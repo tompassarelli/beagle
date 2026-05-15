@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# beagle-expand: show a beagle program after macro expansion.
+#
+# Usage:
+#   bin/beagle-expand <source.rkt>
+#
+# Prints the expanded beagle source (macros applied, but not yet emitted
+# as Clojure). Use this to audit what your macros actually do.
+
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+    echo "usage: beagle-expand <source.rkt>" >&2
+    exit 2
+fi
+
+src="$1"
+
+if [[ ! -f "$src" ]]; then
+    echo "beagle-expand: source file not found: $src" >&2
+    exit 1
+fi
+
+racket -e "(require beagle/private/expand-tool) (expand-file \"$src\")"

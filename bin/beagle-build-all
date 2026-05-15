@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# beagle-build-all: compile every .rkt file in a directory tree to Clojure.
+#
+# Usage:
+#   bin/beagle-build-all [SOURCE_DIR]
+#
+# Default SOURCE_DIR is "examples". Output paths derive from each file's
+# (define-namespace ...) declaration and land under runtime/src/.
+
+set -euo pipefail
+
+beagle_root="$(cd "$(dirname "$0")/.." && pwd)"
+src_dir="${1:-examples}"
+
+cd "$beagle_root"
+
+if [[ ! -d "$src_dir" ]]; then
+    echo "beagle-build-all: source dir not found: $src_dir" >&2
+    exit 1
+fi
+
+shopt -s nullglob
+count=0
+errors=0
+
+while IFS= read -r -d '' src; do
+    if "$beagle_root/bin/beagle-build" "$src"; then
+        count=$((count + 1))
+    else
+        errors=$((errors + 1))
+    fi
+done < <(find "$src_dir" -name '*.rkt' -type f -print0)
+
+if [[ $errors -gt 0 ]]; then
+    echo "beagle-build-all: $count file(s) compiled, $errors error(s)" >&2
+    exit 1
+fi
+
+echo "beagle-build-all: $count file(s) compiled"

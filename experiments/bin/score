@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# Score the responses in experiments/responses/ by attempting compilation.
+# Writes experiments/scoreboard.md.
+
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+resp_dir="$root/responses"
+scoreboard="$root/scoreboard.md"
+
+if [[ ! -d "$resp_dir" ]]; then
+    echo "score: no responses/ directory yet. After running prompts," >&2
+    echo "       paste each LLM response into experiments/responses/" >&2
+    echo "       as <task>-<variant>.rkt (or with -run-<N> suffix)." >&2
+    exit 1
+fi
+
+# Tally per variant
+declare -A variant_total
+declare -A variant_pass
+
+{
+    echo "# beagle bench — scoreboard"
+    echo ""
+    echo "Generated $(date '+%Y-%m-%d %H:%M:%S')."
+    echo ""
+    echo "| response | variant | compiles | tokens | error (if any) |"
+    echo "|---|---|---|---|---|"
+
+    shopt -s nullglob
+    for resp in "$resp_dir"/*.rkt; do
+        name="$(basename "$resp" .rkt)"
+        # variant is the trailing segment after the last `-` of the
+        # `<task>-<variant>[-run-N]` form. Find it by checking which
+        # variant dir prefix matches.
+        variant="unknown"
+        for vdir in "$root/variants/"*/; do
+            vname="$(basename "$vdir")"
+            if [[ "$name" == *"-$vname"* ]]; then
+                variant="$vname"
+                break
+            fi
+        done
+
+        if compile_err="$(racket "$resp" 2>&1 >/dev/null)"; then
+            compiles="✓"
+            err_summary=""
+        else
+            compiles="✗"
+            # First line of error, cropped
+            err_summary="$(echo "$compile_err" | head -1 | cut -c1-80)"
+        fi
+
+        tokens="$(wc -w < "$resp" | tr -d ' ')"
+
+        variant_total[$variant]=$((${variant_total[$variant]:-0} + 1))
+        if [[ "$compiles" == "✓" ]]; then
+            variant_pass[$variant]=$((${variant_pass[$variant]:-0} + 1))
+        fi
+
+        echo "| $name | $variant | $compiles | $tokens | $err_summary |"
+    done
+
+    echo ""
+    echo "## Per-variant summary"
+    echo ""
+    echo "| variant | pass | total | rate |"
+    echo "|---|---|---|---|"
+    for variant in "${!variant_total[@]}"; do
+        pass=${variant_pass[$variant]:-0}
+        total=${variant_total[$variant]}
+        rate=$(awk "BEGIN { printf \"%.1f%%\", $pass / $total * 100 }")
+        echo "| $variant | $pass | $total | $rate |"
+    done
+} > "$scoreboard"
+
+echo "wrote $scoreboard"
+echo ""
+cat "$scoreboard"

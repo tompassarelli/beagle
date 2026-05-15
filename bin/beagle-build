@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# beagle-build: compile a beagle .rkt source file to Clojure .clj.
+#
+# Usage:
+#   bin/beagle-build <source.rkt> [output.clj]
+#
+# If the output path is omitted, it is derived from the namespace declared
+# in the source via (ns ...) and dropped under runtime/src/.
+# E.g. (ns beagle.foo.bar) → runtime/src/beagle/foo/bar.clj.
+#
+# Without a namespace declaration, the default beagle.user is used.
+
+set -euo pipefail
+
+if [[ $# -lt 1 || $# -gt 2 ]]; then
+    echo "usage: beagle-build <source.rkt> [output.clj]" >&2
+    exit 2
+fi
+
+src="$1"
+beagle_root="$(cd "$(dirname "$0")/.." && pwd)"
+
+if [[ ! -f "$src" ]]; then
+    echo "beagle-build: source file not found: $src" >&2
+    exit 1
+fi
+
+if [[ $# -eq 2 ]]; then
+    out="$2"
+else
+    ns="$(grep -E '^\(ns' "$src" | head -1 | \
+          sed -E 's/^\(ns[[:space:]]+([^)]+)\).*/\1/' | \
+          tr -d '[:space:]')"
+    [[ -z "$ns" ]] && ns="beagle.user"
+    rel_path="$(echo "$ns" | tr '.-' '//_')"
+    out="$beagle_root/runtime/src/$rel_path.clj"
+fi
+
+mkdir -p "$(dirname "$out")"
+racket "$src" > "$out"
+echo "$src -> $out"

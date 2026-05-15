@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Generate prompts to experiments/prompts/<task>-<variant>.md
+# Each prompt = variant spec + task description + response instructions.
+
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+prompt_dir="$root/prompts"
+mkdir -p "$prompt_dir"
+
+shopt -s nullglob
+for variant_dir in "$root/variants/"*/; do
+    [[ -d "$variant_dir" ]] || continue
+    variant="$(basename "$variant_dir")"
+    spec="$variant_dir/spec.md"
+    [[ -f "$spec" ]] || continue
+
+    for task_file in "$root/tasks/"*.md; do
+        [[ -f "$task_file" ]] || continue
+        task="$(basename "$task_file" .md)"
+        out="$prompt_dir/$task-$variant.md"
+
+        {
+            echo "# Prompt: $task in variant $variant"
+            echo ""
+            echo "---"
+            echo ""
+            cat "$spec"
+            echo ""
+            echo "---"
+            echo ""
+            cat "$task_file"
+            echo ""
+            echo "## Your response"
+            echo ""
+            echo "Reply ONLY with valid beagle source, in a Racket code"
+            echo "block. Include the \`#lang beagle\` header. No explanation,"
+            echo "no prose, just the code."
+        } > "$out"
+    done
+done
+
+count=$(ls "$prompt_dir" | wc -l)
+echo "wrote $count prompt(s) to $prompt_dir"
