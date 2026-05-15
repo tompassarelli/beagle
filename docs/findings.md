@@ -169,3 +169,110 @@ edge out wrapped (A) on harder tasks — run more samples before committing.
 - More agents from non-Claude models for cross-model validation.
 - Harder tasks that test macro use, parametric types, and cross-fn
   references.
+
+## Run 2026-05-15 (#3) — 45 responses across 6 variants
+
+**Setup:** 18 more agent calls. Tasks: 18-map-double, 25-cond-many,
+22-multi-arg-macro across all 6 variants, plus 4 self-consistency runs
+of 16-factorial in variant A.
+
+**Headline:** 45/45 responses compile (after run #1's two fixes). 100%
+compile rate across all 6 variants.
+
+**Self-consistency was extremely high.** 5 runs of 16-factorial in
+variant A: runs 2-5 were byte-identical to each other; run 1 differed
+only by `(dec n)` vs `(- n 1)` — same algorithm, different idiomatic
+choice. The LLM has very strong, low-anxiety priors for beagle.
+
+## Run 2026-05-15 (#4) — REAL BEHAVIOR TESTING
+
+**Major methodology upgrade.** Built `experiments/bin/verify-behavior` —
+compiles each response, runs it as actual Clojure against per-task
+behavior assertions (`tasks/<task>.verify.clj`), times end-to-end.
+
+Before fix: **42/45 PASS, 3 BEHAVIOR_FAIL**. After fix: **45/45 PASS**.
+
+### The third bug behavior testing caught
+
+Compile-rate testing said all 45 responses compiled. Behavior testing
+revealed three responses (Heron's formula in variants A, B, F) that
+compiled but failed at runtime.
+
+Cause: `(unsafe "raw clojure")` only worked as a top-level form, not in
+expression position. The LLM used inline `(unsafe "(double sum)")` inside
+`let` bindings; beagle emitted those as literal `(unsafe ...)` Clojure
+calls; Clojure couldn't resolve `unsafe` at runtime.
+
+**Compile-only testing would have missed this entirely.** This is exactly
+the gap the user predicted when proposing the methodology shift.
+
+Fix: extended `parse-list-form` to recognize `(unsafe "string")` as an
+expression. Now inline-escape works anywhere the LLM might put it.
+
+### Behavior pass rates (final, post-fix)
+
+All 6 variants: 100% behavior pass.
+
+| variant | pass | total | rate |
+|---|---|---|---|
+| a-current | 14 | 14 | 100% |
+| b-required | 8 | 8 | 100% |
+| c-minimal | 6 | 6 | 100% |
+| d-inline | 6 | 6 | 100% |
+| e-schema | 3 | 3 | 100% |
+| f-schema-inline | 8 | 8 | 100% |
+
+### Wall-clock times (compile + behavior)
+
+Median across all 45: ~580ms. Range 513-747ms. Variance dominated by
+Clojure JVM startup (~500ms baseline), not by syntactic variant. **No
+variant is measurably faster than another at this complexity.**
+
+The interesting time signal is LLM generation latency (2-3s per call from
+agent metadata), but that's not currently captured in scoring — needs to
+be recorded alongside responses.
+
+### Updated final ranking (post-behavior-testing)
+
+After three real bugs caught and fixed:
+
+1. **A-current** — 100% behavior pass, lowest variance, no problematic
+   syntax generalizations
+2. **D-inline** — 100% behavior pass; equivalent to A on samples
+3. **F-schema-inline** — 100% behavior pass; no measurable benefit
+4. **E-schema** — 100% behavior pass; undersampled but matches A
+5. **C-minimal** — 100% behavior pass, shortest tokens, lint flags untyped
+6. **B-required** — 100% behavior pass, but produces nested-let bloat in
+   complex cases (revealed in run #2 with 19-nested-let)
+
+**Locked recommendation: A-current.** Safe default; doesn't drive LLMs
+into problematic patterns; not measurably slower than alternatives;
+preserves type safety.
+
+### What behavior testing gave us that compile testing did not
+
+1. **Real bugs hidden by compile pass.** Three responses compiled and
+   appeared "fine" by every previous metric. They didn't actually work.
+
+2. **Correctness is the right metric.** All previous data said "all
+   variants work." Behavior data initially said "3 variants have a 1/8
+   to 1/14 failure rate on hard tasks." That's the actionable signal.
+
+3. **Time is mostly JVM noise.** Variant differences in wall-clock
+   compile+run are noise. Real time variation is in LLM generation,
+   which is variant-independent at the complexity tested.
+
+### Methodology now solid
+
+```
+experiments/bin/score              # compile-pass + lint (fast)
+experiments/bin/verify-behavior    # one response: real behavior test
+experiments/bin/verify-all         # all responses: real behavior test
+```
+
+Adding a task:
+1. `tasks/NN-name.md`  — the prompt
+2. `tasks/NN-name.verify.clj` — the behavior assertions
+3. `bin/gen-prompts` to regenerate
+4. Run prompts through LLM, save to responses/
+5. `bin/verify-all` for behavior; `bin/score` for compile-quality
