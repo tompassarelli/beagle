@@ -1,0 +1,7 @@
+(when-not (= (r/sum-of-squares [1 2 3]) 14)
+  (println "FAIL: sum-of-squares [1 2 3] =>" (pr-str (r/sum-of-squares [1 2 3])))
+  (System/exit 1))
+(when-not (= (r/sum-of-squares []) 0) (System/exit 1))
+(when-not (= (r/sum-of-squares [4]) 16) (System/exit 1))
+(when-not (= (r/sum-of-squares [-3 4]) 25) (System/exit 1))
+(System/exit 0)

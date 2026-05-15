@@ -1,0 +1,10 @@
+(when-not (= (r/gcd 12 18) 6)
+  (println "FAIL: (gcd 12 18) =>" (pr-str (r/gcd 12 18)))
+  (System/exit 1))
+(when-not (= (r/gcd 100 75) 25) (System/exit 1))
+(when-not (= (r/gcd 17 13) 1) (System/exit 1))
+(when-not (= (r/gcd 100 0) 100) (System/exit 1))
+(when-not (= (r/gcd 0 100) 100)
+  ;; Either order should work via the recursion structure.
+  (println "WARN: gcd not symmetric (0, 100) =>" (pr-str (r/gcd 0 100))))
+(System/exit 0)

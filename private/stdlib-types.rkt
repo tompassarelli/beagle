@@ -43,11 +43,14 @@
    'distinct   (fn-of '(Any) 'Any)
    'sort       (fn-of '(Any) 'Any)
    ;; --- higher-order (parametric → Any) ------------------------------------
-   'map        (fn-of '(Any Any) 'Any #:rest 'Any)
+   ;; Higher-order: parametric → Any. Variadic in real Clojure.
+   'map        (fn-of '(Any) 'Any #:rest 'Any)        ; (map f c) or (map f c1 c2 ...)
+   'mapv       (fn-of '(Any) 'Any #:rest 'Any)
    'filter     (fn-of '(Any Any) 'Any)
+   'filterv    (fn-of '(Any Any) 'Any)
    'remove     (fn-of '(Any Any) 'Any)
-   'reduce     (fn-of '(Any Any) 'Any)
-   'apply      (fn-of '(Any) 'Any #:rest 'Any)
+   'reduce     (fn-of '(Any Any) 'Any #:rest 'Any)    ; (reduce f c) or (reduce f init c)
+   'apply      (fn-of '(Any Any) 'Any #:rest 'Any)
    'comp       (fn-of '() 'Any #:rest 'Any)
    'partial    (fn-of '(Any) 'Any #:rest 'Any)
    ;; --- string ops ---------------------------------------------------------
