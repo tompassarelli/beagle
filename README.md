@@ -117,12 +117,3 @@ Three levels, narrowest to widest:
 3. **Hand-written `.clj` files alongside generated ones** — the module
    boundary itself is an escape hatch. Anything you can write in Clojure
    you can write in a `.clj` file under `runtime/src/`; both share the JVM.
-
-## Related projects
-
-- `~/code/beagle-rkt-poc` — the original in-memory substrate POC (Racket-only
-  graph store with claims, identifiers, reification). Conceptual reference
-  for an eventual `#lang beaglelog` layer built on top of beagle.
-- `~/code/beagle-iter-2-graph-dsl` — earlier iteration that tried to bake a
-  graph-DB DSL directly into beagle. Archived; that direction is now
-  separated into beaglelog (future).
