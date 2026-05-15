@@ -1,0 +1,8 @@
+(when-not (= (vec (r/my-range 0)) [])
+  (println "FAIL: my-range 0 =>" (pr-str (r/my-range 0)))
+  (System/exit 1))
+(when-not (= (vec (r/my-range 3)) [0 1 2])
+  (println "FAIL: my-range 3 =>" (pr-str (r/my-range 3)))
+  (System/exit 1))
+(when-not (= (vec (r/my-range 5)) [0 1 2 3 4]) (System/exit 1))
+(System/exit 0)
