@@ -6,30 +6,46 @@
 
 ;; -- babashka pod bootstrap --
 (unsafe "(require '[babashka.pods :as pods])")
-(unsafe "(pods/load-pod 'huahaiy/datalevin \"0.9.12\")")
-(unsafe "(require '[pod.huahaiy.datalevin :as d])")
+(unsafe "(pods/load-pod 'replikativ/datahike \"0.6.1613\")")
+(unsafe "(require '[datahike.pod :as d])")
 
-;; -- datalevin externs --
-(declare-extern d/get-conn [String Any -> Any])
-(declare-extern d/transact! [Any Any -> Any])
-(declare-extern d/close [Any -> Nil])
-(declare-extern d/clear [String -> Nil])
+;; -- datahike externs --
+(declare-extern d/create-database [Any -> Any])
+(declare-extern d/delete-database [Any -> Any])
+(declare-extern d/database-exists? [Any -> Boolean])
+(declare-extern d/connect [Any -> Any])
+(declare-extern d/transact [Any Any -> Any])
+(declare-extern d/db [Any -> Any])
 (declare-extern parse-long [String -> Long])
 
 ;; -- record for in-memory task representation --
 (defrecord Task [(id : Long) (title : String) (status : String)])
 
 ;; -- db config --
-(defn db-path [] : String
-  (str (System/getProperty "user.home") "/.pm/datalevin"))
+(defn db-cfg []
+  (hash-map :store (hash-map :backend :file
+                              :path (str (System/getProperty "user.home") "/.pm/datahike"))))
 
-(def schema
-  (hash-map :task/id     (hash-map :db/valueType :db.type/long :db/unique :db.unique/identity)
-            :task/title  (hash-map :db/valueType :db.type/string)
-            :task/status (hash-map :db/valueType :db.type/string)))
+(def task-schema
+  [(hash-map :db/ident :task/id
+             :db/valueType :db.type/long
+             :db/cardinality :db.cardinality/one
+             :db/unique :db.unique/identity)
+   (hash-map :db/ident :task/title
+             :db/valueType :db.type/string
+             :db/cardinality :db.cardinality/one)
+   (hash-map :db/ident :task/status
+             :db/valueType :db.type/string
+             :db/cardinality :db.cardinality/one)])
+
+(defn ensure-db []
+  (when (not (d/database-exists? (db-cfg)))
+    (d/create-database (db-cfg))
+    (d/transact (d/connect (db-cfg)) task-schema)))
 
 (defn get-conn []
-  (d/get-conn (db-path) schema))
+  (ensure-db)
+  (d/connect (db-cfg)))
 
 ;; -- queries (datalog is an embedded DSL — unsafe is the right boundary) --
 (defn query-all [(conn : Any)]
@@ -44,17 +60,17 @@
              (if (seq r) (ffirst r) 0))"))
 
 (defn query-by-id [(conn : Any) (id : Long)]
-  (unsafe "(d/q '[:find ?e :in $ ?id :where [?e :task/id ?id]] (d/db conn) id)"))
+  (unsafe "(d/q [:find '?e :where ['?e :task/id id]] (d/db conn))"))
 
 ;; -- commands --
 (defn cmd-add [(title : String)]
   (let [conn (get-conn)
         next-id (inc (query-max-id conn))]
-    (d/transact! conn [(hash-map :task/id next-id
-                                 :task/title title
-                                 :task/status "todo")])
+    (d/transact conn [(hash-map :task/id next-id
+                                :task/title title
+                                :task/status "todo")])
     (println (str "added #" next-id ": " title))
-    (d/close conn)))
+))
 
 (defn cmd-list []
   (let [conn (get-conn)
@@ -69,7 +85,7 @@
                   (println (str (if (= status "done") "  [x] #" "  [ ] #")
                                 id " " title))))
               sorted)))
-    (d/close conn)))
+))
 
 (defn cmd-done [(id : Long)]
   (let [conn (get-conn)
@@ -77,9 +93,9 @@
     (if (empty? matches)
       (println (str "no task #" id))
       (let [eid (first (first matches))]
-        (d/transact! conn [(hash-map :db/id eid :task/status "done")])
+        (d/transact conn [(hash-map :db/id eid :task/status "done")])
         (println (str "done #" id))))
-    (d/close conn)))
+))
 
 (defn cmd-rm [(id : Long)]
   (let [conn (get-conn)
@@ -87,12 +103,12 @@
     (if (empty? matches)
       (println (str "no task #" id))
       (let [eid (first (first matches))]
-        (unsafe "(d/transact! conn [[:db/retractEntity eid]])")
+        (unsafe "(d/transact conn [[:db/retractEntity eid]])")
         (println (str "removed #" id))))
-    (d/close conn)))
+))
 
 (defn cmd-help []
-  (println "pm — task manager (datalevin)")
+  (println "pm — task manager (datahike)")
   (println "")
   (println "  pm add <title>    add a task")
   (println "  pm list           list all tasks")
@@ -101,7 +117,8 @@
   (println "  pm nuke           wipe database"))
 
 (defn cmd-nuke []
-  (d/clear (db-path))
+  (when (d/database-exists? (db-cfg))
+    (d/delete-database (db-cfg)))
   (println "database cleared."))
 
 ;; -- dispatch --
