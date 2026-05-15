@@ -2,94 +2,107 @@
 
 (ns pm.cli)
 
-(require clojure.edn :as edn)
-(require clojure.java.io :as io)
 (require clojure.string :as str)
 
-;; -- externs for IO --
-(declare-extern slurp [String -> String])
-(declare-extern spit [String String -> Nil])
-(declare-extern parse-long [String -> Long])
-(declare-extern edn/read-string [String -> Any])
-(declare-extern io/file [String -> Any])
+;; -- babashka pod bootstrap --
+(unsafe "(require '[babashka.pods :as pods])")
+(unsafe "(pods/load-pod 'huahaiy/datalevin \"0.9.12\")")
+(unsafe "(require '[pod.huahaiy.datalevin :as d])")
 
-;; -- record --
+;; -- datalevin externs --
+(declare-extern d/get-conn [String Any -> Any])
+(declare-extern d/transact! [Any Any -> Any])
+(declare-extern d/close [Any -> Nil])
+(declare-extern d/clear [String -> Nil])
+(declare-extern parse-long [String -> Long])
+
+;; -- record for in-memory task representation --
 (defrecord Task [(id : Long) (title : String) (status : String)])
 
-;; -- persistence --
-(defn store-path [] : String
-  (str (System/getProperty "user.home") "/.pm/tasks.edn"))
+;; -- db config --
+(defn db-path [] : String
+  (str (System/getProperty "user.home") "/.pm/datalevin"))
 
-(defn load-raw []
-  (let [path (store-path)]
-    (if (.exists (io/file path))
-      (edn/read-string (slurp path))
-      [])))
+(def schema
+  (hash-map :task/id     (hash-map :db/valueType :db.type/long :db/unique :db.unique/identity)
+            :task/title  (hash-map :db/valueType :db.type/string)
+            :task/status (hash-map :db/valueType :db.type/string)))
 
-(defn map->task [m] : Task
-  (->Task (get m :id) (get m :title) (get m :status)))
+(defn get-conn []
+  (d/get-conn (db-path) schema))
 
-(defn task->map [(t : Task)]
-  (hash-map :id (task-id t) :title (task-title t) :status (task-status t)))
+;; -- queries (datalog is an embedded DSL — unsafe is the right boundary) --
+(defn query-all [(conn : Any)]
+  (unsafe "(d/q '[:find ?id ?title ?status
+                  :where [?e :task/id ?id]
+                         [?e :task/title ?title]
+                         [?e :task/status ?status]]
+                (d/db conn))"))
 
-(defn load-tasks []
-  (mapv map->task (load-raw)))
+(defn query-max-id [(conn : Any)] : Long
+  (unsafe "(let [r (d/q '[:find (max ?id) :where [_ :task/id ?id]] (d/db conn))]
+             (if (seq r) (ffirst r) 0))"))
 
-(defn save-tasks [tasks]
-  (let [path (store-path)]
-    (.mkdirs (.getParentFile (io/file path)))
-    (spit path (pr-str (mapv task->map tasks)))))
-
-;; -- id generation --
-(defn next-id [tasks] : Long
-  (if (empty? tasks)
-    1
-    (inc (reduce (fn [mx t] (if (> (task-id t) mx) (task-id t) mx)) 0 tasks))))
+(defn query-by-id [(conn : Any) (id : Long)]
+  (unsafe "(d/q '[:find ?e :in $ ?id :where [?e :task/id ?id]] (d/db conn) id)"))
 
 ;; -- commands --
 (defn cmd-add [(title : String)]
-  (let [tasks (load-tasks)
-        id (next-id tasks)
-        task (->Task id title "todo")]
-    (save-tasks (conj tasks task))
-    (println (str "added #" id ": " title))))
+  (let [conn (get-conn)
+        next-id (inc (query-max-id conn))]
+    (d/transact! conn [(hash-map :task/id next-id
+                                 :task/title title
+                                 :task/status "todo")])
+    (println (str "added #" next-id ": " title))
+    (d/close conn)))
 
 (defn cmd-list []
-  (let [tasks (load-tasks)]
-    (if (empty? tasks)
+  (let [conn (get-conn)
+        results (query-all conn)]
+    (if (empty? results)
       (println "no tasks.")
-      (mapv (fn [t]
-              (println (str (if (= (task-status t) "done") "  [x] #" "  [ ] #")
-                            (task-id t) " " (task-title t))))
-            tasks))))
+      (let [sorted (sort-by first (mapv vec results))]
+        (mapv (fn [row]
+                (let [id (first row)
+                      title (second row)
+                      status (nth row 2)]
+                  (println (str (if (= status "done") "  [x] #" "  [ ] #")
+                                id " " title))))
+              sorted)))
+    (d/close conn)))
 
 (defn cmd-done [(id : Long)]
-  (let [tasks (load-tasks)
-        updated (mapv (fn [t]
-                        (if (= (task-id t) id)
-                          (->Task id (task-title t) "done")
-                          t))
-                      tasks)]
-    (if (= tasks updated)
+  (let [conn (get-conn)
+        matches (query-by-id conn id)]
+    (if (empty? matches)
       (println (str "no task #" id))
-      (do (save-tasks updated)
-          (println (str "done #" id))))))
+      (let [eid (first (first matches))]
+        (d/transact! conn [(hash-map :db/id eid :task/status "done")])
+        (println (str "done #" id))))
+    (d/close conn)))
 
 (defn cmd-rm [(id : Long)]
-  (let [tasks (load-tasks)
-        remaining (filterv (fn [t] (not (= (task-id t) id))) tasks)]
-    (if (= (count tasks) (count remaining))
+  (let [conn (get-conn)
+        matches (query-by-id conn id)]
+    (if (empty? matches)
       (println (str "no task #" id))
-      (do (save-tasks remaining)
-          (println (str "removed #" id))))))
+      (let [eid (first (first matches))]
+        (unsafe "(d/transact! conn [[:db/retractEntity eid]])")
+        (println (str "removed #" id))))
+    (d/close conn)))
 
 (defn cmd-help []
-  (println "pm — task manager")
+  (println "pm — task manager (datalevin)")
   (println "")
   (println "  pm add <title>    add a task")
   (println "  pm list           list all tasks")
   (println "  pm done <id>      mark task done")
-  (println "  pm rm <id>        remove a task"))
+  (println "  pm rm <id>        remove a task")
+  (println "  pm nuke           wipe database"))
+
+(defn cmd-nuke []
+  (d/clear (db-path))
+  (println "database cleared."))
 
 ;; -- dispatch --
 (defn main []
@@ -106,6 +119,7 @@
       (= cmd "rm") (if (nil? (second args))
                      (println "usage: pm rm <id>")
                      (cmd-rm (parse-long (second args))))
+      (= cmd "nuke") (cmd-nuke)
       :else (cmd-help))))
 
 (main)
