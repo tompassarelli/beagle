@@ -99,3 +99,73 @@ two real beagle bugs in the first 17 calls — surfacing exactly the kind of
 "my-syntax-convention-is-inconsistent-and-the-LLM-noticed" issues this
 methodology exists to find. Next iteration: more tasks, more runs per task,
 all 6 variants.
+
+## Run 2026-05-15 (#2) — variants C and D added
+
+**Setup:** 6 more agent calls, covering tasks 01, 16, 21 in variants C
+(minimal, no types) and D (inline `:` annotations).
+
+### Headline
+
+5 variants tested (A, B, C, D, F). 23 total responses. **100% compile rate
+across all five variants.** The two fixes from run #1 closed the gap.
+
+### Token efficiency across variants on identical tasks
+
+| task | a-current | b-required | c-minimal | d-inline | f-schema-inline |
+|---|---|---|---|---|---|
+| 01-greet      | 16 | 16 | 13 | 16 | 16 |
+| 16-factorial  | 20 | 20 | 17 | 21 | 20 |
+| 21-boolean-ops| 18 | 18 | 14 | 18 | 18 |
+| 19-nested-let | 63 | 95 | – | – | 75 |
+
+Observations:
+
+- **C (no types) is consistently the most token-efficient.** 15–22% shorter
+  than the typed variants on identical tasks. Predictable.
+- **Typed variants (A, B, D, F) cluster within ~5% of each other** on
+  simple tasks. The annotation style barely matters for token count.
+- **Hard tasks separate them dramatically.** On `19-nested-let`, variant B
+  was **50% longer than A** because the LLM generated deeply nested let
+  bindings — it transferred "wrap types" from params to lets and couldn't
+  recover when that didn't work. After fix-1 (wrapped-let support), the
+  same response now compiles, but the structural bloat remains in the
+  generated code. **B's spec convention has a real cost on complex tasks.**
+- **D (inline `:`) and F (inline `:-`) produce essentially identical
+  patterns at the same token count.** The marker (`:` vs `:-`) doesn't
+  influence what the LLM writes structurally; it's a pure surface choice.
+
+### Updated provisional rankings
+
+For AI-first beagle, ranked by overall fit:
+
+1. **A-current** (`:` wrapped, optional types) — equal compile rate to
+   typed peers, shorter than B on hard tasks, doesn't force the LLM into
+   problematic patterns. The "safe default."
+2. **D-inline** (`:` inline) — same as A on token count for simple tasks;
+   slightly worse on factorial (21 vs 20) probably noise. Worth testing
+   more on harder tasks.
+3. **F-schema-inline** (`:-` inline) — Schema-style; no measurable advantage
+   over A or D at this complexity. The `:-` vs `:` distinction is moot.
+4. **C-minimal** (no types) — most token-efficient, but defeats the entire
+   point of beagle (the type checker is silent). Suitable for prototyping;
+   bad as the default authoring style.
+5. **B-required** (forces types) — same compile rate as A, but exposes the
+   LLM to "wrap types everywhere" generalization errors. Worst overall
+   even after the parser fix.
+
+### Tentative recommendation
+
+**Lock A-current as the default.** It pays the typing tax without forcing
+problematic generalizations. The `:-` variant gets no measurable benefit;
+abandon it as the "Schema-shaped" surface. Inline annotations (D) might
+edge out wrapped (A) on harder tasks — run more samples before committing.
+
+### What's still needed for confidence
+
+- ≥30 tasks (currently 25 written, 5 sampled). Statistical noise dominates
+  at small N.
+- ≥5 runs per (task, variant) — measure variance, not just mean.
+- More agents from non-Claude models for cross-model validation.
+- Harder tasks that test macro use, parametric types, and cross-fn
+  references.
