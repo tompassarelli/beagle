@@ -63,6 +63,9 @@
 (struct for-binding (name expr)                             #:transparent)
 (struct for-when   (test)                                   #:transparent)
 (struct record-form (name fields)                           #:transparent)
+(struct method-call (method-name target args)               #:transparent)
+(struct static-call (class+method args)                     #:transparent)
+(struct dynamic-var (name)                                  #:transparent)
 
 (struct param       (name type)                             #:transparent)
 (struct let-binding (name type value)                       #:transparent)
@@ -237,6 +240,34 @@
                        declare-extern
                        require))))
 
+;; --- Java interop detection -------------------------------------------------
+
+(define (dot-method-sym? sym)
+  (and (symbol? sym)
+       (let ([s (symbol->string sym)])
+         (and (> (string-length s) 1)
+              (char=? (string-ref s 0) #\.)))))
+
+(define (static-method-sym? sym)
+  (and (symbol? sym)
+       (let ([s (symbol->string sym)])
+         (define slash-pos
+           (let loop ([i 0])
+             (cond [(= i (string-length s)) #f]
+                   [(char=? (string-ref s i) #\/) i]
+                   [else (loop (+ i 1))])))
+         (and slash-pos
+              (> slash-pos 0)
+              (< (+ slash-pos 1) (string-length s))
+              (char-upper-case? (string-ref s 0))))))
+
+(define (dynamic-var-sym? sym)
+  (and (symbol? sym)
+       (let ([s (symbol->string sym)])
+         (and (>= (string-length s) 3)
+              (char=? (string-ref s 0) #\*)
+              (char=? (string-ref s (- (string-length s) 1)) #\*)))))
+
 ;; --- per-form parsing ------------------------------------------------------
 
 (define (parse-top d)
@@ -253,6 +284,8 @@
     [(boolean? d)       d]
     [(exact-integer? d) d]
     [(real? d)          d]
+    [(and (symbol? d) (dynamic-var-sym? d))
+     (dynamic-var d)]
     [(symbol? d)        d]
     [(and (pair? d) (eq? (car d) '#%regex) (= (length d) 2) (string? (cadr d)))
      (regex-lit (cadr d))]
@@ -317,6 +350,12 @@
     [(list 'do body ...)     (do-form (parse-body body))]
 
     [(list 'cond clauses ...) (cond-form (parse-cond-clauses clauses))]
+
+    [(list (? dot-method-sym? m) target args ...)
+     (method-call m (parse-expr target) (map parse-expr args))]
+
+    [(list (? static-method-sym? cm) args ...)
+     (static-call cm (map parse-expr args))]
 
     [(list (? symbol? f) args ...)
      (call-form f (map parse-expr args))]
@@ -480,6 +519,12 @@
  (struct-out for-binding)
  (struct-out for-when)
  (struct-out record-form)
+ (struct-out method-call)
+ (struct-out static-call)
+ (struct-out dynamic-var)
+ dot-method-sym?
+ static-method-sym?
+ dynamic-var-sym?
  (struct-out param)
  (struct-out let-binding)
  (struct-out require-entry)

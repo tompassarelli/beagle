@@ -325,3 +325,49 @@
       `(defrecord Employee ,(br '(name : String) '(rate : Long)))
       '(def e (->Employee "Alice" 95))
       '(def n : Long (employee-name e))))))
+
+;; --- Java interop ------------------------------------------------------------
+
+(test-case "static method with declared type passes"
+  (check-not-exn
+   (lambda ()
+     (check-prog
+      `(declare-extern System/getProperty ,(br 'String '-> 'String))
+      '(def x : String (System/getProperty "user.home"))))))
+
+(test-case "static method with wrong arg type errors"
+  (check-exn exn:fail?
+   (lambda ()
+     (check-prog
+      `(declare-extern System/getProperty ,(br 'String '-> 'String))
+      '(def x (System/getProperty 42))))))
+
+(test-case "instance method with declared type passes"
+  (check-not-exn
+   (lambda ()
+     (check-prog
+      '(def x : Boolean (.startsWith "hello" "he"))))))
+
+(test-case "instance method with wrong arg type errors"
+  (check-exn exn:fail?
+   (lambda ()
+     (check-prog
+      '(def x : Boolean (.startsWith "hello" 42))))))
+
+(test-case "instance method wrong arity errors"
+  (check-exn exn:fail?
+   (lambda ()
+     (check-prog
+      '(def x (.trim "a" "b"))))))
+
+(test-case "dynamic var with declared type infers correctly"
+  (check-not-exn
+   (lambda ()
+     (check-prog
+      '(def x : String (first *command-line-args*))))))
+
+(test-case "undeclared interop returns Any (no error)"
+  (check-not-exn
+   (lambda ()
+     (check-prog
+      '(def x (.someUnknownMethod obj))))))

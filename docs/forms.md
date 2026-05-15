@@ -233,6 +233,54 @@ Example:
 
 Symbols starting with `:` render in Clojure as keywords.
 
+## Java interop
+
+### Instance method call
+
+```racket
+(.method target args...)
+```
+
+Example:
+```racket
+(.exists (io/file path))
+(.startsWith name "http")
+(.trim input)
+```
+
+### Static method call
+
+```racket
+(Class/staticMethod args...)
+```
+
+Example:
+```racket
+(System/getProperty "user.home")
+(Long/parseLong "42")
+(Math/sqrt 2.0)
+```
+
+### Dynamic var access
+
+```racket
+*var-name*
+```
+
+Example:
+```racket
+(first *command-line-args*)
+```
+
+All three forms are type-checked when declared via `declare-extern`. The
+receiver is the first parameter in method type signatures:
+```racket
+(declare-extern .startsWith [String String -> Boolean])
+(declare-extern System/getProperty [String -> String])
+```
+
+~30 common methods and statics are pre-typed in the stdlib.
+
 ## Calls
 
 Any form starting with a symbol other than the built-in keywords above is a

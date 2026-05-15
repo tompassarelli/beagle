@@ -121,6 +121,17 @@
      (format "(fn [~a] ~a)"
              (emit-params (fn-form-params e))
              (emit-body (fn-form-body e) "  "))]
+    [(method-call? e)
+     (format "(~a ~a~a)"
+             (symbol->string (method-call-method-name e))
+             (emit-expr (method-call-target e))
+             (emit-args (method-call-args e)))]
+    [(static-call? e)
+     (format "(~a~a)"
+             (symbol->string (static-call-class+method e))
+             (emit-args (static-call-args e)))]
+    [(dynamic-var? e)
+     (symbol->string (dynamic-var-name e))]
     [(call-form? e)
      (format "(~a~a)"
              (symbol->string (call-form-fn e))

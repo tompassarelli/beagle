@@ -205,3 +205,21 @@
   (check-true (matches? #rx"\\(defrecord Employee \\[name rate\\]\\)" out))
   (check-true (matches? #rx"\\(defn employee-name \\[r\\] \\(:name r\\)\\)" out))
   (check-true (matches? #rx"\\(defn employee-rate \\[r\\] \\(:rate r\\)\\)" out)))
+
+;; --- Java interop ------------------------------------------------------------
+
+(test-case "dot-method emits as (.method target args)"
+  (define out (compile '(def x (.trim s))))
+  (check-true (matches? #rx"\\(\\.trim s\\)" out)))
+
+(test-case "dot-method with args emits correctly"
+  (define out (compile '(def x (.startsWith s "http"))))
+  (check-true (matches? #rx"\\(\\.startsWith s \"http\"\\)" out)))
+
+(test-case "static method emits as (Class/method args)"
+  (define out (compile '(def x (System/getProperty "user.home"))))
+  (check-true (matches? #rx"\\(System/getProperty \"user\\.home\"\\)" out)))
+
+(test-case "dynamic var emits as *name*"
+  (define out (compile '(def x (first *command-line-args*))))
+  (check-true (matches? #rx"\\*command-line-args\\*" out)))

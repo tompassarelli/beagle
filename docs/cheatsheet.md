@@ -194,6 +194,41 @@ Supported natively in beagle source. Common patterns:
 #"\d+"        ; digits
 ```
 
+## Java interop
+
+```racket
+(.method target args...)              ; instance method
+(Class/staticMethod args...)          ; static method
+*dynamic-var*                         ; Clojure dynamic var
+```
+
+Type these with `declare-extern` (receiver is first param for methods):
+```racket
+(declare-extern .exists [Any -> Boolean])
+(declare-extern System/getProperty [String -> String])
+(declare-extern *command-line-args* (Vec String))
+```
+
+Pre-typed in stdlib: `.exists`, `.trim`, `.startsWith`, `.endsWith`,
+`.contains`, `.toLowerCase`, `.toUpperCase`, `.mkdirs`, `.getParent`,
+`.getParentFile`, `.getName`, `.getPath`, `.length`, `.toString`,
+`System/getProperty`, `System/getenv`, `System/currentTimeMillis`,
+`Math/abs`, `Math/pow`, `Math/sqrt`, `Math/floor`, `Math/ceil`,
+`Integer/parseInt`, `Long/parseLong`, `Double/parseDouble`,
+`*command-line-args*`.
+
+### Coverage gaps (known, not yet implemented)
+
+| Gap | What breaks | Future fix |
+|---|---|---|
+| Method overloading | Only one signature per `.method`; second overload needs separate `declare-extern` | Union of function types |
+| Receiver type dispatch | `.exists` typed globally, not per-class | `File/.exists` syntax (Clojure 1.12+) |
+| Constructor calls | `(ClassName. args)` not recognized | New AST node for trailing-dot |
+| Static field access | `Math/PI` as bare symbol returns Any | `declare-extern Math/PI Double` works now |
+| Generic type params | `(.get (HashMap) key)` can't track value type | Java generics model |
+| Overload resolution | Multiple Java methods with same name, different types | Essentially javac |
+| Reflection / dynamic dispatch | Runtime-only class resolution | Impossible statically |
+
 ## Escape hatches
 
 | level | how | when |

@@ -39,7 +39,9 @@ it as canonical when explaining the language.
 - Lint pass: untyped def/defn, unsafe usage, shadowed bindings, unused externs
 - Structured error output: `BEAGLE_ERROR_FORMAT=json` for agent consumption
 - 3 benchmark variants (A canonical, B required-types, C minimal)
-- 158 tests passing
+- Java interop: `.method`, `Class/static`, `*dynamic-vars*` as first-class
+  typed forms; ~30 common methods/statics pre-typed in stdlib
+- 175 tests passing
 - 40 benchmark tasks with real Clojure behavior verification
 - 8 head-to-head programs (beagle vs raw Clojure), 16/16 behavior pass
 - Refactoring + bug-detection experiments (arity cascade, injected bugs)

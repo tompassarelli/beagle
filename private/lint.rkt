@@ -115,6 +115,11 @@
        (for ([e (in-list (cond-clause-body cl))]) (check-shadow e scope ctx)))]
     [(call-form _ args)
      (for ([a (in-list args)]) (check-shadow a scope ctx))]
+    [(method-call _ target args)
+     (check-shadow target scope ctx)
+     (for ([a (in-list args)]) (check-shadow a scope ctx))]
+    [(static-call _ args)
+     (for ([a (in-list args)]) (check-shadow a scope ctx))]
     [(vec-form items)
      (for ([i (in-list items)]) (check-shadow i scope ctx))]
     [(def-form _ _ value)
@@ -169,6 +174,15 @@
     [(call-form fn args)
      (hash-set! used fn #t)
      (for ([a (in-list args)]) (collect-symbols a used))]
+    [(method-call mname target args)
+     (hash-set! used mname #t)
+     (collect-symbols target used)
+     (for ([a (in-list args)]) (collect-symbols a used))]
+    [(static-call cm args)
+     (hash-set! used cm #t)
+     (for ([a (in-list args)]) (collect-symbols a used))]
+    [(dynamic-var name)
+     (hash-set! used name #t)]
     [(vec-form items)
      (for ([i (in-list items)]) (collect-symbols i used))]
     [(unsafe-expr inner) (collect-symbols inner used)]

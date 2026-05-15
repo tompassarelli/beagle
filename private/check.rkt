@@ -240,6 +240,38 @@
      (define body-env (extend-with-params env (fn-form-params e)))
      (define ret (or (fn-form-return-type e) (last-expr-type (fn-form-body e) body-env)))
      (type-fn p-types #f ret)]
+    [(dynamic-var? e)
+     (hash-ref env (dynamic-var-name e) ANY)]
+    [(method-call? e)
+     (define method-sym (method-call-method-name e))
+     (define raw-type (hash-ref env method-sym ANY))
+     (define all-args (cons (method-call-target e) (method-call-args e)))
+     (define fn-type
+       (if (type-poly? raw-type)
+         (resolve-poly-call raw-type all-args env)
+         raw-type))
+     (cond
+       [(type-fn? fn-type)
+        (check-args method-sym fn-type all-args env)
+        (type-fn-ret fn-type)]
+       [else
+        (infer-expr (method-call-target e) env)
+        (for ([a (in-list (method-call-args e))]) (infer-expr a env))
+        ANY])]
+    [(static-call? e)
+     (define sym (static-call-class+method e))
+     (define raw-type (hash-ref env sym ANY))
+     (define fn-type
+       (if (type-poly? raw-type)
+         (resolve-poly-call raw-type (static-call-args e) env)
+         raw-type))
+     (cond
+       [(type-fn? fn-type)
+        (check-args sym fn-type (static-call-args e) env)
+        (type-fn-ret fn-type)]
+       [else
+        (for ([a (in-list (static-call-args e))]) (infer-expr a env))
+        ANY])]
     [(call-form? e)
      (define raw-type (hash-ref env (call-form-fn e) ANY))
      (define fn-type

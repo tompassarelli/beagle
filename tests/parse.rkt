@@ -348,3 +348,40 @@
   (check-exn exn:fail?
              (lambda ()
                (parse-prog `(defrecord Foo ,(br 'x 'y))))))
+
+;; --- Java interop ------------------------------------------------------------
+
+(test-case "dot-method call parses as method-call"
+  (define f (car (parse-one '(.exists file))))
+  (check-true (method-call? f))
+  (check-eq? (method-call-method-name f) '.exists)
+  (check-eq? (method-call-target f) 'file)
+  (check-equal? (method-call-args f) '()))
+
+(test-case "dot-method call with args"
+  (define f (car (parse-one '(.startsWith s "http"))))
+  (check-true (method-call? f))
+  (check-eq? (method-call-method-name f) '.startsWith)
+  (check-eq? (method-call-target f) 's)
+  (check-equal? (length (method-call-args f)) 1))
+
+(test-case "static method call parses as static-call"
+  (define f (car (parse-one '(System/getProperty "user.home"))))
+  (check-true (static-call? f))
+  (check-eq? (static-call-class+method f) 'System/getProperty)
+  (check-equal? (length (static-call-args f)) 1))
+
+(test-case "require-alias call stays as call-form"
+  (define f (car (parse-one '(str/upper-case "hi"))))
+  (check-true (call-form? f))
+  (check-eq? (call-form-fn f) 'str/upper-case))
+
+(test-case "dynamic var parses as dynamic-var"
+  (define f (car (parse-one '*command-line-args*)))
+  (check-true (dynamic-var? f))
+  (check-eq? (dynamic-var-name f) '*command-line-args*))
+
+(test-case "dynamic var inside expression"
+  (define f (car (parse-one '(first *command-line-args*))))
+  (check-true (call-form? f))
+  (check-true (dynamic-var? (car (call-form-args f)))))
