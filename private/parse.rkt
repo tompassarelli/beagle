@@ -62,6 +62,7 @@
 (struct for-form   (clauses body)                           #:transparent)
 (struct for-binding (name expr)                             #:transparent)
 (struct for-when   (test)                                   #:transparent)
+(struct record-form (name fields)                           #:transparent)
 
 (struct param       (name type)                             #:transparent)
 (struct let-binding (name type value)                       #:transparent)
@@ -289,6 +290,9 @@
     [(list 'defn (? symbol? name) params-form body ...)
      (defn-form name (parse-params params-form) #f (parse-body body))]
 
+    [(list 'defrecord (? symbol? name) fields-form)
+     (record-form name (parse-record-fields fields-form))]
+
     [(list 'fn params-form marker return-type body ...)
      #:when (annotation-marker? marker)
      (fn-form (parse-params params-form) (parse-type return-type) (parse-body body))]
@@ -412,6 +416,26 @@
                    acc))]
       [else (error 'beagle "bad let bindings: ~v" rest)])))
 
+(define (parse-record-fields f)
+  (define items
+    (cond
+      [(bracketed? f) (bracket-body f)]
+      [(list? f)      f]
+      [else (error 'beagle "expected record fields, got: ~v" f)]))
+  (when (null? items)
+    (error 'beagle "defrecord requires at least one field"))
+  (for/list ([item (in-list items)])
+    (cond
+      [(and (list? item)
+            (= (length item) 3)
+            (symbol? (car item))
+            (annotation-marker? (cadr item)))
+       (param (car item) (parse-type (caddr item)))]
+      [else
+       (error 'beagle
+              "defrecord field must be (name : Type), got: ~v"
+              item)])))
+
 (define (parse-for-clauses b)
   (define items
     (cond
@@ -455,6 +479,7 @@
  (struct-out for-form)
  (struct-out for-binding)
  (struct-out for-when)
+ (struct-out record-form)
  (struct-out param)
  (struct-out let-binding)
  (struct-out require-entry)

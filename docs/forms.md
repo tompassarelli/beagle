@@ -167,6 +167,38 @@ collection. Optional `:when` clauses filter. Example:
   [x y])
 ```
 
+## Records
+
+### `defrecord`
+
+```racket
+(defrecord NAME [(FIELD : TYPE) ...])
+```
+
+Defines a Clojure record type with typed fields. Generates:
+- A constructor `->NAME` with field types as args, returning `NAME`
+- Accessors `lowername-field` for each field
+
+All fields must have type annotations (wrapped form).
+
+Example:
+```racket
+(defrecord Employee [(name : String) (rate : Long)])
+
+(def alice (->Employee "Alice" 95))
+(def n : String (employee-name alice))
+
+(defn total-cost [(e : Employee) (hours : Long)] : Long
+  (* (employee-rate e) hours))
+```
+
+Emits:
+```clojure
+(defrecord Employee [name rate])
+(defn employee-name [r] (:name r))
+(defn employee-rate [r] (:rate r))
+```
+
 ## Data
 
 ### Vector literal
@@ -313,10 +345,13 @@ Example:
 
 ### Primitives
 
-`String`, `Long`, `Integer`, `Int`, `Double`, `Float`, `Boolean`, `Bool`,
-`Keyword`, `Symbol`, `Nil`, `Any`.
+`String`, `Long`, `Double`, `Boolean`, `Keyword`, `Symbol`, `Nil`, `Any`.
 
-Aliases: `Integer`/`Int` → `Long`; `Float` → `Double`; `Bool` → `Boolean`.
+One canonical name per type. Former aliases (`Integer`, `Int`, `Float`,
+`Bool`) were removed in the AI-optimization pass.
+
+User-defined types (from `defrecord`) are also valid in annotations:
+`Employee`, `Config`, etc.
 
 ### Function types
 
@@ -358,9 +393,6 @@ Beagle catches these at expand time (in strict mode):
 
 Beagle does NOT catch (yet):
 
-- Type narrowing through `if`/`cond` (a `(U String Nil)` stays a `(U String Nil)`
-  even after `(if (= x nil) ...)`)
-- Cross-file type info from `require`d namespaces (use `declare-extern` per name)
 - Parametric type inference (`(Vec T)` element types treated as Any)
 - Macro hygiene (naive substitution)
 

@@ -43,8 +43,21 @@
        (hash-set! env name
                   (type-fn (map (lambda (p) (or (param-type p) ANY)) params)
                            #f ANY))]
+      [(record-form name fields)
+       (define rec-type (type-prim name))
+       (define name-str (symbol->string name))
+       (define name-lower (string-downcase name-str))
+       (hash-set! env (string->symbol (string-append "->" name-str))
+                  (type-fn (map param-type fields) #f rec-type))
+       (for ([f (in-list fields)])
+         (hash-set! env
+                    (string->symbol (string-append name-lower "-" (symbol->string (param-name f))))
+                    (type-fn (list rec-type) #f (param-type f))))]
       [_ (void)]))
   env)
+
+(define (string-downcase s)
+  (list->string (map char-downcase (string->list s))))
 
 (define (mut-copy h)
   (define out (make-hash))
@@ -71,6 +84,8 @@
          (error 'beagle
                 "defn ~a: expected return ~a, got ~a"
                 name (type->string expected-ret) (type->string last-type))))]
+
+    [(record-form _ _) (void)]
 
     [_ (infer-expr form env)]))
 

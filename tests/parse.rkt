@@ -330,3 +330,21 @@
   (check-true (call-form? val))
   (check-eq? (call-form-fn val) '+)
   (check-equal? (call-form-args val) '(5 1)))
+
+;; --- defrecord ---------------------------------------------------------------
+
+(test-case "defrecord parses fields"
+  (define p (parse-prog `(defrecord Employee ,(br '(name : String) '(rate : Long)))))
+  (define f (car (program-forms p)))
+  (check-true (record-form? f))
+  (check-eq? (record-form-name f) 'Employee)
+  (check-equal? (length (record-form-fields f)) 2)
+  (check-eq? (param-name (car (record-form-fields f))) 'name)
+  (check-equal? (param-type (car (record-form-fields f))) (type-prim 'String))
+  (check-eq? (param-name (cadr (record-form-fields f))) 'rate)
+  (check-equal? (param-type (cadr (record-form-fields f))) (type-prim 'Long)))
+
+(test-case "defrecord rejects bare fields without types"
+  (check-exn exn:fail?
+             (lambda ()
+               (parse-prog `(defrecord Foo ,(br 'x 'y))))))

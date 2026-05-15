@@ -25,6 +25,9 @@
 ;; Bool). Less surface for LLMs to confuse.
 (define PRIM-ALIASES '())
 
+(define REJECTED-ALIASES
+  '(Integer Int Float Bool))
+
 (define PARAMETRIC-CTORS
   '(Vec List Set Map))
 
@@ -81,13 +84,20 @@
     [(and (symbol? t) (memq t (current-type-vars)))
      (type-var t)]
 
-    ;; primitive symbol
+    ;; primitive or user-defined type symbol
     [(symbol? t)
      (define canonical
        (cond
          [(assq t PRIM-ALIASES) => cdr]
          [else t]))
-     (unless (member canonical PRIMITIVES)
+     (define s (symbol->string canonical))
+     (when (memq canonical REJECTED-ALIASES)
+       (error 'beagle
+              "type alias ~a was removed — use the canonical name instead"
+              t))
+     (unless (or (member canonical PRIMITIVES)
+                 (and (positive? (string-length s))
+                      (char-upper-case? (string-ref s 0))))
        (error 'beagle
               "unknown type: ~a~nexpected primitive, [A B -> R], (Vec T)/(Map K V)/etc., or (U ...)"
               t))

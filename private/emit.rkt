@@ -56,6 +56,9 @@
              (emit-params (defn-form-params f))
              (emit-body (defn-form-body f) "  "))]
 
+    [(record-form? f)
+     (emit-record f)]
+
     [else (emit-expr f)]))
 
 ;; --- expressions -----------------------------------------------------------
@@ -123,6 +126,24 @@
              (symbol->string (call-form-fn e))
              (emit-args (call-form-args e)))]
     [else (error 'beagle-emit "don't know how to emit: ~v" e)]))
+
+(define (emit-record f)
+  (define name (record-form-name f))
+  (define fields (record-form-fields f))
+  (define name-str (symbol->string name))
+  (define name-lower (string-downcase name-str))
+  (define record-line
+    (format "(defrecord ~a [~a])"
+            name
+            (string-join (map (lambda (p) (symbol->string (param-name p))) fields) " ")))
+  (define accessor-lines
+    (for/list ([p (in-list fields)])
+      (define fname (symbol->string (param-name p)))
+      (format "(defn ~a-~a [r] (:~a r))" name-lower fname fname)))
+  (string-join (cons record-line accessor-lines) "\n\n"))
+
+(define (string-downcase s)
+  (list->string (map char-downcase (string->list s))))
 
 (define (emit-args args)
   (cond

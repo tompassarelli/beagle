@@ -197,3 +197,11 @@
                '(def y (let [x 42] (with-temp 1 x)))))
   (check-true (matches? #rx"\\(let \\[x 42\\]" out))
   (check-false (matches? #rx"\\(let \\[x 1\\]" out)))
+
+;; --- defrecord ---------------------------------------------------------------
+
+(test-case "defrecord emits Clojure defrecord plus accessors"
+  (define out (compile `(defrecord Employee ,(br '(name : String) '(rate : Long)))))
+  (check-true (matches? #rx"\\(defrecord Employee \\[name rate\\]\\)" out))
+  (check-true (matches? #rx"\\(defn employee-name \\[r\\] \\(:name r\\)\\)" out))
+  (check-true (matches? #rx"\\(defn employee-rate \\[r\\] \\(:rate r\\)\\)" out)))

@@ -26,8 +26,22 @@ for being included as system context.
 (define-macro safe   NAME (params) template)   ; expansion type-checked
 (define-macro unsafe NAME (params) template)   ; expansion typed as Any
 
+(defrecord Name [(field1 : Type) (field2 : Type)])  ; typed record
+
 (unsafe "raw clojure source")       ; emits verbatim; top-level OR expression
 ```
+
+### `defrecord`
+
+```racket
+(defrecord Employee [(name : String) (rate : Long)])
+```
+
+Emits Clojure `defrecord` plus generated typed accessors:
+- Constructor: `(->Employee "Alice" 95)` — typed `[String Long -> Employee]`
+- Accessors: `(employee-name e)`, `(employee-rate e)` — typed `[Employee -> String]` etc.
+
+Field syntax reuses wrapped param form `(name : Type)`. All fields must be typed.
 
 ## Expression forms
 

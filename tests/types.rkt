@@ -41,9 +41,12 @@
   (check-eq? (type-prim-name (car (type-app-args t))) 'String)
   (check-true (type-fn? (cadr (type-app-args t)))))
 
-(test-case "unknown primitive errors"
+(test-case "unknown lowercase type errors"
   (check-exn exn:fail?
-             (lambda () (parse-type 'Quaternion))))
+             (lambda () (parse-type 'nope))))
+
+(test-case "user-defined capitalized type accepted"
+  (check-eq? (type-prim-name (parse-type 'Employee)) 'Employee))
 
 (test-case "function type without arrow errors"
   (check-exn exn:fail?

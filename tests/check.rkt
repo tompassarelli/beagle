@@ -286,3 +286,42 @@
      (check-prog/source fixture-source
        '(require nonexistent.module)
        '(def x 42)))))
+
+;; --- defrecord ---------------------------------------------------------------
+
+(test-case "defrecord: constructor type-checks"
+  (check-not-exn
+   (lambda ()
+     (check-prog
+      `(defrecord Employee ,(br '(name : String) '(rate : Long)))
+      '(def e (->Employee "Alice" 95))))))
+
+(test-case "defrecord: constructor wrong arg type errors"
+  (check-exn exn:fail?
+   (lambda ()
+     (check-prog
+      `(defrecord Employee ,(br '(name : String) '(rate : Long)))
+      '(def e (->Employee 42 95))))))
+
+(test-case "defrecord: constructor wrong arity errors"
+  (check-exn exn:fail?
+   (lambda ()
+     (check-prog
+      `(defrecord Employee ,(br '(name : String) '(rate : Long)))
+      '(def e (->Employee "Alice"))))))
+
+(test-case "defrecord: accessor returns correct type"
+  (check-not-exn
+   (lambda ()
+     (check-prog
+      `(defrecord Employee ,(br '(name : String) '(rate : Long)))
+      '(def e (->Employee "Alice" 95))
+      '(def n : String (employee-name e))))))
+
+(test-case "defrecord: accessor wrong return type errors"
+  (check-exn exn:fail?
+   (lambda ()
+     (check-prog
+      `(defrecord Employee ,(br '(name : String) '(rate : Long)))
+      '(def e (->Employee "Alice" 95))
+      '(def n : Long (employee-name e))))))

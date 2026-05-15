@@ -19,15 +19,16 @@ it as canonical when explaining the language.
 `#lang beagle` v0 — end-to-end working, empirically validated:
 
 - Forms: `def`, `defn`, `fn`, `let`, `if`, `cond`, `when`, `do`, `loop`,
-  `recur`, `for` (with `:when`), call, vector literal, quote
+  `recur`, `for` (with `:when`), `defrecord`, call, vector literal, quote
 - Meta: `ns`, `define-mode`, `require`, `declare-extern`, `define-macro`,
   `unsafe` (top-level AND in expression position)
 - Param syntax: **wrapped only** — `(name : Type)`. Single canonical marker `:`.
   Inline annotations and `:-` marker were removed in the AI-optimization
   pass (one idiom per concept).
 - Types: primitives (`String`, `Long`, `Double`, `Boolean`, `Keyword`,
-  `Symbol`, `Nil`, `Any` — no aliases), function types (variadic with `& T`),
-  parametric (`Vec`, `Map`, `Set`, `List`), union (`U`), polymorphic (`forall`)
+  `Symbol`, `Nil`, `Any` — no aliases), user-defined record types,
+  function types (variadic with `& T`), parametric (`Vec`, `Map`, `Set`,
+  `List`), union (`U`), polymorphic (`forall`)
 - Type narrowing: flow-sensitive in `if`/`cond`/`when` via `nil?`, `some?`,
   `string?`, `=`, `not` etc. Threads through cond clauses.
 - Macros: safe (gensym-hygienic) / unsafe with `&rest` and `(splice ...)`
@@ -38,7 +39,7 @@ it as canonical when explaining the language.
 - Lint pass: untyped def/defn, unsafe usage, shadowed bindings, unused externs
 - Structured error output: `BEAGLE_ERROR_FORMAT=json` for agent consumption
 - 3 benchmark variants (A canonical, B required-types, C minimal)
-- 149 tests passing
+- 158 tests passing
 - 40 benchmark tasks with real Clojure behavior verification
 - 8 head-to-head programs (beagle vs raw Clojure), 16/16 behavior pass
 - Refactoring + bug-detection experiments (arity cascade, injected bugs)
