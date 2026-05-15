@@ -27,8 +27,8 @@ Earlier iterations that conflated the two are archived at
 
 `#lang beagle` v0 — end-to-end working, empirically validated:
 
-- Forms: `def`, `defn`, `fn`, `let`, `if`, `cond`, `when`, `do`, call,
-  vector literal, quote
+- Forms: `def`, `defn`, `fn`, `let`, `if`, `cond`, `when`, `do`, `loop`,
+  `recur`, `for` (with `:when`), call, vector literal, quote
 - Meta: `ns`, `define-mode`, `require`, `declare-extern`, `define-macro`,
   `unsafe` (top-level AND in expression position)
 - Param syntax: **wrapped only** — `(name : Type)`. Single canonical marker `:`.
@@ -36,16 +36,22 @@ Earlier iterations that conflated the two are archived at
   pass (one idiom per concept).
 - Types: primitives (`String`, `Long`, `Double`, `Boolean`, `Keyword`,
   `Symbol`, `Nil`, `Any` — no aliases), function types (variadic with `& T`),
-  parametric (`Vec`, `Map`, `Set`, `List`), union (`U`)
-- Macros: safe / unsafe with `&rest` and `(splice ...)`
-- Stdlib catalog: ~100 common Clojure functions pre-typed
+  parametric (`Vec`, `Map`, `Set`, `List`), union (`U`), polymorphic (`forall`)
+- Type narrowing: flow-sensitive in `if`/`cond`/`when` via `nil?`, `some?`,
+  `string?`, `=`, `not` etc. Threads through cond clauses.
+- Macros: safe (gensym-hygienic) / unsafe with `&rest` and `(splice ...)`
+- Stdlib catalog: ~100 common Clojure functions pre-typed, key HOFs polymorphic
+- Cross-file type import: `(require module)` / `(require module :as alias)`
+  resolves source at compile time, imports typed defs/defns/externs/macros
 - Validation: type checks, arity (incl. variadic), undefined refs, hints
-- Lint pass: untyped def/defn, unsafe usage flagged on stderr
+- Lint pass: untyped def/defn, unsafe usage, shadowed bindings, unused externs
 - Structured error output: `BEAGLE_ERROR_FORMAT=json` for agent consumption
 - 3 benchmark variants (A canonical, B required-types, C minimal)
-- 104+ tests passing
-- 33 benchmark tasks with real Clojure behavior verification
-- Validated by empirical agent benchmarks — 5 real bugs caught and fixed
+- 149 tests passing
+- 40 benchmark tasks with real Clojure behavior verification
+- 8 head-to-head programs (beagle vs raw Clojure), 16/16 behavior pass
+- Refactoring + bug-detection experiments (arity cascade, injected bugs)
+- Validated by empirical agent benchmarks — 5 real bugs caught and fixed, 88 behavior verifications passing
 
 ## Architecture
 
@@ -86,6 +92,8 @@ Beagle prints lint warnings to stderr during compile (strict mode only):
 - `defn NAME has no return type annotation` — missing `: Ret`
 - `defn NAME has untyped parameter(s): ...` — missing `(name : Type)`
 - `(unsafe "...") inline escape` — beagle can't validate that code
+- `let binding X shadows outer binding` — let/fn rebinds a name from enclosing scope
+- `unused declare-extern: X` — extern declared but never referenced
 
 Suppress with `BEAGLE_NO_LINT=1`. Warnings don't fail compile. Dynamic
 mode skips lint (types are optional there by definition).

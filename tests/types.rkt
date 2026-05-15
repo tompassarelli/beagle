@@ -94,6 +94,42 @@
   (check-true  (type-compatible? vs vs2))
   (check-false (type-compatible? vs vl)))
 
+;; --- polymorphic types (forall) --------------------------------------------
+
+(test-case "parse forall type"
+  (define t (parse-type `(forall (A) (,BRACKET-TAG A -> A))))
+  (check-true (type-poly? t))
+  (check-equal? (type-poly-vars t) '(A))
+  (define body (type-poly-body t))
+  (check-true (type-fn? body))
+  (check-true (type-var? (car (type-fn-params body))))
+  (check-eq? (type-var-name (car (type-fn-params body))) 'A))
+
+(test-case "type-var is compatible with anything"
+  (check-true (type-compatible? (type-var 'A) (type-prim 'Long)))
+  (check-true (type-compatible? (type-prim 'Long) (type-var 'A))))
+
+(test-case "infer-type-var-bindings matches fn arg types"
+  (define expected (type-fn (list (type-var 'A)) #f (type-var 'B)))
+  (define actual (type-fn (list (type-prim 'Long)) #f (type-prim 'String)))
+  (define bindings (make-hasheq))
+  (infer-type-var-bindings expected actual bindings)
+  (check-eq? (type-prim-name (hash-ref bindings 'A)) 'Long)
+  (check-eq? (type-prim-name (hash-ref bindings 'B)) 'String))
+
+(test-case "apply-type-bindings replaces vars"
+  (define bindings (make-hasheq))
+  (hash-set! bindings 'A (type-prim 'Long))
+  (define result (apply-type-bindings (type-app 'Vec (list (type-var 'A))) bindings))
+  (check-true (type-app? result))
+  (check-eq? (type-prim-name (car (type-app-args result))) 'Long))
+
+(test-case "unbound type vars resolve to Any"
+  (define bindings (make-hasheq))
+  (define result (apply-type-bindings (type-var 'X) bindings))
+  (check-true (type-prim? result))
+  (check-eq? (type-prim-name result) 'Any))
+
 ;; --- infer-literal-type ----------------------------------------------------
 
 (test-case "infer literal types"

@@ -31,18 +31,23 @@
 (define-syntax (beagle-module-begin stx)
   (syntax-case stx ()
     [(_ form ...)
-     (with-handlers
-         ([exn:fail?
-           (lambda (e)
-             (cond
-               [(json-error-mode?)
-                (write-json-error (exn-message e) stx)
-                (exit 1)]
-               [else
-                (raise-syntax-error 'beagle (augment-with-hint (exn-message e)) stx)]))])
-       (define forms  (syntax->list #'(form ...)))
-       (define prog   (parse-program forms))
-       (type-check! prog)
+     (let ()
+       (define (handle-error e [loc-stx #f])
+         (define target (or loc-stx stx))
+         (cond
+           [(json-error-mode?)
+            (write-json-error (exn-message e) target)
+            (exit 1)]
+           [else
+            (raise-syntax-error 'beagle (augment-with-hint (exn-message e)) target)]))
+
+       (define forms (syntax->list #'(form ...)))
+       (define prog
+         (with-handlers ([exn:fail? handle-error])
+           (parse-program forms #:source-path (syntax-source stx))))
+
+       (type-check-with-locs! prog handle-error)
+
        ;; Lint passes after type-check so warnings only appear on programs
        ;; that are otherwise valid. Skipped via BEAGLE_NO_LINT env var (for
        ;; benchmark scoring where stderr noise distorts results).

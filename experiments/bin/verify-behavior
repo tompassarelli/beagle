@@ -38,7 +38,7 @@ mkdir -p "$(dirname "$target_clj")"
 
 start_ns=$(date +%s%N)
 if ! racket "$response" 2>/dev/null | \
-   sed -E '1,/^\(ns /s/^\(ns [^)]+\)/(ns beagle.target)/' > "$target_clj"; then
+   sed -E '1,/^\(ns /s/^\(ns [a-zA-Z0-9._-]+/(ns beagle.target/' > "$target_clj"; then
     end_ns=$(date +%s%N)
     elapsed_ms=$(( (end_ns - start_ns) / 1000000 ))
     echo "$(basename "$response" .rkt): COMPILE_FAIL ${elapsed_ms}ms"

@@ -190,6 +190,14 @@
   (check-exn exn:fail?
              (lambda () (parse-one '(unsafe (println :hi))))))
 
+;; --- regex literal ---------------------------------------------------------
+
+(test-case "regex literal parsed from #%regex tagged form"
+  (define f (car (parse-one '(def x (#%regex "\\s+")))))
+  (check-true (def-form? f))
+  (check-true (regex-lit? (def-form-value f)))
+  (check-equal? (regex-lit-pattern (def-form-value f)) "\\s+"))
+
 ;; --- macros ----------------------------------------------------------------
 
 (test-case "safe macro expansion"
@@ -281,3 +289,44 @@
                (parse-prog
                 '(define-macro safe foo (a b & rest) a)
                 '(def y (foo 1))))))
+
+;; --- macro hygiene --------------------------------------------------------
+
+(test-case "safe macro: let binder is renamed to prevent capture"
+  (define p (parse-prog
+             '(define-macro safe with-temp (val body) (let [x val] body))
+             '(def y (with-temp 1 42))))
+  (define f (car (program-forms p)))
+  (define val (def-form-value f))
+  (check-true (let-form? val))
+  (check-false (eq? (let-binding-name (car (let-form-bindings val))) 'x)))
+
+(test-case "safe macro: fn param is renamed"
+  (define p (parse-prog
+             '(define-macro safe make-fn (body) (fn [x] body))
+             '(def f (make-fn 42))))
+  (define f (car (program-forms p)))
+  (define val (def-form-value f))
+  (check-true (fn-form? val))
+  (check-false (eq? (param-name (car (fn-form-params val))) 'x)))
+
+(test-case "unsafe macro: binder is NOT renamed"
+  (define p (parse-prog
+             '(define-macro unsafe with-temp (val body) (let [x val] body))
+             '(def y (with-temp 1 42))))
+  (define f (car (program-forms p)))
+  (define val (def-form-value f))
+  (check-true (unsafe-expr? val))
+  (define inner (unsafe-expr-inner val))
+  (check-true (let-form? inner))
+  (check-eq? (let-binding-name (car (let-form-bindings inner))) 'x))
+
+(test-case "safe macro: no binders means no rename"
+  (define p (parse-prog
+             '(define-macro safe inc1 (x) (+ x 1))
+             '(def y (inc1 5))))
+  (define f (car (program-forms p)))
+  (define val (def-form-value f))
+  (check-true (call-form? val))
+  (check-eq? (call-form-fn val) '+)
+  (check-equal? (call-form-args val) '(5 1)))

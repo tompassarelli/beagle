@@ -102,17 +102,42 @@ of beagle) could write valid code from it.
 - **Sample size.** N≥30 tasks and M≥5 runs per task for differences to be
   meaningful vs noise.
 
-## Current open questions
+## Resolved questions (answered by benchmark)
 
-Things worth measuring as of 2026-05-15:
+| question | answer |
+|---|---|
+| `:` vs `:-` for annotation | `:` — no measurable difference; `:-` removed |
+| Wrapped vs inline params | Wrapped — inline removed; no measured benefit |
+| Optional vs required types | Optional (variant A) — required (B) causes nested-let bloat |
+| Type aliases | Removed — pure redundancy |
+| Beagle vs raw Clojure (correctness) | No divergence at any scale tested (30-710 lines) |
+| Types help with refactoring? | Not measurably — LLM traces call chains manually |
+| Types help with bug detection? | Not measurably — untyped vector elements (`nth` → `Any`) hide field-access bugs |
 
-1. `:` vs `:-` for type annotation — predicted: `:` wins on familiarity
-2. Wrapped `(x : T)` vs inline `[x : T y : T]` params — predicted: wrapped
-   wins on consistency (less ambiguous parsing for the LLM)
-3. Optional vs required types — predicted: required wins for AI generation
-   (more compile-time safety net) but might lose on first-try token count
-4. With vs without stdlib extern catalog — predicted: catalog wins big
+## Current experiment corpus
 
-Note: testing (1) and (2) requires beagle to support both syntaxes. As of
-v0, only `:` and wrapped are supported, so those experiments are blocked
-until the alternate syntax is implemented.
+### Variant benchmarks (40 tasks × 3 variants)
+
+`experiments/tasks/` — 40 task specs with 23 behavior verify scripts.
+88 total responses across variants A (canonical), B (required-types),
+C (minimal). 100% behavior pass rate across all variants.
+
+### Head-to-head: beagle vs raw Clojure (8 programs)
+
+`experiments/head-to-head/` — 8 programs of escalating complexity (30-710
+lines), each written in both beagle and Clojure. 16/16 behavior pass.
+Phase 1 (P1-P5): single-agent alternating. Phase 2 (P6-P8): parallel
+isolated agents.
+
+### Refactoring experiment
+
+`experiments/refactoring-test/` — Add overhead-pct parameter cascading
+through ~10 functions in P7. Both agents complete correctly, first try.
+
+### Bug detection experiment
+
+`experiments/bug-detection-test/` — 5 injected bugs (2 arity, 1 undefined
+fn, 1 wrong index, 1 wrong sort direction) in P7. Both agents find all 5.
+
+See `head-to-head/results.md` for full analysis and `docs/findings.md`
+for the running empirical log.

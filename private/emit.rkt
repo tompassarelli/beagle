@@ -68,6 +68,7 @@
     [(real? e)          (number->string e)]
     [(symbol? e)        (symbol->string e)]
     [(quoted? e)        (format "'~a" (datum->clj (quoted-datum e)))]
+    [(regex-lit? e)     (format "#\"~a\"" (regex-lit-pattern e))]
     [(vec-form? e)
      (format "[~a]"
              (string-join (map emit-expr (vec-form-items e)) " "))]
@@ -103,6 +104,16 @@
      (format "(let [~a]\n  ~a)"
              (emit-let-bindings (let-form-bindings e))
              (emit-body (let-form-body e) "  "))]
+    [(loop-form? e)
+     (format "(loop [~a]\n  ~a)"
+             (emit-let-bindings (loop-form-bindings e))
+             (emit-body (loop-form-body e) "  "))]
+    [(recur-form? e)
+     (format "(recur~a)" (emit-args (recur-form-args e)))]
+    [(for-form? e)
+     (format "(for [~a]\n  ~a)"
+             (emit-for-clauses (for-form-clauses e))
+             (emit-body (for-form-body e) "  "))]
     [(fn-form? e)
      (format "(fn [~a] ~a)"
              (emit-params (fn-form-params e))
@@ -127,6 +138,16 @@
   (string-join
    (for/list ([b (in-list bindings)])
      (format "~a ~a" (let-binding-name b) (emit-expr (let-binding-value b))))
+   "\n   "))
+
+(define (emit-for-clauses clauses)
+  (string-join
+   (for/list ([c (in-list clauses)])
+     (cond
+       [(for-binding? c)
+        (format "~a ~a" (for-binding-name c) (emit-expr (for-binding-expr c)))]
+       [(for-when? c)
+        (format ":when ~a" (emit-expr (for-when-test c)))]))
    "\n   "))
 
 (define (emit-body exprs indent)

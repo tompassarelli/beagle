@@ -86,6 +86,88 @@
 
 (define (last xs) (if (null? (cdr xs)) (car xs) (last (cdr xs))))
 
+;; --- type narrowing --------------------------------------------------------
+
+(define TYPE-PREDICATES
+  (hasheq
+   'nil?     'Nil
+   'string?  'String
+   'number?  'Long
+   'integer? 'Long
+   'keyword? 'Keyword
+   'symbol?  'Symbol
+   'boolean? 'Boolean))
+
+(define (type-equal? a b)
+  (and (type-prim? a) (type-prim? b)
+       (eq? (type-prim-name a) (type-prim-name b))))
+
+(define (remove-from-union current-type remove-type)
+  (cond
+    [(any-type? current-type) current-type]
+    [(type-union? current-type)
+     (define alts (type-union-alts current-type))
+     (define remaining (filter (lambda (alt) (not (type-equal? alt remove-type))) alts))
+     (cond
+       [(= (length remaining) (length alts)) current-type]
+       [(null? remaining) current-type]
+       [(= (length remaining) 1) (car remaining)]
+       [else (type-union remaining)])]
+    [else current-type]))
+
+(define (extract-narrowing cond-expr)
+  (cond
+    [(and (call-form? cond-expr)
+          (hash-has-key? TYPE-PREDICATES (call-form-fn cond-expr))
+          (= (length (call-form-args cond-expr)) 1)
+          (symbol? (car (call-form-args cond-expr))))
+     (values (car (call-form-args cond-expr))
+             (type-prim (hash-ref TYPE-PREDICATES (call-form-fn cond-expr)))
+             #f)]
+    [(and (call-form? cond-expr)
+          (eq? (call-form-fn cond-expr) 'some?)
+          (= (length (call-form-args cond-expr)) 1)
+          (symbol? (car (call-form-args cond-expr))))
+     (values (car (call-form-args cond-expr))
+             (type-prim 'Nil)
+             #t)]
+    [(and (call-form? cond-expr)
+          (eq? (call-form-fn cond-expr) '=)
+          (= (length (call-form-args cond-expr)) 2))
+     (define a1 (car (call-form-args cond-expr)))
+     (define a2 (cadr (call-form-args cond-expr)))
+     (cond
+       [(and (symbol? a1) (eq? a2 'nil))
+        (values a1 (type-prim 'Nil) #f)]
+       [(and (eq? a1 'nil) (symbol? a2))
+        (values a2 (type-prim 'Nil) #f)]
+       [else (values #f #f #f)])]
+    [(and (call-form? cond-expr)
+          (eq? (call-form-fn cond-expr) 'not)
+          (= (length (call-form-args cond-expr)) 1))
+     (define-values (var narrow neg?) (extract-narrowing (car (call-form-args cond-expr))))
+     (if var
+       (values var narrow (not neg?))
+       (values #f #f #f))]
+    [else (values #f #f #f)]))
+
+(define (narrow-env-for-condition env cond-expr)
+  (define-values (var narrow-type negated?) (extract-narrowing cond-expr))
+  (cond
+    [(not var) (values env env)]
+    [else
+     (define current-type (hash-ref env var #f))
+     (cond
+       [(not current-type) (values env env)]
+       [else
+        (define pos-env (mut-copy env))
+        (hash-set! pos-env var narrow-type)
+        (define neg-env (mut-copy env))
+        (hash-set! neg-env var (remove-from-union current-type narrow-type))
+        (if negated?
+          (values neg-env pos-env)
+          (values pos-env neg-env))])]))
+
 ;; --- inference -------------------------------------------------------------
 
 (define (infer-expr e env)
@@ -95,15 +177,17 @@
     [(symbol? e)
      (or (infer-literal-type e) (hash-ref env e ANY))]
     [(quoted? e) ANY]
+    [(regex-lit? e) ANY]
     [(vec-form? e) (type-app 'Vec (list ANY))]
     [(unsafe-expr? e) ANY]
     [(unsafe-clj? e) ANY]
     [(if-form? e)
      (infer-expr (if-form-cond-expr e) env)
-     (define tt (infer-expr (if-form-then-expr e) env))
+     (define-values (then-env else-env) (narrow-env-for-condition env (if-form-cond-expr e)))
+     (define tt (infer-expr (if-form-then-expr e) then-env))
      (cond
        [(if-form-else-expr e)
-        (define et (infer-expr (if-form-else-expr e) env))
+        (define et (infer-expr (if-form-else-expr e) else-env))
         (cond
           [(type-compatible? tt et) tt]
           [(type-compatible? et tt) et]
@@ -111,23 +195,42 @@
        [else ANY])]
     [(when-form? e)
      (infer-expr (when-form-cond-expr e) env)
-     (last-expr-type (when-form-body e) env)]
+     (define-values (then-env _else) (narrow-env-for-condition env (when-form-cond-expr e)))
+     (last-expr-type (when-form-body e) then-env)]
     [(do-form? e)  (last-expr-type (do-form-body e) env)]
     [(cond-form? e)
      (define clauses (cond-form-clauses e))
      (cond
        [(null? clauses) ANY]
-       [else (last-expr-type (cond-clause-body (car clauses)) env)])]
+       [else (infer-cond-clauses clauses env)])]
     [(let-form? e)
      (define body-env (extend-with-let-bindings env (let-form-bindings e)))
      (last-expr-type (let-form-body e) body-env)]
+    [(loop-form? e)
+     (define body-env (extend-with-let-bindings env (loop-form-bindings e)))
+     (last-expr-type (loop-form-body e) body-env)]
+    [(recur-form? e)
+     (for-each (lambda (a) (infer-expr a env)) (recur-form-args e))
+     ANY]
+    [(for-form? e)
+     (define body-env (mut-copy env))
+     (for ([c (in-list (for-form-clauses e))])
+       (cond
+         [(for-binding? c) (hash-set! body-env (for-binding-name c) ANY)]
+         [(for-when? c) (infer-expr (for-when-test c) body-env)]))
+     (last-expr-type (for-form-body e) body-env)
+     ANY]
     [(fn-form? e)
      (define p-types (map (lambda (p) (or (param-type p) ANY)) (fn-form-params e)))
      (define body-env (extend-with-params env (fn-form-params e)))
      (define ret (or (fn-form-return-type e) (last-expr-type (fn-form-body e) body-env)))
      (type-fn p-types #f ret)]
     [(call-form? e)
-     (define fn-type (hash-ref env (call-form-fn e) ANY))
+     (define raw-type (hash-ref env (call-form-fn e) ANY))
+     (define fn-type
+       (if (type-poly? raw-type)
+         (resolve-poly-call raw-type (call-form-args e) env)
+         raw-type))
      (cond
        [(type-fn? fn-type)
         (check-args (call-form-fn e) fn-type (call-form-args e) env)
@@ -136,6 +239,33 @@
         (for ([a (in-list (call-form-args e))]) (infer-expr a env))
         ANY])]
     [else ANY]))
+
+(define (infer-cond-clauses clauses env)
+  (let loop ([cls clauses] [current-env env] [result-type #f])
+    (cond
+      [(null? cls) (or result-type ANY)]
+      [else
+       (define c (car cls))
+       (define test (cond-clause-test c))
+       (infer-expr test current-env)
+       (define-values (then-env else-env) (narrow-env-for-condition current-env test))
+       (define body-type (last-expr-type (cond-clause-body c) then-env))
+       (loop (cdr cls) else-env (or result-type body-type))])))
+
+(define (resolve-poly-call poly-type args env)
+  (define body (type-poly-body poly-type))
+  (define bindings (make-hasheq))
+  (define arg-types (map (lambda (a) (infer-expr a env)) args))
+  (define fixed (type-fn-params body))
+  (define rest-t (type-fn-rest-type body))
+  (define n-fixed (length fixed))
+  (for ([pt (in-list fixed)]
+        [at (in-list arg-types)])
+    (infer-type-var-bindings pt at bindings))
+  (when (and rest-t (> (length arg-types) n-fixed))
+    (for ([at (in-list (list-tail arg-types n-fixed))])
+      (infer-type-var-bindings rest-t at bindings)))
+  (apply-type-bindings body bindings))
 
 (define (extend-with-let-bindings env bindings)
   (define out (mut-copy env))
@@ -190,4 +320,12 @@
 (define (drop* xs n)
   (if (or (zero? n) (null? xs)) xs (drop* (cdr xs) (- n 1))))
 
-(provide type-check!)
+(define (type-check-with-locs! prog error-handler)
+  (when (eq? (program-mode prog) 'strict)
+    (define env (build-initial-env prog))
+    (for ([form (in-list (program-forms prog))]
+          [orig-stx (in-list (program-form-stxs prog))])
+      (with-handlers ([exn:fail? (lambda (e) (error-handler e orig-stx))])
+        (check-form form env)))))
+
+(provide type-check! type-check-with-locs!)

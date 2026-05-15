@@ -15,11 +15,16 @@
 (require "types.rkt")
 
 (define (p x) (type-prim x))
+(define (tv x) (type-var x))
 
 (define (fn-of args ret #:rest [rest #f])
   (type-fn (map p args)
            (and rest (p rest))
            (p ret)))
+
+(define (poly-fn vars param-types ret-type #:rest [rest-type #f])
+  (type-poly vars
+    (type-fn param-types rest-type ret-type)))
 
 (define STDLIB-TYPES
   (hash
@@ -41,15 +46,30 @@
    'concat     (fn-of '() 'Any #:rest 'Any)
    'reverse    (fn-of '(Any) 'Any)
    'distinct   (fn-of '(Any) 'Any)
-   'sort       (fn-of '(Any) 'Any)
-   ;; --- higher-order (parametric → Any) ------------------------------------
-   ;; Higher-order: parametric → Any. Variadic in real Clojure.
-   'map        (fn-of '(Any) 'Any #:rest 'Any)        ; (map f c) or (map f c1 c2 ...)
-   'mapv       (fn-of '(Any) 'Any #:rest 'Any)
-   'filter     (fn-of '(Any Any) 'Any)
-   'filterv    (fn-of '(Any Any) 'Any)
-   'remove     (fn-of '(Any Any) 'Any)
-   'reduce     (fn-of '(Any Any) 'Any #:rest 'Any)    ; (reduce f c) or (reduce f init c)
+   'sort       (fn-of '(Any) 'Any #:rest 'Any)
+   'sort-by    (fn-of '(Any Any) 'Any #:rest 'Any)
+   ;; --- higher-order (polymorphic where useful) -----------------------------
+   'map        (poly-fn '(A B)
+                 (list (type-fn (list (tv 'A)) #f (tv 'B)))
+                 (p 'Any)
+                 #:rest (p 'Any))
+   'mapv       (poly-fn '(A B)
+                 (list (type-fn (list (tv 'A)) #f (tv 'B))
+                       (p 'Any))
+                 (type-app 'Vec (list (tv 'B))))
+   'filter     (poly-fn '(A)
+                 (list (type-fn (list (tv 'A)) #f (p 'Any))
+                       (p 'Any))
+                 (p 'Any))
+   'filterv    (poly-fn '(A)
+                 (list (type-fn (list (tv 'A)) #f (p 'Any))
+                       (p 'Any))
+                 (type-app 'Vec (list (tv 'A))))
+   'remove     (poly-fn '(A)
+                 (list (type-fn (list (tv 'A)) #f (p 'Any))
+                       (p 'Any))
+                 (p 'Any))
+   'reduce     (fn-of '(Any Any) 'Any #:rest 'Any)
    'apply      (fn-of '(Any Any) 'Any #:rest 'Any)
    'comp       (fn-of '() 'Any #:rest 'Any)
    'partial    (fn-of '(Any) 'Any #:rest 'Any)
@@ -103,7 +123,7 @@
    'newline    (fn-of '() 'Nil)
    'prn        (fn-of '() 'Nil #:rest 'Any)
    ;; --- identity / value ---------------------------------------------------
-   'identity   (fn-of '(Any) 'Any)
+   'identity   (poly-fn '(A) (list (tv 'A)) (tv 'A))
    'constantly (fn-of '(Any) 'Any)
    ;; --- sequence generators / iteration ------------------------------------
    'range      (fn-of '() 'Any #:rest 'Any)    ; (range), (range n), (range a b), (range a b step)

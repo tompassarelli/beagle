@@ -1,0 +1,6 @@
+(when-not (= (r/describe-val nil) "nothing") (System/exit 1))
+(when-not (= (r/describe-val "hi") "hi") (System/exit 1))
+(when-not (= (r/describe-val 42) "number") (System/exit 1))
+(when-not (= (r/describe-val "abc") "abc") (System/exit 1))
+(when-not (= (r/describe-val 0) "number") (System/exit 1))
+(System/exit 0)

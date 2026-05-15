@@ -51,6 +51,32 @@ compiles to Clojure. Each file starts with `#lang beagle`.
 
 **Union:** `(U A B C)` — value is any one of the alternatives.
 
+**Type narrowing:** In `if`/`cond`/`when`, the checker narrows union types
+based on the condition:
+
+```racket
+(defn safe-name [(x : (U String Nil))] : String
+  (if (nil? x) "default" (subs x 0)))     ; x is String in else branch
+
+(defn describe [(x : (U String Long Nil))] : String
+  (cond
+    [(nil? x) "nil"]
+    [(string? x) (subs x 0)]              ; x is String here
+    [:else (str x)]))                      ; x is Long here
+```
+
+Supported predicates: `nil?`, `some?`, `string?`, `number?`, `integer?`,
+`keyword?`, `symbol?`, `boolean?`, `(= x nil)`, `(not ...)`.
+
+**Polymorphic stdlib HOFs:** `map`, `mapv`, `filter`, `filterv`, `identity`
+etc. infer return types from their function argument:
+
+```racket
+(def xs [1 2 3])
+(def ys : (Vec Long) (mapv inc xs))       ; type-checks: mapv returns (Vec Long)
+(def evens : (Vec Long) (filterv even? xs))
+```
+
 **Annotations are optional but recommended.** Annotated forms are
 type-checked at compile time:
 

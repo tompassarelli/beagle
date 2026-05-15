@@ -4,3 +4,5 @@ compiled/
 .DS_Store
 runtime/.cpcache/
 runtime/target/
+runtime/src/beagle/target.clj
+runtime/src/beagle/run_*.clj

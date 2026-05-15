@@ -126,3 +126,163 @@
 (test-case "union annotation rejects non-member"
   (check-exn exn:fail?
              (lambda () (check-prog '(def x : (U String Nil) 42)))))
+
+;; --- type narrowing in if/cond/when ---------------------------------------
+
+(test-case "if nil? narrows union in else branch"
+  (check-not-exn
+   (lambda ()
+     (check-prog `(declare-extern get-name ,(br '-> '(U String Nil)))
+                 '(defn safe-name [] : String
+                    (let [x (get-name)]
+                      (if (nil? x) "default" (subs x 0))))))))
+
+(test-case "if some? narrows union in then branch"
+  (check-not-exn
+   (lambda ()
+     (check-prog `(declare-extern get-name ,(br '-> '(U String Nil)))
+                 '(defn safe-name [] : String
+                    (let [x (get-name)]
+                      (if (some? x) (subs x 0) "default")))))))
+
+(test-case "if (= x nil) narrows like nil?"
+  (check-not-exn
+   (lambda ()
+     (check-prog `(declare-extern get-name ,(br '-> '(U String Nil)))
+                 '(defn safe-name [] : String
+                    (let [x (get-name)]
+                      (if (= x nil) "default" (subs x 0))))))))
+
+(test-case "if (= nil x) narrows like nil?"
+  (check-not-exn
+   (lambda ()
+     (check-prog `(declare-extern get-name ,(br '-> '(U String Nil)))
+                 '(defn safe-name [] : String
+                    (let [x (get-name)]
+                      (if (= nil x) "default" (subs x 0))))))))
+
+(test-case "if (not (nil? x)) flips narrowing"
+  (check-not-exn
+   (lambda ()
+     (check-prog `(declare-extern get-name ,(br '-> '(U String Nil)))
+                 '(defn safe-name [] : String
+                    (let [x (get-name)]
+                      (if (not (nil? x)) (subs x 0) "default")))))))
+
+(test-case "if string? narrows in then branch"
+  (check-not-exn
+   (lambda ()
+     (check-prog `(declare-extern get-val ,(br '-> '(U String Long)))
+                 '(defn describe [] : String
+                    (let [x (get-val)]
+                      (if (string? x) (subs x 0) "number")))))))
+
+(test-case "when narrows body"
+  (check-not-exn
+   (lambda ()
+     (check-prog `(declare-extern get-name ,(br '-> '(U String Nil)))
+                 '(defn print-name []
+                    (let [x (get-name)]
+                      (when (string? x) (subs x 0))))))))
+
+(test-case "cond threads narrowing across clauses"
+  (check-not-exn
+   (lambda ()
+     (check-prog `(declare-extern get-val ,(br '-> '(U String Long Nil)))
+                 `(defn describe [] : String
+                    (let (x (get-val))
+                      (cond
+                        ,(br '(nil? x) "nil")
+                        ,(br '(string? x) '(subs x 0))
+                        ,(br ':else '(str x)))))))))
+
+;; --- polymorphic function types -------------------------------------------
+
+(test-case "mapv infers (Vec Long) return from inc"
+  (check-not-exn
+   (lambda ()
+     (check-prog `(def xs ,(br 1 2 3))
+                 '(def ys : (Vec Long) (mapv inc xs))))))
+
+(test-case "filterv infers (Vec Long) return from even?"
+  (check-not-exn
+   (lambda ()
+     (check-prog `(def xs ,(br 1 2 3))
+                 '(def ys : (Vec Long) (filterv even? xs))))))
+
+(test-case "identity preserves type through annotation"
+  (check-not-exn
+   (lambda ()
+     (check-prog '(def x : Long (identity 42))))))
+
+(test-case "map rejects non-function first arg"
+  (check-exn exn:fail?
+   (lambda ()
+     (check-prog `(def xs ,(br 1 2 3))
+                 '(def ys (map "not-a-fn" xs))))))
+
+(test-case "polymorphic declare-extern via forall"
+  (check-not-exn
+   (lambda ()
+     (check-prog `(declare-extern my-id (forall (T) ,(br 'T '-> 'T)))
+                 '(def x : Long (my-id 42))))))
+
+;; --- cross-file type imports ------------------------------------------------
+
+(define fixture-source
+  (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
+    (build-path dir "fixtures" "app.rkt")))
+
+(define (check-prog/source source-path . forms)
+  (define prog (parse-program (map (lambda (f) (datum->syntax #f f)) forms)
+                              #:source-path source-path))
+  (type-check! prog))
+
+(test-case "cross-file import: typed defn callable with prefix"
+  (check-not-exn
+   (lambda ()
+     (check-prog/source fixture-source
+       '(require mathlib)
+       '(def x : Long (mathlib/add 1 2))))))
+
+(test-case "cross-file import: typed def accessible with prefix"
+  (check-not-exn
+   (lambda ()
+     (check-prog/source fixture-source
+       '(require mathlib)
+       '(def x : Double mathlib/pi)))))
+
+(test-case "cross-file import: type error caught across files"
+  (check-exn exn:fail?
+   (lambda ()
+     (check-prog/source fixture-source
+       '(require mathlib)
+       '(def x : Long (mathlib/greet "tom"))))))
+
+(test-case "cross-file import: arg type error caught"
+  (check-exn exn:fail?
+   (lambda ()
+     (check-prog/source fixture-source
+       '(require mathlib)
+       '(def x : Long (mathlib/add "one" 2))))))
+
+(test-case "cross-file import with :as alias"
+  (check-not-exn
+   (lambda ()
+     (check-prog/source fixture-source
+       '(require mathlib :as m)
+       '(def x : Long (m/add 1 2))))))
+
+(test-case "cross-file import: untyped defn still has arity"
+  (check-exn exn:fail?
+   (lambda ()
+     (check-prog/source fixture-source
+       '(require mathlib)
+       '(def x (mathlib/untyped-inc 1 2 3))))))
+
+(test-case "cross-file import: missing module silently skips"
+  (check-not-exn
+   (lambda ()
+     (check-prog/source fixture-source
+       '(require nonexistent.module)
+       '(def x 42)))))

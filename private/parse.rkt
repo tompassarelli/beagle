@@ -13,6 +13,31 @@
 (define (bracketed? d)        (and (pair? d) (eq? (car d) BT)))
 (define (bracket-body d)      (cdr d))
 
+;; Readtable for parsing beagle source: intercepts #"..." as regex literals.
+(define (read-regex-pattern port)
+  (let loop ([acc '()])
+    (define c (read-char port))
+    (cond
+      [(eof-object? c) (error 'beagle "unterminated regex literal")]
+      [(char=? c #\")  (list->string (reverse acc))]
+      [(char=? c #\\)
+       (define next (read-char port))
+       (cond
+         [(eof-object? next) (error 'beagle "unterminated regex literal")]
+         [else (loop (cons next (cons #\\ acc)))])]
+      [else (loop (cons c acc))])))
+
+(define (regex-dispatch ch port src line col pos)
+  (define pattern (read-regex-pattern port))
+  (define result (list '#%regex pattern))
+  (if src
+    (datum->syntax #f result (vector src line col pos
+                                     (+ 3 (string-length pattern))))
+    result))
+
+(define beagle-readtable
+  (make-readtable #f #\" 'dispatch-macro regex-dispatch))
+
 ;; --- AST -------------------------------------------------------------------
 
 (struct ns-decl     (name)                                  #:transparent)
@@ -31,6 +56,12 @@
 (struct quoted      (datum)                                 #:transparent)
 (struct unsafe-clj  (clj-string)                            #:transparent)
 (struct unsafe-expr (inner)                                 #:transparent)
+(struct regex-lit  (pattern)                                #:transparent)
+(struct loop-form  (bindings body)                          #:transparent)
+(struct recur-form (args)                                   #:transparent)
+(struct for-form   (clauses body)                           #:transparent)
+(struct for-binding (name expr)                             #:transparent)
+(struct for-when   (test)                                   #:transparent)
 
 (struct param       (name type)                             #:transparent)
 (struct let-binding (name type value)                       #:transparent)
@@ -44,15 +75,93 @@
                  forms
                  macros
                  externs        ; hash: name → type
-                 requires)      ; list of require-entry
+                 requires       ; list of require-entry
+                 form-stxs)    ; list of syntax objects parallel to forms
   #:transparent)
 
 (define DEFAULT-MODE      'strict)
 (define DEFAULT-NAMESPACE 'beagle.user)
 
+;; --- cross-file type import ------------------------------------------------
+
+(define (split-ns-segments ns-sym)
+  (define s (symbol->string ns-sym))
+  (define len (string-length s))
+  (let loop ([i 0] [start 0] [acc '()])
+    (cond
+      [(= i len) (reverse (cons (substring s start i) acc))]
+      [(char=? (string-ref s i) #\.)
+       (loop (+ i 1) (+ i 1) (cons (substring s start i) acc))]
+      [else (loop (+ i 1) start acc)])))
+
+(define (last-of xs)
+  (if (null? (cdr xs)) (car xs) (last-of (cdr xs))))
+
+(define (all-but-last xs)
+  (if (null? (cdr xs)) '() (cons (car xs) (all-but-last (cdr xs)))))
+
+(define (resolve-module-path ns-sym source-path)
+  (and source-path
+       (let ()
+         (define segs (split-ns-segments ns-sym))
+         (define file-name (string-append (last-of segs) ".rkt"))
+         (define dir-segs (all-but-last segs))
+         (define source-dir
+           (let-values ([(d _n _d?) (split-path
+                                      (if (complete-path? source-path)
+                                        source-path
+                                        (path->complete-path source-path)))])
+             d))
+         (define full-path
+           (if (null? dir-segs)
+             (build-path source-dir file-name)
+             (apply build-path source-dir (append dir-segs (list file-name)))))
+         (and (file-exists? full-path) full-path))))
+
+(define (qualify-name prefix-sym name-sym)
+  (string->symbol
+   (string-append (symbol->string prefix-sym) "/" (symbol->string name-sym))))
+
+(define (read-beagle-datums path)
+  (with-input-from-file path
+    (lambda ()
+      (read-line)
+      (parameterize ([read-square-bracket-with-tag BT]
+                     [current-readtable beagle-readtable])
+        (let loop ([acc '()])
+          (define d (read))
+          (if (eof-object? d) (reverse acc) (loop (cons d acc))))))))
+
+(define (import-module-types! mod-path prefix externs registry)
+  (define datums (read-beagle-datums mod-path))
+  (for ([d (in-list datums)])
+    (match d
+      [(list 'declare-extern (? symbol? name) type-expr)
+       (hash-set! externs (qualify-name prefix name) (parse-type type-expr))]
+      [(list 'define-macro (? symbol? kind) (? symbol? name) params template)
+       (define ps (cond
+                    [(bracketed? params) (bracket-body params)]
+                    [(list? params) params]
+                    [else '()]))
+       (register-macro! registry (qualify-name prefix name) kind ps template)]
+      [(list 'def (? symbol? name) ': type-expr _)
+       (hash-set! externs (qualify-name prefix name) (parse-type type-expr))]
+      [(list 'defn (? symbol? name) params-form ': ret-type body ...)
+       (define parsed (parse-params params-form))
+       (define ptypes (map (lambda (p) (or (param-type p) (type-prim 'Any))) parsed))
+       (hash-set! externs (qualify-name prefix name)
+                  (type-fn ptypes #f (parse-type ret-type)))]
+      [(list 'defn (? symbol? name) params-form body ...)
+       #:when (or (null? body) (not (eq? (car body) ':)))
+       (define parsed (parse-params params-form))
+       (define ptypes (map (lambda (p) (or (param-type p) (type-prim 'Any))) parsed))
+       (hash-set! externs (qualify-name prefix name)
+                  (type-fn ptypes #f (type-prim 'Any)))]
+      [_ (void)])))
+
 ;; --- entry point -----------------------------------------------------------
 
-(define (parse-program stxs)
+(define (parse-program stxs #:source-path [source-path #f])
   (define datums (map syntax->datum stxs))
 
   ;; Pass 1: pull meta forms out and register macros / externs / requires.
@@ -91,19 +200,33 @@
        (hash-set! externs name (parse-type type-expr))]
 
       [(list 'require (? symbol? rn))
+       (define segs (split-ns-segments rn))
+       (define prefix (string->symbol (last-of segs)))
+       (with-handlers ([exn:fail? (lambda (_e) (void))])
+         (define mod-path (resolve-module-path rn source-path))
+         (when mod-path
+           (import-module-types! mod-path prefix externs registry)))
        (set! requires (cons (require-entry rn #f) requires))]
       [(list 'require (? symbol? rn) ':as (? symbol? alias))
+       (with-handlers ([exn:fail? (lambda (_e) (void))])
+         (define mod-path (resolve-module-path rn source-path))
+         (when mod-path
+           (import-module-types! mod-path alias externs registry)))
        (set! requires (cons (require-entry rn alias) requires))]
 
       [_ (void)]))
 
   ;; Pass 2: parse each remaining form, expanding macros first.
-  (define parsed
+  ;; Keep parallel stx list for source-location error reporting.
+  (define pairs
     (for/list ([d (in-list datums)]
+               [s (in-list stxs)]
                #:unless (meta-form? d))
-      (parse-top (expand-fully registry d))))
+      (cons (parse-top (expand-fully registry d)) s)))
+  (define parsed (map car pairs))
+  (define form-stxs (map cdr pairs))
 
-  (program mode ns parsed registry externs (reverse requires)))
+  (program mode ns parsed registry externs (reverse requires) form-stxs))
 
 (define (meta-form? d)
   (and (pair? d)
@@ -130,6 +253,8 @@
     [(exact-integer? d) d]
     [(real? d)          d]
     [(symbol? d)        d]
+    [(and (pair? d) (eq? (car d) '#%regex) (= (length d) 2) (string? (cadr d)))
+     (regex-lit (cadr d))]
     [(bracketed? d)
      (vec-form (map parse-expr (bracket-body d)))]
     [(and (pair? d) (eq? (car d) 'quote) (= (length d) 2))
@@ -172,6 +297,14 @@
 
     [(list 'let bindings-form body ...)
      (let-form (parse-let-bindings bindings-form) (parse-body body))]
+
+    [(list 'loop bindings-form body ...)
+     (loop-form (parse-let-bindings bindings-form) (parse-body body))]
+    [(list 'recur args ...)
+     (recur-form (map parse-expr args))]
+
+    [(list 'for bindings-form body ...)
+     (for-form (parse-for-clauses bindings-form) (parse-body body))]
 
     [(list 'if c t e)        (if-form (parse-expr c) (parse-expr t) (parse-expr e))]
     [(list 'if c t)          (if-form (parse-expr c) (parse-expr t) #f)]
@@ -279,6 +412,25 @@
                    acc))]
       [else (error 'beagle "bad let bindings: ~v" rest)])))
 
+(define (parse-for-clauses b)
+  (define items
+    (cond
+      [(bracketed? b) (bracket-body b)]
+      [(list? b)      b]
+      [else (error 'beagle "expected for bindings, got: ~v" b)]))
+  (let loop ([rest items] [acc '()])
+    (cond
+      [(null? rest) (reverse acc)]
+      [(and (>= (length rest) 2)
+            (eq? (car rest) ':when))
+       (loop (cddr rest)
+             (cons (for-when (parse-expr (cadr rest))) acc))]
+      [(and (>= (length rest) 2)
+            (symbol? (car rest)))
+       (loop (cddr rest)
+             (cons (for-binding (car rest) (parse-expr (cadr rest))) acc))]
+      [else (error 'beagle "bad for clause: ~v" rest)])))
+
 (provide
  (struct-out program)
  (struct-out ns-decl)
@@ -297,6 +449,12 @@
  (struct-out quoted)
  (struct-out unsafe-clj)
  (struct-out unsafe-expr)
+ (struct-out regex-lit)
+ (struct-out loop-form)
+ (struct-out recur-form)
+ (struct-out for-form)
+ (struct-out for-binding)
+ (struct-out for-when)
  (struct-out param)
  (struct-out let-binding)
  (struct-out require-entry)

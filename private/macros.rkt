@@ -64,12 +64,17 @@
 (define SPLICE-MARKER 'splice)
 
 ;; Expand a single macro application. `args` are raw datums.
+;; Safe macros get hygienic renaming of template-introduced binders.
 (define (expand-macro reg name args)
   (define m (lookup-macro reg name))
   (unless m
     (error 'beagle "no macro named ~a" name))
   (define fixed (macro-def-fixed-params m))
   (define rest-name (macro-def-rest-param m))
+  (define template
+    (if (eq? (macro-def-kind m) 'safe)
+      (hygienize-template (macro-def-template m) fixed rest-name)
+      (macro-def-template m)))
   (cond
     [rest-name
      (when (< (length args) (length fixed))
@@ -79,14 +84,14 @@
      (define fixed-args (take args (length fixed)))
      (define rest-args  (drop args (length fixed)))
      (define bindings (make-bindings fixed fixed-args rest-name rest-args))
-     (substitute (macro-def-template m) bindings rest-name)]
+     (substitute template bindings rest-name)]
     [else
      (unless (= (length args) (length fixed))
        (error 'beagle
               "macro ~a: expected ~a arg(s), got ~a"
               name (length fixed) (length args)))
      (define bindings (make-bindings fixed args #f '()))
-     (substitute (macro-def-template m) bindings #f)]))
+     (substitute template bindings #f)]))
 
 (define (make-bindings fixed-params fixed-args rest-name rest-args)
   (define h (make-hash))
@@ -176,6 +181,89 @@
      (cons (expand-fully-no-marker reg (car datum) depth)
            (expand-fully-no-marker reg (cdr datum) depth))]
     [else datum]))
+
+;; --- hygiene (safe macros only) -------------------------------------------
+;;
+;; Gensym-based: template-introduced binders (let names, fn/defn params)
+;; are renamed to gensyms before parameter substitution so they can't
+;; capture variables at the expansion site. Unsafe macros skip this.
+
+(define (unwrap-brackets* form)
+  (cond
+    [(and (pair? form) (eq? (car form) BRACKET-TAG)) (cdr form)]
+    [(list? form) form]
+    [else '()]))
+
+(define (collect-param-binders! form macro-params add!)
+  (for ([item (in-list (unwrap-brackets* form))])
+    (cond
+      [(and (symbol? item) (not (eq? item '&)) (not (memq item macro-params)))
+       (add! item)]
+      [(and (list? item) (= (length item) 3) (symbol? (car item))
+            (eq? (cadr item) ':) (not (memq (car item) macro-params)))
+       (add! (car item))]
+      [else (void)])))
+
+(define (collect-let-binders! form macro-params add!)
+  (let loop ([rest (unwrap-brackets* form)])
+    (cond
+      [(or (null? rest) (null? (cdr rest))) (void)]
+      [(and (list? (car rest)) (= (length (car rest)) 3)
+            (symbol? (caar rest)) (eq? (cadar rest) ':)
+            (not (memq (caar rest) macro-params)))
+       (add! (caar rest))
+       (loop (cddr rest))]
+      [(and (symbol? (car rest)) (not (memq (car rest) macro-params)))
+       (add! (car rest))
+       (loop (cddr rest))]
+      [else (loop (cddr rest))])))
+
+(define (collect-template-binders template macro-params)
+  (define binders '())
+  (define (add! name)
+    (unless (memq name binders) (set! binders (cons name binders))))
+  (let walk ([datum template])
+    (when (pair? datum)
+      (cond
+        [(eq? (car datum) 'let)
+         (when (and (pair? (cdr datum)) (pair? (cddr datum)))
+           (collect-let-binders! (cadr datum) macro-params add!))
+         (for-each walk (cdr datum))]
+        [(eq? (car datum) 'fn)
+         (when (and (pair? (cdr datum)) (pair? (cddr datum)))
+           (collect-param-binders! (cadr datum) macro-params add!))
+         (for-each walk (cdr datum))]
+        [(eq? (car datum) 'defn)
+         (when (and (pair? (cdr datum)) (pair? (cddr datum)) (pair? (cdddr datum)))
+           (when (and (symbol? (cadr datum)) (not (memq (cadr datum) macro-params)))
+             (add! (cadr datum)))
+           (collect-param-binders! (caddr datum) macro-params add!))
+         (for-each walk (cdr datum))]
+        [else (for-each walk datum)])))
+  binders)
+
+(define (rename-in-template template renames)
+  (cond
+    [(and (symbol? template) (hash-has-key? renames template))
+     (hash-ref renames template)]
+    [(and (pair? template) (eq? (car template) 'quote))
+     template]
+    [(pair? template)
+     (cons (rename-in-template (car template) renames)
+           (rename-in-template (cdr template) renames))]
+    [else template]))
+
+(define (hygienize-template template fixed-params rest-param)
+  (define macro-params
+    (if rest-param (cons rest-param fixed-params) fixed-params))
+  (define binders (collect-template-binders template macro-params))
+  (cond
+    [(null? binders) template]
+    [else
+     (define renames (make-hasheq))
+     (for ([b (in-list binders)])
+       (hash-set! renames b (gensym b)))
+     (rename-in-template template renames)]))
 
 (provide
  (struct-out macro-def)

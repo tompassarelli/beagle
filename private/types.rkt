@@ -34,9 +34,14 @@
 (struct type-fn    (params rest-type ret)      #:transparent)  ; rest-type: type or #f
 (struct type-app   (ctor args)                 #:transparent)
 (struct type-union (alts)                      #:transparent)
+(struct type-var   (name)                      #:transparent)
+(struct type-poly  (vars body)                 #:transparent)
 
 (define (type? x)
-  (or (type-prim? x) (type-fn? x) (type-app? x) (type-union? x)))
+  (or (type-prim? x) (type-fn? x) (type-app? x) (type-union? x)
+      (type-var? x) (type-poly? x)))
+
+(define current-type-vars (make-parameter '()))
 
 ;; --- parsing types from source datums --------------------------------------
 
@@ -45,6 +50,22 @@
     ;; [A B [& T] -> R] form (function, possibly variadic)
     [(and (pair? t) (eq? (car t) BRACKET-TAG))
      (parse-fn-type (cdr t))]
+
+    ;; (forall (A B) body-type)
+    [(and (pair? t) (eq? (car t) 'forall))
+     (unless (= (length t) 3)
+       (error 'beagle "forall requires (forall (vars...) type): ~v" t))
+     (define vars-form (cadr t))
+     (define vars-list
+       (cond
+         [(and (pair? vars-form) (eq? (car vars-form) BRACKET-TAG)) (cdr vars-form)]
+         [(list? vars-form) vars-form]
+         [else (error 'beagle "forall vars must be a list of symbols: ~v" vars-form)]))
+     (unless (andmap symbol? vars-list)
+       (error 'beagle "forall vars must be symbols: ~v" vars-list))
+     (type-poly vars-list
+                (parameterize ([current-type-vars (append vars-list (current-type-vars))])
+                  (parse-type (caddr t))))]
 
     ;; (U A B C) union
     [(and (pair? t) (eq? (car t) 'U))
@@ -55,6 +76,10 @@
     ;; (Vec T), (Map K V), etc.
     [(and (pair? t) (memq (car t) PARAMETRIC-CTORS))
      (type-app (car t) (map parse-type (cdr t)))]
+
+    ;; type variable (in scope from enclosing forall)
+    [(and (symbol? t) (memq t (current-type-vars)))
+     (type-var t)]
 
     ;; primitive symbol
     [(symbol? t)
@@ -111,6 +136,10 @@
     [(or (not actual) (not expected)) #t]
     [(any-type? actual)   #t]
     [(any-type? expected) #t]
+    [(type-var? actual)   #t]
+    [(type-var? expected) #t]
+    [(type-poly? expected) (type-compatible? actual (type-poly-body expected))]
+    [(type-poly? actual)   (type-compatible? (type-poly-body actual) expected)]
 
     ;; Union on the expected side: actual must match SOME alternative.
     [(type-union? expected)
@@ -167,6 +196,11 @@
     [(type-union? t)
      (format "(U ~a)"
              (string-join (map type->string (type-union-alts t)) " "))]
+    [(type-var? t) (symbol->string (type-var-name t))]
+    [(type-poly? t)
+     (format "(forall (~a) ~a)"
+             (string-join (map symbol->string (type-poly-vars t)) " ")
+             (type->string (type-poly-body t)))]
     [else (~v t)]))
 
 (define (string-join xs sep)
@@ -192,6 +226,48 @@
      (type-prim 'Keyword)]
     [else                #f]))
 
+;; --- polymorphic type inference helpers ------------------------------------
+
+(define (infer-type-var-bindings expected actual bindings)
+  (cond
+    [(any-type? actual) (void)]
+    [(type-var? expected)
+     (unless (hash-has-key? bindings (type-var-name expected))
+       (hash-set! bindings (type-var-name expected) actual))]
+    [(and (type-fn? expected) (type-fn? actual))
+     (when (= (length (type-fn-params expected)) (length (type-fn-params actual)))
+       (for ([ep (in-list (type-fn-params expected))]
+             [ap (in-list (type-fn-params actual))])
+         (infer-type-var-bindings ep ap bindings)))
+     (when (and (type-fn-rest-type expected) (type-fn-rest-type actual))
+       (infer-type-var-bindings (type-fn-rest-type expected)
+                                (type-fn-rest-type actual) bindings))
+     (infer-type-var-bindings (type-fn-ret expected) (type-fn-ret actual) bindings)]
+    [(and (type-app? expected) (type-app? actual)
+          (eq? (type-app-ctor expected) (type-app-ctor actual)))
+     (for ([ea (in-list (type-app-args expected))]
+           [aa (in-list (type-app-args actual))])
+       (infer-type-var-bindings ea aa bindings))]
+    [else (void)]))
+
+(define (apply-type-bindings type bindings)
+  (cond
+    [(type-var? type)
+     (hash-ref bindings (type-var-name type) (type-prim 'Any))]
+    [(type-prim? type) type]
+    [(type-fn? type)
+     (type-fn (map (lambda (p) (apply-type-bindings p bindings)) (type-fn-params type))
+              (and (type-fn-rest-type type)
+                   (apply-type-bindings (type-fn-rest-type type) bindings))
+              (apply-type-bindings (type-fn-ret type) bindings))]
+    [(type-app? type)
+     (type-app (type-app-ctor type)
+               (map (lambda (a) (apply-type-bindings a bindings)) (type-app-args type)))]
+    [(type-union? type)
+     (type-union (map (lambda (a) (apply-type-bindings a bindings)) (type-union-alts type)))]
+    [(type-poly? type) type]
+    [else type]))
+
 ;; The built-in environment (BUILTIN-ENV) lives in stdlib-types.rkt to avoid
 ;; a circular dependency (stdlib-types.rkt needs the type constructors from
 ;; this module). Consumers should import STDLIB-TYPES directly.
@@ -202,9 +278,14 @@
  (struct-out type-fn)
  (struct-out type-app)
  (struct-out type-union)
+ (struct-out type-var)
+ (struct-out type-poly)
+ current-type-vars
  type?
  any-type?
  parse-type
  type-compatible?
  type->string
- infer-literal-type)
+ infer-literal-type
+ infer-type-var-bindings
+ apply-type-bindings)

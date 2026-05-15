@@ -39,6 +39,9 @@ for being included as system context.
 (when cond body...)
 (do body1 body2 ... bodyN)          ; returns last
 (let [name1 value1 name2 value2 ...] body...)
+(loop [name1 init1 name2 init2 ...] body...)
+(recur arg1 arg2 ...)               ; tail-recurse back to loop
+(for [x coll1 y coll2 :when pred] body...)  ; list comprehension
 (fn [PARAMS] body...)
 (fn [PARAMS] : ReturnType body...)
 'datum                              ; quote
@@ -146,6 +149,36 @@ Union:
 **Misc**: `identity`, `constantly`
 
 For everything else, use `(declare-extern name TypeExpr)`.
+
+## Clojure namespace interop
+
+`(require clojure.string :as str)` works for any Clojure namespace — emits
+`(:require [clojure.string :as str])` in the Clojure ns form. Then call
+functions as `str/split`, `str/trim`, etc. Type checker treats these as Any.
+
+```racket
+(require clojure.string :as str)
+(require clojure.set :as cset)
+
+(str/split text #"\s+")       ; regex literal supported natively
+(str/trim s)
+(str/lower-case s)
+(str/upper-case s)
+(str/join ", " coll)
+(cset/intersection a b)
+```
+
+## Regex literals
+
+`#"pattern"` — Clojure regex literal. Emits as `#"pattern"` in output.
+Supported natively in beagle source. Common patterns:
+
+```racket
+#"\s+"        ; whitespace
+#"\|"         ; pipe
+#","          ; comma
+#"\d+"        ; digits
+```
 
 ## Escape hatches
 

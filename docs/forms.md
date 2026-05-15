@@ -140,6 +140,33 @@ Sequences expressions; returns the last value. Example:
   42)
 ```
 
+### `loop` / `recur`
+
+```racket
+(loop [NAME INIT ...] BODY...)
+(recur ARG...)
+```
+
+Tail-recursive loop. Bindings work like `let`; `recur` jumps back to
+`loop` with new values. Example:
+```racket
+(loop [acc 1 n 5]
+  (if (<= n 1) acc (recur (* acc n) (dec n))))
+```
+
+### `for`
+
+```racket
+(for [NAME COLL ... :when PRED] BODY...)
+```
+
+List comprehension. Binds each name to successive values from its
+collection. Optional `:when` clauses filter. Example:
+```racket
+(for [x (range 5) y (range x) :when (even? y)]
+  [x y])
+```
+
 ## Data
 
 ### Vector literal

@@ -124,6 +124,31 @@
                        '(def x 1)))
   (check-true (matches? #rx"\\[beagle\\.helpers\\]" out)))
 
+(test-case "clojure namespace require emits in ns :require"
+  (define out (compile '(require clojure.string :as str)
+                       '(def x (str/upper-case "hi"))))
+  (check-true (matches? #rx"\\[clojure\\.string :as str\\]" out))
+  (check-true (matches? #rx"str/upper-case" out)))
+
+(test-case "multiple clojure requires emit correctly"
+  (define out (compile '(require clojure.string :as str)
+                       '(require clojure.set :as cset)
+                       '(def x 1)))
+  (check-true (matches? #rx"\\[clojure\\.string :as str\\]" out))
+  (check-true (matches? #rx"\\[clojure\\.set :as cset\\]" out)))
+
+;; --- regex literal ---------------------------------------------------------
+
+(test-case "regex literal emits as Clojure regex"
+  (define out (compile '(def x (#%regex "\\s+"))))
+  (check-true (matches? #rx"#\"\\\\s\\+\"" out)))
+
+(test-case "regex in function call emits correctly"
+  (define out (compile '(require clojure.string :as str)
+                       '(def x (str/split "a b" (#%regex "\\s+")))))
+  (check-true (matches? #rx"str/split" out))
+  (check-true (matches? #rx"#\"\\\\s\\+\"" out)))
+
 ;; --- declare-extern does not emit code ------------------------------------
 
 (test-case "declare-extern is a type-only declaration; emits nothing"
@@ -138,3 +163,37 @@
                '(define-macro safe call-it (f & args) (f (splice args)))
                '(defn use [] (call-it + 1 2 3))))
   (check-true (matches? #rx"\\(\\+ 1 2 3\\)" out)))
+
+;; --- loop/recur emits as Clojure loop/recur --------------------------------
+
+(test-case "loop/recur emits"
+  (define out (compile
+               '(def x (loop [acc 0 n 10]
+                  (if (= n 0) acc (recur (+ acc n) (- n 1)))))))
+  (check-true (matches? #rx"\\(loop \\[acc 0" out))
+  (check-true (matches? #rx"\\(recur \\(\\+ acc n\\)" out)))
+
+;; --- for emits as Clojure for -----------------------------------------------
+
+(test-case "for comprehension emits"
+  (define out (compile
+               '(def xs (for [x (range 10) y (range x)]
+                  (+ x y)))))
+  (check-true (matches? #rx"\\(for \\[x \\(range 10\\)" out))
+  (check-true (matches? #rx"y \\(range x\\)" out))
+  (check-true (matches? #rx"\\(\\+ x y\\)" out)))
+
+(test-case "for with :when emits"
+  (define out (compile
+               '(def xs (for [x (range 10) :when (> x 5)] x))))
+  (check-true (matches? #rx"\\(for" out))
+  (check-true (matches? #rx":when" out)))
+
+;; --- macro hygiene in emitted code ----------------------------------------
+
+(test-case "safe macro hygiene: emitted let doesn't shadow outer binding"
+  (define out (compile
+               '(define-macro safe with-temp (val body) (let [x val] body))
+               '(def y (let [x 42] (with-temp 1 x)))))
+  (check-true (matches? #rx"\\(let \\[x 42\\]" out))
+  (check-false (matches? #rx"\\(let \\[x 1\\]" out)))

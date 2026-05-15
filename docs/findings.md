@@ -370,3 +370,94 @@ removed syntax). Added tests asserting former aliases now error.
 The benchmark methodology guided this cleanup precisely. Without
 empirical data showing `:-` and inline annotations bought nothing, the
 removal would have felt arbitrary. With it, the trim was obvious.
+
+## Run 2026-05-15 (#7) — head-to-head: beagle vs raw Clojure
+
+**Setup:** 5 programs written in both `#lang beagle` and raw Clojure,
+each verified against the same behavioral test suite. Reference
+implementations (handwritten, not LLM-generated) to establish that beagle
+produces identical behavior to equivalent raw Clojure.
+
+Programs:
+1. Score Statistics — math, reduce, filter, cond dispatch
+2. Nullable Pipeline — vector-of-vectors processing, nil handling, HOFs
+3. Expression Evaluator — recursive tree walk, nested cond, keyword dispatch
+4. Text Statistics — clojure.string FFI, reduce for max-finding, nil edges
+5. Markdown TOC Generator — string processing, filtering, indentation
+
+**Results: 10/10 PASS** — all 5 programs pass on both beagle and Clojure.
+
+| program | beagle ms | clojure ms |
+|---|---|---|
+| 01-score-stats | ~1095 | ~497 |
+| 02-nullable-pipeline | ~1080 | ~503 |
+| 03-expr-eval | ~1071 | ~502 |
+| 04-text-stats | ~1104 | ~521 |
+| 05-markdown-toc | ~1251 | ~516 |
+
+**Key observations:**
+
+- Beagle adds ~550-700ms overhead per program (Racket compile step).
+  Compile-time only; no runtime impact.
+- Both tracks produce byte-equivalent Clojure behavior.
+- Beagle's FFI story for clojure.string is ~3 lines of ceremony
+  (`unsafe` + `declare-extern`) per imported function vs 1 `(:require ...)`
+  line in raw Clojure.
+- Bracket-pair cond is unambiguous; no regex literals forces `unsafe` wrap.
+- No character literals means string-prefix approaches replace char iteration.
+
+**Infrastructure built:** `experiments/head-to-head/` with specs, verify
+scripts, responses, and `bin/verify-all` runner.
+
+Phase 2 (LLM-generated dual-track with iteration counting) is deferred
+until there's a non-trivial program that exercises the type safety net
+at scale.
+
+## Run 2026-05-15 (#8) — head-to-head Phase 2 (scaling) + Phase 3 (targeted)
+
+**Setup:** Continued head-to-head with LLM-generated code at increasing
+scale. Parallel isolated agents (Opus 4.6), no cross-contamination.
+
+### Phase 2: scaling complexity (P6-P8)
+
+| # | Program | Functions | Lines (B/C) | Time (B/C) | Iterations | unsafe |
+|---|---------|-----------|-------------|------------|------------|--------|
+| 6 | Library Catalog | 35 | 195/182 | ~60s/~46s | 1/1 | 0 |
+| 7 | Project Tracker | 72 | 467/388 | ~340s/~187s | 1/1 | 0 |
+| 8 | Course Scheduler | 85 | 710/712 | ~767s/~924s | 3*/3* | 5 |
+
+\* P8 iterations on both sides were verify-script bugs, not code errors.
+
+**Finding:** Scaling from 30 to 710 lines produced zero correctness
+divergence. The LLM generates correct code first-try at every size tested.
+
+P8 exposed 5 `unsafe` blocks for missing language forms (loop/recur, for
+comprehension, 2-arg sort). These were patched: beagle now supports loop,
+recur, for (with :when), sort-by, 2-arg sort. 149 tests passing.
+
+### Phase 3: refactoring experiment
+
+Add `overhead-pct` parameter to `project-cost`, cascade through ~10
+calling functions in P7. Both agents completed correctly first try.
+Beagle ~100s (6 tool uses), Clojure ~111s (9 tool uses).
+
+### Phase 3: bug detection experiment
+
+Inject 5 bugs (2 arity, 1 undefined fn, 1 wrong index, 1 wrong sort
+direction) into P7. Both agents found all 5. Clojure agent was faster
+(61s/11 uses vs 83s/19 uses).
+
+### What we learned
+
+The type system doesn't measurably help at this scale because:
+1. The LLM rarely makes arity errors on well-specified tasks
+2. Beagle's data model is untyped vectors (`nth` returns `Any`), so
+   field-access bugs — the most common LLM error class — are invisible
+3. When bugs are injected, the compile-then-fix loop isn't faster than
+   the single-pass-verify-then-batch-fix approach
+
+**To shift the equation:** typed records (field-level types), multi-file
+refactoring, or scale beyond what the LLM can manually trace (~1000+
+lines across multiple files).
+
+Full results: `experiments/head-to-head/results.md`
