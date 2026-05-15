@@ -19,7 +19,8 @@
                      "private/parse.rkt"
                      "private/check.rkt"
                      "private/emit.rkt"
-                     "private/lint.rkt"))
+                     "private/lint.rkt"
+                     "private/error-format.rkt"))
 
 (provide #%datum
          #%app
@@ -33,7 +34,12 @@
      (with-handlers
          ([exn:fail?
            (lambda (e)
-             (raise-syntax-error 'beagle (exn-message e) stx))])
+             (cond
+               [(json-error-mode?)
+                (write-json-error (exn-message e) stx)
+                (exit 1)]
+               [else
+                (raise-syntax-error 'beagle (augment-with-hint (exn-message e)) stx)]))])
        (define forms  (syntax->list #'(form ...)))
        (define prog   (parse-program forms))
        (type-check! prog)

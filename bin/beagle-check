@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# beagle-check: type-check a beagle file without emitting Clojure.
+#
+# Usage:
+#   bin/beagle-check <source.rkt>
+#
+# Exits 0 if the file compiles cleanly, non-zero otherwise. Stderr carries
+# warnings and errors. Stdout is suppressed (no generated Clojure).
+#
+# Useful for fast feedback in iteration — no need to write a .clj file.
+# Pair with BEAGLE_ERROR_FORMAT=json for parseable error output:
+#   BEAGLE_ERROR_FORMAT=json bin/beagle-check examples/foo.rkt
+
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+    echo "usage: beagle-check <source.rkt>" >&2
+    exit 2
+fi
+
+racket "$1" > /dev/null
