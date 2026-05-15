@@ -20,18 +20,25 @@ Earlier iterations that conflated the two are archived at
 
 ## Status
 
-`#lang beagle` v0 works end-to-end:
+`#lang beagle` v0 — end-to-end working, empirically validated:
+
 - Forms: `def`, `defn`, `fn`, `let`, `if`, `cond`, `when`, `do`, call,
   vector literal, quote
 - Meta: `ns`, `define-mode`, `require`, `declare-extern`, `define-macro`,
-  inline `unsafe`
-- Types: primitives, function types (incl. variadic), parametric (`Vec`,
-  `Map`, etc.), union (`U`)
+  `unsafe` (top-level AND in expression position)
+- Param syntax: wrapped `(name : Type)`, inline `name : Type`, or `:-`
+  marker (Schema-style). All three intermix freely.
+- Types: primitives, function types (variadic with `& T`), parametric
+  (`Vec`, `Map`, `Set`, `List`), union (`U`)
 - Macros: safe / unsafe with `&rest` and `(splice ...)`
-- Stdlib catalog: ~60 common Clojure functions pre-typed (see
-  `private/stdlib-types.rkt`)
-- Compile-time validation: type checks, arity, variadic rest, undefined refs
-- 91/91 tests passing
+- Stdlib catalog: ~100 common Clojure functions pre-typed
+- Validation: type checks, arity (incl. variadic), undefined refs, hints
+- Lint pass: untyped def/defn, unsafe usage flagged on stderr
+- Structured error output: `BEAGLE_ERROR_FORMAT=json` for agent consumption
+- 107/107 tests passing
+- 33 benchmark tasks with real Clojure behavior verification
+- 63 LLM-generated responses sampled across 6 syntactic variants —
+  100% behavior pass after empirically-driven bug fixes (4 fixed)
 
 ## Architecture
 
