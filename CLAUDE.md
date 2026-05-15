@@ -4,13 +4,18 @@ A typed authoring layer that compiles to Clojure. Racket frontend with
 custom `#lang`, macros (safe/unsafe boundaries), static type checking; emits
 plain Clojure source for runtime.
 
-**Primary author: LLMs.** Beagle's design optimizes for AI generation: rich
-types, explicit forms, low syntactic surface area, structured errors. Human
-ergonomics is a secondary constraint.
+**LLM authoring is a first-class concern.** Beagle's design treats AI
+generation as a primary use case: rich types, explicit forms, low syntactic
+surface area, structured errors. Human ergonomics is not sacrificed — but
+when there's tension, AI-friendliness wins.
+
+**Quick reference:** `docs/cheatsheet.md` is the single-page language
+summary designed to be loaded as system context for LLM workflows. Treat
+it as canonical when explaining the language.
 
 ## What this is — and what it isn't
 
-Beagle is a **general typed Clojure DSL** optimized for LLM authoring. It
+Beagle is a **general typed Clojure DSL** with LLM authoring as a first-class concern. It
 is NOT a graph-database tool. The substrate POC (claims, identifiers,
 reification) at `~/code/beagle-rkt-poc` is conceptual reference for a future
 `#lang beaglelog` layer built **on top of** beagle, not as beagle primitives.
@@ -26,19 +31,21 @@ Earlier iterations that conflated the two are archived at
   vector literal, quote
 - Meta: `ns`, `define-mode`, `require`, `declare-extern`, `define-macro`,
   `unsafe` (top-level AND in expression position)
-- Param syntax: wrapped `(name : Type)`, inline `name : Type`, or `:-`
-  marker (Schema-style). All three intermix freely.
-- Types: primitives, function types (variadic with `& T`), parametric
-  (`Vec`, `Map`, `Set`, `List`), union (`U`)
+- Param syntax: **wrapped only** — `(name : Type)`. Single canonical marker `:`.
+  Inline annotations and `:-` marker were removed in the AI-optimization
+  pass (one idiom per concept).
+- Types: primitives (`String`, `Long`, `Double`, `Boolean`, `Keyword`,
+  `Symbol`, `Nil`, `Any` — no aliases), function types (variadic with `& T`),
+  parametric (`Vec`, `Map`, `Set`, `List`), union (`U`)
 - Macros: safe / unsafe with `&rest` and `(splice ...)`
 - Stdlib catalog: ~100 common Clojure functions pre-typed
 - Validation: type checks, arity (incl. variadic), undefined refs, hints
 - Lint pass: untyped def/defn, unsafe usage flagged on stderr
 - Structured error output: `BEAGLE_ERROR_FORMAT=json` for agent consumption
-- 107/107 tests passing
+- 3 benchmark variants (A canonical, B required-types, C minimal)
+- 104+ tests passing
 - 33 benchmark tasks with real Clojure behavior verification
-- 63 LLM-generated responses sampled across 6 syntactic variants —
-  100% behavior pass after empirically-driven bug fixes (4 fixed)
+- Validated by empirical agent benchmarks — 5 real bugs caught and fixed
 
 ## Architecture
 
@@ -99,14 +106,14 @@ mode skips lint (types are optional there by definition).
 | **Strict mode default** | dynamic is escape-hatch for humans; AI should stay strict |
 | **Subset-of-Clojure, not full mimic** | take Lisp universals + Clojure's good ideas; develop own for typed semantics |
 
-### Provisional (subject to benchmark experiments in `experiments/`)
+### Resolved by benchmark and cleanup pass
 
-| decision | predicted result | how to test |
-|---|---|---|
-| **`:` vs `:-` for type annotation** | `:` wins on familiarity (math/ML/TR have more training data than Schema) | Requires adding `:-` support; then variant comparison |
-| **Wrapped `(x : T)` vs inline `[x : T y : T]`** | Wrapped wins on parsing simplicity + LLM consistency | Requires adding inline support; variant comparison |
-| **Optional vs required types** | Required wins on AI-generation safety (more compile-time catches) | Variants A and B already set up — run the bench |
-| **Including/excluding `&rest`, `(splice ...)`, etc.** | Including helps for variadic patterns | Already in v0; could ablate |
+| decision | resolution |
+|---|---|
+| `:` vs `:-` for annotation marker | **`:`** — `:-` removed; no measured benefit in 6-variant benchmark |
+| Wrapped `(x : T)` vs inline `[x : T y : T]` | **Wrapped** — inline removed; no measured benefit, less unambiguous parse |
+| Type aliases `Integer`/`Int`/`Float`/`Bool` | **Removed** — pure redundancy with `Long`/`Double`/`Boolean` |
+| Optional vs required types | **Either, with annotation lint** — variants A (optional) and B (required) both work; A is the canonical baseline |
 
 ### Cargo-cult — deliberately NOT added
 

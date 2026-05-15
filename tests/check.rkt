@@ -44,7 +44,7 @@
 
 (test-case "let binding with wrong literal type errors"
   (check-exn exn:fail?
-             (lambda () (check-prog '(def y (let [x : Long "hi"] x))))))
+             (lambda () (check-prog '(def y (let [(x : Long) "hi"] x))))))
 
 (test-case "call to typed builtin with wrong arg type errors"
   (check-exn exn:fail?

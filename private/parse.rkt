@@ -138,7 +138,7 @@
     [else (error 'beagle "unsupported expression: ~v" d)]))
 
 (define (annotation-marker? sym)
-  (or (eq? sym ':) (eq? sym ':-)))
+  (eq? sym ':))
 
 (define (parse-list-form d)
   (match d
@@ -224,42 +224,32 @@
 
 ;; --- params + bindings -----------------------------------------------------
 
-;; Param lists support three shapes (intermixable):
+;; Param lists support two shapes (intermixable):
 ;;   1. bare name (untyped):          x
-;;   2. wrapped + annotation:         (x : T)   or (x :- T)
-;;   3. inline annotation:            x : T y   or x :- T y
-;; Inline forms scan with lookahead: after a symbol, peek for an annotation
-;; marker; if present, consume three tokens (name marker type).
+;;   2. wrapped + annotation:         (x : T)
+;; One canonical typed-param syntax. Inline (x : T y : T) was supported earlier
+;; but removed for AI-optimization (narrow surface, one idiom per concept).
 (define (parse-params p)
   (define items
     (cond
       [(bracketed? p) (bracket-body p)]
       [(list? p)      p]
       [else (error 'beagle "expected parameter list, got: ~v" p)]))
-  (let loop ([rest items] [acc '()])
+  (for/list ([item (in-list items)])
     (cond
-      [(null? rest) (reverse acc)]
-      ;; Wrapped form: (name : T) or (name :- T)
-      [(and (list? (car rest))
-            (= (length (car rest)) 3)
-            (symbol? (car (car rest)))
-            (annotation-marker? (cadr (car rest))))
-       (loop (cdr rest)
-             (cons (param (car (car rest)) (parse-type (caddr (car rest))))
-                   acc))]
-      ;; Inline form: name : T or name :- T  (3+ tokens left)
-      [(and (>= (length rest) 3)
-            (symbol? (car rest))
-            (annotation-marker? (cadr rest)))
-       (loop (cdddr rest)
-             (cons (param (car rest) (parse-type (caddr rest))) acc))]
+      ;; Wrapped: (name : T)
+      [(and (list? item)
+            (= (length item) 3)
+            (symbol? (car item))
+            (annotation-marker? (cadr item)))
+       (param (car item) (parse-type (caddr item)))]
       ;; Bare untyped name
-      [(symbol? (car rest))
-       (loop (cdr rest) (cons (param (car rest) #f) acc))]
+      [(symbol? item)
+       (param item #f)]
       [else
        (error 'beagle
-              "bad parameter: ~v~nexpected name, (name : Type), or inline name : Type"
-              (car rest))])))
+              "bad parameter: ~v~nexpected name, or (name : Type)"
+              item)])))
 
 (define (parse-let-bindings b)
   (define items
@@ -280,15 +270,6 @@
              (cons (let-binding (car (car rest))
                                 (parse-type (caddr (car rest)))
                                 (parse-expr (cadr rest)))
-                   acc))]
-      ;; Inline annotated: name marker Type value (4 tokens)
-      [(and (>= (length rest) 4)
-            (symbol? (car rest))
-            (annotation-marker? (cadr rest)))
-       (loop (cddddr rest)
-             (cons (let-binding (car rest)
-                                (parse-type (caddr rest))
-                                (parse-expr (cadddr rest)))
                    acc))]
       ;; Untyped: name value (2 tokens)
       [(and (>= (length rest) 2)

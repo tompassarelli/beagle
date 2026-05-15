@@ -35,6 +35,7 @@ for being included as system context.
 (if cond then else)
 (if cond then)                      ; no else, returns nil
 (cond [test1 body1] [test2 body2] [true fallback])
+(cond test1 body1 test2 body2 :else fallback)  ; bare form (Clojure-style)
 (when cond body...)
 (do body1 body2 ... bodyN)          ; returns last
 (let [name1 value1 name2 value2 ...] body...)
@@ -45,30 +46,41 @@ for being included as system context.
 (fn-name arg1 arg2 ...)             ; function call
 ```
 
-## Parameter forms (all equivalent, mixable)
+## Parameter syntax — wrapped only
 
 ```racket
-[x y z]                             ; untyped
-[(x : Long) (y : Long)]             ; wrapped
-[x : Long y : Long]                 ; inline
+[x y z]                             ; untyped (bare names)
+[(x : Long) (y : Long)]             ; wrapped with type
 [(x : Long) y]                      ; mix wrapped + bare
-[x : Long y]                        ; mix inline + bare
 ```
 
-The marker is `:` or `:-` (both accepted; `:` is canonical/preferred).
+One canonical form: wrapped `(name : Type)`. The marker is `:` (single colon
+with spaces). No alternate markers, no inline form. AI-optimization: one
+idiom per concept.
+
+## Let binding syntax
+
+```racket
+(let [x 1 y 2] ...)                       ; untyped
+(let [(x : Long) 1 (y : Long) 2] ...)     ; typed (wrapped — same shape as params)
+(let [(x : Long) 1 y 2] ...)              ; mix
+```
 
 ## Types
 
-| primitive | matches | aliases |
-|---|---|---|
-| `String` | strings | — |
-| `Long` | integers | `Integer`, `Int` |
-| `Double` | floats | `Float` |
-| `Boolean` | true/false | `Bool` |
-| `Keyword` | `:foo` style | — |
-| `Symbol` | quoted symbols | — |
-| `Nil` | `nil` | — |
-| `Any` | anything (escape) | — |
+| primitive | matches |
+|---|---|
+| `String` | strings |
+| `Long` | integers |
+| `Double` | floats |
+| `Boolean` | true/false |
+| `Keyword` | `:foo` style |
+| `Symbol` | quoted symbols |
+| `Nil` | `nil` |
+| `Any` | anything (escape) |
+
+One canonical name per type. No `Integer`, `Int`, `Float`, `Bool` aliases —
+AI-optimization removed them.
 
 Function types:
 - `[A B -> R]`                   fixed arity
@@ -167,10 +179,8 @@ Error kinds include: `unknown-type`, `unknown-form`, `type-mismatch`,
 - `bin/beagle-check SOURCE.rkt`        — type-check only, no emit
 - `bin/beagle-expand SOURCE.rkt`       — show post-macro source
 
-## Tested behavior
+## Empirical baseline
 
-62 LLM-generated responses across 6 syntactic variants, real Clojure
-behavior testing (compile + run + assert), 100% pass rate. 4 real bugs
-caught by behavior testing that compile-only testing missed.
-
-See `docs/findings.md` for the empirical record.
+3 syntactic variants tested (A canonical, B required-types, C minimal),
+multiple LLM samples per task, real Clojure behavior verification. 100%
+behavior pass after empirically-driven bug fixes. See `docs/findings.md`.

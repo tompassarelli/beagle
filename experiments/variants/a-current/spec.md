@@ -1,4 +1,4 @@
-# beagle reference — variant A (current / baseline)
+# beagle reference — variant A (current / canonical)
 
 You are writing **beagle** source. Beagle is a typed authoring layer that
 compiles to Clojure. Each file starts with `#lang beagle`.
@@ -41,8 +41,8 @@ compiles to Clojure. Each file starts with `#lang beagle`.
 
 ## Types
 
-**Primitives:** `String`, `Long`, `Integer`, `Int`, `Double`, `Float`, `Boolean`,
-`Bool`, `Keyword`, `Symbol`, `Nil`, `Any`.
+**Primitives:** `String`, `Long`, `Double`, `Boolean`, `Keyword`, `Symbol`,
+`Nil`, `Any`. One canonical name per type — no aliases.
 
 **Function types:** `[A B -> R]` for fixed arity. `[A & T -> R]` for variadic
 (any number of additional args of type `T`).
@@ -62,6 +62,26 @@ type-checked at compile time:
   (+ x y))
 ```
 
+## Annotation syntax
+
+**Only one form for typed parameters: wrapped `(name : Type)`.**
+
+```racket
+(defn good   [(x : Long) (y : Long)] : Long ...)    ; correct
+(defn untyped [x y] ...)                            ; OK (untyped)
+(defn mix     [(x : Long) y] ...)                   ; OK (mix wrapped + bare)
+```
+
+The marker is always `:` (single colon, with spaces around). No alternate markers.
+
+## Let bindings
+
+```racket
+(let [x 1 y 2] ...)                       ; untyped
+(let [(x : Long) 1 (y : Long) 2] ...)     ; typed (wrapped)
+(let [(x : Long) 1 y 2] ...)              ; mix typed + bare
+```
+
 ## Meta forms
 
 ```racket
@@ -71,7 +91,7 @@ type-checked at compile time:
 (declare-extern fname [Args -> Ret])   ; type for a Clojure function
 (define-macro safe NAME (params) template)
 (define-macro unsafe NAME (params) template)
-(unsafe "raw clojure here")    ; inline escape
+(unsafe "raw clojure here")    ; inline escape (or in expr position)
 ```
 
 ## Common Clojure stdlib functions (pre-typed)
@@ -80,15 +100,19 @@ type-checked at compile time:
 `zero?`, `pos?`, `neg?`, `even?`, `odd?`, `=`, `not=`, `<`, `>`, `<=`, `>=`,
 `not`, `and`, `or`, `true?`, `false?`, `nil?`, `some?`, `count`, `first`,
 `second`, `last`, `rest`, `next`, `nth`, `get`, `get-in`, `empty?`, `seq`,
-`conj`, `cons`, `concat`, `reverse`, `distinct`, `sort`, `map`, `filter`,
-`remove`, `reduce`, `apply`, `comp`, `partial`, `str`, `name`, `keyword`,
-`symbol`, `println`, `print`, `pr`, `pr-str`, `newline`, `prn`, `identity`,
-`constantly`.
+`conj`, `cons`, `concat`, `reverse`, `distinct`, `sort`, `map`, `mapv`,
+`filter`, `filterv`, `remove`, `reduce`, `apply`, `comp`, `partial`,
+`every?`, `some`, `range`, `repeat`, `take`, `drop`, `take-while`,
+`drop-while`, `partition`, `vec`, `vector`, `list`, `hash-map`, `set`,
+`keys`, `vals`, `assoc`, `dissoc`, `update`, `merge`, `contains?`,
+`str`, `name`, `keyword`, `symbol`, `subs`, `string?`, `number?`,
+`integer?`, `keyword?`, `vector?`, `map?`, `coll?`, `println`, `print`,
+`pr`, `pr-str`, `prn`, `identity`, `constantly`.
 
 ## Conventions for this variant
 
 - Include type annotations on `def`/`defn` when you know the types.
-- Wrap each typed parameter as `(name : Type)`.
-- Function return type comes after the param list: `[params...] : RetType body`.
+- Wrap typed params: `(name : Type)`.
+- Function return type follows the param list with `:` — `[params...] : RetType body`.
 - Use `(ns ...)` for the namespace declaration.
 - Default to safe macros; reserve unsafe macros for genuine Clojure-interop needs.

@@ -5,19 +5,21 @@
 
 ;; --- parse-type ------------------------------------------------------------
 
-(test-case "parse primitive types and aliases"
+(test-case "parse primitive types (one canonical name per type)"
   (check-eq? (type-prim-name (parse-type 'String))  'String)
   (check-eq? (type-prim-name (parse-type 'Long))    'Long)
-  (check-eq? (type-prim-name (parse-type 'Integer)) 'Long)   ; alias
-  (check-eq? (type-prim-name (parse-type 'Int))     'Long)   ; alias
   (check-eq? (type-prim-name (parse-type 'Double))  'Double)
-  (check-eq? (type-prim-name (parse-type 'Float))   'Double) ; alias
   (check-eq? (type-prim-name (parse-type 'Boolean)) 'Boolean)
-  (check-eq? (type-prim-name (parse-type 'Bool))    'Boolean); alias
   (check-eq? (type-prim-name (parse-type 'Keyword)) 'Keyword)
   (check-eq? (type-prim-name (parse-type 'Symbol))  'Symbol)
   (check-eq? (type-prim-name (parse-type 'Nil))     'Nil)
   (check-eq? (type-prim-name (parse-type 'Any))     'Any))
+
+(test-case "former aliases are now errors (removed in AI-optimization pass)"
+  (check-exn exn:fail? (lambda () (parse-type 'Integer)))
+  (check-exn exn:fail? (lambda () (parse-type 'Int)))
+  (check-exn exn:fail? (lambda () (parse-type 'Float)))
+  (check-exn exn:fail? (lambda () (parse-type 'Bool))))
 
 (test-case "parse function type from bracketed expression"
   ;; #%brackets-tagged form: [A B -> R]

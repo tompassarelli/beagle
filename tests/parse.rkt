@@ -56,10 +56,6 @@
   (check-eq?   (type-prim-name (def-form-type f)) 'Long)
   (check-equal? (def-form-value f) 42))
 
-(test-case "def with :- annotation (Schema-style)"
-  (define f (car (parse-one '(def x :- Long 42))))
-  (check-true  (def-form? f))
-  (check-eq?   (type-prim-name (def-form-type f)) 'Long))
 
 (test-case "def without type annotation"
   (define f (car (parse-one '(def x 42))))
@@ -88,29 +84,10 @@
   (check-eq?   (type-prim-name (param-type  (car (defn-form-params f)))) 'Long)
   (check-false (param-type (cadr (defn-form-params f)))))
 
-(test-case "defn with inline annotations [x : Long y : Long]"
-  (define f (car (parse-one '(defn add [x : Long y : Long] : Long (+ x y)))))
-  (check-true   (defn-form? f))
-  (check-equal? (length (defn-form-params f)) 2)
-  (check-eq?    (param-name (car (defn-form-params f))) 'x)
-  (check-eq?    (type-prim-name (param-type (car (defn-form-params f)))) 'Long)
-  (check-eq?    (param-name (cadr (defn-form-params f))) 'y)
-  (check-eq?    (type-prim-name (param-type (cadr (defn-form-params f)))) 'Long))
-
-(test-case "defn with :- inline annotations [x :- Long y :- Long]"
-  (define f (car (parse-one '(defn add [x :- Long y :- Long] :- Long (+ x y)))))
-  (check-eq? (type-prim-name (param-type (car (defn-form-params f)))) 'Long)
-  (check-eq? (type-prim-name (defn-form-return-type f)) 'Long))
-
-(test-case "defn with mixed inline + bare params [x : Long y]"
-  (define f (car (parse-one '(defn mix [x : Long y] (+ x y)))))
+(test-case "defn with mixed wrapped + bare params"
+  (define f (car (parse-one '(defn mix [(x : Long) y] x))))
   (check-eq?   (type-prim-name (param-type (car (defn-form-params f)))) 'Long)
   (check-false (param-type (cadr (defn-form-params f)))))
-
-(test-case "defn with mixed wrapped + inline params [(x : Long) y : String]"
-  (define f (car (parse-one '(defn mix [(x : Long) y : String] x))))
-  (check-eq? (type-prim-name (param-type (car (defn-form-params f)))) 'Long)
-  (check-eq? (type-prim-name (param-type (cadr (defn-form-params f)))) 'String))
 
 ;; --- let / fn / if / cond / when / do --------------------------------------
 
@@ -121,14 +98,11 @@
   (check-eq?    (let-binding-name (car (let-form-bindings f))) 'x)
   (check-equal? (let-binding-value (car (let-form-bindings f))) 1))
 
-(test-case "let binding with types"
-  (define f (car (parse-one '(let [x : Long 1 y 2] x))))
+(test-case "let binding with wrapped types"
+  (define f (car (parse-one '(let [(x : Long) 1 y 2] x))))
   (check-eq? (type-prim-name (let-binding-type (car (let-form-bindings f)))) 'Long)
   (check-false (let-binding-type (cadr (let-form-bindings f)))))
 
-(test-case "let binding with :- type"
-  (define f (car (parse-one '(let [x :- Long 1] x))))
-  (check-eq? (type-prim-name (let-binding-type (car (let-form-bindings f)))) 'Long))
 
 (test-case "fn (lambda)"
   (define f (car (parse-one '(fn [x] (inc x)))))

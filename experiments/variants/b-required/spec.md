@@ -34,13 +34,23 @@ are considered errors in this variant.
 | `def` | `(def name : Type value)` ← type REQUIRED | `(def x : Long 42)` |
 | `defn` | `(defn name [(p : T) ...] : Ret body...)` ← types REQUIRED | `(defn id [(x : Any)] : Any x)` |
 | `fn` | `(fn [(p : T) ...] body...)` | `(fn [(x : Long)] (inc x))` |
-| `let` | `(let [n1 v1 n2 v2 ...] body...)` | `(let [x 1 y 2] (+ x y))` |
+| `let` | `(let [(name : Type) value ...] body...)` | `(let [(x : Long) 1] x)` |
 | `if` | `(if cond then [else])` | `(if (> x 0) "p" "np")` |
 | `cond` | `(cond [test body...] [test body...] ...)` | `(cond [(< x 0) "neg"] [(= x 0) "zero"])` |
-| `when` | `(when cond body...)` | `(when ok? (println "yay"))` |
-| `do` | `(do body...)` | `(do (println "a") (println "b") 42)` |
-| call | `(fn-name args...)` | `(+ 1 2)` |
+| `when` | `(when cond body...)` | — |
+| `do` | `(do body...)` | — |
+| call | `(fn-name args...)` | — |
 | vector literal | `[items...]` | `[1 2 3]` |
+
+## Annotation syntax
+
+**Only one form for typed parameters: wrapped `(name : Type)`.**
+
+```racket
+(defn add [(x : Long) (y : Long)] : Long ...)     ; correct
+```
+
+The marker is always `:` (single colon, with spaces around).
 
 ## Types
 

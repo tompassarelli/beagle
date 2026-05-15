@@ -18,14 +18,12 @@
 (define BRACKET-TAG '#%brackets)
 
 (define PRIMITIVES
-  '(String Long Integer Int Double Float Boolean Bool
-    Keyword Symbol Nil Any))
+  '(String Long Double Boolean Keyword Symbol Nil Any))
 
-(define PRIM-ALIASES
-  '((Integer . Long)
-    (Int     . Long)
-    (Float   . Double)
-    (Bool    . Boolean)))
+;; Type aliases removed in the AI-optimization pass — one canonical name
+;; per primitive. Long (not Integer/Int), Double (not Float), Boolean (not
+;; Bool). Less surface for LLMs to confuse.
+(define PRIM-ALIASES '())
 
 (define PARAMETRIC-CTORS
   '(Vec List Set Map))

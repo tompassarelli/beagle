@@ -330,3 +330,43 @@ The benchmark framework is *permanent infrastructure* — every future
 design decision can go through it. Add a task (md + verify.clj), dispatch
 through the LLM, see what breaks. Speed of design iteration is bounded
 only by agent latency.
+
+## Run 2026-05-15 (#6) — AI-optimization cleanup pass
+
+**Trigger:** User asked "having `:-` alongside `:` is essentially
+redundancy?" The benchmark data backed yes: variants D/E/F (using `:-`
+and/or inline annotations) showed no measurable advantage over A/B/C on
+any sampled task.
+
+**Removed in this pass** (one canonical idiom per concept):
+
+- `:-` marker — only `:` accepted now
+- Inline parameter annotations `[x : T y : T]` — only wrapped `[(x : T)]`
+- Inline let bindings `[x : T value]` — only wrapped `[(x : T) value]`
+- Type aliases `Integer`, `Int`, `Float`, `Bool` — only `Long`, `Double`,
+  `Boolean` accepted
+- Variants D-inline, E-schema, F-schema-inline — deleted from
+  `experiments/variants/`
+- 17 response files for variants D/E/F — deleted
+
+**Surface area reduction:**
+
+- Variants: 6 → 3 (A canonical, B required-types, C minimal)
+- Parser code: ~30 lines removed
+- Spec/docs: hundreds of lines simplified
+- Prompts: 168 → 99 (3 × 33 tasks)
+
+**Post-cleanup behavior pass:**
+
+| variant | pass | total | rate |
+|---|---|---|---|
+| a-current | 22 | 22 | 100% |
+| b-required | 15 | 15 | 100% |
+| c-minimal | 14 | 14 | 100% |
+
+**Tests:** 104 passing (down from 108 — removed redundant tests of the
+removed syntax). Added tests asserting former aliases now error.
+
+The benchmark methodology guided this cleanup precisely. Without
+empirical data showing `:-` and inline annotations bought nothing, the
+removal would have felt arbitrary. With it, the trim was obvious.
