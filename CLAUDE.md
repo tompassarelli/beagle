@@ -16,12 +16,8 @@ it as canonical when explaining the language.
 ## What this is — and what it isn't
 
 Beagle is a **general typed Clojure DSL** with LLM authoring as a first-class concern. It
-is NOT a graph-database tool. The substrate POC (claims, identifiers,
-reification) at `~/code/beagle-rkt-poc` is conceptual reference for a future
-`#lang beaglelog` layer built **on top of** beagle, not as beagle primitives.
-
-Earlier iterations that conflated the two are archived at
-`~/code/beagle-iter-2-graph-dsl`. Not the direction.
+is NOT a graph-database tool. A future `#lang beaglelog` layer for graph-DB
+work would be built **on top of** beagle, not as beagle primitives.
 
 ## Status
 
@@ -179,10 +175,6 @@ raco pkg install --link --auto /home/tom/code/beagle
 
 ## Reference
 
-- `~/code/beagle-rkt-poc/` — original substrate POC. Future `#lang beaglelog`
-  reference.
-- `~/code/beagle-iter-2-graph-dsl/` — wrong-direction archive.
-- Typed Racket — type-system pattern beagle follows.
 - `experiments/README.md` — benchmark framework for design decisions.
 - `docs/forms.md` — canonical form catalog.
 - `docs/todo.md` — deferred + speculative work.
