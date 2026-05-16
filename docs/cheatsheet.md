@@ -151,7 +151,7 @@ Union:
 - `(splice rest-name)` in template: inlines the list at that position
 - Naive substitution (no hygiene): avoid binder-name clashes with caller
 
-## Pre-typed stdlib (~435 functions)
+## Pre-typed stdlib (~607 functions)
 
 **Math** (variadic Any): `+`, `-`, `*`, `/`, `mod`, `quot`, `rem`, `inc`,
 `dec`, `min`, `max`, `abs`

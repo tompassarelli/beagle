@@ -13,7 +13,7 @@
   Clojure apps.
 - **Threading macros `->`, `->>`.** Could be user-defined macros, but
   they're universal enough to consider built-in.
-- **More stdlib typing.** ~435 of 1000+ Clojure functions typed.
+- **More stdlib typing.** ~607 of 1000+ Clojure functions typed.
   Priority: remaining high-use functions that would catch real bugs.
 - **Sequential destructuring.** `[a b & rest]` in let/fn/defn.
   Map destructuring (`{:keys}`) is done; vector destructuring is the
@@ -39,7 +39,7 @@ Speculative; no commitment.
 - Types: primitives, function types (incl. variadic), parametric, union, polymorphic (forall), Any
 - Macros: safe (gensym-hygienic) / unsafe with &rest and splice
 - Custom reader preserving `[]`/`()`, intercepting `{}`/`#{}`
-- Stdlib extern catalog (~435 functions)
+- Stdlib extern catalog (~607 functions)
 - bin/beagle-build, bin/beagle-build-all, bin/beagle-expand
 - 258-test suite
 - experiments/ benchmark framework (40 tasks × 3 variants, gen-prompts + score + verify-behavior)

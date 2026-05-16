@@ -34,7 +34,7 @@ it as canonical when explaining the language.
 - Keyword field inference: `(:name person)` returns the field type when
   target is a known typed record
 - Macros: safe (gensym-hygienic) / unsafe with `&rest` and `(splice ...)`
-- Stdlib catalog: ~435 Clojure functions pre-typed, key HOFs polymorphic
+- Stdlib catalog: ~607 Clojure functions pre-typed, key HOFs polymorphic
 - Cross-file type import: `(require module)` / `(require module :as alias)`
   resolves source at compile time, imports typed defs/defns/externs/macros
 - Validation: type checks, arity (incl. variadic), undefined refs, hints

@@ -55,7 +55,7 @@ Example: `(defn foo [(x : Long)] (+ x 1))` in test form:
 | `private/check.rkt` | Type inference + checking. `RECORD-FIELDS` for keyword access |
 | `private/emit.rkt` | AST → Clojure source string |
 | `private/types.rkt` | Type AST, `MAP-TAG`/`SET-TAG` symbols, compatibility |
-| `private/stdlib-types.rkt` | ~435 pre-typed Clojure functions |
+| `private/stdlib-types.rkt` | ~607 pre-typed Clojure functions |
 | `private/lint.rkt` | Shadow detection, unused externs, untyped warnings |
 | `private/macros.rkt` | Macro registry, expansion, safe/unsafe boundary |
 | `private/expand-tool.rkt` | Backend for `beagle-expand` (datum-level, pre-parse) |
