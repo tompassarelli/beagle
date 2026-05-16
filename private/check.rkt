@@ -18,6 +18,8 @@
 
 ;; Record field registry: record-type-name -> hash of keyword-sym -> type
 (define RECORD-FIELDS (make-hash))
+;; Ordered field names for positional destructuring in match
+(define RECORD-FIELD-ORDER (make-hash))
 
 ;; Expression-level source locations from the parser.
 (define current-check-src-table (make-parameter #f))
@@ -118,7 +120,9 @@
     (hash-set! env name t))
   ;; record types imported from other modules
   (for ([(rec-name field-map) (in-hash (program-imported-record-fields prog))])
-    (hash-set! RECORD-FIELDS rec-name field-map))
+    (hash-set! RECORD-FIELDS rec-name field-map)
+    (unless (hash-has-key? RECORD-FIELD-ORDER rec-name)
+      (hash-set! RECORD-FIELD-ORDER rec-name (hash-keys field-map))))
   ;; top-level defs / defns (pre-pass so callers can look them up)
   (for ([form (in-list (program-forms prog))])
     (match form
@@ -129,6 +133,16 @@
       [(defn-form name params #f _)
        (hash-set! env name
                   (type-fn (map param-or-destr-type params) #f ANY))]
+      [(defn-multi name arities)
+       (define alt-types
+         (for/list ([a (in-list arities)])
+           (type-fn (map param-or-destr-type (arity-clause-params a))
+                    #f
+                    (or (arity-clause-return-type a) ANY))))
+       (hash-set! env name
+                  (if (= 1 (length alt-types))
+                    (car alt-types)
+                    (type-union alt-types)))]
       [(record-form name fields)
        (define rec-type (type-prim name))
        (define name-str (symbol->string name))
@@ -143,7 +157,10 @@
          (hash-set! field-map
                     (string->symbol (string-append ":" (symbol->string (param-name f))))
                     (param-type f)))
-       (hash-set! RECORD-FIELDS name field-map)]
+       (hash-set! RECORD-FIELDS name field-map)
+       (hash-set! RECORD-FIELD-ORDER name
+                  (map (lambda (f) (string->symbol (string-append ":" (symbol->string (param-name f)))))
+                       fields))]
       [(protocol-form name methods)
        (for ([m (in-list methods)])
          (define m-params (protocol-method-params m))
@@ -211,6 +228,20 @@
                              'expected (type->string expected-ret)
                              'actual (type->string last-type)))))]
 
+    [(defn-multi name arities)
+     (for ([a (in-list arities)])
+       (define body-env (extend-with-params env (arity-clause-params a)))
+       (define last-type (last-expr-type (arity-clause-body a) body-env))
+       (define expected-ret (arity-clause-return-type a))
+       (when expected-ret
+         (unless (type-compatible? last-type expected-ret)
+           (raise-diag 'return-type
+                       (format "defn ~a: expected return ~a, got ~a"
+                               name (type->string expected-ret) (type->string last-type))
+                       (hasheq 'name (symbol->string name)
+                               'expected (type->string expected-ret)
+                               'actual (type->string last-type))))))]
+
     [(record-form _ _) (void)]
     [(protocol-form _ _) (void)]
     [(deftype-form _ _ impls)
@@ -248,9 +279,37 @@
        (hash-set! out (param-name p) (or (param-type p) ANY))]))
   out)
 
+(define (body-diverges? body)
+  (and (pair? body)
+       (let ([last-e (list-ref body (sub1 (length body)))])
+         (or (and (call-form? last-e)
+                  (eq? (call-form-fn last-e) 'throw))
+             (and (call-form? last-e)
+                  (= (length (call-form-args last-e)) 1)
+                  (new-form? (car (call-form-args last-e))))))))
+
+(define (string-suffix? s suffix)
+  (and (>= (string-length s) (string-length suffix))
+       (string=? (substring s (- (string-length s) (string-length suffix)))
+                 suffix)))
+
 (define (last-expr-type body env)
-  (define ts (for/list ([e (in-list body)]) (infer-expr e env)))
-  (last ts))
+  (let loop ([forms body] [current-env env] [result #f])
+    (cond
+      [(null? forms) result]
+      [(null? (cdr forms))
+       (infer-expr (car forms) current-env)]
+      [else
+       (define e (car forms))
+       (define t (infer-expr e current-env))
+       (define next-env
+         (if (and (when-form? e)
+                  (body-diverges? (when-form-body e)))
+           (let-values ([(_then-env else-env)
+                         (narrow-env-for-condition current-env (when-form-cond-expr e))])
+             else-env)
+           current-env))
+       (loop (cdr forms) next-env t)])))
 
 (define (last xs) (if (null? (cdr xs)) (car xs) (last (cdr xs))))
 
@@ -335,6 +394,31 @@
         (if negated?
           (values neg-env pos-env)
           (values pos-env neg-env))])]))
+
+;; --- match arm narrowing ---------------------------------------------------
+
+(define (narrow-env-for-match clause target-type env)
+  (define pat (match-clause-pattern clause))
+  (cond
+    [(pat-record? pat)
+     (define rec-name (pat-record-type-name pat))
+     (define bindings (pat-record-bindings pat))
+     (define arm-env (mut-copy env))
+     (cond
+       [(hash-has-key? RECORD-FIELDS rec-name)
+        (define field-map (hash-ref RECORD-FIELDS rec-name))
+        (define field-order (hash-ref RECORD-FIELD-ORDER rec-name '()))
+        (for ([b (in-list bindings)]
+              [kw (in-list field-order)])
+          (hash-set! arm-env b (hash-ref field-map kw ANY)))]
+       [(= (length bindings) 1)
+        (hash-set! arm-env (car bindings) (type-prim rec-name))])
+     arm-env]
+    [(pat-var? pat)
+     (define arm-env (mut-copy env))
+     (hash-set! arm-env (pat-var-name pat) target-type)
+     arm-env]
+    [else env]))
 
 ;; --- keyword field lookup --------------------------------------------------
 
@@ -461,6 +545,17 @@
          [(for-when? c) (infer-expr (for-when-test c) body-env)]))
      (last-expr-type (doseq-form-body e) body-env)
      ANY]
+    [(match-form? e)
+     (define target-type (infer-expr (match-form-target e) env))
+     (define arm-types
+       (for/list ([c (in-list (match-form-clauses e))])
+         (define arm-env (narrow-env-for-match c target-type env))
+         (last-expr-type (match-clause-body c) arm-env)))
+     (cond
+       [(null? arm-types) ANY]
+       [(andmap (lambda (t) (type-compatible? t (car arm-types))) (cdr arm-types))
+        (car arm-types)]
+       [else ANY])]
     [(case-form? e)
      (infer-expr (case-form-test e) env)
      (for ([c (in-list (case-form-clauses e))])
@@ -486,6 +581,28 @@
        [(type-fn? fn-type)
         (check-args (call-form-fn e) fn-type (call-form-args e) env e)
         (type-fn-ret fn-type)]
+       [(and (type-union? fn-type)
+             (andmap type-fn? (type-union-alts fn-type)))
+        (define n-args (length (call-form-args e)))
+        (define matching
+          (for/first ([alt (in-list (type-union-alts fn-type))]
+                      #:when (= (length (type-fn-params alt)) n-args))
+            alt))
+        (cond
+          [matching
+           (check-args (call-form-fn e) matching (call-form-args e) env e)
+           (type-fn-ret matching)]
+          [else
+           (define arities (map (λ (a) (length (type-fn-params a)))
+                                (type-union-alts fn-type)))
+           (raise-diag 'arity
+                       (format "call to ~a: no arity accepts ~a arg(s), available: ~a"
+                               (call-form-fn e) n-args arities)
+                       (hasheq 'function (symbol->string (call-form-fn e))
+                               'actual-arity n-args
+                               'available-arities (map number->string arities))
+                       #:src (src-for e))
+           ANY])]
        [else
         (for ([a (in-list (call-form-args e))]) (infer-expr a env))
         ANY])]

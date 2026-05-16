@@ -55,6 +55,28 @@ Example:
 (defn id [x] x)
 ```
 
+### `defn` (multi-arity)
+
+```racket
+(defn NAME
+  ([PARAMS] : ReturnType BODY...)
+  ([PARAMS] : ReturnType BODY...))
+```
+
+Each clause is a separate arity with its own params and return type.
+
+Example:
+```racket
+(defn greet
+  ([(name : String)] : String
+    (str "Hello, " name))
+  ([(name : String) (title : String)] : String
+    (str "Hello, " title " " name)))
+```
+
+Emits Clojure's native multi-arity syntax. The checker validates calls
+against all arities and reports available options on mismatch.
+
 ### `fn` (anonymous function)
 
 ```racket
@@ -158,6 +180,36 @@ Sequences expressions; returns the last value. Example:
   (println "side effect")
   42)
 ```
+
+### `match`
+
+```racket
+(match EXPR
+  [PATTERN BODY...]
+  [PATTERN BODY...]
+  ...)
+```
+
+Pattern matching with type narrowing. Patterns:
+- `(RecordName b1 b2 ...)` — type test + positional field destructuring
+- `{:key1 pat1 :key2 pat2}` — map pattern
+- `nil`, `"str"`, `42` — literal
+- `name` — bind to variable
+- `_` — wildcard
+
+Example:
+```racket
+(defrecord Circle [(radius : Double)])
+(defrecord Rect [(width : Double) (height : Double)])
+
+(match shape
+  [(Circle r) (* 3.14159 r r)]
+  [(Rect w h) (* w h)]
+  [_ 0.0])
+```
+
+Emits Clojure `cond` with `instance?` checks. Record bindings are
+positional: `(Rect w h)` binds `w` = `:width`, `h` = `:height`.
 
 ### `loop` / `recur`
 

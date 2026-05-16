@@ -16,12 +16,12 @@ it as canonical when explaining the language.
 
 `#lang beagle` v0 — end-to-end working, empirically validated:
 
-- Forms: `def`, `defn`, `fn`, `let`, `if`, `cond`, `when`, `do`, `loop`,
-  `recur`, `for` (with `:when`), `doseq`, `try`/`catch`/`finally`, `case`,
-  `defrecord`, `defprotocol`, `defmulti`/`defmethod`, `deftype`,
-  `extend-type`, constructor calls (`ClassName.`), keyword-as-function
-  (`(:key map)`), call, vector literal, map literal (`{}`), set literal
-  (`#{}`), quote, threading (`->`, `->>`)
+- Forms: `def`, `defn` (single + multi-arity), `fn`, `let`, `if`, `cond`,
+  `when`, `do`, `match`, `loop`, `recur`, `for` (with `:when`), `doseq`,
+  `try`/`catch`/`finally`, `case`, `defrecord`, `defprotocol`,
+  `defmulti`/`defmethod`, `deftype`, `extend-type`, constructor calls
+  (`ClassName.`), keyword-as-function (`(:key map)`), call, vector literal,
+  map literal (`{}`), set literal (`#{}`), quote, threading (`->`, `->>`)
 - Meta: `ns`, `define-mode`, `require`, `declare-extern`, `define-macro`,
   `import`, `unsafe` (top-level AND in expression position)
 - Param syntax: **wrapped only** — `(name : Type)`. Plus `{:keys [a b c]}`
@@ -62,6 +62,10 @@ it as canonical when explaining the language.
   assertions, 12 injected bugs (9 caught by beagle at compile time)
 - E4 scaled experiment: 13-module system (8570 LOC), 484 assertions, 35
   injected bugs — first correctness divergence (beagle 3/3, clojure 0/3)
+- Pattern matching (`match`) with record type dispatch + positional field destructuring
+- Multi-arity `defn` with per-arity type checking and union-type call validation
+- Guard-pattern type narrowing: `(when (nil? x) (throw ...))` narrows `x` in subsequent forms
+- Union-to-union type compatibility fix (subset checking)
 
 ## Architecture
 

@@ -76,6 +76,36 @@ Field syntax reuses wrapped param form `(name : Type)`. All fields must be typed
 (fn-name arg1 arg2 ...)             ; function call
 ```
 
+## Pattern matching
+
+```racket
+(match expr
+  [(RecordType f1 f2 ...) body...]     ; record type test + positional field destructuring
+  [{:key1 p1 :key2 p2} body...]        ; map pattern
+  [nil body...]                         ; nil literal
+  ["string" body...]                    ; literal
+  [42 body...]                          ; literal
+  [var-name body...]                    ; bind to variable
+  [_ body...])                          ; wildcard
+```
+
+Record patterns emit `instance?` checks + keyword field extraction. Bindings
+are positional: `(Rect w h)` binds `w` to `:width`, `h` to `:height` in
+declaration order.
+
+## Multi-arity functions
+
+```racket
+(defn greet
+  ([(name : String)] : String
+    (str "Hello, " name))
+  ([(name : String) (title : String)] : String
+    (str "Hello, " title " " name)))
+```
+
+Each arity clause has its own params and return type. The checker validates
+calls against all arities — wrong arity reports available options.
+
 ## Top-level: protocols, multimethods, and type implementations
 
 ```racket

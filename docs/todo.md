@@ -56,3 +56,7 @@ Speculative; no commitment.
 - Nullable type sugar: `String?` → `(U String Nil)`, renders back as `String?`
 - Let-binding type inference (documented: always worked, agents didn't know)
 - Cross-module require imports types (documented: declare-extern only needed for Java/non-beagle)
+- Pattern matching (`match`): record type dispatch, positional field destructuring, map/literal/wildcard patterns
+- Multi-arity `defn`: per-arity type checking, union-type call validation, proper arity error messages
+- Guard-pattern type narrowing: `(when (nil? x) (throw ...))` narrows x in subsequent `do` forms
+- Union-to-union type compatibility: (U A B) assignable to (U A B C) (subset check)

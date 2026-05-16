@@ -163,6 +163,13 @@
     [(type-poly? expected) (type-compatible? actual (type-poly-body expected))]
     [(type-poly? actual)   (type-compatible? (type-poly-body actual) expected)]
 
+    ;; Both unions: every alt in actual must match some alt in expected.
+    [(and (type-union? actual) (type-union? expected))
+     (andmap (lambda (a-alt)
+               (ormap (lambda (e-alt) (type-compatible? a-alt e-alt))
+                      (type-union-alts expected)))
+             (type-union-alts actual))]
+
     ;; Union on the expected side: actual must match SOME alternative.
     [(type-union? expected)
      (ormap (lambda (alt) (type-compatible? actual alt))

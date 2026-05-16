@@ -121,6 +121,8 @@
 (struct mode-decl   (mode)                                  #:transparent)
 (struct def-form    (name type value)                       #:transparent)
 (struct defn-form   (name params return-type body)          #:transparent)
+(struct defn-multi  (name arities)                           #:transparent)
+(struct arity-clause (params return-type body)               #:transparent)
 (struct fn-form     (params return-type body)               #:transparent)
 (struct let-form    (bindings body)                         #:transparent)
 (struct if-form     (cond-expr then-expr else-expr)         #:transparent)
@@ -156,6 +158,14 @@
 (struct protocol-method (name params return-type)          #:transparent)
 (struct defmulti-form (name dispatch-fn)                   #:transparent)
 (struct defmethod-form (name dispatch-val params body)     #:transparent)
+
+(struct match-form  (target clauses)                         #:transparent)
+(struct match-clause (pattern body)                          #:transparent)
+(struct pat-wildcard ()                                      #:transparent)
+(struct pat-literal  (value)                                 #:transparent)
+(struct pat-record   (type-name bindings)                    #:transparent)
+(struct pat-map      (entries)                               #:transparent)
+(struct pat-var      (name)                                  #:transparent)
 
 (struct param       (name type)                             #:transparent)
 (struct map-destructure (keys as-name)                      #:transparent)
@@ -470,6 +480,27 @@
 (define (annotation-marker? sym)
   (eq? sym ':))
 
+(define (multi-arity-form? d)
+  (and (pair? d) (list? d)
+       (let ([first-elem (car d)])
+         (or (bracketed? first-elem)
+             (and (pair? first-elem) (bracketed? (car first-elem)))))))
+
+(define (parse-arity-clause clause)
+  (unless (and (pair? clause) (list? clause))
+    (error 'beagle "multi-arity clause must be (params body...) or (params : Type body...)"))
+  (define params-form (car clause))
+  (define rest (cdr clause))
+  (cond
+    [(and (>= (length rest) 2) (annotation-marker? (car rest)))
+     (arity-clause (parse-params params-form)
+                   (parse-type (cadr rest))
+                   (map parse-expr (cddr rest)))]
+    [else
+     (arity-clause (parse-params params-form)
+                   #f
+                   (map parse-expr rest))]))
+
 (define (parse-list-form d subs)
   (match d
     [(list 'unsafe-expr inner)
@@ -483,6 +514,11 @@
      (def-form name (parse-type type-expr) (parse-expr (or (stx-ref subs 4) value)))]
     [(list 'def (? symbol? name) value)
      (def-form name #f (parse-expr (or (stx-ref subs 2) value)))]
+
+    [(list 'defn (? symbol? name) first-clause rest-clauses ...)
+     #:when (multi-arity-form? first-clause)
+     (defn-multi name (map parse-arity-clause
+                           (cons first-clause rest-clauses)))]
 
     [(list 'defn (? symbol? name) params-form marker return-type body ...)
      #:when (annotation-marker? marker)
@@ -561,6 +597,10 @@
     [(list 'doseq bindings-form body ...)
      (doseq-form (parse-for-clauses (or (stx-ref subs 1) bindings-form))
                  (parse-body (or (stx-tail subs 2) body)))]
+
+    [(list 'match target-expr clauses ...)
+     (parse-match-form (or (stx-ref subs 1) target-expr)
+                       (or (stx-tail subs 2) clauses))]
 
     [(list 'case test-expr clauses ...)
      (parse-case-form (or (stx-ref subs 1) test-expr)
@@ -716,6 +756,57 @@
 
 (define (all-but-last-item xs)
   (if (null? (cdr xs)) '() (cons (car xs) (all-but-last-item (cdr xs)))))
+
+;; --- match -----------------------------------------------------------------
+
+(define (parse-match-form target clauses)
+  (when (null? clauses)
+    (error 'beagle "match requires at least one clause"))
+  (match-form (parse-expr target)
+              (map parse-match-clause clauses)))
+
+(define (parse-match-clause c)
+  (define d (->datum c))
+  (unless (bracketed? d)
+    (error 'beagle "match clause must be [pattern body...], got: ~v" d))
+  (define items (bracket-body d))
+  (when (< (length items) 2)
+    (error 'beagle "match clause needs a pattern and at least one body expression"))
+  (match-clause (parse-pattern (car items))
+                (map parse-expr (cdr items))))
+
+(define (parse-pattern p)
+  (define d (if (syntax? p) (syntax->datum p) p))
+  (cond
+    [(eq? d '_)         (pat-wildcard)]
+    [(eq? d 'nil)       (pat-literal 'nil)]
+    [(string? d)        (pat-literal d)]
+    [(boolean? d)       (pat-literal d)]
+    [(exact-integer? d) (pat-literal d)]
+    [(real? d)          (pat-literal d)]
+    [(keyword-sym? d)   (pat-literal d)]
+    [(and (pair? d) (eq? (car d) MAP-TAG))
+     (parse-map-pattern (cdr d))]
+    [(and (pair? d) (symbol? (car d))
+          (let ([s (symbol->string (car d))])
+            (and (positive? (string-length s))
+                 (char-upper-case? (string-ref s 0)))))
+     (pat-record (car d) (cdr d))]
+    [(symbol? d)        (pat-var d)]
+    [else (error 'beagle "unsupported match pattern: ~v" d)]))
+
+(define (parse-map-pattern entries)
+  (unless (even? (length entries))
+    (error 'beagle "map pattern must have even entries (key/pattern pairs)"))
+  (let loop ([rest entries] [acc '()])
+    (cond
+      [(null? rest) (pat-map (reverse acc))]
+      [else
+       (define k (car rest))
+       (unless (keyword-sym? k)
+         (error 'beagle "map pattern key must be a keyword, got: ~v" k))
+       (loop (cddr rest)
+             (cons (cons k (parse-pattern (cadr rest))) acc))])))
 
 ;; --- params + bindings -----------------------------------------------------
 
@@ -981,6 +1072,15 @@
  (struct-out param)
  (struct-out let-binding)
  (struct-out require-entry)
+ (struct-out match-form)
+ (struct-out match-clause)
+ (struct-out pat-wildcard)
+ (struct-out pat-literal)
+ (struct-out pat-record)
+ (struct-out pat-map)
+ (struct-out pat-var)
+ (struct-out defn-multi)
+ (struct-out arity-clause)
  parse-program
  DEFAULT-MODE
  DEFAULT-NAMESPACE

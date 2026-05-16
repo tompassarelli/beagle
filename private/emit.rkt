@@ -10,6 +10,7 @@
 ;; --- source-location metadata -----------------------------------------------
 
 (define current-emit-src-table (make-parameter #f))
+(define current-emit-record-fields (make-parameter (hasheq)))
 
 (define (emit-srcloc loc)
   (define src (src-loc-source loc))
@@ -26,8 +27,17 @@
 
 ;; --- top-level -------------------------------------------------------------
 
+(define (build-record-field-table prog)
+  (for/fold ([h (hasheq)]) ([f (in-list (program-forms prog))])
+    (if (record-form? f)
+        (hash-set h (record-form-name f)
+                    (map (lambda (p) (symbol->string (param-name p)))
+                         (record-form-fields f)))
+        h)))
+
 (define (emit-program prog)
-  (parameterize ([current-emit-src-table (program-src-table prog)])
+  (parameterize ([current-emit-src-table (program-src-table prog)]
+                 [current-emit-record-fields (build-record-field-table prog)])
     (string-append
      (emit-ns prog)
      "\n\n"
@@ -109,6 +119,14 @@
              (defn-form-name f)
              (emit-params (defn-form-params f))
              (emit-body (defn-form-body f) "  "))]
+
+    [(defn-multi? f)
+     (define arity-strs
+       (for/list ([a (in-list (defn-multi-arities f))])
+         (format "  ([~a]\n    ~a)"
+                 (emit-params (arity-clause-params a))
+                 (emit-body (arity-clause-body a) "    "))))
+     (format "(defn ~a\n~a)" (defn-multi-name f) (string-join arity-strs "\n"))]
 
     [(record-form? f)
      (emit-record f)]
@@ -253,6 +271,8 @@
      (if (kw-access-default e)
        (format "(~a ~a ~a)" (symbol->string (kw-access-kw e)) (emit-expr (kw-access-target e)) (emit-expr (kw-access-default e)))
        (format "(~a ~a)" (symbol->string (kw-access-kw e)) (emit-expr (kw-access-target e))))]
+    [(match-form? e)
+     (emit-match e)]
     [(call-form? e)
      (format "(~a~a)"
              (symbol->string (call-form-fn e))
@@ -273,6 +293,69 @@
       (define fname (symbol->string (param-name p)))
       (format "(defn ~a-~a [r] (:~a r))" name-lower fname fname)))
   (string-join (cons record-line accessor-lines) "\n\n"))
+
+(define (emit-match e)
+  (define target-str (emit-expr (match-form-target e)))
+  (define target-sym (format "match__~a" (random 99999)))
+  (define clauses (match-form-clauses e))
+  (define cond-pairs
+    (for/list ([c (in-list clauses)])
+      (emit-match-arm c target-sym)))
+  (format "(let [~a ~a]\n  (cond\n    ~a))"
+          target-sym target-str
+          (string-join cond-pairs "\n    ")))
+
+(define (emit-match-arm clause target-sym)
+  (define pat (match-clause-pattern clause))
+  (define body-str (emit-body (match-clause-body clause) "      "))
+  (cond
+    [(pat-wildcard? pat)
+     (format ":else ~a" body-str)]
+    [(pat-var? pat)
+     (format ":else (let [~a ~a] ~a)" (pat-var-name pat) target-sym body-str)]
+    [(pat-literal? pat)
+     (define val (pat-literal-value pat))
+     (define test
+       (cond
+         [(eq? val 'nil) (format "(nil? ~a)" target-sym)]
+         [(string? val)  (format "(= ~a ~v)" target-sym val)]
+         [(boolean? val) (format "(~a ~a)" (if val "true?" "false?") target-sym)]
+         [(and (symbol? val) (char=? (string-ref (symbol->string val) 0) #\:))
+          (format "(= ~a ~a)" target-sym (symbol->string val))]
+         [else (format "(= ~a ~a)" target-sym val)]))
+     (format "~a ~a" test body-str)]
+    [(pat-record? pat)
+     (define rec-name (pat-record-type-name pat))
+     (define bindings (pat-record-bindings pat))
+     (define fields (hash-ref (current-emit-record-fields) rec-name #f))
+     (define test (format "(instance? ~a ~a)" rec-name target-sym))
+     (cond
+       [(or (null? bindings) (not fields))
+        (format "~a ~a" test body-str)]
+       [else
+        (define let-pairs
+          (for/list ([b (in-list bindings)]
+                     [fname (in-list fields)])
+            (format "~a (:~a ~a)" b fname target-sym)))
+        (format "~a (let [~a] ~a)" test (string-join let-pairs " ") body-str)])]
+    [(pat-map? pat)
+     (define tests
+       (for/list ([entry (in-list (pat-map-entries pat))])
+         (define k (symbol->string (car entry)))
+         (define v (cdr entry))
+         (cond
+           [(pat-literal? v)
+            (define val (pat-literal-value v))
+            (cond
+              [(string? val) (format "(= (~a ~a) ~v)" k target-sym val)]
+              [(eq? val 'nil) (format "(nil? (~a ~a))" k target-sym)]
+              [else (format "(= (~a ~a) ~a)" k target-sym val)])]
+           [(pat-wildcard? v) "true"]
+           [else (format "(some? (~a ~a))" k target-sym)])))
+     (define test
+       (if (= (length tests) 1) (car tests)
+           (format "(and ~a)" (string-join tests " "))))
+     (format "~a ~a" test body-str)]))
 
 (define (emit-deftype f)
   (define name (deftype-form-name f))

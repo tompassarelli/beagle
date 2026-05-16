@@ -23,6 +23,7 @@
   (cond
     [(def-form? f) (lint-def f)]
     [(defn-form? f) (lint-defn f)]
+    [(defn-multi? f) (lint-defn-multi f)]
     [(unsafe-clj? f) (lint-unsafe-clj f)]
     [else (void)]))
 
@@ -51,6 +52,20 @@
     (warn "defn ~a has untyped parameter(s): ~a (consider adding `(name : Type)`)"
           name
           (string-join (map symbol->string untyped-params) ", "))))
+
+(define (lint-defn-multi f)
+  (define name (defn-multi-name f))
+  (for ([a (in-list (defn-multi-arities f))])
+    (unless (arity-clause-return-type a)
+      (warn "defn ~a (arity ~a) has no return type annotation"
+            name (length (arity-clause-params a))))
+    (define untyped-params
+      (for/list ([p (in-list (arity-clause-params a))]
+                 #:when (and (param? p) (not (param-type p))))
+        (param-name p)))
+    (unless (null? untyped-params)
+      (warn "defn ~a has untyped parameter(s): ~a"
+            name (string-join (map symbol->string untyped-params) ", ")))))
 
 (define (lint-unsafe-clj _)
   (warn "(unsafe \"...\") inline escape — beagle cannot type-check this code"))
@@ -82,6 +97,13 @@
          (add-param-to-scope! p scope))
        (for ([e (in-list (defn-form-body form))])
          (check-shadow e scope (defn-form-name form)))]
+      [(defn-multi? form)
+       (for ([a (in-list (defn-multi-arities form))])
+         (define scope (make-hasheq))
+         (for ([p (in-list (arity-clause-params a))])
+           (add-param-to-scope! p scope))
+         (for ([e (in-list (arity-clause-body a))])
+           (check-shadow e scope (defn-multi-name form))))]
       [(def-form? form)
        (check-shadow (def-form-value form) (make-hasheq) #f)]
       [(defmethod-form? form)
@@ -158,6 +180,12 @@
      (for ([p (in-list params)])
        (add-param-to-scope! p inner))
      (for ([e (in-list body)]) (check-shadow e inner name))]
+    [(defn-multi name arities)
+     (for ([a (in-list arities)])
+       (define inner (scope-copy scope))
+       (for ([p (in-list (arity-clause-params a))])
+         (add-param-to-scope! p inner))
+       (for ([e (in-list (arity-clause-body a))]) (check-shadow e inner name)))]
     [(if-form c t e)
      (check-shadow c scope ctx)
      (check-shadow t scope ctx)
@@ -214,6 +242,25 @@
        (check-shadow (case-clause-value c) scope ctx)
        (check-shadow (case-clause-body c) scope ctx))
      (when default (check-shadow default scope ctx))]
+    [(match-form target clauses)
+     (check-shadow target scope ctx)
+     (for ([c (in-list clauses)])
+       (define inner (hash-copy scope))
+       (define pat (match-clause-pattern c))
+       (cond
+         [(pat-record? pat)
+          (for ([b (in-list (pat-record-bindings pat))])
+            (when (hash-has-key? scope b)
+              (warn-shadow "match binding" b ctx))
+            (hash-set! inner b #t))]
+         [(pat-var? pat)
+          (define n (pat-var-name pat))
+          (when (hash-has-key? scope n)
+            (warn-shadow "match binding" n ctx))
+          (hash-set! inner n #t)]
+         [else (void)])
+       (for ([e (in-list (match-clause-body c))])
+         (check-shadow e inner ctx)))]
     [(new-form _ args)
      (for ([a (in-list args)]) (check-shadow a scope ctx))]
     [(kw-access _ target default)
@@ -304,6 +351,11 @@
        (collect-symbols (case-clause-value c) used)
        (collect-symbols (case-clause-body c) used))
      (when default (collect-symbols default used))]
+    [(match-form target clauses)
+     (collect-symbols target used)
+     (for ([c (in-list clauses)])
+       (for ([e (in-list (match-clause-body c))])
+         (collect-symbols e used)))]
     [(new-form _ args)
      (for ([a (in-list args)]) (collect-symbols a used))]
     [(kw-access _ target default)
