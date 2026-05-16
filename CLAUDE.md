@@ -30,7 +30,8 @@ it as canonical when explaining the language.
 - Types: primitives (`String`, `Long`, `Double`, `Boolean`, `Keyword`,
   `Symbol`, `Nil`, `Any` — no aliases), user-defined record types,
   function types (variadic with `& T`), parametric (`Vec`, `Map`, `Set`,
-  `List`), union (`U`), polymorphic (`forall`)
+  `List`), union (`U`), nullable sugar (`String?` = `(U String Nil)`),
+  polymorphic (`forall`)
 - Type narrowing: flow-sensitive in `if`/`cond`/`when` via `nil?`, `some?`,
   `string?`, `=`, `not` etc. Threads through cond clauses.
 - Keyword field inference: `(:name person)` returns the field type when
@@ -38,10 +39,15 @@ it as canonical when explaining the language.
 - Macros: safe (gensym-hygienic) / unsafe with `&rest` and `(splice ...)`
 - Stdlib catalog: ~607 Clojure functions pre-typed (full typeable surface), key HOFs polymorphic
 - Cross-file type import: `(require module)` / `(require module :as alias)`
-  resolves source at compile time, imports typed defs/defns/externs/macros
+  resolves source at compile time, imports typed defs/defns/externs/records/macros.
+  `declare-extern` is only needed for Java interop and non-beagle namespaces.
+- Let-binding type inference: `(let [x (foo bar)] ...)` infers x's type from
+  the RHS expression — explicit annotations optional
 - Validation: type checks, arity (incl. variadic), undefined refs, hints
 - Lint pass: untyped def/defn, unsafe usage, shadowed bindings, unused externs
-- Structured error output: `BEAGLE_ERROR_FORMAT=json` for agent consumption
+- Rich diagnostics: Rust-style error display with source lines, signatures,
+  "did you mean?" suggestions, arg-return-type notes. JSON mode includes all
+  structured fields for zero-tool-call bug fixes.
 - Java interop: `.method`, `Class/static`, `*dynamic-vars*`, constructors,
   `import`; ~30 common methods/statics pre-typed in stdlib
 - Source mapping: `^{:line N :file "path"}` metadata on every emitted compound form (expression-level)

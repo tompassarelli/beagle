@@ -52,3 +52,7 @@ Speculative; no commitment.
 - Clojure analog query tools: clj-sig, clj-fields, clj-callers, clj-provides
 - E4 scaled experiment (13-module, 8570 LOC, 484 assertions, 35 injected bugs, first correctness divergence)
 - beagle-check-all / beagle-build-all: single-process batch check/build (9-10x vs sequential)
+- Rich diagnostics: Rust-style error codes, source line display, signatures, "did you mean?" suggestions
+- Nullable type sugar: `String?` → `(U String Nil)`, renders back as `String?`
+- Let-binding type inference (documented: always worked, agents didn't know)
+- Cross-module require imports types (documented: declare-extern only needed for Java/non-beagle)

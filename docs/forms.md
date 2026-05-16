@@ -71,16 +71,35 @@ Example:
 
 ```racket
 (let [NAME VALUE NAME VALUE ...] BODY...)
-(let [NAME : Type VALUE ...] BODY...)
+(let [(NAME : Type) VALUE ...] BODY...)
 ```
+
+Bindings infer their type from the right-hand side expression. Type
+annotations are optional — only needed when narrowing a union or
+overriding inference.
 
 Example:
 ```racket
 (let [x 1 y 2]
   (+ x y))
 
-(let [area : Long (* w h)]
+;; Type inferred: n is Long (strlen returns Long), doubled is Long (* returns Long)
+(let [n (strlen name)
+      doubled (* n 2)]
+  (+ doubled 1))
+
+;; Explicit annotation — only when you want to narrow or document:
+(let [(area : Long) (* w h)]
   area)
+```
+
+Map and sequential destructuring in let:
+```racket
+(let [{:keys [name age]} person]
+  (str name " is " age))
+
+(let [[x y & rest] coords]
+  (+ x y))
 ```
 
 ## Control flow
@@ -571,11 +590,27 @@ Defaults to `beagle.user` if omitted.
 
 Example:
 ```racket
+(require catalog :as cat)
 (require clojure.string :as cstr)
 ```
 
-Emits a `(:require ...)` clause in the generated `(ns ...)`. Does NOT
-import types — pair with `declare-extern` for type info.
+Emits a `(:require ...)` clause in the generated `(ns ...)`.
+
+**For beagle modules:** automatically imports all typed defs, defns,
+records (constructors + accessors + keyword-field types), and macros.
+Cross-module calls are fully type-checked without `declare-extern`:
+
+```racket
+(require inventory :as inv)
+
+;; Type checker knows inv/can-fulfill? : [(Vec StockLevel) Long Long -> Boolean]
+;; No declare-extern needed — it was imported from inventory.rkt's source
+(inv/can-fulfill? levels product-id qty)
+```
+
+**For Clojure namespaces** (e.g. `clojure.string`): emits the require
+but cannot import types (no beagle source to read). Use `declare-extern`
+for type-checked calls to these, or accept `Any`-typed pass-through.
 
 ### `declare-extern`
 
@@ -583,12 +618,22 @@ import types — pair with `declare-extern` for type info.
 (declare-extern NAME TypeExpr)
 ```
 
-Declares the type of an external (Clojure-side) function so beagle can
-type-check calls to it.
+Declares the type of a function not available via beagle source import.
+**Only needed for:**
+- Java interop methods/statics not in stdlib
+- Clojure library functions (non-beagle namespaces)
+- Dynamic vars
+
+**NOT needed for** cross-module beagle calls — `(require module :as alias)`
+imports types automatically.
 
 Example:
 ```racket
+;; Clojure library function (no beagle source):
 (declare-extern clojure.string/upper-case [String -> String])
+
+;; Java interop:
+(declare-extern .getAbsolutePath [Any -> String])
 ```
 
 Emits nothing in the output Clojure.
