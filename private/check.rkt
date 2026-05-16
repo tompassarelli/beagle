@@ -32,6 +32,7 @@
 
 ;; Expression-level source locations from the parser.
 (define current-check-src-table (make-parameter #f))
+(define current-check-fn-name (make-parameter #f))
 
 (define (src-for node)
   (define tbl (current-check-src-table))
@@ -239,17 +240,18 @@
 
     [(defn-form name params expected-ret body)
      (define body-env (extend-with-params env params))
-     (define last-type (last-expr-type body body-env))
-     (when expected-ret
-       (unless (type-compatible? last-type expected-ret)
-         (define sig (type->string (type-fn (map param-or-destr-type params) #f expected-ret)))
-         (raise-diag 'return-type
-                     (format "defn ~a: expected return ~a, got ~a"
-                             name (type->string expected-ret) (type->string last-type))
-                     (hasheq 'name (symbol->string name)
-                             'signature (format "~a : ~a" name sig)
-                             'expected (type->string expected-ret)
-                             'actual (type->string last-type)))))]
+     (parameterize ([current-check-fn-name name])
+       (define last-type (last-expr-type body body-env))
+       (when expected-ret
+         (unless (type-compatible? last-type expected-ret)
+           (define sig (type->string (type-fn (map param-or-destr-type params) #f expected-ret)))
+           (raise-diag 'return-type
+                       (format "defn ~a: expected return ~a, got ~a"
+                               name (type->string expected-ret) (type->string last-type))
+                       (hasheq 'name (symbol->string name)
+                               'signature (format "~a : ~a" name sig)
+                               'expected (type->string expected-ret)
+                               'actual (type->string last-type))))))]
 
     [(defn-multi name arities)
      (for ([a (in-list arities)])
@@ -561,6 +563,41 @@
      (hash-ref field-map kw-sym ANY)]
     [else ANY]))
 
+;; --- with-form completeness hint -------------------------------------------
+;; When a `with` updates a record inside a function named `apply-*-STEM`,
+;; suggest any unset nullable fields whose name contains STEM.
+;; e.g., in apply-order-confirmed: (with state [:status "confirmed"])
+;;       → note: OrderState has unset nullable field :confirmed-at
+
+(define (check-with-completeness rec-name field-map set-fields src)
+  (define fn-name (current-check-fn-name))
+  (when fn-name
+    (define fn-str (symbol->string fn-name))
+    (define parts (string-split fn-str "-"))
+    (when (and (>= (length parts) 3)
+               (string=? (car parts) "apply"))
+      (define stem (list-ref parts (sub1 (length parts))))
+      (define set-strs (map symbol->string set-fields))
+      (define unset-nullable
+        (for/list ([(kw-sym ftype) (in-hash field-map)]
+                   #:when (and (type-nullable? ftype)
+                               (let ([fname (substring (symbol->string kw-sym) 1)])
+                                 (and (string-contains? fname stem)
+                                      (not (member (symbol->string kw-sym) set-strs))))))
+          (symbol->string kw-sym)))
+      (when (not (null? unset-nullable))
+        (fprintf (current-error-port)
+                 "note: `~a` updates ~a but does not set nullable field~a ~a~a\n"
+                 fn-str rec-name
+                 (if (= 1 (length unset-nullable)) "" "s")
+                 (string-join unset-nullable ", ")
+                 (if src (format " at ~a:~a" (or (src-loc-source src) "?") (src-loc-line src)) ""))))))
+
+(define (type-nullable? t)
+  (and (type-union? t)
+       (ormap (lambda (m) (and (type-prim? m) (eq? (type-prim-name m) 'Nil)))
+              (type-union-alts t))))
+
 ;; --- inference -------------------------------------------------------------
 
 (define (infer-expr e env)
@@ -746,6 +783,9 @@
                          (hasheq 'record (symbol->string rec-name)
                                  'field (symbol->string kw))
                          #:src (src-for e))]))
+        (check-with-completeness rec-name field-map
+                                 (map with-update-field-kw (with-form-updates e))
+                                 (src-for e))
         target-type]
        [else
         (for ([u (in-list (with-form-updates e))])
@@ -815,6 +855,40 @@
       (infer-type-var-bindings rest-t at bindings)))
   (apply-type-bindings body bindings))
 
+;; Lint: warn when a let-binding name doesn't match the record accessor field.
+;; e.g., (let [reason (ordercancelled-cancelled-at event)] ...) — binding says
+;; "reason" but accessor extracts "cancelled-at". Suggests the correct accessor.
+(define (check-binding-accessor-mismatch bname value env)
+  (when (and (symbol? bname) (call-form? value) (symbol? (call-form-fn value)))
+    (define fn-sym (call-form-fn value))
+    (define fn-str (symbol->string fn-sym))
+    (define fn-type (hash-ref env fn-sym #f))
+    (when (and fn-type (type-fn? fn-type)
+               (= (length (type-fn-params fn-type)) 1)
+               (type-prim? (car (type-fn-params fn-type))))
+      (define rec-type (car (type-fn-params fn-type)))
+      (define rec-name (type-prim-name rec-type))
+      (when (hash-has-key? RECORD-FIELDS rec-name)
+        (define rec-lower (string-downcase (symbol->string rec-name)))
+        (define prefix (string-append rec-lower "-"))
+        (when (string-prefix? fn-str prefix)
+          (define field-name (substring fn-str (string-length prefix)))
+          (define bname-str (symbol->string bname))
+          (when (and (not (string=? bname-str field-name))
+                     (not (string-suffix? bname-str field-name))
+                     (not (string-suffix? field-name bname-str)))
+            (define field-map (hash-ref RECORD-FIELDS rec-name))
+            (define bname-kw (string->symbol (string-append ":" bname-str)))
+            (when (hash-has-key? field-map bname-kw)
+              (define correct-accessor
+                (string-append rec-lower "-" bname-str))
+              (define src (src-for value))
+              (fprintf (current-error-port)
+                       "note: let binding `~a` uses accessor `~a` (field ~a)~a\n  = did you mean: ~a\n"
+                       bname-str fn-str field-name
+                       (if src (format " at ~a:~a" (or (src-loc-source src) "?") (src-loc-line src)) "")
+                       correct-accessor))))))))
+
 (define (extend-with-let-bindings env bindings)
   (define out (mut-copy env))
   (for ([b (in-list bindings)])
@@ -841,6 +915,7 @@
                        (hasheq 'name (symbol->string bname)
                                'expected (type->string declared)
                                'actual (type->string inferred)))))
+       (check-binding-accessor-mismatch bname (let-binding-value b) out)
        (hash-set! out bname (or declared inferred ANY))]))
   out)
 
