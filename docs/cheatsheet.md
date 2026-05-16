@@ -204,7 +204,23 @@ regex (`re-find`/`re-matches`/`re-seq`/`re-pattern`), type coercion
 (`int`/`long`/`double`/`float`/`char`/`boolean`/`bigint`/`bigdec`),
 30+ type predicates, array ops, 20+ Java instance/static methods, and more.
 
-For everything else, use `(declare-extern name TypeExpr)`.
+**Intentionally omitted** (~400 clojure.core functions not typed):
+
+| category | why excluded |
+|---|---|
+| Agents (`agent`, `send`, `send-off`, `await`, ...) | Concurrency primitives — side-effectful, runtime-only |
+| Refs/STM (`ref`, `dosync`, `alter`, `commute`, ...) | Transaction machinery — no static model |
+| Vars (`binding`, `alter-var-root`, `with-redefs`, ...) | Dynamic rebinding — breaks static assumptions |
+| Namespaces (`ns-resolve`, `find-ns`, `intern`, ...) | Metaprogramming — runtime reflection |
+| Classloading (`gen-class`, `gen-interface`, `compile`, ...) | JVM internals — not relevant to application code |
+| Eval/read (`eval`, `read`, `load-string`, ...) | Dynamic code execution — untypeable |
+| Concurrency (`locking`, `pmap`, `seque`, ...) | Threading primitives — use `(unsafe ...)` |
+| Auto-promote variants (`+'`, `*'`, `incN`, ...) | Overflow-safe math — redundant with `+`, `*` |
+
+These are deliberate omissions, not coverage gaps. `bin/gen-stdlib-types`
+generates zero new entries — the typeable surface is fully covered.
+
+For anything omitted, use `(declare-extern name TypeExpr)` or `(unsafe "...")`.
 
 ## Clojure namespace interop
 

@@ -1,10 +1,5 @@
 # beagle — todo
 
-## Next
-
-- **More stdlib typing.** ~607 of 1000+ Clojure functions typed.
-  `bin/gen-stdlib-types` automates remaining coverage.
-
 ## Someday
 
 Speculative; no commitment.
