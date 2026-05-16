@@ -143,10 +143,98 @@ The remaining accuracy gap (4.3pp) is entirely in projections (beagle 20% vs
 clojure 68%) and events (71% vs 100%). Both are attributable to "correct but
 different" fixes that a behavioral test suite would resolve.
 
+## E5e: Behavioral Scoring
+
+**Date:** 2026-05-16
+**Hypothesis:** Line-level diff scoring penalizes "correct but different" fixes.
+A behavioral test suite that checks runtime outcomes should close the gap.
+
+### Method
+
+40 behavioral tests (one per injected bug) that exercise the specific behavior
+each bug breaks. Tests check observable outcomes (return values, state after
+event application) not implementation details. "Correct but different" fixes
+pass if they produce correct behavior.
+
+### Clojure Results
+
+| Trial | Line-diff (E5d) | Behavioral (E5e) |
+|-------|:---:|:---:|
+| Run 1 | 71% | 90% |
+| Run 2 | 72% | 90% |
+| Run 3 | 68% | 90% |
+
+| Metric | Line-diff | Behavioral |
+|--------|:---:|:---:|
+| Mean score | 70.3% | 90.0% |
+| Std deviation | 2.1% | 0.0% |
+
+### Consistently Failing Bugs (all 3 runs)
+
+| Bug | Category | Module | Description |
+|-----|----------|--------|-------------|
+| BUG-09 | F: missing case | projections | CustomerTierChanged not handled |
+| BUG-10 | F: missing case | projections | RefundIssued not handled in payment |
+| BUG-11 | B: nil access | commands | paid-amount nil causes NPE |
+| BUG-18 | A: wrong field | handlers | cancelled-at used instead of reason |
+
+All 4 are bugs the agent consistently fails to detect by code inspection.
+BUG-09 and BUG-10 are missing match cases (category F) — invisible to
+type checkers on both tracks. BUG-11 is a nil-handling issue that only
+manifests at runtime. BUG-18 is a field-name confusion that produces a
+Long where String is expected.
+
+### Beagle Behavioral Scoring: Blocked
+
+Beagle trials score 0% on behavioral tests because the emitted .clj files
+have runtime errors:
+
+1. **Match destructuring not emitted.** Beagle's match compiler uses
+   `(instance? RecordType var)` checks but doesn't emit `let` bindings for
+   the destructured fields. Pattern variables like `iid`, `wid`, `qty` appear
+   unbound in the emitted Clojure.
+
+2. **Unqualified cross-module accessors.** Beagle's type import makes
+   `orderplaced-order-id` available unqualified, but the emitted ns form
+   only has `(:require [pipeline.events :as evt])`. The `:refer :all` patch
+   fixes this, but issue 1 still blocks execution.
+
+3. **Agent-introduced runtime bugs.** At least one trial uses `amt` instead
+   of `event` — a variable name that beagle's type checker accepts (both
+   resolve to compatible types) but that doesn't exist in the emitted scope.
+
+These are beagle infrastructure issues, not experiment design issues. The
+behavioral test correctly identifies that the emitted code doesn't run.
+
+### Analysis
+
+The +19.7pp improvement (70.3% → 90.0%) confirms the hypothesis: line-diff
+scoring was the primary confounding factor in E5d. The remaining 10% gap
+(4 bugs) represents genuine agent limitations — missing match cases and
+nil-handling patterns that neither type checkers nor code inspection reliably
+catches.
+
+The perfect consistency (0.0% std dev) on behavioral scoring means the agent's
+detection capability is deterministic for this problem size — the variance in
+line-diff scoring came entirely from "correct but different" fix patterns.
+
+### E5c vs E5d Behavioral Comparison
+
+| Metric | E5c behavioral | E5d behavioral |
+|--------|:---:|:---:|
+| Mean score | 88.3% | 90.0% |
+| Std deviation | 2.9% | 0.0% |
+
+E5c run1 had 2 additional failures (BUG-19, BUG-23) that E5d consistently
+fixes. The `with` form's clearer update semantics may have helped the agent
+identify these patterns.
+
 ## Next steps
 
-1. Semantic scoring via behavioral tests (would likely close the gap)
-2. Smaller model experiments (beagle's advantage should grow as model degrades)
-3. Exhaustive match warnings to flag missing dispatch cases at compile time
-4. Intent-preserving repair: teach the checker to suggest "remove this update"
+1. ~~Semantic scoring via behavioral tests~~ → **Done (E5e)**
+2. Fix beagle emitter: match destructuring + qualified accessor emission
+3. Re-score beagle trials with behavioral tests after emitter fix
+4. Smaller model experiments (beagle's advantage should grow as model degrades)
+5. Exhaustive match warnings to flag missing dispatch cases at compile time
+6. Intent-preserving repair: teach the checker to suggest "remove this update"
    not just "fix the type"

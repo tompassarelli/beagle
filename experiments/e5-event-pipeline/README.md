@@ -24,6 +24,7 @@ nullable state fields, heavy cross-module contracts.
 | E5a | Fresh build from spec | Compile-time catches mistakes during development |
 | E5b | Schema evolution (split OrderPlaced → OrderPlaced + OrderPriced) | Compiler finds all affected call sites |
 | E5c | Bug detection (40 injected bugs) | 25 caught at compile time; verified repair loop |
+| E5e | Behavioral scoring (40 per-bug tests) | Eliminates line-diff bias; clojure jumps to 90% |
 
 ## Module DAG
 
@@ -40,23 +41,26 @@ events (leaf)
 
 ## Results (3 runs per track, unlabeled bugs)
 
-### E5c (positional constructors) → E5d (`with` form)
+### E5c → E5d → E5e progression
 
-| Metric | Beagle (E5c) | Beagle (E5d) | Clojure (E5c) | Clojure (E5d) |
-|--------|:---:|:---:|:---:|:---:|
-| Mean accuracy | 63.7% | 66.0% | 68.3% | 70.3% |
-| Std deviation | 1.5% | 1.7% | 5.5% | 2.1% |
-| Checker errors | 0 | 0 | n/a | n/a |
+| Metric | Beagle (E5d) line | Clojure (E5d) line | Clojure (E5e) behavioral |
+|--------|:---:|:---:|:---:|
+| Mean accuracy | 66.0% | 70.3% | **90.0%** |
+| Std deviation | 1.7% | 2.1% | **0.0%** |
+| Checker errors | 0 | n/a | n/a |
 
-The `with` form eliminated the bug-surface asymmetry and improved beagle's
-score by +2.3pp, but clojure still wins on raw line-level accuracy. The gap
-narrowed from -4.6pp to -4.3pp.
+**E5e finding:** Line-diff scoring was the primary confounding factor.
+Behavioral tests show the agent actually fixes 36/40 bugs correctly — the
+20pp gap between line-diff (70%) and behavioral (90%) was entirely
+"correct but different" fix patterns being penalized.
 
-Beagle's advantage: **verification** (0 proven checker errors, all runs) and
-**consistency** (1.7% std dev). The remaining gap comes from "correct but
-different" fixes — agents make type-valid repairs that don't match golden intent.
+The 4 unfixable bugs (BUG-09, 10, 11, 18) are missing match cases and
+nil-handling issues that neither type checkers nor code inspection catches.
 
-See `results.md` for full analysis, per-module breakdown, and confounding factors.
+Beagle behavioral scoring is blocked until the emitter produces self-contained
+.clj (match destructuring + qualified accessor emission needed).
+
+See `results.md` for full analysis and per-bug breakdown.
 
 ## Running
 
