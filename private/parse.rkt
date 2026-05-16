@@ -229,7 +229,12 @@
            (if (null? dir-segs)
              (build-path source-dir file-name)
              (apply build-path source-dir (append dir-segs (list file-name)))))
-         (and (file-exists? full-path) full-path))))
+         (cond
+           [(file-exists? full-path) full-path]
+           [(and (not (null? dir-segs))
+                 (file-exists? (build-path source-dir file-name)))
+            (build-path source-dir file-name)]
+           [else #f]))))
 
 (define (qualify-name prefix-sym name-sym)
   (string->symbol
@@ -263,10 +268,14 @@
 
 (define (import-module-types! mod-path prefix externs registry imp-rec-fields)
   (define datums (read-beagle-datums mod-path))
+  (define (reg! name type)
+    (hash-set! externs (qualify-name prefix name) type)
+    (unless (hash-has-key? externs name)
+      (hash-set! externs name type)))
   (for ([d (in-list datums)])
     (match d
       [(list 'declare-extern (? symbol? name) type-expr)
-       (hash-set! externs (qualify-name prefix name) (parse-type type-expr))]
+       (reg! name (parse-type type-expr))]
       [(list 'define-macro (? symbol? kind) (? symbol? name) params template)
        (define ps (cond
                     [(bracketed? params) (bracket-body params)]
@@ -278,31 +287,28 @@
        (define rec-type (type-prim name))
        (define name-str (symbol->string name))
        (define name-lower (import-str-downcase name-str))
-       (hash-set! externs (qualify-name prefix (string->symbol (string-append "->" name-str)))
-                  (type-fn (map param-type fields) #f rec-type))
+       (reg! (string->symbol (string-append "->" name-str))
+             (type-fn (map param-type fields) #f rec-type))
        (define field-map (make-hash))
        (for ([f (in-list fields)])
          (define fname (symbol->string (param-name f)))
-         (hash-set! externs
-                    (qualify-name prefix (string->symbol (string-append name-lower "-" fname)))
-                    (type-fn (list rec-type) #f (param-type f)))
+         (reg! (string->symbol (string-append name-lower "-" fname))
+               (type-fn (list rec-type) #f (param-type f)))
          (hash-set! field-map
                     (string->symbol (string-append ":" fname))
                     (param-type f)))
        (hash-set! imp-rec-fields name field-map)]
       [(list 'def (? symbol? name) ': type-expr _)
-       (hash-set! externs (qualify-name prefix name) (parse-type type-expr))]
+       (reg! name (parse-type type-expr))]
       [(list 'defn (? symbol? name) params-form ': ret-type body ...)
        (define parsed (parse-params params-form))
        (define ptypes (map (lambda (p) (or (param-type p) (type-prim 'Any))) parsed))
-       (hash-set! externs (qualify-name prefix name)
-                  (type-fn ptypes #f (parse-type ret-type)))]
+       (reg! name (type-fn ptypes #f (parse-type ret-type)))]
       [(list 'defn (? symbol? name) params-form body ...)
        #:when (or (null? body) (not (eq? (car body) ':)))
        (define parsed (parse-params params-form))
        (define ptypes (map (lambda (p) (or (param-type p) (type-prim 'Any))) parsed))
-       (hash-set! externs (qualify-name prefix name)
-                  (type-fn ptypes #f (type-prim 'Any)))]
+       (reg! name (type-fn ptypes #f (type-prim 'Any)))]
       [_ (void)])))
 
 ;; --- entry point -----------------------------------------------------------

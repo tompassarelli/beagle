@@ -243,7 +243,7 @@
                              (rest cancelled))
               max-ts (reduce (fn [mx o]
                                (let [ts (orderstate-cancelled-at o)]
-                                 (if (nil? mx) mx (max mx ts))))
+                                 (if (nil? ts) mx (max mx ts))))
                              min-ts (rest cancelled))
               span (- max-ts min-ts)
               num-buckets (if (= bucket-size 0) 1

@@ -51,8 +51,9 @@ it as canonical when explaining the language.
 - Java interop: `.method`, `Class/static`, `*dynamic-vars*`, constructors,
   `import`; ~30 common methods/statics pre-typed in stdlib
 - Source mapping: `^{:line N :file "path"}` metadata on every emitted compound form (expression-level)
-- Cross-module defrecord import: `(require module)` imports record types,
-  constructors, accessors, and keyword-access field types
+- Cross-module type import: `(require module)` imports record types,
+  constructors, accessors, keyword-access field types, AND all defn/def
+  signatures — both qualified and unqualified names validated at call sites
 - 298 tests passing
 - Empirical benchmarks: 40 tasks, 3 variants, head-to-head against raw Clojure,
   refactoring and bug-detection experiments — 5 real bugs caught

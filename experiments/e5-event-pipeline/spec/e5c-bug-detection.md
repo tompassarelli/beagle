@@ -52,19 +52,19 @@ Incorrect arithmetic, wrong comparison operator, off-by-one.
 
 | Category | Count | Beagle catches | Clojure catches |
 |----------|-------|----------------|-----------------|
-| A: Wrong field | 8 | 6 (same-module) | 0 |
-| B: Nil access | 6 | 0 (cross-module) | 0 |
-| C: Arity | 6 | 4 (same-module) | 0 (runtime only) |
-| D: Wrong type | 5 | 1 (stdlib call) | 0 |
-| E: Constructor | 5 | 2 (same-module) | 0 |
+| A: Wrong field | 8 | 8 | 0 |
+| B: Nil access | 6 | 4 | 0 |
+| C: Arity | 6 | 6 | 0 (runtime only) |
+| D: Wrong type | 5 | 4 | 0 |
+| E: Constructor | 5 | 5 | 0 |
 | F: Missing case | 5 | 0 | 0 |
 | G: Logic | 5 | 0 | 0 |
-| **Total** | **40** | **13** | **0** |
+| **Total** | **40** | **24** | **0** |
 
-Note: Beagle's cross-module type checking imports types but doesn't validate
-all accessor/call-site types from required modules. Same-module bugs (especially
-in events.rkt where records are defined) are caught reliably. This is a known
-limitation — future work could strengthen cross-module validation.
+Cross-module type checking (v0.2.0+) imports all typed defn/record signatures
+and validates both qualified (`evt/make-widget`) and unqualified calls.
+Uncaught bugs: logic errors (G), missing match cases (F), and nil access
+where the enclosing function uses `Any` typed params.
 
 ## Bug Injection Locations
 

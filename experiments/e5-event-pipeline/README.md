@@ -23,7 +23,7 @@ nullable state fields, heavy cross-module contracts.
 |----|------|-----------------|
 | E5a | Fresh build from spec | Compile-time catches mistakes during development |
 | E5b | Schema evolution (split OrderPlaced → OrderPlaced + OrderPriced) | Compiler finds all affected call sites |
-| E5c | Bug detection (40 injected bugs) | 13 caught at compile time vs 0 for Clojure |
+| E5c | Bug detection (40 injected bugs) | 24 caught at compile time vs 0 for Clojure |
 
 ## Module DAG
 
