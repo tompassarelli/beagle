@@ -163,6 +163,7 @@
 (struct with-update (field-kw value)                          #:transparent)
 (struct defenum-form (name values)                            #:transparent)
 (struct defunion-form (name members)                          #:transparent)
+(struct defscalar-form (name backing-type)                    #:transparent)
 
 (struct match-form  (target clauses)                         #:transparent)
 (struct match-clause (pattern body)                          #:transparent)
@@ -638,6 +639,9 @@
 
     [(list 'defunion (? symbol? name) members ...)
      (defunion-form name (map ->datum (or (stx-tail subs 2) members)))]
+
+    [(list 'defscalar (? symbol? name) (? symbol? backing))
+     (defscalar-form name (->datum backing))]
 
     [(list 'match target-expr clauses ...)
      (parse-match-form (or (stx-ref subs 1) target-expr)
@@ -1143,6 +1147,7 @@
  (struct-out with-update)
  (struct-out defenum-form)
  (struct-out defunion-form)
+ (struct-out defscalar-form)
  parse-program
  DEFAULT-MODE
  DEFAULT-TARGET

@@ -206,6 +206,16 @@
        ;; OrderEvent typed as (U OrderPlaced OrderConfirmed ...)
        (hash-set! env name
                   (type-union (map (lambda (m) (type-prim m)) members)))]
+      [(defscalar-form name backing)
+       (define scalar-type (type-prim name))
+       (define backing-type (type-prim backing))
+       ;; Constructor: ->ScalarName : [BackingType -> ScalarName]
+       (hash-set! env (string->symbol (string-append "->" (symbol->string name)))
+                  (type-fn (list backing-type) #f scalar-type))
+       ;; Accessor: scalarname-value : [ScalarName -> BackingType]
+       (define name-lower (string-downcase (symbol->string name)))
+       (hash-set! env (string->symbol (string-append name-lower "-value"))
+                  (type-fn (list scalar-type) #f backing-type))]
       [_ (void)]))
   env)
 
@@ -285,6 +295,7 @@
      (last-expr-type body body-env)]
     [(defenum-form _ _) (void)]
     [(defunion-form _ _) (void)]
+    [(defscalar-form _ _) (void)]
 
     [_ (infer-expr form env)]))
 

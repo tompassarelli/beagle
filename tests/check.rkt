@@ -853,3 +853,43 @@
       `(defn process ,(br '(a : Animal)) : Long 0)
       `(defn test [] : Long
          (process (->Cat "whiskers")))))))
+
+;; --- defscalar: nominal domain types ----------------------------------------
+
+(test-case "defscalar type-checks without error"
+  (check-not-exn
+    (lambda ()
+      (check-prog
+        '(defscalar Timestamp Long)
+        '(def ts : Timestamp (->Timestamp 100))))))
+
+(test-case "defscalar types are incompatible with each other"
+  (check-exn exn:fail?
+    (lambda ()
+      (check-prog
+        '(defscalar Timestamp Long)
+        '(defscalar Amount Long)
+        '(def bad : Timestamp (->Amount 100))))))
+
+(test-case "defscalar type is incompatible with its backing type"
+  (check-exn exn:fail?
+    (lambda ()
+      (check-prog
+        '(defscalar Timestamp Long)
+        '(def bad : Long (->Timestamp 100))))))
+
+(test-case "defscalar accessor unwraps to backing type"
+  (check-not-exn
+    (lambda ()
+      (check-prog
+        '(defscalar Timestamp Long)
+        '(def ts : Timestamp (->Timestamp 100))
+        '(def raw : Long (timestamp-value ts))))))
+
+(test-case "defscalar prevents passing backing type where scalar expected"
+  (check-exn exn:fail?
+    (lambda ()
+      (check-prog
+        '(defscalar OrderId Long)
+        `(defn lookup ,(br '(id : OrderId)) : Long 0)
+        '(defn bad [] : Long (lookup 42))))))

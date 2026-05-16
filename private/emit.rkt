@@ -5,6 +5,7 @@
 (require racket/match
          racket/string
          racket/format
+         racket/set
          "parse.rkt")
 
 ;; --- source-location metadata -----------------------------------------------
@@ -13,6 +14,8 @@
 (define current-emit-record-fields (make-parameter (hasheq)))
 (define current-emit-record-ns (make-parameter (hasheq)))
 (define current-emit-target (make-parameter 'clj))
+;; Scalar constructors/accessors that erase to identity at runtime
+(define current-emit-scalar-fns (make-parameter (set)))
 
 (define (emit-srcloc loc)
   (define src (src-loc-source loc))
@@ -40,11 +43,23 @@
   (for/fold ([h local]) ([(rec-name field-names) (in-hash (program-imported-record-field-order prog))])
     (hash-set h rec-name field-names)))
 
+(define (build-scalar-fns prog)
+  (for/fold ([s (set)]) ([f (in-list (program-forms prog))])
+    (if (defscalar-form? f)
+        (let* ([name (defscalar-form-name f)]
+               [name-str (symbol->string name)]
+               [name-lower (string-downcase name-str)]
+               [ctor (string->symbol (string-append "->" name-str))]
+               [accessor (string->symbol (string-append name-lower "-value"))])
+          (set-add (set-add s ctor) accessor))
+        s)))
+
 (define (emit-program prog)
   (parameterize ([current-emit-src-table (program-src-table prog)]
                  [current-emit-record-fields (build-record-field-table prog)]
                  [current-emit-record-ns (program-imported-record-ns prog)]
-                 [current-emit-target (program-target prog)])
+                 [current-emit-target (program-target prog)]
+                 [current-emit-scalar-fns (build-scalar-fns prog)])
     (string-append
      (emit-ns prog)
      "\n\n"
@@ -170,6 +185,9 @@
 
     [(defunion-form? f)
      (emit-defunion f)]
+
+    [(defscalar-form? f)
+     (emit-defscalar f)]
 
     [else (emit-expr-core f)]))
 
@@ -299,9 +317,16 @@
     [(with-form? e)
      (emit-with e)]
     [(call-form? e)
-     (format "(~a~a)"
-             (symbol->string (call-form-fn e))
-             (emit-args (call-form-args e)))]
+     (define fn-sym (call-form-fn e))
+     (cond
+       ;; Scalar constructors/accessors erase to identity (zero runtime cost)
+       [(and (set-member? (current-emit-scalar-fns) fn-sym)
+             (= 1 (length (call-form-args e))))
+        (emit-expr (car (call-form-args e)))]
+       [else
+        (format "(~a~a)"
+                (symbol->string fn-sym)
+                (emit-args (call-form-args e)))])]
     [else (error 'beagle-emit "don't know how to emit: ~v" e)]))
 
 (define (emit-record f)
@@ -338,6 +363,11 @@
   (define members (defunion-form-members f))
   (define member-strs (map symbol->string members))
   (format ";; ~a = ~a" name (string-join member-strs " | ")))
+
+(define (emit-defscalar f)
+  (define name (defscalar-form-name f))
+  (define backing (defscalar-form-backing-type f))
+  (format ";; ~a : ~a (scalar)" name backing))
 
 (define (emit-match e)
   (define target-str (emit-expr (match-form-target e)))
