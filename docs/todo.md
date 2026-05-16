@@ -23,13 +23,6 @@
 
 Speculative; no commitment.
 
-- **`#lang beaglelog`** — the graph-DB DSL built as macros on top of
-  `#lang beagle`. Compiles through beagle to Clojure using Datascript /
-  Datomic.
-- **Local AI prose → beagle layer.** Take natural-language descriptions
-  and translate them to beagle source. Local model so data stays private.
-- **`#lang beagle/cljs`** — ClojureScript-targeted variant for browser
-  / local-first apps.
 - **LSP / editor integration.** Type-aware completion, jump-to-def, etc.
 - **Typed REPL.** Connect to a live Clojure socket-repl, evaluate
   beagle forms with full type checking before sending.
