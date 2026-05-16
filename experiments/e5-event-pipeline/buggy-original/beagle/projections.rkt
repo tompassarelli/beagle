@@ -29,21 +29,9 @@
     (orderplaced-placed-at event)))
 
 ;; apply-order-confirmed: marks order as confirmed with timestamp.
-;; BUG-03: C arity mismatch — 13 args to OrderState constructor instead of 14 (missing cancel-reason)
 (defn apply-order-confirmed [(state : OrderState) (event : Any)] : OrderState
-  (->OrderState (orderstate-order-id state)
-                (orderstate-customer-id state)
-                "confirmed"
-                (orderstate-items state)
-                (orderstate-total state)
-                (orderstate-placed-at state)
-                (orderconfirmed-confirmed-at event)
-                (orderstate-paid-at state)
-                (orderstate-paid-amount state)
-                (orderstate-payment-method state)
-                (orderstate-shipped-count state)
-                (orderstate-delivered-at state)
-                (orderstate-cancelled-at state)))
+  (with state
+    [:status "confirmed"]))
 
 ;; apply-payment-to-order: records payment on order state.
 (defn apply-payment-to-order [(state : OrderState) (event : Any)] : OrderState
@@ -54,21 +42,11 @@
         new-status (if (>= new-paid (orderstate-total state))
                        "paid"
                        (orderstate-status state))]
-    (->OrderState (orderstate-order-id state)
-                  (orderstate-customer-id state)
-                  new-status
-                  (orderstate-items state)
-                  (orderstate-total state)
-                  (orderstate-placed-at state)
-                  (orderstate-confirmed-at state)
-                  (paymentreceived-paid-at event)
-                  new-paid
-                  (paymentreceived-method event)
-                  ;; BUG-04: D wrong type — passing String "shipped" where Long (shipped-count) expected
-                  "shipped"
-                  (orderstate-delivered-at state)
-                  (orderstate-cancelled-at state)
-                  (orderstate-cancel-reason state))))
+    (with state
+      [:status "shipped"]
+      [:paid-at (paymentreceived-paid-at event)]
+      [:paid-amount new-paid]
+      [:payment-method (paymentreceived-method event)])))
 
 ;; apply-item-shipped-to-order: increments shipped count, updates status.
 (defn apply-item-shipped-to-order [(state : OrderState)
@@ -76,56 +54,24 @@
   (let [new-count (+ (orderstate-shipped-count state) 1)
         item-count (count (orderstate-items state))
         new-status (if (>= new-count item-count) "shipping" (orderstate-status state))]
-    (->OrderState (orderstate-order-id state)
-                  (orderstate-customer-id state)
-                  new-status
-                  (orderstate-items state)
-                  (orderstate-total state)
-                  (orderstate-placed-at state)
-                  (orderstate-confirmed-at state)
-                  (orderstate-paid-at state)
-                  (orderstate-paid-amount state)
-                  (orderstate-payment-method state)
-                  new-count
-                  (orderstate-delivered-at state)
-                  (orderstate-cancelled-at state)
-                  (orderstate-cancel-reason state))))
+    (with state
+      [:status new-status]
+      [:shipped-count new-count])))
 
 ;; apply-order-delivered-to-order: marks order as delivered.
 (defn apply-order-delivered-to-order [(state : OrderState)
                                      (event : Any)] : OrderState
-  (->OrderState (orderstate-order-id state)
-                (orderstate-customer-id state)
-                "delivered"
-                (orderstate-items state)
-                (orderstate-total state)
-                (orderstate-placed-at state)
-                (orderstate-confirmed-at state)
-                (orderstate-paid-at state)
-                (orderstate-paid-amount state)
-                (orderstate-payment-method state)
-                (orderstate-shipped-count state)
-                (orderdelivered-delivered-at event)
-                (orderstate-cancelled-at state)
-                (orderstate-cancel-reason state)))
+  (with state
+    [:status "delivered"]
+    [:delivered-at (orderdelivered-delivered-at event)]))
 
 ;; apply-order-cancelled-to-order: marks order as cancelled with reason.
 (defn apply-order-cancelled-to-order [(state : OrderState)
                                       (event : Any)] : OrderState
-  (->OrderState (orderstate-order-id state)
-                (orderstate-customer-id state)
-                "cancelled"
-                (orderstate-items state)
-                (orderstate-total state)
-                (orderstate-placed-at state)
-                (orderstate-confirmed-at state)
-                (orderstate-paid-at state)
-                (orderstate-paid-amount state)
-                (orderstate-payment-method state)
-                (orderstate-shipped-count state)
-                (orderstate-delivered-at state)
-                (ordercancelled-cancelled-at event)
-                (ordercancelled-reason event)))
+  (with state
+    [:status "cancelled"]
+    [:cancelled-at (ordercancelled-cancelled-at event)]
+    [:cancel-reason (ordercancelled-reason event)]))
 
 ;; apply-order-event: main dispatcher for order state projection.
 ;; Handles nil initial state (first event must be OrderPlaced).
@@ -141,7 +87,6 @@
      (if (nil? state) state (apply-item-shipped-to-order state event))]
     [(OrderDelivered oid ts)
      (if (nil? state) state (apply-order-delivered-to-order state event))]
-    ;; BUG-08: F missing match case — OrderCancelled case removed from order projection
     [_ state]))
 
 ;; =============================================================================
@@ -158,42 +103,26 @@
 
 ;; apply-tier-change: updates customer tier.
 (defn apply-tier-change [(state : CustomerState) (event : Any)] : CustomerState
-  (->CustomerState (customerstate-customer-id state)
-                   (customerstate-name state)
-                   (customerstate-email state)
-                   (customertierchanged-new-tier event)
-                   (customerstate-total-spent state)
-                   (customerstate-order-count state)
-                   (customerstate-registered-at state)))
+  (with state
+    [:tier (customertierchanged-new-tier event)]))
 
 ;; apply-order-to-customer: increments order count.
 (defn apply-order-to-customer [(state : CustomerState)
                                (event : Any)] : CustomerState
-  (->CustomerState (customerstate-customer-id state)
-                   (customerstate-name state)
-                   (customerstate-email state)
-                   (customerstate-tier state)
-                   (customerstate-total-spent state)
-                   (+ (customerstate-order-count state) 1)
-                   (customerstate-registered-at state)))
+  (with state
+    [:order-count (+ (customerstate-order-count state) 1)]))
 
 ;; apply-payment-to-customer: adds payment amount to total-spent.
 (defn apply-payment-to-customer [(state : CustomerState)
                                  (amount : Long)] : CustomerState
-  (->CustomerState (customerstate-customer-id state)
-                   (customerstate-name state)
-                   (customerstate-email state)
-                   (customerstate-tier state)
-                   (+ (customerstate-total-spent state) amount)
-                   (customerstate-order-count state)
-                   (customerstate-registered-at state)))
+  (with state
+    [:total-spent (+ (customerstate-total-spent state) amount)]))
 
 ;; apply-customer-event: main dispatcher for customer state projection.
 (defn apply-customer-event [(state : Any) (event : Any)] : Any
   (match event
     [(CustomerRegistered cid name email ts)
      (apply-customer-registered event)]
-    ;; BUG-09: F missing match case — CustomerTierChanged removed from customer projection
     [(OrderPlaced oid cid items total ts)
      (if (nil? state) state (apply-order-to-customer state event))]
     [(PaymentReceived oid amt meth tid ts)
@@ -208,19 +137,17 @@
 (defn apply-inventory-reserved [(state : InventoryState)
                                 (event : Any)] : InventoryState
   (let [qty (inventoryreserved-quantity event)]
-    (->InventoryState (inventorystate-item-id state)
-                      (inventorystate-warehouse-id state)
-                      (- (inventorystate-available state) qty)
-                      (+ (inventorystate-reserved state) qty))))
+    (with state
+      [:available (- (inventorystate-available state) qty)]
+      [:reserved (+ (inventorystate-reserved state) qty)])))
 
 ;; apply-inventory-released: increases available, decreases reserved.
 (defn apply-inventory-released [(state : InventoryState)
                                 (event : Any)] : InventoryState
   (let [qty (inventoryreleased-quantity event)]
-    (->InventoryState (inventorystate-item-id state)
-                      (inventorystate-warehouse-id state)
-                      (+ (inventorystate-available state) qty)
-                      (- (inventorystate-reserved state) qty))))
+    (with state
+      [:available (+ (inventorystate-available state) qty)]
+      [:reserved (- (inventorystate-reserved state) qty)])))
 
 ;; apply-inventory-event: main dispatcher for inventory state projection.
 ;; Creates empty state if nil and event is InventoryReserved.
@@ -241,25 +168,19 @@
 ;; =============================================================================
 
 ;; apply-item-shipped-to-shipment: records shipping details.
-;; BUG-05: D wrong type — passing String "pending" where Long? (delivered-at) expected
 (defn apply-item-shipped-to-shipment [(state : ShipmentState)
                                       (event : Any)] : ShipmentState
-  (->ShipmentState (shipmentstate-order-id state)
-                   (shipmentstate-item-id state)
-                   (itemshipped-tracking-number event)
-                   (itemshipped-carrier event)
-                   (itemshipped-shipped-at event)
-                   "pending"))
+  (with state
+    [:tracking-number (itemshipped-tracking-number event)]
+    [:carrier (itemshipped-carrier event)]
+    [:shipped-at (itemshipped-shipped-at event)]
+    [:delivered-at "pending"]))
 
 ;; apply-delivered-to-shipment: marks shipment as delivered.
 (defn apply-delivered-to-shipment [(state : ShipmentState)
                                    (event : Any)] : ShipmentState
-  (->ShipmentState (shipmentstate-order-id state)
-                   (shipmentstate-item-id state)
-                   (shipmentstate-tracking-number state)
-                   (shipmentstate-carrier state)
-                   (shipmentstate-shipped-at state)
-                   (orderdelivered-delivered-at event)))
+  (with state
+    [:delivered-at (orderdelivered-delivered-at event)]))
 
 ;; apply-shipment-event: main dispatcher for shipment state projection.
 (defn apply-shipment-event [(state : Any) (event : Any)] : Any
@@ -286,23 +207,19 @@
         new-status (if (>= new-paid (paymentstate-amount-due state))
                        "paid"
                        "partial")]
-    (->PaymentState (paymentstate-order-id state)
-                    (paymentstate-amount-due state)
-                    new-paid
-                    (paymentreceived-method event)
-                    (paymentreceived-transaction-id event)
-                    new-status)))
+    (with state
+      [:amount-paid new-paid]
+      [:method (paymentreceived-method event)]
+      [:transaction-id (paymentreceived-transaction-id event)]
+      [:status new-status])))
 
-;; BUG-07: B nil access — transaction-id is String?, passed to subs without nil guard
+;; apply-payment-failed-to-payment: records failed payment attempt.
 (defn apply-payment-failed-to-payment [(state : PaymentState)
                                        (event : Any)] : PaymentState
   (let [txn (subs (paymentstate-transaction-id state) 0 4)]
-    (->PaymentState (paymentstate-order-id state)
-                    (paymentstate-amount-due state)
-                    (paymentstate-amount-paid state)
-                    (paymentstate-method state)
-                    txn
-                    "failed")))
+    (with state
+      [:status "failed"]
+      [:transaction-id txn])))
 
 ;; apply-refund-to-payment: deducts refund from paid amount.
 ;; apply-refund-to-payment: deducts refund from paid amount.
@@ -311,12 +228,9 @@
   (let [new-paid (- (paymentstate-amount-paid state)
                     (refundissued-amount event))
         new-status (if (<= new-paid 0) "refunded" "partial-refund")]
-    (->PaymentState (paymentstate-order-id state)
-                    (paymentstate-amount-due state)
-                    new-paid
-                    (paymentstate-method state)
-                    (paymentstate-transaction-id state)
-                    new-status)))
+    (with state
+      [:amount-paid new-paid]
+      [:status new-status])))
 
 ;; apply-payment-event: main dispatcher for payment state projection.
 (defn apply-payment-event [(state : Any) (event : Any)] : Any
@@ -329,7 +243,6 @@
      (if (nil? state)
          state
          (apply-payment-failed-to-payment state event))]
-    ;; BUG-10: F missing match case — RefundIssued removed from payment projection
     [_ state]))
 
 ;; =============================================================================
@@ -337,7 +250,6 @@
 ;; =============================================================================
 
 ;; order-status: derives the current status string from state fields.
-;; BUG-06: B nil access — cancelled-at is Long?, used in arithmetic (cross-module, not caught by beagle)
 (defn order-status [(state : OrderState)] : String
   (if (> (orderstate-cancelled-at state) 0)
       "cancelled"

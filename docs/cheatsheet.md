@@ -48,6 +48,24 @@ Emits Clojure `defrecord` plus generated typed accessors:
 
 Field syntax reuses wrapped param form `(name : Type)`. All fields must be typed.
 
+### `with` (record update)
+
+```racket
+(with record [:field1 new-value1] [:field2 new-value2])
+```
+
+Typed record update. Compiles to `(assoc record :field1 new-value1 :field2 new-value2)`.
+Type checker validates: field exists on the record type, value matches field type.
+Use instead of positional constructors when updating a few fields on an existing record.
+
+### `defenum`
+
+```racket
+(defenum OrderStatus :placed :confirmed :paid :shipped :delivered :cancelled)
+```
+
+Declares an enum value set. Compiles to `(def OrderStatus-values #{:placed ...})`.
+
 ## Expression forms
 
 ```racket
@@ -73,6 +91,7 @@ Field syntax reuses wrapped param form `(name : Type)`. All fields must be typed
 [item1 item2 ...]                   ; vector literal
 {k1 v1 k2 v2}                      ; map literal
 #{item1 item2}                      ; set literal
+(with record [:field value])        ; typed record update → assoc
 (fn-name arg1 arg2 ...)             ; function call
 ```
 

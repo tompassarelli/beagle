@@ -270,6 +270,40 @@ Emits:
 (defn employee-rate [r] (:rate r))
 ```
 
+### `with` (record update)
+
+```racket
+(with RECORD-EXPR [:FIELD1 VALUE1] [:FIELD2 VALUE2] ...)
+```
+
+Typed record update. Compiles to `(assoc record :field1 val1 :field2 val2 ...)`.
+
+The type checker verifies that each field keyword exists on the target record type
+and that the value type is compatible with the field's declared type. Returns the
+same record type.
+
+```racket
+(defrecord Order [(status : String) (total : Long) (shipped-count : Long)])
+(defn confirm [(o : Order)] : Order
+  (with o [:status "confirmed"]))
+```
+
+If the target expression doesn't resolve to a known record type, `with` still
+compiles (to `assoc`) but field validation is skipped.
+
+### `defenum`
+
+```racket
+(defenum NAME :VALUE1 :VALUE2 ...)
+```
+
+Declares an enum value set. Compiles to `(def NAME-values #{:value1 :value2 ...})`.
+
+```racket
+(defenum OrderStatus :placed :confirmed :paid :shipped :delivered :cancelled)
+;; → (def OrderStatus-values #{:placed :confirmed :paid :shipped :delivered :cancelled})
+```
+
 ### `defprotocol`
 
 ```racket

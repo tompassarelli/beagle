@@ -18,10 +18,11 @@ it as canonical when explaining the language.
 
 - Forms: `def`, `defn` (single + multi-arity), `fn`, `let`, `if`, `cond`,
   `when`, `do`, `match`, `loop`, `recur`, `for` (with `:when`), `doseq`,
-  `try`/`catch`/`finally`, `case`, `defrecord`, `defprotocol`,
-  `defmulti`/`defmethod`, `deftype`, `extend-type`, constructor calls
-  (`ClassName.`), keyword-as-function (`(:key map)`), call, vector literal,
-  map literal (`{}`), set literal (`#{}`), quote, threading (`->`, `->>`)
+  `try`/`catch`/`finally`, `case`, `defrecord`, `with` (typed record update),
+  `defenum`, `defprotocol`, `defmulti`/`defmethod`, `deftype`, `extend-type`,
+  constructor calls (`ClassName.`), keyword-as-function (`(:key map)`), call,
+  vector literal, map literal (`{}`), set literal (`#{}`), quote, threading
+  (`->`, `->>`)
 - Meta: `ns`, `define-mode`, `require`, `declare-extern`, `define-macro`,
   `import`, `unsafe` (top-level AND in expression position)
 - Param syntax: **wrapped only** — `(name : Type)`. Plus `{:keys [a b c]}`
@@ -54,7 +55,11 @@ it as canonical when explaining the language.
 - Cross-module type import: `(require module)` imports record types,
   constructors, accessors, keyword-access field types, AND all defn/def
   signatures — both qualified and unqualified names validated at call sites
-- 298 tests passing
+- `with` form: typed record update `(with rec [:field val])` → `(assoc rec :field val)`
+  with compile-time field existence and type checking
+- `defenum` form: `(defenum Name :a :b)` → `(def Name-values #{:a :b})`
+- Exhaustive match warnings: match on record types warns about missing cases
+- 315 tests passing
 - Empirical benchmarks: 40 tasks, 3 variants, head-to-head against raw Clojure,
   refactoring and bug-detection experiments — 5 real bugs caught
 - Type-system query tools: beagle-sig, beagle-fields, beagle-callers,

@@ -22,6 +22,15 @@ Your goal: fix as many bugs as possible so the codebase is correct.
 - You may read the domain spec at `experiments/e5-event-pipeline/spec/domain.md`
   for context on the business logic.
 
+## Key beagle forms
+
+- `(with record [:field1 val1] [:field2 val2])` — typed record update.
+  Compiles to `(assoc record :field1 val1 :field2 val2)`. The type checker
+  validates that each field exists on the record and the value type matches.
+  Use this instead of positional constructors when updating existing records.
+- `(defrecord Name [(f1 : T1) (f2 : T2)])` — record definition with typed fields.
+- `(match expr [(RecordType f1 f2) body] ...)` — pattern match with record dispatch.
+
 ## Approach
 
 1. Run `beagle-check-all` to get all type errors
