@@ -7,3 +7,5 @@ runtime/.cpcache/
 runtime/target/
 runtime/src/beagle/target.clj
 runtime/src/beagle/run_*.clj
+runtime/src/test/
+pipeline/

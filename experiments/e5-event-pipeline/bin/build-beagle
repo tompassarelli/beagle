@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Build all beagle modules in the given directory
+# Usage: bin/build-beagle [dir]
+
+DIR="${1:-golden/beagle}"
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+BEAGLE_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+cd "$SCRIPT_DIR"
+
+echo "Building beagle modules in $DIR..."
+"$BEAGLE_ROOT/bin/beagle-build-all" "$DIR/" --out "$SCRIPT_DIR/runtime/classes"
+echo "Done."
