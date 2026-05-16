@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Run all E5f smaller-model trials.
+# Usage: bin/run-e5f-all [model]
+# Example: bin/run-e5f-all          # runs sonnet + haiku (12 trials)
+#          bin/run-e5f-all sonnet   # runs sonnet only (6 trials)
+#          bin/run-e5f-all haiku    # runs haiku only (6 trials)
+
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$SCRIPT_DIR"
+
+MODEL_FILTER="${1:-all}"
+
+MODELS=()
+case "$MODEL_FILTER" in
+  all)    MODELS=(sonnet haiku) ;;
+  sonnet) MODELS=(sonnet) ;;
+  haiku)  MODELS=(haiku) ;;
+  *)      echo "Unknown model: $MODEL_FILTER"; exit 1 ;;
+esac
+
+RESULTS_FILE="results-e5f.md"
+
+echo "=== E5f: Smaller Model Experiment ==="
+echo "Models: ${MODELS[*]}"
+echo "Tracks: beagle, clojure"
+echo "Runs per combination: 3"
+echo "Total trials: $((${#MODELS[@]} * 2 * 3))"
+echo ""
+echo "Results will be appended to: $RESULTS_FILE"
+echo ""
+
+# Header for results
+if [ ! -f "$RESULTS_FILE" ]; then
+  cat > "$RESULTS_FILE" <<'EOF'
+# E5f: Smaller Model Results
+
+| Model | Track | Run | Behavioral Score | Time (s) |
+|-------|-------|-----|:---:|---:|
+EOF
+fi
+
+for MODEL in "${MODELS[@]}"; do
+  for TRACK in beagle clojure; do
+    for RUN in 1 2 3; do
+      TRIAL_DIR="trials/e5f-${MODEL}-${TRACK}-run${RUN}"
+
+      if [ -d "$TRIAL_DIR" ]; then
+        echo "SKIP: $TRIAL_DIR already exists"
+        continue
+      fi
+
+      echo ">>> Running: $MODEL / $TRACK / run $RUN"
+      echo ""
+
+      # Capture score from output
+      OUTPUT=$(bin/run-model-trial "$MODEL" "$TRACK" "$RUN" 2>&1) || true
+      echo "$OUTPUT"
+
+      # Extract score and time
+      SCORE=$(echo "$OUTPUT" | grep "^Score:" | tail -1 | grep -oP '\d+' || echo "?")
+      TIME=$(echo "$OUTPUT" | grep "^Agent finished in" | grep -oP '\d+' || echo "?")
+
+      # Append to results
+      echo "| $MODEL | $TRACK | $RUN | ${SCORE}% | $TIME |" >> "$RESULTS_FILE"
+
+      echo ""
+      echo "---"
+      echo ""
+    done
+  done
+done
+
+echo ""
+echo "=== All E5f trials complete ==="
+echo "Results: $RESULTS_FILE"
