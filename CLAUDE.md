@@ -50,8 +50,12 @@ it as canonical when explaining the language.
 - 298 tests passing
 - Empirical benchmarks: 40 tasks, 3 variants, head-to-head against raw Clojure,
   refactoring and bug-detection experiments — 5 real bugs caught
+- Type-system query tools: beagle-sig, beagle-fields, beagle-callers,
+  beagle-provides, beagle-impact (with clojure analogs for fair experiments)
 - v2 experiment framework: 5-module inventory system (1651 LOC), 444 verify
   assertions, 12 injected bugs (9 caught by beagle at compile time)
+- E4 scaled experiment: 13-module system (8570 LOC), 484 assertions, 35
+  injected bugs — first correctness divergence (beagle 3/3, clojure 0/3)
 
 ## Architecture
 
@@ -76,6 +80,10 @@ parse → check → emit
   Skipped in dynamic mode.
 - `private/emit.rkt` — AST → Clojure source string.
 - `private/expand-tool.rkt` — backend for `bin/beagle-expand`.
+- `private/query.rkt` — type-system query engine for `beagle-sig`,
+  `beagle-fields`, `beagle-callers`, `beagle-provides`, `beagle-impact`.
+- `private/check-all.rkt` — batch type-checker (10x vs sequential `beagle-check`).
+- `private/build-all.rkt` — batch compiler (9x vs sequential `beagle-build`).
 - `main.rkt` — language module; `#%module-begin` runs the pipeline,
   embeds resulting string, runtime `(display)`s it.
 
@@ -92,10 +100,55 @@ parse → check → emit
 ## Tools
 
 - `bin/beagle-build SOURCE.rkt [OUT.clj]` — single-file compile
-- `bin/beagle-build-all [DIR]` — directory walker
+- `bin/beagle-build-all FILE-OR-DIR... [--out DIR]` — batch compile in a single process (9x vs sequential)
+- `bin/beagle-check SOURCE.rkt` — type-check without emitting Clojure
+- `bin/beagle-check-all FILE-OR-DIR...` — batch type-check in a single process (10x vs sequential)
 - `bin/beagle-expand SOURCE.rkt` — print source after macro expansion
+- `bin/beagle-sig FN-NAME FILE-OR-DIR...` — print a function's typed signature
+- `bin/beagle-fields RECORD FILE-OR-DIR...` — print record fields, types, and accessors
+- `bin/beagle-callers FN-NAME FILE-OR-DIR...` — find all call sites of a function
+- `bin/beagle-provides FILE-OR-DIR...` — list all exports with types from a module
+- `bin/beagle-impact FN-NAME FILE-OR-DIR...` — show callers and impact of changing a signature
 - `raco test tests/` — test suite
 - `experiments/` — benchmark framework (see `experiments/README.md`)
+
+### Query tools for LLM agents
+
+The `beagle-sig`, `beagle-fields`, `beagle-callers`, `beagle-provides`,
+and `beagle-impact` tools expose the type system as a query interface.
+Instead of reading source files to understand a codebase, agents can ask
+the type system directly:
+
+```bash
+# "What does inv/can-fulfill? expect?"
+bin/beagle-sig can-fulfill? path/to/inventory.rkt
+# → can-fulfill? : [(Vec StockLevel) Long Long -> Boolean]
+
+# "What fields does an Invoice have?"
+bin/beagle-fields Invoice path/to/billing.rkt
+# → Invoice
+#   id : Long          accessor: invoice-id
+#   order-id : Long    accessor: invoice-order-id
+#   ...
+
+# "What does the billing module export?"
+bin/beagle-provides path/to/billing.rkt
+# → records: Invoice, Payment, CreditNote ...
+#   functions: create-invoice : [...], invoice-balance : [...] ...
+
+# "Who calls create-invoice and with what arity?"
+bin/beagle-callers create-invoice path/to/
+# → (create-invoice id order customer ...)  in audit-order (audit.rkt)
+
+# "If I change create-invoice's signature, what breaks?"
+bin/beagle-impact create-invoice path/to/
+# → callers with current arg counts
+```
+
+Clojure-analog tools (`bin/clj-sig`, `bin/clj-fields`, `bin/clj-callers`,
+`bin/clj-provides`) provide the same interface but without type information.
+These exist so experiments can give both tracks the same structural query
+tools, ensuring beagle's advantage comes from types, not tool availability.
 
 ## Lint warnings
 

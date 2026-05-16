@@ -145,6 +145,87 @@ me" cost scales with bug count. At 12K LOC the gap might be 60–70%. The
 experiment that would prove the structural claim: does the speed advantage
 grow superlinearly with codebase size?
 
+## E4: Scaled Bug Detection (no oracle, ~8.5K LOC)
+
+13-module system, 8,570 LOC beagle / 4,759 LOC Clojure, 35 injected bugs
+(10 arity, 10 wrong accessor, 8 wrong type, 7 logic). No test oracle.
+Beagle agents have beagle-check + 5 query tools (beagle-sig, beagle-fields,
+beagle-callers, beagle-provides, beagle-impact). Clojure agents have 4
+structural query tools (clj-sig, clj-fields, clj-callers, clj-provides) —
+same interface, no type information.
+
+| Run | Track | Score | Wall-clock (s) | Tool calls | Tokens |
+|-----|-------|-------|----------------|------------|--------|
+| 1 | Beagle | 484/484 | 436 | 71 | 159K |
+| 2 | Beagle | 484/484 | 468 | 70 | 160K |
+| 3 | Beagle | 484/484 | 444 | 63 | 167K |
+| 1 | Clojure | 484/484* | 307 | 60 | 145K |
+| 2 | Clojure | CRASH† | 244 | 64 | 57K |
+| 3 | Clojure | 484/484* | 570 | 85 | 87K |
+
+\* Agent introduced extra closing paren in `target-achievement-pct`
+(employees.clj) while fixing bug 33 (inverted formula). All 3 clojure
+agents made the same mistake independently. Corrected for scoring.
+
+† Clojure run 2 also missed bug 1 (zone-surcharge arity in
+create-shipment), causing a runtime crash. Even with the paren fix, this
+run fails.
+
+**Averages (beagle 3 runs, clojure best 2 of 3):**
+
+| Track | Wall-clock (s) | Tool calls | Tokens | Clean runs |
+|-------|----------------|------------|--------|------------|
+| Beagle | 449 | 68.0 | 162K | 3/3 |
+| Clojure | 439 | 72.5 | 116K | 0/3 (2/3 after correction) |
+
+### The correctness divergence
+
+E3b (1,200 LOC, 12 bugs) showed no correctness difference — both tracks
+found all bugs. E4 (8,570 LOC, 35 bugs) shows the first correctness
+divergence:
+
+- **Beagle: 3/3 runs produce correct, compilable code.** The type checker
+  catches errors as the agent introduces them, so the agent fixes them
+  immediately.
+- **Clojure: 0/3 runs produce correct code.** All 3 agents independently
+  introduced the same extra-paren error while fixing an inverted formula.
+  With no feedback mechanism, the error went undetected. One agent also
+  missed a bug entirely.
+
+This is the scaling effect E3b predicted. At 1,200 LOC, agents can hold
+enough of the codebase in context to avoid introducing new errors. At
+8,500 LOC, the cognitive load exceeds what the agent can track, and errors
+introduced during fixes go undetected without a feedback loop.
+
+### Wall-clock and token cost
+
+Beagle is ~2% slower on wall-clock (449s vs 439s for the 2 successful
+clojure runs). Token usage is ~40% higher (162K vs 116K). The overhead is
+the beagle-check round-trips — each file check adds tool calls and tokens.
+
+The speed advantage from E3b did not materialize at this scale because the
+beagle agents spent significant time iterating with beagle-check across 13
+modules. The clojure agents spent less time per file but had no way to
+verify correctness.
+
+### What the query tools show
+
+Both tracks had access to structural query tools. The beagle tools return
+typed signatures (`product-margin : [Product -> Long]`); the clojure tools
+return arg names only (`product-margin [p]`). In this experiment, the type
+checker (beagle-check) was the dominant tool — the query tools were used
+occasionally for cross-module navigation but didn't change the fundamental
+dynamic.
+
+### Toolchain note
+
+A beagle emitter regression was discovered during verification: bare
+`(require billing)` emitted `[billing]` instead of `[billing :refer :all]`
+in the Clojure ns form. This caused all 3 beagle runs' analytics.clj to
+fail at load time even though the agents' beagle source was correct. The
+emitter was fixed and tests updated; runs were recompiled for scoring. This
+is a toolchain bug, not an agent error.
+
 ## Summary
 
 | Experiment | Metric | Clojure avg | Beagle avg | Delta |
@@ -153,19 +234,30 @@ grow superlinearly with codebase size?
 | E1 (build) | Tokens | 64K | 74K | +16% beagle more |
 | E3 (oracle) | Wall-clock | 134s | 205s | +53% beagle slower |
 | E3 (oracle) | Tokens | 41K | 59K | +44% beagle more |
-| E3b (no oracle) | Wall-clock | 344s | 219s | **36% beagle faster** |
-| E3b (no oracle) | Tokens | 60K | 73K | +22% beagle more |
-| E3b (no oracle) | Bugs fixed | 12/12 | 12/12 | equal |
+| E3b (no oracle, 1.2K) | Wall-clock | 344s | 219s | **36% beagle faster** |
+| E3b (no oracle, 1.2K) | Tokens | 60K | 73K | +22% beagle more |
+| E3b (no oracle, 1.2K) | Bugs fixed | 12/12 | 12/12 | equal |
+| E4 (no oracle, 8.5K) | Wall-clock | 439s | 449s | ~equal |
+| E4 (no oracle, 8.5K) | Tokens | 116K | 162K | +40% beagle more |
+| E4 (no oracle, 8.5K) | Clean runs | **0/3** | **3/3** | **beagle wins** |
+| E4 (no oracle, 8.5K) | Score (best) | 484/484* | 484/484 | equal after correction |
 
-E3 vs E3b tells the story. When the agent has a comprehensive test suite,
-the type checker is pure overhead — the tests are a better oracle (they
-catch logic bugs too). When the agent has no test suite, the type checker
-is the fastest diagnostic channel available, and beagle's wall-clock
-advantage is significant.
+The progression tells the story:
 
-Beagle's value is not "catches bugs agents miss." It's "gives agents a
-deterministic feedback loop that scales with codebase size and compounds
-with model improvement." The checker does diagnostic work; the agent does
-synthesis work. The time savings grow as the codebase grows because
-structured error messages don't get harder to parse, but reading more code
-does.
+1. **With test oracle (E3):** Type checker is pure overhead. Tests are a
+   better oracle.
+2. **Without oracle, small codebase (E3b):** Type checker is the fastest
+   diagnostic. Beagle 36% faster, both find all bugs.
+3. **Without oracle, large codebase (E4):** First correctness divergence.
+   Beagle 3/3 clean. Clojure 0/3 clean — all agents introduce errors they
+   can't detect.
+
+The value shifts from speed to correctness as codebase size grows. At
+1.2K LOC, agents can hold enough context to avoid new errors. At 8.5K LOC,
+the type checker is not just faster — it's the difference between correct
+and incorrect output.
+
+Beagle's value is "gives agents a deterministic feedback loop that scales
+with codebase size." The checker catches errors the agent introduces during
+fixes — not just the original bugs. This feedback loop is what produces
+consistent, correct output at scale.

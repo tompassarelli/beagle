@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# beagle-check-all: type-check multiple .rkt files in one process.
+#
+# Usage:
+#   bin/beagle-check-all <file-or-dir> ...
+#
+# Directories are expanded to their .rkt contents. Reports all errors,
+# exits 0 if all clean. Supports BEAGLE_ERROR_FORMAT=json.
+
+set -euo pipefail
+
+if [[ $# -lt 1 ]]; then
+    echo "usage: beagle-check-all <file-or-dir> ..." >&2
+    exit 2
+fi
+
+args=""
+for a in "$@"; do
+  args="$args \"$a\""
+done
+racket -e "(require beagle/private/check-all) (run-check-all (list $args))"

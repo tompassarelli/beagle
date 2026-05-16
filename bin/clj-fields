@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# clj-fields: show a Clojure defrecord's fields (no types).
+# Analog of beagle-fields for fair experiment comparison.
+set -euo pipefail
+
+if [[ $# -lt 2 ]]; then
+    echo "usage: clj-fields <RecordName> <file-or-dir> ..." >&2
+    exit 2
+fi
+
+name="$1"; shift
+name_lower=$(echo "$name" | tr '[:upper:]' '[:lower:]')
+
+for a in "$@"; do
+    if [[ -d "$a" ]]; then
+        files=$(find "$a" -name '*.clj' -type f)
+    else
+        files="$a"
+    fi
+
+    for f in $files; do
+        grep -n "(defrecord $name " "$f" 2>/dev/null | while IFS=: read -r lineno content; do
+            fields=$(echo "$content" | grep -oP '\(defrecord '"$name"' \K\[[^]]*\]' | tr -d '[]')
+            echo "$name"
+            for field in $fields; do
+                echo "  $field    accessor: ${name_lower}-${field}"
+            done
+            echo "  constructor: ->$name"
+        done
+    done
+done

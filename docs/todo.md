@@ -48,3 +48,7 @@ Speculative; no commitment.
 - Hygienic macros (gensym-based for safe macros)
 - Cross-module defrecord import (constructors, accessors, keyword-access field types)
 - v2 experiment framework (5-module inventory system, 1651 LOC, 444 assertions, 12 injected bugs)
+- Type-system query tools: beagle-sig, beagle-fields, beagle-callers, beagle-provides, beagle-impact
+- Clojure analog query tools: clj-sig, clj-fields, clj-callers, clj-provides
+- E4 scaled experiment (13-module, 8570 LOC, 484 assertions, 35 injected bugs, first correctness divergence)
+- beagle-check-all / beagle-build-all: single-process batch check/build (9-10x vs sequential)

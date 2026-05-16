@@ -119,10 +119,10 @@
   (check-true (matches? #rx":require" out))
   (check-true (matches? #rx"\\[beagle\\.example\\.helpers :as h\\]" out)))
 
-(test-case "require without alias emits bare"
+(test-case "require without alias emits refer-all"
   (define out (compile '(require beagle.helpers)
                        '(def x 1)))
-  (check-true (matches? #rx"\\[beagle\\.helpers\\]" out)))
+  (check-true (matches? #rx"\\[beagle\\.helpers :refer :all\\]" out)))
 
 (test-case "clojure namespace require emits in ns :require"
   (define out (compile '(require clojure.string :as str)

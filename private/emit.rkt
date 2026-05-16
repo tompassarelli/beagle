@@ -71,7 +71,7 @@
              (require-entry-ns r)
              (require-entry-alias r))]
     [else
-     (format "[~a]" (require-entry-ns r))]))
+     (format "[~a :refer :all]" (require-entry-ns r))]))
 
 ;; Split a fully-qualified Java class symbol like 'java.io.File into
 ;; package ("java.io") and class name ("File"), then emit Clojure-style

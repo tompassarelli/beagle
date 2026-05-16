@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# clj-callers: find call sites of a Clojure function via grep.
+# Analog of beagle-callers for fair experiment comparison.
+set -euo pipefail
+
+if [[ $# -lt 2 ]]; then
+    echo "usage: clj-callers <fn-name> <file-or-dir> ..." >&2
+    exit 2
+fi
+
+name="$1"; shift
+
+for a in "$@"; do
+    if [[ -d "$a" ]]; then
+        files=$(find "$a" -name '*.clj' -type f)
+    else
+        files="$a"
+    fi
+
+    for f in $files; do
+        grep -n "($name " "$f" 2>/dev/null | grep -v "(defn $name " | while IFS=: read -r lineno content; do
+            echo "  $f:$lineno  $content"
+        done
+    done
+done

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Run E4 verification (13 modules, 484 assertions) against a source directory.
+#
+# Usage: bin/verify-e4 <src-dir>
+#
+# src-dir: directory containing all 13 .clj modules
+# Exit code: 0 if all assertions pass, 1 otherwise.
+
+set -euo pipefail
+
+if [[ $# -lt 1 ]]; then
+    echo "usage: bin/verify-e4 <src-dir>" >&2
+    exit 2
+fi
+
+src_dir="$(cd "$1" && pwd)"
+exp_root="$(cd "$(dirname "$0")/.." && pwd)"
+verify_script="${exp_root}/verify/e4.verify.clj"
+
+if [[ ! -f "$verify_script" ]]; then
+    echo "ERROR: verify script not found: $verify_script" >&2
+    exit 2
+fi
+
+for mod in catalog customers inventory orders reports shipping billing procurement promotions employees analytics notifications audit; do
+    if [[ ! -f "${src_dir}/${mod}.clj" ]]; then
+        echo "MISSING: ${src_dir}/${mod}.clj" >&2
+        exit 2
+    fi
+done
+
+exec clojure -Sdeps "{:paths [\"${src_dir}\"]}" -M "$verify_script"

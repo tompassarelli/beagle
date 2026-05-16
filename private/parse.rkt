@@ -235,6 +235,19 @@
           (define d (read))
           (if (eof-object? d) (reverse acc) (loop (cons d acc))))))))
 
+(define (read-beagle-syntax path)
+  (define src (simplify-path (path->complete-path
+                (if (path? path) path (string->path path)))))
+  (with-input-from-file src
+    (lambda ()
+      (port-count-lines! (current-input-port))
+      (read-line)
+      (parameterize ([read-square-bracket-with-tag BT]
+                     [current-readtable beagle-readtable])
+        (let loop ([acc '()])
+          (define d (read-syntax src))
+          (if (eof-object? d) (reverse acc) (loop (cons d acc))))))))
+
 (define (import-str-downcase s)
   (list->string (map char-downcase (string->list s))))
 
@@ -970,4 +983,8 @@
  (struct-out require-entry)
  parse-program
  DEFAULT-MODE
- DEFAULT-NAMESPACE)
+ DEFAULT-NAMESPACE
+ read-beagle-datums
+ read-beagle-syntax
+ parse-params
+ parse-record-fields)

@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -lt 2 ]]; then
+    echo "usage: beagle-impact <fn-name> <file-or-dir> ..." >&2
+    exit 2
+fi
+
+args=""
+for a in "$@"; do
+  args="$args \"$a\""
+done
+racket -e "(require beagle/private/query) (run-query (list \"impact\" $args))"
