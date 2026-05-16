@@ -10,14 +10,25 @@
 ;; --- top-level -------------------------------------------------------------
 
 (define (emit-program prog)
+  (define stxs (program-form-stxs prog))
   (string-append
    (emit-ns prog)
    "\n\n"
    (string-join
-    (for/list ([form (in-list (program-forms prog))])
-      (emit-form form))
+    (for/list ([form (in-list (program-forms prog))]
+               [stx  (in-list stxs)])
+      (string-append (emit-source-loc stx) (emit-form form)))
     "\n\n")
    "\n"))
+
+(define (emit-source-loc stx)
+  (define line (syntax-line stx))
+  (define src  (syntax-source stx))
+  (define file (and src (if (path? src) (path->string src) (~a src))))
+  (cond
+    [(and line file) (format "^{:line ~a :file ~v} " line file)]
+    [line            (format "^{:line ~a} " line)]
+    [else            ""]))
 
 (define (emit-ns prog)
   (define ns (program-namespace prog))
@@ -106,6 +117,12 @@
              (emit-expr (defmethod-form-dispatch-val f))
              (emit-params (defmethod-form-params f))
              (emit-body (defmethod-form-body f) "  "))]
+
+    [(deftype-form? f)
+     (emit-deftype f)]
+
+    [(extend-type-form? f)
+     (emit-extend-type f)]
 
     [else (emit-expr f)]))
 
@@ -238,6 +255,40 @@
       (format "(defn ~a-~a [r] (:~a r))" name-lower fname fname)))
   (string-join (cons record-line accessor-lines) "\n\n"))
 
+(define (emit-deftype f)
+  (define name (deftype-form-name f))
+  (define fields (deftype-form-fields f))
+  (define impls (deftype-form-impls f))
+  (define field-names
+    (string-join (map (lambda (p) (symbol->string (param-name p))) fields) " "))
+  (define impl-strs (map emit-type-impl impls))
+  (if (null? impl-strs)
+    (format "(deftype ~a [~a])" name field-names)
+    (format "(deftype ~a [~a]\n  ~a)" name field-names
+            (string-join impl-strs "\n  "))))
+
+(define (emit-extend-type f)
+  (define impl-strs (map emit-type-impl (extend-type-form-impls f)))
+  (format "(extend-type ~a\n  ~a)"
+          (extend-type-form-type-name f)
+          (string-join impl-strs "\n  ")))
+
+(define (emit-type-impl impl)
+  (define proto-line (symbol->string (type-impl-protocol-name impl)))
+  (define method-lines
+    (for/list ([m (type-impl-methods impl)])
+      (format "(~a [~a]\n    ~a)"
+              (impl-method-name m)
+              (emit-params (impl-method-params m))
+              (emit-body (impl-method-body m) "    "))))
+  (string-append proto-line "\n  " (string-join method-lines "\n  ")))
+
+(define (emit-seq-destructure d)
+  (define names-str (string-join (map symbol->string (seq-destructure-names d)) " "))
+  (if (seq-destructure-rest-name d)
+    (format "[~a & ~a]" names-str (seq-destructure-rest-name d))
+    (format "[~a]" names-str)))
+
 (define (string-downcase s)
   (list->string (map char-downcase (string->list s))))
 
@@ -249,6 +300,7 @@
 (define (emit-param p)
   (cond
     [(map-destructure? p) (emit-map-destructure p)]
+    [(seq-destructure? p) (emit-seq-destructure p)]
     [else (symbol->string (param-name p))]))
 
 (define (emit-map-destructure d)
@@ -267,6 +319,8 @@
        (cond
          [(map-destructure? (let-binding-name b))
           (emit-map-destructure (let-binding-name b))]
+         [(seq-destructure? (let-binding-name b))
+          (emit-seq-destructure (let-binding-name b))]
          [else (symbol->string (let-binding-name b))]))
      (format "~a ~a" name-str (emit-expr (let-binding-value b))))
    "\n   "))

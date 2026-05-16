@@ -72,7 +72,7 @@ Field syntax reuses wrapped param form `(name : Type)`. All fields must be typed
 (fn-name arg1 arg2 ...)             ; function call
 ```
 
-## Top-level: protocols and multimethods
+## Top-level: protocols, multimethods, and type implementations
 
 ```racket
 (defprotocol Name
@@ -81,6 +81,17 @@ Field syntax reuses wrapped param form `(name : Type)`. All fields must be typed
 
 (defmulti name dispatch-fn)
 (defmethod name dispatch-val [params] body...)
+
+(deftype Name [field1 field2]
+  ProtocolName
+  (method [this arg] body...))
+
+(extend-type TypeName
+  ProtocolName
+  (method [this arg] body...))
+
+(-> x (f) (g))                      ; thread-first
+(->> x (f) (g))                     ; thread-last
 ```
 
 ## Parameter syntax — wrapped, bare, or destructured
@@ -91,6 +102,7 @@ Field syntax reuses wrapped param form `(name : Type)`. All fields must be typed
 [(x : Long) y]                      ; mix wrapped + bare
 [{:keys [name age]}]                ; map destructuring
 [{:keys [x y] :as point}]          ; destructure + bind whole map
+[[a b & rest]]                      ; sequential destructuring
 ```
 
 One canonical form: wrapped `(name : Type)`. The marker is `:` (single colon
@@ -103,6 +115,7 @@ idiom per concept.
 (let [x 1 y 2] ...)                       ; untyped
 (let [(x : Long) 1 (y : Long) 2] ...)     ; typed (wrapped — same shape as params)
 (let [(x : Long) 1 y 2] ...)              ; mix
+(let [[a b] pair] ...)                     ; sequential destructuring
 ```
 
 ## Types

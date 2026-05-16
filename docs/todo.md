@@ -2,22 +2,11 @@
 
 ## Next
 
-- **Source mapping (comprehensive).** Goal: 99% automated source-mapping
-  so Clojure runtime errors point back at originating beagle source.
-  Current state: per-form source locations exist for compile-time errors.
-  Remaining: emit `.clj.map` or inline `^{:line N}` metadata so runtime
-  stacktraces map back to `.rkt` source.
-- **`deftype` / `extend-type`.** Protocol implementation on types.
-  `defprotocol` exists; need the other side.
-- **Atom/swap!/reset!.** Basic concurrency primitives. Common in real
-  Clojure apps.
-- **Threading macros `->`, `->>`.** Could be user-defined macros, but
-  they're universal enough to consider built-in.
+- **Expression-level source mapping.** Top-level forms have
+  `^{:line N :file "path"}` metadata; extending to inner expressions
+  (function calls, let bodies) would give line-level stack traces.
 - **More stdlib typing.** ~607 of 1000+ Clojure functions typed.
-  Priority: remaining high-use functions that would catch real bugs.
-- **Sequential destructuring.** `[a b & rest]` in let/fn/defn.
-  Map destructuring (`{:keys}`) is done; vector destructuring is the
-  other half.
+  `bin/gen-stdlib-types` automates remaining coverage.
 
 ## Someday
 
@@ -32,16 +21,19 @@ Speculative; no commitment.
 - All core forms (def, defn, fn, let, if, cond, when, do, call, vector, quote)
 - try/catch/finally, doseq, case, constructor calls (ClassName.)
 - defprotocol, defmulti/defmethod
+- deftype, extend-type (protocol implementation on types)
 - Keyword-as-function (`(:key map)`) with record field type inference
 - Map literals (`{}`), set literals (`#{}`), import (Java classes)
 - Map destructuring (`{:keys [a b c]}`, `{:keys [a b c] :as m}`) in params and let
+- Sequential destructuring (`[a b & rest]`) in params and let
+- Threading macros (`->`, `->>`) — pass-through to Clojure
 - Meta: ns, define-mode, require, declare-extern, define-macro, import, unsafe
 - Types: primitives, function types (incl. variadic), parametric, union, polymorphic (forall), Any
 - Macros: safe (gensym-hygienic) / unsafe with &rest and splice
 - Custom reader preserving `[]`/`()`, intercepting `{}`/`#{}`
-- Stdlib extern catalog (~607 functions)
+- Stdlib extern catalog (~607 functions), bin/gen-stdlib-types auto-generator
 - bin/beagle-build, bin/beagle-build-all, bin/beagle-expand
-- 258-test suite
+- 284-test suite
 - experiments/ benchmark framework (40 tasks × 3 variants, gen-prompts + score + verify-behavior)
 - Head-to-head benchmark (8 programs, beagle vs raw Clojure, 16/16 pass)
 - Refactoring experiment (overhead-pct cascade, 2/2 pass)
@@ -56,6 +48,8 @@ Speculative; no commitment.
 - Flow-sensitive type narrowing in if/cond/when
 - Cross-file type import via (require module) / (require module :as alias)
 - Polymorphic stdlib (map, filter, identity etc.)
+- Atom/swap!/reset! (typed in stdlib — no special form needed)
 - raco beagle build|check|expand subcommands
 - Per-statement source locations for compile-time errors
+- Top-level source mapping (`^{:line N :file "path"}` metadata on emitted forms)
 - Hygienic macros (gensym-based for safe macros)

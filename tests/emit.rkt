@@ -390,3 +390,49 @@
 (test-case "map destructure in let emits"
   (define out (compile `(let ,(br (mp ':keys (br 'x 'y)) 'point) (+ x y))))
   (check-true (matches? #rx"\\{:keys \\[x y\\]\\} point" out)))
+
+;; --- sequential destructuring ------------------------------------------------
+
+(test-case "sequential destructure in params emits"
+  (define out (compile `(defn process ,(br (br 'a 'b 'c)) (println a))))
+  (check-true (matches? #rx"\\[a b c\\]" out)))
+
+(test-case "sequential destructure with & rest emits"
+  (define out (compile `(defn process ,(br (br 'a 'b '& 'rest)) (println a))))
+  (check-true (matches? #rx"\\[a b & rest\\]" out)))
+
+(test-case "sequential destructure in let emits"
+  (define out (compile `(let ,(br (br 'a 'b) 'coll) (+ a b))))
+  (check-true (matches? #rx"\\[a b\\] coll" out)))
+
+;; --- deftype / extend-type ---------------------------------------------------
+
+(test-case "deftype emits"
+  (define out (compile `(deftype Point ,(br '(x : Long) '(y : Long))
+                          Printable
+                          (to-string ,(br '(self : Any)) (str x y)))))
+  (check-true (matches? #rx"\\(deftype Point \\[x y\\]" out))
+  (check-true (matches? #rx"Printable" out))
+  (check-true (matches? #rx"\\(to-string \\[self\\]" out)))
+
+(test-case "deftype without impls emits"
+  (define out (compile `(deftype Pair ,(br '(fst : Any) '(snd : Any)))))
+  (check-true (matches? #rx"\\(deftype Pair \\[fst snd\\]\\)" out)))
+
+(test-case "extend-type emits"
+  (define out (compile `(extend-type String
+                          Showable
+                          (show ,(br '(self : String)) (str self)))))
+  (check-true (matches? #rx"\\(extend-type String" out))
+  (check-true (matches? #rx"Showable" out))
+  (check-true (matches? #rx"\\(show \\[self\\]" out)))
+
+;; --- threading macros pass through -------------------------------------------
+
+(test-case "-> emits as Clojure threading"
+  (define out (compile '(def x (-> m :name))))
+  (check-true (matches? #rx"\\(-> m :name\\)" out)))
+
+(test-case "->> emits correctly"
+  (define out (compile '(def x (->> coll (map inc) (filter even?)))))
+  (check-true (matches? #rx"\\(->> coll \\(map inc\\) \\(filter even\\?\\)\\)" out)))

@@ -548,3 +548,75 @@
    (lambda ()
      (check-prog
       `(let ,(br (mp ':keys (br 'x 'y)) '(hash-map :x 1 :y 2)) (+ x y))))))
+
+;; --- sequential destructuring ------------------------------------------------
+
+(test-case "sequential destructure bindings visible in body"
+  (check-not-exn
+   (lambda ()
+     (check-prog
+      `(defn process ,(br (br 'a 'b 'c)) (println a))))))
+
+(test-case "sequential destructure with & rest visible"
+  (check-not-exn
+   (lambda ()
+     (check-prog
+      `(defn process ,(br (br 'a 'b '& 'rest)) (println rest))))))
+
+(test-case "sequential destructure in let visible"
+  (check-not-exn
+   (lambda ()
+     (check-prog
+      `(let ,(br (br 'a 'b) '(range 2)) (+ a b))))))
+
+;; --- deftype / extend-type ---------------------------------------------------
+
+(test-case "deftype passes type check"
+  (check-not-exn
+   (lambda ()
+     (check-prog
+      `(deftype Point ,(br '(x : Long) '(y : Long)))))))
+
+(test-case "deftype with protocol impl passes"
+  (check-not-exn
+   (lambda ()
+     (check-prog
+      `(defprotocol Printable
+         (to-string ,(br '(self : Any)) : String))
+      `(deftype Point ,(br '(x : Long) '(y : Long))
+         Printable
+         (to-string ,(br '(self : Any)) "point"))))))
+
+(test-case "deftype constructor is typed"
+  (check-not-exn
+   (lambda ()
+     (check-prog
+      `(deftype Point ,(br '(x : Long) '(y : Long)))
+      '(def p (->Point 1 2))))))
+
+(test-case "deftype constructor wrong arg type errors"
+  (check-exn exn:fail?
+   (lambda ()
+     (check-prog
+      `(deftype Point ,(br '(x : Long) '(y : Long)))
+      '(def p (->Point "one" 2))))))
+
+(test-case "extend-type passes type check"
+  (check-not-exn
+   (lambda ()
+     (check-prog
+      `(extend-type String
+         Showable
+         (show ,(br '(self : String)) (str self)))))))
+
+;; --- threading macros --------------------------------------------------------
+
+(test-case "-> passes type check"
+  (check-not-exn
+   (lambda ()
+     (check-prog '(def x (-> m :name))))))
+
+(test-case "->> passes type check (args are standalone valid)"
+  (check-not-exn
+   (lambda ()
+     (check-prog '(def x (->> "hello" (str " world") (str "!")))))))

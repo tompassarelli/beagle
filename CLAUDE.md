@@ -18,13 +18,15 @@ it as canonical when explaining the language.
 
 - Forms: `def`, `defn`, `fn`, `let`, `if`, `cond`, `when`, `do`, `loop`,
   `recur`, `for` (with `:when`), `doseq`, `try`/`catch`/`finally`, `case`,
-  `defrecord`, `defprotocol`, `defmulti`/`defmethod`, constructor calls
-  (`ClassName.`), keyword-as-function (`(:key map)`), call, vector literal,
-  map literal (`{}`), set literal (`#{}`), quote
+  `defrecord`, `defprotocol`, `defmulti`/`defmethod`, `deftype`,
+  `extend-type`, constructor calls (`ClassName.`), keyword-as-function
+  (`(:key map)`), call, vector literal, map literal (`{}`), set literal
+  (`#{}`), quote, threading (`->`, `->>`)
 - Meta: `ns`, `define-mode`, `require`, `declare-extern`, `define-macro`,
   `import`, `unsafe` (top-level AND in expression position)
 - Param syntax: **wrapped only** — `(name : Type)`. Plus `{:keys [a b c]}`
-  map destructuring in params and let bindings.
+  map destructuring and `[a b & rest]` sequential destructuring in params
+  and let bindings.
 - Types: primitives (`String`, `Long`, `Double`, `Boolean`, `Keyword`,
   `Symbol`, `Nil`, `Any` — no aliases), user-defined record types,
   function types (variadic with `& T`), parametric (`Vec`, `Map`, `Set`,
@@ -42,7 +44,8 @@ it as canonical when explaining the language.
 - Structured error output: `BEAGLE_ERROR_FORMAT=json` for agent consumption
 - Java interop: `.method`, `Class/static`, `*dynamic-vars*`, constructors,
   `import`; ~30 common methods/statics pre-typed in stdlib
-- 258 tests passing
+- Source mapping: `^{:line N :file "path"}` metadata on emitted top-level forms
+- 284 tests passing
 - Empirical benchmarks: 40 tasks, 3 variants, head-to-head against raw Clojure,
   refactoring and bug-detection experiments — 5 real bugs caught
 
@@ -58,7 +61,7 @@ parse → check → emit
   `#"..."` (regex) via `MAP-TAG`/`SET-TAG`/`#%regex`.
 - `private/types.rkt` — type AST, parser, compatibility checker.
   `MAP-TAG`/`SET-TAG` are well-known symbols (`#%map`/`#%set`), not gensyms.
-- `private/stdlib-types.rkt` — pre-typed Clojure stdlib catalog (~435 functions).
+- `private/stdlib-types.rkt` — pre-typed Clojure stdlib catalog (~607 functions).
 - `private/macros.rkt` — macro registry, naive substitution, depth-capped
   recursive expansion, safe/unsafe boundary.
 - `private/parse.rkt` — source → AST. Two passes: meta-form collection

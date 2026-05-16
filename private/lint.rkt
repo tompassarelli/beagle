@@ -63,15 +63,23 @@
 
 ;; --- shadowed bindings -----------------------------------------------------
 
+(define (add-param-to-scope! p scope)
+  (cond
+    [(map-destructure? p)
+     (for ([k (in-list (map-destructure-keys p))]) (hash-set! scope k #t))]
+    [(seq-destructure? p)
+     (for ([n (in-list (seq-destructure-names p))]) (hash-set! scope n #t))
+     (when (seq-destructure-rest-name p)
+       (hash-set! scope (seq-destructure-rest-name p) #t))]
+    [else (hash-set! scope (param-name p) #t)]))
+
 (define (lint-shadows prog)
   (for ([form (in-list (program-forms prog))])
     (cond
       [(defn-form? form)
        (define scope (make-hasheq))
        (for ([p (in-list (defn-form-params form))])
-         (if (map-destructure? p)
-           (for ([k (in-list (map-destructure-keys p))]) (hash-set! scope k #t))
-           (hash-set! scope (param-name p) #t)))
+         (add-param-to-scope! p scope))
        (for ([e (in-list (defn-form-body form))])
          (check-shadow e scope (defn-form-name form)))]
       [(def-form? form)
@@ -79,11 +87,25 @@
       [(defmethod-form? form)
        (define scope (make-hasheq))
        (for ([p (in-list (defmethod-form-params form))])
-         (if (map-destructure? p)
-           (for ([k (in-list (map-destructure-keys p))]) (hash-set! scope k #t))
-           (hash-set! scope (param-name p) #t)))
+         (add-param-to-scope! p scope))
        (for ([e (in-list (defmethod-form-body form))])
          (check-shadow e scope (defmethod-form-name form)))]
+      [(deftype-form? form)
+       (for ([impl (in-list (deftype-form-impls form))])
+         (for ([m (in-list (type-impl-methods impl))])
+           (define scope (make-hasheq))
+           (for ([p (in-list (impl-method-params m))])
+             (add-param-to-scope! p scope))
+           (for ([e (in-list (impl-method-body m))])
+             (check-shadow e scope (impl-method-name m)))))]
+      [(extend-type-form? form)
+       (for ([impl (in-list (extend-type-form-impls form))])
+         (for ([m (in-list (type-impl-methods impl))])
+           (define scope (make-hasheq))
+           (for ([p (in-list (impl-method-params m))])
+             (add-param-to-scope! p scope))
+           (for ([e (in-list (impl-method-body m))])
+             (check-shadow e scope (impl-method-name m)))))]
       [else (void)])))
 
 (define (check-shadow form scope ctx)
@@ -96,6 +118,14 @@
           (for ([k (in-list (map-destructure-keys p))])
             (when (hash-has-key? scope k) (warn-shadow "parameter" k ctx))
             (hash-set! inner k #t))]
+         [(seq-destructure? p)
+          (for ([n (in-list (seq-destructure-names p))])
+            (when (hash-has-key? scope n) (warn-shadow "parameter" n ctx))
+            (hash-set! inner n #t))
+          (when (seq-destructure-rest-name p)
+            (define rn (seq-destructure-rest-name p))
+            (when (hash-has-key? scope rn) (warn-shadow "parameter" rn ctx))
+            (hash-set! inner rn #t))]
          [else
           (define n (param-name p))
           (when (hash-has-key? scope n) (warn-shadow "parameter" n ctx))
@@ -110,6 +140,14 @@
           (for ([k (in-list (map-destructure-keys n))])
             (when (hash-has-key? scope k) (warn-shadow "let binding" k ctx))
             (hash-set! inner k #t))]
+         [(seq-destructure? n)
+          (for ([k (in-list (seq-destructure-names n))])
+            (when (hash-has-key? scope k) (warn-shadow "let binding" k ctx))
+            (hash-set! inner k #t))
+          (when (seq-destructure-rest-name n)
+            (define rn (seq-destructure-rest-name n))
+            (when (hash-has-key? scope rn) (warn-shadow "let binding" rn ctx))
+            (hash-set! inner rn #t))]
          [else
           (when (hash-has-key? scope n) (warn-shadow "let binding" n ctx))
           (hash-set! inner n #t)])
@@ -118,7 +156,7 @@
     [(defn-form name params _ body)
      (define inner (scope-copy scope))
      (for ([p (in-list params)])
-       (hash-set! inner (param-name p) #t))
+       (add-param-to-scope! p inner))
      (for ([e (in-list body)]) (check-shadow e inner name))]
     [(if-form c t e)
      (check-shadow c scope ctx)
@@ -273,6 +311,14 @@
      (when default (collect-symbols default used))]
     [(defmethod-form _ _ _ body)
      (for ([e (in-list body)]) (collect-symbols e used))]
+    [(deftype-form _ _ impls)
+     (for ([impl (in-list impls)])
+       (for ([m (in-list (type-impl-methods impl))])
+         (for ([e (in-list (impl-method-body m))]) (collect-symbols e used))))]
+    [(extend-type-form _ impls)
+     (for ([impl (in-list impls)])
+       (for ([m (in-list (type-impl-methods impl))])
+         (for ([e (in-list (impl-method-body m))]) (collect-symbols e used))))]
     [_ (void)]))
 
 (provide lint-program!)

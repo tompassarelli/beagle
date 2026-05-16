@@ -234,6 +234,46 @@ Example:
   (* (:width m) (:height m)))
 ```
 
+### `deftype`
+
+```racket
+(deftype NAME [FIELDS...]
+  ProtocolName
+  (method-name [PARAMS] BODY...)
+  ...)
+```
+
+Defines a Java class implementing one or more protocols. Fields are bare
+names (not typed params). Multiple protocol implementations allowed.
+
+Example:
+```racket
+(deftype Counter [n]
+  IDeref
+  (deref [this] n)
+  Printable
+  (to-string [this] (str "Counter(" n ")")))
+```
+
+### `extend-type`
+
+```racket
+(extend-type TYPE-NAME
+  ProtocolName
+  (method-name [PARAMS] BODY...)
+  ...)
+```
+
+Extends an existing type with protocol implementations. Same protocol/method
+syntax as `deftype` but without fields.
+
+Example:
+```racket
+(extend-type String
+  Greetable
+  (greet [this] (str "Hello, " this)))
+```
+
 ### `try` / `catch` / `finally`
 
 ```racket
@@ -342,6 +382,40 @@ Example:
 (let [{:keys [x y] :as point} (get-coords)]
   (println point)
   (+ x y))
+```
+
+### Sequential destructuring
+
+```racket
+[NAME NAME & REST-NAME]
+```
+
+Works in `defn`, `fn`, and `let` parameter/binding positions. Extracts
+positional values from a sequential collection.
+
+Example:
+```racket
+(defn first-two [[a b & rest]]
+  (println a b (count rest)))
+
+(let [[x y] pair]
+  (+ x y))
+```
+
+### Threading macros
+
+```racket
+(-> VALUE FORMS...)
+(->> VALUE FORMS...)
+```
+
+Pass-through to Clojure — emitted verbatim. Thread-first inserts the value
+as the first argument of each form; thread-last inserts as the last.
+
+Example:
+```racket
+(-> person :name (str/upper-case))
+(->> items (filter even?) (map inc) (reduce +))
 ```
 
 ## Data

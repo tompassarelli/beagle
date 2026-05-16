@@ -66,6 +66,16 @@
          (hash-set! env (protocol-method-name m)
                     (type-fn (map (lambda (p) (or (param-type p) ANY)) m-params)
                              #f m-ret)))]
+      [(deftype-form name fields impls)
+       (define rec-type (type-prim name))
+       (hash-set! env (string->symbol (string-append "->" (symbol->string name)))
+                  (type-fn (map param-type fields) #f rec-type))
+       (define field-map (make-hash))
+       (for ([f (in-list fields)])
+         (hash-set! field-map
+                    (string->symbol (string-append ":" (symbol->string (param-name f))))
+                    (param-type f)))
+       (hash-set! RECORD-FIELDS name field-map)]
       [(defmulti-form name dispatch-fn)
        (hash-set! env name (type-fn (list ANY) (type-prim 'Any) ANY))]
       [(defmethod-form name _ params body)
@@ -82,7 +92,10 @@
   out)
 
 (define (param-or-destr-type p)
-  (if (map-destructure? p) ANY (or (param-type p) ANY)))
+  (cond
+    [(map-destructure? p) ANY]
+    [(seq-destructure? p) ANY]
+    [else (or (param-type p) ANY)]))
 
 ;; --- check a top-level form ------------------------------------------------
 
@@ -107,6 +120,16 @@
 
     [(record-form _ _) (void)]
     [(protocol-form _ _) (void)]
+    [(deftype-form _ _ impls)
+     (for ([impl (in-list impls)])
+       (for ([m (in-list (type-impl-methods impl))])
+         (define m-env (extend-with-params env (impl-method-params m)))
+         (last-expr-type (impl-method-body m) m-env)))]
+    [(extend-type-form _ impls)
+     (for ([impl (in-list impls)])
+       (for ([m (in-list (type-impl-methods impl))])
+         (define m-env (extend-with-params env (impl-method-params m)))
+         (last-expr-type (impl-method-body m) m-env)))]
     [(defmulti-form _ _) (void)]
     [(defmethod-form name _ params body)
      (define body-env (extend-with-params env params))
@@ -123,6 +146,11 @@
          (hash-set! out k ANY))
        (when (map-destructure-as-name p)
          (hash-set! out (map-destructure-as-name p) ANY))]
+      [(seq-destructure? p)
+       (for ([n (in-list (seq-destructure-names p))])
+         (hash-set! out n ANY))
+       (when (seq-destructure-rest-name p)
+         (hash-set! out (seq-destructure-rest-name p) ANY))]
       [else
        (hash-set! out (param-name p) (or (param-type p) ANY))]))
   out)
@@ -287,7 +315,7 @@
      (last-expr-type (for-form-body e) body-env)
      ANY]
     [(fn-form? e)
-     (define p-types (map (lambda (p) (or (param-type p) ANY)) (fn-form-params e)))
+     (define p-types (map param-or-destr-type (fn-form-params e)))
      (define body-env (extend-with-params env (fn-form-params e)))
      (define ret (or (fn-form-return-type e) (last-expr-type (fn-form-body e) body-env)))
      (type-fn p-types #f ret)]
@@ -409,6 +437,11 @@
          (hash-set! out k ANY))
        (when (map-destructure-as-name bname)
          (hash-set! out (map-destructure-as-name bname) (or declared inferred ANY)))]
+      [(seq-destructure? bname)
+       (for ([n (in-list (seq-destructure-names bname))])
+         (hash-set! out n ANY))
+       (when (seq-destructure-rest-name bname)
+         (hash-set! out (seq-destructure-rest-name bname) ANY))]
       [else
        (when declared
          (unless (type-compatible? inferred declared)

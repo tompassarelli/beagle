@@ -134,6 +134,11 @@
 
 (struct param       (name type)                             #:transparent)
 (struct map-destructure (keys as-name)                      #:transparent)  ; {:keys [a b c] :as name}
+(struct seq-destructure (names rest-name)                    #:transparent)  ; [a b & rest]
+(struct deftype-form (name fields impls)                     #:transparent)
+(struct extend-type-form (type-name impls)                   #:transparent)
+(struct type-impl    (protocol-name methods)                 #:transparent)
+(struct impl-method  (name params body)                      #:transparent)
 (struct let-binding (name type value)                       #:transparent)
 
 ;; A require entry: target namespace + optional :as alias
@@ -424,6 +429,12 @@
     [(list 'defmethod (? symbol? name) dispatch-val params-form body ...)
      (defmethod-form name (parse-expr dispatch-val) (parse-params params-form) (parse-body body))]
 
+    [(list 'deftype (? symbol? name) fields-form rest ...)
+     (deftype-form name (parse-record-fields fields-form) (parse-type-impls rest))]
+
+    [(list 'extend-type (? symbol? type-name) rest ...)
+     (extend-type-form type-name (parse-type-impls rest))]
+
     [(list 'fn params-form marker return-type body ...)
      #:when (annotation-marker? marker)
      (fn-form (parse-params params-form) (parse-type return-type) (parse-body body))]
@@ -618,6 +629,9 @@
       [else (error 'beagle "expected parameter list, got: ~v" p)]))
   (for/list ([item (in-list items)])
     (cond
+      ;; Sequential destructure: [a b & rest]
+      [(bracketed? item)
+       (parse-seq-destructure item)]
       ;; Map destructure: {:keys [a b c]} or {:keys [a b c] :as m}
       [(map-destructure-form? item)
        (parse-map-destructure item)]
@@ -684,6 +698,13 @@
        (loop (cddr rest)
              (cons (let-binding destr #f (parse-expr (cadr rest)))
                    acc))]
+      ;; Sequential destructure: [a b & rest] value
+      [(and (>= (length rest) 2)
+            (bracketed? (car rest)))
+       (define destr (parse-seq-destructure (car rest)))
+       (loop (cddr rest)
+             (cons (let-binding destr #f (parse-expr (cadr rest)))
+                   acc))]
       ;; Untyped: name value (2 tokens)
       [(and (>= (length rest) 2)
             (symbol? (car rest)))
@@ -711,6 +732,49 @@
        (error 'beagle
               "defrecord field must be (name : Type), got: ~v"
               item)])))
+
+(define (parse-type-impls rest)
+  (let loop ([items rest] [cur-proto #f] [cur-methods '()] [acc '()])
+    (cond
+      [(null? items)
+       (if cur-proto
+         (reverse (cons (type-impl cur-proto (reverse cur-methods)) acc))
+         (reverse acc))]
+      [(symbol? (car items))
+       (define new-acc
+         (if cur-proto
+           (cons (type-impl cur-proto (reverse cur-methods)) acc)
+           acc))
+       (loop (cdr items) (car items) '() new-acc)]
+      [(pair? (car items))
+       (unless cur-proto
+         (error 'beagle "deftype/extend-type: method before protocol name"))
+       (loop (cdr items) cur-proto
+             (cons (parse-impl-method (car items)) cur-methods) acc)]
+      [else
+       (error 'beagle "deftype/extend-type: unexpected form: ~v" (car items))])))
+
+(define (parse-impl-method d)
+  (match d
+    [(list (? symbol? name) params-form body ...)
+     (impl-method name (parse-params params-form) (parse-body body))]
+    [_ (error 'beagle "bad method implementation: ~v" d)]))
+
+(define (parse-seq-destructure item)
+  (define body (bracket-body item))
+  (define-values (names rest-name)
+    (let loop ([items body] [acc '()])
+      (cond
+        [(null? items) (values (reverse acc) #f)]
+        [(eq? (car items) '&)
+         (unless (and (= (length (cdr items)) 1) (symbol? (cadr items)))
+           (error 'beagle "sequential destructure: & must be followed by exactly one symbol"))
+         (values (reverse acc) (cadr items))]
+        [(symbol? (car items))
+         (loop (cdr items) (cons (car items) acc))]
+        [else
+         (error 'beagle "sequential destructure: expected symbol, got: ~v" (car items))])))
+  (seq-destructure names rest-name))
 
 (define (parse-for-clauses b)
   (define items
@@ -773,6 +837,11 @@
  (struct-out defmulti-form)
  (struct-out defmethod-form)
  (struct-out map-destructure)
+ (struct-out seq-destructure)
+ (struct-out deftype-form)
+ (struct-out extend-type-form)
+ (struct-out type-impl)
+ (struct-out impl-method)
  dot-method-sym?
  static-method-sym?
  dynamic-var-sym?

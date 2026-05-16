@@ -609,3 +609,66 @@
   (check-true (let-form? f))
   (define b (car (let-form-bindings f)))
   (check-true (map-destructure? (let-binding-name b))))
+
+;; --- sequential destructuring ------------------------------------------------
+
+(test-case "sequential destructure in params"
+  (define f (car (parse-one `(defn process ,(br (br 'a 'b 'c)) (println a)))))
+  (check-true (defn-form? f))
+  (define p (car (defn-form-params f)))
+  (check-true (seq-destructure? p))
+  (check-equal? (seq-destructure-names p) '(a b c))
+  (check-false (seq-destructure-rest-name p)))
+
+(test-case "sequential destructure with & rest"
+  (define f (car (parse-one `(defn process ,(br (br 'a 'b '& 'rest)) (println a)))))
+  (define p (car (defn-form-params f)))
+  (check-true (seq-destructure? p))
+  (check-equal? (seq-destructure-names p) '(a b))
+  (check-eq? (seq-destructure-rest-name p) 'rest))
+
+(test-case "sequential destructure in let binding"
+  (define f (car (parse-one `(let ,(br (br 'a 'b) 'coll) (+ a b)))))
+  (check-true (let-form? f))
+  (define b (car (let-form-bindings f)))
+  (check-true (seq-destructure? (let-binding-name b)))
+  (check-equal? (seq-destructure-names (let-binding-name b)) '(a b)))
+
+;; --- deftype / extend-type ---------------------------------------------------
+
+(test-case "deftype parses"
+  (define f (car (parse-one `(deftype Point ,(br '(x : Long) '(y : Long))
+                               Printable
+                               (to-string ,(br '(self : Any)) (str x y))))))
+  (check-true (deftype-form? f))
+  (check-eq? (deftype-form-name f) 'Point)
+  (check-equal? (length (deftype-form-fields f)) 2)
+  (check-equal? (length (deftype-form-impls f)) 1)
+  (check-eq? (type-impl-protocol-name (car (deftype-form-impls f))) 'Printable)
+  (check-equal? (length (type-impl-methods (car (deftype-form-impls f)))) 1))
+
+(test-case "deftype without impls"
+  (define f (car (parse-one `(deftype Pair ,(br '(fst : Any) '(snd : Any))))))
+  (check-true (deftype-form? f))
+  (check-equal? (deftype-form-impls f) '()))
+
+(test-case "extend-type parses"
+  (define f (car (parse-one `(extend-type String
+                               Showable
+                               (show ,(br '(self : String)) (str self))))))
+  (check-true (extend-type-form? f))
+  (check-eq? (extend-type-form-type-name f) 'String)
+  (check-equal? (length (extend-type-form-impls f)) 1))
+
+;; --- threading macros pass through as call-forms ----------------------------
+
+(test-case "-> passes through as call-form"
+  (define f (car (parse-one '(-> x (f a) g))))
+  (check-true (call-form? f))
+  (check-eq? (call-form-fn f) '->)
+  (check-equal? (length (call-form-args f)) 3))
+
+(test-case "->> passes through as call-form"
+  (define f (car (parse-one '(->> coll (map inc) (filter even?)))))
+  (check-true (call-form? f))
+  (check-eq? (call-form-fn f) '->>))
