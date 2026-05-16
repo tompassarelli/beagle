@@ -2,9 +2,6 @@
 
 ## Next
 
-- **Expression-level source mapping.** Top-level forms have
-  `^{:line N :file "path"}` metadata; extending to inner expressions
-  (function calls, let bodies) would give line-level stack traces.
 - **More stdlib typing.** ~607 of 1000+ Clojure functions typed.
   `bin/gen-stdlib-types` automates remaining coverage.
 
@@ -52,4 +49,5 @@ Speculative; no commitment.
 - raco beagle build|check|expand subcommands
 - Per-statement source locations for compile-time errors
 - Top-level source mapping (`^{:line N :file "path"}` metadata on emitted forms)
+- Expression-level source mapping (every compound form gets `^{:line N :file "path"}` metadata)
 - Hygienic macros (gensym-based for safe macros)

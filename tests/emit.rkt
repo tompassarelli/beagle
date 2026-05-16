@@ -436,3 +436,49 @@
 (test-case "->> emits correctly"
   (define out (compile '(def x (->> coll (map inc) (filter even?)))))
   (check-true (matches? #rx"\\(->> coll \\(map inc\\) \\(filter even\\?\\)\\)" out)))
+
+;; --- expression-level source mapping ----------------------------------------
+
+(define BT BRACKET-TAG)
+(define (located d src line)
+  (datum->syntax #f d (vector src line 0 #f #f)))
+
+(test-case "expression-level: inner call gets per-expression metadata"
+  (define src "test.rkt")
+  (define body-stx (located '(+ x 1) src 2))
+  (define params-stx (located (list BT 'x) src 1))
+  (define form-stx (located (list 'defn 'f params-stx body-stx) src 1))
+  (define prog (parse-program (list form-stx)))
+  (define out (emit-program prog))
+  (check-true (matches? #rx"\\^\\{:line 1 :file \"test\\.rkt\"\\} \\(defn" out))
+  (check-true (matches? #rx"\\^\\{:line 2 :file \"test\\.rkt\"\\} \\(\\+ x 1\\)" out)))
+
+(test-case "expression-level: atoms don't get metadata"
+  (define src "test.rkt")
+  (define form-stx (located '(def x 42) src 1))
+  (define prog (parse-program (list form-stx)))
+  (define out (emit-program prog))
+  (check-false (matches? #rx"\\^\\{.*\\} 42" out)))
+
+(test-case "expression-level: let value expressions get metadata"
+  (define src "test.rkt")
+  (define value-stx (located '(+ 1 2) src 3))
+  (define bindings-stx (located (list BT 'x value-stx) src 2))
+  (define body-stx (located '(inc x) src 4))
+  (define form-stx (located (list 'def 'y (list 'let bindings-stx body-stx)) src 1))
+  (define prog (parse-program (list form-stx)))
+  (define out (emit-program prog))
+  (check-true (matches? #rx"\\^\\{:line 3 :file \"test\\.rkt\"\\} \\(\\+ 1 2\\)" out))
+  (check-true (matches? #rx"\\^\\{:line 4 :file \"test\\.rkt\"\\} \\(inc x\\)" out)))
+
+(test-case "expression-level: src-table is populated"
+  (define src "test.rkt")
+  (define body-stx (located '(+ x 1) src 2))
+  (define params-stx (located (list BT 'x) src 1))
+  (define form-stx (located (list 'defn 'f params-stx body-stx) src 1))
+  (define prog (parse-program (list form-stx)))
+  (check-true (> (hash-count (program-src-table prog)) 0)))
+
+(test-case "expression-level: no metadata when syntax has no source location"
+  (define out (compile '(defn f [x] (+ x 1))))
+  (check-false (matches? #rx"\\^\\{" out)))

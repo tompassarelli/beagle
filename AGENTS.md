@@ -8,7 +8,7 @@ A Racket-to-Clojure transpiler. `#lang beagle` source files compile to
 ## How to test
 
 ```
-raco test tests/         # full suite (284 tests)
+raco test tests/         # full suite (289 tests)
 raco test tests/parse.rkt  # just parser
 raco test tests/emit.rkt   # just emitter
 raco test tests/check.rkt  # just type checker

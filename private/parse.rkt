@@ -90,6 +90,31 @@
                              (error 'beagle "unexpected `}`"))
     #\# 'non-terminating-macro hash-dispatch-local))
 
+;; --- source locations -------------------------------------------------------
+
+(struct src-loc (line col source) #:transparent)
+
+(define (stx->src-loc s)
+  (and (syntax? s)
+       (let ([line (syntax-line s)]
+             [src  (syntax-source s)])
+         (and line (src-loc line (syntax-column s) src)))))
+
+(define (->datum x) (if (syntax? x) (syntax->datum x) x))
+(define (stx-subs x) (and (syntax? x) (syntax->list x)))
+(define (stx-ref subs n) (and subs (> (length subs) n) (list-ref subs n)))
+(define (stx-tail subs n) (and subs (>= (length subs) n) (list-tail subs n)))
+
+(define current-registry (make-parameter #f))
+(define current-src-table (make-parameter #f))
+
+(define (store-src! node loc)
+  (when (and loc (current-src-table)
+             (not (string? node)) (not (boolean? node))
+             (not (number? node)) (not (symbol? node)))
+    (hash-set! (current-src-table) node loc))
+  node)
+
 ;; --- AST -------------------------------------------------------------------
 
 (struct ns-decl     (name)                                  #:transparent)
@@ -118,9 +143,9 @@
 (struct method-call (method-name target args)               #:transparent)
 (struct static-call (class+method args)                     #:transparent)
 (struct dynamic-var (name)                                  #:transparent)
-(struct map-form   (pairs)                                  #:transparent)  ; pairs: list of (key . value)
+(struct map-form   (pairs)                                  #:transparent)
 (struct set-form   (items)                                  #:transparent)
-(struct kw-access  (kw target default)                       #:transparent)  ; (:key map) or (:key map default)
+(struct kw-access  (kw target default)                       #:transparent)
 (struct try-form    (body catches finally-body)             #:transparent)
 (struct catch-clause (exception-type name body)            #:transparent)
 (struct doseq-form  (clauses body)                         #:transparent)
@@ -133,8 +158,8 @@
 (struct defmethod-form (name dispatch-val params body)     #:transparent)
 
 (struct param       (name type)                             #:transparent)
-(struct map-destructure (keys as-name)                      #:transparent)  ; {:keys [a b c] :as name}
-(struct seq-destructure (names rest-name)                    #:transparent)  ; [a b & rest]
+(struct map-destructure (keys as-name)                      #:transparent)
+(struct seq-destructure (names rest-name)                    #:transparent)
 (struct deftype-form (name fields impls)                     #:transparent)
 (struct extend-type-form (type-name impls)                   #:transparent)
 (struct type-impl    (protocol-name methods)                 #:transparent)
@@ -152,7 +177,8 @@
                  externs        ; hash: name → type
                  requires       ; list of require-entry
                  imports        ; list of symbols (fully-qualified Java class names)
-                 form-stxs)    ; list of syntax objects parallel to forms
+                 form-stxs     ; list of syntax objects parallel to forms
+                 src-table)    ; hasheq: AST node → src-loc (expression-level source mapping)
   #:transparent)
 
 (define DEFAULT-MODE      'strict)
@@ -296,17 +322,20 @@
 
       [_ (void)]))
 
-  ;; Pass 2: parse each remaining form, expanding macros first.
-  ;; Keep parallel stx list for source-location error reporting.
+  ;; Pass 2: parse each remaining form from syntax objects.
+  ;; Macro expansion happens inline during parsing (preserves inner locations).
+  (define src-table (make-hasheq))
   (define pairs
-    (for/list ([d (in-list datums)]
-               [s (in-list stxs)]
-               #:unless (meta-form? d))
-      (cons (parse-top (expand-fully registry d)) s)))
+    (parameterize ([current-registry registry]
+                   [current-src-table src-table])
+      (for/list ([d (in-list datums)]
+                 [s (in-list stxs)]
+                 #:unless (meta-form? d))
+        (cons (parse-top s) s))))
   (define parsed (map car pairs))
   (define form-stxs (map cdr pairs))
 
-  (program mode ns parsed registry externs (reverse requires) (reverse imports) form-stxs))
+  (program mode ns parsed registry externs (reverse requires) (reverse imports) form-stxs src-table))
 
 (define (meta-form? d)
   (and (pair? d)
@@ -360,16 +389,22 @@
 
 ;; --- per-form parsing ------------------------------------------------------
 
-(define (parse-top d)
+(define (parse-top x)
+  (define d (->datum x))
+  (define loc (and (syntax? x) (stx->src-loc x)))
   (cond
     [(and (pair? d) (eq? (car d) 'unsafe) (= (length d) 2) (string? (cadr d)))
-     (unsafe-clj (cadr d))]
+     (store-src! (unsafe-clj (cadr d)) loc)]
     [(and (pair? d) (eq? (car d) 'unsafe))
      (error 'beagle "unsafe takes a single string argument: (unsafe \"raw clojure\")")]
-    [else (parse-expr d)]))
+    [else (parse-expr x)]))
 
-(define (parse-expr d)
-  (cond
+(define (parse-expr x)
+  (define loc (and (syntax? x) (stx->src-loc x)))
+  (define d (->datum x))
+  (define subs (stx-subs x))
+  (store-src!
+   (cond
     [(string? d)        d]
     [(boolean? d)       d]
     [(exact-integer? d) d]
@@ -380,120 +415,151 @@
     [(and (pair? d) (eq? (car d) '#%regex) (= (length d) 2) (string? (cadr d)))
      (regex-lit (cadr d))]
     [(bracketed? d)
-     (vec-form (map parse-expr (bracket-body d)))]
+     (vec-form (map parse-expr (or (stx-tail subs 1) (bracket-body d))))]
     [(map-tagged? d)
-     (parse-map-literal (map-body d))]
+     (parse-map-literal (or (stx-tail subs 1) (map-body d)))]
     [(set-tagged? d)
-     (set-form (map parse-expr (set-body d)))]
+     (set-form (map parse-expr (or (stx-tail subs 1) (set-body d))))]
     [(and (pair? d) (eq? (car d) 'quote) (= (length d) 2))
      (quoted (cadr d))]
-    [(pair? d) (parse-list-form d)]
-    [else (error 'beagle "unsupported expression: ~v" d)]))
+    [(pair? d)
+     (define reg (current-registry))
+     (cond
+       [(and reg (symbol? (car d)) (lookup-macro reg (car d)))
+        (parse-expr (expand-fully reg d))]
+       [else
+        (parse-list-form d subs)])]
+    [else (error 'beagle "unsupported expression: ~v" d)])
+   loc))
 
 (define (annotation-marker? sym)
   (eq? sym ':))
 
-(define (parse-list-form d)
+(define (parse-list-form d subs)
   (match d
     [(list 'unsafe-expr inner)
-     (unsafe-expr (parse-expr inner))]
+     (unsafe-expr (parse-expr (or (stx-ref subs 1) inner)))]
 
-    ;; (unsafe "string") works in expression position too — emits the string
-    ;; verbatim at this point. Previously only handled at top-level via
-    ;; parse-top; now LLMs can drop into Clojure from any expression slot.
     [(list 'unsafe (? string? str))
      (unsafe-clj str)]
 
     [(list 'def (? symbol? name) marker type-expr value)
      #:when (annotation-marker? marker)
-     (def-form name (parse-type type-expr) (parse-expr value))]
+     (def-form name (parse-type type-expr) (parse-expr (or (stx-ref subs 4) value)))]
     [(list 'def (? symbol? name) value)
-     (def-form name #f (parse-expr value))]
+     (def-form name #f (parse-expr (or (stx-ref subs 2) value)))]
 
     [(list 'defn (? symbol? name) params-form marker return-type body ...)
      #:when (annotation-marker? marker)
-     (defn-form name (parse-params params-form) (parse-type return-type)
-                (parse-body body))]
+     (defn-form name (parse-params (or (stx-ref subs 2) params-form))
+                (parse-type return-type)
+                (parse-body (or (stx-tail subs 5) body)))]
     [(list 'defn (? symbol? name) params-form body ...)
-     (defn-form name (parse-params params-form) #f (parse-body body))]
+     (defn-form name (parse-params (or (stx-ref subs 2) params-form))
+                #f (parse-body (or (stx-tail subs 3) body)))]
 
     [(list 'defrecord (? symbol? name) fields-form)
-     (record-form name (parse-record-fields fields-form))]
+     (record-form name (parse-record-fields (or (stx-ref subs 2) fields-form)))]
 
     [(list 'defprotocol (? symbol? name) sigs ...)
-     (protocol-form name (map parse-protocol-method sigs))]
+     (protocol-form name (map parse-protocol-method (or (stx-tail subs 2) sigs)))]
 
     [(list 'defmulti (? symbol? name) dispatch-expr)
-     (defmulti-form name (parse-expr dispatch-expr))]
+     (defmulti-form name (parse-expr (or (stx-ref subs 2) dispatch-expr)))]
 
     [(list 'defmethod (? symbol? name) dispatch-val params-form body ...)
-     (defmethod-form name (parse-expr dispatch-val) (parse-params params-form) (parse-body body))]
+     (defmethod-form name (parse-expr (or (stx-ref subs 2) dispatch-val))
+                     (parse-params (or (stx-ref subs 3) params-form))
+                     (parse-body (or (stx-tail subs 4) body)))]
 
     [(list 'deftype (? symbol? name) fields-form rest ...)
-     (deftype-form name (parse-record-fields fields-form) (parse-type-impls rest))]
+     (deftype-form name (parse-record-fields (or (stx-ref subs 2) fields-form))
+                   (parse-type-impls (or (stx-tail subs 3) rest)))]
 
     [(list 'extend-type (? symbol? type-name) rest ...)
-     (extend-type-form type-name (parse-type-impls rest))]
+     (extend-type-form type-name (parse-type-impls (or (stx-tail subs 2) rest)))]
 
     [(list 'fn params-form marker return-type body ...)
      #:when (annotation-marker? marker)
-     (fn-form (parse-params params-form) (parse-type return-type) (parse-body body))]
+     (fn-form (parse-params (or (stx-ref subs 1) params-form))
+              (parse-type return-type)
+              (parse-body (or (stx-tail subs 4) body)))]
     [(list 'fn params-form body ...)
-     (fn-form (parse-params params-form) #f (parse-body body))]
+     (fn-form (parse-params (or (stx-ref subs 1) params-form))
+              #f (parse-body (or (stx-tail subs 2) body)))]
 
     [(list 'let bindings-form body ...)
-     (let-form (parse-let-bindings bindings-form) (parse-body body))]
+     (let-form (parse-let-bindings (or (stx-ref subs 1) bindings-form))
+               (parse-body (or (stx-tail subs 2) body)))]
 
     [(list 'loop bindings-form body ...)
-     (loop-form (parse-let-bindings bindings-form) (parse-body body))]
+     (loop-form (parse-let-bindings (or (stx-ref subs 1) bindings-form))
+                (parse-body (or (stx-tail subs 2) body)))]
     [(list 'recur args ...)
-     (recur-form (map parse-expr args))]
+     (recur-form (map parse-expr (or (stx-tail subs 1) args)))]
 
     [(list 'for bindings-form body ...)
-     (for-form (parse-for-clauses bindings-form) (parse-body body))]
+     (for-form (parse-for-clauses (or (stx-ref subs 1) bindings-form))
+               (parse-body (or (stx-tail subs 2) body)))]
 
-    [(list 'if c t e)        (if-form (parse-expr c) (parse-expr t) (parse-expr e))]
-    [(list 'if c t)          (if-form (parse-expr c) (parse-expr t) #f)]
+    [(list 'if c t e)
+     (if-form (parse-expr (or (stx-ref subs 1) c))
+              (parse-expr (or (stx-ref subs 2) t))
+              (parse-expr (or (stx-ref subs 3) e)))]
+    [(list 'if c t)
+     (if-form (parse-expr (or (stx-ref subs 1) c))
+              (parse-expr (or (stx-ref subs 2) t))
+              #f)]
 
-    [(list 'when c body ...) (when-form (parse-expr c) (parse-body body))]
-    [(list 'do body ...)     (do-form (parse-body body))]
+    [(list 'when c body ...)
+     (when-form (parse-expr (or (stx-ref subs 1) c))
+                (parse-body (or (stx-tail subs 2) body)))]
+    [(list 'do body ...)
+     (do-form (parse-body (or (stx-tail subs 1) body)))]
 
-    [(list 'cond clauses ...) (cond-form (parse-cond-clauses clauses))]
+    [(list 'cond clauses ...)
+     (cond-form (parse-cond-clauses (or (stx-tail subs 1) clauses)))]
 
-    [(list 'try rest ...) (parse-try-form rest)]
+    [(list 'try rest ...)
+     (parse-try-form (or (stx-tail subs 1) rest))]
 
     [(list 'doseq bindings-form body ...)
-     (doseq-form (parse-for-clauses bindings-form) (parse-body body))]
+     (doseq-form (parse-for-clauses (or (stx-ref subs 1) bindings-form))
+                 (parse-body (or (stx-tail subs 2) body)))]
 
     [(list 'case test-expr clauses ...)
-     (parse-case-form test-expr clauses)]
+     (parse-case-form (or (stx-ref subs 1) test-expr)
+                      (or (stx-tail subs 2) clauses))]
 
     [(list (? constructor-sym? c) args ...)
-     (new-form c (map parse-expr args))]
+     (new-form c (map parse-expr (or (stx-tail subs 1) args)))]
 
     [(list (? keyword-sym? kw) target)
-     (kw-access kw (parse-expr target) #f)]
+     (kw-access kw (parse-expr (or (stx-ref subs 1) target)) #f)]
     [(list (? keyword-sym? kw) target default-val)
-     (kw-access kw (parse-expr target) (parse-expr default-val))]
+     (kw-access kw (parse-expr (or (stx-ref subs 1) target))
+                   (parse-expr (or (stx-ref subs 2) default-val)))]
 
     [(list (? dot-method-sym? m) target args ...)
-     (method-call m (parse-expr target) (map parse-expr args))]
+     (method-call m (parse-expr (or (stx-ref subs 1) target))
+                    (map parse-expr (or (stx-tail subs 2) args)))]
 
     [(list (? static-method-sym? cm) args ...)
-     (static-call cm (map parse-expr args))]
+     (static-call cm (map parse-expr (or (stx-tail subs 1) args)))]
 
     [(list (? symbol? f) args ...)
-     (call-form f (map parse-expr args))]
+     (call-form f (map parse-expr (or (stx-tail subs 1) args)))]
 
     [_ (error 'beagle "unsupported form: ~v" d)]))
 
 (define (parse-protocol-method sig)
-  (match sig
+  (define d (->datum sig))
+  (match d
     [(list (? symbol? name) params-form ': return-type)
      (protocol-method name (parse-params params-form) (parse-type return-type))]
     [(list (? symbol? name) params-form)
      (protocol-method name (parse-params params-form) #f)]
-    [_ (error 'beagle "defprotocol method signature must be (name [params] : RetType) or (name [params]), got: ~v" sig)]))
+    [_ (error 'beagle "defprotocol method signature must be (name [params] : RetType) or (name [params]), got: ~v" d)]))
 
 (define (parse-body forms)
   (when (null? forms)
@@ -513,23 +579,19 @@
                    acc))])))
 
 (define (parse-cond-clause c)
+  (define d (->datum c))
+  (define c-subs (stx-subs c))
   (cond
-    [(bracketed? c)
-     (define body (bracket-body c))
-     (when (null? body) (error 'beagle "cond clause is empty"))
-     (cond-clause (parse-expr (car body)) (parse-body (cdr body)))]
-    [else (error 'beagle "cond clause must be a bracketed [test body ...] form, got: ~v" c)]))
+    [(bracketed? d)
+     (define items (or (stx-tail c-subs 1) (bracket-body d)))
+     (when (null? items) (error 'beagle "cond clause is empty"))
+     (cond-clause (parse-expr (car items)) (parse-body (cdr items)))]
+    [else (error 'beagle "cond clause must be a bracketed [test body ...] form, got: ~v" d)]))
 
-;; Cond accepts two styles:
-;;   (cond [test1 body1...] [test2 body2...] ...)   — bracketed (beagle default)
-;;   (cond test1 body1 test2 body2 ...)             — Clojure-style flat pairs
-;;
-;; If the first clause is bracketed, all must be (existing behavior).
-;; Otherwise treat them as test/body pairs.
 (define (parse-cond-clauses clauses)
   (cond
     [(null? clauses) '()]
-    [(bracketed? (car clauses))
+    [(bracketed? (->datum (car clauses)))
      (map parse-cond-clause clauses)]
     [else
      (unless (even? (length clauses))
@@ -548,13 +610,14 @@
 (define (parse-try-form rest)
   (define-values (body-forms catch-forms finally-form)
     (let loop ([items rest] [body '()])
+      (define first-d (and (pair? items) (->datum (car items))))
       (cond
         [(null? items)
          (values (reverse body) '() #f)]
-        [(and (pair? (car items)) (eq? (caar items) 'catch))
+        [(and (pair? first-d) (eq? (car first-d) 'catch))
          (define-values (catches fin) (parse-catch-finally items))
          (values (reverse body) catches fin)]
-        [(and (pair? (car items)) (eq? (caar items) 'finally))
+        [(and (pair? first-d) (eq? (car first-d) 'finally))
          (define-values (catches fin) (parse-catch-finally items))
          (values (reverse body) catches fin)]
         [else
@@ -567,24 +630,28 @@
 
 (define (parse-catch-finally items)
   (let loop ([rest items] [catches '()] [fin #f])
+    (define first-d (and (pair? rest) (->datum (car rest))))
     (cond
       [(null? rest) (values (reverse catches) fin)]
-      [(and (pair? (car rest)) (eq? (caar rest) 'catch))
-       (define clause (car rest))
-       (when (< (length clause) 4)
+      [(and (pair? first-d) (eq? (car first-d) 'catch))
+       (define clause-d first-d)
+       (define clause-subs (stx-subs (car rest)))
+       (when (< (length clause-d) 4)
          (error 'beagle "catch clause needs (catch ExType name body...)"))
-       (define ex-type (cadr clause))
-       (define name (caddr clause))
-       (define body (cdddr clause))
+       (define ex-type (cadr clause-d))
+       (define name (caddr clause-d))
+       (define body (or (stx-tail clause-subs 3) (cdddr clause-d)))
        (loop (cdr rest)
              (cons (catch-clause ex-type name (map parse-expr body)) catches)
              fin)]
-      [(and (pair? (car rest)) (eq? (caar rest) 'finally))
-       (define clause (car rest))
-       (when (< (length clause) 2)
+      [(and (pair? first-d) (eq? (car first-d) 'finally))
+       (define clause-d first-d)
+       (define clause-subs (stx-subs (car rest)))
+       (when (< (length clause-d) 2)
          (error 'beagle "finally clause needs at least one body expression"))
-       (loop (cdr rest) catches (map parse-expr (cdr clause)))]
-      [else (error 'beagle "unexpected form after catch/finally: ~v" (car rest))])))
+       (define body (or (stx-tail clause-subs 1) (cdr clause-d)))
+       (loop (cdr rest) catches (map parse-expr body))]
+      [else (error 'beagle "unexpected form after catch/finally: ~v" first-d)])))
 
 ;; --- case ------------------------------------------------------------------
 
@@ -622,26 +689,23 @@
 ;;   2. wrapped + annotation:         (x : T)
 ;;   3. map destructure:              {:keys [a b c]} or {:keys [a b c] :as m}
 (define (parse-params p)
+  (define d (->datum p))
   (define items
     (cond
-      [(bracketed? p) (bracket-body p)]
-      [(list? p)      p]
-      [else (error 'beagle "expected parameter list, got: ~v" p)]))
+      [(bracketed? d) (bracket-body d)]
+      [(list? d)      d]
+      [else (error 'beagle "expected parameter list, got: ~v" d)]))
   (for/list ([item (in-list items)])
     (cond
-      ;; Sequential destructure: [a b & rest]
       [(bracketed? item)
        (parse-seq-destructure item)]
-      ;; Map destructure: {:keys [a b c]} or {:keys [a b c] :as m}
       [(map-destructure-form? item)
        (parse-map-destructure item)]
-      ;; Wrapped: (name : T)
       [(and (list? item)
             (= (length item) 3)
             (symbol? (car item))
             (annotation-marker? (cadr item)))
        (param (car item) (parse-type (caddr item)))]
-      ;; Bare untyped name
       [(symbol? item)
        (param item #f)]
       [else
@@ -657,7 +721,8 @@
               (bracketed? (cadr body))))))
 
 (define (parse-map-destructure item)
-  (define body (map-body item))
+  (define d (->datum item))
+  (define body (map-body d))
   (define keys-bracket (cadr body))
   (define key-names (bracket-body keys-bracket))
   (unless (andmap symbol? key-names)
@@ -672,53 +737,65 @@
   (map-destructure key-names as-name))
 
 (define (parse-let-bindings b)
+  (define d (->datum b))
+  (define psubs (stx-subs b))
   (define items
     (cond
-      [(bracketed? b) (bracket-body b)]
-      [(list? b)      b]
-      [else (error 'beagle "expected let bindings, got: ~v" b)]))
-  (let loop ([rest items] [acc '()])
+      [(bracketed? d) (bracket-body d)]
+      [(list? d)      d]
+      [else (error 'beagle "expected let bindings, got: ~v" d)]))
+  (define item-stxs
+    (cond
+      [(and psubs (bracketed? d)) (cdr psubs)]
+      [psubs psubs]
+      [else #f]))
+  (let loop ([rest items] [stxs item-stxs] [acc '()])
     (cond
       [(null? rest) (reverse acc)]
-      ;; Wrapped annotated: (name : Type) value  (consistent with param style)
       [(and (>= (length rest) 2)
             (list? (car rest))
             (= (length (car rest)) 3)
             (symbol? (car (car rest)))
             (annotation-marker? (cadr (car rest))))
+       (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
        (loop (cddr rest)
+             (and stxs (>= (length stxs) 2) (cddr stxs))
              (cons (let-binding (car (car rest))
                                 (parse-type (caddr (car rest)))
-                                (parse-expr (cadr rest)))
+                                (parse-expr (or val-stx (cadr rest))))
                    acc))]
-      ;; Map destructure: {:keys [a b c]} value
       [(and (>= (length rest) 2)
             (map-destructure-form? (car rest)))
        (define destr (parse-map-destructure (car rest)))
+       (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
        (loop (cddr rest)
-             (cons (let-binding destr #f (parse-expr (cadr rest)))
+             (and stxs (>= (length stxs) 2) (cddr stxs))
+             (cons (let-binding destr #f (parse-expr (or val-stx (cadr rest))))
                    acc))]
-      ;; Sequential destructure: [a b & rest] value
       [(and (>= (length rest) 2)
             (bracketed? (car rest)))
        (define destr (parse-seq-destructure (car rest)))
+       (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
        (loop (cddr rest)
-             (cons (let-binding destr #f (parse-expr (cadr rest)))
+             (and stxs (>= (length stxs) 2) (cddr stxs))
+             (cons (let-binding destr #f (parse-expr (or val-stx (cadr rest))))
                    acc))]
-      ;; Untyped: name value (2 tokens)
       [(and (>= (length rest) 2)
             (symbol? (car rest)))
+       (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
        (loop (cddr rest)
-             (cons (let-binding (car rest) #f (parse-expr (cadr rest)))
+             (and stxs (>= (length stxs) 2) (cddr stxs))
+             (cons (let-binding (car rest) #f (parse-expr (or val-stx (cadr rest))))
                    acc))]
       [else (error 'beagle "bad let bindings: ~v" rest)])))
 
 (define (parse-record-fields f)
+  (define d (->datum f))
   (define items
     (cond
-      [(bracketed? f) (bracket-body f)]
-      [(list? f)      f]
-      [else (error 'beagle "expected record fields, got: ~v" f)]))
+      [(bracketed? d) (bracket-body d)]
+      [(list? d)      d]
+      [else (error 'beagle "expected record fields, got: ~v" d)]))
   (when (null? items)
     (error 'beagle "defrecord requires at least one field"))
   (for/list ([item (in-list items)])
@@ -740,28 +817,35 @@
        (if cur-proto
          (reverse (cons (type-impl cur-proto (reverse cur-methods)) acc))
          (reverse acc))]
-      [(symbol? (car items))
-       (define new-acc
-         (if cur-proto
-           (cons (type-impl cur-proto (reverse cur-methods)) acc)
-           acc))
-       (loop (cdr items) (car items) '() new-acc)]
-      [(pair? (car items))
-       (unless cur-proto
-         (error 'beagle "deftype/extend-type: method before protocol name"))
-       (loop (cdr items) cur-proto
-             (cons (parse-impl-method (car items)) cur-methods) acc)]
       [else
-       (error 'beagle "deftype/extend-type: unexpected form: ~v" (car items))])))
+       (define item-d (->datum (car items)))
+       (cond
+         [(symbol? item-d)
+          (define new-acc
+            (if cur-proto
+              (cons (type-impl cur-proto (reverse cur-methods)) acc)
+              acc))
+          (loop (cdr items) item-d '() new-acc)]
+         [(pair? item-d)
+          (unless cur-proto
+            (error 'beagle "deftype/extend-type: method before protocol name"))
+          (loop (cdr items) cur-proto
+                (cons (parse-impl-method (car items)) cur-methods) acc)]
+         [else
+          (error 'beagle "deftype/extend-type: unexpected form: ~v" item-d)])])))
 
-(define (parse-impl-method d)
+(define (parse-impl-method x)
+  (define d (->datum x))
+  (define subs (stx-subs x))
   (match d
     [(list (? symbol? name) params-form body ...)
-     (impl-method name (parse-params params-form) (parse-body body))]
+     (impl-method name (parse-params (or (stx-ref subs 1) params-form))
+                  (parse-body (or (stx-tail subs 2) body)))]
     [_ (error 'beagle "bad method implementation: ~v" d)]))
 
 (define (parse-seq-destructure item)
-  (define body (bracket-body item))
+  (define d (->datum item))
+  (define body (bracket-body d))
   (define-values (names rest-name)
     (let loop ([items body] [acc '()])
       (cond
@@ -777,25 +861,38 @@
   (seq-destructure names rest-name))
 
 (define (parse-for-clauses b)
+  (define d (->datum b))
+  (define psubs (stx-subs b))
   (define items
     (cond
-      [(bracketed? b) (bracket-body b)]
-      [(list? b)      b]
-      [else (error 'beagle "expected for bindings, got: ~v" b)]))
-  (let loop ([rest items] [acc '()])
+      [(bracketed? d) (bracket-body d)]
+      [(list? d)      d]
+      [else (error 'beagle "expected for bindings, got: ~v" d)]))
+  (define item-stxs
+    (cond
+      [(and psubs (bracketed? d)) (cdr psubs)]
+      [psubs psubs]
+      [else #f]))
+  (let loop ([rest items] [stxs item-stxs] [acc '()])
     (cond
       [(null? rest) (reverse acc)]
       [(and (>= (length rest) 2)
             (eq? (car rest) ':when))
+       (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
        (loop (cddr rest)
-             (cons (for-when (parse-expr (cadr rest))) acc))]
+             (and stxs (>= (length stxs) 2) (cddr stxs))
+             (cons (for-when (parse-expr (or val-stx (cadr rest)))) acc))]
       [(and (>= (length rest) 2)
             (symbol? (car rest)))
+       (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
        (loop (cddr rest)
-             (cons (for-binding (car rest) (parse-expr (cadr rest))) acc))]
+             (and stxs (>= (length stxs) 2) (cddr stxs))
+             (cons (for-binding (car rest) (parse-expr (or val-stx (cadr rest)))) acc))]
       [else (error 'beagle "bad for clause: ~v" rest)])))
 
 (provide
+ (struct-out src-loc)
+ store-src!
  (struct-out program)
  (struct-out ns-decl)
  (struct-out mode-decl)

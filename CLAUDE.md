@@ -44,8 +44,8 @@ it as canonical when explaining the language.
 - Structured error output: `BEAGLE_ERROR_FORMAT=json` for agent consumption
 - Java interop: `.method`, `Class/static`, `*dynamic-vars*`, constructors,
   `import`; ~30 common methods/statics pre-typed in stdlib
-- Source mapping: `^{:line N :file "path"}` metadata on emitted top-level forms
-- 284 tests passing
+- Source mapping: `^{:line N :file "path"}` metadata on every emitted compound form (expression-level)
+- 289 tests passing
 - Empirical benchmarks: 40 tasks, 3 variants, head-to-head against raw Clojure,
   refactoring and bug-detection experiments — 5 real bugs caught
 

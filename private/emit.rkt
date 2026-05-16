@@ -7,28 +7,39 @@
          racket/format
          "parse.rkt")
 
+;; --- source-location metadata -----------------------------------------------
+
+(define current-emit-src-table (make-parameter #f))
+
+(define (emit-srcloc loc)
+  (define src (src-loc-source loc))
+  (define file (and src (if (path? src) (path->string src) (~a src))))
+  (cond
+    [(and (src-loc-line loc) file) (format "^{:line ~a :file ~v} " (src-loc-line loc) file)]
+    [(src-loc-line loc)            (format "^{:line ~a} " (src-loc-line loc))]
+    [else                         ""]))
+
+(define (metadatable? s)
+  (and (> (string-length s) 0)
+       (let ([c (string-ref s 0)])
+         (or (char=? c #\() (char=? c #\[) (char=? c #\{) (char=? c #\#)))))
+
 ;; --- top-level -------------------------------------------------------------
 
 (define (emit-program prog)
-  (define stxs (program-form-stxs prog))
-  (string-append
-   (emit-ns prog)
-   "\n\n"
-   (string-join
-    (for/list ([form (in-list (program-forms prog))]
-               [stx  (in-list stxs)])
-      (string-append (emit-source-loc stx) (emit-form form)))
-    "\n\n")
-   "\n"))
-
-(define (emit-source-loc stx)
-  (define line (syntax-line stx))
-  (define src  (syntax-source stx))
-  (define file (and src (if (path? src) (path->string src) (~a src))))
-  (cond
-    [(and line file) (format "^{:line ~a :file ~v} " line file)]
-    [line            (format "^{:line ~a} " line)]
-    [else            ""]))
+  (parameterize ([current-emit-src-table (program-src-table prog)])
+    (string-append
+     (emit-ns prog)
+     "\n\n"
+     (string-join
+      (for/list ([form (in-list (program-forms prog))])
+        (define raw (emit-form form))
+        (define loc (hash-ref (program-src-table prog) form #f))
+        (if (and loc (metadatable? raw))
+          (string-append (emit-srcloc loc) raw)
+          raw))
+      "\n\n")
+     "\n")))
 
 (define (emit-ns prog)
   (define ns (program-namespace prog))
@@ -124,11 +135,19 @@
     [(extend-type-form? f)
      (emit-extend-type f)]
 
-    [else (emit-expr f)]))
+    [else (emit-expr-core f)]))
 
 ;; --- expressions -----------------------------------------------------------
 
 (define (emit-expr e)
+  (define raw (emit-expr-core e))
+  (define tbl (current-emit-src-table))
+  (define loc (and tbl (hash-ref tbl e #f)))
+  (if (and loc (metadatable? raw))
+    (string-append (emit-srcloc loc) raw)
+    raw))
+
+(define (emit-expr-core e)
   (cond
     [(string? e)        (~v e)]
     [(boolean? e)       (if e "true" "false")]
