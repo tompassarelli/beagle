@@ -34,7 +34,7 @@ it as canonical when explaining the language.
 - Keyword field inference: `(:name person)` returns the field type when
   target is a known typed record
 - Macros: safe (gensym-hygienic) / unsafe with `&rest` and `(splice ...)`
-- Stdlib catalog: ~110 common Clojure functions pre-typed, key HOFs polymorphic
+- Stdlib catalog: ~435 Clojure functions pre-typed, key HOFs polymorphic
 - Cross-file type import: `(require module)` / `(require module :as alias)`
   resolves source at compile time, imports typed defs/defns/externs/macros
 - Validation: type checks, arity (incl. variadic), undefined refs, hints
@@ -58,7 +58,7 @@ parse → check → emit
   `#"..."` (regex) via `MAP-TAG`/`SET-TAG`/`#%regex`.
 - `private/types.rkt` — type AST, parser, compatibility checker.
   `MAP-TAG`/`SET-TAG` are well-known symbols (`#%map`/`#%set`), not gensyms.
-- `private/stdlib-types.rkt` — pre-typed Clojure stdlib catalog (~110 functions).
+- `private/stdlib-types.rkt` — pre-typed Clojure stdlib catalog (~435 functions).
 - `private/macros.rkt` — macro registry, naive substitution, depth-capped
   recursive expansion, safe/unsafe boundary.
 - `private/parse.rkt` — source → AST. Two passes: meta-form collection

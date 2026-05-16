@@ -151,7 +151,7 @@ Union:
 - `(splice rest-name)` in template: inlines the list at that position
 - Naive substitution (no hygiene): avoid binder-name clashes with caller
 
-## Pre-typed stdlib (~100 functions)
+## Pre-typed stdlib (~435 functions)
 
 **Math** (variadic Any): `+`, `-`, `*`, `/`, `mod`, `quot`, `rem`, `inc`,
 `dec`, `min`, `max`, `abs`
@@ -183,6 +183,13 @@ Union:
 **Errors**: `ex-info`, `ex-data`, `throw`
 
 **Misc**: `identity`, `constantly`
+
+**Also typed** (435 total): transducers (`map`/`filter`/`cat`/`halt-when`),
+atoms (`atom`/`swap!`/`reset!`/`deref`), `clojure.string/*`,
+`clojure.set/*`, `clojure.walk/*`, `clojure.edn/read-string`,
+regex (`re-find`/`re-matches`/`re-seq`/`re-pattern`), type coercion
+(`int`/`long`/`double`/`float`/`char`/`boolean`/`bigint`/`bigdec`),
+30+ type predicates, array ops, 20+ Java instance/static methods, and more.
 
 For everything else, use `(declare-extern name TypeExpr)`.
 
