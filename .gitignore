@@ -2,6 +2,7 @@ compiled/
 *.dep
 *.zo
 .DS_Store
+.claude/worktrees/
 runtime/.cpcache/
 runtime/target/
 runtime/src/beagle/target.clj

@@ -8,7 +8,8 @@
 ;; the model for self-correction.
 
 (require racket/format
-         json)
+         json
+         "check.rkt")
 
 (define (json-error-mode?)
   (define v (getenv "BEAGLE_ERROR_FORMAT"))
@@ -89,20 +90,41 @@
      "(unsafe ...) takes a single string literal: (unsafe \"raw clojure\")"]
     [else #f]))
 
-(define (write-json-error msg stx)
-  (define clean (clean-message msg))
-  (define hint (hint-for clean))
-  (write-json
-   (hasheq 'tool "beagle"
-           'kind (extract-kind clean)
-           'message clean
-           'hint   (or hint 'null)
-           'file (path-or-source stx)
-           'line (and stx (syntax-line stx))
-           'col  (and stx (syntax-column stx)))
-   (current-error-port))
-  (newline (current-error-port))
-  (flush-output (current-error-port)))
+(define (write-json-error msg-or-exn stx)
+  (cond
+    [(beagle-diagnostic? msg-or-exn)
+     (define d (beagle-diagnostic-details msg-or-exn))
+     (define msg (exn-message msg-or-exn))
+     (define file (or (hash-ref d 'error-file #f) (path-or-source stx)))
+     (define line (or (hash-ref d 'error-line #f) (and stx (syntax-line stx))))
+     (define base
+       (hasheq 'tool "beagle"
+               'kind (symbol->string (beagle-diagnostic-kind msg-or-exn))
+               'message msg
+               'file (or file 'null)
+               'line (or line 'null)
+               'col (or (and stx (syntax-column stx)) 'null)))
+     (define enriched
+       (for/fold ([h base]) ([(k v) (in-hash d)])
+         (hash-set h (if (symbol? k) k (string->symbol k)) v)))
+     (write-json enriched (current-error-port))
+     (newline (current-error-port))
+     (flush-output (current-error-port))]
+    [else
+     (define msg (if (exn? msg-or-exn) (exn-message msg-or-exn) msg-or-exn))
+     (define clean (clean-message msg))
+     (define hint (hint-for clean))
+     (write-json
+      (hasheq 'tool "beagle"
+              'kind (extract-kind clean)
+              'message clean
+              'hint   (or hint 'null)
+              'file (path-or-source stx)
+              'line (and stx (syntax-line stx))
+              'col  (and stx (syntax-column stx)))
+      (current-error-port))
+     (newline (current-error-port))
+     (flush-output (current-error-port))]))
 
 ;; For non-JSON mode: build the message with a hint appended if applicable.
 (define (augment-with-hint msg)

@@ -19,6 +19,88 @@
 ;; Record field registry: record-type-name -> hash of keyword-sym -> type
 (define RECORD-FIELDS (make-hash))
 
+;; Expression-level source locations from the parser.
+(define current-check-src-table (make-parameter #f))
+
+(define (src-for node)
+  (define tbl (current-check-src-table))
+  (and tbl (hash-ref tbl node #f)))
+
+;; --- structured diagnostics -------------------------------------------------
+
+(struct beagle-diagnostic exn:fail (
+  kind        ; symbol: 'arity 'type-mismatch 'return-type 'def-type 'let-binding
+  details     ; hasheq with structured error data
+) #:transparent)
+
+(define (raise-diag kind message details #:src [src #f])
+  (define details+src
+    (if src
+        (hash-set (hash-set details 'error-line (src-loc-line src))
+                  'error-file (let ([s (src-loc-source src)])
+                                (cond [(path? s) (path->string s)]
+                                      [(string? s) s]
+                                      [else #f])))
+        details))
+  (raise (beagle-diagnostic
+          (format "beagle: ~a" message)
+          (current-continuation-marks)
+          kind
+          details+src)))
+
+;; --- "did you mean?" suggestions --------------------------------------------
+
+(define (extract-module-prefix sym)
+  (define s (symbol->string sym))
+  (let loop ([i 0])
+    (cond [(= i (string-length s)) #f]
+          [(char=? (string-ref s i) #\/) (substring s 0 i)]
+          [else (loop (+ i 1))])))
+
+(define (find-accessor-suggestions arg expected-type actual-type env)
+  (cond
+    [(and (call-form? arg)
+          (symbol? (call-form-fn arg)))
+     (define fn-sym (call-form-fn arg))
+     (define fn-type (hash-ref env fn-sym #f))
+     (cond
+       [(and fn-type (type-fn? fn-type)
+             (= (length (type-fn-params fn-type)) 1)
+             (type-prim? (car (type-fn-params fn-type))))
+        (define record-type (car (type-fn-params fn-type)))
+        (define rec-name (type-prim-name record-type))
+        (cond
+          [(hash-has-key? RECORD-FIELDS rec-name)
+           (define field-map (hash-ref RECORD-FIELDS rec-name))
+           (define rec-lower (string-downcase (symbol->string rec-name)))
+           (define prefix (extract-module-prefix fn-sym))
+           (define orig-str (symbol->string fn-sym))
+           (define all
+             (for/list ([(kw-sym field-type) (in-hash field-map)]
+                        #:when (type-compatible? field-type expected-type)
+                        #:when (not (type-compatible? field-type actual-type)))
+               (define field-name (substring (symbol->string kw-sym) 1))
+               (define accessor-name (string-append rec-lower "-" field-name))
+               (define qualified
+                 (if prefix
+                     (string-append prefix "/" accessor-name)
+                     accessor-name))
+               (hasheq 'replace orig-str
+                       'with qualified
+                       'signature (format "~a : [~a -> ~a]"
+                                          qualified
+                                          (type->string record-type)
+                                          (type->string field-type))
+                       '_distance (abs (- (string-length qualified)
+                                          (string-length orig-str))))))
+           (define sorted (sort all < #:key (lambda (h) (hash-ref h '_distance))))
+           (for/list ([s (in-list sorted)]
+                      [_ (in-range 3)])
+             (hash-remove s '_distance))]
+          [else '()])]
+       [else '()])]
+    [else '()]))
+
 ;; --- entry point -----------------------------------------------------------
 
 (define (type-check! prog)
@@ -108,18 +190,26 @@
      (define inferred (infer-expr value env))
      (when expected-type
        (unless (type-compatible? inferred expected-type)
-         (error 'beagle
-                "def ~a: expected ~a, got ~a"
-                name (type->string expected-type) (type->string inferred))))]
+         (raise-diag 'def-type
+                     (format "def ~a: expected ~a, got ~a"
+                             name (type->string expected-type) (type->string inferred))
+                     (hasheq 'name (symbol->string name)
+                             'expected (type->string expected-type)
+                             'actual (type->string inferred)))))]
 
     [(defn-form name params expected-ret body)
      (define body-env (extend-with-params env params))
      (define last-type (last-expr-type body body-env))
      (when expected-ret
        (unless (type-compatible? last-type expected-ret)
-         (error 'beagle
-                "defn ~a: expected return ~a, got ~a"
-                name (type->string expected-ret) (type->string last-type))))]
+         (define sig (type->string (type-fn (map param-or-destr-type params) #f expected-ret)))
+         (raise-diag 'return-type
+                     (format "defn ~a: expected return ~a, got ~a"
+                             name (type->string expected-ret) (type->string last-type))
+                     (hasheq 'name (symbol->string name)
+                             'signature (format "~a : ~a" name sig)
+                             'expected (type->string expected-ret)
+                             'actual (type->string last-type)))))]
 
     [(record-form _ _) (void)]
     [(protocol-form _ _) (void)]
@@ -334,7 +424,7 @@
          raw-type))
      (cond
        [(type-fn? fn-type)
-        (check-args method-sym fn-type all-args env)
+        (check-args method-sym fn-type all-args env e)
         (type-fn-ret fn-type)]
        [else
         (infer-expr (method-call-target e) env)
@@ -349,7 +439,7 @@
          raw-type))
      (cond
        [(type-fn? fn-type)
-        (check-args sym fn-type (static-call-args e) env)
+        (check-args sym fn-type (static-call-args e) env e)
         (type-fn-ret fn-type)]
        [else
         (for ([a (in-list (static-call-args e))]) (infer-expr a env))
@@ -394,7 +484,7 @@
          raw-type))
      (cond
        [(type-fn? fn-type)
-        (check-args (call-form-fn e) fn-type (call-form-args e) env)
+        (check-args (call-form-fn e) fn-type (call-form-args e) env e)
         (type-fn-ret fn-type)]
        [else
         (for ([a (in-list (call-form-args e))]) (infer-expr a env))
@@ -448,44 +538,109 @@
       [else
        (when declared
          (unless (type-compatible? inferred declared)
-           (error 'beagle
-                  "let binding ~a: expected ~a, got ~a"
-                  bname (type->string declared) (type->string inferred))))
+           (raise-diag 'let-binding
+                       (format "let binding ~a: expected ~a, got ~a"
+                               bname (type->string declared) (type->string inferred))
+                       (hasheq 'name (symbol->string bname)
+                               'expected (type->string declared)
+                               'actual (type->string inferred)))))
        (hash-set! out bname (or declared inferred ANY))]))
   out)
 
 ;; Variadic-aware argument checking.
-(define (check-args fn-name fn-type args env)
+(define (check-args fn-name fn-type args env call-node)
   (define fixed   (type-fn-params fn-type))
   (define rest-t  (type-fn-rest-type fn-type))
   (define n-fixed (length fixed))
   (define n-args  (length args))
+  (define sig-str (format "~a : ~a" fn-name (type->string fn-type)))
+  (define call-src (src-for call-node))
   (cond
     [rest-t
      (when (< n-args n-fixed)
-       (error 'beagle
-              "call to ~a: expected at least ~a arg(s), got ~a"
-              fn-name n-fixed n-args))
+       (define missing-types
+         (for/list ([p (in-list (list-tail fixed n-args))]
+                    [i (in-naturals (+ n-args 1))])
+           (format "arg ~a: ~a" i (type->string p))))
+       (raise-diag 'arity
+                    (format "call to ~a: expected at least ~a arg(s), got ~a"
+                            fn-name n-fixed n-args)
+                    (hasheq 'function (symbol->string fn-name)
+                            'signature sig-str
+                            'expected-arity n-fixed
+                            'actual-arity n-args
+                            'variadic #t
+                            'help (format "missing: ~a"
+                                          (apply string-append
+                                                 (add-between missing-types ", "))))
+                    #:src call-src))
      (define fixed-args (take* args n-fixed))
      (define rest-args  (drop* args n-fixed))
      (for ([p (in-list fixed)] [a (in-list fixed-args)] [i (in-naturals 1)])
-       (check-one-arg fn-name i p a env))
+       (check-one-arg fn-name fn-type i p a env call-src))
      (for ([a (in-list rest-args)] [i (in-naturals (+ n-fixed 1))])
-       (check-one-arg fn-name i rest-t a env))]
+       (check-one-arg fn-name fn-type i rest-t a env call-src))]
     [else
      (unless (= n-fixed n-args)
-       (error 'beagle
-              "call to ~a: expected ~a arg(s), got ~a"
-              fn-name n-fixed n-args))
+       (define help
+         (cond
+           [(> n-args n-fixed)
+            (format "extra argument(s): got ~a, expected ~a" n-args n-fixed)]
+           [else
+            (define missing-types
+              (for/list ([p (in-list (list-tail fixed n-args))]
+                         [i (in-naturals (+ n-args 1))])
+                (format "arg ~a: ~a" i (type->string p))))
+            (format "missing: ~a"
+                    (apply string-append
+                           (add-between missing-types ", ")))]))
+       (raise-diag 'arity
+                    (format "call to ~a: expected ~a arg(s), got ~a"
+                            fn-name n-fixed n-args)
+                    (hasheq 'function (symbol->string fn-name)
+                            'signature sig-str
+                            'expected-arity n-fixed
+                            'actual-arity n-args
+                            'variadic #f
+                            'help help)
+                    #:src call-src))
      (for ([p (in-list fixed)] [a (in-list args)] [i (in-naturals 1)])
-       (check-one-arg fn-name i p a env))]))
+       (check-one-arg fn-name fn-type i p a env call-src))]))
 
-(define (check-one-arg fn-name i expected-type arg env)
+(define (add-between lst sep)
+  (cond [(null? lst) '()]
+        [(null? (cdr lst)) lst]
+        [else (cons (car lst) (cons sep (add-between (cdr lst) sep)))]))
+
+(define (check-one-arg fn-name fn-type i expected-type arg env call-src)
   (define a-type (infer-expr arg env))
   (unless (type-compatible? a-type expected-type)
-    (error 'beagle
-           "call to ~a: arg ~a expected ~a, got ~a"
-           fn-name i (type->string expected-type) (type->string a-type))))
+    (define sig-str (format "~a : ~a" fn-name (type->string fn-type)))
+    (define suggestions (find-accessor-suggestions arg expected-type a-type env))
+    (define arg-expr-str
+      (cond
+        [(call-form? arg) (format "(~a ...)" (call-form-fn arg))]
+        [(symbol? arg) (symbol->string arg)]
+        [(string? arg) (format "~s" arg)]
+        [else #f]))
+    (define arg-sig
+      (and (call-form? arg)
+           (let ([ft (hash-ref env (call-form-fn arg) #f)])
+             (and ft (type-fn? ft)
+                  (format "~a : ~a" (call-form-fn arg) (type->string ft))))))
+    (define arg-src (src-for arg))
+    (raise-diag 'type-mismatch
+                (format "call to ~a: arg ~a expected ~a, got ~a"
+                        fn-name i (type->string expected-type) (type->string a-type))
+                (hasheq 'function (symbol->string fn-name)
+                        'signature sig-str
+                        'arg-position i
+                        'expected (type->string expected-type)
+                        'actual (type->string a-type)
+                        'arg-expr (or arg-expr-str 'null)
+                        'arg-signature (or arg-sig 'null)
+                        'suggestions suggestions)
+                #:src (or arg-src call-src))))
 
 (define (take* xs n)
   (if (or (zero? n) (null? xs)) '() (cons (car xs) (take* (cdr xs) (- n 1)))))
@@ -495,9 +650,12 @@
 (define (type-check-with-locs! prog error-handler)
   (when (eq? (program-mode prog) 'strict)
     (define env (build-initial-env prog))
-    (for ([form (in-list (program-forms prog))]
-          [orig-stx (in-list (program-form-stxs prog))])
-      (with-handlers ([exn:fail? (lambda (e) (error-handler e orig-stx))])
-        (check-form form env)))))
+    (parameterize ([current-check-src-table (program-src-table prog)])
+      (for ([form (in-list (program-forms prog))]
+            [orig-stx (in-list (program-form-stxs prog))])
+        (with-handlers ([exn:fail? (lambda (e) (error-handler e orig-stx))])
+          (check-form form env))))))
 
-(provide type-check! type-check-with-locs!)
+(provide type-check! type-check-with-locs!
+         beagle-diagnostic beagle-diagnostic?
+         beagle-diagnostic-kind beagle-diagnostic-details)

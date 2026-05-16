@@ -36,7 +36,7 @@
          (define target (or loc-stx stx))
          (cond
            [(json-error-mode?)
-            (write-json-error (exn-message e) target)
+            (write-json-error e target)
             (exit 1)]
            [else
             (raise-syntax-error 'beagle (augment-with-hint (exn-message e)) target)]))
