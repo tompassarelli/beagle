@@ -3,8 +3,11 @@
 > follow your nose
 
 A typed authoring layer for Clojure. Compile-time type checking, hygienic
-(naive v0) macros with safe/unsafe boundaries, custom `#lang`, and Clojure
+macros with safe/unsafe boundaries, custom `#lang`, and full Clojure
 ecosystem access via emitted `.clj` source.
+
+**LLM authoring is a first-class concern.** Rich types, explicit forms, low
+syntactic surface area, structured errors. One canonical idiom per concept.
 
 ## Why
 
@@ -15,27 +18,50 @@ front; Clojure's runtime ecosystem behind.
 
 ## What works today
 
-The full general-purpose subset:
+`#lang beagle` v0 — end-to-end working, empirically validated (229 tests):
 
-- `def`, `defn`, `fn`, `let`, `if`, `cond`, `when`, `do`
-- Function calls (any unknown form)
-- Vector literals (`[1 2 3]`)
-- Static types: primitives, function types (`[A B -> R]`), parametric
-  (`(Vec T)`, `(Map K V)`, `(Set T)`)
-- Type checking on annotations against literals and known function returns
-- Macros: `(define-macro safe ...)` (expansion re-checked) and
-  `(define-macro unsafe ...)` (expansion typed as `Any` — escape boundary)
-- File-level mode: `(define-mode strict)` (default) vs `(define-mode dynamic)`
-- Inline escape: `(unsafe "raw clojure source")`
-- Custom reader preserves `[]` vs `()` distinction (Clojure cares: vectors
-  vs lists)
+**Forms:**
+`def`, `defn`, `fn`, `let`, `if`, `cond`, `when`, `do`, `loop`/`recur`,
+`for` (with `:when`), `doseq`, `try`/`catch`/`finally`, `case`,
+`defrecord`, constructor calls (`ClassName.`), function calls, vector
+literals, map literals (`{}`), set literals (`#{}`), quote
+
+**Meta:**
+`ns`, `define-mode`, `require`, `declare-extern`, `define-macro`, `import`,
+`unsafe` (top-level and expression position)
+
+**Types:**
+Primitives (`String`, `Long`, `Double`, `Boolean`, `Keyword`, `Symbol`,
+`Nil`, `Any`), function types (`[A B -> R]`, variadic `[A & T -> R]`),
+parametric (`(Vec T)`, `(Map K V)`, `(Set T)`, `(List T)`), union (`(U A B)`),
+polymorphic (`forall`), user-defined record types
+
+**Type checking:**
+Annotations against literals and known returns, arity checking (incl.
+variadic), flow-sensitive narrowing in `if`/`cond`/`when`, cross-file
+type import via `(require module)`, ~100 pre-typed stdlib functions
+
+**Macros:**
+`(define-macro safe ...)` — expansion re-checked by type system.
+`(define-macro unsafe ...)` — expansion typed as `Any` (escape boundary).
+Gensym-hygienic, `&rest` params, `(splice ...)` for list inlining.
+
+**Java interop:**
+`.method` calls, `Class/staticMethod`, `*dynamic-vars*`, `(import java.io.File)`,
+constructor calls (`ClassName.`). ~30 common methods/statics pre-typed.
+
+**Reader:**
+Custom readtable preserving `[]` vs `()`, intercepting `{}` and `#{}` as
+map/set literals, `#"..."` regex literals.
 
 ## A sample beagle program
 
 ```racket
 #lang beagle
 
-(define-namespace beagle.example.hello)
+(ns beagle.example.hello)
+
+(import java.io.File)
 
 (def greeting : String "hello, world")
 
@@ -48,17 +74,25 @@ The full general-purpose subset:
     [(= n 0)  "zero"]
     [(> n 0)  "positive"]))
 
+(defn safe-parse [(s : String)] : Long
+  (try
+    (Long/parseLong s)
+    (catch Exception e -1)))
+
+(def config {:name "beagle" :version 1})
+
 (define-macro safe inc1 (x)
   (+ x 1))
 
-(defn use [(n : Long)] : Long
+(defn use-it [(n : Long)] : Long
   (inc1 n))
 ```
 
 Compiles to:
 
 ```clojure
-(ns beagle.example.hello)
+(ns beagle.example.hello
+  (:import [java.io File]))
 
 (def greeting "hello, world")
 
@@ -67,36 +101,37 @@ Compiles to:
 
 (defn pick [n]
   (cond
-    (< n 0)  "negative"
-    (= n 0)  "zero"
-    (> n 0)  "positive"))
+  (< n 0) "negative"
+  (= n 0) "zero"
+  (> n 0) "positive"))
 
-(defn use [n]
+(defn safe-parse [s]
+  (try
+  (Long/parseLong s)
+  (catch Exception e
+    -1)))
+
+(def config {:name "beagle" :version 1})
+
+(defn use-it [n]
   (+ n 1))
 ```
 
 ## Build
 
 ```
-bin/beagle-build examples/hello.rkt
+bin/beagle-build examples/hello.rkt [output.clj]
+bin/beagle-build-all [dir]          # compile every .rkt in tree
+bin/beagle-expand examples/hello.rkt  # show post-macro source
+bin/beagle-check examples/hello.rkt   # type-check only, no emit
 ```
 
-Auto-derives the output path from `(define-namespace ...)`. Or pipe yourself:
+Or via raco:
 
 ```
-racket examples/hello.rkt > runtime/src/beagle/example/hello.clj
-```
-
-## Run the generated Clojure
-
-```
-cd runtime
-clojure
-```
-
-```
-user=> (require '[beagle.example.hello :as h])
-user=> (h/main)
+raco beagle build examples/hello.rkt
+raco beagle check examples/hello.rkt
+raco beagle expand examples/hello.rkt
 ```
 
 ## Run tests
@@ -107,13 +142,26 @@ raco test tests/
 
 ## Escape hatches
 
-Three levels, narrowest to widest:
+Four levels, narrowest to widest:
 
 1. **`(unsafe "raw clojure")`** — emit a literal string of Clojure verbatim.
-   Use for one-line drops into Clojure-land.
-2. **`(define-macro unsafe NAME ...)`** — a macro whose expansion is typed
-   as `Any`. Use when the expansion reaches into Clojure idioms the checker
-   can't reason about (JVM interop, dynamic dispatch).
-3. **Hand-written `.clj` files alongside generated ones** — the module
-   boundary itself is an escape hatch. Anything you can write in Clojure
-   you can write in a `.clj` file under `runtime/src/`; both share the JVM.
+2. **`(define-macro unsafe NAME ...)`** — macro whose expansion is typed
+   as `Any`.
+3. **`(define-mode dynamic)`** — skip all type checking for a file.
+4. **Hand-written `.clj` files** — the module boundary itself is an escape
+   hatch.
+
+## Setup
+
+Requires [Racket](https://racket-lang.org/). One-time install:
+
+```
+raco pkg install --link --auto /path/to/beagle
+```
+
+## Reference
+
+- `docs/cheatsheet.md` — single-page LLM-grounding reference
+- `docs/forms.md` — canonical form catalog
+- `docs/todo.md` — roadmap and completed work
+- `experiments/README.md` — benchmark framework
