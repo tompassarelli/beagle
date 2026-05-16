@@ -63,6 +63,8 @@ Field syntax reuses wrapped param form `(name : Type)`. All fields must be typed
 (doseq [x coll ...] body...)       ; side-effecting iteration
 (case test val1 result1 val2 result2 default)
 (ClassName. args...)                ; Java constructor
+(:key map)                          ; keyword-as-function (map lookup)
+(:key map default)                  ; keyword lookup with default
 'datum                              ; quote
 [item1 item2 ...]                   ; vector literal
 {k1 v1 k2 v2}                      ; map literal
@@ -70,12 +72,25 @@ Field syntax reuses wrapped param form `(name : Type)`. All fields must be typed
 (fn-name arg1 arg2 ...)             ; function call
 ```
 
-## Parameter syntax — wrapped only
+## Top-level: protocols and multimethods
+
+```racket
+(defprotocol Name
+  (method-name [params] : ReturnType)
+  (other-method [params]))
+
+(defmulti name dispatch-fn)
+(defmethod name dispatch-val [params] body...)
+```
+
+## Parameter syntax — wrapped, bare, or destructured
 
 ```racket
 [x y z]                             ; untyped (bare names)
 [(x : Long) (y : Long)]             ; wrapped with type
 [(x : Long) y]                      ; mix wrapped + bare
+[{:keys [name age]}]                ; map destructuring
+[{:keys [x y] :as point}]          ; destructure + bind whole map
 ```
 
 One canonical form: wrapped `(name : Type)`. The marker is `:` (single colon

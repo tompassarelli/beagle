@@ -199,6 +199,41 @@ Emits:
 (defn employee-rate [r] (:rate r))
 ```
 
+### `defprotocol`
+
+```racket
+(defprotocol NAME
+  (METHOD-NAME [PARAMS] : RETURN-TYPE)
+  ...)
+```
+
+Protocol methods are registered with their types — calls are arity-checked.
+
+Example:
+```racket
+(defprotocol Greetable
+  (greet [(self : Any)] : String)
+  (farewell [(self : Any)] : String))
+```
+
+### `defmulti` / `defmethod`
+
+```racket
+(defmulti NAME DISPATCH-FN)
+(defmethod NAME DISPATCH-VAL [PARAMS] BODY...)
+```
+
+Multimethod dispatch. Dispatch function is any expression (commonly a keyword).
+
+Example:
+```racket
+(defmulti area :shape)
+(defmethod area :circle [m]
+  (* 3.14 (:radius m) (:radius m)))
+(defmethod area :rect [m]
+  (* (:width m) (:height m)))
+```
+
 ### `try` / `catch` / `finally`
 
 ```racket
@@ -268,6 +303,45 @@ Example:
 ```racket
 (java.io.File. "/tmp/test")
 (StringBuilder. "init")
+```
+
+### Keyword-as-function
+
+```racket
+(:KEY TARGET)
+(:KEY TARGET DEFAULT)
+```
+
+Keyword lookup on a map or record. If target is a typed record, the
+checker infers the field type.
+
+Example:
+```racket
+(:name person)                  ; returns String if person is typed record with name : String
+(:age config "unknown")         ; with default value
+(:db/ident schema)              ; namespaced keywords work
+```
+
+## Destructuring
+
+### Map destructuring
+
+```racket
+{:keys [NAME ...]}
+{:keys [NAME ...] :as WHOLE}
+```
+
+Works in `defn`, `fn`, and `let` parameter/binding positions. Extracts
+keyword-keyed values from a map into local bindings.
+
+Example:
+```racket
+(defn greet [{:keys [name age]}]
+  (str "Hello " name ", age " age))
+
+(let [{:keys [x y] :as point} (get-coords)]
+  (println point)
+  (+ x y))
 ```
 
 ## Data

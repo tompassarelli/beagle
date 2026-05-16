@@ -4,10 +4,8 @@ A typed authoring layer that compiles to Clojure. Racket frontend with
 custom `#lang`, macros (safe/unsafe boundaries), static type checking; emits
 plain Clojure source for runtime.
 
-**LLM authoring is a first-class concern.** Beagle's design treats AI
-generation as a primary use case: rich types, explicit forms, low syntactic
-surface area, structured errors. Human ergonomics is not sacrificed — but
-when there's tension, AI-friendliness wins.
+**LLM authoring is a first-class concern.** Rich types, explicit forms, low
+syntactic surface area, structured errors. One canonical idiom per concept.
 
 **Quick reference:** `docs/cheatsheet.md` is the single-page language
 summary designed to be loaded as system context for LLM workflows. Treat
@@ -20,34 +18,33 @@ it as canonical when explaining the language.
 
 - Forms: `def`, `defn`, `fn`, `let`, `if`, `cond`, `when`, `do`, `loop`,
   `recur`, `for` (with `:when`), `doseq`, `try`/`catch`/`finally`, `case`,
-  `defrecord`, constructor calls (`ClassName.`), call, vector literal,
+  `defrecord`, `defprotocol`, `defmulti`/`defmethod`, constructor calls
+  (`ClassName.`), keyword-as-function (`(:key map)`), call, vector literal,
   map literal (`{}`), set literal (`#{}`), quote
 - Meta: `ns`, `define-mode`, `require`, `declare-extern`, `define-macro`,
   `import`, `unsafe` (top-level AND in expression position)
-- Param syntax: **wrapped only** — `(name : Type)`. Single canonical marker `:`.
-  Inline annotations and `:-` marker were removed in the AI-optimization
-  pass (one idiom per concept).
+- Param syntax: **wrapped only** — `(name : Type)`. Plus `{:keys [a b c]}`
+  map destructuring in params and let bindings.
 - Types: primitives (`String`, `Long`, `Double`, `Boolean`, `Keyword`,
   `Symbol`, `Nil`, `Any` — no aliases), user-defined record types,
   function types (variadic with `& T`), parametric (`Vec`, `Map`, `Set`,
   `List`), union (`U`), polymorphic (`forall`)
 - Type narrowing: flow-sensitive in `if`/`cond`/`when` via `nil?`, `some?`,
   `string?`, `=`, `not` etc. Threads through cond clauses.
+- Keyword field inference: `(:name person)` returns the field type when
+  target is a known typed record
 - Macros: safe (gensym-hygienic) / unsafe with `&rest` and `(splice ...)`
-- Stdlib catalog: ~100 common Clojure functions pre-typed, key HOFs polymorphic
+- Stdlib catalog: ~110 common Clojure functions pre-typed, key HOFs polymorphic
 - Cross-file type import: `(require module)` / `(require module :as alias)`
   resolves source at compile time, imports typed defs/defns/externs/macros
 - Validation: type checks, arity (incl. variadic), undefined refs, hints
 - Lint pass: untyped def/defn, unsafe usage, shadowed bindings, unused externs
 - Structured error output: `BEAGLE_ERROR_FORMAT=json` for agent consumption
-- 3 benchmark variants (A canonical, B required-types, C minimal)
-- Java interop: `.method`, `Class/static`, `*dynamic-vars*` as first-class
-  typed forms; ~30 common methods/statics pre-typed in stdlib
-- 229 tests passing
-- 40 benchmark tasks with real Clojure behavior verification
-- 8 head-to-head programs (beagle vs raw Clojure), 16/16 behavior pass
-- Refactoring + bug-detection experiments (arity cascade, injected bugs)
-- Validated by empirical agent benchmarks — 5 real bugs caught and fixed, 88 behavior verifications passing
+- Java interop: `.method`, `Class/static`, `*dynamic-vars*`, constructors,
+  `import`; ~30 common methods/statics pre-typed in stdlib
+- 258 tests passing
+- Empirical benchmarks: 40 tasks, 3 variants, head-to-head against raw Clojure,
+  refactoring and bug-detection experiments — 5 real bugs caught
 
 ## Architecture
 
@@ -57,21 +54,33 @@ parse → check → emit
 ```
 
 - `lang/reader.rkt` — custom reader preserving `[]` vs `()` via
-  `#%brackets` tag (`read-square-bracket-with-tag`). Also intercepts
-  `{}` (map literals) and `#{}` (set literals) via `MAP-TAG`/`SET-TAG`.
+  `#%brackets` tag. Intercepts `{}` (map literals), `#{}` (set literals),
+  `#"..."` (regex) via `MAP-TAG`/`SET-TAG`/`#%regex`.
 - `private/types.rkt` — type AST, parser, compatibility checker.
-- `private/stdlib-types.rkt` — pre-typed Clojure stdlib catalog (single
-  biggest leverage point for AI safety net).
+  `MAP-TAG`/`SET-TAG` are well-known symbols (`#%map`/`#%set`), not gensyms.
+- `private/stdlib-types.rkt` — pre-typed Clojure stdlib catalog (~110 functions).
 - `private/macros.rkt` — macro registry, naive substitution, depth-capped
   recursive expansion, safe/unsafe boundary.
 - `private/parse.rkt` — source → AST. Two passes: meta-form collection
-  (mode, ns, macros, externs, requires) then expr parsing with macro expansion.
+  (mode, ns, macros, externs, requires, imports) then expr parsing with
+  macro expansion.
 - `private/check.rkt` — best-effort type checking against annotations and
-  the built-in env. Skipped in dynamic mode.
+  the built-in env. Record field registry for keyword-access type inference.
+  Skipped in dynamic mode.
 - `private/emit.rkt` — AST → Clojure source string.
 - `private/expand-tool.rkt` — backend for `bin/beagle-expand`.
 - `main.rkt` — language module; `#%module-begin` runs the pipeline,
   embeds resulting string, runtime `(display)`s it.
+
+## Adding a new form (the pattern)
+
+1. **Struct** in `parse.rkt` — new AST node
+2. **Parse case** in `parse-list-form` — pattern-match the source
+3. **Emit case** in `emit-expr` or `emit-form` — produce Clojure
+4. **Infer case** in `infer-expr` — return type (or `ANY`)
+5. **Lint traversal** in `lint.rkt` — `check-shadow` and `collect-symbols`
+6. **Provide** the struct in parse.rkt's provide list
+7. **Tests** in parse/emit/check test files
 
 ## Tools
 
@@ -101,24 +110,18 @@ mode skips lint (types are optional there by definition).
 
 | decision | reasoning |
 |---|---|
-| **s-expressions, AST-based** | non-negotiable foundation |
-| **Custom reader preserves `[]` vs `()`** | Clojure cares (vectors); beagle needs to know |
-| **`(ns ...)` for namespace** | universal Clojure idiom, in LLM training data |
-| **Wrapped `(x : T)` not inline** | unambiguous parse, no lookahead, AI-friendly |
-| **Stdlib extern catalog** | biggest single leverage point for AI type-safety |
-| **Safe / unsafe macro distinction** | controlled boundary for "what the checker re-validates" |
-| **Macro expansion is inspectable** | `beagle-expand` lets the LLM audit its own macros |
-| **Strict mode default** | dynamic is escape-hatch for humans; AI should stay strict |
-| **Subset-of-Clojure, not full mimic** | take Lisp universals + Clojure's good ideas; develop own for typed semantics |
-
-### Resolved by benchmark and cleanup pass
-
-| decision | resolution |
-|---|---|
-| `:` vs `:-` for annotation marker | **`:`** — `:-` removed; no measured benefit in 6-variant benchmark |
-| Wrapped `(x : T)` vs inline `[x : T y : T]` | **Wrapped** — inline removed; no measured benefit, less unambiguous parse |
-| Type aliases `Integer`/`Int`/`Float`/`Bool` | **Removed** — pure redundancy with `Long`/`Double`/`Boolean` |
-| Optional vs required types | **Either, with annotation lint** — variants A (optional) and B (required) both work; A is the canonical baseline |
+| s-expressions, AST-based | non-negotiable foundation |
+| Custom reader preserves `[]` vs `()` | Clojure cares (vectors); beagle needs to know |
+| `(ns ...)` for namespace | universal Clojure idiom, in LLM training data |
+| Wrapped `(x : T)` not inline | unambiguous parse, no lookahead, AI-friendly |
+| Stdlib extern catalog | biggest single leverage point for AI type-safety |
+| Safe / unsafe macro distinction | controlled boundary for "what the checker re-validates" |
+| Macro expansion is inspectable | `beagle-expand` lets the LLM audit its own macros |
+| Strict mode default | dynamic is escape-hatch for humans; AI should stay strict |
+| Subset-of-Clojure, not full mimic | take Lisp universals + Clojure's good ideas; develop own for typed semantics |
+| `:` as only annotation marker | `:-` removed; no measured benefit in 6-variant benchmark |
+| Wrapped params only | inline removed; no measured benefit, less unambiguous parse |
+| No type aliases | `Long`/`Double`/`Boolean` only — zero ambiguity for LLMs |
 
 ### Cargo-cult — deliberately NOT added
 
@@ -126,47 +129,8 @@ Clojure idioms whose cost > benefit for beagle's goals:
 
 - **`#(...)` anonymous fn shorthand** — alternate idiom for `fn`, more
   LLM confusion than value
-- **`{:keys [...]}` destructuring** — non-trivial parsing, real LLM-error
-  surface
-- **Threading macros `->`, `->>`** — they're just macros; users can add as
-  needed. Not built-in.
 - **`@deref`, `#'var-quote`** — Clojure-runtime concepts; use `unsafe`
-- ~~**`{}` map literals**~~ — implemented: `{}` and `#{}` now native
 - **Exotic reader macros (`#=`, `#_`, `#?`)** — Clojure-reader-specific
-
-## AI-optimization features in v0
-
-- **Type-rich stdlib catalog** (`private/stdlib-types.rkt`) — ~60 common
-  Clojure functions pre-typed. Every call to a known function gets arity
-  and arg-type checking.
-- **Inspectable macro expansion** (`bin/beagle-expand`) — LLM can audit
-  what its macros do without compiling.
-- **Form catalog** (`docs/forms.md`) — one canonical reference for every
-  form, designed for LLM grounding.
-- **Single canonical idiom per concept** — no `#(...)` alongside `fn`, no
-  threading alongside nesting. One way to do each thing.
-
-## Benchmark findings (running log)
-
-Empirical results from running variants through the LLM live in
-`docs/findings.md`. First sample (2026-05-15, 17 agent calls) caught two
-real design bugs and validated:
-- High self-consistency on simple tasks (byte-identical output across runs)
-- Variants don't discriminate at low task complexity
-- Hard tasks surface variant-specific gaps fast
-
-The benchmark fixed two beagle issues that argument would have missed:
-- Let bindings now accept wrapped typed form `(name : Type) value`
-  (consistent with param syntax — LLMs expected this)
-- Math operators (`+`, `-`, `*`, `/`) loosened from `[Long Long -> Long]`
-  to variadic Any (Clojure's math is polymorphic; narrow typing blocked
-  real FP work)
-
-## Hard scope cap
-
-If a month in we are deep in compiler infrastructure with no real Clojure
-projects authored in beagle, **stop**. The whole point is authoring. Not
-building a compiler for its own sake.
 
 ## Setup (one-time)
 
@@ -178,4 +142,5 @@ raco pkg install --link --auto /home/tom/code/beagle
 
 - `experiments/README.md` — benchmark framework for design decisions.
 - `docs/forms.md` — canonical form catalog.
-- `docs/todo.md` — deferred + speculative work.
+- `docs/cheatsheet.md` — single-page LLM grounding reference.
+- `docs/todo.md` — roadmap and completed work.

@@ -2,66 +2,22 @@
 
 ## Next
 
-Architecture supports adding these without API breaks.
-
-- ~~**More lint rules.**~~ Done — shadowed binding detection and unused
-  extern detection added. v0 lints: untyped def/defn, unsafe escape,
-  shadowed bindings, unused externs.
-- ~~**Per-statement source locations.**~~ Done — type-check errors now point
-  at the specific form (line:col), not the module. Both `raise-syntax-error`
-  and JSON error format carry per-form positions.
-- ~~**Hygienic macros.**~~ Done — gensym-based hygiene for safe macros.
-  Template-introduced binders (let/fn/defn) renamed to prevent capture.
-  Unsafe macros keep naive substitution by design.
-- ~~**Type narrowing in `if`/`cond`.**~~ Done — flow-sensitive narrowing
-  via `nil?`, `some?`, `string?`, `=`, `not` etc. Threads through cond clauses.
-- ~~**Cross-file type info.**~~ Done — `(require other.module)` resolves
-  the source file at compile time, imports typed defs/defns/externs/macros
-  with namespace prefix (`module/name`). `:as` alias supported. Missing
-  modules silently skip (types default to Any).
-- ~~**Polymorphic / parametric function types.**~~ Done — `forall` types
-  with type variable inference at call sites. `map`, `mapv`, `filter`,
-  `filterv`, `identity` etc. properly polymorphic in stdlib catalog.
-- ~~**`raco beagle ...` subcommand registration.**~~ Done — `raco beagle build`,
-  `raco beagle check`, `raco beagle expand` registered via info.rkt.
-
-## ~~Milestone: beagle vs raw Clojure head-to-head~~
-
-Done — all three phases complete:
-- Phase 1: 5 reference implementations, 10/10 behavior pass
-- Phase 2: 3 LLM-generated programs (P6-P8, 35-85 functions, up to 710
-  lines), parallel isolated agents, both pass first try
-- Phase 3: refactoring experiment (arity cascade) + bug detection (5
-  injected bugs). Neither showed measurable type-system advantage.
-
-Key finding: types don't help at this scale because the data model uses
-untyped vectors. To change the equation: typed records, multi-file
-refactoring, or scale beyond ~1000 lines.
-
-See `experiments/head-to-head/results.md`.
-
-## Next
-
-Architecture supports adding these without API breaks.
-
 - **Source mapping (comprehensive).** Goal: 99% automated source-mapping
   so Clojure runtime errors point back at originating beagle source.
   Current state: per-form source locations exist for compile-time errors.
   Remaining: emit `.clj.map` or inline `^{:line N}` metadata so runtime
   stacktraces map back to `.rkt` source.
-- **Type-definition system (protocols, multimethods, keyword-as-function).**
-  Robust/complete coverage for Clojure's polymorphic dispatch patterns:
-  - `defprotocol` / `deftype` / `extend-type` — protocol-based polymorphism
-  - `defmulti` / `defmethod` — multimethod dispatch
-  - Keyword-as-function lookups (`(:key map)`) — ubiquitous Clojure idiom
-- **Destructuring.** `{:keys [...]}` in let/fn/defn bindings. Important
-  for real Clojure interop but complex to parse.
+- **`deftype` / `extend-type`.** Protocol implementation on types.
+  `defprotocol` exists; need the other side.
 - **Atom/swap!/reset!.** Basic concurrency primitives. Common in real
   Clojure apps.
 - **Threading macros `->`, `->>`.** Could be user-defined macros, but
   they're universal enough to consider built-in.
-- **More stdlib typing.** Only ~100 of 1000+ Clojure functions typed.
+- **More stdlib typing.** Only ~110 of 1000+ Clojure functions typed.
   Priority: high-use functions that would catch real bugs.
+- **Sequential destructuring.** `[a b & rest]` in let/fn/defn.
+  Map destructuring (`{:keys}`) is done; vector destructuring is the
+  other half.
 
 ## Someday
 
@@ -78,30 +34,35 @@ Speculative; no commitment.
 - **Typed REPL.** Connect to a live Clojure socket-repl, evaluate
   beagle forms with full type checking before sending.
 
-## Done in v0
+## Done
 
-- All forms (def, defn, fn, let, if, cond, when, do, call, vector, quote)
+- All core forms (def, defn, fn, let, if, cond, when, do, call, vector, quote)
 - try/catch/finally, doseq, case, constructor calls (ClassName.)
+- defprotocol, defmulti/defmethod
+- Keyword-as-function (`(:key map)`) with record field type inference
 - Map literals (`{}`), set literals (`#{}`), import (Java classes)
+- Map destructuring (`{:keys [a b c]}`, `{:keys [a b c] :as m}`) in params and let
 - Meta: ns, define-mode, require, declare-extern, define-macro, import, unsafe
 - Types: primitives, function types (incl. variadic), parametric, union, polymorphic (forall), Any
 - Macros: safe (gensym-hygienic) / unsafe with &rest and splice
 - Custom reader preserving `[]`/`()`, intercepting `{}`/`#{}`
-- Stdlib extern catalog (~100 functions)
-- `bin/beagle-build`, `bin/beagle-build-all`, `bin/beagle-expand`
-- 229-test suite (incl. loop/recur, for comprehension, sort-by)
-- `experiments/` benchmark framework (40 tasks × 3 variants, gen-prompts + score + verify-behavior)
+- Stdlib extern catalog (~110 functions)
+- bin/beagle-build, bin/beagle-build-all, bin/beagle-expand
+- 258-test suite
+- experiments/ benchmark framework (40 tasks × 3 variants, gen-prompts + score + verify-behavior)
 - Head-to-head benchmark (8 programs, beagle vs raw Clojure, 16/16 pass)
 - Refactoring experiment (overhead-pct cascade, 2/2 pass)
 - Bug detection experiment (5 injected bugs, 2/2 pass)
 - loop/recur, for (with :when), sort-by language forms
 - Wrapped let-binding form: `(let [(name : Type) value ...] ...)`
-- Lint pass: untyped def/defn, return-type missing, unsafe escape warnings
+- Lint pass: untyped def/defn, return-type missing, unsafe escape, shadow, unused extern
 - Empirical benchmark: 88 responses, 5 real bugs caught + fixed, 100% behavior pass
-- Structured error output (`BEAGLE_ERROR_FORMAT=json`, hints, `beagle-check`)
-- `docs/findings.md` empirical log
-- Form catalog (`docs/forms.md`)
+- Structured error output (BEAGLE_ERROR_FORMAT=json, hints, beagle-check)
+- docs/findings.md empirical log
+- Form catalog (docs/forms.md)
 - Flow-sensitive type narrowing in if/cond/when
-- Cross-file type import via `(require module)` / `(require module :as alias)`
+- Cross-file type import via (require module) / (require module :as alias)
 - Polymorphic stdlib (map, filter, identity etc.)
-- `raco beagle build|check|expand` subcommands
+- raco beagle build|check|expand subcommands
+- Per-statement source locations for compile-time errors
+- Hygienic macros (gensym-based for safe macros)
