@@ -48,6 +48,7 @@
    'distinct   (fn-of '(Any) 'Any)
    'sort       (fn-of '(Any) 'Any #:rest 'Any)
    'sort-by    (fn-of '(Any Any) 'Any #:rest 'Any)
+   'ffirst     (fn-of '(Any) 'Any)
    ;; --- higher-order (polymorphic where useful) -----------------------------
    'map        (poly-fn '(A B)
                  (list (type-fn (list (tv 'A)) #f (tv 'B)))
@@ -69,6 +70,7 @@
                  (list (type-fn (list (tv 'A)) #f (p 'Any))
                        (p 'Any))
                  (p 'Any))
+   'mapcat     (fn-of '(Any Any) 'Any #:rest 'Any)
    'reduce     (fn-of '(Any Any) 'Any #:rest 'Any)
    'apply      (fn-of '(Any Any) 'Any #:rest 'Any)
    'comp       (fn-of '() 'Any #:rest 'Any)
@@ -107,6 +109,7 @@
    '>=         (fn-of '(Long Long) 'Boolean)
    'identical? (fn-of '(Any Any) 'Boolean)
    'compare    (fn-of '(Any Any) 'Long)
+   'boolean    (fn-of '(Any) 'Boolean)
    ;; --- boolean ------------------------------------------------------------
    'not        (fn-of '(Boolean) 'Boolean)
    'and        (fn-of '() 'Any #:rest 'Any)
@@ -115,6 +118,8 @@
    'false?     (fn-of '(Any) 'Boolean)
    'nil?       (fn-of '(Any) 'Boolean)
    'some?      (fn-of '(Any) 'Boolean)
+   'parse-long   (fn-of '(String) 'Any)
+   'parse-double (fn-of '(String) 'Any)
    ;; --- io -----------------------------------------------------------------
    'println    (fn-of '() 'Nil #:rest 'Any)
    'print      (fn-of '() 'Nil #:rest 'Any)
@@ -122,6 +127,9 @@
    'pr-str     (fn-of '() 'String #:rest 'Any)
    'newline    (fn-of '() 'Nil)
    'prn        (fn-of '() 'Nil #:rest 'Any)
+   'slurp      (fn-of '(Any) 'String)
+   'spit       (fn-of '(Any Any) 'Nil #:rest 'Any)
+   'read-string (fn-of '(String) 'Any)
    ;; --- identity / value ---------------------------------------------------
    'identity   (poly-fn '(A) (list (tv 'A)) (tv 'A))
    'constantly (fn-of '(Any) 'Any)
