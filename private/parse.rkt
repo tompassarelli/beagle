@@ -120,14 +120,20 @@
 (struct dynamic-var (name)                                  #:transparent)
 (struct map-form   (pairs)                                  #:transparent)  ; pairs: list of (key . value)
 (struct set-form   (items)                                  #:transparent)
+(struct kw-access  (kw target default)                       #:transparent)  ; (:key map) or (:key map default)
 (struct try-form    (body catches finally-body)             #:transparent)
 (struct catch-clause (exception-type name body)            #:transparent)
 (struct doseq-form  (clauses body)                         #:transparent)
 (struct case-form   (test clauses default)                 #:transparent)
 (struct case-clause (value body)                           #:transparent)
 (struct new-form    (class-name args)                      #:transparent)
+(struct protocol-form (name methods)                       #:transparent)
+(struct protocol-method (name params return-type)          #:transparent)
+(struct defmulti-form (name dispatch-fn)                   #:transparent)
+(struct defmethod-form (name dispatch-val params body)     #:transparent)
 
 (struct param       (name type)                             #:transparent)
+(struct map-destructure (keys as-name)                      #:transparent)  ; {:keys [a b c] :as name}
 (struct let-binding (name type value)                       #:transparent)
 
 ;; A require entry: target namespace + optional :as alias
@@ -341,6 +347,12 @@
               (char-upper-case? (string-ref s 0))
               (char=? (string-ref s (- (string-length s) 1)) #\.)))))
 
+(define (keyword-sym? sym)
+  (and (symbol? sym)
+       (let ([s (symbol->string sym)])
+         (and (> (string-length s) 1)
+              (char=? (string-ref s 0) #\:)))))
+
 ;; --- per-form parsing ------------------------------------------------------
 
 (define (parse-top d)
@@ -403,6 +415,15 @@
     [(list 'defrecord (? symbol? name) fields-form)
      (record-form name (parse-record-fields fields-form))]
 
+    [(list 'defprotocol (? symbol? name) sigs ...)
+     (protocol-form name (map parse-protocol-method sigs))]
+
+    [(list 'defmulti (? symbol? name) dispatch-expr)
+     (defmulti-form name (parse-expr dispatch-expr))]
+
+    [(list 'defmethod (? symbol? name) dispatch-val params-form body ...)
+     (defmethod-form name (parse-expr dispatch-val) (parse-params params-form) (parse-body body))]
+
     [(list 'fn params-form marker return-type body ...)
      #:when (annotation-marker? marker)
      (fn-form (parse-params params-form) (parse-type return-type) (parse-body body))]
@@ -439,6 +460,11 @@
     [(list (? constructor-sym? c) args ...)
      (new-form c (map parse-expr args))]
 
+    [(list (? keyword-sym? kw) target)
+     (kw-access kw (parse-expr target) #f)]
+    [(list (? keyword-sym? kw) target default-val)
+     (kw-access kw (parse-expr target) (parse-expr default-val))]
+
     [(list (? dot-method-sym? m) target args ...)
      (method-call m (parse-expr target) (map parse-expr args))]
 
@@ -449,6 +475,14 @@
      (call-form f (map parse-expr args))]
 
     [_ (error 'beagle "unsupported form: ~v" d)]))
+
+(define (parse-protocol-method sig)
+  (match sig
+    [(list (? symbol? name) params-form ': return-type)
+     (protocol-method name (parse-params params-form) (parse-type return-type))]
+    [(list (? symbol? name) params-form)
+     (protocol-method name (parse-params params-form) #f)]
+    [_ (error 'beagle "defprotocol method signature must be (name [params] : RetType) or (name [params]), got: ~v" sig)]))
 
 (define (parse-body forms)
   (when (null? forms)
@@ -572,11 +606,10 @@
 
 ;; --- params + bindings -----------------------------------------------------
 
-;; Param lists support two shapes (intermixable):
+;; Param lists support three shapes (intermixable):
 ;;   1. bare name (untyped):          x
 ;;   2. wrapped + annotation:         (x : T)
-;; One canonical typed-param syntax. Inline (x : T y : T) was supported earlier
-;; but removed for AI-optimization (narrow surface, one idiom per concept).
+;;   3. map destructure:              {:keys [a b c]} or {:keys [a b c] :as m}
 (define (parse-params p)
   (define items
     (cond
@@ -585,6 +618,9 @@
       [else (error 'beagle "expected parameter list, got: ~v" p)]))
   (for/list ([item (in-list items)])
     (cond
+      ;; Map destructure: {:keys [a b c]} or {:keys [a b c] :as m}
+      [(map-destructure-form? item)
+       (parse-map-destructure item)]
       ;; Wrapped: (name : T)
       [(and (list? item)
             (= (length item) 3)
@@ -596,8 +632,30 @@
        (param item #f)]
       [else
        (error 'beagle
-              "bad parameter: ~v~nexpected name, or (name : Type)"
+              "bad parameter: ~v~nexpected name, (name : Type), or {:keys [...]}"
               item)])))
+
+(define (map-destructure-form? item)
+  (and (map-tagged? item)
+       (let ([body (map-body item)])
+         (and (>= (length body) 2)
+              (eq? (car body) ':keys)
+              (bracketed? (cadr body))))))
+
+(define (parse-map-destructure item)
+  (define body (map-body item))
+  (define keys-bracket (cadr body))
+  (define key-names (bracket-body keys-bracket))
+  (unless (andmap symbol? key-names)
+    (error 'beagle "{:keys [...]} entries must be symbols, got: ~v" key-names))
+  (define as-name
+    (cond
+      [(and (>= (length body) 4)
+            (eq? (list-ref body 2) ':as)
+            (symbol? (list-ref body 3)))
+       (list-ref body 3)]
+      [else #f]))
+  (map-destructure key-names as-name))
 
 (define (parse-let-bindings b)
   (define items
@@ -618,6 +676,13 @@
              (cons (let-binding (car (car rest))
                                 (parse-type (caddr (car rest)))
                                 (parse-expr (cadr rest)))
+                   acc))]
+      ;; Map destructure: {:keys [a b c]} value
+      [(and (>= (length rest) 2)
+            (map-destructure-form? (car rest)))
+       (define destr (parse-map-destructure (car rest)))
+       (loop (cddr rest)
+             (cons (let-binding destr #f (parse-expr (cadr rest)))
                    acc))]
       ;; Untyped: name value (2 tokens)
       [(and (>= (length rest) 2)
@@ -702,6 +767,12 @@
  (struct-out case-form)
  (struct-out case-clause)
  (struct-out new-form)
+ (struct-out kw-access)
+ (struct-out protocol-form)
+ (struct-out protocol-method)
+ (struct-out defmulti-form)
+ (struct-out defmethod-form)
+ (struct-out map-destructure)
  dot-method-sym?
  static-method-sym?
  dynamic-var-sym?

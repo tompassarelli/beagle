@@ -472,3 +472,79 @@
   (check-not-exn
    (lambda ()
      (check-prog '(def x (ArrayList.))))))
+
+;; --- keyword-as-function ---------------------------------------------------
+
+(test-case "keyword access passes type check"
+  (check-not-exn
+   (lambda ()
+     (check-prog '(def x (:name m))))))
+
+(test-case "keyword access with default passes"
+  (check-not-exn
+   (lambda ()
+     (check-prog '(def x (:age m "fallback"))))))
+
+(test-case "keyword access on record returns field type"
+  (check-not-exn
+   (lambda ()
+     (check-prog
+      `(defrecord Person ,(br '(name : String) '(age : Long)))
+      '(def p (->Person "Alice" 30))
+      '(def n : String (:name p))))))
+
+(test-case "keyword access on record catches type mismatch"
+  (check-exn exn:fail?
+   (lambda ()
+     (check-prog
+      `(defrecord Person ,(br '(name : String) '(age : Long)))
+      '(def p : Person (->Person "Alice" 30))
+      '(def n : Long (:name p))))))
+
+;; --- defprotocol -----------------------------------------------------------
+
+(test-case "defprotocol methods are typed in env"
+  (check-not-exn
+   (lambda ()
+     (check-prog
+      `(defprotocol Greetable
+         (greet ,(br '(self : Any)) : String))
+      '(def x : String (greet obj))))))
+
+(test-case "defprotocol method arity checked"
+  (check-exn exn:fail?
+   (lambda ()
+     (check-prog
+      `(defprotocol Greetable
+         (greet ,(br '(self : Any)) : String))
+      '(def x (greet a b c))))))
+
+;; --- defmulti / defmethod ---------------------------------------------------
+
+(test-case "defmulti passes type check"
+  (check-not-exn
+   (lambda ()
+     (check-prog '(defmulti greeting :lang)))))
+
+(test-case "defmethod body is type-checked"
+  (check-not-exn
+   (lambda ()
+     (check-prog
+      '(defmulti greeting :lang)
+      `(defmethod greeting :en ,(br 'x) "hello")))))
+
+;; --- destructuring ----------------------------------------------------------
+
+(define (mp . xs) (cons MAP-TAG xs))
+
+(test-case "map destructure bindings visible in body"
+  (check-not-exn
+   (lambda ()
+     (check-prog
+      `(defn process ,(br (mp ':keys (br 'name 'age))) (println name))))))
+
+(test-case "map destructure in let bindings visible"
+  (check-not-exn
+   (lambda ()
+     (check-prog
+      `(let ,(br (mp ':keys (br 'x 'y)) '(hash-map :x 1 :y 2)) (+ x y))))))

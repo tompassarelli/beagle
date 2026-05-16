@@ -537,3 +537,75 @@
   (define f (car (parse-one '(Point. 10 20))))
   (check-true (new-form? f))
   (check-equal? (length (new-form-args f)) 2))
+
+;; --- keyword-as-function ---------------------------------------------------
+
+(test-case "keyword access parses"
+  (define f (car (parse-one '(:name m))))
+  (check-true (kw-access? f))
+  (check-eq? (kw-access-kw f) ':name)
+  (check-false (kw-access-default f)))
+
+(test-case "keyword access with default"
+  (define f (car (parse-one '(:age m "unknown"))))
+  (check-true (kw-access? f))
+  (check-eq? (kw-access-kw f) ':age)
+  (check-equal? (kw-access-default f) "unknown"))
+
+(test-case "namespaced keyword access"
+  (define f (car (parse-one '(:db/ident schema))))
+  (check-true (kw-access? f))
+  (check-eq? (kw-access-kw f) ':db/ident))
+
+;; --- defprotocol -----------------------------------------------------------
+
+(test-case "defprotocol parses"
+  (define f (car (parse-one `(defprotocol Greetable
+                               (greet ,(br '(self : Any)) : String)))))
+  (check-true (protocol-form? f))
+  (check-eq? (protocol-form-name f) 'Greetable)
+  (check-equal? (length (protocol-form-methods f)) 1)
+  (check-eq? (protocol-method-name (car (protocol-form-methods f))) 'greet))
+
+(test-case "defprotocol with multiple methods"
+  (define f (car (parse-one `(defprotocol Shape
+                               (area ,(br '(self : Any)) : Double)
+                               (perimeter ,(br '(self : Any)) : Double)))))
+  (check-equal? (length (protocol-form-methods f)) 2))
+
+;; --- defmulti / defmethod ---------------------------------------------------
+
+(test-case "defmulti parses"
+  (define f (car (parse-one '(defmulti greeting :lang))))
+  (check-true (defmulti-form? f))
+  (check-eq? (defmulti-form-name f) 'greeting))
+
+(test-case "defmethod parses"
+  (define f (car (parse-one `(defmethod greeting :en ,(br 'x) "hello"))))
+  (check-true (defmethod-form? f))
+  (check-eq? (defmethod-form-name f) 'greeting))
+
+;; --- destructuring ----------------------------------------------------------
+
+(define (mp . xs) (cons MAP-TAG xs))
+
+(test-case "map destructure in params"
+  (define f (car (parse-one `(defn process ,(br (mp ':keys (br 'name 'age))) (println name)))))
+  (check-true (defn-form? f))
+  (define p (car (defn-form-params f)))
+  (check-true (map-destructure? p))
+  (check-equal? (map-destructure-keys p) '(name age))
+  (check-false (map-destructure-as-name p)))
+
+(test-case "map destructure with :as"
+  (define f (car (parse-one `(defn process ,(br (mp ':keys (br 'name 'age) ':as 'm)) (println name)))))
+  (define p (car (defn-form-params f)))
+  (check-true (map-destructure? p))
+  (check-equal? (map-destructure-keys p) '(name age))
+  (check-eq? (map-destructure-as-name p) 'm))
+
+(test-case "map destructure in let binding"
+  (define f (car (parse-one `(let ,(br (mp ':keys (br 'x 'y)) 'point) (+ x y)))))
+  (check-true (let-form? f))
+  (define b (car (let-form-bindings f)))
+  (check-true (map-destructure? (let-binding-name b))))

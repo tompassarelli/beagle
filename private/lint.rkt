@@ -45,7 +45,7 @@
           name))
   (define untyped-params
     (for/list ([p (in-list params)]
-               #:unless (param-type p))
+               #:when (and (param? p) (not (param-type p))))
       (param-name p)))
   (unless (null? untyped-params)
     (warn "defn ~a has untyped parameter(s): ~a (consider adding `(name : Type)`)"
@@ -69,11 +69,21 @@
       [(defn-form? form)
        (define scope (make-hasheq))
        (for ([p (in-list (defn-form-params form))])
-         (hash-set! scope (param-name p) #t))
+         (if (map-destructure? p)
+           (for ([k (in-list (map-destructure-keys p))]) (hash-set! scope k #t))
+           (hash-set! scope (param-name p) #t)))
        (for ([e (in-list (defn-form-body form))])
          (check-shadow e scope (defn-form-name form)))]
       [(def-form? form)
        (check-shadow (def-form-value form) (make-hasheq) #f)]
+      [(defmethod-form? form)
+       (define scope (make-hasheq))
+       (for ([p (in-list (defmethod-form-params form))])
+         (if (map-destructure? p)
+           (for ([k (in-list (map-destructure-keys p))]) (hash-set! scope k #t))
+           (hash-set! scope (param-name p) #t)))
+       (for ([e (in-list (defmethod-form-body form))])
+         (check-shadow e scope (defmethod-form-name form)))]
       [else (void)])))
 
 (define (check-shadow form scope ctx)
@@ -81,19 +91,29 @@
     [(fn-form params _ body)
      (define inner (scope-copy scope))
      (for ([p (in-list params)])
-       (define n (param-name p))
-       (when (hash-has-key? scope n)
-         (warn-shadow "parameter" n ctx))
-       (hash-set! inner n #t))
+       (cond
+         [(map-destructure? p)
+          (for ([k (in-list (map-destructure-keys p))])
+            (when (hash-has-key? scope k) (warn-shadow "parameter" k ctx))
+            (hash-set! inner k #t))]
+         [else
+          (define n (param-name p))
+          (when (hash-has-key? scope n) (warn-shadow "parameter" n ctx))
+          (hash-set! inner n #t)]))
      (for ([e (in-list body)]) (check-shadow e inner ctx))]
     [(let-form bindings body)
      (define inner (scope-copy scope))
      (for ([b (in-list bindings)])
        (define n (let-binding-name b))
-       (when (hash-has-key? scope n)
-         (warn-shadow "let binding" n ctx))
-       (check-shadow (let-binding-value b) inner ctx)
-       (hash-set! inner n #t))
+       (cond
+         [(map-destructure? n)
+          (for ([k (in-list (map-destructure-keys n))])
+            (when (hash-has-key? scope k) (warn-shadow "let binding" k ctx))
+            (hash-set! inner k #t))]
+         [else
+          (when (hash-has-key? scope n) (warn-shadow "let binding" n ctx))
+          (hash-set! inner n #t)])
+       (check-shadow (let-binding-value b) inner ctx))
      (for ([e (in-list body)]) (check-shadow e inner ctx))]
     [(defn-form name params _ body)
      (define inner (scope-copy scope))
@@ -158,6 +178,9 @@
      (when default (check-shadow default scope ctx))]
     [(new-form _ args)
      (for ([a (in-list args)]) (check-shadow a scope ctx))]
+    [(kw-access _ target default)
+     (check-shadow target scope ctx)
+     (when default (check-shadow default scope ctx))]
     [_ (void)]))
 
 (define (warn-shadow kind name ctx)
@@ -245,6 +268,11 @@
      (when default (collect-symbols default used))]
     [(new-form _ args)
      (for ([a (in-list args)]) (collect-symbols a used))]
+    [(kw-access _ target default)
+     (collect-symbols target used)
+     (when default (collect-symbols default used))]
+    [(defmethod-form _ _ _ body)
+     (for ([e (in-list body)]) (collect-symbols e used))]
     [_ (void)]))
 
 (provide lint-program!)

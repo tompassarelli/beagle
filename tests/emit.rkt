@@ -340,3 +340,53 @@
 (test-case "constructor with multiple args emits"
   (define out (compile '(def p (Point. 10 20))))
   (check-true (matches? #rx"\\(Point\\. 10 20\\)" out)))
+
+;; --- keyword-as-function ---------------------------------------------------
+
+(test-case "keyword access emits"
+  (define out (compile '(def x (:name m))))
+  (check-true (matches? #rx"\\(:name m\\)" out)))
+
+(test-case "keyword access with default emits"
+  (define out (compile '(def x (:age m "unknown"))))
+  (check-true (matches? #rx"\\(:age m \"unknown\"\\)" out)))
+
+(test-case "namespaced keyword access emits"
+  (define out (compile '(def x (:db/ident schema))))
+  (check-true (matches? #rx"\\(:db/ident schema\\)" out)))
+
+;; --- defprotocol -----------------------------------------------------------
+
+(test-case "defprotocol emits"
+  (define out (compile `(defprotocol Greetable
+                          (greet ,(br '(self : Any)) : String))))
+  (check-true (matches? #rx"defprotocol Greetable" out))
+  (check-true (matches? #rx"\\(greet \\[self\\]\\)" out)))
+
+;; --- defmulti / defmethod ---------------------------------------------------
+
+(test-case "defmulti emits"
+  (define out (compile '(defmulti greeting :lang)))
+  (check-true (matches? #rx"\\(defmulti greeting :lang\\)" out)))
+
+(test-case "defmethod emits"
+  (define out (compile `(defmulti greeting :lang)
+                       `(defmethod greeting :en ,(br 'x) "hello")))
+  (check-true (matches? #rx"\\(defmethod greeting :en \\[x\\]" out))
+  (check-true (matches? #rx"\"hello\"" out)))
+
+;; --- destructuring ----------------------------------------------------------
+
+(define (mp . xs) (cons MAP-TAG xs))
+
+(test-case "map destructure in params emits"
+  (define out (compile `(defn process ,(br (mp ':keys (br 'name 'age))) (println name))))
+  (check-true (matches? #rx"\\{:keys \\[name age\\]\\}" out)))
+
+(test-case "map destructure with :as emits"
+  (define out (compile `(defn process ,(br (mp ':keys (br 'x 'y) ':as 'm)) (println x))))
+  (check-true (matches? #rx"\\{:keys \\[x y\\] :as m\\}" out)))
+
+(test-case "map destructure in let emits"
+  (define out (compile `(let ,(br (mp ':keys (br 'x 'y)) 'point) (+ x y))))
+  (check-true (matches? #rx"\\{:keys \\[x y\\]\\} point" out)))

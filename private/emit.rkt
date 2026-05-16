@@ -91,6 +91,22 @@
     [(record-form? f)
      (emit-record f)]
 
+    [(protocol-form? f)
+     (define sigs
+       (for/list ([m (protocol-form-methods f)])
+         (format "(~a [~a])" (protocol-method-name m) (emit-params (protocol-method-params m)))))
+     (format "(defprotocol ~a\n  ~a)" (protocol-form-name f) (string-join sigs "\n  "))]
+
+    [(defmulti-form? f)
+     (format "(defmulti ~a ~a)" (defmulti-form-name f) (emit-expr (defmulti-form-dispatch-fn f)))]
+
+    [(defmethod-form? f)
+     (format "(defmethod ~a ~a [~a]\n  ~a)"
+             (defmethod-form-name f)
+             (emit-expr (defmethod-form-dispatch-val f))
+             (emit-params (defmethod-form-params f))
+             (emit-body (defmethod-form-body f) "  "))]
+
     [else (emit-expr f)]))
 
 ;; --- expressions -----------------------------------------------------------
@@ -197,6 +213,10 @@
        (format "(case ~a\n  ~a)" (emit-expr (case-form-test e)) body))]
     [(new-form? e)
      (format "(~a~a)" (symbol->string (new-form-class-name e)) (emit-args (new-form-args e)))]
+    [(kw-access? e)
+     (if (kw-access-default e)
+       (format "(~a ~a ~a)" (symbol->string (kw-access-kw e)) (emit-expr (kw-access-target e)) (emit-expr (kw-access-default e)))
+       (format "(~a ~a)" (symbol->string (kw-access-kw e)) (emit-expr (kw-access-target e))))]
     [(call-form? e)
      (format "(~a~a)"
              (symbol->string (call-form-fn e))
@@ -226,15 +246,29 @@
     [(null? args) ""]
     [else (string-append " " (string-join (map emit-expr args) " "))]))
 
+(define (emit-param p)
+  (cond
+    [(map-destructure? p) (emit-map-destructure p)]
+    [else (symbol->string (param-name p))]))
+
+(define (emit-map-destructure d)
+  (define keys-str (string-join (map symbol->string (map-destructure-keys d)) " "))
+  (if (map-destructure-as-name d)
+    (format "{:keys [~a] :as ~a}" keys-str (map-destructure-as-name d))
+    (format "{:keys [~a]}" keys-str)))
+
 (define (emit-params params)
-  (string-join
-   (for/list ([p (in-list params)]) (symbol->string (param-name p)))
-   " "))
+  (string-join (map emit-param params) " "))
 
 (define (emit-let-bindings bindings)
   (string-join
    (for/list ([b (in-list bindings)])
-     (format "~a ~a" (let-binding-name b) (emit-expr (let-binding-value b))))
+     (define name-str
+       (cond
+         [(map-destructure? (let-binding-name b))
+          (emit-map-destructure (let-binding-name b))]
+         [else (symbol->string (let-binding-name b))]))
+     (format "~a ~a" name-str (emit-expr (let-binding-value b))))
    "\n   "))
 
 (define (emit-for-clauses clauses)

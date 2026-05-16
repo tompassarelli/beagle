@@ -16,6 +16,9 @@
 
 (define ANY (type-prim 'Any))
 
+;; Record field registry: record-type-name -> hash of keyword-sym -> type
+(define RECORD-FIELDS (make-hash))
+
 ;; --- entry point -----------------------------------------------------------
 
 (define (type-check! prog)
@@ -37,22 +40,36 @@
       [(def-form name (? type? t) _) (hash-set! env name t)]
       [(defn-form name params (? type? ret) _)
        (hash-set! env name
-                  (type-fn (map (lambda (p) (or (param-type p) ANY)) params)
-                           #f ret))]
+                  (type-fn (map param-or-destr-type params) #f ret))]
       [(defn-form name params #f _)
        (hash-set! env name
-                  (type-fn (map (lambda (p) (or (param-type p) ANY)) params)
-                           #f ANY))]
+                  (type-fn (map param-or-destr-type params) #f ANY))]
       [(record-form name fields)
        (define rec-type (type-prim name))
        (define name-str (symbol->string name))
        (define name-lower (string-downcase name-str))
        (hash-set! env (string->symbol (string-append "->" name-str))
                   (type-fn (map param-type fields) #f rec-type))
+       (define field-map (make-hash))
        (for ([f (in-list fields)])
          (hash-set! env
                     (string->symbol (string-append name-lower "-" (symbol->string (param-name f))))
-                    (type-fn (list rec-type) #f (param-type f))))]
+                    (type-fn (list rec-type) #f (param-type f)))
+         (hash-set! field-map
+                    (string->symbol (string-append ":" (symbol->string (param-name f))))
+                    (param-type f)))
+       (hash-set! RECORD-FIELDS name field-map)]
+      [(protocol-form name methods)
+       (for ([m (in-list methods)])
+         (define m-params (protocol-method-params m))
+         (define m-ret (or (protocol-method-return-type m) ANY))
+         (hash-set! env (protocol-method-name m)
+                    (type-fn (map (lambda (p) (or (param-type p) ANY)) m-params)
+                             #f m-ret)))]
+      [(defmulti-form name dispatch-fn)
+       (hash-set! env name (type-fn (list ANY) (type-prim 'Any) ANY))]
+      [(defmethod-form name _ params body)
+       (void)]
       [_ (void)]))
   env)
 
@@ -63,6 +80,9 @@
   (define out (make-hash))
   (for ([(k v) (in-hash h)]) (hash-set! out k v))
   out)
+
+(define (param-or-destr-type p)
+  (if (map-destructure? p) ANY (or (param-type p) ANY)))
 
 ;; --- check a top-level form ------------------------------------------------
 
@@ -86,13 +106,25 @@
                 name (type->string expected-ret) (type->string last-type))))]
 
     [(record-form _ _) (void)]
+    [(protocol-form _ _) (void)]
+    [(defmulti-form _ _) (void)]
+    [(defmethod-form name _ params body)
+     (define body-env (extend-with-params env params))
+     (last-expr-type body body-env)]
 
     [_ (infer-expr form env)]))
 
 (define (extend-with-params env params)
   (define out (mut-copy env))
   (for ([p (in-list params)])
-    (hash-set! out (param-name p) (or (param-type p) ANY)))
+    (cond
+      [(map-destructure? p)
+       (for ([k (in-list (map-destructure-keys p))])
+         (hash-set! out k ANY))
+       (when (map-destructure-as-name p)
+         (hash-set! out (map-destructure-as-name p) ANY))]
+      [else
+       (hash-set! out (param-name p) (or (param-type p) ANY))]))
   out)
 
 (define (last-expr-type body env)
@@ -182,6 +214,16 @@
         (if negated?
           (values neg-env pos-env)
           (values pos-env neg-env))])]))
+
+;; --- keyword field lookup --------------------------------------------------
+
+(define (lookup-kw-field-type kw-sym target-type env)
+  (cond
+    [(and (type-prim? target-type)
+          (hash-has-key? RECORD-FIELDS (type-prim-name target-type)))
+     (define field-map (hash-ref RECORD-FIELDS (type-prim-name target-type)))
+     (hash-ref field-map kw-sym ANY)]
+    [else ANY]))
 
 ;; --- inference -------------------------------------------------------------
 
@@ -309,6 +351,10 @@
     [(new-form? e)
      (for ([a (in-list (new-form-args e))]) (infer-expr a env))
      ANY]
+    [(kw-access? e)
+     (infer-expr (kw-access-target e) env)
+     (when (kw-access-default e) (infer-expr (kw-access-default e) env))
+     (lookup-kw-field-type (kw-access-kw e) (infer-expr (kw-access-target e) env) env)]
     [(call-form? e)
      (define raw-type (hash-ref env (call-form-fn e) ANY))
      (define fn-type
@@ -356,14 +402,20 @@
   (for ([b (in-list bindings)])
     (define inferred (infer-expr (let-binding-value b) out))
     (define declared (let-binding-type b))
-    (when declared
-      (unless (type-compatible? inferred declared)
-        (error 'beagle
-               "let binding ~a: expected ~a, got ~a"
-               (let-binding-name b)
-               (type->string declared)
-               (type->string inferred))))
-    (hash-set! out (let-binding-name b) (or declared inferred ANY)))
+    (define bname (let-binding-name b))
+    (cond
+      [(map-destructure? bname)
+       (for ([k (in-list (map-destructure-keys bname))])
+         (hash-set! out k ANY))
+       (when (map-destructure-as-name bname)
+         (hash-set! out (map-destructure-as-name bname) (or declared inferred ANY)))]
+      [else
+       (when declared
+         (unless (type-compatible? inferred declared)
+           (error 'beagle
+                  "let binding ~a: expected ~a, got ~a"
+                  bname (type->string declared) (type->string inferred))))
+       (hash-set! out bname (or declared inferred ANY))]))
   out)
 
 ;; Variadic-aware argument checking.
