@@ -10,6 +10,7 @@
 (require racket/match
          racket/string
          racket/set
+         racket/list
          "parse.rkt"
          "types.rkt"
          "stdlib-types.rkt")
@@ -24,6 +25,8 @@
 (define RECORD-FIELD-ORDER (make-hash))
 ;; Enum value registry: enum-name -> list of keyword symbols
 (define ENUM-VALUES (make-hash))
+;; Record origin: record-type-name -> module-symbol (or 'local)
+(define RECORD-ORIGIN (make-hash))
 
 ;; Expression-level source locations from the parser.
 (define current-check-src-table (make-parameter #f))
@@ -111,6 +114,10 @@
 
 (define (type-check! prog)
   (when (eq? (program-mode prog) 'strict)
+    (hash-clear! RECORD-FIELDS)
+    (hash-clear! RECORD-FIELD-ORDER)
+    (hash-clear! ENUM-VALUES)
+    (hash-clear! RECORD-ORIGIN)
     (define env (build-initial-env prog))
     (for ([form (in-list (program-forms prog))])
       (check-form form env))))
@@ -429,16 +436,43 @@
 
 ;; --- exhaustive match checking ----------------------------------------------
 
+;; Find records that share common fields with all matched types and have
+;; similar field counts (filters out state/projection records with many fields).
+(define (find-sibling-records matched-types)
+  (define matched-field-sets
+    (for/list ([rt (in-list matched-types)]
+               #:when (hash-has-key? RECORD-FIELDS rt))
+      (list->set (hash-keys (hash-ref RECORD-FIELDS rt)))))
+  (cond
+    [(null? matched-field-sets) '()]
+    [else
+     (define common-fields (apply set-intersect matched-field-sets))
+     (cond
+       [(set-empty? common-fields) '()]
+       [else
+        (define matched-set (list->set matched-types))
+        (define max-matched-field-count
+          (apply max (map set-count matched-field-sets)))
+        (define field-count-limit (+ max-matched-field-count (quotient max-matched-field-count 2) 1))
+        (for/list ([rt (in-list (hash-keys RECORD-FIELDS))]
+                   #:when (and (not (set-member? matched-set rt))
+                               (let ([flds (hash-ref RECORD-FIELDS rt)])
+                                 (and (<= (hash-count flds) field-count-limit)
+                                      (subset? common-fields
+                                               (list->set (hash-keys flds)))))))
+          rt)])]))
+
 (define (check-match-exhaustiveness e env)
   (define clauses (match-form-clauses e))
   (define record-pats
     (filter pat-record?
             (map match-clause-pattern clauses)))
-  (when (and (not (null? record-pats))
-             (not (ormap (lambda (c)
-                           (or (pat-wildcard? (match-clause-pattern c))
-                               (pat-var? (match-clause-pattern c))))
-                         clauses)))
+  (when (not (null? record-pats))
+    (define has-wildcard?
+      (ormap (lambda (c)
+               (or (pat-wildcard? (match-clause-pattern c))
+                   (pat-var? (match-clause-pattern c))))
+             clauses))
     (define matched-types
       (map pat-record-type-name record-pats))
     (define all-record-types (hash-keys RECORD-FIELDS))
@@ -447,16 +481,35 @@
       (for/list ([rt (in-list all-record-types)]
                  #:when (not (set-member? matched-set rt)))
         rt))
-    (when (and (>= (length matched-types) 2)
-               (not (null? universe-candidates)))
-      (define src (src-for e))
-      (define file (and src (src-loc-source src)))
-      (define line (and src (src-loc-line src)))
-      (fprintf (current-error-port)
-               "warning: match may be non-exhaustive~a\n  matched: ~a\n  possibly missing: ~a\n"
-               (if line (format " at ~a:~a" (or file "?") line) "")
-               (string-join (map symbol->string matched-types) ", ")
-               (string-join (map symbol->string universe-candidates) ", ")))))
+    (define src (src-for e))
+    (define file (and src (src-loc-source src)))
+    (define line (and src (src-loc-line src)))
+    (cond
+      [(and (not has-wildcard?)
+            (>= (length matched-types) 2)
+            (not (null? universe-candidates)))
+       (fprintf (current-error-port)
+                "warning: match may be non-exhaustive~a\n  matched: ~a\n  possibly missing: ~a\n"
+                (if line (format " at ~a:~a" (or file "?") line) "")
+                (string-join (map symbol->string matched-types) ", ")
+                (string-join (map symbol->string universe-candidates) ", "))]
+      [(and has-wildcard?
+            (>= (length matched-types) 3))
+       (define siblings (find-sibling-records matched-types))
+       (when (not (null? siblings))
+         (define sibling-strs (map symbol->string siblings))
+         (define display-strs
+           (if (> (length sibling-strs) 6)
+             (append (take sibling-strs 6)
+                     (list (format "(+~a more)" (- (length sibling-strs) 6))))
+             sibling-strs))
+         (fprintf (current-error-port)
+                  "note: match wildcard covers ~a sibling record type~a~a\n  matched: ~a\n  wildcard catches: ~a\n"
+                  (length siblings)
+                  (if (= 1 (length siblings)) "" "s")
+                  (if line (format " at ~a:~a" (or file "?") line) "")
+                  (string-join (map symbol->string matched-types) ", ")
+                  (string-join display-strs ", ")))])))
 
 ;; --- keyword field lookup --------------------------------------------------
 

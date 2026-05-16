@@ -11,6 +11,8 @@
 
 (define current-emit-src-table (make-parameter #f))
 (define current-emit-record-fields (make-parameter (hasheq)))
+(define current-emit-record-ns (make-parameter (hasheq)))
+(define current-emit-target (make-parameter 'clj))
 
 (define (emit-srcloc loc)
   (define src (src-loc-source loc))
@@ -28,16 +30,21 @@
 ;; --- top-level -------------------------------------------------------------
 
 (define (build-record-field-table prog)
-  (for/fold ([h (hasheq)]) ([f (in-list (program-forms prog))])
-    (if (record-form? f)
-        (hash-set h (record-form-name f)
-                    (map (lambda (p) (symbol->string (param-name p)))
-                         (record-form-fields f)))
-        h)))
+  (define local
+    (for/fold ([h (hasheq)]) ([f (in-list (program-forms prog))])
+      (if (record-form? f)
+          (hash-set h (record-form-name f)
+                      (map (lambda (p) (symbol->string (param-name p)))
+                           (record-form-fields f)))
+          h)))
+  (for/fold ([h local]) ([(rec-name field-names) (in-hash (program-imported-record-field-order prog))])
+    (hash-set h rec-name field-names)))
 
 (define (emit-program prog)
   (parameterize ([current-emit-src-table (program-src-table prog)]
-                 [current-emit-record-fields (build-record-field-table prog)])
+                 [current-emit-record-fields (build-record-field-table prog)]
+                 [current-emit-record-ns (program-imported-record-ns prog)]
+                 [current-emit-target (program-target prog)])
     (string-append
      (emit-ns prog)
      "\n\n"
@@ -55,8 +62,9 @@
   (define ns (program-namespace prog))
   (define rs (program-requires prog))
   (define is (program-imports prog))
+  (define cljs? (eq? (current-emit-target) 'cljs))
   (define has-requires (not (null? rs)))
-  (define has-imports  (not (null? is)))
+  (define has-imports  (and (not cljs?) (not (null? is))))
   (cond
     [(and (not has-requires) (not has-imports))
      (format "(ns ~a)" ns)]
@@ -75,13 +83,17 @@
              (string-join (map emit-import is) "\n           "))]))
 
 (define (emit-require r)
+  (define ns (require-entry-ns r))
+  (define is-beagle-module?
+    (for/or ([(rec-name mod-ns) (in-hash (current-emit-record-ns))])
+      (eq? mod-ns ns)))
   (cond
+    [(and (require-entry-alias r) is-beagle-module?)
+     (format "[~a :refer :all :as ~a]" ns (require-entry-alias r))]
     [(require-entry-alias r)
-     (format "[~a :as ~a]"
-             (require-entry-ns r)
-             (require-entry-alias r))]
+     (format "[~a :as ~a]" ns (require-entry-alias r))]
     [else
-     (format "[~a :refer :all]" (require-entry-ns r))]))
+     (format "[~a :refer :all]" ns)]))
 
 ;; Split a fully-qualified Java class symbol like 'java.io.File into
 ;; package ("java.io") and class name ("File"), then emit Clojure-style
@@ -247,13 +259,18 @@
     [(dynamic-var? e)
      (symbol->string (dynamic-var-name e))]
     [(try-form? e)
+     (define cljs? (eq? (current-emit-target) 'cljs))
      (format "(try\n  ~a~a~a)"
              (emit-body (try-form-body e) "  ")
              (string-join (for/list ([c (try-form-catches e)])
-               (format "\n  (catch ~a ~a\n    ~a)"
-                       (catch-clause-exception-type c)
-                       (catch-clause-name c)
-                       (emit-body (catch-clause-body c) "    "))) "")
+               (if cljs?
+                 (format "\n  (catch :default ~a\n    ~a)"
+                         (catch-clause-name c)
+                         (emit-body (catch-clause-body c) "    "))
+                 (format "\n  (catch ~a ~a\n    ~a)"
+                         (catch-clause-exception-type c)
+                         (catch-clause-name c)
+                         (emit-body (catch-clause-body c) "    ")))) "")
              (if (try-form-finally-body e)
                (format "\n  (finally\n    ~a)" (emit-body (try-form-finally-body e) "    "))
                ""))]
@@ -347,7 +364,12 @@
      (define rec-name (pat-record-type-name pat))
      (define bindings (pat-record-bindings pat))
      (define fields (hash-ref (current-emit-record-fields) rec-name #f))
-     (define test (format "(instance? ~a ~a)" rec-name target-sym))
+     (define rec-ns (hash-ref (current-emit-record-ns) rec-name #f))
+     (define qualified-name
+       (if rec-ns
+         (format "~a.~a" rec-ns rec-name)
+         (symbol->string rec-name)))
+     (define test (format "(instance? ~a ~a)" qualified-name target-sym))
      (cond
        [(or (null? bindings) (not fields))
         (format "~a ~a" test body-str)]
@@ -467,6 +489,9 @@
     [(real? d)          (number->string d)]
     [(symbol? d)        (symbol->string d)]
     [(null? d)          "()"]
+    [(and (pair? d) (eq? (car d) '#%brackets))
+     (format "[~a]"
+             (string-join (map datum->clj (cdr d)) " "))]
     [(pair? d)
      (format "(~a)"
              (string-join

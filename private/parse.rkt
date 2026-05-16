@@ -193,10 +193,14 @@
                  imports        ; list of symbols (fully-qualified Java class names)
                  form-stxs     ; list of syntax objects parallel to forms
                  src-table      ; hasheq: AST node → src-loc (expression-level source mapping)
-                 imported-record-fields) ; hash: record-name → (hash kw-sym → type)
+                 imported-record-fields ; hash: record-name → (hash kw-sym → type)
+                 imported-record-field-order ; hash: record-name → (listof string?) [definition order]
+                 imported-record-ns ; hash: record-name → module-ns-symbol
+                 target)        ; 'clj or 'cljs
   #:transparent)
 
 (define DEFAULT-MODE      'strict)
+(define DEFAULT-TARGET    'clj)
 (define DEFAULT-NAMESPACE 'beagle.user)
 
 ;; --- cross-file type import ------------------------------------------------
@@ -270,7 +274,7 @@
 (define (import-str-downcase s)
   (list->string (map char-downcase (string->list s))))
 
-(define (import-module-types! mod-path prefix externs registry imp-rec-fields)
+(define (import-module-types! mod-path prefix externs registry imp-rec-fields imp-rec-field-order imp-rec-ns mod-ns)
   (define datums (read-beagle-datums mod-path))
   (define (reg! name type)
     (hash-set! externs (qualify-name prefix name) type)
@@ -301,7 +305,10 @@
          (hash-set! field-map
                     (string->symbol (string-append ":" fname))
                     (param-type f)))
-       (hash-set! imp-rec-fields name field-map)]
+       (hash-set! imp-rec-fields name field-map)
+       (hash-set! imp-rec-field-order name
+                  (map (lambda (f) (symbol->string (param-name f))) fields))
+       (hash-set! imp-rec-ns name mod-ns)]
       [(list 'def (? symbol? name) ': type-expr _)
        (reg! name (parse-type type-expr))]
       [(list 'defn (? symbol? name) params-form ': ret-type body ...)
@@ -323,11 +330,15 @@
   ;; Pass 1: pull meta forms out and register macros / externs / requires.
   (define mode      DEFAULT-MODE)
   (define mode-set? #f)
+  (define target    DEFAULT-TARGET)
+  (define target-set? #f)
   (define ns        DEFAULT-NAMESPACE)
   (define ns-set?   #f)
   (define registry  (make-macro-registry))
   (define externs   (make-hash))
   (define imp-rec-fields (make-hash))
+  (define imp-rec-field-order (make-hash))
+  (define imp-rec-ns (make-hash))
   (define requires  '())
   (define imports   '())
 
@@ -339,6 +350,13 @@
          (error 'beagle "unknown mode: ~a (expected strict or dynamic)" m))
        (set! mode m)
        (set! mode-set? #t)]
+
+      [(list 'define-target (? symbol? t))
+       (when target-set? (error 'beagle "duplicate define-target"))
+       (unless (or (eq? t 'clj) (eq? t 'cljs))
+         (error 'beagle "unknown target: ~a (expected clj or cljs)" t))
+       (set! target t)
+       (set! target-set? #t)]
 
       [(list 'ns (? symbol? n))
        (when ns-set? (error 'beagle "duplicate ns form"))
@@ -363,13 +381,13 @@
        (with-handlers ([exn:fail? (lambda (_e) (void))])
          (define mod-path (resolve-module-path rn source-path))
          (when mod-path
-           (import-module-types! mod-path prefix externs registry imp-rec-fields)))
+           (import-module-types! mod-path prefix externs registry imp-rec-fields imp-rec-field-order imp-rec-ns rn)))
        (set! requires (cons (require-entry rn #f) requires))]
       [(list 'require (? symbol? rn) ':as (? symbol? alias))
        (with-handlers ([exn:fail? (lambda (_e) (void))])
          (define mod-path (resolve-module-path rn source-path))
          (when mod-path
-           (import-module-types! mod-path alias externs registry imp-rec-fields)))
+           (import-module-types! mod-path alias externs registry imp-rec-fields imp-rec-field-order imp-rec-ns rn)))
        (set! requires (cons (require-entry rn alias) requires))]
 
       [(list 'import (? symbol? class-name))
@@ -390,12 +408,13 @@
   (define parsed (map car pairs))
   (define form-stxs (map cdr pairs))
 
-  (program mode ns parsed registry externs (reverse requires) (reverse imports) form-stxs src-table imp-rec-fields))
+  (program mode ns parsed registry externs (reverse requires) (reverse imports) form-stxs src-table imp-rec-fields imp-rec-field-order imp-rec-ns target))
 
 (define (meta-form? d)
   (and (pair? d)
        (memq (car d) '(ns
                        define-mode
+                       define-target
                        define-macro
                        declare-extern
                        require
@@ -420,7 +439,8 @@
          (and slash-pos
               (> slash-pos 0)
               (< (+ slash-pos 1) (string-length s))
-              (char-upper-case? (string-ref s 0))))))
+              (or (char-upper-case? (string-ref s 0))
+                  (string=? (substring s 0 (min 3 (string-length s))) "js/"))))))
 
 (define (dynamic-var-sym? sym)
   (and (symbol? sym)
@@ -1120,6 +1140,7 @@
  (struct-out defenum-form)
  parse-program
  DEFAULT-MODE
+ DEFAULT-TARGET
  DEFAULT-NAMESPACE
  read-beagle-datums
  read-beagle-syntax

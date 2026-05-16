@@ -743,3 +743,52 @@
   (check-not-exn
    (lambda ()
      (check-prog '(defenum Color :red :green :blue)))))
+
+;; --- exhaustive match --------------------------------------------------------
+
+(test-case "match without wildcard warns about missing record types"
+  (let ([output (open-output-string)])
+    (parameterize ([current-error-port output])
+      (check-prog
+       `(defrecord Foo ,(br '(x : Long)))
+       `(defrecord Bar ,(br '(y : String)))
+       `(defrecord Baz ,(br '(z : Boolean)))
+       `(defn handle ,(br '(e : Any)) : Long
+          (match e
+            ,(br '(Foo x) 'x)
+            ,(br '(Bar y) 0)))))
+    (check-regexp-match #rx"non-exhaustive" (get-output-string output))
+    (check-regexp-match #rx"Baz" (get-output-string output))))
+
+(test-case "match with wildcard and sibling records emits note"
+  (let ([output (open-output-string)])
+    (parameterize ([current-error-port output])
+      (check-prog
+       `(defrecord Alpha ,(br '(id : Long) '(x : String)))
+       `(defrecord Beta ,(br '(id : Long) '(y : String)))
+       `(defrecord Gamma ,(br '(id : Long) '(z : String)))
+       `(defrecord Delta ,(br '(id : Long) '(w : String)))
+       `(defn handle ,(br '(e : Any)) : Long
+          (match e
+            ,(br '(Alpha id x) 'id)
+            ,(br '(Beta id y) 'id)
+            ,(br '(Gamma id z) 'id)
+            ,(br '_ 0)))))
+    (check-regexp-match #rx"wildcard covers 1 sibling" (get-output-string output))
+    (check-regexp-match #rx"Delta" (get-output-string output))))
+
+(test-case "match with wildcard and non-sibling records stays silent"
+  (let ([output (open-output-string)])
+    (parameterize ([current-error-port output])
+      (check-prog
+       `(defrecord X1 ,(br '(a : Long)))
+       `(defrecord X2 ,(br '(b : Long)))
+       `(defrecord X3 ,(br '(c : Long)))
+       `(defrecord X4 ,(br '(d : Long)))
+       `(defn handle ,(br '(e : Any)) : Long
+          (match e
+            ,(br '(X1 a) 'a)
+            ,(br '(X2 b) 'b)
+            ,(br '(X3 c) 'c)
+            ,(br '_ 0)))))
+    (check-equal? "" (get-output-string output))))

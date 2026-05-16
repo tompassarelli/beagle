@@ -25,6 +25,12 @@ if [[ ! -f "$src" ]]; then
     exit 1
 fi
 
+## detect CLJS target
+ext="clj"
+if grep -qE '^\(define-target[[:space:]]+cljs\)' "$src" 2>/dev/null; then
+    ext="cljs"
+fi
+
 if [[ $# -eq 2 ]]; then
     out="$2"
 else
@@ -33,7 +39,7 @@ else
           tr -d '[:space:]')"
     [[ -z "$ns" ]] && ns="beagle.user"
     rel_path="$(echo "$ns" | tr '.-' '//_')"
-    out="$beagle_root/runtime/src/$rel_path.clj"
+    out="$beagle_root/runtime/src/$rel_path.$ext"
 fi
 
 mkdir -p "$(dirname "$out")"
