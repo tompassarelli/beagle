@@ -34,6 +34,9 @@
   ;; user-declared external functions
   (for ([(name t) (in-hash (program-externs prog))])
     (hash-set! env name t))
+  ;; record types imported from other modules
+  (for ([(rec-name field-map) (in-hash (program-imported-record-fields prog))])
+    (hash-set! RECORD-FIELDS rec-name field-map))
   ;; top-level defs / defns (pre-pass so callers can look them up)
   (for ([form (in-list (program-forms prog))])
     (match form

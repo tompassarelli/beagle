@@ -38,4 +38,4 @@ fi
 
 mkdir -p "$(dirname "$out")"
 racket "$src" > "$out"
-echo "$src -> $out"
+echo "$src -> $out" >&2

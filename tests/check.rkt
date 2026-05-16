@@ -287,6 +287,80 @@
        '(require nonexistent.module)
        '(def x 42)))))
 
+;; --- cross-file defrecord imports -------------------------------------------
+
+(define shapes-fixture-source
+  (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
+    (build-path dir "fixtures" "shapes.rkt")))
+
+(test-case "cross-file defrecord: constructor callable with prefix"
+  (check-not-exn
+   (lambda ()
+     (check-prog/source shapes-fixture-source
+       '(require shapes)
+       '(def c (shapes/->Circle 5))))))
+
+(test-case "cross-file defrecord: accessor returns correct type"
+  (check-not-exn
+   (lambda ()
+     (check-prog/source shapes-fixture-source
+       '(require shapes)
+       '(def c (shapes/->Circle 5))
+       '(def r : Long (shapes/circle-radius c))))))
+
+(test-case "cross-file defrecord: keyword access infers field type"
+  (check-not-exn
+   (lambda ()
+     (check-prog/source shapes-fixture-source
+       '(require shapes)
+       '(def c : Circle (shapes/->Circle 5))
+       '(def r : Long (:radius c))))))
+
+(test-case "cross-file defrecord: multi-field constructor"
+  (check-not-exn
+   (lambda ()
+     (check-prog/source shapes-fixture-source
+       '(require shapes)
+       '(def r (shapes/->Rect 10 20))))))
+
+(test-case "cross-file defrecord: cross-module function uses imported record"
+  (check-not-exn
+   (lambda ()
+     (check-prog/source shapes-fixture-source
+       '(require shapes)
+       '(def c (shapes/->Circle 5))
+       '(def a : Long (shapes/circle-area c))))))
+
+(test-case "cross-file defrecord: constructor wrong arg type errors"
+  (check-exn exn:fail?
+   (lambda ()
+     (check-prog/source shapes-fixture-source
+       '(require shapes)
+       '(def c (shapes/->Circle "five"))))))
+
+(test-case "cross-file defrecord: constructor wrong arity errors"
+  (check-exn exn:fail?
+   (lambda ()
+     (check-prog/source shapes-fixture-source
+       '(require shapes)
+       '(def c (shapes/->Circle 1 2))))))
+
+(test-case "cross-file defrecord: accessor wrong return type errors"
+  (check-exn exn:fail?
+   (lambda ()
+     (check-prog/source shapes-fixture-source
+       '(require shapes)
+       '(def c (shapes/->Circle 5))
+       '(def r : String (shapes/circle-radius c))))))
+
+(test-case "cross-file defrecord: keyword access type mismatch errors"
+  (check-exn exn:fail?
+   (lambda ()
+     (check-prog/source shapes-fixture-source
+       '(require shapes)
+       '(def c : Circle (shapes/->Circle 5))
+       '(def r : String (:radius c))))))
+
 ;; --- defrecord ---------------------------------------------------------------
 
 (test-case "defrecord: constructor type-checks"

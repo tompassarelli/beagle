@@ -178,7 +178,8 @@
                  requires       ; list of require-entry
                  imports        ; list of symbols (fully-qualified Java class names)
                  form-stxs     ; list of syntax objects parallel to forms
-                 src-table)    ; hasheq: AST node → src-loc (expression-level source mapping)
+                 src-table      ; hasheq: AST node → src-loc (expression-level source mapping)
+                 imported-record-fields) ; hash: record-name → (hash kw-sym → type)
   #:transparent)
 
 (define DEFAULT-MODE      'strict)
@@ -234,7 +235,10 @@
           (define d (read))
           (if (eof-object? d) (reverse acc) (loop (cons d acc))))))))
 
-(define (import-module-types! mod-path prefix externs registry)
+(define (import-str-downcase s)
+  (list->string (map char-downcase (string->list s))))
+
+(define (import-module-types! mod-path prefix externs registry imp-rec-fields)
   (define datums (read-beagle-datums mod-path))
   (for ([d (in-list datums)])
     (match d
@@ -246,6 +250,23 @@
                     [(list? params) params]
                     [else '()]))
        (register-macro! registry (qualify-name prefix name) kind ps template)]
+      [(list 'defrecord (? symbol? name) fields-form)
+       (define fields (parse-record-fields fields-form))
+       (define rec-type (type-prim name))
+       (define name-str (symbol->string name))
+       (define name-lower (import-str-downcase name-str))
+       (hash-set! externs (qualify-name prefix (string->symbol (string-append "->" name-str)))
+                  (type-fn (map param-type fields) #f rec-type))
+       (define field-map (make-hash))
+       (for ([f (in-list fields)])
+         (define fname (symbol->string (param-name f)))
+         (hash-set! externs
+                    (qualify-name prefix (string->symbol (string-append name-lower "-" fname)))
+                    (type-fn (list rec-type) #f (param-type f)))
+         (hash-set! field-map
+                    (string->symbol (string-append ":" fname))
+                    (param-type f)))
+       (hash-set! imp-rec-fields name field-map)]
       [(list 'def (? symbol? name) ': type-expr _)
        (hash-set! externs (qualify-name prefix name) (parse-type type-expr))]
       [(list 'defn (? symbol? name) params-form ': ret-type body ...)
@@ -273,6 +294,7 @@
   (define ns-set?   #f)
   (define registry  (make-macro-registry))
   (define externs   (make-hash))
+  (define imp-rec-fields (make-hash))
   (define requires  '())
   (define imports   '())
 
@@ -308,13 +330,13 @@
        (with-handlers ([exn:fail? (lambda (_e) (void))])
          (define mod-path (resolve-module-path rn source-path))
          (when mod-path
-           (import-module-types! mod-path prefix externs registry)))
+           (import-module-types! mod-path prefix externs registry imp-rec-fields)))
        (set! requires (cons (require-entry rn #f) requires))]
       [(list 'require (? symbol? rn) ':as (? symbol? alias))
        (with-handlers ([exn:fail? (lambda (_e) (void))])
          (define mod-path (resolve-module-path rn source-path))
          (when mod-path
-           (import-module-types! mod-path alias externs registry)))
+           (import-module-types! mod-path alias externs registry imp-rec-fields)))
        (set! requires (cons (require-entry rn alias) requires))]
 
       [(list 'import (? symbol? class-name))
@@ -335,7 +357,7 @@
   (define parsed (map car pairs))
   (define form-stxs (map cdr pairs))
 
-  (program mode ns parsed registry externs (reverse requires) (reverse imports) form-stxs src-table))
+  (program mode ns parsed registry externs (reverse requires) (reverse imports) form-stxs src-table imp-rec-fields))
 
 (define (meta-form? d)
   (and (pair? d)
