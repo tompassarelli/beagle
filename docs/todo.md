@@ -39,8 +39,8 @@ it applied, and report confidence based on whether it passes.
 - [x] Regression detection: verified fix must not introduce new failures
 - [x] Output as ranked repair queue (SPECFIX: label, file, function, confidence, assertions-fixed)
 - [x] Validated: 2/5 candidates verified on E8 buggy (product-margin swap, zone-surcharge operator)
-- [ ] Deeper candidate generation: accessor swap, wrong-argument detection
-- [ ] Cross-evidence correlation: combine blame ratio + semantic rules for confidence boost
+- [x] Deeper candidate generation: accessor swap (204 accessors, semantic type groups), wrong-argument permutation
+- [x] Cross-evidence correlation: blame + semantic + specfix confidence boosts
 
 ## Phase 4: Instrumented tracing (beagle-trace) ✓
 
@@ -83,12 +83,9 @@ No handwritten test code — the type system IS the test spec.
 - [x] Auto-extract type info from modules via beagle-provides
 - [x] Integration: `beagle-proptest SOURCE-DIR [--run] [--build-dir DIR]`
 - [x] Validated: 204 properties on E8 (13 modules, all pass on golden code)
-- [ ] Record generators: random valid instances from field types + scalar constraints
-- [ ] Property inference from return types:
-  - Amount → non-negative
-  - Boolean → idempotent on same input
-  - Vec → length correlates with input length
-  - Count → monotone with collection size
+- [x] Record generators: random valid instances from field types + scalar constraints (scalar-erasure-aware)
+- [x] Property inference from return types (Amount → non-negative, Boolean → idempotent, Vec → length)
+- [x] Validated: 204 static + 82 generative properties (1844 assertions at N=20) on E8
 - [ ] Shrinking: when a property fails, minimize the input to smallest failing case
 - [ ] Differential testing: run same inputs through old vs new code,
       flag any output differences as potential regressions
@@ -122,13 +119,7 @@ assertions — the compiler derives what "correct" means.
 - [ ] Multi-arg function coverage: generate valid inputs for 2+ arg functions
       using cross-product of test data instances
 
-## Next: Repair compiler deepening
-
-### Deeper candidate generation (Phase 3 continuation)
-
-- [ ] Accessor swap detection: when blame shows wrong field, enumerate same-record accessors as candidates
-- [ ] Wrong-argument detection: when arity is correct but types mismatch, try argument permutations
-- [ ] Cross-evidence correlation: combine blame ratio + semantic rules + trace for confidence boost
+## Next: Remaining infrastructure
 
 ### Call-graph trace walk (Phase 4 continuation)
 
@@ -136,35 +127,10 @@ assertions — the compiler derives what "correct" means.
 - [ ] Integrate with semantic rules: cross-reference trace ops against name expectations
 - [ ] Cross-module trace propagation: follow values across require boundaries
 
-### Property testing maturity (Phase 6 continuation)
+### Property testing remaining
 
-- [ ] Record generators: random valid instances from field types + scalar constraints
-- [ ] Property inference from return types (Amount → non-negative, Boolean → idempotent, Vec → length correlates)
 - [ ] Shrinking: when a property fails, minimize input to smallest failing case
 - [ ] Differential testing: run same inputs through old vs new code, flag output differences
-
-## Next: Infrastructure
-
-### Daemon file watcher
-
-- [ ] Auto-invalidate cached ASTs on .rkt modification (inotify/fswatch)
-- [ ] Emit invalidation event so connected tools know to re-query
-
-### Reader normalization pass
-
-The reader currently preserves `[]` vs `()` using a `#%brackets` tag —
-a well-known symbol that parse.rkt pattern-matches on. This works but
-means every downstream pass must understand the tag convention.
-
-Normalization would replace `#%brackets` tags with proper typed AST
-nodes during parsing, so the rest of the pipeline deals with structured
-data rather than tagged lists. Reduces fragility and makes pattern
-matching in check/emit cleaner.
-
-- [ ] Define vector-literal, map-literal, set-literal AST nodes
-- [ ] Convert `#%brackets`/`MAP-TAG`/`SET-TAG` to nodes in parse pass
-- [ ] Update check.rkt and emit.rkt to match on nodes instead of tags
-- [ ] Remove tag-awareness from downstream code
 
 ### LSP / editor integration
 
@@ -179,16 +145,10 @@ matching in check/emit cleaner.
 - [ ] Type environment persists across REPL inputs
 - [ ] Integrates with daemon for cross-module awareness
 
-### CLJS target maturity
+### CLJS target remaining
 
-Currently `(define-target cljs)` switches the emitter to skip Java
-imports and adjust defrecord emission. Full parity means:
-
-- [ ] Audit all emit paths for JVM-specific output (import, Class/static, .method)
-- [ ] CLJS-specific stdlib subset (no Java interop functions)
 - [ ] Source map generation for ClojureScript debugging
-- [ ] Shadow-cljs / figwheel integration testing
-- [ ] JS interop forms (`js/console.log`, `js/document`, etc.)
+- [ ] Shadow-cljs / figwheel integration testing (Heist validates basic pipeline)
 
 ### Distributed traces
 
@@ -253,8 +213,11 @@ imports and adjust defrecord emission. Full parity means:
 - Multi-arity `defn`: per-arity type checking, union-type call validation, proper arity error messages
 - Guard-pattern type narrowing: `(when (nil? x) (throw ...))` narrows x in subsequent `do` forms
 - Union-to-union type compatibility: (U A B) assignable to (U A B C) (subset check)
-- Repair compiler: beagle-blame, beagle-specfix, beagle-trace, beagle-cascade, beagle-oracle, beagle-repair
-- beagle-daemon: persistent TCP query server (45× speedup, mtime-invalidated AST cache)
+- Repair compiler: beagle-blame, beagle-specfix (9 strategies), beagle-trace, beagle-cascade, beagle-oracle, beagle-repair (cross-evidence correlation)
+- beagle-daemon: persistent TCP query server (45× speedup, mtime-invalidated AST cache, filesystem-change-evt file watcher)
+- CLJS target: JS interop types, 137-entry JVM exclusion set, target-aware warnings, Heist app validates full pipeline
+- Property testing: record generators (scalar-erasure-aware), return-type property inference, 286 properties on E8
+- Reader normalization: tags.rkt extraction, centralized unwrap helpers
 - Babashka oracle replacement (12× vs JVM Clojure)
 - Emitter: qualified cross-module calls (removed :refer :all)
 - Varargs (`&`) support in defn/fn parameters
