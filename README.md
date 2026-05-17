@@ -44,6 +44,13 @@ tooling enough structure to emit trusted patches.
 Beagle's advantage scales with model intelligence — it amplifies
 capable models rather than compensating for weak ones.
 
+**Python reference** (same E8 system, typed dataclasses + mypy): Python
+averages 346s — faster than Clojure (595s) and beagle-without-patches
+(421s), but 10% slower than beagle E10 (310s). Per-bug, Python and
+beagle E9 are comparable. The agents never used mypy; Python's
+readability alone accounts for the speed. The differentiator is the
+repair compiler, not the type system.
+
 ## Architecture
 
 ```

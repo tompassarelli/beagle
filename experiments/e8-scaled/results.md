@@ -77,9 +77,19 @@ Beagle consistently beats clojure by ~20% on full-oracle bug repair at
 8.5K LOC scale. The advantage comes from mechanical repair of type/accessor
 bugs (auto-fix + precise diagnostics) rather than from the blocking behavior.
 
-## Future directions
+## Python reference track
 
-- Test at larger scale (20K+ LOC) where reasoning cost scales worse for clojure
-- Test with weaker models (Sonnet/Haiku) where precise diagnostics may matter more
-- Test with partial oracle + `--warn` — this is where non-blocking could
-  actually help, since the agent could skip type errors in untested paths
+See [results-python.md](results-python.md) for full writeup.
+
+| Track | Avg wall time | Turns | Bugs | Per-bug time |
+|-------|--------------|-------|------|-------------|
+| Beagle E10 | 310s | — | 35 | 8.9s |
+| Python | 346s | 60 | 30 | 11.5s |
+| Beagle E9 | 421s | 77 | 35 | 12.0s |
+| Clojure E9 | 595s | 88 | 35 | 17.0s |
+
+Python (typed dataclasses, 30 bugs) beats Clojure by 42% and beagle E9
+by 18% in absolute wall time — but per-bug, Python and beagle E9 are
+comparable. The agents never used mypy; Python's readability alone
+accounts for the speed. Beagle E10 (`--emit-patch`) still beats Python
+by 10%: the repair compiler, not the type system, is the differentiator.
