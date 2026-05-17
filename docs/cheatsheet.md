@@ -272,7 +272,7 @@ Nullable (sugar for `(U T Nil)`):
 - `unsafe`: expansion's result type widened to `Any` (boundary)
 - `&rest-name` in params: collects remaining args into a list
 - `(splice rest-name)` in template: inlines the list at that position
-- Naive substitution (no hygiene): avoid binder-name clashes with caller
+- `safe` macros use gensym-hygienic substitution; `unsafe` macros use naive substitution
 
 ## Pre-typed stdlib (~607 functions)
 
@@ -307,7 +307,7 @@ Nullable (sugar for `(U T Nil)`):
 
 **Misc**: `identity`, `constantly`
 
-**Also typed** (435 total): transducers (`map`/`filter`/`cat`/`halt-when`),
+**Also typed** (~607 total): transducers (`map`/`filter`/`cat`/`halt-when`),
 atoms (`atom`/`swap!`/`reset!`/`deref`), `clojure.string/*`,
 `clojure.set/*`, `clojure.walk/*`, `clojure.edn/read-string`,
 regex (`re-find`/`re-matches`/`re-seq`/`re-pattern`), type coercion

@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BEAGLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+BIN="$BEAGLE_DIR/bin"
+
+usage() {
+    cat >&2 <<'EOF'
+beagle — typed authoring layer for Clojure/ClojureScript
+
+Usage: beagle <command> [args...]
+
+Commands:
+  check [FILE-OR-DIR...]    Type-check without emitting (batch)
+  build [FILE-OR-DIR...]    Compile to Clojure (batch)
+  fix [--dry-run|--apply] [FILE-OR-DIR...]
+                            Auto-fix high-confidence type errors
+  sig <fn-name> <path...>   Print a function's typed signature
+  fields <record> <path...> Print record fields, types, accessors
+  expand <file.rkt>         Show source after macro expansion
+  lsp                       Start LSP server (stdio)
+  repl                      Start typed REPL
+  init                      Bootstrap a beagle project (.claude/ snippet)
+
+Options:
+  --out DIR                 Output directory (for build)
+  --warn                    Emit despite type errors (for build)
+
+Developer tools (bin/beagle-*):
+  beagle-repair, beagle-blame, beagle-specfix, beagle-trace,
+  beagle-cascade, beagle-oracle, beagle-proptest, beagle-muttest,
+  beagle-dtrace, beagle-daemon, beagle-smap, beagle-callers,
+  beagle-provides, beagle-impact
+EOF
+    exit 1
+}
+
+[[ $# -eq 0 ]] && usage
+
+cmd="$1"; shift
+
+case "$cmd" in
+    check)
+        if [[ $# -eq 1 ]] && [[ -f "$1" ]]; then
+            exec "$BIN/beagle-check" "$@"
+        else
+            exec "$BIN/beagle-check-all" "$@"
+        fi
+        ;;
+    build)
+        if [[ $# -ge 1 ]] && [[ -f "$1" ]] && [[ $# -le 2 ]] && [[ "${2:-}" != --* ]]; then
+            exec "$BIN/beagle-build" "$@"
+        else
+            exec "$BIN/beagle-build-all" "$@"
+        fi
+        ;;
+    fix)
+        exec "$BIN/beagle-fix" "$@"
+        ;;
+    sig)
+        exec "$BIN/beagle-sig" "$@"
+        ;;
+    fields)
+        exec "$BIN/beagle-fields" "$@"
+        ;;
+    expand)
+        exec "$BIN/beagle-expand" "$@"
+        ;;
+    lsp)
+        exec "$BIN/beagle-lsp" "$@"
+        ;;
+    repl)
+        exec "$BIN/beagle-repl" "$@"
+        ;;
+    init)
+        target="${1:-.}"
+        mkdir -p "$target/.claude"
+        if [[ -f "$target/.claude/beagle-context.md" ]]; then
+            echo "beagle context already exists at $target/.claude/beagle-context.md" >&2
+            exit 1
+        fi
+        cp "$BEAGLE_DIR/docs/cheatsheet-consumer.md" "$target/.claude/beagle-context.md"
+        echo "Created $target/.claude/beagle-context.md — add to your CLAUDE.md instructions." >&2
+        ;;
+    help|--help|-h)
+        usage
+        ;;
+    *)
+        echo "beagle: unknown command '$cmd'" >&2
+        echo "Run 'beagle help' for usage." >&2
+        exit 1
+        ;;
+esac

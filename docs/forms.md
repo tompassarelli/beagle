@@ -769,8 +769,8 @@ Example:
 (unsafe "RAW-CLOJURE-SOURCE")
 ```
 
-Emits the literal string verbatim. Use for top-level Clojure that beagle
-doesn't model.
+Emits the literal string verbatim. Works at top-level and in expression
+position. Use for Clojure that beagle doesn't model. Typed as `Any`.
 
 Example:
 ```racket
@@ -827,14 +827,7 @@ Beagle catches these at expand time (in strict mode):
 - Unknown forms (anything not in this catalog)
 - Reference to undefined macros
 
-Beagle does NOT catch (yet):
-
-- Parametric type inference (`(Vec T)` element types treated as Any)
-- Macro hygiene (naive substitution)
-
 ## Tools
 
-- `bin/beagle-build SOURCE.rkt [OUT.clj]` — compile one file
-- `bin/beagle-build-all [DIR]` — compile every `.rkt` in a tree
-- `bin/beagle-expand SOURCE.rkt` — print source post-macro-expansion
-- `raco test tests/` — run beagle's own test suite
+See `CLAUDE.md` for the full tool list (~25 tools including repair, query,
+LSP, REPL, proptest, oracle, dtrace, daemon, source maps, mutation testing).

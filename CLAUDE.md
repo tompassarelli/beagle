@@ -14,12 +14,12 @@ it as canonical when explaining the language.
 
 ## Status
 
-`#lang beagle` v0.3 — end-to-end working, empirically validated:
+`#lang beagle` v0.4.0 — consumer-hardened, type inference floor reached:
 
 - Forms: `def`, `defn` (single + multi-arity), `fn`, `let`, `if`, `cond`,
   `when`, `do`, `match`, `loop`, `recur`, `for` (with `:when`), `doseq`,
   `try`/`catch`/`finally`, `case`, `defrecord`, `with` (typed record update),
-  `defenum`, `defprotocol`, `defmulti`/`defmethod`, `deftype`, `extend-type`,
+  `defenum`, `defunion`, `defprotocol`, `defmulti`/`defmethod`, `deftype`, `extend-type`,
   constructor calls (`ClassName.`), keyword-as-function (`(:key map)`), call,
   vector literal, map literal (`{}`), set literal (`#{}`), quote, threading
   (`->`, `->>`)
@@ -44,6 +44,12 @@ it as canonical when explaining the language.
   `declare-extern` is only needed for Java interop and non-beagle namespaces.
 - Let-binding type inference: `(let [x (foo bar)] ...)` infers x's type from
   the RHS expression — explicit annotations optional
+- Collection element type inference: `[(->Product 1 "A") ...]` infers `(Vec Product)`,
+  not `(Vec Any)` — same for `Map` and `Set` literals
+- Destructuring type propagation: `(let [{:keys [name]} (get-product)] ...)`
+  infers `name : String` from the record's field types
+- For-comprehension type flow: `(for [p products] (product-name p))` infers
+  binding type from collection element and returns `(Vec String)`
 - Validation: type checks, arity (incl. variadic), undefined refs, hints
 - Lint pass: untyped def/defn, unsafe usage, shadowed bindings, unused externs
 - Rich diagnostics: Rust-style error display with source lines, signatures,
@@ -66,7 +72,7 @@ it as canonical when explaining the language.
 - Typed REPL: persistent type env, `:type EXPR`, `:sig NAME`, `:env`, compile + emit
 - Differential testing: `beagle-proptest --diff` compares function outputs between
   golden and modified builds, flags behavioral regressions (6143 calls on E8)
-- 359 tests passing
+- 370 tests passing
 - Empirical benchmarks: 40 tasks, 3 variants, head-to-head against raw Clojure,
   refactoring and bug-detection experiments — 5 real bugs caught
 - Type-system query tools: beagle-sig, beagle-fields, beagle-callers,
@@ -138,6 +144,7 @@ parse → check → emit
 
 ## Tools
 
+- `bin/beagle` — unified CLI: `beagle check`, `beagle build`, `beagle fix`, `beagle sig`, `beagle lsp`, `beagle repl`, `beagle init`
 - `bin/beagle-build SOURCE.rkt [OUT.clj]` — single-file compile
 - `bin/beagle-build-all FILE-OR-DIR... [--out DIR] [--warn]` — batch compile (9x vs sequential); `--warn` emits despite type errors
 - `bin/beagle-check SOURCE.rkt` — type-check without emitting Clojure
@@ -166,6 +173,8 @@ parse → check → emit
 - `bin/beagle-callers FN-NAME FILE-OR-DIR...` — find all call sites of a function (daemon-accelerated)
 - `bin/beagle-provides FILE-OR-DIR...` — list all exports with types from a module (daemon-accelerated)
 - `bin/beagle-impact FN-NAME FILE-OR-DIR...` — show callers and impact of changing a signature (daemon-accelerated)
+- `bin/beagle-fix --dry-run|--apply FILE-OR-DIR` — auto-apply high-confidence type-error fixes
+- `bin/gen-stdlib-types` — generate stdlib type entries from clojure.core metadata
 - `raco test tests/` — test suite
 - `experiments/` — benchmark framework (see `experiments/README.md`)
 
@@ -276,5 +285,8 @@ it gets a devlog entry. Routine feature additions do not.
 - `docs/devlog/README.md` — development journal (discoveries + experiments).
 - `experiments/README.md` — benchmark framework for design decisions.
 - `docs/forms.md` — canonical form catalog.
-- `docs/cheatsheet.md` — single-page LLM grounding reference.
+- `docs/cheatsheet.md` — single-page LLM grounding reference (developer).
+- `docs/cheatsheet-consumer.md` — 154-line consumer reference (for `beagle init`).
 - `docs/todo.md` — roadmap and completed work.
+- `docs/agent-workflow.md` — LLM agent workflow patterns.
+- `docs/findings.md` — empirical findings from experiments.

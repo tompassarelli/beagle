@@ -499,8 +499,6 @@
     (format "[~a & ~a]" names-str (seq-destructure-rest-name d))
     (format "[~a]" names-str)))
 
-(define (string-downcase s)
-  (list->string (map char-downcase (string->list s))))
 
 (define (emit-args args)
   (cond

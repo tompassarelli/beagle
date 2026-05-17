@@ -18,6 +18,22 @@
 (define BUILTIN-ENV STDLIB-TYPES)
 
 (define ANY (type-prim 'Any))
+(define NIL (type-prim 'Nil))
+
+(define (merge-types . ts)
+  (define non-any (filter (λ (t) (not (any-type? t))) ts))
+  (cond
+    [(null? non-any) ANY]
+    [(= (length non-any) 1) (car non-any)]
+    [(andmap (λ (t) (type-compatible? t (car non-any))) (cdr non-any))
+     (car non-any)]
+    [else
+     (define flat
+       (append-map (λ (t) (if (type-union? t) (type-union-alts t) (list t))) non-any))
+     (define deduped
+       (for/fold ([acc '()]) ([t (in-list flat)])
+         (if (ormap (λ (a) (type-compatible? t a)) acc) acc (cons t acc))))
+     (if (= (length deduped) 1) (car deduped) (type-union (reverse deduped)))]))
 
 ;; Current compile target ('clj or 'cljs) — set during type-check!
 (define current-check-target (make-parameter 'clj))
@@ -26,10 +42,6 @@
 (define RECORD-FIELDS (make-hash))
 ;; Ordered field names for positional destructuring in match
 (define RECORD-FIELD-ORDER (make-hash))
-;; Enum value registry: enum-name -> list of keyword symbols
-(define ENUM-VALUES (make-hash))
-;; Record origin: record-type-name -> module-symbol (or 'local)
-(define RECORD-ORIGIN (make-hash))
 ;; Closed union members: union-name -> (listof symbol) of record type names
 (define UNION-MEMBERS (make-hash))
 
@@ -122,8 +134,6 @@
   (when (eq? (program-mode prog) 'strict)
     (hash-clear! RECORD-FIELDS)
     (hash-clear! RECORD-FIELD-ORDER)
-    (hash-clear! ENUM-VALUES)
-    (hash-clear! RECORD-ORIGIN)
     (hash-clear! UNION-MEMBERS)
     (define env (build-initial-env prog))
     (parameterize ([current-union-members UNION-MEMBERS]
@@ -206,8 +216,7 @@
        (hash-set! env name (type-fn (list ANY) (type-prim 'Any) ANY))]
       [(defmethod-form name _ params body)
        (void)]
-      [(defenum-form name values)
-       (hash-set! ENUM-VALUES name values)]
+      [(defenum-form name values) (void)]
       [(defunion-form name members)
        (hash-set! UNION-MEMBERS name members)
        ;; Register as a union type so type-compatible? works:
@@ -227,8 +236,6 @@
       [_ (void)]))
   env)
 
-(define (string-downcase s)
-  (list->string (map char-downcase (string->list s))))
 
 (define (mut-copy h)
   (define out (make-hash))
@@ -254,7 +261,8 @@
                              name (type->string expected-type) (type->string inferred))
                      (hasheq 'name (symbol->string name)
                              'expected (type->string expected-type)
-                             'actual (type->string inferred)))))]
+                             'actual (type->string inferred))
+                     #:src (src-for value))))]
 
     [(defn-form name params rest-p expected-ret body)
      (define all-params (if rest-p (append params (list rest-p)) params))
@@ -271,21 +279,28 @@
                        (hasheq 'name (symbol->string name)
                                'signature (format "~a : ~a" name sig)
                                'expected (type->string expected-ret)
-                               'actual (type->string last-type))))))]
+                               'actual (type->string last-type))
+                       #:src (src-for (last body))))))]
 
     [(defn-multi name arities)
      (for ([a (in-list arities)])
        (define body-env (extend-with-params env (arity-clause-params a)))
-       (define last-type (last-expr-type (arity-clause-body a) body-env))
+       (define a-body (arity-clause-body a))
+       (define last-type (last-expr-type a-body body-env))
        (define expected-ret (arity-clause-return-type a))
        (when expected-ret
          (unless (type-compatible? last-type expected-ret)
+           (define sig (type->string
+                         (type-fn (map param-or-destr-type (arity-clause-params a)) #f expected-ret)))
            (raise-diag 'return-type
-                       (format "defn ~a: expected return ~a, got ~a"
-                               name (type->string expected-ret) (type->string last-type))
+                       (format "defn ~a (~a-arity): expected return ~a, got ~a"
+                               name (length (arity-clause-params a))
+                               (type->string expected-ret) (type->string last-type))
                        (hasheq 'name (symbol->string name)
+                               'signature (format "~a : ~a" name sig)
                                'expected (type->string expected-ret)
-                               'actual (type->string last-type))))))]
+                               'actual (type->string last-type))
+                       #:src (src-for (last a-body))))))]
 
     [(record-form _ _) (void)]
     [(protocol-form _ _) (void)]
@@ -359,7 +374,6 @@
            current-env))
        (loop (cdr forms) next-env t)])))
 
-(define (last xs) (if (null? (cdr xs)) (car xs) (last (cdr xs))))
 
 ;; --- type narrowing --------------------------------------------------------
 
@@ -531,9 +545,8 @@
          m))
      (when (not (null? missing))
        (raise-diag 'exhaustive-match
-         (format "match on ~a is not exhaustive~a\n  missing cases: ~a"
+         (format "match on ~a is not exhaustive; missing cases: ~a"
                  union-name
-                 (if line (format " at ~a:~a" (or file "?") line) "")
                  (string-join (map symbol->string missing) ", "))
          (hasheq 'union-name union-name
                  'missing missing
@@ -684,16 +697,44 @@
      (or (infer-literal-type e) (hash-ref env e ANY))]
     [(quoted? e) ANY]
     [(regex-lit? e) ANY]
-    [(vec-form? e) (type-app 'Vec (list ANY))]
+    [(vec-form? e)
+     (define items (vec-form-items e))
+     (if (null? items)
+       (type-app 'Vec (list ANY))
+       (let ()
+         (define elem-types (map (λ (it) (infer-expr it env)) items))
+         (define first-t (car elem-types))
+         (if (and (not (any-type? first-t))
+                  (andmap (λ (t) (type-compatible? t first-t)) (cdr elem-types)))
+           (type-app 'Vec (list first-t))
+           (type-app 'Vec (list ANY)))))]
     [(map-form? e)
-     (for ([p (in-list (map-form-pairs e))])
-       (infer-expr (car p) env)
-       (infer-expr (cdr p) env))
-     (type-app 'Map (list ANY ANY))]
+     (define pairs (map-form-pairs e))
+     (if (null? pairs)
+       (type-app 'Map (list ANY ANY))
+       (let ()
+         (define key-types (map (λ (p) (infer-expr (car p) env)) pairs))
+         (define val-types (map (λ (p) (infer-expr (cdr p) env)) pairs))
+         (define first-k (car key-types))
+         (define first-v (car val-types))
+         (define kt (if (and (not (any-type? first-k))
+                             (andmap (λ (t) (type-compatible? t first-k)) (cdr key-types)))
+                      first-k ANY))
+         (define vt (if (and (not (any-type? first-v))
+                             (andmap (λ (t) (type-compatible? t first-v)) (cdr val-types)))
+                      first-v ANY))
+         (type-app 'Map (list kt vt))))]
     [(set-form? e)
-     (for ([item (in-list (set-form-items e))])
-       (infer-expr item env))
-     (type-app 'Set (list ANY))]
+     (define items (set-form-items e))
+     (if (null? items)
+       (type-app 'Set (list ANY))
+       (let ()
+         (define elem-types (map (λ (it) (infer-expr it env)) items))
+         (define first-t (car elem-types))
+         (if (and (not (any-type? first-t))
+                  (andmap (λ (t) (type-compatible? t first-t)) (cdr elem-types)))
+           (type-app 'Set (list first-t))
+           (type-app 'Set (list ANY)))))]
     [(unsafe-expr? e) ANY]
     [(unsafe-clj? e) ANY]
     [(if-form? e)
@@ -703,11 +744,8 @@
      (cond
        [(if-form-else-expr e)
         (define et (infer-expr (if-form-else-expr e) else-env))
-        (cond
-          [(type-compatible? tt et) tt]
-          [(type-compatible? et tt) et]
-          [else ANY])]
-       [else ANY])]
+        (merge-types tt et)]
+       [else (merge-types tt NIL)])]
     [(when-form? e)
      (infer-expr (when-form-cond-expr e) env)
      (define-values (then-env _else) (narrow-env-for-condition env (when-form-cond-expr e)))
@@ -731,10 +769,20 @@
      (define body-env (mut-copy env))
      (for ([c (in-list (for-form-clauses e))])
        (cond
-         [(for-binding? c) (hash-set! body-env (for-binding-name c) ANY)]
+         [(for-binding? c)
+          (define coll-type (infer-expr (for-binding-expr c) body-env))
+          (define elem-type
+            (if (and (type-app? coll-type)
+                     (memq (type-app-ctor coll-type) '(Vec List Set))
+                     (= (length (type-app-args coll-type)) 1))
+              (car (type-app-args coll-type))
+              ANY))
+          (hash-set! body-env (for-binding-name c) elem-type)]
          [(for-when? c) (infer-expr (for-when-test c) body-env)]))
-     (last-expr-type (for-form-body e) body-env)
-     ANY]
+     (define body-type (last-expr-type (for-form-body e) body-env))
+     (if (any-type? body-type)
+       (type-app 'Vec (list ANY))
+       (type-app 'Vec (list body-type)))]
     [(fn-form? e)
      (define p-types (map param-or-destr-type (fn-form-params e)))
      (define body-env (extend-with-params env (fn-form-params e)))
@@ -776,19 +824,28 @@
         (for ([a (in-list (static-call-args e))]) (infer-expr a env))
         ANY])]
     [(try-form? e)
-     (for ([expr (in-list (try-form-body e))]) (infer-expr expr env))
-     (for ([c (in-list (try-form-catches e))])
-       (define catch-env (mut-copy env))
-       (hash-set! catch-env (catch-clause-name c) ANY)
-       (for ([expr (in-list (catch-clause-body c))]) (infer-expr expr catch-env)))
+     (define body-type (last-expr-type (try-form-body e) env))
+     (define catch-types
+       (for/list ([c (in-list (try-form-catches e))])
+         (define catch-env (mut-copy env))
+         (hash-set! catch-env (catch-clause-name c) ANY)
+         (last-expr-type (catch-clause-body c) catch-env)))
      (when (try-form-finally-body e)
        (for ([expr (in-list (try-form-finally-body e))]) (infer-expr expr env)))
-     ANY]
+     (apply merge-types body-type catch-types)]
     [(doseq-form? e)
      (define body-env (mut-copy env))
      (for ([c (in-list (doseq-form-clauses e))])
        (cond
-         [(for-binding? c) (hash-set! body-env (for-binding-name c) ANY)]
+         [(for-binding? c)
+          (define coll-type (infer-expr (for-binding-expr c) body-env))
+          (define elem-type
+            (if (and (type-app? coll-type)
+                     (memq (type-app-ctor coll-type) '(Vec List Set))
+                     (= (length (type-app-args coll-type)) 1))
+              (car (type-app-args coll-type))
+              ANY))
+          (hash-set! body-env (for-binding-name c) elem-type)]
          [(for-when? c) (infer-expr (for-when-test c) body-env)]))
      (last-expr-type (doseq-form-body e) body-env)
      ANY]
@@ -799,19 +856,18 @@
          (define arm-env (narrow-env-for-match c target-type env))
          (last-expr-type (match-clause-body c) arm-env)))
      (check-match-exhaustiveness e env target-type)
-     (cond
-       [(null? arm-types) ANY]
-       [(andmap (lambda (t) (type-compatible? t (car arm-types))) (cdr arm-types))
-        (car arm-types)]
-       [else ANY])]
+     (if (null? arm-types) ANY (apply merge-types arm-types))]
     [(case-form? e)
      (infer-expr (case-form-test e) env)
-     (for ([c (in-list (case-form-clauses e))])
-       (infer-expr (case-clause-value c) env)
-       (infer-expr (case-clause-body c) env))
-     (when (case-form-default e)
-       (infer-expr (case-form-default e) env))
-     ANY]
+     (define clause-types
+       (for/list ([c (in-list (case-form-clauses e))])
+         (infer-expr (case-clause-value c) env)
+         (infer-expr (case-clause-body c) env)))
+     (define default-type
+       (if (case-form-default e)
+         (infer-expr (case-form-default e) env)
+         NIL))
+     (apply merge-types default-type clause-types)]
     [(new-form? e)
      (for ([a (in-list (new-form-args e))]) (infer-expr a env))
      ANY]
@@ -841,9 +897,9 @@
                (define suggestion
                  (cond
                    [(not (null? alt-fields))
-                    (format "\n   = note: ~a fields of type ~a: ~a"
-                            rec-name (type->string val-type)
-                            (string-join alt-fields ", "))]
+                    (format "\n   = did you mean: ~a? (fields of ~a with type ~a)"
+                            (string-join alt-fields ", ")
+                            rec-name (type->string val-type))]
                    [else ""]))
                (raise-diag 'type-mismatch
                            (format "with ~a: field ~a expected ~a, got ~a~a"
@@ -856,11 +912,13 @@
                                    'alternatives alt-fields)
                            #:src (src-for e)))]
             [else
+             (define available (map symbol->string (hash-keys field-map)))
              (raise-diag 'type-mismatch
-                         (format "with ~a: no field ~a on record ~a"
-                                 rec-name kw rec-name)
+                         (format "with ~a: no field ~a; available fields: ~a"
+                                 rec-name kw (string-join available ", "))
                          (hasheq 'record (symbol->string rec-name)
-                                 'field (symbol->string kw))
+                                 'field (symbol->string kw)
+                                 'available-fields available)
                          #:src (src-for e))]))
         (check-with-completeness rec-name field-map
                                  (map with-update-field-kw (with-form-updates e))
@@ -896,10 +954,14 @@
           [else
            (define arities (map (λ (a) (length (type-fn-params a)))
                                 (type-union-alts fn-type)))
+           (define sig-str (string-join
+                             (map (λ (a) (type->string a)) (type-union-alts fn-type))
+                             " | "))
            (raise-diag 'arity
                        (format "call to ~a: no arity accepts ~a arg(s), available: ~a"
                                (call-form-fn e) n-args arities)
                        (hasheq 'function (symbol->string (call-form-fn e))
+                               'signature (format "~a : ~a" (call-form-fn e) sig-str)
                                'actual-arity n-args
                                'available-arities (map number->string arities))
                        #:src (src-for e))
@@ -910,16 +972,16 @@
     [else ANY]))
 
 (define (infer-cond-clauses clauses env)
-  (let loop ([cls clauses] [current-env env] [result-type #f])
+  (let loop ([cls clauses] [current-env env] [acc '()])
     (cond
-      [(null? cls) (or result-type ANY)]
+      [(null? cls) (if (null? acc) ANY (apply merge-types (reverse acc)))]
       [else
        (define c (car cls))
        (define test (cond-clause-test c))
        (infer-expr test current-env)
        (define-values (then-env else-env) (narrow-env-for-condition current-env test))
        (define body-type (last-expr-type (cond-clause-body c) then-env))
-       (loop (cdr cls) else-env (or result-type body-type))])))
+       (loop (cdr cls) else-env (cons body-type acc))])))
 
 (define (resolve-poly-call poly-type args env)
   (define body (type-poly-body poly-type))
@@ -978,15 +1040,25 @@
     (define bname (let-binding-name b))
     (cond
       [(map-destructure? bname)
+       (define rec-name (and (type-prim? inferred) (type-prim-name inferred)))
+       (define field-map (and rec-name (hash-ref RECORD-FIELDS rec-name #f)))
        (for ([k (in-list (map-destructure-keys bname))])
-         (hash-set! out k ANY))
+         (define kw (string->symbol (string-append ":" (symbol->string k))))
+         (define field-type (and field-map (hash-ref field-map kw #f)))
+         (hash-set! out k (or field-type ANY)))
        (when (map-destructure-as-name bname)
          (hash-set! out (map-destructure-as-name bname) (or declared inferred ANY)))]
       [(seq-destructure? bname)
+       (define elem-type
+         (if (and (type-app? inferred)
+                  (memq (type-app-ctor inferred) '(Vec List))
+                  (= (length (type-app-args inferred)) 1))
+           (car (type-app-args inferred))
+           ANY))
        (for ([n (in-list (seq-destructure-names bname))])
-         (hash-set! out n ANY))
+         (hash-set! out n elem-type))
        (when (seq-destructure-rest-name bname)
-         (hash-set! out (seq-destructure-rest-name bname) ANY))]
+         (hash-set! out (seq-destructure-rest-name bname) (or inferred ANY)))]
       [else
        (when declared
          (unless (type-compatible? inferred declared)
@@ -995,7 +1067,8 @@
                                bname (type->string declared) (type->string inferred))
                        (hasheq 'name (symbol->string bname)
                                'expected (type->string declared)
-                               'actual (type->string inferred)))))
+                               'actual (type->string inferred))
+                       #:src (src-for (let-binding-value b)))))
        (check-binding-accessor-mismatch bname (let-binding-value b) out)
        (hash-set! out bname (or declared inferred ANY))]))
   out)
@@ -1060,11 +1133,6 @@
      (for ([p (in-list fixed)] [a (in-list args)] [i (in-naturals 1)])
        (check-one-arg fn-name fn-type i p a env call-src))]))
 
-(define (add-between lst sep)
-  (cond [(null? lst) '()]
-        [(null? (cdr lst)) lst]
-        [else (cons (car lst) (cons sep (add-between (cdr lst) sep)))]))
-
 (define (check-one-arg fn-name fn-type i expected-type arg env call-src)
   (define a-type (infer-expr arg env))
   (unless (type-compatible? a-type expected-type)
@@ -1075,6 +1143,9 @@
         [(call-form? arg) (format "(~a ...)" (call-form-fn arg))]
         [(symbol? arg) (symbol->string arg)]
         [(string? arg) (format "~s" arg)]
+        [(number? arg) (format "~a" arg)]
+        [(boolean? arg) (if arg "true" "false")]
+        [(keyword? arg) (format "~a" arg)]
         [else #f]))
     (define arg-sig
       (and (call-form? arg)
@@ -1169,17 +1240,6 @@
   (string-ci=? (symbol->string a) (symbol->string b)))
 
 ;; Provenance: #f (unknown/fresh), a symbol (single scalar), or 'mixed
-(define (expr-provenance e)
-  (cond
-    [(call-form? e)
-     (define fn (call-form-fn e))
-     (cond
-       [(hash-has-key? SCALAR-ACCESSORS fn)
-        (hash-ref SCALAR-ACCESSORS fn)]
-       ;; Record field accessors that return scalar types — check if the
-       ;; return type is a known scalar. If so, that's the provenance.
-       [else #f])]
-    [else #f]))
 
 ;; Walk an expression tree, collecting all scalar provenances that feed into it.
 ;; let-env maps binding names to their provenances from let RHS.
@@ -1450,7 +1510,18 @@
          (walk (cond-clause-test c))
          (for-each walk (cond-clause-body c)))]
       [(for-form? e)
+       (for ([c (in-list (for-form-clauses e))])
+         (when (for-binding? c) (walk (for-binding-expr c))))
        (for-each walk (for-form-body e))]
+      [(doseq-form? e)
+       (for ([c (in-list (doseq-form-clauses e))])
+         (when (for-binding? c) (walk (for-binding-expr c))))
+       (for-each walk (doseq-form-body e))]
+      [(case-form? e)
+       (walk (case-form-test e))
+       (for ([c (in-list (case-form-clauses e))])
+         (walk (case-clause-body c)))
+       (when (case-form-default e) (walk (case-form-default e)))]
       [(loop-form? e)
        (for-each walk (loop-form-body e))]
       [(match-form? e)
@@ -1524,7 +1595,19 @@
       [(cond-form? expr)
        (for ([c (in-list (cond-form-clauses expr))])
          (go (cond-clause-test c)) (for-each go (cond-clause-body c)))]
-      [(for-form? expr) (for-each go (for-form-body expr))]
+      [(for-form? expr)
+       (for ([c (in-list (for-form-clauses expr))])
+         (when (for-binding? c) (go (for-binding-expr c))))
+       (for-each go (for-form-body expr))]
+      [(doseq-form? expr)
+       (for ([c (in-list (doseq-form-clauses expr))])
+         (when (for-binding? c) (go (for-binding-expr c))))
+       (for-each go (doseq-form-body expr))]
+      [(case-form? expr)
+       (go (case-form-test expr))
+       (for ([c (in-list (case-form-clauses expr))])
+         (go (case-clause-body c)))
+       (when (case-form-default expr) (go (case-form-default expr)))]
       [(loop-form? expr) (for-each go (loop-form-body expr))]
       [(match-form? expr)
        (go (match-form-target expr))

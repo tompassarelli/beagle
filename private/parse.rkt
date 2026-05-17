@@ -293,8 +293,6 @@
           (define d (read-syntax src))
           (if (eof-object? d) (reverse acc) (loop (cons d acc))))))))
 
-(define (import-str-downcase s)
-  (list->string (map char-downcase (string->list s))))
 
 (define (import-module-types! mod-path prefix externs registry imp-rec-fields imp-rec-field-order imp-rec-ns mod-ns
                               #:scalar-fns [imp-scalar-fns #f]
@@ -321,7 +319,7 @@
        (define fields (parse-record-fields fields-form))
        (define rec-type (type-prim name))
        (define name-str (symbol->string name))
-       (define name-lower (import-str-downcase name-str))
+       (define name-lower (string-downcase name-str))
        (reg! (string->symbol (string-append "->" name-str))
              (type-fn (map param-type fields) #f rec-type))
        (define field-map (make-hash))
@@ -340,7 +338,7 @@
        (define scalar-type (type-prim name))
        (define backing-type (parse-type backing))
        (define name-str (symbol->string name))
-       (define name-lower (import-str-downcase name-str))
+       (define name-lower (string-downcase name-str))
        (define ctor (string->symbol (string-append "->" name-str)))
        (define accessor (string->symbol (string-append name-lower "-value")))
        (reg! ctor (type-fn (list backing-type) #f scalar-type))
@@ -360,7 +358,7 @@
        (define scalar-type (type-prim name))
        (define backing-type (parse-type backing))
        (define name-str (symbol->string name))
-       (define name-lower (import-str-downcase name-str))
+       (define name-lower (string-downcase name-str))
        (define ctor (string->symbol (string-append "->" name-str)))
        (define accessor (string->symbol (string-append name-lower "-value")))
        (reg! ctor (type-fn (list backing-type) #f scalar-type))
@@ -888,8 +886,8 @@
     [(null? clauses) (case-form test '() #f)]
     [(odd? (length clauses))
      ;; odd number: last is default
-     (define pairs (all-but-last-item clauses))
-     (define default (last-item clauses))
+     (define pairs (all-but-last clauses))
+     (define default (last-of clauses))
      (case-form test (parse-case-pairs pairs) (parse-expr default))]
     [else
      (case-form test (parse-case-pairs clauses) #f)]))
@@ -903,11 +901,6 @@
                                      (parse-expr (cadr rest)))
                         acc))])))
 
-(define (last-item xs)
-  (if (null? (cdr xs)) (car xs) (last-item (cdr xs))))
-
-(define (all-but-last-item xs)
-  (if (null? (cdr xs)) '() (cons (car xs) (all-but-last-item (cdr xs)))))
 
 ;; --- match -----------------------------------------------------------------
 

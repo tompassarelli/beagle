@@ -1,0 +1,8 @@
+(declare-extern parse-long [String -> Long])
+
+;; try returns Long when body and catch both return Long
+(defn safe-parse [(s : String)] : Long
+  (try
+    (parse-long s)
+    (catch Exception e
+      0)))

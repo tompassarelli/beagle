@@ -19,8 +19,8 @@ compiler annotates problems — it doesn't block execution.
 
 ## Evidence
 
-Nine experiments (E1–E9) across 48 hours, head-to-head against raw
-Clojure on the same tasks with the same model (Opus 4.6).
+Eleven experiments (E1–E11) across multiple sessions, head-to-head
+against raw Clojure on the same tasks.
 
 **E4** (13 modules, 8570 LOC, 35 injected bugs): beagle 3/3
 correctness vs clojure 0/3 — first reproducible divergence where
@@ -30,6 +30,16 @@ types produce measurably better outcomes.
 77 turns / 421s / 21.6K tokens vs clojure 88 turns / 595s / 33.9K
 tokens. **29% faster, 36% fewer tokens, lower variance.** Both
 tracks 3/3 correctness — the advantage is efficiency.
+
+**E10** (workflow compression): `--emit-patch` pipeline reduces wall
+time by 33% and tokens by 41% vs E9 baseline.
+
+**E11** (model tier): tested Opus, Sonnet, and Haiku on the same
+system. Opus gains 33% from beagle, Sonnet 4%, Haiku 2%. **Beagle's
+advantage scales with model intelligence** — it's a force multiplier
+for capable models, not a crutch for weak ones. Types don't
+compensate for model weakness; they amplify model strength by giving
+faster, more precise feedback loops.
 
 ## Architecture
 
@@ -76,7 +86,7 @@ system rather than using Typed Racket.
 **Forms:** `def`, `defn` (single + multi-arity, varargs with `&`),
 `fn`, `let`, `if`, `cond`, `when`, `do`, `match`, `loop`/`recur`,
 `for`/`doseq`, `try`/`catch`, `case`, `defrecord`, `with` (typed
-record update), `defenum`, `defprotocol`, `defmulti`/`defmethod`,
+record update), `defenum`, `defunion`, `defprotocol`, `defmulti`/`defmethod`,
 `deftype`, `extend-type`, `defscalar`, threading (`->`, `->>`),
 map/set literals, keyword-as-function, destructuring
 
@@ -152,7 +162,7 @@ Requires [Racket](https://racket-lang.org/) and
 
 ```
 raco pkg install --link --auto /path/to/beagle
-raco test tests/   # 338 tests
+raco test tests/   # 370 tests
 ```
 
 ## Reference
@@ -161,4 +171,4 @@ raco test tests/   # 338 tests
 - `docs/agent-workflow.md` — repair tool routing decision tree
 - `docs/forms.md` — canonical form catalog
 - `docs/devlog/` — development journal, 13 entries over 48 hours
-- `experiments/` — E1–E9 benchmark framework + trial data
+- `experiments/` — E1–E11 benchmark framework + trial data

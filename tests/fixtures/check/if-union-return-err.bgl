@@ -1,0 +1,9 @@
+(defrecord Product [(id : Long) (name : String)])
+
+(declare-extern lookup-product [Long -> Product])
+
+;; should fail: if returns (U Product Nil), not Product
+(defn find-product [(id : Long)] : Product
+  (if (> id 0)
+    (lookup-product id)
+    nil))

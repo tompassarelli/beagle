@@ -191,15 +191,61 @@ loop zero-turn for mechanical bugs.
 
 - [x] `beagle-repair --emit-patch` — output unified diff instead of human-readable queue
       (validated: 9 fixes across 4 files on E8 buggy, `git apply --check` passes)
-- [ ] E10: workflow compression experiment (measure turn/time reduction vs E9 baseline)
-      Specs written, trial dirs populated. Run with `--dangerously-skip-permissions`.
-- [ ] E11: model tier experiment — Sonnet 4.6 on same E8 system
-      Tests whether correctness divergence reappears at lower model capability.
-      If Sonnet+beagle matches Opus+Clojure: "same correctness, 10x cheaper."
+- [x] E10: workflow compression experiment (beagle 33% faster wall time, 41% fewer tokens)
+- [x] E11: model tier experiment — Opus 33% gain, Sonnet 4%, Haiku 2%; capability curve confirmed
+
+## v0.4.0: Consumer hardening + tool unification
+
+### Unified CLI entrypoint
+
+Single `beagle` command with subcommands for the consumer surface:
+- [x] `beagle check .` — batch type-check (delegates to beagle-check-all)
+- [x] `beagle build . --out DIR` — batch compile (delegates to beagle-build-all)
+- [x] `beagle fix --dry-run|--apply .` — auto-fix type errors
+- [x] `beagle sig FN .` — query a signature
+- [x] `beagle lsp` — editor integration
+- [x] `beagle repl` — typed REPL
+- [x] `beagle init` — bootstrap a consumer project (drops .claude/ snippet + minimal config)
+
+Developer tools stay as `bin/beagle-*` (repair, proptest, muttest, dtrace, etc.)
+
+### Consumer cheatsheet
+
+- [x] `docs/cheatsheet-consumer.md` — 154 lines: language surface, build/check, error guidance
+- [x] `beagle init` generates project .claude/beagle-context.md from consumer cheatsheet
+
+### Error message audit
+
+- [x] Audit every error path in check.rkt (12 issues found, 8 fixed):
+      added #:src to def/defn/defn-multi/let-binding, added available-fields to `with`,
+      added signature to multi-arity arity errors, rephrased suggestions as "did you mean?",
+      added literal arg-expr for integers/booleans/keywords, cleaned up match exhaustiveness format
+- [x] Ensure all structured errors include fix hints where possible
+- [x] Test error messages on common mistakes (wrong record field, arity mismatch, type mismatch)
+
+### Type checker hardening (done this session)
+
+- [x] Collection element type inference (Vec/Map/Set literals)
+- [x] Destructuring record field type propagation (map + sequential)
+- [x] For/doseq binding type inference from collection elements
+- [x] Branch return type inference (if/try/match/case/cond → union)
+- [x] Pushed inference to floor — remaining Any is genuinely dynamic
+
+### Code cleanup (done this session)
+
+- [x] Dead code removal: RECORD-ORIGIN, ENUM-VALUES, expr-provenance
+- [x] Duplicate removal: string-downcase, last, add-between, last-item/all-but-last-item
+- [x] Silent bug fixes: doseq-form/case-form missing from walk-for-provenance and symbols-in
+- [x] Docs cleanup: CLAUDE.md, forms.md, cheatsheet.md, todo.md, README.md
+
+### Release
+
+- [x] Update version in CLAUDE.md status line (v0.3 → v0.4.0)
+- [ ] Devlog entry: v0.4.0
+- [ ] Tag v0.4.0
 
 ## Someday: Experiments
 
-- [ ] E11: Sonnet/Haiku model tier (specs written, see experiments/e11-model-tier/)
 - [x] Mutation testing: beagle-muttest (13 operators, 1356 sites on E8, identifies oracle gaps)
 - [x] Multi-arg function coverage: type-aware record instances + deterministic diff testing
 
@@ -220,7 +266,7 @@ loop zero-turn for mechanical bugs.
 - Custom reader preserving `[]`/`()`, intercepting `{}`/`#{}`
 - Stdlib extern catalog (~607 functions), bin/gen-stdlib-types auto-generator
 - bin/beagle-build, bin/beagle-build-all, bin/beagle-expand
-- 284-test suite
+- 370-test suite
 - experiments/ benchmark framework (40 tasks × 3 variants, gen-prompts + score + verify-behavior)
 - Head-to-head benchmark (8 programs, beagle vs raw Clojure, 16/16 pass)
 - Refactoring experiment (overhead-pct cascade, 2/2 pass)

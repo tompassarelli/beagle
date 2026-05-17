@@ -1,0 +1,11 @@
+(defrecord Cat [(name : String)])
+(defrecord Dog [(name : String)])
+
+(declare-extern get-pet [-> (U Cat Dog)])
+
+;; match positional destructure: c and d are String (name field)
+;; both arms return String, so match infers String
+(defn pet-name [] : String
+  (match (get-pet)
+    [(Cat c) c]
+    [(Dog d) d]))

@@ -667,6 +667,47 @@
 (check-fixture-ok "defscalar :where with dynamic arg passes (no compile-time check)"
   "defscalar-pred-dynamic.bgl")
 
+;; --- collection element type inference ---
+
+(check-fixture-ok "vec of records infers element type"
+  "vec-element-type.bgl")
+
+(check-fixture-err "vec element type mismatch caught"
+  "vec-element-type-mismatch.bgl")
+
+(check-fixture-ok "empty vec is (Vec Any), compatible with any (Vec T)"
+  "vec-empty-compatible.bgl")
+
+;; --- destructuring record field type propagation ---
+
+(check-fixture-ok "destructured record field has correct type"
+  "destr-record-field-ok.bgl")
+
+(check-fixture-err "destructured record field type mismatch caught"
+  "destr-record-field-err.bgl")
+
+;; --- for-comprehension element type propagation ---
+
+(check-fixture-ok "for binding inherits element type from collection"
+  "for-element-type.bgl")
+
+(check-fixture-err "for return type mismatch caught"
+  "for-element-type-err.bgl")
+
+;; --- branching return type inference ---
+
+(check-fixture-ok "if with divergent branches infers union type"
+  "if-union-return.bgl")
+
+(check-fixture-err "if union return rejects non-nullable annotation"
+  "if-union-return-err.bgl")
+
+(check-fixture-ok "try infers body+catch return type"
+  "try-infers-body-type.bgl")
+
+(check-fixture-ok "match arms with same type infer that type"
+  "match-union-return.bgl")
+
 ;; --- CLJS target tests ---
 
 (define (check-cljs-prog . forms)

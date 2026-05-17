@@ -1,0 +1,10 @@
+(defrecord Product [(id : Long) (name : String)])
+
+(defn get-products [] : (Vec Product)
+  [(->Product 1 "A") (->Product 2 "B")])
+
+;; for binding should inherit element type from (Vec Product)
+;; product-name returns String, so (for ...) returns (Vec String)
+(defn get-names [] : (Vec String)
+  (for [p (get-products)]
+    (product-name p)))
