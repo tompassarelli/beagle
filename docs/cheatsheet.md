@@ -486,7 +486,7 @@ Each note means: something is wrong at that location. Common fixes:
 1. `beagle-repair src/ verify.clj` — get the ranked queue
 2. Apply all AUTO fixes (or use `--auto`)
 3. `beagle-build-all --warn src/ --out .build/` — recompile
-4. Run oracle: `clojure -Sdeps '{:paths [".build/"]}' -M -e '(load-file "verify.clj")'`
+4. Run oracle: `bb -cp .build/ -e '(load-file "verify.clj")'`
 5. For remaining failures: `beagle-trace .build/ verify.clj` to see divergence
 6. `beagle-cascade src/ verify.clj --from-failures` to find root causes
 7. Fix root causes first (highest cascade score), rerun oracle
