@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require rackunit
+         (for-syntax racket/base)
          "../private/parse.rkt"
          "../private/types.rkt")
 
@@ -11,10 +12,15 @@
 (define (parse-prog . forms)
   (parse-program (map (lambda (f) (datum->syntax #f f)) forms)))
 
-;; Construct a bracket-tagged form (what the beagle reader produces for
-;; source `[a b c]`). Test files use plain Racket reader where `[]` collapses
-;; to `()`, so we have to manufacture the tag manually.
 (define (br . xs) (cons BRACKET-TAG xs))
+
+(define-syntax-rule (parse-err name form ...)
+  (test-case name
+    (check-exn exn:fail? (lambda () (parse-prog form ...)))))
+
+(define-syntax-rule (parse-err/rx name rx form ...)
+  (test-case name
+    (check-exn rx (lambda () (parse-prog form ...)))))
 
 ;; --- meta forms ------------------------------------------------------------
 
@@ -30,21 +36,16 @@
   (check-eq? (program-namespace p) 'beagle.test)
   (check-eq? (program-mode      p) 'dynamic))
 
-(test-case "duplicate ns errors"
-  (check-exn exn:fail?
-             (lambda () (parse-prog
-                         '(ns foo)
-                         '(ns bar)))))
+(parse-err "duplicate ns errors"
+  '(ns foo)
+  '(ns bar))
 
-(test-case "duplicate define-mode errors"
-  (check-exn exn:fail?
-             (lambda () (parse-prog
-                         '(define-mode strict)
-                         '(define-mode dynamic)))))
+(parse-err "duplicate define-mode errors"
+  '(define-mode strict)
+  '(define-mode dynamic))
 
-(test-case "unknown define-mode errors"
-  (check-exn exn:fail?
-             (lambda () (parse-prog '(define-mode wat)))))
+(parse-err "unknown define-mode errors"
+  '(define-mode wat))
 
 ;; --- def -------------------------------------------------------------------
 
@@ -134,12 +135,10 @@
   (check-true (cond-form? f))
   (check-equal? (length (cond-form-clauses f)) 3))
 
-(test-case "bare-form cond requires even number of forms"
-  (check-exn exn:fail?
-             (lambda () (parse-one
-                         '(cond
-                            (zero? n) "zero"
-                            "missing-test")))))
+(parse-err "bare-form cond requires even number of forms"
+  '(cond
+     (zero? n) "zero"
+     "missing-test"))
 
 (test-case "when"
   (define f (car (parse-one '(when (> x 0) (println x) x))))
@@ -186,9 +185,8 @@
   ;; The unsafe is the second arg
   (check-true (unsafe-clj? (cadr (call-form-args add-call)))))
 
-(test-case "unsafe rejects non-string"
-  (check-exn exn:fail?
-             (lambda () (parse-one '(unsafe (println :hi))))))
+(parse-err "unsafe rejects non-string"
+  '(unsafe (println :hi)))
 
 ;; --- regex literal ---------------------------------------------------------
 
@@ -220,17 +218,13 @@
   (define value (def-form-value f))
   (check-true (unsafe-expr? value)))
 
-(test-case "macro arity mismatch errors"
-  (check-exn exn:fail?
-             (lambda () (parse-prog
-                         '(define-macro safe two (a b) (+ a b))
-                         '(def y (two 1))))))
+(parse-err "macro arity mismatch errors"
+  '(define-macro safe two (a b) (+ a b))
+  '(def y (two 1)))
 
-(test-case "duplicate macro definition errors"
-  (check-exn exn:fail?
-             (lambda () (parse-prog
-                         '(define-macro safe m (x) x)
-                         '(define-macro safe m (y) y)))))
+(parse-err "duplicate macro definition errors"
+  '(define-macro safe m (x) x)
+  '(define-macro safe m (y) y))
 
 ;; --- declare-extern --------------------------------------------------------
 
@@ -239,11 +233,9 @@
   (check-equal? (hash-count (program-externs p)) 1)
   (check-true (hash-has-key? (program-externs p) 'foo)))
 
-(test-case "duplicate declare-extern errors"
-  (check-exn exn:fail?
-             (lambda () (parse-prog
-                         `(declare-extern foo ,(br 'Long '-> 'Long))
-                         `(declare-extern foo ,(br 'String '-> 'String))))))
+(parse-err "duplicate declare-extern errors"
+  `(declare-extern foo ,(br 'Long '-> 'Long))
+  `(declare-extern foo ,(br 'String '-> 'String)))
 
 ;; --- require ---------------------------------------------------------------
 
@@ -283,12 +275,9 @@
   (check-eq?  (call-form-fn value) '+)
   (check-equal? (length (call-form-args value)) 3))
 
-(test-case "macro &rest: too few args errors"
-  (check-exn exn:fail?
-             (lambda ()
-               (parse-prog
-                '(define-macro safe foo (a b & rest) a)
-                '(def y (foo 1))))))
+(parse-err "macro &rest: too few args errors"
+  '(define-macro safe foo (a b & rest) a)
+  '(def y (foo 1)))
 
 ;; --- macro hygiene --------------------------------------------------------
 
@@ -344,10 +333,8 @@
   (check-eq? (param-name (cadr (record-form-fields f))) 'rate)
   (check-equal? (param-type (cadr (record-form-fields f))) (type-prim 'Long)))
 
-(test-case "defrecord rejects bare fields without types"
-  (check-exn exn:fail?
-             (lambda ()
-               (parse-prog `(defrecord Foo ,(br 'x 'y))))))
+(parse-err "defrecord rejects bare fields without types"
+  `(defrecord Foo ,(br 'x 'y)))
 
 ;; --- Java interop ------------------------------------------------------------
 
@@ -405,9 +392,8 @@
   (check-true (map-form? (def-form-value f)))
   (check-equal? (map-form-pairs (def-form-value f)) '()))
 
-(test-case "map literal with odd count errors"
-  (check-exn exn:fail?
-             (lambda () (parse-one `(def m ,(mt ':a 1 ':b))))))
+(parse-err "map literal with odd count errors"
+  `(def m ,(mt ':a 1 ':b)))
 
 ;; --- set literals ------------------------------------------------------------
 
@@ -687,13 +673,11 @@
   (check-true (with-form? f))
   (check-equal? (length (with-form-updates f)) 1))
 
-(test-case "with rejects non-keyword field"
-  (check-exn #rx"field name must be a keyword"
-             (lambda () (parse-one `(with p ,(br 'name "alice"))))))
+(parse-err/rx "with rejects non-keyword field" #rx"field name must be a keyword"
+  `(with p ,(br 'name "alice")))
 
-(test-case "with rejects malformed update"
-  (check-exn #rx"each update must be"
-             (lambda () (parse-one '(with p 42)))))
+(parse-err/rx "with rejects malformed update" #rx"each update must be"
+  '(with p 42))
 
 ;; --- defenum form ------------------------------------------------------------
 

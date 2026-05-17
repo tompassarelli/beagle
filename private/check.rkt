@@ -125,7 +125,8 @@
     (define env (build-initial-env prog))
     (parameterize ([current-union-members UNION-MEMBERS])
       (for ([form (in-list (program-forms prog))])
-        (check-form form env)))))
+        (check-form form env)))
+    (check-scalar-provenance! prog)))
 
 ;; --- environment -----------------------------------------------------------
 
@@ -1039,6 +1040,435 @@
         (with-handlers ([exn:fail? (lambda (e) (error-handler e orig-stx))])
           (check-form form env))))))
 
+;; =============================================================================
+;; Scalar provenance lint pass
+;;
+;; Detects "scalar laundering" — unwrapping scalar A to Long then rewrapping as
+;; scalar B. Example: (->Amount (timestamp-value x)) launders Timestamp→Amount.
+;; Also flags mixed-provenance arithmetic: (+ (amount-value a) (timestamp-value b))
+;; =============================================================================
+
+(define SCALAR-CTORS (make-hash))   ; "->Amount" → 'Amount
+(define SCALAR-ACCESSORS (make-hash)) ; "amount-value" → 'Amount
+
+(define (build-scalar-registry! prog)
+  (hash-clear! SCALAR-CTORS)
+  (hash-clear! SCALAR-ACCESSORS)
+  (for ([form (in-list (program-forms prog))])
+    (when (defscalar-form? form)
+      (define name (defscalar-form-name form))
+      (define name-str (symbol->string name))
+      (define name-lower (string-downcase name-str))
+      (hash-set! SCALAR-CTORS
+                 (string->symbol (string-append "->" name-str)) name)
+      (hash-set! SCALAR-ACCESSORS
+                 (string->symbol (string-append name-lower "-value")) name)))
+  ;; also register imported scalars
+  (for ([sym (in-list (program-imported-scalar-fns prog))])
+    (define s (symbol->string sym))
+    (cond
+      [(string-prefix? s "->")
+       (define scalar-name (string->symbol (substring s 2)))
+       (hash-set! SCALAR-CTORS sym scalar-name)]
+      [(string-suffix? s "-value")
+       (define prefix (substring s 0 (- (string-length s) 6)))
+       ;; Find the matching ctor to get the canonical scalar name
+       ;; Try exact titlecase first, then scan all ctors for case-insensitive match
+       (define ctor-sym (string->symbol (string-append "->" (string-titlecase-first prefix))))
+       (define canonical
+         (or (hash-ref SCALAR-CTORS ctor-sym #f)
+             (for/first ([(k v) (in-hash SCALAR-CTORS)]
+                         #:when (string-ci=? (symbol->string v) prefix))
+               v)))
+       (hash-set! SCALAR-ACCESSORS sym (or canonical (string->symbol prefix)))])))
+
+(define (string-titlecase-first s)
+  (if (string=? s "") s
+      (string-append (string (char-upcase (string-ref s 0)))
+                     (substring s 1))))
+
+(define (scalar-name-eq? a b)
+  (string-ci=? (symbol->string a) (symbol->string b)))
+
+;; Provenance: #f (unknown/fresh), a symbol (single scalar), or 'mixed
+(define (expr-provenance e)
+  (cond
+    [(call-form? e)
+     (define fn (call-form-fn e))
+     (cond
+       [(hash-has-key? SCALAR-ACCESSORS fn)
+        (hash-ref SCALAR-ACCESSORS fn)]
+       ;; Record field accessors that return scalar types — check if the
+       ;; return type is a known scalar. If so, that's the provenance.
+       [else #f])]
+    [else #f]))
+
+;; Walk an expression tree, collecting all scalar provenances that feed into it.
+;; let-env maps binding names to their provenances from let RHS.
+(define current-prov-env (make-parameter (hasheq)))
+
+(define (collect-provenances e)
+  (cond
+    [(call-form? e)
+     (define fn (call-form-fn e))
+     (cond
+       [(hash-has-key? SCALAR-ACCESSORS fn)
+        (set (hash-ref SCALAR-ACCESSORS fn))]
+       ;; Additive arithmetic propagates provenance (same-type required)
+       [(memq fn '(+ -))
+        (apply set-union (set) (map collect-provenances (call-form-args e)))]
+       ;; Multiplicative arithmetic produces "fresh" result (cross-scalar ok)
+       [(memq fn '(* quot mod rem))
+        (set)]
+       ;; reduce with +/- as combining fn: propagate from collection arg
+       [(eq? fn 'reduce)
+        (define args (call-form-args e))
+        (cond
+          [(and (>= (length args) 3)
+                (symbol? (car args))
+                (memq (car args) '(+ -)))
+           (collect-provenances (caddr args))]
+          [else (set)])]
+       ;; mapv: provenance comes from the lambda body
+       [(eq? fn 'mapv)
+        (define args (call-form-args e))
+        (cond
+          [(and (>= (length args) 1)
+                (fn-form? (car args)))
+           (define fn-body (fn-form-body (car args)))
+           (if (pair? fn-body)
+               (collect-provenances (last fn-body))
+               (set))]
+          [else (set)])]
+       [else (set)])]
+    [(symbol? e)
+     ;; Look up provenance from let bindings
+     (define prov (hash-ref (current-prov-env) e #f))
+     (if prov (set prov) (set))]
+    [(let-form? e)
+     ;; Build provenance env from bindings, then check body
+     (define new-env
+       (for/fold ([env (current-prov-env)])
+                 ([b (in-list (let-form-bindings e))])
+         (define provs (parameterize ([current-prov-env env])
+                         (collect-provenances (let-binding-value b))))
+         (if (= 1 (set-count provs))
+             (hash-set env (let-binding-name b) (set-first provs))
+             env)))
+     (define body (let-form-body e))
+     (if (pair? body)
+         (parameterize ([current-prov-env new-env])
+           (collect-provenances (last body)))
+         (set))]
+    [(if-form? e)
+     (set-union (collect-provenances (if-form-then-expr e))
+                (if (if-form-else-expr e)
+                    (collect-provenances (if-form-else-expr e))
+                    (set)))]
+    [(cond-form? e)
+     (apply set-union (set)
+       (for/list ([c (in-list (cond-form-clauses e))])
+         (define body (cond-clause-body c))
+         (if (pair? body)
+             (collect-provenances (last body))
+             (set))))]
+    [(do-form? e)
+     (define body (do-form-body e))
+     (if (pair? body)
+         (collect-provenances (last body))
+         (set))]
+    [else (set)]))
+
+(define KNOWN-FNS (make-hash))
+
+(define (build-known-fns! prog)
+  (hash-clear! KNOWN-FNS)
+  ;; stdlib
+  (for ([(k _) (in-hash BUILTIN-ENV)]) (hash-set! KNOWN-FNS k #t))
+  ;; externs
+  (for ([(k _) (in-hash (program-externs prog))]) (hash-set! KNOWN-FNS k #t))
+  ;; local forms
+  (for ([form (in-list (program-forms prog))])
+    (cond
+      [(defn-form? form) (hash-set! KNOWN-FNS (defn-form-name form) #t)]
+      [(defn-multi? form) (hash-set! KNOWN-FNS (defn-multi-name form) #t)]
+      [(def-form? form) (hash-set! KNOWN-FNS (def-form-name form) #t)]
+      [(record-form? form)
+       (define name (record-form-name form))
+       (define name-str (symbol->string name))
+       (define name-lower (string-downcase name-str))
+       (hash-set! KNOWN-FNS (string->symbol (string-append "->" name-str)) #t)
+       (for ([f (in-list (record-form-fields form))])
+         (hash-set! KNOWN-FNS
+                    (string->symbol (string-append name-lower "-" (symbol->string (param-name f)))) #t))]
+      [(defscalar-form? form)
+       (define name-str (symbol->string (defscalar-form-name form)))
+       (define name-lower (string-downcase name-str))
+       (hash-set! KNOWN-FNS (string->symbol (string-append "->" name-str)) #t)
+       (hash-set! KNOWN-FNS (string->symbol (string-append name-lower "-value")) #t)]
+      [else (void)]))
+  ;; imported scalars
+  (for ([sym (in-list (program-imported-scalar-fns prog))])
+    (hash-set! KNOWN-FNS sym #t))
+  ;; imported record accessors/constructors
+  (for ([(rec-name field-map) (in-hash (program-imported-record-fields prog))])
+    (define name-str (symbol->string rec-name))
+    (define name-lower (string-downcase name-str))
+    (hash-set! KNOWN-FNS (string->symbol (string-append "->" name-str)) #t)
+    (for ([(kw _) (in-hash field-map)])
+      (define field-str (substring (symbol->string kw) 1))
+      (hash-set! KNOWN-FNS
+                 (string->symbol (string-append name-lower "-" field-str)) #t))))
+
+(define (check-scalar-provenance! prog)
+  (build-scalar-registry! prog)
+  (build-known-fns! prog)
+  (when (eq? (program-mode prog) 'strict)
+    (define src-table (program-src-table prog))
+    (for ([form (in-list (program-forms prog))])
+      (walk-for-provenance form src-table))))
+
+(define current-local-bindings (make-parameter (set)))
+
+(define (walk-for-provenance form src-table)
+  (define (walk e)
+    (cond
+      [(call-form? e)
+       (define fn (call-form-fn e))
+       (define args (call-form-args e))
+       ;; Check: call to undefined function
+       (when (and (not (hash-has-key? KNOWN-FNS fn))
+                  (not (set-member? (current-local-bindings) fn))
+                  (not (memq fn '(recur throw)))
+                  (not (string-contains? (symbol->string fn) "/")))
+         (define src (and src-table (hash-ref src-table e #f)))
+         (fprintf (current-error-port)
+                  "note: call to undefined function '~a'~a\n"
+                  fn
+                  (if src (format "\n  --> ~a:~a" (or (src-loc-source src) "?") (src-loc-line src)) "")))
+       ;; Check: scalar constructor receiving value from different scalar
+       (when (and (hash-has-key? SCALAR-CTORS fn)
+                  (= 1 (length args)))
+         (define target-scalar (hash-ref SCALAR-CTORS fn))
+         (define arg (car args))
+         (define provs (collect-provenances arg))
+         (for ([p (in-set provs)])
+           (when (and p (not (scalar-name-eq? p target-scalar)))
+             (define src (and src-table (hash-ref src-table e #f)))
+             (fprintf (current-error-port)
+                      "note: scalar provenance: ~a receives value derived from ~a~a\n  = ~a wraps a ~a backing value, but the argument originated from ~a\n"
+                      fn p
+                      (if src (format "\n  --> ~a:~a" (or (src-loc-source src) "?") (src-loc-line src)) "")
+                      target-scalar
+                      (type->string (type-prim (scalar-backing target-scalar)))
+                      p))))
+       ;; Check: mixed provenance in additive arithmetic only (+ -)
+       (when (memq fn '(+ -))
+         (define provs (apply set-union (set) (map collect-provenances args)))
+         (when (> (set-count provs) 1)
+           (define src (and src-table (hash-ref src-table e #f)))
+           (fprintf (current-error-port)
+                    "note: mixed scalar provenance in arithmetic: ~a used together~a\n"
+                    (string-join (map symbol->string (set->list provs)) ", ")
+                    (if src (format "\n  --> ~a:~a" (or (src-loc-source src) "?") (src-loc-line src)) ""))))
+       ;; Check: cross-scalar equality comparison
+       (when (and (eq? fn '=) (= (length args) 2))
+         (define prov1 (collect-provenances (car args)))
+         (define prov2 (collect-provenances (cadr args)))
+         (when (and (not (set-empty? prov1))
+                    (not (set-empty? prov2))
+                    (set-empty? (for/set ([a (in-set prov1)]
+                                          #:when (for/or ([b (in-set prov2)])
+                                                   (scalar-name-eq? a b)))
+                                  a)))
+           (define src (and src-table (hash-ref src-table e #f)))
+           (fprintf (current-error-port)
+                    "note: cross-scalar comparison: ~a vs ~a~a\n  = comparing values derived from incompatible scalar types\n"
+                    (string-join (map symbol->string (set->list prov1)) ", ")
+                    (string-join (map symbol->string (set->list prov2)) ", ")
+                    (if src (format "\n  --> ~a:~a" (or (src-loc-source src) "?") (src-loc-line src)) ""))))
+       ;; Recurse into args
+       (for-each walk args)]
+      [(let-form? e)
+       ;; Check for unused let bindings (typed params only, to avoid noise)
+       (define bindings (let-form-bindings e))
+       (define body (let-form-body e))
+       (define body-syms (for/fold ([s (mutable-set)]) ([b (in-list body)])
+                           (set-union! s (symbols-in b)) s))
+       (for ([b (in-list bindings)]
+             [i (in-naturals)])
+         (define name (let-binding-name b))
+         (when (and (not (set-member? body-syms name))
+                    (not (for/or ([later (in-list (drop bindings (add1 i)))])
+                           (set-member? (symbols-in (let-binding-value later)) name)))
+                    (expr-involves-scalar? (let-binding-value b)))
+           (define src (and src-table (hash-ref src-table (let-binding-value b) #f)))
+           (fprintf (current-error-port)
+                    "note: unused let binding '~a'~a\n"
+                    name
+                    (if src (format "\n  --> ~a:~a" (or (src-loc-source src) "?") (src-loc-line src)) ""))))
+       ;; Walk bindings AND build provenance env progressively
+       (define-values (new-env new-locals)
+         (for/fold ([env (current-prov-env)]
+                    [locals (current-local-bindings)])
+                   ([b (in-list bindings)])
+           (parameterize ([current-prov-env env]
+                          [current-local-bindings locals])
+             (walk (let-binding-value b)))
+           (define provs
+             (parameterize ([current-prov-env env])
+               (collect-provenances (let-binding-value b))))
+           (values
+             (if (= 1 (set-count provs))
+                 (hash-set env (let-binding-name b) (set-first provs))
+                 env)
+             (set-add locals (let-binding-name b)))))
+       (parameterize ([current-prov-env new-env]
+                      [current-local-bindings new-locals])
+         (for-each walk body))]
+      [(if-form? e)
+       (walk (if-form-cond-expr e))
+       (walk (if-form-then-expr e))
+       (when (if-form-else-expr e) (walk (if-form-else-expr e)))]
+      [(when-form? e)
+       (walk (when-form-cond-expr e))
+       (for-each walk (when-form-body e))]
+      [(do-form? e)
+       (for-each walk (do-form-body e))]
+      [(defn-form? e)
+       ;; Check for unused typed parameters (hints at wrong-variable bugs)
+       (define body-syms (for/fold ([s (mutable-set)]) ([b (in-list (defn-form-body e))])
+                           (set-union! s (symbols-in b)) s))
+       (for ([p (in-list (defn-form-params e))])
+         (when (and (param? p)
+                    (param-type p)
+                    (scalar-type? (param-type p))
+                    (not (set-member? body-syms (param-name p))))
+           (define src (and src-table (hash-ref src-table e #f)))
+           (fprintf (current-error-port)
+                    "note: unused parameter '~a' in ~a~a\n"
+                    (param-name p) (defn-form-name e)
+                    (if src (format "\n  --> ~a:~a" (or (src-loc-source src) "?") (src-loc-line src)) ""))))
+       (define param-names
+         (for/fold ([s (current-local-bindings)]) ([p (in-list (defn-form-params e))])
+           (if (param? p) (set-add s (param-name p)) s)))
+       (parameterize ([current-local-bindings param-names])
+         (for-each walk (defn-form-body e)))]
+      [(defn-multi? e)
+       (for ([a (in-list (defn-multi-arities e))])
+         (define param-names
+           (for/fold ([s (current-local-bindings)]) ([p (in-list (arity-clause-params a))])
+             (if (param? p) (set-add s (param-name p)) s)))
+         (parameterize ([current-local-bindings param-names])
+           (for-each walk (arity-clause-body a))))]
+      [(fn-form? e)
+       (define param-names
+         (for/fold ([s (current-local-bindings)]) ([p (in-list (fn-form-params e))])
+           (if (param? p) (set-add s (param-name p)) s)))
+       (parameterize ([current-local-bindings param-names])
+         (for-each walk (fn-form-body e)))]
+      [(cond-form? e)
+       (for ([c (in-list (cond-form-clauses e))])
+         (walk (cond-clause-test c))
+         (for-each walk (cond-clause-body c)))]
+      [(for-form? e)
+       (for-each walk (for-form-body e))]
+      [(loop-form? e)
+       (for-each walk (loop-form-body e))]
+      [(match-form? e)
+       (walk (match-form-target e))
+       (for ([c (in-list (match-form-clauses e))])
+         (for-each walk (match-clause-body c)))]
+      [(try-form? e)
+       (for-each walk (try-form-body e))
+       (for ([c (in-list (try-form-catches e))])
+         (for-each walk (catch-clause-body c)))
+       (for-each walk (try-form-finally-body e))]
+      [(with-form? e)
+       (walk (with-form-target e))
+       (for ([u (in-list (with-form-updates e))])
+         (walk (with-update-value u)))]
+      [(vec-form? e)
+       (for-each walk (vec-form-items e))]
+      [(map-form? e)
+       (for ([p (in-list (map-form-pairs e))])
+         (walk (car p)) (walk (cdr p)))]
+      [else (void)]))
+  (walk form))
+
+(define (scalar-backing scalar-name)
+  ;; Look up the backing type from the SCALAR-CTORS registry
+  ;; For the note message we just use 'Long as default
+  'Long)
+
+;; Does an expression involve a scalar accessor or constructor call?
+(define (expr-involves-scalar? e)
+  (cond
+    [(call-form? e)
+     (or (hash-has-key? SCALAR-ACCESSORS (call-form-fn e))
+         (hash-has-key? SCALAR-CTORS (call-form-fn e))
+         (for/or ([a (in-list (call-form-args e))]) (expr-involves-scalar? a)))]
+    [(let-form? e)
+     (or (for/or ([b (in-list (let-form-bindings e))]) (expr-involves-scalar? (let-binding-value b)))
+         (for/or ([b (in-list (let-form-body e))]) (expr-involves-scalar? b)))]
+    [(if-form? e)
+     (or (expr-involves-scalar? (if-form-then-expr e))
+         (and (if-form-else-expr e) (expr-involves-scalar? (if-form-else-expr e))))]
+    [else #f]))
+
+;; Is a type a known scalar type?
+(define (scalar-type? t)
+  (and (type-prim? t)
+       (for/or ([(k v) (in-hash SCALAR-CTORS)])
+         (scalar-name-eq? v (type-prim-name t)))))
+
+;; Collect all symbol references in an expression tree (for unused-param detection)
+(define (symbols-in e)
+  (define syms (mutable-set))
+  (define (go expr)
+    (cond
+      [(symbol? expr) (set-add! syms expr)]
+      [(call-form? expr)
+       (set-add! syms (call-form-fn expr))
+       (for-each go (call-form-args expr))]
+      [(let-form? expr)
+       (for ([b (in-list (let-form-bindings expr))])
+         (go (let-binding-value b)))
+       (for-each go (let-form-body expr))]
+      [(if-form? expr)
+       (go (if-form-cond-expr expr))
+       (go (if-form-then-expr expr))
+       (when (if-form-else-expr expr) (go (if-form-else-expr expr)))]
+      [(when-form? expr) (go (when-form-cond-expr expr)) (for-each go (when-form-body expr))]
+      [(do-form? expr) (for-each go (do-form-body expr))]
+      [(fn-form? expr) (for-each go (fn-form-body expr))]
+      [(cond-form? expr)
+       (for ([c (in-list (cond-form-clauses expr))])
+         (go (cond-clause-test c)) (for-each go (cond-clause-body c)))]
+      [(for-form? expr) (for-each go (for-form-body expr))]
+      [(loop-form? expr) (for-each go (loop-form-body expr))]
+      [(match-form? expr)
+       (go (match-form-target expr))
+       (for ([c (in-list (match-form-clauses expr))])
+         (for-each go (match-clause-body c)))]
+      [(try-form? expr)
+       (for-each go (try-form-body expr))
+       (for ([c (in-list (try-form-catches expr))])
+         (for-each go (catch-clause-body c)))
+       (for-each go (try-form-finally-body expr))]
+      [(with-form? expr)
+       (go (with-form-target expr))
+       (for ([u (in-list (with-form-updates expr))])
+         (go (with-update-value u)))]
+      [(vec-form? expr) (for-each go (vec-form-items expr))]
+      [(map-form? expr)
+       (for ([p (in-list (map-form-pairs expr))])
+         (go (car p)) (go (cdr p)))]
+      [else (void)]))
+  (go e)
+  syms)
+
 (provide type-check! type-check-with-locs!
+         check-scalar-provenance!
          beagle-diagnostic beagle-diagnostic?
          beagle-diagnostic-kind beagle-diagnostic-details)

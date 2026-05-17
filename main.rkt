@@ -52,7 +52,8 @@
        ;; that are otherwise valid. Skipped via BEAGLE_NO_LINT env var (for
        ;; benchmark scoring where stderr noise distorts results).
        (unless (getenv "BEAGLE_NO_LINT")
-         (lint-program! prog))
+         (lint-program! prog)
+         (check-scalar-provenance! prog))
        (define source (emit-program prog))
        #`(#%module-begin
           (display #,source)))]))

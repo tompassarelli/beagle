@@ -44,15 +44,18 @@
     (hash-set h rec-name field-names)))
 
 (define (build-scalar-fns prog)
-  (for/fold ([s (set)]) ([f (in-list (program-forms prog))])
-    (if (defscalar-form? f)
-        (let* ([name (defscalar-form-name f)]
-               [name-str (symbol->string name)]
-               [name-lower (string-downcase name-str)]
-               [ctor (string->symbol (string-append "->" name-str))]
-               [accessor (string->symbol (string-append name-lower "-value"))])
-          (set-add (set-add s ctor) accessor))
-        s)))
+  (define local
+    (for/fold ([s (set)]) ([f (in-list (program-forms prog))])
+      (if (defscalar-form? f)
+          (let* ([name (defscalar-form-name f)]
+                 [name-str (symbol->string name)]
+                 [name-lower (string-downcase name-str)]
+                 [ctor (string->symbol (string-append "->" name-str))]
+                 [accessor (string->symbol (string-append name-lower "-value"))])
+            (set-add (set-add s ctor) accessor))
+          s)))
+  (for/fold ([s local]) ([sym (in-list (program-imported-scalar-fns prog))])
+    (set-add s sym)))
 
 (define (emit-program prog)
   (parameterize ([current-emit-src-table (program-src-table prog)]

@@ -178,7 +178,8 @@
     (define prog (parse-program stxs #:source-path path))
     (type-check-with-locs! prog
       (lambda (e loc-stx)
-        (report-error e loc-stx))))
+        (report-error e loc-stx)))
+    (check-scalar-provenance! prog))
 
   error-count)
 

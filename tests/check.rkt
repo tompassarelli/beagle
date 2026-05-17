@@ -1,895 +1,654 @@
 #lang racket/base
 
 (require rackunit
+         (for-syntax racket/base)
          "../private/parse.rkt"
-         "../private/check.rkt")
+         "../private/check.rkt"
+         "../private/types.rkt")
 
-(require "../private/types.rkt")
+;; =============================================================================
+;; Test helpers — flat wrappers that eliminate nesting
+;; =============================================================================
 
 (define (check-prog . forms)
   (define prog (parse-program (map (lambda (f) (datum->syntax #f f)) forms)))
   (type-check! prog))
-
-(define (br . xs) (cons BRACKET-TAG xs))
-
-;; --- positives -------------------------------------------------------------
-
-(test-case "untyped def passes"
-  (check-not-exn (lambda () (check-prog '(def x 42)))))
-
-(test-case "typed def with matching literal passes"
-  (check-not-exn (lambda () (check-prog '(def x : Long 42)))))
-
-(test-case "Any annotation accepts anything"
-  (check-not-exn (lambda () (check-prog '(def x : Any "hi")))))
-
-(test-case "defn untyped passes"
-  (check-not-exn (lambda () (check-prog '(defn id [x] x)))))
-
-(test-case "defn with correct return type passes"
-  (check-not-exn (lambda () (check-prog '(defn five [] : Long 5)))))
-
-(test-case "known builtin call type-checks"
-  (check-not-exn (lambda () (check-prog '(def x : Long (inc 1))))))
-
-;; --- negatives -------------------------------------------------------------
-
-(test-case "def with wrong literal type errors"
-  (check-exn exn:fail?
-             (lambda () (check-prog '(def x : Long "hi")))))
-
-(test-case "defn with wrong literal return errors"
-  (check-exn exn:fail?
-             (lambda () (check-prog '(defn s [] : String 42)))))
-
-(test-case "let binding with wrong literal type errors"
-  (check-exn exn:fail?
-             (lambda () (check-prog '(def y (let [(x : Long) "hi"] x))))))
-
-(test-case "call to typed builtin with wrong arg type errors"
-  (check-exn exn:fail?
-             (lambda () (check-prog '(def x : Long (inc "not a number"))))))
-
-(test-case "call with wrong arity errors"
-  (check-exn exn:fail?
-             (lambda () (check-prog '(def x : Long (inc 1 2))))))
-
-;; --- dynamic mode skips checking -------------------------------------------
-
-(test-case "dynamic mode lets type errors through"
-  (check-not-exn
-   (lambda ()
-     (check-prog '(define-mode dynamic)
-                 '(def x : Long "wrong type but who cares")))))
-
-;; --- unsafe-expr returns Any -----------------------------------------------
-
-(test-case "unsafe-expr widens to Any so downstream relaxes"
-  (check-not-exn
-   (lambda ()
-     ;; unsafe macro: expansion typed as Any, so binding (def x : Long ...) is OK.
-     (check-prog '(define-macro unsafe wild (x) x)
-                 '(def x : Long (wild "this would normally fail"))))))
-
-(test-case "safe macro: expansion is type-checked"
-  (check-exn exn:fail?
-             (lambda ()
-               (check-prog '(define-macro safe id1 (x) x)
-                           '(def y : Long (id1 "string not Long"))))))
-
-;; --- variadic types --------------------------------------------------------
-
-(test-case "variadic builtin call with valid args"
-  (check-not-exn (lambda () (check-prog '(def x : Long (+ 1 2 3 4 5))))))
-
-(test-case "variadic builtin call with zero args is OK if min met"
-  (check-not-exn (lambda () (check-prog '(def x : Long (+))))))
-
-(test-case "variadic call rejects wrong rest-type"
-  ;; Use a strictly-typed builtin (inc) so the test isolates rest-type check.
-  ;; `+` is intentionally `Any` in v0 because Clojure's `+` is polymorphic.
-  (check-exn exn:fail?
-             (lambda ()
-               (check-prog '(declare-extern strict-sum [Long & Long -> Long])
-                           '(def x : Long (strict-sum 1 "two" 3))))))
-
-(test-case "variadic call rejects below minimum fixed args"
-  (check-exn exn:fail?
-             (lambda () (check-prog '(def x : Long (- ))))))
-
-;; --- declare-extern --------------------------------------------------------
-
-(test-case "declare-extern makes the function callable with type checking"
-  (check-not-exn
-   (lambda ()
-     (check-prog `(declare-extern my-add ,(br 'Long 'Long '-> 'Long))
-                 '(def x : Long (my-add 1 2))))))
-
-(test-case "declare-extern: arg type error caught"
-  (check-exn exn:fail?
-             (lambda ()
-               (check-prog `(declare-extern my-add ,(br 'Long 'Long '-> 'Long))
-                           '(def x : Long (my-add "a" 2))))))
-
-(test-case "declare-extern with variadic"
-  (check-not-exn
-   (lambda ()
-     (check-prog `(declare-extern join ,(br 'String '& 'String '-> 'String))
-                 '(def x : String (join "a" "b" "c"))))))
-
-;; --- union types in annotations --------------------------------------------
-
-(test-case "union annotation accepts any alternative"
-  (check-not-exn (lambda () (check-prog '(def x : (U String Nil) "hi"))))
-  (check-not-exn (lambda () (check-prog '(def x : (U String Nil) nil)))))
-
-(test-case "union annotation rejects non-member"
-  (check-exn exn:fail?
-             (lambda () (check-prog '(def x : (U String Nil) 42)))))
-
-;; --- type narrowing in if/cond/when ---------------------------------------
-
-(test-case "if nil? narrows union in else branch"
-  (check-not-exn
-   (lambda ()
-     (check-prog `(declare-extern get-name ,(br '-> '(U String Nil)))
-                 '(defn safe-name [] : String
-                    (let [x (get-name)]
-                      (if (nil? x) "default" (subs x 0))))))))
-
-(test-case "if some? narrows union in then branch"
-  (check-not-exn
-   (lambda ()
-     (check-prog `(declare-extern get-name ,(br '-> '(U String Nil)))
-                 '(defn safe-name [] : String
-                    (let [x (get-name)]
-                      (if (some? x) (subs x 0) "default")))))))
-
-(test-case "if (= x nil) narrows like nil?"
-  (check-not-exn
-   (lambda ()
-     (check-prog `(declare-extern get-name ,(br '-> '(U String Nil)))
-                 '(defn safe-name [] : String
-                    (let [x (get-name)]
-                      (if (= x nil) "default" (subs x 0))))))))
-
-(test-case "if (= nil x) narrows like nil?"
-  (check-not-exn
-   (lambda ()
-     (check-prog `(declare-extern get-name ,(br '-> '(U String Nil)))
-                 '(defn safe-name [] : String
-                    (let [x (get-name)]
-                      (if (= nil x) "default" (subs x 0))))))))
-
-(test-case "if (not (nil? x)) flips narrowing"
-  (check-not-exn
-   (lambda ()
-     (check-prog `(declare-extern get-name ,(br '-> '(U String Nil)))
-                 '(defn safe-name [] : String
-                    (let [x (get-name)]
-                      (if (not (nil? x)) (subs x 0) "default")))))))
-
-(test-case "if string? narrows in then branch"
-  (check-not-exn
-   (lambda ()
-     (check-prog `(declare-extern get-val ,(br '-> '(U String Long)))
-                 '(defn describe [] : String
-                    (let [x (get-val)]
-                      (if (string? x) (subs x 0) "number")))))))
-
-(test-case "when narrows body"
-  (check-not-exn
-   (lambda ()
-     (check-prog `(declare-extern get-name ,(br '-> '(U String Nil)))
-                 '(defn print-name []
-                    (let [x (get-name)]
-                      (when (string? x) (subs x 0))))))))
-
-(test-case "cond threads narrowing across clauses"
-  (check-not-exn
-   (lambda ()
-     (check-prog `(declare-extern get-val ,(br '-> '(U String Long Nil)))
-                 `(defn describe [] : String
-                    (let (x (get-val))
-                      (cond
-                        ,(br '(nil? x) "nil")
-                        ,(br '(string? x) '(subs x 0))
-                        ,(br ':else '(str x)))))))))
-
-;; --- polymorphic function types -------------------------------------------
-
-(test-case "mapv infers (Vec Long) return from inc"
-  (check-not-exn
-   (lambda ()
-     (check-prog `(def xs ,(br 1 2 3))
-                 '(def ys : (Vec Long) (mapv inc xs))))))
-
-(test-case "filterv infers (Vec Long) return from even?"
-  (check-not-exn
-   (lambda ()
-     (check-prog `(def xs ,(br 1 2 3))
-                 '(def ys : (Vec Long) (filterv even? xs))))))
-
-(test-case "identity preserves type through annotation"
-  (check-not-exn
-   (lambda ()
-     (check-prog '(def x : Long (identity 42))))))
-
-(test-case "map rejects non-function first arg"
-  (check-exn exn:fail?
-   (lambda ()
-     (check-prog `(def xs ,(br 1 2 3))
-                 '(def ys (map "not-a-fn" xs))))))
-
-(test-case "polymorphic declare-extern via forall"
-  (check-not-exn
-   (lambda ()
-     (check-prog `(declare-extern my-id (forall (T) ,(br 'T '-> 'T)))
-                 '(def x : Long (my-id 42))))))
-
-;; --- cross-file type imports ------------------------------------------------
-
-(define fixture-source
-  (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
-    (build-path dir "fixtures" "app.rkt")))
 
 (define (check-prog/source source-path . forms)
   (define prog (parse-program (map (lambda (f) (datum->syntax #f f)) forms)
                               #:source-path source-path))
   (type-check! prog))
 
-(test-case "cross-file import: typed defn callable with prefix"
-  (check-not-exn
-   (lambda ()
-     (check-prog/source fixture-source
-       '(require mathlib)
-       '(def x : Long (mathlib/add 1 2))))))
+(define (br . xs) (cons BRACKET-TAG xs))
+(define MT MAP-TAG)
+(define (mt . xs) (cons MT xs))
+(define ST SET-TAG)
+(define (st . xs) (cons ST xs))
 
-(test-case "cross-file import: typed def accessible with prefix"
-  (check-not-exn
-   (lambda ()
-     (check-prog/source fixture-source
-       '(require mathlib)
-       '(def x : Double mathlib/pi)))))
+(define-syntax-rule (check-ok name form ...)
+  (test-case name (check-not-exn (lambda () (check-prog form ...)))))
 
-(test-case "cross-file import: type error caught across files"
-  (check-exn exn:fail?
-   (lambda ()
-     (check-prog/source fixture-source
-       '(require mathlib)
-       '(def x : Long (mathlib/greet "tom"))))))
+(define-syntax-rule (check-err name form ...)
+  (test-case name (check-exn exn:fail? (lambda () (check-prog form ...)))))
 
-(test-case "cross-file import: arg type error caught"
-  (check-exn exn:fail?
-   (lambda ()
-     (check-prog/source fixture-source
-       '(require mathlib)
-       '(def x : Long (mathlib/add "one" 2))))))
+(define-syntax-rule (check-err/rx name rx form ...)
+  (test-case name (check-exn rx (lambda () (check-prog form ...)))))
 
-(test-case "cross-file import with :as alias"
-  (check-not-exn
-   (lambda ()
-     (check-prog/source fixture-source
-       '(require mathlib :as m)
-       '(def x : Long (m/add 1 2))))))
+(define-syntax-rule (check-ok/source name source form ...)
+  (test-case name (check-not-exn (lambda () (check-prog/source source form ...)))))
 
-(test-case "cross-file import: untyped defn still has arity"
-  (check-exn exn:fail?
-   (lambda ()
-     (check-prog/source fixture-source
-       '(require mathlib)
-       '(def x (mathlib/untyped-inc 1 2 3))))))
+(define-syntax-rule (check-err/source name source form ...)
+  (test-case name (check-exn exn:fail? (lambda () (check-prog/source source form ...)))))
 
-(test-case "cross-file import: missing module silently skips"
-  (check-not-exn
-   (lambda ()
-     (check-prog/source fixture-source
-       '(require nonexistent.module)
-       '(def x 42)))))
+(define-syntax-rule (check-warns name rx form ...)
+  (test-case name
+    (let ([output (open-output-string)])
+      (parameterize ([current-error-port output])
+        (check-prog form ...))
+      (check-regexp-match rx (get-output-string output)))))
 
-;; --- cross-file defrecord imports -------------------------------------------
+(define-syntax-rule (check-silent name form ...)
+  (test-case name
+    (let ([output (open-output-string)])
+      (parameterize ([current-error-port output])
+        (check-prog form ...))
+      (check-equal? "" (get-output-string output)))))
+
+;; =============================================================================
+;; Fixture infrastructure — reads .bgl files with the beagle reader
+;; =============================================================================
+
+(define fixtures-dir
+  (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
+    (build-path dir "fixtures" "check")))
+
+(define (skip-ws port)
+  (let loop ()
+    (define c (peek-char port))
+    (when (and (char? c) (char-whitespace? c))
+      (read-char port)
+      (loop))))
+
+(define (read-until-brace port)
+  (let loop ([acc '()])
+    (skip-ws port)
+    (define c (peek-char port))
+    (cond
+      [(eof-object? c) (error 'fixture-reader "unterminated {")]
+      [(char=? c #\}) (read-char port) (reverse acc)]
+      [else (loop (cons (read port) acc))])))
+
+(define fixture-readtable
+  (make-readtable #f
+    #\{ 'terminating-macro
+        (lambda (ch port src line col pos)
+          (cons MAP-TAG (read-until-brace port)))
+    #\} 'terminating-macro
+        (lambda (ch port src line col pos)
+          (error 'fixture-reader "unexpected `}`"))))
+
+(define (read-fixture-forms relpath)
+  (define path (build-path fixtures-dir relpath))
+  (call-with-input-file path
+    (lambda (in)
+      (parameterize ([read-square-bracket-with-tag '#%brackets]
+                     [current-readtable fixture-readtable])
+        (let loop ()
+          (define stx (read-syntax (path->string path) in))
+          (if (eof-object? stx) '() (cons stx (loop))))))))
+
+(define (check-fixture relpath)
+  (define forms (read-fixture-forms relpath))
+  (define prog (parse-program forms))
+  (type-check! prog))
+
+(define-syntax-rule (check-fixture-ok name relpath)
+  (test-case name (check-not-exn (lambda () (check-fixture relpath)))))
+
+(define-syntax-rule (check-fixture-err name relpath)
+  (test-case name (check-exn exn:fail? (lambda () (check-fixture relpath)))))
+
+(define-syntax-rule (check-fixture-err/rx name rx relpath)
+  (test-case name (check-exn rx (lambda () (check-fixture relpath)))))
+
+(define-syntax-rule (check-fixture-warns name rx relpath)
+  (test-case name
+    (let ([output (open-output-string)])
+      (parameterize ([current-error-port output])
+        (check-fixture relpath))
+      (check-regexp-match rx (get-output-string output)))))
+
+(define-syntax-rule (check-fixture-silent name relpath)
+  (test-case name
+    (let ([output (open-output-string)])
+      (parameterize ([current-error-port output])
+        (check-fixture relpath))
+      (check-equal? "" (get-output-string output)))))
+
+;; =============================================================================
+;; Tests — positives
+;; =============================================================================
+
+(check-ok "untyped def passes"
+  '(def x 42))
+
+(check-ok "typed def with matching literal passes"
+  '(def x : Long 42))
+
+(check-ok "Any annotation accepts anything"
+  '(def x : Any "hi"))
+
+(check-ok "defn untyped passes"
+  '(defn id [x] x))
+
+(check-ok "defn with correct return type passes"
+  '(defn five [] : Long 5))
+
+(check-ok "known builtin call type-checks"
+  '(def x : Long (inc 1)))
+
+;; =============================================================================
+;; Tests — negatives
+;; =============================================================================
+
+(check-err "def with wrong literal type errors"
+  '(def x : Long "hi"))
+
+(check-err "defn with wrong literal return errors"
+  '(defn s [] : String 42))
+
+(check-err "let binding with wrong literal type errors"
+  '(def y (let [(x : Long) "hi"] x)))
+
+(check-err "call to typed builtin with wrong arg type errors"
+  '(def x : Long (inc "not a number")))
+
+(check-err "call with wrong arity errors"
+  '(def x : Long (inc 1 2)))
+
+;; =============================================================================
+;; Tests — dynamic mode
+;; =============================================================================
+
+(check-ok "dynamic mode lets type errors through"
+  '(define-mode dynamic)
+  '(def x : Long "wrong type but who cares"))
+
+;; =============================================================================
+;; Tests — unsafe-expr
+;; =============================================================================
+
+(check-ok "unsafe-expr widens to Any so downstream relaxes"
+  '(define-macro unsafe wild (x) x)
+  '(def x : Long (wild "this would normally fail")))
+
+(check-err "safe macro: expansion is type-checked"
+  '(define-macro safe id1 (x) x)
+  '(def y : Long (id1 "string not Long")))
+
+;; =============================================================================
+;; Tests — variadic types
+;; =============================================================================
+
+(check-ok "variadic builtin call with valid args"
+  '(def x : Long (+ 1 2 3 4 5)))
+
+(check-ok "variadic builtin call with zero args is OK if min met"
+  '(def x : Long (+)))
+
+(check-err "variadic call rejects wrong rest-type"
+  '(declare-extern strict-sum [Long & Long -> Long])
+  '(def x : Long (strict-sum 1 "two" 3)))
+
+(check-err "variadic call rejects below minimum fixed args"
+  '(def x : Long (- )))
+
+;; =============================================================================
+;; Tests — declare-extern
+;; =============================================================================
+
+(check-ok "declare-extern makes the function callable with type checking"
+  `(declare-extern my-add ,(br 'Long 'Long '-> 'Long))
+  '(def x : Long (my-add 1 2)))
+
+(check-err "declare-extern: arg type error caught"
+  `(declare-extern my-add ,(br 'Long 'Long '-> 'Long))
+  '(def x : Long (my-add "a" 2)))
+
+(check-ok "declare-extern with variadic"
+  `(declare-extern join ,(br 'String '& 'String '-> 'String))
+  '(def x : String (join "a" "b" "c")))
+
+;; =============================================================================
+;; Tests — union types
+;; =============================================================================
+
+(check-ok "union annotation accepts any alternative"
+  '(def x : (U String Nil) "hi"))
+
+(check-ok "union nil alternative"
+  '(def x : (U String Nil) nil))
+
+(check-err "union annotation rejects non-member"
+  '(def x : (U String Nil) 42))
+
+;; =============================================================================
+;; Tests — type narrowing (fixtures)
+;; =============================================================================
+
+(check-fixture-ok "if nil? narrows union in else branch"
+  "narrow-nil-if.bgl")
+
+(check-fixture-ok "if some? narrows union in then branch"
+  "narrow-some-if.bgl")
+
+(check-fixture-ok "if (= x nil) narrows like nil?"
+  "narrow-eq-nil.bgl")
+
+(check-fixture-ok "if (= nil x) narrows like nil?"
+  "narrow-nil-eq.bgl")
+
+(check-fixture-ok "if (not (nil? x)) flips narrowing"
+  "narrow-not-nil.bgl")
+
+(check-fixture-ok "if string? narrows in then branch"
+  "narrow-string-if.bgl")
+
+(check-fixture-ok "when narrows body"
+  "narrow-when.bgl")
+
+(check-fixture-ok "cond threads narrowing across clauses"
+  "narrow-cond.bgl")
+
+;; =============================================================================
+;; Tests — polymorphic function types (fixtures)
+;; =============================================================================
+
+(check-fixture-ok "mapv infers (Vec Long) return from inc"
+  "poly-mapv.bgl")
+
+(check-fixture-ok "filterv infers (Vec Long) return from even?"
+  "poly-filterv.bgl")
+
+(check-ok "identity preserves type through annotation"
+  '(def x : Long (identity 42)))
+
+(check-err "map rejects non-function first arg"
+  `(def xs ,(br 1 2 3))
+  '(def ys (map "not-a-fn" xs)))
+
+(check-fixture-ok "polymorphic declare-extern via forall"
+  "poly-forall.bgl")
+
+;; =============================================================================
+;; Tests — cross-file type imports
+;; =============================================================================
+
+(define fixture-source
+  (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
+    (build-path dir "fixtures" "app.rkt")))
+
+(check-ok/source "cross-file import: typed defn callable with prefix" fixture-source
+  '(require mathlib)
+  '(def x : Long (mathlib/add 1 2)))
+
+(check-ok/source "cross-file import: typed def accessible with prefix" fixture-source
+  '(require mathlib)
+  '(def x : Double mathlib/pi))
+
+(check-err/source "cross-file import: type error caught across files" fixture-source
+  '(require mathlib)
+  '(def x : Long (mathlib/greet "tom")))
+
+(check-err/source "cross-file import: arg type error caught" fixture-source
+  '(require mathlib)
+  '(def x : Long (mathlib/add "one" 2)))
+
+(check-ok/source "cross-file import with :as alias" fixture-source
+  '(require mathlib :as m)
+  '(def x : Long (m/add 1 2)))
+
+(check-err/source "cross-file import: untyped defn still has arity" fixture-source
+  '(require mathlib)
+  '(def x (mathlib/untyped-inc 1 2 3)))
+
+(check-ok/source "cross-file import: missing module silently skips" fixture-source
+  '(require nonexistent.module)
+  '(def x 42))
+
+;; =============================================================================
+;; Tests — cross-file defrecord imports
+;; =============================================================================
 
 (define shapes-fixture-source
   (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
     (build-path dir "fixtures" "shapes.rkt")))
 
-(test-case "cross-file defrecord: constructor callable with prefix"
-  (check-not-exn
-   (lambda ()
-     (check-prog/source shapes-fixture-source
-       '(require shapes)
-       '(def c (shapes/->Circle 5))))))
-
-(test-case "cross-file defrecord: accessor returns correct type"
-  (check-not-exn
-   (lambda ()
-     (check-prog/source shapes-fixture-source
-       '(require shapes)
-       '(def c (shapes/->Circle 5))
-       '(def r : Long (shapes/circle-radius c))))))
-
-(test-case "cross-file defrecord: keyword access infers field type"
-  (check-not-exn
-   (lambda ()
-     (check-prog/source shapes-fixture-source
-       '(require shapes)
-       '(def c : Circle (shapes/->Circle 5))
-       '(def r : Long (:radius c))))))
-
-(test-case "cross-file defrecord: multi-field constructor"
-  (check-not-exn
-   (lambda ()
-     (check-prog/source shapes-fixture-source
-       '(require shapes)
-       '(def r (shapes/->Rect 10 20))))))
-
-(test-case "cross-file defrecord: cross-module function uses imported record"
-  (check-not-exn
-   (lambda ()
-     (check-prog/source shapes-fixture-source
-       '(require shapes)
-       '(def c (shapes/->Circle 5))
-       '(def a : Long (shapes/circle-area c))))))
-
-(test-case "cross-file defrecord: constructor wrong arg type errors"
-  (check-exn exn:fail?
-   (lambda ()
-     (check-prog/source shapes-fixture-source
-       '(require shapes)
-       '(def c (shapes/->Circle "five"))))))
-
-(test-case "cross-file defrecord: constructor wrong arity errors"
-  (check-exn exn:fail?
-   (lambda ()
-     (check-prog/source shapes-fixture-source
-       '(require shapes)
-       '(def c (shapes/->Circle 1 2))))))
-
-(test-case "cross-file defrecord: accessor wrong return type errors"
-  (check-exn exn:fail?
-   (lambda ()
-     (check-prog/source shapes-fixture-source
-       '(require shapes)
-       '(def c (shapes/->Circle 5))
-       '(def r : String (shapes/circle-radius c))))))
-
-(test-case "cross-file defrecord: keyword access type mismatch errors"
-  (check-exn exn:fail?
-   (lambda ()
-     (check-prog/source shapes-fixture-source
-       '(require shapes)
-       '(def c : Circle (shapes/->Circle 5))
-       '(def r : String (:radius c))))))
-
-;; --- defrecord ---------------------------------------------------------------
-
-(test-case "defrecord: constructor type-checks"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      `(defrecord Employee ,(br '(name : String) '(rate : Long)))
-      '(def e (->Employee "Alice" 95))))))
-
-(test-case "defrecord: constructor wrong arg type errors"
-  (check-exn exn:fail?
-   (lambda ()
-     (check-prog
-      `(defrecord Employee ,(br '(name : String) '(rate : Long)))
-      '(def e (->Employee 42 95))))))
-
-(test-case "defrecord: constructor wrong arity errors"
-  (check-exn exn:fail?
-   (lambda ()
-     (check-prog
-      `(defrecord Employee ,(br '(name : String) '(rate : Long)))
-      '(def e (->Employee "Alice"))))))
-
-(test-case "defrecord: accessor returns correct type"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      `(defrecord Employee ,(br '(name : String) '(rate : Long)))
-      '(def e (->Employee "Alice" 95))
-      '(def n : String (employee-name e))))))
-
-(test-case "defrecord: accessor wrong return type errors"
-  (check-exn exn:fail?
-   (lambda ()
-     (check-prog
-      `(defrecord Employee ,(br '(name : String) '(rate : Long)))
-      '(def e (->Employee "Alice" 95))
-      '(def n : Long (employee-name e))))))
-
-;; --- Java interop ------------------------------------------------------------
-
-(test-case "static method with declared type passes"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      `(declare-extern System/getProperty ,(br 'String '-> 'String))
-      '(def x : String (System/getProperty "user.home"))))))
-
-(test-case "static method with wrong arg type errors"
-  (check-exn exn:fail?
-   (lambda ()
-     (check-prog
-      `(declare-extern System/getProperty ,(br 'String '-> 'String))
-      '(def x (System/getProperty 42))))))
-
-(test-case "instance method with declared type passes"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      '(def x : Boolean (.startsWith "hello" "he"))))))
-
-(test-case "instance method with wrong arg type errors"
-  (check-exn exn:fail?
-   (lambda ()
-     (check-prog
-      '(def x : Boolean (.startsWith "hello" 42))))))
-
-(test-case "instance method wrong arity errors"
-  (check-exn exn:fail?
-   (lambda ()
-     (check-prog
-      '(def x (.trim "a" "b"))))))
-
-(test-case "dynamic var with declared type infers correctly"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      '(def x : String (first *command-line-args*))))))
-
-(test-case "undeclared interop returns Any (no error)"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      '(def x (.someUnknownMethod obj))))))
-
-;; --- map literals ------------------------------------------------------------
-
-(define MT MAP-TAG)
-(define (mt . xs) (cons MT xs))
-
-(test-case "map literal passes type check"
-  (check-not-exn
-   (lambda ()
-     (check-prog `(def m ,(mt ':a 1 ':b 2))))))
-
-(test-case "map literal typed as (Map Any Any) passes"
-  (check-not-exn
-   (lambda ()
-     (check-prog `(def m : (Map Any Any) ,(mt ':a 1))))))
-
-(test-case "empty map literal passes"
-  (check-not-exn
-   (lambda ()
-     (check-prog `(def m ,(mt))))))
-
-;; --- set literals ------------------------------------------------------------
-
-(define ST SET-TAG)
-(define (st . xs) (cons ST xs))
-
-(test-case "set literal passes type check"
-  (check-not-exn
-   (lambda ()
-     (check-prog `(def s ,(st 1 2 3))))))
-
-(test-case "set literal typed as (Set Any) passes"
-  (check-not-exn
-   (lambda ()
-     (check-prog `(def s : (Set Any) ,(st 1 2 3))))))
-
-(test-case "empty set literal passes"
-  (check-not-exn
-   (lambda ()
-     (check-prog `(def s ,(st))))))
-
-;; --- import ------------------------------------------------------------------
-
-(test-case "import is meta-only, does not affect type checking"
-  (check-not-exn
-   (lambda ()
-     (check-prog '(import java.io.File)
-                 '(def x 1)))))
-
-;; --- try/catch/finally -------------------------------------------------------
-
-(test-case "try/catch passes type check"
-  (check-not-exn
-   (lambda ()
-     (check-prog '(def x (try (/ 1 0) (catch Exception e (str e))))))))
-
-(test-case "try/catch/finally passes type check"
-  (check-not-exn
-   (lambda ()
-     (check-prog '(def x (try (inc 1) (catch Exception e "err") (finally (println "done"))))))))
-
-(test-case "try with typed body passes"
-  (check-not-exn
-   (lambda ()
-     (check-prog '(def x : Any (try (inc 1) (catch Exception e 0)))))))
-
-;; --- doseq -------------------------------------------------------------------
-
-(test-case "doseq passes type check"
-  (check-not-exn
-   (lambda ()
-     (check-prog '(doseq [x (range 10)] (println x))))))
-
-(test-case "doseq with :when passes"
-  (check-not-exn
-   (lambda ()
-     (check-prog '(doseq [x (range 10) :when (even? x)] (println x))))))
-
-;; --- case --------------------------------------------------------------------
-
-(test-case "case passes type check"
-  (check-not-exn
-   (lambda ()
-     (check-prog '(def y (case x "a" 1 "b" 2 "default"))))))
-
-(test-case "case without default passes"
-  (check-not-exn
-   (lambda ()
-     (check-prog '(def y (case x 1 "one" 2 "two"))))))
-
-;; --- constructor calls -------------------------------------------------------
-
-(test-case "constructor call passes type check"
-  (check-not-exn
-   (lambda ()
-     (check-prog '(def f (File. "/tmp"))))))
-
-(test-case "constructor with no args passes"
-  (check-not-exn
-   (lambda ()
-     (check-prog '(def x (ArrayList.))))))
-
-;; --- keyword-as-function ---------------------------------------------------
-
-(test-case "keyword access passes type check"
-  (check-not-exn
-   (lambda ()
-     (check-prog '(def x (:name m))))))
-
-(test-case "keyword access with default passes"
-  (check-not-exn
-   (lambda ()
-     (check-prog '(def x (:age m "fallback"))))))
-
-(test-case "keyword access on record returns field type"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      `(defrecord Person ,(br '(name : String) '(age : Long)))
-      '(def p (->Person "Alice" 30))
-      '(def n : String (:name p))))))
-
-(test-case "keyword access on record catches type mismatch"
-  (check-exn exn:fail?
-   (lambda ()
-     (check-prog
-      `(defrecord Person ,(br '(name : String) '(age : Long)))
-      '(def p : Person (->Person "Alice" 30))
-      '(def n : Long (:name p))))))
-
-;; --- defprotocol -----------------------------------------------------------
-
-(test-case "defprotocol methods are typed in env"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      `(defprotocol Greetable
-         (greet ,(br '(self : Any)) : String))
-      '(def x : String (greet obj))))))
-
-(test-case "defprotocol method arity checked"
-  (check-exn exn:fail?
-   (lambda ()
-     (check-prog
-      `(defprotocol Greetable
-         (greet ,(br '(self : Any)) : String))
-      '(def x (greet a b c))))))
-
-;; --- defmulti / defmethod ---------------------------------------------------
-
-(test-case "defmulti passes type check"
-  (check-not-exn
-   (lambda ()
-     (check-prog '(defmulti greeting :lang)))))
-
-(test-case "defmethod body is type-checked"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      '(defmulti greeting :lang)
-      `(defmethod greeting :en ,(br 'x) "hello")))))
-
-;; --- destructuring ----------------------------------------------------------
-
-(define (mp . xs) (cons MAP-TAG xs))
-
-(test-case "map destructure bindings visible in body"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      `(defn process ,(br (mp ':keys (br 'name 'age))) (println name))))))
-
-(test-case "map destructure in let bindings visible"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      `(let ,(br (mp ':keys (br 'x 'y)) '(hash-map :x 1 :y 2)) (+ x y))))))
-
-;; --- sequential destructuring ------------------------------------------------
-
-(test-case "sequential destructure bindings visible in body"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      `(defn process ,(br (br 'a 'b 'c)) (println a))))))
-
-(test-case "sequential destructure with & rest visible"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      `(defn process ,(br (br 'a 'b '& 'rest)) (println rest))))))
-
-(test-case "sequential destructure in let visible"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      `(let ,(br (br 'a 'b) '(range 2)) (+ a b))))))
-
-;; --- deftype / extend-type ---------------------------------------------------
-
-(test-case "deftype passes type check"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      `(deftype Point ,(br '(x : Long) '(y : Long)))))))
-
-(test-case "deftype with protocol impl passes"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      `(defprotocol Printable
-         (to-string ,(br '(self : Any)) : String))
-      `(deftype Point ,(br '(x : Long) '(y : Long))
-         Printable
-         (to-string ,(br '(self : Any)) "point"))))))
-
-(test-case "deftype constructor is typed"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      `(deftype Point ,(br '(x : Long) '(y : Long)))
-      '(def p (->Point 1 2))))))
-
-(test-case "deftype constructor wrong arg type errors"
-  (check-exn exn:fail?
-   (lambda ()
-     (check-prog
-      `(deftype Point ,(br '(x : Long) '(y : Long)))
-      '(def p (->Point "one" 2))))))
-
-(test-case "extend-type passes type check"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      `(extend-type String
-         Showable
-         (show ,(br '(self : String)) (str self)))))))
-
-;; --- threading macros --------------------------------------------------------
-
-(test-case "-> passes type check"
-  (check-not-exn
-   (lambda ()
-     (check-prog '(def x (-> m :name))))))
-
-(test-case "->> passes type check (args are standalone valid)"
-  (check-not-exn
-   (lambda ()
-     (check-prog '(def x (->> "hello" (str " world") (str "!")))))))
-
-;; --- with form type checking ------------------------------------------------
-
-(test-case "with on known record type passes"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      `(defrecord Person ,(br '(name : String) '(age : Long)))
-      `(defn update-name ,(br '(p : Person)) : Person
-         (with p ,(br ':name "bob")))))))
-
-(test-case "with returns same record type"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      `(defrecord Person ,(br '(name : String) '(age : Long)))
-      '(def p : Person (->Person "alice" 25))
-      `(def q : Person (with p ,(br ':age 30)))))))
-
-(test-case "with catches wrong field type"
-  (check-exn exn:fail?
-             (lambda ()
-               (check-prog
-                `(defrecord Person ,(br '(name : String) '(age : Long)))
-                '(def p : Person (->Person "alice" 25))
-                `(def q (with p ,(br ':age "thirty")))))))
-
-(test-case "with catches unknown field"
-  (check-exn exn:fail?
-             (lambda ()
-               (check-prog
-                `(defrecord Person ,(br '(name : String) '(age : Long)))
-                '(def p : Person (->Person "alice" 25))
-                `(def q (with p ,(br ':email "a@b.com")))))))
-
-(test-case "with in defn with typed param"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      `(defrecord Order ,(br '(status : String) '(total : Long)))
-      `(defn confirm-order ,(br '(o : Order)) : Order
-         (with o ,(br ':status "confirmed")))))))
-
-;; --- defenum ----------------------------------------------------------------
-
-(test-case "defenum type-checks without error"
-  (check-not-exn
-   (lambda ()
-     (check-prog '(defenum Color :red :green :blue)))))
-
-;; --- exhaustive match --------------------------------------------------------
-
-(test-case "match without wildcard warns about missing record types"
-  (let ([output (open-output-string)])
-    (parameterize ([current-error-port output])
-      (check-prog
-       `(defrecord Foo ,(br '(x : Long)))
-       `(defrecord Bar ,(br '(y : String)))
-       `(defrecord Baz ,(br '(z : Boolean)))
-       `(defn handle ,(br '(e : Any)) : Long
-          (match e
-            ,(br '(Foo x) 'x)
-            ,(br '(Bar y) 0)))))
-    (check-regexp-match #rx"non-exhaustive" (get-output-string output))
-    (check-regexp-match #rx"Baz" (get-output-string output))))
-
-(test-case "match with wildcard and sibling records emits note"
-  (let ([output (open-output-string)])
-    (parameterize ([current-error-port output])
-      (check-prog
-       `(defrecord Alpha ,(br '(id : Long) '(x : String)))
-       `(defrecord Beta ,(br '(id : Long) '(y : String)))
-       `(defrecord Gamma ,(br '(id : Long) '(z : String)))
-       `(defrecord Delta ,(br '(id : Long) '(w : String)))
-       `(defn handle ,(br '(e : Any)) : Long
-          (match e
-            ,(br '(Alpha id x) 'id)
-            ,(br '(Beta id y) 'id)
-            ,(br '(Gamma id z) 'id)
-            ,(br '_ 0)))))
-    (check-regexp-match #rx"wildcard covers 1 sibling" (get-output-string output))
-    (check-regexp-match #rx"Delta" (get-output-string output))))
-
-(test-case "match with wildcard and non-sibling records stays silent"
-  (let ([output (open-output-string)])
-    (parameterize ([current-error-port output])
-      (check-prog
-       `(defrecord X1 ,(br '(a : Long)))
-       `(defrecord X2 ,(br '(b : Long)))
-       `(defrecord X3 ,(br '(c : Long)))
-       `(defrecord X4 ,(br '(d : Long)))
-       `(defn handle ,(br '(e : Any)) : Long
-          (match e
-            ,(br '(X1 a) 'a)
-            ,(br '(X2 b) 'b)
-            ,(br '(X3 c) 'c)
-            ,(br '_ 0)))))
-    (check-equal? "" (get-output-string output))))
-
-;; --- defunion ----------------------------------------------------------------
-
-(test-case "defunion type-checks without error"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      '(defrecord Foo [(x : Long)])
-      '(defrecord Bar [(y : String)])
-      '(defunion MyUnion Foo Bar)))))
-
-(test-case "defunion match with all members passes"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      `(defrecord A ,(br '(x : Long)))
-      `(defrecord B ,(br '(y : String)))
-      '(defunion AB A B)
-      `(defn handle ,(br '(e : AB)) : Long
-         (match e
-           ,(br '(A x) 'x)
-           ,(br '(B y) 0)))))))
-
-(test-case "defunion match missing member raises error"
-  (check-exn
-   #rx"not exhaustive"
-   (lambda ()
-     (check-prog
-      `(defrecord X ,(br '(a : Long)))
-      `(defrecord Y ,(br '(b : String)))
-      `(defrecord Z ,(br '(c : Boolean)))
-      '(defunion XYZ X Y Z)
-      `(defn handle ,(br '(e : XYZ)) : Long
-         (match e
-           ,(br '(X a) 'a)
-           ,(br '(Y b) 0)))))))
-
-(test-case "defunion match with wildcard still raises error"
-  (check-exn
-   #rx"not exhaustive"
-   (lambda ()
-     (check-prog
-      `(defrecord P ,(br '(x : Long)))
-      `(defrecord Q ,(br '(y : Long)))
-      `(defrecord R ,(br '(z : Long)))
-      '(defunion PQR P Q R)
-      `(defn handle ,(br '(e : PQR)) : Long
-         (match e
-           ,(br '(P x) 'x)
-           ,(br '_ 0)))))))
-
-(test-case "defunion member is compatible with union type"
-  (check-not-exn
-   (lambda ()
-     (check-prog
-      `(defrecord Cat ,(br '(name : String)))
-      `(defrecord Dog ,(br '(name : String)))
-      '(defunion Animal Cat Dog)
-      `(defn process ,(br '(a : Animal)) : Long 0)
-      `(defn test [] : Long
-         (process (->Cat "whiskers")))))))
-
-;; --- defscalar: nominal domain types ----------------------------------------
-
-(test-case "defscalar type-checks without error"
-  (check-not-exn
-    (lambda ()
-      (check-prog
-        '(defscalar Timestamp Long)
-        '(def ts : Timestamp (->Timestamp 100))))))
-
-(test-case "defscalar types are incompatible with each other"
-  (check-exn exn:fail?
-    (lambda ()
-      (check-prog
-        '(defscalar Timestamp Long)
-        '(defscalar Amount Long)
-        '(def bad : Timestamp (->Amount 100))))))
-
-(test-case "defscalar type is incompatible with its backing type"
-  (check-exn exn:fail?
-    (lambda ()
-      (check-prog
-        '(defscalar Timestamp Long)
-        '(def bad : Long (->Timestamp 100))))))
-
-(test-case "defscalar accessor unwraps to backing type"
-  (check-not-exn
-    (lambda ()
-      (check-prog
-        '(defscalar Timestamp Long)
-        '(def ts : Timestamp (->Timestamp 100))
-        '(def raw : Long (timestamp-value ts))))))
-
-(test-case "defscalar prevents passing backing type where scalar expected"
-  (check-exn exn:fail?
-    (lambda ()
-      (check-prog
-        '(defscalar OrderId Long)
-        `(defn lookup ,(br '(id : OrderId)) : Long 0)
-        '(defn bad [] : Long (lookup 42))))))
+(check-ok/source "cross-file defrecord: constructor callable with prefix" shapes-fixture-source
+  '(require shapes)
+  '(def c (shapes/->Circle 5)))
+
+(check-ok/source "cross-file defrecord: accessor returns correct type" shapes-fixture-source
+  '(require shapes)
+  '(def c (shapes/->Circle 5))
+  '(def r : Long (shapes/circle-radius c)))
+
+(check-ok/source "cross-file defrecord: keyword access infers field type" shapes-fixture-source
+  '(require shapes)
+  '(def c : Circle (shapes/->Circle 5))
+  '(def r : Long (:radius c)))
+
+(check-ok/source "cross-file defrecord: multi-field constructor" shapes-fixture-source
+  '(require shapes)
+  '(def r (shapes/->Rect 10 20)))
+
+(check-ok/source "cross-file defrecord: cross-module function uses imported record" shapes-fixture-source
+  '(require shapes)
+  '(def c (shapes/->Circle 5))
+  '(def a : Long (shapes/circle-area c)))
+
+(check-err/source "cross-file defrecord: constructor wrong arg type errors" shapes-fixture-source
+  '(require shapes)
+  '(def c (shapes/->Circle "five")))
+
+(check-err/source "cross-file defrecord: constructor wrong arity errors" shapes-fixture-source
+  '(require shapes)
+  '(def c (shapes/->Circle 1 2)))
+
+(check-err/source "cross-file defrecord: accessor wrong return type errors" shapes-fixture-source
+  '(require shapes)
+  '(def c (shapes/->Circle 5))
+  '(def r : String (shapes/circle-radius c)))
+
+(check-err/source "cross-file defrecord: keyword access type mismatch errors" shapes-fixture-source
+  '(require shapes)
+  '(def c : Circle (shapes/->Circle 5))
+  '(def r : String (:radius c)))
+
+;; =============================================================================
+;; Tests — defrecord (fixtures)
+;; =============================================================================
+
+(check-fixture-ok "defrecord: constructor type-checks"
+  "defrecord-ok.bgl")
+
+(check-fixture-err "defrecord: constructor wrong arg type errors"
+  "defrecord-wrong-arg.bgl")
+
+(check-fixture-err "defrecord: constructor wrong arity errors"
+  "defrecord-wrong-arity.bgl")
+
+(check-fixture-ok "defrecord: accessor returns correct type"
+  "defrecord-accessor-ok.bgl")
+
+(check-fixture-err "defrecord: accessor wrong return type errors"
+  "defrecord-accessor-wrong-type.bgl")
+
+;; =============================================================================
+;; Tests — Java interop
+;; =============================================================================
+
+(check-ok "static method with declared type passes"
+  `(declare-extern System/getProperty ,(br 'String '-> 'String))
+  '(def x : String (System/getProperty "user.home")))
+
+(check-err "static method with wrong arg type errors"
+  `(declare-extern System/getProperty ,(br 'String '-> 'String))
+  '(def x (System/getProperty 42)))
+
+(check-ok "instance method with declared type passes"
+  '(def x : Boolean (.startsWith "hello" "he")))
+
+(check-err "instance method with wrong arg type errors"
+  '(def x : Boolean (.startsWith "hello" 42)))
+
+(check-err "instance method wrong arity errors"
+  '(def x (.trim "a" "b")))
+
+(check-ok "dynamic var with declared type infers correctly"
+  '(def x : String (first *command-line-args*)))
+
+(check-ok "undeclared interop returns Any (no error)"
+  '(def x (.someUnknownMethod obj)))
+
+;; =============================================================================
+;; Tests — map literals
+;; =============================================================================
+
+(check-ok "map literal passes type check"
+  `(def m ,(mt ':a 1 ':b 2)))
+
+(check-ok "map literal typed as (Map Any Any) passes"
+  `(def m : (Map Any Any) ,(mt ':a 1)))
+
+(check-ok "empty map literal passes"
+  `(def m ,(mt)))
+
+;; =============================================================================
+;; Tests — set literals
+;; =============================================================================
+
+(check-ok "set literal passes type check"
+  `(def s ,(st 1 2 3)))
+
+(check-ok "set literal typed as (Set Any) passes"
+  `(def s : (Set Any) ,(st 1 2 3)))
+
+(check-ok "empty set literal passes"
+  `(def s ,(st)))
+
+;; =============================================================================
+;; Tests — import
+;; =============================================================================
+
+(check-ok "import is meta-only, does not affect type checking"
+  '(import java.io.File)
+  '(def x 1))
+
+;; =============================================================================
+;; Tests — try/catch/finally
+;; =============================================================================
+
+(check-ok "try/catch passes type check"
+  '(def x (try (/ 1 0) (catch Exception e (str e)))))
+
+(check-ok "try/catch/finally passes type check"
+  '(def x (try (inc 1) (catch Exception e "err") (finally (println "done")))))
+
+(check-ok "try with typed body passes"
+  '(def x : Any (try (inc 1) (catch Exception e 0))))
+
+;; =============================================================================
+;; Tests — doseq
+;; =============================================================================
+
+(check-ok "doseq passes type check"
+  '(doseq [x (range 10)] (println x)))
+
+(check-ok "doseq with :when passes"
+  '(doseq [x (range 10) :when (even? x)] (println x)))
+
+;; =============================================================================
+;; Tests — case
+;; =============================================================================
+
+(check-ok "case passes type check"
+  '(def y (case x "a" 1 "b" 2 "default")))
+
+(check-ok "case without default passes"
+  '(def y (case x 1 "one" 2 "two")))
+
+;; =============================================================================
+;; Tests — constructor calls
+;; =============================================================================
+
+(check-ok "constructor call passes type check"
+  '(def f (File. "/tmp")))
+
+(check-ok "constructor with no args passes"
+  '(def x (ArrayList.)))
+
+;; =============================================================================
+;; Tests — keyword-as-function
+;; =============================================================================
+
+(check-ok "keyword access passes type check"
+  '(def x (:name m)))
+
+(check-ok "keyword access with default passes"
+  '(def x (:age m "fallback")))
+
+(check-fixture-ok "keyword access on record returns field type"
+  "keyword-record-ok.bgl")
+
+(check-fixture-err "keyword access on record catches type mismatch"
+  "keyword-record-mismatch.bgl")
+
+;; =============================================================================
+;; Tests — defprotocol (fixtures)
+;; =============================================================================
+
+(check-fixture-ok "defprotocol methods are typed in env"
+  "protocol-typed.bgl")
+
+(check-fixture-err "defprotocol method arity checked"
+  "protocol-arity-err.bgl")
+
+;; =============================================================================
+;; Tests — defmulti / defmethod
+;; =============================================================================
+
+(check-ok "defmulti passes type check"
+  '(defmulti greeting :lang))
+
+(check-fixture-ok "defmethod body is type-checked"
+  "defmethod-ok.bgl")
+
+;; =============================================================================
+;; Tests — destructuring (fixtures)
+;; =============================================================================
+
+(check-fixture-ok "map destructure bindings visible in body"
+  "destructure-map-defn.bgl")
+
+(check-fixture-ok "map destructure in let bindings visible"
+  "destructure-map-let.bgl")
+
+(check-fixture-ok "sequential destructure bindings visible in body"
+  "destructure-seq-defn.bgl")
+
+(check-fixture-ok "sequential destructure with & rest visible"
+  "destructure-seq-rest.bgl")
+
+(check-fixture-ok "sequential destructure in let visible"
+  "destructure-seq-let.bgl")
+
+;; =============================================================================
+;; Tests — deftype / extend-type (fixtures)
+;; =============================================================================
+
+(check-fixture-ok "deftype passes type check"
+  "deftype-ok.bgl")
+
+(check-fixture-ok "deftype with protocol impl passes"
+  "deftype-protocol-impl.bgl")
+
+(check-fixture-ok "deftype constructor is typed"
+  "deftype-constructor-ok.bgl")
+
+(check-fixture-err "deftype constructor wrong arg type errors"
+  "deftype-constructor-wrong-arg.bgl")
+
+(check-fixture-ok "extend-type passes type check"
+  "extend-type-ok.bgl")
+
+;; =============================================================================
+;; Tests — threading macros
+;; =============================================================================
+
+(check-ok "-> passes type check"
+  '(def x (-> m :name)))
+
+(check-ok "->> passes type check"
+  '(def x (->> "hello" (str " world") (str "!"))))
+
+;; =============================================================================
+;; Tests — with form (fixtures)
+;; =============================================================================
+
+(check-fixture-ok "with on known record type passes"
+  "with-ok.bgl")
+
+(check-fixture-ok "with returns same record type"
+  "with-returns-type.bgl")
+
+(check-fixture-err "with catches wrong field type"
+  "with-wrong-field-type.bgl")
+
+(check-fixture-err "with catches unknown field"
+  "with-unknown-field.bgl")
+
+(check-fixture-ok "with in defn with typed param"
+  "with-in-defn.bgl")
+
+;; =============================================================================
+;; Tests — defenum
+;; =============================================================================
+
+(check-ok "defenum type-checks without error"
+  '(defenum Color :red :green :blue))
+
+;; =============================================================================
+;; Tests — exhaustive match (fixtures with warnings)
+;; =============================================================================
+
+(check-fixture-warns "match without wildcard warns about missing record types"
+  #rx"non-exhaustive"
+  "match-exhaustive-warn.bgl")
+
+(check-fixture-warns "match with wildcard and sibling records emits note"
+  #rx"wildcard covers 1 sibling"
+  "match-wildcard-sibling-warn.bgl")
+
+(check-fixture-silent "match with wildcard and non-sibling records stays silent"
+  "match-wildcard-non-sibling-silent.bgl")
+
+;; =============================================================================
+;; Tests — defunion (fixtures)
+;; =============================================================================
+
+(check-fixture-ok "defunion type-checks without error"
+  "defunion-ok.bgl")
+
+(check-fixture-ok "defunion match with all members passes"
+  "defunion-match-all.bgl")
+
+(check-fixture-err/rx "defunion match missing member raises error"
+  #rx"not exhaustive"
+  "defunion-match-missing.bgl")
+
+(check-fixture-err/rx "defunion match with wildcard still raises error"
+  #rx"not exhaustive"
+  "defunion-match-wildcard.bgl")
+
+(check-fixture-ok "defunion member is compatible with union type"
+  "defunion-member-compat.bgl")
+
+;; =============================================================================
+;; Tests — defscalar (fixtures)
+;; =============================================================================
+
+(check-fixture-ok "defscalar type-checks without error"
+  "defscalar-ok.bgl")
+
+(check-fixture-err "defscalar types are incompatible with each other"
+  "defscalar-incompatible.bgl")
+
+(check-fixture-err "defscalar type is incompatible with its backing type"
+  "defscalar-vs-backing.bgl")
+
+(check-fixture-ok "defscalar accessor unwraps to backing type"
+  "defscalar-accessor.bgl")
+
+(check-fixture-err "defscalar prevents passing backing type where scalar expected"
+  "defscalar-call-site.bgl")

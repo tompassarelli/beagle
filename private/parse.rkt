@@ -198,6 +198,7 @@
                  imported-record-fields ; hash: record-name → (hash kw-sym → type)
                  imported-record-field-order ; hash: record-name → (listof string?) [definition order]
                  imported-record-ns ; hash: record-name → module-ns-symbol
+                 imported-scalar-fns ; set of symbols (scalar ctors/accessors from imports)
                  target)        ; 'clj or 'cljs
   #:transparent)
 
@@ -276,7 +277,8 @@
 (define (import-str-downcase s)
   (list->string (map char-downcase (string->list s))))
 
-(define (import-module-types! mod-path prefix externs registry imp-rec-fields imp-rec-field-order imp-rec-ns mod-ns)
+(define (import-module-types! mod-path prefix externs registry imp-rec-fields imp-rec-field-order imp-rec-ns mod-ns
+                              #:scalar-fns [imp-scalar-fns #f])
   (define datums (read-beagle-datums mod-path))
   (define (reg! name type)
     (hash-set! externs (qualify-name prefix name) type)
@@ -311,6 +313,20 @@
        (hash-set! imp-rec-field-order name
                   (map (lambda (f) (symbol->string (param-name f))) fields))
        (hash-set! imp-rec-ns name mod-ns)]
+      [(list 'defscalar (? symbol? name) (? symbol? backing))
+       (define scalar-type (type-prim name))
+       (define backing-type (parse-type backing))
+       (define name-str (symbol->string name))
+       (define name-lower (import-str-downcase name-str))
+       (define ctor (string->symbol (string-append "->" name-str)))
+       (define accessor (string->symbol (string-append name-lower "-value")))
+       (reg! ctor (type-fn (list backing-type) #f scalar-type))
+       (reg! accessor (type-fn (list scalar-type) #f backing-type))
+       (when imp-scalar-fns
+         (hash-set! imp-scalar-fns ctor #t)
+         (hash-set! imp-scalar-fns accessor #t)
+         (hash-set! imp-scalar-fns (qualify-name prefix ctor) #t)
+         (hash-set! imp-scalar-fns (qualify-name prefix accessor) #t))]
       [(list 'def (? symbol? name) ': type-expr _)
        (reg! name (parse-type type-expr))]
       [(list 'defn (? symbol? name) params-form ': ret-type body ...)
@@ -343,6 +359,7 @@
   (define imp-rec-ns (make-hash))
   (define requires  '())
   (define imports   '())
+  (define imp-scalar-fns (make-hash))
 
   (for ([d (in-list datums)])
     (match d
@@ -383,13 +400,15 @@
        (with-handlers ([exn:fail? (lambda (_e) (void))])
          (define mod-path (resolve-module-path rn source-path))
          (when mod-path
-           (import-module-types! mod-path prefix externs registry imp-rec-fields imp-rec-field-order imp-rec-ns rn)))
+           (import-module-types! mod-path prefix externs registry imp-rec-fields imp-rec-field-order imp-rec-ns rn
+                                 #:scalar-fns imp-scalar-fns)))
        (set! requires (cons (require-entry rn #f) requires))]
       [(list 'require (? symbol? rn) ':as (? symbol? alias))
        (with-handlers ([exn:fail? (lambda (_e) (void))])
          (define mod-path (resolve-module-path rn source-path))
          (when mod-path
-           (import-module-types! mod-path alias externs registry imp-rec-fields imp-rec-field-order imp-rec-ns rn)))
+           (import-module-types! mod-path alias externs registry imp-rec-fields imp-rec-field-order imp-rec-ns rn
+                                 #:scalar-fns imp-scalar-fns)))
        (set! requires (cons (require-entry rn alias) requires))]
 
       [(list 'import (? symbol? class-name))
@@ -410,7 +429,7 @@
   (define parsed (map car pairs))
   (define form-stxs (map cdr pairs))
 
-  (program mode ns parsed registry externs (reverse requires) (reverse imports) form-stxs src-table imp-rec-fields imp-rec-field-order imp-rec-ns target))
+  (program mode ns parsed registry externs (reverse requires) (reverse imports) form-stxs src-table imp-rec-fields imp-rec-field-order imp-rec-ns (hash-keys imp-scalar-fns) target))
 
 (define (meta-form? d)
   (and (pair? d)
