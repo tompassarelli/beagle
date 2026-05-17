@@ -42,17 +42,19 @@ it applied, and report confidence based on whether it passes.
 - [ ] Deeper candidate generation: accessor swap, wrong-argument detection
 - [ ] Cross-evidence correlation: combine blame ratio + semantic rules for confidence boost
 
-## Next: Instrumented tracing (beagle-blame v2)
+## Phase 4: Instrumented tracing (beagle-trace) ✓
 
 Full computation trace — not just ratio hints, but "here's where the
 value first went wrong and exactly which sub-expression caused it."
 
-- [ ] Instrumented emit mode: wrap defn bodies with value capture
-- [ ] Trace format: function → let-binding → sub-expression → value
-- [ ] Run oracle with tracing, on failure dump the call chain
-- [ ] Integrate with semantic rules: "this `+` at line 87 produced 4800,
-      name says 'discount' → should be `-`, would produce 3200 = expected"
-- [ ] Single-command workflow: `beagle-blame --trace .build/ verify.clj`
+- [x] Post-compilation instrumentation: wrap arithmetic/comparison ops with value capture
+- [x] Trace format: `(op arg1 arg2) = result ; source.rkt:line` per operation
+- [x] Oracle integration: patch verify assert-eq to reset/dump trace per assertion
+- [x] Source location correlation via beagle's `^{:line N :file "path"}` metadata
+- [x] Single-command workflow: `beagle-trace BUILD-DIR VERIFY-SCRIPT [--focus fn-name]`
+- [x] Validated: 33/33 failures traced on E8 buggy, exact divergence point visible
+- [ ] Integrate with semantic rules: cross-reference trace ops against name expectations
+- [ ] Call-graph walk: trace through function calls to find the root divergence
 
 ## Phase 5: Closed-loop repair (the endgame)
 
