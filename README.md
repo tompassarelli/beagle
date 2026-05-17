@@ -19,12 +19,17 @@ compiler annotates problems — it doesn't block execution.
 
 ## Evidence
 
-**E4** (13 modules, 8570 LOC, 35 injected bugs): beagle achieves 3/3
-correctness passes vs clojure's 0/3 — first reproducible divergence
-where types produce measurably better outcomes.
+Nine experiments (E1–E9) across 48 hours, head-to-head against raw
+Clojure on the same tasks with the same model (Opus 4.6).
 
-**E8** (same system + repair compiler): beagle 76 turns / 375s vs
-clojure 92 turns / 485s. 23% faster with full oracle.
+**E4** (13 modules, 8570 LOC, 35 injected bugs): beagle 3/3
+correctness vs clojure 0/3 — first reproducible divergence where
+types produce measurably better outcomes.
+
+**E9** (same system + repair toolchain, 3 runs each): beagle averages
+77 turns / 421s / 21.6K tokens vs clojure 88 turns / 595s / 33.9K
+tokens. **29% faster, 36% fewer tokens, lower variance.** Both
+tracks 3/3 correctness — the advantage is efficiency.
 
 ## Architecture
 
@@ -155,4 +160,5 @@ raco test tests/   # 338 tests
 - `docs/cheatsheet.md` — single-page language reference (LLM context)
 - `docs/agent-workflow.md` — repair tool routing decision tree
 - `docs/forms.md` — canonical form catalog
-- `docs/devlog/` — development journal, 12 entries over 48 hours
+- `docs/devlog/` — development journal, 13 entries over 48 hours
+- `experiments/` — E1–E9 benchmark framework + trial data
