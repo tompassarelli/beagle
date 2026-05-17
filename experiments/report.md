@@ -1,15 +1,28 @@
 # Beagle Experiment Report
 
-## What is beagle?
+## What is Beagle?
 
-Beagle is a typed authoring layer targeting Clojure, designed to
-minimize *agent repair distance* — the work between "here is a bug"
-and "here is the fix." It compiles to plain Clojure but adds static
-type checking, structured error diagnostics, and a repair compiler that
-turns mechanical bugs into executable patches.
+Beagle is an agent-native authoring layer for Clojure. It does not try
+to make the type system maximally pure. It tries to make bugs maximally
+repairable. The compiler emits structured diagnostics, repair traces,
+and executable patches so LLM agents spend less time reasoning through
+mechanical fixes.
 
 **Thesis:** Mechanical bugs should not require cognition. They should
 compile into patches.
+
+## Summary
+
+Across eleven experiments, Beagle's advantage shifted as the system matured:
+
+1. At small scale, Beagle mostly improved speed.
+2. At larger scale without an oracle, Beagle improved correctness.
+3. With a full oracle, Beagle improved repair efficiency.
+4. With `--emit-patch`, Beagle compressed mechanical fixes into executable patches.
+5. Against Python, Beagle's advantage came from the repair compiler, not types alone.
+
+Beagle wins when bugs can be converted from reasoning problems into
+repair artifacts.
 
 ## Experiment design
 
@@ -22,7 +35,7 @@ code and must fix all bugs until the oracle passes. We measure wall time,
 turns, output tokens, and correctness (pass rate).
 
 Three language tracks:
-- **Beagle** — typed, with checker + repair toolchain
+- **Beagle** — typed, with checker + repair toolchain (agent-native repair compiler)
 - **Clojure** — untyped, same runtime, structural query tools only
 - **Python** — typed (`@dataclass` + type annotations), mypy available
 
@@ -82,9 +95,12 @@ tools. Clojure has 4 structural query tools (no type info).
 `target-achievement-pct` — all 3 agents made this error independently).
 Run 2 also missed a bug causing runtime crash.
 
-**First correctness divergence.** Wall time roughly equal (~2%), but
-beagle produces 3/3 clean runs while Clojure produces 0/3. At scale,
-the value shifts from speed to correctness.
+**First correctness divergence — the most important result in this
+report.** Wall time roughly equal (~2%), but Beagle produces 3/3 clean
+runs while Clojure produces 0/3. When the oracle is absent, Clojure can
+appear to pass but still produce dirty output requiring manual
+correction. Beagle's checker prevents this class of failure entirely. At
+scale, the value shifts from speed to correctness.
 
 ### E8 — Full oracle baseline (13 modules, 8.5K LOC, 35 bugs, 484 assertions)
 
@@ -128,7 +144,7 @@ Correctness: 3/3 both tracks.
 | Output tokens | **-36%** |
 
 Clojure variance is higher (534–663s vs 386–441s). The repair toolchain
-gives beagle more targeted information per turn, producing less
+gives Beagle more targeted information per turn, producing less
 exploratory output.
 
 ### E10 — Workflow compression (`--emit-patch`)
@@ -172,13 +188,15 @@ Correctness: all configurations 484/484.
 from the structured repair tools. Sonnet and Haiku fall back to
 sequential "read-find-fix" regardless of tooling.
 
-Notable: Sonnet + Beagle (395s) is faster than Opus + Clojure (464s)
-at ~5x lower token cost. The tooling enables model-tier arbitrage.
+Directionally, Beagle appears to enable model-tier arbitrage: Sonnet +
+Beagle (395s) beats Opus + Clojure (464s) at ~5x lower token cost.
+Sample sizes are small (2 runs each at Sonnet, 1 at Haiku) — treat as
+promising, not settled.
 
 ### Python reference track (13 modules, 7.2K LOC, 30 bugs)
 
 Same E8 domain ported to Python with `@dataclass` and type annotations.
-30 bugs (vs 35 for beagle/Clojure — 5 Clojure-specific patterns don't
+30 bugs (vs 35 for Beagle/Clojure — 5 Clojure-specific patterns don't
 translate). Agent has mypy + behavioral verify.
 
 | Run | Result | Turns | Wall | Output tokens | Cost |
@@ -198,8 +216,8 @@ and iterated from behavioral feedback.
 | Beagle E9 | 421s | 12.0s | 35 |
 | Clojure E9 | 595s | 17.0s | 35 |
 
-Python beats Clojure by 42% and beagle E9 by 18% in absolute wall
-time. Per-bug, Python (11.5s) is comparable to beagle E9 (12.0s).
+Python beats Clojure by 42% and Beagle E9 by 18% in absolute wall
+time. Per-bug, Python (11.5s) is comparable to Beagle E9 (12.0s).
 **Beagle E10 still beats Python by 10%** — the repair compiler, not
 the type system, is the differentiator.
 
@@ -220,29 +238,33 @@ Python reference  → type system alone ≈ beagle E9; repair compiler wins
 ## Key takeaways
 
 1. **Correctness divergence at scale.** At 8.5K LOC without a test
-   oracle (E4), beagle produces 3/3 clean runs vs Clojure 0/3. This
+   oracle (E4), Beagle produces 3/3 clean runs vs Clojure 0/3. This
    is the strongest result — types prevent bugs that behavioral testing
    misses.
 
 2. **The repair compiler is the differentiator, not the type system.**
-   Python with type annotations (346s) is comparable to beagle-without-
+   Python with type annotations (346s) is comparable to Beagle-without-
    patches (421s) on a per-bug basis. Beagle E10 with `--emit-patch`
    (310s) is 10% faster than Python. The value is in compiling mechanical
    fixes into patches, not in having types.
 
-3. **Beagle amplifies capable models.** Opus gains 33% from beagle's
+3. **Beagle amplifies capable models.** Opus gains 33% from Beagle's
    tooling; Sonnet gains 4%; Haiku gains 2%. The structured repair
    output is only useful if the model can act on it.
 
-4. **Beagle enables model-tier arbitrage.** Sonnet + Beagle (395s, ~$1)
-   outperforms Opus + Clojure (464s, ~$5). The tooling compensates for
-   one full tier of model capability.
+4. **Beagle may enable model-tier arbitrage.** Sonnet + Beagle (395s,
+   ~$1) outperforms Opus + Clojure (464s, ~$5) directionally. Small
+   sample sizes — promising, not conclusive. More runs needed.
 
-5. **Caveat: beagle needs test coverage.** With a partial oracle (E8
-   run 1, 291 assertions), Clojure was 2x faster. Beagle's type checker
-   forces the agent to fix all type errors, including code not covered
-   by tests. The advantage requires sufficient coverage to surface the
-   bugs that types catch mechanically.
+5. **Caveat: Beagle's speed advantage needs behavioral coverage.**
+   E4 showed value *without* oracle coverage (correctness, not speed).
+   But for the *speed* advantage, coverage matters: with a partial oracle
+   (E8 run 1, 291 assertions), Clojure was 2x faster because it could
+   ignore untested broken code. Beagle's type checker forces the agent
+   to fix all type errors regardless. Beagle's speed advantage requires
+   enough behavioral coverage for Clojure to be forced through the same
+   bug surface. With partial coverage, Clojure can appear faster by
+   ignoring untested broken code.
 
 ## Appendix: confounds and limitations
 

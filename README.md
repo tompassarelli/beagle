@@ -51,6 +51,8 @@ beagle E9 are comparable. The agents never used mypy; Python's
 readability alone accounts for the speed. The differentiator is the
 repair compiler, not the type system.
 
+Full methodology and results: [`experiments/report.md`](experiments/report.md)
+
 ## Architecture
 
 ```
