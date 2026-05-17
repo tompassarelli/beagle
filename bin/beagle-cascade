@@ -1,0 +1,307 @@
+#!/usr/bin/env bash
+# beagle-cascade: cross-module impact propagation and predictive blame.
+#
+# Given a set of modified functions, predicts which assertions will fail
+# by walking the call graph transitively. Also identifies cascade patterns
+# where fixing one root bug eliminates multiple downstream failures.
+#
+# Usage:
+#   beagle-cascade <source-dir> <verify-script> [--modified fn1,fn2,...]
+#   beagle-cascade <source-dir> <verify-script> --from-failures
+#
+# --modified: predict impact of specific function changes
+# --from-failures: analyze current failures to find root causes
+
+set -euo pipefail
+
+if [[ $# -lt 2 ]]; then
+    echo "Usage: beagle-cascade <source-dir> <verify-script> [--modified fn1,...] [--from-failures]" >&2
+    exit 1
+fi
+
+SOURCE_DIR="$(cd "$1" && pwd)"
+VERIFY_SCRIPT="$(realpath "$2")"
+shift 2
+
+MODIFIED_FNS=""
+FROM_FAILURES=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --modified) MODIFIED_FNS="$2"; shift 2 ;;
+        --from-failures) FROM_FAILURES=true; shift ;;
+        *) echo "Unknown option: $1" >&2; exit 1 ;;
+    esac
+done
+
+BEAGLE_BIN="$(cd "$(dirname "$0")" && pwd)"
+WORK_DIR="$(mktemp -d /tmp/beagle-cascade.XXXXXX)"
+trap 'rm -rf "$WORK_DIR"' EXIT
+
+# ---------------------------------------------------------------------------
+# Phase 1: Build the call graph
+# ---------------------------------------------------------------------------
+
+echo "─── Phase 1: Building call graph ───" >&2
+
+python3 - "$SOURCE_DIR" "$BEAGLE_BIN" "$WORK_DIR" "$VERIFY_SCRIPT" "$MODIFIED_FNS" "$FROM_FAILURES" << 'PYEOF'
+import sys, os, re, subprocess, json
+from collections import defaultdict
+
+source_dir = sys.argv[1]
+beagle_bin = sys.argv[2]
+work_dir = sys.argv[3]
+verify_script = sys.argv[4]
+modified_fns_str = sys.argv[5]
+from_failures = sys.argv[6] == 'true'
+
+# ---------------------------------------------------------------------------
+# Build call graph from beagle-callers
+# ---------------------------------------------------------------------------
+
+all_functions = {}  # fn_name -> {file, module, sig}
+call_graph = defaultdict(set)  # caller -> set of callees
+reverse_graph = defaultdict(set)  # callee -> set of callers
+
+# Get all exports from all modules
+modules = []
+for fname in sorted(os.listdir(source_dir)):
+    if not fname.endswith('.rkt'):
+        continue
+    fpath = os.path.join(source_dir, fname)
+    module_name = fname[:-4]
+    modules.append((module_name, fpath))
+
+    try:
+        result = subprocess.run(
+            [os.path.join(beagle_bin, 'beagle-provides'), fpath],
+            capture_output=True, text=True, timeout=30
+        )
+        output = result.stdout
+    except (subprocess.TimeoutExpired, Exception):
+        continue
+
+    for m in re.finditer(r'^\s+([\w?!<>*+\-/]+)\s+:\s+\[(.+)\]$', output, re.MULTILINE):
+        fn_name = m.group(1)
+        sig = m.group(2)
+        all_functions[fn_name] = {
+            'file': fpath,
+            'module': module_name,
+            'sig': sig,
+        }
+
+print(f"  {len(all_functions)} functions across {len(modules)} modules", file=sys.stderr)
+
+# Build call graph by parsing source directly (one pass per file)
+known_fns = set(all_functions.keys())
+
+for module_name, fpath in modules:
+    with open(fpath) as f:
+        src = f.read()
+
+    # Find function definitions and their bodies
+    current_fn = None
+    for line in src.split('\n'):
+        # Track current function
+        fn_match = re.match(r'\(defn\s+([\w?!<>*+\-/]+)', line)
+        if fn_match:
+            current_fn = fn_match.group(1)
+            continue
+
+        if current_fn and current_fn in known_fns:
+            # Find all function calls in this line
+            for called in re.findall(r'\(([\w?!<>*+\-/]+)(?:\s|$)', line):
+                # Strip namespace alias if present (e.g. cat/product-margin -> product-margin)
+                bare = called.split('/')[-1] if '/' in called else called
+                if bare in known_fns and bare != current_fn:
+                    call_graph[current_fn].add(bare)
+                    reverse_graph[bare].add(current_fn)
+
+edges = sum(len(v) for v in call_graph.values())
+print(f"  {edges} call edges found", file=sys.stderr)
+
+# ---------------------------------------------------------------------------
+# Transitive impact: given a set of changed functions, find all affected
+# ---------------------------------------------------------------------------
+
+def transitive_callers(fn_name, visited=None):
+    """Find all functions transitively affected by a change to fn_name."""
+    if visited is None:
+        visited = set()
+    if fn_name in visited:
+        return visited
+    visited.add(fn_name)
+    for caller in reverse_graph.get(fn_name, set()):
+        transitive_callers(caller, visited)
+    return visited
+
+# ---------------------------------------------------------------------------
+# Map assertions to functions they test
+# ---------------------------------------------------------------------------
+
+# Parse verify script to find assertion -> function mappings
+with open(verify_script) as f:
+    verify_content = f.read()
+
+assertion_map = {}  # label -> likely function tested
+for m in re.finditer(r'assert-eq\s+"([^"]+)"\s+\S+\s+\((\w+(?:/[\w?!<>*+\-]+)?)', verify_content):
+    label = m.group(1)
+    fn_called = m.group(2)
+    # Strip namespace prefix if present
+    if '/' in fn_called:
+        fn_called = fn_called.split('/', 1)[1]
+    assertion_map[label] = fn_called
+
+print(f"  {len(assertion_map)} assertions mapped to functions", file=sys.stderr)
+
+# ---------------------------------------------------------------------------
+# Analysis mode
+# ---------------------------------------------------------------------------
+
+if from_failures:
+    # Run the oracle to find current failures
+    print("\n─── Running oracle to find current failures ───", file=sys.stderr)
+
+    build_dir = os.path.join(work_dir, 'build')
+    os.makedirs(build_dir, exist_ok=True)
+
+    subprocess.run(
+        [os.path.join(beagle_bin, 'beagle-build-all'), '--warn', source_dir, '--out', build_dir],
+        capture_output=True, timeout=60
+    )
+
+    result = subprocess.run(
+        ['clojure', '-Sdeps', '{:paths ["' + build_dir + '"]}',
+         '-M', '-e', f'(load-file "{verify_script}")'],
+        capture_output=True, text=True, timeout=120
+    )
+    output = result.stdout + result.stderr
+
+    failing_labels = []
+    for line in output.split('\n'):
+        m = re.match(r'^FAIL: (.+)', line)
+        if m:
+            failing_labels.append(m.group(1))
+
+    print(f"  {len(failing_labels)} failing assertions", file=sys.stderr)
+
+    # Map failures to root functions
+    failing_fns = set()
+    for label in failing_labels:
+        fn = assertion_map.get(label)
+        if fn:
+            failing_fns.add(fn)
+
+    # For each failing function, find its callees (potential root causes)
+    root_candidates = defaultdict(list)  # root_fn -> [downstream failures it explains]
+
+    for fn in failing_fns:
+        # Walk callees: which functions does this call?
+        for callee in call_graph.get(fn, set()):
+            if callee in failing_fns:
+                continue  # callee is also failing, go deeper
+            # callee is not directly failing but fn calls it — could be the root
+            affected = transitive_callers(callee)
+            explained = affected & failing_fns
+            if len(explained) > 1:
+                root_candidates[callee].extend(explained)
+
+    # Also: check which single function, if fixed, would resolve the most failures
+    cascade_scores = {}
+    for fn in failing_fns:
+        affected = transitive_callers(fn)
+        explained = affected & failing_fns
+        cascade_scores[fn] = len(explained)
+
+    # Output: cascade analysis
+    print()
+    print("CASCADE ANALYSIS")
+    print("=" * 60)
+    print(f"\n{len(failing_labels)} failing assertions trace to {len(failing_fns)} functions\n")
+
+    # Sort by cascade score
+    ranked = sorted(cascade_scores.items(), key=lambda x: -x[1])
+
+    print("Root cause candidates (fixing one may fix many):")
+    print("-" * 60)
+    for fn, score in ranked[:15]:
+        if score > 1:
+            module = all_functions.get(fn, {}).get('module', '?')
+            sig = all_functions.get(fn, {}).get('sig', '?')
+            downstream = transitive_callers(fn) & failing_fns
+            # Which assertions would be fixed?
+            explained_labels = [l for l, f in assertion_map.items()
+                              if f in downstream and l in failing_labels]
+            print(f"\n  {fn} ({module}) — cascade score: {score}")
+            print(f"    sig: {sig}")
+            print(f"    would fix: {', '.join(explained_labels[:5])}")
+            if len(explained_labels) > 5:
+                print(f"    ... and {len(explained_labels) - 5} more")
+
+    # Identify non-cascading failures (independent bugs)
+    independent = [(fn, score) for fn, score in ranked if score == 1]
+    if independent:
+        print(f"\n\nIndependent failures (no cascade, fix individually):")
+        print("-" * 60)
+        for fn, _ in independent[:10]:
+            module = all_functions.get(fn, {}).get('module', '?')
+            labels = [l for l, f in assertion_map.items() if f == fn and l in failing_labels]
+            if labels:
+                print(f"  {fn} ({module}): {', '.join(labels[:3])}")
+
+elif modified_fns_str:
+    # Predictive mode: predict impact of specified changes
+    modified = [f.strip() for f in modified_fns_str.split(',')]
+
+    print()
+    print("IMPACT PREDICTION")
+    print("=" * 60)
+    print(f"\nModified functions: {', '.join(modified)}\n")
+
+    all_affected = set()
+    for fn in modified:
+        affected = transitive_callers(fn)
+        all_affected |= affected
+
+        print(f"\n  {fn}:")
+        print(f"    direct callers: {', '.join(reverse_graph.get(fn, set()) or ['(none)'])}")
+        print(f"    transitive impact: {len(affected)} function(s)")
+
+    # Predict which assertions will break
+    at_risk = []
+    for label, fn in assertion_map.items():
+        if fn in all_affected:
+            at_risk.append(label)
+
+    print(f"\n\nPREDICTED ASSERTION FAILURES ({len(at_risk)}):")
+    print("-" * 60)
+    for label in sorted(at_risk):
+        fn = assertion_map.get(label, '?')
+        module = all_functions.get(fn, {}).get('module', '?')
+        print(f"  {label}  (via {fn} in {module})")
+
+    print(f"\n\nSummary: changing {', '.join(modified)} affects "
+          f"{len(all_affected)} functions and risks {len(at_risk)} assertions")
+
+else:
+    # Default: show full call graph statistics
+    print()
+    print("CALL GRAPH SUMMARY")
+    print("=" * 60)
+    print(f"\n  Modules: {len(modules)}")
+    print(f"  Functions: {len(all_functions)}")
+    print(f"  Call edges: {edges}")
+    print(f"  Assertions mapped: {len(assertion_map)}")
+
+    # Top callers (most dependencies)
+    print(f"\n\nMost-called functions (highest impact if changed):")
+    print("-" * 60)
+    top_callees = sorted(reverse_graph.items(), key=lambda x: -len(x[1]))
+    for fn, callers in top_callees[:15]:
+        module = all_functions.get(fn, {}).get('module', '?')
+        affected = transitive_callers(fn)
+        at_risk = [l for l, f in assertion_map.items() if f in affected]
+        print(f"  {fn} ({module}): {len(callers)} direct callers, "
+              f"{len(affected)} transitive, {len(at_risk)} assertions at risk")
+
+PYEOF

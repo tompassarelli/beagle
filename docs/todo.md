@@ -93,18 +93,17 @@ No handwritten test code — the type system IS the test spec.
 - [ ] Differential testing: run same inputs through old vs new code,
       flag any output differences as potential regressions
 
-## Phase 7: Cross-module impact propagation
+## Phase 7: Cross-module impact propagation ✓
 
 When a function's behavior changes, automatically identify all downstream
 effects and predict which assertions will break.
 
-- [ ] Build full call graph from type-system query tools
-- [ ] Impact analysis: "you changed `order-total` → these 14 functions
-      transitively depend on it → these 8 assertions test those paths"
-- [ ] Predictive blame: before running oracle, predict which assertions
-      will fail based on which functions were modified
-- [ ] Cascade detection: "fixing this one bug will likely fix these 5
-      downstream failures too" (don't fix symptoms, fix roots)
+- [x] Build full call graph from source parsing (901 edges across 13 modules)
+- [x] Impact analysis: `beagle-cascade --modified fn1,fn2` → transitive callers + at-risk assertions
+- [x] Predictive blame: predict which assertions will fail before running oracle
+- [x] Cascade detection: `--from-failures` finds root causes where one fix eliminates multiple failures
+- [x] Assertion mapping: parse verify script to link labels → tested functions
+- [x] Validated: product-margin → 21 functions affected, 2 assertions at risk; total-revenue cascade score 3
 
 ## Phase 8: Behavioral oracle synthesis
 
