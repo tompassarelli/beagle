@@ -16,8 +16,10 @@ for being included as system context.
 ```
 
 **NOTE:** `(require module :as alias)` imports all typed defs, defns, records,
-and macros from the required beagle module. You do NOT need `declare-extern`
-for cross-module beagle calls — the types are imported automatically.
+scalars, and macros from the required beagle module. You do NOT need
+`declare-extern` for cross-module beagle calls — the types are imported
+automatically. Imported scalars give you both the constructor (`->Amount`)
+and accessor (`amount-value`) with full type checking.
 
 ## Top-level forms
 
@@ -57,6 +59,41 @@ Field syntax reuses wrapped param form `(name : Type)`. All fields must be typed
 Typed record update. Compiles to `(assoc record :field1 new-value1 :field2 new-value2)`.
 Type checker validates: field exists on the record type, value matches field type.
 Use instead of positional constructors when updating a few fields on an existing record.
+
+### `defscalar` (nominal types)
+
+```racket
+(defscalar Amount Long)
+(defscalar Timestamp Long)
+(defscalar AccountId Long)
+(defscalar Email String)
+```
+
+Creates a **nominal type** backed by a primitive. `Amount`, `Timestamp`, and
+`AccountId` are all `Long` at runtime, but the type checker treats them as
+incompatible — you cannot pass an `Amount` where a `Timestamp` is expected.
+
+Generated functions:
+- Constructor: `(->Amount 5000)` — typed `[Long -> Amount]`
+- Accessor: `(amount-value x)` — typed `[Amount -> Long]`
+
+Scalars are the primary defense against "same-type confusion" bugs where IDs,
+monetary values, and timestamps are all Long underneath. The checker flags:
+- Wrong scalar in constructor args: `(->Amount (timestamp-value ts))` — error
+- Mixed scalar arithmetic: `(+ (amount-value x) (timestamp-value y))` — note
+- Cross-scalar comparison: `(= (accountid-value a) (instrumentid-value b))` — note
+
+**Usage pattern:**
+```racket
+(defscalar Price Long)
+(defscalar Quantity Long)
+
+(defn order-total [(price : Price) (qty : Quantity)] : Amount
+  (->Amount (* (price-value price) (quantity-value qty))))
+```
+
+Cross-scalar multiplication (`price * qty = amount`) is valid — the checker
+only flags additive mixing and constructor mismatches.
 
 ### `defenum`
 
@@ -363,7 +400,10 @@ Pre-typed in stdlib: `.exists`, `.trim`, `.startsWith`, `.endsWith`,
 - `defn NAME has untyped parameter(s): names`
 - `(unsafe "...") inline escape — beagle cannot type-check this code`
 
-## Errors (compile-time, fail with rich diagnostics)
+## Errors and notes (compile-time diagnostics)
+
+**Errors** fail the check. **Notes** are provenance warnings — each one
+indicates a real bug with high confidence. Treat every note as actionable.
 
 Set `BEAGLE_ERROR_FORMAT=json` for structured output. JSON fields:
 `tool`, `kind`, `message`, `file`, `line`, `col`, `signature`,
@@ -384,6 +424,37 @@ error[E002]: call to <=: arg 1 expected Long, got String
    = note: campaign-name : [Campaign -> String]
    = help: did you mean campaign-start-date? (campaign-start-date : [Campaign -> Long])
 ```
+
+### Provenance notes (scalar lint)
+
+These appear alongside type errors and indicate bugs with high precision:
+
+```
+note: scalar provenance: ->Amount receives value derived from Price
+  --> orders.rkt:40
+  = Amount wraps a Long backing value, but the argument originated from Price
+
+note: cross-scalar comparison: InstrumentId vs AccountId
+  --> trades.rkt:72
+  = comparing values derived from incompatible scalar types
+
+note: unused parameter 'fill-ts' in fill-order
+  --> orders.rkt:54
+
+note: unused let binding 'acct-id'
+  --> trades.rkt:63
+
+note: call to undefined function 'calculate-pnl'
+  --> reports.rkt:89
+```
+
+Each note means: something is wrong at that location. Common fixes:
+- **scalar provenance mismatch**: you're wrapping the wrong backing value —
+  use the correct scalar accessor (e.g., `amount-value` not `price-value`)
+- **cross-scalar comparison**: you're comparing IDs of different entity types —
+  use the correct record accessor
+- **unused parameter/binding**: the function should be using that value but isn't
+- **undefined function**: typo or missing import
 
 ## Tools
 
