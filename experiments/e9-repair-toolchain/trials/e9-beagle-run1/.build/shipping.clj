@@ -1,8 +1,8 @@
 (ns shipping
-  (:require [catalog :refer :all :as cat]
-            [customers :refer :all :as cust]
-            [inventory :refer :all :as inv]
-            [orders :refer :all :as ord]))
+  (:require [catalog :as cat]
+            [customers :as cust]
+            [inventory :as inv]
+            [orders :as ord]))
 
 ;; ShipmentId : Long (scalar)
 

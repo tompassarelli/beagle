@@ -1,7 +1,7 @@
 (ns billing
-  (:require [catalog :refer :all :as cat]
-            [customers :refer :all :as cust]
-            [orders :refer :all :as ord]))
+  (:require [catalog :as cat]
+            [customers :as cust]
+            [orders :as ord]))
 
 ;; InvoiceId : Long (scalar)
 

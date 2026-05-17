@@ -1,9 +1,9 @@
 (ns analytics
-  (:require [orders :refer :all :as ord]
-            [inventory :refer :all :as inv]
-            [catalog :refer :all :as cat]
-            [billing :refer :all :as bill]
-            [shipping :refer :all :as ship]))
+  (:require [orders :as ord]
+            [inventory :as inv]
+            [catalog :as cat]
+            [billing :as bill]
+            [shipping :as ship]))
 
 ^{:line 16 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/analytics.rkt"} (defrecord PeriodMetric [period metric-name value])
 

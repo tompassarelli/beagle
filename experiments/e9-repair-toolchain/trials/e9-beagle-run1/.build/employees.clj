@@ -1,6 +1,6 @@
 (ns employees
-  (:require [catalog :refer :all :as cat]
-            [orders :refer :all :as ord]))
+  (:require [catalog :as cat]
+            [orders :as ord]))
 
 ;; EmployeeId : Long (scalar)
 

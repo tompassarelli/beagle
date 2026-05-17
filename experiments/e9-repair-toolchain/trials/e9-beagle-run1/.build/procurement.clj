@@ -1,6 +1,6 @@
 (ns procurement
-  (:require [catalog :refer :all :as cat]
-            [inventory :refer :all :as inv]))
+  (:require [catalog :as cat]
+            [inventory :as inv]))
 
 ;; POId : Long (scalar)
 
@@ -206,7 +206,7 @@
   ^{:line 339 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/procurement.rkt"} (if ^{:line 339 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/procurement.rkt"} (> diff 0) ^{:line 339 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/procurement.rkt"} (quot diff 86400) 0)))
 
 ^{:line 348 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/procurement.rkt"} (defn auto-reorder-lines [levels products]
-  ^{:line 349 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/procurement.rkt"} (let [needed ^{:line 349 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/procurement.rkt"} (inv/reorder-needed levels)]
+  ^{:line 349 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/procurement.rkt"} (let [needed ^{:line 349 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/procurement.rkt"} (inv/reorder-needed)]
   ^{:line 350 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/procurement.rkt"} (mapv ^{:line 350 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/procurement.rkt"} (fn [sl] ^{:line 351 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/procurement.rkt"} (let [prod-id ^{:line 351 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/procurement.rkt"} (inv/stocklevel-product-id sl)
    qty ^{:line 352 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/procurement.rkt"} (inv/reorder-quantity sl)
    prod ^{:line 353 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/procurement.rkt"} (cat/find-product-by-id products prod-id)

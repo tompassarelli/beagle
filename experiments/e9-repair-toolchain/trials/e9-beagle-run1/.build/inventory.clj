@@ -1,5 +1,5 @@
 (ns inventory
-  (:require [catalog :refer :all :as cat]))
+  (:require [catalog :as cat]))
 
 ;; WarehouseId : Long (scalar)
 

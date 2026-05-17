@@ -1,8 +1,8 @@
 (ns reports
-  (:require [catalog :refer :all :as cat]
-            [inventory :refer :all :as inv]
-            [customers :refer :all :as cust]
-            [orders :refer :all :as ord]))
+  (:require [catalog :as cat]
+            [inventory :as inv]
+            [customers :as cust]
+            [orders :as ord]))
 
 ^{:line 13 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/reports.rkt"} (defn inventory-summary-report [levels products warehouses]
   ^{:line 15 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/reports.rkt"} (mapv ^{:line 15 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/reports.rkt"} (fn [wh] ^{:line 16 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/reports.rkt"} (let [wh-id ^{:line 16 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/reports.rkt"} (inv/warehouse-id wh)

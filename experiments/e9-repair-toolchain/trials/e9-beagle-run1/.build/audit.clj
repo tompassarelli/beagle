@@ -1,14 +1,14 @@
 (ns audit
-  (:require [catalog :refer :all :as cat]
-            [customers :refer :all :as cust]
-            [inventory :refer :all :as inv]
-            [orders :refer :all :as ord]
-            [shipping :refer :all :as ship]
-            [billing :refer :all :as bill]
-            [procurement :refer :all :as proc]
-            [promotions :refer :all :as promo]
-            [employees :refer :all :as emp]
-            [notifications :refer :all :as notif]))
+  (:require [catalog :as cat]
+            [customers :as cust]
+            [inventory :as inv]
+            [orders :as ord]
+            [shipping :as ship]
+            [billing :as bill]
+            [procurement :as proc]
+            [promotions :as promo]
+            [employees :as emp]
+            [notifications :as notif]))
 
 ^{:line 21 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (defrecord AuditEntry [id entity-type entity-id action actor-id timestamp detail])
 
@@ -207,7 +207,7 @@
   ^{:line 367 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (->ComplianceCheck 0 "order-has-customer" ^{:line 367 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (ord/order-id order) passed detail 0)))
 
 ^{:line 372 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (defn check-invoice-matches-order [invoice orders]
-  ^{:line 374 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (let [order ^{:line 374 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (ord/find-order-by-id orders ^{:line 374 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (bill/invoice-order-id invoice))
+  ^{:line 374 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (let [order ^{:line 374 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (ord/find-order-by-id ^{:line 374 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (bill/invoice-order-id invoice))
    passed ^{:line 375 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (if ^{:line 375 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (nil? order) false ^{:line 377 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (= ^{:line 377 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (bill/invoice-total invoice) ^{:line 378 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (ord/order-total order)))
    detail ^{:line 379 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (if ^{:line 379 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (nil? order) ^{:line 380 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (str "Order #" ^{:line 380 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (bill/invoice-order-id invoice) " not found") ^{:line 382 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (if passed ^{:line 383 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (str "Invoice total matches order total: " ^{:line 384 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (bill/invoice-total invoice)) ^{:line 385 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (str "Invoice total " ^{:line 386 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (bill/invoice-total invoice) " != order total " ^{:line 388 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (ord/order-total order))))]
   ^{:line 389 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (->ComplianceCheck 0 "invoice-matches-order" ^{:line 390 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/audit.rkt"} (bill/invoice-id invoice) passed detail 0)))

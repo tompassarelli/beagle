@@ -46,6 +46,7 @@ START_TIME=$(date +%s)
 
 claude -p "$(cat prompt.md)" \
     --output-format json \
+    --dangerously-skip-permissions \
     > output.json 2> stderr.log
 
 END_TIME=$(date +%s)

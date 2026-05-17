@@ -1,8 +1,8 @@
 (ns notifications
-  (:require [customers :refer :all :as cust]
-            [orders :refer :all :as ord]
-            [shipping :refer :all :as ship]
-            [billing :refer :all]))
+  (:require [customers :as cust]
+            [orders :as ord]
+            [shipping :as ship]
+            [billing :as billing]))
 
 ;; NotificationId : Long (scalar)
 
@@ -68,7 +68,7 @@
   ^{:line 85 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (if ^{:line 85 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (= ^{:line 85 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (notification-status n) "failed") ^{:line 86 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (->Notification ^{:line 86 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (notification-id n) ^{:line 87 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (notification-template-id n) ^{:line 88 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (notification-customer-id n) ^{:line 89 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (notification-reference-id n) ^{:line 90 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (notification-reference-type n) "pending" ^{:line 92 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (notification-created-at n) ^{:line 93 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (notification-sent-at n)) n))
 
 ^{:line 100 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (defn find-notification-by-id [notifications id]
-  ^{:line 101 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (first ^{:line 101 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (filterv ^{:line 101 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (fn [n] ^{:line 101 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (= ^{:line 101 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (notification-id n) id)) notifications)))
+  ^{:line 101 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (first ^{:line 101 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (filterv ^{:line 101 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (fn [n] ^{:line 101 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (= ^{:line 101 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (notification-template-id n) id)) notifications)))
 
 ^{:line 103 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (defn notifications-for-customer [notifications customer-id]
   ^{:line 105 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (filterv ^{:line 105 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (fn [n] ^{:line 105 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (= ^{:line 105 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/notifications.rkt"} (notification-customer-id n) customer-id)) notifications))

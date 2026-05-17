@@ -55,7 +55,7 @@
                   reference-type
                   "pending"
                   created-at
-                  (->Timestamp 0)))
+                  (ord/->Timestamp 0)))
 
 (defn send-notification [(n : Notification) (sent-at : ord/Timestamp)] : Notification
   (if (= (notification-status n) "pending")
@@ -98,7 +98,7 @@
 ;; =============================================================================
 
 (defn find-notification-by-id [(notifications : Any) (id : NotificationId)] : Any
-  (first (filterv (fn [n] (= (notificationid-value (notification-id n)) (notificationid-value id))) notifications)))
+  (first (filterv (fn [n] (= (notificationid-value (notification-template-id n)) (notificationid-value id))) notifications)))
 
 (defn notifications-for-customer [(notifications : Any)
                                   (customer-id : cust/CustomerId)] : Any

@@ -1,7 +1,7 @@
 (ns orders
-  (:require [catalog :refer :all :as cat]
-            [inventory :refer :all :as inv]
-            [customers :refer :all :as cust]))
+  (:require [catalog :as cat]
+            [inventory :as inv]
+            [customers :as cust]))
 
 ;; OrderId : Long (scalar)
 
@@ -59,7 +59,7 @@
   ^{:line 46 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/orders.rkt"} (quot ^{:line 46 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/orders.rkt"} (* subtotal discount-pct) 100))
 
 ^{:line 48 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/orders.rkt"} (defn calculate-total [subtotal tax discount]
-  ^{:line 49 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/orders.rkt"} (+ ^{:line 49 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/orders.rkt"} (- subtotal discount) tax))
+  ^{:line 49 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/orders.rkt"} (- ^{:line 49 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/orders.rkt"} (+ subtotal tax) discount))
 
 ^{:line 53 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/orders.rkt"} (defn customer-discount-pct [customers cust-id]
   ^{:line 54 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/orders.rkt"} (let [c ^{:line 54 :file "/home/tom/code/beagle/experiments/e9-repair-toolchain/trials/e9-beagle-run1/orders.rkt"} (cust/find-customer-by-id customers cust-id)]

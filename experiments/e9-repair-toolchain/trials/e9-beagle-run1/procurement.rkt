@@ -46,7 +46,7 @@
 
 ;; Return all POLines that reference a particular product.
 (defn lines-for-product [(lines : Any) (product-id : cat/ProductId)] : Any
-  (filterv (fn [line] (= (productid-value (poline-product-id line)) (productid-value product-id))) lines))
+  (filterv (fn [line] (= (supplierid-value (poline-product-id line)) (productid-value product-id))) lines))
 
 ;; Total quantity ordered for a product across all PO lines.
 (defn total-quantity-for-product [(lines : Any) (product-id : cat/ProductId)] : Long
@@ -346,7 +346,7 @@
 ;; placeholder po-id = 0, the product's reorder quantity, and the product's
 ;; catalog unit cost.
 (defn auto-reorder-lines [(levels : Any) (products : Any)] : Any
-  (let [needed (inv/reorder-needed levels)]
+  (let [needed (inv/reorder-needed)]
     (mapv (fn [sl]
             (let [prod-id (inv/stocklevel-product-id sl)
                   qty (inv/reorder-quantity sl)
