@@ -147,13 +147,15 @@ assertions — the compiler derives what "correct" means.
 - [x] Interactive REPL with compile-time checking per expression
 - [x] Type environment persists across REPL inputs (defn/def/defrecord)
 - [x] Commands: `:type EXPR`, `:sig NAME`, `:env`, `:quit`
-- [ ] Integrates with daemon for cross-module awareness
+- [x] Daemon integration: `:sig` falls back to daemon TCP query for project-wide lookups;
+      `(require module)` persists imported types into repl-env across inputs
 
 ### CLJS target remaining
 
 - [x] Source map generation: `beagle-smap extract` + `beagle-smap compose` rewrites
       JS source maps to point to original .rkt source (tested on Heist kanban)
-- [ ] Shadow-cljs / figwheel integration testing (Heist validates basic pipeline)
+- [x] Shadow-cljs integration testing: Heist full pipeline (heist-build → shadow-cljs
+      compile → 40/40 playwright tests pass, 0 errors)
 
 ### Distributed traces
 
@@ -236,3 +238,6 @@ assertions — the compiler derives what "correct" means.
 - Type-aware LSP completion: local defs + cross-module qualified + stdlib (with type signatures)
 - CLJS source maps: beagle-smap extract/compose rewrites JS maps to point to .rkt source
 - Mutation testing: beagle-muttest (13 operators, auto-inject + oracle run, coverage gap reports)
+- Multi-arg diff coverage: type-aware record instances, 7399 deterministic calls on E8
+- REPL daemon integration: :sig falls back to daemon TCP query, require persists imports
+- Shadow-cljs validation: Heist full pipeline 40/40 playwright tests

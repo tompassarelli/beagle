@@ -16,6 +16,9 @@
          racket/format
          racket/port
          racket/list
+         racket/file
+         json
+         racket/tcp
          "parse.rkt"
          "types.rkt"
          "check.rkt"
@@ -136,6 +139,30 @@
       (define stx (read-syntax 'repl in))
       (if (eof-object? stx) (reverse acc) (loop (cons stx acc))))))
 
+(define (daemon-port-file)
+  (or (getenv "BEAGLE_DAEMON_PORTFILE")
+      (build-path (find-system-path 'temp-dir) "beagle-daemon.port")))
+
+(define (daemon-query cmd)
+  (with-handlers ([exn:fail? (lambda (_) #f)])
+    (define port-file (daemon-port-file))
+    (unless (file-exists? port-file) (error "no daemon"))
+    (define port-num (string->number (string-trim (file->string port-file))))
+    (define-values (in out) (tcp-connect "127.0.0.1" port-num))
+    (fprintf out "~a\n" cmd)
+    (flush-output out)
+    (define resp (read-json in))
+    (close-input-port in)
+    (close-output-port out)
+    (and (hash? resp) (hash-ref resp 'ok #f) resp)))
+
+(define (daemon-sig name)
+  (define resp (daemon-query (format "sig ~a ." name)))
+  (and resp
+       (let ([results (hash-ref resp 'results '())])
+         (and (pair? results)
+              (hash-ref (car results) 'signature #f)))))
+
 (define (show-env)
   (define user-bindings
     (for/list ([(k v) (in-hash repl-env)]
@@ -167,9 +194,13 @@
        (define name (string-trim (substring (string-trim line) 5)))
        (define sym (string->symbol name))
        (define t (hash-ref repl-env sym #f))
-       (if t
-           (printf "~a : ~a\n" sym (type->string t))
-           (printf "~a: not found\n" name))
+       (cond
+         [t (printf "~a : ~a\n" sym (type->string t))]
+         [else
+          (define daemon-t (daemon-sig name))
+          (if daemon-t
+              (printf "~a : ~a  (via daemon)\n" sym daemon-t)
+              (printf "~a: not found\n" name))])
        (loop)]
       [(string=? (string-trim line) "") (loop)]
       [else
