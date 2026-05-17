@@ -2,9 +2,9 @@
 
 A language where the compiler does the debugging.
 
-Beagle is a typed authoring layer that compiles to Clojure. Racket
-frontend, custom `#lang`, static type checking — emits plain `.clj`
-for runtime. Built for LLM agents: rich types, explicit forms, low
+Beagle is a typed authoring layer that currently targets
+Clojure and ClojureScript. Racket frontend, custom `#lang`, static
+type checking — emits plain `.clj` / `.cljs` for runtime. Built for LLM agents: rich types, explicit forms, low
 syntactic surface area, structured errors. One canonical idiom per
 concept.
 
