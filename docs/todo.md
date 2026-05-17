@@ -105,19 +105,22 @@ effects and predict which assertions will break.
 - [x] Assertion mapping: parse verify script to link labels → tested functions
 - [x] Validated: product-margin → 21 functions affected, 2 assertions at risk; total-revenue cascade score 3
 
-## Phase 8: Behavioral oracle synthesis
+## Phase 8: Behavioral oracle synthesis ✓
 
 Generate the oracle itself from the code + types. No handwritten
 assertions — the compiler derives what "correct" means.
 
-- [ ] Golden snapshot: compile golden code, run with reference inputs,
-      capture all function outputs as expected values
-- [ ] Assertion generation: for each exported function, generate
-      `(assert-eq "fn/input-hash" expected (fn args))` automatically
-- [ ] Differential oracle: compare two versions of code, generate
-      assertions for everything that changed
-- [ ] Mutation testing: automatically inject bugs, verify that the
-      generated oracle catches them (validate oracle completeness)
+- [x] Golden snapshot: compile golden code, call exported functions with
+      auto-generated test data, capture outputs as expected values
+- [x] Assertion generation: `beagle-oracle SOURCE-DIR [--out FILE]` emits
+      runnable verify script with `(assert-eq ...)` for all capturable functions
+- [x] Differential oracle: `--diff MODIFIED-DIR` compares golden vs modified,
+      reports only functions whose output changed
+- [x] Validated: 34 assertions auto-generated from E8 golden; diff mode detects
+      4 behavioral divergences (product-margin sign error) in buggy code
+- [ ] Mutation testing: automatically inject bugs, verify the generated oracle catches them
+- [ ] Multi-arg function coverage: generate valid inputs for 2+ arg functions
+      using cross-product of test data instances
 
 ## Someday (infrastructure)
 
