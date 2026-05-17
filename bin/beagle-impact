@@ -6,6 +6,35 @@ if [[ $# -lt 2 ]]; then
     exit 2
 fi
 
+# Route through daemon if running
+PORTFILE="${BEAGLE_DAEMON_PORTFILE:-/var/tmp/beagle-daemon.port}"
+if [[ -f "$PORTFILE" ]]; then
+    port=$(cat "$PORTFILE")
+    if (exec 3<>/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then
+        exec 3<>/dev/tcp/127.0.0.1/"$port"
+        echo "impact $*" >&3
+        read -r response <&3
+        exec 3>&-
+        echo "$response" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+if not data.get('ok'):
+    print(data.get('error', 'unknown error'), file=sys.stderr); sys.exit(1)
+if data.get('signature'):
+    print(f'{data[\"name\"]} : {data[\"signature\"]}')
+    print(f'  defined in: {data[\"defined-in\"]}\n')
+else:
+    print(f'{data[\"name\"]}: not found in provided files'); sys.exit(0)
+callers = data.get('callers', [])
+if callers:
+    print('callers:')
+    for c in callers:
+        print(f'  {c[\"caller\"]}  ({c[\"file\"]})  args: {c[\"args\"]}')
+"
+        exit 0
+    fi
+fi
+
 args=""
 for a in "$@"; do
   args="$args \"$a\""

@@ -6,6 +6,36 @@ if [[ $# -lt 2 ]]; then
     exit 2
 fi
 
+# Route through daemon if running
+PORTFILE="${BEAGLE_DAEMON_PORTFILE:-/var/tmp/beagle-daemon.port}"
+if [[ -f "$PORTFILE" ]]; then
+    port=$(cat "$PORTFILE")
+    if (exec 3<>/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then
+        exec 3<>/dev/tcp/127.0.0.1/"$port"
+        echo "sig $*" >&3
+        read -r response <&3
+        exec 3>&-
+        # Format JSON to match text output
+        echo "$response" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+if not data.get('ok'):
+    print(data.get('error', 'unknown error'), file=sys.stderr)
+    sys.exit(1)
+for r in data.get('results', []):
+    if r.get('extern'):
+        print(f\"{r['name']} : {r['signature']}  (extern)\")
+    else:
+        print(f\"{r['name']} : {r['signature']}\")
+        for p in r.get('params', []):
+            print(f\"  {p['name']} : {p['type']}\")
+        print(f\"  -> {r['return']}\")
+"
+        exit 0
+    fi
+fi
+
+# Fallback: cold start
 args=""
 for a in "$@"; do
   args="$args \"$a\""

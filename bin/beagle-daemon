@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PORTFILE="${BEAGLE_DAEMON_PORTFILE:-/var/tmp/beagle-daemon.port}"
+PIDFILE="${BEAGLE_DAEMON_PIDFILE:-/var/tmp/beagle-daemon.pid}"
+export BEAGLE_DAEMON_PORTFILE="$PORTFILE"
+
+usage() {
+    cat >&2 <<'EOF'
+usage: beagle-daemon <command> [args...]
+
+Commands:
+  start           Start daemon in background (TCP, ephemeral port)
+  stop            Stop running daemon
+  status          Check if daemon is running (JSON)
+  query CMD ARGS  Send query to running daemon (falls back to one-shot)
+
+Queries (same as CLI tools but returns JSON):
+  sig <fn-name> <dir>
+  fields <record> <dir>
+  callers <fn-name> <dir>
+  provides <file>
+  impact <fn-name> <dir>
+  check <dir>
+  invalidate [file]
+  ping
+
+The daemon keeps parsed ASTs cached, eliminating Racket startup (0.33s)
+and re-parse (1.6s) costs per tool call. ~60 queries/session → saves ~2min.
+
+Environment:
+  BEAGLE_DAEMON_PORTFILE  Port file (default: /tmp/beagle-daemon.port)
+  BEAGLE_DAEMON_PIDFILE   PID file (default: /tmp/beagle-daemon.pid)
+EOF
+    exit 2
+}
+
+is_running() {
+    [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
+}
+
+get_port() {
+    if [[ -f "$PORTFILE" ]]; then
+        cat "$PORTFILE"
+    else
+        echo ""
+    fi
+}
+
+send_query() {
+    local port
+    port=$(get_port)
+    if [[ -z "$port" ]] || ! is_running; then
+        # Fallback: one-shot mode (no persistent daemon)
+        echo -e "$*\nquit" | racket -e '(require beagle/private/daemon) (run-daemon)' 2>/dev/null | head -1
+        return
+    fi
+    # Send via TCP
+    exec 3<>/dev/tcp/127.0.0.1/"$port"
+    echo "$*" >&3
+    local response
+    read -r response <&3
+    exec 3>&-
+    echo "$response"
+}
+
+cmd_start() {
+    if is_running; then
+        echo "Daemon already running (pid $(cat "$PIDFILE"), port $(get_port))" >&2
+        exit 0
+    fi
+
+    rm -f "$PORTFILE" "$PIDFILE"
+
+    racket -e '(require beagle/private/daemon) (run-daemon-tcp)' &
+    local pid=$!
+    echo "$pid" > "$PIDFILE"
+
+    # Wait for port file to appear (max 5s)
+    local waited=0
+    while [[ ! -f "$PORTFILE" ]] && [[ $waited -lt 50 ]]; do
+        sleep 0.1
+        waited=$((waited + 1))
+    done
+
+    if [[ ! -f "$PORTFILE" ]]; then
+        echo "Daemon failed to start (no port file after 5s)" >&2
+        kill "$pid" 2>/dev/null || true
+        rm -f "$PIDFILE"
+        exit 1
+    fi
+
+    local port
+    port=$(get_port)
+    echo "Daemon started (pid $pid, port $port)" >&2
+}
+
+cmd_stop() {
+    if ! is_running; then
+        echo "Daemon not running" >&2
+        rm -f "$PIDFILE" "$PORTFILE"
+        exit 0
+    fi
+
+    local pid
+    pid=$(cat "$PIDFILE")
+
+    # Try graceful quit first
+    local port
+    port=$(get_port)
+    if [[ -n "$port" ]]; then
+        (exec 3<>/dev/tcp/127.0.0.1/"$port" && echo "quit" >&3 && exec 3>&-) 2>/dev/null || true
+        sleep 0.2
+    fi
+
+    # Force if still alive
+    if kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null || true
+    fi
+
+    rm -f "$PIDFILE" "$PORTFILE"
+    echo "Daemon stopped (pid $pid)" >&2
+}
+
+cmd_status() {
+    if is_running; then
+        send_query "ping"
+    else
+        echo '{"ok":false,"status":"stopped"}'
+        rm -f "$PIDFILE" "$PORTFILE"
+    fi
+}
+
+if [[ $# -lt 1 ]]; then
+    usage
+fi
+
+case "$1" in
+    start)   cmd_start ;;
+    stop)    cmd_stop ;;
+    status)  cmd_status ;;
+    query)   shift; send_query "$@" ;;
+    -h|--help) usage ;;
+    *)       usage ;;
+esac

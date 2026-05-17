@@ -21,3 +21,4 @@ Entries are numbered chronologically. Experiments cited by ID (E1–E8+).
 | 009 | 2026-05-17 PM | [E8: repair obligations — the partial oracle backfire](009-e8-repair-obligations.md) |
 | 010 | 2026-05-17 PM | [Direction: repair compiler, not type system](010-repair-compiler.md) |
 | 011 | 2026-05-17 PM | [E8 run3: beagle wins 23%; --warn mode ties blocking](011-e8-full-oracle-win.md) |
+| 012 | 2026-05-17 PM | [Daemon + Babashka: collapsing the wall-time gap](012-daemon-bb.md) |

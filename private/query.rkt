@@ -17,16 +17,18 @@
 (define (extract-defn-entry d)
   (match d
     [(list 'defn (? symbol? name) params-form ': ret-type body ...)
-     (define parsed (parse-params params-form))
+     (define-values (parsed rest-p) (parse-params params-form))
      (define ptypes (map (lambda (p) (or (param-type p) (type-prim 'Any))) parsed))
      (define pnames (map param-name parsed))
-     (list name pnames (type-fn ptypes #f (parse-type ret-type)))]
+     (define rtype (and rest-p (or (param-type rest-p) (type-prim 'Any))))
+     (list name pnames (type-fn ptypes rtype (parse-type ret-type)))]
     [(list 'defn (? symbol? name) params-form body ...)
      #:when (or (null? body) (not (eq? (car body) ':)))
-     (define parsed (parse-params params-form))
+     (define-values (parsed rest-p) (parse-params params-form))
      (define ptypes (map (lambda (p) (or (param-type p) (type-prim 'Any))) parsed))
      (define pnames (map param-name parsed))
-     (list name pnames (type-fn ptypes #f (type-prim 'Any)))]
+     (define rtype (and rest-p (or (param-type rest-p) (type-prim 'Any))))
+     (list name pnames (type-fn ptypes rtype (type-prim 'Any)))]
     [_ #f]))
 
 (define (extract-def-entry d)
@@ -321,4 +323,6 @@
         (list a)))))
 
 (provide query-sig query-fields query-callers query-provides query-impact
-         run-query find-rkt-files)
+         run-query find-rkt-files
+         extract-defn-entry extract-def-entry extract-record-entry
+         extract-extern-entry extract-ns find-calls-in format-call)
