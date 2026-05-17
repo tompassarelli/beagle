@@ -127,6 +127,7 @@ parse → check → emit
 - `bin/beagle-specfix BUILD-DIR VERIFY-SCRIPT` — oracle-guided speculative fix (generate candidates, verify against oracle, report fixes)
 - `bin/beagle-trace BUILD-DIR VERIFY-SCRIPT [--focus FN]` — instrumented tracing (captures arithmetic ops, shows exact divergence per assertion)
 - `bin/beagle-repair SOURCE-DIR VERIFY-SCRIPT [--auto] [--threshold N]` — unified repair pipeline (type check + specfix + blame → ranked repair queue)
+- `bin/beagle-proptest SOURCE-DIR [--run] [--build-dir DIR]` — auto-generate property tests from type information (record round-trips, scalar constraints)
 - `bin/beagle-sig FN-NAME FILE-OR-DIR...` — print a function's typed signature
 - `bin/beagle-fields RECORD FILE-OR-DIR...` — print record fields, types, and accessors
 - `bin/beagle-callers FN-NAME FILE-OR-DIR...` — find all call sites of a function

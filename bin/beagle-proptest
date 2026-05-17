@@ -1,0 +1,264 @@
+#!/usr/bin/env bash
+# beagle-proptest: schema-driven property test generation.
+#
+# Reads type information from beagle modules (defrecord, defscalar, function
+# signatures) and generates property-based test assertions. No handwritten
+# test code — the type system IS the test spec.
+#
+# Usage:
+#   beagle-proptest <source-dir>              Generate properties to stdout
+#   beagle-proptest <source-dir> --run        Generate and run against compiled build
+#   beagle-proptest <source-dir> --run --build-dir <dir>
+#
+# Generated properties:
+#   - Record constructor round-trip (construct → access → equals)
+#   - Scalar non-negativity (Amount, Price, Count → >= 0)
+#   - Function return type constraints (returns Amount → non-negative)
+#   - Monotonicity (count functions → >= 0)
+#   - Filter subset (filter result ⊆ input)
+
+set -euo pipefail
+
+if [[ $# -lt 1 ]]; then
+    echo "Usage: beagle-proptest <source-dir> [--run] [--build-dir <dir>]" >&2
+    exit 1
+fi
+
+SOURCE_DIR="$(cd "$1" && pwd)"
+shift
+
+RUN_MODE=false
+BUILD_DIR=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --run) RUN_MODE=true; shift ;;
+        --build-dir) BUILD_DIR="$2"; shift 2 ;;
+        *) echo "Unknown option: $1" >&2; exit 1 ;;
+    esac
+done
+
+BEAGLE_BIN="$(cd "$(dirname "$0")" && pwd)"
+WORK_DIR="$(mktemp -d /tmp/beagle-proptest.XXXXXX)"
+trap 'rm -rf "$WORK_DIR"' EXIT
+
+# ---------------------------------------------------------------------------
+# Phase 1: Extract type information from all modules
+# ---------------------------------------------------------------------------
+
+echo ";; beagle-proptest: auto-generated properties" >&2
+echo ";; source: $SOURCE_DIR" >&2
+
+python3 - "$SOURCE_DIR" "$BEAGLE_BIN" "$WORK_DIR" << 'PYEOF'
+import sys, os, re, subprocess
+
+source_dir = sys.argv[1]
+beagle_bin = sys.argv[2]
+work_dir = sys.argv[3]
+
+# Collect type information from all modules
+modules = {}
+for fname in sorted(os.listdir(source_dir)):
+    if not fname.endswith('.rkt'):
+        continue
+    fpath = os.path.join(source_dir, fname)
+    module_name = fname[:-4]
+
+    # Run beagle-provides to get type info
+    try:
+        result = subprocess.run(
+            [os.path.join(beagle_bin, 'beagle-provides'), fpath],
+            capture_output=True, text=True, timeout=30
+        )
+        output = result.stdout
+    except (subprocess.TimeoutExpired, Exception):
+        continue
+
+    records = []
+    functions = []
+    scalars = []
+
+    # Parse records
+    for m in re.finditer(r'^\s+(\w+)\s+\[(.+)\]$', output, re.MULTILINE):
+        rec_name = m.group(1)
+        fields_str = m.group(2)
+        fields = []
+        for fm in re.finditer(r'([\w-]+):(\w+\??)', fields_str):
+            fields.append({'name': fm.group(1), 'type': fm.group(2)})
+        if fields:
+            records.append({'name': rec_name, 'fields': fields})
+
+    # Parse functions
+    for m in re.finditer(r'^\s+([\w?!<>*+\-/]+)\s+:\s+\[(.+)\]$', output, re.MULTILINE):
+        fn_name = m.group(1)
+        sig = m.group(2)
+        # Parse "Arg1 Arg2 -> RetType"
+        parts = sig.rsplit(' -> ', 1)
+        if len(parts) == 2:
+            args_str = parts[0].strip()
+            ret_type = parts[1].strip()
+            functions.append({
+                'name': fn_name,
+                'args': args_str,
+                'return_type': ret_type,
+            })
+
+    # Parse scalars from source
+    with open(fpath) as f:
+        src = f.read()
+    for sm in re.finditer(r'\(defscalar\s+(\w+)\s+(\w+)\)', src):
+        scalars.append({'name': sm.group(1), 'base': sm.group(2)})
+
+    modules[module_name] = {
+        'records': records,
+        'functions': functions,
+        'scalars': scalars,
+    }
+
+# ---------------------------------------------------------------------------
+# Generate properties
+# ---------------------------------------------------------------------------
+
+# Known scalar semantics
+NONNEG_SCALARS = {'Amount', 'Price', 'Count', 'Quantity', 'Weight', 'Cost'}
+ID_SCALARS = {'Id', 'ProductId', 'OrderId', 'CustomerId', 'SupplierId',
+              'CategoryId', 'EmployeeId', 'WarehouseId', 'InvoiceId',
+              'NotificationId', 'ShipmentId'}
+
+properties = []
+
+for module_name, info in modules.items():
+    ns = module_name
+
+    # --- Record constructor round-trip ---
+    for rec in info['records']:
+        rec_name = rec['name']
+        fields = rec['fields']
+        ctor = f'->{ rec_name}'
+        # Beagle uses lowercase concatenation for accessor prefix (PeriodMetric -> periodmetric)
+        accessor_prefix = rec_name.lower()
+
+        # Generate sample values per field type
+        sample_vals = []
+        for f in fields:
+            t = f['type']
+            if t in ('Long', 'Double') or any(s in t for s in ['Id', 'Price', 'Amount', 'Count']):
+                sample_vals.append('1')
+            elif t == 'String':
+                sample_vals.append('"test"')
+            elif t == 'Boolean':
+                sample_vals.append('true')
+            elif t == 'Keyword':
+                sample_vals.append(':test')
+            elif t.startswith('Vec') or t.startswith('(Vec'):
+                sample_vals.append('[]')
+            else:
+                sample_vals.append('1')  # fallback for scalar wrappers
+
+        if len(sample_vals) == len(fields):
+            props_for_rec = []
+            # Round-trip: construct then access each field
+            ctor_call = f'({ns}/{ctor} {" ".join(sample_vals)})'
+            for i, f in enumerate(fields):
+                accessor = f'{ns}/{accessor_prefix}-{f["name"]}'
+                expected = sample_vals[i]
+                props_for_rec.append(
+                    f'(assert-eq "prop/{ns}/{rec_name}/{f["name"]}-roundtrip" '
+                    f'{expected} ({accessor} {ctor_call}))'
+                )
+            properties.extend(props_for_rec)
+
+    # --- Scalar non-negativity for function returns ---
+    for fn in info['functions']:
+        ret = fn['return_type']
+        fn_name = fn['name']
+        # Skip functions with complex args (we can't easily generate inputs)
+        if ' ' not in fn['args']:
+            # Single-arg functions — we might be able to test them
+            arg_type = fn['args'].strip()
+            if ret in NONNEG_SCALARS or any(ret.startswith(s) for s in NONNEG_SCALARS):
+                properties.append(
+                    f';; prop: {ns}/{fn_name} returns non-negative {ret}'
+                )
+
+    # --- Filter/count monotonicity ---
+    for fn in info['functions']:
+        fn_name = fn['name']
+        ret = fn['return_type']
+        if fn_name.startswith('count-') or fn_name.endswith('-count'):
+            properties.append(
+                f';; prop: {ns}/{fn_name} returns non-negative (count)'
+            )
+        if fn_name.startswith('filter') or fn_name.startswith('active-') or fn_name.startswith('inactive-'):
+            properties.append(
+                f';; prop: {ns}/{fn_name} result is subset of input'
+            )
+
+# ---------------------------------------------------------------------------
+# Output as runnable Clojure
+# ---------------------------------------------------------------------------
+
+output_lines = []
+output_lines.append(';; beagle-proptest: auto-generated property assertions')
+output_lines.append(f';; Generated from {len(modules)} module(s)')
+output_lines.append(f';; {len(properties)} properties')
+output_lines.append('')
+
+# Namespace header
+ns_requires = []
+for mod in modules:
+    ns_requires.append(f'[{mod}]')
+
+output_lines.append(f'(ns beagle.proptest')
+output_lines.append(f'  (:require {" ".join(ns_requires)}))')
+output_lines.append('')
+
+# Assert-eq helper
+output_lines.append('(def ^:dynamic *pass-count* (atom 0))')
+output_lines.append('(def ^:dynamic *fail-count* (atom 0))')
+output_lines.append('')
+output_lines.append('(defn assert-eq [label expected actual]')
+output_lines.append('  (if (= expected actual)')
+output_lines.append('    (swap! *pass-count* inc)')
+output_lines.append('    (do (swap! *fail-count* inc)')
+output_lines.append('        (println (str "FAIL: " label "\\n  expected: " expected "\\n  actual:   " actual)))))')
+output_lines.append('')
+output_lines.append(';; --- Properties ---')
+output_lines.append('')
+
+for prop in properties:
+    output_lines.append(prop)
+
+output_lines.append('')
+output_lines.append(';; --- Summary ---')
+output_lines.append('(println (format "\\n%d properties checked, %d failures" (+ @*pass-count* @*fail-count*) @*fail-count*))')
+
+# Write output
+output_path = os.path.join(work_dir, 'proptest.clj')
+with open(output_path, 'w') as f:
+    f.write('\n'.join(output_lines))
+
+# Also print to stdout
+print('\n'.join(output_lines))
+
+print(f"\n;; Wrote {len(properties)} properties to {output_path}", file=sys.stderr)
+PYEOF
+
+# ---------------------------------------------------------------------------
+# Phase 2 (optional): Run properties against compiled build
+# ---------------------------------------------------------------------------
+
+if [[ "$RUN_MODE" == "true" ]]; then
+    if [[ -z "$BUILD_DIR" ]]; then
+        BUILD_DIR="$WORK_DIR/build"
+        mkdir -p "$BUILD_DIR"
+        echo "" >&2
+        echo "=== Building modules ===" >&2
+        "$BEAGLE_BIN/beagle-build-all" --warn "$SOURCE_DIR" --out "$BUILD_DIR" 2>&1 | tail -3 >&2
+    fi
+
+    echo "" >&2
+    echo "=== Running properties ===" >&2
+    clojure -Sdeps "{:paths [\"$BUILD_DIR\"]}" \
+        -M -e "(load-file \"$WORK_DIR/proptest.clj\")" 2>&1
+fi

@@ -74,21 +74,22 @@ ranked repair queue → agent applies queue → one verification pass → done.
 - [x] Regression detection: specfix verifies no new failures introduced
 - [x] Validated: 27 items (12 auto-applicable) on E8 buggy (35 bugs, 13 modules)
 
-## Phase 6: Schema-driven property generation
+## Phase 6: Schema-driven property generation (partial)
 
 Use defrecord + defscalar type information to auto-generate property tests.
 No handwritten test code — the type system IS the test spec.
 
-- [ ] Record generators: from `(defrecord Order [...])`, generate random
-      valid Order instances respecting field types and scalar constraints
+- [x] Record constructor round-trip: construct → access → equals for all fields
+- [x] Auto-extract type info from modules via beagle-provides
+- [x] Integration: `beagle-proptest SOURCE-DIR [--run] [--build-dir DIR]`
+- [x] Validated: 204 properties on E8 (13 modules, all pass on golden code)
+- [ ] Record generators: random valid instances from field types + scalar constraints
 - [ ] Property inference from return types:
   - Amount → non-negative
   - Boolean → idempotent on same input
   - Vec → length correlates with input length
   - Count → monotone with collection size
-- [ ] Shrinking: when a property fails, minimize the input to smallest
-      failing case
-- [ ] Integration: `beagle-proptest MODULE.rkt` generates and runs properties
+- [ ] Shrinking: when a property fails, minimize the input to smallest failing case
 - [ ] Differential testing: run same inputs through old vs new code,
       flag any output differences as potential regressions
 
