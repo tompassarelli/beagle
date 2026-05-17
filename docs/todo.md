@@ -122,6 +122,57 @@ assertions — the compiler derives what "correct" means.
 - [ ] Multi-arg function coverage: generate valid inputs for 2+ arg functions
       using cross-product of test data instances
 
+## Now: E9 — validate the repair toolchain in an agent workflow
+
+### Step 1: Agent prompt spring-cleaning
+
+Update all agent-facing docs so the repair tools are discoverable:
+
+- [ ] `docs/cheatsheet.md` — add repair toolchain section (beagle-repair,
+      beagle-trace, beagle-specfix, beagle-cascade, beagle-oracle)
+- [ ] Experiment prompt template — include tool descriptions + usage examples
+      in the system context for beagle-track agents
+- [ ] `docs/agent-workflow.md` — decision tree for which tool to use when:
+      compile error → check fix plan; logic bug → blame + trace + specfix;
+      cascade → find root before fixing symptoms; oracle → verify all at once
+
+### Step 2: E9 experiment design
+
+Same E8 system (13 modules, 8570 LOC, 35 bugs, 484 assertions) but the
+agent's system prompt includes the full repair toolchain.
+
+- [ ] E9 beagle spec: agent has beagle-check-all + beagle-repair + beagle-trace
+      + beagle-cascade. Workflow: run beagle-repair first, apply AUTO fixes,
+      then iterate on SUGGEST items with trace guidance
+- [ ] E9 clojure spec: same as E8 (no type tools, just oracle + grep)
+- [ ] Hypothesis: beagle-repair's 12 auto-applicable fixes → 12 fewer
+      reasoning cycles → ≥40% speed improvement over E8 run3 (76 turns)
+
+### Step 3: Run E9 (3 runs each track)
+
+- [ ] E9-beagle-run1, run2, run3
+- [ ] E9-clojure-run1, run2, run3
+- [ ] Metrics: turns, wall time, tokens, bugs found per phase (auto vs manual)
+
+### Step 4: Document results
+
+- [ ] `experiments/e9-repair-toolchain/results.md`
+- [ ] Devlog entry: E9 results + interpretation
+- [ ] Update todo.md Done section
+
+## Soon: Daemon mode (reduce startup cost)
+
+As tools are invoked more frequently (repair pipeline calls specfix, blame,
+trace, cascade in sequence), the per-invocation startup cost of loading
+Racket modules + parsing source adds up. A long-running daemon would:
+
+- [ ] `beagle-daemon` — persistent Racket process accepting queries over socket/pipe
+- [ ] Cache parsed ASTs, type environments, call graphs across invocations
+- [ ] Protocol: JSON-RPC or simple line protocol (tool name + args → result)
+- [ ] Benchmark: measure current per-tool startup cost vs daemon amortized cost
+- [ ] Integration: tool scripts detect running daemon and route through it
+- [ ] Threshold experiment: at what invocation frequency does daemon pay for itself?
+
 ## Someday (infrastructure)
 
 - **Reader normalization pass.** `#%brackets` tags → typed AST nodes.

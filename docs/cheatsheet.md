@@ -458,16 +458,39 @@ Each note means: something is wrong at that location. Common fixes:
 
 ## Tools
 
+### Compile & check
 - `bin/beagle-build SOURCE.rkt [OUT.clj]` — compile one file
-- `bin/beagle-build-all FILE-OR-DIR... [--out DIR]` — batch compile (9x faster)
+- `bin/beagle-build-all FILE-OR-DIR... [--out DIR] [--warn]` — batch compile (9x faster); `--warn` emits despite type errors
 - `bin/beagle-check SOURCE.rkt` — type-check only, no emit
 - `bin/beagle-check-all FILE-OR-DIR...` — batch type-check (10x faster)
 - `bin/beagle-expand SOURCE.rkt` — show post-macro source
+
+### Query
 - `bin/beagle-sig FN-NAME FILE-OR-DIR...` — print function's type signature
 - `bin/beagle-fields RECORD FILE-OR-DIR...` — print record fields + accessors
 - `bin/beagle-callers FN-NAME FILE-OR-DIR...` — find all call sites
 - `bin/beagle-provides FILE-OR-DIR...` — list module exports with types
 - `bin/beagle-impact FN-NAME FILE-OR-DIR...` — callers + impact of signature change
+
+### Repair toolchain (use these to fix bugs efficiently)
+- `bin/beagle-repair SOURCE-DIR VERIFY [--auto]` — **start here.** Runs the full pipeline and produces a ranked repair queue. Items marked AUTO can be applied directly; SUGGEST items need manual judgment.
+- `bin/beagle-trace BUILD-DIR VERIFY [--focus FN]` — when a logic bug isn't obvious, trace shows the exact arithmetic operation that diverged and its source line.
+- `bin/beagle-specfix BUILD-DIR VERIFY` — generates candidate fixes from ratio analysis, verifies each against the oracle. Only reports fixes that pass with 0 regressions.
+- `bin/beagle-cascade SOURCE-DIR VERIFY --from-failures` — when many assertions fail, this finds root causes. Fix the highest-cascade-score function first (one fix may resolve multiple downstream failures).
+- `bin/beagle-blame BUILD-DIR VERIFY` — quick ratio hints (sign error, multiplier, boolean flip). Useful for fast triage.
+- `bin/beagle-oracle GOLDEN-DIR [--diff MODIFIED-DIR]` — generates a verify script from golden code. Use `--diff` to find which functions produce different output.
+- `bin/beagle-proptest SOURCE-DIR [--run]` — generates structural property tests from type info (record round-trips).
+
+### Repair workflow (recommended order)
+
+1. `beagle-repair src/ verify.clj` — get the ranked queue
+2. Apply all AUTO fixes (or use `--auto`)
+3. `beagle-build-all --warn src/ --out .build/` — recompile
+4. Run oracle: `clojure -Sdeps '{:paths [".build/"]}' -M -e '(load-file "verify.clj")'`
+5. For remaining failures: `beagle-trace .build/ verify.clj` to see divergence
+6. `beagle-cascade src/ verify.clj --from-failures` to find root causes
+7. Fix root causes first (highest cascade score), rerun oracle
+8. Iterate until 0 failures
 
 ## Empirical baseline
 
