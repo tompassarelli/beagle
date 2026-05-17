@@ -1,112 +1,51 @@
 # beagle
 
-> follow your nose
+A language where the compiler does the debugging.
 
-A typed authoring layer for Clojure that minimizes repair distance for
-LLM agents. Compile-time type checking, a repair compiler toolchain,
-and persistent query infrastructure — all designed so AI can find and
-fix bugs faster than untyped alternatives.
+Beagle is a typed authoring layer that compiles to Clojure. Racket
+frontend, custom `#lang`, static type checking — emits plain `.clj`
+for runtime. Built for LLM agents: rich types, explicit forms, low
+syntactic surface area, structured errors. One canonical idiom per
+concept.
 
-**LLM authoring is a first-class concern.** Rich types, explicit forms,
-low syntactic surface area, structured errors. One canonical idiom per
-concept. The type system is a query interface, not a proof obligation.
+## Thesis
 
-## Status
+Beagle does not maximize type purity. Beagle minimizes *repair
+distance* — the work between "here is a bug" and "here is the fix."
 
-`#lang beagle` v0.3 — 331 tests passing, empirically validated at 8500
-LOC scale.
+Types catch shape errors at compile time. A repair compiler turns
+runtime failures into ranked, machine-actionable fix candidates. The
+compiler annotates problems — it doesn't block execution.
 
-**Key result (E4):** At 13 modules / 8570 LOC / 35 injected bugs,
-beagle achieves 3/3 correctness passes vs clojure's 0/3 — the first
-reproducible divergence where types produce measurably better outcomes.
+## Evidence
+
+**E4** (13 modules, 8570 LOC, 35 injected bugs): beagle achieves 3/3
+correctness passes vs clojure's 0/3 — first reproducible divergence
+where types produce measurably better outcomes.
+
+**E8** (same system + repair compiler): beagle 76 turns / 375s vs
+clojure 92 turns / 485s. 23% faster with full oracle.
 
 ## Architecture
 
 ```
 source.rkt → parse → check → emit → output.clj
-                ↑
-      repair compiler (blame, trace, specfix, cascade)
-                ↑
-          daemon (persistent AST cache, 45× query speedup)
+                       ↑
+             repair compiler (blame, trace, specfix, cascade)
+                       ↑
+                 daemon (persistent AST cache, 45× query speedup)
 ```
 
-## What works
+- `lang/reader.rkt` — custom reader preserving `[]` vs `()`
+- `private/parse.rkt` — source → AST (two-pass: meta collection, then exprs)
+- `private/check.rkt` — type checking, record fields, flow narrowing
+- `private/emit.rkt` — AST → qualified Clojure source with source maps
+- `private/daemon.rkt` — TCP server, AST cache with mtime invalidation
 
-**Language:**
-`def`, `defn` (single + multi-arity), `fn`, `let`, `if`, `cond`,
-`when`, `do`, `match`, `loop`/`recur`, `for`/`doseq`, `try`/`catch`,
-`case`, `defrecord`, `with` (typed record update), `defenum`,
-`defprotocol`, `defmulti`/`defmethod`, `deftype`, `extend-type`,
-threading (`->`, `->>`), map/set literals, keyword-as-function,
-destructuring (map + sequential), `defscalar` (nominal wrappers)
+Plain `#lang racket/base` throughout — beagle implements its own type
+system rather than using Typed Racket.
 
-**Types:**
-Primitives, function types (variadic), parametric (`Vec`, `Map`, `Set`),
-union, nullable sugar (`String?`), polymorphic (`forall`), user records,
-nominal scalars. Flow-sensitive narrowing in `if`/`cond`/`when`.
-
-**Stdlib:** ~607 Clojure functions pre-typed. Key HOFs polymorphic.
-
-**Cross-module:** `(require module :as alias)` imports types, records,
-constructors, accessors, macros. All validated at call sites.
-
-**Diagnostics:** Rust-style error display with source lines, signatures,
-"did you mean?" suggestions. JSON mode for zero-tool-call bug fixes.
-
-## Repair compiler
-
-The repair compiler closes the loop: agent writes code → evidence
-system produces a ranked repair queue → agent applies fixes → done.
-
-| Tool | Purpose | Speed |
-|------|---------|-------|
-| `beagle-repair` | Unified pipeline: type errors + blame + specfix → ranked queue | ~5s with daemon |
-| `beagle-trace` | Per-assertion arithmetic trace — exact divergence point | ~0.5s/assertion |
-| `beagle-specfix` | Oracle-guided candidate fixes (verified, not suggested) | ~5s with bb |
-| `beagle-cascade` | Call graph impact — find root causes, not symptoms | <1s |
-| `beagle-blame` | Ratio analysis: sign error, wrong operator, missing term | <1s |
-| `beagle-oracle` | Generate oracle from golden code (golden = test spec) | ~0.5s with bb |
-
-## Query tools (daemon-accelerated)
-
-The type system is a query interface for agents:
-
-```bash
-beagle-sig order-total .           # [Order -> Amount]
-beagle-fields Invoice .            # id, order-id, total, status...
-beagle-callers order-total .       # all call sites + arg counts
-beagle-provides billing.rkt        # full module export list
-beagle-impact order-total .        # callers + downstream effects
-```
-
-With daemon running: 10ms per query (vs 450ms cold).
-
-## Daemon
-
-`beagle-daemon start` launches a persistent Racket process that caches
-parsed ASTs with mtime invalidation. Query tools transparently route
-through it when running, fall back to cold Racket when not.
-
-```bash
-beagle-daemon start     # TCP server, ephemeral port
-beagle-daemon status    # JSON: cached file count, uptime
-beagle-daemon stop      # graceful shutdown
-```
-
-Oracle runs use Babashka (`bb`) instead of JVM Clojure: 0.18s vs 2.14s
-for 484 assertions.
-
-## Build & check
-
-```bash
-bin/beagle-build-all *.rkt --out .build/   # batch compile (9× vs sequential)
-bin/beagle-check-all .                      # batch type-check (10× vs sequential)
-bin/beagle-build source.rkt [out.clj]       # single file
-bin/beagle-check source.rkt                 # type-check only
-bin/beagle-expand source.rkt                # post-macro expansion
-```
-
-## A sample program
+## A program
 
 ```racket
 #lang beagle
@@ -114,48 +53,106 @@ bin/beagle-expand source.rkt                # post-macro expansion
 (define-mode strict)
 (require catalog :as cat)
 
-(defscalar WarehouseId Long)
-
-(defrecord StockLevel [(warehouse-id : WarehouseId)
-                       (product-id : cat/ProductId)
-                       (quantity : Long)
-                       (min-quantity : Long)])
+(defrecord StockLevel [(product-id : Long)
+                       (quantity   : Long)
+                       (min-qty   : Long)])
 
 (defn understocked? [(s : StockLevel)] : Boolean
-  (< (stocklevel-quantity s) (stocklevel-min-quantity s)))
+  (< (stocklevel-quantity s) (stocklevel-min-qty s)))
 
 (defn reorder-quantity [(s : StockLevel)] : Long
   (if (understocked? s)
-      (- (stocklevel-min-quantity s) (stocklevel-quantity s))
+      (- (stocklevel-min-qty s) (stocklevel-quantity s))
       0))
 ```
 
+## Language
+
+**Forms:** `def`, `defn` (single + multi-arity, varargs with `&`),
+`fn`, `let`, `if`, `cond`, `when`, `do`, `match`, `loop`/`recur`,
+`for`/`doseq`, `try`/`catch`, `case`, `defrecord`, `with` (typed
+record update), `defenum`, `defprotocol`, `defmulti`/`defmethod`,
+`deftype`, `extend-type`, `defscalar`, threading (`->`, `->>`),
+map/set literals, keyword-as-function, destructuring
+
+**Types:** primitives (`String`, `Long`, `Double`, `Boolean`,
+`Keyword`, `Symbol`, `Nil`, `Any`), function types (variadic),
+parametric (`Vec`, `Map`, `Set`), union (`U`), nullable (`String?`),
+polymorphic (`forall`), user records, nominal scalars
+
+**Cross-module:** `(require module :as alias)` imports types, records,
+constructors, accessors, macros — all validated at call sites
+
+**Stdlib:** ~607 Clojure functions pre-typed, key HOFs polymorphic
+
+**Diagnostics:** Rust-style errors with source lines, signatures,
+"did you mean?" suggestions; JSON mode for programmatic consumption
+
+## Repair compiler
+
+The repair compiler closes the loop: agent writes code → evidence
+system produces a ranked repair queue → agent applies fixes → done.
+
+| Tool | What it does |
+|------|-------------|
+| `beagle-repair` | Unified pipeline: type errors + blame + specfix → ranked queue |
+| `beagle-trace` | Per-assertion arithmetic trace — exact divergence point |
+| `beagle-specfix` | Oracle-guided candidate fixes (verified, not suggested) |
+| `beagle-cascade` | Call graph impact — find root causes, not symptoms |
+| `beagle-blame` | Ratio analysis: sign error, wrong operator, missing term |
+| `beagle-oracle` | Behavioral oracle from golden code (golden = test spec) |
+
+## Query tools
+
+The type system is a query interface, not just a proof obligation.
+With daemon running: 10ms per query (vs 450ms cold).
+
+```bash
+beagle-sig order-total .           # [Order -> Amount]
+beagle-fields Invoice .            # typed fields + accessors
+beagle-callers order-total .       # all call sites + arg counts
+beagle-provides billing.rkt        # full module export list
+beagle-impact order-total .        # callers + downstream effects
+```
+
+```bash
+beagle-daemon start     # persistent TCP server, ephemeral port
+beagle-daemon status    # cached file count, uptime
+beagle-daemon stop      # graceful shutdown
+```
+
+## Build & check
+
+```bash
+beagle-build-all *.rkt --out .build/   # batch compile (9×)
+beagle-check-all .                     # batch type-check (10×)
+beagle-build source.rkt [out.clj]      # single file
+beagle-check source.rkt                # type-check only
+beagle-expand source.rkt               # post-macro expansion
+```
+
+Oracle runs use Babashka for 12× speedup over JVM Clojure.
+
 ## Escape hatches
 
-1. `(unsafe "raw clojure")` — literal Clojure string
+1. `(unsafe "raw clojure")` — literal Clojure, top-level or expression
 2. `(define-macro unsafe ...)` — macro expansion typed as `Any`
 3. `(define-mode dynamic)` — skip type checking for a file
-4. Hand-written `.clj` — the module boundary is an escape hatch
+4. `--warn` flag — emit despite type errors (annotate, don't block)
 
 ## Setup
 
-Requires [Racket](https://racket-lang.org/) and [Babashka](https://babashka.org/).
+Requires [Racket](https://racket-lang.org/) and
+[Babashka](https://babashka.org/).
 
 ```
 raco pkg install --link --auto /path/to/beagle
-```
-
-## Tests
-
-```
-raco test tests/
+raco test tests/   # 338 tests
 ```
 
 ## Reference
 
-- `docs/cheatsheet.md` — single-page LLM-grounding reference
-- `docs/agent-workflow.md` — decision tree for repair tool routing
+- `docs/cheatsheet.md` — single-page language reference (LLM context)
+- `docs/agent-workflow.md` — repair tool routing decision tree
 - `docs/forms.md` — canonical form catalog
-- `docs/todo.md` — roadmap and completed work
-- `docs/devlog/` — development journal (discoveries + experiments)
-- `experiments/` — benchmark framework (E1–E9)
+- `docs/devlog/` — development journal, 12 entries over 48 hours
