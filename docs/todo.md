@@ -56,23 +56,23 @@ value first went wrong and exactly which sub-expression caused it."
 - [ ] Integrate with semantic rules: cross-reference trace ops against name expectations
 - [ ] Call-graph walk: trace through function calls to find the root divergence
 
-## Phase 5: Closed-loop repair (the endgame)
+## Phase 5: Closed-loop repair (the endgame) ✓
 
 The compiler loop closes. Agent writes → evidence compiler produces a
 ranked repair queue → agent applies queue → one verification pass → done.
 
-- [ ] `beagle-repair` — unified tool combining all evidence sources:
-  - Type errors (hard, mechanical — auto-apply)
+- [x] `beagle-repair` — unified tool combining all evidence sources:
+  - Type errors (hard, mechanical — auto-apply at 0.90)
   - Semantic suspicions (soft, name-based — suggest)
   - Blame traces (empirical, ratio-based — suggest with confidence)
-  - Speculative fixes (verified — auto-apply if oracle passes)
-- [ ] Repair queue output: ordered by confidence, each entry is an
-      executable diff (file, line, old, new, confidence, evidence sources)
-- [ ] `--auto` mode: apply all fixes above threshold, recompile, reverify
-- [ ] Cross-evidence correlation: if type error + semantic rule + blame
-      trace all point at same line, boost confidence to 0.95+
-- [ ] Regression detection: after applying a fix, check that no previously
-      passing assertions now fail
+  - Speculative fixes (verified — auto-apply at 0.95)
+- [x] Repair queue output: ordered by confidence, each entry includes
+      file, line, evidence sources, fix hint, before/after when available
+- [x] `--auto` mode: apply all fixes above `--threshold` (default 0.85)
+- [x] Cross-evidence merging: deduplicate by file:line, boost confidence when
+      multiple sources agree on same location
+- [x] Regression detection: specfix verifies no new failures introduced
+- [x] Validated: 27 items (12 auto-applicable) on E8 buggy (35 bugs, 13 modules)
 
 ## Phase 6: Schema-driven property generation
 

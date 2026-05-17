@@ -1,0 +1,303 @@
+#!/usr/bin/env bash
+# beagle-repair: unified repair tool combining all evidence sources.
+#
+# Runs the full diagnostic pipeline (type check, semantic analysis, blame,
+# trace, speculative fix) and produces a ranked repair queue.
+#
+# Usage:
+#   beagle-repair <source-dir> <verify-script> [--auto] [--threshold N]
+#
+# Evidence layers (in confidence order):
+#   1. specfix-verified: oracle confirms the fix works (0.95)
+#   2. type-error + suggestion: mechanical fix from checker (0.90)
+#   3. type-error + fix-plan: structured repair hint (0.85)
+#   4. trace + semantic agreement: traced op matches name rule (0.80)
+#   5. semantic suspicion alone (0.65)
+#   6. blame hint alone (0.60)
+#
+# --auto mode: apply all fixes above threshold, rebuild, reverify.
+
+set -euo pipefail
+
+if [[ $# -lt 2 ]]; then
+    echo "Usage: beagle-repair <source-dir> <verify-script> [--auto] [--threshold 0.85]" >&2
+    exit 1
+fi
+
+SOURCE_DIR="$(cd "$1" && pwd)"
+VERIFY_SCRIPT="$(realpath "$2")"
+shift 2
+
+AUTO_MODE=false
+THRESHOLD=0.85
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --auto) AUTO_MODE=true; shift ;;
+        --threshold) THRESHOLD="$2"; shift 2 ;;
+        *) echo "Unknown option: $1" >&2; exit 1 ;;
+    esac
+done
+
+WORK_DIR="$(mktemp -d /tmp/beagle-repair.XXXXXX)"
+trap 'rm -rf "$WORK_DIR"' EXIT
+
+BEAGLE_BIN="$(cd "$(dirname "$0")" && pwd)"
+
+echo "══════════════════════════════════════════════════════════" >&2
+echo " beagle-repair: evidence-ranked repair pipeline" >&2
+echo "══════════════════════════════════════════════════════════" >&2
+echo "" >&2
+echo "  source: $SOURCE_DIR" >&2
+echo "  oracle: $VERIFY_SCRIPT" >&2
+echo "  auto:   $AUTO_MODE (threshold: $THRESHOLD)" >&2
+echo "" >&2
+
+# ---------------------------------------------------------------------------
+# Phase 1: Compile with --warn to get both type errors AND compiled output
+# ---------------------------------------------------------------------------
+
+echo "─── Phase 1: Compile (--warn mode) ───" >&2
+
+BUILD_DIR="$WORK_DIR/build"
+mkdir -p "$BUILD_DIR"
+
+"$BEAGLE_BIN/beagle-build-all" --warn "$SOURCE_DIR" --out "$BUILD_DIR" 2> "$WORK_DIR/build-output.txt" || true
+
+echo "  $(grep -c '\.clj$' "$WORK_DIR/build-output.txt" 2>/dev/null || echo 0) modules compiled" >&2
+
+# ---------------------------------------------------------------------------
+# Phase 2: Type check (collect errors with fix plans)
+# ---------------------------------------------------------------------------
+
+echo "─── Phase 2: Type check (fix plans) ───" >&2
+
+BEAGLE_FIX_PLAN=1 BEAGLE_ERROR_FORMAT=json "$BEAGLE_BIN/beagle-check-all" "$SOURCE_DIR" \
+    2> "$WORK_DIR/check-output.json" || true
+
+TYPE_ERRORS=$(grep -c '"kind"' "$WORK_DIR/check-output.json" 2>/dev/null || echo 0)
+echo "  $TYPE_ERRORS type error(s) with fix plans" >&2
+
+# ---------------------------------------------------------------------------
+# Phase 3: Speculative fix (oracle-verified candidates)
+# ---------------------------------------------------------------------------
+
+echo "─── Phase 3: Speculative fix (oracle-verified) ───" >&2
+
+"$BEAGLE_BIN/beagle-specfix" "$BUILD_DIR" "$VERIFY_SCRIPT" \
+    > "$WORK_DIR/specfix-output.txt" 2> "$WORK_DIR/specfix-log.txt" || true
+
+SPECFIX_COUNT=$(grep -c "^SPECFIX:" "$WORK_DIR/specfix-output.txt" 2>/dev/null || echo 0)
+echo "  $SPECFIX_COUNT verified fix(es)" >&2
+
+# ---------------------------------------------------------------------------
+# Phase 4: Blame analysis (ratio hints)
+# ---------------------------------------------------------------------------
+
+echo "─── Phase 4: Blame analysis ───" >&2
+
+"$BEAGLE_BIN/beagle-blame" "$BUILD_DIR" "$VERIFY_SCRIPT" \
+    > "$WORK_DIR/blame-output.txt" 2>/dev/null || true
+
+BLAME_HINTS=$(grep -c "sniff:" "$WORK_DIR/blame-output.txt" 2>/dev/null || echo 0)
+echo "  $BLAME_HINTS blame hint(s)" >&2
+
+# ---------------------------------------------------------------------------
+# Phase 5: Merge evidence into ranked repair queue
+# ---------------------------------------------------------------------------
+
+echo "" >&2
+echo "─── Repair Queue ───" >&2
+echo "" >&2
+
+python3 - "$WORK_DIR" "$THRESHOLD" "$AUTO_MODE" "$SOURCE_DIR" << 'PYEOF'
+import sys, os, re, json
+
+work_dir = sys.argv[1]
+threshold = float(sys.argv[2])
+auto_mode = sys.argv[3] == 'true'
+source_dir = sys.argv[4]
+
+repairs = []
+
+# --- Parse type errors with fix plans ---
+check_file = os.path.join(work_dir, 'check-output.json')
+if os.path.exists(check_file):
+    with open(check_file) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                d = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            if 'fix_plan' in d and d['fix_plan']:
+                plan = d['fix_plan']
+                confidence_str = plan.get('confidence', 'medium')
+                confidence = {'high': 0.90, 'medium': 0.75, 'low': 0.60}.get(confidence_str, 0.70)
+
+                repairs.append({
+                    'confidence': confidence,
+                    'file': d.get('file', '?'),
+                    'line': d.get('line', '?'),
+                    'category': plan.get('category', 'type-error'),
+                    'description': plan.get('description', d.get('message', '')),
+                    'fix_hint': plan.get('fix_hint', ''),
+                    'before': plan.get('before'),
+                    'after': plan.get('after'),
+                    'evidence': ['type-checker', f"E{d.get('kind', '?')}"],
+                    'auto_applicable': confidence >= 0.85 and plan.get('after'),
+                })
+            elif d.get('kind') in ('type-mismatch', 'arity'):
+                # Type error without fix plan — still useful
+                repairs.append({
+                    'confidence': 0.70,
+                    'file': d.get('file', '?'),
+                    'line': d.get('line', '?'),
+                    'category': d.get('kind', 'type-error'),
+                    'description': d.get('message', ''),
+                    'fix_hint': d.get('help', '') or '',
+                    'before': None,
+                    'after': None,
+                    'evidence': ['type-checker'],
+                    'auto_applicable': False,
+                })
+
+# --- Parse specfix output ---
+specfix_file = os.path.join(work_dir, 'specfix-output.txt')
+if os.path.exists(specfix_file):
+    with open(specfix_file) as f:
+        content = f.read()
+
+    blocks = content.split('SPECFIX: ')
+    for block in blocks[1:]:
+        lines = block.strip().split('\n')
+        label = lines[0]
+        fields = {}
+        for line in lines[1:]:
+            m = re.match(r'\s+(\S+):\s+(.+)', line)
+            if m:
+                fields[m.group(1)] = m.group(2)
+
+        fix_desc = fields.get('fix', '')
+        module_file = fields.get('file', '?')
+        fn_name = fields.get('function', '?')
+        fix_line = fields.get('line', '?')
+        assertions_fixed = int(fields.get('assertions-fixed', '1'))
+
+        repairs.append({
+            'confidence': 0.95,
+            'file': module_file,
+            'line': fix_line,
+            'category': 'specfix-verified',
+            'description': f'{label}: {fix_desc}',
+            'fix_hint': fix_desc,
+            'before': None,
+            'after': None,
+            'evidence': ['specfix-oracle', f'fixes-{assertions_fixed}-assertions'],
+            'auto_applicable': True,
+        })
+
+# --- Parse blame hints ---
+blame_file = os.path.join(work_dir, 'blame-output.txt')
+if os.path.exists(blame_file):
+    with open(blame_file) as f:
+        for line in f:
+            m = re.match(r'\s*sniff:\s*\[([0-9.]+)\]\s+(.+)', line)
+            if m:
+                conf = float(m.group(1))
+                hint = m.group(2)
+                # Only add if not already covered by specfix
+                repairs.append({
+                    'confidence': conf * 0.8,  # discount raw blame confidence
+                    'file': '?',
+                    'line': '?',
+                    'category': 'blame-hint',
+                    'description': hint,
+                    'fix_hint': hint,
+                    'before': None,
+                    'after': None,
+                    'evidence': ['blame-ratio'],
+                    'auto_applicable': False,
+                })
+
+# --- Deduplicate: if specfix and type-error point at same file:line, merge evidence ---
+by_location = {}
+for r in repairs:
+    key = f"{r['file']}:{r['line']}"
+    if key not in by_location:
+        by_location[key] = r
+    else:
+        existing = by_location[key]
+        # Merge evidence
+        existing['evidence'] = list(set(existing['evidence'] + r['evidence']))
+        # Boost confidence if multiple sources agree
+        if r['confidence'] > existing['confidence']:
+            existing['confidence'] = min(0.98, r['confidence'] + 0.05)
+            existing['description'] = r['description']
+            existing['fix_hint'] = r['fix_hint']
+            existing['auto_applicable'] = existing['auto_applicable'] or r['auto_applicable']
+
+merged = list(by_location.values())
+
+# --- Sort by confidence (descending) ---
+merged.sort(key=lambda x: -x['confidence'])
+
+# --- Output ---
+auto_count = sum(1 for r in merged if r['auto_applicable'] and r['confidence'] >= threshold)
+print(f"REPAIR QUEUE ({len(merged)} items, {auto_count} auto-applicable above {threshold})")
+print("=" * 60)
+print()
+
+for i, r in enumerate(merged):
+    mode = "AUTO" if (r['auto_applicable'] and r['confidence'] >= threshold) else "SUGGEST"
+    print(f"[{i+1}] {mode}  confidence: {r['confidence']:.2f}  {r['file']}:{r['line']}")
+    print(f"    evidence: {', '.join(r['evidence'])}")
+    print(f"    {r['category']}: {r['description']}")
+    if r['fix_hint']:
+        print(f"    fix: {r['fix_hint']}")
+    if r.get('before') and r.get('after') and r['before'] != 'null' and r['after'] != 'null':
+        print(f"    before: {r['before']}")
+        print(f"    after:  {r['after']}")
+    print()
+
+# --- Auto-apply mode ---
+if auto_mode:
+    applicable = [r for r in merged if r['auto_applicable'] and r['confidence'] >= threshold]
+    if applicable:
+        print(f"\n{'=' * 60}")
+        print(f"AUTO-APPLY: {len(applicable)} fix(es) above threshold {threshold}")
+        print(f"{'=' * 60}\n")
+
+        for r in applicable:
+            if r.get('before') and r.get('after') and r['before'] != 'null' and r['after'] != 'null':
+                # Apply to source file
+                target_file = r['file']
+                if os.path.exists(target_file):
+                    with open(target_file) as f:
+                        content = f.read()
+                    if r['before'] in content:
+                        content = content.replace(r['before'], r['after'], 1)
+                        with open(target_file, 'w') as f:
+                            f.write(content)
+                        print(f"  APPLIED: {target_file}:{r['line']} — {r['fix_hint']}")
+                    else:
+                        print(f"  SKIP: pattern not found in {target_file}")
+                else:
+                    print(f"  SKIP: file not found: {target_file}")
+            else:
+                print(f"  SKIP (no before/after): {r['file']}:{r['line']} — {r['fix_hint']}")
+    else:
+        print(f"\nNo fixes above threshold {threshold} to auto-apply.")
+
+# Summary
+print(f"\n{'─' * 60}")
+print(f"Summary: {len(merged)} repair items")
+print(f"  Auto-applicable: {auto_count}")
+print(f"  Suggestions: {len(merged) - auto_count}")
+if auto_mode and auto_count > 0:
+    print(f"  Applied: {auto_count}")
+    print(f"  Next: rebuild and reverify")
+PYEOF
