@@ -159,15 +159,15 @@
     (match form
       [(def-form name (? type? t) _) (hash-set! env name t)]
       [(defonce-form name (? type? t) _) (hash-set! env name t)]
-      [(defn-form name params rest-p (? type? ret) _)
+      [(defn-form name params rest-p (? type? ret) _ _)
        (define rtype (and rest-p (param-or-destr-type rest-p)))
        (hash-set! env name
                   (type-fn (map param-or-destr-type params) rtype ret))]
-      [(defn-form name params rest-p #f _)
+      [(defn-form name params rest-p #f _ _)
        (define rtype (and rest-p (param-or-destr-type rest-p)))
        (hash-set! env name
                   (type-fn (map param-or-destr-type params) rtype ANY))]
-      [(defn-multi name arities)
+      [(defn-multi name arities _)
        (define alt-types
          (for/list ([a (in-list arities)])
            (define rp (arity-clause-rest-param a))
@@ -276,7 +276,7 @@
                              'actual (type->string inferred))
                      #:src (src-for value))))]
 
-    [(defn-form name params rest-p expected-ret body)
+    [(defn-form name params rest-p expected-ret body _)
      (define all-params (if rest-p (append params (list rest-p)) params))
      (define body-env (extend-with-params env all-params))
      (parameterize ([current-check-fn-name name])
@@ -294,7 +294,7 @@
                                'actual (type->string last-type))
                        #:src (src-for (last body))))))]
 
-    [(defn-multi name arities)
+    [(defn-multi name arities _)
      (for ([a (in-list arities)])
        (define body-env (extend-with-params env (arity-clause-params a)))
        (define a-body (arity-clause-body a))

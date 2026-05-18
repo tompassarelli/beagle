@@ -183,12 +183,12 @@
           (hash-set! inner n #t)])
        (check-shadow (let-binding-value b) inner ctx))
      (for ([e (in-list body)]) (check-shadow e inner ctx))]
-    [(defn-form name params _rest-p _ body)
+    [(defn-form name params _rest-p _ body _private?)
      (define inner (scope-copy scope))
      (for ([p (in-list params)])
        (add-param-to-scope! p inner))
      (for ([e (in-list body)]) (check-shadow e inner name))]
-    [(defn-multi name arities)
+    [(defn-multi name arities _private?)
      (for ([a (in-list arities)])
        (define inner (scope-copy scope))
        (for ([p (in-list (arity-clause-params a))])
@@ -362,7 +362,7 @@
     [(? symbol?) (hash-set! used form #t)]
     [(def-form _ _ value) (collect-symbols value used)]
     [(defonce-form _ _ value) (collect-symbols value used)]
-    [(defn-form _ _ _ _ body)
+    [(defn-form _ _ _ _ body _)
      (for ([e (in-list body)]) (collect-symbols e used))]
     [(fn-form _ _ _ body)
      (for ([e (in-list body)]) (collect-symbols e used))]

@@ -132,8 +132,8 @@
 (struct ns-decl     (name)                                  #:transparent)
 (struct mode-decl   (mode)                                  #:transparent)
 (struct def-form    (name type value)                       #:transparent)
-(struct defn-form   (name params rest-param return-type body) #:transparent)
-(struct defn-multi  (name arities)                           #:transparent)
+(struct defn-form   (name params rest-param return-type body private?) #:transparent)
+(struct defn-multi  (name arities private?)                   #:transparent)
 (struct arity-clause (params rest-param return-type body)    #:transparent)
 (struct fn-form     (params rest-param return-type body)    #:transparent)
 (struct let-form    (bindings body)                         #:transparent)
@@ -723,18 +723,35 @@
     [(list 'defn (? symbol? name) first-clause rest-clauses ...)
      #:when (multi-arity-form? first-clause)
      (defn-multi name (map parse-arity-clause
-                           (cons first-clause rest-clauses)))]
+                           (cons first-clause rest-clauses)) #f)]
 
     [(list 'defn (? symbol? name) params-form marker return-type body ...)
      #:when (annotation-marker? marker)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
                   (parse-type return-type)
-                  (parse-body (or (stx-tail subs 5) body))))]
+                  (parse-body (or (stx-tail subs 5) body)) #f))]
     [(list 'defn (? symbol? name) params-form body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
-                  #f (parse-body (or (stx-tail subs 3) body))))]
+                  #f (parse-body (or (stx-tail subs 3) body)) #f))]
+
+    ;; defn- (private defn)
+    [(list 'defn- (? symbol? name) first-clause rest-clauses ...)
+     #:when (multi-arity-form? first-clause)
+     (defn-multi name (map parse-arity-clause
+                           (cons first-clause rest-clauses)) #t)]
+
+    [(list 'defn- (? symbol? name) params-form marker return-type body ...)
+     #:when (annotation-marker? marker)
+     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
+       (defn-form name parsed rest-p
+                  (parse-type return-type)
+                  (parse-body (or (stx-tail subs 5) body)) #t))]
+    [(list 'defn- (? symbol? name) params-form body ...)
+     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
+       (defn-form name parsed rest-p
+                  #f (parse-body (or (stx-tail subs 3) body)) #t))]
 
     [(list 'defrecord (? symbol? name) fields-form)
      (record-form name (parse-record-fields (or (stx-ref subs 2) fields-form)))]

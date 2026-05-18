@@ -161,18 +161,21 @@
              (emit-expr (defonce-form-value f)))]
 
     [(defn-form? f)
-     (format "(defn ~a [~a]\n  ~a)"
+     (define kw (if (defn-form-private? f) "defn-" "defn"))
+     (format "(~a ~a [~a]\n  ~a)"
+             kw
              (defn-form-name f)
              (emit-params-with-rest (defn-form-params f) (defn-form-rest-param f))
              (emit-body (defn-form-body f) "  "))]
 
     [(defn-multi? f)
+     (define kw (if (defn-multi-private? f) "defn-" "defn"))
      (define arity-strs
        (for/list ([a (in-list (defn-multi-arities f))])
          (format "  ([~a]\n    ~a)"
                  (emit-params-with-rest (arity-clause-params a) (arity-clause-rest-param a))
                  (emit-body (arity-clause-body a) "    "))))
-     (format "(defn ~a\n~a)" (defn-multi-name f) (string-join arity-strs "\n"))]
+     (format "(~a ~a\n~a)" kw (defn-multi-name f) (string-join arity-strs "\n"))]
 
     [(record-form? f)
      (emit-record f)]
