@@ -52,12 +52,13 @@ One command wires up everything for Claude Code: daemon, hooks, system prompt.
 Package beagle as a proper Racket package so it can be installed via `raco pkg install`
 from the catalog (not just `--link`).
 
-- [ ] Add `info.rkt` with proper deps, collection, and pkg metadata
+- [x] Add `info.rkt` with proper deps, collection, pkg metadata, tags, test-paths
 - [ ] Follow [Racket package tutorial](https://blog.racket-lang.org/2017/10/tutorial-creating-a-package.html)
 - [ ] Register on [Racket package catalog](https://github.com/racket/racket/wiki/Creating-Packages)
 
-### Other
+### Experiment metadata
 
+- [x] Add version + dialect table to `experiments/report.md` (v0.1–v0.5, all `#lang beagle` / Clojure target)
 - [ ] E13 confound isolation: full prompt vs cheatsheet, daemon vs no daemon
 
 ## Completed

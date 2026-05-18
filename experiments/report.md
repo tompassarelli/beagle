@@ -46,8 +46,22 @@ An LLM agent (Claude Code, Opus 4.6 unless noted) receives buggy source
 code and must fix all bugs until the oracle passes. We measure wall time,
 turns, output tokens, and correctness (pass rate).
 
+**Beagle version and dialect:** All experiments (E3b–E15) used Beagle
+v0.1.0–v0.5.0 targeting `#lang beagle` (Clojure output). The JS target
+(`#lang beagle/js`) shipped after E15 and has not been benchmarked. See
+version table below for per-experiment correlation.
+
+| Experiments | Beagle version | Key additions |
+|-------------|---------------|---------------|
+| E3b, E4 | v0.1–v0.2 | Core checker, 5 query tools |
+| E8, E9 | v0.3 | Repair toolchain (blame, specfix, trace, cascade) |
+| E10, E11 | v0.3–v0.4 | `--emit-patch`, defscalar refinements |
+| E12, E12a/b | v0.4–v0.5 | Consumer cheatsheet, unified CLI |
+| E13 | v0.5 | Reactive daemon, PostToolUse hook |
+| E14, E15 | v0.5 | Pool infrastructure (abandoned) |
+
 Three language tracks:
-- **Beagle** — typed, with checker + repair toolchain (agent-native repair compiler)
+- **Beagle** (`#lang beagle` → Clojure) — typed, with checker + repair toolchain
 - **Clojure** — untyped, same runtime, structural query tools only
 - **Python** — typed (`@dataclass` + type annotations), mypy available
 

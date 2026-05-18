@@ -6,6 +6,8 @@
 (define scribblings '(("scribblings/beagle.scrbl" ())))
 (define raco-commands
   '(("beagle" beagle/private/raco-cmd "build, check, expand" #f)))
-(define version "0.7.1")
-(define pkg-desc "Typed authoring layer that compiles to Clojure source.")
+(define version "0.8.0")
+(define pkg-desc "Agent-native typed authoring layer — emits Clojure, ClojureScript, or JavaScript.")
 (define pkg-authors '(tom))
+(define pkg-tags '("language" "compiler" "clojure" "javascript" "type-checking"))
+(define test-paths '("tests"))
