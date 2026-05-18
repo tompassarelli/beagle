@@ -8,7 +8,7 @@ A Racket-to-Clojure transpiler. `#lang beagle` source files compile to
 ## How to test
 
 ```
-raco test tests/         # full suite (466 tests)
+raco test tests/         # full suite (471 tests)
 raco test tests/parse.rkt  # just parser
 raco test tests/emit.rkt   # just emitter
 raco test tests/check.rkt  # just type checker
@@ -55,7 +55,7 @@ Example: `(defn foo [(x : Int)] (+ x 1))` in test form:
 | `private/check.rkt` | Type inference + checking. `RECORD-FIELDS` for keyword access |
 | `private/emit.rkt` | AST → Clojure source string |
 | `private/types.rkt` | Type AST, `MAP-TAG`/`SET-TAG` symbols, compatibility |
-| `private/stdlib-types.rkt` | ~678 pre-typed Clojure functions |
+| `private/stdlib-types.rkt` | ~696 pre-typed Clojure functions |
 | `private/lint.rkt` | Shadow detection, unused externs, untyped warnings |
 | `private/macros.rkt` | Macro registry, expansion, safe/unsafe boundary |
 | `private/expand-tool.rkt` | Backend for `beagle-expand` (datum-level, pre-parse) |

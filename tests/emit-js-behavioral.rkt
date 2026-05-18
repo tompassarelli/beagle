@@ -7,6 +7,7 @@
          racket/port
          racket/format
          racket/file
+         racket/runtime-path
          "../private/parse.rkt"
          "../private/check.rkt"
          "../private/emit.rkt"
@@ -36,11 +37,16 @@
 
 ;; Compile beagle forms to JS, append assertion code, run with bun.
 ;; assertions-js is raw JS appended after the emitted program.
+(define-runtime-path BEAGLE-CORE-JS-PATH "../lib/beagle/core.js")
+(define BEAGLE-CORE-JS (path->string BEAGLE-CORE-JS-PATH))
+
 (define (run-js-test beagle-forms assertions-js)
+  (define raw-js
+    (js-emit (append (list '(ns test.app) '(define-mode strict) '(define-target js))
+                     beagle-forms)))
   (define js-code
     (string-append
-     (js-emit (append (list '(ns test.app) '(define-mode strict) '(define-target js))
-                      beagle-forms))
+     (string-replace raw-js "from 'beagle/core.js'" (format "from '~a'" BEAGLE-CORE-JS))
      "\n\n// --- assertions ---\n"
      assertions-js
      "\n"))
@@ -401,5 +407,169 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
      (list '(defenum Color :red :green :blue))
      "console.log(Color_values.has(':red')); console.log(Color_values.has(':purple'));"
      "true\nfalse")
+
+   ;; --- atom operations -------------------------------------------------------
+
+   (check-js-output "atom create and deref"
+     (list '(defn f [] : Int
+              (let [a (atom 42)]
+                (deref a))))
+     "console.log(f());"
+     "42")
+
+   (check-js-output "atom reset!"
+     (list '(defn f [] : Int
+              (let [a (atom 0)]
+                (do (reset! a 99)
+                    (deref a)))))
+     "console.log(f());"
+     "99")
+
+   (check-js-output "atom swap!"
+     (list '(defn f [] : Int
+              (let [a (atom 10)]
+                (do (swap! a (fn [(x : Int)] : Int (+ x 1)))
+                    (deref a)))))
+     "console.log(f());"
+     "11")
+
+   (check-js-output "atom swap! with extra args"
+     (list '(defn add [(x : Int) (y : Int)] : Int (+ x y))
+           '(defn f [] : Int
+              (let [a (atom 10)]
+                (do (swap! a add 5)
+                    (deref a)))))
+     "console.log(f());"
+     "15")
+
+   ;; --- additional stdlib -----------------------------------------------------
+
+   (check-js-output "take-last"
+     (list '(defn f [(xs : (Vec Int))] : Any (take-last 2 xs)))
+     "console.log(JSON.stringify(f([1,2,3,4,5])));"
+     "[4,5]")
+
+   (check-js-output "not= returns boolean"
+     (list '(defn f [(a : Int) (b : Int)] : Bool (not= a b)))
+     "console.log(f(1,2)); console.log(f(1,1));"
+     "true\nfalse")
+
+   (check-js-output "seq on empty returns null"
+     (list '(defn f [(xs : (Vec Int))] : Any (seq xs)))
+     "console.log(f([])); console.log(f([1]) !== null);"
+     "null\ntrue")
+
+   (check-js-output "sequential? predicate"
+     (list '(defn f [(x : Any)] : Bool (sequential? x)))
+     "console.log(f([1,2])); console.log(f(42));"
+     "true\nfalse")
+
+   ;; --- runtime helpers (beagle/core.js) ------------------------------------
+
+   (check-js-output "range generates array"
+     (list '(defn f [] : Any (range 5)))
+     "console.log(JSON.stringify(f()));"
+     "[0,1,2,3,4]")
+
+   (check-js-output "range with start and end"
+     (list '(defn f [] : Any (range 2 7)))
+     "console.log(JSON.stringify(f()));"
+     "[2,3,4,5,6]")
+
+   (check-js-output "range with step"
+     (list '(defn f [] : Any (range 0 10 3)))
+     "console.log(JSON.stringify(f()));"
+     "[0,3,6,9]")
+
+   (check-js-output "remove filters out matching"
+     (list '(defn z? [(x : Int)] : Bool (= x 0))
+           '(defn f [(xs : (Vec Int))] : Any (remove z? xs)))
+     "console.log(JSON.stringify(f([0,1,0,2,0,3])));"
+     "[1,2,3]")
+
+   (check-js-output "mapcat flattens"
+     (list '(defn dup [(x : Int)] : (Vec Int)
+              (let [v x] (conj (conj (conj (range 0) v) v) v)))
+            '(defn f [(xs : (Vec Int))] : Any (mapcat dup xs)))
+     "console.log(JSON.stringify(f([1,2])));"
+     "[1,1,1,2,2,2]")
+
+   (check-js-output "every? checks all"
+     (list '(defn p? [(x : Int)] : Bool (> x 0))
+           '(defn f [(xs : (Vec Int))] : Any (every? p? xs)))
+     "console.log(f([1,2,3])); console.log(f([1,0,3]));"
+     "true\nfalse")
+
+   (check-js-output "keep filters nulls"
+     (list '(defn maybe-inc [(x : Int)] : Any (if (> x 0) (inc x) nil))
+           '(defn f [(xs : (Vec Int))] : Any (keep maybe-inc xs)))
+     "console.log(JSON.stringify(f([0,1,0,2])));"
+     "[2,3]")
+
+   (check-js-output "take-while stops at first false"
+     (list '(defn p? [(x : Int)] : Bool (> x 0))
+           '(defn f [(xs : (Vec Int))] : Any (take-while p? xs)))
+     "console.log(JSON.stringify(f([3,2,1,0,-1])));"
+     "[3,2,1]")
+
+   (check-js-output "drop-while drops prefix"
+     (list '(defn n? [(x : Int)] : Bool (< x 0))
+           '(defn f [(xs : (Vec Int))] : Any (drop-while n? xs)))
+     "console.log(JSON.stringify(f([-3,-2,-1,0,1,2])));"
+     "[0,1,2]")
+
+   (check-js-output "select-keys picks keys"
+     (list `(defn f [(m : Any)] : Any (select-keys m ,(br ":a" ":c"))))
+     "console.log(JSON.stringify(f({':a':1, ':b':2, ':c':3})));"
+     "{\":a\":1,\":c\":3}")
+
+   (check-js-output "assoc-in nested set"
+     (list `(defn f [(m : Any)] : Any (assoc-in m ,(br ":a" ":b") 42)))
+     "console.log(JSON.stringify(f({':a': {':b': 0}})));"
+     "{\":a\":{\":b\":42}}")
+
+   (check-js-output "update-in nested update"
+     (list '(defn add1 [(x : Int)] : Int (+ x 1))
+           `(defn f [(m : Any)] : Any (update-in m ,(br ":a") add1)))
+     "console.log(JSON.stringify(f({':a': 5})));"
+     "{\":a\":6}")
+
+   ;; --- higher-order value wrappers -------------------------------------------
+
+   (check-js-output "map inc as value"
+     (list '(defn f [(xs : (Vec Int))] : Any (map inc xs)))
+     "console.log(JSON.stringify(f([1,2,3])));"
+     "[2,3,4]")
+
+   (check-js-output "map dec as value"
+     (list '(defn f [(xs : (Vec Int))] : Any (map dec xs)))
+     "console.log(JSON.stringify(f([10,20,30])));"
+     "[9,19,29]")
+
+   (check-js-output "filter pos? as value"
+     (list '(defn f [(xs : (Vec Int))] : Any (filter pos? xs)))
+     "console.log(JSON.stringify(f([-1,0,1,2,-3])));"
+     "[1,2]")
+
+   (check-js-output "reduce + as value"
+     (list '(defn f [(xs : (Vec Int))] : Any (reduce + 0 xs)))
+     "console.log(f([1,2,3,4]));"
+     "10")
+
+   (check-js-output "filter some? as value"
+     (list '(defn f [(xs : (Vec Any))] : Any (filter some? xs)))
+     "console.log(JSON.stringify(f([1,null,2,null,3])));"
+     "[1,2,3]")
+
+   (check-js-output "filter nil? as value"
+     (list '(defn f [(xs : (Vec Any))] : Any (filter nil? xs)))
+     "console.log(f([1,null,2,null,3]).length);"
+     "2")
+
+   (check-js-output "user-defined inc shadows stdlib in map"
+     (list '(defn inc [(x : Int)] : Int (* x 10))
+           '(defn f [(xs : (Vec Int))] : Any (map inc xs)))
+     "console.log(JSON.stringify(f([1,2,3])));"
+     "[10,20,30]")
 
  )))

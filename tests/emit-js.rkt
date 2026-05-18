@@ -4,6 +4,7 @@
          rackunit/text-ui
          racket/string
          racket/match
+         racket/port
          "../private/parse.rkt"
          "../private/check.rkt"
          "../private/emit.rkt"
@@ -344,4 +345,258 @@
      "? \"negative\" :"
      '(defn classify [(n : Int)] : String
        (cond (< n 0) "negative" (= n 0) "zero" :else "positive")))
+
+   ;; --- atom operations -------------------------------------------------------
+
+   (check-js-contains "atom → object with value and watches"
+     "{value:"
+     '(defn f [] : Any (atom 0)))
+
+   (check-js-contains "deref → .value"
+     ".value"
+     '(declare-extern a Any)
+     '(defn f [(a : Any)] : Any (deref a)))
+
+   (check-js-contains "reset! → sets .value"
+     ".value ="
+     '(declare-extern a Any)
+     '(defn f [(a : Any)] : Any (reset! a 42)))
+
+   (check-js-contains "swap! → compute and set"
+     "_a.value = "
+     '(declare-extern a Any)
+     '(defn f [(a : Any)] : Any (swap! a inc)))
+
+   (check-js-contains "add-watch → registers watcher"
+     ".watches["
+     '(declare-extern a Any)
+     '(declare-extern watcher Any)
+     '(defn f [(a : Any) (watcher : Any)] : Any (add-watch a :key watcher)))
+
+   ;; --- bare npm imports -------------------------------------------------------
+
+   (check-js-contains "bare npm import → no ./ prefix"
+     "import * as ds from 'datascript';"
+     '(require datascript :as ds)
+     '(defn f [] : Any (ds/create-conn)))
+
+   (check-js-contains "dotted require → relative path"
+     "import * as core from './inventory/core.js';"
+     '(require inventory.core)
+     '(defn f [] : Any (core/init)))
+
+   ;; --- additional stdlib translations ----------------------------------------
+
+   (check-js-contains "take-last → .slice(-n)"
+     ".slice(-"
+     '(declare-extern xs Any)
+     '(defn f [(xs : Any)] : Any (take-last 3 xs)))
+
+   (check-js-contains "pr-str → JSON.stringify"
+     "JSON.stringify"
+     '(defn f [(x : Any)] : String (pr-str x)))
+
+   (check-js-contains "to-array → Array.from"
+     "Array.from("
+     '(declare-extern xs Any)
+     '(defn f [(xs : Any)] : Any (to-array xs)))
+
+   (check-js-contains "aget → array access"
+     "["
+     '(declare-extern arr Any)
+     '(defn f [(arr : Any)] : Any (aget arr 0)))
+
+   (check-js-contains "sequential? → Array.isArray"
+     "Array.isArray("
+     '(declare-extern xs Any)
+     '(defn f [(xs : Any)] : Bool (sequential? xs)))
+
+   (check-js-contains "seq → length check"
+     ".length > 0"
+     '(declare-extern xs Any)
+     '(defn f [(xs : Any)] : Any (seq xs)))
+
+   (check-js-contains "not= → !=="
+     "!=="
+     '(defn f [(a : Int) (b : Int)] : Bool (not= a b)))
+
+   (check-js-contains "letfn → IIFE with function decls"
+     "function f(x)"
+     '(defn outer [] : Int
+        (letfn [(f [(x : Int)] : Int (+ x 1))
+                (g [(x : Int)] : Int (f x))]
+          (g 10))))
+
+   (check-js-contains "letfn body returns"
+     "return g(10);"
+     '(defn outer [] : Int
+        (letfn [(f [(x : Int)] : Int (+ x 1))
+                (g [(x : Int)] : Int (f x))]
+          (g 10))))
+
+   (check-js-contains "letfn emits second fn"
+     "function g(x)"
+     '(defn outer [] : Int
+        (letfn [(f [(x : Int)] : Int (+ x 1))
+                (g [(x : Int)] : Int (f x))]
+          (g 10))))
+
+   (check-js-contains "letfn wraps in IIFE"
+     "(() => {"
+     '(defn outer [] : Int
+        (letfn [(f [(x : Int)] : Int (+ x 1))]
+          (f 10))))
+
+   ;; --- runtime helpers (beagle/core.js) ------------------------------------
+
+   (check-js-contains "range → $$bc.range"
+     "$$bc.range(10)"
+     '(defn f [] : Any (range 10)))
+
+   (check-js-contains "range auto-imports runtime"
+     "import * as $$bc from 'beagle/core.js';"
+     '(defn f [] : Any (range 10)))
+
+   (check-js-contains "remove → $$bc.remove"
+     "$$bc.remove("
+     '(declare-extern xs Any)
+     '(defn f [(xs : Any)] : Any (remove nil? xs)))
+
+   (check-js-contains "mapcat → $$bc.mapcat"
+     "$$bc.mapcat("
+     '(declare-extern xs Any)
+     '(defn f [(xs : Any)] : Any (mapcat identity xs)))
+
+   (check-js-contains "every? → $$bc.every_p"
+     "$$bc.every_p("
+     '(declare-extern xs Any)
+     '(defn f [(xs : Any)] : Any (every? some? xs)))
+
+   (check-js-contains "keep → $$bc.keep"
+     "$$bc.keep("
+     '(declare-extern xs Any)
+     '(defn f [(xs : Any)] : Any (keep identity xs)))
+
+   (check-js-contains "map-indexed → $$bc.map_indexed"
+     "$$bc.map_indexed("
+     '(declare-extern xs Any)
+     '(defn f [(xs : Any)] : Any (map-indexed + xs)))
+
+   (check-js-contains "assoc-in → $$bc.assoc_in"
+     "$$bc.assoc_in("
+     '(declare-extern m Any)
+     `(defn f [(m : Any)] : Any (assoc-in m ,(cons BRACKET-TAG '(:a :b)) 42)))
+
+   (check-js-contains "update-in → $$bc.update_in"
+     "$$bc.update_in("
+     '(declare-extern m Any)
+     `(defn f [(m : Any)] : Any (update-in m ,(cons BRACKET-TAG '(:a)) inc)))
+
+   (check-js-contains "select-keys → $$bc.select_keys"
+     "$$bc.select_keys("
+     '(declare-extern m Any)
+     `(defn f [(m : Any)] : Any (select-keys m ,(cons BRACKET-TAG '(:a :b)))))
+
+   (check-js-contains "merge-with → $$bc.merge_with"
+     "$$bc.merge_with("
+     '(declare-extern a Any)
+     '(declare-extern b Any)
+     '(defn f [(a : Any) (b : Any)] : Any (merge-with + a b)))
+
+   (check-js-contains "take-while → $$bc.take_while"
+     "$$bc.take_while("
+     '(declare-extern xs Any)
+     '(defn f [(xs : Any)] : Any (take-while pos? xs)))
+
+   (check-js-contains "drop-while → $$bc.drop_while"
+     "$$bc.drop_while("
+     '(declare-extern xs Any)
+     '(defn f [(xs : Any)] : Any (drop-while neg? xs)))
+
+   (test-case "no runtime import when not needed"
+     (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+                                   '(defn f [(x : Int)] : Int (+ x 1)))))
+     (check-false (string-contains? result "$$bc")
+                  (format "unexpected runtime import in:\n~a" result)))
+
+   ;; --- higher-order value wrappers ------------------------------------------
+
+   (check-js-contains "inc as value → lambda wrapper"
+     "((_x) => (_x + 1))"
+     '(defn f [(xs : (Vec Int))] : Any (map inc xs)))
+
+   (check-js-contains "dec as value → lambda wrapper"
+     "((_x) => (_x - 1))"
+     '(defn f [(xs : (Vec Int))] : Any (map dec xs)))
+
+   (check-js-contains "nil? as value → lambda wrapper"
+     "((_x) => _x == null)"
+     '(defn f [(xs : (Vec Any))] : Any (filter nil? xs)))
+
+   (check-js-contains "some? as value → lambda wrapper"
+     "((_x) => _x != null)"
+     '(defn f [(xs : (Vec Any))] : Any (filter some? xs)))
+
+   (check-js-contains "pos? as value → lambda wrapper"
+     "((_x) => _x > 0)"
+     '(defn f [(xs : (Vec Int))] : Any (filter pos? xs)))
+
+   (check-js-contains "+ as value → binary wrapper"
+     "((_a, _b) => _a + _b)"
+     '(defn f [(xs : (Vec Int))] : Any (reduce + 0 xs)))
+
+   (check-js-contains "identity as value → lambda wrapper"
+     "((_x) => _x)"
+     '(defn f [(xs : (Vec Int))] : Any (filter identity xs)))
+
+   (check-js-contains "inc in call position still inlines"
+     "(x + 1)"
+     '(defn f [(x : Int)] : Int (inc x)))
+
+   (test-case "user-defined inc shadows stdlib wrapper"
+     (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+                                   '(defn inc [(x : Int)] : Int (* x 10))
+                                   `(defn f [(xs : (Vec Int))] : Any (map inc xs)))))
+     (check-true (string-contains? result "xs.map(inc)")
+                 (format "user inc should emit as bare name, got:\n~a" result))
+     (check-false (string-contains? result "(_x) => (_x + 1)")
+                  "should NOT emit stdlib wrapper when user defines inc"))
+
+   (test-case "param name shadows stdlib wrapper"
+     (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+                                   '(defn greet [(name : String)] : String (str "Hello " name)))))
+     (check-true (string-contains? result "(\"\".concat(\"Hello \", name))")
+                 (format "param 'name' should use mangled name, got:\n~a" result))
+     (check-false (string-contains? result "(_x) => String(_x)")
+                  "should NOT emit stdlib wrapper for param named 'name'"))
+
+   (test-case "let binding shadows stdlib wrapper"
+     (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+                                   '(defn f [] : Any
+                                      (let [identity 42] identity)))))
+     (check-false (string-contains? result "(_x) => _x")
+                  "let-bound identity should not get wrapper"))
+
+   ;; --- JS-NO-EMIT safety net ------------------------------------------------
+
+   (test-case "JS-NO-EMIT function emits warning"
+     (define stderr-output
+       (with-output-to-string
+         (lambda ()
+           (parameterize ([current-error-port (current-output-port)])
+             (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+                            '(declare-extern xs Any)
+                            '(defn f [(xs : Any)] : Any (trampoline xs))))))))
+     (check-true (string-contains? stderr-output "trampoline has no JS translation")
+                 (format "expected JS-NO-EMIT warning in: ~a" stderr-output)))
+
+   (test-case "JS-translated function emits no warning"
+     (define stderr-output
+       (with-output-to-string
+         (lambda ()
+           (parameterize ([current-error-port (current-output-port)])
+             (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+                            '(defn f [(xs : (Vec Int))] : Int (count xs))))))))
+     (check-equal? stderr-output ""
+                   "expected no warning for translated function"))
  ))

@@ -316,6 +316,16 @@
      (format "(let [~a]\n  ~a)"
              (emit-let-bindings (let-form-bindings e))
              (emit-body (let-form-body e) "  "))]
+    [(letfn-form? e)
+     (define fn-strs
+       (for/list ([f (in-list (letfn-form-fns e))])
+         (format "(~a [~a] ~a)"
+                 (symbol->string (letfn-fn-name f))
+                 (emit-params-with-rest (letfn-fn-params f) (letfn-fn-rest-param f))
+                 (emit-body (letfn-fn-body f) "    "))))
+     (format "(letfn [~a]\n  ~a)"
+             (string-join fn-strs "\n          ")
+             (emit-body (letfn-form-body e) "  "))]
     [(loop-form? e)
      (format "(loop [~a]\n  ~a)"
              (emit-let-bindings (loop-form-bindings e))

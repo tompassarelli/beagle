@@ -183,6 +183,24 @@
           (hash-set! inner n #t)])
        (check-shadow (let-binding-value b) inner ctx))
      (for ([e (in-list body)]) (check-shadow e inner ctx))]
+    [(letfn-form fns body)
+     (define inner (scope-copy scope))
+     ;; Add all fn names to scope first (mutually visible)
+     (for ([f (in-list fns)])
+       (define n (letfn-fn-name f))
+       (when (hash-has-key? scope n)
+         (warn-shadow "letfn binding" n ctx))
+       (hash-set! inner n #t))
+     ;; Check each fn body with params in scope
+     (for ([f (in-list fns)])
+       (define fn-scope (scope-copy inner))
+       (for ([p (in-list (letfn-fn-params f))])
+         (add-param-to-scope! p fn-scope))
+       (when (letfn-fn-rest-param f)
+         (add-param-to-scope! (letfn-fn-rest-param f) fn-scope))
+       (for ([e (in-list (letfn-fn-body f))])
+         (check-shadow e fn-scope (letfn-fn-name f))))
+     (for ([e (in-list body)]) (check-shadow e inner ctx))]
     [(defn-form name params _rest-p _ body _private?)
      (define inner (scope-copy scope))
      (for ([p (in-list params)])
@@ -372,6 +390,10 @@
      (for ([e (in-list body)]) (collect-symbols e used))]
     [(let-form bindings body)
      (for ([b (in-list bindings)]) (collect-symbols (let-binding-value b) used))
+     (for ([e (in-list body)]) (collect-symbols e used))]
+    [(letfn-form fns body)
+     (for ([f (in-list fns)])
+       (for ([e (in-list (letfn-fn-body f))]) (collect-symbols e used)))
      (for ([e (in-list body)]) (collect-symbols e used))]
     [(if-form c t e)
      (collect-symbols c used)

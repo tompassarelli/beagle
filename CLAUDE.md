@@ -44,9 +44,10 @@ it as canonical when explaining the language.
 - Keyword field inference: `(:name person)` returns the field type when
   target is a known typed record
 - Macros: safe (gensym-hygienic) / unsafe with `&rest` and `(splice ...)`
-- Stdlib catalog: split by target — `stdlib-portable.rkt` (256 entries),
-  `stdlib-clj.rkt` (365), `stdlib-cljs.rkt` (75); combined via `stdlib-types.rkt`.
-  CLJS-EXCLUDE set warns on JVM-only usage
+- Stdlib catalog: split by target — `stdlib-portable.rkt` (269 entries),
+  `stdlib-clj.rkt` (352), `stdlib-cljs.rkt` (75), `stdlib-js.rkt` (38 JS-native);
+  combined via `stdlib-types.rkt`. CLJS-EXCLUDE warns on JVM-only usage;
+  JS-NO-EMIT warns on portable fns with no JS translation (139 symbols)
 - Cross-file type import: `(require module)` / `(require module :as alias)`
   resolves source at compile time, imports typed defs/defns/externs/records/macros.
   `declare-extern` is only needed for Java interop and non-beagle namespaces.
@@ -80,7 +81,7 @@ it as canonical when explaining the language.
 - Typed REPL: persistent type env, `:type EXPR`, `:sig NAME`, `:env`, compile + emit
 - Differential testing: `beagle-proptest --diff` compares function outputs between
   golden and modified builds, flags behavioral regressions (6143 calls on E8)
-- 462 tests passing
+- 612 tests passing
 - 15 experiments across 3 language tracks (Beagle, Clojure, Python):
   best Beagle config 287s avg with reactive daemon (E13), variance
   collapsed to 59s range; per-bug faster than Python+mypy (8.2s vs 8.5s);
@@ -104,7 +105,16 @@ it as canonical when explaining the language.
   `let`->IIFE, `defrecord`->`Object.freeze` factory with `_tag`, `match`->`_tag`
   checks, `for`->`.map`/`.filter`, `try`/`catch`, `loop`->`while`,
   `with`->spread; `(await expr)` form, functions containing `await` auto-emit
-  as `async function`
+  as `async function`; atom ops (`atom`/`deref`/`reset!`/`swap!`/`add-watch`);
+  `set!` for property mutation; bare npm imports (`(require 'pkg')` → `import`);
+  120 emit-core-call translations (collections, math, predicates, combinators);
+  `beagle.core.js` runtime (12 finite helpers: range, remove, mapcat, every?,
+  keep, map-indexed, assoc-in, update-in, select-keys, merge-with, take-while,
+  drop-while); STDLIB-JS (38 JS-native type declarations: Math, JSON, Promise,
+  fetch, timers, Object, Array); JS-VALUE-WRAPPERS for higher-order stdlib use
+  (binding-aware: user defs shadow stdlib); JS-NO-EMIT safety net (139 unsupported
+  symbols warn at compile time); `silent fallback: 0` verified;
+  72 behavioral tests (compile→Bun execution), 110 string-match tests
 - Repair compiler: accessor-swap detection (204 accessors, semantic type groups),
   wrong-argument permutation, cross-evidence correlation (blame + semantic + specfix)
 - Property testing: record generators (scalar-erasure-aware), property inference
@@ -147,6 +157,12 @@ parse → check → emit-dispatch → emit-{clj,js}
   based on `(program-target prog)`.
 - `private/emit-clj.rkt` — AST → Clojure/ClojureScript source string (was `emit.rkt`).
 - `private/emit-js.rkt` — AST → JavaScript source string.
+- `private/js-capabilities.rkt` — JS capability sets (JS-TRANSLATED, JS-VALUE-WRAPPERS,
+  JS-RUNTIME-HELPERS). Imported by both emit-js and stdlib-js — no circular deps.
+- `private/stdlib-js.rkt` — JS-specific: STDLIB-JS (38 JS-native type declarations),
+  JS-NO-EMIT (computed from STDLIB-PORTABLE minus JS-TRANSLATED).
+- `lib/beagle/core.js` — JS runtime helpers (12 finite functions: range, remove,
+  mapcat, etc.). Auto-imported when referenced.
 - `private/expand-tool.rkt` — backend for `bin/beagle-expand`.
 - `private/query.rkt` — type-system query engine for `beagle-sig`,
   `beagle-fields`, `beagle-callers`, `beagle-provides`, `beagle-impact`.
@@ -208,6 +224,7 @@ parse → check → emit-dispatch → emit-{clj,js}
 - `bin/beagle-syntax FILE...` — fast paren/bracket balance check (<200ms); catches delimiter corruption before compile
 - `bin/beagle-pool DIR` — repair agent pool watcher (abandoned E15; kept for reference)
 - `bin/beagle-docs-sync [--dry-run] [--verbose]` — propagate mechanical facts (test count, stdlib size, devlog count) into docs
+- `bin/beagle-js-coverage` — JS target stdlib coverage report (win condition: `silent fallback: 0`)
 - `bin/gen-stdlib-types` — generate stdlib type entries from clojure.core metadata
 - `raco test tests/` — test suite
 - `experiments/` — benchmark framework (see `experiments/README.md`)

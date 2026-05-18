@@ -265,8 +265,8 @@ idiom per concept.
 | `Nil` | `nil` |
 | `Any` | anything (escape) |
 
-One canonical name per type. No `Integer`, `Long`, `Double`, `Boolean` aliases —
-AI-optimization removed them.
+One canonical name per type. JVM names (`Long`, `Double`, `Boolean`) are
+accepted as `#lang beagle/clj` sugar but resolve to `Int`, `Float`, `Bool`.
 
 Function types:
 - `[A B -> R]`                   fixed arity
@@ -302,7 +302,7 @@ Nullable (sugar for `(U T Nil)`):
 - `(splice rest-name)` in template: inlines the list at that position
 - `safe` macros use gensym-hygienic substitution; `unsafe` macros use naive substitution
 
-## Pre-typed stdlib (~678 functions)
+## Pre-typed stdlib (~696 functions)
 
 **Math** (variadic Any): `+`, `-`, `*`, `/`, `mod`, `quot`, `rem`, `inc`,
 `dec`, `min`, `max`, `abs`
@@ -310,7 +310,7 @@ Nullable (sugar for `(U T Nil)`):
 **Comparison**: `=`, `not=`, `<`, `>`, `<=`, `>=`, `identical?`, `compare`,
 `zero?`, `pos?`, `neg?`, `even?`, `odd?`
 
-**Boolean**: `not`, `and`, `or`, `true?`, `false?`, `nil?`, `some?`
+**Bool**: `not`, `and`, `or`, `true?`, `false?`, `nil?`, `some?`
 
 **Collections**: `first`, `second`, `last`, `rest`, `next`, `nth`, `get`,
 `get-in`, `count`, `empty?`, `seq`, `conj`, `cons`, `concat`, `reverse`,

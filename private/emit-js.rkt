@@ -7,7 +7,8 @@
          racket/format
          racket/set
          "parse.rkt"
-         "emit-dispatch.rkt")
+         "emit-dispatch.rkt"
+         "js-capabilities.rkt")
 
 ;; --- identifier mangling ---------------------------------------------------
 
@@ -143,7 +144,31 @@
               [else #f])]
     [(re-find) (if (= n 2) (format "(~a.match(~a) || [])[0] || null"
                                    (emit-expr (cadr args)) (emit-expr (car args))) #f)]
-    [(deref) (if (= n 1) (emit-expr (car args)) #f)]
+    [(atom) (if (= n 1) (format "({value: ~a, watches: {}})" (emit-expr (car args))) #f)]
+    [(deref) (if (= n 1) (format "~a.value" (emit-expr (car args))) #f)]
+    [(reset!) (if (= n 2)
+                (format "(() => { const _a = ~a, _v = ~a; const _old = _a.value; _a.value = _v; for (const _k in _a.watches) _a.watches[_k](_k, _a, _old, _v); return _v; })()"
+                        (emit-expr (car args)) (emit-expr (cadr args)))
+                #f)]
+    [(swap!) (if (>= n 2)
+               (format "(() => { const _a = ~a; const _old = _a.value; _a.value = (~a)(_old~a); for (const _k in _a.watches) _a.watches[_k](_k, _a, _old, _a.value); return _a.value; })()"
+                       (emit-expr (car args))
+                       (emit-expr (cadr args))
+                       (if (> n 2) (string-append ", " (string-join (map emit-expr (cddr args)) ", ")) ""))
+               #f)]
+    [(add-watch) (if (= n 3)
+                   (format "(~a.watches[~a] = ~a, ~a)"
+                           (emit-expr (car args))
+                           (emit-expr (cadr args))
+                           (emit-expr (caddr args))
+                           (emit-expr (car args)))
+                   #f)]
+    [(remove-watch) (if (= n 2)
+                      (format "(delete ~a.watches[~a], ~a)"
+                              (emit-expr (car args))
+                              (emit-expr (cadr args))
+                              (emit-expr (car args)))
+                      #f)]
     ;; --- collection / sequence -------------------------------------------------
     [(mapv) (if (= n 2) (format "~a.map(~a)" (emit-expr (cadr args)) (emit-expr (car args))) #f)]
     [(filterv) (if (= n 2) (format "~a.filter(~a)" (emit-expr (cadr args)) (emit-expr (car args))) #f)]
@@ -220,6 +245,41 @@
     [(vector?) (if (= n 1) (format "Array.isArray(~a)" (emit-expr (car args))) #f)]
     [(map?) (if (= n 1) (format "(typeof ~a === 'object' && ~a !== null && !Array.isArray(~a))"
                                 (emit-expr (car args)) (emit-expr (car args)) (emit-expr (car args))) #f)]
+    [(set?) (if (= n 1) (format "(~a instanceof Set)" (emit-expr (car args))) #f)]
+    [(sequential?) (if (= n 1) (format "Array.isArray(~a)" (emit-expr (car args))) #f)]
+    [(seq?) (if (= n 1) (format "Array.isArray(~a)" (emit-expr (car args))) #f)]
+    [(coll?) (if (= n 1) (format "(Array.isArray(~a) || (typeof ~a === 'object' && ~a !== null))"
+                                 (emit-expr (car args)) (emit-expr (car args)) (emit-expr (car args))) #f)]
+    [(take-last) (if (= n 2) (format "~a.slice(-~a)" (emit-expr (cadr args)) (emit-expr (car args))) #f)]
+    [(drop-last) (cond
+                   [(= n 1) (format "~a.slice(0, -1)" (emit-expr (car args)))]
+                   [(= n 2) (format "~a.slice(0, -~a)" (emit-expr (cadr args)) (emit-expr (car args)))]
+                   [else #f])]
+    [(pr-str) (if (>= n 1)
+                (format "[~a].map(x => JSON.stringify(x)).join(' ')"
+                        (string-join (map emit-expr args) ", "))
+                #f)]
+    [(to-array) (if (= n 1) (format "Array.from(~a)" (emit-expr (car args))) #f)]
+    [(aget) (if (= n 2) (format "~a[~a]" (emit-expr (car args)) (emit-expr (cadr args))) #f)]
+    [(aset) (if (= n 3) (format "(~a[~a] = ~a)" (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args))) #f)]
+    [(array-seq) (if (= n 1) (format "Array.from(~a)" (emit-expr (car args))) #f)]
+    [(clj->js) (if (= n 1) (emit-expr (car args)) #f)]
+    [(js->clj) (if (= n 1) (emit-expr (car args)) #f)]
+    [(not=) (if (= n 2) (format "(~a !== ~a)" (emit-expr (car args)) (emit-expr (cadr args))) #f)]
+    [(seq) (if (= n 1) (format "(~a.length > 0 ? ~a : null)" (emit-expr (car args)) (emit-expr (car args))) #f)]
+    ;; --- runtime helpers (beagle/core.js) -------------------------------------
+    [(range) (begin (use-runtime!) (format "$$bc.range(~a)" (string-join (map emit-expr args) ", ")))]
+    [(remove) (if (= n 2) (begin (use-runtime!) (format "$$bc.remove(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)))) #f)]
+    [(mapcat) (if (= n 2) (begin (use-runtime!) (format "$$bc.mapcat(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)))) #f)]
+    [(every?) (if (= n 2) (begin (use-runtime!) (format "$$bc.every_p(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)))) #f)]
+    [(keep) (if (= n 2) (begin (use-runtime!) (format "$$bc.keep(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)))) #f)]
+    [(map-indexed) (if (= n 2) (begin (use-runtime!) (format "$$bc.map_indexed(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)))) #f)]
+    [(assoc-in) (if (= n 3) (begin (use-runtime!) (format "$$bc.assoc_in(~a, ~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args)))) #f)]
+    [(update-in) (if (= n 3) (begin (use-runtime!) (format "$$bc.update_in(~a, ~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args)))) #f)]
+    [(select-keys) (if (= n 2) (begin (use-runtime!) (format "$$bc.select_keys(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)))) #f)]
+    [(merge-with) (if (>= n 2) (begin (use-runtime!) (format "$$bc.merge_with(~a)" (string-join (map emit-expr args) ", "))) #f)]
+    [(take-while) (if (= n 2) (begin (use-runtime!) (format "$$bc.take_while(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)))) #f)]
+    [(drop-while) (if (= n 2) (begin (use-runtime!) (format "$$bc.drop_while(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)))) #f)]
     [else #f]))
 
 ;; --- async detection -------------------------------------------------------
@@ -238,6 +298,9 @@
     [(let-form? e) (or (for/or ([b (let-form-bindings e)])
                          (expr-has-await? (let-binding-value b)))
                        (contains-await? (let-form-body e)))]
+    [(letfn-form? e) (or (for/or ([f (letfn-form-fns e)])
+                            (contains-await? (letfn-fn-body f)))
+                         (contains-await? (letfn-form-body e)))]
     [(do-form? e) (contains-await? (do-form-body e))]
     [(cond-form? e) (for/or ([c (cond-form-clauses e)])
                       (or (and (not (symbol? (cond-clause-test c)))
@@ -272,6 +335,46 @@
 (define current-js-record-ns (make-parameter (hasheq)))
 (define current-js-scalar-fns (make-parameter (set)))
 (define current-js-symbol-ns (make-parameter (hasheq)))
+
+;; --- runtime import tracking -----------------------------------------------
+
+(define needs-runtime? (make-parameter #f))
+
+(define (use-runtime!)
+  (needs-runtime? #t))
+
+;; --- binding environment (for value-position wrapper resolution) -----------
+
+(define current-js-bound (make-parameter (set)))
+
+(define (js-bound? sym)
+  (set-member? (current-js-bound) sym))
+
+(define (with-bindings syms thunk)
+  (parameterize ([current-js-bound (set-union (current-js-bound) (list->set syms))])
+    (thunk)))
+
+(define (names-from-binding-target name)
+  (cond
+    [(symbol? name) (list name)]
+    [(map-destructure? name)
+     (append (map-destructure-keys name)
+             (if (map-destructure-as-name name)
+               (list (map-destructure-as-name name))
+               '()))]
+    [(seq-destructure? name)
+     (append (seq-destructure-names name)
+             (if (seq-destructure-rest-name name)
+               (list (seq-destructure-rest-name name))
+               '()))]
+    [else '()]))
+
+(define (binding-names-from-params params [rest-param #f])
+  (append
+   (apply append (map (lambda (p)
+     (if (param? p) (list (param-name p)) (names-from-binding-target p)))
+     params))
+   (if rest-param (list (param-name rest-param)) '())))
 
 ;; --- entry point -----------------------------------------------------------
 
@@ -312,21 +415,42 @@
     (error 'beagle-js "Java imports are not supported for JS target: ~a"
            (program-imports prog))))
 
+(define (collect-top-level-names prog)
+  (define from-forms
+    (for/fold ([s (set)]) ([f (in-list (program-forms prog))])
+      (cond
+        [(def-form? f)      (set-add s (def-form-name f))]
+        [(defonce-form? f)  (set-add s (defonce-form-name f))]
+        [(defn-form? f)     (set-add s (defn-form-name f))]
+        [(defn-multi? f)    (set-add s (defn-multi-name f))]
+        [(record-form? f)   (set-add s (record-form-name f))]
+        [(defenum-form? f)  (set-add s (defenum-form-name f))]
+        [(defunion-form? f) (set-add s (defunion-form-name f))]
+        [(defscalar-form? f)(set-add s (defscalar-form-name f))]
+        [else s])))
+  (define from-externs (list->set (hash-keys (program-externs prog))))
+  (set-union from-forms from-externs))
+
 (define (js-emit-program prog)
   (validate-js-target! prog)
   (parameterize ([current-js-context 'stmt]
                  [current-js-record-fields (build-record-field-table prog)]
                  [current-js-record-ns (program-imported-record-ns prog)]
                  [current-js-scalar-fns (build-scalar-fns prog)]
-                 [current-js-symbol-ns (program-imported-symbol-ns prog)])
-    (string-append
-     (emit-module-header prog)
-     "\n"
-     (string-join
-      (for/list ([form (in-list (program-forms prog))])
-        (emit-form form))
-      "\n\n")
-     "\n")))
+                 [current-js-symbol-ns (program-imported-symbol-ns prog)]
+                 [needs-runtime? #f]
+                 [current-js-bound (collect-top-level-names prog)])
+    (define header (emit-module-header prog))
+    (define body
+      (string-join
+       (for/list ([form (in-list (program-forms prog))])
+         (emit-form form))
+       "\n\n"))
+    (define runtime-import
+      (if (needs-runtime?)
+        "import * as $$bc from 'beagle/core.js';\n"
+        ""))
+    (string-append header runtime-import "\n" body "\n")))
 
 ;; --- module header ---------------------------------------------------------
 
@@ -341,9 +465,14 @@
         (define alias (or (require-entry-alias r)
                          (let ([parts (string-split ns-str ".")])
                            (string->symbol (last parts)))))
-        (format "import * as ~a from './~a.js';"
-                (mangle-name alias)
-                (string-replace ns-str "." "/")))
+        (if (or (string-prefix? ns-str "@")
+                (not (string-contains? ns-str ".")))
+          (format "import * as ~a from '~a';"
+                  (mangle-name alias)
+                  ns-str)
+          (format "import * as ~a from './~a.js';"
+                  (mangle-name alias)
+                  (string-replace ns-str "." "/"))))
       "\n")
      "\n")))
 
@@ -364,11 +493,12 @@
     [(defn-form? f)
      (define params (emit-js-params (defn-form-params f) (defn-form-rest-param f)))
      (define async? (contains-await? (defn-form-body f)))
+     (define bound (binding-names-from-params (defn-form-params f) (defn-form-rest-param f)))
      (format "~afunction ~a(~a) {\n  ~a\n}"
              (if async? "async " "")
              (mangle-name (defn-form-name f))
              params
-             (emit-body-return (defn-form-body f) "  "))]
+             (with-bindings bound (lambda () (emit-body-return (defn-form-body f) "  "))))]
 
     [(defn-multi? f)
      (define name (mangle-name (defn-multi-name f)))
@@ -388,7 +518,8 @@
              (list (format "const ~a = _args.slice(~a);" (emit-js-param rest?) n))
              '()))
          (define all-bindings (append destructure-strs rest-str))
-         (define body (emit-body-return (arity-clause-body a) "    "))
+         (define arity-bound (binding-names-from-params (arity-clause-params a) (arity-clause-rest-param a)))
+         (define body (with-bindings arity-bound (lambda () (emit-body-return (arity-clause-body a) "    "))))
          (define bindings-str (string-join all-bindings "\n    "))
          (define inner (if (null? all-bindings) body (format "~a\n    ~a" bindings-str body)))
          (if rest?
@@ -450,6 +581,8 @@
        [(eq? e 'nil) "null"]
        [(char=? (string-ref (symbol->string e) 0) #\:)
         (~v (mangle-str (substring (symbol->string e) 1)))]
+       [(js-bound? e) (mangle-name e)]
+       [(hash-ref JS-VALUE-WRAPPERS e #f) => values]
        [else (mangle-name e)])]
     [(quoted? e)        (emit-quoted (quoted-datum e))]
     [(regex-lit? e)     (format "/~a/" (regex-lit-pattern e))]
@@ -504,47 +637,55 @@
      (define name (mangle-name (when-let-form-name e)))
      (define async? (or (expr-has-await? (when-let-form-expr e))
                         (contains-await? (when-let-form-body e))))
-     (iife (format "const ~a = ~a; if (~a != null) { ~a }"
-                    name val-str name
-                    (emit-body-return (when-let-form-body e) ""))
-           #:async? async?)]
+     (with-bindings (list (when-let-form-name e))
+       (lambda ()
+         (iife (format "const ~a = ~a; if (~a != null) { ~a }"
+                        name val-str name
+                        (emit-body-return (when-let-form-body e) ""))
+               #:async? async?)))]
 
     [(if-let-form? e)
      (define val-str (emit-expr (if-let-form-expr e)))
      (define name (mangle-name (if-let-form-name e)))
-     (define then-str (emit-expr (if-let-form-then-body e)))
-     (define else-str (if (if-let-form-else-body e)
-                         (emit-expr (if-let-form-else-body e))
-                         "null"))
      (define async? (or (expr-has-await? (if-let-form-expr e))
                         (expr-has-await? (if-let-form-then-body e))
                         (and (if-let-form-else-body e)
                              (expr-has-await? (if-let-form-else-body e)))))
-     (iife (format "const ~a = ~a; if (~a != null) { return ~a; } else { return ~a; }"
-                    name val-str name then-str else-str)
-           #:async? async?)]
+     (with-bindings (list (if-let-form-name e))
+       (lambda ()
+         (define then-str (emit-expr (if-let-form-then-body e)))
+         (define else-str (if (if-let-form-else-body e)
+                             (emit-expr (if-let-form-else-body e))
+                             "null"))
+         (iife (format "const ~a = ~a; if (~a != null) { return ~a; } else { return ~a; }"
+                        name val-str name then-str else-str)
+               #:async? async?)))]
 
     [(when-some-form? e)
      (define val-str (emit-expr (when-some-form-expr e)))
      (define name (mangle-name (when-some-form-name e)))
      (define async? (or (expr-has-await? (when-some-form-expr e))
                         (contains-await? (when-some-form-body e))))
-     (iife (format "const ~a = ~a; if (~a != null) { ~a }"
-                    name val-str name
-                    (emit-body-return (when-some-form-body e) ""))
-           #:async? async?)]
+     (with-bindings (list (when-some-form-name e))
+       (lambda ()
+         (iife (format "const ~a = ~a; if (~a != null) { ~a }"
+                        name val-str name
+                        (emit-body-return (when-some-form-body e) ""))
+               #:async? async?)))]
 
     [(if-some-form? e)
      (define val-str (emit-expr (if-some-form-expr e)))
      (define name (mangle-name (if-some-form-name e)))
-     (define then-str (emit-expr (if-some-form-then-body e)))
-     (define else-str (emit-expr (if-some-form-else-body e)))
      (define async? (or (expr-has-await? (if-some-form-expr e))
                         (expr-has-await? (if-some-form-then-body e))
                         (expr-has-await? (if-some-form-else-body e))))
-     (iife (format "const ~a = ~a; if (~a != null) { return ~a; } else { return ~a; }"
-                    name val-str name then-str else-str)
-           #:async? async?)]
+     (with-bindings (list (if-some-form-name e))
+       (lambda ()
+         (define then-str (emit-expr (if-some-form-then-body e)))
+         (define else-str (emit-expr (if-some-form-else-body e)))
+         (iife (format "const ~a = ~a; if (~a != null) { return ~a; } else { return ~a; }"
+                        name val-str name then-str else-str)
+               #:async? async?)))]
 
     [(do-form? e)
      (iife (emit-body-return (do-form-body e) "")
@@ -570,17 +711,21 @@
      (define has-await (or (for/or ([b (in-list bindings)])
                              (expr-has-await? (let-binding-value b)))
                            (contains-await? body)))
+     (define let-names (apply append (map (lambda (b) (names-from-binding-target (let-binding-name b))) bindings)))
      (define bind-strs
        (for/list ([b (in-list bindings)])
          (format "const ~a = ~a;"
                  (emit-binding-target (let-binding-name b))
                  (emit-expr (let-binding-value b)))))
-     (iife (format "~a ~a" (string-join bind-strs " ") (emit-body-return body ""))
-            #:async? has-await)]
+     (with-bindings let-names
+       (lambda ()
+         (iife (format "~a ~a" (string-join bind-strs " ") (emit-body-return body ""))
+                #:async? has-await)))]
 
     [(loop-form? e)
      (define bindings (loop-form-bindings e))
      (define body (loop-form-body e))
+     (define loop-names (apply append (map (lambda (b) (names-from-binding-target (let-binding-name b))) bindings)))
      (define bind-names
        (for/list ([b (in-list bindings)])
          (emit-binding-target (let-binding-name b))))
@@ -589,11 +734,13 @@
          (format "let ~a = ~a;"
                  (emit-binding-target (let-binding-name b))
                  (emit-expr (let-binding-value b)))))
-     (define body-str
-       (string-join (map (lambda (e) (emit-loop-stmt e bind-names)) body) "\n    "))
-     (format "(() => { ~a while (true) {\n    ~a\n  } })()"
-             (string-join bind-strs " ")
-             body-str)]
+     (with-bindings loop-names
+       (lambda ()
+         (define body-str
+           (string-join (map (lambda (e) (emit-loop-stmt e bind-names)) body) "\n    "))
+         (format "(() => { ~a while (true) {\n    ~a\n  } })()"
+                 (string-join bind-strs " ")
+                 body-str)))]
 
     [(recur-form? e)
      (define assignments
@@ -610,9 +757,36 @@
      (define body (fn-form-body e))
      (define async? (contains-await? body))
      (define prefix (if async? "async " ""))
-     (if (= (length body) 1)
-       (format "~a(~a) => ~a" prefix params (emit-expr (car body)))
-       (format "~a(~a) => { ~a }" prefix params (emit-body-return body "")))]
+     (define bound (binding-names-from-params (fn-form-params e) (fn-form-rest-param e)))
+     (with-bindings bound
+       (lambda ()
+         (if (= (length body) 1)
+           (format "~a(~a) => ~a" prefix params (emit-expr (car body)))
+           (format "~a(~a) => { ~a }" prefix params (emit-body-return body "")))))]
+
+    [(letfn-form? e)
+     (define fns (letfn-form-fns e))
+     (define body (letfn-form-body e))
+     (define fn-names (map letfn-fn-name fns))
+     (define has-await (or (for/or ([f (in-list fns)])
+                             (contains-await? (letfn-fn-body f)))
+                           (contains-await? body)))
+     (with-bindings fn-names
+       (lambda ()
+         (define fn-strs
+           (for/list ([f (in-list fns)])
+             (define name (mangle-name (letfn-fn-name f)))
+             (define params (emit-js-params (letfn-fn-params f) (letfn-fn-rest-param f)))
+             (define fn-body (letfn-fn-body f))
+             (define fn-async? (contains-await? fn-body))
+             (define prefix (if fn-async? "async " ""))
+             (define fn-bound (binding-names-from-params (letfn-fn-params f) (letfn-fn-rest-param f)))
+             (with-bindings fn-bound
+               (lambda ()
+                 (format "~afunction ~a(~a) { ~a }"
+                         prefix name params (emit-body-return fn-body ""))))))
+         (iife (format "~a ~a" (string-join fn-strs " ") (emit-body-return body ""))
+                #:async? has-await)))]
 
     [(method-call? e)
      (format "~a.~a(~a)"
@@ -633,9 +807,11 @@
      (define body-str (emit-body-return (try-form-body e) "  "))
      (define catch-strs
        (for/list ([c (try-form-catches e)])
-         (format "catch (~a) {\n    ~a\n  }"
-                 (mangle-name (catch-clause-name c))
-                 (emit-body-return (catch-clause-body c) "    "))))
+         (with-bindings (list (catch-clause-name c))
+           (lambda ()
+             (format "catch (~a) {\n    ~a\n  }"
+                     (mangle-name (catch-clause-name c))
+                     (emit-body-return (catch-clause-body c) "    "))))))
      (define finally-str
        (if (try-form-finally-body e)
          (format " finally {\n    ~a\n  }"
@@ -653,9 +829,11 @@
     [(dotimes-form? e)
      (define name (mangle-name (dotimes-form-name e)))
      (define count-str (emit-expr (dotimes-form-count-expr e)))
-     (define body-str (emit-body-stmts (dotimes-form-body e) "  "))
-     (iife (format "for (let ~a = 0; ~a < ~a; ~a++) {\n  ~a\n}"
-                   name name count-str name body-str))]
+     (with-bindings (list (dotimes-form-name e))
+       (lambda ()
+         (define body-str (emit-body-stmts (dotimes-form-body e) "  "))
+         (iife (format "for (let ~a = 0; ~a < ~a; ~a++) {\n  ~a\n}"
+                       name name count-str name body-str))))]
 
     [(condp-form? e)
      (define pred (emit-expr (condp-form-pred-fn e)))
@@ -820,16 +998,18 @@
 (define (emit-match-arm clause tmp)
   (define pat (match-clause-pattern clause))
   (define body (match-clause-body clause))
-  (define body-str
-    (if (= (length body) 1)
-      (format "return ~a;" (emit-expr (car body)))
-      (emit-body-return body "")))
+  (define (make-body-str [extra-bound '()])
+    (with-bindings extra-bound
+      (lambda ()
+        (if (= (length body) 1)
+          (format "return ~a;" (emit-expr (car body)))
+          (emit-body-return body "")))))
   (cond
     [(pat-wildcard? pat)
-     (format "{ ~a }" body-str)]
+     (format "{ ~a }" (make-body-str))]
     [(pat-var? pat)
      (format "{ const ~a = ~a; ~a }"
-             (mangle-name (pat-var-name pat)) tmp body-str)]
+             (mangle-name (pat-var-name pat)) tmp (make-body-str (list (pat-var-name pat))))]
     [(pat-literal? pat)
      (define val (pat-literal-value pat))
      (define test
@@ -840,7 +1020,7 @@
          [(and (symbol? val) (char=? (string-ref (symbol->string val) 0) #\:))
           (format "~a === ~v" tmp (mangle-str (substring (symbol->string val) 1)))]
          [else (format "~a === ~a" tmp val)]))
-     (format "if (~a) { ~a } else" test body-str)]
+     (format "if (~a) { ~a } else" test (make-body-str))]
     [(pat-record? pat)
      (define rec-name (pat-record-type-name pat))
      (define bindings (pat-record-bindings pat))
@@ -848,7 +1028,7 @@
      (define test (format "~a._tag === ~v" tmp (symbol->string rec-name)))
      (cond
        [(or (null? bindings) (not fields))
-        (format "if (~a) { ~a } else" test body-str)]
+        (format "if (~a) { ~a } else" test (make-body-str))]
        [else
         (define let-strs
           (for/list ([b (in-list bindings)]
@@ -856,7 +1036,7 @@
             (format "const ~a = ~a.~a;"
                     (mangle-name b) tmp (mangle-str fname))))
         (format "if (~a) { ~a ~a } else"
-                test (string-join let-strs " ") body-str)])]
+                test (string-join let-strs " ") (make-body-str bindings))])]
     [(pat-map? pat)
      (define tests
        (for/list ([entry (in-list (pat-map-entries pat))])
@@ -874,18 +1054,23 @@
      (define test
        (if (= (length tests) 1) (car tests)
            (format "(~a)" (string-join tests " && "))))
-     (format "if (~a) { ~a } else" test body-str)]))
+     (format "if (~a) { ~a } else" test (make-body-str))]))
 
 ;; --- for comprehension → .map / .filter ------------------------------------
 
 (define (emit-for e)
   (define clauses (for-form-clauses e))
   (define body (for-form-body e))
-  (define body-str
-    (if (= (length body) 1)
-      (emit-expr (car body))
-      (format "(() => { ~a })()" (emit-body-return body ""))))
-  (emit-for-clauses clauses body-str))
+  (define for-names (apply append
+    (for/list ([c (in-list clauses)])
+      (if (for-binding? c) (names-from-binding-target (for-binding-name c)) '()))))
+  (with-bindings for-names
+    (lambda ()
+      (define body-str
+        (if (= (length body) 1)
+          (emit-expr (car body))
+          (format "(() => { ~a })()" (emit-body-return body ""))))
+      (emit-for-clauses clauses body-str))))
 
 (define (emit-for-clauses clauses body-str)
   (match clauses
@@ -919,13 +1104,16 @@
 (define (emit-doseq e)
   (define clauses (doseq-form-clauses e))
   (define body (doseq-form-body e))
-  (define body-str (emit-body-stmts body "  "))
   (match clauses
     [(list (for-binding name expr))
-     (format "~a.forEach((~a) => {\n  ~a\n});"
-             (emit-expr expr)
-             (emit-binding-target name)
-             body-str)]
+     (define doseq-names (names-from-binding-target name))
+     (with-bindings doseq-names
+       (lambda ()
+         (define body-str (emit-body-stmts body "  "))
+         (format "~a.forEach((~a) => {\n  ~a\n});"
+                 (emit-expr expr)
+                 (emit-binding-target name)
+                 body-str)))]
     [_ (error 'beagle-js "complex doseq clauses not yet supported for JS target")]))
 
 ;; --- defscalar -------------------------------------------------------------

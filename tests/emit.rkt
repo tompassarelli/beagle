@@ -617,3 +617,22 @@
 (test-case "defonce emits"
   (define out (compile '(defonce db (atom nil))))
   (check-true (matches? #rx"\\(defonce db" out)))
+
+;; --- letfn ---
+
+(test-case "letfn emits"
+  (define out (compile '(defn outer [] : Int
+                          (letfn [(f [(x : Int)] : Int (+ x 1))
+                                  (g [(x : Int)] : Int (f x))]
+                            (g 10)))))
+  (check-true (matches? #rx"\\(letfn \\[" out))
+  (check-true (matches? #rx"\\(f \\[x\\]" out))
+  (check-true (matches? #rx"\\(g \\[x\\]" out))
+  (check-true (matches? #rx"\\(g 10\\)" out)))
+
+(test-case "letfn emits rest param"
+  (define out (compile '(defn outer [] : Int
+                          (letfn [(f [(x : Int) & (rest : Int)] : Int x)]
+                            (f 1 2 3)))))
+  (check-true (matches? #rx"\\(letfn \\[" out))
+  (check-true (matches? #rx"\\(f \\[x & rest\\]" out)))

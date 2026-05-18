@@ -9,7 +9,8 @@
 (require racket/set
          "stdlib-portable.rkt"
          "stdlib-clj.rkt"
-         "stdlib-cljs.rkt")
+         "stdlib-cljs.rkt"
+         "stdlib-js.rkt")
 
 (define (merge-hashes . hs)
   (for*/fold ([out (hash)]) ([h (in-list hs)]
@@ -19,16 +20,20 @@
 (define stdlib-clj-combined
   (merge-hashes STDLIB-PORTABLE STDLIB-CLJ STDLIB-CLJS))
 
+(define stdlib-js-combined
+  (merge-hashes STDLIB-PORTABLE STDLIB-JS))
+
 (define (stdlib-for-target target)
   (case target
     [(clj cljs) stdlib-clj-combined]
-    [(js)       STDLIB-PORTABLE]
+    [(js)       stdlib-js-combined]
     [(py)       STDLIB-PORTABLE]
     [else (error 'stdlib-for-target "unknown target: ~a" target)]))
 
 (define (target-excludes-for target)
   (case target
     [(cljs) CLJ-EXCLUDE]
+    [(js)   JS-NO-EMIT]
     [else #f]))
 
 ;; Backward compatibility: STDLIB-TYPES = full CLJ combined set
@@ -37,4 +42,5 @@
 
 (provide STDLIB-TYPES CLJS-EXCLUDE
          stdlib-for-target target-excludes-for
-         STDLIB-PORTABLE STDLIB-CLJ STDLIB-CLJS CLJ-EXCLUDE)
+         STDLIB-PORTABLE STDLIB-CLJ STDLIB-CLJS CLJ-EXCLUDE
+         STDLIB-JS JS-NO-EMIT)

@@ -28,11 +28,16 @@ One command wires up everything for Claude Code: daemon, hooks, system prompt.
 
 ### JS target gaps
 
-- [ ] `set!` for property mutation — `(set! (.-value el) "")` not parsed; needed for DOM interop
-- [ ] ~15 missing stdlib fns in `emit-core-call`: `mapv`, `filterv`, `sort-by`, `dissoc`, `update`, `merge`, `get` (function form), `subvec`, `pop`, `peek`, `some`, `take`, `vector?`, `map?`
-- [ ] Bare npm imports — `(require 'datascript')` vs only `'./mod.js'` relative paths
-- [ ] `letfn` — mutual recursion local fns (minor, 1 known use)
-- [ ] Atom runtime shim — `atom`, `deref`, `reset!`, `swap!`, `add-watch` (~50 lines)
+- [x] `set!` for property mutation — `(set! (.-value el) "")` parsed and emitted for CLJ + JS
+- [x] ~45 stdlib fns in `emit-core-call`: mapv, filterv, sort-by, dissoc, update, merge, get, subvec, pop, peek, some, take, drop, vector?, map?, distinct, flatten, complement, constantly, partial, comp, frequencies, group-by, partition, interleave, juxt, not-empty, take-last, drop-last, sequential?, seq?, coll?, set?, pr-str, to-array, aget, aset, array-seq, clj->js, js->clj, seq, not=
+- [x] Bare npm imports — single-word requires emit as bare package imports
+- [x] `letfn` — mutual recursion local fns (CLJ + JS emit, lint, 6 tests)
+- [x] Atom ops in emit-core-call — `atom`, `deref`, `reset!`, `swap!`, `add-watch`, `remove-watch`
+- [x] Core fns as higher-order values — JS-VALUE-WRAPPERS emit lambda wrappers in value position; binding-aware (user defs shadow stdlib)
+- [x] JS-NO-EMIT safety net — compile-time warning for portable stdlib fns with no JS translation (139 symbols)
+- [x] `beagle.core.js` runtime — 12 finite helpers: range, remove, mapcat, every?, keep, map-indexed, assoc-in, update-in, select-keys, merge-with, take-while, drop-while
+- [x] STDLIB-JS — 38 JS-native type declarations (Math, JSON, Promise, fetch, timers, Object, Array, console)
+- [x] `beagle-js-coverage` — coverage report showing `silent fallback: 0`
 
 ### Doc generation / single source of truth
 
@@ -41,6 +46,15 @@ One command wires up everything for Claude Code: daemon, hooks, system prompt.
 - [ ] Scribble as single source → generate markdown cheatsheets from Scribble docs
 - [ ] Template markers in markdown docs (`{{types}}`, `{{example}}`) expanded by docs-sync
 - [ ] Canonical example program in one place, referenced by README/cheatsheet/consumer docs
+
+### Proper packaging
+
+Package beagle as a proper Racket package so it can be installed via `raco pkg install`
+from the catalog (not just `--link`).
+
+- [ ] Add `info.rkt` with proper deps, collection, and pkg metadata
+- [ ] Follow [Racket package tutorial](https://blog.racket-lang.org/2017/10/tutorial-creating-a-package.html)
+- [ ] Register on [Racket package catalog](https://github.com/racket/racket/wiki/Creating-Packages)
 
 ### Other
 
@@ -96,7 +110,7 @@ One command wires up everything for Claude Code: daemon, hooks, system prompt.
 
 ### Language
 
-466 tests. ~678 stdlib entries. All core Clojure forms implemented.
+471 tests. ~678 stdlib entries. All core Clojure forms implemented.
 Pattern matching, multi-arity defn, guard narrowing, union types,
 cross-module import, macros (safe/unsafe), defrecord/defscalar/defenum/defunion,
 destructuring, threading, Java interop, metadata, for/doseq/dotimes,

@@ -199,6 +199,8 @@
 (struct defonce-form   (name type value)                     #:transparent)
 (struct await-form    (expr)                                 #:transparent)
 (struct set!-form    (target value)                           #:transparent)
+(struct letfn-form   (fns body)                              #:transparent)
+(struct letfn-fn     (name params rest-param return-type body) #:transparent)
 
 (struct param       (name type)                             #:transparent)
 (struct map-destructure (keys as-name)                      #:transparent)
@@ -642,6 +644,28 @@
                    #f
                    (map parse-expr rest))]))
 
+;; Parse letfn function list: [(f [params] body...) (g [params] : Ret body...)]
+(define (parse-letfn-fns form)
+  (define d (->datum form))
+  (define items (unwrap-items d "letfn function list"))
+  ;; Each item should be (name [params...] body...) or (name [params...] : RetType body...)
+  (for/list ([item (in-list items)])
+    (unless (and (list? item) (>= (length item) 3) (symbol? (car item)))
+      (error 'beagle "letfn: each function must be (name [params] body...), got: ~v" item))
+    (define name (car item))
+    (define params-form (cadr item))
+    (define rest (cddr item))
+    (define-values (parsed rest-p) (parse-params params-form))
+    (cond
+      [(and (>= (length rest) 2) (annotation-marker? (car rest)))
+       (letfn-fn name parsed rest-p
+                 (parse-type (cadr rest))
+                 (map parse-expr (cddr rest)))]
+      [else
+       (letfn-fn name parsed rest-p
+                 #f
+                 (map parse-expr rest))])))
+
 (define SCALAR-PRED-OPS '(>= <= > < = not=))
 
 (define (parse-scalar-predicate p)
@@ -829,6 +853,10 @@
     [(list 'let bindings-form body ...)
      (let-form (parse-let-bindings (or (stx-ref subs 1) bindings-form))
                (parse-body (or (stx-tail subs 2) body)))]
+
+    [(list 'letfn fns-form body ...)
+     (letfn-form (parse-letfn-fns (or (stx-ref subs 1) fns-form))
+                 (parse-body (or (stx-tail subs 2) body)))]
 
     [(list 'loop bindings-form body ...)
      (loop-form (parse-let-bindings (or (stx-ref subs 1) bindings-form))
@@ -1501,6 +1529,8 @@
  (struct-out defonce-form)
  (struct-out await-form)
  (struct-out set!-form)
+ (struct-out letfn-form)
+ (struct-out letfn-fn)
  parse-program
  DEFAULT-MODE
  DEFAULT-TARGET

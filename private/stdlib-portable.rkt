@@ -177,6 +177,22 @@
    'ex-data    (fn-of '(Any) 'Any)
    'ex-message (fn-of '(Any) 'String)
    'throw      (fn-of '(Any) 'Any)
+   ;; --- atom / ref (universal state management) ----------------------------
+   'atom       (fn-of '(Any) 'Any)
+   'deref      (fn-of '(Any) 'Any)
+   'reset!     (fn-of '(Any Any) 'Any)
+   'swap!      (fn-of '(Any Any) 'Any #:rest 'Any)
+   'compare-and-set! (fn-of '(Any Any Any) 'Bool)
+   'add-watch  (fn-of '(Any Any Any) 'Any)
+   'remove-watch (fn-of '(Any Any) 'Any)
+   ;; --- array ops (universal) -----------------------------------------------
+   'aget       (fn-of '(Any Int) 'Any #:rest 'Int)
+   'aset       (fn-of '(Any Int Any) 'Any #:rest 'Any)
+   'to-array   (fn-of '(Any) 'Any)
+   ;; --- type coercion (universal) -------------------------------------------
+   'int        (fn-of '(Any) 'Int)
+   'double     (fn-of '(Any) 'Float)
+   'char       (fn-of '(Any) 'Any)
    ;; --- collection: more access / manipulation -----------------------------
    'nfirst     (fn-of '(Any) 'Any)
    'nnext      (fn-of '(Any) 'Any)

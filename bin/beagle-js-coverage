@@ -1,0 +1,33 @@
+#!/usr/bin/env racket
+#lang racket/base
+
+(require racket/set
+         "../private/stdlib-types.rkt"
+         "../private/js-capabilities.rkt"
+         "../private/stdlib-js.rkt")
+
+(define js-stdlib (stdlib-for-target 'js))
+(define all-keys (list->set (hash-keys js-stdlib)))
+(define stdlib-js-keys (list->set (hash-keys STDLIB-JS)))
+(define portable-keys (list->set (hash-keys STDLIB-PORTABLE)))
+
+(define inline-emitted (set-intersect portable-keys JS-CORE-CALL))
+(define infix-unary (set-intersect portable-keys (set-union JS-INFIX-OPS JS-UNARY-OPS)))
+(define runtime (set-intersect portable-keys JS-RUNTIME-HELPERS))
+(define js-native stdlib-js-keys)
+(define unsupported JS-NO-EMIT)
+(define silent (set-subtract all-keys JS-TRANSLATED JS-NO-EMIT stdlib-js-keys))
+
+(printf "JS target stdlib coverage:\n")
+(printf "  visible:          ~a\n" (set-count all-keys))
+(printf "  inline emitted:   ~a\n" (set-count inline-emitted))
+(printf "  infix/unary:      ~a\n" (set-count infix-unary))
+(printf "  runtime helper:   ~a\n" (set-count runtime))
+(printf "  JS-native:        ~a\n" (set-count js-native))
+(printf "  unsupported:      ~a\n" (set-count unsupported))
+(printf "  silent fallback:  ~a\n" (set-count silent))
+
+(unless (set-empty? silent)
+  (printf "\nSILENT FALLBACK SYMBOLS (BUG):\n")
+  (for ([s (in-set silent)])
+    (printf "  ~a\n" s)))

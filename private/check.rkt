@@ -662,9 +662,13 @@
   (define excludes (target-excludes-for (current-check-target)))
   (when (and excludes (set-member? excludes sym))
     (define src (src-for node))
+    (define tgt (current-check-target))
+    (define msg
+      (case tgt
+        [(js) (format "warning: ~a has no JS translation and will fail at runtime" sym)]
+        [else (format "warning: ~a is JVM-only and unavailable in ~a target" sym tgt)]))
     (fprintf (current-error-port)
-             "warning: ~a is JVM-only and unavailable in ~a target~a\n"
-             sym (current-check-target)
+             "~a~a\n" msg
              (if src (format " at ~a:~a" (or (src-loc-source src) "?") (src-loc-line src)) ""))))
 
 ;; --- scalar predicate checking (compile-time for literals) ----------------
@@ -837,6 +841,22 @@
     [(let-form? e)
      (define body-env (extend-with-let-bindings env (let-form-bindings e)))
      (last-expr-type (let-form-body e) body-env)]
+    [(letfn-form? e)
+     ;; First register all fn types so mutual recursion works
+     (define body-env (mut-copy env))
+     (for ([f (in-list (letfn-form-fns e))])
+       (define p-types (map param-or-destr-type (letfn-fn-params f)))
+       (define rtype (and (letfn-fn-rest-param f) (param-or-destr-type (letfn-fn-rest-param f))))
+       (define ret (or (letfn-fn-return-type f) ANY))
+       (hash-set! body-env (letfn-fn-name f) (type-fn p-types rtype ret)))
+     ;; Then type-check each function body
+     (for ([f (in-list (letfn-form-fns e))])
+       (define fn-env (extend-with-params body-env (letfn-fn-params f)))
+       (when (letfn-fn-rest-param f)
+         (hash-set! fn-env (param-name (letfn-fn-rest-param f))
+                    (or (param-type (letfn-fn-rest-param f)) ANY)))
+       (last-expr-type (letfn-fn-body f) fn-env))
+     (last-expr-type (letfn-form-body e) body-env)]
     [(loop-form? e)
      (define body-env (extend-with-let-bindings env (loop-form-bindings e)))
      (last-expr-type (loop-form-body e) body-env)]

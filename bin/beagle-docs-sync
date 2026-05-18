@@ -54,15 +54,28 @@ TEST_COUNT=$(grep -rch "check-equal?\|check-true\|check-false\|check-exn\|check-
   | awk '{s+=$1} END {print s}')
 echo "  tests: $TEST_COUNT"
 
-# Stdlib function count
+# Stdlib function count (sum across portable + clj + cljs hash definitions only)
 STDLIB_COUNT=$(python3 -c "
 import re
-with open('private/stdlib-types.rkt') as f:
-    content = f.read()
-start = content.find('(define STDLIB-TYPES')
-section = content[start:]
-keys = re.findall(r\"^   '([a-zA-Z./*<>=!?+-][a-zA-Z0-9./*<>=!?+-]*)\", section, re.MULTILINE)
-print(len(keys))
+total = 0
+for path, marker in [('private/stdlib-portable.rkt', 'STDLIB-PORTABLE'),
+                     ('private/stdlib-clj.rkt', 'STDLIB-CLJ'),
+                     ('private/stdlib-cljs.rkt', 'STDLIB-CLJS')]:
+    with open(path) as f:
+        content = f.read()
+    start = content.find('(define ' + marker)
+    if start < 0: continue
+    # find matching close — count parens from the (hash
+    depth = 0
+    section = ''
+    for c in content[start:]:
+        if c == '(': depth += 1
+        elif c == ')': depth -= 1
+        section += c
+        if depth == 0: break
+    keys = re.findall(r\"^   '([a-zA-Z./*<>=!?+-][a-zA-Z0-9./*<>=!?+-]*)\", section, re.MULTILINE)
+    total += len(keys)
+print(total)
 " 2>/dev/null || echo "0")
 echo "  stdlib: $STDLIB_COUNT"
 

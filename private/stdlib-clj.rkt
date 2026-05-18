@@ -21,14 +21,7 @@
 
 (define STDLIB-CLJ
   (hash
-   ;; --- atom / ref ---------------------------------------------------------
-   'atom       (fn-of '(Any) 'Any)
-   'deref      (fn-of '(Any) 'Any)
-   'reset!     (fn-of '(Any Any) 'Any)
-   'swap!      (fn-of '(Any Any) 'Any #:rest 'Any)
-   'compare-and-set! (fn-of '(Any Any Any) 'Bool)
-   'add-watch  (fn-of '(Any Any Any) 'Any)
-   'remove-watch (fn-of '(Any Any) 'Any)
+   ;; --- atom / ref: CLJ-specific extensions --------------------------------
    'volatile!  (fn-of '(Any) 'Any)
    'vreset!    (fn-of '(Any Any) 'Any)
    'vswap!     (fn-of '(Any Any) 'Any #:rest 'Any)
@@ -38,14 +31,11 @@
    'realized?  (fn-of '(Any) 'Bool)
    'deliver    (fn-of '(Any Any) 'Any)
    'promise    (fn-of '() 'Any)
-   ;; --- type coercion / casting -------------------------------------------
-   'int        (fn-of '(Any) 'Int)
+   ;; --- type coercion: CLJ-specific -----------------------------------------
    'long       (fn-of '(Any) 'Int)
    'float      (fn-of '(Any) 'Float)
-   'double     (fn-of '(Any) 'Float)
    'short      (fn-of '(Any) 'Int)
    'byte       (fn-of '(Any) 'Int)
-   'char       (fn-of '(Any) 'Any)
    'bigint     (fn-of '(Any) 'Any)
    'biginteger (fn-of '(Any) 'Any)
    'bigdec     (fn-of '(Any) 'Any)
@@ -152,13 +142,10 @@
    'slurp      (fn-of '(Any) 'String)
    'spit       (fn-of '(Any Any) 'Nil #:rest 'Any)
    'read-string (fn-of '(String) 'Any)
-   ;; --- array ops ----------------------------------------------------------
-   'aget       (fn-of '(Any Int) 'Any #:rest 'Int)
-   'aset       (fn-of '(Any Int Any) 'Any #:rest 'Any)
+   ;; --- array ops: CLJ-specific ---------------------------------------------
    'alength    (fn-of '(Any) 'Int)
    'aclone     (fn-of '(Any) 'Any)
    'array      (fn-of '() 'Any #:rest 'Any)
-   'to-array   (fn-of '(Any) 'Any)
    'into-array (fn-of '(Any) 'Any #:rest 'Any)
    'make-array (fn-of '(Any Int) 'Any)
    ;; --- Java interop: instance methods (receiver is first param) ----------

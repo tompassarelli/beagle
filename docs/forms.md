@@ -1052,8 +1052,8 @@ Example:
 
 `String`, `Int`, `Float`, `Bool`, `Keyword`, `Symbol`, `Nil`, `Any`.
 
-One canonical name per type. Former aliases (`Integer`, `Long`, `Double`,
-`Boolean`) were removed in the AI-optimization pass.
+One canonical name per type. JVM names (`Long`, `Double`, `Boolean`, `Integer`)
+are accepted as `#lang beagle/clj` sugar but resolve to canonical names.
 
 User-defined types (from `defrecord`) are also valid in annotations:
 `Employee`, `Config`, etc.
