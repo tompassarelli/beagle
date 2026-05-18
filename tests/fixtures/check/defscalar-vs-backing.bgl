@@ -1,2 +1,2 @@
-(defscalar Timestamp Long)
-(def bad : Long (->Timestamp 100))
+(defscalar Timestamp Int)
+(def bad : Int (->Timestamp 100))

@@ -11,13 +11,13 @@ with `#lang beagle`. Compiles to plain `.clj`.
 
 **Type annotations** — params and return:
 ```racket
-(defn total [(qty : Long) (price : Long)] : Long (* qty price))
+(defn total [(qty : Int) (price : Int)] : Int (* qty price))
 ```
 
 **Records** — typed constructors, accessors, keyword access:
 ```racket
-(defrecord Product [(id : Long) (name : String) (price : Long)])
-(->Product 1 "Widget" 500)   ;; [Long String Long -> Product]
+(defrecord Product [(id : Int) (name : String) (price : Int)])
+(->Product 1 "Widget" 500)   ;; [Int String Int -> Product]
 (product-name p)              ;; [Product -> String]
 (:name p)                     ;; also typed
 (with p [:price 600])         ;; typed update (use this, not assoc)
@@ -25,14 +25,14 @@ with `#lang beagle`. Compiles to plain `.clj`.
 
 **Scalars** — newtypes, must unwrap/rewrap for arithmetic:
 ```racket
-(defscalar Amount Long)
+(defscalar Amount Int)
 (->Amount (+ (amount-value a) (amount-value b)))
 ```
 
 **require** imports everything: `(require catalog :as cat)`.
 No `declare-extern` needed for cross-module Beagle calls.
 
-Types: `String`, `Long`, `Double`, `Boolean`, `Keyword`, `Nil`, `Any`,
+Types: `String`, `Int`, `Float`, `Bool`, `Keyword`, `Nil`, `Any`,
 `(Vec T)`, `(Map K V)`, `(Set T)`, `(U A B)`, `String?`
 
 ## Reading checker errors

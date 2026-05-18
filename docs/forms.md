@@ -14,7 +14,7 @@ A beagle source file:
 (define-mode strict)          ; optional; default strict
 
 (require some.namespace)      ; optional; can repeat
-(declare-extern foo [Long -> Long])   ; optional; can repeat
+(declare-extern foo [Int -> Int])      ; optional; can repeat
 (define-macro safe inc1 (x) (+ x 1))  ; optional; can repeat
 
 ; ... bodies follow ...
@@ -65,7 +65,7 @@ Where PARAMS is a list of `NAME` or `(NAME : Type)`.
 
 Example:
 ```racket
-(defn add [(x : Long) (y : Long)] : Long
+(defn add [(x : Int) (y : Int)] : Int
   (+ x y))
 
 (defn id [x] x)
@@ -102,7 +102,7 @@ against all arities and reports available options on mismatch.
 
 Example:
 ```racket
-(fn [(x : Long)] (+ x 1))
+(fn [(x : Int)] (+ x 1))
 ```
 
 ### `let`
@@ -121,13 +121,13 @@ Example:
 (let [x 1 y 2]
   (+ x y))
 
-;; Type inferred: n is Long (strlen returns Long), doubled is Long (* returns Long)
+;; Type inferred: n is Int (strlen returns Int), doubled is Int (* returns Int)
 (let [n (strlen name)
       doubled (* n 2)]
   (+ doubled 1))
 
 ;; Explicit annotation — only when you want to narrow or document:
-(let [(area : Long) (* w h)]
+(let [(area : Int) (* w h)]
   area)
 ```
 
@@ -318,8 +318,8 @@ Pattern matching with type narrowing. Patterns:
 
 Example:
 ```racket
-(defrecord Circle [(radius : Double)])
-(defrecord Rect [(width : Double) (height : Double)])
+(defrecord Circle [(radius : Float)])
+(defrecord Rect [(width : Float) (height : Float)])
 
 (match shape
   [(Circle r) (* 3.14159 r r)]
@@ -384,12 +384,12 @@ All fields must have type annotations (wrapped form).
 
 Example:
 ```racket
-(defrecord Employee [(name : String) (rate : Long)])
+(defrecord Employee [(name : String) (rate : Int)])
 
 (def alice (->Employee "Alice" 95))
 (def n : String (employee-name alice))
 
-(defn total-cost [(e : Employee) (hours : Long)] : Long
+(defn total-cost [(e : Employee) (hours : Int)] : Int
   (* (employee-rate e) hours))
 ```
 
@@ -413,7 +413,7 @@ and that the value type is compatible with the field's declared type. Returns th
 same record type.
 
 ```racket
-(defrecord Order [(status : String) (total : Long) (shipped-count : Long)])
+(defrecord Order [(status : String) (total : Int) (shipped-count : Int)])
 (defn confirm [(o : Order)] : Order
   (with o [:status "confirmed"]))
 ```
@@ -445,15 +445,15 @@ Nominal scalar (newtype). Creates a distinct type wrapping a base type.
 Constructor `->Name`, accessor `name-value`.
 
 ```racket
-(defscalar Amount Long)
-;; (->Amount 500)       — wrap Long into Amount
-;; (amount-value a)     — unwrap Amount back to Long
+(defscalar Amount Int)
+;; (->Amount 500)       — wrap Int into Amount
+;; (amount-value a)     — unwrap Amount back to Int
 
-(defscalar Pct Long :where (>= 0) (<= 100))
+(defscalar Pct Int :where (>= 0) (<= 100))
 ;; compile-time literal checking + runtime :pre conditions
 ```
 
-Amount ≠ Long at compile time. Unwrap before arithmetic, rewrap after:
+Amount ≠ Int at compile time. Unwrap before arithmetic, rewrap after:
 ```racket
 (->Amount (+ (amount-value a) (amount-value b)))
 ```
@@ -803,7 +803,7 @@ Example:
 Example:
 ```racket
 [1 2 3]
-[(name : String) (age : Long)]    ; in param-list positions
+[(name : String) (age : Int)]     ; in param-list positions
 ```
 
 ### Map literal
@@ -892,7 +892,7 @@ Example:
 All three forms are type-checked when declared via `declare-extern`. The
 receiver is the first parameter in method type signatures:
 ```racket
-(declare-extern .startsWith [String String -> Boolean])
+(declare-extern .startsWith [String String -> Bool])
 (declare-extern System/getProperty [String -> String])
 ```
 
@@ -958,7 +958,7 @@ Cross-module calls are fully type-checked without `declare-extern`:
 ```racket
 (require inventory :as inv)
 
-;; Type checker knows inv/can-fulfill? : [(Vec StockLevel) Long Long -> Boolean]
+;; Type checker knows inv/can-fulfill? : [(Vec StockLevel) Int Int -> Bool]
 ;; No declare-extern needed — it was imported from inventory.rkt's source
 (inv/can-fulfill? levels product-id qty)
 ```
@@ -1050,10 +1050,10 @@ Example:
 
 ### Primitives
 
-`String`, `Long`, `Double`, `Boolean`, `Keyword`, `Symbol`, `Nil`, `Any`.
+`String`, `Int`, `Float`, `Bool`, `Keyword`, `Symbol`, `Nil`, `Any`.
 
-One canonical name per type. Former aliases (`Integer`, `Int`, `Float`,
-`Bool`) were removed in the AI-optimization pass.
+One canonical name per type. Former aliases (`Integer`, `Long`, `Double`,
+`Boolean`) were removed in the AI-optimization pass.
 
 User-defined types (from `defrecord`) are also valid in annotations:
 `Employee`, `Config`, etc.

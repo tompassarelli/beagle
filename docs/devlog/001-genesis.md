@@ -32,5 +32,5 @@ correctness after fixes. The pipeline works: parse → check → emit.
 
 The leverage isn't in catching errors per se — it's in catching them
 with enough structure that the fix is mechanical. An error message that
-says "line 37: expected Order, got Long, did you mean order-total?"
+says "line 37: expected Order, got Int, did you mean order-total?"
 eliminates a 5-call reasoning loop.

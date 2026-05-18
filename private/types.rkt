@@ -1,9 +1,8 @@
 #lang racket/base
 
-;; Beagle's v0 type system.
+;; Beagle's type system.
 ;;
-;;   primitives:   String, Long, Integer, Int, Double, Float, Boolean, Bool,
-;;                 Keyword, Symbol, Nil, Any
+;;   primitives:   String, Int, Float, Bool, Keyword, Symbol, Nil, Any
 ;;   function:     [A B -> R]              fixed arity
 ;;                 [A B & T -> R]           variadic; tail args of type T
 ;;   parametric:   (Vec T), (List T), (Set T), (Map K V)
@@ -17,15 +16,17 @@
          "tags.rkt")
 
 (define PRIMITIVES
-  '(String Long Double Boolean Keyword Symbol Nil Any))
+  '(String Int Float Bool Keyword Symbol Nil Any))
 
-;; Type aliases removed in the AI-optimization pass — one canonical name
-;; per primitive. Long (not Integer/Int), Double (not Float), Boolean (not
-;; Bool). Less surface for LLMs to confuse.
-(define PRIM-ALIASES '())
+;; Target-specific sugar: #lang beagle/clj accepts JVM names.
+;; These resolve to canonical names in the parser before the checker sees them.
+(define CLJ-ALIASES
+  '((Long . Int) (Double . Float) (Boolean . Bool)
+    (Integer . Int)))
 
+;; Rejected without alias — no silent resolution, hard error with guidance.
 (define REJECTED-ALIASES
-  '(Integer Int Float Bool))
+  '(Number))
 
 (define PARAMETRIC-CTORS
   '(Vec List Set Map Promise))
@@ -99,12 +100,12 @@
     [(symbol? t)
      (define canonical
        (cond
-         [(assq t PRIM-ALIASES) => cdr]
+         [(assq t CLJ-ALIASES) => cdr]
          [else t]))
      (define s (symbol->string canonical))
      (when (memq canonical REJECTED-ALIASES)
        (error 'beagle
-              "type alias ~a was removed — use the canonical name instead"
+              "type ~a is not supported — use Int, Float, Bool, String, or Nil"
               t))
      (unless (or (member canonical PRIMITIVES)
                  (and (positive? (string-length s))
@@ -263,12 +264,12 @@
 (define (infer-literal-type v)
   (cond
     [(string? v)         (type-prim 'String)]
-    [(boolean? v)        (type-prim 'Boolean)]
-    [(exact-integer? v)  (type-prim 'Long)]
-    [(real? v)           (type-prim 'Double)]
+    [(boolean? v)        (type-prim 'Bool)]
+    [(exact-integer? v)  (type-prim 'Int)]
+    [(real? v)           (type-prim 'Float)]
     [(eq? v 'nil)        (type-prim 'Nil)]
-    [(eq? v 'true)       (type-prim 'Boolean)]
-    [(eq? v 'false)      (type-prim 'Boolean)]
+    [(eq? v 'true)       (type-prim 'Bool)]
+    [(eq? v 'false)      (type-prim 'Bool)]
     [(and (symbol? v)
           (positive? (string-length (symbol->string v)))
           (char=? (string-ref (symbol->string v) 0) #\:))

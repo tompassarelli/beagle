@@ -8,25 +8,25 @@ differs from Clojure — if it's not listed, it works the same.
 
 **Type annotations** on params and return types:
 ```racket
-(defn total [(qty : Long) (price : Long)] : Long
+(defn total [(qty : Int) (price : Int)] : Int
   (* qty price))
 ```
 
 **Records** generate typed constructors and accessors:
 ```racket
-(defrecord Product [(id : Long) (name : String) (price : Long)])
-;; (->Product 1 "Widget" 500)   — constructor [Long String Long -> Product]
+(defrecord Product [(id : Int) (name : String) (price : Int)])
+;; (->Product 1 "Widget" 500)   — constructor [Int String Int -> Product]
 ;; (product-name p)             — accessor [Product -> String]
 ;; (:name p)                    — also works, inferred from record type
 ;; (with p [:price 600])        — typed update (assoc with compile-time checking)
 ```
 
-**Nominal scalars** — newtypes over Long:
+**Nominal scalars** — newtypes over Int:
 ```racket
-(defscalar Amount Long)
+(defscalar Amount Int)
 ;; (->Amount 500)            — wrap
 ;; (amount-value a)          — unwrap for arithmetic
-;; Amount ≠ Long at compile time
+;; Amount ≠ Int at compile time
 ```
 
 **require** imports everything (types, records, functions):
@@ -40,7 +40,7 @@ differs from Clojure — if it's not listed, it works the same.
 
 | Error | Example | Fix |
 |-------|---------|-----|
-| Wrong type | `(product-name 42)` — expected Product, got Long | Use the right accessor or pass the right record |
+| Wrong type | `(product-name 42)` — expected Product, got Int | Use the right accessor or pass the right record |
 | Wrong arity | `(f x y)` but f takes 3 args | Check `beagle-sig f .` for the signature |
 | Wrong accessor | `(product-id p)` where `(product-price p)` needed | Check `beagle-fields Product .` for field list |
 | Cross-module | `(cat/product-name 42)` — same checking across modules | Signatures enforced at call sites |
@@ -52,7 +52,7 @@ differs from Clojure — if it's not listed, it works the same.
   (carrier-base-rate zone)
   arg 1: expected Carrier, got DeliveryZone
   help: did you mean `zone-surcharge-pct`?
-  sig: carrier-base-rate : [Carrier -> Long]
+  sig: carrier-base-rate : [Carrier -> Int]
 ```
 
 **"did you mean X?" → yes, use X.** Single suggestions are almost always
@@ -62,7 +62,7 @@ correct. `beagle-fix --apply .` auto-applies these.
 ── E001 ── billing.rkt:61 ──────────────────
   (order-customer-id)
   called with 0 args, expects 1
-  sig: order-customer-id : [Order -> Long]
+  sig: order-customer-id : [Order -> Int]
 ```
 
 → Missing the Order argument. Pass it.

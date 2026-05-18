@@ -1,3 +1,3 @@
-(defrecord Foo [(x : Long)])
+(defrecord Foo [(x : Int)])
 (defrecord Bar [(y : String)])
 (defunion MyUnion Foo Bar)

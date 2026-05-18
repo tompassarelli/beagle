@@ -39,11 +39,11 @@ to LLM output quality.
 **3. Hard tasks discriminate strongly.** `19-nested-let` (Heron's formula)
 failed in all three variants, but on different errors:
 
-- **Variant A** (`/` Long/Double issue): the LLM correctly used flat
-  multi-binding `let`, but `/` was typed as `[Long Long -> Long]` and
-  rejected the Double argument.
+- **Variant A** (`/` Int/Float issue): the LLM correctly used flat
+  multi-binding `let`, but `/` was typed as `[Int Int -> Int]` and
+  rejected the Float argument.
 - **Variant B**: the LLM correctly typed everything but wrote
-  `(let [(sum : Long) (+ a b)] ...)` — *wrapped* typed let bindings,
+  `(let [(sum : Int) (+ a b)] ...)` — *wrapped* typed let bindings,
   mirroring the wrapped param convention. Beagle's let parser only accepted
   inline typed bindings (`name : Type value`). Real bug.
 - **Variant F**: same `/` type issue as A, plus more idiomatic let binding
@@ -58,16 +58,16 @@ beagle's design surface, not an LLM error.
 
 **Fix 1: Let bindings now accept wrapped typed form.**
 ```
-(let [(sum : Long) (+ a b)
-      sum-double :- Double (some-conversion)]
+(let [(sum : Int) (+ a b)
+      sum-float :- Float (some-conversion)]
   ...)
 ```
 Parser supports three forms: wrapped `(name : Type) value`, inline
 `name : Type value`, and untyped `name value`. Mix freely.
 
 **Fix 2: Math operators (`+`, `-`, `*`, `/`) now typed as variadic Any.**
-Real Clojure math is polymorphic across Long/Double/Ratio. v0 was too
-narrow at `[Long Long -> Long]` — caused spurious errors on FP work. New
+Real Clojure math is polymorphic across Int/Float/Ratio. v0 was too
+narrow at `[Int Int -> Int]` — caused spurious errors on FP work. New
 type accepts any args. Less type-safety on math, but eliminates false
 negatives that block real programs. Better narrowing comes with parametric
 function types.
@@ -309,7 +309,7 @@ After fix: **68/68 PASS behavior across all 6 variants.**
 | # | Bug | Caught by | Fixed in commit |
 |---|---|---|---|
 | 1 | Wrapped let bindings not parseable | run #1 (compile-rate) | parser refactor |
-| 2 | Math operators too narrowly typed (Long-only) | run #1 (compile-rate) | stdlib loosened |
+| 2 | Math operators too narrowly typed (Int-only) | run #1 (compile-rate) | stdlib loosened |
 | 3 | `(unsafe "...")` not in expression position | run #4 (behavior) | parse-list-form |
 | 4 | `reduce` typed 2-arg only (real Clojure: 2 or 3) | run #4 (behavior) | stdlib variadic |
 | 5 | Bare-form cond not accepted | run #5 (compile-rate) | parse-cond-clauses |
@@ -345,8 +345,8 @@ any sampled task.
 - `:-` marker — only `:` accepted now
 - Inline parameter annotations `[x : T y : T]` — only wrapped `[(x : T)]`
 - Inline let bindings `[x : T value]` — only wrapped `[(x : T) value]`
-- Type aliases `Integer`, `Int`, `Float`, `Bool` — only `Long`, `Double`,
-  `Boolean` accepted
+- Type aliases `Integer`, `Long`, `Double`, `Boolean` — only `Int`, `Float`,
+  `Bool` accepted
 - Variants D-inline, E-schema, F-schema-inline — deleted from
   `experiments/variants/`
 - 17 response files for variants D/E/F — deleted

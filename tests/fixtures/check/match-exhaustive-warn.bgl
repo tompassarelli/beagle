@@ -1,7 +1,7 @@
-(defrecord Foo [(x : Long)])
+(defrecord Foo [(x : Int)])
 (defrecord Bar [(y : String)])
-(defrecord Baz [(z : Boolean)])
-(defn handle [(e : Any)] : Long
+(defrecord Baz [(z : Bool)])
+(defn handle [(e : Any)] : Int
   (match e
     [(Foo x) x]
     [(Bar y) 0]))

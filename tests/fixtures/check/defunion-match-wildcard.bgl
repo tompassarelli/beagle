@@ -1,8 +1,8 @@
-(defrecord P [(x : Long)])
-(defrecord Q [(y : Long)])
-(defrecord R [(z : Long)])
+(defrecord P [(x : Int)])
+(defrecord Q [(y : Int)])
+(defrecord R [(z : Int)])
 (defunion PQR P Q R)
-(defn handle [(e : PQR)] : Long
+(defn handle [(e : PQR)] : Int
   (match e
     [(P x) x]
     [_ 0]))

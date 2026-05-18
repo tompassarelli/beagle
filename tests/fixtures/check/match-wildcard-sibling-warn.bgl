@@ -1,8 +1,8 @@
-(defrecord Alpha [(id : Long) (x : String)])
-(defrecord Beta [(id : Long) (y : String)])
-(defrecord Gamma [(id : Long) (z : String)])
-(defrecord Delta [(id : Long) (w : String)])
-(defn handle [(e : Any)] : Long
+(defrecord Alpha [(id : Int) (x : String)])
+(defrecord Beta [(id : Int) (y : String)])
+(defrecord Gamma [(id : Int) (z : String)])
+(defrecord Delta [(id : Int) (w : String)])
+(defn handle [(e : Any)] : Int
   (match e
     [(Alpha id x) id]
     [(Beta id y) id]

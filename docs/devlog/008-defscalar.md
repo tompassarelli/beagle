@@ -7,20 +7,20 @@
 ## The feature
 
 ```racket
-(defscalar ProductId Long)
-(defscalar OrderId Long)
+(defscalar ProductId Int)
+(defscalar OrderId Int)
 ```
 
 At compile time: `ProductId` and `OrderId` are incompatible types.
-At runtime: both are plain Longs (zero cost, full Clojure interop).
+At runtime: both are plain Ints (zero cost, full Clojure interop).
 
 Constructors `(->ProductId x)` and accessors `(productid-value x)`
 compile to identity — the type boundary exists only for the checker.
 
 ## Why this matters
 
-The most common silent bug in Clojure domain code: passing one Long
-where another Long was expected. `order-id` where `customer-id` should go.
+The most common silent bug in Clojure domain code: passing one Int
+where another Int was expected. `order-id` where `customer-id` should go.
 No crash, no exception, just wrong data flowing silently through the system.
 
 In Clojure, this bug is undetectable until a behavioral assertion checks

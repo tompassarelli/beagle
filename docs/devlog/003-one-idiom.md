@@ -8,7 +8,7 @@
 Ran a 6-variant benchmark comparing annotation styles:
 - `:-` vs `:` as type marker
 - Inline `x:Type` vs wrapped `(x : Type)` params
-- Type aliases (`Int` = `Long`) vs bare primitives
+- Type aliases (`Long` = `Int`) vs bare primitives
 
 Result: no measurable difference in LLM output quality for any variant.
 When alternatives are equally good, fewer is better. Removed:

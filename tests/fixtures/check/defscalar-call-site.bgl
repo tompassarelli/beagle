@@ -1,3 +1,3 @@
-(defscalar OrderId Long)
-(defn lookup [(id : OrderId)] : Long 0)
-(defn bad [] : Long (lookup 42))
+(defscalar OrderId Int)
+(defn lookup [(id : OrderId)] : Int 0)
+(defn bad [] : Int (lookup 42))

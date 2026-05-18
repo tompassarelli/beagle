@@ -34,7 +34,7 @@ it as canonical when explaining the language.
 - Param syntax: **wrapped only** — `(name : Type)`. Plus `{:keys [a b c]}`
   map destructuring and `[a b & rest]` sequential destructuring in params
   and let bindings.
-- Types: primitives (`String`, `Long`, `Double`, `Boolean`, `Keyword`,
+- Types: primitives (`String`, `Int`, `Float`, `Bool`, `Keyword`,
   `Symbol`, `Nil`, `Any` — no aliases), user-defined record types,
   function types (variadic with `& T`), parametric (`Vec`, `Map`, `Set`,
   `List`), union (`U`), nullable sugar (`String?` = `(U String Nil)`),
@@ -72,7 +72,7 @@ it as canonical when explaining the language.
 - `with` form: typed record update `(with rec [:field val])` → `(assoc rec :field val)`
   with compile-time field existence and type checking
 - `defenum` form: `(defenum Name :a :b)` → `(def Name-values #{:a :b})`
-- Refinement predicates: `(defscalar Pct Long :where (>= 0) (<= 100))` —
+- Refinement predicates: `(defscalar Pct Int :where (>= 0) (<= 100))` —
   compile-time literal checking + runtime `:pre` conditions; cross-module propagation
 - Exhaustive match warnings: match on record types warns about missing cases
 - LSP server: hover (type signatures), diagnostics (on open/save), document
@@ -222,13 +222,13 @@ the type system directly:
 ```bash
 # "What does inv/can-fulfill? expect?"
 bin/beagle-sig can-fulfill? path/to/inventory.bgl
-# → can-fulfill? : [(Vec StockLevel) Long Long -> Boolean]
+# → can-fulfill? : [(Vec StockLevel) Int Int -> Bool]
 
 # "What fields does an Invoice have?"
 bin/beagle-fields Invoice path/to/billing.bgl
 # → Invoice
-#   id : Long          accessor: invoice-id
-#   order-id : Long    accessor: invoice-order-id
+#   id : Int           accessor: invoice-id
+#   order-id : Int     accessor: invoice-order-id
 #   ...
 
 # "What does the billing module export?"
@@ -282,7 +282,7 @@ mode skips lint (types are optional there by definition).
 | Subset-of-Clojure, not full mimic | take Lisp universals + Clojure's good ideas; develop own for typed semantics |
 | `:` as only annotation marker | `:-` removed; no measured benefit in 6-variant benchmark |
 | Wrapped params only | inline removed; no measured benefit, less unambiguous parse |
-| No type aliases | `Long`/`Double`/`Boolean` only — zero ambiguity for LLMs |
+| No type aliases | `Int`/`Float`/`Bool` only — zero ambiguity for LLMs |
 
 ### Cargo-cult — deliberately NOT added
 
@@ -298,6 +298,25 @@ Host-language idioms whose cost > benefit for beagle's goals:
 ```
 raco pkg install --link --auto /home/tom/code/beagle
 ```
+
+## Doc maintenance
+
+After changing type names, form signatures, or other facts that appear in
+multiple docs, run `bin/beagle-docs-sync --verbose` to check consistency.
+It propagates test counts, stdlib sizes, and validates that deprecated type
+names (`Long`, `Double`, `Boolean`) don't appear in canonical docs.
+
+Canonical Beagle type names: `Int`, `Float`, `Bool`, `String`, `Nil`, `Any`,
+`Keyword`, `Symbol`. The old JVM names (`Long`, `Double`, `Boolean`) are
+accepted as `#lang beagle/clj` compatibility sugar but must not appear in
+docs, cheatsheets, or prompts as canonical Beagle types.
+
+Files that define canonical facts (single source of truth):
+- `private/types.rkt` → type names, PRIMITIVES list
+- `private/stdlib-types.rkt` → stdlib catalog and counts
+- `scribblings/beagle.scrbl` → Scribble docs (canonical form reference)
+- `docs/cheatsheet.md` → LLM grounding reference
+- `docs/cheatsheet-consumer.md` → consumer agent reference
 
 ## Devlog discipline
 

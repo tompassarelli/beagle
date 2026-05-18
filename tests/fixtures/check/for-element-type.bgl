@@ -1,4 +1,4 @@
-(defrecord Product [(id : Long) (name : String)])
+(defrecord Product [(id : Int) (name : String)])
 
 (defn get-products [] : (Vec Product)
   [(->Product 1 "A") (->Product 2 "B")])

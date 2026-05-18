@@ -1,9 +1,9 @@
-(defrecord Product [(id : Long) (name : String)])
+(defrecord Product [(id : Int) (name : String)])
 
-(defn process-products [(products : (Vec Product))] : Long
+(defn process-products [(products : (Vec Product))] : Int
   (count products))
 
 ;; should pass: homogeneous vec of Products
-(defn good [] : Long
+(defn good [] : Int
   (let [ps [(->Product 1 "A") (->Product 2 "B")]]
     (process-products ps)))

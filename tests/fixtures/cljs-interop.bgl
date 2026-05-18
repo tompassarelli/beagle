@@ -4,17 +4,17 @@
 (ns test.cljs-interop)
 
 ;; JS global functions
-(def parsed : Long (js/parseInt "42"))
-(def float-val : Double (js/parseFloat "3.14"))
-(def nan-check : Boolean (js/isNaN 0))
-(def finite-check : Boolean (js/isFinite 100))
+(def parsed : Int (js/parseInt "42"))
+(def float-val : Float (js/parseFloat "3.14"))
+(def nan-check : Bool (js/isNaN 0))
+(def finite-check : Bool (js/isFinite 100))
 
 ;; JS Math
-(def pi-area : Double (js/Math.pow 3.14 2.0))
-(def root : Double (js/Math.sqrt 16.0))
-(def rnd : Double (js/Math.random))
-(def floored : Double (js/Math.floor 3.7))
-(def ceiled : Double (js/Math.ceil 3.2))
+(def pi-area : Float (js/Math.pow 3.14 2.0))
+(def root : Float (js/Math.sqrt 16.0))
+(def rnd : Float (js/Math.random))
+(def floored : Float (js/Math.floor 3.7))
+(def ceiled : Float (js/Math.ceil 3.2))
 
 ;; JS console
 (defn log-it [(msg : String)] : Nil
@@ -38,10 +38,10 @@
       (str "error: " e))))
 
 ;; defrecord works in both targets
-(defrecord Point [(x : Long) (y : Long)])
+(defrecord Point [(x : Int) (y : Int)])
 
 (defn make-origin [] : Point
   (->Point 0 0))
 
 (def origin (make-origin))
-(def ox : Long (:x origin))
+(def ox : Int (:x origin))

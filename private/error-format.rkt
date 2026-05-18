@@ -63,7 +63,7 @@
     [(regexp-match? #rx"unknown beagle form" msg)
      "see docs/forms.md for the canonical form catalog"]
     [(regexp-match? #rx"unknown type" msg)
-     "primitives: String Long Double Boolean Keyword Symbol Nil Any; or [A B -> R], (Vec T), (U A B)"]
+     "primitives: String Int Float Bool Keyword Symbol Nil Any; or [A B -> R], (Vec T), (U A B)"]
     [(regexp-match? #rx"bad field spec" msg)
      "field spec must be [name : Type]"]
     [(regexp-match? #rx"bad binding spec" msg)

@@ -1,9 +1,9 @@
-(defrecord Product [(id : Long) (name : String) (price : Long)])
+(defrecord Product [(id : Int) (name : String) (price : Int)])
 
 (defn get-product [] : Product
   (->Product 1 "Widget" 500))
 
-;; should fail: price is Long, not String
+;; should fail: price is Int, not String
 (defn bad-use [] : String
   (let [{:keys [price]} (get-product)]
     price))

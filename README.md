@@ -2,7 +2,7 @@
 
 **A language where mechanical bugs compile into patches.**
 
-Beagle is an agent-native typed authoring layer for dynamic languages. It gives coding agents a compiler, repair queue, and structural query tools — then emits plain source in the target language.
+Beagle is an agent-native typed authoring layer for dynamic languages. It gives coding agents a compiler, repair queue, and structural query tools, then emits ordinary source in the target language.
 
 Currently supported targets:
 
@@ -14,7 +14,7 @@ Same types, same checker, same repair compiler — different backends.
 
 The thesis is simple: **mechanical bugs should not require cognition.**
 
-Shape errors should be caught by types. Runtime failures should become ranked, machine-actionable repair candidates. The goal is to spend zero reasoning tokens on mechanical fixes — the agent's budget goes to semantic bugs that actually require judgment.
+Shape errors should be caught by types. Checker failures become ranked, machine-actionable repair candidates. Runtime failures can be routed into the same repair workflow. The goal is to spend zero reasoning tokens on mechanical fixes — the agent's budget goes to semantic bugs that actually require judgment.
 
 ```text
 source.bgl → parse → check → emit → output.clj / .cljs / .js
@@ -24,13 +24,33 @@ source.bgl → parse → check → emit → output.clj / .cljs / .js
                 daemon + AST cache
 ```
 
-The runtime target stays normal source. If you stop using Beagle, you keep the emitted code.
+The runtime stays ordinary target code. If you stop using Beagle, you keep the emitted source.
+
+## A program
+
+```racket
+#lang beagle/js
+(ns inventory.core)
+(define-mode strict)
+
+(defrecord StockLevel [(product-id : Int)
+                       (quantity   : Int)
+                       (min-qty   : Int)])
+
+(defn understocked? [(s : StockLevel)] : Bool
+  (< (stocklevel-quantity s) (stocklevel-min-qty s)))
+
+(defn reorder-quantity [(s : StockLevel)] : Int
+  (if (understocked? s)
+      (- (stocklevel-min-qty s) (stocklevel-quantity s))
+      0))
+```
+
+Portable Beagle source can emit to any supported target — change `#lang beagle/js` to `#lang beagle/clj` and the same program emits Clojure. Target-specific `#lang`s expose target-specific forms (`await` for JS, Java interop for CLJ).
 
 ## Experiments
 
-The point was not to prove Beagle is "smarter" than Clojure or Python. The point was to measure repair distance: how much work an agent has to do after a bug is introduced.
-
-15 experiments, 3 language tracks, same tasks:
+Agents repair code faster when mechanical failures are surfaced as structured compiler feedback instead of runtime archaeology. 15 experiments, 3 language tracks, same tasks:
 
 | Metric                    | Beagle | Clojure | Python + mypy |
 | ------------------------- | -----: | ------: | ------------: |
@@ -41,30 +61,6 @@ The point was not to prove Beagle is "smarter" than Clojure or Python. The point
 The correctness gap is a static-typing result, not a Beagle-specific one. Beagle's advantage over Python is workflow: reactive daemon, structured repair queue, per-bug speed.
 
 [Full methodology and results](experiments/report.md)
-
-## A program
-
-The same source compiles to any target:
-
-```racket
-#lang beagle/js
-(ns inventory.core)
-(define-mode strict)
-
-(defrecord StockLevel [(product-id : Long)
-                       (quantity   : Long)
-                       (min-qty   : Long)])
-
-(defn understocked? [(s : StockLevel)] : Boolean
-  (< (stocklevel-quantity s) (stocklevel-min-qty s)))
-
-(defn reorder-quantity [(s : StockLevel)] : Long
-  (if (understocked? s)
-      (- (stocklevel-min-qty s) (stocklevel-quantity s))
-      0))
-```
-
-Change `#lang beagle/js` to `#lang beagle/clj` and the same source emits Clojure instead.
 
 ## Setup
 

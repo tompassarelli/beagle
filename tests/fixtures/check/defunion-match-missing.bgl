@@ -1,8 +1,8 @@
-(defrecord X [(a : Long)])
+(defrecord X [(a : Int)])
 (defrecord Y [(b : String)])
-(defrecord Z [(c : Boolean)])
+(defrecord Z [(c : Bool)])
 (defunion XYZ X Y Z)
-(defn handle [(e : XYZ)] : Long
+(defn handle [(e : XYZ)] : Int
   (match e
     [(X a) a]
     [(Y b) 0]))

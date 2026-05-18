@@ -1,8 +1,8 @@
-(defrecord X1 [(a : Long)])
-(defrecord X2 [(b : Long)])
-(defrecord X3 [(c : Long)])
-(defrecord X4 [(d : Long)])
-(defn handle [(e : Any)] : Long
+(defrecord X1 [(a : Int)])
+(defrecord X2 [(b : Int)])
+(defrecord X3 [(c : Int)])
+(defrecord X4 [(d : Int)])
+(defn handle [(e : Any)] : Int
   (match e
     [(X1 a) a]
     [(X2 b) b]

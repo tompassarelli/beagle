@@ -1,4 +1,4 @@
-(defrecord Product [(id : Long) (name : String) (price : Long)])
+(defrecord Product [(id : Int) (name : String) (price : Int)])
 
 (defn get-product [] : Product
   (->Product 1 "Widget" 500))

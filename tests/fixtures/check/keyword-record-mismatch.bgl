@@ -1,3 +1,3 @@
-(defrecord Person [(name : String) (age : Long)])
+(defrecord Person [(name : String) (age : Int)])
 (def p : Person (->Person "Alice" 30))
-(def n : Long (:name p))
+(def n : Int (:name p))

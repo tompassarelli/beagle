@@ -415,6 +415,19 @@
         (format "(~a~a)"
                 qualified-str
                 (emit-args (call-form-args e)))])]
+    [(set!-form? e)
+     (define target (set!-form-target e))
+     (define val (emit-expr (set!-form-value e)))
+     (cond
+       [(method-call? target)
+        (format "(set! (~a ~a) ~a)"
+                (symbol->string (method-call-method-name target))
+                (emit-expr (method-call-target target))
+                val)]
+       [(symbol? target)
+        (format "(set! ~a ~a)" target val)]
+       [else
+        (format "(set! ~a ~a)" (emit-expr target) val)])]
     [(await-form? e)
      (error 'beagle-clj "await is only supported for JS target")]
     [else (error 'beagle-emit "don't know how to emit: ~v" e)]))

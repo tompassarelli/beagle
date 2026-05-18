@@ -405,11 +405,11 @@
   (hasheq
    'nil?     'Nil
    'string?  'String
-   'number?  'Long
-   'integer? 'Long
+   'number?  'Int
+   'integer? 'Int
    'keyword? 'Keyword
    'symbol?  'Symbol
-   'boolean? 'Boolean))
+   'boolean? 'Bool))
 
 (define (type-equal? a b)
   (and (type-prim? a) (type-prim? b)
@@ -800,7 +800,7 @@
     [(dotimes-form? e)
      (infer-expr (dotimes-form-count-expr e) env)
      (define body-env (mut-copy env))
-     (hash-set! body-env (dotimes-form-name e) (type-prim 'Long))
+     (hash-set! body-env (dotimes-form-name e) (type-prim 'Int))
      (last-expr-type (dotimes-form-body e) body-env)
      NIL]
     [(condp-form? e)
@@ -842,6 +842,10 @@
      (last-expr-type (loop-form-body e) body-env)]
     [(recur-form? e)
      (for-each (lambda (a) (infer-expr a env)) (recur-form-args e))
+     ANY]
+    [(set!-form? e)
+     (infer-expr (set!-form-target e) env)
+     (infer-expr (set!-form-value e) env)
      ANY]
     [(await-form? e)
      (define inner-type (infer-expr (await-form-expr e) env))
@@ -1643,8 +1647,8 @@
 
 (define (scalar-backing scalar-name)
   ;; Look up the backing type from the SCALAR-CTORS registry
-  ;; For the note message we just use 'Long as default
-  'Long)
+  ;; For the note message we just use 'Int as default
+  'Int)
 
 ;; Does an expression involve a scalar accessor or constructor call?
 (define (expr-involves-scalar? e)

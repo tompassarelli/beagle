@@ -2,10 +2,10 @@
 
 (ns mathlib)
 
-(defn add [(x : Long) (y : Long)] : Long
+(defn add [(x : Int) (y : Int)] : Int
   (+ x y))
 
-(def pi : Double 3.14159)
+(def pi : Float 3.14159)
 
 (defn greet [(name : String)] : String
   (str "hello " name))

@@ -19,7 +19,7 @@ statically. `assoc` bypasses all checking.
 ## Scalars: unwrap before arithmetic, rewrap after
 
 ```racket
-;; WRONG — Amount is not Long, can't add directly
+;; WRONG — Amount is not Int, can't add directly
 (+ a b)
 
 ;; RIGHT — unwrap, compute, rewrap
@@ -27,7 +27,7 @@ statically. `assoc` bypasses all checking.
 ```
 
 Every `defscalar` type needs explicit wrap/unwrap. The checker enforces
-this — `expected Long, got Amount` means you forgot to unwrap.
+this — `expected Int, got Amount` means you forgot to unwrap.
 
 ## "did you mean X?" — yes, use X
 
@@ -43,7 +43,7 @@ record you actually have:
 
 ```bash
 beagle-fields DeliveryZone .
-# → surcharge-pct : Long    accessor: deliveryzone-surcharge-pct
+# → surcharge-pct : Int     accessor: deliveryzone-surcharge-pct
 ```
 
 ## Don't write `assoc`/`update`/`get` on typed records
@@ -79,7 +79,7 @@ for a compile error.
 ```racket
 ;; WRONG — declare-extern is only for Java interop / non-beagle code
 (require catalog :as cat)
-(declare-extern cat/find-product-by-id [(Vec Product) Long -> Product?])
+(declare-extern cat/find-product-by-id [(Vec Product) Int -> Product?])
 
 ;; RIGHT — require already imported the type
 (require catalog :as cat)

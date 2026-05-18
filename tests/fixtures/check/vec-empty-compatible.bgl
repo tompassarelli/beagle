@@ -1,8 +1,8 @@
-(defrecord Product [(id : Long)])
+(defrecord Product [(id : Int)])
 
-(defn process-products [(ps : (Vec Product))] : Long
+(defn process-products [(ps : (Vec Product))] : Int
   (count ps))
 
 ;; empty vec is (Vec Any), compatible with any (Vec T)
-(defn ok [] : Long
+(defn ok [] : Int
   (process-products []))

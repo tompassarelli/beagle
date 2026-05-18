@@ -1,7 +1,7 @@
-(declare-extern parse-long [String -> Long])
+(declare-extern parse-long [String -> Int])
 
-;; try returns Long when body and catch both return Long
-(defn safe-parse [(s : String)] : Long
+;; try returns Int when body and catch both return Int
+(defn safe-parse [(s : String)] : Int
   (try
     (parse-long s)
     (catch Exception e

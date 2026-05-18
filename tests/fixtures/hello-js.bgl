@@ -2,20 +2,20 @@
 (ns app.main)
 (define-mode strict)
 
-(defrecord Product [(name : String) (price : Long) (in-stock : Boolean)])
+(defrecord Product [(name : String) (price : Int) (in-stock : Bool)])
 
-(def tax-rate : Double 0.08)
+(def tax-rate : Float 0.08)
 
-(defn make-product [(name : String) (price : Long)] : Product
+(defn make-product [(name : String) (price : Int)] : Product
   (->Product name price true))
 
-(defn product-total [(p : Product)] : Double
+(defn product-total [(p : Product)] : Float
   (+ (product-price p) (* (product-price p) tax-rate)))
 
-(defn discount [(p : Product) (pct : Double)] : Product
+(defn discount [(p : Product) (pct : Float)] : Product
   (with p [:price (- (product-price p) (* (product-price p) pct))]))
 
-(defn cheap? [(p : Product)] : Boolean
+(defn cheap? [(p : Product)] : Bool
   (< (product-price p) 10))
 
 (defn summarize [(products : (Vec Product))] : (Vec String)
@@ -37,7 +37,7 @@
     (< (product-price p) 50) "mid-range"
     :else "premium"))
 
-(defn safe-lookup [(products : (Vec Product)) (idx : Long)] : String
+(defn safe-lookup [(products : (Vec Product)) (idx : Int)] : String
   (let [p (nth products idx nil)]
     (if (nil? p)
       "not found"
@@ -47,13 +47,13 @@
   (println (str "Hello, " name "!")))
 
 ;; async/await
-(declare-extern fetch-product [Long -> (Promise Product)])
+(declare-extern fetch-product [Int -> (Promise Product)])
 
-(defn load-and-classify [(id : Long)] : (Promise String)
+(defn load-and-classify [(id : Int)] : (Promise String)
   (let [p (await (fetch-product id))]
     (classify p)))
 
-(defn load-two [(a : Long) (b : Long)] : (Promise (Vec String))
+(defn load-two [(a : Int) (b : Int)] : (Promise (Vec String))
   (let [p1 (await (fetch-product a))
         p2 (await (fetch-product b))]
     [(product-name p1) (product-name p2)]))

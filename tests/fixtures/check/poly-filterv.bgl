@@ -1,2 +1,2 @@
 (def xs [1 2 3])
-(def ys : (Vec Long) (filterv even? xs))
+(def ys : (Vec Int) (filterv even? xs))

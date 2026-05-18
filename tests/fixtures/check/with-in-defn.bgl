@@ -1,3 +1,3 @@
-(defrecord Order [(status : String) (total : Long)])
+(defrecord Order [(status : String) (total : Int)])
 (defn confirm-order [(o : Order)] : Order
   (with o [:status "confirmed"]))

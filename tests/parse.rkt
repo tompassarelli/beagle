@@ -50,11 +50,11 @@
 ;; --- def -------------------------------------------------------------------
 
 (test-case "def with type annotation"
-  (define f (car (parse-one '(def x : Long 42))))
+  (define f (car (parse-one '(def x : Int 42))))
   (check-true  (def-form? f))
   (check-eq?   (def-form-name f) 'x)
   (check-true  (type-prim? (def-form-type f)))
-  (check-eq?   (type-prim-name (def-form-type f)) 'Long)
+  (check-eq?   (type-prim-name (def-form-type f)) 'Int)
   (check-equal? (def-form-value f) 42))
 
 
@@ -66,14 +66,14 @@
 
 (test-case "defn with full type annotations"
   (define f (car (parse-one
-                  '(defn add [(x : Long) (y : Long)] : Long
+                  '(defn add [(x : Int) (y : Int)] : Int
                      (+ x y)))))
   (check-true (defn-form? f))
   (check-eq?  (defn-form-name f) 'add)
   (check-equal? (length (defn-form-params f)) 2)
   (check-eq? (param-name (car (defn-form-params f))) 'x)
-  (check-eq? (type-prim-name (param-type (car (defn-form-params f)))) 'Long)
-  (check-eq? (type-prim-name (defn-form-return-type f)) 'Long))
+  (check-eq? (type-prim-name (param-type (car (defn-form-params f)))) 'Int)
+  (check-eq? (type-prim-name (defn-form-return-type f)) 'Int))
 
 (test-case "defn with no annotations"
   (define f (car (parse-one '(defn id [x] x))))
@@ -81,13 +81,13 @@
   (check-false (param-type (car (defn-form-params f)))))
 
 (test-case "defn with mixed annotated/unannotated params"
-  (define f (car (parse-one '(defn mix [(x : Long) y] (+ x y)))))
-  (check-eq?   (type-prim-name (param-type  (car (defn-form-params f)))) 'Long)
+  (define f (car (parse-one '(defn mix [(x : Int) y] (+ x y)))))
+  (check-eq?   (type-prim-name (param-type  (car (defn-form-params f)))) 'Int)
   (check-false (param-type (cadr (defn-form-params f)))))
 
 (test-case "defn with mixed wrapped + bare params"
-  (define f (car (parse-one '(defn mix [(x : Long) y] x))))
-  (check-eq?   (type-prim-name (param-type (car (defn-form-params f)))) 'Long)
+  (define f (car (parse-one '(defn mix [(x : Int) y] x))))
+  (check-eq?   (type-prim-name (param-type (car (defn-form-params f)))) 'Int)
   (check-false (param-type (cadr (defn-form-params f)))))
 
 ;; --- let / fn / if / cond / when / do --------------------------------------
@@ -100,8 +100,8 @@
   (check-equal? (let-binding-value (car (let-form-bindings f))) 1))
 
 (test-case "let binding with wrapped types"
-  (define f (car (parse-one '(let [(x : Long) 1 y 2] x))))
-  (check-eq? (type-prim-name (let-binding-type (car (let-form-bindings f)))) 'Long)
+  (define f (car (parse-one '(let [(x : Int) 1 y 2] x))))
+  (check-eq? (type-prim-name (let-binding-type (car (let-form-bindings f)))) 'Int)
   (check-false (let-binding-type (cadr (let-form-bindings f)))))
 
 
@@ -229,12 +229,12 @@
 ;; --- declare-extern --------------------------------------------------------
 
 (test-case "declare-extern registered in externs hash"
-  (define p (parse-prog `(declare-extern foo ,(br 'Long '-> 'Long))))
+  (define p (parse-prog `(declare-extern foo ,(br 'Int '-> 'Int))))
   (check-equal? (hash-count (program-externs p)) 1)
   (check-true (hash-has-key? (program-externs p) 'foo)))
 
 (parse-err "duplicate declare-extern errors"
-  `(declare-extern foo ,(br 'Long '-> 'Long))
+  `(declare-extern foo ,(br 'Int '-> 'Int))
   `(declare-extern foo ,(br 'String '-> 'String)))
 
 ;; --- require ---------------------------------------------------------------
@@ -323,7 +323,7 @@
 ;; --- defrecord ---------------------------------------------------------------
 
 (test-case "defrecord parses fields"
-  (define p (parse-prog `(defrecord Employee ,(br '(name : String) '(rate : Long)))))
+  (define p (parse-prog `(defrecord Employee ,(br '(name : String) '(rate : Int)))))
   (define f (car (program-forms p)))
   (check-true (record-form? f))
   (check-eq? (record-form-name f) 'Employee)
@@ -331,7 +331,7 @@
   (check-eq? (param-name (car (record-form-fields f))) 'name)
   (check-equal? (param-type (car (record-form-fields f))) (type-prim 'String))
   (check-eq? (param-name (cadr (record-form-fields f))) 'rate)
-  (check-equal? (param-type (cadr (record-form-fields f))) (type-prim 'Long)))
+  (check-equal? (param-type (cadr (record-form-fields f))) (type-prim 'Int)))
 
 (parse-err "defrecord rejects bare fields without types"
   `(defrecord Foo ,(br 'x 'y)))
@@ -555,8 +555,8 @@
 
 (test-case "defprotocol with multiple methods"
   (define f (car (parse-one `(defprotocol Shape
-                               (area ,(br '(self : Any)) : Double)
-                               (perimeter ,(br '(self : Any)) : Double)))))
+                               (area ,(br '(self : Any)) : Float)
+                               (perimeter ,(br '(self : Any)) : Float)))))
   (check-equal? (length (protocol-form-methods f)) 2))
 
 ;; --- defmulti / defmethod ---------------------------------------------------
@@ -623,7 +623,7 @@
 ;; --- deftype / extend-type ---------------------------------------------------
 
 (test-case "deftype parses"
-  (define f (car (parse-one `(deftype Point ,(br '(x : Long) '(y : Long))
+  (define f (car (parse-one `(deftype Point ,(br '(x : Int) '(y : Int))
                                Printable
                                (to-string ,(br '(self : Any)) (str x y))))))
   (check-true (deftype-form? f))
@@ -695,17 +695,17 @@
 ;; --- defscalar with :where predicates ----------------------------------------
 
 (test-case "defscalar without :where has empty predicates"
-  (define f (car (parse-one '(defscalar Amount Long))))
+  (define f (car (parse-one '(defscalar Amount Int))))
   (check-true (defscalar-form? f))
   (check-eq? (defscalar-form-name f) 'Amount)
-  (check-eq? (defscalar-form-backing-type f) 'Long)
+  (check-eq? (defscalar-form-backing-type f) 'Int)
   (check-equal? (defscalar-form-predicates f) '()))
 
 (test-case "defscalar with :where parses predicates"
-  (define f (car (parse-one '(defscalar Percentage Long :where (>= 0) (<= 100)))))
+  (define f (car (parse-one '(defscalar Percentage Int :where (>= 0) (<= 100)))))
   (check-true (defscalar-form? f))
   (check-eq? (defscalar-form-name f) 'Percentage)
-  (check-eq? (defscalar-form-backing-type f) 'Long)
+  (check-eq? (defscalar-form-backing-type f) 'Int)
   (check-equal? (length (defscalar-form-predicates f)) 2)
   (define p1 (car (defscalar-form-predicates f)))
   (check-eq? (scalar-predicate-op p1) '>=)
@@ -715,27 +715,27 @@
   (check-equal? (scalar-predicate-value p2) 100))
 
 (test-case "defscalar :where with single predicate"
-  (define f (car (parse-one '(defscalar PositiveLong Long :where (> 0)))))
+  (define f (car (parse-one '(defscalar PositiveInt Int :where (> 0)))))
   (check-equal? (length (defscalar-form-predicates f)) 1)
   (check-eq? (scalar-predicate-op (car (defscalar-form-predicates f))) '>))
 
 ;; --- varargs (& rest) in defn/fn params ---
 
 (test-case "defn with & rest-param parses rest-param"
-  (define f (car (parse-one '(defn foo [(x : Long) & (rest : Long)] : Long (+ x 1)))))
+  (define f (car (parse-one '(defn foo [(x : Int) & (rest : Int)] : Int (+ x 1)))))
   (check-true (defn-form? f))
   (check-equal? (length (defn-form-params f)) 1)
   (check-true (param? (defn-form-rest-param f)))
   (check-eq? (param-name (defn-form-rest-param f)) 'rest)
   (check-true (type-prim? (param-type (defn-form-rest-param f))))
-  (check-eq? (type-prim-name (param-type (defn-form-rest-param f))) 'Long))
+  (check-eq? (type-prim-name (param-type (defn-form-rest-param f))) 'Int))
 
 (test-case "defn without & has #f rest-param"
-  (define f (car (parse-one '(defn bar [(x : Long)] : Long x))))
+  (define f (car (parse-one '(defn bar [(x : Int)] : Int x))))
   (check-false (defn-form-rest-param f)))
 
 (test-case "fn with & rest-param"
-  (define f (car (parse-one '(fn [(a : Long) & (b : String)] (str a b)))))
+  (define f (car (parse-one '(fn [(a : Int) & (b : String)] (str a b)))))
   (check-true (fn-form? f))
   (check-equal? (length (fn-form-params f)) 1)
   (check-true (param? (fn-form-rest-param f)))

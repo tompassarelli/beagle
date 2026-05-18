@@ -14,7 +14,7 @@ runtime. The differences are all compile-time.
 ### Type annotations
 
 ```racket
-(defn total [(qty : Long) (price : Long)] : Long
+(defn total [(qty : Int) (price : Int)] : Int
   (* qty price))
 ```
 
@@ -24,11 +24,11 @@ Untyped params are allowed but the checker treats them as `Any`.
 ### Records
 
 ```racket
-(defrecord Product [(id : Long) (name : String) (price : Long)])
+(defrecord Product [(id : Int) (name : String) (price : Int)])
 ```
 
 This generates:
-- Constructor: `(->Product 1 "Widget" 500)` typed `[Long String Long -> Product]`
+- Constructor: `(->Product 1 "Widget" 500)` typed `[Int String Int -> Product]`
 - Accessors: `(product-id p)`, `(product-name p)`, `(product-price p)`
 - Keyword access: `(:name p)` returns `String` when the checker knows `p` is `Product`
 - Typed update: `(with p [:price 600])` — checks field existence AND field type
@@ -41,23 +41,23 @@ validate it. `with` catches wrong field names and wrong types at compile time.
 ### Nominal scalars (newtypes)
 
 ```racket
-(defscalar Amount Long)
-;; (->Amount 500)       — wrap a Long into an Amount
-;; (amount-value a)     — unwrap Amount back to Long
+(defscalar Amount Int)
+;; (->Amount 500)       — wrap an Int into an Amount
+;; (amount-value a)     — unwrap Amount back to Int
 ```
 
-Amount ≠ Long at compile time. You MUST unwrap before arithmetic and
+Amount ≠ Int at compile time. You MUST unwrap before arithmetic and
 rewrap after:
 
 ```racket
-;; WRONG — checker rejects: expected Long, got Amount
+;; WRONG — checker rejects: expected Int, got Amount
 (+ a b)
 
 ;; RIGHT
 (->Amount (+ (amount-value a) (amount-value b)))
 ```
 
-The error message `expected Long, got Amount` always means you forgot to unwrap.
+The error message `expected Int, got Amount` always means you forgot to unwrap.
 
 ### require imports everything
 
@@ -104,7 +104,7 @@ Don't annotate unless narrowing a union:
 
 ## Types
 
-Primitives: `String`, `Long`, `Double`, `Boolean`, `Keyword`, `Nil`, `Any`
+Primitives: `String`, `Int`, `Float`, `Bool`, `Keyword`, `Nil`, `Any`
 
 ```
 [A B -> R]           function type
@@ -112,7 +112,7 @@ Primitives: `String`, `Long`, `Double`, `Boolean`, `Keyword`, `Nil`, `Any`
 (Vec T)              vector
 (Map K V)            map
 (Set T)              set
-(U String Long)      union
+(U String Int)       union
 String?              nullable (= (U String Nil))
 ```
 
@@ -144,7 +144,7 @@ String?              nullable (= (U String Nil))
 ## Parameters
 
 ```racket
-[(x : Long) (y : String)]           typed
+[(x : Int) (y : String)]            typed
 [x y z]                              untyped
 [{:keys [name age]}]                 map destructuring
 [{:keys [x y] :as point}]           destructure + bind whole
@@ -178,7 +178,7 @@ is for a different record type.
 ── E001 ── billing.rkt:61 ──
   (order-customer-id)
   called with 0 args, expects 1
-  sig: order-customer-id : [Order -> Long]
+  sig: order-customer-id : [Order -> Int]
 ```
 
 Missing argument. The `sig:` line tells you exactly what to pass.
@@ -189,8 +189,8 @@ Missing argument. The `sig:` line tells you exactly what to pass.
 - E001 arity → missing/extra arg. Query: `beagle-sig fn .`
 - Single suggestion → high confidence, auto-fixable
 - Multiple suggestions → you choose from alternatives
-- `expected Long, got Amount` → forgot to unwrap scalar
-- `expected Amount, got Long` → forgot to rewrap scalar
+- `expected Int, got Amount` → forgot to unwrap scalar
+- `expected Amount, got Int` → forgot to rewrap scalar
 
 ## Tool reference
 

@@ -1,6 +1,6 @@
 (defrecord Cat [(name : String)])
 (defrecord Dog [(name : String)])
 (defunion Animal Cat Dog)
-(defn process [(a : Animal)] : Long 0)
-(defn test [] : Long
+(defn process [(a : Animal)] : Int 0)
+(defn test [] : Int
   (process (->Cat "whiskers")))

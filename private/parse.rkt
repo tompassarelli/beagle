@@ -198,6 +198,7 @@
 (struct condp-form     (pred-fn test-expr clauses default)   #:transparent)
 (struct defonce-form   (name type value)                     #:transparent)
 (struct await-form    (expr)                                 #:transparent)
+(struct set!-form    (target value)                           #:transparent)
 
 (struct param       (name type)                             #:transparent)
 (struct map-destructure (keys as-name)                      #:transparent)
@@ -837,6 +838,10 @@
 
     [(list 'await inner)
      (await-form (parse-expr (or (stx-ref subs 1) inner)))]
+
+    [(list 'set! target-expr val-expr)
+     (set!-form (parse-expr (or (stx-ref subs 1) target-expr))
+                (parse-expr (or (stx-ref subs 2) val-expr)))]
 
     [(list 'for bindings-form body ...)
      (for-form (parse-for-clauses (or (stx-ref subs 1) bindings-form))
@@ -1495,6 +1500,7 @@
  (struct-out condp-form)
  (struct-out defonce-form)
  (struct-out await-form)
+ (struct-out set!-form)
  parse-program
  DEFAULT-MODE
  DEFAULT-TARGET

@@ -26,6 +26,24 @@ One command wires up everything for Claude Code: daemon, hooks, system prompt.
 
 ## Open
 
+### JS target gaps
+
+- [ ] `set!` for property mutation — `(set! (.-value el) "")` not parsed; needed for DOM interop
+- [ ] ~15 missing stdlib fns in `emit-core-call`: `mapv`, `filterv`, `sort-by`, `dissoc`, `update`, `merge`, `get` (function form), `subvec`, `pop`, `peek`, `some`, `take`, `vector?`, `map?`
+- [ ] Bare npm imports — `(require 'datascript')` vs only `'./mod.js'` relative paths
+- [ ] `letfn` — mutual recursion local fns (minor, 1 known use)
+- [ ] Atom runtime shim — `atom`, `deref`, `reset!`, `swap!`, `add-watch` (~50 lines)
+
+### Doc generation / single source of truth
+
+- [x] Extend `beagle-docs-sync` to propagate canonical type names from `private/types.rkt`
+- [x] Add `CLAUDE.md` instructions to use `beagle-docs-sync` after type/form changes
+- [ ] Scribble as single source → generate markdown cheatsheets from Scribble docs
+- [ ] Template markers in markdown docs (`{{types}}`, `{{example}}`) expanded by docs-sync
+- [ ] Canonical example program in one place, referenced by README/cheatsheet/consumer docs
+
+### Other
+
 - [ ] E13 confound isolation: full prompt vs cheatsheet, daemon vs no daemon
 
 ## Completed

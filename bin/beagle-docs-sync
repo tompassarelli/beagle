@@ -70,6 +70,29 @@ echo "  stdlib: $STDLIB_COUNT"
 DEVLOG_COUNT=$(ls docs/devlog/[0-9]*.md 2>/dev/null | wc -l)
 echo "  devlog entries: $DEVLOG_COUNT"
 
+# Canonical types: Int Float Bool String Nil Any Keyword Symbol
+# Deprecated aliases that should not appear in docs as Beagle types:
+DEPRECATED_TYPES="Long|Double|Boolean|Integer"
+
+# Check for stale type references in docs
+STALE_FILES=""
+for f in docs/cheatsheet.md docs/cheatsheet-consumer.md docs/cheatsheet-distilled.md \
+         docs/forms.md docs/prompts/consumers/distilled.md docs/prompts/consumers/full.md \
+         docs/prompts/contributors/src.md README.md CLAUDE.md AGENTS.md; do
+  if [ -f "$f" ]; then
+    # Match deprecated type names used as Beagle types (not Java interop like Long/parseLong)
+    if grep -Pn "(?<![/.])\b($DEPRECATED_TYPES)\b(?!/)" "$f" | grep -v 'Long/\|Double/\|Boolean/\|Integer/' | grep -qv '^\s*#'; then
+      STALE_FILES="$STALE_FILES $f"
+    fi
+  fi
+done
+if [ -n "$STALE_FILES" ]; then
+  echo "  WARNING: stale type names (Long/Double/Boolean) in:$STALE_FILES"
+  echo "  Canonical types are: Int Float Bool String Nil Any Keyword Symbol"
+else
+  echo "  type names: consistent"
+fi
+
 # --- Update files ------------------------------------------------------------
 
 echo ""

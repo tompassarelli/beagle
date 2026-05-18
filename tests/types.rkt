@@ -7,26 +7,29 @@
 
 (test-case "parse primitive types (one canonical name per type)"
   (check-eq? (type-prim-name (parse-type 'String))  'String)
-  (check-eq? (type-prim-name (parse-type 'Long))    'Long)
-  (check-eq? (type-prim-name (parse-type 'Double))  'Double)
-  (check-eq? (type-prim-name (parse-type 'Boolean)) 'Boolean)
+  (check-eq? (type-prim-name (parse-type 'Int))     'Int)
+  (check-eq? (type-prim-name (parse-type 'Float))   'Float)
+  (check-eq? (type-prim-name (parse-type 'Bool))    'Bool)
   (check-eq? (type-prim-name (parse-type 'Keyword)) 'Keyword)
   (check-eq? (type-prim-name (parse-type 'Symbol))  'Symbol)
   (check-eq? (type-prim-name (parse-type 'Nil))     'Nil)
   (check-eq? (type-prim-name (parse-type 'Any))     'Any))
 
-(test-case "former aliases are now errors (removed in AI-optimization pass)"
-  (check-exn exn:fail? (lambda () (parse-type 'Integer)))
-  (check-exn exn:fail? (lambda () (parse-type 'Int)))
-  (check-exn exn:fail? (lambda () (parse-type 'Float)))
-  (check-exn exn:fail? (lambda () (parse-type 'Bool))))
+(test-case "CLJ-ALIASES resolve to canonical names"
+  (check-eq? (type-prim-name (parse-type 'Long))    'Int)
+  (check-eq? (type-prim-name (parse-type 'Double))  'Float)
+  (check-eq? (type-prim-name (parse-type 'Boolean)) 'Bool)
+  (check-eq? (type-prim-name (parse-type 'Integer)) 'Int))
+
+(test-case "rejected aliases are errors"
+  (check-exn exn:fail? (lambda () (parse-type 'Number))))
 
 (test-case "parse function type from bracketed expression"
   ;; #%brackets-tagged form: [A B -> R]
-  (define t (parse-type `(,BRACKET-TAG Long Long -> Boolean)))
+  (define t (parse-type `(,BRACKET-TAG Int Int -> Bool)))
   (check-true (type-fn? t))
   (check-equal? (length (type-fn-params t)) 2)
-  (check-eq? (type-prim-name (type-fn-ret t)) 'Boolean))
+  (check-eq? (type-prim-name (type-fn-ret t)) 'Bool))
 
 (test-case "parse parametric types"
   (define t (parse-type '(Vec String)))
@@ -35,7 +38,7 @@
   (check-eq? (type-prim-name (car (type-app-args t))) 'String))
 
 (test-case "parse nested parametric / function types"
-  (define t (parse-type `(Map String ,(list BRACKET-TAG 'Long '-> 'Long))))
+  (define t (parse-type `(Map String ,(list BRACKET-TAG 'Int '-> 'Int))))
   (check-true (type-app? t))
   (check-eq? (type-app-ctor t) 'Map)
   (check-eq? (type-prim-name (car (type-app-args t))) 'String)
@@ -50,7 +53,7 @@
 
 (test-case "function type without arrow errors"
   (check-exn exn:fail?
-             (lambda () (parse-type `(,BRACKET-TAG Long Long Long)))))
+             (lambda () (parse-type `(,BRACKET-TAG Int Int Int)))))
 
 ;; --- type-compatible? ------------------------------------------------------
 
@@ -61,22 +64,22 @@
 
 (test-case "primitives compatible with themselves only"
   (check-true  (type-compatible? (type-prim 'String) (type-prim 'String)))
-  (check-false (type-compatible? (type-prim 'String) (type-prim 'Long)))
-  (check-false (type-compatible? (type-prim 'Boolean) (type-prim 'Long))))
+  (check-false (type-compatible? (type-prim 'String) (type-prim 'Int)))
+  (check-false (type-compatible? (type-prim 'Bool) (type-prim 'Int))))
 
 (test-case "function type compatibility (v0 invariant params + return)"
-  (define a (type-fn (list (type-prim 'Long)) #f (type-prim 'Boolean)))
-  (define b (type-fn (list (type-prim 'Long)) #f (type-prim 'Boolean)))
-  (define c (type-fn (list (type-prim 'String)) #f (type-prim 'Boolean)))
+  (define a (type-fn (list (type-prim 'Int)) #f (type-prim 'Bool)))
+  (define b (type-fn (list (type-prim 'Int)) #f (type-prim 'Bool)))
+  (define c (type-fn (list (type-prim 'String)) #f (type-prim 'Bool)))
   (check-true  (type-compatible? a b))
   (check-false (type-compatible? a c)))
 
 (test-case "variadic function type parses & checks"
-  (define t (parse-type `(,BRACKET-TAG Long & Long -> Long)))
+  (define t (parse-type `(,BRACKET-TAG Int & Int -> Int)))
   (check-true  (type-fn? t))
   (check-equal? (length (type-fn-params t)) 1)
   (check-true  (type? (type-fn-rest-type t)))
-  (check-eq?   (type-prim-name (type-fn-rest-type t)) 'Long))
+  (check-eq?   (type-prim-name (type-fn-rest-type t)) 'Int))
 
 (test-case "union type parses and checks both ways"
   (define u (parse-type '(U String Nil)))
@@ -87,13 +90,13 @@
   (check-false (type-compatible? u (type-prim 'String)))
   ;; Nil <: (U String Nil)
   (check-true  (type-compatible? (type-prim 'Nil) u))
-  ;; Long </: (U String Nil)
-  (check-false (type-compatible? (type-prim 'Long) u)))
+  ;; Int </: (U String Nil)
+  (check-false (type-compatible? (type-prim 'Int) u)))
 
 (test-case "parametric type compatibility"
   (define vs (type-app 'Vec (list (type-prim 'String))))
   (define vs2 (type-app 'Vec (list (type-prim 'String))))
-  (define vl (type-app 'Vec (list (type-prim 'Long))))
+  (define vl (type-app 'Vec (list (type-prim 'Int))))
   (check-true  (type-compatible? vs vs2))
   (check-false (type-compatible? vs vl)))
 
@@ -109,23 +112,23 @@
   (check-eq? (type-var-name (car (type-fn-params body))) 'A))
 
 (test-case "type-var is compatible with anything"
-  (check-true (type-compatible? (type-var 'A) (type-prim 'Long)))
-  (check-true (type-compatible? (type-prim 'Long) (type-var 'A))))
+  (check-true (type-compatible? (type-var 'A) (type-prim 'Int)))
+  (check-true (type-compatible? (type-prim 'Int) (type-var 'A))))
 
 (test-case "infer-type-var-bindings matches fn arg types"
   (define expected (type-fn (list (type-var 'A)) #f (type-var 'B)))
-  (define actual (type-fn (list (type-prim 'Long)) #f (type-prim 'String)))
+  (define actual (type-fn (list (type-prim 'Int)) #f (type-prim 'String)))
   (define bindings (make-hasheq))
   (infer-type-var-bindings expected actual bindings)
-  (check-eq? (type-prim-name (hash-ref bindings 'A)) 'Long)
+  (check-eq? (type-prim-name (hash-ref bindings 'A)) 'Int)
   (check-eq? (type-prim-name (hash-ref bindings 'B)) 'String))
 
 (test-case "apply-type-bindings replaces vars"
   (define bindings (make-hasheq))
-  (hash-set! bindings 'A (type-prim 'Long))
+  (hash-set! bindings 'A (type-prim 'Int))
   (define result (apply-type-bindings (type-app 'Vec (list (type-var 'A))) bindings))
   (check-true (type-app? result))
-  (check-eq? (type-prim-name (car (type-app-args result))) 'Long))
+  (check-eq? (type-prim-name (car (type-app-args result))) 'Int))
 
 (test-case "unbound type vars resolve to Any"
   (define bindings (make-hasheq))
@@ -137,12 +140,12 @@
 
 (test-case "infer literal types"
   (check-eq? (type-prim-name (infer-literal-type "hi"))    'String)
-  (check-eq? (type-prim-name (infer-literal-type 42))      'Long)
-  (check-eq? (type-prim-name (infer-literal-type 3.14))    'Double)
-  (check-eq? (type-prim-name (infer-literal-type #t))      'Boolean)
+  (check-eq? (type-prim-name (infer-literal-type 42))      'Int)
+  (check-eq? (type-prim-name (infer-literal-type 3.14))    'Float)
+  (check-eq? (type-prim-name (infer-literal-type #t))      'Bool)
   (check-eq? (type-prim-name (infer-literal-type 'nil))    'Nil)
-  (check-eq? (type-prim-name (infer-literal-type 'true))   'Boolean)
-  (check-eq? (type-prim-name (infer-literal-type 'false))  'Boolean)
+  (check-eq? (type-prim-name (infer-literal-type 'true))   'Bool)
+  (check-eq? (type-prim-name (infer-literal-type 'false))  'Bool)
   (check-eq? (type-prim-name (infer-literal-type ':kw))    'Keyword))
 
 ;; --- qualified type names ---------------------------------------------------
@@ -174,7 +177,7 @@
   (define b (type-app 'Promise (list (type-prim 'String))))
   (check-true (type-compatible? a b)))
 
-(test-case "(Promise String) not compatible with (Promise Long)"
+(test-case "(Promise String) not compatible with (Promise Int)"
   (define a (type-app 'Promise (list (type-prim 'String))))
-  (define b (type-app 'Promise (list (type-prim 'Long))))
+  (define b (type-app 'Promise (list (type-prim 'Int))))
   (check-false (type-compatible? a b)))

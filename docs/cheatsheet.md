@@ -52,11 +52,11 @@ and accessor (`amount-value`) with full type checking.
 ### `defrecord`
 
 ```racket
-(defrecord Employee [(name : String) (rate : Long)])
+(defrecord Employee [(name : String) (rate : Int)])
 ```
 
 Emits Clojure `defrecord` plus generated typed accessors:
-- Constructor: `(->Employee "Alice" 95)` — typed `[String Long -> Employee]`
+- Constructor: `(->Employee "Alice" 95)` — typed `[String Int -> Employee]`
 - Accessors: `(employee-name e)`, `(employee-rate e)` — typed `[Employee -> String]` etc.
 
 Field syntax reuses wrapped param form `(name : Type)`. All fields must be typed.
@@ -74,30 +74,30 @@ Use instead of positional constructors when updating a few fields on an existing
 ### `defscalar` (nominal types)
 
 ```racket
-(defscalar Amount Long)
-(defscalar Timestamp Long)
-(defscalar AccountId Long)
+(defscalar Amount Int)
+(defscalar Timestamp Int)
+(defscalar AccountId Int)
 (defscalar Email String)
 ```
 
 Creates a **nominal type** backed by a primitive. `Amount`, `Timestamp`, and
-`AccountId` are all `Long` at runtime, but the type checker treats them as
+`AccountId` are all `Int` at runtime, but the type checker treats them as
 incompatible — you cannot pass an `Amount` where a `Timestamp` is expected.
 
 Generated functions:
-- Constructor: `(->Amount 5000)` — typed `[Long -> Amount]`
-- Accessor: `(amount-value x)` — typed `[Amount -> Long]`
+- Constructor: `(->Amount 5000)` — typed `[Int -> Amount]`
+- Accessor: `(amount-value x)` — typed `[Amount -> Int]`
 
 Scalars are the primary defense against "same-type confusion" bugs where IDs,
-monetary values, and timestamps are all Long underneath. The checker flags:
+monetary values, and timestamps are all Int underneath. The checker flags:
 - Wrong scalar in constructor args: `(->Amount (timestamp-value ts))` — error
 - Mixed scalar arithmetic: `(+ (amount-value x) (timestamp-value y))` — note
 - Cross-scalar comparison: `(= (accountid-value a) (instrumentid-value b))` — note
 
 **Usage pattern:**
 ```racket
-(defscalar Price Long)
-(defscalar Quantity Long)
+(defscalar Price Int)
+(defscalar Quantity Int)
 
 (defn order-total [(price : Price) (qty : Quantity)] : Amount
   (->Amount (* (price-value price) (quantity-value qty))))
@@ -108,8 +108,8 @@ only flags additive mixing and constructor mismatches.
 
 **Refinement predicates (opt-in):**
 ```racket
-(defscalar Percentage Long :where (>= 0) (<= 100))
-(defscalar PositiveAmount Long :where (> 0))
+(defscalar Percentage Int :where (>= 0) (<= 100))
+(defscalar PositiveAmount Int :where (> 0))
 ```
 
 `:where` adds compile-time and runtime validation:
@@ -228,8 +228,8 @@ calls against all arities — wrong arity reports available options.
 
 ```racket
 [x y z]                             ; untyped (bare names)
-[(x : Long) (y : Long)]             ; wrapped with type
-[(x : Long) y]                      ; mix wrapped + bare
+[(x : Int) (y : Int)]                ; wrapped with type
+[(x : Int) y]                        ; mix wrapped + bare
 [{:keys [name age]}]                ; map destructuring
 [{:keys [x y] :as point}]          ; destructure + bind whole map
 [[a b & rest]]                      ; sequential destructuring
@@ -243,13 +243,13 @@ idiom per concept.
 
 ```racket
 (let [x (some-fn arg)] ...)               ; type inferred from RHS (preferred)
-(let [(x : Long) 1 (y : Long) 2] ...)     ; explicit type (only when narrowing)
+(let [(x : Int) 1 (y : Int) 2] ...)        ; explicit type (only when narrowing)
 (let [[a b] pair] ...)                     ; sequential destructuring
 (let [{:keys [name age]} person] ...)      ; map destructuring
 ```
 
-**Let bindings infer types automatically.** If `some-fn` returns `Long`, then
-`x` has type `Long` without annotation. Only annotate when you want to narrow
+**Let bindings infer types automatically.** If `some-fn` returns `Int`, then
+`x` has type `Int` without annotation. Only annotate when you want to narrow
 (e.g., force a union to a specific branch).
 
 ## Types
@@ -257,15 +257,15 @@ idiom per concept.
 | primitive | matches |
 |---|---|
 | `String` | strings |
-| `Long` | integers |
-| `Double` | floats |
-| `Boolean` | true/false |
+| `Int` | integers |
+| `Float` | floats |
+| `Bool` | true/false |
 | `Keyword` | `:foo` style |
 | `Symbol` | quoted symbols |
 | `Nil` | `nil` |
 | `Any` | anything (escape) |
 
-One canonical name per type. No `Integer`, `Int`, `Float`, `Bool` aliases —
+One canonical name per type. No `Integer`, `Long`, `Double`, `Boolean` aliases —
 AI-optimization removed them.
 
 Function types:
@@ -277,7 +277,7 @@ Parametric:
 - `(Vec T)`, `(List T)`, `(Set T)`, `(Map K V)`
 
 Union:
-- `(U String Long)` — value is one of the alternatives
+- `(U String Int)` — value is one of the alternatives
 
 Nullable (sugar for `(U T Nil)`):
 - `String?` — shorthand for `(U String Nil)`
@@ -453,7 +453,7 @@ Supported natively in beagle source. Common patterns:
 
 Type these with `declare-extern` (receiver is first param for methods):
 ```racket
-(declare-extern .exists [Any -> Boolean])
+(declare-extern .exists [Any -> Bool])
 (declare-extern System/getProperty [String -> String])
 (declare-extern *command-line-args* (Vec String))
 ```
@@ -472,7 +472,7 @@ Pre-typed in stdlib: `.exists`, `.trim`, `.startsWith`, `.endsWith`,
 |---|---|---|
 | Method overloading | Only one signature per `.method`; second overload needs separate `declare-extern` | Union of function types |
 | Receiver type dispatch | `.exists` typed globally, not per-class | `File/.exists` syntax (Clojure 1.12+) |
-| Static field access | `Math/PI` as bare symbol returns Any | `declare-extern Math/PI Double` works now |
+| Static field access | `Math/PI` as bare symbol returns Any | `declare-extern Math/PI Float` works now |
 | Generic type params | `(.get (HashMap) key)` can't track value type | Java generics model |
 | Overload resolution | Multiple Java methods with same name, different types | Essentially javac |
 | Reflection / dynamic dispatch | Runtime-only class resolution | Impossible statically |
@@ -508,14 +508,14 @@ Error kinds: `arity`, `type-mismatch`, `return-type`, `def-type`,
 
 Human-readable output (default) uses Rust-style formatting:
 ```
-error[E002]: call to <=: arg 1 expected Long, got String
+error[E002]: call to <=: arg 1 expected Int, got String
   --> promotions.rkt:37
    |
 37 |        (<= (campaign-name campaign) now)
    |
-   = sig: <= : [Long Long -> Boolean]
+   = sig: <= : [Int Int -> Bool]
    = note: campaign-name : [Campaign -> String]
-   = help: did you mean campaign-start-date? (campaign-start-date : [Campaign -> Long])
+   = help: did you mean campaign-start-date? (campaign-start-date : [Campaign -> Int])
 ```
 
 ### Provenance notes (scalar lint)
@@ -525,7 +525,7 @@ These appear alongside type errors and indicate bugs with high precision:
 ```
 note: scalar provenance: ->Amount receives value derived from Price
   --> orders.rkt:40
-  = Amount wraps a Long backing value, but the argument originated from Price
+  = Amount wraps an Int backing value, but the argument originated from Price
 
 note: cross-scalar comparison: InstrumentId vs AccountId
   --> trades.rkt:72

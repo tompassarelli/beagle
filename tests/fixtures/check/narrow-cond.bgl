@@ -1,4 +1,4 @@
-(declare-extern get-val [-> (U String Long Nil)])
+(declare-extern get-val [-> (U String Int Nil)])
 (defn describe [] : String
   (let [x (get-val)]
     (cond

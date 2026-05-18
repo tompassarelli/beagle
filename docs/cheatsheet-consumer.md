@@ -33,7 +33,7 @@ macros. You do NOT need `declare-extern` for cross-module beagle calls.
 
 (defrecord Name [(field1 : Type) (field2 : Type)])
 
-(defscalar Amount Long)                ; nominal type (Amount ≠ Long at compile time)
+(defscalar Amount Int)                 ; nominal type (Amount ≠ Int at compile time)
 
 (defenum Status :active :inactive)     ; enum value set
 ```
@@ -41,11 +41,11 @@ macros. You do NOT need `declare-extern` for cross-module beagle calls.
 ### Records
 
 ```racket
-(defrecord Employee [(name : String) (rate : Long)])
+(defrecord Employee [(name : String) (rate : Int)])
 ```
 
 Generates:
-- Constructor: `(->Employee "Alice" 95)` — typed `[String Long -> Employee]`
+- Constructor: `(->Employee "Alice" 95)` — typed `[String Int -> Employee]`
 - Accessors: `(employee-name e)`, `(employee-rate e)`
 - Keyword access: `(:name e)` returns `String` when `e` is `Employee`
 - Update: `(with e [:rate 100])` — compile-time field + type validation
@@ -94,7 +94,7 @@ Generates:
 ## Parameters
 
 ```racket
-[(x : Long) (y : String)]             ; typed (canonical form)
+[(x : Int) (y : String)]              ; typed (canonical form)
 [x y z]                               ; untyped
 [{:keys [name age]}]                  ; map destructuring
 [{:keys [x y] :as point}]            ; destructure + bind whole
@@ -106,9 +106,9 @@ Generates:
 | Type | Matches |
 |------|---------|
 | `String` | strings |
-| `Long` | integers |
-| `Double` | floats |
-| `Boolean` | true/false |
+| `Int` | integers |
+| `Float` | floats |
+| `Bool` | true/false |
 | `Keyword` | `:foo` |
 | `Nil` | `nil` |
 | `Any` | anything (escape) |
@@ -119,7 +119,7 @@ Generates:
 (Vec T)               ; vector of T
 (Map K V)             ; map
 (Set T)               ; set
-(U String Long)       ; union
+(U String Int)        ; union
 String?               ; nullable (= (U String Nil))
 ```
 

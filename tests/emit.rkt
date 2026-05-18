@@ -28,7 +28,7 @@
   (check-true (matches? #rx"\\(def greeting \"hello\"\\)" out)))
 
 (test-case "defn drops types but emits arg vector"
-  (define out (compile '(defn add [(x : Long) (y : Long)] : Long (+ x y))))
+  (define out (compile '(defn add [(x : Int) (y : Int)] : Int (+ x y))))
   (check-true (matches? #rx"\\(defn add \\[x y\\]" out))
   (check-true (matches? #rx"\\(\\+ x y\\)"            out)))
 
@@ -152,7 +152,7 @@
 ;; --- declare-extern does not emit code ------------------------------------
 
 (test-case "declare-extern is a type-only declaration; emits nothing"
-  (define out (compile `(declare-extern foo ,(br 'Long '-> 'Long))
+  (define out (compile `(declare-extern foo ,(br 'Int '-> 'Int))
                        '(def x 1)))
   (check-false (matches? #rx"foo" out)))
 
@@ -201,7 +201,7 @@
 ;; --- defrecord ---------------------------------------------------------------
 
 (test-case "defrecord emits Clojure defrecord plus accessors"
-  (define out (compile `(defrecord Employee ,(br '(name : String) '(rate : Long)))))
+  (define out (compile `(defrecord Employee ,(br '(name : String) '(rate : Int)))))
   (check-true (matches? #rx"\\(defrecord Employee \\[name rate\\]\\)" out))
   (check-true (matches? #rx"\\(defn employee-name \\[r\\] \\(:name r\\)\\)" out))
   (check-true (matches? #rx"\\(defn employee-rate \\[r\\] \\(:rate r\\)\\)" out)))
@@ -408,7 +408,7 @@
 ;; --- deftype / extend-type ---------------------------------------------------
 
 (test-case "deftype emits"
-  (define out (compile `(deftype Point ,(br '(x : Long) '(y : Long))
+  (define out (compile `(deftype Point ,(br '(x : Int) '(y : Int))
                           Printable
                           (to-string ,(br '(self : Any)) (str x y)))))
   (check-true (matches? #rx"\\(deftype Point \\[x y\\]" out))
@@ -486,13 +486,13 @@
 ;; --- with form emission ------------------------------------------------------
 
 (test-case "with emits assoc"
-  (define out (compile `(defrecord P ,(br '(x : Long)))
+  (define out (compile `(defrecord P ,(br '(x : Int)))
                        `(def p (->P 1))
                        `(def q (with p ,(br ':x 2)))))
   (check-true (matches? #rx"\\(assoc p :x 2\\)" out)))
 
 (test-case "with multi-field emits multi-arg assoc"
-  (define out (compile `(defrecord P ,(br '(x : Long) '(y : Long)))
+  (define out (compile `(defrecord P ,(br '(x : Int) '(y : Int)))
                        `(def p (->P 1 2))
                        `(def q (with p ,(br ':x 10) ,(br ':y 20)))))
   (check-true (matches? #rx"\\(assoc p :x 10 :y 20\\)" out)))
@@ -509,13 +509,13 @@
 ;; --- defscalar emission -------------------------------------------------------
 
 (test-case "defscalar without :where emits comment (erased)"
-  (define out (compile '(defscalar Amount Long)
+  (define out (compile '(defscalar Amount Int)
                        '(def x : Amount (->Amount 42))))
-  (check-true (matches? #rx";; Amount : Long \\(scalar\\)" out))
+  (check-true (matches? #rx";; Amount : Int \\(scalar\\)" out))
   (check-false (matches? #rx"defn ->Amount" out)))
 
 (test-case "defscalar with :where emits constructor with :pre"
-  (define out (compile '(defscalar Percentage Long :where (>= 0) (<= 100))
+  (define out (compile '(defscalar Percentage Int :where (>= 0) (<= 100))
                        '(def x : Percentage (->Percentage 50))))
   (check-true (matches? #rx"defn ->Percentage" out))
   (check-true (matches? #rx":pre" out))
@@ -523,19 +523,19 @@
   (check-true (matches? #rx"\\(<= v 100\\)" out)))
 
 (test-case "defscalar with :where constructor is not erased at call site"
-  (define out (compile '(defscalar Percentage Long :where (>= 0) (<= 100))
+  (define out (compile '(defscalar Percentage Int :where (>= 0) (<= 100))
                        '(def x : Percentage (->Percentage 50))))
   (check-true (matches? #rx"\\(->Percentage 50\\)" out)))
 
 ;; --- varargs emission --------------------------------------------------------
 
 (test-case "defn with & rest emits Clojure varargs"
-  (define out (compile '(defn my-sum [(x : Long) & (rest : Long)] : Long
+  (define out (compile '(defn my-sum [(x : Int) & (rest : Int)] : Int
                           (+ x (reduce + 0 rest)))))
   (check-true (matches? #rx"\\(defn my-sum \\[x & rest\\]" out)))
 
 (test-case "fn with & rest emits varargs"
-  (define out (compile '(def f : Any (fn [(a : Long) & (b : Long)] (+ a 1)))))
+  (define out (compile '(def f : Any (fn [(a : Int) & (b : Int)] (+ a 1)))))
   (check-true (matches? #rx"\\(fn \\[a & b\\]" out)))
 
 (test-case "defn with only & rest and no fixed params"

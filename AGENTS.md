@@ -41,9 +41,9 @@ them). Use these helpers:
 (define (mp . xs) (cons MAP-TAG xs))       ; simulates {...}
 ```
 
-Example: `(defn foo [(x : Long)] (+ x 1))` in test form:
+Example: `(defn foo [(x : Int)] (+ x 1))` in test form:
 ```racket
-(parse-one `(defn foo ,(br '(x : Long)) (+ x 1)))
+(parse-one `(defn foo ,(br '(x : Int)) (+ x 1)))
 ```
 
 ## Key file map
@@ -74,7 +74,7 @@ Example: `(defn foo [(x : Long)] (+ x 1))` in test form:
 
 ## What NOT to do
 
-- Don't add type aliases (e.g. `Int` for `Long`) — removed by design
+- Don't add type aliases (e.g. `Long` for `Int`) — removed by design
 - Don't add `#(...)` fn shorthand — cargo-culted out
 - Don't use gensyms for reader tags — they break across phases
 - Don't skip lint traversal when adding forms — shadow detection will miss the new form's subtrees

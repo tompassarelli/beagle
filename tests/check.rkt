@@ -133,7 +133,7 @@
   '(def x 42))
 
 (check-ok "typed def with matching literal passes"
-  '(def x : Long 42))
+  '(def x : Int 42))
 
 (check-ok "Any annotation accepts anything"
   '(def x : Any "hi"))
@@ -142,29 +142,29 @@
   '(defn id [x] x))
 
 (check-ok "defn with correct return type passes"
-  '(defn five [] : Long 5))
+  '(defn five [] : Int 5))
 
 (check-ok "known builtin call type-checks"
-  '(def x : Long (inc 1)))
+  '(def x : Int (inc 1)))
 
 ;; =============================================================================
 ;; Tests — negatives
 ;; =============================================================================
 
 (check-err "def with wrong literal type errors"
-  '(def x : Long "hi"))
+  '(def x : Int "hi"))
 
 (check-err "defn with wrong literal return errors"
   '(defn s [] : String 42))
 
 (check-err "let binding with wrong literal type errors"
-  '(def y (let [(x : Long) "hi"] x)))
+  '(def y (let [(x : Int) "hi"] x)))
 
 (check-err "call to typed builtin with wrong arg type errors"
-  '(def x : Long (inc "not a number")))
+  '(def x : Int (inc "not a number")))
 
 (check-err "call with wrong arity errors"
-  '(def x : Long (inc 1 2)))
+  '(def x : Int (inc 1 2)))
 
 ;; =============================================================================
 ;; Tests — dynamic mode
@@ -172,7 +172,7 @@
 
 (check-ok "dynamic mode lets type errors through"
   '(define-mode dynamic)
-  '(def x : Long "wrong type but who cares"))
+  '(def x : Int "wrong type but who cares"))
 
 ;; =============================================================================
 ;; Tests — unsafe-expr
@@ -180,40 +180,40 @@
 
 (check-ok "unsafe-expr widens to Any so downstream relaxes"
   '(define-macro unsafe wild (x) x)
-  '(def x : Long (wild "this would normally fail")))
+  '(def x : Int (wild "this would normally fail")))
 
 (check-err "safe macro: expansion is type-checked"
   '(define-macro safe id1 (x) x)
-  '(def y : Long (id1 "string not Long")))
+  '(def y : Int (id1 "string not Int")))
 
 ;; =============================================================================
 ;; Tests — variadic types
 ;; =============================================================================
 
 (check-ok "variadic builtin call with valid args"
-  '(def x : Long (+ 1 2 3 4 5)))
+  '(def x : Int (+ 1 2 3 4 5)))
 
 (check-ok "variadic builtin call with zero args is OK if min met"
-  '(def x : Long (+)))
+  '(def x : Int (+)))
 
 (check-err "variadic call rejects wrong rest-type"
-  '(declare-extern strict-sum [Long & Long -> Long])
-  '(def x : Long (strict-sum 1 "two" 3)))
+  '(declare-extern strict-sum [Int & Int -> Int])
+  '(def x : Int (strict-sum 1 "two" 3)))
 
 (check-err "variadic call rejects below minimum fixed args"
-  '(def x : Long (- )))
+  '(def x : Int (- )))
 
 ;; =============================================================================
 ;; Tests — declare-extern
 ;; =============================================================================
 
 (check-ok "declare-extern makes the function callable with type checking"
-  `(declare-extern my-add ,(br 'Long 'Long '-> 'Long))
-  '(def x : Long (my-add 1 2)))
+  `(declare-extern my-add ,(br 'Int 'Int '-> 'Int))
+  '(def x : Int (my-add 1 2)))
 
 (check-err "declare-extern: arg type error caught"
-  `(declare-extern my-add ,(br 'Long 'Long '-> 'Long))
-  '(def x : Long (my-add "a" 2)))
+  `(declare-extern my-add ,(br 'Int 'Int '-> 'Int))
+  '(def x : Int (my-add "a" 2)))
 
 (check-ok "declare-extern with variadic"
   `(declare-extern join ,(br 'String '& 'String '-> 'String))
@@ -264,14 +264,14 @@
 ;; Tests — polymorphic function types (fixtures)
 ;; =============================================================================
 
-(check-fixture-ok "mapv infers (Vec Long) return from inc"
+(check-fixture-ok "mapv infers (Vec Int) return from inc"
   "poly-mapv.bgl")
 
-(check-fixture-ok "filterv infers (Vec Long) return from even?"
+(check-fixture-ok "filterv infers (Vec Int) return from even?"
   "poly-filterv.bgl")
 
 (check-ok "identity preserves type through annotation"
-  '(def x : Long (identity 42)))
+  '(def x : Int (identity 42)))
 
 (check-err "map rejects non-function first arg"
   `(def xs ,(br 1 2 3))
@@ -290,23 +290,23 @@
 
 (check-ok/source "cross-file import: typed defn callable with prefix" fixture-source
   '(require mathlib)
-  '(def x : Long (mathlib/add 1 2)))
+  '(def x : Int (mathlib/add 1 2)))
 
 (check-ok/source "cross-file import: typed def accessible with prefix" fixture-source
   '(require mathlib)
-  '(def x : Double mathlib/pi))
+  '(def x : Float mathlib/pi))
 
 (check-err/source "cross-file import: type error caught across files" fixture-source
   '(require mathlib)
-  '(def x : Long (mathlib/greet "tom")))
+  '(def x : Int (mathlib/greet "tom")))
 
 (check-err/source "cross-file import: arg type error caught" fixture-source
   '(require mathlib)
-  '(def x : Long (mathlib/add "one" 2)))
+  '(def x : Int (mathlib/add "one" 2)))
 
 (check-ok/source "cross-file import with :as alias" fixture-source
   '(require mathlib :as m)
-  '(def x : Long (m/add 1 2)))
+  '(def x : Int (m/add 1 2)))
 
 (check-err/source "cross-file import: untyped defn still has arity" fixture-source
   '(require mathlib)
@@ -331,12 +331,12 @@
 (check-ok/source "cross-file defrecord: accessor returns correct type" shapes-fixture-source
   '(require shapes)
   '(def c (shapes/->Circle 5))
-  '(def r : Long (shapes/circle-radius c)))
+  '(def r : Int (shapes/circle-radius c)))
 
 (check-ok/source "cross-file defrecord: keyword access infers field type" shapes-fixture-source
   '(require shapes)
   '(def c : Circle (shapes/->Circle 5))
-  '(def r : Long (:radius c)))
+  '(def r : Int (:radius c)))
 
 (check-ok/source "cross-file defrecord: multi-field constructor" shapes-fixture-source
   '(require shapes)
@@ -345,7 +345,7 @@
 (check-ok/source "cross-file defrecord: cross-module function uses imported record" shapes-fixture-source
   '(require shapes)
   '(def c (shapes/->Circle 5))
-  '(def a : Long (shapes/circle-area c)))
+  '(def a : Int (shapes/circle-area c)))
 
 (check-err/source "cross-file defrecord: constructor wrong arg type errors" shapes-fixture-source
   '(require shapes)
@@ -397,10 +397,10 @@
   '(def x (System/getProperty 42)))
 
 (check-ok "instance method with declared type passes"
-  '(def x : Boolean (.startsWith "hello" "he")))
+  '(def x : Bool (.startsWith "hello" "he")))
 
 (check-err "instance method with wrong arg type errors"
-  '(def x : Boolean (.startsWith "hello" 42)))
+  '(def x : Bool (.startsWith "hello" 42)))
 
 (check-err "instance method wrong arity errors"
   '(def x (.trim "a" "b")))
@@ -734,22 +734,22 @@
       (check-equal? "" (get-output-string output)))))
 
 (check-cljs-ok "cljs: js/parseInt type-checks"
-  '(def x : Long (js/parseInt "42")))
+  '(def x : Int (js/parseInt "42")))
 
 (check-cljs-ok "cljs: js/Math.sqrt type-checks"
-  '(def x : Double (js/Math.sqrt 16.0)))
+  '(def x : Float (js/Math.sqrt 16.0)))
 
 (check-cljs-ok "cljs: js/console.log type-checks"
   '(defn log-it [(msg : String)] : Nil (js/console.log msg)))
 
 (check-cljs-ok "cljs: standard fns work in cljs"
-  '(def x : Long (inc 1)))
+  '(def x : Int (inc 1)))
 
 (check-cljs-ok "cljs: js/parseFloat type-checks"
-  '(def x : Double (js/parseFloat "3.14")))
+  '(def x : Float (js/parseFloat "3.14")))
 
 (check-cljs-ok "cljs: js/isNaN type-checks"
-  '(def x : Boolean (js/isNaN 0)))
+  '(def x : Bool (js/isNaN 0)))
 
 (check-cljs-warns "cljs: slurp warns as JVM-only"
   #rx"JVM-only"
@@ -768,15 +768,15 @@
   '(def x (first *command-line-args*)))
 
 (check-cljs-silent "cljs: universal fn produces no JVM-only warning"
-  '(def x : Long (inc 1)))
+  '(def x : Int (inc 1)))
 
 ;; --- metadata type checking --------------------------------------------------
 
 (check-ok "metadata is transparent to type checking"
-  `(def x : (Vec Long) (#%meta (,MT :stretch 1) ,(br 1 2 3))))
+  `(def x : (Vec Int) (#%meta (,MT :stretch 1) ,(br 1 2 3))))
 
 (check-ok "metadata on typed vector in let"
-  `(defn f [] : (Vec Long)
+  `(defn f [] : (Vec Int)
      (let ,(br 'v `(#%meta (,MT :stretch 1) ,(br 10 20)))
        v)))
 
@@ -786,7 +786,7 @@
 ;; --- conditional let type checking -------------------------------------------
 
 (check-ok "when-let type checks binding"
-  '(defn f [(x : Long?)] : Nil (when-let [v x] (println v))))
+  '(defn f [(x : Int?)] : Nil (when-let [v x] (println v))))
 
 (check-ok "if-let type checks both branches"
   '(defn f [(m : Any)] : String (if-let [v (get m :k)] (str v) "no")))
@@ -803,10 +803,10 @@
 ;; --- when-not, if-not ---
 
 (check-ok "when-not type checks"
-  '(defn f [(xs : (Vec Long))] (when-not (empty? xs) (first xs))))
+  '(defn f [(xs : (Vec Int))] (when-not (empty? xs) (first xs))))
 
 (check-ok "if-not type checks"
-  '(defn f [(x : Boolean)] : String (if-not x "yes" "no")))
+  '(defn f [(x : Bool)] : String (if-not x "yes" "no")))
 
 ;; --- comment ---
 
@@ -815,7 +815,7 @@
 
 ;; --- dotimes ---
 
-(check-ok "dotimes type checks, binding is Long"
+(check-ok "dotimes type checks, binding is Int"
   `(defn f [] (dotimes ,(br 'i 5) (println i))))
 
 ;; --- condp ---
@@ -840,15 +840,15 @@
   '(defn f [(url : String)] : (Promise String) (await (fetch-data url))))
 
 (check-ok "Promise return with unwrapped body type accepted"
-  `(declare-extern load ,(br '-> '(Promise Long)))
-  '(defn f [] : (Promise Long) (await (load))))
+  `(declare-extern load ,(br '-> '(Promise Int)))
+  '(defn f [] : (Promise Int) (await (load))))
 
 (check-ok "nested await in let type-checks"
-  `(declare-extern fetch-name ,(br 'Long '-> '(Promise String)))
-  '(defn f [(id : Long)] : (Promise String)
+  `(declare-extern fetch-name ,(br 'Int '-> '(Promise String)))
+  '(defn f [(id : Int)] : (Promise String)
     (let [name (await (fetch-name id))]
       (str "Hello " name))))
 
 (check-err "Promise return type mismatch caught"
-  `(declare-extern load ,(br '-> '(Promise Long)))
+  `(declare-extern load ,(br '-> '(Promise Int)))
   '(defn f [] : (Promise String) (await (load))))

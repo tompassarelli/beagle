@@ -331,6 +331,9 @@
        (check-shadow (with-update-value u) scope ctx))]
     [(defenum-form _ _) (void)]
     [(await-form expr) (check-shadow expr scope ctx)]
+    [(set!-form target value)
+     (check-shadow target scope ctx)
+     (check-shadow value scope ctx)]
     [_ (void)]))
 
 (define (gensym-name? n)

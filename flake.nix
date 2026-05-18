@@ -1,5 +1,5 @@
 {
-  description = "Beagle — typed authoring layer that compiles to Clojure";
+  description = "Beagle — typed authoring layer for dynamic languages";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -73,6 +73,7 @@
             pkgs.racket
             pkgs.babashka
             pkgs.clojure
+            pkgs.bun
           ];
         };
       }
