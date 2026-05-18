@@ -191,4 +191,157 @@
    (check-js-contains "defn without await → no async"
      "function g("
      '(defn g [(x : Long)] : Long (+ x 1)))
+
+   ;; --- control flow ---------------------------------------------------------
+
+   (check-js-contains "loop/recur → while"
+     "while (true)"
+     '(defn countdown [(n : Long)] : Long
+       (loop [i n]
+         (if (= i 0) i (recur (- i 1))))))
+
+   (check-js-contains "recur → reassign + continue"
+     "continue"
+     '(defn countdown [(n : Long)] : Long
+       (loop [i n]
+         (if (= i 0) i (recur (- i 1))))))
+
+   (check-js-contains "try/catch → try block"
+     "try {"
+     '(defn safe [(x : Long)] : Long
+       (try x (catch Exception e 0))))
+
+   (check-js-contains "do → IIFE"
+     "(() =>"
+     '(defn f [] : Nil (do (println "a") (println "b"))))
+
+   (check-js-contains "when → IIFE with if"
+     "if ("
+     '(defn f [(x : Boolean)] : Nil (when x (println "yes"))))
+
+   (check-js-contains "case → chained equality"
+     "=== 1"
+     '(defn f [(x : Long)] : String
+       (case x 1 "one" 2 "two" "other")))
+
+   ;; --- iteration ------------------------------------------------------------
+
+   (check-js-contains "doseq → forEach"
+     ".forEach("
+     '(defn f [(xs : (Vec Long))] : Nil (doseq [x xs] (println x))))
+
+   (check-js-contains "dotimes → for loop"
+     "for (let"
+     '(defn f [(n : Long)] : Nil (dotimes [i n] (println i))))
+
+   ;; --- interop --------------------------------------------------------------
+
+   (check-js-contains ".method → dot call"
+     ".toString("
+     '(defn f [(x : Any)] : String (.toString x)))
+
+   (check-js-contains "Class/method → function call"
+     "Math/abs("
+     '(defn f [(x : Long)] : Long (Math/abs x)))
+
+   (check-js-contains "new → new keyword"
+     "new Date("
+     '(def d : Any (Date. 2024)))
+
+   ;; --- multi-arity ----------------------------------------------------------
+
+   (check-js-contains "multi-arity → arguments.length dispatch"
+     "arguments.length"
+     `(defn greet
+       (,(br '(name : String)) : String (str "Hello " name))
+       (,(br '(first : String) '(last : String)) : String (str "Hello " first " " last))))
+
+   ;; --- binding forms --------------------------------------------------------
+
+   (check-js-contains "when-let → null check IIFE"
+     "!= null"
+     '(defn f [(x : Any)] : Nil (when-let [v x] (println v))))
+
+   (check-js-contains "if-let → null check with else"
+     "else"
+     '(defn f [(x : Any)] : String (if-let [v x] "found" "missing")))
+
+   ;; --- edge cases (CLJS-inspired) --------------------------------------------
+
+   (check-js-contains "munge: hyphen and underscore produce distinct names"
+     "my__var"
+     '(def my_var : Long 1))
+
+   (check-js-contains "munge: hyphen-name does not collide with underscore"
+     "my_func"
+     '(defn my-func [] : Long 42))
+
+   (check-js-contains "string with embedded quotes"
+     "\"he said \\\"hi\\\"\""
+     '(def s : String "he said \"hi\""))
+
+   (check-js-contains "boolean true → true"
+     "true"
+     '(def x : Boolean true))
+
+   (check-js-contains "boolean false → false"
+     "false"
+     '(def x : Boolean false))
+
+   (check-js-contains "nested let → nested IIFE"
+     "const y"
+     '(defn f [] : Long (let [x 1] (let [y 2] (+ x y)))))
+
+   (check-js-contains "await in nested let propagates async"
+     "async"
+     `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
+     '(defn f [(url : String)] : (Promise String)
+       (let [x "prefix"]
+         (let [result (await (fetch-data url))]
+           (str x result)))))
+
+   (check-js-contains "multi-arity with await → async dispatch"
+     "async function"
+     `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
+     `(defn load
+       (,(br '(url : String)) : (Promise String) (await (fetch-data url)))
+       (,(br '(url : String) '(fallback : String)) : (Promise String)
+         (let [r (await (fetch-data url))] (if (nil? r) fallback r)))))
+
+   (check-js-contains "record field access chains"
+     ".x"
+     '(defrecord Point [(x : Long) (y : Long)])
+     '(defrecord Line [(start : Point) (end : Point)])
+     '(defn start-x [(l : Line)] : Long (:x (:start l))))
+
+   (check-js-contains "empty string is a valid value"
+     "const s = \"\";"
+     '(def s : String ""))
+
+   (check-js-contains "zero is a valid numeric value"
+     "const z = 0;"
+     '(def z : Long 0))
+
+   (check-js-contains "negative number"
+     "const n = -42;"
+     '(def n : Long -42))
+
+   (check-js-contains "double literal preserves decimal"
+     "3.14"
+     '(def pi : Double 3.14))
+
+   (check-js-contains "keyword literal → string"
+     "\"foo\""
+     '(def k : Keyword :foo))
+
+   (check-js-contains "for nested in let"
+     ".map("
+     '(defn f [(xs : (Vec Long))] : (Vec Long)
+       (let [offset 10]
+         (for [x xs] (+ x offset)))))
+
+   (check-js-contains "cond with multiple branches → chained ternary"
+     "? \"negative\" :"
+     '(defn classify [(n : Long)] : String
+       (cond (< n 0) "negative" (= n 0) "zero" :else "positive")))
  ))

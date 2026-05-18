@@ -12,17 +12,14 @@
 ;; --- identifier mangling ---------------------------------------------------
 
 (define (mangle-name sym)
-  (define s (symbol->string sym))
-  (string-replace
-   (string-replace
-    (string-replace s "-" "_")
-    "?" "_p")
-   "!" "_bang"))
+  (mangle-str (symbol->string sym)))
 
 (define (mangle-str s)
   (string-replace
    (string-replace
-    (string-replace s "-" "_")
+    (string-replace
+     (string-replace s "_" "__")
+     "-" "_")
     "?" "_p")
    "!" "_bang"))
 
@@ -586,8 +583,10 @@
      (string-append (string-join parts " : ") " : " default-str)]
 
     [(new-form? e)
+     (define raw (symbol->string (new-form-class-name e)))
+     (define cls (if (string-suffix? raw ".") (substring raw 0 (sub1 (string-length raw))) raw))
      (format "new ~a(~a)"
-             (mangle-name (new-form-class-name e))
+             (mangle-str cls)
              (string-join (map emit-expr (new-form-args e)) ", "))]
 
     [(kw-access? e)

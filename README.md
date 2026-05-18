@@ -2,21 +2,29 @@
 
 **A language where mechanical bugs compile into patches.**
 
-Beagle is an agent-native typed authoring layer for Clojure/ClojureScript: it gives coding agents a compiler, repair queue, and structural query tools, then emits plain `.clj` / `.cljs`.
+Beagle is an agent-native typed authoring layer for dynamic languages. It gives coding agents a compiler, repair queue, and structural query tools — then emits plain source in the target language.
+
+Currently supported targets:
+
+- **Clojure** (`#lang beagle` / `#lang beagle/clj`) → `.clj`
+- **ClojureScript** (`#lang beagle/cljs`) → `.cljs`
+- **JavaScript** (`#lang beagle/js`) → `.js`
+
+Same types, same checker, same repair compiler — different backends.
 
 The thesis is simple: **mechanical bugs should not require cognition.**
 
 Shape errors should be caught by types. Runtime failures should become ranked, machine-actionable repair candidates. The goal is to spend zero reasoning tokens on mechanical fixes — the agent's budget goes to semantic bugs that actually require judgment.
 
 ```text
-source.rkt → parse → check → emit → output.clj / output.cljs
+source.bgl → parse → check → emit → output.clj / .cljs / .js
                        ↑
-             repair compiler
+              repair compiler
                        ↑
-                 daemon + AST cache
+                daemon + AST cache
 ```
 
-The runtime target stays normal Clojure. If you stop using Beagle, you keep the emitted `.clj` / `.cljs`.
+The runtime target stays normal source. If you stop using Beagle, you keep the emitted code.
 
 ## Experiments
 
@@ -36,11 +44,12 @@ The correctness gap is a static-typing result, not a Beagle-specific one. Beagle
 
 ## A program
 
+The same source compiles to any target:
+
 ```racket
-#lang beagle
+#lang beagle/js
 (ns inventory.core)
 (define-mode strict)
-(require catalog :as cat)
 
 (defrecord StockLevel [(product-id : Long)
                        (quantity   : Long)
@@ -55,13 +64,15 @@ The correctness gap is a static-typing result, not a Beagle-specific one. Beagle
       0))
 ```
 
+Change `#lang beagle/js` to `#lang beagle/clj` and the same source emits Clojure instead.
+
 ## Setup
 
 Requires [Racket](https://racket-lang.org/) and [Babashka](https://babashka.org/).
 
 ```sh
 raco pkg install --link --auto /path/to/beagle
-raco test tests/   # 466 tests
+raco test tests/   # 500+ tests
 ```
 
 ## Agent integration
@@ -73,7 +84,7 @@ beagle init --claude-code
 beagle-daemon start --watch .
 ```
 
-Generates a PostToolUse hook, settings, `CLAUDE.md`, and language context. The daemon gives instant type feedback on every `.rkt` edit and re-checks within ~100ms of each save.
+Generates a PostToolUse hook, settings, `CLAUDE.md`, and language context. The daemon gives instant type feedback on every `.bgl`/`.rkt` edit and re-checks within ~100ms of each save.
 
 MCP:
 
