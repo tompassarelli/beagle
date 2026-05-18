@@ -315,9 +315,9 @@
       (for/list ([a (in-list args)])
         (cond
           [(directory-exists? a) (find-rkt-files a)]
-          [(regexp-match? #rx"\\.rkt$" a) (list a)]
+          [(regexp-match? #rx"\\.(bgl|rkt)$" a) (list a)]
           [else
-           (eprintf "beagle-check-all: skipping non-.rkt file: ~a\n" a)
+           (eprintf "beagle-check-all: skipping non-.bgl file: ~a\n" a)
            '()])))
     string<?))
 
@@ -329,7 +329,7 @@
   (define files (expand-args args))
 
   (when (null? files)
-    (eprintf "beagle-check-all: no .rkt files found\n")
+    (eprintf "beagle-check-all: no .bgl files found\n")
     (exit 2))
 
   (define json? (json-error-mode?))

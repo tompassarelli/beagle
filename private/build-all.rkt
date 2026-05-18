@@ -9,10 +9,17 @@
          "error-format.rkt"
          "query.rkt")
 
-(define (ns->path ns-sym)
+(define (extension-for-target target)
+  (case target
+    [(cljs) ".cljs"]
+    [(js)   ".js"]
+    [(py)   ".py"]
+    [else   ".clj"]))
+
+(define (ns->path ns-sym target)
   (define s (symbol->string ns-sym))
   (string-append (regexp-replace* #rx"\\." (regexp-replace* #rx"-" s "_") "/")
-                 ".clj"))
+                 (extension-for-target target)))
 
 (define (build-one-file path out-dir json? #:warn? [warn? #f])
   (define type-errors 0)
@@ -54,10 +61,11 @@
 
     (define source (emit-program prog))
     (define ns (program-namespace prog))
+    (define target (program-target prog))
     (define out-path
       (if out-dir
-          (build-path out-dir (ns->path ns))
-          (string->path (ns->path ns))))
+          (build-path out-dir (ns->path ns target))
+          (string->path (ns->path ns target))))
 
     (define out-dir-part (path-only out-path))
     (when out-dir-part
@@ -80,9 +88,9 @@
       (for/list ([a (in-list args)])
         (cond
           [(directory-exists? a) (find-rkt-files a)]
-          [(regexp-match? #rx"\\.rkt$" a) (list a)]
+          [(regexp-match? #rx"\\.(bgl|rkt)$" a) (list a)]
           [else
-           (eprintf "beagle-build-all: skipping non-.rkt file: ~a\n" a)
+           (eprintf "beagle-build-all: skipping non-.bgl file: ~a\n" a)
            '()])))
     string<?))
 
@@ -114,7 +122,7 @@
   (define files (expand-args file-args))
 
   (when (null? files)
-    (eprintf "beagle-build-all: no .rkt files found\n")
+    (eprintf "beagle-build-all: no .bgl files found\n")
     (exit 2))
 
   (define json? (json-error-mode?))

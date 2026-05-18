@@ -1,7 +1,8 @@
 # beagle — language reference (consumer)
 
-Beagle is a typed language that compiles to Clojure. This reference covers
-everything needed to write beagle code. Errors are caught at compile time.
+Beagle is a typed language that compiles to Clojure or JavaScript. This
+reference covers everything needed to write beagle code. Errors are caught
+at compile time.
 
 ## File header
 
@@ -14,6 +15,8 @@ everything needed to write beagle code. Errors are caught at compile time.
 (declare-extern fn-name [Args -> Ret]) ; ONLY for Java interop / non-beagle fns
 (import java.io.File)                  ; Java class import
 ```
+
+For JavaScript target: `#lang beagle/js` with `.bgl` file extension.
 
 `(require module :as alias)` imports everything — types, records, functions,
 macros. You do NOT need `declare-extern` for cross-module beagle calls.
@@ -158,6 +161,14 @@ Only annotate when narrowing: `(let [(x : Product) (find-product id)] ...)`.
 - Nullable return when non-nullable declared
 - Undefined function references
 - Cross-module contract violations
+
+## JavaScript target
+
+Use `#lang beagle/js` (file extension `.bgl`). Forms emit JS: `defn` →
+`function`, `def` → `const`, `fn` → arrow, `defrecord` → `Object.freeze`,
+`nil` → `null`. Async support: `(await expr)` with `(Promise T)` type;
+functions containing `await` are auto-async. Identifiers mangled: `-` → `_`,
+`?` → `_p`, `!` → `_bang`. All type checking works identically.
 
 ## Build & check
 

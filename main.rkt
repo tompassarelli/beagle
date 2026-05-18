@@ -26,6 +26,7 @@
          #%app
          #%top
          #%top-interaction
+         beagle-module-begin
          (rename-out [beagle-module-begin #%module-begin]))
 
 (define-syntax (beagle-module-begin stx)

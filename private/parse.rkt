@@ -197,6 +197,7 @@
 (struct dotimes-form   (name count-expr body)                #:transparent)
 (struct condp-form     (pred-fn test-expr clauses default)   #:transparent)
 (struct defonce-form   (name type value)                     #:transparent)
+(struct await-form    (expr)                                 #:transparent)
 
 (struct param       (name type)                             #:transparent)
 (struct map-destructure (keys as-name)                      #:transparent)
@@ -255,7 +256,7 @@
   (and source-path
        (let ()
          (define segs (split-ns-segments ns-sym))
-         (define file-name (string-append (last-of segs) ".rkt"))
+         (define base-name (last-of segs))
          (define dir-segs (all-but-last segs))
          (define source-dir
            (let-values ([(d _n _d?) (split-path
@@ -263,20 +264,22 @@
                                         source-path
                                         (path->complete-path source-path)))])
              d))
-         (define full-path
-           (if (null? dir-segs)
-             (build-path source-dir file-name)
-             (apply build-path source-dir (append dir-segs (list file-name)))))
-         (cond
-           [(file-exists? full-path) full-path]
-           [(and (not (null? dir-segs))
-                 (file-exists? (build-path source-dir file-name))
-                 (not (equal? (simplify-path (build-path source-dir file-name))
-                              (simplify-path (if (complete-path? source-path)
-                                                 source-path
-                                                 (path->complete-path source-path))))))
-            (build-path source-dir file-name)]
-           [else #f]))))
+         (define (try-extensions dir-prefix)
+           (for/or ([ext '(".bgl" ".rkt")])
+             (define p (if (null? dir-prefix)
+                         (build-path source-dir (string-append base-name ext))
+                         (apply build-path source-dir
+                                (append dir-prefix (list (string-append base-name ext))))))
+             (and (file-exists? p) p)))
+         (or (try-extensions dir-segs)
+             (and (not (null? dir-segs))
+                  (let ([flat (try-extensions '())])
+                    (and flat
+                         (not (equal? (simplify-path flat)
+                                      (simplify-path (if (complete-path? source-path)
+                                                         source-path
+                                                         (path->complete-path source-path)))))
+                         flat)))))))
 
 (define (qualify-name prefix-sym name-sym)
   (string->symbol
@@ -285,12 +288,21 @@
 (define (read-beagle-datums path)
   (with-input-from-file path
     (lambda ()
-      (read-line)
+      (define first-line (read-line))
+      (unless (and (string? first-line) (regexp-match? #rx"^#lang " first-line))
+        (file-position (current-input-port) 0))
       (parameterize ([read-square-bracket-with-tag BT]
                      [current-readtable beagle-readtable])
         (let loop ([acc '()])
           (define d (read))
           (if (eof-object? d) (reverse acc) (loop (cons d acc))))))))
+
+(define (lang-line->target lang-line)
+  (cond
+    [(regexp-match? #rx"beagle/js"  lang-line) 'js]
+    [(regexp-match? #rx"beagle/py"  lang-line) 'py]
+    [(regexp-match? #rx"beagle/cljs" lang-line) 'cljs]
+    [else #f]))
 
 (define (read-beagle-syntax path)
   (define src (simplify-path (path->complete-path
@@ -298,12 +310,22 @@
   (with-input-from-file src
     (lambda ()
       (port-count-lines! (current-input-port))
-      (read-line)
+      (define first-line (read-line))
+      (define has-lang? (and (string? first-line)
+                             (regexp-match? #rx"^#lang " first-line)))
+      (define target (and has-lang? (lang-line->target first-line)))
+      (unless has-lang?
+        (file-position (current-input-port) 0)
+        (port-count-lines! (current-input-port)))
       (parameterize ([read-square-bracket-with-tag BT]
                      [current-readtable beagle-readtable])
-        (let loop ([acc '()])
-          (define d (read-syntax src))
-          (if (eof-object? d) (reverse acc) (loop (cons d acc))))))))
+        (define forms
+          (let loop ([acc '()])
+            (define d (read-syntax src))
+            (if (eof-object? d) (reverse acc) (loop (cons d acc)))))
+        (if target
+          (cons (datum->syntax #f (list 'define-target target)) forms)
+          forms)))))
 
 
 (define (import-module-types! mod-path prefix externs registry imp-rec-fields imp-rec-field-order imp-rec-ns mod-ns
@@ -431,8 +453,8 @@
 
       [(list 'define-target (? symbol? t))
        (when target-set? (error 'beagle "duplicate define-target"))
-       (unless (or (eq? t 'clj) (eq? t 'cljs))
-         (error 'beagle "unknown target: ~a (expected clj or cljs)" t))
+       (unless (memq t '(clj cljs js py))
+         (error 'beagle "unknown target: ~a (expected clj, cljs, js, or py)" t))
        (set! target t)
        (set! target-set? #t)]
 
@@ -736,6 +758,23 @@
        (defn-form name parsed rest-p
                   #f (parse-body (or (stx-tail subs 3) body)) #f))]
 
+    ;; defn with ^:private metadata on name
+    [(list 'defn (list '#%meta _ (? symbol? name)) first-clause rest-clauses ...)
+     #:when (multi-arity-form? first-clause)
+     (defn-multi name (map parse-arity-clause
+                           (cons first-clause rest-clauses)) #t)]
+
+    [(list 'defn (list '#%meta _ (? symbol? name)) params-form marker return-type body ...)
+     #:when (annotation-marker? marker)
+     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
+       (defn-form name parsed rest-p
+                  (parse-type return-type)
+                  (parse-body (or (stx-tail subs 5) body)) #t))]
+    [(list 'defn (list '#%meta _ (? symbol? name)) params-form body ...)
+     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
+       (defn-form name parsed rest-p
+                  #f (parse-body (or (stx-tail subs 3) body)) #t))]
+
     ;; defn- (private defn)
     [(list 'defn- (? symbol? name) first-clause rest-clauses ...)
      #:when (multi-arity-form? first-clause)
@@ -795,6 +834,9 @@
                 (parse-body (or (stx-tail subs 2) body)))]
     [(list 'recur args ...)
      (recur-form (map parse-expr (or (stx-tail subs 1) args)))]
+
+    [(list 'await inner)
+     (await-form (parse-expr (or (stx-ref subs 1) inner)))]
 
     [(list 'for bindings-form body ...)
      (for-form (parse-for-clauses (or (stx-ref subs 1) bindings-form))
@@ -1452,6 +1494,7 @@
  (struct-out dotimes-form)
  (struct-out condp-form)
  (struct-out defonce-form)
+ (struct-out await-form)
  parse-program
  DEFAULT-MODE
  DEFAULT-TARGET

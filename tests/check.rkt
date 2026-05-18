@@ -322,7 +322,7 @@
 
 (define shapes-fixture-source
   (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
-    (build-path dir "fixtures" "shapes.rkt")))
+    (build-path dir "fixtures" "shapes.bgl")))
 
 (check-ok/source "cross-file defrecord: constructor callable with prefix" shapes-fixture-source
   '(require shapes)
@@ -830,3 +830,25 @@
 
 (check-err "defonce type mismatch"
   '(defonce db : String 42))
+
+;; =============================================================================
+;; async/await + Promise type
+;; =============================================================================
+
+(check-ok "await on (Promise T) type-checks"
+  `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
+  '(defn f [(url : String)] : (Promise String) (await (fetch-data url))))
+
+(check-ok "Promise return with unwrapped body type accepted"
+  `(declare-extern load ,(br '-> '(Promise Long)))
+  '(defn f [] : (Promise Long) (await (load))))
+
+(check-ok "nested await in let type-checks"
+  `(declare-extern fetch-name ,(br 'Long '-> '(Promise String)))
+  '(defn f [(id : Long)] : (Promise String)
+    (let [name (await (fetch-name id))]
+      (str "Hello " name))))
+
+(check-err "Promise return type mismatch caught"
+  `(declare-extern load ,(br '-> '(Promise Long)))
+  '(defn f [] : (Promise String) (await (load))))

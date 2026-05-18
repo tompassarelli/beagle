@@ -159,3 +159,22 @@
   ;; Different base names are NOT compatible
   (check-false (type-compatible? (type-prim 'cat/ProductId) (type-prim 'CategoryId)))
   (check-false (type-compatible? (type-prim 'ord/Amount) (type-prim 'Timestamp))))
+
+;; --- Promise type ----------------------------------------------------------
+
+(test-case "parse (Promise T) parametric type"
+  (define t (parse-type '(Promise String)))
+  (check-true (type-app? t))
+  (check-eq? (type-app-ctor t) 'Promise)
+  (check-equal? (length (type-app-args t)) 1)
+  (check-eq? (type-prim-name (car (type-app-args t))) 'String))
+
+(test-case "(Promise T) compatible with itself"
+  (define a (type-app 'Promise (list (type-prim 'String))))
+  (define b (type-app 'Promise (list (type-prim 'String))))
+  (check-true (type-compatible? a b)))
+
+(test-case "(Promise String) not compatible with (Promise Long)"
+  (define a (type-app 'Promise (list (type-prim 'String))))
+  (define b (type-app 'Promise (list (type-prim 'Long))))
+  (check-false (type-compatible? a b)))

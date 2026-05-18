@@ -69,7 +69,7 @@ all_scalars = {}   # name -> base type, across all modules
 all_records = {}   # name -> {module, fields}, across all modules
 
 for fname in sorted(os.listdir(source_dir)):
-    if not fname.endswith('.rkt'):
+    if not (fname.endswith('.bgl') or fname.endswith('.rkt')):
         continue
     fpath = os.path.join(source_dir, fname)
     module_name = fname[:-4]
@@ -715,7 +715,7 @@ def extract_typed_functions(source_dir, beagle_bin):
     if not source_dir or not os.path.isdir(source_dir):
         return typed
     for fname in sorted(os.listdir(source_dir)):
-        if not fname.endswith('.rkt'):
+        if not (fname.endswith('.bgl') or fname.endswith('.rkt')):
             continue
         fpath = os.path.join(source_dir, fname)
         module = fname[:-4]

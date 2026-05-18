@@ -15,7 +15,8 @@
          "types.rkt"
          "stdlib-types.rkt")
 
-(define BUILTIN-ENV STDLIB-TYPES)
+(define (builtin-env-for-target target)
+  (stdlib-for-target target))
 
 (define ANY (type-prim 'Any))
 (define NIL (type-prim 'Nil))
@@ -35,7 +36,7 @@
          (if (ormap (λ (a) (type-compatible? t a)) acc) acc (cons t acc))))
      (if (= (length deduped) 1) (car deduped) (type-union (reverse deduped)))]))
 
-;; Current compile target ('clj or 'cljs) — set during type-check!
+;; Current compile target ('clj, 'cljs, 'js, or 'py) — set during type-check!
 (define current-check-target (make-parameter 'clj))
 
 ;; Record field registry: record-type-name -> hash of keyword-sym -> type
@@ -145,7 +146,7 @@
 ;; --- environment -----------------------------------------------------------
 
 (define (build-initial-env prog)
-  (define env (mut-copy BUILTIN-ENV))
+  (define env (mut-copy (builtin-env-for-target (program-target prog))))
   ;; user-declared external functions
   (for ([(name t) (in-hash (program-externs prog))])
     (hash-set! env name t))
@@ -155,7 +156,8 @@
     (unless (hash-has-key? RECORD-FIELD-ORDER rec-name)
       (hash-set! RECORD-FIELD-ORDER rec-name (hash-keys field-map))))
   ;; top-level defs / defns (pre-pass so callers can look them up)
-  (for ([form (in-list (program-forms prog))])
+  (for ([raw-form (in-list (program-forms prog))])
+    (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
     (match form
       [(def-form name (? type? t) _) (hash-set! env name t)]
       [(defonce-form name (? type? t) _) (hash-set! env name t)]
@@ -282,7 +284,11 @@
      (parameterize ([current-check-fn-name name])
        (define last-type (last-expr-type body body-env))
        (when expected-ret
-         (unless (type-compatible? last-type expected-ret)
+         (unless (or (type-compatible? last-type expected-ret)
+                     (and (type-app? expected-ret)
+                          (eq? (type-app-ctor expected-ret) 'Promise)
+                          (= 1 (length (type-app-args expected-ret)))
+                          (type-compatible? last-type (car (type-app-args expected-ret)))))
            (define rtype (and rest-p (param-or-destr-type rest-p)))
            (define sig (type->string (type-fn (map param-or-destr-type params) rtype expected-ret)))
            (raise-diag 'return-type
@@ -301,7 +307,11 @@
        (define last-type (last-expr-type a-body body-env))
        (define expected-ret (arity-clause-return-type a))
        (when expected-ret
-         (unless (type-compatible? last-type expected-ret)
+         (unless (or (type-compatible? last-type expected-ret)
+                     (and (type-app? expected-ret)
+                          (eq? (type-app-ctor expected-ret) 'Promise)
+                          (= 1 (length (type-app-args expected-ret)))
+                          (type-compatible? last-type (car (type-app-args expected-ret)))))
            (define sig (type->string
                          (type-fn (map param-or-destr-type (arity-clause-params a)) #f expected-ret)))
            (raise-diag 'return-type
@@ -333,6 +343,8 @@
     [(defenum-form _ _) (void)]
     [(defunion-form _ _) (void)]
     [(defscalar-form _ _ _) (void)]
+
+    [(? with-meta?) (check-form (with-meta-expr form) env)]
 
     [_ (infer-expr form env)]))
 
@@ -644,15 +656,15 @@
        (ormap (lambda (m) (and (type-prim? m) (eq? (type-prim-name m) 'Nil)))
               (type-union-alts t))))
 
-;; --- CLJS compatibility warnings ------------------------------------------
+;; --- target compatibility warnings ----------------------------------------
 
-(define (warn-cljs-exclude sym node)
-  (when (and (eq? (current-check-target) 'cljs)
-             (set-member? CLJS-EXCLUDE sym))
+(define (warn-target-exclude sym node)
+  (define excludes (target-excludes-for (current-check-target)))
+  (when (and excludes (set-member? excludes sym))
     (define src (src-for node))
     (fprintf (current-error-port)
-             "warning: ~a is JVM-only and unavailable in ClojureScript target~a\n"
-             sym
+             "warning: ~a is JVM-only and unavailable in ~a target~a\n"
+             sym (current-check-target)
              (if src (format " at ~a:~a" (or (src-loc-source src) "?") (src-loc-line src)) ""))))
 
 ;; --- scalar predicate checking (compile-time for literals) ----------------
@@ -831,6 +843,13 @@
     [(recur-form? e)
      (for-each (lambda (a) (infer-expr a env)) (recur-form-args e))
      ANY]
+    [(await-form? e)
+     (define inner-type (infer-expr (await-form-expr e) env))
+     (if (and (type-app? inner-type)
+              (eq? (type-app-ctor inner-type) 'Promise)
+              (= 1 (length (type-app-args inner-type))))
+       (car (type-app-args inner-type))
+       ANY)]
     [(for-form? e)
      (define body-env (mut-copy env))
      (for ([c (in-list (for-form-clauses e))])
@@ -860,11 +879,11 @@
      (define ret (or (fn-form-return-type e) (last-expr-type (fn-form-body e) body-env)))
      (type-fn p-types #f ret)]
     [(dynamic-var? e)
-     (warn-cljs-exclude (dynamic-var-name e) e)
+     (warn-target-exclude (dynamic-var-name e) e)
      (hash-ref env (dynamic-var-name e) ANY)]
     [(method-call? e)
      (define method-sym (method-call-method-name e))
-     (warn-cljs-exclude method-sym e)
+     (warn-target-exclude method-sym e)
      (define raw-type (hash-ref env method-sym ANY))
      (define all-args (cons (method-call-target e) (method-call-args e)))
      (define fn-type
@@ -881,7 +900,7 @@
         ANY])]
     [(static-call? e)
      (define sym (static-call-class+method e))
-     (warn-cljs-exclude sym e)
+     (warn-target-exclude sym e)
      (define raw-type (hash-ref env sym ANY))
      (define fn-type
        (if (type-poly? raw-type)
@@ -1005,7 +1024,7 @@
           (infer-expr (with-update-value u) env))
         ANY])]
     [(call-form? e)
-     (warn-cljs-exclude (call-form-fn e) e)
+     (warn-target-exclude (call-form-fn e) e)
      (define raw-type (hash-ref env (call-form-fn e) ANY))
      (define fn-type
        (if (type-poly? raw-type)
@@ -1398,7 +1417,7 @@
 (define (build-known-fns! prog)
   (hash-clear! KNOWN-FNS)
   ;; stdlib
-  (for ([(k _) (in-hash BUILTIN-ENV)]) (hash-set! KNOWN-FNS k #t))
+  (for ([(k _) (in-hash (builtin-env-for-target (program-target prog)))]) (hash-set! KNOWN-FNS k #t))
   ;; externs
   (for ([(k _) (in-hash (program-externs prog))]) (hash-set! KNOWN-FNS k #t))
   ;; local forms

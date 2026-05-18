@@ -1,19 +1,17 @@
 #!/usr/bin/env bash
-# beagle-build: compile a beagle .rkt source file to Clojure .clj.
+# beagle-build: compile a beagle source file to target output.
 #
 # Usage:
-#   bin/beagle-build <source.rkt> [output.clj]
+#   bin/beagle-build <source.bgl> [output]
 #
 # If the output path is omitted, it is derived from the namespace declared
 # in the source via (ns ...) and dropped under runtime/src/.
-# E.g. (ns beagle.foo.bar) → runtime/src/beagle/foo/bar.clj.
-#
-# Without a namespace declaration, the default beagle.user is used.
+# Extension is determined by target: .clj (default), .cljs, .js, .py.
 
 set -euo pipefail
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
-    echo "usage: beagle-build <source.rkt> [output.clj]" >&2
+    echo "usage: beagle-build <source.bgl> [output.clj]" >&2
     exit 2
 fi
 
@@ -25,10 +23,16 @@ if [[ ! -f "$src" ]]; then
     exit 1
 fi
 
-## detect CLJS target
+## detect target from source or #lang
 ext="clj"
 if grep -qE '^\(define-target[[:space:]]+cljs\)' "$src" 2>/dev/null; then
     ext="cljs"
+elif grep -qE '^\(define-target[[:space:]]+js\)' "$src" 2>/dev/null || \
+     grep -qE '^#lang beagle/js' "$src" 2>/dev/null; then
+    ext="js"
+elif grep -qE '^\(define-target[[:space:]]+py\)' "$src" 2>/dev/null || \
+     grep -qE '^#lang beagle/py' "$src" 2>/dev/null; then
+    ext="py"
 fi
 
 if [[ $# -eq 2 ]]; then

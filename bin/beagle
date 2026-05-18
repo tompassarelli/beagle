@@ -17,7 +17,7 @@ Commands:
                             Auto-fix high-confidence type errors
   sig <fn-name> <path...>   Print a function's typed signature
   fields <record> <path...> Print record fields, types, accessors
-  expand <file.rkt>         Show source after macro expansion
+  expand <file.bgl>         Show source after macro expansion
   lsp                       Start LSP server (stdio)
   repl                      Start typed REPL
   mcp                       Start MCP server (stdio)

@@ -174,7 +174,7 @@
 
 (define (find-rkt-files-in dir)
   (for/list ([p (in-directory dir)]
-             #:when (regexp-match? #rx"\\.rkt$" (path->string p)))
+             #:when (regexp-match? #rx"\\.(bgl|rkt)$" (path->string p)))
     (path->string p)))
 
 (define (expand-args args)
@@ -183,7 +183,7 @@
       (for/list ([a (in-list args)])
         (cond
           [(directory-exists? a) (find-rkt-files-in a)]
-          [(regexp-match? #rx"\\.rkt$" a) (list a)]
+          [(regexp-match? #rx"\\.(bgl|rkt)$" a) (list a)]
           [else '()])))
     string<?))
 
@@ -203,7 +203,7 @@
    (expand-args file-or-dirs)))
 
 (when (null? files)
-  (eprintf "beagle-fix: no .rkt files found\n")
+  (eprintf "beagle-fix: no .bgl files found\n")
   (exit 2))
 
 (define entries (collect-fixable-errors files))

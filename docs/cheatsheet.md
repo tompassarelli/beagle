@@ -15,6 +15,16 @@ for being included as system context.
 (import java.io.File)          ; Java class import
 ```
 
+For the JavaScript target, use `#lang beagle/js` and `.bgl` file extension:
+
+```racket
+#lang beagle/js
+
+(ns my.module)
+(define-mode strict)
+(require other.module :as mod)  ; → import * as mod from './other.module.js'
+```
+
 **NOTE:** `(require module :as alias)` imports all typed defs, defns, records,
 scalars, and macros from the required beagle module. You do NOT need
 `declare-extern` for cross-module beagle calls — the types are imported
@@ -367,6 +377,59 @@ functions as `str/split`, `str/trim`, etc. Type checker treats these as Any.
 (str/join ", " coll)
 (cset/intersection a b)
 ```
+
+## JavaScript target (`#lang beagle/js`)
+
+File extension: `.bgl`. Use `#lang beagle/js` or `(define-target js)`.
+
+### Form mapping (beagle → JS)
+
+| beagle | JavaScript |
+|---|---|
+| `(defn name [params] body)` | `function name(params) { return body; }` |
+| `(def name value)` | `const name = value;` |
+| `(fn [params] body)` | `(params) => body` |
+| `(let [x 1 y 2] body)` | IIFE: `(() => { const x = 1; const y = 2; return body; })()` |
+| `(defrecord R [(f : T)])` | `Object.freeze({_tag: "R", f: ...})` |
+| `(match expr ...)` | `_tag ===` checks |
+| `(for [x coll] body)` | `coll.map(x => body)` / `.filter()` for `:when` |
+| `(with rec [:f val])` | `Object.freeze({...rec, f: val})` |
+| `nil` | `null` |
+| `println` | `console.log` |
+
+### Async/await
+
+```racket
+(defn fetch-data [(url : String)] : (Promise String)
+  (await (http/get url)))
+```
+
+- `(await expr)` — emits `await expr`
+- `(Promise T)` — typed promise; functions containing `await` are auto-detected as async
+- No explicit `async` keyword needed — the emitter adds it when `await` is present
+
+### Identifier mangling
+
+Lisp identifiers are mangled to valid JS names:
+
+| character | replacement |
+|---|---|
+| `-` | `_` |
+| `?` | `_p` |
+| `!` | `_bang` |
+
+Example: `valid-email?` → `valid_email_p`, `reset!` → `reset_bang`
+
+### Module imports
+
+```racket
+(require util :as u)           ; → import * as u from './util.js'
+(require data.transform)       ; → import * as data_transform from './data.transform.js'
+```
+
+Emits ES module `import` statements. All beagle cross-module type
+resolution works identically — `require` imports types, records, and
+function signatures for the checker regardless of target.
 
 ## Regex literals
 

@@ -262,7 +262,7 @@
 
 (define (find-rkt-files dir)
   (for/list ([p (in-directory dir)]
-             #:when (regexp-match? #rx"\\.rkt$" (path->string p)))
+             #:when (regexp-match? #rx"\\.(bgl|rkt)$" (path->string p)))
     (path->string p)))
 
 ;; --- CLI dispatch ------------------------------------------------------------

@@ -1,5 +1,5 @@
 #lang s-exp syntax/module-reader
-beagle/main
+beagle/clj/main
 #:read         beagle-read
 #:read-syntax  beagle-read-syntax
 

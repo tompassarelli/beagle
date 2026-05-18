@@ -1,0 +1,59 @@
+#lang beagle/js
+(ns app.main)
+(define-mode strict)
+
+(defrecord Product [(name : String) (price : Long) (in-stock : Boolean)])
+
+(def tax-rate : Double 0.08)
+
+(defn make-product [(name : String) (price : Long)] : Product
+  (->Product name price true))
+
+(defn product-total [(p : Product)] : Double
+  (+ (product-price p) (* (product-price p) tax-rate)))
+
+(defn discount [(p : Product) (pct : Double)] : Product
+  (with p [:price (- (product-price p) (* (product-price p) pct))]))
+
+(defn cheap? [(p : Product)] : Boolean
+  (< (product-price p) 10))
+
+(defn summarize [(products : (Vec Product))] : (Vec String)
+  (for [p products]
+    (product-name p)))
+
+(defn find-cheap [(products : (Vec Product))] : (Vec Product)
+  (for [p products :when (cheap? p)]
+    p))
+
+(defn process-order [(p : Product)] : String
+  (if (product-in-stock p)
+    (str "Shipping: " (product-name p))
+    "Out of stock"))
+
+(defn classify [(p : Product)] : String
+  (cond
+    (< (product-price p) 10) "budget"
+    (< (product-price p) 50) "mid-range"
+    :else "premium"))
+
+(defn safe-lookup [(products : (Vec Product)) (idx : Long)] : String
+  (let [p (nth products idx nil)]
+    (if (nil? p)
+      "not found"
+      (product-name p))))
+
+(defn greet [(name : String)] : Nil
+  (println (str "Hello, " name "!")))
+
+;; async/await
+(declare-extern fetch-product [Long -> (Promise Product)])
+
+(defn load-and-classify [(id : Long)] : (Promise String)
+  (let [p (await (fetch-product id))]
+    (classify p)))
+
+(defn load-two [(a : Long) (b : Long)] : (Promise (Vec String))
+  (let [p1 (await (fetch-product a))
+        p2 (await (fetch-product b))]
+    [(product-name p1) (product-name p2)]))

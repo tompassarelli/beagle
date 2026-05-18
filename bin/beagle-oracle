@@ -76,7 +76,7 @@ modules = {}
 all_records = {}  # RecordName -> {module, fields}
 
 for fname in sorted(os.listdir(source_dir)):
-    if not fname.endswith('.rkt'):
+    if not (fname.endswith('.bgl') or fname.endswith('.rkt')):
         continue
     fpath = os.path.join(source_dir, fname)
     module_name = fname[:-4]

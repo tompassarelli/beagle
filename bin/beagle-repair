@@ -129,7 +129,7 @@ def extract_module_from_path(path):
     if not path or path == '?':
         return None
     base = os.path.basename(path)
-    for ext in ['.rkt', '.clj']:
+    for ext in ['.bgl', '.rkt', '.clj']:
         if base.endswith(ext):
             return base[:-len(ext)]
     return None
@@ -319,7 +319,12 @@ for output_file_name in ['build-output.txt', 'check-output.json']:
                 path = ctx_m.group(1)
                 # Extract module name from path
                 base = os.path.basename(path)
-                current_module = base.replace('.rkt', '') if base.endswith('.rkt') else None
+                if base.endswith('.bgl'):
+                    current_module = base.replace('.bgl', '')
+                elif base.endswith('.rkt'):
+                    current_module = base.replace('.rkt', '')
+                else:
+                    current_module = None
                 continue
             # Parse SUSPECT line
             susp_m = re.match(r'\s+SUSPECT \[([0-9.]+)\]: ([\w?!<>*+\-/]+): (.+)', line)
@@ -457,7 +462,7 @@ def resolve_source_file(repair_entry):
         return f
     # Try source_dir + .rkt version
     base = os.path.basename(f)
-    for ext_from, ext_to in [('.clj', '.rkt'), ('.clj', '.clj')]:
+    for ext_from, ext_to in [('.clj', '.bgl'), ('.clj', '.rkt'), ('.clj', '.clj')]:
         if base.endswith(ext_from):
             candidate = os.path.join(source_dir, base[:-len(ext_from)] + ext_to)
             if os.path.exists(candidate):

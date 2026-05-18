@@ -330,6 +330,7 @@
      (for ([u (in-list updates)])
        (check-shadow (with-update-value u) scope ctx))]
     [(defenum-form _ _) (void)]
+    [(await-form expr) (check-shadow expr scope ctx)]
     [_ (void)]))
 
 (define (gensym-name? n)
@@ -479,6 +480,8 @@
      (for ([impl (in-list impls)])
        (for ([m (in-list (type-impl-methods impl))])
          (for ([e (in-list (impl-method-body m))]) (collect-symbols e used))))]
+    [(await-form expr)
+     (collect-symbols expr used)]
     [_ (void)]))
 
 (provide lint-program!)

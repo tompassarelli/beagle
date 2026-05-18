@@ -171,7 +171,7 @@
   (define diags
     (with-handlers ([exn:fail? (lambda (e) (list (make-diag 0 0 1 (exn-message e))))])
       (cond
-        [(not (regexp-match? #rx"\\.rkt$" path)) '()]
+        [(not (regexp-match? #rx"\\.(bgl|rkt)$" path)) '()]
         [(and (not content) (not (file-exists? path))) '()]
         [else (check-file-for-diagnostics path content)])))
   (send-notification out "textDocument/publishDiagnostics"
@@ -383,7 +383,7 @@
       (let ([dir (path->string (let-values ([(base _name _must-be-dir?) (split-path (string->path origin-path))])
                                  base))])
         (for/first ([f (in-directory dir)]
-                    #:when (regexp-match? #rx"\\.rkt$" (path->string f))
+                    #:when (regexp-match? #rx"\\.(bgl|rkt)$" (path->string f))
                     #:when (not (equal? (path->string f) origin-path))
                     #:when (search-file (path->string f)))
           (search-file (path->string f))))))
@@ -470,7 +470,7 @@
                   (let-values ([(base _name _dir?) (split-path (string->path path))])
                     base)))
     (for ([f (in-directory dir)]
-          #:when (regexp-match? #rx"\\.rkt$" (path->string f))
+          #:when (regexp-match? #rx"\\.(bgl|rkt)$" (path->string f))
           #:when (not (equal? (path->string f) path)))
       (define mod-name
         (path->string (let-values ([(_base name _dir?) (split-path f)]) name)))

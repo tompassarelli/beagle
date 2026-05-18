@@ -28,7 +28,7 @@
   '(Integer Int Float Bool))
 
 (define PARAMETRIC-CTORS
-  '(Vec List Set Map))
+  '(Vec List Set Map Promise))
 
 ;; --- type AST --------------------------------------------------------------
 

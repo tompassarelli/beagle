@@ -1,8 +1,9 @@
 # beagle — session anchor
 
-A typed authoring layer that compiles to Clojure. Racket frontend with
-custom `#lang`, macros (safe/unsafe boundaries), static type checking; emits
-plain Clojure source for runtime.
+A multi-target authoring IR. Racket frontend with custom `#lang`, macros
+(safe/unsafe boundaries), static type checking; emits Clojure, ClojureScript,
+or JavaScript source for runtime. `.bgl` is the primary file extension
+(`.rkt` still accepted for backward compatibility).
 
 **LLM authoring is a first-class concern.** Rich types, explicit forms, low
 syntactic surface area, structured errors. One canonical idiom per concept.
@@ -14,7 +15,7 @@ it as canonical when explaining the language.
 
 ## Status
 
-`#lang beagle` v0.7.0 — MCP server, Claude Code integration, Scribble docs:
+`#lang beagle` v0.8.0 — multi-target (Clojure/CLJS/JS/Python), MCP server, Claude Code integration, Scribble docs:
 
 - Forms: `def`, `defn` (single + multi-arity), `fn`, `let`, `if`, `cond`,
   `when`, `when-not`, `when-let`, `if-let`, `if-not`, `when-some`, `if-some`,
@@ -22,10 +23,12 @@ it as canonical when explaining the language.
   `doseq`, `dotimes`, `try`/`catch`/`finally`, `case`, `condp`, `comment`,
   `defrecord`, `with` (typed record update), `defenum`, `defonce`, `defunion`,
   `defprotocol`, `defmulti`/`defmethod`, `deftype`, `extend-type`,
-  `with-open`, `doto`, constructor calls (`ClassName.`), keyword-as-function
-  (`(:key map)`), call, vector literal, map literal (`{}`), set literal (`#{}`),
-  quote, metadata (`^{:key val}`), threading
+  `with-open`, `doto`, `await`, constructor calls (`ClassName.`),
+  keyword-as-function (`(:key map)`), call, vector literal, map literal (`{}`),
+  set literal (`#{}`), quote, metadata (`^{:key val}`), threading
   (`->`, `->>`, `cond->`, `cond->>`, `some->`, `some->>`, `as->`)
+- Targets: `#lang beagle/clj` (default), `#lang beagle/cljs`, `#lang beagle/js`,
+  `#lang beagle/py` (plumbing only, no emitter yet)
 - Meta: `ns`, `define-mode`, `require`, `declare-extern`, `define-macro`,
   `import`, `unsafe` (top-level AND in expression position)
 - Param syntax: **wrapped only** — `(name : Type)`. Plus `{:keys [a b c]}`
@@ -35,13 +38,15 @@ it as canonical when explaining the language.
   `Symbol`, `Nil`, `Any` — no aliases), user-defined record types,
   function types (variadic with `& T`), parametric (`Vec`, `Map`, `Set`,
   `List`), union (`U`), nullable sugar (`String?` = `(U String Nil)`),
-  polymorphic (`forall`)
+  polymorphic (`forall`), `(Promise T)` (JS async)
 - Type narrowing: flow-sensitive in `if`/`cond`/`when` via `nil?`, `some?`,
   `string?`, `=`, `not` etc. Threads through cond clauses.
 - Keyword field inference: `(:name person)` returns the field type when
   target is a known typed record
 - Macros: safe (gensym-hygienic) / unsafe with `&rest` and `(splice ...)`
-- Stdlib catalog: ~678 Clojure functions + 26 JS interop entries pre-typed; CLJS-EXCLUDE set warns on JVM-only usage
+- Stdlib catalog: split by target — `stdlib-portable.rkt` (256 entries),
+  `stdlib-clj.rkt` (365), `stdlib-cljs.rkt` (75); combined via `stdlib-types.rkt`.
+  CLJS-EXCLUDE set warns on JVM-only usage
 - Cross-file type import: `(require module)` / `(require module :as alias)`
   resolves source at compile time, imports typed defs/defns/externs/records/macros.
   `declare-extern` is only needed for Java interop and non-beagle namespaces.
@@ -75,7 +80,7 @@ it as canonical when explaining the language.
 - Typed REPL: persistent type env, `:type EXPR`, `:sig NAME`, `:env`, compile + emit
 - Differential testing: `beagle-proptest --diff` compares function outputs between
   golden and modified builds, flags behavioral regressions (6143 calls on E8)
-- 466 tests passing
+- 462 tests passing
 - 15 experiments across 3 language tracks (Beagle, Clojure, Python):
   best Beagle config 287s avg with reactive daemon (E13), variance
   collapsed to 59s range; per-bug faster than Python+mypy (8.2s vs 8.5s);
@@ -93,8 +98,13 @@ it as canonical when explaining the language.
 - Multi-arity `defn` with per-arity type checking and union-type call validation
 - Guard-pattern type narrowing: `(when (nil? x) (throw ...))` narrows `x` in subsequent forms
 - Union-to-union type compatibility fix (subset checking)
-- CLJS target: `(define-target cljs)` with JS interop types, JVM-only warnings,
+- CLJS target: `#lang beagle/cljs` with JS interop types, JVM-only warnings,
   catch `:default`, ns without `:import`; Heist app compiles through full pipeline
+- JS target: `#lang beagle/js` — `defn`->`function`, `def`->`const`, `fn`->arrow,
+  `let`->IIFE, `defrecord`->`Object.freeze` factory with `_tag`, `match`->`_tag`
+  checks, `for`->`.map`/`.filter`, `try`/`catch`, `loop`->`while`,
+  `with`->spread; `(await expr)` form, functions containing `await` auto-emit
+  as `async function`
 - Repair compiler: accessor-swap detection (204 accessors, semantic type groups),
   wrong-argument permutation, cross-evidence correlation (blame + semantic + specfix)
 - Property testing: record generators (scalar-erasure-aware), property inference
@@ -104,7 +114,7 @@ it as canonical when explaining the language.
   oracle-output correlation (identifies root cause services and cascade chains)
 - Reactive checking: daemon file watcher (Racket filesystem-change-evt) re-checks on every save (~100ms),
   enriches errors with record field context; Claude Code PostToolUse hook injects
-  diagnostics after every Edit/Write on .rkt files
+  diagnostics after every Edit/Write on .bgl/.rkt files
 - Repair agent pool: abandoned after E14-E15. Agents currently resist
   multi-agent edit delegation in ways that make this an impractical optimization
   target (4 approaches tested, 0 activations)
@@ -112,16 +122,19 @@ it as canonical when explaining the language.
 ## Architecture
 
 ```
-parse → check → emit
+parse → check → emit-dispatch → emit-{clj,js}
 (all expand-time, inside our custom #%module-begin)
 ```
 
 - `lang/reader.rkt` — custom reader preserving `[]` vs `()` via
   `#%brackets` tag. Intercepts `{}` (map literals), `#{}` (set literals),
   `#"..."` (regex) via `MAP-TAG`/`SET-TAG`/`#%regex`.
+- `lang/reader-impl.rkt` — shared reader logic for all `#lang beagle/*` variants.
 - `private/types.rkt` — type AST, parser, compatibility checker.
   `MAP-TAG`/`SET-TAG` are well-known symbols (`#%map`/`#%set`), not gensyms.
-- `private/stdlib-types.rkt` — pre-typed Clojure stdlib catalog (~678 functions).
+- `private/stdlib-types.rkt` — combined stdlib catalog; delegates to
+  `private/stdlib-portable.rkt` (256 entries), `private/stdlib-clj.rkt` (365),
+  `private/stdlib-cljs.rkt` (75).
 - `private/macros.rkt` — macro registry, naive substitution, depth-capped
   recursive expansion, safe/unsafe boundary.
 - `private/parse.rkt` — source → AST. Two passes: meta-form collection
@@ -130,7 +143,10 @@ parse → check → emit
 - `private/check.rkt` — best-effort type checking against annotations and
   the built-in env. Record field registry for keyword-access type inference.
   Skipped in dynamic mode.
-- `private/emit.rkt` — AST → Clojure source string.
+- `private/emit-dispatch.rkt` — dispatches to `emit-clj.rkt` or `emit-js.rkt`
+  based on `(program-target prog)`.
+- `private/emit-clj.rkt` — AST → Clojure/ClojureScript source string (was `emit.rkt`).
+- `private/emit-js.rkt` — AST → JavaScript source string.
 - `private/expand-tool.rkt` — backend for `bin/beagle-expand`.
 - `private/query.rkt` — type-system query engine for `beagle-sig`,
   `beagle-fields`, `beagle-callers`, `beagle-provides`, `beagle-impact`.
@@ -148,7 +164,7 @@ parse → check → emit
 
 1. **Struct** in `parse.rkt` — new AST node
 2. **Parse case** in `parse-list-form` — pattern-match the source
-3. **Emit case** in `emit-expr` or `emit-form` — produce Clojure
+3. **Emit case** in `emit-clj.rkt` AND `emit-js.rkt` — produce target source
 4. **Infer case** in `infer-expr` — return type (or `ANY`)
 5. **Lint traversal** in `lint.rkt` — `check-shadow` and `collect-symbols`
 6. **Provide** the struct in parse.rkt's provide list
@@ -157,11 +173,11 @@ parse → check → emit
 ## Tools
 
 - `bin/beagle` — unified CLI: `beagle check`, `beagle build`, `beagle fix`, `beagle sig`, `beagle lsp`, `beagle repl`, `beagle mcp`, `beagle init`
-- `bin/beagle-build SOURCE.rkt [OUT.clj]` — single-file compile
-- `bin/beagle-build-all FILE-OR-DIR... [--out DIR] [--warn]` — batch compile (9x vs sequential); `--warn` emits despite type errors
-- `bin/beagle-check SOURCE.rkt` — type-check without emitting Clojure
+- `bin/beagle-build SOURCE.bgl [OUT]` — single-file compile; auto-detects target from `#lang` line, outputs `.clj`/`.cljs`/`.js`/`.py` accordingly (`.rkt` sources accepted)
+- `bin/beagle-build-all FILE-OR-DIR... [--out DIR] [--warn]` — batch compile (9x vs sequential); `--warn` emits despite type errors; auto-detects target per file
+- `bin/beagle-check SOURCE.bgl` — type-check without emitting (`.rkt` sources accepted)
 - `bin/beagle-check-all FILE-OR-DIR...` — batch type-check (10x vs sequential) + semantic suspicions
-- `bin/beagle-expand SOURCE.rkt` — print source after macro expansion
+- `bin/beagle-expand SOURCE.bgl` — print source after macro expansion (`.rkt` sources accepted)
 - `bin/beagle-blame BUILD-DIR VERIFY-SCRIPT` — run oracle with blame analysis (ratio → likely bug type)
 - `bin/beagle-specfix BUILD-DIR VERIFY-SCRIPT` — oracle-guided speculative fix (9 strategies incl. accessor swap, arg permutation)
 - `bin/beagle-trace BUILD-DIR VERIFY-SCRIPT [--focus FN]` — instrumented tracing with call-graph walk (arithmetic ops + function call/return chain, cross-module)
@@ -171,7 +187,7 @@ parse → check → emit
 - `bin/beagle-oracle GOLDEN-DIR [--out FILE] [--diff MODIFIED-DIR]` — behavioral oracle synthesis (golden code IS the test spec)
 - `bin/beagle-lsp` — LSP server (stdio transport) for editor integration
 - `bin/beagle-repl` — interactive REPL with type checking
-- `bin/beagle-smap extract FILE.cljs` / `compose JS.map MAPPING.json` — source map: .rkt → .cljs → .js
+- `bin/beagle-smap extract FILE.cljs` / `compose JS.map MAPPING.json` — source map: .bgl/.rkt → .cljs → .js
 - `bin/beagle-muttest BUILD-DIR VERIFY [--limit N]` — mutation testing (13 operators, reports kill rate + oracle gaps)
 - `bin/beagle-dtrace instrument BUILD-DIR [--services s1,s2] [--out DIR]` — auto-instrument cross-service calls with span creation
 - `bin/beagle-dtrace collect [--port N] [--dir DIR]` — TCP collector daemon for span aggregation
@@ -180,7 +196,7 @@ parse → check → emit
 - `bin/beagle-dtrace graph TRACE-DIR` — service dependency graph with impact analysis
 - `bin/beagle-dtrace cascade TRACE-DIR [--trace-id ID]` — root cause analysis across service boundaries
 - `bin/beagle-daemon start|stop|status|query CMD` — persistent query server (45× faster than cold tools)
-- `bin/beagle-daemon start --watch DIR` — start with file watcher; re-checks .rkt files on save, caches enriched results
+- `bin/beagle-daemon start --watch DIR` — start with file watcher; re-checks .bgl/.rkt files on save, caches enriched results
 - `bin/beagle-mcp` — MCP server exposing type system as tools (sig, fields, callers, provides, impact, check, check-enriched, build, expand); delegates to daemon when running
 - `bin/beagle-verify-enriched BUILD-DIR VERIFY` — run verify + auto-diagnose failures (trace, cascade, pattern analysis)
 - `bin/beagle-sig FN-NAME FILE-OR-DIR...` — print a function's typed signature (daemon-accelerated)
@@ -205,24 +221,24 @@ the type system directly:
 
 ```bash
 # "What does inv/can-fulfill? expect?"
-bin/beagle-sig can-fulfill? path/to/inventory.rkt
+bin/beagle-sig can-fulfill? path/to/inventory.bgl
 # → can-fulfill? : [(Vec StockLevel) Long Long -> Boolean]
 
 # "What fields does an Invoice have?"
-bin/beagle-fields Invoice path/to/billing.rkt
+bin/beagle-fields Invoice path/to/billing.bgl
 # → Invoice
 #   id : Long          accessor: invoice-id
 #   order-id : Long    accessor: invoice-order-id
 #   ...
 
 # "What does the billing module export?"
-bin/beagle-provides path/to/billing.rkt
+bin/beagle-provides path/to/billing.bgl
 # → records: Invoice, Payment, CreditNote ...
 #   functions: create-invoice : [...], invoice-balance : [...] ...
 
 # "Who calls create-invoice and with what arity?"
 bin/beagle-callers create-invoice path/to/
-# → (create-invoice id order customer ...)  in audit-order (audit.rkt)
+# → (create-invoice id order customer ...)  in audit-order (audit.bgl)
 
 # "If I change create-invoice's signature, what breaks?"
 bin/beagle-impact create-invoice path/to/
@@ -262,6 +278,7 @@ mode skips lint (types are optional there by definition).
 | Safe / unsafe macro distinction | controlled boundary for "what the checker re-validates" |
 | Macro expansion is inspectable | `beagle-expand` lets the LLM audit its own macros |
 | Strict mode default | dynamic is escape-hatch for humans; AI should stay strict |
+| Multi-target IR, not Clojure transpiler | same typed AST emits to Clojure, CLJS, JS (Python plumbed); target from `#lang` |
 | Subset-of-Clojure, not full mimic | take Lisp universals + Clojure's good ideas; develop own for typed semantics |
 | `:` as only annotation marker | `:-` removed; no measured benefit in 6-variant benchmark |
 | Wrapped params only | inline removed; no measured benefit, less unambiguous parse |
@@ -269,7 +286,7 @@ mode skips lint (types are optional there by definition).
 
 ### Cargo-cult — deliberately NOT added
 
-Clojure idioms whose cost > benefit for beagle's goals:
+Host-language idioms whose cost > benefit for beagle's goals:
 
 - **`#(...)` anonymous fn shorthand** — alternate idiom for `fn`, more
   LLM confusion than value
