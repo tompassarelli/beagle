@@ -1,21 +1,35 @@
 # beagle
 
-A language where the compiler does the debugging.
+A language where mechanical bugs compile into patches.
 
-Beagle is an agent-native language: a typed authoring layer targeting
-Clojure/ClojureScript, designed to minimize agent repair distance.
-Racket frontend, custom `#lang`, static type checking — emits plain
-`.clj` / `.cljs` for runtime.
+Beagle is an agent-native typed authoring layer for
+Clojure/ClojureScript: it gives coding agents a compiler, repair queue,
+and structural query tools, then emits plain `.clj` / `.cljs`.
 
-Mechanical bugs should not require cognition. They should compile into
-patches. Types catch shape errors at compile time. A repair compiler
-turns runtime failures into ranked, machine-actionable fix candidates.
-Zero reasoning tokens on mechanical fixes; the agent's budget is spent
-entirely on semantic bugs that require judgment.
+The thesis is simple: mechanical bugs should not require cognition.
+Shape errors should be caught by types. Runtime failures should become
+ranked, machine-actionable repair candidates. The goal is to spend zero
+reasoning tokens on mechanical fixes — the agent's budget goes to
+semantic bugs that actually require judgment.
+
+```
+source.rkt → parse → check → emit → output.clj
+                       ↑
+             repair compiler
+                       ↑
+                 daemon + AST cache
+```
+
+The runtime target stays normal Clojure. If you stop using Beagle, you
+keep the emitted `.clj` / `.cljs`.
 
 ## Experiments
 
-15 experiments, 3 language tracks (Beagle, Clojure, Python), same tasks.
+The point was not to prove Beagle is "smarter" than Clojure or Python.
+The point was to measure repair distance: how much work an agent has to
+do after a bug is introduced.
+
+15 experiments, 3 language tracks, same tasks:
 
 | | Beagle | Clojure | Python + mypy |
 |---|---|---|---|
@@ -23,7 +37,7 @@ entirely on semantic bugs that require judgment.
 | Best wall time | 287s | 365s | 255s |
 | Per-bug time | 8.2s | 10.4s | 8.5s |
 
-The correctness gap is a static-typing result, not a beagle-specific
+The correctness gap is a static-typing result, not a Beagle-specific
 one. Beagle's advantage over Python is workflow: reactive daemon,
 structured repair queue, per-bug speed.
 
@@ -50,19 +64,6 @@ structured repair queue, per-bug speed.
       0))
 ```
 
-## Architecture
-
-```
-source.rkt → parse → check → emit → output.clj
-                       ↑
-             repair compiler (blame, trace, specfix, cascade)
-                       ↑
-                 daemon (persistent AST cache, 45× query speedup)
-```
-
-Plain `#lang racket/base` throughout — beagle implements its own type
-system rather than using Typed Racket.
-
 ## Setup
 
 Requires [Racket](https://racket-lang.org/) and
@@ -70,7 +71,7 @@ Requires [Racket](https://racket-lang.org/) and
 
 ```
 raco pkg install --link --auto /path/to/beagle
-raco test tests/   # 466 tests
+raco test tests/
 ```
 
 ## Agent integration
