@@ -219,6 +219,19 @@
 (struct nix-pipe           (direction lhs rhs)                #:transparent)
 (struct nix-impl           (lhs rhs)                          #:transparent)
 
+;; --- SQL-specific AST nodes (valid only under #lang beagle/sql) -----------
+(struct sql-table        (name columns)                       #:transparent)
+(struct sql-column       (name type constraints)              #:transparent)
+(struct sql-select       (columns from-clause joins where-clause group-by having order-by limit offset) #:transparent)
+(struct sql-insert       (table columns values)              #:transparent)
+(struct sql-update       (table set-pairs where-clause)      #:transparent)
+(struct sql-delete       (table where-clause)                #:transparent)
+(struct sql-join         (type table alias condition)          #:transparent)
+(struct sql-alias        (expr alias-name)                    #:transparent)
+(struct sql-column-ref   (table-or-alias column)              #:transparent)
+(struct sql-aggregate    (fn-name expr alias)                 #:transparent)
+(struct sql-order-spec   (expr direction)                     #:transparent)
+
 (struct param       (name type)                             #:transparent)
 (struct map-destructure (keys as-name)                      #:transparent)
 (struct seq-destructure (names rest-name)                    #:transparent)
@@ -319,6 +332,7 @@
 
 (define (lang-line->target lang-line)
   (cond
+    [(regexp-match? #rx"beagle/sql" lang-line) 'sql]
     [(regexp-match? #rx"beagle/nix" lang-line) 'nix]
     [(regexp-match? #rx"beagle/js"  lang-line) 'js]
     [(regexp-match? #rx"beagle/py"  lang-line) 'py]
@@ -474,8 +488,8 @@
 
       [(list 'define-target (? symbol? t))
        (when target-set? (error 'beagle "duplicate define-target"))
-       (unless (memq t '(clj cljs js nix py))
-         (error 'beagle "unknown target: ~a (expected clj, cljs, js, nix, or py)" t))
+       (unless (memq t '(clj cljs js nix py sql))
+         (error 'beagle "unknown target: ~a (expected clj, cljs, js, nix, py, or sql)" t))
        (set! target t)
        (set! target-set? #t)]
 
@@ -988,6 +1002,33 @@
 
     ;; --- end Nix-specific forms ----------------------------------------------
 
+    ;; --- SQL-specific forms ---------------------------------------------------
+
+    [(list 'deftable (? symbol? name) fields-form)
+     (sql-table name (parse-sql-columns (or (stx-ref subs 2) fields-form)))]
+
+    [(cons 'select rest)
+     (parse-sql-select (or (stx-tail subs 1) rest) subs)]
+
+    [(list 'insert (? symbol? table) cols-form (cons 'values rows))
+     (define values-subs (and subs (stx-subs (stx-ref subs 3))))
+     (sql-insert table
+                 (parse-sql-column-names (or (stx-ref subs 2) cols-form))
+                 (map (lambda (r) (parse-sql-values-row r))
+                      (or (stx-tail values-subs 1) rows)))]
+
+    [(list 'update (? symbol? table) set-form rest ...)
+     #:when (and (pair? set-form) (eq? (car set-form) 'set))
+     (sql-update table
+                 (parse-sql-set-pairs (or (stx-ref subs 2) set-form))
+                 (parse-sql-where-clause (or (stx-tail subs 3) rest)))]
+
+    [(list 'delete (? symbol? table) rest ...)
+     (sql-delete table
+                 (parse-sql-where-clause (or (stx-tail subs 2) rest)))]
+
+    ;; --- end SQL-specific forms -----------------------------------------------
+
     [(list 'set! target-expr val-expr)
      (set!-form (parse-expr (or (stx-ref subs 1) target-expr))
                 (parse-expr (or (stx-ref subs 2) val-expr)))]
@@ -1244,6 +1285,245 @@
        (define body (bracket-body id))
        (nix-fn-set-formal (car body) (parse-expr (datum->syntax #f (cadr body))))]
       [else (error 'beagle "fn-set formal: expected name or (name default), got ~v" id)])))
+
+;; --- SQL-specific parse helpers --------------------------------------------
+
+(define (sql-dot-ref? sym)
+  ;; Returns #t if sym looks like table.column (has a single dot, not at start/end)
+  (define s (symbol->string sym))
+  (define dot-pos (for/or ([i (in-range (string-length s))])
+                    (and (char=? (string-ref s i) #\.) i)))
+  (and dot-pos (> dot-pos 0) (< dot-pos (- (string-length s) 1))))
+
+(define (parse-sql-column-ref sym)
+  ;; Parse p.id -> (sql-column-ref 'p 'id)
+  (define s (symbol->string sym))
+  (define dot-pos (for/or ([i (in-range (string-length s))])
+                    (and (char=? (string-ref s i) #\.) i)))
+  (sql-column-ref (string->symbol (substring s 0 dot-pos))
+                  (string->symbol (substring s (+ dot-pos 1)))))
+
+(define (parse-sql-columns fields-form)
+  ;; Parse [(id : Int :primary-key) (name : String :not-null) ...]
+  (define items (unwrap-items (->datum fields-form) "deftable column list"))
+  (for/list ([item (in-list items)])
+    (define d (if (syntax? item) (syntax->datum item) item))
+    (define col-items (cond
+                        [(bracketed? d) (bracket-body d)]
+                        [(list? d) d]
+                        [else (error 'beagle "deftable: column must be a list, got ~v" d)]))
+    (when (< (length col-items) 3)
+      (error 'beagle "deftable column requires at least (name : Type), got ~v" col-items))
+    (define col-name (car col-items))
+    (unless (eq? (cadr col-items) ':)
+      (error 'beagle "deftable column ~a: expected : after name" col-name))
+    (define col-type (parse-type (caddr col-items)))
+    (define constraints (cdddr col-items))
+    (sql-column col-name col-type constraints)))
+
+(define (parse-sql-column-names cols-form)
+  ;; Parse [name price stock] -> list of symbols
+  (define d (->datum cols-form))
+  (define items (cond
+                  [(bracketed? d) (bracket-body d)]
+                  [(list? d) d]
+                  [else (error 'beagle "insert: expected column name list, got ~v" d)]))
+  (for/list ([item (in-list items)])
+    (define s (->datum item))
+    (unless (symbol? s)
+      (error 'beagle "insert: column name must be a symbol, got ~v" s))
+    s))
+
+(define (parse-sql-values-row row)
+  ;; Parse ["Widget" 9.99 100] -> list of exprs
+  (define d (->datum row))
+  (define items (cond
+                  [(bracketed? d) (bracket-body d)]
+                  [(list? d) d]
+                  [else (error 'beagle "insert values: expected a row vector, got ~v" d)]))
+  (map (lambda (item) (parse-expr (if (syntax? item) item (datum->syntax #f item)))) items))
+
+(define (parse-sql-set-pairs set-form)
+  ;; Parse (set [price (* price 0.9)] [stock (+ stock 10)]) -> list of (cons symbol expr)
+  (define d (->datum set-form))
+  (define pairs-raw (cdr d)) ; skip 'set
+  (for/list ([pair-raw (in-list pairs-raw)])
+    (define pair-d (->datum pair-raw))
+    (define items (cond
+                    [(bracketed? pair-d) (bracket-body pair-d)]
+                    [(list? pair-d) pair-d]
+                    [else (error 'beagle "update set: expected [col expr] pair, got ~v" pair-d)]))
+    (when (< (length items) 2)
+      (error 'beagle "update set: need [column value], got ~v" items))
+    (cons (car items)
+          (parse-expr (datum->syntax #f (cadr items))))))
+
+(define (parse-sql-where-clause rest-forms)
+  ;; Parse remaining clauses, find (where ...) if present
+  (for/or ([form (in-list rest-forms)])
+    (define d (->datum form))
+    (and (pair? d) (eq? (car d) 'where)
+         (parse-sql-expr (datum->syntax #f (cadr d))))))
+
+(define (parse-sql-expr stx)
+  ;; Parse a SQL expression (where conditions, etc.)
+  (define d (->datum stx))
+  (cond
+    [(and (symbol? d) (sql-dot-ref? d))
+     (parse-sql-column-ref d)]
+    [(symbol? d) d]
+    [(string? d) d]
+    [(number? d) d]
+    [(boolean? d) d]
+    [(eq? d 'nil) 'nil]
+    [(and (pair? d) (memq (car d) '(= <> > < >= <= + - * / and or not like between in)))
+     (call-form (car d) (map (lambda (a) (parse-sql-expr (datum->syntax #f a))) (cdr d)))]
+    [(and (pair? d) (memq (car d) '(count sum avg min max coalesce upper lower trim length)))
+     ;; Aggregate or function call — check for :as alias
+     (define fn-name (car d))
+     (define args-and-alias (cdr d))
+     (define-values (args alias)
+       (let loop ([items args-and-alias] [acc '()])
+         (cond
+           [(null? items) (values (reverse acc) #f)]
+           [(and (pair? (cdr items)) (eq? (->datum (car items)) ':as))
+            (values (reverse acc) (->datum (cadr items)))]
+           [else (loop (cdr items) (cons (car items) acc))])))
+     (sql-aggregate fn-name
+                    (if (null? args) #f (parse-sql-expr (datum->syntax #f (car args))))
+                    alias)]
+    [(pair? d)
+     (call-form (car d) (map (lambda (a) (parse-sql-expr (datum->syntax #f a))) (cdr d)))]
+    [else d]))
+
+(define (parse-sql-select-column col-datum)
+  ;; Parse a single column in a select column list
+  (define d (->datum col-datum))
+  (cond
+    [(and (symbol? d) (sql-dot-ref? d))
+     (parse-sql-column-ref d)]
+    [(symbol? d) d]
+    [(and (pair? d) (memq (car d) '(count sum avg min max coalesce upper lower trim length)))
+     ;; aggregate function with possible :as alias
+     (define fn-name (car d))
+     (define args-and-alias (cdr d))
+     (define-values (args alias)
+       (let loop ([items args-and-alias] [acc '()])
+         (cond
+           [(null? items) (values (reverse acc) #f)]
+           [(and (pair? (cdr items)) (eq? (->datum (car items)) ':as))
+            (values (reverse acc) (->datum (cadr items)))]
+           [else (loop (cdr items) (cons (car items) acc))])))
+     (sql-aggregate fn-name
+                    (if (null? args) #f (parse-sql-expr (datum->syntax #f (car args))))
+                    alias)]
+    [(symbol? d) d]
+    [else (parse-sql-expr (datum->syntax #f d))]))
+
+(define (parse-sql-select rest subs)
+  ;; rest = ((columns-vec) clauses...)
+  ;; Parse: (select [cols...] (from ...) (where ...) ...)
+  (when (null? rest) (error 'beagle "select requires at least a column list"))
+  (define cols-form (car rest))
+  (define cols-d (->datum cols-form))
+  (define col-items (cond
+                      [(bracketed? cols-d) (bracket-body cols-d)]
+                      [(list? cols-d) cols-d]
+                      [else (error 'beagle "select: first argument must be column list, got ~v" cols-d)]))
+  (define columns (map parse-sql-select-column col-items))
+
+  ;; Parse remaining clauses
+  (define clauses (cdr rest))
+  (define from-clause #f)
+  (define joins '())
+  (define where-clause #f)
+  (define group-by #f)
+  (define having #f)
+  (define order-by #f)
+  (define limit-val #f)
+  (define offset-val #f)
+
+  (for ([clause (in-list clauses)])
+    (define cd (->datum clause))
+    (when (pair? cd)
+      (case (car cd)
+        [(from)
+         (define table-name (cadr cd))
+         (define alias (parse-sql-as-alias (cddr cd)))
+         (set! from-clause (if alias (sql-alias table-name alias) table-name))]
+        [(join inner-join)
+         (define join-info (parse-sql-join-clause 'inner (cdr cd)))
+         (set! joins (append joins (list join-info)))]
+        [(left-join)
+         (define join-info (parse-sql-join-clause 'left (cdr cd)))
+         (set! joins (append joins (list join-info)))]
+        [(right-join)
+         (define join-info (parse-sql-join-clause 'right (cdr cd)))
+         (set! joins (append joins (list join-info)))]
+        [(where)
+         (set! where-clause (parse-sql-expr (datum->syntax #f (cadr cd))))]
+        [(group-by)
+         (set! group-by (map (lambda (g)
+                               (define gd (->datum g))
+                               (if (and (symbol? gd) (sql-dot-ref? gd))
+                                 (parse-sql-column-ref gd)
+                                 gd))
+                             (cdr cd)))]
+        [(having)
+         (set! having (parse-sql-expr (datum->syntax #f (cadr cd))))]
+        [(order-by)
+         (set! order-by (parse-sql-order-by (cdr cd)))]
+        [(limit)
+         (set! limit-val (cadr cd))]
+        [(offset)
+         (set! offset-val (cadr cd))])))
+
+  (sql-select columns from-clause joins where-clause group-by having order-by limit-val offset-val))
+
+(define (parse-sql-as-alias rest)
+  ;; Look for :as alias in a list
+  (let loop ([items rest])
+    (cond
+      [(null? items) #f]
+      [(and (pair? (cdr items)) (eq? (->datum (car items)) ':as))
+       (->datum (cadr items))]
+      [else (loop (cdr items))])))
+
+(define (parse-sql-join-clause type args)
+  ;; Parse: table :as alias condition
+  (define table (car args))
+  (define rest-args (cdr args))
+  (define alias (parse-sql-as-alias rest-args))
+  ;; Find the condition (last list form after :as alias is consumed)
+  (define condition
+    (let loop ([items rest-args])
+      (cond
+        [(null? items) #f]
+        [(eq? (->datum (car items)) ':as) (loop (cddr items))]
+        [(pair? (->datum (car items)))
+         (parse-sql-expr (datum->syntax #f (->datum (car items))))]
+        [else (loop (cdr items))])))
+  (sql-join type table alias condition))
+
+(define (parse-sql-order-by items)
+  ;; Parse: col :asc, col :desc, or bare col
+  (let loop ([rest items] [acc '()])
+    (cond
+      [(null? rest) (reverse acc)]
+      [else
+       (define col-d (->datum (car rest)))
+       (define col-expr
+         (if (and (symbol? col-d) (sql-dot-ref? col-d))
+           (parse-sql-column-ref col-d)
+           col-d))
+       (define-values (dir remaining)
+         (if (and (pair? (cdr rest))
+                  (memq (->datum (cadr rest)) '(:asc :desc asc desc)))
+           (values (let ([v (->datum (cadr rest))])
+                     (if (memq v '(:asc asc)) 'asc 'desc))
+                   (cddr rest))
+           (values 'asc (cdr rest))))
+       (loop remaining (cons (sql-order-spec col-expr dir) acc))])))
 
 ;; --- try/catch/finally -----------------------------------------------------
 
@@ -1701,6 +1981,17 @@
  (struct-out nix-fn-set-formal)
  (struct-out nix-pipe)
  (struct-out nix-impl)
+ (struct-out sql-table)
+ (struct-out sql-column)
+ (struct-out sql-select)
+ (struct-out sql-insert)
+ (struct-out sql-update)
+ (struct-out sql-delete)
+ (struct-out sql-join)
+ (struct-out sql-alias)
+ (struct-out sql-column-ref)
+ (struct-out sql-aggregate)
+ (struct-out sql-order-spec)
  parse-program
  DEFAULT-MODE
  DEFAULT-TARGET

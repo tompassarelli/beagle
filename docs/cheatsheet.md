@@ -431,6 +431,64 @@ Emits ES module `import` statements. All beagle cross-module type
 resolution works identically — `require` imports types, records, and
 function signatures for the checker regardless of target.
 
+## SQL target (`#lang beagle/sql`)
+
+File extension: `.bgl`. Use `#lang beagle/sql` or `(define-target sql)`.
+
+### Schema declarations
+
+`deftable` declares a table schema for type checking (no SQL output):
+
+```racket
+(deftable products
+  [(id    : Int    :primary-key)
+   (name  : String :not-null)
+   (price : Float  :not-null)
+   (stock : Int    :default 0)])
+```
+
+### Query forms
+
+```racket
+;; SELECT with clauses
+(select [p.id p.name (count o.id :as order_count)]
+  (from products :as p)
+  (left-join orders :as o (= o.product_id p.id))
+  (where (> p.stock 0))
+  (group-by p.id p.name)
+  (order-by p.name :asc)
+  (limit 10))
+
+;; INSERT
+(insert products [name price stock]
+  (values ["Widget" 9.99 100]
+          ["Gadget" 19.99 50]))
+
+;; UPDATE
+(update products
+  (set [price (* price 0.9)]
+       [stock (+ stock 10)])
+  (where (= category "clearance")))
+
+;; DELETE
+(delete products
+  (where (< total 0)))
+```
+
+### Type checking
+
+- Table existence: `insert`/`update`/`delete` validates table is declared via `deftable`
+- Column existence: column references (`p.id`) validated against declared schema
+- Target gating: SQL forms rejected in non-SQL targets at compile time
+
+### Aggregates
+
+`count`, `sum`, `avg`, `min`, `max` with optional `:as alias`:
+
+```racket
+(select [(count id) (avg price :as avg_price)] (from products))
+```
+
 ## Regex literals
 
 `#"pattern"` — Clojure regex literal. Emits as `#"pattern"` in output.

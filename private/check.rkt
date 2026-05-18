@@ -46,6 +46,32 @@
 ;; Closed union members: union-name -> (listof symbol) of record type names
 (define UNION-MEMBERS (make-hash))
 
+;; SQL table registry: table-name -> (hash column-name -> type)
+(define SQL-TABLES (make-hash))
+
+;; Target-only form gating: AST predicate -> required target symbol
+(define TARGET-ONLY-FORMS
+  (list
+   (cons sql-table?     'sql)
+   (cons sql-select?    'sql)
+   (cons sql-insert?    'sql)
+   (cons sql-update?    'sql)
+   (cons sql-delete?    'sql)
+   (cons nix-inherit?       'nix)
+   (cons nix-inherit-from?  'nix)
+   (cons nix-with?          'nix)
+   (cons nix-rec-attrs?     'nix)
+   (cons nix-assert?        'nix)
+   (cons nix-get-or?        'nix)
+   (cons nix-has-attr?      'nix)
+   (cons nix-search-path?   'nix)
+   (cons nix-interpolated-string? 'nix)
+   (cons nix-multiline-string?    'nix)
+   (cons nix-path?          'nix)
+   (cons nix-fn-set?        'nix)
+   (cons nix-pipe?          'nix)
+   (cons nix-impl?          'nix)))
+
 ;; Expression-level source locations from the parser.
 (define current-check-src-table (make-parameter #f))
 (define current-check-fn-name (make-parameter #f))
@@ -136,12 +162,34 @@
     (hash-clear! RECORD-FIELDS)
     (hash-clear! RECORD-FIELD-ORDER)
     (hash-clear! UNION-MEMBERS)
+    (hash-clear! SQL-TABLES)
     (define env (build-initial-env prog))
     (parameterize ([current-union-members UNION-MEMBERS]
                    [current-check-target (program-target prog)])
       (for ([form (in-list (program-forms prog))])
+        (check-target-gating form)
         (check-form form env)))
     (check-scalar-provenance! prog)))
+
+(define (check-target-gating form)
+  (define target (current-check-target))
+  (for ([entry (in-list TARGET-ONLY-FORMS)])
+    (define pred? (car entry))
+    (define required-target (cdr entry))
+    (when (and (pred? form) (not (eq? target required-target)))
+      (define form-name
+        (cond
+          [(sql-table? form)  "deftable"]
+          [(sql-select? form) "select"]
+          [(sql-insert? form) "insert"]
+          [(sql-update? form) "update"]
+          [(sql-delete? form) "delete"]
+          [else "this form"]))
+      (raise-diag 'target-mismatch
+                  (format "~a is only supported in beagle/~a" form-name required-target)
+                  (hasheq 'form form-name
+                          'required-target (symbol->string required-target)
+                          'actual-target (symbol->string target))))))
 
 ;; --- environment -----------------------------------------------------------
 
@@ -344,6 +392,73 @@
     [(defunion-form _ _) (void)]
     [(defscalar-form _ _ _) (void)]
 
+    ;; SQL forms
+    [(sql-table name columns)
+     ;; Register the table schema for column validation
+     (define col-map (make-hash))
+     (for ([col (in-list columns)])
+       (hash-set! col-map (sql-column-name col) (sql-column-type col)))
+     (hash-set! SQL-TABLES name col-map)]
+
+    [(sql-select columns from-clause joins where-clause group-by having order-by limit offset)
+     ;; Build alias->table mapping for column reference validation
+     (define alias-map (make-hash))
+     (when from-clause
+       (cond
+         [(sql-alias? from-clause)
+          (hash-set! alias-map (sql-alias-alias-name from-clause) (sql-alias-expr from-clause))]
+         [(symbol? from-clause)
+          (hash-set! alias-map from-clause from-clause)]))
+     (for ([j (in-list joins)])
+       (define tbl (sql-join-table j))
+       (define al (or (sql-join-alias j) tbl))
+       (hash-set! alias-map al tbl))
+     ;; Validate column references
+     (for ([col (in-list columns)])
+       (check-sql-column-ref col alias-map))
+     (when where-clause
+       (check-sql-expr-refs where-clause alias-map))
+     (for ([j (in-list joins)])
+       (when (sql-join-condition j)
+         (check-sql-expr-refs (sql-join-condition j) alias-map)))
+     (when having
+       (check-sql-expr-refs having alias-map))]
+
+    [(sql-insert table columns values-list)
+     ;; Validate table exists
+     (unless (hash-has-key? SQL-TABLES table)
+       (raise-diag 'sql-table
+                   (format "insert: unknown table ~a" table)
+                   (hasheq 'table (symbol->string table))))
+     ;; Validate columns exist
+     (define col-map (hash-ref SQL-TABLES table))
+     (for ([col (in-list columns)])
+       (unless (hash-has-key? col-map col)
+         (raise-diag 'sql-column
+                     (format "insert ~a: unknown column ~a" table col)
+                     (hasheq 'table (symbol->string table)
+                             'column (symbol->string col)))))]
+
+    [(sql-update table set-pairs where-clause)
+     (unless (hash-has-key? SQL-TABLES table)
+       (raise-diag 'sql-table
+                   (format "update: unknown table ~a" table)
+                   (hasheq 'table (symbol->string table))))
+     (define col-map (hash-ref SQL-TABLES table))
+     (for ([pair (in-list set-pairs)])
+       (define col-name (car pair))
+       (unless (hash-has-key? col-map col-name)
+         (raise-diag 'sql-column
+                     (format "update ~a: unknown column ~a" table col-name)
+                     (hasheq 'table (symbol->string table)
+                             'column (symbol->string col-name)))))]
+
+    [(sql-delete table where-clause)
+     (unless (hash-has-key? SQL-TABLES table)
+       (raise-diag 'sql-table
+                   (format "delete: unknown table ~a" table)
+                   (hasheq 'table (symbol->string table))))]
+
     [(? with-meta?) (check-form (with-meta-expr form) env)]
 
     [_ (infer-expr form env)]))
@@ -365,6 +480,41 @@
       [else
        (hash-set! out (param-name p) (or (param-type p) ANY))]))
   out)
+
+;; --- SQL validation helpers -------------------------------------------------
+
+(define (check-sql-column-ref col alias-map)
+  ;; Validate a column reference (either sql-column-ref, sql-aggregate, or symbol)
+  (cond
+    [(sql-column-ref? col)
+     (define alias (sql-column-ref-table-or-alias col))
+     (define col-name (sql-column-ref-column col))
+     (when (hash-has-key? alias-map alias)
+       (define table-name (hash-ref alias-map alias))
+       (when (and (symbol? table-name) (hash-has-key? SQL-TABLES table-name))
+         (define col-map (hash-ref SQL-TABLES table-name))
+         (unless (hash-has-key? col-map col-name)
+           (raise-diag 'sql-column
+                       (format "select: table ~a has no column ~a" table-name col-name)
+                       (hasheq 'table (symbol->string table-name)
+                               'column (symbol->string col-name))))))]
+    [(sql-aggregate? col)
+     (when (sql-aggregate-expr col)
+       (check-sql-column-ref (sql-aggregate-expr col) alias-map))]
+    [else (void)]))
+
+(define (check-sql-expr-refs expr alias-map)
+  ;; Walk an expression tree, validate column refs
+  (cond
+    [(sql-column-ref? expr)
+     (check-sql-column-ref expr alias-map)]
+    [(call-form? expr)
+     (for ([a (in-list (call-form-args expr))])
+       (check-sql-expr-refs a alias-map))]
+    [(sql-aggregate? expr)
+     (when (sql-aggregate-expr expr)
+       (check-sql-expr-refs (sql-aggregate-expr expr) alias-map))]
+    [else (void)]))
 
 (define (body-diverges? body)
   (and (pair? body)
