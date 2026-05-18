@@ -13,7 +13,7 @@ turns runtime failures into ranked, machine-actionable fix candidates.
 Zero reasoning tokens on mechanical fixes; the agent's budget is spent
 entirely on semantic bugs that require judgment.
 
-## Evidence
+## Experiments
 
 15 experiments, 3 language tracks (Beagle, Clojure, Python), same tasks.
 
