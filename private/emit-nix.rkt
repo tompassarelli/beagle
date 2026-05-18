@@ -62,7 +62,7 @@
     (cond
       [(or (def-form? f) (defn-form? f) (defn-multi? f)
            (defonce-form? f) (record-form? f) (defenum-form? f)
-           (defscalar-form? f))
+           (defscalar-form? f) (nix-inherit? f) (nix-inherit-from? f))
        (set! defs (cons f defs))]
       [else
        (set! body-exprs (cons f body-exprs))]))
@@ -169,6 +169,21 @@
      ;; Scalars are just aliases in Nix
      (format "~a# scalar ~a (validated at compile time)" ind
              (mangle-name (defscalar-form-name f)))]
+
+    [(nix-inherit? f)
+     (format "~ainherit ~a;"
+             ind
+             (string-join (map (lambda (n) (mangle-name n))
+                               (nix-inherit-names f))
+                          " "))]
+
+    [(nix-inherit-from? f)
+     (format "~ainherit (~a) ~a;"
+             ind
+             (emit-expr (nix-inherit-from-ns-expr f) depth)
+             (string-join (map (lambda (n) (mangle-name n))
+                               (nix-inherit-from-names f))
+                          " "))]
 
     [else (format "~a# unsupported form: ~v" ind f)]))
 
@@ -353,6 +368,74 @@
                      (mangle-name (if-let-form-name e))
                      (emit-body (if-let-form-then-body e) depth))
              (emit-body (if-let-form-else-body e) depth))]
+
+    ;; --- Nix-specific forms --------------------------------------------------
+
+    [(nix-inherit? e)
+     (format "inherit ~a;"
+             (string-join (map (lambda (n) (mangle-name n))
+                               (nix-inherit-names e))
+                          " "))]
+
+    [(nix-inherit-from? e)
+     (format "inherit (~a) ~a;"
+             (emit-expr (nix-inherit-from-ns-expr e) depth)
+             (string-join (map (lambda (n) (mangle-name n))
+                               (nix-inherit-from-names e))
+                          " "))]
+
+    [(nix-with? e)
+     (format "with ~a; ~a"
+             (emit-expr (nix-with-ns-expr e) depth)
+             (emit-expr (nix-with-body e) depth))]
+
+    [(nix-rec-attrs? e)
+     (emit-nix-rec-attrs (nix-rec-attrs-pairs e) depth)]
+
+    [(nix-assert? e)
+     (format "assert ~a; ~a"
+             (emit-expr (nix-assert-cond-expr e) depth)
+             (emit-expr (nix-assert-body e) depth))]
+
+    [(nix-get-or? e)
+     (format "~a.~a or ~a"
+             (emit-expr (nix-get-or-base-expr e) depth)
+             (nix-get-or-path e)
+             (emit-expr (nix-get-or-default e) depth))]
+
+    [(nix-has-attr? e)
+     (format "~a ? ~a"
+             (emit-expr (nix-has-attr-base-expr e) depth)
+             (nix-has-attr-path e))]
+
+    [(nix-search-path? e)
+     (format "<~a>" (nix-search-path-name e))]
+
+    [(nix-interpolated-string? e)
+     (emit-nix-interp-string (nix-interpolated-string-parts e) depth)]
+
+    [(nix-multiline-string? e)
+     (emit-nix-multiline-string (nix-multiline-string-lines e) depth)]
+
+    [(nix-path? e)
+     (nix-path-path-string e)]
+
+    [(nix-fn-set? e)
+     (emit-nix-fn-set e depth)]
+
+    [(nix-pipe? e)
+     (define op (if (eq? (nix-pipe-direction e) 'to) "|>" "<|"))
+     (format "(~a ~a ~a)"
+             (emit-expr (nix-pipe-lhs e) depth)
+             op
+             (emit-expr (nix-pipe-rhs e) depth))]
+
+    [(nix-impl? e)
+     (format "(~a -> ~a)"
+             (emit-expr (nix-impl-lhs e) depth)
+             (emit-expr (nix-impl-rhs e) depth))]
+
+    ;; --- end Nix-specific forms ----------------------------------------------
 
     [else (format "null /* unsupported: ~v */" e)]))
 
@@ -762,6 +845,63 @@
       (string-join binds "\n") "\n"
       (indent depth) "in\n"
       (indent depth) (emit-expr last-expr depth))]))
+
+;; --- Nix-specific form helpers ----------------------------------------------
+
+(define (emit-nix-rec-attrs pairs depth)
+  (define ind (indent (+ depth 1)))
+  (define entries
+    (for/list ([pair (in-list pairs)])
+      (define key (car pair))
+      (define val (cdr pair))
+      (format "~a~a = ~a;" ind (mangle-name key) (emit-expr val (+ depth 1)))))
+  (string-append
+   "rec {\n"
+   (string-join entries "\n")
+   "\n" (indent depth) "}"))
+
+(define (emit-nix-interp-string parts depth)
+  (define chunks
+    (for/list ([part (in-list parts)])
+      (cond
+        [(string? part) (escape-nix-string part)]
+        [else (format "${~a}" (emit-expr part depth))])))
+  (format "\"~a\"" (string-join chunks "")))
+
+(define (emit-nix-multiline-string lines depth)
+  (define ind (indent (+ depth 1)))
+  (define line-strs
+    (for/list ([line (in-list lines)])
+      (cond
+        [(string? line) (string-append ind line)]
+        [else (string-append ind "${" (emit-expr line depth) "}")])))
+  (string-append
+   "''\n"
+   (string-join line-strs "\n")
+   "\n" (indent depth) "''"))
+
+(define (emit-nix-fn-set e depth)
+  (define formals (nix-fn-set-formals e))
+  (define rest? (nix-fn-set-rest? e))
+  (define at-name (nix-fn-set-at-name e))
+  (define body (nix-fn-set-body e))
+  (define formal-strs
+    (for/list ([f (in-list formals)])
+      (define name (mangle-name (nix-fn-set-formal-name f)))
+      (define default (nix-fn-set-formal-default f))
+      (if default
+        (format "~a ? ~a" name (emit-expr default depth))
+        name)))
+  (define all-formals
+    (if rest?
+      (append formal-strs (list "..."))
+      formal-strs))
+  (define set-str (string-join all-formals ", "))
+  (define pattern
+    (if at-name
+      (format "{ ~a } @ ~a" set-str (mangle-name at-name))
+      (format "{ ~a }" set-str)))
+  (format "~a: ~a" pattern (emit-expr body depth)))
 
 ;; --- registration ----------------------------------------------------------
 

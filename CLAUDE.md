@@ -2,7 +2,7 @@
 
 A multi-target authoring IR. Racket frontend with custom `#lang`, macros
 (safe/unsafe boundaries), static type checking; emits Clojure, ClojureScript,
-or JavaScript source for runtime. `.bgl` is the primary file extension
+JavaScript, or Nix source for runtime. `.bgl` is the primary file extension
 (`.rkt` still accepted for backward compatibility).
 
 **LLM authoring is a first-class concern.** Rich types, explicit forms, low
@@ -15,7 +15,7 @@ it as canonical when explaining the language.
 
 ## Status
 
-`#lang beagle` v0.8.0 — multi-target (Clojure/CLJS/JS/Python), MCP server, Claude Code integration, Scribble docs:
+`#lang beagle` v0.8.0 — multi-target (Clojure/CLJS/JS/Nix/Python), MCP server, Claude Code integration, Scribble docs:
 
 - Forms: `def`, `defn` (single + multi-arity), `fn`, `let`, `if`, `cond`,
   `when`, `when-not`, `when-let`, `if-let`, `if-not`, `when-some`, `if-some`,
@@ -28,7 +28,7 @@ it as canonical when explaining the language.
   set literal (`#{}`), quote, metadata (`^{:key val}`), threading
   (`->`, `->>`, `cond->`, `cond->>`, `some->`, `some->>`, `as->`)
 - Targets: `#lang beagle/clj` (default), `#lang beagle/cljs`, `#lang beagle/js`,
-  `#lang beagle/py` (plumbing only, no emitter yet)
+  `#lang beagle/nix`, `#lang beagle/py` (plumbing only, no emitter yet)
 - Meta: `ns`, `define-mode`, `require`, `declare-extern`, `define-macro`,
   `import`, `unsafe` (top-level AND in expression position)
 - Param syntax: **wrapped only** — `(name : Type)`. Plus `{:keys [a b c]}`
@@ -45,7 +45,8 @@ it as canonical when explaining the language.
   target is a known typed record
 - Macros: safe (gensym-hygienic) / unsafe with `&rest` and `(splice ...)`
 - Stdlib catalog: split by target — `stdlib-portable.rkt` (269 entries),
-  `stdlib-clj.rkt` (352), `stdlib-cljs.rkt` (75), `stdlib-js.rkt` (38 JS-native);
+  `stdlib-clj.rkt` (352), `stdlib-cljs.rkt` (75), `stdlib-js.rkt` (38 JS-native),
+  `stdlib-nix.rkt` (120: builtins/lib/lib.types);
   combined via `stdlib-types.rkt`. CLJS-EXCLUDE warns on JVM-only usage;
   JS-NO-EMIT warns on portable fns with no JS translation (139 symbols)
 - Cross-file type import: `(require module)` / `(require module :as alias)`
@@ -81,7 +82,7 @@ it as canonical when explaining the language.
 - Typed REPL: persistent type env, `:type EXPR`, `:sig NAME`, `:env`, compile + emit
 - Differential testing: `beagle-proptest --diff` compares function outputs between
   golden and modified builds, flags behavioral regressions (6143 calls on E8)
-- 612 tests passing
+- 655 tests passing
 - 15 experiments across 3 language tracks (Beagle, Clojure, Python):
   best Beagle config 287s avg with reactive daemon (E13), variance
   collapsed to 59s range; per-bug faster than Python+mypy (8.2s vs 8.5s);
@@ -115,6 +116,18 @@ it as canonical when explaining the language.
   (binding-aware: user defs shadow stdlib); JS-NO-EMIT safety net (139 unsupported
   symbols warn at compile time); `silent fallback: 0` verified;
   72 behavioral tests (compile→Bun execution), 110 string-match tests
+- Nix target: `#lang beagle/nix` — `defn`->curried functions, `def`->`let` bindings,
+  `defrecord`->`mkType` constructor + accessors, map literals->attrsets,
+  vectors->Nix lists, `let`->`let/in`, `if`->`if/then/else`, `cond`->nested if,
+  `match`->`_tag` dispatch, `for`->`builtins.map`/`builtins.filter`,
+  `loop`/`recur`->recursive let, `with`->attrset merge; `builtins/*` and `lib/*`
+  call convention (`/`->`.` in emitted names); stdlib-nix (120 typed entries:
+  ~60 builtins, ~40 lib, ~15 lib.types); full Nisp-form parity: `fn-set`/
+  `fn-set-rest`/`fn-set@` (attrset-pattern lambdas), `inh`/`inh-from` (inherit),
+  `with-do` (scope injection), `s` (string interpolation), `ms` (multiline strings),
+  `p` (path literals), `spath` (search paths), `rec-att` (recursive attrsets),
+  `assert-do`, `get-or` (select with default), `has` (has-attr), `pipe-to`/
+  `pipe-from`, `impl` (implication); 42 emit tests
 - Repair compiler: accessor-swap detection (204 accessors, semantic type groups),
   wrong-argument permutation, cross-evidence correlation (blame + semantic + specfix)
 - Property testing: record generators (scalar-erasure-aware), property inference
@@ -153,16 +166,21 @@ parse → check → emit-dispatch → emit-{clj,js}
 - `private/check.rkt` — best-effort type checking against annotations and
   the built-in env. Record field registry for keyword-access type inference.
   Skipped in dynamic mode.
-- `private/emit-dispatch.rkt` — dispatches to `emit-clj.rkt` or `emit-js.rkt`
-  based on `(program-target prog)`.
+- `private/emit-dispatch.rkt` — dispatches to `emit-clj.rkt`, `emit-js.rkt`, or
+  `emit-nix.rkt` based on `(program-target prog)`.
 - `private/emit-clj.rkt` — AST → Clojure/ClojureScript source string (was `emit.rkt`).
 - `private/emit-js.rkt` — AST → JavaScript source string.
+- `private/emit-nix.rkt` — AST → Nix source string (curried fns, attrsets, let/in).
 - `private/js-capabilities.rkt` — JS capability sets (JS-TRANSLATED, JS-VALUE-WRAPPERS,
   JS-RUNTIME-HELPERS). Imported by both emit-js and stdlib-js — no circular deps.
 - `private/stdlib-js.rkt` — JS-specific: STDLIB-JS (38 JS-native type declarations),
   JS-NO-EMIT (computed from STDLIB-PORTABLE minus JS-TRANSLATED).
+- `private/stdlib-nix.rkt` — Nix-specific: STDLIB-NIX (120 typed entries for
+  builtins.*, lib.*, lib.types.*).
 - `lib/beagle/core.js` — JS runtime helpers (12 finite functions: range, remove,
   mapcat, etc.). Auto-imported when referenced.
+- `nix/main.rkt` — Nix target module (`#lang beagle/nix` → `define-target nix`).
+- `nix/lang/reader.rkt` — reader hook for `#lang beagle/nix`.
 - `private/expand-tool.rkt` — backend for `bin/beagle-expand`.
 - `private/query.rkt` — type-system query engine for `beagle-sig`,
   `beagle-fields`, `beagle-callers`, `beagle-provides`, `beagle-impact`.
@@ -295,7 +313,7 @@ mode skips lint (types are optional there by definition).
 | Safe / unsafe macro distinction | controlled boundary for "what the checker re-validates" |
 | Macro expansion is inspectable | `beagle-expand` lets the LLM audit its own macros |
 | Strict mode default | dynamic is escape-hatch for humans; AI should stay strict |
-| Multi-target IR, not Clojure transpiler | same typed AST emits to Clojure, CLJS, JS (Python plumbed); target from `#lang` |
+| Multi-target IR, not Clojure transpiler | same typed AST emits to Clojure, CLJS, JS, Nix (Python plumbed); target from `#lang` |
 | Subset-of-Clojure, not full mimic | take Lisp universals + Clojure's good ideas; develop own for typed semantics |
 | `:` as only annotation marker | `:-` removed; no measured benefit in 6-variant benchmark |
 | Wrapped params only | inline removed; no measured benefit, less unambiguous parse |

@@ -202,6 +202,23 @@
 (struct letfn-form   (fns body)                              #:transparent)
 (struct letfn-fn     (name params rest-param return-type body) #:transparent)
 
+;; --- Nix-specific AST nodes (valid only under #lang beagle/nix) -----------
+(struct nix-inherit        (names)                            #:transparent)
+(struct nix-inherit-from   (ns-expr names)                    #:transparent)
+(struct nix-with           (ns-expr body)                     #:transparent)
+(struct nix-rec-attrs      (pairs)                            #:transparent)
+(struct nix-assert         (cond-expr body)                   #:transparent)
+(struct nix-get-or         (base-expr path default)           #:transparent)
+(struct nix-has-attr       (base-expr path)                   #:transparent)
+(struct nix-search-path    (name)                             #:transparent)
+(struct nix-interpolated-string (parts)                       #:transparent)
+(struct nix-multiline-string (lines)                          #:transparent)
+(struct nix-path           (path-string)                      #:transparent)
+(struct nix-fn-set         (formals rest? at-name body)       #:transparent)
+(struct nix-fn-set-formal  (name default)                     #:transparent)
+(struct nix-pipe           (direction lhs rhs)                #:transparent)
+(struct nix-impl           (lhs rhs)                          #:transparent)
+
 (struct param       (name type)                             #:transparent)
 (struct map-destructure (keys as-name)                      #:transparent)
 (struct seq-destructure (names rest-name)                    #:transparent)
@@ -874,6 +891,103 @@
     [(list 'await inner)
      (await-form (parse-expr (or (stx-ref subs 1) inner)))]
 
+    ;; --- Nix-specific forms --------------------------------------------------
+
+    [(list 'inh names ...)
+     (nix-inherit (map (lambda (n)
+                         (define d (->datum n))
+                         (if (symbol? d) d (error 'beagle "inh: expected symbol, got ~v" d)))
+                       (or (stx-tail subs 1) names)))]
+
+    [(list 'inh-from ns-expr names ...)
+     (nix-inherit-from (parse-expr (or (stx-ref subs 1) ns-expr))
+                       (map (lambda (n)
+                              (define d (->datum n))
+                              (if (symbol? d) d (error 'beagle "inh-from: expected symbol, got ~v" d)))
+                            (or (stx-tail subs 2) names)))]
+
+    [(list 'with-do ns-expr body-expr)
+     (nix-with (parse-expr (or (stx-ref subs 1) ns-expr))
+               (parse-expr (or (stx-ref subs 2) body-expr)))]
+
+    [(list 'rec-att pairs ...)
+     (nix-rec-attrs (parse-nix-rec-pairs (or (stx-tail subs 1) pairs)))]
+
+    [(list 'assert-do cond-expr body-expr)
+     (nix-assert (parse-expr (or (stx-ref subs 1) cond-expr))
+                 (parse-expr (or (stx-ref subs 2) body-expr)))]
+
+    [(list 'get-or base path-expr default-expr)
+     (nix-get-or (parse-expr (or (stx-ref subs 1) base))
+                 (let ([d (->datum (or (stx-ref subs 2) path-expr))])
+                   (if (symbol? d) (symbol->string d) (format "~a" d)))
+                 (parse-expr (or (stx-ref subs 3) default-expr)))]
+
+    [(list 'has base path-expr)
+     (nix-has-attr (parse-expr (or (stx-ref subs 1) base))
+                   (let ([d (->datum (or (stx-ref subs 2) path-expr))])
+                     (if (symbol? d) (symbol->string d) (format "~a" d))))]
+
+    [(list 'spath name-expr)
+     (define d (->datum (or (stx-ref subs 1) name-expr)))
+     (nix-search-path (cond
+                        [(symbol? d) (symbol->string d)]
+                        [(string? d) d]
+                        [else (error 'beagle "spath: expected symbol or string, got ~v" d)]))]
+
+    [(cons 's parts)
+     (nix-interpolated-string
+      (map (lambda (part)
+             (define d (->datum part))
+             (if (string? d) d (parse-expr part)))
+           (or (stx-tail subs 1) (cdr d))))]
+
+    [(list 'ms lines ...)
+     (nix-multiline-string
+      (map (lambda (line)
+             (define d (->datum line))
+             (if (string? d) d (parse-expr line)))
+           (or (stx-tail subs 1) lines)))]
+
+    [(list 'p path-str)
+     (define d (->datum (or (stx-ref subs 1) path-str)))
+     (nix-path (cond
+                 [(string? d) d]
+                 [(symbol? d) (symbol->string d)]
+                 [else (error 'beagle "p: expected string or symbol, got ~v" d)]))]
+
+    [(list 'fn-set formals body-expr)
+     (nix-fn-set (parse-nix-fn-set-formals (or (stx-ref subs 1) formals))
+                 #f #f
+                 (parse-expr (or (stx-ref subs 2) body-expr)))]
+
+    [(list 'fn-set-rest formals body-expr)
+     (nix-fn-set (parse-nix-fn-set-formals (or (stx-ref subs 1) formals))
+                 #t #f
+                 (parse-expr (or (stx-ref subs 2) body-expr)))]
+
+    [(list 'fn-set@ at-name formals body-expr)
+     (define at (->datum (or (stx-ref subs 1) at-name)))
+     (nix-fn-set (parse-nix-fn-set-formals (or (stx-ref subs 2) formals))
+                 #f at
+                 (parse-expr (or (stx-ref subs 3) body-expr)))]
+
+    [(list 'pipe-to lhs rhs)
+     (nix-pipe 'to
+               (parse-expr (or (stx-ref subs 1) lhs))
+               (parse-expr (or (stx-ref subs 2) rhs)))]
+
+    [(list 'pipe-from lhs rhs)
+     (nix-pipe 'from
+               (parse-expr (or (stx-ref subs 1) lhs))
+               (parse-expr (or (stx-ref subs 2) rhs)))]
+
+    [(list 'impl lhs rhs)
+     (nix-impl (parse-expr (or (stx-ref subs 1) lhs))
+               (parse-expr (or (stx-ref subs 2) rhs)))]
+
+    ;; --- end Nix-specific forms ----------------------------------------------
+
     [(list 'set! target-expr val-expr)
      (set!-form (parse-expr (or (stx-ref subs 1) target-expr))
                 (parse-expr (or (stx-ref subs 2) val-expr)))]
@@ -1096,6 +1210,40 @@
                      (cons (cond-clause (parse-expr (car rest))
                                         (list (parse-expr (cadr rest))))
                            acc))]))]))
+
+;; --- Nix-specific parse helpers --------------------------------------------
+
+(define (parse-nix-rec-pairs pairs)
+  (let loop ([rest pairs] [acc '()])
+    (cond
+      [(null? rest) (reverse acc)]
+      [(< (length rest) 2)
+       (error 'beagle "rec-att: expected key value pairs, got odd number of forms")]
+      [else
+       (define key (->datum (car rest)))
+       (define val (parse-expr (cadr rest)))
+       (loop (cddr rest)
+             (cons (cons (if (symbol? key) key (error 'beagle "rec-att: key must be symbol, got ~v" key))
+                         val)
+                   acc))])))
+
+(define (parse-nix-fn-set-formals formals-stx)
+  (define d (->datum formals-stx))
+  (define items
+    (cond
+      [(bracketed? d) (bracket-body d)]
+      [(list? d) d]
+      [else (error 'beagle "fn-set: expected list of formals, got ~v" d)]))
+  (for/list ([item (in-list items)])
+    (define id (->datum item))
+    (cond
+      [(symbol? id) (nix-fn-set-formal id #f)]
+      [(and (list? id) (= (length id) 2))
+       (nix-fn-set-formal (car id) (parse-expr (datum->syntax #f (cadr id))))]
+      [(and (bracketed? id) (= (length (bracket-body id)) 2))
+       (define body (bracket-body id))
+       (nix-fn-set-formal (car body) (parse-expr (datum->syntax #f (cadr body))))]
+      [else (error 'beagle "fn-set formal: expected name or (name default), got ~v" id)])))
 
 ;; --- try/catch/finally -----------------------------------------------------
 
@@ -1538,6 +1686,21 @@
  (struct-out set!-form)
  (struct-out letfn-form)
  (struct-out letfn-fn)
+ (struct-out nix-inherit)
+ (struct-out nix-inherit-from)
+ (struct-out nix-with)
+ (struct-out nix-rec-attrs)
+ (struct-out nix-assert)
+ (struct-out nix-get-or)
+ (struct-out nix-has-attr)
+ (struct-out nix-search-path)
+ (struct-out nix-interpolated-string)
+ (struct-out nix-multiline-string)
+ (struct-out nix-path)
+ (struct-out nix-fn-set)
+ (struct-out nix-fn-set-formal)
+ (struct-out nix-pipe)
+ (struct-out nix-impl)
  parse-program
  DEFAULT-MODE
  DEFAULT-TARGET

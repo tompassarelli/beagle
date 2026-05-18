@@ -56,6 +56,35 @@ from the catalog (not just `--link`).
 - [ ] Follow [Racket package tutorial](https://blog.racket-lang.org/2017/10/tutorial-creating-a-package.html)
 - [ ] Register on [Racket package catalog](https://github.com/racket/racket/wiki/Creating-Packages)
 
+### Nix target: full Nisp parity
+
+`beagle/nix` should express real NixOS modules without `unsafe` escape hatches.
+All forms are target-specific (`nix-*` AST nodes, invalid outside `beagle/nix`).
+
+**Phase 1 — Module-writing core:**
+- [x] Core emitter (defn→curried, defrecord→mkType, maps→attrsets, etc.)
+- [x] stdlib-nix (120 typed entries: builtins/lib/lib.types)
+- [x] `fn-set` / `fn-set-rest` / `fn-set@` — attrset-pattern lambda
+- [x] `inh` / `inh-from` — inherit
+- [x] `with-do` — with scope injection
+- [x] `s` — string interpolation
+- [x] `p` — path literals
+
+**Phase 2 — Nix semantic essentials:**
+- [x] `rec-att` — recursive attrsets
+- [x] `assert-do` — assert expression
+- [x] `get-or` — select with or-default
+- [x] `has` — has-attr check
+- [x] `ms` — multiline strings
+- [x] `spath` — search path literals
+
+**Phase 3 — Operator/convenience parity:**
+- [x] `pipe-to` / `pipe-from` — pipe operators
+- [x] `impl` — logical implication
+
+Win condition: every NixOS module expressible in Nisp is expressible
+in `beagle/nix` without `unsafe`. Emitted Nix evaluates correctly.
+
 ### Experiment metadata
 
 - [x] Add version + dialect table to `experiments/report.md` (v0.1–v0.5, all `#lang beagle` / Clojure target)
