@@ -1,4 +1,4 @@
-# beagle
+# Beagle
 
 A language where mechanical bugs compile into patches.
 
