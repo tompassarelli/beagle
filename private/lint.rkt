@@ -216,6 +216,9 @@
      (for ([i (in-list items)]) (check-shadow i scope ctx))]
     [(def-form _ _ value)
      (check-shadow value scope ctx)]
+    [(with-meta metadata expr)
+     (check-shadow metadata scope ctx)
+     (check-shadow expr scope ctx)]
     [(unsafe-expr inner) (check-shadow inner scope ctx)]
     [(try-form body catches finally-body)
      (for ([e (in-list body)]) (check-shadow e scope ctx))
@@ -342,6 +345,9 @@
        (collect-symbols (cdr p) used))]
     [(set-form items)
      (for ([i (in-list items)]) (collect-symbols i used))]
+    [(with-meta metadata expr)
+     (collect-symbols metadata used)
+     (collect-symbols expr used)]
     [(unsafe-expr inner) (collect-symbols inner used)]
     [(try-form body catches finally-body)
      (for ([e (in-list body)]) (collect-symbols e used))

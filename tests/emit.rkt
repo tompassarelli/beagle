@@ -542,3 +542,20 @@
   (define out (compile '(defn log-it [& (msgs : String)] : String
                           (clojure.string/join ", " msgs))))
   (check-true (matches? #rx"\\(defn log-it \\[& msgs\\]" out)))
+
+;; --- metadata emission -------------------------------------------------------
+
+(test-case "metadata emits ^{...} prefix"
+  (define out (compile `(def x (#%meta (,MT :stretch 1) ,(br 1 2 3)))))
+  (check-true (matches? #rx"\\^\\{:stretch 1\\}" out))
+  (check-true (matches? #rx"\\[1 2 3\\]" out)))
+
+(test-case "metadata keyword shorthand emits correctly"
+  (define out (compile `(def x (#%meta (,MT :dynamic true) ,(br 4 5)))))
+  (check-true (matches? #rx"\\^\\{:dynamic true\\}" out)))
+
+(test-case "nested metadata in vector"
+  (define out (compile `(def z ,(br `(#%meta (,MT :stretch 1) ,(br 'a))
+                                     `(#%meta (,MT :stretch 2) ,(br 'b))))))
+  (check-true (matches? #rx"\\^\\{:stretch 1\\}" out))
+  (check-true (matches? #rx"\\^\\{:stretch 2\\}" out)))

@@ -236,6 +236,10 @@
     [(set-form? e)
      (format "#{~a}"
              (string-join (map emit-expr (set-form-items e)) " "))]
+    [(with-meta? e)
+     (format "^~a ~a"
+             (emit-expr-core (with-meta-metadata e))
+             (emit-expr (with-meta-expr e)))]
     [(unsafe-expr? e)   (emit-expr (unsafe-expr-inner e))]
     [(unsafe-clj? e)    (string-trim (unsafe-clj-clj-string e))]
     [(if-form? e)
@@ -546,7 +550,14 @@
    (for/list ([c (in-list clauses)])
      (cond
        [(for-binding? c)
-        (format "~a ~a" (for-binding-name c) (emit-expr (for-binding-expr c)))]
+        (define name-str
+          (cond
+            [(seq-destructure? (for-binding-name c))
+             (emit-seq-destructure (for-binding-name c))]
+            [(map-destructure? (for-binding-name c))
+             (emit-map-destructure (for-binding-name c))]
+            [else (symbol->string (for-binding-name c))]))
+        (format "~a ~a" name-str (emit-expr (for-binding-expr c)))]
        [(for-when? c)
         (format ":when ~a" (emit-expr (for-when-test c)))]))
    "\n   "))

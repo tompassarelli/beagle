@@ -746,3 +746,30 @@
   (check-true (defn-form? f))
   (check-eq? (param-name (defn-form-rest-param f)) 'rest)
   (check-false (param-type (defn-form-rest-param f))))
+
+;; --- metadata ----------------------------------------------------------------
+
+(test-case "metadata on vector parses as with-meta"
+  (define f (car (parse-one `(def x (#%meta (,MT :stretch 1) ,(br 1 2 3))))))
+  (check-true (def-form? f))
+  (define val (def-form-value f))
+  (check-true (with-meta? val))
+  (check-true (map-form? (with-meta-metadata val)))
+  (check-true (vec-form? (with-meta-expr val))))
+
+(test-case "metadata keyword shorthand parses"
+  (define f (car (parse-one `(def x (#%meta (,MT :private #t) ,(br 1 2))))))
+  (check-true (def-form? f))
+  (define val (def-form-value f))
+  (check-true (with-meta? val))
+  (check-true (map-form? (with-meta-metadata val))))
+
+(test-case "nested metadata parses"
+  (define f (car (parse-one `(def z ,(br `(#%meta (,MT :stretch 1) ,(br 'a))
+                                          `(#%meta (,MT :stretch 2) ,(br 'b)))))))
+  (check-true (def-form? f))
+  (define val (def-form-value f))
+  (check-true (vec-form? val))
+  (check-equal? (length (vec-form-items val)) 2)
+  (check-true (with-meta? (car (vec-form-items val))))
+  (check-true (with-meta? (cadr (vec-form-items val)))))

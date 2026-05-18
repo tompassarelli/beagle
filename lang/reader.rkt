@@ -102,12 +102,33 @@ beagle/main
   (define result (list 'deref expr))
   (datum->syntax #f result (vector src line col pos #f)))
 
+;; `^{:key val} form` → `(#%meta (#%map :key val) form)` (Clojure metadata)
+;; `^:keyword form` → `(#%meta (#%map :keyword true) form)` (shorthand)
+(define (caret-reader ch port src line col pos)
+  (skip-whitespace port)
+  (define next (peek-char port))
+  (define meta-map
+    (cond
+      [(and (char? next) (char=? next #\{))
+       (read port)]
+      [(and (char? next) (char=? next #\:))
+       (define kw (read port))
+       (list MAP-TAG kw #t)]
+      [else
+       (error 'beagle "^ must be followed by {:map} or :keyword, got: ~a" next)]))
+  (define target (read port))
+  (define result (list '#%meta meta-map target))
+  (if src
+    (datum->syntax #f result (vector src line col pos #f))
+    result))
+
 (define beagle-readtable
   (make-readtable #f
     #\{ 'terminating-macro curly-reader
     #\} 'terminating-macro (lambda (ch port src line col pos)
                              (error 'beagle "unexpected `}`"))
     #\@ 'non-terminating-macro at-reader
+    #\^ 'non-terminating-macro caret-reader
     #\# 'non-terminating-macro hash-dispatch))
 
 (define (beagle-read in)

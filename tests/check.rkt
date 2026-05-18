@@ -769,3 +769,16 @@
 
 (check-cljs-silent "cljs: universal fn produces no JVM-only warning"
   '(def x : Long (inc 1)))
+
+;; --- metadata type checking --------------------------------------------------
+
+(check-ok "metadata is transparent to type checking"
+  `(def x : (Vec Long) (#%meta (,MT :stretch 1) ,(br 1 2 3))))
+
+(check-ok "metadata on typed vector in let"
+  `(defn f [] : (Vec Long)
+     (let ,(br 'v `(#%meta (,MT :stretch 1) ,(br 10 20)))
+       v)))
+
+(check-err "metadata does not suppress type error in inner expr"
+  `(def x : String (#%meta (,MT :stretch 1) ,(br 1 2 3))))

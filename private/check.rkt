@@ -735,6 +735,7 @@
                   (andmap (λ (t) (type-compatible? t first-t)) (cdr elem-types)))
            (type-app 'Set (list first-t))
            (type-app 'Set (list ANY)))))]
+    [(with-meta? e) (infer-expr (with-meta-expr e) env)]
     [(unsafe-expr? e) ANY]
     [(unsafe-clj? e) ANY]
     [(if-form? e)

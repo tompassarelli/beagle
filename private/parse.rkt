@@ -186,6 +186,8 @@
 (struct pat-map      (entries)                               #:transparent)
 (struct pat-var      (name)                                  #:transparent)
 
+(struct with-meta   (metadata expr)                          #:transparent)
+
 (struct param       (name type)                             #:transparent)
 (struct map-destructure (keys as-name)                      #:transparent)
 (struct seq-destructure (names rest-name)                    #:transparent)
@@ -567,6 +569,9 @@
      (set-form (map parse-expr (or (stx-tail subs 1) (set-body d))))]
     [(and (pair? d) (eq? (car d) 'quote) (= (length d) 2))
      (quoted (cadr d))]
+    [(and (pair? d) (eq? (car d) '#%meta) (= (length d) 3))
+     (with-meta (parse-expr (or (and subs (stx-ref subs 1)) (cadr d)))
+                (parse-expr (or (and subs (stx-ref subs 2)) (caddr d))))]
     [(pair? d)
      (define reg (current-registry))
      (cond
@@ -1215,6 +1220,20 @@
              (and stxs (>= (length stxs) 2) (cddr stxs))
              (cons (for-when (parse-expr (or val-stx (cadr rest)))) acc))]
       [(and (>= (length rest) 2)
+            (bracketed? (car rest)))
+       (define destr (parse-seq-destructure (car rest)))
+       (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
+       (loop (cddr rest)
+             (and stxs (>= (length stxs) 2) (cddr stxs))
+             (cons (for-binding destr (parse-expr (or val-stx (cadr rest)))) acc))]
+      [(and (>= (length rest) 2)
+            (map-destructure-form? (car rest)))
+       (define destr (parse-map-destructure (car rest)))
+       (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
+       (loop (cddr rest)
+             (and stxs (>= (length stxs) 2) (cddr stxs))
+             (cons (for-binding destr (parse-expr (or val-stx (cadr rest)))) acc))]
+      [(and (>= (length rest) 2)
             (symbol? (car rest)))
        (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
        (loop (cddr rest)
@@ -1293,6 +1312,7 @@
  (struct-out defunion-form)
  (struct-out defscalar-form)
  (struct-out scalar-predicate)
+ (struct-out with-meta)
  parse-program
  DEFAULT-MODE
  DEFAULT-TARGET
