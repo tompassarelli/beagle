@@ -1,45 +1,36 @@
 # Beagle
 
-A language where mechanical bugs compile into patches.
+**A language where mechanical bugs compile into patches.**
 
-Beagle is an agent-native typed authoring layer for
-Clojure/ClojureScript: it gives coding agents a compiler, repair queue,
-and structural query tools, then emits plain `.clj` / `.cljs`.
+Beagle is an agent-native typed authoring layer for Clojure/ClojureScript: it gives coding agents a compiler, repair queue, and structural query tools, then emits plain `.clj` / `.cljs`.
 
-The thesis is simple: mechanical bugs should not require cognition.
-Shape errors should be caught by types. Runtime failures should become
-ranked, machine-actionable repair candidates. The goal is to spend zero
-reasoning tokens on mechanical fixes — the agent's budget goes to
-semantic bugs that actually require judgment.
+The thesis is simple: **mechanical bugs should not require cognition.**
 
-```
-source.rkt → parse → check → emit → output.clj
+Shape errors should be caught by types. Runtime failures should become ranked, machine-actionable repair candidates. The goal is to spend zero reasoning tokens on mechanical fixes — the agent's budget goes to semantic bugs that actually require judgment.
+
+```text
+source.rkt → parse → check → emit → output.clj / output.cljs
                        ↑
              repair compiler
                        ↑
                  daemon + AST cache
 ```
 
-The runtime target stays normal Clojure. If you stop using Beagle, you
-keep the emitted `.clj` / `.cljs`.
+The runtime target stays normal Clojure. If you stop using Beagle, you keep the emitted `.clj` / `.cljs`.
 
 ## Experiments
 
-The point was not to prove Beagle is "smarter" than Clojure or Python.
-The point was to measure repair distance: how much work an agent has to
-do after a bug is introduced.
+The point was not to prove Beagle is "smarter" than Clojure or Python. The point was to measure repair distance: how much work an agent has to do after a bug is introduced.
 
 15 experiments, 3 language tracks, same tasks:
 
-| | Beagle | Clojure | Python + mypy |
-|---|---|---|---|
-| Correctness (E4, 35 bugs) | 3/3 | 0/3 | 3/3 |
-| Best wall time | 287s | 365s | 255s |
-| Per-bug time | 8.2s | 10.4s | 8.5s |
+| Metric                    | Beagle | Clojure | Python + mypy |
+| ------------------------- | -----: | ------: | ------------: |
+| Correctness (E4, 35 bugs) |    3/3 |     0/3 |           3/3 |
+| Best wall time            |   287s |    365s |          255s |
+| Per-bug time              |   8.2s |   10.4s |          8.5s |
 
-The correctness gap is a static-typing result, not a Beagle-specific
-one. Beagle's advantage over Python is workflow: reactive daemon,
-structured repair queue, per-bug speed.
+The correctness gap is a static-typing result, not a Beagle-specific one. Beagle's advantage over Python is workflow: reactive daemon, structured repair queue, per-bug speed.
 
 [Full methodology and results](experiments/report.md)
 
@@ -66,50 +57,52 @@ structured repair queue, per-bug speed.
 
 ## Setup
 
-Requires [Racket](https://racket-lang.org/) and
-[Babashka](https://babashka.org/).
+Requires [Racket](https://racket-lang.org/) and [Babashka](https://babashka.org/).
 
-```
+```sh
 raco pkg install --link --auto /path/to/beagle
-raco test tests/
+raco test tests/   # 466 tests
 ```
 
 ## Agent integration
 
-**Claude Code** (one command):
+Claude Code:
 
-```
+```sh
 beagle init --claude-code
 beagle-daemon start --watch .
 ```
 
-Generates PostToolUse hook (instant type feedback on every `.rkt` edit),
-settings, CLAUDE.md, and language context. The daemon re-checks within
-~100ms of each save.
+Generates a PostToolUse hook, settings, `CLAUDE.md`, and language context. The daemon gives instant type feedback on every `.rkt` edit and re-checks within ~100ms of each save.
 
-**MCP** (any agent framework):
+MCP:
 
-```
+```sh
 beagle mcp
 ```
 
-9 tools over stdio: `sig`, `fields`, `callers`, `provides`, `impact`,
-`check`, `check_enriched`, `build`, `expand`. Daemon-first, CLI fallback.
+9 tools over stdio: `sig`, `fields`, `callers`, `provides`, `impact`, `check`, `check_enriched`, `build`, `expand`.
+
+Daemon-first, CLI fallback.
 
 ## Documentation
 
-**Scribble docs** (language reference, all forms, types, tools):
+Scribble docs:
 
-```
+```sh
 raco docs beagle
 ```
 
-Or build standalone HTML: `raco scribble --html scribblings/beagle.scrbl`
+Standalone HTML:
 
-**Other references:**
+```sh
+raco scribble --html scribblings/beagle.scrbl
+```
 
-- [`docs/cheatsheet.md`](docs/cheatsheet.md) — single-page language summary (LLM system context)
+Other references:
+
+- [`docs/cheatsheet.md`](docs/cheatsheet.md) — single-page language summary for agent context
 - [`docs/agent-workflow.md`](docs/agent-workflow.md) — repair tool routing decision tree
-- [`docs/prompts/`](docs/prompts/) — pre-built agent system prompts (consumer + contributor)
+- [`docs/prompts/`](docs/prompts/) — pre-built agent system prompts
 - [`docs/devlog/`](docs/devlog/) — development journal
 - [`experiments/report.md`](experiments/report.md) — E1–E15 methodology and results
