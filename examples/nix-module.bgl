@@ -1,0 +1,14 @@
+#lang beagle/nix
+(ns examples.nix-module)
+
+(fn-set-rest (config lib pkgs)
+  {:imports [(p "./hardware-configuration.nix")]
+   :boot.loader.systemd-boot.enable true
+   :networking.hostName "hello"
+   :services.openssh.enable true
+   :users.users.tom
+     {:isNormalUser true
+      :extraGroups ["wheel" "networkmanager"]
+      :shell pkgs.zsh}
+   :environment.systemPackages
+     (with-do pkgs [git vim curl htop])})

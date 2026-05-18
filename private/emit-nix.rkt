@@ -236,12 +236,18 @@
     [(eq? e 'nil) "null"]
 
     [(symbol? e)
+     (define sym-str (symbol->string e))
      (cond
        [(eq? e 'nil) "null"]
        [(eq? e 'true) "true"]
        [(eq? e 'false) "false"]
-       [(char=? (string-ref (symbol->string e) 0) #\:)
-        (format "\"~a\"" (substring (symbol->string e) 1))]
+       [(char=? (string-ref sym-str 0) #\:)
+        (format "\"~a\"" (substring sym-str 1))]
+       [(or (string-prefix? sym-str "lib/")
+            (string-prefix? sym-str "builtins/"))
+        (string-replace sym-str "/" ".")]
+       [(string-contains? sym-str ".")
+        sym-str]
        [else (mangle-name e)])]
 
     [(def-form? e)
@@ -684,18 +690,20 @@
              [(symbol? key)
               (define s (symbol->string key))
               (if (string-prefix? s ":")
-                (string-replace (substring s 1) "-" "_")
-                (mangle-name key))]
-             [(string? key) key]
+                (substring s 1)
+                (format "${~a}" (mangle-name key)))]
+             [(string? key) (format "\"~a\"" key)]
              [(quoted? key)
               (define d (quoted-datum key))
               (if (symbol? d)
                 (let ([s (symbol->string d)])
                   (if (string-prefix? s ":")
-                    (string-replace (substring s 1) "-" "_")
+                    (substring s 1)
                     s))
                 (emit-expr key (+ depth 1)))]
-             [else (emit-expr key (+ depth 1))]))
+             [(nix-interpolated-string? key)
+              (emit-expr key (+ depth 1))]
+             [else (format "${~a}" (emit-expr key (+ depth 1)))]))
          (format "~a~a = ~a;" ind key-str (emit-expr val (+ depth 1)))))
      (string-append
       "{\n"

@@ -1,0 +1,23 @@
+#lang beagle/nix
+(ns modules.kanata)
+
+;; NixOS module: kanata keyboard remapping
+;; Shows typed module options (lib/mkOption + lib/types.*)
+(fn-set-rest (config lib pkgs)
+  {:options.myConfig.modules.kanata
+     {:enable (lib/mkEnableOption "Kanata keyboard remapping")
+      :devices (lib/mkOption
+                 {:type (lib/types.listOf lib/types.str)
+                  :default []
+                  :description "Input device paths for kanata to capture"})
+      :configFile (lib/mkOption
+                    {:type lib/types.path
+                     :description "Path to kanata .kbd config file"})
+      :port (lib/mkOption
+              {:type (lib/types.nullOr lib/types.port)
+               :default nil
+               :description "TCP port for kanata server"})}
+
+   :config
+     (lib/mkIf config.myConfig.modules.kanata.enable
+       {:imports [(p "./kanata.nix")]})})

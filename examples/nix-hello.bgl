@@ -1,0 +1,7 @@
+#lang beagle/nix
+(ns examples.nix-hello)
+
+{:greeting (s "Hello, " name "!")
+ :numbers [1 2 3 4 5]
+ :meta {:created-by "beagle"
+        :version "0.1.0"}}

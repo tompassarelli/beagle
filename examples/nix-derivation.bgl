@@ -1,0 +1,14 @@
+#lang beagle/nix
+(ns examples.nix-derivation)
+
+(stdenv.mkDerivation
+  {:pname "hello-beagle"
+   :version "0.1.0"
+   :src (fetchFromGitHub
+          {:owner "tompassarelli"
+           :repo "beagle"
+           :rev "v0.1.0"
+           :sha256 ""})
+   :buildInputs (with-do pkgs [racket-minimal])
+   :installPhase (ms "mkdir -p $out/bin"
+                     "cp $src/main.rkt $out/bin/")})
