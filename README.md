@@ -77,11 +77,15 @@ The correctness gap is a static-typing result, not a Beagle-specific one. Beagle
 Requires [Racket](https://racket-lang.org/) 8.x+.
 
 ```sh
+raco pkg install beagle
+```
+
+Or from source:
+
+```sh
 raco pkg install --link --auto /path/to/beagle
 raco test tests/   # 600+ tests
 ```
-
-[Babashka](https://babashka.org/) is optional — used only for experiment oracle runs and `gen-stdlib-types`.
 
 ## Agent integration
 

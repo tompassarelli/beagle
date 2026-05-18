@@ -9,5 +9,6 @@
 (define version "0.8.0")
 (define pkg-desc "Agent-native typed authoring layer — emits Clojure, ClojureScript, or JavaScript.")
 (define pkg-authors '(tom))
+(define license '(MIT))
 (define pkg-tags '("language" "compiler" "clojure" "javascript" "type-checking"))
 (define test-paths '("tests"))
