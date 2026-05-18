@@ -89,9 +89,8 @@ DEPRECATED_TYPES="Long|Double|Boolean|Integer"
 
 # Check for stale type references in docs
 STALE_FILES=""
-for f in docs/cheatsheet.md docs/cheatsheet-consumer.md docs/cheatsheet-distilled.md \
-         docs/forms.md docs/prompts/consumers/distilled.md docs/prompts/consumers/full.md \
-         docs/prompts/contributors/src.md README.md CLAUDE.md AGENTS.md; do
+for f in docs/cheatsheet.md docs/cheatsheet-consumer.md \
+         README.md CLAUDE.md AGENTS.md; do
   if [ -f "$f" ]; then
     # Match deprecated type names used as Beagle types (not Java interop like Long/parseLong)
     if grep -Pn "(?<![/.])\b($DEPRECATED_TYPES)\b(?!/)" "$f" | grep -v 'Long/\|Double/\|Boolean/\|Integer/' | grep -qv '^\s*#'; then

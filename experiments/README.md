@@ -139,5 +139,5 @@ through ~10 functions in P7. Both agents complete correctly, first try.
 `experiments/bug-detection-test/` — 5 injected bugs (2 arity, 1 undefined
 fn, 1 wrong index, 1 wrong sort direction) in P7. Both agents find all 5.
 
-See `head-to-head/results.md` for full analysis and `docs/findings.md`
-for the running empirical log.
+See `head-to-head/results.md` for full analysis and `experiments/report.md`
+for the complete experiment report.

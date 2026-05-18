@@ -15,132 +15,18 @@ it as canonical when explaining the language.
 
 ## Status
 
-`#lang beagle` v0.8.0 — multi-target (Clojure/CLJS/JS/Nix/Python), MCP server, Claude Code integration, Scribble docs:
+`#lang beagle` v0.8.0 — 550 tests passing.
 
-- Forms: `def`, `defn` (single + multi-arity), `fn`, `let`, `if`, `cond`,
-  `when`, `when-not`, `when-let`, `if-let`, `if-not`, `when-some`, `if-some`,
-  `do`, `match`, `loop`, `recur`, `for` (with `:when`, `:let`, destructuring),
-  `doseq`, `dotimes`, `try`/`catch`/`finally`, `case`, `condp`, `comment`,
-  `defrecord`, `with` (typed record update), `defenum`, `defonce`, `defunion`,
-  `defprotocol`, `defmulti`/`defmethod`, `deftype`, `extend-type`,
-  `with-open`, `doto`, `await`, constructor calls (`ClassName.`),
-  keyword-as-function (`(:key map)`), call, vector literal, map literal (`{}`),
-  set literal (`#{}`), quote, metadata (`^{:key val}`), threading
-  (`->`, `->>`, `cond->`, `cond->>`, `some->`, `some->>`, `as->`)
-- Targets: `#lang beagle/clj` (default), `#lang beagle/cljs`, `#lang beagle/js`,
-  `#lang beagle/nix`, `#lang beagle/py` (plumbing only, no emitter yet)
-- Meta: `ns`, `define-mode`, `require`, `declare-extern`, `define-macro`,
-  `import`, `unsafe` (top-level AND in expression position)
-- Param syntax: **wrapped only** — `(name : Type)`. Plus `{:keys [a b c]}`
-  map destructuring and `[a b & rest]` sequential destructuring in params
-  and let bindings.
-- Types: primitives (`String`, `Int`, `Float`, `Bool`, `Keyword`,
-  `Symbol`, `Nil`, `Any` — no aliases), user-defined record types,
-  function types (variadic with `& T`), parametric (`Vec`, `Map`, `Set`,
-  `List`), union (`U`), nullable sugar (`String?` = `(U String Nil)`),
-  polymorphic (`forall`), `(Promise T)` (JS async)
-- Type narrowing: flow-sensitive in `if`/`cond`/`when` via `nil?`, `some?`,
-  `string?`, `=`, `not` etc. Threads through cond clauses.
-- Keyword field inference: `(:name person)` returns the field type when
-  target is a known typed record
-- Macros: safe (gensym-hygienic) / unsafe with `&rest` and `(splice ...)`
-- Stdlib catalog: split by target — `stdlib-portable.rkt` (269 entries),
-  `stdlib-clj.rkt` (352), `stdlib-cljs.rkt` (75), `stdlib-js.rkt` (38 JS-native),
-  `stdlib-nix.rkt` (120: builtins/lib/lib.types);
-  combined via `stdlib-types.rkt`. CLJS-EXCLUDE warns on JVM-only usage;
-  JS-NO-EMIT warns on portable fns with no JS translation (139 symbols)
-- Cross-file type import: `(require module)` / `(require module :as alias)`
-  resolves source at compile time, imports typed defs/defns/externs/records/macros.
-  `declare-extern` is only needed for Java interop and non-beagle namespaces.
-- Let-binding type inference: `(let [x (foo bar)] ...)` infers x's type from
-  the RHS expression — explicit annotations optional
-- Collection element type inference: `[(->Product 1 "A") ...]` infers `(Vec Product)`,
-  not `(Vec Any)` — same for `Map` and `Set` literals
-- Destructuring type propagation: `(let [{:keys [name]} (get-product)] ...)`
-  infers `name : String` from the record's field types
-- For-comprehension type flow: `(for [p products] (product-name p))` infers
-  binding type from collection element and returns `(Vec String)`
-- Validation: type checks, arity (incl. variadic), undefined refs, hints
-- Lint pass: untyped def/defn, unsafe usage, shadowed bindings, unused externs
-- Rich diagnostics: Rust-style error display with source lines, signatures,
-  "did you mean?" suggestions, arg-return-type notes. JSON mode includes all
-  structured fields for zero-tool-call bug fixes.
-- Java interop: `.method`, `Class/static`, `*dynamic-vars*`, constructors,
-  `import`; ~30 common methods/statics pre-typed in stdlib
-- Source mapping: `^{:line N :file "path"}` metadata on every emitted compound form (expression-level)
-- Cross-module type import: `(require module)` imports record types,
-  constructors, accessors, keyword-access field types, AND all defn/def
-  signatures — both qualified and unqualified names validated at call sites
-- `with` form: typed record update `(with rec [:field val])` → `(assoc rec :field val)`
-  with compile-time field existence and type checking
-- `defenum` form: `(defenum Name :a :b)` → `(def Name-values #{:a :b})`
-- Refinement predicates: `(defscalar Pct Int :where (>= 0) (<= 100))` —
-  compile-time literal checking + runtime `:pre` conditions; cross-module propagation
-- Exhaustive match warnings: match on record types warns about missing cases
-- LSP server: hover (type signatures), diagnostics (on open/save), document
-  symbols, jump-to-definition (same file + directory scan)
-- Typed REPL: persistent type env, `:type EXPR`, `:sig NAME`, `:env`, compile + emit
-- Differential testing: `beagle-proptest --diff` compares function outputs between
-  golden and modified builds, flags behavioral regressions (6143 calls on E8)
-- 655 tests passing
-- 15 experiments across 3 language tracks (Beagle, Clojure, Python):
-  best Beagle config 287s avg with reactive daemon (E13), variance
-  collapsed to 59s range; per-bug faster than Python+mypy (8.2s vs 8.5s);
-  strict improvement over Clojure (287s vs 365s best);
-  multi-agent pool abandoned after E14-E15 (0 activations)
-- Type-system query tools: beagle-sig, beagle-fields, beagle-callers,
-  beagle-provides, beagle-impact (with clojure analogs for fair experiments)
-- v2 experiment framework: 5-module inventory system (1651 LOC), 444 verify
-  assertions, 12 injected bugs (9 caught by beagle at compile time)
-- E4 scaled experiment: 13-module system (8570 LOC), 484 assertions, 35
-  injected bugs — first correctness divergence (beagle 3/3, clojure 0/3)
-- E5 event-sourced pipeline: 8 modules, 40 bugs, `with`-form projections;
-  beagle 66% / clojure 70% on line-diff, 0 checker errors all runs
-- Pattern matching (`match`) with record type dispatch + positional field destructuring
-- Multi-arity `defn` with per-arity type checking and union-type call validation
-- Guard-pattern type narrowing: `(when (nil? x) (throw ...))` narrows `x` in subsequent forms
-- Union-to-union type compatibility fix (subset checking)
-- CLJS target: `#lang beagle/cljs` with JS interop types, JVM-only warnings,
-  catch `:default`, ns without `:import`; Heist app compiles through full pipeline
-- JS target: `#lang beagle/js` — `defn`->`function`, `def`->`const`, `fn`->arrow,
-  `let`->IIFE, `defrecord`->`Object.freeze` factory with `_tag`, `match`->`_tag`
-  checks, `for`->`.map`/`.filter`, `try`/`catch`, `loop`->`while`,
-  `with`->spread; `(await expr)` form, functions containing `await` auto-emit
-  as `async function`; atom ops (`atom`/`deref`/`reset!`/`swap!`/`add-watch`);
-  `set!` for property mutation; bare npm imports (`(require 'pkg')` → `import`);
-  120 emit-core-call translations (collections, math, predicates, combinators);
-  `beagle.core.js` runtime (12 finite helpers: range, remove, mapcat, every?,
-  keep, map-indexed, assoc-in, update-in, select-keys, merge-with, take-while,
-  drop-while); STDLIB-JS (38 JS-native type declarations: Math, JSON, Promise,
-  fetch, timers, Object, Array); JS-VALUE-WRAPPERS for higher-order stdlib use
-  (binding-aware: user defs shadow stdlib); JS-NO-EMIT safety net (139 unsupported
-  symbols warn at compile time); `silent fallback: 0` verified;
-  72 behavioral tests (compile→Bun execution), 110 string-match tests
-- Nix target: `#lang beagle/nix` — `defn`->curried functions, `def`->`let` bindings,
-  `defrecord`->`mkType` constructor + accessors, map literals->attrsets,
-  vectors->Nix lists, `let`->`let/in`, `if`->`if/then/else`, `cond`->nested if,
-  `match`->`_tag` dispatch, `for`->`builtins.map`/`builtins.filter`,
-  `loop`/`recur`->recursive let, `with`->attrset merge; `builtins/*` and `lib/*`
-  call convention (`/`->`.` in emitted names); stdlib-nix (120 typed entries:
-  ~60 builtins, ~40 lib, ~15 lib.types); full Nisp-form parity: `fn-set`/
-  `fn-set-rest`/`fn-set@` (attrset-pattern lambdas), `inh`/`inh-from` (inherit),
-  `with-do` (scope injection), `s` (string interpolation), `ms` (multiline strings),
-  `p` (path literals), `spath` (search paths), `rec-att` (recursive attrsets),
-  `assert-do`, `get-or` (select with default), `has` (has-attr), `pipe-to`/
-  `pipe-from`, `impl` (implication); 42 emit tests
-- Repair compiler: accessor-swap detection (204 accessors, semantic type groups),
-  wrong-argument permutation, cross-evidence correlation (blame + semantic + specfix)
-- Property testing: record generators (scalar-erasure-aware), property inference
-  from return types (non-negative, deterministic, vec-length); 286 properties on E8
-- Distributed tracing: `beagle-dtrace` instruments cross-service calls (432 sites on E8),
-  collects spans, visualizes waterfalls, and runs cross-service blame analysis with
-  oracle-output correlation (identifies root cause services and cascade chains)
-- Reactive checking: daemon file watcher (Racket filesystem-change-evt) re-checks on every save (~100ms),
-  enriches errors with record field context; Claude Code PostToolUse hook injects
-  diagnostics after every Edit/Write on .bgl/.rkt files
-- Repair agent pool: abandoned after E14-E15. Agents currently resist
-  multi-agent edit delegation in ways that make this an impractical optimization
-  target (4 approaches tested, 0 activations)
+- **Targets:** `beagle/clj` (default), `beagle/cljs`, `beagle/js`, `beagle/nix`, `beagle/py` (plumbed, no emitter)
+- **Forms:** ~50 forms — definitions, control flow, data structures, pattern matching, threading, interop. See `docs/cheatsheet.md` for the full catalog.
+- **Types:** 8 primitives (`String`, `Int`, `Float`, `Bool`, `Keyword`, `Symbol`, `Nil`, `Any`), parametric (`Vec`, `Map`, `Set`, `List`), union (`U`), nullable (`T?`), function types, `forall`, `(Promise T)`
+- **Stdlib:** ~700 entries total — portable (269), Clojure (352), CLJS (75), JS (38 native), Nix (120)
+- **Type checking:** flow-sensitive narrowing, cross-module import, collection/destructuring inference, exhaustive match warnings, refinement predicates
+- **Diagnostics:** Rust-style errors with signatures, "did you mean?" suggestions, JSON mode
+- **Tooling:** LSP, typed REPL, MCP server, reactive daemon (~100ms re-check), repair compiler, property testing, distributed tracing
+- **Experiments:** 15 across 3 tracks (Beagle/Clojure/Python) — best config 287s avg (E13), per-bug faster than Python+mypy
+
+See `docs/cheatsheet.md` for the full language reference.
 
 ## Architecture
 
@@ -203,6 +89,30 @@ parse → check → emit-dispatch → emit-{clj,js}
 5. **Lint traversal** in `lint.rkt` — `check-shadow` and `collect-symbols`
 6. **Provide** the struct in parse.rkt's provide list
 7. **Tests** in parse/emit/check test files
+
+## Test helpers
+
+Tests can't use `[...]` or `{...}` syntax directly (Racket reader collapses
+them). Use these helpers:
+
+```racket
+(define (br . xs) (cons BRACKET-TAG xs))   ; simulates [...]
+(define (mp . xs) (cons MAP-TAG xs))       ; simulates {...}
+```
+
+Example: `(defn foo [(x : Int)] (+ x 1))` in test form:
+```racket
+(parse-one `(defn foo ,(br '(x : Int)) (+ x 1)))
+```
+
+## Conventions
+
+- `ANY` is `(type-prim 'Any)` — the universal escape type
+- Params can be `param`, `map-destructure`, or `seq-destructure` structs — always check with `(map-destructure? p)` / `(seq-destructure? p)` before calling `(param-name p)`
+- `MAP-TAG` and `SET-TAG` are `'#%map` and `'#%set` (well-known symbols, NOT gensyms — gensyms break across Racket phase boundaries)
+- The reader runs at phase 0, the parser at phase 1 (inside `define-syntax`) — shared symbols must be phase-stable
+- `emit-form` handles top-level forms (def, defn, defrecord, etc.); `emit-expr` handles everything else
+- `check-form` does top-level type checking; `infer-expr` does expression-level inference
 
 ## Tools
 
@@ -372,14 +282,10 @@ it gets a devlog entry. Routine feature additions do not.
 ## Reference
 
 - `scribblings/beagle.scrbl` — Racket-native Scribble docs (build with `raco scribble --html scribblings/beagle.scrbl`).
-- `docs/prompts/consumers/` — agent system prompts (full + distilled).
-- `docs/prompts/contributors/src.md` — canonical contributor reference (feeds CLAUDE.md + AGENTS.md).
-- `docs/devlog/README.md` — development journal (discoveries + experiments).
-- `experiments/README.md` — benchmark framework for design decisions.
-- `docs/forms.md` — canonical form catalog (markdown; Scribble is the canonical source).
 - `docs/cheatsheet.md` — single-page LLM grounding reference (developer).
 - `docs/cheatsheet-consumer.md` — 154-line consumer reference (for `beagle init`).
+- `docs/devlog/README.md` — development journal (discoveries + experiments).
+- `experiments/README.md` — benchmark framework for design decisions.
+- `experiments/report.md` — full experiment report (E3b–E14, all tracks).
 - `docs/todo.md` — roadmap and completed work.
 - `docs/agent-workflow.md` — LLM agent workflow patterns.
-- `docs/findings.md` — empirical findings from experiments (through E8; E9+ in report.md).
-- `experiments/report.md` — full experiment report (E3b–E14, all tracks).

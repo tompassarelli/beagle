@@ -594,4 +594,4 @@ Each note means: something is wrong at that location. Common fixes:
 
 3 syntactic variants tested (A canonical, B required-types, C minimal),
 multiple LLM samples per task, real Clojure behavior verification. 100%
-behavior pass after empirically-driven bug fixes. See `docs/findings.md`.
+behavior pass after empirically-driven bug fixes. See `experiments/report.md`.

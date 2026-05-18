@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-15 morning  
 **Commits:** `310b41b`–`2453b50`  
-**Related:** `docs/findings.md`
+**Related:** `experiments/report.md`
 
 ## Discovery
 

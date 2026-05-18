@@ -61,7 +61,7 @@
 (define (hint-for msg)
   (cond
     [(regexp-match? #rx"unknown beagle form" msg)
-     "see docs/forms.md for the canonical form catalog"]
+     "see docs/cheatsheet.md for the form catalog"]
     [(regexp-match? #rx"unknown type" msg)
      "primitives: String Int Float Bool Keyword Symbol Nil Any; or [A B -> R], (Vec T), (U A B)"]
     [(regexp-match? #rx"bad field spec" msg)
