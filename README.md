@@ -1,14 +1,12 @@
 # Beagle
 
-**A language where mechanical bugs compile into patches.**
-
 Beagle is an agent-native typed authoring layer for dynamic languages. It gives coding agents a compiler, repair queue, and structural query tools, then emits ordinary source in the target language.
 
 Currently supported targets:
 
-- **Clojure** (`#lang beagle` / `#lang beagle/clj`) → `.clj`
-- **ClojureScript** (`#lang beagle/cljs`) → `.cljs`
-- **JavaScript** (`#lang beagle/js`) → `.js`
+- `#lang beagle/clj` — Clojure
+- `#lang beagle/cljs` — ClojureScript
+- `#lang beagle/js` — JavaScript
 
 Same types, same checker, same repair compiler — different backends.
 
@@ -25,6 +23,18 @@ source.bgl → parse → check → emit → output.clj / .cljs / .js
 ```
 
 The runtime stays ordinary target code. If you stop using Beagle, you keep the emitted source.
+
+## Why this syntax
+
+Beagle's surface language is Clojure-shaped. That is deliberate: syntax is part of the repair surface.
+
+**S-expressions make structure explicit.** The reader produces nested structure directly instead of reconstructing it from precedence rules, semicolon insertion, and ambiguous statement grammar. That makes Beagle easier to parse, easier to transform, and easier to repair. The common complaint that Lisp syntax is "hard to read" is mostly familiarity cost; the structural complexity is lower, not higher.
+
+**Clojure's brackets and braces remove real ambiguity.** `[x y]` is a vector. `(f x y)` is a call. `{:a 1 :b 2}` is a map literal, not a block. Scheme-style pure parens blur data and computation visually; Clojure fixes that with lightweight structural punctuation. Beagle inherits that choice because it helps both human readers and language models.
+
+**Immutability by default reduces the search space.** `def` produces a constant. `defrecord` produces frozen data. `with` returns a new value. Mutation exists only through explicit escape hatches: atoms, interop, or target-specific forms. That means most Beagle code can be reasoned about locally without tracking hidden assignment.
+
+**Clojure has useful training data.** LLMs can bootstrap from existing Clojure forms, idioms, and naming conventions. Beagle then narrows the surface: one parameter syntax, one annotation marker, one canonical idiom per concept, and no reader-macro zoo. Fewer valid interpretations means less ambiguity during generation and repair.
 
 ## A program
 
