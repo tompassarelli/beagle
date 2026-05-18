@@ -131,6 +131,7 @@ fi
 # Fallback: direct check
 beagle check "$FILE" 2>&1 >&2 || true
 HOOK
+            sed -i "s|beagle check|$BEAGLE_DIR/bin/beagle check|" "$target/.claude/hooks/beagle-check.sh"
             chmod +x "$target/.claude/hooks/beagle-check.sh"
             echo "Created .claude/hooks/beagle-check.sh" >&2
 
