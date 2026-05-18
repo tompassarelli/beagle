@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Wrapper that runs beagle-mcp with the venv Python (for mcp package).
+set -euo pipefail
+BEAGLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+exec "$BEAGLE_DIR/.venv/bin/python" "$BEAGLE_DIR/bin/beagle-mcp" "$@"

@@ -103,13 +103,19 @@ case "$cmd" in
             cat > "$target/.claude/hooks/beagle-check.sh" <<'HOOK'
 #!/usr/bin/env bash
 # PostToolUse hook: type-check .rkt files after edit/write.
-# Queries running daemon for instant results; falls back to beagle check.
+# Auto-starts daemon if not running. Queries daemon for instant results.
 set -euo pipefail
 INPUT=$(cat)
 FILE=$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_input',{}).get('file_path',''))" 2>/dev/null || true)
 [[ "$FILE" == *.rkt ]] || exit 0
 
 PORT_FILE="${BEAGLE_DAEMON_PORTFILE:-/var/tmp/beagle-daemon.port}"
+
+# Auto-start daemon if not running
+if [[ ! -f "$PORT_FILE" ]] || ! echo "ping" | nc -w 1 127.0.0.1 "$(cat "$PORT_FILE" 2>/dev/null)" >/dev/null 2>&1; then
+    beagle-daemon start >/dev/null 2>&1
+fi
+
 if [[ -f "$PORT_FILE" ]]; then
     PORT=$(cat "$PORT_FILE")
     RESULT=$(echo "check $FILE" | nc -w 2 127.0.0.1 "$PORT" 2>/dev/null || true)
@@ -131,6 +137,7 @@ fi
 # Fallback: direct check
 beagle check "$FILE" 2>&1 >&2 || true
 HOOK
+            sed -i "s|beagle-daemon start|$BEAGLE_DIR/bin/beagle-daemon start|" "$target/.claude/hooks/beagle-check.sh"
             sed -i "s|beagle check|$BEAGLE_DIR/bin/beagle check|" "$target/.claude/hooks/beagle-check.sh"
             chmod +x "$target/.claude/hooks/beagle-check.sh"
             echo "Created .claude/hooks/beagle-check.sh" >&2

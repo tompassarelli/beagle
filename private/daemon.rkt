@@ -128,6 +128,23 @@
                             'auto_fixable (and auto-fixable? #t)
                             'source_line (or src-line 'null))
                     errors))))
+    ;; Capture undefined-ref and scalar-provenance notes from stderr
+    (define provenance-output
+      (with-output-to-string
+        (lambda ()
+          (parameterize ([current-error-port (current-output-port)])
+            (check-scalar-provenance! prog)))))
+    (for ([line (in-list (string-split provenance-output "\n"))])
+      (when (and (non-empty-string? line)
+                 (string-prefix? line "note:"))
+        (set! errors
+              (cons (hasheq 'line 0
+                            'kind "provenance"
+                            'message line
+                            'function 'null 'expected 'null 'actual 'null
+                            'signature 'null 'suggestions '() 'help 'null
+                            'fix_plan 'null 'auto_fixable #f 'source_line 'null)
+                    errors))))
     (define raw-suspicions (run-semantic-analysis! prog #:file path))
     (for ([s (in-list raw-suspicions)])
       (set! suspicions
@@ -459,16 +476,16 @@
 
 (define (handle-check args)
   (define files (find-rkt-in (if (null? args) (list ".") args)))
-  (define errors '())
+  (define all-errors '())
   (for ([f (in-list files)])
-    (with-handlers ([exn:fail? (lambda (e)
-                                 (set! errors
-                                       (cons (hasheq 'file f 'error (exn-message e))
-                                             errors)))])
-      (get-datums f)))
-  (hasheq 'ok (null? errors)
+    (define-values (errs _suspicions) (check-file-full f))
+    (for ([e (in-list errs)])
+      (set! all-errors
+            (cons (hasheq 'file f 'error (hash-ref e 'message "unknown"))
+                  all-errors))))
+  (hasheq 'ok (null? all-errors)
           'files-checked (length files)
-          'errors (reverse errors)))
+          'errors (reverse all-errors)))
 
 (define (handle-ping _args)
   (hasheq 'ok #t 'status "running" 'cached (hash-count datum-cache)))
