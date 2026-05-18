@@ -267,7 +267,7 @@
            (format "~a:" (mangle-name (param-name p))))
          (if rest-p (list (format "~a:" (mangle-name (param-name rest-p)))) '()))
         " "))
-     (format "(~a ~a)" param-str (emit-body body depth))]
+     (format "~a ~a" param-str (emit-body body depth))]
 
     [(let-form? e)
      (emit-let e depth)]
@@ -895,7 +895,7 @@
   (define body (nix-fn-set-body e))
   (define formal-strs
     (for/list ([f (in-list formals)])
-      (define name (mangle-name (nix-fn-set-formal-name f)))
+      (define name (symbol->string (nix-fn-set-formal-name f)))
       (define default (nix-fn-set-formal-default f))
       (if default
         (format "~a ? ~a" name (emit-expr default depth))

@@ -1,0 +1,60 @@
+#lang beagle/nix
+(ns flake)
+
+;; FirnOS flake — converted from nisp flake.rkt
+;; This exercises nearly every beagle/nix feature.
+
+{:description "FirnOS - A modular, shareable NixOS configuration framework"
+
+ :inputs
+   {:nixpkgs.url "github:nixos/nixpkgs/nixos-25.11"
+    :nixpkgs-unstable.url "github:nixos/nixpkgs/nixos-unstable"
+    :home-manager {:url "github:nix-community/home-manager/release-25.11"
+                   :inputs.nixpkgs.follows "nixpkgs"}
+    :stylix.url "github:danth/stylix/release-25.11"
+    :sops-nix {:url "github:Mic92/sops-nix"
+               :inputs.nixpkgs.follows "nixpkgs"}}
+
+ :outputs
+   (fn-set (self nixpkgs nixpkgs-unstable home-manager stylix sops-nix)
+     (let [firnModules (p "./modules")]
+       {:lib.mkSystem
+          (fn-set-rest (hostname hostConfig hardwareConfig
+                        (system "x86_64-linux")
+                        (extraModules []))
+            (nixpkgs.lib.nixosSystem
+              {:system system
+               :specialArgs {:inputs {:stylix stylix}
+                             :flakeRoot self}
+               :modules
+                 (concat
+                   [hardwareConfig
+                    stylix.nixosModules.stylix
+                    home-manager.nixosModules.home-manager
+                    sops-nix.nixosModules.sops
+                    hostConfig
+
+                    (fn-set-rest (config pkgs)
+                      {:networking.hostName hostname
+                       :sops.age.keyFile "/var/lib/sops-nix/key.txt"
+                       :environment.systemPackages
+                         (with-do pkgs [sops age])
+                       :imports
+                         (let [moduleDirs
+                                 (builtins/attrNames
+                                   (nixpkgs.lib.filterAttrs
+                                     (fn [(n : Any) (v : Any)] : Any
+                                       (= v "directory"))
+                                     (builtins/readDir (p "./modules"))))]
+                           (builtins/map
+                             (fn [(m : Any)] : Any
+                               (s firnModules "/" m))
+                             moduleDirs))})]
+                   extraModules)}))
+
+        :nixosConfigurations
+          {:whiterabbit
+             (self.lib.mkSystem
+               {:hostname "whiterabbit"
+                :hostConfig (p "./hosts/whiterabbit/configuration.nix")
+                :hardwareConfig (p "./hardware-configuration.nix")})}}))}
