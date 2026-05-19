@@ -185,6 +185,11 @@
   (check-true (and out (string-contains? out "...")))
   (check-true (and out (string-contains? out "{ config, lib, pkgs, ... }:"))))
 
+(test-case "module sugar emits same as fn-set-rest"
+  (define out (nix-emit "(define-target nix) (module (config lib pkgs) config)"))
+  (check-true (and out (string-contains? out "...")))
+  (check-true (and out (string-contains? out "{ config, lib, pkgs, ... }:"))))
+
 (test-case "fn-set@ emits at-pattern"
   (define out (nix-emit "(define-target nix) (fn-set@ self (a b) a)"))
   (check-true (and out (string-contains? out "@ self")))

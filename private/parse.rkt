@@ -981,6 +981,11 @@
                  #t #f
                  (parse-expr (or (stx-ref subs 2) body-expr)))]
 
+    [(list 'module formals body-expr)
+     (nix-fn-set (parse-nix-fn-set-formals (or (stx-ref subs 1) formals))
+                 #t #f
+                 (parse-expr (or (stx-ref subs 2) body-expr)))]
+
     [(list 'fn-set@ at-name formals body-expr)
      (define at (->datum (or (stx-ref subs 1) at-name)))
      (nix-fn-set (parse-nix-fn-set-formals (or (stx-ref subs 2) formals))
