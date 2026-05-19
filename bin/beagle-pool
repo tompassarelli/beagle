@@ -359,11 +359,12 @@ async def handle_socket_client(reader, writer, pool):
 
 def scan_mtimes(directory):
     mtimes = {}
-    for f in glob.glob(os.path.join(directory, "*.bgl")) + glob.glob(os.path.join(directory, "*.rkt")):
-        try:
-            mtimes[f] = os.path.getmtime(f)
-        except OSError:
-            pass
+    for ext in ('.bclj', '.bcljs', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt'):
+        for f in glob.glob(os.path.join(directory, "*" + ext)):
+            try:
+                mtimes[f] = os.path.getmtime(f)
+            except OSError:
+                pass
     return mtimes
 
 
@@ -427,7 +428,7 @@ async def main():
         loop.add_signal_handler(sig, on_signal)
 
     rkt_count = len(prev_mtimes)
-    print(f"beagle-pool: watching {watch_dir} ({rkt_count} .rkt files, "
+    print(f"beagle-pool: watching {watch_dir} ({rkt_count} beagle files, "
           f"{len(pool.workers)} warm worker(s), ${args.max_cost:.2f} cap)",
           flush=True)
 

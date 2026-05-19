@@ -60,6 +60,16 @@ source_dir = sys.argv[1]
 beagle_bin = sys.argv[2]
 work_dir = sys.argv[3]
 
+BEAGLE_EXTENSIONS = ('.bclj', '.bcljs', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt')
+def is_beagle_source(fname):
+    return any(fname.endswith(ext) for ext in BEAGLE_EXTENSIONS)
+
+def strip_beagle_ext(fname):
+    for ext in BEAGLE_EXTENSIONS:
+        if fname.endswith(ext):
+            return fname[:-len(ext)]
+    return fname
+
 # =========================================================================
 # Collect type information from all modules
 # =========================================================================
@@ -69,10 +79,10 @@ all_scalars = {}   # name -> base type, across all modules
 all_records = {}   # name -> {module, fields}, across all modules
 
 for fname in sorted(os.listdir(source_dir)):
-    if not (fname.endswith('.bgl') or fname.endswith('.rkt')):
+    if not is_beagle_source(fname):
         continue
     fpath = os.path.join(source_dir, fname)
-    module_name = fname[:-4]
+    module_name = strip_beagle_ext(fname)
 
     # Run beagle-provides to get type info
     try:
@@ -689,6 +699,15 @@ golden_dir = sys.argv[1]
 modified_dir = sys.argv[2]
 work_dir = sys.argv[3]
 
+BEAGLE_EXTENSIONS = ('.bclj', '.bcljs', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt')
+def is_beagle_source(fname):
+    return any(fname.endswith(ext) for ext in BEAGLE_EXTENSIONS)
+def strip_beagle_ext(fname):
+    for ext in BEAGLE_EXTENSIONS:
+        if fname.endswith(ext):
+            return fname[:-len(ext)]
+    return fname
+
 # Find functions shared between both builds (with type signatures)
 def extract_functions(build_dir):
     """Parse defn signatures from compiled .clj files."""
@@ -715,10 +734,10 @@ def extract_typed_functions(source_dir, beagle_bin):
     if not source_dir or not os.path.isdir(source_dir):
         return typed
     for fname in sorted(os.listdir(source_dir)):
-        if not (fname.endswith('.bgl') or fname.endswith('.rkt')):
+        if not is_beagle_source(fname):
             continue
         fpath = os.path.join(source_dir, fname)
-        module = fname[:-4]
+        module = strip_beagle_ext(fname)
         try:
             result = subprocess.run(
                 [os.path.join(beagle_bin, 'beagle-provides'), fpath],

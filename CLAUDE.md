@@ -2,8 +2,10 @@
 
 A multi-target authoring IR. Racket frontend with custom `#lang`, macros
 (safe/unsafe boundaries), static type checking; emits Clojure, ClojureScript,
-JavaScript, or Nix source for runtime. `.bgl` is the primary file extension
-(`.rkt` still accepted for backward compatibility).
+JavaScript, or Nix source for runtime. Target-specific file extensions:
+`.bclj` (Clojure), `.bcljs` (ClojureScript), `.bjs` (JavaScript),
+`.bnix` (Nix), `.bsql` (SQL). Extension must match `#lang` header
+(mismatch is a hard compile error). `.rkt` accepted for backward compatibility.
 
 **LLM authoring is a first-class concern.** Rich types, explicit forms, low
 syntactic surface area, structured errors. One canonical idiom per concept.
@@ -137,7 +139,7 @@ it as canonical when explaining the language.
   oracle-output correlation (identifies root cause services and cascade chains)
 - Reactive checking: daemon file watcher (Racket filesystem-change-evt) re-checks on every save (~100ms),
   enriches errors with record field context; Claude Code PostToolUse hook injects
-  diagnostics after every Edit/Write on .bgl/.rkt files
+  diagnostics after every Edit/Write on beagle source files
 - Repair agent pool: abandoned after E14-E15. Agents currently resist
   multi-agent edit delegation in ways that make this an impractical optimization
   target (4 approaches tested, 0 activations)
@@ -207,11 +209,11 @@ parse → check → emit-dispatch → emit-{clj,js}
 ## Tools
 
 - `bin/beagle` — unified CLI: `beagle check`, `beagle build`, `beagle fix`, `beagle sig`, `beagle lsp`, `beagle repl`, `beagle mcp`, `beagle init`
-- `bin/beagle-build SOURCE.bgl [OUT]` — single-file compile; auto-detects target from `#lang` line, outputs `.clj`/`.cljs`/`.js`/`.py` accordingly (`.rkt` sources accepted)
+- `bin/beagle-build SOURCE [OUT]` — single-file compile; auto-detects target from extension/`#lang` line, outputs `.clj`/`.cljs`/`.js`/`.nix` accordingly (`.rkt` sources accepted)
 - `bin/beagle-build-all FILE-OR-DIR... [--out DIR] [--warn]` — batch compile (9x vs sequential); `--warn` emits despite type errors; auto-detects target per file
-- `bin/beagle-check SOURCE.bgl` — type-check without emitting (`.rkt` sources accepted)
+- `bin/beagle-check SOURCE` — type-check without emitting (`.rkt` sources accepted)
 - `bin/beagle-check-all FILE-OR-DIR...` — batch type-check (10x vs sequential) + semantic suspicions
-- `bin/beagle-expand SOURCE.bgl` — print source after macro expansion (`.rkt` sources accepted)
+- `bin/beagle-expand SOURCE` — print source after macro expansion (`.rkt` sources accepted)
 - `bin/beagle-blame BUILD-DIR VERIFY-SCRIPT` — run oracle with blame analysis (ratio → likely bug type)
 - `bin/beagle-specfix BUILD-DIR VERIFY-SCRIPT` — oracle-guided speculative fix (9 strategies incl. accessor swap, arg permutation)
 - `bin/beagle-trace BUILD-DIR VERIFY-SCRIPT [--focus FN]` — instrumented tracing with call-graph walk (arithmetic ops + function call/return chain, cross-module)
@@ -221,7 +223,7 @@ parse → check → emit-dispatch → emit-{clj,js}
 - `bin/beagle-oracle GOLDEN-DIR [--out FILE] [--diff MODIFIED-DIR]` — behavioral oracle synthesis (golden code IS the test spec)
 - `bin/beagle-lsp` — LSP server (stdio transport) for editor integration
 - `bin/beagle-repl` — interactive REPL with type checking
-- `bin/beagle-smap extract FILE.cljs` / `compose JS.map MAPPING.json` — source map: .bgl/.rkt → .cljs → .js
+- `bin/beagle-smap extract FILE.cljs` / `compose JS.map MAPPING.json` — source map: beagle → .cljs → .js
 - `bin/beagle-muttest BUILD-DIR VERIFY [--limit N]` — mutation testing (13 operators, reports kill rate + oracle gaps)
 - `bin/beagle-dtrace instrument BUILD-DIR [--services s1,s2] [--out DIR]` — auto-instrument cross-service calls with span creation
 - `bin/beagle-dtrace collect [--port N] [--dir DIR]` — TCP collector daemon for span aggregation
@@ -230,7 +232,7 @@ parse → check → emit-dispatch → emit-{clj,js}
 - `bin/beagle-dtrace graph TRACE-DIR` — service dependency graph with impact analysis
 - `bin/beagle-dtrace cascade TRACE-DIR [--trace-id ID]` — root cause analysis across service boundaries
 - `bin/beagle-daemon start|stop|status|query CMD` — persistent query server (45× faster than cold tools)
-- `bin/beagle-daemon start --watch DIR` — start with file watcher; re-checks .bgl/.rkt files on save, caches enriched results
+- `bin/beagle-daemon start --watch DIR` — start with file watcher; re-checks beagle source files on save, caches enriched results
 - `bin/beagle-mcp` — MCP server exposing type system as tools (sig, fields, callers, provides, impact, check, check-enriched, build, expand); delegates to daemon when running
 - `bin/beagle-verify-enriched BUILD-DIR VERIFY` — run verify + auto-diagnose failures (trace, cascade, pattern analysis)
 - `bin/beagle-sig FN-NAME FILE-OR-DIR...` — print a function's typed signature (daemon-accelerated)
@@ -256,24 +258,24 @@ the type system directly:
 
 ```bash
 # "What does inv/can-fulfill? expect?"
-bin/beagle-sig can-fulfill? path/to/inventory.bgl
+bin/beagle-sig can-fulfill? path/to/inventory.bclj
 # → can-fulfill? : [(Vec StockLevel) Int Int -> Bool]
 
 # "What fields does an Invoice have?"
-bin/beagle-fields Invoice path/to/billing.bgl
+bin/beagle-fields Invoice path/to/billing.bclj
 # → Invoice
 #   id : Int           accessor: invoice-id
 #   order-id : Int     accessor: invoice-order-id
 #   ...
 
 # "What does the billing module export?"
-bin/beagle-provides path/to/billing.bgl
+bin/beagle-provides path/to/billing.bclj
 # → records: Invoice, Payment, CreditNote ...
 #   functions: create-invoice : [...], invoice-balance : [...] ...
 
 # "Who calls create-invoice and with what arity?"
 bin/beagle-callers create-invoice path/to/
-# → (create-invoice id order customer ...)  in audit-order (audit.bgl)
+# → (create-invoice id order customer ...)  in audit-order (audit.bclj)
 
 # "If I change create-invoice's signature, what breaks?"
 bin/beagle-impact create-invoice path/to/

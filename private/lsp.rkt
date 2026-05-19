@@ -22,7 +22,8 @@
          "query.rkt"
          "types.rkt"
          "check.rkt"
-         "stdlib-types.rkt")
+         "stdlib-types.rkt"
+         "extensions.rkt")
 
 ;; --- JSON-RPC transport -----------------------------------------------------
 
@@ -383,7 +384,7 @@
       (let ([dir (path->string (let-values ([(base _name _must-be-dir?) (split-path (string->path origin-path))])
                                  base))])
         (for/first ([f (in-directory dir)]
-                    #:when (regexp-match? #rx"\\.(bgl|rkt)$" (path->string f))
+                    #:when (regexp-match? BEAGLE-FILE-RX (path->string f))
                     #:when (not (equal? (path->string f) origin-path))
                     #:when (search-file (path->string f)))
           (search-file (path->string f))))))

@@ -18,7 +18,8 @@
          "../private/parse.rkt"
          "../private/check.rkt"
          "../private/error-format.rkt"
-         "../private/query.rkt")
+         "../private/query.rkt"
+         "../private/extensions.rkt")
 
 ;; --- source cache (shared with check-all) ---
 
@@ -174,7 +175,7 @@
 
 (define (find-rkt-files-in dir)
   (for/list ([p (in-directory dir)]
-             #:when (regexp-match? #rx"\\.(bgl|rkt)$" (path->string p)))
+             #:when (regexp-match? BEAGLE-FILE-RX (path->string p)))
     (path->string p)))
 
 (define (expand-args args)
@@ -183,7 +184,7 @@
       (for/list ([a (in-list args)])
         (cond
           [(directory-exists? a) (find-rkt-files-in a)]
-          [(regexp-match? #rx"\\.(bgl|rkt)$" a) (list a)]
+          [(regexp-match? BEAGLE-FILE-RX a) (list a)]
           [else '()])))
     string<?))
 
@@ -203,7 +204,7 @@
    (expand-args file-or-dirs)))
 
 (when (null? files)
-  (eprintf "beagle-fix: no .bgl files found\n")
+  (eprintf "beagle-fix: no beagle source files found\n")
   (exit 2))
 
 (define entries (collect-fixable-errors files))

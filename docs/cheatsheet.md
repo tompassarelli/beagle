@@ -3,6 +3,21 @@
 Everything an LLM needs to ground on. Single canonical reference. Optimized
 for being included as system context.
 
+## File extensions
+
+Each file declares its target via extension:
+
+| Extension | Target | `#lang` |
+|-----------|--------|---------|
+| `.bclj` | Clojure | `#lang beagle` or `#lang beagle/clj` |
+| `.bcljs` | ClojureScript | `#lang beagle/cljs` |
+| `.bjs` | JavaScript | `#lang beagle/js` |
+| `.bnix` | Nix | `#lang beagle/nix` |
+| `.bsql` | SQL | `#lang beagle/sql` |
+| `.rkt` | (legacy) | any |
+
+Extension and `#lang` header must match. Mismatch is a hard compile error.
+
 ## File header
 
 ```racket
@@ -15,7 +30,7 @@ for being included as system context.
 (import java.io.File)          ; Java class import
 ```
 
-For the JavaScript target, use `#lang beagle/js` and `.bgl` file extension:
+For the JavaScript target, use `#lang beagle/js` and `.bjs` file extension:
 
 ```racket
 #lang beagle/js
@@ -380,7 +395,7 @@ functions as `str/split`, `str/trim`, etc. Type checker treats these as Any.
 
 ## JavaScript target (`#lang beagle/js`)
 
-File extension: `.bgl`. Use `#lang beagle/js` or `(define-target js)`.
+File extension: `.bjs`. Use `#lang beagle/js`.
 
 ### Form mapping (beagle → JS)
 

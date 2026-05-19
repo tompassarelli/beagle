@@ -2,7 +2,7 @@
 # beagle-expand: show a beagle program after macro expansion.
 #
 # Usage:
-#   bin/beagle-expand <source.bgl>
+#   bin/beagle-expand <source.bclj|.bjs|.bnix|.bcljs>
 #
 # Prints the expanded beagle source (macros applied, but not yet emitted
 # as Clojure). Use this to audit what your macros actually do.
@@ -10,7 +10,7 @@
 set -euo pipefail
 
 if [[ $# -ne 1 ]]; then
-    echo "usage: beagle-expand <source.bgl>" >&2
+    echo "usage: beagle-expand <source.bclj|.bjs|.bnix|.bcljs>" >&2
     exit 2
 fi
 

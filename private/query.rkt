@@ -3,7 +3,8 @@
 (require racket/match
          racket/format
          "parse.rkt"
-         "types.rkt")
+         "types.rkt"
+         "extensions.rkt")
 
 (define (annotation-marker? sym) (eq? sym ':))
 
@@ -262,7 +263,7 @@
 
 (define (find-rkt-files dir)
   (for/list ([p (in-directory dir)]
-             #:when (regexp-match? #rx"\\.(bgl|rkt)$" (path->string p)))
+             #:when (regexp-match? BEAGLE-FILE-RX (path->string p)))
     (path->string p)))
 
 ;; --- CLI dispatch ------------------------------------------------------------

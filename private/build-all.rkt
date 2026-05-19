@@ -2,12 +2,15 @@
 
 (require racket/path
          racket/file
+         racket/list
+         racket/string
          "parse.rkt"
          "check.rkt"
          "emit.rkt"
          "lint.rkt"
          "error-format.rkt"
-         "query.rkt")
+         "query.rkt"
+         "extensions.rkt")
 
 (define (extension-for-target target)
   (case target
@@ -47,6 +50,16 @@
     ([exn:fail? (lambda (e) (handle-error e #f))])
     (define stxs (read-beagle-syntax path))
     (define prog (parse-program stxs #:source-path path))
+
+    ;; Extension/header mismatch check
+    (define expected-tgt (expected-target-for-extension path))
+    (when (and expected-tgt
+               (not (eq? expected-tgt (program-target prog))))
+      (define ext-str
+        (car (findf (lambda (pair) (string-suffix? path (car pair)))
+                    EXTENSION-TARGET-MAP)))
+      (error (format "extension/header mismatch: ~a expects #lang beagle/~a, found #lang beagle/~a"
+                     ext-str expected-tgt (program-target prog))))
 
     (define ok? #t)
     (type-check-with-locs! prog
@@ -88,9 +101,9 @@
       (for/list ([a (in-list args)])
         (cond
           [(directory-exists? a) (find-rkt-files a)]
-          [(regexp-match? #rx"\\.(bgl|rkt)$" a) (list a)]
+          [(regexp-match? BEAGLE-FILE-RX a) (list a)]
           [else
-           (eprintf "beagle-build-all: skipping non-.bgl file: ~a\n" a)
+           (eprintf "beagle-build-all: skipping non-beagle file: ~a\n" a)
            '()])))
     string<?))
 
@@ -122,7 +135,7 @@
   (define files (expand-args file-args))
 
   (when (null? files)
-    (eprintf "beagle-build-all: no .bgl files found\n")
+    (eprintf "beagle-build-all: no beagle source files found\n")
     (exit 2))
 
   (define json? (json-error-mode?))

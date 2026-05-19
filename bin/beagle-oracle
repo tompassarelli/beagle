@@ -68,6 +68,15 @@ work_dir = sys.argv[4]
 out_file = sys.argv[5]
 diff_dir = sys.argv[6]
 
+BEAGLE_EXTENSIONS = ('.bclj', '.bcljs', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt')
+def is_beagle_source(fname):
+    return any(fname.endswith(ext) for ext in BEAGLE_EXTENSIONS)
+def strip_beagle_ext(fname):
+    for ext in BEAGLE_EXTENSIONS:
+        if fname.endswith(ext):
+            return fname[:-len(ext)]
+    return fname
+
 # ---------------------------------------------------------------------------
 # Extract type information from all modules
 # ---------------------------------------------------------------------------
@@ -76,10 +85,10 @@ modules = {}
 all_records = {}  # RecordName -> {module, fields}
 
 for fname in sorted(os.listdir(source_dir)):
-    if not (fname.endswith('.bgl') or fname.endswith('.rkt')):
+    if not is_beagle_source(fname):
         continue
     fpath = os.path.join(source_dir, fname)
-    module_name = fname[:-4]
+    module_name = strip_beagle_ext(fname)
 
     try:
         result = subprocess.run(

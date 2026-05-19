@@ -2,7 +2,7 @@
 # beagle-check: type-check a beagle file without emitting Clojure.
 #
 # Usage:
-#   bin/beagle-check <source.bgl>
+#   bin/beagle-check <source.bclj|.bjs|.bnix|.bcljs>
 #
 # Exits 0 if the file compiles cleanly, non-zero otherwise. Stderr carries
 # warnings and errors. Stdout is suppressed (no generated Clojure).
@@ -14,7 +14,7 @@
 set -euo pipefail
 
 if [[ $# -ne 1 ]]; then
-    echo "usage: beagle-check <source.bgl>" >&2
+    echo "usage: beagle-check <source.bclj|.bjs|.bnix|.bcljs>" >&2
     exit 2
 fi
 
