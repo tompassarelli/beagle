@@ -20,11 +20,15 @@
    (string-replace
     (string-replace
      (string-replace
-      (string-replace s "_" "__")
-      "-" "_")
-     "?" "_p")
-    "!" "_bang")
-   "=" "_eq"))
+      (string-replace
+       (string-replace
+        (string-replace s "_" "__")
+        "-" "_")
+       "?" "_p")
+      "!" "_bang")
+     "=" "_eq")
+    ">" "_gt")
+   "<" "_lt"))
 
 ;; --- infix operators -------------------------------------------------------
 
@@ -795,10 +799,16 @@
                 #:async? has-await)))]
 
     [(method-call? e)
-     (format "~a.~a(~a)"
-             (emit-expr (method-call-target e))
-             (mangle-str (substring (symbol->string (method-call-method-name e)) 1))
-             (string-join (map emit-expr (method-call-args e)) ", "))]
+     (define method-str (symbol->string (method-call-method-name e)))
+     (if (and (> (string-length method-str) 2)
+              (string=? (substring method-str 0 2) ".-"))
+       (format "~a.~a"
+               (emit-expr (method-call-target e))
+               (mangle-str (substring method-str 2)))
+       (format "~a.~a(~a)"
+               (emit-expr (method-call-target e))
+               (mangle-str (substring method-str 1))
+               (string-join (map emit-expr (method-call-args e)) ", ")))]
 
     [(static-call? e)
      (define s (symbol->string (static-call-class+method e)))

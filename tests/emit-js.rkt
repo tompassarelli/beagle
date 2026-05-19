@@ -595,6 +595,31 @@
      (check-false (string-contains? result "(_x) => _x")
                   "let-bound identity should not get wrapper"))
 
+   ;; --- Mangle: > and < in identifiers ----------------------------------------
+
+   (test-case "mangle > in identifier"
+     (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+                                   '(defn id->ref [(s : String)] : String s))))
+     (check-true (string-contains? result "id__gtref")
+                 (format "expected > mangled to _gt, got:\n~a" result)))
+
+   (test-case "mangle < in identifier"
+     (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+                                   '(defn less<than [(x : Int)] : Int x))))
+     (check-true (string-contains? result "less_ltthan")
+                 (format "expected < mangled to _lt, got:\n~a" result)))
+
+   ;; --- Property access with .- ------------------------------------------------
+
+   (test-case ".-prop emits property access, not method call"
+     (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+                                   '(declare-extern obj Any)
+                                   '(defn f [(obj : Any)] : Any (.-name obj)))))
+     (check-true (string-contains? result "obj.name")
+                 (format "expected property access, got:\n~a" result))
+     (check-false (string-contains? result "obj.name(")
+                  "should not have parens for property access"))
+
    ;; --- JS-NO-EMIT safety net ------------------------------------------------
 
    (test-case "JS-NO-EMIT function emits warning"
