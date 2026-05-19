@@ -18,15 +18,15 @@ source.bclj/.bjs/.bnix → parse → check → emit → output.clj / .js / .nix
 
 ## Core ideas
 
-**S-expressions as structural compression.** Source is close to an AST. Less syntax to hallucinate, less grammar to repair, less distance between source and compiler representation. Structural tools become easier because the source is already structural.
+**S-expressions as structural compression.** Source is close to an AST. That collapses the distance between source and compiler representation, which means repair tooling can be cheap and structural rather than expensive and string-based. Less syntax to hallucinate, less grammar to repair.
 
-**Explicit mutation.** Mutation expands the reasoning search space. Beagle keeps it visible. Pure code can be reasoned about locally. Mutable state and target escape hatches are marked clearly enough that an agent can find the dangerous parts.
+**Explicit mutation.** Agents over-explore mutation-coupled programs because purity isn't legible locally — you can't tell what's safe to move, reorder, or memoize without re-deriving the whole effect structure. Beagle marks mutation explicitly, making that structure cheap to query and collapsing the reasoning search space.
 
 **Authoring-time types.** Types catch mechanical errors during generation — wrong fields, wrong argument shapes, missing cases, invalid interop. Then they disappear. The emitted artifact is ordinary dynamic code.
 
 **Dynamic runtimes as targets.** Clojure stays Clojure. JavaScript stays JavaScript. Nix stays Nix. The authoring layer gives agents one typed structural surface. The emitters translate it into the languages real systems already use.
 
-**Agent-efficiency network effects.** The winning authoring surfaces will be easy to parse, easy to query, easy to repair, compact in context, and familiar enough that current models can already write them. A typed Lisp over dynamic targets has the right shape: familiar enough to bootstrap, structural enough to tool, small enough to improve through self-hosting.
+**Agent-efficiency network effects.** Even a model that rarely hallucinates is cheaper to deploy against a surface where the residual errors are caught at 100ms latency by a checker than one where they survive to runtime. That cost advantage compounds: faster feedback loops, less context burned on string-level fixups, cheaper repair. A typed Lisp over dynamic targets has the right shape — familiar enough to bootstrap, structural enough to tool, small enough to improve through self-hosting.
 
 ## Targets
 
@@ -36,7 +36,7 @@ source.bclj/.bjs/.bnix → parse → check → emit → output.clj / .js / .nix
 - `#lang beagle/nix` — Nix
 - `#lang beagle/sql` — SQL
 
-Same types, same checker, same repair compiler — different backends. Change `#lang beagle/js` to `#lang beagle/clj` and the same program emits Clojure. Target-specific `#lang`s expose target-specific forms (`await` for JS, `fn-set`/`inh`/`with-do` for Nix, Java interop for CLJ).
+Same types, same checker, same repair compiler — different backends. The unification is at the type-system and tooling level: one checker, one repair queue, one query interface across targets. Portable programs can switch `#lang` and re-emit, but most real code uses target-specific forms (`await` for JS, `fn-set`/`inh`/`with-do` for Nix, Java interop for CLJ).
 
 ## A program
 
@@ -68,7 +68,7 @@ Same types, same checker, same repair compiler — different backends. Change `#
 | Best wall time            |   287s |    365s |          255s |
 | Per-bug time              |   8.2s |   10.4s |          8.5s |
 
-The correctness gap is a static-typing result, not a Beagle-specific one. Beagle's advantage over Python is workflow: reactive daemon, structured repair queue, per-bug speed.
+The correctness gap is a static-typing result, not a Beagle-specific one. The per-bug times are noise at this scale. Beagle's real advantage over Python+mypy is the integrated toolchain — reactive daemon, AST cache, structured repair queue, blame and cascade analysis — a substrate advantage that compounds in ways that bolting types onto an existing language doesn't.
 
 [Full methodology and results](experiments/report.md)
 
