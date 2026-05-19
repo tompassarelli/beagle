@@ -2,11 +2,13 @@
 
 (require json
          racket/string
+         racket/list
          "parse.rkt"
          "check.rkt"
          "error-format.rkt"
          "query.rkt"
-         "blame.rkt")
+         "blame.rkt"
+         "extensions.rkt")
 
 ;; --- source line cache ------------------------------------------------------
 
@@ -301,6 +303,17 @@
       (lambda (e) (report-error e #f))])
     (define stxs (read-beagle-syntax path))
     (define prog (parse-program stxs #:source-path path))
+
+    ;; Extension/header mismatch check
+    (define expected-tgt (expected-target-for-extension path))
+    (when (and expected-tgt
+               (not (eq? expected-tgt (program-target prog))))
+      (define ext-str
+        (car (findf (lambda (pair) (string-suffix? path (car pair)))
+                    EXTENSION-TARGET-MAP)))
+      (error (format "extension/header mismatch: ~a expects #lang beagle/~a, found #lang beagle/~a"
+                     ext-str expected-tgt (program-target prog))))
+
     (type-check-with-locs! prog
       (lambda (e loc-stx)
         (report-error e loc-stx)))
@@ -315,9 +328,9 @@
       (for/list ([a (in-list args)])
         (cond
           [(directory-exists? a) (find-rkt-files a)]
-          [(regexp-match? #rx"\\.(bgl|rkt)$" a) (list a)]
+          [(regexp-match? BEAGLE-FILE-RX a) (list a)]
           [else
-           (eprintf "beagle-check-all: skipping non-.bgl file: ~a\n" a)
+           (eprintf "beagle-check-all: skipping non-beagle file: ~a\n" a)
            '()])))
     string<?))
 
@@ -329,7 +342,7 @@
   (define files (expand-args args))
 
   (when (null? files)
-    (eprintf "beagle-check-all: no .bgl files found\n")
+    (eprintf "beagle-check-all: no beagle source files found\n")
     (exit 2))
 
   (define json? (json-error-mode?))

@@ -129,7 +129,7 @@ def extract_module_from_path(path):
     if not path or path == '?':
         return None
     base = os.path.basename(path)
-    for ext in ['.bgl', '.rkt', '.clj']:
+    for ext in ['.bclj', '.bcljs', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt', '.clj']:
         if base.endswith(ext):
             return base[:-len(ext)]
     return None
@@ -319,12 +319,11 @@ for output_file_name in ['build-output.txt', 'check-output.json']:
                 path = ctx_m.group(1)
                 # Extract module name from path
                 base = os.path.basename(path)
-                if base.endswith('.bgl'):
-                    current_module = base.replace('.bgl', '')
-                elif base.endswith('.rkt'):
-                    current_module = base.replace('.rkt', '')
-                else:
-                    current_module = None
+                current_module = None
+                for _ext in ('.bclj', '.bcljs', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt'):
+                    if base.endswith(_ext):
+                        current_module = base[:-len(_ext)]
+                        break
                 continue
             # Parse SUSPECT line
             susp_m = re.match(r'\s+SUSPECT \[([0-9.]+)\]: ([\w?!<>*+\-/]+): (.+)', line)
@@ -453,20 +452,22 @@ auto_count = sum(1 for r in merged if r['auto_applicable'] and r['confidence'] >
 # --emit-patch: unified diff output for machine consumption
 # ---------------------------------------------------------------------------
 def resolve_source_file(repair_entry):
-    """Find the .rkt source file corresponding to a repair entry."""
+    """Find the beagle source file corresponding to a repair entry."""
     f = repair_entry.get('file', '?')
     if f == '?' or not f:
         return None
-    # Try as-is (might be absolute path to .rkt)
+    # Try as-is (might be absolute path)
     if os.path.exists(f):
         return f
-    # Try source_dir + .rkt version
+    # Try source_dir + beagle extension versions
     base = os.path.basename(f)
-    for ext_from, ext_to in [('.clj', '.bgl'), ('.clj', '.rkt'), ('.clj', '.clj')]:
+    source_exts = ('.bclj', '.bcljs', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt')
+    for ext_from in ('.clj', '.cljs', '.js', '.nix'):
         if base.endswith(ext_from):
-            candidate = os.path.join(source_dir, base[:-len(ext_from)] + ext_to)
-            if os.path.exists(candidate):
-                return candidate
+            for ext_to in source_exts:
+                candidate = os.path.join(source_dir, base[:-len(ext_from)] + ext_to)
+                if os.path.exists(candidate):
+                    return candidate
     # Try just the basename in source_dir
     candidate = os.path.join(source_dir, base)
     if os.path.exists(candidate):

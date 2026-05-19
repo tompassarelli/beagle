@@ -16,7 +16,7 @@ at compile time.
 (import java.io.File)                  ; Java class import
 ```
 
-For JavaScript target: `#lang beagle/js` with `.bgl` file extension.
+File extensions: `.bclj` (Clojure), `.bcljs` (CLJS), `.bjs` (JS), `.bnix` (Nix). Extension must match `#lang`.
 
 `(require module :as alias)` imports everything — types, records, functions,
 macros. You do NOT need `declare-extern` for cross-module beagle calls.
@@ -164,7 +164,7 @@ Only annotate when narrowing: `(let [(x : Product) (find-product id)] ...)`.
 
 ## JavaScript target
 
-Use `#lang beagle/js` (file extension `.bgl`). Forms emit JS: `defn` →
+Use `#lang beagle/js` (file extension `.bjs`). Forms emit JS: `defn` →
 `function`, `def` → `const`, `fn` → arrow, `defrecord` → `Object.freeze`,
 `nil` → `null`. Async support: `(await expr)` with `(Promise T)` type;
 functions containing `await` are auto-async. Identifiers mangled: `-` → `_`,

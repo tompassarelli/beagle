@@ -17,7 +17,7 @@ Commands:
                             Auto-fix high-confidence type errors
   sig <fn-name> <path...>   Print a function's typed signature
   fields <record> <path...> Print record fields, types, accessors
-  expand <file.bgl>         Show source after macro expansion
+  expand <file>              Show source after macro expansion
   lsp                       Start LSP server (stdio)
   repl                      Start typed REPL
   mcp                       Start MCP server (stdio)
@@ -102,12 +102,12 @@ case "$cmd" in
             mkdir -p "$target/.claude/hooks"
             cat > "$target/.claude/hooks/beagle-check.sh" <<'HOOK'
 #!/usr/bin/env bash
-# PostToolUse hook: type-check .rkt files after edit/write.
+# PostToolUse hook: type-check beagle files after edit/write.
 # Auto-starts daemon if not running. Queries daemon for instant results.
 set -euo pipefail
 INPUT=$(cat)
 FILE=$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_input',{}).get('file_path',''))" 2>/dev/null || true)
-[[ "$FILE" == *.rkt ]] || exit 0
+[[ "$FILE" == *.bclj || "$FILE" == *.bcljs || "$FILE" == *.bjs || "$FILE" == *.bnix || "$FILE" == *.bsql || "$FILE" == *.bpy || "$FILE" == *.bgl || "$FILE" == *.rkt ]] || exit 0
 
 PORT_FILE="${BEAGLE_DAEMON_PORTFILE:-/var/tmp/beagle-daemon.port}"
 

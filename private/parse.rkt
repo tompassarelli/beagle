@@ -6,7 +6,8 @@
 
 (require racket/match
          "types.rkt"
-         "macros.rkt")
+         "macros.rkt"
+         "extensions.rkt")
 
 (define BT BRACKET-TAG)
 (define MT MAP-TAG)
@@ -298,7 +299,7 @@
                                         (path->complete-path source-path)))])
              d))
          (define (try-extensions dir-prefix)
-           (for/or ([ext '(".bgl" ".rkt")])
+           (for/or ([ext BEAGLE-EXTENSIONS])
              (define p (if (null? dir-prefix)
                          (build-path source-dir (string-append base-name ext))
                          (apply build-path source-dir

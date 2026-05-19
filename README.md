@@ -15,7 +15,7 @@ The thesis is simple: **mechanical bugs should not require cognition.**
 Shape errors should be caught by types. Checker failures become ranked, machine-actionable repair candidates. Runtime failures can be routed into the same repair workflow. The goal is to spend zero reasoning tokens on mechanical fixes — the agent's budget goes to semantic bugs that actually require judgment.
 
 ```text
-source.bgl → parse → check → emit → output.clj / .cljs / .js
+source.bclj/.bjs/.bnix → parse → check → emit → output.clj / .js / .nix
                        ↑
               repair compiler
                        ↑
@@ -96,7 +96,7 @@ beagle init --claude-code
 beagle-daemon start --watch .
 ```
 
-Generates a PostToolUse hook, settings, `CLAUDE.md`, and language context. The daemon gives instant type feedback on every `.bgl`/`.rkt` edit and re-checks within ~100ms of each save.
+Generates a PostToolUse hook, settings, `CLAUDE.md`, and language context. The daemon gives instant type feedback on every beagle source edit (`.bclj`, `.bjs`, `.bnix`, etc.) and re-checks within ~100ms of each save.
 
 MCP:
 

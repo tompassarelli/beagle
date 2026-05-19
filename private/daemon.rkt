@@ -36,7 +36,8 @@
          "check-all.rkt"
          "query.rkt"
          "blame.rkt"
-         "types.rkt")
+         "types.rkt"
+         "extensions.rkt")
 
 ;; --- Cache -------------------------------------------------------------------
 
@@ -62,7 +63,7 @@
       (cond
         [(directory-exists? a)
          (for/list ([f (in-directory a)]
-                    #:when (regexp-match? #rx"\\.(bgl|rkt)$" (path->string f)))
+                    #:when (regexp-match? BEAGLE-FILE-RX (path->string f)))
            (path->string f))]
         [(file-exists? a) (list a)]
         [else '()]))))
@@ -227,7 +228,7 @@
 (define (start-dir-watcher dir)
   (define (scan-and-watch)
     (for ([f (in-directory dir)]
-          #:when (regexp-match? #rx"\\.(bgl|rkt)$" (path->string f)))
+          #:when (regexp-match? BEAGLE-FILE-RX (path->string f)))
       (define p (path->string f))
       (start-file-watcher p)
       (run-check-and-cache! p)))

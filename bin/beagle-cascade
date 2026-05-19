@@ -55,6 +55,15 @@ verify_script = sys.argv[4]
 modified_fns_str = sys.argv[5]
 from_failures = sys.argv[6] == 'true'
 
+BEAGLE_EXTENSIONS = ('.bclj', '.bcljs', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt')
+def is_beagle_source(fname):
+    return any(fname.endswith(ext) for ext in BEAGLE_EXTENSIONS)
+def strip_beagle_ext(fname):
+    for ext in BEAGLE_EXTENSIONS:
+        if fname.endswith(ext):
+            return fname[:-len(ext)]
+    return fname
+
 # ---------------------------------------------------------------------------
 # Build call graph from beagle-callers
 # ---------------------------------------------------------------------------
@@ -66,10 +75,10 @@ reverse_graph = defaultdict(set)  # callee -> set of callers
 # Get all exports from all modules
 modules = []
 for fname in sorted(os.listdir(source_dir)):
-    if not (fname.endswith('.bgl') or fname.endswith('.rkt')):
+    if not is_beagle_source(fname):
         continue
     fpath = os.path.join(source_dir, fname)
-    module_name = fname[:-4]
+    module_name = strip_beagle_ext(fname)
     modules.append((module_name, fpath))
 
     try:

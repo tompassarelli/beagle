@@ -16,11 +16,13 @@
 ;; Or use bin/beagle-build to auto-derive the path from (define-namespace ...).
 
 (require (for-syntax racket/base
+                     racket/string
                      "private/parse.rkt"
                      "private/check.rkt"
                      "private/emit.rkt"
                      "private/lint.rkt"
-                     "private/error-format.rkt"))
+                     "private/error-format.rkt"
+                     "private/extensions.rkt"))
 
 (provide #%datum
          #%app
@@ -46,6 +48,22 @@
        (define prog
          (with-handlers ([exn:fail? handle-error])
            (parse-program forms #:source-path (syntax-source stx))))
+
+       ;; Extension/header mismatch check
+       (let ([src-path (syntax-source stx)])
+         (when src-path
+           (define path-str (if (path? src-path) (path->string src-path) src-path))
+           (when (string? path-str)
+             (define expected-tgt (expected-target-for-extension path-str))
+             (when (and expected-tgt
+                        (not (eq? expected-tgt (program-target prog))))
+               (define ext-str
+                 (car (findf (lambda (pair) (string-suffix? path-str (car pair)))
+                             EXTENSION-TARGET-MAP)))
+               (raise-syntax-error 'beagle
+                 (format "extension/header mismatch: ~a expects #lang beagle/~a, found #lang beagle/~a"
+                         ext-str expected-tgt (program-target prog))
+                 stx)))))
 
        (type-check-with-locs! prog handle-error)
 

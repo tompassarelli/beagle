@@ -2,7 +2,7 @@
 # beagle-build: compile a beagle source file to target output.
 #
 # Usage:
-#   bin/beagle-build <source.bgl> [output]
+#   bin/beagle-build <source.bclj|.bjs|.bnix|.bcljs|.bsql> [output]
 #
 # If the output path is omitted, it is derived from the namespace declared
 # in the source via (ns ...) and dropped under runtime/src/.
@@ -11,7 +11,7 @@
 set -euo pipefail
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
-    echo "usage: beagle-build <source.bgl> [output.clj]" >&2
+    echo "usage: beagle-build <source.bclj|.bjs|.bnix|.bcljs> [output]" >&2
     exit 2
 fi
 
@@ -23,20 +23,31 @@ if [[ ! -f "$src" ]]; then
     exit 1
 fi
 
-## detect target from source or #lang
+## detect target from file extension, then fall back to source content
 ext="clj"
-if grep -qE '^\(define-target[[:space:]]+cljs\)' "$src" 2>/dev/null; then
-    ext="cljs"
-elif grep -qE '^\(define-target[[:space:]]+js\)' "$src" 2>/dev/null || \
-     grep -qE '^#lang beagle/js' "$src" 2>/dev/null; then
-    ext="js"
-elif grep -qE '^\(define-target[[:space:]]+py\)' "$src" 2>/dev/null || \
-     grep -qE '^#lang beagle/py' "$src" 2>/dev/null; then
-    ext="py"
-elif grep -qE '^\(define-target[[:space:]]+nix\)' "$src" 2>/dev/null || \
-     grep -qE '^#lang beagle/nix' "$src" 2>/dev/null; then
-    ext="nix"
-fi
+case "$src" in
+    *.bcljs) ext="cljs" ;;
+    *.bjs)   ext="js" ;;
+    *.bnix)  ext="nix" ;;
+    *.bsql)  ext="sql" ;;
+    *.bpy)   ext="py" ;;
+    *.bclj)  ext="clj" ;;
+    *)
+        # Legacy .bgl/.rkt: detect from file content
+        if grep -qE '^\(define-target[[:space:]]+cljs\)' "$src" 2>/dev/null; then
+            ext="cljs"
+        elif grep -qE '^\(define-target[[:space:]]+js\)' "$src" 2>/dev/null || \
+             grep -qE '^#lang beagle/js' "$src" 2>/dev/null; then
+            ext="js"
+        elif grep -qE '^\(define-target[[:space:]]+py\)' "$src" 2>/dev/null || \
+             grep -qE '^#lang beagle/py' "$src" 2>/dev/null; then
+            ext="py"
+        elif grep -qE '^\(define-target[[:space:]]+nix\)' "$src" 2>/dev/null || \
+             grep -qE '^#lang beagle/nix' "$src" 2>/dev/null; then
+            ext="nix"
+        fi
+        ;;
+esac
 
 if [[ $# -eq 2 ]]; then
     out="$2"

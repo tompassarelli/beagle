@@ -55,7 +55,7 @@
       (check-equal? "" (get-output-string output)))))
 
 ;; =============================================================================
-;; Fixture infrastructure — reads .bgl files with the beagle reader
+;; Fixture infrastructure — reads beagle source files with the beagle reader
 ;; =============================================================================
 
 (define fixtures-dir
@@ -237,38 +237,38 @@
 ;; =============================================================================
 
 (check-fixture-ok "if nil? narrows union in else branch"
-  "narrow-nil-if.bgl")
+  "narrow-nil-if.bclj")
 
 (check-fixture-ok "if some? narrows union in then branch"
-  "narrow-some-if.bgl")
+  "narrow-some-if.bclj")
 
 (check-fixture-ok "if (= x nil) narrows like nil?"
-  "narrow-eq-nil.bgl")
+  "narrow-eq-nil.bclj")
 
 (check-fixture-ok "if (= nil x) narrows like nil?"
-  "narrow-nil-eq.bgl")
+  "narrow-nil-eq.bclj")
 
 (check-fixture-ok "if (not (nil? x)) flips narrowing"
-  "narrow-not-nil.bgl")
+  "narrow-not-nil.bclj")
 
 (check-fixture-ok "if string? narrows in then branch"
-  "narrow-string-if.bgl")
+  "narrow-string-if.bclj")
 
 (check-fixture-ok "when narrows body"
-  "narrow-when.bgl")
+  "narrow-when.bclj")
 
 (check-fixture-ok "cond threads narrowing across clauses"
-  "narrow-cond.bgl")
+  "narrow-cond.bclj")
 
 ;; =============================================================================
 ;; Tests — polymorphic function types (fixtures)
 ;; =============================================================================
 
 (check-fixture-ok "mapv infers (Vec Int) return from inc"
-  "poly-mapv.bgl")
+  "poly-mapv.bclj")
 
 (check-fixture-ok "filterv infers (Vec Int) return from even?"
-  "poly-filterv.bgl")
+  "poly-filterv.bclj")
 
 (check-ok "identity preserves type through annotation"
   '(def x : Int (identity 42)))
@@ -278,7 +278,7 @@
   '(def ys (map "not-a-fn" xs)))
 
 (check-fixture-ok "polymorphic declare-extern via forall"
-  "poly-forall.bgl")
+  "poly-forall.bclj")
 
 ;; =============================================================================
 ;; Tests — cross-file type imports
@@ -322,7 +322,7 @@
 
 (define shapes-fixture-source
   (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
-    (build-path dir "fixtures" "shapes.bgl")))
+    (build-path dir "fixtures" "shapes.bclj")))
 
 (check-ok/source "cross-file defrecord: constructor callable with prefix" shapes-fixture-source
   '(require shapes)
@@ -370,19 +370,19 @@
 ;; =============================================================================
 
 (check-fixture-ok "defrecord: constructor type-checks"
-  "defrecord-ok.bgl")
+  "defrecord-ok.bclj")
 
 (check-fixture-err "defrecord: constructor wrong arg type errors"
-  "defrecord-wrong-arg.bgl")
+  "defrecord-wrong-arg.bclj")
 
 (check-fixture-err "defrecord: constructor wrong arity errors"
-  "defrecord-wrong-arity.bgl")
+  "defrecord-wrong-arity.bclj")
 
 (check-fixture-ok "defrecord: accessor returns correct type"
-  "defrecord-accessor-ok.bgl")
+  "defrecord-accessor-ok.bclj")
 
 (check-fixture-err "defrecord: accessor wrong return type errors"
-  "defrecord-accessor-wrong-type.bgl")
+  "defrecord-accessor-wrong-type.bclj")
 
 ;; =============================================================================
 ;; Tests — Java interop
@@ -499,20 +499,20 @@
   '(def x (:age m "fallback")))
 
 (check-fixture-ok "keyword access on record returns field type"
-  "keyword-record-ok.bgl")
+  "keyword-record-ok.bclj")
 
 (check-fixture-err "keyword access on record catches type mismatch"
-  "keyword-record-mismatch.bgl")
+  "keyword-record-mismatch.bclj")
 
 ;; =============================================================================
 ;; Tests — defprotocol (fixtures)
 ;; =============================================================================
 
 (check-fixture-ok "defprotocol methods are typed in env"
-  "protocol-typed.bgl")
+  "protocol-typed.bclj")
 
 (check-fixture-err "defprotocol method arity checked"
-  "protocol-arity-err.bgl")
+  "protocol-arity-err.bclj")
 
 ;; =============================================================================
 ;; Tests — defmulti / defmethod
@@ -522,45 +522,45 @@
   '(defmulti greeting :lang))
 
 (check-fixture-ok "defmethod body is type-checked"
-  "defmethod-ok.bgl")
+  "defmethod-ok.bclj")
 
 ;; =============================================================================
 ;; Tests — destructuring (fixtures)
 ;; =============================================================================
 
 (check-fixture-ok "map destructure bindings visible in body"
-  "destructure-map-defn.bgl")
+  "destructure-map-defn.bclj")
 
 (check-fixture-ok "map destructure in let bindings visible"
-  "destructure-map-let.bgl")
+  "destructure-map-let.bclj")
 
 (check-fixture-ok "sequential destructure bindings visible in body"
-  "destructure-seq-defn.bgl")
+  "destructure-seq-defn.bclj")
 
 (check-fixture-ok "sequential destructure with & rest visible"
-  "destructure-seq-rest.bgl")
+  "destructure-seq-rest.bclj")
 
 (check-fixture-ok "sequential destructure in let visible"
-  "destructure-seq-let.bgl")
+  "destructure-seq-let.bclj")
 
 ;; =============================================================================
 ;; Tests — deftype / extend-type (fixtures)
 ;; =============================================================================
 
 (check-fixture-ok "deftype passes type check"
-  "deftype-ok.bgl")
+  "deftype-ok.bclj")
 
 (check-fixture-ok "deftype with protocol impl passes"
-  "deftype-protocol-impl.bgl")
+  "deftype-protocol-impl.bclj")
 
 (check-fixture-ok "deftype constructor is typed"
-  "deftype-constructor-ok.bgl")
+  "deftype-constructor-ok.bclj")
 
 (check-fixture-err "deftype constructor wrong arg type errors"
-  "deftype-constructor-wrong-arg.bgl")
+  "deftype-constructor-wrong-arg.bclj")
 
 (check-fixture-ok "extend-type passes type check"
-  "extend-type-ok.bgl")
+  "extend-type-ok.bclj")
 
 ;; =============================================================================
 ;; Tests — threading macros
@@ -577,19 +577,19 @@
 ;; =============================================================================
 
 (check-fixture-ok "with on known record type passes"
-  "with-ok.bgl")
+  "with-ok.bclj")
 
 (check-fixture-ok "with returns same record type"
-  "with-returns-type.bgl")
+  "with-returns-type.bclj")
 
 (check-fixture-err "with catches wrong field type"
-  "with-wrong-field-type.bgl")
+  "with-wrong-field-type.bclj")
 
 (check-fixture-err "with catches unknown field"
-  "with-unknown-field.bgl")
+  "with-unknown-field.bclj")
 
 (check-fixture-ok "with in defn with typed param"
-  "with-in-defn.bgl")
+  "with-in-defn.bclj")
 
 ;; =============================================================================
 ;; Tests — defenum
@@ -604,109 +604,109 @@
 
 (check-fixture-warns "match without wildcard warns about missing record types"
   #rx"non-exhaustive"
-  "match-exhaustive-warn.bgl")
+  "match-exhaustive-warn.bclj")
 
 (check-fixture-warns "match with wildcard and sibling records emits note"
   #rx"wildcard covers 1 sibling"
-  "match-wildcard-sibling-warn.bgl")
+  "match-wildcard-sibling-warn.bclj")
 
 (check-fixture-silent "match with wildcard and non-sibling records stays silent"
-  "match-wildcard-non-sibling-silent.bgl")
+  "match-wildcard-non-sibling-silent.bclj")
 
 ;; =============================================================================
 ;; Tests — defunion (fixtures)
 ;; =============================================================================
 
 (check-fixture-ok "defunion type-checks without error"
-  "defunion-ok.bgl")
+  "defunion-ok.bclj")
 
 (check-fixture-ok "defunion match with all members passes"
-  "defunion-match-all.bgl")
+  "defunion-match-all.bclj")
 
 (check-fixture-err/rx "defunion match missing member raises error"
   #rx"not exhaustive"
-  "defunion-match-missing.bgl")
+  "defunion-match-missing.bclj")
 
 (check-fixture-err/rx "defunion match with wildcard still raises error"
   #rx"not exhaustive"
-  "defunion-match-wildcard.bgl")
+  "defunion-match-wildcard.bclj")
 
 (check-fixture-ok "defunion member is compatible with union type"
-  "defunion-member-compat.bgl")
+  "defunion-member-compat.bclj")
 
 ;; =============================================================================
 ;; Tests — defscalar (fixtures)
 ;; =============================================================================
 
 (check-fixture-ok "defscalar type-checks without error"
-  "defscalar-ok.bgl")
+  "defscalar-ok.bclj")
 
 (check-fixture-err "defscalar types are incompatible with each other"
-  "defscalar-incompatible.bgl")
+  "defscalar-incompatible.bclj")
 
 (check-fixture-err "defscalar type is incompatible with its backing type"
-  "defscalar-vs-backing.bgl")
+  "defscalar-vs-backing.bclj")
 
 (check-fixture-ok "defscalar accessor unwraps to backing type"
-  "defscalar-accessor.bgl")
+  "defscalar-accessor.bclj")
 
 (check-fixture-err "defscalar prevents passing backing type where scalar expected"
-  "defscalar-call-site.bgl")
+  "defscalar-call-site.bclj")
 
 (check-fixture-ok "defscalar :where with valid literal passes"
-  "defscalar-pred-ok.bgl")
+  "defscalar-pred-ok.bclj")
 
 (check-fixture-err/rx "defscalar :where rejects literal below range"
   #rx"violates constraint"
-  "defscalar-pred-fail-low.bgl")
+  "defscalar-pred-fail-low.bclj")
 
 (check-fixture-err/rx "defscalar :where rejects literal above range"
   #rx"violates constraint"
-  "defscalar-pred-fail-high.bgl")
+  "defscalar-pred-fail-high.bclj")
 
 (check-fixture-ok "defscalar :where with dynamic arg passes (no compile-time check)"
-  "defscalar-pred-dynamic.bgl")
+  "defscalar-pred-dynamic.bclj")
 
 ;; --- collection element type inference ---
 
 (check-fixture-ok "vec of records infers element type"
-  "vec-element-type.bgl")
+  "vec-element-type.bclj")
 
 (check-fixture-err "vec element type mismatch caught"
-  "vec-element-type-mismatch.bgl")
+  "vec-element-type-mismatch.bclj")
 
 (check-fixture-ok "empty vec is (Vec Any), compatible with any (Vec T)"
-  "vec-empty-compatible.bgl")
+  "vec-empty-compatible.bclj")
 
 ;; --- destructuring record field type propagation ---
 
 (check-fixture-ok "destructured record field has correct type"
-  "destr-record-field-ok.bgl")
+  "destr-record-field-ok.bclj")
 
 (check-fixture-err "destructured record field type mismatch caught"
-  "destr-record-field-err.bgl")
+  "destr-record-field-err.bclj")
 
 ;; --- for-comprehension element type propagation ---
 
 (check-fixture-ok "for binding inherits element type from collection"
-  "for-element-type.bgl")
+  "for-element-type.bclj")
 
 (check-fixture-err "for return type mismatch caught"
-  "for-element-type-err.bgl")
+  "for-element-type-err.bclj")
 
 ;; --- branching return type inference ---
 
 (check-fixture-ok "if with divergent branches infers union type"
-  "if-union-return.bgl")
+  "if-union-return.bclj")
 
 (check-fixture-err "if union return rejects non-nullable annotation"
-  "if-union-return-err.bgl")
+  "if-union-return-err.bclj")
 
 (check-fixture-ok "try infers body+catch return type"
-  "try-infers-body-type.bgl")
+  "try-infers-body-type.bclj")
 
 (check-fixture-ok "match arms with same type infer that type"
-  "match-union-return.bgl")
+  "match-union-return.bclj")
 
 ;; --- CLJS target tests ---
 
