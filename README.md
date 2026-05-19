@@ -2,6 +2,8 @@
 
 A typed Lisp authoring layer for agent-written dynamic code.
 
+It replaces the pattern where agents generate raw target-language source and hope — instead they get a compiler, checker, and repair queue between intent and artifact.
+
 The language used to author software does not need to be the same language used to run it. Dynamic languages are excellent runtime targets — Clojure, JavaScript, Nix, SQL — but weak surfaces for code-generation agents. Too many mechanical errors survive until runtime: wrong fields, wrong arities, malformed branches, broken delimiters, implicit mutation.
 
 Beagle separates the authoring surface from the runtime artifact. Agents write typed, structural source. Beagle checks it, queries it, repairs it, and emits ordinary target code.
@@ -26,7 +28,7 @@ source.bclj/.bjs/.bnix → parse → check → emit → output.clj / .js / .nix
 
 **Dynamic runtimes as targets.** Clojure stays Clojure. JavaScript stays JavaScript. Nix stays Nix. The authoring layer gives agents one typed structural surface. The emitters translate it into the languages real systems already use.
 
-**Agent-efficiency network effects.** Even a model that rarely hallucinates is cheaper to deploy against a surface where the residual errors are caught at 100ms latency by a checker than one where they survive to runtime. That cost advantage compounds: faster feedback loops, less context burned on string-level fixups, cheaper repair. A typed Lisp over dynamic targets has the right shape — familiar enough to bootstrap, structural enough to tool, small enough to improve through self-hosting.
+**Agent-efficiency network effects.** Even a model that rarely hallucinates is cheaper to deploy against a surface where the residual errors are caught at 100ms latency by a checker than one where they survive to runtime. That cost advantage compounds: faster feedback loops, less context burned on string-level fixups, cheaper repair. A typed Lisp over dynamic targets has the right shape — familiar enough to bootstrap, structural enough to tool.
 
 ## Targets
 
