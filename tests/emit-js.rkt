@@ -207,6 +207,20 @@
        (loop [i n]
          (if (= i 0) i (recur (- i 1))))))
 
+   (check-js-contains "loop with let containing recur → const, not IIFE"
+     "const c ="
+     '(defn scan [(s : String) (n : Int)] : Int
+       (loop [i 0]
+         (let [c (.charCodeAt s i)]
+           (if (= c n) i (recur (+ i 1)))))))
+
+   (check-js-contains "loop with let + recur has continue at correct level"
+     "continue;"
+     '(defn scan [(s : String) (n : Int)] : Int
+       (loop [i 0]
+         (let [c (.charCodeAt s i)]
+           (if (= c n) i (recur (+ i 1)))))))
+
    (check-js-contains "try/catch → try block"
      "try {"
      '(defn safe [(x : Int)] : Int

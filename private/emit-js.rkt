@@ -583,7 +583,11 @@
         (~v (mangle-str (substring (symbol->string e) 1)))]
        [(js-bound? e) (mangle-name e)]
        [(hash-ref JS-VALUE-WRAPPERS e #f) => values]
-       [else (mangle-name e)])]
+       [else
+        (let ([m (mangle-name e)])
+          (if (string-contains? m "/")
+              (string-replace m "/" ".")
+              m))])]
     [(quoted? e)        (emit-quoted (quoted-datum e))]
     [(regex-lit? e)     (format "/~a/" (regex-lit-pattern e))]
 
@@ -929,9 +933,12 @@
             [else (mangle-name fn-sym)]))
         (define qualified
           (let ([mod-prefix (hash-ref (current-js-symbol-ns) fn-sym #f)])
-            (if (and mod-prefix (not (string-contains? mangled "/")))
-                (string-append (mangle-name mod-prefix) "." mangled)
-                mangled)))
+            (cond
+              [(and mod-prefix (not (string-contains? mangled "/")))
+               (string-append (mangle-name mod-prefix) "." mangled)]
+              [(string-contains? mangled "/")
+               (string-replace mangled "/" ".")]
+              [else mangled])))
         (format "~a(~a)"
                 qualified
                 (string-join (map emit-expr args) ", "))])]
@@ -1195,7 +1202,22 @@
     [(if-form? e)
      (or (expr-contains-recur? (if-form-then-expr e))
          (and (if-form-else-expr e) (expr-contains-recur? (if-form-else-expr e))))]
+    [(let-form? e)
+     (body-contains-recur? (let-form-body e))]
+    [(cond-form? e)
+     (for/or ([c (in-list (cond-form-clauses e))])
+       (body-contains-recur? (cond-clause-body c)))]
+    [(when-let-form? e)
+     (body-contains-recur? (when-let-form-body e))]
+    [(if-let-form? e)
+     (or (expr-contains-recur? (if-let-form-then-body e))
+         (and (if-let-form-else-body e)
+              (expr-contains-recur? (if-let-form-else-body e))))]
     [else #f]))
+
+(define (body-contains-recur? body)
+  (for/or ([e (in-list body)])
+    (expr-contains-recur? e)))
 
 (define (emit-recur-stmts e bind-names)
   (define temps
@@ -1217,6 +1239,31 @@
        (let ([else-str (emit-loop-stmt (if-form-else-expr e) bind-names)])
          (format "if (~a) { ~a } else { ~a }" cond-str then-str else-str))
        (format "if (~a) { ~a }" cond-str then-str))]
+    [(and (let-form? e) (body-contains-recur? (let-form-body e)))
+     (define let-names (apply append (map (lambda (b) (names-from-binding-target (let-binding-name b))) (let-form-bindings e))))
+     (define binding-strs
+       (for/list ([b (in-list (let-form-bindings e))])
+         (format "const ~a = ~a;"
+                 (emit-binding-target (let-binding-name b))
+                 (emit-expr (let-binding-value b)))))
+     (with-bindings let-names
+       (lambda ()
+         (define body-str
+           (string-join (map (lambda (x) (emit-loop-stmt x bind-names)) (let-form-body e)) " "))
+         (string-append (string-join binding-strs " ") " " body-str)))]
+    [(and (cond-form? e) (for/or ([c (in-list (cond-form-clauses e))]) (body-contains-recur? (cond-clause-body c))))
+     (define parts
+       (for/list ([c (in-list (cond-form-clauses e))])
+         (define test (cond-clause-test c))
+         (define body (cond-clause-body c))
+         (define body-str
+           (string-join (map (lambda (x) (emit-loop-stmt x bind-names)) body) " "))
+         (cond
+           [(and (symbol? test) (eq? test ':else))
+            (format "{ ~a }" body-str)]
+           [else
+            (format "if (~a) { ~a }" (emit-expr test) body-str)])))
+     (string-join parts " else ")]
     [(recur-form? e)
      (emit-recur-stmts e bind-names)]
     [else

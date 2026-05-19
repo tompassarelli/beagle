@@ -572,4 +572,34 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
      "console.log(JSON.stringify(f([1,2,3])));"
      "[10,20,30]")
 
+   (check-js-output "loop with let containing recur"
+     (list '(defn find-char [(s : String) (target : Int)] : Int
+              (loop [i 0]
+                (let [c (.charCodeAt s i)]
+                  (if (= c target) i (recur (+ i 1)))))))
+     "console.log(find_char('hello', 108));"
+     "2")
+
+   (check-js-output "loop with nested let containing recur"
+     (list '(defn sum-until [(xs : (Vec Int)) (limit : Int)] : Int
+              (loop [i 0 total 0]
+                (if (>= i (count xs)) total
+                  (let [v (nth xs i)]
+                    (if (>= (+ total v) limit) total
+                      (recur (+ i 1) (+ total v))))))))
+     "console.log(sum_until([1,2,3,4,5], 7));"
+     "6")
+
+   (check-js-output "loop with cond containing recur"
+     (list '(defn classify-first [(xs : (Vec Int))] : String
+              (loop [i 0]
+                (if (>= i (count xs)) "none"
+                  (let [v (nth xs i)]
+                    (cond
+                      (> v 100) "big"
+                      (> v 10) "medium"
+                      :else (recur (+ i 1))))))))
+     "console.log(classify_first([1,5,50,200]));"
+     "medium")
+
  )))
