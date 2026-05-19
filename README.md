@@ -1,20 +1,12 @@
 # Beagle
 
-Beagle is an agent-native typed authoring layer for dynamic languages. It gives coding agents a compiler, repair queue, and structural query tools, then emits ordinary source in the target language.
+A typed Lisp authoring layer for agent-written dynamic code.
 
-Currently supported targets:
+The language used to author software does not need to be the same language used to run it. Dynamic languages are excellent runtime targets — Clojure, JavaScript, Nix, SQL — but weak surfaces for code-generation agents. Too many mechanical errors survive until runtime: wrong fields, wrong arities, malformed branches, broken delimiters, implicit mutation.
 
-- `#lang beagle/clj` — Clojure
-- `#lang beagle/cljs` — ClojureScript
-- `#lang beagle/js` — JavaScript
-- `#lang beagle/nix` — Nix
-- `#lang beagle/sql` — SQL
+Beagle separates the authoring surface from the runtime artifact. Agents write typed, structural source. Beagle checks it, queries it, repairs it, and emits ordinary target code.
 
-Same types, same checker, same repair compiler — different backends.
-
-The thesis is simple: **mechanical bugs should not require cognition.**
-
-Shape errors should be caught by types. Checker failures become ranked, machine-actionable repair candidates. Runtime failures can be routed into the same repair workflow. The goal is to spend zero reasoning tokens on mechanical fixes — the agent's budget goes to semantic bugs that actually require judgment.
+**The types are scaffolding. The emitted code is the building.**
 
 ```text
 source.bclj/.bjs/.bnix → parse → check → emit → output.clj / .js / .nix
@@ -24,19 +16,27 @@ source.bclj/.bjs/.bnix → parse → check → emit → output.clj / .js / .nix
                 daemon + AST cache
 ```
 
-The runtime stays ordinary target code. If you stop using Beagle, you keep the emitted source.
+## Core ideas
 
-## Why this syntax
+**S-expressions as structural compression.** Source is close to an AST. Less syntax to hallucinate, less grammar to repair, less distance between source and compiler representation. Structural tools become easier because the source is already structural.
 
-Beagle is Clojure-shaped because syntax is part of the repair surface.
+**Explicit mutation.** Mutation expands the reasoning search space. Beagle keeps it visible. Pure code can be reasoned about locally. Mutable state and target escape hatches are marked clearly enough that an agent can find the dangerous parts.
 
-S-expressions make program structure explicit. The reader produces nested structure directly instead of reconstructing it from precedence rules, semicolon insertion, and ambiguous statement grammar. That makes Beagle easier to parse, transform, diagnose, and repair.
+**Authoring-time types.** Types catch mechanical errors during generation — wrong fields, wrong argument shapes, missing cases, invalid interop. Then they disappear. The emitted artifact is ordinary dynamic code.
 
-Clojure's brackets and braces remove real ambiguity. `[x y]` is a vector. `(f x y)` is a call. `{:a 1 :b 2}` is a map literal, not a block. Beagle inherits that distinction because it helps both human readers and language models.
+**Dynamic runtimes as targets.** Clojure stays Clojure. JavaScript stays JavaScript. Nix stays Nix. The authoring layer gives agents one typed structural surface. The emitters translate it into the languages real systems already use.
 
-Immutability by default reduces the search space. `def` produces a constant. `defrecord` produces frozen data. `with` returns a new value. Mutation exists only through explicit escape hatches: atoms, interop, or target-specific forms. Most Beagle code can be reasoned about locally without tracking hidden assignment.
+**Agent-efficiency network effects.** The winning authoring surfaces will be easy to parse, easy to query, easy to repair, compact in context, and familiar enough that current models can already write them. A typed Lisp over dynamic targets has the right shape: familiar enough to bootstrap, structural enough to tool, small enough to improve through self-hosting.
 
-Clojure also has useful training data. LLMs can bootstrap from existing Clojure forms, idioms, and naming conventions. Beagle then narrows the surface: one parameter syntax, one annotation marker, one canonical idiom per concept, and no reader-macro zoo. Fewer valid interpretations means less ambiguity during generation and repair.
+## Targets
+
+- `#lang beagle/clj` — Clojure
+- `#lang beagle/cljs` — ClojureScript
+- `#lang beagle/js` — JavaScript
+- `#lang beagle/nix` — Nix
+- `#lang beagle/sql` — SQL
+
+Same types, same checker, same repair compiler — different backends. Change `#lang beagle/js` to `#lang beagle/clj` and the same program emits Clojure. Target-specific `#lang`s expose target-specific forms (`await` for JS, `fn-set`/`inh`/`with-do` for Nix, Java interop for CLJ).
 
 ## A program
 
@@ -58,11 +58,9 @@ Clojure also has useful training data. LLMs can bootstrap from existing Clojure 
       0))
 ```
 
-Portable Beagle source can emit to any supported target — change `#lang beagle/js` to `#lang beagle/clj` and the same program emits Clojure. Target-specific `#lang`s expose target-specific forms (`await` for JS, `fn-set`/`inh`/`with-do` for Nix, Java interop for CLJ).
-
 ## Experiments
 
-Agents repair code faster when mechanical failures are surfaced as structured compiler feedback instead of runtime archaeology. 15 experiments, 3 language tracks, same tasks:
+15 experiments, 3 language tracks, same tasks:
 
 | Metric                    | Beagle | Clojure | Python + mypy |
 | ------------------------- | -----: | ------: | ------------: |
@@ -91,14 +89,12 @@ raco test beagle-test/tests/   # 773 tests
 
 ## Agent integration
 
-Claude Code:
-
 ```sh
 beagle init --claude-code
 beagle-daemon start --watch .
 ```
 
-Generates a PostToolUse hook, settings, `CLAUDE.md`, and language context. The daemon gives instant type feedback on every beagle source edit (`.bclj`, `.bjs`, `.bnix`, etc.) and re-checks within ~100ms of each save.
+Generates a PostToolUse hook, settings, `CLAUDE.md`, and language context. The daemon gives instant type feedback on every beagle source edit and re-checks within ~100ms of each save.
 
 ## Tooling
 
@@ -112,20 +108,6 @@ Generates a PostToolUse hook, settings, `CLAUDE.md`, and language context. The d
 See [`docs/tool-reference.md`](docs/tool-reference.md) for the full CLI catalog.
 
 ## Documentation
-
-Scribble docs:
-
-```sh
-raco docs beagle
-```
-
-Standalone HTML:
-
-```sh
-raco scribble --html beagle-doc/scribblings/beagle.scrbl
-```
-
-Other references:
 
 - [`docs/cheatsheet.md`](docs/cheatsheet.md) — single-page language summary for agent context
 - [`docs/agent-workflow.md`](docs/agent-workflow.md) — repair tool routing decision tree
