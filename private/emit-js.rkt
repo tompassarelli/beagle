@@ -800,7 +800,16 @@
 
     [(static-call? e)
      (define s (symbol->string (static-call-class+method e)))
-     (define dotted (string-replace s "/" "."))
+     (define slash-pos (let loop ([i 0])
+                         (cond [(= i (string-length s)) #f]
+                               [(char=? (string-ref s i) #\/) i]
+                               [else (loop (+ i 1))])))
+     (define dotted
+       (if (and slash-pos
+                (> (string-length s) (+ slash-pos 3))
+                (string=? (substring s (+ slash-pos 1) (+ slash-pos 3)) "->"))
+         (string-append (substring s 0 slash-pos) "." (substring s (+ slash-pos 3)))
+         (string-replace s "/" ".")))
      (format "~a(~a)" (mangle-str dotted)
              (string-join (map emit-expr (static-call-args e)) ", "))]
 
@@ -930,6 +939,10 @@
           (cond
             [(string-prefix? fn-str "->")
              (mangle-str (substring fn-str 2))]
+            [(string-contains? fn-str "/->")
+             (let ([parts (string-split fn-str "/->")])
+               (string-append (mangle-name (string->symbol (car parts)))
+                              "." (mangle-str (cadr parts))))]
             [else (mangle-name fn-sym)]))
         (define qualified
           (let ([mod-prefix (hash-ref (current-js-symbol-ns) fn-sym #f)])

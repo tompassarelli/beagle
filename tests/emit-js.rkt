@@ -410,6 +410,10 @@
      "JSON.stringify"
      '(defn f [(x : Any)] : String (pr-str x)))
 
+   (check-js-contains "static call Module/->Ctor strips -> prefix"
+     "ir.IrProgram("
+     '(defn f [] : Any (ir/->IrProgram "test")))
+
    (check-js-contains "to-array → Array.from"
      "Array.from("
      '(declare-extern xs Any)
