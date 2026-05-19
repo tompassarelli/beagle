@@ -5,6 +5,7 @@
 ;; are pulled out separately and don't appear in `forms`.
 
 (require racket/match
+         racket/string
          "types.rkt"
          "macros.rkt"
          "extensions.rkt")
@@ -246,8 +247,8 @@
 (struct impl-method  (name params body)                      #:transparent)
 (struct let-binding (name type value)                       #:transparent)
 
-;; A require entry: target namespace + optional :as alias
-(struct require-entry (ns alias) #:transparent)
+;; A require entry: target namespace + optional :as alias + optional :refer names
+(struct require-entry (ns alias refer) #:transparent)
 
 ;; Whole-program structure populated by parse-program.
 (struct program (mode
@@ -525,7 +526,7 @@
                                  #:scalar-fns imp-scalar-fns
                                  #:scalar-preds imp-scalar-preds
                                  #:symbol-ns imp-symbol-ns)))
-       (set! requires (cons (require-entry rn #f) requires))]
+       (set! requires (cons (require-entry rn #f #f) requires))]
       [(list 'require (? symbol? rn) ':as (? symbol? alias))
        (with-handlers ([exn:fail? (lambda (_e) (void))])
          (define mod-path (resolve-module-path rn source-path))
@@ -534,7 +535,18 @@
                                  #:scalar-fns imp-scalar-fns
                                  #:scalar-preds imp-scalar-preds
                                  #:symbol-ns imp-symbol-ns)))
-       (set! requires (cons (require-entry rn alias) requires))]
+       (set! requires (cons (require-entry rn alias #f) requires))]
+      [(list 'require (? symbol? rn) ':refer (? (lambda (x) (and (pair? x) (eq? (car x) '#%brackets))) names))
+       (define refer-syms (map ->datum (cdr (->datum names))))
+       (with-handlers ([exn:fail? (lambda (_e) (void))])
+         (define mod-path (resolve-module-path rn source-path))
+         (define prefix (string->symbol (last-of (split-ns-segments rn))))
+         (when mod-path
+           (import-module-types! mod-path prefix externs registry imp-rec-fields imp-rec-field-order imp-rec-ns rn
+                                 #:scalar-fns imp-scalar-fns
+                                 #:scalar-preds imp-scalar-preds
+                                 #:symbol-ns imp-symbol-ns)))
+       (set! requires (cons (require-entry rn #f refer-syms) requires))]
 
       [(list 'import (? symbol? class-name))
        (set! imports (cons class-name imports))]

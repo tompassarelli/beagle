@@ -435,7 +435,11 @@
         [(defscalar-form? f)(set-add s (defscalar-form-name f))]
         [else s])))
   (define from-externs (list->set (hash-keys (program-externs prog))))
-  (set-union from-forms from-externs))
+  (define from-refers
+    (for/fold ([s (set)]) ([r (in-list (program-requires prog))])
+      (define refer (require-entry-refer r))
+      (if refer (set-union s (list->set refer)) s)))
+  (set-union from-forms from-externs from-refers))
 
 (define (js-emit-program prog)
   (validate-js-target! prog)
@@ -468,17 +472,22 @@
      (string-join
       (for/list ([r (in-list rs)])
         (define ns-str (symbol->string (require-entry-ns r)))
-        (define alias (or (require-entry-alias r)
-                         (let ([parts (string-split ns-str ".")])
-                           (string->symbol (last parts)))))
-        (if (or (string-prefix? ns-str "@")
-                (not (string-contains? ns-str ".")))
-          (format "import * as ~a from '~a';"
-                  (mangle-name alias)
-                  ns-str)
-          (format "import * as ~a from './~a.js';"
-                  (mangle-name alias)
-                  (string-replace ns-str "." "/"))))
+        (define refer (require-entry-refer r))
+        (define module-path
+          (if (or (string-prefix? ns-str "@")
+                  (not (string-contains? ns-str ".")))
+            ns-str
+            (string-append "./" (string-replace ns-str "." "/") ".js")))
+        (if refer
+          (format "import { ~a } from '~a';"
+                  (string-join (map (lambda (s) (mangle-str (symbol->string s))) refer) ", ")
+                  module-path)
+          (let ([alias (or (require-entry-alias r)
+                           (let ([parts (string-split ns-str ".")])
+                             (string->symbol (last parts))))])
+            (format "import * as ~a from '~a';"
+                    (mangle-name alias)
+                    module-path))))
       "\n")
      "\n")))
 
