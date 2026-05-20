@@ -1,0 +1,24 @@
+{
+  "experiment": "F3-corrected",
+  "feature": "D",
+  "feature_name": "D-cost-budgets",
+  "profile": 2,
+  "run": 1,
+  "trial_id": "506b351b",
+  "visible_oracle": {
+    "total": 5,
+    "passed": 5,
+    "failed": 0
+  },
+  "hidden_oracle": {
+    "total": 11,
+    "passed": 11,
+    "failed": 0
+  },
+  "final_type_errors": 0,
+  "baseline_type_errors": 0,
+  "fix_quality": "complete",
+  "duration_s": 300,
+  "timestamp": "2026-05-21T04:02:21+07:00",
+  "workspace": "/tmp/trial-506b351b"
+}

@@ -1,0 +1,155 @@
+Only in /home/tom/code/beagle/experiments/e16-workflow-scheduler/golden/beagle/: _clj
+diff -ru /home/tom/code/beagle/experiments/e16-workflow-scheduler/golden/beagle/errors.bgl /tmp/trial-181612ff/src/errors.bgl
+--- /home/tom/code/beagle/experiments/e16-workflow-scheduler/golden/beagle/errors.bgl	2026-05-20 22:16:25.358774925 +0700
++++ /tmp/trial-181612ff/src/errors.bgl	2026-05-21 04:26:45.114235706 +0700
+@@ -106,7 +106,9 @@
+      (str "Deadline missed: earliest start " earliest-start
+           " + duration " duration " > deadline " deadline)]
+     [(WorkerUnavailable worker-id windows)
+-     (str "Worker " worker-id " unavailable during required time windows")]))
++     (str "Worker " worker-id " unavailable during required time windows")]
++    [(WorkerOverloaded worker-id max-tasks)
++     (str "Worker " worker-id " overloaded: max " max-tasks " tasks")]))
+ 
+ (defn describe-schedule-failure [(failure : ScheduleFailure)] : String
+   (str "Task " (schedulefailure-task-id failure) ": "
+@@ -168,7 +170,8 @@
+     [(NoCapableWorker required available) "capability"]
+     [(ResourceOverCapacity resource-id capacity demanded) "resource"]
+     [(DeadlineMissed earliest-start duration deadline) "deadline"]
+-    [(WorkerUnavailable worker-id windows) "availability"]))
++    [(WorkerUnavailable worker-id windows) "availability"]
++    [(WorkerOverloaded worker-id max-tasks) "overload"]))
+ 
+ ;; failure-is-structural?: returns true if the failure is due to
+ ;; structural issues (cycles) rather than capacity/timing.
+@@ -178,7 +181,8 @@
+     [(NoCapableWorker required available) false]
+     [(ResourceOverCapacity resource-id capacity demanded) false]
+     [(DeadlineMissed earliest-start duration deadline) false]
+-    [(WorkerUnavailable worker-id windows) false]))
++    [(WorkerUnavailable worker-id windows) false]
++    [(WorkerOverloaded worker-id max-tasks) false]))
+ 
+ ;; =============================================================================
+ ;; Error Aggregation
+diff -ru /home/tom/code/beagle/experiments/e16-workflow-scheduler/golden/beagle/matcher.bgl /tmp/trial-181612ff/src/matcher.bgl
+--- /home/tom/code/beagle/experiments/e16-workflow-scheduler/golden/beagle/matcher.bgl	2026-05-20 22:24:55.920773212 +0700
++++ /tmp/trial-181612ff/src/matcher.bgl	2026-05-21 04:28:19.785560754 +0700
+@@ -165,9 +165,19 @@
+                    (filterv (fn [(w : Worker)]
+                               (check-all-resources task resources existing
+                                                    task-resource-map start end))
+-                            no-overlap))]
++                            no-overlap))
++        ;; Step 5: load limit filter (max-tasks = 0 means unlimited)
++        within-limit (filterv (fn [(w : Worker)]
++                                (let [max-t (worker-max-tasks w)
++                                      task-count (count (filterv
++                                                          (fn [(a : Assignment)]
++                                                            (= (worker-id w)
++                                                               (assignment-worker-id a)))
++                                                          existing))]
++                                  (or (= max-t 0) (< task-count max-t))))
++                              eligible)]
+     ;; Sort by id ASC for deterministic selection
+-    (sort-by (fn [(w : Worker)] (worker-id w)) eligible)))
++    (sort-by (fn [(w : Worker)] (worker-id w)) within-limit)))
+ 
+ ;; =============================================================================
+ ;; Capability Analysis
+@@ -314,21 +324,34 @@
+           (->WorkerUnavailable
+             (worker-id (first cap-workers))
+             (worker-unavailable (first cap-workers)))
+-          ;; Check resources
+-          (let [required-ids (set (task-resources task))
+-                required-resources (filterv (fn [(r : Resource)]
+-                                             (contains? required-ids (resource-id r)))
+-                                           resources)]
+-            (let [over-cap (first (filterv
+-                                    (fn [(r : Resource)]
+-                                      (not (check-resource-capacity
+-                                             r existing task-resource-map start end)))
+-                                    required-resources))]
+-              (if (some? over-cap)
+-                (let [used (count-overlapping-assignments
+-                             (resource-id over-cap) existing
+-                             task-resource-map start end)]
+-                  (->ResourceOverCapacity (resource-id over-cap)
+-                                          (resource-capacity over-cap)
+-                                          (+ used 1)))
+-                nil))))))))
++          ;; Check if all available workers are at their task limit
++          (let [overloaded (filterv (fn [(w : Worker)]
++                                      (let [max-t (worker-max-tasks w)
++                                            cnt (count (filterv
++                                                         (fn [(a : Assignment)]
++                                                           (= (worker-id w)
++                                                              (assignment-worker-id a)))
++                                                         existing))]
++                                        (and (> max-t 0) (>= cnt max-t))))
++                                    avail)]
++            (if (= (count overloaded) (count avail))
++              (->WorkerOverloaded (worker-id (first avail))
++                                  (worker-max-tasks (first avail)))
++              ;; Check resources
++              (let [required-ids (set (task-resources task))
++                    required-resources (filterv (fn [(r : Resource)]
++                                                 (contains? required-ids (resource-id r)))
++                                               resources)]
++                (let [over-cap (first (filterv
++                                        (fn [(r : Resource)]
++                                          (not (check-resource-capacity
++                                                 r existing task-resource-map start end)))
++                                        required-resources))]
++                  (if (some? over-cap)
++                    (let [used (count-overlapping-assignments
++                                 (resource-id over-cap) existing
++                                 task-resource-map start end)]
++                      (->ResourceOverCapacity (resource-id over-cap)
++                                              (resource-capacity over-cap)
++                                              (+ used 1)))
++                    nil))))))))))
+diff -ru /home/tom/code/beagle/experiments/e16-workflow-scheduler/golden/beagle/types.bgl /tmp/trial-181612ff/src/types.bgl
+--- /home/tom/code/beagle/experiments/e16-workflow-scheduler/golden/beagle/types.bgl	2026-05-20 22:10:16.635923716 +0700
++++ /tmp/trial-181612ff/src/types.bgl	2026-05-21 04:26:34.632310963 +0700
+@@ -41,7 +41,8 @@
+ (defrecord Worker [(id : String)
+                    (name : String)
+                    (capabilities : (Vec String))
+-                   (unavailable : (Vec Window))])
++                   (unavailable : (Vec Window))
++                   (max-tasks : Int)])
+ 
+ ;; Resource: a shared resource with limited concurrent capacity.
+ (defrecord Resource [(id : String)
+@@ -82,12 +83,15 @@
+ (defrecord WorkerUnavailable [(worker-id : String)
+                               (windows : (Vec Window))])
+ 
++(defrecord WorkerOverloaded [(worker-id : String) (max-tasks : Int)])
++
+ (defunion FailureReason
+   DependencyCycle
+   NoCapableWorker
+   ResourceOverCapacity
+   DeadlineMissed
+-  WorkerUnavailable)
++  WorkerUnavailable
++  WorkerOverloaded)
+ 
+ ;; =============================================================================
+ ;; Schedule Failure
+@@ -198,8 +202,9 @@
+ (defn make-worker [(id : String)
+                    (name : String)
+                    (capabilities : (Vec String))
+-                   (unavailable : (Vec Window))] : Worker
+-  (->Worker id name capabilities unavailable))
++                   (unavailable : (Vec Window))
++                   (max-tasks : Int)] : Worker
++  (->Worker id name capabilities unavailable max-tasks))
+ 
+ (defn make-resource [(id : String)
+                      (name : String)

@@ -1,0 +1,202 @@
+Only in /home/tom/code/beagle/experiments/e16-workflow-scheduler/golden/beagle/: _clj
+diff -ru /home/tom/code/beagle/experiments/e16-workflow-scheduler/golden/beagle/errors.bgl /tmp/trial-6d017974/src/errors.bgl
+--- /home/tom/code/beagle/experiments/e16-workflow-scheduler/golden/beagle/errors.bgl	2026-05-20 22:16:25.358774925 +0700
++++ /tmp/trial-6d017974/src/errors.bgl	2026-05-21 04:04:38.578339289 +0700
+@@ -106,7 +106,9 @@
+      (str "Deadline missed: earliest start " earliest-start
+           " + duration " duration " > deadline " deadline)]
+     [(WorkerUnavailable worker-id windows)
+-     (str "Worker " worker-id " unavailable during required time windows")]))
++     (str "Worker " worker-id " unavailable during required time windows")]
++    [(ResourceLocked resource-id locked-by)
++     (str "Resource " resource-id " locked by task " locked-by)]))
+ 
+ (defn describe-schedule-failure [(failure : ScheduleFailure)] : String
+   (str "Task " (schedulefailure-task-id failure) ": "
+@@ -168,7 +170,8 @@
+     [(NoCapableWorker required available) "capability"]
+     [(ResourceOverCapacity resource-id capacity demanded) "resource"]
+     [(DeadlineMissed earliest-start duration deadline) "deadline"]
+-    [(WorkerUnavailable worker-id windows) "availability"]))
++    [(WorkerUnavailable worker-id windows) "availability"]
++    [(ResourceLocked resource-id locked-by) "resource-lock"]))
+ 
+ ;; failure-is-structural?: returns true if the failure is due to
+ ;; structural issues (cycles) rather than capacity/timing.
+@@ -178,7 +181,8 @@
+     [(NoCapableWorker required available) false]
+     [(ResourceOverCapacity resource-id capacity demanded) false]
+     [(DeadlineMissed earliest-start duration deadline) false]
+-    [(WorkerUnavailable worker-id windows) false]))
++    [(WorkerUnavailable worker-id windows) false]
++    [(ResourceLocked resource-id locked-by) false]))
+ 
+ ;; =============================================================================
+ ;; Error Aggregation
+diff -ru /home/tom/code/beagle/experiments/e16-workflow-scheduler/golden/beagle/scheduler.bgl /tmp/trial-6d017974/src/scheduler.bgl
+--- /home/tom/code/beagle/experiments/e16-workflow-scheduler/golden/beagle/scheduler.bgl	2026-05-20 22:25:11.253682809 +0700
++++ /tmp/trial-6d017974/src/scheduler.bgl	2026-05-21 04:11:55.730396956 +0700
+@@ -38,6 +38,12 @@
+             (assoc acc (task-id task) (task-resources task)))
+           {} tasks))
+ 
++;; build-resource-map: creates a map from resource-id to Resource for O(1) lookup.
++(defn build-resource-map [(resources : (Vec Resource))] : (Map String Resource)
++  (reduce (fn [(acc : (Map String Resource)) (r : Resource)]
++            (assoc acc (resource-id r) r))
++          {} resources))
++
+ ;; =============================================================================
+ ;; Input Validation
+ ;; =============================================================================
+@@ -224,10 +230,13 @@
+                            (task-map : (Map String Task))
+                            (workers : (Vec Worker))
+                            (resources : (Vec Resource))
+-                           (task-resource-map : (Map String (Vec String)))] : (Map String Any)
++                           (task-resource-map : (Map String (Vec String)))
++                           (resource-map : (Map String Resource))] : (Map String Any)
+   (let [task (get task-map tid)
+         assignments-so-far (get acc :assignments [])
+-        failures-so-far (get acc :failures [])]
++        failures-so-far (get acc :failures [])
++        ;; locked-resources is a Vec of locked exclusive resource IDs
++        locked-resources (get acc :locked-resources [])]
+     (if (nil? task)
+       ;; Task ID not found in task map — should not happen with valid input
+       (assoc acc :failures
+@@ -248,17 +257,61 @@
+                        (->ScheduleFailure tid
+                          (->DeadlineMissed 0 (task-duration task)
+                                            (task-deadline task)))))
+-          ;; All dependencies succeeded — try to schedule
+-          (let [earliest (compute-earliest-start task assignments-so-far)
+-                attempt-result (schedule-with-retry task workers resources
+-                                                     assignments-so-far
+-                                                     task-resource-map
+-                                                     earliest)]
+-            (match attempt-result
+-              [(AttemptSuccess a)
+-               (assoc acc :assignments (conj assignments-so-far a))]
+-              [(AttemptFailure f)
+-               (assoc acc :failures (conj failures-so-far f))])))))))
++          ;; Check if any required exclusive resource is already locked
++          (let [required-rids (task-resources task)
++                first-locked-rid (first
++                                    (filterv
++                                      (fn [(rid : String)]
++                                        (let [r (get resource-map rid)]
++                                          (if (nil? r)
++                                            false
++                                            (if (resource-exclusive r)
++                                              (some? (some (fn [(lr : Any)] (= lr rid))
++                                                           locked-resources))
++                                              false))))
++                                      required-rids))]
++            (if (some? first-locked-rid)
++              ;; Fail with ResourceLocked — find which task holds the lock
++              (let [locker-assignment
++                      (first
++                        (filterv
++                          (fn [(a : Assignment)]
++                            (let [rids (get task-resource-map
++                                           (assignment-task-id a) [])]
++                              (some (fn [(r : String)] (= r first-locked-rid))
++                                    rids)))
++                          assignments-so-far))
++                    locker-tid (if (some? locker-assignment)
++                                 (assignment-task-id locker-assignment)
++                                 "")]
++                (assoc acc :failures
++                       (conj failures-so-far
++                             (->ScheduleFailure tid
++                               (->ResourceLocked first-locked-rid locker-tid)))))
++              ;; All dependencies succeeded and no exclusive lock conflict — schedule
++              (let [earliest (compute-earliest-start task assignments-so-far)
++                    attempt-result (schedule-with-retry task workers resources
++                                                         assignments-so-far
++                                                         task-resource-map
++                                                         earliest)]
++                (match attempt-result
++                  [(AttemptSuccess a)
++                   ;; Lock any exclusive resources this task uses
++                   (let [new-locked (reduce
++                                      (fn [(lk : Any) (rid : String)]
++                                        (let [r (get resource-map rid)]
++                                          (if (nil? r)
++                                            lk
++                                            (if (resource-exclusive r)
++                                              (conj lk rid)
++                                              lk))))
++                                      locked-resources
++                                      required-rids)]
++                     (assoc acc
++                            :assignments (conj assignments-so-far a)
++                            :locked-resources new-locked))]
++                  [(AttemptFailure f)
++                   (assoc acc :failures (conj failures-so-far f))])))))))))
+ 
+ ;; =============================================================================
+ ;; Core Schedule Function
+@@ -310,13 +363,14 @@
+               ;; Step 3: Schedule each task in topological order
+               (let [task-map (build-task-map tasks)
+                     task-resource-map (build-task-resource-map tasks)
++                    resource-map (build-resource-map resources)
+                     ;; Process all tasks, accumulating assignments and failures
+                     result (reduce
+                              (fn [(acc : (Map String Any)) (tid : String)]
+                                (process-single-task acc tid task-map
+                                                     workers resources
+-                                                    task-resource-map))
+-                             {:assignments [] :failures []}
++                                                    task-resource-map resource-map))
++                             {:assignments [] :failures [] :locked-resources []}
+                              order)
+                     final-assignments (get result :assignments [])
+                     final-failures (get result :failures [])]
+diff -ru /home/tom/code/beagle/experiments/e16-workflow-scheduler/golden/beagle/types.bgl /tmp/trial-6d017974/src/types.bgl
+--- /home/tom/code/beagle/experiments/e16-workflow-scheduler/golden/beagle/types.bgl	2026-05-20 22:10:16.635923716 +0700
++++ /tmp/trial-6d017974/src/types.bgl	2026-05-21 04:04:29.137468022 +0700
+@@ -44,9 +44,11 @@
+                    (unavailable : (Vec Window))])
+ 
+ ;; Resource: a shared resource with limited concurrent capacity.
++;; exclusive: if true, only one task may use this resource for the entire schedule.
+ (defrecord Resource [(id : String)
+                      (name : String)
+-                     (capacity : Int)])
++                     (capacity : Int)
++                     (exclusive : Bool)])
+ 
+ ;; Dependency: explicit dependency edge between two tasks.
+ (defrecord Dependency [(from-task : String) (to-task : String)])
+@@ -82,12 +84,15 @@
+ (defrecord WorkerUnavailable [(worker-id : String)
+                               (windows : (Vec Window))])
+ 
++(defrecord ResourceLocked [(resource-id : String) (locked-by : String)])
++
+ (defunion FailureReason
+   DependencyCycle
+   NoCapableWorker
+   ResourceOverCapacity
+   DeadlineMissed
+-  WorkerUnavailable)
++  WorkerUnavailable
++  ResourceLocked)
+ 
+ ;; =============================================================================
+ ;; Schedule Failure
+@@ -203,8 +208,9 @@
+ 
+ (defn make-resource [(id : String)
+                      (name : String)
+-                     (capacity : Int)] : Resource
+-  (->Resource id name capacity))
++                     (capacity : Int)
++                     (exclusive : Bool)] : Resource
++  (->Resource id name capacity exclusive))
+ 
+ (defn make-window [(start : Int) (end : Int)] : Window
+   (->Window start end))
