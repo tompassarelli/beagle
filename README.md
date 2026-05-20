@@ -117,3 +117,7 @@ Generates a PostToolUse hook, settings, `CLAUDE.md`, and language context. The d
 - [`docs/tool-reference.md`](docs/tool-reference.md) — CLI and tool catalog
 - [`docs/devlog/`](docs/devlog/) — development journal (18 entries)
 - [`experiments/report.md`](experiments/report.md) — E1–E15 results
+
+## Related
+
+Beagle is a language bridge for [Claim Normal Form](https://github.com/tompassarelli/claim-normal-form) — its typed forms map into CNF's entity/claim graph.
