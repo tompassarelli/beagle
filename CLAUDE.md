@@ -23,7 +23,7 @@ it as canonical when explaining the language.
 - **Stdlib:** ~696 entries total — portable (269), Clojure (352), CLJS (75), JS (38 native), Nix (120), SQL (10)
 - **Type checking:** flow-sensitive narrowing, cross-module import, collection/destructuring inference, exhaustive match warnings, refinement predicates
 - **Diagnostics:** Rust-style errors with signatures, "did you mean?" suggestions, JSON mode
-- **Tooling:** LSP, typed REPL, reactive daemon (~100ms re-check), repair compiler, property testing, distributed tracing
+- **Tooling:** LSP, typed REPL, reactive daemon (~100ms re-check), repair compiler, property testing, distributed tracing, `beagle init --hooks` (scaffold Claude Code integration for any project)
 - **Experiments:** 15 across 3 tracks (Beagle/Clojure/Python) — best config 287s avg (E13), per-bug faster than Python+mypy
 
 See `docs/cheatsheet.md` for the full language reference.
