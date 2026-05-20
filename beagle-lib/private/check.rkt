@@ -26,13 +26,15 @@
 ;;   0 — parse only (no type checking)
 ;;   1 — basic types (signatures, records, arity, let-bindings)
 ;;   2 — structural (+ defunion exhaustiveness, defenum, defscalar, flow narrowing)
-;;   3 — full (+ deferror, check/rescue) — default, matches current behavior
+;;   3 — full (+ deferror, check/rescue)
+;; Default: P2. E16-T experiments showed P2 is the sweet spot for agent-assisted
+;; development — exhaustive match checking is the key differentiator.
 (define current-check-profile
   (make-parameter
     (let ([v (getenv "BEAGLE_CHECK_PROFILE")])
       (if (and v (regexp-match? #rx"^[0-3]$" v))
           (string->number v)
-          3))))
+          2))))
 
 (define (merge-types . ts)
   (define non-any (filter (λ (t) (not (any-type? t))) ts))

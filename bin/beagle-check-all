@@ -10,7 +10,7 @@
 # --agent:     suppress lint warnings, show only type errors in a clean,
 #              minimal format designed for LLM agent consumption.
 # --profile N: control which type-checking features are enabled (0-3).
-#              0 = parse only, 1 = basic types, 2 = structural, 3 = full (default).
+#              0 = parse only, 1 = basic types, 2 = structural (default), 3 = full.
 
 set -euo pipefail
 source "$(dirname "$0")/_beagle-racket"
