@@ -241,6 +241,66 @@
 (struct sql-aggregate    (fn-name expr alias)                 #:transparent)
 (struct sql-order-spec   (expr direction)                     #:transparent)
 
+;; --- JS/quote AST nodes (valid only under #lang beagle/js) -----------------
+;; js/quote: structural JS quasiquotation — beagle represents JS AST nodes,
+;; not text.  Splices (~expr, ~@stmts) insert beagle values into the JS tree
+;; with compile-time context validation.
+
+;; Top-level wrapper produced by (js/quote ...)
+(struct js-quote-form    (body)                               #:transparent)
+;; body: a single js-ast node (block, expr, etc.)
+
+;; --- JS AST node types ---
+;; Statements
+(struct js-ast-block     (stmts)                              #:transparent)
+(struct js-ast-const     (name value)                         #:transparent)
+(struct js-ast-let       (name value)                         #:transparent)
+(struct js-ast-assign    (target value)                       #:transparent)
+(struct js-ast-return    (expr)                               #:transparent)
+(struct js-ast-if        (test then else-branch)              #:transparent)
+(struct js-ast-for-of    (binding iterable body)              #:transparent)
+(struct js-ast-while     (test body)                          #:transparent)
+(struct js-ast-throw     (expr)                               #:transparent)
+(struct js-ast-try       (body catch-name catch-body finally-body) #:transparent)
+(struct js-ast-expr-stmt (expr)                               #:transparent)
+
+;; Declarations
+(struct js-ast-function  (name params body async? export?)    #:transparent)
+(struct js-ast-class     (name extends-expr methods)          #:transparent)
+(struct js-ast-method    (name params body static? async? kind) #:transparent)
+;; kind: 'method, 'get, 'set, 'constructor
+
+;; Expressions
+(struct js-ast-call      (callee args)                        #:transparent)
+(struct js-ast-member    (object property computed?)          #:transparent)
+(struct js-ast-index     (object index-expr)                  #:transparent)
+(struct js-ast-arrow     (params body)                        #:transparent)
+(struct js-ast-ternary   (test then else-expr)                #:transparent)
+(struct js-ast-binary    (op left right)                      #:transparent)
+(struct js-ast-unary     (op expr prefix?)                    #:transparent)
+(struct js-ast-template  (parts)                              #:transparent)
+;; parts: list of (string or js-ast node) — template literal pieces
+(struct js-ast-array     (items)                              #:transparent)
+(struct js-ast-object    (pairs)                              #:transparent)
+;; pairs: list of (cons key-node value-node)
+(struct js-ast-spread    (expr)                               #:transparent)
+(struct js-ast-await     (expr)                               #:transparent)
+(struct js-ast-new       (callee args)                        #:transparent)
+(struct js-ast-typeof    (expr)                               #:transparent)
+
+;; Identifiers and literals — leaf nodes
+(struct js-ast-ident     (name)                               #:transparent)
+(struct js-ast-literal   (value)                              #:transparent)
+;; value: string, number, boolean, or 'null / 'undefined
+
+;; Splice nodes — beagle expressions inserted into JS AST
+(struct js-ast-splice-expr (beagle-expr)                      #:transparent)
+;; ~expr: splice a beagle expression as a JS expression
+(struct js-ast-splice-stmts (beagle-expr)                     #:transparent)
+;; ~@expr: splice a beagle expression as JS statement(s)
+(struct js-ast-splice-json (beagle-expr)                      #:transparent)
+;; ~%expr: splice a beagle expression as JSON data
+
 (struct param       (name type)                             #:transparent)
 (struct map-destructure (keys as-name)                      #:transparent)
 (struct seq-destructure (names rest-name)                    #:transparent)
@@ -1145,6 +1205,13 @@
 
     ;; --- end Nix-specific forms ----------------------------------------------
 
+    ;; --- JS-specific forms (js/quote) -----------------------------------------
+
+    [(cons 'js/quote body)
+     (js-quote-form (parse-js-ast-body (or (stx-tail subs 1) body)))]
+
+    ;; --- end JS-specific forms ------------------------------------------------
+
     ;; --- SQL-specific forms ---------------------------------------------------
 
     [(list 'deftable (? symbol? name) fields-form)
@@ -1438,6 +1505,518 @@
        (define body (bracket-body id))
        (nix-fn-set-formal (car body) (parse-expr (datum->syntax #f (cadr body))))]
       [else (error 'beagle "fn-set formal: expected name or (name default), got ~v" id)])))
+
+;; --- JS/quote parse helpers -------------------------------------------------
+;; Parse JS-like S-expression forms into JS AST nodes.
+;; Syntax within (js/quote ...):
+;;   Statements:
+;;     (const name expr)      → js-ast-const
+;;     (let name expr)        → js-ast-let
+;;     (= target expr)        → js-ast-assign
+;;     (return expr)          → js-ast-return
+;;     (if test then [else])  → js-ast-if
+;;     (for-of binding iter body...) → js-ast-for-of
+;;     (while test body...)   → js-ast-while
+;;     (throw expr)           → js-ast-throw
+;;     (try body... (catch name body...) [(finally body...)])
+;;     (function name (params...) body...) / (async function ...) / (export function ...)
+;;     (export (async function ...))
+;;     (class name [extends expr] method...) / (export class ...)
+;;     (method name (params...) body...) / (static method ...) / (get ...) / (set ...) / (async method ...) / (constructor (params...) body...)
+;;   Expressions:
+;;     (call callee args...)  → js-ast-call
+;;     (.prop obj)            → js-ast-member
+;;     (. obj prop)           → js-ast-member
+;;     (bracket obj idx)      → js-ast-index
+;;     (=> (params...) body)  → js-ast-arrow
+;;     (? test then else)     → js-ast-ternary
+;;     (op left right)        → js-ast-binary  (for +, -, *, /, ===, etc.)
+;;     (! expr)               → js-ast-unary
+;;     (tpl "str" expr ...)   → js-ast-template
+;;     (array items...)       → js-ast-array
+;;     (object k v ...)       → js-ast-object
+;;     (... expr)             → js-ast-spread
+;;     (await expr)           → js-ast-await
+;;     (new callee args...)   → js-ast-new
+;;     (typeof expr)          → js-ast-typeof
+;;   Splices:
+;;     ~expr                  → js-ast-splice-expr (beagle expr → JS expr)
+;;     ~@expr                 → js-ast-splice-stmts (beagle expr → JS stmts)
+;;     ~%expr                 → js-ast-splice-json (beagle expr → JSON data)
+;;   Leaf:
+;;     symbol                 → js-ast-ident
+;;     string/number/bool     → js-ast-literal
+;;     null / undefined       → js-ast-literal
+
+;; JS binary operators.  Racket's | char opens quoted-symbol syntax,
+;; so we use readable aliases: or (||), and (&&), bit-or (|), bit-and (&),
+;; bit-xor (^), nullish (??).  These emit as the JS operator.
+(define JS-BINARY-OPS
+  (hasheq '+ "+" '- "-" '* "*" '/ "/" '% "%"
+          '** "**" '=== "===" '!== "!==" '== "==" '!= "!="
+          '< "<" '> ">" '<= "<=" '>= ">="
+          'and "&&" 'or "||" 'nullish "??"
+          'bit-and "&" 'bit-or "|" 'bit-xor "^"
+          '<< "<<" '>> ">>" '>>> ">>>"
+          'in "in" 'instanceof "instanceof"))
+
+(define JS-ASSIGN-OPS
+  (hasheq '+= "+=" '-= "-=" '*= "*=" '/= "/="
+          '%= "%=" '**= "**="
+          'and= "&&=" 'or= "||=" 'nullish= "??="
+          'bit-and= "&=" 'bit-or= "|=" 'bit-xor= "^="
+          '<<= "<<=" '>>= ">>=" '>>>= ">>>="))
+
+(define (js-binary-op? sym)
+  (and (symbol? sym) (hash-has-key? JS-BINARY-OPS sym)))
+(define (js-assign-op? sym)
+  (and (symbol? sym) (hash-has-key? JS-ASSIGN-OPS sym)))
+
+(define (splice-sym? sym)
+  (and (symbol? sym)
+       (let ([s (symbol->string sym)])
+         (and (> (string-length s) 1)
+              (char=? (string-ref s 0) #\~)))))
+
+(define (splice-kind sym)
+  ;; ~name → 'expr, ~@name → 'stmts, ~%name → 'json
+  (define s (symbol->string sym))
+  (cond
+    [(and (> (string-length s) 2) (char=? (string-ref s 1) #\@))
+     (values 'stmts (string->symbol (substring s 2)))]
+    [(and (> (string-length s) 2) (char=? (string-ref s 1) #\%))
+     (values 'json (string->symbol (substring s 2)))]
+    [else
+     (values 'expr (string->symbol (substring s 1)))]))
+
+(define (parse-js-ast-body forms)
+  ;; Multiple top-level forms → block; single form → that form
+  (cond
+    [(null? forms) (js-ast-block '())]
+    [(= (length forms) 1) (parse-js-ast-stmt (->datum (car forms)))]
+    [else (js-ast-block (map (lambda (f) (parse-js-ast-stmt (->datum f))) forms))]))
+
+(define (parse-js-ast-stmt d)
+  ;; Parse a datum as a JS statement or declaration
+  (cond
+    [(and (pair? d) (not (eq? (car d) BRACKET-TAG)))
+     (parse-js-ast-list-stmt d)]
+    ;; A splice at statement level
+    [(splice-sym? d)
+     (define-values (kind name) (splice-kind d))
+     (case kind
+       [(stmts) (js-ast-splice-stmts (parse-expr name))]
+       [(expr)  (js-ast-expr-stmt (js-ast-splice-expr (parse-expr name)))]
+       [(json)  (js-ast-expr-stmt (js-ast-splice-json (parse-expr name)))])]
+    ;; Anything else is an expression statement
+    [else (js-ast-expr-stmt (parse-js-ast-expr d))]))
+
+(define (parse-js-ast-list-stmt d)
+  (match d
+    ;; const / let declarations
+    [(list 'const (? symbol? name) value)
+     (js-ast-const name (parse-js-ast-expr value))]
+    [(list 'let (? symbol? name) value)
+     (js-ast-let name (parse-js-ast-expr value))]
+
+    ;; assignment: (= target value) or compound (+=, -=, etc.)
+    [(list '= target value)
+     (js-ast-assign (parse-js-ast-expr target) (parse-js-ast-expr value))]
+    [(list (? js-assign-op? op) target value)
+     ;; Desugar compound assignment: (+= a b) → a = a + b at AST level? No — emit directly.
+     ;; Store as binary-assign via the assign node with the op embedded in target
+     (js-ast-assign (parse-js-ast-expr target)
+                    (js-ast-binary (strip-assign-op op)
+                                   (parse-js-ast-expr target)
+                                   (parse-js-ast-expr value)))]
+
+    ;; return
+    [(list 'return)
+     (js-ast-return #f)]
+    [(list 'return expr)
+     (js-ast-return (parse-js-ast-expr expr))]
+
+    ;; if statement
+    [(list 'if test then)
+     (js-ast-if (parse-js-ast-expr test)
+                (parse-js-ast-block-body (list then))
+                #f)]
+    [(list 'if test then else-branch)
+     (js-ast-if (parse-js-ast-expr test)
+                (parse-js-ast-block-body (list then))
+                (parse-js-ast-block-body (list else-branch)))]
+    [(list* 'if test body)
+     #:when (>= (length body) 1)
+     ;; (if test stmt1 stmt2 ... [else stmt ...])
+     (define-values (then-stmts else-stmts) (split-if-else body))
+     (js-ast-if (parse-js-ast-expr test)
+                (parse-js-ast-block-body then-stmts)
+                (if (null? else-stmts) #f (parse-js-ast-block-body else-stmts)))]
+
+    ;; for-of
+    [(list* 'for-of (? symbol? binding) iterable body)
+     (js-ast-for-of binding (parse-js-ast-expr iterable)
+                     (parse-js-ast-block-body body))]
+
+    ;; while
+    [(list* 'while test body)
+     (js-ast-while (parse-js-ast-expr test) (parse-js-ast-block-body body))]
+
+    ;; throw
+    [(list 'throw expr)
+     (js-ast-throw (parse-js-ast-expr expr))]
+
+    ;; try/catch/finally
+    [(list* 'try rest)
+     (parse-js-ast-try rest)]
+
+    ;; export function / export async function / export class
+    ;; Handles both (export (function ...)) and (export (async function ...))
+    ;; where the inner async/function may be flat or nested.
+    [(list 'export inner)
+     (define inner-d (->datum inner))
+     (cond
+       [(and (pair? inner-d) (eq? (car inner-d) 'function))
+        (define f (parse-js-ast-function (cdr inner-d) #:async? #f))
+        (struct-copy js-ast-function f [export? #t])]
+       [(and (pair? inner-d) (eq? (car inner-d) 'async))
+        ;; (export (async function name (params) body...)) — flat form
+        ;; or (export (async (function name (params) body...))) — nested form
+        (define rest-items (cdr inner-d))
+        (cond
+          ;; Nested: (async (function name ...))
+          [(and (pair? rest-items) (pair? (car rest-items))
+                (eq? (car (car rest-items)) 'function))
+           (define f (parse-js-ast-function (cdr (car rest-items)) #:async? #t))
+           (struct-copy js-ast-function f [export? #t])]
+          ;; Flat: (async function name (params) body...)
+          [(and (pair? rest-items) (eq? (car rest-items) 'function))
+           (define f (parse-js-ast-function (cdr rest-items) #:async? #t))
+           (struct-copy js-ast-function f [export? #t])]
+          [else (error 'beagle "js/quote: export async must be followed by function")])]
+       [(and (pair? inner-d) (eq? (car inner-d) 'class))
+        (parse-js-ast-class (cdr inner-d) #:export? #t)]
+       [else (error 'beagle "js/quote: export requires function, async function, or class, got ~v" inner-d)])]
+
+    ;; async function — handles both flat and nested forms
+    [(list 'async inner-form)
+     (define inner-d (->datum inner-form))
+     (cond
+       ;; Nested: (async (function name ...))
+       [(and (pair? inner-d) (eq? (car inner-d) 'function))
+        (parse-js-ast-function (cdr inner-d) #:async? #t)]
+       [else (error 'beagle "js/quote: async must be followed by function")])]
+    [(list* 'async 'function rest)
+     ;; Flat: (async function name (params) body...)
+     (parse-js-ast-function rest #:async? #t)]
+
+    ;; function
+    [(cons 'function rest)
+     (parse-js-ast-function rest #:async? #f)]
+
+    ;; class
+    [(cons 'class rest)
+     (parse-js-ast-class rest)]
+
+    ;; Binary ops as statement (expression statement)
+    [(list (? js-binary-op? op) left right)
+     (js-ast-expr-stmt (js-ast-binary op (parse-js-ast-expr left) (parse-js-ast-expr right)))]
+
+    ;; Generic call as statement
+    [(list* (? symbol? fn) args)
+     #:when (not (splice-sym? fn))
+     (js-ast-expr-stmt (parse-js-ast-call-or-member d))]
+
+    ;; Splice at statement level (already handled in parse-js-ast-stmt for bare symbols)
+    [(list* first rest)
+     (js-ast-expr-stmt (parse-js-ast-expr d))]
+
+    [_ (error 'beagle "js/quote: unsupported statement form: ~v" d)]))
+
+(define (strip-assign-op sym)
+  ;; += → +, -= → -, etc.  Uses the JS-ASSIGN-OPS lookup to get the JS string,
+  ;; then strips the trailing '=' to find the base operator.
+  (define js-str (hash-ref JS-ASSIGN-OPS sym))
+  (define base-str (substring js-str 0 (- (string-length js-str) 1)))
+  ;; Return the symbol from JS-BINARY-OPS that maps to this base-str
+  (for/first ([(k v) (in-hash JS-BINARY-OPS)]
+              #:when (string=? v base-str))
+    k))
+
+(define (split-if-else body)
+  ;; Split body at 'else keyword: (stmt... else stmt...) → (values then-stmts else-stmts)
+  (let loop ([rest body] [then-acc '()])
+    (cond
+      [(null? rest) (values (reverse then-acc) '())]
+      [(eq? (->datum (car rest)) 'else)
+       (values (reverse then-acc) (cdr rest))]
+      [else (loop (cdr rest) (cons (car rest) then-acc))])))
+
+(define (parse-js-ast-block-body stmts)
+  ;; Parse a list of forms as a block
+  (define parsed (map (lambda (s) (parse-js-ast-stmt (->datum s))) stmts))
+  (if (= (length parsed) 1) (car parsed) (js-ast-block parsed)))
+
+(define (parse-js-ast-function rest #:async? [async? #f])
+  ;; rest: (name (params...) body...)
+  (when (< (length rest) 2)
+    (error 'beagle "js/quote function: expected (function name (params...) body...)"))
+  (define name-d (->datum (car rest)))
+  (unless (symbol? name-d)
+    (error 'beagle "js/quote function: name must be a symbol, got ~v" name-d))
+  (define params-d (->datum (cadr rest)))
+  (define params (parse-js-ast-param-list params-d))
+  (define body-forms (cddr rest))
+  (js-ast-function name-d params (parse-js-ast-block-body body-forms) async? #f))
+
+(define (parse-js-ast-param-list d)
+  ;; Parse (x y z) or [x y z] → list of symbols
+  (define items
+    (cond
+      [(bracketed? d) (bracket-body d)]
+      [(list? d) d]
+      [else (error 'beagle "js/quote: expected parameter list, got ~v" d)]))
+  (for/list ([item (in-list items)])
+    (define v (->datum item))
+    (cond
+      [(symbol? v) v]
+      ;; spread param: (... name)
+      [(and (pair? v) (eq? (car v) 'spread) (= (length v) 2) (symbol? (cadr v)))
+       (list 'spread (cadr v))]
+      [else (error 'beagle "js/quote: parameter must be a symbol, got ~v" v)])))
+
+(define (parse-js-ast-class rest #:export? [export? #f])
+  ;; rest: (name [extends expr] method...)
+  (when (null? rest)
+    (error 'beagle "js/quote class: expected (class name ...)"))
+  (define name-d (->datum (car rest)))
+  (unless (symbol? name-d)
+    (error 'beagle "js/quote class: name must be a symbol, got ~v" name-d))
+  (define remaining (cdr rest))
+  (define-values (extends-expr methods-raw)
+    (cond
+      [(and (pair? remaining) (eq? (->datum (car remaining)) 'extends)
+            (pair? (cdr remaining)))
+       (values (parse-js-ast-expr (->datum (cadr remaining))) (cddr remaining))]
+      [else (values #f remaining)]))
+  (define methods (map (lambda (m) (parse-js-ast-method (->datum m))) methods-raw))
+  (js-ast-class name-d extends-expr methods))
+
+(define (parse-js-ast-method d)
+  ;; (method name (params...) body...) or (constructor (params...) body...)
+  ;; (static method name (params...) body...) (async method ...) (get ...) (set ...)
+  (cond
+    [(not (pair? d)) (error 'beagle "js/quote method: expected list, got ~v" d)]
+    [else
+     (define-values (static? async? kind rest)
+       (parse-js-method-modifiers d))
+     (cond
+       [(eq? kind 'constructor)
+        (when (< (length rest) 1)
+          (error 'beagle "js/quote constructor: expected (constructor (params...) body...)"))
+        (define params (parse-js-ast-param-list (->datum (car rest))))
+        (define body-forms (cdr rest))
+        (js-ast-method 'constructor params (parse-js-ast-block-body body-forms) static? async? 'constructor)]
+       [else
+        (when (< (length rest) 2)
+          (error 'beagle "js/quote method: expected (method name (params...) body...)"))
+        (define name-d (->datum (car rest)))
+        (define params (parse-js-ast-param-list (->datum (cadr rest))))
+        (define body-forms (cddr rest))
+        (js-ast-method name-d params (parse-js-ast-block-body body-forms) static? async? kind)])]))
+
+(define (parse-js-method-modifiers d)
+  ;; Returns (values static? async? kind rest)
+  (define head (car d))
+  (cond
+    [(eq? head 'constructor)
+     (values #f #f 'constructor (cdr d))]
+    [(eq? head 'static)
+     (define-values (s2 a2 k2 r2) (parse-js-method-modifiers (cdr d)))
+     (values #t a2 k2 r2)]
+    [(eq? head 'async)
+     (define-values (s2 a2 k2 r2) (parse-js-method-modifiers (cdr d)))
+     (values s2 #t k2 r2)]
+    [(eq? head 'get)
+     (values #f #f 'get (cdr d))]
+    [(eq? head 'set)
+     (values #f #f 'set (cdr d))]
+    [(eq? head 'method)
+     (values #f #f 'method (cdr d))]
+    ;; bare name — implied method
+    [(symbol? head)
+     (values #f #f 'method d)]
+    [else (error 'beagle "js/quote method: unexpected modifier ~v" head)]))
+
+(define (parse-js-ast-try rest)
+  ;; rest: body... (catch name body...) [(finally body...)]
+  (define-values (body-forms catch-and-finally)
+    (let loop ([forms rest] [body-acc '()])
+      (cond
+        [(null? forms) (values (reverse body-acc) '())]
+        [(and (pair? (->datum (car forms)))
+              (memq (car (->datum (car forms))) '(catch finally)))
+         (values (reverse body-acc) forms)]
+        [else (loop (cdr forms) (cons (car forms) body-acc))])))
+  (define catch-name #f)
+  (define catch-body #f)
+  (define finally-body #f)
+  (for ([cf (in-list catch-and-finally)])
+    (define d (->datum cf))
+    (match d
+      [(list* 'catch (? symbol? name) body)
+       (set! catch-name name)
+       (set! catch-body (parse-js-ast-block-body body))]
+      [(list* 'finally body)
+       (set! finally-body (parse-js-ast-block-body body))]
+      [_ (error 'beagle "js/quote try: expected (catch name body...) or (finally body...), got ~v" d)]))
+  (js-ast-try (parse-js-ast-block-body body-forms) catch-name catch-body finally-body))
+
+(define (parse-js-ast-expr d)
+  ;; Parse a datum as a JS expression
+  (cond
+    ;; Literals
+    [(string? d) (js-ast-literal d)]
+    [(number? d) (js-ast-literal d)]
+    [(boolean? d) (js-ast-literal d)]
+    [(eq? d 'null) (js-ast-literal 'null)]
+    [(eq? d 'undefined) (js-ast-literal 'undefined)]
+    [(eq? d 'true) (js-ast-literal #t)]
+    [(eq? d 'false) (js-ast-literal #f)]
+    [(eq? d 'this) (js-ast-ident 'this)]
+
+    ;; Splice
+    [(splice-sym? d)
+     (define-values (kind name) (splice-kind d))
+     (case kind
+       [(expr)  (js-ast-splice-expr (parse-expr name))]
+       [(stmts) (error 'beagle "js/quote: ~@splice not allowed in expression context")]
+       [(json)  (js-ast-splice-json (parse-expr name))])]
+
+    ;; Identifier
+    [(symbol? d) (js-ast-ident d)]
+
+    ;; Bracket form → array literal
+    [(bracketed? d)
+     (js-ast-array (map (lambda (item) (parse-js-ast-expr (->datum item)))
+                        (bracket-body d)))]
+
+    ;; Map-tagged → object literal
+    [(map-tagged? d)
+     (parse-js-ast-object-literal (map-body d))]
+
+    ;; List forms
+    [(pair? d)
+     (parse-js-ast-list-expr d)]
+
+    [else (error 'beagle "js/quote: unsupported expression: ~v" d)]))
+
+(define (parse-js-ast-object-literal items)
+  ;; {k1 v1 k2 v2 ...} → js-ast-object
+  (unless (even? (length items))
+    (error 'beagle "js/quote object literal: expected even number of forms (key/value pairs)"))
+  (define pairs
+    (let loop ([rest items] [acc '()])
+      (cond
+        [(null? rest) (reverse acc)]
+        [else
+         (define key (parse-js-ast-expr (->datum (car rest))))
+         (define val (parse-js-ast-expr (->datum (cadr rest))))
+         (loop (cddr rest) (cons (cons key val) acc))])))
+  (js-ast-object pairs))
+
+(define (parse-js-ast-list-expr d)
+  (match d
+    ;; Arrow function: (=> (params...) body-expr) or (=> (params...) body1 body2 ...)
+    [(list '=> params-form body)
+     (define params (parse-js-ast-param-list params-form))
+     (js-ast-arrow params (parse-js-ast-expr body))]
+    [(list* '=> params-form body)
+     #:when (> (length body) 1)
+     (define params (parse-js-ast-param-list params-form))
+     (js-ast-arrow params (parse-js-ast-block-body body))]
+
+    ;; Ternary: (? test then else)
+    [(list '? test then else-expr)
+     (js-ast-ternary (parse-js-ast-expr test) (parse-js-ast-expr then) (parse-js-ast-expr else-expr))]
+
+    ;; Binary operators
+    [(list (? js-binary-op? op) left right)
+     (js-ast-binary op (parse-js-ast-expr left) (parse-js-ast-expr right))]
+
+    ;; Unary operators
+    [(list '! expr) (js-ast-unary '! (parse-js-ast-expr expr) #t)]
+    [(list 'typeof expr) (js-ast-typeof (parse-js-ast-expr expr))]
+    [(list 'void expr) (js-ast-unary 'void (parse-js-ast-expr expr) #t)]
+    [(list 'delete expr) (js-ast-unary 'delete (parse-js-ast-expr expr) #t)]
+
+    ;; new
+    [(list* 'new callee args)
+     (js-ast-new (parse-js-ast-expr callee) (map parse-js-ast-expr args))]
+
+    ;; await
+    [(list 'await expr) (js-ast-await (parse-js-ast-expr expr))]
+
+    ;; Template literal: (tpl "str" expr "str" ...)
+    [(cons 'tpl parts)
+     (js-ast-template (map (lambda (p)
+                             (define v (->datum p))
+                             (if (string? v) v (parse-js-ast-expr v)))
+                           (cdr d)))]
+
+    ;; Spread: (spread expr)
+    [(list 'spread expr) (js-ast-spread (parse-js-ast-expr expr))]
+
+    ;; Array literal: (array items...)
+    [(cons 'array items)
+     (js-ast-array (map parse-js-ast-expr items))]
+
+    ;; Object literal: (object k v k v ...)
+    [(cons 'object items)
+     (parse-js-ast-object-literal items)]
+
+    ;; Member access: (dot obj prop)
+    [(list 'dot obj (? symbol? prop))
+     (js-ast-member (parse-js-ast-expr obj) prop #f)]
+
+    ;; Computed member: (bracket obj idx)
+    [(list 'bracket obj idx)
+     (js-ast-index (parse-js-ast-expr obj) (parse-js-ast-expr idx))]
+
+    ;; Call: general — (callee arg1 arg2 ...)
+    ;; Method calls: (.method obj arg...) → member + call
+    [_ (parse-js-ast-call-or-member d)]))
+
+(define (parse-js-ast-call-or-member d)
+  (define head (car d))
+  (define head-d (->datum head))
+  (cond
+    ;; (.method obj args...) → call on member
+    [(and (symbol? head-d) (dot-method-sym? head-d))
+     (define method-name (string->symbol (substring (symbol->string head-d) 1)))
+     (when (null? (cdr d))
+       (error 'beagle "js/quote: method call needs an object: ~v" d))
+     (define obj (parse-js-ast-expr (cadr d)))
+     (define args (map parse-js-ast-expr (cddr d)))
+     (if (null? args)
+       ;; Bare .prop access with no args — could be access or zero-arg call
+       ;; Treat as call (since it's in call position)
+       (js-ast-call (js-ast-member obj method-name #f) '())
+       (js-ast-call (js-ast-member obj method-name #f) args))]
+
+    ;; Splice in call position: (~fn args...)
+    [(splice-sym? head-d)
+     (define-values (kind name) (splice-kind head-d))
+     (unless (eq? kind 'expr)
+       (error 'beagle "js/quote: only ~expr splices allowed in call position"))
+     (define callee (js-ast-splice-expr (parse-expr name)))
+     (js-ast-call callee (map parse-js-ast-expr (cdr d)))]
+
+    ;; Normal call: (fn arg1 arg2 ...)
+    [else
+     (define callee (parse-js-ast-expr head-d))
+     (define args (map parse-js-ast-expr (cdr d)))
+     (js-ast-call callee args)]))
 
 ;; --- SQL-specific parse helpers --------------------------------------------
 
@@ -2167,6 +2746,40 @@
  (struct-out sql-column-ref)
  (struct-out sql-aggregate)
  (struct-out sql-order-spec)
+ (struct-out js-quote-form)
+ (struct-out js-ast-block)
+ (struct-out js-ast-const)
+ (struct-out js-ast-let)
+ (struct-out js-ast-assign)
+ (struct-out js-ast-return)
+ (struct-out js-ast-if)
+ (struct-out js-ast-for-of)
+ (struct-out js-ast-while)
+ (struct-out js-ast-throw)
+ (struct-out js-ast-try)
+ (struct-out js-ast-expr-stmt)
+ (struct-out js-ast-function)
+ (struct-out js-ast-class)
+ (struct-out js-ast-method)
+ (struct-out js-ast-call)
+ (struct-out js-ast-member)
+ (struct-out js-ast-index)
+ (struct-out js-ast-arrow)
+ (struct-out js-ast-ternary)
+ (struct-out js-ast-binary)
+ (struct-out js-ast-unary)
+ (struct-out js-ast-template)
+ (struct-out js-ast-array)
+ (struct-out js-ast-object)
+ (struct-out js-ast-spread)
+ (struct-out js-ast-await)
+ (struct-out js-ast-new)
+ (struct-out js-ast-typeof)
+ (struct-out js-ast-ident)
+ (struct-out js-ast-literal)
+ (struct-out js-ast-splice-expr)
+ (struct-out js-ast-splice-stmts)
+ (struct-out js-ast-splice-json)
  parse-program
  DEFAULT-MODE
  DEFAULT-TARGET

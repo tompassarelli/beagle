@@ -352,6 +352,9 @@
     [(set!-form target value)
      (check-shadow target scope ctx)
      (check-shadow value scope ctx)]
+    [(js-quote-form body)
+     ;; Traverse JS AST to find beagle splices and check-shadow them
+     (check-shadow-js-ast body scope ctx)]
     [_ (void)]))
 
 (define (gensym-name? n)
@@ -507,6 +510,178 @@
          (for ([e (in-list (impl-method-body m))]) (collect-symbols e used))))]
     [(await-form expr)
      (collect-symbols expr used)]
+    [(js-quote-form body)
+     (collect-symbols-js-ast body used)]
     [_ (void)]))
+
+;; --- js/quote AST traversal for lint ----------------------------------------
+;; Walk the JS AST tree and invoke check-shadow / collect-symbols on any
+;; beagle splice expressions found inside.
+
+(define (check-shadow-js-ast node scope ctx)
+  (cond
+    [(js-ast-splice-expr? node)
+     (check-shadow (js-ast-splice-expr-beagle-expr node) scope ctx)]
+    [(js-ast-splice-stmts? node)
+     (check-shadow (js-ast-splice-stmts-beagle-expr node) scope ctx)]
+    [(js-ast-splice-json? node)
+     (check-shadow (js-ast-splice-json-beagle-expr node) scope ctx)]
+    [(js-ast-block? node)
+     (for ([s (in-list (js-ast-block-stmts node))])
+       (check-shadow-js-ast s scope ctx))]
+    [(js-ast-const? node)
+     (check-shadow-js-ast (js-ast-const-value node) scope ctx)]
+    [(js-ast-let? node)
+     (check-shadow-js-ast (js-ast-let-value node) scope ctx)]
+    [(js-ast-assign? node)
+     (check-shadow-js-ast (js-ast-assign-target node) scope ctx)
+     (check-shadow-js-ast (js-ast-assign-value node) scope ctx)]
+    [(js-ast-return? node)
+     (when (js-ast-return-expr node)
+       (check-shadow-js-ast (js-ast-return-expr node) scope ctx))]
+    [(js-ast-if? node)
+     (check-shadow-js-ast (js-ast-if-test node) scope ctx)
+     (check-shadow-js-ast (js-ast-if-then node) scope ctx)
+     (when (js-ast-if-else-branch node)
+       (check-shadow-js-ast (js-ast-if-else-branch node) scope ctx))]
+    [(js-ast-for-of? node)
+     (check-shadow-js-ast (js-ast-for-of-iterable node) scope ctx)
+     (check-shadow-js-ast (js-ast-for-of-body node) scope ctx)]
+    [(js-ast-while? node)
+     (check-shadow-js-ast (js-ast-while-test node) scope ctx)
+     (check-shadow-js-ast (js-ast-while-body node) scope ctx)]
+    [(js-ast-throw? node)
+     (check-shadow-js-ast (js-ast-throw-expr node) scope ctx)]
+    [(js-ast-try? node)
+     (check-shadow-js-ast (js-ast-try-body node) scope ctx)
+     (when (js-ast-try-catch-body node)
+       (check-shadow-js-ast (js-ast-try-catch-body node) scope ctx))
+     (when (js-ast-try-finally-body node)
+       (check-shadow-js-ast (js-ast-try-finally-body node) scope ctx))]
+    [(js-ast-expr-stmt? node)
+     (check-shadow-js-ast (js-ast-expr-stmt-expr node) scope ctx)]
+    [(js-ast-function? node)
+     (check-shadow-js-ast (js-ast-function-body node) scope ctx)]
+    [(js-ast-class? node)
+     (when (js-ast-class-extends-expr node)
+       (check-shadow-js-ast (js-ast-class-extends-expr node) scope ctx))
+     (for ([m (in-list (js-ast-class-methods node))])
+       (check-shadow-js-ast m scope ctx))]
+    [(js-ast-method? node)
+     (check-shadow-js-ast (js-ast-method-body node) scope ctx)]
+    [(js-ast-call? node)
+     (check-shadow-js-ast (js-ast-call-callee node) scope ctx)
+     (for ([a (in-list (js-ast-call-args node))])
+       (check-shadow-js-ast a scope ctx))]
+    [(js-ast-member? node)
+     (check-shadow-js-ast (js-ast-member-object node) scope ctx)]
+    [(js-ast-index? node)
+     (check-shadow-js-ast (js-ast-index-object node) scope ctx)
+     (check-shadow-js-ast (js-ast-index-index-expr node) scope ctx)]
+    [(js-ast-arrow? node)
+     (check-shadow-js-ast (js-ast-arrow-body node) scope ctx)]
+    [(js-ast-ternary? node)
+     (check-shadow-js-ast (js-ast-ternary-test node) scope ctx)
+     (check-shadow-js-ast (js-ast-ternary-then node) scope ctx)
+     (check-shadow-js-ast (js-ast-ternary-else-expr node) scope ctx)]
+    [(js-ast-binary? node)
+     (check-shadow-js-ast (js-ast-binary-left node) scope ctx)
+     (check-shadow-js-ast (js-ast-binary-right node) scope ctx)]
+    [(js-ast-unary? node)
+     (check-shadow-js-ast (js-ast-unary-expr node) scope ctx)]
+    [(js-ast-template? node)
+     (for ([p (in-list (js-ast-template-parts node))])
+       (unless (string? p) (check-shadow-js-ast p scope ctx)))]
+    [(js-ast-array? node)
+     (for ([i (in-list (js-ast-array-items node))])
+       (check-shadow-js-ast i scope ctx))]
+    [(js-ast-object? node)
+     (for ([pair (in-list (js-ast-object-pairs node))])
+       (check-shadow-js-ast (car pair) scope ctx)
+       (check-shadow-js-ast (cdr pair) scope ctx))]
+    [(js-ast-spread? node)
+     (check-shadow-js-ast (js-ast-spread-expr node) scope ctx)]
+    [(js-ast-await? node)
+     (check-shadow-js-ast (js-ast-await-expr node) scope ctx)]
+    [(js-ast-new? node)
+     (check-shadow-js-ast (js-ast-new-callee node) scope ctx)
+     (for ([a (in-list (js-ast-new-args node))])
+       (check-shadow-js-ast a scope ctx))]
+    [(js-ast-typeof? node)
+     (check-shadow-js-ast (js-ast-typeof-expr node) scope ctx)]
+    [else (void)]))
+
+(define (collect-symbols-js-ast node used)
+  (cond
+    [(js-ast-splice-expr? node)
+     (collect-symbols (js-ast-splice-expr-beagle-expr node) used)]
+    [(js-ast-splice-stmts? node)
+     (collect-symbols (js-ast-splice-stmts-beagle-expr node) used)]
+    [(js-ast-splice-json? node)
+     (collect-symbols (js-ast-splice-json-beagle-expr node) used)]
+    [(js-ast-block? node)
+     (for ([s (in-list (js-ast-block-stmts node))])
+       (collect-symbols-js-ast s used))]
+    [(js-ast-const? node) (collect-symbols-js-ast (js-ast-const-value node) used)]
+    [(js-ast-let? node) (collect-symbols-js-ast (js-ast-let-value node) used)]
+    [(js-ast-assign? node)
+     (collect-symbols-js-ast (js-ast-assign-target node) used)
+     (collect-symbols-js-ast (js-ast-assign-value node) used)]
+    [(js-ast-return? node)
+     (when (js-ast-return-expr node)
+       (collect-symbols-js-ast (js-ast-return-expr node) used))]
+    [(js-ast-if? node)
+     (collect-symbols-js-ast (js-ast-if-test node) used)
+     (collect-symbols-js-ast (js-ast-if-then node) used)
+     (when (js-ast-if-else-branch node)
+       (collect-symbols-js-ast (js-ast-if-else-branch node) used))]
+    [(js-ast-for-of? node)
+     (collect-symbols-js-ast (js-ast-for-of-iterable node) used)
+     (collect-symbols-js-ast (js-ast-for-of-body node) used)]
+    [(js-ast-while? node)
+     (collect-symbols-js-ast (js-ast-while-test node) used)
+     (collect-symbols-js-ast (js-ast-while-body node) used)]
+    [(js-ast-throw? node) (collect-symbols-js-ast (js-ast-throw-expr node) used)]
+    [(js-ast-try? node)
+     (collect-symbols-js-ast (js-ast-try-body node) used)
+     (when (js-ast-try-catch-body node) (collect-symbols-js-ast (js-ast-try-catch-body node) used))
+     (when (js-ast-try-finally-body node) (collect-symbols-js-ast (js-ast-try-finally-body node) used))]
+    [(js-ast-expr-stmt? node) (collect-symbols-js-ast (js-ast-expr-stmt-expr node) used)]
+    [(js-ast-function? node) (collect-symbols-js-ast (js-ast-function-body node) used)]
+    [(js-ast-class? node)
+     (when (js-ast-class-extends-expr node) (collect-symbols-js-ast (js-ast-class-extends-expr node) used))
+     (for ([m (in-list (js-ast-class-methods node))]) (collect-symbols-js-ast m used))]
+    [(js-ast-method? node) (collect-symbols-js-ast (js-ast-method-body node) used)]
+    [(js-ast-call? node)
+     (collect-symbols-js-ast (js-ast-call-callee node) used)
+     (for ([a (in-list (js-ast-call-args node))]) (collect-symbols-js-ast a used))]
+    [(js-ast-member? node) (collect-symbols-js-ast (js-ast-member-object node) used)]
+    [(js-ast-index? node)
+     (collect-symbols-js-ast (js-ast-index-object node) used)
+     (collect-symbols-js-ast (js-ast-index-index-expr node) used)]
+    [(js-ast-arrow? node) (collect-symbols-js-ast (js-ast-arrow-body node) used)]
+    [(js-ast-ternary? node)
+     (collect-symbols-js-ast (js-ast-ternary-test node) used)
+     (collect-symbols-js-ast (js-ast-ternary-then node) used)
+     (collect-symbols-js-ast (js-ast-ternary-else-expr node) used)]
+    [(js-ast-binary? node)
+     (collect-symbols-js-ast (js-ast-binary-left node) used)
+     (collect-symbols-js-ast (js-ast-binary-right node) used)]
+    [(js-ast-unary? node) (collect-symbols-js-ast (js-ast-unary-expr node) used)]
+    [(js-ast-template? node)
+     (for ([p (in-list (js-ast-template-parts node))])
+       (unless (string? p) (collect-symbols-js-ast p used)))]
+    [(js-ast-array? node) (for ([i (in-list (js-ast-array-items node))]) (collect-symbols-js-ast i used))]
+    [(js-ast-object? node)
+     (for ([pair (in-list (js-ast-object-pairs node))])
+       (collect-symbols-js-ast (car pair) used)
+       (collect-symbols-js-ast (cdr pair) used))]
+    [(js-ast-spread? node) (collect-symbols-js-ast (js-ast-spread-expr node) used)]
+    [(js-ast-await? node) (collect-symbols-js-ast (js-ast-await-expr node) used)]
+    [(js-ast-new? node)
+     (collect-symbols-js-ast (js-ast-new-callee node) used)
+     (for ([a (in-list (js-ast-new-args node))]) (collect-symbols-js-ast a used))]
+    [(js-ast-typeof? node) (collect-symbols-js-ast (js-ast-typeof-expr node) used)]
+    [else (void)]))
 
 (provide lint-program!)

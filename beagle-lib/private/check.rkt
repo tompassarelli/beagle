@@ -45,6 +45,7 @@
 ;; Maps predicate → required target symbol.
 (define TARGET-ONLY-FORMS
   (hash
+   js-quote-form?           'js
    await-form?              'js
    nix-inherit?             'nix
    nix-inherit-from?        'nix
@@ -70,6 +71,7 @@
 ;; Map predicate → display name for error messages.
 (define TARGET-FORM-NAMES
   (hash
+   js-quote-form?           "js/quote"
    await-form?              "await"
    nix-inherit?             "inh"
    nix-inherit-from?        "inh-from"
@@ -1204,6 +1206,10 @@
               (= 1 (length (type-app-args inner-type))))
        (car (type-app-args inner-type))
        ANY)]
+    [(js-quote-form? e)
+     ;; Type-check all beagle splice expressions inside the JS AST
+     (infer-js-ast-splices (js-quote-form-body e) env)
+     (type-prim 'JsAst)]
     [(for-form? e)
      (define body-env (mut-copy env))
      (for ([c (in-list (for-form-clauses e))])
@@ -1419,6 +1425,112 @@
         (for ([a (in-list (call-form-args e))]) (infer-expr a env))
         ANY])]
     [else ANY]))
+
+;; Traverse a JS AST node and type-check all beagle splice expressions.
+(define (infer-js-ast-splices node env)
+  (cond
+    ;; Splice nodes — these contain beagle expressions to type-check
+    [(js-ast-splice-expr? node)
+     (infer-expr (js-ast-splice-expr-beagle-expr node) env)]
+    [(js-ast-splice-stmts? node)
+     (infer-expr (js-ast-splice-stmts-beagle-expr node) env)]
+    [(js-ast-splice-json? node)
+     (infer-expr (js-ast-splice-json-beagle-expr node) env)]
+
+    ;; Statement nodes
+    [(js-ast-block? node)
+     (for ([s (in-list (js-ast-block-stmts node))])
+       (infer-js-ast-splices s env))]
+    [(js-ast-const? node)
+     (infer-js-ast-splices (js-ast-const-value node) env)]
+    [(js-ast-let? node)
+     (infer-js-ast-splices (js-ast-let-value node) env)]
+    [(js-ast-assign? node)
+     (infer-js-ast-splices (js-ast-assign-target node) env)
+     (infer-js-ast-splices (js-ast-assign-value node) env)]
+    [(js-ast-return? node)
+     (when (js-ast-return-expr node)
+       (infer-js-ast-splices (js-ast-return-expr node) env))]
+    [(js-ast-if? node)
+     (infer-js-ast-splices (js-ast-if-test node) env)
+     (infer-js-ast-splices (js-ast-if-then node) env)
+     (when (js-ast-if-else-branch node)
+       (infer-js-ast-splices (js-ast-if-else-branch node) env))]
+    [(js-ast-for-of? node)
+     (infer-js-ast-splices (js-ast-for-of-iterable node) env)
+     (infer-js-ast-splices (js-ast-for-of-body node) env)]
+    [(js-ast-while? node)
+     (infer-js-ast-splices (js-ast-while-test node) env)
+     (infer-js-ast-splices (js-ast-while-body node) env)]
+    [(js-ast-throw? node)
+     (infer-js-ast-splices (js-ast-throw-expr node) env)]
+    [(js-ast-try? node)
+     (infer-js-ast-splices (js-ast-try-body node) env)
+     (when (js-ast-try-catch-body node)
+       (infer-js-ast-splices (js-ast-try-catch-body node) env))
+     (when (js-ast-try-finally-body node)
+       (infer-js-ast-splices (js-ast-try-finally-body node) env))]
+    [(js-ast-expr-stmt? node)
+     (infer-js-ast-splices (js-ast-expr-stmt-expr node) env)]
+
+    ;; Declarations
+    [(js-ast-function? node)
+     (infer-js-ast-splices (js-ast-function-body node) env)]
+    [(js-ast-class? node)
+     (when (js-ast-class-extends-expr node)
+       (infer-js-ast-splices (js-ast-class-extends-expr node) env))
+     (for ([m (in-list (js-ast-class-methods node))])
+       (infer-js-ast-splices m env))]
+    [(js-ast-method? node)
+     (infer-js-ast-splices (js-ast-method-body node) env)]
+
+    ;; Expressions
+    [(js-ast-call? node)
+     (infer-js-ast-splices (js-ast-call-callee node) env)
+     (for ([a (in-list (js-ast-call-args node))])
+       (infer-js-ast-splices a env))]
+    [(js-ast-member? node)
+     (infer-js-ast-splices (js-ast-member-object node) env)]
+    [(js-ast-index? node)
+     (infer-js-ast-splices (js-ast-index-object node) env)
+     (infer-js-ast-splices (js-ast-index-index-expr node) env)]
+    [(js-ast-arrow? node)
+     (infer-js-ast-splices (js-ast-arrow-body node) env)]
+    [(js-ast-ternary? node)
+     (infer-js-ast-splices (js-ast-ternary-test node) env)
+     (infer-js-ast-splices (js-ast-ternary-then node) env)
+     (infer-js-ast-splices (js-ast-ternary-else-expr node) env)]
+    [(js-ast-binary? node)
+     (infer-js-ast-splices (js-ast-binary-left node) env)
+     (infer-js-ast-splices (js-ast-binary-right node) env)]
+    [(js-ast-unary? node)
+     (infer-js-ast-splices (js-ast-unary-expr node) env)]
+    [(js-ast-template? node)
+     (for ([p (in-list (js-ast-template-parts node))])
+       (unless (string? p) (infer-js-ast-splices p env)))]
+    [(js-ast-array? node)
+     (for ([i (in-list (js-ast-array-items node))])
+       (infer-js-ast-splices i env))]
+    [(js-ast-object? node)
+     (for ([pair (in-list (js-ast-object-pairs node))])
+       (infer-js-ast-splices (car pair) env)
+       (infer-js-ast-splices (cdr pair) env))]
+    [(js-ast-spread? node)
+     (infer-js-ast-splices (js-ast-spread-expr node) env)]
+    [(js-ast-await? node)
+     (infer-js-ast-splices (js-ast-await-expr node) env)]
+    [(js-ast-new? node)
+     (infer-js-ast-splices (js-ast-new-callee node) env)
+     (for ([a (in-list (js-ast-new-args node))])
+       (infer-js-ast-splices a env))]
+    [(js-ast-typeof? node)
+     (infer-js-ast-splices (js-ast-typeof-expr node) env)]
+
+    ;; Leaf nodes — nothing to traverse
+    [(js-ast-ident? node) (void)]
+    [(js-ast-literal? node) (void)]
+
+    [else (void)]))
 
 (define (infer-cond-clauses clauses env)
   (let loop ([cls clauses] [current-env env] [acc '()])

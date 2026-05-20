@@ -1,0 +1,70 @@
+#lang beagle/js
+(ns test.jsquote)
+
+;; js/quote: structural JS quasiquotation
+;; Top-level js/quote forms emit JavaScript directly.
+
+;; 1. Simple constant
+(js/quote
+  (const greeting "Hello, World!"))
+
+;; 2. Function with control flow
+(js/quote
+  (function validateAge (age)
+    (if (< age 0)
+      (throw (new Error "Age cannot be negative"))
+      else
+      (if (>= age 18)
+        (return true)
+        else
+        (return false)))))
+
+;; 3. Async function with await
+(js/quote
+  (export (async function fetchData (url)
+    (const response (await (fetch url)))
+    (if (! (dot response ok))
+      (throw (new Error (tpl "HTTP error: " (dot response status)))))
+    (const data (await (.json response)))
+    (return data))))
+
+;; 4. Splicing beagle values into JS AST
+(def api-base : String "/api/v1")
+
+(js/quote
+  (const baseUrl ~api-base)
+  (const fullUrl (tpl "" baseUrl "/users")))
+
+;; 5. Class with methods
+(js/quote
+  (export (class Counter
+    (constructor (initial)
+      (= (dot this count) initial))
+    (increment ()
+      (= (dot this count) (+ (dot this count) 1))
+      (return this))
+    (get value ()
+      (return (dot this count)))
+    (static create ()
+      (return (new Counter 0))))))
+
+;; 6. While loop and for-of
+(js/quote
+  (function processItems (items)
+    (const results (array))
+    (for-of item items
+      (const processed (tpl "item: " item))
+      (.push results processed))
+    (return results)))
+
+;; 7. Try-catch-finally
+(js/quote
+  (async function safeFetch (url)
+    (try
+      (const response (await (fetch url)))
+      (return (await (.json response)))
+      (catch err
+        (.error console (dot err message))
+        (return null))
+      (finally
+        (.log console "fetch complete")))))
