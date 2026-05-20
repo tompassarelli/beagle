@@ -1,0 +1,13 @@
+(defunion (Result T E)
+  (Ok [(value : T)])
+  (Err [(error : E)]))
+
+(defrecord Order [(id : Int) (name : String)])
+(defrecord OrderError [(code : Int) (message : String)])
+
+(declare-extern find-order [Int -> (Result Order OrderError)])
+
+(defn handle [(r : (Result Order OrderError))] : String
+  (match r
+    [(Ok order) (order-name order)]
+    [(Err e) (ordererror-message e)]))

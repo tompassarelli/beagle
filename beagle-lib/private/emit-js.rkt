@@ -554,10 +554,30 @@
      (format "const ~a_values = new Set([~a]);" name (string-join val-strs ", "))]
 
     [(defunion-form? f)
-     (format "// ~a = ~a"
-             (mangle-name (defunion-form-name f))
-             (string-join (map (compose mangle-str symbol->string)
-                              (defunion-form-members f)) " | "))]
+     (define comment
+       (format "// ~a = ~a"
+               (mangle-name (defunion-form-name f))
+               (string-join (map (compose mangle-str symbol->string)
+                                (defunion-form-members f)) " | ")))
+     (define member-fields (defunion-form-member-fields f))
+     (if (not member-fields)
+       comment
+       (string-append comment "\n"
+         (string-join
+           (for/list ([m (in-list (defunion-form-members f))])
+             (define fields (hash-ref member-fields m))
+             (define m-str (mangle-str (symbol->string m)))
+             (define field-names (map (compose mangle-str symbol->string param-name) fields))
+             (format "function ~a(~a) { return Object.freeze({ _tag: ~v~a }); }"
+                     m-str
+                     (string-join field-names ", ")
+                     (symbol->string m)
+                     (if (null? field-names) ""
+                       (string-append ", "
+                         (string-join
+                           (map (lambda (n) (format "~a: ~a" n n)) field-names)
+                           ", ")))))
+           "\n")))]
 
     [(defscalar-form? f)
      (emit-defscalar f)]

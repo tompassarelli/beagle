@@ -6,6 +6,7 @@
 
 (require racket/match
          racket/string
+         racket/set
          "types.rkt"
          "macros.rkt"
          "extensions.rkt")
@@ -176,7 +177,9 @@
 (struct with-form   (target updates)                          #:transparent)
 (struct with-update (field-kw value)                          #:transparent)
 (struct defenum-form (name values)                            #:transparent)
-(struct defunion-form (name members)                          #:transparent)
+(struct defunion-form (name members type-params member-fields) #:transparent)
+;; type-params: (listof symbol) or '() for non-parametric
+;; member-fields: (hasheq member-name → (listof param)) or #f for non-parametric
 (struct defscalar-form (name backing-type predicates)         #:transparent)
 (struct scalar-predicate (op value)                           #:transparent)
 
@@ -267,6 +270,7 @@
                  imported-scalar-preds ; hash: scalar-name → (listof scalar-predicate)
                  imported-symbol-ns ; hash: unqualified-symbol → module-prefix-symbol
                  imported-union-members ; hash: union-name → (listof symbol) of record type names
+                 imported-parametric-unions ; hash: union-name → (hasheq 'params ... 'members ... 'member-fields ...)
                  target)        ; 'clj or 'cljs
   #:transparent)
 
@@ -374,7 +378,8 @@
                               #:scalar-fns [imp-scalar-fns #f]
                               #:scalar-preds [imp-scalar-preds #f]
                               #:symbol-ns [imp-symbol-ns #f]
-                              #:union-members [imp-union-members #f])
+                              #:union-members [imp-union-members #f]
+                              #:parametric-unions [imp-param-unions #f])
   (define datums (read-beagle-datums mod-path))
   (define (reg! name type)
     (hash-set! externs (qualify-name prefix name) type)
@@ -446,11 +451,50 @@
          (hash-set! imp-scalar-fns (qualify-name prefix ctor) #t)
          (hash-set! imp-scalar-fns (qualify-name prefix accessor) #t))]
       [(list 'defunion (? symbol? name) members ...)
-       ;; Register the union type as (U member1 member2 ...)
        (reg! name (type-union (map (lambda (m) (type-prim m)) members)))
-       ;; Store the member list for exhaustive match checking
        (when imp-union-members
          (hash-set! imp-union-members name members))]
+      [(list 'defunion (list (? symbol? name) type-vars ...) member-defs ...)
+       (define mnames (map car member-defs))
+       (current-user-parametric (set-add (current-user-parametric) name))
+       (reg! name (type-prim name))
+       (when imp-union-members
+         (hash-set! imp-union-members name mnames))
+       (define member-fields-hash (make-hasheq))
+       (for ([md (in-list member-defs)])
+         (define mname (car md))
+         (define fields-raw (cadr md))
+         (define field-items
+           (cond [(and (pair? fields-raw) (eq? (car fields-raw) BRACKET-TAG)) (cdr fields-raw)]
+                 [(list? fields-raw) fields-raw]
+                 [else '()]))
+         (define fields
+           (parameterize ([current-type-vars (append type-vars (current-type-vars))])
+             (for/list ([item (in-list field-items)])
+               (cond
+                 [(and (list? item) (= (length item) 3) (symbol? (car item)) (eq? (cadr item) ':))
+                  (param (car item) (parse-type (caddr item)))]
+                 [else (param (if (symbol? item) item (car item)) (type-prim 'Any))]))))
+         (hash-set! member-fields-hash mname fields)
+         (define m-lower (string-downcase (symbol->string mname)))
+         (define m-str (symbol->string mname))
+         (define m-type (type-prim mname))
+         (define ctor-fn (type-fn (map param-type fields) #f m-type))
+         (reg! (string->symbol (string-append "->" m-str))
+               (if (null? type-vars) ctor-fn (type-poly type-vars ctor-fn #f)))
+         (for ([f (in-list fields)])
+           (define acc-fn (type-fn (list m-type) #f (param-type f)))
+           (reg! (string->symbol (string-append m-lower "-" (symbol->string (param-name f))))
+                 (if (null? type-vars) acc-fn (type-poly type-vars acc-fn #f)))
+           (when imp-rec-fields
+             (define kw (string->symbol (string-append ":" (symbol->string (param-name f)))))
+             (hash-update! imp-rec-fields mname (lambda (h) (begin (hash-set! h kw (param-type f)) h)) (make-hasheq))
+             (hash-update! imp-rec-field-order mname (lambda (lst) (append lst (list kw))) '()))))
+       (when imp-param-unions
+         (hash-set! imp-param-unions name
+                    (hasheq 'params type-vars
+                            'members mnames
+                            'member-fields member-fields-hash)))]
       [(list 'def (? symbol? name) ': type-expr _)
        (reg! name (parse-type type-expr))]
       [(list 'defonce (? symbol? name) ': type-expr _)
@@ -491,6 +535,14 @@
   (define imp-scalar-preds (make-hash))
   (define imp-symbol-ns (make-hash))
   (define imp-union-members (make-hash))
+  (define imp-param-unions (make-hash))
+
+  ;; Pre-scan: register parametric defunion names so parse-type can handle them
+  (for ([d (in-list datums)])
+    (match d
+      [(list 'defunion (list (? symbol? name) _ ...) _ ...)
+       (current-user-parametric (set-add (current-user-parametric) name))]
+      [_ (void)]))
 
   (for ([d (in-list datums)])
     (match d
@@ -535,7 +587,8 @@
                                  #:scalar-fns imp-scalar-fns
                                  #:scalar-preds imp-scalar-preds
                                  #:symbol-ns imp-symbol-ns
-                                 #:union-members imp-union-members)))
+                                 #:union-members imp-union-members
+                                 #:parametric-unions imp-param-unions)))
        (set! requires (cons (require-entry rn #f #f) requires))]
       [(list 'require (? symbol? rn) ':as (? symbol? alias))
        (with-handlers ([exn:fail? (lambda (_e) (void))])
@@ -545,7 +598,8 @@
                                  #:scalar-fns imp-scalar-fns
                                  #:scalar-preds imp-scalar-preds
                                  #:symbol-ns imp-symbol-ns
-                                 #:union-members imp-union-members)))
+                                 #:union-members imp-union-members
+                                 #:parametric-unions imp-param-unions)))
        (set! requires (cons (require-entry rn alias #f) requires))]
       [(list 'require (? symbol? rn) ':refer (? (lambda (x) (and (pair? x) (eq? (car x) '#%brackets))) names))
        (define refer-syms (map ->datum (cdr (->datum names))))
@@ -557,7 +611,8 @@
                                  #:scalar-fns imp-scalar-fns
                                  #:scalar-preds imp-scalar-preds
                                  #:symbol-ns imp-symbol-ns
-                                 #:union-members imp-union-members)))
+                                 #:union-members imp-union-members
+                                 #:parametric-unions imp-param-unions)))
        (set! requires (cons (require-entry rn #f refer-syms) requires))]
 
       [(list 'import (? symbol? class-name))
@@ -570,7 +625,8 @@
   (define src-table (make-hasheq))
   (define pairs
     (parameterize ([current-registry registry]
-                   [current-src-table src-table])
+                   [current-src-table src-table]
+                   [current-user-parametric (current-user-parametric)])
       (for/list ([d (in-list datums)]
                  [s (in-list stxs)]
                  #:unless (meta-form? d))
@@ -578,7 +634,7 @@
   (define parsed (map car pairs))
   (define form-stxs (map cdr pairs))
 
-  (program mode ns parsed registry externs (reverse requires) (reverse imports) form-stxs src-table imp-rec-fields imp-rec-field-order imp-rec-ns (hash-keys imp-scalar-fns) imp-scalar-preds imp-symbol-ns imp-union-members target))
+  (program mode ns parsed registry externs (reverse requires) (reverse imports) form-stxs src-table imp-rec-fields imp-rec-field-order imp-rec-ns (hash-keys imp-scalar-fns) imp-scalar-preds imp-symbol-ns imp-union-members imp-param-unions target))
 
 (define (meta-form? d)
   (and (pair? d)
@@ -1216,7 +1272,12 @@
      (defenum-form name (map ->datum (or (stx-tail subs 2) values)))]
 
     [(list 'defunion (? symbol? name) members ...)
-     (defunion-form name (map ->datum (or (stx-tail subs 2) members)))]
+     (define raw (map ->datum (or (stx-tail subs 2) members)))
+     (define mnames (map (lambda (m) (if (pair? m) (car m) m)) raw))
+     (defunion-form name mnames '() #f)]
+
+    [(list 'defunion (list (? symbol? name) type-vars ...) member-defs ...)
+     (parse-parametric-defunion name type-vars member-defs subs)]
 
     [(list 'defscalar (? symbol? name) (? symbol? backing) ':where preds ...)
      (defscalar-form name (->datum backing) (map parse-scalar-predicate preds))]
@@ -1861,6 +1922,26 @@
              (cons (let-binding (car rest) #f (parse-expr (or val-stx (cadr rest))))
                    acc))]
       [else (error 'beagle "bad let bindings: ~v" rest)])))
+
+(define (parse-parametric-defunion name type-vars member-defs subs)
+  (define tvars (map ->datum type-vars))
+  (unless (andmap symbol? tvars)
+    (error 'beagle "defunion type parameters must be symbols: ~v" tvars))
+  (current-user-parametric (set-add (current-user-parametric) name))
+  (define member-names '())
+  (define mf-hash (make-hasheq))
+  (for ([md (in-list (or (stx-tail subs 2) member-defs))])
+    (define d (->datum md))
+    (unless (and (list? d) (>= (length d) 2) (symbol? (car d)))
+      (error 'beagle "parametric defunion member must be (Name [fields...]): ~v" d))
+    (define mname (car d))
+    (set! member-names (cons mname member-names))
+    (define fields-datum (cadr d))
+    (define fields
+      (parameterize ([current-type-vars (append tvars (current-type-vars))])
+        (parse-record-fields fields-datum)))
+    (hash-set! mf-hash mname fields))
+  (defunion-form name (reverse member-names) tvars mf-hash))
 
 (define (parse-record-fields f)
   (define d (->datum f))

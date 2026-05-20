@@ -1,8 +1,6 @@
-#lang beagle
-
-(ns beagle.result)
-(define-mode strict)
-
 (defunion (Result T E)
   (Ok [(value : T)])
   (Err [(error : E)]))
+
+(def x (->Ok 42))
+(def y (->Err "something failed"))

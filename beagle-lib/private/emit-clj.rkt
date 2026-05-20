@@ -475,7 +475,23 @@
   (define name (defunion-form-name f))
   (define members (defunion-form-members f))
   (define member-strs (map symbol->string members))
-  (format ";; ~a = ~a" name (string-join member-strs " | ")))
+  (define member-fields (defunion-form-member-fields f))
+  (define comment (format ";; ~a = ~a" name (string-join member-strs " | ")))
+  (if (not member-fields)
+    comment
+    (string-append comment "\n"
+      (string-join
+        (for/list ([m (in-list members)])
+          (define fields (hash-ref member-fields m))
+          (define m-str (symbol->string m))
+          (define ctor (format "(defrecord ~a [~a])"
+                         m-str
+                         (string-join
+                           (for/list ([fld (in-list fields)])
+                             (format "~a" (param-name fld)))
+                           " ")))
+          ctor)
+        "\n"))))
 
 (define (emit-defscalar f)
   (define name (defscalar-form-name f))

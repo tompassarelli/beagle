@@ -299,6 +299,23 @@
   "poly-bounded-prim-err.bclj")
 
 ;; =============================================================================
+;; Tests — parametric defunion
+;; =============================================================================
+
+(check-fixture-ok "parametric defunion: constructors and match with type narrowing"
+  "param-union-ok.bclj")
+
+(check-fixture-err/rx "parametric defunion: missing Err branch is exhaustive error"
+  #rx"not exhaustive"
+  "param-union-missing.bclj")
+
+(check-fixture-ok "parametric defunion: constructors callable"
+  "param-union-ctor.bclj")
+
+(check-fixture-ok "parametric defunion: match narrows type params in field types"
+  "param-union-narrow.bclj")
+
+;; =============================================================================
 ;; Tests — cross-file type imports
 ;; =============================================================================
 
@@ -683,14 +700,14 @@
 
 (check-ok/source "cross-file Result: exhaustive match on imported union passes" result-fixture-source
   '(require result)
-  `(defn handle ,(br '(r : Result)) : String
+  `(defn handle ,(br '(r : (Result String String))) : String
      (match r
        ,(br '(Ok v) "ok")
        ,(br '(Err e) 'e))))
 
 (check-err/source "cross-file Result: non-exhaustive match on imported union errors" result-fixture-source
   '(require result)
-  `(defn handle ,(br '(r : Result)) : String
+  `(defn handle ,(br '(r : (Result String String))) : String
      (match r
        ,(br '(Ok v) "ok"))))
 

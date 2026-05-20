@@ -13,6 +13,7 @@
 
 (require racket/match
          racket/format
+         racket/set
          "tags.rkt")
 
 (define PRIMITIVES
@@ -47,6 +48,8 @@
 (define current-type-vars (make-parameter '()))
 ;; Set by checker: maps union-name → (listof member-symbol) for subtype checks
 (define current-union-members (make-parameter (hash)))
+;; Set by parser: user-defined parametric type names (e.g. Result from parametric defunion)
+(define current-user-parametric (make-parameter (set)))
 
 ;; --- parsing types from source datums --------------------------------------
 
@@ -100,8 +103,10 @@
        (error 'beagle "empty union type: ~v" t))
      (type-union (map parse-type (cdr t)))]
 
-    ;; (Vec T), (Map K V), etc.
-    [(and (pair? t) (memq (car t) PARAMETRIC-CTORS))
+    ;; (Vec T), (Map K V), (Result T E), etc.
+    [(and (pair? t) (symbol? (car t))
+          (or (memq (car t) PARAMETRIC-CTORS)
+              (set-member? (current-user-parametric) (car t))))
      (type-app (car t) (map parse-type (cdr t)))]
 
     ;; type variable (in scope from enclosing forall)
@@ -212,6 +217,12 @@
     [(type-union? actual)
      (andmap (lambda (alt) (type-compatible? alt expected))
              (type-union-alts actual))]
+
+    ;; Prim compatible with parametric union type-app: Ok compatible with (Result T E)
+    [(and (type-prim? actual) (type-app? expected)
+          (let ([members (hash-ref (current-union-members) (type-app-ctor expected) #f)])
+            (and members (memq (type-prim-name actual) members))))
+     #t]
 
     ;; Primitives match by canonical name or union membership.
     ;; Qualified names (mod/Type) match their unqualified base (Type).
@@ -364,6 +375,7 @@
  (struct-out type-poly)
  current-type-vars
  current-union-members
+ current-user-parametric
  type?
  any-type?
  parse-type

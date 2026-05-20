@@ -245,10 +245,10 @@ generator needs it.
 ## Summary
 
 ```
-Phase 1  exhaustive match errors      now       trivial    no new syntax
-Phase 2  beagle.result convention     now       none       one .bgl file
-Phase 3  bounded polymorphism         next      moderate   parser + checker
-Phase 4  parametric defunion          after 3   significant compiler change
+Phase 1  exhaustive match errors      done      trivial    no new syntax
+Phase 2  beagle.result convention     done      none       one .bgl file
+Phase 3  bounded polymorphism         done      moderate   parser + checker
+Phase 4  parametric defunion          done      significant  compiler change
 —        type aliases                 deferred  —          when nesting hurts
 —        literal types                deferred  —          when codegen demands
 ```

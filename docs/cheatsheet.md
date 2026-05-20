@@ -141,6 +141,31 @@ only flags additive mixing and constructor mismatches.
 
 Declares an enum value set. Compiles to `(def OrderStatus-values #{:placed ...})`.
 
+### `defunion`
+
+```racket
+;; simple (non-parametric)
+(defunion Shape
+  (Circle [(radius : Float)])
+  (Rect   [(w : Float) (h : Float)]))
+
+;; parametric — type parameters in parens after the name
+(defunion (Result T E)
+  (Ok  [(value : T)])
+  (Err [(error : E)]))
+```
+
+Tagged union of record variants. Each member is a `defrecord` with a constructor
+(`->Ok`, `->Err`) and typed accessors (`ok-value`, `err-error`). In strict mode,
+`match` must cover all members or the checker reports the missing cases.
+
+Parametric unions accept type arguments: `(Result String OrderError)`.
+Match narrowing substitutes type params into field types, so `ok-value`
+returns `String` (not `T`) when the target type is `(Result String OrderError)`.
+
+Cross-module: `(require result)` imports the union, its members, constructors,
+and accessors. Exhaustive match and type-param narrowing work across modules.
+
 ## Expression forms
 
 ```racket

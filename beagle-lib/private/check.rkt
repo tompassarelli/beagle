@@ -115,6 +115,9 @@
 ;; Closed union members: union-name -> (listof symbol) of record type names
 (define UNION-MEMBERS (make-hash))
 
+;; Parametric union definitions: union-name -> (hasheq 'params 'members 'member-fields)
+(define PARAMETRIC-UNIONS (make-hash))
+
 ;; SQL table registry: table-name -> (hash column-name -> type)
 (define SQL-TABLES (make-hash))
 
@@ -231,6 +234,7 @@
     (hash-clear! RECORD-FIELDS)
     (hash-clear! RECORD-FIELD-ORDER)
     (hash-clear! UNION-MEMBERS)
+    (hash-clear! PARAMETRIC-UNIONS)
     (hash-clear! SQL-TABLES)
     (define env (build-initial-env prog))
     (define nix-schema
@@ -260,6 +264,9 @@
   ;; union types imported from other modules (for exhaustive match checking)
   (for ([(union-name members) (in-hash (program-imported-union-members prog))])
     (hash-set! UNION-MEMBERS union-name members))
+  ;; parametric unions imported from other modules (for match narrowing with type-param substitution)
+  (for ([(union-name pdef) (in-hash (program-imported-parametric-unions prog))])
+    (hash-set! PARAMETRIC-UNIONS union-name pdef))
   ;; top-level defs / defns (pre-pass so callers can look them up)
   (for ([raw-form (in-list (program-forms prog))])
     (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
@@ -325,12 +332,15 @@
       [(defmethod-form name _ params body)
        (void)]
       [(defenum-form name values) (void)]
-      [(defunion-form name members)
+      [(defunion-form name members type-params member-fields)
        (hash-set! UNION-MEMBERS name members)
-       ;; Register as a union type so type-compatible? works:
-       ;; OrderEvent typed as (U OrderPlaced OrderConfirmed ...)
-       (hash-set! env name
-                  (type-union (map (lambda (m) (type-prim m)) members)))]
+       (cond
+         [(null? type-params)
+          (hash-set! env name
+                     (type-union (map (lambda (m) (type-prim m)) members)))]
+         [else
+          (hash-set! env name (type-prim name))
+          (register-parametric-union! name type-params members member-fields env)])]
       [(defscalar-form name backing preds)
        (define scalar-type (type-prim name))
        (define backing-type (type-prim backing))
@@ -344,6 +354,38 @@
       [_ (void)]))
   env)
 
+(define (register-parametric-union! name type-params members member-fields env)
+  (hash-set! PARAMETRIC-UNIONS name
+             (hasheq 'params type-params
+                     'members members
+                     'member-fields member-fields))
+  (for ([m (in-list members)])
+    (define fields (hash-ref member-fields m))
+    (define m-type (type-prim m))
+    (define m-str (symbol->string m))
+    (define m-lower (string-downcase m-str))
+    ;; Constructor: ->Ok is polymorphic [T -> Ok] (forall over union's type params)
+    (define ctor-fn (type-fn (map param-type fields) #f m-type))
+    (hash-set! env (string->symbol (string-append "->" m-str))
+               (if (null? type-params)
+                 ctor-fn
+                 (type-poly type-params ctor-fn #f)))
+    ;; Accessors: ok-value is [Ok -> T]
+    (define field-map (make-hash))
+    (for ([f (in-list fields)])
+      (define acc-fn (type-fn (list m-type) #f (param-type f)))
+      (hash-set! env
+                 (string->symbol (string-append m-lower "-" (symbol->string (param-name f))))
+                 (if (null? type-params)
+                   acc-fn
+                   (type-poly type-params acc-fn #f)))
+      (hash-set! field-map
+                 (string->symbol (string-append ":" (symbol->string (param-name f))))
+                 (param-type f)))
+    (hash-set! RECORD-FIELDS m field-map)
+    (hash-set! RECORD-FIELD-ORDER m
+               (map (lambda (f) (string->symbol (string-append ":" (symbol->string (param-name f)))))
+                    fields))))
 
 (define (mut-copy h)
   (define out (make-hash))
@@ -446,7 +488,7 @@
      (define body-env (extend-with-params env params))
      (last-expr-type body body-env)]
     [(defenum-form _ _) (void)]
-    [(defunion-form _ _) (void)]
+    [(defunion-form _ _ _ _) (void)]
     [(defscalar-form _ _ _) (void)]
 
     ;; SQL forms
@@ -690,6 +732,20 @@
 
 ;; --- match arm narrowing ---------------------------------------------------
 
+(define (resolve-parametric-field-type field-type target-type)
+  (cond
+    [(and (type-app? target-type)
+          (hash-has-key? PARAMETRIC-UNIONS (type-app-ctor target-type)))
+     (define pdef (hash-ref PARAMETRIC-UNIONS (type-app-ctor target-type)))
+     (define params (hash-ref pdef 'params))
+     (define args (type-app-args target-type))
+     (define bindings (make-hasheq))
+     (for ([p (in-list params)]
+           [a (in-list args)])
+       (hash-set! bindings p a))
+     (apply-type-bindings field-type bindings)]
+    [else field-type]))
+
 (define (narrow-env-for-match clause target-type env)
   (define pat (match-clause-pattern clause))
   (cond
@@ -703,7 +759,8 @@
         (define field-order (hash-ref RECORD-FIELD-ORDER rec-name '()))
         (for ([b (in-list bindings)]
               [kw (in-list field-order)])
-          (hash-set! arm-env b (hash-ref field-map kw ANY)))]
+          (define raw-type (hash-ref field-map kw ANY))
+          (hash-set! arm-env b (resolve-parametric-field-type raw-type target-type)))]
        [(= (length bindings) 1)
         (hash-set! arm-env (car bindings) (type-prim rec-name))])
      arm-env]
@@ -761,9 +818,14 @@
   ;; Strict check: if target type is a defunion, ALL members must be covered.
   ;; Wildcard does NOT satisfy this — every case must be explicit.
   (define union-name
-    (and (type-prim? target-type)
-         (hash-ref UNION-MEMBERS (type-prim-name target-type) #f)
-         (type-prim-name target-type)))
+    (cond
+      [(and (type-prim? target-type)
+            (hash-ref UNION-MEMBERS (type-prim-name target-type) #f))
+       (type-prim-name target-type)]
+      [(and (type-app? target-type)
+            (hash-ref UNION-MEMBERS (type-app-ctor target-type) #f))
+       (type-app-ctor target-type)]
+      [else #f]))
   (define union-members
     (and union-name (hash-ref UNION-MEMBERS union-name)))
 
@@ -1744,6 +1806,17 @@
        (define name-lower (string-downcase name-str))
        (hash-set! KNOWN-FNS (string->symbol (string-append "->" name-str)) #t)
        (hash-set! KNOWN-FNS (string->symbol (string-append name-lower "-value")) #t)]
+      [(defunion-form? form)
+       (define mf (defunion-form-member-fields form))
+       (for ([m (in-list (defunion-form-members form))])
+         (define m-str (symbol->string m))
+         (define m-lower (string-downcase m-str))
+         (hash-set! KNOWN-FNS (string->symbol (string-append "->" m-str)) #t)
+         (when mf
+           (define fields (hash-ref mf m '()))
+           (for ([f (in-list fields)])
+             (hash-set! KNOWN-FNS
+                        (string->symbol (string-append m-lower "-" (symbol->string (param-name f)))) #t))))]
       [else (void)]))
   ;; imported scalars
   (for ([sym (in-list (program-imported-scalar-fns prog))])

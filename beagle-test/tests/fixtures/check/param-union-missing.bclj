@@ -1,0 +1,9 @@
+(defunion (Result T E)
+  (Ok [(value : T)])
+  (Err [(error : E)]))
+
+(defrecord Order [(id : Int)])
+
+(defn handle [(r : (Result Order String))] : String
+  (match r
+    [(Ok order) "got it"]))
