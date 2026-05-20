@@ -37,7 +37,10 @@ fi
 case "$FEATURE" in
   A) FEATURE_NAME="A-task-groups" ;;
   B) FEATURE_NAME="B-resource-maintenance" ;;
-  *) echo "Unknown feature: $FEATURE (use A or B)" >&2; exit 1 ;;
+  C) FEATURE_NAME="C-worker-load-limits" ;;
+  D) FEATURE_NAME="D-cost-budgets" ;;
+  E) FEATURE_NAME="E-exclusive-resources" ;;
+  *) echo "Unknown feature: $FEATURE (use A-E)" >&2; exit 1 ;;
 esac
 
 TASK_DIR="$FEATURE_DIR/$FEATURE_NAME"
@@ -73,8 +76,19 @@ cp "$TASK_DIR/spec.md" "$WORKSPACE/feature-spec.md"
 # ── Step 2: Write CLAUDE.md ──────────────────────────────────────────────
 
 CHECK_FLAG=""
+CHECK_CMD=""
+CHECK_WORKFLOW=""
+CHECK_RULE=""
 if [[ "$PROFILE" -gt 0 ]]; then
   CHECK_FLAG=" --profile $PROFILE"
+  CHECK_CMD="
+Type check (errors only, fast):
+\`\`\`
+BEAGLE_AGENT_MODE=1 $BEAGLE_BIN check --profile $PROFILE $WORKSPACE/src/
+\`\`\`
+"
+  CHECK_WORKFLOW="5. Run the type checker. Fix any exhaustive-match errors (these point to match sites you missed). Iterate until 0 errors."
+  CHECK_RULE="- After tests pass, run the type checker to catch missed match sites — it reports only real errors."
 fi
 
 cat > "$WORKSPACE/CLAUDE.md" <<AGENTEOF
@@ -92,11 +106,6 @@ Implement the feature described in \`feature-spec.md\`.
 
 ## Commands
 
-Type check:
-\`\`\`
-$BEAGLE_BIN check${CHECK_FLAG} $WORKSPACE/src/
-\`\`\`
-
 Build (compile to Clojure):
 \`\`\`
 $BEAGLE_BIN build --warn --out $WORKSPACE/clj $WORKSPACE/src/
@@ -106,20 +115,20 @@ Run feature tests:
 \`\`\`
 cd $WORKSPACE/clj && bb -cp . $WORKSPACE/tests/feature-tests.clj
 \`\`\`
-
+${CHECK_CMD}
 ## Workflow
 1. Read \`feature-spec.md\` to understand the feature requirements.
 2. Read the existing source files to understand the codebase.
-3. Run the type checker to understand the current type landscape.
-4. Implement the feature across all affected files.
-5. Build and run feature tests. Iterate until all tests pass.
-6. Run the type checker one final time to ensure no type errors.
+3. Implement the feature across all affected files.
+4. Build and run feature tests. Iterate until all tests pass.
+${CHECK_WORKFLOW}
 
 ## Rules
 - Only edit files in \`src/\`.
 - Do not modify test files.
 - Always rebuild before running tests.
 - Make sure existing behavior is preserved (the feature extends, not replaces).
+${CHECK_RULE}
 AGENTEOF
 
 # ── Step 3: Type check baseline ──────────────────────────────────────────
@@ -182,14 +191,14 @@ else
   if [[ -d "$WORKSPACE/clj/scheduler" ]]; then
     VISIBLE_OUT=$(cd "$WORKSPACE/clj" && timeout 60 bb -cp . "$WORKSPACE/tests/feature-tests.clj" 2>&1) || true
     VISIBLE_PASSED=$(echo "$VISIBLE_OUT" | grep -c '^PASS:' || true)
-    VISIBLE_TOTAL=$(grep -c 'run-test ' "$WORKSPACE/tests/feature-tests.clj" || true)
+    VISIBLE_TOTAL=$(grep -c '(run-test "' "$WORKSPACE/tests/feature-tests.clj" || true)
     VISIBLE_FAILED=$((VISIBLE_TOTAL - VISIBLE_PASSED))
     echo "Visible oracle: ${VISIBLE_PASSED}/${VISIBLE_TOTAL} passed, ${VISIBLE_FAILED} failed"
 
     # Run hidden oracle
     HIDDEN_OUT=$(cd "$WORKSPACE/clj" && timeout 60 bb -cp . "$TASK_DIR/hidden-oracle.clj" 2>&1) || true
     HIDDEN_PASSED=$(echo "$HIDDEN_OUT" | grep -c '^PASS:' || true)
-    HIDDEN_TOTAL=$(grep -c 'run-test ' "$TASK_DIR/hidden-oracle.clj" || true)
+    HIDDEN_TOTAL=$(grep -c '(run-test "' "$TASK_DIR/hidden-oracle.clj" || true)
     HIDDEN_FAILED=$((HIDDEN_TOTAL - HIDDEN_PASSED))
     echo "Hidden oracle:  ${HIDDEN_PASSED}/${HIDDEN_TOTAL} passed, ${HIDDEN_FAILED} failed"
   else
