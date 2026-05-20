@@ -47,6 +47,10 @@
          (for/fold ([h2 h]) ([m (in-list (defunion-form-members f))])
            (define fields (hash-ref (defunion-form-member-fields f) m '()))
            (hash-set h2 m (map (lambda (p) (symbol->string (param-name p))) fields)))]
+        [(deferror-form? f)
+         (for/fold ([h2 h]) ([m (in-list (deferror-form-members f))])
+           (define fields (hash-ref (deferror-form-member-fields f) m '()))
+           (hash-set h2 m (map (lambda (p) (symbol->string (param-name p))) fields)))]
         [else h])))
   (for/fold ([h local]) ([(rec-name field-names) (in-hash (program-imported-record-field-order prog))])
     (hash-set h rec-name field-names)))
@@ -214,6 +218,9 @@
     [(defunion-form? f)
      (emit-defunion f)]
 
+    [(deferror-form? f)
+     (emit-deferror f)]
+
     [(defscalar-form? f)
      (emit-defscalar f)]
 
@@ -356,6 +363,24 @@
              (emit-args (static-call-args e)))]
     [(dynamic-var? e)
      (symbol->string (dynamic-var-name e))]
+    [(check-expr? e)
+     (define inner (emit-expr (check-expr-expr e)))
+     (format "(let [r__check ~a]\n  (if (instance? ~a r__check)\n    (~a r__check)\n    (throw (ex-info (str \"check failed: \" (~a r__check)) {:error r__check}))))"
+             inner "Ok" "ok-value" "err-error")]
+    [(rescue-form? e)
+     (define inner (emit-expr (rescue-form-expr e)))
+     (define fallback (emit-expr (rescue-form-fallback e)))
+     (define err-name (or (rescue-form-err-name e) '_))
+     (format "(let [r__rescue ~a]\n  (if (instance? ~a r__rescue)\n    (~a r__rescue)\n    (let [~a r__rescue] ~a)))"
+             inner "Ok" "ok-value" err-name fallback)]
+    [(target-case-form? e)
+     (define target (current-emit-target))
+     (define cases (target-case-form-cases e))
+     (define branch (or (hash-ref cases target #f)
+                        (hash-ref cases 'clj #f)))
+     (unless branch
+       (error 'beagle "target-case: no branch for target ~a" target))
+     (emit-expr branch)]
     [(try-form? e)
      (define cljs? (eq? (current-emit-target) 'cljs))
      (format "(try\n  ~a~a~a)"
@@ -497,6 +522,23 @@
                            " ")))
           ctor)
         "\n"))))
+
+(define (emit-deferror f)
+  (define name (deferror-form-name f))
+  (define members (deferror-form-members f))
+  (define member-strs (map symbol->string members))
+  (define mf (deferror-form-member-fields f))
+  (define comment (format ";; error ~a = ~a" name (string-join member-strs " | ")))
+  (string-append comment "\n"
+    (string-join
+      (for/list ([m (in-list members)])
+        (define fields (hash-ref mf m '()))
+        (define m-str (symbol->string m))
+        (if (null? fields)
+          (format "(defrecord ~a [])" m-str)
+          (format "(defrecord ~a [~a])" m-str
+                  (string-join (map (lambda (fld) (format "~a" (param-name fld))) fields) " "))))
+      "\n")))
 
 (define (emit-defscalar f)
   (define name (defscalar-form-name f))

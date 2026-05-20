@@ -1,0 +1,236 @@
+#!/usr/bin/env bash
+# beagle-explain: structured diagnostic explanations for agents.
+#
+# Usage:
+#   beagle-explain E002              (human-readable)
+#   beagle-explain --json E002       (machine-readable)
+#   beagle-explain --list            (list all codes)
+
+set -euo pipefail
+
+JSON=0
+LIST=0
+CODE=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --json) JSON=1; shift ;;
+        --list) LIST=1; shift ;;
+        *) CODE="$1"; shift ;;
+    esac
+done
+
+# Diagnostic database — one entry per error code
+declare -A TITLES SUMMARIES WHYS BADS GOODS REPAIRS
+
+TITLES[E001]="Arity mismatch"
+SUMMARIES[E001]="Function call has wrong number of arguments."
+WHYS[E001]="Agents often miscounted parameters, especially with variadic functions or threading macros."
+BADS[E001]='(defn greet [(name : String) (age : Int)] : String (str "Hi " name))
+(greet "Tom")  ;; ERROR: expected 2 arg(s), got 1'
+GOODS[E001]='(greet "Tom" 30)'
+REPAIRS[E001]="Add missing arguments or remove extra ones. Check function signature with: beagle-sig <fn-name> <file>"
+
+TITLES[E002]="Type mismatch"
+SUMMARIES[E002]="Argument type does not match the parameter annotation."
+WHYS[E002]="Common when agents confuse record accessors, pass wrong field, or use Int where String is expected."
+BADS[E002]='(defn greet [(name : String)] : String (str "Hi " name))
+(greet 42)  ;; ERROR: arg 1 expected String, got Int'
+GOODS[E002]='(greet "Tom")'
+REPAIRS[E002]="Change the argument to match the expected type, or fix the annotation. Check suggestions in the diagnostic."
+
+TITLES[E003]="Return type mismatch"
+SUMMARIES[E003]="Function body returns a type that does not match the declared return type."
+WHYS[E003]="Agents sometimes forget to update return annotations after changing function bodies."
+BADS[E003]='(defn count-words [(s : String)] : Int
+  (str/split s " "))  ;; ERROR: expected Int, got (Vec String)'
+GOODS[E003]='(defn count-words [(s : String)] : Int
+  (count (str/split s " ")))'
+REPAIRS[E003]="Either fix the return expression or update the return type annotation."
+
+TITLES[E004]="Definition type mismatch"
+SUMMARIES[E004]="A def binding has a type annotation that does not match the inferred value type."
+WHYS[E004]="Happens when agents copy-paste definitions and forget to update the annotation."
+BADS[E004]='(def greeting : Int "hello")  ;; ERROR: expected Int, got String'
+GOODS[E004]='(def greeting : String "hello")'
+REPAIRS[E004]="Fix the type annotation or the value expression."
+
+TITLES[E005]="Let binding type mismatch"
+SUMMARIES[E005]="A let binding has a declared type that does not match the inferred expression type."
+WHYS[E005]="Similar to E004 but inside let blocks. Often caused by chained transformations."
+BADS[E005]='(let [(x : Int) "hello"] x)  ;; ERROR: expected Int, got String'
+GOODS[E005]='(let [(x : String) "hello"] x)'
+REPAIRS[E005]="Fix the type annotation or the bound expression."
+
+TITLES[E006]="Non-exhaustive match"
+SUMMARIES[E006]="A match expression on a defunion does not cover all members."
+WHYS[E006]="Agents forget to add branches for all union members. This is the most important error to fix — missing cases cause runtime crashes."
+BADS[E006]='(defunion Shape (Circle [(r : Float)]) (Square [(s : Float)]))
+(match shape
+  [(Circle r) (* 3.14 r r)])  ;; ERROR: missing case: Square'
+GOODS[E006]='(match shape
+  [(Circle r) (* 3.14 r r)]
+  [(Square s) (* s s)])'
+REPAIRS[E006]="Add the missing match branches. The diagnostic lists which cases are missing."
+
+TITLES[E007]="Scalar constraint violation"
+SUMMARIES[E007]="A literal value violates a defscalar :where constraint."
+WHYS[E007]="Agents pass out-of-range values to constrained scalar constructors."
+BADS[E007]='(defscalar Percentage Int :where [(>= 0) (<= 100)])
+(->Percentage 150)  ;; ERROR: violates constraint (<= 100)'
+GOODS[E007]='(->Percentage 75)'
+REPAIRS[E007]="Use a value within the declared constraint range."
+
+TITLES[E008]="Type bound violation"
+SUMMARIES[E008]="A polymorphic type variable was inferred to a type that does not satisfy its bound."
+WHYS[E008]="Happens with bounded polymorphism (forall [(T <: Bound)] ...) when the concrete type is incompatible."
+BADS[E008]='(defn show [(x : (forall [(T <: String)] T))] : String (str x))
+(show 42)  ;; ERROR: T inferred as Int, does not satisfy bound String'
+GOODS[E008]='(show "hello")'
+REPAIRS[E008]="Pass a value whose type satisfies the declared bound."
+
+TITLES[E009]="Target-specific form in wrong target"
+SUMMARIES[E009]="A form that only works in one target was used in a different target file."
+WHYS[E009]="Agents use JS-specific forms (await, js-quote) in .bclj files or vice versa."
+BADS[E009]=';; In a .bclj file:
+(await (fetch "/api"))  ;; ERROR: await is only supported in beagle/js'
+GOODS[E009]=';; In a .bjs file:
+(await (fetch "/api"))'
+REPAIRS[E009]="Move this code to a file with the correct target extension."
+
+TITLES[E010]="SQL GROUP BY violation"
+SUMMARIES[E010]="A SELECT column is neither in GROUP BY nor an aggregate function."
+WHYS[E010]="Standard SQL rule — agents forget to aggregate non-grouped columns."
+BADS[E010]='(select :users [:name :age] :group-by [:name])
+;; ERROR: column age must appear in GROUP BY or be aggregate'
+GOODS[E010]='(select :users [:name (avg :age)] :group-by [:name])'
+REPAIRS[E010]="Add the column to GROUP BY or wrap it in an aggregate function."
+
+TITLES[E011]="Unknown SQL table"
+SUMMARIES[E011]="Referenced a table not declared with deftable."
+WHYS[E011]="Agents reference tables that haven't been defined in the current module."
+BADS[E011]='(select :users [:name])  ;; ERROR: unknown table users'
+GOODS[E011]='(deftable :users {:name String :age Int})
+(select :users [:name])'
+REPAIRS[E011]="Add a deftable declaration or fix the table name."
+
+TITLES[E012]="Unknown SQL column"
+SUMMARIES[E012]="Referenced a column that does not exist in the table schema."
+WHYS[E012]="Agents use wrong column names — check the deftable definition."
+BADS[E012]='(deftable :users {:name String})
+(select :users [:email])  ;; ERROR: unknown column email'
+GOODS[E012]='(select :users [:name])'
+REPAIRS[E012]="Fix the column name to match the deftable schema."
+
+TITLES[E013]="SQL column type mismatch"
+SUMMARIES[E013]="Value type does not match the column type declared in deftable."
+WHYS[E013]="Agents insert wrong value types into typed SQL columns."
+BADS[E013]='(deftable :users {:name String :age Int})
+(insert :users [:name :age] [["Tom" "thirty"]])  ;; ERROR: age expected Int'
+GOODS[E013]='(insert :users [:name :age] [["Tom" 30]])'
+REPAIRS[E013]="Fix the value to match the declared column type."
+
+TITLES[E014]="Unknown NixOS option"
+SUMMARIES[E014]="Referenced a NixOS option path that does not exist in the loaded schema."
+WHYS[E014]="Agents use outdated or misspelled option paths. Check suggestions in the diagnostic."
+BADS[E014]=';; :services.openssh.enabled is not a real option
+{:services.openssh.enabled true}'
+GOODS[E014]='{:services.openssh.enable true}'
+REPAIRS[E014]="Check the suggested alternatives or use: beagle-schema <path>"
+
+TITLES[E015]="NixOS option type mismatch"
+SUMMARIES[E015]="Value type does not match the NixOS option schema type."
+WHYS[E015]="Agents pass wrong types to NixOS options (e.g., string instead of bool)."
+BADS[E015]='{:services.openssh.enable "yes"}  ;; ERROR: expected Bool'
+GOODS[E015]='{:services.openssh.enable true}'
+REPAIRS[E015]="Fix the value type to match the schema. Use: beagle-schema <path>"
+
+TITLES[E000]="Compile error"
+SUMMARIES[E000]="A compile error that does not match a specific diagnostic category."
+WHYS[E000]="Catch-all for errors not yet categorized. Read the message carefully."
+BADS[E000]=""
+GOODS[E000]=""
+REPAIRS[E000]="Read the error message and fix the issue. If this is a common pattern, file an issue to get it categorized."
+
+if [[ "$LIST" == "1" ]]; then
+    if [[ "$JSON" == "1" ]]; then
+        echo -n '{"schemaVersion":1,"codes":['
+        first=1
+        for code in E000 E001 E002 E003 E004 E005 E006 E007 E008 E009 E010 E011 E012 E013 E014 E015; do
+            [[ $first == 0 ]] && echo -n ","
+            first=0
+            title="${TITLES[$code]}"
+            echo -n "{\"code\":\"$code\",\"title\":$(python3 -c "import json; print(json.dumps('$title'))")}"
+        done
+        echo ']}'
+    else
+        echo "Beagle diagnostic codes:"
+        echo ""
+        for code in E000 E001 E002 E003 E004 E005 E006 E007 E008 E009 E010 E011 E012 E013 E014 E015; do
+            echo "  $code  ${TITLES[$code]}"
+        done
+    fi
+    exit 0
+fi
+
+if [[ -z "$CODE" ]]; then
+    echo "usage: beagle-explain [--json] <code>    (e.g. beagle-explain E002)" >&2
+    echo "       beagle-explain --list              (list all codes)" >&2
+    exit 2
+fi
+
+# Normalize: accept lowercase, with/without E prefix
+CODE=$(echo "$CODE" | tr '[:lower:]' '[:upper:]')
+[[ "$CODE" =~ ^[0-9]+$ ]] && CODE="E$CODE"
+
+if [[ -z "${TITLES[$CODE]+x}" ]]; then
+    echo "beagle-explain: unknown code $CODE" >&2
+    echo "Run 'beagle-explain --list' for available codes." >&2
+    exit 1
+fi
+
+TITLE="${TITLES[$CODE]}"
+SUMMARY="${SUMMARIES[$CODE]}"
+WHY="${WHYS[$CODE]}"
+BAD="${BADS[$CODE]}"
+GOOD="${GOODS[$CODE]}"
+REPAIR="${REPAIRS[$CODE]}"
+
+if [[ "$JSON" == "1" ]]; then
+    python3 -c "
+import json, sys
+print(json.dumps({
+    'schemaVersion': 1,
+    'code': '$CODE',
+    'title': $(python3 -c "import json; print(json.dumps('$TITLE'))"),
+    'summary': $(python3 -c "import json; print(json.dumps('$SUMMARY'))"),
+    'why_agents_cause_this': $(python3 -c "import json; print(json.dumps('$WHY'))"),
+    'examples': {
+        'bad': $(python3 -c "import json; print(json.dumps('''$BAD'''))"),
+        'good': $(python3 -c "import json; print(json.dumps('''$GOOD'''))")
+    },
+    'repair': $(python3 -c "import json; print(json.dumps('$REPAIR'))")
+}))
+"
+else
+    echo "$CODE: $TITLE"
+    echo ""
+    echo "What happened:"
+    echo "  $SUMMARY"
+    echo ""
+    echo "Why agents cause this:"
+    echo "  $WHY"
+    echo ""
+    if [[ -n "$BAD" ]]; then
+        echo "Bad example:"
+        echo "$BAD" | sed 's/^/  /'
+        echo ""
+    fi
+    if [[ -n "$GOOD" ]]; then
+        echo "Good example:"
+        echo "$GOOD" | sed 's/^/  /'
+        echo ""
+    fi
+    echo "Repair:"
+    echo "  $REPAIR"
+fi

@@ -201,7 +201,7 @@
        (for ([e (in-list (letfn-fn-body f))])
          (check-shadow e fn-scope (letfn-fn-name f))))
      (for ([e (in-list body)]) (check-shadow e inner ctx))]
-    [(defn-form name params _rest-p _ body _private?)
+    [(defn-form name params _rest-p _ body _private? _raises)
      (define inner (scope-copy scope))
      (for ([p (in-list params)])
        (add-param-to-scope! p inner))
@@ -294,6 +294,17 @@
      (check-shadow target scope ctx)
      (for ([f (in-list forms)]) (check-shadow f scope ctx))]
     [(unsafe-expr inner) (check-shadow inner scope ctx)]
+    [(check-expr expr) (check-shadow expr scope ctx)]
+    [(rescue-form expr fallback err-name)
+     (check-shadow expr scope ctx)
+     (if err-name
+         (let ([inner (scope-copy scope)])
+           (hash-set! inner err-name #t)
+           (check-shadow fallback inner ctx))
+         (check-shadow fallback scope ctx))]
+    [(target-case-form cases)
+     (for ([(k v) (in-hash cases)])
+       (check-shadow v scope ctx))]
     [(try-form body catches finally-body)
      (for ([e (in-list body)]) (check-shadow e scope ctx))
      (for ([c (in-list catches)])
@@ -348,6 +359,7 @@
      (for ([u (in-list updates)])
        (check-shadow (with-update-value u) scope ctx))]
     [(defenum-form _ _) (void)]
+    [(deferror-form _ _ _) (void)]
     [(await-form expr) (check-shadow expr scope ctx)]
     [(set!-form target value)
      (check-shadow target scope ctx)
@@ -387,7 +399,7 @@
     [(? symbol?) (hash-set! used form #t)]
     [(def-form _ _ value) (collect-symbols value used)]
     [(defonce-form _ _ value) (collect-symbols value used)]
-    [(defn-form _ _ _ _ body _)
+    [(defn-form _ _ _ _ body _ _)
      (for ([e (in-list body)]) (collect-symbols e used))]
     [(fn-form _ _ _ body)
      (for ([e (in-list body)]) (collect-symbols e used))]
@@ -465,6 +477,13 @@
        (collect-symbols (cdr c) used))
      (when default (collect-symbols default used))]
     [(unsafe-expr inner) (collect-symbols inner used)]
+    [(check-expr expr) (collect-symbols expr used)]
+    [(rescue-form expr fallback _err-name)
+     (collect-symbols expr used)
+     (collect-symbols fallback used)]
+    [(target-case-form cases)
+     (for ([(k v) (in-hash cases)])
+       (collect-symbols v used))]
     [(try-form body catches finally-body)
      (for ([e (in-list body)]) (collect-symbols e used))
      (for ([c (in-list catches)])
@@ -498,6 +517,7 @@
      (for ([u (in-list updates)])
        (collect-symbols (with-update-value u) used))]
     [(defenum-form _ _) (void)]
+    [(deferror-form _ _ _) (void)]
     [(defmethod-form _ _ _ body)
      (for ([e (in-list body)]) (collect-symbols e used))]
     [(deftype-form _ _ impls)

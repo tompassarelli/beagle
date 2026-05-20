@@ -100,7 +100,8 @@
      (define file (or (hash-ref d 'error-file #f) (path-or-source stx)))
      (define line (or (hash-ref d 'error-line #f) (and stx (syntax-line stx))))
      (define base
-       (hasheq 'tool "beagle"
+       (hasheq 'schemaVersion 1
+               'tool "beagle"
                'kind (symbol->string (beagle-diagnostic-kind msg-or-exn))
                'message msg
                'file (or file 'null)
@@ -117,7 +118,8 @@
      (define clean (clean-message msg))
      (define hint (hint-for clean))
      (write-json
-      (hasheq 'tool "beagle"
+      (hasheq 'schemaVersion 1
+              'tool "beagle"
               'kind (extract-kind clean)
               'message clean
               'hint   (or hint 'null)

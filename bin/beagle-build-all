@@ -19,8 +19,4 @@ if [[ $# -lt 1 ]]; then
     exit 2
 fi
 
-args=""
-for a in "$@"; do
-  args="$args \"$a\""
-done
-"$RACKET" -e "(require beagle/private/build-all) (run-build-all (list $args))"
+"$RACKET" -e "(require beagle/private/build-all) (run-build-all (vector->list (current-command-line-arguments)))" -- "$@"

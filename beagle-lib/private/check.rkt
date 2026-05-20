@@ -157,15 +157,35 @@
   details     ; hasheq with structured error data
 ) #:transparent)
 
+(define (kind->error-code kind)
+  (case kind
+    [(arity)              "E001"]
+    [(type-mismatch)      "E002"]
+    [(return-type)        "E003"]
+    [(def-type)           "E004"]
+    [(let-binding)        "E005"]
+    [(exhaustive-match)   "E006"]
+    [(scalar-predicate)   "E007"]
+    [(type-bound)         "E008"]
+    [(target-form)        "E009"]
+    [(sql-group-by)       "E010"]
+    [(sql-table)          "E011"]
+    [(sql-column)         "E012"]
+    [(sql-type)           "E013"]
+    [(nixos-unknown-option) "E014"]
+    [(nixos-type-mismatch)  "E015"]
+    [else                 "E000"]))
+
 (define (raise-diag kind message details #:src [src #f])
+  (define with-code (hash-set details 'error-code (kind->error-code kind)))
   (define details+src
     (if src
-        (hash-set (hash-set details 'error-line (src-loc-line src))
+        (hash-set (hash-set with-code 'error-line (src-loc-line src))
                   'error-file (let ([s (src-loc-source src)])
                                 (cond [(path? s) (path->string s)]
                                       [(string? s) s]
                                       [else #f])))
-        details))
+        with-code))
   (raise (beagle-diagnostic
           (format "beagle: ~a" message)
           (current-continuation-marks)
@@ -291,11 +311,11 @@
     (match form
       [(def-form name (? type? t) _) (hash-set! env name t)]
       [(defonce-form name (? type? t) _) (hash-set! env name t)]
-      [(defn-form name params rest-p (? type? ret) _ _)
+      [(defn-form name params rest-p (? type? ret) _ _ _)
        (define rtype (and rest-p (param-or-destr-type rest-p)))
        (hash-set! env name
                   (type-fn (map param-or-destr-type params) rtype ret))]
-      [(defn-form name params rest-p #f _ _)
+      [(defn-form name params rest-p #f _ _ _)
        (define rtype (and rest-p (param-or-destr-type rest-p)))
        (hash-set! env name
                   (type-fn (map param-or-destr-type params) rtype ANY))]
@@ -359,6 +379,20 @@
          [else
           (hash-set! env name (type-prim name))
           (register-parametric-union! name type-params members member-fields env)])]
+      [(deferror-form name members member-fields)
+       (hash-set! UNION-MEMBERS name members)
+       (hash-set! env name
+                  (type-union (map (lambda (m) (type-prim m)) members)))
+       (when member-fields
+         (for ([m (in-list members)])
+           (define fields (hash-ref member-fields m '()))
+           (unless (null? fields)
+             (hash-set! RECORD-FIELDS m
+                        (for/hasheq ([fld (in-list fields)])
+                          (values (param-name fld) (or (param-type fld) ANY))))
+             (hash-set! RECORD-FIELD-ORDER m (map param-name fields))
+             (hash-set! env (string->symbol (string-append "->" (symbol->string m)))
+                        (type-fn (map (lambda (f) (or (param-type f) ANY)) fields) #f (type-prim m))))))]
       [(defscalar-form name backing preds)
        (define scalar-type (type-prim name))
        (define backing-type (type-prim backing))
@@ -443,7 +477,7 @@
                              'actual (type->string inferred))
                      #:src (src-for value))))]
 
-    [(defn-form name params rest-p expected-ret body _)
+    [(defn-form name params rest-p expected-ret body _ _)
      (define all-params (if rest-p (append params (list rest-p)) params))
      (define body-env (extend-with-params env all-params))
      (parameterize ([current-check-fn-name name])
@@ -507,6 +541,7 @@
      (last-expr-type body body-env)]
     [(defenum-form _ _) (void)]
     [(defunion-form _ _ _ _) (void)]
+    [(deferror-form _ _ _) (void)]
     [(defscalar-form _ _ _) (void)]
 
     ;; SQL forms
@@ -572,7 +607,9 @@
                          (format "insert ~a.~a: expected ~a, got ~a"
                                  table col (type->string expected-type) (type->string val-type))
                          (hasheq 'table (symbol->string table)
-                                 'column (symbol->string col)))))))]
+                                 'column (symbol->string col)
+                                 'expected (type->string expected-type)
+                                 'actual (type->string val-type)))))))]
 
     [(sql-update table set-pairs where-clause)
      (unless (hash-has-key? SQL-TABLES table)
@@ -758,6 +795,21 @@
        (string=? (substring s (- (string-length s) (string-length suffix)))
                  suffix)))
 
+(define (result-like-type? t)
+  (and (type-app? t)
+       (let ([ctor (type-app-ctor t)])
+         (and (hash-has-key? PARAMETRIC-UNIONS ctor)
+              (let ([members (hash-ref (hash-ref PARAMETRIC-UNIONS ctor) 'members '())])
+                (and (member 'Ok members)
+                     (member 'Err members)))))))
+
+(define (warn-ignored-result e t)
+  (when (and (call-form? e) (result-like-type? t))
+    (define fn-name (call-form-fn e))
+    (fprintf (current-error-port)
+             "warning: call to ~a returns ~a but the result is not consumed — use match, let, check, or rescue\n"
+             fn-name (type->string t))))
+
 (define (last-expr-type body env)
   (let loop ([forms body] [current-env env] [result #f])
     (cond
@@ -767,6 +819,7 @@
       [else
        (define e (car forms))
        (define t (infer-expr e current-env))
+       (warn-ignored-result e t)
        (define next-env
          (if (and (when-form? e)
                   (body-diverges? (when-form-body e)))
@@ -1165,7 +1218,8 @@
                   (raise-diag 'nixos-type-mismatch
                     (format "NixOS option ~a: ~a" path-str (cadr result))
                     (hasheq 'path path-str
-                            'expected (hash-ref entry 't "?"))
+                            'expected (hash-ref entry 't "?")
+                            'actual (type->string val-type))
                     #:src (src-for val))))])]))
       ;; Recurse into nested maps
       (when (map-form? val)
@@ -1400,6 +1454,37 @@
        [else
         (for ([a (in-list (static-call-args e))]) (infer-expr a env))
         ANY])]
+    [(check-expr? e)
+     (define inner-type (infer-expr (check-expr-expr e) env))
+     (cond
+       [(and (type-app? inner-type)
+             (hash-has-key? PARAMETRIC-UNIONS (type-app-ctor inner-type))
+             (let ([members (hash-ref (hash-ref PARAMETRIC-UNIONS (type-app-ctor inner-type)) 'members '())])
+               (member 'Ok members))
+             (>= (length (type-app-args inner-type)) 1))
+        (car (type-app-args inner-type))]
+       [else ANY])]
+    [(rescue-form? e)
+     (define inner-type (infer-expr (rescue-form-expr e) env))
+     (define fallback-env
+       (if (rescue-form-err-name e)
+           (let ([env2 (mut-copy env)])
+             (hash-set! env2 (rescue-form-err-name e) ANY)
+             env2)
+           env))
+     (define fallback-type (infer-expr (rescue-form-fallback e) fallback-env))
+     (cond
+       [(and (type-app? inner-type)
+             (hash-has-key? PARAMETRIC-UNIONS (type-app-ctor inner-type))
+             (let ([members (hash-ref (hash-ref PARAMETRIC-UNIONS (type-app-ctor inner-type)) 'members '())])
+               (member 'Ok members))
+             (>= (length (type-app-args inner-type)) 1))
+        (car (type-app-args inner-type))]
+       [else fallback-type])]
+    [(target-case-form? e)
+     (for ([(k v) (in-hash (target-case-form-cases e))])
+       (infer-expr v env))
+     ANY]
     [(try-form? e)
      (define body-type (last-expr-type (try-form-body e) env))
      (define catch-types
@@ -2056,6 +2141,17 @@
            (for ([f (in-list fields)])
              (hash-set! KNOWN-FNS
                         (string->symbol (string-append m-lower "-" (symbol->string (param-name f)))) #t))))]
+      [(deferror-form? form)
+       (define mf (deferror-form-member-fields form))
+       (for ([m (in-list (deferror-form-members form))])
+         (define m-str (symbol->string m))
+         (define m-lower (string-downcase m-str))
+         (hash-set! KNOWN-FNS (string->symbol (string-append "->" m-str)) #t)
+         (when mf
+           (define fields (hash-ref mf m '()))
+           (for ([f (in-list fields)])
+             (hash-set! KNOWN-FNS
+                        (string->symbol (string-append m-lower "-" (symbol->string (param-name f)))) #t))))]
       [else (void)]))
   ;; imported scalars
   (for ([sym (in-list (program-imported-scalar-fns prog))])
@@ -2347,4 +2443,5 @@
          check-scalar-provenance!
          beagle-diagnostic beagle-diagnostic?
          beagle-diagnostic-kind beagle-diagnostic-details
+         kind->error-code
          check-form infer-expr build-initial-env)

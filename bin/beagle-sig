@@ -37,8 +37,4 @@ for r in data.get('results', []):
 fi
 
 # Fallback: cold start
-args=""
-for a in "$@"; do
-  args="$args \"$a\""
-done
-"$RACKET" -e "(require beagle/private/query) (run-query (list \"sig\" $args))"
+"$RACKET" -e "(require beagle/private/query) (run-query (cons \"sig\" (vector->list (current-command-line-arguments))))" -- "$@"

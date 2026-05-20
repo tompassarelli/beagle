@@ -173,6 +173,10 @@
     [else datum]))
 
 (define (expand-fully-no-marker reg datum [depth 0])
+  (when (>= depth MAX-EXPANSION-DEPTH)
+    (error 'beagle
+           "macro expansion exceeded depth ~a (possible infinite recursion)"
+           MAX-EXPANSION-DEPTH))
   (cond
     [(macro-application? reg datum)
      (define expanded (expand-macro reg (car datum) (cdr datum)))

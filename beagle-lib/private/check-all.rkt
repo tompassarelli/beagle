@@ -54,6 +54,7 @@
         (define help (hash-ref d 'help ""))
         (hasheq 'confidence "high"
                 'category "missing-argument"
+                'fix-safety "local-behavior-change"
                 'description (format "~a needs ~a arg(s), got ~a"
                                      fn-name expected actual)
                 'fix-hint (format "Add the missing argument(s): ~a" help))]
@@ -67,6 +68,7 @@
         (define actual (hash-ref d 'actual-arity 0))
         (hasheq 'confidence "high"
                 'category "extra-argument"
+                'fix-safety "local-behavior-change"
                 'description (format "~a takes ~a arg(s), got ~a — remove ~a arg(s)"
                                      fn-name expected actual (- actual expected))
                 'fix-hint (format "Remove ~a extra argument(s) from the call"
@@ -87,6 +89,7 @@
           (and before (string-replace before old new)))
         (hasheq 'confidence "high"
                 'category "wrong-accessor"
+                'fix-safety "type-directed"
                 'description (format "Replace ~a with ~a" old new)
                 'before (or before 'null)
                 'after (or after 'null)
@@ -106,6 +109,7 @@
                     (or (hash-ref s 'signature #f) "?"))))
         (hasheq 'confidence "medium"
                 'category "wrong-accessor-multiple"
+                'fix-safety "requires-human-review"
                 'description "Multiple compatible replacements"
                 'fix-hint (format "Replace with one of: ~a"
                                   (string-join candidates ", ")))]
@@ -118,6 +122,7 @@
         (define arg-sig (hash-ref d 'arg-signature #f))
         (hasheq 'confidence "medium"
                 'category "type-mismatch"
+                'fix-safety "requires-human-review"
                 'description (exn-message e)
                 'fix-hint help-text)]
 
@@ -164,14 +169,7 @@
      (define err-line (or (hash-ref d 'error-line #f) stx-line))
      (define err-file (or (hash-ref d 'error-file #f) file))
 
-     (define code
-       (case kind
-         [(arity) "E001"]
-         [(type-mismatch) "E002"]
-         [(return-type) "E003"]
-         [(def-type) "E004"]
-         [(let-binding) "E005"]
-         [else "E000"]))
+     (define code (hash-ref d 'error-code "E000"))
 
      (define out '())
      (define (emit s) (set! out (cons s out)))
@@ -258,7 +256,8 @@
      (define line (or error-line-raw stx-line))
      (define src-line (and file line (read-source-line file line)))
      (define base
-       (hasheq 'tool "beagle"
+       (hasheq 'schemaVersion 1
+               'tool "beagle"
                'kind (symbol->string (beagle-diagnostic-kind e))
                'file (or file 'null)
                'line (or line 'null)
@@ -275,7 +274,8 @@
 
     [else
      (define src-line (and stx-file stx-line (read-source-line stx-file stx-line)))
-     (hasheq 'tool "beagle"
+     (hasheq 'schemaVersion 1
+             'tool "beagle"
              'kind "compile-error"
              'file (or stx-file 'null)
              'line (or stx-line 'null)

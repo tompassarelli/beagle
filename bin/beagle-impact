@@ -36,8 +36,4 @@ if callers:
     fi
 fi
 
-args=""
-for a in "$@"; do
-  args="$args \"$a\""
-done
-"$RACKET" -e "(require beagle/private/query) (run-query (list \"impact\" $args))"
+"$RACKET" -e "(require beagle/private/query) (run-query (cons \"impact\" (vector->list (current-command-line-arguments))))" -- "$@"

@@ -1005,3 +1005,39 @@
 
 (check-nix-ok "s accepted in beagle/nix"
   '(def x : Any (s "hello " name)))
+
+;; =============================================================================
+;; Tests — check/rescue
+;; =============================================================================
+
+(check-ok "check form passes type check"
+  '(def x : Any (check (inc 1))))
+
+(check-ok "rescue with fallback passes type check"
+  '(def x : Any (rescue (inc 1) 0)))
+
+(check-ok "rescue with error binding passes type check"
+  '(def x : Any (rescue (inc 1) err (str err))))
+
+;; =============================================================================
+;; Tests — deferror / :raises
+;; =============================================================================
+
+(check-ok "deferror with bare variants passes type check"
+  '(deferror NetworkError Timeout ConnectionRefused))
+
+(check-ok "deferror with fielded variants passes type check"
+  `(deferror ApiError
+     (NotFound ,(br '(id : Int)))
+     (RateLimit ,(br '(retry-after : Int)))))
+
+(check-ok "defn with :raises passes type check"
+  `(deferror NetErr Timeout Refused)
+  `(defn fetch ,(br '(url : String)) : String :raises NetErr (str url)))
+
+;; =============================================================================
+;; Tests — target-case
+;; =============================================================================
+
+(check-ok "target-case passes type check"
+  '(def x : Any (target-case :clj "clj" :js "js" :nix "nix")))

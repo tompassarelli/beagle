@@ -22,4 +22,4 @@ if [[ ! -f "$src" ]]; then
     exit 1
 fi
 
-"$RACKET" -e "(require beagle/private/expand-tool) (expand-file \"$src\")"
+"$RACKET" -e "(require beagle/private/expand-tool) (expand-file (vector-ref (current-command-line-arguments) 0))" -- "$src"

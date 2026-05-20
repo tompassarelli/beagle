@@ -47,7 +47,7 @@
 
 ;; --- collect errors with fix metadata ---
 
-(struct fix-entry (file line kind confidence category
+(struct fix-entry (file line kind confidence fix-safety category
                    description before after replace-old replace-new) #:transparent)
 
 (define (collect-fixable-errors files)
@@ -75,7 +75,7 @@
           (when (regexp-match? (regexp-quote old) src-line)
             (define new-line (string-replace src-line old new #:all? #f))
             (set! entries
-              (cons (fix-entry err-file err-line kind "auto"
+              (cons (fix-entry err-file err-line kind "auto" "type-directed"
                               "wrong-accessor"
                               (format "Replace ~a with ~a" old new)
                               src-line new-line old new)
@@ -87,7 +87,7 @@
                (< (hash-ref d 'actual-arity 0) (hash-ref d 'expected-arity 0)))
           (define help (hash-ref d 'help ""))
           (set! entries
-            (cons (fix-entry err-file err-line kind "suggested"
+            (cons (fix-entry err-file err-line kind "suggested" "local-behavior-change"
                             "missing-argument"
                             (format "~a — ~a" (exn-message e) help)
                             (or src-line "") #f #f #f)
@@ -98,7 +98,7 @@
                (hash-ref d 'expected-arity #f)
                (> (hash-ref d 'actual-arity 0) (hash-ref d 'expected-arity 0)))
           (set! entries
-            (cons (fix-entry err-file err-line kind "suggested"
+            (cons (fix-entry err-file err-line kind "suggested" "local-behavior-change"
                             "extra-argument"
                             (format "~a" (exn-message e))
                             (or src-line "") #f #f #f)
@@ -113,7 +113,7 @@
             (for/list ([s (in-list suggestions)])
               (format "~a" (hash-ref s 'with "?"))))
           (set! entries
-            (cons (fix-entry err-file err-line kind "suggested"
+            (cons (fix-entry err-file err-line kind "suggested" "requires-human-review"
                             "multiple-candidates"
                             (format "~a — candidates: ~a"
                                     (exn-message e)
@@ -124,7 +124,7 @@
          ;; DIAGNOSTIC: type mismatch with no suggestions
          [(eq? kind 'type-mismatch)
           (set! entries
-            (cons (fix-entry err-file err-line kind "diagnostic"
+            (cons (fix-entry err-file err-line kind "diagnostic" "requires-human-review"
                             "type-mismatch"
                             (format "~a" (exn-message e))
                             (or src-line "") #f #f #f)
@@ -225,9 +225,10 @@
           (if (= 1 (length auto-entries)) "" "ES")
           (if (eq? (mode) 'apply) " (applied)" " (dry-run)"))
   (for ([entry (in-list auto-entries)])
-    (printf "  ~a:~a  ~a\n"
+    (printf "  ~a:~a  [~a] ~a\n"
             (fix-entry-file entry)
             (fix-entry-line entry)
+            (fix-entry-fix-safety entry)
             (fix-entry-description entry))
     (when (fix-entry-after entry)
       (printf "    before: ~a\n" (string-trim (fix-entry-before entry)))

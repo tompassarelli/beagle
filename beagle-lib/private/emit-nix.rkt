@@ -63,7 +63,7 @@
     (cond
       [(or (def-form? f) (defn-form? f) (defn-multi? f)
            (defonce-form? f) (record-form? f) (defenum-form? f)
-           (defscalar-form? f) (nix-inherit? f) (nix-inherit-from? f))
+           (deferror-form? f) (defscalar-form? f) (nix-inherit? f) (nix-inherit-from? f))
        (set! defs (cons f defs))]
       [else
        (set! body-exprs (cons f body-exprs))]))
@@ -162,9 +162,27 @@
      (define entries
        (string-join
         (for/list ([v (in-list vals)])
-          (format "\"~a\"" (string-replace (symbol->string v) ":" "")))
+          (format "\"~a\"" (escape-nix-string (string-replace (symbol->string v) ":" ""))))
         " "))
      (format "~a~a_values = [ ~a ];" ind name entries)]
+
+    [(deferror-form? f)
+     (define name (mangle-name (deferror-form-name f)))
+     (define members (deferror-form-members f))
+     (define mf (deferror-form-member-fields f))
+     (define ctors
+       (for/list ([m (in-list members)])
+         (define fields (hash-ref mf m '()))
+         (define m-str (mangle-name m))
+         (if (null? fields)
+           (format "~a~a = { __tag = \"~a\"; };" ind m-str (symbol->string m))
+           (let* ([param-names (map (lambda (p) (mangle-name (param-name p))) fields)]
+                  [params-str (string-join param-names ": ")])
+             (format "~a~a = ~a: { __tag = \"~a\"; ~a };" ind m-str params-str
+                     (symbol->string m)
+                     (string-join (map (lambda (n) (format "~a = ~a;" n n)) param-names) " "))))))
+     (string-append (format "~a# error ~a" ind name) "\n"
+                    (string-join ctors "\n"))]
 
     [(defscalar-form? f)
      ;; Scalars are just aliases in Nix
@@ -207,7 +225,7 @@
        (format "~a:" (mangle-name fn)))
      " "))
   (define body-entries
-    (cons (format "~a  _tag = \"~a\";" ind tag)
+    (cons (format "~a  _tag = \"~a\";" ind (escape-nix-string tag))
           (for/list ([fn (in-list field-names)])
             (format "~a  ~a = ~a;" ind (mangle-name fn) (mangle-name fn)))))
   (define ctor
@@ -243,7 +261,7 @@
        [(eq? e 'true) "true"]
        [(eq? e 'false) "false"]
        [(char=? (string-ref sym-str 0) #\:)
-        (format "\"~a\"" (substring sym-str 1))]
+        (format "\"~a\"" (escape-nix-string (substring sym-str 1)))]
        [(string-contains? sym-str "/")
         (string-replace sym-str "/" ".")]
        [(string-contains? sym-str ".")
@@ -311,7 +329,7 @@
     [(quoted? e)
      (define d (quoted-datum e))
      (cond
-       [(symbol? d) (format "\"~a\"" (symbol->string d))]
+       [(symbol? d) (format "\"~a\"" (escape-nix-string (symbol->string d)))]
        [(string? d) (format "\"~a\"" (escape-nix-string d))]
        [(number? d) (number->string d)]
        [(boolean? d) (if d "true" "false")]
@@ -334,6 +352,21 @@
      ;; Should only appear inside loop — handled there
      "null /* recur outside loop */"]
 
+    [(check-expr? e)
+     (define inner (emit-expr (check-expr-expr e) depth))
+     (format "(let r = ~a; in if r ? __tag && r.__tag == \"Ok\" then r.value else abort \"check failed\")"
+             inner)]
+    [(rescue-form? e)
+     (define inner (emit-expr (rescue-form-expr e) depth))
+     (define fallback (emit-expr (rescue-form-fallback e) depth))
+     (format "(let r = ~a; in if r ? __tag && r.__tag == \"Ok\" then r.value else ~a)"
+             inner fallback)]
+    [(target-case-form? e)
+     (define cases (target-case-form-cases e))
+     (define branch (or (hash-ref cases 'nix #f)))
+     (unless branch
+       (error 'beagle "target-case: no branch for target nix"))
+     (emit-expr branch depth)]
     [(try-form? e)
      ;; Nix has builtins.tryEval
      (format "builtins.tryEval (~a)" (emit-body (try-form-body e) depth))]
@@ -431,7 +464,7 @@
      (emit-nix-multiline-string (nix-multiline-string-lines e) depth)]
 
     [(nix-indented-string? e)
-     (emit-nix-indented-string (nix-indented-string-text e) depth)]
+     (emit-nix-indented-string (nix-indented-string-text e) depth #:escape? #f)]
 
     [(block-string? e)
      (emit-nix-indented-string (block-string-text e) depth)]
@@ -705,7 +738,7 @@
      (if (string-prefix? s ":")
        (substring s 1)
        (format "${~a}" (mangle-name key)))]
-    [(string? key) (format "\"~a\"" key)]
+    [(string? key) (format "\"~a\"" (escape-nix-string key))]
     [(quoted? key)
      (define d (quoted-datum key))
      (if (symbol? d)
@@ -818,7 +851,7 @@
                        " ")
                       body-str)))
           (format "if ~a._tag == \"~a\" then ~a else ~a"
-                  target tag bind-str
+                  target (escape-nix-string tag) bind-str
                   (emit-match-clauses (cdr cs)))]
          [(pat-var? pat)
           (format "let ~a = ~a; in ~a"
@@ -924,6 +957,11 @@
 (define (escape-nix-multiline-keep-interp s)
   (regexp-replace* #rx"''" s "'''"))
 
+(define (escape-nix-multiline s)
+  (regexp-replace* #rx"\\$\\{"
+    (regexp-replace* #rx"''" s "'''")
+    "''${"))
+
 (define (escape-nix-string-keep-interp s)
   (regexp-replace*
    #rx"\""
@@ -964,15 +1002,15 @@
    (string-join line-strs "\n")
    "\n" (indent depth) "''"))
 
-(define (emit-nix-indented-string text depth)
+(define (emit-nix-indented-string text depth #:escape? [escape? #t])
   (define ind (indent (+ depth 1)))
   (define lines (regexp-split #rx"\n" text))
+  (define (process-line l)
+    (if (string=? l "") ""
+        (string-append ind (if escape? (escape-nix-multiline l) l))))
   (string-append
    "''\n"
-   (string-join
-    (map (lambda (l) (if (string=? l "") "" (string-append ind l)))
-         lines)
-    "\n")
+   (string-join (map process-line lines) "\n")
    "\n" (indent depth) "''"))
 
 (define options-root-rx #rx"options\\.myConfig\\.modules\\.([a-zA-Z0-9_-]+)")

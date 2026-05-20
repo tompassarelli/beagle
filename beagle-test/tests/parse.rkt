@@ -921,3 +921,62 @@
   (check-true (defonce-form? f))
   (check-equal? (defonce-form-name f) 'db)
   (check-not-false (defonce-form-type f)))
+
+;; --- check/rescue ------------------------------------------------------------
+
+(test-case "check parses"
+  (define f (car (parse-one '(check (fetch-user 1)))))
+  (check-true (check-expr? f))
+  (check-true (call-form? (check-expr-expr f))))
+
+(test-case "rescue with fallback parses"
+  (define f (car (parse-one '(rescue (fetch-user 1) default-user))))
+  (check-true (rescue-form? f))
+  (check-true (call-form? (rescue-form-expr f)))
+  (check-eq? (rescue-form-fallback f) 'default-user)
+  (check-false (rescue-form-err-name f)))
+
+(test-case "rescue with error binding parses"
+  (define f (car (parse-one '(rescue (fetch-user 1) err (handle-error err)))))
+  (check-true (rescue-form? f))
+  (check-true (call-form? (rescue-form-expr f)))
+  (check-true (call-form? (rescue-form-fallback f)))
+  (check-eq? (rescue-form-err-name f) 'err))
+
+;; --- deferror ----------------------------------------------------------------
+
+(test-case "deferror with bare variants parses"
+  (define f (car (parse-one '(deferror NetworkError Timeout ConnectionRefused))))
+  (check-true (deferror-form? f))
+  (check-equal? (deferror-form-name f) 'NetworkError)
+  (check-equal? (deferror-form-members f) '(Timeout ConnectionRefused)))
+
+(test-case "deferror with fielded variants parses"
+  (define f (car (parse-one `(deferror ApiError
+                               (NotFound ,(br '(id : Int)))
+                               (RateLimit ,(br '(retry-after : Int)))))))
+  (check-true (deferror-form? f))
+  (check-equal? (deferror-form-name f) 'ApiError)
+  (check-equal? (deferror-form-members f) '(NotFound RateLimit))
+  (check-equal? (length (hash-ref (deferror-form-member-fields f) 'NotFound)) 1))
+
+;; --- :raises on defn ---------------------------------------------------------
+
+(test-case "defn with :raises parses"
+  (define f (car (parse-one `(defn fetch ,(br '(url : String)) : String :raises NetworkError (str url)))))
+  (check-true (defn-form? f))
+  (check-equal? (defn-form-raises f) 'NetworkError))
+
+(test-case "defn without :raises has #f"
+  (define f (car (parse-one `(defn greet ,(br '(name : String)) : String (str name)))))
+  (check-true (defn-form? f))
+  (check-false (defn-form-raises f)))
+
+;; --- target-case -------------------------------------------------------------
+
+(test-case "target-case parses"
+  (define f (car (parse-one '(target-case :clj (str "clj") :js (str "js")))))
+  (check-true (target-case-form? f))
+  (define cases (target-case-form-cases f))
+  (check-true (hash-has-key? cases 'clj))
+  (check-true (hash-has-key? cases 'js)))

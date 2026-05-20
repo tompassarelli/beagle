@@ -15,6 +15,32 @@
 (define MT MAP-TAG)
 (define ST SET-TAG)
 
+;; --- identifier safety ------------------------------------------------------
+;; Racket's |...| pipe-quote syntax allows arbitrary characters in symbols.
+;; Block chars that would inject code in any target language.
+(define unsafe-ident-rx #rx"[;'\"` \t\n\r(){}\\[\\]\\\\,]")
+
+(define (validate-identifier! sym [context "identifier"])
+  (when (symbol? sym)
+    (define s (symbol->string sym))
+    (when (regexp-match? unsafe-ident-rx s)
+      (error 'beagle
+             "~a '~a' contains characters that would inject code in target output"
+             context s))))
+
+(define valid-module-path-rx #rx"^[a-zA-Z0-9._/-]+$")
+(define (validate-module-path! sym)
+  (when (symbol? sym)
+    (define s (symbol->string sym))
+    (unless (regexp-match? valid-module-path-rx s)
+      (error 'beagle
+             "require namespace '~a' contains invalid characters"
+             s))
+    (when (regexp-match? #rx"(^|[./])\\.\\.($|[./])" s)
+      (error 'beagle
+             "require namespace '~a' contains '..' path traversal"
+             s))))
+
 (define (bracketed? d)        (and (pair? d) (eq? (car d) BT)))
 (define (bracket-body d)      (cdr d))
 
@@ -135,7 +161,7 @@
 (struct ns-decl     (name)                                  #:transparent)
 (struct mode-decl   (mode)                                  #:transparent)
 (struct def-form    (name type value)                       #:transparent)
-(struct defn-form   (name params rest-param return-type body private?) #:transparent)
+(struct defn-form   (name params rest-param return-type body private? raises) #:transparent)
 (struct defn-multi  (name arities private?)                   #:transparent)
 (struct arity-clause (params rest-param return-type body)    #:transparent)
 (struct fn-form     (params rest-param return-type body)    #:transparent)
@@ -180,6 +206,7 @@
 (struct defunion-form (name members type-params member-fields) #:transparent)
 ;; type-params: (listof symbol) or '() for non-parametric
 ;; member-fields: (hasheq member-name → (listof param)) or #f for non-parametric
+(struct deferror-form (name members member-fields)            #:transparent)
 (struct defscalar-form (name backing-type predicates)         #:transparent)
 (struct scalar-predicate (op value)                           #:transparent)
 
@@ -190,6 +217,10 @@
 (struct pat-record   (type-name bindings)                    #:transparent)
 (struct pat-map      (entries)                               #:transparent)
 (struct pat-var      (name)                                  #:transparent)
+
+(struct check-expr  (expr)                                   #:transparent)
+(struct rescue-form (expr fallback err-name)                 #:transparent)
+(struct target-case-form (cases)                             #:transparent)
 
 (struct with-meta   (metadata expr)                          #:transparent)
 (struct when-let-form  (name expr body)                      #:transparent)
@@ -639,10 +670,12 @@
 
       [(list 'ns (? symbol? n))
        (when ns-set? (error 'beagle "duplicate ns form"))
+       (validate-identifier! n "namespace")
        (set! ns n)
        (set! ns-set? #t)]
 
       [(list 'define-macro (? symbol? kind) (? symbol? name) macro-params template)
+       (validate-identifier! name "macro")
        (define ps (cond
                     [(bracketed? macro-params) (bracket-body macro-params)]
                     [(list? macro-params)      macro-params]
@@ -650,11 +683,13 @@
        (register-macro! registry name kind ps template)]
 
       [(list 'declare-extern (? symbol? name) type-expr)
+       (validate-identifier! name "extern")
        (when (hash-has-key? externs name)
          (error 'beagle "duplicate declare-extern: ~a" name))
        (hash-set! externs name (parse-type type-expr))]
 
       [(list 'require (? symbol? rn))
+       (validate-module-path! rn)
        (define segs (split-ns-segments rn))
        (define prefix (string->symbol (last-of segs)))
        (with-handlers ([exn:fail? (lambda (_e) (void))])
@@ -668,6 +703,7 @@
                                  #:parametric-unions imp-param-unions)))
        (set! requires (cons (require-entry rn #f #f) requires))]
       [(list 'require (? symbol? rn) ':as (? symbol? alias))
+       (validate-module-path! rn)
        (with-handlers ([exn:fail? (lambda (_e) (void))])
          (define mod-path (resolve-module-path rn source-path))
          (when mod-path
@@ -679,6 +715,7 @@
                                  #:parametric-unions imp-param-unions)))
        (set! requires (cons (require-entry rn alias #f) requires))]
       [(list 'require (? symbol? rn) ':refer (? (lambda (x) (and (pair? x) (eq? (car x) '#%brackets))) names))
+       (validate-module-path! rn)
        (define refer-syms (map ->datum (cdr (->datum names))))
        (with-handlers ([exn:fail? (lambda (_e) (void))])
          (define mod-path (resolve-module-path rn source-path))
@@ -788,8 +825,11 @@
     [(exact-integer? d) d]
     [(real? d)          d]
     [(and (symbol? d) (dynamic-var-sym? d))
+     (validate-identifier! d "dynamic var")
      (dynamic-var d)]
-    [(symbol? d)        d]
+    [(symbol? d)
+     (validate-identifier! d)
+     d]
     [(and (pair? d) (eq? (car d) '#%regex) (= (length d) 2) (string? (cadr d)))
      (regex-lit (cadr d))]
     [(bracketed? d)
@@ -1014,16 +1054,22 @@
      (defn-multi name (map parse-arity-clause
                            (cons first-clause rest-clauses)) #f)]
 
+    [(list 'defn (? symbol? name) params-form marker return-type ':raises (? symbol? err-type) body ...)
+     #:when (annotation-marker? marker)
+     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
+       (defn-form name parsed rest-p
+                  (parse-type return-type)
+                  (parse-body (or (stx-tail subs 7) body)) #f (->datum err-type)))]
     [(list 'defn (? symbol? name) params-form marker return-type body ...)
      #:when (annotation-marker? marker)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
                   (parse-type return-type)
-                  (parse-body (or (stx-tail subs 5) body)) #f))]
+                  (parse-body (or (stx-tail subs 5) body)) #f #f))]
     [(list 'defn (? symbol? name) params-form body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
-                  #f (parse-body (or (stx-tail subs 3) body)) #f))]
+                  #f (parse-body (or (stx-tail subs 3) body)) #f #f))]
 
     ;; defn with ^:private metadata on name
     [(list 'defn (list '#%meta _ (? symbol? name)) first-clause rest-clauses ...)
@@ -1036,11 +1082,11 @@
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
                   (parse-type return-type)
-                  (parse-body (or (stx-tail subs 5) body)) #t))]
+                  (parse-body (or (stx-tail subs 5) body)) #t #f))]
     [(list 'defn (list '#%meta _ (? symbol? name)) params-form body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
-                  #f (parse-body (or (stx-tail subs 3) body)) #t))]
+                  #f (parse-body (or (stx-tail subs 3) body)) #t #f))]
 
     ;; defn- (private defn)
     [(list 'defn- (? symbol? name) first-clause rest-clauses ...)
@@ -1048,16 +1094,22 @@
      (defn-multi name (map parse-arity-clause
                            (cons first-clause rest-clauses)) #t)]
 
+    [(list 'defn- (? symbol? name) params-form marker return-type ':raises (? symbol? err-type) body ...)
+     #:when (annotation-marker? marker)
+     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
+       (defn-form name parsed rest-p
+                  (parse-type return-type)
+                  (parse-body (or (stx-tail subs 7) body)) #t (->datum err-type)))]
     [(list 'defn- (? symbol? name) params-form marker return-type body ...)
      #:when (annotation-marker? marker)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
                   (parse-type return-type)
-                  (parse-body (or (stx-tail subs 5) body)) #t))]
+                  (parse-body (or (stx-tail subs 5) body)) #t #f))]
     [(list 'defn- (? symbol? name) params-form body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
-                  #f (parse-body (or (stx-tail subs 3) body)) #t))]
+                  #f (parse-body (or (stx-tail subs 3) body)) #t #f))]
 
     [(list 'defrecord (? symbol? name) fields-form)
      (record-form name (parse-record-fields (or (stx-ref subs 2) fields-form)))]
@@ -1395,6 +1447,21 @@
     [(list 'try rest ...)
      (parse-try-form (or (stx-tail subs 1) rest))]
 
+    [(list 'check expr)
+     (check-expr (parse-expr (or (stx-ref subs 1) expr)))]
+
+    [(list 'rescue expr (? symbol? err-name) handler)
+     (rescue-form (parse-expr (or (stx-ref subs 1) expr))
+                  (parse-expr (or (stx-ref subs 3) handler))
+                  err-name)]
+    [(list 'rescue expr fallback)
+     (rescue-form (parse-expr (or (stx-ref subs 1) expr))
+                  (parse-expr (or (stx-ref subs 2) fallback))
+                  #f)]
+
+    [(list 'target-case rest ...)
+     (parse-target-case (or (stx-tail subs 1) rest))]
+
     [(list 'doseq bindings-form body ...)
      (doseq-form (parse-for-clauses (or (stx-ref subs 1) bindings-form))
                  (parse-body (or (stx-tail subs 2) body)))]
@@ -1422,6 +1489,9 @@
 
     [(list 'defunion (list (? symbol? name) type-vars ...) member-defs ...)
      (parse-parametric-defunion name type-vars member-defs subs)]
+
+    [(list 'deferror (? symbol? name) member-defs ...)
+     (parse-deferror name member-defs subs)]
 
     [(list 'defscalar (? symbol? name) (? symbol? backing) ':where preds ...)
      (defscalar-form name (->datum backing) (map parse-scalar-predicate preds))]
@@ -2604,8 +2674,10 @@
               (= (length item) 3)
               (symbol? (car item))
               (annotation-marker? (cadr item)))
+         (validate-identifier! (car item) "parameter")
          (param (car item) (parse-type (caddr item)))]
         [(symbol? item)
+         (validate-identifier! item "parameter")
          (param item #f)]
         [else
          (error 'beagle
@@ -2712,6 +2784,43 @@
         (parse-record-fields fields-datum)))
     (hash-set! mf-hash mname fields))
   (defunion-form name (reverse member-names) tvars mf-hash))
+
+(define (parse-deferror name member-defs subs)
+  (define member-names '())
+  (define mf-hash (make-hasheq))
+  (for ([md (in-list (or (stx-tail subs 2) member-defs))])
+    (define d (->datum md))
+    (cond
+      [(symbol? d)
+       (set! member-names (cons d member-names))
+       (hash-set! mf-hash d '())]
+      [(and (list? d) (>= (length d) 2) (symbol? (car d)))
+       (define mname (car d))
+       (set! member-names (cons mname member-names))
+       (hash-set! mf-hash mname (parse-record-fields (cadr d)))]
+      [else
+       (error 'beagle "deferror member must be Symbol or (Name [fields...]): ~v" d)]))
+  (deferror-form name (reverse member-names) mf-hash))
+
+(define (parse-target-case rest)
+  (define cases (make-hasheq))
+  (define items (map ->datum rest))
+  (let loop ([items items] [raw rest])
+    (cond
+      [(null? items) (void)]
+      [(< (length items) 2)
+       (error 'beagle "target-case: expected keyword-expression pairs, got trailing: ~v" items)]
+      [else
+       (define kw (car items))
+       (define expr-raw (and (pair? raw) (pair? (cdr raw)) (cadr raw)))
+       (unless (and (symbol? kw) (regexp-match? #rx"^:" (symbol->string kw)))
+         (error 'beagle "target-case: expected target keyword, got: ~v" kw))
+       (define target-name (string->symbol (substring (symbol->string kw) 1)))
+       (hash-set! cases target-name (parse-expr (or expr-raw (cadr items))))
+       (loop (cddr items) (if (and (pair? raw) (pair? (cdr raw))) (cddr raw) '()))]))
+  (when (hash-empty? cases)
+    (error 'beagle "target-case: no branches provided"))
+  (target-case-form cases))
 
 (define (parse-record-fields f)
   (define d (->datum f))
@@ -2892,8 +3001,12 @@
  (struct-out with-update)
  (struct-out defenum-form)
  (struct-out defunion-form)
+ (struct-out deferror-form)
  (struct-out defscalar-form)
  (struct-out scalar-predicate)
+ (struct-out check-expr)
+ (struct-out rescue-form)
+ (struct-out target-case-form)
  (struct-out with-meta)
  (struct-out when-let-form)
  (struct-out if-let-form)
@@ -3002,4 +3115,8 @@
  map-body
  set-tagged?
  set-body
- unwrap-items)
+ unwrap-items
+ validate-identifier!
+ unsafe-ident-rx
+ validate-module-path!
+ valid-module-path-rx)

@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# beagle-skill: version-matched skill documentation for agents.
+#
+# Usage:
+#   beagle-skill list                     list available skills
+#   beagle-skill get <name>               print skill content
+#   beagle-skill get <name> --json        print as JSON
+
+set -euo pipefail
+
+BEAGLE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SKILL_DIR="$BEAGLE_ROOT/skill-data"
+VERSION=$(grep 'define version' "$BEAGLE_ROOT/beagle-lib/info.rkt" 2>/dev/null | sed 's/.*"\(.*\)".*/\1/' || echo "unknown")
+
+if [[ $# -eq 0 ]]; then
+    echo "usage: beagle-skill list" >&2
+    echo "       beagle-skill get <name> [--json]" >&2
+    exit 2
+fi
+
+CMD="$1"
+shift
+
+case "$CMD" in
+    list)
+        echo "beagle skills (v$VERSION):"
+        echo ""
+        for f in "$SKILL_DIR"/*.md; do
+            [[ -f "$f" ]] || continue
+            name=$(basename "$f" .md)
+            desc=$(head -1 "$f" | sed 's/^# //')
+            echo "  $name — $desc"
+        done
+        ;;
+
+    get)
+        if [[ $# -lt 1 ]]; then
+            echo "usage: beagle-skill get <name> [--json]" >&2
+            exit 2
+        fi
+        NAME="$1"
+        JSON=0
+        [[ "${2:-}" == "--json" ]] && JSON=1
+
+        SKILL_FILE="$SKILL_DIR/$NAME.md"
+        if [[ ! -f "$SKILL_FILE" ]]; then
+            echo "beagle-skill: unknown skill '$NAME'" >&2
+            echo "Available skills:" >&2
+            for f in "$SKILL_DIR"/*.md; do
+                [[ -f "$f" ]] || continue
+                echo "  $(basename "$f" .md)" >&2
+            done
+            exit 1
+        fi
+
+        if [[ "$JSON" == "1" ]]; then
+            CONTENT=$(cat "$SKILL_FILE")
+            python3 -c "
+import json, sys
+content = sys.stdin.read()
+print(json.dumps({
+    'schemaVersion': 1,
+    'skill': '$NAME',
+    'version': '$VERSION',
+    'content': content
+}))
+" <<< "$CONTENT"
+        else
+            echo "# beagle-skill: $NAME (v$VERSION)"
+            echo ""
+            cat "$SKILL_FILE"
+        fi
+        ;;
+
+    *)
+        echo "beagle-skill: unknown command '$CMD'" >&2
+        echo "usage: beagle-skill list | get <name>" >&2
+        exit 2
+        ;;
+esac

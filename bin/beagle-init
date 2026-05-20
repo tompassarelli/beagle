@@ -266,6 +266,35 @@ PEOF
     echo "  created .claude/hooks/ (simple mode)"
 fi
 
+# --- Write flake.nix (follows beagle's nixpkgs for consistent racket) ---
+if [[ ! -f "flake.nix" ]] && [[ -n "$BEAGLE_PATH" ]]; then
+    cat > flake.nix << FEOF
+{
+  inputs = {
+    beagle.url = "path:${BEAGLE_PATH}";
+    nixpkgs.follows = "beagle/nixpkgs";
+  };
+
+  outputs = { nixpkgs, beagle, ... }:
+    let
+      system = "x86_64-linux";
+      pkgs = import nixpkgs { inherit system; };
+    in {
+      devShells.\${system}.default = pkgs.mkShell {
+        packages = with pkgs; [ racket ];
+      };
+    };
+}
+FEOF
+    echo "  created flake.nix (follows beagle/nixpkgs)"
+fi
+
+# --- Write .envrc ---
+if [[ ! -f ".envrc" ]] && [[ -f "flake.nix" ]]; then
+    echo "use flake" > .envrc
+    echo "  created .envrc"
+fi
+
 echo ""
 echo "beagle project initialized (target: $TARGET)"
 if [[ "$HOOKS" == true ]]; then

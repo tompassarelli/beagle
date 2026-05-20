@@ -636,3 +636,37 @@
                             (f 1 2 3)))))
   (check-true (matches? #rx"\\(letfn \\[" out))
   (check-true (matches? #rx"\\(f \\[x & rest\\]" out)))
+
+;; --- check/rescue ------------------------------------------------------------
+
+(test-case "check emits let+if pattern"
+  (define out (compile '(def x (check (fetch-user 1)))))
+  (check-true (matches? #rx"let \\[r__check" out))
+  (check-true (matches? #rx"Ok" out)))
+
+(test-case "rescue emits let+if pattern"
+  (define out (compile '(def x (rescue (fetch-user 1) default-user))))
+  (check-true (matches? #rx"let \\[r__rescue" out))
+  (check-true (matches? #rx"Ok" out)))
+
+(test-case "rescue with error binding emits binding name"
+  (define out (compile '(def x (rescue (fetch-user 1) err (handle-error err)))))
+  (check-true (matches? #rx"let \\[r__rescue" out))
+  (check-true (matches? #rx"err" out)))
+
+;; --- deferror ----------------------------------------------------------------
+
+(test-case "deferror emits defrecord per variant"
+  (define out (compile `(deferror ApiError
+                          (NotFound ,(br '(id : Int)))
+                          (RateLimit ,(br '(retry-after : Int))))))
+  (check-true (matches? #rx"error ApiError" out))
+  (check-true (matches? #rx"\\(defrecord NotFound" out))
+  (check-true (matches? #rx"\\(defrecord RateLimit" out)))
+
+;; --- target-case -------------------------------------------------------------
+
+(test-case "target-case selects clj branch"
+  (define out (compile '(def x (target-case :clj "clojure" :js "javascript"))))
+  (check-true (matches? #rx"\"clojure\"" out))
+  (check-false (matches? #rx"\"javascript\"" out)))

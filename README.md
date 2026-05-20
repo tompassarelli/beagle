@@ -114,5 +114,6 @@ See [`docs/tool-reference.md`](docs/tool-reference.md) for the full CLI catalog.
 - [`docs/cheatsheet.md`](docs/cheatsheet.md) — single-page language summary for agent context
 - [`docs/agent-workflow.md`](docs/agent-workflow.md) — repair tool routing decision tree
 - [`docs/tool-reference.md`](docs/tool-reference.md) — complete CLI tool catalog
+- [`docs/nix-racket-versioning.md`](docs/nix-racket-versioning.md) — why projects must follow beagle's nixpkgs
 - [`docs/devlog/`](docs/devlog/) — development journal
 - [`experiments/report.md`](experiments/report.md) — E1–E15 methodology and results

@@ -12,6 +12,63 @@ One command wires up everything for Claude Code: daemon, hooks, system prompt.
 - [x] Generate `CLAUDE.md` snippet with beagle context (from consumer cheatsheet)
 - [x] Print setup summary (what was created, how to start daemon)
 
+## Now: Security hardening
+
+Cross-target audit (2026-05-20). Beagle source is semi-trusted (agent-authored).
+The rule: validate structural names at parse time, escape literal data at emit
+time. Never use generic `symbol->string` or `format "~a"` across target boundaries.
+
+Identifiers, keywords, module paths, map keys, enum values, string literal
+content, regex content, and template content are different security surfaces —
+they need separate validation/escaping, not one global regex.
+
+### 1. `beagle-expand` command injection (critical) ✓
+
+- [x] All `bin/` scripts (`beagle-expand`, `beagle-sig`, `beagle-fields`, `beagle-callers`, `beagle-impact`, `beagle-provides`, `beagle-check-all`, `beagle-build-all`) pass args via `(current-command-line-arguments)`, never interpolated into code text.
+
+### 2. Nix emit-time escaping (critical) ✓
+
+- [x] All `(format "\"~a\"" x)` points in emit-nix.rkt route through `escape-nix-string` (handles `${`, `"`, `\`, `\n`): defenum values, record `_tag`, keywords, quoted symbols, string literals, map keys, match `_tag` comparisons.
+- [x] Reader-produced `nix-indented-string` and `nix-multiline-string` content emitted verbatim (already Nix-escaped by reader). `block-string` (heredoc) content escaped via `escape-nix-multiline` (handles `''` → `'''`, `${` → `''${`).
+
+### 3. JS regex + template literal escaping (high) ✓
+
+- [x] **Regex `/` escape** — `escape-js-regex-slash` handles backslash-aware `/` → `\/` in emit-js.rkt.
+- [x] **Template literal** — `escape-js-template-string` escapes `` ` `` and `${` in `js/quote` template string parts.
+
+### 4. Parse-time identifier validation (high) ✓
+
+- [x] `validate-identifier!` — blocklist of injection chars (`;'"` `` ` `` `(){}[]\,` whitespace) called from `parse-expr`, `parse-params`, `parse-meta-forms`. Defense-in-depth only — does NOT replace per-target emit escaping.
+- [x] `validate-module-path!` — restrict `require` namespaces to `[a-zA-Z0-9._/-]`, reject `..` traversal. Applied to all three `require` variants.
+
+### 5. Macro expansion DoS (medium) ✓
+
+- [x] `expand-fully-no-marker` now has same `MAX-EXPANSION-DEPTH` (64) check as `expand-fully`.
+
+### 6. Nix import path traversal (medium) ✓
+
+- [x] `validate-module-path!` rejects `..` segments in require namespaces at parse time.
+
+### 7. Daemon hardening (medium) — deferred
+
+- [ ] Move port/pid files from `/var/tmp` to `$XDG_RUNTIME_DIR` (user-owned, not world-writable).
+- [ ] Restrict `repair` command to paths within the watched directory.
+- [ ] Set `0600` on port/pid files.
+
+Local-only risk (requires another user on the same machine).
+
+### 8. Pool agent capability restriction (high) — deferred
+
+- [ ] Remove `Bash` from repair agent `allowedTools` — unsanitized compiler error text feeds agent prompts with unrestricted shell. Prompt-injection/RCE-shaped. Use `allowCommands` if shell is needed.
+- [ ] Set `chmod 0600` on `.beagle/pool.sock`.
+
+Pool agent experiments abandoned (E14-E15: 0 activations across 7 runs). Risk is moot until pool is revived.
+
+### 9. Low — defer, track
+
+- [ ] JS Inf/NaN emission — `+inf.0` emits invalid JS (should be `Infinity`). Correctness bug, not injection.
+- [ ] LSP URI validation — no path restriction on document URIs. Low risk (requires compromised editor).
+
 ## Open
 
 ### Type system improvements

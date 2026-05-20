@@ -72,12 +72,13 @@
   (define entry (nixos-option-lookup schema path-str))
   (cond
     [entry
-     (write-json entry)
+     (write-json (hash-set entry 'schemaVersion 1))
      (newline)]
     [else
      (define suggestions (nixos-find-similar schema path-str))
      (write-json
-      (hasheq 'error "not found"
+      (hasheq 'schemaVersion 1
+              'error "not found"
               'path path-str
               'suggestions (take suggestions (min 10 (length suggestions)))))
      (newline)

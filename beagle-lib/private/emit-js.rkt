@@ -10,6 +10,27 @@
          "emit-dispatch.rkt"
          "js-capabilities.rkt")
 
+;; --- security helpers -------------------------------------------------------
+
+(define (escape-js-regex-slash pat)
+  (let loop ([i 0] [acc '()])
+    (cond
+      [(>= i (string-length pat))
+       (list->string (reverse acc))]
+      [(char=? (string-ref pat i) #\\)
+       (if (< (+ i 1) (string-length pat))
+         (loop (+ i 2) (cons (string-ref pat (+ i 1)) (cons #\\ acc)))
+         (loop (+ i 1) (cons #\\ acc)))]
+      [(char=? (string-ref pat i) #\/)
+       (loop (+ i 1) (cons #\/ (cons #\\ acc)))]
+      [else
+       (loop (+ i 1) (cons (string-ref pat i) acc))])))
+
+(define (escape-js-template-string s)
+  (regexp-replace* #rx"\\$\\{"
+    (regexp-replace* #rx"`" s "\\\\`")
+    "\\\\${"))
+
 ;; --- identifier mangling ---------------------------------------------------
 
 (define (mangle-name sym)
@@ -328,6 +349,12 @@
     [(kw-access? e) (expr-has-await? (kw-access-target e))]
     [(set!-form? e) (or (expr-has-await? (set!-form-target e))
                         (expr-has-await? (set!-form-value e)))]
+    [(check-expr? e) (expr-has-await? (check-expr-expr e))]
+    [(rescue-form? e) (or (expr-has-await? (rescue-form-expr e))
+                          (expr-has-await? (rescue-form-fallback e)))]
+    [(target-case-form? e)
+     (for/or ([(k v) (in-hash (target-case-form-cases e))])
+       (expr-has-await? v))]
     [else #f]))
 
 ;; --- IIFE helper -----------------------------------------------------------
@@ -399,6 +426,10 @@
          (for/fold ([h2 h]) ([m (in-list (defunion-form-members f))])
            (define fields (hash-ref (defunion-form-member-fields f) m '()))
            (hash-set h2 m (map (lambda (p) (symbol->string (param-name p))) fields)))]
+        [(deferror-form? f)
+         (for/fold ([h2 h]) ([m (in-list (deferror-form-members f))])
+           (define fields (hash-ref (deferror-form-member-fields f) m '()))
+           (hash-set h2 m (map (lambda (p) (symbol->string (param-name p))) fields)))]
         [else h])))
   (for/fold ([h local]) ([(rec-name field-names) (in-hash (program-imported-record-field-order prog))])
     (hash-set h rec-name field-names)))
@@ -440,6 +471,7 @@
         [(record-form? f)   (set-add s (record-form-name f))]
         [(defenum-form? f)  (set-add s (defenum-form-name f))]
         [(defunion-form? f) (set-add s (defunion-form-name f))]
+        [(deferror-form? f) (set-add s (deferror-form-name f))]
         [(defscalar-form? f)(set-add s (defscalar-form-name f))]
         [else s])))
   (define from-externs (list->set (hash-keys (program-externs prog))))
@@ -587,6 +619,29 @@
                            ", ")))))
            "\n")))]
 
+    [(deferror-form? f)
+     (define name (mangle-str (symbol->string (deferror-form-name f))))
+     (define members (deferror-form-members f))
+     (define mf (deferror-form-member-fields f))
+     (define comment (format "// error ~a = ~a" name
+                             (string-join (map (compose mangle-str symbol->string) members) " | ")))
+     (string-append comment "\n"
+       (string-join
+         (for/list ([m (in-list members)])
+           (define fields (hash-ref mf m '()))
+           (define m-str (mangle-str (symbol->string m)))
+           (define field-names (map (compose mangle-str symbol->string param-name) fields))
+           (format "function ~a(~a) { return Object.freeze({ _tag: ~v~a }); }"
+                   m-str
+                   (string-join field-names ", ")
+                   (symbol->string m)
+                   (if (null? field-names) ""
+                     (string-append ", "
+                       (string-join
+                         (map (lambda (n) (format "~a: ~a" n n)) field-names)
+                         ", ")))))
+         "\n"))]
+
     [(defscalar-form? f)
      (emit-defscalar f)]
 
@@ -640,7 +695,9 @@
              (string-replace m "/" ".")]
             [else m]))])]
     [(quoted? e)        (emit-quoted (quoted-datum e))]
-    [(regex-lit? e)     (format "/~a/" (regex-lit-pattern e))]
+    [(regex-lit? e)
+     (define pat (escape-js-regex-slash (regex-lit-pattern e)))
+     (format "/~a/" pat)]
 
     [(vec-form? e)
      (format "[~a]"
@@ -885,6 +942,24 @@
     [(dynamic-var? e)
      (mangle-name (dynamic-var-name e))]
 
+    [(check-expr? e)
+     (define inner (emit-expr (check-expr-expr e)))
+     (iife (format "const r = ~a;\nif (r && r.__tag === \"Ok\") return r.value;\nthrow new Error(\"check failed: \" + JSON.stringify(r));"
+                   inner))]
+    [(rescue-form? e)
+     (define inner (emit-expr (rescue-form-expr e)))
+     (define fallback (emit-expr (rescue-form-fallback e)))
+     (define err-name (if (rescue-form-err-name e)
+                          (mangle-name (rescue-form-err-name e))
+                          "_err"))
+     (iife (format "const r = ~a;\nif (r && r.__tag === \"Ok\") return r.value;\nconst ~a = r;\nreturn ~a;"
+                   inner err-name fallback))]
+    [(target-case-form? e)
+     (define cases (target-case-form-cases e))
+     (define branch (or (hash-ref cases 'js #f)))
+     (unless branch
+       (error 'beagle "target-case: no branch for target js"))
+     (emit-expr branch)]
     [(try-form? e)
      (define body-str (emit-body-return (try-form-body e) "  "))
      (define catch-strs
@@ -1659,7 +1734,7 @@
        (string-join
         (for/list ([p (in-list (js-ast-template-parts node))])
           (if (string? p)
-            p
+            (escape-js-template-string p)
             (format "${~a}" (emit-js-ast-expr-str p))))
         ""))
      (format "`~a`" parts-str)]

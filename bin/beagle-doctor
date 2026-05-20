@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# beagle-doctor: check host environment and target readiness.
+#
+# Usage:
+#   beagle-doctor              (human-readable)
+#   beagle-doctor --json       (machine-readable)
+
+set -euo pipefail
+source "$(dirname "$0")/_beagle-racket"
+
+JSON=0
+if [[ "${1:-}" == "--json" ]]; then
+    JSON=1
+fi
+
+STATUS="ok"
+CHECKS=()
+
+check_tool() {
+    local name="$1"
+    local cmd="$2"
+    local version_flag="${3:---version}"
+    local result
+    if result=$(eval "$cmd $version_flag" 2>&1 | head -1); then
+        CHECKS+=("{\"name\":\"$name\",\"status\":\"ok\",\"message\":$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')}")
+    else
+        STATUS="error"
+        CHECKS+=("{\"name\":\"$name\",\"status\":\"error\",\"message\":\"not found\"}")
+    fi
+}
+
+check_tool "racket" "$RACKET" "--version"
+check_tool "raco" "$RACO" "--version"
+
+# Clojure CLI
+if command -v clj &>/dev/null; then
+    ver=$(clj --version 2>&1 | head -1)
+    CHECKS+=("{\"name\":\"clojure\",\"status\":\"ok\",\"message\":$(printf '%s' "$ver" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')}")
+else
+    CHECKS+=("{\"name\":\"clojure\",\"status\":\"warning\",\"message\":\"clj not found (needed for clj target)\"}")
+    [[ "$STATUS" == "ok" ]] && STATUS="warning"
+fi
+
+# Node.js
+if command -v node &>/dev/null; then
+    ver=$(node --version 2>&1 | head -1)
+    CHECKS+=("{\"name\":\"node\",\"status\":\"ok\",\"message\":$(printf '%s' "$ver" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')}")
+else
+    CHECKS+=("{\"name\":\"node\",\"status\":\"warning\",\"message\":\"node not found (needed for js target)\"}")
+    [[ "$STATUS" == "ok" ]] && STATUS="warning"
+fi
+
+# Nix
+if command -v nix &>/dev/null; then
+    ver=$(nix --version 2>&1 | head -1)
+    CHECKS+=("{\"name\":\"nix\",\"status\":\"ok\",\"message\":$(printf '%s' "$ver" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')}")
+else
+    CHECKS+=("{\"name\":\"nix\",\"status\":\"warning\",\"message\":\"nix not found (needed for nix target)\"}")
+    [[ "$STATUS" == "ok" ]] && STATUS="warning"
+fi
+
+# Daemon
+BEAGLE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PORTFILE="${BEAGLE_DAEMON_PORTFILE:-$(mktemp -u)}"
+DEFAULT_PORTFILE="$(python3 -c 'import tempfile,os; print(os.path.join(tempfile.gettempdir(), "beagle-daemon.port"))')"
+if [[ -f "$DEFAULT_PORTFILE" ]]; then
+    PORT=$(cat "$DEFAULT_PORTFILE")
+    if echo "status" | nc -w 1 127.0.0.1 "$PORT" &>/dev/null; then
+        CHECKS+=("{\"name\":\"daemon\",\"status\":\"ok\",\"message\":\"running on port $PORT\"}")
+    else
+        CHECKS+=("{\"name\":\"daemon\",\"status\":\"warning\",\"message\":\"port file exists but daemon not responding\"}")
+        [[ "$STATUS" == "ok" ]] && STATUS="warning"
+    fi
+else
+    CHECKS+=("{\"name\":\"daemon\",\"status\":\"warning\",\"message\":\"not running\"}")
+    [[ "$STATUS" == "ok" ]] && STATUS="warning"
+fi
+
+# Cache directory
+CACHE_DIR="$BEAGLE_ROOT/.beagle"
+if [[ -d "$CACHE_DIR" && -w "$CACHE_DIR" ]]; then
+    CHECKS+=("{\"name\":\"cache\",\"status\":\"ok\",\"message\":\"$CACHE_DIR writable\"}")
+elif [[ -d "$CACHE_DIR" ]]; then
+    CHECKS+=("{\"name\":\"cache\",\"status\":\"warning\",\"message\":\"$CACHE_DIR not writable\"}")
+    [[ "$STATUS" == "ok" ]] && STATUS="warning"
+else
+    CHECKS+=("{\"name\":\"cache\",\"status\":\"ok\",\"message\":\"$CACHE_DIR will be created on first use\"}")
+fi
+
+# Target emitters
+TARGETS=()
+for target in clj cljs js nix sql; do
+    emitter="$BEAGLE_ROOT/beagle-lib/private/emit-${target}.rkt"
+    if [[ "$target" == "clj" ]]; then
+        emitter="$BEAGLE_ROOT/beagle-lib/private/emit-clj.rkt"
+    elif [[ "$target" == "cljs" ]]; then
+        emitter="$BEAGLE_ROOT/beagle-lib/private/emit-clj.rkt"
+    fi
+    if [[ -f "$emitter" ]]; then
+        TARGETS+=("{\"name\":\"$target\",\"status\":\"ok\"}")
+    else
+        TARGETS+=("{\"name\":\"$target\",\"status\":\"error\",\"message\":\"emitter not found\"}")
+        STATUS="error"
+    fi
+done
+
+if [[ "$JSON" == "1" ]]; then
+    CHECKS_JSON=$(IFS=,; echo "${CHECKS[*]}")
+    TARGETS_JSON=$(IFS=,; echo "${TARGETS[*]}")
+    echo "{\"schemaVersion\":1,\"status\":\"$STATUS\",\"checks\":[$CHECKS_JSON],\"targets\":[$TARGETS_JSON]}"
+else
+    echo "beagle-doctor"
+    echo "============="
+    echo ""
+    echo "Status: $STATUS"
+    echo ""
+    echo "Environment:"
+    for check in "${CHECKS[@]}"; do
+        name=$(echo "$check" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["name"])')
+        status=$(echo "$check" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["status"])')
+        msg=$(echo "$check" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["message"])')
+        if [[ "$status" == "ok" ]]; then
+            echo "  [ok]      $name: $msg"
+        elif [[ "$status" == "warning" ]]; then
+            echo "  [warn]    $name: $msg"
+        else
+            echo "  [ERROR]   $name: $msg"
+        fi
+    done
+    echo ""
+    echo "Target emitters:"
+    for target in "${TARGETS[@]}"; do
+        name=$(echo "$target" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["name"])')
+        status=$(echo "$target" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["status"])')
+        if [[ "$status" == "ok" ]]; then
+            echo "  [ok]      $name"
+        else
+            msg=$(echo "$target" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("message",""))')
+            echo "  [ERROR]   $name: $msg"
+        fi
+    done
+fi
