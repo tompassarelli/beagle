@@ -2,15 +2,9 @@
 
 (require racket/set
          "types.rkt"
+         "stdlib-helpers.rkt"
          "stdlib-portable.rkt"
          "js-capabilities.rkt")
-
-(define (p x) (type-prim x))
-
-(define (fn-of args ret #:rest [rest #f])
-  (type-fn (map p args)
-           (and rest (p rest))
-           (p ret)))
 
 (define STDLIB-JS
   (hash

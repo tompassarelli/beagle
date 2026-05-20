@@ -9,8 +9,7 @@
 
 (require racket/match
          racket/format
-         "parse.rkt"
-         "types.rkt")
+         "parse.rkt")
 
 (define (lint-program! prog)
   (when (eq? (program-mode prog) 'strict)
