@@ -50,6 +50,24 @@ Generates:
 - Keyword access: `(:name e)` returns `String` when `e` is `Employee`
 - Update: `(with e [:rate 100])` — compile-time field + type validation
 
+### Tagged unions
+
+```racket
+(defunion (Result T E)
+  (Ok  [(value : T)])
+  (Err [(error : E)]))
+```
+
+Generates typed constructors (`->Ok`, `->Err`) and accessors (`ok-value`, `err-error`).
+Match must cover all members — the checker reports missing cases:
+
+```racket
+(defn handle [(r : (Result Order OrderError))] : String
+  (match r
+    [(Ok order) (order-name order)]       ; order : Order (narrowed)
+    [(Err e) (ordererror-message e)]))    ; e : OrderError (narrowed)
+```
+
 ## Expressions
 
 ```racket
@@ -112,6 +130,7 @@ Generates:
 | `Keyword` | `:foo` |
 | `Nil` | `nil` |
 | `Any` | anything (escape) |
+| `Number` | `(U Int Float)` — prefer `Int` or `Float` when known |
 
 ```
 [A B -> R]            ; function type
@@ -121,6 +140,7 @@ Generates:
 (Set T)               ; set
 (U String Int)        ; union
 String?               ; nullable (= (U String Nil))
+(Result T E)          ; parametric union (Ok/Err)
 ```
 
 ## Let bindings infer types

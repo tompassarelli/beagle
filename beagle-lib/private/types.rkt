@@ -25,9 +25,9 @@
   '((Long . Int) (Double . Float) (Boolean . Bool)
     (Integer . Int)))
 
-;; Rejected without alias — no silent resolution, hard error with guidance.
-(define REJECTED-ALIASES
-  '(Number))
+;; Built-in union aliases — resolve during parse-type, not user-writable
+(define BUILTIN-UNION-ALIASES
+  (hasheq 'Number (lambda () (type-union (list (type-prim 'Int) (type-prim 'Float))))))
 
 (define PARAMETRIC-CTORS
   '(Vec List Set Map Promise))
@@ -123,6 +123,10 @@
      (define base-sym (string->symbol (substring s 0 (sub1 (string-length s)))))
      (type-union (list (parse-type base-sym) (type-prim 'Nil)))]
 
+    ;; built-in union alias (Number → (U Int Float))
+    [(and (symbol? t) (hash-ref BUILTIN-UNION-ALIASES t #f))
+     => (lambda (thunk) (thunk))]
+
     ;; primitive or user-defined type symbol
     [(symbol? t)
      (define canonical
@@ -130,10 +134,6 @@
          [(assq t CLJ-ALIASES) => cdr]
          [else t]))
      (define s (symbol->string canonical))
-     (when (memq canonical REJECTED-ALIASES)
-       (error 'beagle
-              "type ~a is not supported — use Int, Float, Bool, String, or Nil"
-              t))
      (unless (or (member canonical PRIMITIVES)
                  (and (positive? (string-length s))
                       (char-upper-case? (string-ref s 0)))
@@ -273,12 +273,18 @@
              (string-join (map type->string (type-app-args t)) " "))]
     [(type-union? t)
      (define alts (type-union-alts t))
-     (if (and (= (length alts) 2)
-              (ormap (lambda (a) (and (type-prim? a) (eq? (type-prim-name a) 'Nil))) alts))
-         (let ([non-nil (findf (lambda (a) (not (and (type-prim? a) (eq? (type-prim-name a) 'Nil)))) alts)])
-           (format "~a?" (type->string non-nil)))
-         (format "(U ~a)"
-                 (string-join (map type->string (type-union-alts t)) " ")))]
+     (define alt-names (and (andmap type-prim? alts) (map type-prim-name alts)))
+     (cond
+       [(and alt-names (= (length alts) 2)
+             (member 'Int alt-names) (member 'Float alt-names))
+        "Number"]
+       [(and (= (length alts) 2)
+             (ormap (lambda (a) (and (type-prim? a) (eq? (type-prim-name a) 'Nil))) alts))
+        (let ([non-nil (findf (lambda (a) (not (and (type-prim? a) (eq? (type-prim-name a) 'Nil)))) alts)])
+          (format "~a?" (type->string non-nil)))]
+       [else
+        (format "(U ~a)"
+                (string-join (map type->string (type-union-alts t)) " "))])]
     [(type-var? t) (symbol->string (type-var-name t))]
     [(type-poly? t)
      (define bounds (type-poly-bounds t))

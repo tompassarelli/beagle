@@ -11,15 +11,18 @@ More rails, fewer choices. Make the agent's wrong code mechanically cornered.
 
 ## What we have
 
-### Primitives (8)
+### Primitives (8) + Number alias
 
 ```
 String  Int  Float  Bool  Keyword  Symbol  Nil  Any
+Number = (U Int Float)
 ```
 
 No aliases in canonical beagle. JVM names (`Long`, `Double`, `Boolean`,
 `Integer`) resolve to canonical names in `#lang beagle/clj` only.
 `Any` is the escape hatch — compatible with everything in both directions.
+`Number` is a built-in union alias — prefer `Int` or `Float` when the
+concrete numeric type is known.
 
 ### Function types
 

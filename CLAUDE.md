@@ -19,7 +19,7 @@ it as canonical when explaining the language.
 
 - **Targets:** `beagle/clj` (default), `beagle/cljs`, `beagle/js`, `beagle/nix`, `beagle/sql`, `beagle/py` (plumbed, no emitter)
 - **Forms:** ~50 forms — definitions, control flow, data structures, pattern matching, threading, interop. See `docs/cheatsheet.md` for the full catalog.
-- **Types:** 8 primitives (`String`, `Int`, `Float`, `Bool`, `Keyword`, `Symbol`, `Nil`, `Any`), parametric (`Vec`, `Map`, `Set`, `List`), union (`U`), nullable (`T?`), function types, `forall` (with optional `<:` bounds), parametric `defunion` (`(Result T E)`), `(Promise T)`
+- **Types:** 8 primitives (`String`, `Int`, `Float`, `Bool`, `Keyword`, `Symbol`, `Nil`, `Any`), `Number` (`U Int Float`), parametric (`Vec`, `Map`, `Set`, `List`), union (`U`), nullable (`T?`), function types, `forall` (with optional `<:` bounds), parametric `defunion` (`(Result T E)`), `(Promise T)`
 - **Stdlib:** ~700 entries total — portable (269), Clojure (352), CLJS (75), JS (38 native), Nix (120), SQL (10)
 - **Type checking:** flow-sensitive narrowing, cross-module import, collection/destructuring inference, exhaustive match warnings, refinement predicates
 - **Diagnostics:** Rust-style errors with signatures, "did you mean?" suggestions, JSON mode
@@ -195,7 +195,7 @@ mode skips lint (types are optional there by definition).
 | Subset-of-Clojure, not full mimic | take Lisp universals + Clojure's good ideas; develop own for typed semantics |
 | `:` as only annotation marker | `:-` removed; no measured benefit in 6-variant benchmark |
 | Wrapped params only | inline removed; no measured benefit, less unambiguous parse |
-| No type aliases | `Int`/`Float`/`Bool` only — zero ambiguity for LLMs |
+| No user type aliases | `Number` is the only built-in alias (`U Int Float`); prefer `Int`/`Float` when the concrete type is known |
 
 ### Cargo-cult — deliberately NOT added
 

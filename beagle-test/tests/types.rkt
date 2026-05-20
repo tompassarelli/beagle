@@ -21,8 +21,11 @@
   (check-eq? (type-prim-name (parse-type 'Boolean)) 'Bool)
   (check-eq? (type-prim-name (parse-type 'Integer)) 'Int))
 
-(test-case "rejected aliases are errors"
-  (check-exn exn:fail? (lambda () (parse-type 'Number))))
+(test-case "Number resolves to (U Int Float)"
+  (let ([t (parse-type 'Number)])
+    (check-true (type-union? t))
+    (check-equal? (sort (map type-prim-name (type-union-alts t)) symbol<?)
+                  '(Float Int))))
 
 (test-case "parse function type from bracketed expression"
   ;; #%brackets-tagged form: [A B -> R]

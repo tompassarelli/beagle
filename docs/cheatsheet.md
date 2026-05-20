@@ -306,9 +306,15 @@ idiom per concept.
 | `Symbol` | quoted symbols |
 | `Nil` | `nil` |
 | `Any` | anything (escape) |
+| `Number` | `(U Int Float)` — use when either numeric type is valid |
 
 One canonical name per type. JVM names (`Long`, `Double`, `Boolean`) are
 accepted as `#lang beagle/clj` sugar but resolve to `Int`, `Float`, `Bool`.
+
+**Prefer `Int` or `Float` when you know which.** `Number` is for genuinely
+polymorphic numeric code (arithmetic helpers, aggregation). If a function
+always returns an integer, annotate `Int` — the narrower type catches more
+bugs at call sites.
 
 Function types:
 - `[A B -> R]`                   fixed arity
