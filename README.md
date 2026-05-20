@@ -62,6 +62,31 @@ Same types, same checker, same repair compiler — different backends. The unifi
 
 ## Experiments
 
+### E16: Does the type checker make agents faster?
+
+4 features built by Claude Sonnet agents — one group with no type
+checker, one with Beagle's structural checker (clean output, post-test
+verification, clear framing):
+
+| | No types | With types | |
+|---|---:|---:|---|
+| Avg feature build time | 362s | **274s** | **24% faster** |
+| Correctness | 8/8 | 8/8 | identical |
+| Hardest feature (E) | 600s | **328s** | **45% faster** |
+
+Types don't affect correctness at this scale — the agent gets there
+either way. Types affect **how fast** it gets there, with the advantage
+scaling by coordination complexity.
+
+The same checker, poorly integrated (noisy output, wrong workflow
+position), imposes a 76% *penalty*. Three non-code fixes — clean output,
+correct positioning, clear framing — swing the outcome by 100
+percentage points.
+
+[E16 results](experiments/e16-workflow-scheduler/results/type/RESULTS.md) · [devlog entry](docs/devlog/018-e16-type-surface.md)
+
+### E1–E15: Cross-language comparison
+
 15 experiments, 3 language tracks, same tasks:
 
 | Metric                    | Beagle | Clojure | Python + mypy |

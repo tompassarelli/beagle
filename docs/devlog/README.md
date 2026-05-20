@@ -3,8 +3,7 @@
 Entries record discoveries, direction changes, and experimental results.
 Each entry is a snapshot of understanding at the time it was written.
 
-All beagle development took place over ~72 hours (2026-05-15 to 2026-05-18).
-Entries are numbered chronologically. Experiments cited by ID (E1–E8+).
+Entries are numbered chronologically. Experiments cited by ID (E1–E16+).
 
 ## Entries
 
@@ -27,3 +26,4 @@ Entries are numbered chronologically. Experiments cited by ID (E1–E8+).
 | 015 | 2026-05-18 | [Reactive checking: inotify daemon + PostToolUse hook](015-reactive-checking.md) |
 | 016 | 2026-05-18 | [Repair agent pool: forked error resolution](016-repair-agent-pool.md) |
 | 017 | 2026-05-18 | [v0.5.0: packaging, doc infrastructure, release hygiene](017-v050-packaging.md) |
+| 018 | 2026-05-21 | [E16: types make agents 24% faster (when integration is right)](018-e16-type-surface.md) |
