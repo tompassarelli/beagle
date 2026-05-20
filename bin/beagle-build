@@ -9,6 +9,7 @@
 # Extension is determined by target: .clj (default), .cljs, .js, .py, .nix.
 
 set -euo pipefail
+source "$(dirname "$0")/_beagle-racket"
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
     echo "usage: beagle-build <source.bclj|.bjs|.bnix|.bcljs> [output]" >&2
@@ -61,5 +62,5 @@ else
 fi
 
 mkdir -p "$(dirname "$out")"
-racket "$src" > "$out"
+"$RACKET" "$src" > "$out"
 echo "$src -> $out" >&2

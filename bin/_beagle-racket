@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Resolve the correct Racket for beagle's compiled bytecode.
+# Source this from bin/* scripts: source "$(dirname "$0")/_beagle-racket"
+# Then use $RACKET instead of "racket" and $RACO instead of "raco".
+
+BEAGLE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+RACKET="racket"
+RACO="raco"
+
+if [[ -d "$BEAGLE_ROOT/.direnv" ]]; then
+    _direnv_racket="$(cd "$BEAGLE_ROOT" && direnv exec . which racket 2>/dev/null || true)"
+    if [[ -n "$_direnv_racket" ]]; then
+        RACKET="$_direnv_racket"
+        RACO="$(dirname "$_direnv_racket")/raco"
+    fi
+fi

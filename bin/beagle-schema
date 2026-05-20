@@ -8,8 +8,9 @@
 #   beagle-schema --json <path>          machine-readable JSON output
 
 set -euo pipefail
+source "$(dirname "$0")/_beagle-racket"
 
-BEAGLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+BEAGLE_DIR="$BEAGLE_ROOT"
 export BEAGLE_DIR
 
-racket -l beagle/private/schema-cli -- "$@"
+"$RACKET" -l beagle/private/schema-cli -- "$@"

@@ -12,9 +12,9 @@
 # Exits 0 if clean, 1 if errors, 2 if no files found.
 
 set -euo pipefail
+source "$(dirname "$0")/_beagle-racket"
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LIB_DIR="$SCRIPT_DIR/../beagle-lib/private"
+LIB_DIR="$BEAGLE_ROOT/beagle-lib/private"
 
 args=()
 files=()
@@ -63,4 +63,4 @@ for f in "${files[@]}"; do
     racket_args+=("$f")
 done
 
-exec racket "$LIB_DIR/validate-nix.rkt" "${racket_args[@]}"
+exec "$RACKET" "$LIB_DIR/validate-nix.rkt" "${racket_args[@]}"

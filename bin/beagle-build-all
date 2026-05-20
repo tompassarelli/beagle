@@ -12,6 +12,7 @@
 #         Parse errors and unresolvable bindings still fail.
 
 set -euo pipefail
+source "$(dirname "$0")/_beagle-racket"
 
 if [[ $# -lt 1 ]]; then
     echo "usage: beagle-build-all <file-or-dir> ... [--out <dir>]" >&2
@@ -22,4 +23,4 @@ args=""
 for a in "$@"; do
   args="$args \"$a\""
 done
-racket -e "(require beagle/private/build-all) (run-build-all (list $args))"
+"$RACKET" -e "(require beagle/private/build-all) (run-build-all (list $args))"

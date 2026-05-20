@@ -111,11 +111,15 @@
 (define (key-sym->path sym)
   (substring (symbol->string sym) 1))
 
-;; Walk the AST collecting all dotted map keys. Tracks occurrence counts
-;; so we can find the right source position for duplicates.
+;; Walk the AST collecting dotted map keys AND lint warnings.
+;; Carries a scope set (variable names in scope) to detect string map keys
+;; that reference variables or embed attr path segments.
+;;
+;; Returns (values found-keys lint-warnings)
 (define (collect-program-keys prog)
   (define found '())
-  (define occurrence-counts (make-hash))  ; key-sym-string -> count
+  (define lint-warnings '())
+  (define occurrence-counts (make-hash))
 
   (define (record-key! key-sym val)
     (define key-str (symbol->string key-sym))
@@ -124,11 +128,63 @@
     (set! found (cons (found-key (key-sym->path key-sym) val key-sym occ)
                       found)))
 
-  (define (walk-map-pairs pairs #:prefix [prefix #f])
+  (define (add-lint! msg)
+    (set! lint-warnings (cons msg lint-warnings)))
+
+  (define FREEFORM-KEY-PREFIXES
+    '("boot.kernel.sysctl" "services.samba.settings"))
+
+  (define (freeform-context? prefix)
+    (and prefix
+         (ormap (lambda (p) (string-prefix? prefix p)) FREEFORM-KEY-PREFIXES)))
+
+  (define (looks-like-filename? s)
+    (or (string-prefix? s ".")
+        (regexp-match? #px"\\.[a-z]{1,5}$" s)))
+
+  ;; Check a string map key for suspicious patterns
+  (define (lint-string-key key-str scope prefix)
+    (cond
+      [(string-contains? key-str ".")
+       (cond
+         [(string-contains? key-str "/") #f]
+         [(freeform-context? prefix) #f]
+         [(looks-like-filename? key-str) #f]
+         [else
+          (define parts (string-split key-str "."))
+          (define first-part (car parts))
+          (define last-part (last parts))
+          (cond
+            [(hash-has-key? scope first-part)
+             (format "string key ~v starts with variable '~a' — use {~a {:~a ...}} instead"
+                     key-str first-part first-part
+                     (string-join (cdr parts) "."))]
+            [(member last-part '("text" "source" "enable" "package" "packages"))
+             (define file-part (string-join (drop-right parts 1) "."))
+             (format "string key ~v embeds '.~a' — use {~v {:~a ...}} instead"
+                     key-str last-part file-part last-part)]
+            [else
+             (format "string key ~v contains '.' — emits as single quoted attr, not a dotted path. Use a keyword key or nested map instead"
+                     key-str)])])]
+      [(regexp-match? #rx"\\}\\." key-str)
+       (format "string key ~v has interpolation with embedded attr path — split into nested map"
+               key-str)]
+      [(hash-has-key? scope key-str)
+       (format "string key ~v matches variable '~a' — use the variable directly as a map key"
+               key-str key-str)]
+      [else #f]))
+
+  (define (walk-map-pairs pairs scope #:prefix [prefix #f])
     (for ([pair (in-list pairs)])
       (define key (car pair))
       (define val (cdr pair))
       (define key-str (if (symbol? key) (symbol->string key) #f))
+
+      ;; Lint: check string keys for suspicious patterns
+      (when (string? key)
+        (define warning (lint-string-key key scope prefix))
+        (when warning (add-lint! warning)))
+
       (define full-path
         (cond
           [(and prefix key-str (> (string-length key-str) 1)
@@ -137,88 +193,111 @@
           [else #f]))
       (cond
         [(and full-path (map-form? val))
-         (walk-map-pairs (map-form-pairs val)
+         (walk-map-pairs (map-form-pairs val) scope
                          #:prefix (substring (symbol->string full-path) 1))]
         [full-path
          (record-key! full-path val)]
         [(and (dotted-option-key? key) (map-form? val))
-         (walk-map-pairs (map-form-pairs val)
+         (walk-map-pairs (map-form-pairs val) scope
                          #:prefix (key-sym->path key))]
         [(dotted-option-key? key)
          (record-key! key val)]
         [else (void)])
-      (unless (map-form? val) (walk val))))
+      (unless (map-form? val) (walk val scope))))
 
-  (define (walk e)
+  ;; Extract binding names from a let-form
+  (define (let-scope bindings)
+    (for/hash ([b (in-list bindings)])
+      (values (symbol->string (let-binding-name b)) #t)))
+
+  ;; Extract formal names from nix-fn-set
+  (define (fn-set-scope formals)
+    (for/hash ([f (in-list formals)])
+      (values (symbol->string (nix-fn-set-formal-name f)) #t)))
+
+  ;; Merge two scope hashes
+  (define (scope-merge a b)
+    (define result (hash-copy a))
+    (for ([(k v) (in-hash b)])
+      (hash-set! result k v))
+    result)
+
+  (define (walk e scope)
     (cond
-      [(map-form? e)       (walk-map-pairs (map-form-pairs e))]
-      [(nix-fn-set? e)     (walk (nix-fn-set-body e))]
-      [(nix-rec-attrs? e)  (walk-map-pairs (nix-rec-attrs-pairs e))]
-      [(def-form? e)       (walk (def-form-value e))]
-      [(defn-form? e)      (for-each walk (defn-form-body e))]
+      [(map-form? e)       (walk-map-pairs (map-form-pairs e) scope)]
+      [(nix-fn-set? e)
+       (define new-scope (scope-merge scope (fn-set-scope (nix-fn-set-formals e))))
+       (walk (nix-fn-set-body e) new-scope)]
+      [(nix-rec-attrs? e)  (walk-map-pairs (nix-rec-attrs-pairs e) scope)]
+      [(def-form? e)       (walk (def-form-value e) scope)]
+      [(defn-form? e)      (for-each (lambda (b) (walk b scope)) (defn-form-body e))]
       [(defn-multi? e)
        (for ([a (in-list (defn-multi-arities e))])
-         (for-each walk (arity-clause-body a)))]
-      [(fn-form? e)        (for-each walk (fn-form-body e))]
+         (for-each (lambda (b) (walk b scope)) (arity-clause-body a)))]
+      [(fn-form? e)        (for-each (lambda (b) (walk b scope)) (fn-form-body e))]
       [(let-form? e)
+       (define new-scope (scope-merge scope (let-scope (let-form-bindings e))))
        (for ([b (in-list (let-form-bindings e))])
-         (walk (let-binding-value b)))
-       (for-each walk (let-form-body e))]
+         (walk (let-binding-value b) scope))
+       (for-each (lambda (b) (walk b new-scope)) (let-form-body e))]
       [(if-form? e)
-       (walk (if-form-cond-expr e))
-       (walk (if-form-then-expr e))
-       (when (if-form-else-expr e) (walk (if-form-else-expr e)))]
+       (walk (if-form-cond-expr e) scope)
+       (walk (if-form-then-expr e) scope)
+       (when (if-form-else-expr e) (walk (if-form-else-expr e) scope))]
       [(cond-form? e)
        (for ([c (in-list (cond-form-clauses e))])
-         (walk (cond-clause-test c))
-         (for-each walk (cond-clause-body c)))]
+         (walk (cond-clause-test c) scope)
+         (for-each (lambda (b) (walk b scope)) (cond-clause-body c)))]
       [(when-form? e)
-       (walk (when-form-cond-expr e))
-       (for-each walk (when-form-body e))]
-      [(do-form? e)        (for-each walk (do-form-body e))]
+       (walk (when-form-cond-expr e) scope)
+       (for-each (lambda (b) (walk b scope)) (when-form-body e))]
+      [(do-form? e)        (for-each (lambda (b) (walk b scope)) (do-form-body e))]
       [(call-form? e)
-       (when (call-form-fn e) (walk (call-form-fn e)))
-       (for-each walk (call-form-args e))]
-      [(vec-form? e)       (for-each walk (vec-form-items e))]
-      [(set-form? e)       (for-each walk (set-form-items e))]
+       (when (call-form-fn e) (walk (call-form-fn e) scope))
+       (for-each (lambda (a) (walk a scope)) (call-form-args e))]
+      [(vec-form? e)       (for-each (lambda (i) (walk i scope)) (vec-form-items e))]
+      [(set-form? e)       (for-each (lambda (i) (walk i scope)) (set-form-items e))]
       [(nix-with? e)
-       (walk (nix-with-ns-expr e))
-       (walk (nix-with-body e))]
+       (walk (nix-with-ns-expr e) scope)
+       (walk (nix-with-body e) scope)]
       [(nix-assert? e)
-       (walk (nix-assert-cond-expr e))
-       (walk (nix-assert-body e))]
+       (walk (nix-assert-cond-expr e) scope)
+       (walk (nix-assert-body e) scope)]
       [(nix-get-or? e)
-       (walk (nix-get-or-base-expr e))
-       (walk (nix-get-or-default e))]
+       (walk (nix-get-or-base-expr e) scope)
+       (walk (nix-get-or-default e) scope)]
       [(match-form? e)
-       (walk (match-form-target e))
+       (walk (match-form-target e) scope)
        (for ([c (in-list (match-form-clauses e))])
-         (for-each walk (match-clause-body c)))]
-      [(try-form? e)       (for-each walk (try-form-body e))]
+         (for-each (lambda (b) (walk b scope)) (match-clause-body c)))]
+      [(try-form? e)       (for-each (lambda (b) (walk b scope)) (try-form-body e))]
       [(kw-access? e)
-       (walk (kw-access-target e))
-       (when (kw-access-default e) (walk (kw-access-default e)))]
+       (walk (kw-access-target e) scope)
+       (when (kw-access-default e) (walk (kw-access-default e) scope))]
       [(when-let-form? e)
-       (walk (when-let-form-expr e))
-       (for-each walk (when-let-form-body e))]
+       (define new-scope (hash-set (hash-copy scope) (symbol->string (when-let-form-name e)) #t))
+       (walk (when-let-form-expr e) scope)
+       (for-each (lambda (b) (walk b new-scope)) (when-let-form-body e))]
       [(if-let-form? e)
-       (walk (if-let-form-expr e))
-       (for-each walk (if-let-form-then-body e))
-       (for-each walk (if-let-form-else-body e))]
-      [(for-form? e)       (for-each walk (for-form-body e))]
-      [(loop-form? e)      (for-each walk (loop-form-body e))]
-      [(doseq-form? e)     (for-each walk (doseq-form-body e))]
-      [(with-meta? e)      (walk (with-meta-expr e))]
+       (define new-scope (hash-set (hash-copy scope) (symbol->string (if-let-form-name e)) #t))
+       (walk (if-let-form-expr e) scope)
+       (for-each (lambda (b) (walk b new-scope)) (if-let-form-then-body e))
+       (for-each (lambda (b) (walk b new-scope)) (if-let-form-else-body e))]
+      [(for-form? e)       (for-each (lambda (b) (walk b scope)) (for-form-body e))]
+      [(loop-form? e)      (for-each (lambda (b) (walk b scope)) (loop-form-body e))]
+      [(doseq-form? e)     (for-each (lambda (b) (walk b scope)) (doseq-form-body e))]
+      [(with-meta? e)      (walk (with-meta-expr e) scope)]
       [(letfn-form? e)
        (for ([f (in-list (letfn-form-fns e))])
-         (for-each walk (letfn-fn-body f)))
-       (for-each walk (letfn-form-body e))]
+         (for-each (lambda (b) (walk b scope)) (letfn-fn-body f)))
+       (for-each (lambda (b) (walk b scope)) (letfn-form-body e))]
       [else (void)]))
 
+  (define empty-scope (make-immutable-hash))
   (for ([form (in-list (program-forms prog))])
-    (walk form))
+    (walk form empty-scope))
 
-  (reverse found))
+  (values (reverse found) (reverse lint-warnings)))
 
 ;; ============================================================================
 ;; Infer a simple type from a literal value (no full type-checking)
@@ -242,6 +321,53 @@
     [(set-form? v)       (type-app 'Set (list (type-prim 'Any)))]
     [(call-form? v)      (type-prim 'Any)]
     [else                (type-prim 'Any)]))
+
+;; ============================================================================
+;; mkOption default checks — bool/int/float/str options without :default blow up
+;; ============================================================================
+
+(define (mk-option-call? val)
+  (and (call-form? val)
+       (let ([fn (call-form-fn val)])
+         (and (symbol? fn) (eq? fn 'lib/mkOption)))))
+
+(define (mk-option-map val)
+  (and (mk-option-call? val)
+       (let ([args (call-form-args val)])
+         (and (pair? args) (map-form? (car args))
+              (car args)))))
+
+(define (map-form-ref m key-sym)
+  (for/or ([pair (in-list (map-form-pairs m))])
+    (and (eq? (car pair) key-sym) (cdr pair))))
+
+(define TYPES-NEEDING-DEFAULT
+  '(lib/types.bool))
+
+(define (detect-missing-defaults file-path keys)
+  (define errors '())
+  (for ([fk (in-list keys)])
+    (define path-str (found-key-path fk))
+    (define val (found-key-value fk))
+    (when (and (string-prefix? path-str "options.") (mk-option-call? val))
+      (define m (mk-option-map val))
+      (when m
+        (define type-val (map-form-ref m ':type))
+        (define default-val (map-form-ref m ':default))
+        (when (and type-val (symbol? type-val)
+                   (member type-val TYPES-NEEDING-DEFAULT)
+                   (not default-val))
+          (define key-str (symbol->string (found-key-key-sym fk)))
+          (define-values (line col)
+            (find-key-in-source-nth file-path key-str (found-key-occurrence fk)))
+          (set! errors
+                (cons (validation-error
+                       file-path line col
+                       (format "mkOption ~a has type ~a but no :default — will blow up when read"
+                               path-str type-val)
+                       'missing-default path-str)
+                      errors))))))
+  (reverse errors))
 
 ;; ============================================================================
 ;; Schema validation
@@ -491,8 +617,14 @@
                  file (program-target prog)))
 
       (when (eq? (program-target prog) 'nix)
-        (define keys (collect-program-keys prog))
+        (define-values (keys lint-warnings) (collect-program-keys prog))
         (set! all-file-keys (cons (cons file keys) all-file-keys))
+
+        ;; Lint warnings from scope-aware string key analysis
+        (for ([w (in-list lint-warnings)])
+          (set! all-errors
+                (cons (validation-error file #f #f w 'string-key-lint #f)
+                      all-errors)))
 
         ;; Schema validation
         (define schema-errors (validate-file-keys file keys schema))
@@ -500,7 +632,11 @@
 
         ;; Duplicate detection
         (define dup-errors (detect-duplicates file keys))
-        (set! all-errors (append all-errors dup-errors)))))
+        (set! all-errors (append all-errors dup-errors))
+
+        ;; Missing default detection
+        (define default-errors (detect-missing-defaults file keys))
+        (set! all-errors (append all-errors default-errors)))))
 
   ;; Cross-file conflict detection
   (define conflict-errors (detect-cross-file-conflicts all-file-keys schema))

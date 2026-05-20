@@ -200,7 +200,6 @@
              (let ([check (scan-delimiters (tokenize (repair-result-output parinfer-result)))])
                (null? (scan-result-problems check))))
         parinfer-result]
-
        [else
         (heuristic-repair source tokens problems)])]))
 
@@ -233,10 +232,16 @@
 
       [(extra-closer)
        (define bad-closer (scan-problem-closer p))
+       (define off (token-offset bad-closer))
+       (define ws-start
+         (let loop ([i (sub1 off)])
+           (if (and (>= i 0) (char=? (string-ref source i) #\space))
+               (loop (sub1 i))
+               (add1 i))))
        (set! edits
          (cons (repair-edit
-                (token-offset bad-closer)
-                (string-length (token-text bad-closer))
+                ws-start
+                (+ (- off ws-start) (string-length (token-text bad-closer)))
                 ""
                 (token-line bad-closer) (token-col bad-closer)
                 (format "unmatched ~a" (token-text bad-closer)))

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
 # Run beagle daemon in foreground (for systemd/process managers).
 set -euo pipefail
-exec racket -e '(require beagle/private/daemon) (run-daemon-tcp)'
+source "$(dirname "$0")/_beagle-racket"
+exec "$RACKET" -e '(require beagle/private/daemon) (run-daemon-tcp)'

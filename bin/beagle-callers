@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(dirname "$0")/_beagle-racket"
 
 if [[ $# -lt 2 ]]; then
     echo "usage: beagle-callers <fn-name> <file-or-dir> ..." >&2
@@ -31,4 +32,4 @@ args=""
 for a in "$@"; do
   args="$args \"$a\""
 done
-racket -e "(require beagle/private/query) (run-query (list \"callers\" $args))"
+"$RACKET" -e "(require beagle/private/query) (run-query (list \"callers\" $args))"

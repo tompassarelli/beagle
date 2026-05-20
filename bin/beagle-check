@@ -12,10 +12,11 @@
 #   BEAGLE_ERROR_FORMAT=json bin/beagle-check examples/foo.rkt
 
 set -euo pipefail
+source "$(dirname "$0")/_beagle-racket"
 
 if [[ $# -ne 1 ]]; then
     echo "usage: beagle-check <source.bclj|.bjs|.bnix|.bcljs>" >&2
     exit 2
 fi
 
-racket "$1" > /dev/null
+"$RACKET" "$1" > /dev/null

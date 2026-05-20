@@ -8,6 +8,7 @@
 # as Clojure). Use this to audit what your macros actually do.
 
 set -euo pipefail
+source "$(dirname "$0")/_beagle-racket"
 
 if [[ $# -ne 1 ]]; then
     echo "usage: beagle-expand <source.bclj|.bjs|.bnix|.bcljs>" >&2
@@ -21,4 +22,4 @@ if [[ ! -f "$src" ]]; then
     exit 1
 fi
 
-racket -e "(require beagle/private/expand-tool) (expand-file \"$src\")"
+"$RACKET" -e "(require beagle/private/expand-tool) (expand-file \"$src\")"
