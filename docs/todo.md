@@ -105,12 +105,36 @@ Same typed AST, better tooling, integrated repair compiler.
 - [ ] `beagle-import` — .nix → .bnix conversion (reuse rnix parser)
 - [ ] Package name validation — cross-check `pkgs.X` against nixpkgs attrs
 
+### SQL target: remaining gaps
+
+`beagle/sql` has hardened emission (quoted identifiers, escaped strings,
+Inf/NaN rejection), type-checked validation (table/column registry, INSERT
+types, GROUP BY semantics), and 152 tests. Gaps for real production use:
+
+- [ ] Parameterized queries — bind parameters instead of string interpolation (the gold standard for injection prevention; escaping is defense-in-depth, not primary)
+- [ ] Dialect testing — only validated against SQLite; need Postgres and MySQL round-trip suites
+- [ ] Transactions — BEGIN/COMMIT/ROLLBACK
+- [ ] UPSERT / ON CONFLICT
+- [ ] Views — CREATE VIEW, SELECT from views
+- [ ] Derived tables — subquery in FROM clause
+- [ ] Schema migrations — versioned DDL with up/down
+
 ### New emit targets
 
 - [ ] `beagle/rkt` — Racket
 - [ ] `beagle/py` — Python (plumbed, needs emitter)
 - [ ] `beagle/elixir` — Elixir
 - [ ] `beagle/bash` — Bash
+
+### Stale `.zo` files across agents
+
+Compiled `.zo` files get stale when multiple agents (or the PostToolUse hook)
+share the same working directory. Symptoms: `version mismatch` errors,
+silent file reverts during edits. Needs investigation — possible causes:
+
+- [ ] Hook-triggered `raco make` races with in-progress edits
+- [ ] Worktree agents sharing compiled/ directories with the main tree
+- [ ] `raco setup` overwriting source from cached bytecode
 
 ### Experiment metadata
 
