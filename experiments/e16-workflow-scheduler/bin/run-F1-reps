@@ -3,6 +3,10 @@ set -euo pipefail
 
 # run-F1-reps — Feature A structural replication experiment.
 #
+# SUPERSEDED by run-F3-corrected. F1-reps data is confounded: P0 agents
+# received type checking at the default profile (P2) due to a missing
+# --profile flag. See RESULTS.md "Confound: P0 Profile Leakage" section.
+#
 # Runs Feature A + 3 structural variants (C, D, E) × 2 profiles (P0, P2).
 # Same coordination complexity class, different domain surfaces.
 # Order randomized to prevent ordering effects.

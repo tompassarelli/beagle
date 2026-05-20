@@ -3,6 +3,10 @@ set -euo pipefail
 
 # run-F1 — Launch the F1 feature-building experiment.
 #
+# SUPERSEDED by run-F3-corrected. F1 data is confounded: P0 agents
+# received type checking at the default profile (P3 at the time) due
+# to a missing --profile flag. See RESULTS.md "Confound" section.
+#
 # 2 features × 2 profiles (P0, P2) × N reps = 4N runs.
 # Default: 1 rep = 4 runs. Order randomized.
 
