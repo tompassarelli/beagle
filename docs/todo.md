@@ -20,7 +20,7 @@ Corner agent mistakes mechanically. See [`docs/type-system.md`](type-system.md) 
 
 - [x] Phase 1: Exhaustive match errors — missing `defunion` match cases are hard errors in strict mode (wildcards don't suppress)
 - [x] Phase 2: `beagle.result` convention — `Ok`/`Err`/`Result` module + cross-module defunion import
-- [ ] Phase 3: Bounded polymorphism — `(forall [T <: Bound] ...)` constraining type variables
+- [x] Phase 3: Bounded polymorphism — `(forall [(T <: Bound)] ...)` constraining type variables
 - [ ] Phase 4: Parametric `defunion` — `(defunion (Result T E) ...)` for typed error returns
 
 ### Target-aware code generation

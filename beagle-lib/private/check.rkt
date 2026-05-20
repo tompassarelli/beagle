@@ -1372,6 +1372,7 @@
 
 (define (resolve-poly-call poly-type args env)
   (define body (type-poly-body poly-type))
+  (define bounds (type-poly-bounds poly-type))
   (define bindings (make-hasheq))
   (define arg-types (map (lambda (a) (infer-expr a env)) args))
   (define fixed (type-fn-params body))
@@ -1383,6 +1384,17 @@
   (when (and rest-t (> (length arg-types) n-fixed))
     (for ([at (in-list (list-tail arg-types n-fixed))])
       (infer-type-var-bindings rest-t at bindings)))
+  (when bounds
+    (for ([(var bound) (in-hash bounds)])
+      (define inferred (hash-ref bindings var #f))
+      (when (and inferred (not (any-type? inferred))
+                 (not (type-compatible? inferred bound)))
+        (raise-diag 'type-bound
+          (format "type variable ~a was inferred as ~a, which doesn't satisfy bound ~a"
+                  var (type->string inferred) (type->string bound))
+          (hasheq 'var var
+                  'inferred (type->string inferred)
+                  'bound (type->string bound))))))
   (apply-type-bindings body bindings))
 
 ;; Lint: warn when a let-binding name doesn't match the record accessor field.
@@ -1562,7 +1574,8 @@
   (when (eq? (program-mode prog) 'strict)
     (define env (build-initial-env prog))
     (parameterize ([current-check-src-table (program-src-table prog)]
-                   [current-check-target (program-target prog)])
+                   [current-check-target (program-target prog)]
+                   [current-union-members UNION-MEMBERS])
       (for ([form (in-list (program-forms prog))]
             [orig-stx (in-list (program-form-stxs prog))])
         (with-handlers ([exn:fail? (lambda (e) (error-handler e orig-stx))])

@@ -1,0 +1,7 @@
+(defrecord Dog [(name : String) (breed : String)])
+(defrecord Cat [(name : String) (indoor : Bool)])
+(defunion Pet Dog Cat)
+
+(declare-extern get-name (forall [(T <: Pet)] [T -> String]))
+(def dog-name : String (get-name (->Dog "Rex" "Lab")))
+(def cat-name : String (get-name (->Cat "Mimi" true)))

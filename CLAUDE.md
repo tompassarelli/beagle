@@ -19,7 +19,7 @@ it as canonical when explaining the language.
 
 - **Targets:** `beagle/clj` (default), `beagle/cljs`, `beagle/js`, `beagle/nix`, `beagle/sql`, `beagle/py` (plumbed, no emitter)
 - **Forms:** ~50 forms — definitions, control flow, data structures, pattern matching, threading, interop. See `docs/cheatsheet.md` for the full catalog.
-- **Types:** 8 primitives (`String`, `Int`, `Float`, `Bool`, `Keyword`, `Symbol`, `Nil`, `Any`), parametric (`Vec`, `Map`, `Set`, `List`), union (`U`), nullable (`T?`), function types, `forall`, `(Promise T)`
+- **Types:** 8 primitives (`String`, `Int`, `Float`, `Bool`, `Keyword`, `Symbol`, `Nil`, `Any`), parametric (`Vec`, `Map`, `Set`, `List`), union (`U`), nullable (`T?`), function types, `forall` (with optional `<:` bounds), `(Promise T)`
 - **Stdlib:** ~700 entries total — portable (269), Clojure (352), CLJS (75), JS (38 native), Nix (120), SQL (10)
 - **Type checking:** flow-sensitive narrowing, cross-module import, collection/destructuring inference, exhaustive match warnings, refinement predicates
 - **Diagnostics:** Rust-style errors with signatures, "did you mean?" suggestions, JSON mode

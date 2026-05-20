@@ -38,7 +38,7 @@
 (struct type-app   (ctor args)                 #:transparent)
 (struct type-union (alts)                      #:transparent)
 (struct type-var   (name)                      #:transparent)
-(struct type-poly  (vars body)                 #:transparent)
+(struct type-poly  (vars body bounds)           #:transparent)  ; bounds: hasheq var→type or #f
 
 (define (type? x)
   (or (type-prim? x) (type-fn? x) (type-app? x) (type-union? x)
@@ -50,27 +50,49 @@
 
 ;; --- parsing types from source datums --------------------------------------
 
+(define (parse-forall-vars entries)
+  (let loop ([rest entries] [vars '()] [bounds (hasheq)])
+    (cond
+      [(null? rest) (values (reverse vars) bounds)]
+      [(symbol? (car rest))
+       (loop (cdr rest) (cons (car rest) vars) bounds)]
+      [(and (list? (car rest))
+            (= (length (car rest)) 3)
+            (symbol? (car (car rest)))
+            (eq? (cadr (car rest)) '<:))
+       (define var-name (car (car rest)))
+       (define bound-expr (caddr (car rest)))
+       (define bound-type
+         (parameterize ([current-type-vars (append (map car (filter list? entries))
+                                                   (filter symbol? entries)
+                                                   (current-type-vars))])
+           (parse-type bound-expr)))
+       (loop (cdr rest) (cons var-name vars) (hash-set bounds var-name bound-type))]
+      [else
+       (error 'beagle "forall var must be a symbol or (T <: Bound): ~v" (car rest))])))
+
 (define (parse-type t)
   (cond
     ;; [A B [& T] -> R] form (function, possibly variadic)
     [(and (pair? t) (eq? (car t) BRACKET-TAG))
      (parse-fn-type (cdr t))]
 
-    ;; (forall (A B) body-type)
+    ;; (forall (A B) body-type) or (forall [(T <: Bound) U] body-type)
     [(and (pair? t) (eq? (car t) 'forall))
      (unless (= (length t) 3)
        (error 'beagle "forall requires (forall (vars...) type): ~v" t))
      (define vars-form (cadr t))
-     (define vars-list
+     (define raw-entries
        (cond
          [(and (pair? vars-form) (eq? (car vars-form) BRACKET-TAG)) (cdr vars-form)]
          [(list? vars-form) vars-form]
-         [else (error 'beagle "forall vars must be a list of symbols: ~v" vars-form)]))
-     (unless (andmap symbol? vars-list)
-       (error 'beagle "forall vars must be symbols: ~v" vars-list))
+         [else (error 'beagle "forall vars must be a list: ~v" vars-form)]))
+     (define-values (vars-list bounds-hash)
+       (parse-forall-vars raw-entries))
      (type-poly vars-list
                 (parameterize ([current-type-vars (append vars-list (current-type-vars))])
-                  (parse-type (caddr t))))]
+                  (parse-type (caddr t)))
+                (if (zero? (hash-count bounds-hash)) #f bounds-hash))]
 
     ;; (U A B C) union
     [(and (pair? t) (eq? (car t) 'U))
@@ -248,8 +270,16 @@
                  (string-join (map type->string (type-union-alts t)) " ")))]
     [(type-var? t) (symbol->string (type-var-name t))]
     [(type-poly? t)
-     (format "(forall (~a) ~a)"
-             (string-join (map symbol->string (type-poly-vars t)) " ")
+     (define bounds (type-poly-bounds t))
+     (define var-strs
+       (map (lambda (v)
+              (define b (and bounds (hash-ref bounds v #f)))
+              (if b
+                (format "(~a <: ~a)" v (type->string b))
+                (symbol->string v)))
+            (type-poly-vars t)))
+     (format "(forall [~a] ~a)"
+             (string-join var-strs " ")
              (type->string (type-poly-body t)))]
     [else (~v t)]))
 

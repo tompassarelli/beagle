@@ -296,6 +296,11 @@ Parametric:
 Union:
 - `(U String Int)` — value is one of the alternatives
 
+Polymorphic:
+- `(forall [T] [T -> T])` — unbounded type variable
+- `(forall [(T <: Pet)] [T -> String])` — bounded: T must satisfy Pet
+- `(forall [(T <: (U String Int))] [T -> String])` — union bound
+
 Nullable (sugar for `(U T Nil)`):
 - `String?` — shorthand for `(U String Nil)`
 - `Product?` — shorthand for `(U Product Nil)`

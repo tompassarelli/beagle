@@ -1,0 +1,8 @@
+(defrecord Dog [(name : String) (breed : String)])
+(defrecord Cat [(name : String) (indoor : Bool)])
+(defunion Pet Dog Cat)
+
+(defrecord Car [(make : String) (year : Int)])
+
+(declare-extern get-name (forall [(T <: Pet)] [T -> String]))
+(def oops : String (get-name (->Car "Toyota" 2024)))

@@ -281,6 +281,24 @@
   "poly-forall.bclj")
 
 ;; =============================================================================
+;; Tests — bounded polymorphism
+;; =============================================================================
+
+(check-fixture-ok "bounded poly: Pet union bound accepts Dog and Cat"
+  "poly-bounded-ok.bclj")
+
+(check-fixture-err/rx "bounded poly: Car violates Pet bound"
+  #rx"doesn't satisfy bound"
+  "poly-bounded-err.bclj")
+
+(check-fixture-ok "bounded poly: primitive union bound accepts matching types"
+  "poly-bounded-prim-ok.bclj")
+
+(check-fixture-err/rx "bounded poly: Bool violates (U String Int) bound"
+  #rx"doesn't satisfy bound"
+  "poly-bounded-prim-err.bclj")
+
+;; =============================================================================
 ;; Tests — cross-file type imports
 ;; =============================================================================
 

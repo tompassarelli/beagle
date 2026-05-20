@@ -15,9 +15,10 @@
            (and rest (p rest))
            (p ret)))
 
-(define (poly-fn vars param-types ret-type #:rest [rest-type #f])
+(define (poly-fn vars param-types ret-type #:rest [rest-type #f] #:bounds [bounds #f])
   (type-poly vars
-    (type-fn param-types rest-type ret-type)))
+    (type-fn param-types rest-type ret-type)
+    bounds))
 
 (define STDLIB-CLJ
   (hash

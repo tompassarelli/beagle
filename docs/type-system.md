@@ -165,7 +165,7 @@ phase one. The habit matters more than the type precision.
 
 **Implementation:** One `.bgl` file, add to cheatsheet, mention in consumer docs.
 
-### Phase 3 — Bounded polymorphism (next, real feature)
+### Phase 3 — Bounded polymorphism (done)
 
 **What:**
 
