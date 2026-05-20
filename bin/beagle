@@ -11,7 +11,8 @@ beagle — typed authoring layer for Clojure/ClojureScript
 Usage: beagle <command> [args...]
 
 Commands:
-  check [FILE-OR-DIR...]    Type-check without emitting (batch)
+  check [--profile 0|1|2|3] [FILE-OR-DIR...]
+                            Type-check without emitting (batch)
   build [FILE-OR-DIR...]    Compile to Clojure (batch)
   fix [--dry-run|--apply] [FILE-OR-DIR...]
                             Auto-fix high-confidence type errors
@@ -42,7 +43,22 @@ cmd="$1"; shift
 
 case "$cmd" in
     check)
-        if [[ $# -eq 1 ]] && [[ -f "$1" ]]; then
+        # Count non-flag args to decide single-file vs batch.
+        # --profile takes a value arg, so skip the next arg after it.
+        _check_files=()
+        _skip_next=false
+        for _a in "$@"; do
+            if $_skip_next; then
+                _skip_next=false
+                continue
+            fi
+            case "$_a" in
+                --profile) _skip_next=true ;;
+                --*) ;;
+                *) _check_files+=("$_a") ;;
+            esac
+        done
+        if [[ ${#_check_files[@]} -eq 1 ]] && [[ -f "${_check_files[0]}" ]]; then
             exec "$BIN/beagle-check" "$@"
         else
             exec "$BIN/beagle-check-all" "$@"

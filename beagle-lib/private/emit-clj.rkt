@@ -83,22 +83,34 @@
                  [current-emit-target (program-target prog)]
                  [current-emit-scalar-fns (build-scalar-fns prog)]
                  [current-emit-symbol-ns (program-imported-symbol-ns prog)])
+    ;; Emit body first so we can detect str/ usage for auto-requires
+    (define body
+      (string-join
+       (for/list ([form (in-list (program-forms prog))])
+         (define raw (emit-form form))
+         (define loc (hash-ref (program-src-table prog) form #f))
+         (if (and loc (metadatable? raw))
+           (string-append (emit-srcloc loc) raw)
+           raw))
+       "\n\n"))
+    (define needs-clj-string?
+      (regexp-match? #rx"[( \t\n]str/" body))
     (string-append
-     (emit-ns prog)
+     (emit-ns prog #:needs-clj-string? needs-clj-string?)
      "\n\n"
-     (string-join
-      (for/list ([form (in-list (program-forms prog))])
-        (define raw (emit-form form))
-        (define loc (hash-ref (program-src-table prog) form #f))
-        (if (and loc (metadatable? raw))
-          (string-append (emit-srcloc loc) raw)
-          raw))
-      "\n\n")
+     body
      "\n")))
 
-(define (emit-ns prog)
+(define (emit-ns prog #:needs-clj-string? [needs-clj-string? #f])
   (define ns (program-namespace prog))
-  (define rs (program-requires prog))
+  (define base-rs (program-requires prog))
+  ;; Auto-inject clojure.string require when str/ calls are used
+  (define rs
+    (if (and needs-clj-string?
+             (not (for/or ([r (in-list base-rs)])
+                    (eq? (require-entry-ns r) 'clojure.string))))
+        (append base-rs (list (require-entry 'clojure.string 'str #f)))
+        base-rs))
   (define is (program-imports prog))
   (define cljs? (eq? (current-emit-target) 'cljs))
   (define has-requires (not (null? rs)))

@@ -2,17 +2,31 @@
 # beagle-check-all: type-check multiple .rkt files in one process.
 #
 # Usage:
-#   bin/beagle-check-all <file-or-dir> ...
+#   bin/beagle-check-all [--agent] [--profile 0|1|2|3] <file-or-dir> ...
 #
 # Directories are expanded to their .rkt contents. Reports all errors,
 # exits 0 if all clean. Supports BEAGLE_ERROR_FORMAT=json.
+#
+# --agent:     suppress lint warnings, show only type errors in a clean,
+#              minimal format designed for LLM agent consumption.
+# --profile N: control which type-checking features are enabled (0-3).
+#              0 = parse only, 1 = basic types, 2 = structural, 3 = full (default).
 
 set -euo pipefail
 source "$(dirname "$0")/_beagle-racket"
 
-if [[ $# -lt 1 ]]; then
-    echo "usage: beagle-check-all <file-or-dir> ..." >&2
+# Parse --agent flag (consumed here, not forwarded to Racket)
+args=()
+for arg in "$@"; do
+    case "$arg" in
+        --agent) export BEAGLE_AGENT_MODE=1 ;;
+        *) args+=("$arg") ;;
+    esac
+done
+
+if [[ ${#args[@]} -lt 1 ]]; then
+    echo "usage: beagle-check-all [--agent] [--profile 0|1|2|3] <file-or-dir> ..." >&2
     exit 2
 fi
 
-"$RACKET" -e "(require beagle/private/check-all) (run-check-all (vector->list (current-command-line-arguments)))" -- "$@"
+"$RACKET" -e "(require beagle/private/check-all) (run-check-all (vector->list (current-command-line-arguments)))" -- "${args[@]}"

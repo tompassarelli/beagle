@@ -22,6 +22,18 @@
 (define ANY (type-prim 'Any))
 (define NIL (type-prim 'Nil))
 
+;; Check-profile levels:
+;;   0 — parse only (no type checking)
+;;   1 — basic types (signatures, records, arity, let-bindings)
+;;   2 — structural (+ defunion exhaustiveness, defenum, defscalar, flow narrowing)
+;;   3 — full (+ deferror, check/rescue) — default, matches current behavior
+(define current-check-profile
+  (make-parameter
+    (let ([v (getenv "BEAGLE_CHECK_PROFILE")])
+      (if (and v (regexp-match? #rx"^[0-3]$" v))
+          (string->number v)
+          3))))
+
 (define (merge-types . ts)
   (define non-any (filter (λ (t) (not (any-type? t))) ts))
   (cond
@@ -268,7 +280,8 @@
                schema)))))
 
 (define (type-check! prog)
-  (when (eq? (program-mode prog) 'strict)
+  (when (and (eq? (program-mode prog) 'strict)
+             (>= (current-check-profile) 1))
     (hash-clear! RECORD-FIELDS)
     (hash-clear! RECORD-FIELD-ORDER)
     (hash-clear! UNION-MEMBERS)
@@ -371,7 +384,8 @@
        (void)]
       [(defenum-form name values) (void)]
       [(defunion-form name members type-params member-fields)
-       (hash-set! UNION-MEMBERS name members)
+       (when (>= (current-check-profile) 2)
+         (hash-set! UNION-MEMBERS name members))
        (cond
          [(null? type-params)
           (hash-set! env name
@@ -380,19 +394,20 @@
           (hash-set! env name (type-prim name))
           (register-parametric-union! name type-params members member-fields env)])]
       [(deferror-form name members member-fields)
-       (hash-set! UNION-MEMBERS name members)
-       (hash-set! env name
-                  (type-union (map (lambda (m) (type-prim m)) members)))
-       (when member-fields
-         (for ([m (in-list members)])
-           (define fields (hash-ref member-fields m '()))
-           (unless (null? fields)
-             (hash-set! RECORD-FIELDS m
-                        (for/hasheq ([fld (in-list fields)])
-                          (values (param-name fld) (or (param-type fld) ANY))))
-             (hash-set! RECORD-FIELD-ORDER m (map param-name fields))
-             (hash-set! env (string->symbol (string-append "->" (symbol->string m)))
-                        (type-fn (map (lambda (f) (or (param-type f) ANY)) fields) #f (type-prim m))))))]
+       (when (>= (current-check-profile) 3)
+         (hash-set! UNION-MEMBERS name members)
+         (hash-set! env name
+                    (type-union (map (lambda (m) (type-prim m)) members)))
+         (when member-fields
+           (for ([m (in-list members)])
+             (define fields (hash-ref member-fields m '()))
+             (unless (null? fields)
+               (hash-set! RECORD-FIELDS m
+                          (for/hasheq ([fld (in-list fields)])
+                            (values (param-name fld) (or (param-type fld) ANY))))
+               (hash-set! RECORD-FIELD-ORDER m (map param-name fields))
+               (hash-set! env (string->symbol (string-append "->" (symbol->string m)))
+                          (type-fn (map (lambda (f) (or (param-type f) ANY)) fields) #f (type-prim m)))))))]
       [(defscalar-form name backing preds)
        (define scalar-type (type-prim name))
        (define backing-type (type-prim backing))
@@ -896,21 +911,24 @@
     [else (values #f #f #f)]))
 
 (define (narrow-env-for-condition env cond-expr)
-  (define-values (var narrow-type negated?) (extract-narrowing cond-expr))
   (cond
-    [(not var) (values env env)]
+    [(< (current-check-profile) 2) (values env env)]
     [else
-     (define current-type (hash-ref env var #f))
+     (define-values (var narrow-type negated?) (extract-narrowing cond-expr))
      (cond
-       [(not current-type) (values env env)]
+       [(not var) (values env env)]
        [else
-        (define pos-env (mut-copy env))
-        (hash-set! pos-env var narrow-type)
-        (define neg-env (mut-copy env))
-        (hash-set! neg-env var (remove-from-union current-type narrow-type))
-        (if negated?
-          (values neg-env pos-env)
-          (values pos-env neg-env))])]))
+        (define current-type (hash-ref env var #f))
+        (cond
+          [(not current-type) (values env env)]
+          [else
+           (define pos-env (mut-copy env))
+           (hash-set! pos-env var narrow-type)
+           (define neg-env (mut-copy env))
+           (hash-set! neg-env var (remove-from-union current-type narrow-type))
+           (if negated?
+             (values neg-env pos-env)
+             (values pos-env neg-env))])])]))
 
 ;; --- match arm narrowing ---------------------------------------------------
 
@@ -1457,6 +1475,7 @@
     [(check-expr? e)
      (define inner-type (infer-expr (check-expr-expr e) env))
      (cond
+       [(< (current-check-profile) 3) ANY]
        [(and (type-app? inner-type)
              (hash-has-key? PARAMETRIC-UNIONS (type-app-ctor inner-type))
              (let ([members (hash-ref (hash-ref PARAMETRIC-UNIONS (type-app-ctor inner-type)) 'members '())])
@@ -1474,6 +1493,7 @@
            env))
      (define fallback-type (infer-expr (rescue-form-fallback e) fallback-env))
      (cond
+       [(< (current-check-profile) 3) fallback-type]
        [(and (type-app? inner-type)
              (hash-has-key? PARAMETRIC-UNIONS (type-app-ctor inner-type))
              (let ([members (hash-ref (hash-ref PARAMETRIC-UNIONS (type-app-ctor inner-type)) 'members '())])
@@ -1522,7 +1542,8 @@
        (for/list ([c (in-list (match-form-clauses e))])
          (define arm-env (narrow-env-for-match c target-type env))
          (last-expr-type (match-clause-body c) arm-env)))
-     (check-match-exhaustiveness e env target-type)
+     (when (>= (current-check-profile) 2)
+       (check-match-exhaustiveness e env target-type))
      (if (null? arm-types) ANY (apply merge-types arm-types))]
     [(case-form? e)
      (infer-expr (case-form-test e) env)
@@ -1605,7 +1626,8 @@
      (cond
        [(type-fn? fn-type)
         (check-args (call-form-fn e) fn-type (call-form-args e) env e)
-        (check-scalar-predicate-literal (call-form-fn e) (call-form-args e) e)
+        (when (>= (current-check-profile) 2)
+          (check-scalar-predicate-literal (call-form-fn e) (call-form-args e) e))
         (type-fn-ret fn-type)]
        [(and (type-union? fn-type)
              (andmap type-fn? (type-union-alts fn-type)))
@@ -1957,7 +1979,8 @@
   (if (or (zero? n) (null? xs)) xs (drop* (cdr xs) (- n 1))))
 
 (define (type-check-with-locs! prog error-handler)
-  (when (eq? (program-mode prog) 'strict)
+  (when (and (eq? (program-mode prog) 'strict)
+             (>= (current-check-profile) 1))
     (define env (build-initial-env prog))
     (parameterize ([current-check-src-table (program-src-table prog)]
                    [current-check-target (program-target prog)]
@@ -2167,12 +2190,13 @@
                  (string->symbol (string-append name-lower "-" field-str)) #t))))
 
 (define (check-scalar-provenance! prog)
-  (build-scalar-registry! prog)
-  (build-known-fns! prog)
-  (when (eq? (program-mode prog) 'strict)
-    (define src-table (program-src-table prog))
-    (for ([form (in-list (program-forms prog))])
-      (walk-for-provenance form src-table))))
+  (when (>= (current-check-profile) 2)
+    (build-scalar-registry! prog)
+    (build-known-fns! prog)
+    (when (eq? (program-mode prog) 'strict)
+      (define src-table (program-src-table prog))
+      (for ([form (in-list (program-forms prog))])
+        (walk-for-provenance form src-table)))))
 
 (define current-local-bindings (make-parameter (set)))
 
@@ -2444,4 +2468,5 @@
          beagle-diagnostic beagle-diagnostic?
          beagle-diagnostic-kind beagle-diagnostic-details
          kind->error-code
+         current-check-profile
          check-form infer-expr build-initial-env)

@@ -8,7 +8,15 @@
          "error-format.rkt"
          "query.rkt"
          "blame.rkt"
+         "lint.rkt"
          "extensions.rkt")
+
+;; --- agent mode --------------------------------------------------------------
+;; When BEAGLE_AGENT_MODE=1, suppress lint and show a clean error summary
+;; designed for LLM agent consumption.
+
+(define (agent-mode?)
+  (and (getenv "BEAGLE_AGENT_MODE") #t))
 
 ;; --- source line cache ------------------------------------------------------
 
@@ -285,12 +293,43 @@
 
 ;; --- batch checker ----------------------------------------------------------
 
+;; An agent-error captures the essential fields for --agent summary output.
+(struct agent-error (file line message) #:transparent)
+
+(define (extract-agent-error e loc-stx path)
+  (define file
+    (or (and (beagle-diagnostic? e)
+             (hash-ref (beagle-diagnostic-details e) 'error-file #f))
+        (and loc-stx
+             (let ([s (syntax-source loc-stx)])
+               (cond [(path? s) (path->string s)]
+                     [(string? s) s]
+                     [else #f])))
+        path))
+  (define line
+    (or (and (beagle-diagnostic? e)
+             (hash-ref (beagle-diagnostic-details e) 'error-line #f))
+        (and loc-stx (syntax-line loc-stx))))
+  (define msg (exn-message e))
+  ;; Strip the "beagle: " prefix for cleaner agent output
+  (define clean-msg (regexp-replace #rx"^beagle: " msg ""))
+  (agent-error file line clean-msg))
+
+(define (basename path)
+  (define parts (regexp-split #rx"/" path))
+  (if (null? parts) path (last parts)))
+
 (define (check-one-file path json?)
+  (define agent? (agent-mode?))
   (define error-count 0)
+  (define agent-errors '())
+  (define lint-count 0)
 
   (define (report-error e loc-stx)
     (set! error-count (+ error-count 1))
     (cond
+      [agent?
+       (set! agent-errors (cons (extract-agent-error e loc-stx path) agent-errors))]
       [json?
        (write-json (diagnostic->json e loc-stx path) (current-error-port))
        (newline (current-error-port))
@@ -317,10 +356,22 @@
     (type-check-with-locs! prog
       (lambda (e loc-stx)
         (report-error e loc-stx)))
-    (check-scalar-provenance! prog)
-    (run-semantic-analysis! prog #:file path))
 
-  error-count)
+    ;; In agent mode, suppress notes/warnings from provenance and semantic
+    ;; analysis — they go directly to stderr and would pollute agent output.
+    ;; At profile 0 (parse only), skip all post-parse analysis.
+    (when (>= (current-check-profile) 1)
+      (if agent?
+          (let ([sink (open-output-string)])
+            (parameterize ([current-error-port sink])
+              (check-scalar-provenance! prog)
+              (run-semantic-analysis! prog #:file path))
+            (set! lint-count (count-lint-warnings prog)))
+          (begin
+            (check-scalar-provenance! prog)
+            (run-semantic-analysis! prog #:file path)))))
+
+  (values error-count lint-count (reverse agent-errors)))
 
 (define (expand-args args)
   (sort
@@ -334,31 +385,83 @@
            '()])))
     string<?))
 
+(define (parse-profile-arg args)
+  ;; Extract --profile N from args, return (values profile-level remaining-args).
+  ;; Defaults to current-check-profile (which may be set via BEAGLE_CHECK_PROFILE env var).
+  (let loop ([remaining args] [result '()] [profile (current-check-profile)])
+    (cond
+      [(null? remaining) (values profile (reverse result))]
+      [(and (string=? (car remaining) "--profile")
+            (pair? (cdr remaining)))
+       (define n (string->number (cadr remaining)))
+       (cond
+         [(and n (exact-integer? n) (<= 0 n 3))
+          (loop (cddr remaining) result n)]
+         [else
+          (eprintf "beagle-check-all: --profile must be 0, 1, 2, or 3\n")
+          (exit 2)])]
+      [else (loop (cdr remaining) (cons (car remaining) result) profile)])))
+
 (define (run-check-all args)
   (when (null? args)
-    (eprintf "usage: beagle-check-all <file-or-dir> ...\n")
+    (eprintf "usage: beagle-check-all [--profile 0|1|2|3] <file-or-dir> ...\n")
     (exit 2))
 
-  (define files (expand-args args))
+  (define-values (profile file-args) (parse-profile-arg args))
+  (define files (expand-args file-args))
 
   (when (null? files)
     (eprintf "beagle-check-all: no beagle source files found\n")
     (exit 2))
 
   (define json? (json-error-mode?))
+  (define agent? (agent-mode?))
   (define total-errors 0)
+  (define total-lint 0)
+  (define all-agent-errors '())
 
-  (for ([f (in-list files)])
-    (define errs (check-one-file f json?))
-    (cond
-      [(zero? errs)
-       (unless json?
-         (eprintf "  ~a ok\n" f))]
-      [else
-       (set! total-errors (+ total-errors errs))]))
+  (parameterize ([current-check-profile profile])
+    (for ([f (in-list files)])
+      (define-values (errs lints aerrs) (check-one-file f json?))
+      (cond
+        [(zero? errs)
+         (unless (or json? agent?)
+           (eprintf "  ~a ok\n" f))]
+        [else
+         (set! total-errors (+ total-errors errs))])
+      (set! total-lint (+ total-lint lints))
+      (set! all-agent-errors (append all-agent-errors aerrs))))
 
-  (unless json?
-    (eprintf "\n~a file(s), ~a error(s)\n" (length files) total-errors))
+  (cond
+    [agent?
+     ;; Clean, minimal output for LLM agent consumption
+     (define lint-note
+       (if (> total-lint 0)
+           (format " (~a lint warning~a hidden)"
+                   total-lint (if (= total-lint 1) "" "s"))
+           ""))
+     (cond
+       [(zero? total-errors)
+        (eprintf "0 errors~a\n" lint-note)]
+       [else
+        (eprintf "~a error~a\n"
+                 total-errors
+                 (if (= total-errors 1) "" "s"))
+        (for ([ae (in-list all-agent-errors)])
+          (define loc
+            (cond
+              [(and (agent-error-file ae) (agent-error-line ae))
+               (format "~a:~a" (basename (agent-error-file ae)) (agent-error-line ae))]
+              [(agent-error-file ae) (basename (agent-error-file ae))]
+              [else "?"]))
+          (eprintf "- ~a ~a\n" loc (agent-error-message ae)))
+        (when (> total-lint 0)
+          (eprintf "\n~a lint warning~a hidden (run without --agent to see)\n"
+                   total-lint
+                   (if (= total-lint 1) "" "s")))])]
+    [else
+     (unless json?
+       (eprintf "\n~a file(s), ~a error(s)\n" (length files) total-errors))])
 
   (exit (if (zero? total-errors) 0 1)))
 

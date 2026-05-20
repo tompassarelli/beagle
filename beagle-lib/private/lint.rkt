@@ -704,4 +704,17 @@
     [(js-ast-typeof? node) (collect-symbols-js-ast (js-ast-typeof-expr node) used)]
     [else (void)]))
 
-(provide lint-program!)
+;; --- counting mode ----------------------------------------------------------
+;; Runs lint with a captured error port and returns the number of warnings
+;; emitted, without printing anything. Used by --agent mode in check-all.
+
+(define (count-lint-warnings prog)
+  (define out (open-output-string))
+  (parameterize ([current-error-port out])
+    (lint-program! prog))
+  (define s (get-output-string out))
+  (if (string=? s "")
+      0
+      (length (regexp-match* #rx"\n" s))))
+
+(provide lint-program! count-lint-warnings)

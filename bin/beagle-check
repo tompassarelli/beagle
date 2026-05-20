@@ -2,10 +2,15 @@
 # beagle-check: type-check a beagle file without emitting Clojure.
 #
 # Usage:
-#   bin/beagle-check <source.bclj|.bjs|.bnix|.bcljs>
+#   bin/beagle-check [--agent] [--profile 0|1|2|3] <source.bclj|.bjs|.bnix|.bcljs>
 #
 # Exits 0 if the file compiles cleanly, non-zero otherwise. Stderr carries
 # warnings and errors. Stdout is suppressed (no generated Clojure).
+#
+# --agent:     suppress lint warnings, show only type errors in a clean,
+#              minimal format designed for LLM agent consumption.
+# --profile N: control which type-checking features are enabled (0-3).
+#              0 = parse only, 1 = basic types, 2 = structural, 3 = full (default).
 #
 # Useful for fast feedback in iteration — no need to write a .clj file.
 # Pair with BEAGLE_ERROR_FORMAT=json for parseable error output:
@@ -14,9 +19,38 @@
 set -euo pipefail
 source "$(dirname "$0")/_beagle-racket"
 
-if [[ $# -ne 1 ]]; then
-    echo "usage: beagle-check <source.bclj|.bjs|.bnix|.bcljs>" >&2
+# Parse flags
+AGENT=false
+PROFILE=""
+FILE=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --agent) AGENT=true; shift ;;
+        --profile)
+            if [[ $# -lt 2 ]]; then
+                echo "beagle-check: --profile requires an argument (0, 1, 2, or 3)" >&2
+                exit 2
+            fi
+            PROFILE="$2"; shift 2 ;;
+        *) FILE="$1"; shift ;;
+    esac
+done
+
+if [[ -z "$FILE" ]]; then
+    echo "usage: beagle-check [--agent] [--profile 0|1|2|3] <source.bclj|.bjs|.bnix|.bcljs>" >&2
     exit 2
 fi
 
-"$RACKET" "$1" > /dev/null
+if [[ "$AGENT" == true ]] || [[ -n "$PROFILE" ]]; then
+    # Route through check-all for structured agent output / profile support
+    EXTRA_ARGS=()
+    if [[ "$AGENT" == true ]]; then
+        export BEAGLE_AGENT_MODE=1
+    fi
+    if [[ -n "$PROFILE" ]]; then
+        EXTRA_ARGS+=(--profile "$PROFILE")
+    fi
+    "$RACKET" -e "(require beagle/private/check-all) (run-check-all (vector->list (current-command-line-arguments)))" -- "${EXTRA_ARGS[@]}" "$FILE"
+else
+    "$RACKET" "$FILE" > /dev/null
+fi
