@@ -61,7 +61,12 @@ parse → check → emit-dispatch → emit-{clj,js,sql}
 - `beagle-lib/private/emit-dispatch.rkt` — dispatches to `emit-clj.rkt`, `emit-js.rkt`, or
   `emit-nix.rkt` based on `(program-target prog)`.
 - `beagle-lib/private/emit-clj.rkt` — AST → Clojure/ClojureScript source string (was `emit.rkt`).
-- `beagle-lib/private/emit-js.rkt` — AST → JavaScript source string.
+- `beagle-lib/private/emit-js.rkt` — AST → JavaScript source string. Delegates to
+  target-specific emission modules.
+- `beagle-lib/private/js-emit-utils.rkt` — shared JS emission utilities (name mangling,
+  escaping, `current-emit-expr` parameter).
+- `beagle-lib/private/emit-jst.rkt` — typed JS target (`jst-*`) emission helpers.
+- `beagle-lib/private/emit-js-quote.rkt` — JS/quote AST rendering.
 - `beagle-lib/private/emit-nix.rkt` — AST → Nix source string (curried fns, attrsets, let/in).
 - `beagle-lib/private/js-capabilities.rkt` — JS capability sets (JS-TRANSLATED, JS-VALUE-WRAPPERS,
   JS-RUNTIME-HELPERS). Imported by both emit-js and stdlib-js — no circular deps.
