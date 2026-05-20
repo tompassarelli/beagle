@@ -15,10 +15,10 @@ it as canonical when explaining the language.
 
 ## Status
 
-`#lang beagle` v0.10.1 — 1034 tests passing.
+`#lang beagle` v0.10.1 — 1127 tests passing.
 
 - **Targets:** `beagle/clj` (default), `beagle/cljs`, `beagle/js`, `beagle/nix`, `beagle/sql`, `beagle/py` (plumbed, no emitter)
-- **Forms:** ~50 forms — definitions, control flow, data structures, pattern matching, threading, interop. See `docs/cheatsheet.md` for the full catalog.
+- **Forms:** ~78 forms — ~50 cross-target (definitions, control flow, data structures, pattern matching, threading, interop) + 28 typed JS target forms (`js/*`). See `docs/cheatsheet.md` for the full catalog.
 - **Types:** 8 primitives (`String`, `Int`, `Float`, `Bool`, `Keyword`, `Symbol`, `Nil`, `Any`), `Number` (`U Int Float`), parametric (`Vec`, `Map`, `Set`, `List`), union (`U`), nullable (`T?`), function types, `forall` (with optional `<:` bounds), parametric `defunion` (`(Result T E)`), `(Promise T)`
 - **Stdlib:** ~729 entries total — portable (269), Clojure (352), CLJS (75), JS (38 native), Nix (120), SQL (43)
 - **Type checking:** flow-sensitive narrowing, cross-module import, collection/destructuring inference, exhaustive match warnings, refinement predicates
@@ -48,10 +48,11 @@ parse → check → emit-dispatch → emit-{clj,js,sql}
   recursive expansion, safe/unsafe boundary.
 - `beagle-lib/private/parse.rkt` — source → AST. Two passes: meta-form collection
   (mode, ns, macros, externs, requires, imports) then expr parsing with
-  macro expansion.
+  macro expansion. Includes 28 `jst-*` structs for typed JS target AST
+  (`js/*` surface forms).
 - `beagle-lib/private/check.rkt` — best-effort type checking against annotations and
   the built-in env. Record field registry for keyword-access type inference.
-  Skipped in dynamic mode.
+  Skipped in dynamic mode. Includes `jst-*` type inference + JS target gating.
 - `beagle-lib/private/emit-dispatch.rkt` — dispatches to `emit-clj.rkt`, `emit-js.rkt`, or
   `emit-nix.rkt` based on `(program-target prog)`.
 - `beagle-lib/private/emit-clj.rkt` — AST → Clojure/ClojureScript source string (was `emit.rkt`).

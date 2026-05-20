@@ -89,6 +89,7 @@ Corner agent mistakes mechanically. See [`docs/type-system.md`](type-system.md) 
 - [x] `fmt` — interpolated string templates: `(fmt "hello ${name}")` → `(str "hello " name)`. Works with heredocs. Parse-time rewrite, all targets.
 - [ ] `js-template` — typed splice sites: `${stmt body}`, `${expr x}`, `${json data}`, `${indent block 4}`. Reject invalid splices (stmt where expr expected).
 - [ ] `js/quote` — structural JS quasiquotation. Beagle represents JS AST, not text. The north star.
+- [x] Typed JS target AST — 28 `jst-*` IR structs with `js/*` surface syntax. Full pipeline: parse → check → emit → lint. 73 tests.
 
 ### JS target gaps
 

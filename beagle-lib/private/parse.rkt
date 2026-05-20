@@ -349,6 +349,36 @@
 (struct js-ast-splice-json (beagle-expr)                      #:transparent)
 ;; ~%expr: splice a beagle expression as JSON data
 
+;; --- Typed JS target AST (js/* forms) ----------------------------------------
+(struct jst-fn       (name params rest-param return-type body async? export?) #:transparent)
+(struct jst-call     (callee args)                                #:transparent)
+(struct jst-await    (expr)                                       #:transparent)
+(struct jst-try      (body catch-name catch-body finally-body)    #:transparent)
+(struct jst-const    (name type value)                            #:transparent)
+(struct jst-let      (name type value)                            #:transparent)
+(struct jst-assign   (target value)                               #:transparent)
+(struct jst-return   (expr)                                       #:transparent)
+(struct jst-throw    (expr)                                       #:transparent)
+(struct jst-if       (test then-body else-body)                   #:transparent)
+(struct jst-ternary  (test then-expr else-expr)                   #:transparent)
+(struct jst-for-of   (binding elem-type iterable body)            #:transparent)
+(struct jst-while    (test body)                                  #:transparent)
+(struct jst-arrow    (params rest-param return-type body async?)  #:transparent)
+(struct jst-class    (name extends methods export?)               #:transparent)
+(struct jst-method   (name params rest-param return-type body static? async? kind) #:transparent)
+(struct jst-new      (class-expr args)                            #:transparent)
+(struct jst-dot      (object property)                            #:transparent)
+(struct jst-index    (object index-expr)                          #:transparent)
+(struct jst-array    (items)                                      #:transparent)
+(struct jst-object   (pairs)                                      #:transparent)
+(struct jst-spread   (expr)                                       #:transparent)
+(struct jst-typeof   (expr)                                       #:transparent)
+(struct jst-template (parts)                                      #:transparent)
+(struct jst-binary   (op left right)                              #:transparent)
+(struct jst-unary    (op expr)                                    #:transparent)
+(struct jst-do       (body)                                       #:transparent)
+(struct jst-export   (form)                                       #:transparent)
+
 (struct param       (name type)                             #:transparent)
 (struct map-destructure (keys as-name)                      #:transparent)
 (struct seq-destructure (names rest-name)                    #:transparent)
@@ -1279,6 +1309,131 @@
     [(cons 'js/quote body)
      (js-quote-form (parse-js-ast-body (or (stx-tail subs 1) body)))]
 
+    ;; --- Typed JS target forms (js/*) -----------------------------------------
+
+    [(list* 'js/fn name-form params-form body-rest)
+     #:when (symbol? (->datum name-form))
+     (parse-jst-fn (->datum name-form) params-form body-rest #f #f)]
+
+    [(list* 'js/async-fn name-form params-form body-rest)
+     #:when (symbol? (->datum name-form))
+     (parse-jst-fn (->datum name-form) params-form body-rest #t #f)]
+
+    [(list* 'js/call callee-form arg-forms)
+     (jst-call (parse-jst-callee callee-form) (map parse-expr arg-forms))]
+
+    [(list 'js/await expr-form)
+     (jst-await (parse-expr expr-form))]
+
+    [(list 'js/const name-form ': type-form val-form)
+     #:when (annotation-marker? ':)
+     (jst-const (->datum name-form) (parse-type type-form) (parse-expr val-form))]
+
+    [(list 'js/const name-form val-form)
+     (jst-const (->datum name-form) #f (parse-expr val-form))]
+
+    [(list 'js/let name-form ': type-form val-form)
+     #:when (annotation-marker? ':)
+     (jst-let (->datum name-form) (parse-type type-form) (parse-expr val-form))]
+
+    [(list 'js/let name-form val-form)
+     (jst-let (->datum name-form) #f (parse-expr val-form))]
+
+    [(list 'js/set! target-form val-form)
+     (jst-assign (parse-jst-callee target-form) (parse-expr val-form))]
+
+    [(list 'js/return)
+     (jst-return #f)]
+
+    [(list 'js/return expr-form)
+     (jst-return (parse-expr expr-form))]
+
+    [(list 'js/throw expr-form)
+     (jst-throw (parse-expr expr-form))]
+
+    [(list* 'js/if test-form body-rest)
+     (define-values (then-body else-body)
+       (let loop ([forms body-rest] [acc '()])
+         (cond
+           [(null? forms) (values (reverse acc) '())]
+           [(eq? (->datum (car forms)) 'else)
+            (values (reverse acc) (cdr forms))]
+           [else (loop (cdr forms) (cons (parse-expr (car forms)) acc))])))
+     (jst-if (parse-expr test-form) then-body (if (null? else-body) #f (map parse-expr else-body)))]
+
+    [(list 'js/? test-form then-form else-form)
+     (jst-ternary (parse-expr test-form) (parse-expr then-form) (parse-expr else-form))]
+
+    [(list* 'js/try body-rest)
+     (parse-jst-try body-rest)]
+
+    [(list* 'js/for-of binding-form iterable-form body-rest)
+     (parse-jst-for-of binding-form iterable-form body-rest)]
+
+    [(list* 'js/while test-form body-rest)
+     (jst-while (parse-expr test-form) (map parse-expr body-rest))]
+
+    [(list* 'js/arrow params-form body-rest)
+     (parse-jst-arrow params-form body-rest #f)]
+
+    [(list* 'js/async-arrow params-form body-rest)
+     (parse-jst-arrow params-form body-rest #t)]
+
+    [(list* 'js/class name-form rest)
+     (parse-jst-class name-form rest)]
+
+    [(list* 'js/new class-form arg-forms)
+     (jst-new (parse-jst-callee class-form) (map parse-expr arg-forms))]
+
+    [(list 'js/. obj-form (? symbol? prop))
+     (jst-dot (parse-expr obj-form) prop)]
+
+    [(list 'js/.. obj-form idx-form)
+     (jst-index (parse-expr obj-form) (parse-expr idx-form))]
+
+    [(cons 'js/array items)
+     (jst-array (map parse-expr (cdr d)))]
+
+    [(cons 'js/object items)
+     (parse-jst-object (cdr d))]
+
+    [(cons 'js/template parts)
+     (jst-template (map (lambda (p)
+                          (define v (->datum p))
+                          (if (string? v) v (parse-expr p)))
+                        (cdr d)))]
+
+    [(list 'js/spread expr-form)
+     (jst-spread (parse-expr expr-form))]
+
+    [(list 'js/typeof expr-form)
+     (jst-typeof (parse-expr expr-form))]
+
+    [(list* 'js/do body-rest)
+     (jst-do (map parse-expr body-rest))]
+
+    [(list 'js/export inner-form)
+     (define inner (parse-expr inner-form))
+     (cond
+       [(jst-fn? inner) (struct-copy jst-fn inner [export? #t])]
+       [(jst-class? inner) (struct-copy jst-class inner [export? #t])]
+       [else (jst-export inner)])]
+
+    [(list 'js/! expr-form)
+     (jst-unary '! (parse-expr expr-form))]
+
+    [(list 'js/void expr-form)
+     (jst-unary 'void (parse-expr expr-form))]
+
+    [(list (and op (or 'js/- 'js/+)) expr-form)
+     (define js-op (if (eq? op 'js/-) '- '+))
+     (jst-unary js-op (parse-expr expr-form))]
+
+    [(list (? jst-binary-op? op) left-form right-form)
+     (jst-binary (hash-ref JST-BINARY-OPS op) (parse-expr left-form) (parse-expr right-form))]
+
+    ;; --- end Typed JS target forms --------------------------------------------
+
     ;; --- end JS-specific forms ------------------------------------------------
 
     ;; --- SQL-specific forms ---------------------------------------------------
@@ -2164,6 +2319,148 @@
      (define callee (parse-js-ast-expr head-d))
      (define args (map parse-js-ast-expr (cdr d)))
      (js-ast-call callee args)]))
+
+;; --- Typed JS target (js/*) parse helpers ----------------------------------
+
+(define JST-BINARY-OPS
+  (hasheq 'js/+  '+   'js/-  '-   'js/*  '*   'js/div  '/   'js/%  '%   'js/**  '**
+          'js/=== '===  'js/!== '!==  'js/== '==  'js/!= '!=
+          'js/<  '<   'js/>  '>   'js/<= '<=  'js/>= '>=
+          'js/&& 'and  'js/|| 'or  'js/?? 'nullish
+          'js/in 'in  'js/instanceof 'instanceof))
+
+(define (jst-binary-op? sym)
+  (and (symbol? sym) (hash-has-key? JST-BINARY-OPS sym)))
+
+(define (jst-dotted-symbol? sym)
+  (define s (symbol->string sym))
+  (and (string-contains? s ".")
+       (not (string-prefix? s "."))
+       (not (string-suffix? s "."))))
+
+(define (jst-split-dotted sym)
+  (define parts (string-split (symbol->string sym) "."))
+  (for/fold ([acc (string->symbol (car parts))])
+            ([p (in-list (cdr parts))])
+    (jst-dot acc (string->symbol p))))
+
+(define (parse-jst-callee form)
+  (define d (->datum form))
+  (cond
+    [(and (symbol? d) (jst-dotted-symbol? d))
+     (jst-split-dotted d)]
+    [else (parse-expr form)]))
+
+(define (jst-split-ret-body params-form body-forms)
+  (define-values (param-list rest-param) (parse-params params-form))
+  (define-values (ret-type body-start)
+    (cond
+      [(and (>= (length body-forms) 2)
+            (eq? (->datum (car body-forms)) ':))
+       (values (parse-type (cadr body-forms)) (cddr body-forms))]
+      [else (values #f body-forms)]))
+  (values param-list rest-param ret-type (map parse-expr body-start)))
+
+(define (parse-jst-fn name params-form body-forms async? export?)
+  (define-values (params rest-param ret-type body)
+    (jst-split-ret-body params-form body-forms))
+  (jst-fn name params rest-param ret-type body async? export?))
+
+(define (parse-jst-arrow params-form body-forms async?)
+  (define-values (params rest-param ret-type body)
+    (jst-split-ret-body params-form body-forms))
+  (jst-arrow params rest-param ret-type body async?))
+
+(define (parse-jst-try body-forms)
+  (define-values (try-body catch-name catch-body finally-body)
+    (let loop ([forms body-forms] [acc '()])
+      (cond
+        [(null? forms)
+         (values (reverse acc) #f #f #f)]
+        [(eq? (->datum (car forms)) 'catch)
+         (when (null? (cdr forms))
+           (error 'beagle "js/try: catch requires a binding name"))
+         (define cname (->datum (cadr forms)))
+         (unless (symbol? cname)
+           (error 'beagle "js/try: catch binding must be a symbol, got ~v" cname))
+         (define rest-after-name (cddr forms))
+         (define-values (cbody rest-after-catch)
+           (let cloop ([r rest-after-name] [cacc '()])
+             (cond
+               [(null? r) (values (reverse cacc) '())]
+               [(eq? (->datum (car r)) 'finally) (values (reverse cacc) r)]
+               [else (cloop (cdr r) (cons (parse-expr (car r)) cacc))])))
+         (define fbody
+           (if (and (pair? rest-after-catch) (eq? (->datum (car rest-after-catch)) 'finally))
+               (map parse-expr (cdr rest-after-catch))
+               #f))
+         (values (map parse-expr (reverse acc)) cname cbody fbody)]
+        [(eq? (->datum (car forms)) 'finally)
+         (values (map parse-expr (reverse acc)) #f #f (map parse-expr (cdr forms)))]
+        [else (loop (cdr forms) (cons (car forms) acc))])))
+  (jst-try try-body catch-name catch-body finally-body))
+
+(define (parse-jst-for-of binding-form iterable-form body-forms)
+  (define bd (->datum binding-form))
+  (define-values (name elem-type)
+    (cond
+      [(symbol? bd) (values bd #f)]
+      [(and (list? bd) (= (length bd) 3) (eq? (cadr bd) ':))
+       (values (car bd) (parse-type (caddr bd)))]
+      [else (error 'beagle "js/for-of: binding must be a symbol or (name : Type), got ~v" bd)]))
+  (jst-for-of name elem-type (parse-expr iterable-form) (map parse-expr body-forms)))
+
+(define (parse-jst-class name-form rest)
+  (define name (->datum name-form))
+  (unless (symbol? name)
+    (error 'beagle "js/class: name must be a symbol, got ~v" name))
+  (define-values (extends methods-raw)
+    (cond
+      [(and (pair? rest) (eq? (->datum (car rest)) 'extends)
+            (pair? (cdr rest)))
+       (values (parse-jst-callee (cadr rest)) (cddr rest))]
+      [else (values #f rest)]))
+  (define methods (map parse-jst-class-method methods-raw))
+  (jst-class name extends methods #f))
+
+(define (parse-jst-class-method form)
+  (define d (->datum form))
+  (unless (pair? d)
+    (error 'beagle "js/class method: expected list, got ~v" d))
+  (define-values (static? async? kind remaining)
+    (let loop ([items d] [s? #f] [a? #f])
+      (define head (and (pair? items) (car items)))
+      (cond
+        [(eq? head 'static) (loop (cdr items) #t a?)]
+        [(eq? head 'async) (loop (cdr items) s? #t)]
+        [(eq? head 'constructor) (values s? a? 'constructor (cdr items))]
+        [(eq? head 'get) (values s? a? 'get (cdr items))]
+        [(eq? head 'set) (values s? a? 'set (cdr items))]
+        [else (values s? a? 'method items)])))
+  (define-values (mname params-form body-forms)
+    (cond
+      [(eq? kind 'constructor)
+       (when (null? remaining)
+         (error 'beagle "js/class constructor: expected params"))
+       (values 'constructor (car remaining) (cdr remaining))]
+      [else
+       (when (< (length remaining) 2)
+         (error 'beagle "js/class method: expected (name (params) body...)"))
+       (values (car remaining) (cadr remaining) (cddr remaining))]))
+  (define-values (params rest-param ret-type body)
+    (jst-split-ret-body (datum->syntax #f params-form) body-forms))
+  (jst-method mname params rest-param ret-type body static? async? kind))
+
+(define (parse-jst-object items)
+  (let loop ([rest items] [acc '()])
+    (cond
+      [(null? rest) (jst-object (reverse acc))]
+      [(< (length rest) 2)
+       (error 'beagle "js/object: expected key-value pairs, got odd count")]
+      [else
+       (define key (->datum (car rest)))
+       (define val (parse-expr (cadr rest)))
+       (loop (cddr rest) (cons (cons key val) acc))])))
 
 ;; --- SQL-specific parse helpers --------------------------------------------
 
@@ -3101,6 +3398,36 @@
  (struct-out js-ast-splice-expr)
  (struct-out js-ast-splice-stmts)
  (struct-out js-ast-splice-json)
+ (struct-out jst-fn)
+ (struct-out jst-call)
+ (struct-out jst-await)
+ (struct-out jst-try)
+ (struct-out jst-const)
+ (struct-out jst-let)
+ (struct-out jst-assign)
+ (struct-out jst-return)
+ (struct-out jst-throw)
+ (struct-out jst-if)
+ (struct-out jst-ternary)
+ (struct-out jst-for-of)
+ (struct-out jst-while)
+ (struct-out jst-arrow)
+ (struct-out jst-class)
+ (struct-out jst-method)
+ (struct-out jst-new)
+ (struct-out jst-dot)
+ (struct-out jst-index)
+ (struct-out jst-array)
+ (struct-out jst-object)
+ (struct-out jst-spread)
+ (struct-out jst-typeof)
+ (struct-out jst-template)
+ (struct-out jst-binary)
+ (struct-out jst-unary)
+ (struct-out jst-do)
+ (struct-out jst-export)
+ jst-binary-op?
+ JST-BINARY-OPS
  parse-program
  DEFAULT-MODE
  DEFAULT-TARGET

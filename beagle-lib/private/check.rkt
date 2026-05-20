@@ -61,6 +61,34 @@
   (hash
    js-quote-form?           'js
    await-form?              'js
+   jst-fn?                  'js
+   jst-call?                'js
+   jst-await?               'js
+   jst-try?                 'js
+   jst-const?               'js
+   jst-let?                 'js
+   jst-assign?              'js
+   jst-return?              'js
+   jst-throw?               'js
+   jst-if?                  'js
+   jst-ternary?             'js
+   jst-for-of?              'js
+   jst-while?               'js
+   jst-arrow?               'js
+   jst-class?               'js
+   jst-method?              'js
+   jst-new?                 'js
+   jst-dot?                 'js
+   jst-index?               'js
+   jst-array?               'js
+   jst-object?              'js
+   jst-spread?              'js
+   jst-typeof?              'js
+   jst-template?            'js
+   jst-binary?              'js
+   jst-unary?               'js
+   jst-do?                  'js
+   jst-export?              'js
    nix-inherit?             'nix
    nix-inherit-from?        'nix
    nix-with?                'nix
@@ -95,6 +123,34 @@
   (hash
    js-quote-form?           "js/quote"
    await-form?              "await"
+   jst-fn?                  "js/fn"
+   jst-call?                "js/call"
+   jst-await?               "js/await"
+   jst-try?                 "js/try"
+   jst-const?               "js/const"
+   jst-let?                 "js/let"
+   jst-assign?              "js/set!"
+   jst-return?              "js/return"
+   jst-throw?               "js/throw"
+   jst-if?                  "js/if"
+   jst-ternary?             "js/?"
+   jst-for-of?              "js/for-of"
+   jst-while?               "js/while"
+   jst-arrow?               "js/arrow"
+   jst-class?               "js/class"
+   jst-method?              "js/method"
+   jst-new?                 "js/new"
+   jst-dot?                 "js/."
+   jst-index?               "js/.."
+   jst-array?               "js/array"
+   jst-object?              "js/object"
+   jst-spread?              "js/spread"
+   jst-typeof?              "js/typeof"
+   jst-template?            "js/template"
+   jst-binary?              "js/binary"
+   jst-unary?               "js/unary"
+   jst-do?                  "js/do"
+   jst-export?              "js/export"
    nix-inherit?             "inh"
    nix-inherit-from?        "inh-from"
    nix-with?                "with-do"
@@ -1411,6 +1467,59 @@
      ;; Type-check all beagle splice expressions inside the JS AST
      (infer-js-ast-splices (js-quote-form-body e) env)
      (type-prim 'JsAst)]
+
+    ;; --- Typed JS target forms (js/*) -----------------------------------------
+    [(jst-fn? e)       (infer-jst-fn e env)]
+    [(jst-call? e)     (infer-jst-call e env)]
+    [(jst-await? e)    (infer-jst-await e env)]
+    [(jst-try? e)      (infer-jst-try e env)]
+    [(jst-const? e)    (infer-jst-const e env)]
+    [(jst-let? e)      (infer-jst-let e env)]
+    [(jst-assign? e)   (for-each (lambda (v) (infer-expr v env)) (list (jst-assign-value e))) ANY]
+    [(jst-return? e)   (if (jst-return-expr e) (infer-expr (jst-return-expr e) env) (type-prim 'Nil))]
+    [(jst-throw? e)    (infer-expr (jst-throw-expr e) env) ANY]
+    [(jst-if? e)       (infer-expr (jst-if-test e) env)
+                       (for-each (lambda (f) (infer-expr f env)) (jst-if-then-body e))
+                       (when (jst-if-else-body e)
+                         (for-each (lambda (f) (infer-expr f env)) (jst-if-else-body e)))
+                       ANY]
+    [(jst-ternary? e)  (infer-expr (jst-ternary-test e) env)
+                       (define t (infer-expr (jst-ternary-then-expr e) env))
+                       (define f (infer-expr (jst-ternary-else-expr e) env))
+                       (merge-types t f)]
+    [(jst-for-of? e)   (infer-jst-for-of e env)]
+    [(jst-while? e)    (infer-expr (jst-while-test e) env)
+                       (for-each (lambda (f) (infer-expr f env)) (jst-while-body e))
+                       ANY]
+    [(jst-arrow? e)    (infer-jst-arrow e env)]
+    [(jst-class? e)    (infer-jst-class e env)]
+    [(jst-method? e)   (infer-jst-method e env)]
+    [(jst-new? e)      (infer-expr (jst-new-class-expr e) env)
+                       (for-each (lambda (a) (infer-expr a env)) (jst-new-args e))
+                       ANY]
+    [(jst-dot? e)      (infer-jst-dot-expr e env)]
+    [(jst-index? e)    (infer-expr (jst-index-object e) env)
+                       (infer-expr (jst-index-index-expr e) env)
+                       ANY]
+    [(jst-array? e)    (infer-jst-array e env)]
+    [(jst-object? e)   (for-each (lambda (p) (infer-expr (cdr p) env)) (jst-object-pairs e))
+                       (type-app 'Map (list (type-prim 'String) ANY))]
+    [(jst-spread? e)   (infer-expr (jst-spread-expr e) env)]
+    [(jst-typeof? e)   (infer-expr (jst-typeof-expr e) env) (type-prim 'String)]
+    [(jst-template? e) (for-each (lambda (p) (unless (string? p) (infer-expr p env)))
+                                 (jst-template-parts e))
+                       (type-prim 'String)]
+    [(jst-binary? e)   (jst-infer-binary-type e env)]
+    [(jst-unary? e)    (infer-expr (jst-unary-expr e) env)
+                       (case (jst-unary-op e)
+                         [(!) (type-prim 'Bool)]
+                         [(typeof) (type-prim 'String)]
+                         [(void) (type-prim 'Nil)]
+                         [else ANY])]
+    [(jst-do? e)       (jst-infer-body (jst-do-body e) env)]
+    [(jst-export? e)   (infer-expr (jst-export-form e) env)]
+    ;; --- end Typed JS target forms --------------------------------------------
+
     [(for-form? e)
      (define body-env (mut-copy env))
      (for ([c (in-list (for-form-clauses e))])
@@ -1767,6 +1876,159 @@
     [(js-ast-literal? node) (void)]
 
     [else (void)]))
+
+;; --- Typed JS target (jst-*) inference helpers -----------------------------
+
+(define (jst-infer-body body env)
+  (if (null? body)
+      ANY
+      (begin
+        (for ([f (in-list (drop-right body 1))])
+          (infer-expr f env))
+        (infer-expr (last body) env))))
+
+(define (jst-infer-binary-type e env)
+  (define lt (infer-expr (jst-binary-left e) env))
+  (define rt (infer-expr (jst-binary-right e) env))
+  (case (jst-binary-op e)
+    [(=== !== == != < > <= >= in instanceof) (type-prim 'Bool)]
+    [(and or nullish) (merge-types lt rt)]
+    [(+ - * / % **) (merge-types lt rt)]
+    [else ANY]))
+
+(define (infer-jst-dot-expr e env)
+  (infer-expr (jst-dot-object e) env)
+  ANY)
+
+(define (infer-jst-fn e env)
+  (define body-env (mut-copy env))
+  (for ([p (in-list (jst-fn-params e))])
+    (when (param? p)
+      (hash-set! body-env (param-name p) (or (param-type p) ANY))))
+  (when (jst-fn-rest-param e)
+    (hash-set! body-env (jst-fn-rest-param e) (type-app 'Vec (list ANY))))
+  (jst-infer-body (jst-fn-body e) body-env)
+  (define param-types
+    (for/list ([p (in-list (jst-fn-params e))])
+      (if (param? p) (or (param-type p) ANY) ANY)))
+  (define ret (or (jst-fn-return-type e) ANY))
+  (type-fn param-types #f ret))
+
+(define (infer-jst-call e env)
+  (define fn-type (infer-expr (jst-call-callee e) env))
+  (for ([a (in-list (jst-call-args e))])
+    (infer-expr a env))
+  (if (type-fn? fn-type)
+      (type-fn-ret fn-type)
+      ANY))
+
+(define (infer-jst-await e env)
+  (define inner-type (infer-expr (jst-await-expr e) env))
+  (if (and (type-app? inner-type)
+           (eq? (type-app-ctor inner-type) 'Promise)
+           (= 1 (length (type-app-args inner-type))))
+      (car (type-app-args inner-type))
+      ANY))
+
+(define (infer-jst-try e env)
+  (define try-t (jst-infer-body (jst-try-body e) env))
+  (when (jst-try-catch-name e)
+    (define catch-env (mut-copy env))
+    (hash-set! catch-env (jst-try-catch-name e) ANY)
+    (when (jst-try-catch-body e)
+      (jst-infer-body (jst-try-catch-body e) catch-env)))
+  (when (jst-try-finally-body e)
+    (jst-infer-body (jst-try-finally-body e) env))
+  try-t)
+
+(define (infer-jst-const e env)
+  (define val-type (infer-expr (jst-const-value e) env))
+  (define declared (or (jst-const-type e) val-type))
+  (when (jst-const-type e)
+    (unless (type-compatible? val-type (jst-const-type e))
+      (raise-diag 'type-mismatch
+                  (format "js/const ~a: declared ~a but got ~a"
+                          (jst-const-name e)
+                          (type->string (jst-const-type e))
+                          (type->string val-type))
+                  (hasheq 'declared (type->string (jst-const-type e))
+                          'actual (type->string val-type))
+                  #:src (src-for e))))
+  (hash-set! env (jst-const-name e) declared)
+  declared)
+
+(define (infer-jst-let e env)
+  (define val-type (infer-expr (jst-let-value e) env))
+  (define declared (or (jst-let-type e) val-type))
+  (when (jst-let-type e)
+    (unless (type-compatible? val-type (jst-let-type e))
+      (raise-diag 'type-mismatch
+                  (format "js/let ~a: declared ~a but got ~a"
+                          (jst-let-name e)
+                          (type->string (jst-let-type e))
+                          (type->string val-type))
+                  (hasheq 'declared (type->string (jst-let-type e))
+                          'actual (type->string val-type))
+                  #:src (src-for e))))
+  (hash-set! env (jst-let-name e) declared)
+  declared)
+
+(define (infer-jst-for-of e env)
+  (define iter-type (infer-expr (jst-for-of-iterable e) env))
+  (define elem-type
+    (cond
+      [(jst-for-of-elem-type e) (jst-for-of-elem-type e)]
+      [(and (type-app? iter-type)
+            (memq (type-app-ctor iter-type) '(Vec List Set))
+            (= (length (type-app-args iter-type)) 1))
+       (car (type-app-args iter-type))]
+      [else ANY]))
+  (define body-env (mut-copy env))
+  (hash-set! body-env (jst-for-of-binding e) elem-type)
+  (jst-infer-body (jst-for-of-body e) body-env)
+  ANY)
+
+(define (infer-jst-arrow e env)
+  (define body-env (mut-copy env))
+  (for ([p (in-list (jst-arrow-params e))])
+    (when (param? p)
+      (hash-set! body-env (param-name p) (or (param-type p) ANY))))
+  (when (jst-arrow-rest-param e)
+    (hash-set! body-env (jst-arrow-rest-param e) (type-app 'Vec (list ANY))))
+  (define body-type (jst-infer-body (jst-arrow-body e) body-env))
+  (define param-types
+    (for/list ([p (in-list (jst-arrow-params e))])
+      (if (param? p) (or (param-type p) ANY) ANY)))
+  (define ret (or (jst-arrow-return-type e) body-type))
+  (type-fn param-types #f ret))
+
+(define (infer-jst-class e env)
+  (when (jst-class-extends e)
+    (infer-expr (jst-class-extends e) env))
+  (for ([m (in-list (jst-class-methods e))])
+    (infer-jst-method m env))
+  ANY)
+
+(define (infer-jst-method e env)
+  (define body-env (mut-copy env))
+  (hash-set! body-env 'this ANY)
+  (for ([p (in-list (jst-method-params e))])
+    (when (param? p)
+      (hash-set! body-env (param-name p) (or (param-type p) ANY))))
+  (when (jst-method-rest-param e)
+    (hash-set! body-env (jst-method-rest-param e) (type-app 'Vec (list ANY))))
+  (jst-infer-body (jst-method-body e) body-env)
+  ANY)
+
+(define (infer-jst-array e env)
+  (define elem-types
+    (for/list ([item (in-list (jst-array-items e))])
+      (infer-expr item env)))
+  (define elem-type
+    (if (null? elem-types) ANY (apply merge-types elem-types)))
+  (type-app 'Vec (list elem-type)))
+
+;; --- end Typed JS target inference helpers ---------------------------------
 
 (define (infer-cond-clauses clauses env)
   (let loop ([cls clauses] [current-env env] [acc '()])
