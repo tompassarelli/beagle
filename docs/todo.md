@@ -19,7 +19,7 @@ One command wires up everything for Claude Code: daemon, hooks, system prompt.
 Corner agent mistakes mechanically. See [`docs/type-system.md`](type-system.md) for full rationale.
 
 - [x] Phase 1: Exhaustive match errors — missing `defunion` match cases are hard errors in strict mode (wildcards don't suppress)
-- [ ] Phase 2: `beagle.result` convention — ship `Ok`/`Err`/`Result` module using existing features
+- [x] Phase 2: `beagle.result` convention — `Ok`/`Err`/`Result` module + cross-module defunion import
 - [ ] Phase 3: Bounded polymorphism — `(forall [T <: Bound] ...)` constraining type variables
 - [ ] Phase 4: Parametric `defunion` — `(defunion (Result T E) ...)` for typed error returns
 

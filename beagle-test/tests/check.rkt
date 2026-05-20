@@ -635,6 +635,48 @@
   "defunion-member-compat.bclj")
 
 ;; =============================================================================
+;; Tests — Result convention (defunion Ok/Err)
+;; =============================================================================
+
+(check-fixture-ok "Result: match on Ok and Err passes"
+  "result-match-all.bclj")
+
+(check-fixture-err/rx "Result: match missing Err branch raises exhaustive error"
+  #rx"not exhaustive"
+  "result-match-missing.bclj")
+
+;; Cross-module Result import
+(define result-fixture-source
+  (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
+    (build-path dir "fixtures" "result.bclj")))
+
+(check-ok/source "cross-file Result: constructor callable with prefix" result-fixture-source
+  '(require result)
+  '(def ok-val (result/->Ok 42)))
+
+(check-ok/source "cross-file Result: Err constructor callable" result-fixture-source
+  '(require result)
+  '(def err-val (result/->Err "something went wrong")))
+
+(check-ok/source "cross-file Result: accessor returns correct type" result-fixture-source
+  '(require result)
+  '(def e (result/->Err "fail"))
+  '(def msg : String (result/err-error e)))
+
+(check-ok/source "cross-file Result: exhaustive match on imported union passes" result-fixture-source
+  '(require result)
+  `(defn handle ,(br '(r : Result)) : String
+     (match r
+       ,(br '(Ok v) "ok")
+       ,(br '(Err e) 'e))))
+
+(check-err/source "cross-file Result: non-exhaustive match on imported union errors" result-fixture-source
+  '(require result)
+  `(defn handle ,(br '(r : Result)) : String
+     (match r
+       ,(br '(Ok v) "ok"))))
+
+;; =============================================================================
 ;; Tests — defscalar (fixtures)
 ;; =============================================================================
 
