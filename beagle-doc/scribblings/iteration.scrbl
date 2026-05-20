@@ -42,7 +42,7 @@ Side-effecting iteration. Same binding syntax as @tt{for} (multiple bindings,
 
 @defform[(dotimes [name count] body ...)]{
 Counted iteration. Binds @racket[name] to @tt{0}, @tt{1}, ..., @tt{count-1}.
-The binding is typed as @tt{Long}. Returns @tt{nil}.
+The binding is typed as @tt{Int}. Returns @tt{nil}.
 
 @codeblock|{
 (dotimes [i 10]

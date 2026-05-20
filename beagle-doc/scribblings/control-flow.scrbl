@@ -139,8 +139,8 @@ Patterns:
 ]
 
 @codeblock|{
-(defrecord Circle [(radius : Double)])
-(defrecord Rect [(width : Double) (height : Double)])
+(defrecord Circle [(radius : Float)])
+(defrecord Rect [(width : Float) (height : Float)])
 
 (match shape
   [(Circle r) (* 3.14159 r r)]

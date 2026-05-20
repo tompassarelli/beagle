@@ -2,7 +2,7 @@
 
 Beagle is a typed language that compiles to Clojure or JavaScript. This
 reference covers everything needed to write beagle code. Errors are caught
-at compile time.
+at compile time. Generated from Scribble docs.
 
 ## File header
 
@@ -141,6 +141,8 @@ Match must cover all members — the checker reports missing cases:
 (U String Int)        ; union
 String?               ; nullable (= (U String Nil))
 (Result T E)          ; parametric union (Ok/Err)
+(forall [T] [T -> T]) ; polymorphic
+(forall [(T <: Bound)] [T -> R]) ; bounded
 ```
 
 ## Let bindings infer types

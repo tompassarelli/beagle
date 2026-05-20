@@ -42,7 +42,7 @@ Defines a function with an explicit return type. The checker verifies
 the body's inferred type is compatible.
 
 @codeblock|{
-(defn add [(x : Long) (y : Long)] : Long
+(defn add [(x : Int) (y : Int)] : Int
   (+ x y))
 
 (defn id [x] x)
@@ -67,7 +67,7 @@ Multi-arity function. Each clause is @tt{([params] : ReturnType body ...)}.
 Anonymous function.
 
 @codeblock|{
-(fn [(x : Long)] (+ x 1))
+(fn [(x : Int)] (+ x 1))
 }|}
 
 @section[#:tag "let"]{let}
@@ -80,7 +80,7 @@ Explicit type annotations are optional and only needed when narrowing.
 (let [x 1 y 2] (+ x y))
 
 ;; Explicit annotation only when narrowing:
-(let [(area : Long) (* w h)] area)
+(let [(area : Int) (* w h)] area)
 
 ;; Destructuring:
 (let [{:keys [name age]} person] (str name " is " age))

@@ -17,7 +17,7 @@ first-class concern.
 
 @bold{What the checker catches at compile time:}
 @itemlist[
-  @item{Type mismatches --- passing a @tt{Long} where a @tt{String} is expected}
+  @item{Type mismatches --- passing an @tt{Int} where a @tt{String} is expected}
   @item{Arity errors --- wrong number of arguments to a function}
   @item{Undefined references --- using a name that hasn't been defined}
   @item{Record field errors --- accessing a field that doesn't exist on a record type}

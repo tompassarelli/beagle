@@ -7,7 +7,7 @@
 Install beagle as a linked Racket package:
 
 @verbatim|{
-  raco pkg install --link --auto /path/to/beagle
+  raco pkg install --link beagle-lib/ beagle-test/ beagle-doc/ beagle/
 }|
 
 If using Nix, the flake provides a dev shell:
@@ -32,7 +32,7 @@ A beagle source file uses the @tt{#lang beagle} declaration:
 ;; definitions follow...
 (def greeting : String "hello")
 
-(defn add [(x : Long) (y : Long)] : Long
+(defn add [(x : Int) (y : Int)] : Int
   (+ x y))
 }|
 
@@ -60,7 +60,7 @@ is needed for cross-module beagle calls:
 @codeblock|{
 (require inventory :as inv)
 
-;; Type checker knows: inv/can-fulfill? : [(Vec StockLevel) Long Long -> Boolean]
+;; Type checker knows: inv/can-fulfill? : [(Vec StockLevel) Int Int -> Bool]
 (inv/can-fulfill? levels product-id qty)
 }|
 

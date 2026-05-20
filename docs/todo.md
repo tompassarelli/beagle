@@ -49,16 +49,16 @@ Corner agent mistakes mechanically. See [`docs/type-system.md`](type-system.md) 
 ### Doc consolidation
 
 - [x] Delete dead weight: `forms.md`, `cheatsheet-distilled.md`, `findings.md`, prompts stubs
-- [ ] Strip CLAUDE.md experiment results into experiments/report.md only
-- [ ] Single cheatsheet generation from Scribble
+- [x] Strip CLAUDE.md experiment results into experiments/report.md only
+- [x] Single cheatsheet generation from Scribble
 
 ### Doc generation / single source of truth
 
 - [x] Extend `beagle-docs-sync` to propagate canonical type names from `private/types.rkt`
 - [x] Add `CLAUDE.md` instructions to use `beagle-docs-sync` after type/form changes
-- [ ] Scribble as single source → generate markdown cheatsheets from Scribble docs
-- [ ] Template markers in markdown docs (`{{types}}`, `{{example}}`) expanded by docs-sync
-- [ ] Canonical example program in one place, referenced by README/cheatsheet/consumer docs
+- [x] Scribble as single source → `bin/beagle-gen-cheatsheet` renders Scribble → markdown cheatsheets
+- [x] `beagle-docs-sync` runs generator before propagating counts
+- [x] Canonical example program: `examples/demo.bclj` (defrecord, defunion, Result, match, multi-arity)
 
 ### Proper packaging
 

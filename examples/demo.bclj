@@ -1,0 +1,57 @@
+#lang beagle
+
+(ns beagle.demo)
+
+;; Records — typed data with constructors and accessors
+(defrecord Product [(name : String) (price : Int) (stock : Int)])
+
+;; Scalars — nominal types preventing same-type confusion
+(defscalar OrderId Int)
+(defscalar Quantity Int)
+
+;; Tagged unions — exhaustive match required
+(defunion (Result T E)
+  (Ok  [(value : T)])
+  (Err [(error : E)]))
+
+(defenum OrderStatus :pending :confirmed :shipped)
+
+;; Typed function with defunion return
+(defn find-product [(id : Int) (catalog : (Vec Product))] : (Result Product String)
+  (if-let [p (first (filterv (fn [item] (= (product-stock item) id)) catalog))]
+    (->Ok p)
+    (->Err "not found")))
+
+;; Match with exhaustive pattern coverage
+(defn describe-result [(r : (Result Product String))] : String
+  (match r
+    [(Ok product) (str "Found: " (product-name product))]
+    [(Err msg)    (str "Error: " msg)]))
+
+;; Flow-sensitive narrowing
+(defn safe-name [(x : String?)] : String
+  (if (nil? x) "unknown" x))
+
+;; Threading + higher-order functions
+(defn expensive-products [(products : (Vec Product)) (min-price : Int)] : (Vec String)
+  (->> products
+       (filterv (fn [p] (>= (product-price p) min-price)))
+       (mapv product-name)))
+
+;; Multi-arity
+(defn greet
+  ([(name : String)] : String
+    (str "Hello, " name))
+  ([(name : String) (title : String)] : String
+    (str "Hello, " title " " name)))
+
+;; Entry point
+(def catalog : (Vec Product)
+  [(->Product "Widget" 999 100)
+   (->Product "Gadget" 2499 50)
+   (->Product "Gizmo" 499 200)])
+
+(println (describe-result (find-product 100 catalog)))
+(println (greet "Alice"))
+(println (greet "Bob" "Dr."))
+(println (str "Expensive: " (expensive-products catalog 1000)))

@@ -9,7 +9,7 @@ Defines a typed record. Generates a constructor, typed accessors, and
 keyword-access support.
 
 @codeblock|{
-(defrecord Employee [(name : String) (rate : Long)])
+(defrecord Employee [(name : String) (rate : Int)])
 
 (def alice (->Employee "Alice" 95))
 (def n : String (employee-name alice))
@@ -18,9 +18,9 @@ keyword-access support.
 
 Generated functions:
 @itemlist[
-  @item{Constructor: @tt{->Employee} typed @tt{[String Long -> Employee]}}
+  @item{Constructor: @tt{->Employee} typed @tt{[String Int -> Employee]}}
   @item{Accessors: @tt{employee-name} typed @tt{[Employee -> String]},
-        @tt{employee-rate} typed @tt{[Employee -> Long]}}
+        @tt{employee-rate} typed @tt{[Employee -> Int]}}
   @item{Keyword access: @tt{(:name e)} infers field type when @tt{e} is
         a known @tt{Employee}}
 ]
@@ -42,7 +42,7 @@ The type checker verifies each field exists on the record type and
 the value type matches the field's declared type.
 
 @codeblock|{
-(defrecord Order [(status : String) (total : Long)])
+(defrecord Order [(status : String) (total : Int)])
 (defn confirm [(o : Order)] : Order
   (with o [:status "confirmed"]))
 }|}
@@ -51,15 +51,15 @@ the value type matches the field's declared type.
 
 @defform[(defscalar Name BackingType)]{
 Creates a nominal type wrapping a primitive. @tt{Amount}, @tt{Timestamp},
-and @tt{AccountId} can all be @tt{Long} at runtime but the type checker
+and @tt{AccountId} can all be @tt{Int} at runtime but the type checker
 treats them as incompatible.
 
 @codeblock|{
-(defscalar Amount Long)
+(defscalar Amount Int)
 (defscalar Email String)
 
 (def total (->Amount 5000))     ; wrap
-(def n (amount-value total))    ; unwrap: Long
+(def n (amount-value total))    ; unwrap: Int
 }|}
 
 @defform[#:id defscalar-refined (defscalar Name BackingType :where (pred) ...)]{
@@ -67,7 +67,7 @@ Refinement predicates add compile-time literal checking and runtime @tt{:pre}
 conditions.
 
 @codeblock|{
-(defscalar Percentage Long :where (>= 0) (<= 100))
+(defscalar Percentage Int :where (>= 0) (<= 100))
 (->Percentage 150)   ; compile-time error: 150 violates (<= 100)
 }|}
 
@@ -79,6 +79,53 @@ Useful for constraining keyword fields to a known set of values.
 
 @codeblock|{
 (defenum OrderStatus :placed :confirmed :paid :shipped :delivered :cancelled)
+}|}
+
+@section[#:tag "defunion"]{defunion (tagged unions)}
+
+@defform[(defunion Name Member ...)]{
+Declares a tagged union. Each member is a @tt{defrecord}. Combined with
+exhaustive @tt{match}, forgetting a case is a compile error.
+
+@codeblock|{
+(defrecord Circle [(radius : Float)])
+(defrecord Rect [(width : Float) (height : Float)])
+(defunion Shape Circle Rect)
+
+(defn area [(s : Shape)] : Float
+  (match s
+    [(Circle r) (* 3.14159 r r)]
+    [(Rect w h) (* w h)]))
+}|
+
+Members can be defined inline with field specs:
+
+@codeblock|{
+(defunion Shape
+  (Circle [(radius : Float)])
+  (Rect [(width : Float) (height : Float)]))
+}|}
+
+@subsection{Parametric defunion}
+
+@defform[#:id defunion-parametric (defunion (Name T ...) (Member [(field : Type)] ...) ...)]{
+Type-parameterized unions. Type variables from the union name are substituted
+into member fields:
+
+@codeblock|{
+(defunion (Result T E)
+  (Ok [(value : T)])
+  (Err [(error : E)]))
+
+(defn find-user [(id : Int)] : (Result User String)
+  (if (valid? id)
+    (->Ok (load-user id))
+    (->Err "not found")))
+
+;; Exhaustive match required:
+(match (find-user 42)
+  [(Ok user) (user-name user)]
+  [(Err msg) (str "Error: " msg)])
 }|}
 
 @section[#:tag "defprotocol"]{defprotocol}

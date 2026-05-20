@@ -1,7 +1,8 @@
 # beagle — one-page cheatsheet
 
 Everything an LLM needs to ground on. Single canonical reference. Optimized
-for being included as system context.
+for being included as system context. Generated from Scribble docs —
+edit `beagle-doc/scribblings/*.scrbl`, then run `bin/beagle-gen-cheatsheet`.
 
 ## File extensions
 
@@ -18,400 +19,1089 @@ Each file declares its target via extension:
 
 Extension and `#lang` header must match. Mismatch is a hard compile error.
 
-## File header
+## Getting Started
+
+### Installation
+
+Install beagle as a linked Racket package:
+
+`raco pkg install --link beagle-lib/ beagle-test/ beagle-doc/ beagle/`
+
+If using Nix, the flake provides a dev shell:
+
+`echo 'use flake' > .envrc && direnv allow`
+
+### File Structure
+
+A beagle source file uses the `#lang beagle` declaration:
 
 ```racket
-#lang beagle
-
-(ns my.namespace)              ; canonical: matches Clojure (ns ...)
-(define-mode strict)            ; default; or `dynamic` to skip type checks
-(require some.module :as mod)   ; imports all types/fns from another beagle module
-(declare-extern fn [Args -> Ret])  ; ONLY needed for Java interop or non-beagle fns
-(import java.io.File)          ; Java class import
+#lang beagle                                                                
+                                                                            
+(ns example.demo)              ; namespace (default: beagle.user)           
+(define-mode strict)           ; default; or dynamic to skip type checks    
+(require some.module :as mod)  ; import types/fns from another beagle module
+(declare-extern fn [A -> R])   ; only for Java interop or non-beagle fns    
+(import java.io.File)          ; Java class import                          
+                                                                            
+;; definitions follow...                                                    
+(def greeting : String "hello")                                             
+                                                                            
+(defn add [(x : Int) (y : Int)] : Int                                       
+  (+ x y))                                                                  
 ```
 
-For the JavaScript target, use `#lang beagle/js` and `.bjs` file extension:
+Meta forms (`ns`, `define-mode`, `require`, `declare-extern`,
+`define-macro`, `import`) can appear anywhere but conventionally go at
+the top.
+
+### Compiling and Checking
+
+* `beagle check .` — type-check all files in the current directory
+
+* `beagle build . –out .build/` — compile beagle to Clojure source
+
+* `beagle fix –apply .` — auto-fix mechanical type errors
+
+* `beagle sig fn-name .` — query a function’s type signature
+
+* `beagle repl` — interactive REPL with type checking
+
+* `beagle lsp` — LSP server for editor integration
+
+### Cross-Module Imports
+
+`(require module :as alias)` imports all typed definitions, records,
+scalars, and macros from another beagle module. No `declare-extern` is
+needed for cross-module beagle calls:
 
 ```racket
-#lang beagle/js
-
-(ns my.module)
-(define-mode strict)
-(require other.module :as mod)  ; → import * as mod from './other.module.js'
+(require inventory :as inv)                                                 
+                                                                            
+;; Type checker knows: inv/can-fulfill? : [(Vec StockLevel) Int Int -> Bool]
+(inv/can-fulfill? levels product-id qty)                                    
 ```
 
-**NOTE:** `(require module :as alias)` imports all typed defs, defns, records,
-scalars, and macros from the required beagle module. You do NOT need
-`declare-extern` for cross-module beagle calls — the types are imported
-automatically. Imported scalars give you both the constructor (`->Amount`)
-and accessor (`amount-value`) with full type checking.
+For non-beagle namespaces (Clojure libraries), use `declare-extern` for
+type-checked calls, or accept `Any`-typed pass-through.
 
-## Top-level forms
+### Claude Code Integration
+
+For a one-command setup with Claude Code (hooks, daemon, context):
+
+`beagle init --claude-code`
+
+This creates:
+
+* `.claude/beagle-context.md` — language reference for system context
+
+* `.claude/hooks/beagle-check.sh` — PostToolUse hook for instant type
+  feedback
+
+* `.claude/settings.json` — hook wiring
+
+* `CLAUDE.md` — project instructions
+
+Then start the daemon: `beagle-daemon start –watch .`
+
+Without `–claude-code`, `beagle init` only creates the context file.
+
+### Viewing Documentation
+
+After installation, view these docs locally:
+
+`raco docs beagle`
+
+## Definitions
+
+Top-level definitions bind names for use throughout a module. Type
+annotations are optional but recommended — the checker infers types from
+right-hand-side expressions when annotations are absent.
+
+### def
 
 ```racket
-(def NAME VALUE)
-(def NAME : Type VALUE)             ; typed
-(defonce NAME VALUE)                ; only binds if not already defined
-
-(defn NAME [PARAMS] BODY ...)
-(defn NAME [PARAMS] : ReturnType BODY ...)
-
-(define-macro safe   NAME (params) template)   ; expansion type-checked
-(define-macro unsafe NAME (params) template)   ; expansion typed as Any
-
-(defrecord Name [(field1 : Type) (field2 : Type)])  ; typed record
-
-(unsafe "raw clojure source")       ; emits verbatim; top-level OR expression
+(def name value)
 ```
 
-### `defrecord`
+Defines a top-level binding. The type is inferred from `value`.
 
 ```racket
-(defrecord Employee [(name : String) (rate : Int)])
+(def name : Type value)
 ```
 
-Emits Clojure `defrecord` plus generated typed accessors:
-- Constructor: `(->Employee "Alice" 95)` — typed `[String Int -> Employee]`
-- Accessors: `(employee-name e)`, `(employee-rate e)` — typed `[Employee -> String]` etc.
-
-Field syntax reuses wrapped param form `(name : Type)`. All fields must be typed.
-
-### `with` (record update)
+Defines a typed top-level binding. Raises a compile-time error if the
+inferred type of `value` is not compatible with `Type`.
 
 ```racket
-(with record [:field1 new-value1] [:field2 new-value2])
+(def greeting : String "hello")
+(def x 42)                     
 ```
 
-Typed record update. Compiles to `(assoc record :field1 new-value1 :field2 new-value2)`.
-Type checker validates: field exists on the record type, value matches field type.
-Use instead of positional constructors when updating a few fields on an existing record.
-
-### `defscalar` (nominal types)
+### defonce
 
 ```racket
-(defscalar Amount Int)
-(defscalar Timestamp Int)
-(defscalar AccountId Int)
-(defscalar Email String)
+(defonce name value)
 ```
 
-Creates a **nominal type** backed by a primitive. `Amount`, `Timestamp`, and
-`AccountId` are all `Int` at runtime, but the type checker treats them as
-incompatible — you cannot pass an `Amount` where a `Timestamp` is expected.
+Like `def` but only binds if `name` is not already defined. Emits
+Clojure’s `defonce`. Common for top-level state that should survive
+namespace reloads.
 
-Generated functions:
-- Constructor: `(->Amount 5000)` — typed `[Int -> Amount]`
-- Accessor: `(amount-value x)` — typed `[Amount -> Int]`
-
-Scalars are the primary defense against "same-type confusion" bugs where IDs,
-monetary values, and timestamps are all Int underneath. The checker flags:
-- Wrong scalar in constructor args: `(->Amount (timestamp-value ts))` — error
-- Mixed scalar arithmetic: `(+ (amount-value x) (timestamp-value y))` — note
-- Cross-scalar comparison: `(= (accountid-value a) (instrumentid-value b))` — note
-
-**Usage pattern:**
 ```racket
-(defscalar Price Int)
-(defscalar Quantity Int)
-
-(defn order-total [(price : Price) (qty : Quantity)] : Amount
-  (->Amount (* (price-value price) (quantity-value qty))))
+(defonce db-conn : Any (create-connection config))
 ```
 
-Cross-scalar multiplication (`price * qty = amount`) is valid — the checker
-only flags additive mixing and constructor mismatches.
+### defn
 
-**Refinement predicates (opt-in):**
 ```racket
-(defscalar Percentage Int :where (>= 0) (<= 100))
-(defscalar PositiveAmount Int :where (> 0))
+(defn name [params] body ...)
 ```
 
-`:where` adds compile-time and runtime validation:
-- **Compile-time:** `(->Percentage 150)` is a type error (literal violates `(<= 100)`)
-- **Runtime:** constructor emits Clojure `:pre` conditions for dynamic values
-- Predicates propagate across `require` boundaries
-- Ops: `>=`, `<=`, `>`, `<`, `=`, `not=`
-
-### `defenum`
+Defines a function with the given parameters and body. Parameters may be
+bare names or typed with `(name : Type)`.
 
 ```racket
-(defenum OrderStatus :placed :confirmed :paid :shipped :delivered :cancelled)
+(defn name [params] : ReturnType body ...)
 ```
 
-Declares an enum value set. Compiles to `(def OrderStatus-values #{:placed ...})`.
-
-### `defunion`
+Defines a function with an explicit return type. The checker verifies
+the body’s inferred type is compatible.
 
 ```racket
-;; simple (non-parametric)
-(defunion Shape
-  (Circle [(radius : Float)])
-  (Rect   [(w : Float) (h : Float)]))
-
-;; parametric — type parameters in parens after the name
-(defunion (Result T E)
-  (Ok  [(value : T)])
-  (Err [(error : E)]))
+(defn add [(x : Int) (y : Int)] : Int
+  (+ x y))                           
+                                     
+(defn id [x] x)                      
 ```
 
-Tagged union of record variants. Each member is a `defrecord` with a constructor
-(`->Ok`, `->Err`) and typed accessors (`ok-value`, `err-error`). In strict mode,
-`match` must cover all members or the checker reports the missing cases.
-
-Parametric unions accept type arguments: `(Result String OrderError)`.
-Match narrowing substitutes type params into field types, so `ok-value`
-returns `String` (not `T`) when the target type is `(Result String OrderError)`.
-
-Cross-module: `(require result)` imports the union, its members, constructors,
-and accessors. Exhaustive match and type-param narrowing work across modules.
-
-## Expression forms
+#### Multi-Arity
 
 ```racket
-(if cond then else)
-(if cond then)                      ; no else, returns nil
-(cond [test1 body1] [test2 body2] [true fallback])
-(cond test1 body1 test2 body2 :else fallback)  ; bare form (Clojure-style)
-(when cond body...)
-(when-not cond body...)             ; inverted when
-(when-let [name expr] body...)      ; bind + truthy test
-(if-let [name expr] then else)      ; bind + truthy branch
-(when-some [name expr] body...)     ; bind + non-nil test
-(if-some [name expr] then else)     ; bind + non-nil branch
-(if-not cond then else)             ; inverted if
-(do body1 body2 ... bodyN)          ; returns last
-(let [name1 value1 name2 value2 ...] body...)
-(loop [name1 init1 name2 init2 ...] body...)
-(recur arg1 arg2 ...)               ; tail-recurse back to loop
-(for [x coll :when pred :let [y (f x)]] body...)  ; list comprehension
-(dotimes [i n] body...)             ; counted iteration (i = 0..n-1)
-(condp pred test v1 r1 v2 r2 default)  ; predicate dispatch
-(comment forms...)                  ; returns nil, forms not evaluated
-(fn [PARAMS] body...)
-(fn [PARAMS] : ReturnType body...)
-(try body... (catch ExType e handler...) (finally cleanup...))
-(doseq [x coll ...] body...)       ; side-effecting iteration
-(case test val1 result1 val2 result2 default)
-(with-open [name expr] body...)     ; resource management (auto-close)
-(doto target (.method args) ...)    ; Java mutation chain
-(ClassName. args...)                ; Java constructor
-(:key map)                          ; keyword-as-function (map lookup)
-(:key map default)                  ; keyword lookup with default
-^{:key val} form                    ; metadata
-'datum                              ; quote
-(fmt "hello ${name}")               ; interpolated string → (str "hello " name)
-(fmt #<<TAG ... ${expr} ... TAG)    ; interpolated heredoc → (str ...)
-[item1 item2 ...]                   ; vector literal
-{k1 v1 k2 v2}                      ; map literal
-#{item1 item2}                      ; set literal
-(with record [:field value])        ; typed record update → assoc
-(fn-name arg1 arg2 ...)             ; function call
+(defn name (clause ...) ...)
 ```
 
-## Pattern matching
+Multi-arity function. Each clause is `([params] : ReturnType body ...)`.
 
 ```racket
-(match expr
-  [(RecordType f1 f2 ...) body...]     ; record type test + positional field destructuring
-  [{:key1 p1 :key2 p2} body...]        ; map pattern
-  [nil body...]                         ; nil literal
-  ["string" body...]                    ; literal
-  [42 body...]                          ; literal
-  [var-name body...]                    ; bind to variable
-  [_ body...])                          ; wildcard
-```
-
-Record patterns emit `instance?` checks + keyword field extraction. Bindings
-are positional: `(Rect w h)` binds `w` to `:width`, `h` to `:height` in
-declaration order.
-
-## Multi-arity functions
-
-```racket
-(defn greet
-  ([(name : String)] : String
-    (str "Hello, " name))
+(defn greet                                   
+  ([(name : String)] : String                 
+    (str "Hello, " name))                     
   ([(name : String) (title : String)] : String
-    (str "Hello, " title " " name)))
+    (str "Hello, " title " " name)))          
 ```
 
-Each arity clause has its own params and return type. The checker validates
-calls against all arities — wrong arity reports available options.
-
-## Top-level: protocols, multimethods, and type implementations
+### fn (anonymous function)
 
 ```racket
-(defprotocol Name
-  (method-name [params] : ReturnType)
-  (other-method [params]))
-
-(defmulti name dispatch-fn)
-(defmethod name dispatch-val [params] body...)
-
-(deftype Name [field1 field2]
-  ProtocolName
-  (method [this arg] body...))
-
-(extend-type TypeName
-  ProtocolName
-  (method [this arg] body...))
-
-(-> x (f) (g))                      ; thread-first
-(->> x (f) (g))                     ; thread-last
-(cond-> x test1 (f) test2 (g))     ; conditional thread-first
-(cond->> x test1 (f) test2 (g))    ; conditional thread-last
-(some-> x (f) (g))                  ; nil-safe thread-first
-(some->> x (f) (g))                 ; nil-safe thread-last
-(as-> x $ (f $) (g $ 1))           ; named thread
+(fn [params] body ...)
 ```
 
-## Parameter syntax — wrapped, bare, or destructured
+Anonymous function.
 
 ```racket
-[x y z]                             ; untyped (bare names)
-[(x : Int) (y : Int)]                ; wrapped with type
-[(x : Int) y]                        ; mix wrapped + bare
-[{:keys [name age]}]                ; map destructuring
-[{:keys [x y] :as point}]          ; destructure + bind whole map
-[[a b & rest]]                      ; sequential destructuring
+(fn [(x : Int)] (+ x 1))
 ```
 
-One canonical form: wrapped `(name : Type)`. The marker is `:` (single colon
-with spaces). No alternate markers, no inline form. AI-optimization: one
-idiom per concept.
-
-## Let binding syntax
+### let
 
 ```racket
-(let [x (some-fn arg)] ...)               ; type inferred from RHS (preferred)
-(let [(x : Int) 1 (y : Int) 2] ...)        ; explicit type (only when narrowing)
-(let [[a b] pair] ...)                     ; sequential destructuring
-(let [{:keys [name age]} person] ...)      ; map destructuring
+(let [name value ...] body ...)
 ```
 
-**Let bindings infer types automatically.** If `some-fn` returns `Int`, then
-`x` has type `Int` without annotation. Only annotate when you want to narrow
-(e.g., force a union to a specific branch).
+Local bindings. Types are inferred from right-hand-side expressions.
+Explicit type annotations are optional and only needed when narrowing.
+
+```racket
+(let [x 1 y 2] (+ x y))                                
+                                                       
+;; Explicit annotation only when narrowing:            
+(let [(area : Int) (* w h)] area)                      
+                                                       
+;; Destructuring:                                      
+(let [{:keys [name age]} person] (str name " is " age))
+(let [[x y & rest] coords] (+ x y))                    
+```
 
 ## Types
 
-| primitive | matches |
+### Primitives
+
+| **Type** | **Matches** |
 |---|---|
 | `String` | strings |
 | `Int` | integers |
 | `Float` | floats |
 | `Bool` | true/false |
-| `Keyword` | `:foo` style |
+| `Keyword` | :foo style keywords |
 | `Symbol` | quoted symbols |
-| `Nil` | `nil` |
-| `Any` | anything (escape) |
-| `Number` | `(U Int Float)` — use when either numeric type is valid |
+| `Nil` | nil |
+| `Any` | anything (escape hatch) |
+| `Number` | (U Int Float) — prefer Int or Float when known |
 
 One canonical name per type. JVM names (`Long`, `Double`, `Boolean`) are
-accepted as `#lang beagle/clj` sugar but resolve to `Int`, `Float`, `Bool`.
+accepted as compatibility sugar in `#lang beagle/clj` but resolve to the
+canonical names above.
 
-**Prefer `Int` or `Float` when you know which.** `Number` is for genuinely
-polymorphic numeric code (arithmetic helpers, aggregation). If a function
-always returns an integer, annotate `Int` — the narrower type catches more
-bugs at call sites.
+### Function Types
 
-Function types:
-- `[A B -> R]`                   fixed arity
-- `[A & T -> R]`                 variadic (zero+ extra `T` args)
-- `[-> R]`                       nullary
+* `[A B -> R]` — fixed-arity function taking `A` and `B`, returning `R`
 
-Parametric:
-- `(Vec T)`, `(List T)`, `(Set T)`, `(Map K V)`
+* `[A & T -> R]` — variadic: one `A` then zero or more `T` args
 
-Union:
-- `(U String Int)` — value is one of the alternatives
+* `[-> R]` — nullary function
 
-Polymorphic:
-- `(forall [T] [T -> T])` — unbounded type variable
-- `(forall [(T <: Pet)] [T -> String])` — bounded: T must satisfy Pet
-- `(forall [(T <: (U String Int))] [T -> String])` — union bound
+### Parametric Types
 
-Nullable (sugar for `(U T Nil)`):
-- `String?` — shorthand for `(U String Nil)`
-- `Product?` — shorthand for `(U Product Nil)`
+* `(Vec T)` — vector of `T`
 
-## Macros
+* `(List T)` — list of `T`
+
+* `(Set T)` — set of `T`
+
+* `(Map K V)` — map from `K` to `V`
+
+* `(Promise T)` — promise resolving to `T`
+
+### Union Types
+
+`(U A B C)` — value is one of the alternatives.
+
+### Nullable Sugar
+
+`String?` is shorthand for `(U String Nil)`. Works with any type:
+`Product?` means `(U Product Nil)`.
+
+### Type Narrowing
+
+Flow-sensitive narrowing in `if`/`cond`/`when` via predicates like
+`nil?`, `some?`, `string?`, `=`, `not`.
 
 ```racket
-(define-macro safe inc1 (x)
-  (+ x 1))
-
-(define-macro safe call-with (f & args)
-  (f (splice args)))               ; (splice rest) inlines the &rest list
-
-(define-macro unsafe wild (form)
-  (do (println "trace") form))     ; expansion typed Any
+(defn safe-name [(x : String?)] : String                                   
+  (if (nil? x) "unknown" x))   ; x is narrowed to String in the then branch
 ```
 
-- `safe`: expansion re-validated by checker
-- `unsafe`: expansion's result type widened to `Any` (boundary)
-- `&rest-name` in params: collects remaining args into a list
-- `(splice rest-name)` in template: inlines the list at that position
-- `safe` macros use gensym-hygienic substitution; `unsafe` macros use naive substitution
+### Polymorphic Types
 
-## Pre-typed stdlib (~696 functions)
+`(forall [A] [A -> A])` introduces type variables for generic functions.
 
-**Math** (variadic Any): `+`, `-`, `*`, `/`, `mod`, `quot`, `rem`, `inc`,
-`dec`, `min`, `max`, `abs`
+#### Bounded Polymorphism
 
-**Comparison**: `=`, `not=`, `<`, `>`, `<=`, `>=`, `identical?`, `compare`,
-`zero?`, `pos?`, `neg?`, `even?`, `odd?`
+Type variables can be constrained with upper bounds using `<:`:
 
-**Bool**: `not`, `and`, `or`, `true?`, `false?`, `nil?`, `some?`
+```racket
+(forall [(T <: HasName)] [T -> String])            
+(forall [(T <: (U Circle Rectangle))] [T -> Float])
+```
 
-**Collections**: `first`, `second`, `last`, `rest`, `next`, `nth`, `get`,
-`get-in`, `count`, `empty?`, `seq`, `conj`, `cons`, `concat`, `reverse`,
-`distinct`, `sort`, `into`, `vec`, `vector`, `list`, `hash-map`, `set`,
-`hash-set`, `keys`, `vals`, `assoc`, `dissoc`, `update`, `merge`,
-`contains?`, `find`
+Without bounds, `T` accepts anything. With `<:`, the checker verifies
+the inferred type satisfies the bound.
 
-**Higher-order**: `map`, `mapv`, `filter`, `filterv`, `remove`, `reduce`,
-`apply`, `comp`, `partial`, `every?`, `some`
+### Let Binding Inference
 
-**Sequence gen**: `range`, `repeat`, `iterate`, `take`, `drop`, `take-while`,
-`drop-while`, `partition`, `interpose`
+Let bindings infer types automatically from the right-hand side:
 
-**Strings**: `str`, `name`, `keyword`, `symbol`, `subs`, `pr-str`
+```racket
+(let [x (get-product id)] ...)     ; x : Product (inferred)            
+(let [{:keys [name]} product] ...) ; name : String (from record fields)
+```
 
-**Predicates**: `string?`, `number?`, `integer?`, `keyword?`, `symbol?`,
-`map?`, `vector?`, `list?`, `set?`, `coll?`, `sequential?`, `fn?`
+Explicit annotations are only needed when narrowing:
 
-**IO**: `println`, `print`, `pr`, `prn`, `newline`
+```racket
+(let [(area : Int) (* w h)] area)
+```
 
-**Errors**: `ex-info`, `ex-data`, `throw`
+### Collection Type Inference
 
-**Misc**: `identity`, `constantly`
+Collection literals infer element types from their contents:
 
-**Also typed** (~607 total): transducers (`map`/`filter`/`cat`/`halt-when`),
-atoms (`atom`/`swap!`/`reset!`/`deref`), `clojure.string/*`,
-`clojure.set/*`, `clojure.walk/*`, `clojure.edn/read-string`,
-regex (`re-find`/`re-matches`/`re-seq`/`re-pattern`), type coercion
-(`int`/`long`/`double`/`float`/`char`/`boolean`/`bigint`/`bigdec`),
-30+ type predicates, array ops, 20+ Java instance/static methods, and more.
+```racket
+[(->Product 1 "A") (->Product 2 "B")]  ; (Vec Product), not (Vec Any)
+{:a 1 :b 2}                             ; (Map Keyword Int)          
+#{:x :y :z}                             ; (Set Keyword)              
+```
 
-**Intentionally omitted** (~400 clojure.core functions not typed):
+## Records, Scalars, and Enums
 
-| category | why excluded |
-|---|---|
-| Agents (`agent`, `send`, `send-off`, `await`, ...) | Concurrency primitives — side-effectful, runtime-only |
-| Refs/STM (`ref`, `dosync`, `alter`, `commute`, ...) | Transaction machinery — no static model |
-| Vars (`binding`, `alter-var-root`, `with-redefs`, ...) | Dynamic rebinding — breaks static assumptions |
-| Namespaces (`ns-resolve`, `find-ns`, `intern`, ...) | Metaprogramming — runtime reflection |
-| Classloading (`gen-class`, `gen-interface`, `compile`, ...) | JVM internals — not relevant to application code |
-| Eval/read (`eval`, `read`, `load-string`, ...) | Dynamic code execution — untypeable |
-| Concurrency (`locking`, `pmap`, `seque`, ...) | Threading primitives — use `(unsafe ...)` |
-| Auto-promote variants (`+'`, `*'`, `incN`, ...) | Overflow-safe math — redundant with `+`, `*` |
+### defrecord
 
-These are deliberate omissions, not coverage gaps. `bin/gen-stdlib-types`
-generates zero new entries — the typeable surface is fully covered.
+```racket
+(defrecord Name [(field : Type) ...])
+```
 
-For anything omitted, use `(declare-extern name TypeExpr)` or `(unsafe "...")`.
+Defines a typed record. Generates a constructor, typed accessors, and
+keyword-access support.
+
+```racket
+(defrecord Employee [(name : String) (rate : Int)])  
+                                                     
+(def alice (->Employee "Alice" 95))                  
+(def n : String (employee-name alice))               
+(:name alice)  ; returns String via keyword inference
+```
+
+Generated functions:
+
+* Constructor: `->Employee` typed `[String Int -> Employee]`
+
+* Accessors: `employee-name` typed `[Employee -> String]`,
+  `employee-rate` typed `[Employee -> Int]`
+
+* Keyword access: `(:name e)` infers field type when `e` is a known
+  `Employee`
+
+Compiles to Clojure `defrecord` plus generated accessor functions:
+
+```racket
+;; Generated Clojure:                              
+(defrecord Employee [name rate])                   
+(defn ->Employee [name rate] (Employee. name rate))
+(defn employee-name [r] (:name r))                 
+(defn employee-rate [r] (:rate r))                 
+```
+
+### with (record update)
+
+```racket
+(with record [:field value] ...)
+```
+
+Typed record update. Compiles to `(assoc record :field1 val1 ...)`. The
+type checker verifies each field exists on the record type and the value
+type matches the field’s declared type.
+
+```racket
+(defrecord Order [(status : String) (total : Int)])
+(defn confirm [(o : Order)] : Order                
+  (with o [:status "confirmed"]))                  
+```
+
+### defscalar (nominal types)
+
+```racket
+(defscalar Name BackingType)
+```
+
+Creates a nominal type wrapping a primitive. `Amount`, `Timestamp`, and
+`AccountId` can all be `Int` at runtime but the type checker treats them
+as incompatible.
+
+```racket
+(defscalar Amount Int)                       
+(defscalar Email String)                     
+                                             
+(def total (->Amount 5000))     ; wrap       
+(def n (amount-value total))    ; unwrap: Int
+```
+
+```racket
+(defscalar Name BackingType :where (pred) ...)
+```
+
+Refinement predicates add compile-time literal checking and runtime
+`:pre` conditions.
+
+```racket
+(defscalar Percentage Int :where (>= 0) (<= 100))               
+(->Percentage 150)   ; compile-time error: 150 violates (<= 100)
+```
+
+### defenum
+
+```racket
+(defenum Name :value ...)
+```
+
+Declares an enum value set. Compiles to `(def Name-values #{:value1
+...})`. Useful for constraining keyword fields to a known set of values.
+
+```racket
+(defenum OrderStatus :placed :confirmed :paid :shipped :delivered :cancelled)
+```
+
+### defunion (tagged unions)
+
+```racket
+(defunion Name Member ...)
+```
+
+Declares a tagged union. Each member is a `defrecord`. Combined with
+exhaustive `match`, forgetting a case is a compile error.
+
+```racket
+(defrecord Circle [(radius : Float)])              
+(defrecord Rect [(width : Float) (height : Float)])
+(defunion Shape Circle Rect)                       
+                                                   
+(defn area [(s : Shape)] : Float                   
+  (match s                                         
+    [(Circle r) (* 3.14159 r r)]                   
+    [(Rect w h) (* w h)]))                         
+```
+
+Members can be defined inline with field specs:
+
+```racket
+(defunion Shape                             
+  (Circle [(radius : Float)])               
+  (Rect [(width : Float) (height : Float)]))
+```
+
+#### Parametric defunion
+
+```racket
+(defunion (Name T ...) (Member [(field : Type)] ...) ...)
+```
+
+Type-parameterized unions. Type variables from the union name are
+substituted into member fields:
+
+```racket
+(defunion (Result T E)                             
+  (Ok [(value : T)])                               
+  (Err [(error : E)]))                             
+                                                   
+(defn find-user [(id : Int)] : (Result User String)
+  (if (valid? id)                                  
+    (->Ok (load-user id))                          
+    (->Err "not found")))                          
+                                                   
+;; Exhaustive match required:                      
+(match (find-user 42)                              
+  [(Ok user) (user-name user)]                     
+  [(Err msg) (str "Error: " msg)])                 
+```
+
+### defprotocol
+
+```racket
+(defprotocol Name (method-name [params] : ReturnType) ...)
+```
+
+Defines a protocol with typed method signatures.
+
+```racket
+(defprotocol Greetable            
+  (greet [(self : Any)] : String))
+```
+
+### deftype
+
+```racket
+(deftype Name [fields ...] ProtocolName (method [params] body ...) ...)
+```
+
+Defines a type implementing one or more protocols.
+
+```racket
+(deftype Counter [n]
+  IDeref            
+  (deref [this] n)) 
+```
+
+### extend-type
+
+```racket
+(extend-type TypeName ProtocolName (method [params] body ...) ...)
+```
+
+Extends an existing type with protocol implementations.
+
+```racket
+(extend-type String                   
+  Greetable                           
+  (greet [this] (str "Hello, " this)))
+```
+
+### defmulti / defmethod
+
+```racket
+(defmulti name dispatch-fn)
+```
+
+Defines a multimethod with the given dispatch function.
+
+```racket
+(defmethod name dispatch-val [params] body ...)
+```
+
+Adds an implementation for a dispatch value.
+
+```racket
+(defmulti area :shape)             
+(defmethod area :circle [m]        
+  (* 3.14 (:radius m) (:radius m)))
+```
+
+## Control Flow
+
+### if
+
+```racket
+(if cond then else)
+```
+
+Conditional. Type narrows in branches when condition uses `nil?`,
+`some?`, etc.
+
+```racket
+(if (> x 0) "positive" "non-positive")
+```
+
+```racket
+(if cond then)
+```
+
+Without else branch, returns `Nil` when condition is false.
+
+### if-not
+
+```racket
+(if-not cond then else)
+```
+
+Inverted conditional. Expands to `(if (not cond) then else)`.
+
+```racket
+(if-not (authorized? user) "denied" "allowed")
+```
+
+### cond
+
+```racket
+(cond [test body ...] ...)
+```
+
+Multi-branch conditional (bracketed style).
+
+```racket
+(cond                  
+  [(< n 0) "negative"] 
+  [(= n 0) "zero"]     
+  [(> n 0) "positive"])
+```
+
+Also supports flat Clojure-style: `(cond test1 body1 test2 body2 :else
+fallback)`.
+
+### condp
+
+```racket
+(condp pred test value result ... default)
+```
+
+Predicate-based dispatch. Tests `(pred value test)` for each clause. An
+odd trailing form is the default.
+
+```racket
+(condp = color 
+  :red   "stop"
+  :green "go"  
+  "unknown")   
+```
+
+### when
+
+```racket
+(when cond body ...)
+```
+
+Evaluates body when condition is truthy. Returns `Nil` otherwise.
+
+```racket
+(when (> x 0)         
+  (println "positive")
+  x)                  
+```
+
+### when-not
+
+```racket
+(when-not cond body ...)
+```
+
+Evaluates body when condition is falsy. Expands to `(when (not cond)
+body...)`.
+
+```racket
+(when-not (empty? items)
+  (process items))      
+```
+
+### when-let
+
+```racket
+(when-let [name expr] body ...)
+```
+
+Binds `name` to the result of `expr`; evaluates body if truthy.
+
+```racket
+(when-let [user (find-user id)]
+  (println (user-name user)))  
+```
+
+### if-let
+
+```racket
+(if-let [name expr] then else)
+```
+
+Binds `name` to the result of `expr`. If truthy, evaluates `then` with
+the binding in scope. Otherwise evaluates `else`.
+
+```racket
+(if-let [user (find-user id)]
+  (user-name user)           
+  "anonymous")               
+```
+
+### when-some / if-some
+
+```racket
+(when-some [name expr] body ...)
+```
+
+Like `when-let` but tests for non-nil (not truthiness). `false` passes.
+
+```racket
+(when-some [val (get config :debug)]
+  (enable-debugging val))           
+```
+
+```racket
+(if-some [name expr] then else)
+```
+
+Like `if-let` but tests for non-nil.
+
+```racket
+(if-some [port (get config :port)]
+  (start-server port)             
+  (start-server 8080))            
+```
+
+### case
+
+```racket
+(case test value result ... default)
+```
+
+Constant-time dispatch. An odd trailing form is the default.
+
+```racket
+(case color    
+  :red   "stop"
+  :green "go"  
+  "unknown")   
+```
+
+### match
+
+```racket
+(match expr [pattern body ...] ...)
+```
+
+Pattern matching with type narrowing.
+
+Patterns:
+
+* `(RecordName b1 b2 ...)` — type test + positional field destructuring
+
+* `{:key1 pat1 :key2 pat2}` — map pattern
+
+* `nil`, `"str"`, `42` — literals
+
+* `name` — bind to variable
+
+* `_` — wildcard
+
+```racket
+(defrecord Circle [(radius : Float)])              
+(defrecord Rect [(width : Float) (height : Float)])
+                                                   
+(match shape                                       
+  [(Circle r) (* 3.14159 r r)]                     
+  [(Rect w h) (* w h)]                             
+  [_ 0.0])                                         
+```
+
+### try / catch / finally
+
+```racket
+(try body ... (catch ExType name handler ...) (finally cleanup ...))
+```
+
+Exception handling. Multiple `catch` clauses allowed. `finally` is
+optional.
+
+```racket
+(try                         
+  (Long/parseLong s)         
+  (catch Exception e         
+    (println (.getMessage e))
+    -1)                      
+  (finally                   
+    (println "done")))       
+```
+
+### do
+
+```racket
+(do body ...)
+```
+
+Sequences expressions; returns the last value. Used where a single
+expression is expected but multiple side effects are needed.
+
+```racket
+(do                    
+  (println "saving...")
+  (save-record! rec)   
+  (println "done")     
+  rec)                 
+```
+
+### comment
+
+```racket
+(comment forms ...)
+```
+
+Ignores all forms and returns `nil`. Used for development-time scratch
+code and inline examples. The forms are not evaluated or type-checked.
+
+```racket
+(comment                   
+  (start-server 8080)      
+  (run-tests)              
+  (println "scratch area"))
+```
+
+## Iteration and Comprehensions
+
+Beagle supports Clojure’s full iteration toolkit: list comprehensions,
+side-effecting loops, counted iteration, and tail-recursive
+`loop`/`recur`.
+
+### for
+
+```racket
+(for [name coll ... :when pred :let [name val ...]] body ...)
+```
+
+List comprehension. Binds each name to successive values from its
+collection. Optional `:when` clauses filter, `:let` clauses bind
+intermediate values. Destructuring works in bindings.
+
+Returns `(Vec BodyType)`.
+
+```racket
+(for [x (range 5) y (range x) :when (even? y)]                    
+  [x y])                                                          
+                                                                  
+;; with :let                                                      
+(for [item items :let [price (item-price item) tax (* price 0.1)]]
+  (+ price tax))                                                  
+                                                                  
+;; with destructuring                                             
+(for [[eid name email] contacts]                                  
+  (->Contact eid name email))                                     
+```
+
+### doseq
+
+```racket
+(doseq [name coll ...] body ...)
+```
+
+Side-effecting iteration. Same binding syntax as `for` (multiple
+bindings, `:when` and `:let` clauses). Returns `nil`.
+
+```racket
+(doseq [x items :when (pos? x)]
+  (println x))                 
+```
+
+### dotimes
+
+```racket
+(dotimes [name count] body ...)
+```
+
+Counted iteration. Binds `name` to `0`, `1`, ..., `count-1`. The binding
+is typed as `Int`. Returns `nil`.
+
+```racket
+(dotimes [i 10]                  
+  (println (str "iteration " i)))
+```
+
+### loop / recur
+
+```racket
+(loop [name init ...] body ...)
+```
+
+Tail-recursive loop. Bindings work like `let`; `recur` jumps back with
+new values.
+
+```racket
+(loop [acc 1 n 5]                             
+  (if (<= n 1) acc (recur (* acc n) (dec n))))
+```
+
+### Threading Macros
+
+```racket
+(-> value forms ...)
+```
+
+Thread-first: inserts value as first argument.
+
+```racket
+(->> value forms ...)
+```
+
+Thread-last: inserts value as last argument.
+
+```racket
+(cond-> value test form ...)
+```
+
+Conditional thread-first.
+
+```racket
+(cond->> value test form ...)
+```
+
+Conditional thread-last.
+
+```racket
+(some-> value forms ...)
+```
+
+Nil-safe thread-first (short-circuits on nil).
+
+```racket
+(some->> value forms ...)
+```
+
+Nil-safe thread-last.
+
+```racket
+(as-> value name forms ...)
+```
+
+Named thread: binds `name` to the intermediate value at each step.
+
+```racket
+(-> person :name (str/upper-case))                     
+(->> items (filter even?) (map inc) (reduce +))        
+                                                       
+(cond-> order                                          
+  paid?     (assoc :status :paid)                      
+  shipped?  (assoc :status :shipped))                  
+                                                       
+(some-> user :address :city)                           
+                                                       
+(as-> data $ (map inc $) (filter even? $) (reduce + $))
+```
+
+## Java Interop and Data Literals
+
+### Instance Methods
+
+```racket
+(.method target args ...)
+```
+
+Java instance method call. The receiver is typed when declared via
+`declare-extern` or the stdlib.
+
+```racket
+(.exists (io/file path)) 
+(.startsWith name "http")
+(.trim input)            
+```
+
+### Static Methods
+
+```racket
+(Class/staticMethod args ...)
+```
+
+Java static method call.
+
+```racket
+(System/getProperty "user.home")
+(Long/parseLong "42")           
+(Math/sqrt 2.0)                 
+```
+
+### Constructor Calls
+
+```racket
+(ClassName. args ...)
+```
+
+Java constructor. The trailing dot is the marker.
+
+```racket
+(java.io.File. "/tmp/test")
+(StringBuilder. "init")    
+```
+
+### Dynamic Vars
+
+Symbols wrapped in `*earmuffs*` are dynamic var references:
+
+```racket
+(first *command-line-args*)
+```
+
+### with-open
+
+```racket
+(with-open [name expr ...] body ...)
+```
+
+Binds resources, evaluates body, then closes all bindings (via
+`java.io.Closeable`).
+
+```racket
+(with-open [rdr (clojure.java.io/reader "data.csv")]
+  (doall (line-seq rdr)))                           
+```
+
+### doto
+
+```racket
+(doto target forms ...)
+```
+
+Evaluates `target`, threads it as first argument through each form,
+returns the original target. Used for Java mutation chains.
+
+```racket
+(doto (java.util.HashMap.)
+  (.put "a" 1)            
+  (.put "b" 2))           
+```
+
+### import
+
+```racket
+(import Fully.Qualified.Class)
+```
+
+Emits `(:import [package ClassName])` in the generated ns form.
+
+```racket
+(import java.io.File)     
+(import java.time.Instant)
+```
+
+### declare-extern
+
+```racket
+(declare-extern name TypeExpr)
+```
+
+Declares the type of a function not available via beagle source import.
+**Only needed for** Java interop and non-beagle Clojure namespaces.
+**Not needed for** cross-module beagle calls.
+
+```racket
+(declare-extern .getAbsolutePath [Any -> String])     
+(declare-extern System/getProperty [String -> String])
+```
+
+### Vector Literals
+
+```racket
+[1 2 3]                                        
+[(->Employee "Alice" 95) (->Employee "Bob" 80)]
+```
+
+Element types are inferred: `[(->Product 1 "A") ...]` gives `(Vec
+Product)`.
+
+### Map Literals
+
+```racket
+{:name "Tom" :age 30}
+```
+
+### Set Literals
+
+```racket
+#{1 2 3}   
+#{:a :b :c}
+```
+
+### Keyword-as-Function
+
+```racket
+(:key target)
+```
+
+Keyword lookup. If `target` is a typed record, the checker infers the
+field type.
+
+```racket
+(:key target default)
+```
+
+Keyword lookup with a default value.
+
+```racket
+(:name person)          ; String if person is typed record
+(:age config "unknown") ; with default                    
+```
+
+### Regex Literals
+
+`#"pattern"` — Clojure regex literal, emitted verbatim.
+
+### Metadata
+
+```racket
+(^ map target)
+```
+
+Attaches Clojure metadata to the following form. `^:keyword` is sugar
+for `^{:keyword true}`.
+
+```racket
+^{:key (str prefix "-" idx)} [item-view item]
+^:private (def internal-state (atom {}))     
+```
+
+### Quote
+
+Standard Lisp quoting. Quoted forms are not evaluated.
+
+```racket
+'(a b c)    ; quoted list  
+'foo        ; quoted symbol
+```
+
+### unsafe
+
+```racket
+(unsafe "raw-clojure-source")
+```
+
+Emits the literal string verbatim into the Clojure output. Works at
+top-level and in expression position. Typed as `Any`. Use sparingly —
+this is the escape hatch for Clojure features beagle doesn’t cover.
+
+```racket
+(unsafe "(defn helper [x] (some-clj-thing x))")
+```
 
 ## Clojure namespace interop
 
@@ -463,8 +1153,6 @@ File extension: `.bjs`. Use `#lang beagle/js`.
 
 ### Identifier mangling
 
-Lisp identifiers are mangled to valid JS names:
-
 | character | replacement |
 |---|---|
 | `-` | `_` |
@@ -481,12 +1169,11 @@ Example: `valid-email?` → `valid_email_p`, `reset!` → `reset_bang`
 ```
 
 Emits ES module `import` statements. All beagle cross-module type
-resolution works identically — `require` imports types, records, and
-function signatures for the checker regardless of target.
+resolution works identically.
 
 ## SQL target (`#lang beagle/sql`)
 
-File extension: `.bgl`. Use `#lang beagle/sql` or `(define-target sql)`.
+File extension: `.bsql`. Use `#lang beagle/sql`.
 
 ### Schema declarations
 
@@ -534,59 +1221,158 @@ File extension: `.bgl`. Use `#lang beagle/sql` or `(define-target sql)`.
 - Column existence: column references (`p.id`) validated against declared schema
 - Target gating: SQL forms rejected in non-SQL targets at compile time
 
-### Aggregates
+## Macros
 
-`count`, `sum`, `avg`, `min`, `max` with optional `:as alias`:
+Beagle macros are template-based: they substitute parameters into a
+template form at expansion time. The `safe`/`unsafe` distinction
+controls whether the expanded code is re-validated by the type checker.
 
-```racket
-(select [(count id) (avg price :as avg_price)] (from products))
-```
-
-## Regex literals
-
-`#"pattern"` — Clojure regex literal. Emits as `#"pattern"` in output.
-Supported natively in beagle source. Common patterns:
+### define-macro
 
 ```racket
-#"\s+"        ; whitespace
-#"\|"         ; pipe
-#","          ; comma
-#"\d+"        ; digits
+(define-macro safe name (params) template)
 ```
 
-## Java interop
+Defines a macro whose expansion is type-checked normally.
 
 ```racket
-(.method target args...)              ; instance method
-(Class/staticMethod args...)          ; static method
-*dynamic-var*                         ; Clojure dynamic var
+(define-macro unsafe name (params) template)
 ```
 
-Type these with `declare-extern` (receiver is first param for methods):
+Defines a macro whose expansion is typed as `Any` (escape boundary).
+
 ```racket
-(declare-extern .exists [Any -> Bool])
-(declare-extern System/getProperty [String -> String])
-(declare-extern *command-line-args* (Vec String))
+(define-macro safe inc1 (x)            
+  (+ x 1))                             
+                                       
+(define-macro safe call-with (f & args)
+  (f (splice args)))                   
+                                       
+(define-macro unsafe debug-call (form) 
+  (do (println "trace") form))         
 ```
 
-Pre-typed in stdlib: `.exists`, `.trim`, `.startsWith`, `.endsWith`,
-`.contains`, `.toLowerCase`, `.toUpperCase`, `.mkdirs`, `.getParent`,
-`.getParentFile`, `.getName`, `.getPath`, `.length`, `.toString`,
-`System/getProperty`, `System/getenv`, `System/currentTimeMillis`,
-`Math/abs`, `Math/pow`, `Math/sqrt`, `Math/floor`, `Math/ceil`,
-`Integer/parseInt`, `Long/parseLong`, `Double/parseDouble`,
-`*command-line-args*`.
+* `safe`: expansion re-validated by type checker
 
-### Coverage gaps (known, not yet implemented)
+* `unsafe`: expansion’s result type widened to `Any`
 
-| Gap | What breaks | Future fix |
-|---|---|---|
-| Method overloading | Only one signature per `.method`; second overload needs separate `declare-extern` | Union of function types |
-| Receiver type dispatch | `.exists` typed globally, not per-class | `File/.exists` syntax (Clojure 1.12+) |
-| Static field access | `Math/PI` as bare symbol returns Any | `declare-extern Math/PI Float` works now |
-| Generic type params | `(.get (HashMap) key)` can't track value type | Java generics model |
-| Overload resolution | Multiple Java methods with same name, different types | Essentially javac |
-| Reflection / dynamic dispatch | Runtime-only class resolution | Impossible statically |
+* `& rest-name` in params: collects remaining args into a list
+
+* `(splice rest-name)` in template: inlines the list at that position
+
+* `safe` macros use gensym-hygienic substitution; `unsafe` macros use
+  naive substitution
+
+## Tools
+
+### Unified CLI
+
+The `beagle` command wraps all common operations:
+
+* `beagle check .` — batch type-check all files
+
+* `beagle build . –out DIR` — batch compile to Clojure
+
+* `beagle fix –dry-run|–apply .` — auto-fix type errors
+
+* `beagle sig FN .` — query function signature
+
+* `beagle lsp` — LSP server (stdio transport)
+
+* `beagle repl` — typed REPL with persistent environment
+
+* `beagle init` — bootstrap a new beagle project
+
+### Reactive Daemon
+
+The daemon caches ASTs and watches files for changes, providing
+near-instant re-checking on every save:
+
+* `beagle-daemon start –watch DIR` — file watcher, re-checks on every
+  save (~100ms)
+
+* `beagle-daemon query check-enriched DIR` — synchronous type check +
+  enriched context
+
+* `beagle-daemon query check-result FILE` — cached result (instant)
+
+### Query Tools
+
+Query tools expose the type system as an API. Instead of reading source
+to understand a codebase, ask the type system directly:
+
+* `beagle-sig FN FILE-OR-DIR` — function’s type signature
+
+* `beagle-fields RECORD FILE-OR-DIR` — record fields + accessors
+
+* `beagle-callers FN FILE-OR-DIR` — find all call sites
+
+* `beagle-provides FILE-OR-DIR` — list module exports with types
+
+* `beagle-impact FN FILE-OR-DIR` — callers + impact of signature change
+
+### MCP Server
+
+Exposes beagle’s type system as tools over the Model Context Protocol,
+so any MCP-compatible agent gets type-aware code intelligence:
+
+`beagle mcp`
+
+Tools: `beagle_sig`, `beagle_fields`, `beagle_callers`,
+`beagle_provides`, `beagle_impact`, `beagle_check`,
+`beagle_check_enriched`, `beagle_build`, `beagle_expand`. Delegates to a
+running daemon for speed; falls back to direct CLI invocation.
+
+Requires the `mcp` Python package (`pip install mcp`).
+
+### Repair Toolchain
+
+Automated bug-finding and fixing tools that use oracle-based behavioral
+comparison, tracing, and cross-evidence correlation:
+
+* `beagle-repair SOURCE VERIFY [–auto] [–emit-patch]` — unified repair
+  pipeline with cross-evidence correlation
+
+* `beagle-trace BUILD VERIFY [–focus FN]` — instrumented tracing
+
+* `beagle-specfix BUILD VERIFY` — oracle-guided speculative fix
+
+* `beagle-cascade SOURCE VERIFY –from-failures` — root-cause analysis
+
+* `beagle-blame BUILD VERIFY` — ratio-based fault hints
+
+* `beagle-oracle GOLDEN [–diff MODIFIED]` — behavioral oracle synthesis
+
+* `beagle-proptest SOURCE [–run] [–diff DIR]` — property + differential
+  testing
+
+### Other Tools
+
+Individual tools for specific tasks, including batch compilation, syntax
+checking, mutation testing, and distributed tracing:
+
+* `beagle-build SOURCE.rkt [OUT.clj]` — single-file compile
+
+* `beagle-build-all FILES [–out DIR]` — batch compile (9x vs sequential)
+
+* `beagle-check SOURCE.rkt` — single-file type check
+
+* `beagle-check-all FILES` — batch type check (10x vs sequential)
+
+* `beagle-expand SOURCE.rkt` — show post-macro expansion
+
+* `beagle-syntax FILES` — fast paren/bracket balance check (<200ms)
+
+* `beagle-verify-enriched BUILD VERIFY` — verify + auto-diagnose
+
+* `beagle-muttest BUILD VERIFY` — mutation testing
+
+* `beagle-dtrace instrument|collect|view|blame|graph|cascade` —
+  distributed tracing
+
+* `beagle-smap extract|compose` — source map generation
+
+* `beagle-docs-sync` — propagate mechanical facts across docs
 
 ## Escape hatches
 
@@ -614,9 +1400,6 @@ Set `BEAGLE_ERROR_FORMAT=json` for structured output. JSON fields:
 `expected`, `actual`, `arg-position`, `arg-expr`, `arg-signature`,
 `suggestions[]` (with `replace`/`with`/`signature`), `help`.
 
-Error kinds: `arity`, `type-mismatch`, `return-type`, `def-type`,
-`let-binding`, `compile-error`.
-
 Human-readable output (default) uses Rust-style formatting:
 ```
 error[E002]: call to <=: arg 1 expected Int, got String
@@ -628,78 +1411,6 @@ error[E002]: call to <=: arg 1 expected Int, got String
    = note: campaign-name : [Campaign -> String]
    = help: did you mean campaign-start-date? (campaign-start-date : [Campaign -> Int])
 ```
-
-### Provenance notes (scalar lint)
-
-These appear alongside type errors and indicate bugs with high precision:
-
-```
-note: scalar provenance: ->Amount receives value derived from Price
-  --> orders.rkt:40
-  = Amount wraps an Int backing value, but the argument originated from Price
-
-note: cross-scalar comparison: InstrumentId vs AccountId
-  --> trades.rkt:72
-  = comparing values derived from incompatible scalar types
-
-note: unused parameter 'fill-ts' in fill-order
-  --> orders.rkt:54
-
-note: unused let binding 'acct-id'
-  --> trades.rkt:63
-
-note: call to undefined function 'calculate-pnl'
-  --> reports.rkt:89
-```
-
-Each note means: something is wrong at that location. Common fixes:
-- **scalar provenance mismatch**: you're wrapping the wrong backing value —
-  use the correct scalar accessor (e.g., `amount-value` not `price-value`)
-- **cross-scalar comparison**: you're comparing IDs of different entity types —
-  use the correct record accessor
-- **unused parameter/binding**: the function should be using that value but isn't
-- **undefined function**: typo or missing import
-
-## Tools
-
-### Reactive daemon
-- `bin/beagle-daemon start --watch DIR` — start daemon + inotify watcher; re-checks every .rkt file within ~100ms of save. With the PostToolUse hook configured, enriched errors are injected after every edit.
-- `bin/beagle-daemon query check-enriched DIR` — synchronous type check + enriched context (JSON)
-- `bin/beagle-daemon query check-result FILE` — return cached result from watcher (instant)
-- `bin/beagle-verify-enriched BUILD-DIR VERIFY` — run verify + auto-diagnose with trace/cascade
-
-### Compile & check
-- `bin/beagle-build SOURCE.rkt [OUT.clj]` — compile one file
-- `bin/beagle-build-all FILE-OR-DIR... [--out DIR] [--warn]` — batch compile (9x faster); `--warn` emits despite type errors
-- `bin/beagle-check SOURCE.rkt` — type-check only, no emit
-- `bin/beagle-check-all FILE-OR-DIR...` — batch type-check (10x faster); daemon makes this redundant during edit loop
-- `bin/beagle-expand SOURCE.rkt` — show post-macro source
-
-### Query
-- `bin/beagle-sig FN-NAME FILE-OR-DIR...` — print function's type signature
-- `bin/beagle-fields RECORD FILE-OR-DIR...` — print record fields + accessors (daemon enrichment includes these)
-- `bin/beagle-callers FN-NAME FILE-OR-DIR...` — find all call sites
-- `bin/beagle-provides FILE-OR-DIR...` — list module exports with types
-- `bin/beagle-impact FN-NAME FILE-OR-DIR...` — callers + impact of signature change
-
-### Repair toolchain (use these to fix bugs efficiently)
-- `bin/beagle-repair SOURCE-DIR VERIFY [--auto] [--emit-patch]` — **start here.** Runs the full pipeline and produces a ranked repair queue. `--emit-patch` outputs a unified diff to stdout (`git apply` compatible) — zero reasoning needed for mechanical fixes.
-- `bin/beagle-trace BUILD-DIR VERIFY [--focus FN]` — when a logic bug isn't obvious, trace shows the exact arithmetic operation that diverged and its source line.
-- `bin/beagle-specfix BUILD-DIR VERIFY` — generates candidate fixes from ratio analysis, verifies each against the oracle. Only reports fixes that pass with 0 regressions.
-- `bin/beagle-cascade SOURCE-DIR VERIFY --from-failures` — when many assertions fail, this finds root causes. Fix the highest-cascade-score function first (one fix may resolve multiple downstream failures).
-- `bin/beagle-blame BUILD-DIR VERIFY` — quick ratio hints (sign error, multiplier, boolean flip). Useful for fast triage.
-- `bin/beagle-oracle GOLDEN-DIR [--diff MODIFIED-DIR]` — generates a verify script from golden code. Use `--diff` to find which functions produce different output.
-- `bin/beagle-proptest SOURCE-DIR [--run]` — generates structural property tests from type info (record round-trips).
-
-### Repair workflow (recommended order)
-
-1. `beagle-daemon start --watch .` — reactive checking on every save
-2. `beagle-fix --apply .` — auto-fix mechanical type errors
-3. Fix remaining type errors (daemon hook shows errors after each edit)
-4. `beagle-build-all *.rkt --out .build/` — compile
-5. `beagle-verify-enriched .build/ verify.clj` — verify + auto-diagnose
-6. Fix root causes first (highest cascade score), rerun oracle
-7. Iterate until 0 failures
 
 ## Empirical baseline
 

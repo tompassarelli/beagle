@@ -45,6 +45,21 @@ update_in_file() {
   fi
 }
 
+# --- Regenerate cheatsheets from Scribble ------------------------------------
+
+echo "Regenerating cheatsheets from Scribble..."
+if [ -x "$BEAGLE_DIR/bin/beagle-gen-cheatsheet" ]; then
+  if $DRY_RUN; then
+    "$BEAGLE_DIR/bin/beagle-gen-cheatsheet" --dry-run
+  else
+    "$BEAGLE_DIR/bin/beagle-gen-cheatsheet"
+  fi
+else
+  echo "  SKIP: bin/beagle-gen-cheatsheet not found"
+fi
+
+echo ""
+
 # --- Collect facts -----------------------------------------------------------
 
 echo "Collecting facts..."

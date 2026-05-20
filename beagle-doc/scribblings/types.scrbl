@@ -7,16 +7,18 @@
 @tabular[#:sep @hspace[2]
   (list (list @bold{Type} @bold{Matches})
         (list @tt{String}  "strings")
-        (list @tt{Long}    "integers")
-        (list @tt{Double}  "floats")
-        (list @tt{Boolean} "true/false")
+        (list @tt{Int}     "integers")
+        (list @tt{Float}   "floats")
+        (list @tt{Bool}    "true/false")
         (list @tt{Keyword} ":foo style keywords")
         (list @tt{Symbol}  "quoted symbols")
         (list @tt{Nil}     "nil")
-        (list @tt{Any}     "anything (escape hatch)"))]
+        (list @tt{Any}     "anything (escape hatch)")
+        (list @tt{Number}  "(U Int Float) — prefer Int or Float when known"))]
 
-One canonical name per type. No aliases (@tt{Integer}, @tt{Int}, @tt{Float},
-@tt{Bool} are not accepted).
+One canonical name per type. JVM names (@tt{Long}, @tt{Double}, @tt{Boolean})
+are accepted as compatibility sugar in @tt{#lang beagle/clj} but resolve to
+the canonical names above.
 
 @section{Function Types}
 
@@ -33,6 +35,7 @@ One canonical name per type. No aliases (@tt{Integer}, @tt{Int}, @tt{Float},
   @item{@tt{(List T)} --- list of @tt{T}}
   @item{@tt{(Set T)} --- set of @tt{T}}
   @item{@tt{(Map K V)} --- map from @tt{K} to @tt{V}}
+  @item{@tt{(Promise T)} --- promise resolving to @tt{T}}
 ]
 
 @section{Union Types}
@@ -58,6 +61,18 @@ like @tt{nil?}, @tt{some?}, @tt{string?}, @tt{=}, @tt{not}.
 
 @tt{(forall [A] [A -> A])} introduces type variables for generic functions.
 
+@subsection{Bounded Polymorphism}
+
+Type variables can be constrained with upper bounds using @tt{<:}:
+
+@codeblock|{
+(forall [(T <: HasName)] [T -> String])
+(forall [(T <: (U Circle Rectangle))] [T -> Float])
+}|
+
+Without bounds, @tt{T} accepts anything. With @tt{<:}, the checker verifies
+the inferred type satisfies the bound.
+
 @section{Let Binding Inference}
 
 Let bindings infer types automatically from the right-hand side:
@@ -70,7 +85,7 @@ Let bindings infer types automatically from the right-hand side:
 Explicit annotations are only needed when narrowing:
 
 @codeblock|{
-(let [(area : Long) (* w h)] area)
+(let [(area : Int) (* w h)] area)
 }|
 
 @section{Collection Type Inference}
@@ -79,6 +94,6 @@ Collection literals infer element types from their contents:
 
 @codeblock|{
 [(->Product 1 "A") (->Product 2 "B")]  ; (Vec Product), not (Vec Any)
-{:a 1 :b 2}                             ; (Map Keyword Long)
+{:a 1 :b 2}                             ; (Map Keyword Int)
 #{:x :y :z}                             ; (Set Keyword)
 }|

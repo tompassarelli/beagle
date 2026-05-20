@@ -214,10 +214,14 @@ raco pkg install --link beagle-lib/ beagle-test/ beagle-doc/ beagle/
 
 ## Doc maintenance
 
-After changing type names, form signatures, or other facts that appear in
-multiple docs, run `bin/beagle-docs-sync --verbose` to check consistency.
-It propagates test counts, stdlib sizes, and validates that deprecated type
-names (`Long`, `Double`, `Boolean`) don't appear in canonical docs.
+**Scribble is the single source of truth for the language reference.**
+Edit `beagle-doc/scribblings/*.scrbl`, then run `bin/beagle-docs-sync --verbose`
+to regenerate cheatsheets and propagate counts.
+
+- `bin/beagle-gen-cheatsheet` — regenerates `docs/cheatsheet.md` and
+  `docs/cheatsheet-consumer.md` from Scribble docs
+- `bin/beagle-docs-sync` — runs the generator, then propagates test counts,
+  stdlib sizes, and validates type name consistency
 
 Canonical Beagle type names: `Int`, `Float`, `Bool`, `String`, `Nil`, `Any`,
 `Keyword`, `Symbol`. The old JVM names (`Long`, `Double`, `Boolean`) are
@@ -227,9 +231,9 @@ docs, cheatsheets, or prompts as canonical Beagle types.
 Files that define canonical facts (single source of truth):
 - `private/types.rkt` → type names, PRIMITIVES list
 - `private/stdlib-types.rkt` → stdlib catalog and counts
-- `scribblings/beagle.scrbl` → Scribble docs (canonical form reference)
-- `docs/cheatsheet.md` → LLM grounding reference
-- `docs/cheatsheet-consumer.md` → consumer agent reference
+- `beagle-doc/scribblings/*.scrbl` → Scribble docs (canonical form reference, generates cheatsheets)
+- `docs/cheatsheet.md` → generated LLM grounding reference
+- `docs/cheatsheet-consumer.md` → generated consumer agent reference
 
 ## Devlog discipline
 
