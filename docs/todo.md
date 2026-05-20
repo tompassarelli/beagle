@@ -22,6 +22,8 @@ Corner agent mistakes mechanically. See [`docs/type-system.md`](type-system.md) 
 - [x] Phase 2: `beagle.result` convention — `Ok`/`Err`/`Result` module + cross-module defunion import
 - [x] Phase 3: Bounded polymorphism — `(forall [(T <: Bound)] ...)` constraining type variables
 - [x] Phase 4: Parametric `defunion` — `(defunion (Result T E) ...)` for typed error returns
+- [x] `Number` built-in alias — `(U Int Float)`, docs steer toward `Int`/`Float` when concrete
+- [x] Match emit fix — defunion match arms now destructure fields in emitted Clojure/JS
 
 ### Target-aware code generation
 

@@ -387,11 +387,16 @@
 (define (build-record-field-table prog)
   (define local
     (for/fold ([h (hasheq)]) ([f (in-list (program-forms prog))])
-      (if (record-form? f)
-          (hash-set h (record-form-name f)
-                      (map (lambda (p) (symbol->string (param-name p)))
-                           (record-form-fields f)))
-          h)))
+      (cond
+        [(record-form? f)
+         (hash-set h (record-form-name f)
+                     (map (lambda (p) (symbol->string (param-name p)))
+                          (record-form-fields f)))]
+        [(and (defunion-form? f) (defunion-form-member-fields f))
+         (for/fold ([h2 h]) ([m (in-list (defunion-form-members f))])
+           (define fields (hash-ref (defunion-form-member-fields f) m '()))
+           (hash-set h2 m (map (lambda (p) (symbol->string (param-name p))) fields)))]
+        [else h])))
   (for/fold ([h local]) ([(rec-name field-names) (in-hash (program-imported-record-field-order prog))])
     (hash-set h rec-name field-names)))
 
