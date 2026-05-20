@@ -4,6 +4,8 @@ A typed Lisp authoring layer for agent-written dynamic code. Agents write typed,
 
 **The types are scaffolding. The emitted code is the building.**
 
+Beagle checks *generation*, not runtime — emitted code carries no type guards by design. The goal is to catch the mechanical errors agents make while writing (wrong fields, missing cases, invalid interop), then get out of the way.
+
 ```text
 source.bclj/.bjs/.bnix → parse → check → emit → output.clj / .js / .nix
                        ↑
@@ -25,7 +27,7 @@ source.bclj/.bjs/.bnix → parse → check → emit → output.clj / .js / .nix
 - `#lang beagle/cljs` — ClojureScript
 - `#lang beagle/js` — JavaScript
 - `#lang beagle/nix` — Nix
-- `#lang beagle/sql` — SQL
+- `#lang beagle/sql` — SQL *(experimental)*
 
 ## A program
 
@@ -51,7 +53,7 @@ source.bclj/.bjs/.bnix → parse → check → emit → output.clj / .js / .nix
 
 ### E16: Does the type checker make agents faster?
 
-4 features built by Claude Sonnet agents — one group with no type checker, one with Beagle's structural checker:
+4 features built by Claude Sonnet agents — one group with no type checker, one with Beagle's structural checker (n=4, treat as directional):
 
 | | No types | With types | |
 |---|---:|---:|---|
@@ -59,7 +61,9 @@ source.bclj/.bjs/.bnix → parse → check → emit → output.clj / .js / .nix
 | Correctness | 8/8 | 8/8 | identical |
 | Hardest feature | 600s | **328s** | **45% faster** |
 
-Types don't affect correctness at this scale. Types affect **how fast** the agent gets there, scaling with coordination complexity. The same checker poorly integrated imposes a 76% penalty — three non-code fixes swing the outcome by 100 percentage points.
+Types didn't move correctness at this scale — they moved how fast the agent got there, with the gap widening on features with more coordination complexity.
+
+The load-bearing finding is about *integration*, not the checker itself: the same checker, poorly wired into the agent loop (noisy output, wrong workflow position, vague framing), imposed a 76% penalty. Three non-code fixes swung the outcome by 100 percentage points. The contribution is as much *how* the checker reaches the agent as the checker.
 
 [Results](experiments/e16-workflow-scheduler/results/type/RESULTS.md) · [Devlog](docs/devlog/018-e16-type-surface.md)
 
@@ -69,6 +73,8 @@ Types don't affect correctness at this scale. Types affect **how fast** the agen
 | ------------------------- | -----: | ------: | ------------: |
 | Correctness (E4, 35 bugs) |    3/3 |     0/3 |           3/3 |
 | Best wall time            |   287s |    365s |          255s |
+
+Beagle matches the typed baseline (mypy) on correctness and beats the untyped one (Clojure). mypy edges wall time — the trade Beagle makes is one typed surface across multiple backends, not single-language speed.
 
 [Full methodology](experiments/report.md)
 
@@ -104,12 +110,10 @@ Generates a PostToolUse hook, settings, `CLAUDE.md`, and language context. The d
 - **Repair compiler** — blame, specfix, trace, cascade analysis
 - **Property testing** — record generators, return-type inference, differential testing
 
-See [`docs/tool-reference.md`](docs/tool-reference.md) for the full CLI catalog.
-
 ## Documentation
 
 - [`docs/cheatsheet.md`](docs/cheatsheet.md) — language summary
 - [`docs/agent-workflow.md`](docs/agent-workflow.md) — repair tool routing
-- [`docs/tool-reference.md`](docs/tool-reference.md) — CLI catalog
+- [`docs/tool-reference.md`](docs/tool-reference.md) — CLI and tool catalog
 - [`docs/devlog/`](docs/devlog/) — development journal (18 entries)
 - [`experiments/report.md`](experiments/report.md) — E1–E15 results
