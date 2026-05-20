@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+# beagle-extract-schema — extract NixOS/HM option schema to JSON.
+#
+# Usage:
+#   beagle-extract-schema [--target <attr-path>] [--out <file>] [--flake <dir>]
+#   beagle-extract-schema --hm [--out <file>] [--flake <dir>]
+#
+# --hm extracts Home Manager submodule options instead of NixOS options.
+#
+# Defaults:
+#   --target  nixosConfigurations.$(hostname).options
+#   --out     <flake>/.nisp-cache/schema.json (or schema-hm.json for --hm)
+#   --flake   git toplevel or cwd
+
+set -euo pipefail
+
+HOST="${HOSTNAME:-$(hostname)}"
+HM_MODE=false
+TARGET=""
+OUT=""
+FLAKE=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --target) TARGET="$2"; shift 2 ;;
+        --out)    OUT="$2"; shift 2 ;;
+        --flake)  FLAKE="$2"; shift 2 ;;
+        --hm)     HM_MODE=true; shift ;;
+        --help|-h)
+            echo "Usage: beagle-extract-schema [--hm] [--target <path>] [--out <file>] [--flake <dir>]"
+            exit 0 ;;
+        *) echo "beagle-extract-schema: unknown argument: $1" >&2; exit 2 ;;
+    esac
+done
+
+if [[ -z "$FLAKE" ]]; then
+    FLAKE="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+fi
+
+if [[ -z "$TARGET" ]]; then
+    if $HM_MODE; then
+        TARGET="nixosConfigurations.${HOST}.options.home-manager.users"
+    else
+        TARGET="nixosConfigurations.${HOST}.options"
+    fi
+fi
+
+if [[ -z "$OUT" ]]; then
+    mkdir -p "$FLAKE/.nisp-cache"
+    if $HM_MODE; then
+        OUT="$FLAKE/.nisp-cache/schema-hm.json"
+    else
+        OUT="$FLAKE/.nisp-cache/schema.json"
+    fi
+fi
+
+if $HM_MODE; then
+    NIX_EXPR="$(cat <<'NIXEOF'
+let
+  flake = builtins.getFlake (toString @FLAKE@);
+  hmUserOpts = flake.@TARGET@;
+  subOpts = hmUserOpts.type.getSubOptions [ "<user>" ];
+
+  describeType = t:
+    let
+      try = builtins.tryEval (t.name or "?");
+      base = { t = if try.success then try.value else "?"; };
+      tryInner =
+        if (t ? nestedTypes) && (t.nestedTypes ? elemType)
+        then builtins.tryEval (describeType t.nestedTypes.elemType)
+        else { success = false; value = null; };
+      withInner =
+        if tryInner.success then base // { inner = tryInner.value; } else base;
+      tryEnum =
+        if (base.t == "enum") && (t ? functor) && (t.functor ? payload) && (t.functor.payload ? values)
+        then builtins.tryEval t.functor.payload.values
+        else { success = false; value = null; };
+      withEnum =
+        if tryEnum.success then withInner // { enum = tryEnum.value; } else withInner;
+    in withEnum;
+
+  safeWalk = path: o:
+    let
+      isOpt = builtins.tryEval ((o._type or null) == "option");
+      isAttrs = builtins.tryEval (builtins.isAttrs o);
+    in
+      if isOpt.success && isOpt.value then
+        let try = builtins.tryEval ({ name = path; } // describeType (o.type or {}));
+        in if try.success then [ try.value ] else [ { name = path; t = "?"; } ]
+      else if isAttrs.success && isAttrs.value then
+        builtins.concatLists
+          (builtins.attrValues
+            (builtins.mapAttrs (n: v:
+              let r = builtins.tryEval (safeWalk (if path == "" then n else "${path}.${n}") v);
+              in if r.success then r.value else []
+            ) o))
+      else [];
+
+in safeWalk "" subOpts
+NIXEOF
+)"
+else
+    NIX_EXPR="$(cat <<'NIXEOF'
+let
+  flake = builtins.getFlake (toString @FLAKE@);
+  opts  = flake.@TARGET@;
+
+  describeType = t:
+    let
+      base = { t = t.name or "?"; };
+      tryInner =
+        if (t ? nestedTypes) && (t.nestedTypes ? elemType)
+        then builtins.tryEval (describeType t.nestedTypes.elemType)
+        else { success = false; value = null; };
+      withInner =
+        if tryInner.success then base // { inner = tryInner.value; } else base;
+      tryEnum =
+        if (t.name or "") == "enum" && (t ? functor) && (t.functor ? payload) && (t.functor.payload ? values)
+        then builtins.tryEval t.functor.payload.values
+        else { success = false; value = null; };
+      withEnum =
+        if tryEnum.success then withInner // { enum = tryEnum.value; } else withInner;
+    in withEnum;
+
+  walk = path: o:
+    if (o._type or null) == "option"
+    then [ ({ name = path; } // describeType (o.type or {})) ]
+    else if builtins.isAttrs o
+    then builtins.concatLists
+      (builtins.attrValues
+        (builtins.mapAttrs (n: v: walk (if path == "" then n else "${path}.${n}") v) o))
+    else [];
+in walk "" opts
+NIXEOF
+)"
+fi
+
+NIX_EXPR="${NIX_EXPR//@FLAKE@/$FLAKE}"
+NIX_EXPR="${NIX_EXPR//@TARGET@/$TARGET}"
+
+echo "beagle-extract-schema: evaluating $TARGET ..." >&2
+
+tmpfile="$(mktemp)"
+trap 'rm -f "$tmpfile"' EXIT
+
+echo "$NIX_EXPR" > "$tmpfile"
+
+if ! nix eval --json --file "$tmpfile" > "$OUT"; then
+    echo "beagle-extract-schema: nix eval failed" >&2
+    cat "$OUT" >&2
+    rm -f "$OUT"
+    exit 1
+fi
+
+count=$(python3 -c "import json; print(len(json.load(open('$OUT'))))" 2>/dev/null || echo "?")
+echo "beagle-extract-schema: wrote $count options to $OUT" >&2

@@ -37,7 +37,13 @@ for arg in "$@"; do
             exit 0
             ;;
         *)
-            files+=("$arg")
+            if [[ -d "$arg" ]]; then
+                while IFS= read -r -d '' f; do
+                    files+=("$f")
+                done < <(find "$arg" -name '*.bnix' -type f -print0 2>/dev/null | sort -z)
+            else
+                files+=("$arg")
+            fi
             ;;
     esac
 done

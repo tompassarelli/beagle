@@ -30,6 +30,9 @@
     ">" "_gt")
    "<" "_lt"))
 
+(define (mangle-prop s)
+  (string-replace s "-" "_"))
+
 ;; --- infix operators -------------------------------------------------------
 
 (define JS-INFIX-OPS
@@ -629,9 +632,13 @@
        [(hash-ref JS-VALUE-WRAPPERS e #f) => values]
        [else
         (let ([m (mangle-name e)])
-          (if (string-contains? m "/")
-              (string-replace m "/" ".")
-              m))])]
+          (cond
+            [(and (string-contains? m "/")
+                  (string-prefix? (symbol->string e) "js/"))
+             (mangle-str (substring (symbol->string e) 3))]
+            [(string-contains? m "/")
+             (string-replace m "/" ".")]
+            [else m]))])]
     [(quoted? e)        (emit-quoted (quoted-datum e))]
     [(regex-lit? e)     (format "/~a/" (regex-lit-pattern e))]
 
@@ -851,10 +858,10 @@
               (string=? (substring method-str 0 2) ".-"))
        (format "~a.~a"
                (emit-expr (method-call-target e))
-               (mangle-str (substring method-str 2)))
+               (mangle-prop (substring method-str 2)))
        (format "~a.~a(~a)"
                (emit-expr (method-call-target e))
-               (mangle-str (substring method-str 1))
+               (mangle-prop (substring method-str 1))
                (string-join (map emit-expr (method-call-args e)) ", ")))]
 
     [(static-call? e)
@@ -864,11 +871,14 @@
                                [(char=? (string-ref s i) #\/) i]
                                [else (loop (+ i 1))])))
      (define dotted
-       (if (and slash-pos
-                (> (string-length s) (+ slash-pos 3))
-                (string=? (substring s (+ slash-pos 1) (+ slash-pos 3)) "->"))
-         (string-append (substring s 0 slash-pos) "." (substring s (+ slash-pos 3)))
-         (string-replace s "/" ".")))
+       (cond
+         [(and slash-pos (string=? (substring s 0 slash-pos) "js"))
+          (substring s (+ slash-pos 1))]
+         [(and slash-pos
+               (> (string-length s) (+ slash-pos 3))
+               (string=? (substring s (+ slash-pos 1) (+ slash-pos 3)) "->"))
+          (string-append (substring s 0 slash-pos) "." (substring s (+ slash-pos 3)))]
+         [else (string-replace s "/" ".")]))
      (format "~a(~a)" (mangle-str dotted)
              (string-join (map emit-expr (static-call-args e)) ", "))]
 

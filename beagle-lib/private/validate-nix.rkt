@@ -13,6 +13,7 @@
 (require racket/string
          racket/list
          racket/file
+         racket/set
          "parse.rkt"
          "types.rkt"
          "nixos-schema.rkt")
@@ -373,7 +374,7 @@
 ;; Schema validation
 ;; ============================================================================
 
-(define (validate-file-keys file-path keys schema)
+(define (validate-file-keys file-path keys schema #:hm-schema [hm-schema #f])
   (define errors '())
 
   (define (add-error! fk msg kind path)
@@ -383,11 +384,21 @@
     (set! errors (cons (validation-error file-path line col msg kind path)
                        errors)))
 
+  (define (check-type-against-entry fk path-str entry label)
+    (cond
+      [(eq? entry 'permissive) (void)]
+      [else
+       (define val-type (infer-literal-type-simple (found-key-value fk)))
+       (define result (nixos-check-value-type entry val-type))
+       (when (and (pair? result) (eq? (car result) 'mismatch))
+         (add-error! fk
+                     (format "~a option ~a: ~a" label path-str (cadr result))
+                     'type-mismatch path-str))]))
+
   (for ([fk (in-list keys)])
     (define path-str (found-key-path fk))
     (define val (found-key-value fk))
 
-    ;; Skip structural keys
     (define top-ns (car (string-split path-str ".")))
     (cond
       [(member top-ns MODULE-STRUCTURAL-KEYS) (void)]
@@ -395,30 +406,37 @@
       [(string-prefix? path-str "myConfig.") (void)]
       [else
        (define entry (nixos-option-lookup/wildcard schema path-str))
-       (define in-hm-context?
-         (and (not entry)
-              (member top-ns HOME-MANAGER-ROOTS)))
        (cond
-         [in-hm-context? (void)]
-         [(not entry)
-          (when (nixos-namespace-exists? schema top-ns)
-            (define similars (nixos-find-similar schema path-str))
-            (define suggest
-              (if (null? similars) ""
-                  (format " -- did you mean: ~a?"
-                          (string-join (take similars (min 3 (length similars)))
-                                      ", "))))
-            (add-error! fk
-                        (format "unknown NixOS option: ~a~a" path-str suggest)
-                        'unknown-option path-str))]
-         [(eq? entry 'permissive) (void)]
+         [entry
+          (check-type-against-entry fk path-str entry "NixOS")]
          [else
-          (define val-type (infer-literal-type-simple val))
-          (define result (nixos-check-value-type entry val-type))
-          (when (and (pair? result) (eq? (car result) 'mismatch))
-            (add-error! fk
-                        (format "NixOS option ~a: ~a" path-str (cadr result))
-                        'type-mismatch path-str))])]))
+          (define hm-entry
+            (and hm-schema (nixos-option-lookup/wildcard hm-schema path-str)))
+          (cond
+            [hm-entry
+             (check-type-against-entry fk path-str hm-entry "HM")]
+            [(member top-ns HOME-MANAGER-ROOTS)
+             (when hm-schema
+               (define similars (nixos-find-similar hm-schema path-str))
+               (define suggest
+                 (if (null? similars) ""
+                     (format " -- did you mean: ~a?"
+                             (string-join (take similars (min 3 (length similars)))
+                                          ", "))))
+               (add-error! fk
+                           (format "unknown HM option: ~a~a" path-str suggest)
+                           'unknown-option path-str))]
+            [(nixos-namespace-exists? schema top-ns)
+             (define similars (nixos-find-similar schema path-str))
+             (define suggest
+               (if (null? similars) ""
+                   (format " -- did you mean: ~a?"
+                           (string-join (take similars (min 3 (length similars)))
+                                        ", "))))
+             (add-error! fk
+                         (format "unknown NixOS option: ~a~a" path-str suggest)
+                         'unknown-option path-str)]
+            [else (void)])])]))
 
   (reverse errors))
 
@@ -527,21 +545,82 @@
   (reverse errors))
 
 ;; ============================================================================
+;; myConfig introspective validation — declarations are the schema
+;; ============================================================================
+
+(define (collect-myconfig-declarations all-file-keys)
+  (define declared (mutable-set))
+  (for ([fk-pair (in-list all-file-keys)])
+    (define keys (cdr fk-pair))
+    (for ([fk (in-list keys)])
+      (define path-str (found-key-path fk))
+      (when (string-prefix? path-str "options.myConfig.")
+        (define config-path (substring path-str 8))
+        (set-add! declared config-path))))
+  declared)
+
+(define (myconfig-find-similar declared path-str)
+  (define candidates
+    (for/list ([decl (in-set declared)]
+               #:when (let ([d (levenshtein path-str decl)])
+                        (and (> d 0) (<= d (max 2 (min 4 (quotient (string-length path-str) 3)))))))
+      (cons (levenshtein path-str decl) decl)))
+  (map cdr (sort candidates < #:key car)))
+
+(define (detect-myconfig-errors all-file-keys declared)
+  (define errors '())
+  (for ([fk-pair (in-list all-file-keys)])
+    (define file-path (car fk-pair))
+    (define keys (cdr fk-pair))
+    (for ([fk (in-list keys)])
+      (define path-str (found-key-path fk))
+      (when (string-prefix? path-str "myConfig.")
+        (unless (set-member? declared path-str)
+          (define prefix-ok?
+            (for/or ([decl (in-set declared)])
+              (string-prefix? decl (string-append path-str "."))))
+          (unless prefix-ok?
+            (define similars (myconfig-find-similar declared path-str))
+            (define suggest
+              (if (null? similars) ""
+                  (format " -- did you mean: ~a?"
+                          (string-join (take similars (min 3 (length similars)))
+                                       ", "))))
+            (define key-str (symbol->string (found-key-key-sym fk)))
+            (define-values (line col)
+              (find-key-in-source-nth file-path key-str (found-key-occurrence fk)))
+            (set! errors
+                  (cons (validation-error
+                         file-path line col
+                         (format "unknown myConfig option: ~a~a" path-str suggest)
+                         'unknown-option path-str)
+                        errors)))))))
+  (reverse errors))
+
+;; ============================================================================
 ;; Auto-fix: rewrite source when unambiguous Levenshtein correction exists
 ;; ============================================================================
 
-(define (compute-auto-fixes errors schema)
+(define (compute-auto-fixes errors schema
+                            #:hm-schema [hm-schema #f]
+                            #:myconfig-declared [myconfig-declared (set)])
   (define fixes '())
   (for ([err (in-list errors)])
     (when (eq? (validation-error-kind err) 'unknown-option)
       (define path-str (validation-error-path err))
       (when path-str
-        (define similars (nixos-find-similar schema path-str))
+        (define top-ns (car (string-split path-str ".")))
+        (define similars
+          (cond
+            [(string-prefix? path-str "myConfig.")
+             (myconfig-find-similar myconfig-declared path-str)]
+            [(and hm-schema (member top-ns HOME-MANAGER-ROOTS))
+             (nixos-find-similar hm-schema path-str)]
+            [else (nixos-find-similar schema path-str)]))
         (when (pair? similars)
           (define best (car similars))
           (define best-dist (levenshtein path-str best))
           (when (<= best-dist 2)
-            ;; Require clear gap to runner-up
             (define unambiguous?
               (or (null? (cdr similars))
                   (> (levenshtein path-str (cadr similars))
@@ -597,6 +676,14 @@
            schema-path
            (hash-count (nixos-schema-table schema)))
 
+  (define hm-schema-path (find-hm-schema-json (car files)))
+  (define hm-schema
+    (and hm-schema-path (load-nixos-schema hm-schema-path)))
+  (when hm-schema
+    (eprintf "beagle-validate: loaded HM schema from ~a (~a options)\n"
+             hm-schema-path
+             (hash-count (nixos-schema-table hm-schema))))
+
   (define all-errors '())
   (define all-file-keys '())
 
@@ -627,7 +714,7 @@
                       all-errors)))
 
         ;; Schema validation
-        (define schema-errors (validate-file-keys file keys schema))
+        (define schema-errors (validate-file-keys file keys schema #:hm-schema hm-schema))
         (set! all-errors (append all-errors schema-errors))
 
         ;; Duplicate detection
@@ -637,6 +724,14 @@
         ;; Missing default detection
         (define default-errors (detect-missing-defaults file keys))
         (set! all-errors (append all-errors default-errors)))))
+
+  ;; myConfig introspective validation
+  (define myconfig-declared (collect-myconfig-declarations all-file-keys))
+  (unless (set-empty? myconfig-declared)
+    (define myconfig-errors (detect-myconfig-errors all-file-keys myconfig-declared))
+    (set! all-errors (append all-errors myconfig-errors))
+    (eprintf "beagle-validate: introspected ~a myConfig declarations\n"
+             (set-count myconfig-declared)))
 
   ;; Cross-file conflict detection
   (define conflict-errors (detect-cross-file-conflicts all-file-keys schema))
@@ -648,7 +743,9 @@
 
   ;; Auto-fix if requested
   (when (and auto-fix? (pair? all-errors))
-    (define fixes (compute-auto-fixes all-errors schema))
+    (define fixes (compute-auto-fixes all-errors schema
+                                      #:hm-schema hm-schema
+                                      #:myconfig-declared myconfig-declared))
     (cond
       [(null? fixes)
        (eprintf "\nbeagle-validate: no auto-fixable errors found\n")]
@@ -669,7 +766,12 @@
 
   error-count)
 
-(provide validate-files)
+(provide validate-files
+         validate-file-keys
+         collect-myconfig-declarations
+         detect-myconfig-errors
+         (struct-out found-key)
+         (struct-out validation-error))
 
 ;; When run as a script
 (module+ main

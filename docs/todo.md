@@ -105,6 +105,13 @@ Same typed AST, better tooling, integrated repair compiler.
 - [ ] `beagle-import` — .nix → .bnix conversion (reuse rnix parser)
 - [ ] Package name validation — cross-check `pkgs.X` against nixpkgs attrs
 
+### New emit targets
+
+- [ ] `beagle/rkt` — Racket
+- [ ] `beagle/py` — Python (plumbed, needs emitter)
+- [ ] `beagle/elixir` — Elixir
+- [ ] `beagle/bash` — Bash
+
 ### Experiment metadata
 
 - [x] Add version + dialect table to `experiments/report.md` (v0.1–v0.5, all `#lang beagle` / Clojure target)

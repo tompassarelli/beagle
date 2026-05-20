@@ -21,6 +21,7 @@
  ;; Loading
  load-nixos-schema
  find-schema-json
+ find-hm-schema-json
 
  ;; Lookup
  nixos-option-lookup
@@ -51,10 +52,9 @@
   (define table (make-hash))
   (define prefixes (mutable-set))
   (for ([e (in-list entries)])
-    (define p (hash-ref e 'p #f))
+    (define p (or (hash-ref e 'p #f) (hash-ref e 'name #f)))
     (when (and p (string? p))
       (hash-set! table p e)
-      ;; Add all prefixes for namespace checking
       (let loop ([s p])
         (define dot (for/or ([i (in-range (sub1 (string-length s)) 0 -1)])
                       (and (char=? (string-ref s i) #\.) i)))
@@ -64,7 +64,7 @@
           (loop prefix)))))
   (nixos-schema (hash-copy table) prefixes))
 
-(define (find-schema-json source-path)
+(define (find-schema-in-cache source-path filename)
   (define dir
     (cond
       [(path? source-path) (let-values ([(base name dir?) (split-path source-path)])
@@ -74,7 +74,7 @@
       [else #f]))
   (and dir
        (let loop ([d (simplify-path (path->complete-path dir))])
-         (define candidate (build-path d ".nisp-cache" "schema.json"))
+         (define candidate (build-path d ".nisp-cache" filename))
          (cond
            [(file-exists? candidate) candidate]
            [else
@@ -82,6 +82,12 @@
             (and (path? parent)
                  (not (equal? parent d))
                  (loop parent))]))))
+
+(define (find-schema-json source-path)
+  (find-schema-in-cache source-path "schema.json"))
+
+(define (find-hm-schema-json source-path)
+  (find-schema-in-cache source-path "schema-hm.json"))
 
 ;; ============================================================================
 ;; Lookup
@@ -91,10 +97,11 @@
   (hash-ref (nixos-schema-table schema) path-str #f))
 
 (define SUBMODULE-BOUNDARY-TYPES
-  '("attrsOf" "lazyAttrsOf" "listOf" "submodule"))
+  '("attrsOf" "lazyAttrsOf" "listOf" "submodule" "dagOf"))
 
 (define FREEFORM-TYPES
-  '("either" "oneOf" "anything" "unspecified" "raw" "attrs" "freeformType"))
+  '("either" "oneOf" "anything" "unspecified" "raw" "attrs" "freeformType"
+    "nixpkgs-config" "nixpkgs-overlay"))
 
 (define (entry-is-permissive-parent? entry)
   (define t (hash-ref entry 't "?"))

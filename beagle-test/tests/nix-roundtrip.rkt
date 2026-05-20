@@ -93,10 +93,49 @@
 
 ;; --- no beagle form names leak into output -----------------------------------
 
+;; --- let bindings + conditionals ---------------------------------------------
+
+(test-case "nix-let-cond round-trip"
+  (define out (compile-bnix-file (build-path fixtures-dir "nix-let-cond.bnix")))
+  (check-true (string-contains? out "let"))
+  (check-true (string-contains? out "cfg = config.services.demo;"))
+  (check-true (string-contains? out "isDev = (cfg.environment == \"development\")"))
+  (check-true (string-contains? out "lib.mkEnableOption"))
+  (check-true (string-contains? out "lib.mkIf cfg.enable"))
+  (check-true (string-contains? out "if isDev then \"debug\" else \"info\""))
+  (check-true (string-contains? out "toString port")))
+
+;; --- mkDefault / mkForce / mkOverride ----------------------------------------
+
+(test-case "nix-mkdefault round-trip"
+  (define out (compile-bnix-file (build-path fixtures-dir "nix-mkdefault.bnix")))
+  (check-true (string-contains? out "lib.mkDefault \"nixos\""))
+  (check-true (string-contains? out "lib.mkDefault \"UTC\""))
+  (check-true (string-contains? out "lib.mkForce"))
+  (check-true (string-contains? out "lib.mkOverride 50 \"no\""))
+  (check-false (string-contains? out "lib/mk")))
+
+;; --- nested mkIf + mkForce + builtins ----------------------------------------
+
+(test-case "nix-nested-mkif round-trip"
+  (define out (compile-bnix-file (build-path fixtures-dir "nix-nested-mkif.bnix")))
+  (check-true (string-contains? out "lib.mkIf cfg.enable"))
+  (check-true (string-contains? out "lib.mkIf (cfg.port != null)"))
+  (check-true (string-contains? out "lib.mkDefault"))
+  (check-true (string-contains? out "lib.mkForce false"))
+  (check-true (string-contains? out "lib.mkForce \"/var/log/demo.log\""))
+  (check-true (string-contains? out "builtins.readFile cfg.configPath"))
+  (check-false (string-contains? out "lib/mk"))
+  (check-false (string-contains? out "builtins/")))
+
+;; --- no beagle form names leak into output -----------------------------------
+
 (test-case "no beagle form names in any fixture output"
   (for ([fixture '("nix-simple-pkg.bnix" "nix-options.bnix"
                     "nix-rec-assert.bnix" "nix-kmod.bnix"
-                    "nix-interp-ms.bnix" "nix-builtins.bnix")])
+                    "nix-interp-ms.bnix" "nix-builtins.bnix"
+                    "nix-let-cond.bnix" "nix-mkdefault.bnix"
+                    "nix-nested-mkif.bnix")])
     (define out (compile-bnix-file (build-path fixtures-dir fixture)))
     (check-false (string-contains? out "fn-set") (format "~a leaks fn-set" fixture))
     (check-false (string-contains? out "fn-set-rest") (format "~a leaks fn-set-rest" fixture))
