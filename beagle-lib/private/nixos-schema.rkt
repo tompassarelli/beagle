@@ -24,13 +24,15 @@
 
  ;; Lookup
  nixos-option-lookup
+ nixos-option-lookup/wildcard
  nixos-namespace-exists?
 
  ;; Type checking
  nixos-check-value-type
 
  ;; Did-you-mean
- nixos-find-similar)
+ nixos-find-similar
+ levenshtein)
 
 ;; ============================================================================
 ;; Schema state
@@ -87,6 +89,34 @@
 
 (define (nixos-option-lookup schema path-str)
   (hash-ref (nixos-schema-table schema) path-str #f))
+
+(define SUBMODULE-BOUNDARY-TYPES
+  '("attrsOf" "lazyAttrsOf" "listOf" "submodule"))
+
+(define (nixos-option-lookup/wildcard schema path-str)
+  (or (nixos-option-lookup schema path-str)
+      (let ([parts (string-split path-str ".")])
+        (and (>= (length parts) 2)
+             (let loop ([i 1])
+               (cond
+                 [(>= i (length parts)) #f]
+                 [else
+                  (define wildcard-path
+                    (string-join
+                     (append (take parts i) (cons "<name>" (drop parts (add1 i))))
+                     "."))
+                  (define wildcard-entry (nixos-option-lookup schema wildcard-path))
+                  (cond
+                    [wildcard-entry wildcard-entry]
+                    [else
+                     (define prefix (string-join (take parts i) "."))
+                     (define prefix-entry (nixos-option-lookup schema prefix))
+                     (cond
+                       [(and prefix-entry
+                             (let ([t (hash-ref prefix-entry 't "?")])
+                               (member t SUBMODULE-BOUNDARY-TYPES)))
+                        'permissive]
+                       [else (loop (add1 i))])])]))))))
 
 (define (nixos-namespace-exists? schema path-str)
   (set-member? (nixos-schema-prefixes schema) path-str))

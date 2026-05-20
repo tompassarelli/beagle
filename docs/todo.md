@@ -14,6 +14,23 @@ One command wires up everything for Claude Code: daemon, hooks, system prompt.
 
 ## Open
 
+### Type system improvements
+
+Corner agent mistakes mechanically. See [`docs/type-system.md`](type-system.md) for full rationale.
+
+- [x] Phase 1: Exhaustive match errors — missing `defunion` match cases are hard errors in strict mode (wildcards don't suppress)
+- [ ] Phase 2: `beagle.result` convention — ship `Ok`/`Err`/`Result` module using existing features
+- [ ] Phase 3: Bounded polymorphism — `(forall [T <: Bound] ...)` constraining type variables
+- [ ] Phase 4: Parametric `defunion` — `(defunion (Result T E) ...)` for typed error returns
+
+### Target-aware code generation
+
+`fmt` → `js-template` → `js/quote`: three levels of codegen support.
+
+- [x] `fmt` — interpolated string templates: `(fmt "hello ${name}")` → `(str "hello " name)`. Works with heredocs. Parse-time rewrite, all targets.
+- [ ] `js-template` — typed splice sites: `${stmt body}`, `${expr x}`, `${json data}`, `${indent block 4}`. Reject invalid splices (stmt where expr expected).
+- [ ] `js/quote` — structural JS quasiquotation. Beagle represents JS AST, not text. The north star.
+
 ### JS target gaps
 
 - [x] `set!` for property mutation — `(set! (.-value el) "")` parsed and emitted for CLJ + JS
@@ -50,40 +67,41 @@ from the catalog (not just `--link`).
 - [x] Composable lib/test/doc package split — see [`docs/plan-racket-package-reorg.md`](plan-racket-package-reorg.md)
 - [x] Register on [Racket package catalog](https://github.com/racket/racket/wiki/Creating-Packages)
 
-### Nix target: full Nisp parity
+### Nix target: full nisp replacement
 
-`beagle/nix` should express real NixOS modules without `unsafe` escape hatches.
-All forms are target-specific (`nix-*` AST nodes, invalid outside `beagle/nix`).
+`beagle/nix` replaces nisp as the authoring layer for NixOS configs.
+Same typed AST, better tooling, integrated repair compiler.
 
-**Phase 1 — Module-writing core:**
-- [x] Core emitter (defn→curried, defrecord→mkType, maps→attrsets, etc.)
-- [x] stdlib-nix (120 typed entries: builtins/lib/lib.types)
-- [x] `fn-set` / `fn-set-rest` / `fn-set@` — attrset-pattern lambda
-- [x] `inh` / `inh-from` — inherit
-- [x] `with-do` — with scope injection
-- [x] `s` — string interpolation
-- [x] `p` — path literals
+**Phase 1 — Module-writing core:** ✓
+- [x] Core emitter, stdlib-nix (120 typed entries), all nix-specific forms
+- [x] Target-form gating (15 nix forms + `await`)
+- [x] 183/183 equivalence tests vs old nisp output
 
-**Phase 2 — Nix semantic essentials:**
-- [x] `rec-att` — recursive attrsets
-- [x] `assert-do` — assert expression
-- [x] `get-or` — select with or-default
-- [x] `has` — has-attr check
-- [x] `ms` — multiline strings
-- [x] `spath` — search path literals
+**Phase 2 — Toolchain parity (replacing `nisp` CLI):**
+- [x] `beagle-build` — .bnix → .nix compilation (firn-build uses it)
+- [x] `beagle-schema` — interactive NixOS option queries (replaces `nisp schema`)
+- [x] `beagle-validate` — source-level validation with schema, types, duplicates, cross-file conflicts (replaces `nisp validate`)
+- [x] `beagle-rename` — option path refactoring across .bnix files (replaces `nisp rename`)
+- [x] `nixos-schema.rkt` — schema loading, wildcard matching, type checking, did-you-mean
+- [x] Wildcard path matching for `attrsOf submodule` boundaries
+- [x] Home Manager root awareness (skip HM-only namespaces)
+- [x] Cross-file conflict detection with mkDefault/mkForce awareness
+- [x] Auto-fix mode (Levenshtein ≤ 2, unambiguous)
+- [x] firn-validate rewired to call beagle-validate
 
-**Phase 3 — Operator/convenience parity:**
-- [x] `pipe-to` / `pipe-from` — pipe operators
-- [x] `impl` — logical implication
+**Phase 3 — Zero validation errors:**
+- [ ] HM schema loading — load separate Home Manager schema for HM-context paths (`programs.git.settings.*`, `programs.atuin.*`, `programs.delta.*`, `programs.walker.*`, `programs.yazi.*`, `xdg.*`, `gtk.*`)
+- [ ] Freeform attrs expansion — `virtualisation.podman.defaultNetwork.settings.*`, `nix.settings.*` etc. are freeform and should be permissive
+- [ ] Stylix module schema — `stylix.targets.*` needs stylix flake input schema
+- [ ] Duplicate detection refinement — skip expected module pattern (options + config sections set same path)
+- [ ] Custom option validation — `myConfig.modules.kanata.capsLockEscCtrl` in template needs the module's own schema
 
-**Phase 4 — Target-form gating:**
-- [x] `TARGET-ONLY-FORMS` registry in `check.rkt` — compile error for target-specific forms outside their target
-- [x] `check-target-form` validation in `infer-expr` — gates all 15 nix forms + `await`
-- [x] Fix `emit-nix.rkt` silent `await` handling (was emitting inner expr, now errors)
-- [x] Cross-target rejection tests (10 tests: await on clj/nix, nix forms on clj/js)
-
-Win condition: every NixOS module expressible in Nisp is expressible
-in `beagle/nix` without `unsafe`. Emitted Nix evaluates correctly.
+**Phase 4 — Beyond nisp:**
+- [ ] LSP completion for NixOS option paths from schema
+- [ ] LSP completion for package names from packages.json
+- [ ] LSP hover showing NixOS schema type + enum for option paths
+- [ ] `beagle-import` — .nix → .bnix conversion (reuse rnix parser)
+- [ ] Package name validation — cross-check `pkgs.X` against nixpkgs attrs
 
 ### Experiment metadata
 

@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# beagle-rename: rename option paths across all .bnix files.
+#
+# Usage:
+#   beagle-rename [--dry-run] OLD_PATH NEW_PATH
+#
+# Examples:
+#   beagle-rename --dry-run myConfig.modules.foo myConfig.modules.bar
+#   beagle-rename myConfig.modules.foo myConfig.modules.bar
+
+set -euo pipefail
+
+dry_run=""
+args=()
+
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) dry_run="--dry-run" ;;
+    --help|-h)
+      echo "usage: beagle-rename [--dry-run] OLD_PATH NEW_PATH" >&2
+      echo "" >&2
+      echo "Renames option paths across all .bnix files in the current directory tree." >&2
+      echo "" >&2
+      echo "Options:" >&2
+      echo "  --dry-run   Show planned changes without writing files" >&2
+      exit 0
+      ;;
+    *) args+=("$arg") ;;
+  esac
+done
+
+if [[ ${#args[@]} -ne 2 ]]; then
+  echo "usage: beagle-rename [--dry-run] OLD_PATH NEW_PATH" >&2
+  exit 2
+fi
+
+old_path="${args[0]}"
+new_path="${args[1]}"
+
+exec racket -l beagle/private/rename-nix -- $dry_run "$old_path" "$new_path"

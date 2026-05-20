@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# beagle-schema: interactive NixOS schema queries.
+#
+# Usage:
+#   beagle-schema <path>                 exact lookup: type, enum, inner
+#   beagle-schema --children <prefix>    list options under a prefix
+#   beagle-schema --search <query>       substring search (up to 20 results)
+#   beagle-schema --json <path>          machine-readable JSON output
+
+set -euo pipefail
+
+BEAGLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+export BEAGLE_DIR
+
+racket -l beagle/private/schema-cli -- "$@"

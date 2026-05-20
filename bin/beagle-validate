@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# beagle-validate: validate .bnix files against the NixOS option schema.
+#
+# Replaces `nisp validate` — validates on SOURCE (.bnix), not generated .nix.
+# Gives source-line precision and catches errors before emission.
+#
+# Usage:
+#   bin/beagle-validate [files...]         # validate specific files
+#   bin/beagle-validate                    # auto-discover all .bnix files
+#   bin/beagle-validate --auto-fix         # apply unambiguous corrections
+#
+# Exits 0 if clean, 1 if errors, 2 if no files found.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LIB_DIR="$SCRIPT_DIR/../beagle-lib/private"
+
+args=()
+files=()
+auto_fix=""
+
+for arg in "$@"; do
+    case "$arg" in
+        --auto-fix)
+            auto_fix="--auto-fix"
+            ;;
+        --help|-h)
+            echo "Usage: beagle-validate [--auto-fix] [files...]"
+            echo ""
+            echo "Validate .bnix files against the NixOS option schema."
+            echo ""
+            echo "  files...     .bnix files to validate (auto-discovers if omitted)"
+            echo "  --auto-fix   apply unambiguous Levenshtein corrections"
+            echo ""
+            echo "Exits 0 if clean, 1 if errors, 2 if no files found."
+            exit 0
+            ;;
+        *)
+            files+=("$arg")
+            ;;
+    esac
+done
+
+# Auto-discover .bnix files if none specified
+if [[ ${#files[@]} -eq 0 ]]; then
+    while IFS= read -r -d '' f; do
+        files+=("$f")
+    done < <(find . -name '*.bnix' -type f -print0 2>/dev/null | sort -z)
+fi
+
+if [[ ${#files[@]} -eq 0 ]]; then
+    echo "beagle-validate: no .bnix files found" >&2
+    exit 2
+fi
+
+# Build the racket command
+racket_args=()
+if [[ -n "$auto_fix" ]]; then
+    racket_args+=("$auto_fix")
+fi
+for f in "${files[@]}"; do
+    racket_args+=("$f")
+done
+
+exec racket "$LIB_DIR/validate-nix.rkt" "${racket_args[@]}"
