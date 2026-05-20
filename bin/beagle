@@ -164,23 +164,19 @@ SETTINGS
                 echo "  matcher: Edit|Write → .claude/hooks/beagle-check.sh" >&2
             fi
 
-            # CLAUDE.md snippet (case-insensitive check)
-            existing_claude=""
-            for f in "$target"/[Cc][Ll][Aa][Uu][Dd][Ee].[Mm][Dd]; do
-                [[ -f "$f" ]] && existing_claude="$(basename "$f")" && break
-            done
-            if [[ -z "$existing_claude" ]]; then
-                cat > "$target/CLAUDE.md" <<'CLAUDE'
-# Project
+            # CLAUDE.md — insert/replace <!-- beagle --> section
+            beagle_section="$(cat <<'BEAGLE_SECTION'
+<!-- beagle -->
+## Beagle
 
 Uses [beagle](https://github.com/tompassarelli/beagle) — a typed authoring
-layer that compiles to Clojure. See `.claude/beagle-context.md` for the
-full language reference.
+layer for Clojure/JS/Nix. See `.claude/beagle-context.md` for the full
+language reference.
 
-## Workflow
+### Workflow
 
 - `beagle check .` — type-check all files
-- `beagle build . --out .build/` — compile to Clojure
+- `beagle build . --out .build/` — compile to target
 - `beagle sig fn-name .` — query a function's type signature
 - `beagle fields Record .` — query record fields and accessors
 
@@ -188,10 +184,30 @@ The daemon watches for file changes and provides instant type feedback
 after every edit via the PostToolUse hook.
 
 Start it with: `beagle-daemon start --watch .`
-CLAUDE
-                echo "Created CLAUDE.md" >&2
+<!-- /beagle -->
+BEAGLE_SECTION
+)"
+            existing_claude=""
+            for f in "$target"/[Cc][Ll][Aa][Uu][Dd][Ee].[Mm][Dd]; do
+                [[ -f "$f" ]] && existing_claude="$f" && break
+            done
+            if [[ -z "$existing_claude" ]]; then
+                printf "# Project\n\n%s\n" "$beagle_section" > "$target/CLAUDE.md"
+                echo "Created CLAUDE.md with beagle section" >&2
+            elif grep -q '<!-- beagle -->' "$existing_claude"; then
+                # Replace in-place between markers (preserves position)
+                tmpfile="$(mktemp)"
+                awk -v section="$beagle_section" '
+                    /<!-- beagle -->/ { print section; skip=1; next }
+                    /<!-- \/beagle -->/ { skip=0; next }
+                    !skip { print }
+                ' "$existing_claude" > "$tmpfile"
+                mv "$tmpfile" "$existing_claude"
+                echo "Updated beagle section in $(basename "$existing_claude")" >&2
             else
-                echo "CLAUDE.md already exists (found: $existing_claude), skipping — add beagle workflow notes manually" >&2
+                # Append section to existing file
+                printf "\n%s\n" "$beagle_section" >> "$existing_claude"
+                echo "Appended beagle section to $(basename "$existing_claude")" >&2
             fi
 
             echo "" >&2
