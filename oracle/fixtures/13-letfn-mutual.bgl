@@ -1,0 +1,11 @@
+#lang beagle/rkt
+
+(defn check-parity [(n : Int)] : String
+  (letfn [(is-even? [(x : Int)] : Bool
+            (if (= x 0) true (is-odd? (- x 1))))
+          (is-odd? [(x : Int)] : Bool
+            (if (= x 0) false (is-even? (- x 1))))]
+    (if (is-even? n) "even" "odd")))
+
+(println (check-parity 4))
+(println (check-parity 7))

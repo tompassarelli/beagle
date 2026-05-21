@@ -1,0 +1,16 @@
+#lang beagle/rkt
+
+(defn find-name [(names : (Vec String)) (idx : Int)] : String
+  (if-let [found (if (< idx (count names)) (nth names idx) nil)]
+    (str "found: " found)
+    "not found"))
+
+(defn greet-if-present [(name : String?)] : String
+  (if-some [n name]
+    (str "Hello, " n)
+    "Hello, stranger"))
+
+(println (find-name ["alice" "bob"] 0))
+(println (find-name ["alice" "bob"] 5))
+(println (greet-if-present "Tom"))
+(println (greet-if-present nil))

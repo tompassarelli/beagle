@@ -1,0 +1,13 @@
+#lang beagle/rkt
+
+(defn apply-to-list [(f : [Int -> Int]) (xs : (Vec Int))] : (Vec Int)
+  (map f xs))
+
+(def results : (Vec Int) (apply-to-list inc [1 2 3]))
+(println results)
+
+(def upper : [String -> String] string/upper-case)
+(println (upper "hello"))
+
+(def words : (Vec String) (map string/trim [" hi " " there "]))
+(println words)

@@ -193,6 +193,14 @@
   (define out (rkt-emit "(define-target rkt) (def x (dec 5))"))
   (check-true (string-contains? out "(sub1 5)")))
 
+(test-case "inc as value ref → add1"
+  (define out (rkt-emit "(define-target rkt) (def f inc)"))
+  (check-true (string-contains? out "add1")))
+
+(test-case "string/upper-case as value ref → string-upcase"
+  (define out (rkt-emit "(define-target rkt) (def f string/upper-case)"))
+  (check-true (string-contains? out "string-upcase")))
+
 ;; --- constructor translation -----------------------------------------------
 
 (test-case "->Name becomes Name"
@@ -292,3 +300,55 @@
   (define out (rkt-emit "(define-target rkt) (defunion (Result T E) (Ok [(value : T)]) (Err [(error : E)]))"))
   (check-true (string-contains? out "(struct (T E) Ok"))
   (check-true (string-contains? out "(define-type (Result T E)")))
+
+;; --- when-let / if-let -----------------------------------------------------
+
+(test-case "when-let emits let + when"
+  (define out (rkt-emit "(define-target rkt) (def r (when-let [x (get m \"k\")] (println x)))"))
+  (check-true (string-contains? out "(let ("))
+  (check-true (string-contains? out "(when ")))
+
+(test-case "if-let emits let + if"
+  (define out (rkt-emit "(define-target rkt) (def r (if-let [x (get m \"k\")] x \"default\"))"))
+  (check-true (string-contains? out "(let ("))
+  (check-true (string-contains? out "(if ")))
+
+;; --- when-some / if-some ---------------------------------------------------
+
+(test-case "when-some emits let + when"
+  (define out (rkt-emit "(define-target rkt) (def r (when-some [x val] (println x)))"))
+  (check-true (string-contains? out "(let ("))
+  (check-true (string-contains? out "(when ")))
+
+(test-case "if-some emits let + if"
+  (define out (rkt-emit "(define-target rkt) (def r (if-some [x val] x 0))"))
+  (check-true (string-contains? out "(let ("))
+  (check-true (string-contains? out "(if ")))
+
+;; --- dotimes ---------------------------------------------------------------
+
+(test-case "dotimes emits for with in-range"
+  (define out (rkt-emit "(define-target rkt) (dotimes [i 5] (println i))"))
+  (check-true (string-contains? out "(for ("))
+  (check-true (string-contains? out "(in-range 5)")))
+
+;; --- condp -----------------------------------------------------------------
+
+(test-case "condp emits cond with predicate application"
+  (define out (rkt-emit "(define-target rkt) (def r (condp = x 1 \"one\" 2 \"two\" \"other\"))"))
+  (check-true (string-contains? out "(cond"))
+  (check-true (string-contains? out "[else")))
+
+;; --- set! ------------------------------------------------------------------
+
+(test-case "set! emits set!"
+  (define out (rkt-emit "(define-target rkt) (set! x 42)"))
+  (check-true (string-contains? out "(set! x 42)")))
+
+;; --- letfn -----------------------------------------------------------------
+
+(test-case "letfn emits let with define + type annotations"
+  (define out (rkt-emit "(define-target rkt) (def r (letfn [(f [(x : Int)] : Int (g x)) (g [(x : Int)] : Int (+ x 1))] (f 10)))"))
+  (check-true (string-contains? out "(let ()"))
+  (check-true (string-contains? out "(: f (-> Integer Integer))"))
+  (check-true (string-contains? out "(define (f ")))

@@ -120,12 +120,23 @@
        (hash-set fields (defscalar-form-name f) '("v"))]
       [else fields])))
 
+(define rkt-value-refs
+  (hash 'string/join "string-join" 'string/split "string-split"
+        'string/upper-case "string-upcase" 'string/lower-case "string-downcase"
+        'string/includes? "string-contains?" 'string/trim "string-trim"
+        'string/starts-with? "string-prefix?" 'string/ends-with? "string-suffix?"
+        'string/replace "string-replace"
+        'println "displayln" 'prn "writeln"
+        'mapv "map" 'filterv "filter"
+        'inc "add1" 'dec "sub1"))
+
 (define (emit-symbol sym)
   (define s (symbol->string sym))
   (cond
     [(string-prefix? s "->")
      (substring s 2)]
     [(accessor-for s)]
+    [(hash-ref rkt-value-refs sym #f)]
     [else (mangle-name sym)]))
 
 (define (accessor-for s)
@@ -185,6 +196,16 @@
     [(kw-access? e)      (emit-kw-access e)]
     [(case-form? e)      (emit-case e)]
     [(with-form? e)      (emit-with e)]
+    [(when-let-form? e)  (emit-when-let e)]
+    [(if-let-form? e)    (emit-if-let e)]
+    [(when-some-form? e) (emit-when-some e)]
+    [(if-some-form? e)   (emit-if-some e)]
+    [(dotimes-form? e)   (emit-dotimes e)]
+    [(condp-form? e)     (emit-condp e)]
+    [(set!-form? e)      (emit-set! e)]
+    [(letfn-form? e)     (emit-letfn e)]
+    [(await-form? e)     (format ";; await not supported for rkt target")]
+
     [(unsafe-clj? e)     (format ";; unsafe: ~a" (unsafe-clj-clj-string e))]
     [(unsafe-expr? e)    (emit-expr (unsafe-expr-inner e))]
     [(dynamic-var? e)    (mangle-name (dynamic-var-name e))]
@@ -728,6 +749,14 @@
                  (emit-expr (for-binding-expr c)))]
         [(for-when? c)
          (format "#:when ~a" (emit-expr (for-when-test c)))]
+        [(for-let? c)
+         (define bindings (for-let-bindings c))
+         (string-join
+          (for/list ([b (in-list bindings)])
+            (format "[~a ~a]"
+                    (mangle-name (let-binding-name b))
+                    (emit-expr (let-binding-value b))))
+          " ")]
         [else ""])))
 
   (format "(for/list (~a) ~a)" (string-join clause-strs " ") (emit-body body)))
@@ -747,6 +776,14 @@
                  (emit-expr (for-binding-expr c)))]
         [(for-when? c)
          (format "#:when ~a" (emit-expr (for-when-test c)))]
+        [(for-let? c)
+         (define bindings (for-let-bindings c))
+         (string-join
+          (for/list ([b (in-list bindings)])
+            (format "[~a ~a]"
+                    (mangle-name (let-binding-name b))
+                    (emit-expr (let-binding-value b))))
+          " ")]
         [else ""])))
 
   (format "(for (~a) ~a)" (string-join clause-strs " ") (emit-body body)))
@@ -813,6 +850,100 @@
         [else (~a field-kw)]))
     (set! result (format "(struct-copy ??? ~a [~a ~a])" result field-name (emit-expr value))))
   result)
+
+;; --- when-let / if-let / when-some / if-some ------------------------------
+
+(define (emit-when-let e)
+  (define name (mangle-name (when-let-form-name e)))
+  (define expr (emit-expr (when-let-form-expr e)))
+  (define body (emit-body (when-let-form-body e)))
+  (format "(let ([~a ~a]) (when ~a ~a))" name expr name body))
+
+(define (emit-if-let e)
+  (define name (mangle-name (if-let-form-name e)))
+  (define expr (emit-expr (if-let-form-expr e)))
+  (define then (emit-expr (if-let-form-then-body e)))
+  (define els (if-let-form-else-body e))
+  (if els
+      (format "(let ([~a ~a]) (if ~a ~a ~a))" name expr name then (emit-expr els))
+      (format "(let ([~a ~a]) (when ~a ~a))" name expr name then)))
+
+(define (emit-when-some e)
+  (define name (mangle-name (when-some-form-name e)))
+  (define expr (emit-expr (when-some-form-expr e)))
+  (define body (emit-body (when-some-form-body e)))
+  (format "(let ([~a ~a]) (when ~a ~a))" name expr name body))
+
+(define (emit-if-some e)
+  (define name (mangle-name (if-some-form-name e)))
+  (define expr (emit-expr (if-some-form-expr e)))
+  (define then (emit-expr (if-some-form-then-body e)))
+  (define els (emit-expr (if-some-form-else-body e)))
+  (format "(let ([~a ~a]) (if ~a ~a ~a))" name expr name then els))
+
+;; --- dotimes ---------------------------------------------------------------
+
+(define (emit-dotimes e)
+  (define name (mangle-name (dotimes-form-name e)))
+  (define count-expr (emit-expr (dotimes-form-count-expr e)))
+  (define body (emit-body (dotimes-form-body e)))
+  (format "(for ([~a (in-range ~a)]) ~a)" name count-expr body))
+
+;; --- condp -----------------------------------------------------------------
+
+(define (emit-condp e)
+  (define pred (emit-expr (condp-form-pred-fn e)))
+  (define test (emit-expr (condp-form-test-expr e)))
+  (define clauses (condp-form-clauses e))
+  (define default (condp-form-default e))
+  (define clause-strs
+    (for/list ([c (in-list clauses)])
+      (format "[(~a ~a ~a) ~a]" pred (emit-expr (car c)) test (emit-expr (cdr c)))))
+  (define default-str
+    (if default (format "[else ~a]" (emit-expr default)) ""))
+  (format "(cond ~a ~a)" (string-join clause-strs " ") default-str))
+
+;; --- set! ------------------------------------------------------------------
+
+(define (emit-set! e)
+  (define target (set!-form-target e))
+  (define val (emit-expr (set!-form-value e)))
+  (cond
+    [(symbol? target)
+     (format "(set! ~a ~a)" (mangle-name target) val)]
+    [else
+     (format "(set! ~a ~a)" (emit-expr target) val)]))
+
+;; --- letfn -----------------------------------------------------------------
+
+(define (emit-letfn e)
+  (define fns (letfn-form-fns e))
+  (define body (emit-body (letfn-form-body e)))
+  (define fn-defs
+    (for/list ([f (in-list fns)])
+      (define name (mangle-name (letfn-fn-name f)))
+      (define params (letfn-fn-params f))
+      (define ret (letfn-fn-return-type f))
+      (define param-types
+        (for/list ([p (in-list params)])
+          (emit-type (param-type p))))
+      (define type-ann
+        (if ret
+            (format "(: ~a (-> ~a ~a))" name (string-join param-types " ") (emit-type ret))
+            #f))
+      (define param-str
+        (string-join
+         (for/list ([p (in-list params)])
+           (define t (param-type p))
+           (if t
+               (format "[~a : ~a]" (mangle-name (param-name p)) (emit-type t))
+               (format "~a" (mangle-name (param-name p)))))
+         " "))
+      (define fn-body (emit-body (letfn-fn-body f)))
+      (string-append
+       (if type-ann (string-append type-ann "\n") "")
+       (format "(define (~a ~a) ~a)" name param-str fn-body))))
+  (format "(let () ~a ~a)" (string-join fn-defs "\n") body))
 
 ;; --- body emission ---------------------------------------------------------
 

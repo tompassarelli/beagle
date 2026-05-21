@@ -184,12 +184,15 @@ that also serves as a differential oracle — `raco make` independently validate
 Beagle's type promises for free.
 
 - [x] P0: hand-emitted 5 spike programs, all pass `raco make`, mapping table
-- [ ] P1: minimal emitter (`emit-rkt.rkt`) — records, unions, scalars, parametric types, narrowing, basic forms
-- [ ] P1: `beagle/rkt` target module + reader
-- [ ] P1: fixture tests — emit from `.bgl`, compare to expected `.rkt`, run `raco make`
-- [ ] P1: negative fixtures — known-buggy `.bgl` files that `raco make` must reject
-- [ ] P2: oracle CI — `raco make` on emitted output as part of test suite
-- [ ] P3: differential harness — same inputs through JS + Racket, compare outputs
+- [x] P1: `emit-rkt.rkt` — records, unions, scalars, parametric types, narrowing, defn, fn, let, if/cond/when, when-let/if-let/when-some/if-some, loop/recur, try/catch, for/doseq, dotimes, condp, letfn, set!, match, ~60 core stdlib translations
+- [x] P1: `beagle/rkt` target module + reader (`rkt/main.rkt`, `rkt/lang/reader.rkt`)
+- [x] P1: 58 unit tests (`beagle-test/tests/emit-rkt.rkt`)
+- [x] P1: 13 positive fixtures (`oracle/fixtures/01-13*.bgl`), all pass `raco make`
+- [x] P1: 2 negative fixtures (`oracle/negative/`), both rejected by `raco make`
+- [x] P2: oracle CI — `beagle-test/tests/oracle.rkt` shells out to `racket` + `raco make` as part of `raco test`
+- [x] P3: differential harness — `beagle-test/tests/differential.rkt` compares RKT vs CLJ output (9 fixtures, gated by `BEAGLE_ORACLE=1`)
+- [x] Value-position stdlib refs — `inc`→`add1`, `string/*`→`string-*`, etc. via `rkt-value-refs` table
+- [ ] Known gaps: `defenum` keyword-as-member (checker rejects), `count` on strings, `Int/Int` division → Exact-Rational, defscalar/collection display format differs between targets
 
 ### New emit targets
 
