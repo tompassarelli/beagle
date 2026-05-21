@@ -213,6 +213,40 @@ else
     FAIL=$((FAIL + 1))
 fi
 
+# --- Parser module ------------------------------------------------------------
+
+echo ""
+echo "=== Building self-hosted parser ==="
+bin/beagle-build self-host/parse.bjs
+
+echo "=== PARSE: Running self-tests ==="
+PARSE_OUT=$(node runtime/src/self/host/parse.js 2>&1)
+PARSE_RC=$?
+
+echo "$PARSE_OUT"
+if [ $PARSE_RC -eq 0 ]; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+fi
+
+# --- Checker module -----------------------------------------------------------
+
+echo ""
+echo "=== Building self-hosted checker ==="
+bin/beagle-build self-host/check.bjs
+
+echo "=== CHECK: Running self-tests ==="
+CHECK_OUT=$(node runtime/src/self/host/check.js 2>&1)
+CHECK_RC=$?
+
+echo "$CHECK_OUT"
+if [ $CHECK_RC -eq 0 ]; then
+    PASS=$((PASS + 1))
+else
+    FAIL=$((FAIL + 1))
+fi
+
 # --- Summary ------------------------------------------------------------------
 
 echo ""

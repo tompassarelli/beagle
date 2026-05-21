@@ -1,5 +1,5 @@
 ---
-status: active
+status: done
 priority: 1
 ---
 
@@ -19,7 +19,7 @@ JS via Node) produce target source from JSON AST.
 source.bgl → bin/beagle-ast → JSON AST → node emit-{target}.mjs → target source
 ```
 
-## Done — emitters + lint + internals (63%)
+## Done — all compiler components (100%)
 
 - [x] AST JSON bridge (`ast-json.rkt`, `bin/beagle-ast`)
   - Extension-based target inference, float/int kind split
@@ -35,15 +35,10 @@ source.bgl → bin/beagle-ast → JSON AST → node emit-{target}.mjs → target
 - [x] Types (`self-host/types.bjs`) — type AST, parser, compatibility checker, 50 tests
 - [x] Macros (`self-host/macros.bjs`) — template expansion, hygiene, contracts, 27 tests
 - [x] AST (`self-host/ast.bjs`) — node constructors, symbol predicates, tag utils, 48 tests
+- [x] Parser (`self-host/parse.bjs`, 1923 lines) — source→AST, all forms, destructuring, 71 tests
+- [x] Checker (`self-host/check.bjs`, 1648 lines) — type inference, narrowing, exhaustiveness, 38 tests
 - [x] Unified build script (`self-host/build.sh`) — all checks pass
 - [x] Pipeline scripts: beagle-self-emit, beagle-self-emit-clj, -py, -nix, -rkt
-
-## Hardest — parser + type checker (remaining 37%)
-
-- [ ] parse.bjs (1872 lines) — source → AST, macro expansion, module resolution
-- [ ] check.bjs (2558 lines) — type inference, flow narrowing, exhaustive match
-
-These are deeply Racket-specific (syntax objects, reader macros, module system).
 
 ## Coverage
 
@@ -58,6 +53,6 @@ These are deeply Racket-specific (syntax objects, reader macros, module system).
 | macros.rkt | 484 | done |
 | types.rkt | 393 | done |
 | ast.rkt | 437 | done |
-| **done** | **7534** | **~63%** |
-| parse.rkt | 1872 | hard |
-| check.rkt | 2558 | hard |
+| parse.rkt | 1872 | done |
+| check.rkt | 2558 | done |
+| **total** | **11,964** | **~100%** |
