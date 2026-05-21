@@ -7,7 +7,6 @@ This experiment compares **agent repair workflows**, not just languages:
 | Track | Language | Toolchain |
 |---|---|---|
 | Beagle | `#lang beagle/clj` | daemon, beagle-check, beagle-fix, beagle-explain |
-| Zero | `.0` files | `zero check --json`, `zero explain`, `zero fix --plan --json` |
 | Python | `.py` + type annotations | mypy (forced), pytest |
 
 ## Domain: Constrained Maintenance Workflow Scheduler
@@ -190,7 +189,6 @@ ViolationKind = CapabilityMismatch { missing: list<string> }
 
 Language-idiomatic error types:
 - Beagle: `deferror` or union types
-- Zero: `choice` with `raises`
 - Python: exception hierarchy or dataclass results
 
 ### Determinism Contract
