@@ -106,7 +106,7 @@ printf "%-8s  %-6s  %-9s  %-14s  %-14s\n" \
 printf "%-8s  %-6s  %-9s  %-14s  %-14s\n" \
   "--------" "------" "---------" "--------------" "--------------"
 
-for TRACK in beagle python zero; do
+for TRACK in beagle python; do
   RUNS=${TRACK_RUNS[$TRACK]:-0}
   if [[ $RUNS -eq 0 ]]; then continue; fi
   FIXES=${TRACK_FIXES[$TRACK]:-0}
@@ -158,7 +158,7 @@ echo ""
 echo "--- Head-to-Head ---"
 echo ""
 
-ALL_TRACKS=(beagle python zero)
+ALL_TRACKS=(beagle python)
 ACTIVE_TRACKS=()
 for T in "${ALL_TRACKS[@]}"; do
   if [[ ${TRACK_RUNS[$T]:-0} -gt 0 ]]; then

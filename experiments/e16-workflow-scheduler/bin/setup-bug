@@ -5,7 +5,7 @@ set -euo pipefail
 #
 # Usage: bin/setup-bug <track> <bug_id> <workspace_dir>
 #
-# Tracks: beagle, python, zero
+# Tracks: beagle, python
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 EXPERIMENT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -15,7 +15,7 @@ BEAGLE_BIN="/home/tom/code/beagle/bin/beagle"
 
 usage() {
   echo "Usage: $(basename "$0") <track> <bug_id> <workspace_dir>"
-  echo "Tracks: beagle, python, zero"
+  echo "Tracks: beagle, python"
   exit 1
 }
 
@@ -27,8 +27,8 @@ TRACK="$1"
 BUG_ID="$2"
 WORKSPACE="$3"
 
-if [[ "$TRACK" != "beagle" && "$TRACK" != "python" && "$TRACK" != "zero" ]]; then
-  echo "Error: unknown track '$TRACK' (expected: beagle, python, zero)" >&2
+if [[ "$TRACK" != "beagle" && "$TRACK" != "python" ]]; then
+  echo "Error: unknown track '$TRACK' (expected: beagle, python)" >&2
   exit 1
 fi
 
@@ -47,9 +47,6 @@ case "$TRACK" in
     mkdir -p "$WORKSPACE/python"
     rsync -a --exclude '__pycache__' "$GOLDEN_DIR/python/" "$WORKSPACE/python/"
     ;;
-  zero)
-    rsync -a "$GOLDEN_DIR/zero/" "$WORKSPACE/"
-    ;;
 esac
 
 # 3. For beagle: build .bgl -> .clj
@@ -62,7 +59,7 @@ fi
 #    Patches use paths like a/golden/<track>/file.ext.
 #    For python: code lives at $WORKSPACE/python/, apply from $WORKSPACE with -p2
 #      (strips "a/golden/" leaving "python/file.ext")
-#    For beagle/zero: code lives at $WORKSPACE/, strip "a/golden/<track>/" with -p3
+#    For beagle: code lives at $WORKSPACE/, strip "a/golden/<track>/" with -p3
 PATCH_FILE="$BUGS_DIR/$BUG_ID/${TRACK}.patch"
 if [[ -f "$PATCH_FILE" ]]; then
   echo "Applying patch: $PATCH_FILE ..."

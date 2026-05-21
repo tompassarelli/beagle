@@ -11,11 +11,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 EXPERIMENT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 VERIFY_DIR="$EXPERIMENT_DIR/verify"
-ZERO_BIN="/home/tom/code/zerolang/bin/zero"
 
 usage() {
   echo "Usage: $(basename "$0") <track> <workspace_dir> [--json]"
-  echo "Tracks: beagle, python, zero"
+  echo "Tracks: beagle, python"
   exit 1
 }
 
@@ -30,7 +29,7 @@ if [[ "${3:-}" == "--json" ]]; then
   JSON_MODE=true
 fi
 
-if [[ "$TRACK" != "beagle" && "$TRACK" != "python" && "$TRACK" != "zero" ]]; then
+if [[ "$TRACK" != "beagle" && "$TRACK" != "python" ]]; then
   echo "Error: unknown track '$TRACK'" >&2
   exit 1
 fi
@@ -85,27 +84,6 @@ parse_python() {
   TOTAL=$((PASSED + FAILED))
 }
 
-parse_zero() {
-  local output="$1"
-  # Success: "49 test(s) ok"
-  # Failure: "N test(s) ok, M failed"  or separate lines
-  local ok_line
-  ok_line=$(echo "$output" | grep -oP '[0-9]+ test\(s\) ok' || true)
-  if [[ -n "$ok_line" ]]; then
-    PASSED=$(echo "$ok_line" | grep -oP '^[0-9]+')
-  else
-    PASSED=0
-  fi
-  local fail_line
-  fail_line=$(echo "$output" | grep -oP '[0-9]+ failed' || true)
-  if [[ -n "$fail_line" ]]; then
-    FAILED=$(echo "$fail_line" | grep -oP '^[0-9]+')
-  else
-    FAILED=0
-  fi
-  TOTAL=$((PASSED + FAILED))
-}
-
 # ---------------------------------------------------------------------------
 # Run the oracle
 # ---------------------------------------------------------------------------
@@ -139,11 +117,6 @@ case "$TRACK" in
         "PYTHONPATH='$WORKSPACE' python3 -m pytest '$VERIFY_DIR/python/test_oracle.py' -v --tb=short --noconftest 2>&1"
     ) || EXIT_CODE=$?
     parse_python "$OUTPUT"
-    ;;
-
-  zero)
-    OUTPUT=$(cd "$WORKSPACE" && "$ZERO_BIN" test zero.json 2>&1) || EXIT_CODE=$?
-    parse_zero "$OUTPUT"
     ;;
 esac
 

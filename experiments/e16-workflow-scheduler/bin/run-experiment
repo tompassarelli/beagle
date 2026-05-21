@@ -19,7 +19,7 @@ RESULTS_DIR="$EXPERIMENT_DIR/results"
 
 usage() {
   echo "Usage: $(basename "$0") <track> <bug_id> [--run <N>]"
-  echo "Tracks: beagle, python, zero"
+  echo "Tracks: beagle, python"
   exit 1
 }
 
@@ -105,13 +105,6 @@ case "$TRACK" in
     echo ""
     echo "  Test with:"
     echo "    PYTHONPATH=$WORKSPACE python -m pytest $EXPERIMENT_DIR/verify/python/test_oracle.py -v --tb=short --noconftest"
-    ;;
-  zero)
-    echo "  Workspace:     $WORKSPACE"
-    echo "  Files to edit: $WORKSPACE/src/*.0"
-    echo ""
-    echo "  Test with:"
-    echo "    cd $WORKSPACE && /home/tom/code/zerolang/bin/zero test zero.json"
     ;;
 esac
 echo ""
