@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Oracle check: emit Typed Racket from a Beagle source file, then
+# run raco make to independently validate the type promises.
+#
+# Usage:
+#   check-oracle FILE.bgl          # check one file
+#   check-oracle oracle/fixtures/  # check all .bgl files in directory
+#
+# Exit codes:
+#   0 = all files pass (Beagle emit + raco make agree)
+#   1 = at least one failure
+#
+# Failure classification (printed per file):
+#   PASS              — emitted Typed Racket passes raco make
+#   BEAGLE_REJECT     — Beagle itself rejects the source (not an oracle issue)
+#   EMITTER_BUG       — Beagle accepted but emitted invalid Racket syntax
+#   BEAGLE_UNSOUND    — Beagle accepted but Typed Racket found a type error
+#   ORACLE_GAP        — emitter produced unsupported construct (known gap)
+
+TMPDIR="${TMPDIR:-/tmp}"
+PASS=0
+FAIL=0
+ERRORS=()
+
+check_file() {
+    local src="$1"
+    local name
+    name=$(basename "$src" .bgl)
+    local tmp="$TMPDIR/oracle-${name}-$$.rkt"
+
+    # Step 1: Beagle emit
+    if ! racket "$src" 2>/dev/null > "$tmp"; then
+        printf "  %-40s BEAGLE_REJECT\n" "$src"
+        ERRORS+=("$src: BEAGLE_REJECT")
+        FAIL=$((FAIL + 1))
+        rm -f "$tmp"
+        return
+    fi
+
+    # Step 2: Check emitted file starts with #lang
+    if ! head -1 "$tmp" | grep -q '^#lang'; then
+        printf "  %-40s EMITTER_BUG (no #lang header)\n" "$src"
+        ERRORS+=("$src: EMITTER_BUG")
+        FAIL=$((FAIL + 1))
+        rm -f "$tmp"
+        return
+    fi
+
+    # Step 3: raco make (type check)
+    local raco_out
+    if raco_out=$(raco make "$tmp" 2>&1); then
+        printf "  %-40s PASS\n" "$src"
+        PASS=$((PASS + 1))
+    else
+        # Classify the error
+        if echo "$raco_out" | grep -q "Type Checker:"; then
+            printf "  %-40s BEAGLE_UNSOUND\n" "$src"
+            ERRORS+=("$src: BEAGLE_UNSOUND")
+        elif echo "$raco_out" | grep -q "unbound identifier"; then
+            printf "  %-40s EMITTER_BUG (unbound identifier)\n" "$src"
+            ERRORS+=("$src: EMITTER_BUG")
+        else
+            printf "  %-40s EMITTER_BUG\n" "$src"
+            ERRORS+=("$src: EMITTER_BUG")
+        fi
+        FAIL=$((FAIL + 1))
+
+        # Show first few lines of error
+        echo "$raco_out" | head -5 | sed 's/^/    /'
+    fi
+
+    rm -f "$tmp"
+}
+
+# Main
+if [ $# -eq 0 ]; then
+    echo "Usage: check-oracle FILE.bgl|DIR/"
+    exit 1
+fi
+
+target="$1"
+
+echo "Oracle check:"
+
+if [ -d "$target" ]; then
+    for f in "$target"/*.bgl; do
+        [ -f "$f" ] && check_file "$f"
+    done
+elif [ -f "$target" ]; then
+    check_file "$target"
+else
+    echo "Error: $target not found"
+    exit 1
+fi
+
+echo ""
+echo "Results: $PASS passed, $FAIL failed"
+
+if [ ${#ERRORS[@]} -gt 0 ]; then
+    echo ""
+    echo "Failures:"
+    for e in "${ERRORS[@]}"; do
+        echo "  $e"
+    done
+    exit 1
+fi
