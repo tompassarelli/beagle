@@ -2,29 +2,33 @@
 
 ;; E22: defconst-set — Nix target
 
-(define-macro proc defconst-set
+(define-macro beagle defconst-set
   [(prefix : Symbol) (entries : (Vec Syntax))] : (Vec Form)
-  (let ((ps (symbol->string prefix)))
+  (let (ps (symbol->string prefix))
     (append
-     (map (lambda (e)
-            (let ((ename (car e)) (etype (caddr e)) (eval (cadddr e)))
-              `(defn ,(string->symbol (format "~a-~a" ps ename))
-                 () : ,etype
-                 ,eval)))
+     (map (fn [(e : Syntax)]
+            (let (ename (syntax-name e)
+                  etype (syntax-type e)
+                  eval (first (rest (rest (rest e)))))
+              (make-defn (format-symbol "~a-~a" ps ename)
+                         (list)
+                         etype
+                         eval)))
           entries)
      (list
-      (let ((clauses
+      (let (clauses
              (append
-              (map (lambda (e)
-                     (let ((ename (car e)))
+              (map (fn [(e : Syntax)]
+                     (let (ename (syntax-name e))
                        (list (list '= 'name (symbol->string ename))
                              (list 'str (format "~a: " ename)
-                                   (list (string->symbol (format "~a-~a" ps ename)))))))
+                                   (list (format-symbol "~a-~a" ps ename))))))
                    entries)
-              (list (list 'else (list 'str "unknown: " 'name))))))
-        `(defn ,(string->symbol (format "lookup-~a" ps))
-           ((name : String)) : String
-           ,(cons 'cond clauses)))))))
+              (list (list 'else (list 'str "unknown: " 'name)))))
+        (make-defn (format-symbol "lookup-~a" ps)
+                   (list (make-param 'name 'String))
+                   'String
+                   (cons 'cond clauses)))))))
 
 (defconst-set http-status
   ((ok : Int 200)

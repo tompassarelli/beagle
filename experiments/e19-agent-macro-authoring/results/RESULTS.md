@@ -98,7 +98,7 @@ E19 asks: can agents write the macro?
 ## Implications
 
 1. **Proc macro docs are necessary.** Without them, agents don't discover
-   `define-macro proc` — they reach for runtime patterns instead. The
+   `define-macro beagle` — they reach for runtime patterns instead. The
    cheatsheet entry is load-bearing.
 
 2. **BRACKET-TAG is a papercut.** Agent B's only failure was the reader

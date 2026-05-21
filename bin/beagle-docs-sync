@@ -140,8 +140,8 @@ for f in CLAUDE.md README.md docs/cheatsheet.md; do
   update_in_file "$f" "~[0-9]+ entries total" "~$STDLIB_COUNT entries total" "stdlib entries total"
 done
 
-# Devlog count
-update_in_file "README.md" "[0-9]+ entries" "$DEVLOG_COUNT entries" "devlog count"
+# Devlog count (pattern must not match "352 entries" in stdlib table)
+update_in_file "README.md" "journal \\([0-9]+ entries\\)" "journal ($DEVLOG_COUNT entries)" "devlog count"
 
 # Stdlib count in AGENTS.md file map
 update_in_file "AGENTS.md" "~[0-9]+ pre-typed" "~$STDLIB_COUNT pre-typed" "stdlib count"

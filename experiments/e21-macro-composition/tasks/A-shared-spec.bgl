@@ -2,36 +2,44 @@
 
 ;; E21 Condition A: both macros receive the same field spec
 
-(define-macro proc defentity
+(define-macro beagle defentity
   [(name : Symbol) (fields : (Vec Syntax))] : (Vec Form)
   (cons
-    `(defrecord ,name ,(map (lambda (f) (list (car f) ': (caddr f))) fields))
-    (map (lambda (f)
-           (let ((fname (car f)) (ftype (caddr f)))
-             `(defn ,(string->symbol (format "~a-~a" name fname))
-                ((r : ,name)) : ,ftype
-                (get r ,(string->symbol (format ":~a" fname))))))
+    (make-defrecord name (map (fn [(f : Syntax)] (make-field (syntax-name f) (syntax-type f))) fields))
+    (map (fn [(f : Syntax)]
+           (let (fname (syntax-name f)
+                 ftype (syntax-type f))
+             (make-defn (format-symbol "~a-~a" name fname)
+                        (list (make-param 'r name))
+                        ftype
+                        (make-get 'r (make-keyword fname)))))
          fields)))
 
-(define-macro proc defapi
+(define-macro beagle defapi
   [(name : Symbol) (path : String) (fields : (Vec Syntax))] : (Vec Form)
-  (let ((ns (symbol->string name)))
+  (let (ns (symbol->string name)
+        first-f (first fields)
+        rest-fs (rest fields)
+        first-args (list (format "~a: " (syntax-name first-f)) (syntax-name first-f))
+        rest-args (map (fn [(f : Syntax)]
+                         (list 'str (format ", ~a: " (syntax-name f)) (syntax-name f)))
+                       rest-fs))
     (list
-     `(defn ,(string->symbol (format "list-~as" ns)) () : String
-        (str ,(format "GET ~a" path)))
-     `(defn ,(string->symbol (format "get-~a" ns)) ((id : String)) : String
-        (str ,(format "GET ~a/" path) id))
-     `(defn ,(string->symbol (format "create-~a" ns))
-        ,(map (lambda (f) (list (car f) ': (caddr f))) fields) : String
-        (str ,(format "POST ~a {" path)
-             ,@(let loop ((fs fields) (first? #t))
-                 (if (null? fs) '()
-                     (append
-                      (if first?
-                        (list (format "~a: " (caar fs)) (caar fs))
-                        (list (format ", ~a: " (caar fs)) (caar fs)))
-                      (loop (cdr fs) #f))))
-             "}")))))
+     (make-defn (format-symbol "list-~as" ns)
+                (list)
+                'String
+                (list 'str (format "GET ~a" path)))
+     (make-defn (format-symbol "get-~a" ns)
+                (list (make-param 'id 'String))
+                'String
+                (list 'str (format "GET ~a/" path) 'id))
+     (make-defn (format-symbol "create-~a" ns)
+                (map (fn [(f : Syntax)] (make-param (syntax-name f) (syntax-type f))) fields)
+                'String
+                (append (list 'str (format "POST ~a {" path))
+                        (append first-args
+                                (append rest-args
+                                        (list "}"))))))))
 
 ;; Shared field specs — written once, consumed by both macros
 (defentity User ((name : String) (email : String) (age : Int)))

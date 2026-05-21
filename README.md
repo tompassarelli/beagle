@@ -122,7 +122,7 @@ Beagle matches the typed baseline (mypy) on correctness and beats the untyped on
 
 ## Known gaps
 
-- ~~**Proc macro body language.**~~ Resolved: `define-macro beagle` evaluates macro bodies as Beagle using syntax constructors (`make-defrecord`, `make-defn`, `syntax-name`, etc.). No Racket `car`/`cdr`/quasiquote. Legacy `define-macro proc` (Racket bodies) still available.
+- ~~**Proc macro body language.**~~ Resolved: `define-macro beagle` evaluates macro bodies as Beagle using syntax constructors (`make-defrecord`, `make-defn`, `syntax-name`, etc.). No context-switch to Racket.
 - ~~**Cross-target macro verification.**~~ Resolved (E22): same proc macro compiles and runs identically on all 6 non-SQL targets (Clojure, CLJS, JS, Nix, Python, Typed Racket).
 - ~~**CNF visibility.**~~ Resolved (E20): query tools now expand macros before extracting definitions. `beagle-sig`, `beagle-fields`, and `beagle-provides` all see through macro expansions.
 

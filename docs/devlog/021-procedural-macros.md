@@ -2,6 +2,8 @@
 
 **Date:** 2026-05-21
 
+**Update:** `define-macro beagle` now evaluates macro bodies as Beagle using syntax constructors (`make-defrecord`, `make-defn`, etc.) — no Racket context-switch. See `beagle-doc/scribblings/macros.scrbl` for current reference. The `define-macro proc` examples below are historical.
+
 ## The discovery
 
 Beagle's transpiler architecture — one synchronous pass through its

@@ -2,15 +2,17 @@
 
 (ns e20.author)
 
-(define-macro proc defentity
+(define-macro beagle defentity
   [(name : Symbol) (fields : (Vec Syntax))] : (Vec Form)
   (cons
-    `(defrecord ,name ,(map (lambda (f) (list (car f) ': (caddr f))) fields))
-    (map (lambda (f)
-           (let ((fname (car f)) (ftype (caddr f)))
-             `(defn ,(string->symbol (format "~a-~a" name fname))
-                ((r : ,name)) : ,ftype
-                (get r ,(string->symbol (format ":~a" fname))))))
+    (make-defrecord name (map (fn [(f : Syntax)] (make-field (syntax-name f) (syntax-type f))) fields))
+    (map (fn [(f : Syntax)]
+           (let (fname (syntax-name f)
+                 ftype (syntax-type f))
+             (make-defn (format-symbol "~a-~a" name fname)
+                        (list (make-param 'r name))
+                        ftype
+                        (make-get 'r (make-keyword fname)))))
          fields)))
 
 (defentity User ((name : String) (email : String) (age : Int)))

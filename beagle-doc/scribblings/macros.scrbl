@@ -46,13 +46,13 @@ Defines a macro whose expansion is typed as @tt{Any} (escape boundary).
 
 @section[#:tag "procedural-macros"]{Procedural Macros}
 
-@section[#:tag "define-macro-beagle"]{define-macro beagle (recommended)}
+@section[#:tag "define-macro-beagle"]{define-macro beagle}
 
 @defform[(define-macro beagle name
   [(param : Type) ...] : ReturnType
   body)]{
 Beagle-native macro body evaluated at compile time. The body is Beagle code
-using syntax constructors — no Racket, no @tt{car}/@tt{cdr}/@tt{quasiquote}.
+using syntax constructors.
 
 Contract types: @tt{Symbol}, @tt{String}, @tt{Int}, @tt{Bool}, @tt{Keyword},
 @tt{Expr}, @tt{Form}, @tt{Syntax} (any), @tt{(Vec T)}.
@@ -97,20 +97,3 @@ Built-ins available in macro bodies: @tt{let}, @tt{fn}, @tt{if}, @tt{cond},
 @tt{=}, @tt{not}, @tt{+}, @tt{-}.
 }
 
-@section[#:tag "define-macro-proc"]{define-macro proc (legacy)}
-
-@defform[(define-macro proc name
-  [(param : Type) ...] : ReturnType
-  body)]{
-Compile-time Racket function with typed AST contracts. Same contract system as
-@tt{define-macro beagle}, but the body is raw Racket (@tt{car}/@tt{cdr}/quasiquote).
-Use @tt{define-macro beagle} for new macros.
-
-@itemlist[
-  @item{Body has @tt{racket/base}, @tt{racket/list}, @tt{racket/string},
-        @tt{racket/format}, and @tt{sym->kw} (symbol→keyword)}
-  @item{Inputs are auto-cleaned: reader tags stripped before the body sees
-        them — @tt{(Vec Syntax)} args arrive as plain lists}
-  @item{Output goes through the full parse → check → emit pipeline}
-  @item{@tt{beagle-expand} shows what the macro produces}
-]}

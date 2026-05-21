@@ -1276,7 +1276,7 @@ Defines a macro whose expansion is typed as `Any` (escape boundary).
 
 ### Procedural Macros
 
-### define-macro beagle (recommended)
+### define-macro beagle
 
 ```racket
 (define-macro beagle name        
@@ -1285,7 +1285,7 @@ body)
 ```
 
 Beagle-native macro body evaluated at compile time. The body is Beagle
-code using syntax constructors — no Racket, no `car`/`cdr`/`quasiquote`.
+code using syntax constructors.
 
 Contract types: `Symbol`, `String`, `Int`, `Bool`, `Keyword`, `Expr`,
 `Form`, `Syntax` (any), `(Vec T)`. Return `Form` for one top-level form,
@@ -1335,28 +1335,6 @@ Syntax constructors:
 Built-ins available in macro bodies: `let`, `fn`, `if`, `cond`, `map`,
 `filter`, `cons`, `list`, `append`, `first`, `rest`, `str`, `format`,
 `string->symbol`, `symbol->string`, `=`, `not`, `+`, `-`.
-
-### define-macro proc (legacy)
-
-```racket
-(define-macro proc name          
-[(param : Type) ...] : ReturnType
-body)                            
-```
-
-Compile-time Racket function with typed AST contracts. Same contract
-system as `define-macro beagle`, but the body is raw Racket
-(`car`/`cdr`/quasiquote). Use `define-macro beagle` for new macros.
-
-* Body has `racket/base`, `racket/list`, `racket/string`,
-  `racket/format`, and `sym->kw` (symbol→keyword)
-
-* Inputs are auto-cleaned: reader tags stripped before the body sees
-  them — `(Vec Syntax)` args arrive as plain lists
-
-* Output goes through the full parse → check → emit pipeline
-
-* `beagle-expand` shows what the macro produces
 
 ## Tools
 

@@ -2,33 +2,30 @@
 
 (ns beagle.e19.router-v2)
 
-(define-macro proc defrouter
+(define-macro beagle defrouter
   [(name : Symbol) (routes : (Vec Syntax))] : (Vec Form)
-  (let* ((route-items (if (and (pair? routes) (eq? (car routes) BRACKET-TAG))
-                          (cdr routes)
-                          routes))
-         (dispatch-name (string->symbol (format "~a-dispatch" name)))
-         (log-name (string->symbol (format "~a-log" name)))
-         (cond-pairs
-          (append
-           (apply append
-                  (map (lambda (r)
-                         (let ((method (car r))
-                               (path (cadr r))
-                               (handler (caddr r)))
-                           (list (list 'and (list '= 'method method) (list '= 'path path))
-                                 (symbol->string handler))))
-                       route-items))
-           (list 'true "404 Not Found"))))
+  (let [dispatch-name (format-symbol "~a-dispatch" name)
+        log-name (format-symbol "~a-log" name)
+        cond-branches (append
+          (map (fn [(r : Syntax)]
+            (let [m (first r)
+                  p (first (rest r))
+                  handler (first (rest (rest r)))]
+              (list (list 'and (list '= 'method m) (list '= 'path p))
+                    (symbol->string handler))))
+            routes)
+          (list (list 'true "404 Not Found")))]
     (list
-     `(defn ,dispatch-name ,(br '(method : String) '(path : String)) : String
-        (cond ,@(let loop ((items cond-pairs) (acc '()))
-                  (if (null? items) (reverse acc)
-                      (loop (cddr items)
-                            (cons (br (car items) (cadr items)) acc))))))
-     `(defn ,log-name ,(br '(method : String) '(path : String)) : String
-        (do (println (str "[LOG] " method " " path))
-            (,dispatch-name method path))))))
+      (make-defn dispatch-name
+        (list (make-param 'method 'String) (make-param 'path 'String))
+        'String
+        (cons 'cond cond-branches))
+      (make-defn log-name
+        (list (make-param 'method 'String) (make-param 'path 'String))
+        'String
+        (list 'do
+          (list 'println (list 'str "[LOG] " 'method " " 'path))
+          (list dispatch-name 'method 'path))))))
 
 (defrouter api
   [("GET" "/users" handle-users)

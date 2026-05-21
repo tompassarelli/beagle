@@ -6,7 +6,7 @@
 ;;   (define-macro safe   inc1 (x) (+ x 1))
 ;;   (define-macro unsafe wild (form) (do (println "trace") form))
 ;;
-;; Beagle-native procedural macros (recommended):
+;; Procedural macros (Beagle-native bodies):
 ;;   (define-macro beagle defentity
 ;;     [(name : Symbol) (fields : (Vec Syntax))] : (Vec Form)
 ;;     (let [record (make-defrecord name
@@ -14,13 +14,6 @@
 ;;                      (make-field (syntax-name f) (syntax-type f)))
 ;;                      fields))]
 ;;       (list record)))
-;;
-;; Legacy procedural macros (Racket bodies):
-;;   (define-macro proc gen-getter
-;;     [(rec : Symbol) (field : Symbol)] : Form
-;;     `(defn ,(string->symbol (format "get-~a" field))
-;;        ((obj : ,rec)) : Any
-;;        (get obj ,(symbol->keyword field))))
 
 (require racket/match
          racket/string
