@@ -788,7 +788,7 @@
          (define body (cond-clause-body c))
          (define body-str (if (= (length body) 1) (emit-expr (car body)) (emit-body-return body "")))
          (cond
-           [(and (symbol? test) (eq? test ':else))
+           [(and (symbol? test) (or (eq? test ':else) (eq? test 'else)))
             (format "~a" body-str)]
            [else
             (format "(~a) ? ~a" (emit-expr test) body-str)])))

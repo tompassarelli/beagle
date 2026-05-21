@@ -332,8 +332,11 @@
      (format "(cond\n  ~a)"
              (string-join
               (for/list ([c (in-list (cond-form-clauses e))])
+                (define test (cond-clause-test c))
                 (format "~a ~a"
-                        (emit-expr (cond-clause-test c))
+                        (if (and (symbol? test) (eq? test 'else))
+                            ":else"
+                            (emit-expr test))
                         (emit-body (cond-clause-body c) "  ")))
               "\n  "))]
     [(let-form? e)

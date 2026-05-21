@@ -37,19 +37,24 @@ This is an architectural consequence of being a transpiler, not a design goal we
 
 ## Procedural macros
 
-Compile-time code generation with typed AST contracts. The macro body is Racket (not Beagle — this is an impedance mismatch we haven't closed yet). Inputs and outputs are contract-checked; the expansion goes through the full checking pipeline.
+Compile-time code generation with typed AST contracts. Macro bodies are written in Beagle using syntax constructors — no context-switch to Racket. Inputs and outputs are contract-checked; the expansion goes through the full checking pipeline.
 
 ```racket
 #lang beagle
-(define-macro proc defentity
+(define-macro beagle defentity
   [(name : Symbol) (fields : (Vec Syntax))] : (Vec Form)
-  (cons
-    `(defrecord ,name ,(map (lambda (f) (list (car f) ': (caddr f))) fields))
-    (map (lambda (f)
-           `(defn ,(string->symbol (format "~a-~a" name (car f)))
-              ((r : ,name)) : ,(caddr f)
-              (get r ,(string->symbol (format ":~a" (car f))))))
-         fields)))
+  (let [record (make-defrecord name
+                 (map (fn [(f : Syntax)]
+                   (make-field (syntax-name f) (syntax-type f)))
+                   fields))
+        getters (map (fn [(f : Syntax)]
+                   (make-defn
+                     (format-symbol "~a-~a" name (syntax-name f))
+                     (list (make-param 'r name))
+                     (syntax-type f)
+                     (make-get 'r (make-keyword (syntax-name f)))))
+                  fields)]
+    (cons record getters)))
 
 (defentity User ((name : String) (email : String) (age : Int)))
 ;; → defrecord User + typed getters User-name, User-email, User-age
@@ -117,8 +122,8 @@ Beagle matches the typed baseline (mypy) on correctness and beats the untyped on
 
 ## Known gaps
 
-- **Proc macro body language.** Macro bodies are Racket, not Beagle. This means macro authors need `car`/`cdr`/quasiquote — E19 showed agents can learn this from docs, but the impedance mismatch is real.
-- **Cross-target macro verification.** Proc macros are tested on Clojure and JS. E22 (scoped, not yet run) will verify all 7 targets.
+- ~~**Proc macro body language.**~~ Resolved: `define-macro beagle` evaluates macro bodies as Beagle using syntax constructors (`make-defrecord`, `make-defn`, `syntax-name`, etc.). No Racket `car`/`cdr`/quasiquote. Legacy `define-macro proc` (Racket bodies) still available.
+- ~~**Cross-target macro verification.**~~ Resolved (E22): same proc macro compiles and runs identically on all 6 non-SQL targets (Clojure, CLJS, JS, Nix, Python, Typed Racket).
 - ~~**CNF visibility.**~~ Resolved (E20): query tools now expand macros before extracting definitions. `beagle-sig`, `beagle-fields`, and `beagle-provides` all see through macro expansions.
 
 ## Setup

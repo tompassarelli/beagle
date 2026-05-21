@@ -1276,7 +1276,67 @@ Defines a macro whose expansion is typed as `Any` (escape boundary).
 
 ### Procedural Macros
 
-### define-macro proc
+### define-macro beagle (recommended)
+
+```racket
+(define-macro beagle name        
+[(param : Type) ...] : ReturnType
+body)                            
+```
+
+Beagle-native macro body evaluated at compile time. The body is Beagle
+code using syntax constructors — no Racket, no `car`/`cdr`/`quasiquote`.
+
+Contract types: `Symbol`, `String`, `Int`, `Bool`, `Keyword`, `Expr`,
+`Form`, `Syntax` (any), `(Vec T)`. Return `Form` for one top-level form,
+`(Vec Form)` for multiple (spliced).
+
+```racket
+(define-macro beagle defentity                                     
+  [(name : Symbol) (fields : (Vec Syntax))] : (Vec Form)           
+  (let [record (make-defrecord name                                
+                 (map (fn [(f : Syntax)]                           
+                   (make-field (syntax-name f) (syntax-type f)))   
+                   fields))                                        
+        getters (map (fn [(f : Syntax)]                            
+                   (make-defn                                      
+                     (format-symbol "~a-~a" name (syntax-name f))  
+                     (list (make-param 'r name))                   
+                     (syntax-type f)                               
+                     (make-get 'r (make-keyword (syntax-name f)))))
+                  fields)]                                         
+    (cons record getters)))                                        
+                                                                   
+(defentity User ((name : String) (email : String) (age : Int)))    
+;; → defrecord User + typed getters User-name, User-email, User-age
+```
+
+Syntax constructors:
+
+* `make-defrecord name fields` — `(defrecord Name ((f : T) ...))`
+
+* `make-defn name params ret-type body` — `(defn name (params) : T
+  body)`
+
+* `make-param name type` — `(name : Type)`
+
+* `make-field name type` — `(name : Type)`
+
+* `make-get target field` — `(get target field)`
+
+* `make-keyword sym` — `:sym`
+
+* `format-symbol fmt args...` — builds a symbol from format string
+
+* `syntax-name s` — first element of a `(name : Type)` syntax triple
+
+* `syntax-type s` — type element of a `(name : Type)` syntax triple
+
+Built-ins available in macro bodies: `let`, `fn`, `if`, `cond`, `map`,
+`filter`, `cons`, `list`, `append`, `first`, `rest`, `str`, `format`,
+`string->symbol`, `symbol->string`, `=`, `not`, `+`, `-`.
+
+### define-macro proc (legacy)
 
 ```racket
 (define-macro proc name          
@@ -1284,31 +1344,9 @@ Defines a macro whose expansion is typed as `Any` (escape boundary).
 body)                            
 ```
 
-Compile-time Racket function with typed AST contracts. Inputs are
-contract-checked before the body runs; output is checked after.
-
-Contract types: `Symbol`, `String`, `Int`, `Bool`, `Keyword`, `Expr`,
-`Form`, `Syntax` (any), `(Vec T)`. Return `Form` for one top-level form,
-`(Vec Form)` for multiple (spliced).
-
-```racket
-;; Generate a typed record + N accessor functions from a field list         
-(define-macro proc defentity                                                
-  [(name : Symbol) (fields : (Vec Syntax))] : (Vec Form)                    
-  (let ((rec-name name)                                                     
-        (field-specs (map (lambda (f) (list (car f) ': (caddr f))) fields)))
-    (cons                                                                   
-      `(defrecord ,rec-name ,field-specs)                                   
-      (map (lambda (f)                                                      
-             (let ((fname (car f)) (ftype (caddr f)))                       
-               `(defn ,(string->symbol (format "~a-~a" name fname))         
-                  ((r : ,rec-name)) : ,ftype                                
-                  (get r ,(string->symbol (format ":~a" fname))))))         
-           fields))))                                                       
-                                                                            
-(defentity User ((name : String) (email : String) (age : Int)))             
-;; Expands to: defrecord User + get-name, get-email, get-age                
-```
+Compile-time Racket function with typed AST contracts. Same contract
+system as `define-macro beagle`, but the body is raw Racket
+(`car`/`cdr`/quasiquote). Use `define-macro beagle` for new macros.
 
 * Body has `racket/base`, `racket/list`, `racket/string`,
   `racket/format`, and `sym->kw` (symbol→keyword)

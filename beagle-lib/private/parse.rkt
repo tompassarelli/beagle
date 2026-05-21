@@ -201,7 +201,8 @@
     (match d
       [(list 'declare-extern (? symbol? name) type-expr)
        (reg! name (parse-type type-expr))]
-      [(list 'define-macro 'proc (? symbol? name) typed-params ': ret-type body)
+      [(list 'define-macro (or 'proc 'beagle) (? symbol? name) typed-params ': ret-type body)
+       (define macro-kind (cadr d))
        (define raw-params
          (cond
            [(bracketed? typed-params) (bracket-body typed-params)]
@@ -214,7 +215,10 @@
              [(and (list? p) (= (length p) 3) (symbol? (car p)) (eq? (cadr p) ':))
               (values (car p) (caddr p))]
              [else (values (if (symbol? p) p (gensym)) 'Syntax)])))
-       (register-proc-macro! registry (qualify-name prefix name) pnames icontracts ret-type body)]
+       (define qname (qualify-name prefix name))
+       (if (eq? macro-kind 'beagle)
+           (register-beagle-macro! registry qname pnames icontracts ret-type body)
+           (register-proc-macro! registry qname pnames icontracts ret-type body))]
       [(list 'define-macro (? symbol? kind) (? symbol? name) params template)
        (define ps (cond
                     [(bracketed? params) (bracket-body params)]
@@ -390,8 +394,9 @@
        (set! ns n)
        (set! ns-set? #t)]
 
-      [(list 'define-macro 'proc (? symbol? name) typed-params ': ret-type body)
+      [(list 'define-macro (or 'proc 'beagle) (? symbol? name) typed-params ': ret-type body)
        (validate-identifier! name "macro")
+       (define macro-kind (cadr d))
        (define raw-params
          (cond
            [(bracketed? typed-params) (bracket-body typed-params)]
@@ -407,7 +412,9 @@
               (values p 'Syntax)]
              [else
               (error 'beagle "macro ~a: bad typed parameter: ~v" name p)])))
-       (register-proc-macro! registry name param-names input-contracts ret-type body)]
+       (if (eq? macro-kind 'beagle)
+           (register-beagle-macro! registry name param-names input-contracts ret-type body)
+           (register-proc-macro! registry name param-names input-contracts ret-type body))]
 
       [(list 'define-macro (? symbol? kind) (? symbol? name) macro-params template)
        (validate-identifier! name "macro")
@@ -1364,10 +1371,16 @@
      (cond-clause (parse-expr (car d)) (parse-body (cdr d)))]
     [else (error 'beagle "cond clause must be a [test body ...] form, got: ~v" d)]))
 
+(define (grouped-clause? d)
+  (and (pair? d)
+       (or (pair? (car d))
+           (eq? (car d) 'else))))
+
 (define (parse-cond-clauses clauses)
   (cond
     [(null? clauses) '()]
-    [(bracketed? (->datum (car clauses)))
+    [(or (bracketed? (->datum (car clauses)))
+         (grouped-clause? (->datum (car clauses))))
      (map parse-cond-clause clauses)]
     [else
      (unless (even? (length clauses))

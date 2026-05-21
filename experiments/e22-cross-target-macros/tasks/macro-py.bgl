@@ -1,0 +1,45 @@
+#lang beagle/py
+
+;; E22: defconst-set — Python target
+
+(define-macro proc defconst-set
+  [(prefix : Symbol) (entries : (Vec Syntax))] : (Vec Form)
+  (let ((ps (symbol->string prefix)))
+    (append
+     (map (lambda (e)
+            (let ((ename (car e)) (etype (caddr e)) (eval (cadddr e)))
+              `(defn ,(string->symbol (format "~a-~a" ps ename))
+                 () : ,etype
+                 ,eval)))
+          entries)
+     (list
+      (let ((clauses
+             (append
+              (map (lambda (e)
+                     (let ((ename (car e)))
+                       (list (list '= 'name (symbol->string ename))
+                             (list 'str (format "~a: " ename)
+                                   (list (string->symbol (format "~a-~a" ps ename)))))))
+                   entries)
+              (list (list 'else (list 'str "unknown: " 'name))))))
+        `(defn ,(string->symbol (format "lookup-~a" ps))
+           ((name : String)) : String
+           ,(cons 'cond clauses)))))))
+
+(defconst-set http-status
+  ((ok : Int 200)
+   (not-found : Int 404)
+   (error : Int 500)))
+
+(defconst-set color
+  ((red : String "ff0000")
+   (green : String "00ff00")
+   (blue : String "0000ff")))
+
+(println (http-status-ok))
+(println (http-status-not-found))
+(println (color-red))
+(println (lookup-http-status "ok"))
+(println (lookup-http-status "error"))
+(println (lookup-http-status "missing"))
+(println (lookup-color "blue"))

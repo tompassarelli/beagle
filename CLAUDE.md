@@ -47,7 +47,12 @@ parse → check → emit-dispatch → emit-{clj,js,nix,py,rkt,sql}
   `private/stdlib-cljs.rkt` (75).
 - `beagle-lib/private/macros.rkt` — macro registry: template macros (safe/unsafe,
   naive substitution with hygiene), procedural macros (`proc` kind, compile-time
-  Racket lambdas with typed AST contracts). Depth-capped recursive expansion.
+  Racket lambdas with typed AST contracts), Beagle-native macros (`beagle` kind,
+  evaluated by macro-eval with syntax constructors). Depth-capped recursive expansion.
+- `beagle-lib/private/macro-eval.rkt` — compile-time Beagle interpreter for
+  `define-macro beagle` bodies. Datum-based evaluator (let, fn, if, cond, calls),
+  closure support, built-in env with list/string ops + syntax constructors
+  (make-defrecord, make-defn, make-param, syntax-name, syntax-type, etc.).
 - `beagle-lib/private/ast.rkt` — 144 AST struct definitions, shared utilities
   (tag helpers, symbol predicates, source location tracking), parse injection
   parameters (`current-parse-expr`, `current-parse-params`).

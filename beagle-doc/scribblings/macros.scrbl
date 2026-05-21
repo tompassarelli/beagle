@@ -46,36 +46,65 @@ Defines a macro whose expansion is typed as @tt{Any} (escape boundary).
 
 @section[#:tag "procedural-macros"]{Procedural Macros}
 
-@section[#:tag "define-macro-proc"]{define-macro proc}
+@section[#:tag "define-macro-beagle"]{define-macro beagle (recommended)}
 
-@defform[(define-macro proc name
+@defform[(define-macro beagle name
   [(param : Type) ...] : ReturnType
   body)]{
-Compile-time Racket function with typed AST contracts. Inputs are
-contract-checked before the body runs; output is checked after.
+Beagle-native macro body evaluated at compile time. The body is Beagle code
+using syntax constructors — no Racket, no @tt{car}/@tt{cdr}/@tt{quasiquote}.
 
 Contract types: @tt{Symbol}, @tt{String}, @tt{Int}, @tt{Bool}, @tt{Keyword},
 @tt{Expr}, @tt{Form}, @tt{Syntax} (any), @tt{(Vec T)}.
 Return @tt{Form} for one top-level form, @tt{(Vec Form)} for multiple (spliced).
 
 @codeblock|{
-;; Generate a typed record + N accessor functions from a field list
-(define-macro proc defentity
+(define-macro beagle defentity
   [(name : Symbol) (fields : (Vec Syntax))] : (Vec Form)
-  (let ((rec-name name)
-        (field-specs (map (lambda (f) (list (car f) ': (caddr f))) fields)))
-    (cons
-      `(defrecord ,rec-name ,field-specs)
-      (map (lambda (f)
-             (let ((fname (car f)) (ftype (caddr f)))
-               `(defn ,(string->symbol (format "~a-~a" name fname))
-                  ((r : ,rec-name)) : ,ftype
-                  (get r ,(string->symbol (format ":~a" fname))))))
-           fields))))
+  (let [record (make-defrecord name
+                 (map (fn [(f : Syntax)]
+                   (make-field (syntax-name f) (syntax-type f)))
+                   fields))
+        getters (map (fn [(f : Syntax)]
+                   (make-defn
+                     (format-symbol "~a-~a" name (syntax-name f))
+                     (list (make-param 'r name))
+                     (syntax-type f)
+                     (make-get 'r (make-keyword (syntax-name f)))))
+                  fields)]
+    (cons record getters)))
 
 (defentity User ((name : String) (email : String) (age : Int)))
-;; Expands to: defrecord User + get-name, get-email, get-age
+;; → defrecord User + typed getters User-name, User-email, User-age
 }|
+
+Syntax constructors:
+@itemlist[
+  @item{@tt{make-defrecord name fields} — @tt{(defrecord Name ((f : T) ...))}}
+  @item{@tt{make-defn name params ret-type body} — @tt{(defn name (params) : T body)}}
+  @item{@tt{make-param name type} — @tt{(name : Type)}}
+  @item{@tt{make-field name type} — @tt{(name : Type)}}
+  @item{@tt{make-get target field} — @tt{(get target field)}}
+  @item{@tt{make-keyword sym} — @tt{:sym}}
+  @item{@tt{format-symbol fmt args...} — builds a symbol from format string}
+  @item{@tt{syntax-name s} — first element of a @tt{(name : Type)} syntax triple}
+  @item{@tt{syntax-type s} — type element of a @tt{(name : Type)} syntax triple}
+]
+
+Built-ins available in macro bodies: @tt{let}, @tt{fn}, @tt{if}, @tt{cond},
+@tt{map}, @tt{filter}, @tt{cons}, @tt{list}, @tt{append}, @tt{first},
+@tt{rest}, @tt{str}, @tt{format}, @tt{string->symbol}, @tt{symbol->string},
+@tt{=}, @tt{not}, @tt{+}, @tt{-}.
+}
+
+@section[#:tag "define-macro-proc"]{define-macro proc (legacy)}
+
+@defform[(define-macro proc name
+  [(param : Type) ...] : ReturnType
+  body)]{
+Compile-time Racket function with typed AST contracts. Same contract system as
+@tt{define-macro beagle}, but the body is raw Racket (@tt{car}/@tt{cdr}/quasiquote).
+Use @tt{define-macro beagle} for new macros.
 
 @itemlist[
   @item{Body has @tt{racket/base}, @tt{racket/list}, @tt{racket/string},

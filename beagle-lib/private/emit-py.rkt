@@ -494,7 +494,7 @@
         (parameterize ([current-indent body-ind])
           (emit-body-block body body-ind)))
       (define keyword (if (= i 0) "if" "elif"))
-      (if (and (symbol? test) (eq? test ':else))
+      (if (and (symbol? test) (or (eq? test ':else) (eq? test 'else)))
           (format "else:\n~a" body-str)
           (format "~a ~a:\n~a" keyword (emit-expr test) body-str))))
   (string-join parts (format "\n~a" ind)))
