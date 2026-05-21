@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# beagle-ast: dump parsed+checked AST as JSON.
+#
+# Usage:
+#   bin/beagle-ast <source.bgl|.bclj|.bjs|.bnix|.bpy>
+#
+# Outputs a JSON representation of the typed AST, suitable for
+# consumption by external emitters (self-hosting pipeline).
+
+set -euo pipefail
+source "$(dirname "$0")/_beagle-racket"
+
+if [[ $# -ne 1 ]]; then
+    echo "usage: beagle-ast <source>" >&2
+    exit 2
+fi
+
+src="$1"
+
+if [[ ! -f "$src" ]]; then
+    echo "beagle-ast: source file not found: $src" >&2
+    exit 1
+fi
+
+"$RACKET" -e '
+(require beagle/private/parse
+         beagle/private/check
+         beagle/private/ast-json
+         json)
+
+(define src (vector-ref (current-command-line-arguments) 0))
+(define forms (read-beagle-syntax src))
+(define prog (parse-program forms #:source-path src))
+(type-check! prog)
+(write-json (program->json prog))
+(newline)
+' -- "$src"

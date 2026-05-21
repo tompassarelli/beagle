@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# beagle-self-emit: self-hosted emit pipeline.
+#
+# Usage:
+#   bin/beagle-self-emit <source.bjs>
+#
+# Pipeline:
+#   1. Racket: parse + type-check → JSON AST (bin/beagle-ast)
+#   2. Node:   beagle-written emitter → JavaScript source
+#
+# This is beagle compiling itself — Racket handles parsing and type-checking,
+# then a beagle-written JS emitter (self-host/emit-js.bjs, compiled to JS)
+# produces the final output.
+
+set -euo pipefail
+
+BEAGLE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$BEAGLE_ROOT/bin/_beagle-racket"
+
+if [[ $# -ne 1 ]]; then
+    echo "usage: beagle-self-emit <source.bjs>" >&2
+    exit 2
+fi
+
+src="$1"
+
+if [[ ! -f "$src" ]]; then
+    echo "beagle-self-emit: source file not found: $src" >&2
+    exit 1
+fi
+
+EMITTER="$BEAGLE_ROOT/self-host/dist/emit-js.mjs"
+
+if [[ ! -f "$EMITTER" ]]; then
+    echo "beagle-self-emit: emitter not built. Run: bin/beagle-build self-host/emit-js.bjs" >&2
+    exit 1
+fi
+
+"$BEAGLE_ROOT/bin/beagle-ast" "$src" | node "$EMITTER"
