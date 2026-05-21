@@ -187,11 +187,15 @@
              (for/or ([f (in-list forms)])
                (define d (syntax->datum f))
                (and (pair? d) (eq? (car d) 'define-target))))
-           (unless has-define-target?
-             (error 'beagle
-                    "~a: #lang beagle requires a target — use #lang beagle/js, beagle/clj, beagle/py, beagle/nix, or add (define-target <target>)"
-                    (path->string src)))
-           forms]
+           (cond
+             [has-define-target? forms]
+             [(expected-target-for-extension (path->string src))
+              => (lambda (ext-tgt)
+                   (cons (datum->syntax #f (list 'define-target ext-tgt)) forms))]
+             [else
+              (error 'beagle
+                     "~a: #lang beagle requires a target — use #lang beagle/js, beagle/clj, beagle/py, beagle/nix, or add (define-target <target>)"
+                     (path->string src))])]
           [else forms])))))
 
 

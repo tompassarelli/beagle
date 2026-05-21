@@ -1,0 +1,970 @@
+#lang beagle/js
+(ns self-host.emit-py)
+(define-mode strict)
+
+;; Self-hosted Python emitter.
+;; Reads JSON AST (from beagle-ast), emits Python source.
+
+(declare-extern JSON Any)
+(declare-extern process Any)
+
+;; --- name mangling (snake_case) ----------------------------------------------
+
+(defn mangle [(name : String)] : String
+  (.replaceAll
+    (.replaceAll
+      (.replaceAll
+        (.replaceAll
+          (.replaceAll name "-" "_")
+          "?" "_p")
+        "!" "_bang")
+      ">" "_gt")
+    "<" "_lt"))
+
+;; --- indentation helpers -----------------------------------------------------
+
+(def INDENT-STEP : String "    ")
+
+(defn indent-more [(ind : String)] : String
+  (str ind INDENT-STEP))
+
+;; --- parameter emission ------------------------------------------------------
+
+(defn emit-param [(p : Any)] : String
+  (let [t (get p "type")]
+    (cond
+      (= t "param") (mangle (get p "name"))
+      (= t "map-destructure")
+        (let [as-name (get p "as")]
+          (if as-name (mangle as-name) "kwargs"))
+      (= t "seq-destructure")
+        (mangle (first (get p "names")))
+      :else "_")))
+
+(defn emit-params [(params : (Vec Any)) (rest-p : Any)] : String
+  (let [fixed (map emit-param params)
+        all (if (and rest-p (not= rest-p false))
+              (let [rname (if (and (map? rest-p) (get rest-p "name"))
+                            (get rest-p "name")
+                            (if (string? rest-p) rest-p "args"))]
+                (conj fixed (str "*" (mangle rname))))
+              fixed)]
+    (.join all ", ")))
+
+;; --- body block helpers ------------------------------------------------------
+;; Python is indentation-sensitive. The body-block helper emits all-but-last
+;; as plain statements, then wraps the last expression with `return`.
+;; Empty body emits `pass`.
+
+(defn stmt-form? [(e : Any)] : Bool
+  (let [node (get e "node")]
+    (or (= node "def") (= node "defn") (= node "when")
+        (= node "doseq") (= node "set!") (= node "try")
+        (= node "for") (= node "match") (= node "cond")
+        (= node "loop") (= node "case") (= node "let")
+        (= node "when-let") (= node "if-let")
+        (= node "dotimes") (= node "letfn") (= node "condp")
+        (= node "with-open") (= node "when-some"))))
+
+(defn emit-body-block [(body : (Vec Any)) (ind : String)] : String
+  (if (= (count body) 0)
+    (str ind "pass")
+    (let [init (take (- (count body) 1) body)
+          last-e (last body)
+          stmts (map (fn [(e : Any)] : String
+                       (str ind (emit-expr e ind)))
+                     init)
+          last-str (if (stmt-form? last-e)
+                     (str ind (emit-expr last-e ind))
+                     (str ind "return " (emit-expr last-e ind)))]
+      (.join (conj stmts last-str) "\n"))))
+
+(defn emit-stmt-block [(body : (Vec Any)) (ind : String)] : String
+  (if (= (count body) 0)
+    (str ind "pass")
+    (.join (map (fn [(e : Any)] : String
+                  (str ind (emit-expr e ind)))
+                body)
+           "\n")))
+
+(defn emit-body-stmts [(body : (Vec Any)) (ind : String)] : String
+  (.join (map (fn [(e : Any)] : String (emit-expr e ind)) body)
+         (str "\n" ind)))
+
+;; --- quoted datum emission ---------------------------------------------------
+
+(defn emit-quoted [(d : Any)] : String
+  (cond
+    (string? d) (.stringify JSON d)
+    (number? d) (str d)
+    (and (map? d) (= (get d "type") "symbol"))
+      (.stringify JSON (get d "value"))
+    (and (map? d) (= (get d "type") "keyword"))
+      (.stringify JSON (get d "value"))
+    (vector? d)
+      (str "[" (.join (map emit-quoted d) ", ") "]")
+    (nil? d) "None"
+    (= d true) "True"
+    (= d false) "False"
+    :else (str d)))
+
+;; --- pattern emission (for match) --------------------------------------------
+
+(defn emit-pattern [(p : Any)] : String
+  (let [pt (get p "type")]
+    (cond
+      (= pt "wildcard") "_"
+      (= pt "var") (mangle (get p "name"))
+      (= pt "literal")
+        (let [v (get p "value")]
+          (cond
+            (nil? v) "None"
+            (string? v) (.stringify JSON v)
+            (number? v) (str v)
+            (= v true) "True"
+            (= v false) "False"
+            :else (str v)))
+      (= pt "record")
+        (let [bindings (get p "bindings")
+              field-strs (map (fn [(b : Any)] : String (mangle (get b "name"))) bindings)]
+          (str (mangle (get p "name")) "(" (.join field-strs ", ") ")"))
+      (= pt "map")
+        (let [entries (get p "entries")
+              entry-strs (map (fn [(pair : Any)] : String
+                                (str (emit-expr (get pair "key") "") ": "
+                                     (emit-pattern (get pair "value"))))
+                              entries)]
+          (str "{" (.join entry-strs ", ") "}"))
+      :else "_")))
+
+;; --- core call translations --------------------------------------------------
+;; Maps ~40 beagle core functions to Python equivalents.
+
+(defn emit-core-call [(fn-name : String) (args : (Vec Any)) (ind : String)] : (U String Nil)
+  (let [n (count args)
+        a (fn [(i : Int)] : String (emit-expr (nth args i) ind))]
+    (cond
+      ;; I/O
+      (= fn-name "println")
+        (str "print(" (.join (map (fn [(x : Any)] : String (emit-expr x ind)) args) ", ") ")")
+      (= fn-name "str")
+        (if (= n 1)
+          (str "str(" (a 0) ")")
+          (str "\"\".join([str(x) for x in [" (.join (map (fn [(x : Any)] : String (emit-expr x ind)) args) ", ") "]])")
+        )
+      (and (= fn-name "pr-str") (= n 1))
+        (str "repr(" (a 0) ")")
+
+      ;; throw
+      (and (= fn-name "throw") (= n 1))
+        (str "raise " (a 0))
+
+      ;; boolean
+      (and (= fn-name "not") (= n 1))
+        (str "(not " (a 0) ")")
+
+      ;; nil/some checks
+      (and (= fn-name "nil?") (= n 1))
+        (str "(" (a 0) " is None)")
+      (and (= fn-name "some?") (= n 1))
+        (str "(" (a 0) " is not None)")
+
+      ;; count / inc / dec
+      (and (= fn-name "count") (= n 1))
+        (str "len(" (a 0) ")")
+      (and (= fn-name "inc") (= n 1))
+        (str "(" (a 0) " + 1)")
+      (and (= fn-name "dec") (= n 1))
+        (str "(" (a 0) " - 1)")
+
+      ;; collection construction
+      (and (= fn-name "conj") (= n 2))
+        (str "(" (a 0) " + [" (a 1) "])")
+      (and (= fn-name "cons") (= n 2))
+        (str "[" (a 0) "] + " (a 1))
+      (and (= fn-name "assoc") (= n 3))
+        (str "{**" (a 0) ", " (a 1) ": " (a 2) "}")
+
+      ;; get
+      (and (= fn-name "get") (= n 3))
+        (str (a 0) ".get(" (a 1) ", " (a 2) ")")
+      (and (= fn-name "get") (= n 2))
+        (str (a 0) ".get(" (a 1) ")")
+
+      ;; contains?
+      (and (= fn-name "contains?") (= n 2))
+        (str "(" (a 1) " in " (a 0) ")")
+
+      ;; higher-order: map
+      (and (= fn-name "map") (= n 2))
+        (let [fn-arg (nth args 0)
+              coll-str (a 1)]
+          (if (= (get fn-arg "node") "fn")
+            (let [params (get fn-arg "params")
+                  p (first params)
+                  pname (mangle (if (= (get p "type") "param") (get p "name") (str p)))
+                  body-expr (first (get fn-arg "body"))]
+              (str "[" (emit-expr body-expr ind) " for " pname " in " coll-str "]"))
+            (str "[" (emit-expr fn-arg ind) "(x) for x in " coll-str "]")))
+
+      ;; higher-order: filter
+      (and (= fn-name "filter") (= n 2))
+        (let [fn-arg (nth args 0)
+              coll-str (a 1)]
+          (if (= (get fn-arg "node") "fn")
+            (let [params (get fn-arg "params")
+                  p (first params)
+                  pname (mangle (if (= (get p "type") "param") (get p "name") (str p)))
+                  body-expr (first (get fn-arg "body"))]
+              (str "[" pname " for " pname " in " coll-str " if " (emit-expr body-expr ind) "]"))
+            (str "[x for x in " coll-str " if " (emit-expr fn-arg ind) "(x)]")))
+
+      ;; reduce
+      (and (= fn-name "reduce") (= n 3))
+        (str "__import__('functools').reduce(" (a 0) ", " (a 1) ", " (a 2) ")")
+      (and (= fn-name "reduce") (= n 2))
+        (str "__import__('functools').reduce(" (a 0) ", " (a 1) ")")
+
+      ;; range
+      (= fn-name "range")
+        (str "list(range(" (.join (map (fn [(x : Any)] : String (emit-expr x ind)) args) ", ") "))")
+
+      ;; into
+      (and (= fn-name "into") (= n 2))
+        (str "list(" (a 1) ")")
+
+      ;; apply
+      (and (= fn-name "apply") (= n 2))
+        (str (a 0) "(*" (a 1) ")")
+
+      ;; concat
+      (and (= fn-name "concat") (= n 2))
+        (str "(" (a 0) " + " (a 1) ")")
+
+      ;; empty?
+      (and (= fn-name "empty?") (= n 1))
+        (str "(len(" (a 0) ") == 0)")
+
+      ;; indexing
+      (and (= fn-name "first") (= n 1))
+        (str (a 0) "[0]")
+      (and (= fn-name "second") (= n 1))
+        (str (a 0) "[1]")
+      (and (= fn-name "last") (= n 1))
+        (str (a 0) "[-1]")
+      (and (= fn-name "rest") (= n 1))
+        (str (a 0) "[1:]")
+      (and (= fn-name "nth") (= n 2))
+        (str (a 0) "[" (a 1) "]")
+
+      ;; identity
+      (and (= fn-name "identity") (= n 1))
+        (a 0)
+
+      ;; arithmetic (infix)
+      (and (= fn-name "+") (>= n 2))
+        (str "(" (.join (map (fn [(x : Any)] : String (emit-expr x ind)) args) " + ") ")")
+      (and (= fn-name "-") (>= n 2))
+        (str "(" (.join (map (fn [(x : Any)] : String (emit-expr x ind)) args) " - ") ")")
+      (and (= fn-name "*") (>= n 2))
+        (str "(" (.join (map (fn [(x : Any)] : String (emit-expr x ind)) args) " * ") ")")
+      (and (= fn-name "/") (>= n 2))
+        (str "(" (.join (map (fn [(x : Any)] : String (emit-expr x ind)) args) " / ") ")")
+
+      ;; comparison
+      (and (= fn-name "=") (= n 2))
+        (str "(" (a 0) " == " (a 1) ")")
+      (and (= fn-name "not=") (= n 2))
+        (str "(" (a 0) " != " (a 1) ")")
+      (and (= fn-name "<") (= n 2))
+        (str "(" (a 0) " < " (a 1) ")")
+      (and (= fn-name ">") (= n 2))
+        (str "(" (a 0) " > " (a 1) ")")
+      (and (= fn-name "<=") (= n 2))
+        (str "(" (a 0) " <= " (a 1) ")")
+      (and (= fn-name ">=") (= n 2))
+        (str "(" (a 0) " >= " (a 1) ")")
+
+      ;; logical
+      (and (= fn-name "and") (= n 2))
+        (str "(" (a 0) " and " (a 1) ")")
+      (and (= fn-name "or") (= n 2))
+        (str "(" (a 0) " or " (a 1) ")")
+
+      ;; mod
+      (and (= fn-name "mod") (= n 2))
+        (str "(" (a 0) " % " (a 1) ")")
+
+      :else nil)))
+
+;; --- record / union / enum / scalar emission ---------------------------------
+
+(defn emit-record [(e : Any) (ind : String)] : String
+  (let [name (mangle (get e "name"))
+        fields (get e "fields")]
+    (if (= (count fields) 0)
+      (str "@dataclass(frozen=True)\nclass " name ":\n    pass")
+      (let [field-strs (map (fn [(f : Any)] : String
+                              (str "    " (mangle (get f "name")) ": object"))
+                            fields)]
+        (str "@dataclass(frozen=True)\nclass " name ":\n"
+             (.join field-strs "\n"))))))
+
+(defn emit-defenum [(e : Any) (ind : String)] : String
+  (let [name (mangle (get e "name"))
+        vals (get e "values")
+        val-strs (map (fn [(v : String)] : String
+                         (str "    " (mangle v) " = " (.stringify JSON v)))
+                       vals)]
+    (str "class " name ":\n" (.join val-strs "\n"))))
+
+(defn emit-defunion [(e : Any) (ind : String)] : String
+  (let [name (mangle (get e "name"))
+        members (get e "members")
+        mf (get e "member-fields")
+        member-strs (map (fn [(m : String)] : String
+                           (let [fields (if (nil? mf) [] (get mf m))
+                                 safe-fields (if (nil? fields) [] fields)]
+                             (if (= (count safe-fields) 0)
+                               (str "@dataclass(frozen=True)\nclass " (mangle m) "(" name "):\n    pass")
+                               (let [fstrs (map (fn [(f : Any)] : String
+                                                  (str "    " (mangle (get f "name")) ": object"))
+                                                safe-fields)]
+                                 (str "@dataclass(frozen=True)\nclass " (mangle m) "(" name "):\n"
+                                      (.join fstrs "\n"))))))
+                         members)]
+    (str "class " name ":\n    pass\n\n" (.join member-strs "\n\n"))))
+
+(defn emit-deferror [(e : Any) (ind : String)] : String
+  (let [name (mangle (get e "name"))
+        members (get e "members")
+        mf (get e "member-fields")
+        member-strs (map (fn [(m : String)] : String
+                           (let [fields (if (nil? mf) [] (get mf m))
+                                 safe-fields (if (nil? fields) [] fields)]
+                             (if (= (count safe-fields) 0)
+                               (str "@dataclass(frozen=True)\nclass " (mangle m) "(" name "):\n    pass")
+                               (let [fstrs (map (fn [(f : Any)] : String
+                                                  (str "    " (mangle (get f "name")) ": object"))
+                                                safe-fields)]
+                                 (str "@dataclass(frozen=True)\nclass " (mangle m) "(" name "):\n"
+                                      (.join fstrs "\n"))))))
+                         members)]
+    (str "class " name "(Exception):\n    pass\n\n" (.join member-strs "\n\n"))))
+
+(defn emit-defscalar [(e : Any) (ind : String)] : String
+  (let [name (mangle (get e "name"))]
+    (str "@dataclass(frozen=True)\nclass " name ":\n    value: object")))
+
+;; --- match emission ----------------------------------------------------------
+
+(defn emit-match [(e : Any) (ind : String)] : String
+  (let [case-ind (indent-more ind)
+        body-ind (indent-more case-ind)
+        target-str (emit-expr (get e "target") ind)
+        clauses (get e "clauses")
+        arm-strs (map (fn [(c : Any)] : String
+                         (let [pat-str (emit-pattern (get c "pattern"))
+                               body-str (emit-body-block (get c "body") body-ind)]
+                           (str case-ind "case " pat-str ":\n" body-str)))
+                       clauses)]
+    (str "match " target-str ":\n" (.join arm-strs "\n"))))
+
+;; --- case emission -----------------------------------------------------------
+
+(defn emit-case [(e : Any) (ind : String)] : String
+  (let [case-ind (indent-more ind)
+        body-ind (indent-more case-ind)
+        target-str (emit-expr (get e "test") ind)
+        clauses (get e "clauses")
+        arm-strs (map (fn [(c : Any)] : String
+                         (let [val (get c "value")
+                               val-str (if (map? val)
+                                         (emit-expr val ind)
+                                         (if (string? val)
+                                           (.stringify JSON val)
+                                           (str val)))
+                               body-node (get c "body")
+                               body-str (emit-body-block [body-node] body-ind)]
+                           (str case-ind "case " val-str ":\n" body-str)))
+                       clauses)
+        default-node (get e "default")
+        default-str (if default-node
+                      (let [db (emit-body-block [default-node] body-ind)]
+                        (str "\n" case-ind "case _:\n" db))
+                      "")]
+    (str "match " target-str ":\n" (.join arm-strs "\n") default-str)))
+
+;; --- loop/recur emission -----------------------------------------------------
+
+(defn contains-recur? [(e : Any)] : Bool
+  (if (nil? e) false
+    (let [node (get e "node")]
+      (cond
+        (= node "recur") true
+        (= node "if")
+          (or (contains-recur? (get e "then"))
+              (if (get e "else") (contains-recur? (get e "else")) false))
+        (= node "do")
+          (.some (get e "body") (fn [(x : Any)] : Bool (contains-recur? x)))
+        (= node "let")
+          (.some (get e "body") (fn [(x : Any)] : Bool (contains-recur? x)))
+        (= node "cond")
+          (.some (get e "clauses") (fn [(c : Any)] : Bool
+            (.some (get c "body") (fn [(x : Any)] : Bool (contains-recur? x)))))
+        :else false))))
+
+(defn emit-recur-stmt [(bindings : (Vec Any)) (recur-args : (Vec Any)) (ind : String)] : String
+  (let [assigns (map (fn [(i : Int)] : String
+                       (str ind (mangle (get (nth bindings i) "name"))
+                            " = " (emit-expr (nth recur-args i) ind)))
+                     (range 0 (count bindings)))]
+    (str (.join assigns "\n") "\n" ind "continue")))
+
+(defn emit-loop-stmt [(e : Any) (bindings : (Vec Any)) (ind : String)] : String
+  (let [node (get e "node")]
+    (cond
+      (= node "recur")
+        (emit-recur-stmt bindings (get e "args") ind)
+      (= node "if")
+        (let [inner-ind (indent-more ind)
+              then-str (emit-loop-stmt (get e "then") bindings inner-ind)
+              else-node (get e "else")
+              else-str (if else-node
+                         (emit-loop-stmt else-node bindings inner-ind)
+                         (str inner-ind "pass"))]
+          (str ind "if " (emit-expr (get e "cond") ind) ":\n"
+               then-str "\n"
+               ind "else:\n"
+               else-str))
+      :else
+        (str ind "return " (emit-expr e ind)))))
+
+(defn emit-loop-body [(body : (Vec Any)) (bindings : (Vec Any)) (ind : String)] : String
+  (.join (map (fn [(e : Any)] : String
+                (if (contains-recur? e)
+                  (emit-loop-stmt e bindings ind)
+                  (str ind (emit-expr e ind))))
+              body)
+         "\n"))
+
+(defn emit-loop [(e : Any) (ind : String)] : String
+  (let [bindings (get e "bindings")
+        loop-ind (indent-more ind)
+        init-strs (map (fn [(b : Any)] : String
+                         (str (mangle (get b "name")) " = "
+                              (emit-expr (get b "value") ind)))
+                       bindings)
+        body-str (emit-loop-body (get e "body") bindings loop-ind)]
+    (str (.join init-strs (str "\n" ind))
+         "\n" ind "while True:\n" body-str)))
+
+;; --- for / doseq / dotimes emission ------------------------------------------
+
+(defn emit-for [(e : Any) (ind : String)] : String
+  (let [clauses (get e "clauses")
+        body (get e "body")
+        body-expr (last body)
+        parts (map (fn [(c : Any)] : String
+                     (let [t (get c "type")]
+                       (cond
+                         (= t "binding")
+                           (str "for " (mangle (get c "name")) " in " (emit-expr (get c "expr") ind))
+                         (= t "when")
+                           (str "if " (emit-expr (get c "test") ind))
+                         :else "")))
+                   clauses)
+        non-empty (filter (fn [(s : String)] : Bool (not= s "")) parts)]
+    (str "[" (emit-expr body-expr ind) " " (.join non-empty " ") "]")))
+
+(defn emit-doseq [(e : Any) (ind : String)] : String
+  (let [clauses (get e "clauses")
+        body-ind (indent-more ind)
+        binding (first clauses)
+        body-str (emit-stmt-block (get e "body") body-ind)]
+    (str "for " (mangle (get binding "name")) " in "
+         (emit-expr (get binding "expr") ind) ":\n" body-str)))
+
+;; --- cond emission -----------------------------------------------------------
+
+(defn emit-cond-clause [(c : Any) (keyword : String) (ind : String) (body-ind : String)] : String
+  (let [test (get c "test")
+        body (get c "body")
+        body-str (emit-body-block body body-ind)]
+    (if (or (and (= (get test "node") "literal")
+                 (= (get test "kind") "keyword")
+                 (= (get test "value") "else"))
+            (and (= (get test "node") "ref")
+                 (= (get test "name") "else")))
+      (str "else:\n" body-str)
+      (str keyword " " (emit-expr test ind) ":\n" body-str))))
+
+(defn emit-cond [(e : Any) (ind : String)] : String
+  (let [clauses (get e "clauses")
+        body-ind (indent-more ind)
+        first-part (emit-cond-clause (first clauses) "if" ind body-ind)
+        rest-parts (map (fn [(c : Any)] : String
+                          (emit-cond-clause c "elif" ind body-ind))
+                        (rest clauses))]
+    (.join (cons first-part rest-parts) (str "\n" ind))))
+
+;; --- try/except emission -----------------------------------------------------
+
+(defn emit-try [(e : Any) (ind : String)] : String
+  (let [body-ind (indent-more ind)
+        body-str (emit-body-block (get e "body") body-ind)
+        catches (get e "catches")
+        catch-strs (map (fn [(c : Any)] : String
+                          (let [exc-type (let [t (get c "type")]
+                                           (if (= t "Exception") "Exception" (mangle t)))
+                                catch-body (emit-body-block (get c "body") body-ind)]
+                            (str "except " exc-type " as " (mangle (get c "name")) ":\n" catch-body)))
+                        catches)
+        finally-body (get e "finally")
+        finally-str (if finally-body
+                      (let [fb (emit-body-block finally-body body-ind)]
+                        (str "\n" ind "finally:\n" fb))
+                      "")]
+    (str "try:\n" body-str "\n"
+         ind (.join catch-strs (str "\n" ind))
+         finally-str)))
+
+;; --- condp emission ----------------------------------------------------------
+
+(defn emit-condp [(e : Any) (ind : String)] : String
+  (let [pred-fn (get e "pred")
+        test-str (emit-expr (get e "test") ind)
+        clauses (get e "clauses")
+        body-ind (indent-more ind)
+        ;; check if pred is an infix operator
+        pred-name (if (= (get pred-fn "node") "ref") (get pred-fn "name") nil)
+        infix-op (cond
+                   (= pred-name "=") "=="
+                   (= pred-name "not=") "!="
+                   (= pred-name "<") "<"
+                   (= pred-name ">") ">"
+                   (= pred-name "<=") "<="
+                   (= pred-name ">=") ">="
+                   :else nil)
+        emit-condp-clause (fn [(c : Any) (kw : String)] : String
+                            (let [test-clause (if infix-op
+                                                (str (emit-expr (get c "test") ind) " " infix-op " " test-str)
+                                                (str (emit-expr pred-fn ind) "(" (emit-expr (get c "test") ind) ", " test-str ")"))
+                                  clause-body (str body-ind "return " (emit-expr (get c "body") body-ind))]
+                              (str kw " " test-clause ":\n" clause-body)))
+        first-part (emit-condp-clause (first clauses) "if")
+        rest-parts (map (fn [(c : Any)] : String (emit-condp-clause c "elif")) (rest clauses))
+        parts (cons first-part rest-parts)
+        default-node (get e "default")
+        default-str (if default-node
+                      (str "\n" ind "else:\n" body-ind "return " (emit-expr default-node body-ind))
+                      "")]
+    (str (.join parts (str "\n" ind)) default-str)))
+
+;; --- let emission ------------------------------------------------------------
+
+(defn emit-let [(e : Any) (ind : String)] : String
+  (let [bindings (get e "bindings")
+        bind-strs (map (fn [(b : Any)] : String
+                         (str (mangle (get b "name")) " = "
+                              (emit-expr (get b "value") ind)))
+                       bindings)
+        body (get e "body")
+        body-strs (map (fn [(expr : Any)] : String (emit-expr expr ind)) body)]
+    (.join (concat bind-strs body-strs) (str "\n" ind))))
+
+;; --- fn emission -------------------------------------------------------------
+
+(defn emit-fn [(e : Any) (ind : String)] : String
+  (let [params-str (emit-params (get e "params") (get e "rest"))
+        body (get e "body")]
+    (if (= (count body) 1)
+      (str "lambda " params-str ": " (emit-expr (first body) ind))
+      ;; multi-body lambda: use complex wrapper
+      (let [body-str (emit-body-block body (indent-more ""))]
+        (str "(lambda: (lambda " params-str ": (__fn := None, exec(\"\"\"def __fn("
+             params-str "):\\n" body-str "\"\"\"), __fn)[-1])(" params-str "))()")))))
+
+;; --- letfn emission ----------------------------------------------------------
+
+(defn emit-letfn [(e : Any) (ind : String)] : String
+  (let [fns (get e "fns")
+        fn-strs (map (fn [(f : Any)] : String
+                       (let [name (mangle (get f "name"))
+                             params-str (emit-params (get f "params") (get f "rest"))
+                             body-ind (indent-more ind)
+                             body-str (emit-body-block (get f "body") body-ind)]
+                         (str "def " name "(" params-str "):\n" body-str)))
+                     fns)
+        body (get e "body")
+        init (take (- (count body) 1) body)
+        init-strs (map (fn [(expr : Any)] : String (emit-expr expr ind)) init)
+        last-e (last body)
+        last-str (if (stmt-form? last-e)
+                   (emit-expr last-e ind)
+                   (str "return " (emit-expr last-e ind)))]
+    (.join (concat fn-strs init-strs [last-str]) (str "\n" ind))))
+
+;; --- with (record update) emission -------------------------------------------
+
+(defn emit-with [(e : Any) (ind : String)] : String
+  (let [target-str (emit-expr (get e "target") ind)
+        updates (get e "updates")
+        update-strs (map (fn [(u : Any)] : String
+                           (let [field-name (let [f (get u "field")]
+                                              (if (.startsWith f ":")
+                                                (.substring f 1)
+                                                f))]
+                             (str (mangle field-name) "=" (emit-expr (get u "value") ind))))
+                         updates)]
+    (str "__import__('dataclasses').replace(" target-str ", " (.join update-strs ", ") ")")))
+
+;; --- main emit-expr ----------------------------------------------------------
+
+(defn emit-expr [(e : Any) (ind : String)] : String
+  (if (nil? e) "None"
+    (let [node (get e "node")]
+      (cond
+        ;; --- literals ---
+        (= node "literal")
+          (let [kind (get e "kind")]
+            (cond
+              (= kind "string") (.stringify JSON (get e "value"))
+              (= kind "number") (str (get e "value"))
+              (= kind "bool") (if (get e "value") "True" "False")
+              (= kind "nil") "None"
+              (= kind "keyword") (.stringify JSON (get e "value"))
+              :else "None"))
+
+        ;; --- variable reference ---
+        (= node "ref")
+          (let [name (get e "name")]
+            (cond
+              (= name "nil") "None"
+              (= name "true") "True"
+              (= name "false") "False"
+              (.startsWith name ":") (.stringify JSON (.substring name 1))
+              :else (mangle name)))
+
+        ;; --- def ---
+        (= node "def")
+          (str (mangle (get e "name")) " = " (emit-expr (get e "value") ind))
+
+        ;; --- defonce ---
+        (= node "defonce")
+          (str (mangle (get e "name")) " = " (emit-expr (get e "value") ind))
+
+        ;; --- defn ---
+        (= node "defn")
+          (let [name (mangle (get e "name"))
+                params-str (emit-params (get e "params") (get e "rest"))
+                body-ind (indent-more ind)
+                body-str (emit-body-block (get e "body") body-ind)]
+            (str "def " name "(" params-str "):\n" body-str))
+
+        ;; --- defn-multi ---
+        (= node "defn-multi")
+          (let [name (mangle (get e "name"))
+                arities (get e "arities")
+                deep-ind (indent-more (indent-more ind))
+                arity-strs (map (fn [(a : Any)] : String
+                                  (let [body-str (emit-body-block (get a "body") deep-ind)]
+                                    (str "    if len(args) == " (count (get a "params")) ":\n" body-str)))
+                                arities)]
+            (str "def " name "(*args):\n" (.join arity-strs "\n")))
+
+        ;; --- record ---
+        (= node "record")
+          (emit-record e ind)
+
+        ;; --- defenum ---
+        (= node "defenum")
+          (emit-defenum e ind)
+
+        ;; --- defunion ---
+        (= node "defunion")
+          (emit-defunion e ind)
+
+        ;; --- deferror ---
+        (= node "deferror")
+          (emit-deferror e ind)
+
+        ;; --- defscalar ---
+        (= node "defscalar")
+          (emit-defscalar e ind)
+
+        ;; --- if (ternary) ---
+        (= node "if")
+          (let [then-str (emit-expr (get e "then") ind)
+                cond-str (emit-expr (get e "cond") ind)
+                else-node (get e "else")
+                else-str (if else-node (emit-expr else-node ind) "None")]
+            (str "(" then-str " if " cond-str " else " else-str ")"))
+
+        ;; --- when ---
+        (= node "when")
+          (let [body-ind (indent-more ind)
+                body-str (emit-body-block (get e "body") body-ind)]
+            (str "if " (emit-expr (get e "cond") ind) ":\n" body-str))
+
+        ;; --- do ---
+        (= node "do")
+          (emit-body-stmts (get e "body") ind)
+
+        ;; --- cond ---
+        (= node "cond")
+          (emit-cond e ind)
+
+        ;; --- let ---
+        (= node "let")
+          (emit-let e ind)
+
+        ;; --- fn ---
+        (= node "fn")
+          (emit-fn e ind)
+
+        ;; --- call ---
+        (= node "call")
+          (let [fn-expr (get e "fn")
+                args (get e "args")]
+            (if (= (get fn-expr "node") "ref")
+              (let [fn-name (get fn-expr "name")
+                    core (emit-core-call fn-name args ind)]
+                (if (some? core)
+                  core
+                  (str (mangle fn-name) "(" (.join (map (fn [(x : Any)] : String (emit-expr x ind)) args) ", ") ")")))
+              ;; non-ref function expression
+              (str (emit-expr fn-expr ind) "(" (.join (map (fn [(x : Any)] : String (emit-expr x ind)) args) ", ") ")")))
+
+        ;; --- vec ---
+        (= node "vec")
+          (str "[" (.join (map (fn [(x : Any)] : String (emit-expr x ind)) (get e "items")) ", ") "]")
+
+        ;; --- map ---
+        (= node "map")
+          (let [pairs (get e "pairs")
+                strs (map (fn [(p : Any)] : String
+                            (str (emit-expr (get p "key") ind) ": " (emit-expr (get p "val") ind)))
+                          pairs)]
+            (str "{" (.join strs ", ") "}"))
+
+        ;; --- set ---
+        (= node "set")
+          (let [items (get e "items")]
+            (if (= (count items) 0)
+              "set()"
+              (str "{" (.join (map (fn [(x : Any)] : String (emit-expr x ind)) items) ", ") "}")))
+
+        ;; --- method-call ---
+        (= node "method-call")
+          (let [method (get e "method")
+                target-str (emit-expr (get e "target") ind)
+                args (get e "args")
+                clean-name (if (.startsWith method ".")
+                             (.substring method 1)
+                             method)]
+            (if (.startsWith method ".-")
+              ;; property access
+              (str target-str "." (mangle (.substring method 2)))
+              ;; method call
+              (str target-str "." (mangle clean-name) "("
+                   (.join (map (fn [(x : Any)] : String (emit-expr x ind)) args) ", ") ")")))
+
+        ;; --- static-call ---
+        (= node "static-call")
+          (let [s (get e "name")
+                args (get e "args")
+                slash-idx (.indexOf s "/")]
+            (if (>= slash-idx 0)
+              (str (mangle (.substring s 0 slash-idx)) "."
+                   (mangle (.substring s (+ slash-idx 1)))
+                   "(" (.join (map (fn [(x : Any)] : String (emit-expr x ind)) args) ", ") ")")
+              (str (mangle s)
+                   "(" (.join (map (fn [(x : Any)] : String (emit-expr x ind)) args) ", ") ")")))
+
+        ;; --- new (constructor) ---
+        (= node "new")
+          (let [cls (get e "class")
+                clean (if (.endsWith cls ".")
+                        (.substring cls 0 (- (.-length cls) 1))
+                        cls)]
+            (str (mangle clean) "("
+                 (.join (map (fn [(x : Any)] : String (emit-expr x ind)) (get e "args")) ", ") ")"))
+
+        ;; --- kw-access ---
+        (= node "kw-access")
+          (let [kw (get e "kw")
+                key-str (.substring kw 1)
+                target-str (emit-expr (get e "target") ind)
+                default-val (get e "default")]
+            (if (and default-val (not= default-val false))
+              (str target-str ".get(" (.stringify JSON key-str) ", " (emit-expr default-val ind) ")")
+              (str target-str "[" (.stringify JSON key-str) "]")))
+
+        ;; --- dynamic-var ---
+        (= node "dynamic-var")
+          (mangle (get e "name"))
+
+        ;; --- try ---
+        (= node "try")
+          (emit-try e ind)
+
+        ;; --- for ---
+        (= node "for")
+          (emit-for e ind)
+
+        ;; --- doseq ---
+        (= node "doseq")
+          (emit-doseq e ind)
+
+        ;; --- dotimes ---
+        (= node "dotimes")
+          (let [body-ind (indent-more ind)
+                body-str (emit-stmt-block (get e "body") body-ind)]
+            (str "for " (mangle (get e "name")) " in range("
+                 (emit-expr (get e "count") ind) "):\n" body-str))
+
+        ;; --- match ---
+        (= node "match")
+          (emit-match e ind)
+
+        ;; --- case ---
+        (= node "case")
+          (emit-case e ind)
+
+        ;; --- loop ---
+        (= node "loop")
+          (emit-loop e ind)
+
+        ;; --- recur (standalone, outside loop -- error) ---
+        (= node "recur")
+          "# ERROR: recur outside loop"
+
+        ;; --- with (record update) ---
+        (= node "with")
+          (emit-with e ind)
+
+        ;; --- when-let ---
+        (= node "when-let")
+          (let [var-name (mangle (get e "name"))
+                body-ind (indent-more ind)
+                body-str (emit-stmt-block (get e "body") body-ind)]
+            (str var-name " = " (emit-expr (get e "expr") ind) "\n"
+                 ind "if " var-name " is not None:\n" body-str))
+
+        ;; --- if-let ---
+        (= node "if-let")
+          (let [var-name (mangle (get e "name"))
+                then-str (emit-expr (get e "then") ind)
+                else-node (get e "else")
+                else-str (if else-node (emit-expr else-node ind) "None")]
+            (str var-name " = " (emit-expr (get e "expr") ind) "\n"
+                 then-str " if " var-name " is not None else " else-str))
+
+        ;; --- await ---
+        (= node "await")
+          (str "await " (emit-expr (get e "expr") ind))
+
+        ;; --- set! ---
+        (= node "set!")
+          (str (emit-expr (get e "target") ind) " = " (emit-expr (get e "value") ind))
+
+        ;; --- unsafe ---
+        (= node "unsafe")
+          (emit-expr (get e "inner") ind)
+
+        ;; --- unsafe-raw ---
+        (= node "unsafe-raw")
+          (.trim (get e "code"))
+
+        ;; --- quoted ---
+        (= node "quoted")
+          (emit-quoted (get e "datum"))
+
+        ;; --- regex ---
+        (= node "regex")
+          (str "re.compile(r\"" (get e "pattern") "\")")
+
+        ;; --- block-string ---
+        (= node "block-string")
+          (str "\"\"\"" (get e "text") "\"\"\"")
+
+        ;; --- target-case ---
+        (= node "target-case")
+          (let [cases (get e "cases")
+                branch (first (filter (fn [(c : Any)] : Bool (= (get c "target") "py")) cases))]
+            (if branch (emit-expr (get branch "body") ind) "None"))
+
+        ;; --- check ---
+        (= node "check")
+          (let [inner (emit-expr (get e "expr") ind)]
+            (str "(lambda r: r.value if r.is_ok() else (_ for _ in ()).throw(r.error))(" inner ")"))
+
+        ;; --- rescue ---
+        (= node "rescue")
+          (let [inner (emit-expr (get e "expr") ind)
+                fallback (emit-expr (get e "fallback") ind)]
+            (str "(lambda r: r.value if r.is_ok() else " fallback ")(" inner ")"))
+
+        ;; --- condp ---
+        (= node "condp")
+          (emit-condp e ind)
+
+        ;; --- letfn ---
+        (= node "letfn")
+          (emit-letfn e ind)
+
+        ;; --- when-some ---
+        (= node "when-some")
+          (let [var-name (mangle (get e "name"))
+                body-ind (indent-more ind)
+                body-str (emit-stmt-block (get e "body") body-ind)]
+            (str var-name " = " (emit-expr (get e "expr") ind) "\n"
+                 ind "if " var-name " is not None:\n" body-str))
+
+        ;; --- if-some ---
+        (= node "if-some")
+          (let [var-name (mangle (get e "name"))]
+            (str "(lambda __v: " (emit-expr (get e "then") ind)
+                 " if __v is not None else " (emit-expr (get e "else") ind)
+                 ")(" (emit-expr (get e "expr") ind) ")"))
+
+        ;; --- unknown ---
+        (= node "unknown")
+          (str "# UNSUPPORTED: " (get e "raw"))
+
+        :else
+          (str "# unknown node: " node)))))
+
+;; --- header emission ---------------------------------------------------------
+
+(defn needs-dataclass? [(forms : (Vec Any))] : Bool
+  (.some forms (fn [(f : Any)] : Bool
+    (let [node (get f "node")]
+      (or (= node "record") (= node "defunion") (= node "deferror"))))))
+
+;; --- program emission --------------------------------------------------------
+
+(defn emit-program [(prog : Any)] : String
+  (let [forms (get prog "forms")
+        body (.join (map (fn [(f : Any)] : String (emit-expr f "")) forms) "\n\n")
+        header (if (needs-dataclass? forms) "from dataclasses import dataclass" "")]
+    (if (= header "")
+      (str body "\n")
+      (str header "\n\n" body "\n"))))
+
+;; --- main: read stdin, emit --------------------------------------------------
+
+(defn main [] : Nil
+  (let [chunks (atom [])]
+    (.on (.-stdin process) "data"
+      (fn [(chunk : Any)] : Nil
+        (reset! chunks (conj (deref chunks) (.toString chunk)))))
+    (.on (.-stdin process) "end"
+      (fn [] : Nil
+        (let [input (.join (deref chunks) "")
+              prog (.parse JSON input)
+              output (emit-program prog)]
+          (.write (.-stdout process) output))))))
+
+(main)

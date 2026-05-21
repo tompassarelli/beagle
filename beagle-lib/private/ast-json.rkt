@@ -210,7 +210,7 @@
              'test (expr->json (case-form-test e))
              'clauses (map (lambda (c)
                              (hasheq 'value (datum->json (case-clause-value c))
-                                     'body (map expr->json (case-clause-body c))))
+                                     'body (expr->json (case-clause-body c))))
                            (case-form-clauses e))
              'default (and (case-form-default e) (expr->json (case-form-default e))))]
 
@@ -252,14 +252,30 @@
              'values (map symbol->string (defenum-form-values e)))]
 
     [(defunion-form? e)
-     (hasheq 'node "defunion"
-             'name (symbol->string (defunion-form-name e))
-             'members (map symbol->string (defunion-form-members e)))]
+     (define mf (defunion-form-member-fields e))
+     (define base
+       (hasheq 'node "defunion"
+               'name (symbol->string (defunion-form-name e))
+               'members (map symbol->string (defunion-form-members e))))
+     (if mf
+         (hash-set base 'member-fields
+                   (for/hasheq ([(k v) (in-hash mf)])
+                     (values k
+                             (map (lambda (p) (hasheq 'name (symbol->string (param-name p)))) v))))
+         base)]
 
     [(deferror-form? e)
-     (hasheq 'node "deferror"
-             'name (symbol->string (deferror-form-name e))
-             'members (map symbol->string (deferror-form-members e)))]
+     (define mf (deferror-form-member-fields e))
+     (define base
+       (hasheq 'node "deferror"
+               'name (symbol->string (deferror-form-name e))
+               'members (map symbol->string (deferror-form-members e))))
+     (if mf
+         (hash-set base 'member-fields
+                   (for/hasheq ([(k v) (in-hash mf)])
+                     (values k
+                             (map (lambda (p) (hasheq 'name (symbol->string (param-name p)))) v))))
+         base)]
 
     [(defscalar-form? e)
      (hasheq 'node "defscalar"
@@ -304,8 +320,8 @@
      (hasheq 'node "if-let"
              'name (symbol->string (if-let-form-name e))
              'expr (expr->json (if-let-form-expr e))
-             'then (map expr->json (if-let-form-then-body e))
-             'else (map expr->json (if-let-form-else-body e)))]
+             'then (expr->json (if-let-form-then-body e))
+             'else (and (if-let-form-else-body e) (expr->json (if-let-form-else-body e))))]
 
     [(condp-form? e)
      (hasheq 'node "condp"
@@ -381,8 +397,10 @@
     [(pat-record? p)   (hasheq 'type "record"
                                'name (symbol->string (pat-record-type-name p))
                                'bindings (map (lambda (b)
-                                                (hasheq 'field (symbol->string (car b))
-                                                        'name (symbol->string (cdr b))))
+                                                (if (symbol? b)
+                                                    (hasheq 'name (symbol->string b))
+                                                    (hasheq 'field (symbol->string (car b))
+                                                            'name (symbol->string (cdr b)))))
                                               (pat-record-bindings p)))]
     [(pat-map? p)      (hasheq 'type "map"
                                'entries (map (lambda (e)
