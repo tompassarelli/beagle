@@ -12,7 +12,8 @@
          "stdlib-cljs.rkt"
          "stdlib-js.rkt"
          "stdlib-nix.rkt"
-         "stdlib-sql.rkt")
+         "stdlib-sql.rkt"
+         "stdlib-py.rkt")
 
 (define (merge-hashes . hs)
   (for*/fold ([out (hash)]) ([h (in-list hs)]
@@ -31,13 +32,16 @@
 (define stdlib-sql-combined
   (merge-hashes STDLIB-SQL))
 
+(define stdlib-py-combined
+  (merge-hashes STDLIB-PORTABLE STDLIB-PY))
+
 (define (stdlib-for-target target)
   (case target
     [(clj cljs) stdlib-clj-combined]
     [(js)       stdlib-js-combined]
     [(nix)      stdlib-nix-combined]
     [(sql)      stdlib-sql-combined]
-    [(py)       STDLIB-PORTABLE]
+    [(py)       stdlib-py-combined]
     [else (error 'stdlib-for-target "unknown target: ~a" target)]))
 
 (define (target-excludes-for target)
@@ -55,4 +59,5 @@
          STDLIB-PORTABLE STDLIB-CLJ STDLIB-CLJS CLJ-EXCLUDE
          STDLIB-JS JS-NO-EMIT
          STDLIB-NIX
-         STDLIB-SQL)
+         STDLIB-SQL
+         STDLIB-PY)

@@ -125,6 +125,23 @@
     [(defscalar-form? f)
      (emit-defscalar f)]
 
+    [(protocol-form? f)
+     (emit-protocol f)]
+
+    [(deftype-form? f)
+     (emit-deftype f)]
+
+    [(extend-type-form? f)
+     (emit-extend-type f)]
+
+    [(defmulti-form? f)
+     (define name (mangle-name (defmulti-form-name f)))
+     (format "def ~a(*args, **kwargs):\n    return ~a(*args, **kwargs)"
+             name (emit-expr (defmulti-form-dispatch-fn f)))]
+
+    [(defmethod-form? f)
+     (emit-defmethod f)]
+
     [else (emit-expr f)]))
 
 ;; --- expressions ------------------------------------------------------------
@@ -199,9 +216,13 @@
      (emit-call e)]
 
     [(method-call? e)
+     (define mname (symbol->string (method-call-method-name e)))
+     (define clean-name (if (and (> (string-length mname) 0) (char=? (string-ref mname 0) #\.))
+                            (substring mname 1)
+                            mname))
      (format "~a.~a(~a)"
              (emit-expr (method-call-target e))
-             (mangle-str (symbol->string (method-call-method-name e)))
+             (mangle-str clean-name)
              (string-join (map emit-expr (method-call-args e)) ", "))]
 
     [(static-call? e)
@@ -217,8 +238,12 @@
                  (string-join (map emit-expr (static-call-args e)) ", ")))]
 
     [(new-form? e)
+     (define cname (symbol->string (new-form-class-name e)))
+     (define clean (if (string-suffix? cname ".")
+                       (substring cname 0 (- (string-length cname) 1))
+                       cname))
      (format "~a(~a)"
-             (mangle-name (new-form-class-name e))
+             (mangle-str clean)
              (string-join (map emit-expr (new-form-args e)) ", "))]
 
     [(kw-access? e)
@@ -309,6 +334,48 @@
      (define fallback (emit-expr (rescue-form-fallback e)))
      (format "(lambda r: r.value if r.is_ok() else ~a)(~a)" fallback inner)]
 
+    [(condp-form? e)
+     (emit-condp e)]
+
+    [(dotimes-form? e)
+     (define ind (current-indent))
+     (define body-ind (indent+))
+     (define body-str
+       (parameterize ([current-indent body-ind])
+         (emit-stmt-block (dotimes-form-body e) body-ind)))
+     (format "for ~a in range(~a):\n~a"
+             (mangle-name (dotimes-form-name e))
+             (emit-expr (dotimes-form-count-expr e))
+             body-str)]
+
+    [(doto-form? e)
+     (emit-doto e)]
+
+    [(letfn-form? e)
+     (emit-letfn e)]
+
+    [(with-open-form? e)
+     (emit-with-open e)]
+
+    [(when-some-form? e)
+     (define ind (current-indent))
+     (define body-ind (indent+))
+     (define var (mangle-name (when-some-form-name e)))
+     (define body-str
+       (parameterize ([current-indent body-ind])
+         (emit-stmt-block (when-some-form-body e) body-ind)))
+     (format "~a = ~a\n~aif ~a is not None:\n~a"
+             var
+             (emit-expr (when-some-form-expr e))
+             ind var body-str)]
+
+    [(if-some-form? e)
+     (define var (mangle-name (if-some-form-name e)))
+     (format "(lambda __v: ~a if __v is not None else ~a)(~a)"
+             (emit-expr (if-some-form-then-body e))
+             (emit-expr (if-some-form-else-body e))
+             (emit-expr (if-some-form-expr e)))]
+
     [else (format "# UNSUPPORTED: ~v" e)]))
 
 ;; --- helpers ----------------------------------------------------------------
@@ -337,7 +404,8 @@
         [else (mangle-name p)])))
   (define all
     (if rest-param
-        (append fixed (list (format "*~a" (mangle-name rest-param))))
+        (let ([rname (if (param? rest-param) (param-name rest-param) rest-param)])
+          (append fixed (list (format "*~a" (mangle-name rname)))))
         fixed))
   (string-join all ", "))
 
@@ -376,7 +444,9 @@
       (doseq-form? e) (set!-form? e) (try-form? e)
       (for-form? e) (match-form? e) (cond-form? e)
       (loop-form? e) (case-form? e) (let-form? e)
-      (when-let-form? e) (if-let-form? e)))
+      (when-let-form? e) (if-let-form? e)
+      (dotimes-form? e) (letfn-form? e) (condp-form? e)
+      (with-open-form? e) (when-some-form? e)))
 
 (define (emit-stmt e)
   (emit-expr e))
@@ -716,6 +786,183 @@
 (define (emit-defscalar f)
   (define name (mangle-name (defscalar-form-name f)))
   (format "@dataclass(frozen=True)\nclass ~a:\n    value: object" name))
+
+;; --- defprotocol → ABC ------------------------------------------------------
+
+(define (emit-protocol f)
+  (define name (mangle-name (protocol-form-name f)))
+  (define method-strs
+    (for/list ([m (protocol-form-methods f)])
+      (define mname (mangle-name (protocol-method-name m)))
+      (define params-str (emit-params (protocol-method-params m) #f))
+      (format "    @abstractmethod\n    def ~a(~a):\n        ..." mname params-str)))
+  (format "from abc import ABC, abstractmethod\n\nclass ~a(ABC):\n~a"
+          name
+          (string-join method-strs "\n\n")))
+
+;; --- deftype → class with protocol impls ------------------------------------
+
+(define (emit-deftype f)
+  (define name (mangle-name (deftype-form-name f)))
+  (define fields (deftype-form-fields f))
+  (define impls (deftype-form-impls f))
+  (define init-params
+    (string-join (map (lambda (p) (mangle-name (param-name p))) fields) ", "))
+  (define init-body
+    (string-join
+     (for/list ([p (in-list fields)])
+       (define pname (mangle-name (param-name p)))
+       (format "        self.~a = ~a" pname pname))
+     "\n"))
+  (define init-str
+    (format "    def __init__(self, ~a):\n~a" init-params init-body))
+  (define impl-strs (map emit-type-impl-methods impls))
+  (define bases
+    (if (null? impls) ""
+        (string-join (map (lambda (i) (mangle-name (type-impl-protocol-name i))) impls) ", ")))
+  (define class-header
+    (if (string=? bases "")
+        (format "class ~a:" name)
+        (format "class ~a(~a):" name bases)))
+  (format "~a\n~a\n\n~a"
+          class-header
+          init-str
+          (string-join impl-strs "\n\n")))
+
+(define (emit-extend-type f)
+  (define type-name (mangle-name (extend-type-form-type-name f)))
+  (define impl-strs
+    (for/list ([impl (extend-type-form-impls f)])
+      (define methods (type-impl-methods impl))
+      (string-join
+       (for/list ([m methods])
+         (define mname (mangle-name (impl-method-name m)))
+         (define params-str (emit-params (impl-method-params m) #f))
+         (define body-ind "        ")
+         (define body-str
+           (parameterize ([current-indent body-ind])
+             (emit-body-block (impl-method-body m) body-ind)))
+         (format "    def ~a(~a):\n~a" mname params-str body-str))
+       "\n\n")))
+  (string-join impl-strs "\n\n"))
+
+(define (emit-type-impl-methods impl)
+  (define methods (type-impl-methods impl))
+  (string-join
+   (for/list ([m methods])
+     (define mname (mangle-name (impl-method-name m)))
+     (define params-str (emit-params (impl-method-params m) #f))
+     (define body-ind "        ")
+     (define body-str
+       (parameterize ([current-indent body-ind])
+         (emit-body-block (impl-method-body m) body-ind)))
+     (format "    def ~a(~a):\n~a" mname params-str body-str))
+   "\n\n"))
+
+;; --- defmethod → dispatch dict + registration --------------------------------
+
+(define (emit-defmethod f)
+  (define name (mangle-name (defmethod-form-name f)))
+  (define dispatch-val (emit-expr (defmethod-form-dispatch-val f)))
+  (define params-str (emit-params (defmethod-form-params f) #f))
+  (define body-ind "    ")
+  (define body-str
+    (parameterize ([current-indent body-ind])
+      (emit-body-block (defmethod-form-body f) body-ind)))
+  (define fn-name (format "_~a_~a" name (mangle-str (format "~a" (defmethod-form-dispatch-val f)))))
+  (format "def ~a(~a):\n~a\n~a_registry[~a] = ~a"
+          fn-name params-str body-str name dispatch-val fn-name))
+
+;; --- condp → if/elif chain with shared predicate ----------------------------
+
+(define (condp-infix-op pred)
+  (cond
+    [(symbol? pred)
+     (case pred
+       [(=) "=="] [(not=) "!="]
+       [(<) "<"] [(>) ">"] [(<=) "<="] [(>=) ">="]
+       [else #f])]
+    [else #f]))
+
+(define (emit-condp e)
+  (define ind (current-indent))
+  (define pred-fn (condp-form-pred-fn e))
+  (define test-str (emit-expr (condp-form-test-expr e)))
+  (define clauses (condp-form-clauses e))
+  (define body-ind (indent+))
+  (define infix-op (condp-infix-op pred-fn))
+  (define parts
+    (for/list ([c (in-list clauses)]
+               [i (in-naturals)])
+      (define keyword (if (= i 0) "if" "elif"))
+      (define test-clause
+        (if infix-op
+            (format "~a ~a ~a" (emit-expr (car c)) infix-op test-str)
+            (format "~a(~a, ~a)" (emit-expr pred-fn) (emit-expr (car c)) test-str)))
+      (define clause-body
+        (parameterize ([current-indent body-ind])
+          (format "~areturn ~a" body-ind (emit-expr (cdr c)))))
+      (format "~a ~a:\n~a" keyword test-clause clause-body)))
+  (define default-str
+    (if (condp-form-default e)
+        (format "\n~aelse:\n~areturn ~a" ind body-ind (emit-expr (condp-form-default e)))
+        ""))
+  (string-append (string-join parts (format "\n~a" ind)) default-str))
+
+;; --- doto → assign + method calls + return ----------------------------------
+
+(define (emit-doto e)
+  (define ind (current-indent))
+  (define target-str (emit-expr (doto-form-target e)))
+  (define form-strs
+    (for/list ([f (doto-form-forms e)])
+      (format "~a~a" ind (emit-expr f))))
+  (format "__doto = ~a\n~a\n~a__doto"
+          target-str
+          (string-join form-strs "\n")
+          ind))
+
+;; --- letfn → local def statements -------------------------------------------
+
+(define (emit-letfn e)
+  (define ind (current-indent))
+  (define fn-strs
+    (for/list ([f (letfn-form-fns e)])
+      (define name (mangle-name (letfn-fn-name f)))
+      (define params-str (emit-params (letfn-fn-params f) (letfn-fn-rest-param f)))
+      (define body-ind (string-append ind "    "))
+      (define body-str
+        (parameterize ([current-indent body-ind])
+          (emit-body-block (letfn-fn-body f) body-ind)))
+      (format "def ~a(~a):\n~a" name params-str body-str)))
+  (define body (letfn-form-body e))
+  (define body-strs
+    (for/list ([expr (in-list (drop-right body 1))])
+      (emit-expr expr)))
+  (define last-str
+    (let ([last-e (last body)])
+      (if (stmt-form? last-e)
+          (emit-expr last-e)
+          (format "return ~a" (emit-expr last-e)))))
+  (string-join (append fn-strs body-strs (list last-str)) (format "\n~a" ind)))
+
+;; --- with-open → with statement ---------------------------------------------
+
+(define (emit-with-open e)
+  (define ind (current-indent))
+  (define body-ind (indent+))
+  (define bindings (with-open-form-bindings e))
+  (define ctx-strs
+    (for/list ([b (in-list bindings)])
+      (format "~a as ~a"
+              (emit-expr (let-binding-value b))
+              (mangle-name (let-binding-name b)))))
+  (define body-str
+    (parameterize ([current-indent body-ind])
+      (emit-body-block (with-open-form-body e) body-ind)))
+  (format "with ~a:\n~a"
+          (string-join ctx-strs ", ")
+          body-str))
 
 ;; --- call dispatch ----------------------------------------------------------
 
