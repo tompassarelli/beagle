@@ -90,7 +90,7 @@ Or from source:
 
 ```sh
 raco pkg install --link beagle-lib/ beagle-test/ beagle-doc/ beagle/
-raco test beagle-test/tests/   # 796 tests
+raco test beagle-test/tests/   # 1221 tests
 ```
 
 ## Agent integration
@@ -115,7 +115,7 @@ Generates a PostToolUse hook, settings, `CLAUDE.md`, and language context. The d
 - [`docs/cheatsheet.md`](docs/cheatsheet.md) — language summary
 - [`docs/agent-workflow.md`](docs/agent-workflow.md) — repair tool routing
 - [`docs/tool-reference.md`](docs/tool-reference.md) — CLI and tool catalog
-- [`docs/devlog/`](docs/devlog/) — development journal (18 entries)
+- [`docs/devlog/`](docs/devlog/) — development journal (21 entries)
 - [`experiments/report.md`](experiments/report.md) — E1–E15 results
 
 ## Related

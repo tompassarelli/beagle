@@ -1360,7 +1360,9 @@
      (define items (or (stx-tail c-subs 1) (bracket-body d)))
      (when (null? items) (error 'beagle "cond clause is empty"))
      (cond-clause (parse-expr (car items)) (parse-body (cdr items)))]
-    [else (error 'beagle "cond clause must be a bracketed [test body ...] form, got: ~v" d)]))
+    [(and (pair? d) (pair? (cdr d)))
+     (cond-clause (parse-expr (car d)) (parse-body (cdr d)))]
+    [else (error 'beagle "cond clause must be a [test body ...] form, got: ~v" d)]))
 
 (define (parse-cond-clauses clauses)
   (cond
@@ -1495,9 +1497,11 @@
 
 (define (parse-match-clause c)
   (define d (->datum c))
-  (unless (bracketed? d)
-    (error 'beagle "match clause must be [pattern body...], got: ~v" d))
-  (define items (bracket-body d))
+  (define items
+    (cond
+      [(bracketed? d) (bracket-body d)]
+      [(and (pair? d) (pair? (cdr d))) d]
+      [else (error 'beagle "match clause must be [pattern body...], got: ~v" d)]))
   (when (< (length items) 2)
     (error 'beagle "match clause needs a pattern and at least one body expression"))
   (match-clause (parse-pattern (car items))

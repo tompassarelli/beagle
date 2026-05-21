@@ -1171,111 +1171,6 @@ Example: `valid-email?` → `valid_email_p`, `reset!` → `reset_bang`
 Emits ES module `import` statements. All beagle cross-module type
 resolution works identically.
 
-### Typed JS forms (`js/*`)
-
-28 target-specific forms for direct JS code generation. Typed, checked,
-and emitted as idiomatic JavaScript. Use these when you need precise
-control over the JS output (classes, try/catch, for-of, etc.).
-
-#### Definitions & assignment
-
-```racket
-(js/const name value)              ; → const name = value;
-(js/const (name : Type) value)     ; → const name = value;  (type-checked)
-(js/let name value)                ; → let name = value;
-(js/set! target value)             ; → target = value;
-```
-
-#### Functions & arrows
-
-```racket
-(js/fn name [params] body...)                   ; → function name(params) { ... }
-(js/fn name [(x : Int)] : String body...)       ; → typed, checked
-(js/async-fn name [params] body...)             ; → async function name(params) { ... }
-(js/arrow [params] body...)                     ; → (params) => { ... }
-(js/async-arrow [params] body...)               ; → async (params) => { ... }
-(js/fn name [params & rest] body...)            ; → function name(params, ...rest) { ... }
-```
-
-#### Control flow
-
-```racket
-(js/if test then-body...)                       ; → if (test) { ... }
-(js/if test (then...) (else...))                ; → if (test) { ... } else { ... }
-(js/? test then-expr else-expr)                 ; → test ? then : else
-(js/for-of [(x : T) iterable] body...)         ; → for (const x of iterable) { ... }
-(js/while test body...)                         ; → while (test) { ... }
-(js/return expr)                                ; → return expr;
-(js/return)                                     ; → return;
-(js/throw expr)                                 ; → throw expr;
-(js/await expr)                                 ; → await expr
-```
-
-#### Try/catch/finally
-
-```racket
-(js/try
-  body...
-  (catch e catch-body...)
-  (finally finally-body...))
-```
-
-#### Classes
-
-```racket
-(js/class Animal
-  (constructor [name]
-    (js/set! (js/. this name) name))
-  (speak []
-    (js/return (js/template "My name is " (js/. this name)))))
-
-(js/class Dog (extends Animal)
-  (speak [] : String
-    (js/return "Woof")))
-
-(js/new MyClass arg1 arg2)                      ; → new MyClass(arg1, arg2)
-```
-
-Methods support `static`, `async`, `get`, `set`, `constructor` modifiers.
-
-#### Property access & calls
-
-```racket
-(js/. obj prop)                                 ; → obj.prop
-(js/.. obj p1 p2 p3)                            ; → obj.p1.p2.p3
-(js/call callee args...)                        ; → callee(args)
-(js/call console.log "hi")                      ; → console.log("hi")  (dotted auto-resolved)
-```
-
-#### Data structures
-
-```racket
-(js/array 1 2 3)                                ; → [1, 2, 3]
-(js/object "key1" val1 "key2" val2)             ; → {key1: val1, key2: val2}
-(js/spread expr)                                ; → ...expr
-```
-
-#### Operators
-
-```racket
-(js/typeof expr)                                ; → typeof expr
-(js/! expr)                                     ; → !expr
-(js/void expr)                                  ; → void expr
-(js/+ a b)  (js/- a b)  (js/* a b)             ; → a + b, a - b, a * b
-(js/=== a b)  (js/!== a b)                      ; → a === b, a !== b
-(js/< a b)  (js/> a b)  (js/<= a b)  (js/>= a b)
-(js/&& a b)  (js/|| a b)
-(js/% a b)  (js/** a b)                         ; → a % b, a ** b
-```
-
-#### Other
-
-```racket
-(js/template "Hello " name "!")                 ; → `Hello ${name}!`
-(js/do body...)                                 ; → statement block
-(js/export form)                                ; → export ...
-```
-
 ## SQL target (`#lang beagle/sql`)
 
 File extension: `.bsql`. Use `#lang beagle/sql`.
@@ -1328,9 +1223,15 @@ File extension: `.bsql`. Use `#lang beagle/sql`.
 
 ## Macros
 
-Beagle macros are template-based: they substitute parameters into a
-template form at expansion time. The `safe`/`unsafe` distinction
-controls whether the expanded code is re-validated by the type checker.
+Beagle has two macro systems: ​_template macros_​ for simple
+substitution and ​_procedural macros_​ for computed code generation.
+Both produce forms that go through the full type-checking pipeline.
+
+### Template Macros
+
+Template macros substitute parameters into a fixed template form. The
+`safe`/`unsafe` distinction controls whether the expanded code is
+re-validated by the type checker.
 
 ### define-macro
 
@@ -1367,6 +1268,67 @@ Defines a macro whose expansion is typed as `Any` (escape boundary).
 
 * `safe` macros use gensym-hygienic substitution; `unsafe` macros use
   naive substitution
+
+### Procedural Macros
+
+Procedural macros are compile-time functions that receive typed inputs
+and return generated forms. Unlike template macros, they can iterate
+over data, compute names, and produce variable numbers of output forms.
+
+### define-macro proc
+
+```racket
+(define-macro proc name          
+[(param : Type) ...] : ReturnType
+body)                            
+```
+
+Defines a procedural macro. The body is Racket code executed at compile
+time. Inputs are contract-checked against their declared types before
+the body runs; the output is checked against `ReturnType` after.
+
+Contract types: `Symbol`, `String`, `Int`, `Bool`, `Keyword`, `Expr`
+(single expression), `Form` (top-level form), `Syntax` (any datum),
+`(Vec T)` (list of T).
+
+Return `Form` for a single top-level form, or `(Vec Form)` for multiple
+forms (spliced into the module).
+
+```racket
+;; Generate a typed record + N accessor functions from a field list         
+(define-macro proc defentity                                                
+  [(name : Symbol) (fields : (Vec Syntax))] : (Vec Form)                    
+  (let ((rec-name name)                                                     
+        (field-specs (map (lambda (f) (list (car f) ': (caddr f))) fields)))
+    (cons                                                                   
+      `(defrecord ,rec-name ,field-specs)                                   
+      (map (lambda (f)                                                      
+             (let ((fname (car f)) (ftype (caddr f)))                       
+               `(defn ,(string->symbol (format "~a-~a" name fname))         
+                  ((r : ,rec-name)) : ,ftype                                
+                  (get r ,(string->symbol (format ":~a" fname))))))         
+           fields))))                                                       
+                                                                            
+(defentity User ((name : String) (email : String) (age : Int)))             
+;; Expands to: defrecord User + get-name, get-email, get-age                
+```
+
+* Body has access to `racket/base`, `racket/list`, `racket/string`,
+  `racket/format`, plus helpers: `br` (bracket tag), `mp` (map tag),
+  `st` (set tag), `sym->kw` (symbol→keyword)
+
+* Use quasiquote (`‘`) and unquote (`,`) to build output forms
+
+* `(Vec Form)` output is spliced — each form becomes a separate
+  top-level definition
+
+* Input contracts reject bad arguments at expansion time with clear
+  error messages
+
+* Output goes through the full parse → check → emit pipeline
+  (type-checked like hand-written code)
+
+* Use `beagle-expand` to inspect what a proc macro produces
 
 ## Tools
 

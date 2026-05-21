@@ -10,21 +10,23 @@
    `(defn ,(string->symbol (format "~a-transition" name))
       ((state : String) (event : String)) : String
       (cond
-        ,@(map (lambda (t)
-                 (let ((from (car t)) (evt (cadr t)) (to (caddr t)))
-                   (br `(and (= state ,from) (= event ,evt)) to)))
-               transitions)
-        ,(br 'true '(do (println (str "invalid transition: " state " + " event))
-                        state))))
+        ,@(apply append
+            (map (lambda (t)
+                   (let ((from (car t)) (evt (cadr t)) (to (caddr t)))
+                     (list `(and (= state ,from) (= event ,evt)) to)))
+                 transitions))
+        true (do (println (str "invalid transition: " state " + " event))
+                 state)))
    ;; valid-event? predicate
    `(defn ,(string->symbol (format "~a-valid?" name))
       ((state : String) (event : String)) : Bool
       (cond
-        ,@(map (lambda (t)
-                 (let ((from (car t)) (evt (cadr t)))
-                   (br `(and (= state ,from) (= event ,evt)) 'true)))
-               transitions)
-        ,(br 'true 'false)))
+        ,@(apply append
+            (map (lambda (t)
+                   (let ((from (car t)) (evt (cadr t)))
+                     (list `(and (= state ,from) (= event ,evt)) 'true)))
+                 transitions))
+        true false))
    ;; terminal? predicate
    `(defn ,(string->symbol (format "~a-terminal?" name))
       ((state : String)) : Bool

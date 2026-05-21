@@ -192,12 +192,6 @@ Use `#lang beagle/js` (file extension `.bjs`). Forms emit JS: `defn` →
 functions containing `await` are auto-async. Identifiers mangled: `-` → `_`,
 `?` → `_p`, `!` → `_bang`. All type checking works identically.
 
-For direct JS control, 28 typed `js/*` forms are available: `js/fn`,
-`js/const`, `js/let`, `js/class`, `js/arrow`, `js/call`, `js/if`, `js/?`,
-`js/for-of`, `js/while`, `js/try`, `js/new`, `js/.`, `js/array`, `js/object`,
-`js/template`, `js/spread`, `js/typeof`, `js/do`, `js/export`, binary/unary
-ops. All type-checked. See full cheatsheet for syntax.
-
 ## Build & check
 
 ```bash
