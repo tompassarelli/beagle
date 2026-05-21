@@ -23,7 +23,8 @@
          "types.rkt"
          "check.rkt"
          "stdlib-types.rkt"
-         "extensions.rkt")
+         "extensions.rkt"
+         "expand-tool.rkt")
 
 ;; --- JSON-RPC transport -----------------------------------------------------
 
@@ -124,9 +125,13 @@
         (if (= start end) #f
             (substring ln start end))])]))
 
+(define (lsp-read-datums path)
+  (with-handlers ([exn:fail? (lambda (e) (read-beagle-datums path))])
+    (expand-datums path)))
+
 (define (lookup-symbol-info path word)
   (with-handlers ([exn:fail? (lambda (_) #f)])
-    (define datums (read-beagle-datums path))
+    (define datums (lsp-read-datums path))
     (define target (string->symbol word))
     (define results '())
     (for ([d (in-list datums)])
@@ -316,7 +321,7 @@
   (define uri (hash-ref (hash-ref params 'textDocument) 'uri))
   (define path (uri->path uri))
   (with-handlers ([exn:fail? (lambda (_) '())])
-    (define datums (read-beagle-datums path))
+    (define datums (lsp-read-datums path))
     (define symbols '())
     (define line-no 0)
     (for ([d (in-list datums)])
@@ -370,7 +375,7 @@
 (define (find-definition origin-path target)
   (define (search-file path)
     (with-handlers ([exn:fail? (lambda (_) #f)])
-      (define datums (read-beagle-datums path))
+      (define datums (lsp-read-datums path))
       (for/first ([d (in-list datums)]
                   #:when (or (let ([e (extract-defn-entry d)])
                                (and e (eq? (car e) target)))
@@ -431,7 +436,7 @@
   (define items '())
   ;; File-local definitions
   (with-handlers ([exn:fail? (lambda (_) (void))])
-    (define datums (read-beagle-datums path))
+    (define datums (lsp-read-datums path))
     (for ([d (in-list datums)])
       (define defn-entry (extract-defn-entry d))
       (when defn-entry
@@ -481,7 +486,7 @@
       (define mod-prefix (string-append (substring mod-name 0 (- (string-length mod-name) 4)) "/"))
       (when (string-prefix? mod-prefix prefix)
         (with-handlers ([exn:fail? (lambda (_) (void))])
-          (define datums (read-beagle-datums (path->string f)))
+          (define datums (lsp-read-datums (path->string f)))
           (for ([d (in-list datums)])
             (define defn-entry (extract-defn-entry d))
             (when defn-entry
