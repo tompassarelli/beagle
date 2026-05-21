@@ -81,7 +81,12 @@
     "13-letfn-mutual.bgl"
     "15-multi-arity.bgl"
     "16-case-maps.bgl"
-    "17-doseq-sets.bgl"))
+    "17-doseq-sets.bgl"
+    "18-defonce-regex.bgl"
+    "20-nested-data.bgl"
+    "21-polymorphic-fns.bgl"
+    "22-reduce-fold.bgl"
+    "23-boolean-logic.bgl"))
 
 (for ([name (in-list differential-fixtures)])
   (define bgl-path (build-path fixtures-dir name))

@@ -166,7 +166,7 @@
     [(keyword? e)    (format "'~a" (keyword->string e))]
 
     [(def-form? e)       (emit-def e)]
-    [(defonce-form? e)   (emit-def-like e (defonce-form-name e) #f (defonce-form-value e))]
+    [(defonce-form? e)   (emit-def-like e (defonce-form-name e) (defonce-form-type e) (defonce-form-value e))]
     [(defn-form? e)      (emit-defn e)]
     [(defn-multi? e)     (emit-defn-multi e)]
     [(record-form? e)    (emit-record e)]

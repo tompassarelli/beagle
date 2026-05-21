@@ -1,0 +1,12 @@
+#lang beagle/rkt
+
+(defonce pi : Float 3.14159)
+
+(defn circle-area [(r : Float)] : Float
+  (* pi (* r r)))
+
+(defn circle-circumference [(r : Float)] : Float
+  (* 2.0 (* pi r)))
+
+(println (circle-area 5.0))
+(println (circle-circumference 3.0))

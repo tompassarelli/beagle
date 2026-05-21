@@ -1,0 +1,16 @@
+#lang beagle/rkt
+
+(defn identity-val [(x : Any)] : Any x)
+
+(defn pair-up [(a : String) (b : Int)] : (Vec Any)
+  [a b])
+
+(defn swap [(xs : (Vec Any))] : (Vec Any)
+  [(nth xs 1) (nth xs 0)])
+
+(def p1 (pair-up "hello" 42))
+(def p2 (swap p1))
+
+(println (first p1))
+(println (first p2))
+(println (identity-val "works"))

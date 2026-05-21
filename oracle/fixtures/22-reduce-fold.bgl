@@ -1,0 +1,10 @@
+#lang beagle/rkt
+
+(defn sum [(xs : (Vec Int))] : Int
+  (reduce + 0 xs))
+
+(defn product [(xs : (Vec Int))] : Int
+  (reduce * 1 xs))
+
+(println (sum [1 2 3 4 5]))
+(println (product [1 2 3 4 5]))

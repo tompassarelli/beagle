@@ -1,0 +1,25 @@
+#lang beagle/rkt
+
+(defn clamp [(x : Int) (lo : Int) (hi : Int)] : Int
+  (cond
+    [(< x lo) lo]
+    [(> x hi) hi]
+    [true x]))
+
+(defn abs-val [(x : Int)] : Int
+  (if (< x 0) (- 0 x) x))
+
+(defn sign [(x : Int)] : String
+  (cond
+    [(> x 0) "positive"]
+    [(< x 0) "negative"]
+    [true "zero"]))
+
+(println (clamp 5 0 10))
+(println (clamp -3 0 10))
+(println (clamp 15 0 10))
+(println (abs-val -7))
+(println (abs-val 3))
+(println (sign -5))
+(println (sign 0))
+(println (sign 42))
