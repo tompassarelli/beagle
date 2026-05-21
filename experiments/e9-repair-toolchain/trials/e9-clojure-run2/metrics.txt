@@ -1,2 +1,0 @@
-input_tokens: 100
-output_tokens: 32195

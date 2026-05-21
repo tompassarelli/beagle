@@ -1,7 +1,0 @@
-(when-not (= (r/count-evens [1 2 3 4 5 6]) 3)
-  (println "FAIL: count-evens [1..6] =>" (pr-str (r/count-evens [1 2 3 4 5 6])))
-  (System/exit 1))
-(when-not (= (r/count-evens [1 3 5]) 0) (System/exit 1))
-(when-not (= (r/count-evens []) 0) (System/exit 1))
-(when-not (= (r/count-evens [0]) 1) (System/exit 1))
-(System/exit 0)

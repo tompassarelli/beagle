@@ -1,8 +1,0 @@
-(when-not (= (r/factorial 0) 1)
-  (println "FAIL: (factorial 0) =>" (pr-str (r/factorial 0)))
-  (System/exit 1))
-(when-not (= (r/factorial 1) 1) (System/exit 1))
-(when-not (= (r/factorial 5) 120)
-  (println "FAIL: (factorial 5) =>" (pr-str (r/factorial 5)))
-  (System/exit 1))
-(System/exit 0)

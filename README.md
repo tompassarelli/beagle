@@ -99,7 +99,7 @@ Types didn't move correctness at this scale — they moved how fast the agent go
 
 The load-bearing finding is about *integration*, not the checker itself: the same checker, poorly wired into the agent loop (noisy output, wrong workflow position, vague framing), imposed a 76% penalty. Three non-code fixes swung the outcome by 100 percentage points. The contribution is as much *how* the checker reaches the agent as the checker.
 
-[Results](experiments/e16-workflow-scheduler/results/type/RESULTS.md) · [Devlog](docs/devlog/018-e16-type-surface.md)
+[Results](https://github.com/tompassarelli/beagle-lab/blob/main/e16-workflow-scheduler/results/type/RESULTS.md) · [Devlog](docs/devlog/018-e16-type-surface.md)
 
 ### E18–E19: Procedural macros
 
@@ -107,7 +107,7 @@ E18 measured compression: proc macros compress 2-3× at realistic scale. Beagle'
 
 E19 tested whether agents can write proc macros. A prompted agent (with docs) wrote a working macro in 2 iterations / 271s. An unprompted agent (no proc macro docs) independently invented runtime data dispatch in 1 iteration / 117s — faster and simpler, but without compile-time type coverage of the generated code. Proc macro docs are load-bearing for discoverability; without them, agents default to runtime patterns.
 
-[E18 Results](experiments/e18-macro-compression/results/RESULTS.md) · [E19 Results](experiments/e19-agent-macro-authoring/results/RESULTS.md)
+[E18 Results](https://github.com/tompassarelli/beagle-lab/blob/main/e18-macro-compression/results/RESULTS.md) · [E19 Results](https://github.com/tompassarelli/beagle-lab/blob/main/e19-agent-macro-authoring/results/RESULTS.md)
 
 ### E1–E15: Cross-language comparison
 
@@ -118,7 +118,7 @@ E19 tested whether agents can write proc macros. A prompted agent (with docs) wr
 
 Beagle matches the typed baseline (mypy) on correctness and beats the untyped one (Clojure). mypy edges wall time — the trade Beagle makes is one typed surface across multiple backends, not single-language speed.
 
-[Full methodology](experiments/report.md)
+[Full methodology](https://github.com/tompassarelli/beagle-lab)
 
 ## Known gaps
 
@@ -164,7 +164,7 @@ Generates a PostToolUse hook, settings, `CLAUDE.md`, and language context. The d
 - [`docs/agent-workflow.md`](docs/agent-workflow.md) — repair tool routing
 - [`docs/tool-reference.md`](docs/tool-reference.md) — CLI and tool catalog
 - [`docs/devlog/`](docs/devlog/) — development journal (21 entries)
-- [`experiments/report.md`](experiments/report.md) — E1–E15 results
+- [`beagle-lab`](https://github.com/tompassarelli/beagle-lab) — experiment archive (E0–E22)
 
 ## How Beagle relates to CNF
 

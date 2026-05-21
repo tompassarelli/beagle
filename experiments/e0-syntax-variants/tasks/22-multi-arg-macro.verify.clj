@@ -1,7 +1,0 @@
-(when-not (= (r/safe-inc 5) 6)
-  (println "FAIL: (safe-inc 5) =>" (pr-str (r/safe-inc 5)))
-  (System/exit 1))
-(when-not (nil? (r/safe-inc 0))
-  (println "FAIL: (safe-inc 0) =>" (pr-str (r/safe-inc 0)))
-  (System/exit 1))
-(System/exit 0)

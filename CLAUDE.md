@@ -219,7 +219,7 @@ mode skips lint (types are optional there by definition).
 | Safe / unsafe macro distinction | controlled boundary for "what the checker re-validates" |
 | Macro expansion is inspectable | `beagle-expand` lets the LLM audit its own macros |
 | Strict mode default | dynamic is escape-hatch for humans; AI should stay strict |
-| P2 checker profile default | E16-T experiments: P2 (exhaustive match, narrowing) is the sweet spot for agent-assisted dev. P3 effects add no measured value; P1 false positives actively hurt (3.4× slower). Types help agents build features (reasoning scaffold) not find bugs (tests win). See `experiments/e16-workflow-scheduler/results/type/RESULTS.md` |
+| P2 checker profile default | E16-T experiments: P2 (exhaustive match, narrowing) is the sweet spot for agent-assisted dev. P3 effects add no measured value; P1 false positives actively hurt (3.4× slower). Types help agents build features (reasoning scaffold) not find bugs (tests win). See beagle-lab `e16-workflow-scheduler/results/type/RESULTS.md` |
 | Multi-target IR, not Clojure transpiler | same typed AST emits to Clojure, CLJS, JS, Nix (Python plumbed); target from `#lang` |
 | Subset-of-Clojure, not full mimic | take Lisp universals + Clojure's good ideas; develop own for typed semantics |
 | `:` as only annotation marker | `:-` removed; no measured benefit in 6-variant benchmark |
@@ -286,7 +286,6 @@ it gets a devlog entry. Routine feature additions do not.
 - `docs/cheatsheet.md` — single-page LLM grounding reference (developer).
 - `docs/cheatsheet-consumer.md` — 154-line consumer reference (for `beagle init`).
 - `docs/devlog/README.md` — development journal (discoveries + experiments).
-- `experiments/README.md` — benchmark framework for design decisions.
-- `experiments/report.md` — full experiment report (E3b–E14, all tracks).
+- `~/code/beagle-lab/` — experiment archive (E0–E22, benchmark framework, all results).
 - `docs/todo.md` — roadmap and completed work.
 - `docs/agent-workflow.md` — LLM agent workflow patterns.

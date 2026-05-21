@@ -1,6 +1,0 @@
-(when-not (= ((r/compose2 inc inc) 5) 7)
-  (println "FAIL: (compose2 inc inc) 5 =>" (pr-str ((r/compose2 inc inc) 5)))
-  (System/exit 1))
-(when-not (= ((r/compose2 inc dec) 5) 5) (System/exit 1))
-(when-not (= ((r/compose2 dec inc) 10) 10) (System/exit 1))
-(System/exit 0)

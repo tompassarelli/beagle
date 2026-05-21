@@ -96,4 +96,4 @@ A noisy checker in the inner loop → 76% tax.
 Same tool, same types, same codebase. The difference is how you hand
 the output to the agent.
 
-[Full results](../../experiments/e16-workflow-scheduler/results/type/RESULTS.md)
+[Full results](https://github.com/tompassarelli/beagle-lab/blob/main/e16-workflow-scheduler/results/type/RESULTS.md)

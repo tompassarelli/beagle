@@ -1,8 +1,0 @@
-(when-not (= (vec (r/doubles [1 2 3])) [2 4 6])
-  (println "FAIL: (doubles [1 2 3]) =>" (pr-str (r/doubles [1 2 3])))
-  (System/exit 1))
-(when-not (= (vec (r/doubles [])) [])
-  (println "FAIL: (doubles []) =>" (pr-str (r/doubles [])))
-  (System/exit 1))
-(when-not (= (vec (r/doubles [-1 0 1])) [-2 0 2]) (System/exit 1))
-(System/exit 0)

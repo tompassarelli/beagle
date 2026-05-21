@@ -1489,4 +1489,4 @@ error[E002]: call to <=: arg 1 expected Int, got String
 
 3 syntactic variants tested (A canonical, B required-types, C minimal),
 multiple LLM samples per task, real Clojure behavior verification. 100%
-behavior pass after empirically-driven bug fixes. See `experiments/report.md`.
+behavior pass after empirically-driven bug fixes. See beagle-lab repo.

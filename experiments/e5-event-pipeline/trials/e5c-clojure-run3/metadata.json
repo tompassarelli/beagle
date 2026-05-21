@@ -1,9 +1,0 @@
-{
-  "experiment": "e5c",
-  "track": "clojure",
-  "run": 3,
-  "beagle_version": "v0.2.0-4-g349319c",
-  "commit": "349319c68d5dad32e3cf03ab960001c138d8f0a5",
-  "timestamp": "2026-05-16T21:45:20+07:00",
-  "labeled_bugs": false
-}

@@ -1,5 +1,0 @@
-(when-not (= (r/next-num 41) 42)
-  (println "FAIL: (next-num 41) =>" (pr-str (r/next-num 41)))
-  (System/exit 1))
-(when-not (= (r/next-num 0) 1) (System/exit 1))
-(System/exit 0)

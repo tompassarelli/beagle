@@ -1,7 +1,0 @@
-
-Testing verify.behavioral-stripped
-
-Ran 40 tests containing 106 assertions.
-0 failures, 0 errors.
-
-106/106 assertions passed
