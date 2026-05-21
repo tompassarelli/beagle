@@ -559,19 +559,19 @@
 ;; --- infer-cond-clauses ------------------------------------------------------
 
 (defn infer-cond-clauses [(clauses : (Vec Any)) (env : Any)] : Any
-  (let [result ANY
-        current-env env]
+  (let [state {"result" ANY "env" env}]
     (.forEach clauses (fn [(c : Any)] : Nil
-      (let [test (get c "test")]
-        (infer-expr test current-env)
-        (let [narrowed (narrow-env-for-condition current-env test)
+      (let [test (get c "test")
+            cur-env (get state "env")]
+        (infer-expr test cur-env)
+        (let [narrowed (narrow-env-for-condition cur-env test)
               then-env (get narrowed "then")
               else-env (get narrowed "else")
               body-type (last-expr-type (get c "body") then-env)]
-          (set! result (merge-types result body-type))
-          (set! current-env else-env)))
+          (set! (get state "result") (merge-types (get state "result") body-type))
+          (set! (get state "env") else-env)))
       nil))
-    result))
+    (get state "result")))
 
 ;; === infer-expr (the core engine) ============================================
 

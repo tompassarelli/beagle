@@ -174,27 +174,27 @@
   {"node" "defonce" "name" name "ann" ann "value" value})
 
 (defn make-defn [(name : String) (params : (Vec Any)) (rest-param : Any)
-                  (ret : Any) (body : (Vec Any)) (private : Bool)] : Any
-  {"node" "defn" "name" name "params" params "rest-param" rest-param
-   "ret" ret "body" body "private" private})
+                  (ret : Any) (body : (Vec Any)) (priv : Bool)] : Any
+  {"node" "defn" "name" name "params" params "rest" (if (nil? rest-param) false rest-param)
+   "ret" ret "body" body "private" priv})
 
-(defn make-defn-multi [(name : String) (arities : (Vec Any)) (private : Bool)] : Any
-  {"node" "defn-multi" "name" name "arities" arities "private" private})
+(defn make-defn-multi [(name : String) (arities : (Vec Any)) (priv : Bool)] : Any
+  {"node" "defn-multi" "name" name "arities" arities "private" priv})
 
 (defn make-fn [(params : (Vec Any)) (rest-param : Any) (ret : Any) (body : (Vec Any))] : Any
-  {"node" "fn" "params" params "rest-param" rest-param "ret" ret "body" body})
+  {"node" "fn" "params" params "rest" (if (nil? rest-param) false rest-param) "ret" ret "body" body})
 
 (defn make-let [(bindings : (Vec Any)) (body : (Vec Any))] : Any
   {"node" "let" "bindings" bindings "body" body})
 
 (defn make-if [(test : Any) (then-expr : Any) (else-expr : Any)] : Any
-  {"node" "if" "test" test "then" then-expr "else" else-expr})
+  {"node" "if" "cond" test "then" then-expr "else" else-expr})
 
 (defn make-cond [(clauses : (Vec Any))] : Any
   {"node" "cond" "clauses" clauses})
 
 (defn make-when [(test : Any) (body : (Vec Any))] : Any
-  {"node" "when" "test" test "body" body})
+  {"node" "when" "cond" test "body" body})
 
 (defn make-do [(body : (Vec Any))] : Any
   {"node" "do" "body" body})
@@ -227,7 +227,7 @@
   {"node" "method-call" "method" method "target" target "args" args})
 
 (defn make-static-call [(class-method : String) (args : (Vec Any))] : Any
-  {"node" "static-call" "class-method" class-method "args" args})
+  {"node" "static-call" "name" class-method "args" args})
 
 (defn make-kw-access [(kw : String) (target : Any) (fallback : Any)] : Any
   {"node" "kw-access" "kw" kw "target" target "default" fallback})
@@ -274,10 +274,10 @@
   {"node" "if-some" "name" name "expr" expr "then" then-body "else" else-body})
 
 (defn make-condp [(pred-fn : Any) (test-expr : Any) (clauses : (Vec Any)) (fallback : Any)] : Any
-  {"node" "condp" "pred-fn" pred-fn "test-expr" test-expr "clauses" clauses "default" fallback})
+  {"node" "condp" "pred" pred-fn "test" test-expr "clauses" clauses "default" fallback})
 
 (defn make-dotimes [(name : String) (count-expr : Any) (body : (Vec Any))] : Any
-  {"node" "dotimes" "name" name "count-expr" count-expr "body" body})
+  {"node" "dotimes" "name" name "count" count-expr "body" body})
 
 (defn make-doseq [(clauses : (Vec Any)) (body : (Vec Any))] : Any
   {"node" "doseq" "clauses" clauses "body" body})
@@ -324,7 +324,7 @@
   {"pattern" "literal" "value" value})
 
 (defn make-pat-record [(type-name : String) (bindings : (Vec Any))] : Any
-  {"pattern" "record" "type-name" type-name "bindings" bindings})
+  {"pattern" "record" "name" type-name "bindings" bindings})
 
 (defn make-pat-map [(entries : (Vec Any))] : Any
   {"pattern" "map" "entries" entries})
@@ -349,6 +349,8 @@
     (number? d) d
     (boolean? d) d
     (nil? d) nil
+    (and (vector? d) (= (.-length d) 2) (= (nth d 0) "#%string"))
+      (nth d 1)
     (vector? d) (.map d datum->json)
     :else (str d)))
 
@@ -501,8 +503,7 @@
   (cond
     (= (.-length clauses) 0) []
     ;; bracketed style: [test body...]
-    (or (bracketed? (nth clauses 0))
-        (and (vector? (nth clauses 0)) (> (.-length (nth clauses 0)) 0)))
+    (bracketed? (nth clauses 0))
       (.map clauses (fn [(c : Any)] : Any
         (let [items (if (bracketed? c) (bracket-body c) c)]
           (if (and (vector? items) (> (.-length items) 1))
@@ -620,7 +621,7 @@
                 (< (+ i 1) (.-length items))
                   (do (.push result
                         {"value" (datum->json (nth items i))
-                         "body" (parse-expr (nth items (+ i 1)))})
+                         "body" [(parse-expr (nth items (+ i 1)))]})
                       (walk (+ i 2)))
                 :else nil))]
       (walk 0)
@@ -956,6 +957,10 @@
     (number? d)
       (make-literal "number" d)
 
+    ;; string literal: [#%string value] (from self-hosted reader)
+    (and (vector? d) (= (.-length d) 2) (= (nth d 0) "#%string"))
+      (make-literal "string" (nth d 1))
+
     ;; symbol "nil" → nil literal
     (and (string? d) (= d "nil"))
       (make-literal "nil" nil)
@@ -1210,12 +1215,12 @@
 
       ;; when-not: (when-not c body...)
       (and (= head "when-not") (>= (.-length rest-items) 1))
-        (make-when (make-call "not" [(parse-expr (nth rest-items 0))])
+        (make-when (make-call (make-ref "not") [(parse-expr (nth rest-items 0))])
                    (.map (.slice rest-items 1) parse-expr))
 
       ;; if-not: (if-not c t e)
       (and (= head "if-not") (>= (.-length rest-items) 2))
-        (make-if (make-call "not" [(parse-expr (nth rest-items 0))])
+        (make-if (make-call (make-ref "not") [(parse-expr (nth rest-items 0))])
                  (parse-expr (nth rest-items 1))
                  (if (>= (.-length rest-items) 3) (parse-expr (nth rest-items 2)) nil))
 
@@ -1346,7 +1351,7 @@
 
       ;; generic call: (fn-name args...)
       (and (string? head))
-        (make-call head (.map rest-items parse-expr))
+        (make-call (make-ref head) (.map rest-items parse-expr))
 
       ;; call with computed function: ((expr) args...)
       (vector? head)
@@ -1397,12 +1402,17 @@
       (if (meta-form? d)
         nil
         (.push forms (parse-expr d)))))
-    {"mode" (get mode "v")
-     "namespace" (get namespace "v")
-     "target" (get target "v")
-     "forms" forms
-     "externs" externs
-     "requires" requires}))
+    (let [extern-keys (.keys js/Object externs)
+          extern-list (.map extern-keys
+                        (fn [(k : String)] : Any
+                          (let [t (get externs k)]
+                            {"name" k "type" t})))]
+      {"mode" (get mode "v")
+       "namespace" (get namespace "v")
+       "target" (get target "v")
+       "forms" forms
+       "externs" extern-list
+       "requires" requires})))
 
 ;; === tests ===================================================================
 
@@ -1642,7 +1652,7 @@
 (check "static-call"
   (let [node (parse-expr ["Math/abs" -1])]
     (and (= (get node "node") "static-call")
-         (= (get node "class-method") "Math/abs"))))
+         (= (get node "name") "Math/abs"))))
 
 ;; --- constructor -------------------------------------------------------------
 
@@ -1657,13 +1667,13 @@
   (let [node (parse-expr ["->" "x" ["foo" 1] ["bar" 2]])]
     ;; should expand to (bar (foo x 1) 2)
     (and (= (get node "node") "call")
-         (= (get node "fn") "bar"))))
+         (= (get (get node "fn") "name") "bar"))))
 
 (check "->> thread-last"
   (let [node (parse-expr ["->>" "x" ["foo" 1] ["bar" 2]])]
     ;; should expand to (bar 2 (foo 1 x))
     (and (= (get node "node") "call")
-         (= (get node "fn") "bar"))))
+         (= (get (get node "fn") "name") "bar"))))
 
 ;; --- multi-arity defn --------------------------------------------------------
 
@@ -1863,9 +1873,11 @@
 ;; --- generic call ------------------------------------------------------------
 
 (check "generic call"
-  (let [node (parse-expr ["println" "hello"])]
+  (let [node (parse-expr ["println" "hello"])
+        fn-node (get node "fn")]
     (and (= (get node "node") "call")
-         (= (get node "fn") "println"))))
+         (= (get fn-node "node") "ref")
+         (= (get fn-node "name") "println"))))
 
 ;; --- match with record pattern -----------------------------------------------
 
@@ -1876,7 +1888,7 @@
     (and (= (get node "node") "match")
          (= (.-length (get node "clauses")) 2)
          (= (get (get (nth (get node "clauses") 0) "pattern") "pattern") "record")
-         (= (get (get (nth (get node "clauses") 0) "pattern") "type-name") "Circle"))))
+         (= (get (get (nth (get node "clauses") 0) "pattern") "name") "Circle"))))
 
 ;; --- defn- private -----------------------------------------------------------
 

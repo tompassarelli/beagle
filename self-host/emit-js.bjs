@@ -917,14 +917,88 @@
 
 ;; --- emit-loop ---------------------------------------------------------------
 
+(defn expr-contains-recur? [(e : Any)] : Bool
+  (cond
+    (nil? e) false
+    (not (map? e)) false
+    (= (get e "node") "recur") true
+    (= (get e "node") "if")
+      (or (expr-contains-recur? (get e "then"))
+          (expr-contains-recur? (get e "else")))
+    (= (get e "node") "let")
+      (body-contains-recur? (get e "body"))
+    (= (get e "node") "cond")
+      (.some (get e "clauses") (fn [(c : Any)] : Bool
+        (body-contains-recur? (get c "body"))))
+    (= (get e "node") "when-let")
+      (body-contains-recur? (get e "body"))
+    (= (get e "node") "if-let")
+      (or (expr-contains-recur? (get e "then"))
+          (expr-contains-recur? (get e "else")))
+    :else false))
+
+(defn body-contains-recur? [(body : (Vec Any))] : Bool
+  (.some body (fn [(e : Any)] : Bool (expr-contains-recur? e))))
+
+(defn emit-recur-stmts [(e : Any) (bind-names : (Vec String))] : String
+  (let [args (get e "args")
+        temps (for [i (range 0 (count args))]
+                (str "const _recur_" i " = " (emit-expr (nth args i)) ";"))
+        assigns (for [i (range 0 (count bind-names))]
+                  (str (nth bind-names i) " = _recur_" i ";"))]
+    (str (.join (concat temps assigns) " ") " continue;")))
+
+(defn emit-loop-stmt [(e : Any) (bind-names : (Vec String))] : String
+  (cond
+    (and (= (get e "node") "if") (expr-contains-recur? e))
+      (let [cond-str (emit-expr (get e "cond"))
+            then-str (emit-loop-stmt (get e "then") bind-names)]
+        (if (get e "else")
+          (let [else-str (emit-loop-stmt (get e "else") bind-names)]
+            (str "if (" cond-str ") { " then-str " } else { " else-str " }"))
+          (str "if (" cond-str ") { " then-str " }")))
+    (and (= (get e "node") "let") (body-contains-recur? (get e "body")))
+      (let [binding-strs (map (fn [(b : Any)] : String
+                                (str "const " (mangle-name (get b "name"))
+                                     " = " (emit-expr (get b "value")) ";"))
+                              (get e "bindings"))
+            body-str (.join (map (fn [(x : Any)] : String
+                                  (emit-loop-stmt x bind-names))
+                                (get e "body")) " ")]
+        (str (.join binding-strs " ") " " body-str))
+    (and (= (get e "node") "cond")
+         (.some (get e "clauses") (fn [(c : Any)] : Bool
+           (body-contains-recur? (get c "body")))))
+      (let [parts (map (fn [(c : Any)] : String
+                         (let [test (get c "test")
+                               body (get c "body")
+                               body-str (.join (map (fn [(x : Any)] : String
+                                                      (emit-loop-stmt x bind-names))
+                                                    body) " ")]
+                           (if (and (= (get test "node") "literal")
+                                    (= (get test "kind") "keyword")
+                                    (= (get test "value") "else"))
+                             (str "{ " body-str " }")
+                             (str "if (" (emit-expr test) ") { " body-str " }"))))
+                       (get e "clauses"))]
+        (.join parts " else "))
+    (= (get e "node") "recur")
+      (emit-recur-stmts e bind-names)
+    :else
+      (str "return " (emit-expr e) ";")))
+
 (defn emit-loop [(e : Any)] : String
   (let [bindings (get e "bindings")
         body (get e "body")
+        bind-names (map (fn [(b : Any)] : String (mangle-name (get b "name"))) bindings)
         bind-strs (map (fn [(b : Any)] : String
                          (str "let " (mangle-name (get b "name"))
                               " = " (emit-expr (get b "value")) ";"))
                        bindings)
-        body-str (emit-body-return body "    ")]
+        body-str (.join (map (fn [(x : Any)] : String
+                               (emit-loop-stmt x bind-names))
+                             body)
+                        "\n    ")]
     (str "(() => { " (.join bind-strs " ") " while (true) {\n    " body-str "\n  } })()")))
 
 (defn emit-recur [(e : Any)] : String

@@ -70,8 +70,24 @@ function emit_doseq(e) {
   return (() => { const clauses = e["clauses"]; const body = e["body"]; const c = clauses[0]; return ((c["type"] === "binding") ? (() => { const name = mangle_name(c["name"]); const coll = emit_expr(c["expr"]); const body_str = emit_body_stmts(body, "  "); return ("".concat("(() => { ", coll, ".forEach((", name, ") => {\n  ", body_str, "\n}); })()")); })() : "/* unsupported doseq */"); })();
 }
 
+function expr_contains_recur_p(e) {
+  return ((e == null)) ? false : ((!(typeof e === 'object' && e !== null && !Array.isArray(e)))) ? false : ((e["node"] === "recur")) ? true : ((e["node"] === "if")) ? (expr_contains_recur_p(e["then"]) || expr_contains_recur_p(e["else"])) : ((e["node"] === "let")) ? body_contains_recur_p(e["body"]) : ((e["node"] === "cond")) ? e["clauses"].some((c) => body_contains_recur_p(c["body"])) : ((e["node"] === "when-let")) ? body_contains_recur_p(e["body"]) : ((e["node"] === "if-let")) ? (expr_contains_recur_p(e["then"]) || expr_contains_recur_p(e["else"])) : false;
+}
+
+function body_contains_recur_p(body) {
+  return body.some((e) => expr_contains_recur_p(e));
+}
+
+function emit_recur_stmts(e, bind_names) {
+  return (() => { const args = e["args"]; const temps = $$bc.range(0, args.length).map((i) => ("".concat("const _recur_", i, " = ", emit_expr(args[i]), ";"))); const assigns = $$bc.range(0, bind_names.length).map((i) => ("".concat(bind_names[i], " = _recur_", i, ";"))); return ("".concat([].concat(temps, assigns).join(" "), " continue;")); })();
+}
+
+function emit_loop_stmt(e, bind_names) {
+  return (((e["node"] === "if") && expr_contains_recur_p(e))) ? (() => { const cond_str = emit_expr(e["cond"]); const then_str = emit_loop_stmt(e["then"], bind_names); return (e["else"] ? (() => { const else_str = emit_loop_stmt(e["else"], bind_names); return ("".concat("if (", cond_str, ") { ", then_str, " } else { ", else_str, " }")); })() : ("".concat("if (", cond_str, ") { ", then_str, " }"))); })() : (((e["node"] === "let") && body_contains_recur_p(e["body"]))) ? (() => { const binding_strs = e["bindings"].map((b) => ("".concat("const ", mangle_name(b["name"]), " = ", emit_expr(b["value"]), ";"))); const body_str = e["body"].map((x) => emit_loop_stmt(x, bind_names)).join(" "); return ("".concat(binding_strs.join(" "), " ", body_str)); })() : (((e["node"] === "cond") && e["clauses"].some((c) => body_contains_recur_p(c["body"])))) ? (() => { const parts = e["clauses"].map((c) => (() => { const test = c["test"]; const body = c["body"]; const body_str = body.map((x) => emit_loop_stmt(x, bind_names)).join(" "); return (((test["node"] === "literal") && (test["kind"] === "keyword") && (test["value"] === "else")) ? ("".concat("{ ", body_str, " }")) : ("".concat("if (", emit_expr(test), ") { ", body_str, " }"))); })()); return parts.join(" else "); })() : ((e["node"] === "recur")) ? emit_recur_stmts(e, bind_names) : ("".concat("return ", emit_expr(e), ";"));
+}
+
 function emit_loop(e) {
-  return (() => { const bindings = e["bindings"]; const body = e["body"]; const bind_strs = bindings.map((b) => ("".concat("let ", mangle_name(b["name"]), " = ", emit_expr(b["value"]), ";"))); const body_str = emit_body_return(body, "    "); return ("".concat("(() => { ", bind_strs.join(" "), " while (true) {\n    ", body_str, "\n  } })()")); })();
+  return (() => { const bindings = e["bindings"]; const body = e["body"]; const bind_names = bindings.map((b) => mangle_name(b["name"])); const bind_strs = bindings.map((b) => ("".concat("let ", mangle_name(b["name"]), " = ", emit_expr(b["value"]), ";"))); const body_str = body.map((x) => emit_loop_stmt(x, bind_names)).join("\n    "); return ("".concat("(() => { ", bind_strs.join(" "), " while (true) {\n    ", body_str, "\n  } })()")); })();
 }
 
 function emit_recur(e) {
