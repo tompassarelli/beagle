@@ -1,0 +1,1097 @@
+#lang beagle/js
+(ns self-host.emit-rkt)
+(define-mode strict)
+
+;; Self-hosted Typed Racket emitter.
+;; Reads JSON AST (from beagle-ast), emits Typed Racket source.
+
+(declare-extern JSON Any)
+(declare-extern process Any)
+
+;; --- record field registry ---------------------------------------------------
+;; Populated per-program: maps record-name -> [field-name-string ...]
+;; Uses an atom holding a map, mutated via reset!/assoc.
+
+(def record-fields : Any (atom {}))
+
+(defn reg-set [(name : String) (field-names : (Vec String))] : Nil
+  (reset! record-fields (assoc (deref record-fields) name field-names)))
+
+(defn reg-get [(name : String)] : Any
+  (get (deref record-fields) name))
+
+(defn build-record-registry [(forms : (Vec Any))] : Nil
+  (reset! record-fields {})
+  (.forEach forms
+    (fn [(f : Any)] : Nil
+      (let [node (get f "node")]
+        (cond
+          (= node "record")
+            (let [name (get f "name")
+                  fields (get f "fields")
+                  names (.map fields (fn [(p : Any)] : String (get p "name")))]
+              (reg-set name names))
+          (= node "defunion")
+            (let [mf (get f "member-fields")]
+              (if (not (nil? mf))
+                (.forEach (get f "members")
+                  (fn [(m : String)] : Nil
+                    (if (nil? (reg-get m))
+                      (let [fields (get mf m)]
+                        (if (and (not (nil? fields)) (> (count fields) 0))
+                          (let [names (.map fields (fn [(p : Any)] : String (get p "name")))]
+                            (reg-set m names))
+                          nil))
+                      nil)))
+                nil))
+          (= node "deferror")
+            (let [mf (get f "member-fields")]
+              (if (not (nil? mf))
+                (.forEach (get f "members")
+                  (fn [(m : String)] : Nil
+                    (if (nil? (reg-get m))
+                      (let [fields (get mf m)]
+                        (if (and (not (nil? fields)) (> (count fields) 0))
+                          (let [names (.map fields (fn [(p : Any)] : String (get p "name")))]
+                            (reg-set m names))
+                          nil))
+                      nil)))
+                nil))
+          (= node "defscalar")
+            (reg-set (get f "name") ["v"])
+          :else nil)))))
+
+;; --- name mangling -----------------------------------------------------------
+;; Racket allows hyphens, question marks, exclamation marks natively.
+;; Only need to avoid collisions with reserved words.
+
+(def rkt-reserved : (Vec String)
+  ["if" "cond" "let" "define" "lambda" "struct" "match"
+   "require" "provide" "module" "begin" "set!" "quote"
+   "and" "or" "not" "when" "unless" "for" "do"
+   "define-type" "ann" "inst" "cast"])
+
+(defn mangle [(name : String)] : String
+  (if (.includes rkt-reserved name)
+    (str name "_")
+    name))
+
+;; --- type emission -----------------------------------------------------------
+;; Emits Typed Racket type syntax from JSON type objects.
+
+(defn emit-type [(t : Any)] : String
+  (if (nil? t) "Any"
+    (let [kind (get t "kind")]
+      (cond
+        (= kind "prim")
+          (let [name (get t "name")]
+            (cond
+              (= name "String")  "String"
+              (= name "Int")     "Integer"
+              (= name "Float")   "Flonum"
+              (= name "Bool")    "Boolean"
+              (= name "Nil")     "False"
+              (= name "Any")     "Any"
+              (= name "Keyword") "Symbol"
+              (= name "Symbol")  "Symbol"
+              :else name))
+
+        (= kind "fn")
+          (let [params (get t "params")
+                ret (get t "ret")
+                rest-t (get t "rest")
+                param-strs (.map params (fn [(p : Any)] : String (emit-type p)))]
+            (if (and (not (nil? rest-t)) (not= rest-t false))
+              (str "(-> " (.join param-strs " ") " " (emit-type rest-t) " * " (emit-type ret) ")")
+              (str "(-> " (.join param-strs " ") " " (emit-type ret) ")")))
+
+        (= kind "app")
+          (let [ctor (get t "name")
+                args (get t "args")]
+            (cond
+              (or (= ctor "Vec") (= ctor "List"))
+                (str "(Listof " (emit-type (nth args 0)) ")")
+              (= ctor "Set")
+                (str "(Setof " (emit-type (nth args 0)) ")")
+              (= ctor "Map")
+                (str "(HashTable " (emit-type (nth args 0)) " " (emit-type (nth args 1)) ")")
+              (= ctor "Promise")
+                (str "(Promise " (emit-type (nth args 0)) ")")
+              :else
+                (str "(" ctor " " (.join (.map args (fn [(a : Any)] : String (emit-type a))) " ") ")")))
+
+        (= kind "union")
+          (let [members (get t "members")]
+            ;; Check for nullable pattern: (U T Nil) -> (Option T)
+            (if (and (= (count members) 2)
+                     (.some members (fn [(m : Any)] : Bool
+                       (and (= (get m "kind") "prim") (= (get m "name") "Nil")))))
+              (let [non-nil (first (filter (fn [(m : Any)] : Bool
+                                             (not (and (= (get m "kind") "prim")
+                                                       (= (get m "name") "Nil"))))
+                                          members))]
+                (str "(Option " (emit-type non-nil) ")"))
+              (str "(U " (.join (.map members (fn [(m : Any)] : String (emit-type m))) " ") ")")))
+
+        (= kind "var")
+          (get t "name")
+
+        :else "Any"))))
+
+;; --- value ref translations --------------------------------------------------
+
+(def rkt-value-refs : Any
+  {"string/join" "string-join"
+   "string/split" "string-split"
+   "string/upper-case" "string-upcase"
+   "string/lower-case" "string-downcase"
+   "string/includes?" "string-contains?"
+   "string/trim" "string-trim"
+   "string/starts-with?" "string-prefix?"
+   "string/ends-with?" "string-suffix?"
+   "string/replace" "string-replace"
+   "println" "displayln"
+   "prn" "writeln"
+   "mapv" "map"
+   "filterv" "filter"
+   "inc" "add1"
+   "dec" "sub1"})
+
+;; --- accessor resolution -----------------------------------------------------
+;; Detects `foo-bar` where `Foo` has field `bar` -> `Foo-bar`
+
+(defn accessor-for [(s : String)] : (U String Nil)
+  (let [result (atom nil)
+        reg (deref record-fields)
+        keys (.keys (.-constructor reg) reg)]
+    (.forEach keys
+      (fn [(rec : String)] : Nil
+        (if (nil? (deref result))
+          (let [rec-lower (.toLowerCase rec)
+                prefix (str rec-lower "-")]
+            (if (.startsWith s prefix)
+              (let [field (.substring s (.-length prefix))
+                    field-names (reg-get rec)]
+                (if (and (not (nil? field-names)) (.includes field-names field))
+                  (reset! result (str rec "-" field))
+                  nil))
+              nil))
+          nil)))
+    (deref result)))
+
+(defn emit-symbol [(sym : String)] : String
+  (cond
+    (.startsWith sym "->")
+      (.substring sym 2)
+    :else
+      (let [acc (accessor-for sym)]
+        (if (some? acc)
+          acc
+          (let [vref (get rkt-value-refs sym)]
+            (if (some? vref) vref (mangle sym)))))))
+
+;; --- helpers -----------------------------------------------------------------
+
+(defn emit-args [(args : (Vec Any))] : String
+  (if (= (count args) 0)
+    ""
+    (str " " (.join (map emit-expr args) " "))))
+
+(defn emit-body [(exprs : (Vec Any))] : String
+  (cond
+    (= (count exprs) 0) "(void)"
+    (= (count exprs) 1) (emit-expr (first exprs))
+    :else (.join (map emit-expr exprs) "\n  ")))
+
+;; --- param emission ----------------------------------------------------------
+
+(defn emit-param-typed [(p : Any)] : String
+  (let [t (get p "type")]
+    (cond
+      (= t "param")
+        (let [ann (get p "ann")]
+          (if (and (not (nil? ann)) (not= ann false))
+            (str "[" (mangle (get p "name")) " : " (emit-type ann) "]")
+            (mangle (get p "name"))))
+      :else (mangle (get p "name")))))
+
+(defn emit-params-typed [(params : (Vec Any)) (rest-p : Any)] : String
+  (let [fixed (.map params (fn [(p : Any)] : String (emit-param-typed p)))
+        all (if (and rest-p (not= rest-p false))
+              (let [rp (if (and (map? rest-p) (get rest-p "name")) rest-p rest-p)
+                    rname (if (map? rp) (mangle (get rp "name")) (mangle (str rp)))
+                    rann (if (map? rp) (get rp "ann") nil)
+                    rtype (if (and (not (nil? rann)) (not= rann false))
+                            (str (emit-type rann) " *")
+                            "Any *")]
+                (conj fixed (str ". [" rname " : " rtype "]")))
+              fixed)]
+    (.join all " ")))
+
+;; --- core call check ---------------------------------------------------------
+
+(def core-calls : (Vec String)
+  ["+" "-" "*" "/" "mod" "rem"
+   "=" "not=" "<" ">" "<=" ">="
+   "and" "or" "not"
+   "str" "println" "print" "prn"
+   "inc" "dec" "abs"
+   "first" "rest" "cons" "conj" "concat"
+   "count" "empty?" "nil?" "some?"
+   "nth" "get" "assoc" "dissoc"
+   "contains?" "keys" "vals"
+   "map" "filter" "reduce"
+   "mapv" "filterv"
+   "into" "vec" "set" "list" "hash-map"
+   "range" "repeat"
+   "apply" "partial" "comp"
+   "identity" "constantly"
+   "string/join" "string/split" "string/upper-case" "string/lower-case"
+   "string/includes?" "string/trim" "string/starts-with?" "string/ends-with?"
+   "string/replace"
+   "subs"
+   "int?" "float?" "string?" "keyword?" "symbol?" "boolean?" "number?"
+   "name" "keyword" "symbol"
+   "max" "min"
+   "sort" "sort-by" "reverse"
+   "distinct" "flatten"
+   "take" "drop"
+   "atom" "deref" "reset!" "swap!"
+   "throw" "type" "->"])
+
+(defn core-call? [(name : String)] : Bool
+  (.includes core-calls name))
+
+;; --- core call emission ------------------------------------------------------
+
+(defn emit-core-call [(sym : String) (args : (Vec Any))] : String
+  (let [a (map emit-expr args)
+        n (count a)]
+    (cond
+      ;; arithmetic
+      (or (= sym "+") (= sym "-") (= sym "*") (= sym "/"))
+        (str "(" sym " " (.join a " ") ")")
+      (= sym "mod")
+        (str "(modulo " (.join a " ") ")")
+      (= sym "rem")
+        (str "(remainder " (.join a " ") ")")
+
+      ;; comparison
+      (= sym "=")
+        (str "(equal? " (.join a " ") ")")
+      (= sym "not=")
+        (str "(not (equal? " (.join a " ") "))")
+      (or (= sym "<") (= sym ">") (= sym "<=") (= sym ">="))
+        (str "(" sym " " (.join a " ") ")")
+
+      ;; logic
+      (= sym "and") (str "(and " (.join a " ") ")")
+      (= sym "or")  (str "(or "  (.join a " ") ")")
+      (= sym "not") (str "(not " (.join a " ") ")")
+
+      ;; string
+      (= sym "str")
+        (if (= n 1)
+          (str "(format \"~a\" " (nth a 0) ")")
+          (str "(string-append "
+               (.join (.map a (fn [(x : String)] : String (str "(format \"~a\" " x ")"))) " ")
+               ")"))
+
+      ;; I/O
+      (= sym "println") (str "(displayln " (.join a " ") ")")
+      (= sym "print")   (str "(display " (.join a " ") ")")
+      (= sym "prn")     (str "(writeln " (.join a " ") ")")
+
+      ;; arithmetic helpers
+      (= sym "inc") (str "(add1 " (nth a 0) ")")
+      (= sym "dec") (str "(sub1 " (nth a 0) ")")
+      (= sym "abs") (str "(abs " (nth a 0) ")")
+
+      ;; sequence ops
+      (= sym "first") (str "(car " (nth a 0) ")")
+      (= sym "rest")  (str "(cdr " (nth a 0) ")")
+      (= sym "cons")  (str "(cons " (nth a 0) " " (nth a 1) ")")
+      (= sym "conj")  (str "(append " (nth a 0) " (list " (nth a 1) "))")
+      (= sym "concat") (str "(append " (.join a " ") ")")
+
+      ;; count / predicates
+      (= sym "count")  (str "(length " (nth a 0) ")")
+      (= sym "empty?") (str "(null? " (nth a 0) ")")
+      (= sym "nil?")   (str "(not " (nth a 0) ")")
+      (= sym "some?")  (str "(and " (nth a 0) " #t)")
+
+      ;; indexing
+      (= sym "nth") (str "(list-ref " (.join a " ") ")")
+
+      ;; map ops
+      (= sym "get")
+        (if (= n 3)
+          (str "(hash-ref " (nth a 0) " " (nth a 1) " (λ () " (nth a 2) "))")
+          (str "(hash-ref " (nth a 0) " " (nth a 1) ")"))
+      (= sym "assoc")    (str "(hash-set " (.join a " ") ")")
+      (= sym "dissoc")   (str "(hash-remove " (nth a 0) " " (nth a 1) ")")
+      (= sym "contains?") (str "(hash-has-key? " (nth a 0) " " (nth a 1) ")")
+      (= sym "keys")     (str "(hash-keys " (nth a 0) ")")
+      (= sym "vals")     (str "(hash-values " (nth a 0) ")")
+
+      ;; higher-order
+      (= sym "map")     (str "(map " (.join a " ") ")")
+      (= sym "filter")  (str "(filter " (.join a " ") ")")
+      (= sym "reduce")
+        (if (= n 3)
+          (str "(foldl " (nth a 0) " " (nth a 1) " " (nth a 2) ")")
+          (str "(foldl " (.join a " ") ")"))
+      (= sym "mapv")    (str "(map " (.join a " ") ")")
+      (= sym "filterv") (str "(filter " (.join a " ") ")")
+
+      ;; collection construction
+      (= sym "into") (str "(append " (nth a 0) " (map values " (nth a 1) "))")
+      (= sym "vec")  (nth a 0)
+      (= sym "set")  (str "(list->set " (nth a 0) ")")
+      (= sym "list") (str "(list " (.join a " ") ")")
+      (= sym "hash-map") (str "(hash " (.join a " ") ")")
+
+      ;; range/repeat
+      (= sym "range")
+        (cond
+          (= n 1) (str "(range " (nth a 0) ")")
+          (= n 2) (str "(range " (nth a 0) " " (nth a 1) ")")
+          :else   (str "(range " (nth a 0) " " (nth a 1) " " (nth a 2) ")"))
+      (= sym "repeat") (str "(make-list " (nth a 0) " " (nth a 1) ")")
+
+      ;; functional
+      (= sym "apply")   (str "(apply " (.join a " ") ")")
+      (= sym "partial")
+        (str "(curry " (nth a 0) " " (.join (.slice a 1) " ") ")")
+      (= sym "comp")    (str "(compose " (.join a " ") ")")
+      (= sym "identity")   (str "(identity " (nth a 0) ")")
+      (= sym "constantly") (str "(const " (nth a 0) ")")
+
+      ;; string operations
+      (= sym "string/join")
+        (if (= n 2)
+          (str "(string-join " (nth a 0) " " (nth a 1) ")")
+          (str "(string-join " (nth a 0) ")"))
+      (= sym "string/split") (str "(string-split " (nth a 0) " " (nth a 1) ")")
+      (= sym "string/upper-case") (str "(string-upcase " (nth a 0) ")")
+      (= sym "string/lower-case") (str "(string-downcase " (nth a 0) ")")
+      (= sym "string/includes?")  (str "(string-contains? " (nth a 0) " " (nth a 1) ")")
+      (= sym "string/trim")       (str "(string-trim " (nth a 0) ")")
+      (= sym "string/starts-with?") (str "(string-prefix? " (nth a 0) " " (nth a 1) ")")
+      (= sym "string/ends-with?")   (str "(string-suffix? " (nth a 0) " " (nth a 1) ")")
+      (= sym "string/replace") (str "(string-replace " (nth a 0) " " (nth a 1) " " (nth a 2) ")")
+
+      ;; subs
+      (= sym "subs")
+        (if (= n 3)
+          (str "(substring " (nth a 0) " " (nth a 1) " " (nth a 2) ")")
+          (str "(substring " (nth a 0) " " (nth a 1) ")"))
+
+      ;; type predicates
+      (= sym "int?")     (str "(exact-integer? " (nth a 0) ")")
+      (= sym "float?")   (str "(flonum? " (nth a 0) ")")
+      (= sym "string?")  (str "(string? " (nth a 0) ")")
+      (= sym "keyword?") (str "(symbol? " (nth a 0) ")")
+      (= sym "symbol?")  (str "(symbol? " (nth a 0) ")")
+      (= sym "boolean?") (str "(boolean? " (nth a 0) ")")
+      (= sym "number?")  (str "(number? " (nth a 0) ")")
+
+      ;; conversion
+      (= sym "name")    (str "(symbol->string " (nth a 0) ")")
+      (= sym "keyword") (str "(string->symbol " (nth a 0) ")")
+      (= sym "symbol")  (str "(string->symbol " (nth a 0) ")")
+
+      ;; min/max
+      (or (= sym "max") (= sym "min"))
+        (str "(" sym " " (.join a " ") ")")
+
+      ;; sorting
+      (= sym "sort")    (str "(sort " (nth a 0) " <)")
+      (= sym "sort-by") (str "(sort " (nth a 1) " < #:key " (nth a 0) ")")
+      (= sym "reverse") (str "(reverse " (nth a 0) ")")
+      (= sym "distinct") (str "(remove-duplicates " (nth a 0) ")")
+      (= sym "flatten")  (str "(flatten " (nth a 0) ")")
+      (= sym "take") (str "(take " (nth a 1) " " (nth a 0) ")")
+      (= sym "drop") (str "(drop " (nth a 1) " " (nth a 0) ")")
+
+      ;; atom/box
+      (= sym "atom")   (str "(box " (nth a 0) ")")
+      (= sym "deref")  (str "(unbox " (nth a 0) ")")
+      (= sym "reset!") (str "(set-box! " (nth a 0) " " (nth a 1) ")")
+      (= sym "swap!")
+        (str "(set-box! " (nth a 0) " (" (nth a 1) " (unbox " (nth a 0) ")"
+             (if (> n 2) (str " " (.join (.slice a 2) " ")) "")
+             "))")
+
+      ;; throw
+      (= sym "throw") (str "(raise " (nth a 0) ")")
+
+      ;; type
+      (= sym "type") (str "'" (nth a 0))
+
+      ;; constructor
+      (= sym "->")
+        (if (>= n 1)
+          (str "(" (nth a 0) " " (.join (.slice a 1) " ") ")")
+          (str "(-> " (.join a " ") ")"))
+
+      :else (str "(" sym " " (.join a " ") ")"))))
+
+;; --- emit-expr ---------------------------------------------------------------
+
+(defn emit-expr [(e : Any)] : String
+  (if (nil? e) "#f"
+    (let [node (get e "node")]
+      (cond
+        ;; --- literals ---
+        (= node "literal")
+          (let [kind (get e "kind")]
+            (cond
+              (= kind "string") (.stringify JSON (get e "value"))
+              (= kind "number") (str (get e "value"))
+              (= kind "float") (let [s (str (get e "value"))]
+                                 (if (.includes s ".") s (str s ".0")))
+              (= kind "bool") (if (get e "value") "#t" "#f")
+              (= kind "nil") "#f"
+              (= kind "keyword") (str "'" (get e "value"))
+              :else "#f"))
+
+        ;; --- variable reference ---
+        (= node "ref")
+          (let [name (get e "name")]
+            (cond
+              (= name "nil")   "#f"
+              (= name "true")  "#t"
+              (= name "false") "#f"
+              (.startsWith name ":") (str "'" (.substring name 1))
+              :else (emit-symbol name)))
+
+        ;; --- def ---
+        (= node "def")
+          (let [n (mangle (get e "name"))
+                ann (get e "ann")]
+            (if (and (not (nil? ann)) (not= ann false))
+              (str "(define " n " : " (emit-type ann) " " (emit-expr (get e "value")) ")")
+              (str "(define " n " " (emit-expr (get e "value")) ")")))
+
+        ;; --- defonce ---
+        (= node "defonce")
+          (let [n (mangle (get e "name"))
+                ann (get e "ann")]
+            (if (and (not (nil? ann)) (not= ann false))
+              (str "(define " n " : " (emit-type ann) " " (emit-expr (get e "value")) ")")
+              (str "(define " n " " (emit-expr (get e "value")) ")")))
+
+        ;; --- defn ---
+        (= node "defn")
+          (emit-defn e)
+
+        ;; --- defn-multi ---
+        (= node "defn-multi")
+          (emit-defn-multi e)
+
+        ;; --- fn (lambda) ---
+        (= node "fn")
+          (let [params (get e "params")
+                rest-p (get e "rest")
+                param-str (emit-params-typed params rest-p)
+                body-str (emit-body (get e "body"))]
+            (str "(λ (" param-str ") " body-str ")"))
+
+        ;; --- let ---
+        (= node "let")
+          (let [bindings (get e "bindings")
+                body (get e "body")
+                bind-strs (.map bindings (fn [(b : Any)] : String
+                             (let [ann (get b "ann")]
+                               (if (and (not (nil? ann)) (not= ann false))
+                                 (str "[" (mangle (get b "name")) " : " (emit-type ann) " " (emit-expr (get b "value")) "]")
+                                 (str "[" (mangle (get b "name")) " " (emit-expr (get b "value")) "]")))))]
+            (if (> (count bindings) 1)
+              (str "(let* (" (.join bind-strs " ") ") " (emit-body body) ")")
+              (str "(let (" (.join bind-strs " ") ") " (emit-body body) ")")))
+
+        ;; --- if ---
+        (= node "if")
+          (let [cond-str (emit-expr (get e "cond"))
+                then-str (emit-expr (get e "then"))
+                else-node (get e "else")]
+            (str "(if " cond-str " " then-str " " (emit-expr else-node) ")"))
+
+        ;; --- when ---
+        (= node "when")
+          (str "(when " (emit-expr (get e "cond")) " " (emit-body (get e "body")) ")")
+
+        ;; --- do ---
+        (= node "do")
+          (str "(begin " (emit-body (get e "body")) ")")
+
+        ;; --- cond ---
+        (= node "cond")
+          (emit-cond e)
+
+        ;; --- call ---
+        (= node "call")
+          (emit-call e)
+
+        ;; --- vec ---
+        (= node "vec")
+          (str "(list " (.join (map emit-expr (get e "items")) " ") ")")
+
+        ;; --- map ---
+        (= node "map")
+          (let [pairs (get e "pairs")
+                pair-strs (.map pairs (fn [(p : Any)] : String
+                             (str (emit-expr (get p "key")) " " (emit-expr (get p "val")))))]
+            (str "(hash " (.join pair-strs " ") ")"))
+
+        ;; --- set ---
+        (= node "set")
+          (str "(set " (.join (map emit-expr (get e "items")) " ") ")")
+
+        ;; --- record (defrecord) ---
+        (= node "record")
+          (emit-record e)
+
+        ;; --- defenum ---
+        (= node "defenum")
+          (emit-defenum e)
+
+        ;; --- defunion ---
+        (= node "defunion")
+          (emit-defunion e)
+
+        ;; --- deferror ---
+        (= node "deferror")
+          (emit-deferror e)
+
+        ;; --- defscalar ---
+        (= node "defscalar")
+          (emit-defscalar e)
+
+        ;; --- quoted ---
+        (= node "quoted")
+          (emit-quoted (get e "datum"))
+
+        ;; --- regex ---
+        (= node "regex")
+          (str "(pregexp " (.stringify JSON (get e "pattern")) ")")
+
+        ;; --- match ---
+        (= node "match")
+          (emit-match e)
+
+        ;; --- loop ---
+        (= node "loop")
+          (emit-loop e)
+
+        ;; --- recur ---
+        (= node "recur")
+          (str "(loop" (emit-args (get e "args")) ")")
+
+        ;; --- try ---
+        (= node "try")
+          (emit-try e)
+
+        ;; --- for ---
+        (= node "for")
+          (emit-for e)
+
+        ;; --- doseq ---
+        (= node "doseq")
+          (emit-doseq e)
+
+        ;; --- method-call ---
+        (= node "method-call")
+          (let [method (get e "method")
+                target-str (emit-expr (get e "target"))
+                args (get e "args")
+                method-str (.replaceAll method "." "")]
+            (str "(send " target-str " " method-str
+                 (if (= (count args) 0) "" (str " " (.join (map emit-expr args) " ")))
+                 ")"))
+
+        ;; --- new ---
+        (= node "new")
+          (let [class-name (get e "class")
+                args (get e "args")
+                name-str (.replaceAll class-name "." "")]
+            (str "(" name-str " " (.join (map emit-expr args) " ") ")"))
+
+        ;; --- kw-access ---
+        (= node "kw-access")
+          (let [kw (get e "kw")
+                target-str (emit-expr (get e "target"))
+                default-val (get e "default")
+                key-str (if (.startsWith kw ":")
+                          (str "'" (.substring kw 1))
+                          (str "'" kw))]
+            (if (and (not (nil? default-val)) (not= default-val false))
+              (str "(hash-ref " target-str " " key-str " " (emit-expr default-val) ")")
+              (str "(hash-ref " target-str " " key-str ")")))
+
+        ;; --- case ---
+        (= node "case")
+          (emit-case e)
+
+        ;; --- with ---
+        (= node "with")
+          (emit-with e)
+
+        ;; --- when-let ---
+        (= node "when-let")
+          (let [n (mangle (get e "name"))
+                expr-str (emit-expr (get e "expr"))
+                body-str (emit-body (get e "body"))]
+            (str "(let ([" n " " expr-str "]) (when " n " " body-str "))"))
+
+        ;; --- if-let ---
+        (= node "if-let")
+          (let [n (mangle (get e "name"))
+                expr-str (emit-expr (get e "expr"))
+                then-str (emit-expr (get e "then"))
+                else-node (get e "else")]
+            (if (and (not (nil? else-node)) (not= else-node false))
+              (str "(let ([" n " " expr-str "]) (if " n " " then-str " " (emit-expr else-node) "))")
+              (str "(let ([" n " " expr-str "]) (when " n " " then-str "))")))
+
+        ;; --- dotimes ---
+        (= node "dotimes")
+          (let [n (mangle (get e "name"))
+                count-str (emit-expr (get e "count"))
+                body-str (emit-body (get e "body"))]
+            (str "(for ([" n " (in-range " count-str ")]) " body-str ")"))
+
+        ;; --- condp ---
+        (= node "condp")
+          (emit-condp e)
+
+        ;; --- set! ---
+        (= node "set!")
+          (let [target (get e "target")
+                val (emit-expr (get e "value"))]
+            (if (= (get target "node") "ref")
+              (str "(set! " (mangle (get target "name")) " " val ")")
+              (str "(set! " (emit-expr target) " " val ")")))
+
+        ;; --- letfn ---
+        (= node "letfn")
+          (emit-letfn e)
+
+        ;; --- dynamic-var ---
+        (= node "dynamic-var")
+          (mangle (get e "name"))
+
+        ;; --- unsafe ---
+        (= node "unsafe")
+          (emit-expr (get e "inner"))
+
+        ;; --- unsafe-raw ---
+        (= node "unsafe-raw")
+          (str ";; unsafe: " (.trim (get e "code")))
+
+        ;; --- await ---
+        (= node "await")
+          ";; await not supported for rkt target"
+
+        ;; --- target-case ---
+        (= node "target-case")
+          (let [cases (get e "cases")
+                branch (first (filter (fn [(c : Any)] : Bool (= (get c "target") "rkt")) cases))]
+            (if branch (emit-expr (get branch "body")) "(void)"))
+
+        ;; --- block-string ---
+        (= node "block-string")
+          (.stringify JSON (get e "text"))
+
+        ;; --- static-call ---
+        (= node "static-call")
+          (str "(" (get e "name") (emit-args (get e "args")) ")")
+
+        ;; --- check ---
+        (= node "check")
+          (str ";; check: " (emit-expr (get e "expr")))
+
+        ;; --- rescue ---
+        (= node "rescue")
+          (str ";; rescue: " (emit-expr (get e "expr")))
+
+        :else
+          (str ";; unsupported: " node)))))
+
+;; --- defn emission -----------------------------------------------------------
+
+(defn emit-defn [(e : Any)] : String
+  (let [name (mangle (get e "name"))
+        params (get e "params")
+        rest-p (get e "rest")
+        ret (get e "ret")
+        body (get e "body")
+
+        ;; build param types for the type annotation
+        param-types (.map params (fn [(p : Any)] : String
+                      (emit-type (get p "ann"))))
+        rest-type-strs (if (and rest-p (not= rest-p false))
+                         (let [rp (if (and (map? rest-p) (get rest-p "ann")) rest-p rest-p)
+                               rt (if (map? rp) (get rp "ann") nil)]
+                           [(str (emit-type rt) " *")])
+                         [])
+        all-types (concat param-types rest-type-strs)
+
+        ;; type annotation line
+        fn-type (if (and (not (nil? ret)) (not= ret false))
+                  (str "(: " name " (-> " (.join all-types " ") " " (emit-type ret) "))")
+                  nil)
+
+        ;; param list
+        param-str (emit-params-typed params rest-p)
+        body-str (emit-body body)]
+    (str (if fn-type (str fn-type "\n") "")
+         "(define (" name " " param-str ")\n  " body-str ")")))
+
+;; --- defn-multi emission -----------------------------------------------------
+
+(defn emit-defn-multi [(e : Any)] : String
+  (let [name (mangle (get e "name"))
+        arities (get e "arities")
+
+        ;; build case-> type
+        case-types (.map arities (fn [(a : Any)] : String
+                     (let [params (get a "params")
+                           ret (get a "ret")
+                           ptypes (.map params (fn [(p : Any)] : String (emit-type (get p "ann"))))]
+                       (str "(-> " (.join ptypes " ") " " (if (and (not (nil? ret)) (not= ret false)) (emit-type ret) "Any") ")"))))
+        type-str (str "(: " name " (case-> " (.join case-types " ") "))")
+
+        ;; build clauses
+        clauses (.map arities (fn [(a : Any)] : String
+                  (let [params (get a "params")
+                        body (get a "body")
+                        param-str (emit-params-typed params nil)]
+                    (str "  [(" param-str ")\n   " (emit-body body) "]"))))]
+    (str type-str "\n"
+         "(define " name "\n  (case-lambda\n" (.join clauses "\n") "))")))
+
+;; --- record emission ---------------------------------------------------------
+
+(defn emit-record [(e : Any)] : String
+  (let [name (get e "name")
+        fields (get e "fields")
+        field-strs (.map fields (fn [(f : Any)] : String
+                     (str "[" (mangle (get f "name")) " : " (emit-type (get f "ann")) "]")))]
+    (str "(struct " name " (" (.join field-strs " ") ") #:transparent)")))
+
+;; --- defenum emission --------------------------------------------------------
+
+(defn emit-defenum [(e : Any)] : String
+  (let [name (get e "name")
+        vals (get e "values")
+        syms (.map vals (fn [(v : String)] : String
+               (str "'" (.replaceAll v ":" ""))))]
+    (str "(define-type " name " (U " (.join syms " ") "))")))
+
+;; --- defunion emission -------------------------------------------------------
+
+(defn emit-defunion [(e : Any)] : String
+  (let [name (get e "name")
+        members (get e "members")
+        mf (get e "member-fields")
+
+        ;; emit struct definitions for members that need them
+        ;; skip members that are already in the record registry (separate defrecord)
+        struct-strs
+          (filter (fn [(s : String)] : Bool (not= s ""))
+            (.map members
+              (fn [(m : String)] : String
+                (if (nil? mf)
+                  ;; no member-fields: skip if already in record registry
+                  (if (nil? (reg-get m))
+                    ""
+                    "")
+                  ;; has member-fields
+                  (let [fields (get mf m)]
+                    (if (or (nil? fields) (= (count fields) 0))
+                      (str "(struct " m " () #:transparent)")
+                      (let [field-strs (.map fields (fn [(f : Any)] : String
+                                         (str "[" (mangle (get f "name")) " : Any]")))]
+                        (str "(struct " m " (" (.join field-strs " ") ") #:transparent)"))))))))
+
+        ;; type alias
+        type-str (str "(define-type " name " (U " (.join members " ") "))")]
+    ;; Match canonical behavior: always prefix type-str with \n
+    ;; This ensures the double-blank-line between preceding form and type definition
+    (if (= (count struct-strs) 0)
+      (str "\n" type-str)
+      (str (.join struct-strs "\n") "\n" type-str))))
+
+;; --- deferror emission -------------------------------------------------------
+
+(defn emit-deferror [(e : Any)] : String
+  (let [name (get e "name")
+        members (get e "members")
+        mf (get e "member-fields")
+
+        struct-strs (.map members (fn [(m : String)] : String
+                      (if (nil? mf)
+                        (str "(struct " m " exn:fail () #:transparent)")
+                        (let [fields (get mf m)]
+                          (if (or (nil? fields) (= (count fields) 0))
+                            (str "(struct " m " exn:fail () #:transparent)")
+                            (let [field-strs (.map fields (fn [(f : Any)] : String
+                                               (str "[" (mangle (get f "name")) " : Any]")))]
+                              (str "(struct " m " exn:fail (" (.join field-strs " ") ") #:transparent)")))))))
+
+        type-str (str "(define-type " name " (U " (.join members " ") "))")]
+    (str (.join struct-strs "\n") "\n" type-str)))
+
+;; --- defscalar emission ------------------------------------------------------
+
+(defn emit-defscalar [(e : Any)] : String
+  (let [name (get e "name")
+        backing (get e "backing")]
+    (str "(struct " name " ([v : " (emit-type backing) "]) #:transparent)")))
+
+;; --- cond emission -----------------------------------------------------------
+
+(defn emit-cond [(e : Any)] : String
+  (let [clauses (get e "clauses")
+        clause-strs (.map clauses (fn [(c : Any)] : String
+                      (let [test (get c "test")
+                            body (get c "body")
+                            test-str (cond
+                                       (and (= (get test "node") "literal")
+                                            (= (get test "kind") "keyword")
+                                            (= (get test "value") "else"))
+                                         "else"
+                                       (and (= (get test "node") "ref")
+                                            (= (get test "name") "else"))
+                                         "else"
+                                       :else (emit-expr test))]
+                        (str "[" test-str " " (emit-body body) "]"))))]
+    (str "(cond " (.join clause-strs " ") ")")))
+
+;; --- call emission -----------------------------------------------------------
+
+(defn emit-call [(e : Any)] : String
+  (let [fn-expr (get e "fn")
+        args (get e "args")]
+    (if (= (get fn-expr "node") "ref")
+      (let [fn-name (get fn-expr "name")]
+        (if (core-call? fn-name)
+          (emit-core-call fn-name args)
+          (str "(" (emit-symbol fn-name) (emit-args args) ")")))
+      (str "(" (emit-expr fn-expr) (emit-args args) ")"))))
+
+;; --- match emission ----------------------------------------------------------
+
+(defn emit-match [(e : Any)] : String
+  (let [target-str (emit-expr (get e "target"))
+        clauses (get e "clauses")
+        clause-strs (.map clauses (fn [(c : Any)] : String
+                      (let [pat (get c "pattern")
+                            body (get c "body")
+                            pat-type (get pat "type")]
+                        (cond
+                          (= pat-type "wildcard")
+                            (str "[else " (emit-body body) "]")
+
+                          (= pat-type "literal")
+                            (let [val (get pat "value")]
+                              (str "[(equal? " target-str " " (emit-expr val) ") " (emit-body body) "]"))
+
+                          (= pat-type "var")
+                            (str "[else (let ([" (mangle (get pat "name")) " " target-str "]) " (emit-body body) ")]")
+
+                          (= pat-type "record")
+                            (let [type-name (get pat "name")
+                                  bindings (get pat "bindings")
+                                  pred (str type-name "?")
+                                  known-fields (reg-get type-name)
+                                  bind-strs (.map bindings (fn [(b : Any) (i : Int)] : String
+                                               (let [field-name (if (get b "field")
+                                                                  (get b "field")
+                                                                  (if (and (not (nil? known-fields))
+                                                                           (< i (count known-fields)))
+                                                                    (nth known-fields i)
+                                                                    (mangle (get b "name"))))
+                                                     accessor (str type-name "-" field-name)]
+                                                 (str "[" (mangle (get b "name")) " (" accessor " " target-str ")]"))))]
+                              (str "[(" pred " " target-str ") (let (" (.join bind-strs " ") ") " (emit-body body) ")]"))
+
+                          :else
+                            (str "[else " (emit-body body) "]")))))]
+    (str "(cond " (.join clause-strs " ") ")")))
+
+;; --- loop/recur emission -----------------------------------------------------
+
+(defn emit-loop [(e : Any)] : String
+  (let [bindings (get e "bindings")
+        body (get e "body")
+        bind-strs (.map bindings (fn [(b : Any)] : String
+                    (let [n (mangle (get b "name"))
+                          ann (get b "ann")]
+                      (if (and (not (nil? ann)) (not= ann false))
+                        (str "[" n " : " (emit-type ann) " " (emit-expr (get b "value")) "]")
+                        (str "[" n " " (emit-expr (get b "value")) "]")))))]
+    (str "(let loop (" (.join bind-strs " ") ") " (emit-body body) ")")))
+
+;; --- try/catch emission ------------------------------------------------------
+
+(defn emit-try [(e : Any)] : String
+  (let [body (get e "body")
+        catches (get e "catches")
+        body-str (emit-body body)]
+    (if (= (count catches) 0)
+      body-str
+      (let [catch-strs (.map catches (fn [(c : Any)] : String
+                          (let [etype (get c "type")
+                                n (mangle (get c "name"))
+                                cbody (emit-body (get c "body"))
+                                pred (cond
+                                       (nil? etype)          "exn:fail?"
+                                       (= etype "Exception") "exn:fail?"
+                                       (= etype "Error")     "exn:fail?"
+                                       :else (str etype "?"))]
+                            (str "[" pred " (λ (" n ") " cbody ")]"))))]
+        (str "(with-handlers (" (.join catch-strs " ") ") " body-str ")")))))
+
+;; --- for emission ------------------------------------------------------------
+
+(defn emit-for [(e : Any)] : String
+  (let [clauses (get e "clauses")
+        body (get e "body")
+        clause-strs (.map clauses (fn [(c : Any)] : String
+                      (let [t (get c "type")]
+                        (cond
+                          (= t "binding")
+                            (str "[" (mangle (get c "name")) " (in-list " (emit-expr (get c "expr")) ")]")
+                          (= t "when")
+                            (str "#:when " (emit-expr (get c "test")))
+                          (= t "let")
+                            (let [bindings (get c "bindings")]
+                              (.join (.map bindings (fn [(b : Any)] : String
+                                       (str "[" (mangle (get b "name")) " " (emit-expr (get b "value")) "]")))
+                                     " "))
+                          :else ""))))]
+    (str "(for/list (" (.join clause-strs " ") ") " (emit-body body) ")")))
+
+;; --- doseq emission ----------------------------------------------------------
+
+(defn emit-doseq [(e : Any)] : String
+  (let [clauses (get e "clauses")
+        body (get e "body")
+        clause-strs (.map clauses (fn [(c : Any)] : String
+                      (let [t (get c "type")]
+                        (cond
+                          (= t "binding")
+                            (str "[" (mangle (get c "name")) " (in-list " (emit-expr (get c "expr")) ")]")
+                          (= t "when")
+                            (str "#:when " (emit-expr (get c "test")))
+                          :else ""))))]
+    (str "(for (" (.join clause-strs " ") ") " (emit-body body) ")")))
+
+;; --- case emission -----------------------------------------------------------
+
+(defn emit-case [(e : Any)] : String
+  (let [test-str (emit-expr (get e "test"))
+        clauses (get e "clauses")
+        default-node (get e "default")
+        clause-strs (.map clauses (fn [(c : Any)] : String
+                      (let [val (get c "value")
+                            body-node (get c "body")]
+                        (str "[(equal? " test-str " " (emit-expr val) ") " (emit-expr body-node) "]"))))
+        default-str (if (and (not (nil? default-node)) (not= default-node false))
+                      (str " [else " (emit-expr default-node) "]")
+                      "")]
+    (str "(cond " (.join clause-strs " ") default-str ")")))
+
+;; --- with emission -----------------------------------------------------------
+
+(defn emit-with [(e : Any)] : String
+  (let [target-str (emit-expr (get e "target"))
+        updates (get e "updates")
+        result (atom target-str)]
+    (.forEach updates
+      (fn [(u : Any)] : Nil
+        (let [field-raw (get u "field")
+              field-name (if (.startsWith field-raw ":")
+                           (.substring field-raw 1)
+                           field-raw)
+              val-str (emit-expr (get u "value"))]
+          (reset! result (str "(struct-copy ??? " (deref result) " [" field-name " " val-str "])")))))
+    (deref result)))
+
+;; --- condp emission ----------------------------------------------------------
+
+(defn emit-condp [(e : Any)] : String
+  (let [pred-str (emit-expr (get e "pred"))
+        test-str (emit-expr (get e "test"))
+        clauses (get e "clauses")
+        default-node (get e "default")
+        clause-strs (.map clauses (fn [(c : Any)] : String
+                      (str "[(" pred-str " " (emit-expr (get c "test")) " " test-str ") "
+                           (emit-body (get c "body")) "]")))
+        default-str (if (and (not (nil? default-node)) (not= default-node false))
+                      (str " [else " (emit-expr default-node) "]")
+                      "")]
+    (str "(cond " (.join clause-strs " ") default-str ")")))
+
+;; --- letfn emission ----------------------------------------------------------
+
+(defn emit-letfn [(e : Any)] : String
+  (let [fns (get e "fns")
+        body (get e "body")
+        fn-defs (.map fns (fn [(f : Any)] : String
+                   (let [name (mangle (get f "name"))
+                         params (get f "params")
+                         rest-p (get f "rest")
+                         ret (get f "ret")
+                         ;; type annotation
+                         param-types (.map params (fn [(p : Any)] : String (emit-type (get p "ann"))))
+                         type-ann (if (and (not (nil? ret)) (not= ret false))
+                                    (str "(: " name " (-> " (.join param-types " ") " " (emit-type ret) "))")
+                                    nil)
+                         param-str (emit-params-typed params rest-p)
+                         fn-body (emit-body (get f "body"))]
+                     (str (if type-ann (str type-ann "\n") "")
+                          "(define (" name " " param-str ") " fn-body ")"))))]
+    (str "(let () " (.join fn-defs "\n") " " (emit-body body) ")")))
+
+;; --- quoted emission ---------------------------------------------------------
+
+(defn emit-quoted [(d : Any)] : String
+  (cond
+    (string? d) (.stringify JSON d)
+    (number? d) (str d)
+    (and (map? d) (= (get d "type") "symbol"))
+      (str "'" (get d "value"))
+    (and (map? d) (= (get d "type") "keyword"))
+      (str "'" (get d "value"))
+    (vector? d)
+      (str "'(" (.join (map emit-quoted d) " ") ")")
+    (nil? d) "#f"
+    :else (str "'" d)))
+
+;; --- program emission --------------------------------------------------------
+
+(defn emit-program [(prog : Any)] : String
+  (let [forms (get prog "forms")
+        _ (build-record-registry forms)
+        parts (map emit-expr forms)]
+    (str "#lang typed/racket\n\n" (.join parts "\n\n") "\n")))
+
+;; --- main: read stdin, emit --------------------------------------------------
+
+(defn main [] : Nil
+  (let [chunks (atom [])]
+    (.on (.-stdin process) "data"
+      (fn [(chunk : Any)] : Nil
+        (reset! chunks (conj (deref chunks) (.toString chunk)))))
+    (.on (.-stdin process) "end"
+      (fn [] : Nil
+        (let [input (.join (deref chunks) "")
+              prog (.parse JSON input)
+              output (emit-program prog)]
+          (.write (.-stdout process) output))))))
+
+(main)

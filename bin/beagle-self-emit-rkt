@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# beagle-self-emit-rkt: self-hosted Typed Racket emit pipeline.
+#
+# Usage:
+#   bin/beagle-self-emit-rkt <source.bgl>
+#
+# Pipeline:
+#   1. Racket: parse + type-check → JSON AST (bin/beagle-ast)
+#   2. Node:   beagle-written emitter → Typed Racket source
+
+set -euo pipefail
+
+BEAGLE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$BEAGLE_ROOT/bin/_beagle-racket"
+
+if [[ $# -ne 1 ]]; then
+    echo "usage: beagle-self-emit-rkt <source>" >&2
+    exit 2
+fi
+
+src="$1"
+
+if [[ ! -f "$src" ]]; then
+    echo "beagle-self-emit-rkt: source file not found: $src" >&2
+    exit 1
+fi
+
+EMITTER="$BEAGLE_ROOT/self-host/dist/emit-rkt.mjs"
+
+if [[ ! -f "$EMITTER" ]]; then
+    echo "beagle-self-emit-rkt: emitter not built. Run: bin/beagle-build self-host/emit-rkt.bjs" >&2
+    exit 1
+fi
+
+"$BEAGLE_ROOT/bin/beagle-ast" "$src" | node "$EMITTER"

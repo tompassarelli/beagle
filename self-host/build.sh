@@ -4,6 +4,7 @@ set -euo pipefail
 
 BEAGLE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$BEAGLE_ROOT"
+source "$BEAGLE_ROOT/bin/_beagle-racket"
 
 PASS=0
 FAIL=0
@@ -87,6 +88,77 @@ if diff <(echo "$RACKET_OUT") <(echo "$SELF_OUT") > /dev/null 2>&1; then
 else
     echo "  FAIL: pytest.bpy differs"
     diff <(echo "$RACKET_OUT") <(echo "$SELF_OUT")
+    FAIL=$((FAIL + 1))
+fi
+
+# --- Nix emitter --------------------------------------------------------------
+
+echo ""
+echo "=== Building self-hosted Nix emitter ==="
+bin/beagle-build self-host/emit-nix.bjs
+cp runtime/src/self/host/emit/nix.js self-host/dist/emit-nix.mjs
+
+for fixture in nix-builtins nix-simple-pkg nix-rec-assert nix-let-cond nix-interp-ms; do
+    echo "=== NIX: Testing against ${fixture}.bnix ==="
+    # Build canonical output
+    bin/beagle-build "beagle-test/tests/fixtures/${fixture}.bnix" 2>/dev/null
+    NS=$(grep -E '^\(ns' "beagle-test/tests/fixtures/${fixture}.bnix" | head -1 | \
+         sed -E 's/^\(ns[[:space:]]+([^)]+)\).*/\1/' | tr -d '[:space:]')
+    REL=$(echo "$NS" | sed 's/[.-]/\//g')
+    NIX_FILE="runtime/src/${REL}.nix"
+    RACKET_SRC=$(cat "$NIX_FILE")
+    SELF_OUT=$(bin/beagle-self-emit-nix "beagle-test/tests/fixtures/${fixture}.bnix" 2>/dev/null)
+
+    if diff <(echo "$RACKET_SRC") <(echo "$SELF_OUT") > /dev/null 2>&1; then
+        echo "  PASS: ${fixture}.bnix matches"
+        PASS=$((PASS + 1))
+    else
+        echo "  FAIL: ${fixture}.bnix differs"
+        diff <(echo "$RACKET_SRC") <(echo "$SELF_OUT")
+        FAIL=$((FAIL + 1))
+    fi
+done
+
+# --- Racket emitter -----------------------------------------------------------
+
+echo ""
+echo "=== Building self-hosted Racket emitter ==="
+bin/beagle-build self-host/emit-rkt.bjs
+cp runtime/src/self/host/emit/rkt.js self-host/dist/emit-rkt.mjs
+
+RKT_PASS=0
+RKT_TOTAL=0
+for fixture in oracle/fixtures/*.bgl; do
+    fname=$(basename "$fixture" .bgl)
+    RKT_TOTAL=$((RKT_TOTAL + 1))
+    RACKET_OUT=$("$RACKET" "$fixture" 2>/dev/null) || continue
+    SELF_OUT=$(bin/beagle-self-emit-rkt "$fixture" 2>/dev/null) || continue
+
+    if diff <(echo "$RACKET_OUT") <(echo "$SELF_OUT") > /dev/null 2>&1; then
+        RKT_PASS=$((RKT_PASS + 1))
+    fi
+done
+echo "  RKT: ${RKT_PASS}/${RKT_TOTAL} fixtures match"
+if [ "$RKT_PASS" -gt 0 ]; then
+    PASS=$((PASS + 1))
+fi
+
+# --- Lint check ---------------------------------------------------------------
+
+echo ""
+echo "=== Building self-hosted lint ==="
+bin/beagle-build self-host/lint.bjs
+
+echo "=== LINT: Testing against mathlib.bclj ==="
+RACKET_LINT=$(bin/beagle-build beagle-test/tests/fixtures/mathlib.bclj 2>&1 | grep "beagle \[lint\]" | sort)
+SELF_LINT=$(bin/beagle-ast beagle-test/tests/fixtures/mathlib.bclj 2>/dev/null | node runtime/src/self/host/lint.js 2>&1 | grep "beagle \[lint\]" | sort)
+
+if diff <(echo "$RACKET_LINT") <(echo "$SELF_LINT") > /dev/null 2>&1; then
+    echo "  PASS: lint output matches"
+    PASS=$((PASS + 1))
+else
+    echo "  FAIL: lint outputs differ"
+    diff <(echo "$RACKET_LINT") <(echo "$SELF_LINT")
     FAIL=$((FAIL + 1))
 fi
 

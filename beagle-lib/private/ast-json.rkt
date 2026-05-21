@@ -70,6 +70,8 @@
 (define (expr->json e)
   (cond
     [(string? e)  (hasheq 'node "literal" 'kind "string" 'value e)]
+    [(and (number? e) (inexact? e))
+     (hasheq 'node "literal" 'kind "float" 'value e)]
     [(number? e)  (hasheq 'node "literal" 'kind "number" 'value e)]
     [(boolean? e) (hasheq 'node "literal" 'kind "bool" 'value e)]
     [(symbol? e)
@@ -253,15 +255,18 @@
 
     [(defunion-form? e)
      (define mf (defunion-form-member-fields e))
+     (define tp (defunion-form-type-params e))
      (define base
        (hasheq 'node "defunion"
                'name (symbol->string (defunion-form-name e))
-               'members (map symbol->string (defunion-form-members e))))
+               'members (map symbol->string (defunion-form-members e))
+               'type-params (if tp (map symbol->string tp) 'null)))
      (if mf
          (hash-set base 'member-fields
                    (for/hasheq ([(k v) (in-hash mf)])
                      (values k
-                             (map (lambda (p) (hasheq 'name (symbol->string (param-name p)))) v))))
+                             (map (lambda (p) (hasheq 'name (symbol->string (param-name p))
+                                                    'ann (type->json (param-type p)))) v))))
          base)]
 
     [(deferror-form? e)
@@ -274,7 +279,8 @@
          (hash-set base 'member-fields
                    (for/hasheq ([(k v) (in-hash mf)])
                      (values k
-                             (map (lambda (p) (hasheq 'name (symbol->string (param-name p)))) v))))
+                             (map (lambda (p) (hasheq 'name (symbol->string (param-name p))
+                                                    'ann (type->json (param-type p)))) v))))
          base)]
 
     [(defscalar-form? e)
@@ -323,13 +329,26 @@
              'then (expr->json (if-let-form-then-body e))
              'else (and (if-let-form-else-body e) (expr->json (if-let-form-else-body e))))]
 
+    [(when-some-form? e)
+     (hasheq 'node "when-some"
+             'name (symbol->string (when-some-form-name e))
+             'expr (expr->json (when-some-form-expr e))
+             'body (map expr->json (when-some-form-body e)))]
+
+    [(if-some-form? e)
+     (hasheq 'node "if-some"
+             'name (symbol->string (if-some-form-name e))
+             'expr (expr->json (if-some-form-expr e))
+             'then (expr->json (if-some-form-then-body e))
+             'else (expr->json (if-some-form-else-body e)))]
+
     [(condp-form? e)
      (hasheq 'node "condp"
              'pred (expr->json (condp-form-pred-fn e))
              'test (expr->json (condp-form-test-expr e))
              'clauses (map (lambda (c)
-                             (hasheq 'test (expr->json (cond-clause-test c))
-                                     'body (map expr->json (cond-clause-body c))))
+                             (hasheq 'test (expr->json (car c))
+                                     'body (expr->json (cdr c))))
                            (condp-form-clauses e))
              'default (and (condp-form-default e) (expr->json (condp-form-default e))))]
 
@@ -388,6 +407,103 @@
              'text (block-string-text e)
              'tag (and (block-string-tag e) (symbol->string (block-string-tag e))))]
 
+    [(with-meta? e)
+     (expr->json (with-meta-expr e))]
+
+    ;; --- Nix-specific forms ---
+    [(nix-inherit? e)
+     (hasheq 'node "nix-inherit"
+             'names (map symbol->string (nix-inherit-names e)))]
+
+    [(nix-inherit-from? e)
+     (hasheq 'node "nix-inherit-from"
+             'ns-expr (expr->json (nix-inherit-from-ns-expr e))
+             'names (map symbol->string (nix-inherit-from-names e)))]
+
+    [(nix-with? e)
+     (hasheq 'node "nix-with"
+             'ns-expr (expr->json (nix-with-ns-expr e))
+             'body (expr->json (nix-with-body e)))]
+
+    [(nix-rec-attrs? e)
+     (hasheq 'node "nix-rec-attrs"
+             'pairs (map (lambda (p)
+                           (hasheq 'key (symbol->string (car p))
+                                   'val (expr->json (cdr p))))
+                         (nix-rec-attrs-pairs e)))]
+
+    [(nix-assert? e)
+     (hasheq 'node "nix-assert"
+             'cond (expr->json (nix-assert-cond-expr e))
+             'body (expr->json (nix-assert-body e)))]
+
+    [(nix-get-or? e)
+     (hasheq 'node "nix-get-or"
+             'base (expr->json (nix-get-or-base-expr e))
+             'path (symbol->string (nix-get-or-path e))
+             'default (expr->json (nix-get-or-default e)))]
+
+    [(nix-has-attr? e)
+     (hasheq 'node "nix-has-attr"
+             'base (expr->json (nix-has-attr-base-expr e))
+             'path (symbol->string (nix-has-attr-path e)))]
+
+    [(nix-search-path? e)
+     (hasheq 'node "nix-search-path"
+             'name (symbol->string (nix-search-path-name e)))]
+
+    [(nix-interpolated-string? e)
+     (hasheq 'node "nix-interpolated-string"
+             'parts (map (lambda (part)
+                           (if (string? part)
+                               (hasheq 'type "text" 'value part)
+                               (hasheq 'type "expr" 'value (expr->json part))))
+                         (nix-interpolated-string-parts e)))]
+
+    [(nix-multiline-string? e)
+     (hasheq 'node "nix-multiline-string"
+             'lines (map (lambda (line)
+                           (cond
+                             [(string? line) (hasheq 'type "text" 'value line)]
+                             [(nix-interpolated-string? line)
+                              (hasheq 'type "interp"
+                                      'parts (map (lambda (part)
+                                                    (if (string? part)
+                                                        (hasheq 'type "text" 'value part)
+                                                        (hasheq 'type "expr" 'value (expr->json part))))
+                                                  (nix-interpolated-string-parts line)))]
+                             [else (hasheq 'type "expr" 'value (expr->json line))]))
+                         (nix-multiline-string-lines e)))]
+
+    [(nix-indented-string? e)
+     (hasheq 'node "nix-indented-string"
+             'text (nix-indented-string-text e))]
+
+    [(nix-path? e)
+     (hasheq 'node "nix-path" 'path (nix-path-path-string e))]
+
+    [(nix-fn-set? e)
+     (hasheq 'node "nix-fn-set"
+             'formals (map (lambda (f)
+                             (hasheq 'name (symbol->string (nix-fn-set-formal-name f))
+                                     'default (and (nix-fn-set-formal-default f)
+                                                   (expr->json (nix-fn-set-formal-default f)))))
+                           (nix-fn-set-formals e))
+             'rest (nix-fn-set-rest? e)
+             'at-name (and (nix-fn-set-at-name e) (symbol->string (nix-fn-set-at-name e)))
+             'body (expr->json (nix-fn-set-body e)))]
+
+    [(nix-pipe? e)
+     (hasheq 'node "nix-pipe"
+             'direction (symbol->string (nix-pipe-direction e))
+             'lhs (expr->json (nix-pipe-lhs e))
+             'rhs (expr->json (nix-pipe-rhs e)))]
+
+    [(nix-impl? e)
+     (hasheq 'node "nix-impl"
+             'lhs (expr->json (nix-impl-lhs e))
+             'rhs (expr->json (nix-impl-rhs e)))]
+
     [else (hasheq 'node "unknown" 'raw (~a e))]))
 
 (define (pattern->json p)
@@ -414,6 +530,16 @@
   (hasheq 'target (symbol->string (program-target prog))
           'namespace (symbol->string (program-namespace prog))
           'mode (symbol->string (program-mode prog))
+          'requires (map (lambda (r)
+                           (hasheq 'ns (symbol->string (require-entry-ns r))
+                                   'alias (and (require-entry-alias r)
+                                               (symbol->string (require-entry-alias r)))
+                                   'refer (and (require-entry-refer r)
+                                               (map symbol->string (require-entry-refer r)))))
+                         (program-requires prog))
+          'externs (for/list ([(name type) (in-hash (program-externs prog))])
+                     (hasheq 'name (symbol->string name)
+                             'type (type->json type)))
           'forms (map expr->json (program-forms prog))))
 
 (define (program->json-string prog)

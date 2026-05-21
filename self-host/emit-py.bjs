@@ -631,6 +631,8 @@
             (cond
               (= kind "string") (.stringify JSON (get e "value"))
               (= kind "number") (str (get e "value"))
+              (= kind "float") (let [s (str (get e "value"))]
+                                 (if (.includes s ".") s (str s ".0")))
               (= kind "bool") (if (get e "value") "True" "False")
               (= kind "nil") "None"
               (= kind "keyword") (.stringify JSON (get e "value"))
