@@ -420,7 +420,9 @@
           (format "[~a ~a]"
                   (mangle-name (let-binding-name b))
                   (emit-expr (let-binding-value b))))))
-  (format "(let (~a) ~a)" (string-join bind-strs " ") (emit-body body)))
+  (if (> (length bindings) 1)
+      (format "(let* (~a) ~a)" (string-join bind-strs " ") (emit-body body))
+      (format "(let (~a) ~a)" (string-join bind-strs " ") (emit-body body))))
 
 ;; --- if/cond/when ----------------------------------------------------------
 

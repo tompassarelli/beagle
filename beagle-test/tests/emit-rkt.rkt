@@ -105,9 +105,13 @@
 
 ;; --- let -------------------------------------------------------------------
 
-(test-case "let emits let"
+(test-case "multi-binding let emits let*"
   (define out (rkt-emit "(define-target rkt) (def r (let [x 1 y 2] (+ x y)))"))
-  (check-true (string-contains? out "(let ([x 1] [y 2])")))
+  (check-true (string-contains? out "(let* ([x 1] [y 2])")))
+
+(test-case "single-binding let emits let"
+  (define out (rkt-emit "(define-target rkt) (def r (let [x 1] x))"))
+  (check-true (string-contains? out "(let ([x 1])")))
 
 ;; --- if / cond / when ------------------------------------------------------
 

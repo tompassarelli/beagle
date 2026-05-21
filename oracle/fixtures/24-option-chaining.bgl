@@ -1,0 +1,14 @@
+#lang beagle/rkt
+
+(defrecord User [(name : String) (email : String?)])
+
+(defn display-email [(u : User)] : String
+  (if-some [e (user-email u)]
+    (str (user-name u) " <" e ">")
+    (str (user-name u) " (no email)")))
+
+(def u1 : User (->User "Alice" "alice@example.com"))
+(def u2 : User (->User "Bob" nil))
+
+(println (display-email u1))
+(println (display-email u2))

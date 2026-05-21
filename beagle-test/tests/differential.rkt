@@ -86,7 +86,10 @@
     "20-nested-data.bgl"
     "21-polymorphic-fns.bgl"
     "22-reduce-fold.bgl"
-    "23-boolean-logic.bgl"))
+    "23-boolean-logic.bgl"
+    "24-option-chaining.bgl"
+    "25-result-pipeline.bgl"
+    "26-fn-composition.bgl"))
 
 (for ([name (in-list differential-fixtures)])
   (define bgl-path (build-path fixtures-dir name))

@@ -1,0 +1,23 @@
+#lang beagle/rkt
+
+(defunion (Result T E)
+  (Ok [(value : T)])
+  (Err [(error : E)]))
+
+(defn parse-int [(s : String)] : (Result Int String)
+  (if (= s "42")
+    (->Ok 42)
+    (->Err (str "not a number: " s))))
+
+(defn double-result [(r : (Result Int String))] : (Result Int String)
+  (match r
+    [(Ok v) (->Ok (* v 2))]
+    [(Err e) (->Err e)]))
+
+(defn describe [(r : (Result Int String))] : String
+  (match r
+    [(Ok v) (str "success: " v)]
+    [(Err e) (str "error: " e)]))
+
+(println (describe (double-result (parse-int "42"))))
+(println (describe (double-result (parse-int "abc"))))
