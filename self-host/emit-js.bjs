@@ -131,6 +131,10 @@
             (= name "false") "false"
             (.startsWith name ":")
               (.stringify JSON (mangle (.substring name 1)))
+            (.startsWith name "js/")
+              (mangle (.substring name 3))
+            (.includes name "/")
+              (.replaceAll (mangle name) "/" ".")
             :else (mangle-name name)))
 
       ;; def
@@ -530,23 +534,23 @@
       (and (= fn-name "some?") (= n 1))
         (str "(" (a 0) " != null)")
       (and (= fn-name "string?") (= n 1))
-        (str "(typeof " (a 0) " === \"string\")")
+        (str "(typeof " (a 0) " === 'string')")
       (and (= fn-name "number?") (= n 1))
-        (str "(typeof " (a 0) " === \"number\")")
+        (str "(typeof " (a 0) " === 'number')")
       (and (= fn-name "int?") (= n 1))
         (str "Number.isInteger(" (a 0) ")")
       (and (= fn-name "float?") (= n 1))
-        (str "(typeof " (a 0) " === \"number\" && !Number.isInteger(" (a 0) "))")
+        (str "(typeof " (a 0) " === 'number' && !Number.isInteger(" (a 0) "))")
       (and (= fn-name "boolean?") (= n 1))
-        (str "(typeof " (a 0) " === \"boolean\")")
+        (str "(typeof " (a 0) " === 'boolean')")
       (and (= fn-name "symbol?") (= n 1))
-        (str "(typeof " (a 0) " === \"symbol\")")
+        (str "(typeof " (a 0) " === 'symbol')")
       (and (= fn-name "fn?") (= n 1))
-        (str "(typeof " (a 0) " === \"function\")")
+        (str "(typeof " (a 0) " === 'function')")
       (and (= fn-name "keyword?") (= n 1))
-        (str "(typeof " (a 0) " === \"string\")")
+        (str "(typeof " (a 0) " === 'string')")
       (and (= fn-name "map?") (= n 1))
-        (str "(typeof " (a 0) " === \"object\" && " (a 0) " !== null && !Array.isArray(" (a 0) "))")
+        (str "(typeof " (a 0) " === 'object' && " (a 0) " !== null && !Array.isArray(" (a 0) "))")
       (and (= fn-name "vector?") (= n 1))
         (str "Array.isArray(" (a 0) ")")
       (and (= fn-name "set?") (= n 1))
@@ -558,11 +562,11 @@
       (and (= fn-name "any?") (= n 1))
         (str "true")
       (and (= fn-name "empty?") (= n 1))
-        (str "(Array.isArray(" (a 0) ") ? " (a 0) ".length === 0 : " (a 0) " instanceof Set ? " (a 0) ".size === 0 : Object.keys(" (a 0) ").length === 0)")
+        (str "(" (a 0) ".length === 0)")
 
       ;; collection ops
       (and (= fn-name "count") (= n 1))
-        (str "(" (a 0) ".length != null ? " (a 0) ".length : " (a 0) " instanceof Set ? " (a 0) ".size : Object.keys(" (a 0) ").length)")
+        (str (a 0) ".length")
       (and (= fn-name "first") (= n 1))
         (str (a 0) "[0]")
       (and (= fn-name "second") (= n 1))
@@ -584,7 +588,7 @@
       (and (= fn-name "get-in") (= n 2))
         (str "$$bc.get_in(" (a 0) ", " (a 1) ")")
       (and (= fn-name "assoc") (>= n 3))
-        (str "Object.freeze({..." (a 0) ", "
+        (str "({..." (a 0) ", "
              (.join (map (fn [(i : Int)] : String
                            (str "[" (emit-expr (nth args (+ 1 (* i 2)))) "]: "
                                 (emit-expr (nth args (+ 2 (* i 2))))))
@@ -592,7 +596,7 @@
                     ", ")
              "})")
       (and (= fn-name "dissoc") (= n 2))
-        (str "(({[" (a 1) "]: _, ...r}) => r)(" (a 0) ")")
+        (str "(() => { const _r = {..." (a 0) "}; delete _r[" (a 1) "]; return _r; })()")
       (and (= fn-name "conj") (= n 2))
         (str "[..." (a 0) ", " (a 1) "]")
       (and (= fn-name "cons") (= n 2))
@@ -600,7 +604,7 @@
       (and (= fn-name "into") (= n 2))
         (str "[..." (a 0) ", ..." (a 1) "]")
       (and (= fn-name "concat") (>= n 1))
-        (str "[..." (.join (map emit-expr args) ", ...") "]")
+        (str "[].concat(" (.join (map emit-expr args) ", ") ")")
       (and (= fn-name "flatten") (= n 1))
         (str (a 0) ".flat(Infinity)")
       (and (= fn-name "vec") (= n 1))
@@ -624,11 +628,11 @@
       (and (= fn-name "vals") (= n 1))
         (str "Object.values(" (a 0) ")")
       (and (= fn-name "merge") (>= n 1))
-        (str "Object.freeze({" (.join (map (fn [(arg : Any)] : String (str "..." (emit-expr arg))) args) ", ") "})")
+        (str "Object.assign({}, " (.join (map emit-expr args) ", ") ")")
       (and (= fn-name "select-keys") (= n 2))
         (str "Object.fromEntries(" (a 1) ".filter(k => k in " (a 0) ").map(k => [k, " (a 0) "[k]]))")
       (and (= fn-name "update") (= n 3))
-        (str "Object.freeze({..." (a 0) ", [" (a 1) "]: " (a 2) "(" (a 0) "[" (a 1) "])})")
+        (str "({..." (a 0) ", [" (a 1) "]: " (a 2) "(" (a 0) "[" (a 1) "])})")
 
       ;; higher-order functions
       (and (= fn-name "map") (= n 2))
@@ -759,23 +763,29 @@
         (str "(() => { throw " (a 0) "; })()")
       (and (= fn-name "hash") (= n 1))
         (str "$$bc.hash(" (a 0) ")")
-      (and (= fn-name "gensym") (= n 0))
-        "Symbol()"
+      (and (= fn-name "gensym"))
+        (if (= n 0) "Symbol()" (str "Symbol(" (a 0) ")"))
 
       ;; atom
       (and (= fn-name "atom") (= n 1))
-        (str "{value: " (a 0) "}")
+        (str "({value: " (a 0) ", watches: {}})")
       (and (= fn-name "deref") (= n 1))
         (str (a 0) ".value")
       (and (= fn-name "reset!") (= n 2))
-        (str "(" (a 0) ".value = " (a 1) ")")
+        (str "(() => { const _a = " (a 0) ", _v = " (a 1)
+             "; const _old = _a.value; _a.value = _v;"
+             " for (const _k in _a.watches) _a.watches[_k](_k, _a, _old, _v);"
+             " return _v; })()")
       (and (= fn-name "swap!") (>= n 2))
-        (if (= n 2)
-          (str "(" (a 0) ".value = " (a 1) "(" (a 0) ".value))")
-          (let [extra (.join (map emit-expr (drop 2 args)) ", ")]
-            (str "(" (a 0) ".value = " (a 1) "(" (a 0) ".value, " extra "))")))
+        (let [extra-str (if (> n 2) (str ", " (.join (map emit-expr (drop 2 args)) ", ")) "")]
+          (str "(() => { const _a = " (a 0) "; const _old = _a.value;"
+               " _a.value = (" (a 1) ")(_old" extra-str ");"
+               " for (const _k in _a.watches) _a.watches[_k](_k, _a, _old, _a.value);"
+               " return _a.value; })()"))
 
-      ;; runtime helpers
+      ;; runtime helpers (beagle/core.js)
+      (= fn-name "range")
+        (str "$$bc.range(" (.join (map emit-expr args) ", ") ")")
       (= fn-name "memoize")
         (str "$$bc.memoize(" (a 0) ")")
       (= fn-name "fnil")
@@ -1068,10 +1078,28 @@
 
 ;; --- program entry point -----------------------------------------------------
 
+(defn emit-expr-stmt [(e : Any)] : String
+  (let [s (emit-expr e)]
+    (if (.endsWith s ";") s (str s ";"))))
+
+(defn emit-form [(f : Any)] : String
+  (let [node (get f "node")]
+    (cond
+      (or (= node "def") (= node "defonce") (= node "defn")
+          (= node "defn-multi") (= node "defrecord") (= node "record")
+          (= node "defenum") (= node "defunion") (= node "deferror")
+          (= node "defscalar"))
+        (emit-expr f)
+      :else (emit-expr-stmt f))))
+
 (defn emit-program [(prog : Any)] : String
   (let [forms (get prog "forms")
-        body (.join (map (fn [(f : Any)] : String (emit-expr f)) forms) "\n\n")]
-    (str body "\n")))
+        body (.join (map (fn [(f : Any)] : String (emit-form f)) forms) "\n\n")
+        needs-import (.includes body "$$bc.")
+        import-str (if needs-import
+                     "import * as $$bc from 'beagle/core.js';\n\n"
+                     "")]
+    (str import-str body "\n")))
 
 ;; --- main: read stdin, emit --------------------------------------------------
 
