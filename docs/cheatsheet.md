@@ -1227,19 +1227,15 @@ Beagle has two macro systems: ​_template macros_​ for simple
 substitution and ​_procedural macros_​ for computed code generation.
 Both produce forms that go through the full type-checking pipeline.
 
-**When to use which:** Use a template macro when you need simple
-substitution with a fixed output shape (one form in, one form out). Use
-a procedural macro when you need to iterate over data, compute symbol
-names, or generate a variable number of typed top-level forms. If you
-just need data-driven dispatch at runtime (e.g. a lookup table), plain
-functions with `cond` or `map`/`filter` are simpler — reach for proc
-macros when the generated code must participate in the type system
-(typed `defn`, `defrecord`, etc.).
+**When to use which:** Template macro for fixed-shape substitution.
+Procedural macro to iterate over data, compute names, or generate
+multiple typed forms. Plain functions when runtime dispatch suffices —
+proc macros are for when generated code must go through the type
+checker.
 
 ### Template Macros
 
-Template macros substitute parameters into a fixed template form. The
-`safe`/`unsafe` distinction controls whether the expanded code is
+The `safe`/`unsafe` distinction controls whether expanded code is
 re-validated by the type checker.
 
 ### define-macro
@@ -1280,10 +1276,6 @@ Defines a macro whose expansion is typed as `Any` (escape boundary).
 
 ### Procedural Macros
 
-Procedural macros are compile-time functions that receive typed inputs
-and return generated forms. Unlike template macros, they can iterate
-over data, compute names, and produce variable numbers of output forms.
-
 ### define-macro proc
 
 ```racket
@@ -1292,16 +1284,12 @@ over data, compute names, and produce variable numbers of output forms.
 body)                            
 ```
 
-Defines a procedural macro. The body is Racket code executed at compile
-time. Inputs are contract-checked against their declared types before
-the body runs; the output is checked against `ReturnType` after.
+Compile-time Racket function with typed AST contracts. Inputs are
+contract-checked before the body runs; output is checked after.
 
-Contract types: `Symbol`, `String`, `Int`, `Bool`, `Keyword`, `Expr`
-(single expression), `Form` (top-level form), `Syntax` (any datum),
-`(Vec T)` (list of T).
-
-Return `Form` for a single top-level form, or `(Vec Form)` for multiple
-forms (spliced into the module).
+Contract types: `Symbol`, `String`, `Int`, `Bool`, `Keyword`, `Expr`,
+`Form`, `Syntax` (any), `(Vec T)`. Return `Form` for one top-level form,
+`(Vec Form)` for multiple (spliced).
 
 ```racket
 ;; Generate a typed record + N accessor functions from a field list         
@@ -1322,25 +1310,15 @@ forms (spliced into the module).
 ;; Expands to: defrecord User + get-name, get-email, get-age                
 ```
 
-* Body has access to `racket/base`, `racket/list`, `racket/string`,
-  `racket/format`, plus helper `sym->kw` (symbol→keyword)
+* Body has `racket/base`, `racket/list`, `racket/string`,
+  `racket/format`, and `sym->kw` (symbol→keyword)
 
-* Inputs are auto-cleaned: reader tags (`#%brackets`, `#%map`, `#%set`)
-  are stripped before the body receives them — `(Vec Syntax)` args
-  arrive as plain lists, not tagged forms
-
-* Use quasiquote (`‘`) and unquote (`,`) to build output forms
-
-* `(Vec Form)` output is spliced — each form becomes a separate
-  top-level definition
-
-* Input contracts reject bad arguments at expansion time with clear
-  error messages
+* Inputs are auto-cleaned: reader tags stripped before the body sees
+  them — `(Vec Syntax)` args arrive as plain lists
 
 * Output goes through the full parse → check → emit pipeline
-  (type-checked like hand-written code)
 
-* Use `beagle-expand` to inspect what a proc macro produces
+* `beagle-expand` shows what the macro produces
 
 ## Tools
 

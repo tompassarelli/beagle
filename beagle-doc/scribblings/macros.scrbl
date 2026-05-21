@@ -6,20 +6,15 @@ Beagle has two macro systems: @emph{template macros} for simple substitution
 and @emph{procedural macros} for computed code generation. Both produce forms
 that go through the full type-checking pipeline.
 
-@bold{When to use which:} Use a template macro when you need simple
-substitution with a fixed output shape (one form in, one form out). Use a
-procedural macro when you need to iterate over data, compute symbol names,
-or generate a variable number of typed top-level forms. If you just need
-data-driven dispatch at runtime (e.g. a lookup table), plain functions with
-@tt{cond} or @tt{map}/@tt{filter} are simpler — reach for proc macros when
-the generated code must participate in the type system (typed @tt{defn},
-@tt{defrecord}, etc.).
+@bold{When to use which:} Template macro for fixed-shape substitution.
+Procedural macro to iterate over data, compute names, or generate multiple
+typed forms. Plain functions when runtime dispatch suffices — proc macros are
+for when generated code must go through the type checker.
 
 @section[#:tag "template-macros"]{Template Macros}
 
-Template macros substitute parameters into a fixed template form.
-The @tt{safe}/@tt{unsafe} distinction controls whether the expanded
-code is re-validated by the type checker.
+The @tt{safe}/@tt{unsafe} distinction controls whether expanded code is
+re-validated by the type checker.
 
 @section[#:tag "define-macro"]{define-macro}
 
@@ -51,25 +46,17 @@ Defines a macro whose expansion is typed as @tt{Any} (escape boundary).
 
 @section[#:tag "procedural-macros"]{Procedural Macros}
 
-Procedural macros are compile-time functions that receive typed inputs and
-return generated forms. Unlike template macros, they can iterate over data,
-compute names, and produce variable numbers of output forms.
-
 @section[#:tag "define-macro-proc"]{define-macro proc}
 
 @defform[(define-macro proc name
   [(param : Type) ...] : ReturnType
   body)]{
-Defines a procedural macro. The body is Racket code executed at compile time.
-Inputs are contract-checked against their declared types before the body runs;
-the output is checked against @tt{ReturnType} after.
+Compile-time Racket function with typed AST contracts. Inputs are
+contract-checked before the body runs; output is checked after.
 
 Contract types: @tt{Symbol}, @tt{String}, @tt{Int}, @tt{Bool}, @tt{Keyword},
-@tt{Expr} (single expression), @tt{Form} (top-level form), @tt{Syntax} (any datum),
-@tt{(Vec T)} (list of T).
-
-Return @tt{Form} for a single top-level form, or @tt{(Vec Form)} for multiple
-forms (spliced into the module).
+@tt{Expr}, @tt{Form}, @tt{Syntax} (any), @tt{(Vec T)}.
+Return @tt{Form} for one top-level form, @tt{(Vec Form)} for multiple (spliced).
 
 @codeblock|{
 ;; Generate a typed record + N accessor functions from a field list
@@ -91,14 +78,10 @@ forms (spliced into the module).
 }|
 
 @itemlist[
-  @item{Body has access to @tt{racket/base}, @tt{racket/list}, @tt{racket/string},
-        @tt{racket/format}, plus helper @tt{sym->kw} (symbol→keyword)}
-  @item{Inputs are auto-cleaned: reader tags (@tt{#%brackets}, @tt{#%map},
-        @tt{#%set}) are stripped before the body receives them — @tt{(Vec Syntax)}
-        args arrive as plain lists, not tagged forms}
-  @item{Use quasiquote (@tt{`}) and unquote (@tt{,}) to build output forms}
-  @item{@tt{(Vec Form)} output is spliced — each form becomes a separate top-level definition}
-  @item{Input contracts reject bad arguments at expansion time with clear error messages}
-  @item{Output goes through the full parse → check → emit pipeline (type-checked like hand-written code)}
-  @item{Use @tt{beagle-expand} to inspect what a proc macro produces}
+  @item{Body has @tt{racket/base}, @tt{racket/list}, @tt{racket/string},
+        @tt{racket/format}, and @tt{sym->kw} (symbol→keyword)}
+  @item{Inputs are auto-cleaned: reader tags stripped before the body sees
+        them — @tt{(Vec Syntax)} args arrive as plain lists}
+  @item{Output goes through the full parse → check → emit pipeline}
+  @item{@tt{beagle-expand} shows what the macro produces}
 ]}
