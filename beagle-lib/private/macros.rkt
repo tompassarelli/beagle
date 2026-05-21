@@ -6,21 +6,21 @@
 ;;   (define-macro safe   inc1 (x) (+ x 1))
 ;;   (define-macro unsafe wild (form) (do (println "trace") form))
 ;;
-;; Variadic macros use `&rest` in parameters:
-;;   (define-macro safe call (fn & args)
-;;     (fn (splice args)))
+;; Beagle-native procedural macros (recommended):
+;;   (define-macro beagle defentity
+;;     [(name : Symbol) (fields : (Vec Syntax))] : (Vec Form)
+;;     (let [record (make-defrecord name
+;;                    (map (fn [(f : Syntax)]
+;;                      (make-field (syntax-name f) (syntax-type f)))
+;;                      fields))]
+;;       (list record)))
 ;;
-;; Procedural macros with typed AST contracts:
+;; Legacy procedural macros (Racket bodies):
 ;;   (define-macro proc gen-getter
 ;;     [(rec : Symbol) (field : Symbol)] : Form
 ;;     `(defn ,(string->symbol (format "get-~a" field))
 ;;        ((obj : ,rec)) : Any
 ;;        (get obj ,(symbol->keyword field))))
-;;
-;; The proc body is Racket code evaluated at macro registration time.
-;; It receives raw datums as arguments and must return a datum that
-;; parse-expr will process. The checker validates the expansion output
-;; — same pipeline as hand-written code.
 
 (require racket/match
          racket/string

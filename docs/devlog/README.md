@@ -3,7 +3,7 @@
 Entries record discoveries, direction changes, and experimental results.
 Each entry is a snapshot of understanding at the time it was written.
 
-Entries are numbered chronologically. Experiments cited by ID (E1–E16+).
+Entries are numbered chronologically. Experiments cited by ID (E1–E22+).
 
 ## Entries
 

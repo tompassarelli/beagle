@@ -218,7 +218,7 @@ silent file reverts during edits. Needs investigation — possible causes:
 ## Completed
 
 <details>
-<summary>v0.1–v0.6.1 (click to expand)</summary>
+<summary>v0.1–v0.11.0 (click to expand)</summary>
 
 ### Repair compiler (phases 1–5)
 
@@ -250,6 +250,7 @@ silent file reverts during edits. Needs investigation — possible causes:
 - v0.5.0: docs/prompts/, nix flake, beagle-docs-sync, README update
 - v0.6.0: form completeness (when-not, if-not, condp, dotimes, defonce, comment), Scribble docs
 - v0.6.1: Scribble polish
+- v0.11.0: proc macros, typed JS target AST, multi-target, Beagle macro evaluator
 
 ### Experiments
 
@@ -262,12 +263,19 @@ silent file reverts during edits. Needs investigation — possible causes:
 - E12: Python gap analysis + clj-kondo track
 - E13: reactive daemon (287s avg, per-bug faster than Python+mypy)
 - E14–E15: multi-agent pool (abandoned — 0 activations across 7 runs)
+- E16: type checker makes agents 24% faster (integration is load-bearing)
+- E18: proc macro compression (2-3× at realistic scale)
+- E19: agent macro authoring (prompted 271s, unprompted invents runtime dispatch)
+- E20: CNF visibility (query tools see through macro expansions)
+- E21: macro composition (single macro generates entity + API)
+- E22: cross-target macro verification (all 6 non-SQL targets)
 
 ### Language
 
-471 tests. ~678 stdlib entries. All core Clojure forms implemented.
-Pattern matching, multi-arity defn, guard narrowing, union types,
-cross-module import, macros (safe/unsafe), defrecord/defscalar/defenum/defunion,
+1221 tests. ~696 stdlib entries. 7 targets (Clojure, CLJS, JS, Nix, Python, Typed Racket, SQL).
+Three macro kinds: template (safe/unsafe), procedural (Racket bodies), Beagle-native
+(syntax constructors, compile-time evaluator). Pattern matching, multi-arity defn,
+guard narrowing, union types, cross-module import, defrecord/defscalar/defenum/defunion,
 destructuring, threading, Java interop, metadata, for/doseq/dotimes,
 try/catch, loop/recur, all conditional forms.
 
