@@ -1,0 +1,43 @@
+#lang beagle
+
+;; E18 Pattern 1: CRUD scaffold — proc macro version
+;; Same three entities, generated from specs.
+
+(define-macro proc defentity
+  [(name : Symbol) (fields : (Vec Syntax))] : (Vec Form)
+  (append
+   ;; defrecord
+   (list (cons 'defrecord
+               (cons name
+                     (list (cons '#%brackets
+                                 (map (lambda (f) (list (car f) ': (caddr f)))
+                                      fields))))))
+   ;; typed getters
+   (map (lambda (f)
+          (let ((fname (car f))
+                (ftype (caddr f)))
+            `(defn ,(string->symbol (format "~a-~a" name fname))
+               ((obj : ,name)) : ,ftype
+               (get obj ,(sym->kw fname)))))
+        fields)
+   ;; constructor alias
+   (list
+    (let ((ctor (string->symbol (format "make-~a" name)))
+          (raw-ctor (string->symbol (format "->~a" name))))
+      `(defn ,ctor
+         ,(map (lambda (f) (list (car f) ': (caddr f))) fields)
+         : ,name
+         (,raw-ctor ,@(map car fields)))))))
+
+(defentity User ((name : String) (email : String) (age : Int) (active : Bool)))
+(defentity Product ((sku : String) (title : String) (price : Float) (in-stock : Bool)))
+(defentity Order ((id : String) (user-id : String) (total : Float) (status : String)))
+
+;; --- usage ---
+(def u : User (make-User "alice" "alice@co.com" 30 true))
+(def p : Product (make-Product "SKU-1" "Widget" 9.99 true))
+(def o : Order (make-Order "ORD-1" "alice" 29.97 "pending"))
+
+(println (User-name u))
+(println (Product-title p))
+(println (Order-status o))

@@ -1,0 +1,41 @@
+#lang beagle
+
+;; E18 Pattern 3: API client — proc macro version
+;; Same three endpoints, generated from specs.
+
+(defrecord ApiResponse [(status : Int) (body : String)])
+
+(define-macro proc defapi
+  [(resource : Symbol) (path : String) (fields : (Vec Syntax))] : (Vec Form)
+  (let ((res (symbol->string resource)))
+    (let ((field-strs
+           (let loop ((fs fields) (acc '()))
+             (if (null? fs) (reverse acc)
+                 (let ((f (car fs)) (rest (cdr fs)))
+                   (loop rest
+                         (cons (car f)
+                               (cons (format "~a: " (car f))
+                                     acc))))))))
+      (list
+       `(defn ,(string->symbol (format "get-~as" res)) () : String
+          (str ,(format "GET ~a" path)))
+       `(defn ,(string->symbol (format "get-~a" res)) ((id : String)) : String
+          (str ,(format "GET ~a/" path) id))
+       `(defn ,(string->symbol (format "create-~a" res))
+          ,(map (lambda (f) (list (car f) ': (caddr f))) fields) : String
+          (str ,(format "POST ~a {" path) ,@field-strs "}"))))))
+
+(defapi user "/api/users"
+  ((name : String) (email : String)))
+
+(defapi product "/api/products"
+  ((sku : String) (title : String) (price : Float)))
+
+(defapi order "/api/orders"
+  ((user-id : String) (total : Float)))
+
+(println (get-users))
+(println (get-user "42"))
+(println (create-user "alice" "a@co.com"))
+(println (get-product "SKU-1"))
+(println (create-order "42" 29.97))

@@ -1,0 +1,41 @@
+#lang beagle
+
+;; E18 Pattern 2: State machine — hand-written baseline
+;; Order lifecycle: pending → confirmed → shipped → delivered
+;;                  pending → cancelled
+;;                  confirmed → cancelled
+
+(defn transition [(state : String) (event : String)] : String
+  (cond
+    [(and (= state "pending") (= event "confirm")) "confirmed"]
+    [(and (= state "pending") (= event "cancel")) "cancelled"]
+    [(and (= state "confirmed") (= event "ship")) "shipped"]
+    [(and (= state "confirmed") (= event "cancel")) "cancelled"]
+    [(and (= state "shipped") (= event "deliver")) "delivered"]
+    [true (do (println (str "invalid transition: " state " + " event))
+              state)]))
+
+(defn valid-event? [(state : String) (event : String)] : Bool
+  (cond
+    [(and (= state "pending") (= event "confirm")) true]
+    [(and (= state "pending") (= event "cancel")) true]
+    [(and (= state "confirmed") (= event "ship")) true]
+    [(and (= state "confirmed") (= event "cancel")) true]
+    [(and (= state "shipped") (= event "deliver")) true]
+    [true false]))
+
+(defn terminal? [(state : String)] : Bool
+  (or (= state "delivered") (= state "cancelled")))
+
+;; run a sequence of events
+(defn run-events [(state : String) (events : (Vec String))] : String
+  (reduce (fn [(s : String) (e : String)] : String
+            (if (valid-event? s e)
+              (transition s e)
+              (do (println (str "skipping invalid: " e " in " s)) s)))
+          state events))
+
+(println (run-events "pending" ["confirm" "ship" "deliver"]))
+(println (run-events "pending" ["cancel"]))
+(println (terminal? "delivered"))
+(println (terminal? "confirmed"))

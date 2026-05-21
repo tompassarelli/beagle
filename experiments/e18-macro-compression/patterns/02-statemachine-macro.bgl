@@ -1,0 +1,52 @@
+#lang beagle
+
+;; E18 Pattern 2: State machine — proc macro version
+;; Same order lifecycle, generated from a transition table.
+
+(define-macro proc defstatemachine
+  [(name : Symbol) (transitions : (Vec Syntax)) (terminals : (Vec Syntax))] : (Vec Form)
+  (list
+   ;; transition function
+   `(defn ,(string->symbol (format "~a-transition" name))
+      ((state : String) (event : String)) : String
+      (cond
+        ,@(map (lambda (t)
+                 (let ((from (car t)) (evt (cadr t)) (to (caddr t)))
+                   (br `(and (= state ,from) (= event ,evt)) to)))
+               transitions)
+        ,(br 'true '(do (println (str "invalid transition: " state " + " event))
+                        state))))
+   ;; valid-event? predicate
+   `(defn ,(string->symbol (format "~a-valid?" name))
+      ((state : String) (event : String)) : Bool
+      (cond
+        ,@(map (lambda (t)
+                 (let ((from (car t)) (evt (cadr t)))
+                   (br `(and (= state ,from) (= event ,evt)) 'true)))
+               transitions)
+        ,(br 'true 'false)))
+   ;; terminal? predicate
+   `(defn ,(string->symbol (format "~a-terminal?" name))
+      ((state : String)) : Bool
+      (or ,@(map (lambda (s) `(= state ,s)) terminals)))))
+
+(defstatemachine order
+  (("pending" "confirm" "confirmed")
+   ("pending" "cancel" "cancelled")
+   ("confirmed" "ship" "shipped")
+   ("confirmed" "cancel" "cancelled")
+   ("shipped" "deliver" "delivered"))
+  ("delivered" "cancelled"))
+
+;; run a sequence of events
+(defn run-events [(state : String) (events : (Vec String))] : String
+  (reduce (fn [(s : String) (e : String)] : String
+            (if (order-valid? s e)
+              (order-transition s e)
+              (do (println (str "skipping invalid: " e " in " s)) s)))
+          state events))
+
+(println (run-events "pending" ["confirm" "ship" "deliver"]))
+(println (run-events "pending" ["cancel"]))
+(println (order-terminal? "delivered"))
+(println (order-terminal? "confirmed"))
