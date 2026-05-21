@@ -1,0 +1,777 @@
+[
+  {
+    "name": "empty input returns ok",
+    "category": "happy_path",
+    "input": {"tasks": [], "workers": [], "resources": []},
+    "expect": {"status": "ok", "assignments": []}
+  },
+  {
+    "name": "empty tasks with workers",
+    "category": "happy_path",
+    "input": {
+      "tasks": [],
+      "workers": [{"id": "1", "name": "w1", "capabilities": [], "unavailable": []}],
+      "resources": []
+    },
+    "expect": {"status": "ok", "assignments": []}
+  },
+  {
+    "name": "single task single worker",
+    "category": "happy_path",
+    "input": {
+      "tasks": [{"id": "1", "name": "t1", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}],
+      "workers": [{"id": "1", "name": "w1", "capabilities": [], "unavailable": []}],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "assignments": [
+        {"task_id": "1", "worker_id": "1", "start_time": 0, "end_time": 10, "attempt": 1}
+      ]
+    }
+  },
+  {
+    "name": "single task duration 25",
+    "category": "happy_path",
+    "input": {
+      "tasks": [{"id": "1", "name": "t1", "duration": 25, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}],
+      "workers": [{"id": "1", "name": "w1", "capabilities": [], "unavailable": []}],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "assignments": [
+        {"task_id": "1", "start_time": 0, "end_time": 25}
+      ]
+    }
+  },
+  {
+    "name": "two tasks two workers parallel",
+    "category": "happy_path",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "2", "name": "t2", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []},
+        {"id": "2", "name": "w2", "capabilities": [], "unavailable": []}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "assignments": [
+        {"task_id": "1", "worker_id": "1", "start_time": 0, "end_time": 10},
+        {"task_id": "2", "worker_id": "2", "start_time": 0, "end_time": 10}
+      ]
+    }
+  },
+  {
+    "name": "two tasks one worker sequential",
+    "category": "happy_path",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "2", "name": "t2", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "assignments": [
+        {"task_id": "1", "start_time": 0, "end_time": 10},
+        {"task_id": "2", "start_time": 10, "end_time": 20}
+      ]
+    }
+  },
+  {
+    "name": "priority ordering lower number first",
+    "category": "happy_path",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "low", "duration": 10, "priority": 5, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "2", "name": "high", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "assignments": [
+        {"task_id": "2", "start_time": 0, "end_time": 10},
+        {"task_id": "1", "start_time": 10, "end_time": 20}
+      ],
+      "before": [{"early": "2", "late": "1"}]
+    }
+  },
+  {
+    "name": "same priority tiebreak by id",
+    "category": "happy_path",
+    "input": {
+      "tasks": [
+        {"id": "2", "name": "t2", "duration": 5, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "1", "name": "t1", "duration": 5, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "assignments": [
+        {"task_id": "1", "start_time": 0},
+        {"task_id": "2", "start_time": 5}
+      ]
+    }
+  },
+  {
+    "name": "multiple capable workers picks first by id",
+    "category": "happy_path",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "3", "name": "w3", "capabilities": [], "unavailable": []},
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []},
+        {"id": "2", "name": "w2", "capabilities": [], "unavailable": []}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "assignments": [
+        {"task_id": "1", "worker_id": "1"}
+      ]
+    }
+  },
+  {
+    "name": "four tasks two workers batch",
+    "category": "happy_path",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "2", "name": "t2", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "3", "name": "t3", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "4", "name": "t4", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []},
+        {"id": "2", "name": "w2", "capabilities": [], "unavailable": []}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "assignment_count": 4,
+      "assignments": [
+        {"task_id": "1", "start_time": 0},
+        {"task_id": "2", "start_time": 0},
+        {"task_id": "3", "start_time": 10},
+        {"task_id": "4", "start_time": 10}
+      ]
+    }
+  },
+  {
+    "name": "linear chain exact timing",
+    "category": "dependency",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "a", "duration": 5, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "2", "name": "b", "duration": 7, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": ["1"], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "3", "name": "c", "duration": 3, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": ["2"], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "assignments": [
+        {"task_id": "1", "start_time": 0, "end_time": 5},
+        {"task_id": "2", "start_time": 5, "end_time": 12},
+        {"task_id": "3", "start_time": 12, "end_time": 15}
+      ],
+      "before": [{"early": "1", "late": "2"}, {"early": "2", "late": "3"}]
+    }
+  },
+  {
+    "name": "diamond dependency d starts after latest predecessor",
+    "category": "dependency",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "a", "duration": 5, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "2", "name": "b", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": ["1"], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "3", "name": "c", "duration": 3, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": ["1"], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "4", "name": "d", "duration": 5, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": ["2", "3"], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []},
+        {"id": "2", "name": "w2", "capabilities": [], "unavailable": []}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "assignment_count": 4,
+      "assignments_partial": true,
+      "assignments": [
+        {"task_id": "2", "end_time": 15},
+        {"task_id": "4", "start_time": 15}
+      ],
+      "before": [
+        {"early": "1", "late": "2"},
+        {"early": "1", "late": "3"},
+        {"early": "2", "late": "4"},
+        {"early": "3", "late": "4"}
+      ]
+    }
+  },
+  {
+    "name": "simple cycle detected",
+    "category": "dependency",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "a", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": ["2"], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "2", "name": "b", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": ["1"], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "error",
+      "has_failure_type": ["DependencyCycle"],
+      "failure_task_ids": ["1", "2"]
+    }
+  },
+  {
+    "name": "complex cycle abc",
+    "category": "dependency",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "a", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": ["3"], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "2", "name": "b", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": ["1"], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "3", "name": "c", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": ["2"], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "error",
+      "has_failure_type": ["DependencyCycle"],
+      "failure_task_ids": ["1", "2", "3"]
+    }
+  },
+  {
+    "name": "self dependency detected",
+    "category": "dependency",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "a", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": ["1"], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "error",
+      "has_failure_type": ["DependencyCycle"],
+      "failure_task_ids": ["1"]
+    }
+  },
+  {
+    "name": "wide fanout b c d all after a",
+    "category": "dependency",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "a", "duration": 5, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "2", "name": "b", "duration": 5, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": ["1"], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "3", "name": "c", "duration": 5, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": ["1"], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "4", "name": "d", "duration": 5, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": ["1"], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []},
+        {"id": "2", "name": "w2", "capabilities": [], "unavailable": []},
+        {"id": "3", "name": "w3", "capabilities": [], "unavailable": []}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "before": [
+        {"early": "1", "late": "2"},
+        {"early": "1", "late": "3"},
+        {"early": "1", "late": "4"}
+      ]
+    }
+  },
+  {
+    "name": "exact capability match",
+    "category": "capability",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 10, "priority": 1, "deadline": 0, "capabilities": ["1"], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": ["1"], "unavailable": []}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "assignments": [{"task_id": "1", "worker_id": "1"}]
+    }
+  },
+  {
+    "name": "superset capability match",
+    "category": "capability",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 10, "priority": 1, "deadline": 0, "capabilities": ["1"], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": ["1", "2"], "unavailable": []}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "assignments": [{"task_id": "1", "worker_id": "1"}]
+    }
+  },
+  {
+    "name": "missing capability fails",
+    "category": "capability",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 10, "priority": 1, "deadline": 0, "capabilities": ["1", "2"], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": ["1"], "unavailable": []}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "error",
+      "has_failure_type": ["NoCapableWorker"]
+    }
+  },
+  {
+    "name": "capable worker selected over incapable",
+    "category": "capability",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 10, "priority": 1, "deadline": 0, "capabilities": ["1"], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []},
+        {"id": "2", "name": "w2", "capabilities": ["1"], "unavailable": []}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "assignments": [{"task_id": "1", "worker_id": "2"}]
+    }
+  },
+  {
+    "name": "two tasks different caps routed correctly",
+    "category": "capability",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 10, "priority": 1, "deadline": 0, "capabilities": ["1"], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "2", "name": "t2", "duration": 10, "priority": 1, "deadline": 0, "capabilities": ["2"], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": ["1"], "unavailable": []},
+        {"id": "2", "name": "w2", "capabilities": ["2"], "unavailable": []}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "assignments": [
+        {"task_id": "1", "worker_id": "1"},
+        {"task_id": "2", "worker_id": "2"}
+      ]
+    }
+  },
+  {
+    "name": "resource cap 1 forces sequential",
+    "category": "resource",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": ["1"], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "2", "name": "t2", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": ["1"], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []},
+        {"id": "2", "name": "w2", "capabilities": [], "unavailable": []}
+      ],
+      "resources": [{"id": "1", "name": "r1", "capacity": 1}]
+    },
+    "expect": {
+      "status": "ok",
+      "assignments": [
+        {"task_id": "1", "start_time": 0},
+        {"task_id": "2", "start_time": 10}
+      ]
+    }
+  },
+  {
+    "name": "resource cap 2 allows parallel",
+    "category": "resource",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": ["1"], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "2", "name": "t2", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": ["1"], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []},
+        {"id": "2", "name": "w2", "capabilities": [], "unavailable": []}
+      ],
+      "resources": [{"id": "1", "name": "r1", "capacity": 2}]
+    },
+    "expect": {
+      "status": "ok",
+      "assignments": [
+        {"task_id": "1", "start_time": 0},
+        {"task_id": "2", "start_time": 0}
+      ]
+    }
+  },
+  {
+    "name": "task no resources unaffected by constraint",
+    "category": "resource",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": ["1"], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "2", "name": "t2", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []},
+        {"id": "2", "name": "w2", "capabilities": [], "unavailable": []}
+      ],
+      "resources": [{"id": "1", "name": "r1", "capacity": 1}]
+    },
+    "expect": {
+      "status": "ok",
+      "assignments_partial": true,
+      "assignments": [
+        {"task_id": "2", "start_time": 0}
+      ]
+    }
+  },
+  {
+    "name": "worker unavailable task fits before",
+    "category": "time_window",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 5, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": [{"start": 10, "end": 50}]}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "assignments": [
+        {"task_id": "1", "start_time": 0, "end_time": 5}
+      ]
+    }
+  },
+  {
+    "name": "worker unavailable task scheduled after",
+    "category": "time_window",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 30, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": [{"start": 10, "end": 50}]}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "assignments": [
+        {"task_id": "1", "start_time": 50, "end_time": 80}
+      ]
+    }
+  },
+  {
+    "name": "different worker when first unavailable",
+    "category": "time_window",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": [{"start": 0, "end": 100}]},
+        {"id": "2", "name": "w2", "capabilities": [], "unavailable": []}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "assignments": [
+        {"task_id": "1", "worker_id": "2", "start_time": 0}
+      ]
+    }
+  },
+  {
+    "name": "tight deadline plus unavailable misses deadline",
+    "category": "time_window",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 10, "priority": 1, "deadline": 20, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": [{"start": 0, "end": 15}]}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "error",
+      "has_failure_type": ["DeadlineMissed"]
+    }
+  },
+  {
+    "name": "multiple unavailability windows",
+    "category": "time_window",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": [{"start": 0, "end": 10}, {"start": 15, "end": 25}]}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "assignments": [
+        {"task_id": "1", "start_time": 25, "end_time": 35}
+      ]
+    }
+  },
+  {
+    "name": "retry succeeds after backoff",
+    "category": "retry",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 2, "backoff": 10}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": [{"start": 0, "end": 15}]}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "assignments": [
+        {"task_id": "1", "start_time": 15, "end_time": 25}
+      ]
+    }
+  },
+  {
+    "name": "retry backoff pushes past deadline",
+    "category": "retry",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 10, "priority": 1, "deadline": 15, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 3, "backoff": 5}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": [{"start": 0, "end": 20}]}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "error",
+      "has_failure_type": ["DeadlineMissed"]
+    }
+  },
+  {
+    "name": "zero duration task",
+    "category": "edge_case",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 0, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "assignments": [
+        {"task_id": "1", "start_time": 0, "end_time": 0}
+      ]
+    }
+  },
+  {
+    "name": "no workers all tasks fail",
+    "category": "edge_case",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "2", "name": "t2", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [],
+      "resources": []
+    },
+    "expect": {
+      "status": "error",
+      "failure_count": 2,
+      "has_failure_type": ["NoCapableWorker"]
+    }
+  },
+  {
+    "name": "deadline exactly met",
+    "category": "edge_case",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 10, "priority": 1, "deadline": 10, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "assignments": [
+        {"task_id": "1", "end_time": 10}
+      ]
+    }
+  },
+  {
+    "name": "deadline missed by one",
+    "category": "edge_case",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 11, "priority": 1, "deadline": 10, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "error",
+      "has_failure_type": ["DeadlineMissed"]
+    }
+  },
+  {
+    "name": "zero duration after dependency",
+    "category": "edge_case",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "a", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "2", "name": "b", "duration": 0, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": ["1"], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "assignments_partial": true,
+      "assignments": [
+        {"task_id": "2", "start_time": 10, "end_time": 10}
+      ]
+    }
+  },
+  {
+    "name": "deadline zero means no deadline",
+    "category": "edge_case",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []}
+      ],
+      "resources": []
+    },
+    "expect": {
+      "status": "ok",
+      "assignments": [
+        {"task_id": "1", "start_time": 0}
+      ]
+    }
+  },
+  {
+    "name": "validator correct schedule zero violations",
+    "category": "validator",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []}
+      ],
+      "resources": [],
+      "validate": true
+    },
+    "expect": {
+      "status": "ok",
+      "violation_count": 0
+    }
+  },
+  {
+    "name": "validator chain zero violations",
+    "category": "validator",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "a", "duration": 5, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "2", "name": "b", "duration": 5, "priority": 1, "deadline": 0, "capabilities": [], "resources": [], "depends_on": ["1"], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []}
+      ],
+      "resources": [],
+      "validate": true
+    },
+    "expect": {
+      "status": "ok",
+      "violation_count": 0
+    }
+  },
+  {
+    "name": "validator resource constraint zero violations",
+    "category": "validator",
+    "input": {
+      "tasks": [
+        {"id": "1", "name": "t1", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": ["1"], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}},
+        {"id": "2", "name": "t2", "duration": 10, "priority": 1, "deadline": 0, "capabilities": [], "resources": ["1"], "depends_on": [], "retry_policy": {"max_attempts": 0, "backoff": 0}}
+      ],
+      "workers": [
+        {"id": "1", "name": "w1", "capabilities": [], "unavailable": []},
+        {"id": "2", "name": "w2", "capabilities": [], "unavailable": []}
+      ],
+      "resources": [{"id": "1", "name": "r1", "capacity": 1}],
+      "validate": true
+    },
+    "expect": {
+      "status": "ok",
+      "violation_count": 0
+    }
+  }
+]
