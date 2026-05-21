@@ -64,17 +64,17 @@ Proc macros compress 2-3× at realistic scale when you have enough instances to 
 
 ## Targets
 
-| Target | `#lang` | Maturity | Runtime verification |
-|--------|---------|----------|---------------------|
-| Clojure | `beagle/clj` | Production — full stdlib (352), all experiments | Babashka |
-| JavaScript | `beagle/js` | Production — 38 native stdlib + 28 typed `js/*` forms | Node |
-| Python | `beagle/py` | Complete — 131 stdlib, dataclasses, match/case | Python 3 |
-| Nix | `beagle/nix` | Complete — 120 stdlib, curried fns, attrsets | nix eval |
-| ClojureScript | `beagle/cljs` | Emitter complete, 75 stdlib | compile-only |
-| SQL | `beagle/sql` | Experimental — DDL, DML, schema validation | compile-only |
-| Typed Racket | `beagle/rkt` | Oracle — `raco make` independently validates type promises | raco make |
+| Target | `#lang` | Stdlib | Verified with |
+|--------|---------|--------|---------------|
+| Clojure | `beagle/clj` | 352 entries | Babashka |
+| JavaScript | `beagle/js` | 38 native + 28 typed `js/*` forms | Node |
+| Python | `beagle/py` | 131 entries | Python 3 |
+| Nix | `beagle/nix` | 120 entries | nix eval |
+| ClojureScript | `beagle/cljs` | 75 entries | compile-only |
+| SQL | `beagle/sql` | 43 entries *(experimental)* | compile-only |
+| Typed Racket | `beagle/rkt` | — *(oracle: validates type promises via `raco make`)* | raco make |
 
-Portable stdlib (269 entries) is shared across all targets. Target-specific entries add platform-native operations.
+269 portable stdlib entries shared across all targets.
 
 ## Experiments
 
