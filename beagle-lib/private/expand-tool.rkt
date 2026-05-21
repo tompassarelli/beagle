@@ -9,18 +9,36 @@
 
 (require racket/match
          racket/format
+         racket/list
          "parse.rkt"
          "macros.rkt"
-         "types.rkt")
+         "types.rkt"
+         "tags.rkt")
 
 ;; --- entry ----------------------------------------------------------------
 
 (define (expand-file path)
   (define datums (read-file-datums path))
   (define registry (make-macro-registry))
-  ;; First pass: register macros
+  ;; First pass: register macros (template + proc)
   (for ([d (in-list datums)])
     (match d
+      [(list 'define-macro 'proc (? symbol? name) typed-params ': ret-type body)
+       (define raw-params
+         (cond
+           [(bracketed? typed-params) (bracket-body typed-params)]
+           [(list? typed-params)      typed-params]
+           [else '()]))
+       (define-values (param-names input-contracts)
+         (for/lists (names contracts)
+                    ([p (in-list raw-params)])
+           (cond
+             [(and (list? p) (= (length p) 3) (symbol? (car p)) (eq? (cadr p) ':))
+              (values (car p) (caddr p))]
+             [(symbol? p)
+              (values p 'Syntax)]
+             [else (values (gensym) 'Syntax)])))
+       (register-proc-macro! registry name param-names input-contracts ret-type body)]
       [(list 'define-macro (? symbol? kind) (? symbol? name) params template)
        (define ps (cond
                     [(bracketed? params) (bracket-body params)]
@@ -28,12 +46,18 @@
                     [else '()]))
        (register-macro! registry name kind ps template)]
       [_ (void)]))
-  ;; Second pass: expand each non-meta form
+  ;; Second pass: expand each non-meta form, splice (Vec Form) output
   (for ([d (in-list datums)])
     (unless (and (pair? d) (memq (car d) '(define-macro import)))
       (define expanded (expand-fully registry d))
-      (displayln (datum->beagle-src expanded))
-      (newline))))
+      (cond
+        [(and (pair? expanded) (eq? (car expanded) '#%splice-forms))
+         (for ([form (in-list (cdr expanded))])
+           (displayln (datum->beagle-src form))
+           (newline))]
+        [else
+         (displayln (datum->beagle-src expanded))
+         (newline)]))))
 
 ;; Minimal readtable for expand-tool: handles #"...", {...}, and #{...}.
 (define (read-regex port)
@@ -94,7 +118,16 @@
               (if src
                 (datum->syntax #f result (vector src line col pos (+ 3 (string-length pattern))))
                 result)]
-             [else (error 'beagle "unexpected dispatch: #~a" next)]))))
+             [else
+              (define sym-str
+                (let loop ([acc '()])
+                  (define c (peek-char port))
+                  (if (and (char? c)
+                           (not (char-whitespace? c))
+                           (not (memq c '(#\( #\) #\[ #\] #\{ #\} #\" #\; #\' #\`))))
+                    (begin (read-char port) (loop (cons c acc)))
+                    (list->string (reverse acc)))))
+              (string->symbol (string-append "#" sym-str))]))))
 
 (define (read-file-datums path)
   ;; Use beagle's reader to preserve [...] vs (...), {...}, and #{...}.
