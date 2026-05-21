@@ -89,7 +89,10 @@
     "23-boolean-logic.bgl"
     "24-option-chaining.bgl"
     "25-result-pipeline.bgl"
-    "26-fn-composition.bgl"))
+    "26-fn-composition.bgl"
+    "27-map-operations.bgl"
+    "28-recursive-data.bgl"
+    "29-list-processing.bgl"))
 
 (for ([name (in-list differential-fixtures)])
   (define bgl-path (build-path fixtures-dir name))

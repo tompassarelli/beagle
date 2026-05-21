@@ -538,7 +538,7 @@
      (if (= (length a) 3)
          (format "(hash-ref ~a ~a (λ () ~a))" (car a) (cadr a) (caddr a))
          (format "(hash-ref ~a ~a)" (car a) (cadr a)))]
-    [(assoc)  (format "(hash-set ~a ~a)" (string-join a " "))]
+    [(assoc)  (format "(hash-set ~a)" (string-join a " "))]
     [(dissoc) (format "(hash-remove ~a ~a)" (car a) (cadr a))]
     [(contains?) (format "(hash-has-key? ~a ~a)" (car a) (cadr a))]
     [(keys) (format "(hash-keys ~a)" (car a))]
