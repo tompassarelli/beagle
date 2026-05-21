@@ -1,22 +1,17 @@
 # Beagle
 
-A typed authoring IR where parse, check, and emit run in one synchronous pass. This makes things possible that phased compilers can't do — like typed contracts on compile-time code generation, where the macro's output goes through the same type checker as hand-written code.
+Beagle is a typed authoring IR for agent-written programs.
 
-Agents write typed source. Beagle catches mechanical errors (wrong fields, missing cases, invalid interop), then emits ordinary Clojure, JavaScript, Python, or Nix. The types exist at authoring time and disappear at runtime.
+Agents write compact typed source. Beagle catches mechanical mistakes — wrong fields, missing cases, invalid interop, bad generated forms — then emits ordinary Clojure, JavaScript, Python, or Nix. The types exist at authoring time and disappear at runtime.
+
+Beagle's unusual property is that expansion, checking, and emission share one AST and one diagnostic path. Generated forms are checked the same way as hand-written forms, so procedural macros can have typed input/output contracts and still emit ordinary target code.
 
 ```text
 .bclj/.bjs/.bnix/.bpy → parse → check → emit → .clj / .js / .nix / .py
-                              ↑
-                     one pass — no phase boundary
+                               ↑
+                  expansion, checking, emission
+                  share one AST + diagnostic path
 ```
-
-## Why the architecture matters
-
-Most typed languages separate macro expansion from type checking (different compiler phases). Beagle doesn't — expansion, checking, and emission happen in the same pass over the same AST. This means:
-
-- Proc macro output is type-checked identically to hand-written code
-- Input/output contracts are enforced at expansion time
-- The agent can inspect expansions (`beagle-expand`) and get typed errors on generated code
 
 This is an architectural consequence of being a transpiler, not a design goal we started with. We discovered it while building procedural macros and confirmed it experimentally (E18, E19).
 
@@ -42,7 +37,7 @@ This is an architectural consequence of being a transpiler, not a design goal we
 
 ## Procedural macros
 
-Compile-time code generation with typed AST contracts. The macro body is Racket (not Beagle — this is an impedance mismatch we haven't closed yet). Inputs and outputs are contract-checked; the expansion goes through the full type-checking pipeline.
+Compile-time code generation with typed AST contracts. The macro body is Racket (not Beagle — this is an impedance mismatch we haven't closed yet). Inputs and outputs are contract-checked; the expansion goes through the full checking pipeline.
 
 ```racket
 #lang beagle
@@ -60,9 +55,11 @@ Compile-time code generation with typed AST contracts. The macro body is Racket 
 ;; → defrecord User + typed getters User-name, User-email, User-age
 ```
 
-Proc macros compress 2-3× at realistic scale when you have enough instances to amortize the definition cost (crossover at 2-4 instances). Below that, hand-written code is shorter. Template macros can't express these patterns at all — they can't iterate over data to generate variable numbers of forms.
+Proc macros compress 2-3× at realistic scale when you have enough instances to amortize the definition cost (crossover at 2-4 instances). Below that, hand-written code is shorter. Beagle's template macros can't express these patterns — they can't iterate over data to generate variable numbers of forms.
 
 ## Targets
+
+**Primary**
 
 | Target | `#lang` | Stdlib | Verified with |
 |--------|---------|--------|---------------|
@@ -70,9 +67,14 @@ Proc macros compress 2-3× at realistic scale when you have enough instances to 
 | JavaScript | `beagle/js` | 38 native + 28 typed `js/*` forms | Node |
 | Python | `beagle/py` | 131 entries | Python 3 |
 | Nix | `beagle/nix` | 120 entries | nix eval |
-| ClojureScript | `beagle/cljs` | 75 entries | compile-only |
-| SQL | `beagle/sql` | 43 entries *(experimental)* | compile-only |
-| Typed Racket | `beagle/rkt` | — *(oracle: validates type promises via `raco make`)* | raco make |
+
+**Experimental / verification**
+
+| Target | `#lang` | Notes |
+|--------|---------|-------|
+| ClojureScript | `beagle/cljs` | 75 stdlib entries, compile-only |
+| SQL | `beagle/sql` | DDL, DML, schema validation |
+| Typed Racket | `beagle/rkt` | Oracle — `raco make` independently validates type promises |
 
 269 portable stdlib entries shared across all targets.
 
@@ -96,7 +98,7 @@ The load-bearing finding is about *integration*, not the checker itself: the sam
 
 ### E18–E19: Procedural macros
 
-E18 measured compression: proc macros compress 2-3× at realistic scale. Template macros can't express any of the three test patterns.
+E18 measured compression: proc macros compress 2-3× at realistic scale. Beagle's template macros can't express any of the three test patterns.
 
 E19 tested whether agents can write proc macros. A prompted agent (with docs) wrote a working macro in 2 iterations / 271s. An unprompted agent (no proc macro docs) independently invented runtime data dispatch in 1 iteration / 117s — faster and simpler, but without compile-time type coverage of the generated code. Proc macro docs are load-bearing for discoverability; without them, agents default to runtime patterns.
 
@@ -159,6 +161,6 @@ Generates a PostToolUse hook, settings, `CLAUDE.md`, and language context. The d
 - [`docs/devlog/`](docs/devlog/) — development journal (21 entries)
 - [`experiments/report.md`](experiments/report.md) — E1–E15 results
 
-## Related
+## How Beagle relates to CNF
 
-Beagle is a language bridge for [Claim Normal Form](https://github.com/tompassarelli/claim-normal-form) — its typed forms map into CNF's entity/claim graph.
+Beagle is the typed authoring layer. [Claim Normal Form](https://github.com/tompassarelli/claim-normal-form) is the semantic graph layer. A Beagle program can emit ordinary source code, but its typed forms also map into CNF claims so agents can query, validate, and eventually execute program structure directly.
