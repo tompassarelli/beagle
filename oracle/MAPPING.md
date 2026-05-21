@@ -85,3 +85,5 @@ Validated by P0 spike: 5 hand-emitted programs, all accepted by `raco make`.
 | `defprotocol` / `extend-type` | Racket has interfaces, but structure differs | Emit struct + generic |
 | `Int / Int` division | Racket `/` returns `Exact-Rational`, not `Flonum` | Emit `(exact->inexact (/ a b))` or use `Flonum` inputs |
 | `str` coercion | `string-append` requires all-String args | Emit `(format "~a" x)` per arg to coerce |
+| `count` on strings | Racket `length` is list-only; `string-length` for strings | Need type-aware dispatch (list vs string) |
+| stdlib fns as values | `inc` as a value ref emits as `inc` (unbound) | Need to emit `add1` for value-position stdlib refs |
