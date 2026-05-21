@@ -320,6 +320,84 @@
   (check-eq? (call-form-fn val) '+)
   (check-equal? (call-form-args val) '(5 1)))
 
+;; --- procedural macros ------------------------------------------------------
+
+(test-case "proc macro: basic expansion"
+  (define p (parse-prog
+             `(define-macro proc make-const
+                ,(br '(name : Symbol) '(val : Expr)) : Form
+                (list 'def name val))
+             '(make-const x 42)))
+  (define f (car (program-forms p)))
+  (check-true (def-form? f))
+  (check-eq? (def-form-name f) 'x)
+  (check-equal? (def-form-value f) 42))
+
+(test-case "proc macro: quasiquote in body"
+  (define p (parse-prog
+             `(define-macro proc make-def
+                ,(br '(name : Symbol) '(val : Expr)) : Form
+                (quasiquote (def (unquote name) (+ (unquote val) 1))))
+             '(make-def y 10)))
+  (define f (car (program-forms p)))
+  (check-true (def-form? f))
+  (check-eq? (def-form-name f) 'y)
+  (define value (def-form-value f))
+  (check-true (call-form? value))
+  (check-eq? (call-form-fn value) '+)
+  (check-equal? (call-form-args value) '(10 1)))
+
+(test-case "proc macro: generate multiple forms via (Vec Form) splices top-level"
+  (define p (parse-prog
+             `(define-macro proc gen-pair
+                ,(br '(a : Symbol) '(b : Symbol)) : (Vec Form)
+                (list (list 'def a 1) (list 'def b 2)))
+             '(gen-pair x y)))
+  (define forms (program-forms p))
+  (check-equal? (length forms) 2)
+  (check-true (def-form? (car forms)))
+  (check-eq? (def-form-name (car forms)) 'x)
+  (check-true (def-form? (cadr forms)))
+  (check-eq? (def-form-name (cadr forms)) 'y))
+
+(test-case "proc macro: input contract rejects bad arg type"
+  (check-exn #rx"expected Symbol"
+    (lambda ()
+      (parse-prog
+       `(define-macro proc needs-sym
+          ,(br '(name : Symbol)) : Form
+          (list 'def name 1))
+       '(needs-sym 42)))))
+
+(test-case "proc macro: output contract rejects bad output"
+  (check-exn #rx"expected Form"
+    (lambda ()
+      (parse-prog
+       `(define-macro proc bad-output
+          ,(br '(name : Symbol)) : Form
+          42)
+       '(bad-output x)))))
+
+(test-case "proc macro: body error gives clear message"
+  (check-exn #rx"macro bad-body: body raised an error"
+    (lambda ()
+      (parse-prog
+       `(define-macro proc bad-body
+          ,(br '(x : Symbol)) : Form
+          (error "boom"))
+       '(bad-body y)))))
+
+(test-case "proc macro: expansion goes through type checker"
+  (define p (parse-prog
+             `(define-macro proc typed-def
+                ,(br '(name : Symbol) '(val : Expr)) : Form
+                (list 'def name ': 'Int val))
+             '(typed-def z 99)))
+  (define f (car (program-forms p)))
+  (check-true (def-form? f))
+  (check-eq? (def-form-name f) 'z)
+  (check-equal? (def-form-type f) (parse-type 'Int)))
+
 ;; --- defrecord ---------------------------------------------------------------
 
 (test-case "defrecord parses fields"

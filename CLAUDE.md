@@ -1,9 +1,10 @@
 # beagle — session anchor
 
 A multi-target authoring IR. Racket frontend with custom `#lang`, macros
-(safe/unsafe boundaries), static type checking; emits Clojure, ClojureScript,
-JavaScript, Nix, SQL, Python, or Typed Racket source for runtime. `.bgl` is the primary file extension
-(`.rkt` still accepted for backward compatibility).
+(safe/unsafe/procedural with typed AST contracts), static type checking;
+emits Clojure, ClojureScript, JavaScript, Nix, SQL, Python, or Typed Racket
+source for runtime. `.bgl` is the primary file extension (`.rkt` still
+accepted for backward compatibility).
 
 **LLM authoring is a first-class concern.** Rich types, explicit forms, low
 syntactic surface area, structured errors. One canonical idiom per concept.
@@ -15,7 +16,7 @@ it as canonical when explaining the language.
 
 ## Status
 
-`#lang beagle` v0.10.1 — 1214 tests passing (+ 53 oracle/differential via `BEAGLE_ORACLE=1`).
+`#lang beagle` v0.10.1 — 1221 tests passing (+ 53 oracle/differential via `BEAGLE_ORACLE=1`).
 
 - **Targets:** `beagle/clj` (default), `beagle/cljs`, `beagle/js`, `beagle/nix`, `beagle/sql`, `beagle/py`, `beagle/rkt`
 - **Forms:** ~78 forms — ~50 cross-target (definitions, control flow, data structures, pattern matching, threading, interop) + 28 typed JS target forms (`js/*`). See `docs/cheatsheet.md` for the full catalog.
@@ -44,8 +45,9 @@ parse → check → emit-dispatch → emit-{clj,js,nix,py,rkt,sql}
 - `beagle-lib/private/stdlib-types.rkt` — combined stdlib catalog; delegates to
   `private/stdlib-portable.rkt` (256 entries), `private/stdlib-clj.rkt` (365),
   `private/stdlib-cljs.rkt` (75).
-- `beagle-lib/private/macros.rkt` — macro registry, naive substitution, depth-capped
-  recursive expansion, safe/unsafe boundary.
+- `beagle-lib/private/macros.rkt` — macro registry: template macros (safe/unsafe,
+  naive substitution with hygiene), procedural macros (`proc` kind, compile-time
+  Racket lambdas with typed AST contracts). Depth-capped recursive expansion.
 - `beagle-lib/private/ast.rkt` — 144 AST struct definitions, shared utilities
   (tag helpers, symbol predicates, source location tracking), parse injection
   parameters (`current-parse-expr`, `current-parse-params`).

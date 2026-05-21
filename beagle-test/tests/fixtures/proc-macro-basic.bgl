@@ -1,0 +1,8 @@
+#lang beagle
+
+(define-macro proc make-const
+  [(name : Symbol) (val : Expr)] : Form
+  (list 'def name ': 'Int val))
+
+(make-const answer 42)
+(println answer)

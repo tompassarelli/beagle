@@ -27,3 +27,6 @@ Entries are numbered chronologically. Experiments cited by ID (E1–E16+).
 | 016 | 2026-05-18 | [Repair agent pool: forked error resolution](016-repair-agent-pool.md) |
 | 017 | 2026-05-18 | [v0.5.0: packaging, doc infrastructure, release hygiene](017-v050-packaging.md) |
 | 018 | 2026-05-21 | [E16: types make agents 24% faster (when integration is right)](018-e16-type-surface.md) |
+| 019 | 2026-05-21 | [Post-E16 decisions: what to do next](019-post-e16-decisions.md) |
+| 020 | 2026-05-21 | [E17: typed AST codegen (null result, task mismatch)](020-e17-typed-codegen.md) |
+| 021 | 2026-05-21 | [Procedural macros with typed AST contracts](021-procedural-macros.md) |

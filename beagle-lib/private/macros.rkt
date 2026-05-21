@@ -2,6 +2,7 @@
 
 ;; Beagle's macro layer.
 ;;
+;; Template macros (safe/unsafe):
 ;;   (define-macro safe   inc1 (x) (+ x 1))
 ;;   (define-macro unsafe wild (form) (do (println "trace") form))
 ;;
@@ -9,23 +10,33 @@
 ;;   (define-macro safe call (fn & args)
 ;;     (fn (splice args)))
 ;;
-;;   (call + 1 2 3) → (+ 1 2 3)
+;; Procedural macros with typed AST contracts:
+;;   (define-macro proc gen-getter
+;;     [(rec : Symbol) (field : Symbol)] : Form
+;;     `(defn ,(string->symbol (format "get-~a" field))
+;;        ((obj : ,rec)) : Any
+;;        (get obj ,(symbol->keyword field))))
 ;;
-;; The `&` parameter collects remaining args into a list bound to the next
-;; parameter name. References to that name in the template substitute the
-;; list as a literal (data, not Clojure code). Use `(splice name)` in the
-;; template to splice the list's elements at that position.
-;;
-;; Substitution is naive — no scope marks, no hygiene. The expansion can
-;; capture or be captured by the caller's bindings. Documented as Next.
+;; The proc body is Racket code evaluated at macro registration time.
+;; It receives raw datums as arguments and must return a datum that
+;; parse-expr will process. The checker validates the expansion output
+;; — same pipeline as hand-written code.
 
 (require racket/match
-         "types.rkt")
+         racket/string
+         "types.rkt"
+         "tags.rkt")
 
 (struct macro-def (kind fixed-params rest-param template) #:transparent)
-;; kind: 'safe or 'unsafe
+;; kind: 'safe, 'unsafe, or 'proc
 ;; fixed-params: list of symbols (positional)
 ;; rest-param: symbol or #f (variadic catchall)
+;; template: datum tree (safe/unsafe) or #f (proc)
+
+(struct proc-macro-def macro-def (proc input-contracts output-contract) #:transparent)
+;; proc: Racket procedure (lambda over raw datums)
+;; input-contracts: list of contract type symbols (Symbol, Expr, Form, Syntax, ...)
+;; output-contract: contract type symbol or (Vec Form) etc.
 
 (define (make-macro-registry) (make-hash))
 
@@ -56,6 +67,118 @@
   (define-values (fixed rest-name) (parse-macro-params params))
   (hash-set! reg name (macro-def kind fixed rest-name template)))
 
+;; --- procedural macros ------------------------------------------------------
+
+(define (strip-reader-tags datum)
+  (cond
+    [(and (pair? datum) (eq? (car datum) 'quote))
+     datum]
+    [(and (pair? datum) (eq? (car datum) BRACKET-TAG))
+     (map strip-reader-tags (cdr datum))]
+    [(and (pair? datum) (eq? (car datum) MAP-TAG))
+     (cons 'hash (map strip-reader-tags (cdr datum)))]
+    [(and (pair? datum) (eq? (car datum) SET-TAG))
+     (cons 'set (map strip-reader-tags (cdr datum)))]
+    [(pair? datum)
+     (cons (strip-reader-tags (car datum))
+           (strip-reader-tags (cdr datum)))]
+    [else datum]))
+
+(define proc-macro-ns #f)
+
+(define (get-proc-macro-namespace)
+  (unless proc-macro-ns
+    (set! proc-macro-ns (make-base-namespace))
+    (parameterize ([current-namespace proc-macro-ns])
+      (namespace-require 'racket/list)
+      (namespace-require 'racket/string)
+      (namespace-require 'racket/format)
+      (eval `(define BRACKET-TAG ',BRACKET-TAG) proc-macro-ns)
+      (eval `(define MAP-TAG ',MAP-TAG) proc-macro-ns)
+      (eval `(define SET-TAG ',SET-TAG) proc-macro-ns)
+      (eval '(define (br . xs) (cons BRACKET-TAG xs)) proc-macro-ns)
+      (eval '(define (mp . xs) (cons MAP-TAG xs)) proc-macro-ns)
+      (eval '(define (st . xs) (cons SET-TAG xs)) proc-macro-ns)
+      (eval '(define (sym->kw s)
+               (string->symbol (string-append ":" (symbol->string s)))) proc-macro-ns)))
+  proc-macro-ns)
+
+(define (compile-proc-body name param-names body-datum)
+  (define clean-body (strip-reader-tags body-datum))
+  (define lambda-expr `(lambda ,param-names ,clean-body))
+  (with-handlers
+    ([exn:fail?
+      (lambda (e)
+        (error 'beagle
+               "macro ~a: body failed to compile:\n  ~a"
+               name (exn-message e)))])
+    (eval lambda-expr (get-proc-macro-namespace))))
+
+(define (register-proc-macro! reg name param-names input-contracts output-contract body-datum)
+  (when (hash-has-key? reg name)
+    (error 'beagle "duplicate macro definition: ~a" name))
+  (define proc (compile-proc-body name param-names body-datum))
+  (hash-set! reg name
+    (proc-macro-def 'proc param-names #f #f
+                    proc input-contracts output-contract)))
+
+;; --- AST contracts ----------------------------------------------------------
+
+(define KNOWN-FORM-HEADS
+  '(def defn defrecord defunion deferror defscalar defonce defmulti
+    do let fn if cond when unless match case for doseq dotimes
+    loop try println prn defn- ns require import define-macro
+    declare-extern set! letfn when-let if-let when-some if-some condp))
+
+(define (check-datum-contract datum contract macro-name position)
+  (cond
+    [(eq? contract 'Syntax) (void)]
+    [(eq? contract 'Symbol)
+     (unless (symbol? datum)
+       (error 'beagle
+              "macro ~a: ~a: expected Symbol, got ~v"
+              macro-name position datum))]
+    [(eq? contract 'String)
+     (unless (string? datum)
+       (error 'beagle
+              "macro ~a: ~a: expected String, got ~v"
+              macro-name position datum))]
+    [(eq? contract 'Int)
+     (unless (exact-integer? datum)
+       (error 'beagle
+              "macro ~a: ~a: expected Int, got ~v"
+              macro-name position datum))]
+    [(eq? contract 'Bool)
+     (unless (boolean? datum)
+       (error 'beagle
+              "macro ~a: ~a: expected Bool, got ~v"
+              macro-name position datum))]
+    [(eq? contract 'Keyword)
+     (unless (keyword? datum)
+       (error 'beagle
+              "macro ~a: ~a: expected Keyword, got ~v"
+              macro-name position datum))]
+    [(eq? contract 'Expr)
+     (unless (or (symbol? datum) (string? datum) (number? datum)
+                 (boolean? datum) (keyword? datum) (pair? datum))
+       (error 'beagle
+              "macro ~a: ~a: expected Expr, got ~v"
+              macro-name position datum))]
+    [(eq? contract 'Form)
+     (unless (and (pair? datum) (symbol? (car datum)))
+       (error 'beagle
+              "macro ~a: ~a: expected Form (a list starting with a symbol), got ~v"
+              macro-name position datum))]
+    [(and (pair? contract) (eq? (car contract) 'Vec) (= (length contract) 2))
+     (unless (list? datum)
+       (error 'beagle
+              "macro ~a: ~a: expected (Vec ~a), got non-list ~v"
+              macro-name position (cadr contract) datum))
+     (for ([item (in-list datum)] [i (in-naturals)])
+       (check-datum-contract item (cadr contract) macro-name
+                             (format "~a[~a]" position i)))]
+    [else (void)]))
+
 (define (lookup-macro reg name)
   (hash-ref reg name #f))
 
@@ -65,10 +188,44 @@
 
 ;; Expand a single macro application. `args` are raw datums.
 ;; Safe macros get hygienic renaming of template-introduced binders.
+;; Proc macros call a Racket lambda and validate the output contract.
 (define (expand-macro reg name args)
   (define m (lookup-macro reg name))
   (unless m
     (error 'beagle "no macro named ~a" name))
+  (cond
+    [(proc-macro-def? m)
+     (expand-proc-macro m name args)]
+    [else
+     (expand-template-macro m name args)]))
+
+(define (expand-proc-macro m name args)
+  (define params (macro-def-fixed-params m))
+  (define input-contracts (proc-macro-def-input-contracts m))
+  (define output-contract (proc-macro-def-output-contract m))
+  (unless (= (length args) (length params))
+    (error 'beagle
+           "macro ~a: expected ~a arg(s), got ~a"
+           name (length params) (length args)))
+  (for ([arg (in-list args)]
+        [contract (in-list input-contracts)]
+        [pname (in-list params)])
+    (check-datum-contract arg contract name (format "arg ~a" pname)))
+  (define result
+    (with-handlers
+      ([exn:fail?
+        (lambda (e)
+          (error 'beagle
+                 "macro ~a: body raised an error:\n  ~a"
+                 name (exn-message e)))])
+      (apply (proc-macro-def-proc m) args)))
+  (check-datum-contract result output-contract name "output")
+  (cond
+    [(and (pair? output-contract) (eq? (car output-contract) 'Vec))
+     (cons '#%splice-forms result)]
+    [else result]))
+
+(define (expand-template-macro m name args)
   (define fixed (macro-def-fixed-params m))
   (define rest-name (macro-def-rest-param m))
   (define template
@@ -271,9 +428,14 @@
 
 (provide
  (struct-out macro-def)
+ (struct-out proc-macro-def)
  make-macro-registry
  register-macro!
+ register-proc-macro!
+ compile-proc-body
  lookup-macro
  macro-application?
  expand-macro
- expand-fully)
+ expand-fully
+ check-datum-contract
+ strip-reader-tags)

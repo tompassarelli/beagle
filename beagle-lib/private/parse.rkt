@@ -201,6 +201,20 @@
     (match d
       [(list 'declare-extern (? symbol? name) type-expr)
        (reg! name (parse-type type-expr))]
+      [(list 'define-macro 'proc (? symbol? name) typed-params ': ret-type body)
+       (define raw-params
+         (cond
+           [(bracketed? typed-params) (bracket-body typed-params)]
+           [(list? typed-params)      typed-params]
+           [else '()]))
+       (define-values (pnames icontracts)
+         (for/lists (ns cs)
+                    ([p (in-list raw-params)])
+           (cond
+             [(and (list? p) (= (length p) 3) (symbol? (car p)) (eq? (cadr p) ':))
+              (values (car p) (caddr p))]
+             [else (values (if (symbol? p) p (gensym)) 'Syntax)])))
+       (register-proc-macro! registry (qualify-name prefix name) pnames icontracts ret-type body)]
       [(list 'define-macro (? symbol? kind) (? symbol? name) params template)
        (define ps (cond
                     [(bracketed? params) (bracket-body params)]
@@ -376,6 +390,25 @@
        (set! ns n)
        (set! ns-set? #t)]
 
+      [(list 'define-macro 'proc (? symbol? name) typed-params ': ret-type body)
+       (validate-identifier! name "macro")
+       (define raw-params
+         (cond
+           [(bracketed? typed-params) (bracket-body typed-params)]
+           [(list? typed-params)      typed-params]
+           [else (error 'beagle "macro ~a: parameters must be a list" name)]))
+       (define-values (param-names input-contracts)
+         (for/lists (names contracts)
+                    ([p (in-list raw-params)])
+           (cond
+             [(and (list? p) (= (length p) 3) (symbol? (car p)) (eq? (cadr p) ':))
+              (values (car p) (caddr p))]
+             [(symbol? p)
+              (values p 'Syntax)]
+             [else
+              (error 'beagle "macro ~a: bad typed parameter: ~v" name p)])))
+       (register-proc-macro! registry name param-names input-contracts ret-type body)]
+
       [(list 'define-macro (? symbol? kind) (? symbol? name) macro-params template)
        (validate-identifier! name "macro")
        (define ps (cond
@@ -438,15 +471,29 @@
 
   ;; Pass 2: parse each remaining form from syntax objects.
   ;; Macro expansion happens inline during parsing (preserves inner locations).
+  ;; Proc macros with (Vec Form) output are expanded here and spliced into the
+  ;; top-level form list — their output goes through full parse/check/emit.
   (define src-table (make-hasheq))
   (define pairs
     (parameterize ([current-registry registry]
                    [current-src-table src-table]
                    [current-user-parametric (current-user-parametric)])
-      (for/list ([d (in-list datums)]
-                 [s (in-list stxs)]
-                 #:unless (meta-form? d))
-        (cons (parse-top s) s))))
+      (apply append
+        (for/list ([d (in-list datums)]
+                   [s (in-list stxs)]
+                   #:unless (meta-form? d))
+          (define expanded
+            (if (and (pair? d) (symbol? (car d)) (lookup-macro registry (car d)))
+              (expand-fully registry d)
+              d))
+          (cond
+            [(and (pair? expanded) (eq? (car expanded) '#%splice-forms))
+             (for/list ([form-datum (in-list (cdr expanded))])
+               (cons (parse-top (datum->syntax #f form-datum)) s))]
+            [(eq? expanded d)
+             (list (cons (parse-top s) s))]
+            [else
+             (list (cons (parse-top (datum->syntax #f expanded)) s))])))))
   (define parsed (map car pairs))
   (define form-stxs (map cdr pairs))
 
