@@ -1,0 +1,12 @@
+#lang beagle/rkt
+
+(defn apply-twice [(f : [Int -> Int]) (x : Int)] : Int
+  (f (f x)))
+
+(defn make-adder [(n : Int)] : [Int -> Int]
+  (fn [(x : Int)] (+ x n)))
+
+(def add5 : [Int -> Int] (make-adder 5))
+
+(println (apply-twice add5 10))
+(println (apply-twice (fn [(x : Int)] (+ x 1)) 0))

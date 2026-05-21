@@ -103,8 +103,9 @@
          (if (hash-has-key? h m)
              h
              (let ([mfields (if mf (hash-ref mf m '()) '())])
-               (hash-set h m
-                         (map (lambda (p) (symbol->string (param-name p))) mfields)))))]
+               (if (null? mfields) h
+                   (hash-set h m
+                             (map (lambda (p) (symbol->string (param-name p))) mfields))))))]
       [(deferror-form? f)
        (define mf (deferror-form-member-fields f))
        (for/fold ([h fields])
@@ -112,8 +113,9 @@
          (if (hash-has-key? h m)
              h
              (let ([mfields (if mf (hash-ref mf m '()) '())])
-               (hash-set h m
-                         (map (lambda (p) (symbol->string (param-name p))) mfields)))))]
+               (if (null? mfields) h
+                   (hash-set h m
+                             (map (lambda (p) (symbol->string (param-name p))) mfields))))))]
       [(defscalar-form? f)
        (hash-set fields (defscalar-form-name f) '("v"))]
       [else fields])))
@@ -700,7 +702,13 @@
             (define etype (catch-clause-exception-type c))
             (define name (mangle-name (catch-clause-name c)))
             (define cbody (emit-body (catch-clause-body c)))
-            (format "[~a (~a) ~a]" name (if etype (symbol->string etype) "exn:fail") cbody)))
+            (define pred
+              (cond
+                [(not etype) "exn:fail?"]
+                [(eq? etype 'Exception) "exn:fail?"]
+                [(eq? etype 'Error) "exn:fail?"]
+                [else (format "~a?" etype)]))
+            (format "[~a (λ (~a) ~a)]" pred name cbody)))
         (format "(with-handlers (~a) ~a)"
                 (string-join catch-str " ")
                 body-str))))

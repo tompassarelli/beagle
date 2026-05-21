@@ -1,0 +1,13 @@
+#lang beagle/rkt
+
+(defn safe-parse [(items : (Vec String))] : String
+  (try
+    (let [n (count items)]
+      (if (= n 0)
+        (throw "empty list")
+        (str "count: " n)))
+    (catch Exception e
+      (str "error: " e))))
+
+(println (safe-parse ["hello" "world"]))
+(println (safe-parse []))

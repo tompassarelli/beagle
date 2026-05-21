@@ -1,0 +1,19 @@
+#lang beagle/rkt
+
+(defn greeting [(name : String)] : String
+  (str "Hello, " (string/upper-case name) "!"))
+
+(defn csv-line [(items : (Vec String))] : String
+  (string/join items ","))
+
+(defn contains-hello? [(s : String)] : Bool
+  (string/includes? s "hello"))
+
+(defn initials [(name : String)] : String
+  (let [parts (string/split name " ")]
+    (string/join (mapv (fn [(p : String)] (subs p 0 1)) parts) ".")))
+
+(println (greeting "world"))
+(println (csv-line ["a" "b" "c"]))
+(println (contains-hello? "say hello world"))
+(println (initials "John Paul Smith"))
