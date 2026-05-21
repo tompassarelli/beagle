@@ -1,6 +1,7 @@
 #lang racket/base
 
-;; Typed JS target (js/*) parse helpers — extracted from parse.rkt.
+;; Typed JS target (js/*) parse helpers — minimal set.
+;; Only forms with no core beagle equivalent.
 
 (require racket/string
          "ast.rkt"
@@ -45,55 +46,6 @@
       [else (values #f body-forms)]))
   (values param-list rest-param ret-type (map (current-parse-expr) body-start)))
 
-(define (parse-jst-fn name params-form body-forms async? export?)
-  (define-values (params rest-param ret-type body)
-    (jst-split-ret-body params-form body-forms))
-  (jst-fn name params rest-param ret-type body async? export?))
-
-(define (parse-jst-arrow params-form body-forms async?)
-  (define-values (params rest-param ret-type body)
-    (jst-split-ret-body params-form body-forms))
-  (jst-arrow params rest-param ret-type body async?))
-
-(define (parse-jst-try body-forms)
-  (define-values (try-body catch-name catch-body finally-body)
-    (let loop ([forms body-forms] [acc '()])
-      (cond
-        [(null? forms)
-         (values (reverse acc) #f #f #f)]
-        [(eq? (->datum (car forms)) 'catch)
-         (when (null? (cdr forms))
-           (error 'beagle "js/try: catch requires a binding name"))
-         (define cname (->datum (cadr forms)))
-         (unless (symbol? cname)
-           (error 'beagle "js/try: catch binding must be a symbol, got ~v" cname))
-         (define rest-after-name (cddr forms))
-         (define-values (cbody rest-after-catch)
-           (let cloop ([r rest-after-name] [cacc '()])
-             (cond
-               [(null? r) (values (reverse cacc) '())]
-               [(eq? (->datum (car r)) 'finally) (values (reverse cacc) r)]
-               [else (cloop (cdr r) (cons ((current-parse-expr) (car r)) cacc))])))
-         (define fbody
-           (if (and (pair? rest-after-catch) (eq? (->datum (car rest-after-catch)) 'finally))
-               (map (current-parse-expr) (cdr rest-after-catch))
-               #f))
-         (values (map (current-parse-expr) (reverse acc)) cname cbody fbody)]
-        [(eq? (->datum (car forms)) 'finally)
-         (values (map (current-parse-expr) (reverse acc)) #f #f (map (current-parse-expr) (cdr forms)))]
-        [else (loop (cdr forms) (cons (car forms) acc))])))
-  (jst-try try-body catch-name catch-body finally-body))
-
-(define (parse-jst-for-of binding-form iterable-form body-forms)
-  (define bd (->datum binding-form))
-  (define-values (name elem-type)
-    (cond
-      [(symbol? bd) (values bd #f)]
-      [(and (list? bd) (= (length bd) 3) (eq? (cadr bd) ':))
-       (values (car bd) (parse-type (caddr bd)))]
-      [else (error 'beagle "js/for-of: binding must be a symbol or (name : Type), got ~v" bd)]))
-  (jst-for-of name elem-type ((current-parse-expr) iterable-form) (map (current-parse-expr) body-forms)))
-
 (define (parse-jst-class name-form rest)
   (define name (->datum name-form))
   (unless (symbol? name)
@@ -135,18 +87,6 @@
     (jst-split-ret-body (datum->syntax #f params-form) body-forms))
   (jst-method mname params rest-param ret-type body static? async? kind))
 
-(define (parse-jst-object items)
-  (let loop ([rest items] [acc '()])
-    (cond
-      [(null? rest) (jst-object (reverse acc))]
-      [(< (length rest) 2)
-       (error 'beagle "js/object: expected key-value pairs, got odd count")]
-      [else
-       (define key (->datum (car rest)))
-       (define val ((current-parse-expr) (cadr rest)))
-       (loop (cddr rest) (cons (cons key val) acc))])))
-
 (provide
  JST-BINARY-OPS jst-binary-op?
- parse-jst-callee parse-jst-fn parse-jst-arrow parse-jst-try
- parse-jst-for-of parse-jst-class parse-jst-class-method parse-jst-object)
+ parse-jst-callee parse-jst-class parse-jst-class-method)

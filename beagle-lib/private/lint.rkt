@@ -366,52 +366,17 @@
     [(js-quote-form body)
      ;; Traverse JS AST to find beagle splices and check-shadow them
      (check-shadow-js-ast body scope ctx)]
-    [(jst-fn _ params _ _ body _ _)
-     (for ([e (in-list body)]) (check-shadow e scope ctx))]
-    [(jst-call callee args)
-     (check-shadow callee scope ctx)
-     (for ([a (in-list args)]) (check-shadow a scope ctx))]
-    [(jst-await expr) (check-shadow expr scope ctx)]
-    [(jst-try body _ catch-body finally-body)
-     (for ([e (in-list body)]) (check-shadow e scope ctx))
-     (when catch-body (for ([e (in-list catch-body)]) (check-shadow e scope ctx)))
-     (when finally-body (for ([e (in-list finally-body)]) (check-shadow e scope ctx)))]
-    [(jst-const _ _ value) (check-shadow value scope ctx)]
-    [(jst-let _ _ value) (check-shadow value scope ctx)]
-    [(jst-assign target value) (check-shadow target scope ctx) (check-shadow value scope ctx)]
     [(jst-return expr) (when expr (check-shadow expr scope ctx))]
-    [(jst-throw expr) (check-shadow expr scope ctx)]
-    [(jst-if test then-body else-body)
-     (check-shadow test scope ctx)
-     (for ([e (in-list then-body)]) (check-shadow e scope ctx))
-     (when else-body (for ([e (in-list else-body)]) (check-shadow e scope ctx)))]
-    [(jst-ternary test then-expr else-expr)
-     (check-shadow test scope ctx) (check-shadow then-expr scope ctx) (check-shadow else-expr scope ctx)]
-    [(jst-for-of _ _ iterable body)
-     (check-shadow iterable scope ctx)
-     (for ([e (in-list body)]) (check-shadow e scope ctx))]
-    [(jst-while test body)
-     (check-shadow test scope ctx)
-     (for ([e (in-list body)]) (check-shadow e scope ctx))]
-    [(jst-arrow _ _ _ body _)
-     (for ([e (in-list body)]) (check-shadow e scope ctx))]
     [(jst-class _ extends methods _)
      (when extends (check-shadow extends scope ctx))
      (for ([m (in-list methods)])
        (for ([e (in-list (jst-method-body m))]) (check-shadow e scope ctx)))]
-    [(jst-new class-expr args)
-     (check-shadow class-expr scope ctx)
-     (for ([a (in-list args)]) (check-shadow a scope ctx))]
     [(jst-dot obj _) (check-shadow obj scope ctx)]
-    [(jst-index obj idx) (check-shadow obj scope ctx) (check-shadow idx scope ctx)]
-    [(jst-array items) (for ([i (in-list items)]) (check-shadow i scope ctx))]
-    [(jst-object pairs) (for ([p (in-list pairs)]) (check-shadow (cdr p) scope ctx))]
     [(jst-spread expr) (check-shadow expr scope ctx)]
     [(jst-typeof expr) (check-shadow expr scope ctx)]
     [(jst-template parts) (for ([p (in-list parts)]) (unless (string? p) (check-shadow p scope ctx)))]
     [(jst-binary _ left right) (check-shadow left scope ctx) (check-shadow right scope ctx)]
     [(jst-unary _ expr) (check-shadow expr scope ctx)]
-    [(jst-do body) (for ([e (in-list body)]) (check-shadow e scope ctx))]
     [(jst-export form) (check-shadow form scope ctx)]
     [_ (void)]))
 
@@ -578,52 +543,17 @@
      (collect-symbols expr used)]
     [(js-quote-form body)
      (collect-symbols-js-ast body used)]
-    [(jst-fn _ params _ _ body _ _)
-     (for ([e (in-list body)]) (collect-symbols e used))]
-    [(jst-call callee args)
-     (collect-symbols callee used)
-     (for ([a (in-list args)]) (collect-symbols a used))]
-    [(jst-await expr) (collect-symbols expr used)]
-    [(jst-try body _ catch-body finally-body)
-     (for ([e (in-list body)]) (collect-symbols e used))
-     (when catch-body (for ([e (in-list catch-body)]) (collect-symbols e used)))
-     (when finally-body (for ([e (in-list finally-body)]) (collect-symbols e used)))]
-    [(jst-const _ _ value) (collect-symbols value used)]
-    [(jst-let _ _ value) (collect-symbols value used)]
-    [(jst-assign target value) (collect-symbols target used) (collect-symbols value used)]
     [(jst-return expr) (when expr (collect-symbols expr used))]
-    [(jst-throw expr) (collect-symbols expr used)]
-    [(jst-if test then-body else-body)
-     (collect-symbols test used)
-     (for ([e (in-list then-body)]) (collect-symbols e used))
-     (when else-body (for ([e (in-list else-body)]) (collect-symbols e used)))]
-    [(jst-ternary test then-expr else-expr)
-     (collect-symbols test used) (collect-symbols then-expr used) (collect-symbols else-expr used)]
-    [(jst-for-of _ _ iterable body)
-     (collect-symbols iterable used)
-     (for ([e (in-list body)]) (collect-symbols e used))]
-    [(jst-while test body)
-     (collect-symbols test used)
-     (for ([e (in-list body)]) (collect-symbols e used))]
-    [(jst-arrow _ _ _ body _)
-     (for ([e (in-list body)]) (collect-symbols e used))]
     [(jst-class _ extends methods _)
      (when extends (collect-symbols extends used))
      (for ([m (in-list methods)])
        (for ([e (in-list (jst-method-body m))]) (collect-symbols e used)))]
-    [(jst-new class-expr args)
-     (collect-symbols class-expr used)
-     (for ([a (in-list args)]) (collect-symbols a used))]
     [(jst-dot obj _) (collect-symbols obj used)]
-    [(jst-index obj idx) (collect-symbols obj used) (collect-symbols idx used)]
-    [(jst-array items) (for ([i (in-list items)]) (collect-symbols i used))]
-    [(jst-object pairs) (for ([p (in-list pairs)]) (collect-symbols (cdr p) used))]
     [(jst-spread expr) (collect-symbols expr used)]
     [(jst-typeof expr) (collect-symbols expr used)]
     [(jst-template parts) (for ([p (in-list parts)]) (unless (string? p) (collect-symbols p used)))]
     [(jst-binary _ left right) (collect-symbols left used) (collect-symbols right used)]
     [(jst-unary _ expr) (collect-symbols expr used)]
-    [(jst-do body) (for ([e (in-list body)]) (collect-symbols e used))]
     [(jst-export form) (collect-symbols form used)]
     [_ (void)]))
 

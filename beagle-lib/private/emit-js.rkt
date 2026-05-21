@@ -618,19 +618,9 @@
      (emit-js-ast-node (js-quote-form-body f) 0)]
 
     ;; --- Typed JS target forms (jst-*) ----------------------------------------
-    [(jst-fn? f)       (emit-jst-fn f)]
     [(jst-class? f)    (emit-jst-class f)]
-    [(jst-const? f)    (emit-jst-const f)]
-    [(jst-let? f)      (emit-jst-let f)]
-    [(jst-export? f)   (format "export ~a" (emit-jst-form-or-expr (jst-export-form f)))]
-    [(jst-if? f)       (emit-jst-if f)]
-    [(jst-for-of? f)   (emit-jst-for-of f)]
-    [(jst-while? f)    (emit-jst-while f)]
-    [(jst-try? f)      (emit-jst-try f)]
-    [(jst-assign? f)   (emit-jst-assign f)]
+    [(jst-export? f)   (string-append "export " (emit-form (jst-export-form f)))]
     [(jst-return? f)   (emit-jst-return f)]
-    [(jst-throw? f)    (emit-jst-throw f)]
-    [(jst-do? f)       (emit-jst-do f)]
 
     [else (emit-expr-stmt f)]))
 
@@ -701,41 +691,15 @@
      (emit-js-ast-node (js-quote-form-body e) 0)]
 
     ;; --- Typed JS target expression forms (jst-*) -----------------------------
-    [(jst-call? e)     (emit-jst-call e)]
-    [(jst-await? e)    (format "await ~a" (emit-jst-expr (jst-await-expr e)))]
-    [(jst-arrow? e)    (emit-jst-arrow e)]
-    [(jst-ternary? e)  (format "(~a ? ~a : ~a)"
-                               (emit-jst-expr (jst-ternary-test e))
-                               (emit-jst-expr (jst-ternary-then-expr e))
-                               (emit-jst-expr (jst-ternary-else-expr e)))]
     [(jst-dot? e)      (emit-jst-dot e)]
-    [(jst-index? e)    (format "~a[~a]"
-                               (emit-jst-expr (jst-index-object e))
-                               (emit-jst-expr (jst-index-index-expr e)))]
-    [(jst-new? e)      (format "new ~a(~a)"
-                               (emit-jst-expr (jst-new-class-expr e))
-                               (string-join (map emit-jst-expr (jst-new-args e)) ", "))]
-    [(jst-array? e)    (format "[~a]"
-                               (string-join (map emit-jst-expr (jst-array-items e)) ", "))]
-    [(jst-object? e)   (emit-jst-object e)]
     [(jst-spread? e)   (format "...~a" (emit-jst-expr (jst-spread-expr e)))]
     [(jst-typeof? e)   (format "typeof ~a" (emit-jst-expr (jst-typeof-expr e)))]
     [(jst-template? e) (emit-jst-template e)]
     [(jst-binary? e)   (emit-jst-binary e)]
     [(jst-unary? e)    (emit-jst-unary e)]
-    [(jst-fn? e)       (emit-jst-fn e)]
     [(jst-class? e)    (emit-jst-class e)]
-    [(jst-const? e)    (emit-jst-const e)]
-    [(jst-let? e)      (emit-jst-let e)]
-    [(jst-if? e)       (emit-jst-if e)]
-    [(jst-for-of? e)   (emit-jst-for-of e)]
-    [(jst-while? e)    (emit-jst-while e)]
-    [(jst-try? e)      (emit-jst-try e)]
-    [(jst-assign? e)   (emit-jst-assign e)]
     [(jst-return? e)   (emit-jst-return e)]
-    [(jst-throw? e)    (emit-jst-throw e)]
-    [(jst-do? e)       (emit-jst-do e)]
-    [(jst-export? e)   (format "export ~a" (emit-jst-form-or-expr (jst-export-form e)))]
+    [(jst-export? e)   (string-append "export " (emit-form (jst-export-form e)))]
 
     [(if-form? e)
      (cond

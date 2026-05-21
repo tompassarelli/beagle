@@ -365,8 +365,8 @@
 
       [(list 'define-target (? symbol? t))
        (when target-set? (error 'beagle "duplicate define-target"))
-       (unless (memq t '(clj cljs js nix py sql))
-         (error 'beagle "unknown target: ~a (expected clj, cljs, js, nix, py, or sql)" t))
+       (unless (memq t '(clj cljs js nix py sql rkt))
+         (error 'beagle "unknown target: ~a (expected clj, cljs, js, nix, py, sql, or rkt)" t))
        (set! target t)
        (set! target-set? #t)]
 
@@ -941,37 +941,7 @@
      (js-quote-form (parse-js-ast-body (or (stx-tail subs 1) body)))]
 
     ;; --- Typed JS target forms (js/*) -----------------------------------------
-
-    [(list* 'js/fn name-form params-form body-rest)
-     #:when (symbol? (->datum name-form))
-     (parse-jst-fn (->datum name-form) params-form body-rest #f #f)]
-
-    [(list* 'js/async-fn name-form params-form body-rest)
-     #:when (symbol? (->datum name-form))
-     (parse-jst-fn (->datum name-form) params-form body-rest #t #f)]
-
-    [(list* 'js/call callee-form arg-forms)
-     (jst-call (parse-jst-callee callee-form) (map parse-expr arg-forms))]
-
-    [(list 'js/await expr-form)
-     (jst-await (parse-expr expr-form))]
-
-    [(list 'js/const name-form ': type-form val-form)
-     #:when (annotation-marker? ':)
-     (jst-const (->datum name-form) (parse-type type-form) (parse-expr val-form))]
-
-    [(list 'js/const name-form val-form)
-     (jst-const (->datum name-form) #f (parse-expr val-form))]
-
-    [(list 'js/let name-form ': type-form val-form)
-     #:when (annotation-marker? ':)
-     (jst-let (->datum name-form) (parse-type type-form) (parse-expr val-form))]
-
-    [(list 'js/let name-form val-form)
-     (jst-let (->datum name-form) #f (parse-expr val-form))]
-
-    [(list 'js/set! target-form val-form)
-     (jst-assign (parse-jst-callee target-form) (parse-expr val-form))]
+    ;; Minimal set: only forms with no core beagle equivalent.
 
     [(list 'js/return)
      (jst-return #f)]
@@ -979,54 +949,8 @@
     [(list 'js/return expr-form)
      (jst-return (parse-expr expr-form))]
 
-    [(list 'js/throw expr-form)
-     (jst-throw (parse-expr expr-form))]
-
-    [(list* 'js/if test-form body-rest)
-     (define-values (then-body else-body)
-       (let loop ([forms body-rest] [acc '()])
-         (cond
-           [(null? forms) (values (reverse acc) '())]
-           [(eq? (->datum (car forms)) 'else)
-            (values (reverse acc) (cdr forms))]
-           [else (loop (cdr forms) (cons (parse-expr (car forms)) acc))])))
-     (jst-if (parse-expr test-form) then-body (if (null? else-body) #f (map parse-expr else-body)))]
-
-    [(list 'js/? test-form then-form else-form)
-     (jst-ternary (parse-expr test-form) (parse-expr then-form) (parse-expr else-form))]
-
-    [(list* 'js/try body-rest)
-     (parse-jst-try body-rest)]
-
-    [(list* 'js/for-of binding-form iterable-form body-rest)
-     (parse-jst-for-of binding-form iterable-form body-rest)]
-
-    [(list* 'js/while test-form body-rest)
-     (jst-while (parse-expr test-form) (map parse-expr body-rest))]
-
-    [(list* 'js/arrow params-form body-rest)
-     (parse-jst-arrow params-form body-rest #f)]
-
-    [(list* 'js/async-arrow params-form body-rest)
-     (parse-jst-arrow params-form body-rest #t)]
-
     [(list* 'js/class name-form rest)
      (parse-jst-class name-form rest)]
-
-    [(list* 'js/new class-form arg-forms)
-     (jst-new (parse-jst-callee class-form) (map parse-expr arg-forms))]
-
-    [(list 'js/. obj-form (? symbol? prop))
-     (jst-dot (parse-expr obj-form) prop)]
-
-    [(list 'js/.. obj-form idx-form)
-     (jst-index (parse-expr obj-form) (parse-expr idx-form))]
-
-    [(cons 'js/array items)
-     (jst-array (map parse-expr (cdr d)))]
-
-    [(cons 'js/object items)
-     (parse-jst-object (cdr d))]
 
     [(cons 'js/template parts)
      (jst-template (map (lambda (p)
@@ -1040,13 +964,9 @@
     [(list 'js/typeof expr-form)
      (jst-typeof (parse-expr expr-form))]
 
-    [(list* 'js/do body-rest)
-     (jst-do (map parse-expr body-rest))]
-
     [(list 'js/export inner-form)
      (define inner (parse-expr inner-form))
      (cond
-       [(jst-fn? inner) (struct-copy jst-fn inner [export? #t])]
        [(jst-class? inner) (struct-copy jst-class inner [export? #t])]
        [else (jst-export inner)])]
 
