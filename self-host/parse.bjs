@@ -245,7 +245,7 @@
   {"node" "with" "target" target "updates" updates})
 
 (defn make-defrecord [(name : String) (fields : (Vec Any))] : Any
-  {"node" "defrecord" "name" name "fields" fields})
+  {"node" "record" "name" name "fields" fields})
 
 (defn make-defenum [(name : String) (values : (Vec String))] : Any
   {"node" "defenum" "name" name "values" values})
@@ -318,19 +318,19 @@
   {"name" name "ann" ann "value" value})
 
 (defn make-pat-wildcard [] : Any
-  {"pattern" "wildcard"})
+  {"type" "wildcard"})
 
 (defn make-pat-literal [(value : Any)] : Any
-  {"pattern" "literal" "value" value})
+  {"type" "literal" "value" value})
 
 (defn make-pat-record [(type-name : String) (bindings : (Vec Any))] : Any
-  {"pattern" "record" "name" type-name "bindings" bindings})
+  {"type" "record" "name" type-name "bindings" bindings})
 
 (defn make-pat-map [(entries : (Vec Any))] : Any
-  {"pattern" "map" "entries" entries})
+  {"type" "map" "entries" entries})
 
 (defn make-pat-var [(name : String)] : Any
-  {"pattern" "var" "name" name})
+  {"type" "var" "name" name})
 
 ;; --- gensym ------------------------------------------------------------------
 
@@ -654,7 +654,7 @@
     (and (vector? p) (> (.-length p) 0) (string? (nth p 0))
          (> (.-length (nth p 0)) 0)
          (upper-case-char? (.charCodeAt (nth p 0) 0)))
-      (make-pat-record (nth p 0) (.slice p 1))
+      (make-pat-record (nth p 0) (.map (.slice p 1) (fn [(b : Any)] : Any (let [r {"name" b}] r))))
     ;; Variable pattern
     (string? p) (make-pat-var p)
     :else (make-pat-literal (datum->json p))))
@@ -1583,7 +1583,7 @@
                            [BRACKET-TAG "y" ["+" "y" 1]]])]
     (and (= (get node "node") "match")
          (= (.-length (get node "clauses")) 2)
-         (= (get (get (nth (get node "clauses") 0) "pattern") "pattern") "wildcard"))))
+         (= (get (get (nth (get node "clauses") 0) "pattern") "type") "wildcard"))))
 
 ;; --- case --------------------------------------------------------------------
 
@@ -1614,7 +1614,7 @@
 (check "defrecord"
   (let [node (parse-expr ["defrecord" "Point"
                            [BRACKET-TAG ["x" ":" "Float"] ["y" ":" "Float"]]])]
-    (and (= (get node "node") "defrecord")
+    (and (= (get node "node") "record")
          (= (get node "name") "Point")
          (= (.-length (get node "fields")) 2))))
 
@@ -1887,7 +1887,7 @@
                            [BRACKET-TAG ["Rect" "w" "h"] ["*" "w" "h"]]])]
     (and (= (get node "node") "match")
          (= (.-length (get node "clauses")) 2)
-         (= (get (get (nth (get node "clauses") 0) "pattern") "pattern") "record")
+         (= (get (get (nth (get node "clauses") 0) "pattern") "type") "record")
          (= (get (get (nth (get node "clauses") 0) "pattern") "name") "Circle"))))
 
 ;; --- defn- private -----------------------------------------------------------

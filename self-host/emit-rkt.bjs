@@ -716,6 +716,21 @@
         (= node "rescue")
           (str ";; rescue: " (emit-expr (get e "expr")))
 
+        ;; --- if-some ---
+        (= node "if-some")
+          (let [name (mangle (get e "name"))
+                expr (emit-expr (get e "expr"))
+                then (emit-expr (get e "then"))
+                els (emit-expr (get e "else"))]
+            (str "(let ([" name " " expr "]) (if " name " " then " " els "))"))
+
+        ;; --- when-some ---
+        (= node "when-some")
+          (let [name (mangle (get e "name"))
+                expr (emit-expr (get e "expr"))
+                body (emit-body (get e "body"))]
+            (str "(let ([" name " " expr "]) (when " name " " body "))"))
+
         :else
           (str ";; unsupported: " node)))))
 
@@ -1029,8 +1044,9 @@
         clauses (get e "clauses")
         default-node (get e "default")
         clause-strs (.map clauses (fn [(c : Any)] : String
-                      (str "[(" pred-str " " (emit-expr (get c "test")) " " test-str ") "
-                           (emit-body (get c "body")) "]")))
+                      (let [b (get c "body")]
+                        (str "[(" pred-str " " (emit-expr (get c "test")) " " test-str ") "
+                             (if (vector? b) (emit-body b) (emit-expr b)) "]"))))
         default-str (if (and (not (nil? default-node)) (not= default-node false))
                       (str " [else " (emit-expr default-node) "]")
                       "")]

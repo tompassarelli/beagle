@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Oracle check via Bun compiler path: emit Typed Racket from a Beagle
+# source file using beagle-bun, then run raco make to independently
+# validate the type promises.
+#
+# Usage:
+#   check-oracle-bun FILE.bgl          # check one file
+#   check-oracle-bun oracle/fixtures/  # check all .bgl files in directory
+#
+# Same classification as check-oracle (PASS, BEAGLE_REJECT, EMITTER_BUG,
+# BEAGLE_UNSOUND, ORACLE_GAP) — but the emitter is the self-hosted Bun
+# path instead of Racket.
+
+BEAGLE_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+TMPDIR="${TMPDIR:-/tmp}"
+PASS=0
+FAIL=0
+ERRORS=()
+
+check_file() {
+    local src="$1"
+    local name
+    name=$(basename "$src" .bgl)
+    local tmp="$TMPDIR/oracle-bun-${name}-$$.rkt"
+
+    # Step 1: Bun emit
+    if ! "$BEAGLE_ROOT/bin/beagle-bun" "$src" 2>/dev/null > "$tmp"; then
+        printf "  %-40s BEAGLE_REJECT\n" "$src"
+        ERRORS+=("$src: BEAGLE_REJECT")
+        FAIL=$((FAIL + 1))
+        rm -f "$tmp"
+        return
+    fi
+
+    # Step 2: Check emitted file starts with #lang
+    if ! head -1 "$tmp" | grep -q '^#lang'; then
+        printf "  %-40s EMITTER_BUG (no #lang header)\n" "$src"
+        ERRORS+=("$src: EMITTER_BUG")
+        FAIL=$((FAIL + 1))
+        rm -f "$tmp"
+        return
+    fi
+
+    # Step 3: raco make (type check)
+    local raco_out
+    if raco_out=$(raco make "$tmp" 2>&1); then
+        printf "  %-40s PASS\n" "$src"
+        PASS=$((PASS + 1))
+    else
+        if echo "$raco_out" | grep -q "Type Checker:"; then
+            printf "  %-40s BEAGLE_UNSOUND\n" "$src"
+            ERRORS+=("$src: BEAGLE_UNSOUND")
+        elif echo "$raco_out" | grep -q "unbound identifier"; then
+            printf "  %-40s EMITTER_BUG (unbound identifier)\n" "$src"
+            ERRORS+=("$src: EMITTER_BUG")
+        else
+            printf "  %-40s EMITTER_BUG\n" "$src"
+            ERRORS+=("$src: EMITTER_BUG")
+        fi
+        FAIL=$((FAIL + 1))
+        echo "$raco_out" | head -5 | sed 's/^/    /'
+    fi
+
+    rm -f "$tmp"
+}
+
+if [ $# -eq 0 ]; then
+    echo "Usage: check-oracle-bun FILE.bgl|DIR/"
+    exit 1
+fi
+
+target="$1"
+
+echo "Oracle check (Bun path):"
+
+if [ -d "$target" ]; then
+    for f in "$target"/*.bgl; do
+        [ -f "$f" ] && check_file "$f"
+    done
+elif [ -f "$target" ]; then
+    check_file "$target"
+else
+    echo "Error: $target not found"
+    exit 1
+fi
+
+echo ""
+echo "Results: $PASS passed, $FAIL failed"
+
+if [ ${#ERRORS[@]} -gt 0 ]; then
+    echo ""
+    echo "Failures:"
+    for e in "${ERRORS[@]}"; do
+        echo "  $e"
+    done
+    exit 1
+fi
