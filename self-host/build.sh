@@ -19,12 +19,12 @@ echo "=== JS: Testing against hello-js.bjs ==="
 RACKET_OUT=$(bin/beagle-build beagle-test/tests/fixtures/hello-js.bjs 2>/dev/null && cat runtime/src/app/main.js)
 SELF_OUT=$(bin/beagle-self-emit beagle-test/tests/fixtures/hello-js.bjs 2>/dev/null)
 
-if diff <(echo "$RACKET_OUT" | tail -n +2) <(echo "$SELF_OUT") > /dev/null 2>&1; then
+if diff <(echo "$RACKET_OUT" | tail -n +2) <(echo "$SELF_OUT" | tail -n +2) > /dev/null 2>&1; then
     echo "  PASS: self-hosted JS output matches Racket emitter"
     PASS=$((PASS + 1))
 else
     echo "  FAIL: JS outputs differ"
-    diff <(echo "$RACKET_OUT" | tail -n +2) <(echo "$SELF_OUT")
+    diff <(echo "$RACKET_OUT" | tail -n +2) <(echo "$SELF_OUT" | tail -n +2)
     FAIL=$((FAIL + 1))
 fi
 
@@ -33,7 +33,7 @@ GEN2=$(bin/beagle-self-emit self-host/emit-js.bjs 2>/dev/null)
 GEN1_OUT=$(bin/beagle-self-emit beagle-test/tests/fixtures/hello-js.bjs 2>/dev/null)
 
 echo "$GEN2" > /tmp/beagle-gen2-emitter.mjs
-GEN2_OUT=$(bin/beagle-ast beagle-test/tests/fixtures/hello-js.bjs 2>/dev/null | node /tmp/beagle-gen2-emitter.mjs)
+GEN2_OUT=$(bin/beagle-ast beagle-test/tests/fixtures/hello-js.bjs 2>/dev/null | bun run /tmp/beagle-gen2-emitter.mjs)
 
 if diff <(echo "$GEN1_OUT") <(echo "$GEN2_OUT") > /dev/null 2>&1; then
     echo "  PASS: gen2 output matches gen1 (fixed-point reached)"

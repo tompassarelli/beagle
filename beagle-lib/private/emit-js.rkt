@@ -12,6 +12,13 @@
          "js-emit-utils.rkt"
          "emit-jst.rkt"
          "emit-js-quote.rkt")
+
+(define match-counter (box 0))
+(define (next-match-id!)
+  (define n (unbox match-counter))
+  (set-box! match-counter (add1 n))
+  n)
+
 ;; --- infix operators -------------------------------------------------------
 
 (define JS-INFIX-OPS
@@ -1238,7 +1245,7 @@
 
 (define (emit-match e)
   (define target-str (emit-expr (match-form-target e)))
-  (define tmp (format "_match_~a" (random 99999)))
+  (define tmp (format "_match_~a" (next-match-id!)))
   (define clauses (match-form-clauses e))
   (define arms
     (for/list ([c (in-list clauses)])

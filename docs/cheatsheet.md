@@ -10,16 +10,14 @@ Each file declares its target via extension:
 
 | Extension | Target | `#lang` |
 |-----------|--------|---------|
-| `.bclj` | Clojure | `#lang beagle/clj` |
+| `.bclj` | Clojure | `#lang beagle` or `#lang beagle/clj` |
 | `.bcljs` | ClojureScript | `#lang beagle/cljs` |
 | `.bjs` | JavaScript | `#lang beagle/js` |
 | `.bnix` | Nix | `#lang beagle/nix` |
-| `.bpy` | Python | `#lang beagle/py` |
 | `.bsql` | SQL | `#lang beagle/sql` |
-| `.bgl` | target-neutral | requires explicit `#lang beagle/<target>` or `(define-target <target>)` |
 | `.rkt` | (legacy) | any |
 
-Extension and `#lang` header must match. Mismatch is a hard compile error. `.bgl` files must declare a target explicitly.
+Extension and `#lang` header must match. Mismatch is a hard compile error.
 
 ## Getting Started
 

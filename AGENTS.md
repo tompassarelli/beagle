@@ -18,7 +18,7 @@ beagle/         # Aggregate (multi-collection, implies lib + doc)
 ## How to test
 
 ```
-raco test beagle-test/tests/              # full suite (1221 tests)
+raco test beagle-test/tests/              # full suite (1222 tests)
 raco test beagle-test/tests/parse.rkt     # just parser
 raco test beagle-test/tests/emit.rkt      # just Clojure emitter
 raco test beagle-test/tests/emit-js.rkt   # just JS emitter

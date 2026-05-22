@@ -884,9 +884,16 @@
 
 ;; --- emit-match --------------------------------------------------------------
 
+(def match-counter (atom 0))
+
+(defn next-match-id! [] : Int
+  (let [n (deref match-counter)]
+    (swap! match-counter inc)
+    n))
+
 (defn emit-match [(e : Any)] : String
   (let [target-str (emit-expr (get e "target"))
-        tmp (str "_match_" (rand-int 99999))
+        tmp (str "_match_" (next-match-id!))
         clauses (get e "clauses")
         last-pat (get (nth clauses (- (count clauses) 1)) "pattern")
         last-type (get last-pat "type")

@@ -87,7 +87,7 @@ Proc macros compress 2-3× at realistic scale when you have enough instances to 
 | SQL | `beagle/sql` | 54 stdlib entries, DDL, DML, schema validation |
 | Typed Racket | `beagle/rkt` | Oracle — `raco make` independently validates type promises |
 
-319 portable stdlib entries shared across all targets (~1190 total).
+319 portable stdlib entries shared across all targets. ~696 pre-typed entries (portable + Clojure + CLJS); JS, Nix, SQL, and Python add target-specific catalogs.
 
 ## Self-hosting
 
@@ -187,6 +187,6 @@ Generates a PostToolUse hook, settings, `CLAUDE.md`, and language context. The d
 - [`docs/cheatsheet.md`](docs/cheatsheet.md) — language summary
 - [`docs/agent-workflow.md`](docs/agent-workflow.md) — repair tool routing
 - [`docs/tool-reference.md`](docs/tool-reference.md) — CLI and tool catalog
-- [`docs/devlog/`](docs/devlog/) — development journal (23 entries)
+- [`docs/devlog/`](docs/devlog/) — development journal (21 entries)
 - [`beagle-lab`](https://github.com/tompassarelli/beagle-lab) — research journal: experiment tasks, results, methodology (E0–E22)
 

@@ -1364,8 +1364,15 @@ function emit_record(e) {
   return (() => { const name = e["name"]; const fields = e["fields"]; const name_mangled = mangle(name); const name_lower = name.toLowerCase(); const field_names = fields.map((f) => f["name"]); const field_params = field_names.map(mangle); const factory = ("".concat("function ", name_mangled, "(", field_params.join(", "), ") {\n", "  return Object.freeze({_tag: ", JSON.stringify(name), ", ", field_params.join(", "), "});\n", "}")); const accessors = field_names.map((fname) => (() => { const mfname = mangle(fname); return ("".concat("function ", mangle(name_lower), "_", mfname, "(r) { return r.", mfname, "; }")); })()); return [factory, ...accessors].join("\n\n"); })();
 }
 
+const match_counter = ({value: 0, watches: {}});
+
+function next_match_id_bang() {
+  return (() => { const n = match_counter.value; (() => { const _a = match_counter; const _old = _a.value; _a.value = (((_x) => (_x + 1)))(_old); for (const _k in _a.watches) _a.watches[_k](_k, _a, _old, _a.value); return _a.value; })();
+return n; })();
+}
+
 function emit_match(e) {
-  return (() => { const target_str = emit_expr(e["target"]); const tmp = ("".concat("_match_", Math.floor(Math.random() * 99999))); const clauses = e["clauses"]; const last_pat = clauses[(clauses.length - 1)]["pattern"]; const last_type = last_pat["type"]; const needs_fallback = (!((last_type === "wildcard") || (last_type === "var"))); const arms = clauses.map((c) => emit_match_arm(c, tmp)); const arms_str = arms.join(" "); const fallback = (needs_fallback ? " { return null; }" : ""); return ("".concat("(() => { const ", tmp, " = ", target_str, "; ", arms_str, fallback, " })()")); })();
+  return (() => { const target_str = emit_expr(e["target"]); const tmp = ("".concat("_match_", next_match_id_bang())); const clauses = e["clauses"]; const last_pat = clauses[(clauses.length - 1)]["pattern"]; const last_type = last_pat["type"]; const needs_fallback = (!((last_type === "wildcard") || (last_type === "var"))); const arms = clauses.map((c) => emit_match_arm(c, tmp)); const arms_str = arms.join(" "); const fallback = (needs_fallback ? " { return null; }" : ""); return ("".concat("(() => { const ", tmp, " = ", target_str, "; ", arms_str, fallback, " })()")); })();
 }
 
 function emit_match_arm(clause, tmp) {
