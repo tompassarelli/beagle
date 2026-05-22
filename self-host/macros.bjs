@@ -17,6 +17,36 @@
 (def SPLICE-MARKER : String "splice")
 (def MAX-EXPANSION-DEPTH : Int 64)
 
+;; --- expansion provenance ----------------------------------------------------
+
+(defn make-root-ctx [(name : String)] : Any
+  {"macro-name" name "depth" 0 "parent" nil})
+
+(defn push-ctx [(parent : Any) (name : String)] : Any
+  {"macro-name" name "depth" (+ 1 (get parent "depth")) "parent" parent})
+
+(defn truncate-datum [(datum : Any)] : String
+  (let [s (unsafe-js "JSON.stringify(datum)" : String)]
+    (if (> (.-length s) 80)
+      (str (.substring s 0 77) "...")
+      s)))
+
+(defn collect-chain-lines [(ctx : Any)] : (Vec String)
+  (if (nil? ctx)
+    []
+    (.concat
+      [(str "  in macro: " (get ctx "macro-name") " (depth " (get ctx "depth") ")")]
+      (collect-chain-lines (get ctx "parent")))))
+
+(defn format-expansion-chain [(ctx : Any)] : String
+  (let [all-lines (collect-chain-lines ctx)
+        n (.-length all-lines)]
+    (if (<= n 10)
+      (.join all-lines "\n")
+      (let [top (.slice all-lines 0 4)
+            bot (.slice all-lines (- n 4) n)]
+        (.join (.concat top [(str "  ... (" (- n 8) " more)")] bot) "\n")))))
+
 (def KNOWN-FORM-HEADS : (Vec String)
   ["def" "defn" "defrecord" "defunion" "deferror" "defscalar" "defonce" "defmulti"
    "do" "let" "fn" "if" "cond" "when" "unless" "match" "case" "for" "doseq" "dotimes"
@@ -274,7 +304,7 @@
       (let [bindings (make-bindings fixed args nil [])]
         (substitute template bindings nil)))))
 
-(defn expand-macro [(reg : Any) (name : String) (args : (Vec Any))] : Any
+(defn expand-macro [(reg : Any) (name : String) (args : (Vec Any)) (ctx : Any)] : Any
   (let [m (lookup-macro reg name)]
     (if (nil? m)
       (do (.write (.-stderr process) (str "beagle: no macro named " name "\n"))
@@ -290,33 +320,39 @@
 
 ;; --- expand-fully (recursive) ------------------------------------------------
 
-(defn expand-fully [(reg : Any) (datum : Any) (depth : Int)] : Any
+(defn expand-fully [(reg : Any) (datum : Any) (depth : Int) (ctx : Any)] : Any
   (cond
     (>= depth MAX-EXPANSION-DEPTH)
-      (do (.write (.-stderr process)
-            (str "beagle: macro expansion exceeded depth " (str MAX-EXPANSION-DEPTH) "\n"))
-          datum)
+      (let [chain (if (nil? ctx) "" (str "\n" (format-expansion-chain ctx)))]
+        (.write (.-stderr process)
+          (str "beagle: macro expansion exceeded depth " (str MAX-EXPANSION-DEPTH) chain "\n"))
+        datum)
     (macro-application? reg datum)
-      (let [m (lookup-macro reg (datum-car datum))
-            expanded (expand-macro reg (datum-car datum) (datum-cdr datum))]
+      (let [name (datum-car datum)
+            next-ctx (if (nil? ctx) (make-root-ctx name) (push-ctx ctx name))
+            m (lookup-macro reg name)
+            expanded (expand-macro reg name (datum-cdr datum) next-ctx)]
         (if (= (get m "kind") "unsafe")
-          ["unsafe-expr" (expand-fully-no-marker reg expanded (+ depth 1))]
-          (expand-fully reg expanded (+ depth 1))))
+          ["unsafe-expr" (expand-fully-no-marker reg expanded (+ depth 1) next-ctx)]
+          (expand-fully reg expanded (+ depth 1) next-ctx)))
     (datum-pair? datum)
-      (.map datum (fn [(item : Any)] : Any (expand-fully reg item depth)))
+      (.map datum (fn [(item : Any)] : Any (expand-fully reg item depth ctx)))
     :else datum))
 
-(defn expand-fully-no-marker [(reg : Any) (datum : Any) (depth : Int)] : Any
+(defn expand-fully-no-marker [(reg : Any) (datum : Any) (depth : Int) (ctx : Any)] : Any
   (cond
     (>= depth MAX-EXPANSION-DEPTH)
-      (do (.write (.-stderr process)
-            (str "beagle: macro expansion exceeded depth " (str MAX-EXPANSION-DEPTH) "\n"))
-          datum)
+      (let [chain (if (nil? ctx) "" (str "\n" (format-expansion-chain ctx)))]
+        (.write (.-stderr process)
+          (str "beagle: macro expansion exceeded depth " (str MAX-EXPANSION-DEPTH) chain "\n"))
+        datum)
     (macro-application? reg datum)
-      (let [expanded (expand-macro reg (datum-car datum) (datum-cdr datum))]
-        (expand-fully-no-marker reg expanded (+ depth 1)))
+      (let [name (datum-car datum)
+            next-ctx (if (nil? ctx) (make-root-ctx name) (push-ctx ctx name))
+            expanded (expand-macro reg name (datum-cdr datum) next-ctx)]
+        (expand-fully-no-marker reg expanded (+ depth 1) next-ctx))
     (datum-pair? datum)
-      (.map datum (fn [(item : Any)] : Any (expand-fully-no-marker reg item depth)))
+      (.map datum (fn [(item : Any)] : Any (expand-fully-no-marker reg item depth ctx)))
     :else datum))
 
 ;; === test runner =============================================================
@@ -336,7 +372,7 @@
 
 (let [reg (make-macro-registry)]
   (register-macro! reg "inc1" "safe" ["x"] ["+" "x" 1])
-  (let [result (expand-macro reg "inc1" [5])]
+  (let [result (expand-macro reg "inc1" [5] nil)]
     (check "simple substitution: (inc1 5) → (+ 5 1)"
       (json-eq result ["+" 5 1]))))
 
@@ -344,7 +380,7 @@
 
 (let [reg (make-macro-registry)]
   (register-macro! reg "add" "safe" ["a" "b"] ["+" "a" "b"])
-  (let [result (expand-macro reg "add" [3 4])]
+  (let [result (expand-macro reg "add" [3 4] nil)]
     (check "multi-param: (add 3 4) → (+ 3 4)"
       (json-eq result ["+" 3 4]))))
 
@@ -352,7 +388,7 @@
 
 (let [reg (make-macro-registry)]
   (register-macro! reg "square" "safe" ["x"] ["*" "x" "x"])
-  (let [result (expand-macro reg "square" [7])]
+  (let [result (expand-macro reg "square" [7] nil)]
     (check "nested: (square 7) → (* 7 7)"
       (json-eq result ["*" 7 7]))))
 
@@ -361,7 +397,7 @@
 (let [reg (make-macro-registry)]
   (register-macro! reg "wrap-do" "safe" ["head" "&" "body"]
     ["do" "head" [SPLICE-MARKER "body"]])
-  (let [result (expand-macro reg "wrap-do" ["a" "b" "c"])]
+  (let [result (expand-macro reg "wrap-do" ["a" "b" "c"] nil)]
     (check "variadic splice: (wrap-do a b c) → (do a b c)"
       (json-eq result ["do" "a" "b" "c"]))))
 
@@ -370,7 +406,7 @@
 (let [reg (make-macro-registry)]
   (register-macro! reg "wrap-vec" "safe" ["head" "&" "rest"]
     ["list" "head" "rest"])
-  (let [result (expand-macro reg "wrap-vec" ["a" "b" "c"])]
+  (let [result (expand-macro reg "wrap-vec" ["a" "b" "c"] nil)]
     (check "rest as vec: (wrap-vec a b c) → (list a [#%brackets b c])"
       (json-eq result ["list" "a" [BRACKET-TAG "b" "c"]]))))
 
@@ -379,7 +415,7 @@
 (let [reg (make-macro-registry)]
   (register-macro! reg "raw" "unsafe" ["form"]
     ["do" ["println" "trace"] "form"])
-  (let [result (expand-macro reg "raw" [["+ " 1 2]])]
+  (let [result (expand-macro reg "raw" [["+ " 1 2]] nil)]
     (check "unsafe substitution"
       (json-eq result ["do" ["println" "trace"] ["+ " 1 2]]))))
 
@@ -388,7 +424,7 @@
 (let [reg (make-macro-registry)]
   (register-macro! reg "with-tmp" "safe" ["body"]
     ["let" ["tmp" 0] "body"])
-  (let [result (expand-macro reg "with-tmp" [["println" "tmp"]])
+  (let [result (expand-macro reg "with-tmp" [["println" "tmp"]] nil)
         binds (nth result 1)
         bind-name (nth binds 0)]
     (check "hygiene: let result is let form"
@@ -403,7 +439,7 @@
 (let [reg (make-macro-registry)]
   (register-macro! reg "with-fn" "safe" ["body"]
     ["fn" ["x"] "body"])
-  (let [result (expand-macro reg "with-fn" [["println" "x"]])
+  (let [result (expand-macro reg "with-fn" [["println" "x"]] nil)
         params (nth result 1)
         param-name (nth params 0)]
     (check "hygiene: fn result is fn form"
@@ -418,7 +454,7 @@
 (let [reg (make-macro-registry)]
   (register-macro! reg "inc1" "unsafe" ["x"] ["+" "x" 1])
   (register-macro! reg "inc2" "unsafe" ["x"] ["inc1" ["inc1" "x"]])
-  (let [result (expand-fully reg ["inc2" 5] 0)]
+  (let [result (expand-fully reg ["inc2" 5] 0 nil)]
     (check "recursive expansion: (inc2 5) → (unsafe-expr (+ (+ 5 1) 1))"
       (json-eq result ["unsafe-expr" ["+" ["+" 5 1] 1]]))))
 
@@ -426,7 +462,7 @@
 
 (let [reg (make-macro-registry)]
   (register-macro! reg "inc1" "unsafe" ["x"] ["+" "x" 1])
-  (let [result (expand-fully reg ["println" ["inc1" 5]] 0)]
+  (let [result (expand-fully reg ["println" ["inc1" 5]] 0 nil)]
     (check "expand-fully: non-macro forms preserved"
       (json-eq result ["println" ["unsafe-expr" ["+" 5 1]]]))))
 
