@@ -208,6 +208,7 @@
     [(sql-type)           "E013"]
     [(nixos-unknown-option) "E014"]
     [(nixos-type-mismatch)  "E015"]
+    [(template-splice)     "E016"]
     [else                 "E000"]))
 
 (define (raise-diag kind message details #:src [src #f])
@@ -1440,9 +1441,18 @@
     [(jst-dot? e)      (infer-jst-dot-expr e env)]
     [(jst-spread? e)   (infer-expr (jst-spread-expr e) env)]
     [(jst-typeof? e)   (infer-expr (jst-typeof-expr e) env) (type-prim 'String)]
-    [(jst-template? e) (for-each (lambda (p) (unless (string? p) (infer-expr p env)))
-                                 (jst-template-parts e))
-                       (type-prim 'String)]
+    [(jst-template? e)
+     (for-each (lambda (p)
+                 (unless (string? p)
+                   (define t (infer-expr p env))
+                   (when (and t (type-app? t)
+                              (memq (type-app-ctor t) '(Vec Map Set List)))
+                     (raise-diag 'template-splice
+                       (format "template splice has type ~a — collections don't stringify meaningfully in JS"
+                               (type->string t))
+                       (hasheq 'actual (type->string t))))))
+               (jst-template-parts e))
+     (type-prim 'String)]
     [(jst-binary? e)   (jst-infer-binary-type e env)]
     [(jst-unary? e)    (infer-expr (jst-unary-expr e) env)
                        (case (jst-unary-op e)

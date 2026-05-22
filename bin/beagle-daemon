@@ -2,8 +2,9 @@
 set -euo pipefail
 source "$(dirname "$0")/_beagle-racket"
 
-PORTFILE="${BEAGLE_DAEMON_PORTFILE:-/var/tmp/beagle-daemon.port}"
-PIDFILE="${BEAGLE_DAEMON_PIDFILE:-/var/tmp/beagle-daemon.pid}"
+_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/var/tmp}"
+PORTFILE="${BEAGLE_DAEMON_PORTFILE:-${_RUNTIME_DIR}/beagle-daemon.port}"
+PIDFILE="${BEAGLE_DAEMON_PIDFILE:-${_RUNTIME_DIR}/beagle-daemon.pid}"
 export BEAGLE_DAEMON_PORTFILE="$PORTFILE"
 
 usage() {
@@ -35,8 +36,8 @@ The daemon keeps parsed ASTs cached, eliminating Racket startup (0.33s)
 and re-parse (1.6s) costs per tool call. ~60 queries/session → saves ~2min.
 
 Environment:
-  BEAGLE_DAEMON_PORTFILE  Port file (default: /tmp/beagle-daemon.port)
-  BEAGLE_DAEMON_PIDFILE   PID file (default: /tmp/beagle-daemon.pid)
+  BEAGLE_DAEMON_PORTFILE  Port file (default: $XDG_RUNTIME_DIR/beagle-daemon.port)
+  BEAGLE_DAEMON_PIDFILE   PID file (default: $XDG_RUNTIME_DIR/beagle-daemon.pid)
 EOF
     exit 2
 }
@@ -81,6 +82,7 @@ cmd_start() {
     "$RACKET" -e '(require beagle/private/daemon) (run-daemon-tcp)' &
     local pid=$!
     echo "$pid" > "$PIDFILE"
+    chmod 0600 "$PIDFILE"
 
     # Wait for port file to appear (max 5s)
     local waited=0

@@ -603,4 +603,32 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
      "console.log(classify_first([1,5,50,200]));"
      "medium")
 
+   ;; --- special float values (Inf/NaN) ----------------------------------------
+
+   (check-js-output "+inf.0 → Infinity at runtime"
+     (list '(def x : Float +inf.0)
+           '(defn main [] : Nil (println x)))
+     "main();"
+     "Infinity")
+
+   (check-js-output "-inf.0 → -Infinity at runtime"
+     (list '(def x : Float -inf.0)
+           '(defn main [] : Nil (println x)))
+     "main();"
+     "-Infinity")
+
+   (check-js-output "+nan.0 → NaN at runtime"
+     (list '(def x : Float +nan.0)
+           '(defn main [] : Nil (println x)))
+     "main();"
+     "NaN")
+
+   (check-js-behavior "Infinity arithmetic works"
+     (list '(def x : Float +inf.0)
+           '(def y : Float -inf.0)
+           '(def z : Float +nan.0))
+     "if (x !== Infinity) throw new Error('expected Infinity');
+      if (y !== -Infinity) throw new Error('expected -Infinity');
+      if (!Number.isNaN(z)) throw new Error('expected NaN');")
+
  )))

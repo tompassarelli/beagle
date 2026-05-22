@@ -34,6 +34,14 @@
 (define (nix-reserved? s)
   (member s nix-reserved-words))
 
+;; --- special float values ---------------------------------------------------
+
+(define (emit-nix-number n)
+  (cond
+    [(or (eqv? n +inf.0) (eqv? n -inf.0) (eqv? n +nan.0))
+     (error 'beagle-nix "Nix does not support Infinity or NaN literals")]
+    [else (number->string n)]))
+
 ;; --- escape ----------------------------------------------------------------
 
 (define (escape-nix-string s)
@@ -239,7 +247,7 @@
 
 (define (emit-expr e depth)
   (cond
-    [(number? e) (number->string e)]
+    [(number? e) (emit-nix-number e)]
     [(string? e) (format "\"~a\"" (escape-nix-string e))]
     [(boolean? e) (if e "true" "false")]
     [(eq? e 'nil) "null"]
@@ -321,7 +329,7 @@
      (cond
        [(symbol? d) (format "\"~a\"" (escape-nix-string (symbol->string d)))]
        [(string? d) (format "\"~a\"" (escape-nix-string d))]
-       [(number? d) (number->string d)]
+       [(number? d) (emit-nix-number d)]
        [(boolean? d) (if d "true" "false")]
        [else (format "\"~v\"" d)])]
 

@@ -76,6 +76,7 @@
 (define check-sema (make-semaphore 1)) ; serialize type checking (global state)
 (define watcher-threads (make-hash)) ; path -> thread
 (define watch-dir-threads '())       ; list of directory watcher threads
+(define watched-dirs '())            ; list of watched directory paths (simplified)
 (define pending-results (make-hash)) ; path -> hasheq (consumed by latest-results)
 
 (define (file-content-hash path)
@@ -269,7 +270,9 @@
             (sync (filesystem-change-evt dir)))
           (scan-and-watch)
           (loop)))))
-  (set! watch-dir-threads (cons t watch-dir-threads)))
+  (set! watch-dir-threads (cons t watch-dir-threads))
+  (set! watched-dirs (cons (path->string (simplify-path (string->path dir)))
+                           watched-dirs)))
 
 (define (stop-all-watchers)
   (for ([(path t) (in-hash watcher-threads)])
@@ -277,7 +280,8 @@
   (hash-clear! watcher-threads)
   (for ([t (in-list watch-dir-threads)])
     (kill-thread t))
-  (set! watch-dir-threads '()))
+  (set! watch-dir-threads '())
+  (set! watched-dirs '()))
 
 ;; --- New command handlers ---------------------------------------------------
 
@@ -521,8 +525,14 @@
 
 (define (handle-repair args)
   (when (null? args) (error "repair requires: <file>"))
-  (define path (car args))
+  (define path (path->string (simplify-path (string->path (car args)))))
   (unless (file-exists? path) (error (format "file not found: ~a" path)))
+  ;; Restrict repair to files within watched directories (no path traversal)
+  (when (pair? watched-dirs)
+    (unless (for/or ([wd (in-list watched-dirs)])
+              (define wd/ (if (string-suffix? wd "/") wd (string-append wd "/")))
+              (string-prefix? path wd/))
+      (error (format "repair blocked: ~a is outside watched directories" path))))
   (define source (file->string path))
   (define r (repair-structure source))
   (cond
@@ -594,15 +604,20 @@
 
 ;; --- TCP mode ----------------------------------------------------------------
 
+(define (daemon-runtime-dir)
+  (or (getenv "XDG_RUNTIME_DIR")
+      (path->string (find-system-path 'temp-dir))))
+
 (define (run-daemon-tcp [port-num 0])
   (define listener (tcp-listen port-num 4 #t "127.0.0.1"))
   (define-values (_local-host actual-port _remote-host _remote-port)
     (tcp-addresses listener #t))
   (define port-file
     (or (getenv "BEAGLE_DAEMON_PORTFILE")
-        (build-path (find-system-path 'temp-dir) "beagle-daemon.port")))
+        (build-path (daemon-runtime-dir) "beagle-daemon.port")))
   (call-with-output-file port-file #:exists 'replace
     (lambda (out) (fprintf out "~a\n" actual-port)))
+  (file-or-directory-permissions port-file #o600)
   (fprintf (current-error-port) "beagle-daemon listening on 127.0.0.1:~a\n" actual-port)
   (flush-output (current-error-port))
 

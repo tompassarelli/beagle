@@ -19,6 +19,15 @@
   (set-box! match-counter (add1 n))
   n)
 
+;; --- special float values ---------------------------------------------------
+
+(define (emit-js-number n)
+  (cond
+    [(eqv? n +inf.0) "Infinity"]
+    [(eqv? n -inf.0) "-Infinity"]
+    [(eqv? n +nan.0) "NaN"]
+    [else (number->string n)]))
+
 ;; --- infix operators -------------------------------------------------------
 
 (define JS-INFIX-OPS
@@ -766,7 +775,7 @@
     [(string? e)        (~v e)]
     [(boolean? e)       (if e "true" "false")]
     [(exact-integer? e) (number->string e)]
-    [(real? e)          (number->string e)]
+    [(real? e)          (emit-js-number e)]
     [(symbol? e)
      (cond
        [(eq? e 'nil) "null"]
@@ -1409,7 +1418,7 @@
     [(string? d) (~v d)]
     [(boolean? d) (if d "true" "false")]
     [(exact-integer? d) (number->string d)]
-    [(real? d) (number->string d)]
+    [(real? d) (emit-js-number d)]
     [(symbol? d)
      (define s (symbol->string d))
      (if (char=? (string-ref s 0) #\:)

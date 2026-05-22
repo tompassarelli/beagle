@@ -1,13 +1,14 @@
 # Active work — priority order
 
-1. **targets.md** — JS target gaps (`js-template` typed splices, `js/quote` structural quasiquotation)
-2. **nix-target.md** — phase 3: zero validation errors for NixOS config authoring
-3. **security.md** — daemon hardening + JS Inf/NaN (paused, local-only risk)
+All workstreams complete.
 
 ## Done
 
 - **self-hosting.md** — complete as of v0.13.0 (12 components, bootstrap proven, 11/11 emission parity)
 - **macro-provenance.md** — complete: provenance threading (Racket + Bun), `--trace` flag, validation tests
+- **targets.md** — complete: CLJ behavioral tests, Oracle CI (Bun), JS template splices, Inf/NaN fix
+- **nix-target.md** — complete: 212 files, 0 false positives (flake-input HM programs fix)
+- **security.md** — complete: XDG runtime dir, repair path restriction, file perms, Inf/NaN
 
 ## How this directory works
 

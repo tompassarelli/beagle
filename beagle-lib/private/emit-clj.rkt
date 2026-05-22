@@ -9,6 +9,15 @@
          "parse.rkt"
          "emit-dispatch.rkt")
 
+;; --- special float values ---------------------------------------------------
+
+(define (emit-clj-number n)
+  (cond
+    [(eqv? n +inf.0) "##Inf"]
+    [(eqv? n -inf.0) "##-Inf"]
+    [(eqv? n +nan.0) "##NaN"]
+    [else (number->string n)]))
+
 ;; --- source-location metadata -----------------------------------------------
 
 (define current-emit-src-table (make-parameter #f))
@@ -258,7 +267,7 @@
     [(string? e)        (~v e)]
     [(boolean? e)       (if e "true" "false")]
     [(exact-integer? e) (number->string e)]
-    [(real? e)          (number->string e)]
+    [(real? e)          (emit-clj-number e)]
     [(symbol? e)        (symbol->string e)]
     [(quoted? e)        (format "'~a" (datum->clj (quoted-datum e)))]
     [(regex-lit? e)     (format "#\"~a\"" (regex-lit-pattern e))]
@@ -749,7 +758,7 @@
     [(string? d)        (~v d)]
     [(boolean? d)       (if d "true" "false")]
     [(exact-integer? d) (number->string d)]
-    [(real? d)          (number->string d)]
+    [(real? d)          (emit-clj-number d)]
     [(symbol? d)        (symbol->string d)]
     [(null? d)          "()"]
     [(bracketed? d)

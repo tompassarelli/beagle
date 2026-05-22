@@ -26,6 +26,15 @@
     ">" "_gt")
    "<" "_lt"))
 
+;; --- special float values ---------------------------------------------------
+
+(define (emit-py-number n)
+  (cond
+    [(eqv? n +inf.0) "float('inf')"]
+    [(eqv? n -inf.0) "float('-inf')"]
+    [(eqv? n +nan.0) "float('nan')"]
+    [else (number->string n)]))
+
 ;; --- indentation helper -----------------------------------------------------
 
 (define current-indent (make-parameter ""))
@@ -156,7 +165,7 @@
     [(string? e)        (~v e)]
     [(boolean? e)       (if e "True" "False")]
     [(exact-integer? e) (number->string e)]
-    [(real? e)          (number->string e)]
+    [(real? e)          (emit-py-number e)]
     [(symbol? e)
      (cond
        [(eq? e 'nil) "None"]
@@ -394,7 +403,8 @@
   (cond
     [(symbol? datum)  (format "\"~a\"" datum)]
     [(string? datum)  (~v datum)]
-    [(number? datum)  (number->string datum)]
+    [(exact-integer? datum) (number->string datum)]
+    [(real? datum)    (emit-py-number datum)]
     [(boolean? datum) (if datum "True" "False")]
     [(null? datum)    "[]"]
     [(pair? datum)

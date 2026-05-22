@@ -27,8 +27,8 @@ priority: 1
 
 ## JS target
 
-- [ ] `js-template` — typed splice sites
-- [ ] `js/quote` — structural JS quasiquotation
+- [x] `js-template` — typed splice sites (collection types raise E016 diagnostic)
+- [x] `js/quote` — structural JS quasiquotation (already complete: 3 splice kinds)
 
 ## Cancelled
 

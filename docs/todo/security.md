@@ -1,24 +1,18 @@
 ---
-status: paused
-priority: 3
+status: done
+priority: —
 ---
 
 # Security hardening — remaining items
 
-Cross-target audit done 2026-05-20. Critical + high items resolved.
-Remaining items are medium/low risk (local-only).
+Cross-target audit done 2026-05-20. All items resolved.
 
-## Medium — daemon hardening
+## Done
 
-- [ ] Move port/pid files from `/var/tmp` to `$XDG_RUNTIME_DIR`
-- [ ] Restrict `repair` command to paths within the watched directory
-- [ ] Set `0600` on port/pid files
-
-Local-only risk (requires another user on the same machine).
-
-## Low
-
-- [ ] JS Inf/NaN emission — `+inf.0` emits invalid JS (should be `Infinity`)
+- [x] Move port/pid files from `/var/tmp` to `$XDG_RUNTIME_DIR`
+- [x] Restrict `repair` command to paths within the watched directory
+- [x] Set `0600` on port/pid files
+- [x] JS Inf/NaN emission — fixed across JS, CLJ, Python, Nix emitters
 
 ## Cancelled
 

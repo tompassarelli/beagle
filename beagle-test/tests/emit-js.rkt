@@ -647,6 +647,30 @@
      '(def v : String "42")
      '(def x : String (fmt (#%block-string JS "x = ${v};"))))
 
+   ;; --- special float values (Inf/NaN) --------------------------------------
+
+   (test-case "+inf.0 → Infinity"
+     (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+                                   '(def x : Float +inf.0))))
+     (check-true (string-contains? result "Infinity")
+                 (format "expected Infinity in:\n~a" result))
+     (check-false (string-contains? result "+inf.0")
+                  (format "should not contain +inf.0 in:\n~a" result)))
+
+   (test-case "-inf.0 → -Infinity"
+     (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+                                   '(def x : Float -inf.0))))
+     (check-true (string-contains? result "-Infinity")
+                 (format "expected -Infinity in:\n~a" result)))
+
+   (test-case "+nan.0 → NaN"
+     (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+                                   '(def x : Float +nan.0))))
+     (check-true (string-contains? result "NaN")
+                 (format "expected NaN in:\n~a" result))
+     (check-false (string-contains? result "+nan.0")
+                  (format "should not contain +nan.0 in:\n~a" result)))
+
 (test-case "JS-translated function emits no warning"
      (define stderr-output
        (with-output-to-string

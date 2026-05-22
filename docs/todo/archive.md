@@ -15,6 +15,11 @@
 - `beagle-expand --trace`: expansion step tracing to stderr, depth-indented
 - Macro provenance validation tests (nested error chain, trace handler capture)
 - Bun oracle CI: 23/30 raco make pass + 22/30 emission parity (oracle-bun.rkt)
+- JS Inf/NaN fixed across all 4 emitters (JS→Infinity, CLJ→##Inf, Py→float('inf'), Nix→error)
+- Daemon hardening: XDG_RUNTIME_DIR, repair path restriction, 0600 file perms
+- Nix validation: flake-input HM programs skip (212 files, 0 false positives)
+- js-template typed splice validation (E016 for collection types)
+- js/quote confirmed complete (3 splice kinds: ~expr, ~@stmts, ~%json)
 
 ## v0.12.0
 

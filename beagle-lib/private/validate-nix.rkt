@@ -417,15 +417,23 @@
              (check-type-against-entry fk path-str hm-entry "HM")]
             [(member top-ns HOME-MANAGER-ROOTS)
              (when hm-schema
-               (define similars (nixos-find-similar hm-schema path-str))
-               (define suggest
-                 (if (null? similars) ""
-                     (format " -- did you mean: ~a?"
-                             (string-join (take similars (min 3 (length similars)))
-                                          ", "))))
-               (add-error! fk
-                           (format "unknown HM option: ~a~a" path-str suggest)
-                           'unknown-option path-str))]
+               ;; Only error if the second-level namespace exists in the HM schema.
+               ;; Programs from flake inputs (e.g., walker) won't be in the schema.
+               (define parts (string-split path-str "."))
+               (define ns-prefix
+                 (if (>= (length parts) 2)
+                     (string-join (take parts 2) ".")
+                     path-str))
+               (when (nixos-namespace-exists? hm-schema ns-prefix)
+                 (define similars (nixos-find-similar hm-schema path-str))
+                 (define suggest
+                   (if (null? similars) ""
+                       (format " -- did you mean: ~a?"
+                               (string-join (take similars (min 3 (length similars)))
+                                            ", "))))
+                 (add-error! fk
+                             (format "unknown HM option: ~a~a" path-str suggest)
+                             'unknown-option path-str)))]
             [(nixos-namespace-exists? schema top-ns)
              (define similars (nixos-find-similar schema path-str))
              (define suggest
