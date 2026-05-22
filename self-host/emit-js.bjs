@@ -51,6 +51,25 @@
 (def UNARY-OPS : (Map String String)
   {"not" "!"})
 
+(def VALUE-WRAPPERS : (Map String String)
+  {"inc" "((_x) => (_x + 1))"
+   "dec" "((_x) => (_x - 1))"
+   "identity" "((_x) => _x)"
+   "nil?" "((_x) => _x == null)"
+   "some?" "((_x) => _x != null)"
+   "not" "((_x) => !_x)"
+   "string?" "((_x) => typeof _x === 'string')"
+   "number?" "((_x) => typeof _x === 'number')"
+   "integer?" "((_x) => Number.isInteger(_x))"
+   "vector?" "((_x) => Array.isArray(_x))"
+   "empty?" "((_x) => _x.length === 0)"
+   "count" "((_x) => _x.length)"
+   "first" "((_x) => _x[0])"
+   "last" "((_x) => _x[_x.length - 1])"
+   "rest" "((_x) => _x.slice(1))"
+   "str" "((..._xs) => \"\".concat(..._xs))"
+   "boolean?" "((_x) => typeof _x === 'boolean')"})
+
 ;; --- emit-type (for JSDoc/comments, not used yet) ----------------------------
 
 (defn emit-type [(t : Any)] : String
@@ -127,13 +146,15 @@
 
       ;; variable reference
       (= node "ref")
-        (let [name (get e "name")]
+        (let [name (get e "name")
+              wrapper (get VALUE-WRAPPERS name)]
           (cond
             (= name "nil") "null"
             (= name "true") "true"
             (= name "false") "false"
             (.startsWith name ":")
               (.stringify JSON (mangle (.substring name 1)))
+            (some? wrapper) wrapper
             (.startsWith name "js/")
               (mangle (.substring name 3))
             (.includes name "/")

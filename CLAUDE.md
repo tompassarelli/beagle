@@ -154,13 +154,32 @@ Example: `(defn foo [(x : Int)] (+ x 1))` in test form:
 3. Use `--emit-patch` tools before manual repair.
 4. Escalate to `trace`/`blame`/`cascade` only when stuck.
 
+### Delimiter rule: tools before inference
+
+Try to use tools to debug paren issues before falling back to inference
+to diagnose/count. When a delimiter issue needs diagnosing — a build fails,
+the hook reports a structural error, something looks off after a large
+edit — reach for the tools first:
+
+1. `bin/beagle-syntax FILE` — instant structural check, exact line:col
+2. `bin/beagle-syntax --ledger FILE` — depth trace showing where nesting diverges
+3. `bin/beagle-syntax --repair --emit-patch FILE` — machine-generated fix
+
+Apply the patch or use the ledger to make a targeted edit. If `--emit-patch`
+gives the wrong fix, use `--ledger` output to identify the exact line, then
+edit that line.
+
+This applies to **all beagle-family files** (`.bgl`, `.bjs`, `.bclj`, `.bcljs`,
+`.bnix`, `.bsql`, `.bpy`) **in any repo** — including heist, beagle-lab, etc.
+For cross-repo files, use the full path: `~/code/beagle/bin/beagle-syntax FILE`.
+
 ### After every edit (automatic)
 
 The PostToolUse hook fires on Edit/Write to any beagle file
 (`.bgl`, `.bclj`, `.bcljs`, `.bjs`, `.bnix`, `.bsql`, `.bpy`, `.rkt`).
 
-If it reports a syntax error, fix delimiters first — do not type-check
-or inspect deeper errors until delimiters pass.
+If it reports a syntax error, fix delimiters using the sequence above — do
+not type-check or inspect deeper errors until delimiters pass.
 
 - `bin/beagle-syntax FILE` — structural check (use `--ledger` for depth trace, `--repair --emit-patch` for suggested fixes)
 - `bin/beagle-daemon query check-enriched FILE` — type errors with field context and fix hints
