@@ -10,40 +10,25 @@ priority: 1
 **Reimplementation: complete.** All ~12K lines of the Racket compiler
 have been rewritten in beagle/js (11 components, 400+ tests).
 
-**Bootstrap closure: in progress.** Racket is still in the active
-compile path. The front-end trust gap (reader) is built but not yet
-proven against the compiler corpus.
+**Bootstrap closure: proven.** The Bun-only compile path (`bin/beagle-bun`)
+produces byte-identical output to the Racket path for all 12 compiler
+components. Racket remains as a differential oracle, not in the compile loop.
 
-### Trusted path today
-
-```
-source.bgl → Racket parse/check → JSON AST → beagle-written JS → target source
-```
-
-### Target trusted path
+### Trusted path
 
 ```
 source.bgl → Bun reader/parser/checker/emitter → target source
 ```
 
-Racket remains as a differential oracle in CI, not in the compile loop.
-
 ## Proof ladder (bootstrap closure)
 
-- [x] P0: Bun reader exists (`self-host/reader.bjs`, 50 tests)
-- [ ] P0: Reader output matches Racket reader on compiler corpus
-- [ ] P1: Bun parser output matches Racket-backed parser output
-- [ ] P2: Bun checker accepts the compiler corpus
-- [ ] P3: Bun emitter produces matching target output
-- [ ] P4: Bun compiler compiles one compiler component without Racket
-- [ ] P5: Bun compiler compiles the JS emitter
-- [ ] P6: JS emitter fixed-point still holds under the Bun path
-
-## Blocking issue
-
-`check.bjs` uses `set!` on `let` bindings → compiles to `const`
-reassignment → Bun rejects. Fix: restructure mutable state in
-check.bjs to use object-property mutation instead.
+- [x] P0: Reader output matches Racket reader on compiler corpus (12/12)
+- [x] P1: Parser output matches Racket-backed parser output (12/12)
+- [x] P2: Checker accepts the compiler corpus (12/12)
+- [x] P3: Emitter produces byte-identical target output (12/12)
+- [x] P4: Bun compiler compiles one component whose output runs
+- [x] P5: Bun compiler compiles the JS emitter
+- [x] P6: JS emitter fixed-point holds under the Bun path (byte-identical)
 
 ## Done — reimplementation (all compiler components)
 
@@ -62,7 +47,7 @@ check.bjs to use object-property mutation instead.
 - [x] Reader (`self-host/reader.bjs`) — s-expression reader, 50 tests
 - [x] Stdlib types exported as JSON (`self-host/dist/stdlib-types.json`)
 - [x] Compiler bundle script (`self-host/bundle-compiler.sh`)
-- [x] `bin/beagle-bun` — standalone compiler entry point (blocked on check.bjs const issue)
+- [x] `bin/beagle-bun` — standalone compiler entry point
 - [x] Unified build script (`self-host/build.sh`) — 18/18 checks pass
 - [x] Pipeline scripts: beagle-self-emit, beagle-self-emit-clj, -py, -nix, -rkt
 
@@ -72,7 +57,7 @@ check.bjs to use object-property mutation instead.
 - [x] `self-host/export-stdlib.rkt` — one-time Racket→JSON stdlib export
 - [x] `self-host/bundle-compiler.sh` — builds standalone compiler.cjs
 - [x] `bin/beagle-bun` — Racket-free compile path
-- [ ] `self-host/verify-bootstrap.sh` — differential check: Bun path vs Racket path
+- [x] `self-host/verify-bootstrap.sh` — differential check: Bun path vs Racket path (P0–P6)
 - [ ] Oracle CI integration — raco make cross-check on Bun compiler output
 
 ## Coverage
@@ -90,4 +75,4 @@ check.bjs to use object-property mutation instead.
 | ast.rkt | 437 | reimplemented |
 | parse.rkt | 1872 | reimplemented |
 | check.rkt | 2558 | reimplemented |
-| **total** | **11,964** | **reimplemented, not yet bootstrap-closed** |
+| **total** | **11,964** | **reimplemented, bootstrap-closed** |

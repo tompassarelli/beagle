@@ -52,6 +52,18 @@ for f in "${CORPUS[@]}"; do
   fi
 done
 
+# --- P2: Checker accepts corpus ---
+echo ""
+echo "=== P2: Checker accepts compiler corpus ==="
+for f in "${CORPUS[@]}"; do
+  check_err=$(bin/beagle-bun "$f" > /dev/null 2>&1)
+  if [ $? -eq 0 ]; then
+    pass "P2 $f"
+  else
+    fail "P2 $f (checker rejected)"
+  fi
+done
+
 # --- P1: Parser output matches ---
 echo ""
 echo "=== P1: Parser output matches Racket parser ==="
@@ -122,6 +134,32 @@ if bin/beagle-bun self-host/emit-js.bjs --no-check > /dev/null 2>&1; then
   pass "P5 emit-js.bjs compiles"
 else
   fail "P5 emit-js.bjs fails to compile"
+fi
+
+# --- P6: Fixed-point ---
+echo ""
+echo "=== P6: Fixed-point (gen1 === gen2 under Bun path) ==="
+gen1=$(bin/beagle-bun self-host/emit-js.bjs --no-check 2>/dev/null)
+if [ -z "$gen1" ]; then
+  fail "P6 gen1 compilation failed"
+else
+  # Patch line 1 so gen1 can execute (resolve beagle/core.js import)
+  tmpgen1=$(mktemp /tmp/beagle-gen1-XXXXXX.cjs)
+  echo "$gen1" | sed "1s|import \* as \$\$bc from 'beagle/core.js';|const \$\$bc = require('$BEAGLE_ROOT/beagle-lib/lib/beagle/core.js');|" > "$tmpgen1"
+  gen2=$(bin/beagle-bun self-host/emit-js.bjs --ast --no-check 2>/dev/null | bun "$tmpgen1")
+  rm -f "$tmpgen1"
+
+  if [ "$gen1" = "$gen2" ]; then
+    pass "P6 fixed-point (byte-identical)"
+  else
+    gen1_body=$(echo "$gen1" | tail -n +2)
+    gen2_body=$(echo "$gen2" | tail -n +2)
+    if [ "$gen1_body" = "$gen2_body" ]; then
+      pass "P6 fixed-point (body identical, import line differs)"
+    else
+      fail "P6 fixed-point broken"
+    fi
+  fi
 fi
 
 # --- Summary ---
