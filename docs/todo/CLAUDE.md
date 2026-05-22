@@ -1,9 +1,13 @@
 # Active work — priority order
 
-1. **self-hosting.md** — get beagle compiling itself (target: 25%+ of compiler lines)
-2. **nix-target.md** — zero validation errors for NixOS config authoring
-3. **security.md** — daemon hardening + pool agent restrictions
-4. **targets.md** — new emit targets (elixir, bash) + SQL gaps + rkt gaps
+1. **targets.md** — Nix multi-arity fail-loud, Clojure emitter test backfill, target gaps
+2. **macro-provenance.md** — thread source location + expansion chain through the expander
+3. **nix-target.md** — zero validation errors for NixOS config authoring
+4. **security.md** — daemon hardening + pool agent restrictions
+
+## Done
+
+- **self-hosting.md** — complete as of v0.13.0 (12 components, bootstrap proven, 11/11 emission parity)
 
 ## How this directory works
 
