@@ -140,18 +140,8 @@
      (format "~a~a = ~a ~a;" ind name param-str body-str)]
 
     [(defn-multi? f)
-     ;; Multi-arity: emit as function that dispatches on arg count
-     ;; For now, emit the first arity
-     (define name (mangle-name (defn-multi-name f)))
-     (define first-arity (car (defn-multi-arities f)))
-     (define params (arity-clause-params first-arity))
-     (define body (arity-clause-body first-arity))
-     (define param-str
-       (string-join
-        (for/list ([p (in-list params)])
-          (format "~a:" (mangle-name (param-name p))))
-        " "))
-     (format "~a~a = ~a ~a;" ind name param-str (emit-body body depth))]
+     (error 'emit-nix "multi-arity defn not supported for Nix target: ~a"
+            (defn-multi-name f))]
 
     [(record-form? f)
      (emit-record-defs f depth)]

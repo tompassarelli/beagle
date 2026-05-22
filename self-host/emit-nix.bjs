@@ -815,13 +815,7 @@
 ;; --- top-level defn-multi emission -------------------------------------------
 
 (defn emit-top-defn-multi [(e : Any) (depth : Int)] : String
-  (let [name (mangle (get e "name"))
-        first-arity (first (get e "arities"))
-        params (get first-arity "params")
-        body (get first-arity "body")
-        ind (indent depth)
-        param-str (.join (map (fn [(p : Any)] : String (str (mangle (get p "name")) ":")) params) " ")]
-    (str ind name " = " param-str " " (emit-body body depth) ";")))
+  (throw (js/new Error (str "multi-arity defn not supported for Nix target: " (get e "name")))))
 
 ;; --- quoted datum emission ---------------------------------------------------
 
