@@ -74,20 +74,38 @@ Proc macros compress 2-3× at realistic scale when you have enough instances to 
 
 | Target | `#lang` | Stdlib | Verified with |
 |--------|---------|--------|---------------|
-| Clojure | `beagle/clj` | 352 entries | Babashka |
-| JavaScript | `beagle/js` | 38 native + 28 typed `js/*` forms | Node |
-| Python | `beagle/py` | 131 entries | Python 3 |
-| Nix | `beagle/nix` | 120 entries | nix eval |
+| Clojure | `beagle/clj` | 414 entries | Babashka |
+| JavaScript | `beagle/js` | 55 native + 28 typed `js/*` forms | Node / Bun |
+| Python | `beagle/py` | 151 entries | Python 3 |
+| Nix | `beagle/nix` | 111 entries | nix eval |
 
 **Experimental / verification**
 
 | Target | `#lang` | Notes |
 |--------|---------|-------|
-| ClojureScript | `beagle/cljs` | 75 stdlib entries, compile-only |
-| SQL | `beagle/sql` | DDL, DML, schema validation |
+| ClojureScript | `beagle/cljs` | 86 stdlib entries, compile-only |
+| SQL | `beagle/sql` | 54 stdlib entries, DDL, DML, schema validation |
 | Typed Racket | `beagle/rkt` | Oracle — `raco make` independently validates type promises |
 
-269 portable stdlib entries shared across all targets.
+319 portable stdlib entries shared across all targets (~1190 total).
+
+## Self-hosting
+
+Beagle compiles itself. 12 `.bjs` components (reader, parser, type checker, 5 emitters, AST, macros, lint, types) are written in Beagle targeting JavaScript. The Racket compiler compiles them to JS, producing a standalone `compiler.cjs` that runs on Bun — then that bundle compiles the same `.bjs` sources and produces identical output (bootstrap fixed-point proven).
+
+The self-hosted compiler is the primary path for [Heist](https://github.com/tompassarelli/heist), a full-stack app framework dogfooding Beagle.
+
+## Raw strings
+
+`#r"..."` literals pass through without escape processing. Delimiter escalation with `#` characters for strings containing quotes:
+
+```racket
+#r"no escapes needed"
+#r#"contains "quotes" freely"#
+#r##"contains "# sequences"##
+```
+
+Useful for embedding JS/SQL/HTML templates, regex patterns, and `fmt` interpolation templates.
 
 ## Experiments
 
@@ -144,7 +162,7 @@ Or from source:
 
 ```sh
 raco pkg install --link beagle-lib/ beagle-test/ beagle-doc/ beagle/
-raco test beagle-test/tests/   # 1221 tests
+raco test beagle-test/tests/   # 1222 tests
 ```
 
 ## Agent integration
@@ -169,6 +187,6 @@ Generates a PostToolUse hook, settings, `CLAUDE.md`, and language context. The d
 - [`docs/cheatsheet.md`](docs/cheatsheet.md) — language summary
 - [`docs/agent-workflow.md`](docs/agent-workflow.md) — repair tool routing
 - [`docs/tool-reference.md`](docs/tool-reference.md) — CLI and tool catalog
-- [`docs/devlog/`](docs/devlog/) — development journal (21 entries)
+- [`docs/devlog/`](docs/devlog/) — development journal (23 entries)
 - [`beagle-lab`](https://github.com/tompassarelli/beagle-lab) — research journal: experiment tasks, results, methodology (E0–E22)
 
