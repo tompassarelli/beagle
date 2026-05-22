@@ -8,6 +8,7 @@
 
 (declare-extern JSON Any)
 (declare-extern process Any)
+(declare-extern rereadDatum Any)
 
 ;; --- constants ---------------------------------------------------------------
 
@@ -906,8 +907,9 @@
                       ;; find matching close brace
                       (let [close-pos (fmt-find-close text (+ i 2))]
                         (if (> close-pos -1)
-                          (let [expr-str (.trim (.substring text (+ i 2) close-pos))]
-                            (.push result expr-str)
+                          (let [expr-str (.trim (.substring text (+ i 2) close-pos))
+                                datum (get (rereadDatum expr-str 0) "value")]
+                            (.push result ["#%expr" datum])
                             (set! (get state "i") (+ close-pos 1))
                             (set! (get state "start") (+ close-pos 1))
                             (walk))
@@ -941,12 +943,17 @@
                         (walk)))))]
       (walk))))
 
+(defn fmt-unwrap-part [(p : Any)] : Any
+  (if (and (vector? p) (= (nth p 0) "#%expr"))
+    (nth p 1)
+    ["#%string" p]))
+
 (defn expand-fmt [(text : String)] : Any
   (let [parts (fmt-split-template text)]
     (cond
-      (= (.-length parts) 0) ""
-      (and (= (.-length parts) 1) (string? (nth parts 0))) (nth parts 0)
-      :else (.concat ["str"] parts))))
+      (= (.-length parts) 0) ["#%string" ""]
+      (and (= (.-length parts) 1) (string? (nth parts 0))) ["#%string" (nth parts 0)]
+      :else (.concat ["str"] (mapv fmt-unwrap-part parts)))))
 
 ;; --- parse-expr: the main dispatch -------------------------------------------
 
@@ -1315,8 +1322,8 @@
       ;; fmt: (fmt "template") → expand to str call
       (and (= head "fmt") (= (.-length rest-items) 1))
         (let [arg (nth rest-items 0)]
-          (if (string? arg)
-            (parse-expr (expand-fmt arg))
+          (if (string-datum? arg)
+            (parse-expr (expand-fmt (extract-string arg)))
             (parse-expr arg)))
 
       ;; threading macros
