@@ -81,18 +81,17 @@
   (check-true (matches? #rx"\\(def y true\\)"  a))
   (check-true (matches? #rx"\\(def y false\\)" b)))
 
-(test-case "unsafe block emitted verbatim"
-  (define out (compile '(unsafe "(defn h [] :ok)")))
+(test-case "unsafe-clj block emitted verbatim"
+  (define out (compile '(unsafe-clj "(defn h [] :ok)")))
   (check-true (matches? #rx"\\(defn h \\[\\] :ok\\)" out)))
 
-(test-case "unsafe preserves square brackets"
-  (define out (compile '(unsafe "(d/q '[:find ?n :where [?e :name ?n]] @conn)")))
+(test-case "unsafe-clj preserves square brackets"
+  (define out (compile '(unsafe-clj "(d/q '[:find ?n :where [?e :name ?n]] @conn)")))
   (check-true (matches? #rx"\\[:find \\?n :where \\[\\?e :name \\?n\\]\\]" out)))
 
-(test-case "inline unsafe emits inside an expression"
-  (define out (compile '(def x (+ 1 (unsafe "(double sum)") 2))))
+(test-case "inline unsafe-clj emits inside an expression"
+  (define out (compile '(def x (+ 1 (unsafe-clj "(double sum)") 2))))
   (check-true (matches? #rx"\\(\\+ 1 \\(double sum\\) 2\\)" out))
-  ;; Must NOT emit (unsafe ...) as a Clojure call:
   (check-false (matches? #rx"\\(unsafe " out)))
 
 ;; --- macro expansion shows up in emitted code ------------------------------

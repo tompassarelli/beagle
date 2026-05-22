@@ -96,6 +96,40 @@
       s))
   (string-join trimmed "\n"))
 
+(define (read-raw-string port src line col pos)
+  (define hash-count
+    (let loop ([n 0])
+      (define c (peek-char port))
+      (if (and (char? c) (char=? c #\#))
+        (begin (read-char port) (loop (add1 n)))
+        n)))
+  (define open (read-char port))
+  (unless (and (char? open) (char=? open #\"))
+    (error 'beagle "expected '\"' after #r~a, got: ~a"
+           (make-string hash-count #\#) open))
+  (define content
+    (let loop ([acc '()])
+      (define c (read-char port))
+      (cond
+        [(eof-object? c)
+         (error 'beagle "unterminated raw string literal")]
+        [(char=? c #\")
+         (define hashes
+           (let hloop ([n 0])
+             (if (and (< n hash-count)
+                      (char? (peek-char port))
+                      (char=? (peek-char port) #\#))
+               (begin (read-char port) (hloop (add1 n)))
+               n)))
+         (if (= hashes hash-count)
+           (list->string (reverse acc))
+           (loop (foldl cons acc
+                        (cons #\" (build-list hashes (lambda (_) #\#))))))]
+        [else (loop (cons c acc))])))
+  (if src
+    (datum->syntax #f content (vector src line col pos #f))
+    content))
+
 (define (hash-dispatch ch port src line col pos)
   (define next (peek-char port))
   (cond
@@ -131,6 +165,9 @@
        (datum->syntax #f result (vector src line col pos
                                         (+ 3 (string-length pattern))))
        result)]
+    [(and (char? next) (char=? next #\r))
+     (read-char port)
+     (read-raw-string port src line col pos)]
     [else
      (define combined (input-port-append #f (open-input-string "#") port))
      (parameterize ([current-readtable (make-readtable #f)])

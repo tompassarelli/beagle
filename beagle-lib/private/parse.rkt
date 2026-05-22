@@ -541,9 +541,12 @@
   (define loc (and (syntax? x) (stx->src-loc x)))
   (cond
     [(and (pair? d) (eq? (car d) 'unsafe) (= (length d) 2) (string? (cadr d)))
-     (store-src! (unsafe-clj (cadr d)) loc)]
-    [(and (pair? d) (eq? (car d) 'unsafe))
-     (error 'beagle "unsafe takes a single string argument: (unsafe \"raw clojure\")")]
+     (error 'beagle "(unsafe \"...\") is ambiguous in multi-target beagle. Use (unsafe-js \"...\"), (unsafe-clj \"...\"), (unsafe-py \"...\"), (unsafe-nix \"...\"), or (unsafe-rkt \"...\")")]
+    [(and (pair? d) (= (length d) 2) (string? (cadr d))
+          (memq (car d) '(unsafe-js unsafe-clj unsafe-py unsafe-nix unsafe-rkt)))
+     (store-src! (unsafe-target (string->symbol (substring (symbol->string (car d)) 7))
+                                (cadr d))
+                 loc)]
     [else (parse-expr x)]))
 
 (define (parse-expr x)
@@ -767,7 +770,13 @@
      (unsafe-expr (parse-expr (or (stx-ref subs 1) inner)))]
 
     [(list 'unsafe (? string? str))
-     (unsafe-clj str)]
+     (error 'beagle "(unsafe \"...\") is ambiguous in multi-target beagle. Use (unsafe-js \"...\"), (unsafe-clj \"...\"), (unsafe-py \"...\"), (unsafe-nix \"...\"), or (unsafe-rkt \"...\")")]
+
+    [(list 'unsafe-js (? string? str))   (unsafe-target 'js str)]
+    [(list 'unsafe-clj (? string? str))  (unsafe-target 'clj str)]
+    [(list 'unsafe-py (? string? str))   (unsafe-target 'py str)]
+    [(list 'unsafe-nix (? string? str))  (unsafe-target 'nix str)]
+    [(list 'unsafe-rkt (? string? str))  (unsafe-target 'rkt str)]
 
     [(list 'def (? symbol? name) marker type-expr value)
      #:when (annotation-marker? marker)

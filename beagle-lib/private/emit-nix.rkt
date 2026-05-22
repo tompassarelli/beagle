@@ -372,8 +372,12 @@
      (format "builtins.tryEval (~a)" (emit-body (try-form-body e) depth))]
 
     [(unsafe-clj? e)
-     ;; Raw Nix escape
      (unsafe-clj-clj-string e)]
+    [(unsafe-target? e)
+     (if (eq? (unsafe-target-target e) 'nix)
+       (string-trim (unsafe-target-raw-string e))
+       (error 'beagle-nix "unsafe-~a form in Nix target; use (unsafe-nix \"...\") instead"
+              (unsafe-target-target e)))]
 
     [(unsafe-expr? e)
      (emit-expr (unsafe-expr-inner e) depth)]

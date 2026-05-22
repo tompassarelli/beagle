@@ -207,6 +207,10 @@
     [(await-form? e)     (format ";; await not supported for rkt target")]
 
     [(unsafe-clj? e)     (format ";; unsafe: ~a" (unsafe-clj-clj-string e))]
+    [(unsafe-target? e)
+     (if (eq? (unsafe-target-target e) 'rkt)
+       (string-trim (unsafe-target-raw-string e))
+       (format ";; unsafe-~a (wrong target)" (unsafe-target-target e)))]
     [(unsafe-expr? e)    (emit-expr (unsafe-expr-inner e))]
     [(dynamic-var? e)    (mangle-name (dynamic-var-name e))]
     [(regex-lit? e)      (format "(pregexp ~v)" (regex-lit-pattern e))]

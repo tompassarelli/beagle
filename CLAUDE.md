@@ -198,7 +198,7 @@ Beagle prints lint warnings to stderr during compile (strict mode only):
 - `untyped def NAME` — `(def x 42)` without type annotation
 - `defn NAME has no return type annotation` — missing `: Ret`
 - `defn NAME has untyped parameter(s): ...` — missing `(name : Type)`
-- `(unsafe "...") inline escape` — beagle can't validate that code
+- `(unsafe-{js,clj,py,nix,rkt} "...") inline escape` — beagle can't validate that code
 - `let binding X shadows outer binding` — let/fn rebinds a name from enclosing scope
 - `unused declare-extern: X` — extern declared but never referenced
 

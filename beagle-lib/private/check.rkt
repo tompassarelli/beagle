@@ -1372,6 +1372,7 @@
        (if (null? clause-types) ANY (apply merge-types clause-types)))]
     [(unsafe-expr? e) ANY]
     [(unsafe-clj? e) ANY]
+    [(unsafe-target? e) ANY]
     [(if-form? e)
      (infer-expr (if-form-cond-expr e) env)
      (define-values (then-env else-env) (narrow-env-for-condition env (if-form-cond-expr e)))

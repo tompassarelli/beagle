@@ -167,26 +167,32 @@
 
 ;; --- unsafe inline ---------------------------------------------------------
 
-(test-case "unsafe with string"
-  (define f (car (parse-one '(unsafe "(println :hi)"))))
-  (check-true (unsafe-clj? f))
-  (check-equal? (unsafe-clj-clj-string f) "(println :hi)"))
+(parse-err "unsafe with bare string is ambiguous"
+  '(unsafe "(println :hi)"))
 
-(test-case "unsafe in expression position (inside def)"
-  (define f (car (parse-one '(def x (unsafe "(double 5)")))))
+(test-case "unsafe-clj with string"
+  (define f (car (parse-one '(unsafe-clj "(println :hi)"))))
+  (check-true (unsafe-target? f))
+  (check-eq? (unsafe-target-target f) 'clj)
+  (check-equal? (unsafe-target-raw-string f) "(println :hi)"))
+
+(test-case "unsafe-js with string"
+  (define f (car (parse-one '(unsafe-js "console.log(1)"))))
+  (check-true (unsafe-target? f))
+  (check-eq? (unsafe-target-target f) 'js)
+  (check-equal? (unsafe-target-raw-string f) "console.log(1)"))
+
+(test-case "unsafe-target in expression position (inside def)"
+  (define f (car (parse-one '(def x (unsafe-clj "(double 5)")))))
   (check-true  (def-form? f))
-  (check-true  (unsafe-clj? (def-form-value f)))
-  (check-equal? (unsafe-clj-clj-string (def-form-value f)) "(double 5)"))
+  (check-true  (unsafe-target? (def-form-value f)))
+  (check-equal? (unsafe-target-raw-string (def-form-value f)) "(double 5)"))
 
-(test-case "unsafe in expression position (inside fn call)"
-  (define f (car (parse-one '(def y (+ 1 (unsafe "(double sum)"))))))
+(test-case "unsafe-target in expression position (inside fn call)"
+  (define f (car (parse-one '(def y (+ 1 (unsafe-clj "(double sum)"))))))
   (define add-call (def-form-value f))
   (check-true (call-form? add-call))
-  ;; The unsafe is the second arg
-  (check-true (unsafe-clj? (cadr (call-form-args add-call)))))
-
-(parse-err "unsafe rejects non-string"
-  '(unsafe (println :hi)))
+  (check-true (unsafe-target? (cadr (call-form-args add-call)))))
 
 ;; --- regex literal ---------------------------------------------------------
 
