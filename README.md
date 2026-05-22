@@ -93,7 +93,7 @@ Proc macros compress 2-3× at realistic scale when you have enough instances to 
 
 Beagle compiles itself. 12 `.bjs` components (reader, parser, type checker, 5 emitters, AST, macros, lint, types) are written in Beagle targeting JavaScript. The Racket compiler compiles them to JS, producing a standalone `compiler.cjs` that runs on Bun — then that bundle compiles the same `.bjs` sources and produces identical output (bootstrap fixed-point proven).
 
-The self-hosted compiler is the primary path for [Heist](https://github.com/tompassarelli/heist), a full-stack app framework dogfooding Beagle.
+Emission parity verified: 11/11 modules of [Heist](https://github.com/tompassarelli/heist) (a full-stack app framework dogfooding Beagle) produce byte-identical output from both Racket and Bun compilers. The self-hosted compiler is the primary compilation path for Heist.
 
 ## Raw strings
 
