@@ -37,6 +37,9 @@
       (str m "$")
       m)))
 
+(defn mangle-prop [(name : String)] : String
+  (.replaceAll name "-" "_"))
+
 ;; --- infix / unary operators -------------------------------------------------
 
 (def INFIX-OPS : (Map String String)
@@ -276,8 +279,8 @@
               target (emit-expr (get e "target"))
               args (get e "args")]
           (if (.startsWith method ".-")
-            (str target "." (mangle (.substring method 2)))
-            (str target "." (mangle (.substring method 1))
+            (str target "." (mangle-prop (.substring method 2)))
+            (str target "." (mangle-prop (.substring method 1))
                  "(" (.join (map emit-expr args) ", ") ")")))
 
       ;; static-call
@@ -356,7 +359,7 @@
 
       ;; defunion
       (= node "defunion")
-        (str "// " (mangle-name (get e "name")) " union (members: " (.join (get e "members") ", ") ")")
+        (str "// " (mangle (get e "name")) " = " (.join (map mangle (get e "members")) " | "))
 
       ;; deferror
       (= node "deferror")
@@ -493,6 +496,13 @@
             (let [parts (.split fn-name "/->")]
               (str (mangle-name (first parts)) "." (mangle (nth parts 1))
                    "(" (.join (map emit-expr args) ", ") ")"))
+
+          ;; namespace-qualified call (ns/fn-name)
+          (.includes fn-name "/")
+            (let [core (emit-core-call fn-name args)]
+              (if (some? core)
+                core
+                (str (.replaceAll (mangle fn-name) "/" ".") "(" (.join (map emit-expr args) ", ") ")")))
 
           ;; default: try core call, then plain function call
           :else
@@ -637,8 +647,16 @@
       ;; higher-order functions
       (and (= fn-name "map") (= n 2))
         (str (a 1) ".map(" (a 0) ")")
+      (and (= fn-name "mapv") (= n 2))
+        (str (a 1) ".map(" (a 0) ")")
       (and (= fn-name "filter") (= n 2))
         (str (a 1) ".filter(" (a 0) ")")
+      (and (= fn-name "filterv") (= n 2))
+        (str (a 1) ".filter(" (a 0) ")")
+      (and (= fn-name "subvec") (= n 2))
+        (str (a 0) ".slice(" (a 1) ")")
+      (and (= fn-name "subvec") (= n 3))
+        (str (a 0) ".slice(" (a 1) ", " (a 2) ")")
       (and (= fn-name "remove") (= n 2))
         (str "$$bc.remove(" (a 0) ", " (a 1) ")")
       (and (= fn-name "reduce") (= n 2))
@@ -849,9 +867,13 @@
   (let [target-str (emit-expr (get e "target"))
         tmp (str "_match_" (rand-int 99999))
         clauses (get e "clauses")
+        last-pat (get (nth clauses (- (count clauses) 1)) "pattern")
+        last-type (get last-pat "type")
+        needs-fallback (not (or (= last-type "wildcard") (= last-type "var")))
         arms (map (fn [(c : Any)] : String (emit-match-arm c tmp)) clauses)
-        arms-str (.join arms " ")]
-    (str "(() => { const " tmp " = " target-str "; " arms-str " })()"))  )
+        arms-str (.join arms " ")
+        fallback (if needs-fallback " { return null; }" "")]
+    (str "(() => { const " tmp " = " target-str "; " arms-str fallback " })()")))
 
 (defn emit-match-arm [(clause : Any) (tmp : String)] : String
   (let [pat (get clause "pattern")
@@ -876,7 +898,8 @@
               bindings (get pat "bindings")
               test (str tmp "._tag === " (.stringify JSON rec-name))
               let-strs (map (fn [(b : Any)] : String
-                              (str "const " (mangle-name (get b "name")) " = " tmp "." (mangle (get b "field")) ";"))
+                              (let [field (if (get b "field") (get b "field") (get b "name"))]
+                                (str "const " (mangle-name (get b "name")) " = " tmp "." (mangle field) ";")))
                             bindings)]
           (str "if (" test ") { " (.join let-strs " ") " return " body-str "; } else"))
       :else
@@ -1092,14 +1115,33 @@
         (emit-expr f)
       :else (emit-expr-stmt f))))
 
+(defn emit-module-header [(prog : Any)] : String
+  (let [reqs (get prog "requires")]
+    (if (or (nil? reqs) (= (count reqs) 0))
+      ""
+      (let [strs (map (fn [(r : Any)] : String
+                        (let [ns-str (get r "ns")
+                              refer (get r "refer")
+                              alias (get r "alias")
+                              mod-path (str "./" (.replaceAll ns-str "." "/") ".js")]
+                          (if refer
+                            (str "import { " (.join (map mangle refer) ", ") " } from '" mod-path "';")
+                            (let [a (if alias alias
+                                      (let [parts (.split ns-str ".")]
+                                        (nth parts (- (count parts) 1))))]
+                              (str "import * as " (mangle-name a) " from '" mod-path "';")))))
+                      reqs)]
+        (str (.join strs "\n") "\n\n")))))
+
 (defn emit-program [(prog : Any)] : String
   (let [forms (get prog "forms")
         body (.join (map (fn [(f : Any)] : String (emit-form f)) forms) "\n\n")
-        needs-import (.includes body "$$bc.")
-        import-str (if needs-import
-                     "import * as $$bc from 'beagle/core.js';\n\n"
-                     "")]
-    (str import-str body "\n")))
+        needs-bc (.includes body "$$bc.")
+        bc-import (if needs-bc
+                    "import * as $$bc from 'beagle/core.js';\n\n"
+                    "")
+        mod-header (emit-module-header prog)]
+    (str "\n" mod-header bc-import body "\n")))
 
 ;; --- main: read stdin, emit --------------------------------------------------
 

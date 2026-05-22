@@ -58,7 +58,41 @@ source.bgl → Bun reader/parser/checker/emitter → target source
 - [x] `self-host/bundle-compiler.sh` — builds standalone compiler.cjs
 - [x] `bin/beagle-bun` — Racket-free compile path
 - [x] `self-host/verify-bootstrap.sh` — differential check: Bun path vs Racket path (P0–P6)
+- [x] `oracle/bin/check-oracle-bun` — Bun path oracle check (23/30, 7 BEAGLE_UNSOUND)
 - [ ] Oracle CI integration — raco make cross-check on Bun compiler output
+
+## Bun-vs-Racket emission gaps (blocking dogfood)
+
+Heist modules (11/11 compile, 0/11 byte-identical to Racket output).
+Three categories of divergence:
+
+### `_tag` → `__tag` mangling (critical, recurring)
+
+`mangle()` converts `_` to `__`. The `_tag` field in defrecord/defunion
+constructors goes through mangle in some code paths, producing `__tag`.
+Racket emitter outputs `_tag`. This is a semantic break — predicates
+and match arms check the wrong field name. Has regressed multiple times.
+
+Root cause: `_tag` is an internal runtime field that should never be
+mangled, but the emitter doesn't distinguish runtime-internal names
+from user-authored names.
+
+### `mapv(f, xs)` vs `xs.map(f)`, `subvec(x, n)` vs `x.slice(n)`
+
+Bun emitter wraps `map` calls as `mapv(f, xs)` (a `$bc.` runtime helper),
+Racket emitter emits `.map(f)` method calls. Same for `subvec` vs `.slice`.
+Semantically equivalent but not byte-identical.
+
+### Missing `import` statements for cross-module refs
+
+Racket emitter produces `import * as mod from './ns/mod.js'` for
+`(require ...)` forms. Bun emitter omits these. Breaks at runtime
+when modules reference each other.
+
+### Oracle type emission gaps (7/30 BEAGLE_UNSOUND)
+
+- Int→Float coercion: Bun emits `5`, Racket emits `5.0` for Flonum params (4 fixtures)
+- Parametric types: `(struct (T E) Ok ...)` vs `(struct Ok ([value : Any]) ...)` (3 fixtures)
 
 ## Coverage
 
