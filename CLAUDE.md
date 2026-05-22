@@ -16,7 +16,7 @@ it as canonical when explaining the language.
 
 ## Status
 
-`#lang beagle` v0.12.0 — 1221 tests passing (+ 53 oracle/differential via `BEAGLE_ORACLE=1`).
+`#lang beagle` v0.13.0 — 1221 tests passing (+ 53 oracle/differential via `BEAGLE_ORACLE=1`).
 
 - **Targets:** `beagle/clj` (default), `beagle/cljs`, `beagle/js`, `beagle/nix`, `beagle/sql`, `beagle/py`, `beagle/rkt`
 - **Forms:** ~78 forms — ~50 cross-target (definitions, control flow, data structures, pattern matching, threading, interop) + 28 typed JS target forms (`js/*`). See `docs/cheatsheet.md` for the full catalog.
