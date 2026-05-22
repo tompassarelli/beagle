@@ -294,6 +294,10 @@
     [(unsafe-clj? e)
      (hasheq 'node "unsafe-raw" 'code (unsafe-clj-clj-string e))]
 
+    [(unsafe-target? e)
+     (hasheq 'node "unsafe-raw" 'code (unsafe-target-raw-string e)
+             'target (symbol->string (unsafe-target-target e)))]
+
     [(regex-lit? e)
      (hasheq 'node "regex" 'pattern (regex-lit-pattern e))]
 

@@ -95,6 +95,20 @@
       (recur (+ i 1) (+ n 1))
       n)))
 
+(defn raw-push-quote-hashes [(buf : (Vec String)) (n : Int)] : Nil
+  (.push buf "\"")
+  (doseq [j (range n)] (.push buf "#")))
+
+(defn read-raw-step [(src : String) (i : Int) (buf : (Vec String)) (hc : Int)] : Int
+  (if (= (.charAt src i) "\"")
+    (let [found (count-hashes src (+ i 1))]
+      (if (>= found hc)
+        -1
+        (do (raw-push-quote-hashes buf found)
+            (+ i 1 found))))
+    (do (.push buf (.charAt src i))
+        (+ i 1))))
+
 (defn read-raw-string [(src : String) (pos : Int)] : Any
   (let [hc (count-hashes src pos)
         open-pos (+ pos hc)
@@ -102,24 +116,14 @@
     (if (or (>= open-pos len) (not= (.charAt src open-pos) "\""))
       (do (.write (.-stderr process) "beagle reader: expected '\"' after #r hashes\n")
           (make-result "" open-pos))
-      (let [start (+ open-pos 1)
-            buf []]
-        (loop [i start]
-          (cond
-            (>= i len)
-              (do (.write (.-stderr process) "beagle reader: unterminated raw string\n")
-                  (make-result [STRING-TAG (.join buf "")] i))
-            (= (.charAt src i) "\"")
-              (let [found (count-hashes src (+ i 1))]
-                (if (>= found hc)
-                  (make-result [STRING-TAG (.join buf "")] (+ i 1 hc))
-                  (do (.push buf "\"")
-                      (loop [j 0]
-                        (when (< j found) (.push buf "#") (recur (+ j 1))))
-                      (recur (+ i 1 found)))))
-            :else
-              (do (.push buf (.charAt src i))
-                  (recur (+ i 1)))))))))
+      (let [buf []]
+        (loop [i (+ open-pos 1)]
+          (if (>= i len)
+            (make-result [STRING-TAG (.join buf "")] i)
+            (let [next (read-raw-step src i buf hc)]
+              (if (= next -1)
+                (make-result [STRING-TAG (.join buf "")] (+ i 1 hc))
+                (recur next)))))))))
 
 ;; --- number reader -------------------------------------------------------------
 

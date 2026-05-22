@@ -375,7 +375,7 @@
 
       ;; unsafe-raw
       (= node "unsafe-raw")
-        (get e "code")
+        (.trim (get e "code"))
 
       ;; await
       (= node "await")
@@ -1141,7 +1141,8 @@
                     "import * as $$bc from 'beagle/core.js';\n\n"
                     "")
         mod-header (emit-module-header prog)]
-    (str "\n" mod-header bc-import body "\n")))
+    (let [prefix (if (= mod-header "") "\n" "")]
+      (str prefix mod-header bc-import body "\n"))))
 
 ;; --- main: read stdin, emit --------------------------------------------------
 

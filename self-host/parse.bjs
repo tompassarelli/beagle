@@ -297,6 +297,13 @@
 (defn make-unsafe-raw [(code : String)] : Any
   {"node" "unsafe-raw" "code" code})
 
+(defn string-datum? [(d : Any)] : Bool
+  (or (string? d)
+      (and (vector? d) (= (.-length d) 2) (= (nth d 0) "#%string"))))
+
+(defn extract-string [(d : Any)] : String
+  (if (string? d) d (nth d 1)))
+
 (defn make-regex [(pattern : String)] : Any
   {"node" "regex" "pattern" pattern})
 
@@ -1025,9 +1032,14 @@
   (let [head (nth d 0)
         rest-items (.slice d 1)]
     (cond
-      ;; unsafe
-      (and (= head "unsafe") (= (.-length rest-items) 1) (string? (nth rest-items 0)))
-        (make-unsafe-raw (nth rest-items 0))
+      ;; unsafe with bare string → error
+      (and (= head "unsafe") (= (.-length rest-items) 1) (string-datum? (nth rest-items 0)))
+        (do (.write (.-stderr process) "beagle: (unsafe \"...\") is ambiguous. Use (unsafe-js \"...\"), (unsafe-clj \"...\"), etc.\n")
+            (make-unsafe-raw (extract-string (nth rest-items 0))))
+
+      ;; target-specific unsafe: unsafe-js, unsafe-clj, unsafe-py, unsafe-nix, unsafe-rkt
+      (and (.startsWith head "unsafe-") (= (.-length rest-items) 1) (string-datum? (nth rest-items 0)))
+        (make-unsafe-raw (extract-string (nth rest-items 0)))
 
       ;; def with type annotation: (def name : Type value)
       (and (= head "def") (= (.-length rest-items) 3)
@@ -1392,10 +1404,18 @@
                 (set! (get externs (nth d 1))
                   (if (>= (.-length d) 3) (parse-type (nth d 2)) (make-prim "Any")))
               (= head "require")
-                (.push requires {"ns" (nth d 1)
-                                 "alias" (if (and (>= (.-length d) 4) (= (nth d 2) ":as"))
-                                           (nth d 3) nil)
-                                 "refer" nil})
+                (let [ns-name (nth d 1)
+                      has-as (and (>= (.-length d) 4) (= (nth d 2) ":as"))
+                      has-refer (and (>= (.-length d) 4) (= (nth d 2) ":refer"))
+                      alias (if has-as (nth d 3) nil)
+                      refer (if has-refer
+                              (let [bracket-form (nth d 3)]
+                                (if (and (.isArray js/Array bracket-form)
+                                         (= (nth bracket-form 0) "#%brackets"))
+                                  (.slice bracket-form 1)
+                                  nil))
+                              nil)]
+                  (.push requires {"ns" ns-name "alias" alias "refer" refer}))
               :else nil))))))
     ;; Pass 2: parse non-meta forms
     (.forEach datums (fn [(d : Any)] : Nil
