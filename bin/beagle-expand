@@ -2,16 +2,24 @@
 # beagle-expand: show a beagle program after macro expansion.
 #
 # Usage:
-#   bin/beagle-expand <source.bclj|.bjs|.bnix|.bcljs>
+#   bin/beagle-expand [--trace] <source.bclj|.bjs|.bnix|.bcljs>
 #
 # Prints the expanded beagle source (macros applied, but not yet emitted
 # as Clojure). Use this to audit what your macros actually do.
+#
+# --trace  Print each macro expansion step to stderr (input + output per step).
 
 set -euo pipefail
 source "$(dirname "$0")/_beagle-racket"
 
+trace=0
+if [[ "${1:-}" == "--trace" ]]; then
+    trace=1
+    shift
+fi
+
 if [[ $# -ne 1 ]]; then
-    echo "usage: beagle-expand <source.bclj|.bjs|.bnix|.bcljs>" >&2
+    echo "usage: beagle-expand [--trace] <source.bclj|.bjs|.bnix|.bcljs>" >&2
     exit 2
 fi
 
@@ -22,4 +30,8 @@ if [[ ! -f "$src" ]]; then
     exit 1
 fi
 
-"$RACKET" -e "(require beagle/private/expand-tool) (expand-file (vector-ref (current-command-line-arguments) 0))" -- "$src"
+if [[ "$trace" -eq 1 ]]; then
+    "$RACKET" -e "(require beagle/private/expand-tool) (expand-file-traced (vector-ref (current-command-line-arguments) 0))" -- "$src"
+else
+    "$RACKET" -e "(require beagle/private/expand-tool) (expand-file (vector-ref (current-command-line-arguments) 0))" -- "$src"
+fi

@@ -1,5 +1,21 @@
 # Completed work
 
+## v0.13.0
+
+### Post-release audit (2026-05-22)
+
+- Nix multi-arity fail-loud (both Racket + Bun emitters)
+- CLJ behavioral test suite: 56 end-to-end tests (compile → bb → verify)
+- defenum keyword emission fix (emitted symbols instead of keywords)
+- defmethod return type annotation leak fix
+- deftype/extend-type return type annotation leak fix
+- Macro expander provenance: expansion-ctx struct, chain formatting, truncated input forms
+- Provenance mirrored in self-hosted expander (self-host/macros.bjs)
+- Zero-value todo audit: cancelled 18 items across 4 workstreams with documented reasoning
+- `beagle-expand --trace`: expansion step tracing to stderr, depth-indented
+- Macro provenance validation tests (nested error chain, trace handler capture)
+- Bun oracle CI: 23/30 raco make pass + 22/30 emission parity (oracle-bun.rkt)
+
 ## v0.12.0
 
 ### Self-hosting bootstrap

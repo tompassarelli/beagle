@@ -6,7 +6,7 @@ priority: 3
 # Security hardening — remaining items
 
 Cross-target audit done 2026-05-20. Critical + high items resolved.
-Remaining items are medium/low risk (local-only or abandoned features).
+Remaining items are medium/low risk (local-only).
 
 ## Medium — daemon hardening
 
@@ -16,14 +16,16 @@ Remaining items are medium/low risk (local-only or abandoned features).
 
 Local-only risk (requires another user on the same machine).
 
-## Medium — pool agent
-
-- [ ] Remove `Bash` from repair agent `allowedTools`
-- [ ] Set `chmod 0600` on `.beagle/pool.sock`
-
-Pool agent experiments abandoned (E14-E15: 0 activations). Moot until revived.
-
 ## Low
 
 - [ ] JS Inf/NaN emission — `+inf.0` emits invalid JS (should be `Infinity`)
-- [ ] LSP URI validation — no path restriction on document URIs
+
+## Cancelled
+
+- **Pool agent security (remove Bash from allowedTools, socket perms)** —
+  Pool agent experiments abandoned (E14-E15: 0 activations). The feature
+  doesn't exist in any active workflow. Moot until/unless pool agent is revived.
+
+- **LSP URI validation** — Near-zero risk. LSP runs locally, no exploit path.
+  URI manipulation requires a malicious LSP client on the same machine, which
+  already has full filesystem access.

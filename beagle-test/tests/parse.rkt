@@ -3,7 +3,8 @@
 (require rackunit
          (for-syntax racket/base)
          beagle/private/parse
-         beagle/private/types)
+         beagle/private/types
+         beagle/private/macros)
 
 (define (parse-one form)
   (program-forms
@@ -393,6 +394,18 @@
           (error "boom"))
        '(bad-body y)))))
 
+(test-case "proc macro: nested expansion error shows both macro names"
+  (check-exn #rx"macro inner:.*body raised an error"
+    (lambda ()
+      (parse-prog
+       `(define-macro proc inner
+          ,(br '(x : Symbol)) : Form
+          (error "inner boom"))
+       `(define-macro proc outer
+          ,(br '(x : Symbol)) : Form
+          (list 'inner x))
+       '(outer y)))))
+
 (test-case "proc macro: expansion goes through type checker"
   (define p (parse-prog
              `(define-macro proc typed-def
@@ -403,6 +416,22 @@
   (check-true (def-form? f))
   (check-eq? (def-form-name f) 'z)
   (check-equal? (def-form-type f) (parse-type 'Int)))
+
+(test-case "trace handler captures nested macro expansion steps"
+  (define reg (make-macro-registry))
+  (register-macro! reg 'dbl 'safe '(x) '(* x 2))
+  (register-macro! reg 'quad 'safe '(x) '(dbl (dbl x)))
+  (define steps '())
+  (parameterize ([current-trace-handler
+                  (lambda (phase name datum depth)
+                    (set! steps (cons (list phase name depth) steps)))])
+    (expand-fully reg '(quad 5)))
+  (define ordered (reverse steps))
+  (check-equal? (length ordered) 6)
+  (check-equal? (car ordered) '(before quad 0))
+  (check-equal? (cadr ordered) '(after quad 0))
+  (check-equal? (caddr ordered) '(before dbl 1))
+  (check-equal? (cadddr ordered) '(after dbl 1)))
 
 ;; --- defrecord ---------------------------------------------------------------
 

@@ -1,6 +1,6 @@
 ---
-status: active
-priority: 2
+status: done
+priority: —
 ---
 
 # Macro expander provenance
@@ -34,15 +34,26 @@ internals. Better to land this before more proc macros are written.
 - [x] Depth-cap error includes full macro chain (truncated to 10 lines for deep recursion)
 - [x] Body errors include input form summary (truncated to 80 chars)
 
+## Done (self-hosted expander)
+
+- [x] Mirror provenance changes in self-hosted expander (`self-host/macros.bjs`)
+- [x] `make-root-ctx`, `push-ctx`, `format-expansion-chain`, `truncate-datum`
+- [x] All `expand-fully` / `expand-macro` call sites updated to thread context
+
 ## Remaining
 
-- [ ] Source location in expansion-ctx (currently has macro name + depth but not line:col)
-- [ ] `beagle-expand --trace` shows expansion steps, not just final output
-- [ ] Mirror provenance changes in self-hosted expander (`self-host/macros.bjs`)
-- [ ] Thread provenance through template macro expansion (currently only proc/beagle macros)
+- [x] `beagle-expand --trace` shows expansion steps, not just final output
+- [x] Test: contract violation 2 expansions deep shows both macro names (raco test case)
+- [x] Test: trace handler captures nested macro expansion steps (raco test case)
 
-## Validation
+## Cancelled
 
-- [x] Recursive macro hitting depth cap shows full chain (verified manually)
-- [ ] Test: contract violation 2 expansions deep shows both macro names (raco test case)
-- [ ] Test: `beagle-expand --trace` on nested macro shows intermediate forms
+- **Source location in expansion-ctx** — Zero incremental value. Errors already
+  include macro name, depth, and full expansion chain (truncated to 10 lines).
+  Adding line:col requires threading syntax objects through the entire expansion
+  pipeline (datum conversion in `expand-fully` loses location). Effort is
+  disproportionate to the marginal improvement over name+depth+chain.
+
+- **Template macro provenance** — Zero value. Template macros are substitution-only;
+  they don't error inside their body. The only failure mode is arity mismatch,
+  which already reports the macro name. There is nothing to attach provenance to.

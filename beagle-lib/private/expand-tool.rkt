@@ -227,4 +227,20 @@
             (cdr expanded)
             (list expanded)))))))
 
-(provide expand-file expand-datums)
+;; --- traced expansion -------------------------------------------------------
+
+(define (make-trace-handler)
+  (lambda (phase macro-name datum depth)
+    (define indent (make-string (* depth 2) #\space))
+    (case phase
+      [(before)
+       (fprintf (current-error-port) "~a--- expand: ~a ---\n" indent macro-name)
+       (fprintf (current-error-port) "~a  input:  ~a\n" indent (datum->beagle-src datum))]
+      [(after)
+       (fprintf (current-error-port) "~a  output: ~a\n\n" indent (datum->beagle-src datum))])))
+
+(define (expand-file-traced path)
+  (parameterize ([current-trace-handler (make-trace-handler)])
+    (expand-file path)))
+
+(provide expand-file expand-file-traced expand-datums)

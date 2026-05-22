@@ -6,6 +6,7 @@
          racket/port
          racket/format
          racket/file
+         racket/path
          beagle/private/parse
          beagle/private/check
          beagle/private/emit
@@ -506,5 +507,185 @@
       (println (count (cset/union #{1 2} #{2 3})))
       (println (into [] (sort (cset/intersection #{1 2 3} #{2 3 4}))))"
      "3\n[2 3]")
+
+   ;; --- defprotocol / deftype / extend-type edge cases -------------------------
+
+   (check-clj-output "deftype implementing multiple protocols"
+     (list `(defprotocol Printable
+              (to-string ,(br '(self : Printable)) : String))
+           `(defprotocol Measurable
+              (size ,(br '(self : Measurable)) : Int))
+           `(deftype Box ,(br '(label : String) '(items : Int))
+              Printable
+              (to-string ,(br '(self : Box)) : String
+                (str "Box(" (.-label self) ")"))
+              Measurable
+              (size ,(br '(self : Box)) : Int
+                (.-items self))))
+     "(let [b (->Box \"stuff\" 42)]
+        (println (to-string b))
+        (println (size b)))"
+     "Box(stuff)\n42")
+
+   (check-clj-output "protocol method with multiple parameters"
+     (list `(defprotocol Combinable
+              (combine ,(br '(self : Combinable) '(other : String) '(sep : String)) : String))
+           `(deftype Tag ,(br '(value : String))
+              Combinable
+              (combine ,(br '(self : Tag) '(other : String) '(sep : String)) : String
+                (str (.-value self) sep other))))
+     "(let [t (->Tag \"hello\")]
+        (println (combine t \"world\" \"-\"))
+        (println (combine t \"there\" \":\")))"
+     "hello-world\nhello:there")
+
+   (check-clj-output "extend-type on String (built-in JVM type)"
+     (list `(defprotocol Reversible
+              (rev ,(br '(self : Reversible)) : String))
+           `(extend-type String
+              Reversible
+              (rev ,(br '(self : String)) : String
+                (clojure.string/reverse self))))
+     "(println (rev \"abcde\"))
+      (println (rev \"racecar\"))"
+     "edcba\nracecar")
+
+   (check-clj-output "deftype with no protocols (plain fields)"
+     (list `(deftype Pair ,(br '(fst : Int) '(snd : Int))))
+     "(let [p (->Pair 10 20)]
+        (println (.-fst p))
+        (println (.-snd p))
+        (println (+ (.-fst p) (.-snd p))))"
+     "10\n20\n30")
+
+   (check-clj-output "self-referential protocol (method returns protocol type)"
+     (list `(defprotocol Incrementable
+              (inc-val ,(br '(self : Incrementable)) : Incrementable))
+           `(deftype Counter ,(br '(n : Int))
+              Incrementable
+              (inc-val ,(br '(self : Counter)) : Counter
+                (->Counter (inc (.-n self))))))
+     "(let [c0 (->Counter 0)
+            c1 (inc-val c0)
+            c2 (inc-val c1)
+            c3 (inc-val c2)]
+        (println (.-n c0))
+        (println (.-n c1))
+        (println (.-n c2))
+        (println (.-n c3)))"
+     "0\n1\n2\n3")
+
+   ;; --- multi-module behavioral tests ----------------------------------------
+
+   (let ()
+     ;; Helper: compile multiple beagle modules and run them together via bb.
+     ;; modules is a list of (ns-symbol beagle-form ...) lists.
+     ;; assertions-clj is Clojure code for main.clj (should require the modules).
+     ;; Returns (values exit-code stdout stderr all-clj-source).
+     (define (run-clj-multi-module-test modules assertions-clj)
+       (define tmpdir (make-temporary-directory))
+       (dynamic-wind
+         void
+         (lambda ()
+           (define all-clj "")
+           ;; Compile and write each module
+           (for ([mod (in-list modules)])
+             (define mod-ns (car mod))
+             (define mod-forms (cdr mod))
+             (define raw-clj
+               (clj-emit (append (list (list 'ns mod-ns)
+                                       '(define-mode strict))
+                                 mod-forms)))
+             (set! all-clj (string-append all-clj
+                             (format ";;; --- ~a ---\n~a\n\n" mod-ns raw-clj)))
+             ;; Map ns to file path: foo.bar -> foo/bar.clj, dashes -> underscores
+             (define ns-str (symbol->string mod-ns))
+             (define rel-path
+               (string-append
+                (string-replace (string-replace ns-str "." "/") "-" "_")
+                ".clj"))
+             (define full-path (build-path tmpdir rel-path))
+             (make-directory* (path-only full-path))
+             (call-with-output-file full-path
+               (lambda (out) (display raw-clj out))))
+           ;; Write main.clj with assertions
+           (define main-path (build-path tmpdir "main.clj"))
+           (call-with-output-file main-path
+             (lambda (out) (display assertions-clj out)))
+           (set! all-clj (string-append all-clj
+                           (format ";;; --- main.clj ---\n~a\n" assertions-clj)))
+           ;; Run bb with classpath
+           (define-values (proc stdout stdin stderr)
+             (subprocess #f #f #f BB-PATH
+                         "--classpath" (path->string tmpdir)
+                         (path->string main-path)))
+           (close-output-port stdin)
+           (define out-str (port->string stdout))
+           (define err-str (port->string stderr))
+           (subprocess-wait proc)
+           (define code (subprocess-status proc))
+           (close-input-port stdout)
+           (close-input-port stderr)
+           (values code out-str err-str all-clj))
+         (lambda ()
+           (when (directory-exists? tmpdir)
+             (delete-directory/files tmpdir)))))
+
+     (define-syntax-rule (check-multi-module name modules assertions-clj expected-out)
+       (test-case name
+         (define-values (code out err clj)
+           (run-clj-multi-module-test modules assertions-clj))
+         (check-equal? code 0
+                       (format "exit ~a\n--- stderr ---\n~a\n--- clj ---\n~a" code err clj))
+         (check-equal? (string-trim out) expected-out
+                       (format "wrong output\n--- clj ---\n~a" clj))))
+
+     ;; Test 1: basic require — module A defines a function, module B calls it
+     (check-multi-module "multi-module: basic require"
+       (list
+        (list 'mathlib.core
+              '(defn square [(n : Int)] : Int (* n n)))
+        (list 'app.main
+              '(defn compute [(x : Int)] : Int (+ x 1))))
+       "(require '[mathlib.core :as mc])
+        (require '[app.main :as app])
+        (println (mc/square 7))
+        (println (app/compute 9))"
+       "49\n10")
+
+     ;; Test 2: record across modules — A defines a defrecord, B constructs/accesses it
+     (check-multi-module "multi-module: record across modules"
+       (list
+        (list 'models.point
+              '(defrecord Point [(x : Int) (y : Int)]))
+        (list 'geo.ops
+              '(defn origin-distance [(x : Int) (y : Int)] : Int (+ (* x x) (* y y)))))
+       "(require '[models.point :as pt])
+        (require '[geo.ops :as geo])
+        (let [p (pt/->Point 3 4)]
+          (println (:x p))
+          (println (:y p))
+          (println (geo/origin-distance (:x p) (:y p))))"
+       "3\n4\n25")
+
+     ;; Test 3: transitive require — A defines fn, B wraps it, C calls B's wrapper
+     (check-multi-module "multi-module: transitive require"
+       (list
+        (list 'base.math
+              '(defn double [(n : Int)] : Int (* n 2)))
+        (list 'mid.transform
+              '(defn quad [(n : Int)] : Int (* n 4)))
+        (list 'top.app
+              '(defn process [(n : Int)] : Int (+ n 100))))
+       "(require '[base.math :as bm])
+        (require '[mid.transform :as mt])
+        (require '[top.app :as ta])
+        (println (bm/double 5))
+        (println (mt/quad 5))
+        (println (ta/process 5))
+        (println (mt/quad (bm/double 3)))"
+       "10\n20\n105\n24")
+
+     (void))
 
 )))

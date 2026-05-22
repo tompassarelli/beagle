@@ -389,6 +389,12 @@
 
 (define MAX-EXPANSION-DEPTH 64)
 
+;; Trace callback parameter. When set to a procedure, expand-fully calls it
+;; before and after each macro expansion step:
+;;   (handler 'before macro-name input-datum depth)
+;;   (handler 'after  macro-name result-datum depth)
+(define current-trace-handler (make-parameter #f))
+
 (define (expand-fully reg datum [depth 0] [ctx #f])
   (when (>= depth MAX-EXPANSION-DEPTH)
     (define chain (if ctx (format "\n~a" (format-expansion-chain ctx)) ""))
@@ -400,7 +406,10 @@
      (define name (car datum))
      (define next-ctx (if ctx (push-ctx ctx name) (make-root-ctx name)))
      (define m (lookup-macro reg name))
+     (define handler (current-trace-handler))
+     (when handler (handler 'before name datum depth))
      (define expanded (expand-macro reg name (cdr datum) next-ctx))
+     (when handler (handler 'after name expanded depth))
      (cond
        [(eq? (macro-def-kind m) 'unsafe)
         (list 'unsafe-expr (expand-fully-no-marker reg expanded (+ depth 1) next-ctx))]
@@ -421,7 +430,10 @@
     [(macro-application? reg datum)
      (define name (car datum))
      (define next-ctx (if ctx (push-ctx ctx name) (make-root-ctx name)))
+     (define handler (current-trace-handler))
+     (when handler (handler 'before name datum depth))
      (define expanded (expand-macro reg name (cdr datum) next-ctx))
+     (when handler (handler 'after name expanded depth))
      (expand-fully-no-marker reg expanded (+ depth 1) next-ctx)]
     [(pair? datum)
      (cons (expand-fully-no-marker reg (car datum) depth ctx)
@@ -525,6 +537,8 @@
  macro-application?
  expand-macro
  expand-fully
+ expand-fully-no-marker
+ current-trace-handler
  format-expansion-chain
  check-datum-contract
  strip-reader-tags)

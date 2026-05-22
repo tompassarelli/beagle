@@ -21,10 +21,12 @@ is clean on the real NixOS config.
 - [ ] Custom option validation — `myConfig.modules.kanata.capsLockEscCtrl`
   in template needs the module's own schema
 
-## Phase 4 — beyond nisp
+## Cancelled
 
-- [ ] LSP completion for NixOS option paths from schema
-- [ ] LSP completion for package names from packages.json
-- [ ] LSP hover showing NixOS schema type + enum for option paths
-- [ ] `beagle-import` — .nix → .bnix conversion (reuse rnix parser)
-- [ ] Package name validation — cross-check `pkgs.X` against nixpkgs attrs
+- **Phase 4 (LSP completion for NixOS options/packages, LSP hover for schema
+  types, beagle-import .nix→.bnix, package name validation)** — Speculative
+  features that depend on the Nix target being heavily used in production.
+  Phase 3 validation work is the priority. beagle-import in particular solves
+  a problem that doesn't exist — .bnix files are authored directly, not
+  converted from .nix. Resurrect individual items if Nix target adoption
+  creates concrete demand.
