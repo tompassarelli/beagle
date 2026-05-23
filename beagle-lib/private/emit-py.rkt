@@ -85,6 +85,9 @@
     (set! imports (cons "from dataclasses import dataclass" imports)))
   (when has-unions?
     (set! imports (cons "from dataclasses import dataclass" imports)))
+  ;; (import name) — bare Python module import: `import math`
+  (for ([imp (in-list (program-imports prog))])
+    (set! imports (cons (format "import ~a" (symbol->string imp)) imports)))
   (define reqs (program-requires prog))
   (for ([r (in-list reqs)])
     (define ns-str (symbol->string (require-entry-ns r)))
