@@ -88,12 +88,13 @@
     [(empty?) (if (= n 1) (format "(~a.length === 0)" (emit-expr (car args))) #f)]
     [(first) (if (= n 1) (format "~a[0]" (emit-expr (car args))) #f)]
     [(second) (if (= n 1) (format "~a[1]" (emit-expr (car args))) #f)]
-    [(last) (if (= n 1) (format "~a[~a.length - 1]" (emit-expr (car args)) (emit-expr (car args))) #f)]
+    [(last) (if (= n 1)
+                (format "(() => { const _x = ~a; return _x[_x.length - 1]; })()" (emit-expr (car args)))
+                #f)]
     [(rest) (if (= n 1) (format "~a.slice(1)" (emit-expr (car args))) #f)]
     [(nth) (cond
              [(= n 2) (format "~a[~a]" (emit-expr (car args)) (emit-expr (cadr args)))]
-             [(= n 3) (format "(~a[~a] != null ? ~a[~a] : ~a)"
-                              (emit-expr (car args)) (emit-expr (cadr args))
+             [(= n 3) (format "(() => { const _x = ~a, _i = ~a; return _x[_i] != null ? _x[_i] : ~a; })()"
                               (emit-expr (car args)) (emit-expr (cadr args))
                               (emit-expr (caddr args)))]
              [else #f])]
@@ -190,19 +191,14 @@
     [(filterv) (if (= n 2) (format "~a.filter(~a)" (emit-expr (cadr args)) (emit-expr (car args))) #f)]
     [(get) (cond
              [(= n 2) (format "~a[~a]" (emit-expr (car args)) (emit-expr (cadr args)))]
-             [(= n 3) (format "(~a[~a] != null ? ~a[~a] : ~a)"
-                              (emit-expr (car args)) (emit-expr (cadr args))
+             [(= n 3) (format "(() => { const _x = ~a, _k = ~a; return _x[_k] != null ? _x[_k] : ~a; })()"
                               (emit-expr (car args)) (emit-expr (cadr args))
                               (emit-expr (caddr args)))]
              [else #f])]
     [(update) (if (= n 3)
-               (format "({...~a, [~a]: ~a(~a[~a])})"
-                       (emit-expr (car args))
-                       (emit-expr (cadr args))
-                       (emit-expr (caddr args))
-                       (emit-expr (car args))
-                       (emit-expr (cadr args)))
-               #f)]
+                  (format "(() => { const _m = ~a, _k = ~a; return { ..._m, [_k]: ~a(_m[_k]) }; })()"
+                          (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args)))
+                  #f)]
     [(merge) (if (>= n 1)
               (format "Object.assign({}, ~a)" (string-join (map emit-expr args) ", "))
               #f)]
@@ -215,7 +211,9 @@
                 [(= n 3) (format "~a.slice(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args)))]
                 [else #f])]
     [(pop) (if (= n 1) (format "~a.slice(0, -1)" (emit-expr (car args))) #f)]
-    [(peek) (if (= n 1) (format "~a[~a.length - 1]" (emit-expr (car args)) (emit-expr (car args))) #f)]
+    [(peek) (if (= n 1)
+                (format "(() => { const _x = ~a; return _x[_x.length - 1]; })()" (emit-expr (car args)))
+                #f)]
     [(take) (if (= n 2) (format "~a.slice(0, ~a)" (emit-expr (cadr args)) (emit-expr (car args))) #f)]
     [(drop) (if (= n 2) (format "~a.slice(~a)" (emit-expr (cadr args)) (emit-expr (car args))) #f)]
     [(some) (if (= n 2)
@@ -223,11 +221,13 @@
              #f)]
     [(distinct) (if (= n 1) (format "[...new Set(~a)]" (emit-expr (car args))) #f)]
     [(flatten) (if (= n 1) (format "~a.flat(Infinity)" (emit-expr (car args))) #f)]
-    [(not-empty) (if (= n 1) (format "(~a.length > 0 ? ~a : null)" (emit-expr (car args)) (emit-expr (car args))) #f)]
+    [(not-empty) (if (= n 1)
+                     (format "(() => { const _x = ~a; return _x.length > 0 ? _x : null; })()" (emit-expr (car args)))
+                     #f)]
     [(sort-by) (if (= n 2)
-                (format "[...~a].sort((a, b) => { const ka = ~a(a), kb = ~a(b); return ka < kb ? -1 : ka > kb ? 1 : 0; })"
-                        (emit-expr (cadr args)) (emit-expr (car args)) (emit-expr (car args)))
-                #f)]
+                   (format "(() => { const _k = ~a; return [...~a].sort((a, b) => { const ka = _k(a), kb = _k(b); return ka < kb ? -1 : ka > kb ? 1 : 0; }); })()"
+                           (emit-expr (car args)) (emit-expr (cadr args)))
+                   #f)]
     [(partition) (if (= n 2)
                   (format "(() => { const _c = ~a, _n = ~a, _r = []; for (let i = 0; i < _c.length; i += _n) _r.push(_c.slice(i, i + _n)); return _r; })()"
                           (emit-expr (cadr args)) (emit-expr (car args)))
@@ -259,13 +259,17 @@
              #f)]
     ;; --- type predicates -------------------------------------------------------
     [(vector?) (if (= n 1) (format "Array.isArray(~a)" (emit-expr (car args))) #f)]
-    [(map?) (if (= n 1) (format "(typeof ~a === 'object' && ~a !== null && !Array.isArray(~a))"
-                                (emit-expr (car args)) (emit-expr (car args)) (emit-expr (car args))) #f)]
+    [(map?) (if (= n 1)
+                (format "(() => { const _x = ~a; return typeof _x === 'object' && _x !== null && !Array.isArray(_x); })()"
+                        (emit-expr (car args)))
+                #f)]
     [(set?) (if (= n 1) (format "(~a instanceof Set)" (emit-expr (car args))) #f)]
     [(sequential?) (if (= n 1) (format "Array.isArray(~a)" (emit-expr (car args))) #f)]
     [(seq?) (if (= n 1) (format "Array.isArray(~a)" (emit-expr (car args))) #f)]
-    [(coll?) (if (= n 1) (format "(Array.isArray(~a) || (typeof ~a === 'object' && ~a !== null))"
-                                 (emit-expr (car args)) (emit-expr (car args)) (emit-expr (car args))) #f)]
+    [(coll?) (if (= n 1)
+                 (format "(() => { const _x = ~a; return Array.isArray(_x) || (typeof _x === 'object' && _x !== null); })()"
+                         (emit-expr (car args)))
+                 #f)]
     [(take-last) (if (= n 2) (format "~a.slice(-~a)" (emit-expr (cadr args)) (emit-expr (car args))) #f)]
     [(drop-last) (cond
                    [(= n 1) (format "~a.slice(0, -1)" (emit-expr (car args)))]
@@ -282,7 +286,9 @@
     [(clj->js) (if (= n 1) (emit-expr (car args)) #f)]
     [(js->clj) (if (= n 1) (emit-expr (car args)) #f)]
     [(not=) (if (= n 2) (format "(~a !== ~a)" (emit-expr (car args)) (emit-expr (cadr args))) #f)]
-    [(seq) (if (= n 1) (format "(~a.length > 0 ? ~a : null)" (emit-expr (car args)) (emit-expr (car args))) #f)]
+    [(seq) (if (= n 1)
+               (format "(() => { const _x = ~a; return _x.length > 0 ? _x : null; })()" (emit-expr (car args)))
+               #f)]
     ;; --- runtime helpers (beagle/core.js) -------------------------------------
     [(range)       (runtime-call "range" args)]
     [(remove)      (if (= n 2) (runtime-call "remove" args) #f)]
@@ -305,7 +311,9 @@
     [(ffirst) (if (= n 1) (format "~a[0]?.[0]" (emit-expr (car args))) #f)]
     [(nthrest) (if (= n 2) (format "~a.slice(~a)" (emit-expr (car args)) (emit-expr (cadr args))) #f)]
     [(nthnext) (if (= n 2) (format "(() => { const _s = ~a.slice(~a); return _s.length > 0 ? _s : null; })()" (emit-expr (car args)) (emit-expr (cadr args))) #f)]
-    [(rand-nth) (if (= n 1) (format "~a[Math.floor(Math.random() * ~a.length)]" (emit-expr (car args)) (emit-expr (car args))) #f)]
+    [(rand-nth) (if (= n 1)
+                    (format "(() => { const _x = ~a; return _x[Math.floor(Math.random() * _x.length)]; })()" (emit-expr (car args)))
+                    #f)]
     [(shuffle) (if (= n 1) (format "[...~a].sort(() => Math.random() - 0.5)" (emit-expr (car args))) #f)]
     [(list?) (if (= n 1) (format "Array.isArray(~a)" (emit-expr (car args))) #f)]
     [(boolean?) (if (= n 1) (format "(typeof ~a === 'boolean')" (emit-expr (car args))) #f)]
@@ -358,9 +366,10 @@
     [(interpose)     (if (= n 2) (runtime-call "interpose" args) #f)]
     [(partition-all) (if (= n 2) (runtime-call "partition_all" args) #f)]
     [(partition-by)  (if (= n 2) (runtime-call "partition_by" args) #f)]
-    [(split-at) (if (= n 2) (format "[~a.slice(0, ~a), ~a.slice(~a)]"
-                                    (emit-expr (cadr args)) (emit-expr (car args))
-                                    (emit-expr (cadr args)) (emit-expr (car args))) #f)]
+    [(split-at) (if (= n 2)
+                    (format "(() => { const _n = ~a, _c = ~a; return [_c.slice(0, _n), _c.slice(_n)]; })()"
+                            (emit-expr (car args)) (emit-expr (cadr args)))
+                    #f)]
     [(split-with) (if (= n 2) (runtime-call "split_with" args) #f)]
     [(zipmap)     (if (= n 2) (runtime-call "zipmap" args) #f)]
     ;; --- bitwise ---------------------------------------------------------------
@@ -1120,12 +1129,13 @@
 
     [(kw-access? e)
      (define prop (kw->prop (kw-access-kw e)))
-     (if (kw-access-default e)
-       (format "(~a.~a != null ? ~a.~a : ~a)"
-               (emit-expr (kw-access-target e)) prop
-               (emit-expr (kw-access-target e)) prop
-               (emit-expr (kw-access-default e)))
-       (format "~a.~a" (emit-expr (kw-access-target e)) prop))]
+     (define target-str (emit-expr (kw-access-target e)))
+     (cond
+       [(kw-access-default e)
+        (format "(~a.~a != null ? ~a.~a : ~a)"
+                target-str prop target-str prop
+                (emit-expr (kw-access-default e)))]
+       [else (format "~a.~a" target-str prop)])]
 
     [(match-form? e)
      (emit-match e)]
@@ -1430,32 +1440,29 @@
       (format "~a, ...~a" fixed (emit-js-param rest-p)))
     fixed))
 
-(define (emit-js-param p)
+;; Render a destructuring pattern to its JS form. Returns #f for non-destructure
+;; inputs so callers can fall through to their own handling.
+(define (emit-destructure p)
   (cond
     [(map-destructure? p)
-     (define keys (map-destructure-keys p))
-     (format "{~a}" (string-join (map (compose mangle-str symbol->string) keys) ", "))]
+     (format "{~a}" (string-join (map mangle-name (map-destructure-keys p)) ", "))]
     [(seq-destructure? p)
-     (define names (seq-destructure-names p))
-     (define mangled (map (compose mangle-str symbol->string) names))
-     (if (seq-destructure-rest-name p)
-       (format "[~a, ...~a]" (string-join mangled ", ")
-               (mangle-str (symbol->string (seq-destructure-rest-name p))))
-       (format "[~a]" (string-join mangled ", ")))]
-    [else (mangle-name (param-name p))]))
+     (define mangled (map mangle-name (seq-destructure-names p)))
+     (cond
+       [(seq-destructure-rest-name p)
+        (format "[~a, ...~a]" (string-join mangled ", ")
+                (mangle-name (seq-destructure-rest-name p)))]
+       [else
+        (format "[~a]" (string-join mangled ", "))])]
+    [else #f]))
+
+(define (emit-js-param p)
+  (or (emit-destructure p)
+      (mangle-name (param-name p))))
 
 (define (emit-binding-target name)
   (cond
-    [(map-destructure? name)
-     (define keys (map-destructure-keys name))
-     (format "{~a}" (string-join (map (compose mangle-str symbol->string) keys) ", "))]
-    [(seq-destructure? name)
-     (define names (seq-destructure-names name))
-     (define mangled (map (compose mangle-str symbol->string) names))
-     (if (seq-destructure-rest-name name)
-       (format "[~a, ...~a]" (string-join mangled ", ")
-               (mangle-str (symbol->string (seq-destructure-rest-name name))))
-       (format "[~a]" (string-join mangled ", ")))]
+    [(emit-destructure name) => values]
     [(symbol? name) (mangle-name name)]
     [else (error 'beagle-js "unsupported binding target: ~v" name)]))
 
