@@ -1,0 +1,21 @@
+{
+  "tables": {
+    "users": {
+      "columns": {
+        "id":         { "type": "Int", "primary_key": true },
+        "name":       { "type": "String" },
+        "email":      { "type": "String" },
+        "created_at": { "type": "Int" }
+      }
+    },
+    "posts": {
+      "columns": {
+        "id":      { "type": "Int", "primary_key": true },
+        "user_id": { "type": "Int", "fk_table": "users", "fk_column": "id" },
+        "title":   { "type": "String" },
+        "body":    { "type": "String" },
+        "views":   { "type": "Int" }
+      }
+    }
+  }
+}

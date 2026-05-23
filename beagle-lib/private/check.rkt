@@ -14,7 +14,8 @@
          "parse.rkt"
          "types.rkt"
          "stdlib-types.rkt"
-         "nixos-schema.rkt")
+         "nixos-schema.rkt"
+         "sql-schema.rkt")
 
 (define (builtin-env-for-target target)
   (stdlib-for-target target))
@@ -176,6 +177,7 @@
 
 ;; SQL table registry: table-name -> (hash column-name -> type)
 (define SQL-TABLES (make-hash))
+(define SQL-FKS (make-hash)) ; (table-sym . col-sym) → (target-table-sym . target-col-sym)
 
 ;; NixOS option schema for validating dotted map keys in beagle/nix
 (define current-nixos-schema (make-parameter #f))
@@ -416,6 +418,18 @@
       (and (eq? (program-target prog) 'nix)
            (let ([src (program-source-file prog)])
              (and src (load-nixos-schema-cached src)))))
+    ;; SQL: seed SQL-TABLES from .beagle-cache/sql-schema.json so queries
+    ;; can reference tables declared anywhere in the project. Same-file
+    ;; deftables (processed below) override cached entries on collision.
+    (when (eq? (program-target prog) 'sql)
+      (define src (program-source-file prog))
+      (define cached (and src (load-sql-schema-cached src)))
+      (when cached
+        (for ([(tbl col-map) (in-hash (sql-schema-tables cached))])
+          (hash-set! SQL-TABLES tbl col-map))
+        (hash-clear! SQL-FKS)
+        (for ([(tbl-col target) (in-hash (sql-schema-fks cached))])
+          (hash-set! SQL-FKS tbl-col target))))
     (parameterize ([current-union-members UNION-MEMBERS]
                    [current-check-target (program-target prog)]
                    [current-nixos-schema nix-schema])
@@ -724,13 +738,15 @@
     [(sql-insert table columns values-list)
      (unless (hash-has-key? SQL-TABLES table)
        (raise-diag 'sql-table
-                   (format "insert: unknown table ~a" table)
+                   (format "insert: unknown table ~a~a"
+                           table (sql-table-suggest table))
                    (hasheq 'table (symbol->string table))))
      (define col-map (hash-ref SQL-TABLES table))
      (for ([col (in-list columns)])
        (unless (hash-has-key? col-map col)
          (raise-diag 'sql-column
-                     (format "insert ~a: unknown column ~a" table col)
+                     (format "insert ~a: unknown column ~a~a"
+                             table col (sql-column-suggest table col))
                      (hasheq 'table (symbol->string table)
                              'column (symbol->string col)))))
      ;; Validate value types against column types
@@ -753,21 +769,24 @@
     [(sql-update table set-pairs where-clause)
      (unless (hash-has-key? SQL-TABLES table)
        (raise-diag 'sql-table
-                   (format "update: unknown table ~a" table)
+                   (format "update: unknown table ~a~a"
+                           table (sql-table-suggest table))
                    (hasheq 'table (symbol->string table))))
      (define col-map (hash-ref SQL-TABLES table))
      (for ([pair (in-list set-pairs)])
        (define col-name (car pair))
        (unless (hash-has-key? col-map col-name)
          (raise-diag 'sql-column
-                     (format "update ~a: unknown column ~a" table col-name)
+                     (format "update ~a: unknown column ~a~a"
+                             table col-name (sql-column-suggest table col-name))
                      (hasheq 'table (symbol->string table)
                              'column (symbol->string col-name)))))]
 
     [(sql-delete table where-clause)
      (unless (hash-has-key? SQL-TABLES table)
        (raise-diag 'sql-table
-                   (format "delete: unknown table ~a" table)
+                   (format "delete: unknown table ~a~a"
+                           table (sql-table-suggest table))
                    (hasheq 'table (symbol->string table))))]
 
     [(sql-with ctes body)
@@ -871,6 +890,23 @@
     [(sql-alias? col) (sql-col-display-name (sql-alias-expr col))]
     [else (format "~a" col)]))
 
+(define (sql-column-suggest table-name col-name)
+  ;; Return a "did you mean: X?" suffix or "" if no near match exists.
+  (define col-map (hash-ref SQL-TABLES table-name #f))
+  (cond
+    [(not col-map) ""]
+    [else
+     (define col-str (symbol->string col-name))
+     (define candidates (map symbol->string (hash-keys col-map)))
+     (define near (find-similar-strs col-str candidates 1))
+     (if (null? near) "" (format " -- did you mean: ~a?" (car near)))]))
+
+(define (sql-table-suggest table-name)
+  (define str (symbol->string table-name))
+  (define candidates (map symbol->string (hash-keys SQL-TABLES)))
+  (define near (find-similar-strs str candidates 1))
+  (if (null? near) "" (format " -- did you mean: ~a?" (car near))))
+
 (define (check-sql-column-ref col alias-map)
   ;; Validate a column reference (either sql-column-ref, sql-aggregate, or symbol)
   (cond
@@ -883,7 +919,9 @@
          (define col-map (hash-ref SQL-TABLES table-name))
          (unless (hash-has-key? col-map col-name)
            (raise-diag 'sql-column
-                       (format "select: table ~a has no column ~a" table-name col-name)
+                       (format "select: table ~a has no column ~a~a"
+                               table-name col-name
+                               (sql-column-suggest table-name col-name))
                        (hasheq 'table (symbol->string table-name)
                                'column (symbol->string col-name))))))]
     [(sql-aggregate? col)
@@ -2220,6 +2258,14 @@
       (and (eq? (program-target prog) 'nix)
            (let ([src (program-source-file prog)])
              (and src (load-nixos-schema-cached src)))))
+    (when (eq? (program-target prog) 'sql)
+      (define src (program-source-file prog))
+      (define cached (and src (load-sql-schema-cached src)))
+      (when cached
+        (for ([(tbl col-map) (in-hash (sql-schema-tables cached))])
+          (hash-set! SQL-TABLES tbl col-map))
+        (for ([(tbl-col target) (in-hash (sql-schema-fks cached))])
+          (hash-set! SQL-FKS tbl-col target))))
     (parameterize ([current-check-src-table (program-src-table prog)]
                    [current-check-target (program-target prog)]
                    [current-union-members UNION-MEMBERS]

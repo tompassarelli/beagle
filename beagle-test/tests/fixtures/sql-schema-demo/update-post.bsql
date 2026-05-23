@@ -1,0 +1,12 @@
+#lang beagle/sql
+(ns test.sql.demo.update-post)
+
+;; Insert + update against cross-file schema. Type checker validates
+;; column names against .beagle-cache/sql-schema.json.
+
+(insert posts [user_id title body views]
+  (values [1 "First post" "Hello" 0]))
+
+(update posts
+  (set [views 100])
+  (where (= id 1)))
