@@ -165,6 +165,53 @@ ships, flip the default. Documented in
 
 ---
 
+## Empirical verification (added post-hoc)
+
+After writing the spec I authored two representative tasks under the
+new surface to confirm friction reduction is real:
+
+**Conditional pipeline (Day 0 task 5):**
+```clj
+(defn build-request [(token : String) (agent : String) (json? : Bool)]
+                    : (Map Keyword String)
+  (let [base {}
+        with-auth (if (= token "") base
+                    (assoc base :Authorization (str "Bearer " token)))
+        with-agent (if (= agent "") with-auth
+                     (assoc with-auth :User-Agent agent))
+        with-json (if json?
+                    (assoc with-agent :Content-Type "application/json")
+                    with-agent)]
+    with-json))
+```
+Zero internal "should I use cond->?" debate — the form doesn't exist.
+The let-chain IS the canonical. Compiles cleanly. **Friction win
+confirmed.**
+
+**Recursive sum (Day 0 task 4):**
+```clj
+(defn sum-to [(n : Int)] : Int
+  (loop [i 0 acc 0]
+    (if (>= i n) acc (recur (+ i 1) (+ acc i)))))
+```
+Identical to Day 0 (loop/recur kept). No friction change. **Reversal
+verdict confirmed.**
+
+## One subtle gotcha worth flagging
+
+Dropped stdlib aliases (inc/dec/not=) don't get an explicit lint
+warning at parse time. The parser doesn't reject them; the type
+checker just doesn't have signatures for them. Emission produces the
+call literally (`(inc 5)` → `(inc 5)`). For Clojure target this still
+works at runtime (Clojure has `inc` natively); for Scheme/Cyclone
+target it would fail at the target's compile step.
+
+So the "drop" is *documented* but not *enforced*. An agent that types
+`(inc 5)` gets no immediate feedback in a Clojure-targeted file. To
+fully enforce, we'd need lint to warn on "call to function not in
+beagle's stdlib for the current target." That's a small follow-up,
+worth doing before agents lean on it.
+
 ## What I'd recommend
 
 1. **Skim this report.** Confirm or push back on the conservative-cleanup
