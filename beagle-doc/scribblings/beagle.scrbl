@@ -35,4 +35,5 @@ first-class concern.
 @include-section["iteration.scrbl"]
 @include-section["interop.scrbl"]
 @include-section["macros.scrbl"]
+@include-section["nix-target.scrbl"]
 @include-section["tools.scrbl"]

@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# beagle-test-tag — run tests filtered by tag.
+#
+# Tags are declared per-test via (test-case/tag "name" '(tag1 tag2 ...) body).
+# Untagged tests (plain test-case) always run.
+#
+# Usage:
+#   bin/beagle-test-tag nix              # only tests tagged 'nix
+#   bin/beagle-test-tag nix,parse        # union of 'nix and 'parse
+#   bin/beagle-test-tag --list           # list known tags + counts
+set -euo pipefail
+
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo"
+
+if [ $# -eq 0 ]; then
+  echo "usage: beagle-test-tag <tag>[,<tag>...] | --list" >&2
+  exit 2
+fi
+
+if [ "$1" = "--list" ]; then
+  echo "Known tags (from test-case/tag calls):"
+  grep -rh "(test-case/tag" beagle-test/tests/*.rkt 2>/dev/null \
+    | sed -E "s/.*'\(([^)]+)\).*/\1/" \
+    | tr -s ' ' '\n' \
+    | sort | uniq -c | sort -rn
+  exit 0
+fi
+
+export BEAGLE_TEST_TAGS="$1"
+raco test beagle-test/tests/

@@ -307,6 +307,17 @@
       [(nix-with? e)
        (walk (nix-with-ns-expr e) scope)
        (walk (nix-with-body e) scope)]
+      [(nix-with-cfg? e)
+       ;; Walk body so dotted keys inside still get collected as declarations
+       ;; / references. The path itself is just a config.X identifier.
+       (walk (nix-with-cfg-path e) scope)
+       (walk (nix-with-cfg-body e) scope)]
+      [(nix-derivation? e) (walk (nix-derivation-attrs e) scope)]
+      [(nix-flake? e)      (walk (nix-flake-attrs e) scope)]
+      [(nix-fn-set? e)
+       ;; Already a top-level case above adds formals to scope; this is here as
+       ;; a fallback when nix-fn-set appears inside an expression (rare).
+       (walk (nix-fn-set-body e) scope)]
       [(nix-assert? e)
        (walk (nix-assert-cond-expr e) scope)
        (walk (nix-assert-body e) scope)]

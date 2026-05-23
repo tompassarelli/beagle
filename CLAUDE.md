@@ -9,25 +9,18 @@ accepted for backward compatibility).
 **LLM authoring is a first-class concern.** Rich types, explicit forms, low
 syntactic surface area, structured errors. One canonical idiom per concept.
 
-**Quick reference:** `docs/cheatsheet.md` is the single-page language
-summary designed to be loaded as system context for LLM workflows. Treat
-it as canonical when explaining the language.
-
-
 ## Status
 
 `#lang beagle` v0.13.1 — 1296 tests passing (+ oracle/differential/bun-parity via `BEAGLE_ORACLE=1`).
 
 - **Targets:** `beagle/clj` (default), `beagle/cljs`, `beagle/js`, `beagle/nix`, `beagle/sql`, `beagle/py`, `beagle/rkt`
-- **Forms:** ~78 forms — ~50 cross-target (definitions, control flow, data structures, pattern matching, threading, interop) + 28 typed JS target forms (`js/*`). See `docs/cheatsheet.md` for the full catalog.
-- **Types:** 8 primitives (`String`, `Int`, `Float`, `Bool`, `Keyword`, `Symbol`, `Nil`, `Any`), `Number` (`U Int Float`), parametric (`Vec`, `Map`, `Set`, `List`), union (`U`), nullable (`T?`), function types, `forall` (with optional `<:` bounds), parametric `defunion` (`(Result T E)`), `(Promise T)`
-- **Stdlib:** ~696 pre-typed (portable 319 + Clojure 414 + CLJS 86), plus JS (55), Nix (111), SQL (54), Python (151)
+- **Forms:** ~78 forms — ~50 cross-target (definitions, control flow, data structures, pattern matching, threading, interop) + 28 typed JS target forms (`js/*`).
+- **Types:** 9 primitives (`String`, `Int`, `Float`, `Bool`, `Keyword`, `Symbol`, `Nil`, `Any`, `NixType`), `Number` (`U Int Float`), parametric (`Vec`, `Map`, `Set`, `List`, `NixType`), union (`U`), nullable (`T?`), function types, `forall` (with optional `<:` bounds), parametric `defunion` (`(Result T E)`), `(Promise T)`
+- **Stdlib:** ~865 pre-typed (portable 319 + Clojure 414 + CLJS 86), plus JS (55), Nix (280), SQL (54), Python (151)
 - **Type checking:** flow-sensitive narrowing, cross-module import, collection/destructuring inference, exhaustive match warnings, refinement predicates
 - **Diagnostics:** Rust-style errors with signatures, "did you mean?" suggestions, JSON mode
 - **Tooling:** LSP, typed REPL, reactive daemon (~100ms re-check), repair compiler, property testing, distributed tracing, `beagle init --hooks` (scaffold Claude Code integration for any project)
 - **Experiments:** 15 across 3 tracks (Beagle/Clojure/Python) — best config 287s avg (E13), per-bug faster than Python+mypy
-
-See `docs/cheatsheet.md` for the full language reference.
 
 ## Architecture
 
@@ -81,8 +74,12 @@ parse → check → emit-dispatch → emit-{clj,js,nix,py,rkt,sql}
   JS-RUNTIME-HELPERS). Imported by both emit-js and stdlib-js — no circular deps.
 - `beagle-lib/private/stdlib-js.rkt` — JS-specific: STDLIB-JS (38 JS-native type declarations),
   JS-NO-EMIT (computed from STDLIB-PORTABLE minus JS-TRANSLATED).
-- `beagle-lib/private/stdlib-nix.rkt` — Nix-specific: STDLIB-NIX (120 typed entries for
-  builtins.*, lib.*, lib.types.*).
+- `beagle-lib/private/stdlib-nix.rkt` — Nix-specific: STDLIB-NIX (280 typed entries for
+  builtins.*, lib.*, lib.types.*). lib.types.* values typed as NixType (opaque).
+- `beagle-lib/private/emit-nix-strings.rkt` — string escaping + interp/multiline/indented
+  emitters (single unified escape-nix #:multiline? #:keep-interp?).
+- `beagle-lib/private/validate-nix.rkt` — schema-driven validator; user config externalized
+  to .nisp-cache/validate-config.json with HM-root auto-discovery from HM schema.
 - `beagle-lib/private/stdlib-py.rkt` — Python-specific: STDLIB-PY (131 typed entries for
   builtins, os.path, json, math, re, functools, itertools, collections, dataclasses).
 - `beagle-lib/lib/beagle/core.js` — JS runtime helpers (12 finite functions: range, remove,
@@ -99,7 +96,7 @@ parse → check → emit-dispatch → emit-{clj,js,nix,py,rkt,sql}
 - `beagle-lib/private/query.rkt` — type-system query engine for `beagle-sig`,
   `beagle-fields`, `beagle-callers`, `beagle-provides`, `beagle-impact`.
 - `beagle-lib/private/blame.rkt` — semantic property rules + static suspicion analysis.
-- `beagle-lib/private/daemon.rkt` — persistent query server (TCP, AST cache with mtime invalidation, 45× query speedup).
+- `beagle-lib/private/daemon.rkt` — persistent query/build server (TCP, AST cache with mtime invalidation, 45× query speedup, ~0.6s warm builds vs ~3s cold).
 - `beagle-lib/private/check-all.rkt` — batch type-checker (10x vs sequential `beagle-check`).
 - `beagle-lib/private/build-all.rkt` — batch compiler (9x vs sequential `beagle-build`).
 - `beagle-lib/private/lsp.rkt` — LSP server (JSON-RPC 2.0, Content-Length framing, hover/diagnostics/symbols/definition).
@@ -183,6 +180,7 @@ not type-check or inspect deeper errors until delimiters pass.
 
 - `bin/beagle-syntax FILE` — structural check (use `--ledger` for depth trace, `--repair --emit-patch` for suggested fixes)
 - `bin/beagle-daemon query check-enriched FILE` — type errors with field context and fix hints
+- `bin/beagle-daemon query build OUT-DIR SRC-DIR` — warm build (~0.6s vs ~3s cold beagle-build-all)
 - `bin/beagle-fix .` — report fixable type errors (advisory only, does not modify files)
 
 ### During normal development
@@ -207,8 +205,6 @@ not type-check or inspect deeper errors until delimiters pass.
 - `bin/beagle-cascade ... --from-failures`
 - `bin/beagle-blame ...`
 - `bin/beagle-specfix ...`
-
-Full tool reference with all flags: `docs/tool-reference.md`
 
 ## Lint warnings
 
@@ -260,56 +256,8 @@ Host-language idioms whose cost > benefit for beagle's goals:
 raco pkg install --link beagle-lib/ beagle-test/ beagle-doc/ beagle/
 ```
 
-## Doc maintenance
-
-**Scribble is the single source of truth for the language reference.**
-Edit `beagle-doc/scribblings/*.scrbl`, then run `bin/beagle-docs-sync --verbose`
-to regenerate cheatsheets and propagate counts.
-
-- `bin/beagle-gen-cheatsheet` — regenerates `docs/cheatsheet.md` and
-  `docs/cheatsheet-consumer.md` from Scribble docs
-- `bin/beagle-docs-sync` — runs the generator, then propagates test counts,
-  stdlib sizes, and validates type name consistency
-
-Canonical Beagle type names: `Int`, `Float`, `Bool`, `String`, `Nil`, `Any`,
-`Keyword`, `Symbol`. The old JVM names (`Long`, `Double`, `Boolean`) are
-accepted as `#lang beagle/clj` compatibility sugar but must not appear in
-docs, cheatsheets, or prompts as canonical Beagle types.
-
-Files that define canonical facts (single source of truth):
-- `private/types.rkt` → type names, PRIMITIVES list
-- `private/stdlib-types.rkt` → stdlib catalog and counts
-- `beagle-doc/scribblings/*.scrbl` → Scribble docs (canonical form reference, generates cheatsheets)
-- `docs/cheatsheet.md` → generated LLM grounding reference
-- `docs/cheatsheet-consumer.md` → generated consumer agent reference
-
-## Devlog discipline
-
-`docs/devlog/` is the scientific journal for beagle development.
-Entries are written when meaningful discoveries happen — not for routine
-commits. The pattern:
-
-1. **Hypothesis** — what we expected and why
-2. **Experiment** — what we ran (cite experiment ID, commit, setup)
-3. **Result** — numbers, not prose
-4. **Interpretation** — what this means for the project direction
-5. **Next question** — what this result makes us want to test next
-
-Keep entries concise (~30 lines). Link from `docs/devlog/README.md`.
-When an experiment produces surprising or direction-changing results,
-it gets a devlog entry. Routine feature additions do not.
-
-Experiment tasks, results, and data live in `~/code/beagle-lab/` (separate
-repo). Devlog entries here summarize findings and link to beagle-lab for
-full methodology. When running a new experiment, create its directory in
-beagle-lab (e.g. `e23-foo/`), work there, then write the devlog entry here.
-
 ## Reference
 
-- `scribblings/beagle.scrbl` — Racket-native Scribble docs (build with `raco scribble --html scribblings/beagle.scrbl`).
-- `docs/cheatsheet.md` — single-page LLM grounding reference (developer).
-- `docs/cheatsheet-consumer.md` — 154-line consumer reference (for `beagle init`).
-- `docs/devlog/README.md` — development journal (discoveries + experiments).
-- `~/code/beagle-lab/` — experiment archive (E0–E22, benchmark framework, all results).
-- `docs/todo.md` — roadmap and completed work.
-- `docs/agent-workflow.md` — LLM agent workflow patterns.
+- `beagle-doc/scribblings/*.scrbl` — canonical language reference (Scribble source of truth)
+- `devlog/` — development journal (discoveries + experiments)
+- `~/code/beagle-lab/` — experiment archive (E0–E22, benchmark framework, all results)

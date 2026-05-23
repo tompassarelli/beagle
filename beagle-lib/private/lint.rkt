@@ -16,7 +16,9 @@
     (for ([form (in-list (program-forms prog))])
       (lint-form form))
     (lint-shadows prog)
-    (lint-unused-externs prog)))
+    (lint-unused-externs prog)
+    (when (eq? (program-target prog) 'nix)
+      (lint-nix prog))))
 
 (define (lint-form f)
   (cond
@@ -730,6 +732,107 @@
      (for ([a (in-list (js-ast-new-args node))]) (collect-symbols-js-ast a used))]
     [(js-ast-typeof? node) (collect-symbols-js-ast (js-ast-typeof-expr node) used)]
     [else (void)]))
+
+;; --- Nix-aware lints --------------------------------------------------------
+;; Idiomatic-Nix smell detection. Only runs for #lang beagle/nix files (strict).
+
+(define (lint-nix prog)
+  (define (walk e)
+    (cond
+      [(call-form? e) (lint-nix-call e) (for-each walk (call-form-args e))]
+      [(map-form? e) (for ([p (in-list (map-form-pairs e))]) (walk (cdr p)))]
+      [(vec-form? e) (for-each walk (vec-form-items e))]
+      [(def-form? e) (walk (def-form-value e))]
+      [(defn-form? e) (for-each walk (defn-form-body e))]
+      [(let-form? e)
+       (for ([b (in-list (let-form-bindings e))]) (walk (let-binding-value b)))
+       (for-each walk (let-form-body e))]
+      [(if-form? e)
+       (walk (if-form-cond-expr e)) (walk (if-form-then-expr e))
+       (when (if-form-else-expr e) (walk (if-form-else-expr e)))]
+      [(cond-form? e)
+       (for ([c (in-list (cond-form-clauses e))])
+         (walk (cond-clause-test c))
+         (for-each walk (cond-clause-body c)))]
+      [(nix-with? e) (walk (nix-with-ns-expr e)) (walk (nix-with-body e))]
+      [(nix-assert? e) (walk (nix-assert-cond-expr e)) (walk (nix-assert-body e))]
+      [(nix-with-cfg? e) (walk (nix-with-cfg-path e)) (walk (nix-with-cfg-body e))]
+      [(nix-fn-set? e) (walk (nix-fn-set-body e))]
+      [(nix-derivation? e) (walk (nix-derivation-attrs e))]
+      [(nix-flake? e) (walk (nix-flake-attrs e))]
+      [(nix-interpolated-string? e)
+       (lint-nix-interp e)
+       (for ([p (in-list (nix-interpolated-string-parts e))])
+         (unless (string? p) (walk p)))]
+      [else (void)]))
+  (for ([f (in-list (program-forms prog))])
+    (walk f)))
+
+(define (lint-nix-call e)
+  (define fn (call-form-fn e))
+  (define args (call-form-args e))
+  (cond
+    ;; (lib/mkIf false BODY) — dead code
+    [(and (eq? fn 'lib/mkIf) (= (length args) 2)
+          (or (eq? (car args) 'false) (eq? (car args) #f)))
+     (warn "(lib/mkIf false ...) is dead code; remove the call or fix the condition")]
+    ;; (lib/mkIf true BODY) — pointless wrapper
+    [(and (eq? fn 'lib/mkIf) (= (length args) 2)
+          (or (eq? (car args) 'true) (eq? (car args) #t)))
+     (warn "(lib/mkIf true BODY) is always-on; inline BODY directly")]
+    ;; (lib/mkIf x x) — typo: body is the condition
+    [(and (eq? fn 'lib/mkIf) (= (length args) 2)
+          (equal? (car args) (cadr args)))
+     (warn "(lib/mkIf X X) — body equals condition; likely a typo")]
+    ;; (lib/mkOption {:type T}) where T is a non-nullable primitive without :default
+    [(and (eq? fn 'lib/mkOption) (= (length args) 1) (map-form? (car args)))
+     (lint-mk-option-pairs (map-form-pairs (car args)))]
+    ;; (merge {} x) or (merge x {}) — no-op
+    [(and (eq? fn 'merge) (= (length args) 2))
+     (cond
+       [(and (map-form? (car args)) (null? (map-form-pairs (car args))))
+        (warn "(merge {} X) is a no-op; use X directly")]
+       [(and (map-form? (cadr args)) (null? (map-form-pairs (cadr args))))
+        (warn "(merge X {}) is a no-op; use X directly")])]
+    ;; (concat x []) or (concat [] x) — no-op
+    [(and (eq? fn 'concat) (= (length args) 2))
+     (cond
+       [(and (vec-form? (car args)) (null? (vec-form-items (car args))))
+        (warn "(concat [] X) is a no-op; use X directly")]
+       [(and (vec-form? (cadr args)) (null? (vec-form-items (cadr args))))
+        (warn "(concat X []) is a no-op; use X directly")])]
+    [else (void)]))
+
+(define (lint-mk-option-pairs pairs)
+  (define type-val
+    (for/or ([p (in-list pairs)])
+      (and (symbol? (car p))
+           (string=? (symbol->string (car p)) ":type")
+           (cdr p))))
+  (define has-default?
+    (for/or ([p (in-list pairs)])
+      (and (symbol? (car p))
+           (string=? (symbol->string (car p)) ":default"))))
+  (define description?
+    (for/or ([p (in-list pairs)])
+      (and (symbol? (car p))
+           (string=? (symbol->string (car p)) ":description"))))
+  (when (and type-val (symbol? type-val)
+             (member type-val '(lib/types.bool lib/types.str lib/types.int
+                                 lib/types.float lib/types.path))
+             (not has-default?))
+    (warn "lib/mkOption with :type ~a but no :default — will throw at eval time" type-val))
+  (unless description?
+    (warn "lib/mkOption missing :description — please document this option")))
+
+(define (lint-nix-interp e)
+  (define parts (nix-interpolated-string-parts e))
+  (cond
+    [(null? parts)
+     (warn "(s) with no parts; use \"\"")]
+    [(andmap string? parts)
+     (warn "(s ~v) has no interpolated expressions; use a plain string literal"
+           (apply string-append parts))]))
 
 ;; --- counting mode ----------------------------------------------------------
 ;; Runs lint with a captured error port and returns the number of warnings

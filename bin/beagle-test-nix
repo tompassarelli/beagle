@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# beagle-test-nix — run only the Nix-target test files.
+#
+# Two layers:
+#   1. Pure-nix files (tests/nix-*.rkt, tests/validate-nix.rkt)
+#   2. Cross-cutting files that exercise nix code paths
+#      (parse.rkt for with-form disambiguation, check.rkt for target gating)
+#
+# Usage:
+#   bin/beagle-test-nix              # parse + emit + roundtrip + lints + validate
+#   bin/beagle-test-nix --full       # also run cross-cutting parse/check tests
+#   bin/beagle-test-nix --watch      # rerun on .bnix / .rkt changes
+set -euo pipefail
+
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo"
+
+NIX_FILES=(
+  beagle-test/tests/nix-roundtrip.rkt
+  beagle-test/tests/nix-parse.rkt
+  beagle-test/tests/nix-emit-errors.rkt
+  beagle-test/tests/nix-lints.rkt
+  beagle-test/tests/emit-nix.rkt
+  beagle-test/tests/validate-nix.rkt
+)
+
+CROSS_FILES=(
+  beagle-test/tests/parse.rkt
+  beagle-test/tests/check.rkt
+)
+
+mode="${1:-fast}"
+
+case "$mode" in
+  --full)
+    raco test "${NIX_FILES[@]}" "${CROSS_FILES[@]}"
+    ;;
+  --watch)
+    if ! command -v entr >/dev/null; then
+      echo "beagle-test-nix --watch requires 'entr' on PATH" >&2
+      exit 2
+    fi
+    find beagle-lib beagle-test/tests -name "*.rkt" -o -name "*.bnix" \
+      | entr -c raco test "${NIX_FILES[@]}"
+    ;;
+  fast|"")
+    raco test "${NIX_FILES[@]}"
+    ;;
+  *)
+    echo "usage: beagle-test-nix [--full|--watch]" >&2
+    exit 2
+    ;;
+esac
