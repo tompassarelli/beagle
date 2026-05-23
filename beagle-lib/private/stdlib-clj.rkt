@@ -86,6 +86,8 @@
    'clojure.string/re-quote-replacement (fn-of '(String) 'String)
    'clojure.string/index-of (fn-of '(String Any) 'Any)
    'clojure.string/last-index-of (fn-of '(String Any) 'Any)
+   'clojure.string/split-lines (fn-of '(String) 'Any)
+   'clojure.string/replace-first (fn-of '(String Any Any) 'String)
    ;; --- clojure.set -------------------------------------------------------
    'clojure.set/union       (fn-of '() 'Any #:rest 'Any)
    'clojure.set/intersection (fn-of '(Any) 'Any #:rest 'Any)
@@ -122,6 +124,57 @@
    'clojure.pprint/print-table  (fn-of '(Any) 'Nil #:rest 'Any)
    ;; --- clojure.edn -------------------------------------------------------
    'clojure.edn/read-string (fn-of '(String) 'Any)
+   'clojure.edn/read        (fn-of '(Any) 'Any)
+   ;; --- clojure.data -------------------------------------------------------
+   ;; (diff returns [in-a-only in-b-only in-both])
+   'clojure.data/diff       (fn-of '(Any Any) 'Any)
+   ;; --- clojure.repl -------------------------------------------------------
+   ;; (interactive help/debug functions; return Nil for printing-only)
+   'clojure.repl/doc        (fn-of '(Any) 'Nil)
+   'clojure.repl/source     (fn-of '(Any) 'Nil)
+   'clojure.repl/dir        (fn-of '(Any) 'Nil)
+   'clojure.repl/pst        (fn-of '() 'Nil #:rest 'Any)
+   'clojure.repl/apropos    (fn-of '(Any) 'Any)
+   'clojure.repl/find-doc   (fn-of '(Any) 'Nil)
+   'clojure.repl/demunge    (fn-of '(String) 'String)
+   ;; --- clojure.test -------------------------------------------------------
+   ;; (test runner — `is`, `are`, `testing` are macros; `run-tests` returns a map)
+   'clojure.test/run-tests       (fn-of '() 'Any #:rest 'Any)
+   'clojure.test/run-all-tests   (fn-of '() 'Any #:rest 'Any)
+   'clojure.test/successful?     (fn-of '(Any) 'Bool)
+   'clojure.test/test-var        (fn-of '(Any) 'Any)
+   'clojure.test/test-vars       (fn-of '(Any) 'Any)
+   'clojure.test/test-ns         (fn-of '(Any) 'Any)
+   ;; --- clojure.zip --------------------------------------------------------
+   ;; (zipper navigation; locs are opaque)
+   'clojure.zip/zipper           (fn-of '(Any Any Any Any) 'Any)
+   'clojure.zip/seq-zip          (fn-of '(Any) 'Any)
+   'clojure.zip/vector-zip       (fn-of '(Any) 'Any)
+   'clojure.zip/xml-zip          (fn-of '(Any) 'Any)
+   'clojure.zip/node             (fn-of '(Any) 'Any)
+   'clojure.zip/branch?          (fn-of '(Any) 'Bool)
+   'clojure.zip/children         (fn-of '(Any) 'Any)
+   'clojure.zip/make-node        (fn-of '(Any Any Any) 'Any)
+   'clojure.zip/path             (fn-of '(Any) 'Any)
+   'clojure.zip/lefts            (fn-of '(Any) 'Any)
+   'clojure.zip/rights           (fn-of '(Any) 'Any)
+   'clojure.zip/down             (fn-of '(Any) 'Any)
+   'clojure.zip/up               (fn-of '(Any) 'Any)
+   'clojure.zip/root             (fn-of '(Any) 'Any)
+   'clojure.zip/right            (fn-of '(Any) 'Any)
+   'clojure.zip/rightmost        (fn-of '(Any) 'Any)
+   'clojure.zip/left             (fn-of '(Any) 'Any)
+   'clojure.zip/leftmost         (fn-of '(Any) 'Any)
+   'clojure.zip/insert-left      (fn-of '(Any Any) 'Any)
+   'clojure.zip/insert-right     (fn-of '(Any Any) 'Any)
+   'clojure.zip/replace          (fn-of '(Any Any) 'Any)
+   'clojure.zip/edit             (fn-of '(Any Any) 'Any #:rest 'Any)
+   'clojure.zip/insert-child     (fn-of '(Any Any) 'Any)
+   'clojure.zip/append-child     (fn-of '(Any Any) 'Any)
+   'clojure.zip/next             (fn-of '(Any) 'Any)
+   'clojure.zip/prev             (fn-of '(Any) 'Any)
+   'clojure.zip/end?             (fn-of '(Any) 'Bool)
+   'clojure.zip/remove           (fn-of '(Any) 'Any)
    ;; --- namespace / var inspection: CLJ-specific --------------------------
    'type       (fn-of '(Any) 'Any)
    'class      (fn-of '(Any) 'Any)
@@ -425,6 +478,20 @@
    'slurp 'spit 'bean 'class 'supers 'bases 'ancestors 'parents
    'future 'future-call 'future-cancel 'future-cancelled? 'future-done? 'future?
    'promise 'deliver 'realized?
-   'agent 'send 'send-off 'await 'shutdown-agents))
+   'agent 'send 'send-off 'await 'shutdown-agents
+   ;; clojure.repl: REPL/JVM-only — no CLJS port
+   'clojure.repl/doc 'clojure.repl/source 'clojure.repl/dir 'clojure.repl/pst
+   'clojure.repl/apropos 'clojure.repl/find-doc 'clojure.repl/demunge
+   ;; clojure.zip: same on JVM and CLJS — but `clojure.zip` ns is JVM-only
+   ;; (CLJS uses `cljs.zip`); excluded to surface ns mismatches at type time
+   'clojure.zip/zipper 'clojure.zip/seq-zip 'clojure.zip/vector-zip 'clojure.zip/xml-zip
+   'clojure.zip/node 'clojure.zip/branch? 'clojure.zip/children 'clojure.zip/make-node
+   'clojure.zip/path 'clojure.zip/lefts 'clojure.zip/rights
+   'clojure.zip/down 'clojure.zip/up 'clojure.zip/root
+   'clojure.zip/right 'clojure.zip/rightmost 'clojure.zip/left 'clojure.zip/leftmost
+   'clojure.zip/insert-left 'clojure.zip/insert-right
+   'clojure.zip/replace 'clojure.zip/edit
+   'clojure.zip/insert-child 'clojure.zip/append-child
+   'clojure.zip/next 'clojure.zip/prev 'clojure.zip/end? 'clojure.zip/remove))
 
 (provide STDLIB-CLJ CLJ-EXCLUDE)
