@@ -27,6 +27,8 @@ Beagle is a typed s-expression language that emits ordinary Nix / Clojure / Java
 
 **Design principles** (the ones that actually shape the surface):
 
+- **S-expressions.** Uniform parens. No syntax debates. Trivial to parse, trivial for macros to construct, trivial for agents to manipulate as data. Keeps the AST small, keeps the tooling small, keeps the future open (every transformation, query, compression, and rewrite is a tree walk).
+- **Immutability by default.** Bindings are immutable. Records are functional. There is no `set!`, no in-place mutation, no implicit aliasing. State changes go through explicit forms with visible plumbing. Concurrency stories, equality reasoning, and agent rewrites stay sane.
 - **One canonical idiom per concept.** No `with-do` vs `with`. No `inh` and `inherit`. Single name, single shape.
 - **Zero escape hatches.** No `unsafe-nix`, no `unsafe-js`, no `any`. If the stdlib doesn't cover something, add a one-line type signature.
 - **Schema is types.** NixOS option schemas (16k+ options) flow into the type checker. Misspelled option paths fail at parse time. Wrong-typed values fail at type-check time. You never wait for `nixos-rebuild` to find out.
