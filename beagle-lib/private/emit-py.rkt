@@ -38,11 +38,25 @@
 ;; --- indentation helper -----------------------------------------------------
 
 (define current-indent (make-parameter ""))
-(define current-loop-bindings (make-parameter #f))
 
+;; True when the next emitted form is in tail position of a function body
+;; (we should prepend `return ` to its trailing value where meaningful).
+(define current-tail? (make-parameter #f))
 
 (define (indent+ [extra "    "])
   (string-append (current-indent) extra))
+
+;; Emit a body block at a deeper indent, then return the produced string.
+;; Centralizes the parameterize+emit-body-block pattern.
+(define (emit-body-at body extra-indent)
+  (define new-ind (indent+ extra-indent))
+  (parameterize ([current-indent new-ind])
+    (emit-body-block body new-ind)))
+
+(define (emit-stmt-block-at body extra-indent)
+  (define new-ind (indent+ extra-indent))
+  (parameterize ([current-indent new-ind])
+    (emit-stmt-block body new-ind)))
 
 ;; --- entry point ------------------------------------------------------------
 
@@ -143,8 +157,12 @@
 
     [(defmulti-form? f)
      (define name (mangle-name (defmulti-form-name f)))
-     (format "def ~a(*args, **kwargs):\n    return ~a(*args, **kwargs)"
-             name (emit-expr (defmulti-form-dispatch-fn f)))]
+     (define dispatch-str (emit-expr (defmulti-form-dispatch-fn f)))
+     ;; Emit a registry dict plus the dispatch entry point: looks up the
+     ;; method by dispatch-fn result and invokes it. Each defmethod will
+     ;; register its handler into `<name>_registry`.
+     (format "~a_registry = {}\ndef ~a(*args, **kwargs):\n    return ~a_registry[~a(*args, **kwargs)](*args, **kwargs)"
+             name name name dispatch-str)]
 
     [(defmethod-form? f)
      (emit-defmethod f)]
@@ -289,18 +307,9 @@
      (emit-with e)]
 
     [(when-let-form? e)
-     (define ind (current-indent))
-     (define body-ind (indent+))
-     (define var (mangle-name (when-let-form-name e)))
-     (define body-str
-       (parameterize ([current-indent body-ind])
-         (emit-stmt-block (when-let-form-body e) body-ind)))
-     (format "~a = ~a\n~aif ~a is not None:\n~a"
-             var
-             (emit-expr (when-let-form-expr e))
-             ind
-             var
-             body-str)]
+     (emit-when-binding (when-let-form-name e)
+                        (when-let-form-expr e)
+                        (when-let-form-body e))]
 
     [(if-let-form? e)
      (define var (mangle-name (if-let-form-name e)))
@@ -342,15 +351,10 @@
      (emit-condp e)]
 
     [(dotimes-form? e)
-     (define ind (current-indent))
-     (define body-ind (indent+))
-     (define body-str
-       (parameterize ([current-indent body-ind])
-         (emit-stmt-block (dotimes-form-body e) body-ind)))
      (format "for ~a in range(~a):\n~a"
              (mangle-name (dotimes-form-name e))
              (emit-expr (dotimes-form-count-expr e))
-             body-str)]
+             (emit-stmt-block-at (dotimes-form-body e) "    "))]
 
     [(doto-form? e)
      (emit-doto e)]
@@ -362,16 +366,9 @@
      (emit-with-open e)]
 
     [(when-some-form? e)
-     (define ind (current-indent))
-     (define body-ind (indent+))
-     (define var (mangle-name (when-some-form-name e)))
-     (define body-str
-       (parameterize ([current-indent body-ind])
-         (emit-stmt-block (when-some-form-body e) body-ind)))
-     (format "~a = ~a\n~aif ~a is not None:\n~a"
-             var
-             (emit-expr (when-some-form-expr e))
-             ind var body-str)]
+     (emit-when-binding (when-some-form-name e)
+                        (when-some-form-expr e)
+                        (when-some-form-body e))]
 
     [(if-some-form? e)
      (define var (mangle-name (if-some-form-name e)))
@@ -420,12 +417,16 @@
       (parameterize ([current-indent ind])
         (define stmts
           (for/list ([e (in-list (drop-right body 1))])
-            (format "~a~a" ind (emit-stmt e))))
+            (format "~a~a" ind (emit-expr e))))
         (define last-e (last body))
         (define last-str
-          (if (stmt-form? last-e)
-              (format "~a~a" ind (emit-stmt last-e))
-              (format "~areturn ~a" ind (emit-expr last-e))))
+          (cond
+            [(stmt-form? last-e)
+             ;; Let the form decide whether to inject `return` internally.
+             (parameterize ([current-tail? #t])
+               (format "~a~a" ind (emit-expr last-e)))]
+            [else
+             (format "~areturn ~a" ind (emit-expr last-e))]))
         (string-join (append stmts (list last-str)) "\n"))))
 
 (define (emit-stmt-block body ind)
@@ -437,6 +438,17 @@
            (format "~a~a" ind (emit-expr e)))
          "\n"))))
 
+;; Shared emission for when-let / when-some:
+;;   <name> = <expr>
+;;   if <name> is not None:
+;;       <body...>
+(define (emit-when-binding raw-name expr body)
+  (define ind (current-indent))
+  (define var (mangle-name raw-name))
+  (define body-str (emit-stmt-block-at body "    "))
+  (format "~a = ~a\n~aif ~a is not None:\n~a"
+          var (emit-expr expr) ind var body-str))
+
 (define (emit-body-stmts body)
   (define ind (current-indent))
   (string-join
@@ -444,6 +456,10 @@
      (emit-expr e))
    (format "\n~a" ind)))
 
+;; Forms that emit as Python statements rather than expressions.
+;; When such a form ends a function body, we cannot prepend `return`
+;; (these forms produce their own control flow, with `return` injected
+;; in the appropriate inner positions).
 (define (stmt-form? e)
   (or (def-form? e) (defn-form? e) (when-form? e)
       (doseq-form? e) (set!-form? e) (try-form? e)
@@ -453,25 +469,45 @@
       (dotimes-form? e) (letfn-form? e) (condp-form? e)
       (with-open-form? e) (when-some-form? e)))
 
-(define (emit-stmt e)
-  (emit-expr e))
-
 ;; --- let → assignments + final expression -----------------------------------
 
 (define (emit-let e)
   (define ind (current-indent))
+  (define tail? (current-tail?))
   (define bindings
     (for/list ([b (in-list (let-form-bindings e))])
       (format "~a = ~a"
               (mangle-name (let-binding-name b))
-              (emit-expr (let-binding-value b)))))
+              ;; Bindings are never in tail position.
+              (parameterize ([current-tail? #f])
+                (emit-expr (let-binding-value b))))))
   (define body (let-form-body e))
   (define body-strs
-    (for/list ([expr (in-list body)])
-      (emit-expr expr)))
+    (cond
+      [(null? body) '()]
+      [else
+       (define non-tail
+         (for/list ([expr (in-list (drop-right body 1))])
+           (parameterize ([current-tail? #f])
+             (emit-expr expr))))
+       (define last-e (last body))
+       (define last-str
+         (cond
+           [(and tail? (not (stmt-form? last-e)))
+            (format "return ~a" (parameterize ([current-tail? #f])
+                                  (emit-expr last-e)))]
+           [else
+            (emit-expr last-e)]))
+       (append non-tail (list last-str))]))
   (string-join (append bindings body-strs) (format "\n~a" ind)))
 
-;; --- fn → lambda (single expr) or local def (multi) ------------------------
+;; --- fn → lambda (single expr) or tuple-sequencing for multi-expr body -----
+;;
+;; Python lambdas are single-expression. For multi-expression bodies we
+;; sequence via a tuple `(e1, e2, ..., en)[-1]` which evaluates each
+;; expression left-to-right and returns the last value. This preserves
+;; effect ordering for the common case (a few side-effecting calls then a
+;; final value). For genuine local control flow, lift to `defn` or `letfn`.
 
 (define (emit-fn e)
   (define params-str (emit-params (fn-form-params e) (fn-form-rest-param e)))
@@ -480,26 +516,24 @@
     [(= (length body) 1)
      (format "lambda ~a: ~a" params-str (emit-expr (car body)))]
     [else
-     (define body-str (emit-body-block body (indent+ "")))
-     (format "(lambda: (lambda ~a: (__fn := None, exec(\"\"\"def __fn(~a):\\n~a\"\"\"), __fn)[-1])(~a))()"
-             params-str params-str body-str params-str)]))
+     (define exprs (string-join (map emit-expr body) ", "))
+     (format "lambda ~a: (~a)[-1]" params-str exprs)]))
 
 ;; --- cond → if/elif/else chain ----------------------------------------------
+
+(define (else-clause-test? test)
+  (and (symbol? test) (or (eq? test ':else) (eq? test 'else))))
 
 (define (emit-cond e)
   (define ind (current-indent))
   (define clauses (cond-form-clauses e))
-  (define body-ind (indent+))
   (define parts
     (for/list ([c (in-list clauses)]
                [i (in-naturals)])
       (define test (cond-clause-test c))
-      (define body (cond-clause-body c))
-      (define body-str
-        (parameterize ([current-indent body-ind])
-          (emit-body-block body body-ind)))
+      (define body-str (emit-body-at (cond-clause-body c) "    "))
       (define keyword (if (= i 0) "if" "elif"))
-      (if (and (symbol? test) (or (eq? test ':else) (eq? test 'else)))
+      (if (else-clause-test? test)
           (format "else:\n~a" body-str)
           (format "~a ~a:\n~a" keyword (emit-expr test) body-str))))
   (string-join parts (format "\n~a" ind)))
@@ -508,26 +542,20 @@
 
 (define (emit-try e)
   (define ind (current-indent))
-  (define body-ind (indent+))
-  (define body-str
-    (parameterize ([current-indent body-ind])
-      (emit-body-block (try-form-body e) body-ind)))
+  (define body-str (emit-body-at (try-form-body e) "    "))
   (define catch-strs
     (for/list ([c (try-form-catches e)])
+      (define exc-type-sym (catch-clause-exception-type c))
       (define exc-type
-        (let ([t (catch-clause-exception-type c)])
-          (if (eq? t 'Exception) "Exception" (mangle-name t))))
-      (define catch-body
-        (parameterize ([current-indent body-ind])
-          (emit-body-block (catch-clause-body c) body-ind)))
+        (if (eq? exc-type-sym 'Exception) "Exception" (mangle-name exc-type-sym)))
+      (define catch-body (emit-body-at (catch-clause-body c) "    "))
       (format "except ~a as ~a:\n~a"
               exc-type
               (mangle-name (catch-clause-name c))
               catch-body)))
   (define finally-str
     (if (try-form-finally-body e)
-        (let ([fb (parameterize ([current-indent body-ind])
-                    (emit-body-block (try-form-finally-body e) body-ind))])
+        (let ([fb (emit-body-at (try-form-finally-body e) "    ")])
           (format "\n~afinally:\n~a" ind fb))
         ""))
   (format "try:\n~a\n~a~a~a"
@@ -539,53 +567,56 @@
 ;; --- for → list comprehension -----------------------------------------------
 
 (define (emit-for e)
+  (define tail? (current-tail?))
   (define clauses (for-form-clauses e))
   (define body (for-form-body e))
   (define body-expr (if (= (length body) 1) (car body) (last body)))
   (define parts
-    (for/list ([c (in-list clauses)])
-      (cond
-        [(for-binding? c)
-         (format "for ~a in ~a"
-                 (mangle-name (for-binding-name c))
-                 (emit-expr (for-binding-expr c)))]
-        [(for-when? c)
-         (format "if ~a" (emit-expr (for-when-test c)))]
-        [(for-let? c)
-         ""]
-        [else ""])))
-  (format "[~a ~a]"
-          (emit-expr body-expr)
-          (string-join (filter (lambda (s) (not (string=? s ""))) parts) " ")))
+    (parameterize ([current-tail? #f])
+      (for/list ([c (in-list clauses)])
+        (cond
+          [(for-binding? c)
+           (format "for ~a in ~a"
+                   (mangle-name (for-binding-name c))
+                   (emit-expr (for-binding-expr c)))]
+          [(for-when? c)
+           (format "if ~a" (emit-expr (for-when-test c)))]
+          [(for-let? c)
+           ;; Python list comps lack `:let` — emulate with `for NAME in [VAL]`,
+           ;; one extra loop per binding. Side-effect-free, evaluates VAL once.
+           (string-join
+            (for/list ([b (in-list (for-let-bindings c))])
+              (format "for ~a in [~a]"
+                      (mangle-name (let-binding-name b))
+                      (emit-expr (let-binding-value b))))
+            " ")]
+          [else ""]))))
+  (define comp-str
+    (parameterize ([current-tail? #f])
+      (format "[~a ~a]"
+              (emit-expr body-expr)
+              (string-join (filter (lambda (s) (not (string=? s ""))) parts) " "))))
+  (if tail? (format "return ~a" comp-str) comp-str))
 
 ;; --- doseq → for loop -------------------------------------------------------
 
 (define (emit-doseq e)
-  (define clauses (doseq-form-clauses e))
-  (define ind (current-indent))
-  (define body-ind (indent+))
-  (define body-str
-    (parameterize ([current-indent body-ind])
-      (emit-stmt-block (doseq-form-body e) body-ind)))
-  (define binding (car clauses))
+  (define binding (car (doseq-form-clauses e)))
   (format "for ~a in ~a:\n~a"
           (mangle-name (for-binding-name binding))
           (emit-expr (for-binding-expr binding))
-          body-str))
+          (emit-stmt-block-at (doseq-form-body e) "    ")))
 
 ;; --- match → match/case (Python 3.10+) --------------------------------------
 
 (define (emit-match e)
   (define ind (current-indent))
   (define case-ind (string-append ind "    "))
-  (define body-ind (string-append ind "        "))
   (define target-str (emit-expr (match-form-target e)))
   (define arm-strs
     (for/list ([c (in-list (match-form-clauses e))])
       (define pat-str (emit-pattern (match-clause-pattern c)))
-      (define body-str
-        (parameterize ([current-indent body-ind])
-          (emit-body-block (match-clause-body c) body-ind)))
+      (define body-str (emit-body-at (match-clause-body c) "        "))
       (format "~acase ~a:\n~a" case-ind pat-str body-str)))
   (format "match ~a:\n~a" target-str (string-join arm-strs "\n")))
 
@@ -621,19 +652,15 @@
 (define (emit-case e)
   (define ind (current-indent))
   (define case-ind (string-append ind "    "))
-  (define body-ind (string-append ind "        "))
   (define target-str (emit-expr (case-form-test e)))
   (define arm-strs
     (for/list ([c (in-list (case-form-clauses e))])
       (define val-str (emit-expr (case-clause-value c)))
-      (define body-str
-        (parameterize ([current-indent body-ind])
-          (emit-body-block (list (case-clause-body c)) body-ind)))
+      (define body-str (emit-body-at (list (case-clause-body c)) "        "))
       (format "~acase ~a:\n~a" case-ind val-str body-str)))
   (define default-str
     (if (case-form-default e)
-        (let ([body-str (parameterize ([current-indent body-ind])
-                          (emit-body-block (list (case-form-default e)) body-ind))])
+        (let ([body-str (emit-body-at (list (case-form-default e)) "        ")])
           (format "\n~acase _:\n~a" case-ind body-str))
         ""))
   (format "match ~a:\n~a~a" target-str (string-join arm-strs "\n") default-str))
@@ -654,11 +681,29 @@
     [else #f]))
 
 (define (emit-recur-stmt bindings args ind)
-  (define assigns
-    (for/list ([b (in-list bindings)]
-               [a (in-list args)])
-      (format "~a~a = ~a" ind (mangle-name (let-binding-name b)) (emit-expr a))))
-  (string-append (string-join assigns "\n") (format "\n~acontinue" ind)))
+  ;; Use temporaries so that recur arguments see the OLD binding values
+  ;; (e.g. (recur (dec i) (* acc i)) must compute the new acc with the old i).
+  (cond
+    [(or (null? bindings) (null? (cdr bindings)))
+     ;; Single binding — no aliasing risk, assign directly.
+     (define assigns
+       (for/list ([b (in-list bindings)]
+                  [a (in-list args)])
+         (format "~a~a = ~a" ind (mangle-name (let-binding-name b)) (emit-expr a))))
+     (string-append (string-join assigns "\n") (format "\n~acontinue" ind))]
+    [else
+     (define tmp-assigns
+       (for/list ([b (in-list bindings)]
+                  [a (in-list args)]
+                  [i (in-naturals)])
+         (format "~a__recur_~a = ~a" ind i (emit-expr a))))
+     (define final-assigns
+       (for/list ([b (in-list bindings)]
+                  [i (in-naturals)])
+         (format "~a~a = __recur_~a" ind (mangle-name (let-binding-name b)) i)))
+     (string-append
+      (string-join (append tmp-assigns final-assigns) "\n")
+      (format "\n~acontinue" ind))]))
 
 (define (emit-loop-stmt e bindings ind)
   (cond
@@ -691,8 +736,7 @@
               (emit-expr (let-binding-value b)))))
   (define loop-ind (indent+))
   (define body-str
-    (parameterize ([current-indent loop-ind]
-                   [current-loop-bindings bindings])
+    (parameterize ([current-indent loop-ind])
       (emit-loop-body (loop-form-body e) bindings loop-ind)))
   (format "~a\n~awhile True:\n~a"
           (string-join init-strs (format "\n~a" ind))
@@ -719,19 +763,41 @@
           target-str
           (string-join updates ", ")))
 
-;; --- records → @dataclass ---------------------------------------------------
+;; --- dataclass helpers ------------------------------------------------------
 
-(define (emit-record f)
-  (define name (mangle-name (record-form-name f)))
-  (define fields (record-form-fields f))
+;; Emit a single @dataclass class declaration with the given (already-mangled)
+;; name, an optional base class name, and a list of field params. Returns the
+;; class-only string (no accessors).
+(define (emit-dataclass class-name base-name fields)
+  (define base-str (if base-name (format "(~a)" base-name) ""))
   (if (null? fields)
-      (format "@dataclass(frozen=True)\nclass ~a:\n    pass" name)
+      (format "@dataclass(frozen=True)\nclass ~a~a:\n    pass" class-name base-str)
       (let ([field-strs
              (for/list ([p (in-list fields)])
                (format "    ~a: object" (mangle-name (param-name p))))])
-        (format "@dataclass(frozen=True)\nclass ~a:\n~a"
-                name
-                (string-join field-strs "\n")))))
+        (format "@dataclass(frozen=True)\nclass ~a~a:\n~a"
+                class-name base-str (string-join field-strs "\n")))))
+
+;; Emit `<recname-lower>-<field>` accessor wrappers that match how the
+;; checker resolves record accessors (see check.rkt find-accessor-suggestions).
+(define (emit-record-accessors record-name fields)
+  (define name-str (symbol->string record-name))
+  (define name-lower (string-downcase name-str))
+  (for/list ([p (in-list fields)])
+    (define field-str (symbol->string (param-name p)))
+    (define acc-name (mangle-str (string-append name-lower "-" field-str)))
+    (format "def ~a(r):\n    return r.~a"
+            acc-name (mangle-str field-str))))
+
+;; --- records → @dataclass ---------------------------------------------------
+
+(define (emit-record f)
+  (define raw-name (record-form-name f))
+  (define name (mangle-name raw-name))
+  (define fields (record-form-fields f))
+  (define class-str (emit-dataclass name #f fields))
+  (define accessor-strs (emit-record-accessors raw-name fields))
+  (string-join (cons class-str accessor-strs) "\n\n"))
 
 ;; --- defenum → class with constants -----------------------------------------
 
@@ -739,52 +805,37 @@
   (define name (mangle-name (defenum-form-name f)))
   (define vals (defenum-form-values f))
   (define val-strs
-    (for/list ([v (in-list vals)]
-               [i (in-naturals)])
+    (for/list ([v (in-list vals)])
       (format "    ~a = ~v" (mangle-name v) (symbol->string v))))
   (format "class ~a:\n~a" name (string-join val-strs "\n")))
 
-;; --- defunion → base class + dataclass variants -----------------------------
+;; --- sum types (defunion / deferror) ---------------------------------------
+
+;; Shared emission for sum types: a base class + one @dataclass per variant.
+;; `base-extends` is either #f (plain base class) or "Exception" for deferror.
+(define (emit-sum-type name members member-fields base-extends)
+  (define base-decl
+    (if base-extends
+        (format "class ~a(~a):\n    pass" name base-extends)
+        (format "class ~a:\n    pass" name)))
+  (define member-strs
+    (for/list ([m (in-list members)])
+      (define mname (mangle-name m))
+      (define fields (if member-fields (hash-ref member-fields m '()) '()))
+      (emit-dataclass mname name fields)))
+  (format "~a\n\n~a" base-decl (string-join member-strs "\n\n")))
 
 (define (emit-defunion f)
-  (define name (mangle-name (defunion-form-name f)))
-  (define members (defunion-form-members f))
-  (define member-fields (defunion-form-member-fields f))
-  (define member-strs
-    (for/list ([m (in-list members)])
-      (define mname (mangle-name m))
-      (define fields (if member-fields (hash-ref member-fields m '()) '()))
-      (if (null? fields)
-          (format "@dataclass(frozen=True)\nclass ~a(~a):\n    pass" mname name)
-          (let ([field-strs
-                 (for/list ([p (in-list fields)])
-                   (format "    ~a: object" (mangle-name (param-name p))))])
-            (format "@dataclass(frozen=True)\nclass ~a(~a):\n~a"
-                    mname name (string-join field-strs "\n"))))))
-  (format "class ~a:\n    pass\n\n~a"
-          name
-          (string-join member-strs "\n\n")))
-
-;; --- deferror → same as defunion but extends Exception ----------------------
+  (emit-sum-type (mangle-name (defunion-form-name f))
+                 (defunion-form-members f)
+                 (defunion-form-member-fields f)
+                 #f))
 
 (define (emit-deferror f)
-  (define name (mangle-name (deferror-form-name f)))
-  (define members (deferror-form-members f))
-  (define member-fields (deferror-form-member-fields f))
-  (define member-strs
-    (for/list ([m (in-list members)])
-      (define mname (mangle-name m))
-      (define fields (if member-fields (hash-ref member-fields m '()) '()))
-      (if (null? fields)
-          (format "@dataclass(frozen=True)\nclass ~a(~a):\n    pass" mname name)
-          (let ([field-strs
-                 (for/list ([p (in-list fields)])
-                   (format "    ~a: object" (mangle-name (param-name p))))])
-            (format "@dataclass(frozen=True)\nclass ~a(~a):\n~a"
-                    mname name (string-join field-strs "\n"))))))
-  (format "class ~a(Exception):\n    pass\n\n~a"
-          name
-          (string-join member-strs "\n\n")))
+  (emit-sum-type (mangle-name (deferror-form-name f))
+                 (deferror-form-members f)
+                 (deferror-form-member-fields f)
+                 "Exception"))
 
 ;; --- defscalar → newtype wrapper --------------------------------------------
 
@@ -811,57 +862,41 @@
   (define name (mangle-name (deftype-form-name f)))
   (define fields (deftype-form-fields f))
   (define impls (deftype-form-impls f))
-  (define init-params
-    (string-join (map (lambda (p) (mangle-name (param-name p))) fields) ", "))
+  (define field-names (map (lambda (p) (mangle-name (param-name p))) fields))
+  (define init-params (string-join field-names ", "))
   (define init-body
     (string-join
-     (for/list ([p (in-list fields)])
-       (define pname (mangle-name (param-name p)))
+     (for/list ([pname (in-list field-names)])
        (format "        self.~a = ~a" pname pname))
      "\n"))
   (define init-str
     (format "    def __init__(self, ~a):\n~a" init-params init-body))
   (define impl-strs (map emit-type-impl-methods impls))
-  (define bases
-    (if (null? impls) ""
-        (string-join (map (lambda (i) (mangle-name (type-impl-protocol-name i))) impls) ", ")))
+  (define base-names
+    (map (lambda (i) (mangle-name (type-impl-protocol-name i))) impls))
   (define class-header
-    (if (string=? bases "")
+    (if (null? base-names)
         (format "class ~a:" name)
-        (format "class ~a(~a):" name bases)))
+        (format "class ~a(~a):" name (string-join base-names ", "))))
   (format "~a\n~a\n\n~a"
           class-header
           init-str
           (string-join impl-strs "\n\n")))
 
-(define (emit-extend-type f)
-  (define type-name (mangle-name (extend-type-form-type-name f)))
-  (define impl-strs
-    (for/list ([impl (extend-type-form-impls f)])
-      (define methods (type-impl-methods impl))
-      (string-join
-       (for/list ([m methods])
-         (define mname (mangle-name (impl-method-name m)))
-         (define params-str (emit-params (impl-method-params m) #f))
-         (define body-ind "        ")
-         (define body-str
-           (parameterize ([current-indent body-ind])
-             (emit-body-block (impl-method-body m) body-ind)))
-         (format "    def ~a(~a):\n~a" mname params-str body-str))
-       "\n\n")))
-  (string-join impl-strs "\n\n"))
+;; Emit a single protocol/type method as `    def name(params):\n        body`.
+(define (emit-class-method m)
+  (define mname (mangle-name (impl-method-name m)))
+  (define params-str (emit-params (impl-method-params m) #f))
+  (define body-str (emit-body-at (impl-method-body m) "        "))
+  (format "    def ~a(~a):\n~a" mname params-str body-str))
 
 (define (emit-type-impl-methods impl)
-  (define methods (type-impl-methods impl))
+  (string-join (map emit-class-method (type-impl-methods impl)) "\n\n"))
+
+(define (emit-extend-type f)
   (string-join
-   (for/list ([m methods])
-     (define mname (mangle-name (impl-method-name m)))
-     (define params-str (emit-params (impl-method-params m) #f))
-     (define body-ind "        ")
-     (define body-str
-       (parameterize ([current-indent body-ind])
-         (emit-body-block (impl-method-body m) body-ind)))
-     (format "    def ~a(~a):\n~a" mname params-str body-str))
+   (for/list ([impl (extend-type-form-impls f)])
+     (emit-type-impl-methods impl))
    "\n\n"))
 
 ;; --- defmethod → dispatch dict + registration --------------------------------
@@ -870,24 +905,22 @@
   (define name (mangle-name (defmethod-form-name f)))
   (define dispatch-val (emit-expr (defmethod-form-dispatch-val f)))
   (define params-str (emit-params (defmethod-form-params f) #f))
-  (define body-ind "    ")
   (define body-str
-    (parameterize ([current-indent body-ind])
-      (emit-body-block (defmethod-form-body f) body-ind)))
+    (parameterize ([current-indent "    "])
+      (emit-body-block (defmethod-form-body f) "    ")))
   (define fn-name (format "_~a_~a" name (mangle-str (format "~a" (defmethod-form-dispatch-val f)))))
   (format "def ~a(~a):\n~a\n~a_registry[~a] = ~a"
           fn-name params-str body-str name dispatch-val fn-name))
 
 ;; --- condp → if/elif chain with shared predicate ----------------------------
 
-(define (condp-infix-op pred)
-  (cond
-    [(symbol? pred)
-     (case pred
-       [(=) "=="] [(not=) "!="]
-       [(<) "<"] [(>) ">"] [(<=) "<="] [(>=) ">="]
-       [else #f])]
-    [else #f]))
+;; Symbols that can be emitted as Python infix operators when used as the
+;; predicate of `(condp PRED ...)`. For anything else we fall through to a
+;; regular `pred(case-val, test-val)` call.
+(define CONDP-INFIX-OPS
+  (hasheq '= "==" 'not= "!="
+          '< "<"  '>  ">"
+          '<= "<=" '>= ">="))
 
 (define (emit-condp e)
   (define ind (current-indent))
@@ -895,7 +928,7 @@
   (define test-str (emit-expr (condp-form-test-expr e)))
   (define clauses (condp-form-clauses e))
   (define body-ind (indent+))
-  (define infix-op (condp-infix-op pred-fn))
+  (define infix-op (and (symbol? pred-fn) (hash-ref CONDP-INFIX-OPS pred-fn #f)))
   (define parts
     (for/list ([c (in-list clauses)]
                [i (in-naturals)])
@@ -905,8 +938,7 @@
             (format "~a ~a ~a" (emit-expr (car c)) infix-op test-str)
             (format "~a(~a, ~a)" (emit-expr pred-fn) (emit-expr (car c)) test-str)))
       (define clause-body
-        (parameterize ([current-indent body-ind])
-          (format "~areturn ~a" body-ind (emit-expr (cdr c)))))
+        (format "~areturn ~a" body-ind (emit-expr (cdr c))))
       (format "~a ~a:\n~a" keyword test-clause clause-body)))
   (define default-str
     (if (condp-form-default e)
@@ -929,17 +961,15 @@
 
 ;; --- letfn → local def statements -------------------------------------------
 
+(define (emit-letfn-fn f)
+  (define name (mangle-name (letfn-fn-name f)))
+  (define params-str (emit-params (letfn-fn-params f) (letfn-fn-rest-param f)))
+  (define body-str (emit-body-at (letfn-fn-body f) "    "))
+  (format "def ~a(~a):\n~a" name params-str body-str))
+
 (define (emit-letfn e)
   (define ind (current-indent))
-  (define fn-strs
-    (for/list ([f (letfn-form-fns e)])
-      (define name (mangle-name (letfn-fn-name f)))
-      (define params-str (emit-params (letfn-fn-params f) (letfn-fn-rest-param f)))
-      (define body-ind (string-append ind "    "))
-      (define body-str
-        (parameterize ([current-indent body-ind])
-          (emit-body-block (letfn-fn-body f) body-ind)))
-      (format "def ~a(~a):\n~a" name params-str body-str)))
+  (define fn-strs (map emit-letfn-fn (letfn-form-fns e)))
   (define body (letfn-form-body e))
   (define body-strs
     (for/list ([expr (in-list (drop-right body 1))])
@@ -954,136 +984,129 @@
 ;; --- with-open → with statement ---------------------------------------------
 
 (define (emit-with-open e)
-  (define ind (current-indent))
-  (define body-ind (indent+))
-  (define bindings (with-open-form-bindings e))
   (define ctx-strs
-    (for/list ([b (in-list bindings)])
+    (for/list ([b (in-list (with-open-form-bindings e))])
       (format "~a as ~a"
               (emit-expr (let-binding-value b))
               (mangle-name (let-binding-name b)))))
-  (define body-str
-    (parameterize ([current-indent body-ind])
-      (emit-body-block (with-open-form-body e) body-ind)))
   (format "with ~a:\n~a"
           (string-join ctx-strs ", ")
-          body-str))
+          (emit-body-at (with-open-form-body e) "    ")))
 
 ;; --- call dispatch ----------------------------------------------------------
+
+;; --- intrinsics dispatch ----------------------------------------------------
+;;
+;; Maps Beagle call forms with special Python emission to small functions
+;; (define (handler args) ...). Keeps emit-call as a simple lookup with a
+;; clear fall-through.
+
+(define (emit-args args [sep ", "])
+  (string-join (map emit-expr args) sep))
+
+(define (a1 args) (emit-expr (car args)))
+(define (a2 args) (emit-expr (cadr args)))
+(define (a3 args) (emit-expr (caddr args)))
+
+;; Helpers for `map`/`filter`: inline a (fn [(x : T)] body) call to a
+;; comprehension; otherwise wrap with an explicit `f(x)` invocation.
+(define (inline-fn-param-name fn-arg)
+  (define p (car (fn-form-params fn-arg)))
+  (mangle-name (if (param? p) (param-name p) p)))
+
+(define (emit-map-comp args)
+  (define fn-arg (car args))
+  (define coll-str (a2 args))
+  (cond
+    [(fn-form? fn-arg)
+     (define pname (inline-fn-param-name fn-arg))
+     (define body-str (emit-expr (car (fn-form-body fn-arg))))
+     (format "[~a for ~a in ~a]" body-str pname coll-str)]
+    [else
+     (format "[~a(x) for x in ~a]" (emit-expr fn-arg) coll-str)]))
+
+(define (emit-filter-comp args)
+  (define fn-arg (car args))
+  (define coll-str (a2 args))
+  (cond
+    [(fn-form? fn-arg)
+     (define pname (inline-fn-param-name fn-arg))
+     (define body-str (emit-expr (car (fn-form-body fn-arg))))
+     (format "[~a for ~a in ~a if ~a]" pname pname coll-str body-str)]
+    [else
+     (format "[x for x in ~a if ~a(x)]" coll-str (emit-expr fn-arg))]))
+
+;; Single-table dispatch. Each entry is (sym . handler). Handlers receive
+;; the raw args list (so they can branch on length where needed).
+(define INTRINSICS
+  (hasheq
+   'println   (lambda (args) (format "print(~a)" (emit-args args)))
+   'str       (lambda (args)
+                (if (= (length args) 1)
+                    (format "str(~a)" (a1 args))
+                    (format "\"\".join([str(x) for x in [~a]])" (emit-args args))))
+   'pr-str    (lambda (args) (format "repr(~a)" (a1 args)))
+   'throw     (lambda (args) (format "raise ~a" (a1 args)))
+   'not       (lambda (args) (format "(not ~a)" (a1 args)))
+   'nil?      (lambda (args) (format "(~a is None)" (a1 args)))
+   'some?     (lambda (args) (format "(~a is not None)" (a1 args)))
+   'count     (lambda (args) (format "len(~a)" (a1 args)))
+   'inc       (lambda (args) (format "(~a + 1)" (a1 args)))
+   'dec       (lambda (args) (format "(~a - 1)" (a1 args)))
+   'conj      (lambda (args) (format "(~a + [~a])" (a1 args) (a2 args)))
+   'cons      (lambda (args) (format "[~a] + ~a" (a1 args) (a2 args)))
+   'assoc     (lambda (args) (format "{**~a, ~a: ~a}" (a1 args) (a2 args) (a3 args)))
+   'get       (lambda (args)
+                (if (= (length args) 3)
+                    (format "~a.get(~a, ~a)" (a1 args) (a2 args) (a3 args))
+                    (format "~a.get(~a)" (a1 args) (a2 args))))
+   'contains? (lambda (args) (format "(~a in ~a)" (a2 args) (a1 args)))
+   'map       emit-map-comp
+   'filter    emit-filter-comp
+   'reduce    (lambda (args)
+                (if (= (length args) 3)
+                    (format "__import__('functools').reduce(~a, ~a, ~a)"
+                            (a1 args) (a2 args) (a3 args))
+                    (format "__import__('functools').reduce(~a, ~a)"
+                            (a1 args) (a2 args))))
+   'range     (lambda (args) (format "list(range(~a))" (emit-args args)))
+   'into      (lambda (args) (format "list(~a)" (a2 args)))
+   'apply     (lambda (args) (format "~a(*~a)" (a1 args) (a2 args)))
+   'concat    (lambda (args) (format "(~a + ~a)" (a1 args) (a2 args)))
+   'empty?    (lambda (args) (format "(len(~a) == 0)" (a1 args)))
+   'first     (lambda (args) (format "~a[0]" (a1 args)))
+   'second    (lambda (args) (format "~a[1]" (a1 args)))
+   'last      (lambda (args) (format "~a[-1]" (a1 args)))
+   'rest      (lambda (args) (format "~a[1:]" (a1 args)))
+   'nth       (lambda (args) (format "~a[~a]" (a1 args) (a2 args)))
+   'identity  (lambda (args) (a1 args))
+   'mod       (lambda (args) (format "(~a % ~a)" (a1 args) (a2 args)))))
+
+;; Symbol → Python infix operator (for left-associative variadic operators).
+(define VARIADIC-INFIX-OPS
+  (hasheq '+ "+" '- "-" '* "*" '/ "/"))
+
+;; Symbol → Python operator (for binary comparison/logic).
+(define BINARY-INFIX-OPS
+  (hasheq '=  "==" 'not= "!="
+          '<  "<"  '>   ">"
+          '<= "<=" '>=  ">="
+          'and "and" 'or "or"))
 
 (define (emit-call e)
   (define fn-sym (call-form-fn e))
   (define args (call-form-args e))
-  (define fn-str (mangle-name fn-sym))
-  (define sym-str (symbol->string fn-sym))
+  (define handler (hash-ref INTRINSICS fn-sym #f))
   (cond
-    [(eq? fn-sym 'println)
-     (format "print(~a)" (string-join (map emit-expr args) ", "))]
-    [(eq? fn-sym 'str)
-     (if (= (length args) 1)
-         (format "str(~a)" (emit-expr (car args)))
-         (format "\"\".join([str(x) for x in [~a]])"
-                 (string-join (map emit-expr args) ", ")))]
-    [(eq? fn-sym 'pr-str)
-     (format "repr(~a)" (emit-expr (car args)))]
-    [(eq? fn-sym 'throw)
-     (format "raise ~a" (emit-expr (car args)))]
-    [(eq? fn-sym 'not)
-     (format "(not ~a)" (emit-expr (car args)))]
-    [(eq? fn-sym 'nil?)
-     (format "(~a is None)" (emit-expr (car args)))]
-    [(eq? fn-sym 'some?)
-     (format "(~a is not None)" (emit-expr (car args)))]
-    [(eq? fn-sym 'count)
-     (format "len(~a)" (emit-expr (car args)))]
-    [(eq? fn-sym 'inc)
-     (format "(~a + 1)" (emit-expr (car args)))]
-    [(eq? fn-sym 'dec)
-     (format "(~a - 1)" (emit-expr (car args)))]
-    [(eq? fn-sym 'conj)
-     (format "(~a + [~a])" (emit-expr (car args)) (emit-expr (cadr args)))]
-    [(eq? fn-sym 'cons)
-     (format "[~a] + ~a" (emit-expr (car args)) (emit-expr (cadr args)))]
-    [(eq? fn-sym 'assoc)
-     (format "{**~a, ~a: ~a}"
-             (emit-expr (car args))
-             (emit-expr (cadr args))
-             (emit-expr (caddr args)))]
-    [(eq? fn-sym 'get)
-     (if (= (length args) 3)
-         (format "~a.get(~a, ~a)"
-                 (emit-expr (car args))
-                 (emit-expr (cadr args))
-                 (emit-expr (caddr args)))
-         (format "~a.get(~a)"
-                 (emit-expr (car args))
-                 (emit-expr (cadr args))))]
-    [(eq? fn-sym 'contains?)
-     (format "(~a in ~a)" (emit-expr (cadr args)) (emit-expr (car args)))]
-    [(eq? fn-sym 'map)
-     (define fn-arg (car args))
-     (define coll-str (emit-expr (cadr args)))
-     (if (fn-form? fn-arg)
-         (let* ([p (car (fn-form-params fn-arg))]
-                [pname (mangle-name (if (param? p) (param-name p) p))]
-                [body-str (emit-expr (car (fn-form-body fn-arg)))])
-           (format "[~a for ~a in ~a]" body-str pname coll-str))
-         (format "[~a(x) for x in ~a]" (emit-expr fn-arg) coll-str))]
-    [(eq? fn-sym 'filter)
-     (define fn-arg (car args))
-     (define coll-str (emit-expr (cadr args)))
-     (if (fn-form? fn-arg)
-         (let* ([p (car (fn-form-params fn-arg))]
-                [pname (mangle-name (if (param? p) (param-name p) p))]
-                [body-str (emit-expr (car (fn-form-body fn-arg)))])
-           (format "[~a for ~a in ~a if ~a]" pname pname coll-str body-str))
-         (format "[x for x in ~a if ~a(x)]" coll-str (emit-expr fn-arg)))]
-    [(eq? fn-sym 'reduce)
-     (if (= (length args) 3)
-         (format "__import__('functools').reduce(~a, ~a, ~a)"
-                 (emit-expr (car args))
-                 (emit-expr (cadr args))
-                 (emit-expr (caddr args)))
-         (format "__import__('functools').reduce(~a, ~a)"
-                 (emit-expr (car args))
-                 (emit-expr (cadr args))))]
-    [(eq? fn-sym 'range)
-     (format "list(range(~a))" (string-join (map emit-expr args) ", "))]
-    [(eq? fn-sym 'into)
-     (format "list(~a)" (emit-expr (cadr args)))]
-    [(eq? fn-sym 'apply)
-     (format "~a(*~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
-    [(eq? fn-sym 'concat)
-     (format "(~a + ~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
-    [(eq? fn-sym 'empty?)
-     (format "(len(~a) == 0)" (emit-expr (car args)))]
-    [(eq? fn-sym 'first)
-     (format "~a[0]" (emit-expr (car args)))]
-    [(eq? fn-sym 'second)
-     (format "~a[1]" (emit-expr (car args)))]
-    [(eq? fn-sym 'last)
-     (format "~a[-1]" (emit-expr (car args)))]
-    [(eq? fn-sym 'rest)
-     (format "~a[1:]" (emit-expr (car args)))]
-    [(eq? fn-sym 'nth)
-     (format "~a[~a]" (emit-expr (car args)) (emit-expr (cadr args)))]
-    [(eq? fn-sym 'identity)
-     (emit-expr (car args))]
-    [(memq fn-sym '(+ - * /))
-     (format "(~a)"
-             (string-join (map emit-expr args) (format " ~a " sym-str)))]
-    [(memq fn-sym '(= not=))
-     (define op (if (eq? fn-sym '=) "==" "!="))
-     (format "(~a ~a ~a)" (emit-expr (car args)) op (emit-expr (cadr args)))]
-    [(memq fn-sym '(< > <= >=))
-     (format "(~a ~a ~a)" (emit-expr (car args)) sym-str (emit-expr (cadr args)))]
-    [(memq fn-sym '(and or))
-     (define op (if (eq? fn-sym 'and) "and" "or"))
-     (format "(~a ~a ~a)" (emit-expr (car args)) op (emit-expr (cadr args)))]
-    [(eq? fn-sym 'mod)
-     (format "(~a % ~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
+    [handler (handler args)]
+    [(hash-ref VARIADIC-INFIX-OPS fn-sym #f)
+     => (lambda (op)
+          (format "(~a)" (string-join (map emit-expr args) (format " ~a " op))))]
+    [(hash-ref BINARY-INFIX-OPS fn-sym #f)
+     => (lambda (op)
+          (format "(~a ~a ~a)" (a1 args) op (a2 args)))]
     [else
-     (format "~a(~a)" fn-str (string-join (map emit-expr args) ", "))]))
+     (format "~a(~a)" (mangle-name fn-sym) (emit-args args))]))
 
 ;; --- string-index-of helper -------------------------------------------------
 
