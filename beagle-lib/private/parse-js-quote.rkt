@@ -353,7 +353,4 @@
 
 (provide
  parse-js-ast-body
- ;; Re-exported from js-emit-utils.rkt for backward compatibility.
- JS-BINARY-OPS JS-ASSIGN-OPS
- js-binary-op? js-assign-op?
  splice-sym? splice-kind)
