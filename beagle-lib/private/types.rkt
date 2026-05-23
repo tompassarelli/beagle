@@ -17,7 +17,7 @@
          "tags.rkt")
 
 (define PRIMITIVES
-  '(String Int Float Bool Keyword Symbol Nil Any))
+  '(String Int Float Bool Keyword Symbol Nil Any NixType))
 
 ;; Target-specific sugar: #lang beagle/clj accepts JVM names.
 ;; These resolve to canonical names in the parser before the checker sees them.
@@ -30,7 +30,7 @@
   (hasheq 'Number (lambda () (type-union (list (type-prim 'Int) (type-prim 'Float))))))
 
 (define PARAMETRIC-CTORS
-  '(Vec List Set Map Promise))
+  '(Vec List Set Map Promise NixType))
 
 ;; --- type AST --------------------------------------------------------------
 

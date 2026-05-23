@@ -15,6 +15,10 @@
 (define (indent n)
   (make-string (* 2 n) #\space))
 
+;; --- recur context (parameterized during loop emission) -------------------
+
+(define current-recur-name (make-parameter #f))
+
 ;; --- identifier mangling ---------------------------------------------------
 
 (define (mangle-name sym)
@@ -183,9 +187,7 @@
                     (string-join ctors "\n"))]
 
     [(defscalar-form? f)
-     ;; Scalars are just aliases in Nix
-     (format "~a# scalar ~a (validated at compile time)" ind
-             (mangle-name (defscalar-form-name f)))]
+     (emit-defscalar-nix f depth)]
 
     [(nix-inherit? f)
      (format "~ainherit ~a;"
@@ -203,6 +205,54 @@
                           " "))]
 
     [else (format "~a# unsupported form: ~v" ind f)]))
+
+;; --- defscalar → branded constructor with runtime predicates ---------------
+
+(define (scalar-pred->nix backing-sym v p)
+  (define op (scalar-predicate-op p))
+  (define val (scalar-predicate-value p))
+  (case op
+    [(>) (format "~a > ~v" v val)]
+    [(>=) (format "~a >= ~v" v val)]
+    [(<) (format "~a < ~v" v val)]
+    [(<=) (format "~a <= ~v" v val)]
+    [(=) (format "~a == ~v" v val)]
+    [(==) (format "~a == ~v" v val)]
+    [(!=) (format "~a != ~v" v val)]
+    [(not=) (format "~a != ~v" v val)]
+    [else (error 'emit-nix "defscalar: unsupported predicate operator: ~a" op)]))
+
+(define (backing-type-check backing-sym v)
+  (case backing-sym
+    [(Int) (format "builtins.isInt ~a" v)]
+    [(Float) (format "builtins.isFloat ~a" v)]
+    [(String) (format "builtins.isString ~a" v)]
+    [(Bool) (format "builtins.isBool ~a" v)]
+    [else #f]))
+
+(define (emit-defscalar-nix f depth)
+  (define ind (indent depth))
+  (define name (defscalar-form-name f))
+  (define backing (defscalar-form-backing-type f))
+  (define preds (defscalar-form-predicates f))
+  (define ctor-name (mangle-name (string->symbol (format "->~a" name))))
+  (define v "v")
+  (define backing-assert (backing-type-check backing v))
+  (define pred-asserts
+    (map (lambda (p) (scalar-pred->nix backing v p)) preds))
+  (define all-asserts
+    (if backing-assert (cons backing-assert pred-asserts) pred-asserts))
+  (cond
+    [(null? all-asserts)
+     ;; No checks — identity function as a brand
+     (format "~a~a = v: v;" ind ctor-name)]
+    [else
+     (define assert-block
+       (string-join
+        (for/list ([a (in-list all-asserts)])
+          (format "assert ~a;" a))
+        " "))
+     (format "~a~a = v: ~a v;" ind ctor-name assert-block)]))
 
 ;; --- record → attrset constructor + accessors ------------------------------
 
@@ -315,8 +365,8 @@
      (emit-nix-attrs (map-form-pairs e) depth)]
 
     [(set-form? e)
-     ;; Nix has no set literal — emit as a list (builtins.listToAttrs could work but list is simpler)
-     (emit-nix-list (set-form-items e) depth)]
+     (error 'emit-nix
+            "Nix has no set literal. Use a list (#{...} → [...]) or an attrset {:k true} for set-of-keywords semantics.")]
 
     [(kw-access? e)
      (define target (emit-expr (kw-access-target e) depth))
@@ -347,17 +397,24 @@
      (emit-loop e depth)]
 
     [(recur-form? e)
-     ;; Should only appear inside loop — handled there
-     "null /* recur outside loop */"]
+     (define name (current-recur-name))
+     (unless name
+       (error 'emit-nix "(recur ...) outside of (loop ...)"))
+     (define arg-strs
+       (map (lambda (a) (paren-wrap (emit-expr a depth) a))
+            (recur-form-args e)))
+     (if (null? arg-strs)
+       name
+       (string-append name " " (string-join arg-strs " ")))]
 
     [(check-expr? e)
      (define inner (emit-expr (check-expr-expr e) depth))
-     (format "(let r = ~a; in if r ? __tag && r.__tag == \"Ok\" then r.value else abort \"check failed\")"
+     (format "(let r = ~a; in if r ? _tag && r._tag == \"Ok\" then r.value else abort \"check failed\")"
              inner)]
     [(rescue-form? e)
      (define inner (emit-expr (rescue-form-expr e) depth))
      (define fallback (emit-expr (rescue-form-fallback e) depth))
-     (format "(let r = ~a; in if r ? __tag && r.__tag == \"Ok\" then r.value else ~a)"
+     (format "(let r = ~a; in if r ? _tag && r._tag == \"Ok\" then r.value else ~a)"
              inner fallback)]
     [(target-case-form? e)
      (define cases (target-case-form-cases e))
@@ -366,8 +423,10 @@
        (error 'beagle "target-case: no branch for target nix"))
      (emit-expr branch depth)]
     [(try-form? e)
-     ;; Nix has builtins.tryEval
-     (format "builtins.tryEval (~a)" (emit-body (try-form-body e) depth))]
+     ;; Nix's builtins.tryEval returns { success; value; } — unwrap to value-or-null
+     ;; so the rest of beagle sees the same semantics as other targets.
+     (format "(let __t = builtins.tryEval (~a); in if __t.success then __t.value else null)"
+             (emit-body (try-form-body e) depth))]
 
     [(unsafe-clj? e)
      (unsafe-clj-clj-string e)]
@@ -384,12 +443,8 @@
      (emit-expr (with-meta-expr e) depth)]
 
     [(method-call? e)
-     ;; Nix doesn't have methods — emit as function call
-     (define target (emit-expr (method-call-target e) depth))
-     (define method (symbol->string (method-call-method-name e)))
-     (define args (map (lambda (a) (emit-expr a depth)) (method-call-args e)))
-     (format "~a.~a~a" target method
-             (if (null? args) "" (string-append " " (string-join args " "))))]
+     (error 'emit-nix
+            "method calls (.foo target) have no Nix translation. Use (foo target ...) for plain function application or (target.foo ...) for attrset access.")]
 
     [(await-form? e)
      (error 'beagle-nix "await is only supported in beagle/js")]
@@ -491,7 +546,7 @@
 
     ;; --- end Nix-specific forms ----------------------------------------------
 
-    [else (format "null /* unsupported: ~v */" e)]))
+    [else (error 'emit-nix "no Nix emission defined for AST node: ~v" e)]))
 
 ;; --- let -------------------------------------------------------------------
 
@@ -528,6 +583,12 @@
     ;; Unary not → !
     [(and fn-name (eq? fn-name 'not) (= (length args) 1))
      (format "!~a" (paren-wrap (emit-expr (car args) depth) (car args)))]
+
+    ;; mod — Nix has no native modulo; emit inline arithmetic
+    [(and fn-name (eq? fn-name 'mod) (= (length args) 2))
+     (define a-str (emit-expr (car args) depth))
+     (define b-str (emit-expr (cadr args) depth))
+     (format "(~a - (~a / ~a) * ~a)" a-str a-str b-str b-str)]
 
     ;; Arithmetic/comparison — infix
     [(and fn-name (nix-infix-op fn-name))
@@ -692,7 +753,6 @@
     [(<) "<"] [(>) ">"] [(<=) "<="] [(>=) ">="]
     [(=) "=="] [(==) "=="] [(not=) "!="] [(!=) "!="]
     [(and) "&&"] [(or) "||"]
-    [(mod) "/* mod */"]
     [else #f]))
 
 (define (paren-wrap text expr)
@@ -874,38 +934,67 @@
       (format "~a = ~a;" field (emit-expr (with-update-value u) depth))))
   (format "(~a // { ~a })" target (string-join update-entries " ")))
 
-;; --- for comprehension → builtins.map + builtins.filter --------------------
+;; --- for comprehension ----------------------------------------------------
+;; (for [x xs :when (pred x) y ys] body) →
+;;   concatMap (x: optionals (pred x) (concatMap (y: [body]) ys)) xs
+;; Bindings nest left-to-right; :when filters the *next* binding's iteration
+;; (matches Clojure semantics); :let extends scope; :while truncates.
+;;
+;; emit-nix supports multiple bindings + :when; :let lowers to a wrapping let;
+;; :while is not expressible without imperative state — emit an explicit error.
 
 (define (emit-for e depth)
   (define clauses (for-form-clauses e))
   (define body (for-form-body e))
 
-  ;; Find the binding and any :when filters
-  (define binding-clause (findf for-binding? clauses))
-  (define when-clauses (filter for-when? clauses))
+  (when (null? clauses)
+    (error 'emit-nix "(for [] ...) has no bindings"))
+  (unless (for-binding? (car clauses))
+    (error 'emit-nix "(for ...) must start with a binding clause"))
 
-  (cond
-    [binding-clause
-     (define var (mangle-name (for-binding-name binding-clause)))
-     (define coll (emit-expr (for-binding-expr binding-clause) depth))
-     (define body-str (emit-body body depth))
+  (define body-str (emit-body body depth))
 
-     (define mapped (format "builtins.map (~a: ~a) ~a" var body-str coll))
+  ;; Build the innermost expression: a singleton list of the body so concatMap
+  ;; can flatten across iterations.
+  (define (inner) (format "[ ~a ]" body-str))
 
-     (if (null? when-clauses)
-       mapped
-       (format "builtins.filter (~a: ~a) (~a)"
-               var
-               (emit-expr (for-when-test (car when-clauses)) depth)
-               mapped))]
-    [else "[ ]"]))
+  (let loop ([cs clauses] [emit (inner)])
+    (cond
+      [(null? cs) emit]
+      [else
+       (define c (car cs))
+       (cond
+         [(for-binding? c)
+          (define var (mangle-name (for-binding-name c)))
+          (define coll (emit-expr (for-binding-expr c) depth))
+          (loop (cdr cs)
+                (format "builtins.concatMap (~a: ~a) ~a"
+                        var emit (paren-wrap coll (for-binding-expr c))))]
+         [(for-when? c)
+          (define test-str (emit-expr (for-when-test c) depth))
+          (loop (cdr cs)
+                (format "(if ~a then ~a else [ ])" test-str emit))]
+         [(for-let? c)
+          (define binds (for-let-bindings c))
+          (define ind (indent (+ depth 1)))
+          (define bind-strs
+            (for/list ([b (in-list binds)])
+              (format "~a~a = ~a;" ind
+                      (mangle-name (let-binding-name b))
+                      (emit-expr (let-binding-value b) (+ depth 1)))))
+          (loop (cdr cs)
+                (string-append
+                 "let\n"
+                 (string-join bind-strs "\n") "\n"
+                 (indent depth) "in " emit))]
+         [else
+          (error 'emit-nix ":while is not expressible in Nix without imperative state — use :when with a guard instead")])])))
 
 ;; --- loop/recur → recursive Nix function -----------------------------------
 
 (define (emit-loop e depth)
   (define bindings (loop-form-bindings e))
   (define body (loop-form-body e))
-  (define ind (indent (+ depth 1)))
 
   (define param-names
     (for/list ([b (in-list bindings)])
@@ -915,10 +1004,12 @@
       (emit-expr (let-binding-value b) depth)))
 
   (define param-str (string-join param-names " "))
+  (define body-str
+    (parameterize ([current-recur-name "__loop"])
+      (emit-body body depth)))
 
-  (format "let __loop = ~a: ~a; in __loop ~a"
-          param-str
-          (emit-body body depth)
+  (format "(let __loop = ~a: ~a; in __loop ~a)"
+          param-str body-str
           (string-join init-vals " ")))
 
 ;; --- body (sequence of exprs → last one) -----------------------------------
