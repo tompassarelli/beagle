@@ -139,3 +139,14 @@
   (check-true (string-contains? out "END AS \"tier\""))
   (check-true (string-contains? out "UNION"))
   (check-true (string-contains? out "'discontinued' AS \"tier\"")))
+
+;; --- stdlib funcs (LTRIM, SIGN, ROUND, CURRENT_TIMESTAMP) -------------------
+
+(test-case "sql-stdlib-funcs fixture — newly-added scalar/math/time functions"
+  (define out (sql-fixture "sql-stdlib-funcs.bsql"))
+  (check-true (string-contains? out "LTRIM(\"raw_name\") AS \"cleaned\""))
+  (check-true (string-contains? out "SIGN(\"balance\") AS \"bal_sign\""))
+  (check-true (string-contains? out "ROUND(\"qty\" * \"unit_price\", 2) AS \"line_total\""))
+  ;; niladic keywords emit without parens — portable across PostgreSQL, MySQL, SQLite
+  (check-true (string-contains? out "CURRENT_TIMESTAMP AS \"fetched_at\""))
+  (check-false (string-contains? out "CURRENT_TIMESTAMP()")))

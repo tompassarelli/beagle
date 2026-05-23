@@ -1,0 +1,11 @@
+#lang beagle/sql
+(ns test.sql.stdlib-funcs)
+
+;; Common SQL stdlib functions: string trim variants, math, timestamps.
+(select [id
+         (ltrim raw_name :as cleaned)
+         (sign balance :as bal_sign)
+         (round (* qty unit_price) 2 :as line_total)
+         (current_timestamp :as fetched_at)]
+  (from order_items)
+  (where (and (> qty 0) (is-not-null raw_name))))

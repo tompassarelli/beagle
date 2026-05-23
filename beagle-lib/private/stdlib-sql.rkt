@@ -21,20 +21,27 @@
    'avg            (fn-of '(Any) 'Float)
    'min            (fn-of '(Any) 'Any)
    'max            (fn-of '(Any) 'Any)
+   'string_agg     (fn-of '(String String) 'String)
+   'group_concat   (fn-of '(String String) 'String)
 
    ;; --- String functions ---
-   'upper     (fn-of '(String) 'String)
-   'lower     (fn-of '(String) 'String)
-   'trim      (fn-of '(String) 'String)
-   'length    (fn-of '(String) 'Int)
-   'concat    (fn-of '(String String) 'String)
-   'substring (fn-of '(String Int Int) 'String)
-   'replace   (fn-of '(String String String) 'String)
-   'position  (fn-of '(String String) 'Int)
-   'left      (fn-of '(String Int) 'String)
-   'right     (fn-of '(String Int) 'String)
-   'lpad      (fn-of '(String Int String) 'String)
-   'rpad      (fn-of '(String Int String) 'String)
+   'upper        (fn-of '(String) 'String)
+   'lower        (fn-of '(String) 'String)
+   'trim         (fn-of '(String) 'String)
+   'ltrim        (fn-of '(String) 'String)
+   'rtrim        (fn-of '(String) 'String)
+   'length       (fn-of '(String) 'Int)
+   'char_length  (fn-of '(String) 'Int)
+   'octet_length (fn-of '(String) 'Int)
+   'concat       (fn-of '(String String) 'String)
+   'substring    (fn-of '(String Int Int) 'String)
+   'replace      (fn-of '(String String String) 'String)
+   'position     (fn-of '(String String) 'Int)
+   'left         (fn-of '(String Int) 'String)
+   'right        (fn-of '(String Int) 'String)
+   'lpad         (fn-of '(String Int String) 'String)
+   'rpad         (fn-of '(String Int String) 'String)
+   'reverse      (fn-of '(String) 'String)
 
    ;; --- Math functions ---
    'abs       (fn-of '(Any) 'Any)
@@ -44,6 +51,10 @@
    'mod       (fn-of '(Int Int) 'Int)
    'power     (fn-of '(Any Any) 'Float)
    'sqrt      (fn-of '(Float) 'Float)
+   'sign      (fn-of '(Any) 'Int)
+   'exp       (fn-of '(Float) 'Float)
+   'ln        (fn-of '(Float) 'Float)
+   'log       (fn-of '(Float) 'Float)
 
    ;; --- Null / coalesce ---
    'coalesce  (fn-of '(Any Any) 'Any)
@@ -52,10 +63,13 @@
    'least     (fn-of '(Any Any) 'Any)
 
    ;; --- Date/time functions ---
-   'now            (fn-of '() 'Any)
-   'date_trunc     (fn-of '(String Any) 'Any)
-   'extract        (fn-of '(String Any) 'Int)
-   'age            (fn-of '(Any Any) 'Any)
+   'now               (fn-of '() 'Any)
+   'current_date      (fn-of '() 'Any)
+   'current_time      (fn-of '() 'Any)
+   'current_timestamp (fn-of '() 'Any)
+   'date_trunc        (fn-of '(String Any) 'Any)
+   'extract           (fn-of '(String Any) 'Int)
+   'age               (fn-of '(Any Any) 'Any)
 
    ;; --- Window functions ---
    'row_number  (fn-of '() 'Int)
@@ -67,6 +81,8 @@
    'first_value (fn-of '(Any) 'Any)
    'last_value  (fn-of '(Any) 'Any)
    'nth_value   (fn-of '(Any Int) 'Any)
+   'percent_rank (fn-of '() 'Float)
+   'cume_dist    (fn-of '() 'Float)
 
    ;; --- Type casting (used internally) ---
    'cast       (fn-of '(Any Any) 'Any)))

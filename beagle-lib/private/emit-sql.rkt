@@ -280,6 +280,11 @@
   (format "~a.~a" (sql-quote-identifier (sql-column-ref-table-or-alias ref))
           (sql-quote-identifier (sql-column-ref-column ref))))
 
+;; CURRENT_TIMESTAMP / CURRENT_DATE / CURRENT_TIME are SQL keywords, not
+;; functions — most engines (notably SQLite) reject the trailing `()`.
+(define SQL-NILADIC-KEYWORDS
+  '(current_date current_time current_timestamp))
+
 (define (emit-sql-aggregate agg)
   (define fn-name (sql-aggregate-fn-name agg))
   (define arg-expr (sql-aggregate-expr agg))
@@ -287,9 +292,17 @@
     (cond
       [(eq? fn-name 'count-distinct)
        (format "COUNT(DISTINCT ~a)" (emit-sql-expr arg-expr))]
+      [(and (not arg-expr) (memq fn-name SQL-NILADIC-KEYWORDS))
+       (string-upcase (symbol->string fn-name))]
       [else
        (define fn-str (string-upcase (symbol->string fn-name)))
-       (define arg-str (if arg-expr (emit-sql-expr arg-expr) "*"))
+       ;; `COUNT()` with no arg means `COUNT(*)`. Other zero-arg functions
+       ;; (`NOW()` etc.) keep empty parens.
+       (define arg-str
+         (cond
+           [arg-expr             (emit-sql-expr arg-expr)]
+           [(eq? fn-name 'count) "*"]
+           [else                 ""]))
        (format "~a(~a)" fn-str arg-str)]))
   (maybe-alias base (sql-aggregate-alias agg)))
 

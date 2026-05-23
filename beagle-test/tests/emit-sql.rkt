@@ -596,3 +596,27 @@
 (test-case "+nan.0 rejected as numeric literal"
   (define out (se "(define-target sql) " "(select [name] (from products) (where (> price +nan.0)))"))
   (check-true (and (string? out) (string-contains? out "cannot emit +nan.0"))))
+
+;; =====================================================================
+;; Zero-arg non-COUNT functions emit empty parens (not `(*)`)
+;; =====================================================================
+
+(test-case "now() emits empty parens, not (*)"
+  (define out (se "(define-target sql) " "(select [(now)] (from t))"))
+  (check-true (string-contains? out "NOW()"))
+  (check-false (string-contains? out "NOW(*)")))
+
+(test-case "current_timestamp emits niladic keyword (no parens) with alias"
+  (define out (se "(define-target sql) " "(select [(current_timestamp :as ts)] (from t))"))
+  (check-true (string-contains? out "CURRENT_TIMESTAMP AS \"ts\""))
+  (check-false (string-contains? out "CURRENT_TIMESTAMP()"))
+  (check-false (string-contains? out "CURRENT_TIMESTAMP(*)")))
+
+(test-case "current_date emits niladic keyword"
+  (define out (se "(define-target sql) " "(select [(current_date)] (from t))"))
+  (check-true (string-contains? out "CURRENT_DATE"))
+  (check-false (string-contains? out "CURRENT_DATE()")))
+
+(test-case "count() with no arg still emits COUNT(*)"
+  (define out (se "(define-target sql) " "(select [(count)] (from t))"))
+  (check-true (string-contains? out "COUNT(*)")))

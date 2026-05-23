@@ -113,13 +113,15 @@
     is-null is-not-null ||))
 
 (define SQL-KNOWN-FUNCTIONS
-  '(count sum avg min max coalesce upper lower trim length
-    concat substring replace position left right lpad rpad
-    now date_trunc extract age
-    abs ceil floor round mod power sqrt
+  '(count sum avg min max coalesce upper lower trim ltrim rtrim length
+    char_length octet_length
+    concat substring replace position left right lpad rpad reverse
+    string_agg group_concat
+    now current_date current_time current_timestamp date_trunc extract age
+    abs ceil floor round mod power sqrt sign exp ln log
     nullif greatest least
     count-distinct
-    row_number rank dense_rank ntile lag lead
+    row_number rank dense_rank ntile lag lead percent_rank cume_dist
     first_value last_value nth_value))
 
 (define SQL-AGGREGATE-FUNCTIONS
