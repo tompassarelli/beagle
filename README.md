@@ -1,169 +1,160 @@
 # Beagle
 
-Beagle is a typed authoring layer for agent-written software.
-
-Agents write compact source. Beagle expands it, checks it, and emits ordinary target code. The types exist at authoring time and disappear at runtime.
-
-```text
-.bclj/.bjs/.bnix/.bpy → parse → check → emit → .clj / .js / .nix / .py
-                               ↑
-                  expansion, checking, emission
-                  share one AST + diagnostic path
-```
-
-This is an architectural consequence of being a transpiler, not a design goal we started with. We discovered it while building procedural macros and confirmed it experimentally (E18, E19). It means generated code is checked the same way as hand-written code — procedural macros get typed input/output contracts for free.
-
-```text
-target language  =  deployment format
-Beagle AST       =  authoring format
-CNF graph        =  reasoning format
-```
-
-Beagle emits code for runtimes. It also emits [claims](https://github.com/tompassarelli/claim-normal-form) for agents. The same program can be executed by ordinary tools and reasoned about structurally by agent tools.
-
-## A program
+**A typed authoring language that catches your config bugs before they reach Nix, Clojure, JavaScript, or Python.**
 
 ```racket
-#lang beagle/js
-(ns inventory.core)
-(define-mode strict)
+#lang beagle/nix
+(ns hosts.whiterabbit)
 
-(defrecord StockLevel [(product-id : Int)
-                       (quantity   : Int)
-                       (min-qty    : Int)])
-
-(defn understocked? [(s : StockLevel)] : Bool
-  (< (stocklevel-quantity s) (stocklevel-min-qty s)))
-
-(defn reorder-quantity [(s : StockLevel)] : Int
-  (if (understocked? s)
-      (- (stocklevel-min-qty s) (stocklevel-quantity s))
-      0))
+(module [config lib pkgs]
+  (def msg : String config.services.openssh.enable))
+;; ✗ hosts/whiterabbit.bnix:4:0: def msg: expected String, got Bool
+;;   (resolved from .beagle-cache/schema.json — services.openssh.enable : bool)
 ```
 
-## Procedural macros
+The schema knows `services.openssh.enable` is `Bool`. Beagle knows that too. You assign it to a `String` field; you get a compile error with file:line:col precision — **before `nixos-rebuild` ever runs**.
 
-Compile-time code generation with typed AST contracts. Macro bodies are written in Beagle using syntax constructors — no context-switch to Racket. Inputs and outputs are contract-checked; the expansion goes through the full checking pipeline.
+## What it is
+
+Beagle is a typed s-expression language that emits ordinary Nix / Clojure / JavaScript / Python / Racket / SQL / ClojureScript. You write one typed source; you get plain target code anyone can deploy or audit.
+
+```
+.bnix / .bclj / .bjs / .bpy → parse → check → emit → .nix / .clj / .js / .py
+                                       ↑
+                            macros, schema, stdlib, type narrowing
+                            all share one AST + diagnostic path
+```
+
+**Design principles** (the ones that actually shape the surface):
+
+- **One canonical idiom per concept.** No `with-do` vs `with`. No `inh` and `inherit`. Single name, single shape.
+- **Zero escape hatches.** No `unsafe-nix`, no `unsafe-js`, no `any`. If the stdlib doesn't cover something, add a one-line type signature.
+- **Schema is types.** NixOS option schemas (16k+ options) flow into the type checker. Misspelled option paths fail at parse time. Wrong-typed values fail at type-check time. You never wait for `nixos-rebuild` to find out.
+- **LLM authoring is first-class.** Rich types, explicit forms, structured errors, "did you mean?" suggestions, low syntactic surface area.
+
+## Demo: the NixOS story
+
+Write your config in `.bnix`:
 
 ```racket
-#lang beagle
-(define-macro beagle defentity
-  [(name : Symbol) (fields : (Vec Syntax))] : (Vec Form)
-  (let [record (make-defrecord name
-                 (map (fn [(f : Syntax)]
-                   (make-field (syntax-name f) (syntax-type f)))
-                   fields))
-        getters (map (fn [(f : Syntax)]
-                   (make-defn
-                     (format-symbol "~a-~a" name (syntax-name f))
-                     (list (make-param 'r name))
-                     (syntax-type f)
-                     (make-get 'r (make-keyword (syntax-name f)))))
-                  fields)]
-    (cons record getters)))
+#lang beagle/nix
+(ns modules.demo)
 
-(defentity User ((name : String) (email : String) (age : Int)))
-;; → defrecord User + typed getters User-name, User-email, User-age
+(module [config lib pkgs]
+  (with-cfg config.myConfig.modules.demo
+    {:options.myConfig.modules.demo
+     {:enable (lib/mkEnableOption "demo service")
+      :port (lib/mkOption {:type lib/types.port :default 8080})}
+
+     :config (lib/mkIf cfg.enable
+       {:environment.systemPackages [pkgs.hello]
+        :networking.firewall.allowedTCPPorts [cfg.port]})}))
 ```
 
-Proc macros compress 2-3× at realistic scale when you have enough instances to amortize the definition cost (crossover at 2-4 instances). Below that, hand-written code is shorter. Beagle's template macros can't express these patterns — they can't iterate over data to generate variable numbers of forms.
+Compiles to:
+
+```nix
+{ config, lib, pkgs, ... }:
+let cfg = config.myConfig.modules.demo; in {
+  options.myConfig.modules.demo = {
+    enable = lib.mkEnableOption "demo service";
+    port = lib.mkOption { type = lib.types.port; default = 8080; };
+  };
+  config = lib.mkIf cfg.enable {
+    environment.systemPackages = [ pkgs.hello ];
+    networking.firewall.allowedTCPPorts = [ cfg.port ];
+  };
+}
+```
+
+What you get for free:
+
+| Mistake | When you find out |
+|---|---|
+| `services.opensh.enable` (typo) | parse time, with "did you mean services.openssh.enable?" |
+| `(lib/mkOption {:type true})` (Bool where NixType expected) | type check |
+| `(derivation {:src ./.})` (missing `:pname`/`:name`) | type check, with explanation |
+| `(unsafe-nix "...")` (escape hatch) | parse rejection — no escape hatches exist |
+| `(if config.X.enable foo bar)` where foo and bar are different types | type check (flow narrowing) |
+| Forgetting to git-add new modules | rebuild prereq check |
+
+## Compared to
+
+| | beagle | Nickel | Dhall | raw Nix + nil |
+|---|---|---|---|---|
+| Static type checking | ✓ | ✓ | ✓ | partial (nil LSP) |
+| **Schema-derived types** | **✓** | manual | manual | – |
+| Multi-target backends | **✓** (7) | – | – | – |
+| Procedural macros with typed AST contracts | **✓** | – | – | – |
+| Zero escape hatches | **✓** | `Dyn` exists | – | `builtins.unsafeDiscardOutputDependency` etc. |
+| LSP / hover / completion | ✓ | ✓ | partial | ✓ (nil) |
+| Native NixOS module integration | ✓ | partial | – | ✓ |
+| Compiles to (rather than replacing) Nix | ✓ | – | – | – |
+
+The "compiles to" part is the unique structural choice. Beagle outputs real `.nix` files that any NixOS or nix-darwin user can read, audit, and build with stock tools. You're not asking your team to deploy a new runtime — you're asking them to read better-typed Nix.
 
 ## Targets
 
-**Primary**
-
-| Target | `#lang` | Stdlib | Verified with |
-|--------|---------|--------|---------------|
-| Clojure | `beagle/clj` | 414 entries | Babashka |
-| JavaScript | `beagle/js` | 55 native + 28 typed `js/*` forms | Node / Bun |
+| Target | `#lang` | Stdlib | Runtime |
+|---|---|---|---|
+| Clojure | `beagle/clj` | 414 entries | JVM, Babashka |
+| JavaScript | `beagle/js` | 55 native + 28 typed `js/*` forms | Node, Bun |
 | Python | `beagle/py` | 151 entries | Python 3 |
-| Nix | `beagle/nix` | 111 entries | nix eval |
+| Nix | `beagle/nix` | 527 entries (parametric types) | nix-eval |
+| ClojureScript | `beagle/cljs` | 86 stdlib entries | browser, Node |
+| SQL | `beagle/sql` | 54 stdlib entries | DDL/DML emission |
+| Typed Racket | `beagle/rkt` | (oracle) | `raco make` validates type promises |
 
-**Experimental / verification**
-
-| Target | `#lang` | Notes |
-|--------|---------|-------|
-| ClojureScript | `beagle/cljs` | 86 stdlib entries, compile-only |
-| SQL | `beagle/sql` | 54 stdlib entries, DDL, DML, schema validation |
-| Typed Racket | `beagle/rkt` | Oracle — `raco make` independently validates type promises |
-
-319 portable stdlib entries shared across all targets. ~696 pre-typed entries (portable + Clojure + CLJS); JS, Nix, SQL, and Python add target-specific catalogs.
+319 portable stdlib entries shared across all targets, plus the target-specific catalogs above.
 
 ## Self-hosting
 
-Beagle compiles itself. 12 `.bjs` components (reader, parser, type checker, 5 emitters, AST, macros, lint, types) are written in Beagle targeting JavaScript. The Racket compiler compiles them to JS, producing a standalone `compiler.cjs` that runs on Bun — then that bundle compiles the same `.bjs` sources and produces identical output (bootstrap fixed-point proven).
+Beagle compiles itself. The 12 `.bjs` components (reader, parser, type checker, 5 emitters, AST, macros, lint, types) are written in Beagle targeting JavaScript. Bootstrap fixed-point proven: Racket compiler → JS bundle → JS bundle compiles same sources → byte-identical output.
 
-Emission parity verified: 11/11 modules of [Heist](https://github.com/tompassarelli/heist) (a full-stack app framework dogfooding Beagle) produce byte-identical output from both Racket and Bun compilers. The self-hosted compiler is the primary compilation path for Heist.
+Emission parity verified against [Heist](https://github.com/tompassarelli/heist) (a full-stack dogfood app): 11/11 modules produce byte-identical output from both compilers.
 
-## Raw strings
-
-`#r"..."` literals pass through without escape processing. Delimiter escalation with `#` characters for strings containing quotes:
-
-```racket
-#r"no escapes needed"
-#r#"contains "quotes" freely"#
-#r##"contains "# sequences"##
-```
-
-Useful for embedding JS/SQL/HTML templates, regex patterns, and `fmt` interpolation templates.
-
-## Experiments
-
-### E16: Does the type checker make agents faster?
-
-4 features built by Claude Sonnet agents — one group with no type checker, one with Beagle's structural checker (n=4, treat as directional):
-
-| | No types | With types | |
-|---|---:|---:|---|
-| Avg build time | 362s | **274s** | **24% faster** |
-| Correctness | 8/8 | 8/8 | identical |
-| Hardest feature | 600s | **328s** | **45% faster** |
-
-Types didn't move correctness at this scale — they moved how fast the agent got there, with the gap widening on features with more coordination complexity.
-
-The load-bearing finding is about *integration*, not the checker itself: the same checker, poorly wired into the agent loop (noisy output, wrong workflow position, vague framing), imposed a 76% penalty. Three non-code fixes swung the outcome by 100 percentage points. The contribution is as much *how* the checker reaches the agent as the checker.
-
-[Results](https://github.com/tompassarelli/beagle-lab/blob/main/e16-workflow-scheduler/results/type/RESULTS.md) · [Devlog](docs/devlog/018-e16-type-surface.md)
-
-### E18–E19: Procedural macros
-
-E18 measured compression: proc macros compress 2-3× at realistic scale. Beagle's template macros can't express any of the three test patterns.
-
-E19 tested whether agents can write proc macros. A prompted agent (with docs) wrote a working macro in 2 iterations / 271s. An unprompted agent (no proc macro docs) independently invented runtime data dispatch in 1 iteration / 117s — faster and simpler, but without compile-time type coverage of the generated code. Proc macro docs are load-bearing for discoverability; without them, agents default to runtime patterns.
-
-[E18 Results](https://github.com/tompassarelli/beagle-lab/blob/main/e18-macro-compression/results/RESULTS.md) · [E19 Results](https://github.com/tompassarelli/beagle-lab/blob/main/e19-agent-macro-authoring/results/RESULTS.md)
-
-### E1–E15: Cross-language comparison
-
-| Metric                    | Beagle | Clojure | Python + mypy |
-| ------------------------- | -----: | ------: | ------------: |
-| Correctness (E4, 35 bugs) |    3/3 |     0/3 |           3/3 |
-| Best wall time            |   287s |    365s |          255s |
-
-Beagle matches the typed baseline (mypy) on correctness and beats the untyped one (Clojure). mypy edges wall time — the trade Beagle makes is one typed surface across multiple backends, not single-language speed.
-
-[Full methodology](https://github.com/tompassarelli/beagle-lab)
-
-## Things we had to prove
-
-- ~~**Proc macro body language.**~~ Resolved: `define-macro beagle` evaluates macro bodies as Beagle using syntax constructors. No context-switch to Racket.
-- ~~**Cross-target macro verification.**~~ Resolved (E22): same proc macro compiles and runs identically on all 6 non-SQL targets.
-- ~~**CNF visibility.**~~ Resolved (E20): query tools expand macros before extracting definitions.
-
-## Setup
+## Install
 
 Requires [Racket](https://racket-lang.org/) 8.x+.
 
 ```sh
-raco pkg install beagle
+git clone https://github.com/tompassarelli/beagle
+cd beagle
+raco pkg install --link beagle-lib/ beagle-test/ beagle-doc/ beagle/
+raco test beagle-test/tests/    # 1343 tests
 ```
 
-Or from source:
+For NixOS users dogfooding their config:
 
 ```sh
-raco pkg install --link beagle-lib/ beagle-test/ beagle-doc/ beagle/
-raco test beagle-test/tests/   # 1296 tests
+cd ~/your-nixos-config
+beagle-extract-schema           # writes .beagle-cache/schema.json
+beagle-validate                 # type-check every .bnix
 ```
+
+## First program (60 seconds)
+
+```racket
+#lang beagle/nix
+(ns hello)
+
+(def greeting : String "hello, world")
+```
+
+```sh
+beagle-build hello.bnix          # → hello.nix
+nix-instantiate --eval hello.nix # → "hello, world"
+```
+
+## Tooling
+
+- **LSP server** — hover (target-aware completion against stdlib + schema), diagnostics, symbols, jump-to-definition. `nvim-lspconfig` and Doom Emacs entries forthcoming.
+- **Typed REPL** — persistent environment, parse → check → emit per input
+- **Reactive daemon** — AST cache, inotify file watching, ~100ms re-check
+- **Property testing** — record generators, return-type inference, differential testing
+- **`beagle-validate`** — schema-driven option-path validator with Levenshtein "did you mean", cross-file conflict detection, auto-fix for unambiguous typos
+- **`beagle-nix-oracle`** — emit → `nix-instantiate --parse` → classify (independent codegen oracle)
+- **`bin/beagle-ci`** — tests + property tests + nixos-config validate gate
 
 ## Agent integration
 
@@ -172,21 +163,32 @@ beagle init --claude-code
 beagle-daemon start --watch .
 ```
 
-Generates a PostToolUse hook, settings, `CLAUDE.md`, and language context. The daemon re-checks within ~100ms of each save.
+Generates a PostToolUse hook, settings, `CLAUDE.md`, and language context. The daemon re-checks within ~100ms of each save. Designed around the finding (E16) that *how* the type checker reaches an agent matters as much as the checker itself.
 
-## Tooling
+## Research
 
-- **LSP server** — hover, diagnostics, symbols, jump-to-definition, completion
-- **Typed REPL** — persistent environment, parse → check → emit per input
-- **Reactive daemon** — AST cache, inotify file watching, ~100ms re-check
-- **Repair compiler** — blame, specfix, trace, cascade analysis
-- **Property testing** — record generators, return-type inference, differential testing
+| Question | Answer |
+|---|---|
+| E16: Do types make agents faster? | **24% faster** average, **45% on coordination-heavy features** (n=4). Same checker poorly-wired imposes 76% penalty — *integration matters as much as the type system*. |
+| E18: Do proc macros compress code? | **2-3×** at realistic scale (crossover at 2-4 instances). Beagle template macros can't express the test patterns. |
+| E19: Can agents write proc macros? | Yes, with docs (271s, 2 iterations). Without docs they invent runtime dispatch — proc macros need discoverability. |
+| E1-E15: vs Clojure / Python+mypy | Matches mypy correctness, beats Clojure correctness. mypy edges wall time — Beagle trades single-language speed for one typed surface across N backends. |
+
+[Full lab](https://github.com/tompassarelli/beagle-lab) — E0–E22, methodology, raw results.
+
+## Status
+
+`#lang beagle` v0.13.x — 1343 tests passing. **No v1.0 until others have used it in anger.** The author dogfoods on a 220-file NixOS config; production-grade for one user, ready-for-adventure for others.
+
+If you're a NixOS user who wants to try it: the [nixos-starter template](#) (forthcoming) gets you running in 60 seconds.
 
 ## Documentation
 
-- [`docs/cheatsheet.md`](docs/cheatsheet.md) — language summary
-- [`docs/agent-workflow.md`](docs/agent-workflow.md) — repair tool routing
-- [`docs/tool-reference.md`](docs/tool-reference.md) — CLI and tool catalog
-- [`docs/devlog/`](docs/devlog/) — development journal (21 entries)
-- [`beagle-lab`](https://github.com/tompassarelli/beagle-lab) — research journal: experiment tasks, results, methodology (E0–E22)
+- [`docs/cheatsheet.md`](docs/cheatsheet.md) — language summary (single page, designed as LLM context)
+- [`beagle-doc/scribblings/nix-target.scrbl`](beagle-doc/scribblings/nix-target.scrbl) — Scribble reference for the Nix target
+- [`beagle-doc/scribblings/`](beagle-doc/scribblings/) — Scribble docs (`raco docs beagle` after install)
+- [`beagle-lab`](https://github.com/tompassarelli/beagle-lab) — research journal, experiment results
 
+## License
+
+MIT.

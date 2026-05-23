@@ -739,7 +739,7 @@
 ;; Top-level entry: validate one or more files
 ;; ============================================================================
 
-(define (validate-files files #:auto-fix? [auto-fix? #f])
+(define (validate-files files #:auto-fix? [auto-fix? #f] #:verbose? [verbose? #f])
   (when (null? files)
     (eprintf "beagle-validate: no .bnix files to validate\n")
     (exit 2))
@@ -753,17 +753,19 @@
     (exit 2))
 
   (define schema (load-nixos-schema schema-path))
-  (eprintf "beagle-validate: loaded schema from ~a (~a options)\n"
-           schema-path
-           (hash-count (nixos-schema-table schema)))
+  (define schema-count (hash-count (nixos-schema-table schema)))
+  (when verbose?
+    (eprintf "beagle-validate: loaded schema from ~a (~a options)\n"
+             schema-path schema-count))
 
   (define hm-schema-path (find-hm-schema-json (car files)))
   (define hm-schema
     (and hm-schema-path (load-nixos-schema hm-schema-path)))
-  (when hm-schema
+  (define hm-count
+    (if hm-schema (hash-count (nixos-schema-table hm-schema)) 0))
+  (when (and verbose? hm-schema)
     (eprintf "beagle-validate: loaded HM schema from ~a (~a options)\n"
-             hm-schema-path
-             (hash-count (nixos-schema-table hm-schema))))
+             hm-schema-path hm-count))
 
   ;; Load validator config alongside schema; auto-discover HM roots if absent.
   (define loaded-cfg (load-validator-config schema-path))
@@ -835,11 +837,13 @@
 
   ;; myConfig introspective validation
   (define myconfig-declared (collect-myconfig-declarations all-file-keys))
+  (define myconfig-count (set-count myconfig-declared))
   (unless (set-empty? myconfig-declared)
     (define myconfig-errors (detect-myconfig-errors all-file-keys myconfig-declared))
     (set! all-errors (append all-errors myconfig-errors))
-    (eprintf "beagle-validate: introspected ~a myConfig declarations\n"
-             (set-count myconfig-declared)))
+    (when verbose?
+      (eprintf "beagle-validate: introspected ~a myConfig declarations\n"
+               myconfig-count)))
 
   ;; Cross-file conflict detection
   (define conflict-errors (detect-cross-file-conflicts all-file-keys schema))
@@ -867,10 +871,18 @@
                   (caddr fix)))
        (apply-auto-fixes! fixes)]))
 
-  ;; Summary
+  ;; Summary — single-line by default, expanded under --verbose
   (define error-count (length all-errors))
   (define file-count (length files))
-  (eprintf "\n~a file(s) checked, ~a error(s)\n" file-count error-count)
+  (cond
+    [verbose?
+     (eprintf "\n~a file(s) checked, ~a error(s)\n" file-count error-count)]
+    [else
+     (eprintf "beagle-validate: ~a files, ~a errors  (~a NixOS~a~a options)\n"
+              file-count error-count
+              schema-count
+              (if (positive? hm-count) (format " + ~a HM" hm-count) "")
+              (if (positive? myconfig-count) (format " + ~a myConfig" myconfig-count) ""))])
 
   error-count)
 
@@ -885,12 +897,14 @@
 (module+ main
   (require racket/cmdline)
   (define auto-fix? #f)
+  (define verbose? #f)
   (define files
     (command-line
      #:program "beagle-validate"
      #:once-each
      ["--auto-fix" "Apply unambiguous Levenshtein corrections" (set! auto-fix? #t)]
+     [("-v" "--verbose") "Show schema-load chatter + per-stage details" (set! verbose? #t)]
      #:args files
      files))
-  (define error-count (validate-files files #:auto-fix? auto-fix?))
+  (define error-count (validate-files files #:auto-fix? auto-fix? #:verbose? verbose?))
   (exit (if (zero? error-count) 0 1)))

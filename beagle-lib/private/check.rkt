@@ -180,6 +180,12 @@
 ;; NixOS option schema for validating dotted map keys in beagle/nix
 (define current-nixos-schema (make-parameter #f))
 
+;; Maps local let-binding names → the config.X.Y... prefix they alias.
+;; When `(let [cfg config.services.foo] ...)` is checked, this registers
+;; cfg → "services.foo" so `cfg.enable` inside the body resolves via
+;; schema lookup as "services.foo.enable".
+(define current-cfg-aliases (make-parameter (hasheq)))
+
 ;; --- schema → type translation --------------------------------------------
 ;; Map a Nix option schema entry's "t" field to a Beagle type. Recurses into
 ;; "inner" for parametric types (listOf, attrsOf, nullOr).
@@ -223,14 +229,31 @@
     [(not (symbol? sym)) #f]
     [else
      (define s (symbol->string sym))
+     (define path-str (resolve-cfg-alias s))
      (cond
-       [(not (string-prefix? s "config.")) #f]
+       [(not path-str) #f]
        [else
-        (define path-str (substring s 7))
         (define entry (nixos-option-lookup/wildcard schema path-str))
         (cond
           [(or (not entry) (eq? entry 'permissive)) #f]
           [else (schema-entry->beagle-type entry)])])]))
+
+;; Resolve a symbol like "config.X.Y" → "X.Y", or "cfg.foo" → "services.demo.foo"
+;; (when cfg is let-bound to config.services.demo). Returns #f if neither.
+(define (resolve-cfg-alias s)
+  (cond
+    [(string-prefix? s "config.") (substring s 7)]
+    [else
+     (define dot (for/or ([i (in-range (string-length s))]
+                          #:when (char=? (string-ref s i) #\.))
+                   i))
+     (cond
+       [(not dot) #f]
+       [else
+        (define head (substring s 0 dot))
+        (define tail (substring s (+ dot 1)))
+        (define prefix (hash-ref (current-cfg-aliases) (string->symbol head) #f))
+        (and prefix (string-append prefix "." tail))])]))
 
 ;; Expression-level source locations from the parser.
 (define current-check-src-table (make-parameter #f))
@@ -1464,7 +1487,29 @@
        [else (infer-cond-clauses clauses env)])]
     [(let-form? e)
      (define body-env (extend-with-let-bindings env (let-form-bindings e)))
-     (last-expr-type (let-form-body e) body-env)]
+     ;; Build cfg-alias map for any binding whose value is a `config.X` symbol.
+     (define-values (extra-aliases _ignored)
+       (let loop ([bs (let-form-bindings e)] [out (hasheq)] [_ignored '()])
+         (cond
+           [(null? bs) (values out #f)]
+           [else
+            (define b (car bs))
+            (define v (let-binding-value b))
+            (cond
+              [(and (symbol? v)
+                    (string-prefix? (symbol->string v) "config.")
+                    (let-binding-name b)
+                    (symbol? (let-binding-name b)))
+               (loop (cdr bs)
+                     (hash-set out (let-binding-name b)
+                               (substring (symbol->string v) 7))
+                     _ignored)]
+              [else (loop (cdr bs) out _ignored)])])))
+     (parameterize ([current-cfg-aliases
+                     (for/fold ([acc (current-cfg-aliases)])
+                               ([(k v) (in-hash extra-aliases)])
+                       (hash-set acc k v))])
+       (last-expr-type (let-form-body e) body-env))]
     [(letfn-form? e)
      ;; First register all fn types so mutual recursion works
      (define body-env (mut-copy env))
