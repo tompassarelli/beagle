@@ -1,6 +1,6 @@
 # Beagle
 
-**A typed authoring language that catches your config bugs before they reach Nix, Clojure, JavaScript, or Python.**
+**A typed authoring layer for agent-written code.**
 
 ```racket
 #lang beagle/nix
