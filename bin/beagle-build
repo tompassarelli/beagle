@@ -64,3 +64,17 @@ fi
 mkdir -p "$(dirname "$out")"
 "$RACKET" "$src" > "$out"
 echo "$src -> $out" >&2
+
+# Optional Nix smoke test: confirm the emitted file parses as valid Nix.
+# Set BEAGLE_NIX_EVAL_CHECK=1 to enable. Requires `nix` on PATH.
+if [[ "$ext" == "nix" && "${BEAGLE_NIX_EVAL_CHECK:-0}" == "1" ]]; then
+    if command -v nix-instantiate >/dev/null; then
+        if ! nix-instantiate --parse "$out" >/dev/null 2>/tmp/beagle-nix-check.err; then
+            echo "beagle-build: emitted $out failed nix-instantiate --parse:" >&2
+            cat /tmp/beagle-nix-check.err >&2
+            exit 1
+        fi
+    else
+        echo "beagle-build: BEAGLE_NIX_EVAL_CHECK=1 set but nix-instantiate not on PATH" >&2
+    fi
+fi

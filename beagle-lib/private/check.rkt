@@ -180,6 +180,58 @@
 ;; NixOS option schema for validating dotted map keys in beagle/nix
 (define current-nixos-schema (make-parameter #f))
 
+;; --- schema → type translation --------------------------------------------
+;; Map a Nix option schema entry's "t" field to a Beagle type. Recurses into
+;; "inner" for parametric types (listOf, attrsOf, nullOr).
+(define (schema-entry->beagle-type entry)
+  (define t (hash-ref entry 't "?"))
+  (define inner (hash-ref entry 'inner #f))
+  (cond
+    [(member t '("bool")) (type-prim 'Bool)]
+    [(member t '("int" "port" "u8" "u16" "u32" "u64" "s8" "s16" "s32" "s64"
+                 "positiveInt" "unsignedInt"))
+     (type-prim 'Int)]
+    [(or (member t '("float" "number"))) (type-prim 'Float)]
+    [(member t '("str" "string" "singleLineStr" "nonEmptyStr" "passwdEntry"
+                 "separatedString" "lines" "commas" "envVar" "path" "pathInStore"))
+     (type-prim 'String)]
+    [(and (string? t) (regexp-match? #rx"^strMatching" t)) (type-prim 'String)]
+    [(and (string? t) (regexp-match? #rx"^ints\\." t)) (type-prim 'Int)]
+    [(equal? t "listOf")
+     (type-app 'List (list (if (and inner (hash? inner))
+                               (schema-entry->beagle-type inner)
+                               (type-prim 'Any))))]
+    [(member t '("attrsOf" "lazyAttrsOf"))
+     (type-app 'Map (list (type-prim 'String)
+                          (if (and inner (hash? inner))
+                              (schema-entry->beagle-type inner)
+                              (type-prim 'Any))))]
+    [(equal? t "nullOr")
+     (type-union (list (if (and inner (hash? inner))
+                           (schema-entry->beagle-type inner)
+                           (type-prim 'Any))
+                       (type-prim 'Nil)))]
+    [(equal? t "enum") (type-prim 'String)]
+    [else (type-prim 'Any)]))
+
+;; Look up the type for `config.X.Y` against the loaded schema. Returns #f
+;; if not a config.* path, or if no schema is loaded, or if not in the schema.
+(define (schema-type-for-config-sym sym)
+  (define schema (current-nixos-schema))
+  (cond
+    [(not schema) #f]
+    [(not (symbol? sym)) #f]
+    [else
+     (define s (symbol->string sym))
+     (cond
+       [(not (string-prefix? s "config.")) #f]
+       [else
+        (define path-str (substring s 7))
+        (define entry (nixos-option-lookup/wildcard schema path-str))
+        (cond
+          [(or (not entry) (eq? entry 'permissive)) #f]
+          [else (schema-entry->beagle-type entry)])])]))
+
 ;; Expression-level source locations from the parser.
 (define current-check-src-table (make-parameter #f))
 (define current-check-fn-name (make-parameter #f))
@@ -882,7 +934,13 @@
    'integer? 'Int
    'keyword? 'Keyword
    'symbol?  'Symbol
-   'boolean? 'Bool))
+   'boolean? 'Bool
+   ;; Nix builtins — flow-narrow on these in beagle/nix code.
+   'builtins/isString    'String
+   'builtins/isInt       'Int
+   'builtins/isBool      'Bool
+   'builtins/isFloat     'Float
+   'builtins/isNull      'Nil))
 
 (define (type-equal? a b)
   (and (type-prim? a) (type-prim? b)
@@ -1278,7 +1336,10 @@
     [(or (string? e) (boolean? e) (exact-integer? e) (real? e))
      (or (infer-literal-type e) ANY)]
     [(symbol? e)
-     (or (infer-literal-type e) (hash-ref env e ANY))]
+     (or (infer-literal-type e)
+         (hash-ref env e #f)
+         (schema-type-for-config-sym e)
+         ANY)]
     [(quoted? e) ANY]
     [(regex-lit? e) ANY]
     [(vec-form? e)
@@ -2080,9 +2141,14 @@
   (when (and (eq? (program-mode prog) 'strict)
              (>= (current-check-profile) 1))
     (define env (build-initial-env prog))
+    (define nix-schema
+      (and (eq? (program-target prog) 'nix)
+           (let ([src (program-source-file prog)])
+             (and src (load-nixos-schema-cached src)))))
     (parameterize ([current-check-src-table (program-src-table prog)]
                    [current-check-target (program-target prog)]
-                   [current-union-members UNION-MEMBERS])
+                   [current-union-members UNION-MEMBERS]
+                   [current-nixos-schema nix-schema])
       (for ([form (in-list (program-forms prog))]
             [orig-stx (in-list (program-form-stxs prog))])
         (with-handlers ([exn:fail? (lambda (e) (error-handler e orig-stx))])
@@ -2298,6 +2364,59 @@
 
 (define current-local-bindings (make-parameter (set)))
 
+;; --- did-you-mean for nix surface forms -----------------------------------
+;; When an undefined-function note is about to fire, check whether the name
+;; is close to a known nix surface form (canonical names only, no aliases).
+(define NIX-SURFACE-FORMS
+  '(module fn-set overlay
+    inherit inherit-from
+    with with-cfg
+    assert implies
+    rec-attrs
+    derivation flake
+    get-or has
+    search-path
+    p s ms
+    pipe-to pipe-from))
+
+(define (nix-form-did-you-mean fn-sym)
+  (define name (symbol->string fn-sym))
+  ;; threshold scales with name length so short names match tightly,
+  ;; long names tolerate more deletion (with-do → with is distance 3)
+  (define threshold (max 3 (min 4 (quotient (string-length name) 2))))
+  (define scored
+    (for/list ([form (in-list NIX-SURFACE-FORMS)])
+      (cons (levenshtein name (symbol->string form)) form)))
+  (define matches
+    (sort (filter (lambda (p) (and (> (car p) 0) (<= (car p) threshold))) scored)
+          < #:key car))
+  (cond
+    [(null? matches) #f]
+    [else (string-join (map (lambda (p) (symbol->string (cdr p)))
+                            (take matches (min 3 (length matches))))
+                       " or ")]))
+
+(define (levenshtein a b)
+  (define la (string-length a))
+  (define lb (string-length b))
+  (cond
+    [(zero? la) lb]
+    [(zero? lb) la]
+    [else
+     (define prev (make-vector (add1 lb)))
+     (define curr (make-vector (add1 lb)))
+     (for ([j (in-range (add1 lb))]) (vector-set! prev j j))
+     (for ([i (in-range 1 (add1 la))])
+       (vector-set! curr 0 i)
+       (for ([j (in-range 1 (add1 lb))])
+         (define cost (if (char=? (string-ref a (sub1 i)) (string-ref b (sub1 j))) 0 1))
+         (vector-set! curr j
+                      (min (add1 (vector-ref curr (sub1 j)))
+                           (add1 (vector-ref prev j))
+                           (+ cost (vector-ref prev (sub1 j))))))
+       (vector-copy! prev 0 curr))
+     (vector-ref prev lb)]))
+
 (define (walk-for-provenance form src-table)
   (define (walk e)
     (cond
@@ -2310,10 +2429,12 @@
                   (not (memq fn '(recur throw)))
                   (not (string-contains? (symbol->string fn) "/")))
          (define src (and src-table (hash-ref src-table e #f)))
+         (define suggestion (nix-form-did-you-mean fn))
          (fprintf (current-error-port)
-                  "note: call to undefined function '~a'~a\n"
+                  "note: call to undefined function '~a'~a~a\n"
                   fn
-                  (if src (format "\n  --> ~a:~a" (or (src-loc-source src) "?") (src-loc-line src)) "")))
+                  (if src (format "\n  --> ~a:~a" (or (src-loc-source src) "?") (src-loc-line src)) "")
+                  (if suggestion (format "\n  did you mean: ~a?" suggestion) "")))
        ;; Check: scalar constructor receiving value from different scalar
        (when (and (hash-has-key? SCALAR-CTORS fn)
                   (= 1 (length args)))
@@ -2473,6 +2594,25 @@
       [(map-form? e)
        (for ([p (in-list (map-form-pairs e))])
          (walk (car p)) (walk (cdr p)))]
+      ;; --- nix-specific forms ----
+      [(nix-fn-set? e)         (walk (nix-fn-set-body e))]
+      [(nix-with? e)           (walk (nix-with-ns-expr e)) (walk (nix-with-body e))]
+      [(nix-with-cfg? e)       (walk (nix-with-cfg-path e)) (walk (nix-with-cfg-body e))]
+      [(nix-assert? e)         (walk (nix-assert-cond-expr e)) (walk (nix-assert-body e))]
+      [(nix-get-or? e)         (walk (nix-get-or-base-expr e)) (walk (nix-get-or-default e))]
+      [(nix-has-attr? e)       (walk (nix-has-attr-base-expr e))]
+      [(nix-rec-attrs? e)
+       (for ([p (in-list (nix-rec-attrs-pairs e))]) (walk (cdr p)))]
+      [(nix-derivation? e)     (walk (nix-derivation-attrs e))]
+      [(nix-flake? e)          (walk (nix-flake-attrs e))]
+      [(nix-pipe? e)           (walk (nix-pipe-lhs e)) (walk (nix-pipe-rhs e))]
+      [(nix-impl? e)           (walk (nix-impl-lhs e)) (walk (nix-impl-rhs e))]
+      [(nix-interpolated-string? e)
+       (for ([p (in-list (nix-interpolated-string-parts e))])
+         (unless (string? p) (walk p)))]
+      [(nix-multiline-string? e)
+       (for ([l (in-list (nix-multiline-string-lines e))])
+         (unless (string? l) (walk l)))]
       [else (void)]))
   (walk form))
 

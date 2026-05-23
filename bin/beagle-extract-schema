@@ -9,7 +9,7 @@
 #
 # Defaults:
 #   --target  nixosConfigurations.$(hostname).options
-#   --out     <flake>/.nisp-cache/schema.json (or schema-hm.json for --hm)
+#   --out     <flake>/.beagle-cache/schema.json (or schema-hm.json for --hm)
 #   --flake   git toplevel or cwd
 
 set -euo pipefail
@@ -46,11 +46,11 @@ if [[ -z "$TARGET" ]]; then
 fi
 
 if [[ -z "$OUT" ]]; then
-    mkdir -p "$FLAKE/.nisp-cache"
+    mkdir -p "$FLAKE/.beagle-cache"
     if $HM_MODE; then
-        OUT="$FLAKE/.nisp-cache/schema-hm.json"
+        OUT="$FLAKE/.beagle-cache/schema-hm.json"
     else
-        OUT="$FLAKE/.nisp-cache/schema.json"
+        OUT="$FLAKE/.beagle-cache/schema.json"
     fi
 fi
 

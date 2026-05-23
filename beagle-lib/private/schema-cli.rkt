@@ -27,7 +27,7 @@
   (define dummy (build-path (current-directory) "dummy.nix"))
   (define schema-path (find-schema-json dummy))
   (unless schema-path
-    (eprintf "beagle-schema: no .nisp-cache/schema.json found (walked up from ~a)\n"
+    (eprintf "beagle-schema: no .beagle-cache/schema.json found (walked up from ~a)\n"
              (current-directory))
     (exit 1))
   (load-nixos-schema schema-path))

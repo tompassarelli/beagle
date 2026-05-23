@@ -248,8 +248,8 @@ the type guarantee honest.
 @section{Validator}
 
 The schema-driven validator (@tt{bin/beagle-validate}) reads
-@tt{.nisp-cache/schema.json} and checks every option path + value type. Configure
-with @tt{.nisp-cache/validate-config.json}:
+@tt{.beagle-cache/schema.json} and checks every option path + value type. Configure
+with @tt{.beagle-cache/validate-config.json}:
 
 @codeblock|{
 {

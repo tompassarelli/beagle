@@ -46,7 +46,7 @@
 (define (emit-nix-number n)
   (cond
     [(or (eqv? n +inf.0) (eqv? n -inf.0) (eqv? n +nan.0))
-     (error 'beagle-nix "Nix does not support Infinity or NaN literals")]
+     (error 'emit-nix "Nix does not support Infinity or NaN literals")]
     [else (number->string n)]))
 
 ;; Nix string escaping + interp/multiline/indented helpers live in
@@ -435,7 +435,7 @@
             "method calls (.foo target) have no Nix translation. Use (foo target ...) for plain function application or (target.foo ...) for attrset access.")]
 
     [(await-form? e)
-     (error 'beagle-nix "await is only supported in beagle/js")]
+     (error 'emit-nix "await is only supported in beagle/js")]
 
     [(when-let-form? e)
      (format "let __v = ~a; in if __v != null then ~a else null"
@@ -544,45 +544,146 @@
 
 ;; --- derivation / flake / with-cfg emission --------------------------------
 
+;; --- derivation: typed attrset shape validation ---------------------------
+;; Required: (:pname OR :name)
+;; Optional with known types:
+;;   :version (String), :src (Any/Path), :builder (Any — overrides pkgs.stdenv.mkDerivation),
+;;   :buildInputs (Vec/List), :nativeBuildInputs (Vec/List), :propagatedBuildInputs (Vec/List),
+;;   :buildPhase (String), :installPhase (String), :configurePhase (String),
+;;   :checkPhase (String), :patchPhase (String), :unpackPhase (String),
+;;   :preBuild (String), :postBuild (String), :preInstall (String), :postInstall (String),
+;;   :patches (Vec/List), :meta (Map), :outputs (Vec/List String),
+;;   :doCheck (Bool), :enableParallelBuilding (Bool),
+;;   :CARGO_BUILD_TARGET / :MAKE / arbitrary build-env vars (String — caught by allow-env-pattern)
+;; Unknown keys that don't match an env-var pattern are rejected with did-you-mean.
+
+(define DERIVATION-REQUIRED-ONE-OF
+  '(":pname" ":name"))
+
+(define DERIVATION-KNOWN-KEYS
+  '(":pname" ":name" ":version" ":src" ":builder"
+    ":buildInputs" ":nativeBuildInputs" ":propagatedBuildInputs"
+    ":propagatedNativeBuildInputs" ":checkInputs" ":nativeCheckInputs"
+    ":buildPhase" ":installPhase" ":configurePhase" ":checkPhase"
+    ":patchPhase" ":unpackPhase" ":fixupPhase" ":distPhase"
+    ":preBuild" ":postBuild" ":preInstall" ":postInstall"
+    ":preConfigure" ":postConfigure" ":preCheck" ":postCheck"
+    ":preFixup" ":postFixup" ":preUnpack" ":postUnpack"
+    ":patches" ":meta" ":outputs" ":doCheck" ":doInstallCheck"
+    ":enableParallelBuilding" ":enableParallelChecking"
+    ":dontUnpack" ":dontConfigure" ":dontBuild" ":dontInstall" ":dontFixup"
+    ":dontStrip" ":dontPatchELF" ":separateDebugInfo"
+    ":system" ":hardeningDisable" ":hardeningEnable"
+    ":NIX_CFLAGS_COMPILE" ":NIX_LDFLAGS"
+    ":cargoBuildFlags" ":cargoSha256" ":cargoHash" ":vendorHash" ":cargoLock"
+    ":pyproject" ":pythonImportsCheck" ":format"
+    ":makeFlags" ":installFlags" ":checkFlags"
+    ":passthru" ":__structuredAttrs"))
+
+(define (env-var-key? key-str)
+  ;; All-caps key with optional underscores — treat as a build-env variable.
+  (regexp-match? #px"^:[A-Z][A-Z0-9_]*$" key-str))
+
+(define (kw-key-string p)
+  (and (symbol? (car p)) (symbol->string (car p))))
+
+(define (key-similarity-suggest key known-keys)
+  (define candidates
+    (sort
+     (filter (lambda (k) (<= (key-levenshtein key k) 2))
+             known-keys)
+     < #:key (lambda (k) (key-levenshtein key k))))
+  (cond
+    [(null? candidates) #f]
+    [else (string-join (take candidates (min 3 (length candidates))) " or ")]))
+
+(define (key-levenshtein a b)
+  (define la (string-length a))
+  (define lb (string-length b))
+  (cond [(zero? la) lb] [(zero? lb) la]
+        [else
+         (define prev (make-vector (add1 lb)))
+         (define curr (make-vector (add1 lb)))
+         (for ([j (in-range (add1 lb))]) (vector-set! prev j j))
+         (for ([i (in-range 1 (add1 la))])
+           (vector-set! curr 0 i)
+           (for ([j (in-range 1 (add1 lb))])
+             (define cost (if (char=? (string-ref a (sub1 i)) (string-ref b (sub1 j))) 0 1))
+             (vector-set! curr j (min (add1 (vector-ref curr (sub1 j)))
+                                      (add1 (vector-ref prev j))
+                                      (+ cost (vector-ref prev (sub1 j))))))
+           (vector-copy! prev 0 curr))
+         (vector-ref prev lb)]))
+
 (define (emit-nix-derivation e depth)
   (define attrs (nix-derivation-attrs e))
   (unless (map-form? attrs)
     (error 'emit-nix "(derivation ...) requires an attrset literal, got ~v" attrs))
   (define pairs (map-form-pairs attrs))
-  ;; Extract optional :builder override (defaults to pkgs.stdenv.mkDerivation)
-  (define builder
-    (let loop ([ps pairs])
-      (cond
-        [(null? ps) #f]
-        [(and (symbol? (car (car ps)))
-              (string=? (symbol->string (car (car ps))) ":builder"))
-         (cdr (car ps))]
-        [else (loop (cdr ps))])))
-  (define filtered
-    (filter (lambda (p)
-              (not (and (symbol? (car p))
-                        (string=? (symbol->string (car p)) ":builder"))))
-            pairs))
-  ;; Validate that at least one of :pname or :name is present.
+  ;; Validate keys
   (define has-name?
-    (ormap (lambda (p)
-             (and (symbol? (car p))
-                  (member (symbol->string (car p)) '(":pname" ":name"))))
-           filtered))
+    (ormap (lambda (p) (and (kw-key-string p)
+                            (member (kw-key-string p) DERIVATION-REQUIRED-ONE-OF)))
+           pairs))
   (unless has-name?
     (error 'emit-nix "(derivation ...) requires either :pname or :name"))
+  ;; Reject unknown keys (unless they're env-var-shaped)
+  (for ([p (in-list pairs)])
+    (define k (kw-key-string p))
+    (when k
+      (unless (or (member k DERIVATION-KNOWN-KEYS) (env-var-key? k))
+        (define suggest (key-similarity-suggest k DERIVATION-KNOWN-KEYS))
+        (error 'emit-nix
+               "(derivation ...): unknown key ~a~a"
+               k
+               (if suggest (format " — did you mean ~a?" suggest) "")))))
+  ;; Extract :builder for redirection
+  (define builder
+    (let loop ([ps pairs])
+      (cond [(null? ps) #f]
+            [(equal? (kw-key-string (car ps)) ":builder") (cdr (car ps))]
+            [else (loop (cdr ps))])))
+  (define filtered
+    (filter (lambda (p) (not (equal? (kw-key-string p) ":builder"))) pairs))
   (define builder-str
-    (if builder
-      (emit-expr builder depth)
-      "pkgs.stdenv.mkDerivation"))
+    (if builder (emit-expr builder depth) "pkgs.stdenv.mkDerivation"))
   (define attrs-str (emit-nix-attrs filtered depth))
   (format "(~a ~a)" builder-str attrs-str))
+
+;; --- flake: typed attrset shape validation --------------------------------
+;; A flake.nix has exactly: :description, :inputs, :outputs (required),
+;; optional :nixConfig. Unknown top-level keys are rejected.
+;; :outputs must be a function (module or fn-set). :inputs is a map.
+
+(define FLAKE-REQUIRED '(":outputs"))
+(define FLAKE-KNOWN-KEYS
+  '(":description" ":inputs" ":outputs" ":nixConfig"))
 
 (define (emit-nix-flake e depth)
   (define attrs (nix-flake-attrs e))
   (unless (map-form? attrs)
     (error 'emit-nix "(flake ...) requires an attrset literal, got ~v" attrs))
-  ;; A flake is just an attrset — output is the same shape Nix expects in flake.nix
+  (define pairs (map-form-pairs attrs))
+  ;; Required keys present?
+  (for ([req (in-list FLAKE-REQUIRED)])
+    (unless (ormap (lambda (p) (equal? (kw-key-string p) req)) pairs)
+      (error 'emit-nix "(flake ...): missing required key ~a" req)))
+  ;; All keys known?
+  (for ([p (in-list pairs)])
+    (define k (kw-key-string p))
+    (when k
+      (unless (member k FLAKE-KNOWN-KEYS)
+        (define suggest (key-similarity-suggest k FLAKE-KNOWN-KEYS))
+        (error 'emit-nix
+               "(flake ...): unknown top-level key ~a~a"
+               k
+               (if suggest (format " — did you mean ~a?" suggest) "")))))
+  ;; :outputs must be a function (nix-fn-set or fn-form)
+  (for ([p (in-list pairs)])
+    (when (equal? (kw-key-string p) ":outputs")
+      (unless (or (nix-fn-set? (cdr p)) (fn-form? (cdr p)))
+        (error 'emit-nix
+               "(flake ...): :outputs must be a function of inputs — use (module [self ...] BODY) or (fn-set [...] BODY)"))))
   (emit-expr attrs depth))
 
 (define (emit-nix-with-cfg e depth)
@@ -1171,9 +1272,13 @@
       (format "{ ~a } @ ~a" set-str (mangle-name at-name))
       (format "{ ~a }" set-str)))
   (define body-str (emit-expr body depth))
-  (if (= depth 0)
-    (format "~a:\n\n~a" pattern body-str)
-    (format "~a: ~a" pattern body-str)))
+  (cond
+    [(= depth 0)
+     (format "~a:\n\n~a" pattern body-str)]
+    [else
+     ;; Wrap in parens when emitted inside another expression: Nix's lambda
+     ;; `{a}: body` has very low precedence and breaks list/attrset parsing.
+     (format "(~a: ~a)" pattern body-str)]))
 
 ;; --- registration ----------------------------------------------------------
 

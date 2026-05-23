@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # beagle-validate: validate .bnix files against the NixOS option schema.
 #
-# Replaces `nisp validate` — validates on SOURCE (.bnix), not generated .nix.
+# Validates on SOURCE (.bnix), not generated .nix.
 # Gives source-line precision and catches errors before emission.
 #
 # Usage:

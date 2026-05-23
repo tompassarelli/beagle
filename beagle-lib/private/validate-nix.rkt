@@ -2,8 +2,8 @@
 
 ;; validate-nix — standalone NixOS configuration validator for .bnix files.
 ;;
-;; Replaces `nisp validate`: reads .bnix source, validates option paths
-;; against .nisp-cache/schema.json, checks value types, detects duplicates
+;; Reads .bnix source, validates option paths
+;; against .beagle-cache/schema.json, checks value types, detects duplicates
 ;; within files and conflicts across files. Reports errors as
 ;; file:line:col: messages with did-you-mean suggestions.
 ;;
@@ -14,10 +14,12 @@
          racket/list
          racket/file
          racket/set
+         racket/port
          json
          "parse.rkt"
          "types.rkt"
-         "nixos-schema.rkt")
+         "nixos-schema.rkt"
+         (prefix-in nix: beagle/nix/lang/reader-impl))
 
 ;; ============================================================================
 ;; Error collection
@@ -99,7 +101,7 @@
 (define MODULE-STRUCTURAL-KEYS '("config" "options" "imports" "_module" "_file"))
 
 ;; --- validator config (externalized) ---------------------------------------
-;; Loaded from .nisp-cache/validate-config.json alongside schema.json.
+;; Loaded from .beagle-cache/validate-config.json alongside schema.json.
 ;; Falls back to safe defaults when absent.
 ;;
 ;; Schema:
@@ -197,6 +199,9 @@
          [(string-contains? key-str "/") #f]
          [(freeform-context? prefix) #f]
          [(looks-like-filename? key-str) #f]
+         ;; Nix interpolation in the key (e.g. "${config.X}" or "foo.${X}") —
+         ;; the key is computed at Nix-eval time, not a dotted path mistake.
+         [(regexp-match? #rx"\\$\\{" key-str) #f]
          [else
           (define parts (string-split key-str "."))
           (define first-part (car parts))
@@ -742,9 +747,9 @@
   ;; Find schema from first file
   (define schema-path (find-schema-json (car files)))
   (unless schema-path
-    (eprintf "beagle-validate: cannot find .nisp-cache/schema.json\n")
+    (eprintf "beagle-validate: cannot find .beagle-cache/schema.json\n")
     (eprintf "  searched upward from: ~a\n" (car files))
-    (eprintf "  run `nisp schema` or place schema.json in .nisp-cache/\n")
+    (eprintf "  run `beagle-extract-schema` or place schema.json in .beagle-cache/\n")
     (exit 2))
 
   (define schema (load-nixos-schema schema-path))
@@ -782,7 +787,17 @@
                         (format "parse error: ~a" (exn-message e))
                         'parse-error #f)
                       all-errors)))])
-      (define stxs (read-beagle-syntax file))
+      ;; Use the nix-aware reader so ~"..." / ~''...'' macros expand.
+      ;; We strip the #lang line and inject (define-target nix) so the
+      ;; parser sees a nix-target program regardless of #lang quoting.
+      (define src-name (if (path? file) (path->string file) file))
+      (define stxs
+        (call-with-input-file file
+          (lambda (in)
+            (read-line in) ; skip #lang
+            (let loop ([acc (list (datum->syntax #f '(define-target nix)))])
+              (define d (nix:beagle-nix-read-syntax src-name in))
+              (if (eof-object? d) (reverse acc) (loop (cons d acc)))))))
       (define prog (parse-program stxs #:source-path file))
 
       (unless (eq? (program-target prog) 'nix)
@@ -804,8 +819,15 @@
         (set! all-errors (append all-errors schema-errors))
 
         ;; Duplicate detection
-        (define dup-errors (detect-duplicates file keys))
-        (set! all-errors (append all-errors dup-errors))
+        ;; flake.bnix routinely defines the same nixos-option in multiple
+        ;; sub-system builders (mkSystem vs mkDarwinSystem) — they're in
+        ;; separate module instantiations, not actual duplicates. Skip.
+        (define is-flake?
+          (let ([fp (if (path? file) (path->string file) file)])
+            (regexp-match? #rx"/flake\\.bnix$|^flake\\.bnix$" fp)))
+        (unless is-flake?
+          (define dup-errors (detect-duplicates file keys))
+          (set! all-errors (append all-errors dup-errors)))
 
         ;; Missing default detection
         (define default-errors (detect-missing-defaults file keys))

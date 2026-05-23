@@ -164,9 +164,11 @@
         (set! results
               (cons (format "```\n~a : ~a\n```" target (type->string (cadr def-e)))
                     results))))
-    ;; Also check stdlib
+    ;; Also check stdlib (target-aware: pick the right catalog for .bnix/.bjs/etc)
     (when (null? results)
-      (define stdlib-type (hash-ref STDLIB-TYPES target #f))
+      (define file-target (or (expected-target-for-extension path) 'clj))
+      (define stdlib (stdlib-for-target file-target))
+      (define stdlib-type (hash-ref stdlib target #f))
       (when stdlib-type
         (set! results
               (list (format "```\n~a : ~a  (stdlib)\n```" target (type->string stdlib-type))))))
@@ -479,7 +481,7 @@
                   (let-values ([(base _name _dir?) (split-path (string->path path))])
                     base)))
     (for ([f (in-directory dir)]
-          #:when (regexp-match? #rx"\\.(bgl|rkt)$" (path->string f))
+          #:when (regexp-match? #rx"\\.(bclj|bcljs|bjs|bnix|bsql|bpy|bgl|rkt)$" (path->string f))
           #:when (not (equal? (path->string f) path)))
       (define mod-name
         (path->string (let-values ([(_base name _dir?) (split-path f)]) name)))
@@ -497,8 +499,10 @@
                                     'kind 3
                                     'detail (type->string (caddr defn-entry)))
                             items)))))))))
-  ;; Stdlib completions
-  (for ([(k v) (in-hash STDLIB-TYPES)])
+  ;; Stdlib completions (target-aware)
+  (define file-target (or (expected-target-for-extension path) 'clj))
+  (define stdlib (stdlib-for-target file-target))
+  (for ([(k v) (in-hash stdlib)])
     (define name (symbol->string k))
     (when (string-prefix? name prefix)
       (set! items

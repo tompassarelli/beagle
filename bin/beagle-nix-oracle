@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# beagle-nix-oracle: independent semantic check of emitted Nix.
+#
+# Like the Typed-Racket oracle for beagle/rkt: emit → run an external
+# checker → classify. Here the checker is `nix-instantiate --strict --eval`
+# against a tiny harness that asserts the output evaluates without error
+# (we don't care about the value, just that it's well-formed Nix).
+#
+# Usage:
+#   bin/beagle-nix-oracle <source.bnix>          # check one file
+#   bin/beagle-nix-oracle beagle-test/tests/fixtures/*.bnix
+#
+# Skips fixtures listed in EVAL-SKIP (those that reference undefined
+# variables — they're showcasing syntax, not standalone modules).
+#
+# Exits non-zero if any file fails the oracle.
+
+set -euo pipefail
+
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if ! command -v nix-instantiate >/dev/null; then
+    echo "beagle-nix-oracle: requires nix-instantiate on PATH" >&2
+    exit 2
+fi
+
+# Fixtures with intentionally-undefined refs.
+EVAL_SKIP=(
+    "nix-interp-ms.bnix"
+    "nix-kmod.bnix"
+    "nix-options.bnix"
+)
+
+skip_p() {
+    local base="$(basename "$1")"
+    for s in "${EVAL_SKIP[@]}"; do
+        [[ "$base" == "$s" ]] && return 0
+    done
+    return 1
+}
+
+fail=0
+pass=0
+skip=0
+
+for src in "$@"; do
+    if skip_p "$src"; then
+        echo "SKIP $src (intentionally undefined refs)"
+        skip=$((skip + 1))
+        continue
+    fi
+
+    tmp_nix="$(mktemp /tmp/beagle-oracle-XXXXXX.nix)"
+    if ! "$repo/bin/beagle-build" "$src" "$tmp_nix" >/dev/null 2>&1; then
+        echo "FAIL $src (compile error)"
+        rm -f "$tmp_nix"
+        fail=$((fail + 1))
+        continue
+    fi
+
+    if nix-instantiate --parse "$tmp_nix" >/dev/null 2>/tmp/oracle.err; then
+        echo "PASS $src"
+        pass=$((pass + 1))
+    else
+        echo "FAIL $src"
+        cat /tmp/oracle.err
+        fail=$((fail + 1))
+    fi
+    rm -f "$tmp_nix"
+done
+
+echo
+echo "beagle-nix-oracle: $pass passed, $fail failed, $skip skipped"
+exit $((fail > 0 ? 1 : 0))

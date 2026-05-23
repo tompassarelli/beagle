@@ -127,7 +127,7 @@
 
 (test-case "find-hm-schema-json locates schema-hm.json"
   (define tmp-dir (make-temporary-directory))
-  (define cache-dir (build-path tmp-dir ".nisp-cache"))
+  (define cache-dir (build-path tmp-dir ".beagle-cache"))
   (make-directory cache-dir)
   (define hm-path (build-path cache-dir "schema-hm.json"))
   (call-with-output-file hm-path

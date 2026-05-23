@@ -153,6 +153,13 @@
   (check-true (string-contains? out "url = \"github:NixOS/nixpkgs/nixos-unstable\";"))
   (check-false (string-contains? out "(flake ")))
 
+(test-case "nix-macro round-trip — safe macro expansion in nix"
+  (define out (compile-bnix-file (build-path fixtures-dir "nix-macro.bnix")))
+  (check-true (string-contains? out "lib.mkEnableOption \"Example service\""))
+  (check-true (string-contains? out "lib.mkIf cfg.enable"))
+  (check-false (string-contains? out "enable-opt"))
+  (check-false (string-contains? out "define-macro")))
+
 (test-case "nix-with-cfg round-trip"
   (define out (compile-bnix-file (build-path fixtures-dir "nix-with-cfg.bnix")))
   (check-true (string-contains? out "cfg = config.myConfig.modules.demo;"))
@@ -170,7 +177,7 @@
                     "nix-let-cond.bnix" "nix-mkdefault.bnix"
                     "nix-nested-mkif.bnix" "nix-derivation.bnix"
                     "nix-overlay.bnix" "nix-flake.bnix"
-                    "nix-with-cfg.bnix")])
+                    "nix-with-cfg.bnix" "nix-macro.bnix")])
     (define out (compile-bnix-file (build-path fixtures-dir fixture)))
     (check-false (string-contains? out "fn-set") (format "~a leaks fn-set" fixture))
     (check-false (string-contains? out "rec-attrs") (format "~a leaks rec-attrs" fixture))

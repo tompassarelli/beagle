@@ -75,7 +75,7 @@
       [else #f]))
   (and dir
        (let loop ([d (simplify-path (path->complete-path dir))])
-         (define candidate (build-path d ".nisp-cache" filename))
+         (define candidate (build-path d ".beagle-cache" filename))
          (cond
            [(file-exists? candidate) candidate]
            [else

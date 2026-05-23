@@ -3,6 +3,6 @@
 
 (module [config lib]
   {:networking (rec-attrs hostName "myhost"
-                          domain (s networking.hostName ".local"))
+                          domain ~"${hostName}.local")
    :boot (assert config.boot.isContainer
            {:kernelModules ["kvm-amd"]})})

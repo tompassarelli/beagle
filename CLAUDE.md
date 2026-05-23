@@ -79,7 +79,7 @@ parse → check → emit-dispatch → emit-{clj,js,nix,py,rkt,sql}
 - `beagle-lib/private/emit-nix-strings.rkt` — string escaping + interp/multiline/indented
   emitters (single unified escape-nix #:multiline? #:keep-interp?).
 - `beagle-lib/private/validate-nix.rkt` — schema-driven validator; user config externalized
-  to .nisp-cache/validate-config.json with HM-root auto-discovery from HM schema.
+  to .beagle-cache/validate-config.json with HM-root auto-discovery from HM schema.
 - `beagle-lib/private/stdlib-py.rkt` — Python-specific: STDLIB-PY (131 typed entries for
   builtins, os.path, json, math, re, functools, itertools, collections, dataclasses).
 - `beagle-lib/lib/beagle/core.js` — JS runtime helpers (12 finite functions: range, remove,

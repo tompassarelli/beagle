@@ -13,6 +13,7 @@
 ;;   impact <fn-name> <file-or-dir>...
 ;;   check <file-or-dir>...
 ;;   check-enriched <file-or-dir>...     full type check + enriched context
+;;   build <out-dir> <file-or-dir>...    parse + check + emit to out-dir (~100ms warm)
 ;;   repair <file>                        structural repair (fix delimiters in-place)
 ;;   check-result [<file>]               latest pre-computed result from watcher
 ;;   latest-results                      all results since last query (clears buffer)
@@ -35,6 +36,7 @@
          "parse.rkt"
          "check.rkt"
          "check-all.rkt"
+         "emit.rkt"
          "query.rkt"
          "blame.rkt"
          "types.rkt"
@@ -561,6 +563,58 @@
       (begin (invalidate-cache!) (hasheq 'ok #t 'cleared "all"))
       (begin (invalidate-cache! (car args)) (hasheq 'ok #t 'cleared (car args)))))
 
+;; --- Build (emit via warm daemon) -------------------------------------------
+
+(define (target-extension target)
+  (case target
+    [(cljs) ".cljs"]
+    [(js)   ".js"]
+    [(py)   ".py"]
+    [else   ".clj"]))
+
+(define (ns->out-path ns-sym target)
+  (define s (symbol->string ns-sym))
+  (string-append (regexp-replace* #rx"\\." (regexp-replace* #rx"-" s "_") "/")
+                 (target-extension target)))
+
+(define (handle-build args)
+  (when (< (length args) 2)
+    (error "build requires: <out-dir> <file-or-dir>..."))
+  (define out-dir (car args))
+  (define files (find-rkt-in (cdr args)))
+  (define built 0)
+  (define error-list '())
+
+  (for ([f (in-list files)])
+    (with-handlers ([exn:fail? (lambda (e)
+                                 (set! error-list
+                                       (cons (hasheq 'file f 'error (exn-message e))
+                                             error-list)))])
+      (define stxs (read-beagle-syntax f))
+      (define prog (parse-program stxs #:source-path f))
+
+      (define type-errs 0)
+      (type-check-with-locs! prog
+        (lambda (e loc-stx)
+          (set! type-errs (+ type-errs 1))))
+
+      (define source (emit-program prog))
+      (define ns (program-namespace prog))
+      (define target (program-target prog))
+      (define rel (ns->out-path ns target))
+      (define out-path (build-path out-dir rel))
+
+      (make-parent-directory* out-path)
+      (with-output-to-file out-path #:exists 'replace
+        (lambda () (display source)))
+
+      (set! built (+ built 1))))
+
+  (hasheq 'ok (null? error-list)
+          'built built
+          'error_count (length error-list)
+          'errors (reverse error-list)))
+
 ;; --- Dispatch ----------------------------------------------------------------
 
 (define (dispatch-command parts)
@@ -571,6 +625,7 @@
     [(list "provides" args ...) (handle-provides args)]
     [(list "impact" args ...) (handle-impact args)]
     [(list "check" args ...) (handle-check args)]
+    [(list "build" args ...) (handle-build args)]
     [(list "repair" args ...) (handle-repair args)]
     [(list "watch" args ...) (handle-watch args)]
     [(list "unwatch" args ...) (handle-unwatch args)]

@@ -1,0 +1,12 @@
+#lang beagle/nix
+(ns test.nix.macro)
+
+;; Template macro: wrap a description in an mkEnableOption call.
+(define-macro safe enable-opt (desc)
+  (lib/mkEnableOption desc))
+
+(module [config lib pkgs]
+  (with-cfg config.myConfig.modules.example
+    {:options.myConfig.modules.example.enable (enable-opt "Example service")
+     :config (lib/mkIf cfg.enable
+       {:environment.systemPackages [pkgs.hello]})}))

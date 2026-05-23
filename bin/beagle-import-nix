@@ -1,7 +1,7 @@
 #!/usr/bin/env racket
 #lang racket/base
 
-;; nisp-to-bgl: mechanical converter from nisp .rkt to beagle/nix .bgl
+;; beagle-import-nix: mechanical converter from legacy .rkt to beagle/nix .bgl
 ;; Handles: pkg, svc, hm-module, module-file, bundle-file, raw-file, submodule-impl
 
 (require racket/string
@@ -23,7 +23,7 @@
       (regexp-replace #rx"^#lang nisp\n?" text "")
       (lambda () (read-all (current-input-port)))))
   (when (null? forms)
-    (error 'nisp-to-bgl "no forms in ~a" path))
+    (error 'beagle-import-nix "no forms in ~a" path))
   (define form (car forms))
   (match form
     [(list 'pkg name desc)
@@ -881,7 +881,7 @@
   (require racket/cmdline)
   (define files
     (command-line
-     #:program "nisp-to-bgl"
+     #:program "beagle-import-nix"
      #:args files
      files))
 

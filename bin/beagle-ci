@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# beagle-ci: gate script — runs everything that must pass before a commit ships.
+#
+# Layers (in order, fastest first):
+#   1. raco test beagle-test/tests/           (~25s)
+#   2. bin/beagle-test-nix                    (nix-only, redundant safety check)
+#   3. lint pass over fixtures                (catches stdlib drift)
+#   4. (optional) firn-build + firn-validate against ~/code/nixos-config
+#       — enabled with BEAGLE_VALIDATE_NIXOS_CONFIG=1
+#
+# Exits non-zero if any layer fails.
+
+set -euo pipefail
+
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo"
+
+echo "=== 1/4: raco test beagle-test/tests/ ==="
+raco test beagle-test/tests/ 2>&1 | tail -5
+
+echo
+echo "=== 2/4: bin/beagle-test-nix ==="
+bin/beagle-test-nix 2>&1 | tail -3
+
+echo
+echo "=== 3/4: nix-instantiate smoke test on all fixtures ==="
+if command -v nix-instantiate >/dev/null; then
+    BEAGLE_NIX_EVAL_CHECK=1 raco test beagle-test/tests/nix-property.rkt 2>&1 | tail -3
+else
+    echo "  (skipped — nix-instantiate not on PATH)"
+fi
+
+if [[ "${BEAGLE_VALIDATE_NIXOS_CONFIG:-0}" == "1" ]]; then
+    echo
+    echo "=== 4/4: nixos-config firn-build + firn-validate ==="
+    nixos_repo="${NIXOS_CONFIG_REPO:-$HOME/code/nixos-config}"
+    if [[ ! -d "$nixos_repo" ]]; then
+        echo "  (skipped — $nixos_repo not found; set NIXOS_CONFIG_REPO=<path>)"
+    else
+        cd "$nixos_repo"
+        BEAGLE_PATH="$repo" ./scripts/firn-build 2>&1 | tail -3
+        BEAGLE_PATH="$repo" ./scripts/firn-validate 2>&1 | tail -3
+    fi
+else
+    echo
+    echo "=== 4/4: nixos-config validate (skipped — set BEAGLE_VALIDATE_NIXOS_CONFIG=1) ==="
+fi
+
+echo
+echo "beagle-ci: ✓ all layers passed"
