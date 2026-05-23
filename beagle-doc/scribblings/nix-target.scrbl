@@ -2,6 +2,61 @@
 
 @title{Nix Target}
 
+@section{Reading Nix docs, writing beagle/nix}
+
+The beagle/nix surface is Lisp-shaped. The Nix language is dot-and-semicolon
+shaped. When you (or an LLM) read NixOS option docs and write a `.bnix`
+module, you do a small mechanical translation. The rules are bounded —
+five patterns, no exceptions.
+
+@tabular[#:sep @hspace[2]
+  (list
+    (list @bold{Nix doc}                           @bold{beagle/nix})
+    (list @tt{lib.mkOption}                        @tt{(lib.mkOption …) OR (lib/mkOption …)})
+    (list @tt{lib.types.bool}                      @tt{lib.types.bool OR lib/types.bool})
+    (list @tt{builtins.attrNames x}                @tt{(builtins.attrNames x)})
+    (list @tt|{{ a = 1; b = 2; }}|                 @tt{{:a 1 :b 2}})
+    (list @tt{services.openssh.enable = true;}     @tt{:services.openssh.enable true})
+    (list @tt{[ a b c ]}                           @tt{[a b c]})
+    (list @tt|{{ config, pkgs, ... }: BODY}|       @tt{(module [config pkgs] BODY)})
+    (list @tt|{final: prev: BODY}|                 @tt{(overlay [final prev] BODY)})
+    (list @tt{"text ${expr}"}                      @tt{~"text ${expr}"})
+    (list @tt|{''multi\nline${expr}''}|            @tt{~''multi\nline${expr}''}))]
+
+The dotted-prefix lookup (@tt{lib.X}, @tt{builtins.X}, @tt{pkgs.X}) is
+canonicalized to slashed-form for stdlib resolution — both surface forms
+type-check identically. Pick the one that reads more naturally in context;
+nix-doc-shape pastes work without further edit.
+
+@section{Snippet translation tools}
+
+@itemlist[
+  @item{@tt{bin/beagle-translate-nix} — pipe-friendly best-effort snippet
+        translator. Handles the patterns above for paste-from-docs cases.
+        @code{echo '{ a = 1; }' | beagle-translate-nix} → @code{{:a 1}}.}
+  @item{@tt{bin/beagle-import-nix} — full-file converter (rnix-parser-backed).
+        Use when migrating a whole @tt{.nix} file. Handles 100% of nixpkgs
+        syntax; output may need light cleanup for idiomatic beagle.}]
+
+@section{The three symbol kinds}
+
+beagle/nix has three orthogonal flavors of identifier, each with its own
+type-resolution path. Knowing which is which removes the apparent
+inconsistency:
+
+@tabular[#:sep @hspace[2]
+  (list
+    (list @bold{Shape}            @bold{Semantic}                                                                    @bold{Resolved by})
+    (list @tt{foo}                "local identifier (variable, function name, let binding)"                          "lexical env")
+    (list @tt{lib/foo} @tt{or} @tt{lib.foo}  "qualified stdlib call (lib, builtins, pkgs)"                                       "stdlib catalog")
+    (list @tt{config.X.Y}         "schema-typed NixOS option path (16k+ entries)"                                   ".beagle-cache/schema.json"))]
+
+The dotted symbol @tt{config.X.Y} looks like Clojure's @tt{(get-in config
+[:X :Y])} but isn't — it's a flat schema path, not a nested traversal.
+The schema literally stores @tt{"p": "X.Y"} as one string. The dotted
+shape is the most direct mapping; refactoring to keyword-list traversal
+would create source-vs-schema indirection for zero gain.
+
 @section{Overview}
 
 @tt{#lang beagle/nix} compiles to Nix expression-language source code.

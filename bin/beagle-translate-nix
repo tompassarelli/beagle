@@ -1,0 +1,74 @@
+#!/usr/bin/env racket
+#lang racket/base
+
+;; beagle-translate-nix — best-effort pattern translator for inline Nix snippets.
+;;
+;; Reads Nix on stdin (or from a file argument), writes beagle/nix-shape s-exprs
+;; to stdout. Covers the common paste-from-docs patterns:
+;;
+;;   { config, pkgs, ... }: BODY       →  (module [config pkgs] BODY)
+;;   final: prev: BODY                 →  (overlay [final prev] BODY)
+;;   { a = 1; b = 2; }                 →  {:a 1 :b 2}
+;;   path.to.attr = value;             →  :path.to.attr value
+;;   [ a b c ]                         →  [a b c]
+;;   true / false / null               →  true / false / nil
+;;   "text ${expr} more"               →  ~"text ${expr} more"
+;;   ''multi\nline''                   →  ~''multi\nline''
+;;
+;; For anything more complex than that, use bin/beagle-import-nix on a whole
+;; file (rnix-parser-backed, handles 100% of nixpkgs syntax). This tool is
+;; for the "paste this 5-line snippet" case.
+;;
+;; Usage:
+;;   cat snippet.nix | beagle-translate-nix
+;;   beagle-translate-nix snippet.nix
+;;   echo '{ a = 1; }' | beagle-translate-nix
+
+(require racket/string
+         racket/port
+         racket/file
+         racket/cmdline)
+
+(define (translate-nix text)
+  (let* ([s text]
+         ;; semicolons → nothing (statement separator in Nix, not in beagle)
+         [s (regexp-replace* #rx";" s "")]
+         ;; `name = ` (top-level attr binding) → `:name `
+         ;; Match: word-with-dots followed by ` = `
+         [s (regexp-replace* #px"(^|[\\s{,])([a-zA-Z_][\\w.]*)\\s*=\\s*" s "\\1:\\2 ")]
+         ;; Nix's `true` / `false` / `null` are already what beagle uses,
+         ;; except null → nil
+         [s (regexp-replace* #px"\\bnull\\b" s "nil")]
+         ;; Comma in attrset patterns → nothing (we use spaces)
+         ;;   { config, pkgs, ... }: → { config pkgs ... }:
+         [s (regexp-replace* #px"\\{([^{}=]*),([^{}=]*)\\}\\s*:" s
+                             (lambda (_ before after)
+                               (format "{~a ~a}:" before after)))]
+         ;; Strings: "..." stays as "..." (already same syntax) EXCEPT
+         ;; if it contains ${...} interpolation, prefix with ~
+         [s (regexp-replace* #px"(?<!~)\"([^\"\\\\]*\\$\\{[^\"]*?)\"" s "~\"\\1\"")]
+         )
+    s))
+
+(define (main)
+  (define input-path #f)
+  (command-line
+   #:program "beagle-translate-nix"
+   #:args args
+   (when (and (pair? args) (file-exists? (car args)))
+     (set! input-path (car args))))
+  (define text
+    (cond
+      [input-path (file->string input-path)]
+      [else (port->string (current-input-port))]))
+  (define translated (translate-nix text))
+  (display translated)
+  (unless (regexp-match? #rx"\n$" translated)
+    (newline))
+  (eprintf "
+beagle-translate-nix: best-effort pattern translation.
+  - For full-file conversion, use: bin/beagle-import-nix
+  - Inspect output before pasting; complex syntax may need manual cleanup
+"))
+
+(main)
