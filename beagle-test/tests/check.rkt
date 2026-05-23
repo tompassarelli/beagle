@@ -975,33 +975,29 @@
   '(defn f [(url : String)] : (Promise String) (await (fetch-data url))))
 
 ;; Nix forms rejected outside beagle/nix
-(check-err/rx "inh rejected in beagle/clj"
-  #rx"inh is only supported in beagle/nix"
-  '(def x : Any (inh a b)))
+(check-err/rx "inherit rejected in beagle/clj"
+  #rx"inherit is only supported in beagle/nix"
+  '(def x : Any (inherit a b)))
 
-(check-js-err/rx "inh rejected in beagle/js"
-  #rx"inh is only supported in beagle/nix"
-  '(def x : Any (inh a b)))
+(check-js-err/rx "inherit rejected in beagle/js"
+  #rx"inherit is only supported in beagle/nix"
+  '(def x : Any (inherit a b)))
 
 (check-err/rx "fn-set rejected in beagle/clj"
-  #rx"fn-set is only supported in beagle/nix"
+  #rx"module / fn-set / overlay is only supported in beagle/nix"
   '(def x : Any (fn-set [{a 1}] a)))
 
 (check-js-err/rx "pipe-to rejected in beagle/js"
-  #rx"pipe-to/pipe-from is only supported in beagle/nix"
+  #rx"pipe-to / pipe-from is only supported in beagle/nix"
   '(def x : Any (pipe-to 1 inc)))
-
-(check-err/rx "with-do rejected in beagle/clj"
-  #rx"with-do is only supported in beagle/nix"
-  '(def x : Any (with-do lib body)))
 
 (check-js-err/rx "s (interpolated string) rejected in beagle/js"
   #rx"s is only supported in beagle/nix"
   '(def x : Any (s "hello " name)))
 
 ;; Verify Nix forms pass on beagle/nix
-(check-nix-ok "inh accepted in beagle/nix"
-  '(def x : Any (inh a b)))
+(check-nix-ok "inherit accepted in beagle/nix"
+  '(def x : Any (inherit a b)))
 
 (check-nix-ok "s accepted in beagle/nix"
   '(def x : Any (s "hello " name)))

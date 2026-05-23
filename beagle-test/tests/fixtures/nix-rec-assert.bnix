@@ -1,8 +1,8 @@
 #lang beagle/nix
 (ns test.nix.rec-assert)
 
-(fn-set-rest [config lib]
-  {:networking (rec-att hostName "myhost"
-                        domain (s networking.hostName ".local"))
-   :boot (assert-do config.boot.isContainer
+(module [config lib]
+  {:networking (rec-attrs hostName "myhost"
+                          domain (s networking.hostName ".local"))
+   :boot (assert config.boot.isContainer
            {:kernelModules ["kvm-amd"]})})

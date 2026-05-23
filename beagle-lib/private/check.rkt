@@ -86,6 +86,9 @@
    nix-fn-set?              'nix
    nix-pipe?                'nix
    nix-impl?                'nix
+   nix-derivation?          'nix
+   nix-flake?               'nix
+   nix-with-cfg?            'nix
    sql-table?               'sql
    sql-select?              'sql
    sql-insert?              'sql
@@ -115,21 +118,24 @@
    jst-binary?              "js/binary"
    jst-unary?               "js/unary"
    jst-export?              "js/export"
-   nix-inherit?             "inh"
-   nix-inherit-from?        "inh-from"
-   nix-with?                "with-do"
-   nix-rec-attrs?           "rec-att"
-   nix-assert?              "assert-do"
+   nix-inherit?             "inherit"
+   nix-inherit-from?        "inherit-from"
+   nix-with?                "with"
+   nix-rec-attrs?           "rec-attrs"
+   nix-assert?              "assert"
    nix-get-or?              "get-or"
    nix-has-attr?            "has"
-   nix-search-path?         "spath"
+   nix-search-path?         "search-path"
    nix-interpolated-string? "s"
    nix-multiline-string?    "ms"
    nix-indented-string?     "''"
    nix-path?                "p"
-   nix-fn-set?              "fn-set"
-   nix-pipe?                "pipe-to/pipe-from"
-   nix-impl?                "impl"
+   nix-fn-set?              "module / fn-set / overlay"
+   nix-pipe?                "pipe-to / pipe-from"
+   nix-impl?                "implies"
+   nix-derivation?          "derivation"
+   nix-flake?               "flake"
+   nix-with-cfg?            "with-cfg"
    sql-table?               "deftable"
    sql-select?              "select"
    sql-insert?              "insert"

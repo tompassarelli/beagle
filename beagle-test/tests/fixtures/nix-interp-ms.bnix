@@ -1,7 +1,7 @@
 #lang beagle/nix
 (ns test.nix.interp-ms)
 
-(fn-set-rest [pkgs]
+(module [pkgs]
   {:script (pkgs/writeScriptBin "hello"
              (ms (s "#!" pkgs.bash "/bin/bash")
                  "echo hello world"))

@@ -544,9 +544,126 @@
              (emit-expr (nix-impl-lhs e) depth)
              (emit-expr (nix-impl-rhs e) depth))]
 
+    [(nix-derivation? e)
+     (emit-nix-derivation e depth)]
+
+    [(nix-flake? e)
+     (emit-nix-flake e depth)]
+
+    [(nix-with-cfg? e)
+     (emit-nix-with-cfg e depth)]
+
     ;; --- end Nix-specific forms ----------------------------------------------
 
     [else (error 'emit-nix "no Nix emission defined for AST node: ~v" e)]))
+
+;; --- derivation / flake / with-cfg emission --------------------------------
+
+(define (emit-nix-derivation e depth)
+  (define attrs (nix-derivation-attrs e))
+  (unless (map-form? attrs)
+    (error 'emit-nix "(derivation ...) requires an attrset literal, got ~v" attrs))
+  (define pairs (map-form-pairs attrs))
+  ;; Extract optional :builder override (defaults to pkgs.stdenv.mkDerivation)
+  (define builder
+    (let loop ([ps pairs])
+      (cond
+        [(null? ps) #f]
+        [(and (symbol? (car (car ps)))
+              (string=? (symbol->string (car (car ps))) ":builder"))
+         (cdr (car ps))]
+        [else (loop (cdr ps))])))
+  (define filtered
+    (filter (lambda (p)
+              (not (and (symbol? (car p))
+                        (string=? (symbol->string (car p)) ":builder"))))
+            pairs))
+  ;; Validate that at least one of :pname or :name is present.
+  (define has-name?
+    (ormap (lambda (p)
+             (and (symbol? (car p))
+                  (member (symbol->string (car p)) '(":pname" ":name"))))
+           filtered))
+  (unless has-name?
+    (error 'emit-nix "(derivation ...) requires either :pname or :name"))
+  (define builder-str
+    (if builder
+      (emit-expr builder depth)
+      "pkgs.stdenv.mkDerivation"))
+  (define attrs-str (emit-nix-attrs filtered depth))
+  (format "(~a ~a)" builder-str attrs-str))
+
+(define (emit-nix-flake e depth)
+  (define attrs (nix-flake-attrs e))
+  (unless (map-form? attrs)
+    (error 'emit-nix "(flake ...) requires an attrset literal, got ~v" attrs))
+  ;; A flake is just an attrset — output is the same shape Nix expects in flake.nix
+  (emit-expr attrs depth))
+
+(define (emit-nix-with-cfg e depth)
+  ;; (with-cfg config.path body) — introduces `cfg = config.path;` over body
+  ;; and (if body is a map literal) rewrites occurrences of config.path. into cfg.
+  ;; AST-level replacement for the legacy regex-based extract-cfg-root in emit-nix-fn-set.
+  (define path-expr (nix-with-cfg-path e))
+  (define body (nix-with-cfg-body e))
+  (define path-str (emit-expr path-expr depth))
+  (define rewritten-body
+    (rewrite-cfg-ref body path-str))
+  (define body-str (emit-expr rewritten-body depth))
+  (format "let\n~acfg = ~a;\nin\n~a"
+          (indent (+ depth 1)) path-str body-str))
+
+;; Walk AST, replace occurrences of `path-str` qualified-access with `cfg`.
+;; This is an AST-level substitution: any symbol whose name starts with
+;; `path-str.` becomes `cfg.<rest>`; any kw-access on `path-str` becomes
+;; kw-access on `cfg`.
+(define (rewrite-cfg-ref e path-str)
+  (define cfg-prefix (string-append path-str "."))
+  (define (walk e)
+    (cond
+      [(symbol? e)
+       (define s (symbol->string e))
+       (cond
+         [(string=? s path-str) 'cfg]
+         [(string-prefix? s cfg-prefix)
+          (string->symbol (string-append "cfg." (substring s (string-length cfg-prefix))))]
+         [else e])]
+      [(map-form? e)
+       (map-form
+        (for/list ([p (in-list (map-form-pairs e))])
+          (cons (walk (car p)) (walk (cdr p)))))]
+      [(vec-form? e)
+       (vec-form (map walk (vec-form-items e)))]
+      [(call-form? e)
+       (call-form (walk (call-form-fn e)) (map walk (call-form-args e)))]
+      [(let-form? e)
+       (let-form
+        (for/list ([b (in-list (let-form-bindings e))])
+          (let-binding (let-binding-name b) (walk (let-binding-value b))))
+        (map walk (let-form-body e)))]
+      [(if-form? e)
+       (if-form (walk (if-form-cond-expr e))
+                (walk (if-form-then-expr e))
+                (and (if-form-else-expr e) (walk (if-form-else-expr e))))]
+      [(when-form? e)
+       (when-form (walk (when-form-cond-expr e)) (map walk (when-form-body e)))]
+      [(do-form? e)
+       (do-form (map walk (do-form-body e)))]
+      [(kw-access? e)
+       (kw-access (kw-access-kw e) (walk (kw-access-target e))
+                  (and (kw-access-default e) (walk (kw-access-default e))))]
+      [(nix-with? e)
+       (nix-with (walk (nix-with-ns-expr e)) (walk (nix-with-body e)))]
+      [(nix-assert? e)
+       (nix-assert (walk (nix-assert-cond-expr e)) (walk (nix-assert-body e)))]
+      [(nix-get-or? e)
+       (nix-get-or (walk (nix-get-or-base-expr e)) (nix-get-or-path e) (walk (nix-get-or-default e)))]
+      [(nix-interpolated-string? e)
+       (nix-interpolated-string (map walk (nix-interpolated-string-parts e)))]
+      [(nix-multiline-string? e)
+       (nix-multiline-string (map walk (nix-multiline-string-lines e)))]
+      [else e]))
+  (walk e))
 
 ;; --- let -------------------------------------------------------------------
 
@@ -1106,12 +1223,6 @@
    (string-join (map process-line lines) "\n")
    "\n" (indent depth) "''"))
 
-(define options-root-rx #rx"options\\.myConfig\\.modules\\.([a-zA-Z0-9_-]+)")
-
-(define (extract-cfg-root body-str)
-  (define m (regexp-match options-root-rx body-str))
-  (and m (string-append "config.myConfig.modules." (cadr m))))
-
 (define (emit-nix-fn-set e depth)
   (define formals (nix-fn-set-formals e))
   (define rest? (nix-fn-set-rest? e))
@@ -1134,25 +1245,9 @@
       (format "{ ~a } @ ~a" set-str (mangle-name at-name))
       (format "{ ~a }" set-str)))
   (define body-str (emit-expr body depth))
-  (define cfg-root (and rest? (extract-cfg-root body-str)))
-  (cond
-    [(and cfg-root (map-form? body))
-     (define rewritten (string-replace body-str (string-append cfg-root ".") "cfg."))
-     (format "~a:\n\nlet\n  cfg = ~a;\nin\n~a" pattern cfg-root rewritten)]
-    [(and cfg-root (let-form? body)
-          (regexp-match #rx"^let\n" body-str))
-     (define rewritten (string-replace body-str (string-append cfg-root ".") "cfg."))
-     (define injected (regexp-replace #rx"^let\n" rewritten
-                                      (format "let\n  cfg = ~a;\n" cfg-root)))
-     (format "~a:\n\n~a" pattern injected)]
-    [else
-     (cond
-       [(and rest? (= depth 0))
-        (format "~a:\n\n~a" pattern body-str)]
-       [rest?
-        (format "~a: ~a" pattern body-str)]
-       [else
-        (format "~a: ~a" pattern body-str)])]))
+  (if (= depth 0)
+    (format "~a:\n\n~a" pattern body-str)
+    (format "~a: ~a" pattern body-str)))
 
 ;; --- registration ----------------------------------------------------------
 

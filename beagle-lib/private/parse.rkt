@@ -910,29 +910,31 @@
 
     ;; --- Nix-specific forms --------------------------------------------------
 
-    [(list 'inh names ...)
+    [(list 'inherit names ...)
      (nix-inherit (map (lambda (n)
                          (define d (->datum n))
-                         (if (symbol? d) d (error 'beagle "inh: expected symbol, got ~v" d)))
+                         (if (symbol? d) d (error 'beagle "inherit: expected symbol, got ~v" d)))
                        (or (stx-tail subs 1) names)))]
 
-    [(list 'inh-from ns-expr names ...)
+    [(list 'inherit-from ns-expr names ...)
      (nix-inherit-from (parse-expr (or (stx-ref subs 1) ns-expr))
                        (map (lambda (n)
                               (define d (->datum n))
-                              (if (symbol? d) d (error 'beagle "inh-from: expected symbol, got ~v" d)))
+                              (if (symbol? d) d (error 'beagle "inherit-from: expected symbol, got ~v" d)))
                             (or (stx-tail subs 2) names)))]
 
-    [(list 'with-do ns-expr body-expr)
-     (nix-with (parse-expr (or (stx-ref subs 1) ns-expr))
-               (parse-expr (or (stx-ref subs 2) body-expr)))]
-
-    [(list 'rec-att pairs ...)
+    [(list 'rec-attrs pairs ...)
      (nix-rec-attrs (parse-nix-rec-pairs (or (stx-tail subs 1) pairs)))]
 
-    [(list 'assert-do cond-expr body-expr)
+    [(list 'assert cond-expr body-expr)
      (nix-assert (parse-expr (or (stx-ref subs 1) cond-expr))
                  (parse-expr (or (stx-ref subs 2) body-expr)))]
+
+    [(list 'with-cfg path-expr body-expr)
+     ;; (with-cfg config.myConfig.modules.X BODY) → introduces `cfg = config...;`
+     ;; let-binding and rewrites config.myConfig.modules.X.foo to cfg.foo in BODY.
+     (nix-with-cfg (parse-expr (or (stx-ref subs 1) path-expr))
+                   (parse-expr (or (stx-ref subs 2) body-expr)))]
 
     [(list 'get-or base path-expr default-expr)
      (nix-get-or (parse-expr (or (stx-ref subs 1) base))
@@ -949,12 +951,12 @@
                    (let ([d (->datum (or (stx-ref subs 2) path-expr))])
                      (if (symbol? d) (symbol->string d) (format "~a" d))))]
 
-    [(list 'spath name-expr)
+    [(list 'search-path name-expr)
      (define d (->datum (or (stx-ref subs 1) name-expr)))
      (nix-search-path (cond
                         [(symbol? d) (symbol->string d)]
                         [(string? d) d]
-                        [else (error 'beagle "spath: expected symbol or string, got ~v" d)]))]
+                        [else (error 'beagle "search-path: expected symbol or string, got ~v" d)]))]
 
     [(cons 's parts)
      (nix-interpolated-string
@@ -989,21 +991,31 @@
                  #f #f
                  (parse-expr (or (stx-ref subs 2) body-expr)))]
 
-    [(list 'fn-set-rest formals body-expr)
-     (nix-fn-set (parse-nix-fn-set-formals (or (stx-ref subs 1) formals))
-                 #t #f
-                 (parse-expr (or (stx-ref subs 2) body-expr)))]
-
     [(list 'module formals body-expr)
+     ;; NixOS module / open-attrs lambda: { a, b, ... }: body
      (nix-fn-set (parse-nix-fn-set-formals (or (stx-ref subs 1) formals))
                  #t #f
                  (parse-expr (or (stx-ref subs 2) body-expr)))]
 
-    [(list 'fn-set@ at-name formals body-expr)
-     (define at (->datum (or (stx-ref subs 1) at-name)))
-     (nix-fn-set (parse-nix-fn-set-formals (or (stx-ref subs 2) formals))
-                 #f at
-                 (parse-expr (or (stx-ref subs 3) body-expr)))]
+    [(list 'overlay formals body-expr)
+     ;; Nix overlay: final: prev: body (exactly two positional formals)
+     (define f-list (parse-nix-fn-set-formals (or (stx-ref subs 1) formals)))
+     (unless (= (length f-list) 2)
+       (error 'beagle "overlay: expected exactly two formals [final prev], got ~a" (length f-list)))
+     (nix-fn-set f-list #f #f
+                 (parse-expr (or (stx-ref subs 2) body-expr)))]
+
+    [(list 'derivation attrs-expr)
+     ;; mkDerivation sugar: (derivation {:pname ... :version ... :src ...})
+     ;; Emits as `(pkgs.stdenv.mkDerivation { ... })`. Use `:builder pkg` to
+     ;; override the default stdenv (e.g. :builder pkgs.runCommand).
+     (define attrs (parse-expr (or (stx-ref subs 1) attrs-expr)))
+     (nix-derivation attrs)]
+
+    [(list 'flake attrs-expr)
+     ;; flake.nix sugar: (flake {:description ... :inputs {...} :outputs (fn-set [self nixpkgs] ...)})
+     (define attrs (parse-expr (or (stx-ref subs 1) attrs-expr)))
+     (nix-flake attrs)]
 
     [(list 'pipe-to lhs rhs)
      (nix-pipe 'to
@@ -1015,7 +1027,7 @@
                (parse-expr (or (stx-ref subs 1) lhs))
                (parse-expr (or (stx-ref subs 2) rhs)))]
 
-    [(list 'impl lhs rhs)
+    [(list 'implies lhs rhs)
      (nix-impl (parse-expr (or (stx-ref subs 1) lhs))
                (parse-expr (or (stx-ref subs 2) rhs)))]
 
@@ -1268,8 +1280,22 @@
                    (parse-body (or (stx-tail subs 2) body)))]
 
     [(list 'with target-expr updates ...)
-     (parse-with-form (or (stx-ref subs 1) target-expr)
-                      (or (stx-tail subs 2) updates))]
+     ;; (with ns body) — Nix scope (parses to nix-with).
+     ;; (with target [:k v] [:k v] ...) — record update (with-form).
+     ;; Disambiguate by shape: nix-with has exactly one body arg whose top-level
+     ;; form is NOT a [:keyword value] update bracket.
+     (cond
+       [(and (= (length updates) 1)
+             (let ([d (->datum (car updates))])
+               (not (and (bracketed? d)
+                         (>= (length (bracket-body d)) 2)
+                         (let ([first (car (bracket-body d))])
+                           (and (symbol? first) (keyword-sym? first)))))))
+        (nix-with (parse-expr (or (stx-ref subs 1) target-expr))
+                  (parse-expr (or (stx-ref subs 2) (car updates))))]
+       [else
+        (parse-with-form (or (stx-ref subs 1) target-expr)
+                         (or (stx-tail subs 2) updates))])]
 
     [(list 'defenum (? symbol? name) values ...)
      (defenum-form name (map ->datum (or (stx-tail subs 2) values)))]

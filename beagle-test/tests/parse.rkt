@@ -820,11 +820,12 @@
   (check-true (with-form? f))
   (check-equal? (length (with-form-updates f)) 1))
 
-(parse-err/rx "with rejects non-keyword field" #rx"field name must be a keyword"
-  `(with p ,(br 'name "alice")))
-
-(parse-err/rx "with rejects malformed update" #rx"each update must be"
-  '(with p 42))
+;; (with p [name "alice"]) and (with p 42) now parse as nix-with (Nix scope)
+;; under the shape-disambiguation rule — they no longer hit record-update.
+;; If you want a record-update error, use multiple [:k v] updates that violate
+;; the rules, e.g.:
+(parse-err/rx "record-update with rejects non-keyword field" #rx"field name must be a keyword"
+  `(with p ,(br 'name "alice") ,(br ':age 30)))
 
 ;; --- defenum form ------------------------------------------------------------
 

@@ -1,7 +1,7 @@
 #lang beagle/nix
 (ns test.nix.mkdefault)
 
-(fn-set-rest [lib pkgs]
+(module [lib pkgs]
   {:networking.hostName (lib/mkDefault "nixos")
    :time.timeZone (lib/mkDefault "UTC")
    :environment.systemPackages (lib/mkForce [pkgs.vim])

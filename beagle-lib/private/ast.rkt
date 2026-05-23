@@ -225,6 +225,9 @@
 (struct nix-fn-set-formal  (name default)                     #:transparent)
 (struct nix-pipe           (direction lhs rhs)                #:transparent)
 (struct nix-impl           (lhs rhs)                          #:transparent)
+(struct nix-derivation     (attrs)                            #:transparent)
+(struct nix-flake          (attrs)                            #:transparent)
+(struct nix-with-cfg       (path body)                        #:transparent)
 
 ;; --- SQL-specific AST nodes ------------------------------------------------
 (struct sql-table        (name columns)                       #:transparent)
@@ -406,6 +409,8 @@
  (struct-out nix-indented-string) (struct-out nix-path)
  (struct-out nix-fn-set) (struct-out nix-fn-set-formal)
  (struct-out nix-pipe) (struct-out nix-impl)
+ (struct-out nix-derivation) (struct-out nix-flake)
+ (struct-out nix-with-cfg)
  ;; SQL AST
  (struct-out sql-table) (struct-out sql-column)
  (struct-out sql-select) (struct-out sql-insert) (struct-out sql-update) (struct-out sql-delete)

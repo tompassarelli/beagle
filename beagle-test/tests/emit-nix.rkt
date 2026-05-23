@@ -185,31 +185,26 @@
   (check-true (and out (string-contains? out "b ? 5")))
   (check-true (and out (string-contains? out "{ a, b ? 5 }:"))))
 
-(test-case "fn-set-rest emits ... in formals"
-  (define out (nix-emit "(define-target nix) (fn-set-rest (config lib pkgs) config)"))
-  (check-true (and out (string-contains? out "...")))
-  (check-true (and out (string-contains? out "{ config, lib, pkgs, ... }:"))))
-
-(test-case "module with brackets emits same as fn-set-rest"
+(test-case "module emits ... in formals"
   (define out (nix-emit "(define-target nix) (module [config lib pkgs] config)"))
   (check-true (and out (string-contains? out "...")))
   (check-true (and out (string-contains? out "{ config, lib, pkgs, ... }:"))))
 
-(test-case "fn-set@ emits at-pattern"
-  (define out (nix-emit "(define-target nix) (fn-set@ self (a b) a)"))
-  (check-true (and out (string-contains? out "@ self")))
-  (check-true (and out (string-contains? out "{ a, b } @ self:"))))
+(test-case "overlay emits two formals without rest"
+  (define out (nix-emit "(define-target nix) (overlay [final prev] {:foo 1})"))
+  (check-true (and out (string-contains? out "{ final, prev }:")))
+  (check-false (and out (string-contains? out "..."))))
 
-(test-case "inh emits inherit"
-  (define out (nix-emit "(define-target nix) (inh a b c)"))
+(test-case "inherit emits inherit"
+  (define out (nix-emit "(define-target nix) (inherit a b c)"))
   (check-true (and out (string-contains? out "inherit a b c;"))))
 
-(test-case "inh-from emits inherit (ns)"
-  (define out (nix-emit "(define-target nix) (inh-from pkgs vim git)"))
+(test-case "inherit-from emits inherit (ns)"
+  (define out (nix-emit "(define-target nix) (inherit-from pkgs vim git)"))
   (check-true (and out (string-contains? out "inherit (pkgs) vim git;"))))
 
-(test-case "with-do emits with"
-  (define out (nix-emit "(define-target nix) (with-do lib [1 2 3])"))
+(test-case "with emits with"
+  (define out (nix-emit "(define-target nix) (with lib [1 2 3])"))
   (check-true (and out (string-contains? out "with lib;")))
   (check-true (and out (string-contains? out "[ 1 2 3 ]"))))
 
@@ -227,14 +222,14 @@
 
 ;; --- Phase 2: Nix semantic essentials --------------------------------------
 
-(test-case "rec-att emits recursive attrset"
-  (define out (nix-emit "(define-target nix) (rec-att x 1 y x)"))
+(test-case "rec-attrs emits recursive attrset"
+  (define out (nix-emit "(define-target nix) (rec-attrs x 1 y x)"))
   (check-true (and out (string-contains? out "rec {")))
   (check-true (and out (string-contains? out "x = 1;")))
   (check-true (and out (string-contains? out "y = x;"))))
 
-(test-case "assert-do emits assert"
-  (define out (nix-emit "(define-target nix) (assert-do true 42)"))
+(test-case "assert emits assert"
+  (define out (nix-emit "(define-target nix) (assert true 42)"))
   (check-true (and out (string-contains? out "assert true; 42"))))
 
 (test-case "get-or emits select with or-default"
@@ -251,8 +246,8 @@
   (check-true (and out (string-contains? out "line one")))
   (check-true (and out (string-contains? out "line two"))))
 
-(test-case "spath emits search path"
-  (define out (nix-emit "(define-target nix) (spath nixpkgs)"))
+(test-case "search-path emits search path"
+  (define out (nix-emit "(define-target nix) (search-path nixpkgs)"))
   (check-true (and out (string-contains? out "<nixpkgs>"))))
 
 ;; --- Phase 3: Operator/convenience parity ----------------------------------
@@ -265,8 +260,8 @@
   (define out (nix-emit "(define-target nix) (pipe-from f x)"))
   (check-true (and out (string-contains? out "f <| x"))))
 
-(test-case "impl emits logical implication"
-  (define out (nix-emit "(define-target nix) (impl a b)"))
+(test-case "implies emits logical implication"
+  (define out (nix-emit "(define-target nix) (implies a b)"))
   (check-true (and out (string-contains? out "a -> b"))))
 
 ;; --- nix indented strings (''...'') ----------------------------------------

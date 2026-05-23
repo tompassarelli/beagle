@@ -51,9 +51,8 @@
 (test-case "nix-rec-assert round-trip"
   (define out (compile-bnix-file (build-path fixtures-dir "nix-rec-assert.bnix")))
   (check-true (string-contains? out "rec {"))
-  (check-false (string-contains? out "rec-att"))
-  (check-true (string-contains? out "assert config.boot.isContainer;"))
-  (check-false (string-contains? out "assert-do")))
+  (check-false (string-contains? out "rec-attrs"))
+  (check-true (string-contains? out "assert config.boot.isContainer;")))
 
 ;; --- kmod (merge, assertions, with, not) -------------------------------------
 
@@ -138,10 +137,7 @@
                     "nix-nested-mkif.bnix")])
     (define out (compile-bnix-file (build-path fixtures-dir fixture)))
     (check-false (string-contains? out "fn-set") (format "~a leaks fn-set" fixture))
-    (check-false (string-contains? out "fn-set-rest") (format "~a leaks fn-set-rest" fixture))
-    (check-false (string-contains? out "with-do") (format "~a leaks with-do" fixture))
-    (check-false (string-contains? out "rec-att") (format "~a leaks rec-att" fixture))
-    (check-false (string-contains? out "assert-do") (format "~a leaks assert-do" fixture))
-    (check-false (string-contains? out "inh-from") (format "~a leaks inh-from" fixture))
+    (check-false (string-contains? out "rec-attrs") (format "~a leaks rec-attrs" fixture))
+    (check-false (string-contains? out "inherit-from") (format "~a leaks inherit-from" fixture))
     (check-false (string-contains? out "nix-rec") (format "~a leaks nix-rec" fixture))
     (check-false (string-contains? out "nix-assert") (format "~a leaks nix-assert" fixture))))
