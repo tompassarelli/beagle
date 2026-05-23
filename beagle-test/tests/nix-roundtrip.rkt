@@ -7,7 +7,7 @@
          racket/runtime-path
          beagle/private/parse
          beagle/private/emit
-         beagle/lang/reader-impl)
+         beagle/nix/lang/reader-impl)
 
 (define-runtime-path fixtures-dir "fixtures")
 
@@ -21,7 +21,7 @@
     (with-input-from-string body
       (lambda ()
         (let loop ([acc '()])
-          (define d (beagle-read-syntax (path->string path) (current-input-port)))
+          (define d (beagle-nix-read-syntax (path->string path) (current-input-port)))
           (if (eof-object? d) (reverse acc) (loop (cons d acc)))))))
   (define prog (parse-program stxs))
   (string-trim (emit-program prog)))
@@ -127,6 +127,40 @@
   (check-false (string-contains? out "lib/mk"))
   (check-false (string-contains? out "builtins/")))
 
+;; --- new forms: derivation, overlay, flake, with-cfg -----------------------
+
+(test-case "nix-derivation round-trip"
+  (define out (compile-bnix-file (build-path fixtures-dir "nix-derivation.bnix")))
+  (check-true (string-contains? out "pkgs.stdenv.mkDerivation"))
+  (check-true (string-contains? out "pname = \"hello-rust\";"))
+  (check-true (string-contains? out "version = \"0.1.0\";"))
+  (check-true (string-contains? out "buildPhase = \"cargo build --release\";"))
+  (check-false (string-contains? out "(derivation"))
+  (check-false (string-contains? out ":pname")))
+
+(test-case "nix-overlay round-trip"
+  (define out (compile-bnix-file (build-path fixtures-dir "nix-overlay.bnix")))
+  (check-true (string-contains? out "{ final, prev }:"))
+  (check-false (string-contains? out "..."))
+  (check-true (string-contains? out "prev.callPackage"))
+  (check-true (string-contains? out "prev.hello.overrideAttrs")))
+
+(test-case "nix-flake round-trip"
+  (define out (compile-bnix-file (build-path fixtures-dir "nix-flake.bnix")))
+  (check-true (string-contains? out "description ="))
+  (check-true (string-contains? out "inputs ="))
+  (check-true (string-contains? out "outputs ="))
+  (check-true (string-contains? out "url = \"github:NixOS/nixpkgs/nixos-unstable\";"))
+  (check-false (string-contains? out "(flake ")))
+
+(test-case "nix-with-cfg round-trip"
+  (define out (compile-bnix-file (build-path fixtures-dir "nix-with-cfg.bnix")))
+  (check-true (string-contains? out "cfg = config.myConfig.modules.demo;"))
+  (check-true (string-contains? out "lib.mkIf cfg.enable"))
+  (check-true (string-contains? out "cfg.port"))
+  (check-false (string-contains? out "config.myConfig.modules.demo.port"))
+  (check-false (string-contains? out "with-cfg")))
+
 ;; --- no beagle form names leak into output -----------------------------------
 
 (test-case "no beagle form names in any fixture output"
@@ -134,10 +168,13 @@
                     "nix-rec-assert.bnix" "nix-kmod.bnix"
                     "nix-interp-ms.bnix" "nix-builtins.bnix"
                     "nix-let-cond.bnix" "nix-mkdefault.bnix"
-                    "nix-nested-mkif.bnix")])
+                    "nix-nested-mkif.bnix" "nix-derivation.bnix"
+                    "nix-overlay.bnix" "nix-flake.bnix"
+                    "nix-with-cfg.bnix")])
     (define out (compile-bnix-file (build-path fixtures-dir fixture)))
     (check-false (string-contains? out "fn-set") (format "~a leaks fn-set" fixture))
     (check-false (string-contains? out "rec-attrs") (format "~a leaks rec-attrs" fixture))
     (check-false (string-contains? out "inherit-from") (format "~a leaks inherit-from" fixture))
+    (check-false (string-contains? out "with-cfg") (format "~a leaks with-cfg" fixture))
     (check-false (string-contains? out "nix-rec") (format "~a leaks nix-rec" fixture))
     (check-false (string-contains? out "nix-assert") (format "~a leaks nix-assert" fixture))))

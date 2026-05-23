@@ -14,6 +14,7 @@
          racket/list
          racket/file
          racket/set
+         json
          "parse.rkt"
          "types.rkt"
          "nixos-schema.rkt")
@@ -97,10 +98,55 @@
 
 (define MODULE-STRUCTURAL-KEYS '("config" "options" "imports" "_module" "_file"))
 
-(define HOME-MANAGER-ROOTS
-  '("programs" "home" "xdg" "accounts" "i18n" "targets" "wayland"
-    "qt" "gtk" "dconf" "fonts" "nixpkgs" "services" "systemd" "manual"
-    "news" "nix" "lib" "stylix"))
+;; --- validator config (externalized) ---------------------------------------
+;; Loaded from .nisp-cache/validate-config.json alongside schema.json.
+;; Falls back to safe defaults when absent.
+;;
+;; Schema:
+;;   {
+;;     "homeManagerRoots": ["programs", "home", ...],
+;;     "freeformKeyPrefixes": ["boot.kernel.sysctl", ...],
+;;     "typesNeedingDefault": ["lib/types.bool"]
+;;   }
+;;
+;; If `homeManagerRoots` is absent and an HM schema is loaded, roots are
+;; auto-discovered from the schema's top-level prefixes.
+
+(struct validator-config (home-manager-roots freeform-key-prefixes types-needing-default)
+  #:transparent)
+
+(define DEFAULT-VALIDATOR-CONFIG
+  (validator-config '() '() '(lib/types.bool)))
+
+(define (load-validator-config schema-path)
+  (define cfg-path
+    (and schema-path
+         (let-values ([(base name dir?) (split-path schema-path)])
+           (and (path? base) (build-path base "validate-config.json")))))
+  (cond
+    [(and cfg-path (file-exists? cfg-path))
+     (with-handlers ([exn:fail? (lambda (_) DEFAULT-VALIDATOR-CONFIG)])
+       (define j (call-with-input-file cfg-path read-json))
+       (validator-config
+        (or (hash-ref j 'homeManagerRoots #f) '())
+        (or (hash-ref j 'freeformKeyPrefixes #f) '())
+        (map string->symbol
+             (or (hash-ref j 'typesNeedingDefault #f) '("lib/types.bool")))))]
+    [else DEFAULT-VALIDATOR-CONFIG]))
+
+;; Auto-discover HM roots from a loaded HM schema if the config didn't list them.
+(define (discover-hm-roots hm-schema)
+  (cond
+    [(not hm-schema) '()]
+    [else
+     (define roots (make-hash))
+     (for ([key (in-hash-keys (nixos-schema-table hm-schema))])
+       (define first-dot (regexp-match-positions #rx"\\." key))
+       (when first-dot
+         (hash-set! roots (substring key 0 (caar first-dot)) #t)))
+     (hash-keys roots)]))
+
+(define current-validator-config (make-parameter DEFAULT-VALIDATOR-CONFIG))
 
 (define (dotted-option-key? sym)
   (and (symbol? sym)
@@ -132,12 +178,12 @@
   (define (add-lint! msg)
     (set! lint-warnings (cons msg lint-warnings)))
 
-  (define FREEFORM-KEY-PREFIXES
-    '("boot.kernel.sysctl" "services.samba.settings"))
+  (define freeform-prefixes
+    (validator-config-freeform-key-prefixes (current-validator-config)))
 
   (define (freeform-context? prefix)
     (and prefix
-         (ormap (lambda (p) (string-prefix? prefix p)) FREEFORM-KEY-PREFIXES)))
+         (ormap (lambda (p) (string-prefix? prefix p)) freeform-prefixes)))
 
   (define (looks-like-filename? s)
     (or (string-prefix? s ".")
@@ -342,8 +388,10 @@
   (for/or ([pair (in-list (map-form-pairs m))])
     (and (eq? (car pair) key-sym) (cdr pair))))
 
-(define TYPES-NEEDING-DEFAULT
-  '(lib/types.bool))
+;; Use (validator-config-types-needing-default (current-validator-config))
+;; for the configurable set; kept as an alias here for grep-ability.
+(define (types-needing-default)
+  (validator-config-types-needing-default (current-validator-config)))
 
 (define (detect-missing-defaults file-path keys)
   (define errors '())
@@ -356,7 +404,7 @@
         (define type-val (map-form-ref m ':type))
         (define default-val (map-form-ref m ':default))
         (when (and type-val (symbol? type-val)
-                   (member type-val TYPES-NEEDING-DEFAULT)
+                   (member type-val (types-needing-default))
                    (not default-val))
           (define key-str (symbol->string (found-key-key-sym fk)))
           (define-values (line col)
@@ -375,6 +423,15 @@
 ;; ============================================================================
 
 (define (validate-file-keys file-path keys schema #:hm-schema [hm-schema #f])
+  ;; If the active validator-config has no explicit HM roots, derive them from
+  ;; the HM schema (its top-level prefixes) so callers don't have to set the
+  ;; parameter to get sensible unknown-option detection.
+  (define effective-hm-roots
+    (let ([cfg-roots (validator-config-home-manager-roots (current-validator-config))])
+      (cond
+        [(pair? cfg-roots) cfg-roots]
+        [hm-schema (discover-hm-roots hm-schema)]
+        [else '()])))
   (define errors '())
 
   (define (add-error! fk msg kind path)
@@ -415,7 +472,7 @@
           (cond
             [hm-entry
              (check-type-against-entry fk path-str hm-entry "HM")]
-            [(member top-ns HOME-MANAGER-ROOTS)
+            [(member top-ns effective-hm-roots)
              (when hm-schema
                ;; Only error if the second-level namespace exists in the HM schema.
                ;; Programs from flake inputs (e.g., walker) won't be in the schema.
@@ -622,7 +679,7 @@
           (cond
             [(string-prefix? path-str "myConfig.")
              (myconfig-find-similar myconfig-declared path-str)]
-            [(and hm-schema (member top-ns HOME-MANAGER-ROOTS))
+            [(and hm-schema (member top-ns (validator-config-home-manager-roots (current-validator-config))))
              (nixos-find-similar hm-schema path-str)]
             [else (nixos-find-similar schema path-str)]))
         (when (pair? similars)
@@ -691,6 +748,16 @@
     (eprintf "beagle-validate: loaded HM schema from ~a (~a options)\n"
              hm-schema-path
              (hash-count (nixos-schema-table hm-schema))))
+
+  ;; Load validator config alongside schema; auto-discover HM roots if absent.
+  (define loaded-cfg (load-validator-config schema-path))
+  (define cfg
+    (cond
+      [(and (null? (validator-config-home-manager-roots loaded-cfg)) hm-schema)
+       (struct-copy validator-config loaded-cfg
+                    [home-manager-roots (discover-hm-roots hm-schema)])]
+      [else loaded-cfg]))
+  (current-validator-config cfg)
 
   (define all-errors '())
   (define all-file-keys '())

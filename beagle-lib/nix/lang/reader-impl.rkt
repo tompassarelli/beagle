@@ -91,9 +91,92 @@
        (datum->syntax #f result (vector src line col pos #f))
        result)]))
 
+;; ~"text ${expr} text" → (s "text " expr " text")
+;; Lexes the interp-string body, splits on ${...} segments,
+;; parses each segment as a beagle datum and emits an (s ...) form.
+(define (read-interp-string port src line col pos)
+  ;; Consume the opening "
+  (define opening (read-char port))
+  (unless (and (char? opening) (char=? opening #\"))
+    (error 'beagle "~~ must be followed by \" to open an interpolated string"))
+  (let loop ([parts '()] [literal '()])
+    (define c (read-char port))
+    (cond
+      [(eof-object? c)
+       (error 'beagle "unterminated ~~\"...\" string")]
+      [(char=? c #\")
+       (define final-parts
+         (if (null? literal) parts (cons (list->string (reverse literal)) parts)))
+       (define result (cons 's (reverse final-parts)))
+       (if src
+         (datum->syntax #f result (vector src line col pos #f))
+         result)]
+      [(char=? c #\\)
+       ;; Escape: \", \\, \$, \n, \t
+       (define esc (read-char port))
+       (cond
+         [(eof-object? esc) (error 'beagle "unterminated escape in ~~\"...\"")]
+         [(char=? esc #\n) (loop parts (cons #\newline literal))]
+         [(char=? esc #\t) (loop parts (cons #\tab literal))]
+         [else (loop parts (cons esc literal))])]
+      [(and (char=? c #\$)
+            (let ([n (peek-char port)]) (and (char? n) (char=? n #\{))))
+       (read-char port) ; consume {
+       ;; Read a balanced expression up to matching }
+       (define expr-str (read-until-matching-brace port))
+       (define expr-port (open-input-string expr-str))
+       (define expr-datum
+         (parameterize ([read-square-bracket-with-tag '#%brackets]
+                        [current-readtable beagle-nix-readtable])
+           (read expr-port)))
+       (define new-parts
+         (if (null? literal)
+           (cons expr-datum parts)
+           (cons expr-datum (cons (list->string (reverse literal)) parts))))
+       (loop new-parts '())]
+      [else (loop parts (cons c literal))])))
+
+(define (read-until-matching-brace port)
+  (let loop ([depth 1] [acc '()] [in-str? #f])
+    (define c (read-char port))
+    (cond
+      [(eof-object? c) (error 'beagle "unmatched { in ~~\"${...}\"")]
+      [(and (not in-str?) (char=? c #\{))
+       (loop (+ depth 1) (cons c acc) #f)]
+      [(and (not in-str?) (char=? c #\}))
+       (if (= depth 1)
+         (list->string (reverse acc))
+         (loop (- depth 1) (cons c acc) #f))]
+      [(and (not in-str?) (char=? c #\"))
+       (loop depth (cons c acc) #t)]
+      [(and in-str? (char=? c #\\))
+       (define n (read-char port))
+       (loop depth (cons n (cons c acc)) in-str?)]
+      [(and in-str? (char=? c #\"))
+       (loop depth (cons c acc) #f)]
+      [else
+       (loop depth (cons c acc) in-str?)])))
+
+(define (nix-tilde-reader ch port src line col pos)
+  (define next (peek-char port))
+  (cond
+    [(and (char? next) (char=? next #\"))
+     (read-interp-string port src line col pos)]
+    [else
+     ;; ~ followed by non-quote: treat as a symbol char (allow ~foo names)
+     (define rest
+       (let loop ([acc (list ch)])
+         (define n (peek-char port))
+         (cond
+           [(or (eof-object? n) (memv n '(#\space #\newline #\tab #\) #\] #\} #\( #\[ #\{ #\;)))
+            (list->string (reverse acc))]
+           [else (read-char port) (loop (cons n acc))])))
+     (string->symbol rest)]))
+
 (define beagle-nix-readtable
   (make-readtable beagle-readtable
-    #\' 'terminating-macro nix-sq-reader))
+    #\' 'terminating-macro nix-sq-reader
+    #\~ 'non-terminating-macro nix-tilde-reader))
 
 (define (beagle-nix-read in)
   (parameterize ([read-square-bracket-with-tag '#%brackets]

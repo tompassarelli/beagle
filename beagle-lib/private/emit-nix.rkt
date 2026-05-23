@@ -8,7 +8,8 @@
          racket/format
          racket/list
          "parse.rkt"
-         "emit-dispatch.rkt")
+         "emit-dispatch.rkt"
+         "emit-nix-strings.rkt")
 
 ;; --- indentation -----------------------------------------------------------
 
@@ -31,9 +32,11 @@
      "!" "_bang"))
   (if (nix-reserved? out) (string-append out "'") out))
 
+;; Nix syntactic keywords. `import` is a function (builtins.import), not a
+;; keyword, so it's intentionally excluded.
 (define nix-reserved-words
   '("if" "then" "else" "let" "in" "with" "rec" "inherit"
-    "assert" "or" "true" "false" "null" "import"))
+    "assert" "or" "true" "false" "null"))
 
 (define (nix-reserved? s)
   (member s nix-reserved-words))
@@ -46,23 +49,18 @@
      (error 'beagle-nix "Nix does not support Infinity or NaN literals")]
     [else (number->string n)]))
 
-;; --- escape ----------------------------------------------------------------
+;; Nix string escaping + interp/multiline/indented helpers live in
+;; emit-nix-strings.rkt and are imported above. They call back via
+;; the `current-emit-expr` parameter.
 
-(define (escape-nix-string s)
-  (regexp-replace*
-   #rx"\\$\\{"
-   (regexp-replace*
-    #rx"\""
-    (regexp-replace*
-     #rx"\n"
-     (regexp-replace* #rx"\\\\" s "\\\\\\\\")
-     "\\\\n")
-    "\\\\\"")
-   "\\\\${"))
 
 ;; --- Nix emission from Beagle AST -----------------------------------------
 
 (define (nix-emit-program prog)
+  (parameterize ([current-emit-expr emit-expr])
+    (nix-emit-program-body prog)))
+
+(define (nix-emit-program-body prog)
   (define depth 0)
   (define forms (program-forms prog))
   (define requires (program-requires prog))
@@ -164,7 +162,7 @@
      (define entries
        (string-join
         (for/list ([v (in-list vals)])
-          (format "\"~a\"" (escape-nix-string (string-replace (symbol->string v) ":" ""))))
+          (format "\"~a\"" (escape-nix (string-replace (symbol->string v) ":" ""))))
         " "))
      (format "~a~a_values = [ ~a ];" ind name entries)]
 
@@ -273,7 +271,7 @@
        (format "~a:" (mangle-name fn)))
      " "))
   (define body-entries
-    (cons (format "~a  _tag = \"~a\";" ind (escape-nix-string tag))
+    (cons (format "~a  _tag = \"~a\";" ind (escape-nix tag))
           (for/list ([fn (in-list field-names)])
             (format "~a  ~a = ~a;" ind (mangle-name fn) (mangle-name fn)))))
   (define ctor
@@ -298,7 +296,7 @@
 (define (emit-expr e depth)
   (cond
     [(number? e) (emit-nix-number e)]
-    [(string? e) (format "\"~a\"" (escape-nix-string e))]
+    [(string? e) (format "\"~a\"" (escape-nix e))]
     [(boolean? e) (if e "true" "false")]
     [(eq? e 'nil) "null"]
 
@@ -309,7 +307,7 @@
        [(eq? e 'true) "true"]
        [(eq? e 'false) "false"]
        [(char=? (string-ref sym-str 0) #\:)
-        (format "\"~a\"" (escape-nix-string (substring sym-str 1)))]
+        (format "\"~a\"" (escape-nix (substring sym-str 1)))]
        [(string-contains? sym-str "/")
         (string-replace sym-str "/" ".")]
        [(string-contains? sym-str ".")
@@ -377,8 +375,8 @@
     [(quoted? e)
      (define d (quoted-datum e))
      (cond
-       [(symbol? d) (format "\"~a\"" (escape-nix-string (symbol->string d)))]
-       [(string? d) (format "\"~a\"" (escape-nix-string d))]
+       [(symbol? d) (format "\"~a\"" (escape-nix (symbol->string d)))]
+       [(string? d) (format "\"~a\"" (escape-nix d))]
        [(number? d) (emit-nix-number d)]
        [(boolean? d) (if d "true" "false")]
        [else (format "\"~v\"" d)])]
@@ -917,7 +915,7 @@
      (if (string-prefix? s ":")
        (substring s 1)
        (format "${~a}" (mangle-name key)))]
-    [(string? key) (format "\"~a\"" (escape-nix-string key))]
+    [(string? key) (format "\"~a\"" (escape-nix key))]
     [(quoted? key)
      (define d (quoted-datum key))
      (if (symbol? d)
@@ -1030,7 +1028,7 @@
                        " ")
                       body-str)))
           (format "if ~a._tag == \"~a\" then ~a else ~a"
-                  target (escape-nix-string tag) bind-str
+                  target (escape-nix tag) bind-str
                   (emit-match-clauses (cdr cs)))]
          [(pat-var? pat)
           (format "let ~a = ~a; in ~a"
@@ -1163,65 +1161,6 @@
    "rec {\n"
    (string-join entries "\n")
    "\n" (indent depth) "}"))
-
-(define (escape-nix-multiline-keep-interp s)
-  (regexp-replace* #rx"''" s "'''"))
-
-(define (escape-nix-multiline s)
-  (regexp-replace* #rx"\\$\\{"
-    (regexp-replace* #rx"''" s "'''")
-    "''${"))
-
-(define (escape-nix-string-keep-interp s)
-  (regexp-replace*
-   #rx"\""
-   (regexp-replace*
-    #rx"\n"
-    (regexp-replace* #rx"\\\\" s "\\\\\\\\")
-    "\\\\n")
-   "\\\\\""))
-
-(define (emit-nix-interp-string-inline parts depth)
-  (define chunks
-    (for/list ([part (in-list parts)])
-      (cond
-        [(string? part) (escape-nix-multiline-keep-interp part)]
-        [else (format "${~a}" (emit-expr part depth))])))
-  (string-join chunks ""))
-
-(define (emit-nix-interp-string parts depth)
-  (define chunks
-    (for/list ([part (in-list parts)])
-      (cond
-        [(string? part) (escape-nix-string-keep-interp part)]
-        [else (format "${~a}" (emit-expr part depth))])))
-  (format "\"~a\"" (string-join chunks "")))
-
-(define (emit-nix-multiline-string lines depth)
-  (define ind (indent (+ depth 1)))
-  (define line-strs
-    (for/list ([line (in-list lines)])
-      (cond
-        [(string? line) (string-append ind line)]
-        [(nix-interpolated-string? line)
-         (string-append ind (emit-nix-interp-string-inline
-                             (nix-interpolated-string-parts line) depth))]
-        [else (string-append ind "${" (emit-expr line depth) "}")])))
-  (string-append
-   "''\n"
-   (string-join line-strs "\n")
-   "\n" (indent depth) "''"))
-
-(define (emit-nix-indented-string text depth #:escape? [escape? #t])
-  (define ind (indent (+ depth 1)))
-  (define lines (regexp-split #rx"\n" text))
-  (define (process-line l)
-    (if (string=? l "") ""
-        (string-append ind (if escape? (escape-nix-multiline l) l))))
-  (string-append
-   "''\n"
-   (string-join (map process-line lines) "\n")
-   "\n" (indent depth) "''"))
 
 (define (emit-nix-fn-set e depth)
   (define formals (nix-fn-set-formals e))
