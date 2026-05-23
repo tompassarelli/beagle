@@ -186,6 +186,28 @@
 ;; schema lookup as "services.foo.enable".
 (define current-cfg-aliases (make-parameter (hasheq)))
 
+;; Known qualified-call prefixes for the nix target. When a user writes
+;; `lib.mkOption` (matching Nix doc syntax), canonicalize to `lib/mkOption`
+;; for stdlib catalog lookup. Otherwise users hit Any for symbols that
+;; look identical to typed entries.
+(define KNOWN-QUALIFIED-PREFIXES '("lib." "builtins." "pkgs."))
+
+(define (canonicalize-qualified-sym sym)
+  (define s (symbol->string sym))
+  (define matched
+    (for/or ([p (in-list KNOWN-QUALIFIED-PREFIXES)]
+             #:when (string-prefix? s p))
+      p))
+  (cond
+    [(not matched) sym]
+    [else
+     (define plen (string-length matched))
+     ;; Replace first dot at position (plen - 1) with /
+     (string->symbol
+       (string-append (substring s 0 (sub1 plen))
+                      "/"
+                      (substring s plen)))]))
+
 ;; --- schema → type translation --------------------------------------------
 ;; Map a Nix option schema entry's "t" field to a Beagle type. Recurses into
 ;; "inner" for parametric types (listOf, attrsOf, nullOr).
@@ -1368,6 +1390,7 @@
     [(symbol? e)
      (or (infer-literal-type e)
          (hash-ref env e #f)
+         (hash-ref env (canonicalize-qualified-sym e) #f)
          (schema-type-for-config-sym e)
          ANY)]
     [(quoted? e) ANY]
