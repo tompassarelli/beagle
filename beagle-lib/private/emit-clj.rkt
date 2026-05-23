@@ -118,68 +118,61 @@
 
 (define (emit-ns prog #:needs-clj-string? [needs-clj-string? #f])
   (define ns (program-namespace prog))
-  (define base-rs (program-requires prog))
-  ;; Auto-inject clojure.string require when str/ calls are used
-  (define rs
-    (if (and needs-clj-string?
-             (not (for/or ([r (in-list base-rs)])
-                    (eq? (require-entry-ns r) 'clojure.string))))
-        (append base-rs (list (require-entry 'clojure.string 'str #f)))
-        base-rs))
-  (define is (program-imports prog))
-  (define cljs? (eq? (current-emit-target) 'cljs))
-  (define has-requires (not (null? rs)))
-  (define has-imports  (and (not cljs?) (not (null? is))))
+  (define rs (auto-inject-clj-string (program-requires prog) needs-clj-string?))
+  ;; JVM :import clauses are CLJ-only; CLJS uses :require for classes.
+  (define is (if (eq? (current-emit-target) 'cljs)
+                 '()
+                 (program-imports prog)))
+  (define clauses
+    (filter values
+      (list
+       (and (not (null? rs))
+            (format "(:require ~a)"
+                    (string-join (map emit-require rs) "\n            ")))
+       (and (not (null? is))
+            (format "(:import ~a)"
+                    (string-join (map emit-import is) "\n           "))))))
+  (if (null? clauses)
+      (format "(ns ~a)" ns)
+      (format "(ns ~a\n  ~a)" ns (string-join clauses "\n  "))))
+
+;; Inject [clojure.string :as str] when the body uses `str/foo` and the user
+;; didn't already require clojure.string.
+(define (auto-inject-clj-string base-rs needs-clj-string?)
   (cond
-    [(and (not has-requires) (not has-imports))
-     (format "(ns ~a)" ns)]
-    [(and has-requires (not has-imports))
-     (format "(ns ~a\n  (:require ~a))"
-             ns
-             (string-join (map emit-require rs) "\n            "))]
-    [(and (not has-requires) has-imports)
-     (format "(ns ~a\n  (:import ~a))"
-             ns
-             (string-join (map emit-import is) "\n           "))]
-    [else
-     (format "(ns ~a\n  (:require ~a)\n  (:import ~a))"
-             ns
-             (string-join (map emit-require rs) "\n            ")
-             (string-join (map emit-import is) "\n           "))]))
+    [(not needs-clj-string?) base-rs]
+    [(for/or ([r (in-list base-rs)])
+       (eq? (require-entry-ns r) 'clojure.string))
+     base-rs]
+    [else (append base-rs (list (require-entry 'clojure.string 'str #f)))]))
+
+;; Find the index of the last `.` in s, or #f if none.
+(define (string-last-dot s)
+  (let loop ([i (- (string-length s) 1)])
+    (cond
+      [(< i 0) #f]
+      [(char=? (string-ref s i) #\.) i]
+      [else (loop (- i 1))])))
 
 (define (emit-require r)
   (define ns (require-entry-ns r))
-  (cond
-    [(require-entry-alias r)
-     (format "[~a :as ~a]" ns (require-entry-alias r))]
-    [else
-     (define ns-str (symbol->string ns))
-     (define last-seg
-       (let ([idx (for/last ([i (in-range (string-length ns-str))]
-                             #:when (char=? (string-ref ns-str i) #\.))
-                    i)])
-         (if idx (substring ns-str (+ idx 1)) ns-str)))
-     (format "[~a :as ~a]" ns last-seg)]))
+  (define alias
+    (or (require-entry-alias r)
+        ;; Default alias: the last `.`-separated segment of the namespace.
+        (let* ([ns-str (symbol->string ns)]
+               [idx (string-last-dot ns-str)])
+          (if idx (substring ns-str (+ idx 1)) ns-str))))
+  (format "[~a :as ~a]" ns alias))
 
 ;; Split a fully-qualified Java class symbol like 'java.io.File into
 ;; package ("java.io") and class name ("File"), then emit Clojure-style
-;; [package ClassName].
+;; [package ClassName]. Bare classes (no dot) emit as a plain symbol.
 (define (emit-import class-sym)
   (define s (symbol->string class-sym))
-  (define last-dot
-    (let loop ([i (- (string-length s) 1)])
-      (cond
-        [(< i 0) #f]
-        [(char=? (string-ref s i) #\.) i]
-        [else (loop (- i 1))])))
+  (define idx (string-last-dot s))
   (cond
-    [last-dot
-     (define pkg (substring s 0 last-dot))
-     (define cls (substring s (+ last-dot 1)))
-     (format "[~a ~a]" pkg cls)]
-    [else
-     ;; No dot — bare class name (e.g. Exception)
-     (symbol->string class-sym)]))
+    [idx (format "[~a ~a]" (substring s 0 idx) (substring s (+ idx 1)))]
+    [else s]))
 
 ;; --- per-form emission -----------------------------------------------------
 
@@ -540,44 +533,44 @@
   (define val-strs (map (lambda (v) (format ":~a" v)) vals))
   (format "(def ~a-values #{~a})" name (string-join val-strs " ")))
 
+;; Emit `(defrecord Name [f1 f2 ...])` from a member symbol + its field params.
+(define (emit-variant-defrecord name fields)
+  (cond
+    [(null? fields)
+     (format "(defrecord ~a [])" name)]
+    [else
+     (format "(defrecord ~a [~a])"
+             name
+             (string-join (map (lambda (p) (symbol->string (param-name p))) fields) " "))]))
+
 (define (emit-defunion f)
   (define name (defunion-form-name f))
   (define members (defunion-form-members f))
-  (define member-strs (map symbol->string members))
   (define member-fields (defunion-form-member-fields f))
-  (define comment (format ";; ~a = ~a" name (string-join member-strs " | ")))
-  (if (not member-fields)
-    comment
-    (string-append comment "\n"
+  (define comment
+    (format ";; ~a = ~a" name (string-join (map symbol->string members) " | ")))
+  (cond
+    [(not member-fields) comment]
+    [else
+     (string-append
+      comment "\n"
       (string-join
-        (for/list ([m (in-list members)])
-          (define fields (hash-ref member-fields m))
-          (define m-str (symbol->string m))
-          (define ctor (format "(defrecord ~a [~a])"
-                         m-str
-                         (string-join
-                           (for/list ([fld (in-list fields)])
-                             (format "~a" (param-name fld)))
-                           " ")))
-          ctor)
-        "\n"))))
+       (for/list ([m (in-list members)])
+         (emit-variant-defrecord m (hash-ref member-fields m '())))
+       "\n"))]))
 
 (define (emit-deferror f)
   (define name (deferror-form-name f))
   (define members (deferror-form-members f))
-  (define member-strs (map symbol->string members))
   (define mf (deferror-form-member-fields f))
-  (define comment (format ";; error ~a = ~a" name (string-join member-strs " | ")))
-  (string-append comment "\n"
-    (string-join
-      (for/list ([m (in-list members)])
-        (define fields (hash-ref mf m '()))
-        (define m-str (symbol->string m))
-        (if (null? fields)
-          (format "(defrecord ~a [])" m-str)
-          (format "(defrecord ~a [~a])" m-str
-                  (string-join (map (lambda (fld) (format "~a" (param-name fld))) fields) " "))))
-      "\n")))
+  (define comment
+    (format ";; error ~a = ~a" name (string-join (map symbol->string members) " | ")))
+  (string-append
+   comment "\n"
+   (string-join
+    (for/list ([m (in-list members)])
+      (emit-variant-defrecord m (hash-ref mf m '())))
+    "\n")))
 
 (define (emit-defscalar f)
   (define name (defscalar-form-name f))
