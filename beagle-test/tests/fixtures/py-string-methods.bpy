@@ -1,0 +1,30 @@
+#lang beagle/py
+
+(ns py-string-methods)
+
+(defn shout [(s : String)] : String
+  (.upper s))
+
+(defn whisper [(s : String)] : String
+  (.lower s))
+
+(defn trim-edges [(s : String)] : String
+  (.strip s))
+
+(defn words [(s : String)] : (Vec String)
+  (.split s " "))
+
+(defn join-with-dash [(parts : (Vec String))] : String
+  (.join "-" parts))
+
+(defn swap-vowels [(s : String)] : String
+  (.replace s "a" "@"))
+
+(defn starts-with-hi? [(s : String)] : Bool
+  (.startswith s "hi"))
+
+(defn ends-with-bang? [(s : String)] : Bool
+  (.endswith s "!"))
+
+(defn count-spaces [(s : String)] : Int
+  (.count s " "))

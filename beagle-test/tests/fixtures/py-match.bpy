@@ -1,0 +1,27 @@
+#lang beagle/py
+
+(ns py-match)
+
+(defunion Shape
+  (Circle [(radius : Float)])
+  (Square [(side : Float)])
+  (Rect   [(w : Float) (h : Float)]))
+
+(defn area [(s : Shape)] : Float
+  (match s
+    [(Circle r) (* 3.14159 (* r r))]
+    [(Square w) (* w w)]
+    [(Rect w h) (* w h)]))
+
+(defn classify [(n : Int)] : String
+  (cond
+    (= n 0) "zero"
+    (= n 1) "one"
+    (= n 2) "two"
+    :else   "many"))
+
+(defn describe [(s : Shape)] : String
+  (match s
+    [(Circle _) "round"]
+    [(Square _) "four-equal-sides"]
+    [(Rect _ _) "rectangular"]))

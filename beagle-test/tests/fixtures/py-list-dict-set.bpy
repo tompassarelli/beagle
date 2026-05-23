@@ -1,0 +1,45 @@
+#lang beagle/py
+
+(ns py-list-dict-set)
+
+(defn append-one [(xs : (List Int)) (x : Int)] : Nil
+  (.append xs x))
+
+(defn extend-vec [(xs : (List Int)) (ys : (List Int))] : Nil
+  (.extend xs ys))
+
+(defn pop-last [(xs : (List Int))] : Int
+  (.pop xs))
+
+(defn dict-keys [(d : (Map String Int))] : (List String)
+  (list (.keys d)))
+
+(defn dict-values [(d : (Map String Int))] : (List Int)
+  (list (.values d)))
+
+(defn dict-get-default [(d : (Map String Int)) (k : String)] : Int
+  (.get d k 0))
+
+(defn set-union-fn [(a : (Set Int)) (b : (Set Int))] : (Set Int)
+  (.union a b))
+
+(defn set-intersection-fn [(a : (Set Int)) (b : (Set Int))] : (Set Int)
+  (.intersection a b))
+
+(defn len-of [(xs : (List Int))] : Int
+  (len xs))
+
+(defn max-of [(xs : (List Int))] : Int
+  (max xs))
+
+(defn min-of [(xs : (List Int))] : Int
+  (min xs))
+
+(defn sum-of [(xs : (List Int))] : Int
+  (sum xs))
+
+(defn sorted-of [(xs : (List Int))] : (List Int)
+  (sorted xs))
+
+(defn reversed-of [(xs : (List Int))] : (List Int)
+  (list (reversed xs)))

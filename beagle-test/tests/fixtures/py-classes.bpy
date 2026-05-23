@@ -1,0 +1,25 @@
+#lang beagle/py
+
+(ns py-classes)
+
+(defrecord Account
+  [(holder : String)
+   (balance : Float)])
+
+(defn deposit [(a : Account) (amount : Float)] : Account
+  (Account (account-holder a) (+ (account-balance a) amount)))
+
+(defn withdraw [(a : Account) (amount : Float)] : Account
+  (Account (account-holder a) (- (account-balance a) amount)))
+
+(defrecord Transaction
+  [(from-acct : String)
+   (to-acct : String)
+   (amount : Float)])
+
+(defn describe-txn [(t : Transaction)] : String
+  (str (transaction-from-acct t)
+       " -> "
+       (transaction-to-acct t)
+       ": "
+       (str (transaction-amount t))))

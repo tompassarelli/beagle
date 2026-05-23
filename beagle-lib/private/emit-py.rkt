@@ -20,11 +20,13 @@
    (string-replace
     (string-replace
      (string-replace
-      (string-replace s "-" "_")
-      "?" "_p")
-     "!" "_bang")
-    ">" "_gt")
-   "<" "_lt"))
+      (string-replace
+       (string-replace s "-" "_")
+       "?" "_p")
+      "!" "_bang")
+     ">" "_gt")
+    "<" "_lt")
+   "/" "."))
 
 ;; --- special float values ---------------------------------------------------
 
