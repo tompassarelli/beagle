@@ -67,7 +67,8 @@
   (check-false (nix-fn-set-rest? f)))
 
 (test-case "overlay enforces exactly two formals"
-  (check-true (nix-fn-set? (first-form "(overlay [a b] a)")))
+  (check-true (fn-form? (first-form "(overlay [a b] a)")))
+  (check-equal? (length (fn-form-params (first-form "(overlay [a b] a)"))) 2)
   (check-exn exn:fail? (lambda () (first-form "(overlay [a] a)")))
   (check-exn exn:fail? (lambda () (first-form "(overlay [a b c] a)"))))
 

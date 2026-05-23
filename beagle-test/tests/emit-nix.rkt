@@ -190,10 +190,10 @@
   (check-true (and out (string-contains? out "...")))
   (check-true (and out (string-contains? out "{ config, lib, pkgs, ... }:"))))
 
-(test-case "overlay emits two formals without rest"
+(test-case "overlay emits curried (final: prev: body)"
   (define out (nix-emit "(define-target nix) (overlay [final prev] {:foo 1})"))
-  (check-true (and out (string-contains? out "{ final, prev }:")))
-  (check-false (and out (string-contains? out "..."))))
+  (check-true (and out (string-contains? out "final: prev:")))
+  (check-false (and out (string-contains? out "{ final, prev"))))
 
 (test-case "inherit emits inherit"
   (define out (nix-emit "(define-target nix) (inherit a b c)"))

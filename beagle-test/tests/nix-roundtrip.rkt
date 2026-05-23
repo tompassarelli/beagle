@@ -138,10 +138,10 @@
   (check-false (string-contains? out "(derivation"))
   (check-false (string-contains? out ":pname")))
 
-(test-case "nix-overlay round-trip"
+(test-case "nix-overlay round-trip — curried not attrset"
   (define out (compile-bnix-file (build-path fixtures-dir "nix-overlay.bnix")))
-  (check-true (string-contains? out "{ final, prev }:"))
-  (check-false (string-contains? out "..."))
+  (check-true (string-contains? out "final: prev:"))
+  (check-false (string-contains? out "{ final, prev"))
   (check-true (string-contains? out "prev.callPackage"))
   (check-true (string-contains? out "prev.hello.overrideAttrs")))
 

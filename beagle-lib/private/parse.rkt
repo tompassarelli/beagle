@@ -985,12 +985,16 @@
                  (parse-expr (or (stx-ref subs 2) body-expr)))]
 
     [(list 'overlay formals body-expr)
-     ;; Nix overlay: final: prev: body (exactly two positional formals)
+     ;; Nix overlay: final: prev: body (curried — NOT attrset-destructure)
+     ;; Emits as fn-form so the nix emitter produces `final: prev: body`.
      (define f-list (parse-nix-fn-set-formals (or (stx-ref subs 1) formals)))
      (unless (= (length f-list) 2)
        (error 'beagle "overlay: expected exactly two formals [final prev], got ~a" (length f-list)))
-     (nix-fn-set f-list #f #f
-                 (parse-expr (or (stx-ref subs 2) body-expr)))]
+     (define ps
+       (for/list ([f (in-list f-list)])
+         (param (nix-fn-set-formal-name f) #f)))
+     (fn-form ps #f #f
+              (list (parse-expr (or (stx-ref subs 2) body-expr))))]
 
     [(list 'derivation attrs-expr)
      ;; mkDerivation sugar: (derivation {:pname ... :version ... :src ...})

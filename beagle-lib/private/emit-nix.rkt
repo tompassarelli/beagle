@@ -1003,7 +1003,12 @@
      (if (string-prefix? s ":")
        (substring s 1)
        (format "${~a}" (mangle-name key)))]
-    [(string? key) (format "\"~a\"" (escape-nix key))]
+    [(string? key)
+     ;; If the key contains ${...} interpolation, preserve it so Nix
+     ;; evaluates it (computed key). Otherwise full-escape as literal.
+     (if (regexp-match? #rx"\\$\\{" key)
+       (format "\"~a\"" (escape-nix #:keep-interp? #t key))
+       (format "\"~a\"" (escape-nix key)))]
     [(quoted? key)
      (define d (quoted-datum key))
      (if (symbol? d)

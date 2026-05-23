@@ -961,6 +961,13 @@
 
 (define (extract-narrowing cond-expr)
   (cond
+    ;; Bare-symbol truthiness — if the symbol's type is (U X Nil), narrow
+    ;; to Nil in the FALSE branch (negated = #t flips it). Works for
+    ;; schema-derived optional config paths: (if config.X.optional ...).
+    ;; Returns the Nil type as the "narrow-to" with negated=#t so callers
+    ;; apply Nil to the else-branch and non-Nil to the then-branch.
+    [(symbol? cond-expr)
+     (values cond-expr (type-prim 'Nil) #t)]
     [(and (call-form? cond-expr)
           (hash-has-key? TYPE-PREDICATES (call-form-fn cond-expr))
           (= (length (call-form-args cond-expr)) 1)
