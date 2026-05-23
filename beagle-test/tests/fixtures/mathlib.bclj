@@ -11,4 +11,4 @@
   (str "hello " name))
 
 (defn untyped-inc [x]
-  (inc x))
+  (+ x 1))

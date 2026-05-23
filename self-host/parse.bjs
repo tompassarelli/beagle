@@ -110,7 +110,7 @@
       (make-prim "Any")
       (let [before (.slice items 0 arrow-pos)
             after (.slice items (+ arrow-pos 1))]
-        (if (not= (.-length after) 1)
+        (if (not (= (.-length after) 1))
           (make-prim "Any")
           (let [amp-pos (.indexOf before "&")]
             (if (> amp-pos -1)
@@ -966,7 +966,7 @@
     (boolean? d) (make-literal "bool" d)
 
     ;; number literal (int vs float)
-    (and (number? d) (not= d (js/Math.floor d)))
+    (and (number? d) (not (= d (js/Math.floor d))))
       (make-literal "float" d)
     (number? d)
       (make-literal "number" d)

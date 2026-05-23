@@ -6,7 +6,7 @@
 
 (defn repeat-str [(s : String) (n : Int)] : String
   (loop [i 0 acc ""]
-    (if (= i n) acc (recur (inc i) (str acc s)))))
+    (if (= i n) acc (recur (+ i 1) (str acc s)))))
 
 (println (sum-pairs [1 2 3] [10 20 30]))
 (println (repeat-str "ab" 3))

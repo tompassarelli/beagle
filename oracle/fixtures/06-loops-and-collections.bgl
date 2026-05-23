@@ -2,7 +2,7 @@
 
 (defn sum-range [(n : Int)] : Int
   (loop [i 0 acc 0]
-    (if (= i n) acc (recur (inc i) (+ acc i)))))
+    (if (= i n) acc (recur (+ i 1) (+ acc i)))))
 
 (defn squares [(xs : (Vec Int))] : (Vec Int)
   (for [x xs] (* x x)))

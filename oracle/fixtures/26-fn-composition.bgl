@@ -2,7 +2,7 @@
 
 (defn apply-n [(f : [Int -> Int]) (n : Int) (x : Int)] : Int
   (loop [i 0 acc x]
-    (if (= i n) acc (recur (inc i) (f acc)))))
+    (if (= i n) acc (recur (+ i 1) (f acc)))))
 
 (defn pipeline [(x : Int)] : Int
   (let [step1 (+ x 10)
