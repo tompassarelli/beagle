@@ -1,0 +1,31 @@
+{
+  "tables": {
+    "users": {
+      "columns": {
+        "id":         { "type": "Int", "primary_key": true },
+        "username":   { "type": "String" },
+        "email":      { "type": "String" },
+        "created_at": { "type": "Int" }
+      }
+    },
+    "posts": {
+      "columns": {
+        "id":         { "type": "Int", "primary_key": true },
+        "author_id":  { "type": "Int", "fk_table": "users", "fk_column": "id" },
+        "title":      { "type": "String" },
+        "body":       { "type": "String" },
+        "view_count": { "type": "Int" },
+        "published":  { "type": "Bool" }
+      }
+    },
+    "comments": {
+      "columns": {
+        "id":         { "type": "Int", "primary_key": true },
+        "post_id":    { "type": "Int", "fk_table": "posts", "fk_column": "id" },
+        "author_id":  { "type": "Int", "fk_table": "users", "fk_column": "id" },
+        "body":       { "type": "String" },
+        "created_at": { "type": "Int" }
+      }
+    }
+  }
+}

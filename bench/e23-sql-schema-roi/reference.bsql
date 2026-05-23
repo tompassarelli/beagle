@@ -1,0 +1,14 @@
+#lang beagle/sql
+(ns bench.e23.reference)
+
+;; Top 5 most-viewed published posts by a given author's username.
+;; Column refs (author_id, view_count, published) validated against
+;; .beagle-cache/sql-schema.json — typos become compile errors.
+
+(select [posts.title posts.view_count]
+  (from posts)
+  (join users :on (= posts.author_id users.id))
+  (where (and (= users.username "alice")
+              (= posts.published true)))
+  (order-by [posts.view_count :desc])
+  (limit 5))

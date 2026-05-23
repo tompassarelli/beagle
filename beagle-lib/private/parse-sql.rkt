@@ -133,6 +133,9 @@
     [(and (symbol? d) (sql-dot-ref? d))
      (parse-sql-column-ref d)]
     [(eq? d '*) '*]
+    ;; Bare `true`/`false` are boolean literals, not column refs.
+    [(eq? d 'true) #t]
+    [(eq? d 'false) #f]
     [(symbol? d) d]
     [(string? d) d]
     [(number? d) d]
@@ -334,7 +337,19 @@
   (sql-join type table alias condition))
 
 (define (parse-sql-order-by items)
-  (let loop ([rest items] [acc '()])
+  ;; Accept either flat `(order-by col :desc col2 :asc)` or bracketed
+  ;; `(order-by [col :desc] [col2 :asc])` — both are natural authoring
+  ;; forms. Unwrap bracket-lists into the flat list.
+  (define unwrap
+    (let loop ([xs items] [acc '()])
+      (cond
+        [(null? xs) (reverse acc)]
+        [(let ([d (->datum (car xs))])
+           (and (pair? d) (eq? (car d) '#%brackets)))
+         (define d (->datum (car xs)))
+         (loop (cdr xs) (append (reverse (map (lambda (x) (datum->syntax #f x)) (cdr d))) acc))]
+        [else (loop (cdr xs) (cons (car xs) acc))])))
+  (let loop ([rest unwrap] [acc '()])
     (cond
       [(null? rest) (reverse acc)]
       [else
