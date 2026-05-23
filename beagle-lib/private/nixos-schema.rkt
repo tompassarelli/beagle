@@ -33,6 +33,7 @@
 
  ;; Did-you-mean
  nixos-find-similar
+ find-similar-strs
  levenshtein)
 
 ;; ============================================================================
@@ -275,3 +276,13 @@
                         (and (> d 0) (<= d threshold))))
       (cons (levenshtein path-str key) key)))
   (map cdr (sort candidates < #:key car)))
+
+;; Generic top-N closest-string finder. Returns the n candidates from
+;; `candidates` with smallest Levenshtein distance from `target`,
+;; sorted ascending. Non-string entries in candidates are skipped.
+(define (find-similar-strs target candidates n)
+  (define scored
+    (for/list ([c (in-list candidates)] #:when (string? c))
+      (cons (levenshtein target c) c)))
+  (define sorted (sort scored < #:key car))
+  (map cdr (if (<= (length sorted) n) sorted (take sorted n))))
