@@ -26,8 +26,6 @@
     [(defonce-form? f) (lint-defonce f)]
     [(defn-form? f) (lint-defn f)]
     [(defn-multi? f) (lint-defn-multi f)]
-    [(unsafe-clj? f) (lint-unsafe-clj f)]
-    [(unsafe-target? f) (lint-unsafe-clj f)]
     [else (void)]))
 
 (define (warn fmt . args)
@@ -74,12 +72,6 @@
     (unless (null? untyped-params)
       (warn "defn ~a has untyped parameter(s): ~a"
             name (string-join (map symbol->string untyped-params) ", ")))))
-
-(define (lint-unsafe-clj f)
-  (define target-name
-    (cond [(unsafe-target? f) (format "unsafe-~a" (unsafe-target-target f))]
-          [else "unsafe"]))
-  (warn "(~a \"...\") inline escape — beagle cannot type-check this code" target-name))
 
 (define (string-join xs sep)
   (cond
@@ -298,7 +290,6 @@
     [(doto-form target forms)
      (check-shadow target scope ctx)
      (for ([f (in-list forms)]) (check-shadow f scope ctx))]
-    [(unsafe-expr inner) (check-shadow inner scope ctx)]
     [(check-expr expr) (check-shadow expr scope ctx)]
     [(rescue-form expr fallback err-name)
      (check-shadow expr scope ctx)
@@ -493,7 +484,6 @@
        (collect-symbols (car c) used)
        (collect-symbols (cdr c) used))
      (when default (collect-symbols default used))]
-    [(unsafe-expr inner) (collect-symbols inner used)]
     [(check-expr expr) (collect-symbols expr used)]
     [(rescue-form expr fallback _err-name)
      (collect-symbols expr used)

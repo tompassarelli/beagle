@@ -13,16 +13,16 @@ for when generated code must go through the type checker.
 
 @section[#:tag "template-macros"]{Template Macros}
 
-The @tt{safe}/@tt{unsafe} distinction controls whether expanded code is
-re-validated by the type checker.
+All template macros are @bold{safe} — their expansion is type-checked
+end-to-end. The @tt{unsafe} kind was removed in the no-escape-hatch design
+pass; if you need behavior that can't be type-checked, the macro shouldn't
+exist.
 
 @section[#:tag "define-macro"]{define-macro}
 
 @defform[(define-macro safe name (params) template)]{
-Defines a macro whose expansion is type-checked normally.}
-
-@defform[#:id define-macro-unsafe (define-macro unsafe name (params) template)]{
-Defines a macro whose expansion is typed as @tt{Any} (escape boundary).
+Defines a template macro. Expansion is re-validated by the type checker
+under gensym-hygienic substitution.
 
 @codeblock|{
 (define-macro safe inc1 (x)
@@ -30,18 +30,13 @@ Defines a macro whose expansion is typed as @tt{Any} (escape boundary).
 
 (define-macro safe call-with (f & args)
   (f (splice args)))
-
-(define-macro unsafe debug-call (form)
-  (do (println "trace") form))
 }|
 
 @itemlist[
-  @item{@tt{safe}: expansion re-validated by type checker}
-  @item{@tt{unsafe}: expansion's result type widened to @tt{Any}}
   @item{@tt{& rest-name} in params: collects remaining args into a list}
   @item{@tt{(splice rest-name)} in template: inlines the list at that position}
-  @item{@tt{safe} macros use gensym-hygienic substitution; @tt{unsafe} macros
-        use naive substitution}
+  @item{Hygiene: binders in the template are gensym-renamed so they can't
+        capture variables in the call site}
 ]}
 
 @section[#:tag "procedural-macros"]{Procedural Macros}

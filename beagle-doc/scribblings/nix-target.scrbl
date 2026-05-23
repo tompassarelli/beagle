@@ -224,16 +224,26 @@ typed entries:
   @item{Full @tt{lib.types.*}: bool/str/int/float/path/package/port + listOf/attrsOf/
         nullOr/either/oneOf/submodule + ints.* sized integers}]
 
-@section{Escape Hatch: unsafe-nix}
+@section{No Escape Hatch — By Design}
 
-When you need to write raw Nix that beagle can't model (yet):
+Beagle/nix has @bold{no} @tt{unsafe-nix} / verbatim-text escape. Every
+program goes through the parser, checker, and stdlib catalog.
 
-@codeblock|{
-(unsafe-nix "pkgs.lib.fakeHash")
-}|
+If you hit a gap:
 
-The string is inserted verbatim. The checker won't validate it; the renamer
-won't see references inside it. Treat as last resort.
+@itemlist[
+  @item{@bold{Missing stdlib function?} Add it to
+        @tt{beagle-lib/private/stdlib-nix.rkt} — one line with a type signature.}
+  @item{@bold{Genuinely-untypable hand-written Nix snippet?} Write the snippet
+        as a sibling @tt{.nix} file and import it from your @tt{.bnix}. The
+        filesystem boundary is auditable; an inline backdoor is not.}]
+
+Why no escape: every typed language that shipped one (TypeScript @tt{any},
+Rust @tt{unsafe}, Python @tt{Any}-as-bailout) ended up regretting it. The
+escape hatch becomes the path of least resistance, the type system loses
+its teeth, and untyped code rots invisibly inside otherwise-checked files.
+Forcing the issue through the stdlib catalog makes coverage grow and keeps
+the type guarantee honest.
 
 @section{Validator}
 

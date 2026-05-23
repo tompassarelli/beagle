@@ -264,25 +264,11 @@
   (define out (nix-emit "(define-target nix) (implies a b)"))
   (check-true (and out (string-contains? out "a -> b"))))
 
-;; --- nix indented strings (''...'') ----------------------------------------
+;; --- escape hatch removed --------------------------------------------------
 
-(test-case "nix-indented-string emits '' block"
-  (define out (nix-emit-forms
-    '(define-target nix)
-    `(def x (#%nix-string "hello \"world\"\nline 2"))))
-  (check-true (and out (string-contains? out "''") (string-contains? out "hello \"world\""))))
-
-(test-case "nix-indented-string preserves ''' escape from reader"
-  (define out (nix-emit-forms
-    '(define-target nix)
-    `(def x (#%nix-string "has ''' inside"))))
-  (check-true (and out (string-contains? out "has ''' inside"))))
-
-(test-case "nix-indented-string preserves $ in shell scripts"
-  (define out (nix-emit-forms
-    '(define-target nix)
-    `(def x (#%nix-string "echo $HOME\nname=\"test\""))))
-  (check-true (and out (string-contains? out "echo $HOME") (string-contains? out "name=\"test\""))))
+(test-case "unsafe-nix is rejected at parse time"
+  ;; nix-emit swallows the parse error and returns #f when the program fails.
+  (check-false (nix-emit "(def x : Any (unsafe-nix \"hello\"))")))
 
 ;; --- qualified calls: / → . --------------------------------------------------
 

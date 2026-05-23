@@ -168,32 +168,26 @@
 
 ;; --- unsafe inline ---------------------------------------------------------
 
-(parse-err "unsafe with bare string is ambiguous"
+;; All (unsafe ...) forms were removed in the no-escape-hatch design pass.
+;; Every variant is now a parse-time error.
+
+(parse-err/rx "unsafe is rejected" #rx"escape hatches are not available"
   '(unsafe "(println :hi)"))
 
-(test-case "unsafe-clj with string"
-  (define f (car (parse-one '(unsafe-clj "(println :hi)"))))
-  (check-true (unsafe-target? f))
-  (check-eq? (unsafe-target-target f) 'clj)
-  (check-equal? (unsafe-target-raw-string f) "(println :hi)"))
+(parse-err/rx "unsafe-clj is rejected" #rx"escape hatches are not available"
+  '(unsafe-clj "(println :hi)"))
 
-(test-case "unsafe-js with string"
-  (define f (car (parse-one '(unsafe-js "console.log(1)"))))
-  (check-true (unsafe-target? f))
-  (check-eq? (unsafe-target-target f) 'js)
-  (check-equal? (unsafe-target-raw-string f) "console.log(1)"))
+(parse-err/rx "unsafe-js is rejected" #rx"escape hatches are not available"
+  '(unsafe-js "console.log(1)"))
 
-(test-case "unsafe-target in expression position (inside def)"
-  (define f (car (parse-one '(def x (unsafe-clj "(double 5)")))))
-  (check-true  (def-form? f))
-  (check-true  (unsafe-target? (def-form-value f)))
-  (check-equal? (unsafe-target-raw-string (def-form-value f)) "(double 5)"))
+(parse-err/rx "unsafe-nix is rejected" #rx"escape hatches are not available"
+  '(unsafe-nix "''hello''"))
 
-(test-case "unsafe-target in expression position (inside fn call)"
-  (define f (car (parse-one '(def y (+ 1 (unsafe-clj "(double sum)"))))))
-  (define add-call (def-form-value f))
-  (check-true (call-form? add-call))
-  (check-true (unsafe-target? (cadr (call-form-args add-call)))))
+(parse-err/rx "unsafe-py is rejected" #rx"escape hatches are not available"
+  '(unsafe-py "print('hi')"))
+
+(parse-err/rx "unsafe-rkt is rejected" #rx"escape hatches are not available"
+  '(unsafe-rkt "(printf \"hi\")"))
 
 ;; --- regex literal ---------------------------------------------------------
 
@@ -217,13 +211,9 @@
   (check-eq?  (call-form-fn value) '+)
   (check-equal? (call-form-args value) '(5 1)))
 
-(test-case "unsafe macro wraps expansion"
-  (define p (parse-prog
-             '(define-macro unsafe wild (x) (some-clj x))
-             '(def y (wild 7))))
-  (define f (car (program-forms p)))
-  (define value (def-form-value f))
-  (check-true (unsafe-expr? value)))
+(parse-err/rx "unsafe macro kind is rejected"
+              #rx"kind must be 'safe"
+  '(define-macro unsafe wild (x) x))
 
 (parse-err "macro arity mismatch errors"
   '(define-macro safe two (a b) (+ a b))
@@ -305,17 +295,6 @@
   (define val (def-form-value f))
   (check-true (fn-form? val))
   (check-false (eq? (param-name (car (fn-form-params val))) 'x)))
-
-(test-case "unsafe macro: binder is NOT renamed"
-  (define p (parse-prog
-             '(define-macro unsafe with-temp (val body) (let [x val] body))
-             '(def y (with-temp 1 42))))
-  (define f (car (program-forms p)))
-  (define val (def-form-value f))
-  (check-true (unsafe-expr? val))
-  (define inner (unsafe-expr-inner val))
-  (check-true (let-form? inner))
-  (check-eq? (let-binding-name (car (let-form-bindings inner))) 'x))
 
 (test-case "safe macro: no binders means no rename"
   (define p (parse-prog

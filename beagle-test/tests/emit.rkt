@@ -81,18 +81,11 @@
   (check-true (matches? #rx"\\(def y true\\)"  a))
   (check-true (matches? #rx"\\(def y false\\)" b)))
 
-(test-case "unsafe-clj block emitted verbatim"
-  (define out (compile '(unsafe-clj "(defn h [] :ok)")))
-  (check-true (matches? #rx"\\(defn h \\[\\] :ok\\)" out)))
-
-(test-case "unsafe-clj preserves square brackets"
-  (define out (compile '(unsafe-clj "(d/q '[:find ?n :where [?e :name ?n]] @conn)")))
-  (check-true (matches? #rx"\\[:find \\?n :where \\[\\?e :name \\?n\\]\\]" out)))
-
-(test-case "inline unsafe-clj emits inside an expression"
-  (define out (compile '(def x (+ 1 (unsafe-clj "(double sum)") 2))))
-  (check-true (matches? #rx"\\(\\+ 1 \\(double sum\\) 2\\)" out))
-  (check-false (matches? #rx"\\(unsafe " out)))
+(test-case "unsafe-clj is rejected at parse time"
+  (check-exn (lambda (e) (and (exn:fail? e)
+                              (regexp-match? #rx"escape hatches are not available"
+                                             (exn-message e))))
+             (lambda () (compile '(unsafe-clj "(defn h [] :ok)")))))
 
 ;; --- macro expansion shows up in emitted code ------------------------------
 
@@ -102,13 +95,11 @@
                '(defn use [n] (inc1 n))))
   (check-true (matches? #rx"\\(\\+ n 1\\)" out)))
 
-(test-case "unsafe macro emission renders inside expr position"
-  (define out (compile
-               '(define-macro unsafe wild (x) (do (println "trace") x))
-               '(defn use [n] (wild (inc n)))))
-  ;; The do form should appear inside the defn body
-  (check-true (matches? #rx"\\(do" out))
-  (check-true (matches? #rx"\\(inc n\\)" out)))
+(test-case "unsafe macro kind is rejected"
+  (check-exn (lambda (e) (and (exn:fail? e)
+                              (regexp-match? #rx"kind must be 'safe"
+                                             (exn-message e))))
+             (lambda () (compile '(define-macro unsafe wild (x) (do (println "trace") x))))))
 
 ;; --- require emits in ns form ---------------------------------------------
 
@@ -140,13 +131,13 @@
 
 (test-case "regex literal emits as Clojure regex"
   (define out (compile '(def x (#%regex "\\s+"))))
-  (check-true (matches? #rx"#\"\\\\s\\+\"" out)))
+  (check-true (matches? #rx"\\(re-pattern \"\\\\s\\+\"\\)" out)))
 
 (test-case "regex in function call emits correctly"
   (define out (compile '(require clojure.string :as str)
                        '(def x (str/split "a b" (#%regex "\\s+")))))
   (check-true (matches? #rx"str/split" out))
-  (check-true (matches? #rx"#\"\\\\s\\+\"" out)))
+  (check-true (matches? #rx"\\(re-pattern \"\\\\s\\+\"\\)" out)))
 
 ;; --- declare-extern does not emit code ------------------------------------
 

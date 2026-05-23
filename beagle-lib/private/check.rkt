@@ -3,7 +3,7 @@
 ;; Static type-checking pass over a parsed beagle program.
 ;;
 ;; Best-effort: annotated forms and calls to typed functions get checked;
-;; the rest passes through. `Any` is universal. `unsafe-expr` widens to Any.
+;; the rest passes through. `Any` is universal.
 ;; Variadic function types respect their rest-type. Skipped entirely in
 ;; dynamic mode.
 
@@ -81,7 +81,6 @@
    nix-search-path?         'nix
    nix-interpolated-string? 'nix
    nix-multiline-string?    'nix
-   nix-indented-string?     'nix
    nix-path?                'nix
    nix-fn-set?              'nix
    nix-pipe?                'nix
@@ -126,9 +125,8 @@
    nix-get-or?              "get-or"
    nix-has-attr?            "has"
    nix-search-path?         "search-path"
-   nix-interpolated-string? "s"
-   nix-multiline-string?    "ms"
-   nix-indented-string?     "''"
+   nix-interpolated-string? "s / ~\"...\""
+   nix-multiline-string?    "ms / ~''...''"
    nix-path?                "p"
    nix-fn-set?              "module / fn-set / overlay"
    nix-pipe?                "pipe-to / pipe-from"
@@ -1377,9 +1375,6 @@
      (if (condp-form-default e)
        (apply merge-types (infer-expr (condp-form-default e) env) clause-types)
        (if (null? clause-types) ANY (apply merge-types clause-types)))]
-    [(unsafe-expr? e) ANY]
-    [(unsafe-clj? e) ANY]
-    [(unsafe-target? e) ANY]
     [(if-form? e)
      (infer-expr (if-form-cond-expr e) env)
      (define-values (then-env else-env) (narrow-env-for-condition env (if-form-cond-expr e)))

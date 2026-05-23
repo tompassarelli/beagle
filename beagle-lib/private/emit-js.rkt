@@ -819,13 +819,6 @@
              (string-join (map emit-expr (set-form-items e)) ", "))]
 
     [(with-meta? e)     (emit-expr (with-meta-expr e))]
-    [(unsafe-expr? e)   (emit-expr (unsafe-expr-inner e))]
-    [(unsafe-clj? e)    (error 'beagle-js "unsafe Clojure strings are not supported for JS target")]
-    [(unsafe-target? e)
-     (if (eq? (unsafe-target-target e) 'js)
-       (string-trim (unsafe-target-raw-string e))
-       (error 'beagle-js "unsafe-~a form in JS target; use (unsafe-js \"...\") instead"
-              (unsafe-target-target e)))]
 
     [(js-quote-form? e)
      (emit-js-ast-node (js-quote-form-body e) 0)]

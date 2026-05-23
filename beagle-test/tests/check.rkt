@@ -175,12 +175,10 @@
   '(def x : Int "wrong type but who cares"))
 
 ;; =============================================================================
-;; Tests — unsafe-expr
+;; Tests — macros
 ;; =============================================================================
-
-(check-ok "unsafe-expr widens to Any so downstream relaxes"
-  '(define-macro unsafe wild (x) x)
-  '(def x : Int (wild "this would normally fail")))
+;; The 'unsafe macro kind was removed (no escape hatches). All macros are 'safe
+;; and their expansions are type-checked end-to-end.
 
 (check-err "safe macro: expansion is type-checked"
   '(define-macro safe id1 (x) x)
@@ -992,7 +990,7 @@
   '(def x : Any (pipe-to 1 inc)))
 
 (check-js-err/rx "s (interpolated string) rejected in beagle/js"
-  #rx"s is only supported in beagle/nix"
+  #rx"is only supported in beagle/nix"
   '(def x : Any (s "hello " name)))
 
 ;; Verify Nix forms pass on beagle/nix

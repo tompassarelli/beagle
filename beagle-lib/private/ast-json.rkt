@@ -288,16 +288,6 @@
              'name (symbol->string (defscalar-form-name e))
              'backing (type->json (defscalar-form-backing-type e)))]
 
-    [(unsafe-expr? e)
-     (hasheq 'node "unsafe" 'inner (expr->json (unsafe-expr-inner e)))]
-
-    [(unsafe-clj? e)
-     (hasheq 'node "unsafe-raw" 'code (unsafe-clj-clj-string e))]
-
-    [(unsafe-target? e)
-     (hasheq 'node "unsafe-raw" 'code (unsafe-target-raw-string e)
-             'target (symbol->string (unsafe-target-target e)))]
-
     [(regex-lit? e)
      (hasheq 'node "regex" 'pattern (regex-lit-pattern e))]
 
@@ -478,10 +468,6 @@
                                                   (nix-interpolated-string-parts line)))]
                              [else (hasheq 'type "expr" 'value (expr->json line))]))
                          (nix-multiline-string-lines e)))]
-
-    [(nix-indented-string? e)
-     (hasheq 'node "nix-indented-string"
-             'text (nix-indented-string-text e))]
 
     [(nix-path? e)
      (hasheq 'node "nix-path" 'path (nix-path-path-string e))]

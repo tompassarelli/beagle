@@ -4,7 +4,7 @@
 ;;
 ;; Template macros (safe/unsafe):
 ;;   (define-macro safe   inc1 (x) (+ x 1))
-;;   (define-macro unsafe wild (form) (do (println "trace") form))
+;;   (define-macro safe my-when (cond body) (if cond body nil))
 ;;
 ;; Procedural macros (Beagle-native bodies):
 ;;   (define-macro beagle defentity
@@ -22,7 +22,7 @@
          "macro-eval.rkt")
 
 (struct macro-def (kind fixed-params rest-param template) #:transparent)
-;; kind: 'safe, 'unsafe, or 'proc
+;; kind: 'safe or 'proc
 ;; fixed-params: list of symbols (positional)
 ;; rest-param: symbol or #f (variadic catchall)
 ;; template: datum tree (safe/unsafe) or #f (proc)
@@ -93,8 +93,10 @@
 (define (register-macro! reg name kind params template)
   (when (hash-has-key? reg name)
     (error 'beagle "duplicate macro definition: ~a" name))
-  (unless (or (eq? kind 'safe) (eq? kind 'unsafe))
-    (error 'beagle "macro ~a: kind must be 'safe or 'unsafe, got ~a" name kind))
+  (unless (eq? kind 'safe)
+    (error 'beagle
+           "macro ~a: kind must be 'safe (escape-hatch 'unsafe kind has been removed — all template macros are now type-checked end-to-end)"
+           name))
   (unless (list? params)
     (error 'beagle "macro ~a: parameters must be a list, got ~v" name params))
   (define-values (fixed rest-name) (parse-macro-params params))
@@ -410,34 +412,10 @@
      (when handler (handler 'before name datum depth))
      (define expanded (expand-macro reg name (cdr datum) next-ctx))
      (when handler (handler 'after name expanded depth))
-     (cond
-       [(eq? (macro-def-kind m) 'unsafe)
-        (list 'unsafe-expr (expand-fully-no-marker reg expanded (+ depth 1) next-ctx))]
-       [else
-        (expand-fully reg expanded (+ depth 1) next-ctx)])]
+     (expand-fully reg expanded (+ depth 1) next-ctx)]
     [(pair? datum)
      (cons (expand-fully reg (car datum) depth ctx)
            (expand-fully reg (cdr datum) depth ctx))]
-    [else datum]))
-
-(define (expand-fully-no-marker reg datum [depth 0] [ctx #f])
-  (when (>= depth MAX-EXPANSION-DEPTH)
-    (define chain (if ctx (format "\n~a" (format-expansion-chain ctx)) ""))
-    (error 'beagle
-           "macro expansion exceeded depth ~a (possible infinite recursion)~a"
-           MAX-EXPANSION-DEPTH chain))
-  (cond
-    [(macro-application? reg datum)
-     (define name (car datum))
-     (define next-ctx (if ctx (push-ctx ctx name) (make-root-ctx name)))
-     (define handler (current-trace-handler))
-     (when handler (handler 'before name datum depth))
-     (define expanded (expand-macro reg name (cdr datum) next-ctx))
-     (when handler (handler 'after name expanded depth))
-     (expand-fully-no-marker reg expanded (+ depth 1) next-ctx)]
-    [(pair? datum)
-     (cons (expand-fully-no-marker reg (car datum) depth ctx)
-           (expand-fully-no-marker reg (cdr datum) depth ctx))]
     [else datum]))
 
 ;; --- hygiene (safe macros only) -------------------------------------------
@@ -537,7 +515,6 @@
  macro-application?
  expand-macro
  expand-fully
- expand-fully-no-marker
  current-trace-handler
  format-expansion-chain
  check-datum-contract

@@ -426,16 +426,6 @@
      (format "(let __t = builtins.tryEval (~a); in if __t.success then __t.value else null)"
              (emit-body (try-form-body e) depth))]
 
-    [(unsafe-clj? e)
-     (unsafe-clj-clj-string e)]
-    [(unsafe-target? e)
-     (if (eq? (unsafe-target-target e) 'nix)
-       (string-trim (unsafe-target-raw-string e))
-       (error 'beagle-nix "unsafe-~a form in Nix target; use (unsafe-nix \"...\") instead"
-              (unsafe-target-target e)))]
-
-    [(unsafe-expr? e)
-     (emit-expr (unsafe-expr-inner e) depth)]
 
     [(with-meta? e)
      (emit-expr (with-meta-expr e) depth)]
@@ -517,9 +507,6 @@
 
     [(nix-multiline-string? e)
      (emit-nix-multiline-string (nix-multiline-string-lines e) depth)]
-
-    [(nix-indented-string? e)
-     (emit-nix-indented-string (nix-indented-string-text e) depth #:escape? #f)]
 
     [(block-string? e)
      (emit-nix-indented-string (block-string-text e) depth)]

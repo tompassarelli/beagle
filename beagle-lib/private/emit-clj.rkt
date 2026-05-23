@@ -179,13 +179,6 @@
 
 (define (emit-form f)
   (cond
-    [(unsafe-clj? f) (string-trim (unsafe-clj-clj-string f))]
-    [(unsafe-target? f)
-     (if (memq (unsafe-target-target f) '(clj cljs))
-       (string-trim (unsafe-target-raw-string f))
-       (error 'beagle-clj "unsafe-~a form in Clojure target; use (unsafe-clj \"...\") instead"
-              (unsafe-target-target f)))]
-
     [(def-form? f)
      (format "(def ~a ~a)"
              (def-form-name f)
@@ -270,7 +263,7 @@
     [(real? e)          (emit-clj-number e)]
     [(symbol? e)        (symbol->string e)]
     [(quoted? e)        (format "'~a" (datum->clj (quoted-datum e)))]
-    [(regex-lit? e)     (format "#\"~a\"" (regex-lit-pattern e))]
+    [(regex-lit? e)     (format "(re-pattern \"~a\")" (regex-lit-pattern e))]
     [(vec-form? e)
      (format "[~a]"
              (string-join (map emit-expr (vec-form-items e)) " "))]
@@ -287,13 +280,6 @@
      (format "^~a ~a"
              (emit-expr-core (with-meta-metadata e))
              (emit-expr (with-meta-expr e)))]
-    [(unsafe-expr? e)   (emit-expr (unsafe-expr-inner e))]
-    [(unsafe-clj? e)    (string-trim (unsafe-clj-clj-string e))]
-    [(unsafe-target? e)
-     (if (memq (unsafe-target-target e) '(clj cljs))
-       (string-trim (unsafe-target-raw-string e))
-       (error 'beagle-clj "unsafe-~a form in Clojure target; use (unsafe-clj \"...\") instead"
-              (unsafe-target-target e)))]
     [(if-form? e)
      (cond
        [(if-form-else-expr e)

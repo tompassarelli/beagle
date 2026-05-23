@@ -32,10 +32,6 @@
   (define out (lint-prog '(defn foo [(x : Int) (y : Int)] : Int (+ x y))))
   (check-equal? out ""))
 
-(test-case "unsafe-clj inline warns"
-  (define out (lint-prog '(unsafe-clj "(println :hi)")))
-  (check-true (regexp-match? #rx"unsafe.*inline escape" out)))
-
 (test-case "lint skipped in dynamic mode"
   (define out (lint-prog '(define-mode dynamic)
                          '(def x 42)

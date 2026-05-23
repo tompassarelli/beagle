@@ -130,6 +130,33 @@ Example: `(defn foo [(x : Int)] (+ x 1))` in test form:
 (parse-one `(defn foo ,(br '(x : Int)) (+ x 1)))
 ```
 
+## REQUIREMENT: NEVER author escape hatches, for any reason
+
+Beagle has **zero** escape hatches. No `unsafe-nix`, no `unsafe-js`, no
+`unsafe-clj`, no `unsafe-py`, no `unsafe-rkt`, no `unsafe`, no
+`define-macro unsafe`, no `''...''` raw passthrough. By design.
+
+When you hit a gap:
+
+1. **Missing stdlib function?** Add a one-line type signature to the
+   appropriate `beagle-lib/private/stdlib-{clj,js,py,nix,rkt,portable}.rkt`.
+2. **Missing surface form?** Add an AST struct + parse case + emit case.
+   Same as every other form.
+3. **Genuinely-untypable target snippet?** Write a sibling file in the
+   target language (e.g. `foo.nix` next to `foo.bnix`) and import it.
+   The filesystem boundary is auditable; an inline backdoor is not.
+
+Do NOT propose adding `unsafe-*` back "just for one case." Every typed
+language that shipped an escape hatch (TypeScript `any`, Rust `unsafe`,
+Java `Object`-casting, Python `Any`-as-bailout) regretted it. The hatch
+becomes the path of least resistance, untyped code rots invisibly inside
+otherwise-checked files, and the type guarantee loses its meaning. The
+discipline of "no escape" forces the stdlib to mature and makes
+hallucinations show up as compile errors instead of shipping silently.
+
+This rule applies to all targets, all phases, all helpers, all macros.
+If you're about to write the word `unsafe` in code, stop.
+
 ## Conventions
 
 - `ANY` is `(type-prim 'Any)` — the universal escape type

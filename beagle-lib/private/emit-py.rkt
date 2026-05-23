@@ -87,13 +87,6 @@
 
 (define (emit-form f)
   (cond
-    [(unsafe-clj? f) (string-trim (unsafe-clj-clj-string f))]
-    [(unsafe-target? f)
-     (if (eq? (unsafe-target-target f) 'py)
-       (string-trim (unsafe-target-raw-string f))
-       (error 'beagle-py "unsafe-~a form in Python target; use (unsafe-py \"...\") instead"
-              (unsafe-target-target f)))]
-
     [(def-form? f)
      (format "~a = ~a"
              (mangle-name (def-form-name f))
@@ -191,14 +184,6 @@
          "set()"
          (format "{~a}"
                  (string-join (map emit-expr (set-form-items e)) ", ")))]
-
-    [(unsafe-expr? e)   (emit-expr (unsafe-expr-inner e))]
-    [(unsafe-clj? e)    (string-trim (unsafe-clj-clj-string e))]
-    [(unsafe-target? e)
-     (if (eq? (unsafe-target-target e) 'py)
-       (string-trim (unsafe-target-raw-string e))
-       (error 'beagle-py "unsafe-~a form in Python target; use (unsafe-py \"...\") instead"
-              (unsafe-target-target e)))]
 
     [(if-form? e)
      (cond

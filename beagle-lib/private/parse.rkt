@@ -538,15 +538,11 @@
 
 (define (parse-top x)
   (define d (->datum x))
-  (define loc (and (syntax? x) (stx->src-loc x)))
   (cond
-    [(and (pair? d) (eq? (car d) 'unsafe) (= (length d) 2) (string? (cadr d)))
-     (error 'beagle "(unsafe \"...\") is ambiguous in multi-target beagle. Use (unsafe-js \"...\"), (unsafe-clj \"...\"), (unsafe-py \"...\"), (unsafe-nix \"...\"), or (unsafe-rkt \"...\")")]
-    [(and (pair? d) (= (length d) 2) (string? (cadr d))
-          (memq (car d) '(unsafe-js unsafe-clj unsafe-py unsafe-nix unsafe-rkt)))
-     (store-src! (unsafe-target (string->symbol (substring (symbol->string (car d)) 7))
-                                (cadr d))
-                 loc)]
+    [(and (pair? d) (memq (car d) '(unsafe unsafe-js unsafe-clj unsafe-py unsafe-rkt unsafe-nix)))
+     (error 'beagle
+            "(~a ...) escape hatches are not available. Beagle has no per-target escape by design — if the stdlib doesn't cover the function, add a one-line type signature to the appropriate stdlib-*.rkt; if you need raw target code, write a separate target-language file and import it."
+            (car d))]
     [else (parse-expr x)]))
 
 (define (parse-expr x)
@@ -766,17 +762,10 @@
 
 (define (parse-list-form d subs)
   (match d
-    [(list 'unsafe-expr inner)
-     (unsafe-expr (parse-expr (or (stx-ref subs 1) inner)))]
-
-    [(list 'unsafe (? string? str))
-     (error 'beagle "(unsafe \"...\") is ambiguous in multi-target beagle. Use (unsafe-js \"...\"), (unsafe-clj \"...\"), (unsafe-py \"...\"), (unsafe-nix \"...\"), or (unsafe-rkt \"...\")")]
-
-    [(list 'unsafe-js (? string? str))   (unsafe-target 'js str)]
-    [(list 'unsafe-clj (? string? str))  (unsafe-target 'clj str)]
-    [(list 'unsafe-py (? string? str))   (unsafe-target 'py str)]
-    [(list 'unsafe-nix (? string? str))  (unsafe-target 'nix str)]
-    [(list 'unsafe-rkt (? string? str))  (unsafe-target 'rkt str)]
+    [(list (or 'unsafe 'unsafe-js 'unsafe-clj 'unsafe-py 'unsafe-rkt 'unsafe-nix 'unsafe-expr) _ ...)
+     (error 'beagle
+            "(~a ...) escape hatches are not available. Beagle has no per-target escape by design — add to stdlib-*.rkt or write a separate target-language file and import it."
+            (car d))]
 
     [(list 'def (? symbol? name) marker type-expr value)
      #:when (annotation-marker? marker)
@@ -976,8 +965,6 @@
      (block-string (->datum (or (stx-ref subs 2) text))
                    (->datum (or (stx-ref subs 1) tag)))]
 
-    [(list '#%nix-string text)
-     (nix-indented-string (->datum (or (stx-ref subs 1) text)))]
 
     [(list 'p path-str)
      (define d (->datum (or (stx-ref subs 1) path-str)))
