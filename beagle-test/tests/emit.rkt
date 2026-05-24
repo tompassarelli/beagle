@@ -331,19 +331,8 @@
   (define out (compile '(def p (Point. 10 20))))
   (check-true (matches? #rx"\\(Point\\. 10 20\\)" out)))
 
-;; --- keyword-as-function ---------------------------------------------------
-
-(test-case "keyword access emits"
-  (define out (compile '(def x (:name m))))
-  (check-true (matches? #rx"\\(:name m\\)" out)))
-
-(test-case "keyword access with default emits"
-  (define out (compile '(def x (:age m "unknown"))))
-  (check-true (matches? #rx"\\(:age m \"unknown\"\\)" out)))
-
-(test-case "namespaced keyword access emits"
-  (define out (compile '(def x (:db/ident schema))))
-  (check-true (matches? #rx"\\(:db/ident schema\\)" out)))
+;; (:keyword target) call-form removed — use (get m :key) for maps,
+;; (field-name r) for record field access.
 
 ;; --- defprotocol -----------------------------------------------------------
 
@@ -647,11 +636,7 @@
   (define out (compile '(defn f [(o : Any)] (set! (.-name o) "x"))))
   (check-true (matches? #rx"\\(set! \\(\\.-name o\\) \"x\"\\)" out)))
 
-;; --- keyword-access with default -------------------------------------------
-
-(test-case "kw-access with default emits 3-arg get"
-  (define out (compile '(defn f [(m : Any)] : String (:name m "anonymous"))))
-  (check-true (matches? #rx"\\(:name m \"anonymous\"\\)" out)))
+;; (:keyword target) call-form removed — use (get m :key) for maps.
 
 ;; --- condp without default --------------------------------------------------
 

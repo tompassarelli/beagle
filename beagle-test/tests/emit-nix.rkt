@@ -101,7 +101,8 @@
   (check-true (string-contains? out "builtins.length")))
 
 (test-case "lib/ calls emit as lib.*"
-  (define out (nix-emit "(define-target nix) (lib/mkIf true {:enable true})"))
+  (define out (nix-emit-forms '(define-target nix)
+    `(lib/mkIf true ,(mt ':enable #t))))
   (check-true (string-contains? out "lib.mkIf true")))
 
 ;; --- stdlib fns ------------------------------------------------------------
@@ -125,17 +126,20 @@
   (check-true (string-contains? out "builtins.length")))
 
 (test-case "merge emits //"
-  (define out (nix-emit "(define-target nix) (merge {:a 1} {:b 2})"))
+  (define out (nix-emit-forms '(define-target nix)
+    `(merge ,(mt ':a 1) ,(mt ':b 2))))
   (check-true (string-contains? out "//")))
 
 (test-case "concat emits ++"
   (define out (nix-emit "(define-target nix) (concat [1] [2])"))
   (check-true (string-contains? out "++")))
 
-;; --- keyword access --------------------------------------------------------
+;; --- attrset field access via get -----------------------------------------
+;; (:keyword target) call-form removed — use (get m :key); emit-nix lowers
+;; literal-keyword get to unquoted attrset access (person.name).
 
-(test-case "keyword access emits field selection"
-  (define out (nix-emit "(define-target nix) (:name person)"))
+(test-case "get with literal keyword emits unquoted attrset access"
+  (define out (nix-emit "(define-target nix) (get person :name)"))
   (check-true (string-contains? out "person.name")))
 
 ;; --- dotted option paths ---------------------------------------------------
@@ -191,7 +195,8 @@
   (check-true (and out (string-contains? out "{ config, lib, pkgs, ... }:"))))
 
 (test-case "overlay emits curried (final: prev: body)"
-  (define out (nix-emit "(define-target nix) (overlay [final prev] {:foo 1})"))
+  (define out (nix-emit-forms '(define-target nix)
+    `(overlay ,(br 'final 'prev) ,(mt ':foo 1))))
   (check-true (and out (string-contains? out "final: prev:")))
   (check-false (and out (string-contains? out "{ final, prev"))))
 

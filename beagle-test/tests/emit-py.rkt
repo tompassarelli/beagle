@@ -371,10 +371,7 @@
   (check-true (string-contains? out "if x is not None:")))
 
 ;; --- keyword access ---------------------------------------------------------
-
-(test-case "keyword access emits dict access"
-  (define out (py-emit-forms '(define-target py) '(:name (#%map :name "alice"))))
-  (check-true (string-contains? out "[\"name\"]")))
+;; (:keyword target) call-form removed — use (get m :key); covered by get emit tests.
 
 ;; --- header imports ---------------------------------------------------------
 

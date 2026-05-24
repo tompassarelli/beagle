@@ -73,11 +73,15 @@
      '(defrecord Point [(x : Int) (y : Int)])
      '(def p : Point (->Point 1 2)))
 
-   (check-js-contains "kw-access → dot access"
-     "p.x"
+   ;; (:keyword target) call-form removed — record field access now goes
+   ;; through the typed accessor (point-x p) defined as `function point_x(r)
+   ;; { return r.x; }`. JS engines inline this; the emitted source shows the
+   ;; function call rather than direct property access.
+   (check-js-contains "record field accessor emits typed call"
+     "point_x(p)"
      '(defrecord Point [(x : Int) (y : Int)])
      '(def p : Point (->Point 1 2))
-     '(def v : Int (:x p)))
+     '(def v : Int (point-x p)))
 
    (check-js-contains "with → freeze spread"
      "Object.freeze({...p"
@@ -325,7 +329,7 @@
      ".x"
      '(defrecord Point [(x : Int) (y : Int)])
      '(defrecord Line [(start : Point) (end : Point)])
-     '(defn start-x [(l : Line)] : Int (:x (:start l))))
+     '(defn start-x [(l : Line)] : Int (point-x (line-start l))))
 
    (check-js-contains "empty string is a valid value"
      "const s = \"\";"

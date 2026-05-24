@@ -289,6 +289,43 @@ make the surface easier to predict, not harder. Pattern-isolated
 additions have **positive marginal cost** — each one is its own
 thing to learn.
 
+## Categories of drop justification
+
+When a form fails the test, the *why* it failed matters for the
+audit. Different categories of failure have different implications
+for whether other forms are also suspect.
+
+1. **Pure ergonomic sugar with no semantic content.** Examples: `inc`,
+   `dec`, `not=`. The form is one identifier shorter than the
+   composition; nothing else. These drop because they're surface
+   weight with no payoff.
+
+2. **Pattern-isolated forms that work fine but participate in no
+   broader regularity.** Examples: `when-not`, `cond->`, `some->`,
+   `defmulti`. Each one is its own fact to memorize; nothing else in
+   beagle teaches the pattern. These drop because they're decision
+   surface without consistency payoff.
+
+3. **Multi-canonicals where alternatives compete and confuse.**
+   Examples: `->` vs. `->>`, `if-some` vs. `if-let`. Drop the
+   redundant one so authors have one canonical choice.
+
+4. **Drops that unblock building-side cleanness.** Examples:
+   `(:foo m)` keyword-as-fn (its existence overloads `(:keyword x)`
+   between record-field-access and map-lookup, preventing the
+   syntactic shape from being dedicated to the typed concept).
+   The form may not be "wrong" by itself, but its presence
+   *prevents the rest of the design from being maximally crisp*.
+   These drops are stronger than 1–3: the form isn't just dead
+   weight, it's actively blocking structural clarity.
+
+   The category test: does the form overload a syntactic shape that
+   beagle wants to dedicate to a typed/native concept? If yes, the
+   drop is in category 4 and the justification is stronger than
+   pattern-isolated. Look for other forms that fit this pattern —
+   they tend to hide because each one looks individually defensible
+   ("it's just a convenient shorthand for X").
+
 ## The test for any new or existing form
 
 When in doubt about whether a form earns its place, ask:
@@ -431,3 +468,123 @@ become drop candidates that fail the strict bar.
 The `cond` reprieve holds. The `when-let`/`if-let` reprieve was
 incumbency disguised as deferral and falls under the strict bar.
 Other reprieves should be re-examined the same way as audits proceed.
+
+## Open design questions surfaced by the audit
+
+These are questions that the audit raised but that need explicit
+design thought before the relevant work ships. Recording them so they
+aren't improvised when the time comes.
+
+### Pattern algebra closure (before match `or`-extension ships)
+
+Adding `or` as a match pattern primitive commits beagle to having a
+*pattern algebra*. The natural neighbors are:
+
+- `and`-patterns (match all of)
+- `not`-patterns (match anything but)
+- guard clauses (`:when expr` in pattern position)
+
+Some pattern-matching languages have all of these (Haskell, OCaml,
+Scala). Some have only some. The question: what is beagle's closure?
+Three positions are coherent:
+
+1. **`or` only.** Other algebra composes from existing forms (nested
+   match, manual conditions). Position: pattern algebra is just `or`
+   because it's the one composition that *can't* be expressed any
+   other way at the pattern level.
+2. **`or` + guards.** Add `:when expr` because guards interact
+   meaningfully with destructuring (you need the bindings in scope
+   for the guard). Skip `and` and `not`.
+3. **`or` + `and` + `not` + guards.** Full pattern algebra, ML-family
+   posture.
+
+This is a position that needs to be argued, not defaulted into.
+The or-extension PR should state which closure beagle is committing
+to and why.
+
+### Post-nullable-narrowing form for the `when-let` pattern
+
+Dropping `when-let`/`if-let` now is correct, but it doesn't *defer*
+the underlying problem — it forces an interim verbose pattern
+(`(let [x expr] (if x (do body)))`). When nullable narrowing lands
+later, the natural reflex will be to "revive `when-let`" with new
+semantics. That would carry the Clojure-shaped name forward into
+a beagle-native concept — exactly the overfitting risk.
+
+The eventual form should be designed *as a beagle-native form*, not
+as Clojure-`when-let`-with-types. Considerations:
+
+- Name should not inherit Clojure's vocabulary (no `if-let`,
+  `when-let`, `if-some`, `when-some`).
+- Form should interact with the type system explicitly: binding gets
+  narrowed type inside body (`T?` → `T`).
+- Should slot into the bracket-clause family if possible.
+
+When the time comes (post-nullable-narrowing), the question is
+"what should this form be called and shaped like" — not "should we
+revive `when-let`."
+
+### `do`-form examination (post-`when`-drop)
+
+After dropping `when`, the new canonical for side-effect-sequence is
+`(do ...)`. `do` becomes more visible, used inside `if` branches and
+elsewhere. Under the principle:
+
+- Not bracket-clause-shaped (so not in that family)
+- Sequencing-of-effects is its own concept that nothing else does
+  (so pattern-isolated)
+- But it's *the only way* to compose multiple statements where one
+  is needed (so structurally load-bearing)
+
+The audit verdict is probably "keep" because there's no composition
+that replaces it (every Lisp has progn/begin). But put it on the
+radar for explicit examination after `when` drops, so the principle
+isn't assumed to give an answer it hasn't been asked.
+
+## Tooling: codemods for corpus-scale migrations
+
+At small corpus sizes (under ~10 sites), hand-migration of dropped
+forms is fast and verifiable. At larger sizes (the `when` drop with
+67 corpus sites being the first example), hand-migration is slow,
+error-prone, and produces inconsistent results. The pattern:
+
+- 1–10 sites: hand-migrate.
+- 10+ sites: write a parser-level rewrite codemod, run it, verify
+  diff visually, commit migration as one logical unit.
+
+The codemod for `when` is straightforward: `(when c body...)` →
+`(if c (do body...))`. Could be a small Racket script that consumes
+beagle source and emits rewritten source via the AST. Worth building
+once and reusing for future corpus-scale migrations.
+
+Don't ship a drop with hand-migrated corpus when a codemod would do
+better. The codemod investment is tiny relative to a hand-migration
+of 67 sites, and the resulting migration is uniform.
+
+## Emit-layer obligations for surface drops
+
+When dropping a form that absorbs into another via composition, the
+absorbing form's emit layer often needs an optimization to preserve
+the dropped form's performance characteristic. Without it, the drop
+ships a perf regression.
+
+Concrete instance: dropping `case` in favor of `match` + `or` only
+works fully if the emit layer recognizes literal-only `or`-patterns
+and lowers them to target-native constant-time dispatch:
+
+- Clojure: `case` form
+- ClojureScript: `case` form
+- JavaScript: `switch` statement
+- Python: `match`/`case` statement
+- SQL: `CASE WHEN val IN (...)`
+- Nix: chained `if`/`else if` (no native switch)
+- Typed Racket: `case` form
+
+If the `match`-or extension ships *without* this optimization, the
+case-fold introduces a perf regression on hot dispatch paths that
+won't be visible until someone benchmarks. The optimization is
+in-scope for the match-or extension work, not a follow-up.
+
+The general rule: when dropping form X by folding into form Y, audit
+each target's emit for any optimization X had that Y now needs to
+inherit. Add those to Y's emit-layer scope as part of the drop work.

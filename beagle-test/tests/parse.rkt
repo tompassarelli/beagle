@@ -621,24 +621,8 @@
   (check-true (new-form? f))
   (check-equal? (length (new-form-args f)) 2))
 
-;; --- keyword-as-function ---------------------------------------------------
-
-(test-case "keyword access parses"
-  (define f (car (parse-one '(:name m))))
-  (check-true (kw-access? f))
-  (check-eq? (kw-access-kw f) ':name)
-  (check-false (kw-access-default f)))
-
-(test-case "keyword access with default"
-  (define f (car (parse-one '(:age m "unknown"))))
-  (check-true (kw-access? f))
-  (check-eq? (kw-access-kw f) ':age)
-  (check-equal? (kw-access-default f) "unknown"))
-
-(test-case "namespaced keyword access"
-  (define f (car (parse-one '(:db/ident schema))))
-  (check-true (kw-access? f))
-  (check-eq? (kw-access-kw f) ':db/ident))
+;; (:keyword target) call-form removed — use (get m :key) for maps,
+;; (field-name r) for record field access.
 
 ;; --- defprotocol -----------------------------------------------------------
 

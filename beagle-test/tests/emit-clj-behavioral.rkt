@@ -459,7 +459,7 @@
            `(extend-type Circle
               Describable
               (describe ,(br '(self : Circle)) : String
-                (str "circle r=" (:radius self)))))
+                (str "circle r=" (circle-radius self)))))
      "(println (describe (->Circle 5)))"
      "circle r=5")
 
@@ -471,11 +471,11 @@
            `(extend-type Dog
               Speaker
               (speak ,(br '(self : Dog)) : String
-                (str (:name self) " says woof")))
+                (str (dog-name self) " says woof")))
            `(extend-type Cat
               Speaker
               (speak ,(br '(self : Cat)) : String
-                (str (:name self) " says meow"))))
+                (str (cat-name self) " says meow"))))
      "(println (speak (->Dog \"Rex\")))
       (println (speak (->Cat \"Mia\")))"
      "Rex says woof\nMia says meow")

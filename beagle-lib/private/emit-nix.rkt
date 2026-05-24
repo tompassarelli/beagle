@@ -855,12 +855,23 @@
                 (string-join (map (lambda (a) (emit-expr a depth)) args) " // "))])]
 
     [(and fn-name (eq? fn-name 'get))
-     (if (>= (length args) 2)
-       (format "~a.~a"
-               (emit-expr (car args) depth)
-               (emit-expr (cadr args) depth))
-       (format "builtins.getAttr ~a"
-               (string-join (map (lambda (a) (emit-expr a depth)) args) " ")))]
+     (cond
+       [(< (length args) 2)
+        (format "builtins.getAttr ~a"
+                (string-join (map (lambda (a) (emit-expr a depth)) args) " "))]
+       [else
+        ;; Literal keyword key → unquoted attrset access (`m.name`), the
+        ;; idiomatic Nix form. Non-literal keys fall back to interpolation.
+        (define key-arg (cadr args))
+        (define key-str
+          (cond
+            [(and (symbol? key-arg)
+                  (let ([s (symbol->string key-arg)])
+                    (and (positive? (string-length s))
+                         (char=? (string-ref s 0) #\:))))
+             (substring (symbol->string key-arg) 1)]
+            [else (emit-expr key-arg depth)]))
+        (format "~a.~a" (emit-expr (car args) depth) key-str)])]
 
     [(and fn-name (eq? fn-name 'assoc))
      (if (>= (length args) 3)

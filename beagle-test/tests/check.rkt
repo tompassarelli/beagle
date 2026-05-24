@@ -366,11 +366,6 @@
   '(def c (shapes/->Circle 5))
   '(def r : Int (shapes/circle-radius c)))
 
-(check-ok/source "cross-file defrecord: keyword access infers field type" shapes-fixture-source
-  '(require shapes)
-  '(def c : Circle (shapes/->Circle 5))
-  '(def r : Int (:radius c)))
-
 (check-ok/source "cross-file defrecord: multi-field constructor" shapes-fixture-source
   '(require shapes)
   '(def r (shapes/->Rect 10 20)))
@@ -392,11 +387,6 @@
   '(require shapes)
   '(def c (shapes/->Circle 5))
   '(def r : String (shapes/circle-radius c)))
-
-(check-err/source "cross-file defrecord: keyword access type mismatch errors" shapes-fixture-source
-  '(require shapes)
-  '(def c : Circle (shapes/->Circle 5))
-  '(def r : String (:radius c)))
 
 ;; =============================================================================
 ;; Tests — defrecord (fixtures)
@@ -522,20 +512,11 @@
   '(def x (ArrayList.)))
 
 ;; =============================================================================
-;; Tests — keyword-as-function
+;; Tests — keyword-as-function removed
 ;; =============================================================================
-
-(check-ok "keyword access passes type check"
-  '(def x (:name m)))
-
-(check-ok "keyword access with default passes"
-  '(def x (:age m "fallback")))
-
-(check-fixture-ok "keyword access on record returns field type"
-  "keyword-record-ok.bclj")
-
-(check-fixture-err "keyword access on record catches type mismatch"
-  "keyword-record-mismatch.bclj")
+;; (:keyword target) call-form removed — use (get m :key) for maps,
+;; (field-name r) for record field access. Records have typed auto-accessors
+;; tested elsewhere (defrecord field-access tests).
 
 ;; =============================================================================
 ;; Tests — defprotocol (fixtures)

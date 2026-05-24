@@ -396,7 +396,7 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
    (check-js-output "nested record construction"
      (list '(defrecord Inner [(val : Int)])
            '(defrecord Outer [(inner : Inner)])
-           '(defn get-val [(o : Outer)] : Int (:val (:inner o))))
+           '(defn get-val [(o : Outer)] : Int (inner-val (outer-inner o))))
      "console.log(get_val(Outer(Inner(42))));"
      "42")
 

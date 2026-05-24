@@ -1296,11 +1296,9 @@
     [(list (? constructor-sym? c) args ...)
      (new-form c (map parse-expr (or (stx-tail subs 1) args)))]
 
-    [(list (? keyword-sym? kw) target)
-     (kw-access kw (parse-expr (or (stx-ref subs 1) target)) #f)]
-    [(list (? keyword-sym? kw) target default-val)
-     (kw-access kw (parse-expr (or (stx-ref subs 1) target))
-                   (parse-expr (or (stx-ref subs 2) default-val)))]
+    ;; (:keyword target) call-form removed — overloaded one syntactic shape
+    ;; for two distinct operations (map get vs. record field access). Use
+    ;; (get m :key) for maps, (field-name r) for record field access.
 
     [(list (? dot-method-sym? m) target args ...)
      (method-call m (parse-expr (or (stx-ref subs 1) target))
@@ -1354,6 +1352,8 @@
      (error 'beagle "dec removed — use (- x 1)")]
     [(list 'not= _ ...)
      (error 'beagle "not= removed — use (not (= a b))")]
+    [(list (? keyword-sym? kw) _ ...)
+     (error 'beagle "(:keyword target) call-form removed — use (get m :key) for maps or (field-name r) for record field access; got: ~v" kw)]
 
     [(list (? symbol? f) args ...)
      (call-form f (map parse-expr (or (stx-tail subs 1) args)))]
