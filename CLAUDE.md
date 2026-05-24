@@ -302,18 +302,20 @@ Forms removed because they were sugar/redundant or had ~zero real
 usage. See `lab/journal/log/024-surface-friction-observation.md` for
 the empirical basis.
 
-- **`defmulti` / `defmethod`** — 0 corpus usage. Use defprotocol + extend-type.
-- **`as->` / `cond->` / `cond->>` / `some->` / `some->>`** — 0 corpus
-  usage. Threading-macro family narrowed to `->` and `->>` only.
-- **`when-not` / `if-not`** — sugar. Use `(when (not c) ...)` /
-  `(if (not c) t e)`.
+- **`defmulti` / `defmethod`** — value-dispatch alternative to `match`;
+  no broader pattern. Use `defprotocol` + `extend-type` (type dispatch)
+  or `match` (value dispatch).
+- **`->`** — first-arg threading. Positional convenience, not semantic
+  uniqueness. Use `->>` or a let-chain.
+- **`as->` / `cond->` / `cond->>` / `some->` / `some->>`** — compositions
+  of threading + conditional / threading + nil-check. Use let-chains.
+- **`when-not` / `if-not`** — sugar. Use `(when (not c))` / `(if (not c) t e)`.
+- **`when-some` / `if-some`** — distinction from `when-let`/`if-let`
+  (not-nil vs truthy) is too subtle. Use `when-let` / `if-let`.
 - **`inc` / `dec`** — sugar. Use `(+ x 1)` / `(- x 1)`.
 - **`not=`** — sugar. Use `(not (= a b))`.
 - **`deferror`** — unified into `(defunion :throwable Name ...)`.
   Same structural shape; throwable is now a keyword on defunion.
-- **`define-macro beagle`** — 0 corpus usage. All procedural macros
-  use `define-macro proc`. Removed alongside `macro-eval.rkt`
-  (the compile-time beagle interpreter that powered 'beagle macros).
 
 Kept after empirical re-evaluation (Day 0 friction-list verdict
 reversed): `loop`/`recur` (agent reflexively reaches for it — that's

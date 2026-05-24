@@ -9,6 +9,12 @@ When in doubt: read this. The Day 0 friction observation showed that
 "confused mid-author" is the main agent failure mode, and that
 confusion is reduced by having a single source of "this is canonical."
 
+For the *design principle* behind why these specific forms exist (and
+others don't), see `design-principle.md` in this directory. The
+load-bearing test: **does adding/keeping a form make the rest of the
+surface more predictable, or is it a separate fact to memorize?**
+Pattern-extending earns its place; pattern-isolated doesn't.
+
 ---
 
 ## Top-level definitions
@@ -293,15 +299,20 @@ Anonymous function.
 
 - No `#(...)` shorthand. `fn` is the only form.
 
-### Threading: `->` / `->>`
+### Threading: `->>`
 
-Function composition pipelines.
+Function composition pipeline. Each step takes the threaded value as
+its **last** argument.
 
 ```
-(-> x foo (bar 2) (baz))         ; first-arg threading: foo(x), bar(foo(x), 2), baz(...)
-(->> xs (filter pred) (map f))   ; last-arg threading: typical for seq ops
+(->> xs (filter pred) (map f))   ; (map f (filter pred xs))
 ```
 
+- `->` (first-arg threading) removed. The first-vs-last asymmetry was
+  positional convenience, not semantic uniqueness — agents had to
+  memorize per-function "which arg position does this expect?" with
+  no compounding benefit. `->>` covers the threading concept; for
+  patterns where `->>` doesn't fit naturally, use a let-chain.
 - `as->`, `cond->`, `some->` all removed. Use explicit let-chains for
   conditional or short-circuiting pipelines.
 
@@ -374,12 +385,13 @@ Function composition pipelines.
 
 - `#(...)` anonymous fn shorthand — use `fn`
 - `@deref`, `#'var-quote` — runtime concepts; not in beagle
-- `defmulti`/`defmethod` — use `defprotocol` + `extend-type`
+- `defmulti`/`defmethod` — use `defprotocol` + `extend-type` or `match`
 - `as->`/`cond->`/`some->` — use let-chains
+- `->` (first-arg threading) — use `->>` or let-chains
 - `when-not`/`if-not` — use `(when (not c))` / `(if (not c) t e)`
 - `inc`/`dec`/`not=` — sugar; use primitives
+- `when-some`/`if-some` — use `when-let`/`if-let`
 - `deferror` — use `(defunion :throwable Name ...)`
-- `define-macro beagle` — use `define-macro proc`
 - `unsafe-clj`/`unsafe-js`/etc. — zero escape hatches by design
 
 If an agent reaches for any of these, the parser produces an explicit
