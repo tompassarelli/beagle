@@ -290,20 +290,43 @@ Specifically untouched:
 
 ---
 
-## EXECUTION ORDER (Phase 2)
+## EXECUTION RESULTS (Phase 2 — completed)
 
-1. **Parser**: drop pattern matches for dropped forms; emit clear "did
-   you mean?" errors at parse time.
-2. **Stdlib**: remove dropped aliases (`car`, `cdr`, `length`, `null?`,
-   `inc`, `dec`, `not=`); ensure replacements exist.
-3. **Each emit module** (clj, cljs, js, py, nix, rkt, sql, scheme):
-   remove emit cases for dropped forms.
-4. **Lint**: remove warnings for dropped forms; add canonical-vs-
-   alternative warnings if any kept-pair has overlap (e.g. when-some
-   vs when-let).
-5. **Tests**: existing tests covering dropped forms get rewritten or
-   deleted as appropriate.
+What landed:
 
-## Multimethod usage audit
+1. **Parser** rejects dropped forms with explicit errors carrying the
+   canonical replacement:
+   - `(inc x)` → "inc removed — use (+ x 1)"
+   - `(dec x)` → "dec removed — use (- x 1)"
+   - `(not= a b)` → "not= removed — use (not (= a b))"
+   - `(when-not c body)` → "when-not removed — use (when (not ...) body)"
+   - `(if-not c t e)` → "if-not removed — use (if (not ...) then else)"
+   - `(cond-> ...)` / `(cond->> ...)` → "cond-> removed — use a let-chain"
+   - `(some-> ...)` / `(some->> ...)` → "some-> removed — use a let-chain
+     with explicit nil-checks"
+   - `(as-> ...)` → "as-> removed — use a let with explicit naming"
+   - `(defmulti ...)` / `(defmethod ...)` → "removed — use defprotocol +
+     extend-type for type-based dispatch"
+2. **Stdlib**: removed `inc`, `dec`, `not=` from stdlib-portable. No
+   aliases for car/cdr/length/null? existed in beagle's stdlib in the
+   first place (first/rest/count/empty?/nil? were always canonical).
+3. **Emit modules**: dead emit cases for dropped forms left in place
+   (they're unreachable now since parse rejects upstream). Cleanup
+   pass deferred — low value, high risk of breaking other things.
+4. **Tests**: ~19 tests removed for forms that no longer exist;
+   ~5 tests migrated to use new canonical forms.
 
-Pending. Will scan corpus during Phase 2.
+## Multimethod usage audit (completed)
+
+`(defmulti)` and `(defmethod)` appeared in exactly **one fixture file**
+(`tests/fixtures/check/defmethod-ok.bclj` — 2 lines). No real
+usage. Dropped both. Fixture deleted.
+
+## Final state
+
+- 1382 tests passing (was 1401 pre-redesign).
+- All dropped forms produce explicit parser errors with canonical
+  replacement hints.
+- Corpus migrated to new canonical forms.
+- See `lab/journal/log/026-surface-redesign-morning-report.md` for the
+  honest read on what landed vs what was scoped.
