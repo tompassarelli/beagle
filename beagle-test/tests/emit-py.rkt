@@ -113,9 +113,13 @@
   (define out (py-emit "(define-target py) (if true 1)"))
   (check-true (string-contains? out "1 if True else None")))
 
-(test-case "when emits if statement"
-  (define out (py-emit "(define-target py) (when true (println \"yes\"))"))
-  (check-true (string-contains? out "if True:"))
+;; when removed — replaced by if (no else). Python emit-layer renders if
+;; (with or without else) as a ternary expression (`body if cond else None`
+;; when no else). Side-effecting body becomes ternary; runtime behavior is
+;; equivalent in modern Python.
+(test-case "if (no else) emits ternary with None"
+  (define out (py-emit "(define-target py) (if true (println \"yes\"))"))
+  (check-true (string-contains? out "if True else None"))
   (check-true (string-contains? out "print(\"yes\")")))
 
 (test-case "cond emits if/elif/else"

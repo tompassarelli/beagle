@@ -38,9 +38,9 @@
     [(Circle c) (circle-radius c)]
     [(Square q) (square-side q)]))
 
-;; when + do
+;; if + do (was: when + do; when removed)
 (defn log-point [(p : Point)] : Nil
-  (when (> (point-x p) 0)
+  (if (> (point-x p) 0)
     (do
       (println "positive x")
       (println (str "x=" (point-x p))))))

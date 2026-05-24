@@ -48,9 +48,8 @@
   (check-true (matches? #rx"true 1"  out))
   (check-true (matches? #rx"false 2" out)))
 
-(test-case "when emits"
-  (define out (compile '(def y (when true 1))))
-  (check-true (matches? #rx"\\(when true" out)))
+;; when removed — interim (if c body) / (if c (do b1 b2 …)) pattern; covered
+;; by general if + do emit tests.
 
 (test-case "do emits"
   (define out (compile '(def y (do 1 2 3))))

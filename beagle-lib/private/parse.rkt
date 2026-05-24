@@ -1148,10 +1148,13 @@
               (parse-expr (or (stx-ref subs 2) t))
               #f)]
 
-    [(list 'when c body ...)
-     (when-form (parse-expr (or (stx-ref subs 1) c))
-                (parse-body (or (stx-tail subs 2) body)))]
-    ;; when-not / if-not / unless removed — use (when (not ...)) / (if (not ...) ...) directly.
+    ;; when removed — pure ergonomic sugar over if + do. Per design-principle.md
+    ;; (asymmetric burden, bootstrap-vs-native lens), entry-hall sugar drops when
+    ;; not load-bearing for the next user. Composition: (if c body) for single-
+    ;; body, (if c (do b1 b2 …)) for multi-body. The if-no-else case parses with
+    ;; #f else (verified line 1148 below), so single-body migration is clean.
+    ;;
+    ;; when-not / if-not / unless were dropped earlier — same reasoning.
 
     ;; when-let / if-let removed — Clojure-shaped truthy-binding sugar.
     ;; The interim replacement is the verbose (let [x v] (if x then else))
@@ -1335,6 +1338,8 @@
      (error 'beagle "when-not removed — use (when (not ...) body)")]
     [(list 'if-not _ ...)
      (error 'beagle "if-not removed — use (if (not ...) then else)")]
+    [(list 'when _ ...)
+     (error 'beagle "when removed — use (if c body) for single body or (if c (do b1 b2 …)) for multi-body. The if-no-else form returns nil when condition is false, same as when did")]
     [(list 'when-some _ ...)
      (error 'beagle "when-some removed — beagle's typed nullable-narrowing form is pending design (lab/journal/synthesis/design-principle.md). Until then, use (let [x v] (if x (do body)))")]
     [(list 'if-some _ ...)

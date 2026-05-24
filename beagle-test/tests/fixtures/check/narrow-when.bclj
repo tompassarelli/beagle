@@ -1,4 +1,4 @@
 (declare-extern get-name [-> (U String Nil)])
 (defn print-name []
   (let [x (get-name)]
-    (when (string? x) (subs x 0))))
+    (if (string? x) (subs x 0))))

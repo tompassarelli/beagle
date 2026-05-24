@@ -9,7 +9,7 @@ At that moment, work through entries in this file: re-run each demoted
 test, rewrite/update it for the current surface, promote the fixed
 suite back to active tier (in `beagle-test/tiers.rktd`).
 
-## Total debt: 7 failures across 1 entries
+## Total debt: 11 failures across 2 entries
 
 (Counter line above is read by `bin/beagle-test` to surface accumulated
 debt in runner output. Format: `## Total debt: N failures across M entries`.
@@ -66,6 +66,49 @@ verification catches | what structural verification misses.
 ## Entries
 
 <!-- Append new entries below, most recent first. -->
+
+## 2026-05-24 — when drop
+
+**Surface change:** `when` removed from beagle parse. Pure ergonomic
+sugar over `if` + `do`. Single-body `(when c body)` → `(if c body)`;
+multi-body `(when c b1 b2 ...)` → `(if c (do b1 b2 ...))`. The if-no-
+else case parses with `#f` else, so the migration is clean.
+
+**Emit-layer note:** JS and Python emit `(if c body)` (no else) as a
+ternary expression, not a statement. The old `(when c body)` emitted
+as a statement. For side-effecting bodies this is a real shape change
+(though runtime behavior is equivalent in both JS and modern Python).
+Recorded; no perf regression but worth knowing if shape matters for
+downstream consumers.
+
+**Active-tier work (done):**
+- parse.rkt: when parse case removed; explicit migration error added
+- Active-tier tests updated: parse.rkt (when parse test → parse-err),
+  emit.rkt (removed when emit test), emit-js.rkt (rewrote to test if-no-else
+  → ternary), emit-py.rkt (rewrote to test if-no-else → ternary with None),
+  emit-rkt.rkt (rewrote to test if-no-else)
+- Corpus migrated by hand (2 sites): fixtures/kitchen-sink.bclj
+  (log-point), fixtures/check/narrow-when.bclj (narrowing test)
+
+**Codemod note:** the drop-when rule (bin/beagle-rewrite drop-when)
+was built and tested but NOT applied to the 2 corpus sites — the
+rewriter strips comments and reformats whole files, which is too
+costly for a 2-site migration where preserving surrounding context
+matters. The codemod earns its place at higher site counts (10+ per
+the heuristic in design-principle.md). Both sites were hand-migrated.
+
+**Demoted-tier failures (NOT fixed; logged here for reconciliation):**
+
+| Target | Test file | Test name | Was checking |
+|---|---|---|---|
+| clj | emit-clj-behavioral.rkt | "when runs body on true" | That `(when x (println "yes"))` prints `"yes"` when `x` is `true` |
+| clj | emit-clj-behavioral.rkt | "when skips body on false" | That `(when x (println "yes"))` does not run when `x` is `false` (no output, no error) |
+| js | emit-js-behavioral.rkt | "when runs body on true" | Same as clj: body executes when condition is true |
+| js | emit-js-behavioral.rkt | "when skips body on false" | Same as clj: body is skipped when condition is false |
+
+**Reconciliation guidance:** rewrite as `(if x (println "yes"))` for
+single-body cases or `(if x (do b1 b2 …))` for multi-body. Verify
+the body executes for truthy conditions and is skipped for falsy.
 
 ## 2026-05-24 — when-let / if-let drop (FIRST DROP UNDER TIERED REGIME)
 

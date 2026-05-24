@@ -241,9 +241,13 @@
      "(() =>"
      '(defn f [] : Nil (do (println "a") (println "b"))))
 
-   (check-js-contains "when → IIFE with if"
-     "if ("
-     '(defn f [(x : Bool)] : Nil (when x (println "yes"))))
+   ;; when removed — replaced by if (no else). JS emit-layer renders if
+   ;; (with or without else) as a ternary (`cond ? then : null` when no else).
+   ;; Side-effecting bodies in this position now go through the ternary;
+   ;; runtime behavior is equivalent (ternary evaluates the branch).
+   (check-js-contains "if (no else) → ternary with null"
+     ": null"
+     '(defn f [(x : Bool)] : Nil (if x (println "yes"))))
 
    ;; case removed — replaced by match with literal patterns. JS emits
    ;; the same chained equality pattern from either form.

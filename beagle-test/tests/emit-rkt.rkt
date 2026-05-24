@@ -123,9 +123,10 @@
   (define out (rkt-emit "(define-target rkt) (def r (cond [(= x 1) \"one\"] [(= x 2) \"two\"]))"))
   (check-true (string-contains? out "(cond")))
 
-(test-case "when emits when"
-  (define out (rkt-emit "(define-target rkt) (when true (println \"hi\"))"))
-  (check-true (string-contains? out "(when #t")))
+;; when removed — interim (if c body) pattern; emits standard (if #t (println "hi"))
+(test-case "if (no else) emits"
+  (define out (rkt-emit "(define-target rkt) (if true (println \"hi\"))"))
+  (check-true (string-contains? out "(if #t")))
 
 ;; --- do --------------------------------------------------------------------
 

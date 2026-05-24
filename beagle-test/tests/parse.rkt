@@ -141,10 +141,9 @@
      (zero? n) "zero"
      "missing-test"))
 
-(test-case "when"
-  (define f (car (parse-one '(when (> x 0) (println x) x))))
-  (check-true (when-form? f))
-  (check-equal? (length (when-form-body f)) 2))
+(parse-err/rx "when removed — migration error"
+  #rx"when removed"
+  '(when (> x 0) (println x) x))
 
 (test-case "do"
   (define f (car (parse-one '(do (println "a") (println "b") 42))))
