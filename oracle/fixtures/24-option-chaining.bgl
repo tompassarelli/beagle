@@ -3,7 +3,7 @@
 (defrecord User [(name : String) (email : String?)])
 
 (defn display-email [(u : User)] : String
-  (if-some [e (user-email u)]
+  (if-let [e (user-email u)]
     (str (user-name u) " <" e ">")
     (str (user-name u) " (no email)")))
 

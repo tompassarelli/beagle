@@ -420,15 +420,15 @@
      "(println (describe-num 2)) (println (describe-num 99))"
      "two\nother")
 
-   ;; --- if-some / when-some -------------------------------------------------
+   ;; --- if-let / when-let (if-some / when-some removed) ---------------------
 
-   (check-clj-output "if-some with non-nil"
-     (list '(defn f [(x : Any)] : String (if-some [v x] (str "got: " v) "nothing")))
+   (check-clj-output "if-let with non-nil"
+     (list '(defn f [(x : Any)] : String (if-let [v x] (str "got: " v) "nothing")))
      "(println (f 42)) (println (f nil))"
      "got: 42\nnothing")
 
-   (check-clj-output "when-some with non-nil"
-     (list '(defn f [(x : Any)] : Nil (when-some [v x] (println (str "got: " v)))))
+   (check-clj-output "when-let with non-nil"
+     (list '(defn f [(x : Any)] : Nil (when-let [v x] (println (str "got: " v)))))
      "(f 42)"
      "got: 42")
 

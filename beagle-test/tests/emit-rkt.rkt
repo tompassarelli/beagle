@@ -313,17 +313,8 @@
   (check-true (string-contains? out "(let ("))
   (check-true (string-contains? out "(if ")))
 
-;; --- when-some / if-some ---------------------------------------------------
-
-(test-case "when-some emits let + when"
-  (define out (rkt-emit "(define-target rkt) (def r (when-some [x val] (println x)))"))
-  (check-true (string-contains? out "(let ("))
-  (check-true (string-contains? out "(when ")))
-
-(test-case "if-some emits let + if"
-  (define out (rkt-emit "(define-target rkt) (def r (if-some [x val] x 0))"))
-  (check-true (string-contains? out "(let ("))
-  (check-true (string-contains? out "(if ")))
+;; when-some / if-some removed — the truthy-vs-nil distinction was a
+;; footgun. Use when-let / if-let; their emit produces let+when / let+if.
 
 ;; --- dotimes ---------------------------------------------------------------
 

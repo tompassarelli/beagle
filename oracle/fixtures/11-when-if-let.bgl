@@ -6,7 +6,7 @@
     "not found"))
 
 (defn greet-if-present [(name : String?)] : String
-  (if-some [n name]
+  (if-let [n name]
     (str "Hello, " n)
     "Hello, stranger"))
 

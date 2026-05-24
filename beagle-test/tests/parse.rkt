@@ -909,13 +909,7 @@
   (check-true (if-let-form? f))
   (check-false (if-let-form-else-body f)))
 
-(test-case "when-some parses"
-  (define f (car (parse-one '(when-some [v x] (println v)))))
-  (check-true (when-some-form? f)))
-
-(test-case "if-some parses"
-  (define f (car (parse-one '(if-some [v x] (str v) "nil"))))
-  (check-true (if-some-form? f)))
+;; when-some / if-some removed — see lab/journal/synthesis/surface-reference.md.
 
 ;; --- with-open ---------------------------------------------------------------
 

@@ -1165,14 +1165,11 @@
      (if-let-form name expr
                   (parse-expr (or (stx-ref subs 2) then))
                   #f)]
-    [(list 'when-some bindings-form body ...)
-     (define-values (name expr) (parse-cond-let-binding (or (stx-ref subs 1) bindings-form)))
-     (when-some-form name expr (parse-body (or (stx-tail subs 2) body)))]
-    [(list 'if-some bindings-form then else)
-     (define-values (name expr) (parse-cond-let-binding (or (stx-ref subs 1) bindings-form)))
-     (if-some-form name expr
-                   (parse-expr (or (stx-ref subs 2) then))
-                   (parse-expr (or (stx-ref subs 3) else)))]
+    ;; when-some / if-some removed — the truthy-vs-nil distinction (vs
+    ;; when-let/if-let) is too subtle to be a footgun-free idiom. Use
+    ;; when-let/if-let (truthy check, suffices for nullable types since
+    ;; nil is falsy in beagle) or explicit (when (not (nil? x)) ...) when
+    ;; you specifically need to distinguish nil from other falsy values.
 
     [(list 'with-open bindings-form body ...)
      (with-open-form (parse-let-bindings (or (stx-ref subs 1) bindings-form))
@@ -1344,6 +1341,10 @@
      (error 'beagle "when-not removed — use (when (not ...) body)")]
     [(list 'if-not _ ...)
      (error 'beagle "if-not removed — use (if (not ...) then else)")]
+    [(list 'when-some _ ...)
+     (error 'beagle "when-some removed — use (when-let [x v] body)")]
+    [(list 'if-some _ ...)
+     (error 'beagle "if-some removed — use (if-let [x v] then else)")]
     [(list 'defmulti _ ...)
      (error 'beagle "defmulti removed — use defprotocol + extend-type for type-based dispatch")]
     [(list 'defmethod _ ...)
