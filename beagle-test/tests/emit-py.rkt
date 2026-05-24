@@ -312,12 +312,7 @@
   (check-true (string-contains? out "replace("))
   (check-true (string-contains? out "x=2")))
 
-;; --- dotimes ----------------------------------------------------------------
-
-(test-case "dotimes emits for range"
-  (define out (py-emit "(define-target py) (dotimes [i 10] (println i))"))
-  (check-true (string-contains? out "for i in range(10):"))
-  (check-true (string-contains? out "print(i)")))
+;; dotimes removed — use (doseq [i (range n)] body); covered by doseq emit tests.
 
 ;; --- letfn ------------------------------------------------------------------
 

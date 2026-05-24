@@ -245,9 +245,7 @@
      ".forEach("
      '(defn f [(xs : (Vec Int))] : Nil (doseq [x xs] (println x))))
 
-   (check-js-contains "dotimes → for loop"
-     "for (let"
-     '(defn f [(n : Int)] : Nil (dotimes [i n] (println i))))
+   ;; dotimes removed — use (doseq [i (range n)] body).
 
    ;; --- interop --------------------------------------------------------------
 

@@ -568,11 +568,7 @@
   (define out (compile '(def x (comment (+ 1 2)))))
   (check-true (matches? #rx"nil" out)))
 
-;; --- dotimes ---
-
-(test-case "dotimes emits"
-  (define out (compile `(defn f [] (dotimes ,(br 'i 5) (println i)))))
-  (check-true (matches? #rx"\\(dotimes \\[i 5\\]" out)))
+;; dotimes removed — use (doseq [i (range n)] body).
 
 ;; --- condp ---
 

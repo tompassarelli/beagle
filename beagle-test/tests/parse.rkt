@@ -940,13 +940,7 @@
   (define f (car (parse-one '(comment (def x 1) (defn foo [] 42)))))
   (check-equal? f 'nil))
 
-;; --- dotimes ---
-
-(test-case "dotimes parses"
-  (define f (car (parse-one `(dotimes ,(br 'i 10) (println i)))))
-  (check-true (dotimes-form? f))
-  (check-equal? (dotimes-form-name f) 'i)
-  (check-equal? (length (dotimes-form-body f)) 1))
+;; dotimes removed — sugar for (doseq [i (range n)] body).
 
 ;; --- condp ---
 

@@ -1216,14 +1216,8 @@
      (doseq-form (parse-for-clauses (or (stx-ref subs 1) bindings-form))
                  (parse-body (or (stx-tail subs 2) body)))]
 
-    [(list 'dotimes bindings-form body ...)
-     (define bd (->datum (or (stx-ref subs 1) bindings-form)))
-     (define items (unwrap-items bd "dotimes binding"))
-     (unless (= (length items) 2)
-       (error 'beagle "dotimes binding must be [name count], got: ~v" items))
-     (dotimes-form (car items)
-                   (parse-expr (cadr items))
-                   (parse-body (or (stx-tail subs 2) body)))]
+    ;; dotimes removed — sugar for (doseq [i (range n)] body...).
+    ;; No broader pattern reinforced; composition is transparent.
 
     [(list 'with target-expr updates ...)
      ;; (with ns body) — Nix scope (parses to nix-with).
@@ -1348,6 +1342,8 @@
      (error 'beagle "if-some removed — use (if-let [x v] then else)")]
     [(list '-> _ ...)
      (error 'beagle "-> (first-arg threading) removed — use ->> or a let-chain")]
+    [(list 'dotimes _ ...)
+     (error 'beagle "dotimes removed — use (doseq [i (range n)] body...)")]
     [(list 'defmulti _ ...)
      (error 'beagle "defmulti removed — use defprotocol + extend-type for type-based dispatch")]
     [(list 'defmethod _ ...)

@@ -234,7 +234,8 @@
      "(println (factorial 5))"
      "120")
 
-   ;; --- for / doseq / dotimes -----------------------------------------------
+   ;; --- for / doseq ---------------------------------------------------------
+   ;; dotimes removed — use (doseq [i (range n)] body).
 
    (check-clj-output "for comprehension"
      (list '(defn double-all [(xs : (Vec Int))] : (Vec Int)
@@ -252,11 +253,6 @@
      (list '(defn f [(xs : (Vec Int))] : Nil (doseq [x xs] (println x))))
      "(f [10 20 30])"
      "10\n20\n30")
-
-   (check-clj-output "dotimes counts"
-     (list '(defn f [(n : Int)] : Nil (dotimes [i n] (println i))))
-     "(f 3)"
-     "0\n1\n2")
 
    ;; --- higher-order functions ----------------------------------------------
 

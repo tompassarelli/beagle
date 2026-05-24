@@ -316,12 +316,7 @@
 ;; when-some / if-some removed — the truthy-vs-nil distinction was a
 ;; footgun. Use when-let / if-let; their emit produces let+when / let+if.
 
-;; --- dotimes ---------------------------------------------------------------
-
-(test-case "dotimes emits for with in-range"
-  (define out (rkt-emit "(define-target rkt) (dotimes [i 5] (println i))"))
-  (check-true (string-contains? out "(for ("))
-  (check-true (string-contains? out "(in-range 5)")))
+;; dotimes removed — use (doseq [i (range n)] body) instead.
 
 ;; --- condp -----------------------------------------------------------------
 

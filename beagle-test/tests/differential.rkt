@@ -77,7 +77,7 @@
     "07-higher-order.bgl"
     "10-let-patterns.bgl"
     "11-when-if-let.bgl"
-    "12-dotimes-condp.bgl"
+    "12-condp.bgl"
     "13-letfn-mutual.bgl"
     "15-multi-arity.bgl"
     "16-case-maps.bgl"

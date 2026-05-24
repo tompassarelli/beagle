@@ -872,10 +872,7 @@
 (check-ok "comment type checks (returns nil)"
   '(def x (comment (+ 1 2 3))))
 
-;; --- dotimes ---
-
-(check-ok "dotimes type checks, binding is Int"
-  `(defn f [] (dotimes ,(br 'i 5) (println i))))
+;; dotimes removed — use (doseq [i (range n)] body).
 
 ;; --- condp ---
 
