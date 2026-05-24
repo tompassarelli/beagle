@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# beagle-rewrite: apply AST rewrites to beagle source files.
+#
+# Usage:
+#   bin/beagle-rewrite <rule-name> <file-or-dir>           # dry-run, show diff
+#   bin/beagle-rewrite --apply <rule-name> <file-or-dir>   # apply changes
+#   bin/beagle-rewrite --list                              # list available rules
+#
+# Codemod framework for surface migrations. Rules live in
+# beagle-lib/private/rewrites/*.rkt and are registered automatically
+# (require the rule file in rewrite-cli.rkt to make it available).
+#
+# Reads beagle source via the beagle reader (handles [], {}, #{}, #"..."),
+# applies the rule's s-expression transform bottom-up, writes back via
+# a simple pretty-printer that converts tags back to delimiters.
+#
+# NOTE: the rewriter does NOT preserve original whitespace or comments.
+# Review the diff (run without --apply first) before writing back.
+
+set -uo pipefail
+source "$(dirname "$0")/_beagle-racket"
+
+BEAGLE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+exec "$RACKET" "$BEAGLE_ROOT/beagle-lib/private/rewrite-cli.rkt" "$@"
