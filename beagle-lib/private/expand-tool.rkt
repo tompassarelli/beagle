@@ -20,12 +20,11 @@
 (define (expand-file path)
   (define datums (read-file-datums path))
   (define registry (make-macro-registry))
-  ;; First pass: register macros (template + proc). The 'beagle macro
-  ;; kind (beagle-evaluated procedural body) was removed — zero corpus
-  ;; usage; all procedural macros are 'proc (Racket-evaluated body).
+  ;; First pass: register macros (template + proc + beagle)
   (for ([d (in-list datums)])
     (match d
-      [(list 'define-macro 'proc (? symbol? name) typed-params ': ret-type body)
+      [(list 'define-macro (or 'proc 'beagle) (? symbol? name) typed-params ': ret-type body)
+       (define macro-kind (cadr d))
        (define raw-params
          (cond
            [(bracketed? typed-params) (bracket-body typed-params)]
@@ -40,7 +39,9 @@
              [(symbol? p)
               (values p 'Syntax)]
              [else (values (gensym) 'Syntax)])))
-       (register-proc-macro! registry name param-names input-contracts ret-type body)]
+       (if (eq? macro-kind 'beagle)
+           (register-beagle-macro! registry name param-names input-contracts ret-type body)
+           (register-proc-macro! registry name param-names input-contracts ret-type body))]
       [(list 'define-macro (? symbol? kind) (? symbol? name) params template)
        (define ps (cond
                     [(bracketed? params) (bracket-body params)]
@@ -191,7 +192,8 @@
   (define registry (make-macro-registry))
   (for ([d (in-list datums)])
     (match d
-      [(list 'define-macro 'proc (? symbol? name) typed-params ': ret-type body)
+      [(list 'define-macro (or 'proc 'beagle) (? symbol? name) typed-params ': ret-type body)
+       (define macro-kind (cadr d))
        (define raw-params
          (cond
            [(bracketed? typed-params) (bracket-body typed-params)]
@@ -206,7 +208,9 @@
              [(symbol? p)
               (values p 'Syntax)]
              [else (values (gensym) 'Syntax)])))
-       (register-proc-macro! registry name param-names input-contracts ret-type body)]
+       (if (eq? macro-kind 'beagle)
+           (register-beagle-macro! registry name param-names input-contracts ret-type body)
+           (register-proc-macro! registry name param-names input-contracts ret-type body))]
       [(list 'define-macro (? symbol? kind) (? symbol? name) params template)
        (define ps (cond
                     [(bracketed? params) (bracket-body params)]

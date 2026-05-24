@@ -220,7 +220,8 @@
     (match d
       [(list 'declare-extern (? symbol? name) type-expr)
        (reg! name (parse-type type-expr))]
-      [(list 'define-macro 'proc (? symbol? name) typed-params ': ret-type body)
+      [(list 'define-macro (or 'proc 'beagle) (? symbol? name) typed-params ': ret-type body)
+       (define macro-kind (cadr d))
        (define raw-params
          (cond
            [(bracketed? typed-params) (bracket-body typed-params)]
@@ -234,7 +235,9 @@
               (values (car p) (caddr p))]
              [else (values (if (symbol? p) p (gensym)) 'Syntax)])))
        (define qname (qualify-name prefix name))
-       (register-proc-macro! registry qname pnames icontracts ret-type body)]
+       (if (eq? macro-kind 'beagle)
+           (register-beagle-macro! registry qname pnames icontracts ret-type body)
+           (register-proc-macro! registry qname pnames icontracts ret-type body))]
       [(list 'define-macro (? symbol? kind) (? symbol? name) params template)
        (define ps (cond
                     [(bracketed? params) (bracket-body params)]
@@ -415,8 +418,9 @@
        (set! ns n)
        (set! ns-set? #t)]
 
-      [(list 'define-macro 'proc (? symbol? name) typed-params ': ret-type body)
+      [(list 'define-macro (or 'proc 'beagle) (? symbol? name) typed-params ': ret-type body)
        (validate-identifier! name "macro")
+       (define macro-kind (cadr d))
        (define raw-params
          (cond
            [(bracketed? typed-params) (bracket-body typed-params)]
@@ -432,7 +436,9 @@
               (values p 'Syntax)]
              [else
               (error 'beagle "macro ~a: bad typed parameter: ~v" name p)])))
-       (register-proc-macro! registry name param-names input-contracts ret-type body)]
+       (if (eq? macro-kind 'beagle)
+           (register-beagle-macro! registry name param-names input-contracts ret-type body)
+           (register-proc-macro! registry name param-names input-contracts ret-type body))]
 
       [(list 'define-macro (? symbol? kind) (? symbol? name) macro-params template)
        (validate-identifier! name "macro")
