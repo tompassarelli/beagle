@@ -382,8 +382,8 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
    ;; --- edge cases ----------------------------------------------------------
 
    (check-js-output "inc and dec"
-     (list '(defn f [(x : Int)] : Int (inc x))
-           '(defn g [(x : Int)] : Int (dec x)))
+     (list '(defn f [(x : Int)] : Int (+ x 1))
+           '(defn g [(x : Int)] : Int (- x 1)))
      "console.log(f(5)); console.log(g(5));"
      "6\n4")
 
@@ -451,7 +451,7 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
      "[4,5]")
 
    (check-js-output "not= returns boolean"
-     (list '(defn f [(a : Int) (b : Int)] : Bool (not= a b)))
+     (list '(defn f [(a : Int) (b : Int)] : Bool (not (= a b))))
      "console.log(f(1,2)); console.log(f(1,1));"
      "true\nfalse")
 
@@ -502,7 +502,7 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
      "true\nfalse")
 
    (check-js-output "keep filters nulls"
-     (list '(defn maybe-inc [(x : Int)] : Any (if (> x 0) (inc x) nil))
+     (list '(defn maybe-inc [(x : Int)] : Any (if (> x 0) (+ x 1) nil))
            '(defn f [(xs : (Vec Int))] : Any (keep maybe-inc xs)))
      "console.log(JSON.stringify(f([0,1,0,2])));"
      "[2,3]")

@@ -145,7 +145,7 @@
   '(defn five [] : Int 5))
 
 (check-ok "known builtin call type-checks"
-  '(def x : Int (inc 1)))
+  '(def x : Int (+ 1 1)))
 
 ;; =============================================================================
 ;; Tests — negatives
@@ -486,10 +486,10 @@
   '(def x (try (/ 1 0) (catch Exception e (str e)))))
 
 (check-ok "try/catch/finally passes type check"
-  '(def x (try (inc 1) (catch Exception e "err") (finally (println "done")))))
+  '(def x (try (+ 1 1) (catch Exception e "err") (finally (println "done")))))
 
 (check-ok "try with typed body passes"
-  '(def x : Any (try (inc 1) (catch Exception e 0))))
+  '(def x : Any (try (+ 1 1) (catch Exception e 0))))
 
 ;; =============================================================================
 ;; Tests — doseq
@@ -810,7 +810,7 @@
   '(defn log-it [(msg : String)] : Nil (js/console.log msg)))
 
 (check-cljs-ok "cljs: standard fns work in cljs"
-  '(def x : Int (inc 1)))
+  '(def x : Int (+ 1 1)))
 
 (check-cljs-ok "cljs: js/parseFloat type-checks"
   '(def x : Float (js/parseFloat "3.14")))
@@ -835,7 +835,7 @@
   '(def x (first *command-line-args*)))
 
 (check-cljs-silent "cljs: universal fn produces no JVM-only warning"
-  '(def x : Int (inc 1)))
+  '(def x : Int (+ 1 1)))
 
 ;; --- metadata type checking --------------------------------------------------
 
@@ -867,13 +867,7 @@
 (check-ok "for with :let type checks"
   `(def x : (Vec String) (for ,(br 'i '(range 3) ':let (br 's '(str i))) s)))
 
-;; --- when-not, if-not ---
-
-(check-ok "when-not type checks"
-  '(defn f [(xs : (Vec Int))] (when-not (empty? xs) (first xs))))
-
-(check-ok "if-not type checks"
-  '(defn f [(x : Bool)] : String (if-not x "yes" "no")))
+;; when-not / if-not removed — use (when (not ...) body) / (if (not ...) t e).
 
 ;; --- comment ---
 
@@ -997,13 +991,13 @@
 ;; =============================================================================
 
 (check-ok "check form passes type check"
-  '(def x : Any (check (inc 1))))
+  '(def x : Any (check (+ 1 1))))
 
 (check-ok "rescue with fallback passes type check"
-  '(def x : Any (rescue (inc 1) 0)))
+  '(def x : Any (rescue (+ 1 1) 0)))
 
 (check-ok "rescue with error binding passes type check"
-  '(def x : Any (rescue (inc 1) err (str err))))
+  '(def x : Any (rescue (+ 1 1) err (str err))))
 
 ;; =============================================================================
 ;; Tests — deferror / :raises

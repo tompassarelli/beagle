@@ -189,17 +189,9 @@
   (define out (rkt-emit "(define-target rkt) (def x (str \"hi \" 42))"))
   (check-true (string-contains? out "format")))
 
-(test-case "inc → add1"
-  (define out (rkt-emit "(define-target rkt) (def x (inc 5))"))
-  (check-true (string-contains? out "(add1 5)")))
-
-(test-case "dec → sub1"
-  (define out (rkt-emit "(define-target rkt) (def x (dec 5))"))
-  (check-true (string-contains? out "(sub1 5)")))
-
-(test-case "inc as value ref → add1"
-  (define out (rkt-emit "(define-target rkt) (def f inc)"))
-  (check-true (string-contains? out "add1")))
+;; inc/dec → add1/sub1 emit-rkt translations removed — inc/dec dropped
+;; from beagle surface; use (+ x 1) / (- x 1) directly. The Racket emit
+;; produces (+ 5 1) literally, which Racket also accepts.
 
 (test-case "string/upper-case as value ref → string-upcase"
   (define out (rkt-emit "(define-target rkt) (def f string/upper-case)"))

@@ -230,7 +230,7 @@
    (check-clj-output "loop/recur factorial"
      (list '(defn factorial [(n : Int)] : Int
               (loop [i n acc 1]
-                (if (<= i 1) acc (recur (dec i) (* acc i))))))
+                (if (<= i 1) acc (recur (- i 1) (* acc i))))))
      "(println (factorial 5))"
      "120")
 
@@ -278,7 +278,7 @@
    ;; --- threading macros ----------------------------------------------------
 
    (check-clj-output "thread-first"
-     (list '(defn f [(x : Int)] : Int (-> x inc inc inc)))
+     (list '(defn f [(x : Int)] : Int (-> x (+ 1) (+ 1) (+ 1))))
      "(println (f 0))"
      "3")
 
@@ -337,9 +337,9 @@
    (check-clj-output "letfn mutual recursion"
      (list '(defn mutual-test [] : Bool
               (letfn [(is-even [(n : Int)] : Bool
-                        (if (= n 0) true (is-odd (dec n))))
+                        (if (= n 0) true (is-odd (- n 1))))
                       (is-odd [(n : Int)] : Bool
-                        (if (= n 0) false (is-even (dec n))))]
+                        (if (= n 0) false (is-even (- n 1))))]
                 (is-even 10))))
      "(println (mutual-test))"
      "true")
@@ -554,7 +554,7 @@
            `(deftype Counter ,(br '(n : Int))
               Incrementable
               (inc-val ,(br '(self : Counter)) : Counter
-                (->Counter (inc (.-n self))))))
+                (->Counter (+ (.-n self) 1)))))
      "(let [c0 (->Counter 0)
             c1 (inc-val c0)
             c2 (inc-val c1)

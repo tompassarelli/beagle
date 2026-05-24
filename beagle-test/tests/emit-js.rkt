@@ -164,7 +164,7 @@
 
    (check-js-contains "inc → + 1"
      "(x + 1)"
-     '(defn f [(x : Int)] : Int (inc x)))
+     '(defn f [(x : Int)] : Int (+ x 1)))
 
    (check-js-contains "count → .length"
      ".length"
@@ -434,9 +434,9 @@
      '(declare-extern xs Any)
      '(defn f [(xs : Any)] : Any (seq xs)))
 
-   (check-js-contains "not= → !=="
-     "!=="
-     '(defn f [(a : Int) (b : Int)] : Bool (not= a b)))
+   (check-js-contains "(not (= a b)) emits !(===)"
+     "!(a === b)"
+     '(defn f [(a : Int) (b : Int)] : Bool (not (= a b))))
 
    (check-js-contains "letfn → IIFE with function decls"
      "function f(x)"
@@ -569,7 +569,7 @@
 
    (check-js-contains "inc in call position still inlines"
      "(x + 1)"
-     '(defn f [(x : Int)] : Int (inc x)))
+     '(defn f [(x : Int)] : Int (+ x 1)))
 
    (test-case "user-defined inc shadows stdlib wrapper"
      (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)

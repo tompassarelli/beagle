@@ -197,6 +197,57 @@ confirmed.**
 Identical to Day 0 (loop/recur kept). No friction change. **Reversal
 verdict confirmed.**
 
+## The meta-learning (worth more than the surface drops)
+
+Empirical re-evaluation overruled the theoretical Day 0 verdicts in
+multiple places. Pattern emerged: the Day 0 friction list often
+identified "3 idioms for 1 concept" when the reality was "3 idioms
+for 3 related-but-distinct concepts."
+
+Cases where the diagnostic was wrong:
+
+- **`loop`/`recur` vs named-let**: I claimed redundancy. Reality:
+  beagle doesn't support named-let; `loop`/`recur` is the singular
+  canonical. No redundancy.
+
+- **`->Name` vs `Name` constructor**: I claimed redundancy. Reality:
+  beagle only supports `->Name`. No redundancy.
+
+- **Record field access (3 forms)**: I claimed redundancy:
+  `(field r)`, `(:field r)`, `(.-field r)`. Reality (audited
+  after surface work): these are *3 different concepts*:
+  - `(field r)` = beagle-record auto-accessor (typed against record)
+  - `(:field r)` = beagle-map keyword-as-fn (typed against map)
+  - `(.-field r)` = JS-interop property access (357 occurrences,
+    heavily used in self-host)
+  No redundancy. Picking "one canonical" would conflate distinct
+  semantics.
+
+So the surface is tighter than the friction list suggested. The
+*actual* cleanup was small (zero-usage drops + small sugar drops).
+The friction Day 0 captured was real but mostly came from me confusing
+related concepts mid-authoring, not from genuine surface redundancy.
+
+**Implication for future surface passes**: empirical verification has
+to come *before* committing to drops. Theoretical "this looks like
+redundancy" can mislead in three different ways:
+1. The form is the singular canonical with no alternative (loop/recur).
+2. The forms address different concepts despite looking similar (field
+   access).
+3. The form has zero usage and theoretically-equivalent alternatives,
+   so dropping is genuinely safe (multimethods, as->/cond->/some->).
+
+The third case is the only "real" drop. The first two are protected
+by the "agent reaches for it reflexively" test or by reading what
+the form actually does in context.
+
+This is the conservative-cleanup result: small but principled. A
+more ambitious redesign would need: type-aware tooling for the
+field-access kind of question (lint that knows record vs map),
+empirical usage data on which forms are reflexive vs taught, and a
+willingness to do the "3 concepts → 1 form + 1 macro for the others"
+kind of redesign which is multi-day work.
+
 ## One subtle gotcha worth flagging
 
 Dropped stdlib aliases (inc/dec/not=) don't get an explicit lint

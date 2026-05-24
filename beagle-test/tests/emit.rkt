@@ -57,7 +57,7 @@
   (check-true (matches? #rx"\\(do" out)))
 
 (test-case "fn emits"
-  (define out (compile '(def f (fn [x] (inc x)))))
+  (define out (compile '(def f (fn [x] (+ x 1)))))
   (check-true (matches? #rx"\\(fn \\[x\\]" out)))
 
 (test-case "vector literal emits with brackets"
@@ -444,12 +444,12 @@
   (define src "test.rkt")
   (define value-stx (located '(+ 1 2) src 3))
   (define bindings-stx (located (list BT 'x value-stx) src 2))
-  (define body-stx (located '(inc x) src 4))
+  (define body-stx (located '(+ x 1) src 4))
   (define form-stx (located (list 'def 'y (list 'let bindings-stx body-stx)) src 1))
   (define prog (parse-program (list form-stx)))
   (define out (emit-program prog))
   (check-true (matches? #rx"\\^\\{:line 3 :file \"test\\.rkt\"\\} \\(\\+ 1 2\\)" out))
-  (check-true (matches? #rx"\\^\\{:line 4 :file \"test\\.rkt\"\\} \\(inc x\\)" out)))
+  (check-true (matches? #rx"\\^\\{:line 4 :file \"test\\.rkt\"\\} \\(\\+ x 1\\)" out)))
 
 (test-case "expression-level: src-table is populated"
   (define src "test.rkt")

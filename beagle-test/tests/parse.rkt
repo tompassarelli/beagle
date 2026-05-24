@@ -107,7 +107,7 @@
 
 
 (test-case "fn (lambda)"
-  (define f (car (parse-one '(fn [x] (inc x)))))
+  (define f (car (parse-one '(fn [x] (+ x 1)))))
   (check-true (fn-form? f))
   (check-equal? (length (fn-form-params f)) 1))
 

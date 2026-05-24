@@ -259,8 +259,9 @@
 (test-case "comparison operators"
   (define out (py-emit "(define-target py) (= 1 1)"))
   (check-true (string-contains? out "=="))
-  (define out2 (py-emit "(define-target py) (not= 1 2)"))
-  (check-true (string-contains? out2 "!=")))
+  (define out2 (py-emit "(define-target py) (not (= 1 2))"))
+  ;; was `not=` before surface redesign; now emits as wrapped `not (==)`.
+  (check-true (string-contains? out2 "(not")))
 
 (test-case "and/or emit keywords"
   (define out (py-emit "(define-target py) (and true false)"))
@@ -279,7 +280,7 @@
 ;; --- loop/recur -------------------------------------------------------------
 
 (test-case "loop/recur emits while True"
-  (define out (py-emit "(define-target py) (defn f [(n : Int)] : Int (loop [acc 1 i n] (if (<= i 1) acc (recur (* acc i) (dec i)))))"))
+  (define out (py-emit "(define-target py) (defn f [(n : Int)] : Int (loop [acc 1 i n] (if (<= i 1) acc (recur (* acc i) (- i 1)))))"))
   (check-true (string-contains? out "acc = 1"))
   (check-true (string-contains? out "i = n"))
   (check-true (string-contains? out "while True:"))

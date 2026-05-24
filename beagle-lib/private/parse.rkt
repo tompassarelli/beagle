@@ -1299,8 +1299,34 @@
      (parse-expr (expand-thread-first init steps))]
     [(list '->> init steps ...)
      (parse-expr (expand-thread-last init steps))]
-    ;; cond->/cond->>/some->/some->>/as-> removed — use let-chains for
-    ;; conditional or short-circuiting pipelines.
+
+    ;; Explicit errors for forms removed in the 2026-05 surface redesign.
+    ;; The catch-all fallthrough would treat these as undefined functions,
+    ;; which is misleading — they used to be forms, they're not anymore.
+    [(list 'cond-> _ ...)
+     (error 'beagle "cond-> removed — use a let-chain with (if ...) for conditional accumulation")]
+    [(list 'cond->> _ ...)
+     (error 'beagle "cond->> removed — use a let-chain with (if ...) for conditional accumulation")]
+    [(list 'some-> _ ...)
+     (error 'beagle "some-> removed — use a let-chain with explicit nil-checks")]
+    [(list 'some->> _ ...)
+     (error 'beagle "some->> removed — use a let-chain with explicit nil-checks")]
+    [(list 'as-> _ ...)
+     (error 'beagle "as-> removed — use a let with explicit naming for intermediate values")]
+    [(list 'when-not _ ...)
+     (error 'beagle "when-not removed — use (when (not ...) body)")]
+    [(list 'if-not _ ...)
+     (error 'beagle "if-not removed — use (if (not ...) then else)")]
+    [(list 'defmulti _ ...)
+     (error 'beagle "defmulti removed — use defprotocol + extend-type for type-based dispatch")]
+    [(list 'defmethod _ ...)
+     (error 'beagle "defmethod removed — use defprotocol + extend-type for type-based dispatch")]
+    [(list 'inc _ ...)
+     (error 'beagle "inc removed — use (+ x 1)")]
+    [(list 'dec _ ...)
+     (error 'beagle "dec removed — use (- x 1)")]
+    [(list 'not= _ ...)
+     (error 'beagle "not= removed — use (not (= a b))")]
 
     [(list (? symbol? f) args ...)
      (call-form f (map parse-expr (or (stx-tail subs 1) args)))]
