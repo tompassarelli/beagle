@@ -218,8 +218,9 @@ not type-check or inspect deeper errors until delimiters pass.
 - `bin/beagle-test` — **tiered** test runner (active blocks, demoted advisory).
   Use this, NOT `raco test beagle-test/tests/` directly — `raco test` bypasses
   tier logic and will block iteration on demoted-tier failures that shouldn't
-  block. Flags: `--active-only` for fast loop, `--include-gated` to add
-  env-gated suites. Tier classification in `beagle-test/tiers.rktd`; demoted
+  block. Local default: active-only (fast loop). CI runs the full suite (sets
+  `CI=true`). Local opt-in to full suite: `BEAGLE_FULL_SUITE=1 bin/beagle-test`
+  or `--full` flag. Tier classification in `beagle-test/tiers.rktd`; demoted
   failures logged to `lab/surface-debt.md` for batch reconciliation.
 
 ### Tiering discipline during surface iteration

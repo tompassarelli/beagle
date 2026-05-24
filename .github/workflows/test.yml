@@ -1,0 +1,44 @@
+name: tests
+
+# CI runs the full tiered suite (active + demoted). The CI=true env var
+# triggers bin/beagle-test to include the demoted tier. Active failures
+# block the build; demoted failures are advisory (logged in the run
+# output and surface-debt.md tracks accumulated debt). See
+# lab/journal/synthesis/design-principle.md "Test-cadence decomposition".
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Racket
+        uses: Bogdanp/setup-racket@v1.11
+        with:
+          architecture: x64
+          distribution: full
+          variant: CS
+          version: '9.1'
+
+      - name: Link beagle packages
+        run: |
+          raco pkg install --auto --link \
+            beagle-lib/ beagle-test/ beagle-doc/ beagle/
+
+      - name: Run tiered test suite
+        env:
+          CI: 'true'
+        run: bin/beagle-test
+
+      - name: Show accumulated surface debt
+        if: always()
+        run: |
+          if [ -f lab/surface-debt.md ]; then
+            head -20 lab/surface-debt.md
+          fi

@@ -167,7 +167,26 @@
 
 ;; --- main ------------------------------------------------------------------
 
-(define active-only? (make-parameter #f))
+;; Default behavior:
+;;   - Local interactive iteration: SKIP demoted (fast loop). The reflexive
+;;     "run everything" was the interim until CI shipped; now CI carries
+;;     the always-run-demoted load.
+;;   - CI: include demoted (set CI=true or BEAGLE_FULL_SUITE=1).
+;;   - Manual local opt-in: BEAGLE_FULL_SUITE=1 or --full flag.
+;;
+;; If you find yourself wanting to "run everything locally to be sure",
+;; that's the workflow analog of "fix the demoted test in-line" — see
+;; CLAUDE.md "Tiering discipline during surface iteration". Trust the
+;; tiering; CI will catch demoted regressions on push.
+
+(define (env-set? name)
+  (define v (getenv name))
+  (and v (not (string=? v ""))))
+
+(define full-suite-env?
+  (or (env-set? "CI") (env-set? "BEAGLE_FULL_SUITE")))
+
+(define active-only? (make-parameter (not full-suite-env?)))
 (define include-gated? (make-parameter #f))
 
 (define (run)
@@ -188,7 +207,7 @@
 
   (cond
     [(active-only?)
-     (printf "DEMOTED TIER: skipped (--active-only)\n\n")]
+     (printf "DEMOTED TIER: skipped (local default; set CI=true / BEAGLE_FULL_SUITE=1 / pass --full to include)\n\n")]
     [else
      (print-tier-section "DEMOTED TIER (advisory, no block)" demoted-results)])
 
@@ -251,8 +270,9 @@
 (command-line
  #:program "beagle-test"
  #:once-each
- [("--active-only") "Run active tier only (skip demoted)"
-                    (active-only? #t)]
+ [("--active-only") "Run active tier only (skip demoted)" (active-only? #t)]
+ [("--full") "Run active + demoted (overrides CI/BEAGLE_FULL_SUITE check)"
+             (active-only? #f)]
  [("--include-gated") "Also run gated tier (requires env vars)"
                       (include-gated? #t)]
  #:args ()
