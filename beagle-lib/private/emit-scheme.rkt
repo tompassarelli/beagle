@@ -67,11 +67,12 @@
       [(record-form? f)
        (hash-set! h (record-form-name f)
                   (map param-name (record-form-fields f)))]
-      [(defunion-form? f)
+      [(and (defunion-form? f) (defunion-form-member-fields f))
+       (define mf (defunion-form-member-fields f))
        (for ([m (in-list (defunion-form-members f))])
-         (when (defunion-member-fields m)
-           (hash-set! h (defunion-member-name m)
-                      (map param-name (defunion-member-fields m)))))]))
+         (define fields (hash-ref mf m '()))
+         (when (pair? fields)
+           (hash-set! h m (map param-name fields))))]))
   h)
 
 ;; --- expression dispatch ---------------------------------------------------

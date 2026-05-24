@@ -33,7 +33,7 @@ nix-doc-shape pastes work without further edit.
 @itemlist[
   @item{@tt{bin/beagle-translate-nix} — pipe-friendly best-effort snippet
         translator. Handles the patterns above for paste-from-docs cases.
-        @code{echo '{ a = 1; }' | beagle-translate-nix} → @code{{:a 1}}.}
+        @tt|{echo '{ a = 1; }' | beagle-translate-nix}| → @tt|{{:a 1}}|.}
   @item{@tt{bin/beagle-import-nix} — full-file converter (rnix-parser-backed).
         Use when migrating a whole @tt{.nix} file. Handles 100% of nixpkgs
         syntax; output may need light cleanup for idiomatic beagle.}]
@@ -48,7 +48,7 @@ inconsistency:
   (list
     (list @bold{Shape}            @bold{Semantic}                                                                    @bold{Resolved by})
     (list @tt{foo}                "local identifier (variable, function name, let binding)"                          "lexical env")
-    (list @tt{lib/foo} @tt{or} @tt{lib.foo}  "qualified stdlib call (lib, builtins, pkgs)"                                       "stdlib catalog")
+    (list @elem{@tt{lib/foo} or @tt{lib.foo}}  "qualified stdlib call (lib, builtins, pkgs)"                                       "stdlib catalog")
     (list @tt{config.X.Y}         "schema-typed NixOS option path (16k+ entries)"                                   ".beagle-cache/schema.json"))]
 
 The dotted symbol @tt{config.X.Y} looks like Clojure's @tt{(get-in config
@@ -158,7 +158,7 @@ Dotted keyword keys flatten to native Nix path syntax.
 
 →
 
-@codeblock|{
+@verbatim|{
 { networking.firewall.allowedTCPPorts = [ 22 80 443 ]; }
 }|
 
