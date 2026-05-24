@@ -1289,9 +1289,17 @@
      (parse-match-form (or (stx-ref subs 1) target-expr)
                        (or (stx-tail subs 2) clauses))]
 
-    [(list 'case test-expr clauses ...)
-     (parse-case-form (or (stx-ref subs 1) test-expr)
-                      (or (stx-tail subs 2) clauses))]
+    ;; case removed — folded into match + or-pattern. The case-fold
+    ;; optimization in emit-clj.rkt and emit-rkt.rkt lowers literal-only
+    ;; or-patterns to target-native (case ...) for O(1) dispatch, so the
+    ;; migration ships no perf regression.
+    ;;
+    ;; Migration:
+    ;;   (case x 1 "one" 2 "two" :else "other")
+    ;;   →
+    ;;   (match x [(or 1) "one"] [(or 2) "two"] [_ "other"])
+    ;; or more compactly:
+    ;;   (match x [1 "one"] [2 "two"] [_ "other"])
 
     [(list (? constructor-sym? c) args ...)
      (new-form c (map parse-expr (or (stx-tail subs 1) args)))]
@@ -1352,6 +1360,8 @@
      (error 'beagle "dec removed — use (- x 1)")]
     [(list 'not= _ ...)
      (error 'beagle "not= removed — use (not (= a b))")]
+    [(list 'case _ ...)
+     (error 'beagle "case removed — use (match x [v1 body] [v2 body] [_ default]) or (match x [(or v1 v2) shared-body] [_ default]); literal-only matches case-fold to target-native dispatch in emit")]
     [(list (? keyword-sym? kw) _ ...)
      (error 'beagle "(:keyword target) call-form removed — use (get m :key) for maps or (field-name r) for record field access; got: ~v" kw)]
 

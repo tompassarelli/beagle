@@ -302,20 +302,10 @@
   (check-true (matches? #rx"\\(doseq" out))
   (check-true (matches? #rx":when" out)))
 
-;; --- case --------------------------------------------------------------------
-
-(test-case "case emits as Clojure case"
-  (define out (compile '(def y (case x "a" 1 "b" 2 "default"))))
-  (check-true (matches? #rx"\\(case x" out))
-  (check-true (matches? #rx"\"a\" 1" out))
-  (check-true (matches? #rx"\"b\" 2" out))
-  (check-true (matches? #rx"\"default\"" out)))
-
-(test-case "case without default emits"
-  (define out (compile '(def y (case x 1 "one" 2 "two"))))
-  (check-true (matches? #rx"\\(case x" out))
-  (check-true (matches? #rx"1 \"one\"" out))
-  (check-true (matches? #rx"2 \"two\"" out)))
+;; case removed — use (match x [v1 body1] [v2 body2] [_ default]) or
+;; (match x [(or v1 v2) shared-body] [_ default]). Case-fold optimization
+;; in the Clojure emitter lowers literal-only match → native (case ...).
+;; See "match: or-pattern + case-fold optimization" tests below.
 
 ;; --- constructor calls -------------------------------------------------------
 

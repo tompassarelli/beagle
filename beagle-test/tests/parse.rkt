@@ -579,28 +579,13 @@
   (check-true (for-binding? (car (doseq-form-clauses f))))
   (check-true (for-binding? (cadr (doseq-form-clauses f)))))
 
-;; --- case --------------------------------------------------------------------
+;; --- case removed ------------------------------------------------------------
+;; case folded into match + literal patterns; case-fold optimization in emit
+;; lowers literal-only dispatch to target-native case/switch.
 
-(test-case "case with pairs and default"
-  (define f (car (parse-one '(case x "a" 1 "b" 2 "default"))))
-  (check-true (case-form? f))
-  (check-eq? (case-form-test f) 'x)
-  (check-equal? (length (case-form-clauses f)) 2)
-  (check-equal? (case-clause-value (car (case-form-clauses f))) "a")
-  (check-equal? (case-clause-body (car (case-form-clauses f))) 1)
-  (check-equal? (case-form-default f) "default"))
-
-(test-case "case without default (even clauses)"
-  (define f (car (parse-one '(case x 1 "one" 2 "two"))))
-  (check-true (case-form? f))
-  (check-equal? (length (case-form-clauses f)) 2)
-  (check-false (case-form-default f)))
-
-(test-case "case with no clauses"
-  (define f (car (parse-one '(case x))))
-  (check-true (case-form? f))
-  (check-equal? (case-form-clauses f) '())
-  (check-false (case-form-default f)))
+(parse-err/rx "case removed — migration error"
+  #rx"case removed"
+  '(case x 1 "one" 2 "two"))
 
 ;; --- constructor calls -------------------------------------------------------
 

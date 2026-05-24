@@ -142,9 +142,9 @@
       (println (count Color-values))"
      "true\ntrue\n3")
 
-   (check-clj-output "case dispatch on keywords"
+   (check-clj-output "match with keyword literals (was: case dispatch)"
      (list '(defn color-name [(c : Keyword)] : String
-              (case c :red "Red" :green "Green" :blue "Blue" "unknown")))
+              (match c [:red "Red"] [:green "Green"] [:blue "Blue"] [_ "unknown"])))
      "(println (color-name :red)) (println (color-name :blue))"
      "Red\nBlue")
 
@@ -206,9 +206,9 @@
      "(println (f 1)) (println (f nil))"
      "found\nmissing")
 
-   (check-clj-output "case matches correct value"
+   (check-clj-output "match with or-pattern matches correct value (was: case)"
      (list '(defn day-type [(d : Int)] : String
-              (case d 0 "weekend" 6 "weekend" "weekday")))
+              (match d [(or 0 6) "weekend"] [_ "weekday"])))
      "(println (day-type 0)) (println (day-type 3)) (println (day-type 6))"
      "weekend\nweekday\nweekend")
 

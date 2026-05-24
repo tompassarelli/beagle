@@ -491,15 +491,9 @@
 (check-ok "doseq with :when passes"
   '(doseq [x (range 10) :when (even? x)] (println x)))
 
-;; =============================================================================
-;; Tests — case
-;; =============================================================================
-
-(check-ok "case passes type check"
-  '(def y (case x "a" 1 "b" 2 "default")))
-
-(check-ok "case without default passes"
-  '(def y (case x 1 "one" 2 "two")))
+;; case removed — folded into match + literal patterns; case-fold optimization
+;; lowers literal-only dispatch to target-native case/switch in emit.
+;; See or-pattern tests above for current case-style dispatch semantics.
 
 ;; =============================================================================
 ;; Tests — constructor calls

@@ -63,12 +63,14 @@
     (/ a b)
     (catch Exception e 0)))
 
-;; case
+;; match with literal patterns (replaces former case form; case-folds to
+;; target-native dispatch in emit)
 (defn color-name [(c : Color)] : String?
-  (case c
-    :red "Red"
-    :green "Green"
-    :blue "Blue"))
+  (match c
+    [:red "Red"]
+    [:green "Green"]
+    [:blue "Blue"]
+    [_ nil]))
 
 ;; with (record update)
 (defn move-right [(p : Point)] : Point

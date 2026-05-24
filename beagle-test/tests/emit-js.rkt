@@ -245,10 +245,12 @@
      "if ("
      '(defn f [(x : Bool)] : Nil (when x (println "yes"))))
 
-   (check-js-contains "case → chained equality"
+   ;; case removed — replaced by match with literal patterns. JS emits
+   ;; the same chained equality pattern from either form.
+   (check-js-contains "match with literals → chained equality"
      "=== 1"
      '(defn f [(x : Int)] : String
-       (case x 1 "one" 2 "two" "other")))
+       (match x [1 "one"] [2 "two"] [_ "other"])))
 
    ;; --- iteration ------------------------------------------------------------
 

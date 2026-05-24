@@ -66,3 +66,30 @@ verification catches | what structural verification misses.
 ## Entries
 
 <!-- Append new entries below, most recent first. -->
+
+## 2026-05-24 — case drop (self-host sync deferred)
+
+**Surface change:** `(case x v1 b1 v2 b2 :else default)` removed from
+beagle parse. Folds into `match` with literal patterns (case-fold
+optimization in emit lowers all-literal-dispatch match → target-native
+`case` / `switch` form). Migration: `(case x 1 "a" 2 "b" :else "c")`
+→ `(match x [1 "a"] [2 "b"] [_ "c"])`.
+
+**Self-host gap (deferred):** `self-host/parse.bjs` and `self-host/
+emit-clj.bjs` still contain `case` recognition branches and emission
+code. Self-host is gated behind `BEAGLE_ORACLE=1` (not in active
+tier), so the gap doesn't block the case drop. Update during a
+focused "self-host sync to current surface" pass — likely combined
+with the same pass for `dotimes`, `when`, `when-let`, `if-let`, and
+any other dropped forms that the self-host still recognizes.
+
+**Was checking:** that when the self-host parses beagle code
+containing `(case …)`, it produces a `case-form` AST and emits
+correct Clojure `(case …)` output. Future verification: after
+self-host sync, the self-host must reject `(case …)` at parse-time
+with the same migration message as the main parser.
+
+| Target | File | What to update |
+|---|---|---|
+| self-host (bjs) | parse.bjs | Remove case + dotimes parse-form branches; add parse-time errors matching main parser |
+| self-host (bjs) | emit-clj.bjs | Remove case-form emit branch (dead after parse rejection) |

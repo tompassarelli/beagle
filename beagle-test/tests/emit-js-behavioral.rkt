@@ -252,9 +252,9 @@ console.assert(threw, 'frozen record should reject mutation');
      "console.log(classify(-1)); console.log(classify(0)); console.log(classify(1));"
      "neg\nzero\npos")
 
-   (check-js-output "case matches correct value"
+   (check-js-output "match with or-pattern matches correct value (was: case)"
      (list '(defn day-type [(d : Int)] : String
-              (case d 0 "weekend" 6 "weekend" "weekday")))
+              (match d [(or 0 6) "weekend"] [_ "weekday"])))
      "console.log(day_type(0)); console.log(day_type(3)); console.log(day_type(6));"
      "weekend\nweekday\nweekend")
 
