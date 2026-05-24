@@ -591,9 +591,7 @@
 ;; Tests — threading macros
 ;; =============================================================================
 
-(check-ok "-> passes type check"
-  '(def x (-> m :name)))
-
+;; -> removed; only ->> survives.
 (check-ok "->> passes type check"
   '(def x (->> "hello" (str " world") (str "!"))))
 

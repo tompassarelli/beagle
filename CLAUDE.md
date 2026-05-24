@@ -249,6 +249,25 @@ mode skips lint (types are optional there by definition).
 
 ## Design decisions
 
+### The dominant principle: consistency compounds, ergonomic savings don't
+
+A surface form earns its place by being **part of a system** —
+reinforcing patterns that show up elsewhere in beagle. Forms that
+exist for local ergonomic savings, with no broader pattern they
+reinforce, are net-negative even when they save characters at
+authoring time.
+
+The test for every form: **does this make the rest of the surface
+more predictable, or is it a separate fact to memorize?**
+
+If it makes the surface more predictable: keep / add (pattern-extending).
+If it's a separate fact: drop / reject (pattern-isolated), regardless
+of Clojure-precedent, character-savings, training-data reflex, or
+corpus-usage statistics.
+
+Full rationale: `lab/journal/synthesis/design-principle.md`. This is
+the load-bearing reference for any future surface decision.
+
 ### Confident (committed, well-reasoned)
 
 | decision | reasoning |

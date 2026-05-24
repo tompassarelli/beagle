@@ -409,9 +409,7 @@
 
 ;; --- threading macros expand at parse time ------------------------------------
 
-(test-case "-> emits expanded form"
-  (define out (compile '(def x (-> m :name))))
-  (check-true (matches? #rx"\\(:name m\\)" out)))
+;; -> removed; ->> covers threading. See lab/journal/synthesis/design-principle.md.
 
 (test-case "->> emits expanded form"
   (define out (compile '(def x (->> coll (map inc) (filter even?)))))

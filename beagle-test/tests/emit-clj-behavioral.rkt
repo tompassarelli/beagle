@@ -275,12 +275,7 @@
      "(println (->> [1 2 3 4 5 6] (filter odd?) (mapv (fn [x] (* x x)))))"
      "[1 9 25]")
 
-   ;; --- threading macros ----------------------------------------------------
-
-   (check-clj-output "thread-first"
-     (list '(defn f [(x : Int)] : Int (-> x (+ 1) (+ 1) (+ 1))))
-     "(println (f 0))"
-     "3")
+   ;; --- threading macros (-> dropped; only ->> survives) ------------------
 
    (check-clj-output "thread-last"
      '()

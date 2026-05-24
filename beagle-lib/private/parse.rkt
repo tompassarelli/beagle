@@ -703,10 +703,11 @@
           (append step (list val)))
       (list step val)))
 
-(define (expand-thread-first init steps)
-  (foldl (lambda (step acc) (thread-step-insert acc step 'first))
-         init steps))
-
+;; expand-thread-first removed alongside the -> form. The first-vs-last
+;; threading distinction is positional convenience, not semantic
+;; uniqueness — ->> covers the threading need, the asymmetry was a
+;; hallucination surface for "which arg position does this fn want."
+;; Under decision-surface-minimization, one threading form suffices.
 (define (expand-thread-last init steps)
   (foldl (lambda (step acc) (thread-step-insert acc step 'last))
          init steps))
@@ -1319,8 +1320,8 @@
     [(list 'fmt (? string? text))
      (parse-expr (expand-fmt text))]
 
-    [(list '-> init steps ...)
-     (parse-expr (expand-thread-first init steps))]
+    ;; -> (first-arg threading) removed — positional convenience, not
+    ;; semantic uniqueness. ->> covers the threading concept.
     [(list '->> init steps ...)
      (parse-expr (expand-thread-last init steps))]
 
@@ -1345,6 +1346,8 @@
      (error 'beagle "when-some removed — use (when-let [x v] body)")]
     [(list 'if-some _ ...)
      (error 'beagle "if-some removed — use (if-let [x v] then else)")]
+    [(list '-> _ ...)
+     (error 'beagle "-> (first-arg threading) removed — use ->> or a let-chain")]
     [(list 'defmulti _ ...)
      (error 'beagle "defmulti removed — use defprotocol + extend-type for type-based dispatch")]
     [(list 'defmethod _ ...)
