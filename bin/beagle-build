@@ -62,7 +62,15 @@ else
 fi
 
 mkdir -p "$(dirname "$out")"
-"$RACKET" "$src" > "$out"
+# Atomic write: emit to a temp file first, then mv on success. Without this,
+# the `>` redirection truncates $out before racket runs — if racket fails
+# mid-emit, the file is left empty/partial silently. The atomic rename
+# guarantees $out either has the complete new contents or the old contents.
+tmp="$(mktemp "${out}.XXXXXX")"
+trap 'rm -f "$tmp"' EXIT
+"$RACKET" "$src" > "$tmp"
+mv "$tmp" "$out"
+trap - EXIT
 echo "$src -> $out" >&2
 
 # Optional Nix smoke test: confirm the emitted file parses as valid Nix.
