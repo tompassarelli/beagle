@@ -18,8 +18,7 @@
 (require racket/match
          racket/string
          "types.rkt"
-         "tags.rkt"
-         "macro-eval.rkt")
+         "tags.rkt")
 
 (struct macro-def (kind fixed-params rest-param template) #:transparent)
 ;; kind: 'safe or 'proc
@@ -67,9 +66,6 @@
 ;; proc: Racket procedure (lambda over raw datums)
 ;; input-contracts: list of contract type symbols (Symbol, Expr, Form, Syntax, ...)
 ;; output-contract: contract type symbol or (Vec Form) etc.
-
-(struct beagle-macro-def macro-def (param-names input-contracts output-contract body-datum) #:transparent)
-;; body-datum: stripped Beagle datum (evaluated by macro-eval at expansion time)
 
 (define (make-macro-registry) (make-hash))
 
@@ -157,14 +153,6 @@
     (proc-macro-def 'proc param-names #f #f
                     proc input-contracts output-contract)))
 
-(define (register-beagle-macro! reg name param-names input-contracts output-contract body-datum)
-  (when (hash-has-key? reg name)
-    (error 'beagle "duplicate macro definition: ~a" name))
-  (define clean-body (strip-reader-tags body-datum))
-  (hash-set! reg name
-    (beagle-macro-def 'beagle param-names #f #f
-                      param-names input-contracts output-contract clean-body)))
-
 ;; --- AST contracts ----------------------------------------------------------
 
 (define KNOWN-FORM-HEADS
@@ -237,8 +225,6 @@
   (unless m
     (error 'beagle "no macro named ~a" name))
   (cond
-    [(beagle-macro-def? m)
-     (expand-beagle-macro m name args ctx)]
     [(proc-macro-def? m)
      (expand-proc-macro m name args ctx)]
     [else
@@ -266,40 +252,6 @@
                  "macro ~a: body raised an error:\n  ~a\n  input: ~a~a"
                  name (exn-message e) (truncate-datum (cons name args)) chain))])
       (apply (proc-macro-def-proc m) clean-args)))
-  (check-datum-contract result output-contract name "output")
-  (cond
-    [(and (pair? output-contract) (eq? (car output-contract) 'Vec))
-     (cons '#%splice-forms result)]
-    [else result]))
-
-(define (expand-beagle-macro m name args [ctx #f])
-  (define param-names (beagle-macro-def-param-names m))
-  (define input-contracts (beagle-macro-def-input-contracts m))
-  (define output-contract (beagle-macro-def-output-contract m))
-  (define body-datum (beagle-macro-def-body-datum m))
-  (unless (= (length args) (length param-names))
-    (error 'beagle
-           "macro ~a: expected ~a arg(s), got ~a"
-           name (length param-names) (length args)))
-  (define clean-args (map strip-reader-tags args))
-  (for ([arg (in-list clean-args)]
-        [contract (in-list input-contracts)]
-        [pname (in-list param-names)])
-    (check-datum-contract arg contract name (format "arg ~a" pname)))
-  (define env
-    (for/fold ([e (make-macro-env)])
-              ([pname (in-list param-names)]
-               [arg (in-list clean-args)])
-      (hash-set e pname arg)))
-  (define result
-    (with-handlers
-      ([exn:fail?
-        (lambda (e)
-          (define chain (if ctx (format "\n~a" (format-expansion-chain ctx)) ""))
-          (error 'beagle
-                 "macro ~a: body raised an error:\n  ~a\n  input: ~a~a"
-                 name (exn-message e) (truncate-datum (cons name args)) chain))])
-      (macro-eval body-datum env)))
   (check-datum-contract result output-contract name "output")
   (cond
     [(and (pair? output-contract) (eq? (car output-contract) 'Vec))
@@ -504,12 +456,10 @@
 (provide
  (struct-out macro-def)
  (struct-out proc-macro-def)
- (struct-out beagle-macro-def)
  (struct-out expansion-ctx)
  make-macro-registry
  register-macro!
  register-proc-macro!
- register-beagle-macro!
  compile-proc-body
  lookup-macro
  macro-application?
