@@ -1153,24 +1153,17 @@
                 (parse-body (or (stx-tail subs 2) body)))]
     ;; when-not / if-not / unless removed — use (when (not ...)) / (if (not ...) ...) directly.
 
-    [(list 'when-let bindings-form body ...)
-     (define-values (name expr) (parse-cond-let-binding (or (stx-ref subs 1) bindings-form)))
-     (when-let-form name expr (parse-body (or (stx-tail subs 2) body)))]
-    [(list 'if-let bindings-form then else)
-     (define-values (name expr) (parse-cond-let-binding (or (stx-ref subs 1) bindings-form)))
-     (if-let-form name expr
-                  (parse-expr (or (stx-ref subs 2) then))
-                  (parse-expr (or (stx-ref subs 3) else)))]
-    [(list 'if-let bindings-form then)
-     (define-values (name expr) (parse-cond-let-binding (or (stx-ref subs 1) bindings-form)))
-     (if-let-form name expr
-                  (parse-expr (or (stx-ref subs 2) then))
-                  #f)]
-    ;; when-some / if-some removed — the truthy-vs-nil distinction (vs
-    ;; when-let/if-let) is too subtle to be a footgun-free idiom. Use
-    ;; when-let/if-let (truthy check, suffices for nullable types since
-    ;; nil is falsy in beagle) or explicit (when (not (nil? x)) ...) when
-    ;; you specifically need to distinguish nil from other falsy values.
+    ;; when-let / if-let removed — Clojure-shaped truthy-binding sugar.
+    ;; The interim replacement is the verbose (let [x v] (if x then else))
+    ;; pattern. The eventual replacement will be beagle's typed nullable-
+    ;; narrowing form (provisional name TBD, tracked in design-principle.md
+    ;; "Open design questions"). The replacement should NOT inherit Clojure's
+    ;; vocabulary — that would carry Clojure semantics into a beagle-native
+    ;; concept (overfitting risk per the bootstrap-vs-native principle).
+    ;;
+    ;; when-some / if-some were removed earlier — truthy-vs-nil distinction
+    ;; was too subtle. Same applies here; the typed replacement will handle
+    ;; nil-narrowing explicitly via the type system, not via name variants.
 
     [(list 'with-open bindings-form body ...)
      (with-open-form (parse-let-bindings (or (stx-ref subs 1) bindings-form))
@@ -1343,9 +1336,13 @@
     [(list 'if-not _ ...)
      (error 'beagle "if-not removed — use (if (not ...) then else)")]
     [(list 'when-some _ ...)
-     (error 'beagle "when-some removed — use (when-let [x v] body)")]
+     (error 'beagle "when-some removed — beagle's typed nullable-narrowing form is pending design (lab/journal/synthesis/design-principle.md). Until then, use (let [x v] (if x (do body)))")]
     [(list 'if-some _ ...)
-     (error 'beagle "if-some removed — use (if-let [x v] then else)")]
+     (error 'beagle "if-some removed — beagle's typed nullable-narrowing form is pending design (lab/journal/synthesis/design-principle.md). Until then, use (let [x v] (if x then else))")]
+    [(list 'when-let _ ...)
+     (error 'beagle "when-let removed — beagle's typed nullable-narrowing form will land with the nil-semantics work (provisional name TBD; tracked in design-principle.md \"Open design questions\"). Until then, use (let [x v] (if x (do body))). Do NOT reintroduce when-let when the typed form arrives — the name carries Clojure semantics; the typed form should be beagle-native")]
+    [(list 'if-let _ ...)
+     (error 'beagle "if-let removed — beagle's typed nullable-narrowing form will land with the nil-semantics work (provisional name TBD; tracked in design-principle.md \"Open design questions\"). Until then, use (let [x v] (if x then else)). Do NOT reintroduce if-let when the typed form arrives — the name carries Clojure semantics; the typed form should be beagle-native")]
     [(list '-> _ ...)
      (error 'beagle "-> (first-arg threading) removed — use ->> or a let-chain")]
     [(list 'dotimes _ ...)

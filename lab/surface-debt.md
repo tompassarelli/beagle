@@ -9,7 +9,7 @@ At that moment, work through entries in this file: re-run each demoted
 test, rewrite/update it for the current surface, promote the fixed
 suite back to active tier (in `beagle-test/tiers.rktd`).
 
-## Total debt: 0 failures across 0 entries
+## Total debt: 7 failures across 1 entries
 
 (Counter line above is read by `bin/beagle-test` to surface accumulated
 debt in runner output. Format: `## Total debt: N failures across M entries`.
@@ -66,6 +66,51 @@ verification catches | what structural verification misses.
 ## Entries
 
 <!-- Append new entries below, most recent first. -->
+
+## 2026-05-24 — when-let / if-let drop (FIRST DROP UNDER TIERED REGIME)
+
+**Surface change:** `when-let` and `if-let` removed from beagle parse.
+Clojure-shaped truthy-binding sugar — Category 2 (pattern-isolated).
+Interim replacement: `(let [x v] (if x then else))`. The eventual
+replacement will be beagle's typed nullable-narrowing form (provisional
+name TBD; tracked in design-principle.md "Open design questions"). The
+parse-time migration error explicitly tells future-instances to NOT
+reintroduce when-let/if-let when the typed form arrives — those names
+carry Clojure semantics; the typed form should be beagle-native.
+
+**Reason this is the first drop under tiered regime:** the case-drop
+(#84) and earlier drops were done with full cross-target migrations
+including demoted-tier behavioral tests. This drop deliberately stops
+that pattern — demoted-tier failures are logged here rather than
+fixed in-line. See CLAUDE.md "thoroughness-redirection" discipline.
+
+**Active-tier work (done):**
+- parse.rkt: when-let / if-let parse cases removed; explicit migration
+  errors added pointing at the future typed form
+- Active-tier tests (parse.rkt, check.rkt, emit.rkt, emit-js.rkt,
+  emit-py.rkt, emit-rkt.rkt) rewritten to use let+if or removed
+- Corpus migrated: fixtures/kitchen-sink.bclj, oracle/fixtures/
+  11-when-if-let.bgl, oracle/fixtures/24-option-chaining.bgl,
+  examples/demo.bclj
+
+**Demoted-tier failures (NOT fixed; logged here for reconciliation):**
+
+| Target | Test file | Test name | Was checking |
+|---|---|---|---|
+| clj | emit-clj-behavioral.rkt | "when-let non-nil runs body" | That `(when-let [v x] (println v))` executes the body and prints `v` when `x` is non-nil (input: `42`, expected output: `"42"`) |
+| clj | emit-clj-behavioral.rkt | "if-let selects branch" | That `(if-let [v x] "found" "missing")` returns the then-branch for non-nil `x` and the else-branch for nil `x` (inputs: `1` and `nil`, expected outputs: `"found"\n"missing"`) |
+| clj | emit-clj-behavioral.rkt | "if-let with non-nil" | That `(if-let [v x] (str "got: " v) "nothing")` formats the bound value when non-nil (inputs: `42` and `nil`, expected outputs: `"got: 42"\n"nothing"`) |
+| clj | emit-clj-behavioral.rkt | "when-let with non-nil" | That `(when-let [v x] (println (str "got: " v)))` formats and prints the bound value (input: `42`, expected output: `"got: 42"`) |
+| js | emit-js-behavioral.rkt | "when-let non-null runs body" | That `(when-let [v x] (println v))` executes the body and prints `v` when `x` is not null (input: `42`, expected output: `"42"`) |
+| js | emit-js-behavioral.rkt | "when-let null skips body" | That `(when-let [v x] (println v))` skips the body when `x` is null (input: `null`, expected: no output, no error) |
+| js | emit-js-behavioral.rkt | "if-let selects branch" | That `(if-let [v x] "found" "missing")` returns the then-branch for non-null and else-branch for null (inputs: `1` and `null`, expected outputs: `"found"\n"missing"`) |
+
+**Reconciliation guidance:** these tests should be rewritten to use
+the interim `(let [x v] (if x then else))` pattern OR migrated to the
+eventual typed nullable-narrowing form once it lands. The behavioral
+expectations (the "Was checking" column) are the contract — the
+implementation form is what changes. Verify the runtime output matches
+the expected output column before declaring tests fixed.
 
 ## 2026-05-24 — case drop (self-host sync deferred)
 

@@ -874,25 +874,19 @@
   (check-true (with-meta? (car (vec-form-items val))))
   (check-true (with-meta? (cadr (vec-form-items val)))))
 
-;; --- conditional let forms ---------------------------------------------------
+;; --- conditional let forms removed -------------------------------------------
+;; when-let / if-let removed — Clojure-shaped truthy-binding sugar. Interim
+;; replacement: (let [x v] (if x then else)). The eventual replacement will be
+;; beagle's typed nullable-narrowing form (provisional name TBD). See
+;; design-principle.md "Open design questions".
 
-(test-case "when-let parses"
-  (define f (car (parse-one '(when-let [x (get m :key)] (println x)))))
-  (check-true (when-let-form? f))
-  (check-eq? (when-let-form-name f) 'x))
+(parse-err/rx "when-let removed — migration error"
+  #rx"when-let removed"
+  '(when-let [x (get m :key)] (println x)))
 
-(test-case "if-let parses with else"
-  (define f (car (parse-one '(if-let [v (get m :key)] (str v) "nope"))))
-  (check-true (if-let-form? f))
-  (check-eq? (if-let-form-name f) 'v)
-  (check-not-false (if-let-form-else-body f)))
-
-(test-case "if-let parses without else"
-  (define f (car (parse-one '(if-let [v (get m :key)] (str v)))))
-  (check-true (if-let-form? f))
-  (check-false (if-let-form-else-body f)))
-
-;; when-some / if-some removed — see lab/journal/synthesis/surface-reference.md.
+(parse-err/rx "if-let removed — migration error"
+  #rx"if-let removed"
+  '(if-let [v (get m :key)] (str v) "nope"))
 
 ;; --- with-open ---------------------------------------------------------------
 

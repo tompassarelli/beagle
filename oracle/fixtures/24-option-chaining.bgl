@@ -1,11 +1,15 @@
 #lang beagle/rkt
 
+;; if-let removed; using the interim (let [x v] (if x …)) pattern.
+;; Migrate to beagle's typed nullable-narrowing form when it lands.
+
 (defrecord User [(name : String) (email : String?)])
 
 (defn display-email [(u : User)] : String
-  (if-let [e (user-email u)]
-    (str (user-name u) " <" e ">")
-    (str (user-name u) " (no email)")))
+  (let [e (user-email u)]
+    (if e
+      (str (user-name u) " <" e ">")
+      (str (user-name u) " (no email)"))))
 
 (def u1 : User (->User "Alice" "alice@example.com"))
 (def u2 : User (->User "Bob" nil))

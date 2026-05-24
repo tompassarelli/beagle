@@ -1,14 +1,20 @@
 #lang beagle/rkt
 
+;; if-let/when-let removed; using the interim (let [x v] (if x …)) pattern.
+;; When beagle's typed nullable-narrowing form lands, this should be
+;; migrated to it.
+
 (defn find-name [(names : (Vec String)) (idx : Int)] : String
-  (if-let [found (if (< idx (count names)) (nth names idx) nil)]
-    (str "found: " found)
-    "not found"))
+  (let [found (if (< idx (count names)) (nth names idx) nil)]
+    (if found
+      (str "found: " found)
+      "not found")))
 
 (defn greet-if-present [(name : String?)] : String
-  (if-let [n name]
-    (str "Hello, " n)
-    "Hello, stranger"))
+  (let [n name]
+    (if n
+      (str "Hello, " n)
+      "Hello, stranger")))
 
 (println (find-name ["alice" "bob"] 0))
 (println (find-name ["alice" "bob"] 5))

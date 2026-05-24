@@ -222,6 +222,45 @@ not type-check or inspect deeper errors until delimiters pass.
   env-gated suites. Tier classification in `beagle-test/tiers.rktd`; demoted
   failures logged to `lab/surface-debt.md` for batch reconciliation.
 
+### Tiering discipline during surface iteration
+
+**Thoroughness-redirection rule.** When working on a surface drop or change:
+the "be thorough, fix everything" instinct is correct — but it goes to
+**active-tier code + debt-file entries**, never to **demoted-tier code**
+during iteration.
+
+- Active-tier failures from surface changes: **fix**. The build is blocked
+  until they pass.
+- Demoted-tier failures from surface changes: **log to `lab/surface-debt.md`**
+  with a "Was checking" entry describing what the failing test verified.
+  Do NOT edit the demoted test file to fix it. The tiering exists
+  precisely so demoted-tier maintenance doesn't slow surface iteration.
+
+Why this matters: each demoted fix feels cheap (small mechanical migration).
+Accumulated across drops, the cost is the full cross-target test-update tax
+that the tiering was built to eliminate. The reflexive "this fix is small,
+just do it" is the workflow analog of "this form is small, just add it" —
+locally-justified, globally-expensive. Same asymmetric-burden lens applies.
+
+Workflow per surface drop:
+1. Make the active-tier change (parse, check, structural emit).
+2. Run `bin/beagle-test`.
+3. Active failures: fix until green.
+4. Demoted failures: open `lab/surface-debt.md`, append entry with
+   per-failure "Was checking" detail, update the `## Total debt:` counter.
+5. Commit. Move on.
+
+What counts as a "demoted-tier file" right now (per `beagle-test/tiers.rktd`):
+- `emit-clj-behavioral.rkt`
+- `emit-js-behavioral.rkt`
+
+When you find yourself opening one of those to edit during a surface drop,
+stop. The fix goes to `surface-debt.md`, not the file.
+
+Corpus migrations (fixtures in `beagle-test/tests/fixtures/`, `oracle/fixtures/`,
+`examples/`) are not test code — they are test INPUTS. They MUST be migrated
+when surface changes break them; the tiering discipline doesn't apply.
+
 ### When navigating — prefer query tools over grep
 
 - `bin/beagle-sig NAME FILE...` — typed signature

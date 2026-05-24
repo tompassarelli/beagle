@@ -517,15 +517,8 @@
   (check-true (matches? #rx"\\^\\{:stretch 1\\}" out))
   (check-true (matches? #rx"\\^\\{:stretch 2\\}" out)))
 
-;; --- conditional let emission ------------------------------------------------
-
-(test-case "when-let emits"
-  (define out (compile '(defn f [(x : Any)] : Nil (when-let [v x] (println v)))))
-  (check-true (matches? #rx"\\(when-let \\[v x\\]" out)))
-
-(test-case "if-let emits"
-  (define out (compile '(defn f [(m : Any)] : String (if-let [v (get m :k)] (str v) "no"))))
-  (check-true (matches? #rx"\\(if-let \\[v \\(get m :k\\)\\]" out)))
+;; when-let / if-let removed — interim (let [x v] (if x …)) pattern emits
+;; standard let + if Clojure forms (already covered by let/if emit tests).
 
 (test-case "with-open emits"
   (define out (compile '(defn f [(p : String)] : Any (with-open [r (slurp p)] r))))

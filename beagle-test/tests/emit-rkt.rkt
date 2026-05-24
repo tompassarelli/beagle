@@ -307,20 +307,9 @@
   (check-true (string-contains? out "(struct (T E) Ok"))
   (check-true (string-contains? out "(define-type (Result T E)")))
 
-;; --- when-let / if-let -----------------------------------------------------
-
-(test-case "when-let emits let + when"
-  (define out (rkt-emit "(define-target rkt) (def r (when-let [x (get m \"k\")] (println x)))"))
-  (check-true (string-contains? out "(let ("))
-  (check-true (string-contains? out "(when ")))
-
-(test-case "if-let emits let + if"
-  (define out (rkt-emit "(define-target rkt) (def r (if-let [x (get m \"k\")] x \"default\"))"))
-  (check-true (string-contains? out "(let ("))
-  (check-true (string-contains? out "(if ")))
-
-;; when-some / if-some removed — the truthy-vs-nil distinction was a
-;; footgun. Use when-let / if-let; their emit produces let+when / let+if.
+;; when-let / if-let removed — interim (let [x v] (if x …)) pattern emits
+;; standard let + if forms (covered by general let/if emit tests).
+;; when-some / if-some removed previously for same reason.
 
 ;; dotimes removed — use (doseq [i (range n)] body) instead.
 

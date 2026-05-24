@@ -85,11 +85,10 @@
   (doseq [item items]
     (println item)))
 
-;; if-let
+;; if-let removed; interim let+if pattern until typed nullable-narrowing form lands
 (defn first-or-default [(xs : (Vec Int))] : Int
-  (if-let [x (first xs)]
-    x
-    0))
+  (let [x (first xs)]
+    (if x x 0)))
 
 ;; letfn
 (defn mutual-test [] : Bool

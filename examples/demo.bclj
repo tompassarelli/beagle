@@ -17,10 +17,12 @@
 (defenum OrderStatus :pending :confirmed :shipped)
 
 ;; Typed function with defunion return
+;; if-let removed; using interim let+if until typed nullable-narrowing form lands
 (defn find-product [(id : Int) (catalog : (Vec Product))] : (Result Product String)
-  (if-let [p (first (filterv (fn [item] (= (product-stock item) id)) catalog))]
-    (->Ok p)
-    (->Err "not found")))
+  (let [p (first (filterv (fn [item] (= (product-stock item) id)) catalog))]
+    (if p
+      (->Ok p)
+      (->Err "not found"))))
 
 ;; Match with exhaustive pattern coverage
 (defn describe-result [(r : (Result Product String))] : String

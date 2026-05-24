@@ -839,13 +839,11 @@
 (check-err "metadata does not suppress type error in inner expr"
   `(def x : String (#%meta (,MT :stretch 1) ,(br 1 2 3))))
 
-;; --- conditional let type checking -------------------------------------------
+;; when-let / if-let removed — interim let+if pattern type-checks the same way
+;; (see let + if type-check tests above).
 
-(check-ok "when-let type checks binding"
-  '(defn f [(x : Int?)] : Nil (when-let [v x] (println v))))
-
-(check-ok "if-let type checks both branches"
-  '(defn f [(m : Any)] : String (if-let [v (get m :k)] (str v) "no")))
+(check-ok "let + if (interim nullable-narrow pattern) type checks"
+  '(defn f [(x : Int?)] : Nil (let [v x] (if v (println v) nil))))
 
 (check-ok "with-open type checks"
   '(defn f [(p : String)] : Any (with-open [r (slurp p)] r)))

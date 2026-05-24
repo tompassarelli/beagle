@@ -283,14 +283,8 @@
        (,(br '(first : String) '(last : String)) : String (str "Hello " first " " last))))
 
    ;; --- binding forms --------------------------------------------------------
-
-   (check-js-contains "when-let → null check IIFE"
-     "!= null"
-     '(defn f [(x : Any)] : Nil (when-let [v x] (println v))))
-
-   (check-js-contains "if-let → null check with else"
-     "else"
-     '(defn f [(x : Any)] : String (if-let [v x] "found" "missing")))
+   ;; when-let / if-let removed — interim (let [x v] (if x …)) pattern; covered
+   ;; by general let + if emit tests above.
 
    ;; --- edge cases (CLJS-inspired) --------------------------------------------
 

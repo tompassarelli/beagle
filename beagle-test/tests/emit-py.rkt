@@ -367,12 +367,8 @@
   (define out (py-emit "(define-target py) \"hello world\""))
   (check-true (string-contains? out "\"hello world\"")))
 
-;; --- when-let / if-let ------------------------------------------------------
-
-(test-case "when-let emits assignment + None check"
-  (define out (py-emit "(define-target py) (when-let [x (some-fn)] (println x))"))
-  (check-true (string-contains? out "x = some_fn()"))
-  (check-true (string-contains? out "if x is not None:")))
+;; when-let / if-let removed — interim (let [x v] (if x …)) pattern.
+;; Standard let + if Python emission already tested above.
 
 ;; --- keyword access ---------------------------------------------------------
 ;; (:keyword target) call-form removed — use (get m :key); covered by get emit tests.
