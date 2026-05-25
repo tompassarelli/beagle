@@ -381,6 +381,23 @@
        [(boolean? d) (if d "true" "false")]
        [else (format "\"~v\"" d)])]
 
+    [(flake-input-form? e)
+     ;; (flake-input :NAME :NAMESPACE :seg ...) →
+     ;;   inputs.NAME.NAMESPACE.${pkgs.stdenv.hostPlatform.system}.seg1.seg2...
+     ;; System axis collapsed; path segments emitted verbatim.
+     (define (seg->str s)
+       (define str (symbol->string s))
+       (if (string-prefix? str ":") (substring str 1) str))
+     (define input-str (seg->str (flake-input-form-input-name e)))
+     (define ns-str (seg->str (flake-input-form-namespace e)))
+     (define path-segs (flake-input-form-path-segments e))
+     (define path-str (string-join (map seg->str path-segs) "."))
+     (if (string=? path-str "")
+         (format "inputs.~a.~a.${pkgs.stdenv.hostPlatform.system}"
+                 input-str ns-str)
+         (format "inputs.~a.~a.${pkgs.stdenv.hostPlatform.system}.~a"
+                 input-str ns-str path-str))]
+
     [(match-form? e)
      (emit-match e depth)]
 
@@ -947,10 +964,8 @@
                                      (map (lambda (a) (paren-wrap (emit-expr a depth) a)) args)
                                      " "))))]
 
-    [(and fn-name (eq? fn-name 'nix-ident))
-     (if (and (pair? args) (string? (car args)))
-       (car args)
-       (emit-expr (car args) depth))]
+    ;; nix-ident handling removed — the parser now rejects (nix-ident ...) calls
+    ;; at parse time. Use (flake-input :NAME :NAMESPACE :path ...) instead.
 
     ;; Generic function call
     [else
@@ -971,10 +986,10 @@
 
 (define (paren-wrap text expr)
   (cond
+    [(flake-input-form? expr) text]
     [(and (call-form? expr)
           (symbol? (call-form-fn expr))
-          (let ([fn (call-form-fn expr)])
-            (or (nix-infix-op fn) (eq? fn 'nix-ident))))
+          (nix-infix-op (call-form-fn expr)))
      text]
     [(or (call-form? expr) (fn-form? expr) (let-form? expr)
          (if-form? expr) (when-form? expr) (cond-form? expr)
