@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# beagle-roundtrip-nix: validate beagle-import-nix's round-trip property.
+#
+# For each .nix file given (or found under a directory):
+#   1. nix-instantiate --parse → normalized original
+#   2. beagle-import-nix → .bnix
+#   3. beagle-build .bnix → .nix
+#   4. nix-instantiate --parse the emitted .nix → normalized emit
+#   5. diff normalized original vs normalized emit
+#
+# Reports clean/dirty per file and aggregate stats.
+
+set -u
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BEAGLE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+IMPORT_NIX="$SCRIPT_DIR/beagle-import-nix"
+BEAGLE_BUILD="$SCRIPT_DIR/beagle-build"
+WORK="$(mktemp -d -t beagle-rt-XXXXXXXX)"
+trap 'rm -rf "$WORK"' EXIT
+
+if [ $# -eq 0 ]; then
+  echo "Usage: beagle-roundtrip-nix <file.nix|dir> [...]" >&2
+  exit 1
+fi
+
+# Collect target files (.nix files under dirs, or named files directly)
+declare -a TARGETS=()
+for arg in "$@"; do
+  if [ -d "$arg" ]; then
+    while IFS= read -r f; do TARGETS+=("$f"); done < <(find "$arg" -name "*.nix" -type f)
+  elif [ -f "$arg" ]; then
+    TARGETS+=("$arg")
+  fi
+done
+
+clean=0
+dirty=0
+import_fail=0
+build_fail=0
+parse_fail=0
+declare -a DIRTY_FILES=()
+declare -a IMPORT_FAILS=()
+declare -a BUILD_FAILS=()
+declare -a PARSE_FAILS=()
+
+for src in "${TARGETS[@]}"; do
+  name="${src//\//_}"
+  bnix="$WORK/$name.bnix"
+  emitted="$WORK/$name.nix"
+
+  # 1: normalize original
+  orig_norm=$(nix-instantiate --parse "$src" 2>/dev/null)
+  if [ -z "$orig_norm" ]; then
+    parse_fail=$((parse_fail+1))
+    PARSE_FAILS+=("$src")
+    continue
+  fi
+
+  # 2: import
+  if ! "$IMPORT_NIX" "$src" > "$bnix" 2>/dev/null; then
+    import_fail=$((import_fail+1))
+    IMPORT_FAILS+=("$src")
+    continue
+  fi
+
+  # 3: build with explicit output path (avoids ns-collision when many
+  # modules are named "default" — beagle-build writes to runtime/src/<ns>.nix
+  # by default but we want isolated per-file outputs in our work dir)
+  if ! "$BEAGLE_BUILD" "$bnix" "$emitted" >/dev/null 2>&1; then
+    build_fail=$((build_fail+1))
+    BUILD_FAILS+=("$src")
+    continue
+  fi
+
+  if [ ! -f "$emitted" ]; then
+    build_fail=$((build_fail+1))
+    BUILD_FAILS+=("$src (no emit found)")
+    continue
+  fi
+
+  # 4: normalize emit
+  emit_norm=$(nix-instantiate --parse "$emitted" 2>/dev/null)
+  if [ -z "$emit_norm" ]; then
+    parse_fail=$((parse_fail+1))
+    PARSE_FAILS+=("$emitted (re-parse failed)")
+    continue
+  fi
+
+  # 5: diff
+  if [ "$orig_norm" = "$emit_norm" ]; then
+    clean=$((clean+1))
+  else
+    dirty=$((dirty+1))
+    DIRTY_FILES+=("$src")
+  fi
+done
+
+total=${#TARGETS[@]}
+echo "==================================================="
+echo "roundtrip summary: $total files"
+echo "  clean (byte-identical normalized): $clean"
+echo "  dirty (differ after normalization): $dirty"
+echo "  import-fail (beagle-import-nix crash): $import_fail"
+echo "  build-fail (beagle-build error):       $build_fail"
+echo "  parse-fail (nix-instantiate refused):  $parse_fail"
+echo "==================================================="
+
+if [ ${#DIRTY_FILES[@]} -gt 0 ] && [ "${VERBOSE:-0}" = "1" ]; then
+  echo ""
+  echo "DIRTY (first 10):"
+  for f in "${DIRTY_FILES[@]:0:10}"; do echo "  $f"; done
+fi
+if [ ${#IMPORT_FAILS[@]} -gt 0 ] && [ "${VERBOSE:-0}" = "1" ]; then
+  echo ""
+  echo "IMPORT FAILS (first 10):"
+  for f in "${IMPORT_FAILS[@]:0:10}"; do echo "  $f"; done
+fi
+if [ ${#BUILD_FAILS[@]} -gt 0 ] && [ "${VERBOSE:-0}" = "1" ]; then
+  echo ""
+  echo "BUILD FAILS (first 10):"
+  for f in "${BUILD_FAILS[@]:0:10}"; do echo "  $f"; done
+fi
+
+# Exit non-zero if anything failed
+if [ $clean -lt $total ]; then
+  exit 1
+fi

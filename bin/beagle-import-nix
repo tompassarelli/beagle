@@ -146,11 +146,60 @@
          [(char=? ch #\.)
           (loop (add1 i) (cons (tok 'punct ".") acc))]
          [(char=? ch #\=)
-          (loop (add1 i) (cons (tok 'punct "=") acc))]
+          (cond
+            [(and (< (add1 i) len) (char=? (string-ref str (add1 i)) #\=))
+             (loop (+ i 2) (cons (tok 'op "==") acc))]
+            [else (loop (add1 i) (cons (tok 'punct "=") acc))])]
          [(char=? ch #\?)
           (loop (add1 i) (cons (tok 'punct "?") acc))]
          [(char=? ch #\+)
-          (loop (add1 i) (cons (tok 'punct "+") acc))]
+          (cond
+            [(and (< (add1 i) len) (char=? (string-ref str (add1 i)) #\+))
+             (loop (+ i 2) (cons (tok 'op "++") acc))]
+            [else (loop (add1 i) (cons (tok 'op "+") acc))])]
+         [(char=? ch #\!)
+          (cond
+            [(and (< (add1 i) len) (char=? (string-ref str (add1 i)) #\=))
+             (loop (+ i 2) (cons (tok 'op "!=") acc))]
+            [else (loop (add1 i) (cons (tok 'op "!") acc))])]
+         [(char=? ch #\&)
+          (when (or (>= (add1 i) len) (not (char=? (string-ref str (add1 i)) #\&)))
+            (error 'beagle-import-nix "unexpected single & at offset ~a" i))
+          (loop (+ i 2) (cons (tok 'op "&&") acc))]
+         [(char=? ch #\|)
+          (when (or (>= (add1 i) len) (not (char=? (string-ref str (add1 i)) #\|)))
+            (error 'beagle-import-nix "unexpected single | at offset ~a" i))
+          (loop (+ i 2) (cons (tok 'op "||") acc))]
+         [(char=? ch #\<)
+          (cond
+            [(and (< (add1 i) len) (char=? (string-ref str (add1 i)) #\=))
+             (loop (+ i 2) (cons (tok 'op "<=") acc))]
+            [else (loop (add1 i) (cons (tok 'op "<") acc))])]
+         [(char=? ch #\>)
+          (cond
+            [(and (< (add1 i) len) (char=? (string-ref str (add1 i)) #\=))
+             (loop (+ i 2) (cons (tok 'op ">=") acc))]
+            [else (loop (add1 i) (cons (tok 'op ">") acc))])]
+         [(char=? ch #\*)
+          (loop (add1 i) (cons (tok 'op "*") acc))]
+         [(char=? ch #\/)
+          ;; / is used both as path-separator inside names and as
+          ;; division/update operator. In normalized form, // appears
+          ;; for attrset-update and / for division. Single-slash-as-
+          ;; division is rare in configs.
+          (cond
+            [(and (< (add1 i) len) (char=? (string-ref str (add1 i)) #\/))
+             (loop (+ i 2) (cons (tok 'op "//") acc))]
+            [(and (< (add1 i) len) (name-char? (string-ref str (add1 i))))
+             ;; Looks like a path or qualified name — fall through to name lexer
+             (define end (find-end str i name-char?))
+             (loop end (cons (tok 'name (substring str i end)) acc))]
+            [else (loop (add1 i) (cons (tok 'op "/") acc))])]
+         [(char=? ch #\-)
+          (cond
+            [(and (< (add1 i) len) (char=? (string-ref str (add1 i)) #\>))
+             (loop (+ i 2) (cons (tok 'op "->") acc))]
+            [else (loop (add1 i) (cons (tok 'op "-") acc))])]
          [(char=? ch #\")
           (define-values (s next) (read-string-literal str (add1 i) #\"))
           (loop next (cons (tok 'str s) acc))]
@@ -196,7 +245,17 @@
        (error 'beagle-import-nix "unterminated string at offset ~a" start)]
       [(char=? (string-ref str i) #\\)
        (when (< (add1 i) (string-length str))
-         (write-char (string-ref str (add1 i)) out))
+         (define esc (string-ref str (add1 i)))
+         (write-char
+           (case esc
+             [(#\n) #\newline]
+             [(#\t) #\tab]
+             [(#\r) #\return]
+             [(#\\) #\\]
+             [(#\") #\"]
+             [(#\') #\']
+             [else  esc])
+           out))
        (loop (+ i 2))]
       [(char=? (string-ref str i) delim)
        (values (get-output-string out) (add1 i))]
@@ -277,7 +336,9 @@
     result))
 
 (define (parse-expr)
-  ;; Top-level expression: lambda, let, with, if, or apply.
+  ;; Top-level expression: lambda, let, with, if, or binary-op chain.
+  ;; nix-instantiate --parse adds parens for precedence, so we can
+  ;; treat all binary operators as left-associative at the same level.
   (cond
     [(consume-name? "let")
      (define bindings (parse-bindings))
@@ -299,7 +360,17 @@
     [(lambda-ahead?)
      (parse-lambda)]
     [else
-     (parse-apply)]))
+     (parse-binop)]))
+
+(define (parse-binop)
+  ;; Left-associative chain: parse-apply (OP parse-apply)*
+  (let loop ([acc (parse-apply)])
+    (define t (peek))
+    (cond
+      [(and t (eq? (tok-kind t) 'op))
+       (define op (tok-val (advance!)))
+       (loop `(binop ,op ,acc ,(parse-apply)))]
+      [else acc])))
 
 (define (lambda-ahead?)
   ;; Lookahead: detect `NAME :` or `{ formals } :` lambda shape.
@@ -606,6 +677,8 @@
      (format "(~a ~a)"
              (emit-expr (car args) depth)
              (string-join (map (λ (a) (emit-expr a depth)) (cdr args)) " "))]
+    [(list 'binop op lhs rhs)
+     (emit-binop op lhs rhs depth)]
     [(list 'select target path)
      (emit-select target path depth)]
     [(list 'attrset bindings)
@@ -636,6 +709,37 @@
     (match e
       [(list 'apply fn arg) (loop fn (cons arg args))]
       [_ (cons e args)])))
+
+(define (emit-binop op lhs rhs depth)
+  ;; Map Nix binary operators to beagle/nix call forms. String concat
+  ;; (+) uses (s ...); arithmetic + uses (+ ...); attrset merge (//)
+  ;; uses (// ...) or a stdlib helper.
+  (define lhs-str (emit-expr lhs depth))
+  (define rhs-str (emit-expr rhs depth))
+  (case op
+    [("+")
+     ;; Could be string-concat or arithmetic — beagle's (s ...) handles
+     ;; the string case, but for numeric we want (+ ...). For MVP,
+     ;; pick (s ...) since string-concat is the overwhelmingly common
+     ;; case in NixOS configs and the checker will reject mismatched
+     ;; types either way.
+     (format "(s ~a ~a)" lhs-str rhs-str)]
+    [("-")  (format "(- ~a ~a)" lhs-str rhs-str)]
+    [("*")  (format "(* ~a ~a)" lhs-str rhs-str)]
+    [("/")  (format "(/ ~a ~a)" lhs-str rhs-str)]
+    [("++") (format "(++ ~a ~a)" lhs-str rhs-str)]
+    [("//") (format "(// ~a ~a)" lhs-str rhs-str)]
+    [("==") (format "(== ~a ~a)" lhs-str rhs-str)]
+    [("!=") (format "(!= ~a ~a)" lhs-str rhs-str)]
+    [("<")  (format "(< ~a ~a)" lhs-str rhs-str)]
+    [(">")  (format "(> ~a ~a)" lhs-str rhs-str)]
+    [("<=") (format "(<= ~a ~a)" lhs-str rhs-str)]
+    [(">=") (format "(>= ~a ~a)" lhs-str rhs-str)]
+    [("&&") (format "(and ~a ~a)" lhs-str rhs-str)]
+    [("||") (format "(or ~a ~a)" lhs-str rhs-str)]
+    [("->") (format "(implies ~a ~a)" lhs-str rhs-str)]
+    [("!")  (format "(not ~a)" lhs-str)]
+    [else   (format "; unsupported op ~a\n  (~a ~a ~a)" op op lhs-str rhs-str)]))
 
 (define (emit-lambda kind body depth)
   (match kind
@@ -688,19 +792,7 @@
 (define (emit-binding b depth)
   (match b
     [(list 'bind path val)
-     (define key
-       (cond
-         [(= (length path) 1)
-          (match (car path)
-            [(? string? s) (format ":~a" s)]
-            [(list 'str s) (format "~v" s)])]
-         [else
-          ;; Dotted path: emit as :a.b.c form
-          (string-append ":"
-                         (string-join
-                           (map (λ (s) (if (string? s) s (format "~v" (cadr s))))
-                                path)
-                           "."))]))
+     (define key (emit-binding-key path))
      (format "~a ~a" key (emit-expr val depth))]
     [(list 'inherit names)
      (format "(inherit ~a)"
@@ -709,6 +801,44 @@
      (format "(inherit-from ~a ~a)"
              (emit-expr src depth)
              (string-join (map symbol->string names) " "))]))
+
+(define (emit-binding-key path)
+  ;; Emit an attrset key. Handle the canonical idioms:
+  ;;   - single bare name → :name
+  ;;   - dotted path → :a.b.c
+  ;;   - "${ident}" string key (single interp, bare ident) → bare ident
+  ;;     (matches the idiomatic Nix attrset key shape and normalizes
+  ;;     identically without paren-wrapping)
+  ;;   - other quoted string → "string"
+  (cond
+    [(= (length path) 1)
+     (match (car path)
+       [(? string? s) (format ":~a" s)]
+       [(list 'str s)
+        (cond
+          [(simple-ident-interp? s)
+           ;; "${name}" → emit as bare `name`, which beagle's emit-nix
+           ;; renders as `${name}` (without paren-wrap that comes from
+           ;; string-key handling).
+           (extract-ident-interp s)]
+          [else (format "~v" s)])])]
+    [else
+     ;; Dotted path: emit as :a.b.c form
+     (string-append ":"
+                    (string-join
+                      (map (λ (s) (if (string? s) s (format "~v" (cadr s))))
+                           path)
+                      "."))]))
+
+(define (simple-ident-interp? s)
+  ;; Check if s is exactly "${IDENT}" — opening ${, then a bare
+  ;; identifier (alphanumeric + underscore + dash), then closing }.
+  (regexp-match-exact? #rx"\\$\\{[a-zA-Z_][a-zA-Z0-9_-]*\\}" s))
+
+(define (extract-ident-interp s)
+  ;; Pull out the identifier from "${ident}"
+  (define m (regexp-match #rx"\\$\\{([a-zA-Z_][a-zA-Z0-9_-]*)\\}" s))
+  (cadr m))
 
 (define (emit-str-interp parts depth)
   ;; "${expr1}foo${expr2}" → (s expr1 "foo" expr2)
