@@ -1,23 +1,26 @@
 # Beagle
 
 **A typed, LLM-optimized authoring surface that compiles to multiple
-targets. Currently focused on establishing itself as the de facto
-language for authoring Nix.**
+targets. Built for provably-fast developer feedback loops and stronger
+composition than the underlying target languages permit on their own.**
 
-The first sentence is the identity: beagle emits to seven backends
-(Clojure, ClojureScript, JavaScript, Python, Nix, SQL, Typed Racket)
-from one typed AST, and the abstractions are proven portable across
-all of them. The second sentence is the phase: the active distribution
-and adoption work concentrates on Nix specifically — the language
-people actively dislike using, with no incumbent typed alternative,
-and a failure profile (eval errors, schema violations, type mismatches
-in module composition) that beagle's type system catches at compile
-time. The other targets stay first-class structurally; they aren't the
-current focus of test-pass investment or community-adoption work.
+The identity: beagle emits to seven backends (Clojure, ClojureScript,
+JavaScript, Python, Nix, SQL, Typed Racket) from one typed AST. The
+same source can be typed, macro-expanded, and validated against
+schemas before it ever reaches the target runtime — eval-time errors
+become parse-time errors, schema mismatches become compile-time
+diagnostics, repeated structure becomes a typed macro authored once.
 
-Six months from now if the focus shifts to JS or another target, the
-second sentence updates; the first doesn't. The language *is* multi-target.
-The *campaign* is Nix-first.
+The current emphasis: making the Nix authoring loop measurably better
+than hand-writing Nix. Concrete targets are sub-second re-checks
+on edits, schema-driven validation across the full NixOS option
+universe, and a converter that round-trips real-world Nix code through
+beagle without semantic loss. The other targets stay first-class
+structurally; they aren't the current focus of test-pass investment
+or community-adoption work.
+
+The first paragraph is the identity. The second is the current phase.
+The phase shifts as use cases mature; the identity doesn't.
 
 ```racket
 #lang beagle/nix

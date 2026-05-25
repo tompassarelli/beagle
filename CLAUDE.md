@@ -8,13 +8,16 @@ primary file extension (`.rkt` still accepted for backward compatibility).
 
 **Identity vs phase.** Beagle *is* multi-target — emitters for all seven
 backends exist and the abstractions are proven portable. The current
-*phase* is establishing beagle as the de facto authoring language for
-Nix. Surface decisions during this phase are evaluated primarily against
-Nix needs; portability is a secondary constraint rather than a blocking
-one. Other targets (Clojure, JS, ClojureScript, Python, SQL, Typed
-Racket) are supported at the abstraction level but are not the current
-focus of test-pass investment or community-adoption work. When Nix
-entrenchment is real, the phase shifts; the identity doesn't.
+*phase* is making the Nix authoring loop measurably better than
+hand-writing Nix: sub-second re-checks, schema-driven validation across
+the full NixOS option universe, round-trip-preserving conversion of
+existing Nix codebases. Surface decisions during this phase are
+evaluated primarily against Nix needs; portability is a secondary
+constraint rather than a blocking one. Other targets (Clojure, JS,
+ClojureScript, Python, SQL, Typed Racket) are supported at the
+abstraction level but are not the current focus of test-pass investment
+or community-adoption work. When the Nix loop is provably better, the
+phase shifts; the identity doesn't.
 
 **LLM authoring is a first-class concern.** Rich types, explicit forms,
 low syntactic surface area, structured errors. One canonical idiom per

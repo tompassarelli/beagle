@@ -1008,34 +1008,27 @@
              (emit-expr body (+ depth 2)))]))
 
 (define (emit-let bindings body depth)
-  ;; Expand inherit/inherit-from into explicit name=value bindings,
-  ;; same as emit-attrset does.
-  (define expanded
-    (apply append
-           (map (λ (b)
-                  (match b
-                    [(list 'inherit names)
-                     (map (λ (n) (list 'bind (list (symbol->string n)) `(id ,n))) names)]
-                    [(list 'inherit-from src names)
-                     (map (λ (n)
-                            (list 'bind (list (symbol->string n))
-                                  `(select ,src (,(symbol->string n)))))
-                          names)]
-                    [_ (list b)]))
-                bindings)))
+  ;; beagle/nix's (let [...]) supports name/value pairs AND singleton
+  ;; (inherit ...) and (inherit-from ...) forms.
   (format "(let [~a]\n~a~a)"
           (string-join
             (map (λ (b)
                    (match b
+                     [(list 'inherit names)
+                      (format "(inherit ~a)" (string-join (map symbol->string names) " "))]
+                     [(list 'inherit-from src names)
+                      (format "(inherit-from ~a ~a)"
+                              (emit-expr src depth)
+                              (string-join (map symbol->string names) " "))]
                      [(list 'bind (list path) val)
                       (define name-str
                         (cond
                           [(string? path) path]
-                          [(pair? path) (cadr path)] ; (str s) → s
+                          [(pair? path) (cadr path)]
                           [else (format "~v" path)]))
-                     (format "~a ~a" name-str (emit-expr val depth))]
+                      (format "~a ~a" name-str (emit-expr val depth))]
                      [_ (format "; unsupported let binding: ~v" b)]))
-                 expanded)
+                 bindings)
             "\n        ")
           (indent (add1 depth))
           (emit-expr body (add1 depth))))

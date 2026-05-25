@@ -1747,6 +1747,14 @@
   (let loop ([rest items] [stxs item-stxs] [acc '()])
     (cond
       [(null? rest) (reverse acc)]
+      ;; Singleton (inherit ...) or (inherit-from src ...) binding.
+      ;; Parsed as a let-binding with name = #f (sentinel), value =
+      ;; the parsed inherit/inherit-from expression.
+      [(and (pair? (car rest))
+            (memq (car (car rest)) '(inherit inherit-from)))
+       (loop (cdr rest)
+             (and stxs (cdr stxs))
+             (cons (let-binding #f #f (parse-expr (car (or (and stxs (list (car stxs))) (list (car rest)))))) acc))]
       [(and (>= (length rest) 2)
             (list? (car rest))
             (= (length (car rest)) 3)

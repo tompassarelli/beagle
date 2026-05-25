@@ -792,9 +792,22 @@
   (define ind (indent (+ depth 1)))
   (define bind-strs
     (for/list ([b (in-list bindings)])
-      (format "~a~a = ~a;" ind
-              (emit-binding-target (let-binding-name b))
-              (emit-expr (let-binding-value b) (+ depth 1)))))
+      ;; Singleton inherit/inherit-from bindings: name=#f sentinel,
+      ;; value is the parsed nix-inherit/nix-inherit-from form.
+      (define n (let-binding-name b))
+      (define v (let-binding-value b))
+      (cond
+        [(and (not n) (nix-inherit? v))
+         (format "~ainherit ~a;" ind
+                 (string-join (map symbol->string (nix-inherit-names v)) " "))]
+        [(and (not n) (nix-inherit-from? v))
+         (format "~ainherit (~a) ~a;" ind
+                 (emit-expr (nix-inherit-from-ns-expr v) (+ depth 1))
+                 (string-join (map symbol->string (nix-inherit-from-names v)) " "))]
+        [else
+         (format "~a~a = ~a;" ind
+                 (emit-binding-target n)
+                 (emit-expr v (+ depth 1)))])))
   (string-append
    "let\n"
    (string-join bind-strs "\n")
