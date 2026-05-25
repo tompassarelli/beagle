@@ -1,11 +1,22 @@
 ---
-status: active
+status: done
 priority: 1
 depends-on: —
 blocks: cyclone-self-host.md
+closed: 2026-05-25
 ---
 
 # Surface redesign — agent-first, principled, no compat
+
+**Status: closed 2026-05-25.** All four endpoint criteria from
+`design-principle.md` reached. Surface-redesign-as-dominant-mode is
+over. Two outstanding questions (nil-semantics and macro-DSL audit)
+remain, but both are gated on external triggers (concrete need /
+Cyclone landing), not on more audit cycles. cyclone-self-host.md is
+unblocked. See `design-principle.md` "Endpoint reached — 2026-05-25"
+section for the full closure note and `lab/journal/log/027-night-
+audit.md` for the closeout audit that absorbed the final deferred
+items.
 
 ## Why now
 

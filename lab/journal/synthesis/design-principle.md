@@ -841,3 +841,56 @@ own perpetual mode and crowds out the *using* work that is the
 actual point of building beagle in the first place. The audit
 exists to make the surface fit-for-use; once the surface fits, the
 audit's job is done.
+
+## Endpoint reached — 2026-05-25
+
+All four signals hold:
+
+1. **Bootstrap-vs-native lens — clean.** Every current form has been
+   examined. Drops that landed under the lens: `defmulti`/`defmethod`,
+   `deftype`, `->`, `as->`/`cond->`/`cond->>`/`some->`/`some->>`,
+   `when`, `when-not`/`if-not`, `when-some`/`if-some`, `when-let`/
+   `if-let`, `dotimes`, `case`, `(:keyword target)`, `inc`/`dec`,
+   `not=`, `deferror`, and the `unsafe` macro kind. Forms that
+   survived empirical audit and stay (`loop`/`recur`, `->Name`,
+   `->>`, `cond`, `do`, `nth` vs `get`, `for`/`doseq`/`map`/`filter`/
+   `reduce`, the three record-access mechanisms) each have a documented
+   rationale for why they're distinct concepts rather than redundancy.
+2. **Open design questions — bounded.** Two remain: nil semantics
+   (gates the typed nullable-narrowing form; interim `(let [x v] (if x
+   ...))` works) and the macro-DSL audit (blocked on Cyclone for
+   constraint clarity). Neither blocks in-progress work. Both have
+   explicit dependencies on external decisions/landings — they are
+   "answer when X happens" items, not "think about more" items.
+3. **Dogfood corpus compiles cleanly.** firnos (~/code/nixos-config),
+   self-host/, and oracle fixtures all green under the post-drop
+   surface. The dogfood pass this session surfaced one beagle bug
+   (atomic-write, f15ef57) which fix-and-ship rather than surface
+   change resolved.
+4. **Corpus migrations done.** Hand-migrated 6 fixture files +
+   self-host/parse.bjs during the drop sequence; codemod framework
+   built (`bin/beagle-rewrite drop-when`) but unused because the
+   per-site cost was below the codemod-threshold. No outstanding
+   automated rewrites.
+
+**Surface-redesign-as-dominant-mode ends here.** Future surface
+changes become responsive to concrete need (an open question got
+answered; a use case surfaced a gap), not driven by audit cycles.
+
+What this closure means:
+- The audit *cycle* is closed. The *question set* is not — nil-
+  semantics and macro-DSL audit still have answers pending. But those
+  are bound to external triggers, not to "more thinking."
+- Future-instance reading this: if you find yourself wanting to
+  re-audit the surface from scratch, stop. The audit endpoint was
+  reached. Drop candidates from here forward must come from concrete
+  friction in real use, not from another pass through the form list.
+- Next priorities (per `lab/plans/CLAUDE.md`): Cyclone self-host
+  (architectural identity work), schema-typed-paths (capability
+  extension), unsafe-capabilities formalization (depends on Cyclone).
+  Plus the unlisted-but-legitimate path: sustained dogfood as
+  information-generation about which of those matters most.
+
+See `lab/journal/log/027-night-audit.md` for the closeout audit of
+the morning-report's deferred items, which was the last work this
+cycle absorbed.

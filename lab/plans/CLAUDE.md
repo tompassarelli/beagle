@@ -1,12 +1,12 @@
 # Active work — priority order
 
-- **surface-redesign.md** — redesign beagle's surface from principles (agent-first, one canonical idiom, no compat). BLOCKS cyclone-self-host: the surface we port is the surface we keep
-- **cyclone-self-host.md** — bootstrap beagle on Cyclone Scheme; remove Racket runtime dependency. BLOCKED by surface-redesign
+- **cyclone-self-host.md** — bootstrap beagle on Cyclone Scheme; remove Racket runtime dependency. UNBLOCKED 2026-05-25 (surface-redesign closed)
 - **schema-typed-paths.md** — extend `.beagle-cache/<x>-schema.json` ingestion beyond Nix + SQL (TS .d.ts, typeshed, OpenAPI, JSON Schema, etc.)
 - **unsafe-capabilities.md** — formalize the informal "no unsafe ever" dogma as a typed capability system (unsafe-ffi, unsafe-compile-time-eval, etc.). Depends on cyclone-self-host introducing the first real FFI case.
 
 ## Done
 
+- **surface-redesign.md** — closed 2026-05-25; all four endpoint criteria from design-principle.md met; surface-as-dominant-mode is over. See design-principle.md "Endpoint reached" section + journal log 027.
 - **self-hosting.md** — v0.13.0 (12 components, bootstrap proven, 11/11 emission parity)
 - **macro-provenance.md** — provenance threading (Racket + Bun), `--trace` flag, validation tests
 - **targets.md** — CLJ behavioral tests, Oracle CI (Bun), JS template splices, Inf/NaN fix
