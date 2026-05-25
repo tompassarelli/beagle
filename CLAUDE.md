@@ -1,10 +1,10 @@
 # beagle — session anchor
 
 A multi-target authoring IR. Racket frontend with custom `#lang`, macros
-(safe/unsafe/procedural with typed AST contracts), static type checking;
-emits Clojure, ClojureScript, JavaScript, Nix, SQL, Python, or Typed Racket
-source for runtime. `.bgl` is the primary file extension (`.rkt` still
-accepted for backward compatibility).
+(safe template + procedural with typed AST contracts; no `unsafe` kind),
+static type checking; emits Clojure, ClojureScript, JavaScript, Nix, SQL,
+Python, or Typed Racket source for runtime. `.bgl` is the primary file
+extension (`.rkt` still accepted for backward compatibility).
 
 **LLM authoring is a first-class concern.** Rich types, explicit forms, low
 syntactic surface area, structured errors. One canonical idiom per concept.
@@ -38,9 +38,12 @@ parse → check → emit-dispatch → emit-{clj,js,nix,py,rkt,sql}
 - `beagle-lib/private/stdlib-types.rkt` — combined stdlib catalog; delegates to
   `private/stdlib-portable.rkt` (256 entries), `private/stdlib-clj.rkt` (365),
   `private/stdlib-cljs.rkt` (75).
-- `beagle-lib/private/macros.rkt` — macro registry: template macros (safe/unsafe,
-  naive substitution with hygiene), procedural macros (`beagle` kind, evaluated by
-  macro-eval with syntax constructors and typed AST contracts). Depth-capped recursive expansion.
+- `beagle-lib/private/macros.rkt` — macro registry: template macros (`safe`
+  kind only; naive substitution with hygiene), procedural macros (`proc`
+  kind, evaluated by host Racket; `beagle` kind, evaluated by macro-eval
+  with syntax constructors and typed AST contracts). Depth-capped recursive
+  expansion. `unsafe` kind rejected at registration — there is no
+  escape-hatch macro shape.
 - `beagle-lib/private/macro-eval.rkt` — compile-time Beagle interpreter for
   `define-macro beagle` bodies. Datum-based evaluator (let, fn, if, cond, calls),
   closure support, built-in env with list/string ops + syntax constructors
@@ -285,12 +288,14 @@ Beagle prints lint warnings to stderr during compile (strict mode only):
 - `untyped def NAME` — `(def x 42)` without type annotation
 - `defn NAME has no return type annotation` — missing `: Ret`
 - `defn NAME has untyped parameter(s): ...` — missing `(name : Type)`
-- `(unsafe-{js,clj,py,nix,rkt} "...") inline escape` — beagle can't validate that code
 - `let binding X shadows outer binding` — let/fn rebinds a name from enclosing scope
 - `unused declare-extern: X` — extern declared but never referenced
 
 Suppress with `BEAGLE_NO_LINT=1`. Warnings don't fail compile. Dynamic
 mode skips lint (types are optional there by definition).
+
+The historical `(unsafe-{js,clj,py,nix,rkt} "...") inline escape` lint
+is gone — those forms are parse-time errors, not warnings.
 
 ## Design decisions
 
@@ -322,7 +327,7 @@ the load-bearing reference for any future surface decision.
 | `(ns ...)` for namespace | universal Clojure idiom, in LLM training data |
 | Wrapped `(x : T)` not inline | unambiguous parse, no lookahead, AI-friendly |
 | Stdlib extern catalog | biggest single leverage point for AI type-safety |
-| Safe / unsafe macro distinction | controlled boundary for "what the checker re-validates" |
+| Template macros are always type-checked end-to-end | The expansion is parsed as beagle source and runs through the checker like any other expression — no escape-hatch shape exists. (Pre-2026-05 had `safe` vs `unsafe` kinds; `unsafe` was dropped.) |
 | Macro expansion is inspectable | `beagle-expand` lets the LLM audit its own macros |
 | Strict mode default | dynamic is escape-hatch for humans; AI should stay strict |
 | P2 checker profile default | E16-T experiments: P2 (exhaustive match, narrowing) is the sweet spot for agent-assisted dev. P3 effects add no measured value; P1 false positives actively hurt (3.4× slower). Types help agents build features (reasoning scaffold) not find bugs (tests win). See beagle-lab `e16-workflow-scheduler/results/type/RESULTS.md` |
@@ -345,33 +350,66 @@ Host-language idioms whose cost > benefit for beagle's goals:
 
 Forms removed because they were sugar/redundant or had ~zero real
 usage. See `lab/journal/log/024-surface-friction-observation.md` for
-the empirical basis.
+the empirical basis and `lab/journal/log/027-night-audit.md` for the
+deferred-items audit.
 
 - **`defmulti` / `defmethod`** — value-dispatch alternative to `match`;
   no broader pattern. Use `defprotocol` + `extend-type` (type dispatch)
   or `match` (value dispatch).
+- **`deftype`** — bundled `defrecord` + protocol impls into one form.
+  Two distinct concepts: use `(defrecord Name [fields])` for the data
+  shape and `(extend-type Name Protocol (method ...))` for the protocol
+  attachment.
 - **`->`** — first-arg threading. Positional convenience, not semantic
   uniqueness. Use `->>` or a let-chain.
 - **`as->` / `cond->` / `cond->>` / `some->` / `some->>`** — compositions
   of threading + conditional / threading + nil-check. Use let-chains.
-- **`when-not` / `if-not`** — sugar. Use `(when (not c))` / `(if (not c) t e)`.
-- **`when-some` / `if-some`** — distinction from `when-let`/`if-let`
-  (not-nil vs truthy) is too subtle. Use `when-let` / `if-let`.
+- **`when`** — sugar over `(if c body)` (single-body) or `(if c (do …))`
+  (multi-body). The if-no-else form returns nil when condition is false.
+- **`when-not` / `if-not`** — sugar. Use `(if (not c) …)`.
+- **`when-some` / `if-some`** — superseded by the broader nil-semantics
+  decision; the typed nullable-narrowing form is pending design.
+  Interim: `(let [x v] (if x then else))`.
+- **`when-let` / `if-let`** — Clojure-shaped truthy-binding sugar; carries
+  semantics the typed nullable-narrowing form should not inherit. Interim:
+  `(let [x v] (if x then else))`. Do not reintroduce these names when the
+  typed form lands.
+- **`dotimes`** — sugar over `(doseq [i (range n)] body…)`.
+- **`case`** — folded into `match` with the `or` pattern extension
+  (`(match x [(or 1 2) "small"] [_ "big"])`). The case-fold optimization
+  in emit-clj/emit-rkt lowers literal-only or-patterns to target-native
+  `case` so the migration ships no perf regression.
+- **`(:keyword target)`** — keyword-as-fn on maps overloaded one shape for
+  two concepts (record field access vs map keyed lookup). Records use the
+  typed auto-accessor `(field-name r)`; maps use `(get m :key)`. JS interop
+  property access `(.-field obj)` is a separate concept and stays.
 - **`inc` / `dec`** — sugar. Use `(+ x 1)` / `(- x 1)`.
 - **`not=`** — sugar. Use `(not (= a b))`.
 - **`deferror`** — unified into `(defunion :throwable Name ...)`.
   Same structural shape; throwable is now a keyword on defunion.
+- **`unsafe` macro kind** — escape hatch on the macro shape; rejected at
+  registration. Template macros are always type-checked end-to-end via
+  the only remaining kind, `safe`.
 
 Kept after empirical re-evaluation (Day 0 friction-list verdict
 reversed): `loop`/`recur` (agent reflexively reaches for it — that's
 the canonical signal), `->Name` constructor (beagle has no `(Name ...)`
-alternative; no redundancy to drop).
+alternative; no redundancy to drop), `->>` (canonical threading; sits
+alone in its concept space, low corpus count reflects let-chain-heavy
+style not redundancy), `cond` (sequential independent-predicate
+dispatch — distinct concept from `match`'s pattern-against-target
+dispatch), `do` (multi-expression sequencing, useful even after `when`
+drop — see `lab/journal/log/issue-86-do-form-audit.md`).
 
-### Lints (surface redesign, 2026-05)
-
-- **`(:field r)` on records** — warning suggesting the typed
-  auto-accessor `(field-name r)`. Map access untouched; only fires
-  when target type is a known defrecord. Suppress via `BEAGLE_NO_LINT=1`.
+Audited and confirmed as distinct concepts (not redundancy):
+- **`nth` vs `get`** — `nth` is positional-int into vector; `get` is
+  keyed lookup on map. Same predictability test as `cond` vs `match`.
+- **`for` vs `doseq` vs `map`/`filter`/`reduce`** — collection
+  comprehension that yields vs side-effect iteration that returns nil
+  vs higher-order function calls. Three concepts, three forms.
+- **Record field access** — `(field-name r)` for records,
+  `(get m :key)` for maps, `(.-field obj)` for JS interop. Three
+  concepts (post `(:foo m)` drop), not redundancy.
 
 ## Setup (one-time)
 

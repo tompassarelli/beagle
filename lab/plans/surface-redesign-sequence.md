@@ -5,6 +5,14 @@ priority: 1
 
 # Surface redesign — drop sequence (steps 3+ of consistency-compounds audit)
 
+**Status snapshot (2026-05-25):** Steps 1, 2, 3, 4, 5, 6, 7 done. Step 8
+confirmed (cond stays). Step 9 done — when-let / if-let dropped 2026-05-24
+with explicit parse errors and "do not reintroduce these names" guidance
+in the migration message. Step 10 still pending, blocked on Cyclone. Also
+in 2026-05-25 deferred-items pass: `deftype` dropped (categorized
+post-hoc as "bundles two concepts"), `nth` vs `get` and
+`for`/`doseq`/`map` audited and confirmed distinct concepts (no drops).
+
 The remaining drop candidates from the design-principle audit are
 **not independent**. Some absorb each other; some depend on extending
 existing forms first; some depend on decisions not yet made (nil
@@ -119,18 +127,16 @@ result (added implicitly by this plan).
 
 ### Step 9 — `when-let` / `if-let` decision (depends on nil-semantics)
 
-**Status:** blocked on the nil-semantics decision (separate plan).
+**Status:** done (2026-05-24).
 
-If beagle moves to explicit `T?`/`Option<T>` with non-null defaults
-and monadic chaining, the nil-binding pattern restructures around
-something else (probably `do`-notation style monadic bind) and
-`when-let`/`if-let` become the wrong shape regardless. Dropping them
-to a transitional let-chain replacement now means two migrations later.
-
-If nil-semantics isn't on the table near-term, the drop proceeds:
-replacement is `(let [x v] (when x body))` / `(let [x v] (if x t e))`.
-
-Decision point: nil-semantics audit. Not in this plan.
+Reversed the "blocked on nil-semantics" verdict after recognizing that
+keeping Clojure-shaped truthy-binding sugar around as a placeholder
+risks the typed nullable-narrowing form inheriting its name and
+semantics. The drop went in with a long parse-error message explicitly
+naming the trap: the eventual typed form should be beagle-native and
+should NOT reuse `when-let`/`if-let` even when it lands. Interim
+replacement is `(let [x v] (if x then else))` until the typed form is
+designed.
 
 ### Step 10 — Macro DSL audit (sequenced with self-host)
 
