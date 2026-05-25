@@ -838,6 +838,22 @@
     [(list 'extend-type (? symbol? type-name) rest ...)
      (extend-type-form type-name (parse-type-impls (or (stx-tail subs 2) rest)))]
 
+    ;; flake-input: typed access to flake-input attribute paths.
+    ;; (flake-input :NAME :NAMESPACE :path ...) →
+    ;;   inputs.NAME.NAMESPACE.${pkgs.stdenv.hostPlatform.system}.path...
+    ;; System axis collapsed (every flake follows this convention).
+    ;; Result type opaque (NixType); schema-cache for compile-time
+    ;; attribute-path checking is a deferred follow-up.
+    [(list 'flake-input (? keyword-sym? input-name)
+                        (? keyword-sym? namespace)
+                        rest ...)
+     (define raw-segments (or (stx-tail subs 3) rest))
+     (for ([s (in-list raw-segments)])
+       (unless (or (keyword-sym? s) (symbol? s))
+         (error 'beagle
+                "flake-input: path segment must be keyword or symbol, got ~v" s)))
+     (flake-input-form input-name namespace raw-segments)]
+
     [(list 'fn params-form marker return-type body ...)
      #:when (annotation-marker? marker)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 1) params-form))])
@@ -1359,6 +1375,8 @@
      (error 'beagle "defmethod removed — use defprotocol + extend-type for type-based dispatch")]
     [(list 'deftype _ ...)
      (error 'beagle "deftype removed — use (defrecord Name [fields]) for the data shape and (extend-type Name Protocol (method ...)) for protocol impls")]
+    [(list 'nix-ident _ ...)
+     (error 'beagle "nix-ident removed — use (flake-input :NAME :NAMESPACE :path ...) for flake-input access. nix-ident was an undocumented escape hatch that bypassed the type system.")]
     [(list 'inc _ ...)
      (error 'beagle "inc removed — use (+ x 1)")]
     [(list 'dec _ ...)
