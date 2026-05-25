@@ -29,7 +29,7 @@ jobs:
       - name: Link beagle packages
         run: |
           raco pkg install --auto --link \
-            beagle-lib/ beagle-test/ beagle-doc/ beagle/
+            beagle-lib/ beagle-test/ beagle/
 
       - name: Run tiered test suite
         env:

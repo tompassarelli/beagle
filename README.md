@@ -1,6 +1,23 @@
 # Beagle
 
-**A typed authoring layer for agent-written code.**
+**A typed, LLM-optimized authoring surface that compiles to multiple
+targets. Currently focused on establishing itself as the de facto
+language for authoring Nix.**
+
+The first sentence is the identity: beagle emits to seven backends
+(Clojure, ClojureScript, JavaScript, Python, Nix, SQL, Typed Racket)
+from one typed AST, and the abstractions are proven portable across
+all of them. The second sentence is the phase: the active distribution
+and adoption work concentrates on Nix specifically — the language
+people actively dislike using, with no incumbent typed alternative,
+and a failure profile (eval errors, schema violations, type mismatches
+in module composition) that beagle's type system catches at compile
+time. The other targets stay first-class structurally; they aren't the
+current focus of test-pass investment or community-adoption work.
+
+Six months from now if the focus shifts to JS or another target, the
+second sentence updates; the first doesn't. The language *is* multi-target.
+The *campaign* is Nix-first.
 
 ```racket
 #lang beagle/nix
@@ -14,106 +31,117 @@
 
 The schema knows `services.openssh.enable` is `Bool`. Beagle knows that too. You assign it to a `String` field; you get a compile error with file:line:col precision — **before `nixos-rebuild` ever runs**.
 
-## What it is
+## The bet
 
-Beagle is a typed s-expression language that emits ordinary Nix / Clojure / JavaScript / Python / Racket / SQL / ClojureScript. You write one typed source; you get plain target code anyone can deploy or audit.
+Today's typed languages have rich type systems but baroque human-optimized
+surfaces. Today's dynamic languages have clean surfaces but no type-level
+scaffolding. Both flavors evolved before AI code generation existed, and
+both made trade-offs that are wrong for models generating code from a spec.
 
-```
-.bnix / .bclj / .bjs / .bpy → parse → check → emit → .nix / .clj / .js / .py
-                                       ↑
-                            macros, schema, stdlib, type narrowing
-                            all share one AST + diagnostic path
-```
+Python is the default model-authored language today by training-data weight;
+the model writes it fluently. What the model can't do well in Python is
+**lift repeated structure into typed primitives**. Every Django model,
+every Pydantic schema, every API client gets hand-written each time because
+Python has no macro layer and no rich type system to express the pattern
+once. As a domain specializes and the codebase grows, the model's
+compression ceiling becomes the bottleneck — not because the model is bad
+but because the language doesn't give it the abstractions.
 
-**Design principles** (the ones that actually shape the surface):
+Typed languages with rich macro systems (Common Lisp, Racket, OCaml,
+the ML family) hit a different problem: surface sprawl. Five threading
+macros means five chances to pick wrong, and the model has no human's
+accumulated taste to guide the choice.
 
-- **S-expressions.** Uniform parens. No syntax debates. Trivial to parse, trivial for macros to construct, trivial for agents to manipulate as data. Keeps the AST small, keeps the tooling small, keeps the future open (every transformation, query, compression, and rewrite is a tree walk).
-- **Immutability by default.** Bindings are immutable. Records are functional. There is no `set!`, no in-place mutation, no implicit aliasing. State changes go through explicit forms with visible plumbing. Concurrency stories, equality reasoning, and agent rewrites stay sane.
-- **One canonical idiom per concept.** No `with-do` vs `with`. No `inh` and `inherit`. Single name, single shape.
-- **Zero escape hatches.** No `unsafe-nix`, no `unsafe-js`, no `any`. If the stdlib doesn't cover something, add a one-line type signature.
-- **Schema is types.** NixOS option schemas (16k+ options) flow into the type checker. Misspelled option paths fail at parse time. Wrong-typed values fail at type-check time. You never wait for `nixos-rebuild` to find out.
-- **LLM authoring is first-class.** Rich types, explicit forms, structured errors, "did you mean?" suggestions, low syntactic surface area.
+Beagle threads the needle: a typed Lisp with **one canonical idiom per
+concept**, a curated catalog of typed externs, and rich enough macros to
+lift repeated structure — but no more surface than the model actually
+needs. The compression ceiling moves up; the hallucination surface stays
+low.
 
-## Demo: the NixOS story
+## The five principles
 
-Write your config in `.bnix`:
+Every surface decision was filtered through these. They are load-bearing.
 
-```racket
-#lang beagle/nix
-(ns modules.demo)
+1. **One canonical idiom per concept.** Every concept with N equivalent
+   idioms is a 1/N hallucination opportunity. Where two forms claim to
+   express the same concept, one gets removed.
 
-(module [config lib pkgs]
-  (with-cfg config.myConfig.modules.demo
-    {:options.myConfig.modules.demo
-     {:enable (lib/mkEnableOption "demo service")
-      :port (lib/mkOption {:type lib/types.port :default 8080})}
+2. **Verbose-with-clarity over concise-with-magic.** Explicit positional
+   args beat auto-currying. Named bindings beat implicit context.
+   Spelled-out forms beat terse aliases. Generation cost is amortized
+   to the model; ambiguity cost compounds at every read site.
 
-     :config (lib/mkIf cfg.enable
-       {:environment.systemPackages [pkgs.hello]
-        :networking.firewall.allowedTCPPorts [cfg.port]})}))
-```
+3. **Failure modes that localize.** When the model writes the wrong
+   thing, the error should pinpoint which form and what shape was
+   expected. Forms whose shape matches what the type system understands
+   produce better errors.
 
-Compiles to:
+4. **Zero escape hatches.** No `unsafe-js`, no `unsafe-clj`, no inline
+   target passthrough, no `(define-macro unsafe ...)`. Every gap closes
+   by adding a stdlib type signature, adding a surface form, or writing
+   a sibling target-language file and importing it. The filesystem
+   boundary is auditable; an inline backdoor is not.
 
-```nix
-{ config, lib, pkgs, ... }:
-let cfg = config.myConfig.modules.demo; in {
-  options.myConfig.modules.demo = {
-    enable = lib.mkEnableOption "demo service";
-    port = lib.mkOption { type = lib.types.port; default = 8080; };
-  };
-  config = lib.mkIf cfg.enable {
-    environment.systemPackages = [ pkgs.hello ];
-    networking.firewall.allowedTCPPorts = [ cfg.port ];
-  };
-}
-```
+5. **Consistency compounds; ergonomic savings don't.** A form earns its
+   place by reinforcing a pattern that shows up elsewhere. Forms that
+   exist for local character savings, with no broader pattern, are
+   net-negative even when they look convenient at authoring time.
 
-What you get for free:
+Long-form rationale: [`lab/journal/synthesis/design-principle.md`](lab/journal/synthesis/design-principle.md).
 
-| Mistake | When you find out |
-|---|---|
-| `services.opensh.enable` (typo) | parse time, with "did you mean services.openssh.enable?" |
-| `(lib/mkOption {:type true})` (Bool where NixType expected) | type check |
-| `(derivation {:src ./.})` (missing `:pname`/`:name`) | type check, with explanation |
-| `(unsafe-nix "...")` (escape hatch) | parse rejection — no escape hatches exist |
-| `(if config.X.enable foo bar)` where foo and bar are different types | type check (flow narrowing) |
-| Forgetting to git-add new modules | rebuild prereq check |
+## The lock-in discipline
 
-## Compared to
+The 2026-05 surface audit cycle closed with surface-redesign-as-dominant-mode
+ending. From here forward:
 
-| | beagle | Nickel | Dhall | raw Nix + nil |
-|---|---|---|---|---|
-| Static type checking | ✓ | ✓ | ✓ | partial (nil LSP) |
-| **Schema-derived types** | **✓** | manual | manual | – |
-| Multi-target backends | **✓** (7) | – | – | – |
-| Procedural macros with typed AST contracts | **✓** | – | – | – |
-| Zero escape hatches | **✓** | `Dyn` exists | – | `builtins.unsafeDiscardOutputDependency` etc. |
-| LSP / hover / completion | ✓ | ✓ | partial | ✓ (nil) |
-| Native NixOS module integration | ✓ | partial | – | ✓ |
-| Compiles to (rather than replacing) Nix | ✓ | – | – | – |
+**A form change requires a measurable delta on a documented benchmark.
+Full stop.**
 
-The "compiles to" part is the unique structural choice. Beagle outputs real `.nix` files that any NixOS or nix-darwin user can read, audit, and build with stock tools. You're not asking your team to deploy a new runtime — you're asking them to read better-typed Nix.
+No more "I think this reads better" changes. No more "the model probably
+prefers this" changes. If a proposed change can't be measured, it can't
+be made. The benchmark methodology has an existence proof (E16, E3b);
+generalizing the harness so every future surface change passes through
+it is the discipline that converts the surface from open to closed in
+practice rather than just in principle.
+
+Two open questions remain, both gated on external triggers rather than
+on more thinking: nil-semantics (eventual typed nullable-narrowing form,
+will NOT reuse the `when-let`/`if-let` name) and macro-DSL audit (blocked
+on Cyclone self-host introducing the concrete constraints).
 
 ## Targets
 
 | Target | `#lang` | Stdlib | Runtime |
 |---|---|---|---|
-| Clojure | `beagle/clj` | 414 entries | JVM, Babashka |
-| JavaScript | `beagle/js` | 55 native + 28 typed `js/*` forms | Node, Bun |
-| Python | `beagle/py` | 151 entries | Python 3 |
-| Nix | `beagle/nix` | 527 entries (parametric types) | nix-eval |
-| ClojureScript | `beagle/cljs` | 86 stdlib entries | browser, Node |
-| SQL | `beagle/sql` | 54 stdlib entries | DDL/DML emission |
-| Typed Racket | `beagle/rkt` | (oracle) | `raco make` validates type promises |
+| Clojure | `beagle/clj` | 397 entries | JVM, Babashka |
+| JavaScript | `beagle/js` | 102 native + 28 typed `js/*` forms | Node, Bun |
+| Python | `beagle/py` | 348 entries | Python 3 |
+| Nix | `beagle/nix` | 523 entries | nix-eval |
+| ClojureScript | `beagle/cljs` | 132 entries | browser, Node |
+| SQL | `beagle/sql` | 59 entries | DDL/DML emission |
+| Typed Racket | `beagle/rkt` | (oracle) | `raco make` independently validates beagle's type promises |
 
-319 portable stdlib entries shared across all targets, plus the target-specific catalogs above.
+269 portable stdlib entries shared across all targets, plus the
+target-specific catalogs above.
+
+The same typed AST drives every emitter. Nix has been the most
+generative target for the language itself — working on a non-trivial
+NixOS configuration produced design pressure that shaped `NixType` as
+an opaque primitive and motivated the schema-driven validator.
 
 ## Self-hosting
 
-Beagle compiles itself. The 12 `.bjs` components (reader, parser, type checker, 5 emitters, AST, macros, lint, types) are written in Beagle targeting JavaScript. Bootstrap fixed-point proven: Racket compiler → JS bundle → JS bundle compiles same sources → byte-identical output.
+Beagle compiles itself. The 12 `.bjs` components (reader, parser, type
+checker, 5 emitters, AST, macros, lint, types) are written in beagle
+targeting JavaScript. Bootstrap fixed-point proven: Racket compiler →
+JS bundle → JS bundle compiles same sources → byte-identical output.
 
-Emission parity verified against [Heist](https://github.com/tompassarelli/heist) (a full-stack dogfood app): 11/11 modules produce byte-identical output from both compilers.
+Emission parity verified against [Heist](https://github.com/tompassarelli/heist)
+(full-stack dogfood app): 11/11 modules produce byte-identical output
+from both compilers.
+
+Next milestone: Cyclone Scheme self-host, removing the Racket runtime
+dependency. See [`lab/plans/cyclone-self-host.md`](lab/plans/cyclone-self-host.md).
 
 ## Install
 
@@ -122,8 +150,8 @@ Requires [Racket](https://racket-lang.org/) 8.x+.
 ```sh
 git clone https://github.com/tompassarelli/beagle
 cd beagle
-raco pkg install --link beagle-lib/ beagle-test/ beagle-doc/ beagle/
-raco test beagle-test/tests/    # 1343 tests
+raco pkg install --link beagle-lib/ beagle-test/ beagle/
+bin/beagle-test    # ~1190 active-tier tests
 ```
 
 For NixOS users dogfooding their config:
@@ -150,13 +178,17 @@ nix-instantiate --eval hello.nix # → "hello, world"
 
 ## Tooling
 
-- **LSP server** — hover (target-aware completion against stdlib + schema), diagnostics, symbols, jump-to-definition. Neovim users: ready-to-drop stanza at [`contrib/nvim-lspconfig/`](contrib/nvim-lspconfig/) (upstream PR pending). Tree-sitter grammar: [`tree-sitter-beagle`](https://github.com/tompassarelli/tree-sitter-beagle) (separate repo).
-- **Typed REPL** — persistent environment, parse → check → emit per input
-- **Reactive daemon** — AST cache, inotify file watching, ~100ms re-check
-- **Property testing** — record generators, return-type inference, differential testing
-- **`beagle-validate`** — schema-driven option-path validator with Levenshtein "did you mean", cross-file conflict detection, auto-fix for unambiguous typos
-- **`beagle-nix-oracle`** — emit → `nix-instantiate --parse` → classify (independent codegen oracle)
-- **`bin/beagle-ci`** — tests + property tests + nixos-config validate gate
+- **LSP server** — hover (target-aware completion against stdlib + schema), diagnostics, symbols, jump-to-definition. Neovim users: stanza at [`contrib/nvim-lspconfig/`](contrib/nvim-lspconfig/). Tree-sitter grammar: [`tree-sitter-beagle`](https://github.com/tompassarelli/tree-sitter-beagle) (separate repo).
+- **Typed REPL** — persistent environment, parse → check → emit per input.
+- **Reactive daemon** — AST cache, mtime invalidation, ~100ms re-check, ~0.6s warm builds vs ~3s cold.
+- **Property testing** — record generators, return-type inference, differential testing.
+- **`beagle-validate`** — schema-driven option-path validator with Levenshtein "did you mean", cross-file conflict detection, auto-fix for unambiguous typos.
+- **`beagle-nix-oracle`** — emit → `nix-instantiate --parse` → classify (independent codegen oracle).
+- **`bin/beagle-ci`** — tests + property tests + nixos-config validate gate.
+
+For any question about a form, type, or stdlib entry: ask the daemon
+(`bin/beagle-sig NAME`, `bin/beagle-fields RECORD NAME`, `bin/beagle-provides FILE`)
+or read the source. The reference is the compiler.
 
 ## Agent integration
 
@@ -165,7 +197,8 @@ beagle init --claude-code
 beagle-daemon start --watch .
 ```
 
-Generates a PostToolUse hook, settings, `CLAUDE.md`, and language context. The daemon re-checks within ~100ms of each save. Designed around the finding (E16) that *how* the type checker reaches an agent matters as much as the checker itself.
+Generates a PostToolUse hook, settings, `CLAUDE.md`, and language
+context. The daemon re-checks within ~100ms of each save.
 
 ## Research
 
@@ -174,22 +207,48 @@ Generates a PostToolUse hook, settings, `CLAUDE.md`, and language context. The d
 | E16: Do types make agents faster? | **24% faster** average, **45% on coordination-heavy features** (n=4). Same checker poorly-wired imposes 76% penalty — *integration matters as much as the type system*. |
 | E18: Do proc macros compress code? | **2-3×** at realistic scale (crossover at 2-4 instances). Beagle template macros can't express the test patterns. |
 | E19: Can agents write proc macros? | Yes, with docs (271s, 2 iterations). Without docs they invent runtime dispatch — proc macros need discoverability. |
+| E3b: Beagle vs hand-written Clojure | **36% wall-clock improvement** on agent-driven authoring task. |
 | E1-E15: vs Clojure / Python+mypy | Matches mypy correctness, beats Clojure correctness. mypy edges wall time — Beagle trades single-language speed for one typed surface across N backends. |
 
 [Full lab](https://github.com/tompassarelli/beagle-lab) — E0–E22, methodology, raw results.
 
+## Where the documentation lives
+
+Beagle does not ship a hand-written form-reference manual. The form
+catalog rots faster than humans can maintain it against a moving
+surface, and the compiler already knows every form's shape, every
+stdlib signature, every type rule. Reference questions get answered
+from the source:
+
+- **What forms exist?** Grep `parse.rkt` or run `bin/beagle-provides`
+  on the beagle source itself.
+- **What's the signature of X?** `bin/beagle-sig X` or read the stdlib
+  catalog at `beagle-lib/private/stdlib-*.rkt`.
+- **What fields does record R have?** `bin/beagle-fields R FILE`.
+- **What does this error mean?** The error message tells you; the
+  parser source is `beagle-lib/private/parse.rkt`.
+
+Hand-written documentation is reserved for things the compiler can't
+generate from itself:
+
+- [`README.md`](README.md) — this file: what beagle is, the principles, the lock-in discipline.
+- [`CLAUDE.md`](CLAUDE.md) — session anchor for LLM context: how to navigate, what tools exist.
+- [`lab/journal/synthesis/design-principle.md`](lab/journal/synthesis/design-principle.md) — long-form principles with full rationale for each surface decision.
+- [`lab/journal/log/`](lab/journal/log/) — chronological audit notes, especially logs 024-027 for the 2026-05 surface redesign cycle.
+- [`lab/plans/`](lab/plans/) — workstream plans (active + done, with frontmatter status).
+- [`beagle-lab`](https://github.com/tompassarelli/beagle-lab) — experiment writeups (E0–E22+) with raw results and methodology.
+
 ## Status
 
-`#lang beagle` v0.14.0 — 1343 tests passing. **No v1.0 until others have used it in anger.** The author dogfoods on a 220-file NixOS config ([firnos](https://github.com/tompassarelli/firnos)) — schema-typed end-to-end, system builds from `flake.bnix` directly. Production-grade for one user, ready-for-adventure for others.
+`#lang beagle` v0.14.0 — 1190 active-tier tests passing. **No v1.0
+until others have used it in anger.** The author dogfoods on a 220-file
+NixOS config ([firnos](https://github.com/tompassarelli/firnos)) —
+schema-typed end-to-end, system builds from `flake.bnix` directly.
+Production-grade for one user, ready-for-adventure for others.
 
-If you're a NixOS user who wants to try it: clone [firnos](https://github.com/tompassarelli/firnos) for a real working example, or scaffold from scratch — `beagle init`, then `beagle module add <name>` for a minimal first module.
-
-## Documentation
-
-- [`beagle-doc/scribblings/nix-target.scrbl`](beagle-doc/scribblings/nix-target.scrbl) — Scribble reference for the Nix target
-- [`beagle-doc/scribblings/`](beagle-doc/scribblings/) — Scribble docs (`raco docs beagle` after install)
-- [`CLAUDE.md`](CLAUDE.md) — session anchor + design rules (load as LLM context)
-- [`beagle-lab`](https://github.com/tompassarelli/beagle-lab) — research journal, experiment results
+If you're a NixOS user who wants to try it: clone [firnos](https://github.com/tompassarelli/firnos)
+for a real working example, or scaffold from scratch — `beagle init`,
+then `beagle module add <name>` for a minimal first module.
 
 ## License
 

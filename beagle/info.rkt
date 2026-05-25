@@ -1,6 +1,6 @@
 #lang info
 (define collection 'multi)
-(define deps '("beagle-lib" "beagle-doc"))
+(define deps '("beagle-lib"))
 (define build-deps '("beagle-test"))
-(define implies '("beagle-lib" "beagle-doc"))
-(define version "0.13.1")
+(define implies '("beagle-lib"))
+(define version "0.14.0")

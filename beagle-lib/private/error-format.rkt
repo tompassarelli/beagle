@@ -61,7 +61,7 @@
 (define (hint-for msg)
   (cond
     [(regexp-match? #rx"unknown beagle form" msg)
-     "see beagle-doc/scribblings/ for the form catalog"]
+     "the form may have been removed; check parse.rkt or run bin/beagle-provides on a working file for the current form set"]
     [(regexp-match? #rx"unknown type" msg)
      "primitives: String Int Float Bool Keyword Symbol Nil Any; or [A B -> R], (Vec T), (U A B)"]
     [(regexp-match? #rx"bad field spec" msg)

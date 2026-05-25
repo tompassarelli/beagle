@@ -1,13 +1,24 @@
 # beagle — session anchor
 
-A multi-target authoring IR. Racket frontend with custom `#lang`, macros
-(safe template + procedural with typed AST contracts; no `unsafe` kind),
-static type checking; emits Clojure, ClojureScript, JavaScript, Nix, SQL,
-Python, or Typed Racket source for runtime. `.bgl` is the primary file
-extension (`.rkt` still accepted for backward compatibility).
+A multi-target typed authoring IR. Racket frontend with custom `#lang`,
+macros (safe template + procedural with typed AST contracts; no `unsafe`
+kind), static type checking; emits Clojure, ClojureScript, JavaScript,
+Nix, SQL, Python, or Typed Racket source for runtime. `.bgl` is the
+primary file extension (`.rkt` still accepted for backward compatibility).
 
-**LLM authoring is a first-class concern.** Rich types, explicit forms, low
-syntactic surface area, structured errors. One canonical idiom per concept.
+**Identity vs phase.** Beagle *is* multi-target — emitters for all seven
+backends exist and the abstractions are proven portable. The current
+*phase* is establishing beagle as the de facto authoring language for
+Nix. Surface decisions during this phase are evaluated primarily against
+Nix needs; portability is a secondary constraint rather than a blocking
+one. Other targets (Clojure, JS, ClojureScript, Python, SQL, Typed
+Racket) are supported at the abstraction level but are not the current
+focus of test-pass investment or community-adoption work. When Nix
+entrenchment is real, the phase shifts; the identity doesn't.
+
+**LLM authoring is a first-class concern.** Rich types, explicit forms,
+low syntactic surface area, structured errors. One canonical idiom per
+concept.
 
 ## Status
 
@@ -414,14 +425,29 @@ Audited and confirmed as distinct concepts (not redundancy):
 ## Setup (one-time)
 
 ```
-raco pkg install --link beagle-lib/ beagle-test/ beagle-doc/ beagle/
+raco pkg install --link beagle-lib/ beagle-test/ beagle/
 ```
 
 ## Reference
 
-- `beagle-doc/scribblings/*.scrbl` — canonical language reference (Scribble source of truth)
-- `lab/journal/log/` — development journal (chronological discoveries + experiments)
-- `lab/journal/synthesis/` — analytical/atemporal notes (audits, design rationale snapshots)
+The hand-written form-reference manual was deleted 2026-05-25 — it was
+drifting from the moving surface faster than it could be maintained.
+The compiler is the source of truth for everything mechanical.
+
+For mechanical questions ("what forms exist?", "what's the signature of X?",
+"what fields does R have?"):
+- `bin/beagle-sig NAME FILE...` — typed signature lookup
+- `bin/beagle-fields RECORD FILE...` — record fields, types, accessors
+- `bin/beagle-provides FILE...` — module exports
+- `bin/beagle-callers NAME FILE...` — call sites
+- Or read `beagle-lib/private/parse.rkt` for the form set, `stdlib-*.rkt` for the typed extern catalog
+
+For non-mechanical questions ("why does the surface look this way?",
+"what was dropped and why?"):
+- `README.md` — what beagle is, the five principles, the lock-in discipline
+- `lab/journal/synthesis/design-principle.md` — long-form principles + audit-endpoint discipline
+- `lab/journal/log/` — chronological audit notes (logs 024-027 cover the 2026-05 redesign)
 - `lab/plans/` — workstream plans (active + done, with frontmatter status)
 - `lab/experiments/` — experiment archive (mirrors `~/code/beagle-lab/`)
+- `~/code/beagle-lab/` — full experiment results (E0–E22+)
 - `~/code/beagle-lab/` — historical experiment archive (E0–E22, benchmark framework, results)
