@@ -1466,6 +1466,7 @@
          ANY)]
     [(quoted? e) ANY]
     [(regex-lit? e) ANY]
+    [(flake-input-form? e) (type-prim 'NixType)]
     [(vec-form? e)
      (define items (vec-form-items e))
      (if (null? items)
