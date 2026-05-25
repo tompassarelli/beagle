@@ -714,32 +714,43 @@
   ;; Map Nix binary operators to beagle/nix call forms. String concat
   ;; (+) uses (s ...); arithmetic + uses (+ ...); attrset merge (//)
   ;; uses (// ...) or a stdlib helper.
-  (define lhs-str (emit-expr lhs depth))
-  (define rhs-str (emit-expr rhs depth))
   (case op
     [("+")
-     ;; Could be string-concat or arithmetic — beagle's (s ...) handles
-     ;; the string case, but for numeric we want (+ ...). For MVP,
-     ;; pick (s ...) since string-concat is the overwhelmingly common
-     ;; case in NixOS configs and the checker will reject mismatched
-     ;; types either way.
-     (format "(s ~a ~a)" lhs-str rhs-str)]
-    [("-")  (format "(- ~a ~a)" lhs-str rhs-str)]
-    [("*")  (format "(* ~a ~a)" lhs-str rhs-str)]
-    [("/")  (format "(/ ~a ~a)" lhs-str rhs-str)]
-    [("++") (format "(++ ~a ~a)" lhs-str rhs-str)]
-    [("//") (format "(// ~a ~a)" lhs-str rhs-str)]
-    [("==") (format "(== ~a ~a)" lhs-str rhs-str)]
-    [("!=") (format "(!= ~a ~a)" lhs-str rhs-str)]
-    [("<")  (format "(< ~a ~a)" lhs-str rhs-str)]
-    [(">")  (format "(> ~a ~a)" lhs-str rhs-str)]
-    [("<=") (format "(<= ~a ~a)" lhs-str rhs-str)]
-    [(">=") (format "(>= ~a ~a)" lhs-str rhs-str)]
-    [("&&") (format "(and ~a ~a)" lhs-str rhs-str)]
-    [("||") (format "(or ~a ~a)" lhs-str rhs-str)]
-    [("->") (format "(implies ~a ~a)" lhs-str rhs-str)]
-    [("!")  (format "(not ~a)" lhs-str)]
-    [else   (format "; unsupported op ~a\n  (~a ~a ~a)" op op lhs-str rhs-str)]))
+     ;; Flatten nested + chains: (binop + (binop + a b) c) → (s a b c).
+     ;; Beagle's (s ...) is variadic; emitting flat preserves the
+     ;; original .nix's normalization shape (("a" + b + "c") vs nested
+     ;; (("a" + b) + "c") which nix-instantiate --parse preserves).
+     (define args (flatten-plus-chain `(binop ,op ,lhs ,rhs)))
+     (format "(s ~a)"
+             (string-join (map (λ (a) (emit-expr a depth)) args) " "))]
+    [else
+     (define lhs-str (emit-expr lhs depth))
+     (define rhs-str (emit-expr rhs depth))
+     (case op
+       [("-")  (format "(- ~a ~a)" lhs-str rhs-str)]
+       [("*")  (format "(* ~a ~a)" lhs-str rhs-str)]
+       [("/")  (format "(/ ~a ~a)" lhs-str rhs-str)]
+       [("++") (format "(++ ~a ~a)" lhs-str rhs-str)]
+       [("//") (format "(// ~a ~a)" lhs-str rhs-str)]
+       [("==") (format "(== ~a ~a)" lhs-str rhs-str)]
+       [("!=") (format "(!= ~a ~a)" lhs-str rhs-str)]
+       [("<")  (format "(< ~a ~a)" lhs-str rhs-str)]
+       [(">")  (format "(> ~a ~a)" lhs-str rhs-str)]
+       [("<=") (format "(<= ~a ~a)" lhs-str rhs-str)]
+       [(">=") (format "(>= ~a ~a)" lhs-str rhs-str)]
+       [("&&") (format "(and ~a ~a)" lhs-str rhs-str)]
+       [("||") (format "(or ~a ~a)" lhs-str rhs-str)]
+       [("->") (format "(implies ~a ~a)" lhs-str rhs-str)]
+       [("!")  (format "(not ~a)" lhs-str)]
+       [else   (format "; unsupported op ~a\n  (~a ~a ~a)" op op lhs-str rhs-str)])]))
+
+(define (flatten-plus-chain ast)
+  ;; Walk a (binop "+" lhs rhs) tree left-associatively, flattening
+  ;; into a list of operand exprs. (binop "+" (binop "+" a b) c) → (a b c).
+  (match ast
+    [(list 'binop "+" lhs rhs)
+     (append (flatten-plus-chain lhs) (flatten-plus-chain rhs))]
+    [_ (list ast)]))
 
 (define (emit-lambda kind body depth)
   (match kind
