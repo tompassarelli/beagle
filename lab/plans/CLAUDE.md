@@ -1,5 +1,6 @@
 # Active work — priority order
 
+- **typed-flake-inputs.md** — close the last escape hatch (`nix-ident`) by adding a typed `flake-input` primitive; add dockerTools stdlib coverage; port claude-sandbox.bnix. Precondition for the Nix Discourse launch — the "no escape hatches" claim has to match reality before the artifact goes public.
 - **cyclone-self-host.md** — bootstrap beagle on Cyclone Scheme; remove Racket runtime dependency. UNBLOCKED 2026-05-25 (surface-redesign closed)
 - **schema-typed-paths.md** — extend `.beagle-cache/<x>-schema.json` ingestion beyond Nix + SQL (TS .d.ts, typeshed, OpenAPI, JSON Schema, etc.)
 - **unsafe-capabilities.md** — formalize the informal "no unsafe ever" dogma as a typed capability system (unsafe-ffi, unsafe-compile-time-eval, etc.). Depends on cyclone-self-host introducing the first real FFI case.
