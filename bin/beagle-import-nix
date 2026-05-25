@@ -143,6 +143,8 @@
        (cond
          [(memv ch '(#\( #\) #\{ #\} #\[ #\] #\; #\, #\:))
           (loop (add1 i) (cons (tok 'punct (string ch)) acc))]
+         [(char=? ch #\@)
+          (loop (add1 i) (cons (tok 'punct "@") acc))]
          [(char=? ch #\.)
           (loop (add1 i) (cons (tok 'punct ".") acc))]
          [(char=? ch #\=)
@@ -391,14 +393,32 @@
      (parse-binop)]))
 
 (define (parse-binop)
-  ;; Left-associative chain: parse-apply (OP parse-apply)*
-  (let loop ([acc (parse-apply)])
+  ;; Left-associative chain: parse-unary (OP parse-unary)*
+  (let loop ([acc (parse-unary)])
     (define t (peek))
     (cond
       [(and t (eq? (tok-kind t) 'op))
        (define op (tok-val (advance!)))
-       (loop `(binop ,op ,acc ,(parse-apply)))]
+       (cond
+         [(string=? op "?")
+          ;; Has-attr operator: expr ? attr.path → (has-attr expr [path...])
+          ;; Path is dotted, parsed as sequence of attr names.
+          (define path (parse-attr-path))
+          (loop `(has-attr ,acc ,path))]
+         [else (loop `(binop ,op ,acc ,(parse-unary)))])]
       [else acc])))
+
+(define (parse-unary)
+  ;; Prefix unary operators: ! and -. Both have higher precedence than
+  ;; binary ops; nix-instantiate parens them tight when they appear.
+  (define t (peek))
+  (cond
+    [(and t (eq? (tok-kind t) 'op)
+          (or (string=? (tok-val t) "!")
+              (string=? (tok-val t) "-")))
+     (define op (tok-val (advance!)))
+     `(unop ,op ,(parse-unary))]
+    [else (parse-apply)]))
 
 (define (lambda-ahead?)
   ;; Lookahead: detect `NAME :` or `{ formals } :` lambda shape.
@@ -438,17 +458,35 @@
 (define (parse-lambda)
   (cond
     [(and (peek) (eq? (tok-kind (peek)) 'name))
-     ;; Single-arg lambda: NAME : body
+     ;; NAME : body  OR  NAME @ { formals } : body  OR  { formals } @ NAME : body
+     ;; (handled below for the latter; here just the bare name case)
      (define name (tok-val (advance!)))
-     (expect-punct! ":")
-     `(lambda (single ,(string->symbol name)) ,(parse-expr))]
+     (cond
+       [(consume-punct? "@")
+        ;; name@{ formals }: body
+        (expect-punct! "{")
+        (define formals (parse-formals))
+        (expect-punct! "}")
+        (expect-punct! ":")
+        `(lambda (formals-at ,(string->symbol name) ,formals before) ,(parse-expr))]
+       [else
+        (expect-punct! ":")
+        `(lambda (single ,(string->symbol name)) ,(parse-expr))])]
     [else
-     ;; Formals lambda: { args, ... } : body
+     ;; { formals } : body  OR  { formals } @ name : body
      (expect-punct! "{")
      (define formals (parse-formals))
      (expect-punct! "}")
-     (expect-punct! ":")
-     `(lambda (formals ,formals) ,(parse-expr))]))
+     (cond
+       [(consume-punct? "@")
+        (define alias-tok (advance!))
+        (unless (eq? (tok-kind alias-tok) 'name)
+          (error 'beagle-import-nix "@ lambda: expected name after @"))
+        (expect-punct! ":")
+        `(lambda (formals-at ,(string->symbol (tok-val alias-tok)) ,formals after) ,(parse-expr))]
+       [else
+        (expect-punct! ":")
+        `(lambda (formals ,formals) ,(parse-expr))])]))
 
 (define (parse-formals)
   ;; Comma-separated NAME [? default], optionally ending with `...`.
@@ -499,18 +537,28 @@
       [(consume-punct? ".")
        (define seg (parse-attr-name))
        (loop target (cons seg path))]
+      [(consume-name? "or")
+       ;; Default-value-on-attr-access: target.a.b or default →
+       ;; (select-or target [path...] default)
+       (define default-expr (parse-atom))
+       (define new-target
+         (if (null? path)
+             `(binop "or" ,target ,default-expr)
+             `(select-or ,target ,(reverse path) ,default-expr)))
+       (loop new-target '())]
       [else
        (if (null? path)
            target
            `(select ,target ,(reverse path)))])))
 
 (define (parse-attr-name)
-  ;; Attr names can be plain identifiers, quoted strings, or ${...}
-  ;; (which appears as a name-token of form "${...}").
+  ;; Attr names can be plain identifiers, quoted strings, integers
+  ;; (services.foo.9090 etc), or ${...}.
   (define t (advance!))
   (case (tok-kind t)
     [(name) (tok-val t)]
     [(str)  (list 'str (tok-val t))]
+    [(int)  (tok-val t)]
     [else (error 'beagle-import-nix "expected attr name, got ~v" t)]))
 
 (define (parse-atom)
@@ -713,8 +761,29 @@
              (string-join (map (λ (a) (emit-expr a depth)) (cdr args)) " "))]
     [(list 'binop op lhs rhs)
      (emit-binop op lhs rhs depth)]
+    [(list 'unop "!" arg)
+     (format "(not ~a)" (emit-expr arg depth))]
+    [(list 'unop "-" arg)
+     (format "(- ~a)" (emit-expr arg depth))]
+    [(list 'has-attr target path)
+     ;; (has? target [path...]) — beagle uses has? for attr-presence
+     (format "(has? ~a ~a)"
+             (emit-expr target depth)
+             (string-join
+               (map (λ (s) (if (string? s) (format ":~a" s) (format "~v" (cadr s)))) path)
+               " "))]
     [(list 'select target path)
      (emit-select target path depth)]
+    [(list 'select-or target path default)
+     ;; (get-or target path default) — beagle/nix's form for
+     ;; attr-access-with-default. Path is emitted as a list of
+     ;; string keys; default falls through to emit-expr.
+     (format "(get-or ~a [~a] ~a)"
+             (emit-expr target depth)
+             (string-join
+               (map (λ (s) (if (string? s) (format "~s" s) (format "~v" (cadr s)))) path)
+               " ")
+             (emit-expr default depth))]
     [(list 'attrset bindings)
      (emit-attrset bindings depth)]
     [(list 'rec-attrset bindings)
@@ -825,44 +894,130 @@
      (format "(module [~a]\n~a~a)"
              (string-join names " ")
              (indent (add1 depth))
-             (emit-expr body (add1 depth)))]))
+             (emit-expr body (add1 depth)))]
+    [(list 'formals-at alias (list args ellipsis?) _position)
+     ;; { args, ... }@alias: body  →  module-with-alias.
+     ;; beagle has no direct equivalent of @-alias; emit as a let-bound
+     ;; alias = (module-args-as-attrset). Functionally equivalent.
+     (define names (map (λ (p) (symbol->string (car p))) args))
+     (format "(module [~a]\n~a;; @-alias `~a` flattened — original referenced the full attrset~n~a(let [~a {~a}]~n~a~a))"
+             (string-join names " ")
+             (indent (add1 depth))
+             alias
+             (indent (add1 depth))
+             alias
+             (string-join (map (λ (n) (format ":~a ~a" n n)) names) " ")
+             (indent (+ depth 2))
+             (emit-expr body (+ depth 2)))]))
 
 (define (emit-let bindings body depth)
+  ;; Expand inherit/inherit-from into explicit name=value bindings,
+  ;; same as emit-attrset does.
+  (define expanded
+    (apply append
+           (map (λ (b)
+                  (match b
+                    [(list 'inherit names)
+                     (map (λ (n) (list 'bind (list (symbol->string n)) `(id ,n))) names)]
+                    [(list 'inherit-from src names)
+                     (map (λ (n)
+                            (list 'bind (list (symbol->string n))
+                                  `(select ,src (,(symbol->string n)))))
+                          names)]
+                    [_ (list b)]))
+                bindings)))
   (format "(let [~a]\n~a~a)"
           (string-join
             (map (λ (b)
                    (match b
                      [(list 'bind (list path) val)
-                      (format "~a ~a" path (emit-expr val depth))]
+                      (define name-str
+                        (cond
+                          [(string? path) path]
+                          [(pair? path) (cadr path)] ; (str s) → s
+                          [else (format "~v" path)]))
+                     (format "~a ~a" name-str (emit-expr val depth))]
                      [_ (format "; unsupported let binding: ~v" b)]))
-                 bindings)
+                 expanded)
             "\n        ")
           (indent (add1 depth))
           (emit-expr body (add1 depth))))
 
 (define (emit-select target path depth)
-  ;; target.a.b.c → target.a.b.c (beagle/nix uses same dotted-access syntax)
-  (define base (emit-expr target depth))
-  (define path-str
-    (string-join
-      (map (λ (seg)
-             (match seg
-               [(? string? s) s]
-               [(list 'str s) (format "~v" s)]))
-           path)
-      "."))
-  (format "~a.~a" base path-str))
+  ;; Static dotted access: target.a.b.c → target.a.b.c
+  ;; Dynamic segments (from ${expr} in source) need (get target key-expr)
+  ;; because beagle/nix's dotted-access syntax requires literal names.
+  ;;
+  ;; Strategy: split path into runs of static vs dynamic segments. Static
+  ;; runs use dotted access; dynamic segments use nested (get ...) calls.
+  (let loop ([acc-expr-str (emit-expr target depth)] [segs path])
+    (cond
+      [(null? segs) acc-expr-str]
+      [else
+       (define seg (car segs))
+       (cond
+         [(and (pair? seg) (eq? (car seg) 'str) (pair? (cadr seg))
+               (= (length (cadr seg)) 1) (pair? (caadr seg))
+               (eq? (car (caadr seg)) 'interp))
+          ;; Single-interp string key: target.${expr}.rest →
+          ;;   (get target (emit expr)) . rest
+          (define key-expr (emit-interp-expr (cadr (caadr seg))))
+          (loop (format "(get ~a ~a)" acc-expr-str key-expr)
+                (cdr segs))]
+         [else
+          ;; Collect consecutive static segments and emit as dotted.
+          (define-values (static-run rest)
+            (let inner ([s (cons seg (cdr segs))] [out '()])
+              (cond
+                [(null? s) (values (reverse out) '())]
+                [(static-seg? (car s))
+                 (inner (cdr s) (cons (car s) out))]
+                [else (values (reverse out) s)])))
+          (cond
+            [(null? static-run)
+             ;; First segment was dynamic — already handled above; loop.
+             (loop acc-expr-str (cdr segs))]
+            [else
+             (define dotted
+               (string-join
+                 (map (λ (s) (if (string? s) s (format "~v" (cadr s)))) static-run)
+                 "."))
+             (loop (format "~a.~a" acc-expr-str dotted) rest)])])])))
+
+(define (static-seg? seg)
+  (or (string? seg)
+      (and (pair? seg) (eq? (car seg) 'str) (string? (cadr seg)))))
 
 (define (emit-attrset bindings depth)
   (cond
     [(null? bindings) "{}"]
     [else
+     ;; Expand inherit/inherit-from into explicit key-value bindings,
+     ;; since beagle/nix's {} only accepts pairs (it doesn't have a
+     ;; special syntax for inherit inside map literals).
+     (define expanded (apply append (map expand-binding bindings)))
      (string-append
        "{"
        (string-join
-         (map (λ (b) (emit-binding b (add1 depth))) bindings)
+         (map (λ (b) (emit-binding b (add1 depth))) expanded)
          (string-append "\n" (indent (add1 depth))))
        "}")]))
+
+(define (expand-binding b)
+  ;; inherit foo bar → bind :foo foo + bind :bar bar
+  ;; inherit-from src foo bar → bind :foo src.foo + bind :bar src.bar
+  ;; regular bind → unchanged
+  (match b
+    [(list 'inherit names)
+     (map (λ (n)
+            (list 'bind (list (symbol->string n)) `(id ,n)))
+          names)]
+    [(list 'inherit-from src names)
+     (map (λ (n)
+            (list 'bind (list (symbol->string n))
+                  `(select ,src (,(symbol->string n)))))
+          names)]
+    [_ (list b)]))
 
 (define (emit-binding b depth)
   (match b
