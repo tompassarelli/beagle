@@ -77,10 +77,14 @@ Every surface decision was filtered through these. They are load-bearing.
    produce better errors.
 
 4. **Zero escape hatches.** No `unsafe-js`, no `unsafe-clj`, no inline
-   target passthrough, no `(define-macro unsafe ...)`. Every gap closes
-   by adding a stdlib type signature, adding a surface form, or writing
-   a sibling target-language file and importing it. The filesystem
-   boundary is auditable; an inline backdoor is not.
+   target passthrough, no `(define-macro unsafe ...)`, no `nix-ident`
+   verbatim-string-to-Nix emission. Every gap closes by adding a stdlib
+   type signature, adding a typed surface form (the way `flake-input`
+   replaced `nix-ident` for flake-attribute access), or writing a
+   sibling target-language file and importing it. The filesystem
+   boundary is auditable; an inline backdoor is not. The claim holds
+   as of 2026-05-25: the `nix-ident` form was the last
+   escape-hatch-by-another-name and is now a parse-time error.
 
 5. **Consistency compounds; ergonomic savings don't.** A form earns its
    place by reinforcing a pattern that shows up elsewhere. Forms that
