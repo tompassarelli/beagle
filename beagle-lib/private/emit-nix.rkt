@@ -448,8 +448,24 @@
      (emit-expr (with-meta-expr e) depth)]
 
     [(method-call? e)
-     (error 'emit-nix
-            "method calls (.foo target) have no Nix translation. Use (foo target ...) for plain function application or (target.foo ...) for attrset access.")]
+     ;; (.attr target args ...) → (target.attr args ...) in Nix.
+     ;; Used for attr-access on a parenthesized expression: in Nix
+     ;; you write `(expr).attr arg` for `(get expr "attr")` applied
+     ;; to arg. Beagle's dotted-access syntax requires a leading
+     ;; identifier, so this is the canonical way to express "attr
+     ;; access on a complex expression" in beagle/nix.
+     (define method-str (substring (symbol->string (method-call-method-name e)) 1))
+     (define target-str (paren-wrap (emit-expr (method-call-target e) depth)
+                                    (method-call-target e)))
+     (define arg-strs
+       (map (lambda (a) (paren-wrap (emit-expr a depth) a))
+            (method-call-args e)))
+     (cond
+       [(null? arg-strs) (format "~a.~a" target-str method-str)]
+       [else
+        (format "~a.~a ~a"
+                target-str method-str
+                (string-join arg-strs " "))])]
 
     [(await-form? e)
      (error 'emit-nix "await is only supported in beagle/js")]
@@ -982,6 +998,9 @@
     [(<) "<"] [(>) ">"] [(<=) "<="] [(>=) ">="]
     [(=) "=="] [(==) "=="] [(not=) "!="] [(!=) "!="]
     [(and) "&&"] [(or) "||"]
+    [(++) "++"]         ;; Nix list concatenation
+    [(//) "//"]         ;; Nix attrset update/merge
+    [(->) "->"]         ;; Nix logical implication
     [else #f]))
 
 (define (paren-wrap text expr)

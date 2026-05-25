@@ -153,7 +153,10 @@
              (loop (+ i 2) (cons (tok 'op "==") acc))]
             [else (loop (add1 i) (cons (tok 'punct "=") acc))])]
          [(char=? ch #\?)
-          (loop (add1 i) (cons (tok 'punct "?") acc))]
+          ;; ? is both the has-attr operator (expr ? attr) and the
+          ;; formals-default marker (name ? default). Tokenize as 'op
+          ;; and let parsers check both kinds via tok-val comparison.
+          (loop (add1 i) (cons (tok 'op "?") acc))]
          [(char=? ch #\+)
           (cond
             [(and (< (add1 i) len) (char=? (string-ref str (add1 i)) #\+))
@@ -357,6 +360,14 @@
      #t]
     [else #f]))
 
+(define (consume-op? s)
+  (define t (peek))
+  (cond
+    [(and t (eq? (tok-kind t) 'op) (string=? (tok-val t) s))
+     (advance!)
+     #t]
+    [else #f]))
+
 (define (parse-normalized str)
   (parameterize ([cursor (tokenize str)])
     (define result (parse-expr))
@@ -437,7 +448,7 @@
 
 (define (formals-then-colon?)
   ;; Look at tokens after current position. We're at '{'. Walk to matching
-  ;; '}' and check if next token is ':'.
+  ;; '}' and check if next token is ':' OR '@ NAME :' (for { ... } @ name: body).
   (define toks (cursor))
   (let loop ([rest (cdr toks)] [depth 1])
     (cond
@@ -450,8 +461,19 @@
          [(and (eq? (tok-kind t) 'punct) (string=? (tok-val t) "}"))
           (define new-depth (sub1 depth))
           (if (zero? new-depth)
+              ;; Check : OR @ NAME : after }
               (let ([nxt (and (pair? (cdr rest)) (cadr rest))])
-                (and nxt (eq? (tok-kind nxt) 'punct) (string=? (tok-val nxt) ":")))
+                (cond
+                  [(and nxt (eq? (tok-kind nxt) 'punct) (string=? (tok-val nxt) ":"))
+                   #t]
+                  [(and nxt (eq? (tok-kind nxt) 'punct) (string=? (tok-val nxt) "@"))
+                   ;; Should be @ NAME :
+                   (define after-at (and (pair? (cddr rest)) (caddr rest)))
+                   (define after-name (and (pair? (cdddr rest)) (cadddr rest)))
+                   (and after-at (eq? (tok-kind after-at) 'name)
+                        after-name (eq? (tok-kind after-name) 'punct)
+                        (string=? (tok-val after-name) ":"))]
+                  [else #f]))
               (loop (cdr rest) new-depth))]
          [else (loop (cdr rest) depth)])])))
 
@@ -500,7 +522,7 @@
        (define name (tok-val (advance!)))
        (define default
          (cond
-           [(consume-punct? "?") (parse-expr)]
+           [(consume-op? "?") (parse-expr)]
            [else #f]))
        (define new-acc (cons (list (string->symbol name) default) acc))
        (cond
@@ -775,15 +797,38 @@
     [(list 'select target path)
      (emit-select target path depth)]
     [(list 'select-or target path default)
-     ;; (get-or target path default) — beagle/nix's form for
-     ;; attr-access-with-default. Path is emitted as a list of
-     ;; string keys; default falls through to emit-expr.
-     (format "(get-or ~a [~a] ~a)"
-             (emit-expr target depth)
-             (string-join
-               (map (λ (s) (if (string? s) (format "~s" s) (format "~v" (cadr s)))) path)
-               " ")
-             (emit-expr default depth))]
+     ;; beagle/nix's (get-or base attr-symbol default) handles single-
+     ;; attribute access with default. For multi-segment paths
+     ;; (a.b.c or default), nest: chain the inner accesses statically
+     ;; and apply get-or to only the OUTERMOST segment, because that's
+     ;; where the default kicks in semantically (Nix's `a.b.c or X`
+     ;; means "try the full path; if any segment missing, X").
+     ;;
+     ;; In practice, multi-segment-with-or is rare; single-segment
+     ;; dominates. For multi-segment we still produce semantically
+     ;; correct beagle by emitting nested get-or on the final segment
+     ;; with intermediate plain attr access.
+     (cond
+       [(= (length path) 1)
+        (define attr-str
+          (let ([s (car path)])
+            (cond [(string? s) s]
+                  [else (cadr s)])))
+        (format "(get-or ~a ~a ~a)"
+                (emit-expr target depth) attr-str (emit-expr default depth))]
+       [else
+        ;; Multi-segment: target.a.b.c or default → access target.a.b
+        ;; statically, then get-or on .c with default.
+        (define prefix (drop-right path 1))
+        (define last-seg (last path))
+        (define prefix-target `(select ,target ,prefix))
+        (define last-attr-str
+          (cond [(string? last-seg) last-seg]
+                [else (cadr last-seg)]))
+        (format "(get-or ~a ~a ~a)"
+                (emit-expr prefix-target depth)
+                last-attr-str
+                (emit-expr default depth))])]
     [(list 'attrset bindings)
      (emit-attrset bindings depth)]
     [(list 'rec-attrset bindings)
@@ -888,11 +933,20 @@
 (define (emit-lambda kind body depth)
   (match kind
     [(list 'single name)
-     (format "(fn-set (~a) ~a)" name (emit-expr body depth))]
+     ;; Single-arg bare lambda: x: body → (fn [x] body) which beagle emits
+     ;; as `x: body`. (fn-set ...) would emit `{ x }: body` which is the
+     ;; FORMALS shape — semantically different.
+     (format "(fn [~a] ~a)" name (emit-expr body depth))]
     [(list 'formals (list args ellipsis?))
      (define names (map (λ (p) (symbol->string (car p))) args))
-     (format "(module [~a]\n~a~a)"
-             (string-join names " ")
+     ;; Use (fn-set ...) for round-trip fidelity: ellipsis is preserved
+     ;; only when present in the original. (module [args]) always
+     ;; implies ellipsis which over-translates.
+     (define args-str
+       (cond [ellipsis? (string-append (string-join names " ") " ...")]
+             [else (string-join names " ")]))
+     (format "(fn-set (~a)\n~a~a)"
+             args-str
              (indent (add1 depth))
              (emit-expr body (add1 depth)))]
     [(list 'formals-at alias (list args ellipsis?) _position)
@@ -945,12 +999,16 @@
 
 (define (emit-select target path depth)
   ;; Static dotted access: target.a.b.c → target.a.b.c
-  ;; Dynamic segments (from ${expr} in source) need (get target key-expr)
-  ;; because beagle/nix's dotted-access syntax requires literal names.
-  ;;
-  ;; Strategy: split path into runs of static vs dynamic segments. Static
-  ;; runs use dotted access; dynamic segments use nested (get ...) calls.
-  (let loop ([acc-expr-str (emit-expr target depth)] [segs path])
+  ;; Dynamic segments (from ${expr} in source) need (get target key-expr).
+  ;; Non-identifier targets (e.g. parenthesized applications) need
+  ;; (.attr target) method-call shape because beagle's dotted syntax
+  ;; only works on identifier prefixes.
+  (define base-str (emit-expr target depth))
+  (define target-is-id?
+    (and (pair? target)
+         (or (eq? (car target) 'id)
+             (eq? (car target) 'select))))
+  (let loop ([acc-expr-str base-str] [segs path] [first-step? #t])
     (cond
       [(null? segs) acc-expr-str]
       [else
@@ -959,11 +1017,10 @@
          [(and (pair? seg) (eq? (car seg) 'str) (pair? (cadr seg))
                (= (length (cadr seg)) 1) (pair? (caadr seg))
                (eq? (car (caadr seg)) 'interp))
-          ;; Single-interp string key: target.${expr}.rest →
-          ;;   (get target (emit expr)) . rest
+          ;; Single-interp string key
           (define key-expr (emit-interp-expr (cadr (caadr seg))))
           (loop (format "(get ~a ~a)" acc-expr-str key-expr)
-                (cdr segs))]
+                (cdr segs) #f)]
          [else
           ;; Collect consecutive static segments and emit as dotted.
           (define-values (static-run rest)
@@ -974,15 +1031,33 @@
                  (inner (cdr s) (cons (car s) out))]
                 [else (values (reverse out) s)])))
           (cond
-            [(null? static-run)
-             ;; First segment was dynamic — already handled above; loop.
-             (loop acc-expr-str (cdr segs))]
+            [(null? static-run) (loop acc-expr-str (cdr segs) #f)]
             [else
              (define dotted
                (string-join
                  (map (λ (s) (if (string? s) s (format "~v" (cadr s)))) static-run)
                  "."))
-             (loop (format "~a.~a" acc-expr-str dotted) rest)])])])))
+             (define new-acc
+               (cond
+                 [(and first-step? (not target-is-id?))
+                  ;; (complex-expr).a.b.c → method-call shape so
+                  ;; beagle/nix can emit it. First static seg becomes
+                  ;; (.a complex-expr); remaining segs append dotted.
+                  (define first-seg (car static-run))
+                  (define rest-segs (cdr static-run))
+                  (define first-str
+                    (cond [(string? first-seg) first-seg]
+                          [else (format "~v" (cadr first-seg))]))
+                  (define base-call (format "(.~a ~a)" first-str acc-expr-str))
+                  (cond
+                    [(null? rest-segs) base-call]
+                    [else
+                     (format "~a.~a" base-call
+                             (string-join
+                               (map (λ (s) (if (string? s) s (format "~v" (cadr s)))) rest-segs)
+                               "."))])]
+                 [else (format "~a.~a" acc-expr-str dotted)]))
+             (loop new-acc rest #f)])])])))
 
 (define (static-seg? seg)
   (or (string? seg)
@@ -1113,21 +1188,28 @@
 
 (define (emit-interp-expr nix-expr)
   ;; nix-expr is a raw substring of normalized Nix from inside a ${...}.
-  ;; Try to emit as a beagle expression that round-trips identically:
-  ;;   - simple identifier (foo, foo-bar, _bar): bare symbol
-  ;;   - dotted identifier (a.b.c): dotted symbol (beagle supports this)
-  ;;   - anything else: emit as an opaque string with a Nix interp marker
-  ;;     that beagle's emit will preserve in the output
+  ;; Strategy:
+  ;;   - simple identifier or dotted-id: emit as bare symbol
+  ;;   - anything else: recursively tokenize and parse as a beagle/nix
+  ;;     expression. If parse succeeds, emit. If it fails, fall back to
+  ;;     opaque ${...} preservation via $$ escape.
   (define trimmed (string-trim nix-expr))
   (cond
     [(regexp-match-exact? #rx"[a-zA-Z_][a-zA-Z0-9_-]*(\\.[a-zA-Z_][a-zA-Z0-9_'-]*)*" trimmed)
      trimmed]
     [else
-     ;; Complex expression — emit as a string fragment that beagle will
-     ;; pass through with the ${...} marker preserved. Format the string
-     ;; as a single-char-string "${EXPR}" via Nix-style $${ escape.
-     ;; That round-trips to ${EXPR} in the final .nix.
-     (format "~v" (format "$${~a}" trimmed))]))
+     ;; Try recursive parse using my own tokenizer/parser on the
+     ;; substring. The interp text is already in normalized form so
+     ;; my parser handles the same grammar.
+     (define parsed
+       (with-handlers ([exn:fail? (lambda (_) #f)])
+         (parameterize ([cursor (tokenize trimmed)])
+           (parse-expr))))
+     (cond
+       [parsed (emit-expr parsed 0)]
+       [else
+        ;; Fallback: opaque preservation
+        (format "~v" (format "$${~a}" trimmed))])]))
 
 ;; ============================================================================
 ;; Entry point
