@@ -1067,32 +1067,16 @@
   (cond
     [(null? bindings) "{}"]
     [else
-     ;; Expand inherit/inherit-from into explicit key-value bindings,
-     ;; since beagle/nix's {} only accepts pairs (it doesn't have a
-     ;; special syntax for inherit inside map literals).
-     (define expanded (apply append (map expand-binding bindings)))
+     ;; beagle/nix supports (inherit ...) and (inherit-from ...) as
+     ;; singleton items inside a {...} attrset; emit them directly
+     ;; for round-trip fidelity rather than expanding into explicit
+     ;; key/value bindings.
      (string-append
        "{"
        (string-join
-         (map (λ (b) (emit-binding b (add1 depth))) expanded)
+         (map (λ (b) (emit-binding b (add1 depth))) bindings)
          (string-append "\n" (indent (add1 depth))))
        "}")]))
-
-(define (expand-binding b)
-  ;; inherit foo bar → bind :foo foo + bind :bar bar
-  ;; inherit-from src foo bar → bind :foo src.foo + bind :bar src.bar
-  ;; regular bind → unchanged
-  (match b
-    [(list 'inherit names)
-     (map (λ (n)
-            (list 'bind (list (symbol->string n)) `(id ,n)))
-          names)]
-    [(list 'inherit-from src names)
-     (map (λ (n)
-            (list 'bind (list (symbol->string n))
-                  `(select ,src (,(symbol->string n)))))
-          names)]
-    [_ (list b)]))
 
 (define (emit-binding b depth)
   (match b

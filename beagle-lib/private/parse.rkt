@@ -1434,12 +1434,26 @@
   (map parse-expr forms))
 
 (define (parse-map-literal items)
-  (unless (even? (length items))
-    (error 'beagle "map literal must have an even number of forms (key/value pairs), got ~a"
-           (length items)))
+  ;; Items are normally key/value pairs (even count). To support Nix-style
+  ;; `inherit` and `inherit-from` bindings inside an attrset literal, a
+  ;; singleton `(inherit ...)` or `(inherit-from src ...)` item counts as
+  ;; ONE entry (the parsed inherit expression becomes the key with a
+  ;; sentinel value, picked up by emit-nix). The arity check happens after
+  ;; classifying.
   (let loop ([rest items] [acc '()])
     (cond
       [(null? rest) (map-form (reverse acc))]
+      [(let ([first-datum (->datum (car rest))])
+         (and (pair? first-datum)
+              (memq (car first-datum) '(inherit inherit-from))))
+       ;; Singleton inherit binding; key is the parsed form, value is #f
+       ;; (sentinel that emit-nix recognizes for inherit-style emission).
+       (loop (cdr rest)
+             (cons (cons (parse-expr (car rest)) #f) acc))]
+      [(null? (cdr rest))
+       (error 'beagle
+              "map literal: odd number of forms (expected key/value pair after position ~a)"
+              (length acc))]
       [else
        (loop (cddr rest)
              (cons (cons (parse-expr (car rest)) (parse-expr (cadr rest)))

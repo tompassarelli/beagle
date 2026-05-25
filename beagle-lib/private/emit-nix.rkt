@@ -1098,14 +1098,26 @@
        (for/list ([pair (in-list pairs)])
          (define key (car pair))
          (define val (cdr pair))
-         (define key-str (emit-key key depth))
          (cond
-           [(and (map-form? val)
-                 (string-contains? key-str ".")
-                 (= (length (map-form-pairs val)) 1))
-            (flatten-dot-path key-str (map-form-pairs val) depth)]
+           ;; Singleton inherit / inherit-from binding (parsed by
+           ;; parse-map-literal with val = #f). Emit Nix's inherit
+           ;; syntax directly: `inherit a b c;` or `inherit (src) a b c;`.
+           [(and (not val) (nix-inherit? key))
+            (list (format "~ainherit ~a;" ind
+                          (string-join (map symbol->string (nix-inherit-names key)) " ")))]
+           [(and (not val) (nix-inherit-from? key))
+            (list (format "~ainherit (~a) ~a;" ind
+                          (emit-expr (nix-inherit-from-ns-expr key) (+ depth 1))
+                          (string-join (map symbol->string (nix-inherit-from-names key)) " ")))]
            [else
-            (list (format "~a~a = ~a;" ind key-str (emit-expr val (+ depth 1))))])))
+            (define key-str (emit-key key depth))
+            (cond
+              [(and (map-form? val)
+                    (string-contains? key-str ".")
+                    (= (length (map-form-pairs val)) 1))
+               (flatten-dot-path key-str (map-form-pairs val) depth)]
+              [else
+               (list (format "~a~a = ~a;" ind key-str (emit-expr val (+ depth 1))))])])))
      (string-append
       "{\n"
       (string-join (apply append entries) "\n")
