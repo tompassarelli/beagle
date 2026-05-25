@@ -1,906 +1,739 @@
 #!/usr/bin/env racket
 #lang racket/base
 
-;; beagle-import-nix: mechanical converter from legacy .rkt to beagle/nix .bgl
-;; Handles: pkg, svc, hm-module, module-file, bundle-file, raw-file, submodule-impl
+;; beagle-import-nix: convert hand-written .nix to beagle/nix (.bnix).
+;;
+;; Strategy: pipe input through `nix-instantiate --parse` to get a
+;; normalized form (Nix syntax, single-line, fully parenthesized,
+;; semantically equivalent to the original). Parse that normalized form
+;; into an AST. Translate to beagle/nix source. Emit.
+;;
+;; The normalization step buys us a much simpler parsing job —
+;; `nix-instantiate --parse` handles all the messy parts (operator
+;; precedence, comments, whitespace, string-vs-multiline-string,
+;; etc.) before we ever see the input.
+;;
+;; Status: MVP. Handles attrsets, lists, function-with-formals,
+;; attribute access, string literals (with interpolation), integers,
+;; bools, null, identifiers, application, let, with, if-then-else,
+;; inherit. Does NOT yet recognize NixOS-module shape and emit the
+;; `(module ...)` macro — output is structurally equivalent raw
+;; lambda + attrset. Pattern recognition is a follow-up.
 
 (require racket/string
          racket/list
          racket/match
          racket/port
+         racket/system
          racket/format
-         racket/file)
+         racket/path)
 
-(define (read-all port)
-  (let loop ([acc '()])
-    (define d (read port))
-    (if (eof-object? d) (reverse acc) (loop (cons d acc)))))
+;; ============================================================================
+;; Driver
+;; ============================================================================
 
-(define (convert-file path)
-  (define text (file->string path))
-  (define forms
-    (with-input-from-string
-      (regexp-replace #rx"^#lang nisp\n?" text "")
-      (lambda () (read-all (current-input-port)))))
-  (when (null? forms)
-    (error 'beagle-import-nix "no forms in ~a" path))
-  (define form (car forms))
-  (match form
-    [(list 'pkg name desc)
-     (emit-pkg name desc #f)]
-    [(list 'pkg name)
-     (emit-pkg name (symbol->string name) #f)]
-    [(list 'pkg name pkg-path desc)
-     (emit-pkg name desc pkg-path)]
-
-    [(list 'svc name desc)
-     (emit-svc name desc)]
-
-    [(list 'hm-module name desc body ...)
-     (emit-hm-module name desc body)]
-
-    [(list 'module-file section name clauses ...)
-     (emit-module-file section name clauses)]
-
-    [(list 'bundle-file name clauses ...)
-     (emit-bundle-file name clauses)]
-
-    [(list 'raw-file body)
-     (emit-raw-file path body)]
-
-    [(list 'submodule-impl name body ...)
-     (emit-submodule-impl path name body)]
-
-    [(list 'flake-file body ...)
-     (fprintf (current-error-port) "MANUAL: ~a — flake needs hand conversion\n" path)
-     #f]
-
-    [(list 'host-file entries ...)
-     (emit-host-file path entries)]
-
-    [_
-     (fprintf (current-error-port) "SKIP: ~a — unrecognized pattern: ~v\n" path (car form))
-     #f]))
-
-;; ---------------------------------------------------------------------------
-;; datum->bgl: convert nisp s-expression to beagle/nix source text
-;; ---------------------------------------------------------------------------
-
-(define (datum->bgl d)
+(define (main argv-vec)
+  (define argv (vector->list argv-vec))
   (cond
-    [(eq? d #t) "true"]
-    [(eq? d #f) "false"]
-    [(null? d) "nil"]
-    [(string? d) (format "~s" d)]
-    [(number? d) (format "~a" d)]
-    [(symbol? d) (symbol->string d)]
-
-    [(not (list? d)) (format "~v" d)]
-
+    [(or (null? argv) (member "--help" argv) (member "-h" argv))
+     (display-usage)
+     (exit 0)]
+    [(member "--version" argv)
+     (displayln "beagle-import-nix 0.1.0 (MVP)")
+     (exit 0)]
     [else
-     (define tag (car d))
-     (case tag
-       ;; (lst v1 v2 ...) → [v1 v2 ...]
-       [(lst)
-        (format "[~a]" (string-join (map datum->bgl (cdr d)) " "))]
+     (define input-path (car argv))
+     (unless (file-exists? input-path)
+       (eprintf "beagle-import-nix: file not found: ~a\n" input-path)
+       (exit 1))
+     (define normalized (normalize-nix input-path))
+     (define ast (parse-normalized normalized))
+     (define ns-name (path->ns-name input-path))
+     (display (emit-bnix ast ns-name))
+     (newline)]))
 
-       ;; (att (k1 v1) (k2 v2) ...) → {:k1 v1 :k2 v2 ...}
-       [(att)
-        (emit-att-bgl (cdr d))]
+(define (display-usage)
+  (displayln "Usage: beagle-import-nix <file.nix> > file.bnix")
+  (displayln "")
+  (displayln "  Converts a hand-written .nix file to beagle/nix (.bnix).")
+  (displayln "  Output is written to stdout.")
+  (displayln "")
+  (displayln "  Status: MVP. Covers common attrset/list/function/let/with shapes.")
+  (displayln "  Output is semantically equivalent but may need manual cleanup to")
+  (displayln "  use beagle/nix's higher-level macros (module, with-cfg, etc.)."))
 
-       ;; (s expr1 expr2 ...) → (s expr1 expr2 ...)
-       [(s)
-        (format "(s ~a)" (string-join (map datum->bgl (cdr d)) " "))]
+(define (path->ns-name p)
+  ;; Best-effort ns: derive from the file's basename, stripping .nix.
+  (define name (path->string (file-name-from-path p)))
+  (regexp-replace #rx"\\.nix$" name ""))
 
-       ;; (ms "line1" "line2" ...) → (ms "line1" "line2" ...)
-       [(ms)
-        (format "(ms ~a)" (string-join (map datum->bgl (cdr d)) " "))]
+;; ============================================================================
+;; Step 1: normalize via nix-instantiate --parse
+;; ============================================================================
 
-       ;; (p "path") → (p "path")
-       [(p)
-        (format "(p ~s)" (cadr d))]
+(define (normalize-nix path)
+  (define-values (proc out in err)
+    (subprocess #f #f (current-error-port) (find-nix-instantiate)
+                "--parse" path))
+  (close-output-port in)
+  (define result (port->string out))
+  (close-input-port out)
+  (subprocess-wait proc)
+  (unless (zero? (subprocess-status proc))
+    (error 'beagle-import-nix
+           "nix-instantiate --parse failed for ~a" path))
+  result)
 
-       ;; (with-pkgs a b ...) → (with-do pkgs [a b ...])
-       [(with-pkgs)
-        (format "(with-do pkgs [~a])" (string-join (map datum->bgl (cdr d)) " "))]
+(define (find-nix-instantiate)
+  (or (find-executable-path "nix-instantiate")
+      (error 'beagle-import-nix
+             "nix-instantiate not on PATH — install nix to use beagle-import-nix")))
 
-       ;; (with-do expr body) → (with-do expr body)
-       [(with-do)
-        (format "(with-do ~a ~a)" (datum->bgl (cadr d)) (datum->bgl (caddr d)))]
+;; ============================================================================
+;; Step 2: parse normalized form into AST
+;; ============================================================================
+;;
+;; Normalized Nix grammar (from nix-instantiate --parse output):
+;;
+;;   expr      = lambda | let-expr | with-expr | if-expr | apply
+;;   lambda    = formals ':' expr | NAME ':' expr
+;;   formals   = '{' [formal (',' formal)* [',' '...']] '}'
+;;   formal    = NAME [? expr]
+;;   let-expr  = 'let' bindings 'in' expr
+;;   with-expr = 'with' expr ';' expr
+;;   if-expr   = 'if' expr 'then' expr 'else' expr
+;;   apply     = select (select)*
+;;   select    = atom ('.' attr-name)*
+;;   atom      = '(' expr ')' | attrset | list | string | int | bool | null | NAME
+;;   attrset   = '{' bindings '}'  | 'rec' '{' bindings '}'
+;;   bindings  = (binding ';')*
+;;   binding   = attr-path '=' expr | 'inherit' NAME* | 'inherit' '(' expr ')' NAME*
+;;   list      = '[' atom* ']'
+;;   string    = '"' chars '"' | ''' chars '''
+;;
+;; AST node tags:
+;;   ('lambda formals body)
+;;   ('let bindings body)
+;;   ('with scope body)
+;;   ('if c t e)
+;;   ('apply fn args)            — left-associative function application
+;;   ('select target path)       — path is list of strings (attr names)
+;;   ('attrset bindings)         — bindings is list of (binding-attrpath expr) or ('inherit ...)
+;;   ('list elems)
+;;   ('rec-attrset bindings)
+;;   ('str-lit s)                — simple string
+;;   ('str-interp parts)         — interpolated string: list of strings/exprs
+;;   ('int n) ('bool b) ('null)
+;;   ('id name)
+;;   ('inherit names)
+;;   ('inherit-from src names)
 
-       ;; (call fn arg1 ...) → (fn arg1 ...)
-       [(call)
-        (format "(~a)" (string-join (map datum->bgl (cdr d)) " "))]
+(struct tok (kind val) #:transparent)
 
-       ;; (mkif cond body) → (lib/mkIf cond body)
-       [(mkif)
-        (format "(lib/mkIf ~a ~a)" (datum->bgl (cadr d)) (datum->bgl (caddr d)))]
+(define (tokenize str)
+  ;; Lex the normalized form. The output is single-line with spaces
+  ;; between tokens — we can rely on that.
+  (define len (string-length str))
+  (let loop ([i 0] [acc '()])
+    (cond
+      [(>= i len) (reverse acc)]
+      [(char-whitespace? (string-ref str i)) (loop (add1 i) acc)]
+      [else
+       (define ch (string-ref str i))
+       (cond
+         [(memv ch '(#\( #\) #\{ #\} #\[ #\] #\; #\, #\:))
+          (loop (add1 i) (cons (tok 'punct (string ch)) acc))]
+         [(char=? ch #\.)
+          (loop (add1 i) (cons (tok 'punct ".") acc))]
+         [(char=? ch #\=)
+          (loop (add1 i) (cons (tok 'punct "=") acc))]
+         [(char=? ch #\?)
+          (loop (add1 i) (cons (tok 'punct "?") acc))]
+         [(char=? ch #\+)
+          (loop (add1 i) (cons (tok 'punct "+") acc))]
+         [(char=? ch #\")
+          (define-values (s next) (read-string-literal str (add1 i) #\"))
+          (loop next (cons (tok 'str s) acc))]
+         [(char=? ch #\')
+          ;; Multi-line string ''...'' — nix-instantiate --parse usually
+          ;; converts these to "..." with escapes, but handle just in case.
+          (define-values (s next) (read-string-literal str (add1 i) #\'))
+          (loop next (cons (tok 'str s) acc))]
+         [(or (char-numeric? ch) (and (char=? ch #\-)
+                                       (< (add1 i) len)
+                                       (char-numeric? (string-ref str (add1 i)))))
+          (define end (find-end str i char-numeric?))
+          (loop end (cons (tok 'int (substring str i end)) acc))]
+         [(or (char-alphabetic? ch) (char=? ch #\_) (char=? ch #\/))
+          (define end (find-end str i name-char?))
+          (define name (substring str i end))
+          (loop end (cons (tok 'name name) acc))]
+         [else
+          (error 'beagle-import-nix
+                 "unexpected character '~a' at position ~a in normalized form"
+                 ch i)])])))
 
-       ;; (mkforce val) → (lib/mkForce val)
-       [(mkforce)
-        (format "(lib/mkForce ~a)" (datum->bgl (cadr d)))]
+(define (name-char? ch)
+  (or (char-alphabetic? ch)
+      (char-numeric? ch)
+      (memv ch '(#\_ #\- #\/ #\'))))
 
-       ;; (mkdefault val) → (lib/mkDefault val)
-       [(mkdefault)
-        (format "(lib/mkDefault ~a)" (datum->bgl (cadr d)))]
+(define (find-end str start pred)
+  (let loop ([i start])
+    (cond
+      [(>= i (string-length str)) i]
+      [(pred (string-ref str i)) (loop (add1 i))]
+      [else i])))
 
-       ;; (mkenable desc) → (lib/mkEnableOption desc)
-       [(mkenable)
-        (format "(lib/mkEnableOption ~a)" (datum->bgl (cadr d)))]
+(define (read-string-literal str start delim)
+  ;; Reads until matching delim, respecting backslash escapes. Returns
+  ;; the parsed content (with ${...} as a raw substring) and the next
+  ;; index past the closing delim.
+  (define out (open-output-string))
+  (let loop ([i start])
+    (cond
+      [(>= i (string-length str))
+       (error 'beagle-import-nix "unterminated string at offset ~a" start)]
+      [(char=? (string-ref str i) #\\)
+       (when (< (add1 i) (string-length str))
+         (write-char (string-ref str (add1 i)) out))
+       (loop (+ i 2))]
+      [(char=? (string-ref str i) delim)
+       (values (get-output-string out) (add1 i))]
+      [(and (char=? (string-ref str i) #\$)
+            (< (add1 i) (string-length str))
+            (char=? (string-ref str (add1 i)) #\{))
+       ;; Preserve ${...} interpolation by copying it verbatim until
+       ;; matching close-brace.
+       (write-char #\$ out)
+       (write-char #\{ out)
+       (let depth-loop ([j (+ i 2)] [depth 1])
+         (cond
+           [(zero? depth)
+            (loop j)]
+           [(>= j (string-length str))
+            (error 'beagle-import-nix "unterminated interpolation at offset ~a" i)]
+           [(char=? (string-ref str j) #\{)
+            (write-char #\{ out)
+            (depth-loop (add1 j) (add1 depth))]
+           [(char=? (string-ref str j) #\})
+            (write-char #\} out)
+            (define new-depth (sub1 depth))
+            (if (zero? new-depth)
+                (loop (add1 j))
+                (depth-loop (add1 j) new-depth))]
+           [else
+            (write-char (string-ref str j) out)
+            (depth-loop (add1 j) depth)]))]
+      [else
+       (write-char (string-ref str i) out)
+       (loop (add1 i))])))
 
-       ;; (if-then cond a b) → (if cond a b)
-       [(if-then)
-        (format "(if ~a ~a ~a)" (datum->bgl (cadr d)) (datum->bgl (caddr d)) (datum->bgl (cadddr d)))]
+;; Parser state: mutable token cursor.
+(define cursor (make-parameter #f))
 
-       ;; (== a b) → (== a b)
-       [(==)
-        (format "(== ~a ~a)" (datum->bgl (cadr d)) (datum->bgl (caddr d)))]
+(define (peek)
+  (define c (cursor))
+  (and (pair? c) (car c)))
 
-       ;; (cat a b) → (s a b)  (string concat in Nix is +, but beagle/nix uses s)
-       [(cat)
-        (format "(s ~a)" (string-join (map datum->bgl (cdr d)) " "))]
+(define (peek2)
+  (define c (cursor))
+  (and (pair? c) (pair? (cdr c)) (cadr c)))
 
-       ;; (nl) → nil
-       [(nl) "nil"]
+(define (advance!)
+  (define c (cursor))
+  (when (null? c) (error 'beagle-import-nix "unexpected end of input"))
+  (cursor (cdr c))
+  (car c))
 
-       ;; (fn params body) → (fn (params) body)
-       [(fn)
-        (define params (cadr d))
-        (define body (cddr d))
-        (define param-str
-          (cond
-            [(symbol? params) (format "(~a)" params)]
-            [(list? params) (format "(~a)" (string-join (map symbol->string params) " "))]
-            [else (datum->bgl params)]))
-        (format "(fn ~a ~a)" param-str (string-join (map datum->bgl body) " "))]
+(define (expect-punct! s)
+  (define t (peek))
+  (unless (and t (eq? (tok-kind t) 'punct) (string=? (tok-val t) s))
+    (error 'beagle-import-nix "expected '~a', got ~v" s t))
+  (advance!))
 
-       ;; (and a b ...) → (and a b ...)
-       [(and)
-        (format "(and ~a)" (string-join (map datum->bgl (cdr d)) " "))]
+(define (consume-punct? s)
+  (define t (peek))
+  (cond
+    [(and t (eq? (tok-kind t) 'punct) (string=? (tok-val t) s))
+     (advance!)
+     #t]
+    [else #f]))
 
-       ;; (not a) → (not a)
-       [(not)
-        (format "(not ~a)" (datum->bgl (cadr d)))]
+(define (consume-name? s)
+  (define t (peek))
+  (cond
+    [(and t (eq? (tok-kind t) 'name) (string=? (tok-val t) s))
+     (advance!)
+     #t]
+    [else #f]))
 
-       ;; (!= a b) → (!= a b)
-       [(!=)
-        (format "(!= ~a ~a)" (datum->bgl (cadr d)) (datum->bgl (caddr d)))]
+(define (parse-normalized str)
+  (parameterize ([cursor (tokenize str)])
+    (define result (parse-expr))
+    (unless (null? (cursor))
+      (error 'beagle-import-nix
+             "extra tokens after parse: ~v" (cursor)))
+    result))
 
-       ;; (fn-set-rest (args ...) body) → (fn-set-rest (args ...) body)
-       [(fn-set-rest)
-        (define args (cadr d))
-        (define body (caddr d))
-        (format "(fn-set-rest (~a)\n~a)"
-                (string-join (map symbol->string args) " ")
-                (indent-str (datum->bgl body) 2))]
+(define (parse-expr)
+  ;; Top-level expression: lambda, let, with, if, or apply.
+  (cond
+    [(consume-name? "let")
+     (define bindings (parse-bindings))
+     (unless (consume-name? "in")
+       (error 'beagle-import-nix "expected 'in' after let bindings"))
+     `(let ,bindings ,(parse-expr))]
+    [(consume-name? "with")
+     (define scope (parse-expr))
+     (expect-punct! ";")
+     `(with ,scope ,(parse-expr))]
+    [(consume-name? "if")
+     (define c (parse-expr))
+     (unless (consume-name? "then")
+       (error 'beagle-import-nix "expected 'then' in if"))
+     (define t (parse-expr))
+     (unless (consume-name? "else")
+       (error 'beagle-import-nix "expected 'else' in if"))
+     `(if ,c ,t ,(parse-expr))]
+    [(lambda-ahead?)
+     (parse-lambda)]
+    [else
+     (parse-apply)]))
 
-       ;; (let-in ([a b] ...) body) → (let [a b ...] body)
-       [(let-in)
-        (define binds (cadr d))
-        (define body (caddr d))
-        (define bind-strs
-          (for/list ([b (in-list binds)])
-            (format "~a ~a" (car b) (datum->bgl (cadr b)))))
-        (format "(let [~a]\n~a)"
-                (string-join bind-strs "\n      ")
-                (indent-str (datum->bgl body) 2))]
+(define (lambda-ahead?)
+  ;; Lookahead: detect `NAME :` or `{ formals } :` lambda shape.
+  ;; nix-instantiate --parse always wraps lambdas in parens, but inside
+  ;; the parens we may see `{ ... }: ...` or `name: ...`.
+  (define t1 (peek))
+  (define t2 (peek2))
+  (cond
+    [(and t1 (eq? (tok-kind t1) 'name)
+          t2 (eq? (tok-kind t2) 'punct) (string=? (tok-val t2) ":"))
+     #t]
+    [(and t1 (eq? (tok-kind t1) 'punct) (string=? (tok-val t1) "{"))
+     ;; Could be lambda or attrset. Scan to matching } and check for : after.
+     (formals-then-colon?)]
+    [else #f]))
 
-       ;; (.> "k1" "k2" ...) → dotted attrpath
-       ;; For paths with quoted segments like ("xdg" "configFile" "\"name\"" "source"),
-       ;; returns a list: (dotpath-entry "xdg.configFile" "name" "source")
-       ;; For simple paths, returns a plain dotted string
-       [(.>)
-        (define segs (cdr d))
-        (define has-quoted? (ormap (lambda (s) (and (string? s) (string-prefix? s "\""))) segs))
-        (if has-quoted?
-          ;; Return marker for nested emission
-          (format "DOTPATH:~a"
-                  (string-join
-                   (for/list ([seg (in-list segs)])
-                     (if (and (string? seg) (string-prefix? seg "\""))
-                       seg  ; keep quotes as-is for later splitting
-                       seg))
-                   "|"))
-          ;; Simple case: all plain segments
-          (string-join (map (lambda (s) (if (string? s) s (format "~a" s))) segs) "."))]
+(define (formals-then-colon?)
+  ;; Look at tokens after current position. We're at '{'. Walk to matching
+  ;; '}' and check if next token is ':'.
+  (define toks (cursor))
+  (let loop ([rest (cdr toks)] [depth 1])
+    (cond
+      [(null? rest) #f]
+      [else
+       (define t (car rest))
+       (cond
+         [(and (eq? (tok-kind t) 'punct) (string=? (tok-val t) "{"))
+          (loop (cdr rest) (add1 depth))]
+         [(and (eq? (tok-kind t) 'punct) (string=? (tok-val t) "}"))
+          (define new-depth (sub1 depth))
+          (if (zero? new-depth)
+              (let ([nxt (and (pair? (cdr rest)) (cadr rest))])
+                (and nxt (eq? (tok-kind nxt) 'punct) (string=? (tok-val nxt) ":")))
+              (loop (cdr rest) new-depth))]
+         [else (loop (cdr rest) depth)])])))
 
-       ;; NixOS type constructors
-       [(t-str)    "lib/types.str"]
-       [(t-int)    "lib/types.int"]
-       [(t-bool)   "lib/types.bool"]
-       [(t-path)   "lib/types.path"]
-       [(t-port)   "lib/types.port"]
-       [(t-listof) (format "(lib/types.listOf ~a)" (datum->bgl (cadr d)))]
-       [(t-nullor) (format "(lib/types.nullOr ~a)" (datum->bgl (cadr d)))]
-       [(t-attrsof) (format "(lib/types.attrsOf ~a)" (datum->bgl (cadr d)))]
-       [(t-enum)   (format "(lib/types.enum ~a)" (datum->bgl (cadr d)))]
+(define (parse-lambda)
+  (cond
+    [(and (peek) (eq? (tok-kind (peek)) 'name))
+     ;; Single-arg lambda: NAME : body
+     (define name (tok-val (advance!)))
+     (expect-punct! ":")
+     `(lambda (single ,(string->symbol name)) ,(parse-expr))]
+    [else
+     ;; Formals lambda: { args, ... } : body
+     (expect-punct! "{")
+     (define formals (parse-formals))
+     (expect-punct! "}")
+     (expect-punct! ":")
+     `(lambda (formals ,formals) ,(parse-expr))]))
 
-       ;; (mkopt #:type T #:default D #:desc S) → (lib/mkOption {:type T ...})
-       [(mkopt)
-        (emit-mkopt-bgl (cdr d))]
+(define (parse-formals)
+  ;; Comma-separated NAME [? default], optionally ending with `...`.
+  (let loop ([acc '()] [ellipsis? #f])
+    (cond
+      [(consume-punct? ".")
+       (expect-punct! ".")
+       (expect-punct! ".")
+       (loop acc #t)]
+      [(and (peek) (eq? (tok-kind (peek)) 'name))
+       (define name (tok-val (advance!)))
+       (define default
+         (cond
+           [(consume-punct? "?") (parse-expr)]
+           [else #f]))
+       (define new-acc (cons (list (string->symbol name) default) acc))
+       (cond
+         [(consume-punct? ",") (loop new-acc ellipsis?)]
+         [else (list (reverse new-acc) ellipsis?)])]
+      [else
+       (list (reverse acc) ellipsis?)])))
 
-       ;; (set key val) — standalone set, used in raw contexts
-       [(set)
-        (format ":~a ~a" (cadr d) (datum->bgl (caddr d)))]
+(define (parse-apply)
+  (define first (parse-select))
+  (let loop ([acc first])
+    (cond
+      [(application-can-continue?)
+       (loop `(apply ,acc ,(parse-select)))]
+      [else acc])))
 
-       ;; (home-of user entries ...) inside att/body context
-       [(home-of home-of-bare)
-        (define user-expr (cadr d))
-        (define entries (cddr d))
-        (define normal-entries '())
-        (define special-pairs '())
-        (for ([entry (in-list entries)])
-          (cond
-            [(and (list? entry) (eq? (car entry) 'set)
-                  (set-key-has-special? (cadr entry)))
-             (define segs (set-key->dotpath-segs (cadr entry)))
-             (set! special-pairs (append special-pairs
-               (list (cons segs (datum->bgl (caddr entry))))))]
-            [else
-             (set! normal-entries (append normal-entries (list entry)))]))
-        (define grouped-strs
-          (if (null? special-pairs) '()
-            (emit-grouped-dotpath-entries special-pairs "")))
-        (define normal-strs (map emit-body-entry-bgl normal-entries))
-        (format ":home-manager.users {~a {~a}}"
-                (datum->bgl user-expr)
-                (string-join (append normal-strs grouped-strs) "\n"))]
+(define (application-can-continue?)
+  ;; Continue applying if the next token starts an atom AND we're not
+  ;; at a punctuation that would end the expression.
+  (define t (peek))
+  (and t
+       (case (tok-kind t)
+         [(name) (not (member (tok-val t)
+                              '("then" "else" "in" "with"
+                                "let" "if" "inherit")))]
+         [(int str) #t]
+         [(punct) (member (tok-val t) '("(" "{" "["))]
+         [else #f])))
 
-       ;; (nix-attr-entry path val) → :path val as attrset entry
-       [(nix-attr-entry)
-        (define path-expr (cadr d))
-        (define val-expr (caddr d))
-        (define segs (extract-dotpath-segs path-expr))
-        (if (and segs (segs-have-special? segs))
-          (car (emit-grouped-dotpath-entries (list (cons segs (datum->bgl val-expr))) ""))
-          (let ([path-str (if segs (string-join segs ".") (datum->bgl path-expr))])
-            (format ":~a ~a" path-str (datum->bgl val-expr))))]
+(define (parse-select)
+  (define base (parse-atom))
+  (let loop ([target base] [path '()])
+    (cond
+      [(consume-punct? ".")
+       (define seg (parse-attr-name))
+       (loop target (cons seg path))]
+      [else
+       (if (null? path)
+           target
+           `(select ,target ,(reverse path)))])))
 
-       ;; (nix-attrs-entries (att (path val) ...))
-       [(nix-attrs-entries)
-        (define att-form (cadr d))
-        (define pairs (if (and (list? att-form) (eq? (car att-form) 'att))
-                       (cdr att-form)
-                       (list att-form)))
-        (define special-pairs '())
-        (define normal-strs '())
-        (for ([p (in-list pairs)])
-          (define path-expr (car p))
-          (define val-expr (cadr p))
-          (define segs (extract-dotpath-segs path-expr))
-          (if (and segs (segs-have-special? segs))
-            (set! special-pairs (append special-pairs
-              (list (cons segs (datum->bgl val-expr)))))
-            (let ([path-str (if segs (string-join segs ".") (datum->bgl path-expr))])
-              (set! normal-strs (append normal-strs
-                (list (format ":~a ~a" path-str (datum->bgl val-expr))))))))
-        (define grouped (if (null? special-pairs) '()
-                          (emit-grouped-dotpath-entries special-pairs "")))
-        (string-join (append normal-strs grouped) "\n")]
+(define (parse-attr-name)
+  ;; Attr names can be plain identifiers, quoted strings, or ${...}
+  ;; (which appears as a name-token of form "${...}").
+  (define t (advance!))
+  (case (tok-kind t)
+    [(name) (tok-val t)]
+    [(str)  (list 'str (tok-val t))]
+    [else (error 'beagle-import-nix "expected attr name, got ~v" t)]))
 
-       ;; (rec-att (k v) ...) → (rec-att {:k v ...})
-       [(rec-att)
-        (format "(rec-att ~a)" (emit-att-bgl (cdr d)))]
-
-       ;; (assert-do cond body) → (assert-do cond body)
-       [(assert-do)
-        (format "(assert-do ~a ~a)" (datum->bgl (cadr d)) (datum->bgl (caddr d)))]
-
-       ;; (toString x) → (builtins/toString x)
-       [(toString)
-        (format "(builtins/toString ~a)" (datum->bgl (cadr d)))]
-
-       ;; fallback — emit as raw form
+(define (parse-atom)
+  (define t (peek))
+  (unless t (error 'beagle-import-nix "unexpected end of input in atom"))
+  (case (tok-kind t)
+    [(punct)
+     (cond
+       [(string=? (tok-val t) "(")
+        (advance!)
+        (define e (parse-expr))
+        (expect-punct! ")")
+        e]
+       [(string=? (tok-val t) "{")
+        (parse-attrset)]
+       [(string=? (tok-val t) "[")
+        (parse-list)]
+       [else (error 'beagle-import-nix "unexpected punct '~a'" (tok-val t))])]
+    [(name)
+     (cond
+       [(or (string=? (tok-val t) "true") (string=? (tok-val t) "false"))
+        (advance!)
+        `(bool ,(string=? (tok-val t) "true"))]
+       [(string=? (tok-val t) "null")
+        (advance!)
+        '(null)]
+       [(string=? (tok-val t) "rec")
+        (advance!)
+        (define inner (parse-atom))
+        (match inner
+          [(list 'attrset bindings) (list 'rec-attrset bindings)]
+          [_ (error 'beagle-import-nix "rec must be followed by attrset")])]
        [else
-        (format "(~a)" (string-join (map datum->bgl d) " "))])]))
+        (advance!)
+        `(id ,(string->symbol (tok-val t)))])]
+    [(int)
+     (advance!)
+     `(int ,(string->number (tok-val t)))]
+    [(str)
+     (advance!)
+     (parse-string-literal (tok-val t))]
+    [else (error 'beagle-import-nix "unexpected token in atom: ~v" t)]))
 
-(define (indent-str s n)
-  (define pad (make-string n #\space))
-  (string-join
-   (for/list ([line (in-list (string-split s "\n"))])
-     (string-append pad line))
-   "\n"))
+(define (parse-attrset)
+  (expect-punct! "{")
+  (define bindings (parse-bindings))
+  (expect-punct! "}")
+  `(attrset ,bindings))
 
-;; Extract path segments from (.> segs...) or (quote (segs...)) or bare list
-;; Normalizes all segments to strings
-(define (extract-dotpath-segs form)
-  (define (normalize-segs segs)
-    (map (lambda (s) (if (string? s) s (format "~a" s))) segs))
-  (cond
-    [(and (list? form) (eq? (car form) '.>)) (normalize-segs (cdr form))]
-    [(and (list? form) (eq? (car form) 'quote) (pair? (cdr form)) (list? (cadr form)))
-     (normalize-segs (cadr form))]
-    [else #f]))
-
-;; Parse a Nix attrpath string into segments, respecting quoted and ${} parts
-;; "xdg.configFile.\"name\".source" → ("xdg" "configFile" "\"name\"" "source")
-;; "users.users.${username}.extra" → ("users" "users" "${username}" "extra")
-(define (parse-nix-attrpath-string s)
-  (regexp-match* #rx"\"[^\"]*\"|\\$\\{[^}]+\\}|[^.]+" s))
-
-;; Check if a set key (symbol or string) contains quoted/dynamic segments
-(define (set-key-has-special? key)
-  (cond
-    [(symbol? key)
-     (define s (symbol->string key))
-     (or (string-contains? s "\"") (string-contains? s "${"))]
-    [(string? key)
-     (or (string-contains? key "\"") (string-contains? key "${"))]
-    [else #f]))
-
-;; Convert a set key to dotpath segments if it has special parts
-(define (set-key->dotpath-segs key)
-  (define s (if (symbol? key) (symbol->string key) key))
-  (parse-nix-attrpath-string s))
-
-;; Strip surrounding quotes from a segment: "\"name\"" → "name"
-(define (strip-nix-quotes s)
-  (if (and (string-prefix? s "\"") (string-suffix? s "\""))
-    (substring s 1 (- (string-length s) 1))
-    s))
-
-(define (seg-is-special? s)
-  (and (string? s)
-       (or (string-prefix? s "\"") (string-prefix? s "${"))))
-
-(define (segs-have-special? segs)
-  (ormap seg-is-special? segs))
-
-;; Group dotpath pairs by common prefix (segments before first special segment).
-;; Special segments are "quoted" (starts with ") or dynamic (starts with ${).
-;; Quoted → string key in map. Dynamic → bare variable key.
-(define (emit-grouped-dotpath-entries pairs indent-prefix)
-  (define groups (make-hash))
-  (define group-order '())
-  (for ([pair (in-list pairs)])
-    (define segs (car pair))
-    (define val-str (cdr pair))
-    (define-values (prefix special-key special-type suffix)
-      (let loop ([ss segs] [pre '()])
-        (cond
-          [(null? ss) (values (reverse pre) #f #f '())]
-          [(string-prefix? (car ss) "\"")
-           (values (reverse pre) (strip-nix-quotes (car ss)) 'quoted (cdr ss))]
-          [(string-prefix? (car ss) "${")
-           (values (reverse pre)
-                   (substring (car ss) 2 (- (string-length (car ss)) 1))
-                   'dynamic (cdr ss))]
-          [else (loop (cdr ss) (cons (car ss) pre))])))
-    (define prefix-str (string-join prefix "."))
-    (when (not (hash-has-key? groups prefix-str))
-      (set! group-order (append group-order (list prefix-str))))
-    (hash-update! groups prefix-str
-                  (lambda (existing)
-                    (append existing (list (list special-key special-type suffix val-str))))
-                  '()))
-  (for/list ([prefix-str (in-list group-order)])
-    (define entries (hash-ref groups prefix-str))
-    (define inner-strs
-      (for/list ([entry (in-list entries)])
-        (define special-key (car entry))
-        (define special-type (cadr entry))
-        (define suffix (caddr entry))
-        (define val-str (cadddr entry))
-        (if special-key
-          (let ([key-str (if (eq? special-type 'quoted)
-                           (format "~s" special-key)
-                           special-key)])
-            (if (null? suffix)
-              (format "~a ~a" key-str val-str)
-              (format "~a {:~a ~a}" key-str (string-join suffix ".") val-str)))
-          val-str)))
-    (define has-any-special (ormap (lambda (e) (car e)) entries))
+(define (parse-bindings)
+  (let loop ([acc '()])
     (cond
-      [(string=? prefix-str "")
-       (format "~a~a" indent-prefix (string-join inner-strs " "))]
-      [has-any-special
-       (format "~a:~a {~a}" indent-prefix prefix-str (string-join inner-strs " "))]
+      [(or (let ([t (peek)])
+             (and t (eq? (tok-kind t) 'punct)
+                  (member (tok-val t) '("}" "in"))))
+           (let ([t (peek)])
+             (and t (eq? (tok-kind t) 'name) (string=? (tok-val t) "in"))))
+       (reverse acc)]
+      [(consume-name? "inherit")
+       (cond
+         [(consume-punct? "(")
+          (define src (parse-expr))
+          (expect-punct! ")")
+          (define names (parse-inherit-names))
+          (expect-punct! ";")
+          (loop (cons `(inherit-from ,src ,names) acc))]
+         [else
+          (define names (parse-inherit-names))
+          (expect-punct! ";")
+          (loop (cons `(inherit ,names) acc))])]
       [else
-       (format "~a:~a ~a" indent-prefix prefix-str (string-join inner-strs " "))])))
+       (define path (parse-attr-path))
+       (expect-punct! "=")
+       (define val (parse-expr))
+       (expect-punct! ";")
+       (loop (cons `(bind ,path ,val) acc))])))
 
-;; Emit an att (attrset) form as beagle/nix map literal
-(define (emit-att-bgl pairs)
-  (define entries
-    (for/list ([p (in-list pairs)])
-      (cond
-        ;; (set key val) inside att
-        [(and (list? p) (= (length p) 2) (list? (car p)) (eq? (caar p) 'set))
-         (format ":~a ~a" (cadar p) (datum->bgl (caddar p)))]
-        ;; (nix-attr-entry path val)
-        [(and (list? p) (= (length p) 2) (list? (car p)) (eq? (caar p) 'nix-attr-entry))
-         (datum->bgl (car p))]
-        ;; (nix-attrs-entries ...)
-        [(and (list? p) (= (length p) 2) (list? (car p)) (eq? (caar p) 'nix-attrs-entries))
-         (datum->bgl (car p))]
-        ;; Regular (key val) pair
-        [(and (list? p) (= (length p) 2))
-         (define key (car p))
-         (define val (cadr p))
-         (cond
-           [(symbol? key) (format ":~a ~a" key (datum->bgl val))]
-           [(string? key)
-            (define m (regexp-match #rx"^\\$\\{\"?(.+?)\"?\\}$" key))
-            (if m
-              ;; Dynamic key like "${cfg.username}" or ${"waybar/config"} → string key
-              (format "~s ~a" (cadr m) (datum->bgl val))
-              ;; Regular quoted string key
-              (format "~s ~a" key (datum->bgl val)))]
-           [(and (list? key) (eq? (car key) '.>))
-            (format ":~a ~a" (datum->bgl key) (datum->bgl val))]
-           [else (format "~v ~a" key (datum->bgl val))])]
-        ;; Single-element entry (standalone form like set, nix-attr-entry)
-        [(and (list? p) (>= (length p) 1))
-         (cond
-           [(eq? (car p) 'set)
-            (if (set-key-has-special? (cadr p))
-              (car (emit-grouped-dotpath-entries
-                    (list (cons (set-key->dotpath-segs (cadr p))
-                                (datum->bgl (caddr p)))) ""))
-              (format ":~a ~a" (cadr p) (datum->bgl (caddr p))))]
-           [(eq? (car p) 'nix-attr-entry)
-            (datum->bgl p)]
-           [(eq? (car p) 'nix-attrs-entries)
-            (datum->bgl p)]
-           [(eq? (car p) 'home-of)
-            (datum->bgl p)]
-           [(eq? (car p) 'home-of-bare)
-            (datum->bgl p)]
-           [else (format ";; ~v" p)])]
-        [else (format ";; ~v" p)])))
-  (format "{~a}" (string-join entries " ")))
+(define (parse-inherit-names)
+  (let loop ([acc '()])
+    (define t (peek))
+    (cond
+      [(and t (eq? (tok-kind t) 'name)
+            (not (member (tok-val t) '("inherit"))))
+       (advance!)
+       (loop (cons (string->symbol (tok-val t)) acc))]
+      [(and t (eq? (tok-kind t) 'str))
+       (advance!)
+       (loop (cons (tok-val t) acc))]
+      [else (reverse acc)])))
 
-;; Emit a body entry (used inside home-of, config-body, att with mixed forms)
-(define (emit-body-entry-bgl entry)
+(define (parse-attr-path)
+  (let loop ([acc (list (parse-attr-name))])
+    (cond
+      [(consume-punct? ".") (loop (cons (parse-attr-name) acc))]
+      [else (reverse acc)])))
+
+(define (parse-list)
+  (expect-punct! "[")
+  (let loop ([acc '()])
+    (cond
+      [(consume-punct? "]") `(list ,(reverse acc))]
+      [else (loop (cons (parse-atom) acc))])))
+
+(define (parse-string-literal raw)
+  ;; If the raw string contains ${...}, split into a list of literal
+  ;; chunks and embedded expression substrings (which we'll re-emit as
+  ;; raw text for now — parsing nested Nix would be a follow-up).
   (cond
-    [(and (list? entry) (eq? (car entry) 'set))
-     (if (set-key-has-special? (cadr entry))
-       (car (emit-grouped-dotpath-entries
-             (list (cons (set-key->dotpath-segs (cadr entry))
-                         (datum->bgl (caddr entry)))) ""))
-       (format ":~a ~a" (cadr entry) (datum->bgl (caddr entry))))]
-    [(and (list? entry) (eq? (car entry) 'nix-attr-entry))
-     (datum->bgl entry)]
-    [(and (list? entry) (eq? (car entry) 'nix-attrs-entries))
-     (datum->bgl entry)]
-    [else (format ";; MANUAL: ~v" entry)]))
+    [(regexp-match? #rx"\\$\\{" raw)
+     (define parts (split-on-interp raw))
+     `(str-interp ,parts)]
+    [else `(str-lit ,raw)]))
 
-;; Emit mkopt keyword args as lib/mkOption
-(define (emit-mkopt-bgl args)
-  (define type-val #f)
-  (define default-val #f)
-  (define desc-val #f)
-  (let loop ([rest args])
-    (match rest
-      [(list '#:type t more ...)
-       (set! type-val t) (loop more)]
-      [(list '#:default d more ...)
-       (set! default-val d) (loop more)]
-      [(list '#:desc d more ...)
-       (set! desc-val d) (loop more)]
-      [(list) (void)]
-      [_ (void)]))
-  (define entries '())
-  (when type-val
-    (set! entries (cons (format ":type ~a" (datum->bgl type-val)) entries)))
-  (when default-val
-    (set! entries (cons (format ":default ~a" (datum->bgl default-val)) entries)))
-  (when desc-val
-    (set! entries (cons (format ":description ~a" (datum->bgl desc-val)) entries)))
-  (format "(lib/mkOption {~a})" (string-join (reverse entries) " ")))
+(define (split-on-interp s)
+  ;; Returns alternating string-lit and expr-substr chunks. expr-substr
+  ;; is wrapped as (interp "literal nix substring").
+  (let loop ([i 0] [acc '()])
+    (cond
+      [(>= i (string-length s))
+       (reverse acc)]
+      [else
+       (define dollar (regexp-match-positions #rx"\\$\\{" s i))
+       (cond
+         [(not dollar)
+          (reverse (cons (substring s i) acc))]
+         [else
+          (define start (car (car dollar)))
+          (define before (substring s i start))
+          (define-values (expr-str next)
+            (read-interp-expr s (+ start 2)))
+          (define new-acc
+            (cons `(interp ,expr-str) (if (zero? (string-length before))
+                                          acc
+                                          (cons before acc))))
+          (loop next new-acc)])])))
 
-;; ---------------------------------------------------------------------------
-;; Emitters for top-level patterns
-;; ---------------------------------------------------------------------------
+(define (read-interp-expr s start)
+  ;; Read until matching close-brace, respecting nesting.
+  (let loop ([i start] [depth 1] [out (open-output-string)])
+    (cond
+      [(>= i (string-length s))
+       (error 'beagle-import-nix "unterminated interpolation")]
+      [(char=? (string-ref s i) #\{)
+       (write-char #\{ out)
+       (loop (add1 i) (add1 depth) out)]
+      [(char=? (string-ref s i) #\})
+       (define new-depth (sub1 depth))
+       (cond
+         [(zero? new-depth)
+          (values (get-output-string out) (add1 i))]
+         [else
+          (write-char #\} out)
+          (loop (add1 i) new-depth out)])]
+      [else
+       (write-char (string-ref s i) out)
+       (loop (add1 i) depth out)])))
 
-(define (emit-pkg name desc pkg-path)
-  (define mod-name (symbol->string name))
-  (define pkg-expr
-    (if pkg-path
-      (format "[~a]" (symbol->string pkg-path))
-      (format "[~a]" mod-name)))
-  (format "#lang beagle/nix\n(ns modules.~a)\n\n(fn-set-rest (config lib pkgs)\n  {:options.myConfig.modules.~a.enable\n     (lib/mkEnableOption ~s)\n\n   :config\n     (lib/mkIf config.myConfig.modules.~a.enable\n       {:environment.systemPackages (with-do pkgs ~a)})})\n"
-          mod-name mod-name desc mod-name pkg-expr))
+;; ============================================================================
+;; Step 3: emit beagle/nix
+;; ============================================================================
 
-(define (emit-svc name desc)
-  (define mod-name (symbol->string name))
-  (format "#lang beagle/nix\n(ns modules.~a)\n\n(fn-set-rest (config lib pkgs)\n  {:options.myConfig.modules.~a.enable\n     (lib/mkEnableOption ~s)\n\n   :config\n     (lib/mkIf config.myConfig.modules.~a.enable\n       {:services.~a.enable true})})\n"
-          mod-name mod-name desc mod-name mod-name))
-
-(define (emit-hm-module name desc body)
-  (define mod-name (symbol->string name))
-  (define entry-lines
-    (for/list ([entry (in-list body)])
-      (emit-body-entry-bgl entry)))
+(define (emit-bnix ast ns-name)
   (string-append
-   (format "#lang beagle/nix\n(ns modules.~a)\n\n" mod-name)
-   (format "(fn-set-rest (config lib pkgs)\n")
-   (format "  {:options.myConfig.modules.~a.enable\n" mod-name)
-   (format "     (lib/mkEnableOption ~s)\n\n" desc)
-   (format "   :config\n")
-   (format "     (lib/mkIf config.myConfig.modules.~a.enable\n" mod-name)
-   (format "       {:home-manager.users\n")
-   (format "         {config.myConfig.modules.users.username\n")
-   (format "           {~a}}})})\n"
-           (string-join entry-lines "\n            "))))
+    "#lang beagle/nix\n"
+    "(ns " (sanitize-ns ns-name) ")\n"
+    "\n"
+    (emit-expr ast 0)))
 
-(define (extract-clause clauses tag)
-  (for/first ([c (in-list clauses)]
-              #:when (and (list? c) (eq? (car c) tag)))
-    c))
+(define (sanitize-ns s)
+  (regexp-replace* #rx"[^a-zA-Z0-9._-]" s "-"))
 
-(define (emit-module-file section name clauses)
-  (define sec (symbol->string section))
-  (define mod-name (symbol->string name))
-  (define desc-clause (extract-clause clauses 'desc))
-  (define desc (if desc-clause (cadr desc-clause) mod-name))
-  (define config-body (extract-clause clauses 'config-body))
-  (define lets-clause (extract-clause clauses 'lets))
-  (define option-attrs (extract-clause clauses 'option-attrs))
-  (define raw-body (extract-clause clauses 'raw-body))
-  (define no-enable? (and (extract-clause clauses 'no-enable) #t))
+(define (indent n) (make-string (* n 2) #\space))
 
-  ;; Extract top-level set entries from config-body
-  (define sets
-    (if config-body
-      (filter (lambda (x) (and (list? x) (eq? (car x) 'set))) (cdr config-body))
-      '()))
+(define (emit-expr ast depth)
+  (match ast
+    [(list 'lambda kind body)
+     (emit-lambda kind body depth)]
+    [(list 'let bindings body)
+     (emit-let bindings body depth)]
+    [(list 'with scope body)
+     (format "(with ~a\n~a~a)"
+             (emit-expr scope depth)
+             (indent (add1 depth))
+             (emit-expr body (add1 depth)))]
+    [(list 'if c t e)
+     (format "(if ~a ~a ~a)"
+             (emit-expr c depth)
+             (emit-expr t depth)
+             (emit-expr e depth))]
+    [(list 'apply fn arg)
+     (define args (collect-apply-args ast))
+     (format "(~a ~a)"
+             (emit-expr (car args) depth)
+             (string-join (map (λ (a) (emit-expr a depth)) (cdr args)) " "))]
+    [(list 'select target path)
+     (emit-select target path depth)]
+    [(list 'attrset bindings)
+     (emit-attrset bindings depth)]
+    [(list 'rec-attrset bindings)
+     (string-append "; rec attrset not yet supported, emitting plain attrset\n"
+                    (emit-attrset bindings depth))]
+    [(list 'list elems)
+     (format "[~a]"
+             (string-join (map (λ (e) (emit-expr e depth)) elems) " "))]
+    [(list 'str-lit s)
+     (format "~v" s)]
+    [(list 'str-interp parts)
+     (emit-str-interp parts depth)]
+    [(list 'int n)
+     (number->string n)]
+    [(list 'bool b)
+     (if b "true" "false")]
+    [(list 'null)
+     "nil"]
+    [(list 'id name)
+     (symbol->string name)]
+    [_ (format "; unhandled: ~v" ast)]))
 
-  ;; Extract home-of/home-of-bare from config-body
-  (define home-of-forms
-    (if config-body
-      (filter (lambda (x) (and (list? x) (memq (car x) '(home-of home-of-bare))))
-              (cdr config-body))
-      '()))
+(define (collect-apply-args ast)
+  ;; (apply (apply (apply f a) b) c) → (f a b c)
+  (let loop ([e ast] [args '()])
+    (match e
+      [(list 'apply fn arg) (loop fn (cons arg args))]
+      [_ (cons e args)])))
 
-  ;; Extract nix-attr-entry forms from config-body (top-level, not inside home-of)
-  (define top-nix-entries
-    (if config-body
-      (filter (lambda (x) (and (list? x) (memq (car x) '(nix-attr-entry nix-attrs-entries))))
-              (cdr config-body))
-      '()))
+(define (emit-lambda kind body depth)
+  (match kind
+    [(list 'single name)
+     (format "(fn-set (~a) ~a)" name (emit-expr body depth))]
+    [(list 'formals (list args ellipsis?))
+     (define names (map (λ (p) (symbol->string (car p))) args))
+     (format "(module [~a]\n~a~a)"
+             (string-join names " ")
+             (indent (add1 depth))
+             (emit-expr body (add1 depth)))]))
 
-  ;; Determine let bindings from lets clause
-  (define let-binds
-    (if lets-clause
-      (cadr lets-clause)
-      '()))
+(define (emit-let bindings body depth)
+  (format "(let [~a]\n~a~a)"
+          (string-join
+            (map (λ (b)
+                   (match b
+                     [(list 'bind (list path) val)
+                      (format "~a ~a" path (emit-expr val depth))]
+                     [_ (format "; unsupported let binding: ~v" b)]))
+                 bindings)
+            "\n        ")
+          (indent (add1 depth))
+          (emit-expr body (add1 depth))))
 
-  ;; Build option-attrs entries
-  (define option-entries
-    (if option-attrs
-      (for/list ([oa (in-list (cdr option-attrs))])
-        (define opt-name (car oa))
-        (define opt-val (cadr oa))
-        (format "      :~a ~a" opt-name (datum->bgl opt-val)))
-      '()))
+(define (emit-select target path depth)
+  ;; target.a.b.c → target.a.b.c (beagle/nix uses same dotted-access syntax)
+  (define base (emit-expr target depth))
+  (define path-str
+    (string-join
+      (map (λ (seg)
+             (match seg
+               [(? string? s) s]
+               [(list 'str s) (format "~v" s)]))
+           path)
+      "."))
+  (format "~a.~a" base path-str))
 
-  ;; Build imports from raw-body
-  (define import-entries
-    (if raw-body
-      (let ([rb (cdr raw-body)])
-        (cond
-          [(and (pair? rb) (list? (car rb)) (eq? (caar rb) 'imports))
-           (define imports (cdar rb))
-           (list (format "   :imports [~a]"
-                         (string-join (map datum->bgl imports) " ")))]
-          [else
-           (list (format "   ;; MANUAL raw-body: ~v" rb))]))
-      '()))
-
-  ;; Build config body: sets + home-of + nix-attr-entries
-  ;; Route special-key sets through dotpath grouping
-  (define normal-set-entries '())
-  (define set-dotpath-pairs '())
-  (for ([s (in-list sets)])
-    (if (set-key-has-special? (cadr s))
-      (set! set-dotpath-pairs (append set-dotpath-pairs
-        (list (cons (set-key->dotpath-segs (cadr s))
-                    (datum->bgl (caddr s))))))
-      (set! normal-set-entries (append normal-set-entries
-        (list (format "        :~a ~a" (cadr s) (datum->bgl (caddr s))))))))
-  (define set-entries
-    (append normal-set-entries
-            (if (null? set-dotpath-pairs) '()
-              (emit-grouped-dotpath-entries set-dotpath-pairs "        "))))
-  (define home-entries
-    (for/list ([h (in-list home-of-forms)])
-      (define user-expr (cadr h))
-      (define user-str (datum->bgl user-expr))
-      (define inner-entries (cddr h))
-      ;; Collect set entries and dotpath entries separately
-      (define set-lines '())
-      (define dotpath-pairs '())  ;; list of (segs-list . val-str)
-      (define other-lines '())
-      (for ([entry (in-list inner-entries)])
-        (cond
-          [(and (list? entry) (eq? (car entry) 'set))
-           (if (set-key-has-special? (cadr entry))
-             (set! dotpath-pairs (append dotpath-pairs
-               (list (cons (set-key->dotpath-segs (cadr entry))
-                           (datum->bgl (caddr entry))))))
-             (set! set-lines (append set-lines
-               (list (format "            :~a ~a" (cadr entry) (datum->bgl (caddr entry)))))))]
-          [(and (list? entry) (eq? (car entry) 'nix-attr-entry))
-           (define path-form (cadr entry))
-           (define segs (extract-dotpath-segs path-form))
-           (if segs
-             (set! dotpath-pairs (append dotpath-pairs
-               (list (cons segs (datum->bgl (caddr entry))))))
-             (set! set-lines (append set-lines
-               (list (format "            :~a ~a" (datum->bgl path-form) (datum->bgl (caddr entry)))))))]
-          [(and (list? entry) (eq? (car entry) 'nix-attrs-entries))
-           (define att-form (cadr entry))
-           (define pairs (if (and (list? att-form) (eq? (car att-form) 'att))
-                           (cdr att-form)
-                           (list att-form)))
-           (for ([p (in-list pairs)])
-             (define path-expr (car p))
-             (define val-expr (cadr p))
-             (define segs* (extract-dotpath-segs path-expr))
-             (if segs*
-               (set! dotpath-pairs (append dotpath-pairs
-                 (list (cons segs* (datum->bgl val-expr)))))
-               (set! set-lines (append set-lines
-                 (list (format "            :~a ~a" (datum->bgl path-expr) (datum->bgl val-expr)))))))]
-          [else
-           (set! other-lines (append other-lines
-             (list (format "            ;; MANUAL: ~v" entry))))]))
-      ;; Convert dotpath pairs to grouped nested map entries
-      (define dotpath-lines
-        (if (null? dotpath-pairs)
-          '()
-          (emit-grouped-dotpath-entries dotpath-pairs "            ")))
-      (define all-inner (append set-lines dotpath-lines other-lines))
-      (format "        :home-manager.users\n          {~a\n            {~a}}"
-              user-str (string-join all-inner "\n"))))
-  ;; Handle top-level nix entries with dotpath grouping
-  (define top-dotpath-pairs '())
-  (define top-nix-simple '())
-  (for ([entry (in-list top-nix-entries)])
-    (cond
-      [(eq? (car entry) 'nix-attr-entry)
-       (define path-form (cadr entry))
-       (define segs (extract-dotpath-segs path-form))
-       (if segs
-         (set! top-dotpath-pairs (append top-dotpath-pairs
-           (list (cons segs (datum->bgl (caddr entry))))))
-         (set! top-nix-simple (append top-nix-simple
-           (list (format "        :~a ~a" (datum->bgl path-form) (datum->bgl (caddr entry)))))))]
-      [(eq? (car entry) 'nix-attrs-entries)
-       (define att-form (cadr entry))
-       (define pairs (if (and (list? att-form) (eq? (car att-form) 'att))
-                       (cdr att-form)
-                       (list att-form)))
-       (for ([p (in-list pairs)])
-         (define path-expr (car p))
-         (define val-expr (cadr p))
-         (define segs* (extract-dotpath-segs path-expr))
-         (if segs*
-           (set! top-dotpath-pairs (append top-dotpath-pairs
-             (list (cons segs* (datum->bgl val-expr)))))
-           (set! top-nix-simple (append top-nix-simple
-             (list (format "        :~a ~a" (datum->bgl path-expr) (datum->bgl val-expr)))))))]
-      [else
-       (set! top-nix-simple (append top-nix-simple
-         (list (format "        ;; MANUAL: ~v" entry))))]))
-  (define top-nix-entry-lines
-    (append top-nix-simple
-            (if (null? top-dotpath-pairs)
-              '()
-              (emit-grouped-dotpath-entries top-dotpath-pairs "        "))))
-
-  (define all-config-entries (append set-entries home-entries top-nix-entry-lines))
-  (define config-str
-    (if (null? all-config-entries)
-      "{}"
-      (format "{\n~a}" (string-join all-config-entries "\n"))))
-
-  ;; Build let bindings if present
-  (define let-prefix
-    (if (pair? let-binds)
-      (string-append
-       "  (let ["
+(define (emit-attrset bindings depth)
+  (cond
+    [(null? bindings) "{}"]
+    [else
+     (string-append
+       "{"
        (string-join
-        (for/list ([b (in-list let-binds)])
-          (format "~a ~a" (car b) (datum->bgl (cadr b))))
-        "\n        ")
-       "]\n")
-      ""))
-  (define let-suffix (if (pair? let-binds) ")" ""))
+         (map (λ (b) (emit-binding b (add1 depth))) bindings)
+         (string-append "\n" (indent (add1 depth))))
+       "}")]))
 
-  ;; Determine option path prefix for this module
-  (define opt-prefix (format "myConfig.~a.~a" sec mod-name))
+(define (emit-binding b depth)
+  (match b
+    [(list 'bind path val)
+     (define key
+       (cond
+         [(= (length path) 1)
+          (match (car path)
+            [(? string? s) (format ":~a" s)]
+            [(list 'str s) (format "~v" s)])]
+         [else
+          ;; Dotted path: emit as :a.b.c form
+          (string-append ":"
+                         (string-join
+                           (map (λ (s) (if (string? s) s (format "~v" (cadr s))))
+                                path)
+                           "."))]))
+     (format "~a ~a" key (emit-expr val depth))]
+    [(list 'inherit names)
+     (format "(inherit ~a)"
+             (string-join (map symbol->string names) " "))]
+    [(list 'inherit-from src names)
+     (format "(inherit-from ~a ~a)"
+             (emit-expr src depth)
+             (string-join (map symbol->string names) " "))]))
 
+(define (emit-str-interp parts depth)
+  ;; "${expr1}foo${expr2}" → (s expr1 "foo" expr2)
+  ;; For MVP, embedded expressions are emitted as raw Nix text wrapped
+  ;; in (nix-ident ...) — but that's the form we just removed! Use a
+  ;; comment instead and emit the literal string with placeholders.
+  ;; TODO: properly recursively parse the embedded Nix expression.
   (cond
-    ;; no-enable module (like system): just config, no enable toggle
-    [no-enable?
-     (string-append
-      (format "#lang beagle/nix\n(ns ~a.~a)\n\n" sec mod-name)
-      (format "(fn-set-rest (config lib pkgs)\n")
-      let-prefix
-      (format "  {~a\n"
-              (if (pair? option-entries)
-                (string-append
-                 (format ":options.~a\n" opt-prefix)
-                 (format "     {~a}\n" (string-join option-entries "\n")))
-                ""))
-      (if (pair? import-entries)
-        (string-append (string-join import-entries "\n") "\n")
-        "")
-      (format "   :config\n")
-      (format "     ~a}" config-str)
-      let-suffix
-      ")\n")]
-
+    [(and (= (length parts) 1) (string? (car parts)))
+     (format "~v" (car parts))]
     [else
-     (string-append
-      (format "#lang beagle/nix\n(ns ~a.~a)\n\n" sec mod-name)
-      (format "(fn-set-rest (config lib pkgs)\n")
-      let-prefix
-      ;; Option attrs beyond enable
-      (if (pair? option-entries)
-        (string-append
-         (format "  {:options.~a\n" opt-prefix)
-         (format "     {:enable (lib/mkEnableOption ~s)\n" desc)
-         (string-join option-entries "\n")
-         "}\n\n")
-        (string-append
-         (format "  {:options.~a.enable\n" opt-prefix)
-         (format "     (lib/mkEnableOption ~s)\n\n" desc)))
-      ;; Imports
-      (if (pair? import-entries)
-        (string-append (string-join import-entries "\n") "\n\n")
-        "")
-      ;; Config body
-      (format "   :config\n")
-      (format "     (lib/mkIf config.~a.enable\n" opt-prefix)
-      (format "       ~a)}" config-str)
-      let-suffix
-      ")\n")]))
+     (define s-args
+       (map (λ (p)
+              (match p
+                [(? string? s) (format "~v" s)]
+                [(list 'interp nix-expr)
+                 ;; HACK: emit the Nix expr as a string literal with a
+                 ;; comment marker. Real fix needs recursive parse.
+                 (format "; TODO unparsed interp: ~s\n               \"~a\""
+                         nix-expr nix-expr)]))
+            parts))
+     (format "(s ~a)" (string-join s-args " "))]))
 
-(define (emit-bundle-file name clauses)
-  (define mod-name (symbol->string name))
-  (define desc-clause (extract-clause clauses 'desc))
-  (define desc (if desc-clause (cadr desc-clause) mod-name))
-  (define sub-modules (extract-clause clauses 'sub-modules))
-  (define sub-modules* (extract-clause clauses 'sub-modules*))
-  (define config-body (extract-clause clauses 'config-body))
-  (define option-attrs (extract-clause clauses 'option-attrs))
+;; ============================================================================
+;; Entry point
+;; ============================================================================
 
-  ;; sub-modules* entries are (name default-bool) pairs
-  (define enable-lines
-    (cond
-      [(and sub-modules (not sub-modules*))
-       (for/list ([m (in-list (cdr sub-modules))])
-         (format "        :myConfig.modules.~a.enable (lib/mkDefault true)" m))]
-      [sub-modules*
-       (for/list ([entry (in-list (cdr sub-modules*))])
-         (define m (car entry))
-         (define default-val (cadr entry))
-         (format "        :myConfig.modules.~a.enable (lib/mkDefault ~a)"
-                 m (if default-val "true" "false")))]
-      [else '()]))
-
-  (define option-entries
-    (if option-attrs
-      (for/list ([oa (in-list (cdr option-attrs))])
-        (define opt-name (car oa))
-        (define opt-val (cadr oa))
-        (format "      :~a ~a" opt-name (datum->bgl opt-val)))
-      '()))
-
-  (define config-entries
-    (if config-body
-      (for/list ([entry (in-list (cdr config-body))])
-        (format "        ~a" (emit-body-entry-bgl entry)))
-      '()))
-
-  (define all-config (append enable-lines config-entries))
-
-  (cond
-    [(or (pair? enable-lines) (pair? config-entries))
-     (string-append
-      (format "#lang beagle/nix\n(ns bundles.~a)\n\n" mod-name)
-      (format "(fn-set-rest (config lib pkgs)\n")
-      (if (pair? option-entries)
-        (string-append
-         (format "  {:options.myConfig.bundles.~a\n" mod-name)
-         (format "     {:enable (lib/mkEnableOption ~s)\n" desc)
-         (string-join option-entries "\n")
-         "}\n\n")
-        (string-append
-         (format "  {:options.myConfig.bundles.~a.enable\n" mod-name)
-         (format "     (lib/mkEnableOption ~s)\n\n" desc)))
-      (format "   :config\n")
-      (format "     (lib/mkIf config.myConfig.bundles.~a.enable\n" mod-name)
-      (format "       {\n~a})})\n" (string-join all-config "\n")))]
-
-    [else
-     (fprintf (current-error-port) "COMPLEX BUNDLE: ~a — needs manual conversion\n" mod-name)
-     #f]))
-
-(define (emit-raw-file path body)
-  (define mod-name
-    (let* ([base (regexp-replace #rx"^.*/" path "")]
-           [base (regexp-replace #rx"\\.rkt$" base "")])
-      base))
-  (define parent
-    (let* ([dir (regexp-replace #rx"/[^/]+$" path "")]
-           [dir-name (regexp-replace #rx"^.*/" dir "")])
-      dir-name))
-  (string-append
-   (format "#lang beagle/nix\n(ns ~a.~a)\n\n" parent mod-name)
-   (datum->bgl body)
-   "\n"))
-
-(define (emit-submodule-impl path name body)
-  (define mod-name (symbol->string name))
-  (define parent
-    (let* ([dir (regexp-replace #rx"/[^/]+$" path "")]
-           [dir-name (regexp-replace #rx"^.*/" dir "")])
-      dir-name))
-  (define entry-lines
-    (for/list ([entry (in-list body)])
-      (emit-body-entry-bgl entry)))
-  (string-append
-   (format "#lang beagle/nix\n(ns ~a.~a)\n\n" parent mod-name)
-   (format ";; submodule implementation\n")
-   (format "(fn-set-rest (config lib pkgs)\n")
-   (format "  (lib/mkIf config.myConfig.modules.~a.enable\n" parent)
-   (format "    {~a}))\n" (string-join entry-lines "\n      "))))
-
-(define (emit-host-file path entries)
-  (define host-name
-    (let* ([dir (regexp-replace #rx"/[^/]+$" path "")]
-           [dir-name (regexp-replace #rx"^.*/" dir "")])
-      dir-name))
-  (define parent-dir
-    (let* ([dir (regexp-replace #rx"/[^/]+$" path "")]
-           [grandparent (regexp-replace #rx"/[^/]+$" dir "")]
-           [gp-name (regexp-replace #rx"^.*/" grandparent "")])
-      gp-name))
-  (define entry-lines
-    (for/list ([entry (in-list entries)])
-      (cond
-        [(and (list? entry) (eq? (car entry) 'set))
-         (format "   :~a ~a" (cadr entry) (datum->bgl (caddr entry)))]
-        [(and (list? entry) (eq? (car entry) 'enable))
-         (define mods (cdr entry))
-         (string-join
-          (for/list ([m (in-list mods)])
-            (format "   :~a.enable true" m))
-          "\n")]
-        [else (format "   ;; MANUAL: ~v" entry)])))
-  (string-append
-   (format "#lang beagle/nix\n(ns ~a.~a)\n\n" parent-dir host-name)
-   (format "(fn-set-rest (config lib pkgs)\n")
-   (format "  {\n~a})\n" (string-join entry-lines "\n"))))
-
-;; --- main -------------------------------------------------------------------
-(module+ main
-  (require racket/cmdline)
-  (define files
-    (command-line
-     #:program "beagle-import-nix"
-     #:args files
-     files))
-
-  (define converted 0)
-  (define skipped 0)
-
-  (for ([f (in-list files)])
-    (define result
-      (with-handlers ([exn:fail? (lambda (e)
-                                   (fprintf (current-error-port) "ERROR: ~a — ~a\n" f (exn-message e))
-                                   #f)])
-        (convert-file f)))
-    (cond
-      [(string? result)
-       (define out-path (regexp-replace #rx"\\.rkt$" f ".bgl"))
-       (display-to-file result out-path #:exists 'replace)
-       (set! converted (+ converted 1))
-       (fprintf (current-error-port) "OK: ~a → ~a\n" f out-path)]
-      [else
-       (set! skipped (+ skipped 1))]))
-
-  (fprintf (current-error-port) "\n~a converted, ~a skipped/complex\n" converted skipped))
+(main (current-command-line-arguments))
