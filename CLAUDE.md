@@ -455,7 +455,7 @@ For mechanical questions ("what forms exist?", "what's the signature of X?",
 
 For non-mechanical questions ("why does the surface look this way?",
 "what was dropped and why?"):
-- `README.md` — what beagle is, the seven core principles, the lock-in discipline
+- `README.md` — what beagle is, the core principles, the lock-in discipline
 - `lab/journal/synthesis/design-principle.md` — long-form principles + audit-endpoint discipline
 - `lab/journal/log/` — chronological audit notes (logs 024-027 cover the 2026-05 redesign)
 - `lab/plans/` — workstream plans (active + done, with frontmatter status)
