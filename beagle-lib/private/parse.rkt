@@ -844,15 +844,22 @@
     ;; System axis collapsed (every flake follows this convention).
     ;; Result type opaque (NixType); schema-cache for compile-time
     ;; attribute-path checking is a deferred follow-up.
-    [(list 'flake-input (? keyword-sym? input-name)
-                        (? keyword-sym? namespace)
-                        rest ...)
-     (define raw-segments (or (stx-tail subs 3) rest))
-     (for ([s (in-list raw-segments)])
+    [(list 'flake-input input-name namespace rest ...)
+     (unless (keyword-sym? input-name)
+       (error 'beagle
+              "flake-input: input-name must be a keyword (e.g. :quickshell), got ~v"
+              input-name))
+     (unless (keyword-sym? namespace)
+       (error 'beagle
+              "flake-input: namespace must be a keyword (e.g. :packages or :legacyPackages), got ~v"
+              namespace))
+     ;; Use rest (raw datum from match destructuring) rather than stx-tail —
+     ;; segments are bare symbols, no source-location preservation needed.
+     (for ([s (in-list rest)])
        (unless (or (keyword-sym? s) (symbol? s))
          (error 'beagle
                 "flake-input: path segment must be keyword or symbol, got ~v" s)))
-     (flake-input-form input-name namespace raw-segments)]
+     (flake-input-form input-name namespace rest)]
 
     [(list 'fn params-form marker return-type body ...)
      #:when (annotation-marker? marker)

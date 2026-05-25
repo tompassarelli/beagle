@@ -187,3 +187,34 @@
 (test-case "implies parses to nix-impl"
   (define f (first-form "(implies a b)"))
   (check-true (nix-impl? f)))
+
+;; --- flake-input ------------------------------------------------------------
+
+(test-case "flake-input parses to flake-input-form"
+  (define f (first-form "(flake-input :quickshell :packages :default)"))
+  (check-true (flake-input-form? f))
+  (check-equal? (flake-input-form-input-name f) ':quickshell)
+  (check-equal? (flake-input-form-namespace f) ':packages)
+  (check-equal? (flake-input-form-path-segments f) '(:default)))
+
+(test-case "flake-input with multi-segment path"
+  (define f (first-form "(flake-input :nur :legacyPackages :repos :rycee :firefox-addons :sidebery)"))
+  (check-true (flake-input-form? f))
+  (check-equal? (flake-input-form-input-name f) ':nur)
+  (check-equal? (flake-input-form-namespace f) ':legacyPackages)
+  (check-equal? (flake-input-form-path-segments f)
+                '(:repos :rycee :firefox-addons :sidebery)))
+
+(test-case "flake-input rejects non-keyword input-name"
+  (check-exn exn:fail? (lambda () (first-form "(flake-input quickshell :packages :default)"))))
+
+(test-case "flake-input rejects non-keyword namespace"
+  (check-exn exn:fail? (lambda () (first-form "(flake-input :quickshell packages :default)"))))
+
+;; --- nix-ident migration error ----------------------------------------------
+
+(test-case "nix-ident is rejected with migration error"
+  (check-exn (lambda (e)
+               (and (exn:fail? e)
+                    (regexp-match? #rx"nix-ident removed" (exn-message e))))
+             (lambda () (first-form "(nix-ident \"inputs.foo.bar\")"))))

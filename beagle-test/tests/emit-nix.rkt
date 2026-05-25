@@ -310,3 +310,25 @@
   (define out (nix-emit "(define-target nix) (ms (s \"#!\" pkgs.bash \"/bin/bash\") \"echo hi\")"))
   (check-true (and out (string-contains? out "#!${pkgs.bash}/bin/bash")))
   (check-false (string-contains? out "${\"")))
+
+;; --- flake-input emission ----------------------------------------------------
+
+(test-case "flake-input emits canonical inputs.X.Y.${system}.Z path"
+  (define out (nix-emit "(define-target nix) (def pkg : NixType (flake-input :quickshell :packages :default))"))
+  (check-true (and out (string-contains? out "inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default"))))
+
+(test-case "flake-input with multi-segment path"
+  (define out (nix-emit "(define-target nix) (def pkg : NixType (flake-input :nur :legacyPackages :repos :rycee :firefox-addons :sidebery))"))
+  (check-true (and out (string-contains? out "inputs.nur.legacyPackages.${pkgs.stdenv.hostPlatform.system}.repos.rycee.firefox-addons.sidebery"))))
+
+(test-case "flake-input inside string concat composes cleanly"
+  (define out (nix-emit "(define-target nix) (def exec : String (s (flake-input :quickshell :packages :default) \"/bin/qs\"))"))
+  ;; Should produce a string with the flake-input path interpolated, then "/bin/qs" appended
+  (check-true (and out (string-contains? out "inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default")))
+  (check-true (and out (string-contains? out "/bin/qs"))))
+
+;; --- nix-ident migration error (emit-side; parse-side covered in nix-parse) ---
+
+(test-case "nix-ident produces parse error at compile"
+  (define out (nix-emit "(define-target nix) (def x : Any (nix-ident \"inputs.foo\"))"))
+  (check-true (and (string? out) (regexp-match? #rx"nix-ident removed" out))))
