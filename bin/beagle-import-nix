@@ -847,12 +847,16 @@
     [(list 'unop "-" arg)
      (format "(- ~a)" (emit-expr arg depth))]
     [(list 'has-attr target path)
-     ;; (has? target [path...]) — beagle uses has? for attr-presence
-     (format "(has? ~a ~a)"
+     ;; Nix's `target ? attr.path` → beagle/nix's (has base path-string).
+     ;; emit-nix renders this as `base ? path` verbatim, so a dotted
+     ;; path-string like "a.b.c" emits as `base ? a.b.c`.
+     (define path-str
+       (string-join
+         (map (λ (s) (if (string? s) s (format "~a" (cadr s)))) path)
+         "."))
+     (format "(has ~a ~a)"
              (emit-expr target depth)
-             (string-join
-               (map (λ (s) (if (string? s) (format ":~a" s) (format "~v" (cadr s)))) path)
-               " "))]
+             path-str)]
     [(list 'select target path)
      (emit-select target path depth)]
     [(list 'select-or target path default)
@@ -1048,19 +1052,34 @@
              (indent (add1 depth))
              (emit-expr body (add1 depth)))]
     [(list 'formals-at alias (list args ellipsis?) _position)
-     ;; { args, ... }@alias: body  →  module-with-alias.
-     ;; beagle has no direct equivalent of @-alias; emit as a let-bound
-     ;; alias = (module-args-as-attrset). Functionally equivalent.
-     (define names (map (λ (p) (symbol->string (car p))) args))
-     (format "(module [~a]\n~a;; @-alias `~a` flattened — original referenced the full attrset~n~a(let [~a {~a}]~n~a~a))"
-             (string-join names " ")
-             (indent (add1 depth))
+     ;; { args, ... } @ alias : body   OR   alias @ { args, ... } : body
+     ;;   →  (module [arg1 arg2 ... :as alias] body)
+     ;; or (fn-set ...) variant if there's no rest-marker. The :as marker
+     ;; mirrors Nix's @-capture: a binding aliased to the FULL args attrset
+     ;; including whatever extends under `...`. The earlier emit (a let-
+     ;; binding reconstructing alias from named formals only) silently
+     ;; dropped the rest, which broke `inputs.X` lookups for any X not
+     ;; named explicitly in the formals.
+     (define arg-strs
+       (map (λ (p)
+              (match p
+                [(list name #f) (symbol->string name)]
+                [(list name default)
+                 (format "(~a ~a)" name (emit-expr default depth))]))
+            args))
+     ;; Use (fn-set ...) and include `...` literally in the bracket when
+     ;; ellipsis? — matches existing convention from the non-formals-at
+     ;; case. (Beagle treats `...` as a formal name; emit-nix renders it
+     ;; as `...` in the Nix output.) Using `module` form here would add
+     ;; rest? = #t automatically and produce duplicate ellipsis.
+     (define base-args
+       (cond [ellipsis? (string-append (string-join arg-strs " ") " ...")]
+             [else (string-join arg-strs " ")]))
+     (format "(fn-set [~a :as ~a]\n~a~a)"
+             base-args
              alias
              (indent (add1 depth))
-             alias
-             (string-join (map (λ (n) (format ":~a ~a" n n)) names) " ")
-             (indent (+ depth 2))
-             (emit-expr body (+ depth 2)))]))
+             (emit-expr body (add1 depth)))]))
 
 (define (emit-let bindings body depth)
   ;; beagle/nix's (let [...]) supports name/value pairs AND singleton
@@ -1099,7 +1118,7 @@
     (and (pair? target)
          (or (eq? (car target) 'id)
              (eq? (car target) 'select))))
-  (let loop ([acc-expr-str base-str] [segs path] [first-step? #t])
+  (let loop ([acc-expr-str base-str] [segs path] [first-step? #t] [via-get? #f])
     (cond
       [(null? segs) acc-expr-str]
       [else
@@ -1111,7 +1130,18 @@
           ;; Single-interp string key
           (define key-expr (emit-interp-expr (cadr (caadr seg))))
           (loop (format "(get ~a ~a)" acc-expr-str key-expr)
-                (cdr segs) #f)]
+                (cdr segs) #f #t)]
+         [via-get?
+          ;; Already chained via (get ...); subsequent static segs must
+          ;; also wrap in (get ...) because Racket's reader breaks
+          ;; `(form).name` into two separate datums. Without this, the
+          ;; emitter would split the chain across multiple interpolations.
+          (define name-str
+            (cond [(string? seg) seg]
+                  [(and (pair? seg) (eq? (car seg) 'str)) (cadr seg)]
+                  [else (format "~v" seg)]))
+          (loop (format "(get ~a :~a)" acc-expr-str name-str)
+                (cdr segs) #f #t)]
          [else
           ;; Collect consecutive static segments and emit as dotted.
           (define-values (static-run rest)
@@ -1122,7 +1152,7 @@
                  (inner (cdr s) (cons (car s) out))]
                 [else (values (reverse out) s)])))
           (cond
-            [(null? static-run) (loop acc-expr-str (cdr segs) #f)]
+            [(null? static-run) (loop acc-expr-str (cdr segs) #f via-get?)]
             [else
              (define dotted
                (string-join
@@ -1151,7 +1181,7 @@
                                (map (λ (s) (if (string? s) s (format "~v" (cadr s)))) rest-segs)
                                "."))])]
                  [else (format "~a.~a" acc-expr-str dotted)]))
-             (loop new-acc rest #f)])])])))
+             (loop new-acc rest #f via-get?)])])])))
 
 (define (static-seg? seg)
   (or (string? seg)

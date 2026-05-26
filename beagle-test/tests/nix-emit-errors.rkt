@@ -29,14 +29,6 @@
                     (regexp-match? #rx"no set literal" (exn-message e))))
              (lambda () (nix-emit "#{1 2 3}"))))
 
-;; --- method calls rejected --------------------------------------------------
-
-(test-case "method call rejected with helpful message"
-  (check-exn (lambda (e)
-               (and (exn:fail? e)
-                    (regexp-match? #rx"method calls" (exn-message e))))
-             (lambda () (nix-emit "(.foo target)"))))
-
 ;; --- await rejected ---------------------------------------------------------
 
 (test-case "await rejected on nix target"

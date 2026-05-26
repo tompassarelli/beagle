@@ -907,17 +907,25 @@
                 (string-join (map (lambda (a) (emit-expr a depth)) args) " "))]
        [else
         ;; Literal keyword key → unquoted attrset access (`m.name`), the
-        ;; idiomatic Nix form. Non-literal keys fall back to interpolation.
+        ;; idiomatic Nix form. Non-literal keys (bare variable references,
+        ;; complex expressions) must use Nix's dynamic-attr interpolation
+        ;; `target.${expr}` — emitting `target.<sym-name>` would treat the
+        ;; variable's NAME as the attribute key instead of its VALUE.
         (define key-arg (cadr args))
-        (define key-str
-          (cond
-            [(and (symbol? key-arg)
-                  (let ([s (symbol->string key-arg)])
-                    (and (positive? (string-length s))
-                         (char=? (string-ref s 0) #\:))))
-             (substring (symbol->string key-arg) 1)]
-            [else (emit-expr key-arg depth)]))
-        (format "~a.~a" (emit-expr (car args) depth) key-str)])]
+        (define is-keyword?
+          (and (symbol? key-arg)
+               (let ([s (symbol->string key-arg)])
+                 (and (positive? (string-length s))
+                      (char=? (string-ref s 0) #\:)))))
+        (cond
+          [is-keyword?
+           (format "~a.~a"
+                   (emit-expr (car args) depth)
+                   (substring (symbol->string key-arg) 1))]
+          [else
+           (format "~a.\"${~a}\""
+                   (emit-expr (car args) depth)
+                   (emit-expr key-arg depth))])])]
 
     [(and fn-name (eq? fn-name 'assoc))
      (if (>= (length args) 3)

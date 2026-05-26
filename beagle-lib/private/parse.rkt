@@ -966,20 +966,21 @@
                  [else (error 'beagle "p: expected string or symbol, got ~v" d)]))]
 
     [(list 'fn-set formals body-expr)
-     (nix-fn-set (parse-nix-fn-set-formals (or (stx-ref subs 1) formals))
-                 #f #f
-                 (parse-expr (or (stx-ref subs 2) body-expr)))]
+     (define-values (fl at-name)
+       (parse-nix-fn-set-formals (or (stx-ref subs 1) formals)))
+     (nix-fn-set fl #f at-name (parse-expr (or (stx-ref subs 2) body-expr)))]
 
     [(list 'module formals body-expr)
      ;; NixOS module / open-attrs lambda: { a, b, ... }: body
-     (nix-fn-set (parse-nix-fn-set-formals (or (stx-ref subs 1) formals))
-                 #t #f
-                 (parse-expr (or (stx-ref subs 2) body-expr)))]
+     (define-values (fl at-name)
+       (parse-nix-fn-set-formals (or (stx-ref subs 1) formals)))
+     (nix-fn-set fl #t at-name (parse-expr (or (stx-ref subs 2) body-expr)))]
 
     [(list 'overlay formals body-expr)
      ;; Nix overlay: final: prev: body (curried — NOT attrset-destructure)
      ;; Emits as fn-form so the nix emitter produces `final: prev: body`.
-     (define f-list (parse-nix-fn-set-formals (or (stx-ref subs 1) formals)))
+     (define-values (f-list _at-name)
+       (parse-nix-fn-set-formals (or (stx-ref subs 1) formals)))
      (unless (= (length f-list) 2)
        (error 'beagle "overlay: expected exactly two formals [final prev], got ~a" (length f-list)))
      (define ps
@@ -1518,22 +1519,44 @@
                    acc))])))
 
 (define (parse-nix-fn-set-formals formals-stx)
+  ;; Returns (values formals at-name) where at-name is #f or a symbol
+  ;; bound to the full formal-args attrset via Nix's `{ ... } @ name:`
+  ;; capture (surface syntax: `:as name` at end of formals list).
+  ;; This binding aliases ALL named formals plus whatever the rest-marker
+  ;; (`...`) extends to, so the scope-tracker (when it lands) should
+  ;; treat it as a single source of truth for "name X covers all-of-args."
   (define d (->datum formals-stx))
   (define items
     (cond
       [(bracketed? d) (bracket-body d)]
       [(list? d) d]
       [else (error 'beagle "fn-set: expected list of formals, got ~v" d)]))
-  (for/list ([item (in-list items)])
-    (define id (->datum item))
-    (cond
-      [(symbol? id) (nix-fn-set-formal id #f)]
-      [(and (list? id) (= (length id) 2))
-       (nix-fn-set-formal (car id) (parse-expr (datum->syntax #f (cadr id))))]
-      [(and (bracketed? id) (= (length (bracket-body id)) 2))
-       (define body (bracket-body id))
-       (nix-fn-set-formal (car body) (parse-expr (datum->syntax #f (cadr body))))]
-      [else (error 'beagle "fn-set formal: expected name or (name default), got ~v" id)])))
+  (define-values (before-as at-name)
+    (let loop ([rest items] [acc '()])
+      (cond
+        [(null? rest) (values (reverse acc) #f)]
+        [(eq? (->datum (car rest)) ':as)
+         (when (null? (cdr rest))
+           (error 'beagle "fn-set/module: :as requires a name"))
+         (define n (->datum (cadr rest)))
+         (unless (symbol? n)
+           (error 'beagle "fn-set/module: :as expects a symbol, got ~v" n))
+         (unless (null? (cddr rest))
+           (error 'beagle "fn-set/module: :as name must come last in formals"))
+         (values (reverse acc) n)]
+        [else (loop (cdr rest) (cons (car rest) acc))])))
+  (define formals
+    (for/list ([item (in-list before-as)])
+      (define id (->datum item))
+      (cond
+        [(symbol? id) (nix-fn-set-formal id #f)]
+        [(and (list? id) (= (length id) 2))
+         (nix-fn-set-formal (car id) (parse-expr (datum->syntax #f (cadr id))))]
+        [(and (bracketed? id) (= (length (bracket-body id)) 2))
+         (define body (bracket-body id))
+         (nix-fn-set-formal (car body) (parse-expr (datum->syntax #f (cadr body))))]
+        [else (error 'beagle "fn-set formal: expected name or (name default), got ~v" id)])))
+  (values formals at-name))
 
 ;; --- try/catch/finally -----------------------------------------------------
 
