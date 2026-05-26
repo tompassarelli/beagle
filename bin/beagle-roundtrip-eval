@@ -1,0 +1,389 @@
+#!/usr/bin/env bash
+# beagle-roundtrip-eval: eval-equivalence harness for beagle backend converters.
+#
+# Tests semantic preservation on the target runtime, not source-text shape.
+# For Nix corpora: compares drvPath (build instructions) per host across the
+# original flake vs the converted-then-emitted twin flake. The byte-identity
+# metric (see beagle-roundtrip-nix) is a parallel diagnostic, not the
+# primary signal — see lab/journal/log/028 for the reframe rationale.
+#
+# Usage:
+#   bin/beagle-roundtrip-eval <corpus-dir>
+#
+# Where <corpus-dir> is a Nix flake checkout (contains flake.nix +
+# flake.lock). Pin the corpus by checking out a specific commit before
+# running — the harness assumes inputs are frozen.
+
+# ============================================================================
+# ADAPTER CONTRACT
+# ============================================================================
+#
+# Each target backend implements four shell functions:
+#
+#   <prefix>_evaluator <flake-dir> <target-spec>
+#     -> stdout: raw result for the given target-spec
+#     -> exit 0 on success
+#
+#   <prefix>_canonicalize <raw-result on stdin>
+#     -> stdout: canonical form (often identity, but explicit)
+#
+#   <prefix>_primary_cmp <canonical-a> <canonical-b>
+#     -> exit 0=match, 1=differ
+#
+#   <prefix>_diagnostic_cmp <flake-dir-a> <flake-dir-b> <target-spec>
+#     -> stdout: divergence report localized to user-facing leaves
+#
+# Currently implemented: nix_*
+# Deliberately NOT stubbed: clj, js, py, rkt — each adapter shape gets
+# validated against a real corpus before being committed. See
+# lab/journal/log/028 for why pre-stubbing freezes guesses; the next
+# adapter slot gets a "did the four-field shape survive contact with the
+# second backend" prediction logged before it's built.
+
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BEAGLE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+IMPORT_NIX="$SCRIPT_DIR/beagle-import-nix"
+BEAGLE_BUILD="$SCRIPT_DIR/beagle-build"
+
+# ============================================================================
+# NIX ADAPTER
+# ============================================================================
+
+# CRITICAL INVARIANT: nix_evaluator MUST NOT realize derivations.
+#
+# We read drvPath (unrealized build *instructions*), not outPath (realized
+# build *outputs*). The equivalence is sound under Nix's evaluation
+# determinism: same drvPath in a pinned corpus deterministically produces
+# same outPath, by construction. Doing actual builds turns a ~200ms-per-host
+# evaluator into a ~20-min one with no additional signal in the
+# pinned-corpus regime.
+#
+# Future contributors / future-me: do NOT change this to `nix build`,
+# `nix-instantiate -A`, or anything that triggers realization. If you think
+# you need outPath equivalence, the right place to add it is as a separate
+# "strict mode" with its own dedicated invariant docstring — not by quietly
+# swapping the evaluator. Speed is load-bearing for continuous-instrument use.
+
+nix_evaluator() {
+  # Writes stdout (drvPath on success) and exits with nix's exit code.
+  # Stderr is captured separately by the driver so eval errors are
+  # diagnosable rather than silently treated as "empty result."
+  local flake_dir="$1"
+  local host="$2"
+  nix eval --raw \
+    "path:$flake_dir#nixosConfigurations.$host.config.system.build.toplevel.drvPath"
+}
+
+nix_canonicalize() {
+  # drvPath strings are already canonical — identity. Explicit pass-through
+  # so the canonicalize stage stays visible in the adapter contract even
+  # when it happens to be a no-op for this backend.
+  cat
+}
+
+nix_primary_cmp() {
+  local a="$1" b="$2"
+  [ "$a" = "$b" ]
+}
+
+# Diagnostic-cmp: failure-localization layer, NOT the pass/fail signal.
+#
+# CURATION RATIONALE for the leaf list (when implemented).
+# Each leaf is included because it represents a stable user-facing surface
+# whose divergence is meaningfully localizable. The curation is a *design
+# decision*, not a default — adding a leaf is a claim that its drift would
+# be real signal; removing one is a claim that its drift is noise. Either
+# change wants explicit rationale in this comment, not in commit messages
+# alone.
+#
+# Planned curation (encoded when the first failing case appears):
+#   - networking.hostName: identity, user-set, never derivation
+#   - system.stateVersion: identity, never changes once set
+#   - time.timeZone: identity, user-set
+#   - users.users.<u>.shell.pname: stable name of user shell (drvPath flaps;
+#     pname is the identity claim)
+#   - environment.systemPackages [pname]: package *identities*, drift here
+#     means package set differs, not that inputs moved
+#   - services.*.enable filtered: the main "what is on" signal
+#
+# v1 implementation: stub — returns "primary signal differed; diagnostic
+# leaves not yet curated against a real failing case." The function exists
+# at the adapter-contract level (intentional, so adapter shape is right
+# before content is full); body matures when there's a real failure to
+# localize against. Pre-implementing without a failing case to design
+# against would freeze guesses about which leaves matter.
+
+nix_diagnostic_cmp() {
+  local orig_dir="$1" twin_dir="$2" host="$3"
+  echo "diagnostic-cmp: primary signal differed for host=$host"
+  echo "  orig=$orig_dir"
+  echo "  twin=$twin_dir"
+  echo "  (v1 stub — diagnostic leaves curated when first real failure lands)"
+}
+
+# ============================================================================
+# DRIVER
+# ============================================================================
+
+usage() {
+  cat >&2 <<EOF
+Usage: $(basename "$0") <corpus-dir>
+
+  <corpus-dir>  Nix flake checkout (must contain flake.nix + flake.lock).
+                Pin the corpus by checking out a specific commit before
+                running — the harness assumes inputs are frozen.
+
+Output:
+  Per-host pass/fail summary to stdout.
+  Detailed results in lab/journal/log/runs/eval-YYYYMMDD-HHMMSS-<corpus>.md
+  (the journal entry is the durable artifact; stdout is the human summary).
+EOF
+  exit 1
+}
+
+if [ $# -ne 1 ]; then usage; fi
+CORPUS="$1"
+if [ ! -f "$CORPUS/flake.nix" ]; then
+  echo "error: $CORPUS does not contain flake.nix" >&2
+  exit 1
+fi
+if [ ! -f "$CORPUS/flake.lock" ]; then
+  echo "error: $CORPUS does not contain flake.lock (corpus must be pinned)" >&2
+  exit 1
+fi
+
+CORPUS=$(cd "$CORPUS" && pwd)
+CORPUS_NAME=$(basename "$CORPUS")
+CORPUS_SHA="(unpinned)"
+if [ -d "$CORPUS/.git" ]; then
+  CORPUS_SHA=$(cd "$CORPUS" && git rev-parse --short HEAD 2>/dev/null || echo "(unpinned)")
+fi
+BEAGLE_SHA=$(cd "$BEAGLE_ROOT" && git rev-parse --short HEAD)
+
+echo "==================================================="
+echo "beagle-roundtrip-eval: $CORPUS_NAME"
+echo "  beagle:     $BEAGLE_SHA"
+echo "  corpus:     $CORPUS"
+echo "  corpus-sha: $CORPUS_SHA"
+echo "==================================================="
+
+WORK="$(mktemp -d -t beagle-eval-XXXXXXXX)"
+# Cleanup work dir on exit. Set BEAGLE_EVAL_KEEP=1 to preserve for debug.
+if [ "${BEAGLE_EVAL_KEEP:-0}" != "1" ]; then
+  trap 'rm -rf "$WORK"' EXIT
+else
+  echo "  work-dir:   $WORK  (BEAGLE_EVAL_KEEP=1, preserved for debug)"
+fi
+TWIN="$WORK/twin"
+
+# 1. Build the twin directory: copy non-.nix files from corpus, then for
+#    each .nix file convert via beagle-import-nix and emit back into the
+#    twin location via beagle-build.
+echo "[1/4] Building twin flake at $TWIN"
+mkdir -p "$TWIN"
+rsync -a --exclude='*.nix' "$CORPUS/" "$TWIN/"
+
+declare -i convert_fail=0
+declare -i build_fail=0
+declare -i nix_files=0
+
+while IFS= read -r src; do
+  nix_files=$((nix_files+1))
+  rel="${src#$CORPUS/}"
+  bnix="$WORK/bnix/$rel.bnix"
+  twin_nix="$TWIN/$rel"
+  mkdir -p "$(dirname "$bnix")" "$(dirname "$twin_nix")"
+  if ! "$IMPORT_NIX" "$src" > "$bnix" 2>/dev/null; then
+    # On conversion failure: copy original unchanged into twin so the twin
+    # remains evaluable. Downside: eval comparison treats this file as
+    # identity, so it can't reveal converter bugs in this file. Tracked in
+    # the summary so it's not invisible.
+    convert_fail=$((convert_fail+1))
+    cp "$src" "$twin_nix"
+    continue
+  fi
+  if ! "$BEAGLE_BUILD" "$bnix" "$twin_nix" >/dev/null 2>&1; then
+    build_fail=$((build_fail+1))
+    cp "$src" "$twin_nix"
+    continue
+  fi
+  if [ ! -f "$twin_nix" ]; then
+    build_fail=$((build_fail+1))
+    cp "$src" "$twin_nix"
+  fi
+done < <(find "$CORPUS" -name "*.nix" -type f)
+
+echo "  nix files:    $nix_files"
+echo "  convert-fail: $convert_fail (original copied unchanged into twin)"
+echo "  build-fail:   $build_fail (original copied unchanged into twin)"
+
+# 2. Enumerate hosts from the original flake.
+echo "[2/4] Enumerating hosts"
+HOSTS=$(nix eval --raw "path:$CORPUS#nixosConfigurations" \
+          --apply 'attrs: builtins.concatStringsSep " " (builtins.attrNames attrs)' \
+          2>/dev/null) || HOSTS=""
+
+if [ -z "$HOSTS" ]; then
+  echo "error: no nixosConfigurations found in original flake (or eval failed)" >&2
+  echo "  cannot proceed — primary signal requires per-host drvPath comparison" >&2
+  exit 2
+fi
+
+read -ra HOST_ARR <<< "$HOSTS"
+echo "  hosts: ${#HOST_ARR[@]} (${HOST_ARR[*]})"
+
+# 3. Per host: nix_evaluator on original + twin, primary_cmp, diagnostic_cmp on fail.
+echo "[3/4] Per-host drvPath comparison"
+
+# Per-host outcome categories (distinguishing these is load-bearing —
+# each implies a different debug path):
+#   PASS              : both eval succeed, drvPath strings match
+#   FAIL-DIVERGE      : both eval succeed, drvPath strings differ
+#                       → real semantic divergence (run diagnostic-cmp)
+#   FAIL-TWIN-EVAL    : orig eval succeeds, twin eval fails
+#                       → converter introduced a bug that breaks evaluability
+#                       (capture twin stderr — that's the actionable signal)
+#   FAIL-ORIG-EVAL    : orig eval fails (twin status irrelevant)
+#                       → corpus or environment problem; harness can't measure
+declare -i pass=0
+declare -i diverge=0
+declare -i twin_eval_fail=0
+declare -i orig_eval_fail=0
+declare -a DIVERGE_HOSTS=()
+declare -a TWIN_EVAL_FAIL_HOSTS=()
+declare -a ORIG_EVAL_FAIL_HOSTS=()
+declare -a DIAGNOSTIC_REPORTS=()
+declare -a TWIN_EVAL_ERRORS=()  # captured stderr per failing twin
+
+for host in "${HOST_ARR[@]}"; do
+  orig_err=$(mktemp)
+  twin_err=$(mktemp)
+  orig_drv=$(nix_evaluator "$CORPUS" "$host" 2>"$orig_err"); orig_status=$?
+  twin_drv=$(nix_evaluator "$TWIN"   "$host" 2>"$twin_err"); twin_status=$?
+
+  if [ $orig_status -ne 0 ]; then
+    orig_eval_fail=$((orig_eval_fail+1))
+    ORIG_EVAL_FAIL_HOSTS+=("$host")
+    echo "  $host: FAIL-ORIG-EVAL"
+    rm -f "$orig_err" "$twin_err"
+    continue
+  fi
+
+  if [ $twin_status -ne 0 ]; then
+    twin_eval_fail=$((twin_eval_fail+1))
+    TWIN_EVAL_FAIL_HOSTS+=("$host")
+    # Capture the twin's error message — this is the actionable signal for
+    # localizing the converter bug that broke evaluability.
+    TWIN_EVAL_ERRORS+=("--- $host: twin eval failed ---")
+    while IFS= read -r line; do
+      TWIN_EVAL_ERRORS+=("$line")
+    done < "$twin_err"
+    echo "  $host: FAIL-TWIN-EVAL"
+    rm -f "$orig_err" "$twin_err"
+    continue
+  fi
+
+  rm -f "$orig_err" "$twin_err"
+
+  orig_canon=$(echo "$orig_drv" | nix_canonicalize)
+  twin_canon=$(echo "$twin_drv" | nix_canonicalize)
+
+  if nix_primary_cmp "$orig_canon" "$twin_canon"; then
+    pass=$((pass+1))
+    echo "  $host: PASS"
+  else
+    diverge=$((diverge+1))
+    DIVERGE_HOSTS+=("$host")
+    echo "  $host: FAIL-DIVERGE (drvPaths differ)"
+    DIAGNOSTIC_REPORTS+=("--- $host ---")
+    while IFS= read -r line; do
+      DIAGNOSTIC_REPORTS+=("$line")
+    done < <(nix_diagnostic_cmp "$CORPUS" "$TWIN" "$host")
+  fi
+done
+
+# 4. Write journal entry, print summary.
+echo "[4/4] Writing journal artifact"
+
+TIMESTAMP=$(date -Iseconds)
+JOURNAL_DIR="$BEAGLE_ROOT/lab/journal/log/runs"
+mkdir -p "$JOURNAL_DIR"
+JOURNAL_FILE="$JOURNAL_DIR/eval-$(date +%Y%m%d-%H%M%S)-$CORPUS_NAME.md"
+
+{
+  echo "# eval-roundtrip — $CORPUS_NAME @ $CORPUS_SHA"
+  echo ""
+  echo "- timestamp:   $TIMESTAMP"
+  echo "- beagle-sha:  $BEAGLE_SHA"
+  echo "- corpus:      $CORPUS"
+  echo "- corpus-sha:  $CORPUS_SHA"
+  echo ""
+  echo "## twin build"
+  echo ""
+  echo "| metric | count |"
+  echo "|---|---|"
+  echo "| nix files     | $nix_files |"
+  echo "| convert-fail  | $convert_fail |"
+  echo "| build-fail    | $build_fail |"
+  echo ""
+  echo "## per-host drvPath equivalence (primary signal)"
+  echo ""
+  echo "| metric | count |"
+  echo "|---|---|"
+  echo "| hosts total       | ${#HOST_ARR[@]} |"
+  echo "| PASS              | $pass |"
+  echo "| FAIL-DIVERGE      | $diverge |"
+  echo "| FAIL-TWIN-EVAL    | $twin_eval_fail |"
+  echo "| FAIL-ORIG-EVAL    | $orig_eval_fail |"
+  echo ""
+  if [ $diverge -gt 0 ]; then
+    echo "### FAIL-DIVERGE hosts (drvPath strings differ — real semantic divergence)"
+    echo ""
+    for h in "${DIVERGE_HOSTS[@]}"; do echo "- $h"; done
+    echo ""
+    echo "#### diagnostic-cmp reports"
+    echo ""
+    echo '```'
+    for line in "${DIAGNOSTIC_REPORTS[@]}"; do echo "$line"; done
+    echo '```'
+    echo ""
+  fi
+  if [ $twin_eval_fail -gt 0 ]; then
+    echo "### FAIL-TWIN-EVAL hosts (converter broke evaluability)"
+    echo ""
+    for h in "${TWIN_EVAL_FAIL_HOSTS[@]}"; do echo "- $h"; done
+    echo ""
+    echo "#### twin eval errors (actionable signal for converter bugs)"
+    echo ""
+    echo '```'
+    for line in "${TWIN_EVAL_ERRORS[@]}"; do echo "$line"; done
+    echo '```'
+    echo ""
+  fi
+  if [ $orig_eval_fail -gt 0 ]; then
+    echo "### FAIL-ORIG-EVAL hosts (corpus/environment issue, harness can't measure)"
+    echo ""
+    for h in "${ORIG_EVAL_FAIL_HOSTS[@]}"; do echo "- $h"; done
+    echo ""
+  fi
+} > "$JOURNAL_FILE"
+
+echo ""
+echo "==================================================="
+echo "SUMMARY ($CORPUS_NAME @ $CORPUS_SHA)"
+echo "==================================================="
+echo "  PASS:              $pass / ${#HOST_ARR[@]}"
+echo "  FAIL-DIVERGE:      $diverge"
+echo "  FAIL-TWIN-EVAL:    $twin_eval_fail"
+echo "  FAIL-ORIG-EVAL:    $orig_eval_fail"
+echo "  twin convert-fail: $convert_fail / $nix_files files"
+echo "  twin build-fail:   $build_fail / $nix_files files"
+echo "==================================================="
+echo "journal: $JOURNAL_FILE"
+
+if [ $diverge -gt 0 ] || [ $twin_eval_fail -gt 0 ] || [ $orig_eval_fail -gt 0 ]; then
+  exit 1
+fi
+exit 0
