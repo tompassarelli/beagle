@@ -136,11 +136,17 @@ nix_diagnostic_cmp() {
 
 usage() {
   cat >&2 <<EOF
-Usage: $(basename "$0") <corpus-dir>
+Usage: $(basename "$0") [--host HOST] <corpus-dir>
 
-  <corpus-dir>  Nix flake checkout (must contain flake.nix + flake.lock).
-                Pin the corpus by checking out a specific commit before
-                running — the harness assumes inputs are frozen.
+  <corpus-dir>      Nix flake checkout (must contain flake.nix + flake.lock).
+                    Pin the corpus by checking out a specific commit before
+                    running — the harness assumes inputs are frozen.
+  --host HOST       Run eval against only HOST (skip enumeration + the
+                    other hosts). Much faster for iteration when you're
+                    fixing one host's specific failure.
+
+Env:
+  BEAGLE_EVAL_KEEP=1   Preserve the work dir for debugging.
 
 Output:
   Per-host pass/fail summary to stdout.
@@ -149,6 +155,18 @@ Output:
 EOF
   exit 1
 }
+
+ONLY_HOST=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --host) ONLY_HOST="$2"; shift 2 ;;
+    --host=*) ONLY_HOST="${1#--host=}"; shift ;;
+    -h|--help) usage ;;
+    --) shift; break ;;
+    -*) echo "error: unknown flag $1" >&2; exit 1 ;;
+    *) break ;;
+  esac
+done
 
 if [ $# -ne 1 ]; then usage; fi
 CORPUS="$1"
@@ -226,19 +244,27 @@ echo "  nix files:    $nix_files"
 echo "  convert-fail: $convert_fail (original copied unchanged into twin)"
 echo "  build-fail:   $build_fail (original copied unchanged into twin)"
 
-# 2. Enumerate hosts from the original flake.
-echo "[2/4] Enumerating hosts"
-HOSTS=$(nix eval --raw "path:$CORPUS#nixosConfigurations" \
-          --apply 'attrs: builtins.concatStringsSep " " (builtins.attrNames attrs)' \
-          2>/dev/null) || HOSTS=""
+# 2. Enumerate hosts from the original flake. If --host was given, skip
+#    enumeration entirely — saves a flake eval call AND restricts the
+#    per-host loop to just one entry. Major iteration-speed win when
+#    you're chasing a single host's failure.
+if [ -n "$ONLY_HOST" ]; then
+  echo "[2/4] Skipping enumeration (--host $ONLY_HOST)"
+  HOST_ARR=("$ONLY_HOST")
+else
+  echo "[2/4] Enumerating hosts"
+  HOSTS=$(nix eval --raw --accept-flake-config "path:$CORPUS#nixosConfigurations" \
+            --apply 'attrs: builtins.concatStringsSep " " (builtins.attrNames attrs)' \
+            2>/dev/null) || HOSTS=""
 
-if [ -z "$HOSTS" ]; then
-  echo "error: no nixosConfigurations found in original flake (or eval failed)" >&2
-  echo "  cannot proceed — primary signal requires per-host drvPath comparison" >&2
-  exit 2
+  if [ -z "$HOSTS" ]; then
+    echo "error: no nixosConfigurations found in original flake (or eval failed)" >&2
+    echo "  cannot proceed — primary signal requires per-host drvPath comparison" >&2
+    exit 2
+  fi
+
+  read -ra HOST_ARR <<< "$HOSTS"
 fi
-
-read -ra HOST_ARR <<< "$HOSTS"
 echo "  hosts: ${#HOST_ARR[@]} (${HOST_ARR[*]})"
 
 # 3. Per host: nix_evaluator on original + twin, primary_cmp, diagnostic_cmp on fail.
