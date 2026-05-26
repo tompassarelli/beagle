@@ -854,23 +854,28 @@
     ;; Arithmetic/comparison — infix
     [(and fn-name (nix-infix-op fn-name))
      => (lambda (op)
+          (define (emit-operand a)
+            ;; paren-wrap operands that would otherwise be parsed
+            ;; greedily by Nix (if/let/fn/etc absorb everything to
+            ;; the right unless wrapped).
+            (paren-wrap (emit-expr a depth) a))
           (cond
             [(= (length args) 2)
              (format "(~a ~a ~a)"
-                     (emit-expr (car args) depth)
+                     (emit-operand (car args))
                      op
-                     (emit-expr (cadr args) depth))]
+                     (emit-operand (cadr args)))]
             [(and (= (length args) 1) (member fn-name '(- not)))
              (format "(~a~a)"
                      (if (eq? fn-name 'not) "!" "-")
-                     (emit-expr (car args) depth))]
+                     (emit-operand (car args)))]
             [else
              ;; N-ary infix → left-fold: join rendered args with " op ".
              ;; (The earlier pair-wise iteration duplicated every middle
              ;; arg — `(+ a b c d)` became `a + b + b + c + c + d`.)
              (format "(~a)"
                      (string-join
-                       (map (lambda (a) (emit-expr a depth)) args)
+                       (map emit-operand args)
                        (format " ~a " op)))]))]
 
     ;; Collection ops
@@ -928,14 +933,19 @@
                (let ([s (symbol->string key-arg)])
                  (and (positive? (string-length s))
                       (char=? (string-ref s 0) #\:)))))
+        ;; paren-wrap the target — `(get-or X k d).y` would otherwise
+        ;; parse as `X.k or d.y` because Nix's `or` operator consumes
+        ;; the trailing `.y` as part of its default expression.
+        (define target-str
+          (paren-wrap (emit-expr (car args) depth) (car args)))
         (cond
           [is-keyword?
            (format "~a.~a"
-                   (emit-expr (car args) depth)
+                   target-str
                    (substring (symbol->string key-arg) 1))]
           [else
            (format "~a.\"${~a}\""
-                   (emit-expr (car args) depth)
+                   target-str
                    (emit-expr key-arg depth))])])]
 
     [(and fn-name (eq? fn-name 'assoc))

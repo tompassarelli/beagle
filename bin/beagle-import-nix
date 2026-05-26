@@ -903,14 +903,23 @@
      (cond
        [(and (= (length path) 1)
              (not (seg-static? (car path))))
-        ;; Dynamic key — Nix `target.${dyn} or default` →
-        ;; (builtins/attrByPath [(s ...)] default target)
+        ;; Dynamic key with default — Nix `target.${dyn} or default`.
+        ;; Decompose into pure if-then-else (no lib dependency, works
+        ;; even in contexts where `lib` isn't in scope like overlays):
+        ;;   if (target ? "${KEY}") then target.${KEY} else default
+        ;; Beagle bnix:
+        ;;   (if (has TARGET "${KEY}") (get TARGET KEY-EXPR) DEFAULT)
+        ;; The has-path string carries the interp text verbatim — beagle's
+        ;; emit-nix will quote it (since it's non-identifier) producing
+        ;; `target ? "${KEY}"` which Nix evaluates with dynamic key lookup.
         (define seg (car path))
         (define key-bnix (emit-str-interp (cadr seg) depth))
-        (format "(builtins/attrByPath [~a] ~a ~a)"
+        (format "(if (has ~a \"${~a}\") (get ~a ~a) ~a)"
+                (emit-expr target depth)
                 key-bnix
-                (emit-expr default depth)
-                (emit-expr target depth))]
+                (emit-expr target depth)
+                key-bnix
+                (emit-expr default depth))]
        [(= (length path) 1)
         (format "(get-or ~a ~a ~a)"
                 (emit-expr target depth)
