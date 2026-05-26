@@ -123,11 +123,95 @@ nix_primary_cmp() {
 # against would freeze guesses about which leaves matter.
 
 nix_diagnostic_cmp() {
+  # Compare a curated set of user-facing config leaves between orig and
+  # twin. The verdict:
+  #   ALL MATCH   → divergence is non-user-facing (e.g. flake-source-hash
+  #                 cascade from sops/home-manager/custom-scripts that
+  #                 reference self.outPath). Twin is semantically equivalent.
+  #   ANY DIFFER  → real config drift — converter is dropping/changing
+  #                 something user-visible. Each DIFFER line names which leaf.
+  #
+  # CURATION RATIONALE: each leaf returns a primitive (string or list of
+  # strings) that is set by user config and does NOT embed derivation
+  # hashes. drvPath flaps under input drift; pname/stateVersion/enable-flag
+  # are stable across that drift. Adding/removing a leaf is a design
+  # decision — when something new starts cascading falsely, add a leaf
+  # that captures the user-facing slice.
   local orig_dir="$1" twin_dir="$2" host="$3"
-  echo "diagnostic-cmp: primary signal differed for host=$host"
-  echo "  orig=$orig_dir"
-  echo "  twin=$twin_dir"
-  echo "  (v1 stub — diagnostic leaves curated when first real failure lands)"
+
+  # Each entry: a label, a path (no --apply), and an optional --apply
+  # expression. Stored as a function that, given <flake-dir>, evals to
+  # the string value of that leaf. Bash doesn't have first-class arrays
+  # of arrays, so we use a label-indexed associative array trick.
+  local labels=(
+    hostName
+    stateVersion
+    timeZone
+    kernelVersion
+    systemPackages
+    enabledSystemdServices
+  )
+
+  diag_eval() {
+    local label="$1" dir="$2" host="$3"
+    case "$label" in
+      hostName)
+        nix eval --raw --accept-flake-config \
+          "path:$dir#nixosConfigurations.$host.config.networking.hostName" 2>/dev/null
+        ;;
+      stateVersion)
+        nix eval --raw --accept-flake-config \
+          "path:$dir#nixosConfigurations.$host.config.system.stateVersion" 2>/dev/null
+        ;;
+      timeZone)
+        nix eval --raw --accept-flake-config \
+          "path:$dir#nixosConfigurations.$host.config.time.timeZone" 2>/dev/null
+        ;;
+      kernelVersion)
+        nix eval --raw --accept-flake-config \
+          "path:$dir#nixosConfigurations.$host.config.boot.kernelPackages.kernel.version" 2>/dev/null
+        ;;
+      systemPackages)
+        nix eval --raw --accept-flake-config \
+          "path:$dir#nixosConfigurations.$host.config.environment.systemPackages" \
+          --apply 'pkgs: builtins.toString (builtins.map (p: p.pname or p.name or "_") pkgs)' 2>/dev/null
+        ;;
+      enabledSystemdServices)
+        nix eval --raw --accept-flake-config \
+          "path:$dir#nixosConfigurations.$host.config.systemd.services" \
+          --apply 'svcs: builtins.toString (builtins.sort builtins.lessThan (builtins.filter (n: (svcs.${n}.enable or false)) (builtins.attrNames svcs)))' 2>/dev/null
+        ;;
+    esac
+  }
+
+  local matches=0 differs=0
+  local report=""
+
+  for label in "${labels[@]}"; do
+    local orig_val twin_val
+    orig_val=$(diag_eval "$label" "$orig_dir" "$host")
+    twin_val=$(diag_eval "$label" "$twin_dir" "$host")
+    if [ "$orig_val" = "$twin_val" ]; then
+      matches=$((matches+1))
+      report+="    MATCH   $label"$'\n'
+    else
+      differs=$((differs+1))
+      report+="    DIFFER  $label"$'\n'
+      report+="      orig: ${orig_val:0:120}"$'\n'
+      report+="      twin: ${twin_val:0:120}"$'\n'
+    fi
+  done
+
+  echo "diagnostic-cmp for host=$host"
+  echo "  $matches MATCH / $differs DIFFER (of ${#leaves[@]} curated leaves)"
+  echo -n "$report"
+  if [ $differs -eq 0 ]; then
+    echo "  VERDICT: DIVERGE-but-equivalent — all curated leaves match;"
+    echo "           divergence is non-user-facing (likely flake-source-hash"
+    echo "           cascade from self-referencing config like sops)."
+  else
+    echo "  VERDICT: REAL DIVERGENCE — $differs user-facing leaf(s) differ."
+  fi
 }
 
 # ============================================================================

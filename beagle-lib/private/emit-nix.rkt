@@ -865,14 +865,13 @@
                      (if (eq? fn-name 'not) "!" "-")
                      (emit-expr (car args) depth))]
             [else
+             ;; N-ary infix → left-fold: join rendered args with " op ".
+             ;; (The earlier pair-wise iteration duplicated every middle
+             ;; arg — `(+ a b c d)` became `a + b + b + c + c + d`.)
              (format "(~a)"
                      (string-join
-                      (for/list ([i (in-range (- (length args) 1))])
-                        (format "~a ~a ~a"
-                                (emit-expr (list-ref args i) depth)
-                                op
-                                (emit-expr (list-ref args (+ i 1)) depth)))
-                      (format " ~a " op)))]))]
+                       (map (lambda (a) (emit-expr a depth)) args)
+                       (format " ~a " op)))]))]
 
     ;; Collection ops
     [(and fn-name (eq? fn-name 'str))

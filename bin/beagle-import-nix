@@ -49,6 +49,11 @@
 
 (define (path->source-relative abs-path-str)
   (define src-dir (current-source-dir))
+  (define trailing-slash? (regexp-match? #rx"/$" abs-path-str))
+  (define (preserve-slash s)
+    (if (and trailing-slash? (not (regexp-match? #rx"/$" s)))
+        (string-append s "/")
+        s))
   (cond
     [(not src-dir) abs-path-str]
     [(string=? abs-path-str src-dir) "./"]
@@ -63,11 +68,12 @@
                    (char=? (string-ref rel-str 0) #\/)))
           abs-path-str]
          ;; Parent-relative (../...) — Nix accepts as-is, no leading ./ needed
-         [(regexp-match? #rx"^\\.\\.(/|$)" rel-str) rel-str]
+         [(regexp-match? #rx"^\\.\\.(/|$)" rel-str)
+          (preserve-slash rel-str)]
          ;; Same-dir (just "." somehow) — emit ./
          [(string=? rel-str ".") "./"]
          ;; Under source-dir — prepend ./ to make it explicit-relative
-         [else (string-append "./" rel-str)]))]))
+         [else (preserve-slash (string-append "./" rel-str))]))]))
 
 ;; ============================================================================
 ;; Driver
@@ -875,37 +881,50 @@
     [(list 'select target path)
      (emit-select target path depth)]
     [(list 'select-or target path default)
-     ;; beagle/nix's (get-or base attr-symbol default) handles single-
-     ;; attribute access with default. For multi-segment paths
-     ;; (a.b.c or default), nest: chain the inner accesses statically
-     ;; and apply get-or to only the OUTERMOST segment, because that's
-     ;; where the default kicks in semantically (Nix's `a.b.c or X`
-     ;; means "try the full path; if any segment missing, X").
-     ;;
-     ;; In practice, multi-segment-with-or is rare; single-segment
-     ;; dominates. For multi-segment we still produce semantically
-     ;; correct beagle by emitting nested get-or on the final segment
-     ;; with intermediate plain attr access.
+     ;; Three shapes:
+     ;;   - single static key: (get-or target attr default)
+     ;;   - single dynamic key (string-with-interp): emit via
+     ;;     builtins.attrByPath, because (get-or) requires a symbol-key
+     ;;     and Nix's `target.${dyn} or default` is exactly an
+     ;;     attrByPath lookup on a singleton path list.
+     ;;   - multi-segment: chain inner static access, then get-or on
+     ;;     final segment.
+     (define (seg-static? s)
+       (cond [(string? s) #t]
+             [(and (pair? s) (eq? (car s) 'str)
+                   (= (length (cadr s)) 1)
+                   (string? (car (cadr s))))
+              #t]
+             [else #f]))
+     (define (seg-text s)
+       (cond [(string? s) s]
+             [(and (pair? s) (eq? (car s) 'str)) (car (cadr s))]
+             [else (format "~a" s)]))
      (cond
+       [(and (= (length path) 1)
+             (not (seg-static? (car path))))
+        ;; Dynamic key — Nix `target.${dyn} or default` →
+        ;; (builtins/attrByPath [(s ...)] default target)
+        (define seg (car path))
+        (define key-bnix (emit-str-interp (cadr seg) depth))
+        (format "(builtins/attrByPath [~a] ~a ~a)"
+                key-bnix
+                (emit-expr default depth)
+                (emit-expr target depth))]
        [(= (length path) 1)
-        (define attr-str
-          (let ([s (car path)])
-            (cond [(string? s) s]
-                  [else (cadr s)])))
         (format "(get-or ~a ~a ~a)"
-                (emit-expr target depth) attr-str (emit-expr default depth))]
+                (emit-expr target depth)
+                (seg-text (car path))
+                (emit-expr default depth))]
        [else
-        ;; Multi-segment: target.a.b.c or default → access target.a.b
-        ;; statically, then get-or on .c with default.
+        ;; Multi-segment: target.a.b.c or default — chain static
+        ;; access on prefix, get-or on final segment.
         (define prefix (drop-right path 1))
         (define last-seg (last path))
         (define prefix-target `(select ,target ,prefix))
-        (define last-attr-str
-          (cond [(string? last-seg) last-seg]
-                [else (cadr last-seg)]))
         (format "(get-or ~a ~a ~a)"
                 (emit-expr prefix-target depth)
-                last-attr-str
+                (seg-text last-seg)
                 (emit-expr default depth))])]
     [(list 'attrset bindings)
      (emit-attrset bindings depth)]
@@ -982,15 +1001,38 @@
   ;; uses (// ...) or a stdlib helper.
   (case op
     [("+")
-     ;; Flatten nested + chains: (binop + (binop + a b) c) → (s a b c).
+     ;; Flatten nested + chains: (binop + (binop + a b) c) → list of args.
      ;; Then MERGE consecutive string-literal args into one literal
-     ;; (with ${ escaped) so beagle's emit doesn't produce
-     ;; "${THEMES[@]}" — i.e. consecutive Nix strings concat'd at the
-     ;; source become a single literal that's safely escaped.
+     ;; (with ${ escaped) so beagle's emit doesn't produce "${THEMES[@]}".
+     ;;
+     ;; Shape choice based on first operand:
+     ;;   path + ...  → (+ (p "...") ...)   yields Nix path concat
+     ;;                 (path + string → path; preserves Nix's path
+     ;;                 semantics, avoiding the "${./X}" coercion to
+     ;;                 store path that ${(s ...)} would trigger).
+     ;;   else        → (s ...)             yields Nix string interp
      (define raw-args (flatten-plus-chain `(binop ,op ,lhs ,rhs)))
      (define merged (merge-consecutive-string-lits raw-args))
-     (format "(s ~a)"
-             (string-join (map (λ (a) (emit-expr a depth)) merged) " "))]
+     (define first-is-path?
+       (and (pair? merged)
+            (let ([a (car merged)])
+              (and (pair? a) (eq? (car a) 'path)))))
+     (cond
+       [(and first-is-path? (>= (length merged) 3))
+        ;; path + (string concat of everything else). Nix's
+        ;; `path + s1 + s2 + ...` left-folds and renormalizes the path
+        ;; at each step, stripping intermediate slashes; grouping the
+        ;; rest into a single string operand makes the slash preserve.
+        (define path-str (emit-expr (car merged) depth))
+        (define rest-str
+          (string-join (map (λ (a) (emit-expr a depth)) (cdr merged)) " "))
+        (format "(+ ~a (s ~a))" path-str rest-str)]
+       [first-is-path?
+        (format "(+ ~a)"
+                (string-join (map (λ (a) (emit-expr a depth)) merged) " "))]
+       [else
+        (format "(s ~a)"
+                (string-join (map (λ (a) (emit-expr a depth)) merged) " "))])]
     [else
      (define lhs-str (emit-expr lhs depth))
      (define rhs-str (emit-expr rhs depth))
@@ -1015,9 +1057,22 @@
 (define (flatten-plus-chain ast)
   ;; Walk a (binop "+" lhs rhs) tree left-associatively, flattening
   ;; into a list of operand exprs. (binop "+" (binop "+" a b) c) → (a b c).
+  ;;
+  ;; Special-case path operands with trailing slash: Nix REJECTS path
+  ;; literals with trailing slashes in expression position (e.g. `./foo/`
+  ;; is invalid), even though nix-instantiate's --parse output renders
+  ;; them that way as a separator hint. Peel the slash into a separate
+  ;; string operand so the chain reads `./foo + "/" + name`.
   (match ast
     [(list 'binop "+" lhs rhs)
      (append (flatten-plus-chain lhs) (flatten-plus-chain rhs))]
+    [(list 'path p)
+     (cond
+       [(and (> (string-length p) 1)
+             (char=? (string-ref p (- (string-length p) 1)) #\/))
+        (list (list 'path (substring p 0 (- (string-length p) 1)))
+              `(str-lit "/"))]
+       [else (list ast)])]
     [_ (list ast)]))
 
 (define (merge-consecutive-string-lits args)
