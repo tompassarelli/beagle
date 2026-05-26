@@ -528,9 +528,21 @@
              (emit-expr (nix-get-or-default e) depth))]
 
     [(nix-has-attr? e)
+     ;; Nix's `?` operator RHS accepts a bare identifier, a dotted path
+     ;; of identifiers, or a quoted string. If the path contains
+     ;; non-identifier characters (e.g. `/`), it MUST be quoted —
+     ;; otherwise `target ? /persist` parses as a path literal in
+     ;; expression position and fails.
+     (define raw-path (nix-has-attr-path e))
+     (define formatted-path
+       (cond
+         [(regexp-match? #rx"^[a-zA-Z_][a-zA-Z0-9_'-]*(\\.[a-zA-Z_][a-zA-Z0-9_'-]*)*$"
+                         raw-path)
+          raw-path]
+         [else (format "~v" raw-path)]))
      (format "~a ? ~a"
              (emit-expr (nix-has-attr-base-expr e) depth)
-             (nix-has-attr-path e))]
+             formatted-path)]
 
     [(nix-search-path? e)
      (format "<~a>" (nix-search-path-name e))]
