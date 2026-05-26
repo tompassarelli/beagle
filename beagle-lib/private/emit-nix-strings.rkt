@@ -25,19 +25,35 @@
 
 ;; Single source of truth for Nix string escaping.
 ;; #:multiline? — produce ''…'' string semantics (escapes are different from "…")
-;; #:keep-interp? — do NOT escape ${ (the caller is composing an interpolated string)
+;; #:keep-interp? — do NOT escape bare ${ (the caller is composing an
+;;                  interpolated string; ${X} markers are real interps)
+;;
+;; Beagle's bnix convention: `$${` in a literal string chunk means
+;; "literal `${` in the rendered output." This is independent of
+;; keep-interp? and ALWAYS gets translated to the Nix-specific escape
+;; (`\${` in "…", `''${` in ''…''). Translation is done through a
+;; placeholder so the resulting `\${` / `''${` isn't re-matched by the
+;; bare-`${` pass that runs after it.
+(define LIT-DOLLAR-PLACEHOLDER "LITDOLLAR")
+
 (define (escape-nix s
                     #:multiline? [multiline? #f]
                     #:keep-interp? [keep-interp? #f])
   (cond
     [multiline?
-     (let* ([s (regexp-replace* #rx"''" s "'''")])
-       (if keep-interp? s (regexp-replace* #rx"\\$\\{" s "''${")))]
+     (let* ([s (regexp-replace* #rx"''" s "'''")]
+            [s (regexp-replace* #rx"\\$\\$\\{" s LIT-DOLLAR-PLACEHOLDER)]
+            [s (if keep-interp? s (regexp-replace* #rx"\\$\\{" s "''${"))]
+            [s (regexp-replace* (regexp-quote LIT-DOLLAR-PLACEHOLDER) s "''${")])
+       s)]
     [else
      (let* ([s (regexp-replace* #rx"\\\\" s "\\\\\\\\")]
             [s (regexp-replace* #rx"\n" s "\\\\n")]
-            [s (regexp-replace* #rx"\"" s "\\\\\"")])
-       (if keep-interp? s (regexp-replace* #rx"\\$\\{" s "\\\\${")))]))
+            [s (regexp-replace* #rx"\"" s "\\\\\"")]
+            [s (regexp-replace* #rx"\\$\\$\\{" s LIT-DOLLAR-PLACEHOLDER)]
+            [s (if keep-interp? s (regexp-replace* #rx"\\$\\{" s "\\\\${"))]
+            [s (regexp-replace* (regexp-quote LIT-DOLLAR-PLACEHOLDER) s "\\\\${")])
+       s)]))
 
 (define (emit-nix-interp-string-inline parts depth)
   (define chunks
