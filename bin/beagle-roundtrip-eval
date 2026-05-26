@@ -70,9 +70,16 @@ nix_evaluator() {
   # Writes stdout (drvPath on success) and exits with nix's exit code.
   # Stderr is captured separately by the driver so eval errors are
   # diagnosable rather than silently treated as "empty result."
+  #
+  # --accept-flake-config: many real-world flakes declare nixConfig with
+  # extra-substituters (e.g. cachix caches). Untrusted by default, which
+  # makes eval fail when cross-arch derivations need substitution. The
+  # corpus is already pinned (commit + flake.lock) — trusting its
+  # nixConfig is consistent with that trust boundary. No-op for flakes
+  # without nixConfig.
   local flake_dir="$1"
   local host="$2"
-  nix eval --raw \
+  nix eval --raw --accept-flake-config \
     "path:$flake_dir#nixosConfigurations.$host.config.system.build.toplevel.drvPath"
 }
 
@@ -256,6 +263,7 @@ declare -a TWIN_EVAL_FAIL_HOSTS=()
 declare -a ORIG_EVAL_FAIL_HOSTS=()
 declare -a DIAGNOSTIC_REPORTS=()
 declare -a TWIN_EVAL_ERRORS=()  # captured stderr per failing twin
+declare -a ORIG_EVAL_ERRORS=()  # captured stderr per failing orig
 
 for host in "${HOST_ARR[@]}"; do
   orig_err=$(mktemp)
@@ -266,6 +274,13 @@ for host in "${HOST_ARR[@]}"; do
   if [ $orig_status -ne 0 ]; then
     orig_eval_fail=$((orig_eval_fail+1))
     ORIG_EVAL_FAIL_HOSTS+=("$host")
+    # Capture the orig error — FAIL-ORIG-EVAL means the corpus baseline
+    # itself can't be measured, and the error IS the signal for why
+    # (env mismatch, missing input, corpus rot, etc.).
+    ORIG_EVAL_ERRORS+=("--- $host: orig eval failed ---")
+    while IFS= read -r line; do
+      ORIG_EVAL_ERRORS+=("$line")
+    done < "$orig_err"
     echo "  $host: FAIL-ORIG-EVAL"
     rm -f "$orig_err" "$twin_err"
     continue
@@ -366,6 +381,12 @@ JOURNAL_FILE="$JOURNAL_DIR/eval-$(date +%Y%m%d-%H%M%S)-$CORPUS_NAME.md"
     echo "### FAIL-ORIG-EVAL hosts (corpus/environment issue, harness can't measure)"
     echo ""
     for h in "${ORIG_EVAL_FAIL_HOSTS[@]}"; do echo "- $h"; done
+    echo ""
+    echo "#### orig eval errors (the error IS the signal for corpus/env issues)"
+    echo ""
+    echo '```'
+    for line in "${ORIG_EVAL_ERRORS[@]}"; do echo "$line"; done
+    echo '```'
     echo ""
   fi
 } > "$JOURNAL_FILE"
