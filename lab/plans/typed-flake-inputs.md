@@ -1,9 +1,35 @@
 ---
-status: active
-priority: 1
+status: done
+priority: —
 depends-on: —
 blocks: nix-discourse-launch
 created: 2026-05-25
+completed: 2026-05-27
+---
+
+## Completion notes (2026-05-27)
+
+All items shipped:
+
+- `flake-input-form` lives in `beagle-lib/private/ast.rkt:321`, parsed at
+  `parse.rkt:847`, type-checked at `check.rkt:1469`, emitted at
+  `emit-nix.rkt:384`.
+- `nix-ident` is a parse-time error with migration message at
+  `parse.rkt:1386`.
+- Tests cover the form + the parse error in `beagle-test/tests/nix-parse.rkt:191+`.
+- All 5 firnos sites migrated to `(flake-input ...)`; zero `nix-ident`
+  call sites remain.
+- dockerTools stdlib entries (4 fns) in `stdlib-nix.rkt:867-870`.
+- `claude-sandbox.nix` → `claude-sandbox.bnix` port complete;
+  round-trips byte-identical.
+- README §6 "Zero escape hatches" and CLAUDE.md "REQUIREMENT: NEVER
+  author escape hatches" both updated to reflect code reality.
+- `bin/beagle-test` green; `firn-build` clean; `nix build
+  .#nixosConfigurations.whiterabbit` evaluates.
+
+The no-escape-hatches claim now matches reality. `nix-discourse-launch`
+is unblocked.
+
 ---
 
 # Typed flake-input access + dockerTools stdlib + nix-ident removal

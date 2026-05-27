@@ -1,12 +1,12 @@
 # Active work — priority order
 
-- **typed-flake-inputs.md** — close the last escape hatch (`nix-ident`) by adding a typed `flake-input` primitive; add dockerTools stdlib coverage; port claude-sandbox.bnix. Precondition for the Nix Discourse launch — the "no escape hatches" claim has to match reality before the artifact goes public.
-- **cyclone-self-host.md** — bootstrap beagle on Cyclone Scheme; remove Racket runtime dependency. UNBLOCKED 2026-05-25 (surface-redesign closed)
+- **cyclone-self-host.md** — bootstrap beagle on Cyclone Scheme; remove Racket runtime dependency. UNBLOCKED 2026-05-25 (surface-redesign closed); next sequencing after Nix Discourse launch lands.
 - **schema-typed-paths.md** — extend `.beagle-cache/<x>-schema.json` ingestion beyond Nix + SQL (TS .d.ts, typeshed, OpenAPI, JSON Schema, etc.)
 - **unsafe-capabilities.md** — formalize the informal "no unsafe ever" dogma as a typed capability system (unsafe-ffi, unsafe-compile-time-eval, etc.). Depends on cyclone-self-host introducing the first real FFI case.
 
 ## Done
 
+- **typed-flake-inputs.md** — closed 2026-05-27; `flake-input` primitive shipped, `nix-ident` is a parse-time error, 5 firnos sites migrated, dockerTools stdlib added, claude-sandbox ported. No-escape-hatches claim now matches reality. Unblocks Nix Discourse launch.
 - **surface-redesign.md** — closed 2026-05-25; all four endpoint criteria from design-principle.md met; surface-as-dominant-mode is over. See design-principle.md "Endpoint reached" section + journal log 027.
 - **self-hosting.md** — v0.13.0 (12 components, bootstrap proven, 11/11 emission parity)
 - **macro-provenance.md** — provenance threading (Racket + Bun), `--trace` flag, validation tests
