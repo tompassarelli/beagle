@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# beagle-migrate-turtles: convert v0.15 surface beagle source to turtles surface.
+#
+# Usage:
+#   bin/beagle-migrate-turtles <source.b{gl,clj,cljs,js,nix,sql,py}>     # print to stdout
+#   bin/beagle-migrate-turtles --in-place <source>                        # write back
+#
+# Reads v0.15 source (with [], {}, #{} brackets) and emits turtles surface
+# (parens only, claim forms paired with definitions).
+#
+# This is a one-shot v0.15 → v0.16 migration tool. After v0.16 ships and the
+# corpus is migrated, this tool can be deleted.
+
+set -euo pipefail
+source "$(dirname "$0")/_beagle-racket"
+
+in_place=0
+if [[ "${1:-}" == "--in-place" ]]; then
+    in_place=1
+    shift
+fi
+
+if [[ $# -ne 1 ]]; then
+    echo "usage: beagle-migrate-turtles [--in-place] <source>" >&2
+    exit 2
+fi
+
+src="$1"
+
+if [[ ! -f "$src" ]]; then
+    echo "beagle-migrate-turtles: file not found: $src" >&2
+    exit 1
+fi
+
+if [[ "$in_place" -eq 1 ]]; then
+    tmp=$(mktemp)
+    "$RACKET" -e "(require beagle/private/migrate-turtles) (display (migrate-turtles-file (vector-ref (current-command-line-arguments) 0)))" -- "$src" > "$tmp"
+    mv "$tmp" "$src"
+else
+    "$RACKET" -e "(require beagle/private/migrate-turtles) (display (migrate-turtles-file (vector-ref (current-command-line-arguments) 0)))" -- "$src"
+fi
