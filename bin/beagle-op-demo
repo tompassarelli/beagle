@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# beagle-op-demo: showcase the operative foundation end-to-end.
+#
+# Usage:
+#   bin/beagle-op-demo [SOURCE]
+#
+# With no arg: writes a built-in demo program, then runs it through
+#   migrate → check → compile (all 7 targets) → run.
+#
+# With a v0.15 source file: migrates it to turtles+quote-operator surface,
+#   checks, compiles to the target inferred from the #lang line, and runs.
+
+set -euo pipefail
+
+bin_dir="$(dirname "$0")"
+
+if [[ $# -eq 0 ]]; then
+    src=$(mktemp --suffix=.bgl)
+    cat > "$src" <<'EOF'
+#lang beagle/clj
+(ns demo.operative)
+
+(define-mode strict)
+
+;; Compile-time macro evaluated by the operative interpreter ahead of run.
+(define-macro safe square (' params x) (* x x))
+
+(defrecord Point (' fields x y))
+
+(claim distance ∈ (→ (' params Int Int) (returns Int)))
+(defn distance (' params dx dy)
+  (body (+ (square dx) (square dy))))
+
+(defn classify (' params n)
+  (body (cond (case (< n 0) "negative")
+              (case (= n 0) "zero")
+              (case :else "positive"))))
+
+(claim origin ∈ Point)
+(def origin (Point 0 0))
+
+(println (str "distance(3,4) = " (distance 3 4)))
+(println (classify -5))
+(println (classify 0))
+(println (classify 7))
+EOF
+    is_migrated=1
+else
+    input="$1"
+    src=$(mktemp --suffix=.bgl)
+    "$bin_dir/beagle-migrate-turtles" "$input" > "$src"
+    is_migrated=0
+fi
+
+if [[ "$is_migrated" -eq 0 ]]; then
+    echo "=== migrated source ==="
+    cat "$src"
+fi
+
+echo "=== type check ==="
+"$bin_dir/beagle-op-check" "$src" || true
+
+for target in rkt clj cljs js nix py sql; do
+    echo "=== compile → $target ==="
+    "$bin_dir/beagle-op-compile" --target "$target" "$src" 2>&1 | head -25 || true
+done
+
+echo "=== run (operative interpreter) ==="
+"$bin_dir/beagle-op-run" "$src" 2>&1 || true
+
+rm -f "$src"
