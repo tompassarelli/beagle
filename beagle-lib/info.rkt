@@ -1,7 +1,7 @@
 #lang info
 (define collection "beagle")
 (define deps '("base"))
-(define version "0.14.0")
+(define version "0.15.0")
 (define pkg-desc "Agent-native typed authoring layer — emits Clojure, ClojureScript, JavaScript, Nix, or SQL.")
 (define pkg-authors '(tom))
 (define license '(MIT))

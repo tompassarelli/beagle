@@ -25,7 +25,7 @@ concept.
 
 ## Status
 
-`#lang beagle` v0.14.0 — 1382 tests passing (+ oracle/differential/bun-parity via `BEAGLE_ORACLE=1`).
+`#lang beagle` v0.15.0 — 1382 tests passing (+ oracle/differential/bun-parity via `BEAGLE_ORACLE=1`).
 
 - **Targets:** `beagle/clj` (default), `beagle/cljs`, `beagle/js`, `beagle/nix`, `beagle/sql`, `beagle/py`, `beagle/rkt`
 - **Forms:** ~78 forms — ~50 cross-target (definitions, control flow, data structures, pattern matching, threading, interop) + 28 typed JS target forms (`js/*`).

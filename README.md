@@ -262,7 +262,7 @@ generate from itself:
 
 ## Status
 
-`#lang beagle` v0.14.0 — 1190 active-tier tests passing. **No v1.0
+`#lang beagle` v0.15.0 — 1190 active-tier tests passing. **No v1.0
 until others have used it in anger.** The author dogfoods on a 220-file
 NixOS config ([firnos](https://github.com/tompassarelli/firnos)) —
 schema-typed end-to-end, system builds from `flake.bnix` directly.
