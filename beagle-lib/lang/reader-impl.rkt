@@ -143,20 +143,10 @@
          (read-syntax src combined)
          (read combined)))]))
 
-(define (apostrophe-reader ch port src line col pos)
-  ;; ' as a non-terminating-macro: when ' appears IN the middle of a
-  ;; symbol token, it's already absorbed as part of the symbol (this
-  ;; handler doesn't fire there). When ' appears at the START of a
-  ;; fresh token, this handler runs and produces (quote NEXT) —
-  ;; preserving Racket's standard quote behavior.
-  ;;
-  ;; Net effect: identifiers like mapAttrs', getExe', and others
-  ;; common in nixpkgs now parse as single symbols; bare 'foo still
-  ;; quotes.
-  (define next-form (read-syntax/recursive src port))
-  (if (eof-object? next-form)
-      (error 'beagle "expected form after '")
-      (datum->syntax #f `(quote ,next-form) (list src line col pos #f))))
+;; Note: there is NO apostrophe reader macro in the quote-operator surface.
+;; `'` is just an ordinary identifier character. Data quoting uses
+;; `(' OPERAND)` with `'` in head position; there is no `'x` prefix sugar.
+;; See plan 20260528220000-beagle_quote_operator_clarification.
 
 (define (pipe-reader ch port src line col pos)
   ;; Treat `|` as an ordinary identifier character so `|>` and `|>>`
@@ -196,7 +186,10 @@
                             (lambda (ch port src line col pos)
                               (error 'beagle "unexpected `}`"))
     #\| 'non-terminating-macro pipe-reader
-    #\' 'non-terminating-macro apostrophe-reader
+    ;; `'` is treated as ordinary so it can appear as a bare symbol in
+    ;; head position; we override Racket's default `'x` ≡ (quote x) macro
+    ;; by aliasing `'` to the ordinary character `a`.
+    #\' #\a #f
     #\# 'non-terminating-macro hash-dispatch))
 
 (define (beagle-read in)
