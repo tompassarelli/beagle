@@ -15,6 +15,7 @@
          "eval-standard.rkt"
          "check-operative.rkt"
          "emit-operative.rkt"
+         "macro-expand.rkt"
          (only-in beagle/lang/reader-impl beagle-read))
 
 (provide
@@ -79,11 +80,15 @@
 ;; --- compile -------------------------------------------------------------
 
 (define (compile-source path [target-override #f])
-  ;; Reads, checks, emits. Errors abort compilation with a multi-line
-  ;; error message. Returns the emitted source string.
+  ;; Reads, expands macros, checks, emits. Errors abort compilation with
+  ;; a multi-line error message. Returns the emitted source string.
   (define-values (lang-line forms) (read-source path))
   (define target (or target-override (detect-target lang-line)))
-  (define errors (check-program forms))
+  ;; Macro expansion is compile-time evaluation of pure operatives —
+  ;; the Beagle-specific win. After expansion, the program contains
+  ;; only forms the type checker and emitter directly understand.
+  (define expanded (expand-program forms))
+  (define errors (check-program expanded))
   (cond
     [(not (null? errors))
      (define msg
@@ -93,17 +98,18 @@
          "\n"))
      (raise-user-error 'compile "type errors:\n~a" msg)]
     [else
-     (emit-program forms target)]))
+     (emit-program expanded target)]))
 
 ;; --- run (evaluate via operative interpreter) ---------------------------
 
 (define (run-source path)
-  ;; Reads source, evaluates each form against the operative evaluator.
+  ;; Reads source, expands macros, evaluates each form.
   ;; Used for the operative REPL and direct execution.
   (define-values (_ forms) (read-source path))
+  (define expanded (expand-program forms))
   (define env (initial-env))
   (install-standard-forms! env)
   (define last-val (void))
-  (for ([f (in-list forms)])
+  (for ([f (in-list expanded)])
     (set! last-val (evaluate f env)))
   last-val)
