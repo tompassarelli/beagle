@@ -234,6 +234,97 @@
             (env-define! call-env v (string->keyword (symbol->string v))))))
       (void))))
 
+;; --- do : sequence ---------------------------------------------------------
+
+(define (make-do-op)
+  (make-raw-operative
+    'do
+    (lambda (args call-env)
+      (evaluate-all args call-env))))
+
+;; --- when / unless : Clojure-style conditional sequences ----------------
+
+(define (make-when-op)
+  (make-raw-operative
+    'when
+    (lambda (args call-env)
+      (cond
+        [(null? args) (void)]
+        [else
+         (define test-val (evaluate (car args) call-env))
+         (cond
+           [(or (eq? test-val #f) (eq? test-val 'nil)) (void)]
+           [else (evaluate-all (cdr args) call-env)])]))))
+
+(define (make-unless-op)
+  (make-raw-operative
+    'unless
+    (lambda (args call-env)
+      (cond
+        [(null? args) (void)]
+        [else
+         (define test-val (evaluate (car args) call-env))
+         (cond
+           [(or (eq? test-val #f) (eq? test-val 'nil))
+            (evaluate-all (cdr args) call-env)]
+           [else (void)])]))))
+
+;; --- doseq : side-effect iteration ---------------------------------------
+
+;; (doseq (' bindings (bind x coll)) (body B...))
+;; For each value in coll, bind x and evaluate body for side effects.
+(define (make-doseq-op)
+  (make-raw-operative
+    'doseq
+    (lambda (args call-env)
+      (cond
+        [(= (length args) 2)
+         (define bindings-data (evaluate (car args) call-env))
+         (define body-form (cadr args))
+         (define binds (extract-list-with-head bindings-data 'bindings))
+         ;; First cut: single binding only
+         (cond
+           [(and (= (length binds) 1) (pair? (car binds))
+                 (eq? (caar binds) 'bind) (= (length (car binds)) 3))
+            (define name (cadr (car binds)))
+            (define coll-expr (caddr (car binds)))
+            (define coll (evaluate coll-expr call-env))
+            (for ([v (in-list coll)])
+              (define new-env (env-extend call-env))
+              (env-define! new-env name v)
+              (evaluate body-form new-env))
+            (void)]
+           [else (void)])]
+        [else (error 'doseq "expected (doseq bindings-form body-form)")]))))
+
+;; --- for : list comprehension --------------------------------------------
+
+;; (for (' clauses (bind x coll) ...) (body B...))
+;; Returns a list of body-results, one per binding combination.
+(define (make-for-op)
+  (make-raw-operative
+    'for
+    (lambda (args call-env)
+      (cond
+        [(= (length args) 2)
+         (define clauses-data (evaluate (car args) call-env))
+         (define body-form (cadr args))
+         (define clauses (or (extract-list-with-head clauses-data 'clauses)
+                             (extract-list-with-head clauses-data 'bindings)))
+         ;; First cut: single binding only, no :when
+         (cond
+           [(and (= (length clauses) 1) (pair? (car clauses))
+                 (eq? (caar clauses) 'bind) (= (length (car clauses)) 3))
+            (define name (cadr (car clauses)))
+            (define coll-expr (caddr (car clauses)))
+            (define coll (evaluate coll-expr call-env))
+            (for/list ([v (in-list coll)])
+              (define new-env (env-extend call-env))
+              (env-define! new-env name v)
+              (evaluate body-form new-env))]
+           [else (error 'for "first cut supports single binding only")])]
+        [else (error 'for "expected (for clauses-form body-form)")]))))
+
 ;; --- match: pattern matching --------------------------------------------
 
 ;; Surface:
@@ -550,4 +641,9 @@
   (env-define! env 'defrecord (make-defrecord-op))
   (env-define! env 'defunion  (make-defunion-op))
   (env-define! env 'defenum   (make-defenum-op))
+  (env-define! env 'do        (make-do-op))
+  (env-define! env 'when      (make-when-op))
+  (env-define! env 'unless    (make-unless-op))
+  (env-define! env 'doseq     (make-doseq-op))
+  (env-define! env 'for       (make-for-op))
   env)
