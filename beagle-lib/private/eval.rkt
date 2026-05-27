@@ -497,6 +497,36 @@
 (define SYMBOL?-OP  (make-wrapped 'symbol?  symbol?))
 (define BOOLEAN?-OP (make-wrapped 'boolean? boolean?))
 (define KEYWORD?-OP (make-wrapped 'keyword? keyword?))
+(define NOT-OP (make-wrapped 'not
+                              (lambda (v)
+                                (or (eq? v #f) (eq? v 'nil)))))
+(define LIST?-OP (make-wrapped 'list? list?))
+(define VECTOR?-OP (make-wrapped 'vector? vector?))
+(define HASH?-OP (make-wrapped 'hash? hash?))
+;; Boolean combinators — raw operatives to support short-circuit
+(define AND-OP
+  (make-raw 'and
+    (lambda (args env)
+      (cond
+        [(null? args) #t]
+        [(null? (cdr args)) (evaluate (car args) env)]
+        [else
+         (define v (evaluate (car args) env))
+         (cond
+           [(or (eq? v #f) (eq? v 'nil)) #f]
+           [else (apply-operative AND-OP (cdr args) env)])]))))
+(define OR-OP
+  (make-raw 'or
+    (lambda (args env)
+      (cond
+        [(null? args) #f]
+        [(null? (cdr args)) (evaluate (car args) env)]
+        [else
+         (define v (evaluate (car args) env))
+         (cond
+           [(or (eq? v #f) (eq? v 'nil))
+            (apply-operative OR-OP (cdr args) env)]
+           [else v])]))))
 
 ;; --- I/O (minimal) --------------------------------------------------------
 
@@ -660,6 +690,12 @@
                           (symbol?       . ,SYMBOL?-OP)
                           (boolean?      . ,BOOLEAN?-OP)
                           (keyword?      . ,KEYWORD?-OP)
+                          (not           . ,NOT-OP)
+                          (list?         . ,LIST?-OP)
+                          (vector?       . ,VECTOR?-OP)
+                          (hash?         . ,HASH?-OP)
+                          (and           . ,AND-OP)
+                          (or            . ,OR-OP)
                           (display       . ,DISPLAY-OP)
                           (newline       . ,NEWLINE-OP)
                           (println       . ,PRINTLN-OP)
