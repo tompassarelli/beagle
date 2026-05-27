@@ -35,13 +35,16 @@
   operative? operative-name
   env? make-env env-define! env-set! env-lookup env-extend env-parent
   ;; evaluator
-  evaluate evaluate-all apply-operative
+  evaluate evaluate-all apply-operative truthy?
   ;; primitives (exposed for testing & embedding)
   initial-env
   QUOTE-OP
   ;; reflection helpers
   raw-operative?
-  wrapped-operative?)
+  wrapped-operative?
+  ;; constructors for use by standard-forms layer
+  make-raw-operative
+  make-wrapped-operative)
 
 ;; --- value types ----------------------------------------------------------
 
@@ -156,6 +159,17 @@
   ;; proc receives raw args and env; nothing pre-evaluated.
   (operative name proc #f))
 
+;; Public constructors for use by the standard-forms layer. These build
+;; operatives whose proc receives raw `(args env)` (raw) or pre-evaluated
+;; values (wrapped). Tests and tooling should use these instead of
+;; reaching for the struct constructor.
+(define (make-raw-operative name proc)
+  (make-raw name proc))
+
+(define (make-wrapped-operative name proc)
+  ;; proc here receives Racket-evaluated values and returns a value.
+  (make-wrapped name proc))
+
 ;; --- the data operator `'` -----------------------------------------------
 
 ;; `'` is variadic and does not evaluate its operands. It collects them
@@ -173,11 +187,11 @@
 ;;
 ;;   (vau (' params P...) ENV-NAME (body EXPR...))
 ;;
-;; The first operand is the parameter pattern as data (a list whose head
-;; is the symbol `params` and whose tail are the parameter names). The
-;; second operand is the environment-parameter name (a symbol, or the
-;; conventional `#ignore` to skip binding it). The third operand is a
-;; (body EXPR...) form.
+;; The first operand is a `'`-form that evaluates to the data list
+;; `(params NAME...)`. The second operand is the environment-parameter
+;; name (a symbol; `_` skips binding). The third operand is a `body`
+;; form — which is itself a normal operative that evaluates its args
+;; sequentially.
 (define VAU-OP
   (make-raw 'vau
     (lambda (args call-env)
@@ -186,31 +200,29 @@
       (define params-form (car args))
       (define env-name    (cadr args))
       (define body-form   (caddr args))
-      (define params (extract-params params-form))
+      ;; Evaluate the params-form to get the data list (params NAME...).
+      (define params-data (evaluate params-form call-env))
+      (define params (extract-params params-data))
       (define def-env call-env)  ; lexical capture
       (operative
         (or (and (symbol? env-name) env-name) 'lambda)
         (lambda (raw-args caller-env)
           (define new-env (env-extend def-env))
           (bind-params! new-env params raw-args)
-          (when (and (symbol? env-name) (not (eq? env-name '_)) (not (eq? env-name '#%ignore)))
+          (when (and (symbol? env-name)
+                     (not (eq? env-name '_))
+                     (not (eq? env-name '#%ignore)))
             (env-define! new-env env-name caller-env))
-          (evaluate-body body-form new-env))
+          (evaluate body-form new-env))
         #f))))
 
-(define (extract-params params-form)
-  ;; params-form is the data list `(params NAME...)` produced by `'`,
-  ;; OR the result of evaluating a quoted form. We accept either:
-  ;;   - a list `(params NAME...)` directly
-  ;;   - a form `(' params NAME...)` that needs evaluating (returns the list)
+(define (extract-params params-data)
+  ;; params-data is the data list `(params NAME...)`.
   (cond
-    [(and (pair? params-form) (eq? (car params-form) 'params))
-     (cdr params-form)]
-    [(and (pair? params-form) (eq? (car params-form) QUOTE-OP-SYM))
-     ;; ('-form not yet evaluated; evaluate it to get the data list
-     (extract-params (cdr params-form))]
+    [(and (pair? params-data) (eq? (car params-data) 'params))
+     (cdr params-data)]
     [else
-     (error 'vau "expected (params NAME...) parameter form, got ~v" params-form)]))
+     (error 'vau "expected (params NAME...) form, got ~v" params-data)]))
 
 (define (bind-params! e params args)
   (cond
@@ -228,13 +240,13 @@
     [else
      (error 'apply "bad parameter pattern: ~v" params)]))
 
-(define (evaluate-body body-form env)
-  ;; body-form is `(body EXPR...)` — `body` is the structural marker.
-  (cond
-    [(and (pair? body-form) (eq? (car body-form) 'body))
-     (evaluate-all (cdr body-form) env)]
-    [else
-     (evaluate body-form env)]))
+;; `body`: a regular operative that sequences its operands.
+;; (body EXPR1 EXPR2 ... LAST) evaluates each in order and returns LAST.
+;; This is just an eval-operator — no special handling anywhere.
+(define BODY-OP
+  (make-raw 'body
+    (lambda (args env)
+      (evaluate-all args env))))
 
 ;; `wrap`: take a raw operative and return a function-shaped operative
 ;; that evaluates each argument first.
@@ -423,6 +435,7 @@
                           (wrap          . ,WRAP-OP)
                           (unwrap        . ,UNWRAP-OP)
                           (eval          . ,EVAL-OP)
+                          (body          . ,BODY-OP)
                           (if            . ,IF-OP)
                           (define        . ,DEFINE-OP)
                           (set!          . ,SET!-OP)
@@ -464,4 +477,12 @@
   (env-define! e 'true #t)
   (env-define! e 'false #f)
   (env-define! e 'nil 'nil)
+  ;; Type primitives — bind each type name to itself as a value so type
+  ;; expressions can use them without being looked up specially. The
+  ;; type checker substitutes real type structures; at the runtime
+  ;; level, types are inert symbols.
+  (for ([t (in-list '(Int Float Bool String Keyword Symbol Nil Any
+                      Number Promise Vec List Map Set NixType
+                      Maybe Result Form Syntax Expr))])
+    (env-define! e t t))
   e)
