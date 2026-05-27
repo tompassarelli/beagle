@@ -114,8 +114,6 @@ Every surface decision was filtered through these. They are load-bearing.
    exist for local character savings, with no broader pattern, are
    net-negative even when they look convenient at authoring time.
 
-Long-form rationale: [`lab/journal/synthesis/design-principle.md`](lab/journal/synthesis/design-principle.md).
-
 ## The lock-in discipline
 
 The 2026-05 surface audit cycle closed with surface-redesign-as-dominant-mode
@@ -168,7 +166,7 @@ Emission parity verified against [Heist](https://github.com/tompassarelli/heist)
 from both compilers.
 
 Next milestone: Cyclone Scheme self-host, removing the Racket runtime
-dependency. See [`lab/plans/cyclone-self-host.md`](lab/plans/cyclone-self-host.md).
+dependency.
 
 ## Install
 
@@ -260,9 +258,6 @@ generate from itself:
 
 - [`README.md`](README.md) — this file: what beagle is, the principles, the lock-in discipline.
 - [`CLAUDE.md`](CLAUDE.md) — session anchor for LLM context: how to navigate, what tools exist.
-- [`lab/journal/synthesis/design-principle.md`](lab/journal/synthesis/design-principle.md) — long-form principles with full rationale for each surface decision.
-- [`lab/journal/log/`](lab/journal/log/) — chronological audit notes, especially logs 024-027 for the 2026-05 surface redesign cycle.
-- [`lab/plans/`](lab/plans/) — workstream plans (active + done, with frontmatter status).
 - [`beagle-lab`](https://github.com/tompassarelli/beagle-lab) — experiment writeups (E0–E22+) with raw results and methodology.
 
 ## Status

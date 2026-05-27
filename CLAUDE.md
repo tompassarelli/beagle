@@ -248,22 +248,19 @@ not type-check or inspect deeper errors until delimiters pass.
   tier logic and will block iteration on demoted-tier failures that shouldn't
   block. Local default: active-only (fast loop). CI runs the full suite (sets
   `CI=true`). Local opt-in to full suite: `BEAGLE_FULL_SUITE=1 bin/beagle-test`
-  or `--full` flag. Tier classification in `beagle-test/tiers.rktd`; demoted
-  failures logged to `lab/surface-debt.md` for batch reconciliation.
+  or `--full` flag. Tier classification in `beagle-test/tiers.rktd`.
 
 ### Tiering discipline during surface iteration
 
 **Thoroughness-redirection rule.** When working on a surface drop or change:
 the "be thorough, fix everything" instinct is correct — but it goes to
-**active-tier code + debt-file entries**, never to **demoted-tier code**
-during iteration.
+**active-tier code**, not to **demoted-tier code** during iteration.
 
 - Active-tier failures from surface changes: **fix**. The build is blocked
   until they pass.
-- Demoted-tier failures from surface changes: **log to `lab/surface-debt.md`**
-  with a "Was checking" entry describing what the failing test verified.
-  Do NOT edit the demoted test file to fix it. The tiering exists
-  precisely so demoted-tier maintenance doesn't slow surface iteration.
+- Demoted-tier failures from surface changes: **do NOT edit the demoted
+  test file to fix it.** The tiering exists precisely so demoted-tier
+  maintenance doesn't slow surface iteration.
 
 Why this matters: each demoted fix feels cheap (small mechanical migration).
 Accumulated across drops, the cost is the full cross-target test-update tax
@@ -275,8 +272,7 @@ Workflow per surface drop:
 1. Make the active-tier change (parse, check, structural emit).
 2. Run `bin/beagle-test`.
 3. Active failures: fix until green.
-4. Demoted failures: open `lab/surface-debt.md`, append entry with
-   per-failure "Was checking" detail, update the `## Total debt:` counter.
+4. Demoted failures: leave alone — they're advisory during iteration.
 5. Commit. Move on.
 
 What counts as a "demoted-tier file" right now (per `beagle-test/tiers.rktd`):
@@ -284,7 +280,7 @@ What counts as a "demoted-tier file" right now (per `beagle-test/tiers.rktd`):
 - `emit-js-behavioral.rkt`
 
 When you find yourself opening one of those to edit during a surface drop,
-stop. The fix goes to `surface-debt.md`, not the file.
+stop.
 
 Corpus migrations (fixtures in `beagle-test/tests/fixtures/`, `oracle/fixtures/`,
 `examples/`) are not test code — they are test INPUTS. They MUST be migrated
@@ -340,9 +336,6 @@ If it's a separate fact: drop / reject (pattern-isolated), regardless
 of Clojure-precedent, character-savings, training-data reflex, or
 corpus-usage statistics.
 
-Full rationale: `lab/journal/synthesis/design-principle.md`. This is
-the load-bearing reference for any future surface decision.
-
 ### Confident (committed, well-reasoned)
 
 | decision | reasoning |
@@ -374,9 +367,7 @@ Host-language idioms whose cost > benefit for beagle's goals:
 ### Dropped (surface redesign, 2026-05)
 
 Forms removed because they were sugar/redundant or had ~zero real
-usage. See `lab/journal/log/024-surface-friction-observation.md` for
-the empirical basis and `lab/journal/log/027-night-audit.md` for the
-deferred-items audit.
+usage.
 
 - **`defmulti` / `defmethod`** — value-dispatch alternative to `match`;
   no broader pattern. Use `defprotocol` + `extend-type` (type dispatch)
@@ -424,7 +415,7 @@ alone in its concept space, low corpus count reflects let-chain-heavy
 style not redundancy), `cond` (sequential independent-predicate
 dispatch — distinct concept from `match`'s pattern-against-target
 dispatch), `do` (multi-expression sequencing, useful even after `when`
-drop — see `lab/journal/log/issue-86-do-form-audit.md`).
+drop).
 
 Audited and confirmed as distinct concepts (not redundancy):
 - **`nth` vs `get`** — `nth` is positional-int into vector; `get` is
@@ -459,9 +450,4 @@ For mechanical questions ("what forms exist?", "what's the signature of X?",
 For non-mechanical questions ("why does the surface look this way?",
 "what was dropped and why?"):
 - `README.md` — what beagle is, the core principles, the lock-in discipline
-- `lab/journal/synthesis/design-principle.md` — long-form principles + audit-endpoint discipline
-- `lab/journal/log/` — chronological audit notes (logs 024-027 cover the 2026-05 redesign)
-- `lab/plans/` — workstream plans (active + done, with frontmatter status)
-- `lab/experiments/` — experiment archive (mirrors `~/code/beagle-lab/`)
-- `~/code/beagle-lab/` — full experiment results (E0–E22+)
 - `~/code/beagle-lab/` — historical experiment archive (E0–E22, benchmark framework, results)
