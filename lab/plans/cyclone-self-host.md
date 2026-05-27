@@ -5,6 +5,21 @@ priority: 1
 
 # Cyclone self-hosting — beagle on Scheme, Racket-free
 
+## Naming + relationship to `self-hosting.md`
+
+There are **two** self-host stories in this repo. New readers usually
+conflate them:
+
+- `self-hosting.md` (status: done, v0.13.0) — JS/Bun proof-of-concept.
+  `self-host/*.bjs` compile to JS; Bun runs the resulting compiler.
+  This proved bootstrap closure but Bun is not the destination.
+- `cyclone-self-host.md` (THIS plan, status: active, priority 1) —
+  production end state. Runtime becomes Cyclone Scheme; Racket leaves
+  the end-user dependency set entirely.
+
+When in doubt, the cyclone plan wins — the JS/Bun work was the rung,
+not the roof.
+
 ## Thesis
 
 Beagle's current compiler runs on Racket. The end state is: beagle compiles

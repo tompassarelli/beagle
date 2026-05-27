@@ -18,3 +18,7 @@ pipeline/
 result
 runtime/src/kea/
 runtime/src/promotions.clj
+
+# Rust build artifacts for tools/
+tools/*/target/
+tools/*/Cargo.lock
