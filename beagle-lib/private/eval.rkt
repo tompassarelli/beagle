@@ -370,15 +370,82 @@
 (define (list-primitive name racket-proc)
   (make-wrapped name racket-proc))
 
-(define CONS-OP   (list-primitive 'cons cons))
-(define CAR-OP    (list-primitive 'car car))
-(define CDR-OP    (list-primitive 'cdr cdr))
-(define LIST-OP   (list-primitive 'list list))
-(define NULL?-OP  (list-primitive 'null? null?))
-(define PAIR?-OP  (list-primitive 'pair? pair?))
-(define LENGTH-OP (list-primitive 'length length))
-(define APPEND-OP (list-primitive 'append append))
+(define CONS-OP    (list-primitive 'cons cons))
+(define CAR-OP     (list-primitive 'car car))
+(define CDR-OP     (list-primitive 'cdr cdr))
+(define LIST-OP    (list-primitive 'list list))
+(define NULL?-OP   (list-primitive 'null? null?))
+(define PAIR?-OP   (list-primitive 'pair? pair?))
+(define LENGTH-OP  (list-primitive 'length length))
+(define APPEND-OP  (list-primitive 'append append))
 (define REVERSE-OP (list-primitive 'reverse reverse))
+(define FIRST-OP   (list-primitive 'first car))
+(define REST-OP    (list-primitive 'rest cdr))
+(define SECOND-OP  (list-primitive 'second cadr))
+(define THIRD-OP   (list-primitive 'third caddr))
+(define (last-helper xs)
+  (cond [(null? xs) (error 'last "empty list")]
+        [(null? (cdr xs)) (car xs)]
+        [else (last-helper (cdr xs))]))
+(define LAST-OP (list-primitive 'last last-helper))
+
+;; Higher-order ops — these are wrapped, so all args are evaluated before
+;; calling. The first arg (the function) must be a wrapped operative; we
+;; invoke it via apply-operative.
+
+(define (apply-fn-list fn xs env)
+  ;; Apply a wrapped operative `fn` to each element of `xs`, in `env`.
+  (for/list ([x (in-list xs)])
+    (apply-operative fn (list x) env)))
+
+(define MAP-OP
+  (make-raw 'map
+    (lambda (args env)
+      (unless (= (length args) 2)
+        (error 'map "expected (map FN LIST), got ~v args" (length args)))
+      (define fn (evaluate (car args) env))
+      (define xs (evaluate (cadr args) env))
+      (apply-fn-list fn xs env))))
+
+(define FILTER-OP
+  (make-raw 'filter
+    (lambda (args env)
+      (unless (= (length args) 2)
+        (error 'filter "expected (filter PRED LIST), got ~v args" (length args)))
+      (define pred (evaluate (car args) env))
+      (define xs (evaluate (cadr args) env))
+      (for/list ([x (in-list xs)]
+                 #:when (let ([v (apply-operative pred (list x) env)])
+                          (and (not (eq? v #f)) (not (eq? v 'nil)))))
+        x))))
+
+(define REDUCE-OP
+  (make-raw 'reduce
+    (lambda (args env)
+      (cond
+        [(= (length args) 2)
+         (define fn (evaluate (car args) env))
+         (define xs (evaluate (cadr args) env))
+         (cond
+           [(null? xs) (error 'reduce "reduce of empty list with no initial")]
+           [else
+            (for/fold ([acc (car xs)]) ([x (in-list (cdr xs))])
+              (apply-operative fn (list acc x) env))])]
+        [(= (length args) 3)
+         (define fn (evaluate (car args) env))
+         (define init (evaluate (cadr args) env))
+         (define xs (evaluate (caddr args) env))
+         (for/fold ([acc init]) ([x (in-list xs)])
+           (apply-operative fn (list acc x) env))]
+        [else
+         (error 'reduce "expected 2 or 3 args, got ~v" (length args))]))))
+
+(define COUNT-OP   (list-primitive 'count length))
+(define EMPTY?-OP  (list-primitive 'empty? null?))
+(define CONTAINS?-OP
+  (list-primitive 'contains?
+                  (lambda (xs y)
+                    (and (member y xs) #t))))
 
 ;; --- equality -------------------------------------------------------------
 
@@ -483,6 +550,17 @@
                           (length        . ,LENGTH-OP)
                           (append        . ,APPEND-OP)
                           (reverse       . ,REVERSE-OP)
+                          (first         . ,FIRST-OP)
+                          (rest          . ,REST-OP)
+                          (second        . ,SECOND-OP)
+                          (third         . ,THIRD-OP)
+                          (last          . ,LAST-OP)
+                          (map           . ,MAP-OP)
+                          (filter        . ,FILTER-OP)
+                          (reduce        . ,REDUCE-OP)
+                          (count         . ,COUNT-OP)
+                          (empty?        . ,EMPTY?-OP)
+                          (contains?     . ,CONTAINS?-OP)
                           (eq?           . ,EQ?-OP)
                           (equal?        . ,EQUAL?-OP)
                           (=             . ,=-OP)
