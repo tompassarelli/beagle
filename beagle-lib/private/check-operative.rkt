@@ -172,6 +172,9 @@
      (eq? (type-prim-name a) (type-prim-name b))]
     [(and (type-any? a) (type-any? b)) #t]
     [(and (type-nil? a) (type-nil? b)) #t]
+    ;; Nil and (type-prim 'Nil) are equivalent
+    [(and (type-nil? a) (type-prim? b) (eq? (type-prim-name b) 'Nil)) #t]
+    [(and (type-prim? a) (eq? (type-prim-name a) 'Nil) (type-nil? b)) #t]
     [(and (type-arrow? a) (type-arrow? b))
      (and (= (length (type-arrow-params a)) (length (type-arrow-params b)))
           (andmap type-equal?
