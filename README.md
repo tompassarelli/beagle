@@ -19,9 +19,6 @@ beagle without semantic loss. The other targets stay first-class
 structurally; they aren't the current focus of test-pass investment
 or community-adoption work.
 
-The first paragraph is the identity. The second is the current phase.
-The phase shifts as use cases mature; the identity doesn't.
-
 ```racket
 #lang beagle/nix
 (ns hosts.whiterabbit)
