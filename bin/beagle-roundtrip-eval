@@ -294,35 +294,56 @@ echo "[1/4] Building twin flake at $TWIN"
 mkdir -p "$TWIN"
 rsync -a --exclude='*.nix' "$CORPUS/" "$TWIN/"
 
+# Parallelize the per-file convert+emit. Each file is independent: import-nix
+# produces a .bnix from the .nix, beagle-build emits a fresh .nix from the
+# .bnix. xargs -P fans out — empirically ~16 hits the diminishing-returns
+# point on 24-core hosts (Racket startup overhead + disk contention).
+PARALLEL_JOBS="${BEAGLE_EVAL_JOBS:-16}"
+
+convert_one() {
+  local src="$1" corpus="$2" work="$3" twin="$4"
+  local rel="${src#$corpus/}"
+  local bnix="$work/bnix/$rel.bnix"
+  local twin_nix="$twin/$rel"
+  mkdir -p "$(dirname "$bnix")" "$(dirname "$twin_nix")"
+  if ! "$IMPORT_NIX" "$src" > "$bnix" 2>/dev/null; then
+    cp "$src" "$twin_nix"
+    echo "C" > "$work/status/$(echo "$rel" | tr / _).status"
+    return
+  fi
+  if ! "$BEAGLE_BUILD" "$bnix" "$twin_nix" >/dev/null 2>&1; then
+    cp "$src" "$twin_nix"
+    echo "B" > "$work/status/$(echo "$rel" | tr / _).status"
+    return
+  fi
+  if [ ! -f "$twin_nix" ]; then
+    cp "$src" "$twin_nix"
+    echo "B" > "$work/status/$(echo "$rel" | tr / _).status"
+    return
+  fi
+  echo "OK" > "$work/status/$(echo "$rel" | tr / _).status"
+}
+export -f convert_one
+export IMPORT_NIX BEAGLE_BUILD CORPUS WORK TWIN
+
+mkdir -p "$WORK/status"
+echo "  (parallelism: $PARALLEL_JOBS jobs)"
+find "$CORPUS" -name "*.nix" -type f -print0 \
+  | xargs -0 -n 1 -P "$PARALLEL_JOBS" -I{} \
+      bash -c 'convert_one "$1" "$CORPUS" "$WORK" "$TWIN"' _ {}
+
 declare -i convert_fail=0
 declare -i build_fail=0
 declare -i nix_files=0
 
-while IFS= read -r src; do
+for f in "$WORK/status"/*.status; do
+  [ -f "$f" ] || continue
   nix_files=$((nix_files+1))
-  rel="${src#$CORPUS/}"
-  bnix="$WORK/bnix/$rel.bnix"
-  twin_nix="$TWIN/$rel"
-  mkdir -p "$(dirname "$bnix")" "$(dirname "$twin_nix")"
-  if ! "$IMPORT_NIX" "$src" > "$bnix" 2>/dev/null; then
-    # On conversion failure: copy original unchanged into twin so the twin
-    # remains evaluable. Downside: eval comparison treats this file as
-    # identity, so it can't reveal converter bugs in this file. Tracked in
-    # the summary so it's not invisible.
-    convert_fail=$((convert_fail+1))
-    cp "$src" "$twin_nix"
-    continue
-  fi
-  if ! "$BEAGLE_BUILD" "$bnix" "$twin_nix" >/dev/null 2>&1; then
-    build_fail=$((build_fail+1))
-    cp "$src" "$twin_nix"
-    continue
-  fi
-  if [ ! -f "$twin_nix" ]; then
-    build_fail=$((build_fail+1))
-    cp "$src" "$twin_nix"
-  fi
-done < <(find "$CORPUS" -name "*.nix" -type f)
+  case "$(cat "$f")" in
+    C) convert_fail=$((convert_fail+1)) ;;
+    B) build_fail=$((build_fail+1)) ;;
+  esac
+done
 
 echo "  nix files:    $nix_files"
 echo "  convert-fail: $convert_fail (original copied unchanged into twin)"

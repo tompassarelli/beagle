@@ -1022,11 +1022,18 @@
         ;;   if (target ? "${KEY}") then target.${KEY} else default
         ;; Beagle bnix:
         ;;   (if (has TARGET "${KEY}") (get TARGET KEY-EXPR) DEFAULT)
-        ;; The has-path string carries the interp text verbatim — beagle's
-        ;; emit-nix will quote it (since it's non-identifier) producing
-        ;; `target ? "${KEY}"` which Nix evaluates with dynamic key lookup.
+        ;; KEY needs to be the BARE expression (not wrapped in (s ...))
+        ;; because it gets embedded in `${...}` interp where the (s ...)
+        ;; wrap would produce `"${(s X)}"` — invalid Nix.
         (define seg (car path))
-        (define key-bnix (emit-str-interp (cadr seg) depth))
+        (define parts (cadr seg))
+        (define key-bnix
+          (cond
+            [(and (= (length parts) 1)
+                  (pair? (car parts))
+                  (eq? (car (car parts)) 'interp))
+             (emit-interp-expr (cadr (car parts)))]
+            [else (emit-str-interp parts depth)]))
         (format "(if (has ~a \"${~a}\") (get ~a ~a) ~a)"
                 (emit-expr target depth)
                 key-bnix
@@ -1519,14 +1526,17 @@
                  (emit-interp-expr nix-expr)]))
             parts))
      (cond
-       ;; Single interp, no literal parts → the whole string is just
-       ;; the interpolated expression. Wrapping in an outer (s ...) when
-       ;; the inner is already a string-shaped beagle form (e.g. a
-       ;; (s ...) from a + concatenation) produces nested interpolation
-       ;; in the Nix output, which is malformed. Emit the inner directly.
+       ;; Single interp whose inner emit is ALREADY a (s ...) form —
+       ;; e.g. nested string-with-interp from a `+`-concat. Wrapping
+       ;; would produce `"${"${...}"}"` which is malformed Nix.
+       ;; Otherwise keep the outer (s ...) wrap: `"${X}"` is NOT the
+       ;; same as `X` (it coerces X to string — paths→store, drvs→
+       ;; outPath, numbers→toString), so dropping the wrap would
+       ;; silently change semantics on non-string values.
        [(and (= (length parts) 1)
              (pair? (car parts))
-             (eq? (car (car parts)) 'interp))
+             (eq? (car (car parts)) 'interp)
+             (regexp-match? #rx"^\\(s " (car s-args)))
         (car s-args)]
        [else
         (format "(s ~a)" (string-join s-args " "))])]))
