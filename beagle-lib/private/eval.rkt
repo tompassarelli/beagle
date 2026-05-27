@@ -513,6 +513,62 @@
             [(char? i) (string i)]
             [else (format "~a" i)]))))))
 
+(define STRING-LENGTH-OP (make-wrapped 'string-length string-length))
+(define STRING-UPCASE-OP (make-wrapped 'string-upcase string-upcase))
+(define STRING-DOWNCASE-OP (make-wrapped 'string-downcase string-downcase))
+(define STRING-CONTAINS?-OP
+  (make-wrapped 'string-contains?
+    (lambda (s sub)
+      (and (regexp-match? (regexp-quote sub) s) #t))))
+
+;; --- predicates ----------------------------------------------------------
+
+(define NIL?-OP
+  (make-wrapped 'nil?
+    (lambda (v) (or (eq? v 'nil) (eq? v #f) (void? v)))))
+(define ODD?-OP  (make-wrapped 'odd?  odd?))
+(define EVEN?-OP (make-wrapped 'even? even?))
+(define ZERO?-OP (make-wrapped 'zero? zero?))
+(define POS?-OP  (make-wrapped 'pos?  positive?))
+(define NEG?-OP  (make-wrapped 'neg?  negative?))
+
+;; --- iteration helpers ---------------------------------------------------
+
+(define RANGE-OP
+  (make-wrapped 'range
+    (lambda args
+      (cond
+        [(= (length args) 1) (build-list (car args) values)]
+        [(= (length args) 2)
+         (define start (car args))
+         (define stop (cadr args))
+         (build-list (- stop start) (lambda (i) (+ start i)))]
+        [(= (length args) 3)
+         (define start (car args))
+         (define stop (cadr args))
+         (define step (caddr args))
+         (let loop ([i start] [acc '()])
+           (cond
+             [(>= i stop) (reverse acc)]
+             [else (loop (+ i step) (cons i acc))]))]
+        [else (error 'range "expected 1, 2, or 3 args")]))))
+
+(define APPLY-OP
+  (make-raw 'apply
+    (lambda (args env)
+      (unless (= (length args) 2)
+        (error 'apply "expected (apply FN LIST), got ~v args" (length args)))
+      (define fn (evaluate (car args) env))
+      (define xs (evaluate (cadr args) env))
+      (apply-operative fn xs env))))
+
+(define INC-OP (make-wrapped 'inc (lambda (n) (+ n 1))))
+(define DEC-OP (make-wrapped 'dec (lambda (n) (- n 1))))
+(define MOD-OP (make-wrapped 'mod modulo))
+(define ABS-OP (make-wrapped 'abs abs))
+(define MIN-OP (make-wrapped 'min min))
+(define MAX-OP (make-wrapped 'max max))
+
 ;; --- environment access ---------------------------------------------------
 
 ;; Expose the current environment as a first-class value. Useful for
@@ -594,6 +650,24 @@
                           (string->symbol . ,STRING->SYMBOL-OP)
                           (number->string . ,NUMBER->STRING-OP)
                           (str            . ,STR-OP)
+                          (string-length  . ,STRING-LENGTH-OP)
+                          (string-upcase  . ,STRING-UPCASE-OP)
+                          (string-downcase . ,STRING-DOWNCASE-OP)
+                          (string-contains? . ,STRING-CONTAINS?-OP)
+                          (nil?           . ,NIL?-OP)
+                          (odd?           . ,ODD?-OP)
+                          (even?          . ,EVEN?-OP)
+                          (zero?          . ,ZERO?-OP)
+                          (pos?           . ,POS?-OP)
+                          (neg?           . ,NEG?-OP)
+                          (range          . ,RANGE-OP)
+                          (apply          . ,APPLY-OP)
+                          (inc            . ,INC-OP)
+                          (dec            . ,DEC-OP)
+                          (mod            . ,MOD-OP)
+                          (abs            . ,ABS-OP)
+                          (min            . ,MIN-OP)
+                          (max            . ,MAX-OP)
                           (current-env   . ,CURRENT-ENV-OP)
                           (make-environment . ,MAKE-ENVIRONMENT-OP)))])
     (env-define! e (car entry) (cdr entry)))
