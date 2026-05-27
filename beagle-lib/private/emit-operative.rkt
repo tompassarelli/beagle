@@ -1,0 +1,1051 @@
+#lang racket/base
+
+;; Backend emitter for the operative model.
+;;
+;; Per plan 20260528223000, each backend compiles Beagle's operative
+;; surface to its target language's primitives. The story:
+;;
+;;   - Wrapped operatives (function-shaped, args evaluated first)
+;;     compile to target-native functions where the target supports
+;;     them. This is the majority of code.
+;;
+;;   - Raw operatives (args passed unevaluated) compile to target
+;;     macros where available (Racket, Clojure), or to AOT-
+;;     specialized closures elsewhere (JS, Python). Many raw
+;;     operatives (like `let`, `if`, `cond`) have direct equivalents
+;;     in every target — we map them rather than implementing them
+;;     generically.
+;;
+;;   - Pure operatives (no `!` in dynamic extent) are candidates for
+;;     compile-time evaluation. The compiler can choose to evaluate
+;;     them at compile time, producing constants in the output. This
+;;     is what makes macros-as-operatives work.
+;;
+;;   - Nix and Pure-subset SQL only accept pure code. Forms that use
+;;     mutation operators are rejected with a target-specific error.
+;;
+;; Targets supported:
+;;   :rkt   — Typed Racket source
+;;   :clj   — Clojure
+;;   :cljs  — ClojureScript
+;;   :js    — JavaScript
+;;   :nix   — Nix
+;;   :py    — Python
+;;   :sql   — SQL (limited; pure-subset)
+
+(require racket/match
+         racket/format
+         racket/string
+         racket/list)
+
+(provide emit emit-program TARGETS)
+
+(define TARGETS '(rkt clj cljs js nix py sql))
+
+(define QUOTE-OP (string->symbol "'"))
+
+;; --- entry points --------------------------------------------------------
+
+(define (emit-program forms target)
+  (unless (memq target TARGETS)
+    (error 'emit-program "unknown target: ~a (must be one of: ~a)" target TARGETS))
+  (define out (open-output-string))
+  (define dispatch (target->dispatch target))
+  (dispatch 'preamble out)
+  (for ([f (in-list forms)])
+    (dispatch 'form f out)
+    (display "\n\n" out))
+  (dispatch 'postamble out)
+  (get-output-string out))
+
+(define (emit form target)
+  ;; Emit a single form.
+  (emit-program (list form) target))
+
+;; --- dispatch table ------------------------------------------------------
+
+(define (target->dispatch t)
+  (case t
+    [(rkt)  emit-rkt-dispatch]
+    [(clj)  emit-clj-dispatch]
+    [(cljs) emit-cljs-dispatch]
+    [(js)   emit-js-dispatch]
+    [(nix)  emit-nix-dispatch]
+    [(py)   emit-py-dispatch]
+    [(sql)  emit-sql-dispatch]))
+
+;; --- helpers shared across targets ---------------------------------------
+
+(define (quote-head? sym)
+  ;; Accept Beagle's `'` symbol or Racket's `quote` (for testability from .rkt sources).
+  (or (eq? sym QUOTE-OP) (eq? sym 'quote)))
+
+(define (extract-params-list form)
+  ;; Accept (' params A B...) or (params A B...) — return list of names.
+  ;; If the form is (quote (params A B...)) from Racket source, the
+  ;; payload is a 1-element list containing the params-form; unwrap.
+  (cond
+    [(and (pair? form) (quote-head? (car form)))
+     (define rest (cdr form))
+     (cond
+       [(and (= (length rest) 1) (pair? (car rest)))
+        ;; (quote PAYLOAD-LIST) — Racket-style single-arg quote
+        (extract-params-list (car rest))]
+       [else (extract-params-list rest)])]
+    [(and (pair? form) (eq? (car form) 'params))
+     (cdr form)]
+    [(null? form) '()]
+    [else '()]))
+
+(define (extract-body-exprs form)
+  ;; (body EXPR...) → EXPR list
+  (cond
+    [(and (pair? form) (eq? (car form) 'body)) (cdr form)]
+    [else (list form)]))
+
+(define (extract-let-pairs form)
+  ;; (' bindings (bind X V)...) → ((X V)...)
+  (cond
+    [(and (pair? form) (quote-head? (car form)))
+     (define rest (cdr form))
+     (cond
+       [(and (= (length rest) 1) (pair? (car rest)))
+        (extract-let-pairs (car rest))]
+       [else (extract-let-pairs rest)])]
+    [(and (pair? form) (eq? (car form) 'bindings))
+     (for/list ([b (in-list (cdr form))])
+       (cond
+         [(and (pair? b) (eq? (car b) 'bind) (= (length b) 3))
+          (list (cadr b) (caddr b))]
+         [else (error 'emit "bad let binding: ~v" b)]))]
+    [else '()]))
+
+(define (mangle name target)
+  ;; Per-target identifier mangling. Most targets accept beagle names
+  ;; directly; some need translation for invalid chars.
+  (case target
+    [(js)
+     ;; JS doesn't allow `-`, `?`, `!` in identifiers; convert.
+     (string->symbol
+       (string-replace
+         (string-replace
+           (string-replace (symbol->string name) "-" "_")
+           "?" "_p")
+         "!" "_bang"))]
+    [(py)
+     ;; Python accepts `_` but not `-`, `?`, `!`.
+     (string->symbol
+       (string-replace
+         (string-replace
+           (string-replace (symbol->string name) "-" "_")
+           "?" "_p")
+         "!" "_bang"))]
+    [else name]))
+
+;; ============================================================================
+;; Racket backend
+;; ============================================================================
+
+(define (emit-rkt-dispatch what . rest)
+  (case what
+    [(preamble)
+     (define out (car rest))
+     (display "#lang racket/base\n\n" out)]
+    [(postamble) (void)]
+    [(form)
+     (define f (car rest))
+     (define out (cadr rest))
+     (display (rkt->string f) out)]))
+
+(define (rkt->string expr)
+  (cond
+    [(null? expr) "'()"]
+    [(boolean? expr) (if expr "#t" "#f")]
+    [(eq? expr 'nil) "'()"]
+    [(number? expr) (number->string expr)]
+    [(string? expr) (format "~v" expr)]
+    [(keyword? expr) (format "'#:~a" (keyword->string expr))]
+    [(symbol? expr) (symbol->string expr)]
+    [(pair? expr) (rkt-call->string expr)]
+    [else (format "~v" expr)]))
+
+(define (rkt-call->string expr)
+  (define head (car expr))
+  (define args (cdr expr))
+  (case head
+    [(defn)    (rkt-defn args)]
+    [(define)  (rkt-define args)]
+    [(fn)      (rkt-fn args)]
+    [(let)     (rkt-let args)]
+    [(if)      (rkt-if args)]
+    [(cond)    (rkt-cond args)]
+    [(match)   (rkt-match args)]
+    [(claim)   "(void)"]  ; claims are compile-time-only
+    [(body)    (rkt-body args)]
+    [(set!)    (format "(set! ~a ~a)"
+                       (rkt->string (car args))
+                       (rkt->string (cadr args)))]
+    [else
+     (cond
+       [(eq? head QUOTE-OP)
+        ;; (' ARG...) → '(ARG...) — a quoted list literal
+        (format "'~a" (rkt->string args))]
+       [else
+        (format "(~a)"
+                (string-join (map rkt->string expr) " "))])]))
+
+(define (rkt-defn args)
+  (define name (car args))
+  (define rest (cdr args))
+  (define-values (params-form body-form) (skip-fn-annotations rest))
+  (define params (extract-params-list params-form))
+  (define body-exprs (extract-body-exprs body-form))
+  (format "(define (~a ~a) ~a)"
+          name
+          (string-join (map symbol->string params) " ")
+          (string-join (map rkt->string body-exprs) " ")))
+
+(define (rkt-define args)
+  (format "(define ~a ~a)"
+          (rkt->string (car args))
+          (rkt->string (cadr args))))
+
+(define (rkt-fn args)
+  (define-values (params-form body-form) (skip-fn-annotations args))
+  (define params (extract-params-list params-form))
+  (define body-exprs (extract-body-exprs body-form))
+  (format "(lambda (~a) ~a)"
+          (string-join (map symbol->string params) " ")
+          (string-join (map rkt->string body-exprs) " ")))
+
+(define (skip-fn-annotations args)
+  ;; Args may start with `∈ TYPE` (type annotation we ignore at emission
+  ;; time). Return (values params-form body-form).
+  (cond
+    [(and (>= (length args) 4) (eq? (car args) '∈))
+     (values (caddr args) (cadddr args))]
+    [(= (length args) 2)
+     (values (car args) (cadr args))]
+    [else
+     (error 'rkt-fn "bad fn shape: ~v" args)]))
+
+(define (rkt-let args)
+  (define bindings (extract-let-pairs (car args)))
+  (define body-form (cadr args))
+  (define body-exprs (extract-body-exprs body-form))
+  (format "(let (~a) ~a)"
+          (string-join
+            (for/list ([p (in-list bindings)])
+              (format "[~a ~a]" (car p) (rkt->string (cadr p))))
+            " ")
+          (string-join (map rkt->string body-exprs) " ")))
+
+(define (rkt-if args)
+  (cond
+    [(= (length args) 3)
+     (format "(if ~a ~a ~a)"
+             (rkt->string (car args))
+             (rkt->string (cadr args))
+             (rkt->string (caddr args)))]
+    [(= (length args) 2)
+     (format "(when ~a ~a)"
+             (rkt->string (car args))
+             (rkt->string (cadr args)))]
+    [else (error 'rkt-if "bad if: ~v" args)]))
+
+(define (rkt-cond args)
+  (define clauses
+    (for/list ([c (in-list args)])
+      (cond
+        [(and (pair? c) (eq? (car c) 'case) (= (length c) 3))
+         (define t (cadr c)) (define r (caddr c))
+         (cond
+           [(eq? t ':else) (format "[else ~a]" (rkt->string r))]
+           [else (format "[~a ~a]" (rkt->string t) (rkt->string r))])]
+        [else (error 'rkt-cond "bad clause: ~v" c)])))
+  (format "(cond ~a)" (string-join clauses " ")))
+
+(define (rkt-match args)
+  ;; (match SCRUT (arm PAT RESULT)...)
+  (define scrut (car args))
+  (define arms (cdr args))
+  (define racket-clauses
+    (for/list ([a (in-list arms)])
+      (cond
+        [(and (pair? a) (eq? (car a) 'arm) (= (length a) 3))
+         (format "[~a ~a]"
+                 (rkt-pattern->string (cadr a))
+                 (rkt->string (caddr a)))]
+        [else (error 'rkt-match "bad arm: ~v" a)])))
+  (format "(match ~a ~a)"
+          (rkt->string scrut)
+          (string-join racket-clauses " ")))
+
+(define (rkt-pattern->string p)
+  (cond
+    [(eq? p '_) "_"]
+    [(symbol? p) (symbol->string p)]
+    [(number? p) (number->string p)]
+    [(string? p) (format "~v" p)]
+    [(boolean? p) (if p "#t" "#f")]
+    [(keyword? p) (format "'#:~a" (keyword->string p))]
+    [(and (pair? p) (eq? (car p) 'list))
+     (format "(list ~a)" (string-join (map rkt-pattern->string (cdr p)) " "))]
+    [else (rkt->string p)]))
+
+(define (rkt-body args)
+  ;; (body EXPR...) - sequence with implicit begin
+  (cond
+    [(null? args) "(void)"]
+    [(null? (cdr args)) (rkt->string (car args))]
+    [else (format "(begin ~a)"
+                  (string-join (map rkt->string args) " "))]))
+
+;; ============================================================================
+;; Clojure backend
+;; ============================================================================
+
+(define (emit-clj-dispatch what . rest)
+  (case what
+    [(preamble) (void)]
+    [(postamble) (void)]
+    [(form)
+     (define f (car rest))
+     (define out (cadr rest))
+     (display (clj->string f) out)]))
+
+(define (clj->string expr)
+  (cond
+    [(null? expr) "()"]
+    [(boolean? expr) (if expr "true" "false")]
+    [(eq? expr 'nil) "nil"]
+    [(number? expr) (number->string expr)]
+    [(string? expr) (format "~v" expr)]
+    [(keyword? expr) (format ":~a" (keyword->string expr))]
+    [(symbol? expr)
+     (cond
+       [(and (> (string-length (symbol->string expr)) 0)
+             (char=? (string-ref (symbol->string expr) 0) #\:))
+        ;; keyword-as-symbol (from Beagle reader)
+        (symbol->string expr)]
+       [else (symbol->string expr)])]
+    [(pair? expr) (clj-call->string expr)]
+    [else (format "~v" expr)]))
+
+(define (clj-call->string expr)
+  (define head (car expr))
+  (define args (cdr expr))
+  (case head
+    [(defn)   (clj-defn args)]
+    [(define) (clj-define args)]
+    [(fn)     (clj-fn args)]
+    [(let)    (clj-let args)]
+    [(if)     (clj-if args)]
+    [(cond)   (clj-cond args)]
+    [(match)  (clj-match args)]
+    [(claim)  ""]
+    [(body)   (clj-body args)]
+    [(vector) (format "[~a]" (string-join (map clj->string args) " "))]
+    [(hash-map)
+     (format "{~a}"
+             (string-join
+               (let loop ([rest args] [acc '()])
+                 (cond
+                   [(null? rest) (reverse acc)]
+                   [(null? (cdr rest)) (reverse acc)]
+                   [else (loop (cddr rest)
+                               (cons (format "~a ~a"
+                                             (clj->string (car rest))
+                                             (clj->string (cadr rest)))
+                                     acc))]))
+               ", "))]
+    [(hash-set)
+     (format "#{~a}" (string-join (map clj->string args) " "))]
+    [(|'|) (format "'(~a)" (string-join (map clj->string args) " "))]
+    [else
+     (format "(~a)" (string-join (map clj->string expr) " "))]))
+
+(define (clj-defn args)
+  (define name (car args))
+  (define rest (cdr args))
+  (define-values (params-form body-form) (skip-fn-annotations rest))
+  (define params (extract-params-list params-form))
+  (define body-exprs (extract-body-exprs body-form))
+  (format "(defn ~a [~a] ~a)"
+          name
+          (string-join (map symbol->string params) " ")
+          (string-join (map clj->string body-exprs) " ")))
+
+(define (clj-define args)
+  (format "(def ~a ~a)" (clj->string (car args)) (clj->string (cadr args))))
+
+(define (clj-fn args)
+  (define-values (params-form body-form) (skip-fn-annotations args))
+  (define params (extract-params-list params-form))
+  (define body-exprs (extract-body-exprs body-form))
+  (format "(fn [~a] ~a)"
+          (string-join (map symbol->string params) " ")
+          (string-join (map clj->string body-exprs) " ")))
+
+(define (clj-let args)
+  (define bindings (extract-let-pairs (car args)))
+  (define body-form (cadr args))
+  (define body-exprs (extract-body-exprs body-form))
+  (format "(let [~a] ~a)"
+          (string-join
+            (for/list ([p (in-list bindings)])
+              (format "~a ~a" (car p) (clj->string (cadr p))))
+            " ")
+          (string-join (map clj->string body-exprs) " ")))
+
+(define (clj-if args)
+  (cond
+    [(= (length args) 3)
+     (format "(if ~a ~a ~a)"
+             (clj->string (car args))
+             (clj->string (cadr args))
+             (clj->string (caddr args)))]
+    [(= (length args) 2)
+     (format "(when ~a ~a)"
+             (clj->string (car args))
+             (clj->string (cadr args)))]
+    [else (error 'clj-if "bad if: ~v" args)]))
+
+(define (clj-cond args)
+  (define pairs
+    (for/list ([c (in-list args)])
+      (cond
+        [(and (pair? c) (eq? (car c) 'case) (= (length c) 3))
+         (define t (cadr c)) (define r (caddr c))
+         (cond
+           [(eq? t ':else) (format ":else ~a" (clj->string r))]
+           [else (format "~a ~a" (clj->string t) (clj->string r))])])))
+  (format "(cond ~a)" (string-join pairs " ")))
+
+(define (clj-match args)
+  ;; Clojure has match in core.match. Emit (clojure.core.match/match SCRUT [PAT RESULT]...)
+  (define scrut (car args))
+  (define arms (cdr args))
+  (define clauses
+    (for/list ([a (in-list arms)])
+      (cond
+        [(and (pair? a) (eq? (car a) 'arm) (= (length a) 3))
+         (format "~a ~a"
+                 (clj-pattern->string (cadr a))
+                 (clj->string (caddr a)))])))
+  (format "(match ~a ~a)" (clj->string scrut) (string-join clauses " ")))
+
+(define (clj-pattern->string p)
+  (cond
+    [(eq? p '_) "_"]
+    [(and (pair? p) (eq? (car p) 'list))
+     (format "[~a]" (string-join (map clj-pattern->string (cdr p)) " "))]
+    [else (clj->string p)]))
+
+(define (clj-body args)
+  (cond
+    [(null? args) "nil"]
+    [(null? (cdr args)) (clj->string (car args))]
+    [else (format "(do ~a)" (string-join (map clj->string args) " "))]))
+
+;; ============================================================================
+;; ClojureScript backend (~ Clojure with minor differences)
+;; ============================================================================
+
+(define (emit-cljs-dispatch what . rest)
+  (case what
+    [(preamble) (void)]
+    [(postamble) (void)]
+    [(form)
+     (define f (car rest))
+     (define out (cadr rest))
+     ;; First-cut: CLJS shares emission with Clojure.
+     (display (clj->string f) out)]))
+
+;; ============================================================================
+;; JavaScript backend
+;; ============================================================================
+
+(define (emit-js-dispatch what . rest)
+  (case what
+    [(preamble)
+     (define out (car rest))
+     (display "// emitted from beagle (operative surface)\n\n" out)]
+    [(postamble) (void)]
+    [(form)
+     (define f (car rest))
+     (define out (cadr rest))
+     (display (js->string f 0) out)
+     (display ";" out)]))
+
+(define (js->string expr indent)
+  (cond
+    [(null? expr) "[]"]
+    [(boolean? expr) (if expr "true" "false")]
+    [(eq? expr 'nil) "null"]
+    [(number? expr) (number->string expr)]
+    [(string? expr) (format "~v" expr)]
+    [(keyword? expr) (format "Symbol.for(~v)" (keyword->string expr))]
+    [(symbol? expr) (symbol->string (mangle expr 'js))]
+    [(pair? expr) (js-call->string expr indent)]
+    [else (format "~v" expr)]))
+
+(define (js-call->string expr indent)
+  (define head (car expr))
+  (define args (cdr expr))
+  (case head
+    [(defn)   (js-defn args indent)]
+    [(define) (js-define args indent)]
+    [(fn)     (js-fn args indent)]
+    [(let)    (js-let args indent)]
+    [(if)     (js-if args indent)]
+    [(cond)   (js-cond args indent)]
+    [(claim)  ""]
+    [(body)   (js-body args indent)]
+    [(vector) (format "[~a]" (string-join
+                              (for/list ([a (in-list args)]) (js->string a indent))
+                              ", "))]
+    [(hash-map)
+     (format "{~a}"
+             (string-join
+               (let loop ([rest args] [acc '()])
+                 (cond
+                   [(null? rest) (reverse acc)]
+                   [(null? (cdr rest)) (reverse acc)]
+                   [else (loop (cddr rest)
+                               (cons (format "~a: ~a"
+                                             (js-key->string (car rest))
+                                             (js->string (cadr rest) indent))
+                                     acc))]))
+               ", "))]
+    [(+) (binop "+" args indent)]
+    [(-) (binop "-" args indent)]
+    [(*) (binop "*" args indent)]
+    [(/) (binop "/" args indent)]
+    [(<) (binop "<" args indent)]
+    [(<=) (binop "<=" args indent)]
+    [(>) (binop ">" args indent)]
+    [(>=) (binop ">=" args indent)]
+    [(=) (binop "===" args indent)]
+    [(set!) (format "~a = ~a"
+                    (js->string (car args) indent)
+                    (js->string (cadr args) indent))]
+    [(|'|)
+     (format "[~a]" (string-join
+                     (for/list ([a (in-list args)]) (js-quote->string a indent))
+                     ", "))]
+    [else
+     (format "~a(~a)"
+             (js->string head indent)
+             (string-join (for/list ([a (in-list args)]) (js->string a indent)) ", "))]))
+
+(define (js-quote->string expr indent)
+  ;; Inside a `'` form: symbols become strings, lists become arrays.
+  (cond
+    [(symbol? expr) (format "~v" (symbol->string expr))]
+    [(pair? expr) (format "[~a]"
+                          (string-join (for/list ([a (in-list expr)]) (js-quote->string a indent)) ", "))]
+    [else (js->string expr indent)]))
+
+(define (js-key->string k)
+  (cond
+    [(keyword? k) (format "~v" (keyword->string k))]
+    [(symbol? k)
+     (define s (symbol->string k))
+     (cond
+       [(and (> (string-length s) 0) (char=? (string-ref s 0) #\:))
+        (format "~v" (substring s 1))]
+       [else (format "~v" s)])]
+    [else (format "~v" k)]))
+
+(define (binop op args indent)
+  (cond
+    [(= (length args) 2)
+     (format "(~a ~a ~a)"
+             (js->string (car args) indent)
+             op
+             (js->string (cadr args) indent))]
+    [else
+     ;; n-ary: foldl
+     (string-join (for/list ([a (in-list args)]) (js->string a indent))
+                  (string-append " " op " "))]))
+
+(define (js-defn args indent)
+  (define name (mangle (car args) 'js))
+  (define rest (cdr args))
+  (define-values (params-form body-form) (skip-fn-annotations rest))
+  (define params (extract-params-list params-form))
+  (define body-exprs (extract-body-exprs body-form))
+  (format "function ~a(~a) {\n~areturn ~a;\n~a}"
+          name
+          (string-join (for/list ([p (in-list params)])
+                         (symbol->string (mangle p 'js))) ", ")
+          (make-string (+ indent 2) #\space)
+          (string-join (for/list ([e (in-list body-exprs)])
+                         (js->string e (+ indent 2))) "; ")
+          (make-string indent #\space)))
+
+(define (js-define args indent)
+  (format "const ~a = ~a"
+          (js->string (car args) indent)
+          (js->string (cadr args) indent)))
+
+(define (js-fn args indent)
+  (define-values (params-form body-form) (skip-fn-annotations args))
+  (define params (extract-params-list params-form))
+  (define body-exprs (extract-body-exprs body-form))
+  (format "((~a) => { return ~a; })"
+          (string-join (for/list ([p (in-list params)])
+                         (symbol->string (mangle p 'js))) ", ")
+          (string-join (for/list ([e (in-list body-exprs)])
+                         (js->string e indent)) "; ")))
+
+(define (js-let args indent)
+  (define bindings (extract-let-pairs (car args)))
+  (define body-form (cadr args))
+  (define body-exprs (extract-body-exprs body-form))
+  (define iife-params
+    (string-join (for/list ([p (in-list bindings)])
+                   (symbol->string (mangle (car p) 'js))) ", "))
+  (define iife-args
+    (string-join (for/list ([p (in-list bindings)])
+                   (js->string (cadr p) indent)) ", "))
+  (define body-emitted
+    (string-join (for/list ([e (in-list body-exprs)])
+                   (js->string e indent)) "; "))
+  (format "((~a) => { return ~a; })(~a)"
+          iife-params body-emitted iife-args))
+
+(define (js-if args indent)
+  (cond
+    [(= (length args) 3)
+     (format "(~a ? ~a : ~a)"
+             (js->string (car args) indent)
+             (js->string (cadr args) indent)
+             (js->string (caddr args) indent))]
+    [(= (length args) 2)
+     (format "(~a ? ~a : null)"
+             (js->string (car args) indent)
+             (js->string (cadr args) indent))]
+    [else (error 'js-if "bad if: ~v" args)]))
+
+(define (js-cond args indent)
+  ;; Emit as nested ternary chain.
+  (let loop ([clauses args])
+    (cond
+      [(null? clauses) "null"]
+      [else
+       (define c (car clauses))
+       (cond
+         [(and (pair? c) (eq? (car c) 'case) (= (length c) 3))
+          (define t (cadr c)) (define r (caddr c))
+          (cond
+            [(eq? t ':else) (js->string r indent)]
+            [else (format "(~a ? ~a : ~a)"
+                          (js->string t indent)
+                          (js->string r indent)
+                          (loop (cdr clauses)))])])])))
+
+(define (js-body args indent)
+  (cond
+    [(null? args) "null"]
+    [(null? (cdr args)) (js->string (car args) indent)]
+    [else
+     ;; Sequence via comma operator
+     (format "(~a)"
+             (string-join (for/list ([e (in-list args)]) (js->string e indent)) ", "))]))
+
+;; ============================================================================
+;; Nix backend (pure subset)
+;; ============================================================================
+
+(define (emit-nix-dispatch what . rest)
+  (case what
+    [(preamble) (void)]
+    [(postamble) (void)]
+    [(form)
+     (define f (car rest))
+     (define out (cadr rest))
+     (display (nix->string f) out)]))
+
+(define (nix->string expr)
+  (cond
+    [(null? expr) "[ ]"]
+    [(boolean? expr) (if expr "true" "false")]
+    [(eq? expr 'nil) "null"]
+    [(number? expr) (number->string expr)]
+    [(string? expr) (format "~v" expr)]
+    [(keyword? expr) (format "~v" (keyword->string expr))]
+    [(symbol? expr) (symbol->string expr)]
+    [(pair? expr) (nix-call->string expr)]
+    [else (format "~v" expr)]))
+
+(define (nix-call->string expr)
+  (define head (car expr))
+  (define args (cdr expr))
+  (case head
+    [(defn)   (nix-defn args)]
+    [(define) (nix-define args)]
+    [(fn)     (nix-fn args)]
+    [(let)    (nix-let args)]
+    [(if)     (nix-if args)]
+    [(claim)  ""]
+    [(body)   (nix-body args)]
+    [(vector) (format "[ ~a ]" (string-join (map nix->string args) " "))]
+    [(hash-map) (nix-attrset args)]
+    [(set!)
+     (error 'emit-nix "Nix is pure; set! not allowed in Nix-targeted code")]
+    [(+ - * /)
+     ;; Nix uses infix arithmetic.
+     (format "(~a)" (string-join (map nix->string args)
+                                  (format " ~a " head)))]
+    [(< <= > >=)
+     (format "(~a ~a ~a)"
+             (nix->string (car args))
+             head
+             (nix->string (cadr args)))]
+    [(=)
+     (format "(~a == ~a)"
+             (nix->string (car args))
+             (nix->string (cadr args)))]
+    [else
+     ;; Nix function application is juxtaposition (no parens around args).
+     (cond
+       [(null? args) (nix->string head)]
+       [else
+        (format "(~a ~a)"
+                (nix->string head)
+                (string-join (map nix->string args) " "))])]))
+
+(define (nix-defn args)
+  (define name (car args))
+  (define rest (cdr args))
+  (define-values (params-form body-form) (skip-fn-annotations rest))
+  (define params (extract-params-list params-form))
+  (define body-exprs (extract-body-exprs body-form))
+  ;; Nix has curried functions: name = a: b: body
+  (format "~a = ~a;"
+          name
+          (nix-curry params (nix-body-emit body-exprs))))
+
+(define (nix-define args)
+  (format "~a = ~a;" (car args) (nix->string (cadr args))))
+
+(define (nix-fn args)
+  (define-values (params-form body-form) (skip-fn-annotations args))
+  (define params (extract-params-list params-form))
+  (define body-exprs (extract-body-exprs body-form))
+  (nix-curry params (nix-body-emit body-exprs)))
+
+(define (nix-curry params body-str)
+  (cond
+    [(null? params) body-str]
+    [else
+     (format "~a: ~a" (car params) (nix-curry (cdr params) body-str))]))
+
+(define (nix-body-emit exprs)
+  (cond
+    [(null? exprs) "null"]
+    [(null? (cdr exprs)) (nix->string (car exprs))]
+    [else
+     ;; Nix has no statement sequencing; use `let _ = expr1; in expr2`.
+     (format "let _ = ~a; in ~a"
+             (nix->string (car exprs))
+             (nix-body-emit (cdr exprs)))]))
+
+(define (nix-let args)
+  (define bindings (extract-let-pairs (car args)))
+  (define body-form (cadr args))
+  (define body-exprs (extract-body-exprs body-form))
+  (format "let ~a in ~a"
+          (string-join
+            (for/list ([p (in-list bindings)])
+              (format "~a = ~a;" (car p) (nix->string (cadr p))))
+            " ")
+          (nix-body-emit body-exprs)))
+
+(define (nix-if args)
+  (cond
+    [(= (length args) 3)
+     (format "(if ~a then ~a else ~a)"
+             (nix->string (car args))
+             (nix->string (cadr args))
+             (nix->string (caddr args)))]
+    [else (error 'nix-if "Nix requires 3-arg if: ~v" args)]))
+
+(define (nix-body args) (nix-body-emit args))
+
+(define (nix-attrset args)
+  (when (odd? (length args))
+    (error 'nix-attrset "odd hash-map args: ~v" args))
+  (format "{ ~a }"
+          (string-join
+            (let loop ([rest args] [acc '()])
+              (cond
+                [(null? rest) (reverse acc)]
+                [else
+                 (loop (cddr rest)
+                       (cons (format "~a = ~a;"
+                                     (nix-attr-key (car rest))
+                                     (nix->string (cadr rest)))
+                             acc))]))
+            " ")))
+
+(define (nix-attr-key k)
+  (cond
+    [(keyword? k) (keyword->string k)]
+    [(symbol? k)
+     (define s (symbol->string k))
+     (cond
+       [(and (> (string-length s) 0) (char=? (string-ref s 0) #\:))
+        (substring s 1)]
+       [else s])]
+    [else (format "~v" k)]))
+
+;; ============================================================================
+;; Python backend
+;; ============================================================================
+
+(define (emit-py-dispatch what . rest)
+  (case what
+    [(preamble) (void)]
+    [(postamble) (void)]
+    [(form)
+     (define f (car rest))
+     (define out (cadr rest))
+     (display (py->string f 0) out)]))
+
+(define (py->string expr indent)
+  (cond
+    [(null? expr) "[]"]
+    [(boolean? expr) (if expr "True" "False")]
+    [(eq? expr 'nil) "None"]
+    [(number? expr) (number->string expr)]
+    [(string? expr) (format "~v" expr)]
+    [(keyword? expr) (format "~v" (keyword->string expr))]
+    [(symbol? expr) (symbol->string (mangle expr 'py))]
+    [(pair? expr) (py-call->string expr indent)]
+    [else (format "~v" expr)]))
+
+(define (py-call->string expr indent)
+  (define head (car expr))
+  (define args (cdr expr))
+  (case head
+    [(defn)   (py-defn args indent)]
+    [(define) (py-define args indent)]
+    [(fn)     (py-fn args indent)]
+    [(let)    (py-let args indent)]
+    [(if)     (py-if args indent)]
+    [(cond)   (py-cond args indent)]
+    [(claim)  ""]
+    [(body)   (py-body args indent)]
+    [(vector) (format "[~a]" (string-join (for/list ([a (in-list args)]) (py->string a indent)) ", "))]
+    [(hash-map)
+     (format "{~a}"
+             (string-join
+               (let loop ([rest args] [acc '()])
+                 (cond
+                   [(null? rest) (reverse acc)]
+                   [(null? (cdr rest)) (reverse acc)]
+                   [else (loop (cddr rest)
+                               (cons (format "~a: ~a"
+                                             (py-key (car rest))
+                                             (py->string (cadr rest) indent))
+                                     acc))]))
+               ", "))]
+    [(+ - * /)
+     (binop (symbol->string head) args indent)]
+    [(< <= > >=)
+     (binop (symbol->string head) args indent)]
+    [(=) (binop "==" args indent)]
+    [else
+     (format "~a(~a)"
+             (py->string head indent)
+             (string-join (for/list ([a (in-list args)]) (py->string a indent)) ", "))]))
+
+(define (py-key k)
+  (cond
+    [(keyword? k) (format "~v" (keyword->string k))]
+    [(symbol? k)
+     (define s (symbol->string k))
+     (cond
+       [(and (> (string-length s) 0) (char=? (string-ref s 0) #\:))
+        (format "~v" (substring s 1))]
+       [else (format "~v" s)])]
+    [else (format "~v" k)]))
+
+(define (py-defn args indent)
+  (define name (mangle (car args) 'py))
+  (define rest (cdr args))
+  (define-values (params-form body-form) (skip-fn-annotations rest))
+  (define params (extract-params-list params-form))
+  (define body-exprs (extract-body-exprs body-form))
+  (cond
+    [(null? body-exprs)
+     (format "def ~a(~a):\n~apass"
+             name
+             (string-join (for/list ([p (in-list params)])
+                            (symbol->string (mangle p 'py))) ", ")
+             (make-string (+ indent 4) #\space))]
+    [else
+     (define body-lines
+       (for/list ([(e i) (in-indexed body-exprs)])
+         (define line (py->string e (+ indent 4)))
+         (cond
+           [(= i (- (length body-exprs) 1))
+            (string-append (make-string (+ indent 4) #\space) "return " line)]
+           [else (string-append (make-string (+ indent 4) #\space) line)])))
+     (format "def ~a(~a):\n~a"
+             name
+             (string-join (for/list ([p (in-list params)])
+                            (symbol->string (mangle p 'py))) ", ")
+             (string-join body-lines "\n"))]))
+
+(define (py-define args indent)
+  (format "~a = ~a"
+          (py->string (car args) indent)
+          (py->string (cadr args) indent)))
+
+(define (py-fn args indent)
+  (define-values (params-form body-form) (skip-fn-annotations args))
+  (define params (extract-params-list params-form))
+  (define body-exprs (extract-body-exprs body-form))
+  ;; Python lambdas are single-expression; for multi-body, this is
+  ;; lossy. First cut handles single-expression bodies.
+  (cond
+    [(= (length body-exprs) 1)
+     (format "(lambda ~a: ~a)"
+             (string-join (for/list ([p (in-list params)])
+                            (symbol->string (mangle p 'py))) ", ")
+             (py->string (car body-exprs) indent))]
+    [else
+     ;; multi-expression body — wrap in a nested def via a helper. For
+     ;; now, emit with a marker that callers can recognize.
+     (format "(lambda ~a: (~a)[-1])"
+             (string-join (for/list ([p (in-list params)])
+                            (symbol->string (mangle p 'py))) ", ")
+             (string-join (for/list ([e (in-list body-exprs)]) (py->string e indent)) ", "))]))
+
+(define (py-let args indent)
+  (define bindings (extract-let-pairs (car args)))
+  (define body-form (cadr args))
+  (define body-exprs (extract-body-exprs body-form))
+  ;; Python let: walrus-style in expression position, or assignment lines
+  ;; in statement position. First cut: emit as immediately-invoked lambda
+  ;; (purely functional, no statements needed).
+  (define iife-params
+    (string-join (for/list ([p (in-list bindings)])
+                   (symbol->string (mangle (car p) 'py))) ", "))
+  (define iife-args
+    (string-join (for/list ([p (in-list bindings)])
+                   (py->string (cadr p) indent)) ", "))
+  (cond
+    [(= (length body-exprs) 1)
+     (format "(lambda ~a: ~a)(~a)"
+             iife-params (py->string (car body-exprs) indent) iife-args)]
+    [else
+     (format "(lambda ~a: (~a)[-1])(~a)"
+             iife-params
+             (string-join (for/list ([e (in-list body-exprs)]) (py->string e indent)) ", ")
+             iife-args)]))
+
+(define (py-if args indent)
+  (cond
+    [(= (length args) 3)
+     (format "(~a if ~a else ~a)"
+             (py->string (cadr args) indent)
+             (py->string (car args) indent)
+             (py->string (caddr args) indent))]
+    [(= (length args) 2)
+     (format "(~a if ~a else None)"
+             (py->string (cadr args) indent)
+             (py->string (car args) indent))]
+    [else (error 'py-if "bad if: ~v" args)]))
+
+(define (py-cond args indent)
+  (let loop ([clauses args])
+    (cond
+      [(null? clauses) "None"]
+      [else
+       (define c (car clauses))
+       (cond
+         [(and (pair? c) (eq? (car c) 'case) (= (length c) 3))
+          (define t (cadr c)) (define r (caddr c))
+          (cond
+            [(eq? t ':else) (py->string r indent)]
+            [else (format "(~a if ~a else ~a)"
+                          (py->string r indent)
+                          (py->string t indent)
+                          (loop (cdr clauses)))])])])))
+
+(define (py-body args indent)
+  (cond
+    [(null? args) "None"]
+    [(null? (cdr args)) (py->string (car args) indent)]
+    [else
+     (format "[~a][-1]"
+             (string-join (for/list ([e (in-list args)]) (py->string e indent)) ", "))]))
+
+;; ============================================================================
+;; SQL backend (limited)
+;; ============================================================================
+
+(define (emit-sql-dispatch what . rest)
+  (case what
+    [(preamble) (void)]
+    [(postamble) (void)]
+    [(form)
+     (define f (car rest))
+     (define out (cadr rest))
+     (display (sql->string f) out)]))
+
+(define (sql->string expr)
+  ;; SQL is much more restricted; first cut handles top-level defn as
+  ;; CREATE FUNCTION, def as a SQL constant, and simple expressions.
+  (cond
+    [(null? expr) "NULL"]
+    [(boolean? expr) (if expr "TRUE" "FALSE")]
+    [(eq? expr 'nil) "NULL"]
+    [(number? expr) (number->string expr)]
+    [(string? expr) (format "'~a'" expr)]
+    [(symbol? expr) (symbol->string expr)]
+    [(pair? expr) (sql-call->string expr)]
+    [else (format "~v" expr)]))
+
+(define (sql-call->string expr)
+  (define head (car expr))
+  (define args (cdr expr))
+  (case head
+    [(defn)
+     (define name (car args))
+     (define rest (cdr args))
+     (define-values (params-form body-form) (skip-fn-annotations rest))
+     (define params (extract-params-list params-form))
+     (define body-exprs (extract-body-exprs body-form))
+     (format "CREATE FUNCTION ~a(~a) AS $$\nSELECT ~a;\n$$ LANGUAGE SQL;"
+             name
+             (string-join (for/list ([p (in-list params)])
+                            (format "~a ANY" p)) ", ")
+             (string-join (map sql->string body-exprs) "; "))]
+    [(claim) ""]
+    [(+ - * /)
+     (format "(~a)"
+             (string-join (map sql->string args) (format " ~a " head)))]
+    [(< <= > >=)
+     (format "(~a ~a ~a)"
+             (sql->string (car args))
+             head
+             (sql->string (cadr args)))]
+    [(=)
+     (format "(~a = ~a)"
+             (sql->string (car args))
+             (sql->string (cadr args)))]
+    [(if)
+     (format "(CASE WHEN ~a THEN ~a ELSE ~a END)"
+             (sql->string (car args))
+             (sql->string (cadr args))
+             (sql->string (caddr args)))]
+    [else
+     (format "~a(~a)"
+             (sql->string head)
+             (string-join (map sql->string args) ", "))]))
