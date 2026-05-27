@@ -1235,7 +1235,17 @@
             [else
              (define dotted
                (string-join
-                 (map (λ (s) (if (string? s) s (format "~v" (cadr s)))) static-run)
+                 (map (λ (s)
+                        (cond [(string? s) s]
+                              ;; (str (parts...)) — extract single literal
+                              ;; string chunk, quote for Nix attr-name
+                              [(and (pair? s) (eq? (car s) 'str)
+                                    (pair? (cadr s))
+                                    (= (length (cadr s)) 1)
+                                    (string? (car (cadr s))))
+                               (format "~v" (car (cadr s)))]
+                              [else (format "~v" (cadr s))]))
+                      static-run)
                  "."))
              (define new-acc
                (cond
@@ -1250,6 +1260,11 @@
                   (define rest-segs (cdr static-run))
                   (define first-str
                     (cond [(string? first-seg) first-seg]
+                          [(and (pair? first-seg) (eq? (car first-seg) 'str)
+                                (pair? (cadr first-seg))
+                                (= (length (cadr first-seg)) 1)
+                                (string? (car (cadr first-seg))))
+                           (format "~v" (car (cadr first-seg)))]
                           [else (format "~v" (cadr first-seg))]))
                   (define base-call (format "(get ~a :~a)" acc-expr-str first-str))
                   (cond
@@ -1257,14 +1272,30 @@
                     [else
                      (format "~a.~a" base-call
                              (string-join
-                               (map (λ (s) (if (string? s) s (format "~v" (cadr s)))) rest-segs)
+                               (map (λ (s)
+                                      (cond [(string? s) s]
+                                            [(and (pair? s) (eq? (car s) 'str)
+                                                  (pair? (cadr s))
+                                                  (= (length (cadr s)) 1)
+                                                  (string? (car (cadr s))))
+                                             (format "~v" (car (cadr s)))]
+                                            [else (format "~v" (cadr s))]))
+                                    rest-segs)
                                "."))])]
                  [else (format "~a.~a" acc-expr-str dotted)]))
              (loop new-acc rest #f via-get?)])])])))
 
 (define (static-seg? seg)
+  ;; Static = no interpolation. Either a bare name string OR a (str parts)
+  ;; where parts is a singleton list of a literal string (e.g. `."/"`).
+  ;; Was checking (string? (cadr s)) but cadr is the parts-list itself,
+  ;; not a bare string — segments like `."/"` were silently dropped
+  ;; from dotted-access chains.
   (or (string? seg)
-      (and (pair? seg) (eq? (car seg) 'str) (string? (cadr seg)))))
+      (and (pair? seg) (eq? (car seg) 'str)
+           (pair? (cadr seg))
+           (= (length (cadr seg)) 1)
+           (string? (car (cadr seg))))))
 
 (define (emit-attrset bindings depth)
   (cond

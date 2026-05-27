@@ -203,7 +203,7 @@ nix_diagnostic_cmp() {
   done
 
   echo "diagnostic-cmp for host=$host"
-  echo "  $matches MATCH / $differs DIFFER (of ${#leaves[@]} curated leaves)"
+  echo "  $matches MATCH / $differs DIFFER (of ${#labels[@]} curated leaves)"
   echo -n "$report"
   if [ $differs -eq 0 ]; then
     echo "  VERDICT: DIVERGE-but-equivalent — all curated leaves match;"
@@ -375,11 +375,31 @@ declare -a DIAGNOSTIC_REPORTS=()
 declare -a TWIN_EVAL_ERRORS=()  # captured stderr per failing twin
 declare -a ORIG_EVAL_ERRORS=()  # captured stderr per failing orig
 
+# Phase A: kick off all host evaluations in parallel. nix-daemon handles
+# concurrent requests independently; each host's orig+twin evals are
+# independent of every other host's. Results written to per-host files
+# under $WORK so we can read them deterministically in phase B.
+echo "  (running ${#HOST_ARR[@]} hosts in parallel)"
 for host in "${HOST_ARR[@]}"; do
-  orig_err=$(mktemp)
-  twin_err=$(mktemp)
-  orig_drv=$(nix_evaluator "$CORPUS" "$host" 2>"$orig_err"); orig_status=$?
-  twin_drv=$(nix_evaluator "$TWIN"   "$host" 2>"$twin_err"); twin_status=$?
+  (
+    nix_evaluator "$CORPUS" "$host" >"$WORK/orig.$host.drv" 2>"$WORK/orig.$host.err"
+    echo $? >"$WORK/orig.$host.status"
+  ) &
+  (
+    nix_evaluator "$TWIN" "$host" >"$WORK/twin.$host.drv" 2>"$WORK/twin.$host.err"
+    echo $? >"$WORK/twin.$host.status"
+  ) &
+done
+wait
+
+# Phase B: walk results in deterministic order, categorize.
+for host in "${HOST_ARR[@]}"; do
+  orig_err="$WORK/orig.$host.err"
+  twin_err="$WORK/twin.$host.err"
+  orig_drv=$(cat "$WORK/orig.$host.drv")
+  twin_drv=$(cat "$WORK/twin.$host.drv")
+  orig_status=$(cat "$WORK/orig.$host.status")
+  twin_status=$(cat "$WORK/twin.$host.status")
 
   if [ $orig_status -ne 0 ]; then
     orig_eval_fail=$((orig_eval_fail+1))
@@ -392,7 +412,6 @@ for host in "${HOST_ARR[@]}"; do
       ORIG_EVAL_ERRORS+=("$line")
     done < "$orig_err"
     echo "  $host: FAIL-ORIG-EVAL"
-    rm -f "$orig_err" "$twin_err"
     continue
   fi
 
@@ -406,11 +425,8 @@ for host in "${HOST_ARR[@]}"; do
       TWIN_EVAL_ERRORS+=("$line")
     done < "$twin_err"
     echo "  $host: FAIL-TWIN-EVAL"
-    rm -f "$orig_err" "$twin_err"
     continue
   fi
-
-  rm -f "$orig_err" "$twin_err"
 
   orig_canon=$(echo "$orig_drv" | nix_canonicalize)
   twin_canon=$(echo "$twin_drv" | nix_canonicalize)

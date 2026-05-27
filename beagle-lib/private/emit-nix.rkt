@@ -1054,7 +1054,17 @@
      text]
     [(or (call-form? expr) (fn-form? expr) (let-form? expr)
          (if-form? expr) (when-form? expr) (cond-form? expr)
-         (match-form? expr) (for-form? expr))
+         (match-form? expr) (for-form? expr)
+         ;; nix-get-or emits as `target.attr or default` — Nix's `or`
+         ;; suffix-operator absorbs anything to the right (e.g. a
+         ;; trailing `.X`), so wherever this appears as a target of
+         ;; further select/has/etc, it MUST be parenthesized.
+         (nix-get-or? expr)
+         ;; nix-with / nix-assert similarly emit expressions with
+         ;; greedy trailing-token semantics (`with X; body` consumes
+         ;; everything as body); wrap to keep them as values.
+         (nix-with? expr)
+         (nix-assert? expr))
      (format "(~a)" text)]
     [else text]))
 
