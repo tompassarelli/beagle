@@ -17,7 +17,8 @@
 ;; surface; the compiler trusts unmarked code.
 
 (require "eval.rkt"
-         racket/set)
+         racket/set
+         racket/list)
 
 (provide install-standard-forms!
          claim-substrate)
@@ -297,6 +298,155 @@
 
 ;; --- installer ----------------------------------------------------------
 
+;; --- at / set-at! : nested access -------------------------------------------
+
+;; (at TARGET (' path :K1 :K2 :K3)) — walk TARGET through the keys, return value.
+;; Accepts hash-maps (keyword keys) and vectors (numeric indexes).
+(define (make-at-op)
+  (make-raw-operative
+    'at
+    (lambda (args call-env)
+      (unless (= (length args) 2)
+        (error 'at "expected (at TARGET (' path …)), got ~v args" (length args)))
+      (define target (evaluate (car args) call-env))
+      (define path-data (evaluate (cadr args) call-env))
+      (define keys (extract-path-keys path-data))
+      (at-walk target keys))))
+
+(define (extract-path-keys path-form)
+  (cond
+    [(and (pair? path-form) (eq? (car path-form) 'path))
+     (cdr path-form)]
+    [(list? path-form) path-form]
+    [else (list path-form)]))
+
+(define (at-walk target keys)
+  (cond
+    [(null? keys) target]
+    [(hash? target)
+     (at-walk (hash-ref target (car keys) #f) (cdr keys))]
+    [(vector? target)
+     (define i (car keys))
+     (cond
+       [(and (exact-integer? i) (< i (vector-length target)))
+        (at-walk (vector-ref target i) (cdr keys))]
+       [else #f])]
+    [(eq? target #f) #f]
+    [else (error 'at "cannot walk into ~v" target)]))
+
+;; set-at! — the ! suffix marks this as explicit mutation.
+;; Since we use immutable hashes/vectors, this returns a new value rather
+;; than mutating in place (functional update). The ! is still informative:
+;; the compiler treats `set-at!` callers as mutating.
+(define (make-set-at!-op)
+  (make-raw-operative
+    'set-at!
+    (lambda (args call-env)
+      (unless (= (length args) 3)
+        (error 'set-at! "expected (set-at! TARGET (' path …) VALUE), got ~v args" (length args)))
+      (define target (evaluate (car args) call-env))
+      (define path-data (evaluate (cadr args) call-env))
+      (define value (evaluate (caddr args) call-env))
+      (define keys (extract-path-keys path-data))
+      (set-at-update target keys value))))
+
+(define (set-at-update target keys value)
+  (cond
+    [(null? keys) value]
+    [(hash? target)
+     (define k (car keys))
+     (define sub (hash-ref target k #f))
+     (hash-set target k (set-at-update sub (cdr keys) value))]
+    [(vector? target)
+     (define i (car keys))
+     (cond
+       [(and (exact-integer? i) (< i (vector-length target)))
+        (define new-vec (vector->list target))
+        (define before (take new-vec i))
+        (define after (drop new-vec (+ i 1)))
+        (apply vector-immutable
+               (append before
+                       (list (set-at-update (vector-ref target i) (cdr keys) value))
+                       after))]
+       [else target])]
+    [else (error 'set-at! "cannot walk into ~v" target)]))
+
+;; --- get/assoc for maps -----------------------------------------------------
+
+(define (make-get-op)
+  (make-wrapped-operative
+    'get
+    (lambda args
+      (cond
+        [(= (length args) 2)
+         (define h (car args))
+         (define k (cadr args))
+         (cond
+           [(hash? h) (hash-ref h k #f)]
+           [else (error 'get "expected hash, got ~v" h)])]
+        [(= (length args) 3)
+         (define h (car args))
+         (define k (cadr args))
+         (define default (caddr args))
+         (cond
+           [(hash? h) (hash-ref h k default)]
+           [else default])]
+        [else (error 'get "expected (get H K) or (get H K DEFAULT)")]))))
+
+(define (make-assoc-op)
+  (make-wrapped-operative
+    'assoc
+    (lambda args
+      (cond
+        [(and (>= (length args) 3) (odd? (length args)))
+         (define h (car args))
+         (let loop ([rest (cdr args)] [acc h])
+           (cond
+             [(null? rest) acc]
+             [(null? (cdr rest)) acc]
+             [else (loop (cddr rest) (hash-set acc (car rest) (cadr rest)))]))]
+        [else (error 'assoc "expected (assoc H K V ...)")]))))
+
+(define (make-keys-op)
+  (make-wrapped-operative
+    'keys
+    (lambda (h)
+      (cond
+        [(hash? h) (hash-keys h)]
+        [else (error 'keys "expected hash, got ~v" h)]))))
+
+(define (make-vals-op)
+  (make-wrapped-operative
+    'vals
+    (lambda (h)
+      (cond
+        [(hash? h) (hash-values h)]
+        [else (error 'vals "expected hash, got ~v" h)]))))
+
+;; --- nth for vectors -------------------------------------------------------
+
+(define (make-nth-op)
+  (make-wrapped-operative
+    'nth
+    (lambda args
+      (cond
+        [(= (length args) 2)
+         (define v (car args))
+         (define i (cadr args))
+         (cond
+           [(vector? v) (vector-ref v i)]
+           [(list? v) (list-ref v i)]
+           [else (error 'nth "expected vector or list, got ~v" v)])]
+        [(= (length args) 3)
+         (define v (car args))
+         (define i (cadr args))
+         (define default (caddr args))
+         (cond
+           [(and (vector? v) (< i (vector-length v))) (vector-ref v i)]
+           [(and (list? v) (< i (length v))) (list-ref v i)]
+           [else default])]
+        [else (error 'nth "expected (nth V I) or (nth V I DEFAULT)")]))))
+
 (define (install-standard-forms! env)
   (env-define! env 'fn       (make-fn-op))
   (env-define! env 'defn     (make-defn-op))
@@ -311,4 +461,11 @@
   (env-define! env 'vector   (make-vector-op))
   (env-define! env 'hash-map (make-hash-map-op))
   (env-define! env 'hash-set (make-hash-set-op))
+  (env-define! env 'at       (make-at-op))
+  (env-define! env 'set-at!  (make-set-at!-op))
+  (env-define! env 'get      (make-get-op))
+  (env-define! env 'assoc    (make-assoc-op))
+  (env-define! env 'keys     (make-keys-op))
+  (env-define! env 'vals     (make-vals-op))
+  (env-define! env 'nth      (make-nth-op))
   env)

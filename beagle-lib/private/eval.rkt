@@ -103,7 +103,10 @@
 
 (define (evaluate expr env)
   (cond
-    [(symbol? expr) (env-lookup env expr)]
+    [(symbol? expr)
+     (cond
+       [(keyword-symbol? expr) expr]   ; `:foo` self-evaluates as keyword
+       [else (env-lookup env expr)])]
     [(self-evaluating? expr) expr]
     [(pair? expr) (apply-list expr env)]
     [(null? expr)
@@ -111,6 +114,12 @@
     [else
      ;; Everything else self-evaluates by default (vectors, hashes, etc.).
      expr]))
+
+(define (keyword-symbol? sym)
+  (and (symbol? sym)
+       (let ([s (symbol->string sym)])
+         (and (> (string-length s) 0)
+              (char=? (string-ref s 0) #\:)))))
 
 (define (self-evaluating? v)
   (or (number? v) (string? v) (boolean? v) (char? v) (keyword? v)
