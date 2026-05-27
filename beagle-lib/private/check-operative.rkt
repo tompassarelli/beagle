@@ -182,8 +182,11 @@
 
 (define (type-compatible? expected actual)
   ;; Is `actual` assignable to a slot of type `expected`?
-  ;; - Any matches everything in both directions.
+  ;; - Any matches everything in both directions (recursively through apps).
   ;; - Union on expected: any member must match.
+  ;; - Union on actual: every member must match expected.
+  ;; - Parametric apps (Vec Int) (Vec Any) compatible if ctor matches and
+  ;;   each arg pair is compatible.
   ;; - Otherwise, type-equal? (no subtyping yet).
   (cond
     [(type-any? expected) #t]
@@ -194,6 +197,20 @@
     [(type-union? actual)
      (andmap (lambda (alt) (type-compatible? expected alt))
              (type-union-alts actual))]
+    [(and (type-app? expected) (type-app? actual))
+     (and (eq? (type-app-ctor expected) (type-app-ctor actual))
+          (= (length (type-app-args expected)) (length (type-app-args actual)))
+          (andmap type-compatible?
+                  (type-app-args expected) (type-app-args actual)))]
+    [(and (type-arrow? expected) (type-arrow? actual))
+     (and (= (length (type-arrow-params expected))
+             (length (type-arrow-params actual)))
+          ;; contravariant params, covariant returns — but for now,
+          ;; just check pair-wise compatible (loose)
+          (andmap type-compatible?
+                  (type-arrow-params expected) (type-arrow-params actual))
+          (type-compatible? (type-arrow-returns expected)
+                            (type-arrow-returns actual)))]
     [else (type-equal? expected actual)]))
 
 (define (type->string t)
@@ -259,12 +276,13 @@
   (define NUM (type-union (list INT FLOAT)))
   (define ANY (type-any))
   (define (binary t r) (type-arrow (list t t) r))
-  ;; arithmetic — for now, use Any-returning to avoid Number-narrowing complexity
+  ;; arithmetic — variadic-Any (the variadic flag is the single-Any-param
+  ;; convention used by check-arrow-call).
   (for ([n (in-list '(+ - * /))])
-    (tenv-define! e n (type-arrow (list ANY ANY) ANY)))
-  ;; comparison
+    (tenv-define! e n (type-arrow (list ANY) ANY)))
+  ;; comparison — pairwise; treat as variadic-Any for now
   (for ([n (in-list '(< <= > >=))])
-    (tenv-define! e n (type-arrow (list NUM NUM) BOOL)))
+    (tenv-define! e n (type-arrow (list ANY) BOOL)))
   (tenv-define! e '= (type-arrow (list ANY ANY) BOOL))
   ;; equality / predicates
   (tenv-define! e 'eq? (type-arrow (list ANY ANY) BOOL))
@@ -334,11 +352,32 @@
     [else ANY-TYPE]))
 
 (define (check-symbol-ref sym env errors)
-  (define t (tenv-lookup env sym))
+  ;; `:foo` symbols are keywords — self-evaluating, no lookup.
+  ;; Dotted paths like `foo.bar.baz` (Nix attr access) are also accepted
+  ;; without lookup; they're emit-target-resolved.
+  ;; Unbound names default to Any silently — the checker is gradual:
+  ;; absence of a declared type is not an error, just an opportunity
+  ;; for inference. Real "name doesn't exist" issues surface at runtime
+  ;; or at backend-specific resolution time.
   (cond
-    [t (values t errors)]
-    [else (values ANY-TYPE
-                  (err! errors sym "unbound name: ~a" sym))]))
+    [(keyword-symbol? sym) (values (type-prim 'Keyword) errors)]
+    [(dotted-path-symbol? sym) (values ANY-TYPE errors)]
+    [else
+     (define t (tenv-lookup env sym))
+     (cond
+       [t (values t errors)]
+       [else (values ANY-TYPE errors)])]))
+
+(define (keyword-symbol? sym)
+  (and (symbol? sym)
+       (let ([s (symbol->string sym)])
+         (and (> (string-length s) 0)
+              (char=? (string-ref s 0) #\:)))))
+
+(define (dotted-path-symbol? sym)
+  (and (symbol? sym)
+       (let ([s (symbol->string sym)])
+         (regexp-match? #rx"\\." s))))
 
 (define (check-call expr env errors)
   (define head (car expr))
@@ -353,9 +392,27 @@
     [(match)    (check-match args env errors)]
     [(define)   (check-define args env errors)]
     [(def)      (check-define args env errors)]
-    [(ns)       (values NIL-TYPE errors)]            ; namespace decl — no type effect
-    [(define-mode) (values NIL-TYPE errors)]         ; mode marker — no type effect
+    [(ns)       (values NIL-TYPE errors)]
+    [(define-mode) (values NIL-TYPE errors)]
+    [(define-target) (values NIL-TYPE errors)]
+    [(define-macro) (check-define-macro args env errors)]
+    [(declare-extern) (check-declare-extern args env errors)]
+    [(import require)  (values NIL-TYPE errors)]
+    [(defrecord) (check-defrecord args env errors)]
+    [(defunion)  (check-defunion args env errors)]
+    [(defenum)   (check-defenum args env errors)]
+    [(defprotocol) (values NIL-TYPE errors)]
+    [(extend-type) (values NIL-TYPE errors)]
+    [(module flake) (check-module-or-flake args env errors)]
+    [(do)       (check-body args env errors)]
+    [(doseq for loop) (values ANY-TYPE (check-args args env errors))]
+    [(recur)    (values ANY-TYPE (check-args args env errors))]
+    [(letfn)    (values ANY-TYPE (check-args args env errors))]
+    [(with)     (values ANY-TYPE (check-args args env errors))]
+    [(try)      (values ANY-TYPE (check-args args env errors))]
     [(set!)     (check-set! args env errors)]
+    [(set-at!)  (values NIL-TYPE (check-args args env errors))]
+    [(at)       (values ANY-TYPE (check-args args env errors))]
     [else
      (cond
        [(eq? head QUOTE-OP) (values ANY-TYPE errors)]    ; quoted data
@@ -375,9 +432,10 @@
   (define op-type (and (symbol? head) (tenv-lookup env head)))
   (cond
     [(not op-type)
-     ;; Unknown operator — record error but allow continuing.
-     (define errs
-       (check-args args env (err! errors head "unbound operator: ~a" head)))
+     ;; Unknown operator — gradual checker: silently allow, treat as Any.
+     ;; The backend either knows the name (target-native function) or
+     ;; the runtime resolves it via the operative env.
+     (define errs (check-args args env errors))
      (values ANY-TYPE errs)]
     [(type-arrow? op-type)
      (check-arrow-call head op-type args env errors)]
@@ -471,7 +529,12 @@
 
 (define (check-defn args env errors)
   ;; (defn NAME (' params P...) (body ...))
+  ;; Multi-arity: (defn NAME (' arities (arity ...)))
   (cond
+    [(and (>= (length args) 2) (symbol? (car args))
+          (pair? (cadr args))
+          (multi-arity-form? (cadr args)))
+     (values NIL-TYPE (check-args (cdr args) env errors))]
     [(and (>= (length args) 3) (symbol? (car args)))
      (define name (car args))
      (define-values (params-form body-form) (extract-defn-shape (cdr args)))
@@ -507,6 +570,17 @@
     [else
      (values ANY-TYPE
              (err! errors args "defn shape unrecognized"))]))
+
+(define (multi-arity-form? form)
+  ;; A multi-arity defn body is a quoted (' arities (arity ...) ...) form.
+  (cond
+    [(and (pair? form) (quote-head? (car form)))
+     (multi-arity-form? (cdr form))]
+    [(and (pair? form) (eq? (car form) 'arities)) #t]
+    [else #f]))
+
+(define (quote-head? sym)
+  (or (eq? sym (string->symbol "'")) (eq? sym 'quote)))
 
 (define (extract-defn-shape args)
   ;; args (after NAME) is either (params-form body-form) or
@@ -666,6 +740,91 @@
         (tenv-define! env name vt)
         (values NIL-TYPE errs)])]
     [else (values ANY-TYPE (err! errors args "define shape unrecognized"))]))
+
+(define (check-define-macro args env errors)
+  ;; (define-macro KIND NAME (' params …) body…)
+  ;; Or (define-macro safe NAME (' params …) template)
+  ;; Register the macro name with Any type.
+  (cond
+    [(and (>= (length args) 3) (symbol? (cadr args)))
+     (tenv-define! env (cadr args) ANY-TYPE)
+     (values NIL-TYPE errors)]
+    [else (values NIL-TYPE errors)]))
+
+(define (check-declare-extern args env errors)
+  ;; (declare-extern NAME ∈ TYPE)
+  (cond
+    [(and (= (length args) 3) (eq? (cadr args) '∈) (symbol? (car args)))
+     (with-handlers ([exn:fail? (lambda (_) (void))])
+       (tenv-define! env (car args) (parse-type (caddr args))))
+     (values NIL-TYPE errors)]
+    [else (values NIL-TYPE errors)]))
+
+(define (check-defrecord args env errors)
+  ;; (defrecord NAME (' fields F1 F2 …))
+  ;; Register:
+  ;;  - NAME as a constructor function (Any...) -> NAME-type
+  ;;  - ->NAME as the same constructor
+  ;;  - NAME-field accessors as (NAME-type) -> Any
+  (cond
+    [(and (>= (length args) 2) (symbol? (car args)))
+     (define name (car args))
+     (define name-type (type-prim name))
+     (define fields (extract-params-list (cadr args)))  ; fields is shaped like params
+     (define ctor-type (type-arrow (map (lambda (_) ANY-TYPE) fields) name-type))
+     ;; Constructor: both NAME and ->NAME accept positional fields
+     (tenv-define! env name ctor-type)
+     (tenv-define! env (string->symbol (format "->~a" name)) ctor-type)
+     ;; Accessors: NAME-field accepts a NAME, returns Any (would be field type if known)
+     (for ([f (in-list fields)])
+       (tenv-define! env
+                     (string->symbol (format "~a-~a" name f))
+                     (type-arrow (list name-type) ANY-TYPE)))
+     (values NIL-TYPE errors)]
+    [else (values NIL-TYPE errors)]))
+
+(define (check-defunion args env errors)
+  ;; (defunion NAME (' variants V1 V2 …))
+  ;; (defunion (Name T1 T2) …)  parametric
+  ;; (defunion :throwable Name …)
+  (define name
+    (cond
+      [(symbol? (car args)) (car args)]
+      [(keyword-symbol? (car args)) (cadr args)]
+      [(and (pair? (car args)) (symbol? (car (car args)))) (car (car args))]
+      [else #f]))
+  (when (symbol? name)
+    (tenv-define! env name (type-prim name)))
+  (values NIL-TYPE errors))
+
+(define (check-defenum args env errors)
+  ;; (defenum NAME V1 V2 V3 …)
+  (cond
+    [(and (pair? args) (symbol? (car args)))
+     (tenv-define! env (car args) (type-prim (car args)))
+     (for ([v (in-list (cdr args))])
+       (when (symbol? v) (tenv-define! env v (type-prim 'Keyword))))
+     (values NIL-TYPE errors)]
+    [else (values NIL-TYPE errors)]))
+
+(define (check-module-or-flake args env errors)
+  ;; (module (' params P…) (body …))
+  ;; (flake VALUE)
+  (cond
+    [(and (>= (length args) 2)
+          (pair? (car args))
+          (or (eq? (caar args) 'quote)
+              (eq? (caar args) (string->symbol "'"))
+              (eq? (caar args) 'params)))
+     (define params-form (car args))
+     (define body-form (cadr args))
+     (define params (extract-params-list params-form))
+     (define body-env (tenv-extend env))
+     (for ([n (in-list params)])
+       (tenv-define! body-env n ANY-TYPE))
+     (check-expr body-form body-env errors)]
+    [else
+     (values ANY-TYPE (check-args args env errors))]))
 
 (define (check-set! args env errors)
   ;; set! is the explicit mutation marker. The checker records its

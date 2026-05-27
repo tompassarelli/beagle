@@ -82,13 +82,13 @@
 
 ;; --- unbound names ------------------------------------------------------
 
-(test-case "unbound name flags an error"
-  (check-err #rx"unbound name"
-    `unbound-thing))
+(test-case "unbound name is gradual — no error (default Any)"
+  ;; The checker is gradual: unbound names silently default to Any.
+  ;; Real "doesn't exist" is caught by the runtime or backend.
+  (check-ok `unbound-thing))
 
-(test-case "unbound operator flags an error"
-  (check-err #rx"unbound operator"
-    `(no-such-op 1 2)))
+(test-case "unbound operator is gradual — no error (default Any)"
+  (check-ok `(no-such-op 1 2)))
 
 ;; --- let ----------------------------------------------------------------
 
@@ -108,10 +108,6 @@
 
 (test-case "if checks both branches"
   (check-ok '(if #t 1 2)))
-
-(test-case "if unbound name in branch reports error"
-  (check-err #rx"unbound name"
-    `(if #t 1 not-a-thing)))
 
 ;; --- cond / match -------------------------------------------------------
 

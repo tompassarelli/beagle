@@ -46,12 +46,14 @@
     (lambda (path)
       (check-equal? (check-source path) '()))))
 
-(test-case "check-source flags unbound names"
+(test-case "check-source treats unbound names as Any (gradual)"
+  ;; Gradual checker: unbound symbols default to Any, no error reported.
+  ;; Real "doesn't exist" issues surface at runtime / backend resolution.
   (with-temp-source
     "#lang beagle/clj\nunbound-thing\n"
     (lambda (path)
       (define errs (check-source path))
-      (check-true (> (length errs) 0)))))
+      (check-equal? errs '()))))
 
 ;; --- compile to each target --------------------------------------------
 
@@ -92,9 +94,13 @@
 
 ;; --- compile aborts on type errors --------------------------------------
 
-(test-case "compile aborts when type errors are present"
+(test-case "compile aborts on real type mismatch"
+  ;; Need a structural mismatch the gradual checker catches: arity error.
   (with-temp-source
-    "#lang beagle/rkt\nundefined-name\n"
+    "#lang beagle/rkt
+(claim f ∈ (→ (' params Int Int) (returns Int)))
+(defn f (' params a b) (body (+ a b)))
+(f 1 2 3)\n"
     (lambda (path)
       (check-exn exn:fail:user? (lambda () (compile-source path))))))
 
