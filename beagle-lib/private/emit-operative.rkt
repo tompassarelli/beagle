@@ -839,6 +839,8 @@
     [(flake)       (nix-flake args)]
     [(with)        (nix-with args)]
     [(p)           (nix-path args)]
+    [(s)           (nix-s args)]
+    [(ms)          (nix-ms args)]
     [(str)         (format "(builtins.concatStringsSep \"\" [~a])"
                            (string-join
                              (for/list ([a (in-list args)])
@@ -910,6 +912,31 @@
      (car args)]
     [else
      (format "(p ~a)" (string-join (map nix->string args) " "))]))
+
+;; (s A B C …) → "AB C…" with Nix interpolation for non-string parts.
+;; A string literal stays literal; a symbol/expression gets wrapped as ${…}.
+(define (nix-s args)
+  (define parts
+    (for/list ([a (in-list args)])
+      (cond
+        [(string? a)
+         ;; Embed string content directly (without outer quotes).
+         (define s (format "~v" a))
+         (substring s 1 (- (string-length s) 1))]
+        [(symbol? a)
+         (format "$~a{~a}" "" (nix->string a))]
+        [else
+         (format "$~a{~a}" "" (nix->string a))])))
+  (format "\"~a\"" (string-join parts "")))
+
+;; (ms LINE1 LINE2 …) → ''\n  LINE1\n  LINE2\n'' — Nix indented string
+(define (nix-ms args)
+  (define lines
+    (for/list ([a (in-list args)])
+      (cond
+        [(string? a) a]
+        [else (format "$~a{~a}" "" (nix->string a))])))
+  (format "''\n  ~a\n''" (string-join lines "\n  ")))
 
 ;; (with TARGET BODY)  →  with TARGET; BODY
 (define (nix-with args)
