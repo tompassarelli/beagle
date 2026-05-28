@@ -1,23 +1,17 @@
 # beagle — session anchor
 
-A multi-target typed authoring IR. Racket frontend with custom `#lang`,
+A typed authoring IR for Nix. Racket frontend with custom `#lang`,
 macros (safe template + procedural with typed AST contracts; no `unsafe`
-kind), static type checking; emits Clojure, ClojureScript, JavaScript,
-Nix, SQL, Python, or Typed Racket source for runtime. `.bgl` is the
-primary file extension (`.rkt` still accepted for backward compatibility).
+kind), static type checking; emits Nix source. `.bnix` is the primary
+file extension for Nix-target source; `.bgl` and `.rkt` accepted.
 
-**Identity vs phase.** Beagle *is* multi-target — emitters for all seven
-backends exist and the abstractions are proven portable. The current
-*phase* is making the Nix authoring loop measurably better than
-hand-writing Nix: sub-second re-checks, schema-driven validation across
-the full NixOS option universe, round-trip-preserving conversion of
-existing Nix codebases. Surface decisions during this phase are
-evaluated primarily against Nix needs; portability is a secondary
-constraint rather than a blocking one. Other targets (Clojure, JS,
-ClojureScript, Python, SQL, Typed Racket) are supported at the
-abstraction level but are not the current focus of test-pass investment
-or community-adoption work. When the Nix loop is provably better, the
-phase shifts; the identity doesn't.
+**Live vs dormant.** Nix is the live target. Emitters for Clojure,
+ClojureScript, JavaScript, Python, SQL, and Typed Racket live under
+`beagle-lib/private/dormant/` — abstractions intact, parked but
+recoverable. The default develop/test/build loop is Nix-only; the
+others reactivate with `BEAGLE_ALL_TARGETS=1`. See
+`beagle-lib/private/dormant/README.md` and life-os thread
+`20260528233608-beagle_quarantine_non_nix_targets`.
 
 **LLM authoring is a first-class concern.** Rich types, explicit forms,
 low syntactic surface area, structured errors. One canonical idiom per
@@ -25,7 +19,9 @@ concept.
 
 ## Status
 
-`#lang beagle` v0.15.0 — 1382 tests passing (+ oracle/differential/bun-parity via `BEAGLE_ORACLE=1`).
+`#lang beagle` v0.15.0 — Nix-tier default test run is the active loop;
+`BEAGLE_ALL_TARGETS=1 bin/beagle-test` plus `BEAGLE_ORACLE=1` opt in to
+the gated tier (dormant target tests + oracle / differential / property).
 
 - **Targets:** `beagle/nix` is the **live happy path**; `beagle/clj`,
   `beagle/cljs`, `beagle/js`, `beagle/sql`, `beagle/py`, `beagle/rkt`
@@ -44,7 +40,9 @@ concept.
 ## Architecture
 
 ```
-parse → check → emit-dispatch → emit-{clj,js,nix,py,rkt,sql}
+parse → check → emit-dispatch → emit-nix
+                                (dormant: emit-{clj,js,py,rkt,sql} —
+                                 only loaded with BEAGLE_ALL_TARGETS=1)
 (all expand-time, inside our custom #%module-begin)
 ```
 
@@ -128,18 +126,19 @@ parse → check → emit-dispatch → emit-{clj,js,nix,py,rkt,sql}
 
 ## Test helpers
 
-Tests can't use `[...]` or `{...}` syntax directly (Racket reader collapses
-them). Use these helpers:
+The current surface uses head-tagged structural sub-lists
+(`(params ...)`, `(fields ...)`, `(<- name val …)`) so tests can write
+forms directly without bracket-tag tricks:
 
 ```racket
-(define (br . xs) (cons BRACKET-TAG xs))   ; simulates [...]
-(define (mp . xs) (cons MAP-TAG xs))       ; simulates {...}
+(parse-one '(defn foo (params (x : Int)) (+ x 1)))
+(parse-one '(let (<- x 1 y 2) (+ x y)))
+(parse-one '(defrecord Point (fields (x : Int) (y : Int))))
 ```
 
-Example: `(defn foo [(x : Int)] (+ x 1))` in test form:
-```racket
-(parse-one `(defn foo ,(br '(x : Int)) (+ x 1)))
-```
+The legacy `(br …)` / `(mp …)` helpers for simulating `[…]` / `{…}`
+are still defined for migrator tests that exercise pre-tightening
+v0.15 inputs.
 
 ## REQUIREMENT: NEVER author escape hatches, for any reason
 
@@ -215,8 +214,9 @@ Apply the patch or use the ledger to make a targeted edit. If `--emit-patch`
 gives the wrong fix, use `--ledger` output to identify the exact line, then
 edit that line.
 
-This applies to **all beagle-family files** (`.bgl`, `.bjs`, `.bclj`, `.bcljs`,
-`.bnix`, `.bsql`, `.bpy`) **in any repo** — including heist, beagle-lab, etc.
+This applies to **all beagle-family files** — `.bnix` is live; `.bgl`,
+`.bjs`, `.bclj`, `.bcljs`, `.bsql`, `.bpy` are accepted readers for
+dormant targets and still parse/syntax-check normally.
 For cross-repo files, use the full path: `~/code/beagle/bin/beagle-syntax FILE`.
 
 ### After every edit (automatic)
@@ -350,7 +350,7 @@ corpus-usage statistics.
 | Macro expansion is inspectable | `beagle-expand` lets the LLM audit its own macros |
 | Strict mode default | dynamic is escape-hatch for humans; AI should stay strict |
 | P2 checker profile default | E16-T experiments: P2 (exhaustive match, narrowing) is the sweet spot for agent-assisted dev. P3 effects add no measured value; P1 false positives actively hurt (3.4× slower). Types help agents build features (reasoning scaffold) not find bugs (tests win). See beagle-lab `e16-workflow-scheduler/results/type/RESULTS.md` |
-| Multi-target IR, not Clojure transpiler | same typed AST emits to Clojure, CLJS, JS, Nix (Python plumbed); target from `#lang` |
+| Multi-target IR | same typed AST emits to Nix (live) plus five dormant backends (Clj, CLJS, JS, Py, Rkt, SQL); target from `#lang`. The IR is the bet; the targets are individually parkable. |
 | Subset-of-Clojure, not full mimic | take Lisp universals + Clojure's good ideas; develop own for typed semantics |
 | `:` as only annotation marker | `:-` removed; no measured benefit in 6-variant benchmark |
 | Wrapped params only | inline removed; no measured benefit, less unambiguous parse |
@@ -446,9 +446,14 @@ For mechanical questions ("what forms exist?", "what's the signature of X?",
 - `bin/beagle-fields RECORD FILE...` — record fields, types, accessors
 - `bin/beagle-provides FILE...` — module exports
 - `bin/beagle-callers NAME FILE...` — call sites
-- Or read `beagle-lib/private/parse.rkt` for the form set, `stdlib-*.rkt` for the typed extern catalog
+- Or read `beagle-lib/private/parse.rkt` for the form set,
+  `beagle-lib/private/stdlib-nix.rkt` and `stdlib-portable.rkt` for the
+  live typed extern catalog, `beagle-lib/private/dormant/stdlib-*.rkt`
+  for the parked target catalogs
 
 For non-mechanical questions ("why does the surface look this way?",
 "what was dropped and why?"):
 - `README.md` — what beagle is, the core principles, the lock-in discipline
+- `~/code/life-os/threads/` — design papers and threads (role-locality,
+  public-contracts, quarantine, etc.)
 - `~/code/beagle-lab/` — historical experiment archive (E0–E22, benchmark framework, results)

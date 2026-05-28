@@ -1,30 +1,20 @@
 # Beagle
 
-**A typed, LLM-optimized authoring surface that compiles to multiple
-targets. Built for provably-fast developer feedback loops and stronger
-composition than the underlying target languages permit on their own.**
+**A typed, LLM-optimized authoring surface for Nix. Schema-driven
+validation, sub-second re-checks, round-trips real-world Nix without
+semantic loss.**
 
-The identity: beagle emits to seven backends (Clojure, ClojureScript,
-JavaScript, Python, Nix, SQL, Typed Racket) from one typed AST. The
-same source can be typed, macro-expanded, and validated against
-schemas before it ever reaches the target runtime — eval-time errors
-become parse-time errors, schema mismatches become compile-time
-diagnostics, repeated structure becomes a typed macro authored once.
-
-The current emphasis: making the Nix authoring loop measurably better
-than hand-writing Nix. Concrete targets are sub-second re-checks
-on edits, schema-driven validation across the full NixOS option
-universe, and a converter that round-trips real-world Nix code through
-beagle without semantic loss. The other targets stay first-class
-structurally; they aren't the current focus of test-pass investment
-or community-adoption work.
+Five other backends (Clojure, ClojureScript, JavaScript, Python, SQL,
+Typed Racket) sit in [`beagle-lib/private/dormant/`](beagle-lib/private/dormant/) —
+parked, not deleted. The multi-target abstractions are intact and
+reactivate with `BEAGLE_ALL_TARGETS=1`; the live loop is Nix only.
 
 ```racket
 #lang beagle/nix
 (ns hosts.whiterabbit)
 
-(module [config lib pkgs]
-  (def msg : String config.services.openssh.enable))
+(module (params config lib pkgs)
+  (def msg :type String config.services.openssh.enable))
 ;; ✗ hosts/whiterabbit.bnix:4:0: def msg: expected String, got Bool
 ;;   (resolved from .beagle-cache/schema.json — services.openssh.enable : bool)
 ```
@@ -126,44 +116,30 @@ generalizing the harness so every future surface change passes through
 it is the discipline that converts the surface from open to closed in
 practice rather than just in principle.
 
-Two open questions remain, both gated on external triggers rather than
-on more thinking: nil-semantics (eventual typed nullable-narrowing form,
-will NOT reuse the `when-let`/`if-let` name) and macro-DSL audit (blocked
-on Cyclone self-host introducing the concrete constraints).
+One open question remains, gated on an external trigger rather than
+more thinking: nil-semantics (eventual typed nullable-narrowing form,
+will NOT reuse the `when-let`/`if-let` name).
 
 ## Targets
 
-| Target | `#lang` | Stdlib | Runtime |
+| Target | `#lang` | Stdlib | Status |
 |---|---|---|---|
-| Clojure | `beagle/clj` | 397 entries | JVM, Babashka |
-| JavaScript | `beagle/js` | 102 native + 28 typed `js/*` forms | Node, Bun |
-| Python | `beagle/py` | 348 entries | Python 3 |
-| Nix | `beagle/nix` | 523 entries | nix-eval |
-| ClojureScript | `beagle/cljs` | 132 entries | browser, Node |
-| SQL | `beagle/sql` | 59 entries | DDL/DML emission |
-| Typed Racket | `beagle/rkt` | (oracle) | `raco make` independently validates beagle's type promises |
+| Nix | `beagle/nix` | 523 entries | **live** — schema-typed, round-trips real-world Nix |
+| Clojure | `beagle/clj` | 397 entries | dormant ([`dormant/`](beagle-lib/private/dormant/)) |
+| ClojureScript | `beagle/cljs` | 132 entries | dormant |
+| JavaScript | `beagle/js` | 102 + 28 typed `js/*` | dormant |
+| Python | `beagle/py` | 348 entries | dormant |
+| SQL | `beagle/sql` | 59 entries | dormant |
+| Typed Racket | `beagle/rkt` | (oracle) | dormant |
 
 269 portable stdlib entries shared across all targets, plus the
-target-specific catalogs above.
+target-specific catalogs above. The dormant emitters and stdlibs are
+intact; opt in for any one session with `BEAGLE_ALL_TARGETS=1`.
 
-The same typed AST drives every emitter. Nix has been the most
-generative target for the language itself — working on a non-trivial
-NixOS configuration produced design pressure that shaped `NixType` as
-an opaque primitive and motivated the schema-driven validator.
-
-## Self-hosting
-
-Beagle compiles itself. The 12 `.bjs` components (reader, parser, type
-checker, 5 emitters, AST, macros, lint, types) are written in beagle
-targeting JavaScript. Bootstrap fixed-point proven: Racket compiler →
-JS bundle → JS bundle compiles same sources → byte-identical output.
-
-Emission parity verified against [Heist](https://github.com/tompassarelli/heist)
-(full-stack dogfood app): 11/11 modules produce byte-identical output
-from both compilers.
-
-Next milestone: Cyclone Scheme self-host, removing the Racket runtime
-dependency.
+The same typed AST drives every emitter. Nix is the current live
+target — working on a non-trivial NixOS configuration produced design
+pressure that shaped `NixType` as an opaque primitive and motivated
+the schema-driven validator.
 
 ## Install
 
@@ -245,7 +221,8 @@ from the source:
 - **What forms exist?** Grep `parse.rkt` or run `bin/beagle-provides`
   on the beagle source itself.
 - **What's the signature of X?** `bin/beagle-sig X` or read the stdlib
-  catalog at `beagle-lib/private/stdlib-*.rkt`.
+  catalog at `beagle-lib/private/stdlib-nix.rkt` and `stdlib-portable.rkt`
+  (dormant target catalogs under `beagle-lib/private/dormant/`).
 - **What fields does record R have?** `bin/beagle-fields R FILE`.
 - **What does this error mean?** The error message tells you; the
   parser source is `beagle-lib/private/parse.rkt`.
