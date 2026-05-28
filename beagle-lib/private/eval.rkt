@@ -220,6 +220,23 @@
            (env-define! env name val)
            (loop (cddr rest))])))))
 
+;; --- labeled structural-role operators ------------------------------------
+;;
+;; Role locality requires that declaration sub-lists (parameters, fields,
+;; variants, fn-bundles, …) carry their role in their head — not be assigned
+;; by position inside the parent operator's grammar. These operatives all
+;; evaluate to their raw operands as a list, identical to `'` semantically;
+;; the surface distinction is whether the list is *data* (`'`) or a
+;; structural role (`params`, `fields`, `variants`, `fns`, `arities`).
+(define (make-role-op sym)
+  (make-raw sym (lambda (args env) args)))
+
+(define PARAMS-OP   (make-role-op 'params))
+(define FIELDS-OP   (make-role-op 'fields))
+(define VARIANTS-OP (make-role-op 'variants))
+(define FNS-OP      (make-role-op 'fns))
+(define ARITIES-OP  (make-role-op 'arities))
+
 ;; --- core operatives ------------------------------------------------------
 
 ;; `vau`: construct a raw operative.
@@ -697,6 +714,11 @@
   (for ([entry (in-list `((,QUOTE-OP-SYM . ,QUOTE-OP)
                           (quote         . ,QUOTE-OP)      ; alias for ' (Racket reader compat)
                           (<-            . ,LARROW-OP)     ; binding operator
+                          (params        . ,PARAMS-OP)     ; role: parameter list
+                          (fields        . ,FIELDS-OP)     ; role: field list
+                          (variants      . ,VARIANTS-OP)   ; role: variant list
+                          (fns           . ,FNS-OP)        ; role: letfn fn list
+                          (arities       . ,ARITIES-OP)    ; role: multi-arity bundle
                           (vau           . ,VAU-OP)
                           (wrap          . ,WRAP-OP)
                           (unwrap        . ,UNWRAP-OP)

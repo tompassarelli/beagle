@@ -84,10 +84,12 @@
   (or (eq? sym QUOTE-OP) (eq? sym 'quote)))
 
 (define (extract-params-list form)
-  ;; Tightened: param/field/etc. lists are (' A B...) — drop the '-head.
-  ;; Pre-tightening (' HEAD A B...) and (HEAD A B...) still accepted as
-  ;; back-compat for unmigrated test inputs.
+  ;; Role-local: structural sub-lists are head-tagged (params|fields|variants|fns|arities|vars|path A B...).
+  ;; Back-compat shapes still accepted: (' A B...), (' LABEL A B...), Racket-quoted (quote (...)).
   (cond
+    [(and (pair? form) (symbol? (car form))
+          (memq (car form) '(params fields vars variants path arities fns)))
+     (cdr form)]
     [(and (pair? form) (quote-head? (car form)))
      (define rest (cdr form))
      (cond
@@ -95,13 +97,10 @@
         ;; (quote (PAYLOAD-LIST)) — Racket-style single-arg quote
         (extract-params-list (car rest))]
        [(and (pair? rest) (symbol? (car rest))
-             (memq (car rest) '(params fields vars variants path arities)))
+             (memq (car rest) '(params fields vars variants path arities fns)))
         ;; pre-tightening label inside `'`
         (cdr rest)]
        [else rest])]
-    [(and (pair? form) (symbol? (car form))
-          (memq (car form) '(params fields vars variants path arities)))
-     (cdr form)]
     [(null? form) '()]
     [else '()]))
 

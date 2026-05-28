@@ -683,10 +683,13 @@
      (error 'check-defn "unrecognized shape: ~v" args)]))
 
 (define (extract-params-list params-form)
-  ;; Tightened: param/field/etc. lists are `(' A B...)` — drop the `'`-head.
-  ;; Also accept (quote (A B...)) from Racket-source test construction.
-  ;; Pre-tightening (params/fields/vars labels) accepted for back-compat.
+  ;; Role-local: structural sub-lists are head-tagged (params|fields|variants|fns|arities|vars|path A B...).
+  ;; Back-compat: (' A B...), (' LABEL A B...), and Racket (quote ...) still accepted.
   (cond
+    [(and (pair? params-form) (symbol? (car params-form))
+          (memq (car params-form) '(params fields vars variants path arities fns)))
+     ;; role-local labeled form — drop the head
+     (cdr params-form)]
     [(and (pair? params-form) (or (eq? (car params-form) QUOTE-OP)
                                    (eq? (car params-form) 'quote)))
      (define rest (cdr params-form))
@@ -695,16 +698,12 @@
         ;; (quote (PAYLOAD-LIST)) shape from Racket reader
         (extract-params-list (car rest))]
        [(and (pair? rest) (symbol? (car rest))
-             (memq (car rest) '(params fields vars variants path arities)))
-        ;; pre-tightening label — strip it
+             (memq (car rest) '(params fields vars variants path arities fns)))
+        ;; pre-tightening label inside `'`
         (cdr rest)]
        [else
         ;; tightened — `(' A B...)` returns (A B...)
         rest])]
-    [(and (pair? params-form) (symbol? (car params-form))
-          (memq (car params-form) '(params fields vars variants path arities)))
-     ;; bare-label form (HEAD A B...) — drop the label
-     (cdr params-form)]
     [(null? params-form) '()]
     [else '()]))
 

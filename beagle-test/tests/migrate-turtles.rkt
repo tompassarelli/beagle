@@ -49,6 +49,12 @@
 ;; Variadic `<-` helper — splat list elements as binding operands.
 (define (L items) (cons LARROW-OP items))
 
+;; Role-local structural-head helpers — labeled-head sublists.
+(define (P items) (cons 'params items))
+(define (F items) (cons 'fields items))
+(define (V items) (cons 'variants items))
+(define (FNS items) (cons 'fns items))
+
 (define (migrate-and-read v015-text)
   (forms-after-lang (migrate-turtles-text v015-text)))
 
@@ -62,20 +68,20 @@
   "#lang beagle
 (defn add [(x : Int) (y : Int)] : Int (+ x y))"
   `((claim add :type (-> Int Int Int))
-    (defn add ,(Q '(x y)) (+ x y)))
+    (defn add ,(P '(x y)) (+ x y)))
   "defn with typed params and return type")
 
 (check-migrate
   "#lang beagle
 (defn id [x] x)"
-  `((defn id ,(Q '(x)) x))
+  `((defn id ,(P '(x)) x))
   "defn with no types")
 
 (check-migrate
   "#lang beagle
 (defn add [(x : Int) (y : Int)] : Int (+ x y) (println \"side\"))"
   `((claim add :type (-> Int Int Int))
-    (defn add ,(Q '(x y)) (+ x y) (println "side")))
+    (defn add ,(P '(x y)) (+ x y) (println "side")))
   "defn with multi-body")
 
 ;; --- def -----------------------------------------------------------------
@@ -99,7 +105,7 @@
   "#lang beagle
 (defn f [] : Int (let [x 1 y 2] (+ x y)))"
   `((claim f :type (-> Int))
-    (defn f ,(Q '())
+    (defn f ,(P '())
       (let ,(L '(x 1 y 2)) (+ x y))))
   "let with flat-pair brackets -> <- binding")
 
@@ -107,7 +113,7 @@
   "#lang beagle
 (defn f [] : Int (let ((x 1) (y 2)) (+ x y)))"
   `((claim f :type (-> Int))
-    (defn f ,(Q '())
+    (defn f ,(P '())
       (let ,(L '(x 1 y 2)) (+ x y))))
   "let with paren-of-pairs -> <- binding")
 
@@ -158,7 +164,7 @@
 (check-migrate
   "#lang beagle
 (defrecord Point [(x : Int) (y : Int)])"
-  `((defrecord Point ,(Q '(x y)))
+  `((defrecord Point ,(F '(x y)))
     (claim Point.x :type Int)
     (claim Point.y :type Int))
   "defrecord with typed fields -> fields + per-field claims")
@@ -171,6 +177,6 @@
   (cond (< n 0) \"neg\" (= n 0) \"zero\" :else \"pos\"))"
   `((claim classify :type (-> Int String))
     (defn classify
-      ,(Q '(n))
+      ,(P '(n))
       (cond (< n 0) "neg" (= n 0) "zero" :else "pos")))
   "cond — flat by adjacency")
