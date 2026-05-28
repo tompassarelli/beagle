@@ -214,6 +214,22 @@
     (datum->syntax #f result (vector src line col pos #f))
     result))
 
+;; Quote-prefix reader. `'X` reads as `(quote X)` for any next datum X:
+;; `'(a b)`  → (quote (a b))           — inert list
+;; `'[a b]`  → (quote (#%brackets a b)) — inert vector
+;; `'{a b}`  → (quote (#%map a b))     — inert map
+;; `'foo`    → (quote foo)             — inert symbol
+;; This is the canonical inert marker — the old `(' a b)` quote-inside
+;; list form is retired.
+(define (quote-reader ch port src line col pos)
+  (define inner
+    (parameterize ([current-readtable beagle-readtable])
+      (if src (read-syntax src port) (read port))))
+  (define result (list 'quote inner))
+  (if src
+    (datum->syntax #f result (vector src line col pos #f))
+    result))
+
 (define beagle-readtable
   (make-readtable #f
     #\[ 'terminating-macro bracket-reader
@@ -225,10 +241,7 @@
                             (lambda (ch port src line col pos)
                               (error 'beagle "unexpected `}`"))
     #\| 'non-terminating-macro pipe-reader
-    ;; `'` is treated as ordinary so it can appear as a bare symbol in
-    ;; head position; we override Racket's default `'x` ≡ (quote x) macro
-    ;; by aliasing `'` to the ordinary character `a`.
-    #\' #\a #f
+    #\' 'terminating-macro quote-reader
     #\# 'non-terminating-macro hash-dispatch))
 
 (define (beagle-read in)

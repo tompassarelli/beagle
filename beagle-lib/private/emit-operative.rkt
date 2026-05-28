@@ -866,13 +866,39 @@
     [(vector) (format "[ ~a ]" (string-join (map nix->string args) " "))]
     [(hash-map) (nix-attrset args)]
     [(hash-set) (format "[ ~a ]" (string-join (map nix->string args) " "))]
-    ;; Data-literal containers (role-locality §5). Emit the same Nix shape
-    ;; as the computed constructors — Nix's attrset / list is lazy either
-    ;; way; the semantic distinction is at the beagle level, not the
-    ;; target level.
+    ;; Data containers. Post-surface-flip: bare `(#%map …)` is a
+    ;; COMPUTED map, bare-symbol key emits as Nix dynamic ${name}.
+    ;; A frozen map appears as `(quote (#%map …))` (handled by the
+    ;; `quote` case below); its bare-symbol keys emit as literal Nix
+    ;; identifiers.
     [(#%brackets) (format "[ ~a ]" (string-join (map nix->string args) " "))]
     [(#%map)      (nix-attrset args)]
     [(#%set)      (format "[ ~a ]" (string-join (map nix->string args) " "))]
+    [(quote)
+     ;; Quoted (frozen) container. The only thing it affects in Nix
+     ;; emission is: bare-symbol keys inside a frozen map become
+     ;; literal Nix identifiers instead of dynamic ${name}. For
+     ;; vectors/sets/lists, frozen vs computed makes no difference to
+     ;; the emitted Nix.
+     (cond
+       [(and (= (length args) 1) (pair? (car args))
+             (eq? (car (car args)) '#%map))
+        (nix-attrset-frozen (cdr (car args)))]
+       [(and (= (length args) 1) (pair? (car args))
+             (eq? (car (car args)) '#%brackets))
+        (format "[ ~a ]"
+                (string-join (map nix->string (cdr (car args))) " "))]
+       [(and (= (length args) 1) (pair? (car args))
+             (eq? (car (car args)) '#%set))
+        (format "[ ~a ]"
+                (string-join (map nix->string (cdr (car args))) " "))]
+       [(= (length args) 1)
+        ;; `(quote X)` for any other X — emit X as-is. Bare symbols
+        ;; in this position would be code-as-data and are unusual in
+        ;; Nix output.
+        (nix->string (car args))]
+       [else
+        (format "(quote ~a)" (string-join (map nix->string args) " "))])]
     [(set!)
      (error 'emit-nix "Nix is pure; set! not allowed in Nix-targeted code")]
     [(+ - * /)
@@ -1118,6 +1144,8 @@
 (define (nix-body args) (nix-body-emit args))
 
 (define (nix-attrset args)
+  ;; Computed map: bare-symbol keys are Beagle variable references and
+  ;; render as Nix dynamic ${name}. See nix-attr-key.
   (when (odd? (length args))
     (error 'nix-attrset "odd hash-map args: ~v" args))
   (format "{ ~a }"
@@ -1132,6 +1160,42 @@
                                      (nix->string (cadr rest)))
                              acc))]))
             " ")))
+
+;; Frozen map: bare-symbol keys are literal Nix identifiers (no ${…}
+;; interpolation). Values are still emitted via nix->string — the
+;; freeze affects keys only at the Nix-emit boundary.
+(define (nix-attrset-frozen args)
+  (when (odd? (length args))
+    (error 'nix-attrset-frozen "odd map args: ~v" args))
+  (format "{ ~a }"
+          (string-join
+            (let loop ([rest args] [acc '()])
+              (cond
+                [(null? rest) (reverse acc)]
+                [else
+                 (loop (cddr rest)
+                       (cons (format "~a = ~a;"
+                                     (nix-attr-key-frozen (car rest))
+                                     (nix->string (cadr rest)))
+                             acc))]))
+            " ")))
+
+(define (nix-attr-key-frozen k)
+  (cond
+    [(keyword? k) (keyword->string k)]
+    [(string? k) (format "~v" k)]
+    [(symbol? k)
+     (define s (symbol->string k))
+     (cond
+       [(and (> (string-length s) 0) (char=? (string-ref s 0) #\:))
+        ;; legacy `:foo` keys still accepted; strip the colon
+        (substring s 1)]
+       [else
+        ;; bare symbol in a FROZEN map → literal Nix identifier
+        s])]
+    [(and (pair? k) (eq? (car k) 's)) (nix-s (cdr k))]
+    [(pair? k) (format "$~a{~a}" "" (nix->string k))]
+    [else (format "~v" k)]))
 
 (define (nix-attr-key k)
   (cond

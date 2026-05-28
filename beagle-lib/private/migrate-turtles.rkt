@@ -54,11 +54,14 @@
 ;; variadic `'` form ('-sym ITEMS...).
 (define QUOTE-OP (string->symbol "'"))
 (define BRACKET-OP '#%brackets)
+(define MAP-OP    '#%map)
+(define SET-OP    '#%set)
 
 (define (Q items)
-  ;; Splat ITEMS as operands of the `'` operator (inert data).
-  ;; Reserved for code-as-data / paths / inert lists.
-  (cons QUOTE-OP items))
+  ;; Frozen list `'(a b c)`. Produces `(quote (a b c))`; the writer
+  ;; renders it as `'(a b c)`. The legacy `(' a b c)` quote-inside
+  ;; shape is retired — all inert containers use quote-as-PREFIX now.
+  (list 'quote items))
 
 (define (L items)
   ;; Binding zone — a bare vector literal `[name val name val …]`.
@@ -536,20 +539,70 @@
 
 (define (migrate-expr expr)
   (cond
-    ;; Data literals stay as data literals per role-locality §5:
-    ;; [a b c] is a vector value (inert contents); to compute, use
-    ;; (vector …). Same for {…} and #{…}. The reader keeps these
-    ;; tagged with MAP-TAG/BRACKET-TAG/SET-TAG; we walk their contents
-    ;; in case any nested element needs migration but preserve the
-    ;; container shape.
+    ;; Surface flip: bare `[…]`/`{…}` now COMPUTE; the inert form is
+    ;; the `'`-prefix `'[…]`/`'{…}`. For .nix-imported corpus, every
+    ;; attrset is a literal-key shape, so we wrap maps in `(quote …)`
+    ;; (producing `'{…}` in the output) and drop the colon prefix from
+    ;; each key — since the map is frozen, bare symbol keys emit as
+    ;; literal Nix identifiers (same Nix output as the old `:k` form).
+    ;;
+    ;; Vectors stay bare: Nix list elements are Nix expressions, and
+    ;; both the old inert and new computed forms emit the same Nix.
     [(and (pair? expr) (eq? (car expr) BRACKET-TAG))
      (cons BRACKET-TAG (map migrate-expr (bracket-body expr)))]
     [(and (pair? expr) (eq? (car expr) MAP-TAG))
-     (cons MAP-TAG (map migrate-expr (map-body expr)))]
+     ;; Detect literal-key vs computed-key map. A key is "literal" if
+     ;; it's colon-prefixed (`:k`), a string, or a keyword. Bare
+     ;; symbols (`username`) are computed-key — they evaluate to the
+     ;; bound variable's value at the Nix evaluation site.
+     (define body (map-body expr))
+     (define keys (for/list ([k (in-list body)] [i (in-naturals)]
+                             #:when (even? i)) k))
+     (define all-literal? (andmap literal-key? keys))
+     (cond
+       [all-literal?
+        ;; Frozen map: wrap in quote, drop colon prefix from each key.
+        ;; Emits as Nix `{ ident = val; }` with literal identifier keys.
+        (list 'quote
+              (cons MAP-TAG
+                    (for/list ([item (in-list body)] [i (in-naturals)])
+                      (cond
+                        [(even? i) (drop-colon-prefix (migrate-expr item))]
+                        [else (migrate-expr item)]))))]
+       [else
+        ;; Computed map: leave bare. Bare-symbol keys emit as Nix `${name}`
+        ;; via the dynamic-attr-key path.
+        (cons MAP-TAG (map migrate-expr body))])]
     [(and (pair? expr) (eq? (car expr) SET-TAG))
      (cons SET-TAG (map migrate-expr (set-body expr)))]
     [(pair? expr) (migrate-call expr)]
     [else expr]))
+
+;; Strip a leading `:` from a symbol used in map-key position. The
+;; colon was the v0.15-era marker for "literal key"; in a frozen map
+;; (post-surface-flip) the bare symbol IS the literal key. Non-symbol
+;; keys pass through unchanged.
+(define (drop-colon-prefix k)
+  (cond
+    [(symbol? k)
+     (define s (symbol->string k))
+     (cond
+       [(and (positive? (string-length s)) (char=? (string-ref s 0) #\:))
+        (string->symbol (substring s 1))]
+       [else k])]
+    [else k]))
+
+;; A "literal key" is one whose meaning at Nix-emit time is a literal
+;; identifier (or string). Colon-prefixed symbols and strings qualify;
+;; bare symbols are variable references and would emit as Nix ${name}.
+(define (literal-key? k)
+  (cond
+    [(string? k) #t]
+    [(keyword? k) #t]
+    [(symbol? k)
+     (define s (symbol->string k))
+     (and (positive? (string-length s)) (char=? (string-ref s 0) #\:))]
+    [else #f]))
 
 (define (migrate-call form)
   (define head (car form))
@@ -1015,6 +1068,8 @@
         (write-inline-items (cdr form) out)
         (display ")" out)]
        [(and (eq? (car form) 'quote) (= (length form) 2))
+        ;; Quote-prefix syntax. Whatever the next datum's container is,
+        ;; print `'` immediately before it (no space, no inner paren).
         (display "'" out)
         (write-inline (cadr form) out)]
        [else
@@ -1057,8 +1112,13 @@
     [(pair? form)
      (cond
        [(and (eq? (car form) 'quote) (= (length form) 2))
+        ;; Quote-prefix renders the inner container with `'` immediately
+        ;; before its opening delimiter, no intervening space. The
+        ;; indent for the inner content is one column to the right of
+        ;; where `'` sits — i.e., the inner container's open delimiter
+        ;; column = indent + 1.
         (display "'" out)
-        (write-turtles-form (cadr form) out indent)]
+        (write-turtles-form (cadr form) out (+ indent 1))]
        [else
         (define inline (form->inline-string form))
         (cond
