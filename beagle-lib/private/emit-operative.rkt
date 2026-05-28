@@ -815,8 +815,11 @@
     [(keyword? expr) (format "~v" (keyword->string expr))]
     [(symbol? expr)
      ;; Slash → dot for namespace-qualified names: lib/mkIf → lib.mkIf.
+     ;; Skip pure-operator symbols (// for attrset update, / for division,
+     ;; etc.) — those are operator tokens, not namespace paths.
      (define s (symbol->string expr))
      (cond
+       [(regexp-match? #rx"^[/+*<>=!?-]+$" s) s]
        [(regexp-match? #rx"/" s) (string-replace s "/" ".")]
        [else s])]
     [(pair? expr) (nix-call->string expr)]
@@ -854,6 +857,10 @@
     [(+ - * /)
      (format "(~a)" (string-join (map nix->string args)
                                   (format " ~a " head)))]
+    [(// ++)
+     ;; Nix infix operators: a // b   a ++ b   (left-associative).
+     (format "(~a)" (string-join (map nix->string args)
+                                  (format " ~a " head)))]
     [(< <= > >=)
      (format "(~a ~a ~a)"
              (nix->string (car args)) head (nix->string (cadr args)))]
@@ -885,10 +892,15 @@
     [(>= (length args) 2)
      (define params-form (car args))
      (define body-exprs (cdr args))
-     (define params (extract-params-list params-form))
+     (define raw-params (extract-params-list params-form))
+     (define rest? (memq '... raw-params))
+     (define params (filter (lambda (p) (not (eq? p '...))) raw-params))
      (define pattern
-       (format "{ ~a, ... }"
-               (string-join (map symbol->string params) ", ")))
+       (if rest?
+           (format "{ ~a, ... }"
+                   (string-join (map symbol->string params) ", "))
+           (format "{ ~a }"
+                   (string-join (map symbol->string params) ", "))))
      (define body-str
        (cond
          [(= (length body-exprs) 1) (nix->string (car body-exprs))]
@@ -896,7 +908,7 @@
                        (string-join (for/list ([e (in-list (drop-right body-exprs 1))])
                                       (format "_ = ~a;" (nix->string e))) " ")
                        (nix->string (last body-exprs)))]))
-     (format "~a:\n\n~a" pattern body-str)]
+     (format "(~a:\n\n~a)" pattern body-str)]
     [else "{ ... }: null"]))
 
 ;; (flake VALUE)  →  VALUE — flake is a meta-form; the attrset is the value
@@ -961,7 +973,8 @@
 (define (nix-fn args)
   (define-values (params-form body-exprs) (skip-fn-annotations args))
   (define params (extract-params-list params-form))
-  (nix-curry params (nix-body-emit body-exprs)))
+  ;; Paren-wrap so the lambda parses correctly when used as a function argument.
+  (format "(~a)" (nix-curry params (nix-body-emit body-exprs))))
 
 (define (nix-curry params body-str)
   (cond

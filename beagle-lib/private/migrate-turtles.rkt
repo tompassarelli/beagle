@@ -543,6 +543,8 @@
 ;; importer-emitted (fn-set (params... [...]) body) → (module (' params...) body)
 ;; The two forms differ in surface arity but mean the same Nix module — a
 ;; lambda over an attrset pattern. Convert to the canonical `module` shape.
+;; The trailing `...` ellipsis marker is preserved as-is in the params list;
+;; the emitter uses its presence to decide between strict and open patterns.
 (define (migrate-fn-set form)
   (match form
     [(list 'fn-set param-form body ...)
@@ -550,11 +552,10 @@
                        [(bracketed? param-form) (bracket-body param-form)]
                        [(list? param-form) param-form]
                        [else '()]))
-     ;; Drop the trailing `...` ellipsis marker; the module form always
-     ;; carries `rest? = #t` implicitly.
      (define names
-       (for/list ([p (in-list entries)] #:when (not (eq? p '...)))
+       (for/list ([p (in-list entries)])
          (cond
+           [(eq? p '...) p]
            [(symbol? p) p]
            [(and (list? p) (= (length p) 2) (symbol? (car p))) (car p)]
            [(and (list? p) (= (length p) 3) (eq? (cadr p) ':)) (car p)]
