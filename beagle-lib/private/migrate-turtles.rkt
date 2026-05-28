@@ -551,28 +551,11 @@
     [(and (pair? expr) (eq? (car expr) BRACKET-TAG))
      (cons BRACKET-TAG (map migrate-expr (bracket-body expr)))]
     [(and (pair? expr) (eq? (car expr) MAP-TAG))
-     ;; Detect literal-key vs computed-key map. A key is "literal" if
-     ;; it's colon-prefixed (`:k`), a string, or a keyword. Bare
-     ;; symbols (`username`) are computed-key — they evaluate to the
-     ;; bound variable's value at the Nix evaluation site.
-     (define body (map-body expr))
-     (define keys (for/list ([k (in-list body)] [i (in-naturals)]
-                             #:when (even? i)) k))
-     (define all-literal? (andmap literal-key? keys))
-     (cond
-       [all-literal?
-        ;; Frozen map: wrap in quote, drop colon prefix from each key.
-        ;; Emits as Nix `{ ident = val; }` with literal identifier keys.
-        (list 'quote
-              (cons MAP-TAG
-                    (for/list ([item (in-list body)] [i (in-naturals)])
-                      (cond
-                        [(even? i) (drop-colon-prefix (migrate-expr item))]
-                        [else (migrate-expr item)]))))]
-       [else
-        ;; Computed map: leave bare. Bare-symbol keys emit as Nix `${name}`
-        ;; via the dynamic-attr-key path.
-        (cons MAP-TAG (map migrate-expr body))])]
+     ;; Maps are computed containers. Keys mark intent inline:
+     ;;   :k   → literal key (emits as Nix `k = …;`)
+     ;;   bare → computed key (emits as Nix `${name} = …;`)
+     ;; No quote-prefix on the map itself.
+     (cons MAP-TAG (map migrate-expr (map-body expr)))]
     [(and (pair? expr) (eq? (car expr) SET-TAG))
      (cons SET-TAG (map migrate-expr (set-body expr)))]
     [(pair? expr) (migrate-call expr)]

@@ -112,9 +112,11 @@ Phase-stable and easy to get wrong:
 - `emit-form` handles top-level forms; `emit-expr` handles everything
   else. `check-form` does top-level checking; `infer-expr` is
   expression-level
-- Current surface uses head-tagged structural sub-lists:
-  `(params …)`, `(fields …)`, `(<- name val …)`, `(variants …)`,
-  `(fns …)`. `'` is reserved for inert data (paths, code-as-data).
+- **Maps/vectors/sets evaluate. Keys are keywords. `{:enable true}`.** (Rule. Closed. Do not reopen.)
+- Current surface uses bare vectors for structural slots: `[x y]` for
+  params/fields/binding-zones (no `(params …)` wrapper). `'` is the
+  inert marker for lists only: `'(a b c)` for paths/code-as-data.
+  Containers `[…]` / `{…}` / `#{…}` are never quote-prefixed.
 
 ## What changed recently — read the git log, not this file
 
