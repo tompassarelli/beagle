@@ -844,6 +844,9 @@
     [(p)           (nix-path args)]
     [(s)           (nix-s args)]
     [(ms)          (nix-ms args)]
+    [(get)         (nix-get args)]
+    [(get-or)      (nix-get-or args)]
+    [(assoc)       (nix-assoc args)]
     [(str)         (format "(builtins.concatStringsSep \"\" [~a])"
                            (string-join
                              (for/list ([a (in-list args)])
@@ -864,9 +867,18 @@
     [(< <= > >=)
      (format "(~a ~a ~a)"
              (nix->string (car args)) head (nix->string (cadr args)))]
-    [(=)
+    [(= ==)
      (format "(~a == ~a)"
              (nix->string (car args)) (nix->string (cadr args)))]
+    [(!= not=)
+     (format "(~a != ~a)"
+             (nix->string (car args)) (nix->string (cadr args)))]
+    [(and)
+     (format "(~a)" (string-join (map nix->string args) " && "))]
+    [(or)
+     (format "(~a)" (string-join (map nix->string args) " || "))]
+    [(not)
+     (format "(!~a)" (nix->string (car args)))]
     [else
      (cond
        ;; '-headed data list — render the operands as their data values.
@@ -940,6 +952,61 @@
         [else
          (format "$~a{~a}" "" (nix->string a))])))
   (format "\"~a\"" (string-join parts "")))
+
+;; (get TARGET KEY) → TARGET.KEY  (literal :keyword key) or TARGET.${expr}
+(define (nix-get args)
+  (cond
+    [(>= (length args) 2)
+     (define target (car args))
+     (define key (cadr args))
+     (define target-str (nix->string target))
+     ;; Paren-wrap compound target expressions; symbols / qualified paths emit bare.
+     (define wrapped-target
+       (cond
+         [(and (pair? target) (not (eq? (car target) 'get))) (format "(~a)" target-str)]
+         [else target-str]))
+     (cond
+       [(keyword? key)
+        (format "~a.~a" wrapped-target (keyword->string key))]
+       [(and (symbol? key)
+             (let ([s (symbol->string key)])
+               (and (positive? (string-length s))
+                    (char=? (string-ref s 0) #\:))))
+        (format "~a.~a" wrapped-target (substring (symbol->string key) 1))]
+       [else
+        (format "~a.$~a{~a}" wrapped-target "" (nix->string key))])]
+    [else (format "(builtins.getAttr ~a)" (string-join (map nix->string args) " "))]))
+
+;; (get-or TARGET KEY DEFAULT) → (TARGET.KEY or DEFAULT)
+(define (nix-get-or args)
+  (cond
+    [(>= (length args) 3)
+     (define target (car args))
+     (define key (cadr args))
+     (define default (caddr args))
+     (define target-str (nix->string target))
+     (define key-str
+       (cond
+         [(keyword? key) (keyword->string key)]
+         [(and (symbol? key)
+               (let ([s (symbol->string key)])
+                 (and (positive? (string-length s))
+                      (char=? (string-ref s 0) #\:))))
+          (substring (symbol->string key) 1)]
+         [(symbol? key) (symbol->string key)]
+         [else (format "$~a{~a}" "" (nix->string key))]))
+     (format "(~a.~a or ~a)" target-str key-str (nix->string default))]
+    [else (format "(builtins.getAttr ~a)" (string-join (map nix->string args) " "))]))
+
+;; (assoc TARGET KEY VAL) → TARGET // { KEY = VAL; }
+(define (nix-assoc args)
+  (cond
+    [(>= (length args) 3)
+     (format "(~a // { ~a = ~a; })"
+             (nix->string (car args))
+             (nix-attr-key (cadr args))
+             (nix->string (caddr args)))]
+    [else "/* assoc needs 3 args */ null"]))
 
 ;; (ms LINE1 LINE2 …) → ''\n  LINE1\n  LINE2\n'' — Nix indented string
 (define (nix-ms args)
@@ -1033,6 +1100,7 @@
 (define (nix-attr-key k)
   (cond
     [(keyword? k) (keyword->string k)]
+    [(string? k) (format "~v" k)]
     [(symbol? k)
      (define s (symbol->string k))
      (cond
@@ -1043,6 +1111,12 @@
         ;; bare symbol — Nix dotted-path antiquote: ${var} (no quotes,
         ;; valid only after a dot — Nix's attrset dot-path form)
         (format "$~a{~a}" "" s)])]
+    [(and (pair? k) (eq? (car k) 's))
+     ;; (s …) interpolated string key — render as the Nix string itself.
+     (nix-s (cdr k))]
+    [(pair? k)
+     ;; Compound expression key — emit as antiquote.
+     (format "$~a{~a}" "" (nix->string k))]
     [else (format "~v" k)]))
 
 ;; ============================================================================
