@@ -123,14 +123,28 @@
                 (and (char-alphabetic? c) (char-upper-case? c)))))))
 
 (define (parse-arrow t)
-  ;; Tightened: (→ (' T1 T2) RT). Pre-tightening: (→ (' params T1 T2) (returns RT)).
-  (unless (= (length t) 3)
-    (error 'parse-type "arrow type expects (→ params returns): ~v" t))
-  (define params-form (cadr t))
-  (define returns-form (caddr t))
-  (define param-types (parse-params-form params-form))
-  (define return-type (parse-returns-form returns-form))
-  (type-arrow param-types return-type))
+  ;; Flat-arrow (current): (→ T1 T2 ... RT) — last operand is return type.
+  ;; Tightened (back-compat): (→ (' T1 T2) RT)
+  ;; Pre-tightening (back-compat): (→ (' params T1 T2) (returns RT))
+  (define operands (cdr t))
+  (cond
+    [(null? operands)
+     (error 'parse-type "arrow type expects at least a return type")]
+    ;; Pre-tightening / tightened: 2 operands where the first is a '-list
+    [(and (= (length operands) 2)
+          (pair? (car operands))
+          (or (eq? (car (car operands)) QUOTE-OP)
+              (eq? (car (car operands)) 'quote)
+              (eq? (car (car operands)) 'params)))
+     (define param-types (parse-params-form (car operands)))
+     (define return-type (parse-returns-form (cadr operands)))
+     (type-arrow param-types return-type)]
+    [else
+     ;; Flat — last operand is RT, the rest are param types.
+     (define n (length operands))
+     (define param-types (map parse-type (take operands (- n 1))))
+     (define return-type (parse-type (list-ref operands (- n 1))))
+     (type-arrow param-types return-type)]))
 
 (define (parse-params-form form)
   ;; Tightened: (' T1 T2)

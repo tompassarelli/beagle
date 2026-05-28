@@ -218,11 +218,12 @@
      (list defn-form)]
     [_ (error 'migrate-turtles "unrecognized defn shape: ~v" form)]))
 
-;; (→ (' T1 T2) RT)
+;; Flat function type: (→ T1 T2 RT) — last operand is the return type.
+;; Single-return-value commitment makes flat work cleanly.
 (define (make-fn-type-form param-types ret-type)
-  (list '→
-        (Q (map migrate-type param-types))
-        (migrate-type ret-type)))
+  (list* '→
+         (append (map migrate-type param-types)
+                 (list (migrate-type ret-type)))))
 
 ;; A multi-arity clause is shaped (param-form ...rest) where param-form is
 ;; itself bracketed (not a bare symbol). Bare-symbol first elements indicate
@@ -880,14 +881,14 @@
        [variadic-pos
         (define fixed (take params (- (length params) (length variadic-pos))))
         (define rest-type (cadr variadic-pos))
-        (list '→
-              (Q (append (map migrate-type fixed)
-                         (list '& (migrate-type rest-type))))
-              (migrate-type ret))]
+        (list* '→
+               (append (map migrate-type fixed)
+                       (list '& (migrate-type rest-type))
+                       (list (migrate-type ret))))]
        [else
-        (list '→
-              (Q (map migrate-type params))
-              (migrate-type ret))])]))
+        (list* '→
+               (append (map migrate-type params)
+                       (list (migrate-type ret))))])]))
 
 (define (split-at-arrow entries)
   (let loop ([rest entries] [acc '()])

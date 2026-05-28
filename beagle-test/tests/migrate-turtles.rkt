@@ -61,7 +61,7 @@
 (check-migrate
   "#lang beagle
 (defn add [(x : Int) (y : Int)] : Int (+ x y))"
-  `((claim add ∈ (→ ,(Q '(Int Int)) Int))
+  `((claim add ∈ (→ Int Int Int))
     (defn add ,(Q '(x y)) (+ x y)))
   "defn with typed params and return type")
 
@@ -74,7 +74,7 @@
 (check-migrate
   "#lang beagle
 (defn add [(x : Int) (y : Int)] : Int (+ x y) (println \"side\"))"
-  `((claim add ∈ (→ ,(Q '(Int Int)) Int))
+  `((claim add ∈ (→ Int Int Int))
     (defn add ,(Q '(x y)) (+ x y) (println "side")))
   "defn with multi-body")
 
@@ -98,7 +98,7 @@
 (check-migrate
   "#lang beagle
 (defn f [] : Int (let [x 1 y 2] (+ x y)))"
-  `((claim f ∈ (→ ,(Q '()) Int))
+  `((claim f ∈ (→ Int))
     (defn f ,(Q '())
       (let ,(L '(x 1 y 2)) (+ x y))))
   "let with flat-pair brackets → ← binding")
@@ -106,7 +106,7 @@
 (check-migrate
   "#lang beagle
 (defn f [] : Int (let ((x 1) (y 2)) (+ x y)))"
-  `((claim f ∈ (→ ,(Q '()) Int))
+  `((claim f ∈ (→ Int))
     (defn f ,(Q '())
       (let ,(L '(x 1 y 2)) (+ x y))))
   "let with paren-of-pairs → ← binding")
@@ -150,7 +150,7 @@
 (check-migrate
   "#lang beagle
 (declare-extern foo [Int -> String])"
-  `((declare-extern foo ∈ (→ ,(Q '(Int)) String)))
+  `((declare-extern foo ∈ (→ Int String)))
   "declare-extern with function type")
 
 ;; --- defrecord ------------------------------------------------------------
@@ -169,7 +169,7 @@
   "#lang beagle
 (defn classify [(n : Int)] : String
   (cond (< n 0) \"neg\" (= n 0) \"zero\" :else \"pos\"))"
-  `((claim classify ∈ (→ ,(Q '(Int)) String))
+  `((claim classify ∈ (→ Int String))
     (defn classify
       ,(Q '(n))
       (cond (< n 0) "neg" (= n 0) "zero" :else "pos")))
