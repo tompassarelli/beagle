@@ -1094,8 +1094,15 @@
        (write-turtles-form item out (+ indent 1)))])
   (display ")" out))
 
-;; Render a data-container ([…], {…}, #{…}). Try inline first; spill
-;; multi-line with continuation indent if too wide.
+;; Render a data-container ([…], {…}, #{…}). Try inline first.
+;; If overflowing:
+;;   - Maps render PAIR-PER-LINE with values column-aligned (Rules 1, 2, 4).
+;;   - Vectors that "look like binding zones" (even length, every
+;;     even-indexed item is a symbol — let/loop/doseq/for/letfn binding
+;;     shape) also render pair-per-line.
+;;   - All other vectors and sets render one item per line.
+;; In every case, a value that itself overflows the line breaks onto
+;; its own indented continuation rather than forcing key on a lonely line.
 (define (write-data-container open close items out indent)
   (define inline-out (open-output-string))
   (display open inline-out)
@@ -1105,38 +1112,138 @@
   (cond
     [(<= (+ indent (string-length inline)) WIDTH)
      (display inline out)]
+    [(or (equal? open "{") (looks-like-pairs? items))
+     (write-paired-container open close items out indent)]
     [else
-     (display open out)
-     (define item-indent (+ indent (string-length open)))
-     (cond
-       [(null? items) (void)]
-       [else
-        (write-turtles-form (car items) out item-indent)
-        (for ([item (in-list (cdr items))])
-          (newline out)
-          (display (make-string item-indent #\space) out)
-          (write-turtles-form item out item-indent))])
-     (display close out)]))
+     (write-itemwise-container open close items out indent)]))
+
+;; Heuristic: a vector "looks like binding pairs" if it has an even
+;; non-zero length and every even-indexed item is a symbol. Captures
+;; let/loop/doseq/for/letfn binding vectors without false-positiving
+;; on data vectors like [1 2 3 4] (numbers are not symbols).
+(define (looks-like-pairs? items)
+  (and (pair? items)
+       (even? (length items))
+       (let loop ([rest items])
+         (cond
+           [(null? rest) #t]
+           [(symbol? (car rest)) (loop (cddr rest))]
+           [else #f]))))
+
+(define INDENT-STEP 2)
+
+;; Cap for the column-alignment heuristic (Rule 4): only column-align
+;; map keys when the widest key is reasonably short and there's more
+;; than one pair. Long namespaced keys mixed with short ones make
+;; alignment counterproductive (pushes short-key values far right).
+(define ALIGN-CAP 16)
+
+(define (write-paired-container open close items out indent)
+  (display open out)
+  (define inner-indent (+ indent (string-length open)))
+  (cond
+    [(null? items) (void)]
+    [else
+     (define key-strs
+       (for/list ([k (in-list items)] [i (in-naturals)] #:when (even? i))
+         (form->inline-string k)))
+     (define max-key-width (apply max 0 (map string-length key-strs)))
+     (define align-width
+       (if (and (> (length key-strs) 1)
+                (<= max-key-width ALIGN-CAP))
+           max-key-width
+           0))
+     (let loop ([rest items] [first? #t])
+       (cond
+         [(null? rest) (void)]
+         [(null? (cdr rest))
+          ;; Stray unpaired key at the end — render alone
+          (unless first?
+            (newline out)
+            (display (make-string inner-indent #\space) out))
+          (write-turtles-form (car rest) out inner-indent)]
+         [else
+          (unless first?
+            (newline out)
+            (display (make-string inner-indent #\space) out))
+          (write-paired-item (car rest) (cadr rest) out indent inner-indent align-width)
+          (loop (cddr rest) #f)]))])
+  (display close out))
+
+(define (write-paired-item key val out container-indent inner-indent align-width)
+  (define key-str (form->inline-string key))
+  (define pad (max 1 (- (+ align-width 1) (string-length key-str))))
+  (define value-col (+ inner-indent (string-length key-str) pad))
+  (define val-inline (form->inline-string val))
+  (define fits-inline? (<= (+ value-col (string-length val-inline)) WIDTH))
+  (cond
+    [fits-inline?
+     ;; Rule 1: pair fits on one line — stay there.
+     (display key-str out)
+     (display (make-string pad #\space) out)
+     (display val-inline out)]
+    [else
+     ;; Pair doesn't fit. Break the value to its own line at
+     ;; container-indent + STEP. This keeps fixed 2-space indent
+     ;; (no rightward drift) regardless of the key's width or how
+     ;; deeply we're nested.
+     (display key-str out)
+     (define break-indent (+ container-indent INDENT-STEP))
+     (newline out)
+     (display (make-string break-indent #\space) out)
+     (write-turtles-form val out break-indent)]))
+
+(define (write-itemwise-container open close items out indent)
+  (display open out)
+  (define item-indent (+ indent (string-length open)))
+  (cond
+    [(null? items) (void)]
+    [else
+     (write-turtles-form (car items) out item-indent)
+     (for ([item (in-list (cdr items))])
+       (newline out)
+       (display (make-string item-indent #\space) out)
+       (write-turtles-form item out item-indent))])
+  (display close out))
 
 (define (write-multiline-call head items out indent)
+  ;; Fixed 2-space indent rule (Rule 1 — kill bracket-alignment):
+  ;;   (head arg1
+  ;;     arg2
+  ;;     arg3)
+  ;; The first arg sits on the head's line if it fits in budget;
+  ;; otherwise all args break to indent + STEP. Subsequent args
+  ;; always at indent + STEP. Indentation depends on the form's
+  ;; OWN indent, never on the column where its head/bracket lands.
   (cond
     [(eq? head 'hash-map)
      (write-multiline-hash-map items out indent)]
     [else
      (display "(" out)
      (display head out)
-     (define head-str-len (+ 1 (string-length (~a head))))
-     (define use-deep-indent? (> head-str-len 12))
-     (define real-indent (if use-deep-indent? (+ indent 2) (+ indent head-str-len 1)))
      (cond
        [(null? items) (void)]
        [else
-        (display " " out)
-        (write-turtles-form (car items) out (+ indent head-str-len 1))
-        (for ([item (in-list (cdr items))])
-          (newline out)
-          (display (make-string real-indent #\space) out)
-          (write-turtles-form item out real-indent))])
+        (define rest-indent (+ indent INDENT-STEP))
+        (define head-line-col (+ indent 1 (string-length (~a head)) 1))
+        (define first-inline (form->inline-string (car items)))
+        (define first-fits?
+          (<= (+ head-line-col (string-length first-inline)) WIDTH))
+        (cond
+          [first-fits?
+           ;; First arg on head's line; rest at indent+STEP.
+           (display " " out)
+           (write-turtles-form (car items) out head-line-col)
+           (for ([item (in-list (cdr items))])
+             (newline out)
+             (display (make-string rest-indent #\space) out)
+             (write-turtles-form item out rest-indent))]
+          [else
+           ;; First arg also breaks; all args at indent+STEP.
+           (for ([item (in-list items)])
+             (newline out)
+             (display (make-string rest-indent #\space) out)
+             (write-turtles-form item out rest-indent))])])
      (display ")" out)]))
 
 (define (write-multiline-hash-map items out indent)
