@@ -9,7 +9,7 @@ Typed Racket) sit in [`beagle-lib/private/dormant/`](beagle-lib/private/dormant/
 parked, not deleted, reactivate with `BEAGLE_ALL_TARGETS=1`. The live
 loop is Nix only.
 
-## The bet
+## Motivation
 
 Today's typed languages have rich type systems but baroque human-optimized
 surfaces. Today's dynamic languages have clean surfaces but no type-level
