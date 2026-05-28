@@ -64,11 +64,6 @@ fi
 
 # --- Write CLAUDE.md ---
 if [[ ! -f "CLAUDE.md" ]]; then
-    CHEATSHEET=""
-    if [[ -n "$BEAGLE_PATH" && -f "$BEAGLE_PATH/skill-data/beagle-agent.md" ]]; then
-        CHEATSHEET=$(cat "$BEAGLE_PATH/skill-data/beagle-agent.md")
-    fi
-
     cat > CLAUDE.md << 'CLEOF'
 # Project — beagle
 
@@ -96,11 +91,11 @@ or inspect deeper errors until delimiters pass.
 - `beagle-sig NAME FILE...` — typed signature lookup
 - `beagle-fields RECORD FILE...` — record field types
 - `beagle-syntax --repair --write FILE` — auto-fix delimiter errors
-CLEOF
 
-    if [[ -n "$CHEATSHEET" ]]; then
-        printf '\n---\n\n%s\n' "$CHEATSHEET" >> CLAUDE.md
-    fi
+For the form set, types, and stdlib: read `parse.rkt` and
+`stdlib-nix.rkt` in the beagle source. There is no static reference
+document — it would go stale within a day.
+CLEOF
     echo "  created CLAUDE.md"
 fi
 

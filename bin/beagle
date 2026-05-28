@@ -100,14 +100,11 @@ case "$cmd" in
         done
 
         mkdir -p "$target/.claude"
-
-        # Always: copy agent skill-data as context
-        if [[ ! -f "$target/.claude/beagle-context.md" ]]; then
-            cp "$BEAGLE_DIR/skill-data/beagle-agent.md" "$target/.claude/beagle-context.md"
-            echo "Created .claude/beagle-context.md" >&2
-        else
-            echo ".claude/beagle-context.md already exists, skipping" >&2
-        fi
+        # Static skill-data is deleted by design — beagle's surface
+        # churns and static reference docs go stale. Agents should
+        # query the live source: `bin/beagle-sig`, `bin/beagle-fields`,
+        # `bin/beagle-provides`, `bin/beagle-syntax`, and read
+        # `parse.rkt` / `stdlib-nix.rkt` directly.
 
         if [[ "$claude_code" == true ]]; then
             # Hook script

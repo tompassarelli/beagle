@@ -1,459 +1,124 @@
 # beagle — session anchor
 
-A typed authoring IR for Nix. Racket frontend with custom `#lang`,
-macros (safe template + procedural with typed AST contracts; no `unsafe`
-kind), static type checking; emits Nix source. `.bnix` is the primary
-file extension for Nix-target source; `.bgl` and `.rkt` accepted.
+A typed authoring IR. **Nix is the live target;** Clj, CLJS, JS, Py,
+Rkt, SQL emitters are parked under `beagle-lib/private/dormant/` and
+reactivate with `BEAGLE_ALL_TARGETS=1`. Pipeline:
+`parse → check → emit`, all at Racket expand-time inside our custom
+`#%module-begin`.
 
-**Live vs dormant.** Nix is the live target. Emitters for Clojure,
-ClojureScript, JavaScript, Python, SQL, and Typed Racket live under
-`beagle-lib/private/dormant/` — abstractions intact, parked but
-recoverable. The default develop/test/build loop is Nix-only; the
-others reactivate with `BEAGLE_ALL_TARGETS=1`. See
-`beagle-lib/private/dormant/README.md` and life-os thread
-`20260528233608-beagle_quarantine_non_nix_targets`.
+There is **no static reference documentation** for the form set, types,
+or stdlib. The surface churns; static docs go stale within a day. The
+compiler is the source of truth — query it.
 
-**LLM authoring is a first-class concern.** Rich types, explicit forms,
-low syntactic surface area, structured errors. One canonical idiom per
-concept.
+## Tool-first reflexes
 
-## Status
+Use these before reading source or guessing. Each one is a dynamic
+answer to a question a static doc would otherwise try to encode.
 
-`#lang beagle` v0.15.0 — Nix-tier default test run is the active loop;
-`BEAGLE_ALL_TARGETS=1 bin/beagle-test` plus `BEAGLE_ORACLE=1` opt in to
-the gated tier (dormant target tests + oracle / differential / property).
+| question | tool |
+|---|---|
+| does this file parse? where? | `bin/beagle-syntax FILE` (`--ledger`, `--repair --emit-patch`) |
+| does this file type-check? | `bin/beagle-op-check FILE` (or `bin/beagle-check FILE` for legacy pipeline) |
+| what's the signature of X? | `bin/beagle-sig X FILE...` |
+| what fields does record R have? | `bin/beagle-fields R FILE...` |
+| who calls X? | `bin/beagle-callers X FILE...` |
+| what does FILE export? | `bin/beagle-provides FILE` |
+| change-impact for X? | `bin/beagle-impact X FILE...` |
+| show macro expansion | `bin/beagle-expand FILE` |
+| run tests | `bin/beagle-test` (Nix-tier default) |
+| compile this | `bin/beagle-op-compile FILE` |
 
-- **Targets:** `beagle/nix` is the **live happy path**; `beagle/clj`,
-  `beagle/cljs`, `beagle/js`, `beagle/sql`, `beagle/py`, `beagle/rkt`
-  are **dormant** (parked scaffolding under `beagle-lib/private/dormant/`,
-  excluded from the default loop). Reactivate with `BEAGLE_ALL_TARGETS=1`.
-  See `beagle-lib/private/dormant/README.md` and thread
-  `20260528233608-beagle_quarantine_non_nix_targets`.
-- **Forms:** ~78 forms — ~50 cross-target (definitions, control flow, data structures, pattern matching, threading, interop) + 28 typed JS target forms (`js/*`).
-- **Types:** 9 primitives (`String`, `Int`, `Float`, `Bool`, `Keyword`, `Symbol`, `Nil`, `Any`, `NixType`), `Number` (`U Int Float`), parametric (`Vec`, `Map`, `Set`, `List`, `NixType`), union (`U`), nullable (`T?`), function types, `forall` (with optional `<:` bounds), parametric `defunion` (`(Result T E)`), `(Promise T)`
-- **Stdlib:** Nix 523 (live) + portable 269; Clojure 397, CLJS 132, JS 102, SQL 59, Python 348 still cataloged but dormant.
-- **Type checking:** flow-sensitive narrowing, cross-module import, collection/destructuring inference, exhaustive match warnings, refinement predicates
-- **Diagnostics:** Rust-style errors with signatures, "did you mean?" suggestions, JSON mode
-- **Tooling:** LSP, typed REPL, reactive daemon (~100ms re-check), repair compiler, property testing, distributed tracing, `beagle init --hooks` (scaffold Claude Code integration for any project)
-- **Experiments:** 15 across 3 tracks (Beagle/Clojure/Python) — best config 287s avg (E13), per-bug faster than Python+mypy
+When stuck after ordinary checks: `bin/beagle-repair --emit-patch`,
+`bin/beagle-trace --focus FN`, `bin/beagle-cascade --from-failures`,
+`bin/beagle-blame`, `bin/beagle-specfix`.
 
-## Architecture
-
-```
-parse → check → emit-dispatch → emit-nix
-                                (dormant: emit-{clj,js,py,rkt,sql} —
-                                 only loaded with BEAGLE_ALL_TARGETS=1)
-(all expand-time, inside our custom #%module-begin)
-```
-
-- `beagle-lib/lang/reader.rkt` — custom reader preserving `[]` vs `()` via
-  `#%brackets` tag. Intercepts `{}` (map literals), `#{}` (set literals),
-  `#"..."` (regex) via `MAP-TAG`/`SET-TAG`/`#%regex`.
-- `beagle-lib/lang/reader-impl.rkt` — shared reader logic for all `#lang beagle/*` variants.
-- `beagle-lib/private/types.rkt` — type AST, parser, compatibility checker.
-  `MAP-TAG`/`SET-TAG` are well-known symbols (`#%map`/`#%set`), not gensyms.
-- `beagle-lib/private/stdlib-types.rkt` — combined stdlib catalog; delegates to
-  `private/stdlib-portable.rkt` (256 entries), `private/stdlib-nix.rkt` (523),
-  and `dormant/stdlib-{clj,cljs,js,py,sql}.rkt` (parked, see dormant/README.md).
-- `beagle-lib/private/macros.rkt` — macro registry: template macros (`safe`
-  kind only; naive substitution with hygiene), procedural macros (`proc`
-  kind, evaluated by host Racket; `beagle` kind, evaluated by macro-eval
-  with syntax constructors and typed AST contracts). Depth-capped recursive
-  expansion. `unsafe` kind rejected at registration — there is no
-  escape-hatch macro shape.
-- `beagle-lib/private/macro-eval.rkt` — compile-time Beagle interpreter for
-  `define-macro beagle` bodies. Datum-based evaluator (let, fn, if, cond, calls),
-  closure support, built-in env with list/string ops + syntax constructors
-  (make-defrecord, make-defn, make-param, syntax-name, syntax-type, etc.).
-- `beagle-lib/private/ast.rkt` — 144 AST struct definitions, shared utilities
-  (tag helpers, symbol predicates, source location tracking), parse injection
-  parameters (`current-parse-expr`, `current-parse-params`).
-- `beagle-lib/private/parse.rkt` — source → AST. Two passes: meta-form collection
-  (mode, ns, macros, externs, requires, imports) then expr parsing with
-  macro expansion. Delegates to target-specific parse modules.
-- `beagle-lib/private/parse-jst.rkt` — typed JS target (`js/*`) parse helpers.
-- `beagle-lib/private/parse-js-quote.rkt` — JS/quote AST parse helpers.
-- `beagle-lib/private/parse-sql.rkt` — SQL-specific parse helpers.
-- `beagle-lib/private/check.rkt` — best-effort type checking against annotations and
-  the built-in env. Record field registry for keyword-access type inference.
-  Skipped in dynamic mode. Includes `jst-*` type inference + JS target gating.
-- `beagle-lib/private/emit-dispatch.rkt` — backend registry. Each emitter
-  calls `(register-backend! target …)` when loaded; `private/emit.rkt`
-  loads only `emit-nix.rkt` by default. `BEAGLE_ALL_TARGETS=1`
-  dynamic-requires the dormant ones.
-- `beagle-lib/private/emit-nix.rkt` — AST → Nix source string (curried fns, attrsets, let/in).
-- `beagle-lib/private/stdlib-nix.rkt` — Nix-specific: STDLIB-NIX (280 typed entries for
-  builtins.*, lib.*, lib.types.*). lib.types.* values typed as NixType (opaque).
-- `beagle-lib/private/emit-nix-strings.rkt` — string escaping + interp/multiline/indented
-  emitters (single unified escape-nix #:multiline? #:keep-interp?).
-- `beagle-lib/private/validate-nix.rkt` — schema-driven validator; user config externalized
-  to .beagle-cache/validate-config.json with HM-root auto-discovery from HM schema.
-- `beagle-lib/nix/main.rkt` — Nix target module (`#lang beagle/nix` → `define-target nix`).
-- `beagle-lib/nix/lang/reader.rkt` — reader hook for `#lang beagle/nix`.
-- `beagle-lib/private/dormant/` — parked emitters and stdlibs for the
-  five non-Nix targets (`emit-{clj,js,py,rkt,sql}.rkt`, `emit-{jst,js-quote}.rkt`,
-  `js-{capabilities,emit-utils}.rkt`, `stdlib-{clj,cljs,js,py,sql}.rkt`).
-  See `dormant/README.md` for reactivation. `beagle-lib/{clj,cljs,js,py,rkt,sql}/`
-  target-module dirs still exist for `#lang beagle/<target>` parsing
-  but the emit pipeline they call into is dormant by default.
-- `oracle/bin/check-oracle` — oracle check script: emit → raco make → classify.
-- `oracle/MAPPING.md` — Beagle → Typed Racket type correspondence table.
-- `beagle-lib/private/expand-tool.rkt` — backend for `bin/beagle-expand`.
-- `beagle-lib/private/query.rkt` — type-system query engine for `beagle-sig`,
-  `beagle-fields`, `beagle-callers`, `beagle-provides`, `beagle-impact`.
-- `beagle-lib/private/blame.rkt` — semantic property rules + static suspicion analysis.
-- `beagle-lib/private/daemon.rkt` — persistent query/build server (TCP, AST cache with mtime invalidation, 45× query speedup, ~0.6s warm builds vs ~3s cold).
-- `beagle-lib/private/check-all.rkt` — batch type-checker (10x vs sequential `beagle-check`).
-- `beagle-lib/private/build-all.rkt` — batch compiler (9x vs sequential `beagle-build`).
-- `beagle-lib/private/lsp.rkt` — LSP server (JSON-RPC 2.0, Content-Length framing, hover/diagnostics/symbols/definition).
-- `beagle-lib/private/repl.rkt` — typed REPL with persistent environment (parse → check → emit per input).
-- `beagle-lib/lib/beagle/dtrace.clj` — distributed tracing runtime (Clojure/Babashka): span lifecycle, context propagation, Ring middleware, file/TCP exporters.
-- `beagle-lib/main.rkt` — language module; `#%module-begin` runs the pipeline,
-  embeds resulting string, runtime `(display)`s it.
-
-## Adding a new form (the pattern)
-
-1. **Struct** in `ast.rkt` — new AST node (add to provide list)
-2. **Parse case** in `parse-list-form` (in `parse.rkt`) — pattern-match the source
-3. **Emit case** in `emit-nix.rkt` — the live target. Don't add cases to
-   the dormant `dormant/emit-{clj,js,py,rkt,sql}.rkt` emitters unless you
-   are actively reactivating that target — the new form simply won't
-   exist there until then, which is fine.
-4. **Infer case** in `infer-expr` — return type (or `ANY`)
-5. **Lint traversal** in `lint.rkt` — `check-shadow` and `collect-symbols`
-6. **Provide** the struct in ast.rkt's provide list
-7. **Tests** in parse/emit-nix/check test files
-
-## Test helpers
-
-The current surface uses head-tagged structural sub-lists
-(`(params ...)`, `(fields ...)`, `(<- name val …)`) so tests can write
-forms directly without bracket-tag tricks:
-
-```racket
-(parse-one '(defn foo (params (x : Int)) (+ x 1)))
-(parse-one '(let (<- x 1 y 2) (+ x y)))
-(parse-one '(defrecord Point (fields (x : Int) (y : Int))))
-```
-
-The legacy `(br …)` / `(mp …)` helpers for simulating `[…]` / `{…}`
-are still defined for migrator tests that exercise pre-tightening
-v0.15 inputs.
-
-## REQUIREMENT: NEVER author escape hatches, for any reason
-
-Beagle has **zero** escape hatches. No `unsafe-nix`, no `unsafe-js`, no
-`unsafe-clj`, no `unsafe-py`, no `unsafe-rkt`, no `unsafe`, no
-`define-macro unsafe`, no `''...''` raw passthrough, no `nix-ident`
-verbatim-string-to-Nix emission. By design.
-
-This claim was an overstatement as of mid-2026-05 — `nix-ident` existed
-as an undocumented escape hatch under a non-`unsafe-*` name. The
-2026-05-25 cleanup removed it (parse-time error with migration message)
-and added the typed `flake-input` form to handle the legitimate
-flake-attribute-access cases that previously needed `nix-ident`. The
-claim now matches code reality.
-
-When you hit a gap:
-
-1. **Missing stdlib function?** Add a one-line type signature to the
-   appropriate `beagle-lib/private/stdlib-{clj,js,py,nix,rkt,portable}.rkt`.
-2. **Missing surface form?** Add an AST struct + parse case + emit case.
-   Same as every other form. (`flake-input` is the canonical recent example.)
-3. **Genuinely-untypable target snippet?** Write a sibling file in the
-   target language (e.g. `foo.nix` next to `foo.bnix`) and import it.
-   The filesystem boundary is auditable; an inline backdoor is not.
-
-Do NOT propose adding `unsafe-*` back "just for one case." Do NOT
-propose adding a new `nix-ident`-style verbatim-emission form under
-any name. Every typed language that shipped an escape hatch
-(TypeScript `any`, Rust `unsafe`, Java `Object`-casting, Python
-`Any`-as-bailout) regretted it. The hatch becomes the path of least
-resistance, untyped code rots invisibly inside otherwise-checked
-files, and the type guarantee loses its meaning. The discipline of
-"no escape" forces the stdlib to mature and makes hallucinations
-show up as compile errors instead of shipping silently.
-
-This rule applies to all targets, all phases, all helpers, all macros.
-If you're about to write the word `unsafe` — or `*-ident` for raw
-identifier emission — in code, stop.
-
-## Conventions
-
-- `ANY` is `(type-prim 'Any)` — the universal escape type
-- Params can be `param`, `map-destructure`, or `seq-destructure` structs — always check with `(map-destructure? p)` / `(seq-destructure? p)` before calling `(param-name p)`
-- `MAP-TAG` and `SET-TAG` are `'#%map` and `'#%set` (well-known symbols, NOT gensyms — gensyms break across Racket phase boundaries)
-- The reader runs at phase 0, the parser at phase 1 (inside `define-syntax`) — shared symbols must be phase-stable
-- `emit-form` handles top-level forms (def, defn, defrecord, etc.); `emit-expr` handles everything else
-- `check-form` does top-level type checking; `infer-expr` does expression-level inference
+For the form set, read `beagle-lib/private/parse.rkt`. For the typed
+externs, read `beagle-lib/private/stdlib-nix.rkt` and `stdlib-portable.rkt`.
 
 ## Session start
 
-1. Confirm daemon: `bin/beagle-daemon status` — start with `bin/beagle-daemon start --watch .` if not running
-2. The daemon auto-starts via the PostToolUse hook, but confirming at session start avoids cold-start delay on first edit
+1. Confirm daemon: `bin/beagle-daemon status`. Start with
+   `bin/beagle-daemon start --watch .` if absent — the PostToolUse
+   hook auto-starts it on first edit but confirming up front avoids
+   cold-start delay.
 
 ## Agent loop
 
-1. After edits, trust hook output. Fix syntax errors before type errors.
-2. Use query tools (`sig`, `fields`, `callers`, `provides`) before opening large files.
+1. Trust hook output. Fix syntax errors before type errors. Never
+   count parens by hand — `bin/beagle-syntax` already counted them.
+2. Use query tools above before opening large files.
 3. Use `--emit-patch` tools before manual repair.
-4. Escalate to `trace`/`blame`/`cascade` only when stuck.
 
-### Delimiter rule: tools before inference
+## Rules with teeth
 
-Try to use tools to debug paren issues before falling back to inference
-to diagnose/count. When a delimiter issue needs diagnosing — a build fails,
-the hook reports a structural error, something looks off after a large
-edit — reach for the tools first:
+These are the non-obvious ones an agent will get wrong otherwise.
 
-1. `bin/beagle-syntax FILE` — instant structural check, exact line:col
-2. `bin/beagle-syntax --ledger FILE` — depth trace showing where nesting diverges
-3. `bin/beagle-syntax --repair --emit-patch FILE` — machine-generated fix
+### Zero escape hatches
 
-Apply the patch or use the ledger to make a targeted edit. If `--emit-patch`
-gives the wrong fix, use `--ledger` output to identify the exact line, then
-edit that line.
+No `unsafe-*` anything (no `unsafe-nix`, `unsafe-js`, `unsafe-clj`,
+`unsafe-py`, `unsafe-rkt`, no `(define-macro unsafe ...)`). No
+`nix-ident` or any other verbatim-string-to-target form under any name.
+No `''…''`-as-raw-passthrough on bnix.
 
-This applies to **all beagle-family files** — `.bnix` is live; `.bgl`,
-`.bjs`, `.bclj`, `.bcljs`, `.bsql`, `.bpy` are accepted readers for
-dormant targets and still parse/syntax-check normally.
-For cross-repo files, use the full path: `~/code/beagle/bin/beagle-syntax FILE`.
+When you hit a gap:
+1. Missing stdlib function → add a one-line typed entry to
+   `stdlib-nix.rkt` (or `stdlib-portable.rkt`).
+2. Missing surface form → add AST struct + parse case + emit case +
+   infer case + lint traversal + test, same as every other form.
+3. Genuinely untypable target snippet → write a sibling `.nix` file
+   next to the `.bnix` and import it. The filesystem boundary is
+   auditable; an inline backdoor is not.
 
-### After every edit (automatic)
+Every typed language that shipped an escape hatch regretted it
+(TypeScript `any`, Java `Object`-cast, Python `Any`-as-bailout,
+Rust `unsafe`). The discipline of "no escape" forces the stdlib to
+mature and makes hallucinations show up as compile errors.
 
-The PostToolUse hook fires on Edit/Write to any beagle file
-(`.bgl`, `.bclj`, `.bcljs`, `.bjs`, `.bnix`, `.bsql`, `.bpy`, `.rkt`).
+### Test tiering during surface iteration
 
-If it reports a syntax error, fix delimiters using the sequence above — do
-not type-check or inspect deeper errors until delimiters pass.
+`bin/beagle-test` runs the **active tier only** by default — Nix-target
+tests and the target-agnostic infrastructure. Non-Nix target tests and
+behavioral/oracle suites are gated; opt in with `BEAGLE_ALL_TARGETS=1`
+or per-suite env vars (`BEAGLE_ORACLE=1`, `BEAGLE_NIX_EVAL_CHECK=1`).
 
-- `bin/beagle-syntax FILE` — structural check (use `--ledger` for depth trace, `--repair --emit-patch` for suggested fixes)
-- `bin/beagle-daemon query check-enriched FILE` — type errors with field context and fix hints
-- `bin/beagle-daemon query build OUT-DIR SRC-DIR` — warm build (~0.6s vs ~3s cold beagle-build-all)
-- `bin/beagle-fix .` — report fixable type errors (advisory only, does not modify files)
+- Active failures: fix until green.
+- Demoted / gated failures during surface iteration: **leave alone.**
+  The tiering exists so dormant-target test churn doesn't slow the
+  Nix loop. The reflex to "just fix the small thing" is locally cheap
+  and globally expensive across drops.
 
-### During normal development
+Fixture migrations are not test code — they're test inputs and **must**
+be migrated when surface changes break them.
 
-- `bin/beagle-check SOURCE` / `bin/beagle-check-all DIR...`
-- `bin/beagle-build SOURCE` / `bin/beagle-build-all DIR...`
-- `bin/beagle-expand SOURCE` — show macro expansion
-- `bin/beagle-test` — **tiered** test runner (active blocks, demoted advisory).
-  Use this, NOT `raco test beagle-test/tests/` directly — `raco test` bypasses
-  tier logic and will block iteration on demoted-tier failures that shouldn't
-  block. Local default: active-only (fast loop). CI runs the full suite (sets
-  `CI=true`). Local opt-in to full suite: `BEAGLE_FULL_SUITE=1 bin/beagle-test`
-  or `--full` flag. Tier classification in `beagle-test/tiers.rktd`.
+### Where papers and plans live
 
-### Tiering discipline during surface iteration
+Long-form design papers (role-locality, public-contracts, quarantine,
+etc.) live in `~/code/life-os/threads/` with YAML front matter per the
+threads/CLAUDE.md spec. **Do not** recreate `~/code/beagle/docs/` — it
+was deliberately deleted. In-repo prose belongs under
+`lab/journal/synthesis/` if anywhere.
 
-**Thoroughness-redirection rule.** When working on a surface drop or change:
-the "be thorough, fix everything" instinct is correct — but it goes to
-**active-tier code**, not to **demoted-tier code** during iteration.
+## Conventions
 
-- Active-tier failures from surface changes: **fix**. The build is blocked
-  until they pass.
-- Demoted-tier failures from surface changes: **do NOT edit the demoted
-  test file to fix it.** The tiering exists precisely so demoted-tier
-  maintenance doesn't slow surface iteration.
+Phase-stable and easy to get wrong:
 
-Why this matters: each demoted fix feels cheap (small mechanical migration).
-Accumulated across drops, the cost is the full cross-target test-update tax
-that the tiering was built to eliminate. The reflexive "this fix is small,
-just do it" is the workflow analog of "this form is small, just add it" —
-locally-justified, globally-expensive. Same asymmetric-burden lens applies.
+- `ANY` is `(type-prim 'Any)` — the universal escape type
+- `MAP-TAG` and `SET-TAG` are `'#%map` and `'#%set` (well-known
+  symbols, NOT gensyms — gensyms break across Racket phase boundaries)
+- Reader runs at phase 0, parser at phase 1 — shared symbols must be
+  phase-stable
+- Params can be `param`, `map-destructure`, or `seq-destructure`
+  structs — always check the predicate before calling `(param-name p)`
+- `emit-form` handles top-level forms; `emit-expr` handles everything
+  else. `check-form` does top-level checking; `infer-expr` is
+  expression-level
+- Current surface uses head-tagged structural sub-lists:
+  `(params …)`, `(fields …)`, `(<- name val …)`, `(variants …)`,
+  `(fns …)`. `'` is reserved for inert data (paths, code-as-data).
 
-Workflow per surface drop:
-1. Make the active-tier change (parse, check, structural emit).
-2. Run `bin/beagle-test`.
-3. Active failures: fix until green.
-4. Demoted failures: leave alone — they're advisory during iteration.
-5. Commit. Move on.
+## What changed recently — read the git log, not this file
 
-What counts as a "demoted-tier file" right now (per `beagle-test/tiers.rktd`):
-- `emit-clj-behavioral.rkt`
-- `emit-js-behavioral.rkt`
-
-When you find yourself opening one of those to edit during a surface drop,
-stop.
-
-**Gated tier — non-Nix target tests.** As of the quarantine (thread
-`20260528233608`), all non-Nix target tests are gated and excluded from
-the default `bin/beagle-test` run. They live in the same files as before
-but are not classified active. The same rule applies: don't edit them
-during a surface drop, period. If you want to verify a non-Nix target's
-behavior, opt in with `BEAGLE_ALL_TARGETS=1` for that one session.
-
-Corpus migrations (fixtures in `beagle-test/tests/fixtures/`, `oracle/fixtures/`,
-`examples/`) are not test code — they are test INPUTS. They MUST be migrated
-when surface changes break them; the tiering discipline doesn't apply.
-
-### When navigating — prefer query tools over grep
-
-- `bin/beagle-sig NAME FILE...` — typed signature
-- `bin/beagle-fields RECORD FILE...` — fields, types, accessors
-- `bin/beagle-callers NAME FILE...` — call sites
-- `bin/beagle-provides FILE...` — module exports
-- `bin/beagle-impact NAME FILE...` — callers + change impact
-
-### When stuck — after ordinary checks fail
-
-- `bin/beagle-repair ... --emit-patch`
-- `bin/beagle-trace ... --focus FN`
-- `bin/beagle-cascade ... --from-failures`
-- `bin/beagle-blame ...`
-- `bin/beagle-specfix ...`
-
-## Lint warnings
-
-Beagle prints lint warnings to stderr during compile (strict mode only):
-
-- `untyped def NAME` — `(def x 42)` without type annotation
-- `defn NAME has no return type annotation` — missing `: Ret`
-- `defn NAME has untyped parameter(s): ...` — missing `(name : Type)`
-- `let binding X shadows outer binding` — let/fn rebinds a name from enclosing scope
-- `unused declare-extern: X` — extern declared but never referenced
-
-Suppress with `BEAGLE_NO_LINT=1`. Warnings don't fail compile. Dynamic
-mode skips lint (types are optional there by definition).
-
-The historical `(unsafe-{js,clj,py,nix,rkt} "...") inline escape` lint
-is gone — those forms are parse-time errors, not warnings.
-
-## Design decisions
-
-### The dominant principle: consistency compounds, ergonomic savings don't
-
-A surface form earns its place by being **part of a system** —
-reinforcing patterns that show up elsewhere in beagle. Forms that
-exist for local ergonomic savings, with no broader pattern they
-reinforce, are net-negative even when they save characters at
-authoring time.
-
-The test for every form: **does this make the rest of the surface
-more predictable, or is it a separate fact to memorize?**
-
-If it makes the surface more predictable: keep / add (pattern-extending).
-If it's a separate fact: drop / reject (pattern-isolated), regardless
-of Clojure-precedent, character-savings, training-data reflex, or
-corpus-usage statistics.
-
-### Confident (committed, well-reasoned)
-
-| decision | reasoning |
-|---|---|
-| s-expressions, AST-based | non-negotiable foundation |
-| Custom reader preserves `[]` vs `()` | Clojure cares (vectors); beagle needs to know |
-| `(ns ...)` for namespace | universal Clojure idiom, in LLM training data |
-| Wrapped `(x : T)` not inline | unambiguous parse, no lookahead, AI-friendly |
-| Stdlib extern catalog | biggest single leverage point for AI type-safety |
-| Template macros are always type-checked end-to-end | The expansion is parsed as beagle source and runs through the checker like any other expression — no escape-hatch shape exists. (Pre-2026-05 had `safe` vs `unsafe` kinds; `unsafe` was dropped.) |
-| Macro expansion is inspectable | `beagle-expand` lets the LLM audit its own macros |
-| Strict mode default | dynamic is escape-hatch for humans; AI should stay strict |
-| P2 checker profile default | E16-T experiments: P2 (exhaustive match, narrowing) is the sweet spot for agent-assisted dev. P3 effects add no measured value; P1 false positives actively hurt (3.4× slower). Types help agents build features (reasoning scaffold) not find bugs (tests win). See beagle-lab `e16-workflow-scheduler/results/type/RESULTS.md` |
-| Multi-target IR | same typed AST emits to Nix (live) plus five dormant backends (Clj, CLJS, JS, Py, Rkt, SQL); target from `#lang`. The IR is the bet; the targets are individually parkable. |
-| Subset-of-Clojure, not full mimic | take Lisp universals + Clojure's good ideas; develop own for typed semantics |
-| `:` as only annotation marker | `:-` removed; no measured benefit in 6-variant benchmark |
-| Wrapped params only | inline removed; no measured benefit, less unambiguous parse |
-| No user type aliases | `Number` is the only built-in alias (`U Int Float`); prefer `Int`/`Float` when the concrete type is known |
-
-### Cargo-cult — deliberately NOT added
-
-Host-language idioms whose cost > benefit for beagle's goals:
-
-- **`#(...)` anonymous fn shorthand** — alternate idiom for `fn`, more
-  LLM confusion than value
-- **`@deref`, `#'var-quote`** — Clojure-runtime concepts; not needed
-- **Exotic reader macros (`#=`, `#_`, `#?`)** — Clojure-reader-specific
-
-### Dropped (surface redesign, 2026-05)
-
-Forms removed because they were sugar/redundant or had ~zero real
-usage.
-
-- **`defmulti` / `defmethod`** — value-dispatch alternative to `match`;
-  no broader pattern. Use `defprotocol` + `extend-type` (type dispatch)
-  or `match` (value dispatch).
-- **`deftype`** — bundled `defrecord` + protocol impls into one form.
-  Two distinct concepts: use `(defrecord Name (fields …))` for the data
-  shape and `(extend-type Name Protocol (method ...))` for the protocol
-  attachment.
-- **`->`** — first-arg threading. Positional convenience, not semantic
-  uniqueness. Use `->>` or a let-chain.
-- **`as->` / `cond->` / `cond->>` / `some->` / `some->>`** — compositions
-  of threading + conditional / threading + nil-check. Use let-chains.
-- **`when`** — sugar over `(if c body)` (single-body) or `(if c (do …))`
-  (multi-body). The if-no-else form returns nil when condition is false.
-- **`when-not` / `if-not`** — sugar. Use `(if (not c) …)`.
-- **`when-some` / `if-some`** — superseded by the broader nil-semantics
-  decision; the typed nullable-narrowing form is pending design.
-  Interim: `(let [x v] (if x then else))`.
-- **`when-let` / `if-let`** — Clojure-shaped truthy-binding sugar; carries
-  semantics the typed nullable-narrowing form should not inherit. Interim:
-  `(let [x v] (if x then else))`. Do not reintroduce these names when the
-  typed form lands.
-- **`dotimes`** — sugar over `(doseq [i (range n)] body…)`.
-- **`case`** — folded into `match` with the `or` pattern extension
-  (`(match x [(or 1 2) "small"] [_ "big"])`). The case-fold optimization
-  in emit-clj/emit-rkt lowers literal-only or-patterns to target-native
-  `case` so the migration ships no perf regression.
-- **`(:keyword target)`** — keyword-as-fn on maps overloaded one shape for
-  two concepts (record field access vs map keyed lookup). Records use the
-  typed auto-accessor `(field-name r)`; maps use `(get m :key)`. JS interop
-  property access `(.-field obj)` is a separate concept and stays.
-- **`inc` / `dec`** — sugar. Use `(+ x 1)` / `(- x 1)`.
-- **`not=`** — sugar. Use `(not (= a b))`.
-- **`deferror`** — unified into `(defunion :throwable Name ...)`.
-  Same structural shape; throwable is now a keyword on defunion.
-- **`unsafe` macro kind** — escape hatch on the macro shape; rejected at
-  registration. Template macros are always type-checked end-to-end via
-  the only remaining kind, `safe`.
-
-Kept after empirical re-evaluation (Day 0 friction-list verdict
-reversed): `loop`/`recur` (agent reflexively reaches for it — that's
-the canonical signal), `->Name` constructor (beagle has no `(Name ...)`
-alternative; no redundancy to drop), `->>` (canonical threading; sits
-alone in its concept space, low corpus count reflects let-chain-heavy
-style not redundancy), `cond` (sequential independent-predicate
-dispatch — distinct concept from `match`'s pattern-against-target
-dispatch), `do` (multi-expression sequencing, useful even after `when`
-drop).
-
-Audited and confirmed as distinct concepts (not redundancy):
-- **`nth` vs `get`** — `nth` is positional-int into vector; `get` is
-  keyed lookup on map. Same predictability test as `cond` vs `match`.
-- **`for` vs `doseq` vs `map`/`filter`/`reduce`** — collection
-  comprehension that yields vs side-effect iteration that returns nil
-  vs higher-order function calls. Three concepts, three forms.
-- **Record field access** — `(field-name r)` for records,
-  `(get m :key)` for maps, `(.-field obj)` for JS interop. Three
-  concepts (post `(:foo m)` drop), not redundancy.
-
-## Setup (one-time)
-
-```
-raco pkg install --link beagle-lib/ beagle-test/ beagle/
-```
-
-## Reference
-
-The hand-written form-reference manual was deleted 2026-05-25 — it was
-drifting from the moving surface faster than it could be maintained.
-The compiler is the source of truth for everything mechanical.
-
-For mechanical questions ("what forms exist?", "what's the signature of X?",
-"what fields does R have?"):
-- `bin/beagle-sig NAME FILE...` — typed signature lookup
-- `bin/beagle-fields RECORD FILE...` — record fields, types, accessors
-- `bin/beagle-provides FILE...` — module exports
-- `bin/beagle-callers NAME FILE...` — call sites
-- Or read `beagle-lib/private/parse.rkt` for the form set,
-  `beagle-lib/private/stdlib-nix.rkt` and `stdlib-portable.rkt` for the
-  live typed extern catalog, `beagle-lib/private/dormant/stdlib-*.rkt`
-  for the parked target catalogs
-
-For non-mechanical questions ("why does the surface look this way?",
-"what was dropped and why?"):
-- `README.md` — what beagle is, the core principles, the lock-in discipline
-- `~/code/life-os/threads/` — design papers and threads (role-locality,
-  public-contracts, quarantine, etc.)
-- `~/code/beagle-lab/` — historical experiment archive (E0–E22, benchmark framework, results)
+Anything beyond the rules-with-teeth is in `git log` and the
+life-os threads. If the surface looks different from what you expect,
+`git log --since="1 week" CLAUDE.md beagle-lib/private/parse.rkt` will
+tell you why.
