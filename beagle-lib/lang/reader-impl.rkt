@@ -1,15 +1,14 @@
 #lang racket/base
 
-;; Shared reader logic for all #lang beagle/* variants — turtles surface.
+;; Shared reader logic for all #lang beagle/* variants.
 ;;
-;; Reader rule: parentheses only for structure. No [], no {}, no #{}.
-;; Atom literals at the reader level: numbers, strings, symbols, keywords,
-;; characters, booleans, regex (#"..."), raw strings (#r"..."), heredocs
-;; (#<<TAG ... TAG).
-;;
-;; The turtles surface (plan 20260528021255) eliminated reader-level
-;; bracket distinctions. Pre-turtles brackets [], {}, #{} now raise reader
-;; errors with migration hints pointing at `bin/beagle-migrate-turtles`.
+;; Reader produces tagged data containers per role-locality §5:
+;;   [a b]   → (#%brackets a b)   — vector data literal (inert)
+;;   {:k v}  → (#%map :k v)       — map data literal (inert)
+;;   #{a b}  → (#%set a b)        — set data literal (inert)
+;; Parentheses produce structure forms — heads dispatch by operator.
+;; Contents of data literals are still read with the same reader, so
+;; nesting works: `{:k [1 2 3]}` reads as `(#%map :k (#%brackets 1 2 3))`.
 
 (require racket/port
          racket/string
@@ -123,8 +122,12 @@
         (parameterize ([current-readtable (make-readtable #f)])
           (if src (read-syntax src combined) (read combined)))])]
     [(and (char? next) (char=? next #\{))
-     (error 'beagle
-            "`#{` set literal removed in turtles surface (use `(hash-set ...)`); run bin/beagle-migrate-turtles to migrate v0.15 source")]
+     (read-char port)
+     (define items (read-until-close port #\}))
+     (define result (cons '#%set items))
+     (if src
+       (datum->syntax #f result (vector src line col pos #f))
+       result)]
     [(and (char? next) (char=? next #\"))
      (read-char port)
      (define pattern (read-regex-pattern port))
@@ -168,20 +171,56 @@
        (read-char port)
        (loop (cons c acc))])))
 
-(define (bracket-error ch port src line col pos)
-  (error 'beagle
-         "`~a` removed in turtles surface (use `(vector ...)`, `(hash-map ...)`, params/body sub-forms, etc.); run bin/beagle-migrate-turtles to migrate v0.15 source"
-         ch))
+;; Read items until the given close character, using the beagle readtable
+;; recursively so nested forms parse the same way.
+(define (read-until-close port close-ch)
+  (let loop ([acc '()])
+    (skip-whitespace-and-comments port)
+    (define c (peek-char port))
+    (cond
+      [(eof-object? c)
+       (error 'beagle "unexpected EOF while reading data container (expected `~a`)" close-ch)]
+      [(char=? c close-ch)
+       (read-char port)
+       (reverse acc)]
+      [else
+       (define item (read port))
+       (loop (cons item acc))])))
 
-(define (curly-error ch port src line col pos)
-  (error 'beagle
-         "`{...}` map literal removed in turtles surface (use `(hash-map :k v ...)`); run bin/beagle-migrate-turtles to migrate v0.15 source"))
+(define (skip-whitespace-and-comments port)
+  (let loop ()
+    (define c (peek-char port))
+    (cond
+      [(eof-object? c) (void)]
+      [(char-whitespace? c) (read-char port) (loop)]
+      [(char=? c #\;) ; line comment
+       (let inner ()
+         (define cc (read-char port))
+         (unless (or (eof-object? cc) (char=? cc #\newline)) (inner)))
+       (loop)]
+      [else (void)])))
+
+(define (bracket-reader ch port src line col pos)
+  (define items (read-until-close port #\]))
+  (define result (cons '#%brackets items))
+  (if src
+    (datum->syntax #f result (vector src line col pos #f))
+    result))
+
+(define (curly-reader ch port src line col pos)
+  (define items (read-until-close port #\}))
+  (define result (cons '#%map items))
+  (if src
+    (datum->syntax #f result (vector src line col pos #f))
+    result))
 
 (define beagle-readtable
   (make-readtable #f
-    #\[ 'terminating-macro bracket-error
-    #\] 'terminating-macro bracket-error
-    #\{ 'terminating-macro curly-error
+    #\[ 'terminating-macro bracket-reader
+    #\] 'terminating-macro
+                            (lambda (ch port src line col pos)
+                              (error 'beagle "unexpected `]`"))
+    #\{ 'terminating-macro curly-reader
     #\} 'terminating-macro
                             (lambda (ch port src line col pos)
                               (error 'beagle "unexpected `}`"))

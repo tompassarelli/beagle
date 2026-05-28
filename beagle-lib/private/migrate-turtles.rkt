@@ -515,13 +515,18 @@
 
 (define (migrate-expr expr)
   (cond
+    ;; Data literals stay as data literals per role-locality §5:
+    ;; [a b c] is a vector value (inert contents); to compute, use
+    ;; (vector …). Same for {…} and #{…}. The reader keeps these
+    ;; tagged with MAP-TAG/BRACKET-TAG/SET-TAG; we walk their contents
+    ;; in case any nested element needs migration but preserve the
+    ;; container shape.
     [(and (pair? expr) (eq? (car expr) BRACKET-TAG))
-     ;; [a b c] in expression position → (vector a b c)
-     (cons 'vector (map migrate-expr (bracket-body expr)))]
+     (cons BRACKET-TAG (map migrate-expr (bracket-body expr)))]
     [(and (pair? expr) (eq? (car expr) MAP-TAG))
-     (cons 'hash-map (map migrate-expr (map-body expr)))]
+     (cons MAP-TAG (map migrate-expr (map-body expr)))]
     [(and (pair? expr) (eq? (car expr) SET-TAG))
-     (cons 'hash-set (map migrate-expr (set-body expr)))]
+     (cons SET-TAG (map migrate-expr (set-body expr)))]
     [(pair? expr) (migrate-call expr)]
     [else expr]))
 
@@ -952,8 +957,9 @@
 ;; --- writer (parens only) -------------------------------------------------
 
 ;; Emit a turtles surface form with formatting that's review-readable.
-;; No #%brackets, #%map, #%set anywhere in output. Encountering one is an
-;; error (signals incomplete migration).
+;; Per role-locality §5, data containers `[...]` and `{...}` and `#{...}`
+;; are first-class output forms (inert data literals). They render with
+;; their delimiters, NOT as constructors.
 ;;
 ;; Strategy: try one-line inline first; if the result fits in 78 columns
 ;; from the current indent, use it. Otherwise, break after the head and
@@ -969,11 +975,17 @@
 (define (write-inline form out)
   (cond
     [(bracketed? form)
-     (error 'migrate-turtles "stray bracket tag in output: ~v" form)]
+     (display "[" out)
+     (write-inline-items (bracket-body form) out)
+     (display "]" out)]
     [(map-tagged? form)
-     (error 'migrate-turtles "stray map tag in output: ~v" form)]
+     (display "{" out)
+     (write-inline-items (map-body form) out)
+     (display "}" out)]
     [(set-tagged? form)
-     (error 'migrate-turtles "stray set tag in output: ~v" form)]
+     (display "#{" out)
+     (write-inline-items (set-body form) out)
+     (display "}" out)]
     [(null? form) (display "()" out)]
     [(pair? form)
      (cond
@@ -1015,11 +1027,11 @@
 (define (write-turtles-form form out indent)
   (cond
     [(bracketed? form)
-     (error 'migrate-turtles "stray bracket tag in output: ~v" form)]
+     (write-data-container "[" "]" (bracket-body form) out indent)]
     [(map-tagged? form)
-     (error 'migrate-turtles "stray map tag in output: ~v" form)]
+     (write-data-container "{" "}" (map-body form) out indent)]
     [(set-tagged? form)
-     (error 'migrate-turtles "stray set tag in output: ~v" form)]
+     (write-data-container "#{" "}" (set-body form) out indent)]
     [(null? form) (display "()" out)]
     [(pair? form)
      (cond
@@ -1060,6 +1072,30 @@
        (display (make-string (+ indent 1) #\space) out)
        (write-turtles-form item out (+ indent 1)))])
   (display ")" out))
+
+;; Render a data-container ([…], {…}, #{…}). Try inline first; spill
+;; multi-line with continuation indent if too wide.
+(define (write-data-container open close items out indent)
+  (define inline-out (open-output-string))
+  (display open inline-out)
+  (write-inline-items items inline-out)
+  (display close inline-out)
+  (define inline (get-output-string inline-out))
+  (cond
+    [(<= (+ indent (string-length inline)) WIDTH)
+     (display inline out)]
+    [else
+     (display open out)
+     (define item-indent (+ indent (string-length open)))
+     (cond
+       [(null? items) (void)]
+       [else
+        (write-turtles-form (car items) out item-indent)
+        (for ([item (in-list (cdr items))])
+          (newline out)
+          (display (make-string item-indent #\space) out)
+          (write-turtles-form item out item-indent))])
+     (display close out)]))
 
 (define (write-multiline-call head items out indent)
   (cond

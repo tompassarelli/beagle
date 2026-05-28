@@ -855,6 +855,13 @@
     [(vector) (format "[ ~a ]" (string-join (map nix->string args) " "))]
     [(hash-map) (nix-attrset args)]
     [(hash-set) (format "[ ~a ]" (string-join (map nix->string args) " "))]
+    ;; Data-literal containers (role-locality §5). Emit the same Nix shape
+    ;; as the computed constructors — Nix's attrset / list is lazy either
+    ;; way; the semantic distinction is at the beagle level, not the
+    ;; target level.
+    [(#%brackets) (format "[ ~a ]" (string-join (map nix->string args) " "))]
+    [(#%map)      (nix-attrset args)]
+    [(#%set)      (format "[ ~a ]" (string-join (map nix->string args) " "))]
     [(set!)
      (error 'emit-nix "Nix is pure; set! not allowed in Nix-targeted code")]
     [(+ - * /)
