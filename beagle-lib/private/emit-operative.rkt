@@ -813,7 +813,12 @@
     [(number? expr) (number->string expr)]
     [(string? expr) (format "~v" expr)]
     [(keyword? expr) (format "~v" (keyword->string expr))]
-    [(symbol? expr) (symbol->string expr)]
+    [(symbol? expr)
+     ;; Slash → dot for namespace-qualified names: lib/mkIf → lib.mkIf.
+     (define s (symbol->string expr))
+     (cond
+       [(regexp-match? #rx"/" s) (string-replace s "/" ".")]
+       [else s])]
     [(pair? expr) (nix-call->string expr)]
     [else (format "~v" expr)]))
 
@@ -828,8 +833,11 @@
     [(if)          (nix-if args)]
     [(claim)       ""]
     [(ns define-mode define-target import require declare-extern) ""]
-    [(defrecord defunion defenum) ""]   ; Nix doesn't have native records; users construct attrsets
+    [(defrecord defunion defenum) ""]
     [(body)        (nix-body args)]
+    [(module)      (nix-module args)]
+    [(flake)       (nix-flake args)]
+    [(with)        (nix-with args)]
     [(str)         (format "(builtins.concatStringsSep \"\" [~a])"
                            (string-join
                              (for/list ([a (in-list args)])
@@ -837,29 +845,69 @@
                              " "))]
     [(vector) (format "[ ~a ]" (string-join (map nix->string args) " "))]
     [(hash-map) (nix-attrset args)]
+    [(hash-set) (format "[ ~a ]" (string-join (map nix->string args) " "))]
     [(set!)
      (error 'emit-nix "Nix is pure; set! not allowed in Nix-targeted code")]
     [(+ - * /)
-     ;; Nix uses infix arithmetic.
      (format "(~a)" (string-join (map nix->string args)
                                   (format " ~a " head)))]
     [(< <= > >=)
      (format "(~a ~a ~a)"
-             (nix->string (car args))
-             head
-             (nix->string (cadr args)))]
+             (nix->string (car args)) head (nix->string (cadr args)))]
     [(=)
      (format "(~a == ~a)"
-             (nix->string (car args))
-             (nix->string (cadr args)))]
+             (nix->string (car args)) (nix->string (cadr args)))]
     [else
-     ;; Nix function application is juxtaposition (no parens around args).
      (cond
+       ;; '-headed data list — render the operands as their data values.
+       [(quote-head? head)
+        (format "[ ~a ]" (string-join (map nix->string args) " "))]
        [(null? args) (nix->string head)]
        [else
         (format "(~a ~a)"
                 (nix->string head)
-                (string-join (map nix->string args) " "))])]))
+                (string-join (map (lambda (a) (nix-arg-wrap a)) args) " "))])]))
+
+(define (nix-arg-wrap a)
+  ;; Wrap a single function argument in parens if it's a compound expression.
+  (cond
+    [(and (pair? a) (memq (car a) '(hash-map vector hash-set)))
+     (nix->string a)]
+    [(pair? a) (format "~a" (nix->string a))]
+    [else (nix->string a)]))
+
+;; (module (' p1 p2 …) BODY…)  →  { p1, p2, …, ... }: BODY
+(define (nix-module args)
+  (cond
+    [(>= (length args) 2)
+     (define params-form (car args))
+     (define body-exprs (cdr args))
+     (define params (extract-params-list params-form))
+     (define pattern
+       (format "{ ~a, ... }"
+               (string-join (map symbol->string params) ", ")))
+     (define body-str
+       (cond
+         [(= (length body-exprs) 1) (nix->string (car body-exprs))]
+         [else (format "let ~a in ~a"
+                       (string-join (for/list ([e (in-list (drop-right body-exprs 1))])
+                                      (format "_ = ~a;" (nix->string e))) " ")
+                       (nix->string (last body-exprs)))]))
+     (format "~a:\n\n~a" pattern body-str)]
+    [else "{ ... }: null"]))
+
+;; (flake VALUE)  →  VALUE — flake is a meta-form; the attrset is the value
+(define (nix-flake args)
+  (cond
+    [(= (length args) 1) (nix->string (car args))]
+    [else "{ }"]))
+
+;; (with TARGET BODY)  →  with TARGET; BODY
+(define (nix-with args)
+  (cond
+    [(= (length args) 2)
+     (format "with ~a; ~a" (nix->string (car args)) (nix->string (cadr args)))]
+    [else (format "(with ~a)" (string-join (map nix->string args) " "))]))
 
 (define (nix-defn args)
   (define name (car args))

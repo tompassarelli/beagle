@@ -812,10 +812,9 @@
 ;;   record-update:  (with record [:k1 v1 :k2 v2 ...])
 ;;   Nix scope:      (with target [expr...])    — Nix lib brings scope in;
 ;;                                                 second arg is just a body
-;; Detect record-update via even-length entries with keyword keys.
-;; turtles+quote shapes:
-;;   record-update → (with record (' (updates (update :k1 v1)...)))
-;;   Nix scope     → (with target (body EXPR...))
+;; Tightened shapes:
+;;   record-update → (with record (' (update :k1 v1)...))  — updates as data
+;;   Nix scope     → (with target EXPR…)  — body is positional, no wrapper
 (define (migrate-with form)
   (match form
     [(list 'with target updates-form)
@@ -839,12 +838,12 @@
               [else (loop (cddr rest)
                           (cons (list 'update (car rest) (migrate-expr (cadr rest)))
                                 acc))])))
-        (list 'with (migrate-expr target)
-              (Q (cons 'updates update-forms)))]
+        (list 'with (migrate-expr target) (Q update-forms))]
        [else
-        ;; Nix-style with: scope-introducing body
-        (list 'with (migrate-expr target)
-              (cons 'body (map migrate-expr entries)))])]
+        ;; Nix-style with: scope-introducing body. The second arg is a
+        ;; single expression — migrate it as-is. Brackets in source land
+        ;; as vector literals via the normal migrate-expr path.
+        (list 'with (migrate-expr target) (migrate-expr updates-form))])]
     [_ (error 'migrate-turtles "unrecognized with shape: ~v" form)]))
 
 ;; --- type migration -------------------------------------------------------
