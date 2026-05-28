@@ -183,12 +183,42 @@
 
 ;; `'` is variadic and does not evaluate its operands. It collects them
 ;; into a list and returns it as data. The simplest operative.
+;; Inert: nothing inside ever evaluates.
 (define QUOTE-OP-SYM (string->symbol "'"))
 (define QUOTE-OP
   (make-raw QUOTE-OP-SYM
     (lambda (args env)
       ;; Just return the raw arguments as a list. No evaluation.
       args)))
+
+;; --- the binding operator `←` --------------------------------------------
+
+;; `←` walks alternating name/value pairs from its raw arguments:
+;;   - names are taken raw (not evaluated)
+;;   - values are evaluated in the current env
+;;   - each name is bound to its evaluated value in the current env
+;;
+;; `←` is the head of let/loop/doseq/for binding lists. When let creates a
+;; child env and evaluates the (←-headed) binding-list operand in that
+;; child env, the bindings land in the child env naturally — no special
+;; path required. `←` has identical semantics regardless of context: it
+;; binds in whichever env it's evaluated in.
+(define LARROW-SYM '←)
+(define LARROW-OP
+  (make-raw LARROW-SYM
+    (lambda (args env)
+      (when (odd? (length args))
+        (error '← "odd number of operands in binding list: ~v" args))
+      (let loop ([rest args])
+        (cond
+          [(null? rest) (void)]
+          [else
+           (define name (car rest))
+           (unless (symbol? name)
+             (error '← "binding name must be a symbol, got ~v" name))
+           (define val (evaluate (cadr rest) env))
+           (env-define! env name val)
+           (loop (cddr rest))])))))
 
 ;; --- core operatives ------------------------------------------------------
 
@@ -226,12 +256,17 @@
         #f))))
 
 (define (extract-params params-data)
-  ;; params-data is the data list `(params NAME...)`.
+  ;; Tightened: params-data is just the list of names `(x y z)` returned
+  ;; by evaluating `(' x y z)` at the call site.
+  ;; Back-compat: old shape `(params x y z)` still accepted.
   (cond
+    [(null? params-data) '()]
     [(and (pair? params-data) (eq? (car params-data) 'params))
      (cdr params-data)]
+    [(list? params-data) params-data]
+    [(symbol? params-data) params-data]   ; rest-args
     [else
-     (error 'vau "expected (params NAME...) form, got ~v" params-data)]))
+     (error 'vau "expected list of param names, got ~v" params-data)]))
 
 (define (bind-params! e params args)
   (cond
@@ -661,6 +696,7 @@
   (define e (make-env #f))
   (for ([entry (in-list `((,QUOTE-OP-SYM . ,QUOTE-OP)
                           (quote         . ,QUOTE-OP)      ; alias for ' (Racket reader compat)
+                          (←             . ,LARROW-OP)     ; binding operator
                           (vau           . ,VAU-OP)
                           (wrap          . ,WRAP-OP)
                           (unwrap        . ,UNWRAP-OP)

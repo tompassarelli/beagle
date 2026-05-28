@@ -41,10 +41,13 @@
 (define PIPE-1 (string->symbol "|>"))
 (define PIPE-2 (string->symbol "|>>"))
 (define QUOTE-OP (string->symbol "'"))
+(define LARROW-OP '←)
 
-;; Variadic `'` helper — splat list elements as operands.
-;; `(Q '(params x y))` → `(' params x y)`
+;; Variadic `'` helper — splat list elements as operands. (Inert data.)
 (define (Q items) (cons QUOTE-OP items))
+
+;; Variadic `←` helper — splat list elements as binding operands.
+(define (L items) (cons LARROW-OP items))
 
 (define (migrate-and-read v015-text)
   (forms-after-lang (migrate-turtles-text v015-text)))
@@ -97,18 +100,16 @@
 (defn f [] : Int (let [x 1 y 2] (+ x y)))"
   `((claim f ∈ (→ ,(Q '()) Int))
     (defn f ,(Q '())
-      (let ,(Q '(bindings (bind x 1) (bind y 2)))
-           (body (+ x y)))))
-  "let with flat-pair brackets (let body stays verbose — deferred)")
+      (let ,(L '(x 1 y 2)) (+ x y))))
+  "let with flat-pair brackets → ← binding")
 
 (check-migrate
   "#lang beagle
 (defn f [] : Int (let ((x 1) (y 2)) (+ x y)))"
   `((claim f ∈ (→ ,(Q '()) Int))
     (defn f ,(Q '())
-      (let ,(Q '(bindings (bind x 1) (bind y 2)))
-           (body (+ x y)))))
-  "let with paren-of-pairs (let body stays verbose — deferred)")
+      (let ,(L '(x 1 y 2)) (+ x y))))
+  "let with paren-of-pairs → ← binding")
 
 ;; --- vector / hash-map / hash-set ----------------------------------------
 
@@ -171,5 +172,5 @@
   `((claim classify ∈ (→ ,(Q '(Int)) String))
     (defn classify
       ,(Q '(n))
-      (cond (case (< n 0) "neg") (case (= n 0) "zero") (case :else "pos"))))
-  "cond — clauses stay verbose, defn body positional")
+      (cond (< n 0) "neg" (= n 0) "zero" :else "pos")))
+  "cond — flat by adjacency")

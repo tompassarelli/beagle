@@ -711,33 +711,54 @@
   (values (type-arrow (map (lambda (_) ANY-TYPE) param-names) body-t) errs))
 
 (define (check-let args env errors)
-  ;; (let (' bindings (bind X V)...) (body ...))
+  ;; Tightened: (let (← N V N V …) BODY...).
+  ;; Back-compat: (let (' bindings (bind X V)...) (body ...))
   (cond
-    [(= (length args) 2)
+    [(>= (length args) 1)
      (define bindings-form (car args))
-     (define body-form (cadr args))
-     (define binds (extract-bindings-list bindings-form))
+     (define body-exprs (cdr args))
+     (define pairs (extract-binding-pairs bindings-form))
      (define-values (bound-env errs)
        (for/fold ([e env] [errs errors])
-                 ([b (in-list binds)])
-         (cond
-           [(and (pair? b) (eq? (car b) 'bind) (= (length b) 3))
-            (define name (cadr b))
-            (define val-expr (caddr b))
-            (define-values (vt e2) (check-expr val-expr env errs))
-            (define new-env (tenv-extend e))
-            (tenv-define! new-env name vt)
-            (values new-env e2)]
-           [else (values e errs)])))
-     (check-expr body-form bound-env errs)]
+                 ([p (in-list pairs)])
+         (define name (car p))
+         (define val-expr (cadr p))
+         (define-values (vt e2) (check-expr val-expr e errs))
+         (define new-env (tenv-extend e))
+         (tenv-define! new-env name vt)
+         (values new-env e2)))
+     (check-body-seq body-exprs bound-env errs)]
     [else (values ANY-TYPE (err! errors args "let shape unrecognized"))]))
 
-(define (extract-bindings-list form)
+(define (check-body-seq exprs env errors)
+  ;; Walk a sequence; return type of last expression.
+  (let loop ([rest exprs] [t-acc NIL-TYPE] [errs-acc errors])
+    (cond
+      [(null? rest) (values t-acc errs-acc)]
+      [else
+       (define-values (t2 errs2) (check-expr (car rest) env errs-acc))
+       (loop (cdr rest) t2 errs2)])))
+
+(define (extract-binding-pairs form)
+  ;; Tightened: (← N V N V …) — flat pairs by adjacency.
+  ;; Back-compat: (' bindings (bind X V) …)
   (cond
+    [(and (pair? form) (eq? (car form) '←))
+     ;; flat list — pair up
+     (let loop ([rest (cdr form)] [acc '()])
+       (cond
+         [(null? rest) (reverse acc)]
+         [(null? (cdr rest)) (reverse acc)]
+         [else (loop (cddr rest) (cons (list (car rest) (cadr rest)) acc))]))]
     [(and (pair? form) (eq? (car form) QUOTE-OP))
-     (extract-bindings-list (cdr form))]
-    [(and (pair? form) (eq? (car form) 'bindings))
-     (cdr form)]
+     (define rest (cdr form))
+     (cond
+       [(and (pair? rest) (eq? (car rest) 'bindings))
+        ;; old verbose: (' bindings (bind X V)...)
+        (for/list ([b (in-list (cdr rest))]
+                   #:when (and (pair? b) (eq? (car b) 'bind) (= (length b) 3)))
+          (list (cadr b) (caddr b)))]
+       [else '()])]
     [(null? form) '()]
     [else '()]))
 
@@ -780,12 +801,13 @@
     [else (type-union result)]))
 
 (define (check-cond args env errors)
-  ;; Each arg is (case TEST RESULT). Walk all, return union of result types.
-  (define-values (result-types errs)
-    (for/fold ([rts '()] [errs errors])
-              ([c (in-list args)])
-      (cond
-        [(and (pair? c) (eq? (car c) 'case) (= (length c) 3))
+  ;; Tightened: (cond TEST RESULT TEST RESULT …) — flat adjacency.
+  ;; Back-compat: (cond (case TEST RESULT)…)
+  (cond
+    [(and (pair? args) (pair? (car args)) (eq? (caar args) 'case))
+     (define-values (result-types errs)
+       (for/fold ([rts '()] [errs errors])
+                 ([c (in-list args)])
          (define test (cadr c))
          (define result (caddr c))
          (define-values (_ e1)
@@ -793,32 +815,63 @@
              [(eq? test ':else) (values ANY-TYPE errs)]
              [else (check-expr test env errs)]))
          (define-values (rt e2) (check-expr result env e1))
-         (values (cons rt rts) e2)]
-        [else (values rts (err! errs c "cond clause not (case TEST RESULT)"))])))
-  (values (unify-types (reverse result-types)) errs))
+         (values (cons rt rts) e2)))
+     (values (unify-types (reverse result-types)) errs)]
+    [else
+     (when (odd? (length args))
+       (set! args (append args (list 'nil))))   ; tolerate odd; let runtime catch
+     (define-values (result-types errs)
+       (let loop ([rest args] [rts '()] [errs errors])
+         (cond
+           [(null? rest) (values rts errs)]
+           [(null? (cdr rest)) (values rts errs)]
+           [else
+            (define test (car rest))
+            (define result (cadr rest))
+            (define-values (_ e1)
+              (cond
+                [(eq? test ':else) (values ANY-TYPE errs)]
+                [else (check-expr test env errs)]))
+            (define-values (rt e2) (check-expr result env e1))
+            (loop (cddr rest) (cons rt rts) e2)])))
+     (values (unify-types (reverse result-types)) errs)]))
 
 (define (check-match args env errors)
-  ;; (match SCRUT (arm PATTERN RESULT)...)
+  ;; Tightened: (match SCRUT PAT RESULT PAT RESULT …) — flat adjacency.
+  ;; Back-compat: (match SCRUT (arm PAT RESULT)…)
   (cond
     [(null? args) (values ANY-TYPE errors)]
     [else
      (define-values (_ e1) (check-expr (car args) env errors))
      (define arms (cdr args))
-     (define-values (result-types errs)
-       (for/fold ([rts '()] [errs e1])
-                 ([a (in-list arms)])
-         (cond
-           [(and (pair? a) (eq? (car a) 'arm) (= (length a) 3))
+     (cond
+       [(and (pair? arms) (pair? (car arms)) (eq? (caar arms) 'arm))
+        (define-values (result-types errs)
+          (for/fold ([rts '()] [errs e1])
+                    ([a (in-list arms)])
             (define pat (cadr a))
             (define result (caddr a))
             (define body-env (tenv-extend env))
-            ;; Bind captured pattern vars to Any.
             (for ([n (in-list (pattern-captures pat))])
               (tenv-define! body-env n ANY-TYPE))
             (define-values (rt e2) (check-expr result body-env errs))
-            (values (cons rt rts) e2)]
-           [else (values rts (err! errs a "match arm not (arm PATTERN RESULT)"))])))
-     (values (unify-types (reverse result-types)) errs)]))
+            (values (cons rt rts) e2)))
+        (values (unify-types (reverse result-types)) errs)]
+       [else
+        (define-values (result-types errs)
+          (let loop ([rest arms] [rts '()] [errs e1])
+            (cond
+              [(null? rest) (values rts errs)]
+              [(null? (cdr rest)) (values rts errs)]
+              [else
+               (define pat (car rest))
+               (define result (cadr rest))
+               (define body-env (tenv-extend env))
+               (for ([n (in-list (pattern-captures pat))])
+                 (tenv-define! body-env n ANY-TYPE))
+               (define-values (rt e2) (check-expr result body-env errs))
+               (loop (cddr rest) (cons rt rts) e2)])))
+        (values (unify-types (reverse result-types)) errs)])]))
 
 (define (pattern-captures pat)
   (cond

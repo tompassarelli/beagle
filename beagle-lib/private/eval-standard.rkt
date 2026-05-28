@@ -108,27 +108,16 @@
   (make-raw-operative
     'let
     (lambda (args call-env)
-      (unless (= (length args) 2)
-        (error 'let
-               "expected (let bindings-form body-form), got ~v args"
-               (length args)))
-      (define bindings-data (evaluate (car args) call-env))
-      (define body-form (cadr args))
-      (define pairs (extract-let-bindings bindings-data call-env))
+      (unless (>= (length args) 1)
+        (error 'let "expected (let bindings-form body...), got ~v args" (length args)))
+      (define bindings-form (car args))
+      (define body-exprs (cdr args))
+      ;; Create a fresh child env and evaluate the binding-list in it.
+      ;; The binding-list is `(← N V N V …)`; `←` walks pairs and binds
+      ;; in whichever env it's evaluated in — so binding lands in new-env.
       (define new-env (env-extend call-env))
-      (for ([p (in-list pairs)])
-        (env-define! new-env (car p) (cadr p)))
-      (evaluate body-form new-env))))
-
-(define (extract-let-bindings bindings-data env)
-  (unless (and (pair? bindings-data) (eq? (car bindings-data) 'bindings))
-    (error 'let "expected (bindings ...) form, got ~v" bindings-data))
-  (for/list ([b (in-list (cdr bindings-data))])
-    (cond
-      [(and (pair? b) (eq? (car b) 'bind) (= (length b) 3))
-       (list (cadr b) (evaluate (caddr b) env))]
-      [else
-       (error 'let "expected (bind NAME VAL), got ~v" b)])))
+      (evaluate bindings-form new-env)
+      (evaluate-all body-exprs new-env))))
 
 ;; --- cond: multi-way conditional ----------------------------------------
 
@@ -139,21 +128,39 @@
   (make-raw-operative
     'cond
     (lambda (args call-env)
-      (let loop ([clauses args])
-        (cond
-          [(null? clauses) (void)]
-          [else
-           (define c (car clauses))
-           (unless (and (pair? c) (eq? (car c) 'case) (= (length c) 3))
-             (error 'cond "expected (case TEST RESULT), got ~v" c))
-           (define test-expr (cadr c))
-           (define result-expr (caddr c))
+      ;; Tightened: (cond TEST RESULT TEST RESULT …) — flat by adjacency.
+      ;; Back-compat: also accept old (cond (case TEST RESULT)…) shape.
+      (cond
+        [(and (pair? args) (pair? (car args))
+              (eq? (caar args) 'case))
+         ;; pre-tightening shape
+         (let loop ([clauses args])
            (cond
-             [(eq? test-expr ':else)
-              (evaluate result-expr call-env)]
-             [(truthy? (evaluate test-expr call-env))
-              (evaluate result-expr call-env)]
-             [else (loop (cdr clauses))])])))))
+             [(null? clauses) (void)]
+             [else
+              (define c (car clauses))
+              (define test-expr (cadr c))
+              (define result-expr (caddr c))
+              (cond
+                [(eq? test-expr ':else) (evaluate result-expr call-env)]
+                [(truthy? (evaluate test-expr call-env))
+                 (evaluate result-expr call-env)]
+                [else (loop (cdr clauses))])]))]
+        [else
+         ;; flat shape
+         (when (odd? (length args))
+           (error 'cond "odd number of operands: ~v" args))
+         (let loop ([rest args])
+           (cond
+             [(null? rest) (void)]
+             [else
+              (define test-expr (car rest))
+              (define result-expr (cadr rest))
+              (cond
+                [(eq? test-expr ':else) (evaluate result-expr call-env)]
+                [(truthy? (evaluate test-expr call-env))
+                 (evaluate result-expr call-env)]
+                [else (loop (cddr rest))])]))]))))
 
 ;; --- claim: substrate fact recording (no-op runtime) --------------------
 
@@ -286,25 +293,21 @@
   (make-raw-operative
     'doseq
     (lambda (args call-env)
-      (cond
-        [(= (length args) 2)
-         (define bindings-data (evaluate (car args) call-env))
-         (define body-form (cadr args))
-         (define binds (extract-list-with-head bindings-data 'bindings))
-         ;; First cut: single binding only
-         (cond
-           [(and (= (length binds) 1) (pair? (car binds))
-                 (eq? (caar binds) 'bind) (= (length (car binds)) 3))
-            (define name (cadr (car binds)))
-            (define coll-expr (caddr (car binds)))
-            (define coll (evaluate coll-expr call-env))
-            (for ([v (in-list coll)])
-              (define new-env (env-extend call-env))
-              (env-define! new-env name v)
-              (evaluate body-form new-env))
-            (void)]
-           [else (void)])]
-        [else (error 'doseq "expected (doseq bindings-form body-form)")]))))
+      (unless (>= (length args) 1)
+        (error 'doseq "expected (doseq (← N COLL) body...)"))
+      (define bindings-form (car args))
+      (define body-exprs (cdr args))
+      (define larrow-args (extract-larrow-operands bindings-form))
+      ;; First cut: single binding (name coll)
+      (unless (= (length larrow-args) 2)
+        (error 'doseq "first cut supports single binding: ~v" larrow-args))
+      (define name (car larrow-args))
+      (define coll (evaluate (cadr larrow-args) call-env))
+      (for ([v (in-list coll)])
+        (define new-env (env-extend call-env))
+        (env-define! new-env name v)
+        (evaluate-all body-exprs new-env))
+      (void))))
 
 ;; --- for : list comprehension --------------------------------------------
 
@@ -325,28 +328,55 @@
   (make-raw-operative
     'loop
     (lambda (args call-env)
-      (unless (= (length args) 2)
-        (error 'loop "expected (loop bindings-form body-form)"))
-      (define bindings-data (evaluate (car args) call-env))
-      (define body-form (cadr args))
-      (define binds (extract-list-with-head bindings-data 'bindings))
+      (unless (>= (length args) 1)
+        (error 'loop "expected (loop (← N V …) body...)"))
+      (define bindings-form (car args))
+      (define body-exprs (cdr args))
+      ;; Pull the alternating name/value pairs from the (← …) operand.
+      ;; Names stay raw, values are evaluated in call-env to seed initial loop state.
+      (define larrow-args (extract-larrow-operands bindings-form))
+      (when (odd? (length larrow-args))
+        (error 'loop "odd binding-list operands: ~v" larrow-args))
       (define names
-        (for/list ([b (in-list binds)])
-          (cond
-            [(and (pair? b) (eq? (car b) 'bind) (= (length b) 3))
-             (cadr b)]
-            [else (error 'loop "bad binding: ~v" b)])))
+        (let pair-loop ([rest larrow-args] [acc '()])
+          (cond [(null? rest) (reverse acc)]
+                [else (pair-loop (cddr rest) (cons (car rest) acc))])))
       (define initial-values
-        (for/list ([b (in-list binds)])
-          (evaluate (caddr b) call-env)))
+        (let pair-loop ([rest larrow-args] [acc '()])
+          (cond [(null? rest) (reverse acc)]
+                [else (pair-loop (cddr rest)
+                                 (cons (evaluate (cadr rest) call-env) acc))])))
       (let loop ([values initial-values])
         (define new-env (env-extend call-env))
         (for ([n (in-list names)] [v (in-list values)])
           (env-define! new-env n v))
         (with-handlers ([recur-signal?
-                         (lambda (sig)
-                           (loop (recur-signal-values sig)))])
-          (evaluate body-form new-env))))))
+                         (lambda (sig) (loop (recur-signal-values sig)))])
+          (evaluate-all body-exprs new-env))))))
+
+;; Extract operands from a (← …) form. Falls through gracefully if the
+;; head isn't `←` (back-compat with the pre-binding-operator shape).
+(define (extract-larrow-operands form)
+  (cond
+    [(and (pair? form) (eq? (car form) '←))
+     (cdr form)]
+    ;; Pre-binding-operator: (' bindings (bind X V)…)
+    [(and (pair? form) (or (eq? (car form) (string->symbol "'"))
+                            (eq? (car form) 'quote)))
+     (define rest (cdr form))
+     (cond
+       [(and (pair? rest) (eq? (car rest) 'bindings))
+        (apply append
+          (for/list ([b (in-list (cdr rest))])
+            (cond [(and (pair? b) (eq? (car b) 'bind) (= (length b) 3))
+                   (list (cadr b) (caddr b))]
+                  [else '()])))]
+       [(and (= (length rest) 1) (pair? (car rest)) (eq? (caar rest) 'bindings))
+        (extract-larrow-operands (car form))]
+       [else
+        ;; (' N V N V …) — the older intermediate shape we just emitted
+        rest])]
+    [else '()]))
 
 (define (make-recur-op)
   (make-raw-operative
@@ -361,25 +391,20 @@
   (make-raw-operative
     'for
     (lambda (args call-env)
-      (cond
-        [(= (length args) 2)
-         (define clauses-data (evaluate (car args) call-env))
-         (define body-form (cadr args))
-         (define clauses (or (extract-list-with-head clauses-data 'clauses)
-                             (extract-list-with-head clauses-data 'bindings)))
-         ;; First cut: single binding only, no :when
-         (cond
-           [(and (= (length clauses) 1) (pair? (car clauses))
-                 (eq? (caar clauses) 'bind) (= (length (car clauses)) 3))
-            (define name (cadr (car clauses)))
-            (define coll-expr (caddr (car clauses)))
-            (define coll (evaluate coll-expr call-env))
-            (for/list ([v (in-list coll)])
-              (define new-env (env-extend call-env))
-              (env-define! new-env name v)
-              (evaluate body-form new-env))]
-           [else (error 'for "first cut supports single binding only")])]
-        [else (error 'for "expected (for clauses-form body-form)")]))))
+      (unless (>= (length args) 1)
+        (error 'for "expected (for (← N COLL) body...)"))
+      (define bindings-form (car args))
+      (define body-exprs (cdr args))
+      (define larrow-args (extract-larrow-operands bindings-form))
+      ;; First cut: single binding (name coll)
+      (unless (= (length larrow-args) 2)
+        (error 'for "first cut supports single binding: ~v" larrow-args))
+      (define name (car larrow-args))
+      (define coll (evaluate (cadr larrow-args) call-env))
+      (for/list ([v (in-list coll)])
+        (define new-env (env-extend call-env))
+        (env-define! new-env name v)
+        (evaluate-all body-exprs new-env)))))
 
 ;; --- match: pattern matching --------------------------------------------
 
@@ -402,25 +427,43 @@
         (error 'match "expected at least (match SCRUT)"))
       (define scrut-val (evaluate (car args) call-env))
       (define arms (cdr args))
-      (let loop ([arms arms])
-        (cond
-          [(null? arms)
-           (error 'match "no arm matched: ~v" scrut-val)]
-          [else
-           (define a (car arms))
-           (unless (and (pair? a) (eq? (car a) 'arm) (= (length a) 3))
-             (error 'match "expected (arm PATTERN RESULT), got ~v" a))
-           (define pat (cadr a))
-           (define result-expr (caddr a))
-           (define-values (matched? bindings)
-             (match-pattern pat scrut-val))
+      ;; Tightened: PAT RESULT PAT RESULT … flat by adjacency.
+      ;; Back-compat: also accept (arm PAT RESULT) wrappers.
+      (cond
+        [(and (pair? arms) (pair? (car arms))
+              (eq? (caar arms) 'arm))
+         (let loop ([arms arms])
            (cond
-             [matched?
-              (define new-env (env-extend call-env))
-              (for ([b (in-list bindings)])
-                (env-define! new-env (car b) (cadr b)))
-              (evaluate result-expr new-env)]
-             [else (loop (cdr arms))])])))))
+             [(null? arms) (error 'match "no arm matched: ~v" scrut-val)]
+             [else
+              (define a (car arms))
+              (define pat (cadr a))
+              (define result-expr (caddr a))
+              (define-values (matched? bindings) (match-pattern pat scrut-val))
+              (cond
+                [matched?
+                 (define new-env (env-extend call-env))
+                 (for ([b (in-list bindings)])
+                   (env-define! new-env (car b) (cadr b)))
+                 (evaluate result-expr new-env)]
+                [else (loop (cdr arms))])]))]
+        [else
+         (when (odd? (length arms))
+           (error 'match "odd number of pattern/result operands: ~v" arms))
+         (let loop ([rest arms])
+           (cond
+             [(null? rest) (error 'match "no arm matched: ~v" scrut-val)]
+             [else
+              (define pat (car rest))
+              (define result-expr (cadr rest))
+              (define-values (matched? bindings) (match-pattern pat scrut-val))
+              (cond
+                [matched?
+                 (define new-env (env-extend call-env))
+                 (for ([b (in-list bindings)])
+                   (env-define! new-env (car b) (cadr b)))
+                 (evaluate result-expr new-env)]
+                [else (loop (cddr rest))])]))]))))
 
 (define (match-pattern pat val)
   (cond

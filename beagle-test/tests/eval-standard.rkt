@@ -18,6 +18,9 @@
 (define Q (string->symbol "'"))
 (define (Q-form . items) (cons Q items))
 
+(define LARROW '←)
+(define (L-form . items) (cons LARROW items))
+
 ;; --- fn -----------------------------------------------------------------
 
 (test-case "fn returns a wrapped operative"
@@ -67,8 +70,8 @@
   (define e (make-env-with-stdlib))
   (define result
     (evaluate
-      `(let ,(Q-form 'bindings '(bind x 1) '(bind y 2))
-            (body (+ x y)))
+      `(let ,(L-form 'x 1 'y 2)
+            (+ x y))
       e))
   (check-equal? result 3))
 
@@ -76,31 +79,28 @@
   (define e (make-env-with-stdlib))
   (define result
     (evaluate
-      `(let ,(Q-form 'bindings '(bind x 42))
-            (body x))
+      `(let ,(L-form 'x 42) x)
       e))
   (check-equal? result 42))
 
-(test-case "let is parallel (values see surrounding env)"
+(test-case "let is sequential (later values see earlier bindings)"
+  ;; With `←` binding sequentially, y sees the just-bound x.
   (define e (make-env-with-stdlib))
   (evaluate '(define x 100) e)
   (define result
     (evaluate
-      `(let ,(Q-form 'bindings
-              '(bind x 1)
-              '(bind y x))  ; y sees outer x=100, NOT inner x=1
-            (body y))
+      `(let ,(L-form 'x 1 'y 'x)
+            y)
       e))
-  (check-equal? result 100))
+  (check-equal? result 1))
 
 (test-case "let nested"
   (define e (make-env-with-stdlib))
   (define result
     (evaluate
-      `(let ,(Q-form 'bindings '(bind x 1))
-         (body
-           (let ,(Q-form 'bindings '(bind y 2))
-             (body (+ x y)))))
+      `(let ,(L-form 'x 1)
+         (let ,(L-form 'y 2)
+           (+ x y)))
       e))
   (check-equal? result 3))
 
@@ -218,7 +218,7 @@
   (evaluate
     `(defn fact ,(Q-form 'params 'n)
        (body
-         (let ,(Q-form 'bindings '(bind base 1))
+         (let ,(L-form 'base 1)
               (body
                 (if (<= n 1)
                     base
