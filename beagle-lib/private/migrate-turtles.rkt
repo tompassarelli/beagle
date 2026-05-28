@@ -87,8 +87,9 @@
   (cons BRACKET-OP items))
 
 (define (FNS items)
-  ;; Function list — head-tagged structural role (letfn fns).
-  (cons 'fns items))
+  ;; Letfn function list — a bare vector `[(name [params] body) …]`.
+  ;; Was `(fns …)`; labeled head removed (head+slot rule).
+  (cons BRACKET-OP items))
 
 ;; --- reader ---------------------------------------------------------------
 
@@ -274,8 +275,14 @@
   ;; Each v0.15 clause is one of:
   ;;   ([params] : RT body...)
   ;;   ([params] body...)
-  ;; Tightened shape: alternating (' P...) BODY... operands after NAME.
-  ;; No arity wrapper — wrapping would put code under a `'`-head.
+  ;; Current shape: one parenthesized arm per arity,
+  ;;   (defn NAME
+  ;;     ([params1] body1…)
+  ;;     ([params2] body2…)
+  ;;     …)
+  ;; No `arities` wrapper. The reader distinguishes single-arity
+  ;; (next form after name is a vector) from multi-arity (next forms
+  ;; are parenthesized arms) by the slot's shape.
   (define arity-data
     (for/list ([c (in-list clauses)])
       (match c
@@ -298,13 +305,11 @@
                (cons 'U
                      (for/list ([a (in-list arity-data)])
                        (make-fn-type-form (cadr a) (caddr a)))))))
-  ;; Build the alternating params/body operand sequence.
-  (define operands
-    (apply append
-      (for/list ([a (in-list arity-data)])
-        (cons (P (car a))
-              (map migrate-expr (cadddr a))))))
-  (define defn-form (list* 'defn name operands))
+  ;; Build one parenthesized arm per arity: ([params] body…).
+  (define arms
+    (for/list ([a (in-list arity-data)])
+      (list* (P (car a)) (map migrate-expr (cadddr a)))))
+  (define defn-form (list* 'defn name arms))
   (if claim-form
       (list claim-form defn-form)
       (list defn-form)))
@@ -766,6 +771,16 @@
 ;;                  ...))
 ;;           (body body...))
 (define (migrate-letfn form)
+  ;; Current shape:
+  ;;   (letfn [(name1 [params] body…)
+  ;;           (name2 [params] body…)]
+  ;;     body…)
+  ;; Each fn-entry is a bare `(name [params] body…)` form. No `fn-def`
+  ;; label, no `fns` wrapper. The outer vector marks the fn-list zone.
+  ;; Letfn-local fns are not public boundaries, so v0.15 type
+  ;; annotations on them are dropped here — types live in claims, and
+  ;; locals don't need public contracts. Add a top-level claim manually
+  ;; if a letfn-local fn needs to be type-visible.
   (match form
     [(list 'letfn fns-form body ...)
      (define fn-entries (cond
@@ -773,24 +788,14 @@
                           [(list? fns-form) fns-form]
                           [else '()]))
      (define migrated-fns
-       (apply append
-         (for/list ([fn-form (in-list fn-entries)])
-           (match fn-form
-             [(list (? symbol? name) param-form ': ret-type fn-body ...)
-              (define params (extract-defn-params param-form))
-              (define param-types (extract-param-types param-form))
-              (list
-                (list 'claim name ':type
-                      (make-fn-type-form param-types ret-type))
-                (list* 'fn-def name
-                       (P params)
-                       (map migrate-expr fn-body)))]
-             [(list (? symbol? name) param-form fn-body ...)
-              (define params (extract-defn-params param-form))
-              (list
-                (list* 'fn-def name
-                       (P params)
-                       (map migrate-expr fn-body)))]))))
+       (for/list ([fn-form (in-list fn-entries)])
+         (match fn-form
+           [(list (? symbol? name) param-form ': _ret-type fn-body ...)
+            (list* name (P (extract-defn-params param-form))
+                   (map migrate-expr fn-body))]
+           [(list (? symbol? name) param-form fn-body ...)
+            (list* name (P (extract-defn-params param-form))
+                   (map migrate-expr fn-body))])))
      (list* 'letfn
             (FNS migrated-fns)
             (map migrate-expr body))]
