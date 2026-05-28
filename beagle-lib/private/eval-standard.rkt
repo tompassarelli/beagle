@@ -301,6 +301,53 @@
 
 ;; (for (' clauses (bind x coll) ...) (body B...))
 ;; Returns a list of body-results, one per binding combination.
+;; --- loop / recur : tail-recursive iteration ----------------------------
+
+;; (loop (' bindings (bind X V) (bind Y W)) (body ...))
+;; Establishes an iteration point. The body may call (recur NEW-X NEW-Y...)
+;; to re-enter with new binding values.
+;;
+;; Implementation: signal-based recur. The loop catches a recur "signal"
+;; (an exception with binding values), rebinds, and re-evaluates the body.
+
+(define-struct recur-signal (values))
+
+(define (make-loop-op)
+  (make-raw-operative
+    'loop
+    (lambda (args call-env)
+      (unless (= (length args) 2)
+        (error 'loop "expected (loop bindings-form body-form)"))
+      (define bindings-data (evaluate (car args) call-env))
+      (define body-form (cadr args))
+      (define binds (extract-list-with-head bindings-data 'bindings))
+      (define names
+        (for/list ([b (in-list binds)])
+          (cond
+            [(and (pair? b) (eq? (car b) 'bind) (= (length b) 3))
+             (cadr b)]
+            [else (error 'loop "bad binding: ~v" b)])))
+      (define initial-values
+        (for/list ([b (in-list binds)])
+          (evaluate (caddr b) call-env)))
+      (let loop ([values initial-values])
+        (define new-env (env-extend call-env))
+        (for ([n (in-list names)] [v (in-list values)])
+          (env-define! new-env n v))
+        (with-handlers ([recur-signal?
+                         (lambda (sig)
+                           (loop (recur-signal-values sig)))])
+          (evaluate body-form new-env))))))
+
+(define (make-recur-op)
+  (make-raw-operative
+    'recur
+    (lambda (args call-env)
+      (define values
+        (for/list ([a (in-list args)])
+          (evaluate a call-env)))
+      (raise (recur-signal values)))))
+
 (define (make-for-op)
   (make-raw-operative
     'for
@@ -646,4 +693,6 @@
   (env-define! env 'unless    (make-unless-op))
   (env-define! env 'doseq     (make-doseq-op))
   (env-define! env 'for       (make-for-op))
+  (env-define! env 'loop      (make-loop-op))
+  (env-define! env 'recur     (make-recur-op))
   env)
