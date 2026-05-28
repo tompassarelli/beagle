@@ -247,9 +247,22 @@ fn emit_literal(l: &ast::Literal, out: &mut String) {
 }
 
 fn emit_str(s: &ast::Str, out: &mut String) {
+    // Distinguish indented `''...''` from regular `"..."` by raw source.
+    // The escape rules differ — ''$ for literal $, '' for literal ', etc. —
+    // so nix-instantiate --parse produces a different AST for each shape
+    // when the content contains $ or '. The importer needs to know the
+    // original delimiter to emit (ms ...) vs (s ...).
+    let raw = s.syntax().text().to_string();
+    let indented = raw.starts_with("''");
+    let (lit_tag, interp_tag) = if indented {
+        ("str-lit-ind", "str-interp-ind")
+    } else {
+        ("str-lit", "str-interp")
+    };
+
     let parts = s.normalized_parts();
     if parts.is_empty() {
-        out.push_str("(str-lit \"\")");
+        out.push_str(&format!("({} \"\")", lit_tag));
         return;
     }
     let all_literal = parts.iter().all(|p| matches!(p, ast::InterpolPart::Literal(_)));
@@ -260,12 +273,12 @@ fn emit_str(s: &ast::Str, out: &mut String) {
                 buf.push_str(s);
             }
         }
-        out.push_str("(str-lit ");
+        out.push_str(&format!("({} ", lit_tag));
         emit_racket_string(&buf, out);
         out.push(')');
         return;
     }
-    out.push_str("(str-interp (");
+    out.push_str(&format!("({} (", interp_tag));
     let mut first = true;
     for p in &parts {
         if !first {

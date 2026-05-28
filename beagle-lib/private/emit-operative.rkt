@@ -1013,14 +1013,23 @@
              (nix->string (caddr args)))]
     [else "/* assoc needs 3 args */ null"]))
 
-;; (ms LINE1 LINE2 …) → ''\n  LINE1\n  LINE2\n'' — Nix indented string
+;; (ms SEG1 SEG2 …) → ''SEG1SEG2…'' — Nix indented string (raw segments).
+;; Each SEG is either a literal string (verbatim, with ${ escaped to ''${
+;; and '' escaped to ''') or an expression (wrapped as ${EXPR}).
 (define (nix-ms args)
-  (define lines
+  (define parts
     (for/list ([a (in-list args)])
       (cond
-        [(string? a) a]
+        [(string? a) (escape-ind-string a)]
         [else (format "$~a{~a}" "" (nix->string a))])))
-  (format "''\n  ~a\n''" (string-join lines "\n  ")))
+  (format "''~a''" (apply string-append parts)))
+
+;; Indented-string escape rules:
+;;   ${  → ''${    (literal $ followed by {)
+;;   ''  → '''     (literal two-quote sequence)
+(define (escape-ind-string s)
+  (define s1 (regexp-replace* #rx"''" s "'''"))
+  (regexp-replace* #rx"\\$\\{" s1 "''${"))
 
 ;; (with TARGET BODY)  →  with TARGET; BODY
 (define (nix-with args)

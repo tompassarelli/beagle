@@ -243,10 +243,20 @@
              (string-join (map (λ (e) (emit-expr e depth)) elems) " "))]
     [(list 'str-lit s)
      (format "~v" (escape-literal-dollars s))]
+    [(list 'str-lit-ind s)
+     ;; Indented ''...'' literal: emit as (ms STRING) so emit-nix renders
+     ;; ''…''. Preserve embedded newlines and other whitespace verbatim
+     ;; via `~s` (writes string with escape sequences); emit-operative's
+     ;; nix-ms unescapes them back to raw characters in the output.
+     (format "(ms ~s)" s)]
     [(list 'path p)
      (format "(p ~v)" p)]
     [(list 'str-interp parts)
      (emit-str-interp parts depth)]
+    [(list 'str-interp-ind parts)
+     ;; Indented ''…'' with interpolation. Emit as (ms ...) with each part
+     ;; mapped to its source-text form. emit-nix's nix-ms wraps in ''…''.
+     (emit-str-ms parts depth)]
     [(list 'int n)
      (number->string n)]
     [(list 'float n)
@@ -677,6 +687,18 @@
         (car s-args)]
        [else
         (format "(s ~a)" (string-join s-args " "))])]))
+
+;; Same parts shape as emit-str-interp, but produces an (ms …) form so
+;; emit-nix renders ''…''. Multi-line literal segments stay one operand
+;; each (ms is multi-line by definition).
+(define (emit-str-ms parts depth)
+  (define ms-args
+    (map (λ (p)
+           (match p
+             [(? string? s) (format "~v" s)]
+             [(list 'interp ast-node) (emit-expr ast-node depth)]))
+         parts))
+  (format "(ms ~a)" (string-join ms-args " ")))
 
 (define (escape-literal-dollars s)
   ;; Re-escape literal ${ → $${ so beagle's emit-nix produces \${ in the
