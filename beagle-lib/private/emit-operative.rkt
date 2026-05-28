@@ -84,18 +84,17 @@
   (or (eq? sym QUOTE-OP) (eq? sym 'quote)))
 
 (define (extract-params-list form)
-  ;; Accept (' params A B...) or (params A B...) — return list of names.
-  ;; If the form is (quote (params A B...)) from Racket source, the
-  ;; payload is a 1-element list containing the params-form; unwrap.
+  ;; Accept (' HEAD A B...), (HEAD A B...), or fall through to '().
+  ;; HEAD is the structural label (params / fields / vars / variants).
   (cond
     [(and (pair? form) (quote-head? (car form)))
      (define rest (cdr form))
      (cond
        [(and (= (length rest) 1) (pair? (car rest)))
-        ;; (quote PAYLOAD-LIST) — Racket-style single-arg quote
         (extract-params-list (car rest))]
        [else (extract-params-list rest)])]
-    [(and (pair? form) (eq? (car form) 'params))
+    [(and (pair? form) (symbol? (car form)))
+     ;; (HEAD A B...) — drop the head label, return the tail
      (cdr form)]
     [(null? form) '()]
     [else '()]))
@@ -184,7 +183,14 @@
     [(cond)         (rkt-cond args)]
     [(match)        (rkt-match args)]
     [(claim)        ""]  ; emit nothing for claims
-    [(ns define-mode) ""]
+    [(ns define-mode define-target import require declare-extern) ""]
+    [(defrecord)
+     (format "(struct ~a (~a) #:transparent)"
+             (car args)
+             (string-join (map symbol->string
+                               (extract-params-list (cadr args)))
+                          " "))]
+    [(defunion defenum) ""]
     [(body)         (rkt-body args)]
     [(set!)         (format "(set! ~a ~a)"
                             (rkt->string (car args))
@@ -396,7 +402,13 @@
     [(match)       (clj-match args)]
     [(claim)       ""]
     [(ns)          (format "(ns ~a)" (clj->string (car args)))]
-    [(define-mode) ""]
+    [(define-mode define-target import require declare-extern) ""]
+    [(defrecord)   (format "(defrecord ~a [~a])"
+                           (car args)
+                           (string-join (map symbol->string
+                                             (extract-params-list (cadr args)))
+                                        " "))]
+    [(defunion defenum) ""]
     [(body)        (clj-body args)]
     [(str)         (format "(str ~a)" (string-join (map clj->string args) " "))]
     [(vector) (format "[~a]" (string-join (map clj->string args) " "))]
@@ -577,7 +589,18 @@
     [(if)          (js-if args indent)]
     [(cond)        (js-cond args indent)]
     [(claim)       ""]
-    [(ns define-mode) ""]
+    [(ns define-mode define-target import require declare-extern) ""]
+    [(defrecord)
+     ;; Emit a JS class with a constructor that takes positional fields.
+     (define name (car args))
+     (define fields (extract-params-list (cadr args)))
+     (format "class ~a { constructor(~a) { ~a } }"
+             name
+             (string-join (map symbol->string fields) ", ")
+             (string-join (for/list ([f (in-list fields)])
+                            (format "this.~a = ~a;" f f))
+                          " "))]
+    [(defunion defenum) ""]
     [(body)        (js-body args indent)]
     [(str)         (format "[~a].join('')"
                            (string-join
@@ -772,7 +795,8 @@
     [(let)         (nix-let args)]
     [(if)          (nix-if args)]
     [(claim)       ""]
-    [(ns define-mode) ""]
+    [(ns define-mode define-target import require declare-extern) ""]
+    [(defrecord defunion defenum) ""]   ; Nix doesn't have native records; users construct attrsets
     [(body)        (nix-body args)]
     [(str)         (format "(builtins.concatStringsSep \"\" [~a])"
                            (string-join
@@ -926,7 +950,17 @@
     [(if)          (py-if args indent)]
     [(cond)        (py-cond args indent)]
     [(claim)       ""]
-    [(ns define-mode) ""]
+    [(ns define-mode define-target import require declare-extern) ""]
+    [(defrecord)
+     ;; Emit a Python @dataclass.
+     (define name (car args))
+     (define fields (extract-params-list (cadr args)))
+     (format "@dataclass\nclass ~a:\n~a"
+             name
+             (string-join (for/list ([f (in-list fields)])
+                            (format "    ~a: any" f))
+                          "\n"))]
+    [(defunion defenum) ""]
     [(body)        (py-body args indent)]
     [(str)         (format "''.join([~a])"
                            (string-join
@@ -1122,6 +1156,8 @@
                             (format "~a ANY" p)) ", ")
              (string-join (map sql->string body-exprs) "; "))]
     [(claim) ""]
+    [(ns define-mode define-target import require declare-extern) ""]
+    [(defrecord defunion defenum) ""]
     [(+ - * /)
      (format "(~a)"
              (string-join (map sql->string args) (format " ~a " head)))]
