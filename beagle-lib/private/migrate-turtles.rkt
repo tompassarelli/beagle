@@ -8,16 +8,22 @@
 ;; and the data-operator `'` makes the data-vs-code distinction explicit
 ;; at every use site.
 ;;
-;; Key shapes:
-;;   defn:  (defn NAME (' (params X...)) (body EXPR...))
-;;          + (claim NAME ∈ (→ (' (params T...)) (returns RT)))
-;;   let:   (let (' (bindings (bind NAME VAL)...)) (body EXPR...))
-;;   if:    (branch (when COND) (then (fn () BODY)) (else (fn () BODY)))
-;;   defrec: (defrecord NAME (' (fields F1 F2)))  + per-field claims
-;;   defunion: (defunion NAME (' (variants V...)))  + per-variant defrecords
-;;   cond:  (cond (' (cases (case TEST RESULT) ...)))
-;;   match: (match SCRUT (' (arms (arm PATTERN RESULT) ...)))
-;;   at:    (at TARGET (' (path :K :K :K)))
+;; Key shapes (post-tightening, plan 20260528235000):
+;;   defn:  (defn NAME (' X...) EXPR...)
+;;          + (claim NAME ∈ (→ (' T...) RT))
+;;   fn:    (fn (' X...) EXPR...)  or  (fn ∈ TYPE (' X...) EXPR...)
+;;   defrec: (defrecord NAME (' F1 F2 ...))  + per-field claims
+;;   defunion: (defunion NAME (' V1 V2 ...))  + per-variant defrecords
+;;   function type: (→ (' T1 T2 ...) RT)
+;;   universal: (∀ (' T1 T2 ...) BODY-TYPE)
+;;   at:    (at TARGET (' :K1 :K2 :K3))
+;;
+;; Deferred (still emitted in pre-tightening verbose shape — needs design):
+;;   let:   (let (' bindings (bind X V)...) (body EXPR...))
+;;   loop / doseq / for / letfn: same bindings-shape as let
+;;   cond:  (cond (case TEST RESULT) (case TEST RESULT) ...)
+;;   match: (match SCRUT (arm PATTERN RESULT) ...)
+;;   multi-arity defn: (defn NAME (' arities (arity (' P) (body B))...))
 ;;
 ;; This is a one-shot tool. After v0.16 ships, the corpus is in turtles
 ;; surface and this tool can be deleted.
@@ -170,37 +176,37 @@
 
 (define (migrate-defn form)
   (match form
-    ;; Multi-arity: (defn NAME (clause1) (clause2) ...)
+    ;; Multi-arity: (defn NAME (clause1) (clause2) ...) — STAYS verbose (deferred)
     [(list 'defn (? symbol? name) clauses ...)
      #:when (and (pair? clauses) (multi-arity-clause? (car clauses)))
      (migrate-multi-arity-defn name clauses)]
     [(list 'defn (? symbol? name) param-form ': ret-type body ...)
-     ;; Typed defn — emit claim + definition
+     ;; Typed defn — emit claim + definition (tightened: no label, no body wrapper)
      (define params (extract-defn-params param-form))
      (define param-types (extract-param-types param-form))
      (define claim-form
        (list 'claim name '∈
              (make-fn-type-form param-types ret-type)))
      (define defn-form
-       (list 'defn name
-             (Q (cons 'params params))
-             (cons 'body (map migrate-expr body))))
+       (list* 'defn name
+              (Q params)
+              (map migrate-expr body)))
      (list claim-form defn-form)]
     [(list 'defn (? symbol? name) param-form body ...)
      ;; Untyped defn
      (define params (extract-defn-params param-form))
      (define defn-form
-       (list 'defn name
-             (Q (cons 'params params))
-             (cons 'body (map migrate-expr body))))
+       (list* 'defn name
+              (Q params)
+              (map migrate-expr body)))
      (list defn-form)]
     [_ (error 'migrate-turtles "unrecognized defn shape: ~v" form)]))
 
-;; (→ (' (params T1 T2)) (returns RT))
+;; (→ (' T1 T2) RT)
 (define (make-fn-type-form param-types ret-type)
   (list '→
-        (Q (cons 'params (map migrate-type param-types)))
-        (list 'returns (migrate-type ret-type))))
+        (Q (map migrate-type param-types))
+        (migrate-type ret-type)))
 
 ;; A multi-arity clause is shaped (param-form ...rest) where param-form is
 ;; itself bracketed (not a bare symbol). Bare-symbol first elements indicate
@@ -325,7 +331,7 @@
                (string->symbol (format "~a.~a" name (car f)))
                '∈
                (migrate-type (caddr f)))))
-     (cons (list 'defrecord name (Q (cons 'fields field-names)))
+     (cons (list 'defrecord name (Q field-names))
            field-claims)]
     [_ (error 'migrate-turtles "unrecognized defrecord shape: ~v" form)]))
 
@@ -357,8 +363,8 @@
              (migrate-defrecord (list 'defrecord (car v) (cadr v)))]
             [else (error 'migrate-turtles "bad variant: ~v" v)]))))
     (cons (if throwable?
-            (list 'defunion ':throwable name (Q (cons 'variants variant-names)))
-            (list 'defunion name (Q (cons 'variants variant-names))))
+            (list 'defunion ':throwable name (Q variant-names))
+            (list 'defunion name (Q variant-names)))
           variant-records))
   (match form
     [(list 'defunion ':throwable (? symbol? name) variants ...)
@@ -383,7 +389,7 @@
              [else (error 'migrate-turtles "bad variant: ~v" v)]))))
      ;; Parametric header (Result T E) stays as-is (list with operator
      ;; in head position — the name is the operator from a reader view).
-     (cons (list 'defunion (cons name tvars) (Q (cons 'variants variant-names)))
+     (cons (list 'defunion (cons name tvars) (Q variant-names))
            variant-records)]
     [_ (error 'migrate-turtles "unrecognized defunion shape: ~v" form)]))
 
@@ -503,14 +509,14 @@
      (cons head (map migrate-expr (cdr form)))]))
 
 ;; v0.15: (module [param ...] body...)
-;; turtles+quote: (module (' (params param ...)) (body body...))
+;; turtles+tightened: (module (' param ...) EXPR...)
 (define (migrate-module form)
   (match form
     [(list 'module param-form body ...)
      (define params (extract-defn-params param-form))
-     (list 'module
-           (Q (cons 'params params))
-           (cons 'body (map migrate-expr body)))]
+     (list* 'module
+            (Q params)
+            (map migrate-expr body))]
     [_ (error 'migrate-turtles "unrecognized module shape: ~v" form)]))
 
 ;; --- let migration --------------------------------------------------------
@@ -570,26 +576,26 @@
 (define (migrate-fn form)
   (match form
     [(list 'fn param-form ': ret-type body ...)
-     ;; typed fn with return annotation
+     ;; typed fn (tightened)
      (define params (extract-defn-params param-form))
      (define param-types (extract-param-types param-form))
-     (list 'fn '∈
-           (make-fn-type-form param-types ret-type)
-           (Q (cons 'params params))
-           (cons 'body (map migrate-expr body)))]
+     (list* 'fn '∈
+            (make-fn-type-form param-types ret-type)
+            (Q params)
+            (map migrate-expr body))]
     [(list 'fn param-form body ...)
      (define params (extract-defn-params param-form))
      (define types (extract-param-types param-form))
      (cond
        [(andmap (lambda (t) (eq? t 'Any)) types)
-        (list 'fn
-              (Q (cons 'params params))
-              (cons 'body (map migrate-expr body)))]
+        (list* 'fn
+               (Q params)
+               (map migrate-expr body))]
        [else
-        (list 'fn '∈
-              (make-fn-type-form types 'Any)
-              (Q (cons 'params params))
-              (cons 'body (map migrate-expr body)))])]
+        (list* 'fn '∈
+               (make-fn-type-form types 'Any)
+               (Q params)
+               (map migrate-expr body))])]
     [_ (error 'migrate-turtles "unrecognized fn shape: ~v" form)]))
 
 ;; --- loop migration -------------------------------------------------------
@@ -864,14 +870,13 @@
         (define fixed (take params (- (length params) (length variadic-pos))))
         (define rest-type (cadr variadic-pos))
         (list '→
-              (Q (list* 'params
-                        (append (map migrate-type fixed)
-                                (list '& (migrate-type rest-type)))))
-              (list 'returns (migrate-type ret)))]
+              (Q (append (map migrate-type fixed)
+                         (list '& (migrate-type rest-type))))
+              (migrate-type ret))]
        [else
         (list '→
-              (Q (cons 'params (map migrate-type params)))
-              (list 'returns (migrate-type ret)))])]))
+              (Q (map migrate-type params))
+              (migrate-type ret))])]))
 
 (define (split-at-arrow entries)
   (let loop ([rest entries] [acc '()])

@@ -123,8 +123,7 @@
                 (and (char-alphabetic? c) (char-upper-case? c)))))))
 
 (define (parse-arrow t)
-  ;; (→ (' params T1 T2) (returns RT))
-  ;; OR (→ params-data (returns RT)) if already evaluated.
+  ;; Tightened: (→ (' T1 T2) RT). Pre-tightening: (→ (' params T1 T2) (returns RT)).
   (unless (= (length t) 3)
     (error 'parse-type "arrow type expects (→ params returns): ~v" t))
   (define params-form (cadr t))
@@ -134,20 +133,23 @@
   (type-arrow param-types return-type))
 
 (define (parse-params-form form)
-  ;; form may be:
-  ;;   (' params T1 T2)         — variadic ' call, source form
-  ;;   (params T1 T2)           — already-evaluated data list
+  ;; Tightened: (' T1 T2)
+  ;; Pre-tightening: (' params T1 T2) or (params T1 T2)
   (cond
     [(and (pair? form) (eq? (car form) QUOTE-OP))
-     (parse-params-form (cdr form))]
+     (define rest (cdr form))
+     (cond
+       [(and (pair? rest) (eq? (car rest) 'params))
+        (map parse-type (cdr rest))]
+       [else (map parse-type rest)])]
     [(and (pair? form) (eq? (car form) 'params))
      (map parse-type (cdr form))]
     [(null? form) '()]
     [else
-     (error 'parse-type "expected (' params ...) or (params ...): ~v" form)]))
+     (error 'parse-type "expected (' T...) or (' params T...): ~v" form)]))
 
 (define (parse-returns-form form)
-  ;; (returns T) — `returns` is the wrapper operator.
+  ;; Tightened: just the return type. Pre-tightening: (returns T) wrapper.
   (cond
     [(and (pair? form) (eq? (car form) 'returns) (= (length form) 2))
      (parse-type (cadr form))]
@@ -595,16 +597,16 @@
              (err! errors args "claim shape unrecognized"))]))
 
 (define (check-defn args env errors)
-  ;; (defn NAME (' params P...) (body ...))
-  ;; Multi-arity: (defn NAME (' arities (arity ...)))
+  ;; Tightened: (defn NAME (' P...) EXPR...)  body is positional sequence.
+  ;; Multi-arity (deferred): (defn NAME (' arities ...))
   (cond
     [(and (>= (length args) 2) (symbol? (car args))
           (pair? (cadr args))
           (multi-arity-form? (cadr args)))
      (values NIL-TYPE (check-args (cdr args) env errors))]
-    [(and (>= (length args) 3) (symbol? (car args)))
+    [(and (>= (length args) 2) (symbol? (car args)))
      (define name (car args))
-     (define-values (params-form body-form) (extract-defn-shape (cdr args)))
+     (define-values (params-form body-exprs) (extract-defn-shape (cdr args)))
      (define declared-type (tenv-lookup env name))
      ;; If no claim was found, the type defaults to Any.
      (define t (or declared-type ANY-TYPE))
@@ -619,8 +621,14 @@
      (when (= (length param-names) (length param-types))
        (for ([n (in-list param-names)] [pt (in-list param-types)])
          (tenv-define! body-env n pt)))
+     ;; Walk body expressions in sequence, taking the last type.
      (define-values (body-t errs)
-       (check-expr body-form body-env errors))
+       (let loop ([rest body-exprs] [t-acc ANY-TYPE] [errs-acc errors])
+         (cond
+           [(null? rest) (values t-acc errs-acc)]
+           [else
+            (define-values (t2 errs2) (check-expr (car rest) body-env errs-acc))
+            (loop (cdr rest) t2 errs2)])))
      ;; Optional: check body returns match declared returns
      (define final-errs
        (cond
@@ -628,7 +636,7 @@
           (cond
             [(type-compatible? (type-arrow-returns t) body-t) errs]
             [else
-             (err! errs body-form
+             (err! errs args
                    "defn ~a: body type ~a not compatible with declared returns ~a"
                    name (type->string body-t)
                    (type->string (type-arrow-returns t)))])]
@@ -650,41 +658,56 @@
   (or (eq? sym (string->symbol "'")) (eq? sym 'quote)))
 
 (define (extract-defn-shape args)
-  ;; args (after NAME) is either (params-form body-form) or
-  ;; (∈ TYPE params-form body-form).
+  ;; Tightened: args (after NAME) is (params-form EXPR1 EXPR2 ...) or
+  ;; (∈ TYPE params-form EXPR1 EXPR2 ...). Returns (params-form body-exprs-list).
   (cond
     [(and (>= (length args) 3) (eq? (car args) '∈))
-     (values (caddr args) (cadddr args))]
-    [(= (length args) 2)
-     (values (car args) (cadr args))]
+     (values (caddr args) (cdddr args))]
+    [(>= (length args) 1)
+     (values (car args) (cdr args))]
     [else
      (error 'check-defn "unrecognized shape: ~v" args)]))
 
 (define (extract-params-list params-form)
-  ;; Accept (' HEAD A B...), (HEAD A B...), or fall through to '().
-  ;; HEAD is the label inside the quoted form (params / fields / vars / etc.).
+  ;; Tightened: param/field/etc. lists are `(' A B...)` — drop the `'`-head.
+  ;; Also accept (quote (A B...)) from Racket-source test construction.
+  ;; Pre-tightening (params/fields/vars labels) accepted for back-compat.
   (cond
     [(and (pair? params-form) (or (eq? (car params-form) QUOTE-OP)
                                    (eq? (car params-form) 'quote)))
      (define rest (cdr params-form))
      (cond
        [(and (= (length rest) 1) (pair? (car rest)))
+        ;; (quote (PAYLOAD-LIST)) shape from Racket reader
         (extract-params-list (car rest))]
-       [else (extract-params-list rest)])]
-    [(and (pair? params-form) (symbol? (car params-form)))
-     ;; (HEAD A B...) — drop the head label, return the tail
+       [(and (pair? rest) (symbol? (car rest))
+             (memq (car rest) '(params fields vars variants path arities)))
+        ;; pre-tightening label — strip it
+        (cdr rest)]
+       [else
+        ;; tightened — `(' A B...)` returns (A B...)
+        rest])]
+    [(and (pair? params-form) (symbol? (car params-form))
+          (memq (car params-form) '(params fields vars variants path arities)))
+     ;; bare-label form (HEAD A B...) — drop the label
      (cdr params-form)]
     [(null? params-form) '()]
     [else '()]))
 
 (define (check-fn args env errors)
-  ;; Same as defn body-check but no name to bind.
-  (define-values (params-form body-form) (extract-defn-shape args))
+  ;; Tightened: (fn (' P...) EXPR...) or (fn ∈ TYPE (' P...) EXPR...)
+  (define-values (params-form body-exprs) (extract-defn-shape args))
   (define param-names (extract-params-list params-form))
   (define body-env (tenv-extend env))
   (for ([n (in-list param-names)])
     (tenv-define! body-env n ANY-TYPE))
-  (define-values (body-t errs) (check-expr body-form body-env errors))
+  (define-values (body-t errs)
+    (let loop ([rest body-exprs] [t-acc ANY-TYPE] [errs-acc errors])
+      (cond
+        [(null? rest) (values t-acc errs-acc)]
+        [else
+         (define-values (t2 errs2) (check-expr (car rest) body-env errs-acc))
+         (loop (cdr rest) t2 errs2)])))
   (values (type-arrow (map (lambda (_) ANY-TYPE) param-names) body-t) errs))
 
 (define (check-let args env errors)

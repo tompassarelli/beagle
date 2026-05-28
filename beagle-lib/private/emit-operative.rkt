@@ -84,17 +84,23 @@
   (or (eq? sym QUOTE-OP) (eq? sym 'quote)))
 
 (define (extract-params-list form)
-  ;; Accept (' HEAD A B...), (HEAD A B...), or fall through to '().
-  ;; HEAD is the structural label (params / fields / vars / variants).
+  ;; Tightened: param/field/etc. lists are (' A B...) — drop the '-head.
+  ;; Pre-tightening (' HEAD A B...) and (HEAD A B...) still accepted as
+  ;; back-compat for unmigrated test inputs.
   (cond
     [(and (pair? form) (quote-head? (car form)))
      (define rest (cdr form))
      (cond
        [(and (= (length rest) 1) (pair? (car rest)))
+        ;; (quote (PAYLOAD-LIST)) — Racket-style single-arg quote
         (extract-params-list (car rest))]
-       [else (extract-params-list rest)])]
-    [(and (pair? form) (symbol? (car form)))
-     ;; (HEAD A B...) — drop the head label, return the tail
+       [(and (pair? rest) (symbol? (car rest))
+             (memq (car rest) '(params fields vars variants path arities)))
+        ;; pre-tightening label inside `'`
+        (cdr rest)]
+       [else rest])]
+    [(and (pair? form) (symbol? (car form))
+          (memq (car form) '(params fields vars variants path arities)))
      (cdr form)]
     [(null? form) '()]
     [else '()]))
@@ -213,9 +219,8 @@
     [(and (pair? rest) (multi-arity-shape? (car rest)))
      (rkt-multi-arity-defn name (car rest))]
     [else
-     (define-values (params-form body-form) (skip-fn-annotations rest))
+     (define-values (params-form body-exprs) (skip-fn-annotations rest))
      (define params (extract-params-list params-form))
-     (define body-exprs (extract-body-exprs body-form))
      (format "(define (~a ~a) ~a)"
              name
              (string-join (map symbol->string params) " ")
@@ -242,6 +247,8 @@
 
 (define (rkt-multi-arity-defn name arities-form)
   ;; Racket case-lambda style: (define NAME (case-lambda [(p1) body1] [(p1 p2) body2]))
+  ;; Multi-arity is deferred surface — still in pre-tightening shape with
+  ;; arity/params/body labels.
   (define arities (extract-arities arities-form))
   (define clauses
     (for/list ([a (in-list arities)])
@@ -268,23 +275,22 @@
           (rkt->string (cadr args))))
 
 (define (rkt-fn args)
-  (define-values (params-form body-form) (skip-fn-annotations args))
+  (define-values (params-form body-exprs) (skip-fn-annotations args))
   (define params (extract-params-list params-form))
-  (define body-exprs (extract-body-exprs body-form))
   (format "(lambda (~a) ~a)"
           (string-join (map symbol->string params) " ")
           (string-join (map rkt->string body-exprs) " ")))
 
 (define (skip-fn-annotations args)
-  ;; Args may start with `∈ TYPE` (type annotation we ignore at emission
-  ;; time). Return (values params-form body-form).
+  ;; Tightened: args is (params-form EXPR...) or (∈ TYPE params-form EXPR...).
+  ;; Returns (values params-form body-exprs-list).
   (cond
-    [(and (>= (length args) 4) (eq? (car args) '∈))
-     (values (caddr args) (cadddr args))]
-    [(= (length args) 2)
-     (values (car args) (cadr args))]
+    [(and (>= (length args) 3) (eq? (car args) '∈))
+     (values (caddr args) (cdddr args))]
+    [(>= (length args) 1)
+     (values (car args) (cdr args))]
     [else
-     (error 'rkt-fn "bad fn shape: ~v" args)]))
+     (error 'skip-fn-annotations "bad fn shape: ~v" args)]))
 
 (define (rkt-let args)
   (define bindings (extract-let-pairs (car args)))
@@ -438,9 +444,8 @@
     [(and (pair? rest) (multi-arity-shape? (car rest)))
      (clj-multi-arity-defn name (car rest))]
     [else
-     (define-values (params-form body-form) (skip-fn-annotations rest))
+     (define-values (params-form body-exprs) (skip-fn-annotations rest))
      (define params (extract-params-list params-form))
-     (define body-exprs (extract-body-exprs body-form))
      (format "(defn ~a [~a] ~a)"
              name
              (string-join (map symbol->string params) " ")
@@ -466,9 +471,8 @@
   (format "(def ~a ~a)" (clj->string (car args)) (clj->string (cadr args))))
 
 (define (clj-fn args)
-  (define-values (params-form body-form) (skip-fn-annotations args))
+  (define-values (params-form body-exprs) (skip-fn-annotations args))
   (define params (extract-params-list params-form))
-  (define body-exprs (extract-body-exprs body-form))
   (format "(fn [~a] ~a)"
           (string-join (map symbol->string params) " ")
           (string-join (map clj->string body-exprs) " ")))
@@ -678,9 +682,8 @@
 (define (js-defn args indent)
   (define name (mangle (car args) 'js))
   (define rest (cdr args))
-  (define-values (params-form body-form) (skip-fn-annotations rest))
+  (define-values (params-form body-exprs) (skip-fn-annotations rest))
   (define params (extract-params-list params-form))
-  (define body-exprs (extract-body-exprs body-form))
   (format "function ~a(~a) {\n~areturn ~a;\n~a}"
           name
           (string-join (for/list ([p (in-list params)])
@@ -696,9 +699,8 @@
           (js->string (cadr args) indent)))
 
 (define (js-fn args indent)
-  (define-values (params-form body-form) (skip-fn-annotations args))
+  (define-values (params-form body-exprs) (skip-fn-annotations args))
   (define params (extract-params-list params-form))
-  (define body-exprs (extract-body-exprs body-form))
   (format "((~a) => { return ~a; })"
           (string-join (for/list ([p (in-list params)])
                          (symbol->string (mangle p 'js))) ", ")
@@ -832,9 +834,8 @@
 (define (nix-defn args)
   (define name (car args))
   (define rest (cdr args))
-  (define-values (params-form body-form) (skip-fn-annotations rest))
+  (define-values (params-form body-exprs) (skip-fn-annotations rest))
   (define params (extract-params-list params-form))
-  (define body-exprs (extract-body-exprs body-form))
   ;; Nix has curried functions: name = a: b: body
   (format "~a = ~a;"
           name
@@ -844,9 +845,8 @@
   (format "~a = ~a;" (car args) (nix->string (cadr args))))
 
 (define (nix-fn args)
-  (define-values (params-form body-form) (skip-fn-annotations args))
+  (define-values (params-form body-exprs) (skip-fn-annotations args))
   (define params (extract-params-list params-form))
-  (define body-exprs (extract-body-exprs body-form))
   (nix-curry params (nix-body-emit body-exprs)))
 
 (define (nix-curry params body-str)
@@ -1005,9 +1005,8 @@
 (define (py-defn args indent)
   (define name (mangle (car args) 'py))
   (define rest (cdr args))
-  (define-values (params-form body-form) (skip-fn-annotations rest))
+  (define-values (params-form body-exprs) (skip-fn-annotations rest))
   (define params (extract-params-list params-form))
-  (define body-exprs (extract-body-exprs body-form))
   (cond
     [(null? body-exprs)
      (format "def ~a(~a):\n~apass"
@@ -1035,9 +1034,8 @@
           (py->string (cadr args) indent)))
 
 (define (py-fn args indent)
-  (define-values (params-form body-form) (skip-fn-annotations args))
+  (define-values (params-form body-exprs) (skip-fn-annotations args))
   (define params (extract-params-list params-form))
-  (define body-exprs (extract-body-exprs body-form))
   ;; Python lambdas are single-expression; for multi-body, this is
   ;; lossy. First cut handles single-expression bodies.
   (cond
@@ -1147,9 +1145,8 @@
     [(defn)
      (define name (car args))
      (define rest (cdr args))
-     (define-values (params-form body-form) (skip-fn-annotations rest))
+     (define-values (params-form body-exprs) (skip-fn-annotations rest))
      (define params (extract-params-list params-form))
-     (define body-exprs (extract-body-exprs body-form))
      (format "CREATE FUNCTION ~a(~a) AS $$\nSELECT ~a;\n$$ LANGUAGE SQL;"
              name
              (string-join (for/list ([p (in-list params)])

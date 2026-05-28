@@ -42,22 +42,30 @@
   (make-raw-operative
     'fn
     (lambda (args call-env)
-      (define-values (params-form body-form) (extract-fn-shape args))
+      (define-values (params-form body-exprs) (extract-fn-shape args))
+      ;; Tightened: body is a positional sequence. Wrap in `do` for vau's
+      ;; single-body-form expectation.
+      (define body-form (sequence->do body-exprs))
       (evaluate
         (list 'wrap (list 'vau params-form '_ body-form))
         call-env))))
 
-(define (extract-fn-shape args)
+(define (sequence->do exprs)
   (cond
-    ;; (fn ∈ TYPE params-form body-form)
-    [(and (>= (length args) 4) (eq? (car args) '∈))
-     (values (caddr args) (cadddr args))]
-    ;; (fn params-form body-form)
-    [(= (length args) 2)
-     (values (car args) (cadr args))]
+    [(null? exprs) (list 'do)]
+    [(null? (cdr exprs)) (car exprs)]
+    [else (cons 'do exprs)]))
+
+(define (extract-fn-shape args)
+  ;; Tightened: (fn params-form EXPR...) or (fn ∈ TYPE params-form EXPR...).
+  ;; Returns (values params-form body-exprs-list).
+  (cond
+    [(and (>= (length args) 3) (eq? (car args) '∈))
+     (values (caddr args) (cdddr args))]
+    [(>= (length args) 1)
+     (values (car args) (cdr args))]
     [else
-     (error 'fn
-            "expected (fn params-form body-form) or (fn ∈ TYPE params-form body-form), got ~v args"
+     (error 'fn "expected (fn params-form body-form...) or (fn ∈ TYPE ...), got ~v args"
             (length args))]))
 
 ;; --- defn: top-level definition + name binding --------------------------
@@ -71,16 +79,17 @@
   (make-raw-operative
     'defn
     (lambda (args call-env)
-      (unless (>= (length args) 3)
+      (unless (>= (length args) 2)
         (error 'defn
-               "expected (defn NAME params-form body-form), got ~v args"
+               "expected (defn NAME params-form body...), got ~v args"
                (length args)))
       (define name (car args))
       (unless (symbol? name)
         (error 'defn "name must be a symbol, got ~v" name))
-      (define-values (params-form body-form) (extract-fn-shape (cdr args)))
+      (define-values (params-form body-exprs) (extract-fn-shape (cdr args)))
       (evaluate
-        (list 'define name (list 'fn params-form body-form))
+        (list 'define name
+              (cons 'fn (cons params-form body-exprs)))
         call-env)
       (void))))
 
