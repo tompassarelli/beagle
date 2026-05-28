@@ -10,7 +10,7 @@
          racket/string
          "ast.rkt"
          "types.rkt"
-         "js-emit-utils.rkt")
+         "dormant/js-emit-utils.rkt")
 
 (define (splice-sym? sym)
   (and (symbol? sym)

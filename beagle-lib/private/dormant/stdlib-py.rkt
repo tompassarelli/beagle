@@ -8,8 +8,8 @@
 ;; modeling would mislead) stay at Any — Python's dynamic standard library is
 ;; loose in places.
 
-(require "types.rkt"
-         "stdlib-helpers.rkt")
+(require "../types.rkt"
+         "../stdlib-helpers.rkt")
 
 (provide STDLIB-PY)
 

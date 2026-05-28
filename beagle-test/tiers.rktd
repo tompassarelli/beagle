@@ -62,35 +62,35 @@
              "syntax.rkt"
              "test-tags.rkt"
              "types.rkt"
-             ;; structural emit tests (the structural-floor rule)
-             "emit.rkt"                ; emit-clj structural
-             "emit-js.rkt"
+             ;; Nix (load-bearing target — the live happy path)
              "emit-nix.rkt"
-             "emit-py.rkt"
-             "emit-rkt.rkt"
-             "emit-sql.rkt"
-             ;; typed JS surface (jst-*) — structural only
-             "js-fixtures.rkt"
-             "js-quote.rkt"
-             "jst.rkt"
-             ;; Python structural fixtures
-             "py-fixtures.rkt"
-             ;; Nix (load-bearing target)
              "nix-emit-errors.rkt"
              "nix-lints.rkt"
              "nix-parse.rkt"
              "nix-roundtrip.rkt"
-             "validate-nix.rkt"
-             ;; SQL (structural only; no behavioral runner exists)
-             "sql-fixtures.rkt"
-             "sql-roundtrip.rkt"
-             "sql-schema-cache.rkt"))
+             "validate-nix.rkt"))
 
   (demoted . (;; behavioral runs that hit external interpreters
               "emit-clj-behavioral.rkt"  ; requires bb (Babashka)
               "emit-js-behavioral.rkt")) ; requires bun
 
-  (gated . (;; opt-in via env var
+  (gated . (;; Non-Nix target tests — parked alongside the dormant
+            ;; emitters. Opt in via BEAGLE_ALL_TARGETS=1 when revisiting
+            ;; a quarantined target. See thread 20260528233608 and
+            ;; beagle-lib/private/dormant/.
+            "emit.rkt"                  ; emit-clj structural
+            "emit-js.rkt"
+            "emit-py.rkt"
+            "emit-rkt.rkt"
+            "emit-sql.rkt"
+            "js-fixtures.rkt"
+            "js-quote.rkt"
+            "jst.rkt"
+            "py-fixtures.rkt"
+            "sql-fixtures.rkt"
+            "sql-roundtrip.rkt"
+            "sql-schema-cache.rkt"
+            ;; opt-in oracle/property/exec runners (env-gated)
             "differential.rkt"          ; BEAGLE_ORACLE=1
             "js-exec-oracle.rkt"        ; requires node/bun at runtime
             "nix-property.rkt"          ; BEAGLE_NIX_EVAL_CHECK=1

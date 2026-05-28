@@ -7,8 +7,8 @@
          racket/format
          racket/list
          racket/set
-         "parse.rkt"
-         "emit-dispatch.rkt")
+         "../parse.rkt"
+         "../emit-dispatch.rkt")
 
 ;; --- name mangling ----------------------------------------------------------
 

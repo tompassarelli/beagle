@@ -5,8 +5,8 @@
 ;; Split from stdlib-types.rkt. Merged into the unified STDLIB-TYPES at
 ;; require time; kept separate so the CLJ pipeline can exclude cleanly.
 
-(require "types.rkt"
-         "stdlib-helpers.rkt")
+(require "../types.rkt"
+         "../stdlib-helpers.rkt")
 
 (define STDLIB-CLJS
   (hash

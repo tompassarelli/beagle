@@ -7,8 +7,8 @@
          racket/format
          racket/set
          racket/list
-         "parse.rkt"
-         "emit-dispatch.rkt")
+         "../parse.rkt"
+         "../emit-dispatch.rkt")
 
 ;; --- special float values ---------------------------------------------------
 

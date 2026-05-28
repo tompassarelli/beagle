@@ -10,9 +10,9 @@
 ;; `(.method obj args ...)` and are not (currently) in this table.
 
 (require racket/set
-         "types.rkt"
-         "stdlib-helpers.rkt"
-         "stdlib-portable.rkt"
+         "../types.rkt"
+         "../stdlib-helpers.rkt"
+         "../stdlib-portable.rkt"
          "js-capabilities.rkt")
 
 (define STDLIB-JS

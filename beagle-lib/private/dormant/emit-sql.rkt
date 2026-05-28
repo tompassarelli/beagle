@@ -7,9 +7,9 @@
          racket/string
          racket/format
          racket/list
-         "parse.rkt"
-         "types.rkt"
-         "emit-dispatch.rkt")
+         "../parse.rkt"
+         "../types.rkt"
+         "../emit-dispatch.rkt")
 
 ;; --- Security helpers -------------------------------------------------------
 

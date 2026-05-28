@@ -3,7 +3,7 @@
 ;; SQL-specific stdlib type declarations.
 ;; Maps SQL aggregate functions, scalar functions, and common SQL builtins to Beagle types.
 
-(require "types.rkt")
+(require "../types.rkt")
 
 (provide STDLIB-SQL)
 

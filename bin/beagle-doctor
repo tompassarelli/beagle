@@ -87,17 +87,20 @@ else
     CHECKS+=("{\"name\":\"cache\",\"status\":\"ok\",\"message\":\"$CACHE_DIR will be created on first use\"}")
 fi
 
-# Target emitters
+# Target emitters: nix is the live happy path; clj/cljs/js/sql/py/rkt
+# are parked under beagle-lib/private/dormant/. Doctor reports them all
+# as "present" so reactivation is a path flip, not archaeology.
 TARGETS=()
-for target in clj cljs js nix sql; do
-    emitter="$BEAGLE_ROOT/beagle-lib/private/emit-${target}.rkt"
-    if [[ "$target" == "clj" ]]; then
-        emitter="$BEAGLE_ROOT/beagle-lib/private/emit-clj.rkt"
-    elif [[ "$target" == "cljs" ]]; then
-        emitter="$BEAGLE_ROOT/beagle-lib/private/emit-clj.rkt"
+for target in clj cljs js nix sql py rkt; do
+    nix_path="$BEAGLE_ROOT/beagle-lib/private/emit-${target}.rkt"
+    dormant_path="$BEAGLE_ROOT/beagle-lib/private/dormant/emit-${target}.rkt"
+    if [[ "$target" == "clj" || "$target" == "cljs" ]]; then
+        dormant_path="$BEAGLE_ROOT/beagle-lib/private/dormant/emit-clj.rkt"
     fi
-    if [[ -f "$emitter" ]]; then
-        TARGETS+=("{\"name\":\"$target\",\"status\":\"ok\"}")
+    if [[ "$target" == "nix" && -f "$nix_path" ]]; then
+        TARGETS+=("{\"name\":\"$target\",\"status\":\"live\"}")
+    elif [[ -f "$dormant_path" ]]; then
+        TARGETS+=("{\"name\":\"$target\",\"status\":\"dormant\"}")
     else
         TARGETS+=("{\"name\":\"$target\",\"status\":\"error\",\"message\":\"emitter not found\"}")
         STATUS="error"

@@ -27,10 +27,15 @@ concept.
 
 `#lang beagle` v0.15.0 — 1382 tests passing (+ oracle/differential/bun-parity via `BEAGLE_ORACLE=1`).
 
-- **Targets:** `beagle/clj` (default), `beagle/cljs`, `beagle/js`, `beagle/nix`, `beagle/sql`, `beagle/py`, `beagle/rkt`
+- **Targets:** `beagle/nix` is the **live happy path**; `beagle/clj`,
+  `beagle/cljs`, `beagle/js`, `beagle/sql`, `beagle/py`, `beagle/rkt`
+  are **dormant** (parked scaffolding under `beagle-lib/private/dormant/`,
+  excluded from the default loop). Reactivate with `BEAGLE_ALL_TARGETS=1`.
+  See `beagle-lib/private/dormant/README.md` and thread
+  `20260528233608-beagle_quarantine_non_nix_targets`.
 - **Forms:** ~78 forms — ~50 cross-target (definitions, control flow, data structures, pattern matching, threading, interop) + 28 typed JS target forms (`js/*`).
 - **Types:** 9 primitives (`String`, `Int`, `Float`, `Bool`, `Keyword`, `Symbol`, `Nil`, `Any`, `NixType`), `Number` (`U Int Float`), parametric (`Vec`, `Map`, `Set`, `List`, `NixType`), union (`U`), nullable (`T?`), function types, `forall` (with optional `<:` bounds), parametric `defunion` (`(Result T E)`), `(Promise T)`
-- **Stdlib:** 1830 pre-typed — portable 269, Clojure 397, CLJS 132, JS 102, Nix 523, SQL 59, Python 348
+- **Stdlib:** Nix 523 (live) + portable 269; Clojure 397, CLJS 132, JS 102, SQL 59, Python 348 still cataloged but dormant.
 - **Type checking:** flow-sensitive narrowing, cross-module import, collection/destructuring inference, exhaustive match warnings, refinement predicates
 - **Diagnostics:** Rust-style errors with signatures, "did you mean?" suggestions, JSON mode
 - **Tooling:** LSP, typed REPL, reactive daemon (~100ms re-check), repair compiler, property testing, distributed tracing, `beagle init --hooks` (scaffold Claude Code integration for any project)
@@ -50,8 +55,8 @@ parse → check → emit-dispatch → emit-{clj,js,nix,py,rkt,sql}
 - `beagle-lib/private/types.rkt` — type AST, parser, compatibility checker.
   `MAP-TAG`/`SET-TAG` are well-known symbols (`#%map`/`#%set`), not gensyms.
 - `beagle-lib/private/stdlib-types.rkt` — combined stdlib catalog; delegates to
-  `private/stdlib-portable.rkt` (256 entries), `private/stdlib-clj.rkt` (365),
-  `private/stdlib-cljs.rkt` (75).
+  `private/stdlib-portable.rkt` (256 entries), `private/stdlib-nix.rkt` (523),
+  and `dormant/stdlib-{clj,cljs,js,py,sql}.rkt` (parked, see dormant/README.md).
 - `beagle-lib/private/macros.rkt` — macro registry: template macros (`safe`
   kind only; naive substitution with hygiene), procedural macros (`proc`
   kind, evaluated by host Racket; `beagle` kind, evaluated by macro-eval
@@ -74,39 +79,25 @@ parse → check → emit-dispatch → emit-{clj,js,nix,py,rkt,sql}
 - `beagle-lib/private/check.rkt` — best-effort type checking against annotations and
   the built-in env. Record field registry for keyword-access type inference.
   Skipped in dynamic mode. Includes `jst-*` type inference + JS target gating.
-- `beagle-lib/private/emit-dispatch.rkt` — dispatches to `emit-clj.rkt`, `emit-js.rkt`,
-  `emit-nix.rkt`, `emit-py.rkt`, or `emit-rkt.rkt` based on `(program-target prog)`.
-- `beagle-lib/private/emit-clj.rkt` — AST → Clojure/ClojureScript source string (was `emit.rkt`).
-- `beagle-lib/private/emit-js.rkt` — AST → JavaScript source string. Delegates to
-  target-specific emission modules.
-- `beagle-lib/private/js-emit-utils.rkt` — shared JS emission utilities (name mangling,
-  escaping, `current-emit-expr` parameter).
-- `beagle-lib/private/emit-jst.rkt` — typed JS target (`jst-*`) emission helpers.
-- `beagle-lib/private/emit-js-quote.rkt` — JS/quote AST rendering.
-- `beagle-lib/private/emit-py.rkt` — AST → Python source string (dataclasses, match/case, snake_case).
-- `beagle-lib/private/emit-rkt.rkt` — AST → Typed Racket source string. Also serves as oracle:
-  `raco make` on output independently validates Beagle's type promises.
+- `beagle-lib/private/emit-dispatch.rkt` — backend registry. Each emitter
+  calls `(register-backend! target …)` when loaded; `private/emit.rkt`
+  loads only `emit-nix.rkt` by default. `BEAGLE_ALL_TARGETS=1`
+  dynamic-requires the dormant ones.
 - `beagle-lib/private/emit-nix.rkt` — AST → Nix source string (curried fns, attrsets, let/in).
-- `beagle-lib/private/js-capabilities.rkt` — JS capability sets (JS-TRANSLATED, JS-VALUE-WRAPPERS,
-  JS-RUNTIME-HELPERS). Imported by both emit-js and stdlib-js — no circular deps.
-- `beagle-lib/private/stdlib-js.rkt` — JS-specific: STDLIB-JS (38 JS-native type declarations),
-  JS-NO-EMIT (computed from STDLIB-PORTABLE minus JS-TRANSLATED).
 - `beagle-lib/private/stdlib-nix.rkt` — Nix-specific: STDLIB-NIX (280 typed entries for
   builtins.*, lib.*, lib.types.*). lib.types.* values typed as NixType (opaque).
 - `beagle-lib/private/emit-nix-strings.rkt` — string escaping + interp/multiline/indented
   emitters (single unified escape-nix #:multiline? #:keep-interp?).
 - `beagle-lib/private/validate-nix.rkt` — schema-driven validator; user config externalized
   to .beagle-cache/validate-config.json with HM-root auto-discovery from HM schema.
-- `beagle-lib/private/stdlib-py.rkt` — Python-specific: STDLIB-PY (131 typed entries for
-  builtins, os.path, json, math, re, functools, itertools, collections, dataclasses).
-- `beagle-lib/lib/beagle/core.js` — JS runtime helpers (12 finite functions: range, remove,
-  mapcat, etc.). Auto-imported when referenced.
 - `beagle-lib/nix/main.rkt` — Nix target module (`#lang beagle/nix` → `define-target nix`).
 - `beagle-lib/nix/lang/reader.rkt` — reader hook for `#lang beagle/nix`.
-- `beagle-lib/py/main.rkt` — Python target module (`#lang beagle/py` → `define-target py`).
-- `beagle-lib/py/lang/reader.rkt` — reader hook for `#lang beagle/py`.
-- `beagle-lib/rkt/main.rkt` — Racket target module (`#lang beagle/rkt` → `define-target rkt`).
-- `beagle-lib/rkt/lang/reader.rkt` — reader hook for `#lang beagle/rkt`.
+- `beagle-lib/private/dormant/` — parked emitters and stdlibs for the
+  five non-Nix targets (`emit-{clj,js,py,rkt,sql}.rkt`, `emit-{jst,js-quote}.rkt`,
+  `js-{capabilities,emit-utils}.rkt`, `stdlib-{clj,cljs,js,py,sql}.rkt`).
+  See `dormant/README.md` for reactivation. `beagle-lib/{clj,cljs,js,py,rkt,sql}/`
+  target-module dirs still exist for `#lang beagle/<target>` parsing
+  but the emit pipeline they call into is dormant by default.
 - `oracle/bin/check-oracle` — oracle check script: emit → raco make → classify.
 - `oracle/MAPPING.md` — Beagle → Typed Racket type correspondence table.
 - `beagle-lib/private/expand-tool.rkt` — backend for `bin/beagle-expand`.
@@ -126,11 +117,14 @@ parse → check → emit-dispatch → emit-{clj,js,nix,py,rkt,sql}
 
 1. **Struct** in `ast.rkt` — new AST node (add to provide list)
 2. **Parse case** in `parse-list-form` (in `parse.rkt`) — pattern-match the source
-3. **Emit case** in `emit-clj.rkt` AND `emit-js.rkt` — produce target source
+3. **Emit case** in `emit-nix.rkt` — the live target. Don't add cases to
+   the dormant `dormant/emit-{clj,js,py,rkt,sql}.rkt` emitters unless you
+   are actively reactivating that target — the new form simply won't
+   exist there until then, which is fine.
 4. **Infer case** in `infer-expr` — return type (or `ANY`)
 5. **Lint traversal** in `lint.rkt` — `check-shadow` and `collect-symbols`
 6. **Provide** the struct in ast.rkt's provide list
-7. **Tests** in parse/emit/check test files
+7. **Tests** in parse/emit-nix/check test files
 
 ## Test helpers
 
@@ -281,6 +275,13 @@ What counts as a "demoted-tier file" right now (per `beagle-test/tiers.rktd`):
 
 When you find yourself opening one of those to edit during a surface drop,
 stop.
+
+**Gated tier — non-Nix target tests.** As of the quarantine (thread
+`20260528233608`), all non-Nix target tests are gated and excluded from
+the default `bin/beagle-test` run. They live in the same files as before
+but are not classified active. The same rule applies: don't edit them
+during a surface drop, period. If you want to verify a non-Nix target's
+behavior, opt in with `BEAGLE_ALL_TARGETS=1` for that one session.
 
 Corpus migrations (fixtures in `beagle-test/tests/fixtures/`, `oracle/fixtures/`,
 `examples/`) are not test code — they are test INPUTS. They MUST be migrated

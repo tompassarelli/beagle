@@ -8,12 +8,16 @@
 
 (require racket/set
          "stdlib-portable.rkt"
-         "stdlib-clj.rkt"
-         "stdlib-cljs.rkt"
-         "stdlib-js.rkt"
          "stdlib-nix.rkt"
-         "stdlib-sql.rkt"
-         "stdlib-py.rkt")
+         ;; Non-Nix stdlib catalogs live under dormant/ — see
+         ;; private/emit.rkt for the quarantine rationale. These imports
+         ;; stay wired because stdlib-types is consumed by query tools
+         ;; (LSP, beagle-sig) that the user still runs against any target.
+         "dormant/stdlib-clj.rkt"
+         "dormant/stdlib-cljs.rkt"
+         "dormant/stdlib-js.rkt"
+         "dormant/stdlib-sql.rkt"
+         "dormant/stdlib-py.rkt")
 
 (define (merge-hashes . hs)
   (for*/fold ([out (hash)]) ([h (in-list hs)]

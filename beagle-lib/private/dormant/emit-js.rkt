@@ -7,8 +7,8 @@
          racket/format
          racket/list
          racket/set
-         "parse.rkt"
-         "emit-dispatch.rkt"
+         "../parse.rkt"
+         "../emit-dispatch.rkt"
          "js-capabilities.rkt"
          "js-emit-utils.rkt"
          "emit-jst.rkt"
