@@ -68,7 +68,7 @@ hatches, tiering discipline, etc.).
 
 ## Status
 
-`#lang beagle` v0.15.0 — Nix-tier active loop is green; dormant-tier
+`#lang beagle` v0.15.1 — Nix-tier active loop is green; dormant-tier
 opt-in via `BEAGLE_ALL_TARGETS=1`. **No v1.0 until others have used it
 in anger.** The author dogfoods on a 220-file NixOS config
 ([firnos](https://github.com/tompassarelli/firnos)) — schema-typed

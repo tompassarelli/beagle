@@ -3,4 +3,4 @@
 (define deps '("beagle-lib"))
 (define build-deps '("beagle-test"))
 (define implies '("beagle-lib"))
-(define version "0.15.0")
+(define version "0.15.1")
