@@ -73,17 +73,29 @@
 
 (define (emit-nix-multiline-string lines depth)
   (define ind (indent (+ depth 1)))
-  (define line-strs
-    (for/list ([line (in-list lines)])
-      (cond
-        [(string? line) (string-append ind line)]
-        [(nix-interpolated-string? line)
-         (string-append ind (emit-nix-interp-string-inline
-                             (nix-interpolated-string-parts line) depth))]
-        [else (string-append ind "${" (emit-expr* line depth) "}")])))
+  ;; Flatten all parts into a single body string: literal strings keep their
+  ;; embedded \n (escape-nix in multiline mode does not touch \n), expression
+  ;; parts emit as inline ${expr} markers. Splitting THIS on \n gives the
+  ;; physical lines we then indent — so a single (ms ...) part containing
+  ;; "[default]\nkey = " indents both lines correctly instead of being
+  ;; treated as one unbroken segment with stray internal newlines.
+  (define body
+    (apply string-append
+      (for/list ([line (in-list lines)])
+        (cond
+          [(string? line)
+           (escape-nix #:multiline? #t #:keep-interp? #t line)]
+          [(nix-interpolated-string? line)
+           (emit-nix-interp-string-inline
+            (nix-interpolated-string-parts line) depth)]
+          [else (format "${~a}" (emit-expr* line depth))]))))
+  (define phys-lines (regexp-split #rx"\n" body))
+  (define indented
+    (for/list ([l (in-list phys-lines)])
+      (if (string=? l "") "" (string-append ind l))))
   (string-append
    "''\n"
-   (string-join line-strs "\n")
+   (string-join indented "\n")
    "\n" (indent depth) "''"))
 
 (define (emit-nix-indented-string text depth #:escape? [escape? #t])

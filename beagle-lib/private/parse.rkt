@@ -1546,7 +1546,8 @@
          (values (reverse acc) n)]
         [else (loop (cdr rest) (cons (car rest) acc))])))
   (define formals
-    (for/list ([item (in-list before-as)])
+    (for/list ([item (in-list before-as)]
+               #:unless (eq? (->datum item) '...))
       (define id (->datum item))
       (cond
         [(symbol? id) (nix-fn-set-formal id #f)]

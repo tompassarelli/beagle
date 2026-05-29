@@ -17,6 +17,7 @@
     [(cljs) ".cljs"]
     [(js)   ".js"]
     [(py)   ".py"]
+    [(nix)  ".nix"]
     [else   ".clj"]))
 
 (define (ns->path ns-sym target)
@@ -24,7 +25,7 @@
   (string-append (regexp-replace* #rx"\\." (regexp-replace* #rx"-" s "_") "/")
                  (extension-for-target target)))
 
-(define (build-one-file path out-dir json? #:warn? [warn? #f])
+(define (build-one-file path out-dir json? #:warn? [warn? #f] #:in-place? [in-place? #f])
   (define type-errors 0)
 
   (define (handle-error e [loc-stx #f])
@@ -76,9 +77,15 @@
     (define ns (program-namespace prog))
     (define target (program-target prog))
     (define out-path
-      (if out-dir
-          (build-path out-dir (ns->path ns target))
-          (string->path (ns->path ns target))))
+      (cond
+        [in-place?
+         (string->path
+          (string-append (regexp-replace #rx"\\.b[a-z]+$" path "")
+                         (extension-for-target target)))]
+        [out-dir
+         (build-path out-dir (ns->path ns target))]
+        [else
+         (string->path (ns->path ns target))]))
 
     (define out-dir-part (path-only out-path))
     (when out-dir-part
@@ -110,6 +117,7 @@
 (define (run-build-all args)
   (define out-dir #f)
   (define warn? #f)
+  (define in-place? #f)
   (define file-args '())
 
   (let loop ([rest args])
@@ -124,12 +132,19 @@
       [(string=? (car rest) "--warn")
        (set! warn? #t)
        (loop (cdr rest))]
+      [(string=? (car rest) "--in-place")
+       (set! in-place? #t)
+       (loop (cdr rest))]
       [else
        (set! file-args (append file-args (list (car rest))))
        (loop (cdr rest))]))
 
+  (when (and out-dir in-place?)
+    (eprintf "beagle-build-all: --out and --in-place are mutually exclusive\n")
+    (exit 2))
+
   (when (null? file-args)
-    (eprintf "usage: beagle-build-all <file-or-dir> ... [--out <dir>] [--warn]\n")
+    (eprintf "usage: beagle-build-all <file-or-dir> ... [--out <dir>] [--in-place] [--warn]\n")
     (exit 2))
 
   (define files (expand-args file-args))
@@ -143,7 +158,7 @@
   (define errors 0)
 
   (for ([f (in-list files)])
-    (if (build-one-file f out-dir json? #:warn? warn?)
+    (if (build-one-file f out-dir json? #:warn? warn? #:in-place? in-place?)
         (set! built (+ built 1))
         (set! errors (+ errors 1))))
 
