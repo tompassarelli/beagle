@@ -267,4 +267,4 @@
                  [current-readtable beagle-nix-readtable])
     (read-syntax src in)))
 
-(provide beagle-nix-read beagle-nix-read-syntax)
+(provide beagle-nix-read beagle-nix-read-syntax beagle-nix-readtable)

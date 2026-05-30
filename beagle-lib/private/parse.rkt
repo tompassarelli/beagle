@@ -177,8 +177,20 @@
       (unless has-lang?
         (file-position (current-input-port) 0)
         (port-count-lines! (current-input-port)))
+      ;; Target-specific readtable for surface forms the base reader
+      ;; doesn't know about. Notably: nix's `~"…"` / `~''…''` reader
+      ;; macros. Without this, beagle-build-all (and any other caller
+      ;; that goes through read-beagle-syntax) sees `~''…''` as bare
+      ;; chars and fails on the first '}', '|', '#', etc. inside the
+      ;; body. bin/beagle-build hits the #lang reader directly via
+      ;; module load, so it always worked there.
+      (define target-readtable
+        (case target
+          [(nix) (dynamic-require 'beagle/nix/lang/reader-impl
+                                  'beagle-nix-readtable)]
+          [else beagle-readtable]))
       (parameterize ([read-square-bracket-with-tag BT]
-                     [current-readtable beagle-readtable])
+                     [current-readtable target-readtable])
         (define forms
           (let loop ([acc '()])
             (define d (read-syntax src))
