@@ -40,13 +40,18 @@
   (check-exn exn:fail? (lambda () (first-form "(inherit 42)"))))
 
 ;; --- with shape disambiguation ----------------------------------------------
+;;
+;; The bare `(with NS BODY)` Nix-scope shape is HARD-REJECTED — the canonical
+;; spelling is `(nix/with NS BODY)`. The record-update shape stays bare (no
+;; Clojure collision). Hard-rejection regression coverage lives in
+;; beagle-test/tests/parse.rkt; this suite only pins the canonical paths.
 
-(test-case "(with ns body) parses to nix-with"
-  (define f (first-form "(with pkgs hello)"))
+(test-case "(nix/with ns body) parses to nix-with"
+  (define f (first-form "(nix/with pkgs hello)"))
   (check-true (nix-with? f)))
 
-(test-case "(with ns [vec lit]) parses to nix-with"
-  (define f (first-form "(with pkgs [1 2 3])"))
+(test-case "(nix/with ns [vec lit]) parses to nix-with"
+  (define f (first-form "(nix/with pkgs [1 2 3])"))
   (check-true (nix-with? f)))
 
 (test-case "(with target [:k v]) parses to record-update with-form"
@@ -87,8 +92,8 @@
 
 ;; --- with-cfg ---------------------------------------------------------------
 
-(test-case "with-cfg parses to nix-with-cfg with path + body"
-  (define f (first-form "(with-cfg config.foo.bar BODY)"))
+(test-case "nix/with-cfg parses to nix-with-cfg with path + body"
+  (define f (first-form "(nix/with-cfg config.foo.bar BODY)"))
   (check-true (nix-with-cfg? f))
   (check-equal? (nix-with-cfg-path f) 'config.foo.bar))
 
@@ -104,8 +109,8 @@
 
 ;; --- assert -----------------------------------------------------------------
 
-(test-case "assert parses to nix-assert"
-  (define f (first-form "(assert true 42)"))
+(test-case "nix/assert parses to nix-assert"
+  (define f (first-form "(nix/assert true 42)"))
   (check-true (nix-assert? f)))
 
 ;; --- get-or, has ------------------------------------------------------------

@@ -226,11 +226,11 @@ diverges from its Clojure namesake, prefix it so the name doesn't
 collide with Clojure's meaning. Bare names are reserved for forms
 that behave as their Clojure equivalent does.
 
-Today's tree still has bare `assert` and `with` with Nix semantics —
-those are the targets of the Phase 1 rename sweep
-(`~/code/life-os/threads/20260530160100-...`). The rule above is the
-standing principle that applies to any new Nix-specific form
-added before that sweep lands.
+Bare `assert` / `with-cfg` / Nix-scope `with` are HARD-REJECTED — see
+commit history for the migration trace; `nix/assert` / `nix/with-cfg` /
+`nix/with` are the only accepted forms. The rule above is the standing
+principle that applies to every Nix-specific form whose name would
+otherwise collide with a Clojure namesake.
 
 ### Test tiering during surface iteration
 
@@ -247,6 +247,69 @@ or per-suite env vars (`BEAGLE_ORACLE=1`, `BEAGLE_NIX_EVAL_CHECK=1`).
 
 Fixture migrations are not test code — they're test inputs and **must**
 be migrated when surface changes break them.
+
+### Don't add features to the operative checker
+
+Classic checker wins; operative is quarantined behind
+`BEAGLE_EXPERIMENTAL_OPERATIVE`. Folding operative→classic or
+deleting it outright is a separate plan; until then **no new
+operative features without an explicit policy override** — bug
+fixes to keep the quarantined path building are fine; new
+capability surface there is not.
+
+### Type-system gating policies
+
+These four gates govern type-system work against the v0.15 surface.
+Each names the rule, the contrast-doc justification (thread
+`20260530180000`), and the activation condition.
+
+1. **Refinement annotations are gated to a single demo file with a
+   kill-switch.** No module or stdlib entry adopts a refinement
+   annotation in source. Reason: the shipped slice is performative —
+   it parses, but fires on only a 5-operator numeric-literal subset
+   and is invisible to `firn-validate` (contrast doc §4.2).
+   Refinement code currently lives in the operative checker, which
+   is itself quarantined. Activation: the static checker handles a
+   real, enumerated majority of predicate shapes (separate plan,
+   currently unscoped).
+
+2. **Bidirectional inference Layer 2 (full synthesis) is deferred.**
+   Reason: the production corpus has 4 `defn`s across 224 `.bnix`
+   files — building synthesis for a case that does not occur
+   (contrast doc §4.1). The Any-heavy stdlib (§4.4) compounds it:
+   even if synthesis shipped, it would dead-end at every arithmetic
+   block. Activation: a target corpus where `defn`s are common AND
+   ≥30 days of Phase 0 telemetry showing the type-error bucket would
+   actually benefit. Neither condition is current.
+
+3. **Types-as-view is a separate experiment with a 3-month kill
+   criterion.** Reason: highest-novelty, zero-precedent piece in the
+   contrast (§4.3). Start with a `beagle-explain-type` CLI; scale
+   only if it gets used in real diagnostic-debugging sessions over
+   3 months; delete otherwise. Runs on its own cadence — does NOT
+   touch the classic checker, does NOT block other type-system
+   work.
+
+4. **Sourcemap fidelity (preserving error-col through
+   canonicalization) is the precondition for un-deferring refinement
+   work.** Reason: contrast doc §4.6 / §5.4 — without it, refinements
+   regress into "diagnostics pointing at generated code the agent
+   can't locate," and the whole feedback loop collapses. Not urgent
+   while refinements are deferred, but the gate is recorded so
+   un-deferring refinements without sourcemap fidelity in place is
+   visibly out of order.
+
+5. **No inline type annotations on the surface.** `(def x : Int 42)`
+   and `(defn add [x : Int] : Int body)` are NOT accepted by the
+   parser — they produce an immediate, pointed rejection naming the
+   claim form as the replacement. Reason: a second type-producing
+   surface alongside claim is an ambiguity surface waiting for an AI
+   generation or copy-paste to wander into it (ML/Rust-trained models
+   will emit `(def x : Int 5)` from prior; a parser that accepts it
+   lets inline types back in through the side door). Activation:
+   removal landed 2026-05-31. The empirical-purge (zero corpus hits)
+   is now structural — the grammar makes the wrong form unparseable,
+   which is the whole point of one canonical form.
 
 ### Where papers and plans live
 

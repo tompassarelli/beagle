@@ -55,7 +55,11 @@
 ;;   return-type        : function body's inferred return doesn't
 ;;                        match declared return type.
 ;;   def-type           : top-level def's value type doesn't match its
-;;                        annotation.
+;;                        annotation. Also emitted for (claim NAME TYPE) +
+;;                        (def NAME VALUE) mismatches (the claim-derived
+;;                        env type plays the same role as an inline
+;;                        annotation), and for orphan claims (claim NAME T
+;;                        without a paired binding).
 ;;   let-binding        : let-bound value type doesn't match its
 ;;                        annotation.
 ;;   type-bound         : type parameter violates its bound.
@@ -113,12 +117,27 @@
 ;;                         received a value of the wrong shape (bad
 ;;                         parameter list, unknown mode/target,
 ;;                         non-symbol name). Type-error.
+;;   inline-type-annotation : author wrote `(def name : T value)` or the
+;;                         analogous defonce/defn shape. Inline type
+;;                         annotations on definitional forms have been
+;;                         removed; the canonical replacement is an
+;;                         out-of-band `(claim NAME TYPE)` form sitting
+;;                         next to the definition. Surface-divergence.
+;;   bare-nix-form       : author wrote a bare Nix-namespaced form
+;;                         (`assert`, `with-cfg`, or Nix-scope `with`)
+;;                         that has been hard-rejected. The canonical
+;;                         spelling is the `nix/`-prefixed form
+;;                         (`nix/assert`, `nix/with-cfg`, `nix/with`).
+;;                         Surface-divergence — fixable by renaming the
+;;                         head symbol.
 (define parse-kind-cause-table
   (hasheq
-   'removed-form    'surface-divergence
-   'unknown-form    'surface-divergence
-   'duplicate-meta  'type-error
-   'bad-meta-value  'type-error))
+   'removed-form           'surface-divergence
+   'unknown-form           'surface-divergence
+   'inline-type-annotation 'surface-divergence
+   'bare-nix-form          'surface-divergence
+   'duplicate-meta         'type-error
+   'bad-meta-value         'type-error))
 
 ;; validate-nix.rkt kinds — emitted by validation-error struct.
 ;;

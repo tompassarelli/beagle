@@ -41,7 +41,7 @@
   (check-exn (lambda (e)
                (and (exn:fail? e)
                     (regexp-match? #rx"multi-arity" (exn-message e))))
-             (lambda () (nix-emit "(defn f ([x] : Any x) ([x y] : Any x))"))))
+             (lambda () (nix-emit "(defn f ([x] x) ([x y] x))"))))
 
 ;; --- derivation missing :pname/:name ----------------------------------------
 
@@ -65,33 +65,33 @@
   (check-exn (lambda (e)
                (and (exn:fail? e)
                     (regexp-match? #rx"Infinity|NaN" (exn-message e))))
-             (lambda () (nix-emit "(def x : Float +inf.0)"))))
+             (lambda () (nix-emit "(def x +inf.0)"))))
 
 ;; --- mod operator emits inline arithmetic, not /* mod */ comment ------------
 
 (test-case "mod operator emits inline arithmetic"
-  (define out (nix-emit "(def x : Int (mod 10 3))"))
+  (define out (nix-emit "(def x (mod 10 3))"))
   (check-true (string-contains? out "(10 - (10 / 3) * 3)"))
   (check-false (string-contains? out "/* mod */")))
 
 ;; --- loop with recur actually recurses --------------------------------------
 
 (test-case "loop body recur emits self-call, not null comment"
-  (define out (nix-emit "(def f : Any (fn [(n : Int)] : Any (loop [i n] (if (<= i 0) 0 (recur (- i 1))))))"))
+  (define out (nix-emit "(def f (fn [(n : Int)] (loop [i n] (if (<= i 0) 0 (recur (- i 1))))))"))
   (check-true (string-contains? out "__loop"))
   (check-false (string-contains? out "/* recur outside loop */")))
 
 ;; --- check-expr uses _tag (single underscore) ------------------------------
 
 (test-case "check-expr uses _tag (single underscore)"
-  (define out (nix-emit "(def x : Any (check (foo)))"))
+  (define out (nix-emit "(def x (check (foo)))"))
   (check-true (string-contains? out "r._tag"))
   (check-false (string-contains? out "r.__tag")))
 
 ;; --- try-form unwraps the tryEval struct ------------------------------------
 
 (test-case "try-form unwraps tryEval to value-or-null"
-  (define out (nix-emit "(def x : Any (try (foo)))"))
+  (define out (nix-emit "(def x (try (foo)))"))
   (check-true (string-contains? out "builtins.tryEval"))
   (check-true (string-contains? out "__t.success"))
   (check-true (string-contains? out "__t.value")))
@@ -99,6 +99,6 @@
 ;; --- import is not mangled --------------------------------------------------
 
 (test-case "import is not mangled (it's a function, not keyword)"
-  (define out (nix-emit "(def x : Any (import nixpkgs))"))
+  (define out (nix-emit "(def x (import nixpkgs))"))
   (check-true (string-contains? out "import nixpkgs"))
   (check-false (string-contains? out "import'")))

@@ -10,6 +10,12 @@
 set -euo pipefail
 source "$(dirname "$0")/_beagle-racket"
 
+if [[ "${BEAGLE_EXPERIMENTAL_OPERATIVE:-}" != "1" ]]; then
+    echo "beagle-op-run: operative checker is experimental and not shipping — see ~/code/life-os/threads/20260530180100-beagle_type_system_implementation_against_v0_15_surface.md" >&2
+    echo "  (set BEAGLE_EXPERIMENTAL_OPERATIVE=1 to opt in)" >&2
+    exit 1
+fi
+
 if [[ $# -ne 1 ]]; then
     echo "usage: beagle-op-run <source>" >&2
     exit 2

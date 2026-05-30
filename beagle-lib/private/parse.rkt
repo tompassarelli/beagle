@@ -250,12 +250,26 @@
                               #:union-members [imp-union-members #f]
                               #:parametric-unions [imp-param-unions #f])
   (define datums (read-beagle-datums mod-path))
+  ;; Pre-pass: collect names that have an explicit (claim NAME TYPE) so the
+  ;; def/defn import pass knows to prefer claim types over the weaker inferred
+  ;; (Any-return) type derived from a bare defn.
+  (define imp-claim-names (make-hasheq))
+  (for ([d (in-list datums)])
+    (match d
+      [(list 'claim (? symbol? name) _) (hash-set! imp-claim-names name #t)]
+      [_ (void)]))
   (define (reg! name type)
     (hash-set! externs (qualify-name prefix name) type)
     (unless (hash-has-key? externs name)
       (hash-set! externs name type))
     (when imp-symbol-ns
       (hash-set! imp-symbol-ns name prefix)))
+  ;; defn-reg! — register an inferred function type for a defn, but only if
+  ;; the same module hasn't already declared a (claim NAME T) for it. The
+  ;; claim is more precise (carries the return type), so we keep it.
+  (define (defn-reg! name type)
+    (unless (hash-ref imp-claim-names name #f)
+      (reg! name type)))
   (for ([d (in-list datums)])
     (match d
       [(list 'declare-extern (? symbol? name) type-expr)
@@ -387,21 +401,36 @@
                     (hasheq 'params type-vars
                             'members mnames
                             'member-fields member-fields-hash)))]
-      [(list 'def (? symbol? name) ': type-expr _)
-       (reg! name (parse-type type-expr))]
-      [(list 'defonce (? symbol? name) ': type-expr _)
-       (reg! name (parse-type type-expr))]
-      [(list 'defn (? symbol? name) params-form ': ret-type body ...)
-       (define-values (parsed rest-p) (parse-params params-form))
-       (define ptypes (map (lambda (p) (or (param-type p) (type-prim 'Any))) parsed))
-       (define rtype (and rest-p (or (param-type rest-p) (type-prim 'Any))))
-       (reg! name (type-fn ptypes rtype (parse-type ret-type)))]
+      ;; Inline `: T` annotations on def/defonce/defn are no longer accepted
+      ;; on the surface. Reject explicitly so imported modules surface the
+      ;; same migration pointer as authored sources — silent skipping here
+      ;; would leave the imported module type-less and produce confusing
+      ;; downstream errors at the call site.
+      [(list 'def (? symbol? name) ': _ _)
+       (raise-parse-error 'inline-type-annotation
+                          "(def ~a : ...) — inline type annotations on def are not supported. Separate the type into a claim form:\n  (claim ~a TYPE)\n  (def ~a VALUE)"
+                          name name name)]
+      [(list 'defonce (? symbol? name) ': _ _)
+       (raise-parse-error 'inline-type-annotation
+                          "(defonce ~a : ...) — inline type annotations on defonce are not supported. Separate the type into a claim form:\n  (claim ~a TYPE)\n  (defonce ~a VALUE)"
+                          name name name)]
+      [(list 'defn (? symbol? name) _ ': _ _ ...)
+       (raise-parse-error 'inline-type-annotation
+                          "(defn ~a [params] : RET ...) — inline return-type annotations on defn are not supported. Separate the type into a claim form:\n  (claim ~a (-> ARG-TYPES... RET-TYPE))\n  (defn ~a [params] body...)"
+                          name name name)]
       [(list 'defn (? symbol? name) params-form body ...)
-       #:when (or (null? body) (not (eq? (car body) ':)))
        (define-values (parsed rest-p) (parse-params params-form))
        (define ptypes (map (lambda (p) (or (param-type p) (type-prim 'Any))) parsed))
        (define rtype (and rest-p (or (param-type rest-p) (type-prim 'Any))))
-       (reg! name (type-fn ptypes rtype (type-prim 'Any)))]
+       ;; Defer to claim-derived type if one exists for this name in the same
+       ;; imported module (claims carry return types; bare defn import infers
+       ;; only ANY return).
+       (defn-reg! name (type-fn ptypes rtype (type-prim 'Any)))]
+      ;; (claim NAME TYPE) — out-of-band type carrier. Register the name with
+      ;; the claim's type so cross-module call sites can see it as typed even
+      ;; when the paired (def …) / (defn …) was untyped.
+      [(list 'claim (? symbol? name) type-expr)
+       (reg! name (parse-type type-expr))]
       [_ (void)])))
 
 ;; --- entry point -----------------------------------------------------------
@@ -588,36 +617,11 @@
 
 ;; --- per-form parsing ------------------------------------------------------
 
-;; Deprecation hints for transitional Nix-namespace aliases.
-;;
-;; Phase 1 of the namespace migration (see
-;; ~/code/life-os/threads/20260530170000-beagle_corpus_migration_nix_namespacing.md)
-;; introduced `nix/assert`, `nix/with-cfg`, and `nix/with` as the canonical
-;; surface forms. The bare names remain accepted as transitional aliases so
-;; the existing corpus keeps building, but every parse of a bare form emits
-;; a non-blocking hint to stderr so the migration sweep has feedback.
-;;
-;; Suppress for the corpus-migration script with BEAGLE_NO_DEPRECATION_HINTS=1
-;; (kept separate from BEAGLE_NO_LINT so the migration step can silence these
-;; specifically without losing other lint output).
-(define (deprecation-hints-suppressed?)
-  (getenv "BEAGLE_NO_DEPRECATION_HINTS"))
-
-(define (warn-deprecation! bare-name canonical-name loc)
-  (unless (deprecation-hints-suppressed?)
-    (define loc-str
-      (cond
-        [(and loc (src-loc-source loc) (src-loc-line loc))
-         (format "~a:~a:~a: "
-                 (src-loc-source loc)
-                 (src-loc-line loc)
-                 (or (src-loc-col loc) 0))]
-        [else ""]))
-    (fprintf (current-error-port)
-             "~adeprecation: bare `~a` is a transitional alias; prefer `~a`. See ~~/code/life-os/threads/20260530170000-beagle_corpus_migration_nix_namespacing.md\n"
-             loc-str
-             bare-name
-             canonical-name)))
+;; (Bare-alias deprecation helpers `warn-deprecation!` and
+;; `deprecation-hints-suppressed?` were removed when the bare Nix-namespaced
+;; aliases — `assert`, `with-cfg`, Nix-scope `with` — were hard-rejected. The
+;; canonical `nix/`-prefixed forms are the only accepted spellings; see the
+;; `'bare-nix-form` rejection arms in parse-expr for the migration pointers.)
 
 (define (parse-top x)
   (define d (->datum x))
@@ -947,15 +951,22 @@
             "(~a ...) escape hatches are not available. Beagle has no per-target escape by design — add to stdlib-*.rkt or write a separate target-language file and import it."
             (car d))]
 
-    [(list 'def (? symbol? name) marker type-expr value)
+    ;; Inline `: T` annotations on def removed. Reject pointedly so the
+    ;; bare-form match below doesn't swallow `(def name : T value)` as
+    ;; "wrong arity" — the user's intent is clear; surface the migration.
+    [(list 'def (? symbol? name) marker _ _)
      #:when (annotation-marker? marker)
-     (def-form name (parse-type type-expr) (parse-expr (or (stx-ref subs 4) value)))]
+     (raise-parse-error 'inline-type-annotation
+                        "(def ~a : ...) — inline type annotations on def are not supported. Separate the type into a claim form:\n  (claim ~a TYPE)\n  (def ~a VALUE)"
+                        name name name)]
     [(list 'def (? symbol? name) value)
      (def-form name #f (parse-expr (or (stx-ref subs 2) value)))]
 
-    [(list 'defonce (? symbol? name) marker type-expr value)
+    [(list 'defonce (? symbol? name) marker _ _)
      #:when (annotation-marker? marker)
-     (defonce-form name (parse-type type-expr) (parse-expr (or (stx-ref subs 4) value)))]
+     (raise-parse-error 'inline-type-annotation
+                        "(defonce ~a : ...) — inline type annotations on defonce are not supported. Separate the type into a claim form:\n  (claim ~a TYPE)\n  (defonce ~a VALUE)"
+                        name name name)]
     [(list 'defonce (? symbol? name) value)
      (defonce-form name #f (parse-expr (or (stx-ref subs 2) value)))]
 
@@ -971,18 +982,20 @@
      (defn-multi name (map parse-arity-clause
                            (bare-multi-arity-clauses args)) #f)]
 
-    [(list 'defn (? symbol? name) params-form marker return-type ':raises (? symbol? err-type) body ...)
+    ;; Inline `: RET` annotations on defn removed (with or without :raises).
+    ;; Reject before the bare-form fallthrough so the rejection message names
+    ;; the claim-form migration explicitly rather than reporting the marker
+    ;; as an unbound symbol downstream.
+    [(list 'defn (? symbol? name) _ marker _ ':raises _ _ ...)
      #:when (annotation-marker? marker)
-     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
-       (defn-form name parsed rest-p
-                  (parse-type return-type)
-                  (parse-body (or (stx-tail subs 7) body)) #f (->datum err-type)))]
-    [(list 'defn (? symbol? name) params-form marker return-type body ...)
+     (raise-parse-error 'inline-type-annotation
+                        "(defn ~a [params] : RET :raises ERR ...) — inline return-type annotations on defn are not supported. Separate the type into a claim form:\n  (claim ~a (-> ARG-TYPES... RET-TYPE :raises ERR))\n  (defn ~a [params] body...)"
+                        name name name)]
+    [(list 'defn (? symbol? name) _ marker _ _ ...)
      #:when (annotation-marker? marker)
-     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
-       (defn-form name parsed rest-p
-                  (parse-type return-type)
-                  (parse-body (or (stx-tail subs 5) body)) #f #f))]
+     (raise-parse-error 'inline-type-annotation
+                        "(defn ~a [params] : RET ...) — inline return-type annotations on defn are not supported. Separate the type into a claim form:\n  (claim ~a (-> ARG-TYPES... RET-TYPE))\n  (defn ~a [params] body...)"
+                        name name name)]
     [(list 'defn (? symbol? name) params-form body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
@@ -1000,12 +1013,11 @@
      (defn-multi name (map parse-arity-clause
                            (bare-multi-arity-clauses args)) #t)]
 
-    [(list 'defn (list '#%meta _ (? symbol? name)) params-form marker return-type body ...)
+    [(list 'defn (list '#%meta _ (? symbol? name)) _ marker _ _ ...)
      #:when (annotation-marker? marker)
-     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
-       (defn-form name parsed rest-p
-                  (parse-type return-type)
-                  (parse-body (or (stx-tail subs 5) body)) #t #f))]
+     (raise-parse-error 'inline-type-annotation
+                        "(defn ^:private ~a [params] : RET ...) — inline return-type annotations on defn are not supported. Separate the type into a claim form:\n  (claim ~a (-> ARG-TYPES... RET-TYPE))\n  (defn ^:private ~a [params] body...)"
+                        name name name)]
     [(list 'defn (list '#%meta _ (? symbol? name)) params-form body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
@@ -1023,22 +1035,36 @@
      (defn-multi name (map parse-arity-clause
                            (bare-multi-arity-clauses args)) #t)]
 
-    [(list 'defn- (? symbol? name) params-form marker return-type ':raises (? symbol? err-type) body ...)
+    [(list 'defn- (? symbol? name) _ marker _ ':raises _ _ ...)
      #:when (annotation-marker? marker)
-     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
-       (defn-form name parsed rest-p
-                  (parse-type return-type)
-                  (parse-body (or (stx-tail subs 7) body)) #t (->datum err-type)))]
-    [(list 'defn- (? symbol? name) params-form marker return-type body ...)
+     (raise-parse-error 'inline-type-annotation
+                        "(defn- ~a [params] : RET :raises ERR ...) — inline return-type annotations on defn- are not supported. Separate the type into a claim form:\n  (claim ~a (-> ARG-TYPES... RET-TYPE :raises ERR))\n  (defn- ~a [params] body...)"
+                        name name name)]
+    [(list 'defn- (? symbol? name) _ marker _ _ ...)
      #:when (annotation-marker? marker)
-     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
-       (defn-form name parsed rest-p
-                  (parse-type return-type)
-                  (parse-body (or (stx-tail subs 5) body)) #t #f))]
+     (raise-parse-error 'inline-type-annotation
+                        "(defn- ~a [params] : RET ...) — inline return-type annotations on defn- are not supported. Separate the type into a claim form:\n  (claim ~a (-> ARG-TYPES... RET-TYPE))\n  (defn- ~a [params] body...)"
+                        name name name)]
     [(list 'defn- (? symbol? name) params-form body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
                   #f (parse-body (or (stx-tail subs 3) body)) #t #f))]
+
+    ;; (claim NAME TYPE) — out-of-band type assertion for a paired def/defn.
+    ;; The inline `(def name : T value)` / `(defn f [..] : R ..)` surface was
+    ;; removed in v0.16; the inline-type rejection error messages point here
+    ;; (see raise-parse-error 'inline-type-annotation sites above). The
+    ;; checker's build-initial-env walks all top-level forms collecting
+    ;; (claim NAME TYPE) pairs into a claim-env hash; subsequent def/defn
+    ;; forms missing inline annotations consult that hash. See check.rkt.
+    [(list 'claim (? symbol? name) type-expr)
+     (claim-form name (parse-type type-expr))]
+    [(list 'claim _ ...)
+     (error 'beagle
+            (string-append
+             "(claim NAME TYPE) takes exactly 2 arguments — a symbol naming the "
+             "paired def/defn binding and a type expression. Got: ~v")
+            d)]
 
     [(list 'defrecord (? symbol? name) fields-form)
      (record-form name (parse-record-fields (or (stx-ref subs 2) fields-form)))]
@@ -1127,23 +1153,24 @@
     [(list 'rec-attrs pairs ...)
      (nix-rec-attrs (parse-nix-rec-pairs (or (stx-tail subs 1) pairs)))]
 
-    [(list (or 'assert 'nix/assert) cond-expr body-expr)
-     ;; `nix/assert` is the canonical name; bare `assert` is a transitional
-     ;; alias kept for the existing corpus until the Phase 1 sweep
-     ;; (~/code/life-os/threads/20260530160100-...). Both parse identically.
-     (when (eq? (car d) 'assert)
-       (warn-deprecation! 'assert 'nix/assert (stx->src-loc (stx-ref subs 0))))
+    [(list 'nix/assert cond-expr body-expr)
+     ;; Canonical Nix assertion form. Bare `(assert ...)` is HARD-REJECTED —
+     ;; see the bare-`assert` arm below.
      (nix-assert (parse-expr (or (stx-ref subs 1) cond-expr))
                  (parse-expr (or (stx-ref subs 2) body-expr)))]
+    [(list 'assert _ _)
+     (raise-parse-error 'bare-nix-form
+                        "(assert ...) — bare `assert` is not supported. Beagle namespaces target-specific forms; use `(nix/assert COND BODY)`.")]
 
-    [(list (or 'with-cfg 'nix/with-cfg) path-expr body-expr)
+    [(list 'nix/with-cfg path-expr body-expr)
      ;; (nix/with-cfg config.myConfig.modules.X BODY) → introduces `cfg = config...;`
      ;; let-binding and rewrites config.myConfig.modules.X.foo to cfg.foo in BODY.
-     ;; `with-cfg` is a transitional alias for the existing corpus.
-     (when (eq? (car d) 'with-cfg)
-       (warn-deprecation! 'with-cfg 'nix/with-cfg (stx->src-loc (stx-ref subs 0))))
+     ;; Bare `(with-cfg ...)` is HARD-REJECTED — see the bare-`with-cfg` arm below.
      (nix-with-cfg (parse-expr (or (stx-ref subs 1) path-expr))
                    (parse-expr (or (stx-ref subs 2) body-expr)))]
+    [(list 'with-cfg _ _)
+     (raise-parse-error 'bare-nix-form
+                        "(with-cfg ...) — bare `with-cfg` is not supported. Beagle namespaces target-specific forms; use `(nix/with-cfg PATH BODY)`.")]
 
     [(list 'get-or base path-expr default-expr)
      (nix-get-or (parse-expr (or (stx-ref subs 1) base))
@@ -1469,20 +1496,18 @@
 
     [(list 'nix/with ns-expr body-expr)
      ;; Canonical Nix scope form. Unambiguous (no record-update shape collision).
-     ;; Bare `(with ns body)` is the transitional alias kept for the existing
-     ;; corpus; the Phase 1 sweep (~/code/life-os/threads/20260530160100-...)
-     ;; migrates corpus usages to `nix/with`.
+     ;; Bare `(with ns body)` Nix-scope shape is HARD-REJECTED — see the
+     ;; bare-`with` arm below.
      (nix-with (parse-expr (or (stx-ref subs 1) ns-expr))
                (parse-expr (or (stx-ref subs 2) body-expr)))]
 
     [(list 'with target-expr updates ...)
-     ;; (with ns body) — Nix scope (parses to nix-with). TRANSITIONAL.
-     ;;   Prefer `(nix/with ns body)` — see rule "Prefix where meaning diverges
-     ;;   from Clojure" in beagle/CLAUDE.md.
      ;; (with target [:k v] [:k v] ...) — record update (with-form). STAYS bare;
      ;;   not a Clojure collision.
-     ;; Disambiguate by shape: nix-with has exactly one body arg whose top-level
-     ;; form is NOT a [:keyword value] update bracket.
+     ;; (with ns body) — Nix scope shape. HARD-REJECTED — point at `nix/with`.
+     ;; Disambiguate by shape: the record-update form has every update as a
+     ;; [:keyword value ...] bracket; anything else is the (removed) Nix-scope
+     ;; shape and gets the migration pointer.
      (cond
        [(and (= (length updates) 1)
              (let ([d (->datum (car updates))])
@@ -1490,12 +1515,9 @@
                          (>= (length (bracket-body d)) 2)
                          (let ([first (car (bracket-body d))])
                            (and (symbol? first) (keyword-sym? first)))))))
-        ;; Bare `(with ns body)` is the transitional Nix-scope alias.
-        ;; Fire deprecation hint (record-update shape `(with target [:k v] …)`
-        ;; stays bare and does NOT fire — handled in the else branch).
-        (warn-deprecation! 'with 'nix/with (stx->src-loc (stx-ref subs 0)))
-        (nix-with (parse-expr (or (stx-ref subs 1) target-expr))
-                  (parse-expr (or (stx-ref subs 2) (car updates))))]
+        ;; Bare `(with ns body)` Nix-scope shape — hard reject.
+        (raise-parse-error 'bare-nix-form
+                           "(with NS BODY) — bare Nix-scope `with` is not supported. Beagle namespaces target-specific forms; use `(nix/with NS BODY)`.")]
        [else
         (parse-with-form (or (stx-ref subs 1) target-expr)
                          (or (stx-tail subs 2) updates))])]

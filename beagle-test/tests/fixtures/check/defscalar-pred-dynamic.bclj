@@ -1,3 +1,4 @@
 (defscalar Percentage Int :where (>= 0) (<= 100))
-(defn make-pct [(n : Int)] : Percentage
+(claim make-pct [Int -> Percentage])
+(defn make-pct [(n : Int)]
   (->Percentage n))

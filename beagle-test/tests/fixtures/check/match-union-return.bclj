@@ -5,7 +5,8 @@
 
 ;; match positional destructure: c and d are String (name field)
 ;; both arms return String, so match infers String
-(defn pet-name [] : String
+(claim pet-name [-> String])
+(defn pet-name []
   (match (get-pet)
     [(Cat c) c]
     [(Dog d) d]))

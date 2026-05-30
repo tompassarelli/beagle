@@ -157,6 +157,7 @@
                   nixos-type-mismatch sql-group-by sql-table sql-column
                   sql-type nixos-unknown-option
                   removed-form unknown-form duplicate-meta bad-meta-value
+                  inline-type-annotation bare-nix-form
                   parse-error string-key-lint unknown-option duplicate
                   missing-default))
   (for ([k (in-list documented-kinds)])

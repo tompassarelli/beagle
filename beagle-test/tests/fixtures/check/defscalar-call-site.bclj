@@ -1,3 +1,5 @@
 (defscalar OrderId Int)
-(defn lookup [(id : OrderId)] : Int 0)
-(defn bad [] : Int (lookup 42))
+(claim lookup [OrderId -> Int])
+(defn lookup [(id : OrderId)] 0)
+(claim bad [-> Int])
+(defn bad [] (lookup 42))

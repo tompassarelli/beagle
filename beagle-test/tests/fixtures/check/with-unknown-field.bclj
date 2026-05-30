@@ -1,3 +1,4 @@
 (defrecord Person [(name : String) (age : Int)])
-(def p : Person (->Person "alice" 25))
+(claim p Person)
+(def p (->Person "alice" 25))
 (def q (with p [:email "a@b.com"]))

@@ -3,7 +3,8 @@
 (declare-extern lookup-product [Int -> Product])
 
 ;; if with divergent branches returns (U Product Nil)
-(defn find-product [(id : Int)] : (U Product Nil)
+(claim find-product [Int -> (U Product Nil)])
+(defn find-product [(id : Int)]
   (if (> id 0)
     (lookup-product id)
     nil))

@@ -1,3 +1,5 @@
 (declare-extern stringify (forall [(T <: (U String Int))] [T -> String]))
-(def a : String (stringify 42))
-(def b : String (stringify "hello"))
+(claim a String)
+(def a (stringify 42))
+(claim b String)
+(def b (stringify "hello"))

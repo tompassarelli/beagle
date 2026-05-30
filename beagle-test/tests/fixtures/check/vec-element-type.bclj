@@ -1,9 +1,11 @@
 (defrecord Product [(id : Int) (name : String)])
 
-(defn process-products [(products : (Vec Product))] : Int
+(claim process-products [(Vec Product) -> Int])
+(defn process-products [(products : (Vec Product))]
   (count products))
 
 ;; should pass: homogeneous vec of Products
-(defn good [] : Int
+(claim good [-> Int])
+(defn good []
   (let [ps [(->Product 1 "A") (->Product 2 "B")]]
     (process-products ps)))

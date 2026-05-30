@@ -1,9 +1,11 @@
 (defrecord Product [(id : Int) (name : String)])
 
-(defn get-products [] : (Vec Product)
+(claim get-products [-> (Vec Product)])
+(defn get-products []
   [(->Product 1 "A") (->Product 2 "B")])
 
 ;; should fail: product-name returns String, not Int
-(defn bad-names [] : (Vec Int)
+(claim bad-names [-> (Vec Int)])
+(defn bad-names []
   (for [p (get-products)]
     (product-name p)))

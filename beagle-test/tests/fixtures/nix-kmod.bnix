@@ -11,5 +11,5 @@
      (lib/mkIf config.hardware.framework.enableKmod
        {:assertions [{:assertion (lib/versionAtLeast config.boot.kernelPackages.kernel.version "6.10")
                       :message "Requires Linux 6.10 or above"}]
-        :boot {:extraModulePackages (with config.boot.kernelPackages [framework-laptop-kmod])
+        :boot {:extraModulePackages (nix/with config.boot.kernelPackages [framework-laptop-kmod])
                :kernelModules ["cros_ec" "cros_ec_lpcs"]}})})

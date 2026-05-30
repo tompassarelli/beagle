@@ -1,2 +1,3 @@
 (def xs [1 2 3])
-(def ys : (Vec Int) (mapv inc xs))
+(claim ys (Vec Int))
+(def ys (mapv inc xs))

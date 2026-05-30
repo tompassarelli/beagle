@@ -2,7 +2,8 @@
 (defrecord Y [(b : String)])
 (defrecord Z [(c : Bool)])
 (defunion XYZ X Y Z)
-(defn handle [(e : XYZ)] : Int
+(claim handle [XYZ -> Int])
+(defn handle [(e : XYZ)]
   (match e
     [(X a) a]
     [(Y b) 0]))

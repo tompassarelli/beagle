@@ -460,20 +460,60 @@
   ;; parametric unions imported from other modules (for match narrowing with type-param substitution)
   (for ([(union-name pdef) (in-hash (program-imported-parametric-unions prog))])
     (hash-set! PARAMETRIC-UNIONS union-name pdef))
+
+  ;; --- claim-form pre-pass --------------------------------------------------
+  ;;
+  ;; The inline `(def name : T value)` / `(defn f [..] : R ..)` surface was
+  ;; removed in v0.16 (see parse.rkt raise-parse-error 'inline-type-annotation
+  ;; sites). The replacement is an out-of-band `(claim NAME TYPE)` form that
+  ;; sits next to its paired binding. Walk all top-level forms once here to
+  ;; collect every claim into a hash; the def/defn pre-pass below consults
+  ;; it when the binding has no inline annotation.
+  (define claim-env (make-hash))
+  (for ([raw-form (in-list (program-forms prog))])
+    (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
+    (when (claim-form? form)
+      (hash-set! claim-env (claim-form-name form) (claim-form-type form))))
+
+  ;; Track which claims actually get paired with a def/defn/defonce so we can
+  ;; reject orphan claims (claim NAME T without a matching binding).
+  (define claim-bound (make-hash))
+
   ;; top-level defs / defns (pre-pass so callers can look them up)
   (for ([raw-form (in-list (program-forms prog))])
     (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
     (match form
       [(def-form name (? type? t) _) (hash-set! env name t)]
+      [(def-form name #f _)
+       ;; No inline annotation: consult claim-env. If the name has a claim,
+       ;; bind it in env; otherwise leave unbound (fall through to inference
+       ;; in check-form).
+       (define ct (hash-ref claim-env name #f))
+       (when ct
+         (hash-set! env name ct)
+         (hash-set! claim-bound name #t))]
       [(defonce-form name (? type? t) _) (hash-set! env name t)]
+      [(defonce-form name #f _)
+       (define ct (hash-ref claim-env name #f))
+       (when ct
+         (hash-set! env name ct)
+         (hash-set! claim-bound name #t))]
       [(defn-form name params rest-p (? type? ret) _ _ _)
        (define rtype (and rest-p (param-or-destr-type rest-p)))
        (hash-set! env name
                   (type-fn (map param-or-destr-type params) rtype ret))]
       [(defn-form name params rest-p #f _ _ _)
+       ;; No inline return-type: prefer claim-env's type when present and
+       ;; shaped as a function type. Otherwise fall back to the ANY return.
+       (define ct (hash-ref claim-env name #f))
        (define rtype (and rest-p (param-or-destr-type rest-p)))
-       (hash-set! env name
-                  (type-fn (map param-or-destr-type params) rtype ANY))]
+       (cond
+         [(and ct (type-fn? ct))
+          (hash-set! env name ct)
+          (hash-set! claim-bound name #t)]
+         [else
+          (hash-set! env name
+                     (type-fn (map param-or-destr-type params) rtype ANY))])]
       [(defn-multi name arities _)
        (define alt-types
          (for/list ([a (in-list arities)])
@@ -561,6 +601,19 @@
        (unless (null? preds)
          (hash-set! SCALAR-PREDS name preds))]
       [_ (void)]))
+
+  ;; Orphan-claim check: every (claim NAME TYPE) must pair with a
+  ;; subsequent (or prior) (def NAME ...) / (defonce NAME ...) /
+  ;; (defn NAME ...) in the same program. A claim without a binding is a
+  ;; programmer error — likely a typo in NAME, or a leftover from a
+  ;; deleted binding. Reject loudly so the typo doesn't silently dangle.
+  (for ([(name _ct) (in-hash claim-env)])
+    (unless (hash-ref claim-bound name #f)
+      (raise-diag 'def-type
+                  (format "claim ~a: no paired def/defn/defonce found. Every (claim NAME TYPE) must sit next to a binding of the same name."
+                          name)
+                  (hasheq 'name (symbol->string name)
+                          'cause "orphan-claim"))))
   env)
 
 (define (register-parametric-union! name type-params members member-fields env)
@@ -613,46 +666,57 @@
   (match form
     [(def-form name expected-type value)
      (define inferred (infer-expr value env))
-     (when expected-type
-       (unless (type-compatible? inferred expected-type)
+     ;; Inline annotation OR claim-form-derived env type (see build-initial-env
+     ;; claim pre-pass): both surfaces feed the same def-type check.
+     (define effective-type (or expected-type (hash-ref env name #f)))
+     (when effective-type
+       (unless (type-compatible? inferred effective-type)
          (raise-diag 'def-type
                      (format "def ~a: expected ~a, got ~a"
-                             name (type->string expected-type) (type->string inferred))
+                             name (type->string effective-type) (type->string inferred))
                      (hasheq 'name (symbol->string name)
-                             'expected (type->string expected-type)
+                             'expected (type->string effective-type)
                              'actual (type->string inferred))
                      #:src (src-for value))))]
     [(defonce-form name expected-type value)
      (define inferred (infer-expr value env))
-     (when expected-type
-       (unless (type-compatible? inferred expected-type)
+     (define effective-type (or expected-type (hash-ref env name #f)))
+     (when effective-type
+       (unless (type-compatible? inferred effective-type)
          (raise-diag 'def-type
                      (format "defonce ~a: expected ~a, got ~a"
-                             name (type->string expected-type) (type->string inferred))
+                             name (type->string effective-type) (type->string inferred))
                      (hasheq 'name (symbol->string name)
-                             'expected (type->string expected-type)
+                             'expected (type->string effective-type)
                              'actual (type->string inferred))
                      #:src (src-for value))))]
 
     [(defn-form name params rest-p expected-ret body _ _)
      (define all-params (if rest-p (append params (list rest-p)) params))
      (define body-env (extend-with-params env all-params))
+     ;; If no inline return-type annotation, fall back to a claim-derived
+     ;; function type sitting in env (see build-initial-env claim pre-pass).
+     ;; The env entry is the full type-fn; we only consume its return type.
+     (define env-fn (hash-ref env name #f))
+     (define effective-ret
+       (or expected-ret
+           (and env-fn (type-fn? env-fn) (type-fn-ret env-fn))))
      (parameterize ([current-check-fn-name name])
        (define last-type (last-expr-type body body-env))
-       (when expected-ret
-         (unless (or (type-compatible? last-type expected-ret)
-                     (and (type-app? expected-ret)
-                          (eq? (type-app-ctor expected-ret) 'Promise)
-                          (= 1 (length (type-app-args expected-ret)))
-                          (type-compatible? last-type (car (type-app-args expected-ret)))))
+       (when effective-ret
+         (unless (or (type-compatible? last-type effective-ret)
+                     (and (type-app? effective-ret)
+                          (eq? (type-app-ctor effective-ret) 'Promise)
+                          (= 1 (length (type-app-args effective-ret)))
+                          (type-compatible? last-type (car (type-app-args effective-ret)))))
            (define rtype (and rest-p (param-or-destr-type rest-p)))
-           (define sig (type->string (type-fn (map param-or-destr-type params) rtype expected-ret)))
+           (define sig (type->string (type-fn (map param-or-destr-type params) rtype effective-ret)))
            (raise-diag 'return-type
                        (format "defn ~a: expected return ~a, got ~a"
-                               name (type->string expected-ret) (type->string last-type))
+                               name (type->string effective-ret) (type->string last-type))
                        (hasheq 'name (symbol->string name)
                                'signature (format "~a : ~a" name sig)
-                               'expected (type->string expected-ret)
+                               'expected (type->string effective-ret)
                                'actual (type->string last-type))
                        #:src (src-for (last body))))))]
 
@@ -682,6 +746,10 @@
 
     [(record-form _ _) (void)]
     [(protocol-form _ _) (void)]
+    ;; (claim NAME TYPE) — already collected and applied in build-initial-env.
+    ;; At check-form time the binding is in env; the claim itself has no
+    ;; runtime/type effect of its own.
+    [(claim-form _ _) (void)]
     [(deftype-form _ _ impls)
      (for ([impl (in-list impls)])
        (for ([m (in-list (type-impl-methods impl))])

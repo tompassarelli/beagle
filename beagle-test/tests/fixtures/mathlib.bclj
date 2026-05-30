@@ -2,12 +2,15 @@
 
 (ns mathlib)
 
-(defn add [(x : Int) (y : Int)] : Int
+(claim add [Int Int -> Int])
+(defn add [(x : Int) (y : Int)]
   (+ x y))
 
-(def pi : Float 3.14159)
+(claim pi Float)
+(def pi 3.14159)
 
-(defn greet [(name : String)] : String
+(claim greet [String -> String])
+(defn greet [(name : String)]
   (str "hello " name))
 
 (defn untyped-inc [x]

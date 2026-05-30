@@ -1,4 +1,5 @@
 (declare-extern get-val [-> (U String Int)])
-(defn describe [] : String
+(claim describe [-> String])
+(defn describe []
   (let [x (get-val)]
     (if (string? x) (subs x 0) "number")))

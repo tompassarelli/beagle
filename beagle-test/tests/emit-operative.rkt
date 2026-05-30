@@ -5,8 +5,16 @@
 ;; each target matches expectations.
 
 (require rackunit
-         racket/string
-         beagle/private/emit-operative)
+         racket/string)
+
+;; Operative checker is experimental and quarantined behind
+;; BEAGLE_EXPERIMENTAL_OPERATIVE=1. See
+;; ~/code/life-os/threads/20260530180100-beagle_type_system_implementation_against_v0_15_surface.md
+(unless (equal? (getenv "BEAGLE_EXPERIMENTAL_OPERATIVE") "1")
+  (displayln "emit-operative tests skipped (set BEAGLE_EXPERIMENTAL_OPERATIVE=1 to run)")
+  (exit 0))
+
+(require beagle/private/emit-operative)
 
 (define Q (string->symbol "'"))
 (define (Q-form . items) (cons Q items))

@@ -37,17 +37,19 @@
 ;; --- basic forms -----------------------------------------------------------
 
 (test-case "def emits let binding"
-  (define out (nix-emit "(define-target nix) (def x : Int 42)"))
+  ;; Inline `: Int` removed — bare form still emits the same let binding.
+  (define out (nix-emit "(define-target nix) (def x 42)"))
   (check-true (string-contains? out "x = 42;"))
   (check-true (string-contains? out "let")))
 
 (test-case "defn emits curried function"
-  (define out (nix-emit "(define-target nix) (defn add [(a : Int) (b : Int)] : Int (+ a b))"))
+  (define out (nix-emit "(define-target nix) (defn add [(a : Int) (b : Int)] (+ a b))"))
   (check-true (string-contains? out "add = a: b:"))
   (check-true (string-contains? out "a + b")))
 
 (test-case "fn emits lambda"
-  (define out (nix-emit "(define-target nix) (def f : Any (fn [(x : Int)] : Int (+ x 1)))"))
+  ;; Drop inline `: Any` / `: Int` — typed params on the inner fn are kept.
+  (define out (nix-emit "(define-target nix) (def f (fn [(x : Int)] (+ x 1)))"))
   (check-true (string-contains? out "x:"))
   (check-true (string-contains? out "x + 1")))
 
@@ -75,14 +77,14 @@
   (check-true (and out (string-contains? out "\"local-fs.target\""))))
 
 (test-case "map emits nix attrset"
-  (define out (nix-emit-forms '(define-target nix) `(def m : Any ,(mt ':a 1 ':b 2))))
+  (define out (nix-emit-forms '(define-target nix) `(def m ,(mt ':a 1 ':b 2))))
   (check-true (string-contains? out "a = 1;"))
   (check-true (string-contains? out "b = 2;"))
   (check-true (string-contains? out "{")))
 
 (test-case "nested attrset"
   (define inner (mt ':inner 42))
-  (define out (nix-emit-forms '(define-target nix) `(def m : Any ,(mt ':outer inner))))
+  (define out (nix-emit-forms '(define-target nix) `(def m ,(mt ':outer inner))))
   (check-true (and out (string-contains? out "outer ="))))
 
 ;; --- records ---------------------------------------------------------------
@@ -109,12 +111,12 @@
 
 (test-case "map fn emits builtins.map"
   (define out (nix-emit-forms '(define-target nix)
-    `(map (fn ,(br '(x : Int)) : Int (+ x 1)) ,(br 1 2 3))))
+    `(map (fn ,(br '(x : Int)) (+ x 1)) ,(br 1 2 3))))
   (check-true (string-contains? out "builtins.map")))
 
 (test-case "filter fn emits builtins.filter"
   (define out (nix-emit-forms '(define-target nix)
-    `(filter (fn ,(br '(x : Int)) : Bool (> x 0)) ,(br 1 -1 2))))
+    `(filter (fn ,(br '(x : Int)) (> x 0)) ,(br 1 -1 2))))
   (check-true (string-contains? out "builtins.filter")))
 
 (test-case "nil? emits null check"
@@ -145,7 +147,7 @@
 ;; --- dotted option paths ---------------------------------------------------
 
 (test-case "dotted keyword keys become Nix option paths"
-  (define out (nix-emit-forms '(define-target nix) `(def m : Any ,(mt ':services.openssh.enable #t))))
+  (define out (nix-emit-forms '(define-target nix) `(def m ,(mt ':services.openssh.enable #t))))
   (check-true (string-contains? out "services.openssh.enable = true;")))
 
 ;; --- cond ------------------------------------------------------------------
@@ -234,8 +236,8 @@
   (define out (nix-emit "(define-target nix) (inherit-from pkgs vim git)"))
   (check-true (and out (string-contains? out "inherit (pkgs) vim git;"))))
 
-(test-case "with emits with"
-  (define out (nix-emit "(define-target nix) (with lib [1 2 3])"))
+(test-case "nix/with emits with"
+  (define out (nix-emit "(define-target nix) (nix/with lib [1 2 3])"))
   (check-true (and out (string-contains? out "with lib;")))
   (check-true (and out (string-contains? out "[ 1 2 3 ]"))))
 
@@ -259,8 +261,8 @@
   (check-true (and out (string-contains? out "x = 1;")))
   (check-true (and out (string-contains? out "y = x;"))))
 
-(test-case "assert emits assert"
-  (define out (nix-emit "(define-target nix) (assert true 42)"))
+(test-case "nix/assert emits assert"
+  (define out (nix-emit "(define-target nix) (nix/assert true 42)"))
   (check-true (and out (string-contains? out "assert true; 42"))))
 
 (test-case "get-or emits select with or-default"
@@ -299,7 +301,7 @@
 
 (test-case "unsafe-nix is rejected at parse time"
   ;; nix-emit swallows the parse error and returns #f when the program fails.
-  (check-false (nix-emit "(def x : Any (unsafe-nix \"hello\"))")))
+  (check-false (nix-emit "(def x (unsafe-nix \"hello\"))")))
 
 ;; --- qualified calls: / -> . --------------------------------------------------
 
@@ -313,7 +315,7 @@
   (check-true (and out (string-contains? out "config.boot.kernelPackages.kernel"))))
 
 (test-case "ns/ symbol in non-call position emits as ns.sym"
-  (define out (nix-emit "(define-target nix) (def x : Any pkgs/hello)"))
+  (define out (nix-emit "(define-target nix) (def x pkgs/hello)"))
   (check-true (and out (string-contains? out "pkgs.hello")))
   (check-false (string-contains? out "pkgs/hello")))
 
@@ -343,20 +345,20 @@
 (test-case "quoted vector '[…] parses as vec-form (matches bare [..])"
   (define out (nix-emit-forms
                '(define-target nix)
-               `(def xs : Any (quote ,(br 1 2 3)))))
+               `(def xs (quote ,(br 1 2 3)))))
   (define ref (nix-emit-forms
                '(define-target nix)
-               `(def xs : Any ,(br 1 2 3))))
+               `(def xs ,(br 1 2 3))))
   (check-true (and out (string-contains? out "[ 1 2 3 ]")))
   (check-equal? out ref))
 
 (test-case "quoted map '{…} parses as map-form (matches bare {..})"
   (define out (nix-emit-forms
                '(define-target nix)
-               `(def m : Any (quote ,(mt ':a 1 ':b 2)))))
+               `(def m (quote ,(mt ':a 1 ':b 2)))))
   (define ref (nix-emit-forms
                '(define-target nix)
-               `(def m : Any ,(mt ':a 1 ':b 2))))
+               `(def m ,(mt ':a 1 ':b 2))))
   (check-true (and out (string-contains? out "a = 1")))
   (check-true (and out (string-contains? out "b = 2")))
   (check-equal? out ref))
@@ -365,49 +367,43 @@
   (define st (lambda xs (cons SET-TAG xs)))
   (define out (nix-emit-forms
                '(define-target nix)
-               `(def s : Any (quote ,(st 1 2 3)))))
+               `(def s (quote ,(st 1 2 3)))))
   (define ref (nix-emit-forms
                '(define-target nix)
-               `(def s : Any ,(st 1 2 3))))
+               `(def s ,(st 1 2 3))))
   (check-equal? out ref))
 
 (test-case "quoted symbol still produces a quoted AST node (unchanged)"
   ;; Regression: only containers get the strip-quote treatment.
   ;; '(a b c) and 'symbol must continue to parse as `quoted`.
-  (define out (nix-emit "(define-target nix) (def s : Any 'hello)"))
+  (define out (nix-emit "(define-target nix) (def s 'hello)"))
   (check-true (and out (string-contains? out "\"hello\""))))
 
-;; --- nix/-prefixed aliases (Phase 1 silent-rename targets) ------------------
+;; --- nix/-prefixed canonical Nix-namespaced forms ---------------------------
 ;; Per the "Prefix where meaning diverges from Clojure" rule in beagle/CLAUDE.md,
 ;; Nix-specific forms whose Clojure namesake means something different get the
-;; nix/ prefix. `nix/assert` / `nix/with` / `nix/with-cfg` are now the canonical
-;; spellings; the bare `assert` / `with` / `with-cfg` remain as transitional
-;; aliases pending the corpus sweep.
+;; nix/ prefix. `nix/assert` / `nix/with` / `nix/with-cfg` are the ONLY accepted
+;; spellings; bare `assert` / `with-cfg` / Nix-scope `with` are HARD-REJECTED at
+;; parse time (see beagle-test/tests/parse.rkt regression tests).
 
-(test-case "nix/assert parses identically to bare assert"
-  (define out (nix-emit "(define-target nix) (def x : Any (nix/assert true 42))"))
-  (define ref (nix-emit "(define-target nix) (def x : Any (assert true 42))"))
-  (check-equal? out ref)
+(test-case "nix/assert emits Nix assert form"
+  (define out (nix-emit "(define-target nix) (def x (nix/assert true 42))"))
   (check-true (and out (string-contains? out "assert true"))))
 
-(test-case "nix/with parses identically to Nix-scope (with ns body)"
-  (define out (nix-emit "(define-target nix) (def x : Any (nix/with pkgs 42))"))
-  (define ref (nix-emit "(define-target nix) (def x : Any (with pkgs 42))"))
-  (check-equal? out ref)
+(test-case "nix/with emits Nix scope form"
+  (define out (nix-emit "(define-target nix) (def x (nix/with pkgs 42))"))
   (check-true (and out (string-contains? out "with pkgs;"))))
 
-(test-case "nix/with-cfg parses identically to bare with-cfg"
+(test-case "nix/with-cfg emits cfg-let binding"
   (define out (nix-emit
-               "(define-target nix) (def x : Any (nix/with-cfg config.myConfig.x 42))"))
-  (define ref (nix-emit
-               "(define-target nix) (def x : Any (with-cfg config.myConfig.x 42))"))
-  (check-equal? out ref))
+               "(define-target nix) (def x (nix/with-cfg config.myConfig.x 42))"))
+  (check-true (and out (string-contains? out "cfg = config.myConfig.x"))))
 
 (test-case "bare (with target [:k v] ...) record-update still works — not renamed"
   ;; (with …) is overloaded — only the Nix-scope shape is the §C-silent
   ;; collision. Record-update form stays bare; it's not a Clojure collision.
   (define out (nix-emit
-               "(define-target nix) (def x : Any (with base [:k 1] [:j 2]))"))
+               "(define-target nix) (def x (with base [:k 1] [:j 2]))"))
   (check-true (and out (string-contains? out "//"))))
 
 ;; --- ms + s inline interpolation ---------------------------------------------
@@ -462,15 +458,15 @@
 ;; --- flake-input emission ----------------------------------------------------
 
 (test-case "flake-input emits canonical inputs.X.Y.${system}.Z path"
-  (define out (nix-emit "(define-target nix) (def pkg : NixType (flake-input :quickshell :packages :default))"))
+  (define out (nix-emit "(define-target nix) (def pkg (flake-input :quickshell :packages :default))"))
   (check-true (and out (string-contains? out "inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default"))))
 
 (test-case "flake-input with multi-segment path"
-  (define out (nix-emit "(define-target nix) (def pkg : NixType (flake-input :nur :legacyPackages :repos :rycee :firefox-addons :sidebery))"))
+  (define out (nix-emit "(define-target nix) (def pkg (flake-input :nur :legacyPackages :repos :rycee :firefox-addons :sidebery))"))
   (check-true (and out (string-contains? out "inputs.nur.legacyPackages.${pkgs.stdenv.hostPlatform.system}.repos.rycee.firefox-addons.sidebery"))))
 
 (test-case "flake-input inside string concat composes cleanly"
-  (define out (nix-emit "(define-target nix) (def exec : String (s (flake-input :quickshell :packages :default) \"/bin/qs\"))"))
+  (define out (nix-emit "(define-target nix) (def exec (s (flake-input :quickshell :packages :default) \"/bin/qs\"))"))
   ;; Should produce a string with the flake-input path interpolated, then "/bin/qs" appended
   (check-true (and out (string-contains? out "inputs.quickshell.packages.${pkgs.stdenv.hostPlatform.system}.default")))
   (check-true (and out (string-contains? out "/bin/qs"))))
@@ -481,7 +477,7 @@
   ;; nix-emit's parse-program is wrapped in with-handlers that returns #f
   ;; on parse failure. The migration-error message itself is tested in
   ;; nix-parse.rkt; here we just confirm the form doesn't reach emit.
-  (define out (nix-emit "(define-target nix) (def x : Any (nix-ident \"inputs.foo\"))"))
+  (define out (nix-emit "(define-target nix) (def x (nix-ident \"inputs.foo\"))"))
   (check-false out))
 
 ;; --- Clojure conditional sugar: accept-and-canonicalize ---------------------

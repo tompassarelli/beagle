@@ -6,7 +6,7 @@
   (lib/mkEnableOption desc))
 
 (module [config lib pkgs]
-  (with-cfg config.myConfig.modules.example
+  (nix/with-cfg config.myConfig.modules.example
     {:options.myConfig.modules.example.enable (enable-opt "Example service")
      :config (lib/mkIf cfg.enable
        {:environment.systemPackages [pkgs.hello]})}))

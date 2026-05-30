@@ -4,6 +4,7 @@
 
 (defrecord Order [(id : Int)])
 
-(defn handle [(r : (Result Order String))] : String
+(claim handle [(Result Order String) -> String])
+(defn handle [(r : (Result Order String))]
   (match r
     [(Ok order) "got it"]))

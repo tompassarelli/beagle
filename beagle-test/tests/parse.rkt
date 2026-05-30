@@ -50,31 +50,185 @@
 
 ;; --- def -------------------------------------------------------------------
 
-(test-case "def with type annotation"
-  (define f (car (parse-one '(def x : Int 42))))
-  (check-true  (def-form? f))
-  (check-eq?   (def-form-name f) 'x)
-  (check-true  (type-prim? (def-form-type f)))
-  (check-eq?   (type-prim-name (def-form-type f)) 'Int)
-  (check-equal? (def-form-value f) 42))
-
+;; Inline `(def name : T value)` and `(defn name [params] : RET body)` are
+;; rejected by the parser — see "rejects inline …" tests below. The bare
+;; forms remain canonical; typed params on defn/let are unaffected.
 
 (test-case "def without type annotation"
   (define f (car (parse-one '(def x 42))))
   (check-false (def-form-type f)))
 
+;; --- inline `: T` rejection (regression) -----------------------------------
+
+;; Every inline-annotation surface — (def x : T v), (defonce x : T v),
+;; (defn f [..] : RET ..), and the typed-param-list variant — must reject
+;; loudly with a message pointing the author at the claim-form migration.
+;; These tests pin both the rejection AND the migration pointer, so the
+;; surface stays gone and the error stays helpful.
+
+(parse-err/rx "rejects inline (def x : Int 42) — points at claim"
+  #rx"inline type annotation"
+  '(def x : Int 42))
+
+(parse-err/rx "rejects inline (def x : Int 42) — names the replacement"
+  #rx"claim"
+  '(def x : Int 42))
+
+(parse-err/rx "rejects inline (defonce x : Int 42) — points at claim"
+  #rx"inline type annotation"
+  '(defonce x : Int 42))
+
+(parse-err/rx "rejects inline (defonce x : Int 42) — names the replacement"
+  #rx"claim"
+  '(defonce x : Int 42))
+
+(parse-err/rx "rejects inline-return-type defn with bare param list"
+  #rx"inline (return-)?type annotation"
+  '(defn add [x y] : Int (+ x y)))
+
+(parse-err/rx "rejects inline-return-type defn with typed param list"
+  #rx"inline (return-)?type annotation"
+  '(defn add [(x : Int) (y : Int)] : Int (+ x y)))
+
+(parse-err/rx "rejects inline-return-type defn-/private with typed params"
+  #rx"inline (return-)?type annotation"
+  '(defn- helper [(x : Int)] : Int x))
+
+;; Sanity: bare forms still parse — the rejection must not collateral-damage
+;; the canonical untyped path.
+
+(test-case "sanity: (def x 42) without annotation still parses"
+  (define f (car (parse-one '(def x 42))))
+  (check-true  (def-form? f))
+  (check-false (def-form-type f)))
+
+(test-case "sanity: (defn add [x y] (+ x y)) bare form still parses"
+  (define f (car (parse-one '(defn add [x y] (+ x y)))))
+  (check-true  (defn-form? f))
+  (check-false (defn-form-return-type f))
+  (check-false (param-type (car (defn-form-params f)))))
+
+;; --- claim form ------------------------------------------------------------
+;;
+;; (claim NAME TYPE) is the out-of-band type carrier for a paired
+;; def/defn/defonce. The inline `:` annotation rejection messages above
+;; point users at this form; the parser must accept it as a real form
+;; rather than letting it fall through to call-form or unbound-symbol.
+
+(test-case "(claim x Int) parses as claim-form with name=x, type=Int"
+  (define f (car (parse-one '(claim x Int))))
+  (check-true (claim-form? f))
+  (check-eq? (claim-form-name f) 'x)
+  (check-eq? (type-prim-name (claim-form-type f)) 'Int))
+
+(test-case "(claim NAME (-> [Int Int] Int)) parses with function type"
+  ;; Function type syntax in beagle is the bracketed [A B -> R] form.
+  ;; We construct the type expr with explicit BRACKET-TAG.
+  (define f (car (parse-one `(claim add ,(br 'Int 'Int '-> 'Int)))))
+  (check-true (claim-form? f))
+  (check-eq? (claim-form-name f) 'add)
+  (check-true (type-fn? (claim-form-type f)))
+  (define t (claim-form-type f))
+  (check-equal? (map type-prim-name (type-fn-params t)) '(Int Int))
+  (check-eq? (type-prim-name (type-fn-ret t)) 'Int))
+
+(test-case "(claim x Int) (def x 42) keeps both forms (claim survives parsing)"
+  (define forms (program-forms (parse-prog '(claim x Int) '(def x 42))))
+  (check-equal? (length forms) 2)
+  (check-true (claim-form? (car forms)))
+  (check-true (def-form?   (cadr forms))))
+
+(parse-err/rx "(claim x) — too few args, names the canonical shape"
+  #rx"\\(claim NAME TYPE\\)"
+  '(claim x))
+
+(parse-err/rx "(claim x Int 99) — too many args, names the canonical shape"
+  #rx"\\(claim NAME TYPE\\)"
+  '(claim x Int 99))
+
+;; --- bare Nix-namespace rejection (regression) -----------------------------
+;;
+;; Bare `(assert …)`, `(with-cfg …)`, and Nix-scope `(with NS BODY)` are
+;; HARD-REJECTED. The canonical `nix/`-prefixed forms (`nix/assert`,
+;; `nix/with-cfg`, `nix/with`) are the only accepted spellings. Same standing
+;; rule as the inline-`: T` rejection above: surface the migration target in
+;; the error message; never silently parse a near-miss.
+;;
+;; The record-update `with` form — `(with target [:k v] …)` — has no Clojure
+;; collision and stays bare. Its sanity test sits next to the rejection tests
+;; to pin the shape-discrimination invariant.
+
+(parse-err/rx "(assert true 42) — bare `assert` rejected, names the canonical replacement"
+  #rx"\\(assert"
+  '(assert true 42))
+
+(parse-err/rx "(assert true 42) — error mentions `nix/assert`"
+  #rx"nix/assert"
+  '(assert true 42))
+
+(test-case "(nix/assert true 42) parses normally"
+  (define f (car (parse-one '(nix/assert true 42))))
+  (check-true (nix-assert? f)))
+
+(parse-err/rx "(with-cfg config.X BODY) — bare `with-cfg` rejected, names canonical"
+  #rx"\\(with-cfg"
+  '(with-cfg config.X BODY))
+
+(parse-err/rx "(with-cfg config.X BODY) — error mentions `nix/with-cfg`"
+  #rx"nix/with-cfg"
+  '(with-cfg config.X BODY))
+
+(test-case "(nix/with-cfg config.foo.bar BODY) parses normally"
+  (define f (car (parse-one '(nix/with-cfg config.foo.bar BODY))))
+  (check-true (nix-with-cfg? f)))
+
+(parse-err/rx "(with pkgs body) — Nix-scope `with` rejected, names canonical"
+  #rx"\\(with"
+  '(with pkgs body))
+
+(parse-err/rx "(with pkgs body) — Nix-scope error mentions `nix/with`"
+  #rx"nix/with"
+  '(with pkgs body))
+
+(test-case "(nix/with pkgs body) parses normally"
+  (define f (car (parse-one '(nix/with pkgs body))))
+  (check-true (nix-with? f)))
+
+(test-case "(with target [:k v] [:j w]) record-update still parses (sanity)"
+  ;; Record-update shape: every update is a [:keyword value] bracket.
+  ;; Stays bare — not a Clojure collision. Build bracket-tagged datums
+  ;; explicitly to mirror what the beagle reader emits.
+  (define f (car (parse-one `(with target ,(br ':k 'v) ,(br ':j 'w)))))
+  (check-true (with-form? f))
+  (check-equal? (length (with-form-updates f)) 2))
+
+(test-case "SQL CTE (with (cte (select …)) …) still parses (separate path)"
+  ;; SQL CTE shape: first arg is a (cte-name (select …)) form — a plain list
+  ;; whose head is a symbol and whose second element is a pair. The SQL `with`
+  ;; arm is shape-disambiguated by #:when ahead of the expression-level `with`
+  ;; arm, so the bare-Nix-`with` rejection does not collateral-damage SQL.
+  ;; (column list is a bracket per parse-sql conventions; the shape
+  ;; predicate that picks the SQL arm only inspects the CTE head, not the
+  ;; nested select body.)
+  (define f
+    (car (parse-one
+          `(with (c (select ,(br 'x) from t))
+                 (select ,(br 'x) from c)))))
+  (check-not-false f))
+
 ;; --- defn ------------------------------------------------------------------
 
-(test-case "defn with full type annotations"
+(test-case "defn with typed params (no inline return type)"
   (define f (car (parse-one
-                  '(defn add [(x : Int) (y : Int)] : Int
+                  '(defn add [(x : Int) (y : Int)]
                      (+ x y)))))
   (check-true (defn-form? f))
   (check-eq?  (defn-form-name f) 'add)
   (check-equal? (length (defn-form-params f)) 2)
   (check-eq? (param-name (car (defn-form-params f))) 'x)
   (check-eq? (type-prim-name (param-type (car (defn-form-params f)))) 'Int)
-  (check-eq? (type-prim-name (defn-form-return-type f)) 'Int))
+  ;; Return type is no longer inlinable — surface this by asserting it's #f.
+  (check-false (defn-form-return-type f)))
 
 (test-case "defn with no annotations"
   (define f (car (parse-one '(defn id [x] x))))
@@ -480,16 +634,15 @@
           (list 'inner x))
        '(outer y)))))
 
-(test-case "proc macro: expansion goes through type checker"
-  (define p (parse-prog
-             `(define-macro proc typed-def
-                ,(br '(name : Symbol) '(val : Expr)) : Form
-                (list 'def name ': 'Int val))
-             '(typed-def z 99)))
-  (define f (car (program-forms p)))
-  (check-true (def-form? f))
-  (check-eq? (def-form-name f) 'z)
-  (check-equal? (def-form-type f) (parse-type 'Int)))
+;; The previous "proc macro: expansion goes through type checker" test
+;; emitted `(def name : Int val)` from a macro body and asserted the
+;; expanded form carried a parsed type. Inline `: T` on def is now
+;; rejected at parse time, so the test premise is gone. There is no
+;; out-of-band claim form wired through the parser yet (claim parses as
+;; a generic call), so we cannot rewrite to the canonical replacement.
+;; If/when the claim form is wired, restore an analogue here that emits
+;; (claim z Int) (def z 99) from the macro body and asserts the
+;; sig-registry binds z to Int.
 
 (test-case "trace handler captures nested macro expansion steps"
   (define reg (make-macro-registry))
@@ -905,7 +1058,9 @@
 ;; --- varargs (& rest) in defn/fn params ---
 
 (test-case "defn with & rest-param parses rest-param"
-  (define f (car (parse-one '(defn foo [(x : Int) & (rest : Int)] : Int (+ x 1)))))
+  ;; Inline return type `: Int` removed from the surface — typed params
+  ;; including `& (rest : Int)` remain supported.
+  (define f (car (parse-one '(defn foo [(x : Int) & (rest : Int)] (+ x 1)))))
   (check-true (defn-form? f))
   (check-equal? (length (defn-form-params f)) 1)
   (check-true (param? (defn-form-rest-param f)))
@@ -914,7 +1069,7 @@
   (check-eq? (type-prim-name (param-type (defn-form-rest-param f))) 'Int))
 
 (test-case "defn without & has #f rest-param"
-  (define f (car (parse-one '(defn bar [(x : Int)] : Int x))))
+  (define f (car (parse-one '(defn bar [(x : Int)] x))))
   (check-false (defn-form-rest-param f)))
 
 (test-case "fn with & rest-param"
@@ -1097,11 +1252,9 @@
   (check-equal? (defonce-form-name f) 'db)
   (check-false (defonce-form-type f)))
 
-(test-case "defonce parses typed"
-  (define f (car (parse-one '(defonce db : Any (atom nil)))))
-  (check-true (defonce-form? f))
-  (check-equal? (defonce-form-name f) 'db)
-  (check-not-false (defonce-form-type f)))
+;; "defonce parses typed" — inline `: T` on defonce is now rejected. See
+;; "rejects inline (defonce x : T val)" below. The bare-form is covered
+;; by the "defonce parses untyped" test directly above.
 
 ;; --- check/rescue ------------------------------------------------------------
 
@@ -1145,15 +1298,13 @@
 
 ;; --- :raises on defn ---------------------------------------------------------
 
-(test-case "defn with :raises parses"
-  (define f (car (parse-one `(defn fetch ,(br '(url : String)) : String :raises NetworkError (str url)))))
-  (check-true (defn-form? f))
-  (check-equal? (defn-form-raises f) 'NetworkError))
-
-(test-case "defn without :raises has #f"
-  (define f (car (parse-one `(defn greet ,(br '(name : String)) : String (str name)))))
-  (check-true (defn-form? f))
-  (check-false (defn-form-raises f)))
+;; `:raises` on defn previously combined with an inline `: RET` annotation
+;; (`(defn fetch [params] : RET :raises ERR body)`). The inline `: RET`
+;; piece is now rejected, and with it the only surface that put :raises
+;; on the defn head. Until :raises gets a non-inline carrier (e.g. on the
+;; claim form, or via metadata), defn-form-raises is unreachable from the
+;; surface. The struct field stays for downstream consumers; tests that
+;; exercise it from source are deferred.
 
 ;; --- target-case -------------------------------------------------------------
 

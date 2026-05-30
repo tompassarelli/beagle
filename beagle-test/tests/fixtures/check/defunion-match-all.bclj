@@ -1,7 +1,8 @@
 (defrecord A [(x : Int)])
 (defrecord B [(y : String)])
 (defunion AB A B)
-(defn handle [(e : AB)] : Int
+(claim handle [AB -> Int])
+(defn handle [(e : AB)]
   (match e
     [(A x) x]
     [(B y) 0]))
