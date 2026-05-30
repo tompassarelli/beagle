@@ -91,6 +91,57 @@
   (check-eq?   (type-prim-name (param-type (car (defn-form-params f)))) 'Int)
   (check-false (param-type (cadr (defn-form-params f)))))
 
+;; --- defn multi-arity (accept-and-canonicalize) ----------------------------
+;;
+;; Two surface forms produce identical defn-multi ASTs:
+;;
+;;   Clojure list-wrapped:  (defn add ([a] a) ([a b] (+ a b)))
+;;   Bare-vector:           (defn add  [a] a   [a b] (+ a b))
+;;
+;; The bare-vector form is canonicalized to the list-wrapped form at parse
+;; time. Identity-preserving — both forms produce the same emitted code.
+;;
+;; In Racket source, `[…]` reads as a plain list (no BRACKET-TAG), so we
+;; build bracket-tagged datums explicitly with `(br …)` to mirror what
+;; the beagle reader produces from real .bgl source.
+(test-case "defn multi-arity: bare-vector == list-wrapped (identity)"
+  (define bare
+    (car (parse-one `(defn add ,(br 'a) a ,(br 'a 'b) (+ a b)))))
+  (define wrapped
+    (car (parse-one `(defn add (,(br 'a) a) (,(br 'a 'b) (+ a b))))))
+  (check-true   (defn-multi? bare))
+  (check-true   (defn-multi? wrapped))
+  (check-equal? bare wrapped))
+
+(test-case "defn multi-arity: three arities, bare-vector"
+  (define f
+    (car (parse-one `(defn greet
+                       ,(br)       "hi"
+                       ,(br 'x)    (str "hi " x)
+                       ,(br 'x 'y) (str y " " x)))))
+  (check-true (defn-multi? f))
+  (check-equal? (length (defn-multi-arities f)) 3))
+
+(test-case "defn multi-arity: typed params, bare-vector == list-wrapped"
+  (define bare
+    (car (parse-one `(defn f
+                       ,(br '(x : Int))               x
+                       ,(br '(x : Int) '(y : Int))    (+ x y)))))
+  (define wrapped
+    (car (parse-one `(defn f
+                       (,(br '(x : Int))               x)
+                       (,(br '(x : Int) '(y : Int))    (+ x y))))))
+  (check-true   (defn-multi? bare))
+  (check-equal? bare wrapped))
+
+;; A single-arity defn whose body returns a vec literal must NOT be misread
+;; as bare-vector multi-arity. The detection rule requires each top-level
+;; bracket to be followed by >= 1 non-bracket form.
+(test-case "defn single-arity returning vec is not multi-arity"
+  (define f (car (parse-one `(defn f ,(br 'a) ,(br 1 2 3)))))
+  (check-true  (defn-form? f))
+  (check-false (defn-multi? f)))
+
 ;; --- let / fn / if / cond / when / do --------------------------------------
 
 (test-case "let binding"
@@ -141,9 +192,54 @@
      (zero? n) "zero"
      "missing-test"))
 
-(parse-err/rx "when removed — migration error"
-  #rx"when removed"
-  '(when (> x 0) (println x) x))
+;; (when c body…) is accepted and canonicalized to (if c (do body…)).
+;; Identity-preserving — the AST is what (if c (do body…)) would produce.
+(test-case "when lowers to if + do"
+  (define f (car (parse-one '(when (> x 0) (println x) x))))
+  (check-true (if-form? f))
+  (check-true (do-form? (if-form-then-expr f)))
+  (check-equal? (length (do-form-body (if-form-then-expr f))) 2)
+  (check-false (if-form-else-expr f)))
+
+(test-case "when-not lowers to if (not c) + do"
+  (define f (car (parse-one '(when-not (> x 0) (println x) x))))
+  (check-true (if-form? f))
+  ;; The condition is a (call-form 'not (...)) wrapping the original test.
+  (check-true (call-form? (if-form-cond-expr f)))
+  (check-eq? (call-form-fn (if-form-cond-expr f)) 'not)
+  (check-true (do-form? (if-form-then-expr f)))
+  (check-false (if-form-else-expr f)))
+
+(test-case "if-not swaps then/else"
+  ;; (if-not c t e) means: if (not c) then t else e — i.e. when c is FALSE
+  ;; run t. Canonicalization rewrites to (if c e t) — when c is TRUE run e,
+  ;; otherwise run t. Same meaning, swapped branches.
+  ;;
+  ;; Source:    (if-not (> x 0) "neg" "pos")
+  ;;            ;; if (> x 0) is false → "neg", else → "pos"
+  ;; Lowered:   (if (> x 0) "pos" "neg")
+  ;;            ;; if (> x 0) is true → "pos", else → "neg"
+  (define f (car (parse-one '(if-not (> x 0) "neg" "pos"))))
+  (check-true (if-form? f))
+  (check-equal? (if-form-then-expr f) "pos")
+  (check-equal? (if-form-else-expr f) "neg"))
+
+(test-case "unless lowers to if c nil + do"
+  (define f (car (parse-one '(unless (> x 0) (println x) x))))
+  (check-true (if-form? f))
+  ;; Then-branch is nil (the no-op path).
+  (check-eq? (if-form-then-expr f) 'nil)
+  ;; Else-branch is the (do …) wrapper around the body.
+  (check-true (do-form? (if-form-else-expr f))))
+
+(parse-err "when with no body errors"
+  '(when (> x 0)))
+(parse-err "when-not with no body errors"
+  '(when-not (> x 0)))
+(parse-err "unless with no body errors"
+  '(unless (> x 0)))
+(parse-err "if-not with two args errors"
+  '(if-not (> x 0) "neg"))
 
 (test-case "do"
   (define f (car (parse-one '(do (println "a") (println "b") 42))))
@@ -861,19 +957,88 @@
   (check-true (with-meta? (car (vec-form-items val))))
   (check-true (with-meta? (cadr (vec-form-items val)))))
 
-;; --- conditional let forms removed -------------------------------------------
-;; when-let / if-let removed — Clojure-shaped truthy-binding sugar. Interim
-;; replacement: (let [x v] (if x then else)). The eventual replacement will be
-;; beagle's typed nullable-narrowing form (provisional name TBD). See
-;; design-principle.md "Open design questions".
+;; --- Clojure binding-conditional macros (accept-and-canonicalize) -----------
+;; if-let / when-let / if-some / when-some are accepted and lowered to the
+;; canonical (let …) (if …) shape. The lowering is identity-preserving — the
+;; AST that results is byte-identical to what a hand-written equivalent would
+;; produce. The eventual typed nullable-narrowing form (provisional name TBD,
+;; tracked in design-principle.md) will not reuse these names.
+;;
+;; Lowerings:
+;;   (if-let    [x v] t e)    → (let [x v] (if x t e))
+;;   (when-let  [x v] body…)  → (let [x v] (if x (do body…)))
+;;   (if-some   [x v] t e)    → (let [x v] (if (not (nil? x)) t e))
+;;   (when-some [x v] body…)  → (let [x v] (if (not (nil? x)) (do body…)))
 
-(parse-err/rx "when-let removed — migration error"
-  #rx"when-let removed"
-  '(when-let [x (get m :key)] (println x)))
+(test-case "if-let lowers to let+if (identity-preserving)"
+  (define got
+    (car (parse-one '(if-let [v (get m :key)] (str v) "nope"))))
+  (define want
+    (car (parse-one '(let [v (get m :key)] (if v (str v) "nope")))))
+  (check-equal? got want))
 
-(parse-err/rx "if-let removed — migration error"
-  #rx"if-let removed"
-  '(if-let [v (get m :key)] (str v) "nope"))
+(test-case "when-let lowers to let+if+do (single body)"
+  (define got
+    (car (parse-one '(when-let [x (get m :key)] (println x)))))
+  (define want
+    (car (parse-one '(let [x (get m :key)] (if x (do (println x)))))))
+  (check-equal? got want))
+
+(test-case "when-let lowers to let+if+do (multi-body)"
+  (define got
+    (car (parse-one '(when-let [x (get m :key)]
+                       (println x)
+                       (str x "!")))))
+  (define want
+    (car (parse-one '(let [x (get m :key)]
+                       (if x (do (println x) (str x "!")))))))
+  (check-equal? got want))
+
+(test-case "if-some lowers to let+if+(not nil?) (some? semantics)"
+  (define got
+    (car (parse-one '(if-some [v (get m :key)] (str v) "nope"))))
+  (define want
+    (car (parse-one '(let [v (get m :key)]
+                       (if (not (nil? v)) (str v) "nope")))))
+  (check-equal? got want))
+
+(test-case "when-some lowers to let+if+(not nil?)+do"
+  (define got
+    (car (parse-one '(when-some [x (get m :key)] (println x)))))
+  (define want
+    (car (parse-one '(let [x (get m :key)]
+                       (if (not (nil? x)) (do (println x)))))))
+  (check-equal? got want))
+
+(test-case "when-some lowers to let+if+(not nil?)+do (multi-body)"
+  (define got
+    (car (parse-one '(when-some [x (get m :key)]
+                       (println x)
+                       (str x "!")))))
+  (define want
+    (car (parse-one '(let [x (get m :key)]
+                       (if (not (nil? x))
+                           (do (println x) (str x "!")))))))
+  (check-equal? got want))
+
+;; Structural sanity: the lowered form is a let-form whose body is a single
+;; if-form. This catches accidental wrapper layers.
+(test-case "if-let produces let-form wrapping if-form"
+  (define f (car (parse-one '(if-let [v x] v 0))))
+  (check-true   (let-form? f))
+  (check-equal? (length (let-form-bindings f)) 1)
+  (check-eq?    (let-binding-name (car (let-form-bindings f))) 'v)
+  (check-equal? (length (let-form-body f)) 1)
+  (check-true   (if-form? (car (let-form-body f)))))
+
+;; Bad-shape diagnostics (the form is accepted; only malformed bindings reject).
+(parse-err/rx "if-let with bad bindings shape"
+  #rx"if-let: bindings must be"
+  '(if-let [x] then else))
+
+(parse-err/rx "when-let with empty body"
+  #rx"when-let: expected at least one body expression"
+  '(when-let [x v]))
 
 ;; --- with-open ---------------------------------------------------------------
 

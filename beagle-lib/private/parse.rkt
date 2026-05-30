@@ -13,7 +13,35 @@
          "ast.rkt"
          "parse-jst.rkt"
          "parse-js-quote.rkt"
-         "parse-sql.rkt")
+         "parse-sql.rkt"
+         "diagnostic-kind.rkt")
+
+;; --- structured parse errors ------------------------------------------------
+;;
+;; The bulk of (error 'beagle ...) call sites in this file are untagged —
+;; they raise plain exn:fail:user without a kind/cause-class. The Phase 0
+;; instrumentation (see thread 20260530160000) tags the high-traffic
+;; subset (~30 sites) with a structured beagle-parse-error so downstream
+;; consumers (error-format.rkt JSON path, beagle-rejection-stats) can
+;; bucket them by cause-class. Other (~80) deep-nested sites stay on
+;; plain `error` and get heuristically classified via
+;; error-format.rkt extract-kind.
+
+(struct beagle-parse-error exn:fail (
+  kind        ; symbol — see parse-error-kind->cause-class in diagnostic-kind.rkt
+  details     ; hasheq with structured data (cause, form, etc.)
+) #:transparent)
+
+(define (raise-parse-error kind fmt . args)
+  (define msg (apply format fmt args))
+  (define details
+    (hasheq 'cause (symbol->string (parse-error-kind->cause-class kind))
+            'phase "parse"))
+  (raise (beagle-parse-error
+          (format "beagle: ~a" msg)
+          (current-continuation-marks)
+          kind
+          details)))
 
 (define BT BRACKET-TAG)
 (define MT MAP-TAG)
@@ -411,21 +439,23 @@
   (for ([d (in-list datums)])
     (match d
       [(list 'define-mode (? symbol? m))
-       (when mode-set? (error 'beagle "duplicate define-mode"))
+       (when mode-set? (raise-parse-error 'duplicate-meta "duplicate define-mode"))
        (unless (or (eq? m 'strict) (eq? m 'dynamic))
-         (error 'beagle "unknown mode: ~a (expected strict or dynamic)" m))
+         (raise-parse-error 'bad-meta-value
+                            "unknown mode: ~a (expected strict or dynamic)" m))
        (set! mode m)
        (set! mode-set? #t)]
 
       [(list 'define-target (? symbol? t))
-       (when target-set? (error 'beagle "duplicate define-target"))
+       (when target-set? (raise-parse-error 'duplicate-meta "duplicate define-target"))
        (unless (memq t '(clj cljs js nix py sql rkt))
-         (error 'beagle "unknown target: ~a (expected clj, cljs, js, nix, py, sql, or rkt)" t))
+         (raise-parse-error 'bad-meta-value
+                            "unknown target: ~a (expected clj, cljs, js, nix, py, sql, or rkt)" t))
        (set! target t)
        (set! target-set? #t)]
 
       [(list 'ns (? symbol? n))
-       (when ns-set? (error 'beagle "duplicate ns form"))
+       (when ns-set? (raise-parse-error 'duplicate-meta "duplicate ns form"))
        (validate-identifier! n "namespace")
        (set! ns n)
        (set! ns-set? #t)]
@@ -437,7 +467,8 @@
          (cond
            [(bracketed? typed-params) (bracket-body typed-params)]
            [(list? typed-params)      typed-params]
-           [else (error 'beagle "macro ~a: parameters must be a list" name)]))
+           [else (raise-parse-error 'bad-meta-value
+                                    "macro ~a: parameters must be a list" name)]))
        (define-values (param-names input-contracts)
          (for/lists (names contracts)
                     ([p (in-list raw-params)])
@@ -447,7 +478,8 @@
              [(symbol? p)
               (values p 'Syntax)]
              [else
-              (error 'beagle "macro ~a: bad typed parameter: ~v" name p)])))
+              (raise-parse-error 'bad-meta-value
+                                 "macro ~a: bad typed parameter: ~v" name p)])))
        (if (eq? macro-kind 'beagle)
            (register-beagle-macro! registry name param-names input-contracts ret-type body)
            (register-proc-macro! registry name param-names input-contracts ret-type body))]
@@ -457,13 +489,14 @@
        (define ps (cond
                     [(bracketed? macro-params) (bracket-body macro-params)]
                     [(list? macro-params)      macro-params]
-                    [else (error 'beagle "macro ~a: parameters must be a list" name)]))
+                    [else (raise-parse-error 'bad-meta-value
+                                             "macro ~a: parameters must be a list" name)]))
        (register-macro! registry name kind ps template)]
 
       [(list 'declare-extern (? symbol? name) type-expr)
        (validate-identifier! name "extern")
        (when (hash-has-key? externs name)
-         (error 'beagle "duplicate declare-extern: ~a" name))
+         (raise-parse-error 'duplicate-meta "duplicate declare-extern: ~a" name))
        (hash-set! externs name (parse-type type-expr))]
 
       [(list 'require (? symbol? rn))
@@ -555,6 +588,37 @@
 
 ;; --- per-form parsing ------------------------------------------------------
 
+;; Deprecation hints for transitional Nix-namespace aliases.
+;;
+;; Phase 1 of the namespace migration (see
+;; ~/code/life-os/threads/20260530170000-beagle_corpus_migration_nix_namespacing.md)
+;; introduced `nix/assert`, `nix/with-cfg`, and `nix/with` as the canonical
+;; surface forms. The bare names remain accepted as transitional aliases so
+;; the existing corpus keeps building, but every parse of a bare form emits
+;; a non-blocking hint to stderr so the migration sweep has feedback.
+;;
+;; Suppress for the corpus-migration script with BEAGLE_NO_DEPRECATION_HINTS=1
+;; (kept separate from BEAGLE_NO_LINT so the migration step can silence these
+;; specifically without losing other lint output).
+(define (deprecation-hints-suppressed?)
+  (getenv "BEAGLE_NO_DEPRECATION_HINTS"))
+
+(define (warn-deprecation! bare-name canonical-name loc)
+  (unless (deprecation-hints-suppressed?)
+    (define loc-str
+      (cond
+        [(and loc (src-loc-source loc) (src-loc-line loc))
+         (format "~a:~a:~a: "
+                 (src-loc-source loc)
+                 (src-loc-line loc)
+                 (or (src-loc-col loc) 0))]
+        [else ""]))
+    (fprintf (current-error-port)
+             "~adeprecation: bare `~a` is a transitional alias; prefer `~a`. See ~~/code/life-os/threads/20260530170000-beagle_corpus_migration_nix_namespacing.md\n"
+             loc-str
+             bare-name
+             canonical-name)))
+
 (define (parse-top x)
   (define d (->datum x))
   (cond
@@ -637,6 +701,72 @@
        (let ([first-elem (car d)])
          (or (bracketed? first-elem)
              (and (pair? first-elem) (bracketed? (car first-elem)))))))
+
+;; Bare-vector multi-arity detection / canonicalization.
+;;
+;; Clojure-style multi-arity defn wraps each arity in a list:
+;;   (defn name ([a] body) ([a b] body))      ; list-wrapped, canonical
+;;
+;; A common authoring slip is to write the same intent without the
+;; outer wrap, leaving the params vectors bare at the top level:
+;;   (defn name [a] body [a b] body)          ; bare-vector multi-arity
+;;
+;; This accepts both. We canonicalize bare-vector multi-arity into
+;; list-wrapped clauses so a single downstream code path handles
+;; everything. The rewrite is identity-preserving: the same AST is
+;; produced from either source form.
+;;
+;; Detection rule (strict to avoid clashing with a single-arity defn
+;; whose body happens to start with a vec literal):
+;;   - First arg is a bracket-vec (the params)
+;;   - At least one additional top-level bracket-vec appears later
+;;   - Every such bracket-vec is followed by >= 1 non-bracket form
+;;     (i.e., it has a body)
+;;
+;; That last condition rejects e.g. (defn f [a] [1 2 3]) — where
+;; [1 2 3] is the function's return value, not a second arity.
+(define (bare-multi-arity-clauses args)
+  ;; args = list of forms after `defn name`. Returns a list of
+  ;; synthetic list-wrapped clauses ((params body...) ...) on
+  ;; success, or #f if `args` is not bare-vector multi-arity.
+  (cond
+    [(or (null? args) (not (bracketed? (car args)))) #f]
+    [else
+     ;; Walk args, splitting at each top-level bracket. Each segment
+     ;; is (bracket body-form ...). Reject if any segment has no body.
+     (define-values (segments cur ok?)
+       (for/fold ([segments '()] [cur '()] [ok? #t])
+                 ([arg (in-list args)])
+         (cond
+           [(not ok?) (values segments cur ok?)]
+           [(bracketed? arg)
+            ;; Starting a new segment. Finalize the previous one (if any).
+            (if (null? cur)
+                ;; No previous segment — first bracket. cur := (list arg).
+                (values segments (list arg) ok?)
+                ;; cur = (params body...) reversed. Check body non-empty.
+                (let ([prev-body (cdr cur)])
+                  (if (null? prev-body)
+                      (values segments cur #f)  ; empty body — abort
+                      (values (cons (reverse cur) segments)
+                              (list arg)
+                              ok?))))]
+           [else
+            ;; Body form. Append to current segment.
+            (if (null? cur)
+                (values segments cur #f)  ; body before any params — abort
+                (values segments (cons arg cur) ok?))])))
+     ;; Finalize the last segment.
+     (cond
+       [(not ok?) #f]
+       [(null? cur) #f]
+       [(null? (cdr cur)) #f]  ; trailing bracket with no body
+       [else
+        (let ([all-segments (reverse (cons (reverse cur) segments))])
+          ;; Multi-arity needs >= 2 clauses; otherwise this is just a
+          ;; single-arity defn and the normal dispatch handles it.
+          (and (>= (length all-segments) 2)
+               all-segments))])]))
 
 (define (parse-arity-clause clause)
   (unless (and (pair? clause) (list? clause))
@@ -744,6 +874,45 @@
   (foldl (lambda (step acc) (thread-step-insert acc step 'last))
          init steps))
 
+;; Lower Clojure binding-conditional macros (if-let / when-let / if-some /
+;; when-some) to their canonical (let …) (if …) shape. Identity-preserving:
+;; the synthesized datum re-parses to the same AST a hand-written equivalent
+;; would produce. Called from parse-list-form's match arms.
+;;
+;; bindings-stx is the original `[name expr]` form (still wrapped in
+;; BRACKET-TAG); rest is the post-binding tail — for if-let/if-some it's
+;; (list then else); for when-let/when-some it's the body sequence.
+(define (lower-binding-cond head bindings-stx rest)
+  (define bdatum (->datum bindings-stx))
+  (define items
+    (cond
+      [(and (pair? bdatum) (eq? (car bdatum) BRACKET-TAG)) (cdr bdatum)]
+      [(list? bdatum) bdatum]
+      [else (error 'beagle
+                   "~a: bindings must be [name expr], got: ~v" head bdatum)]))
+  (unless (and (= (length items) 2) (symbol? (car items)))
+    (error 'beagle
+           "~a: bindings must be [name expr], got: ~v" head bdatum))
+  (define name (car items))
+  (define val-expr (cadr items))
+  (define cond-expr
+    (case head
+      [(if-let when-let)   name]
+      [(if-some when-some) (list 'not (list 'nil? name))]))
+  (case head
+    [(if-let if-some)
+     (unless (= (length rest) 2)
+       (error 'beagle "~a: expected (~a [name expr] then else), got: ~v"
+              head head (cons head (cons bdatum rest))))
+     (list 'let (list BRACKET-TAG name val-expr)
+           (list 'if cond-expr (car rest) (cadr rest)))]
+    [(when-let when-some)
+     (when (null? rest)
+       (error 'beagle "~a: expected at least one body expression after bindings"
+              head))
+     (list 'let (list BRACKET-TAG name val-expr)
+           (list 'if cond-expr (cons 'do rest)))]))
+
 ;; expand-cond-thread, expand-some-thread, expand-as-thread removed —
 ;; the cond->/some->/as-> forms they implemented are dropped from
 ;; beagle's surface. Use explicit let-chains for conditional or short-
@@ -795,6 +964,13 @@
      (defn-multi name (map parse-arity-clause
                            (cons first-clause rest-clauses)) #f)]
 
+    ;; Bare-vector multi-arity: (defn name [a] body [a b] body)
+    ;; Canonicalized to list-wrapped clauses before parsing.
+    [(list 'defn (? symbol? name) args ...)
+     #:when (bare-multi-arity-clauses args)
+     (defn-multi name (map parse-arity-clause
+                           (bare-multi-arity-clauses args)) #f)]
+
     [(list 'defn (? symbol? name) params-form marker return-type ':raises (? symbol? err-type) body ...)
      #:when (annotation-marker? marker)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
@@ -818,6 +994,12 @@
      (defn-multi name (map parse-arity-clause
                            (cons first-clause rest-clauses)) #t)]
 
+    ;; ^:private + bare-vector multi-arity
+    [(list 'defn (list '#%meta _ (? symbol? name)) args ...)
+     #:when (bare-multi-arity-clauses args)
+     (defn-multi name (map parse-arity-clause
+                           (bare-multi-arity-clauses args)) #t)]
+
     [(list 'defn (list '#%meta _ (? symbol? name)) params-form marker return-type body ...)
      #:when (annotation-marker? marker)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
@@ -834,6 +1016,12 @@
      #:when (multi-arity-form? first-clause)
      (defn-multi name (map parse-arity-clause
                            (cons first-clause rest-clauses)) #t)]
+
+    ;; defn- + bare-vector multi-arity
+    [(list 'defn- (? symbol? name) args ...)
+     #:when (bare-multi-arity-clauses args)
+     (defn-multi name (map parse-arity-clause
+                           (bare-multi-arity-clauses args)) #t)]
 
     [(list 'defn- (? symbol? name) params-form marker return-type ':raises (? symbol? err-type) body ...)
      #:when (annotation-marker? marker)
@@ -943,6 +1131,8 @@
      ;; `nix/assert` is the canonical name; bare `assert` is a transitional
      ;; alias kept for the existing corpus until the Phase 1 sweep
      ;; (~/code/life-os/threads/20260530160100-...). Both parse identically.
+     (when (eq? (car d) 'assert)
+       (warn-deprecation! 'assert 'nix/assert (stx->src-loc (stx-ref subs 0))))
      (nix-assert (parse-expr (or (stx-ref subs 1) cond-expr))
                  (parse-expr (or (stx-ref subs 2) body-expr)))]
 
@@ -950,6 +1140,8 @@
      ;; (nix/with-cfg config.myConfig.modules.X BODY) → introduces `cfg = config...;`
      ;; let-binding and rewrites config.myConfig.modules.X.foo to cfg.foo in BODY.
      ;; `with-cfg` is a transitional alias for the existing corpus.
+     (when (eq? (car d) 'with-cfg)
+       (warn-deprecation! 'with-cfg 'nix/with-cfg (stx->src-loc (stx-ref subs 0))))
      (nix-with-cfg (parse-expr (or (stx-ref subs 1) path-expr))
                    (parse-expr (or (stx-ref subs 2) body-expr)))]
 
@@ -1209,15 +1401,14 @@
               (parse-expr (or (stx-ref subs 2) t))
               #f)]
 
-    ;; when removed — pure ergonomic sugar over if + do. Per design-principle.md
-    ;; (asymmetric burden, bootstrap-vs-native lens), entry-hall sugar drops when
-    ;; not load-bearing for the next user. Composition: (if c body) for single-
-    ;; body, (if c (do b1 b2 …)) for multi-body. The if-no-else case parses with
-    ;; #f else (verified line 1148 below), so single-body migration is clean.
-    ;;
-    ;; when-not / if-not / unless were dropped earlier — same reasoning.
+    ;; when / when-not / if-not / unless — accept-and-canonicalize.
+    ;; These Clojure conditional macros lower 1:1 to (if …) / (if … (do …)).
+    ;; Lowering rules live at the dispatch site below; see the comment block
+    ;; near the "Clojure conditional sugar" case. Identity-preserving: the
+    ;; AST and emitted code are byte-equivalent to the hand-written canonical
+    ;; form.
 
-    ;; when-let / if-let removed — Clojure-shaped truthy-binding sugar.
+    ;; when-let / if-let — also accept-and-canonicalize. See lower-binding-cond.
     ;; The interim replacement is the verbose (let [x v] (if x then else))
     ;; pattern. The eventual replacement will be beagle's typed nullable-
     ;; narrowing form (provisional name TBD, tracked in design-principle.md
@@ -1299,6 +1490,10 @@
                          (>= (length (bracket-body d)) 2)
                          (let ([first (car (bracket-body d))])
                            (and (symbol? first) (keyword-sym? first)))))))
+        ;; Bare `(with ns body)` is the transitional Nix-scope alias.
+        ;; Fire deprecation hint (record-update shape `(with target [:k v] …)`
+        ;; stays bare and does NOT fire — handled in the else branch).
+        (warn-deprecation! 'with 'nix/with (stx->src-loc (stx-ref subs 0)))
         (nix-with (parse-expr (or (stx-ref subs 1) target-expr))
                   (parse-expr (or (stx-ref subs 2) (car updates))))]
        [else
@@ -1346,7 +1541,8 @@
      (parse-parametric-defunion name type-vars member-defs subs)]
 
     [(list 'deferror _ ...)
-     (error 'beagle "deferror removed — use (defunion :throwable Name ...) instead")]
+     (raise-parse-error 'removed-form
+                        "deferror removed — use (defunion :throwable Name ...) instead")]
 
     [(list 'defscalar (? symbol? name) (? symbol? backing) ':where preds ...)
      (defscalar-form name (->datum backing) (map parse-scalar-predicate preds))]
@@ -1397,51 +1593,108 @@
     ;; The catch-all fallthrough would treat these as undefined functions,
     ;; which is misleading — they used to be forms, they're not anymore.
     [(list 'cond-> _ ...)
-     (error 'beagle "cond-> removed — use a let-chain with (if ...) for conditional accumulation")]
+     (raise-parse-error 'removed-form
+                        "cond-> removed — use a let-chain with (if ...) for conditional accumulation")]
     [(list 'cond->> _ ...)
-     (error 'beagle "cond->> removed — use a let-chain with (if ...) for conditional accumulation")]
+     (raise-parse-error 'removed-form
+                        "cond->> removed — use a let-chain with (if ...) for conditional accumulation")]
     [(list 'some-> _ ...)
-     (error 'beagle "some-> removed — use a let-chain with explicit nil-checks")]
+     (raise-parse-error 'removed-form
+                        "some-> removed — use a let-chain with explicit nil-checks")]
     [(list 'some->> _ ...)
-     (error 'beagle "some->> removed — use a let-chain with explicit nil-checks")]
+     (raise-parse-error 'removed-form
+                        "some->> removed — use a let-chain with explicit nil-checks")]
     [(list 'as-> _ ...)
-     (error 'beagle "as-> removed — use a let with explicit naming for intermediate values")]
-    [(list 'when-not _ ...)
-     (error 'beagle "when-not removed — use (when (not ...) body)")]
-    [(list 'if-not _ ...)
-     (error 'beagle "if-not removed — use (if (not ...) then else)")]
+     (raise-parse-error 'removed-form
+                        "as-> removed — use a let with explicit naming for intermediate values")]
+    ;; Clojure conditional sugar — accept-and-canonicalize to (if …) / (if … (do …)).
+    ;; Identity-preserving: same emitted code as the hand-written canonical
+    ;; form. The lowerings mirror lower-binding-cond's shape — multi-body
+    ;; bodies are always wrapped in (do …); single-body wrap is emit-equal
+    ;; to bare-body because emit-body of a single expr is just the expr.
+    ;;
+    ;;   (when c body…)      → (if c (do body…))
+    ;;   (when-not c body…)  → (if (not c) (do body…))
+    ;;   (if-not c t e)      → (if c e t)
+    ;;   (unless c body…)    → (if c nil (do body…))
+    ;;
+    ;; Like if-let/when-let, the surface sugar is welcome; the canonical AST
+    ;; is what every downstream pass sees.
+    [(list 'when c body ..1)
+     (parse-expr (list 'if c (cons 'do body)))]
+    [(list 'when-not c body ..1)
+     (parse-expr (list 'if (list 'not c) (cons 'do body)))]
+    [(list 'if-not c then-expr else-expr)
+     (parse-expr (list 'if c else-expr then-expr))]
+    [(list 'unless c body ..1)
+     (parse-expr (list 'if c 'nil (cons 'do body)))]
     [(list 'when _ ...)
-     (error 'beagle "when removed — use (if c body) for single body or (if c (do b1 b2 …)) for multi-body. The if-no-else form returns nil when condition is false, same as when did")]
-    [(list 'when-some _ ...)
-     (error 'beagle "when-some removed — beagle's typed nullable-narrowing form is pending design. Until then, use (let [x v] (if x (do body)))")]
-    [(list 'if-some _ ...)
-     (error 'beagle "if-some removed — beagle's typed nullable-narrowing form is pending design. Until then, use (let [x v] (if x then else))")]
-    [(list 'when-let _ ...)
-     (error 'beagle "when-let removed — beagle's typed nullable-narrowing form will land with the nil-semantics work (provisional name TBD; tracked in design-principle.md \"Open design questions\"). Until then, use (let [x v] (if x (do body))). Do NOT reintroduce when-let when the typed form arrives — the name carries Clojure semantics; the typed form should be beagle-native")]
-    [(list 'if-let _ ...)
-     (error 'beagle "if-let removed — beagle's typed nullable-narrowing form will land with the nil-semantics work (provisional name TBD; tracked in design-principle.md \"Open design questions\"). Until then, use (let [x v] (if x then else)). Do NOT reintroduce if-let when the typed form arrives — the name carries Clojure semantics; the typed form should be beagle-native")]
+     (raise-parse-error 'bad-form
+                        "when requires at least one body expression: (when c body...)")]
+    [(list 'when-not _ ...)
+     (raise-parse-error 'bad-form
+                        "when-not requires at least one body expression: (when-not c body...)")]
+    [(list 'unless _ ...)
+     (raise-parse-error 'bad-form
+                        "unless requires at least one body expression: (unless c body...)")]
+    [(list 'if-not _ ...)
+     (raise-parse-error 'bad-form
+                        "if-not expects (if-not c then else): three arguments required")]
+    ;; Clojure binding-conditional macros: accept-and-canonicalize.
+    ;; These are lowered to the canonical (let …) (if …) shape — the AST that
+    ;; results is byte-identical to what a hand-written equivalent would
+    ;; produce. The lowerings are identity-preserving:
+    ;;
+    ;;   (if-let    [x v] t e)    → (let [x v] (if x t e))
+    ;;   (when-let  [x v] body…)  → (let [x v] (if x (do body…)))
+    ;;   (if-some   [x v] t e)    → (let [x v] (if (not (nil? x)) t e))
+    ;;   (when-some [x v] body…)  → (let [x v] (if (not (nil? x)) (do body…)))
+    ;;
+    ;; The eventual typed nullable-narrowing form (provisional name TBD,
+    ;; tracked in design-principle.md) will not reuse these names — the
+    ;; typed form should be beagle-native, not Clojure-shaped. Until then
+    ;; the sugar is welcome.
+    [(list 'if-let bindings then-expr else-expr)
+     (parse-expr (lower-binding-cond 'if-let bindings (list then-expr else-expr)))]
+    [(list 'when-let bindings body ...)
+     (parse-expr (lower-binding-cond 'when-let bindings body))]
+    [(list 'if-some bindings then-expr else-expr)
+     (parse-expr (lower-binding-cond 'if-some bindings (list then-expr else-expr)))]
+    [(list 'when-some bindings body ...)
+     (parse-expr (lower-binding-cond 'when-some bindings body))]
     [(list '-> _ ...)
-     (error 'beagle "-> (first-arg threading) removed — use ->> or a let-chain")]
+     (raise-parse-error 'removed-form
+                        "-> (first-arg threading) removed — use ->> or a let-chain")]
     [(list 'dotimes _ ...)
-     (error 'beagle "dotimes removed — use (doseq [i (range n)] body...)")]
+     (raise-parse-error 'removed-form
+                        "dotimes removed — use (doseq [i (range n)] body...)")]
     [(list 'defmulti _ ...)
-     (error 'beagle "defmulti removed — use defprotocol + extend-type for type-based dispatch")]
+     (raise-parse-error 'removed-form
+                        "defmulti removed — use defprotocol + extend-type for type-based dispatch")]
     [(list 'defmethod _ ...)
-     (error 'beagle "defmethod removed — use defprotocol + extend-type for type-based dispatch")]
+     (raise-parse-error 'removed-form
+                        "defmethod removed — use defprotocol + extend-type for type-based dispatch")]
     [(list 'deftype _ ...)
-     (error 'beagle "deftype removed — use (defrecord Name [fields]) for the data shape and (extend-type Name Protocol (method ...)) for protocol impls")]
+     (raise-parse-error 'removed-form
+                        "deftype removed — use (defrecord Name [fields]) for the data shape and (extend-type Name Protocol (method ...)) for protocol impls")]
     [(list 'nix-ident _ ...)
-     (error 'beagle "nix-ident removed — use (flake-input :NAME :NAMESPACE :path ...) for flake-input access. nix-ident was an undocumented escape hatch that bypassed the type system.")]
+     (raise-parse-error 'removed-form
+                        "nix-ident removed — use (flake-input :NAME :NAMESPACE :path ...) for flake-input access. nix-ident was an undocumented escape hatch that bypassed the type system.")]
     [(list 'inc _ ...)
-     (error 'beagle "inc removed — use (+ x 1)")]
+     (raise-parse-error 'removed-form
+                        "inc removed — use (+ x 1)")]
     [(list 'dec _ ...)
-     (error 'beagle "dec removed — use (- x 1)")]
+     (raise-parse-error 'removed-form
+                        "dec removed — use (- x 1)")]
     [(list 'not= _ ...)
-     (error 'beagle "not= removed — use (not (= a b))")]
+     (raise-parse-error 'removed-form
+                        "not= removed — use (not (= a b))")]
     [(list 'case _ ...)
-     (error 'beagle "case removed — use (match x [v1 body] [v2 body] [_ default]) or (match x [(or v1 v2) shared-body] [_ default]); literal-only matches case-fold to target-native dispatch in emit")]
+     (raise-parse-error 'removed-form
+                        "case removed — use (match x [v1 body] [v2 body] [_ default]) or (match x [(or v1 v2) shared-body] [_ default]); literal-only matches case-fold to target-native dispatch in emit")]
     [(list (? keyword-sym? kw) _ ...)
-     (error 'beagle "(:keyword target) call-form removed — use (get m :key) for maps or (field-name r) for record field access; got: ~v" kw)]
+     (raise-parse-error 'unknown-form
+                        "(:keyword target) call-form removed — use (get m :key) for maps or (field-name r) for record field access; got: ~v" kw)]
 
     [(list (? symbol? f) args ...)
      (call-form f (map parse-expr (or (stx-tail subs 1) args)))]
@@ -1514,6 +1767,17 @@
              (cons (cons (parse-expr (car rest)) (parse-expr (cadr rest)))
                    acc))])))
 
+;; A cond clause test of `:else` (Clojure idiom) or bare `else` is the
+;; "always true" fallthrough. Canonicalize both to the symbol `'else` so
+;; downstream emit machinery (e.g. emit-nix's emit-cond) sees one shape.
+(define (else-marker-datum? d)
+  (or (eq? d ':else) (eq? d 'else)))
+
+(define (parse-cond-test test-stx test-datum)
+  (cond
+    [(else-marker-datum? test-datum) 'else]
+    [else (parse-expr (or test-stx test-datum))]))
+
 (define (parse-cond-clause c)
   (define d (->datum c))
   (define c-subs (stx-subs c))
@@ -1521,9 +1785,11 @@
     [(bracketed? d)
      (define items (or (stx-tail c-subs 1) (bracket-body d)))
      (when (null? items) (error 'beagle "cond clause is empty"))
-     (cond-clause (parse-expr (car items)) (parse-body (cdr items)))]
+     (define test-datum (->datum (car items)))
+     (cond-clause (parse-cond-test (car items) test-datum)
+                  (parse-body (cdr items)))]
     [(and (pair? d) (pair? (cdr d)))
-     (cond-clause (parse-expr (car d)) (parse-body (cdr d)))]
+     (cond-clause (parse-cond-test #f (car d)) (parse-body (cdr d)))]
     [else (error 'beagle "cond clause must be a [test body ...] form, got: ~v" d)]))
 
 (define (grouped-clause? d)
@@ -1531,23 +1797,46 @@
        (or (pair? (car d))
            (eq? (car d) 'else))))
 
+;; Bracketed/grouped clauses ([t r] or wrapped (case t r)) and flat-pair
+;; clauses ((cond t1 r1 t2 r2)) are both valid surface shapes — but
+;; mixing them in one cond is ambiguous and almost always a typo. Detect
+;; mixed shapes and raise rather than silently misparse.
+(define (cond-clause-shape d)
+  (cond
+    [(bracketed? d)      'bracketed]
+    [(grouped-clause? d) 'bracketed] ; (case t r) / (else r) — same shape family
+    [else                'flat]))
+
 (define (parse-cond-clauses clauses)
   (cond
     [(null? clauses) '()]
-    [(or (bracketed? (->datum (car clauses)))
-         (grouped-clause? (->datum (car clauses))))
-     (map parse-cond-clause clauses)]
     [else
-     (unless (even? (length clauses))
-       (error 'beagle
-              "cond with unbracketed clauses must have an even number of forms (test/body pairs)"))
-     (let loop ([rest clauses] [acc '()])
-       (cond
-         [(null? rest) (reverse acc)]
-         [else (loop (cddr rest)
-                     (cons (cond-clause (parse-expr (car rest))
-                                        (list (parse-expr (cadr rest))))
-                           acc))]))]))
+     (define first-shape (cond-clause-shape (->datum (car clauses))))
+     (case first-shape
+       [(bracketed)
+        ;; Require ALL clauses to be bracketed/grouped — refuse mixed form.
+        (for ([c (in-list (cdr clauses))]
+              [i (in-naturals 1)])
+          (define cd (->datum c))
+          (unless (eq? (cond-clause-shape cd) 'bracketed)
+            (error 'beagle
+                   "cond clauses must be all bracketed or all flat pairs (mixed forms not allowed); clause ~a is flat: ~v"
+                   i cd)))
+        (map parse-cond-clause clauses)]
+       [(flat)
+        (unless (even? (length clauses))
+          (error 'beagle
+                 "cond with unbracketed clauses must have an even number of forms (test/body pairs)"))
+        (let loop ([rest clauses] [acc '()])
+          (cond
+            [(null? rest) (reverse acc)]
+            [else
+             (define test-stx (car rest))
+             (define test-datum (->datum test-stx))
+             (loop (cddr rest)
+                   (cons (cond-clause (parse-cond-test test-stx test-datum)
+                                      (list (parse-expr (cadr rest))))
+                         acc))]))])]))
 
 ;; --- Nix-specific parse helpers --------------------------------------------
 
@@ -2055,4 +2344,9 @@
  read-beagle-datums
  read-beagle-syntax
  parse-params
- parse-record-fields)
+ parse-record-fields
+ beagle-parse-error
+ beagle-parse-error?
+ beagle-parse-error-kind
+ beagle-parse-error-details
+ raise-parse-error)

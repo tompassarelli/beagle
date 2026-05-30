@@ -19,19 +19,24 @@ LIB_DIR="$BEAGLE_ROOT/beagle-lib/private"
 args=()
 files=()
 auto_fix=""
+json_flag=""
 
 for arg in "$@"; do
     case "$arg" in
         --auto-fix)
             auto_fix="--auto-fix"
             ;;
+        --json)
+            json_flag="--json"
+            ;;
         --help|-h)
-            echo "Usage: beagle-validate [--auto-fix] [files...]"
+            echo "Usage: beagle-validate [--auto-fix] [--json] [files...]"
             echo ""
             echo "Validate .bnix files against the NixOS option schema."
             echo ""
             echo "  files...     .bnix files to validate (auto-discovers if omitted)"
             echo "  --auto-fix   apply unambiguous Levenshtein corrections"
+            echo "  --json       emit errors as jsonl on stdout (one record per error)"
             echo ""
             echo "Exits 0 if clean, 1 if errors, 2 if no files found."
             exit 0
@@ -64,6 +69,9 @@ fi
 racket_args=()
 if [[ -n "$auto_fix" ]]; then
     racket_args+=("$auto_fix")
+fi
+if [[ -n "$json_flag" ]]; then
+    racket_args+=("$json_flag")
 fi
 for f in "${files[@]}"; do
     racket_args+=("$f")

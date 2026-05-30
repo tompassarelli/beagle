@@ -15,7 +15,8 @@
          "types.rkt"
          "stdlib-types.rkt"
          "nixos-schema.rkt"
-         "sql-schema.rkt")
+         "sql-schema.rkt"
+         "diagnostic-kind.rkt")
 
 (define (builtin-env-for-target target)
   (stdlib-for-target target))
@@ -316,14 +317,17 @@
 
 (define (raise-diag kind message details #:src [src #f])
   (define with-code (hash-set details 'error-code (kind->error-code kind)))
+  (define with-cause
+    (hash-set with-code 'cause
+              (symbol->string (kind->cause-class kind))))
   (define details+src
     (if src
-        (hash-set (hash-set with-code 'error-line (src-loc-line src))
+        (hash-set (hash-set with-cause 'error-line (src-loc-line src))
                   'error-file (let ([s (src-loc-source src)])
                                 (cond [(path? s) (path->string s)]
                                       [(string? s) s]
                                       [else #f])))
-        with-code))
+        with-cause))
   (raise (beagle-diagnostic
           (format "beagle: ~a" message)
           (current-continuation-marks)

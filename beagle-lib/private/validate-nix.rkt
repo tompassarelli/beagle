@@ -19,6 +19,7 @@
          "parse.rkt"
          "types.rkt"
          "nixos-schema.rkt"
+         "diagnostic-kind.rkt"
          (prefix-in nix: beagle/nix/lang/reader-impl))
 
 ;; ============================================================================
@@ -36,6 +37,23 @@
     [(and l c) (format "~a:~a:~a: ~a" f l c m)]
     [l         (format "~a:~a: ~a" f l m)]
     [else      (format "~a: ~a" f m)]))
+
+;; Per-error JSON record (one line of jsonl) — used by validate-files
+;; when --json is set. Stamps cause-class from diagnostic-kind.rkt so
+;; beagle-rejection-stats can bucket without re-parsing the message.
+(define (error->jsexpr err)
+  (define kind (validation-error-kind err))
+  (hasheq 'schemaVersion 1
+          'tool "beagle-validate"
+          'file (let ([f (validation-error-file err)])
+                  (cond [(path? f) (path->string f)]
+                        [else f]))
+          'line (or (validation-error-line err) 'null)
+          'col  (or (validation-error-col err) 'null)
+          'kind (symbol->string kind)
+          'cause (symbol->string (validate-kind->cause-class kind))
+          'message (validation-error-message err)
+          'path (or (validation-error-path err) 'null)))
 
 ;; ============================================================================
 ;; Source line lookup — find key occurrences in the .bnix source text
@@ -741,7 +759,10 @@
 ;; Top-level entry: validate one or more files
 ;; ============================================================================
 
-(define (validate-files files #:auto-fix? [auto-fix? #f] #:verbose? [verbose? #f])
+(define (validate-files files
+                        #:auto-fix? [auto-fix? #f]
+                        #:verbose?  [verbose?  #f]
+                        #:json?     [json?     #f])
   (when (null? files)
     (eprintf "beagle-validate: no .bnix files to validate\n")
     (exit 2))
@@ -851,9 +872,18 @@
   (define conflict-errors (detect-cross-file-conflicts all-file-keys schema))
   (set! all-errors (append all-errors conflict-errors))
 
-  ;; Report errors
-  (for ([err (in-list all-errors)])
-    (displayln (fmt-error err) (current-error-port)))
+  ;; Report errors — either human-readable (default) or jsonl (when
+  ;; --json was passed). The jsonl path stamps every record with a
+  ;; cause-class so beagle-rejection-stats can bucket them.
+  (cond
+    [json?
+     (for ([err (in-list all-errors)])
+       (write-json (error->jsexpr err) (current-output-port))
+       (newline (current-output-port)))
+     (flush-output (current-output-port))]
+    [else
+     (for ([err (in-list all-errors)])
+       (displayln (fmt-error err) (current-error-port)))])
 
   ;; Auto-fix if requested
   (when (and auto-fix? (pair? all-errors))
@@ -892,6 +922,7 @@
          validate-file-keys
          collect-myconfig-declarations
          detect-myconfig-errors
+         error->jsexpr
          (struct-out found-key)
          (struct-out validation-error))
 
@@ -900,13 +931,17 @@
   (require racket/cmdline)
   (define auto-fix? #f)
   (define verbose? #f)
+  (define json? #f)
   (define files
     (command-line
      #:program "beagle-validate"
      #:once-each
      ["--auto-fix" "Apply unambiguous Levenshtein corrections" (set! auto-fix? #t)]
      [("-v" "--verbose") "Show schema-load chatter + per-stage details" (set! verbose? #t)]
+     ["--json" "Emit errors as jsonl on stdout (one record per error)"
+      (set! json? #t)]
      #:args files
      files))
-  (define error-count (validate-files files #:auto-fix? auto-fix? #:verbose? verbose?))
+  (define error-count
+    (validate-files files #:auto-fix? auto-fix? #:verbose? verbose? #:json? json?))
   (exit (if (zero? error-count) 0 1)))

@@ -34,7 +34,7 @@
      (display-usage)
      (exit 0)]
     [(member "--version" argv)
-     (displayln "beagle-import-nix 0.2.0 (rnix backend)")
+     (displayln "beagle-import-nix 0.3.0 (rnix backend, nix/-prefixed forms)")
      (exit 0)]
     [else
      (define input-path (car argv))
@@ -53,7 +53,7 @@
   (displayln "  Uses rnix-parser (via tools/nix-parse-json binary) for")
   (displayln "  lossless source parsing. Output is semantically equivalent.")
   (displayln "  May need manual cleanup to use beagle/nix's higher-level")
-  (displayln "  macros (module, with-cfg, etc.)."))
+  (displayln "  macros (module, nix/with-cfg, etc.)."))
 
 (define (path->ns-name p)
   (define name (path->string (file-name-from-path p)))
@@ -121,7 +121,9 @@
     [(list 'let bindings body)
      (emit-let bindings body depth)]
     [(list 'with scope body)
-     (format "(with ~a\n~a~a)"
+     ;; Emit `nix/with` (the canonical name); bare `with` is still
+     ;; accepted by parse.rkt but new output should use the prefix.
+     (format "(nix/with ~a\n~a~a)"
              (emit-expr scope depth)
              (indent (add1 depth))
              (emit-expr body (add1 depth)))]
@@ -266,12 +268,12 @@
     [(list 'id name)
      (symbol->string name)]
     [(list 'assert c body)
-     ;; Nix `assert cond; body` — beagle/nix doesn't have a dedicated
-     ;; assert form yet; lower to `if cond then body else throw`.
-     (format "(if ~a ~a (throw ~v))"
+     ;; Nix `assert cond; body` — emit beagle/nix's `nix/assert` form
+     ;; (the canonical prefix; parse.rkt also accepts bare `assert`).
+     (format "(nix/assert ~a\n~a~a)"
              (emit-expr c depth)
-             (emit-expr body depth)
-             "assertion failed")]
+             (indent (add1 depth))
+             (emit-expr body (add1 depth)))]
     [_ (format "; unhandled: ~v" ast)]))
 
 (define (collect-apply-args ast)

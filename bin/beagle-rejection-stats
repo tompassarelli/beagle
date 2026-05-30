@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+# beagle-rejection-stats: aggregate beagle rejection diagnostics by
+# cause-class and emit a histogram + per-kind breakdown.
+#
+# Phase 0 instrumentation per
+# ~/code/life-os/threads/20260530160000-beagle_phase_0_repair_blame_instrumentation.md
+#
+# Usage:
+#   bin/beagle-rejection-stats <dir>                  # run validate, aggregate
+#   bin/beagle-rejection-stats <dir> <verify-script>  # also run check (jsonl from BEAGLE_ERROR_FORMAT=json)
+#   bin/beagle-rejection-stats --stdin                # read jsonl from stdin
+#
+# Output:
+#   - human-readable histogram on stdout
+#   - jsonl append to .beagle-cache/rejection-stats.jsonl (one run record)
+#
+# Exit codes:
+#   0 always (this tool measures; it does not gate)
+
+set -uo pipefail
+
+BEAGLE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+usage() {
+    cat <<'EOF'
+Usage: beagle-rejection-stats <dir-or-bnix-glob> [verify-script]
+       beagle-rejection-stats --stdin   # read jsonl from stdin
+
+Aggregate beagle rejection diagnostics by cause-class.
+Cause-classes: surface-divergence, type-error, logic-error.
+EOF
+}
+
+if [[ $# -lt 1 ]]; then
+    usage
+    exit 2
+fi
+
+JSONL_INPUT=$(mktemp)
+trap 'rm -f "$JSONL_INPUT"' EXIT
+
+if [[ "$1" == "--stdin" ]]; then
+    cat > "$JSONL_INPUT"
+elif [[ "$1" == "--help" || "$1" == "-h" ]]; then
+    usage
+    exit 0
+else
+    DIR="$1"
+    # Drive beagle-validate --json and capture jsonl on stdout.
+    if [[ -e "$DIR" ]]; then
+        "$BEAGLE_ROOT/bin/beagle-validate" --json "$DIR" >> "$JSONL_INPUT" 2>/dev/null || true
+    else
+        echo "beagle-rejection-stats: path not found: $DIR" >&2
+        exit 2
+    fi
+    # Optionally also drive beagle-check-all with BEAGLE_ERROR_FORMAT=json.
+    # The check tool writes JSON to stderr (one per error); merge it in.
+    if [[ $# -ge 2 ]]; then
+        VERIFY="$2"
+        if [[ -x "$VERIFY" ]]; then
+            BEAGLE_ERROR_FORMAT=json "$VERIFY" 2>>"$JSONL_INPUT" >/dev/null || true
+        fi
+    fi
+fi
+
+python3 - "$JSONL_INPUT" <<'PYEOF'
+import json
+import os
+import sys
+import datetime
+from collections import Counter, defaultdict
+
+path = sys.argv[1]
+
+# Cause-class repair-time estimates in seconds. These feed the
+# "freq × estimated-repair-seconds" total that ranks Phase 2 work.
+# Numbers are deliberate over-estimates (the cheap option) for a
+# coarse triage — Phase 2 prioritization revises them once 30 days
+# of real-world data is in.
+REPAIR_SECONDS = {
+    "surface-divergence": 30,    # change a token / swap a form
+    "type-error":         180,   # rework a signature or value type
+    "logic-error":        900,   # debug runtime behavior
+}
+
+cause_counts = Counter()
+kind_counts = Counter()
+cause_to_kinds = defaultdict(Counter)
+records = 0
+parse_errors = 0
+
+with open(path, "r", encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            parse_errors += 1
+            continue
+        records += 1
+        cause = rec.get("cause") or "type-error"
+        kind = rec.get("kind") or "compile-error"
+        cause_counts[cause] += 1
+        kind_counts[kind] += 1
+        cause_to_kinds[cause][kind] += 1
+
+print(f"beagle-rejection-stats: {records} record(s) ingested"
+      f"{f' ({parse_errors} bad jsonl lines skipped)' if parse_errors else ''}")
+print()
+
+# Histogram by cause-class.
+total = sum(cause_counts.values()) or 1
+print("Cause-class histogram:")
+for cause in ("surface-divergence", "type-error", "logic-error"):
+    n = cause_counts.get(cause, 0)
+    pct = 100.0 * n / total
+    repair = n * REPAIR_SECONDS[cause]
+    print(f"  {cause:<22} {n:>5} ({pct:>5.1f}%)   est repair: {repair:>6}s "
+          f"= {repair/60:.1f}min")
+print()
+
+# Per-kind breakdown.
+print("Per-kind breakdown (top 20):")
+for kind, n in kind_counts.most_common(20):
+    print(f"  {kind:<32} {n}")
+
+# Notes on the logic-error bucket.
+if cause_counts.get("logic-error", 0) == 0:
+    print()
+    print("note: logic-error bucket is empty. This is BY DESIGN — beagle's")
+    print("      diagnostic-emission boundary cannot see silent divergences")
+    print("      (code that parses and typechecks but means the wrong thing).")
+    print("      See diagnostic-kind.rkt and the rev-2 main thread §C.")
+
+# Append the run summary to .beagle-cache/rejection-stats.jsonl.
+cache_dir = ".beagle-cache"
+os.makedirs(cache_dir, exist_ok=True)
+out_path = os.path.join(cache_dir, "rejection-stats.jsonl")
+summary = {
+    "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    "records": records,
+    "cause_counts": dict(cause_counts),
+    "kind_counts": dict(kind_counts),
+    "estimated_repair_seconds_total":
+        sum(REPAIR_SECONDS.get(c, 0) * n for c, n in cause_counts.items()),
+}
+with open(out_path, "a", encoding="utf-8") as f:
+    f.write(json.dumps(summary) + "\n")
+
+print()
+print(f"appended summary to {out_path}")
+PYEOF
+
+exit 0

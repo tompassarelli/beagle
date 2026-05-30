@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# beagle-migrate-namespacing: corpus migration for nix/ namespacing.
+#
+# Walks .bnix files under DIR (default: cwd) and rewrites bare head
+# symbols to their nix/-prefixed canonical spelling:
+#
+#   (assert    …)  → (nix/assert    …)
+#   (with-cfg  …)  → (nix/with-cfg  …)
+#   (with NS BODY) → (nix/with NS BODY)   — Nix-scope shape only.
+#
+# Record-update `(with target [:k v] …)` is left bare (it's Clojure-native,
+# not a Nix collision).
+#
+# Usage:
+#   beagle-migrate-namespacing [--dry-run] [--emit-patch] [DIR]
+
+set -euo pipefail
+source "$(dirname "$0")/_beagle-racket"
+
+exec "$RACKET" -l beagle/private/migrate-namespacing -- "$@"

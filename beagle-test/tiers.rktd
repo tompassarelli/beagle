@@ -57,6 +57,7 @@
 #hasheq(
   (active . (;; target-agnostic infrastructure
              "check.rkt"
+             "diagnostic-kind.rkt"
              "lint.rkt"
              "parse.rkt"
              "syntax.rkt"

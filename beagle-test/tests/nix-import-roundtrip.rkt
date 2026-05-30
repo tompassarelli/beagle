@@ -68,3 +68,31 @@
   ;; Per-line layout preserved — plain heredoc still has all three lines
   (check-true (regexp-match? #rx"line one[\n\r]+ *line two" out))
   (check-true (regexp-match? #rx"line two[\n\r]+ *line three" out)))
+
+(test-case "importer emits nix/-prefixed forms for with and assert"
+  ;; Phase 1 of the prefix migration: beagle-import-nix should emit
+  ;; `nix/with` / `nix/assert`, not bare `with` / `assert`.
+  ;; See ~/code/life-os/threads/20260530160100-*.
+  (define tmpdir (find-system-path 'temp-dir))
+  (define src-path (build-path tmpdir "import-prefix-src.nix"))
+  (with-output-to-file src-path #:exists 'replace
+    (lambda ()
+      (display
+        (string-append
+          "{ pkgs, config, ... }:\n"
+          "let cfg = config.services.foo; in\n"
+          "assert cfg.enable;\n"
+          "with pkgs;\n"
+          "{ packages = [ hello ]; }\n"))))
+  (define-values (bnix _err) (run (path->string importer-bin)
+                                  (path->string src-path)))
+  (check-true (regexp-match? #rx"\\(nix/with " bnix)
+              "importer must emit (nix/with …)")
+  (check-true (regexp-match? #rx"\\(nix/assert " bnix)
+              "importer must emit (nix/assert …)")
+  ;; And the bare forms should NOT appear in head position. Use a
+  ;; word-boundary check: `(with ` or `(assert ` followed by non-/.
+  (check-false (regexp-match? #rx"\\(with [^/]" bnix)
+               "importer must not emit bare `(with …)`")
+  (check-false (regexp-match? #rx"\\(assert [^/]" bnix)
+               "importer must not emit bare `(assert …)`"))

@@ -155,6 +155,32 @@
   (check-true (string-contains? out "if true then 1 else"))
   (check-true (string-contains? out "if false then 2")))
 
+;; Clojure-shaped flat-pair cond is accepted and canonicalizes to the same
+;; AST as the bracketed form — the emitted Nix is byte-identical.
+(test-case "cond: flat-pair Clojure form == bracketed form (with :else)"
+  (define flat (nix-emit "(define-target nix) (cond (= x 1) :a (= x 2) :b :else :c)"))
+  (define brk  (nix-emit "(define-target nix) (cond [(= x 1) :a] [(= x 2) :b] [:else :c])"))
+  (check-equal? flat brk)
+  ;; sanity: :else collapses to the bare else-body, not a literal "else" test
+  (check-false (string-contains? flat "if \"else\"")))
+
+(test-case "cond: flat-pair without :else falls through to null"
+  (define out (nix-emit "(define-target nix) (cond (= x 1) :a (= x 2) :b)"))
+  (check-true (string-contains? out "if (x == 1) then \"a\""))
+  (check-true (string-contains? out "if (x == 2) then \"b\""))
+  (check-true (string-contains? out "else null")))
+
+(test-case "cond: bare `else` in bracketed clause works (same as :else)"
+  (define a (nix-emit "(define-target nix) (cond [(= x 1) :a] [else :b])"))
+  (define b (nix-emit "(define-target nix) (cond [(= x 1) :a] [:else :b])"))
+  (check-equal? a b))
+
+(test-case "cond: mixed bracketed + flat clauses is rejected"
+  ;; nix-emit returns #f on parse failure (its handler swallows the error)
+  ;; — so a #f result indicates the mixed form was refused.
+  (define out (nix-emit "(define-target nix) (cond [(= x 1) :a] (= x 2) :b)"))
+  (check-false out))
+
 ;; --- with (record update) --------------------------------------------------
 
 (test-case "with emits attrset merge"
@@ -457,3 +483,39 @@
   ;; nix-parse.rkt; here we just confirm the form doesn't reach emit.
   (define out (nix-emit "(define-target nix) (def x : Any (nix-ident \"inputs.foo\"))"))
   (check-false out))
+
+;; --- Clojure conditional sugar: accept-and-canonicalize ---------------------
+;;
+;; (when c body…)      → (if c (do body…))
+;; (when-not c body…)  → (if (not c) (do body…))
+;; (if-not c t e)      → (if c e t)
+;; (unless c body…)    → (if c nil (do body…))
+;;
+;; Each test parses both the surface form and the lowered form and asserts
+;; the emitted Nix is byte-equal. Pre-condition: parse-side coverage lives in
+;; tests/parse.rkt (AST shape) and tests/diagnostic-kind.rkt (the no-body
+;; rejection-form tag).
+
+(test-case "when emits same Nix as if + do (multi body)"
+  (define a (nix-emit "(define-target nix) (when (> x 0) (println x) x)"))
+  (define b (nix-emit "(define-target nix) (if (> x 0) (do (println x) x))"))
+  (check-equal? a b))
+
+(test-case "when-not emits same Nix as if (not c) + body (single body)"
+  (define a (nix-emit "(define-target nix) (when-not (> x 0) (println x))"))
+  (define b (nix-emit "(define-target nix) (if (not (> x 0)) (println x))"))
+  (check-equal? a b))
+
+(test-case "if-not emits same Nix as if with branches swapped"
+  (define a (nix-emit "(define-target nix) (if-not (> x 0) \"neg\" \"pos\")"))
+  ;; Source swap: (if-not c t e) → (if c e t)
+  (define b (nix-emit "(define-target nix) (if (> x 0) \"pos\" \"neg\")"))
+  (check-equal? a b))
+
+(test-case "unless emits same Nix as if c nil + body (chosen lowering)"
+  ;; Chosen lowering: (unless c body…) → (if c nil (do body…)).
+  ;; For single body the (do body) wrap collapses to bare body in emit
+  ;; (emit-body of a single expr is just the expr), so emit is byte-equal.
+  (define a (nix-emit "(define-target nix) (unless (> x 0) (println x))"))
+  (define b (nix-emit "(define-target nix) (if (> x 0) nil (println x))"))
+  (check-equal? a b))

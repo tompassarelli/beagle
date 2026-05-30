@@ -9,7 +9,9 @@
 
 (require racket/format
          json
-         "check.rkt")
+         "check.rkt"
+         "parse.rkt"
+         "diagnostic-kind.rkt")
 
 (define (json-error-mode?)
   (define v (getenv "BEAGLE_ERROR_FORMAT"))
@@ -113,14 +115,47 @@
      (write-json enriched (current-error-port))
      (newline (current-error-port))
      (flush-output (current-error-port))]
+    [(beagle-parse-error? msg-or-exn)
+     (define d (beagle-parse-error-details msg-or-exn))
+     (define kind (beagle-parse-error-kind msg-or-exn))
+     (define msg (clean-message (exn-message msg-or-exn)))
+     (define base
+       (hasheq 'schemaVersion 1
+               'tool "beagle"
+               'kind (symbol->string kind)
+               'cause (symbol->string (parse-error-kind->cause-class kind))
+               'message msg
+               'hint   (or (hint-for msg) 'null)
+               'file (path-or-source stx)
+               'line (and stx (syntax-line stx))
+               'col  (and stx (syntax-column stx))))
+     (define enriched
+       (for/fold ([h base]) ([(k v) (in-hash d)])
+         (hash-set h (if (symbol? k) k (string->symbol k)) v)))
+     (write-json enriched (current-error-port))
+     (newline (current-error-port))
+     (flush-output (current-error-port))]
     [else
      (define msg (if (exn? msg-or-exn) (exn-message msg-or-exn) msg-or-exn))
      (define clean (clean-message msg))
      (define hint (hint-for clean))
+     (define heuristic-kind (extract-kind clean))
+     ;; Fall back to heuristic kind→cause mapping. The bulk of
+     ;; (error 'beagle ...) sites in parse.rkt still flow through
+     ;; here; the histogram bucket they land in is best-effort until
+     ;; they're promoted to structured beagle-parse-error.
+     (define cause
+       (cond
+         [(string=? heuristic-kind "unknown-form")    "surface-divergence"]
+         [(string=? heuristic-kind "unknown-mode")    "surface-divergence"]
+         [(string=? heuristic-kind "syntax")          "surface-divergence"]
+         [(string=? heuristic-kind "compile-error")   "surface-divergence"]
+         [else                                        "type-error"]))
      (write-json
       (hasheq 'schemaVersion 1
               'tool "beagle"
-              'kind (extract-kind clean)
+              'kind heuristic-kind
+              'cause cause
               'message clean
               'hint   (or hint 'null)
               'file (path-or-source stx)
