@@ -230,6 +230,52 @@
     (datum->syntax #f result (vector src line col pos #f))
     result))
 
+;; Quasiquote-prefix reader. `` `X `` reads as `(quasiquote X)`.
+;; Mirrors Racket's default quasiquote reader, but stays inside the
+;; beagle readtable so brackets/curlies/etc. parse with beagle semantics.
+;; Provides templating surface for proc/beagle macros (paired with
+;; unquote-reader and unquote-splicing).
+(define (quasiquote-reader ch port src line col pos)
+  (define inner
+    (parameterize ([current-readtable beagle-readtable])
+      (if src (read-syntax src port) (read port))))
+  (when (eof-object? inner)
+    (error 'beagle "unexpected EOF after `` ` `` (quasiquote needs a following datum)"))
+  (define result (list 'quasiquote inner))
+  (if src
+    (datum->syntax #f result (vector src line col pos #f))
+    result))
+
+;; Unquote-prefix reader. `,X` reads as `(unquote X)`.
+;; If the next char after `,` is `@`, dispatches to unquote-splicing:
+;; `,@X` → `(unquote-splicing X)`. Inside a quasiquoted template
+;; (`` `(... ,x ...) ``) the unquote escapes back to the surrounding
+;; evaluation context for the duration of one datum.
+(define (unquote-reader ch port src line col pos)
+  (define next (peek-char port))
+  (cond
+    [(and (char? next) (char=? next #\@))
+     (read-char port)
+     (define inner
+       (parameterize ([current-readtable beagle-readtable])
+         (if src (read-syntax src port) (read port))))
+     (when (eof-object? inner)
+       (error 'beagle "unexpected EOF after `,@` (unquote-splicing needs a following datum)"))
+     (define result (list 'unquote-splicing inner))
+     (if src
+       (datum->syntax #f result (vector src line col pos #f))
+       result)]
+    [else
+     (define inner
+       (parameterize ([current-readtable beagle-readtable])
+         (if src (read-syntax src port) (read port))))
+     (when (eof-object? inner)
+       (error 'beagle "unexpected EOF after `,` (unquote needs a following datum)"))
+     (define result (list 'unquote inner))
+     (if src
+       (datum->syntax #f result (vector src line col pos #f))
+       result)]))
+
 (define beagle-readtable
   (make-readtable #f
     #\[ 'terminating-macro bracket-reader
@@ -242,6 +288,8 @@
                               (error 'beagle "unexpected `}`"))
     #\| 'non-terminating-macro pipe-reader
     #\' 'terminating-macro quote-reader
+    #\` 'terminating-macro quasiquote-reader
+    #\, 'terminating-macro unquote-reader
     #\# 'non-terminating-macro hash-dispatch))
 
 (define (beagle-read in)

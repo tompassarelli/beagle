@@ -450,7 +450,7 @@
 
 (test-case "safe macro expansion"
   (define p (parse-prog
-             '(define-macro safe inc1 (x) (+ x 1))
+             `(defmacro inc1 ,(br 'x) (+ x 1))
              '(def y (inc1 5))))
   (define f (car (program-forms p)))
   (check-true (def-form? f))
@@ -460,17 +460,21 @@
   (check-eq?  (call-form-fn value) '+)
   (check-equal? (call-form-args value) '(5 1)))
 
-(parse-err/rx "unsafe macro kind is rejected"
-              #rx"kind must be 'safe"
+(parse-err/rx "legacy (define-macro safe …) is rejected — points at defmacro"
+              #rx"define-macro.*defmacro"
+  '(define-macro safe foo (x) (+ x 1)))
+
+(parse-err/rx "legacy (define-macro unsafe …) is rejected — points at defmacro"
+              #rx"define-macro.*defmacro"
   '(define-macro unsafe wild (x) x))
 
 (parse-err "macro arity mismatch errors"
-  '(define-macro safe two (a b) (+ a b))
+  `(defmacro two ,(br 'a 'b) (+ a b))
   '(def y (two 1)))
 
 (parse-err "duplicate macro definition errors"
-  '(define-macro safe m (x) x)
-  '(define-macro safe m (y) y))
+  `(defmacro m ,(br 'x) x)
+  `(defmacro m ,(br 'y) y))
 
 ;; --- declare-extern --------------------------------------------------------
 
@@ -501,7 +505,7 @@
 
 (test-case "macro with &rest expands binding remaining args as a list"
   (define p (parse-prog
-             '(define-macro safe debug (& xs) (println xs))
+             `(defmacro debug ,(br '& 'xs) (println xs))
              '(def y (debug 1 2 3))))
   (define f (car (program-forms p)))
   (check-true (def-form? f))
@@ -512,7 +516,7 @@
 
 (test-case "macro &rest with splice inlines elements"
   (define p (parse-prog
-             '(define-macro safe call-it (f & args) (f (splice args)))
+             `(defmacro call-it ,(br 'f '& 'args) (f (splice args)))
              '(def y (call-it + 1 2 3))))
   (define f (car (program-forms p)))
   (define value (def-form-value f))
@@ -522,14 +526,14 @@
   (check-equal? (length (call-form-args value)) 3))
 
 (parse-err "macro &rest: too few args errors"
-  '(define-macro safe foo (a b & rest) a)
+  `(defmacro foo ,(br 'a 'b '& 'rest) a)
   '(def y (foo 1)))
 
 ;; --- macro hygiene --------------------------------------------------------
 
 (test-case "safe macro: let binder is renamed to prevent capture"
   (define p (parse-prog
-             '(define-macro safe with-temp (val body) (let [x val] body))
+             `(defmacro with-temp ,(br 'val 'body) (let ,(br 'x 'val) body))
              '(def y (with-temp 1 42))))
   (define f (car (program-forms p)))
   (define val (def-form-value f))
@@ -538,7 +542,7 @@
 
 (test-case "safe macro: fn param is renamed"
   (define p (parse-prog
-             '(define-macro safe make-fn (body) (fn [x] body))
+             `(defmacro make-fn ,(br 'body) (fn ,(br 'x) body))
              '(def f (make-fn 42))))
   (define f (car (program-forms p)))
   (define val (def-form-value f))
@@ -547,7 +551,7 @@
 
 (test-case "safe macro: no binders means no rename"
   (define p (parse-prog
-             '(define-macro safe inc1 (x) (+ x 1))
+             `(defmacro inc1 ,(br 'x) (+ x 1))
              '(def y (inc1 5))))
   (define f (car (program-forms p)))
   (define val (def-form-value f))

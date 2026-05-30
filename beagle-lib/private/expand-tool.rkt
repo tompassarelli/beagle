@@ -48,10 +48,16 @@
                     [(list? params) params]
                     [else '()]))
        (register-macro! registry name kind ps template)]
+      [(list 'defmacro (? symbol? name) params template)
+       (define ps (cond
+                    [(bracketed? params) (bracket-body params)]
+                    [(list? params) params]
+                    [else '()]))
+       (register-macro! registry name 'defmacro ps template)]
       [_ (void)]))
   ;; Second pass: expand each non-meta form, splice (Vec Form) output
   (for ([d (in-list datums)])
-    (unless (and (pair? d) (memq (car d) '(define-macro import)))
+    (unless (and (pair? d) (memq (car d) '(define-macro defmacro import)))
       (define expanded (expand-fully registry d))
       (cond
         [(and (pair? expanded) (eq? (car expanded) '#%splice-forms))
@@ -217,10 +223,16 @@
                     [(list? params) params]
                     [else '()]))
        (register-macro! registry name kind ps template)]
+      [(list 'defmacro (? symbol? name) params template)
+       (define ps (cond
+                    [(bracketed? params) (bracket-body params)]
+                    [(list? params) params]
+                    [else '()]))
+       (register-macro! registry name 'defmacro ps template)]
       [_ (void)]))
   (apply append
     (for/list ([d (in-list datums)])
-      (if (and (pair? d) (memq (car d) '(define-macro import)))
+      (if (and (pair? d) (memq (car d) '(define-macro defmacro import)))
         '()
         (let ([expanded (expand-fully registry d)])
           (if (and (pair? expanded) (eq? (car expanded) '#%splice-forms))

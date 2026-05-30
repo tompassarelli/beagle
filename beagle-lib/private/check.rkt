@@ -16,6 +16,7 @@
          "stdlib-types.rkt"
          "nixos-schema.rkt"
          "sql-schema.rkt"
+         "macros.rkt"
          "diagnostic-kind.rkt")
 
 (define (builtin-env-for-target target)
@@ -313,13 +314,32 @@
     [(nixos-unknown-option) "E014"]
     [(nixos-type-mismatch)  "E015"]
     [(template-splice)     "E016"]
+    [(macro-expansion-type-error) "E017"]
     [else                 "E000"]))
 
 (define (raise-diag kind message details #:src [src #f])
-  (define with-code (hash-set details 'error-code (kind->error-code kind)))
+  ;; When the form currently under type-check came from macro expansion
+  ;; (current-macro-expansion-ctx is set by type-check-with-locs! for
+  ;; macro-derived forms), rebucket the rejection as
+  ;; 'macro-expansion-type-error so Phase 0 telemetry separates "macro
+  ;; produced a wrong-typed result" from "author wrote a wrong-typed
+  ;; surface form". Preserves the original kind under 'original-kind for
+  ;; downstream tooling that wants the specific symptom.
+  (define ctx (current-macro-expansion-ctx))
+  (define effective-kind
+    (if ctx 'macro-expansion-type-error kind))
+  (define base-details
+    (cond
+      [ctx
+       (hash-set* (hash-set details 'original-kind (symbol->string kind))
+                  'macro-name (symbol->string (expansion-ctx-macro-name ctx))
+                  'macro-depth (expansion-ctx-depth ctx))]
+      [else details]))
+  (define with-code
+    (hash-set base-details 'error-code (kind->error-code effective-kind)))
   (define with-cause
     (hash-set with-code 'cause
-              (symbol->string (kind->cause-class kind))))
+              (symbol->string (kind->cause-class effective-kind))))
   (define details+src
     (if src
         (hash-set (hash-set with-cause 'error-line (src-loc-line src))
@@ -331,7 +351,7 @@
   (raise (beagle-diagnostic
           (format "beagle: ~a" message)
           (current-continuation-marks)
-          kind
+          effective-kind
           details+src)))
 
 ;; --- "did you mean?" suggestions --------------------------------------------
@@ -434,12 +454,20 @@
         (hash-clear! SQL-FKS)
         (for ([(tbl-col target) (in-hash (sql-schema-fks cached))])
           (hash-set! SQL-FKS tbl-col target))))
+    (define macro-tbl (program-macro-derived-table prog))
     (parameterize ([current-union-members UNION-MEMBERS]
                    [current-check-target (program-target prog)]
                    [current-nixos-schema nix-schema])
       (for ([form (in-list (program-forms prog))])
-        (check-target-form form)
-        (check-form form env)))
+        ;; Walk the form transitively — a top-level def-form may wrap a
+        ;; macro-derived value inside (def-form y "hello"). Setting the
+        ;; ctx on transitive matches lets raise-diag rebucket the error
+        ;; even when it fires on the outer def-form.
+        (define macro-ctx (form-macro-derived-ctx macro-tbl form))
+        (parameterize ([current-macro-expansion-ctx
+                        (if (eq? macro-ctx #f) #f macro-ctx)])
+          (check-target-form form)
+          (check-form form env))))
     (check-scalar-provenance! prog)))
 
 ;; --- environment -----------------------------------------------------------
@@ -2373,14 +2401,18 @@
           (hash-set! SQL-TABLES tbl col-map))
         (for ([(tbl-col target) (in-hash (sql-schema-fks cached))])
           (hash-set! SQL-FKS tbl-col target))))
+    (define macro-tbl (program-macro-derived-table prog))
     (parameterize ([current-check-src-table (program-src-table prog)]
                    [current-check-target (program-target prog)]
                    [current-union-members UNION-MEMBERS]
                    [current-nixos-schema nix-schema])
       (for ([form (in-list (program-forms prog))]
             [orig-stx (in-list (program-form-stxs prog))])
+        (define macro-ctx (form-macro-derived-ctx macro-tbl form))
         (with-handlers ([exn:fail? (lambda (e) (error-handler e orig-stx))])
-          (check-form form env))))))
+          (parameterize ([current-macro-expansion-ctx
+                          (if (eq? macro-ctx #f) #f macro-ctx)])
+            (check-form form env)))))))
 
 ;; =============================================================================
 ;; Scalar provenance lint pass

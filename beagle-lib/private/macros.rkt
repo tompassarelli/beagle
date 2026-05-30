@@ -93,9 +93,9 @@
 (define (register-macro! reg name kind params template)
   (when (hash-has-key? reg name)
     (error 'beagle "duplicate macro definition: ~a" name))
-  (unless (eq? kind 'safe)
+  (unless (or (eq? kind 'safe) (eq? kind 'defmacro))
     (error 'beagle
-           "macro ~a: kind must be 'safe (escape-hatch 'unsafe kind has been removed — all template macros are now type-checked end-to-end)"
+           "macro ~a: kind must be 'safe or 'defmacro (escape-hatch 'unsafe kind has been removed — all template macros are now type-checked end-to-end)"
            name))
   (unless (list? params)
     (error 'beagle "macro ~a: parameters must be a list, got ~v" name params))
@@ -309,27 +309,139 @@
 (define (expand-template-macro m name args)
   (define fixed (macro-def-fixed-params m))
   (define rest-name (macro-def-rest-param m))
+  (define kind (macro-def-kind m))
+  (define hygienic? (or (eq? kind 'safe) (eq? kind 'defmacro)))
   (define template
-    (if (eq? (macro-def-kind m) 'safe)
+    (if hygienic?
       (hygienize-template (macro-def-template m) fixed rest-name)
       (macro-def-template m)))
+  (define substituted
+    (cond
+      [rest-name
+       (when (< (length args) (length fixed))
+         (error 'beagle
+                "macro ~a: expected at least ~a arg(s), got ~a"
+                name (length fixed) (length args)))
+       (define fixed-args (take args (length fixed)))
+       (define rest-args  (drop args (length fixed)))
+       (define bindings (make-bindings fixed fixed-args rest-name rest-args))
+       (substitute template bindings rest-name)]
+      [else
+       (unless (= (length args) (length fixed))
+         (error 'beagle
+                "macro ~a: expected ~a arg(s), got ~a"
+                name (length fixed) (length args)))
+       (define bindings (make-bindings fixed args #f '()))
+       (substitute template bindings #f)]))
   (cond
-    [rest-name
-     (when (< (length args) (length fixed))
-       (error 'beagle
-              "macro ~a: expected at least ~a arg(s), got ~a"
-              name (length fixed) (length args)))
-     (define fixed-args (take args (length fixed)))
-     (define rest-args  (drop args (length fixed)))
-     (define bindings (make-bindings fixed fixed-args rest-name rest-args))
-     (substitute template bindings rest-name)]
+    [(eq? kind 'defmacro) (qq-eval substituted)]
+    [else substituted]))
+
+;; --- quasi-quote evaluator (defmacro bodies) -------------------------------
+;;
+;; Walks a datum tree honoring quasiquote / unquote / unquote-splicing
+;; level semantics:
+;;   - (quasiquote D)        opens a level; recur on D with depth+1
+;;   - (unquote X)           at depth 1, replace with X; deeper, recur
+;;   - (unquote-splicing X)  list-context only; at depth 1 splice elements
+;;     of X into surrounding list (strip #%brackets tag if X is a vec)
+;;
+;; Outside any quasiquote (depth 0) we pass through unchanged — defmacro
+;; bodies that don't use quasiquote (or use it inside-out) behave like
+;; regular safe-template bodies.
+;;
+;; Mirrors Racket's standard semantics: only the OUTERMOST unquote at the
+;; right level fires; deeper levels stay as data.
+
+(define (qq-eval datum)
+  (qq-walk datum 0))
+
+(define (qq-walk datum depth)
+  (cond
+    [(and (pair? datum) (eq? (car datum) 'quasiquote)
+          (pair? (cdr datum)) (null? (cddr datum)))
+     (cond
+       [(zero? depth)
+        ;; Top-level quasiquote: enter, return raw payload (don't re-wrap).
+        (qq-walk (cadr datum) (+ depth 1))]
+       [else
+        ;; Nested quasiquote inside an outer quasiquote: keep as data
+        ;; but recur into payload at depth+1.
+        (list 'quasiquote (qq-walk (cadr datum) (+ depth 1)))])]
+    [(and (pair? datum) (eq? (car datum) 'unquote)
+          (pair? (cdr datum)) (null? (cddr datum)))
+     (cond
+       [(zero? depth)
+        ;; Stray unquote at top level — pass through (no error; user might
+        ;; want (unquote x) as data in a non-QQ body).
+        (list 'unquote (qq-walk (cadr datum) depth))]
+       [(= depth 1)
+        ;; Fire: return payload as data.
+        (cadr datum)]
+       [else
+        ;; Nested: stay as (unquote ...) but recur with depth-1.
+        (list 'unquote (qq-walk (cadr datum) (- depth 1)))])]
+    [(and (pair? datum) (eq? (car datum) 'unquote-splicing)
+          (pair? (cdr datum)) (null? (cddr datum)))
+     ;; At top level, an unquote-splicing outside a list context is an
+     ;; error; otherwise, walking is done by qq-walk-list below. We hit
+     ;; this case only via direct recursion (not list-walk), so pass
+     ;; through respecting depth.
+     (cond
+       [(zero? depth)
+        (list 'unquote-splicing (qq-walk (cadr datum) depth))]
+       [(= depth 1)
+        (error 'beagle
+               "unquote-splicing not in list context: ~v"
+               datum)]
+       [else
+        (list 'unquote-splicing (qq-walk (cadr datum) (- depth 1)))])]
+    [(pair? datum)
+     (cond
+       [(zero? depth)
+        ;; Outside any quasiquote: walk children looking for quasiquote
+        ;; openings.
+        (cons (qq-walk (car datum) depth) (qq-walk (cdr datum) depth))]
+       [else
+        ;; Inside a quasiquote: walk as a list, allowing splice.
+        (qq-walk-list datum depth)])]
+    [else datum]))
+
+;; Walks a list inside a quasiquote at the given depth, handling
+;; unquote-splicing inline. If the list head is `#%brackets`, preserves
+;; the tag so the surrounding bracketed-vec semantics survive.
+(define (qq-walk-list datum depth)
+  (cond
+    [(null? datum) '()]
+    [(not (pair? datum))
+     ;; improper tail
+     (qq-walk datum depth)]
     [else
-     (unless (= (length args) (length fixed))
-       (error 'beagle
-              "macro ~a: expected ~a arg(s), got ~a"
-              name (length fixed) (length args)))
-     (define bindings (make-bindings fixed args #f '()))
-     (substitute template bindings #f)]))
+     (define head (car datum))
+     (define rest (cdr datum))
+     (cond
+       [(and (pair? head) (eq? (car head) 'unquote-splicing)
+             (pair? (cdr head)) (null? (cddr head)))
+        (cond
+          [(= depth 1)
+           (define spliced-source (cadr head))
+           (define splice-elems (qq-splice-elements spliced-source))
+           (append splice-elems (qq-walk-list rest depth))]
+          [else
+           (cons (list 'unquote-splicing (qq-walk (cadr head) (- depth 1)))
+                 (qq-walk-list rest depth))])]
+       [else
+        (cons (qq-walk head depth) (qq-walk-list rest depth))])]))
+
+;; Extract the elements of a splice source. Bracketed vecs splice their
+;; elements (strip #%brackets tag); plain lists splice as-is.
+(define (qq-splice-elements v)
+  (cond
+    [(and (pair? v) (eq? (car v) BRACKET-TAG)) (cdr v)]
+    [(list? v) v]
+    [else
+     (error 'beagle
+            "unquote-splicing: expected list or vec, got ~v" v)]))
 
 (define (make-bindings fixed-params fixed-args rest-name rest-args)
   (define h (make-hash))
@@ -397,6 +509,83 @@
 ;;   (handler 'after  macro-name result-datum depth)
 (define current-trace-handler (make-parameter #f))
 
+;; Macro-expansion provenance parameter. When non-#f, the current dynamic
+;; extent is processing a macro's expansion result (either expanding it
+;; further or parsing/type-checking the output). Diagnostic emitters
+;; (raise-parse-error in parse.rkt, raise-diag in check.rkt) consult this
+;; to rebucket the rejection kind so the Phase 0 telemetry can separate
+;; "macro produced bad output" from "author wrote bad surface text".
+;;
+;; Value, when set, is an expansion-ctx (carries the macro name + chain).
+;; Set by expand-fully during expansion; set by parse.rkt around the
+;; post-expansion parse of the result; set by check.rkt for each
+;; check-form that touches a macro-derived program form.
+(define current-macro-expansion-ctx (make-parameter #f))
+
+;; Per-program macro-derived form tracking. parse.rkt populates this
+;; (mutable) hash with the top-level AST nodes produced by macro
+;; expansion; check.rkt reads it to drive `current-macro-expansion-ctx`
+;; while checking each form. The hash maps node-identity to the
+;; expansion-ctx that produced it.
+;;
+;; parse.rkt creates a fresh table per parse-program call, parameterizes
+;; current-macro-derived-table to it during parsing (so
+;; mark-macro-derived! attaches expanded nodes), and stashes the
+;; finalized table in PROGRAM->MACRO-TABLE keyed by program identity so
+;; check.rkt can recover it after parse-program returns and the
+;; parameterize has unwound.
+(define current-macro-derived-table (make-parameter #f))
+
+(define PROGRAM->MACRO-TABLE (make-weak-hasheq))
+
+(define (mark-macro-derived! node ctx)
+  (define tbl (current-macro-derived-table))
+  (when tbl
+    (hash-set! tbl node (or ctx 'macro-expansion))))
+
+(define (macro-derived-ctx node)
+  (define tbl (current-macro-derived-table))
+  (and tbl (hash-ref tbl node #f)))
+
+;; Recursive lookup against a specific macro-derived-table. Returns the
+;; expansion-ctx of the first macro-derived sub-node found inside `form`
+;; (DFS), or #f if no descendant came from a macro expansion. check.rkt
+;; uses this on each top-level program form to decide whether to set
+;; current-macro-expansion-ctx while checking it — top-level forms wrap
+;; their macro-derived children (e.g. (def-form y "hello") wraps the
+;; string "hello" emitted by a macro), so check needs to detect macro
+;; provenance transitively, not just on the outer form.
+(define (form-macro-derived-ctx tbl form)
+  (and tbl
+       (let walk ([v form])
+         (cond
+           [(hash-ref tbl v #f) => (lambda (ctx) ctx)]
+           [(pair? v) (or (walk (car v)) (walk (cdr v)))]
+           [(vector? v)
+            (let loop ([i 0])
+              (cond
+                [(= i (vector-length v)) #f]
+                [(walk (vector-ref v i)) => values]
+                [else (loop (+ i 1))]))]
+           [(struct? v)
+            ;; Treat any prefab/transparent struct by its underlying
+            ;; vector representation. Both def-form, call-form, etc.
+            ;; are transparent, so struct->vector works.
+            (let ([vec (struct->vector v 'no-show)])
+              ;; vec[0] is the struct name; skip it.
+              (let loop ([i 1])
+                (cond
+                  [(= i (vector-length vec)) #f]
+                  [(walk (vector-ref vec i)) => values]
+                  [else (loop (+ i 1))])))]
+           [else #f]))))
+
+(define (register-program-macro-table! prog tbl)
+  (hash-set! PROGRAM->MACRO-TABLE prog tbl))
+
+(define (program-macro-derived-table prog)
+  (hash-ref PROGRAM->MACRO-TABLE prog #f))
+
 (define (expand-fully reg datum [depth 0] [ctx #f])
   (when (>= depth MAX-EXPANSION-DEPTH)
     (define chain (if ctx (format "\n~a" (format-expansion-chain ctx)) ""))
@@ -410,9 +599,12 @@
      (define m (lookup-macro reg name))
      (define handler (current-trace-handler))
      (when handler (handler 'before name datum depth))
-     (define expanded (expand-macro reg name (cdr datum) next-ctx))
+     (define expanded
+       (parameterize ([current-macro-expansion-ctx next-ctx])
+         (expand-macro reg name (cdr datum) next-ctx)))
      (when handler (handler 'after name expanded depth))
-     (expand-fully reg expanded (+ depth 1) next-ctx)]
+     (parameterize ([current-macro-expansion-ctx next-ctx])
+       (expand-fully reg expanded (+ depth 1) next-ctx))]
     [(pair? datum)
      (cons (expand-fully reg (car datum) depth ctx)
            (expand-fully reg (cdr datum) depth ctx))]
@@ -454,6 +646,11 @@
        (loop (cddr rest))]
       [else (loop (cddr rest))])))
 
+(define (unquote-form? d)
+  (and (pair? d)
+       (or (eq? (car d) 'unquote)
+           (eq? (car d) 'unquote-splicing))))
+
 (define (collect-template-binders template macro-params)
   (define binders '())
   (define (add! name)
@@ -461,19 +658,31 @@
   (let walk ([datum template])
     (when (pair? datum)
       (cond
+        ;; Don't descend into (unquote …) / (unquote-splicing …) — their
+        ;; payloads are evaluated at expansion time, not part of the
+        ;; template. A defmacro body like `(let ,bindings ,body) treats
+        ;; `bindings` as user-supplied data, not a binder source.
+        [(unquote-form? datum) (void)]
+        ;; Quoted templates are inert.
+        [(eq? (car datum) 'quote) (void)]
         [(eq? (car datum) 'let)
-         (when (and (pair? (cdr datum)) (pair? (cddr datum)))
+         ;; Only interpret a literal bindings vec; skip if the bindings
+         ;; slot is an (unquote …) escape.
+         (when (and (pair? (cdr datum)) (pair? (cddr datum))
+                    (not (unquote-form? (cadr datum))))
            (collect-let-binders! (cadr datum) macro-params add!))
          (for-each walk (cdr datum))]
         [(eq? (car datum) 'fn)
-         (when (and (pair? (cdr datum)) (pair? (cddr datum)))
+         (when (and (pair? (cdr datum)) (pair? (cddr datum))
+                    (not (unquote-form? (cadr datum))))
            (collect-param-binders! (cadr datum) macro-params add!))
          (for-each walk (cdr datum))]
         [(eq? (car datum) 'defn)
          (when (and (pair? (cdr datum)) (pair? (cddr datum)) (pair? (cdddr datum)))
            (when (and (symbol? (cadr datum)) (not (memq (cadr datum) macro-params)))
              (add! (cadr datum)))
-           (collect-param-binders! (caddr datum) macro-params add!))
+           (when (not (unquote-form? (caddr datum)))
+             (collect-param-binders! (caddr datum) macro-params add!)))
          (for-each walk (cdr datum))]
         [else (for-each walk datum)])))
   binders)
@@ -516,6 +725,15 @@
  expand-macro
  expand-fully
  current-trace-handler
+ current-macro-expansion-ctx
+ current-macro-derived-table
+ mark-macro-derived!
+ macro-derived-ctx
+ form-macro-derived-ctx
+ register-program-macro-table!
+ program-macro-derived-table
+ make-root-ctx
+ push-ctx
  format-expansion-chain
  check-datum-contract
  strip-reader-tags)

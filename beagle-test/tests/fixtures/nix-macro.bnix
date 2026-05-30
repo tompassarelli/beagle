@@ -2,7 +2,7 @@
 (ns test.nix.macro)
 
 ;; Template macro: wrap a description in an mkEnableOption call.
-(define-macro safe enable-opt (desc)
+(defmacro enable-opt [desc]
   (lib/mkEnableOption desc))
 
 (module [config lib pkgs]

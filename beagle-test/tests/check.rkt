@@ -229,7 +229,7 @@
 ;; and their expansions are type-checked end-to-end.
 
 (check-err "safe macro: expansion is type-checked"
-  '(define-macro safe id1 (x) x)
+  `(defmacro id1 ,(br 'x) x)
   '(def y : Int (id1 "string not Int")))
 
 ;; =============================================================================

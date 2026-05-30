@@ -34,13 +34,30 @@
 
 (define (raise-parse-error kind fmt . args)
   (define msg (apply format fmt args))
-  (define details
-    (hasheq 'cause (symbol->string (parse-error-kind->cause-class kind))
+  ;; When we're currently parsing the output of a macro expansion
+  ;; (current-macro-expansion-ctx non-#f), rebucket the rejection as
+  ;; 'macro-expansion-parse-error so Phase 0 telemetry attributes the
+  ;; failure to "macro produced unparseable output" rather than the
+  ;; underlying kind (which describes the symptom on the expansion
+  ;; result, not the original surface form the author wrote).
+  (define ctx (current-macro-expansion-ctx))
+  (define effective-kind
+    (if ctx 'macro-expansion-parse-error kind))
+  (define base-details
+    (hasheq 'cause (symbol->string (parse-error-kind->cause-class effective-kind))
             'phase "parse"))
+  (define details
+    (cond
+      [ctx
+       (hash-set* base-details
+                  'original-kind (symbol->string kind)
+                  'macro-name (symbol->string (expansion-ctx-macro-name ctx))
+                  'macro-depth (expansion-ctx-depth ctx))]
+      [else base-details]))
   (raise (beagle-parse-error
           (format "beagle: ~a" msg)
           (current-continuation-marks)
-          kind
+          effective-kind
           details)))
 
 (define BT BRACKET-TAG)
@@ -292,12 +309,15 @@
        (if (eq? macro-kind 'beagle)
            (register-beagle-macro! registry qname pnames icontracts ret-type body)
            (register-proc-macro! registry qname pnames icontracts ret-type body))]
-      [(list 'define-macro (? symbol? kind) (? symbol? name) params template)
+      [(cons 'define-macro _)
+       (raise-parse-error 'legacy-macro-form
+        "(define-macro ...) — `define-macro` is not supported. Use `(defmacro NAME [params] body)` instead.")]
+      [(list 'defmacro (? symbol? name) params template)
        (define ps (cond
                     [(bracketed? params) (bracket-body params)]
                     [(list? params) params]
                     [else '()]))
-       (register-macro! registry (qualify-name prefix name) kind ps template)]
+       (register-macro! registry (qualify-name prefix name) 'defmacro ps template)]
       [(list 'defrecord (? symbol? name) fields-form)
        (define fields (parse-record-fields fields-form))
        (define rec-type (type-prim name))
@@ -513,14 +533,18 @@
            (register-beagle-macro! registry name param-names input-contracts ret-type body)
            (register-proc-macro! registry name param-names input-contracts ret-type body))]
 
-      [(list 'define-macro (? symbol? kind) (? symbol? name) macro-params template)
+      [(cons 'define-macro _)
+       (raise-parse-error 'legacy-macro-form
+        "(define-macro ...) — `define-macro` is not supported. Use `(defmacro NAME [params] body)` instead.")]
+
+      [(list 'defmacro (? symbol? name) macro-params template)
        (validate-identifier! name "macro")
        (define ps (cond
                     [(bracketed? macro-params) (bracket-body macro-params)]
                     [(list? macro-params)      macro-params]
                     [else (raise-parse-error 'bad-meta-value
                                              "macro ~a: parameters must be a list" name)]))
-       (register-macro! registry name kind ps template)]
+       (register-macro! registry name 'defmacro ps template)]
 
       [(list 'declare-extern (? symbol? name) type-expr)
        (validate-identifier! name "extern")
@@ -578,31 +602,59 @@
   ;; Macro expansion happens inline during parsing (preserves inner locations).
   ;; Proc macros with (Vec Form) output are expanded here and spliced into the
   ;; top-level form list — their output goes through full parse/check/emit.
+  ;;
+  ;; macro-derived-table maps each top-level AST node that came out of a
+  ;; macro expansion to the expansion-ctx that produced it. check.rkt
+  ;; reads this to set current-macro-expansion-ctx during type-check,
+  ;; which lets raise-diag rebucket post-expansion type errors as
+  ;; 'macro-expansion-type-error.
   (define src-table (make-hasheq))
+  (define macro-derived-table (make-hasheq))
   (define pairs
     (parameterize ([current-registry registry]
                    [current-src-table src-table]
+                   [current-macro-derived-table macro-derived-table]
                    [current-user-parametric (current-user-parametric)])
       (apply append
         (for/list ([d (in-list datums)]
                    [s (in-list stxs)]
                    #:unless (meta-form? d))
+          (define from-macro?
+            (and (pair? d) (symbol? (car d)) (lookup-macro registry (car d))))
           (define expanded
-            (if (and (pair? d) (symbol? (car d)) (lookup-macro registry (car d)))
-              (expand-fully registry d)
-              d))
+            (if from-macro? (expand-fully registry d) d))
+          (define (parse-macro-output expansion-stx)
+            ;; Set current-macro-expansion-ctx so that any raise-parse-error
+            ;; triggered while parsing this macro output rebuckets to
+            ;; 'macro-expansion-parse-error. Also record the resulting AST
+            ;; node so check.rkt can do the same for type errors.
+            (define ctx (make-root-ctx (car d)))
+            (define parsed-node
+              (parameterize ([current-macro-expansion-ctx ctx])
+                (parse-top expansion-stx)))
+            (mark-macro-derived! parsed-node ctx)
+            parsed-node)
           (cond
             [(and (pair? expanded) (eq? (car expanded) '#%splice-forms))
              (for/list ([form-datum (in-list (cdr expanded))])
-               (cons (parse-top (datum->syntax #f form-datum)) s))]
+               (cons (parse-macro-output (datum->syntax #f form-datum)) s))]
             [(eq? expanded d)
              (list (cons (parse-top s) s))]
+            [from-macro?
+             (list (cons (parse-macro-output (datum->syntax #f expanded)) s))]
             [else
              (list (cons (parse-top (datum->syntax #f expanded)) s))])))))
   (define parsed (map car pairs))
   (define form-stxs (map cdr pairs))
 
-  (program mode ns parsed registry externs (reverse requires) (reverse imports) form-stxs src-table imp-rec-fields imp-rec-field-order imp-rec-ns (hash-keys imp-scalar-fns) imp-scalar-preds imp-symbol-ns imp-union-members imp-param-unions target))
+  (define prog
+    (program mode ns parsed registry externs (reverse requires) (reverse imports) form-stxs src-table imp-rec-fields imp-rec-field-order imp-rec-ns (hash-keys imp-scalar-fns) imp-scalar-preds imp-symbol-ns imp-union-members imp-param-unions target))
+  ;; Stash the macro-derived-table keyed by the program so check.rkt
+  ;; can recover it via program-macro-derived-table after this call
+  ;; returns and the parameterize unwinds.
+  (when (positive? (hash-count macro-derived-table))
+    (register-program-macro-table! prog macro-derived-table))
+  prog)
 
 (define (meta-form? d)
   (and (pair? d)
@@ -610,6 +662,7 @@
                        define-mode
                        define-target
                        define-macro
+                       defmacro
                        declare-extern
                        require
                        import))))
@@ -685,7 +738,17 @@
      (define reg (current-registry))
      (cond
        [(and reg (symbol? (car d)) (lookup-macro reg (car d)))
-        (parse-expr (expand-fully reg d))]
+        ;; Parse the expansion result with current-macro-expansion-ctx
+        ;; set so that any parse rejection on the macro output is
+        ;; bucketed as 'macro-expansion-parse-error. Also record the
+        ;; resulting node in the macro-derived table so check.rkt
+        ;; rebuckets later type errors as 'macro-expansion-type-error.
+        (define ctx (make-root-ctx (car d)))
+        (define parsed-node
+          (parameterize ([current-macro-expansion-ctx ctx])
+            (parse-expr (expand-fully reg d))))
+        (mark-macro-derived! parsed-node ctx)
+        parsed-node]
        [else
         (parse-list-form d subs)])]
     [else (error 'beagle "unsupported expression: ~v" d)])
@@ -1717,6 +1780,23 @@
     [(list (? keyword-sym? kw) _ ...)
      (raise-parse-error 'unknown-form
                         "(:keyword target) call-form removed — use (get m :key) for maps or (field-name r) for record field access; got: ~v" kw)]
+
+    ;; Stray quasiquote/unquote/unquote-splicing outside a defmacro body.
+    ;; The reader produces these from `` ` ``, `,`, `,@` prefixes. They are
+    ;; macro-template syntax only — beagle has no general data-construction
+    ;; backquote (yet). Inside a `(defmacro …)` body they are handled by
+    ;; the qq-eval pass during expansion, so they never reach parse-list-form.
+    ;; If we see them here, the user wrote `,x` or `` `(…) `` outside a
+    ;; defmacro body.
+    [(list 'unquote _ ...)
+     (raise-parse-error 'unknown-form
+                        "unquote (`,`) outside quasiquote — `,x` is only valid inside a `` `…`` template in a defmacro body")]
+    [(list 'unquote-splicing _ ...)
+     (raise-parse-error 'unknown-form
+                        "unquote-splicing (`,@`) outside quasiquote — `,@x` is only valid inside a `` `…`` template in a defmacro body")]
+    [(list 'quasiquote _ ...)
+     (raise-parse-error 'unknown-form
+                        "quasiquote (`` ` ``) outside defmacro body — beagle's quasiquote is macro-template-only; use literal data containers (`'[…]` / `'{…}` / `'(…)`) for inert data construction")]
 
     [(list (? symbol? f) args ...)
      (call-form f (map parse-expr (or (stx-tail subs 1) args)))]

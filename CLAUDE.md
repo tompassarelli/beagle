@@ -161,6 +161,11 @@ Concrete decisions (already locked in
 - Splice sigil: `,@`.
 - `~` stays for tilde-strings (`~"…"` / `~''…''`). Beagle-native
   syntax, no Clojure prior to fight.
+- `defmacro` is the canonical and only macro definition form;
+  `define-macro` is HARD-REJECTED (`'legacy-macro-form` in
+  `parse-kind-cause-table`). Authors write
+  `(defmacro NAME [params] body)` — no `safe`/`unsafe` kind word, no
+  transitional alias.
 
 ### Zero escape hatches
 

@@ -57,9 +57,12 @@
 #hasheq(
   (active . (;; target-agnostic infrastructure
              "check.rkt"
+             "defmacro.rkt"
              "diagnostic-kind.rkt"
              "lint.rkt"
+             "macro-hygiene.rkt"
              "parse.rkt"
+             "quasi-quote-reader.rkt"
              "syntax.rkt"
              "test-tags.rkt"
              "types.rkt"

@@ -599,6 +599,7 @@
     [(define-mode) (values NIL-TYPE errors)]
     [(define-target) (values NIL-TYPE errors)]
     [(define-macro) (check-define-macro args env errors)]
+    [(defmacro) (check-defmacro args env errors)]
     [(declare-extern) (check-declare-extern args env errors)]
     [(import require)  (values NIL-TYPE errors)]
     [(defrecord) (check-defrecord args env errors)]
@@ -1158,6 +1159,15 @@
   (cond
     [(and (>= (length args) 3) (symbol? (cadr args)))
      (tenv-define! env (cadr args) ANY-TYPE)
+     (values NIL-TYPE errors)]
+    [else (values NIL-TYPE errors)]))
+
+(define (check-defmacro args env errors)
+  ;; (defmacro NAME [params …] body)
+  ;; Register the macro name with Any type.
+  (cond
+    [(and (>= (length args) 2) (symbol? (car args)))
+     (tenv-define! env (car args) ANY-TYPE)
      (values NIL-TYPE errors)]
     [else (values NIL-TYPE errors)]))
 

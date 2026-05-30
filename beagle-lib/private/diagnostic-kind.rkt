@@ -78,6 +78,18 @@
 ;;                        Treated as type-error here because the option
 ;;                        path is the "type" lookup key — it parses
 ;;                        fine; the rejection is at schema check time.)
+;;   macro-expansion-type-error : a macro expanded successfully, the
+;;                        post-expansion result parsed, but the type
+;;                        checker rejected it (e.g. the macro produced a
+;;                        form whose inferred type doesn't match the
+;;                        surrounding context, or its output-contract
+;;                        carried a wrong-typed value through). Bucketed
+;;                        as type-error because the surface text the
+;;                        author wrote was legal — the failure is at
+;;                        check time on the expansion result. Distinct
+;;                        from generic type-error so the histogram can
+;;                        track "macro hygiene/typing bugs" separately
+;;                        from author-written type errors.
 (define check-kind-cause-table
   (hasheq
    'target-form         'surface-divergence
@@ -95,7 +107,8 @@
    'sql-table           'type-error
    'sql-column          'type-error
    'sql-type            'type-error
-   'nixos-unknown-option 'type-error))
+   'nixos-unknown-option 'type-error
+   'macro-expansion-type-error 'type-error))
 
 ;; parse.rkt kinds — emitted by raise-parse-error helper that we add
 ;; in this phase to the high-traffic subset (removed-forms,
@@ -130,12 +143,33 @@
 ;;                         (`nix/assert`, `nix/with-cfg`, `nix/with`).
 ;;                         Surface-divergence — fixable by renaming the
 ;;                         head symbol.
+;;   legacy-macro-form   : author wrote `(define-macro …)` — the legacy
+;;                         template-macro form. `defmacro` is the canonical
+;;                         and only macro definition form. Surface-divergence
+;;                         — fixable by renaming `define-macro` →
+;;                         `defmacro` and dropping the `safe`/`unsafe` kind
+;;                         word.
+;;   macro-expansion-parse-error
+;;                       : a macro expanded but the resulting datum
+;;                         doesn't satisfy beagle's surface grammar
+;;                         (parse-program / parse-expr reject it).
+;;                         Surface-divergence because the failure is a
+;;                         shape mismatch on the post-expansion text —
+;;                         the canonical repair is to fix the macro
+;;                         template / proc body so its output is
+;;                         well-formed. Distinct from the generic
+;;                         parse-error / removed-form kinds so the
+;;                         histogram can attribute the rejection to the
+;;                         macro author rather than the call-site
+;;                         author.
 (define parse-kind-cause-table
   (hasheq
    'removed-form           'surface-divergence
    'unknown-form           'surface-divergence
    'inline-type-annotation 'surface-divergence
    'bare-nix-form          'surface-divergence
+   'legacy-macro-form      'surface-divergence
+   'macro-expansion-parse-error 'surface-divergence
    'duplicate-meta         'type-error
    'bad-meta-value         'type-error))
 

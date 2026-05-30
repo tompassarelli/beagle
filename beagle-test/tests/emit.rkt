@@ -90,13 +90,13 @@
 
 (test-case "safe macro expansion emits as direct Clojure"
   (define out (compile
-               '(define-macro safe inc1 (x) (+ x 1))
+               `(defmacro inc1 ,(br 'x) (+ x 1))
                '(defn use [n] (inc1 n))))
   (check-true (matches? #rx"\\(\\+ n 1\\)" out)))
 
-(test-case "unsafe macro kind is rejected"
+(test-case "legacy (define-macro …) is rejected — points at defmacro"
   (check-exn (lambda (e) (and (exn:fail? e)
-                              (regexp-match? #rx"kind must be 'safe"
+                              (regexp-match? #rx"define-macro.*defmacro"
                                              (exn-message e))))
              (lambda () (compile '(define-macro unsafe wild (x) (do (println "trace") x))))))
 
@@ -149,7 +149,7 @@
 
 (test-case "macro &rest with splice emits as expected Clojure call"
   (define out (compile
-               '(define-macro safe call-it (f & args) (f (splice args)))
+               `(defmacro call-it ,(br 'f '& 'args) (f (splice args)))
                '(defn use [] (call-it + 1 2 3))))
   (check-true (matches? #rx"\\(\\+ 1 2 3\\)" out)))
 
@@ -182,7 +182,7 @@
 
 (test-case "safe macro hygiene: emitted let doesn't shadow outer binding"
   (define out (compile
-               '(define-macro safe with-temp (val body) (let [x val] body))
+               `(defmacro with-temp ,(br 'val 'body) (let ,(br 'x 'val) body))
                '(def y (let [x 42] (with-temp 1 x)))))
   (check-true (matches? #rx"\\(let \\[x 42\\]" out))
   (check-false (matches? #rx"\\(let \\[x 1\\]" out)))

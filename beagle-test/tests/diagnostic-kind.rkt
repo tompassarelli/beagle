@@ -207,3 +207,109 @@
                                 "services.example.enable"))
   (define rec (error->jsexpr err))
   (check-equal? (hash-ref rec 'cause) "type-error"))
+
+;; ============================================================================
+;; Macro-expansion-derived rejection kinds
+;;
+;; Phase 0 telemetry needs to distinguish "author wrote bad surface text"
+;; from "macro produced bad surface text" / "macro produced wrong-typed
+;; output." Two kinds cover the split:
+;;
+;;   'macro-expansion-parse-error → surface-divergence (macro output
+;;                                  doesn't satisfy beagle's grammar)
+;;   'macro-expansion-type-error  → type-error           (macro output
+;;                                  parses but doesn't type-check)
+;; ============================================================================
+
+(require (only-in beagle/private/check beagle-diagnostic? beagle-diagnostic-kind
+                                       beagle-diagnostic-details type-check!))
+
+(test-case "diagnostic-kind table: macro-expansion-parse-error maps to surface-divergence"
+  (check-eq? (kind->cause-class 'macro-expansion-parse-error) 'surface-divergence)
+  (check-eq? (parse-error-kind->cause-class 'macro-expansion-parse-error)
+             'surface-divergence))
+
+(test-case "diagnostic-kind table: macro-expansion-type-error maps to type-error"
+  (check-eq? (kind->cause-class 'macro-expansion-type-error) 'type-error))
+
+;; --- Helper: parse-prog with syntax-wrapped datums ---------------------------
+
+(define (parse-prog* . forms)
+  (parse-program (map (lambda (f) (datum->syntax #f f)) forms)))
+
+(define (br . xs)
+  ;; Bracket-tag wrapper for [a b c] vec form in raw datums.
+  (cons (string->symbol "#%brackets") xs))
+
+;; --- macro-expansion-parse-error: defmacro emits unparseable output ---------
+
+(test-case "macro produces cond-> (removed-form) → rebucketed as macro-expansion-parse-error"
+  ;; (defmacro bad [] `(cond-> x [pos? inc]))
+  ;; (def y (bad))
+  ;; bad expands to (cond-> x [pos? inc]) which parse rejects as
+  ;; 'removed-form. Inside macro expansion ctx this rebuckets to
+  ;; 'macro-expansion-parse-error / surface-divergence.
+  (define e
+    (with-handlers ([beagle-parse-error? values])
+      (parse-prog*
+        '(ns test.app)
+        '(define-mode strict)
+        '(define-target clj)
+        `(defmacro bad ,(br)
+           (quasiquote (cond-> x (br pos? inc))))
+        '(def y (bad)))
+      'no-error-raised))
+  (check-pred beagle-parse-error? e)
+  (check-eq? (beagle-parse-error-kind e) 'macro-expansion-parse-error)
+  (define details (beagle-parse-error-details e))
+  (check-equal? (hash-ref details 'cause) "surface-divergence")
+  ;; Original symptom is preserved for downstream tooling.
+  (check-equal? (hash-ref details 'original-kind) "removed-form")
+  ;; Macro provenance is attached.
+  (check-equal? (hash-ref details 'macro-name) "bad"))
+
+;; --- macro-expansion-type-error: defmacro emits wrong-typed output ----------
+
+(test-case "macro produces wrong-typed literal → rebucketed as macro-expansion-type-error"
+  ;; (claim y Int)
+  ;; (defmacro bad [] `"hello")
+  ;; (def y (bad))
+  ;; bad expands to "hello" — parses fine but type-checks fail (claim
+  ;; says Int, value is String). Inside macro-derived form the
+  ;; rejection rebuckets to 'macro-expansion-type-error / type-error.
+  (define prog
+    (parse-prog*
+      '(ns test.app)
+      '(define-mode strict)
+      '(define-target clj)
+      `(defmacro bad ,(br)
+         (quasiquote "hello"))
+      '(claim y Int)
+      '(def y (bad))))
+  (define e
+    (with-handlers ([beagle-diagnostic? values])
+      (type-check! prog)
+      'no-error-raised))
+  (check-pred beagle-diagnostic? e
+              (format "expected beagle-diagnostic, got ~v" e))
+  (check-eq? (beagle-diagnostic-kind e) 'macro-expansion-type-error)
+  (define details (beagle-diagnostic-details e))
+  (check-equal? (hash-ref details 'cause) "type-error")
+  ;; Original symptom (e.g. def-type) is preserved.
+  (check-true (string? (hash-ref details 'original-kind #f)))
+  (check-equal? (hash-ref details 'macro-name) "bad"))
+
+;; --- Negative control: non-macro forms keep their original kinds -----------
+
+(test-case "non-macro removed-form keeps its original kind (no rebucketing)"
+  ;; Sanity check: outside of macro expansion, cond-> still raises with
+  ;; the plain 'removed-form kind. Confirms the parameter properly
+  ;; restricts the rebucketing to macro-derived forms only.
+  (define e
+    (with-handlers ([beagle-parse-error? values])
+      (parse-program
+       (list (datum->syntax #f '(cond-> x [pos? inc]))))
+      'no-error-raised))
+  (check-pred beagle-parse-error? e)
+  (check-eq? (beagle-parse-error-kind e) 'removed-form)
+  (check-false (hash-has-key? (beagle-parse-error-details e) 'macro-name)))
