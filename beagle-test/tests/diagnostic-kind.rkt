@@ -36,12 +36,14 @@
 ;; Note: when / when-not / if-not / unless are no longer rejected — they
 ;; accept-and-canonicalize to (if …) / (if … (do …)). cond-> / some-> /
 ;; as-> are now implemented (Clojure threading family) — they no longer
-;; reject. Use `inc` as the removed-form exemplar; it remains rejected.
-(test-case "surface-divergence: inc removed-form is tagged"
+;; reject. inc / dec / not= were re-adopted as stdlib-portable functions
+;; (audit row d). Use `dotimes` as the removed-form exemplar; it remains
+;; rejected.
+(test-case "surface-divergence: dotimes removed-form is tagged"
   (define e
     (with-handlers ([beagle-parse-error? values])
       (parse-program
-       (list (datum->syntax #f '(inc x))))
+       (list (datum->syntax #f '(dotimes [i 3] x))))
       'no-error-raised))
   (check-pred beagle-parse-error? e)
   (check-eq?  (beagle-parse-error-kind e) 'removed-form)
@@ -239,10 +241,10 @@
 
 ;; --- macro-expansion-parse-error: defmacro emits unparseable output ---------
 
-(test-case "macro produces inc (removed-form) → rebucketed as macro-expansion-parse-error"
-  ;; (defmacro bad [] `(inc x))
+(test-case "macro produces dotimes (removed-form) → rebucketed as macro-expansion-parse-error"
+  ;; (defmacro bad [] `(dotimes [i 3] x))
   ;; (def y (bad))
-  ;; bad expands to (inc x) which parse rejects as
+  ;; bad expands to (dotimes [i 3] x) which parse rejects as
   ;; 'removed-form. Inside macro expansion ctx this rebuckets to
   ;; 'macro-expansion-parse-error / surface-divergence.
   (define e
@@ -252,7 +254,7 @@
         '(define-mode strict)
         '(define-target clj)
         `(defmacro bad ,(br)
-           (quasiquote (inc x)))
+           (quasiquote (dotimes (unquote (br 'i 3)) x)))
         '(def y (bad)))
       'no-error-raised))
   (check-pred beagle-parse-error? e)
@@ -267,12 +269,13 @@
 ;; --- macro-expansion-type-error: defmacro emits wrong-typed output ----------
 
 (test-case "macro produces wrong-typed literal → rebucketed as macro-expansion-type-error"
-  ;; (claim y Int)
   ;; (defmacro bad [] `"hello")
-  ;; (def y (bad))
-  ;; bad expands to "hello" — parses fine but type-checks fail (claim
-  ;; says Int, value is String). Inside macro-derived form the
-  ;; rejection rebuckets to 'macro-expansion-type-error / type-error.
+  ;; (def y :- Int (bad))
+  ;; bad expands to "hello" — parses fine but type-checks fail (inline
+  ;; `:-` annotation says Int, value is String). Inside macro-derived
+  ;; form the rejection rebuckets to 'macro-expansion-type-error /
+  ;; type-error. (Previously this test paired a `(claim y Int)` with
+  ;; an untyped def; claim was removed under the Zero-users rule.)
   (define prog
     (parse-prog*
       '(ns test.app)
@@ -280,8 +283,7 @@
       '(define-target clj)
       `(defmacro bad ,(br)
          (quasiquote "hello"))
-      '(claim y Int)
-      '(def y (bad))))
+      '(def y :- Int (bad))))
   (define e
     (with-handlers ([beagle-diagnostic? values])
       (type-check! prog)
@@ -298,13 +300,13 @@
 ;; --- Negative control: non-macro forms keep their original kinds -----------
 
 (test-case "non-macro removed-form keeps its original kind (no rebucketing)"
-  ;; Sanity check: outside of macro expansion, inc still raises with
+  ;; Sanity check: outside of macro expansion, dotimes still raises with
   ;; the plain 'removed-form kind. Confirms the parameter properly
   ;; restricts the rebucketing to macro-derived forms only.
   (define e
     (with-handlers ([beagle-parse-error? values])
       (parse-program
-       (list (datum->syntax #f '(inc x))))
+       (list (datum->syntax #f '(dotimes [i 3] x))))
       'no-error-raised))
   (check-pred beagle-parse-error? e)
   (check-eq? (beagle-parse-error-kind e) 'removed-form)

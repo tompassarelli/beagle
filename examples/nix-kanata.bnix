@@ -3,7 +3,7 @@
 
 ;; NixOS module: kanata keyboard remapping
 ;; Shows typed module options (lib/mkOption + lib/types.*)
-(module [config lib pkgs]
+(nix/module [config lib pkgs]
   {:options.myConfig.modules.kanata
      {:enable (lib/mkEnableOption "Kanata keyboard remapping")
       :devices (lib/mkOption

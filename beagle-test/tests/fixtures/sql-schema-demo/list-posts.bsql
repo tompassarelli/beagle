@@ -4,7 +4,7 @@
 ;; No deftable in this file — the `users`/`posts` schema lives in
 ;; .beagle-cache/sql-schema.json (cross-file project schema).
 
-(select [posts.title posts.views users.name]
+(sql/select [posts.title posts.views users.name]
   (from posts)
   (join users :on (= posts.user_id users.id))
   (where (> posts.views 100))

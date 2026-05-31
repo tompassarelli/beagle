@@ -699,7 +699,7 @@
 ;; --- flake: typed attrset shape validation --------------------------------
 ;; A flake.nix has exactly: :description, :inputs, :outputs (required),
 ;; optional :nixConfig. Unknown top-level keys are rejected.
-;; :outputs must be a function (module or fn-set). :inputs is a map.
+;; :outputs must be a function (nix/module or nix/fn-set). :inputs is a map.
 
 (define FLAKE-REQUIRED '(":outputs"))
 (define FLAKE-KNOWN-KEYS
@@ -729,7 +729,7 @@
     (when (equal? (kw-key-string p) ":outputs")
       (unless (or (nix-fn-set? (cdr p)) (fn-form? (cdr p)))
         (error 'emit-nix
-               "(flake ...): :outputs must be a function of inputs — use (module [self ...] BODY) or (fn-set [...] BODY)"))))
+               "(flake ...): :outputs must be a function of inputs — use (nix/module [self ...] BODY) or (nix/fn-set [...] BODY)"))))
   (emit-expr attrs depth))
 
 (define (emit-nix-with-cfg e depth)

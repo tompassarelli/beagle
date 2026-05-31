@@ -72,7 +72,11 @@
    'mod        (fn-of '(Int Int) 'Int)
    'quot       (fn-of '(Int Int) 'Int)
    'rem        (fn-of '(Int Int) 'Int)
-   ;; inc/dec removed — use (+ x 1) and (- x 1) directly.
+   ;; inc/dec re-adopted (audit row d): cheap Clojure stdlib sugar; no type or
+   ;; backend justification for absence. Lowering happens in the per-target
+   ;; stdlib emitters (or trivially as (+ x 1) / (- x 1)).
+   'inc        (fn-of '(Int) 'Int)
+   'dec        (fn-of '(Int) 'Int)
    'min        (fn-of '(Int) 'Int #:rest 'Int)
    'max        (fn-of '(Int) 'Int #:rest 'Int)
    'abs        (fn-of '(Int) 'Int)
@@ -83,7 +87,8 @@
    'odd?       (fn-of '(Int) 'Bool)
    ;; --- equality / ordering ------------------------------------------------
    '=          (fn-of '(Any Any) 'Bool)
-   ;; not= removed — use (not (= a b)).
+   ;; not= re-adopted (audit row d): Clojure-canonical negated equality.
+   'not=       (fn-of '(Any Any) 'Bool)
    '<          (fn-of '(Int Int) 'Bool)
    '>          (fn-of '(Int Int) 'Bool)
    '<=         (fn-of '(Int Int) 'Bool)

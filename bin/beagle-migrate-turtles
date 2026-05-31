@@ -6,7 +6,10 @@
 #   bin/beagle-migrate-turtles --in-place <source>                        # write back
 #
 # Reads v0.15 source (with [], {}, #{} brackets) and emits turtles surface
-# (parens only, claim forms paired with definitions).
+# (parens only). Type info from v0.15 inline `: T` annotations is dropped
+# during migration (the claim carrier this tool previously emitted was
+# removed under the Zero-users rule); re-annotate manually with inline
+# `:-` if the type information is needed.
 #
 # This is a one-shot v0.15 → v0.16 migration tool. After v0.16 ships and the
 # corpus is migrated, this tool can be deleted.

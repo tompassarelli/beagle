@@ -375,7 +375,7 @@
      (define args-str
        (cond [ellipsis? (string-append (string-join arg-strs " ") " ...")]
              [else (string-join arg-strs " ")]))
-     (format "(fn-set (~a)\n~a~a)"
+     (format "(nix/fn-set (~a)\n~a~a)"
              args-str
              (indent (add1 depth))
              (emit-expr body (add1 depth)))]
@@ -390,7 +390,7 @@
      (define base-args
        (cond [ellipsis? (string-append (string-join arg-strs " ") " ...")]
              [else (string-join arg-strs " ")]))
-     (format "(fn-set [~a :as ~a]\n~a~a)"
+     (format "(nix/fn-set [~a :as ~a]\n~a~a)"
              base-args
              alias
              (indent (add1 depth))

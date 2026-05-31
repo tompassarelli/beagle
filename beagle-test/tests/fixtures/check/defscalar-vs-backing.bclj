@@ -1,3 +1,2 @@
 (defscalar Timestamp Int)
-(claim bad Int)
-(def bad (->Timestamp 100))
+(def bad :- Int (->Timestamp 100))

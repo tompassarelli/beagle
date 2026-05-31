@@ -1,7 +1,7 @@
 #lang beagle/nix
 (ns test.nix.tilde-ms)
 
-(module [pkgs lib config ...]
+(nix/module [pkgs lib config ...]
   {:hello (pkgs.writeShellScriptBin "hello"
             ~''
             #!${pkgs.bash}/bin/bash

@@ -1,11 +1,9 @@
 (defrecord Product [(id : Int) (name : String) (price : Int)])
 
-(claim get-product [-> Product])
-(defn get-product []
+(defn get-product [] :- Product
   (->Product 1 "Widget" 500))
 
 ;; destructuring should propagate field types from Product
-(claim use-name [-> String])
-(defn use-name []
+(defn use-name [] :- String
   (let [{:keys [name]} (get-product)]
     name))

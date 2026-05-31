@@ -23,14 +23,20 @@
   (define out (compile '(ns foo.bar) '(def x 1)))
   (check-true (matches? #rx"\\(ns foo\\.bar\\)" out)))
 
-(test-case "def with claim emits ^Type tag"
-  (define out (compile `(claim greeting String)
-                       '(def greeting "hello")))
+(test-case "def with inline `:-` annotation emits ^Type tag"
+  ;; Previously paired `(claim greeting String) (def greeting "hello")`;
+  ;; claim was removed under the Zero-users rule. The inline `:-` form
+  ;; carries the same type info to the clj emitter, producing the same
+  ;; ^Type metadata.
+  (define out (compile '(def greeting :- String "hello")))
   (check-true (matches? #rx"\\(def \\^String greeting \"hello\"\\)" out)))
 
-(test-case "defn drops param types but emits arg vector"
+(test-case "defn lowers param types to ^Tag metadata in arg vector"
+  ;; Inline `:- T` / wrapped `(x : T)` typed params lower to Clojure
+  ;; `^Tag` metadata on the param symbol at emit. Int → ^long (Clojure
+  ;; primitive tag). Untyped params emit bare.
   (define out (compile '(defn add [(x : Int) (y : Int)] (+ x y))))
-  (check-true (matches? #rx"\\(defn add \\[x y\\]" out))
+  (check-true (matches? #rx"\\(defn add \\[\\^long x \\^long y\\]" out))
   (check-true (matches? #rx"\\(\\+ x y\\)"            out)))
 
 (test-case "let emits with brackets"
@@ -460,15 +466,13 @@
 
 (test-case "defscalar without :where emits comment (erased)"
   (define out (compile '(defscalar Amount Int)
-                       '(claim x Amount)
-                       '(def x (->Amount 42))))
+                       '(def x :- Amount (->Amount 42))))
   (check-true (matches? #rx";; Amount : Int \\(scalar\\)" out))
   (check-false (matches? #rx"defn ->Amount" out)))
 
 (test-case "defscalar with :where emits constructor with :pre"
   (define out (compile '(defscalar Percentage Int :where (>= 0) (<= 100))
-                       '(claim x Percentage)
-                       '(def x (->Percentage 50))))
+                       '(def x :- Percentage (->Percentage 50))))
   (check-true (matches? #rx"defn ->Percentage" out))
   (check-true (matches? #rx":pre" out))
   (check-true (matches? #rx"\\(>= v 0\\)" out))
@@ -476,16 +480,18 @@
 
 (test-case "defscalar with :where constructor is not erased at call site"
   (define out (compile '(defscalar Percentage Int :where (>= 0) (<= 100))
-                       '(claim x Percentage)
-                       '(def x (->Percentage 50))))
+                       '(def x :- Percentage (->Percentage 50))))
   (check-true (matches? #rx"\\(->Percentage 50\\)" out)))
 
 ;; --- varargs emission --------------------------------------------------------
 
 (test-case "defn with & rest emits Clojure varargs"
+  ;; Fixed params lower their typed annotations to ^Tag (Int → ^long);
+  ;; the rest param is heterogeneous in Clojure semantics and emits
+  ;; bare (no type tag — see emit-params-with-rest).
   (define out (compile '(defn my-sum [(x : Int) & (rest : Int)]
                           (+ x (reduce + 0 rest)))))
-  (check-true (matches? #rx"\\(defn my-sum \\[x & rest\\]" out)))
+  (check-true (matches? #rx"\\(defn my-sum \\[\\^long x & rest\\]" out)))
 
 (test-case "fn with & rest emits varargs"
   (define out (compile '(def f (fn [(a : Int) & (b : Int)] (+ a 1)))))

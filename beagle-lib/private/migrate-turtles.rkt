@@ -10,9 +10,9 @@
 ;;
 ;; Key shapes (post-tightening, plan 20260528235000):
 ;;   defn:        (defn NAME (' X...) EXPR...)
-;;                + (claim NAME :type (-> T... RT))
+;;                (type info from v0.15 `:` annotation dropped — claim is gone)
 ;;   fn:          (fn (' X...) EXPR...)  or  (fn :type TYPE (' X...) EXPR...)
-;;   defrecord:   (defrecord NAME (' F1 F2 ...))  + per-field claims
+;;   defrecord:   (defrecord NAME (' F1 F2 ...))  (per-field type info dropped)
 ;;   defunion:    (defunion NAME (' V1 V2 ...))   + per-variant defrecords
 ;;   defenum:     (defenum NAME (' V1 V2 ...))
 ;;   -> :         (-> T1 T2 ... RT)  — flat, last is return
@@ -182,8 +182,9 @@
 ;; --- migration rules ------------------------------------------------------
 
 ;; The migrator walks top-down. Top-level forms may produce MULTIPLE output
-;; forms (e.g. a typed defn splits into a claim + definition pair). Sub-
-;; expressions transform to a single output expression.
+;; forms (e.g. a defunion splits into the defunion plus a defrecord per
+;; field-bearing variant). Sub-expressions transform to a single output
+;; expression.
 
 ;; Top-level: returns a list of zero-or-more output forms.
 (define (migrate-top-form form)
@@ -218,8 +219,15 @@
 ;; v0.15:  (defn NAME [(p : T)...] : RT body...)
 ;; v0.15:  (defn NAME [(p : T)...] body...)        (no return type)
 ;; v0.15:  (defn NAME [p...] body...)              (no types)
-;; turtles: [(claim NAME ∈ (→ (T...) RT)) (defn NAME (params p...) (body body...))]
-;;       or [(defn NAME (params p...) (body body...))]
+;; turtles: (defn NAME (params p...) (body body...))
+;;
+;; Type information from v0.15 inline `: T` annotations is DROPPED here.
+;; The (claim NAME TYPE) carrier this tool previously emitted has been
+;; removed under the Zero-users rule. The turtles surface uses positional
+;; quoted-operator param lists `(' params P...)` which do not carry
+;; per-param types; the inline `:-` annotation surface lives on the
+;; bracketed `[P :- T]` form, not on this surface. Re-annotate manually
+;; if the type information is needed.
 
 (define (migrate-defn form)
   (match form
@@ -227,18 +235,14 @@
     [(list 'defn (? symbol? name) clauses ...)
      #:when (and (pair? clauses) (multi-arity-clause? (car clauses)))
      (migrate-multi-arity-defn name clauses)]
-    [(list 'defn (? symbol? name) param-form ': ret-type body ...)
-     ;; Typed defn — emit claim + definition with labeled params head
+    [(list 'defn (? symbol? name) param-form ': _ret-type body ...)
+     ;; Typed v0.15 defn — emit untyped turtles defn (types dropped).
      (define params (extract-defn-params param-form))
-     (define param-types (extract-param-types param-form))
-     (define claim-form
-       (list 'claim name ':type
-             (make-fn-type-form param-types ret-type)))
      (define defn-form
        (list* 'defn name
               (P params)
               (map migrate-expr body)))
-     (list claim-form defn-form)]
+     (list defn-form)]
     [(list 'defn (? symbol? name) param-form body ...)
      ;; Untyped defn
      (define params (extract-defn-params param-form))
@@ -301,21 +305,15 @@
                'Any
                body
                #f)])))
-  (define all-typed? (andmap fifth arity-data))
-  (define claim-form
-    (and all-typed?
-         (list 'claim name ':type
-               (cons 'U
-                     (for/list ([a (in-list arity-data)])
-                       (make-fn-type-form (cadr a) (caddr a)))))))
+  ;; Type information across arities was previously emitted as a
+  ;; `(claim NAME :type (U …arities))` carrier. That carrier is gone;
+  ;; multi-arity defns migrate untyped. Re-annotate manually if needed.
   ;; Build one parenthesized arm per arity: ([params] body…).
   (define arms
     (for/list ([a (in-list arity-data)])
       (list* (P (car a)) (map migrate-expr (cadddr a)))))
   (define defn-form (list* 'defn name arms))
-  (if claim-form
-      (list claim-form defn-form)
-      (list defn-form)))
+  (list defn-form))
 
 (define (extract-defn-params param-form)
   ;; param-form is (#%brackets P1 P2 ...) where each Pi is one of:
@@ -350,13 +348,15 @@
 ;; --- def migration --------------------------------------------------------
 
 ;; v0.15: (def NAME : T value) or (def NAME value)
-;; turtles: [(claim NAME ∈ T) (def NAME value)] or [(def NAME value)]
+;; turtles: (def NAME :- T value) or (def NAME value)
+;;
+;; The inline `:-` marker is the canonical typed-binding surface; this
+;; replaces the previous claim-based carrier that the migrator emitted.
 
 (define (migrate-def form)
   (match form
     [(list 'def (? symbol? name) ': type value)
-     (list (list 'claim name ':type (migrate-type type))
-           (list 'def name (migrate-expr value)))]
+     (list (list 'def name ':- (migrate-type type) (migrate-expr value)))]
     [(list 'def (? symbol? name) value)
      (list (list 'def name (migrate-expr value)))]
     [_ (error 'migrate-turtles "unrecognized def shape: ~v" form)]))
@@ -367,6 +367,12 @@
 ;; turtles: (defrecord NAME (' (fields field...))) + (claim NAME.field ∈ T)...
 
 (define (migrate-defrecord form)
+  ;; Per-field type info from v0.15 `(field : T)` is DROPPED here. The
+  ;; claim-based carrier this tool previously emitted (one
+  ;; `(claim NAME.field :type T)` per typed field) has been removed
+  ;; under the Zero-users rule. The turtles surface for defrecord
+  ;; carries field names only via `(' fields F...)`; re-annotate
+  ;; manually if per-field types are needed.
   (match form
     [(list 'defrecord (? symbol? name) fields-form)
      (define entries (cond
@@ -379,15 +385,7 @@
            [(symbol? f) f]
            [(and (list? f) (= (length f) 3) (eq? (cadr f) ':)) (car f)]
            [else (error 'migrate-turtles "bad defrecord field: ~v" f)])))
-     (define field-claims
-       (for/list ([f (in-list entries)]
-                  #:when (and (list? f) (= (length f) 3) (eq? (cadr f) ':)))
-         (list 'claim
-               (string->symbol (format "~a.~a" name (car f)))
-               ':type
-               (migrate-type (caddr f)))))
-     (cons (list 'defrecord name (F field-names))
-           field-claims)]
+     (list (list 'defrecord name (F field-names)))]
     [_ (error 'migrate-turtles "unrecognized defrecord shape: ~v" form)]))
 
 ;; --- defunion migration ---------------------------------------------------
@@ -804,8 +802,7 @@
 
 ;; v0.15: (letfn [(name [params] : RT body) ...] body...)
 ;; turtles+quote:
-;;   (letfn (' (fns (claim name ∈ TYPE)
-;;                  (fn-def name (' (params P...)) (body B...))
+;;   (letfn (' (fns (fn-def name (' (params P...)) (body B...))
 ;;                  ...))
 ;;           (body body...))
 (define (migrate-letfn form)
@@ -816,9 +813,9 @@
   ;; Each fn-entry is a bare `(name [params] body…)` form. No `fn-def`
   ;; label, no `fns` wrapper. The outer vector marks the fn-list zone.
   ;; Letfn-local fns are not public boundaries, so v0.15 type
-  ;; annotations on them are dropped here — types live in claims, and
-  ;; locals don't need public contracts. Add a top-level claim manually
-  ;; if a letfn-local fn needs to be type-visible.
+  ;; annotations on them are dropped here. Locals don't carry inline
+  ;; `:-` annotations in this surface; re-annotate at the boundary
+  ;; (a top-level def with `:-` calling the letfn-local) if needed.
   (match form
     [(list 'letfn fns-form body ...)
      (define fn-entries (cond

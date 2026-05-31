@@ -1,3 +1,2 @@
 (defscalar Percentage Int :where (>= 0) (<= 100))
-(claim pct Percentage)
-(def pct (->Percentage -5))
+(def pct :- Percentage (->Percentage -5))

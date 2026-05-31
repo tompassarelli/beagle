@@ -152,10 +152,14 @@
                (caddr d))]
     [(and (pair? d) (eq? (car d) 'exists))
      (sql-exists (parse-sql-subexpr (cadr d)))]
-    [(and (pair? d) (eq? (car d) 'select))
+    [(and (pair? d) (eq? (car d) 'sql/select))
      (parse-sql-select (cdr d) #f #f)]
-    [(and (pair? d) (eq? (car d) 'select-distinct))
+    [(and (pair? d) (eq? (car d) 'sql/select-distinct))
      (parse-sql-select (cdr d) #f #t)]
+    [(and (pair? d) (eq? (car d) 'select))
+     (error 'beagle "(select ...) — bare `select` is not supported in SQL subexpression. Use `(sql/select ...)`.")]
+    [(and (pair? d) (eq? (car d) 'select-distinct))
+     (error 'beagle "(select-distinct ...) — bare `select-distinct` is not supported in SQL subexpression. Use `(sql/select-distinct ...)`.")]
     [(and (pair? d) (memq (car d) SQL-KNOWN-FUNCTIONS))
      (parse-sql-function-call d)]
     [(pair? d)
@@ -226,15 +230,27 @@
 (define (parse-sql-top-form datum)
   (define d (->datum datum))
   (cond
-    [(and (pair? d) (eq? (car d) 'select))
+    [(and (pair? d) (eq? (car d) 'sql/select))
      (parse-sql-select (cdr d) #f #f)]
-    [(and (pair? d) (eq? (car d) 'select-distinct))
+    [(and (pair? d) (eq? (car d) 'sql/select-distinct))
      (parse-sql-select (cdr d) #f #t)]
-    [(and (pair? d) (memq (car d) '(union union-all intersect except)))
-     (sql-union (car d)
+    [(and (pair? d) (eq? (car d) 'select))
+     (error 'beagle "(select ...) — bare `select` is not supported. Use `(sql/select ...)`.")]
+    [(and (pair? d) (eq? (car d) 'select-distinct))
+     (error 'beagle "(select-distinct ...) — bare `select-distinct` is not supported. Use `(sql/select-distinct ...)`.")]
+    [(and (pair? d) (memq (car d) '(sql/union sql/union-all sql/intersect sql/except)))
+     (define op
+       (case (car d)
+         [(sql/union) 'union]
+         [(sql/union-all) 'union-all]
+         [(sql/intersect) 'intersect]
+         [(sql/except) 'except]))
+     (sql-union op
                 (parse-sql-top-form (cadr d))
                 (parse-sql-top-form (caddr d)))]
-    [else (error 'beagle "expected SQL query form (select/union/etc), got ~v" d)]))
+    [(and (pair? d) (memq (car d) '(union union-all intersect except)))
+     (error 'beagle "(~a ...) — bare `~a` is not supported. Use `(sql/~a ...)`." (car d) (car d) (car d))]
+    [else (error 'beagle "expected SQL query form (sql/select / sql/union / etc), got ~v" d)]))
 
 (define (parse-sql-with rest)
   (when (null? rest)

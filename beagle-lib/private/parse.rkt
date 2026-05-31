@@ -267,26 +267,17 @@
                               #:union-members [imp-union-members #f]
                               #:parametric-unions [imp-param-unions #f])
   (define datums (read-beagle-datums mod-path))
-  ;; Pre-pass: collect names that have an explicit (claim NAME TYPE) so the
-  ;; def/defn import pass knows to prefer claim types over the weaker inferred
-  ;; (Any-return) type derived from a bare defn.
-  (define imp-claim-names (make-hasheq))
-  (for ([d (in-list datums)])
-    (match d
-      [(list 'claim (? symbol? name) _) (hash-set! imp-claim-names name #t)]
-      [_ (void)]))
   (define (reg! name type)
     (hash-set! externs (qualify-name prefix name) type)
     (unless (hash-has-key? externs name)
       (hash-set! externs name type))
     (when imp-symbol-ns
       (hash-set! imp-symbol-ns name prefix)))
-  ;; defn-reg! — register an inferred function type for a defn, but only if
-  ;; the same module hasn't already declared a (claim NAME T) for it. The
-  ;; claim is more precise (carries the return type), so we keep it.
+  ;; defn-reg! — register an inferred function type for a defn. No
+  ;; out-of-band claim pre-pass: claim has been removed; inline `:-`
+  ;; annotations on def/defonce/defn are the only typed-binding surface.
   (define (defn-reg! name type)
-    (unless (hash-ref imp-claim-names name #f)
-      (reg! name type)))
+    (reg! name type))
   (for ([d (in-list datums)])
     (match d
       [(list 'declare-extern (? symbol? name) type-expr)
@@ -421,42 +412,219 @@
                     (hasheq 'params type-vars
                             'members mnames
                             'member-fields member-fields-hash)))]
-      ;; Inline `: T` annotations on def/defonce/defn are no longer accepted
-      ;; on the surface. Reject explicitly so imported modules surface the
-      ;; same migration pointer as authored sources — silent skipping here
-      ;; would leave the imported module type-less and produce confusing
-      ;; downstream errors at the call site.
+      ;; Inline `:-` annotations on def/defonce/defn: register the typed shape
+      ;; so imported modules surface the annotated type to call sites in the
+      ;; importing module.
+      [(list 'def (? symbol? name) ':- type-expr _)
+       (reg! name (parse-type type-expr))]
+      [(list 'defonce (? symbol? name) ':- type-expr _)
+       (reg! name (parse-type type-expr))]
+      [(list 'defn (? symbol? name) params-form ':- return-type _ ...)
+       (define-values (parsed rest-p) (parse-params params-form))
+       (define ptypes (map (lambda (p) (or (param-type p) (type-prim 'Any))) parsed))
+       (define rtype (and rest-p (or (param-type rest-p) (type-prim 'Any))))
+       (defn-reg! name (type-fn ptypes rtype (parse-type return-type)))]
+      ;; Bare `:` is not the inline marker — same hard-rejection as on the
+      ;; authoring side, but the importer surfaces a clearer-yet-still-pointed
+      ;; pointer at `:-` so the migration target is unambiguous either way.
       [(list 'def (? symbol? name) ': _ _)
        (raise-parse-error 'inline-type-annotation
-                          "(def ~a : ...) — inline type annotations on def are not supported. Separate the type into a claim form:\n  (claim ~a TYPE)\n  (def ~a VALUE)"
-                          name name name)]
+                          "(def ~a : ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (def ~a :- TYPE VALUE)"
+                          name name)]
       [(list 'defonce (? symbol? name) ': _ _)
        (raise-parse-error 'inline-type-annotation
-                          "(defonce ~a : ...) — inline type annotations on defonce are not supported. Separate the type into a claim form:\n  (claim ~a TYPE)\n  (defonce ~a VALUE)"
-                          name name name)]
+                          "(defonce ~a : ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (defonce ~a :- TYPE VALUE)"
+                          name name)]
       [(list 'defn (? symbol? name) _ ': _ _ ...)
        (raise-parse-error 'inline-type-annotation
-                          "(defn ~a [params] : RET ...) — inline return-type annotations on defn are not supported. Separate the type into a claim form:\n  (claim ~a (-> ARG-TYPES... RET-TYPE))\n  (defn ~a [params] body...)"
-                          name name name)]
+                          "(defn ~a [params] : RET ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (defn ~a [params] :- RET body...)"
+                          name name)]
       [(list 'defn (? symbol? name) params-form body ...)
        (define-values (parsed rest-p) (parse-params params-form))
        (define ptypes (map (lambda (p) (or (param-type p) (type-prim 'Any))) parsed))
        (define rtype (and rest-p (or (param-type rest-p) (type-prim 'Any))))
-       ;; Defer to claim-derived type if one exists for this name in the same
-       ;; imported module (claims carry return types; bare defn import infers
-       ;; only ANY return).
+       ;; No claim pre-pass: claim is gone. Bare defn imports infer ANY return.
        (defn-reg! name (type-fn ptypes rtype (type-prim 'Any)))]
-      ;; (claim NAME TYPE) — out-of-band type carrier. Register the name with
-      ;; the claim's type so cross-module call sites can see it as typed even
-      ;; when the paired (def …) / (defn …) was untyped.
-      [(list 'claim (? symbol? name) type-expr)
-       (reg! name (parse-type type-expr))]
       [_ (void)])))
+
+;; --- reader-conditional resolution ----------------------------------------
+;;
+;; The reader (beagle-lib/lang/reader-impl.rkt) reads #?(:tag form ...) as
+;; (reader-conditional :tag form ...) and #?@(:tag form ...) as
+;; (reader-conditional-splice :tag form ...). The reader doesn't know which
+;; target is active — that's set by `define-target`, which is itself a datum.
+;; So we resolve these markers here at parse time, after determining the
+;; target from the datum stream.
+;;
+;; Branch selection rule: scan keyword/form pairs left-to-right, return the
+;; first form whose `:tag` matches the current target; if none matches but
+;; `:default` is present, return that. Otherwise raise
+;; 'reader-conditional-no-match.
+;;
+;; Splice resolution: a (reader-conditional-splice :tag value ...) appearing
+;; as a child of a list/bracket/map/set container splices its chosen value
+;; (which must be a sequence — bare list, or #%brackets/#%map/#%set with the
+;; head dropped) into the surrounding container in place of the marker.
+
+(define READER-COND-TAGS '(clj cljs nix default))
+
+;; Fast structural scan — returns #t iff the datum tree contains a
+;; reader-conditional or reader-conditional-splice marker. The common case
+;; (no reader conditionals anywhere in the program) lets parse-program
+;; skip the full rewrite pass entirely and preserve the original syntax
+;; objects (with their inner srclocs). Without this fast path, the
+;; rewriter would `datum->syntax` every top-level form, flattening nested
+;; syntax srclocs that emit-clj's expression-level metadata depends on.
+(define (has-reader-conditional? d)
+  (cond
+    [(pair? d)
+     (or (eq? (car d) 'reader-conditional)
+         (eq? (car d) 'reader-conditional-splice)
+         (ormap has-reader-conditional? d))]
+    [else #f]))
+
+(define (rc-pairs items)
+  (let loop ([items items] [acc '()])
+    (cond
+      [(null? items) (reverse acc)]
+      [(< (length items) 2)
+       (raise-parse-error 'reader-conditional-no-match
+                          "reader-conditional: trailing tag without a form: ~v" items)]
+      [else
+       (define kw (car items))
+       (define form (cadr items))
+       (unless (and (symbol? kw) (regexp-match? #rx"^:" (symbol->string kw)))
+         (raise-parse-error 'reader-conditional-no-match
+                            "reader-conditional: expected :tag, got ~v" kw))
+       (define tag (string->symbol (substring (symbol->string kw) 1)))
+       (loop (cddr items) (cons (cons tag form) acc))])))
+
+(define (rc-select target pairs original)
+  (define hit (assq target pairs))
+  (cond
+    [hit (cdr hit)]
+    [else
+     (define dflt (assq 'default pairs))
+     (cond
+       [dflt (cdr dflt)]
+       [else
+        (raise-parse-error 'reader-conditional-no-match
+                           "reader-conditional: no branch matches target ~a (and no :default): ~v"
+                           target original)])]))
+
+(define (rc-splice-children target xs)
+  ;; Walk a sequence of child datums, replacing (reader-conditional ...) by
+  ;; the selected value (still a single child) and splicing
+  ;; (reader-conditional-splice ...) chosen-sequence into the parent.
+  (apply append
+    (for/list ([x (in-list xs)])
+      (cond
+        [(and (pair? x) (eq? (car x) 'reader-conditional-splice))
+         (define pairs (rc-pairs (cdr x)))
+         (define chosen (rc-select target pairs x))
+         (define seq
+           (cond
+             [(and (pair? chosen)
+                   (memq (car chosen) '(#%brackets #%map #%set)))
+              (cdr chosen)]
+             [(list? chosen) chosen]
+             [else
+              (raise-parse-error 'reader-conditional-no-match
+                                 "reader-conditional-splice: chosen branch is not a sequence: ~v"
+                                 chosen)]))
+         (map (lambda (e) (resolve-reader-conditionals e target)) seq)]
+        [else
+         (list (resolve-reader-conditionals x target))]))))
+
+(define (resolve-reader-conditionals d target)
+  (cond
+    [(and (pair? d) (eq? (car d) 'reader-conditional))
+     (define pairs (rc-pairs (cdr d)))
+     (define chosen (rc-select target pairs d))
+     (resolve-reader-conditionals chosen target)]
+    [(and (pair? d) (eq? (car d) 'reader-conditional-splice))
+     ;; A top-level reader-conditional-splice (not inside a container) — treat
+     ;; as if its chosen value is the result. If chosen is a sequence, this
+     ;; collapses to the bare sequence as a datum, which is almost certainly
+     ;; not what the author wants — but we let the caller decide via the
+     ;; splicing path. Resolve and return the chosen branch verbatim.
+     (define pairs (rc-pairs (cdr d)))
+     (define chosen (rc-select target pairs d))
+     (resolve-reader-conditionals chosen target)]
+    [(pair? d)
+     (cond
+       [(memq (car d) '(#%brackets #%map #%set))
+        (cons (car d) (rc-splice-children target (cdr d)))]
+       [else
+        (rc-splice-children target d)])]
+    [else d]))
 
 ;; --- entry point -----------------------------------------------------------
 
-(define (parse-program stxs #:source-path [source-path #f])
-  (define datums (map syntax->datum stxs))
+(define (parse-program stxs* #:source-path [source-path #f])
+  (define raw-datums (map syntax->datum stxs*))
+
+  ;; Determine target up-front so reader-conditionals can be resolved before
+  ;; any per-form parsing. `define-target` appears as a datum produced by the
+  ;; lang loader (or written by hand under `#lang beagle`). The current-target
+  ;; might also have been set by a wrapping context (e.g. validate-nix.rkt
+  ;; injects (define-target nix)) — in either case, scanning the datum
+  ;; stream is sufficient.
+  (define pre-scan-target
+    (let loop ([ds raw-datums])
+      (cond
+        [(null? ds) DEFAULT-TARGET]
+        [(and (pair? (car ds))
+              (eq? (caar ds) 'define-target)
+              (pair? (cdar ds))
+              (symbol? (cadar ds)))
+         (cadar ds)]
+        [else (loop (cdr ds))])))
+
+  ;; Fast path: most programs have no reader-conditionals at all. Skip
+  ;; the rewrite pass entirely so nested syntax srclocs (which the rewrite
+  ;; would flatten via datum->syntax) survive untouched. Without this, the
+  ;; emit-clj expression-level metadata pass loses its per-expression line
+  ;; numbers (see beagle-test/tests/emit.rkt expression-level cases).
+  (define needs-rewrite?
+    (for/or ([d (in-list raw-datums)]) (has-reader-conditional? d)))
+
+  ;; Resolve reader-conditionals on syntax objects so srclocs survive
+  ;; on the rewritten subtrees. The rewriter rewraps resolved datums via
+  ;; datum->syntax inheriting the original syntax's lexical context.
+  ;; Top-level (reader-conditional-splice ...) markers can produce
+  ;; zero-or-more program forms; we therefore produce a (Vec Syntax) by
+  ;; flat-mapping over the input.
+  (define stxs
+    (cond
+      [(not needs-rewrite?) stxs*]
+      [else
+       (apply append
+         (for/list ([s (in-list stxs*)])
+           (define d (syntax->datum s))
+           (cond
+             [(and (pair? d) (eq? (car d) 'reader-conditional-splice))
+              (define pairs (rc-pairs (cdr d)))
+              (define chosen (rc-select pre-scan-target pairs d))
+              (define seq
+                (cond
+                  [(and (pair? chosen)
+                        (memq (car chosen) '(#%brackets #%map #%set)))
+                   (cdr chosen)]
+                  [(list? chosen) chosen]
+                  [else
+                   (raise-parse-error 'reader-conditional-no-match
+                                      "reader-conditional-splice: chosen branch is not a sequence: ~v"
+                                      chosen)]))
+              (for/list ([elt (in-list seq)])
+                (datum->syntax s (resolve-reader-conditionals elt pre-scan-target) s))]
+             [else
+              (define resolved (resolve-reader-conditionals d pre-scan-target))
+              (cond
+                [(eq? resolved d) (list s)]
+                [else (list (datum->syntax s resolved s))])])))]))
+
+  (define datums (if needs-rewrite? (map syntax->datum stxs) raw-datums))
 
   ;; Pass 1: pull meta forms out and register macros / externs / requires.
   (define mode      DEFAULT-MODE)
@@ -754,14 +922,26 @@
     [else (error 'beagle "unsupported expression: ~v" d)])
    loc))
 
+;; Type-annotation markers.
+;;
+;; Two markers are recognized:
+;;   `:-`  — canonical inline marker. Accepted in all positions:
+;;            top-level (def NAME :- TYPE VALUE),
+;;            param/let bindings inline (NAME :- TYPE VALUE),
+;;            wrapped (NAME :- TYPE),
+;;            defn return type (defn f [...] :- RET ...).
+;;   `:`   — legacy marker. Accepted ONLY inside wrapped forms
+;;            (e.g. `(x : Int)` in params, defrecord fields, fn return
+;;            arrows in arity clauses) for backward compat with existing
+;;            sources. Top-level inline `(def NAME : TYPE VALUE)` is
+;;            still rejected — that arm now points authors at `:-`.
+;;
+;; `annotation-marker?` is the predicate used inside wrapped/arity-clause
+;; positions where both markers are acceptable. The top-level rejection
+;; arms for inline `:` use `(eq? marker ':)` directly so they can produce
+;; a marker-specific error message.
 (define (annotation-marker? sym)
-  (when (eq? sym ':-)
-    (error 'beagle
-           (string-append
-            "unexpected annotation marker `:-`. Beagle uses `:` for type annotations:\n"
-            "  [name : String]\n"
-            "  (defn f [x : Int] : Int ...)")))
-  (eq? sym ':))
+  (or (eq? sym ':-) (eq? sym ':)))
 
 (define (multi-arity-form? d)
   (and (pair? d) (list? d)
@@ -837,11 +1017,13 @@
 
 (define (parse-arity-clause clause)
   (unless (and (pair? clause) (list? clause))
-    (error 'beagle "multi-arity clause must be (params body...) or (params : Type body...)"))
+    (error 'beagle "multi-arity clause must be (params body...) or (params :- Type body...)"))
   (define params-form (car clause))
   (define rest (cdr clause))
   (define-values (parsed rest-p) (parse-params params-form))
   (cond
+    ;; Arity-clause return type: accept either `:-` (canonical) or `:`
+    ;; (legacy). See the `fn` arm in parse-list-form for the rationale.
     [(and (>= (length rest) 2) (annotation-marker? (car rest)))
      (arity-clause parsed rest-p
                    (parse-type (cadr rest))
@@ -864,6 +1046,8 @@
     (define rest (cddr item))
     (define-values (parsed rest-p) (parse-params params-form))
     (cond
+      ;; letfn return type: accept either `:-` (canonical) or `:` (legacy).
+      ;; See the `fn` arm in parse-list-form for the rationale.
       [(and (>= (length rest) 2) (annotation-marker? (car rest)))
        (letfn-fn name parsed rest-p
                  (parse-type (cadr rest))
@@ -1106,22 +1290,25 @@
             "(~a ...) escape hatches are not available. Beagle has no per-target escape by design — add to stdlib-*.rkt or write a separate target-language file and import it."
             (car d))]
 
-    ;; Inline `: T` annotations on def removed. Reject pointedly so the
-    ;; bare-form match below doesn't swallow `(def name : T value)` as
-    ;; "wrong arity" — the user's intent is clear; surface the migration.
-    [(list 'def (? symbol? name) marker _ _)
-     #:when (annotation-marker? marker)
+    ;; Inline `:-` annotations on def/defonce: accepted, populate the type slot.
+    [(list 'def (? symbol? name) ':- type-expr value)
+     (def-form name (parse-type type-expr)
+               (parse-expr (or (stx-ref subs 4) value)))]
+    ;; Inline bare `:` on def is the legacy surface; reject and point at `:-`.
+    [(list 'def (? symbol? name) ': _ _)
      (raise-parse-error 'inline-type-annotation
-                        "(def ~a : ...) — inline type annotations on def are not supported. Separate the type into a claim form:\n  (claim ~a TYPE)\n  (def ~a VALUE)"
-                        name name name)]
+                        "(def ~a : ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (def ~a :- TYPE VALUE)"
+                        name name)]
     [(list 'def (? symbol? name) value)
      (def-form name #f (parse-expr (or (stx-ref subs 2) value)))]
 
-    [(list 'defonce (? symbol? name) marker _ _)
-     #:when (annotation-marker? marker)
+    [(list 'defonce (? symbol? name) ':- type-expr value)
+     (defonce-form name (parse-type type-expr)
+                   (parse-expr (or (stx-ref subs 4) value)))]
+    [(list 'defonce (? symbol? name) ': _ _)
      (raise-parse-error 'inline-type-annotation
-                        "(defonce ~a : ...) — inline type annotations on defonce are not supported. Separate the type into a claim form:\n  (claim ~a TYPE)\n  (defonce ~a VALUE)"
-                        name name name)]
+                        "(defonce ~a : ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (defonce ~a :- TYPE VALUE)"
+                        name name)]
     [(list 'defonce (? symbol? name) value)
      (defonce-form name #f (parse-expr (or (stx-ref subs 2) value)))]
 
@@ -1137,20 +1324,32 @@
      (defn-multi name (map parse-arity-clause
                            (bare-multi-arity-clauses args)) #f)]
 
-    ;; Inline `: RET` annotations on defn removed (with or without :raises).
-    ;; Reject before the bare-form fallthrough so the rejection message names
-    ;; the claim-form migration explicitly rather than reporting the marker
-    ;; as an unbound symbol downstream.
-    [(list 'defn (? symbol? name) _ marker _ ':raises _ _ ...)
-     #:when (annotation-marker? marker)
+    ;; Inline return-type annotations on defn.
+    ;;
+    ;; Canonical form uses `:-` (the inline marker). Bare `:` is rejected with
+    ;; a message pointing the author at `:-` — diagnostic-kind reused so the
+    ;; same kind covers both spellings.
+    ;;
+    ;; The `:raises` shape is matched first so the rejection message can name
+    ;; both the return type and the raises clause explicitly.
+    [(list 'defn (? symbol? name) params-form ':- return-type ':raises err-type body ...)
+     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
+       (defn-form name parsed rest-p
+                  (parse-type return-type)
+                  (parse-body (or (stx-tail subs 7) body)) #f (parse-type err-type)))]
+    [(list 'defn (? symbol? name) params-form ':- return-type body ...)
+     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
+       (defn-form name parsed rest-p
+                  (parse-type return-type)
+                  (parse-body (or (stx-tail subs 5) body)) #f #f))]
+    [(list 'defn (? symbol? name) _ ': _ ':raises _ _ ...)
      (raise-parse-error 'inline-type-annotation
-                        "(defn ~a [params] : RET :raises ERR ...) — inline return-type annotations on defn are not supported. Separate the type into a claim form:\n  (claim ~a (-> ARG-TYPES... RET-TYPE :raises ERR))\n  (defn ~a [params] body...)"
-                        name name name)]
-    [(list 'defn (? symbol? name) _ marker _ _ ...)
-     #:when (annotation-marker? marker)
+                        "(defn ~a [params] : RET :raises ERR ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (defn ~a [params] :- RET :raises ERR body...)"
+                        name name)]
+    [(list 'defn (? symbol? name) _ ': _ _ ...)
      (raise-parse-error 'inline-type-annotation
-                        "(defn ~a [params] : RET ...) — inline return-type annotations on defn are not supported. Separate the type into a claim form:\n  (claim ~a (-> ARG-TYPES... RET-TYPE))\n  (defn ~a [params] body...)"
-                        name name name)]
+                        "(defn ~a [params] : RET ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (defn ~a [params] :- RET body...)"
+                        name name)]
     [(list 'defn (? symbol? name) params-form body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
@@ -1168,11 +1367,20 @@
      (defn-multi name (map parse-arity-clause
                            (bare-multi-arity-clauses args)) #t)]
 
-    [(list 'defn (list '#%meta _ (? symbol? name)) _ marker _ _ ...)
-     #:when (annotation-marker? marker)
+    [(list 'defn (list '#%meta _ (? symbol? name)) params-form ':- return-type ':raises err-type body ...)
+     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
+       (defn-form name parsed rest-p
+                  (parse-type return-type)
+                  (parse-body (or (stx-tail subs 7) body)) #t (parse-type err-type)))]
+    [(list 'defn (list '#%meta _ (? symbol? name)) params-form ':- return-type body ...)
+     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
+       (defn-form name parsed rest-p
+                  (parse-type return-type)
+                  (parse-body (or (stx-tail subs 5) body)) #t #f))]
+    [(list 'defn (list '#%meta _ (? symbol? name)) _ ': _ _ ...)
      (raise-parse-error 'inline-type-annotation
-                        "(defn ^:private ~a [params] : RET ...) — inline return-type annotations on defn are not supported. Separate the type into a claim form:\n  (claim ~a (-> ARG-TYPES... RET-TYPE))\n  (defn ^:private ~a [params] body...)"
-                        name name name)]
+                        "(defn ^:private ~a [params] : RET ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (defn ^:private ~a [params] :- RET body...)"
+                        name name)]
     [(list 'defn (list '#%meta _ (? symbol? name)) params-form body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
@@ -1190,36 +1398,40 @@
      (defn-multi name (map parse-arity-clause
                            (bare-multi-arity-clauses args)) #t)]
 
-    [(list 'defn- (? symbol? name) _ marker _ ':raises _ _ ...)
-     #:when (annotation-marker? marker)
+    [(list 'defn- (? symbol? name) params-form ':- return-type ':raises err-type body ...)
+     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
+       (defn-form name parsed rest-p
+                  (parse-type return-type)
+                  (parse-body (or (stx-tail subs 7) body)) #t (parse-type err-type)))]
+    [(list 'defn- (? symbol? name) params-form ':- return-type body ...)
+     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
+       (defn-form name parsed rest-p
+                  (parse-type return-type)
+                  (parse-body (or (stx-tail subs 5) body)) #t #f))]
+    [(list 'defn- (? symbol? name) _ ': _ ':raises _ _ ...)
      (raise-parse-error 'inline-type-annotation
-                        "(defn- ~a [params] : RET :raises ERR ...) — inline return-type annotations on defn- are not supported. Separate the type into a claim form:\n  (claim ~a (-> ARG-TYPES... RET-TYPE :raises ERR))\n  (defn- ~a [params] body...)"
-                        name name name)]
-    [(list 'defn- (? symbol? name) _ marker _ _ ...)
-     #:when (annotation-marker? marker)
+                        "(defn- ~a [params] : RET :raises ERR ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (defn- ~a [params] :- RET :raises ERR body...)"
+                        name name)]
+    [(list 'defn- (? symbol? name) _ ': _ _ ...)
      (raise-parse-error 'inline-type-annotation
-                        "(defn- ~a [params] : RET ...) — inline return-type annotations on defn- are not supported. Separate the type into a claim form:\n  (claim ~a (-> ARG-TYPES... RET-TYPE))\n  (defn- ~a [params] body...)"
-                        name name name)]
+                        "(defn- ~a [params] : RET ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (defn- ~a [params] :- RET body...)"
+                        name name)]
     [(list 'defn- (? symbol? name) params-form body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
                   #f (parse-body (or (stx-tail subs 3) body)) #t #f))]
 
-    ;; (claim NAME TYPE) — out-of-band type assertion for a paired def/defn.
-    ;; The inline `(def name : T value)` / `(defn f [..] : R ..)` surface was
-    ;; removed in v0.16; the inline-type rejection error messages point here
-    ;; (see raise-parse-error 'inline-type-annotation sites above). The
-    ;; checker's build-initial-env walks all top-level forms collecting
-    ;; (claim NAME TYPE) pairs into a claim-env hash; subsequent def/defn
-    ;; forms missing inline annotations consult that hash. See check.rkt.
-    [(list 'claim (? symbol? name) type-expr)
-     (claim-form name (parse-type type-expr))]
-    [(list 'claim _ ...)
-     (error 'beagle
-            (string-append
-             "(claim NAME TYPE) takes exactly 2 arguments — a symbol naming the "
-             "paired def/defn binding and a type expression. Got: ~v")
-            d)]
+    ;; (claim NAME TYPE) is HARD-REJECTED. Beagle's surface is typed Clojure
+    ;; plus inference — type information rides on ordinary bindings via inline
+    ;; `:-` annotations at boundaries. There is no separate type-fact form.
+    ;; This was removed under the Zero-users rule: no transitional alias.
+    [(cons 'claim _)
+     (raise-parse-error 'claim-form-removed
+      (string-append
+       "(claim NAME TYPE) — claim is not a form. Beagle's surface is typed "
+       "Clojure + inference; use inline annotations: "
+       "`(def NAME :- TYPE VALUE)` for top-level bindings, "
+       "`[param :- TYPE]` and `:- RET-TYPE` for defn."))]
 
     [(list 'defrecord (? symbol? name) fields-form)
      (record-form name (parse-record-fields (or (stx-ref subs 2) fields-form)))]
@@ -1262,6 +1474,11 @@
                 "flake-input: path segment must be keyword or symbol, got ~v" s)))
      (flake-input-form input-name namespace rest)]
 
+    ;; `fn` accepts either `:-` (canonical) or `:` (legacy) as the
+    ;; return-type marker. Top-level def/defonce/defn reject bare `:` because
+    ;; their inline-annotation surface was migrated wholesale to `:-`; `fn`
+    ;; and arity-clauses retain `:` acceptance to avoid churning the existing
+    ;; corpus during the migration window.
     [(list 'fn params-form marker return-type body ...)
      #:when (annotation-marker? marker)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 1) params-form))])
@@ -1287,8 +1504,13 @@
     [(list 'recur args ...)
      (recur-form (map parse-expr (or (stx-tail subs 1) args)))]
 
-    [(list 'await inner)
+    ;; JS-async await — namespaced under `js/` per audit row 8.
+    ;; Bare `(await …)` is rejected with a pointed migration message.
+    [(list 'js/await inner)
      (await-form (parse-expr (or (stx-ref subs 1) inner)))]
+    [(list 'await _)
+     (raise-parse-error 'bare-js-form
+                        "(await ...) — bare `await` is not supported. Beagle namespaces target-specific forms; use `(js/await EXPR)`.")]
 
     ;; --- Nix-specific forms --------------------------------------------------
 
@@ -1375,41 +1597,56 @@
                  [(symbol? d) (symbol->string d)]
                  [else (error 'beagle "p: expected string or symbol, got ~v" d)]))]
 
-    [(list 'fn-set formals body-expr)
+    [(list 'nix/fn-set formals body-expr)
      (define-values (fl at-name)
        (parse-nix-fn-set-formals (or (stx-ref subs 1) formals)))
      (nix-fn-set fl #f at-name (parse-expr (or (stx-ref subs 2) body-expr)))]
+    [(list 'fn-set _ _)
+     (raise-parse-error 'bare-nix-form
+                        "(fn-set ...) — bare `fn-set` is not supported. Beagle namespaces target-specific forms; use `(nix/fn-set FORMALS BODY)`.")]
 
-    [(list 'module formals body-expr)
+    [(list 'nix/module formals body-expr)
      ;; NixOS module / open-attrs lambda: { a, b, ... }: body
      (define-values (fl at-name)
        (parse-nix-fn-set-formals (or (stx-ref subs 1) formals)))
      (nix-fn-set fl #t at-name (parse-expr (or (stx-ref subs 2) body-expr)))]
+    [(list 'module _ _)
+     (raise-parse-error 'bare-nix-form
+                        "(module ...) — bare `module` is not supported. Beagle namespaces target-specific forms; use `(nix/module FORMALS BODY)`.")]
 
-    [(list 'overlay formals body-expr)
+    [(list 'nix/overlay formals body-expr)
      ;; Nix overlay: final: prev: body (curried — NOT attrset-destructure)
      ;; Emits as fn-form so the nix emitter produces `final: prev: body`.
      (define-values (f-list _at-name)
        (parse-nix-fn-set-formals (or (stx-ref subs 1) formals)))
      (unless (= (length f-list) 2)
-       (error 'beagle "overlay: expected exactly two formals [final prev], got ~a" (length f-list)))
+       (error 'beagle "nix/overlay: expected exactly two formals [final prev], got ~a" (length f-list)))
      (define ps
        (for/list ([f (in-list f-list)])
          (param (nix-fn-set-formal-name f) #f)))
      (fn-form ps #f #f
               (list (parse-expr (or (stx-ref subs 2) body-expr))))]
+    [(list 'overlay _ _)
+     (raise-parse-error 'bare-nix-form
+                        "(overlay ...) — bare `overlay` is not supported. Beagle namespaces target-specific forms; use `(nix/overlay [final prev] BODY)`.")]
 
-    [(list 'derivation attrs-expr)
-     ;; mkDerivation sugar: (derivation {:pname ... :version ... :src ...})
+    [(list 'nix/derivation attrs-expr)
+     ;; mkDerivation sugar: (nix/derivation {:pname ... :version ... :src ...})
      ;; Emits as `(pkgs.stdenv.mkDerivation { ... })`. Use `:builder pkg` to
      ;; override the default stdenv (e.g. :builder pkgs.runCommand).
      (define attrs (parse-expr (or (stx-ref subs 1) attrs-expr)))
      (nix-derivation attrs)]
+    [(list 'derivation _)
+     (raise-parse-error 'bare-nix-form
+                        "(derivation ...) — bare `derivation` is not supported. Beagle namespaces target-specific forms; use `(nix/derivation ATTRS)`.")]
 
-    [(list 'flake attrs-expr)
-     ;; flake.nix sugar: (flake {:description ... :inputs {...} :outputs (fn-set [self nixpkgs] ...)})
+    [(list 'nix/flake attrs-expr)
+     ;; flake.nix sugar: (nix/flake {:description ... :inputs {...} :outputs (nix/fn-set [self nixpkgs] ...)})
      (define attrs (parse-expr (or (stx-ref subs 1) attrs-expr)))
      (nix-flake attrs)]
+    [(list 'flake _)
+     (raise-parse-error 'bare-nix-form
+                        "(flake ...) — bare `flake` is not supported. Beagle namespaces target-specific forms; use `(nix/flake ATTRS)`.")]
 
     ;; The pipe family (`pipe-to`, `pipe-from`, `implies`, `|>`, `|>>`) was an
     ;; Elixir/F# import — removed per CLAUDE.md "Beagle is Clojure plus types,
@@ -1479,17 +1716,29 @@
     ;; --- end JS-specific forms ------------------------------------------------
 
     ;; --- SQL-specific forms ---------------------------------------------------
+    ;; All SQL surface forms are namespaced under `sql/` per audit row 6
+    ;; ("Prefix where meaning diverges"). Bare forms are rejected with
+    ;; pointed migration messages.
 
-    [(list 'deftable (? symbol? name) fields-form)
+    [(list 'sql/deftable (? symbol? name) fields-form)
      (sql-table name (parse-sql-columns (or (stx-ref subs 2) fields-form)))]
+    [(list 'deftable _ _)
+     (raise-parse-error 'bare-sql-form
+                        "(deftable ...) — bare `deftable` is not supported. Beagle namespaces target-specific forms; use `(sql/deftable NAME FIELDS)`.")]
 
-    [(cons 'select rest)
+    [(cons 'sql/select rest)
      (parse-sql-select (or (stx-tail subs 1) rest) subs #f)]
+    [(cons 'select _)
+     (raise-parse-error 'bare-sql-form
+                        "(select ...) — bare `select` is not supported. Beagle namespaces target-specific forms; use `(sql/select COLS CLAUSES...)`.")]
 
-    [(cons 'select-distinct rest)
+    [(cons 'sql/select-distinct rest)
      (parse-sql-select (or (stx-tail subs 1) rest) subs #t)]
+    [(cons 'select-distinct _)
+     (raise-parse-error 'bare-sql-form
+                        "(select-distinct ...) — bare `select-distinct` is not supported. Beagle namespaces target-specific forms; use `(sql/select-distinct COLS CLAUSES...)`.")]
 
-    [(cons 'with rest)
+    [(cons 'sql/with rest)
      #:when (and (pair? rest)
                  (pair? (car rest))
                  (let ([first-cte (car rest)])
@@ -1497,71 +1746,119 @@
                         (pair? (cdr first-cte))
                         (pair? (cadr first-cte)))))
      (parse-sql-with (or (stx-tail subs 1) rest))]
+    ;; Note: bare `(with ...)` already has dispatch logic for record-update vs
+    ;; Nix-scope; SQL CTEs route through `sql/with` to avoid further overload.
 
-    [(list 'union left right)
+    [(list 'sql/union left right)
      (sql-union 'union (parse-sql-top-form left) (parse-sql-top-form right))]
-    [(list 'union-all left right)
+    [(list 'sql/union-all left right)
      (sql-union 'union-all (parse-sql-top-form left) (parse-sql-top-form right))]
-    [(list 'intersect left right)
+    [(list 'sql/intersect left right)
      (sql-union 'intersect (parse-sql-top-form left) (parse-sql-top-form right))]
-    [(list 'except left right)
+    [(list 'sql/except left right)
      (sql-union 'except (parse-sql-top-form left) (parse-sql-top-form right))]
+    [(list 'union _ _)
+     (raise-parse-error 'bare-sql-form
+                        "(union ...) — bare `union` is not supported. Beagle namespaces target-specific forms; use `(sql/union LEFT RIGHT)`.")]
+    [(list 'union-all _ _)
+     (raise-parse-error 'bare-sql-form
+                        "(union-all ...) — bare `union-all` is not supported. Beagle namespaces target-specific forms; use `(sql/union-all LEFT RIGHT)`.")]
+    [(list 'intersect _ _)
+     (raise-parse-error 'bare-sql-form
+                        "(intersect ...) — bare `intersect` is not supported. Beagle namespaces target-specific forms; use `(sql/intersect LEFT RIGHT)`.")]
+    [(list 'except _ _)
+     (raise-parse-error 'bare-sql-form
+                        "(except ...) — bare `except` is not supported. Beagle namespaces target-specific forms; use `(sql/except LEFT RIGHT)`.")]
 
-    [(list 'insert (? symbol? table) cols-form (cons 'values rows))
+    [(list 'sql/insert (? symbol? table) cols-form (cons 'values rows))
      (define values-subs (and subs (stx-subs (stx-ref subs 3))))
      (sql-insert table
                  (parse-sql-column-names (or (stx-ref subs 2) cols-form))
                  (map (lambda (r) (parse-sql-values-row r))
                       (or (stx-tail values-subs 1) rows)))]
+    [(list 'insert _ _ (cons 'values _))
+     (raise-parse-error 'bare-sql-form
+                        "(insert ...) — bare `insert` is not supported. Beagle namespaces target-specific forms; use `(sql/insert TABLE COLS (values ROWS...))`.")]
 
-    [(list 'update (? symbol? table) set-form rest ...)
+    [(list 'sql/update (? symbol? table) set-form rest ...)
      #:when (and (pair? set-form) (eq? (car set-form) 'set))
      (sql-update table
                  (parse-sql-set-pairs (or (stx-ref subs 2) set-form))
                  (parse-sql-where-clause (or (stx-tail subs 3) rest)))]
+    [(list 'update _ set-form _ ...)
+     #:when (and (pair? set-form) (eq? (car set-form) 'set))
+     (raise-parse-error 'bare-sql-form
+                        "(update ...) — bare `update` is not supported. Beagle namespaces target-specific forms; use `(sql/update TABLE (set ...) (where ...))`.")]
 
-    [(list 'delete (? symbol? table) rest ...)
+    [(list 'sql/delete (? symbol? table) rest ...)
      (sql-delete table
                  (parse-sql-where-clause (or (stx-tail subs 2) rest)))]
+    [(list 'delete (? symbol? _) _ ...)
+     (raise-parse-error 'bare-sql-form
+                        "(delete ...) — bare `delete` is not supported. Beagle namespaces target-specific forms; use `(sql/delete TABLE (where ...))`.")]
 
-    ;; INSERT...SELECT: (insert-select table [cols] (select ...))
-    [(list 'insert-select (? symbol? table) cols-form query-form)
+    ;; INSERT...SELECT: (sql/insert-select table [cols] (sql/select ...))
+    [(list 'sql/insert-select (? symbol? table) cols-form query-form)
      (sql-insert-select table
                         (parse-sql-column-names (or (stx-ref subs 2) cols-form))
                         (parse-sql-top-form query-form))]
+    [(list 'insert-select _ _ _)
+     (raise-parse-error 'bare-sql-form
+                        "(insert-select ...) — bare `insert-select` is not supported. Beagle namespaces target-specific forms; use `(sql/insert-select TABLE COLS QUERY)`.")]
 
-    ;; RETURNING: (returning stmt [cols])
-    [(list 'returning stmt-form cols-form)
+    ;; RETURNING: (sql/returning stmt [cols])
+    [(list 'sql/returning stmt-form cols-form)
      (define stmt-d (->datum stmt-form))
      (define inner-stmt
        (cond
-         [(and (pair? stmt-d) (memq (car stmt-d) '(insert update delete)))
+         [(and (pair? stmt-d) (memq (car stmt-d) '(sql/insert sql/update sql/delete)))
           (parse-list-form stmt-d #f)]
-         [else (error 'beagle "returning: inner statement must be insert/update/delete")]))
+         [else (error 'beagle "sql/returning: inner statement must be sql/insert/sql/update/sql/delete")]))
      (sql-returning inner-stmt
                     (parse-sql-column-names (or (stx-ref subs 2) cols-form)))]
+    [(list 'returning _ _)
+     (raise-parse-error 'bare-sql-form
+                        "(returning ...) — bare `returning` is not supported. Beagle namespaces target-specific forms; use `(sql/returning STMT COLS)`.")]
 
-    ;; CREATE INDEX: (create-index name table [cols])
-    [(list 'create-index (? symbol? name) (? symbol? table) cols-form)
+    ;; CREATE INDEX: (sql/create-index name table [cols])
+    [(list 'sql/create-index (? symbol? name) (? symbol? table) cols-form)
      (sql-create-index #f name table
                        (parse-sql-column-names (or (stx-ref subs 3) cols-form)))]
-    [(list 'create-unique-index (? symbol? name) (? symbol? table) cols-form)
+    [(list 'sql/create-unique-index (? symbol? name) (? symbol? table) cols-form)
      (sql-create-index #t name table
                        (parse-sql-column-names (or (stx-ref subs 3) cols-form)))]
+    [(list 'create-index _ _ _)
+     (raise-parse-error 'bare-sql-form
+                        "(create-index ...) — bare `create-index` is not supported. Beagle namespaces target-specific forms; use `(sql/create-index NAME TABLE COLS)`.")]
+    [(list 'create-unique-index _ _ _)
+     (raise-parse-error 'bare-sql-form
+                        "(create-unique-index ...) — bare `create-unique-index` is not supported. Beagle namespaces target-specific forms; use `(sql/create-unique-index NAME TABLE COLS)`.")]
 
-    ;; DROP TABLE: (drop-table name) or (drop-table-if-exists name)
-    [(list 'drop-table (? symbol? name))
+    ;; DROP TABLE: (sql/drop-table name) or (sql/drop-table-if-exists name)
+    [(list 'sql/drop-table (? symbol? name))
      (sql-drop-table name #f)]
-    [(list 'drop-table-if-exists (? symbol? name))
+    [(list 'sql/drop-table-if-exists (? symbol? name))
      (sql-drop-table name #t)]
+    [(list 'drop-table _)
+     (raise-parse-error 'bare-sql-form
+                        "(drop-table ...) — bare `drop-table` is not supported. Beagle namespaces target-specific forms; use `(sql/drop-table NAME)`.")]
+    [(list 'drop-table-if-exists _)
+     (raise-parse-error 'bare-sql-form
+                        "(drop-table-if-exists ...) — bare `drop-table-if-exists` is not supported. Beagle namespaces target-specific forms; use `(sql/drop-table-if-exists NAME)`.")]
 
-    ;; ALTER TABLE: (alter-table name (add-column col-def)) etc.
-    [(list 'alter-table (? symbol? table) action-form)
+    ;; ALTER TABLE: (sql/alter-table name (add-column col-def)) etc.
+    [(list 'sql/alter-table (? symbol? table) action-form)
      (sql-alter-table table (->datum action-form))]
+    [(list 'alter-table _ _)
+     (raise-parse-error 'bare-sql-form
+                        "(alter-table ...) — bare `alter-table` is not supported. Beagle namespaces target-specific forms; use `(sql/alter-table TABLE ACTION)`.")]
 
-    ;; TRUNCATE: (truncate table)
-    [(list 'truncate (? symbol? table))
+    ;; TRUNCATE: (sql/truncate table)
+    [(list 'sql/truncate (? symbol? table))
      (sql-truncate table)]
+    [(list 'truncate _)
+     (raise-parse-error 'bare-sql-form
+                        "(truncate ...) — bare `truncate` is not supported. Beagle namespaces target-specific forms; use `(sql/truncate TABLE)`.")]
 
     ;; --- end SQL-specific forms -----------------------------------------------
 
@@ -1856,15 +2153,8 @@
     [(list 'nix-ident _ ...)
      (raise-parse-error 'removed-form
                         "nix-ident removed — use (flake-input :NAME :NAMESPACE :path ...) for flake-input access. nix-ident was an undocumented escape hatch that bypassed the type system.")]
-    [(list 'inc _ ...)
-     (raise-parse-error 'removed-form
-                        "inc removed — use (+ x 1)")]
-    [(list 'dec _ ...)
-     (raise-parse-error 'removed-form
-                        "dec removed — use (- x 1)")]
-    [(list 'not= _ ...)
-     (raise-parse-error 'removed-form
-                        "not= removed — use (not (= a b))")]
+    ;; inc / dec / not= live in stdlib-portable.rkt — no parse-time
+     ;; rejection. They flow through the ordinary call-form arm below.
     [(list 'case _ ...)
      (raise-parse-error 'removed-form
                         "case removed — use (match x [v1 body] [v2 body] [_ default]) or (match x [(or v1 v2) shared-body] [_ default]); literal-only matches case-fold to target-native dispatch in emit")]
@@ -2241,10 +2531,17 @@
 
 ;; --- params + bindings -----------------------------------------------------
 
-;; Param lists support three shapes (intermixable):
-;;   1. bare name (untyped):          x
-;;   2. wrapped + annotation:         (x : T)
-;;   3. map destructure:              {:keys [a b c]} or {:keys [a b c] :as m}
+;; Param lists support four intermixable shapes:
+;;   1. bare name (untyped):              x
+;;   2. wrapped + annotation:             (x :- T)  or  (x : T) (legacy)
+;;   3. inline annotation (alternation):  x :- T    — `:-` follows the name
+;;   4. map destructure:                  {:keys [a b c]} or {:keys [a b c] :as m}
+;;
+;; Inline `:-` walks left-to-right via `parse-typed-params` — when the item
+;; after a bare-symbol name is `:-`, the next item is consumed as that name's
+;; type; otherwise the name is untyped.
+;;
+;; Example: `[a :- Int b c :- String]` → a:Int, b:inferred, c:String.
 (define (parse-params p)
   (define d (->datum p))
   (define items (unwrap-items d "parameter list"))
@@ -2261,26 +2558,7 @@
                        (car rest-items)
                        rest-items)))]
         [else (loop (cdr remaining) (cons (car remaining) acc))])))
-  (define fixed
-    (for/list ([item (in-list before-amp)])
-      (cond
-        [(bracketed? item)
-         (parse-seq-destructure item)]
-        [(map-destructure-form? item)
-         (parse-map-destructure item)]
-        [(and (list? item)
-              (= (length item) 3)
-              (symbol? (car item))
-              (annotation-marker? (cadr item)))
-         (validate-identifier! (car item) "parameter")
-         (param (car item) (parse-type (caddr item)))]
-        [(symbol? item)
-         (validate-identifier! item "parameter")
-         (param item #f)]
-        [else
-         (error 'beagle
-                "bad parameter: ~v~nexpected name, (name : Type), or {:keys [...]}"
-                item)])))
+  (define fixed (parse-typed-params before-amp))
   (define rest-p
     (and after-amp
          (cond
@@ -2294,6 +2572,53 @@
            [else
             (error 'beagle "bad rest parameter after &: ~v" after-amp)])))
   (values fixed rest-p))
+
+;; Walks param items left-to-right, recognizing inline `NAME :- TYPE` triples
+;; and bare `NAME` as alternation. Wrapped `(name :- T)` / `(name : T)`,
+;; bracket destructures, and map destructures are accepted as single items.
+(define (parse-typed-params items)
+  (let loop ([rest items] [acc '()])
+    (cond
+      [(null? rest) (reverse acc)]
+      ;; Inline `name :- TYPE` — consume 3 items.
+      [(and (symbol? (car rest))
+            (pair? (cdr rest))
+            (eq? (cadr rest) ':-)
+            (pair? (cddr rest)))
+       (validate-identifier! (car rest) "parameter")
+       (loop (cdddr rest)
+             (cons (param (car rest) (parse-type (caddr rest))) acc))]
+      ;; Disallow inline `name : TYPE` — guide the author at `:-`.
+      [(and (symbol? (car rest))
+            (pair? (cdr rest))
+            (eq? (cadr rest) ':)
+            (pair? (cddr rest)))
+       (raise-parse-error 'inline-type-annotation
+                          "[~a : ~v ...] — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  [~a :- TYPE ...]"
+                          (car rest) (caddr rest) (car rest))]
+      ;; Single-item parameter (bracket, map-destructure, wrapped, or bare).
+      [else
+       (define item (car rest))
+       (define parsed
+         (cond
+           [(bracketed? item)
+            (parse-seq-destructure item)]
+           [(map-destructure-form? item)
+            (parse-map-destructure item)]
+           [(and (list? item)
+                 (= (length item) 3)
+                 (symbol? (car item))
+                 (annotation-marker? (cadr item)))
+            (validate-identifier! (car item) "parameter")
+            (param (car item) (parse-type (caddr item)))]
+           [(symbol? item)
+            (validate-identifier! item "parameter")
+            (param item #f)]
+           [else
+            (error 'beagle
+                   "bad parameter: ~v~nexpected name, (name :- Type), name :- Type, or {:keys [...]}"
+                   item)]))
+       (loop (cdr rest) (cons parsed acc))])))
 
 (define (map-destructure-form? item)
   (and (map-tagged? item)
@@ -2362,6 +2687,26 @@
              (and stxs (>= (length stxs) 2) (cddr stxs))
              (cons (let-binding destr #f (parse-expr (or val-stx (cadr rest))))
                    acc))]
+      ;; Inline `NAME :- TYPE VALUE` — consume 4 items.
+      ;; Locals are usually inferred; this surface exists for parity with
+      ;; param annotations so the same `:-` reads at every binding site.
+      [(and (>= (length rest) 4)
+            (symbol? (car rest))
+            (eq? (cadr rest) ':-))
+       (define val-stx (and stxs (>= (length stxs) 4) (list-ref stxs 3)))
+       (loop (list-tail rest 4)
+             (and stxs (>= (length stxs) 4) (list-tail stxs 4))
+             (cons (let-binding (car rest)
+                                (parse-type (caddr rest))
+                                (parse-expr (or val-stx (cadddr rest))))
+                   acc))]
+      ;; Disallow inline `NAME : TYPE VALUE` — surface the `:-` migration.
+      [(and (>= (length rest) 4)
+            (symbol? (car rest))
+            (eq? (cadr rest) ':))
+       (raise-parse-error 'inline-type-annotation
+                          "(let [~a : ~v ...] ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (let [~a :- TYPE VALUE ...] ...)"
+                          (car rest) (caddr rest) (car rest))]
       [(and (>= (length rest) 2)
             (symbol? (car rest)))
        (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))

@@ -1,12 +1,12 @@
 #lang beagle/sql
 (ns test.sql.delete)
 
-(deftable sessions
+(sql/deftable sessions
   [(id         : Int :primary-key)
    (expires_at : String)
    (revoked    : Bool)])
 
 ;; DELETE with WHERE.
-(delete sessions
+(sql/delete sessions
   (where (or (< expires_at "2024-01-01")
              (= revoked #t))))

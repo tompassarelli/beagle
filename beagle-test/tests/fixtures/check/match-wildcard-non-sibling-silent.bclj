@@ -2,8 +2,7 @@
 (defrecord X2 [(b : Int)])
 (defrecord X3 [(c : Int)])
 (defrecord X4 [(d : Int)])
-(claim handle [Any -> Int])
-(defn handle [(e : Any)]
+(defn handle [(e : Any)] :- Int
   (match e
     [(X1 a) a]
     [(X2 b) b]

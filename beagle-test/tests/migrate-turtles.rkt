@@ -62,12 +62,18 @@
 
 ;; --- defn ----------------------------------------------------------------
 
+;; The (claim NAME TYPE) carrier emitted by the migrator was deleted
+;; under the Zero-users rule. Type information from v0.15 inline `: T`
+;; annotations is now dropped during migration; only `def`'s typed form
+;; survives by emitting an inline `:-` annotation. Typed defns, multi-
+;; arity defns, and per-field defrecord types lose their type info and
+;; must be re-annotated manually after migration.
+
 (check-migrate
   "#lang beagle
 (defn add [(x : Int) (y : Int)] : Int (+ x y))"
-  `((claim add :type (-> Int Int Int))
-    (defn add ,(P '(x y)) (+ x y)))
-  "defn with typed params and return type")
+  `((defn add ,(P '(x y)) (+ x y)))
+  "defn with typed params and return type (types dropped)")
 
 (check-migrate
   "#lang beagle
@@ -78,18 +84,16 @@
 (check-migrate
   "#lang beagle
 (defn add [(x : Int) (y : Int)] : Int (+ x y) (println \"side\"))"
-  `((claim add :type (-> Int Int Int))
-    (defn add ,(P '(x y)) (+ x y) (println "side")))
-  "defn with multi-body")
+  `((defn add ,(P '(x y)) (+ x y) (println "side")))
+  "defn with multi-body (types dropped)")
 
 ;; --- def -----------------------------------------------------------------
 
 (check-migrate
   "#lang beagle
 (def x : Int 42)"
-  '((claim x :type Int)
-    (def x 42))
-  "def with type annotation")
+  '((def x :- Int 42))
+  "def with type annotation migrates to inline `:-`")
 
 (check-migrate
   "#lang beagle
@@ -102,18 +106,16 @@
 (check-migrate
   "#lang beagle
 (defn f [] : Int (let [x 1 y 2] (+ x y)))"
-  `((claim f :type (-> Int))
-    (defn f ,(P '())
+  `((defn f ,(P '())
       (let ,(L '(x 1 y 2)) (+ x y))))
-  "let with flat-pair brackets -> <- binding")
+  "let with flat-pair brackets -> <- binding (defn type dropped)")
 
 (check-migrate
   "#lang beagle
 (defn f [] : Int (let ((x 1) (y 2)) (+ x y)))"
-  `((claim f :type (-> Int))
-    (defn f ,(P '())
+  `((defn f ,(P '())
       (let ,(L '(x 1 y 2)) (+ x y))))
-  "let with paren-of-pairs -> <- binding")
+  "let with paren-of-pairs -> <- binding (defn type dropped)")
 
 ;; --- vector / hash-map / hash-set ----------------------------------------
 
@@ -164,10 +166,8 @@
 (check-migrate
   "#lang beagle
 (defrecord Point [(x : Int) (y : Int)])"
-  `((defrecord Point ,(F '(x y)))
-    (claim Point.x :type Int)
-    (claim Point.y :type Int))
-  "defrecord with typed fields -> fields + per-field claims")
+  `((defrecord Point ,(F '(x y))))
+  "defrecord with typed fields -> fields (per-field types dropped)")
 
 ;; --- cond / match --------------------------------------------------------
 
@@ -175,8 +175,7 @@
   "#lang beagle
 (defn classify [(n : Int)] : String
   (cond (< n 0) \"neg\" (= n 0) \"zero\" :else \"pos\"))"
-  `((claim classify :type (-> Int String))
-    (defn classify
+  `((defn classify
       ,(P '(n))
       (cond (< n 0) "neg" (= n 0) "zero" :else "pos")))
-  "cond — flat by adjacency")
+  "cond — flat by adjacency (defn types dropped)")

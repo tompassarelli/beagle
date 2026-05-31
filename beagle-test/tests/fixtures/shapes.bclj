@@ -5,10 +5,8 @@
 (defrecord Circle [(radius : Int)])
 (defrecord Rect [(width : Int) (height : Int)])
 
-(claim circle-area [Circle -> Int])
-(defn circle-area [(c : Circle)]
+(defn circle-area [(c : Circle)] :- Int
   (* (circle-radius c) (circle-radius c)))
 
-(claim rect-area [Rect -> Int])
-(defn rect-area [(r : Rect)]
+(defn rect-area [(r : Rect)] :- Int
   (* (rect-width r) (rect-height r)))

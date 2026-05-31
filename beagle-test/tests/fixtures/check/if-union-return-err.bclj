@@ -3,8 +3,7 @@
 (declare-extern lookup-product [Int -> Product])
 
 ;; should fail: if returns (U Product Nil), not Product
-(claim find-product [Int -> Product])
-(defn find-product [(id : Int)]
+(defn find-product [(id : Int)] :- Product
   (if (> id 0)
     (lookup-product id)
     nil))

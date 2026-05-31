@@ -55,11 +55,7 @@
 ;;   return-type        : function body's inferred return doesn't
 ;;                        match declared return type.
 ;;   def-type           : top-level def's value type doesn't match its
-;;                        annotation. Also emitted for (claim NAME TYPE) +
-;;                        (def NAME VALUE) mismatches (the claim-derived
-;;                        env type plays the same role as an inline
-;;                        annotation), and for orphan claims (claim NAME T
-;;                        without a paired binding).
+;;                        inline `:-` annotation.
 ;;   let-binding        : let-bound value type doesn't match its
 ;;                        annotation.
 ;;   type-bound         : type parameter violates its bound.
@@ -131,11 +127,13 @@
 ;;                         parameter list, unknown mode/target,
 ;;                         non-symbol name). Type-error.
 ;;   inline-type-annotation : author wrote `(def name : T value)` or the
-;;                         analogous defonce/defn shape. Inline type
-;;                         annotations on definitional forms have been
-;;                         removed; the canonical replacement is an
-;;                         out-of-band `(claim NAME TYPE)` form sitting
-;;                         next to the definition. Surface-divergence.
+;;                         analogous defonce/defn shape. The canonical
+;;                         inline marker is `:-` (e.g. `(def name :- T
+;;                         value)`). Surface-divergence.
+;;   claim-form-removed   : author wrote `(claim NAME TYPE)`. The claim
+;;                         form has been deleted entirely; inline `:-`
+;;                         annotations on def/defonce/defn are the only
+;;                         typed-binding surface. Surface-divergence.
 ;;   bare-nix-form       : author wrote a bare Nix-namespaced form
 ;;                         (`assert`, `with-cfg`, or Nix-scope `with`)
 ;;                         that has been hard-rejected. The canonical
@@ -171,15 +169,23 @@
 ;;                         histogram can attribute the rejection to the
 ;;                         macro author rather than the call-site
 ;;                         author.
+;;   reader-conditional-no-match
+;;                       : a #?(:tag form ...) or #?@(:tag form ...)
+;;                         reader-conditional had no branch matching the
+;;                         current target and no :default fallback. Surface-
+;;                         divergence — fixable by adding a :default branch
+;;                         or including a branch for the active target.
 (define parse-kind-cause-table
   (hasheq
    'removed-form           'surface-divergence
    'unknown-form           'surface-divergence
    'inline-type-annotation 'surface-divergence
+   'claim-form-removed     'surface-divergence
    'bare-nix-form          'surface-divergence
    'legacy-macro-form      'surface-divergence
    'legacy-pipe-form       'surface-divergence
    'macro-expansion-parse-error 'surface-divergence
+   'reader-conditional-no-match 'surface-divergence
    'duplicate-meta         'type-error
    'bad-meta-value         'type-error
    'bad-form               'surface-divergence))

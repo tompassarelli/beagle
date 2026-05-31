@@ -1,7 +1,8 @@
 #lang racket/base
 
-;; Tests for the standard forms (fn, defn, let, cond, match, claim, ->, etc.)
-;; defined as operatives on top of the bootstrap evaluator.
+;; Tests for the standard forms (fn, defn, let, cond, match, ->, etc.)
+;; defined as operatives on top of the bootstrap evaluator. (claim was
+;; removed; inline `:-` annotations replaced the type-fact surface.)
 
 (require rackunit
          beagle/private/eval
@@ -160,21 +161,9 @@
           (arm _ "no"))))
   (check-equal? result 6))
 
-;; --- claim --------------------------------------------------------------
-
-(test-case "claim is a no-op (returns void) and records in substrate"
-  (define e (make-env-with-stdlib))
-  (parameterize ([claim-substrate '()])
-    (define result (evaluate '(claim foo :type Int) e))
-    (check-true (void? result))
-    (check-equal? (length (claim-substrate)) 1)))
-
-(test-case "multiple claims accumulate"
-  (define e (make-env-with-stdlib))
-  (parameterize ([claim-substrate '()])
-    (evaluate '(claim foo :type Int) e)
-    (evaluate '(claim bar :type String) e)
-    (check-equal? (length (claim-substrate)) 2)))
+;; (claim form removed — substrate / runtime behavior was deleted with
+;; it. Inline `:-` annotations replace the type-fact surface; there is
+;; no runtime operative for type annotations.)
 
 ;; --- type constructors --------------------------------------------------
 

@@ -63,6 +63,7 @@
              "macro-hygiene.rkt"
              "parse.rkt"
              "quasi-quote-reader.rkt"
+             "reader-conditionals.rkt"
              "syntax.rkt"
              "test-tags.rkt"
              "threading.rkt"

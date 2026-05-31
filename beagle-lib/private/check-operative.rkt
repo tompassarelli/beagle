@@ -7,16 +7,11 @@
 ;; pure, so operative bindings stay stable and the checker can trust
 ;; what it sees.
 ;;
-;; The checker walks a program in two passes:
-;;
-;;   Pass 1 (claim collection): scan for top-level `(claim NAME ∈ TYPE)`
-;;   forms and build a type environment: name -> declared type. Also
-;;   collects `(claim NAME :KEY VALUE)` metadata claims for downstream
-;;   tools.
-;;
-;;   Pass 2 (form checking): for each non-claim form, check it under
-;;   the type environment. Definitions extend the env. Function calls
-;;   check arity and per-arg compatibility against declared signatures.
+;; The checker walks a program in one pass: for each form, check it
+;; under the type environment. Definitions extend the env. Function
+;; calls check arity and per-arg compatibility against declared
+;; signatures. The (claim NAME TYPE) form was removed; inline `:-`
+;; annotations on def/defonce/defn are the only typed-binding surface.
 ;;
 ;; The result is a list of type errors. Pure-evaluation forms (no `!`
 ;; in dynamic extent) are also identified for compile-time evaluation
@@ -24,7 +19,7 @@
 ;; at compile time" work.
 ;;
 ;; This is a first cut. The current scope:
-;;   - parse types from claim payloads
+;;   - parse types from inline `:-` annotations
 ;;   - check arity of calls against declared (→ params returns)
 ;;   - check param-type compatibility (subtype: `Any` matches everything,
 ;;     primitives match by name)
@@ -76,9 +71,9 @@
 (define ANY-TYPE (type-any))
 (define NIL-TYPE (type-nil))
 
-;; --- parse types from claim payloads -------------------------------------
+;; --- parse types from inline `:-` annotations -----------------------------
 
-;; Type payload appears after `∈` in a claim. Shapes:
+;; Type payload appears after `:-` on def/defonce/defn. Shapes:
 ;;
 ;;   Primitive symbols: Int, String, Bool, Float, Keyword, Symbol, Nil, Any
 ;;   Arrow:             (→ (' params T1 T2) (returns RT))
@@ -586,7 +581,6 @@
   (define head (car expr))
   (define args (cdr expr))
   (case head
-    [(claim)    (check-claim args env errors)]
     [(defn)     (check-defn args env errors)]
     [(fn)       (check-fn args env errors)]
     [(let)      (check-let args env errors)]
@@ -818,36 +812,6 @@
 
 ;; --- specific forms ------------------------------------------------------
 
-(define (metadata-key? v)
-  ;; Accept Racket keywords (#:foo) or symbols starting with `:` (e.g. :foo)
-  ;; for compatibility with the surface where `:foo` reads as a keyword.
-  (or (keyword? v)
-      (and (symbol? v)
-           (let ([s (symbol->string v)])
-             (and (> (string-length s) 0)
-                  (char=? (string-ref s 0) #\:))))))
-
-(define (check-claim args env errors)
-  ;; (claim NAME ∈ TYPE) — record the type.
-  ;; (claim NAME :KEY VALUE) — metadata; no type effect.
-  (cond
-    [(and (= (length args) 3) (eq? (cadr args) ':type))
-     (define name (car args))
-     (define type-form (caddr args))
-     (with-handlers ([exn:fail?
-                      (lambda (e)
-                        (values ANY-TYPE
-                                (err! errors args "bad type form: ~a" (exn-message e))))])
-       (define t (parameterize ([current-type-env env]) (parse-type type-form)))
-       (when (symbol? name) (tenv-define! env name t))
-       (values NIL-TYPE errors))]
-    [(and (>= (length args) 3) (metadata-key? (cadr args)))
-     ;; metadata claim — ignore for type-checking
-     (values NIL-TYPE errors)]
-    [else
-     (values ANY-TYPE
-             (err! errors args "claim shape unrecognized"))]))
-
 (define (check-defn args env errors)
   ;; Tightened: (defn NAME (' P...) EXPR...)  body is positional sequence.
   ;; Multi-arity (deferred): (defn NAME (' arities ...))
@@ -860,7 +824,7 @@
      (define name (car args))
      (define-values (params-form body-exprs) (extract-defn-shape (cdr args)))
      (define declared-type (tenv-lookup env name))
-     ;; If no claim was found, the type defaults to Any.
+     ;; Without an inline `:-` return-type annotation, the type defaults to Any.
      (define t (or declared-type ANY-TYPE))
      (tenv-define! env name t)
      ;; Check the body in a fresh tenv with params bound to their types.
@@ -1136,7 +1100,7 @@
     [(and (= (length args) 2) (symbol? (car args)))
      (define name (car args))
      (define-values (vt errs) (check-expr (cadr args) env errors))
-     ;; If a claim already provides a type, prefer that.
+     ;; If an inline `:-` annotation already bound a type, prefer that.
      (define existing (tenv-lookup env name))
      (cond
        [(and existing (not (type-any? existing)))
@@ -1314,23 +1278,10 @@
 ;; --- top-level program checking ------------------------------------------
 
 (define (check-program forms)
-  ;; Two passes:
-  ;;   1. Pre-collect all top-level claim NAME types.
-  ;;   2. Check each form.
+  ;; Single pass: check each form. The (claim NAME TYPE) pre-pass has
+  ;; been removed; inline `:-` annotations populate the type env at the
+  ;; def/defonce/defn check site itself.
   (define env (initial-tenv))
-  ;; Pass 1
-  (for ([f (in-list forms)])
-    (cond
-      [(and (pair? f) (eq? (car f) 'claim))
-       (define args (cdr f))
-       (cond
-         [(and (= (length args) 3) (eq? (cadr args) ':type) (symbol? (car args)))
-          (with-handlers ([exn:fail? (lambda (_) (void))])
-            (tenv-define! env (car args)
-                          (parameterize ([current-type-env env]) (parse-type (caddr args)))))]
-         [else (void)])]
-      [else (void)]))
-  ;; Pass 2
   (define errors
     (for/fold ([errs '()]) ([f (in-list forms)])
       (define-values (_ e2) (check-expr f env errs))

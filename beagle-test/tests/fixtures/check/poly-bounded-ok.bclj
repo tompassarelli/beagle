@@ -3,7 +3,5 @@
 (defunion Pet Dog Cat)
 
 (declare-extern get-name (forall [(T <: Pet)] [T -> String]))
-(claim dog-name String)
-(def dog-name (get-name (->Dog "Rex" "Lab")))
-(claim cat-name String)
-(def cat-name (get-name (->Cat "Mimi" true)))
+(def dog-name :- String (get-name (->Dog "Rex" "Lab")))
+(def cat-name :- String (get-name (->Cat "Mimi" true)))

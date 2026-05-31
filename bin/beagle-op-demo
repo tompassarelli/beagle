@@ -33,7 +33,6 @@ if [[ $# -eq 0 ]]; then
 
 (defrecord Point (' fields x y))
 
-(claim distance ∈ (→ (' params Int Int) (returns Int)))
 (defn distance (' params dx dy)
   (body (+ (square dx) (square dy))))
 
@@ -42,7 +41,6 @@ if [[ $# -eq 0 ]]; then
               (case (= n 0) "zero")
               (case :else "positive"))))
 
-(claim origin ∈ Point)
 (def origin (Point 0 0))
 
 (println (str "distance(3,4) = " (distance 3 4)))

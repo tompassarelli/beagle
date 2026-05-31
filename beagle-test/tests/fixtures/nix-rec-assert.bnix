@@ -1,7 +1,7 @@
 #lang beagle/nix
 (ns test.nix.rec-assert)
 
-(module [config lib]
+(nix/module [config lib]
   {:networking (rec-attrs hostName "myhost"
                           domain ~"${hostName}.local")
    :boot (nix/assert config.boot.isContainer

@@ -50,10 +50,10 @@
 (declare-extern fetch-product [Int -> (Promise Product)])
 
 (defn load-and-classify [(id : Int)] : (Promise String)
-  (let [p (await (fetch-product id))]
+  (let [p (js/await (fetch-product id))]
     (classify p)))
 
 (defn load-two [(a : Int) (b : Int)] : (Promise (Vec String))
-  (let [p1 (await (fetch-product a))
-        p2 (await (fetch-product b))]
+  (let [p1 (js/await (fetch-product a))
+        p2 (js/await (fetch-product b))]
     [(product-name p1) (product-name p2)]))

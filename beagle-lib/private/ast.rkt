@@ -322,14 +322,10 @@
 (struct extend-type-form (type-name impls)                   #:transparent)
 (struct flake-input-form (input-name namespace path-segments) #:transparent)
 
-;; (claim NAME TYPE) — type assertion sitting alongside a paired
-;; `(def NAME VALUE)` / `(defn NAME [params] body)`. The inline `:`
-;; annotation surface on def/defonce/defn was removed in v0.16; this
-;; out-of-band carrier replaces it. See:
-;;   parse.rkt    — (claim NAME TYPE) parse case
-;;   check.rkt    — build-initial-env claim pre-pass + def/defn check
-;;   diagnostic-kind.rkt — `inline-type-annotation` kind names this form
-(struct claim-form (name type) #:transparent)
+;; `claim-form` removed. The (claim NAME TYPE) surface was deleted under
+;; the Zero-users rule — the parser now rejects it with a pointed error
+;; naming `:-` as the inline-annotation replacement. There is no AST node
+;; for claim; downstream consumers must not pattern-match on one.
 
 (struct type-impl    (protocol-name methods)                 #:transparent)
 (struct impl-method  (name params body)                      #:transparent)
@@ -413,7 +409,6 @@
  (struct-out deftype-form) (struct-out extend-type-form)
  (struct-out type-impl) (struct-out impl-method)
  (struct-out let-binding) (struct-out require-entry)
- (struct-out claim-form)
  ;; Program
  (struct-out program)
  ;; Nix AST

@@ -3,13 +3,13 @@
 
 ;; CASE expression with multiple WHEN branches and ELSE.
 ;; UNION of two SELECTs.
-(union
-  (select [name (case (when (> price 100) "premium")
-                      (when (> price 50)  "mid-range")
-                      :else "budget")
-                 :as tier]
+(sql/union
+  (sql/select [name (case (when (> price 100) "premium")
+                          (when (> price 50)  "mid-range")
+                          :else "budget")
+                    :as tier]
     (from products)
     (where (= active #t)))
-  (select [name "discontinued" :as tier]
+  (sql/select [name "discontinued" :as tier]
     (from products)
     (where (= active #f))))

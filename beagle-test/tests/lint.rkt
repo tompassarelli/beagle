@@ -21,13 +21,15 @@
 ;; is now rejected at parse time (see parse.rkt "rejects inline …" tests),
 ;; so the linter never sees these forms. The lint rule itself (warn on
 ;; untyped def, warn on defn with no return type) is still wired and will
-;; need fresh fixtures once the claim-form replacement lands. Until then,
+;; need fresh fixtures using inline `:-` annotations (the canonical typed-
+;; binding surface). The interim `(claim NAME TYPE)` carrier was deleted
+;; under the Zero-users rule. Until the fixtures are rewritten on `:-`,
 ;; these are deferred:
 ;;
-;;   "typed def does not warn"                     — (def x : Int 42)
-;;   "defn without return type warns"              — (defn foo [(x : Int)] x)
-;;   "defn with untyped params warns"              — (defn foo [x y] : Int …)
-;;   "fully typed defn produces no warnings"       — (defn foo [..] : Int …)
+;;   "typed def does not warn"                     — (def x :- Int 42)
+;;   "defn without return type warns"              — (defn foo [x :- Int] x)
+;;   "defn with untyped params warns"              — (defn foo [x y] :- Int …)
+;;   "fully typed defn produces no warnings"       — (defn foo [..] :- Int …)
 
 (test-case "lint skipped in dynamic mode"
   (define out (lint-prog '(define-mode dynamic)
@@ -70,9 +72,10 @@
 ;; "unused declare-extern warns" / "used declare-extern does not warn" /
 ;; "extern used in nested call does not warn" all relied on `(def x : T …)`
 ;; or `(defn f [..] : T …)` to wire the type so the lint pass had something
-;; to call. With inline annotations rejected, these need new fixtures
-;; (either claim-form, or the bare def + extern alone). Deferred until the
-;; claim form lands; the lint rule itself is unchanged.
+;; to call. With bare `: T` rejected, these need rewriting on the inline
+;; `:-` surface (`(def x :- T …)`). The brief `(claim NAME TYPE)` carrier
+;; that briefly sat between them is gone. Deferred until the fixtures are
+;; on `:-`; the lint rule itself is unchanged.
 
 ;; --- with and defenum lint traversal -----------------------------------------
 

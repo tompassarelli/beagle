@@ -1,3 +1,2 @@
 (declare-extern my-id (forall (T) [T -> T]))
-(claim x Int)
-(def x (my-id 42))
+(def x :- Int (my-id 42))

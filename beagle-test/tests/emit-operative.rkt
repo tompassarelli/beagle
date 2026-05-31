@@ -122,14 +122,10 @@
   (check-true (contains? out "\"zero\""))
   (check-true (contains? out "\"pos\"")))
 
-;; --- claims emit nothing (compile-time only) ----------------------------
-
-(test-case "claim does not produce target code"
-  (define cl `(claim foo :type Int))
-  (define rkt-out (emit-program (list cl) 'rkt))
-  (check-false (contains? rkt-out "claim"))
-  (define clj-out (emit-program (list cl) 'clj))
-  (check-false (contains? clj-out "claim")))
+;; (claim emit-nothing test removed — claim was deleted under the
+;; Zero-users rule. The other compile-time-only forms — ns,
+;; declare-extern, import, require — still emit nothing; existing
+;; tests cover them implicitly via their target-specific tests.)
 
 ;; --- arithmetic infix vs prefix per-target ------------------------------
 
@@ -149,13 +145,17 @@
   (define out (emit-program (list arith) 'js))
   (check-true (contains? out "+")))
 
-;; --- multi-form program (claim + defn) ----------------------------------
+;; --- multi-form program (defn emits define) -------------------------------
+;;
+;; The previous fixture paired `(claim add :type (-> …))` with `add-form`
+;; and asserted that the claim emits nothing while defn emits the
+;; (define …). Claim was deleted under the Zero-users rule; the inline
+;; `:-` annotation rides on defn directly. With no claim form in the
+;; program at all, the regression collapses to "defn alone emits define"
+;; — already covered by the per-target round-trip tests above. Test is
+;; kept as a multi-form smoke-check (ns + defn together).
 
-(test-case "claim + defn together"
+(test-case "multi-form program (ns + defn)"
   (define out
-    (emit-program
-      (list `(claim add :type (-> ,(Q-form 'params 'Int 'Int) (returns Int)))
-            add-form)
-      'rkt))
-  ;; Claim emits nothing; defn emits the define
+    (emit-program (list '(ns demo) add-form) 'rkt))
   (check-true (contains? out "(define (add a b)")))

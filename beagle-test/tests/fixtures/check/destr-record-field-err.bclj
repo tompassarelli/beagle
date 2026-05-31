@@ -1,11 +1,9 @@
 (defrecord Product [(id : Int) (name : String) (price : Int)])
 
-(claim get-product [-> Product])
-(defn get-product []
+(defn get-product [] :- Product
   (->Product 1 "Widget" 500))
 
 ;; should fail: price is Int, not String
-(claim bad-use [-> String])
-(defn bad-use []
+(defn bad-use [] :- String
   (let [{:keys [price]} (get-product)]
     price))

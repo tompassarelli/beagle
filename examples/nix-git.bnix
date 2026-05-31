@@ -3,7 +3,7 @@
 
 ;; NixOS module: git configuration
 ;; Equivalent to the nisp module-file macro, but explicit.
-(module [config lib pkgs]
+(nix/module [config lib pkgs]
   (let [username config.myConfig.modules.users.username]
     {:options.myConfig.modules.git.enable
        (lib/mkEnableOption "Git configuration")

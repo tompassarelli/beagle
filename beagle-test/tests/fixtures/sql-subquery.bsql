@@ -2,10 +2,10 @@
 (ns test.sql.subquery)
 
 ;; EXISTS subquery + IN subquery.
-(select [name email]
+(sql/select [name email]
   (from customers :as c)
-  (where (and (exists (select [1]
+  (where (and (exists (sql/select [1]
                         (from orders :as o)
                         (where (= o.customer_id c.id))))
-              (in c.id (select [customer_id]
+              (in c.id (sql/select [customer_id]
                          (from premium_members))))))

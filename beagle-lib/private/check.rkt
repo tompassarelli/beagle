@@ -107,7 +107,7 @@
 (define TARGET-FORM-NAMES
   (hash
    js-quote-form?           "js/quote"
-   await-form?              "await"
+   await-form?              "js/await"
    jst-return?              "js/return"
    jst-class?               "js/class"
    jst-method?              "js/method"
@@ -129,23 +129,23 @@
    nix-interpolated-string? "s / ~\"...\""
    nix-multiline-string?    "ms / ~''...''"
    nix-path?                "p"
-   nix-fn-set?              "module / fn-set / overlay"
-   nix-derivation?          "derivation"
-   nix-flake?               "flake"
+   nix-fn-set?              "nix/module / nix/fn-set / nix/overlay"
+   nix-derivation?          "nix/derivation"
+   nix-flake?               "nix/flake"
    nix-with-cfg?            "with-cfg"
-   sql-table?               "deftable"
-   sql-select?              "select"
-   sql-insert?              "insert"
-   sql-update?              "update"
-   sql-delete?              "delete"
-   sql-with?                "with"
-   sql-union?               "union"
-   sql-insert-select?       "insert-select"
-   sql-returning?           "returning"
-   sql-create-index?        "create-index"
-   sql-drop-table?          "drop-table"
-   sql-alter-table?         "alter-table"
-   sql-truncate?            "truncate"))
+   sql-table?               "sql/deftable"
+   sql-select?              "sql/select"
+   sql-insert?              "sql/insert"
+   sql-update?              "sql/update"
+   sql-delete?              "sql/delete"
+   sql-with?                "sql/with"
+   sql-union?               "sql/union"
+   sql-insert-select?       "sql/insert-select"
+   sql-returning?           "sql/returning"
+   sql-create-index?        "sql/create-index"
+   sql-drop-table?          "sql/drop-table"
+   sql-alter-table?         "sql/alter-table"
+   sql-truncate?            "sql/truncate"))
 
 ;; Check if expression `e` is a target-specific form used outside its target.
 ;; Raises a compile error if so.
@@ -485,59 +485,39 @@
   (for ([(union-name pdef) (in-hash (program-imported-parametric-unions prog))])
     (hash-set! PARAMETRIC-UNIONS union-name pdef))
 
-  ;; --- claim-form pre-pass --------------------------------------------------
+  ;; --- def/defn/defonce pre-pass --------------------------------------------
   ;;
-  ;; The inline `(def name : T value)` / `(defn f [..] : R ..)` surface was
-  ;; removed in v0.16 (see parse.rkt raise-parse-error 'inline-type-annotation
-  ;; sites). The replacement is an out-of-band `(claim NAME TYPE)` form that
-  ;; sits next to its paired binding. Walk all top-level forms once here to
-  ;; collect every claim into a hash; the def/defn pre-pass below consults
-  ;; it when the binding has no inline annotation.
-  (define claim-env (make-hash))
-  (for ([raw-form (in-list (program-forms prog))])
-    (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
-    (when (claim-form? form)
-      (hash-set! claim-env (claim-form-name form) (claim-form-type form))))
-
-  ;; Track which claims actually get paired with a def/defn/defonce so we can
-  ;; reject orphan claims (claim NAME T without a matching binding).
-  (define claim-bound (make-hash))
+  ;; Inline `:-` annotations on def/defonce/defn forms are the sole source of
+  ;; pre-pass type information. The parser stores any declared type in the
+  ;; form's type slot (def-form-type, defonce-form-type, defn-form-return-type)
+  ;; and per-param `:-` annotations in param-type. We walk the top-level forms
+  ;; once and seed `env` from those slots so callers can resolve typed
+  ;; references in either direction (forward or backward).
+  ;;
+  ;; Untyped bindings stay out of env at this stage; check-form falls through
+  ;; to inference. Untyped params bind as ANY in the body env (see
+  ;; extend-with-params), which propagates through subsequent operations
+  ;; until a concrete type unifies with them.
 
   ;; top-level defs / defns (pre-pass so callers can look them up)
   (for ([raw-form (in-list (program-forms prog))])
     (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
     (match form
       [(def-form name (? type? t) _) (hash-set! env name t)]
-      [(def-form name #f _)
-       ;; No inline annotation: consult claim-env. If the name has a claim,
-       ;; bind it in env; otherwise leave unbound (fall through to inference
-       ;; in check-form).
-       (define ct (hash-ref claim-env name #f))
-       (when ct
-         (hash-set! env name ct)
-         (hash-set! claim-bound name #t))]
+      [(def-form name #f _) (void)]
       [(defonce-form name (? type? t) _) (hash-set! env name t)]
-      [(defonce-form name #f _)
-       (define ct (hash-ref claim-env name #f))
-       (when ct
-         (hash-set! env name ct)
-         (hash-set! claim-bound name #t))]
+      [(defonce-form name #f _) (void)]
       [(defn-form name params rest-p (? type? ret) _ _ _)
        (define rtype (and rest-p (param-or-destr-type rest-p)))
        (hash-set! env name
                   (type-fn (map param-or-destr-type params) rtype ret))]
       [(defn-form name params rest-p #f _ _ _)
-       ;; No inline return-type: prefer claim-env's type when present and
-       ;; shaped as a function type. Otherwise fall back to the ANY return.
-       (define ct (hash-ref claim-env name #f))
+       ;; No inline return-type: register a function type with ANY return so
+       ;; call sites still see the arity. Param types still flow from inline
+       ;; `:-` annotations via param-or-destr-type.
        (define rtype (and rest-p (param-or-destr-type rest-p)))
-       (cond
-         [(and ct (type-fn? ct))
-          (hash-set! env name ct)
-          (hash-set! claim-bound name #t)]
-         [else
-          (hash-set! env name
-                     (type-fn (map param-or-destr-type params) rtype ANY))])]
+       (hash-set! env name
+                  (type-fn (map param-or-destr-type params) rtype ANY))]
       [(defn-multi name arities _)
        (define alt-types
          (for/list ([a (in-list arities)])
@@ -626,18 +606,6 @@
          (hash-set! SCALAR-PREDS name preds))]
       [_ (void)]))
 
-  ;; Orphan-claim check: every (claim NAME TYPE) must pair with a
-  ;; subsequent (or prior) (def NAME ...) / (defonce NAME ...) /
-  ;; (defn NAME ...) in the same program. A claim without a binding is a
-  ;; programmer error — likely a typo in NAME, or a leftover from a
-  ;; deleted binding. Reject loudly so the typo doesn't silently dangle.
-  (for ([(name _ct) (in-hash claim-env)])
-    (unless (hash-ref claim-bound name #f)
-      (raise-diag 'def-type
-                  (format "claim ~a: no paired def/defn/defonce found. Every (claim NAME TYPE) must sit next to a binding of the same name."
-                          name)
-                  (hasheq 'name (symbol->string name)
-                          'cause "orphan-claim"))))
   env)
 
 (define (register-parametric-union! name type-params members member-fields env)
@@ -690,8 +658,8 @@
   (match form
     [(def-form name expected-type value)
      (define inferred (infer-expr value env))
-     ;; Inline annotation OR claim-form-derived env type (see build-initial-env
-     ;; claim pre-pass): both surfaces feed the same def-type check.
+     ;; Inline `:-` annotation lives in expected-type; the pre-pass mirrors
+     ;; it into env. Either lookup is fine — both point at the same type.
      (define effective-type (or expected-type (hash-ref env name #f)))
      (when effective-type
        (unless (type-compatible? inferred effective-type)
@@ -718,9 +686,9 @@
     [(defn-form name params rest-p expected-ret body _ _)
      (define all-params (if rest-p (append params (list rest-p)) params))
      (define body-env (extend-with-params env all-params))
-     ;; If no inline return-type annotation, fall back to a claim-derived
-     ;; function type sitting in env (see build-initial-env claim pre-pass).
-     ;; The env entry is the full type-fn; we only consume its return type.
+     ;; Inline `:-` return annotation lives in expected-ret; the pre-pass
+     ;; mirrors it into env as a type-fn. Either surface gives the same
+     ;; effective return type (or #f when the binding was untyped).
      (define env-fn (hash-ref env name #f))
      (define effective-ret
        (or expected-ret
@@ -770,10 +738,6 @@
 
     [(record-form _ _) (void)]
     [(protocol-form _ _) (void)]
-    ;; (claim NAME TYPE) — already collected and applied in build-initial-env.
-    ;; At check-form time the binding is in env; the claim itself has no
-    ;; runtime/type effect of its own.
-    [(claim-form _ _) (void)]
     [(deftype-form _ _ impls)
      (for ([impl (in-list impls)])
        (for ([m (in-list (type-impl-methods impl))])

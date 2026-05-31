@@ -1,8 +1,8 @@
 #lang beagle/nix
 (ns test.nix.derivation)
 
-(module [pkgs]
-  (derivation {:pname "hello-rust"
+(nix/module [pkgs]
+  (nix/derivation {:pname "hello-rust"
                :version "0.1.0"
                :src (p "./src")
                :nativeBuildInputs [pkgs.rustc pkgs.cargo]

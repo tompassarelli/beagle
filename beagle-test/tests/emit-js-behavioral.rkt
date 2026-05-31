@@ -346,7 +346,7 @@ console.assert(threw, 'frozen record should reject mutation');
 
    (check-js-output "async/await basic"
      (list `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
-           '(defn f [(x : String)] : (Promise String) (await (fetch-data x))))
+           '(defn f [(x : String)] : (Promise String) (js/await (fetch-data x))))
      "
 globalThis.fetch_data = async (x) => 'got:' + x;
 f('hello').then(r => console.log(r));
@@ -356,8 +356,8 @@ f('hello').then(r => console.log(r));
    (check-js-output "await in nested let"
      (list `(declare-extern get-val ,(br 'Int '-> '(Promise Int)))
            '(defn f [(n : Int)] : (Promise Int)
-              (let [a (await (get-val n))
-                    b (await (get-val (+ n 1)))]
+              (let [a (js/await (get-val n))
+                    b (js/await (get-val (+ n 1)))]
                 (+ a b))))
      "
 globalThis.get_val = async (n) => n * 10;

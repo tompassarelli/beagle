@@ -20,8 +20,10 @@
 ;;   - `if`, `define`, `set!`, etc. are operatives implemented in
 ;;     Racket as the bootstrap set.
 ;;
-;; Standard forms (`defn`, `fn`, `let`, `claim`) are defined in Beagle
-;; itself on top of the bootstrap (see standard.rkt or similar).
+;; Standard forms (`defn`, `fn`, `let`, `cond`, `match`) are defined
+;; in Beagle itself on top of the bootstrap (see standard.rkt or
+;; similar). The `claim` form was removed; inline `:-` annotations on
+;; def/defonce/defn are the only typed-binding surface.
 ;;
 ;; Mutation is explicit: only operators with the `!` suffix mutate
 ;; (`set!`, `swap!`, `reset!`, `set-at!`, `define!`). Everything else

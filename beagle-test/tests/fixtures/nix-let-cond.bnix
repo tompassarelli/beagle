@@ -1,7 +1,7 @@
 #lang beagle/nix
 (ns test.nix.let-cond)
 
-(module [config lib pkgs]
+(nix/module [config lib pkgs]
   (let [cfg config.services.demo
         port cfg.port
         isDev (== cfg.environment "development")]

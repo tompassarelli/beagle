@@ -66,6 +66,40 @@ errors surfaced, perf deltas, byte-identical-output proofs).
 this rule exists to prevent. If you find yourself drafting one,
 check whether the spec resolves it. It almost always does.
 
+## Surface lock — typed Clojure + inference, `:-` inline
+
+The surface is **typed Clojure plus inference**. There is no
+separate type-fact form, no `claim`, no spec registry, no `s/`
+namespace, no validation runtime. Type information rides on
+ordinary Clojure bindings via inline `:-` annotations at
+boundaries; interiors are inferred.
+
+**Annotation syntax (the only typed-binding surface):**
+- `(def NAME :- TYPE VALUE)` — top-level binding with type.
+- `(defn NAME [PARAM :- TYPE ...] :- RETURN-TYPE BODY)` — typed params and return.
+- `(defonce NAME :- TYPE VALUE)` — same shape as def.
+- Mixed param vectors are legal: `[a :- Int b c :- String]` — `a`
+  typed, `b` inferred, `c` typed.
+- Locals and `let`-bindings are inferred unless inference can't
+  reach; if a local needs help, prefer refactoring the boundary
+  annotation.
+
+**Lowering:** `:-` annotations lower to Clojure-family `^Type`
+metadata at clj/cljs emit. Nix emit consumes them through the
+type checker but produces untyped Nix output (Nix doesn't carry
+source-level type hints).
+
+**`:-` is annotation only.** It is not Schema and not Spec. There
+is no spec registry behind it, no `s/def`, no `s/fdef`, no
+validation runtime, no conform/explain. The glyph carries the
+Schema/core.typed prior because that prior reads correctly as
+"has type"; the machinery those libraries put behind the glyph is
+not part of Beagle.
+
+**`(claim NAME TYPE)` is not a form.** The parser rejects it with
+a pointed error naming the inline `:-` replacement. This decision
+is locked at the anchor level — do not reopen.
+
 ## Tool-first reflexes
 
 Use these before reading source or guessing. Each one is a dynamic
@@ -128,11 +162,11 @@ it accumulates fast. **Accretion is the enemy, not breakage. There is
 no one to break.**
 
 When removing something, the parser must reject with a **pointed
-error that names the replacement** — e.g. "inline type annotations
-are not supported — use a claim form" — not a cryptic downstream
-error from the grammar misparsing the offending shape. The repair
-loop's value is "wrong surface, here's the right one"; a removal
-that produces a confusing error is half the win.
+error that names the replacement** — e.g. "`(def x : Int 42)` is
+not supported — use `(def x :- Int 42)`" — not a cryptic
+downstream error from the grammar misparsing the offending shape.
+The repair loop's value is "wrong surface, here's the right one";
+a removal that produces a confusing error is half the win.
 
 The `assert` → `nix/assert` / `with` → `nix/with` work used a
 transitional-alias pattern (bare form accepted as deprecated alias
@@ -248,9 +282,11 @@ mature and makes hallucinations show up as compile errors.
 
 **Sanctioned divergences from Clojure are exactly two:**
 
-1. **The type layer** — `claim`, the checker, the repair/blame loop,
-   diagnostic-kind taxonomy. The thesis (minimal truth + types as
-   view, `~/code/life-os/threads/20260529020859-…`) lives here.
+1. **The type layer** — inline `:-` annotations on `def` / `defn` /
+   `defonce`, the checker, the repair/blame loop, diagnostic-kind
+   taxonomy. The thesis (minimal truth + types as view,
+   `~/code/life-os/threads/20260529020859-…`) lives here. See the
+   "Surface lock" anchor above for the annotation grammar.
 2. **Multi-backend targeting** — `target-case` + per-backend
    lowering. Per-language namespacing (`nix/…`, eventually
    `lua/…` / `bevy/…` / `sql/…`) marks the meaning-divergence;
@@ -387,16 +423,18 @@ Each names the rule, the contrast-doc justification (thread
    un-deferring refinements without sourcemap fidelity in place is
    visibly out of order.
 
-5. **No inline type annotations on the surface.** `(def x : Int 42)`
-   and `(defn add [x : Int] : Int body)` are NOT accepted by the
-   parser — they produce an immediate, pointed rejection naming the
-   claim form as the replacement. Reason: a second type-producing
-   surface alongside claim is an ambiguity surface waiting for an AI
-   generation or copy-paste to wander into it (ML/Rust-trained models
-   will emit `(def x : Int 5)` from prior; a parser that accepts it
-   lets inline types back in through the side door). Activation:
-   removal landed 2026-05-31. The empirical-purge (zero corpus hits)
-   is now structural — the grammar makes the wrong form unparseable,
+5. **Single-colon `:` type annotations are HARD-REJECTED.**
+   `(def x : Int 42)` and `(defn add [x : Int] : Int body)` are NOT
+   accepted by the parser — they produce an immediate, pointed
+   rejection naming the inline `:-` form as the replacement (see
+   "Surface lock" anchor for the canonical grammar). Reason: a
+   second type-producing surface alongside `:-` is an ambiguity
+   surface waiting for an AI generation or copy-paste to wander
+   into it (ML/Rust-trained models will emit `(def x : Int 5)`
+   from prior; a parser that accepts it lets the wrong glyph back
+   in through the side door). Activation: removal landed
+   2026-05-31. The empirical-purge (zero corpus hits) is now
+   structural — the grammar makes the wrong form unparseable,
    which is the whole point of one canonical form.
 
 ### Where papers and plans live

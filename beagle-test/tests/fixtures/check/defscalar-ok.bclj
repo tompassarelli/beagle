@@ -1,3 +1,2 @@
 (defscalar Timestamp Int)
-(claim ts Timestamp)
-(def ts (->Timestamp 100))
+(def ts :- Timestamp (->Timestamp 100))

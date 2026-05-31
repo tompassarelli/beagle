@@ -1,7 +1,7 @@
 #lang beagle/nix
 (ns test.nix.builtins)
 
-(module [lib pkgs]
+(nix/module [lib pkgs]
   (let [nodes (builtins/mapAttrs
                 (fn [(name : Any) (config : Any)] : Any config.system.build.toplevel)
                 {:foo 1 :bar 2})

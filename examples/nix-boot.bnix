@@ -2,7 +2,7 @@
 (ns modules.boot)
 
 ;; NixOS module: boot configuration
-(module [config lib pkgs]
+(nix/module [config lib pkgs]
   {:options.myConfig.modules.boot.enable
      (lib/mkEnableOption "boot configuration")
 

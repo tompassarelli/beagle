@@ -1,7 +1,7 @@
 #lang beagle/nix
 (ns test.nix.with-cfg)
 
-(module [config lib pkgs]
+(nix/module [config lib pkgs]
   (nix/with-cfg config.myConfig.modules.demo
     {:options.myConfig.modules.demo {:enable (lib/mkEnableOption "demo")
                                      :port (lib/mkOption {:type lib/types.port

@@ -5,8 +5,7 @@
 (defrecord Order [(id : Int) (name : String)])
 (defrecord OrderError [(code : Int) (message : String)])
 
-(claim handle [(Result Order OrderError) -> String])
-(defn handle [(r : (Result Order OrderError))]
+(defn handle [(r : (Result Order OrderError))] :- String
   (match r
     [(Ok order) (order-name order)]
     [(Err e) (ordererror-message e)]))

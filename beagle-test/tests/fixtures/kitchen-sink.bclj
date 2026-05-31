@@ -16,50 +16,42 @@
 (defenum Color red green blue)
 
 ;; basic defs
-(claim origin Point)
-(def origin (Point 0 0))
+(def origin :- Point (Point 0 0))
 
-(claim tau Float)
-(def tau 6.28)
+(def tau :- Float 6.28)
 
 ;; multi-body defn
-(claim distance [Point -> Int])
-(defn distance [(p : Point)]
+(defn distance [(p : Point)] :- Int
   (let [dx (point-x p)
         dy (point-y p)]
     (+ (* dx dx) (* dy dy))))
 
 ;; cond with :else
-(claim classify [Int -> String])
-(defn classify [(n : Int)]
+(defn classify [(n : Int)] :- String
   (cond
     (< n 0) "negative"
     (= n 0) "zero"
     :else    "positive"))
 
 ;; match on union
-(claim shape-size [Shape -> Int])
-(defn shape-size [(s : Shape)]
+(defn shape-size [(s : Shape)] :- Int
   (match s
     [(Circle c) (circle-radius c)]
     [(Square q) (square-side q)]))
 
 ;; if + do (was: when + do; when removed)
-(claim log-point [Point -> Nil])
-(defn log-point [(p : Point)]
+(defn log-point [(p : Point)] :- Nil
   (if (> (point-x p) 0)
     (do
       (println "positive x")
       (println (str "x=" (point-x p))))))
 
 ;; for comprehension
-(claim squares [(Vec Int) -> (Vec Int)])
-(defn squares [(ns : (Vec Int))]
+(defn squares [(ns : (Vec Int))] :- (Vec Int)
   (for [n ns] (* n n)))
 
 ;; loop/recur
-(claim factorial [Int -> Int])
-(defn factorial [(n : Int)]
+(defn factorial [(n : Int)] :- Int
   (loop [i n
          acc 1]
     (if (<= i 1)
@@ -67,16 +59,14 @@
       (recur (- i 1) (* acc i)))))
 
 ;; try/catch
-(claim safe-div [Int Int -> Int])
-(defn safe-div [(a : Int) (b : Int)]
+(defn safe-div [(a : Int) (b : Int)] :- Int
   (try
     (/ a b)
     (catch Exception e 0)))
 
 ;; match with literal patterns (replaces former case form; case-folds to
 ;; target-native dispatch in emit)
-(claim color-name [Color -> String?])
-(defn color-name [(c : Color)]
+(defn color-name [(c : Color)] :- String?
   (match c
     [:red "Red"]
     [:green "Green"]
@@ -84,30 +74,25 @@
     [_ nil]))
 
 ;; with (record update)
-(claim move-right [Point -> Point])
-(defn move-right [(p : Point)]
+(defn move-right [(p : Point)] :- Point
   (with p [:x (+ (point-x p) 1)]))
 
 ;; higher-order
-(claim apply-twice [[Int -> Int] Int -> Int])
-(defn apply-twice [(f : [Int -> Int]) (x : Int)]
+(defn apply-twice [(f : [Int -> Int]) (x : Int)] :- Int
   (f (f x)))
 
 ;; doseq
-(claim print-all [(Vec String) -> Nil])
-(defn print-all [(items : (Vec String))]
+(defn print-all [(items : (Vec String))] :- Nil
   (doseq [item items]
     (println item)))
 
 ;; if-let removed; interim let+if pattern until typed nullable-narrowing form lands
-(claim first-or-default [(Vec Int) -> Int])
-(defn first-or-default [(xs : (Vec Int))]
+(defn first-or-default [(xs : (Vec Int))] :- Int
   (let [x (first xs)]
     (if x x 0)))
 
 ;; letfn
-(claim mutual-test [-> Bool])
-(defn mutual-test []
+(defn mutual-test [] :- Bool
   (letfn [(even? [(n : Int)] : Bool
             (if (= n 0) true (odd? (- n 1))))
           (odd? [(n : Int)] : Bool

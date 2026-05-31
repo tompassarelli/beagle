@@ -9,19 +9,24 @@
 ;;
 ;; Surface decisions for v0.16:
 ;;
-;;  - claim-form (out-of-band type carrier): merged with the paired
-;;    def/defn/defonce into Clojure metadata. Inline `: T` was removed
-;;    in v0.16 — claim is the canonical carrier (see ast.rkt). At emit:
+;;  - Inline `:- T` type annotations: lowered to Clojure-family `^Tag`
+;;    metadata at emit time. The type info lives directly on the
+;;    def-form / defonce-form / defn-form / param structs (populated by
+;;    Phase B parsing); no separate claim-env or pre-pass is needed.
 ;;
-;;        (claim x Int) (def x 42)          -> (def ^Int x 42)
-;;        (claim f (-> [Int] Int))
-;;        (defn f [x] (+ x 1))              -> (defn ^{:tag Int}
-;;                                              f [^Int x] (+ x 1))
+;;        (def x :- Int 42)                 -> (def ^long x 42)
+;;        (defn add [a :- Int b :- Int]
+;;          :- Int
+;;          (+ a b))                        -> (defn ^long add
+;;                                                [^long a ^long b]
+;;                                                (+ a b))
+;;        (defn mixed [a :- Int b] (* a b)) -> (defn mixed
+;;                                                [^long a b]
+;;                                                (* a b))
 ;;
-;;    Claim-forms themselves emit nothing — they're consumed during the
-;;    pre-pass that builds the claim-env. Param-level tags only emit
-;;    when the type is a simple type-prim (Clojure cannot tag with
-;;    generic/parametric types as primitive hints).
+;;    Param-level tags only emit when the type is a simple primitive or
+;;    user record name (Clojure cannot tag with generic/parametric
+;;    types as primitive hints). Untyped params emit bare.
 ;;
 ;;  - kw-access (canonical static-key access): emits identity. The
 ;;    (C)-canonicalization at parse time routes (:name target) to a
@@ -78,10 +83,6 @@
 (define current-emit-scalar-fns (make-parameter (set)))
 ;; Unqualified imported symbol → module prefix (for qualifying in output)
 (define current-emit-symbol-ns (make-parameter (hasheq)))
-;; name (symbol) → declared Beagle type (from a paired claim-form).
-;; Populated by build-claim-env from program-forms. def/defn/defonce
-;; consult this to emit Clojure type-hint metadata.
-(define current-emit-claims (make-parameter (hasheq)))
 
 (define (emit-srcloc loc)
   (define src (src-loc-source loc))
@@ -149,24 +150,13 @@
   (for/fold ([s local]) ([sym (in-list (program-imported-scalar-fns prog))])
     (set-add s sym)))
 
-;; --- claim-form (paired type-carrier) -----------------------------------
+;; --- inline `:- T` lowering ------------------------------------------
 ;;
-;; The v0.16 surface drops inline `(def x : T v)` / `(defn f [(x : T)] : T body)`
-;; in favour of out-of-band `(claim NAME TYPE)` markers. The checker
-;; consults a claim-env to type-check the paired def/defn. The emitter
-;; consults the same env at emit time to render the claim as Clojure
-;; metadata on the same binding.
-;;
-;; Merge logic — `build-claim-env` walks program-forms once and indexes
-;; every claim by name. `emit-form` for def/defn/defonce looks up its
-;; name and threads the type into a Clojure tag (`^Tag form` or
-;; `^{:tag Tag}`). Claim-forms themselves do not emit (they're carriers).
-
-(define (build-claim-env prog)
-  (for/fold ([h (hasheq)]) ([f (in-list (program-forms prog))])
-    (cond
-      [(claim-form? f) (hash-set h (claim-form-name f) (claim-form-type f))]
-      [else h])))
+;; v0.16 carries type information directly on def-form / defonce-form /
+;; defn-form / param structs (populated by Phase B parsing). The emitter
+;; reads the type slot for each binding and lowers it to Clojure-family
+;; `^Tag` metadata. No separate env or pre-pass is needed — the type is
+;; right next to the name it annotates.
 
 ;; Translate a Beagle type to a Clojure tag string, or #f when the type
 ;; has no useful primitive hint. Clojure type-hint metadata is used by
@@ -204,16 +194,11 @@
                  [current-emit-record-ns (program-imported-record-ns prog)]
                  [current-emit-target (program-target prog)]
                  [current-emit-scalar-fns (build-scalar-fns prog)]
-                 [current-emit-symbol-ns (program-imported-symbol-ns prog)]
-                 [current-emit-claims (build-claim-env prog)])
+                 [current-emit-symbol-ns (program-imported-symbol-ns prog)])
     ;; Emit body first so we can detect str/ usage for auto-requires.
-    ;; Claim-forms emit nothing (their type info gets merged into the
-    ;; paired def/defn/defonce as Clojure metadata); filter them out so
-    ;; we don't emit blank lines.
     (define body
       (string-join
-       (for/list ([form (in-list (program-forms prog))]
-                  #:unless (claim-form? form))
+       (for/list ([form (in-list (program-forms prog))])
          (with-srcloc-meta form (emit-form form)))
        "\n\n"))
     (define needs-clj-string?
@@ -287,32 +272,29 @@
 (define (emit-form f)
   (cond
     [(def-form? f)
-     (define claimed (hash-ref (current-emit-claims) (def-form-name f) #f))
      (format "(def ~a~a ~a)"
-             (clj-tag-prefix claimed)
+             (clj-tag-prefix (def-form-type f))
              (def-form-name f)
              (emit-expr (def-form-value f)))]
 
     [(defonce-form? f)
-     (define claimed (hash-ref (current-emit-claims) (defonce-form-name f) #f))
      (format "(defonce ~a~a ~a)"
-             (clj-tag-prefix claimed)
+             (clj-tag-prefix (defonce-form-type f))
              (defonce-form-name f)
              (emit-expr (defonce-form-value f)))]
 
     [(defn-form? f)
      (define kw (if (defn-form-private? f) "defn-" "defn"))
-     (define claimed (hash-ref (current-emit-claims) (defn-form-name f) #f))
-     ;; For (claim NAME (-> [P1 P2 ...] R)) we emit return-type metadata
-     ;; on the defn name and per-param tags on each fixed param. Other
-     ;; claim shapes (plain prim, parametric type, etc.) get attached to
-     ;; the name only.
-     (define-values (name-tag param-tags)
-       (if (type-fn? claimed)
-           (values (clj-tag-prefix (type-fn-ret claimed))
-                   (for/list ([pt (in-list (type-fn-params claimed))])
-                     (clj-tag-prefix pt)))
-           (values (clj-tag-prefix claimed) #f)))
+     ;; Return type sits on the defn-form; per-param types live on each
+     ;; param struct. Untyped slots (type = #f) emit no metadata.
+     ;; Destructure params (map-destructure / seq-destructure) have no
+     ;; type slot — emit no metadata for them.
+     (define name-tag (clj-tag-prefix (defn-form-return-type f)))
+     (define param-tags
+       (for/list ([p (in-list (defn-form-params f))])
+         (cond
+           [(param? p) (clj-tag-prefix (param-type p))]
+           [else ""])))
      (format "(~a ~a~a [~a]\n  ~a)"
              kw
              name-tag
@@ -321,11 +303,6 @@
                                     (defn-form-rest-param f)
                                     #:param-tags param-tags)
              (emit-body (defn-form-body f) "  "))]
-
-    ;; claim-form is filtered out at the top of clj-emit-program; reaching
-    ;; this branch would be a bug. Keep the no-op clause for defence in
-    ;; depth (e.g. claim-forms inside a do block — currently invalid).
-    [(claim-form? f) ""]
 
     [(defn-multi? f)
      (define kw (if (defn-multi-private? f) "defn-" "defn"))
@@ -354,9 +331,6 @@
              (emit-expr (defmethod-form-dispatch-val f))
              (emit-params (defmethod-form-params f))
              (emit-body (defmethod-form-body f) "  "))]
-
-    [(deftype-form? f)
-     (emit-deftype f)]
 
     [(extend-type-form? f)
      (emit-extend-type f)]
@@ -931,18 +905,6 @@
            (format "(and ~a)" (string-join tests " "))))
      (format "~a ~a" test body-str)]))
 
-(define (emit-deftype f)
-  (define name (deftype-form-name f))
-  (define fields (deftype-form-fields f))
-  (define impls (deftype-form-impls f))
-  (define field-names
-    (string-join (map (lambda (p) (symbol->string (param-name p))) fields) " "))
-  (define impl-strs (map emit-type-impl impls))
-  (if (null? impl-strs)
-    (format "(deftype ~a [~a])" name field-names)
-    (format "(deftype ~a [~a]\n  ~a)" name field-names
-            (string-join impl-strs "\n  "))))
-
 (define (emit-extend-type f)
   (define impl-strs (map emit-type-impl (extend-type-form-impls f)))
   (format "(extend-type ~a\n  ~a)"
@@ -1015,9 +977,10 @@
           (format "~a & ~a" fixed (emit-param rest-p)))
       fixed))
 
-;; Right-pad a tag list to length n with "" entries. The claim-form
-;; param count may legitimately differ from the defn-form param count
-;; when a checker is in transition; emit no tag rather than crash.
+;; Right-pad a tag list to length n with "" entries. Defensive — the
+;; per-param tag list is built from defn-form-params directly, so it
+;; should always match, but if a caller passes a shorter list we'd
+;; rather emit no tag than crash.
 (define (pad-tags tags n)
   (cond
     [(= (length tags) n) tags]

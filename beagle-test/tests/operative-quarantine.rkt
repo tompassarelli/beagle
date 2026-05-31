@@ -114,26 +114,16 @@
   (define Q (string->symbol "'"))
   (define (Q-form . items) (cons Q items))
 
-  (test-case "(under env) refinement-style claim + defn checks clean"
-    ;; Public-contracts arrow with refinement-style params; checker
-    ;; should accept the matching defn body without error.
-    (define forms
-      (list
-        `(claim add :type (-> ,(Q-form 'params 'Int 'Int) (returns Int)))
-        `(defn add ,(Q-form 'params 'a 'b) (body (+ a b)))
-        `(add 1 2)))
-    (define errs (check-program forms))
-    (check-equal? errs '()
-                  (format "expected no errors for clean refinement program, got: ~v" errs)))
-
-  (test-case "(under env) wrong-arity call still detected through gate"
-    ;; Same claim, but the call is under-arity — the refinement-aware
-    ;; arity check should still fire.
-    (define forms
-      (list
-        `(claim add :type (-> ,(Q-form 'params 'Int 'Int) (returns Int)))
-        `(defn add ,(Q-form 'params 'a 'b) (body (+ a b)))
-        `(add 1)))
-    (define errs (check-program forms))
-    (check-not-equal? errs '()
-                      "expected an arity error from refinement-aware checker")))
+  ;; The previous refinement-aware tests paired `(claim add :type …)`
+  ;; with a defn to feed the public-contracts arrow type into the
+  ;; operative checker. Claim was deleted under the Zero-users rule;
+  ;; the operative path's claim pre-pass has been removed (see
+  ;; check-operative.rkt). The replacement — inline `:type` on defn —
+  ;; requires extending operative `check-defn` to populate tenv from the
+  ;; inline annotation; that wiring isn't in place yet. These two tests
+  ;; are deferred until the operative path either re-adopts a typed
+  ;; carrier or migrates to inline-`:-` semantics.
+  ;;
+  ;;   "(under env) refinement-style claim + defn checks clean"
+  ;;   "(under env) wrong-arity call still detected through gate"
+  (void))

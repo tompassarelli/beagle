@@ -209,7 +209,6 @@
     [(if)           (rkt-if args)]
     [(cond)         (rkt-cond args)]
     [(match)        (rkt-match args)]
-    [(claim)        ""]  ; emit nothing for claims
     [(ns define-mode define-target import require declare-extern) ""]
     [(defrecord)
      (format "(struct ~a (~a) #:transparent)"
@@ -451,7 +450,6 @@
     [(if)          (clj-if args)]
     [(cond)        (clj-cond args)]
     [(match)       (clj-match args)]
-    [(claim)       ""]
     [(ns)          (format "(ns ~a)" (clj->string (car args)))]
     [(define-mode define-target import require declare-extern) ""]
     [(defrecord)   (format "(defrecord ~a [~a])"
@@ -608,7 +606,7 @@
      (define out (cadr rest))
      (define s (js->string f 0))
      (cond
-       [(string=? s "") (void)]                       ; claim etc. — emit nothing
+       [(string=? s "") (void)]                       ; ns/import/etc. — emit nothing
        [else (display s out) (display ";" out)])]))
 
 (define (js->string expr indent)
@@ -633,7 +631,6 @@
     [(let)         (js-let args indent)]
     [(if)          (js-if args indent)]
     [(cond)        (js-cond args indent)]
-    [(claim)       ""]
     [(ns define-mode define-target import require declare-extern) ""]
     [(defrecord)
      ;; Emit a JS class with a constructor that takes positional fields.
@@ -844,7 +841,6 @@
     [(fn)          (nix-fn args)]
     [(let)         (nix-let args)]
     [(if)          (nix-if args)]
-    [(claim)       ""]
     [(ns define-mode define-target require declare-extern) ""]
     [(defrecord defunion defenum) ""]
     [(body)        (nix-body args)]
@@ -1263,7 +1259,6 @@
     [(let)         (py-let args indent)]
     [(if)          (py-if args indent)]
     [(cond)        (py-cond args indent)]
-    [(claim)       ""]
     [(ns define-mode define-target import require declare-extern) ""]
     [(defrecord)
      ;; Emit a Python @dataclass.
@@ -1465,7 +1460,6 @@
              (string-join (for/list ([p (in-list params)])
                             (format "~a ANY" p)) ", ")
              (string-join (map sql->string body-exprs) "; "))]
-    [(claim) ""]
     [(ns define-mode define-target import require declare-extern) ""]
     [(defrecord defunion defenum) ""]
     [(+ - * /)

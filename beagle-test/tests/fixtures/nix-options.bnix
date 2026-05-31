@@ -1,7 +1,7 @@
 #lang beagle/nix
 (ns test.nix.options)
 
-(module [config lib pkgs]
+(nix/module [config lib pkgs]
   (let [cfg config.hardware.custom]
     {:options.hardware.custom {:enable (lib/mkEnableOption "custom hardware")
                                :threshold (lib/mkOption {:type lib/types.int

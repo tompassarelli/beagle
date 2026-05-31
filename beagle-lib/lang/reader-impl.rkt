@@ -10,9 +10,7 @@
 ;; Contents of data literals are still read with the same reader, so
 ;; nesting works: `{:k [1 2 3]}` reads as `(#%map :k (#%brackets 1 2 3))`.
 
-(require racket/port
-         racket/string
-         racket/list)
+(require racket/port)
 
 (define (read-regex-pattern port)
   (let loop ([acc '()])
@@ -28,99 +26,78 @@
          [else (loop (cons next (cons #\\ acc)))])]
       [else (loop (cons c acc))])))
 
-(define (read-heredoc-tag port)
-  (let loop ([acc '()])
-    (define c (read-char port))
-    (cond
-      [(eof-object? c) (error 'beagle "unterminated #<< tag")]
-      [(char=? c #\newline) (list->string (reverse acc))]
-      [(char-whitespace? c) (loop acc)]
-      [else (loop (cons c acc))])))
+;; Heredoc and raw-string reader helpers removed per audit row 5
+;; (`#<<TAG` and `#r"..."` hard-remove). The dispatch arms in
+;; `hash-dispatch` now error with a pointed migration message.
 
-(define (read-heredoc-body port tag)
-  (let loop ([lines '()] [current '()])
-    (define c (read-char port))
-    (cond
-      [(eof-object? c) (error 'beagle "unterminated #<<~a heredoc" tag)]
-      [(char=? c #\newline)
-       (define line (list->string (reverse current)))
-       (define stripped (string-trim line))
-       (if (string=? stripped tag)
-         (values (reverse lines) line)
-         (loop (cons line lines) '()))]
-      [else (loop lines (cons c current))])))
+;; Reader conditionals (#? and #?@) — Clojure-style read-time dispatch.
+;;
+;; Surface:
+;;   #?(:clj X :cljs Y :nix Z :default W)        — read one form
+;;   #?@(:clj [1 2] :cljs [3] :default [])       — read list of forms to splice
+;;
+;; Reading produces tagged data containers — the actual target selection
+;; happens at PARSE time (see resolve-reader-conditionals in parse.rkt),
+;; not at READ time. This is intentional: the reader doesn't know the
+;; current target (it's set by `define-target` later in the program), so
+;; it would be wrong to discard branches here.
+;;
+;;   #?(:clj X :nix Y) → (reader-conditional :clj X :nix Y)
+;;   #?@(:clj X :nix Y) → (reader-conditional-splice :clj X :nix Y)
+;;
+;; The splice marker is recognised inside containing lists/brackets/maps
+;; during the parse-time resolution pass: its chosen branch (which must
+;; itself be a sequence) is spliced into the surrounding container.
+;;
+;; COEXISTENCE WITH `target-case`:
+;;   reader-conditional — READ-time dispatch; non-matching branches are
+;;     discarded before any AST is built. Use when the non-matching
+;;     branches would not even parse (e.g. they call out to target-only
+;;     stdlib functions, or use forms the other target rejects).
+;;   target-case        — PARSE/RUNTIME-time form-level dispatch; all
+;;     branches must parse and type-check, only one is emitted. Use when
+;;     each branch is well-formed in every target and you just want a
+;;     different value/expression per target.
+;;
+;; Both surfaces are intentionally kept. They aren't redundant — they
+;; solve different problems (one elides at read time, the other selects
+;; at emit time).
 
-(define (heredoc-dedent lines closing-line)
-  (define baseline
-    (string-length
-      (car (regexp-match #rx"^([ \t]*)" closing-line))))
-  (define stripped
-    (map (lambda (l)
-           (if (regexp-match? #rx"^[ \t]*$" l) ""
-             (if (>= (string-length l) baseline)
-               (substring l baseline) l)))
-         lines))
-  (define trimmed
-    (let* ([s stripped]
-           [s (if (and (pair? s) (string=? (car s) "")) (cdr s) s)]
-           [s (if (and (pair? s) (string=? (last s) "")) (drop-right s 1) s)])
-      s))
-  (string-join trimmed "\n"))
-
-(define (read-raw-string port src line col pos)
-  (define hash-count
-    (let loop ([n 0])
-      (define c (peek-char port))
-      (if (and (char? c) (char=? c #\#))
-        (begin (read-char port) (loop (add1 n)))
-        n)))
-  (define open (read-char port))
-  (unless (and (char? open) (char=? open #\"))
-    (error 'beagle "expected '\"' after #r~a, got: ~a"
-           (make-string hash-count #\#) open))
-  (define content
-    (let loop ([acc '()])
-      (define c (read-char port))
-      (cond
-        [(eof-object? c)
-         (error 'beagle "unterminated raw string literal")]
-        [(char=? c #\")
-         (define hashes
-           (let hloop ([n 0])
-             (if (and (< n hash-count)
-                      (char? (peek-char port))
-                      (char=? (peek-char port) #\#))
-               (begin (read-char port) (hloop (add1 n)))
-               n)))
-         (if (= hashes hash-count)
-           (list->string (reverse acc))
-           (loop (foldl cons acc
-                        (cons #\" (build-list hashes (lambda (_) #\#))))))]
-        [else (loop (cons c acc))])))
+(define (read-reader-conditional-body port src line col pos splice?)
+  (define opening (read-char port))
+  (unless (and (char? opening) (char=? opening #\())
+    (error 'beagle
+           "#?~a: expected `(` to open reader-conditional body, got ~a"
+           (if splice? "@" "")
+           (if (char? opening) opening 'eof)))
+  (define items (read-until-close port #\)))
+  (define head (if splice? 'reader-conditional-splice 'reader-conditional))
+  (define result (cons head items))
   (if src
-    (datum->syntax #f content (vector src line col pos #f))
-    content))
+    (datum->syntax #f result (vector src line col pos #f))
+    result))
 
 (define (hash-dispatch ch port src line col pos)
   (define next (peek-char port))
   (cond
+    ;; #<<TAG heredoc reader: HARD-REMOVED per audit row 5. Heredocs were
+    ;; never used in any user-facing .bgl/.bnix corpus; tilde-strings
+    ;; (`~"..."` and `~''...''`) cover multi-line Nix strings. The
+    ;; `#%block-string` AST node remains for internal use (fmt-form
+    ;; sometimes receives explicit `(#%block-string ...)` lists in tests).
     [(and (char? next) (char=? next #\<))
+     (error 'beagle
+            "#<<TAG heredoc reader is not supported. Use a tilde-string `~\"...\"` (single line) or `~''...''` (multi-line) instead.")]
+    ;; Reader conditional: #?(:tag form ...) or #?@(:tag form ...)
+    [(and (char? next) (char=? next #\?))
      (read-char port)
-     (define next2 (peek-char port))
+     (define after-? (peek-char port))
      (cond
-       [(and (char? next2) (char=? next2 #\<))
+       [(and (char? after-?) (char=? after-? #\@))
         (read-char port)
-        (define tag (read-heredoc-tag port))
-        (define-values (lines closing-line) (read-heredoc-body port tag))
-        (define text (heredoc-dedent lines closing-line))
-        (define result (list '#%block-string tag text))
-        (if src
-          (datum->syntax #f result (vector src line col pos #f))
-          result)]
+        (read-reader-conditional-body port src line col pos #t)]
        [else
-        (define combined (input-port-append #f (open-input-string "#<") port))
-        (parameterize ([current-readtable (make-readtable #f)])
-          (if src (read-syntax src combined) (read combined)))])]
+        (read-reader-conditional-body port src line col pos #f)])]
     [(and (char? next) (char=? next #\{))
      (read-char port)
      (define items (read-until-close port #\}))
@@ -136,9 +113,12 @@
        (datum->syntax #f result (vector src line col pos
                                         (+ 3 (string-length pattern))))
        result)]
+    ;; #r"..." raw-string reader: HARD-REMOVED per audit row 5. Raw strings
+    ;; were never used in any user-facing corpus. Regular strings (with `\`
+    ;; escapes) or tilde-strings cover the use cases.
     [(and (char? next) (char=? next #\r))
-     (read-char port)
-     (read-raw-string port src line col pos)]
+     (error 'beagle
+            "#r\"...\" raw-string reader is not supported. Use a regular `\"...\"` string with escapes, or a tilde-string `~\"...\"`.")]
     [else
      (define combined (input-port-append #f (open-input-string "#") port))
      (parameterize ([current-readtable (make-readtable #f)])

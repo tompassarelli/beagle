@@ -356,7 +356,7 @@
 ;; --- await ------------------------------------------------------------------
 
 (test-case "await emits await"
-  (define out (py-emit "(define-target py) (await (fetch \"url\"))"))
+  (define out (py-emit "(define-target py) (js/await (fetch \"url\"))"))
   (check-true (string-contains? out "await fetch(\"url\")")))
 
 ;; --- set! -------------------------------------------------------------------

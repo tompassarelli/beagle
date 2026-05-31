@@ -2,6 +2,6 @@
 (ns test.sql.simple-select)
 
 ;; Most basic SELECT — bare columns, table, simple WHERE.
-(select [name price]
+(sql/select [name price]
   (from products)
   (where (> price 10)))

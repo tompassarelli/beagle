@@ -1,5 +1,3 @@
 (defrecord Person [(name : String) (age : Int)])
-(claim p Person)
-(def p (->Person "alice" 25))
-(claim q Person)
-(def q (with p [:age 30]))
+(def p :- Person (->Person "alice" 25))
+(def q :- Person (with p [:age 30]))

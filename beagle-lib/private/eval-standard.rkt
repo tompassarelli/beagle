@@ -1,7 +1,8 @@
 #lang racket/base
 
-;; Standard forms (defn, fn, let, cond, match, claim) defined as
-;; operatives on top of the bootstrap evaluator.
+;; Standard forms (defn, fn, let, cond, match) defined as operatives
+;; on top of the bootstrap evaluator. (claim was removed under the
+;; Zero-users rule; inline `:-` annotations replaced it.)
 ;;
 ;; Per the operative foundation (plan 20260528223000), every form that
 ;; was previously a "special form" is now an operative. None of these
@@ -20,15 +21,7 @@
          racket/set
          racket/list)
 
-(provide install-standard-forms!
-         claim-substrate)
-
-;; --- claim substrate ----------------------------------------------------
-
-;; `claim` records facts about names without affecting the value. The
-;; substrate is a parameter so tests can reset it cleanly and so the
-;; checker/daemon can read accumulated claims.
-(define claim-substrate (make-parameter '()))
+(provide install-standard-forms!)
 
 ;; --- fn: anonymous function ---------------------------------------------
 
@@ -180,15 +173,6 @@
                 [(truthy? (evaluate test-expr call-env))
                  (evaluate result-expr call-env)]
                 [else (loop (cddr rest))])]))]))))
-
-;; --- claim: substrate fact recording (no-op runtime) --------------------
-
-(define (make-claim-op)
-  (make-raw-operative
-    'claim
-    (lambda (args call-env)
-      (claim-substrate (cons args (claim-substrate)))
-      (void))))
 
 ;; --- defrecord: register a record constructor at runtime ---------------
 
@@ -555,11 +539,9 @@
             (evaluate (car args) call-env)
             (evaluate (cadr args) call-env)))))
 
-;; ∈ : membership / annotation marker — `(claim NAME ∈ TYPE)`.
-;; `claim` extracts these from its raw args; if ∈ ever evaluates as a
-;; top-level call, it returns a tagged in-claim value.
-;; `∈` is gone — type annotation now uses the `:type` keyword inside claim,
-;; fn, foreign-*, etc. (treated like any other metadata key).
+;; ∈ and the `claim` form are gone. Type annotations now ride on
+;; ordinary bindings via inline `:-` markers: `(def NAME :- TYPE VALUE)`,
+;; `(defn NAME [P :- T ...] :- RT BODY)`.
 
 ;; --- vector / hash-map / hash-set constructors --------------------------
 
@@ -744,7 +726,6 @@
   (env-define! env 'defn     (make-defn-op))
   (env-define! env 'let      (make-let-op))
   (env-define! env 'cond     (make-cond-op))
-  (env-define! env 'claim    (make-claim-op))
   (env-define! env 'match    (make-match-op))
   (env-define! env '->       (make-arrow-op))
   (env-define! env 'returns  (make-returns-op))

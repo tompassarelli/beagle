@@ -91,11 +91,11 @@ REPAIRS[E008]="Pass a value whose type satisfies the declared bound."
 
 TITLES[E009]="Target-specific form in wrong target"
 SUMMARIES[E009]="A form that only works in one target was used in a different target file."
-WHYS[E009]="Agents use JS-specific forms (await, js-quote) in .bclj files or vice versa."
+WHYS[E009]="Agents use JS-specific forms (js/await, js-quote) in .bclj files or vice versa."
 BADS[E009]=';; In a .bclj file:
-(await (fetch "/api"))  ;; ERROR: await is only supported in beagle/js'
+(js/await (fetch "/api"))  ;; ERROR: js/await is only supported in beagle/js'
 GOODS[E009]=';; In a .bjs file:
-(await (fetch "/api"))'
+(js/await (fetch "/api"))'
 REPAIRS[E009]="Move this code to a file with the correct target extension."
 
 TITLES[E010]="SQL GROUP BY violation"

@@ -60,35 +60,64 @@
 
 ;; --- module / fn-set / overlay ----------------------------------------------
 
-(test-case "module parses to nix-fn-set with rest? true"
-  (define f (first-form "(module [config lib pkgs] config)"))
+(test-case "nix/module parses to nix-fn-set with rest? true"
+  (define f (first-form "(nix/module [config lib pkgs] config)"))
   (check-true (nix-fn-set? f))
   (check-true (nix-fn-set-rest? f))
   (check-equal? (length (nix-fn-set-formals f)) 3))
 
-(test-case "fn-set parses to nix-fn-set with rest? false"
-  (define f (first-form "(fn-set [a b] a)"))
+(test-case "nix/fn-set parses to nix-fn-set with rest? false"
+  (define f (first-form "(nix/fn-set [a b] a)"))
   (check-true (nix-fn-set? f))
   (check-false (nix-fn-set-rest? f)))
 
-(test-case "overlay enforces exactly two formals"
-  (check-true (fn-form? (first-form "(overlay [a b] a)")))
-  (check-equal? (length (fn-form-params (first-form "(overlay [a b] a)"))) 2)
-  (check-exn exn:fail? (lambda () (first-form "(overlay [a] a)")))
-  (check-exn exn:fail? (lambda () (first-form "(overlay [a b c] a)"))))
+(test-case "nix/overlay enforces exactly two formals"
+  (check-true (fn-form? (first-form "(nix/overlay [a b] a)")))
+  (check-equal? (length (fn-form-params (first-form "(nix/overlay [a b] a)"))) 2)
+  (check-exn exn:fail? (lambda () (first-form "(nix/overlay [a] a)")))
+  (check-exn exn:fail? (lambda () (first-form "(nix/overlay [a b c] a)"))))
+
+;; Bare forms reject with pointed migration messages
+(test-case "bare (module ...) rejects with nix/module hint"
+  (check-exn (lambda (e)
+               (and (exn:fail? e)
+                    (regexp-match? #rx"nix/module" (exn-message e))))
+             (lambda () (first-form "(module [config lib pkgs] config)"))))
+(test-case "bare (fn-set ...) rejects with nix/fn-set hint"
+  (check-exn (lambda (e)
+               (and (exn:fail? e)
+                    (regexp-match? #rx"nix/fn-set" (exn-message e))))
+             (lambda () (first-form "(fn-set [a b] a)"))))
+(test-case "bare (overlay ...) rejects with nix/overlay hint"
+  (check-exn (lambda (e)
+               (and (exn:fail? e)
+                    (regexp-match? #rx"nix/overlay" (exn-message e))))
+             (lambda () (first-form "(overlay [a b] a)"))))
 
 ;; --- derivation -------------------------------------------------------------
 
-(test-case "derivation parses to nix-derivation with attrset"
-  (define f (first-form "(derivation {:pname \"x\" :src ./.})"))
+(test-case "nix/derivation parses to nix-derivation with attrset"
+  (define f (first-form "(nix/derivation {:pname \"x\" :src ./.})"))
   (check-true (nix-derivation? f))
   (check-true (map-form? (nix-derivation-attrs f))))
 
+(test-case "bare (derivation ...) rejects with nix/derivation hint"
+  (check-exn (lambda (e)
+               (and (exn:fail? e)
+                    (regexp-match? #rx"nix/derivation" (exn-message e))))
+             (lambda () (first-form "(derivation {:pname \"x\"})"))))
+
 ;; --- flake ------------------------------------------------------------------
 
-(test-case "flake parses to nix-flake"
-  (define f (first-form "(flake {:description \"x\"})"))
+(test-case "nix/flake parses to nix-flake"
+  (define f (first-form "(nix/flake {:description \"x\"})"))
   (check-true (nix-flake? f)))
+
+(test-case "bare (flake ...) rejects with nix/flake hint"
+  (check-exn (lambda (e)
+               (and (exn:fail? e)
+                    (regexp-match? #rx"nix/flake" (exn-message e))))
+             (lambda () (first-form "(flake {:description \"x\"})"))))
 
 ;; --- with-cfg ---------------------------------------------------------------
 

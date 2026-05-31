@@ -59,34 +59,19 @@
 (test-case "primitive arithmetic"
   (check-ok '(+ 1 2)))
 
-;; --- defn + claim --------------------------------------------------------
+;; --- defn ---------------------------------------------------------------
+;;
+;; The `(claim NAME TYPE)` carrier was deleted under the Zero-users rule.
+;; Inline `:-` annotations on def/defonce/defn are the canonical type-
+;; binding surface. The arity-checking machinery underneath is the same;
+;; tests that previously paired a claim with the defn are dropped here
+;; because the operative-surface defn does not yet carry inline `:-`
+;; annotations. Phase F (CorpusMigrate) restores arity-typed coverage
+;; once the operative defn grows a `:-` slot.
 
-(test-case "defn with matching claim — no errors"
-  (check-ok
-    `(claim add :type (-> ,(Q-form 'params 'Int 'Int) (returns Int)))
-    `(defn add ,(Q-form 'params 'a 'b) (body (+ a b)))))
-
-(test-case "defn without claim — type defaults to Any (no errors)"
+(test-case "defn without annotation — type defaults to Any (no errors)"
   (check-ok
     `(defn identity ,(Q-form 'params 'x) (body x))))
-
-(test-case "call respects arity"
-  (check-ok
-    `(claim add :type (-> ,(Q-form 'params 'Int 'Int) (returns Int)))
-    `(defn add ,(Q-form 'params 'a 'b) (body (+ a b)))
-    `(add 1 2)))
-
-(test-case "call with wrong arity errors"
-  (check-err #rx"expected 2 argument"
-    `(claim add :type (-> ,(Q-form 'params 'Int 'Int) (returns Int)))
-    `(defn add ,(Q-form 'params 'a 'b) (body (+ a b)))
-    `(add 1)))
-
-(test-case "call with extra args errors"
-  (check-err #rx"expected 2 argument"
-    `(claim add :type (-> ,(Q-form 'params 'Int 'Int) (returns Int)))
-    `(defn add ,(Q-form 'params 'a 'b) (body (+ a b)))
-    `(add 1 2 3)))
 
 ;; --- unbound names ------------------------------------------------------
 
@@ -141,8 +126,6 @@
   (check-err #rx"set! on unbound"
     `(set! never-defined 99)))
 
-;; --- claim with metadata ------------------------------------------------
-
-(test-case "metadata claim doesn't error"
-  (check-ok
-    `(claim some-name :depends-on other-name)))
+;; (claim form removed — see Zero-users rule. Metadata that previously
+;; rode on `(claim NAME :KEY VALUE)` would now ride on host metadata
+;; (Clojure-style `^{:key value}` on the binding); not yet wired here.)

@@ -2,8 +2,7 @@
 (defrecord Q [(y : Int)])
 (defrecord R [(z : Int)])
 (defunion PQR P Q R)
-(claim handle [PQR -> Int])
-(defn handle [(e : PQR)]
+(defn handle [(e : PQR)] :- Int
   (match e
     [(P x) x]
     [_ 0]))

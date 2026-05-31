@@ -1,6 +1,5 @@
 (declare-extern get-val [-> (U String Int Nil)])
-(claim describe [-> String])
-(defn describe []
+(defn describe [] :- String
   (let [x (get-val)]
     (cond
       [(nil? x) "nil"]

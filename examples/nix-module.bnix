@@ -1,7 +1,7 @@
 #lang beagle/nix
 (ns examples.nix-module)
 
-(module [config lib pkgs]
+(nix/module [config lib pkgs]
   {:imports [(p "./hardware-configuration.nix")]
    :boot.loader.systemd-boot.enable true
    :networking.hostName "hello"

@@ -221,23 +221,23 @@
 ;; --- Phase 1: Module-writing core ------------------------------------------
 
 (test-case "fn-set emits attrset-pattern lambda"
-  (define out (nix-emit "(define-target nix) (fn-set (a b) (+ a b))"))
+  (define out (nix-emit "(define-target nix) (nix/fn-set (a b) (+ a b))"))
   (check-true (and out (string-contains? out "{ a, b }:")))
   (check-true (and out (string-contains? out "a + b"))))
 
 (test-case "fn-set with defaults"
-  (define out (nix-emit "(define-target nix) (fn-set (a (b 5)) (+ a b))"))
+  (define out (nix-emit "(define-target nix) (nix/fn-set (a (b 5)) (+ a b))"))
   (check-true (and out (string-contains? out "b ? 5")))
   (check-true (and out (string-contains? out "{ a, b ? 5 }:"))))
 
 (test-case "module emits ... in formals"
-  (define out (nix-emit "(define-target nix) (module [config lib pkgs] config)"))
+  (define out (nix-emit "(define-target nix) (nix/module [config lib pkgs] config)"))
   (check-true (and out (string-contains? out "...")))
   (check-true (and out (string-contains? out "{ config, lib, pkgs, ... }:"))))
 
 (test-case "overlay emits curried (final: prev: body)"
   (define out (nix-emit-forms '(define-target nix)
-    `(overlay ,(br 'final 'prev) ,(mt ':foo 1))))
+    `(nix/overlay ,(br 'final 'prev) ,(mt ':foo 1))))
   (check-true (and out (string-contains? out "final: prev:")))
   (check-false (and out (string-contains? out "{ final, prev"))))
 

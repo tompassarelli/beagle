@@ -1,4 +1,3 @@
 (defrecord Person [(name : String) (age : Int)])
-(claim update-name [Person -> Person])
-(defn update-name [(p : Person)]
+(defn update-name [(p : Person)] :- Person
   (with p [:name "bob"]))

@@ -1,8 +1,7 @@
 (defrecord Foo [(x : Int)])
 (defrecord Bar [(y : String)])
 (defrecord Baz [(z : Bool)])
-(claim handle [Any -> Int])
-(defn handle [(e : Any)]
+(defn handle [(e : Any)] :- Int
   (match e
     [(Foo x) x]
     [(Bar y) 0]))

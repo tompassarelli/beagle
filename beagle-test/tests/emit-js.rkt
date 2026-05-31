@@ -188,17 +188,17 @@
    (check-js-contains "await -> await keyword"
      "await"
      `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
-     '(defn f [(url : String)] : (Promise String) (await (fetch-data url))))
+     '(defn f [(url : String)] : (Promise String) (js/await (fetch-data url))))
 
    (check-js-contains "defn with await -> async function"
      "async function"
      `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
-     '(defn f [(url : String)] : (Promise String) (await (fetch-data url))))
+     '(defn f [(url : String)] : (Promise String) (js/await (fetch-data url))))
 
    (check-js-contains "fn with await -> async arrow"
      "async ("
      `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
-     '(def f : Any (fn [(url : String)] : (Promise String) (await (fetch-data url)))))
+     '(def f : Any (fn [(url : String)] : (Promise String) (js/await (fetch-data url)))))
 
    (check-js-contains "defn without await -> no async"
      "function g("
@@ -321,16 +321,16 @@
      `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
      '(defn f [(url : String)] : (Promise String)
        (let [x "prefix"]
-         (let [result (await (fetch-data url))]
+         (let [result (js/await (fetch-data url))]
            (str x result)))))
 
    (check-js-contains "multi-arity with await -> async dispatch"
      "async function"
      `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
      `(defn load
-       (,(br '(url : String)) : (Promise String) (await (fetch-data url)))
+       (,(br '(url : String)) : (Promise String) (js/await (fetch-data url)))
        (,(br '(url : String) '(fallback : String)) : (Promise String)
-         (let [r (await (fetch-data url))] (if (nil? r) fallback r)))))
+         (let [r (js/await (fetch-data url))] (if (nil? r) fallback r)))))
 
    (check-js-contains "record field access chains"
      ".x"

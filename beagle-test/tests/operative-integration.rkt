@@ -40,6 +40,12 @@
 
 ;; --- the integration program -------------------------------------------
 
+;; The previous program-text fixture paired `(claim distance :type …)`
+;; and `(claim p :type Point)` with their definitions. Claim was deleted
+;; under the Zero-users rule; the operative defn surface does not yet
+;; carry inline `:-` annotations on its `(' params …)` shape, so the
+;; integration program runs untyped here. Once the operative defn grows
+;; an inline `:-` slot, restore the type assertions.
 (define program-text #<<EOF
 #lang beagle/clj
 (ns demo)
@@ -50,7 +56,6 @@
 
 (defrecord Point (' fields x y))
 
-(claim distance :type (-> (' params Int Int) (returns Int)))
 (defn distance (' params dx dy)
   (body (+ (square dx) (square dy))))
 
@@ -59,7 +64,6 @@
               (case (= n 0) "zero")
               (case :else "positive"))))
 
-(claim p :type Point)
 (def p (Point 3 4))
 
 (println (distance 3 4))

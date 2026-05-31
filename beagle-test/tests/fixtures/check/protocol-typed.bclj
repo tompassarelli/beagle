@@ -1,4 +1,3 @@
 (defprotocol Greetable
   (greet [(self : Any)] : String))
-(claim x String)
-(def x (greet obj))
+(def x :- String (greet obj))

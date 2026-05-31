@@ -2,13 +2,13 @@
 (ns test.sql.cte)
 
 ;; CTE — WITH clause feeding a subsequent SELECT.
-(with
+(sql/with
   (top_customers
-    (select [customer_id (sum total :as revenue)]
+    (sql/select [customer_id (sum total :as revenue)]
       (from orders)
       (group-by customer_id)
       (having (> (sum total) 1000))))
-  (select [c.name tc.revenue]
+  (sql/select [c.name tc.revenue]
     (from customers :as c)
     (join top_customers :as tc (= tc.customer_id c.id))
     (order-by tc.revenue :desc)))

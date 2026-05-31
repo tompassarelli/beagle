@@ -3,14 +3,14 @@
 
 ;; CREATE TABLE with primary-key, NOT NULL inference, nullable, unique,
 ;; default, and references constraints.
-(deftable customers
+(sql/deftable customers
   [(id    : Int :primary-key)
    (name  : String :not-null)
    (email : String :unique)
    (city  : (U String Nil))
    (rank  : Int :default 0)])
 
-(deftable orders
+(sql/deftable orders
   [(id          : Int :primary-key)
    (customer_id : Int :references customers id)
    (total       : Float)])

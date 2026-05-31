@@ -1,11 +1,11 @@
 #lang beagle/nix
 (ns test.nix.flake)
 
-(flake
+(nix/flake
   {:description "minimal flake"
    :inputs {:nixpkgs {:url "github:NixOS/nixpkgs/nixos-unstable"}
             :flake-utils {:url "github:numtide/flake-utils"}}
-   :outputs (module [self nixpkgs flake-utils]
+   :outputs (nix/module [self nixpkgs flake-utils]
               (flake-utils.lib.eachDefaultSystem
                 (fn [(system : String)] : Any
                   (let [pkgs (import nixpkgs {:system system})]

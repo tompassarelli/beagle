@@ -133,12 +133,10 @@
   '(def x 42))
 
 (check-ok "typed def with matching literal passes"
-  '(claim x Int)
-  '(def x 42))
+  '(def x :- Int 42))
 
 (check-ok "Any annotation accepts anything"
-  '(claim x Any)
-  '(def x "hi"))
+  '(def x :- Any "hi"))
 
 (check-ok "defn untyped passes"
   '(defn id [x] x))
@@ -146,53 +144,56 @@
 (test-case "defn with correct return type passes"
   (check-not-exn
    (lambda ()
-     (check-prog `(claim five ,(br '-> 'Int))
-                 '(defn five [] 5)))))
+     (check-prog '(defn five [] :- Int 5)))))
 
 (check-ok "known builtin call type-checks"
-  '(claim x Int)
-  '(def x (+ 1 1)))
+  '(def x :- Int (+ 1 1)))
 
-;; --- claim form: env-pre-pass + paired-def type check ---------------------
+;; The `(claim NAME TYPE)` env-pre-pass tests have been removed entirely:
+;; the claim form was deleted under the Zero-users rule. The check
+;; behavior that the pre-pass exercised (env-bind from a type carrier,
+;; def value rechecked against the carried type) is now exercised
+;; directly by the inline `:-` annotation tests below; the env-binding
+;; outcome is identical.
+
+;; --- inline `:-` annotations: env-pre-pass via def/defn type slots --------
 ;;
-;; (claim NAME TYPE) is the out-of-band carrier that replaces the removed
-;; inline `:` annotation surface. build-initial-env walks every top-level
-;; form into a claim-env hash, then the def/defonce/defn pre-pass consults
-;; that hash when the binding has no inline annotation. Check-form re-checks
-;; the def value against the env type, so `claim x Int` + `def x "hi"` is
-;; rejected.
+;; The inline `:-` annotation slot on def/defonce/defn forms is the
+;; canonical type carrier. build-initial-env walks every top-level def/defn
+;; once, reads the type slot populated by Phase B parsing, and seeds env
+;; from that slot. Same env-binding outcome that the standalone claim form
+;; had — different source.
+;;
+;; Param-level `:-`: each typed param binds NAME → TYPE in the local
+;; checking env for the body. Untyped params stay ANY and propagate
+;; through subsequent operations.
+;;
+;; Return-type `:-`: the body's inferred type is checked against the
+;; declared return; mismatch surfaces a type-error diagnostic.
 
-(check-ok "(claim x Int) + (def x 42) — type matches, check passes"
-  '(claim x Int)
-  '(def x 42))
+(check-ok "(def x :- Int 42) — env-binds x:Int via inline annotation"
+  '(def x :- Int 42)
+  '(def y :- Int x))
 
-(test-case "(claim greet [String -> String]) + (defn greet [s] s) passes"
-  ;; Function type must be bracket-tagged ([A -> R] form). In Racket
-  ;; source `[…]` reads as a plain list — we build the type expr with
-  ;; explicit BRACKET-TAG via `br` so it matches what the beagle reader
-  ;; produces from real source.
+(check-err/rx "(def x :- Int \"hello\") — inline annotation rejects mismatch"
+  #rx"(def-type|expected.*Int|got.*String)"
+  '(def x :- Int "hello"))
+
+(check-ok "(defn add [a :- Int b :- Int] :- Int (+ a b)) — param + return annotations"
+  '(defn add [a :- Int b :- Int] :- Int (+ a b)))
+
+(test-case "(add 1 2) resolves to Int after typed-defn binding in env"
   (check-not-exn
    (lambda ()
-     (check-prog `(claim greet ,(br 'String '-> 'String))
-                 '(defn greet [s] s)))))
+     (check-prog '(defn add [a :- Int b :- Int] :- Int (+ a b))
+                 '(def sum :- Int (add 1 2))))))
 
-(check-ok "(def y 42) without paired claim still works (claim is optional)"
-  '(def y 42))
+(check-err/rx "(defn bad [a :- Int] :- String a) — body Int vs declared String"
+  #rx"(return.*type|def-type|expected.*String|got.*Int)"
+  '(defn bad [a :- Int] :- String a))
 
-(check-err/rx "(claim x Int) + (def x \"hello\") — type mismatch caught"
-  #rx"(def-type|expected.*Int|got.*String)"
-  '(claim x Int)
-  '(def x "hello"))
-
-(check-err/rx "(claim y Int) without paired def — orphan claim rejected"
-  #rx"claim y|no paired"
-  '(claim y Int))
-
-(test-case "(claim f [-> String]) + (defn f [] 42) — return-type mismatch caught"
-  (check-exn #rx"(return.*type|expected.*String|got.*Int)"
-             (lambda ()
-               (check-prog `(claim f ,(br '-> 'String))
-                           '(defn f [] 42)))))
+(check-ok "(defn mixed [a :- Int b] (* a b)) — untyped param inferred from body"
+  '(defn mixed [a :- Int b] (* a b)))
 
 ;; =============================================================================
 ;; Tests — negatives
@@ -219,8 +220,7 @@
 
 (check-ok "dynamic mode lets type errors through"
   '(define-mode dynamic)
-  '(claim x Int)
-  '(def x "wrong type but who cares"))
+  '(def x :- Int "wrong type but who cares"))
 
 ;; =============================================================================
 ;; Tests — macros
@@ -237,12 +237,10 @@
 ;; =============================================================================
 
 (check-ok "variadic builtin call with valid args"
-  '(claim x Int)
-  '(def x (+ 1 2 3 4 5)))
+  '(def x :- Int (+ 1 2 3 4 5)))
 
 (check-ok "variadic builtin call with zero args is OK if min met"
-  '(claim x Int)
-  '(def x (+)))
+  '(def x :- Int (+)))
 
 (check-err "variadic call rejects wrong rest-type"
   '(declare-extern strict-sum [Int & Int -> Int])
@@ -259,32 +257,27 @@
   (check-not-exn
    (lambda ()
      (check-prog `(declare-extern my-add ,(br 'Int 'Int '-> 'Int))
-                 '(claim x Int)
-                 '(def x (my-add 1 2))))))
+                 '(def x :- Int (my-add 1 2))))))
 
 (check-err "declare-extern: arg type error caught"
   `(declare-extern my-add ,(br 'Int 'Int '-> 'Int))
-  '(claim x Int)
-  '(def x (my-add "a" 2)))
+  '(def x :- Int (my-add "a" 2)))
 
 (test-case "declare-extern with variadic"
   (check-not-exn
    (lambda ()
      (check-prog `(declare-extern join ,(br 'String '& 'String '-> 'String))
-                 '(claim x String)
-                 '(def x (join "a" "b" "c"))))))
+                 '(def x :- String (join "a" "b" "c"))))))
 
 ;; =============================================================================
 ;; Tests — union types
 ;; =============================================================================
 
 (check-ok "union annotation accepts any alternative"
-  '(claim x (U String Nil))
-  '(def x "hi"))
+  '(def x :- (U String Nil) "hi"))
 
 (check-ok "union nil alternative"
-  '(claim x (U String Nil))
-  '(def x nil))
+  '(def x :- (U String Nil) nil))
 
 (check-err "union annotation rejects non-member"
   '(def x : (U String Nil) 42))
@@ -328,8 +321,7 @@
   "poly-filterv.bclj")
 
 (check-ok "identity preserves type through annotation"
-  '(claim x Int)
-  '(def x (identity 42)))
+  '(def x :- Int (identity 42)))
 
 (check-err "map rejects non-function first arg"
   `(def xs ,(br 1 2 3))
@@ -383,28 +375,23 @@
 
 (check-ok/source "cross-file import: typed defn callable with prefix" fixture-source
   '(require mathlib)
-  '(claim x Int)
-  '(def x (mathlib/add 1 2)))
+  '(def x :- Int (mathlib/add 1 2)))
 
 (check-ok/source "cross-file import: typed def accessible with prefix" fixture-source
   '(require mathlib)
-  '(claim x Float)
-  '(def x mathlib/pi))
+  '(def x :- Float mathlib/pi))
 
 (check-err/source "cross-file import: type error caught across files" fixture-source
   '(require mathlib)
-  '(claim x Int)
-  '(def x (mathlib/greet "tom")))
+  '(def x :- Int (mathlib/greet "tom")))
 
 (check-err/source "cross-file import: arg type error caught" fixture-source
   '(require mathlib)
-  '(claim x Int)
-  '(def x (mathlib/add "one" 2)))
+  '(def x :- Int (mathlib/add "one" 2)))
 
 (check-ok/source "cross-file import with :as alias" fixture-source
   '(require mathlib :as m)
-  '(claim x Int)
-  '(def x (m/add 1 2)))
+  '(def x :- Int (m/add 1 2)))
 
 (check-err/source "cross-file import: untyped defn still has arity" fixture-source
   '(require mathlib)
@@ -429,8 +416,7 @@
 (check-ok/source "cross-file defrecord: accessor returns correct type" shapes-fixture-source
   '(require shapes)
   '(def c (shapes/->Circle 5))
-  '(claim r Int)
-  '(def r (shapes/circle-radius c)))
+  '(def r :- Int (shapes/circle-radius c)))
 
 (check-ok/source "cross-file defrecord: multi-field constructor" shapes-fixture-source
   '(require shapes)
@@ -439,8 +425,7 @@
 (check-ok/source "cross-file defrecord: cross-module function uses imported record" shapes-fixture-source
   '(require shapes)
   '(def c (shapes/->Circle 5))
-  '(claim a Int)
-  '(def a (shapes/circle-area c)))
+  '(def a :- Int (shapes/circle-area c)))
 
 (check-err/source "cross-file defrecord: constructor wrong arg type errors" shapes-fixture-source
   '(require shapes)
@@ -453,8 +438,7 @@
 (check-err/source "cross-file defrecord: accessor wrong return type errors" shapes-fixture-source
   '(require shapes)
   '(def c (shapes/->Circle 5))
-  '(claim r String)
-  '(def r (shapes/circle-radius c)))
+  '(def r :- String (shapes/circle-radius c)))
 
 ;; =============================================================================
 ;; Tests — defrecord (fixtures)
@@ -483,16 +467,14 @@
   (check-not-exn
    (lambda ()
      (check-prog `(declare-extern System/getProperty ,(br 'String '-> 'String))
-                 '(claim x String)
-                 '(def x (System/getProperty "user.home"))))))
+                 '(def x :- String (System/getProperty "user.home"))))))
 
 (check-err "static method with wrong arg type errors"
   `(declare-extern System/getProperty ,(br 'String '-> 'String))
   '(def x (System/getProperty 42)))
 
 (check-ok "instance method with declared type passes"
-  '(claim x Bool)
-  '(def x (.startsWith "hello" "he")))
+  '(def x :- Bool (.startsWith "hello" "he")))
 
 (check-err "instance method with wrong arg type errors"
   '(def x : Bool (.startsWith "hello" 42)))
@@ -501,8 +483,7 @@
   '(def x (.trim "a" "b")))
 
 (check-ok "dynamic var with declared type infers correctly"
-  '(claim x String)
-  '(def x (first *command-line-args*)))
+  '(def x :- String (first *command-line-args*)))
 
 (check-ok "undeclared interop returns Any (no error)"
   '(def x (.someUnknownMethod obj)))
@@ -517,8 +498,7 @@
 (test-case "map literal typed as (Map Any Any) passes"
   (check-not-exn
    (lambda ()
-     (check-prog '(claim m (Map Any Any))
-                 `(def m ,(mt ':a 1))))))
+     (check-prog `(def m :- (Map Any Any) ,(mt ':a 1))))))
 
 (check-ok "empty map literal passes"
   `(def m ,(mt)))
@@ -533,8 +513,7 @@
 (test-case "set literal typed as (Set Any) passes"
   (check-not-exn
    (lambda ()
-     (check-prog '(claim s (Set Any))
-                 `(def s ,(st 1 2 3))))))
+     (check-prog `(def s :- (Set Any) ,(st 1 2 3))))))
 
 (check-ok "empty set literal passes"
   `(def s ,(st)))
@@ -558,8 +537,7 @@
   '(def x (try (+ 1 1) (catch Exception e "err") (finally (println "done")))))
 
 (check-ok "try with typed body passes"
-  '(claim x Any)
-  '(def x (try (+ 1 1) (catch Exception e 0))))
+  '(def x :- Any (try (+ 1 1) (catch Exception e 0))))
 
 ;; =============================================================================
 ;; Tests — doseq
@@ -593,69 +571,56 @@
 ;; dynamic map / unknown target it returns Any (matching get's semantics).
 ;;
 ;; The target's type only flows into kw-access lookup when the env knows
-;; it, which today requires an explicit (claim target Type). Inferring
-;; record types from constructor calls is a separate gap — exercised via
-;; the "Any fallback" tests below.
+;; it, which today requires an explicit `(def target :- Type ...)` inline
+;; annotation. Inferring record types from constructor calls is a
+;; separate gap — exercised via the "Any fallback" tests below.
 
 (check-ok "(:keyword target) with claimed record type — resolves to field type"
   '(defrecord Point [(x : Int) (y : Int)])
-  '(claim p Point)
-  '(def p (->Point 1 2))
-  '(claim n Int)
-  '(def n (:x p)))
+  '(def p :- Point (->Point 1 2))
+  '(def n :- Int (:x p)))
 
 (check-err/rx "(:keyword target) — wrong field-type binding caught (Int → String)"
   #rx"(def-type|expected.*String|got.*Int)"
   '(defrecord Point [(x : Int) (y : Int)])
-  '(claim p Point)
-  '(def p (->Point 1 2))
-  '(claim n String)
-  '(def n (:x p)))
+  '(def p :- Point (->Point 1 2))
+  '(def n :- String (:x p)))
 
 (check-ok "(:keyword target) on dynamic map flows as Any"
   `(def m ,(mt ':a 1 ':b 2))
-  '(claim v Int)
-  '(def v (:a m)))
+  '(def v :- Int (:a m)))
 
 (check-ok "(:keyword target) — unknown field on record falls back to Any (gap)"
   ;; lookup-kw-field-type returns ANY for missing fields rather than a
   ;; type-error, matching the existing kw-access semantics. Surfaced
   ;; precision gap — documented, not closed by this re-adoption.
   '(defrecord Point [(x : Int) (y : Int)])
-  '(claim p Point)
-  '(def p (->Point 1 2))
-  '(claim z Any)
-  '(def z (:z p)))
+  '(def p :- Point (->Point 1 2))
+  '(def z :- Any (:z p)))
 
 (check-ok "(get target :keyword) on typed record — resolves to field type (was Any)"
   ;; Closed the asymmetry: literal-key (get p :x) now canonicalizes to
   ;; kw-access at parse-time, so the field type flows through. Previously
   ;; degraded to Any via stdlib's (Any Any -> Any) get.
   '(defrecord Point [(x : Int) (y : Int)])
-  '(claim p Point)
-  '(def p (->Point 1 2))
-  '(claim a Int)
-  '(def a (get p :x)))
+  '(def p :- Point (->Point 1 2))
+  '(def a :- Int (get p :x)))
 
 (check-err "(get target :keyword) on typed record rejects type-mismatch (was Any-degraded)"
   ;; Discriminating: under the old (get : Any Any -> Any) typing, a String
   ;; claim would have accepted the result. Now the field type (Int)
   ;; conflicts with the String claim, surfacing the bug at compile time.
   '(defrecord Point [(x : Int) (y : Int)])
-  '(claim p Point)
-  '(def p (->Point 1 2))
-  '(claim s String)
-  '(def s (get p :x)))
+  '(def p :- Point (->Point 1 2))
+  '(def s :- String (get p :x)))
 
 (check-ok "(get p :x default) on typed record — default never fires, field type"
   ;; 3-arity literal-key get on a typed record where the field is known:
   ;; the default expression is unreachable, so the result type is the
   ;; field type, not (U FieldType DefaultType).
   '(defrecord Point [(x : Int) (y : Int)])
-  '(claim p Point)
-  '(def p (->Point 1 2))
-  '(claim a Int)
-  '(def a (get p :x 0)))
+  '(def p :- Point (->Point 1 2))
+  '(def a :- Int (get p :x 0)))
 
 ;; =============================================================================
 ;; Tests — defprotocol (fixtures)
@@ -753,8 +718,7 @@
 (test-case "match with or-pattern of literals type-checks"
   (check-not-exn
    (lambda ()
-     (check-prog `(claim classify ,(br 'Int '-> 'String))
-                 `(defn classify [(x : Int)]
+     (check-prog `(defn classify [(x : Int)] :- String
                     (match x
                       ,(br '(or 1 2 3) "low")
                       ,(br '(or 4 5 6) "mid")
@@ -763,8 +727,7 @@
 (test-case "or-pattern with keyword literals type-checks"
   (check-not-exn
    (lambda ()
-     (check-prog `(claim name ,(br 'Keyword '-> 'String))
-                 `(defn name [(k : Keyword)]
+     (check-prog `(defn name [(k : Keyword)] :- String
                     (match k
                       ,(br '(or :a :b) "first")
                       ,(br '(or :c :d) "second")
@@ -818,24 +781,21 @@
 (check-ok/source "cross-file Result: accessor returns correct type" result-fixture-source
   '(require result)
   '(def e (result/->Err "fail"))
-  '(claim msg String)
-  '(def msg (result/err-error e)))
+  '(def msg :- String (result/err-error e)))
 
 (test-case "cross-file Result: exhaustive match on imported union passes"
   (check-not-exn
    (lambda ()
      (check-prog/source result-fixture-source
                         '(require result)
-                        `(claim handle ,(br '(Result String String) '-> 'String))
-                        `(defn handle ,(br '(r : (Result String String)))
+                        `(defn handle ,(br '(r : (Result String String))) :- String
                            (match r
                              ,(br '(Ok v) "ok")
                              ,(br '(Err e) 'e)))))))
 
 (check-err/source "cross-file Result: non-exhaustive match on imported union errors" result-fixture-source
   '(require result)
-  `(claim handle ,(br '(Result String String) '-> 'String))
-  `(defn handle ,(br '(r : (Result String String)))
+  `(defn handle ,(br '(r : (Result String String))) :- String
      (match r
        ,(br '(Ok v) "ok"))))
 
@@ -939,30 +899,24 @@
       (check-equal? "" (get-output-string output)))))
 
 (check-cljs-ok "cljs: js/parseInt type-checks"
-  '(claim x Int)
-  '(def x (js/parseInt "42")))
+  '(def x :- Int (js/parseInt "42")))
 
 (check-cljs-ok "cljs: js/Math.sqrt type-checks"
-  '(claim x Float)
-  '(def x (js/Math.sqrt 16.0)))
+  '(def x :- Float (js/Math.sqrt 16.0)))
 
 (test-case "cljs: js/console.log type-checks"
   (check-not-exn
    (lambda ()
-     (check-cljs-prog `(claim log-it ,(br 'String '-> 'Nil))
-                      '(defn log-it [(msg : String)] (js/console.log msg))))))
+     (check-cljs-prog '(defn log-it [(msg : String)] :- Nil (js/console.log msg))))))
 
 (check-cljs-ok "cljs: standard fns work in cljs"
-  '(claim x Int)
-  '(def x (+ 1 1)))
+  '(def x :- Int (+ 1 1)))
 
 (check-cljs-ok "cljs: js/parseFloat type-checks"
-  '(claim x Float)
-  '(def x (js/parseFloat "3.14")))
+  '(def x :- Float (js/parseFloat "3.14")))
 
 (check-cljs-ok "cljs: js/isNaN type-checks"
-  '(claim x Bool)
-  '(def x (js/isNaN 0)))
+  '(def x :- Bool (js/isNaN 0)))
 
 (check-cljs-warns "cljs: slurp warns as JVM-only"
   #rx"JVM-only"
@@ -981,22 +935,19 @@
   '(def x (first *command-line-args*)))
 
 (check-cljs-silent "cljs: universal fn produces no JVM-only warning"
-  '(claim x Int)
-  '(def x (+ 1 1)))
+  '(def x :- Int (+ 1 1)))
 
 ;; --- metadata type checking --------------------------------------------------
 
 (test-case "metadata is transparent to type checking"
   (check-not-exn
    (lambda ()
-     (check-prog '(claim x (Vec Int))
-                 `(def x (#%meta (,MT :stretch 1) ,(br 1 2 3)))))))
+     (check-prog `(def x :- (Vec Int) (#%meta (,MT :stretch 1) ,(br 1 2 3)))))))
 
 (test-case "metadata on typed vector in let"
   (check-not-exn
    (lambda ()
-     (check-prog `(claim f ,(br '-> '(Vec Int)))
-                 `(defn f []
+     (check-prog `(defn f [] :- (Vec Int)
                     (let ,(br 'v `(#%meta (,MT :stretch 1) ,(br 10 20)))
                       v))))))
 
@@ -1009,24 +960,20 @@
 (test-case "let + if (interim nullable-narrow pattern) type checks"
   (check-not-exn
    (lambda ()
-     (check-prog `(claim f ,(br 'Int? '-> 'Nil))
-                 '(defn f [(x : Int?)] (let [v x] (if v (println v) nil)))))))
+     (check-prog '(defn f [(x : Int?)] :- Nil (let [v x] (if v (println v) nil)))))))
 
 (test-case "with-open type checks"
   (check-not-exn
    (lambda ()
-     (check-prog `(claim f ,(br 'String '-> 'Any))
-                 '(defn f [(p : String)] (with-open [r (slurp p)] r))))))
+     (check-prog '(defn f [(p : String)] :- Any (with-open [r (slurp p)] r))))))
 
 (check-ok "doto type checks target"
-  '(claim x Any)
-  '(def x (doto (atom 1) (reset! 2))))
+  '(def x :- Any (doto (atom 1) (reset! 2))))
 
 (test-case "for with :let type checks"
   (check-not-exn
    (lambda ()
-     (check-prog '(claim x (Vec String))
-                 `(def x (for ,(br 'i '(range 3) ':let (br 's '(str i))) s))))))
+     (check-prog `(def x :- (Vec String) (for ,(br 'i '(range 3) ':let (br 's '(str i))) s))))))
 
 ;; when-not / if-not removed — use (when (not ...) body) / (if (not ...) t e).
 
@@ -1042,14 +989,12 @@
 (test-case "condp type checks with default"
   (check-not-exn
    (lambda ()
-     (check-prog `(claim f ,(br 'Keyword '-> 'String))
-                 '(defn f [(x : Keyword)] (condp = x :a "alpha" :b "beta" "other"))))))
+     (check-prog '(defn f [(x : Keyword)] :- String (condp = x :a "alpha" :b "beta" "other"))))))
 
 ;; --- defonce ---
 
 (check-ok "defonce type checks"
-  '(claim db Any)
-  '(defonce db (atom nil)))
+  '(defonce db :- Any (atom nil)))
 
 (check-err "defonce type mismatch"
   '(defonce db : String 42))
@@ -1091,61 +1036,52 @@
   (check-not-exn
    (lambda ()
      (check-js-prog `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
-                    `(claim f ,(br 'String '-> '(Promise String)))
-                    '(defn f [(url : String)] (await (fetch-data url)))))))
+                    '(defn f [(url : String)] :- (Promise String) (js/await (fetch-data url)))))))
 
 (test-case "Promise return with unwrapped body type accepted"
   (check-not-exn
    (lambda ()
      (check-js-prog `(declare-extern load ,(br '-> '(Promise Int)))
-                    `(claim f ,(br '-> '(Promise Int)))
-                    '(defn f [] (await (load)))))))
+                    '(defn f [] :- (Promise Int) (js/await (load)))))))
 
 (test-case "nested await in let type-checks"
   (check-not-exn
    (lambda ()
      (check-js-prog `(declare-extern fetch-name ,(br 'Int '-> '(Promise String)))
-                    `(claim f ,(br 'Int '-> '(Promise String)))
-                    '(defn f [(id : Int)]
-                       (let [name (await (fetch-name id))]
+                    '(defn f [(id : Int)] :- (Promise String)
+                       (let [name (js/await (fetch-name id))]
                          (str "Hello " name)))))))
 
 (check-js-err "Promise return type mismatch caught"
   `(declare-extern load ,(br '-> '(Promise Int)))
-  `(claim f ,(br '-> '(Promise String)))
-  '(defn f [] (await (load))))
+  '(defn f [] :- (Promise String) (js/await (load))))
 
 ;; =============================================================================
 ;; Target-form gating — cross-target rejection
 ;; =============================================================================
 ;; await rejected outside beagle/js
 (check-err/rx "await rejected in beagle/clj"
-  #rx"await is only supported in beagle/js"
+  #rx"js/await is only supported in beagle/js"
   `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
-  `(claim f ,(br 'String '-> '(Promise String)))
-  '(defn f [(url : String)] (await (fetch-data url))))
+  '(defn f [(url : String)] :- (Promise String) (js/await (fetch-data url))))
 
 (check-nix-err/rx "await rejected in beagle/nix"
-  #rx"await is only supported in beagle/js"
+  #rx"js/await is only supported in beagle/js"
   `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
-  `(claim f ,(br 'String '-> '(Promise String)))
-  '(defn f [(url : String)] (await (fetch-data url))))
+  '(defn f [(url : String)] :- (Promise String) (js/await (fetch-data url))))
 
 ;; Nix forms rejected outside beagle/nix
 (check-err/rx "inherit rejected in beagle/clj"
   #rx"inherit is only supported in beagle/nix"
-  '(claim x Any)
-  '(def x (inherit a b)))
+  '(def x :- Any (inherit a b)))
 
 (check-js-err/rx "inherit rejected in beagle/js"
   #rx"inherit is only supported in beagle/nix"
-  '(claim x Any)
-  '(def x (inherit a b)))
+  '(def x :- Any (inherit a b)))
 
 (check-err/rx "fn-set rejected in beagle/clj"
-  #rx"module / fn-set / overlay is only supported in beagle/nix"
-  '(claim x Any)
-  '(def x (fn-set [{a 1}] a)))
+  #rx"nix/(module|fn-set|overlay) is only supported in beagle/nix"
+  '(def x :- Any (nix/fn-set [{a 1}] a)))
 
 ;; pipe-to / pipe-from removed entirely (not just nix-only). The rejection is
 ;; now uniform across targets — see tests/threading.rkt for the parse-time
@@ -1153,33 +1089,27 @@
 
 (check-js-err/rx "s (interpolated string) rejected in beagle/js"
   #rx"is only supported in beagle/nix"
-  '(claim x Any)
-  '(def x (s "hello " name)))
+  '(def x :- Any (s "hello " name)))
 
 ;; Verify Nix forms pass on beagle/nix
 (check-nix-ok "inherit accepted in beagle/nix"
-  '(claim x Any)
-  '(def x (inherit a b)))
+  '(def x :- Any (inherit a b)))
 
 (check-nix-ok "s accepted in beagle/nix"
-  '(claim x Any)
-  '(def x (s "hello " name)))
+  '(def x :- Any (s "hello " name)))
 
 ;; =============================================================================
 ;; Tests — check/rescue
 ;; =============================================================================
 
 (check-ok "check form passes type check"
-  '(claim x Any)
-  '(def x (check (+ 1 1))))
+  '(def x :- Any (check (+ 1 1))))
 
 (check-ok "rescue with fallback passes type check"
-  '(claim x Any)
-  '(def x (rescue (+ 1 1) 0)))
+  '(def x :- Any (rescue (+ 1 1) 0)))
 
 (check-ok "rescue with error binding passes type check"
-  '(claim x Any)
-  '(def x (rescue (+ 1 1) err (str err))))
+  '(def x :- Any (rescue (+ 1 1) err (str err))))
 
 ;; =============================================================================
 ;; Tests — (defunion :throwable ...) / :raises
@@ -1205,5 +1135,4 @@
 ;; =============================================================================
 
 (check-ok "target-case passes type check"
-  '(claim x Any)
-  '(def x (target-case :clj "clj" :js "js" :nix "nix")))
+  '(def x :- Any (target-case :clj "clj" :js "js" :nix "nix")))

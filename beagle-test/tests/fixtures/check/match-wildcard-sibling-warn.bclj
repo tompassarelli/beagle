@@ -2,8 +2,7 @@
 (defrecord Beta [(id : Int) (y : String)])
 (defrecord Gamma [(id : Int) (z : String)])
 (defrecord Delta [(id : Int) (w : String)])
-(claim handle [Any -> Int])
-(defn handle [(e : Any)]
+(defn handle [(e : Any)] :- Int
   (match e
     [(Alpha id x) id]
     [(Beta id y) id]

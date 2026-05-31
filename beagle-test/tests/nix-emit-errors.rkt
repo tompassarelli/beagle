@@ -33,6 +33,12 @@
 
 (test-case "await rejected on nix target"
   (check-exn exn:fail?
+             (lambda () (nix-emit "(js/await (some-call))"))))
+
+(test-case "bare (await ...) rejected with namespacing hint"
+  (check-exn (lambda (e)
+               (and (exn:fail? e)
+                    (regexp-match? #rx"js/await" (exn-message e))))
              (lambda () (nix-emit "(await (some-call))"))))
 
 ;; --- defn multi-arity rejected ----------------------------------------------
@@ -45,19 +51,19 @@
 
 ;; --- derivation missing :pname/:name ----------------------------------------
 
-(test-case "derivation without :pname or :name errors"
+(test-case "nix/derivation without :pname or :name errors"
   (check-exn (lambda (e)
                (and (exn:fail? e)
                     (regexp-match? #rx":pname or :name" (exn-message e))))
-             (lambda () (nix-emit "(derivation {:src ./.})"))))
+             (lambda () (nix-emit "(nix/derivation {:src ./.})"))))
 
 ;; --- overlay arity ----------------------------------------------------------
 
-(test-case "overlay rejects wrong arity"
+(test-case "nix/overlay rejects wrong arity"
   (check-exn (lambda (e)
                (and (exn:fail? e)
                     (regexp-match? #rx"exactly two formals" (exn-message e))))
-             (lambda () (nix-emit "(overlay [a] body)"))))
+             (lambda () (nix-emit "(nix/overlay [a] body)"))))
 
 ;; --- Infinity / NaN rejected -----------------------------------------------
 

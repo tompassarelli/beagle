@@ -6,8 +6,8 @@
 ;; Reads Nix on stdin (or from a file argument), writes beagle/nix-shape s-exprs
 ;; to stdout. Covers the common paste-from-docs patterns:
 ;;
-;;   { config, pkgs, ... }: BODY       →  (module [config pkgs] BODY)
-;;   final: prev: BODY                 →  (overlay [final prev] BODY)
+;;   { config, pkgs, ... }: BODY       →  (nix/module [config pkgs] BODY)
+;;   final: prev: BODY                 →  (nix/overlay [final prev] BODY)
 ;;   { a = 1; b = 2; }                 →  {:a 1 :b 2}
 ;;   path.to.attr = value;             →  :path.to.attr value
 ;;   [ a b c ]                         →  [a b c]

@@ -29,9 +29,9 @@
 
 (test-case "read-source-string parses #lang line + forms"
   (define-values (lang forms)
-    (read-source-string "#lang beagle/clj\n(+ 1 2)\n(claim foo :type Int)"))
+    (read-source-string "#lang beagle/clj\n(+ 1 2)\n(def foo :- Int 42)"))
   (check-equal? lang "#lang beagle/clj")
-  (check-equal? forms '((+ 1 2) (claim foo :type Int))))
+  (check-equal? forms '((+ 1 2) (def foo :- Int 42))))
 
 ;; --- detect-target ------------------------------------------------------
 
@@ -104,10 +104,13 @@
 
 (test-case "compile aborts on real type mismatch"
   ;; Need a structural mismatch the gradual checker catches: arity error.
+  ;; Previously this paired `(claim f :type (-> [Int Int] Int))` with a
+  ;; defn to declare an arity. Claim was removed under the Zero-users
+  ;; rule. The operative-surface checker reads typed signatures via
+  ;; `(declare-extern NAME :type (-> (' params …) (returns RT)))`.
   (with-temp-source
     "#lang beagle/rkt
-(claim f :type (-> (' params Int Int) (returns Int)))
-(defn f (' params a b) (body (+ a b)))
+(declare-extern f :type (-> (' params Int Int) (returns Int)))
 (f 1 2 3)\n"
     (lambda (path)
       (check-exn exn:fail:user? (lambda () (compile-source path))))))

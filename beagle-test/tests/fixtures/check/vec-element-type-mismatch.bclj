@@ -1,12 +1,10 @@
 (defrecord Product [(id : Int) (name : String)])
 (defrecord Customer [(id : Int) (email : String)])
 
-(claim process-products [(Vec Product) -> Int])
-(defn process-products [(products : (Vec Product))]
+(defn process-products [(products : (Vec Product))] :- Int
   (count products))
 
 ;; should fail: vec contains Customer, not Product
-(claim bad [-> Int])
-(defn bad []
+(defn bad [] :- Int
   (let [cs [(->Customer 1 "a@b.com") (->Customer 2 "c@d.com")]]
     (process-products cs)))

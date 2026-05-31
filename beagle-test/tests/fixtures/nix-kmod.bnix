@@ -1,7 +1,7 @@
 #lang beagle/nix
 (ns test.nix.kmod)
 
-(module [config lib]
+(nix/module [config lib]
   {:options.hardware.framework.enableKmod
      (merge
        (lib/mkEnableOption "the Framework kernel module")

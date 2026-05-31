@@ -34,7 +34,7 @@
                     sops-nix.nixosModules.sops
                     hostConfig
 
-                    (module [config pkgs]
+                    (nix/module [config pkgs]
                       {:networking.hostName hostname
                        :sops.age.keyFile "/var/lib/sops-nix/key.txt"
                        :environment.systemPackages

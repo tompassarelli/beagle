@@ -1,14 +1,14 @@
 #lang beagle/sql
 (ns test.sql.insert)
 
-(deftable products
+(sql/deftable products
   [(id    : Int :primary-key)
    (name  : String)
    (price : Float)
    (stock : Int)])
 
 ;; Multi-row INSERT with values.
-(insert products [name price stock]
+(sql/insert products [name price stock]
   (values ["Widget"  9.99  100]
           ["Gadget"  19.99 50]
           ["Gizmo"   29.99 25]))

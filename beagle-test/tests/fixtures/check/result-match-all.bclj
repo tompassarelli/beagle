@@ -1,8 +1,7 @@
 (defrecord Ok [(value : Any)])
 (defrecord Err [(error : String)])
 (defunion Result Ok Err)
-(claim handle [Result -> String])
-(defn handle [(r : Result)]
+(defn handle [(r : Result)] :- String
   (match r
     [(Ok v) "ok"]
     [(Err e) e]))
