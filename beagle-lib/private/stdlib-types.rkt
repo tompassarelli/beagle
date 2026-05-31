@@ -9,12 +9,13 @@
 (require racket/set
          "stdlib-portable.rkt"
          "stdlib-nix.rkt"
-         ;; Non-Nix stdlib catalogs live under dormant/ — see
-         ;; private/emit.rkt for the quarantine rationale. These imports
-         ;; stay wired because stdlib-types is consumed by query tools
-         ;; (LSP, beagle-sig) that the user still runs against any target.
-         "dormant/stdlib-clj.rkt"
-         "dormant/stdlib-cljs.rkt"
+         ;; CLJ/CLJS stdlib catalogs are live (promoted from dormant/).
+         ;; JS, SQL, PY remain dormant — see private/emit.rkt for the
+         ;; quarantine rationale. These imports stay wired because
+         ;; stdlib-types is consumed by query tools (LSP, beagle-sig)
+         ;; that the user still runs against any target.
+         "stdlib-clj.rkt"
+         "stdlib-cljs.rkt"
          "dormant/stdlib-js.rkt"
          "dormant/stdlib-sql.rkt"
          "dormant/stdlib-py.rkt")

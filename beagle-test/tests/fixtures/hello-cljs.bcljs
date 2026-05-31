@@ -3,7 +3,8 @@
 (define-target cljs)
 (ns heist.hello)
 
-(defn greet [(name : String)] : String
+(claim greet [String -> String])
+(defn greet [(name : String)]
   (str "Hello, " name "!"))
 
 (def message (greet "Heist"))

@@ -41,8 +41,8 @@
 #hasheq(
   (nix     . (active   "Load-bearing via bnix dogfood (firnos config + heist work)"))
   (rkt     . (active   "Oracle target — Typed Racket validates Beagle's type promises via raco make; all current tests are structural"))
-  (clj     . (split    "Structural active (floor rule); behavioral demoted — Clojure was the bootstrap target; no current load-bearing use; reactivate when a Clojure-backed app ships"))
-  (cljs    . (split    "Structural active; behavioral demoted — same rationale as clj; CLJS-specific tests live inside emit-clj-behavioral suite for now"))
+  (clj     . (active   "Promoted Phase D (2026-05): emit-clj structural + behavioral both active. Fixture-driven .bclj suites reconciled to v0.16 surface (claim form, no inline def/defn type annotations, defrecord+extend-type instead of deftype)"))
+  (cljs    . (active   "Promoted Phase D (2026-05): emit-cljs path covered structurally by emit-clj suite (shared backend); .bcljs fixtures reconciled to v0.16 surface"))
   (js      . (split    "Structural active; behavioral demoted — JS target may become load-bearing via Bun work; currently aspirational"))
   (py      . (split    "Structural active; behavioral demoted — Python target is recent; no load-bearing use yet"))
   (sql     . (active   "Structural-only; no behavioral runner exists yet so nothing to demote"))
@@ -73,17 +73,21 @@
              "nix-lints.rkt"
              "nix-parse.rkt"
              "nix-roundtrip.rkt"
-             "validate-nix.rkt"))
+             "validate-nix.rkt"
+             ;; Clojure / ClojureScript — promoted Phase D (2026-05).
+             ;; emit.rkt is the clj structural suite; emit-clj-behavioral.rkt
+             ;; runs the emitted clj via bb (Babashka). cljs is covered by the
+             ;; shared emit-clj backend; no separate emit-cljs.rkt test exists.
+             "emit.rkt"                 ; emit-clj structural
+             "emit-clj-behavioral.rkt")) ; requires bb (Babashka)
 
   (demoted . (;; behavioral runs that hit external interpreters
-              "emit-clj-behavioral.rkt"  ; requires bb (Babashka)
               "emit-js-behavioral.rkt")) ; requires bun
 
   (gated . (;; Non-Nix target tests — parked alongside the dormant
             ;; emitters. Opt in via BEAGLE_ALL_TARGETS=1 when revisiting
             ;; a quarantined target. See thread 20260528233608 and
             ;; beagle-lib/private/dormant/.
-            "emit.rkt"                  ; emit-clj structural
             "emit-js.rkt"
             "emit-py.rkt"
             "emit-rkt.rkt"

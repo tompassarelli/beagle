@@ -77,24 +77,24 @@
    ;; --- basic arithmetic & values -------------------------------------------
 
    (check-clj-output "def + defn round-trip"
-     (list '(def x : Int 42)
-           '(defn double [(n : Int)] : Int (* n 2)))
+     (list '(def x 42)
+           '(defn double [(n : Int)] (* n 2)))
      "(println (double x))"
      "84")
 
    (check-clj-output "string concatenation"
-     (list '(defn greet [(name : String)] : String (str "Hello, " name "!")))
+     (list '(defn greet [(name : String)] (str "Hello, " name "!")))
      "(println (greet \"world\"))"
      "Hello, world!")
 
    (check-clj-output "boolean logic"
-     (list '(defn both [(a : Bool) (b : Bool)] : Bool (and a b)))
+     (list '(defn both [(a : Bool) (b : Bool)] (and a b)))
      "(println (both true true)) (println (both true false))"
      "true\nfalse")
 
    (check-clj-output "float arithmetic"
-     (list '(def pi : Float 3.14)
-           '(defn circle-area [(r : Float)] : Float (* pi (* r r))))
+     (list '(def pi 3.14)
+           '(defn circle-area [(r : Float)] (* pi (* r r))))
      "(println (circle-area 2.0))"
      "12.56")
 
@@ -107,7 +107,7 @@
 
    (check-clj-output "record with update"
      (list '(defrecord Point [(x : Int) (y : Int)])
-           `(defn move-right [(p : Point)] : Point
+           `(defn move-right [(p : Point)]
               (with p ,(br ':x '(+ (point-x p) 1)))))
      "(let [p (->Point 1 2) q (move-right p)] (println (:x p)) (println (:x q)))"
      "1\n2")
@@ -143,7 +143,7 @@
      "true\ntrue\n3")
 
    (check-clj-output "match with keyword literals (was: case dispatch)"
-     (list '(defn color-name [(c : Keyword)] : String
+     (list '(defn color-name [(c : Keyword)]
               (match c [:red "Red"] [:green "Green"] [:blue "Blue"] [_ "unknown"])))
      "(println (color-name :red)) (println (color-name :blue))"
      "Red\nBlue")
@@ -151,24 +151,24 @@
    ;; --- let -----------------------------------------------------------------
 
    (check-clj-output "let binds correctly"
-     (list '(defn f [] : Int (let [x 10 y 20] (+ x y))))
+     (list '(defn f [] (let [x 10 y 20] (+ x y))))
      "(println (f))"
      "30")
 
    (check-clj-output "nested let scoping"
-     (list '(defn f [] : Int (let [x 1] (let [x 2] x))))
+     (list '(defn f [] (let [x 1] (let [x 2] x))))
      "(println (f))"
      "2")
 
    (check-clj-output "let with map destructuring"
-     (list `(defn f [(m : (Map Keyword Int))] : Int
+     (list `(defn f [(m : (Map Keyword Int))]
               (let [,(mt ':keys (br 'a 'b)) m]
                 (+ a b))))
      "(println (f {:a 10 :b 20}))"
      "30")
 
    (check-clj-output "let with seq destructuring"
-     (list `(defn f [(xs : (Vec Int))] : Int
+     (list `(defn f [(xs : (Vec Int))]
               (let [,(br 'a 'b 'c) xs]
                 (+ a (+ b c)))))
      "(println (f [1 2 3]))"
@@ -177,37 +177,37 @@
    ;; --- cond / if / when / case ---------------------------------------------
 
    (check-clj-output "cond evaluates correct branch"
-     (list '(defn classify [(n : Int)] : String
+     (list '(defn classify [(n : Int)]
               (cond (< n 0) "neg" (= n 0) "zero" :else "pos")))
      "(println (classify -1)) (println (classify 0)) (println (classify 1))"
      "neg\nzero\npos")
 
    (check-clj-output "if with else"
-     (list '(defn abs [(n : Int)] : Int (if (< n 0) (- 0 n) n)))
+     (list '(defn abs [(n : Int)] (if (< n 0) (- 0 n) n)))
      "(println (abs -5)) (println (abs 3))"
      "5\n3")
 
    (check-clj-output "when runs body on true"
-     (list '(defn f [(x : Bool)] : Nil (when x (println "yes"))))
+     (list '(defn f [(x : Bool)] (when x (println "yes"))))
      "(f true)"
      "yes")
 
    (check-clj-behavior "when skips body on false"
-     (list '(defn f [(x : Bool)] : Nil (when x (println "yes"))))
+     (list '(defn f [(x : Bool)] (when x (println "yes"))))
      "(f false)")
 
    (check-clj-output "when-let non-nil runs body"
-     (list '(defn f [(x : Any)] : Nil (when-let [v x] (println v))))
+     (list '(defn f [(x : Any)] (when-let [v x] (println v))))
      "(f 42)"
      "42")
 
    (check-clj-output "if-let selects branch"
-     (list '(defn f [(x : Any)] : String (if-let [v x] "found" "missing")))
+     (list '(defn f [(x : Any)] (if-let [v x] "found" "missing")))
      "(println (f 1)) (println (f nil))"
      "found\nmissing")
 
    (check-clj-output "match with or-pattern matches correct value (was: case)"
-     (list '(defn day-type [(d : Int)] : String
+     (list '(defn day-type [(d : Int)]
               (match d [(or 0 6) "weekend"] [_ "weekday"])))
      "(println (day-type 0)) (println (day-type 3)) (println (day-type 6))"
      "weekend\nweekday\nweekend")
@@ -215,20 +215,20 @@
    ;; --- loop / recur --------------------------------------------------------
 
    (check-clj-output "loop/recur basic countdown"
-     (list '(defn countdown [(n : Int)] : Int
+     (list '(defn countdown [(n : Int)]
               (loop [i n] (if (= i 0) i (recur (- i 1))))))
      "(println (countdown 10))"
      "0")
 
    (check-clj-output "loop/recur accumulator"
-     (list '(defn sum-to [(n : Int)] : Int
+     (list '(defn sum-to [(n : Int)]
               (loop [i n acc 0]
                 (if (= i 0) acc (recur (- i 1) (+ acc i))))))
      "(println (sum-to 5))"
      "15")
 
    (check-clj-output "loop/recur factorial"
-     (list '(defn factorial [(n : Int)] : Int
+     (list '(defn factorial [(n : Int)]
               (loop [i n acc 1]
                 (if (<= i 1) acc (recur (- i 1) (* acc i))))))
      "(println (factorial 5))"
@@ -238,26 +238,26 @@
    ;; dotimes removed — use (doseq [i (range n)] body).
 
    (check-clj-output "for comprehension"
-     (list '(defn double-all [(xs : (Vec Int))] : (Vec Int)
+     (list '(defn double-all [(xs : (Vec Int))]
               (for [x xs] (* x 2))))
      "(println (vec (double-all [1 2 3])))"
      "[2 4 6]")
 
    (check-clj-output "for with :when"
-     (list '(defn positives [(xs : (Vec Int))] : (Vec Int)
+     (list '(defn positives [(xs : (Vec Int))]
               (for [x xs :when (> x 0)] x)))
      "(println (vec (positives [-1 0 1 2 -3])))"
      "[1 2]")
 
    (check-clj-output "doseq iterates"
-     (list '(defn f [(xs : (Vec Int))] : Nil (doseq [x xs] (println x))))
+     (list '(defn f [(xs : (Vec Int))] (doseq [x xs] (println x))))
      "(f [10 20 30])"
      "10\n20\n30")
 
    ;; --- higher-order functions ----------------------------------------------
 
    (check-clj-output "fn as argument"
-     (list `(defn apply-twice [(f : ,(br 'Int '-> 'Int)) (x : Int)] : Int (f (f x))))
+     (list `(defn apply-twice [(f : ,(br 'Int '-> 'Int)) (x : Int)] (f (f x))))
      "(println (apply-twice inc 5))"
      "7")
 
@@ -281,7 +281,7 @@
    ;; --- try/catch -----------------------------------------------------------
 
    (check-clj-output "try/catch returns catch value on error"
-     (list '(defn safe-div [(a : Int) (b : Int)] : String
+     (list '(defn safe-div [(a : Int) (b : Int)]
               (try
                 (do (/ a b) "ok")
                 (catch Exception e "error"))))
@@ -289,14 +289,14 @@
      "ok\nerror")
 
    (check-clj-output "try/catch as expression in let"
-     (list '(defn f [] : Int (let [x (try 42 (catch Exception e 0))] (+ x 1))))
+     (list '(defn f [] (let [x (try 42 (catch Exception e 0))] (+ x 1))))
      "(println (f))"
      "43")
 
    ;; --- do ------------------------------------------------------------------
 
    (check-clj-output "do executes in order"
-     (list '(defn f [] : Nil
+     (list '(defn f []
               (do (println "first") (println "second") (println "third"))))
      "(f)"
      "first\nsecond\nthird")
@@ -304,7 +304,7 @@
    ;; --- atoms ---------------------------------------------------------------
 
    (check-clj-output "atom + swap! + deref"
-     (list '(def counter : Any (atom 0)))
+     (list '(def counter (atom 0)))
      "(swap! counter inc)
       (swap! counter inc)
       (swap! counter inc)
@@ -314,7 +314,7 @@
    ;; --- nil -----------------------------------------------------------------
 
    (check-clj-output "nil? on nil"
-     (list '(def x : Nil nil))
+     (list '(def x nil))
      "(println (nil? x))"
      "true")
 
@@ -326,7 +326,7 @@
    ;; --- letfn ---------------------------------------------------------------
 
    (check-clj-output "letfn mutual recursion"
-     (list '(defn mutual-test [] : Bool
+     (list '(defn mutual-test []
               (letfn [(is-even [(n : Int)] : Bool
                         (if (= n 0) true (is-odd (- n 1))))
                       (is-odd [(n : Int)] : Bool
@@ -363,7 +363,7 @@
    ;; --- string operations (from jank-inspired patterns) ---------------------
 
    (check-clj-output "str concatenation"
-     (list '(defn greeting [(name : String) (age : Int)] : String
+     (list '(defn greeting [(name : String) (age : Int)]
               (str "Hello " name ", age " age)))
      "(println (greeting \"Alice\" 30))"
      "Hello Alice, age 30")
@@ -395,14 +395,14 @@
    ;; --- defonce -------------------------------------------------------------
 
    (check-clj-output "defonce"
-     (list `(defonce config : (Map Keyword Int) ,(mt ':timeout 30 ':retries 3)))
+     (list `(defonce config ,(mt ':timeout 30 ':retries 3)))
      "(println (:timeout config))"
      "30")
 
    ;; --- condp ---------------------------------------------------------------
 
    (check-clj-output "condp"
-     (list '(defn describe-num [(n : Int)] : String
+     (list '(defn describe-num [(n : Int)]
               (condp = n
                 1 "one"
                 2 "two"
@@ -414,37 +414,41 @@
    ;; --- if-let / when-let (if-some / when-some removed) ---------------------
 
    (check-clj-output "if-let with non-nil"
-     (list '(defn f [(x : Any)] : String (if-let [v x] (str "got: " v) "nothing")))
+     (list '(defn f [(x : Any)] (if-let [v x] (str "got: " v) "nothing")))
      "(println (f 42)) (println (f nil))"
      "got: 42\nnothing")
 
    (check-clj-output "when-let with non-nil"
-     (list '(defn f [(x : Any)] : Nil (when-let [v x] (println (str "got: " v)))))
+     (list '(defn f [(x : Any)] (when-let [v x] (println (str "got: " v)))))
      "(f 42)"
      "got: 42")
 
-   ;; --- defprotocol / deftype ------------------------------------------------
+   ;; --- defprotocol + defrecord + extend-type --------------------------------
+   ;; deftype removed — decomposed into defrecord (data shape) + extend-type
+   ;; (protocol impls). Field access via (:field r) instead of (.-field self).
 
-   (check-clj-output "defprotocol + deftype"
+   (check-clj-output "defprotocol + defrecord + extend-type"
      (list `(defprotocol Greetable
               (greet ,(br '(self : Greetable)) : String))
-           `(deftype Person ,(br '(name : String))
+           '(defrecord Person [(name : String)])
+           `(extend-type Person
               Greetable
               (greet ,(br '(self : Person)) : String
-                (str "Hello, " (.-name self)))))
+                (str "Hello, " (:name self)))))
      "(println (greet (->Person \"Alice\")))"
      "Hello, Alice")
 
-   (check-clj-output "deftype with multiple methods"
+   (check-clj-output "defrecord + extend-type with multiple methods"
      (list `(defprotocol Shape
               (area ,(br '(self : Shape)) : Int)
               (perimeter ,(br '(self : Shape)) : Int))
-           `(deftype Rect ,(br '(w : Int) '(h : Int))
+           '(defrecord Rect [(w : Int) (h : Int)])
+           `(extend-type Rect
               Shape
               (area ,(br '(self : Rect)) : Int
-                (* (.-w self) (.-h self)))
+                (* (:w self) (:h self)))
               (perimeter ,(br '(self : Rect)) : Int
-                (* 2 (+ (.-w self) (.-h self))))))
+                (* 2 (+ (:w self) (:h self))))))
      "(let [r (->Rect 3 4)]
         (println (area r))
         (println (perimeter r)))"
@@ -489,20 +493,21 @@
       (println (into [] (sort (cset/intersection #{1 2 3} #{2 3 4}))))"
      "3\n[2 3]")
 
-   ;; --- defprotocol / deftype / extend-type edge cases -------------------------
+   ;; --- defprotocol / defrecord / extend-type edge cases -----------------------
 
-   (check-clj-output "deftype implementing multiple protocols"
+   (check-clj-output "defrecord + extend-type implementing multiple protocols"
      (list `(defprotocol Printable
               (to-string ,(br '(self : Printable)) : String))
            `(defprotocol Measurable
               (size ,(br '(self : Measurable)) : Int))
-           `(deftype Box ,(br '(label : String) '(items : Int))
+           '(defrecord Box [(label : String) (items : Int)])
+           `(extend-type Box
               Printable
               (to-string ,(br '(self : Box)) : String
-                (str "Box(" (.-label self) ")"))
+                (str "Box(" (:label self) ")"))
               Measurable
               (size ,(br '(self : Box)) : Int
-                (.-items self))))
+                (:items self))))
      "(let [b (->Box \"stuff\" 42)]
         (println (to-string b))
         (println (size b)))"
@@ -511,10 +516,11 @@
    (check-clj-output "protocol method with multiple parameters"
      (list `(defprotocol Combinable
               (combine ,(br '(self : Combinable) '(other : String) '(sep : String)) : String))
-           `(deftype Tag ,(br '(value : String))
+           '(defrecord Tag [(value : String)])
+           `(extend-type Tag
               Combinable
               (combine ,(br '(self : Tag) '(other : String) '(sep : String)) : String
-                (str (.-value self) sep other))))
+                (str (:value self) sep other))))
      "(let [t (->Tag \"hello\")]
         (println (combine t \"world\" \"-\"))
         (println (combine t \"there\" \":\")))"
@@ -531,29 +537,30 @@
       (println (rev \"racecar\"))"
      "edcba\nracecar")
 
-   (check-clj-output "deftype with no protocols (plain fields)"
-     (list `(deftype Pair ,(br '(fst : Int) '(snd : Int))))
+   (check-clj-output "defrecord with no protocols (plain fields)"
+     (list '(defrecord Pair [(fst : Int) (snd : Int)]))
      "(let [p (->Pair 10 20)]
-        (println (.-fst p))
-        (println (.-snd p))
-        (println (+ (.-fst p) (.-snd p))))"
+        (println (:fst p))
+        (println (:snd p))
+        (println (+ (:fst p) (:snd p))))"
      "10\n20\n30")
 
    (check-clj-output "self-referential protocol (method returns protocol type)"
      (list `(defprotocol Incrementable
               (inc-val ,(br '(self : Incrementable)) : Incrementable))
-           `(deftype Counter ,(br '(n : Int))
+           '(defrecord Counter [(n : Int)])
+           `(extend-type Counter
               Incrementable
               (inc-val ,(br '(self : Counter)) : Counter
-                (->Counter (+ (.-n self) 1)))))
+                (->Counter (+ (:n self) 1)))))
      "(let [c0 (->Counter 0)
             c1 (inc-val c0)
             c2 (inc-val c1)
             c3 (inc-val c2)]
-        (println (.-n c0))
-        (println (.-n c1))
-        (println (.-n c2))
-        (println (.-n c3)))"
+        (println (:n c0))
+        (println (:n c1))
+        (println (:n c2))
+        (println (:n c3)))"
      "0\n1\n2\n3")
 
    ;; --- multi-module behavioral tests ----------------------------------------
@@ -625,9 +632,9 @@
      (check-multi-module "multi-module: basic require"
        (list
         (list 'mathlib.core
-              '(defn square [(n : Int)] : Int (* n n)))
+              '(defn square [(n : Int)] (* n n)))
         (list 'app.main
-              '(defn compute [(x : Int)] : Int (+ x 1))))
+              '(defn compute [(x : Int)] (+ x 1))))
        "(require '[mathlib.core :as mc])
         (require '[app.main :as app])
         (println (mc/square 7))
@@ -640,7 +647,7 @@
         (list 'models.point
               '(defrecord Point [(x : Int) (y : Int)]))
         (list 'geo.ops
-              '(defn origin-distance [(x : Int) (y : Int)] : Int (+ (* x x) (* y y)))))
+              '(defn origin-distance [(x : Int) (y : Int)] (+ (* x x) (* y y)))))
        "(require '[models.point :as pt])
         (require '[geo.ops :as geo])
         (let [p (pt/->Point 3 4)]
@@ -653,11 +660,11 @@
      (check-multi-module "multi-module: transitive require"
        (list
         (list 'base.math
-              '(defn double [(n : Int)] : Int (* n 2)))
+              '(defn double [(n : Int)] (* n 2)))
         (list 'mid.transform
-              '(defn quad [(n : Int)] : Int (* n 4)))
+              '(defn quad [(n : Int)] (* n 4)))
         (list 'top.app
-              '(defn process [(n : Int)] : Int (+ n 100))))
+              '(defn process [(n : Int)] (+ n 100))))
        "(require '[base.math :as bm])
         (require '[mid.transform :as mt])
         (require '[top.app :as ta])

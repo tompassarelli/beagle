@@ -1,7 +1,7 @@
 # beagle — session anchor
 
-A typed authoring IR. **Nix is the live target;** Clj, CLJS, JS, Py,
-Rkt, SQL emitters are parked under `beagle-lib/private/dormant/` and
+A typed authoring IR. **Nix, Clj, and CLJS are live targets.** JS, Py,
+Rkt, SQL emitters remain parked under `beagle-lib/private/dormant/` and
 reactivate with `BEAGLE_ALL_TARGETS=1`. Pipeline:
 `parse → check → emit`, all at Racket expand-time inside our custom
 `#%module-begin`.
@@ -25,7 +25,7 @@ answer to a question a static doc would otherwise try to encode.
 | what does FILE export? | `bin/beagle-provides FILE` |
 | change-impact for X? | `bin/beagle-impact X FILE...` |
 | show macro expansion | `bin/beagle-expand FILE` |
-| run tests | `bin/beagle-test` (Nix-tier default) |
+| run tests | `bin/beagle-test` (active-tier default, includes Nix + Clj + CLJS) |
 | compile this | `bin/beagle-op-compile FILE` |
 
 When stuck after ordinary checks: `bin/beagle-repair --emit-patch`,
@@ -265,15 +265,16 @@ otherwise collide with a Clojure namesake.
 
 ### Test tiering during surface iteration
 
-`bin/beagle-test` runs the **active tier only** by default — Nix-target
-tests and the target-agnostic infrastructure. Non-Nix target tests and
-behavioral/oracle suites are gated; opt in with `BEAGLE_ALL_TARGETS=1`
-or per-suite env vars (`BEAGLE_ORACLE=1`, `BEAGLE_NIX_EVAL_CHECK=1`).
+`bin/beagle-test` runs the **active tier only** by default — Nix, Clj,
+and CLJS target tests plus the target-agnostic infrastructure. Dormant
+target tests (JS, Py, Rkt, SQL) and behavioral/oracle suites are gated;
+opt in with `BEAGLE_ALL_TARGETS=1` or per-suite env vars
+(`BEAGLE_ORACLE=1`, `BEAGLE_NIX_EVAL_CHECK=1`).
 
 - Active failures: fix until green.
 - Demoted / gated failures during surface iteration: **leave alone.**
   The tiering exists so dormant-target test churn doesn't slow the
-  Nix loop. The reflex to "just fix the small thing" is locally cheap
+  active loop. The reflex to "just fix the small thing" is locally cheap
   and globally expensive across drops.
 
 Fixture migrations are not test code — they're test inputs and **must**

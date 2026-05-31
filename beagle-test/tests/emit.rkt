@@ -23,12 +23,13 @@
   (define out (compile '(ns foo.bar) '(def x 1)))
   (check-true (matches? #rx"\\(ns foo\\.bar\\)" out)))
 
-(test-case "def emits and drops type annotation"
-  (define out (compile '(def greeting : String "hello")))
-  (check-true (matches? #rx"\\(def greeting \"hello\"\\)" out)))
+(test-case "def with claim emits ^Type tag"
+  (define out (compile `(claim greeting String)
+                       '(def greeting "hello")))
+  (check-true (matches? #rx"\\(def \\^String greeting \"hello\"\\)" out)))
 
-(test-case "defn drops types but emits arg vector"
-  (define out (compile '(defn add [(x : Int) (y : Int)] : Int (+ x y))))
+(test-case "defn drops param types but emits arg vector"
+  (define out (compile '(defn add [(x : Int) (y : Int)] (+ x y))))
   (check-true (matches? #rx"\\(defn add \\[x y\\]" out))
   (check-true (matches? #rx"\\(\\+ x y\\)"            out)))
 
@@ -459,13 +460,15 @@
 
 (test-case "defscalar without :where emits comment (erased)"
   (define out (compile '(defscalar Amount Int)
-                       '(def x : Amount (->Amount 42))))
+                       '(claim x Amount)
+                       '(def x (->Amount 42))))
   (check-true (matches? #rx";; Amount : Int \\(scalar\\)" out))
   (check-false (matches? #rx"defn ->Amount" out)))
 
 (test-case "defscalar with :where emits constructor with :pre"
   (define out (compile '(defscalar Percentage Int :where (>= 0) (<= 100))
-                       '(def x : Percentage (->Percentage 50))))
+                       '(claim x Percentage)
+                       '(def x (->Percentage 50))))
   (check-true (matches? #rx"defn ->Percentage" out))
   (check-true (matches? #rx":pre" out))
   (check-true (matches? #rx"\\(>= v 0\\)" out))
@@ -473,22 +476,23 @@
 
 (test-case "defscalar with :where constructor is not erased at call site"
   (define out (compile '(defscalar Percentage Int :where (>= 0) (<= 100))
-                       '(def x : Percentage (->Percentage 50))))
+                       '(claim x Percentage)
+                       '(def x (->Percentage 50))))
   (check-true (matches? #rx"\\(->Percentage 50\\)" out)))
 
 ;; --- varargs emission --------------------------------------------------------
 
 (test-case "defn with & rest emits Clojure varargs"
-  (define out (compile '(defn my-sum [(x : Int) & (rest : Int)] : Int
+  (define out (compile '(defn my-sum [(x : Int) & (rest : Int)]
                           (+ x (reduce + 0 rest)))))
   (check-true (matches? #rx"\\(defn my-sum \\[x & rest\\]" out)))
 
 (test-case "fn with & rest emits varargs"
-  (define out (compile '(def f : Any (fn [(a : Int) & (b : Int)] (+ a 1)))))
+  (define out (compile '(def f (fn [(a : Int) & (b : Int)] (+ a 1)))))
   (check-true (matches? #rx"\\(fn \\[a & b\\]" out)))
 
 (test-case "defn with only & rest and no fixed params"
-  (define out (compile '(defn log-it [& (msgs : String)] : String
+  (define out (compile '(defn log-it [& (msgs : String)]
                           (clojure.string/join ", " msgs))))
   (check-true (matches? #rx"\\(defn log-it \\[& msgs\\]" out)))
 
@@ -513,15 +517,15 @@
 ;; standard let + if Clojure forms (already covered by let/if emit tests).
 
 (test-case "with-open emits"
-  (define out (compile '(defn f [(p : String)] : Any (with-open [r (slurp p)] r))))
+  (define out (compile '(defn f [(p : String)] (with-open [r (slurp p)] r))))
   (check-true (matches? #rx"\\(with-open \\[r" out)))
 
 (test-case "doto emits"
-  (define out (compile '(def x : Any (doto (atom 1) (reset! 2)))))
+  (define out (compile '(def x (doto (atom 1) (reset! 2)))))
   (check-true (matches? #rx"\\(doto" out)))
 
 (test-case "for with :let emits"
-  (define out (compile `(def x : (Vec String) (for ,(br 'i '(range 3) ':let (br 's '(str i))) s))))
+  (define out (compile `(def x (for ,(br 'i '(range 3) ':let (br 's '(str i))) s))))
   (check-true (matches? #rx":let \\[s" out)))
 
 ;; when-not / if-not removed — use (when (not ...)) / (if (not ...) ...).
@@ -537,7 +541,7 @@
 ;; --- condp ---
 
 (test-case "condp emits with default"
-  (define out (compile '(defn f [(x : Keyword)] : String (condp = x :a "alpha" :b "beta" "other"))))
+  (define out (compile '(defn f [(x : Keyword)] (condp = x :a "alpha" :b "beta" "other"))))
   (check-true (matches? #rx"\\(condp = x" out))
   (check-true (matches? #rx":a \"alpha\"" out))
   (check-true (matches? #rx"\"other\"" out)))
@@ -551,7 +555,7 @@
 ;; --- letfn ---
 
 (test-case "letfn emits"
-  (define out (compile '(defn outer [] : Int
+  (define out (compile '(defn outer []
                           (letfn [(f [(x : Int)] : Int (+ x 1))
                                   (g [(x : Int)] : Int (f x))]
                             (g 10)))))
@@ -561,7 +565,7 @@
   (check-true (matches? #rx"\\(g 10\\)" out)))
 
 (test-case "letfn emits rest param"
-  (define out (compile '(defn outer [] : Int
+  (define out (compile '(defn outer []
                           (letfn [(f [(x : Int) & (rest : Int)] : Int x)]
                             (f 1 2 3)))))
   (check-true (matches? #rx"\\(letfn \\[" out))
@@ -616,7 +620,7 @@
 ;; --- condp without default --------------------------------------------------
 
 (test-case "condp without default omits trailing default clause"
-  (define out (compile '(defn f [(k : Keyword)] : String (condp = k :a "alpha" :b "beta"))))
+  (define out (compile '(defn f [(k : Keyword)] (condp = k :a "alpha" :b "beta"))))
   (check-true (matches? #rx"\\(condp = k" out))
   (check-true (matches? #rx":a \"alpha\"" out))
   (check-true (matches? #rx":b \"beta\"" out))
@@ -628,7 +632,7 @@
 
 (test-case "match record pattern with empty bindings emits bare instance? test"
   (define out (compile `(defrecord Tag ,(br '(n : Int)))
-                       `(defn f [(t : Any)] : Int
+                       `(defn f [(t : Any)]
                           (match t
                             ,(br '(Tag) 0)
                             ,(br '_ 1)))))
@@ -636,7 +640,7 @@
 
 (test-case "match map pattern with single key emits unwrapped test"
   (define out
-    (compile `(defn f [(m : Any)] : Int
+    (compile `(defn f [(m : Any)]
                 (match m
                   ,(br (mt ':k 1) 10)
                   ,(br '_ 20)))))
@@ -654,7 +658,7 @@
 
 (test-case "or-pattern of integer literals — case-fold to (case x ...)"
   (define out
-    (compile `(defn f [(x : Int)] : String
+    (compile `(defn f [(x : Int)]
                 (match x
                   ,(br '(or 1 2 3) "low")
                   ,(br '_ "other")))))
@@ -664,7 +668,7 @@
 
 (test-case "or-pattern of keyword literals — case-fold to (case k ...)"
   (define out
-    (compile `(defn f [(k : Keyword)] : String
+    (compile `(defn f [(k : Keyword)]
                 (match k
                   ,(br '(or :a :b) "first")
                   ,(br '_ "other")))))
@@ -674,7 +678,7 @@
 (test-case "or-pattern mixed with non-literal — falls through to cond chain"
   (define out
     (compile `(defrecord Tag ,(br '(n : Int)))
-             `(defn f [(x : Any)] : Int
+             `(defn f [(x : Any)]
                 (match x
                   ,(br '(or 1 2) 10)
                   ,(br '(Tag n) 'n)
@@ -696,7 +700,7 @@
 (test-case "with-form emits assoc"
   (define out
     (compile `(defrecord P ,(br '(x : Int) '(y : Int)))
-             `(defn shift [(p : P)] : P
+             `(defn shift [(p : P)]
                 (with p ,(br ':x '(+ (p-x p) 1)) ,(br ':y '(+ (p-y p) 1))))))
   (check-true (matches? #rx"\\(assoc p :x" out))
   (check-true (matches? #rx":y \\(\\+ \\(p-y p\\)" out)))

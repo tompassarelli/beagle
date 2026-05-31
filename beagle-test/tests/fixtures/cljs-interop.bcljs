@@ -4,28 +4,49 @@
 (ns test.cljs-interop)
 
 ;; JS global functions
-(def parsed : Int (js/parseInt "42"))
-(def float-val : Float (js/parseFloat "3.14"))
-(def nan-check : Bool (js/isNaN 0))
-(def finite-check : Bool (js/isFinite 100))
+(claim parsed Int)
+(def parsed (js/parseInt "42"))
+
+(claim float-val Float)
+(def float-val (js/parseFloat "3.14"))
+
+(claim nan-check Bool)
+(def nan-check (js/isNaN 0))
+
+(claim finite-check Bool)
+(def finite-check (js/isFinite 100))
 
 ;; JS Math
-(def pi-area : Float (js/Math.pow 3.14 2.0))
-(def root : Float (js/Math.sqrt 16.0))
-(def rnd : Float (js/Math.random))
-(def floored : Float (js/Math.floor 3.7))
-(def ceiled : Float (js/Math.ceil 3.2))
+(claim pi-area Float)
+(def pi-area (js/Math.pow 3.14 2.0))
+
+(claim root Float)
+(def root (js/Math.sqrt 16.0))
+
+(claim rnd Float)
+(def rnd (js/Math.random))
+
+(claim floored Float)
+(def floored (js/Math.floor 3.7))
+
+(claim ceiled Float)
+(def ceiled (js/Math.ceil 3.2))
 
 ;; JS console
-(defn log-it [(msg : String)] : Nil
+(claim log-it [String -> Nil])
+(defn log-it [(msg : String)]
   (js/console.log msg))
 
 ;; JS URI encoding
-(def encoded : String (js/encodeURIComponent "hello world"))
-(def decoded : String (js/decodeURIComponent encoded))
+(claim encoded String)
+(def encoded (js/encodeURIComponent "hello world"))
+
+(claim decoded String)
+(def decoded (js/decodeURIComponent encoded))
 
 ;; Standard Clojure functions work in both targets
-(defn greet [(name : String)] : String
+(claim greet [String -> String])
+(defn greet [(name : String)]
   (str "Hello, " name "!"))
 
 (def items (vec (map inc (range 5))))
@@ -40,8 +61,11 @@
 ;; defrecord works in both targets
 (defrecord Point [(x : Int) (y : Int)])
 
-(defn make-origin [] : Point
+(claim make-origin [-> Point])
+(defn make-origin []
   (->Point 0 0))
 
 (def origin (make-origin))
-(def ox : Int (:x origin))
+
+(claim ox Int)
+(def ox (:x origin))

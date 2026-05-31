@@ -1,14 +1,63 @@
 #lang racket/base
 
-;; Clojure/ClojureScript emitter backend.
+;; Clojure emitter backend.
+;;
+;; Registers the 'clj target. The 'cljs target is registered by
+;; emit-cljs.rkt, which reuses this backend but flips the
+;; current-emit-target parameter so per-expression branches (try/catch,
+;; ns :import) emit the CLJS spelling.
+;;
+;; Surface decisions for v0.16:
+;;
+;;  - claim-form (out-of-band type carrier): merged with the paired
+;;    def/defn/defonce into Clojure metadata. Inline `: T` was removed
+;;    in v0.16 — claim is the canonical carrier (see ast.rkt). At emit:
+;;
+;;        (claim x Int) (def x 42)          -> (def ^Int x 42)
+;;        (claim f (-> [Int] Int))
+;;        (defn f [x] (+ x 1))              -> (defn ^{:tag Int}
+;;                                              f [^Int x] (+ x 1))
+;;
+;;    Claim-forms themselves emit nothing — they're consumed during the
+;;    pre-pass that builds the claim-env. Param-level tags only emit
+;;    when the type is a simple type-prim (Clojure cannot tag with
+;;    generic/parametric types as primitive hints).
+;;
+;;  - kw-access (canonical static-key access): emits identity. The
+;;    (C)-canonicalization at parse time routes (:name target) to a
+;;    kw-access node, which prints back as (:name target). 3-arity
+;;    with default emits (:name target default) — Clojure accepts this.
+;;
+;;  - defmacro: parse-time only. Macros expand at parse time and never
+;;    appear in program-forms, so the emitter never sees them. (To emit
+;;    native Clojure defmacros we'd retain defmacro-form in
+;;    program-forms — that's a parse change, not an emit change.)
+;;
+;;  - Threading family (->, ->>, as->, cond->, cond->>, some->, some->>)
+;;    and accepted-by-canonicalize forms (if-let-style flatteners, when,
+;;    cond flat-pair): lowered to call/let/if composition at parse time.
+;;    The emitter sees the lowered AST. Trade-off: emitted Clojure is
+;;    uglier than the surface, but always correct. Reconstructing the
+;;    surface threading expression is a follow-up.
+;;
+;;  - Quoted containers ('[…] / '{…} / '#{…}): emit identity via the
+;;    `quoted` AST node + datum->clj. Clojure reads these natively.
+;;
+;;  - Nix-only forms (nix-with, nix-assert, nix-fn-set, nix-derivation,
+;;    nix-flake, nix-with-cfg, nix-inherit*, nix-rec-attrs, nix-get-or,
+;;    nix-has-attr, nix-search-path, nix-interpolated-string,
+;;    nix-multiline-string, nix-path): rejected with a target-mismatch
+;;    error naming the form. Better to fail loud than emit garbage that
+;;    babashka silently runs the wrong way.
 
 (require racket/match
          racket/string
          racket/format
          racket/set
          racket/list
-         "../parse.rkt"
-         "../emit-dispatch.rkt")
+         "parse.rkt"
+         "types.rkt"
+         "emit-dispatch.rkt")
 
 ;; --- special float values ---------------------------------------------------
 
@@ -29,6 +78,10 @@
 (define current-emit-scalar-fns (make-parameter (set)))
 ;; Unqualified imported symbol → module prefix (for qualifying in output)
 (define current-emit-symbol-ns (make-parameter (hasheq)))
+;; name (symbol) → declared Beagle type (from a paired claim-form).
+;; Populated by build-claim-env from program-forms. def/defn/defonce
+;; consult this to emit Clojure type-hint metadata.
+(define current-emit-claims (make-parameter (hasheq)))
 
 (define (emit-srcloc loc)
   (define src (src-loc-source loc))
@@ -96,17 +149,71 @@
   (for/fold ([s local]) ([sym (in-list (program-imported-scalar-fns prog))])
     (set-add s sym)))
 
+;; --- claim-form (paired type-carrier) -----------------------------------
+;;
+;; The v0.16 surface drops inline `(def x : T v)` / `(defn f [(x : T)] : T body)`
+;; in favour of out-of-band `(claim NAME TYPE)` markers. The checker
+;; consults a claim-env to type-check the paired def/defn. The emitter
+;; consults the same env at emit time to render the claim as Clojure
+;; metadata on the same binding.
+;;
+;; Merge logic — `build-claim-env` walks program-forms once and indexes
+;; every claim by name. `emit-form` for def/defn/defonce looks up its
+;; name and threads the type into a Clojure tag (`^Tag form` or
+;; `^{:tag Tag}`). Claim-forms themselves do not emit (they're carriers).
+
+(define (build-claim-env prog)
+  (for/fold ([h (hasheq)]) ([f (in-list (program-forms prog))])
+    (cond
+      [(claim-form? f) (hash-set h (claim-form-name f) (claim-form-type f))]
+      [else h])))
+
+;; Translate a Beagle type to a Clojure tag string, or #f when the type
+;; has no useful primitive hint. Clojure type-hint metadata is used by
+;; the JVM compiler for primitive avoidance and reflection skips —
+;; arbitrary types (Vec, Map, user records) don't help and are noisy,
+;; so we skip them. Records emit as the bare record name.
+(define (clj-tag-for-type t)
+  (cond
+    [(type-prim? t)
+     (case (type-prim-name t)
+       [(Int) "long"]
+       [(Float) "double"]
+       [(Bool) "Boolean"]
+       [(String) "String"]
+       [(Char) "Character"]
+       [(Nil) #f]
+       [(Any) #f]
+       [else
+        ;; User-defined record/scalar/union types — emit as bare name.
+        ;; The JVM compiler only treats it as a class hint if the name
+        ;; resolves; otherwise Clojure ignores it. Safer than guessing.
+        (symbol->string (type-prim-name t))])]
+    ;; Parametric / function / union types: no useful hint.
+    [else #f]))
+
+;; Format a binding's tag prefix: `^Tag ` (short form) or empty when no
+;; useful hint. Used for both def-level and param-level metadata.
+(define (clj-tag-prefix t)
+  (define tag (and t (clj-tag-for-type t)))
+  (if tag (format "^~a " tag) ""))
+
 (define (clj-emit-program prog)
   (parameterize ([current-emit-src-table (program-src-table prog)]
                  [current-emit-record-fields (build-record-field-table prog)]
                  [current-emit-record-ns (program-imported-record-ns prog)]
                  [current-emit-target (program-target prog)]
                  [current-emit-scalar-fns (build-scalar-fns prog)]
-                 [current-emit-symbol-ns (program-imported-symbol-ns prog)])
-    ;; Emit body first so we can detect str/ usage for auto-requires
+                 [current-emit-symbol-ns (program-imported-symbol-ns prog)]
+                 [current-emit-claims (build-claim-env prog)])
+    ;; Emit body first so we can detect str/ usage for auto-requires.
+    ;; Claim-forms emit nothing (their type info gets merged into the
+    ;; paired def/defn/defonce as Clojure metadata); filter them out so
+    ;; we don't emit blank lines.
     (define body
       (string-join
-       (for/list ([form (in-list (program-forms prog))])
+       (for/list ([form (in-list (program-forms prog))]
+                  #:unless (claim-form? form))
          (with-srcloc-meta form (emit-form form)))
        "\n\n"))
     (define needs-clj-string?
@@ -180,22 +287,45 @@
 (define (emit-form f)
   (cond
     [(def-form? f)
-     (format "(def ~a ~a)"
+     (define claimed (hash-ref (current-emit-claims) (def-form-name f) #f))
+     (format "(def ~a~a ~a)"
+             (clj-tag-prefix claimed)
              (def-form-name f)
              (emit-expr (def-form-value f)))]
 
     [(defonce-form? f)
-     (format "(defonce ~a ~a)"
+     (define claimed (hash-ref (current-emit-claims) (defonce-form-name f) #f))
+     (format "(defonce ~a~a ~a)"
+             (clj-tag-prefix claimed)
              (defonce-form-name f)
              (emit-expr (defonce-form-value f)))]
 
     [(defn-form? f)
      (define kw (if (defn-form-private? f) "defn-" "defn"))
-     (format "(~a ~a [~a]\n  ~a)"
+     (define claimed (hash-ref (current-emit-claims) (defn-form-name f) #f))
+     ;; For (claim NAME (-> [P1 P2 ...] R)) we emit return-type metadata
+     ;; on the defn name and per-param tags on each fixed param. Other
+     ;; claim shapes (plain prim, parametric type, etc.) get attached to
+     ;; the name only.
+     (define-values (name-tag param-tags)
+       (if (type-fn? claimed)
+           (values (clj-tag-prefix (type-fn-ret claimed))
+                   (for/list ([pt (in-list (type-fn-params claimed))])
+                     (clj-tag-prefix pt)))
+           (values (clj-tag-prefix claimed) #f)))
+     (format "(~a ~a~a [~a]\n  ~a)"
              kw
+             name-tag
              (defn-form-name f)
-             (emit-params-with-rest (defn-form-params f) (defn-form-rest-param f))
+             (emit-params-with-rest (defn-form-params f)
+                                    (defn-form-rest-param f)
+                                    #:param-tags param-tags)
              (emit-body (defn-form-body f) "  "))]
+
+    ;; claim-form is filtered out at the top of clj-emit-program; reaching
+    ;; this branch would be a bug. Keep the no-op clause for defence in
+    ;; depth (e.g. claim-forms inside a do block — currently invalid).
+    [(claim-form? f) ""]
 
     [(defn-multi? f)
      (define kw (if (defn-multi-private? f) "defn-" "defn"))
@@ -270,7 +400,19 @@
     [(exact-integer? e) (number->string e)]
     [(real? e)          (emit-clj-number e)]
     [(symbol? e)        (symbol->string e)]
-    [(quoted? e)        (format "'~a" (datum->clj (quoted-datum e)))]
+    [(quoted? e)
+     ;; '[…] / '{…} / '#{…} containers are self-evaluating in Clojure
+     ;; (the inner items become literal data because vectors/maps/sets
+     ;; are inert collections at read time). Drop the leading `'` for
+     ;; these — emitting `[1 2 3]` is idiomatic; `'[1 2 3]` is legal but
+     ;; redundant. Lists ('(1 2 3)) and symbols ('foo) keep the quote
+     ;; because bare `(1 2 3)` would be a call form and bare `foo` a
+     ;; binding reference.
+     (let ([d (quoted-datum e)])
+       (cond
+         [(or (bracketed? d) (map-tagged? d) (set-tagged? d))
+          (datum->clj d)]
+         [else (format "'~a" (datum->clj d))]))]
     [(regex-lit? e)     (format "(re-pattern \"~a\")" (regex-lit-pattern e))]
     [(vec-form? e)
      (format "[~a]"
@@ -503,7 +645,38 @@
         (format "(set! ~a ~a)" (emit-expr target) val)])]
     [(await-form? e)
      (error 'beagle-clj "await is only supported for JS target")]
+    ;; --- Nix-only forms ---------------------------------------------------
+    ;; These AST nodes only have well-defined semantics in the Nix target.
+    ;; Reject them loudly here rather than fall through to the generic
+    ;; "don't know how to emit" — the named-form error tells the user
+    ;; exactly which Beagle construct doesn't have a Clojure equivalent.
+    [(nix-with? e)              (reject-nix-form 'nix/with e)]
+    [(nix-assert? e)            (reject-nix-form 'nix/assert e)]
+    [(nix-with-cfg? e)          (reject-nix-form 'nix/with-cfg e)]
+    [(nix-fn-set? e)            (reject-nix-form 'nix/fn-set e)]
+    [(nix-derivation? e)        (reject-nix-form 'derivation e)]
+    [(nix-flake? e)             (reject-nix-form 'flake e)]
+    [(nix-inherit? e)           (reject-nix-form 'inherit e)]
+    [(nix-inherit-from? e)      (reject-nix-form 'inherit-from e)]
+    [(nix-rec-attrs? e)         (reject-nix-form 'rec-attrs e)]
+    [(nix-get-or? e)            (reject-nix-form 'nix/get-or e)]
+    [(nix-has-attr? e)          (reject-nix-form 'nix/has-attr e)]
+    [(nix-search-path? e)       (reject-nix-form 'nix/search-path e)]
+    [(nix-interpolated-string? e) (reject-nix-form 'nix/interpolated-string e)]
+    [(nix-multiline-string? e)  (reject-nix-form 'nix/multiline-string e)]
+    [(nix-path? e)              (reject-nix-form 'nix/path e)]
     [else (error 'beagle-emit "don't know how to emit: ~v" e)]))
+
+;; Raise a pointed target-mismatch error. The form-name is the Beagle
+;; surface spelling (`nix/with`, `derivation`, etc.) — not the Racket
+;; struct name — so the diagnostic matches what the user typed.
+(define (reject-nix-form form-name node)
+  (error 'beagle-clj
+         (string-append
+          "(~a ...) is a Nix-only form; the ~a target rejects it. "
+          "Move the form behind (target-case nix ...) if the call site "
+          "is cross-target, or set the program target to nix.")
+         form-name (current-emit-target)))
 
 (define (emit-record f)
   (define name (record-form-name f))
@@ -814,16 +987,42 @@
 
 (define (emit-param p) (emit-binding-name p))
 
+;; Emit one param with an optional type-hint prefix. tag-prefix is a
+;; pre-formatted string like "^Int " or "" — see clj-tag-prefix.
+(define (emit-param/tag p tag-prefix)
+  (string-append tag-prefix (emit-param p)))
+
 (define (emit-params params)
   (string-join (map emit-param params) " "))
 
-(define (emit-params-with-rest params rest-p)
-  (define fixed (emit-params params))
+;; emit-params-with-rest now takes an optional #:param-tags list that
+;; runs parallel to `params` (a list of tag-prefix strings, "" for no
+;; hint). When #f, emits the legacy untagged shape. The rest-param never
+;; gets a tag (Clojure rest-args are heterogeneous lists).
+(define (emit-params-with-rest params rest-p #:param-tags [param-tags #f])
+  (define fixed
+    (cond
+      [param-tags
+       (string-join
+        (for/list ([p (in-list params)]
+                   [tag (in-list (pad-tags param-tags (length params)))])
+          (emit-param/tag p tag))
+        " ")]
+      [else (emit-params params)]))
   (if rest-p
       (if (string=? fixed "")
           (format "& ~a" (emit-param rest-p))
           (format "~a & ~a" fixed (emit-param rest-p)))
       fixed))
+
+;; Right-pad a tag list to length n with "" entries. The claim-form
+;; param count may legitimately differ from the defn-form param count
+;; when a checker is in transition; emit no tag rather than crash.
+(define (pad-tags tags n)
+  (cond
+    [(= (length tags) n) tags]
+    [(< (length tags) n) (append tags (make-list (- n (length tags)) ""))]
+    [else (take tags n)]))
 
 (define (emit-let-bindings bindings)
   (string-join
@@ -859,8 +1058,17 @@
     [(symbol? d)        (symbol->string d)]
     [(null? d)          "()"]
     [(bracketed? d)
+     ;; '[a b c] -> [a b c] (Clojure vector literal — quote-stable)
      (format "[~a]"
              (string-join (map datum->clj (bracket-body d)) " "))]
+    [(map-tagged? d)
+     ;; '{:k v ...} -> {:k v ...} (Clojure map literal)
+     (format "{~a}"
+             (string-join (map datum->clj (map-body d)) " "))]
+    [(set-tagged? d)
+     ;; '#{a b c} -> #{a b c} (Clojure set literal)
+     (format "#{~a}"
+             (string-join (map datum->clj (set-body d)) " "))]
     [(pair? d)
      (format "(~a)"
              (string-join
@@ -876,6 +1084,11 @@
   (emitter-backend 'clj clj-emit-program))
 
 (register-backend! 'clj clj-backend)
-(register-backend! 'cljs clj-backend)
 
-(provide clj-backend)
+;; 'cljs is registered separately by emit-cljs.rkt. It reuses
+;; clj-emit-program but parameterizes current-emit-target so per-branch
+;; CLJS spellings (try/catch, ns :import vs :require) emit correctly.
+
+(provide clj-backend
+         clj-emit-program
+         current-emit-target)
