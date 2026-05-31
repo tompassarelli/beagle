@@ -10,6 +10,62 @@ There is **no static reference documentation** for the form set, types,
 or stdlib. The surface churns; static docs go stale within a day. The
 compiler is the source of truth — query it.
 
+## Standing operating mode — apply the spec, don't ratify it
+
+The spec is **generative.** Three statements determine every surface
+question:
+
+1. **Beagle is Clojure plus types.** Clojure surface, types threaded
+   through. Nothing else.
+2. **Divergence from Clojure must be load-bearing for the type
+   system or for a backend, or it dies.** See "Rules with teeth" for
+   the codified detail.
+3. **Each target renders the same surface idiomatically** (Nix as
+   lazy attrsets, Clojure as eager maps, CLJS as Clojure-shaped JS).
+   Idiomatic-per-target is not a divergence — it's the same form
+   rendered faithfully per backend.
+
+These three constraints **produce** answers, they don't ask for
+them. Run a form through them and exactly one answer falls out.
+There are no open surface decisions to ratify — only the spec to
+apply.
+
+**Do not surface "decisions" the spec already determines.** Three
+failure modes that historically reach Tom and shouldn't:
+
+- **Fact-finds disguised as choices.** *"What does bare `{…}`
+  mean?"* — go read what Clojure does and match it. The authority
+  is Clojure's semantics; the parser is interesting only as a
+  conformance check (does it conform; if not, it's a bug), never
+  as a fork.
+- **Unfinished analysis disguised as ambiguity.** *"These N rows
+  are ambiguous"* almost always means "the load-bearing test wasn't
+  run to completion." Run the test — does this divergence buy type
+  precision or a backend anything? — and the rows resolve
+  themselves. "Ambiguous" without that pass is incomplete work,
+  not a real fork.
+- **Invisible implementation choices** with zero surface
+  consequence. Internal AST shape, parse-rewrite vs native macro
+  expansion, helper-function placement — these produce identical
+  observable output and **never reach Tom**. The agent picks,
+  executes, reports.
+
+**Escalate only a genuine conflict between two clauses of the
+rule** — e.g., a form where matching Clojure exactly would cost
+type precision. Most such conflicts are pre-resolved in the
+ordering: **load-bearing-for-types outranks idiom-matching** when
+they collide; **idiom-matching outranks aesthetic preference**
+always. When a real conflict appears: name it as "real conflict:
+X vs Y", propose the resolution, ask one specific question, do
+not reopen the rest of the board.
+
+**Default mode is apply-and-report**, not present-and-ratify.
+Report what was done and what was measured (test counts, type
+errors surfaced, perf deltas, byte-identical-output proofs).
+"Your call" sentences and option-A/B/C menus are the failure mode
+this rule exists to prevent. If you find yourself drafting one,
+check whether the spec resolves it. It almost always does.
+
 ## Tool-first reflexes
 
 Use these before reading source or guessing. Each one is a dynamic
