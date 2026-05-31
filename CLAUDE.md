@@ -188,31 +188,55 @@ Every typed language that shipped an escape hatch regretted it
 Rust `unsafe`). The discipline of "no escape" forces the stdlib to
 mature and makes hallucinations show up as compile errors.
 
-### Clojure-shaped surface, not a new Lisp
+### Beagle is Clojure plus types, nothing else
 
-Beagle targets a **Clojure-shaped surface** and stays there unless
-there's a strong reason to diverge. The only sanctioned divergences:
+**Sanctioned divergences from Clojure are exactly two:**
 
-1. **Shrinking surface.** Remove idioms and enforce one-idiom-per-task
-   via the repair compiler. Multiple ways to do the same thing is a
-   Clojure inheritance to *narrow*, not preserve.
-2. **Per-language namespacing.** Forms whose meaning is target-
-   specific get that target's namespace prefix — `nix/…` for Nix
-   forms today; `lua/…`, `bevy/…`, `sql/…`, etc. for future
-   backends. The namespace marks the meaning-divergence and keeps
-   the bare Clojure-shaped names free for their Clojure meaning.
-   See "Prefix where meaning diverges from Clojure" below.
+1. **The type layer** — `claim`, the checker, the repair/blame loop,
+   diagnostic-kind taxonomy. The thesis (minimal truth + types as
+   view, `~/code/life-os/threads/20260529020859-…`) lives here.
+2. **Multi-backend targeting** — `target-case` + per-backend
+   lowering. Per-language namespacing (`nix/…`, eventually
+   `lua/…` / `bevy/…` / `sql/…`) marks the meaning-divergence;
+   see "Prefix where meaning diverges from Clojure" below.
 
-**The goal:** leverage strong AI priors by keeping the authoring
-surface Clojure-shaped, with **minimal qualifications or
-refinement directives in the surface itself**. The agent inherits
-Clojure-prior idioms unaltered. Precision lives in the **type
-system** (per the minimal-truth / types-as-view thesis,
-`~/code/life-os/threads/20260529020859-…`) — NOT in surface
-annotations, per-form modifiers, or directives that re-qualify
-what a Clojure form means. The checker/inference layer handles the
-precision work the surface deliberately doesn't carry. Beyond
-that, no other refinement direction on the surface.
+Every other surface form is Clojure. The thesis runs on the
+Clojure prior — every gratuitous deviation taxes the one asset
+the project depends on.
+
+**The test for any divergence:** does it serve the type system or
+the backend story? Yes → load-bearing, keep. No → it taxes the
+Clojure prior; remove. A deviation with no type or backend payoff
+isn't neutral — it's precisely what the thesis exists to avoid,
+because it makes the repair loop fire on language friction
+instead of real bugs.
+
+**Operating rules:**
+
+- **Never add new syntax.** No invented operators, forms, or sigils.
+  Capabilities that don't fit Clojure-shaped surface live in the
+  type or backend layer, not the surface. The pipe family (`|>`,
+  `|>>`, `pipe-to`, `pipe-from`) was an Elixir/F# import and is
+  being removed for exactly this reason — a Clojure-trained agent
+  never reaches for them, so they spend surface budget to teach a
+  dialect quirk, which is the thesis in reverse.
+
+- **Accept-and-canonicalize applies to real Clojure forms only**
+  (`when`, `if-let`, `cond` flat-pair, quoted containers,
+  list-wrapped multi-arity). It is **not** license to accept
+  Beagle-specific spellings beside Clojure ones.
+
+- **Surface reduction needs a type-system or backend reason —
+  never taste.** Steering toward a chosen idiom lives in
+  guidance/prompt text; the rejected idiom gets a pointed error
+  naming the replacement (per "Zero users" rule). Never silently
+  translate one idiom into another.
+
+- **"One canonical idiom is cleaner" is a guidance decision, not
+  a removal.** If a form is real Clojure and types fine, keep it
+  and steer via guidance rather than hard-removing. The reduction
+  reflex applies to *inventions* and *untypeable* forms, not to
+  idiomatic Clojure the checker can handle.
 
 Not a new Lisp — a strict, typed *subset* of one.
 
