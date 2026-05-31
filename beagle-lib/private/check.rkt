@@ -1911,10 +1911,30 @@
      ;; known record type, resolves to the field's declared type via
      ;; RECORD-FIELDS; otherwise Any (matching dynamic-map get semantics).
      ;; Canonical typed projection surface alongside the record auto-
-     ;; accessor (field-name target).
+     ;; accessor (field-name target). Also the canonical AST for
+     ;; (get target :kw [default]) — see parse.rkt's literal-key route.
+     ;;
+     ;; With a default expression: if the field is statically known to
+     ;; exist on a typed record, the default never fires — return the
+     ;; field type unchanged. Otherwise (untyped target, or unknown field)
+     ;; return (U FieldType DefaultType) so the default's contribution
+     ;; isn't lost. lookup-kw-field-type degrades to ANY on unknown fields,
+     ;; so the union with DefaultType is still informative.
      (define target-type (infer-expr (kw-access-target e) env))
-     (when (kw-access-default e) (infer-expr (kw-access-default e) env))
-     (lookup-kw-field-type (kw-access-kw e) target-type env)]
+     (define field-type (lookup-kw-field-type (kw-access-kw e) target-type env))
+     (cond
+       [(kw-access-default e)
+        (define default-type (infer-expr (kw-access-default e) env))
+        (cond
+          ;; Statically-known field on a typed record — default unreachable.
+          [(and (type-prim? target-type)
+                (hash-has-key? RECORD-FIELDS (type-prim-name target-type))
+                (hash-has-key?
+                 (hash-ref RECORD-FIELDS (type-prim-name target-type))
+                 (kw-access-kw e)))
+           field-type]
+          [else (merge-types field-type default-type)])]
+       [else field-type])]
     [(with-form? e)
      (define target-type (infer-expr (with-form-target e) env))
      (cond

@@ -886,6 +886,40 @@
   #rx"takes one target"
   '(:name person extra))
 
+;; --- (get target :literal-kw [default]) canonicalization -------------------
+;; The literal-key (get target :kw) and (get target :kw default) forms parse
+;; to the same kw-access AST as (:kw target) — single canonical node. The
+;; dynamic-key form (get target k) where k is a binding stays a call-form so
+;; emit-nix can lower it to Nix's `target.${expr}` dynamic-attr syntax.
+
+(test-case "(get target :kw) parses as kw-access (no default)"
+  (define f (car (parse-one '(get person :name))))
+  (check-true (kw-access? f))
+  (check-eq? (kw-access-kw f) ':name)
+  (check-false (kw-access-default f)))
+
+(test-case "(get target :kw default) parses as kw-access with default"
+  (define f (car (parse-one '(get person :name "anon"))))
+  (check-true (kw-access? f))
+  (check-eq? (kw-access-kw f) ':name)
+  (check-equal? (kw-access-default f) "anon"))
+
+(test-case "(get target var) with non-keyword key stays call-form"
+  ;; var is a binding, not a literal keyword → dynamic-key get path.
+  (define f (car (parse-one '(get person k))))
+  (check-true (call-form? f))
+  (check-eq? (call-form-fn f) 'get))
+
+(test-case "(get target var default) with non-keyword key stays call-form"
+  (define f (car (parse-one '(get person k "fallback"))))
+  (check-true (call-form? f))
+  (check-eq? (call-form-fn f) 'get))
+
+(test-case "round-trip identity: (:kw target) and (get target :kw) produce same AST"
+  (define a (car (parse-one '(:name person))))
+  (define b (car (parse-one '(get person :name))))
+  (check-equal? a b))
+
 ;; --- match: or-pattern ----------------------------------------------------
 
 (test-case "or-pattern parses with literal alternatives"

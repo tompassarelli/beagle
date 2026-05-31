@@ -370,7 +370,18 @@
      (define target (emit-expr (kw-access-target e) depth))
      (define kw (symbol->string (kw-access-kw e)))
      (define field (if (string-prefix? kw ":") (substring kw 1) kw))
-     (format "~a.~a" target field)]
+     (cond
+       [(kw-access-default e)
+        ;; (get m :k default) → `target.field or default` — same emit as
+        ;; the pre-canonicalization call-form path's literal-key 3-arity.
+        ;; Nix's `or` suffix is greedy on the right, so paren-wrap is the
+        ;; caller's job (see paren-wrap rules for nix-get-or).
+        (format "~a.~a or ~a"
+                target
+                field
+                (emit-expr (kw-access-default e) depth))]
+       [else
+        (format "~a.~a" target field)])]
 
     [(quoted? e)
      (define d (quoted-datum e))
@@ -1050,6 +1061,9 @@
          ;; trailing `.X`), so wherever this appears as a target of
          ;; further select/has/etc, it MUST be parenthesized.
          (nix-get-or? expr)
+         ;; kw-access with a default emits the same `target.attr or
+         ;; default` shape — same greedy-`or` hazard.
+         (and (kw-access? expr) (kw-access-default expr))
          ;; nix-with / nix-assert similarly emit expressions with
          ;; greedy trailing-token semantics (`with X; body` consumes
          ;; everything as body); wrap to keep them as values.

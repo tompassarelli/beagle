@@ -1896,6 +1896,18 @@
      (raise-parse-error 'unknown-form
                         "quasiquote (`` ` ``) outside defmacro body — beagle's quasiquote is macro-template-only; use literal data containers (`'[…]` / `'{…}` / `'(…)`) for inert data construction")]
 
+    ;; Literal-key (get target :kw) and (get target :kw default) canonicalize
+    ;; to kw-access — same AST as (:kw target). Identity-preserving: same
+    ;; emitted Nix as the call-form path used to produce. Dynamic-key form
+    ;; (where the key is a binding, not a literal keyword) stays call-form
+    ;; via the catch-all below — emit-nix lowers that to `target.${expr}`.
+    [(list 'get target (? keyword-sym? kw))
+     (kw-access kw (parse-expr (or (stx-ref subs 1) target)) #f)]
+    [(list 'get target (? keyword-sym? kw) default-expr)
+     (kw-access kw
+                (parse-expr (or (stx-ref subs 1) target))
+                (parse-expr (or (stx-ref subs 3) default-expr)))]
+
     [(list (? symbol? f) args ...)
      (call-form f (map parse-expr (or (stx-tail subs 1) args)))]
 

@@ -144,6 +144,19 @@
   (define out (nix-emit "(define-target nix) (get person :name)"))
   (check-true (string-contains? out "person.name")))
 
+(test-case "round-trip identity at Nix emit: (:k target) == (get target :k)"
+  ;; Both forms canonicalize to kw-access; emit produces identical Nix.
+  (define a (nix-emit "(define-target nix) (:name person)"))
+  (define b (nix-emit "(define-target nix) (get person :name)"))
+  (check-equal? a b))
+
+(test-case "(get target :kw default) emits `target.kw or default`"
+  ;; 3-arity literal-key kw-access lowers to Nix's `or` suffix — same
+  ;; emit as the explicit (get-or target kw default) form, modulo the
+  ;; identifier-vs-path key (kw-access requires keyword, get-or any path).
+  (define out (nix-emit "(define-target nix) (get config :timeout 30)"))
+  (check-true (string-contains? out "config.timeout or 30")))
+
 ;; --- dotted option paths ---------------------------------------------------
 
 (test-case "dotted keyword keys become Nix option paths"

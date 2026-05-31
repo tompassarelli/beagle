@@ -627,15 +627,35 @@
   '(claim z Any)
   '(def z (:z p)))
 
-(check-ok "(get target :keyword) on record — falls back to Any (existing untyped path)"
-  ;; Documents the asymmetry from Phase A: (:x p) → Int but (get p :x)
-  ;; → Any (stdlib's get is typed (Any Any ... -> Any) with no callsite
-  ;; narrowing). Closing this is a separate change.
+(check-ok "(get target :keyword) on typed record — resolves to field type (was Any)"
+  ;; Closed the asymmetry: literal-key (get p :x) now canonicalizes to
+  ;; kw-access at parse-time, so the field type flows through. Previously
+  ;; degraded to Any via stdlib's (Any Any -> Any) get.
   '(defrecord Point [(x : Int) (y : Int)])
   '(claim p Point)
   '(def p (->Point 1 2))
-  '(claim a Any)
+  '(claim a Int)
   '(def a (get p :x)))
+
+(check-err "(get target :keyword) on typed record rejects type-mismatch (was Any-degraded)"
+  ;; Discriminating: under the old (get : Any Any -> Any) typing, a String
+  ;; claim would have accepted the result. Now the field type (Int)
+  ;; conflicts with the String claim, surfacing the bug at compile time.
+  '(defrecord Point [(x : Int) (y : Int)])
+  '(claim p Point)
+  '(def p (->Point 1 2))
+  '(claim s String)
+  '(def s (get p :x)))
+
+(check-ok "(get p :x default) on typed record — default never fires, field type"
+  ;; 3-arity literal-key get on a typed record where the field is known:
+  ;; the default expression is unreachable, so the result type is the
+  ;; field type, not (U FieldType DefaultType).
+  '(defrecord Point [(x : Int) (y : Int)])
+  '(claim p Point)
+  '(def p (->Point 1 2))
+  '(claim a Int)
+  '(def a (get p :x 0)))
 
 ;; =============================================================================
 ;; Tests — defprotocol (fixtures)
