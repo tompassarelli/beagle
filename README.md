@@ -1,4 +1,4 @@
-# beagle
+# Beagle
 
 Beagle is a typed subset of Clojure that compiles to Nix, Clojure, and
 ClojureScript. Types exist to make authoring, diagnostics, and AI
