@@ -1,11 +1,8 @@
 # beagle
 
-A typed authoring IR. Clojure surface with type annotations threaded
-through; multi-target compiler emitting to Nix, Clojure, and
-ClojureScript today. Designed as a substrate for AI-augmented authoring:
-a sub-second `parse → check → emit` loop with structured diagnostics
-(`surface-divergence` / `type-error` / `logic-error`) that downstream
-repair tools rank and act on.
+Beagle is a typed subset of Clojure that compiles to Nix, Clojure, and
+ClojureScript. Types exist to make authoring, diagnostics, and AI
+repair reliable; they check at compile time and erase before emit.
 
 ## What it isn't
 
