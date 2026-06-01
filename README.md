@@ -109,7 +109,7 @@ and the repair pipeline (`beagle-repair`, `beagle-blame`,
 
 ## Design discipline
 
-Beagle has zero external users. The discipline is intentionally tight:
+The discipline is intentionally tight:
 
 - **Hard removal over deprecation.** No back-compat shims.
 - **Divergence from Clojure must serve types or a backend, or it
