@@ -1,80 +1,137 @@
-# Beagle
+# beagle
 
-**A typed, LLM-optimized authoring surface for Nix. Schema-driven
-validation, sub-second re-checks, round-trips real-world Nix without
-semantic loss.**
+A typed authoring IR. Clojure surface with type annotations threaded
+through; multi-target compiler emitting to Nix, Clojure, and
+ClojureScript today. Designed as a substrate for AI-augmented authoring:
+a sub-second `parse → check → emit` loop with structured diagnostics
+(`surface-divergence` / `type-error` / `logic-error`) that downstream
+repair tools rank and act on.
 
-Five other backends (Clojure, ClojureScript, JavaScript, Python, SQL,
-Typed Racket) sit in [`beagle-lib/private/dormant/`](beagle-lib/private/dormant/) —
-parked, not deleted, reactivate with `BEAGLE_ALL_TARGETS=1`. The live
-loop is Nix only.
+## What it isn't
 
-## Design notes
+- Not a schema language, not a validation runtime — types check at
+  compile time, then erase.
+- Not a new Lisp — a strict typed subset of Clojure. Where the surface
+  diverges from Clojure, that divergence is either load-bearing for the
+  type system or for a backend, or it dies.
+- Not stable. Pre-1.0, surface still moves. No deprecation aisle —
+  removals are hard.
 
-- [`docs/motivation.md`](docs/motivation.md) — the bet: typed-Lisp-for-AI threading the needle between sprawl and bloat
-- [`docs/principles.md`](docs/principles.md) — seven load-bearing surface principles
-- [`docs/lock-in.md`](docs/lock-in.md) — form changes require measurable deltas on documented benchmarks
-- [`docs/research.md`](docs/research.md) — frozen results from the lab (E1–E22)
+## Status
 
-## Targets
+- **Live targets:** Nix, Clojure, ClojureScript. JS, Python, SQL, Typed
+  Racket emitters are parked under `beagle-lib/private/dormant/`;
+  reactivate with `BEAGLE_ALL_TARGETS=1`.
+- **Active test tier:** 940 / 940 passing on `v0.16.0` (HEAD).
+- **One user.** Dogfooded on a 220-file NixOS config
+  ([firnos](https://github.com/tompassarelli/firnos)) which builds end
+  to end from `.bnix` sources. Not packaged for outside use.
 
-| Target | `#lang` | Stdlib | Status |
-|---|---|---|---|
-| Nix | `beagle/nix` | 523 entries | **live** — schema-typed, round-trips real-world Nix |
-| Clojure | `beagle/clj` | 397 | dormant |
-| ClojureScript | `beagle/cljs` | 132 | dormant |
-| JavaScript | `beagle/js` | 102 + 28 typed `js/*` | dormant |
-| Python | `beagle/py` | 348 | dormant |
-| SQL | `beagle/sql` | 59 | dormant |
-| Typed Racket | `beagle/rkt` | (oracle) | dormant |
+## Quick taste
 
-Plus 269 portable stdlib entries shared across all targets. Dormant
-emitters and catalogs are intact under `beagle-lib/private/dormant/`;
-opt in for one session with `BEAGLE_ALL_TARGETS=1`.
+```clojure
+;; types ride on bindings; interiors inferred
+(defn double [n :- Int] :- Int
+  (* n 2))
 
-## Install
+;; macros + quasi-quote (Scheme-style unquote: `,x`, splice `,@xs`)
+(defmacro inc1 [x] `(+ ,x 1))
 
-Requires [Racket](https://racket-lang.org/) 8.x+.
+;; Clojure threading
+(-> 1 (+ 2) (* 3))
+
+;; reader conditionals for target-divergent code
+(def msg #?(:clj "hello" :cljs "hi" :nix "bonjour"))
+
+;; keyword access canonicalizes — `(:k m)` and `(get m :k)` are the same node
+(:name {:name "ada"})
+```
+
+Every snippet above passes `bin/beagle-syntax`.
+
+## v0.16 surface highlights
+
+- **Inline `:-` annotations** on `def` / `defn` / `defonce` / `let`.
+  The interim `claim` form is gone.
+- **`defmacro` + quasi-quote / unquote / unquote-splicing.** Old
+  `define-macro` removed.
+- **Clojure threading family:** `->`, `->>`, `as->`, `cond->`,
+  `cond->>`, `some->`, `some->>`. The old pipe family is gone.
+- **Reader conditionals** `#?(:clj … :cljs … :nix … :default …)` and
+  `#?@(…)` splice.
+- **Quoted containers** `'[…]`, `'{…}`, `'#{…}` self-evaluate.
+- **Sourcemap fidelity:** author position survives every
+  canonicalization (11/11 on the fidelity bench, up from 5/11).
+- **Typo suggestions** against the 16k-option NixOS schema:
+  segment-aware Levenshtein, 96.9% Top-1, ~130 ms/query.
+- **Per-target prefixes** (`nix/`, `js/`, `sql/`) for forms whose
+  meaning genuinely diverges per backend.
+
+## How it's organized
+
+- `beagle-lib/private/parse.rkt` — surface form set. The source of
+  truth; static docs go stale.
+- `beagle-lib/private/check.rkt` — type checker.
+- `beagle-lib/private/emit-{nix,clj,cljs}.rkt` — live emitters.
+- `beagle-lib/private/nixos-schema.rkt` — 16k-option typed environment.
+- `beagle-lib/private/diagnostic-kind.rkt` — `cause-class?` taxonomy.
+- `beagle-test/` — tiered test suite; `beagle-test/tiers.rktd` is the
+  authoritative tier classification.
+- `CLAUDE.md` — the operating discipline. The preamble's
+  three-statement generative spec (Clojure + types / load-bearing
+  divergence / idiomatic per target) is the canonical anchor for any
+  surface question.
+
+## Getting started
+
+Requires Racket 8.x+.
 
 ```sh
 git clone https://github.com/tompassarelli/beagle
 cd beagle
 raco pkg install --link beagle-lib/ beagle-test/ beagle/
-bin/beagle-test    # Nix-tier (~55s)
+bin/beagle-test --active-only       # 940 active tests
 ```
 
-For NixOS users dogfooding their config: clone
-[firnos](https://github.com/tompassarelli/firnos) for a real working
-example, or run `beagle init` in a fresh dir to scaffold.
+For a real-world `.bnix` corpus, clone
+[firnos](https://github.com/tompassarelli/firnos) — schema-typed end to
+end; the NixOS system builds from `flake.bnix` directly.
 
-## Documentation
+## Tooling
 
 There is no static reference catalog — the surface churns and static
-docs go stale within a day. To know anything mechanical, query the
-compiler:
+docs go stale within a day. Query the compiler instead:
 
 ```sh
-bin/beagle-syntax FILE        # parse check + repair
-bin/beagle-sig X FILE...      # typed signature
-bin/beagle-fields R FILE...   # record fields
-bin/beagle-provides FILE      # module exports
-bin/beagle-callers X FILE...  # call sites
+bin/beagle-syntax FILE              # parse check + repair
+bin/beagle-validate [FILE...]       # parse + check + schema validation
+bin/beagle-check FILE               # typed checker
+bin/beagle-expand FILE              # macro-expanded source
+bin/beagle-sig NAME FILE...         # typed signature
+bin/beagle-fields RECORD FILE...    # record fields
+bin/beagle-callers NAME FILE...     # call sites
+bin/beagle-rejection-stats DIR      # diagnostics by cause-class
 ```
 
-For the form set, read `beagle-lib/private/parse.rkt`. For the typed
-externs, read `beagle-lib/private/stdlib-nix.rkt` and `stdlib-portable.rkt`.
-See `CLAUDE.md` for the full tool list and rules-with-teeth (no escape
-hatches, tiering discipline, etc.).
+`CLAUDE.md` lists the full set including the daemon-backed query tools
+and the repair pipeline (`beagle-repair`, `beagle-blame`,
+`beagle-specfix`).
 
-## Status
+## Design discipline
 
-`#lang beagle` v0.15.1 — Nix-tier active loop is green; dormant-tier
-opt-in via `BEAGLE_ALL_TARGETS=1`. **No v1.0 until others have used it
-in anger.** The author dogfoods on a 220-file NixOS config
-([firnos](https://github.com/tompassarelli/firnos)) — schema-typed
-end-to-end, system builds from `flake.bnix` directly. Production-grade
-for one user, ready-for-adventure for others.
+Beagle has zero external users. The discipline is intentionally tight:
+
+- **Hard removal over deprecation.** No back-compat shims.
+- **Divergence from Clojure must serve types or a backend, or it
+  dies.** Inert syntactic novelty is rejected.
+- **Each target renders idiomatically** — same surface, faithful per
+  backend (Nix as lazy attrsets, Clojure as eager maps, CLJS as
+  Clojure-shaped JS).
+- **Gates have stated jurisdiction.** When ambiguous, ask; don't
+  silently defer.
+
+See `CLAUDE.md` for the full rule set.
 
 ## License
 
-MIT.
+MIT. See [`LICENSE`](LICENSE).
