@@ -1,14 +1,41 @@
 # Beagle
 
-Beagle is a typed subset of Clojure that compiles to Nix, Clojure, and
-ClojureScript. Types exist to make authoring, diagnostics, and AI
-repair reliable; they check at compile time and erase before emit. The
-point isn't to reject bad code — it's to tell repair tools what kind
-of mistake happened, where in the source, after which canonicalization,
-against which target.
+Beagle is a typed Clojure subset designed to emit idiomatic code to
+multiple targets from a single AST. Three targets are live today —
+**Clojure**, **ClojureScript**, and **Nix** — and the architecture
+keeps additional targets (JavaScript, Python, SQL, Typed Racket) one
+emitter away if there's pull for them.
+
+The active distribution effort is **Nix-first**: the language people
+actively dislike using, with no incumbent typed alternative, and a
+failure profile (eval errors, schema violations, type mismatches in
+module composition) that beagle's type system catches at compile time
+against a 16k-option typed environment. The language *is* multi-target.
+The *campaign* is Nix-first.
+
+Types exist to make authoring, diagnostics, and AI repair reliable;
+they check at compile time and erase before emit. The point isn't to
+reject bad code — it's to tell repair tools what kind of mistake
+happened, where in the source, after which canonicalization, against
+which target.
 
 Already used by [firnos](https://github.com/tompassarelli/firnos) to
-author a NixOS system against a 16k-option typed schema.
+author a NixOS system end to end against the typed schema.
+
+## How it compiles
+
+```
+.bclj / .bcljs / .bnix  ──▶  parse  ──▶  check  ──▶  emit  ──▶  .clj / .cljs / .nix
+                                            ▲
+                              macros, schema, stdlib, type narrowing
+                              all share one AST + diagnostic path
+```
+
+`check` is where the 16k-option NixOS schema becomes typed context:
+unknown option paths fail at parse time, wrong-typed values fail at
+type-check time — before `nixos-rebuild` is invoked. Sourcemap
+fidelity is preserved through every canonicalization so diagnostics
+point at the author's position, not a desugared intermediate.
 
 ## What it isn't
 
@@ -21,6 +48,8 @@ author a NixOS system against a 16k-option typed schema.
   removals are hard.
 
 ## Quick taste
+
+Portable surface — parses for any target:
 
 ```clojure
 ;; types ride on bindings; interiors inferred
@@ -39,6 +68,35 @@ author a NixOS system against a 16k-option typed schema.
 ;; keyword access canonicalizes — `(:k m)` and `(get m :k)` are the same node
 (:name {:name "ada"})
 ```
+
+Nix flavor — a NixOS module authored against the typed schema:
+
+```clojure
+#lang beagle/nix
+(ns ssh)
+
+(nix/module [config lib pkgs ...]
+  {:options.myConfig.modules.ssh.enable (lib.mkEnableOption "SSH server")
+   :config
+    (lib.mkIf config.myConfig.modules.ssh.enable
+      {:services.openssh.enable true})})
+```
+
+emits:
+
+```nix
+{ config, lib, pkgs, ... }:
+{
+  options.myConfig.modules.ssh.enable = lib.mkEnableOption "SSH server";
+  config = lib.mkIf config.myConfig.modules.ssh.enable {
+    services.openssh.enable = true;
+  };
+}
+```
+
+`services.openssh.enable` is typed `Bool` (resolved from the schema
+cache). Assigning a `String` fails at check time with file:line:col
+precision — before `nixos-rebuild` is invoked.
 
 Every snippet above passes `bin/beagle-syntax`.
 
@@ -65,7 +123,7 @@ Every snippet above passes `bin/beagle-syntax`.
 - `beagle-lib/private/parse.rkt` — surface form set. The source of
   truth; static docs go stale.
 - `beagle-lib/private/check.rkt` — type checker.
-- `beagle-lib/private/emit-{nix,clj,cljs}.rkt` — live emitters.
+- `beagle-lib/private/emit-{clj,cljs,nix}.rkt` — live emitters.
 - `beagle-lib/private/nixos-schema.rkt` — 16k-option typed environment.
 - `beagle-lib/private/diagnostic-kind.rkt` — `cause-class?` taxonomy.
 - `beagle-test/` — tiered test suite; `beagle-test/tiers.rktd` is the
