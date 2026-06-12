@@ -109,7 +109,16 @@
    (list 'collections      "(def v (conj [1 2] 3))\n(def n (count [1 2 3]))\n(def f (first [1 2]))")
    (list 'higher-order     "(def m (mapv str [1 2 3]))")
    (list 'kw-as-fn         "(def x (:k {:k 1}))")
-   (list 'get-with-default "(def x (get {:k 1} :j 0))")))
+   (list 'get-with-default "(def x (get {:k 1} :j 0))")
+   ;; --- second tranche (2026-06-13 night) -------------------------------------
+   (list 'match            "(defn f [x :- Int] (match x [1 \"one\"] [2 \"two\"] [_ \"many\"]))")
+   (list 'tilde-string     "(def s ~\"line\")")
+   (list 'defmacro         "(defmacro twice [x] `(do ~x ~x))\n(def y :- Int (twice 21))")
+   (list 'declare-extern   "(declare-extern host/thing [Int -> Int])\n(defn f [x :- Int] :- Int (host/thing x))")
+   (list 'comment-form     "(comment \"ignored entirely\")\n(def x :- Int 1)")
+   (list 'condp-default    "(defn f [x :- Int] (condp = x 1 \"one\" \"other\"))")
+   (list 'dotimes-doseq    "(defn f [n :- Int] (loop [i 0] (when (< i n) (recur (+ i 1)))))")
+   (list 'letfn-shape      "(defn outer [x :- Int] :- Int (let [helper (fn [y] (+ y 1))] (helper x)))")))
 
 (for* ([entry (in-list CATALOG)]
        [target (in-list LIVE-TARGETS)])
