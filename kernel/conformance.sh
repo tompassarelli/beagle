@@ -6,8 +6,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-SMALL_HASH="0x55B67E45F43D8309"   # 1000 ticks, seed 0xBEA61E, semantics v6 (births: compaction appends children)
-BIG_HASH="0x27B952DBBC2E7163"     # 500 ticks,  seed 0xBEA61E, semantics v6 (births: compaction appends children)
+SMALL_HASH="0x7DC027B3C3D2540A"   # 1000 ticks, seed 0xBEA61E, semantics v7 (balance: wolves shadow the herd)
+BIG_HASH="0xF8E020640C2AEB56"     # 500 ticks,  seed 0xBEA61E, semantics v7 (balance: wolves shadow the herd)
 fail=0
 
 echo "── small config (1000 ticks, x2 for determinism)"

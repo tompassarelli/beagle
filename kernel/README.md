@@ -142,12 +142,15 @@ Two emergent regimes from the same two beagle functions (seed
 |---|---|---|
 | small, no births (v5) | 300 minds, 6 wolves, 64² | wolves eat 62, prey thins, ALL wolves starve by t=1000 |
 | big, no births (v5) | 200k minds, 1024 wolves, 512² | density inverts it: 1017/1024 wolves thrive, minds collapse 200k→26k in 500 ticks |
-| small, births (v6) | same | population recovers to 300/300 (carrying capacity); wolves still starve out by t=5000 |
-| big, births (v6) | same | SUSTAINED: 200k/200k minds, 1021/1024 wolves — predation and reproduction in balance at 200k entities |
+| small, births (v6) | same | minds recover to capacity; wolves still drift to stochastic extinction by t=5000 |
+| both, shadow-the-herd (v7) | same | SUSTAINED at both capacities: 300/300 + 6/6 through t=30000 (with 955k flee acts and 59k panic-digs of drama); 200k/200k + 1024/1024 at big |
 
-Calm, unhunted minds raise children (1-in-64 per calm tick); sated
-wolves whelp (energy ≥ 900, 1-in-128). Balance is content, not
-engine — tune the constants in sim_kernel.bgl and re-baseline.
+The v7 behavior change that fixed extinction wasn't odds tuning — it
+was character: wolves now SHADOW THE HERD (track scent always, eat
+only when hungry), so feeding is regular instead of lucky. Calm,
+unhunted minds raise children (1-in-64); the sated whelp (energy ≥
+800, 1-in-64). Balance is content, not engine — tune sim_kernel.bgl
+constants and re-baseline.
 
 ## Phase 3 benchmark — minds per millisecond (same beagle module)
 

@@ -129,9 +129,9 @@ pub const WolfOut = struct {
     spawn: bool,
 };
 
-pub const WOLF_DRAIN: i64 = 2;
+pub const WOLF_DRAIN: i64 = 1;
 
-pub const WOLF_FEED_GAIN: i64 = 180;
+pub const WOLF_FEED_GAIN: i64 = 250;
 
 pub const WOLF_SATED_AT: i64 = 700;
 
@@ -140,14 +140,14 @@ pub const WOLF_HOWL_AFTER: i64 = 120;
 pub fn wolfStep(ctx: *rt.Ctx, w: WolfIn, obs: WolfObs, max_x: i64, max_z: i64) WolfOut {
     const energy = @max(0, (w.energy - WOLF_DRAIN));
     const hungry = (energy < WOLF_SATED_AT);
-    const tracking = (hungry and (obs.scent > 0));
+    const tracking = (obs.scent > 0);
     const dx = (if (tracking) obs.prey_dx else (rt.rng_below(ctx, 3) - 1));
     const dz = (if (tracking) obs.prey_dz else (rt.rng_below(ctx, 3) - 1));
     const feeding = (hungry and (obs.prey_near > 0));
     const energy2 = (if (feeding) @min(1000, (energy + WOLF_FEED_GAIN)) else energy);
     const fed = (if (feeding) 0 else (w.fed + 1));
     const howl = (if ((hungry and (fed > WOLF_HOWL_AFTER) and (rt.rng_below(ctx, 32) == 0))) @as(i64, 1) else 0);
-    return WolfOut{ .x = clampCoord((w.x + dx), max_x), .z = clampCoord((w.z + dz), max_z), .energy = energy2, .fed = fed, .howl = howl, .alive = (energy2 > 0), .spawn = ((energy2 >= 900) and (rt.rng_below(ctx, 128) == 0)) };
+    return WolfOut{ .x = clampCoord((w.x + dx), max_x), .z = clampCoord((w.z + dz), max_z), .energy = energy2, .fed = fed, .howl = howl, .alive = (energy2 > 0), .spawn = ((energy2 >= 800) and (rt.rng_below(ctx, 64) == 0)) };
 }
 
 /// SoA buffer for MindIn — engine state, one slice per field.
