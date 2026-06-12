@@ -1121,15 +1121,12 @@
        [else (type-union remaining)])]
     [else current-type]))
 
+;; Predicate leaves only — composition (not/and/or) and bare-symbol
+;; truthiness live in test-narrowings below. Returns
+;; (values var narrow-to-type negated?): the var's type IS narrow-to in
+;; the true branch (negated? #f) or in the false branch (negated? #t).
 (define (extract-narrowing cond-expr)
   (cond
-    ;; Bare-symbol truthiness — if the symbol's type is (U X Nil), narrow
-    ;; to Nil in the FALSE branch (negated = #t flips it). Works for
-    ;; schema-derived optional config paths: (if config.X.optional ...).
-    ;; Returns the Nil type as the "narrow-to" with negated=#t so callers
-    ;; apply Nil to the else-branch and non-Nil to the then-branch.
-    [(symbol? cond-expr)
-     (values cond-expr (type-prim 'Nil) #t)]
     [(and (call-form? cond-expr)
           (hash-has-key? TYPE-PREDICATES (call-form-fn cond-expr))
           (= (length (call-form-args cond-expr)) 1)
@@ -1144,45 +1141,127 @@
      (values (car (call-form-args cond-expr))
              (type-prim 'Nil)
              #t)]
+    ;; (= x nil) / (not= x nil), either argument order.
     [(and (call-form? cond-expr)
-          (eq? (call-form-fn cond-expr) '=)
+          (memq (call-form-fn cond-expr) '(= not=))
           (= (length (call-form-args cond-expr)) 2))
+     (define fn (call-form-fn cond-expr))
      (define a1 (car (call-form-args cond-expr)))
      (define a2 (cadr (call-form-args cond-expr)))
-     (cond
-       [(and (symbol? a1) (eq? a2 'nil))
-        (values a1 (type-prim 'Nil) #f)]
-       [(and (eq? a1 'nil) (symbol? a2))
-        (values a2 (type-prim 'Nil) #f)]
-       [else (values #f #f #f)])]
-    [(and (call-form? cond-expr)
-          (eq? (call-form-fn cond-expr) 'not)
-          (= (length (call-form-args cond-expr)) 1))
-     (define-values (var narrow neg?) (extract-narrowing (car (call-form-args cond-expr))))
-     (if var
-       (values var narrow (not neg?))
-       (values #f #f #f))]
+     (define v (cond [(and (symbol? a1) (eq? a2 'nil)) a1]
+                     [(and (eq? a1 'nil) (symbol? a2)) a2]
+                     [else #f]))
+     (if v
+         (values v (type-prim 'Nil) (eq? fn 'not=))
+         (values #f #f #f))]
     [else (values #f #f #f)]))
 
-(define (narrow-env-for-condition env cond-expr)
+;; --- flow narrowing (occurrence typing on nil/type guards) ------------------
+;;
+;; test-narrowings computes, for a condition expression, which bindings
+;; get refined types in the true branch and in the false branch. Returns
+;; (values then-alist else-alist) of (sym . type) pairs. Composition:
+;;
+;;   (not T)        — swap branches.
+;;   (and T1 T2 …)  — then-branch gets every conjunct's then-narrowings,
+;;                    computed left-to-right under the accumulated
+;;                    narrowing (so (and (some? x) (string? x)) compounds);
+;;                    the else-branch gets nothing (any conjunct may have
+;;                    failed) except in the single-conjunct case.
+;;   (or T1 T2 …)   — De Morgan dual: else-branch accumulates every
+;;                    disjunct's else-narrowings; then-branch only for a
+;;                    single disjunct.
+;;
+;; Leaves: bare-symbol truthiness, nil?/some?, the TYPE-PREDICATES table,
+;; (= x nil)/(not= x nil).
+;;
+;; Soundness: only env-bound locals narrow (params/let/loop bindings).
+;; Clojure locals are immutable, so the refinement survives closure
+;; capture. Bare truthiness does NOT narrow the false branch to Nil when
+;; the non-nil remainder could itself be falsy (`false` — Bool or Any in
+;; the union); nil?/some? leaves don't have that hazard.
+
+(define (alist-set alist k v)
+  (cons (cons k v)
+        (filter (lambda (p) (not (eq? (car p) k))) alist)))
+
+(define (apply-narrowings env alist)
   (cond
-    [(< (current-check-profile) 2) (values env env)]
+    [(null? alist) env]
     [else
-     (define-values (var narrow-type negated?) (extract-narrowing cond-expr))
+     (define e2 (mut-copy env))
+     (for ([p (in-list alist)])
+       (hash-set! e2 (car p) (cdr p)))
+     e2]))
+
+(define (type-could-be-false? t)
+  (cond
+    [(any-type? t) #t]
+    [(type-prim? t) (eq? (type-prim-name t) 'Bool)]
+    [(type-union? t) (ormap type-could-be-false? (type-union-alts t))]
+    [else #f]))
+
+(define (test-narrowings cond-expr env)
+  (cond
+    [(< (current-check-profile) 2) (values '() '())]
+    [else
+     (define (fold-branch args pick-then?)
+       ;; Accumulate narrowings across args left-to-right, each arg
+       ;; analyzed under the overlay accumulated so far.
+       (for/fold ([acc '()]) ([a (in-list args)])
+         (define-values (th el) (test-narrowings a (apply-narrowings env acc)))
+         (for/fold ([acc2 acc]) ([p (in-list (if pick-then? th el))])
+           (alist-set acc2 (car p) (cdr p)))))
      (cond
-       [(not var) (values env env)]
-       [else
-        (define current-type (hash-ref env var #f))
+       [(and (call-form? cond-expr)
+             (eq? (call-form-fn cond-expr) 'not)
+             (= 1 (length (call-form-args cond-expr))))
+        (define-values (th el)
+          (test-narrowings (car (call-form-args cond-expr)) env))
+        (values el th)]
+       [(and (call-form? cond-expr)
+             (eq? (call-form-fn cond-expr) 'and)
+             (pair? (call-form-args cond-expr)))
+        (define args (call-form-args cond-expr))
+        (if (= 1 (length args))
+            (test-narrowings (car args) env)
+            (values (fold-branch args #t) '()))]
+       [(and (call-form? cond-expr)
+             (eq? (call-form-fn cond-expr) 'or)
+             (pair? (call-form-args cond-expr)))
+        (define args (call-form-args cond-expr))
+        (if (= 1 (length args))
+            (test-narrowings (car args) env)
+            (values '() (fold-branch args #f)))]
+       ;; Bare-symbol truthiness.
+       [(symbol? cond-expr)
+        (define cur (hash-ref env cond-expr #f))
         (cond
-          [(not current-type) (values env env)]
+          [(not cur) (values '() '())]
           [else
-           (define pos-env (mut-copy env))
-           (hash-set! pos-env var narrow-type)
-           (define neg-env (mut-copy env))
-           (hash-set! neg-env var (remove-from-union current-type narrow-type))
-           (if negated?
-             (values neg-env pos-env)
-             (values pos-env neg-env))])])]))
+           (define non-nil (remove-from-union cur (type-prim 'Nil)))
+           (values (list (cons cond-expr non-nil))
+                   (if (type-could-be-false? non-nil)
+                       '() ; falsy branch may be `false`, not nil
+                       (list (cons cond-expr (type-prim 'Nil)))))])]
+       [else
+        (define-values (var ntype neg?) (extract-narrowing cond-expr))
+        (cond
+          [(not var) (values '() '())]
+          [else
+           (define cur (hash-ref env var #f))
+           (cond
+             [(not cur) (values '() '())]
+             [else
+              (define pos (list (cons var ntype)))
+              (define neg (list (cons var (remove-from-union cur ntype))))
+              (if neg?
+                  (values neg pos)
+                  (values pos neg))])])])]))
+
+(define (narrow-env-for-condition env cond-expr)
+  (define-values (th el) (test-narrowings cond-expr env))
+  (values (apply-narrowings env th) (apply-narrowings env el)))
 
 ;; --- match arm narrowing ---------------------------------------------------
 
@@ -1970,6 +2049,24 @@
         (for ([u (in-list (with-form-updates e))])
           (infer-expr (with-update-value u) env))
         ANY])]
+    ;; and/or evaluate left-to-right with short-circuit: each argument is
+    ;; checked under the narrowings established by the previous arguments
+    ;; ((and (some? x) (Math/floor x)) sees x non-nil at the second arg;
+    ;; (or (nil? x) (f x)) sees x non-nil — arg 2 only runs when arg 1
+    ;; was falsy). Result stays Any (the value is the last truthy/falsy
+    ;; arg, untyped in v0).
+    [(and (call-form? e)
+          (memq (call-form-fn e) '(and or))
+          (symbol? (call-form-fn e)))
+     (define and? (eq? (call-form-fn e) 'and))
+     (for/fold ([acc '()]) ([a (in-list (call-form-args e))])
+       (define env* (apply-narrowings env acc))
+       (infer-expr a env*)
+       (define-values (th el) (test-narrowings a env*))
+       (for/fold ([acc2 acc]) ([p (in-list (if and? th el))])
+         (alist-set acc2 (car p) (cdr p))))
+     ANY]
+
     [(call-form? e)
      (warn-target-exclude (call-form-fn e) e)
      (define raw-type (hash-ref env (call-form-fn e) ANY))

@@ -1158,3 +1158,105 @@
    (lambda ()
      (parameterize ([current-error-port (open-output-string)])
        (run-semantic-analysis! prog)))))
+
+;; --- 2026-06-12 nil-narrowing (occurrence typing) ----------------------------
+;; Shapes: nil?/some? leaves, bare truthiness, not inversion, and/or
+;; composition + De Morgan, sequential and/or arg narrowing, cond
+;; accumulation. All on a Float? param flowing into Math/floor (Float).
+
+(check-ok "narrow: (if (nil? v) _ use) discharges Nil in else"
+  '(define-target clj)
+  '(defn f [v :- Float?] :- String
+     (if (nil? v) "" (str (Math/floor v)))))
+
+(check-ok "narrow: (when (some? v) use)"
+  '(define-target clj)
+  '(defn f [v :- Float?] :- Any
+     (when (some? v) (Math/floor v))))
+
+(check-ok "narrow: not inversion (if-some lowering shape)"
+  '(define-target clj)
+  '(defn f [v :- Float?] :- Float
+     (if (not (nil? v)) (Math/floor v) 0.0)))
+
+(check-ok "narrow: not= nil"
+  '(define-target clj)
+  '(defn f [v :- Float?] :- Float
+     (if (not= v nil) (Math/floor v) 0.0)))
+
+(check-ok "narrow: and-conjunction narrows both vars in then"
+  '(define-target clj)
+  '(defn f [a :- Float? b :- Float?] :- Float
+     (if (and (some? a) (some? b))
+       (+ (Math/floor a) (Math/floor b))
+       0.0)))
+
+(check-ok "narrow: or De-Morgan narrows in else"
+  '(define-target clj)
+  '(defn f [a :- Float? b :- Float?] :- Float
+     (if (or (nil? a) (nil? b))
+       0.0
+       (+ (Math/floor a) (Math/floor b)))))
+
+(check-ok "narrow: sequential and-args see prior narrowings"
+  '(define-target clj)
+  '(defn f [v :- Float?] :- Any
+     (and (some? v) (> (Math/floor v) 1.0))))
+
+(check-ok "narrow: or-args see prior else-narrowings"
+  '(define-target clj)
+  '(defn f [v :- Float?] :- Any
+     (or (nil? v) (> (Math/floor v) 1.0))))
+
+(check-ok "narrow: cond accumulates negations into later clauses"
+  '(define-target clj)
+  ;; grouped-clause datums use bare `else`; the bracketed [:else ...]
+  ;; surface is covered by the reader-level probes.
+  '(defn f [v :- Float?] :- String
+     (cond
+       ((nil? v) "")
+       (else (str (Math/floor v))))))
+
+(check-ok "narrow: bare truthiness (if-let lowering shape)"
+  '(define-target clj)
+  '(defn f [v :- Float?] :- Float
+     (let [w v]
+       (if w (Math/floor w) 0.0))))
+
+;; Soundness: the falsy branch of bare truthiness must NOT narrow to Nil
+;; when the union contains Bool (x could be `false`). We assert the
+;; falsy branch still treats x as the full (U Bool Nil) by passing it
+;; where that union is required.
+(check-ok "narrow soundness: Bool? falsy branch stays (U Bool Nil)"
+  '(define-target clj)
+  '(defn g [x :- (U Bool Nil)] :- Any x)
+  '(defn f [x :- (U Bool Nil)] :- Any
+     (if x 1 (g x))))
+
+(check-err "narrow negative: unguarded Float? into Math/floor still errors"
+  '(define-target clj)
+  '(defn f [v :- Float?] :- Float
+     (Math/floor v)))
+
+;; --- 2026-06-12 stdlib deepening ---------------------------------------------
+
+(check-err "stdlib: unguarded parse-long is Int? (clj)"
+  '(define-target clj)
+  '(defn f [s :- String] :- Int
+     (parse-long s)))
+
+(check-ok "stdlib: if-let guard discharges parse-long's Nil"
+  '(define-target clj)
+  '(defn f [s :- String] :- Int
+     (if-let [n (parse-long s)] n 0)))
+
+(check-ok "stdlib: element type flows through split + first"
+  '(define-target clj)
+  '(require clojure.string :as str)
+  '(defn f [s :- String] :- String
+     (first (str/split s (#%regex ",")))))
+
+(check-ok "stdlib: comparisons accept the numeric tower"
+  '(define-target clj)
+  '(def a :- Bool (> 2.5 1))
+  '(def b :- Bool (<= 1 2)))

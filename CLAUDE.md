@@ -90,6 +90,18 @@ boundaries; interiors are inferred.
   reach; if a local needs help, prefer refactoring the boundary
   annotation.
 
+**Nil-narrowing (2026-06-12):** the checker flow-narrows nullable
+locals through guards — `nil?`/`some?`/`not=`-nil leaves, bare
+truthiness (so `if-let`/`when-let`/`when-some` narrow), `not`
+inversion, `and`/`or` composition with De Morgan, sequential
+narrowing across `and`/`or` arguments, and `cond` clauses seeing
+prior tests' negations. Bindings only — field paths `(:k p)` don't
+narrow; bind-then-guard (`if-let`) is the idiom. Bare truthiness
+never falsy-narrows a Bool-containing union (could be `false`).
+Nullable-honest stdlib returns (`parse-long` → `Int?`,
+`System/getenv` → `String?`, …) live as clj-table overrides;
+unguarded use in a non-nil position is a pointed compile error.
+
 **Clojure-surface guarantees (hardened 2026-06-12):** the full
 `(ns name "doc"? (:require libspec...) (:import spec...))` form, quoted
 `(require '[lib :as a])` libspecs, `#(... % %2 %&)` fn shorthand,

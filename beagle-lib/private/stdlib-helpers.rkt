@@ -4,7 +4,13 @@
 
 (require "types.rkt")
 
-(define (p x) (type-prim x))
+;; Builtin union aliases resolve here too, so stdlib signatures can say
+;; 'Number and get (U Int Float) — the same resolution parse-type does
+;; for surface annotations.
+(define (p x)
+  (cond
+    [(hash-ref BUILTIN-UNION-ALIASES x #f) => (lambda (thunk) (thunk))]
+    [else (type-prim x)]))
 (define (tv x) (type-var x))
 
 (define (fn-of args ret #:rest [rest #f])

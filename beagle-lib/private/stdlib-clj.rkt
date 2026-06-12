@@ -69,7 +69,8 @@
    'char-escape-string (fn-of '(Any) 'Any)
    ;; --- clojure.string -----------------------------------------------------
    'clojure.string/join     (fn-of '(Any) 'String #:rest 'Any)
-   'clojure.string/split    (fn-of '(String Any) 'Any)
+   'clojure.string/split    (type-fn (list (p 'String) (p 'Any)) #f
+                                     (type-app 'Vec (list (p 'String))))
    'clojure.string/replace  (fn-of '(String Any Any) 'String)
    'clojure.string/trim     (fn-of '(String) 'String)
    'clojure.string/triml    (fn-of '(String) 'String)
@@ -84,9 +85,14 @@
    'clojure.string/reverse  (fn-of '(String) 'String)
    'clojure.string/escape   (fn-of '(String Any) 'String)
    'clojure.string/re-quote-replacement (fn-of '(String) 'String)
-   'clojure.string/index-of (fn-of '(String Any) 'Any)
-   'clojure.string/last-index-of (fn-of '(String Any) 'Any)
-   'clojure.string/split-lines (fn-of '(String) 'Any)
+   ;; Nullable-honest returns: no match → nil. Ergonomic now that
+   ;; nil-narrowing flows through if/when/if-let/and/or/cond guards.
+   'clojure.string/index-of (type-fn (list (p 'String) (p 'Any)) #f
+                                     (type-union (list (p 'Int) (p 'Nil))))
+   'clojure.string/last-index-of (type-fn (list (p 'String) (p 'Any)) #f
+                                          (type-union (list (p 'Int) (p 'Nil))))
+   'clojure.string/split-lines (type-fn (list (p 'String)) #f
+                                        (type-app 'Vec (list (p 'String))))
    'clojure.string/replace-first (fn-of '(String Any Any) 'String)
    ;; --- clojure.set -------------------------------------------------------
    'clojure.set/union       (fn-of '() 'Any #:rest 'Any)
@@ -309,7 +315,8 @@
    'Long/parseLong     (fn-of '(String) 'Int)
    'Double/parseDouble (fn-of '(String) 'Float)
    'System/getProperty       (fn-of '(String) 'String)
-   'System/getenv            (fn-of '(String) 'Any)
+   'System/getenv            (type-fn (list (p 'String)) #f
+                                      (type-union (list (p 'String) (p 'Nil))))
    'System/currentTimeMillis (fn-of '() 'Int)
    'System/exit              (fn-of '(Int) 'Nil)
    ;; --- Java interop: dynamic vars ----------------------------------------
@@ -436,6 +443,41 @@
    'var?           (fn-of '(Any) 'Bool)
    'volatile?      (fn-of '(Any) 'Bool)
    'xml-seq        (fn-of '(Any) 'Any)
+
+   ;; === 2026-06-12 signature deepening (clj-table overrides) ===============
+   ;; Overrides of Any-heavy PORTABLE entries — placed here so the portable
+   ;; table (and therefore the nix corpus) is untouched. Two families:
+   ;; 1. Nullable-honest returns — usable now that nil-narrowing flows
+   ;;    through guards; unguarded use in a non-nil position is a compile
+   ;;    error pointing at the missing guard.
+   ;; 2. Vec element flow via poly — (first (str/split s #",")) : String.
+   ;;    Deliberately NOT nullable: first-of-empty returning nil stays the
+   ;;    accepted Clojure prior in v0 (the honest (U A Nil) would flood
+   ;;    every call site with guards for marginal gain).
+   'parse-long    (type-fn (list (p 'String)) #f
+                           (type-union (list (p 'Int) (p 'Nil))))
+   'parse-double  (type-fn (list (p 'String)) #f
+                           (type-union (list (p 'Float) (p 'Nil))))
+   'parse-boolean (type-fn (list (p 'String)) #f
+                           (type-union (list (p 'Bool) (p 'Nil))))
+   'first  (poly-fn '(A) (list (type-app 'Vec (list (tv 'A)))) (tv 'A))
+   'second (poly-fn '(A) (list (type-app 'Vec (list (tv 'A)))) (tv 'A))
+   'last   (poly-fn '(A) (list (type-app 'Vec (list (tv 'A)))) (tv 'A))
+   'peek   (poly-fn '(A) (list (type-app 'Vec (list (tv 'A)))) (tv 'A))
+   'nth    (poly-fn '(A) (list (type-app 'Vec (list (tv 'A))) (p 'Int)) (tv 'A)
+                    #:rest (p 'Any))
+   'reverse  (poly-fn '(A) (list (type-app 'Vec (list (tv 'A))))
+                      (type-app 'Vec (list (tv 'A))))
+   'distinct (poly-fn '(A) (list (type-app 'Vec (list (tv 'A))))
+                      (type-app 'Vec (list (tv 'A))))
+   'shuffle  (poly-fn '(A) (list (type-app 'Vec (list (tv 'A))))
+                      (type-app 'Vec (list (tv 'A))))
+   'subvec   (poly-fn '(A) (list (type-app 'Vec (list (tv 'A))) (p 'Int))
+                      (type-app 'Vec (list (tv 'A))) #:rest (p 'Int))
+   'keys (poly-fn '(K V) (list (type-app 'Map (list (tv 'K) (tv 'V))))
+                  (type-app 'Vec (list (tv 'K))))
+   'vals (poly-fn '(K V) (list (type-app 'Map (list (tv 'K) (tv 'V))))
+                  (type-app 'Vec (list (tv 'V))))
    ))
 
 ;; CLJ entries unavailable when targeting CLJS.

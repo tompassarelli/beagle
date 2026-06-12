@@ -784,6 +784,22 @@
                                "on 2026-06-12 ok"))))
        "" "2026")
 
+     ;; Nil-narrowing end-to-end: the guarded nullable type-checks AND the
+     ;; emitted Clojure computes correctly under bb (2026-06-12).
+     (check-clj-output "nil-narrowing: guarded Float? runs correctly"
+       (list (list 'defn 'f (br 'v ':- 'Float?) ':- 'String
+                   (list 'if (list 'nil? 'v)
+                         "none"
+                         (list 'str (list 'long (list 'Math/floor 'v)))))
+             (list 'println (list 'f 2.7) (list 'f 'nil)))
+       "" "2 none")
+
+     (check-clj-output "nil-narrowing: parse-long guarded via if-let"
+       (list (list 'defn 'f (br 's ':- 'String) ':- 'Int
+                   (list 'if-let (br 'n (list 'parse-long 's)) 'n 0))
+             (list 'println (list 'f "42") (list 'f "nope")))
+       "" "42 0")
+
      (void))
 
 )))

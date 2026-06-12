@@ -80,19 +80,22 @@
    'min        (fn-of '(Int) 'Int #:rest 'Int)
    'max        (fn-of '(Int) 'Int #:rest 'Int)
    'abs        (fn-of '(Int) 'Int)
-   'zero?      (fn-of '(Int) 'Bool)
-   'pos?       (fn-of '(Int) 'Bool)
-   'neg?       (fn-of '(Int) 'Bool)
+   'zero?      (fn-of '(Number) 'Bool)
+   'pos?       (fn-of '(Number) 'Bool)
+   'neg?       (fn-of '(Number) 'Bool)
    'even?      (fn-of '(Int) 'Bool)
    'odd?       (fn-of '(Int) 'Bool)
    ;; --- equality / ordering ------------------------------------------------
    '=          (fn-of '(Any Any) 'Bool)
    ;; not= re-adopted (audit row d): Clojure-canonical negated equality.
    'not=       (fn-of '(Any Any) 'Bool)
-   '<          (fn-of '(Int Int) 'Bool)
-   '>          (fn-of '(Int Int) 'Bool)
-   '<=         (fn-of '(Int Int) 'Bool)
-   '>=         (fn-of '(Int Int) 'Bool)
+   ;; Comparisons accept the numeric tower (Number = (U Int Float)) —
+   ;; param-widening only, Bool return unchanged, so no downstream type
+   ;; flow changes. (> 2.5 1.0) was a false positive before 2026-06-12.
+   '<          (fn-of '(Number Number) 'Bool)
+   '>          (fn-of '(Number Number) 'Bool)
+   '<=         (fn-of '(Number Number) 'Bool)
+   '>=         (fn-of '(Number Number) 'Bool)
    'identical? (fn-of '(Any Any) 'Bool)
    'compare    (fn-of '(Any Any) 'Int)
    'boolean    (fn-of '(Any) 'Bool)

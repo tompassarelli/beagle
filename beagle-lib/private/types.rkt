@@ -388,6 +388,7 @@
  BRACKET-TAG
  MAP-TAG
  SET-TAG
+ BUILTIN-UNION-ALIASES
  (struct-out type-prim)
  (struct-out type-fn)
  (struct-out type-app)
