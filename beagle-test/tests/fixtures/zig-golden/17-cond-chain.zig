@@ -4,5 +4,5 @@ const rt = @import("beagle_rt.zig");
 pub const Ctx = rt.Ctx;
 
 pub fn bucket(v: i64) i64 {
-    return (if ((v >= 750)) 3 else if ((v >= 500)) 2 else if ((v >= 250)) 1 else 0);
+    return (if ((v >= 750)) @as(i64, 3) else if ((v >= 500)) 2 else if ((v >= 250)) 1 else 0);
 }

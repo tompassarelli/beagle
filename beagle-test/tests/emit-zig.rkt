@@ -251,6 +251,20 @@
   (test-case "engine: two-system generated layer compiles as zig"
     (check-true (zig-compiles? (compile-zig-string TWO-SYSTEM-SRC) "two-systems"))))
 
+(test-case "literal-only branches get an @as anchor (zig comptime_int trap)"
+  ;; In a binding position, (if c 1 0) is two comptime_int branches under
+  ;; runtime control flow — zig rejects it unless one branch is anchored.
+  (define out (compile-zig-string
+               "(ns g)\n(defn f [x :- Int] :- Int (let [v (if (> x 0) 1 0)] v))"))
+  (check-true (regexp-match? #rx"@as.i64, 1." out)))
+
+(when ZIG
+  (test-case "literal-branch if compiles in binding position"
+    (check-true (zig-compiles?
+                 (compile-zig-string
+                  "(ns g)\n(defn f [x :- Int] :- Int (let [v (if (> x 0) 1 0)] v))")
+                 "literal-if-binding"))))
+
 (test-case "engine: a -step fn without Ctx first is an ordinary function"
   (define out (compile-zig-string
                "(ns g)\n(defn two-step [a :- Int b :- Int] :- Int (+ a b))"))

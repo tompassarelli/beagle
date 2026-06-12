@@ -150,10 +150,12 @@
     [(if-form? e)
      (unless (if-form-else-expr e)
        (unsupported "if without else in expression position"))
+     (define t (if-form-then-expr e))
+     (define el (if-form-else-expr e))
      (format "(if (~a) ~a else ~a)"
              (emit-expr (if-form-cond-expr e))
-             (emit-expr (if-form-then-expr e))
-             (emit-expr (if-form-else-expr e)))]
+             (anchor-literal-branch t (list t el))
+             (emit-expr el))]
     [(cond-form? e) (emit-cond e)]
     [(do-form? e) (emit-block-expr '() (do-form-body e))]
     [(let-form? e) (emit-block-expr (let-form-bindings e) (let-form-body e))]
@@ -180,6 +182,22 @@
              (format ".~a = ~a" (ident (param-name f)) (emit-expr a)))
            ", ")))
 
+;; Zig peer-type resolution can't unify branches that are ALL bare
+;; integer/float literals under runtime control flow ("value with
+;; comptime-only type 'comptime_int' depends on runtime control
+;; flow"). Anchoring any one branch with @as fixes the whole chain.
+(define (anchor-literal-branch first-expr all-branch-exprs)
+  (define anchor
+    (cond
+      [(andmap exact-integer? all-branch-exprs) "i64"]
+      [(and (andmap real? all-branch-exprs)
+            (ormap (lambda (x) (not (exact-integer? x))) all-branch-exprs))
+       "f64"]
+      [else #f]))
+  (if anchor
+      (format "@as(~a, ~a)" anchor (emit-expr first-expr))
+      (emit-expr first-expr)))
+
 (define (emit-cond e)
   (define clauses (cond-form-clauses e))
   (define else-clause
@@ -187,13 +205,20 @@
   (unless else-clause
     (unsupported "cond without :else in expression position"))
   (define branches (filter (lambda (c) (not (eq? (cond-clause-test c) 'else))) clauses))
+  ;; single-expr literal bodies across every branch → anchor the first
+  (define bodies (map cond-clause-body (append branches (list else-clause))))
+  (define literal-chain?
+    (andmap (lambda (b) (and (= 1 (length b)) (real? (car b)))) bodies))
   (string-append
    "("
-   (for/fold ([acc ""]) ([c (in-list branches)])
+   (for/fold ([acc ""]) ([c (in-list branches)] [k (in-naturals)])
      (string-append acc
                     (format "if (~a) ~a else "
                             (emit-expr (cond-clause-test c))
-                            (emit-body-expr (cond-clause-body c)))))
+                            (if (and literal-chain? (zero? k))
+                                (anchor-literal-branch (car (cond-clause-body c))
+                                                       (map car bodies))
+                                (emit-body-expr (cond-clause-body c))))))
    (emit-body-expr (cond-clause-body else-clause))
    ")"))
 
