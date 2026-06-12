@@ -78,11 +78,27 @@ boundaries; interiors are inferred.
 - `(def NAME :- TYPE VALUE)` — top-level binding with type.
 - `(defn NAME [PARAM :- TYPE ...] :- RETURN-TYPE BODY)` — typed params and return.
 - `(defonce NAME :- TYPE VALUE)` — same shape as def.
+- `(defrecord NAME [field :- TYPE field2 :- TYPE2 ...])` — record
+  fields use the same flat grammar as params; types required (records
+  are typed boundaries).
 - Mixed param vectors are legal: `[a :- Int b c :- String]` — `a`
   typed, `b` inferred, `c` typed.
+- Docstrings are real Clojure surface and accepted everywhere Clojure
+  accepts them: `(def N "doc" V)`, `(def N :- T "doc" V)`,
+  `(defn N "doc" [params] ...)` — carried through to clj/cljs emit.
 - Locals and `let`-bindings are inferred unless inference can't
   reach; if a local needs help, prefer refactoring the boundary
   annotation.
+
+**Clojure-surface guarantees (hardened 2026-06-12):** the full
+`(ns name "doc"? (:require libspec...) (:import spec...))` form, quoted
+`(require '[lib :as a])` libspecs, `#(... % %2 %&)` fn shorthand,
+map-destructure `:or`/`:as`, and nested seq destructure `[[k v] m]` all
+parse, type-check, and emit. Malformed meta forms and special forms
+raise pointed errors — nothing falls through to the call-form
+passthrough or drops silently. Variadic fns satisfy fixed-arity fn
+positions (`(mapv str xs)` checks). `unless`/`fmt`/`has` are removed
+(use `when-not` / `str`,`format` / `contains?`).
 
 **Lowering:** `:-` annotations lower to Clojure-family `^Type`
 metadata at clj/cljs emit. Nix emit consumes them through the
@@ -108,7 +124,7 @@ answer to a question a static doc would otherwise try to encode.
 | question | tool |
 |---|---|
 | does this file parse? where? | `bin/beagle-syntax FILE` (`--ledger`, `--repair --emit-patch`) |
-| does this file type-check? | `bin/beagle-op-check FILE` (or `bin/beagle-check FILE` for legacy pipeline) |
+| does this file type-check? | `bin/beagle-check --agent FILE` (`beagle-op-*` is the quarantined operative pipeline — gated behind `BEAGLE_EXPERIMENTAL_OPERATIVE=1`, not the default) |
 | what's the signature of X? | `bin/beagle-sig X FILE...` |
 | what fields does record R have? | `bin/beagle-fields R FILE...` |
 | who calls X? | `bin/beagle-callers X FILE...` |
@@ -116,7 +132,7 @@ answer to a question a static doc would otherwise try to encode.
 | change-impact for X? | `bin/beagle-impact X FILE...` |
 | show macro expansion | `bin/beagle-expand FILE` |
 | run tests | `bin/beagle-test` (active-tier default, includes Nix + Clj + CLJS) |
-| compile this | `bin/beagle-op-compile FILE` |
+| compile this | `bin/beagle-build FILE [OUT]` |
 
 When stuck after ordinary checks: `bin/beagle-repair --emit-patch`,
 `bin/beagle-trace --focus FN`, `bin/beagle-cascade --from-failures`,
