@@ -30,6 +30,40 @@
 ;; (`#<<TAG` and `#r"..."` hard-remove). The dispatch arms in
 ;; `hash-dispatch` now error with a pointed migration message.
 
+;; --- #(...) anonymous fn shorthand ------------------------------------------
+;;
+;; Clojure reader sugar: #(inc %) → (fn [%1] (inc %1)). Placeholders:
+;;   %, %1..%N  — positional params (% is an alias for %1)
+;;   %&         — rest param
+;; The rewrite happens at read time (like Clojure); the resulting (fn ...)
+;; datum flows through the ordinary parse/check/emit pipeline, so #() bodies
+;; are fully type-checked. Nested #() is rejected (as in Clojure).
+
+(define reading-fn-shorthand? (make-parameter #f))
+
+(define (fn-shorthand->fn items)
+  (define max-idx 0)
+  (define rest-used? #f)
+  (define (note! sym)
+    (define s (symbol->string sym))
+    (cond
+      [(string=? s "%")  (set! max-idx (max max-idx 1))]
+      [(string=? s "%&") (set! rest-used? #t)]
+      [(regexp-match? #rx"^%[1-9][0-9]*$" s)
+       (set! max-idx (max max-idx (string->number (substring s 1))))]))
+  (define (walk d)
+    (cond
+      [(symbol? d) (note! d) (if (eq? d '%) '%1 d)]
+      [(pair? d)   (cons (walk (car d)) (walk (cdr d)))]
+      [else d]))
+  (define body (walk items))
+  (define params
+    (append
+     (for/list ([i (in-range 1 (+ max-idx 1))])
+       (string->symbol (string-append "%" (number->string i))))
+     (if rest-used? (list '& '%&) '())))
+  (list 'fn (cons '#%brackets params) body))
+
 ;; Reader conditionals (#? and #?@) — Clojure-style read-time dispatch.
 ;;
 ;; Surface:
@@ -105,6 +139,19 @@
      (if src
        (datum->syntax #f result (vector src line col pos #f))
        result)]
+    ;; #(...) anonymous fn shorthand → (fn [%1 ...] body)
+    [(and (char? next) (char=? next #\())
+     (when (reading-fn-shorthand?)
+       (error 'beagle
+              "nested #(...) is not supported — use (fn [x] ...) for the inner function"))
+     (read-char port)
+     (define items
+       (parameterize ([reading-fn-shorthand? #t])
+         (read-until-close port #\))))
+     (define result (fn-shorthand->fn items))
+     (if src
+       (datum->syntax #f result (vector src line col pos #f))
+       result)]
     [(and (char? next) (char=? next #\"))
      (read-char port)
      (define pattern (read-regex-pattern port))
@@ -126,10 +173,11 @@
          (read-syntax src combined)
          (read combined)))]))
 
-;; Note: there is NO apostrophe reader macro in the quote-operator surface.
-;; `'` is just an ordinary identifier character. Data quoting uses
-;; `(' OPERAND)` with `'` in head position; there is no `'x` prefix sugar.
-;; See plan 20260528220000-beagle_quote_operator_clarification.
+;; `'` IS a quote-prefix reader macro (see quote-reader below): 'x reads
+;; as (quote x) for any datum, matching Clojure. (An earlier design used
+;; `(' OPERAND)` with no prefix sugar — see plan
+;; 20260528220000-beagle_quote_operator_clarification — that design was
+;; superseded; this comment was stale until 2026-06-12.)
 
 ;; (pipe-reader removed alongside the pipe family. `|>` / `|>>` are no
 ;; longer reserved threading symbols. `|` now reverts to Racket's default
@@ -266,4 +314,5 @@
   (parameterize ([current-readtable beagle-readtable])
     (read-syntax src in)))
 
-(provide beagle-read beagle-read-syntax beagle-readtable)
+(provide beagle-read beagle-read-syntax beagle-readtable
+         fn-shorthand->fn reading-fn-shorthand?)

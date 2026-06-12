@@ -722,6 +722,59 @@
         (println (mt/quad (bm/double 3)))"
        "10\n20\n105\n24")
 
+     ;; --- 2026-06-12 surface hardening regressions ------------------------
+
+     ;; :or defaults must survive to emitted Clojure (were silently dropped
+     ;; → runtime NPE from valid Clojure).
+     (check-clj-output ":or destructure defaults apply at runtime"
+       (list (list 'defn 'f (br (mt ':keys (br 'a 'b) ':or (mt 'b 2)))
+                   (list '+ 'a 'b))
+             (list 'println (list 'f (mt ':a 1))))
+       "" "3")
+
+     ;; :as after :or (both were dropped when :or preceded :as).
+     (check-clj-output ":as binding after :or"
+       (list (list 'defn 'g (br (mt ':keys (br 'a) ':or (mt 'a 1) ':as 'm))
+                   (list 'count 'm))
+             (list 'println (list 'g (mt ':a 5 ':b 6))))
+       "" "2")
+
+     ;; defn docstrings carry through to the emitted defn.
+     (check-clj-output "defn docstring lands on the emitted var"
+       (list (list 'defn 'greet "Returns a greeting." (br 'name)
+                   (list 'str "hi " 'name)))
+       "(println (:doc (meta #'greet)))"
+       "Returns a greeting.")
+
+     ;; def docstrings: typed def-form now, not a call-form passthrough.
+     (check-clj-output "def docstring emits valid clojure def"
+       (list (list 'def 'version "The version." "1.0.0")
+             (list 'println 'version))
+       "" "1.0.0")
+
+     ;; Nested sequential destructure round-trips.
+     (check-clj-output "nested seq destructure in let"
+       (list (list 'let (br (br 'a (br 'b 'c)) (br 1 (br 2 3)))
+                   (list 'println (list '+ 'a 'b 'c))))
+       "" "6")
+
+     (check-clj-output "doseq pair destructure over a map"
+       (list (list 'doseq (br (br 'k 'v) (mt ':a 1))
+                   (list 'println 'k 'v)))
+       "" ":a 1")
+
+     ;; Variadic→fixed-arity subsumption: (mapv str xs) was a false type
+     ;; error before 2026-06-12.
+     (check-clj-output "variadic str accepted in mapv fn position"
+       (list (list 'prn (list 'mapv 'str (br 1 2))))
+       "" "[\"1\" \"2\"]")
+
+     ;; defrecord flat :- fields (canonical annotation grammar).
+     (check-clj-output "defrecord flat inline field annotations"
+       (list (list 'defrecord 'Pt (br 'x ':- 'Int 'y ':- 'Int))
+             (list 'println (list ':y (list '->Pt 1 2))))
+       "" "2")
+
      (void))
 
 )))

@@ -503,22 +503,22 @@
   (for ([raw-form (in-list (program-forms prog))])
     (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
     (match form
-      [(def-form name (? type? t) _) (hash-set! env name t)]
-      [(def-form name #f _) (void)]
-      [(defonce-form name (? type? t) _) (hash-set! env name t)]
-      [(defonce-form name #f _) (void)]
-      [(defn-form name params rest-p (? type? ret) _ _ _)
+      [(def-form name (? type? t) _ _) (hash-set! env name t)]
+      [(def-form name #f _ _) (void)]
+      [(defonce-form name (? type? t) _ _) (hash-set! env name t)]
+      [(defonce-form name #f _ _) (void)]
+      [(defn-form name params rest-p (? type? ret) _ _ _ _)
        (define rtype (and rest-p (param-or-destr-type rest-p)))
        (hash-set! env name
                   (type-fn (map param-or-destr-type params) rtype ret))]
-      [(defn-form name params rest-p #f _ _ _)
+      [(defn-form name params rest-p #f _ _ _ _)
        ;; No inline return-type: register a function type with ANY return so
        ;; call sites still see the arity. Param types still flow from inline
        ;; `:-` annotations via param-or-destr-type.
        (define rtype (and rest-p (param-or-destr-type rest-p)))
        (hash-set! env name
                   (type-fn (map param-or-destr-type params) rtype ANY))]
-      [(defn-multi name arities _)
+      [(defn-multi name arities _ _)
        (define alt-types
          (for/list ([a (in-list arities)])
            (define rp (arity-clause-rest-param a))
@@ -646,7 +646,7 @@
 
 (define (check-form form env)
   (match form
-    [(def-form name expected-type value)
+    [(def-form name expected-type value _)
      (define inferred (infer-expr value env))
      ;; Inline `:-` annotation lives in expected-type; the pre-pass mirrors
      ;; it into env. Either lookup is fine — both point at the same type.
@@ -660,7 +660,7 @@
                              'expected (type->string effective-type)
                              'actual (type->string inferred))
                      #:src (src-for value))))]
-    [(defonce-form name expected-type value)
+    [(defonce-form name expected-type value _)
      (define inferred (infer-expr value env))
      (define effective-type (or expected-type (hash-ref env name #f)))
      (when effective-type
@@ -673,7 +673,7 @@
                              'actual (type->string inferred))
                      #:src (src-for value))))]
 
-    [(defn-form name params rest-p expected-ret body _ _)
+    [(defn-form name params rest-p expected-ret body _ _ _)
      (define all-params (if rest-p (append params (list rest-p)) params))
      (define body-env (extend-with-params env all-params))
      ;; Inline `:-` return annotation lives in expected-ret; the pre-pass
@@ -708,7 +708,7 @@
                        #:src (or (src-for (last body))
                                  (body-loc-at body (sub1 (length body))))))))]
 
-    [(defn-multi name arities _)
+    [(defn-multi name arities _ _)
      (for ([a (in-list arities)])
        (define body-env (extend-with-params env (arity-clause-params a)))
        (define a-body (arity-clause-body a))
@@ -881,16 +881,14 @@
   (define out (mut-copy env))
   (for ([p (in-list params)])
     (cond
-      [(map-destructure? p)
-       (for ([k (in-list (map-destructure-keys p))])
-         (hash-set! out k ANY))
-       (when (map-destructure-as-name p)
-         (hash-set! out (map-destructure-as-name p) ANY))]
-      [(seq-destructure? p)
-       (for ([n (in-list (seq-destructure-names p))])
+      [(or (map-destructure? p) (seq-destructure? p))
+       ;; destructure-bound-names flattens nested patterns.
+       (for ([n (in-list (destructure-bound-names p))])
          (hash-set! out n ANY))
-       (when (seq-destructure-rest-name p)
-         (hash-set! out (seq-destructure-rest-name p) ANY))]
+       ;; :or default expressions are ordinary exprs — infer them so type
+       ;; errors inside defaults fire.
+       (for ([dex (in-list (destructure-or-default-exprs p))])
+         (infer-expr dex out))]
       [else
        (hash-set! out (param-name p) (or (param-type p) ANY))]))
   out)
@@ -2232,7 +2230,9 @@
          (define field-type (and field-map (hash-ref field-map kw #f)))
          (hash-set! out k (or field-type ANY)))
        (when (map-destructure-as-name bname)
-         (hash-set! out (map-destructure-as-name bname) (or declared inferred ANY)))]
+         (hash-set! out (map-destructure-as-name bname) (or declared inferred ANY)))
+       (for ([dex (in-list (destructure-or-default-exprs bname))])
+         (infer-expr dex out))]
       [(seq-destructure? bname)
        (define elem-type
          (if (and (type-app? inferred)
@@ -2241,7 +2241,13 @@
            (car (type-app-args inferred))
            ANY))
        (for ([n (in-list (seq-destructure-names bname))])
-         (hash-set! out n elem-type))
+         (cond
+           [(symbol? n) (hash-set! out n elem-type)]
+           [else
+            ;; Nested pattern: bind every inner name as Any (element types
+            ;; don't project through nesting in v0 inference).
+            (for ([inner (in-list (destructure-bound-names n))])
+              (hash-set! out inner ANY))]))
        (when (seq-destructure-rest-name bname)
          (hash-set! out (seq-destructure-rest-name bname) (or inferred ANY)))]
       [else

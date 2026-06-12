@@ -64,6 +64,7 @@
              "parse.rkt"
              "quasi-quote-reader.rkt"
              "reader-conditionals.rkt"
+             "reader-shorthand.rkt"     ; #() fn shorthand (2026-06-12)
              "sourcemap-fidelity.rkt"   ; diagnostic srcloc fidelity benchmark
              "syntax.rkt"
              "test-tags.rkt"

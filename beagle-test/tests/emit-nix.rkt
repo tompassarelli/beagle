@@ -282,9 +282,14 @@
   (define out (nix-emit "(define-target nix) (get-or config a.b.c \"fallback\")"))
   (check-true (and out (string-contains? out "config.a.b.c or \"fallback\""))))
 
-(test-case "has emits has-attr check"
-  (define out (nix-emit "(define-target nix) (has config a.b)"))
-  (check-true (and out (string-contains? out "config ? a.b"))))
+(test-case "has is removed; rejection names contains?"
+  ;; `has` removed 2026-06-12 (zero corpus hits; contains? is the Clojure
+  ;; spelling). nix-emit returns #f when parse rejects.
+  (check-false (nix-emit "(define-target nix) (has config a.b)")))
+
+(test-case "contains? emits hasAttr (the has replacement)"
+  (define out (nix-emit "(define-target nix) (contains? config :services)"))
+  (check-true (and out (string-contains? out "builtins.hasAttr"))))
 
 (test-case "ms emits multiline string"
   (define out (nix-emit "(define-target nix) (ms \"line one\" \"line two\")"))
@@ -513,10 +518,9 @@
   (define b (nix-emit "(define-target nix) (if (> x 0) \"pos\" \"neg\")"))
   (check-equal? a b))
 
-(test-case "unless emits same Nix as if c nil + body (chosen lowering)"
-  ;; Chosen lowering: (unless c body…) → (if c nil (do body…)).
-  ;; For single body the (do body) wrap collapses to bare body in emit
-  ;; (emit-body of a single expr is just the expr), so emit is byte-equal.
-  (define a (nix-emit "(define-target nix) (unless (> x 0) (println x))"))
-  (define b (nix-emit "(define-target nix) (if (> x 0) nil (println x))"))
-  (check-equal? a b))
+(test-case "unless is removed; when-not is the Clojure spelling"
+  ;; `unless` removed 2026-06-12 — not a Clojure form; zero corpus hits.
+  (check-false (nix-emit "(define-target nix) (unless (> x 0) (println x))"))
+  ;; when-not lowers to (if (not c) (do body…)) and emits fine.
+  (define out (nix-emit "(define-target nix) (when-not (> x 0) (println x))"))
+  (check-true (and out (string-contains? out "if"))))

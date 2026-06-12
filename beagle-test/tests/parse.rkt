@@ -452,20 +452,16 @@
   (check-equal? (if-form-then-expr f) "pos")
   (check-equal? (if-form-else-expr f) "neg"))
 
-(test-case "unless lowers to if c nil + do"
-  (define f (car (parse-one '(unless (> x 0) (println x) x))))
-  (check-true (if-form? f))
-  ;; Then-branch is nil (the no-op path).
-  (check-eq? (if-form-then-expr f) 'nil)
-  ;; Else-branch is the (do …) wrapper around the body.
-  (check-true (do-form? (if-form-else-expr f))))
+;; `unless` removed 2026-06-12 — not Clojure (when-not is the spelling);
+;; zero corpus hits. The rejection must name the replacement.
+(parse-err/rx "unless is removed; rejection names when-not"
+  #rx"when-not"
+  '(unless (> x 0) (println x) x))
 
 (parse-err "when with no body errors"
   '(when (> x 0)))
 (parse-err "when-not with no body errors"
   '(when-not (> x 0)))
-(parse-err "unless with no body errors"
-  '(unless (> x 0)))
 (parse-err "if-not with two args errors"
   '(if-not (> x 0) "neg"))
 
@@ -1120,33 +1116,12 @@
   (check-eq? (extend-type-form-type-name f) 'String)
   (check-equal? (length (extend-type-form-impls f)) 1))
 
-;; --- fmt: interpolated string templates --------------------------------------
+;; --- fmt: removed 2026-06-12 -------------------------------------------------
+;; Zero corpus hits; not Clojure. str/format are the canonical spellings.
 
-(test-case "fmt with no holes returns plain string"
-  (define f (car (parse-one '(fmt "no holes"))))
-  (check-true (string? f))
-  (check-equal? f "no holes"))
-
-(test-case "fmt with one hole expands to str call"
-  (define f (car (parse-one '(fmt "hello ${name}!"))))
-  (check-true (call-form? f))
-  (check-eq? (call-form-fn f) 'str)
-  (check-equal? (length (call-form-args f)) 3))
-
-(test-case "fmt with expression hole"
-  (define f (car (parse-one '(fmt "val: ${(str a b)}"))))
-  (check-true (call-form? f))
-  (check-eq? (call-form-fn f) 'str)
-  (check-equal? (length (call-form-args f)) 2))
-
-(test-case "fmt with heredoc"
-  (define f (car (parse-one '(fmt (#%block-string JS "x = ${v};")))))
-  (check-true (call-form? f))
-  (check-eq? (call-form-fn f) 'str)
-  (check-equal? (length (call-form-args f)) 3))
-
-(parse-err/rx "fmt rejects unmatched ${" #rx"unmatched"
-  '(fmt "broken ${x"))
+(parse-err/rx "fmt is removed; rejection names str and format"
+  #rx"str"
+  '(fmt "hello ${name}!"))
 
 ;; --- threading macros expand at parse time -----------------------------------
 
@@ -1481,3 +1456,142 @@
   (define cases (target-case-form-cases f))
   (check-true (hash-has-key? cases 'clj))
   (check-true (hash-has-key? cases 'js)))
+
+;; --- 2026-06-12 surface hardening regressions --------------------------------
+;; Silent-drop class: every meta-headed form either registers or raises.
+
+(test-case "full ns form populates namespace, requires, and imports"
+  (define p (parse-prog
+             (L 'ns 'my.cli
+                "CLI namespace."
+                (L ':require (br 'clojure.string ':as 'str)
+                   (br 'babashka.fs ':refer (br 'exists?)))
+                (L ':import (L 'java.time 'LocalDate 'Duration)))))
+  (check-eq? (program-namespace p) 'my.cli)
+  (define rs (program-requires p))
+  (check-equal? (length rs) 2)
+  (define fs-entry
+    (car (filter (lambda (r) (eq? (require-entry-ns r) 'babashka.fs)) rs)))
+  (check-equal? (require-entry-refer fs-entry) '(exists?))
+  (check-equal? (sort (map symbol->string (program-imports p)) string<?)
+                '("java.time.Duration" "java.time.LocalDate")))
+
+(parse-err/rx "ns :use rejected pointing at :require :refer"
+  #rx":refer"
+  (L 'ns 'x.y (L ':use 'foo)))
+
+(parse-err/rx "malformed ns raises (never silently drops)"
+  #rx"malformed ns"
+  (L 'ns "not-a-symbol"))
+
+(test-case "require quoted libspecs register all entries"
+  (define p (parse-prog (L 'require
+                           (L 'quote (br 'clojure.set ':as 'cset))
+                           (L 'quote (br 'clojure.walk ':as 'w)))))
+  (check-equal? (map require-entry-ns (program-requires p))
+                '(clojure.set clojure.walk)))
+
+(test-case "require with :as and :refer combined"
+  (define p (parse-prog (L 'require 'clojure.string ':as 'str
+                           ':refer (br 'join 'trim))))
+  (define r (car (program-requires p)))
+  (check-eq? (require-entry-alias r) 'str)
+  (check-equal? (require-entry-refer r) '(join trim)))
+
+(parse-err/rx ":refer :all rejected pointing at explicit symbols"
+  #rx"explicitly"
+  (L 'require 'foo.bar ':refer ':all))
+
+(test-case "import package-list form expands to qualified classes"
+  (define p (parse-prog (L 'import (L 'java.time 'LocalDate 'Duration))))
+  (check-equal? (sort (map symbol->string (program-imports p)) string<?)
+                '("java.time.Duration" "java.time.LocalDate")))
+
+(parse-err/rx "malformed defmacro raises (never silently drops)"
+  #rx"defmacro"
+  (L 'defmacro 'm (br 'x) 'a 'b))
+
+;; Docstrings — real Clojure def/defn surface, now typed and carried.
+
+(test-case "def with docstring stays a typed def-form"
+  (define f (car (parse-one (L 'def 'version "The version." "1.0"))))
+  (check-true (def-form? f))
+  (check-equal? (def-form-doc f) "The version.")
+  (check-equal? (def-form-value f) "1.0"))
+
+(test-case "def :- TYPE with docstring"
+  (define f (car (parse-one (L 'def 'port ':- 'Int "Port." 8080))))
+  (check-true (def-form? f))
+  (check-equal? (def-form-doc f) "Port.")
+  (check-true (and (def-form-type f) #t)))
+
+(test-case "defn docstring carried on defn-form"
+  (define f (car (parse-one
+                  (L 'defn 'greet "Greets." (br 'name) (L 'str "hi " 'name)))))
+  (check-true (defn-form? f))
+  (check-equal? (defn-form-doc f) "Greets."))
+
+(test-case "defn multi-arity docstring carried on defn-multi"
+  (define f (car (parse-one (L 'defn 'f "Doc."
+                               (L (br 'a) 'a)
+                               (L (br 'a 'b) (L '+ 'a 'b))))))
+  (check-true (defn-multi? f))
+  (check-equal? (defn-multi-doc f) "Doc."))
+
+(parse-err/rx "defn attr-map metadata rejected pointing at docstring"
+  #rx"docstring"
+  (L 'defn 'f (mt ':added "1.0") (br 'x) 'x))
+
+(parse-err/rx "Schema-style prefix return annotation names canonical order"
+  #rx"after the param vector"
+  (L 'defn 'f ':- 'Int (br 'x) 'x))
+
+;; Special-form guards — no call-form passthrough for malformed shapes.
+
+(parse-err/rx "malformed def guarded"
+  #rx"malformed def"
+  (L 'def 'x 1 2))
+
+(parse-err/rx "malformed defn guarded"
+  #rx"malformed defn"
+  (L 'defn 'f))
+
+;; defrecord: flat inline `:-` fields (same grammar as params).
+
+(test-case "defrecord flat :- fields parse"
+  (define f (car (parse-one
+                  (L 'defrecord 'T (br 'id ':- 'String 'n ':- 'Int)))))
+  (check-true (record-form? f))
+  (check-equal? (map param-name (record-form-fields f)) '(id n)))
+
+(parse-err/rx "defrecord untyped field rejection names flat :- form"
+  #rx":-"
+  (L 'defrecord 'T (br 'id)))
+
+;; Map destructure: :or/:as supported; :strs/:syms pointedly rejected.
+
+(test-case "map destructure :or and :as parse onto the struct"
+  (define f (car (parse-one
+                  (L 'defn 'f
+                     (br (mt ':keys (br 'a 'b) ':or (mt 'b 2) ':as 'm))
+                     (L '+ 'a 'b)))))
+  (define p (car (defn-form-params f)))
+  (check-true (map-destructure? p))
+  (check-equal? (map car (map-destructure-or-defaults p)) '(b))
+  (check-eq? (map-destructure-as-name p) 'm))
+
+(parse-err/rx ":strs map destructure rejected"
+  #rx":strs"
+  (L 'defn 'f (br (mt ':keys (br 'a) ':strs (br 'b))) 'a))
+
+(parse-err/rx ":or key not in :keys rejected"
+  #rx":keys"
+  (L 'defn 'f (br (mt ':keys (br 'a) ':or (mt 'zz 1))) 'a))
+
+;; Nested sequential destructure.
+
+(test-case "nested seq destructure parses recursively"
+  (define f (car (parse-one
+                  (L 'let (br (br 'a (br 'b 'c)) (br 1 (br 2 3)))
+                     (L '+ 'a 'b 'c)))))
+  (check-true (let-form? f)))

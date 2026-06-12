@@ -249,13 +249,21 @@
 
 (define (emit-require r)
   (define ns (require-entry-ns r))
+  (define refer-syms (require-entry-refer r))
   (define alias
     (or (require-entry-alias r)
         ;; Default alias: the last `.`-separated segment of the namespace.
-        (let* ([ns-str (symbol->string ns)]
-               [idx (string-last-dot ns-str)])
-          (if idx (substring ns-str (+ idx 1)) ns-str))))
-  (format "[~a :as ~a]" ns alias))
+        ;; Suppressed for refer-only requires (no alias requested).
+        (and (not refer-syms)
+             (let* ([ns-str (symbol->string ns)]
+                    [idx (string-last-dot ns-str)])
+               (if idx (substring ns-str (+ idx 1)) ns-str)))))
+  (format "[~a~a~a]"
+          ns
+          (if alias (format " :as ~a" alias) "")
+          (if (and refer-syms (pair? refer-syms))
+              (format " :refer [~a]" (string-join (map symbol->string refer-syms) " "))
+              "")))
 
 ;; Split a fully-qualified Java class symbol like 'java.io.File into
 ;; package ("java.io") and class name ("File"), then emit Clojure-style
@@ -272,15 +280,17 @@
 (define (emit-form f)
   (cond
     [(def-form? f)
-     (format "(def ~a~a ~a)"
+     (format "(def ~a~a~a ~a)"
              (clj-tag-prefix (def-form-type f))
              (def-form-name f)
+             (if (def-form-doc f) (format " ~v" (def-form-doc f)) "")
              (emit-expr (def-form-value f)))]
 
     [(defonce-form? f)
-     (format "(defonce ~a~a ~a)"
+     (format "(defonce ~a~a~a ~a)"
              (clj-tag-prefix (defonce-form-type f))
              (defonce-form-name f)
+             (if (defonce-form-doc f) (format " ~v" (defonce-form-doc f)) "")
              (emit-expr (defonce-form-value f)))]
 
     [(defn-form? f)
@@ -295,10 +305,13 @@
          (cond
            [(param? p) (clj-tag-prefix (param-type p))]
            [else ""])))
-     (format "(~a ~a~a [~a]\n  ~a)"
+     (format "(~a ~a~a~a [~a]\n  ~a)"
              kw
              name-tag
              (defn-form-name f)
+             (if (defn-form-doc f)
+                 (format "\n  ~v" (defn-form-doc f))
+                 "")
              (emit-params-with-rest (defn-form-params f)
                                     (defn-form-rest-param f)
                                     #:param-tags param-tags)
@@ -311,7 +324,11 @@
          (format "  ([~a]\n    ~a)"
                  (emit-params-with-rest (arity-clause-params a) (arity-clause-rest-param a))
                  (emit-body (arity-clause-body a) "    "))))
-     (format "(~a ~a\n~a)" kw (defn-multi-name f) (string-join arity-strs "\n"))]
+     (format "(~a ~a~a\n~a)"
+             kw
+             (defn-multi-name f)
+             (if (defn-multi-doc f) (format "\n  ~v" (defn-multi-doc f)) "")
+             (string-join arity-strs "\n"))]
 
     [(record-form? f)
      (emit-record f)]
@@ -945,16 +962,32 @@
   (string-append proto-line "\n  " (string-join method-lines "\n  ")))
 
 (define (emit-seq-destructure d)
-  (define names-str (string-join (map symbol->string (seq-destructure-names d)) " "))
+  ;; Entries are symbols or nested destructure patterns — recurse through
+  ;; emit-binding-name so [[k v] m]-style nesting round-trips.
+  (define names-str
+    (string-join
+     (for/list ([n (in-list (seq-destructure-names d))])
+       (if (symbol? n) (symbol->string n) (emit-binding-name n)))
+     " "))
   (if (seq-destructure-rest-name d)
     (format "[~a & ~a]" names-str (seq-destructure-rest-name d))
     (format "[~a]" names-str)))
 
 (define (emit-map-destructure d)
   (define keys-str (string-join (map symbol->string (map-destructure-keys d)) " "))
-  (if (map-destructure-as-name d)
-    (format "{:keys [~a] :as ~a}" keys-str (map-destructure-as-name d))
-    (format "{:keys [~a]}" keys-str)))
+  (define or-str
+    (if (null? (map-destructure-or-defaults d))
+        ""
+        (format " :or {~a}"
+                (string-join
+                 (for/list ([od (in-list (map-destructure-or-defaults d))])
+                   (format "~a ~a" (car od) (emit-expr (cdr od))))
+                 " "))))
+  (define as-str
+    (if (map-destructure-as-name d)
+        (format " :as ~a" (map-destructure-as-name d))
+        ""))
+  (format "{:keys [~a]~a~a}" keys-str or-str as-str))
 
 ;; Emit any binding name target — plain symbol, map destructure, or seq destructure.
 ;; Used by params, let-bindings, for-bindings.

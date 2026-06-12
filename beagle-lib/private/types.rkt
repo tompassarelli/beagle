@@ -14,6 +14,7 @@
 (require racket/match
          racket/format
          racket/set
+         racket/list
          "tags.rkt")
 
 (define PRIMITIVES
@@ -233,19 +234,33 @@
          (let ([members (hash-ref (current-union-members) (type-prim-name expected) #f)])
            (and members (memq (type-prim-name actual) members) #t)))]
 
-    ;; Function compatibility: same fixed-arity, compatible params, compatible
-    ;; rest-types (or both absent), compatible return.
+    ;; Function compatibility with variadic subsumption: an actual fn is
+    ;; usable where the expected fn type is required iff it accepts every
+    ;; call shape the expected type permits. In particular a variadic
+    ;; actual ([& Any -> String], e.g. `str`) satisfies a fixed-arity
+    ;; expected ([Any -> String], e.g. mapv's fn position) — the rest
+    ;; param absorbs the trailing expected params. (Fixed 2026-06-12:
+    ;; (mapv str xs) was a false type error.)
     [(and (type-fn? actual) (type-fn? expected))
-     (and (= (length (type-fn-params actual)) (length (type-fn-params expected)))
-          (andmap type-compatible?
-                  (type-fn-params actual)
-                  (type-fn-params expected))
-          (eq? (and (type-fn-rest-type actual) #t)
-               (and (type-fn-rest-type expected) #t))
-          (or (not (type-fn-rest-type actual))
-              (type-compatible? (type-fn-rest-type actual)
-                                (type-fn-rest-type expected)))
-          (type-compatible? (type-fn-ret actual) (type-fn-ret expected)))]
+     (let* ([a-params (type-fn-params actual)]
+            [e-params (type-fn-params expected)]
+            [a-rest   (type-fn-rest-type actual)]
+            [e-rest   (type-fn-rest-type expected)]
+            [a-n      (length a-params)]
+            [e-n      (length e-params)])
+       (and
+        ;; Actual may not require more fixed args than expected supplies.
+        (<= a-n e-n)
+        ;; Expected params beyond actual's fixed prefix need a rest to land in.
+        (or (= a-n e-n) (and a-rest #t))
+        (andmap type-compatible? a-params (take e-params a-n))
+        (or (not a-rest)
+            (andmap (lambda (p) (type-compatible? a-rest p))
+                    (drop e-params a-n)))
+        ;; A variadic expectation can only be met by a variadic actual.
+        (or (not e-rest)
+            (and a-rest (type-compatible? a-rest e-rest)))
+        (type-compatible? (type-fn-ret actual) (type-fn-ret expected))))]
 
     [(and (type-app? actual) (type-app? expected))
      (and (eq? (type-app-ctor actual) (type-app-ctor expected))

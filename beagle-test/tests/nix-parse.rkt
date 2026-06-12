@@ -149,10 +149,13 @@
   (check-true (nix-get-or? f))
   (check-equal? (nix-get-or-path f) "a.b"))
 
-(test-case "has parses to nix-has-attr"
-  (define f (first-form "(has config a.b)"))
-  (check-true (nix-has-attr? f))
-  (check-equal? (nix-has-attr-path f) "a.b"))
+(test-case "has is removed with a pointed error naming contains?"
+  ;; Removed 2026-06-12 (zero corpus hits). contains? → hasAttr covers
+  ;; single keys; lib/hasAttrByPath covers dotted paths.
+  (check-exn (lambda (e)
+               (and (exn:fail? e)
+                    (regexp-match? #rx"contains\\?" (exn-message e))))
+             (lambda () (first-form "(has config a.b)"))))
 
 ;; --- search-path ------------------------------------------------------------
 

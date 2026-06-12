@@ -175,9 +175,11 @@
 
 (struct ns-decl     (name)                                  #:transparent)
 (struct mode-decl   (mode)                                  #:transparent)
-(struct def-form    (name type value)                       #:transparent)
-(struct defn-form   (name params rest-param return-type body private? raises) #:transparent)
-(struct defn-multi  (name arities private?)                   #:transparent)
+;; doc: optional docstring (String or #f). Real Clojure surface — carried
+;; through to clj/cljs emit; ignored by nix emit and the checker.
+(struct def-form    (name type value doc)                   #:transparent)
+(struct defn-form   (name params rest-param return-type body private? raises doc) #:transparent)
+(struct defn-multi  (name arities private? doc)               #:transparent)
 (struct arity-clause (params rest-param return-type body)    #:transparent)
 (struct fn-form     (params rest-param return-type body)    #:transparent)
 (struct let-form    (bindings body)                         #:transparent)
@@ -255,7 +257,7 @@
 (struct for-let        (bindings)                            #:transparent)
 (struct dotimes-form   (name count-expr body)                #:transparent)
 (struct condp-form     (pred-fn test-expr clauses default)   #:transparent)
-(struct defonce-form   (name type value)                     #:transparent)
+(struct defonce-form   (name type value doc)                 #:transparent)
 (struct await-form    (expr)                                 #:transparent)
 (struct set!-form    (target value)                           #:transparent)
 (struct letfn-form   (fns body)                              #:transparent)
@@ -370,7 +372,41 @@
 
 ;; --- Shared utility structs ------------------------------------------------
 (struct param       (name type)                             #:transparent)
-(struct map-destructure (keys as-name)                      #:transparent)
+;; or-defaults: alist of (key-sym . default-AST) from {:keys [...] :or {...}};
+;; '() when absent. keys/as-name as before. seq-destructure names may contain
+;; nested map-destructure/seq-destructure structs (Clojure nested binding).
+(struct map-destructure (keys as-name or-defaults)          #:transparent)
+
+;; All symbols bound by a destructure pattern, flattened through nesting.
+;; The canonical walk for scope/binding consumers (check, lint, emit-scope).
+(define (destructure-bound-names p)
+  (cond
+    [(map-destructure? p)
+     (append (map-destructure-keys p)
+             (if (map-destructure-as-name p)
+                 (list (map-destructure-as-name p))
+                 '()))]
+    [(seq-destructure? p)
+     (append
+      (apply append
+             (for/list ([n (in-list (seq-destructure-names p))])
+               (if (symbol? n) (list n) (destructure-bound-names n))))
+      (if (seq-destructure-rest-name p)
+          (list (seq-destructure-rest-name p))
+          '()))]
+    [else '()]))
+
+;; All :or default expression ASTs in a destructure pattern, recursively.
+;; Consumers infer/lint these so errors inside defaults surface normally.
+(define (destructure-or-default-exprs p)
+  (cond
+    [(map-destructure? p)
+     (map cdr (map-destructure-or-defaults p))]
+    [(seq-destructure? p)
+     (apply append
+            (for/list ([n (in-list (seq-destructure-names p))])
+              (if (symbol? n) '() (destructure-or-default-exprs n))))]
+    [else '()]))
 (struct seq-destructure (names rest-name)                    #:transparent)
 ;; deftype surface removed (2026-05). The canonical decomposition is defrecord
 ;; (data shape) + extend-type (protocol impls); parse.rkt rejects deftype at the
@@ -465,6 +501,7 @@
  (struct-out defn-multi) (struct-out arity-clause)
  ;; Shared utility structs
  (struct-out param) (struct-out map-destructure) (struct-out seq-destructure)
+ destructure-bound-names destructure-or-default-exprs
  (struct-out extend-type-form)
  (struct-out type-impl) (struct-out impl-method)
  (struct-out let-binding) (struct-out require-entry)

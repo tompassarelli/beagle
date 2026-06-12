@@ -14,7 +14,9 @@
          "parse-jst.rkt"
          "parse-js-quote.rkt"
          "parse-sql.rkt"
-         "diagnostic-kind.rkt")
+         "diagnostic-kind.rkt"
+         ;; #(...) fn-shorthand rewrite shared with the #lang reader.
+         (only-in "../lang/reader-impl.rkt" fn-shorthand->fn reading-fn-shorthand?))
 
 ;; --- structured parse errors ------------------------------------------------
 ;;
@@ -112,6 +114,19 @@
      (read-char port)
      (define items (read-until-brace port))
      (define result (cons ST items))
+     (if src
+       (datum->syntax #f result (vector src line col pos #f))
+       result)]
+    ;; #(...) anonymous fn shorthand → (fn [%1 ...] body). Mirrors the
+    ;; #lang reader's arm (beagle-lib/lang/reader-impl.rkt).
+    [(and (char? next) (char=? next #\())
+     (when (reading-fn-shorthand?)
+       (error 'beagle
+              "nested #(...) is not supported — use (fn [x] ...) for the inner function"))
+     (define lst
+       (parameterize ([reading-fn-shorthand? #t])
+         (read port)))
+     (define result (fn-shorthand->fn lst))
      (if src
        (datum->syntax #f result (vector src line col pos #f))
        result)]
@@ -646,6 +661,79 @@
   (define imp-union-members (make-hash))
   (define imp-param-unions (make-hash))
 
+  ;; Shared require registration: resolve sibling beagle modules for type
+  ;; import, then record the require-entry. Used by the top-level
+  ;; (require ...) arms and by (ns ... (:require ...)) clauses.
+  (define (register-require! rn alias refer-syms)
+    (validate-module-path! rn)
+    (define prefix (or alias (string->symbol (last-of (split-ns-segments rn)))))
+    (with-handlers ([exn:fail? (lambda (_e) (void))])
+      (define mod-path (resolve-module-path rn source-path))
+      (when mod-path
+        (import-module-types! mod-path prefix externs registry imp-rec-fields imp-rec-field-order imp-rec-ns rn
+                              #:scalar-fns imp-scalar-fns
+                              #:scalar-preds imp-scalar-preds
+                              #:symbol-ns imp-symbol-ns
+                              #:union-members imp-union-members
+                              #:parametric-unions imp-param-unions)))
+    (set! requires (cons (require-entry rn alias refer-syms) requires)))
+
+  ;; One require libspec: lib, [lib], [lib :as a], [lib :refer [syms]],
+  ;; [lib :as a :refer [syms]] — possibly quoted ('[lib :as a]). Anything
+  ;; else is a pointed rejection, never a silent drop.
+  (define (register-require-libspec! spec context)
+    (define d0 (->datum spec))
+    (define unq (if (and (pair? d0) (eq? (car d0) 'quote) (pair? (cdr d0))) (cadr d0) d0))
+    (cond
+      [(symbol? unq) (register-require! unq #f #f)]
+      [(and (pair? unq) (eq? (car unq) BRACKET-TAG))
+       (define items (cdr unq))
+       (unless (and (pair? items) (symbol? (car items)))
+         (raise-parse-error 'bad-meta-value
+                            "~a: libspec must start with a namespace symbol, got: ~v" context unq))
+       (define rn (car items))
+       (let loop ([rest (cdr items)] [alias #f] [refer-syms #f])
+         (cond
+           [(null? rest) (register-require! rn alias refer-syms)]
+           [(and (eq? (car rest) ':as) (pair? (cdr rest)) (symbol? (cadr rest)))
+            (loop (cddr rest) (cadr rest) refer-syms)]
+           [(and (eq? (car rest) ':refer) (pair? (cdr rest)))
+            (define rd (->datum (cadr rest)))
+            (cond
+              [(eq? rd ':all)
+               (raise-parse-error 'bad-meta-value
+                                  "~a: (:refer :all) is not supported — name the symbols explicitly: [~a :refer [sym ...]]" context rn)]
+              [(and (pair? rd) (eq? (car rd) BRACKET-TAG))
+               (loop (cddr rest) alias (map ->datum (cdr rd)))]
+              [else
+               (raise-parse-error 'bad-meta-value
+                                  "~a: :refer expects a vector of symbols: [~a :refer [sym ...]], got: ~v" context rn rd)])]
+           [else
+            (raise-parse-error 'bad-meta-value
+                               "~a: unsupported libspec option ~v — supported: [lib], [lib :as alias], [lib :refer [syms]], [lib :as alias :refer [syms]]" context (car rest))]))]
+      [else
+       (raise-parse-error 'bad-meta-value
+                          "~a: bad libspec ~v — expected a namespace symbol or [lib :as alias] / [lib :refer [syms]]" context unq)]))
+
+  ;; One import spec: java.time.LocalDate, (java.time LocalDate Duration),
+  ;; [java.time LocalDate] — possibly quoted.
+  (define (register-import-spec! spec context)
+    (define d0 (->datum spec))
+    (define d (if (and (pair? d0) (eq? (car d0) 'quote) (pair? (cdr d0))) (cadr d0) d0))
+    (cond
+      [(symbol? d) (set! imports (cons d imports))]
+      [(and (pair? d) (or (eq? (car d) BRACKET-TAG) (symbol? (car d))))
+       (define items (if (eq? (car d) BRACKET-TAG) (cdr d) d))
+       (unless (and (>= (length items) 2) (andmap symbol? items))
+         (raise-parse-error 'bad-meta-value
+                            "~a: import spec must be (package Class ...) with symbols, got: ~v" context d))
+       (define pkg (symbol->string (car items)))
+       (for ([cls (in-list (cdr items))])
+         (set! imports (cons (string->symbol (string-append pkg "." (symbol->string cls))) imports)))]
+      [else
+       (raise-parse-error 'bad-meta-value
+                          "~a: bad import spec ~v — expected ClassName symbol or (package Class1 Class2 ...)" context d)]))
+
   ;; Pre-scan: register parametric defunion names so parse-type can handle them
   (for ([d (in-list datums)])
     (match d
@@ -671,11 +759,36 @@
        (set! target t)
        (set! target-set? #t)]
 
-      [(list 'ns (? symbol? n))
+      ;; Full Clojure ns form: (ns name.space "doc"? (:require libspec...)
+      ;; (:import spec...)). Clauses route through the same registration
+      ;; machinery as top-level require/import. Unsupported clauses are
+      ;; rejected with pointed errors — never silently dropped.
+      [(list* 'ns (? symbol? n) ns-rest)
        (when ns-set? (raise-parse-error 'duplicate-meta "duplicate ns form"))
        (validate-identifier! n "namespace")
        (set! ns n)
-       (set! ns-set? #t)]
+       (set! ns-set? #t)
+       (for ([clause (in-list ns-rest)])
+         (cond
+           [(string? clause) (void)] ; ns docstring — accepted, not carried
+           [(and (pair? clause) (eq? (car clause) ':require))
+            (for ([spec (in-list (cdr clause))])
+              (register-require-libspec! spec "ns :require"))]
+           [(and (pair? clause) (eq? (car clause) ':import))
+            (for ([spec (in-list (cdr clause))])
+              (register-import-spec! spec "ns :import"))]
+           [(and (pair? clause) (eq? (car clause) ':use))
+            (raise-parse-error 'bad-meta-value
+                               "(ns ~a (:use ...)) — :use is not supported. Use (:require [lib :refer [sym ...]]) instead." n)]
+           [(and (pair? clause) (eq? (car clause) ':gen-class))
+            (raise-parse-error 'bad-meta-value
+                               "(ns ~a (:gen-class ...)) — :gen-class is not supported; beagle clj output runs as scripts (babashka) or via clojure -M." n)]
+           [(and (pair? clause) (eq? (car clause) ':refer-clojure))
+            (raise-parse-error 'bad-meta-value
+                               "(ns ~a (:refer-clojure ...)) — :refer-clojure is not supported; clojure.core is always available unqualified." n)]
+           [else
+            (raise-parse-error 'bad-meta-value
+                               "(ns ~a ...): unsupported ns clause ~v — supported: docstring, (:require libspec ...), (:import spec ...)" n clause)]))]
 
       [(list 'define-macro (or 'proc 'beagle) (? symbol? name) typed-params ': ret-type body)
        (validate-identifier! name "macro")
@@ -720,49 +833,53 @@
          (raise-parse-error 'duplicate-meta "duplicate declare-extern: ~a" name))
        (hash-set! externs name (parse-type type-expr))]
 
-      [(list 'require (? symbol? rn))
-       (validate-module-path! rn)
-       (define segs (split-ns-segments rn))
-       (define prefix (string->symbol (last-of segs)))
-       (with-handlers ([exn:fail? (lambda (_e) (void))])
-         (define mod-path (resolve-module-path rn source-path))
-         (when mod-path
-           (import-module-types! mod-path prefix externs registry imp-rec-fields imp-rec-field-order imp-rec-ns rn
-                                 #:scalar-fns imp-scalar-fns
-                                 #:scalar-preds imp-scalar-preds
-                                 #:symbol-ns imp-symbol-ns
-                                 #:union-members imp-union-members
-                                 #:parametric-unions imp-param-unions)))
-       (set! requires (cons (require-entry rn #f #f) requires))]
-      [(list 'require (? symbol? rn) ':as (? symbol? alias))
-       (validate-module-path! rn)
-       (with-handlers ([exn:fail? (lambda (_e) (void))])
-         (define mod-path (resolve-module-path rn source-path))
-         (when mod-path
-           (import-module-types! mod-path alias externs registry imp-rec-fields imp-rec-field-order imp-rec-ns rn
-                                 #:scalar-fns imp-scalar-fns
-                                 #:scalar-preds imp-scalar-preds
-                                 #:symbol-ns imp-symbol-ns
-                                 #:union-members imp-union-members
-                                 #:parametric-unions imp-param-unions)))
-       (set! requires (cons (require-entry rn alias #f) requires))]
-      [(list 'require (? symbol? rn) ':refer (? (lambda (x) (and (pair? x) (eq? (car x) '#%brackets))) names))
-       (validate-module-path! rn)
-       (define refer-syms (map ->datum (cdr (->datum names))))
-       (with-handlers ([exn:fail? (lambda (_e) (void))])
-         (define mod-path (resolve-module-path rn source-path))
-         (define prefix (string->symbol (last-of (split-ns-segments rn))))
-         (when mod-path
-           (import-module-types! mod-path prefix externs registry imp-rec-fields imp-rec-field-order imp-rec-ns rn
-                                 #:scalar-fns imp-scalar-fns
-                                 #:scalar-preds imp-scalar-preds
-                                 #:symbol-ns imp-symbol-ns
-                                 #:union-members imp-union-members
-                                 #:parametric-unions imp-param-unions)))
-       (set! requires (cons (require-entry rn #f refer-syms) requires))]
+      ;; (require lib), (require lib :as a), (require lib :refer [syms]),
+      ;; (require lib :as a :refer [syms]) — bare form, options trailing.
+      ;; (require '[lib :as a] '[lib2 :refer [x]] 'lib3) — quoted libspecs,
+      ;; one or more. Both families route through register-require-libspec!.
+      [(list* 'require specs)
+       #:when (and (pair? specs) (symbol? (car specs)))
+       (register-require-libspec! (cons BRACKET-TAG specs) "require")]
+      [(list* 'require specs)
+       #:when (and (pair? specs)
+                   (for/and ([s (in-list specs)])
+                     (let ([sd (->datum s)])
+                       (and (pair? sd)
+                            (memq (car sd) (list 'quote BRACKET-TAG))))))
+       (for ([spec (in-list specs)])
+         (register-require-libspec! spec "require"))]
 
-      [(list 'import (? symbol? class-name))
-       (set! imports (cons class-name imports))]
+      ;; (import java.time.LocalDate), (import (java.time LocalDate Duration)),
+      ;; quoted variants accepted.
+      [(list* 'import import-specs)
+       #:when (pair? import-specs)
+       (for ([spec (in-list import-specs)])
+         (register-import-spec! spec "import"))]
+
+      ;; Malformed meta forms: pass 2 skips every meta-headed form, so any
+      ;; shape pass 1 doesn't accept MUST raise here — a fallthrough would
+      ;; be a silent drop (the ns-form bug class, found 2026-06-12).
+      [(cons 'ns _)
+       (raise-parse-error 'bad-meta-value
+                          "malformed ns form — expected (ns name.space \"doc\"? (:require ...) (:import ...)), got: ~v" d)]
+      [(cons 'require _)
+       (raise-parse-error 'bad-meta-value
+                          "malformed require — expected (require lib :as alias / :refer [syms]) or (require '[lib :as alias] ...), got: ~v" d)]
+      [(cons 'import _)
+       (raise-parse-error 'bad-meta-value
+                          "malformed import — expected (import java.pkg.Class) or (import (java.pkg Class1 Class2)), got: ~v" d)]
+      [(cons 'declare-extern _)
+       (raise-parse-error 'bad-meta-value
+                          "malformed declare-extern — expected (declare-extern name TYPE), e.g. (declare-extern fs/exists? [String -> Bool]), got: ~v" d)]
+      [(cons 'defmacro _)
+       (raise-parse-error 'bad-meta-value
+                          "malformed defmacro — expected (defmacro NAME [params] template) with exactly one template form; wrap multiple forms in `(do ...)`, got: ~v" d)]
+      [(cons 'define-target _)
+       (raise-parse-error 'bad-meta-value
+                          "malformed define-target — expected (define-target clj|cljs|nix|js|py|sql|rkt), got: ~v" d)]
+      [(cons 'define-mode _)
+       (raise-parse-error 'bad-meta-value
+                          "malformed define-mode — expected (define-mode strict|dynamic), got: ~v" d)]
 
       [_ (void)]))
 
@@ -1096,46 +1213,8 @@
     (error 'beagle "defscalar :where predicate must be (op literal), got: ~v" d))
   (scalar-predicate (car d) (cadr d)))
 
-;; fmt: interpolated string templates (parse-time rewrite → str call)
-;; (fmt "hello ${name}") → (str "hello " name)
-;; (fmt #<<JS ... ${expr} ... JS) → (str "..." expr "...")
-(define (fmt-find-close-brace text start)
-  (define len (string-length text))
-  (let loop ([i start] [depth 1])
-    (cond
-      [(>= i len) #f]
-      [(char=? (string-ref text i) #\})
-       (if (= depth 1) i (loop (+ i 1) (- depth 1)))]
-      [(char=? (string-ref text i) #\{)
-       (loop (+ i 1) (+ depth 1))]
-      [else (loop (+ i 1) depth)])))
-
-(define (fmt-split-template text)
-  (define len (string-length text))
-  (let loop ([i 0] [start 0] [acc '()])
-    (cond
-      [(>= i len)
-       (define tail (substring text start len))
-       (reverse (if (> (string-length tail) 0) (cons tail acc) acc))]
-      [(and (< (+ i 1) len)
-            (char=? (string-ref text i) #\$)
-            (char=? (string-ref text (+ i 1)) #\{))
-       (define prefix (substring text start i))
-       (define acc2 (if (> (string-length prefix) 0) (cons prefix acc) acc))
-       (define close (fmt-find-close-brace text (+ i 2)))
-       (unless close
-         (error 'beagle "fmt: unmatched ${ in template"))
-       (define expr-str (string-trim (substring text (+ i 2) close)))
-       (define expr-datum (read (open-input-string expr-str)))
-       (loop (+ close 1) (+ close 1) (cons expr-datum acc2))]
-      [else (loop (+ i 1) start acc)])))
-
-(define (expand-fmt text)
-  (define parts (fmt-split-template text))
-  (cond
-    [(null? parts) ""]
-    [(and (= (length parts) 1) (string? (car parts))) (car parts)]
-    [else (cons 'str parts)]))
+;; (fmt-* interpolation helpers removed with the `fmt` form, 2026-06-12 —
+;; zero corpus hits; `str` / `format` are the Clojure spellings.)
 
 ;; threading macro expansion (parse-time rewrite → fully type-checked)
 ;;
@@ -1361,38 +1440,92 @@
             (car d))]
 
     ;; Inline `:-` annotations on def/defonce: accepted, populate the type slot.
+    ;; Docstrings (real Clojure def surface) are accepted in both typed and
+    ;; untyped positions and carried to clj/cljs emit.
+    [(list 'def (? symbol? name) ':- type-expr (? string? doc) value)
+     (def-form name (parse-type type-expr)
+               (parse-expr (or (stx-ref subs 5) value))
+               doc)]
     [(list 'def (? symbol? name) ':- type-expr value)
      (def-form name (parse-type type-expr)
-               (parse-expr (or (stx-ref subs 4) value)))]
+               (parse-expr (or (stx-ref subs 4) value))
+               #f)]
     ;; Inline bare `:` on def is the legacy surface; reject and point at `:-`.
     [(list 'def (? symbol? name) ': _ _)
      (raise-parse-error 'inline-type-annotation
                         "(def ~a : ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (def ~a :- TYPE VALUE)"
                         name name)]
+    [(list 'def (? symbol? name) (? string? doc) value)
+     (def-form name #f (parse-expr (or (stx-ref subs 3) value)) doc)]
     [(list 'def (? symbol? name) value)
-     (def-form name #f (parse-expr (or (stx-ref subs 2) value)))]
+     (def-form name #f (parse-expr (or (stx-ref subs 2) value)) #f)]
+    ;; Any other def shape would fall through to the call-form passthrough
+    ;; and silently bypass the type layer — guard it (bug class 2026-06-12).
+    [(cons 'def _)
+     (raise-parse-error 'bad-form
+                        "malformed def — expected (def NAME VALUE), (def NAME \"doc\" VALUE), (def NAME :- TYPE VALUE), or (def NAME :- TYPE \"doc\" VALUE); got: ~v" d)]
 
+    [(list 'defonce (? symbol? name) ':- type-expr (? string? doc) value)
+     (defonce-form name (parse-type type-expr)
+                   (parse-expr (or (stx-ref subs 5) value))
+                   doc)]
     [(list 'defonce (? symbol? name) ':- type-expr value)
      (defonce-form name (parse-type type-expr)
-                   (parse-expr (or (stx-ref subs 4) value)))]
+                   (parse-expr (or (stx-ref subs 4) value))
+                   #f)]
     [(list 'defonce (? symbol? name) ': _ _)
      (raise-parse-error 'inline-type-annotation
                         "(defonce ~a : ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (defonce ~a :- TYPE VALUE)"
                         name name)]
+    [(list 'defonce (? symbol? name) (? string? doc) value)
+     (defonce-form name #f (parse-expr (or (stx-ref subs 3) value)) doc)]
     [(list 'defonce (? symbol? name) value)
-     (defonce-form name #f (parse-expr (or (stx-ref subs 2) value)))]
+     (defonce-form name #f (parse-expr (or (stx-ref subs 2) value)) #f)]
+    [(cons 'defonce _)
+     (raise-parse-error 'bad-form
+                        "malformed defonce — expected (defonce NAME VALUE), (defonce NAME \"doc\" VALUE), or (defonce NAME :- TYPE VALUE); got: ~v" d)]
+
+    ;; Docstring on defn/defn- (real Clojure surface): strip it, re-dispatch
+    ;; the remaining form through the ordinary arms, then attach the doc to
+    ;; the resulting node. Covers single-arity, multi-arity, and ^:private
+    ;; name shapes uniformly.
+    [(list* (and head (or 'defn 'defn-)) name-form (? string? doc) rest)
+     #:when (and (pair? rest)
+                 (or (symbol? name-form)
+                     (and (pair? name-form) (eq? (car name-form) '#%meta))))
+     (define stripped-subs
+       (and subs (>= (length subs) 4)
+            (list* (list-ref subs 0) (list-ref subs 1) (list-tail subs 3))))
+     (define parsed (parse-list-form (list* head name-form rest) stripped-subs))
+     (cond
+       [(defn-form? parsed) (struct-copy defn-form parsed [doc doc])]
+       [(defn-multi? parsed) (struct-copy defn-multi parsed [doc doc])]
+       [else parsed])]
+
+    ;; Attr-map metadata on defn is not supported — docstrings are the
+    ;; supported documentation surface.
+    [(list* (or 'defn 'defn-) _ (? map-tagged? _) _)
+     (raise-parse-error 'bad-form
+                        "defn attr-map metadata is not supported — use a docstring: (defn name \"doc\" [params] body)")]
+
+    ;; Schema-style prefix return annotation — common prior from Plumatic
+    ;; Schema. Beagle's return annotation goes after the param vector.
+    [(list* (and head (or 'defn 'defn-)) (? symbol? name) ':- _)
+     (raise-parse-error 'inline-type-annotation
+                        "(~a ~a :- RET [params] ...) — the return annotation goes after the param vector:\n  (~a ~a [params...] :- RET body...)"
+                        head name head name)]
 
     [(list 'defn (? symbol? name) first-clause rest-clauses ...)
      #:when (multi-arity-form? first-clause)
      (defn-multi name (map parse-arity-clause
-                           (cons first-clause rest-clauses)) #f)]
+                           (cons first-clause rest-clauses)) #f #f)]
 
     ;; Bare-vector multi-arity: (defn name [a] body [a b] body)
     ;; Canonicalized to list-wrapped clauses before parsing.
     [(list 'defn (? symbol? name) args ...)
      #:when (bare-multi-arity-clauses args)
      (defn-multi name (map parse-arity-clause
-                           (bare-multi-arity-clauses args)) #f)]
+                           (bare-multi-arity-clauses args)) #f #f)]
 
     ;; Inline return-type annotations on defn.
     ;;
@@ -1406,12 +1539,12 @@
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
                   (parse-type return-type)
-                  (parse-body (or (stx-tail subs 7) body)) #f (parse-type err-type)))]
+                  (parse-body (or (stx-tail subs 7) body)) #f (parse-type err-type) #f))]
     [(list 'defn (? symbol? name) params-form ':- return-type body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
                   (parse-type return-type)
-                  (parse-body (or (stx-tail subs 5) body)) #f #f))]
+                  (parse-body (or (stx-tail subs 5) body)) #f #f #f))]
     [(list 'defn (? symbol? name) _ ': _ ':raises _ _ ...)
      (raise-parse-error 'inline-type-annotation
                         "(defn ~a [params] : RET :raises ERR ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (defn ~a [params] :- RET :raises ERR body...)"
@@ -1423,30 +1556,30 @@
     [(list 'defn (? symbol? name) params-form body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
-                  #f (parse-body (or (stx-tail subs 3) body)) #f #f))]
+                  #f (parse-body (or (stx-tail subs 3) body)) #f #f #f))]
 
     ;; defn with ^:private metadata on name
     [(list 'defn (list '#%meta _ (? symbol? name)) first-clause rest-clauses ...)
      #:when (multi-arity-form? first-clause)
      (defn-multi name (map parse-arity-clause
-                           (cons first-clause rest-clauses)) #t)]
+                           (cons first-clause rest-clauses)) #t #f)]
 
     ;; ^:private + bare-vector multi-arity
     [(list 'defn (list '#%meta _ (? symbol? name)) args ...)
      #:when (bare-multi-arity-clauses args)
      (defn-multi name (map parse-arity-clause
-                           (bare-multi-arity-clauses args)) #t)]
+                           (bare-multi-arity-clauses args)) #t #f)]
 
     [(list 'defn (list '#%meta _ (? symbol? name)) params-form ':- return-type ':raises err-type body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
                   (parse-type return-type)
-                  (parse-body (or (stx-tail subs 7) body)) #t (parse-type err-type)))]
+                  (parse-body (or (stx-tail subs 7) body)) #t (parse-type err-type) #f))]
     [(list 'defn (list '#%meta _ (? symbol? name)) params-form ':- return-type body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
                   (parse-type return-type)
-                  (parse-body (or (stx-tail subs 5) body)) #t #f))]
+                  (parse-body (or (stx-tail subs 5) body)) #t #f #f))]
     [(list 'defn (list '#%meta _ (? symbol? name)) _ ': _ _ ...)
      (raise-parse-error 'inline-type-annotation
                         "(defn ^:private ~a [params] : RET ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (defn ^:private ~a [params] :- RET body...)"
@@ -1454,30 +1587,30 @@
     [(list 'defn (list '#%meta _ (? symbol? name)) params-form body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
-                  #f (parse-body (or (stx-tail subs 3) body)) #t #f))]
+                  #f (parse-body (or (stx-tail subs 3) body)) #t #f #f))]
 
     ;; defn- (private defn)
     [(list 'defn- (? symbol? name) first-clause rest-clauses ...)
      #:when (multi-arity-form? first-clause)
      (defn-multi name (map parse-arity-clause
-                           (cons first-clause rest-clauses)) #t)]
+                           (cons first-clause rest-clauses)) #t #f)]
 
     ;; defn- + bare-vector multi-arity
     [(list 'defn- (? symbol? name) args ...)
      #:when (bare-multi-arity-clauses args)
      (defn-multi name (map parse-arity-clause
-                           (bare-multi-arity-clauses args)) #t)]
+                           (bare-multi-arity-clauses args)) #t #f)]
 
     [(list 'defn- (? symbol? name) params-form ':- return-type ':raises err-type body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
                   (parse-type return-type)
-                  (parse-body (or (stx-tail subs 7) body)) #t (parse-type err-type)))]
+                  (parse-body (or (stx-tail subs 7) body)) #t (parse-type err-type) #f))]
     [(list 'defn- (? symbol? name) params-form ':- return-type body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
                   (parse-type return-type)
-                  (parse-body (or (stx-tail subs 5) body)) #t #f))]
+                  (parse-body (or (stx-tail subs 5) body)) #t #f #f))]
     [(list 'defn- (? symbol? name) _ ': _ ':raises _ _ ...)
      (raise-parse-error 'inline-type-annotation
                         "(defn- ~a [params] : RET :raises ERR ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (defn- ~a [params] :- RET :raises ERR body...)"
@@ -1489,7 +1622,14 @@
     [(list 'defn- (? symbol? name) params-form body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
-                  #f (parse-body (or (stx-tail subs 3) body)) #t #f))]
+                  #f (parse-body (or (stx-tail subs 3) body)) #t #f #f))]
+
+    ;; Any defn shape the arms above didn't accept must not reach the
+    ;; call-form passthrough (silent type-layer bypass — bug class 2026-06-12).
+    [(cons (and head (or 'defn 'defn-)) _)
+     (raise-parse-error 'bad-form
+                        "malformed ~a — expected (~a name \"doc\"? [params...] :- RET? body...) or multi-arity (~a name ([params] body...) ([params2] body...)); got: ~v"
+                        head head head d)]
 
     ;; (claim NAME TYPE) is HARD-REJECTED. Beagle's surface is typed Clojure
     ;; plus inference — type information rides on ordinary bindings via inline
@@ -1629,10 +1769,11 @@
                      [else (format "~a" d)]))
                  (parse-expr (or (stx-ref subs 3) default-expr)))]
 
-    [(list 'has base path-expr)
-     (nix-has-attr (parse-expr (or (stx-ref subs 1) base))
-                   (let ([d (->datum (or (stx-ref subs 2) path-expr))])
-                     (if (symbol? d) (symbol->string d) (format "~a" d))))]
+    ;; `has` — removed 2026-06-12 (zero corpus hits). `contains?` is the
+    ;; Clojure spelling; emit-nix lowers it to hasAttr.
+    [(list 'has _ _)
+     (raise-parse-error 'removed-form
+                        "(has m :k) — `has` is removed. Use `(contains? m :k)` (Clojure spelling; lowers to hasAttr on nix).")]
 
     [(list 'search-path name-expr)
      (define d (->datum (or (stx-ref subs 1) name-expr)))
@@ -1956,17 +2097,10 @@
     ;; AST and emitted code are byte-equivalent to the hand-written canonical
     ;; form.
 
-    ;; when-let / if-let — also accept-and-canonicalize. See lower-binding-cond.
-    ;; The interim replacement is the verbose (let [x v] (if x then else))
-    ;; pattern. The eventual replacement will be beagle's typed nullable-
-    ;; narrowing form (provisional name TBD, tracked in design-principle.md
-    ;; "Open design questions"). The replacement should NOT inherit Clojure's
-    ;; vocabulary — that would carry Clojure semantics into a beagle-native
-    ;; concept (overfitting risk per the bootstrap-vs-native principle).
-    ;;
-    ;; when-some / if-some were removed earlier — truthy-vs-nil distinction
-    ;; was too subtle. Same applies here; the typed replacement will handle
-    ;; nil-narrowing explicitly via the type system, not via name variants.
+    ;; when-let / if-let / when-some / if-some — all four accepted and
+    ;; canonicalized via lower-binding-cond (see the dispatch arms below).
+    ;; They are real Clojure; the -some variants test (not (nil? x)) rather
+    ;; than truthiness, exactly as in Clojure.
 
     [(list 'with-open bindings-form body ...)
      (with-open-form (parse-let-bindings (or (stx-ref subs 1) bindings-form))
@@ -2127,10 +2261,11 @@
     [(list (? static-method-sym? cm) args ...)
      (static-call cm (map parse-expr (or (stx-tail subs 1) args)))]
 
-    [(list 'fmt (list '#%block-string _ (? string? text)))
-     (parse-expr (rewrite-as (expand-fmt text)))]
-    [(list 'fmt (? string? text))
-     (parse-expr (rewrite-as (expand-fmt text)))]
+    ;; `fmt` string interpolation — removed 2026-06-12 (zero corpus hits;
+    ;; not Clojure). `str` / `format` are the Clojure spellings.
+    [(list 'fmt _ ...)
+     (raise-parse-error 'removed-form
+                        "(fmt \"... ${x} ...\") — `fmt` is removed. Use `(str \"... \" x \" ...\")` or `(format \"... %s ...\" x)`.")]
 
     ;; Clojure threading family — all parse-time rewrites to ordinary
     ;; composition. `->` and `->>` are the canonical replacements for the
@@ -2224,7 +2359,9 @@
     ;;   (when c body…)      → (if c (do body…))
     ;;   (when-not c body…)  → (if (not c) (do body…))
     ;;   (if-not c t e)      → (if c e t)
-    ;;   (unless c body…)    → (if c nil (do body…))
+    ;;
+    ;; (`unless` was removed 2026-06-12 — not Clojure; when-not is the
+    ;; canonical spelling and the rejection arm points at it.)
     ;;
     ;; Like if-let/when-let, the surface sugar is welcome; the canonical AST
     ;; is what every downstream pass sees.
@@ -2247,21 +2384,18 @@
                         (or (stx-ref subs 1) c)
                         (or (stx-ref subs 3) else-expr)
                         (or (stx-ref subs 2) then-expr))))]
-    [(list 'unless c body ..1)
-     (parse-expr (rewrite-as
-                  (list 'if
-                        (or (stx-ref subs 1) c)
-                        'nil
-                        (cons 'do (or (stx-tail subs 2) body)))))]
+    ;; `unless` is NOT Clojure (it's CL/Scheme/Ruby) — zero corpus hits,
+    ;; removed 2026-06-12 per the zero-users rule. `when-not` is the
+    ;; Clojure spelling.
+    [(list 'unless _ ...)
+     (raise-parse-error 'removed-form
+                        "(unless c body...) — `unless` is not a Clojure form. Use `(when-not c body...)`.")]
     [(list 'when _ ...)
      (raise-parse-error 'bad-form
                         "when requires at least one body expression: (when c body...)")]
     [(list 'when-not _ ...)
      (raise-parse-error 'bad-form
                         "when-not requires at least one body expression: (when-not c body...)")]
-    [(list 'unless _ ...)
-     (raise-parse-error 'bad-form
-                        "unless requires at least one body expression: (unless c body...)")]
     [(list 'if-not _ ...)
      (raise-parse-error 'bad-form
                         "if-not expects (if-not c then else): three arguments required")]
@@ -2624,28 +2758,9 @@
        (loop (cdr rest) catches (map parse-expr body))]
       [else (error 'beagle "unexpected form after catch/finally: ~v" first-d)])))
 
-;; --- case ------------------------------------------------------------------
-
-(define (parse-case-form test-expr clauses)
-  (define test (parse-expr test-expr))
-  (cond
-    [(null? clauses) (case-form test '() #f)]
-    [(odd? (length clauses))
-     ;; odd number: last is default
-     (define pairs (all-but-last clauses))
-     (define default (last-of clauses))
-     (case-form test (parse-case-pairs pairs) (parse-expr default))]
-    [else
-     (case-form test (parse-case-pairs clauses) #f)]))
-
-(define (parse-case-pairs items)
-  (let loop ([rest items] [acc '()])
-    (cond
-      [(null? rest) (reverse acc)]
-      [else (loop (cddr rest)
-                  (cons (case-clause (parse-expr (car rest))
-                                     (parse-expr (cadr rest)))
-                        acc))])))
+;; (parse-case-form / parse-case-pairs removed 2026-06-12 — dead since the
+;; `case` form was folded into `match`. The case-form AST node remains for
+;; the match case-fold optimization in emit.)
 
 
 ;; --- match -----------------------------------------------------------------
@@ -2806,21 +2921,50 @@
               (eq? (car body) ':keys)
               (bracketed? (cadr body))))))
 
+;; Map destructure: {:keys [a b] :or {b 2} :as m}. All real-Clojure options
+;; are either supported (:keys/:or/:as) or pointedly rejected (:strs/:syms,
+;; {alias :key}) — never silently dropped (the :or bug class, 2026-06-12).
 (define (parse-map-destructure item)
   (define d (->datum item))
   (define body (map-body d))
-  (define keys-bracket (cadr body))
-  (define key-names (bracket-body keys-bracket))
+  (unless (and (>= (length body) 2)
+               (eq? (car body) ':keys)
+               (bracketed? (cadr body)))
+    (error 'beagle
+           "map destructure must start {:keys [names ...] ...}, got: ~v" d))
+  (define key-names (bracket-body (cadr body)))
   (unless (andmap symbol? key-names)
     (error 'beagle "{:keys [...]} entries must be symbols, got: ~v" key-names))
-  (define as-name
+  (let loop ([rest (cddr body)] [as-name #f] [or-defaults '()])
     (cond
-      [(and (>= (length body) 4)
-            (eq? (list-ref body 2) ':as)
-            (symbol? (list-ref body 3)))
-       (list-ref body 3)]
-      [else #f]))
-  (map-destructure key-names as-name))
+      [(null? rest)
+       (map-destructure key-names as-name or-defaults)]
+      [(and (eq? (car rest) ':as) (pair? (cdr rest)) (symbol? (cadr rest)))
+       (loop (cddr rest) (cadr rest) or-defaults)]
+      [(and (eq? (car rest) ':or) (pair? (cdr rest)) (map-tagged? (cadr rest)))
+       (define entries (map-body (cadr rest)))
+       (unless (even? (length entries))
+         (error 'beagle ":or map must be name/default pairs, got: ~v" (cadr rest)))
+       (define defaults
+         (let dloop ([es entries] [acc '()])
+           (cond
+             [(null? es) (reverse acc)]
+             [else
+              (unless (and (symbol? (car es)) (memq (car es) key-names))
+                (error 'beagle
+                       ":or key ~v must be one of the :keys binding names ~v"
+                       (car es) key-names))
+              (dloop (cddr es)
+                     (cons (cons (car es) (parse-expr (cadr es))) acc))])))
+       (loop (cddr rest) as-name defaults)]
+      [(memq (car rest) '(:strs :syms))
+       (error 'beagle
+              "map destructure ~a is not supported — use {:keys [names]} (convert string/symbol keys with keywordize-keys first)"
+              (car rest))]
+      [else
+       (error 'beagle
+              "map destructure: unsupported entry ~v — supported: {:keys [names] :or {name default} :as name}"
+              (car rest))])))
 
 (define (parse-let-bindings b)
   (define d (->datum b))
@@ -2952,22 +3096,36 @@
     (error 'beagle "target-case: no branches provided"))
   (target-case-form cases))
 
+;; Record fields use the same annotation grammar as param vectors: flat
+;; `name :- Type` triples (canonical) or wrapped `(name :- Type)`. Field
+;; types are required — records are typed boundaries; there is no inference
+;; across a record's surface.
 (define (parse-record-fields f)
   (define d (->datum f))
   (define items (unwrap-items d "record fields"))
   (when (null? items)
     (error 'beagle "defrecord requires at least one field"))
-  (for/list ([item (in-list items)])
+  (let loop ([rest items] [acc '()])
     (cond
-      [(and (list? item)
-            (= (length item) 3)
-            (symbol? (car item))
-            (annotation-marker? (cadr item)))
-       (param (car item) (parse-type (caddr item)))]
+      [(null? rest) (reverse acc)]
+      ;; Flat inline triple: name :- Type (canonical, same as params).
+      [(and (symbol? (car rest))
+            (pair? (cdr rest))
+            (annotation-marker? (cadr rest))
+            (pair? (cddr rest)))
+       (loop (cdddr rest)
+             (cons (param (car rest) (parse-type (caddr rest))) acc))]
+      ;; Wrapped: (name :- Type) / (name : Type).
+      [(and (list? (car rest))
+            (= (length (car rest)) 3)
+            (symbol? (caar rest))
+            (annotation-marker? (cadr (car rest))))
+       (loop (cdr rest)
+             (cons (param (caar rest) (parse-type (caddr (car rest)))) acc))]
       [else
        (error 'beagle
-              "defrecord field must be (name : Type), got: ~v"
-              item)])))
+              "defrecord field needs a type annotation — use [name :- Type name2 :- Type2 ...], got: ~v"
+              (car rest))])))
 
 (define (parse-type-impls rest)
   (let loop ([items rest] [cur-proto #f] [cur-methods '()] [acc '()])
@@ -3007,6 +3165,9 @@
                     (parse-body (or (stx-tail subs 2) body))))]
     [_ (error 'beagle "bad method implementation: ~v" d)]))
 
+;; Sequential destructure: [a b], [a [b c]], [{:keys [x]} y], [a & rest].
+;; Nested patterns recurse (real Clojure); entries other than symbols and
+;; nested patterns are rejected pointedly.
 (define (parse-seq-destructure item)
   (define d (->datum item))
   (define body (bracket-body d))
@@ -3020,8 +3181,14 @@
          (values (reverse acc) (cadr items))]
         [(symbol? (car items))
          (loop (cdr items) (cons (car items) acc))]
+        [(bracketed? (car items))
+         (loop (cdr items) (cons (parse-seq-destructure (car items)) acc))]
+        [(map-destructure-form? (car items))
+         (loop (cdr items) (cons (parse-map-destructure (car items)) acc))]
         [else
-         (error 'beagle "sequential destructure: expected symbol, got: ~v" (car items))])))
+         (error 'beagle
+                "sequential destructure: expected a symbol, nested [..] pattern, or {:keys [..]} pattern, got: ~v"
+                (car items))])))
   (seq-destructure names rest-name))
 
 (define (parse-for-clauses b)

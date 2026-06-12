@@ -83,12 +83,9 @@
 
 (define (add-param-to-scope! p scope)
   (cond
-    [(map-destructure? p)
-     (for ([k (in-list (map-destructure-keys p))]) (hash-set! scope k #t))]
-    [(seq-destructure? p)
-     (for ([n (in-list (seq-destructure-names p))]) (hash-set! scope n #t))
-     (when (seq-destructure-rest-name p)
-       (hash-set! scope (seq-destructure-rest-name p) #t))]
+    [(or (map-destructure? p) (seq-destructure? p))
+     (for ([n (in-list (destructure-bound-names p))])
+       (hash-set! scope n #t))]
     [else (hash-set! scope (param-name p) #t)]))
 
 (define (lint-shadows prog)
@@ -133,18 +130,10 @@
      (define inner (scope-copy scope))
      (for ([p (in-list params)])
        (cond
-         [(map-destructure? p)
-          (for ([k (in-list (map-destructure-keys p))])
-            (when (hash-has-key? scope k) (warn-shadow "parameter" k ctx))
-            (hash-set! inner k #t))]
-         [(seq-destructure? p)
-          (for ([n (in-list (seq-destructure-names p))])
+         [(or (map-destructure? p) (seq-destructure? p))
+          (for ([n (in-list (destructure-bound-names p))])
             (when (hash-has-key? scope n) (warn-shadow "parameter" n ctx))
-            (hash-set! inner n #t))
-          (when (seq-destructure-rest-name p)
-            (define rn (seq-destructure-rest-name p))
-            (when (hash-has-key? scope rn) (warn-shadow "parameter" rn ctx))
-            (hash-set! inner rn #t))]
+            (hash-set! inner n #t))]
          [else
           (define n (param-name p))
           (when (hash-has-key? scope n) (warn-shadow "parameter" n ctx))
@@ -190,12 +179,12 @@
        (for ([e (in-list (letfn-fn-body f))])
          (check-shadow e fn-scope (letfn-fn-name f))))
      (for ([e (in-list body)]) (check-shadow e inner ctx))]
-    [(defn-form name params _rest-p _ body _private? _raises)
+    [(defn-form name params _rest-p _ body _private? _raises _doc)
      (define inner (scope-copy scope))
      (for ([p (in-list params)])
        (add-param-to-scope! p inner))
      (for ([e (in-list body)]) (check-shadow e inner name))]
-    [(defn-multi name arities _private?)
+    [(defn-multi name arities _private? _doc)
      (for ([a (in-list arities)])
        (define inner (scope-copy scope))
        (for ([p (in-list (arity-clause-params a))])
@@ -229,9 +218,9 @@
        (check-shadow (cdr p) scope ctx))]
     [(set-form items)
      (for ([i (in-list items)]) (check-shadow i scope ctx))]
-    [(def-form _ _ value)
+    [(def-form _ _ value _)
      (check-shadow value scope ctx)]
-    [(defonce-form _ _ value)
+    [(defonce-form _ _ value _)
      (check-shadow value scope ctx)]
     [(dotimes-form name count-expr body)
      (check-shadow count-expr scope ctx)
@@ -397,9 +386,9 @@
 (define (collect-symbols form used)
   (match form
     [(? symbol?) (hash-set! used form #t)]
-    [(def-form _ _ value) (collect-symbols value used)]
-    [(defonce-form _ _ value) (collect-symbols value used)]
-    [(defn-form _ _ _ _ body _ _)
+    [(def-form _ _ value _) (collect-symbols value used)]
+    [(defonce-form _ _ value _) (collect-symbols value used)]
+    [(defn-form _ _ _ _ body _ _ _)
      (for ([e (in-list body)]) (collect-symbols e used))]
     [(fn-form _ _ _ body)
      (for ([e (in-list body)]) (collect-symbols e used))]
