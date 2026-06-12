@@ -11,11 +11,12 @@
 
 const std = @import("std");
 const det = @import("determinism.zig");
+const cfg = @import("config.zig");
 
-pub const SIZE_X: usize = 64;
-pub const SIZE_Z: usize = 64;
-pub const SIZE_Y: usize = 24;
-pub const CHUNK: usize = 16;
+pub const SIZE_X: usize = cfg.SIZE_X;
+pub const SIZE_Z: usize = cfg.SIZE_Z;
+pub const SIZE_Y: usize = cfg.SIZE_Y;
+pub const CHUNK: usize = cfg.CHUNK;
 pub const CHUNKS_X: usize = SIZE_X / CHUNK;
 pub const CHUNKS_Z: usize = SIZE_Z / CHUNK;
 
@@ -74,10 +75,11 @@ pub const Grid = struct {
     /// Deterministic heightfield: 2-octave value noise over a seeded
     /// lattice, bilinear-smoothed, heights in [4, 18].
     fn generate(self: *Grid, seed: u64) void {
-        const LAT: usize = 9; // lattice points for 64/8 cells + 1
-        var lattice: [LAT * LAT]i64 = undefined;
+        const LAT: usize = SIZE_X / 8 + 1; // lattice points, 8-voxel cells
+        var lattice_buf: [LAT * LAT]i64 = undefined;
+        const lattice = &lattice_buf;
         var rng = det.Splitmix64.init(seed ^ 0x9E37);
-        for (&lattice) |*p| p.* = @intCast(rng.below(1 << 16));
+        for (lattice) |*p| p.* = @intCast(rng.below(1 << 16));
 
         var z: usize = 0;
         while (z < SIZE_Z) : (z += 1) {

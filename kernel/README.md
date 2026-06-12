@@ -62,3 +62,36 @@ Golden snapshots (26 modules, each byte-pinned AND zig-compiled) live
 in beagle-test/tests/fixtures/zig-golden/ (suite: emit-zig.rkt;
 re-bless with BEAGLE_ZIG_BLESS=1 after reviewed emitter changes).
 
+## Scale (semantics v2, 2026-06-13) — 200,000 minds
+
+`-Dbig=true` builds the ambition profile: 512x512 voxel world, 200k
+minds, 256 dread wells, 8-thread mind pass. Three engine changes, the
+beagle kernel source untouched (scripts decide what, the engine
+decides how fast):
+
+- O(N) observation: per-cell alarm aggregates replace the exact-radius
+  O(N^2) pair scan (cell = SOCIAL_CELL).
+- Counter-based rng per (seed, tick, mind) — order-independent, so the
+  pure pass parallelizes with bit-determinism intact.
+- Static dread-well threat/direction fields precomputed once
+  (hash-verified bit-pure: big 0xEEB6CD3DA6B13038 @500t, small
+  0x5147A68B21CB59F1 @1000t held through the change).
+- Render: per-chunk GPU buffers — terrain cost scales with digs, not
+  world size; minds stream every frame.
+
+## Phase 3 benchmark — minds per millisecond (same beagle module)
+
+| backend / build            | config        | per tick | mind-steps/ms |
+|----------------------------|---------------|----------|---------------|
+| zig Debug                  | 300 minds     | 0.088ms  | ~3,400        |
+| zig ReleaseSafe            | 300 minds     | 0.011ms  | ~28,600       |
+| zig ReleaseFast            | 300 minds     | 0.009ms  | ~34,900       |
+| zig ReleaseSafe, 8 threads | 200,000 minds | 5.8ms    | ~34,500       |
+| zig ReleaseFast, 8 threads | 200,000 minds | 4.5ms    | ~44,300       |
+| babashka (same source)     | per-call      | —        | ~62           |
+
+200k minds at 4.5ms/tick = 27% of a 60fps frame budget. Headroom
+before the next wall: more threads, @Vector in the hot pass, and the
+§9.7 SoA-emission question. Watch it: `zig build run -Dbig=true
+-Doptimize=ReleaseSafe`.
+

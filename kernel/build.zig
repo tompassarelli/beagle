@@ -8,6 +8,10 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const big = b.option(bool, "big", "big-world profile (512x512, 200k minds)") orelse false;
+    const opts = b.addOptions();
+    opts.addOption(bool, "big", big);
+
     const dep_sokol = b.dependency("sokol", .{
         .target = target,
         .optimize = optimize,
@@ -26,6 +30,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "sokol", .module = dep_sokol.module("sokol") },
+                .{ .name = "build_options", .module = opts.createModule() },
             },
         }),
     });

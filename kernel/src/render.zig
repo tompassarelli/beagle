@@ -1,21 +1,25 @@
 //! Render harness — handwritten indefinitely (the emitter never eats
-//! this). One instanced-cube pipeline drives everything: terrain voxels
-//! and minds are the same draw call. Hand-written GLSL 410 (GL core
-//! backend only for now; sokol-shdc cross-compilation comes when a
-//! second platform does).
+//! this). One instanced-cube pipeline; terrain lives in PER-CHUNK GPU
+//! buffers rebuilt only when a chunk is dirty (so render cost scales
+//! with digs, not world size), minds stream every frame. Hand-written
+//! GLSL 410, GL core backend.
 
 const std = @import("std");
 const sokol = @import("sokol");
 const sg = sokol.gfx;
 const sapp = sokol.app;
 const sglue = sokol.glue;
+const cfg = @import("config.zig");
 const voxel = @import("voxel.zig");
 const world_mod = @import("world.zig");
 
-pub const MAX_INSTANCES: usize = 48 * 1024;
-
 // per-instance: pos(3) + size(1) + color(3) => 7 f32
 const INST_FLOATS: usize = 7;
+/// Per-chunk instance capacity. Worst-case exposure of a 16x16 column
+/// chunk with cliffs and craters stays well under this; overflow is
+/// guarded (truncated + logged), purely a visual artifact.
+const CHUNK_CAP: usize = 2048;
+const N_CHUNKS: usize = voxel.CHUNKS_X * voxel.CHUNKS_Z;
 
 const vs_src =
     \\#version 410
@@ -132,21 +136,34 @@ fn norm3(v: [3]f32) [3]f32 {
 
 pub const Renderer = struct {
     pip: sg.Pipeline = .{},
-    bind: sg.Bindings = .{},
-    inst_buf: sg.Buffer = .{},
-    instances: []f32, // CPU staging, MAX_INSTANCES * INST_FLOATS
-    n_instances: usize = 0,
+    cube_buf: sg.Buffer = .{},
+    chunk_bufs: []sg.Buffer,
+    chunk_counts: []u32,
+    chunk_staging: []f32, // CHUNK_CAP * INST_FLOATS
+    minds_buf: sg.Buffer = .{},
+    minds_staging: []f32,
     angle: f32 = 0,
+    overflow_warned: bool = false,
 
     pub fn init(alloc: std.mem.Allocator) !Renderer {
-        var r = Renderer{ .instances = try alloc.alloc(f32, MAX_INSTANCES * INST_FLOATS) };
+        var r = Renderer{
+            .chunk_bufs = try alloc.alloc(sg.Buffer, N_CHUNKS),
+            .chunk_counts = try alloc.alloc(u32, N_CHUNKS),
+            .chunk_staging = try alloc.alloc(f32, CHUNK_CAP * INST_FLOATS),
+            .minds_staging = try alloc.alloc(f32, world_mod.N_MINDS * INST_FLOATS),
+        };
+        @memset(r.chunk_counts, 0);
 
-        const vbuf = sg.makeBuffer(.{
-            .data = sg.asRange(&cube_verts),
-        });
-        r.inst_buf = sg.makeBuffer(.{
+        r.cube_buf = sg.makeBuffer(.{ .data = sg.asRange(&cube_verts) });
+        for (r.chunk_bufs) |*b| {
+            b.* = sg.makeBuffer(.{
+                .usage = .{ .stream_update = true },
+                .size = CHUNK_CAP * INST_FLOATS * @sizeOf(f32),
+            });
+        }
+        r.minds_buf = sg.makeBuffer(.{
             .usage = .{ .stream_update = true },
-            .size = MAX_INSTANCES * INST_FLOATS * @sizeOf(f32),
+            .size = world_mod.N_MINDS * INST_FLOATS * @sizeOf(f32),
         });
 
         var shd_desc = sg.ShaderDesc{};
@@ -175,27 +192,10 @@ pub const Renderer = struct {
         pip_desc.layout.attrs[2] = .{ .format = .FLOAT4, .buffer_index = 1 };
         pip_desc.layout.attrs[3] = .{ .format = .FLOAT3, .buffer_index = 1 };
         r.pip = sg.makePipeline(pip_desc);
-
-        r.bind.vertex_buffers[0] = vbuf;
-        r.bind.vertex_buffers[1] = r.inst_buf;
         return r;
     }
 
-    fn push(self: *Renderer, x: f32, y: f32, z: f32, size: f32, c: [3]f32) void {
-        if (self.n_instances >= MAX_INSTANCES) return;
-        const o = self.n_instances * INST_FLOATS;
-        self.instances[o + 0] = x;
-        self.instances[o + 1] = y;
-        self.instances[o + 2] = z;
-        self.instances[o + 3] = size;
-        self.instances[o + 4] = c[0];
-        self.instances[o + 5] = c[1];
-        self.instances[o + 6] = c[2];
-        self.n_instances += 1;
-    }
-
     fn blockColor(b: voxel.Block, x: i64, z: i64) [3]f32 {
-        // tiny deterministic per-column jitter so terrain isn't flat-shaded
         const j: f32 = @as(f32, @floatFromInt(@mod(x * 7 + z * 13, 9))) * 0.012;
         return switch (b) {
             .grass => .{ 0.28 + j, 0.62 + j, 0.25 },
@@ -206,64 +206,97 @@ pub const Renderer = struct {
     }
 
     fn mindColor(alarm: i64) [3]f32 {
-        if (alarm >= 750) return .{ 0.95, 0.15, 0.12 }; // panic
-        if (alarm >= 500) return .{ 0.95, 0.55, 0.12 }; // alarmed
-        if (alarm >= 250) return .{ 0.92, 0.86, 0.20 }; // wary
-        return .{ 0.25, 0.85, 0.85 }; // calm
+        if (alarm >= 750) return .{ 0.95, 0.15, 0.12 };
+        if (alarm >= 500) return .{ 0.95, 0.55, 0.12 };
+        if (alarm >= 250) return .{ 0.92, 0.86, 0.20 };
+        return .{ 0.25, 0.85, 0.85 };
     }
 
-    /// Rebuild the full instance list (terrain exposure + minds) and draw.
-    pub fn frame(self: *Renderer, w: *const world_mod.World) void {
-        self.n_instances = 0;
-        const g = &w.grid;
-        var z: i64 = 0;
-        while (z < voxel.SIZE_Z) : (z += 1) {
-            var x: i64 = 0;
-            while (x < voxel.SIZE_X) : (x += 1) {
-                var y: i64 = 0;
+    /// Rebuild one dirty chunk's instance list and upload it.
+    fn rebuildChunk(self: *Renderer, g: *const voxel.Grid, ci: usize) void {
+        const ccx = ci % voxel.CHUNKS_X;
+        const ccz = ci / voxel.CHUNKS_X;
+        var n: usize = 0;
+        var lz: usize = 0;
+        while (lz < voxel.CHUNK) : (lz += 1) {
+            var lx: usize = 0;
+            while (lx < voxel.CHUNK) : (lx += 1) {
+                const x: i64 = @intCast(ccx * voxel.CHUNK + lx);
+                const z: i64 = @intCast(ccz * voxel.CHUNK + lz);
                 const h = g.heightAt(x, z);
+                var y: i64 = 0;
                 while (y < h) : (y += 1) {
-                    if (g.exposed(x, y, z)) {
-                        self.push(
-                            @floatFromInt(x),
-                            @floatFromInt(y),
-                            @floatFromInt(z),
-                            1.0,
-                            blockColor(g.block(x, y, z), x, z),
-                        );
+                    if (!g.exposed(x, y, z)) continue;
+                    if (n >= CHUNK_CAP) {
+                        if (!self.overflow_warned) {
+                            std.debug.print("render: chunk {d} instance overflow (cap {d})\n", .{ ci, CHUNK_CAP });
+                            self.overflow_warned = true;
+                        }
+                        break;
                     }
+                    const o = n * INST_FLOATS;
+                    const c = blockColor(g.block(x, y, z), x, z);
+                    self.chunk_staging[o + 0] = @floatFromInt(x);
+                    self.chunk_staging[o + 1] = @floatFromInt(y);
+                    self.chunk_staging[o + 2] = @floatFromInt(z);
+                    self.chunk_staging[o + 3] = 1.0;
+                    self.chunk_staging[o + 4] = c[0];
+                    self.chunk_staging[o + 5] = c[1];
+                    self.chunk_staging[o + 6] = c[2];
+                    n += 1;
                 }
             }
         }
+        self.chunk_counts[ci] = @intCast(n);
+        if (n > 0) {
+            sg.updateBuffer(self.chunk_bufs[ci], .{
+                .ptr = self.chunk_staging.ptr,
+                .size = n * INST_FLOATS * @sizeOf(f32),
+            });
+        }
+    }
+
+    pub fn frame(self: *Renderer, w: *world_mod.World) void {
+        const g = &w.grid;
+        // terrain: only dirty chunks pay anything
+        for (0..N_CHUNKS) |ci| {
+            if (g.dirty[ci]) {
+                self.rebuildChunk(g, ci);
+                g.dirty[ci] = false;
+            }
+        }
+        // minds: streamed every frame
         const minds = w.read();
         for (0..world_mod.N_MINDS) |i| {
+            const o = i * INST_FLOATS;
             const h = g.heightAt(minds.x[i], minds.z[i]);
-            self.push(
-                @floatFromInt(minds.x[i]),
-                @floatFromInt(h),
-                @floatFromInt(minds.z[i]),
-                0.7,
-                mindColor(minds.alarm[i]),
-            );
+            const c = mindColor(minds.alarm[i]);
+            self.minds_staging[o + 0] = @floatFromInt(minds.x[i]);
+            self.minds_staging[o + 1] = @floatFromInt(h);
+            self.minds_staging[o + 2] = @floatFromInt(minds.z[i]);
+            self.minds_staging[o + 3] = 0.7;
+            self.minds_staging[o + 4] = c[0];
+            self.minds_staging[o + 5] = c[1];
+            self.minds_staging[o + 6] = c[2];
         }
-
-        sg.updateBuffer(self.inst_buf, .{
-            .ptr = self.instances.ptr,
-            .size = self.n_instances * INST_FLOATS * @sizeOf(f32),
+        sg.updateBuffer(self.minds_buf, .{
+            .ptr = self.minds_staging.ptr,
+            .size = world_mod.N_MINDS * INST_FLOATS * @sizeOf(f32),
         });
 
-        // slow auto-orbit around world center
-        self.angle += 0.0035;
-        const cx: f32 = @floatFromInt(voxel.SIZE_X / 2);
+        // camera scales with the world
+        self.angle += 0.0020;
+        const wx: f32 = @floatFromInt(voxel.SIZE_X);
+        const cx = wx / 2.0;
         const cz: f32 = @floatFromInt(voxel.SIZE_Z / 2);
-        const radius: f32 = 72.0;
+        const radius: f32 = wx * 1.15;
         const eye = [3]f32{
             cx + radius * @cos(self.angle),
-            52.0,
+            wx * 0.8,
             cz + radius * @sin(self.angle),
         };
         const view = lookAt(eye, .{ cx, 8.0, cz }, .{ 0, 1, 0 });
-        const proj = perspective(55.0, sapp.widthf() / sapp.heightf(), 0.1, 400.0);
+        const proj = perspective(55.0, sapp.widthf() / sapp.heightf(), 0.1, wx * 5.0);
         const mvp = matMul(proj, view);
 
         var pass = sg.Pass{ .swapchain = sglue.swapchain() };
@@ -273,9 +306,19 @@ pub const Renderer = struct {
         };
         sg.beginPass(pass);
         sg.applyPipeline(self.pip);
-        sg.applyBindings(self.bind);
         sg.applyUniforms(0, sg.asRange(&mvp));
-        sg.draw(0, 36, @intCast(self.n_instances));
+        var bind = sg.Bindings{};
+        bind.vertex_buffers[0] = self.cube_buf;
+        for (0..N_CHUNKS) |ci| {
+            const n = self.chunk_counts[ci];
+            if (n == 0) continue;
+            bind.vertex_buffers[1] = self.chunk_bufs[ci];
+            sg.applyBindings(bind);
+            sg.draw(0, 36, n);
+        }
+        bind.vertex_buffers[1] = self.minds_buf;
+        sg.applyBindings(bind);
+        sg.draw(0, 36, @intCast(world_mod.N_MINDS));
         sg.endPass();
         sg.commit();
     }

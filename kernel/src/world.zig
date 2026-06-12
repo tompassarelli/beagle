@@ -1,13 +1,22 @@
 //! World state + the tick loop. Memory model per the brief §2:
 //!
-//!   - tick arena: every per-tick temporary; reset exactly once per
-//!     tick AFTER commit, by this harness, never by kernel code.
-//!   - mind state: double-buffered SoA (world[0]/world[1]); the tick
-//!     reads `read` immutably, writes next values into `write` at
-//!     commit, then swaps.
-//!   - voxel grid: third store (scope amendment) — read immutably
-//!     during the tick; dig edits accumulate in the tick arena and are
-//!     applied in place at commit.
+//!   - tick arena: every per-tick temporary; reset once per tick AFTER
+//!     commit, by this harness, never by kernel code.
+//!   - mind state: double-buffered SoA; tick reads `read` immutably,
+//!     commit promotes by copy, swap.
+//!   - voxel grid: third store — read immutably during the tick; dig
+//!     edits applied in deterministic order at commit.
+//!
+//! Scale semantics v2 (2026-06-13, "way more than thousands"):
+//!   - Observation is O(N): per-cell alarm aggregates (cell size
+//!     cfg.SOCIAL_CELL); each mind reads its 3x3 cell neighborhood and
+//!     subtracts itself. Replaces the exact-radius O(N^2) pair scan.
+//!   - RNG is counter-based per (seed, tick, mind): order-independent,
+//!     so the pure pass parallelizes across threads while staying
+//!     bit-deterministic regardless of scheduling.
+//!   - The beagle kernel (sim_kernel.bgl) is UNCHANGED — observation
+//!     gathering and rng policy are harness/Ctx concerns. Scripts
+//!     decide what; the engine decides how fast.
 //!
 //! In Debug builds the arena's child is the debug allocator and reset
 //! uses .free_all, so any pointer retained across a tick is a detected
@@ -15,14 +24,18 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const cfg = @import("config.zig");
 const det = @import("determinism.zig");
 const sim = @import("sim.zig");
 const voxel = @import("voxel.zig");
 
-pub const N_MINDS: usize = 300;
-pub const N_WELLS: usize = 4;
-pub const WELL_RADIUS: i64 = 18;
-pub const SOCIAL_RADIUS: i64 = 6;
+pub const N_MINDS: usize = cfg.N_MINDS;
+pub const N_WELLS: usize = cfg.N_WELLS;
+pub const WELL_RADIUS: i64 = cfg.WELL_RADIUS;
+
+const CELL: usize = cfg.SOCIAL_CELL;
+const CELLS_X: usize = voxel.SIZE_X / CELL + 1;
+const CELLS_Z: usize = voxel.SIZE_Z / CELL + 1;
 
 pub const Minds = struct {
     x: []i64,
@@ -54,27 +67,36 @@ pub const World = struct {
     buffers: [2]Minds,
     read_ix: usize = 0,
     grid: voxel.Grid,
-    wells: [N_WELLS]Well,
-    rng: det.Splitmix64,
+    wells: []Well,
+    seed: u64,
+    rng: det.Splitmix64, // init-time only (placement); ticks use counter rng
     tick_no: u64 = 0,
     hash: det.Fnv1a = .{},
-    // cumulative decision histogram + digs (diagnostics; not hashed)
     act_counts: [5]u64 = .{ 0, 0, 0, 0, 0 },
     digs_applied: u64 = 0,
-    // per-tick stats for the render layer
     last_decisions: []i64,
+    // Static-well fields, precomputed once: threat + away-step per
+    // column. Same values wellThreat/awayFromWell produced per call —
+    // pure precompute, bit-identical results (hash-verified).
+    threat_field: []i64,
+    away_x: []i8,
+    away_z: []i8,
 
     pub fn init(alloc: std.mem.Allocator, seed: u64) !World {
         var w = World{
             .alloc = alloc,
             .buffers = .{ try Minds.init(alloc), try Minds.init(alloc) },
             .grid = try voxel.Grid.init(alloc, seed),
-            .wells = undefined,
+            .wells = try alloc.alloc(Well, N_WELLS),
+            .seed = seed,
             .rng = det.Splitmix64.init(seed),
             .last_decisions = try alloc.alloc(i64, N_MINDS),
+            .threat_field = try alloc.alloc(i64, voxel.SIZE_X * voxel.SIZE_Z),
+            .away_x = try alloc.alloc(i8, voxel.SIZE_X * voxel.SIZE_Z),
+            .away_z = try alloc.alloc(i8, voxel.SIZE_X * voxel.SIZE_Z),
         };
         @memset(w.last_decisions, 0);
-        for (&w.wells) |*well| {
+        for (w.wells) |*well| {
             well.* = .{
                 .x = @intCast(8 + w.rng.below(voxel.SIZE_X - 16)),
                 .z = @intCast(8 + w.rng.below(voxel.SIZE_Z - 16)),
@@ -87,8 +109,19 @@ pub const World = struct {
             m.belief[i] = 0;
             m.alarm[i] = 0;
         }
-        // write buffer starts as a copy
         copyMinds(&w.buffers[1], &w.buffers[0]);
+        // precompute the dread fields
+        var fz: i64 = 0;
+        while (fz < voxel.SIZE_Z) : (fz += 1) {
+            var fx: i64 = 0;
+            while (fx < voxel.SIZE_X) : (fx += 1) {
+                const o: usize = @intCast(fx + fz * @as(i64, voxel.SIZE_X));
+                w.threat_field[o] = w.wellThreat(fx, fz);
+                const away = w.awayFromWell(fx, fz);
+                w.away_x[o] = @intCast(away.dx);
+                w.away_z[o] = @intCast(away.dz);
+            }
+        }
         return w;
     }
 
@@ -96,7 +129,11 @@ pub const World = struct {
         self.buffers[0].deinit(self.alloc);
         self.buffers[1].deinit(self.alloc);
         self.grid.deinit(self.alloc);
+        self.alloc.free(self.wells);
         self.alloc.free(self.last_decisions);
+        self.alloc.free(self.threat_field);
+        self.alloc.free(self.away_x);
+        self.alloc.free(self.away_z);
     }
 
     pub fn read(self: *const World) *const Minds {
@@ -118,10 +155,9 @@ pub const World = struct {
     fn wellThreat(self: *const World, x: i64, z: i64) i64 {
         var best: i64 = 0;
         for (self.wells) |well| {
-            const d = @max(@abs(x - well.x), @abs(z - well.z));
-            const di: i64 = @intCast(d);
-            if (di < WELL_RADIUS) {
-                const t = @divTrunc((WELL_RADIUS - di) * 1000, WELL_RADIUS);
+            const d: i64 = @intCast(@max(@abs(x - well.x), @abs(z - well.z)));
+            if (d < WELL_RADIUS) {
+                const t = @divTrunc((WELL_RADIUS - d) * 1000, WELL_RADIUS);
                 if (t > best) best = t;
             }
         }
@@ -150,47 +186,100 @@ pub const World = struct {
         };
     }
 
-    /// One tick: pure passes over world_read with temporaries in the
-    /// tick arena, then commit (apply moves+digs, promote, swap), then
-    /// the caller resets the arena.
-    pub fn tick(self: *World, tick_alloc: std.mem.Allocator) !void {
-        const r = self.read();
-        var ctx = sim.Ctx{ .tick = tick_alloc, .rng = &self.rng };
+    const CellAgg = struct {
+        sum: []i64,
+        cnt: []i64,
+    };
 
-        const steps = try tick_alloc.alloc(sim.StepOut, N_MINDS);
-        var digs = try std.ArrayList(voxel.Edit).initCapacity(tick_alloc, 16);
-
-        // --- pure pass: belief -> decision -> applied move, per mind -------
-        // (all inside emitted sim.tickStep; observation gathering stays
-        // harness work)
-        for (0..N_MINDS) |i| {
+    /// Pure pass over a contiguous range of minds; every output lands
+    /// in steps[i]. Thread-safe by construction: world is read-only
+    /// here and each mind's rng derives from (seed, tick, i) — a
+    /// counter, not a stream — so scheduling cannot change results.
+    fn mindRange(
+        self: *const World,
+        r: *const Minds,
+        agg: CellAgg,
+        steps: []sim.StepOut,
+        lo: usize,
+        hi: usize,
+        tick_alloc: std.mem.Allocator,
+    ) void {
+        var i = lo;
+        while (i < hi) : (i += 1) {
+            var crng = det.Splitmix64.init(det.mix64(
+                self.seed ^ det.mix64(self.tick_no +% 1) ^ det.mix64(@as(u64, i) +% 0x517CC1B727220A95),
+            ));
+            var ctx = sim.Ctx{ .tick = tick_alloc, .rng = &crng };
+            const cx: i64 = @divTrunc(r.x[i], @as(i64, CELL));
+            const cz: i64 = @divTrunc(r.z[i], @as(i64, CELL));
+            var social_sum: i64 = -r.alarm[i]; // exclude self
+            var social_n: i64 = -1;
+            var dz: i64 = -1;
+            while (dz <= 1) : (dz += 1) {
+                var dx: i64 = -1;
+                while (dx <= 1) : (dx += 1) {
+                    const nx = cx + dx;
+                    const nz = cz + dz;
+                    if (nx >= 0 and nz >= 0 and nx < CELLS_X and nz < CELLS_Z) {
+                        const ci: usize = @intCast(nx + nz * @as(i64, CELLS_X));
+                        social_sum += agg.sum[ci];
+                        social_n += agg.cnt[ci];
+                    }
+                }
+            }
+            const fo: usize = @intCast(r.x[i] + r.z[i] * @as(i64, voxel.SIZE_X));
             const m = sim.MindIn{
                 .x = r.x[i],
                 .z = r.z[i],
                 .belief = r.belief[i],
                 .alarm = r.alarm[i],
             };
-            var social_sum: i64 = 0;
-            var social_n: i64 = 0;
-            for (0..N_MINDS) |j| {
-                if (i == j) continue;
-                const d = @max(@abs(r.x[i] - r.x[j]), @abs(r.z[i] - r.z[j]));
-                if (@as(i64, @intCast(d)) <= SOCIAL_RADIUS) {
-                    social_sum += r.alarm[j];
-                    social_n += 1;
-                }
-            }
-            const away = self.awayFromWell(r.x[i], r.z[i]);
             const obs = sim.Obs{
-                .well_threat = self.wellThreat(r.x[i], r.z[i]),
+                .well_threat = self.threat_field[fo],
                 .social = if (social_n > 0) @divTrunc(social_sum, social_n) else 0,
-                .well_dx = away.dx,
-                .well_dz = away.dz,
+                .well_dx = self.away_x[fo],
+                .well_dz = self.away_z[fo],
             };
             steps[i] = sim.tickStep(&ctx, m, obs, voxel.SIZE_X, voxel.SIZE_Z);
         }
+    }
 
-        // --- commit: promotion-by-copy out of tick memory -------------------
+    pub fn tick(self: *World, tick_alloc: std.mem.Allocator) !void {
+        const r = self.read();
+
+        // --- O(N) observation prep: per-cell alarm aggregates --------------
+        const agg = CellAgg{
+            .sum = try tick_alloc.alloc(i64, CELLS_X * CELLS_Z),
+            .cnt = try tick_alloc.alloc(i64, CELLS_X * CELLS_Z),
+        };
+        @memset(agg.sum, 0);
+        @memset(agg.cnt, 0);
+        for (0..N_MINDS) |i| {
+            const cx: usize = @intCast(@divTrunc(r.x[i], @as(i64, CELL)));
+            const cz: usize = @intCast(@divTrunc(r.z[i], @as(i64, CELL)));
+            agg.sum[cx + cz * CELLS_X] += r.alarm[i];
+            agg.cnt[cx + cz * CELLS_X] += 1;
+        }
+
+        // --- pure pass (parallel at scale; deterministic by counter rng) ---
+        const steps = try tick_alloc.alloc(sim.StepOut, N_MINDS);
+        if (cfg.N_THREADS <= 1 or N_MINDS < 4096) {
+            self.mindRange(r, agg, steps, 0, N_MINDS, tick_alloc);
+        } else {
+            var threads: [cfg.N_THREADS]std.Thread = undefined;
+            const per = (N_MINDS + cfg.N_THREADS - 1) / cfg.N_THREADS;
+            for (0..cfg.N_THREADS) |t| {
+                const lo = @min(t * per, N_MINDS);
+                const hi = @min(lo + per, N_MINDS);
+                threads[t] = std.Thread.spawn(.{}, mindRange, .{
+                    self, r, agg, steps, lo, hi, tick_alloc,
+                }) catch @panic("thread spawn");
+            }
+            for (0..cfg.N_THREADS) |t| threads[t].join();
+        }
+
+        // --- commit: promotion-by-copy out of tick memory ------------------
+        var digs = try std.ArrayList(voxel.Edit).initCapacity(tick_alloc, 64);
         const w = self.write();
         for (0..N_MINDS) |i| {
             if (steps[i].act == sim.ACT_DIG) {
@@ -234,8 +323,6 @@ pub fn runHeadless(base_alloc: std.mem.Allocator, seed: u64, n_ticks: u64) !u64 
     var t: u64 = 0;
     while (t < n_ticks) : (t += 1) {
         try world.tick(arena.allocator());
-        // Debug: hand every tick's memory back to the debug allocator so
-        // cross-tick retention becomes use-after-free. Release: keep pages.
         if (builtin.mode == .Debug) {
             _ = arena.reset(.free_all);
         } else {
