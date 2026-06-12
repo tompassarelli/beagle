@@ -12,7 +12,7 @@ nil
 
 (defn mindin-alarm [r] (:alarm r))
 
-^{:line 15 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (defrecord Obs [well_threat social well_dx well_dz wolf_near wolf_dx wolf_dz])
+^{:line 15 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (defrecord Obs [well_threat social well_dx well_dz wolf_near wolf_dx wolf_dz wolf_here])
 
 (defn obs-well_threat [r] (:well_threat r))
 
@@ -27,6 +27,8 @@ nil
 (defn obs-wolf_dx [r] (:wolf_dx r))
 
 (defn obs-wolf_dz [r] (:wolf_dz r))
+
+(defn obs-wolf_here [r] (:wolf_here r))
 
 ^{:line 17 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (defrecord BeliefOut [belief alarm])
 
@@ -99,7 +101,7 @@ nil
   ^{:line 81 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (let [a ^{:line 81 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (- alarm DIG_RELIEF)]
   ^{:line 82 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (if ^{:line 82 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (< a 0) 0 a)))
 
-^{:line 84 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (defrecord StepOut [x z belief alarm act])
+^{:line 84 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (defrecord StepOut [x z belief alarm act alive])
 
 (defn stepout-x [r] (:x r))
 
@@ -111,22 +113,25 @@ nil
 
 (defn stepout-act [r] (:act r))
 
-^{:line 86 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (defn ^long clamp-coord [^long v ^long maxv]
-  ^{:line 87 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (cond
-  ^{:line 88 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (< v 0) 0
-  ^{:line 89 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (> v ^{:line 89 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (- maxv 1)) ^{:line 89 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (- maxv 1)
+(defn stepout-alive [r] (:alive r))
+
+^{:line 87 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (defn ^long clamp-coord [^long v ^long maxv]
+  ^{:line 88 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (cond
+  ^{:line 89 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (< v 0) 0
+  ^{:line 90 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (> v ^{:line 90 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (- maxv 1)) ^{:line 90 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (- maxv 1)
   :else v))
 
-^{:line 92 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (defn ^StepOut tick-step
-  "One mind, one tick: belief -> decision -> applied movement and dig\n  relief. Returns the world-lifetime next state (+ the act for the\n  harness: hash fold, dig application, render color)." [^Ctx ctx ^MindIn m ^Obs obs ^long max-x ^long max-z]
-  ^{:line 97 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (let [b ^{:line 97 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (belief-update ctx m obs)
-   d ^{:line 98 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (decide ctx m b obs)
-   alarm ^{:line 99 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (if ^{:line 99 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (= ^{:line 99 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:act d) ACT_DIG) ^{:line 100 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (dig-relief ^{:line 100 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:alarm b)) ^{:line 101 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:alarm b))]
-  ^{:line 102 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (->StepOut ^{:line 102 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (clamp-coord ^{:line 102 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (+ ^{:line 102 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:x m) ^{:line 102 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:dx d)) max-x) ^{:line 103 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (clamp-coord ^{:line 103 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (+ ^{:line 103 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:z m) ^{:line 103 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:dz d)) max-z) ^{:line 104 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:belief b) alarm ^{:line 106 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:act d))))
+^{:line 93 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (defn ^StepOut tick-step
+  "One mind, one tick: belief -> decision -> applied movement, dig\n  relief, and the survival verdict — a wolf standing HERE eats you\n  one time in four. Returns world-lifetime next state (+ act and\n  alive for the harness: hash fold, digs, render, compaction)." [^Ctx ctx ^MindIn m ^Obs obs ^long max-x ^long max-z]
+  ^{:line 99 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (let [b ^{:line 99 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (belief-update ctx m obs)
+   d ^{:line 100 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (decide ctx m b obs)
+   alarm ^{:line 101 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (if ^{:line 101 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (= ^{:line 101 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:act d) ACT_DIG) ^{:line 102 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (dig-relief ^{:line 102 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:alarm b)) ^{:line 103 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:alarm b))
+   eaten ^{:line 104 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (and ^{:line 104 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (> ^{:line 104 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:wolf_here obs) 0) ^{:line 105 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (= ^{:line 105 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (kernel.rt/rng-below ctx 4) 0))]
+  ^{:line 106 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (->StepOut ^{:line 106 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (clamp-coord ^{:line 106 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (+ ^{:line 106 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:x m) ^{:line 106 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:dx d)) max-x) ^{:line 107 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (clamp-coord ^{:line 107 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (+ ^{:line 107 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:z m) ^{:line 107 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:dz d)) max-z) ^{:line 108 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:belief b) alarm ^{:line 110 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:act d) ^{:line 111 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (not eaten))))
 
 nil
 
-^{:line 116 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (defrecord WolfIn [x z energy fed])
+^{:line 121 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (defrecord WolfIn [x z energy fed])
 
 (defn wolfin-x [r] (:x r))
 
@@ -136,7 +141,7 @@ nil
 
 (defn wolfin-fed [r] (:fed r))
 
-^{:line 117 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (defrecord WolfObs [scent prey_dx prey_dz prey_near])
+^{:line 122 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (defrecord WolfObs [scent prey_dx prey_dz prey_near])
 
 (defn wolfobs-scent [r] (:scent r))
 
@@ -146,7 +151,7 @@ nil
 
 (defn wolfobs-prey_near [r] (:prey_near r))
 
-^{:line 118 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (defrecord WolfOut [x z energy fed howl])
+^{:line 123 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (defrecord WolfOut [x z energy fed howl alive])
 
 (defn wolfout-x [r] (:x r))
 
@@ -158,23 +163,25 @@ nil
 
 (defn wolfout-howl [r] (:howl r))
 
-^{:line 120 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (def ^long WOLF_DRAIN 2)
+(defn wolfout-alive [r] (:alive r))
 
-^{:line 121 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (def ^long WOLF_FEED_GAIN 180)
+^{:line 126 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (def ^long WOLF_DRAIN 2)
 
-^{:line 122 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (def ^long WOLF_SATED_AT 700)
+^{:line 127 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (def ^long WOLF_FEED_GAIN 180)
 
-^{:line 123 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (def ^long WOLF_HOWL_AFTER 120)
+^{:line 128 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (def ^long WOLF_SATED_AT 700)
 
-^{:line 125 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (defn ^WolfOut wolf-step
-  "One wolf, one tick: hunger drains energy; hungry wolves track the\n  scent gradient (prey_dx/dz points toward the most afraid nearby\n  cell); standing among prey feeds; long-starved wolves sometimes\n  howl (transient — the harness renders it, nothing else)." [^Ctx ctx ^WolfIn w ^WolfObs obs ^long max-x ^long max-z]
-  ^{:line 131 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (let [energy ^{:line 131 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (max 0 ^{:line 131 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (- ^{:line 131 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:energy w) WOLF_DRAIN))
-   hungry ^{:line 132 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (< energy WOLF_SATED_AT)
-   tracking ^{:line 133 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (and hungry ^{:line 133 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (> ^{:line 133 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:scent obs) 0))
-   dx ^{:line 134 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (if tracking ^{:line 134 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:prey_dx obs) ^{:line 134 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (- ^{:line 134 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (kernel.rt/rng-below ctx 3) 1))
-   dz ^{:line 135 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (if tracking ^{:line 135 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:prey_dz obs) ^{:line 135 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (- ^{:line 135 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (kernel.rt/rng-below ctx 3) 1))
-   feeding ^{:line 136 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (and hungry ^{:line 136 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (> ^{:line 136 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:prey_near obs) 0))
-   energy2 ^{:line 137 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (if feeding ^{:line 137 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (min 1000 ^{:line 137 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (+ energy WOLF_FEED_GAIN)) energy)
-   fed ^{:line 138 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (if feeding 0 ^{:line 138 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (inc ^{:line 138 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:fed w)))
-   howl ^{:line 139 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (if ^{:line 139 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (and hungry ^{:line 140 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (> fed WOLF_HOWL_AFTER) ^{:line 141 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (= ^{:line 141 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (kernel.rt/rng-below ctx 32) 0)) 1 0)]
-  ^{:line 144 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (->WolfOut ^{:line 144 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (clamp-coord ^{:line 144 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (+ ^{:line 144 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:x w) dx) max-x) ^{:line 145 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (clamp-coord ^{:line 145 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (+ ^{:line 145 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:z w) dz) max-z) energy2 fed howl)))
+^{:line 129 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (def ^long WOLF_HOWL_AFTER 120)
+
+^{:line 131 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (defn ^WolfOut wolf-step
+  "One wolf, one tick: hunger drains energy; hungry wolves track the\n  scent gradient (prey_dx/dz points toward the most afraid nearby\n  cell); standing among prey feeds; long-starved wolves sometimes\n  howl. A wolf that reaches zero energy starves — the alive verdict\n  drives generated compaction, same as minds." [^Ctx ctx ^WolfIn w ^WolfObs obs ^long max-x ^long max-z]
+  ^{:line 138 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (let [energy ^{:line 138 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (max 0 ^{:line 138 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (- ^{:line 138 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:energy w) WOLF_DRAIN))
+   hungry ^{:line 139 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (< energy WOLF_SATED_AT)
+   tracking ^{:line 140 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (and hungry ^{:line 140 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (> ^{:line 140 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:scent obs) 0))
+   dx ^{:line 141 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (if tracking ^{:line 141 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:prey_dx obs) ^{:line 141 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (- ^{:line 141 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (kernel.rt/rng-below ctx 3) 1))
+   dz ^{:line 142 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (if tracking ^{:line 142 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:prey_dz obs) ^{:line 142 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (- ^{:line 142 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (kernel.rt/rng-below ctx 3) 1))
+   feeding ^{:line 143 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (and hungry ^{:line 143 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (> ^{:line 143 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:prey_near obs) 0))
+   energy2 ^{:line 144 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (if feeding ^{:line 144 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (min 1000 ^{:line 144 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (+ energy WOLF_FEED_GAIN)) energy)
+   fed ^{:line 145 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (if feeding 0 ^{:line 145 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (inc ^{:line 145 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:fed w)))
+   howl ^{:line 146 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (if ^{:line 146 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (and hungry ^{:line 147 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (> fed WOLF_HOWL_AFTER) ^{:line 148 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (= ^{:line 148 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (kernel.rt/rng-below ctx 32) 0)) 1 0)]
+  ^{:line 151 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (->WolfOut ^{:line 151 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (clamp-coord ^{:line 151 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (+ ^{:line 151 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:x w) dx) max-x) ^{:line 152 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (clamp-coord ^{:line 152 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (+ ^{:line 152 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:z w) dz) max-z) energy2 fed howl ^{:line 156 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (> energy2 0))))

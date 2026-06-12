@@ -12,7 +12,7 @@
 
 (defrecord MindIn [x :- Int z :- Int belief :- Int alarm :- Int])
 (defrecord Obs [well_threat :- Int social :- Int well_dx :- Int well_dz :- Int
-                wolf_near :- Int wolf_dx :- Int wolf_dz :- Int])
+                wolf_near :- Int wolf_dx :- Int wolf_dz :- Int wolf_here :- Int])
 (defrecord BeliefOut [belief :- Int alarm :- Int])
 (defrecord Decision [act :- Int dx :- Int dz :- Int])
 
@@ -80,7 +80,8 @@
   (let [a (- alarm DIG_RELIEF)]
     (if (< a 0) 0 a)))
 
-(defrecord StepOut [x :- Int z :- Int belief :- Int alarm :- Int act :- Int])
+(defrecord StepOut [x :- Int z :- Int belief :- Int alarm :- Int act :- Int
+                    alive :- Bool])
 
 (defn clamp-coord [v :- Int maxv :- Int] :- Int
   (cond
@@ -89,20 +90,24 @@
     [:else v]))
 
 (defn tick-step
-  "One mind, one tick: belief -> decision -> applied movement and dig
-  relief. Returns the world-lifetime next state (+ the act for the
-  harness: hash fold, dig application, render color)."
+  "One mind, one tick: belief -> decision -> applied movement, dig
+  relief, and the survival verdict — a wolf standing HERE eats you
+  one time in four. Returns world-lifetime next state (+ act and
+  alive for the harness: hash fold, digs, render, compaction)."
   [ctx :- Ctx m :- MindIn obs :- Obs max-x :- Int max-z :- Int] :- StepOut
   (let [b (belief-update ctx m obs)
         d (decide ctx m b obs)
         alarm (if (= (:act d) ACT_DIG)
                 (dig-relief (:alarm b))
-                (:alarm b))]
+                (:alarm b))
+        eaten (and (> (:wolf_here obs) 0)
+                   (= (kernel.rt/rng-below ctx 4) 0))]
     (->StepOut (clamp-coord (+ (:x m) (:dx d)) max-x)
                (clamp-coord (+ (:z m) (:dz d)) max-z)
                (:belief b)
                alarm
-               (:act d))))
+               (:act d)
+               (not eaten))))
 
 (comment
   "Second archetype: wolves. They hunt by scent — the per-cell alarm
@@ -114,7 +119,8 @@
 
 (defrecord WolfIn [x :- Int z :- Int energy :- Int fed :- Int])
 (defrecord WolfObs [scent :- Int prey_dx :- Int prey_dz :- Int prey_near :- Int])
-(defrecord WolfOut [x :- Int z :- Int energy :- Int fed :- Int howl :- Int])
+(defrecord WolfOut [x :- Int z :- Int energy :- Int fed :- Int howl :- Int
+                    alive :- Bool])
 
 (def WOLF_DRAIN :- Int 2)
 (def WOLF_FEED_GAIN :- Int 180)
@@ -125,7 +131,8 @@
   "One wolf, one tick: hunger drains energy; hungry wolves track the
   scent gradient (prey_dx/dz points toward the most afraid nearby
   cell); standing among prey feeds; long-starved wolves sometimes
-  howl (transient — the harness renders it, nothing else)."
+  howl. A wolf that reaches zero energy starves — the alive verdict
+  drives generated compaction, same as minds."
   [ctx :- Ctx w :- WolfIn obs :- WolfObs max-x :- Int max-z :- Int] :- WolfOut
   (let [energy (max 0 (- (:energy w) WOLF_DRAIN))
         hungry (< energy WOLF_SATED_AT)
@@ -144,5 +151,6 @@
                (clamp-coord (+ (:z w) dz) max-z)
                energy2
                fed
-               howl)))
+               howl
+               (> energy2 0))))
 

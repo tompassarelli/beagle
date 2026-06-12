@@ -267,7 +267,9 @@ pub const Renderer = struct {
         }
         // minds: streamed every frame
         const minds = w.read();
-        for (0..world_mod.N_MINDS) |i| {
+        const n_live = w.n_live;
+        const n_wolves = w.n_wolves_live;
+        for (0..n_live) |i| {
             const o = i * INST_FLOATS;
             const h = g.heightAt(minds.x[i], minds.z[i]);
             const c = mindColor(minds.alarm[i]);
@@ -282,8 +284,8 @@ pub const Renderer = struct {
         // wolves after minds in the same instance stream: bigger, blood-dark,
         // flashing pale on a howl tick
         const wolves = w.readWolves();
-        for (0..world_mod.N_WOLVES) |i| {
-            const o = (world_mod.N_MINDS + i) * INST_FLOATS;
+        for (0..n_wolves) |i| {
+            const o = (n_live + i) * INST_FLOATS;
             const h = g.heightAt(wolves.x[i], wolves.z[i]);
             const howling = w.last_howls[i] != 0;
             self.minds_staging[o + 0] = @floatFromInt(wolves.x[i]);
@@ -296,7 +298,7 @@ pub const Renderer = struct {
         }
         sg.updateBuffer(self.minds_buf, .{
             .ptr = self.minds_staging.ptr,
-            .size = (world_mod.N_MINDS + world_mod.N_WOLVES) * INST_FLOATS * @sizeOf(f32),
+            .size = (n_live + n_wolves) * INST_FLOATS * @sizeOf(f32),
         });
 
         // camera scales with the world
@@ -333,7 +335,7 @@ pub const Renderer = struct {
         }
         bind.vertex_buffers[1] = self.minds_buf;
         sg.applyBindings(bind);
-        sg.draw(0, 36, @intCast(world_mod.N_MINDS + world_mod.N_WOLVES));
+        sg.draw(0, 36, @intCast(n_live + n_wolves));
         sg.endPass();
         sg.commit();
     }

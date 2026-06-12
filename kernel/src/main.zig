@@ -40,9 +40,10 @@ fn runDif(n: u64, seed: u64) !void {
             .wolf_near = @intCast(gen.below(1001)),
             .wolf_dx = @as(i64, @intCast(gen.below(3))) - 1,
             .wolf_dz = @as(i64, @intCast(gen.below(3))) - 1,
+            .wolf_here = @intCast(gen.below(2)),
         };
         const out = sim.tickStep(&ctx, m, obs, 64, 64);
-        std.debug.print("{d} {d} {d} {d} {d}\n", .{ out.x, out.z, out.belief, out.alarm, out.act });
+        std.debug.print("{d} {d} {d} {d} {d} {d}\n", .{ out.x, out.z, out.belief, out.alarm, out.act, @intFromBool(out.alive) });
     }
     // wolf-step cases continue the same generator stream (second system,
     // second block of n lines — the oracle compares the whole stream)
@@ -61,7 +62,7 @@ fn runDif(n: u64, seed: u64) !void {
             .prey_near = @intCast(gen.below(4)),
         };
         const wout = sim.wolfStep(&ctx, w, wobs, 64, 64);
-        std.debug.print("{d} {d} {d} {d} {d}\n", .{ wout.x, wout.z, wout.energy, wout.fed, wout.howl });
+        std.debug.print("{d} {d} {d} {d} {d} {d}\n", .{ wout.x, wout.z, wout.energy, wout.fed, wout.howl, @intFromBool(wout.alive) });
     }
 }
 

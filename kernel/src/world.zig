@@ -74,6 +74,10 @@ pub const World = struct {
     buffers: [2]Minds,
     wolf_buffers: [2]Wolves,
     last_howls: []i64, // transient per wolf, render + hash
+    /// Live populations. Buffers stay sized for the configured maxima;
+    /// generated compaction shrinks these as entities die.
+    n_live: usize = N_MINDS,
+    n_wolves_live: usize = N_WOLVES,
     read_ix: usize = 0,
     grid: voxel.Grid,
     wells: []Well,
@@ -275,6 +279,7 @@ pub const World = struct {
                 .wolf_near = @min(wolves_near * 250, 1000),
                 .wolf_dx = if (wolf_seen) std.math.sign(cx - wolf_cx) else 0,
                 .wolf_dz = if (wolf_seen) std.math.sign(cz - wolf_cz) else 0,
+                .wolf_here = wcnt[@intCast(cx + cz * @as(i64, CELLS_X))],
             };
         }
         sim.tickStepAllRange(tick_alloc, self.seed, self.tick_no, r, obs, voxel.SIZE_X, voxel.SIZE_Z, out, lo, hi);
@@ -291,9 +296,10 @@ pub const World = struct {
         agg: CellAgg,
         wobs: []sim.WolfObs,
         wout: *sim.WolfOutSoA,
+        nw: usize,
         tick_alloc: std.mem.Allocator,
     ) void {
-        for (0..N_WOLVES) |i| {
+        for (0..nw) |i| {
             const cx: i64 = @divTrunc(wr.x[i], @as(i64, CELL));
             const cz: i64 = @divTrunc(wr.z[i], @as(i64, CELL));
             var scent: i64 = 0;
@@ -325,7 +331,7 @@ pub const World = struct {
                 .prey_near = agg.cnt[own],
             };
         }
-        sim.wolfStepAllRange(tick_alloc, self.seed, self.tick_no, wr, wobs, voxel.SIZE_X, voxel.SIZE_Z, wout, 0, N_WOLVES);
+        sim.wolfStepAllRange(tick_alloc, self.seed, self.tick_no, wr, wobs, voxel.SIZE_X, voxel.SIZE_Z, wout, 0, nw);
     }
 
     pub fn tick(self: *World, tick_alloc: std.mem.Allocator) !void {
@@ -338,7 +344,7 @@ pub const World = struct {
         };
         @memset(agg.sum, 0);
         @memset(agg.cnt, 0);
-        for (0..N_MINDS) |i| {
+        for (0..self.n_live) |i| {
             const cx: usize = @intCast(@divTrunc(r.x[i], @as(i64, CELL)));
             const cz: usize = @intCast(@divTrunc(r.z[i], @as(i64, CELL)));
             agg.sum[cx + cz * CELLS_X] += r.alarm[i];
@@ -348,7 +354,7 @@ pub const World = struct {
         const wr = self.readWolves();
         const wcnt = try tick_alloc.alloc(i64, CELLS_X * CELLS_Z);
         @memset(wcnt, 0);
-        for (0..N_WOLVES) |i| {
+        for (0..self.n_wolves_live) |i| {
             const cx: usize = @intCast(@divTrunc(wr.x[i], @as(i64, CELL)));
             const cz: usize = @intCast(@divTrunc(wr.z[i], @as(i64, CELL)));
             wcnt[cx + cz * CELLS_X] += 1;
@@ -357,40 +363,43 @@ pub const World = struct {
         // --- pure pass (parallel at scale; deterministic by counter rng) ---
         // Output SoAs live in the tick arena; the generated engine loops
         // do gather→step→scatter per range, one rng lane per system.
-        const obs = try tick_alloc.alloc(sim.Obs, N_MINDS);
-        var out = try sim.StepOutSoA.alloc(tick_alloc, N_MINDS);
-        const wobs = try tick_alloc.alloc(sim.WolfObs, N_WOLVES);
-        var wout = try sim.WolfOutSoA.alloc(tick_alloc, N_WOLVES);
-        if (cfg.N_THREADS <= 1 or N_MINDS < 4096) {
-            self.worker(r, agg, wcnt, obs, &out, 0, N_MINDS, tick_alloc);
+        const n = self.n_live;
+        const nw = self.n_wolves_live;
+        const obs = try tick_alloc.alloc(sim.Obs, n);
+        var out = try sim.StepOutSoA.alloc(tick_alloc, n);
+        const wobs = try tick_alloc.alloc(sim.WolfObs, nw);
+        var wout = try sim.WolfOutSoA.alloc(tick_alloc, nw);
+        if (cfg.N_THREADS <= 1 or n < 4096) {
+            self.worker(r, agg, wcnt, obs, &out, 0, n, tick_alloc);
         } else {
             var threads: [cfg.N_THREADS]std.Thread = undefined;
-            const per = (N_MINDS + cfg.N_THREADS - 1) / cfg.N_THREADS;
+            const per = (n + cfg.N_THREADS - 1) / cfg.N_THREADS;
             for (0..cfg.N_THREADS) |t| {
-                const lo = @min(t * per, N_MINDS);
-                const hi = @min(lo + per, N_MINDS);
+                const lo = @min(t * per, n);
+                const hi = @min(lo + per, n);
                 threads[t] = std.Thread.spawn(.{}, worker, .{
                     self, r, agg, wcnt, obs, &out, lo, hi, tick_alloc,
                 }) catch @panic("thread spawn");
             }
             for (0..cfg.N_THREADS) |t| threads[t].join();
         }
-        self.wolfPass(wr, agg, wobs, &wout, tick_alloc);
+        self.wolfPass(wr, agg, wobs, &wout, nw, tick_alloc);
 
         // --- commit: transients harness-side, then GENERATED promotion -----
         var digs = try std.ArrayList(voxel.Edit).initCapacity(tick_alloc, 64);
         const w = self.write();
-        for (0..N_MINDS) |i| {
+        for (0..n) |i| {
             if (out.act[i] == sim.ACT_DIG) {
                 try digs.append(tick_alloc, .{ .x = r.x[i], .z = r.z[i] });
             }
             self.last_decisions[i] = out.act[i];
             self.act_counts[@intCast(out.act[i])] += 1;
         }
-        sim.tickStepPromoteAll(&out, w, N_MINDS);
+        // GENERATED compaction: the alive verdicts decide who crosses
+        self.n_live = sim.tickStepCompactAll(&out, w, n);
         const ww = self.writeWolves();
-        for (0..N_WOLVES) |i| self.last_howls[i] = wout.howl[i];
-        sim.wolfStepPromoteAll(&wout, ww, N_WOLVES);
+        for (0..nw) |i| self.last_howls[i] = wout.howl[i];
+        self.n_wolves_live = sim.wolfStepCompactAll(&wout, ww, nw);
         const applied = self.grid.applyDigs(digs.items);
         self.digs_applied += applied;
         self.read_ix = 1 - self.read_ix;
@@ -398,19 +407,21 @@ pub const World = struct {
 
         // --- conformance fingerprint ----------------------------------------
         self.hash.foldU64(self.tick_no);
+        for (0..n) |i| self.hash.foldI64(self.last_decisions[i]);
         const nr = self.read();
-        for (0..N_MINDS) |i| {
-            self.hash.foldI64(self.last_decisions[i]);
+        self.hash.foldU64(self.n_live);
+        for (0..self.n_live) |i| {
             self.hash.foldI64(nr.alarm[i]);
             self.hash.foldI64(nr.x[i]);
             self.hash.foldI64(nr.z[i]);
         }
-        const nw = self.readWolves();
-        for (0..N_WOLVES) |i| {
-            self.hash.foldI64(nw.x[i]);
-            self.hash.foldI64(nw.z[i]);
-            self.hash.foldI64(nw.energy[i]);
-            self.hash.foldI64(self.last_howls[i]);
+        for (0..nw) |i| self.hash.foldI64(self.last_howls[i]);
+        const nwr = self.readWolves();
+        self.hash.foldU64(self.n_wolves_live);
+        for (0..self.n_wolves_live) |i| {
+            self.hash.foldI64(nwr.x[i]);
+            self.hash.foldI64(nwr.z[i]);
+            self.hash.foldI64(nwr.energy[i]);
         }
         self.hash.foldU64(applied);
     }
@@ -435,8 +446,8 @@ pub fn runHeadless(base_alloc: std.mem.Allocator, seed: u64, n_ticks: u64) !u64 
         }
     }
     std.debug.print(
-        "acts: idle={d} wander={d} avoid={d} flee={d} dig={d} digs_applied={d}\n",
-        .{ world.act_counts[0], world.act_counts[1], world.act_counts[2], world.act_counts[3], world.act_counts[4], world.digs_applied },
+        "acts: idle={d} wander={d} avoid={d} flee={d} dig={d} digs_applied={d} minds={d}/{d} wolves={d}/{d}\n",
+        .{ world.act_counts[0], world.act_counts[1], world.act_counts[2], world.act_counts[3], world.act_counts[4], world.digs_applied, world.n_live, N_MINDS, world.n_wolves_live, N_WOLVES },
     );
     return world.hash.h;
 }

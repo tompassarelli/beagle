@@ -18,6 +18,7 @@ pub const Obs = struct {
     wolf_near: i64,
     wolf_dx: i64,
     wolf_dz: i64,
+    wolf_here: i64,
 };
 
 pub const BeliefOut = struct {
@@ -86,6 +87,7 @@ pub const StepOut = struct {
     belief: i64,
     alarm: i64,
     act: i64,
+    alive: bool,
 };
 
 pub fn clampCoord(v: i64, maxv: i64) i64 {
@@ -96,7 +98,8 @@ pub fn tickStep(ctx: *rt.Ctx, m: MindIn, obs: Obs, max_x: i64, max_z: i64) StepO
     const b = beliefUpdate(ctx, m, obs);
     const d = decide(ctx, m, b, obs);
     const alarm = (if ((d.act == ACT_DIG)) digRelief(b.alarm) else b.alarm);
-    return StepOut{ .x = clampCoord((m.x + d.dx), max_x), .z = clampCoord((m.z + d.dz), max_z), .belief = b.belief, .alarm = alarm, .act = d.act };
+    const eaten = ((obs.wolf_here > 0) and (rt.rng_below(ctx, 4) == 0));
+    return StepOut{ .x = clampCoord((m.x + d.dx), max_x), .z = clampCoord((m.z + d.dz), max_z), .belief = b.belief, .alarm = alarm, .act = d.act, .alive = (!eaten) };
 }
 
 pub const WolfIn = struct {
@@ -119,6 +122,7 @@ pub const WolfOut = struct {
     energy: i64,
     fed: i64,
     howl: i64,
+    alive: bool,
 };
 
 pub const WOLF_DRAIN: i64 = 2;
@@ -139,7 +143,7 @@ pub fn wolfStep(ctx: *rt.Ctx, w: WolfIn, obs: WolfObs, max_x: i64, max_z: i64) W
     const energy2 = (if (feeding) @min(1000, (energy + WOLF_FEED_GAIN)) else energy);
     const fed = (if (feeding) 0 else (w.fed + 1));
     const howl = (if ((hungry and (fed > WOLF_HOWL_AFTER) and (rt.rng_below(ctx, 32) == 0))) @as(i64, 1) else 0);
-    return WolfOut{ .x = clampCoord((w.x + dx), max_x), .z = clampCoord((w.z + dz), max_z), .energy = energy2, .fed = fed, .howl = howl };
+    return WolfOut{ .x = clampCoord((w.x + dx), max_x), .z = clampCoord((w.z + dz), max_z), .energy = energy2, .fed = fed, .howl = howl, .alive = (energy2 > 0) };
 }
 
 /// SoA buffer for MindIn — engine state, one slice per field.
@@ -193,6 +197,7 @@ pub const StepOutSoA = struct {
     belief: []i64,
     alarm: []i64,
     act: []i64,
+    alive: []bool,
 
     pub fn alloc(a: std.mem.Allocator, n: usize) !StepOutSoA {
         return .{
@@ -201,6 +206,7 @@ pub const StepOutSoA = struct {
             .belief = try a.alloc(i64, n),
             .alarm = try a.alloc(i64, n),
             .act = try a.alloc(i64, n),
+            .alive = try a.alloc(bool, n),
         };
     }
 
@@ -211,6 +217,7 @@ pub const StepOutSoA = struct {
             .belief = self.belief[i],
             .alarm = self.alarm[i],
             .act = self.act[i],
+            .alive = self.alive[i],
         };
     }
 
@@ -220,6 +227,7 @@ pub const StepOutSoA = struct {
         self.belief[i] = v.belief;
         self.alarm[i] = v.alarm;
         self.act[i] = v.act;
+        self.alive[i] = v.alive;
     }
 
     pub fn copyFrom(self: *StepOutSoA, src: *const StepOutSoA, n: usize) void {
@@ -228,6 +236,7 @@ pub const StepOutSoA = struct {
         @memcpy(self.belief[0..n], src.belief[0..n]);
         @memcpy(self.alarm[0..n], src.alarm[0..n]);
         @memcpy(self.act[0..n], src.act[0..n]);
+        @memcpy(self.alive[0..n], src.alive[0..n]);
     }
 };
 
@@ -282,6 +291,7 @@ pub const WolfOutSoA = struct {
     energy: []i64,
     fed: []i64,
     howl: []i64,
+    alive: []bool,
 
     pub fn alloc(a: std.mem.Allocator, n: usize) !WolfOutSoA {
         return .{
@@ -290,6 +300,7 @@ pub const WolfOutSoA = struct {
             .energy = try a.alloc(i64, n),
             .fed = try a.alloc(i64, n),
             .howl = try a.alloc(i64, n),
+            .alive = try a.alloc(bool, n),
         };
     }
 
@@ -300,6 +311,7 @@ pub const WolfOutSoA = struct {
             .energy = self.energy[i],
             .fed = self.fed[i],
             .howl = self.howl[i],
+            .alive = self.alive[i],
         };
     }
 
@@ -309,6 +321,7 @@ pub const WolfOutSoA = struct {
         self.energy[i] = v.energy;
         self.fed[i] = v.fed;
         self.howl[i] = v.howl;
+        self.alive[i] = v.alive;
     }
 
     pub fn copyFrom(self: *WolfOutSoA, src: *const WolfOutSoA, n: usize) void {
@@ -317,6 +330,7 @@ pub const WolfOutSoA = struct {
         @memcpy(self.energy[0..n], src.energy[0..n]);
         @memcpy(self.fed[0..n], src.fed[0..n]);
         @memcpy(self.howl[0..n], src.howl[0..n]);
+        @memcpy(self.alive[0..n], src.alive[0..n]);
     }
 };
 
@@ -335,15 +349,22 @@ pub fn tickStepAllRange(tick: std.mem.Allocator, seed: u64, tick_no: u64, in: *c
     }
 }
 
-/// Commit-boundary promotion: copy world-lifetime fields
-/// (name-matched between StepOut and MindIn) into the next read
-/// buffer. Output-only fields are transients and stay behind in
-/// tick memory.
-pub fn tickStepPromoteAll(out: *const StepOutSoA, next: *MindInSoA, n: usize) void {
-    @memcpy(next.x[0..n], out.x[0..n]);
-    @memcpy(next.z[0..n], out.z[0..n]);
-    @memcpy(next.belief[0..n], out.belief[0..n]);
-    @memcpy(next.alarm[0..n], out.alarm[0..n]);
+/// Commit-boundary COMPACTION: entities whose alive verdict
+/// survives are copied (name-matched fields, index order
+/// preserved) into the next read buffer; the dead stay behind
+/// in tick memory. Returns the new live count.
+pub fn tickStepCompactAll(out: *const StepOutSoA, next: *MindInSoA, n: usize) usize {
+    var w: usize = 0;
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        if (!out.alive[i]) continue;
+        next.x[w] = out.x[i];
+        next.z[w] = out.z[i];
+        next.belief[w] = out.belief[i];
+        next.alarm[w] = out.alarm[i];
+        w += 1;
+    }
+    return w;
 }
 
 /// Engine range loop over entities [lo, hi): gather from SoA, run
@@ -361,13 +382,20 @@ pub fn wolfStepAllRange(tick: std.mem.Allocator, seed: u64, tick_no: u64, in: *c
     }
 }
 
-/// Commit-boundary promotion: copy world-lifetime fields
-/// (name-matched between WolfOut and WolfIn) into the next read
-/// buffer. Output-only fields are transients and stay behind in
-/// tick memory.
-pub fn wolfStepPromoteAll(out: *const WolfOutSoA, next: *WolfInSoA, n: usize) void {
-    @memcpy(next.x[0..n], out.x[0..n]);
-    @memcpy(next.z[0..n], out.z[0..n]);
-    @memcpy(next.energy[0..n], out.energy[0..n]);
-    @memcpy(next.fed[0..n], out.fed[0..n]);
+/// Commit-boundary COMPACTION: entities whose alive verdict
+/// survives are copied (name-matched fields, index order
+/// preserved) into the next read buffer; the dead stay behind
+/// in tick memory. Returns the new live count.
+pub fn wolfStepCompactAll(out: *const WolfOutSoA, next: *WolfInSoA, n: usize) usize {
+    var w: usize = 0;
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        if (!out.alive[i]) continue;
+        next.x[w] = out.x[i];
+        next.z[w] = out.z[i];
+        next.energy[w] = out.energy[i];
+        next.fed[w] = out.fed[i];
+        w += 1;
+    }
+    return w;
 }
