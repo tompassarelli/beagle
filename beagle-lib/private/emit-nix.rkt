@@ -41,6 +41,35 @@
 (define (nix-reserved? s)
   (member s nix-reserved-words))
 
+;; --- params ------------------------------------------------------------------
+
+;; Param → nix pattern. Plain params curry as `name:`. Map destructuring
+;; renders as the IDIOMATIC nix attrset pattern — Clojure's
+;; {:keys [a b] :or {a 1} :as m} IS nix's { a ? 1, b, ... } @ m: — the
+;; same meaning native on both surfaces. Sequential destructuring has no
+;; nix analog: pointed error naming the let-binding replacement.
+(define (nix-param-pattern p depth)
+  (cond
+    [(param? p) (format "~a:" (mangle-name (param-name p)))]
+    [(map-destructure? p)
+     (define ors (map-destructure-or-defaults p))
+     (define as-name (map-destructure-as-name p))
+     (define entries
+       (for/list ([k (in-list (map-destructure-keys p))])
+         (unless (symbol? k)
+           (error 'beagle
+                  "nested map destructuring in params is not supported by the nix backend — destructure the outer level and bind the rest with let"))
+         (define dflt (and ors (assq k ors)))
+         (if dflt
+             (format "~a ? ~a" (mangle-name k) (emit-expr (cdr dflt) depth))
+             (mangle-name k))))
+     (format "{ ~a, ... }~a:"
+             (string-join entries ", ")
+             (if as-name (format " @ ~a" (mangle-name as-name)) ""))]
+    [else
+     (error 'beagle
+            "sequential destructuring in params is not supported by the nix backend — nix functions destructure attrsets only; bind positionally: (let [x (first xs) y (second xs)] ...)")]))
+
 ;; --- special float values ---------------------------------------------------
 
 (define (emit-nix-number n)
@@ -143,7 +172,7 @@
        (string-join
         (append
          (for/list ([p (in-list params)])
-           (format "~a:" (mangle-name (param-name p))))
+           (nix-param-pattern p depth))
          (if rest-p (list (format "~a:" (mangle-name (param-name rest-p)))) '()))
         " "))
      (define body-str (emit-body body depth))
@@ -328,7 +357,7 @@
        (string-join
         (append
          (for/list ([p (in-list params)])
-           (format "~a:" (mangle-name (param-name p))))
+           (nix-param-pattern p depth))
          (if rest-p (list (format "~a:" (mangle-name (param-name rest-p)))) '()))
         " "))
      (format "~a ~a" param-str (emit-body body depth))]

@@ -86,7 +86,10 @@
              "emit-clj-behavioral.rkt"  ; requires bb (Babashka)
              ;; Zig backend (thread 20260612232001) — snapshot compile
              ;; checks self-skip when zig isn't on PATH.
-             "emit-zig.rkt"))
+             "emit-zig.rkt"
+             ;; Form × live-backend matrix: every cell emits or rejects
+             ;; pointedly (cracks thread 20260613013145 #2).
+             "emit-matrix.rkt"))
 
   (demoted . (;; behavioral runs that hit external interpreters
               "emit-js-behavioral.rkt")) ; requires bun
