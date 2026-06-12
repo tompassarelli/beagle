@@ -99,6 +99,16 @@ export fn frame() void {
             _ = app.arena.reset(.retain_capacity);
         }
     }
+    // live-population HUD, ~once a second
+    if (app.world.tick_no % 60 == 0) {
+        var buf: [128]u8 = undefined;
+        const title = std.fmt.bufPrintSentinel(&buf, "minds {d}/{d} · wolves {d}/{d} · tick {d}", .{
+            app.world.n_live,        world_mod.N_MINDS,
+            app.world.n_wolves_live, world_mod.N_WOLVES,
+            app.world.tick_no,
+        }, 0) catch "minds";
+        sapp.setWindowTitle(title);
+    }
     app.renderer.frame(&app.world);
 }
 
