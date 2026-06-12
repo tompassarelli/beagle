@@ -4,12 +4,21 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    # Zig backend toolchain (thread 20260612232001). Pinned to the
+    # latest tagged release per the §9.6 decision — bump deliberately.
+    zig-overlay.url = "github:mitchellh/zig-overlay";
+    zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, zig-overlay }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        # Zig master-nightly (Tom 2026-06-12: "latest from unstable/master,
+        # I don't want a big rewrite because it's old"). Reproducible via
+        # flake.lock's zig-overlay revision; bump deliberately with
+        # `nix flake update zig-overlay`.
+        zig = zig-overlay.packages.${system}.master;
 
         beagle = pkgs.stdenv.mkDerivation {
           pname = "beagle";
@@ -36,10 +45,6 @@
             if [ -d beagle-lib/lib ]; then
               cp -r beagle-lib/lib $out/lib/beagle/
             fi
-
-            # Copy docs for beagle init
-            mkdir -p $out/lib/beagle/docs
-            cp docs/cheatsheet-consumer.md $out/lib/beagle/docs/
 
             # Install bin scripts, wrapping with PATH
             for f in bin/beagle*; do
@@ -74,6 +79,13 @@
             pkgs.babashka
             pkgs.clojure
             pkgs.bun
+            # Zig backend + tick kernel (thread 20260612232001)
+            zig
+            # sokol_app X11/GLX link deps (kernel render harness)
+            pkgs.xorg.libX11
+            pkgs.xorg.libXi
+            pkgs.xorg.libXcursor
+            pkgs.libGL
           ];
         };
       }
