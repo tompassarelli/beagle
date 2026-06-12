@@ -513,6 +513,179 @@
                     "pub fn promote(v: ~a) ~a {\n    return v;\n}")
                    rec rec))]))
 
+;; --- engine layer (script → engine crossing) ----------------------------------
+;;
+;; When the program defines a per-entity tick entry (tick-step), the
+;; backend additionally generates the engine layer around it: SoA
+;; buffers for the entity and output records, the gather→step→scatter
+;; range loop carrying the counter-rng determinism policy, and
+;; name-matched commit promotion. The iteration semantics live here,
+;; derived from the typed signature; the harness shrinks to world
+;; resources + thread spawns.
+;;
+;; Signature convention (violations are pointed errors):
+;;   (defn tick-step [ctx :- Ctx  e :- E  rest...] :- O ...)
+;;   - param 0: Ctx
+;;   - param 1: entity record E → ESoA, indexed per entity
+;;   - rest:    record-typed params ride as per-entity []const R arrays;
+;;              everything else broadcasts unchanged
+;;   - E and O fields must be scalar (Int/Float/Bool): they cross the
+;;     commit boundary by @memcpy
+
+(define ENGINE-RESERVED
+  '("tick" "seed" "tick_no" "in" "out" "lo" "hi" "i" "crng" "ctx" "n" "a" "v" "self" "src"))
+
+(define (engine-scalar-prim? t)
+  (and (type-prim? t) (memq (type-prim-name t) '(Int Float Bool))))
+
+(define (record-type-name t)
+  (and (type-prim? t)
+       (hash-has-key? (current-records) (type-prim-name t))
+       (type-prim-name t)))
+
+(define (soa-name rec) (format "~aSoA" (ident rec)))
+
+(define (engine-check-scalar-record! rec who)
+  (for ([p (in-list (hash-ref (current-records) rec))])
+    (unless (engine-scalar-prim? (param-type p))
+      (unsupported (format "engine ~a record with non-scalar field" who)
+                   (format "~a.~a crosses the commit boundary; v1 engine state is Int/Float/Bool only"
+                           rec (param-name p))))))
+
+(define (emit-soa rec)
+  (define sn (soa-name rec))
+  (define rn (ident rec))
+  (define fields (hash-ref (current-records) rec))
+  (define (lines f) (string-join (map f fields) "\n"))
+  (string-append
+   (format "/// SoA buffer for ~a — engine state, one slice per field.\n" rn)
+   "/// Allocated by the harness (any allocator); never freed here —\n"
+   "/// emitted code never frees, the harness owns lifetimes.\n"
+   (format "pub const ~a = struct {\n" sn)
+   (lines (lambda (p) (format "    ~a: []~a,"
+                              (ident (param-name p)) (type->zig (param-type p)))))
+   "\n\n"
+   (format "    pub fn alloc(a: std.mem.Allocator, n: usize) !~a {\n        return .{\n" sn)
+   (lines (lambda (p) (format "            .~a = try a.alloc(~a, n),"
+                              (ident (param-name p)) (type->zig (param-type p)))))
+   "\n        };\n    }\n\n"
+   (format "    pub fn get(self: *const ~a, i: usize) ~a {\n        return .{\n" sn rn)
+   (lines (lambda (p) (format "            .~a = self.~a[i],"
+                              (ident (param-name p)) (ident (param-name p)))))
+   "\n        };\n    }\n\n"
+   (format "    pub fn set(self: *~a, i: usize, v: ~a) void {\n" sn rn)
+   (lines (lambda (p) (format "        self.~a[i] = v.~a;"
+                              (ident (param-name p)) (ident (param-name p)))))
+   "\n    }\n\n"
+   (format "    pub fn copyFrom(self: *~a, src: *const ~a, n: usize) void {\n" sn sn)
+   (lines (lambda (p) (format "        @memcpy(self.~a[0..n], src.~a[0..n]);"
+                              (ident (param-name p)) (ident (param-name p)))))
+   "\n    }\n};"))
+
+(define (emit-tick-all entry ename oname extra)
+  (define fname (fn-ident (defn-form-name entry)))
+  (define extra-sig
+    (for/list ([p (in-list extra)])
+      (define r (record-type-name (param-type p)))
+      (if r
+          (format "~a: []const ~a" (ident (param-name p)) (ident r))
+          (format "~a: ~a" (ident (param-name p)) (type->zig (param-type p))))))
+  (define extra-args
+    (for/list ([p (in-list extra)])
+      (if (record-type-name (param-type p))
+          (format "~a[i]" (ident (param-name p)))
+          (ident (param-name p)))))
+  (string-append
+   "/// Engine range loop over entities [lo, hi): gather from SoA, run\n"
+   (format "/// ~a under the counter-rng policy — rng seeded per\n" fname)
+   "/// (seed, tick_no, entity index), order-independent, so disjoint\n"
+   "/// ranges parallelize without losing bit-determinism — and scatter\n"
+   "/// the result. Record params index per entity; scalars broadcast.\n"
+   (format "pub fn tickAllRange(tick: std.mem.Allocator, seed: u64, tick_no: u64, in: *const ~a~a, out: *~a, lo: usize, hi: usize) void {\n"
+           (soa-name ename)
+           (apply string-append
+                  (for/list ([s (in-list extra-sig)]) (format ", ~a" s)))
+           (soa-name oname))
+   "    var i = lo;\n"
+   "    while (i < hi) : (i += 1) {\n"
+   "        var crng = rt.Splitmix64.init(rt.mix64(seed ^ rt.mix64(tick_no +% 1) ^ rt.mix64(@as(u64, i) +% 0x517CC1B727220A95)));\n"
+   "        var ctx = Ctx{ .tick = tick, .rng = &crng };\n"
+   (format "        out.set(i, ~a(&ctx, in.get(i)~a));\n"
+           fname
+           (apply string-append
+                  (for/list ([a (in-list extra-args)]) (format ", ~a" a))))
+   "    }\n}"))
+
+(define (emit-promote-all ename oname)
+  (define efields (hash-ref (current-records) ename))
+  (define common
+    (for/list ([p (in-list (hash-ref (current-records) oname))]
+               #:when (let ([q (findf (lambda (q) (eq? (param-name q) (param-name p)))
+                                      efields)])
+                        (and q
+                             (begin
+                               (unless (equal? (type->zig (param-type q))
+                                               (type->zig (param-type p)))
+                                 (unsupported "engine promotion field type mismatch"
+                                              (format "~a.~a and ~a.~a share a name but not a type"
+                                                      oname (param-name p) ename (param-name p))))
+                               #t))))
+      p))
+  (string-append
+   "/// Commit-boundary promotion: copy world-lifetime fields\n"
+   (format "/// (name-matched between ~a and ~a) into the next read\n"
+           (ident oname) (ident ename))
+   "/// buffer. Output-only fields are transients and stay behind in\n"
+   "/// tick memory.\n"
+   (format "pub fn promoteAll(out: *const ~a, next: *~a, n: usize) void {\n"
+           (soa-name oname) (soa-name ename))
+   (if (null? common)
+       "    _ = out;\n    _ = next;\n    _ = n;\n"
+       (string-join
+        (for/list ([p (in-list common)])
+          (format "    @memcpy(next.~a[0..n], out.~a[0..n]);\n"
+                  (ident (param-name p)) (ident (param-name p))))
+        ""))
+   "}"))
+
+(define (emit-engine prog)
+  (define entry
+    (findf (lambda (f) (and (defn-form? f) (eq? (defn-form-name f) 'tick-step)))
+           (program-forms prog)))
+  (cond
+    [(not entry) '()]
+    [else
+     (define params (defn-form-params entry))
+     (for ([p (in-list params)])
+       (unless (param? p) (unsupported "destructuring parameter in tick-step")))
+     (unless (>= (length params) 2)
+       (unsupported "tick-step engine signature"
+                    "needs [ctx :- Ctx entity :- E ...] for engine generation"))
+     (unless (and (type-prim? (param-type (car params)))
+                  (eq? (type-prim-name (param-type (car params))) 'Ctx))
+       (unsupported "tick-step param 0" "must be ctx :- Ctx"))
+     (define ename (record-type-name (param-type (cadr params))))
+     (unless ename
+       (unsupported "tick-step param 1"
+                    "must be a record — the per-entity state the engine buffers"))
+     (define oname (record-type-name (defn-form-return-type entry)))
+     (unless oname
+       (unsupported "tick-step return"
+                    "must be a record — the per-entity output the engine scatters"))
+     (engine-check-scalar-record! ename "entity")
+     (engine-check-scalar-record! oname "output")
+     (define extra (cddr params))
+     (for ([p (in-list extra)])
+       (when (member (ident (param-name p)) ENGINE-RESERVED)
+         (unsupported "tick-step param name"
+                      (format "~a collides with a generated engine binding"
+                              (ident (param-name p))))))
+     (append
+      (for/list ([r (in-list (remove-duplicates (list ename oname)))])
+        (emit-soa r))
+      (list (emit-tick-all entry ename oname extra)
+            (emit-promote-all ename oname)))]))
+
 (define (zig-emit-program prog)
   (parameterize ([current-records (build-record-table prog)])
     (define decls
@@ -525,7 +698,8 @@
            [(defn-form? f) (emit-defn f)]
            [(defn-multi? f) (unsupported "multi-arity defn")]
            [else (unsupported (format "top-level form ~a" f))]))
-       (emit-promote prog)))
+       (emit-promote prog)
+       (emit-engine prog)))
     (string-append
      "// generated by beagle (zig backend) — do not edit\n"
      "const std = @import(\"std\");\n"

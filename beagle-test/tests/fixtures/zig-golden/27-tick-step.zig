@@ -18,3 +18,58 @@ pub fn tickStep(ctx: *rt.Ctx, s: S, delta: i64) S {
 pub fn promote(v: S) S {
     return v;
 }
+
+/// SoA buffer for S — engine state, one slice per field.
+/// Allocated by the harness (any allocator); never freed here —
+/// emitted code never frees, the harness owns lifetimes.
+pub const SSoA = struct {
+    v: []i64,
+    hits: []i64,
+
+    pub fn alloc(a: std.mem.Allocator, n: usize) !SSoA {
+        return .{
+            .v = try a.alloc(i64, n),
+            .hits = try a.alloc(i64, n),
+        };
+    }
+
+    pub fn get(self: *const SSoA, i: usize) S {
+        return .{
+            .v = self.v[i],
+            .hits = self.hits[i],
+        };
+    }
+
+    pub fn set(self: *SSoA, i: usize, v: S) void {
+        self.v[i] = v.v;
+        self.hits[i] = v.hits;
+    }
+
+    pub fn copyFrom(self: *SSoA, src: *const SSoA, n: usize) void {
+        @memcpy(self.v[0..n], src.v[0..n]);
+        @memcpy(self.hits[0..n], src.hits[0..n]);
+    }
+};
+
+/// Engine range loop over entities [lo, hi): gather from SoA, run
+/// tickStep under the counter-rng policy — rng seeded per
+/// (seed, tick_no, entity index), order-independent, so disjoint
+/// ranges parallelize without losing bit-determinism — and scatter
+/// the result. Record params index per entity; scalars broadcast.
+pub fn tickAllRange(tick: std.mem.Allocator, seed: u64, tick_no: u64, in: *const SSoA, delta: i64, out: *SSoA, lo: usize, hi: usize) void {
+    var i = lo;
+    while (i < hi) : (i += 1) {
+        var crng = rt.Splitmix64.init(rt.mix64(seed ^ rt.mix64(tick_no +% 1) ^ rt.mix64(@as(u64, i) +% 0x517CC1B727220A95)));
+        var ctx = Ctx{ .tick = tick, .rng = &crng };
+        out.set(i, tickStep(&ctx, in.get(i), delta));
+    }
+}
+
+/// Commit-boundary promotion: copy world-lifetime fields
+/// (name-matched between S and S) into the next read
+/// buffer. Output-only fields are transients and stay behind in
+/// tick memory.
+pub fn promoteAll(out: *const SSoA, next: *SSoA, n: usize) void {
+    @memcpy(next.v[0..n], out.v[0..n]);
+    @memcpy(next.hits[0..n], out.hits[0..n]);
+}

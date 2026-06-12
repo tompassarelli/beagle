@@ -185,3 +185,76 @@
                "(ns g)\n(defrecord S [v :- Int])\n(defn tick-step [ctx :- Ctx s :- S] :- S s)"))
   (check-true (regexp-match? #rx"pub fn promote.v: S. S" out)))
 
+;; --- engine layer (script→engine crossing) -------------------------------------
+
+(define ENGINE-SRC
+  (string-append
+   "(ns g)\n"
+   "(defrecord MindIn [x :- Int belief :- Int])\n"
+   "(defrecord Obs [sig :- Int])\n"
+   "(defrecord StepOut [x :- Int belief :- Int act :- Int])\n"
+   "(defn tick-step [ctx :- Ctx m :- MindIn obs :- Obs max-x :- Int] :- StepOut\n"
+   "  (->StepOut (+ (:x m) (:sig obs)) (:belief m) 0))"))
+
+(test-case "engine: SoA buffers generated for entity and output records"
+  (define out (compile-zig-string ENGINE-SRC))
+  (check-true (regexp-match? #rx"pub const MindInSoA = struct" out))
+  (check-true (regexp-match? #rx"pub const StepOutSoA = struct" out)))
+
+(test-case "engine: tickAllRange — record params per-entity, scalars broadcast"
+  (define out (compile-zig-string ENGINE-SRC))
+  (check-true (regexp-match?
+               #rx"pub fn tickAllRange.tick: std.mem.Allocator, seed: u64, tick_no: u64, in: \\*const MindInSoA, obs: \\[\\]const Obs, max_x: i64, out: \\*StepOutSoA, lo: usize, hi: usize."
+               out)))
+
+(test-case "engine: counter-rng determinism policy lives in generated code"
+  (define out (compile-zig-string ENGINE-SRC))
+  (check-true (regexp-match? #rx"rt.Splitmix64.init.rt.mix64.seed" out))
+  (check-true (regexp-match? #rx"0x517CC1B727220A95" out)))
+
+(test-case "engine: promoteAll copies world-lifetime fields, transients stay behind"
+  (define out (compile-zig-string ENGINE-SRC))
+  (check-true (regexp-match? #rx"@memcpy.next.x.0..n., out.x.0..n.." out))
+  (check-true (regexp-match? #rx"@memcpy.next.belief" out))
+  (check-false (regexp-match? #rx"next.act" out)))
+
+(test-case "engine: entity = output dedups to a single SoA struct"
+  (define out (compile-zig-string
+               "(ns g)\n(defrecord S [v :- Int])\n(defn tick-step [ctx :- Ctx s :- S] :- S s)"))
+  (check-equal? 1 (length (regexp-match* #rx"pub const SSoA = struct" out))))
+
+(test-case "engine: world-tick alone gets promote but no engine layer"
+  (define out (compile-zig-string
+               "(ns g)\n(defrecord World [score :- Int])\n(defn world-tick [ctx :- Ctx w :- World] :- World w)"))
+  (check-true (regexp-match? #rx"pub fn promote" out))
+  (check-false (regexp-match? #rx"tickAllRange" out)))
+
+(when ZIG
+  (test-case "engine: generated engine layer compiles as zig"
+    (check-true (zig-compiles? (compile-zig-string ENGINE-SRC) "engine-layer"))))
+
+(check-unsupported/src "engine: param 0 must be Ctx"
+  #rx"tick-step param 0"
+  "(ns g)\n(defrecord S [v :- Int])\n(defn tick-step [n :- Int s :- S] :- S s)")
+
+(check-unsupported/src "engine: param 1 must be the entity record"
+  #rx"tick-step param 1"
+  "(ns g)\n(defrecord S [v :- Int])\n(defn tick-step [ctx :- Ctx n :- Int] :- S (->S n))")
+
+(check-unsupported/src "engine: entity fields must be scalar for the commit memcpy"
+  #rx"engine entity record with non-scalar field"
+  (string-append
+   "(ns g)\n(defrecord Inner [v :- Int])\n"
+   "(defrecord E [inner :- Inner])\n(defrecord O [v :- Int])\n"
+   "(defn tick-step [ctx :- Ctx e :- E] :- O (->O (:v (:inner e))))"))
+
+(check-unsupported/src "engine: param names can't collide with engine bindings"
+  #rx"seed collides with a generated engine binding"
+  "(ns g)\n(defrecord S [v :- Int])\n(defn tick-step [ctx :- Ctx s :- S seed :- Int] :- S s)")
+
+(check-unsupported/src "engine: name-matched promotion fields must agree on type"
+  #rx"share a name but not a type"
+  (string-append
+   "(ns g)\n(defrecord E [x :- Int])\n(defrecord O [x :- Float])\n"
+   "(defn tick-step [ctx :- Ctx e :- E] :- O (->O 1.0))"))
+
