@@ -82,10 +82,11 @@
             # Zig backend + tick kernel (thread 20260612232001)
             zig
             # sokol_app X11/GLX link deps (kernel render harness)
-            pkgs.xorg.libX11
-            pkgs.xorg.libXi
-            pkgs.xorg.libXcursor
+            pkgs.libx11
+            pkgs.libxi
+            pkgs.libxcursor
             pkgs.libGL
+            pkgs.alsa-lib # sokol_audio links asound unconditionally
           ];
         };
       }
