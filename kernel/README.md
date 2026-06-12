@@ -79,6 +79,37 @@ decides how fast):
 - Render: per-chunk GPU buffers — terrain cost scales with digs, not
   world size; minds stream every frame.
 
+## The crossing — script→engine (2026-06-13)
+
+The §9.7 question ("should the emitter generate the SoA layout and
+iteration loop?") is answered: yes, and it's shipped. From tick-step's
+typed signature alone, the zig backend now generates the engine layer
+in sim.zig:
+
+- `MindInSoA` / `StepOutSoA` — one slice per record field, with
+  alloc/get/set/copyFrom (harness owns lifetimes; emitted code still
+  never frees).
+- `tickAllRange(tick, seed, tick_no, in, obs, max_x, max_z, out, lo, hi)`
+  — the gather→step→scatter range loop. The counter-rng determinism
+  policy (`mix64(seed ^ mix64(tick_no+1) ^ mix64(i + C))`) moved INTO
+  generated code; record-typed params ride as per-entity arrays,
+  scalars broadcast.
+- `promoteAll` — commit promotion as bulk @memcpy of the name-matched
+  world-lifetime fields; output-only transients (act) stay behind in
+  tick memory.
+
+world.zig shrank to genuinely world-side work: grid/wells/fields,
+observation gathering, thread spawns, fingerprint. Acceptance: both
+conformance hashes held bit-exact through the handover, and the
+generated engine is FASTER than the handwritten harness loop it
+replaced (bulk promotion + direct SoA access): 4.5 → 3.7ms/tick on
+the big profile.
+
+Convention (pointed errors otherwise): `tick-step [ctx :- Ctx,
+entity :- E, rest...] :- O`; E/O fields scalar (they cross the commit
+boundary by memcpy); record params per-entity, scalar params
+broadcast.
+
 ## Phase 3 benchmark — minds per millisecond (same beagle module)
 
 | backend / build            | config        | per tick | mind-steps/ms |
@@ -86,12 +117,22 @@ decides how fast):
 | zig Debug                  | 300 minds     | 0.088ms  | ~3,400        |
 | zig ReleaseSafe            | 300 minds     | 0.011ms  | ~28,600       |
 | zig ReleaseFast            | 300 minds     | 0.009ms  | ~34,900       |
-| zig ReleaseSafe, 8 threads | 200,000 minds | 5.8ms    | ~34,500       |
+| zig ReleaseSafe, 8 threads | 200,000 minds | 5.8ms    | ~34,500      |
 | zig ReleaseFast, 8 threads | 200,000 minds | 4.5ms    | ~44,300       |
+| zig ReleaseFast, generated engine | 200,000 minds | 3.7ms | ~54,000  |
 | babashka (same source)     | per-call      | —        | ~62           |
 
-200k minds at 4.5ms/tick = 27% of a 60fps frame budget. Headroom
-before the next wall: more threads, @Vector in the hot pass, and the
-§9.7 SoA-emission question. Watch it: `zig build run -Dbig=true
--Doptimize=ReleaseSafe`.
+200k minds at 3.7ms/tick = 22% of a 60fps frame budget. Headroom
+before the next wall: more threads and @Vector in the hot pass. Watch
+it: `zig build run -Dbig=true -Doptimize=ReleaseSafe`.
+
+## Conformance
+
+    ./conformance.sh
+
+One command, red/green: small hash (1000t, x2 for determinism), the
+5000-case zig-vs-babashka differential, big hash (500t, 200k minds).
+Baselines live at the top of the script — re-baselining is a
+deliberate, diff-visible edit. Run it after ANY emitter or harness
+change; "CONFORMANCE GREEN" is the merge gate.
 

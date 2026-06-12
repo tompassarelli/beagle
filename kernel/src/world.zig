@@ -14,9 +14,14 @@
 //!   - RNG is counter-based per (seed, tick, mind): order-independent,
 //!     so the pure pass parallelizes across threads while staying
 //!     bit-deterministic regardless of scheduling.
-//!   - The beagle kernel (sim_kernel.bgl) is UNCHANGED — observation
-//!     gathering and rng policy are harness/Ctx concerns. Scripts
-//!     decide what; the engine decides how fast.
+//! Script→engine crossing (2026-06-13): the engine layer is GENERATED.
+//! sim.zig (emitted from sim_kernel.bgl) now owns the SoA buffers
+//! (sim.MindInSoA / sim.StepOutSoA), the gather→step→scatter range
+//! loop with the counter-rng policy (sim.tickAllRange), and commit
+//! promotion (sim.promoteAll) — all derived from tick-step's typed
+//! signature. This harness keeps what is genuinely world-side:
+//! resources (grid, wells, precomputed fields), observation gathering,
+//! thread spawns, and the conformance fingerprint.
 //!
 //! In Debug builds the arena's child is the debug allocator and reset
 //! uses .free_all, so any pointer retained across a tick is a detected
@@ -37,28 +42,16 @@ const CELL: usize = cfg.SOCIAL_CELL;
 const CELLS_X: usize = voxel.SIZE_X / CELL + 1;
 const CELLS_Z: usize = voxel.SIZE_Z / CELL + 1;
 
-pub const Minds = struct {
-    x: []i64,
-    z: []i64,
-    belief: []i64,
-    alarm: []i64,
+/// Mind state lives in the GENERATED SoA type. Emitted code never
+/// frees, so the harness releases the field slices itself.
+pub const Minds = sim.MindInSoA;
 
-    fn init(alloc: std.mem.Allocator) !Minds {
-        return .{
-            .x = try alloc.alloc(i64, N_MINDS),
-            .z = try alloc.alloc(i64, N_MINDS),
-            .belief = try alloc.alloc(i64, N_MINDS),
-            .alarm = try alloc.alloc(i64, N_MINDS),
-        };
-    }
-
-    fn deinit(self: *Minds, alloc: std.mem.Allocator) void {
-        alloc.free(self.x);
-        alloc.free(self.z);
-        alloc.free(self.belief);
-        alloc.free(self.alarm);
-    }
-};
+fn freeMinds(alloc: std.mem.Allocator, m: *Minds) void {
+    alloc.free(m.x);
+    alloc.free(m.z);
+    alloc.free(m.belief);
+    alloc.free(m.alarm);
+}
 
 pub const Well = struct { x: i64, z: i64 };
 
@@ -85,7 +78,7 @@ pub const World = struct {
     pub fn init(alloc: std.mem.Allocator, seed: u64) !World {
         var w = World{
             .alloc = alloc,
-            .buffers = .{ try Minds.init(alloc), try Minds.init(alloc) },
+            .buffers = .{ try Minds.alloc(alloc, N_MINDS), try Minds.alloc(alloc, N_MINDS) },
             .grid = try voxel.Grid.init(alloc, seed),
             .wells = try alloc.alloc(Well, N_WELLS),
             .seed = seed,
@@ -109,7 +102,7 @@ pub const World = struct {
             m.belief[i] = 0;
             m.alarm[i] = 0;
         }
-        copyMinds(&w.buffers[1], &w.buffers[0]);
+        w.buffers[1].copyFrom(&w.buffers[0], N_MINDS);
         // precompute the dread fields
         var fz: i64 = 0;
         while (fz < voxel.SIZE_Z) : (fz += 1) {
@@ -126,8 +119,8 @@ pub const World = struct {
     }
 
     pub fn deinit(self: *World) void {
-        self.buffers[0].deinit(self.alloc);
-        self.buffers[1].deinit(self.alloc);
+        freeMinds(self.alloc, &self.buffers[0]);
+        freeMinds(self.alloc, &self.buffers[1]);
         self.grid.deinit(self.alloc);
         self.alloc.free(self.wells);
         self.alloc.free(self.last_decisions);
@@ -142,13 +135,6 @@ pub const World = struct {
 
     fn write(self: *World) *Minds {
         return &self.buffers[1 - self.read_ix];
-    }
-
-    fn copyMinds(dst: *Minds, src: *const Minds) void {
-        @memcpy(dst.x, src.x);
-        @memcpy(dst.z, src.z);
-        @memcpy(dst.belief, src.belief);
-        @memcpy(dst.alarm, src.alarm);
     }
 
     /// Ambient dread at (x,z): max over wells of radius falloff, 0..1000.
@@ -191,25 +177,23 @@ pub const World = struct {
         cnt: []i64,
     };
 
-    /// Pure pass over a contiguous range of minds; every output lands
-    /// in steps[i]. Thread-safe by construction: world is read-only
-    /// here and each mind's rng derives from (seed, tick, i) — a
-    /// counter, not a stream — so scheduling cannot change results.
-    fn mindRange(
+    /// One thread's slice of the tick: gather observations for
+    /// [lo, hi) (harness concern — world resources), then hand the
+    /// range to the GENERATED engine loop, which owns iteration, the
+    /// counter-rng policy, and the SoA gather/scatter. obs[i] feeds
+    /// only mind i, so both passes share one range with no barrier.
+    fn worker(
         self: *const World,
         r: *const Minds,
         agg: CellAgg,
-        steps: []sim.StepOut,
+        obs: []sim.Obs,
+        out: *sim.StepOutSoA,
         lo: usize,
         hi: usize,
         tick_alloc: std.mem.Allocator,
     ) void {
         var i = lo;
         while (i < hi) : (i += 1) {
-            var crng = det.Splitmix64.init(det.mix64(
-                self.seed ^ det.mix64(self.tick_no +% 1) ^ det.mix64(@as(u64, i) +% 0x517CC1B727220A95),
-            ));
-            var ctx = sim.Ctx{ .tick = tick_alloc, .rng = &crng };
             const cx: i64 = @divTrunc(r.x[i], @as(i64, CELL));
             const cz: i64 = @divTrunc(r.z[i], @as(i64, CELL));
             var social_sum: i64 = -r.alarm[i]; // exclude self
@@ -228,20 +212,14 @@ pub const World = struct {
                 }
             }
             const fo: usize = @intCast(r.x[i] + r.z[i] * @as(i64, voxel.SIZE_X));
-            const m = sim.MindIn{
-                .x = r.x[i],
-                .z = r.z[i],
-                .belief = r.belief[i],
-                .alarm = r.alarm[i],
-            };
-            const obs = sim.Obs{
+            obs[i] = .{
                 .well_threat = self.threat_field[fo],
                 .social = if (social_n > 0) @divTrunc(social_sum, social_n) else 0,
                 .well_dx = self.away_x[fo],
                 .well_dz = self.away_z[fo],
             };
-            steps[i] = sim.tickStep(&ctx, m, obs, voxel.SIZE_X, voxel.SIZE_Z);
         }
+        sim.tickAllRange(tick_alloc, self.seed, self.tick_no, r, obs, voxel.SIZE_X, voxel.SIZE_Z, out, lo, hi);
     }
 
     pub fn tick(self: *World, tick_alloc: std.mem.Allocator) !void {
@@ -262,37 +240,36 @@ pub const World = struct {
         }
 
         // --- pure pass (parallel at scale; deterministic by counter rng) ---
-        const steps = try tick_alloc.alloc(sim.StepOut, N_MINDS);
+        // Output SoA lives in the tick arena; the generated engine loop
+        // does gather→step→scatter per range.
+        const obs = try tick_alloc.alloc(sim.Obs, N_MINDS);
+        var out = try sim.StepOutSoA.alloc(tick_alloc, N_MINDS);
         if (cfg.N_THREADS <= 1 or N_MINDS < 4096) {
-            self.mindRange(r, agg, steps, 0, N_MINDS, tick_alloc);
+            self.worker(r, agg, obs, &out, 0, N_MINDS, tick_alloc);
         } else {
             var threads: [cfg.N_THREADS]std.Thread = undefined;
             const per = (N_MINDS + cfg.N_THREADS - 1) / cfg.N_THREADS;
             for (0..cfg.N_THREADS) |t| {
                 const lo = @min(t * per, N_MINDS);
                 const hi = @min(lo + per, N_MINDS);
-                threads[t] = std.Thread.spawn(.{}, mindRange, .{
-                    self, r, agg, steps, lo, hi, tick_alloc,
+                threads[t] = std.Thread.spawn(.{}, worker, .{
+                    self, r, agg, obs, &out, lo, hi, tick_alloc,
                 }) catch @panic("thread spawn");
             }
             for (0..cfg.N_THREADS) |t| threads[t].join();
         }
 
-        // --- commit: promotion-by-copy out of tick memory ------------------
+        // --- commit: transients harness-side, then GENERATED promotion -----
         var digs = try std.ArrayList(voxel.Edit).initCapacity(tick_alloc, 64);
         const w = self.write();
         for (0..N_MINDS) |i| {
-            if (steps[i].act == sim.ACT_DIG) {
+            if (out.act[i] == sim.ACT_DIG) {
                 try digs.append(tick_alloc, .{ .x = r.x[i], .z = r.z[i] });
             }
-            const out = sim.promote(steps[i]);
-            w.x[i] = out.x;
-            w.z[i] = out.z;
-            w.belief[i] = out.belief;
-            w.alarm[i] = out.alarm;
-            self.last_decisions[i] = out.act;
-            self.act_counts[@intCast(out.act)] += 1;
+            self.last_decisions[i] = out.act[i];
+            self.act_counts[@intCast(out.act[i])] += 1;
         }
+        sim.promoteAll(&out, w, N_MINDS);
         const applied = self.grid.applyDigs(digs.items);
         self.digs_applied += applied;
         self.read_ix = 1 - self.read_ix;

@@ -99,3 +99,117 @@ pub fn tickStep(ctx: *rt.Ctx, m: MindIn, obs: Obs, max_x: i64, max_z: i64) StepO
 pub fn promote(v: StepOut) StepOut {
     return v;
 }
+
+/// SoA buffer for MindIn — engine state, one slice per field.
+/// Allocated by the harness (any allocator); never freed here —
+/// emitted code never frees, the harness owns lifetimes.
+pub const MindInSoA = struct {
+    x: []i64,
+    z: []i64,
+    belief: []i64,
+    alarm: []i64,
+
+    pub fn alloc(a: std.mem.Allocator, n: usize) !MindInSoA {
+        return .{
+            .x = try a.alloc(i64, n),
+            .z = try a.alloc(i64, n),
+            .belief = try a.alloc(i64, n),
+            .alarm = try a.alloc(i64, n),
+        };
+    }
+
+    pub fn get(self: *const MindInSoA, i: usize) MindIn {
+        return .{
+            .x = self.x[i],
+            .z = self.z[i],
+            .belief = self.belief[i],
+            .alarm = self.alarm[i],
+        };
+    }
+
+    pub fn set(self: *MindInSoA, i: usize, v: MindIn) void {
+        self.x[i] = v.x;
+        self.z[i] = v.z;
+        self.belief[i] = v.belief;
+        self.alarm[i] = v.alarm;
+    }
+
+    pub fn copyFrom(self: *MindInSoA, src: *const MindInSoA, n: usize) void {
+        @memcpy(self.x[0..n], src.x[0..n]);
+        @memcpy(self.z[0..n], src.z[0..n]);
+        @memcpy(self.belief[0..n], src.belief[0..n]);
+        @memcpy(self.alarm[0..n], src.alarm[0..n]);
+    }
+};
+
+/// SoA buffer for StepOut — engine state, one slice per field.
+/// Allocated by the harness (any allocator); never freed here —
+/// emitted code never frees, the harness owns lifetimes.
+pub const StepOutSoA = struct {
+    x: []i64,
+    z: []i64,
+    belief: []i64,
+    alarm: []i64,
+    act: []i64,
+
+    pub fn alloc(a: std.mem.Allocator, n: usize) !StepOutSoA {
+        return .{
+            .x = try a.alloc(i64, n),
+            .z = try a.alloc(i64, n),
+            .belief = try a.alloc(i64, n),
+            .alarm = try a.alloc(i64, n),
+            .act = try a.alloc(i64, n),
+        };
+    }
+
+    pub fn get(self: *const StepOutSoA, i: usize) StepOut {
+        return .{
+            .x = self.x[i],
+            .z = self.z[i],
+            .belief = self.belief[i],
+            .alarm = self.alarm[i],
+            .act = self.act[i],
+        };
+    }
+
+    pub fn set(self: *StepOutSoA, i: usize, v: StepOut) void {
+        self.x[i] = v.x;
+        self.z[i] = v.z;
+        self.belief[i] = v.belief;
+        self.alarm[i] = v.alarm;
+        self.act[i] = v.act;
+    }
+
+    pub fn copyFrom(self: *StepOutSoA, src: *const StepOutSoA, n: usize) void {
+        @memcpy(self.x[0..n], src.x[0..n]);
+        @memcpy(self.z[0..n], src.z[0..n]);
+        @memcpy(self.belief[0..n], src.belief[0..n]);
+        @memcpy(self.alarm[0..n], src.alarm[0..n]);
+        @memcpy(self.act[0..n], src.act[0..n]);
+    }
+};
+
+/// Engine range loop over entities [lo, hi): gather from SoA, run
+/// tickStep under the counter-rng policy — rng seeded per
+/// (seed, tick_no, entity index), order-independent, so disjoint
+/// ranges parallelize without losing bit-determinism — and scatter
+/// the result. Record params index per entity; scalars broadcast.
+pub fn tickAllRange(tick: std.mem.Allocator, seed: u64, tick_no: u64, in: *const MindInSoA, obs: []const Obs, max_x: i64, max_z: i64, out: *StepOutSoA, lo: usize, hi: usize) void {
+    var i = lo;
+    while (i < hi) : (i += 1) {
+        var crng = rt.Splitmix64.init(rt.mix64(seed ^ rt.mix64(tick_no +% 1) ^ rt.mix64(@as(u64, i) +% 0x517CC1B727220A95)));
+        var ctx = Ctx{ .tick = tick, .rng = &crng };
+        out.set(i, tickStep(&ctx, in.get(i), obs[i], max_x, max_z));
+    }
+}
+
+/// Commit-boundary promotion: copy world-lifetime fields
+/// (name-matched between StepOut and MindIn) into the next read
+/// buffer. Output-only fields are transients and stay behind in
+/// tick memory.
+pub fn promoteAll(out: *const StepOutSoA, next: *MindInSoA, n: usize) void {
+    @memcpy(next.x[0..n], out.x[0..n]);
+    @memcpy(next.z[0..n], out.z[0..n]);
+    @memcpy(next.belief[0..n], out.belief[0..n]);
+    @memcpy(next.alarm[0..n], out.alarm[0..n]);
+}
