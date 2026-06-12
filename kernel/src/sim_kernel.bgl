@@ -69,3 +69,28 @@
   [alarm :- Int] :- Int
   (let [a (- alarm DIG_RELIEF)]
     (if (< a 0) 0 a)))
+
+(defrecord StepOut [x :- Int z :- Int belief :- Int alarm :- Int act :- Int])
+
+(defn clamp-coord [v :- Int maxv :- Int] :- Int
+  (cond
+    [(< v 0) 0]
+    [(> v (- maxv 1)) (- maxv 1)]
+    [:else v]))
+
+(defn tick-step
+  "One mind, one tick: belief -> decision -> applied movement and dig
+  relief. Returns the world-lifetime next state (+ the act for the
+  harness: hash fold, dig application, render color)."
+  [ctx :- Ctx m :- MindIn obs :- Obs max-x :- Int max-z :- Int] :- StepOut
+  (let [b (belief-update ctx m obs)
+        d (decide ctx m b obs)
+        alarm (if (= (:act d) ACT_DIG)
+                (dig-relief (:alarm b))
+                (:alarm b))]
+    (->StepOut (clamp-coord (+ (:x m) (:dx d)) max-x)
+               (clamp-coord (+ (:z m) (:dz d)) max-z)
+               (:belief b)
+               alarm
+               (:act d))))
+

@@ -74,3 +74,28 @@ pub fn digRelief(alarm: i64) i64 {
     const a = (alarm - DIG_RELIEF);
     return (if ((a < 0)) 0 else a);
 }
+
+pub const StepOut = struct {
+    x: i64,
+    z: i64,
+    belief: i64,
+    alarm: i64,
+    act: i64,
+};
+
+pub fn clampCoord(v: i64, maxv: i64) i64 {
+    return (if ((v < 0)) 0 else if ((v > (maxv - 1))) (maxv - 1) else v);
+}
+
+pub fn tickStep(ctx: *rt.Ctx, m: MindIn, obs: Obs, max_x: i64, max_z: i64) StepOut {
+    const b = beliefUpdate(ctx, m, obs);
+    const d = decide(ctx, m, b, obs);
+    const alarm = (if ((d.act == ACT_DIG)) digRelief(b.alarm) else b.alarm);
+    return StepOut{ .x = clampCoord((m.x + d.dx), max_x), .z = clampCoord((m.z + d.dz), max_z), .belief = b.belief, .alarm = alarm, .act = d.act };
+}
+
+/// Commit-boundary copy: world state leaves tick memory by
+/// value (escape-checked slice-free in v1).
+pub fn promote(v: StepOut) StepOut {
+    return v;
+}

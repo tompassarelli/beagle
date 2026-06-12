@@ -114,10 +114,6 @@ pub const World = struct {
         @memcpy(dst.alarm, src.alarm);
     }
 
-    fn clampCoord(v: i64, max: i64) i64 {
-        return @max(0, @min(v, max - 1));
-    }
-
     /// Ambient dread at (x,z): max over wells of radius falloff, 0..1000.
     fn wellThreat(self: *const World, x: i64, z: i64) i64 {
         var best: i64 = 0;
@@ -161,11 +157,12 @@ pub const World = struct {
         const r = self.read();
         var ctx = sim.Ctx{ .tick = tick_alloc, .rng = &self.rng };
 
-        const beliefs = try tick_alloc.alloc(sim.BeliefOut, N_MINDS);
-        const decisions = try tick_alloc.alloc(sim.Decision, N_MINDS);
+        const steps = try tick_alloc.alloc(sim.StepOut, N_MINDS);
         var digs = try std.ArrayList(voxel.Edit).initCapacity(tick_alloc, 16);
 
-        // --- belief pass (pure) -------------------------------------------
+        // --- pure pass: belief -> decision -> applied move, per mind -------
+        // (all inside emitted sim.tickStep; observation gathering stays
+        // harness work)
         for (0..N_MINDS) |i| {
             const m = sim.MindIn{
                 .x = r.x[i],
@@ -173,7 +170,6 @@ pub const World = struct {
                 .belief = r.belief[i],
                 .alarm = r.alarm[i],
             };
-            // observation gathering is harness work
             var social_sum: i64 = 0;
             var social_n: i64 = 0;
             for (0..N_MINDS) |j| {
@@ -191,26 +187,22 @@ pub const World = struct {
                 .well_dx = away.dx,
                 .well_dz = away.dz,
             };
-            beliefs[i] = sim.beliefUpdate(&ctx, m, obs);
-            // decision pass uses the same observation; kept in one loop
-            // so rng draws stay in strict mind order.
-            decisions[i] = sim.decide(&ctx, m, beliefs[i], obs);
+            steps[i] = sim.tickStep(&ctx, m, obs, voxel.SIZE_X, voxel.SIZE_Z);
         }
 
-        // --- commit --------------------------------------------------------
+        // --- commit: promotion-by-copy out of tick memory -------------------
         const w = self.write();
         for (0..N_MINDS) |i| {
-            var alarm = beliefs[i].alarm;
-            if (decisions[i].act == sim.ACT_DIG) {
+            if (steps[i].act == sim.ACT_DIG) {
                 try digs.append(tick_alloc, .{ .x = r.x[i], .z = r.z[i] });
-                alarm = sim.digRelief(alarm);
             }
-            w.x[i] = clampCoord(r.x[i] + decisions[i].dx, voxel.SIZE_X);
-            w.z[i] = clampCoord(r.z[i] + decisions[i].dz, voxel.SIZE_Z);
-            w.belief[i] = beliefs[i].belief;
-            w.alarm[i] = alarm;
-            self.last_decisions[i] = decisions[i].act;
-            self.act_counts[@intCast(decisions[i].act)] += 1;
+            const out = sim.promote(steps[i]);
+            w.x[i] = out.x;
+            w.z[i] = out.z;
+            w.belief[i] = out.belief;
+            w.alarm[i] = out.alarm;
+            self.last_decisions[i] = out.act;
+            self.act_counts[@intCast(out.act)] += 1;
         }
         const applied = self.grid.applyDigs(digs.items);
         self.digs_applied += applied;

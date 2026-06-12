@@ -89,3 +89,28 @@ nil
   "Digging vents alarm." [^long alarm]
   ^{:line 71 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (let [a ^{:line 71 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (- alarm DIG_RELIEF)]
   ^{:line 72 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (if ^{:line 72 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (< a 0) 0 a)))
+
+^{:line 74 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (defrecord StepOut [x z belief alarm act])
+
+(defn stepout-x [r] (:x r))
+
+(defn stepout-z [r] (:z r))
+
+(defn stepout-belief [r] (:belief r))
+
+(defn stepout-alarm [r] (:alarm r))
+
+(defn stepout-act [r] (:act r))
+
+^{:line 76 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (defn ^long clamp-coord [^long v ^long maxv]
+  ^{:line 77 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (cond
+  ^{:line 78 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (< v 0) 0
+  ^{:line 79 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (> v ^{:line 79 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (- maxv 1)) ^{:line 79 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (- maxv 1)
+  :else v))
+
+^{:line 82 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (defn ^StepOut tick-step
+  "One mind, one tick: belief -> decision -> applied movement and dig\n  relief. Returns the world-lifetime next state (+ the act for the\n  harness: hash fold, dig application, render color)." [^Ctx ctx ^MindIn m ^Obs obs ^long max-x ^long max-z]
+  ^{:line 87 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (let [b ^{:line 87 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (belief-update ctx m obs)
+   d ^{:line 88 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (decide ctx m b obs)
+   alarm ^{:line 89 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (if ^{:line 89 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (= ^{:line 89 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:act d) ACT_DIG) ^{:line 90 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (dig-relief ^{:line 90 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:alarm b)) ^{:line 91 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:alarm b))]
+  ^{:line 92 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (->StepOut ^{:line 92 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (clamp-coord ^{:line 92 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (+ ^{:line 92 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:x m) ^{:line 92 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:dx d)) max-x) ^{:line 93 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (clamp-coord ^{:line 93 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (+ ^{:line 93 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:z m) ^{:line 93 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:dz d)) max-z) ^{:line 94 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:belief b) alarm ^{:line 96 :file "/home/tom/code/beagle/kernel/src/sim_kernel.bgl"} (:act d))))

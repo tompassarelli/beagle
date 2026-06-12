@@ -38,9 +38,8 @@ fn runDif(n: u64, seed: u64) !void {
             .well_dx = @as(i64, @intCast(gen.below(3))) - 1,
             .well_dz = @as(i64, @intCast(gen.below(3))) - 1,
         };
-        const b = sim.beliefUpdate(&ctx, m, obs);
-        const d = sim.decide(&ctx, m, b, obs);
-        std.debug.print("{d} {d} {d} {d} {d}\n", .{ b.belief, b.alarm, d.act, d.dx, d.dz });
+        const out = sim.promote(sim.tickStep(&ctx, m, obs, 64, 64));
+        std.debug.print("{d} {d} {d} {d} {d}\n", .{ out.x, out.z, out.belief, out.alarm, out.act });
     }
 }
 

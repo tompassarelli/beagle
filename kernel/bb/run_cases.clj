@@ -21,6 +21,5 @@
                          (rt/rng-below gctx 1001)
                          (- (rt/rng-below gctx 3) 1)
                          (- (rt/rng-below gctx 3) 1))
-          b (sim/belief-update ctx m obs)
-          d (sim/decide ctx m b obs)]
-      (println (:belief b) (:alarm b) (:act d) (:dx d) (:dz d)))))
+          out (sim/tick-step ctx m obs 64 64)]
+      (println (:x out) (:z out) (:belief out) (:alarm out) (:act out)))))
