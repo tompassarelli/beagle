@@ -1,0 +1,3 @@
+(ns g)
+(defn doubled-or-zero [v :- Int?] :- Int
+  (if (some? v) (* v 2) 0))

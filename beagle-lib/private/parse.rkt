@@ -220,6 +220,7 @@
     [(regexp-match? #rx"beagle/js"     lang-line) 'js]
     [(regexp-match? #rx"beagle/py"     lang-line) 'py]
     [(regexp-match? #rx"beagle/rkt"    lang-line) 'rkt]
+    [(regexp-match? #rx"beagle/zig"    lang-line) 'zig]
     ;; beagle/scheme — Cyclone target, deferred pending Phase 0 runtime lib
     [(regexp-match? #rx"beagle/scheme" lang-line) 'scheme]
     [else #f]))
@@ -503,7 +504,7 @@
 ;; (which must be a sequence — bare list, or #%brackets/#%map/#%set with the
 ;; head dropped) into the surrounding container in place of the marker.
 
-(define READER-COND-TAGS '(clj cljs nix default))
+(define READER-COND-TAGS '(clj cljs nix zig default))
 
 ;; Fast structural scan — returns #t iff the datum tree contains a
 ;; reader-conditional or reader-conditional-splice marker. The common case
@@ -783,9 +784,9 @@
 
       [(list 'define-target (? symbol? t))
        (when target-set? (raise-parse-error 'duplicate-meta "duplicate define-target"))
-       (unless (memq t '(clj cljs js nix py sql rkt))
+       (unless (memq t '(clj cljs js nix py sql rkt zig))
          (raise-parse-error 'bad-meta-value
-                            "unknown target: ~a (expected clj, cljs, js, nix, py, sql, or rkt)" t))
+                            "unknown target: ~a (expected clj, cljs, js, nix, py, sql, rkt, or zig)" t))
        (set! target t)
        (set! target-set? #t)]
 

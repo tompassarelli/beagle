@@ -13,7 +13,8 @@
          ;; startup adds ~0.3s of cold-load and keeps the structural
          ;; tests on the active path without env-var gymnastics.
          "emit-clj.rkt"
-         "emit-cljs.rkt")
+         "emit-cljs.rkt"
+         "emit-zig.rkt")
 
 (define-runtime-path dormant-dir "dormant")
 

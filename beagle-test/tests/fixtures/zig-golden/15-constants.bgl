@@ -1,0 +1,5 @@
+(ns g)
+(def LIMIT :- Int 100)
+(def SCALE :- Float 2.5)
+(def ENABLED :- Bool true)
+(def NAME :- String "kernel")

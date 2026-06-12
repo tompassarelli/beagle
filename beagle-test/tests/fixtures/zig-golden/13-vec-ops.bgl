@@ -1,0 +1,4 @@
+(ns g)
+(defn extend-and-count [ctx :- Ctx xs :- (Vec Int) x :- Int] :- Int
+  (let [ys (conj ctx xs x)]
+    (+ (count ys) (nth ys 0))))

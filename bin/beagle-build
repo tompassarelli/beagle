@@ -33,6 +33,7 @@ case "$src" in
     *.bsql)  ext="sql" ;;
     *.bpy)   ext="py" ;;
     *.bclj)  ext="clj" ;;
+    *.bzig)  ext="zig" ;;
     *)
         # Legacy .bgl/.rkt: detect from file content
         if grep -qE '^\(define-target[[:space:]]+cljs\)' "$src" 2>/dev/null; then
@@ -46,6 +47,9 @@ case "$src" in
         elif grep -qE '^\(define-target[[:space:]]+nix\)' "$src" 2>/dev/null || \
              grep -qE '^#lang beagle/nix' "$src" 2>/dev/null; then
             ext="nix"
+        elif grep -qE '^\(define-target[[:space:]]+zig\)' "$src" 2>/dev/null || \
+             grep -qE '^#lang beagle/zig' "$src" 2>/dev/null; then
+            ext="zig"
         fi
         ;;
 esac

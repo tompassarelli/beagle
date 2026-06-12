@@ -83,7 +83,10 @@
              ;; runs the emitted clj via bb (Babashka). cljs is covered by the
              ;; shared emit-clj backend; no separate emit-cljs.rkt test exists.
              "emit.rkt"                 ; emit-clj structural
-             "emit-clj-behavioral.rkt")) ; requires bb (Babashka)
+             "emit-clj-behavioral.rkt"  ; requires bb (Babashka)
+             ;; Zig backend (thread 20260612232001) — snapshot compile
+             ;; checks self-skip when zig isn't on PATH.
+             "emit-zig.rkt"))
 
   (demoted . (;; behavioral runs that hit external interpreters
               "emit-js-behavioral.rkt")) ; requires bun
