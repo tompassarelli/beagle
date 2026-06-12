@@ -775,6 +775,15 @@
              (list 'println (list ':y (list '->Pt 1 2))))
        "" "2")
 
+     ;; Backslash regex literals must survive to bb (2026-06-12: emitted
+     ;; (re-pattern "\d{4}") — invalid escapes; crashed at read).
+     (check-clj-output "backslash regex literal round-trips and matches"
+       (list (list 'println
+                   (list 'second
+                         (list 're-find (list '#%regex "(\\d{4})-(\\d{2})")
+                               "on 2026-06-12 ok"))))
+       "" "2026")
+
      (void))
 
 )))

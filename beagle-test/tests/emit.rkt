@@ -135,15 +135,24 @@
 
 ;; --- regex literal ---------------------------------------------------------
 
-(test-case "regex literal emits as Clojure regex"
+;; Regex literals must emit as native #"..." (2026-06-12: the previous
+;; (re-pattern "...") lowering produced invalid string escapes for any
+;; pattern containing backslashes — #"\d" emitted (re-pattern "\d")).
+(test-case "regex literal emits as native Clojure regex literal"
   (define out (compile '(def x (#%regex "\\s+"))))
-  (check-true (matches? #rx"\\(re-pattern \"\\\\s\\+\"\\)" out)))
+  (check-true (matches? #rx"#\"\\\\s\\+\"" out))
+  (check-false (matches? #rx"re-pattern" out)))
 
 (test-case "regex in function call emits correctly"
   (define out (compile '(require clojure.string :as str)
                        '(def x (str/split "a b" (#%regex "\\s+")))))
   (check-true (matches? #rx"str/split" out))
-  (check-true (matches? #rx"\\(re-pattern \"\\\\s\\+\"\\)" out)))
+  (check-true (matches? #rx"#\"\\\\s\\+\"" out)))
+
+(test-case "regex literal gets no ^{:line} metadata (Pattern is not IObj)"
+  ;; Attaching metadata to a regex literal crashes the Clojure reader.
+  (define out (compile '(def x (#%regex "\\d{4}"))))
+  (check-false (matches? #rx"\\^\\{[^}]*\\} *#\"" out)))
 
 ;; --- declare-extern does not emit code ------------------------------------
 

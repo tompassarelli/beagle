@@ -4,6 +4,7 @@
          (for-syntax racket/base)
          beagle/private/parse
          beagle/private/check
+         beagle/private/blame
          beagle/private/types)
 
 ;; =============================================================================
@@ -1136,3 +1137,24 @@
 
 (check-ok "target-case passes type check"
   '(def x :- Any (target-case :clj "clj" :js "js" :nix "nix")))
+
+;; =============================================================================
+;; 2026-06-12 regressions
+;; =============================================================================
+
+;; Semantic analysis (blame.rkt extract-ops) crashed with a
+;; symbol->string contract violation on map-destructure let bindings.
+(test-case "semantic analysis survives map-destructure let bindings"
+  (define prog
+    (parse-program
+     (map (lambda (f) (datum->syntax #f f))
+          (list '(define-target clj)
+                (list 'defn 'g (cons '#%brackets (list 'opts))
+                      (list 'let (list '#%brackets
+                                       (list '#%map ':keys (cons '#%brackets (list 'a 'b)))
+                                       'opts)
+                            (list 'println 'a 'b)))))))
+  (check-not-exn
+   (lambda ()
+     (parameterize ([current-error-port (open-output-string)])
+       (run-semantic-analysis! prog)))))

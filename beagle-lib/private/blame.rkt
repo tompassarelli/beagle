@@ -121,7 +121,17 @@
        (for ([a (in-list args)]) (go a ctx agg?))]
       [(let-form bindings body)
        (for ([b (in-list bindings)])
-         (define bname (if (let-binding? b) (symbol->string (let-binding-name b)) "?"))
+         ;; Binding name may be a destructure pattern, not a bare symbol
+         ;; (crashed on {:keys [...]} let bindings before 2026-06-12).
+         (define bname
+           (cond
+             [(and (let-binding? b) (symbol? (let-binding-name b)))
+              (symbol->string (let-binding-name b))]
+             [(let-binding? b)
+              (string-join (map symbol->string
+                                (destructure-bound-names (let-binding-name b)))
+                           "+")]
+             [else "?"]))
          (define bval (if (let-binding? b) (let-binding-value b) b))
          (go bval (format "~a/~a" ctx bname) agg?))
        (for ([b (in-list body)]) (go b ctx agg?))]

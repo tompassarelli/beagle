@@ -95,7 +95,12 @@
 (define (metadatable? s)
   (and (> (string-length s) 0)
        (let ([c (string-ref s 0)])
-         (or (char=? c #\() (char=? c #\[) (char=? c #\{) (char=? c #\#)))))
+         (or (char=? c #\() (char=? c #\[) (char=? c #\{)
+             ;; #{...} sets carry metadata; #"..." regex literals are
+             ;; java.util.regex.Pattern — not IObj, meta crashes at read.
+             (and (char=? c #\#)
+                  (not (and (> (string-length s) 1)
+                            (char=? (string-ref s 1) #\"))))))))
 
 ;; Prepend Clojure metadata to a raw emission string when the source-location
 ;; table has an entry for the AST node `e` and the emission starts with a
@@ -404,7 +409,10 @@
          [(or (bracketed? d) (map-tagged? d) (set-tagged? d))
           (datum->clj d)]
          [else (format "'~a" (datum->clj d))]))]
-    [(regex-lit? e)     (format "(re-pattern \"~a\")" (regex-lit-pattern e))]
+    ;; Native regex literal — the pattern is reproduced verbatim (the
+    ;; reader preserved backslashes raw). (re-pattern "...") would need
+    ;; string-escaping and broke every pattern containing \d, \w, etc.
+    [(regex-lit? e)     (format "#\"~a\"" (regex-lit-pattern e))]
     [(vec-form? e)
      (format "[~a]"
              (string-join (map emit-expr (vec-form-items e)) " "))]
