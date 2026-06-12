@@ -107,12 +107,15 @@ Each system gets, generated from its signature:
   a per-system LANE (FNV-1a of the system name folded into the
   counter mix) so two systems stepping the same index on the same
   tick draw provably distinct streams.
-- **Lifecycle** — if the output record carries `alive :- Bool` (the
-  entity's survival verdict, decided by its own step), promotion
-  becomes `<name>CompactAll`: order-preserving copy of survivors,
-  returns the new live count, the dead stay behind in tick memory.
-  Otherwise `<name>PromoteAll`: bulk memcpy of name-matched
-  world-lifetime fields; output-only transients stay behind.
+- **Lifecycle** — verdict fields on the output record, decided by the
+  entity's own step. `alive :- Bool`: promotion becomes
+  `<name>CompactAll`, an order-preserving copy of survivors returning
+  the new live count (the dead stay behind in tick memory).
+  `spawn :- Bool` (requires alive): the compaction appends one child
+  per living spawner at the parent's next state, capped by the buffer
+  — the buffer max IS the carrying capacity. Without verdicts:
+  `<name>PromoteAll`, bulk memcpy of name-matched world-lifetime
+  fields.
 
 Convention violations (param 0 not Ctx is just an ordinary fn; but a
 conforming system with a non-record entity, non-scalar fields, name
@@ -137,12 +140,14 @@ Two emergent regimes from the same two beagle functions (seed
 
 | profile | world | outcome |
 |---|---|---|
-| small | 300 minds, 6 wolves, 64² | wolves eat 62, prey thins, ALL wolves starve by t=1000; flee acts collapse 67k→12k after the last wolf dies |
-| big | 200k minds, 1024 wolves, 512² | density inverts it: 1017/1024 wolves thrive, minds collapse 200k→26k in 500 ticks |
+| small, no births (v5) | 300 minds, 6 wolves, 64² | wolves eat 62, prey thins, ALL wolves starve by t=1000 |
+| big, no births (v5) | 200k minds, 1024 wolves, 512² | density inverts it: 1017/1024 wolves thrive, minds collapse 200k→26k in 500 ticks |
+| small, births (v6) | same | population recovers to 300/300 (carrying capacity); wolves still starve out by t=5000 |
+| big, births (v6) | same | SUSTAINED: 200k/200k minds, 1021/1024 wolves — predation and reproduction in balance at 200k entities |
 
-Famine follows feast in the small world; apocalypse in the big one.
-Balance is content, not engine — tune the constants in
-sim_kernel.bgl and re-baseline.
+Calm, unhunted minds raise children (1-in-64 per calm tick); sated
+wolves whelp (energy ≥ 900, 1-in-128). Balance is content, not
+engine — tune the constants in sim_kernel.bgl and re-baseline.
 
 ## Phase 3 benchmark — minds per millisecond (same beagle module)
 

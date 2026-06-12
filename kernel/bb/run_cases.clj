@@ -26,7 +26,7 @@
                          (- (rt/rng-below gctx 3) 1)
                          (rt/rng-below gctx 2))
           out (sim/tick-step ctx m obs 64 64)]
-      (println (:x out) (:z out) (:belief out) (:alarm out) (:act out) (if (:alive out) 1 0))))
+      (println (:x out) (:z out) (:belief out) (:alarm out) (:act out) (if (:alive out) 1 0) (if (:spawn out) 1 0))))
   ;; wolf-step cases continue the same generator stream
   (dotimes [_ n]
     (let [w (sim/->WolfIn (rt/rng-below gctx 64)
@@ -38,4 +38,4 @@
                               (- (rt/rng-below gctx 3) 1)
                               (rt/rng-below gctx 4))
           wout (sim/wolf-step ctx w wobs 64 64)]
-      (println (:x wout) (:z wout) (:energy wout) (:fed wout) (:howl wout) (if (:alive wout) 1 0)))))
+      (println (:x wout) (:z wout) (:energy wout) (:fed wout) (:howl wout) (if (:alive wout) 1 0) (if (:spawn wout) 1 0)))))

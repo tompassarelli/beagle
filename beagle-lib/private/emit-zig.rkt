@@ -678,33 +678,76 @@
                              #t))))
     p))
 
-;; Lifecycle convention: an `alive :- Bool` field on the OUTPUT record
-;; is the entity's survival verdict, decided by its own step. Promotion
+;; Lifecycle convention: verdict fields on the OUTPUT record, decided
+;; by the entity's own step. `alive :- Bool` — survival; promotion
 ;; becomes order-preserving compaction returning the new live count.
-;; `alive` belongs to the output only — it's a verdict, not state.
-(define (system-alive-field entry ename oname)
-  (define o-alive
-    (findf (lambda (p) (eq? (param-name p) 'alive))
+;; `spawn :- Bool` — birth; the compaction appends one child per
+;; living spawner at the parent's next state, capped by the buffer.
+;; Verdicts belong to the output only — they are not state.
+(define (system-verdict-field entry ename oname field-sym what)
+  (define o-f
+    (findf (lambda (p) (eq? (param-name p) field-sym))
            (hash-ref (current-records) oname)))
-  (define e-alive
-    (findf (lambda (p) (eq? (param-name p) 'alive))
+  (define e-f
+    (findf (lambda (p) (eq? (param-name p) field-sym))
            (hash-ref (current-records) ename)))
-  (when (and o-alive e-alive)
+  (when (and o-f e-f)
     (unsupported (format "~a lifecycle" (defn-form-name entry))
-                 (format "alive is the survival verdict and belongs to the output record only — remove it from ~a"
-                         ename)))
-  (when (and o-alive
-             (not (and (type-prim? (param-type o-alive))
-                       (eq? (type-prim-name (param-type o-alive)) 'Bool))))
+                 (format "~a is the ~a verdict and belongs to the output record only — remove it from ~a"
+                         field-sym what ename)))
+  (when (and o-f
+             (not (and (type-prim? (param-type o-f))
+                       (eq? (type-prim-name (param-type o-f)) 'Bool))))
     (unsupported (format "~a lifecycle" (defn-form-name entry))
-                 (format "~a.alive must be Bool — it is the survival verdict" oname)))
-  o-alive)
+                 (format "~a.~a must be Bool — it is the ~a verdict" oname field-sym what)))
+  o-f)
+
+(define (system-alive-field entry ename oname)
+  (define alive (system-verdict-field entry ename oname 'alive "survival"))
+  (define spawn (system-verdict-field entry ename oname 'spawn "birth"))
+  (when (and spawn (not alive))
+    (unsupported (format "~a lifecycle" (defn-form-name entry))
+                 "spawn requires alive — lifecycle verdicts travel together"))
+  (and alive (list alive spawn)))
 
 (define (emit-system-promote entry ename oname)
   (define fname (fn-ident (defn-form-name entry)))
   (define common (system-promote-fields entry ename oname))
+  (define lifecycle (system-alive-field entry ename oname))
   (cond
-    [(system-alive-field entry ename oname)
+    [(and lifecycle (cadr lifecycle))
+     ;; alive + spawn: compaction with births
+     (string-append
+      "/// Commit-boundary COMPACTION with births: survivors are copied\n"
+      "/// (name-matched fields, index order preserved); then each living\n"
+      "/// spawner appends one child at the parent's next state, capped by\n"
+      "/// the buffer. The dead stay behind in tick memory. Returns the\n"
+      "/// new live count.\n"
+      (format "pub fn ~aCompactAll(out: *const ~a, next: *~a, n: usize, cap: usize) usize {\n"
+              fname (soa-name oname) (soa-name ename))
+      "    var w: usize = 0;\n"
+      "    var i: usize = 0;\n"
+      "    while (i < n) : (i += 1) {\n"
+      "        if (!out.alive[i]) continue;\n"
+      (string-join
+       (for/list ([p (in-list common)])
+         (format "        next.~a[w] = out.~a[i];\n"
+                 (ident (param-name p)) (ident (param-name p))))
+       "")
+      "        w += 1;\n"
+      "    }\n"
+      "    i = 0;\n"
+      "    while (i < n) : (i += 1) {\n"
+      "        if (!out.spawn[i] or !out.alive[i] or w >= cap) continue;\n"
+      (string-join
+       (for/list ([p (in-list common)])
+         (format "        next.~a[w] = out.~a[i];\n"
+                 (ident (param-name p)) (ident (param-name p))))
+       "")
+      "        w += 1;\n"
+      "    }\n"
+      "    return w;\n}")]
+    [lifecycle
      (string-append
       "/// Commit-boundary COMPACTION: entities whose alive verdict\n"
       "/// survives are copied (name-matched fields, index order\n"

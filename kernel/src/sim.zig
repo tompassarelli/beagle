@@ -88,6 +88,7 @@ pub const StepOut = struct {
     alarm: i64,
     act: i64,
     alive: bool,
+    spawn: bool,
 };
 
 pub fn clampCoord(v: i64, maxv: i64) i64 {
@@ -99,7 +100,9 @@ pub fn tickStep(ctx: *rt.Ctx, m: MindIn, obs: Obs, max_x: i64, max_z: i64) StepO
     const d = decide(ctx, m, b, obs);
     const alarm = (if ((d.act == ACT_DIG)) digRelief(b.alarm) else b.alarm);
     const eaten = ((obs.wolf_here > 0) and (rt.rng_below(ctx, 4) == 0));
-    return StepOut{ .x = clampCoord((m.x + d.dx), max_x), .z = clampCoord((m.z + d.dz), max_z), .belief = b.belief, .alarm = alarm, .act = d.act, .alive = (!eaten) };
+    const calm = ((alarm == 0) and (b.belief < 60));
+    const born = (calm and (!eaten) and (rt.rng_below(ctx, 64) == 0));
+    return StepOut{ .x = clampCoord((m.x + d.dx), max_x), .z = clampCoord((m.z + d.dz), max_z), .belief = b.belief, .alarm = alarm, .act = d.act, .alive = (!eaten), .spawn = born };
 }
 
 pub const WolfIn = struct {
@@ -123,6 +126,7 @@ pub const WolfOut = struct {
     fed: i64,
     howl: i64,
     alive: bool,
+    spawn: bool,
 };
 
 pub const WOLF_DRAIN: i64 = 2;
@@ -143,7 +147,7 @@ pub fn wolfStep(ctx: *rt.Ctx, w: WolfIn, obs: WolfObs, max_x: i64, max_z: i64) W
     const energy2 = (if (feeding) @min(1000, (energy + WOLF_FEED_GAIN)) else energy);
     const fed = (if (feeding) 0 else (w.fed + 1));
     const howl = (if ((hungry and (fed > WOLF_HOWL_AFTER) and (rt.rng_below(ctx, 32) == 0))) @as(i64, 1) else 0);
-    return WolfOut{ .x = clampCoord((w.x + dx), max_x), .z = clampCoord((w.z + dz), max_z), .energy = energy2, .fed = fed, .howl = howl, .alive = (energy2 > 0) };
+    return WolfOut{ .x = clampCoord((w.x + dx), max_x), .z = clampCoord((w.z + dz), max_z), .energy = energy2, .fed = fed, .howl = howl, .alive = (energy2 > 0), .spawn = ((energy2 >= 900) and (rt.rng_below(ctx, 128) == 0)) };
 }
 
 /// SoA buffer for MindIn — engine state, one slice per field.
@@ -198,6 +202,7 @@ pub const StepOutSoA = struct {
     alarm: []i64,
     act: []i64,
     alive: []bool,
+    spawn: []bool,
 
     pub fn alloc(a: std.mem.Allocator, n: usize) !StepOutSoA {
         return .{
@@ -207,6 +212,7 @@ pub const StepOutSoA = struct {
             .alarm = try a.alloc(i64, n),
             .act = try a.alloc(i64, n),
             .alive = try a.alloc(bool, n),
+            .spawn = try a.alloc(bool, n),
         };
     }
 
@@ -218,6 +224,7 @@ pub const StepOutSoA = struct {
             .alarm = self.alarm[i],
             .act = self.act[i],
             .alive = self.alive[i],
+            .spawn = self.spawn[i],
         };
     }
 
@@ -228,6 +235,7 @@ pub const StepOutSoA = struct {
         self.alarm[i] = v.alarm;
         self.act[i] = v.act;
         self.alive[i] = v.alive;
+        self.spawn[i] = v.spawn;
     }
 
     pub fn copyFrom(self: *StepOutSoA, src: *const StepOutSoA, n: usize) void {
@@ -237,6 +245,7 @@ pub const StepOutSoA = struct {
         @memcpy(self.alarm[0..n], src.alarm[0..n]);
         @memcpy(self.act[0..n], src.act[0..n]);
         @memcpy(self.alive[0..n], src.alive[0..n]);
+        @memcpy(self.spawn[0..n], src.spawn[0..n]);
     }
 };
 
@@ -292,6 +301,7 @@ pub const WolfOutSoA = struct {
     fed: []i64,
     howl: []i64,
     alive: []bool,
+    spawn: []bool,
 
     pub fn alloc(a: std.mem.Allocator, n: usize) !WolfOutSoA {
         return .{
@@ -301,6 +311,7 @@ pub const WolfOutSoA = struct {
             .fed = try a.alloc(i64, n),
             .howl = try a.alloc(i64, n),
             .alive = try a.alloc(bool, n),
+            .spawn = try a.alloc(bool, n),
         };
     }
 
@@ -312,6 +323,7 @@ pub const WolfOutSoA = struct {
             .fed = self.fed[i],
             .howl = self.howl[i],
             .alive = self.alive[i],
+            .spawn = self.spawn[i],
         };
     }
 
@@ -322,6 +334,7 @@ pub const WolfOutSoA = struct {
         self.fed[i] = v.fed;
         self.howl[i] = v.howl;
         self.alive[i] = v.alive;
+        self.spawn[i] = v.spawn;
     }
 
     pub fn copyFrom(self: *WolfOutSoA, src: *const WolfOutSoA, n: usize) void {
@@ -331,6 +344,7 @@ pub const WolfOutSoA = struct {
         @memcpy(self.fed[0..n], src.fed[0..n]);
         @memcpy(self.howl[0..n], src.howl[0..n]);
         @memcpy(self.alive[0..n], src.alive[0..n]);
+        @memcpy(self.spawn[0..n], src.spawn[0..n]);
     }
 };
 
@@ -349,15 +363,25 @@ pub fn tickStepAllRange(tick: std.mem.Allocator, seed: u64, tick_no: u64, in: *c
     }
 }
 
-/// Commit-boundary COMPACTION: entities whose alive verdict
-/// survives are copied (name-matched fields, index order
-/// preserved) into the next read buffer; the dead stay behind
-/// in tick memory. Returns the new live count.
-pub fn tickStepCompactAll(out: *const StepOutSoA, next: *MindInSoA, n: usize) usize {
+/// Commit-boundary COMPACTION with births: survivors are copied
+/// (name-matched fields, index order preserved); then each living
+/// spawner appends one child at the parent's next state, capped by
+/// the buffer. The dead stay behind in tick memory. Returns the
+/// new live count.
+pub fn tickStepCompactAll(out: *const StepOutSoA, next: *MindInSoA, n: usize, cap: usize) usize {
     var w: usize = 0;
     var i: usize = 0;
     while (i < n) : (i += 1) {
         if (!out.alive[i]) continue;
+        next.x[w] = out.x[i];
+        next.z[w] = out.z[i];
+        next.belief[w] = out.belief[i];
+        next.alarm[w] = out.alarm[i];
+        w += 1;
+    }
+    i = 0;
+    while (i < n) : (i += 1) {
+        if (!out.spawn[i] or !out.alive[i] or w >= cap) continue;
         next.x[w] = out.x[i];
         next.z[w] = out.z[i];
         next.belief[w] = out.belief[i];
@@ -382,15 +406,25 @@ pub fn wolfStepAllRange(tick: std.mem.Allocator, seed: u64, tick_no: u64, in: *c
     }
 }
 
-/// Commit-boundary COMPACTION: entities whose alive verdict
-/// survives are copied (name-matched fields, index order
-/// preserved) into the next read buffer; the dead stay behind
-/// in tick memory. Returns the new live count.
-pub fn wolfStepCompactAll(out: *const WolfOutSoA, next: *WolfInSoA, n: usize) usize {
+/// Commit-boundary COMPACTION with births: survivors are copied
+/// (name-matched fields, index order preserved); then each living
+/// spawner appends one child at the parent's next state, capped by
+/// the buffer. The dead stay behind in tick memory. Returns the
+/// new live count.
+pub fn wolfStepCompactAll(out: *const WolfOutSoA, next: *WolfInSoA, n: usize, cap: usize) usize {
     var w: usize = 0;
     var i: usize = 0;
     while (i < n) : (i += 1) {
         if (!out.alive[i]) continue;
+        next.x[w] = out.x[i];
+        next.z[w] = out.z[i];
+        next.energy[w] = out.energy[i];
+        next.fed[w] = out.fed[i];
+        w += 1;
+    }
+    i = 0;
+    while (i < n) : (i += 1) {
+        if (!out.spawn[i] or !out.alive[i] or w >= cap) continue;
         next.x[w] = out.x[i];
         next.z[w] = out.z[i];
         next.energy[w] = out.energy[i];

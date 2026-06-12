@@ -81,7 +81,7 @@
     (if (< a 0) 0 a)))
 
 (defrecord StepOut [x :- Int z :- Int belief :- Int alarm :- Int act :- Int
-                    alive :- Bool])
+                    alive :- Bool spawn :- Bool])
 
 (defn clamp-coord [v :- Int maxv :- Int] :- Int
   (cond
@@ -91,9 +91,10 @@
 
 (defn tick-step
   "One mind, one tick: belief -> decision -> applied movement, dig
-  relief, and the survival verdict — a wolf standing HERE eats you
-  one time in four. Returns world-lifetime next state (+ act and
-  alive for the harness: hash fold, digs, render, compaction)."
+  relief, and the lifecycle verdicts: a wolf standing HERE eats you
+  one time in four; a calm, unhunted mind occasionally raises a
+  child. Returns world-lifetime next state (+ act, alive, spawn for
+  the harness: hash fold, digs, render, compaction-with-births)."
   [ctx :- Ctx m :- MindIn obs :- Obs max-x :- Int max-z :- Int] :- StepOut
   (let [b (belief-update ctx m obs)
         d (decide ctx m b obs)
@@ -101,13 +102,16 @@
                 (dig-relief (:alarm b))
                 (:alarm b))
         eaten (and (> (:wolf_here obs) 0)
-                   (= (kernel.rt/rng-below ctx 4) 0))]
+                   (= (kernel.rt/rng-below ctx 4) 0))
+        calm (and (= alarm 0) (< (:belief b) 60))
+        born (and calm (not eaten) (= (kernel.rt/rng-below ctx 64) 0))]
     (->StepOut (clamp-coord (+ (:x m) (:dx d)) max-x)
                (clamp-coord (+ (:z m) (:dz d)) max-z)
                (:belief b)
                alarm
                (:act d)
-               (not eaten))))
+               (not eaten)
+               born)))
 
 (comment
   "Second archetype: wolves. They hunt by scent — the per-cell alarm
@@ -120,7 +124,7 @@
 (defrecord WolfIn [x :- Int z :- Int energy :- Int fed :- Int])
 (defrecord WolfObs [scent :- Int prey_dx :- Int prey_dz :- Int prey_near :- Int])
 (defrecord WolfOut [x :- Int z :- Int energy :- Int fed :- Int howl :- Int
-                    alive :- Bool])
+                    alive :- Bool spawn :- Bool])
 
 (def WOLF_DRAIN :- Int 2)
 (def WOLF_FEED_GAIN :- Int 180)
@@ -152,5 +156,7 @@
                energy2
                fed
                howl
-               (> energy2 0))))
+               (> energy2 0)
+               (and (>= energy2 900)
+                    (= (kernel.rt/rng-below ctx 128) 0)))))
 

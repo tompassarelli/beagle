@@ -395,11 +395,12 @@ pub const World = struct {
             self.last_decisions[i] = out.act[i];
             self.act_counts[@intCast(out.act[i])] += 1;
         }
-        // GENERATED compaction: the alive verdicts decide who crosses
-        self.n_live = sim.tickStepCompactAll(&out, w, n);
+        // GENERATED compaction-with-births: alive decides who crosses,
+        // spawn appends children, the buffer max is the carrying capacity
+        self.n_live = sim.tickStepCompactAll(&out, w, n, N_MINDS);
         const ww = self.writeWolves();
         for (0..nw) |i| self.last_howls[i] = wout.howl[i];
-        self.n_wolves_live = sim.wolfStepCompactAll(&wout, ww, nw);
+        self.n_wolves_live = sim.wolfStepCompactAll(&wout, ww, nw, N_WOLVES);
         const applied = self.grid.applyDigs(digs.items);
         self.digs_applied += applied;
         self.read_ix = 1 - self.read_ix;

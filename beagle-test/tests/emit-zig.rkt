@@ -308,6 +308,34 @@
   (test-case "lifecycle: generated compaction compiles as zig"
     (check-true (zig-compiles? (compile-zig-string LIFECYCLE-SRC) "lifecycle"))))
 
+(define SPAWN-SRC
+  (string-append
+   "(ns g)\n"
+   "(defrecord E [x :- Int hp :- Int])\n"
+   "(defrecord O [x :- Int hp :- Int alive :- Bool spawn :- Bool])\n"
+   "(defn life-step [ctx :- Ctx e :- E] :- O\n"
+   "  (->O (:x e) (- (:hp e) 1) (> (:hp e) 1) (> (:hp e) 9)))"))
+
+(test-case "lifecycle: spawn verdict adds births to the generated compaction"
+  (define out (compile-zig-string SPAWN-SRC))
+  (check-true (regexp-match? #rx"pub fn lifeStepCompactAll.out: \\*const OSoA, next: \\*ESoA, n: usize, cap: usize. usize" out))
+  (check-true (regexp-match? #rx"if ..out.spawn.i. or .out.alive.i. or w >= cap. continue;" out))
+  ;; verdicts are not state
+  (check-false (regexp-match? #rx"next.spawn" out))
+  (check-false (regexp-match? #rx"next.alive" out)))
+
+(when ZIG
+  (test-case "lifecycle: compaction-with-births compiles as zig"
+    (check-true (zig-compiles? (compile-zig-string SPAWN-SRC) "spawn"))))
+
+(check-unsupported/src "lifecycle: spawn without alive is rejected pointedly"
+  #rx"spawn requires alive"
+  (string-append
+   "(ns g)\n"
+   "(defrecord E [x :- Int])\n"
+   "(defrecord O [x :- Int spawn :- Bool])\n"
+   "(defn life-step [ctx :- Ctx e :- E] :- O (->O (:x e) false))"))
+
 (check-unsupported/src "lifecycle: alive on both records is rejected pointedly"
   #rx"alive is the survival verdict"
   (string-append
