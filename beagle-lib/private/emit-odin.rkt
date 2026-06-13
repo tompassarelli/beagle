@@ -824,14 +824,14 @@
 (define (emit-stmt e)
   (cond
     [(and (if-form? e) (not (if-form-else-expr e)))
-     (format "if ~a { ~a; }"
+     (format "if ~a { ~a }"
              (emit-expr (if-form-cond-expr e))
-             (emit-expr (if-form-then-expr e)))]
+             (emit-stmt (if-form-then-expr e)))]
     [(and (if-form? e) (if-form-else-expr e))
-     (format "if ~a { ~a; } else { ~a; }"
+     (format "if ~a { ~a } else { ~a }"
              (emit-expr (if-form-cond-expr e))
-             (emit-expr (if-form-then-expr e))
-             (emit-expr (if-form-else-expr e)))]
+             (emit-stmt (if-form-then-expr e))
+             (emit-stmt (if-form-else-expr e)))]
     [(set!-form? e) (emit-set!-stmt e)]
     [(condp-form? e) (emit-condp-stmt e)]
     [(dotimes-form? e) (emit-dotimes e)]
@@ -839,11 +839,45 @@
     [(when-form? e)
      (format "if ~a { ~a }"
              (emit-expr (when-form-cond-expr e))
-             (string-join
-              (for/list ([stmt (in-list (when-form-body e))])
-                (format "~a;" (emit-expr stmt)))
-              " "))]
+             (string-join (map emit-stmt (when-form-body e)) " "))]
+    [(let-form? e)
+     (string-join
+      (append
+       (for/list ([b (in-list (let-form-bindings e))])
+         (unless (symbol? (let-binding-name b))
+           (unsupported "destructuring binding"))
+         (define ty (let-binding-type b))
+         (if ty
+             (format "~a: ~a = ~a;"
+                     (ident (let-binding-name b))
+                     (type->odin ty)
+                     (emit-typed-value (let-binding-value b) ty))
+             (format "~a := ~a;"
+                     (ident (let-binding-name b))
+                     (emit-typed-value (let-binding-value b) ty))))
+       (map emit-stmt (let-form-body e)))
+      " ")]
+    [(do-form? e)
+     (string-join (map emit-stmt (do-form-body e)) " ")]
+    [(cond-form? e) (emit-cond-stmt e)]
     [else (format "~a;" (emit-expr e))]))
+
+(define (emit-cond-stmt e)
+  (define clauses (cond-form-clauses e))
+  (define else-clause
+    (findf (lambda (c) (eq? (cond-clause-test c) 'else)) clauses))
+  (define branches (filter (lambda (c) (not (eq? (cond-clause-test c) 'else))) clauses))
+  (string-append
+   (for/fold ([acc ""]) ([c (in-list branches)] [i (in-naturals)])
+     (string-append acc
+                    (if (zero? i) "" " else ")
+                    (format "if ~a { ~a }"
+                            (emit-expr (cond-clause-test c))
+                            (string-join (map emit-stmt (cond-clause-body c)) " "))))
+   (if else-clause
+       (format " else { ~a }"
+               (string-join (map emit-stmt (cond-clause-body else-clause)) " "))
+       "")))
 
 (define (emit-condp-stmt e)
   (define pred (condp-form-pred-fn e))
