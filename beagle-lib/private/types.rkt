@@ -38,7 +38,7 @@
                                                (type-prim 'F32))))))
 
 (define PARAMETRIC-CTORS
-  '(Vec List Set Map Promise NixType Arr))
+  '(Vec List Set Map Promise NixType Arr Ptr))
 
 ;; --- type AST --------------------------------------------------------------
 

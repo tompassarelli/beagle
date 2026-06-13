@@ -1,0 +1,4 @@
+(ns k)
+(defn fill-array [n :- I32] :- Nil
+  (doseq [i (range n)]
+    (println i)))

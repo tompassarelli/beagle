@@ -1,0 +1,5 @@
+(ns h)
+(defrecord Point [x :- F32 y :- F32])
+(defn move-point [p :- Point dx :- F32 dy :- F32] :- Nil
+  (set! (:x p) (+ (:x p) dx))
+  (set! (:y p) (+ (:y p) dy)))

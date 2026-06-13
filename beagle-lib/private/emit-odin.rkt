@@ -83,6 +83,9 @@
           (unsupported "Arr size" "first arg must be a size literal"))
         (define size-str (symbol->string (type-prim-name size-sym)))
         (format "[~a]~a" size-str (type->odin elem))]
+       [(Ptr)
+        (define inner (car (type-app-args t)))
+        (format "^~a" (type->odin inner))]
        [(Map)
         (define k (car (type-app-args t)))
         (unless (and (type-prim? k) (memq (type-prim-name k) '(String Keyword)))
@@ -262,6 +265,8 @@
     [(call-form? e) (emit-call e)]
     [(map-form? e) (unsupported "map literal in expression position"
                                 "use records or build maps with assoc")]
+    [(set!-form? e) (emit-set!-expr e)]
+    [(condp-form? e) (emit-condp-expr e)]
     [(set-form? e) (unsupported "set literal")]
     [(regex-lit? e) (unsupported "regex literal")]
     [else (unsupported (format "expression ~a" e))]))
@@ -298,6 +303,62 @@
   (if (= 1 (length body))
       (emit-expr (car body))
       (emit-block-expr '() body)))
+
+;; --- set! (mutation) ---------------------------------------------------------
+
+(define (emit-set!-target target)
+  (cond
+    [(kw-access? target)
+     (define field (substring (symbol->string (kw-access-kw target)) 1))
+     (format "~a.~a" (emit-expr (kw-access-target target))
+             (ident (string->symbol field)))]
+    [(and (call-form? target) (eq? (call-form-fn target) 'nth)
+          (= 2 (length (call-form-args target))))
+     (format "~a[~a]"
+             (emit-expr (car (call-form-args target)))
+             (emit-expr (cadr (call-form-args target))))]
+    [(symbol? target) (ident target)]
+    [else (unsupported "set! target" (format "~a" target))]))
+
+(define (emit-set!-expr e)
+  (format "(~a = ~a)"
+          (emit-set!-target (set!-form-target e))
+          (emit-expr (set!-form-value e))))
+
+(define (emit-set!-stmt e)
+  (format "~a = ~a;"
+          (emit-set!-target (set!-form-target e))
+          (emit-expr (set!-form-value e))))
+
+;; --- condp (switch) ----------------------------------------------------------
+
+(define (condp-test-label test-val)
+  (cond
+    [(and (symbol? test-val)
+          (regexp-match? #rx"^:" (symbol->string test-val)))
+     (define kw-str (substring (symbol->string test-val) 1))
+     (format ".~a" (string-titlecase (string-replace kw-str "-" "_")))]
+    [else (emit-expr test-val)]))
+
+(define (emit-condp-expr e)
+  (define pred (condp-form-pred-fn e))
+  (unless (eq? pred '=)
+    (unsupported "condp with non-= predicate in odin"))
+  (define test-s (emit-expr (condp-form-test-expr e)))
+  (define clauses (condp-form-clauses e))
+  (define default (condp-form-default e))
+  (unless default
+    (unsupported "condp without default in expression position"))
+  (string-append
+   "("
+   (for/fold ([acc ""]) ([c (in-list clauses)])
+     (string-append acc
+                    (format "~a if (~a == ~a) else "
+                            (emit-expr (cdr c))
+                            test-s
+                            (condp-test-label (car c)))))
+   (emit-expr default)
+   ")"))
 
 ;; Expression-position let/do: assigns result to a temp var inside a block.
 ;; Returns the temp var name as the expression value. The block and temp
@@ -548,6 +609,11 @@
     ;; type casts: (u32 x) → u32(x), (f32 x) → f32(x)
     [(and (hash-ref ODIN-CAST-TYPES fn #f) (= 1 (length args)))
      (format "~a(~a)" (hash-ref ODIN-CAST-TYPES fn) (emit-expr (car args)))]
+    ;; pointer ops
+    [(and (eq? fn 'deref) (= 1 (length args)))
+     (format "~a^" (emit-expr (car args)))]
+    [(and (eq? fn 'addr) (= 1 (length args)))
+     (format "&~a" (emit-expr (car args)))]
     ;; nil tests
     [(and (memq fn '(nil? some?)) (= 1 (length args)))
      (define raw (parameterize ([raw-optional? #t]) (emit-expr (car args))))
@@ -646,6 +712,11 @@
      (format "min(~a)" (string-join (emit-args args) ", "))]
     [(eq? fn 'abs)
      (format "abs(~a)" (emit-expr (car args)))]
+    ;; math functions → math.fn
+    [(and (memq fn '(cos sin tan acos asin atan atan2 sqrt floor ceil
+                     pow log log2 log10))
+          (<= 1 (length args) 2))
+     (format "math.~a(~a)" fn (string-join (emit-args args) ", "))]
     [(eq? fn 'inc) (format "(~a + 1)" (emit-expr (car args)))]
     [(eq? fn 'dec) (format "(~a - 1)" (emit-expr (car args)))]
     [(eq? fn 'zero?) (format "(~a == 0)" (emit-expr (car args)))]
@@ -681,7 +752,7 @@
     [(eq? fn 'rest) (format "~a[1:]" (emit-expr (car args)))]
     [(eq? fn 'empty?) (format "(len(~a) == 0)" (emit-expr (car args)))]
     [(eq? fn 'conj)
-     (format "rt.conj(~a, ~a)"
+     (format "append(&~a, ~a)"
              (emit-expr (car args)) (emit-expr (cadr args)))]
     ;; sort / distinct
     [(and (eq? fn 'sort) (= 1 (length args)))
@@ -761,6 +832,9 @@
              (emit-expr (if-form-cond-expr e))
              (emit-expr (if-form-then-expr e))
              (emit-expr (if-form-else-expr e)))]
+    [(set!-form? e) (emit-set!-stmt e)]
+    [(condp-form? e) (emit-condp-stmt e)]
+    [(dotimes-form? e) (emit-dotimes e)]
     [(doseq-form? e) (emit-doseq e)]
     [(when-form? e)
      (format "if ~a { ~a }"
@@ -770,6 +844,35 @@
                 (format "~a;" (emit-expr stmt)))
               " "))]
     [else (format "~a;" (emit-expr e))]))
+
+(define (emit-condp-stmt e)
+  (define pred (condp-form-pred-fn e))
+  (unless (eq? pred '=)
+    (unsupported "condp with non-= predicate in odin"))
+  (define test-s (emit-expr (condp-form-test-expr e)))
+  (define clauses (condp-form-clauses e))
+  (define default (condp-form-default e))
+  (string-append
+   (format "switch ~a {" test-s)
+   (apply string-append
+          (for/list ([c (in-list clauses)])
+            (format " case ~a: ~a;"
+                    (condp-test-label (car c))
+                    (emit-expr (cdr c)))))
+   (if default
+       (format " case: ~a;" (emit-expr default))
+       "")
+   " }"))
+
+(define (emit-dotimes e)
+  (define var-name (ident (dotimes-form-name e)))
+  (define count-s (emit-expr (dotimes-form-count-expr e)))
+  (define body-stmts
+    (string-join
+     (for/list ([stmt (in-list (dotimes-form-body e))])
+       (emit-stmt stmt))
+     " "))
+  (format "for ~a in 0..<~a { ~a }" var-name count-s body-stmts))
 
 (define (range-call? e)
   (and (call-form? e)
@@ -921,6 +1024,19 @@
        (set! out (cons (emit-loop-body-stmts (let-form-body e) indent) out))]
       [(do-form? e)
        (set! out (cons (emit-loop-body-stmts (do-form-body e) indent) out))]
+      [(set!-form? e)
+       (line! (emit-set!-stmt e))]
+      [(doseq-form? e)
+       (line! (emit-doseq e))]
+      [(dotimes-form? e)
+       (line! (emit-dotimes e))]
+      [(when-form? e)
+       (line! (format "if ~a { ~a }"
+                      (emit-expr (when-form-cond-expr e))
+                      (string-join
+                       (for/list ([stmt (in-list (when-form-body e))])
+                         (format "~a;" (emit-expr stmt)))
+                       " ")))]
       [else
        (line! (format "return ~a;" (emit-expr e)))]))
   (string-join (reverse out) "\n"))
@@ -970,6 +1086,20 @@
                            [(for-when? c) (refs-of (for-when-test c) a0)]
                            [else a0]))])
                ([x (in-list (doseq-form-body e))])
+       (refs-of x a))]
+    [(set!-form? e)
+     (refs-of (set!-form-target e) (refs-of (set!-form-value e) acc))]
+    [(condp-form? e)
+     (for/fold ([a (refs-of (condp-form-test-expr e) acc)])
+               ([c (in-list (condp-form-clauses e))])
+       (refs-of (cdr c) (refs-of (car c) a)))]
+    [(dotimes-form? e)
+     (for/fold ([a (refs-of (dotimes-form-count-expr e) acc)])
+               ([x (in-list (dotimes-form-body e))])
+       (refs-of x a))]
+    [(when-form? e)
+     (for/fold ([a (refs-of (when-form-cond-expr e) acc)])
+               ([x (in-list (when-form-body e))])
        (refs-of x a))]
     [(threading-marker? e) (refs-of (threading-marker-desugared e) acc)]
     [(vec-form? e) (for/fold ([a acc]) ([x (in-list (vec-form-items e))]) (refs-of x a))]
@@ -1117,12 +1247,16 @@
           [(def-form? f) (refs-of (def-form-value f) acc)]
           [else acc])))
     (define needs-fmt? (memq 'println all-refs))
+    (define MATH-FNS '(cos sin tan acos asin atan atan2 sqrt floor ceil
+                       pow log log2 log10))
+    (define needs-math? (ormap (lambda (f) (memq f all-refs)) MATH-FNS))
     (define all-output (string-join decls "\n\n"))
     (define needs-rt? (regexp-match? #rx"rt\\." all-output))
     (string-append
      "// generated by beagle (odin backend) — do not edit\n"
      (format "package ~a\n\n" pkg-name)
      (if needs-fmt? "import \"core:fmt\"\n" "")
+     (if needs-math? "import \"core:math\"\n" "")
      (if needs-rt? "import rt \"beagle_rt\"\n" "")
      (apply string-append extern-imports)
      "\n"
