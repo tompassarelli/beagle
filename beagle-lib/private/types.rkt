@@ -30,7 +30,12 @@
 
 ;; Built-in union aliases — resolve during parse-type, not user-writable
 (define BUILTIN-UNION-ALIASES
-  (hasheq 'Number (lambda () (type-union (list (type-prim 'Int) (type-prim 'Float))))))
+  (hasheq 'Number (lambda () (type-union (list (type-prim 'Int) (type-prim 'Float)
+                                               (type-prim 'I8) (type-prim 'I16)
+                                               (type-prim 'I32)
+                                               (type-prim 'U8) (type-prim 'U16)
+                                               (type-prim 'U32) (type-prim 'U64)
+                                               (type-prim 'F32))))))
 
 (define PARAMETRIC-CTORS
   '(Vec List Set Map Promise NixType Arr))

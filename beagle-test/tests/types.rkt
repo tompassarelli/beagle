@@ -24,8 +24,9 @@
 (test-case "Number resolves to (U Int Float)"
   (let ([t (parse-type 'Number)])
     (check-true (type-union? t))
-    (check-equal? (sort (map type-prim-name (type-union-alts t)) symbol<?)
-                  '(Float Int))))
+    (define names (sort (map type-prim-name (type-union-alts t)) symbol<?))
+    (check-not-false (memq 'Int names))
+    (check-not-false (memq 'Float names))))
 
 (test-case "parse function type from bracketed expression"
   ;; #%brackets-tagged form: [A B -> R]

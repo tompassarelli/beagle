@@ -2,7 +2,7 @@
 # beagle-build: compile a beagle source file to target output.
 #
 # Usage:
-#   bin/beagle-build <source.bclj|.bjs|.bnix|.bcljs|.bsql> [output]
+#   bin/beagle-build <source.bclj|.bjs|.bnix|.bcljs|.bsql|.bodin> [output]
 #
 # If the output path is omitted, it is derived from the namespace declared
 # in the source via (ns ...) and dropped under runtime/src/.
@@ -34,6 +34,7 @@ case "$src" in
     *.bpy)   ext="py" ;;
     *.bclj)  ext="clj" ;;
     *.bzig)  ext="zig" ;;
+    *.bodin) ext="odin" ;;
     *)
         # Legacy .bgl/.rkt: detect from file content
         if grep -qE '^\(define-target[[:space:]]+cljs\)' "$src" 2>/dev/null; then
@@ -50,6 +51,9 @@ case "$src" in
         elif grep -qE '^\(define-target[[:space:]]+zig\)' "$src" 2>/dev/null || \
              grep -qE '^#lang beagle/zig' "$src" 2>/dev/null; then
             ext="zig"
+        elif grep -qE '^\(define-target[[:space:]]+odin\)' "$src" 2>/dev/null || \
+             grep -qE '^#lang beagle/odin' "$src" 2>/dev/null; then
+            ext="odin"
         fi
         ;;
 esac

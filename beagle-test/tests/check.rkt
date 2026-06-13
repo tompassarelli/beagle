@@ -1327,7 +1327,7 @@
   '(def g :- Float (max 1 2.5)))
 
 (check-err/rx "numeric: inc still rejects non-numbers pointedly"
-  #rx"expected Number, got String"
+  #rx"expected .*(Number|Int|Float).*, got String"
   '(def h :- Int (inc "s")))
 
 (check-ok "numeric: Any operand falls back to today's behavior"
