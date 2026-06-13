@@ -680,6 +680,7 @@
   (define target-set? #f)
   (define ns        DEFAULT-NAMESPACE)
   (define ns-set?   #f)
+  (define gen-class? #f)
   (define registry  (make-macro-registry))
   (define externs   (make-hash))
   (define imp-rec-fields (make-hash))
@@ -821,8 +822,10 @@
             (raise-parse-error 'bad-meta-value
                                "(ns ~a (:use ...)) — :use is not supported. Use (:require [lib :refer [sym ...]]) instead." n)]
            [(and (pair? clause) (eq? (car clause) ':gen-class))
-            (raise-parse-error 'bad-meta-value
-                               "(ns ~a (:gen-class ...)) — :gen-class is not supported; beagle clj output runs as scripts (babashka) or via clojure -M." n)]
+            ;; (:gen-class) marks the ns as an AOT / GraalVM-native-image entry
+            ;; point. clj-only: emit-clj emits it, babashka tolerates it as a
+            ;; no-op, and other targets ignore it.
+            (set! gen-class? #t)]
            [(and (pair? clause) (eq? (car clause) ':refer-clojure))
             (raise-parse-error 'bad-meta-value
                                "(ns ~a (:refer-clojure ...)) — :refer-clojure is not supported; clojure.core is always available unqualified." n)]
@@ -984,7 +987,7 @@
   (define form-stxs (map cdr pairs))
 
   (define prog
-    (program mode ns parsed registry externs (reverse requires) (reverse imports) form-stxs src-table imp-rec-fields imp-rec-field-order imp-rec-ns (hash-keys imp-scalar-fns) imp-scalar-preds imp-symbol-ns imp-union-members imp-param-unions target))
+    (program mode ns parsed registry externs (reverse requires) (reverse imports) form-stxs src-table imp-rec-fields imp-rec-field-order imp-rec-ns (hash-keys imp-scalar-fns) imp-scalar-preds imp-symbol-ns imp-union-members imp-param-unions target gen-class?))
   ;; Stash the macro-derived-table keyed by the program so check.rkt
   ;; can recover it via program-macro-derived-table after this call
   ;; returns and the parameterize unwinds.

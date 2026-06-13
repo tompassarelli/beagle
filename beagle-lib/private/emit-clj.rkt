@@ -251,6 +251,11 @@
   (define clauses
     (filter values
       (list
+       ;; (:gen-class) — AOT / GraalVM-native entry; babashka treats it as a
+       ;; no-op. CLJS has no gen-class, so omit it there.
+       (and (program-gen-class? prog)
+            (not (eq? (current-emit-target) 'cljs))
+            "(:gen-class)")
        (and (not (null? rs))
             (format "(:require ~a)"
                     (string-join (map emit-require rs) "\n            ")))

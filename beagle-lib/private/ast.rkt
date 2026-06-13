@@ -442,7 +442,8 @@
                  imported-symbol-ns
                  imported-union-members
                  imported-parametric-unions
-                 target)
+                 target
+                 gen-class?)
   #:transparent)
 
 (define DEFAULT-MODE      'strict)
