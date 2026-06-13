@@ -82,6 +82,13 @@
     [(type-app? t)
      (case (type-app-ctor t)
        [(Vec) (format "[]const ~a" (type->zig (car (type-app-args t))))]
+       [(Map)
+        ;; (Map K V) → rt.Map(V). Keyword and String keys both lower to
+        ;; []const u8 keys inside rt.Map; only the value type V is carried.
+        (define k (car (type-app-args t)))
+        (unless (and (type-prim? k) (memq (type-prim-name k) '(String Keyword)))
+          (unsupported "map key type" "zig maps key on String or Keyword (→ []const u8)"))
+        (format "rt.Map(~a)" (type->zig (cadr (type-app-args t))))]
        [else (unsupported "parametric type" (type-app-ctor t))])]
     [(type-union? t)
      (cond
@@ -357,6 +364,16 @@
              (emit-expr (car args))
              (if (eq? fn 'bit-shift-right) ">>" "<<")
              (cadr args))]
+    ;; typed map ops (CLI target): receiver-typed method calls, so emit
+    ;; stays syntax-directed — rt.Map(V) carries V, no type-threading.
+    ;; get returns ?V → beagle's V?; contains?/assoc/keys are direct.
+    [(and (eq? fn 'get) (= 2 (length args)))
+     (format "~a.get(~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
+    [(eq? fn 'contains?)
+     (format "~a.contains(~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
+    [(eq? fn 'assoc)
+     (format "~a.assoc(~a, ~a)"
+             (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args)))]
     ;; v1 vector ops through the prelude (tick-arena allocation only)
     [(eq? fn 'count) (format "rt.count(~a)" (emit-expr (car args)))]
     [(eq? fn 'nth) (format "rt.nth(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)))]

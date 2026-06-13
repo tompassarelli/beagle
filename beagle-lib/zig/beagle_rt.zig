@@ -58,8 +58,13 @@ pub fn abs_i64(x: i64) i64 {
 
 // --- v1 vectors: arena slices ------------------------------------------------
 
-pub fn count(v: anytype) i64 {
-    return @intCast(v.len);
+pub fn count(c: anytype) i64 {
+    // comptime dispatch: slices carry .len as a field; Map (and other
+    // CLI containers) expose .len() — so (count x) is one emit for both.
+    return switch (@typeInfo(@TypeOf(c))) {
+        .pointer => @intCast(c.len),
+        else => c.len(),
+    };
 }
 
 pub fn nth(v: anytype, i: i64) std.meta.Elem(@TypeOf(v)) {
@@ -73,4 +78,50 @@ pub fn conj(ctx: *Ctx, v: anytype, x: std.meta.Elem(@TypeOf(v))) @TypeOf(v) {
     @memcpy(out[0..v.len], v);
     out[v.len] = x;
     return out;
+}
+
+// === CLI runtime ============================================================
+// The game kernel above allocates only through ctx.tick and frees nothing.
+// A CLI is a different but equally allocation-disciplined shape: it runs
+// once and exits, so everything goes through ONE process-lifetime arena,
+// reclaimed by the OS at exit. This is for compiling TYPED beagle CLIs to
+// native — concrete types only, no dynamic Value boxing.
+
+var cli_arena_state: ?std.heap.ArenaAllocator = null;
+pub fn cliAlloc() std.mem.Allocator {
+    if (cli_arena_state == null) {
+        cli_arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    }
+    return cli_arena_state.?.allocator();
+}
+
+/// Typed map for the CLI target. Keyword and string keys both lower to
+/// []const u8 keys; the value type V is concrete (records, ints, slices,
+/// other maps) — never a dynamic union. `assoc` is immutable (clone+put)
+/// to match Clojure semantics; CLI maps are small (per-record
+/// frontmatter), so O(n) assoc is fine. `get` returns ?V — exactly
+/// beagle's `V?` optional, so it flows straight into nil-narrowing.
+pub fn Map(comptime V: type) type {
+    return struct {
+        const Self = @This();
+        inner: std.StringHashMap(V),
+
+        pub fn empty() Self {
+            return .{ .inner = std.StringHashMap(V).init(cliAlloc()) };
+        }
+        pub fn assoc(self: Self, k: []const u8, v: V) Self {
+            var m = self.inner.clone() catch @panic("oom");
+            m.put(k, v) catch @panic("oom");
+            return .{ .inner = m };
+        }
+        pub fn get(self: Self, k: []const u8) ?V {
+            return self.inner.get(k);
+        }
+        pub fn contains(self: Self, k: []const u8) bool {
+            return self.inner.contains(k);
+        }
+        pub fn len(self: Self) i64 {
+            return @intCast(self.inner.count());
+        }
+    };
 }
