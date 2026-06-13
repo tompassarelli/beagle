@@ -33,10 +33,11 @@
 
 (test-case "defn lowers param types to ^Tag metadata in arg vector"
   ;; Inline `:- T` / wrapped `(x : T)` typed params lower to Clojure
-  ;; `^Tag` metadata on the param symbol at emit. Int → ^long (Clojure
-  ;; primitive tag). Untyped params emit bare.
+  ;; `^Tag` metadata — EXCEPT Int/Float, whose primitive hints (^long/
+  ;; ^double) are dropped: babashka ignores them and GraalVM AOT rejects
+  ;; them, so Int/Float params emit bare like untyped ones.
   (define out (compile '(defn add [(x : Int) (y : Int)] (+ x y))))
-  (check-true (matches? #rx"\\(defn add \\[\\^long x \\^long y\\]" out))
+  (check-true (matches? #rx"\\(defn add \\[x y\\]" out))
   (check-true (matches? #rx"\\(\\+ x y\\)"            out)))
 
 (test-case "let emits with brackets"
@@ -530,12 +531,12 @@
 ;; --- varargs emission --------------------------------------------------------
 
 (test-case "defn with & rest emits Clojure varargs"
-  ;; Fixed params lower their typed annotations to ^Tag (Int → ^long);
-  ;; the rest param is heterogeneous in Clojure semantics and emits
-  ;; bare (no type tag — see emit-params-with-rest).
+  ;; Int/Float params emit bare (their ^long/^double primitive hints are
+  ;; dropped — babashka ignores them, GraalVM AOT rejects them); the rest
+  ;; param is heterogeneous and emits bare too (see emit-params-with-rest).
   (define out (compile '(defn my-sum [(x : Int) & (rest : Int)]
                           (+ x (reduce + 0 rest)))))
-  (check-true (matches? #rx"\\(defn my-sum \\[\\^long x & rest\\]" out)))
+  (check-true (matches? #rx"\\(defn my-sum \\[x & rest\\]" out)))
 
 (test-case "fn with & rest emits varargs"
   (define out (compile '(def f (fn [(a : Int) & (b : Int)] (+ a 1)))))

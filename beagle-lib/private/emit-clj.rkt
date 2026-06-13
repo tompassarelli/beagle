@@ -184,8 +184,13 @@
   (cond
     [(type-prim? t)
      (case (type-prim-name t)
-       [(Int) "long"]
-       [(Float) "double"]
+       ;; ^long / ^double are pure JVM-perf hints: babashka ignores them
+       ;; outright, and GraalVM AOT keeps rejecting them (primitive-return
+       ;; resolution, the 4-primitive-arg cap). beagle's clj output runs on
+       ;; babashka or `clojure -M` scripting where they never pay off, so
+       ;; emit none — Int/Float go unhinted, like Any.
+       [(Int) #f]
+       [(Float) #f]
        [(Bool) "Boolean"]
        [(String) "String"]
        [(Char) "Character"]
@@ -326,23 +331,11 @@
      ;; param struct. Untyped slots (type = #f) emit no metadata.
      ;; Destructure params (map-destructure / seq-destructure) have no
      ;; type slot — emit no metadata for them.
-     ;; The JVM's primitive-arg fn interfaces only go to 4 args, so a fn with
-     ;; >4 params can't carry ^long/^double hints (on args OR return) — clj
-     ;; rejects it ("fns taking primitives support only 4 or fewer args"). SCI
-     ;; ignores the hint, but JVM/GraalVM AOT won't compile it. Suppress
-     ;; primitive hints there; class hints (^String etc.) don't hit the limit.
-     (define suppress-prim? (> (length (defn-form-params f)) 4))
-     (define (defn-tag-prefix t)
-       (define tag (and t (clj-tag-for-type t)))
-       (cond
-         [(not tag) ""]
-         [(and suppress-prim? (or (string=? tag "long") (string=? tag "double"))) ""]
-         [else (format "^~a " tag)]))
-     (define name-tag (defn-tag-prefix (defn-form-return-type f)))
+     (define name-tag (clj-tag-prefix (defn-form-return-type f)))
      (define param-tags
        (for/list ([p (in-list (defn-form-params f))])
          (cond
-           [(param? p) (defn-tag-prefix (param-type p))]
+           [(param? p) (clj-tag-prefix (param-type p))]
            [else ""])))
      (format "(~a ~a~a~a [~a]\n  ~a)"
              kw
