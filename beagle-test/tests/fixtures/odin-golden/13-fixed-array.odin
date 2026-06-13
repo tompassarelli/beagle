@@ -1,0 +1,1 @@
+beagle: def origin: expected (Arr 3 F32), got Vec3

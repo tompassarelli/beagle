@@ -57,8 +57,11 @@
        [(Float) "f64"]
        [(Bool) "bool"]
        [(String) "string"]
-       [(Nil) "void"]   ; Odin uses void for no-return procedures
+       [(Nil) "void"]
        [(Keyword) "string"]
+       [(U8)  "u8"]  [(U16) "u16"] [(U32) "u32"] [(U64) "u64"]
+       [(I8)  "i8"]  [(I16) "i16"] [(I32) "i32"]
+       [(F32) "f32"]
        [(Any) (unsupported "Any-typed boundary"
                            "annotate with a concrete type")]
        [else
@@ -70,6 +73,16 @@
     [(type-app? t)
      (case (type-app-ctor t)
        [(Vec) (format "[dynamic]~a" (type->odin (car (type-app-args t))))]
+       [(Arr)
+        (define targs (type-app-args t))
+        (unless (>= (length targs) 2)
+          (unsupported "Arr" "needs (Arr N T) e.g. (Arr 3 F32)"))
+        (define size-sym (car targs))
+        (define elem (cadr targs))
+        (unless (type-prim? size-sym)
+          (unsupported "Arr size" "first arg must be a size literal"))
+        (define size-str (symbol->string (type-prim-name size-sym)))
+        (format "[~a]~a" size-str (type->odin elem))]
        [(Map)
         (define k (car (type-app-args t)))
         (unless (and (type-prim? k) (memq (type-prim-name k) '(String Keyword)))
@@ -522,11 +535,19 @@
   (parameterize ([current-optionals (append opt-params (current-optionals))])
     (emit-body-expr (fn-form-body fn))))
 
+(define ODIN-CAST-TYPES
+  (hasheq 'u8 "u8" 'u16 "u16" 'u32 "u32" 'u64 "u64"
+          'i8 "i8" 'i16 "i16" 'i32 "i32" 'i64 "i64"
+          'f32 "f32" 'f64 "f64" 'int "int" 'uint "uint"))
+
 (define (emit-call e)
   (define fn (call-form-fn e))
   (define args (call-form-args e))
   (cond
     [(not (symbol? fn)) (unsupported "higher-order call" "fn position must be a name in v1")]
+    ;; type casts: (u32 x) → u32(x), (f32 x) → f32(x)
+    [(and (hash-ref ODIN-CAST-TYPES fn #f) (= 1 (length args)))
+     (format "~a(~a)" (hash-ref ODIN-CAST-TYPES fn) (emit-expr (car args)))]
     ;; nil tests
     [(and (memq fn '(nil? some?)) (= 1 (length args)))
      (define raw (parameterize ([raw-optional? #t]) (emit-expr (car args))))
@@ -750,6 +771,11 @@
               " "))]
     [else (format "~a;" (emit-expr e))]))
 
+(define (range-call? e)
+  (and (call-form? e)
+       (eq? (call-form-fn e) 'range)
+       (<= 1 (length (call-form-args e)) 2)))
+
 (define (emit-doseq e)
   (define clauses (doseq-form-clauses e))
   (define body (doseq-form-body e))
@@ -760,13 +786,21 @@
   (unless (symbol? (for-binding-name binding))
     (unsupported "doseq binding" "destructuring not supported"))
   (define var-name (ident (for-binding-name binding)))
-  (define coll (emit-expr (for-binding-expr binding)))
+  (define coll-expr (for-binding-expr binding))
   (define body-stmts
     (string-join
      (for/list ([stmt (in-list body)])
        (emit-stmt stmt))
      " "))
-  (format "for ~a { |~a| ~a }" coll var-name body-stmts))
+  (cond
+    [(range-call? coll-expr)
+     (define rargs (call-form-args coll-expr))
+     (if (= 1 (length rargs))
+         (format "for ~a in 0..<~a { ~a }" var-name (emit-expr (car rargs)) body-stmts)
+         (format "for ~a in ~a..<~a { ~a }" var-name
+                 (emit-expr (car rargs)) (emit-expr (cadr rargs)) body-stmts))]
+    [else
+     (format "for ~a { |~a| ~a }" (emit-expr coll-expr) var-name body-stmts)]))
 
 ;; Flatten top-level let/do in fn body into sequential statements + return.
 (define (emit-fn-body body ret-type indent)
@@ -955,6 +989,17 @@
              (format "    ~a: ~a," (ident (param-name p)) (type->odin (param-type p))))
            "\n")))
 
+(define (emit-defenum f)
+  (define name (ident (defenum-form-name f)))
+  (define vals (defenum-form-values f))
+  (define entries
+    (for/list ([v (in-list vals)] [i (in-naturals)])
+      (define vname
+        (string-titlecase
+         (string-replace (regexp-replace #rx"^:" (symbol->string v) "") "-" "_")))
+      (format "    .~a = ~a," vname i)))
+  (format "~a :: enum u8 {\n~a\n}" name (string-join entries "\n")))
+
 (define (emit-def f)
   (unless (def-form-type f)
     (unsupported "untyped def" "odin backend needs (def name :- Type value)"))
@@ -1051,6 +1096,7 @@
                  #:unless (eq? f 'nil))
         (cond
           [(record-form? f) (emit-record f)]
+          [(defenum-form? f) (emit-defenum f)]
           [(def-form? f) (emit-def f)]
           [(defn-form? f) (emit-defn f)]
           [(defn-multi? f) (unsupported "multi-arity defn")]
@@ -1058,14 +1104,29 @@
     (define extern-imports
       (for/list ([mod (in-list (referenced-extern-modules prog (program-externs prog)))])
         (format "~a :: import(\"~a\")\n" mod mod)))
+    (define ns-name (program-namespace prog))
+    (define pkg-name
+      (if ns-name
+          (let ([parts (string-split (symbol->string ns-name) ".")])
+            (ident (string->symbol (last parts))))
+          "main"))
+    (define all-refs
+      (for/fold ([acc '()]) ([f (in-list (program-forms prog))])
+        (cond
+          [(defn-form? f) (for/fold ([a acc]) ([e (in-list (defn-form-body f))]) (refs-of e a))]
+          [(def-form? f) (refs-of (def-form-value f) acc)]
+          [else acc])))
+    (define needs-fmt? (memq 'println all-refs))
+    (define all-output (string-join decls "\n\n"))
+    (define needs-rt? (regexp-match? #rx"rt\\." all-output))
     (string-append
      "// generated by beagle (odin backend) — do not edit\n"
-     "package main\n\n"
-     "import \"core:fmt\"\n"
-     "import rt \"beagle_rt\"\n"
+     (format "package ~a\n\n" pkg-name)
+     (if needs-fmt? "import \"core:fmt\"\n" "")
+     (if needs-rt? "import rt \"beagle_rt\"\n" "")
      (apply string-append extern-imports)
      "\n"
-     (string-join decls "\n\n")
+     all-output
      "\n")))
 
 (register-backend! 'odin (emitter-backend 'odin odin-emit-program))

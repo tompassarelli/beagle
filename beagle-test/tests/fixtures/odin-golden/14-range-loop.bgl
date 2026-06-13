@@ -1,0 +1,8 @@
+(ns g)
+(defn sum-range [n :- Int] :- Int
+  (loop [acc 0 i 0]
+    (if (= i n) acc
+      (recur (+ acc i) (+ i 1)))))
+(defn print-range [n :- Int] :- Nil
+  (doseq [i (range n)]
+    (println i)))

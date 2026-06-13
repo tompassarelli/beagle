@@ -1,0 +1,5 @@
+(ns g)
+(def chunk-size :- I32 16)
+(def opacity :- F32 0.8)
+(def flags :- U8 255)
+(defn to-u32 [x :- I32] :- U32 (u32 x))

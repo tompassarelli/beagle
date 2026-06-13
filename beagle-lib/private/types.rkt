@@ -18,7 +18,9 @@
          "tags.rkt")
 
 (define PRIMITIVES
-  '(String Int Float Bool Keyword Symbol Nil Any NixType))
+  '(String Int Float Bool Keyword Symbol Nil Any NixType
+    ;; Odin/low-level numeric types — concrete widths for native backends
+    U8 U16 U32 U64 I8 I16 I32 F32))
 
 ;; Target-specific sugar: #lang beagle/clj accepts JVM names.
 ;; These resolve to canonical names in the parser before the checker sees them.
@@ -31,7 +33,7 @@
   (hasheq 'Number (lambda () (type-union (list (type-prim 'Int) (type-prim 'Float))))))
 
 (define PARAMETRIC-CTORS
-  '(Vec List Set Map Promise NixType))
+  '(Vec List Set Map Promise NixType Arr))
 
 ;; --- type AST --------------------------------------------------------------
 
@@ -109,6 +111,10 @@
           (or (memq (car t) PARAMETRIC-CTORS)
               (set-member? (current-user-parametric) (car t))))
      (type-app (car t) (map parse-type (cdr t)))]
+
+    ;; type-level integer literal: used as size in (Arr 3 F32) → [3]f32
+    [(and (exact-integer? t) (>= t 0))
+     (type-prim (string->symbol (number->string t)))]
 
     ;; type variable (in scope from enclosing forall)
     [(and (symbol? t) (memq t (current-type-vars)))
@@ -235,6 +241,12 @@
          ;; target, where comptime ints coerce to f64 anyway).
          (and (eq? (type-prim-name expected) 'Float)
               (eq? (type-prim-name actual) 'Int))
+         ;; Numeric width widening: Int coerces to any integer subtype,
+         ;; Float coerces to F32/F64, Int coerces to F32/F64.
+         (and (eq? (type-prim-name actual) 'Int)
+              (memq (type-prim-name expected) '(I8 I16 I32 U8 U16 U32 U64 F32)))
+         (and (eq? (type-prim-name actual) 'Float)
+              (memq (type-prim-name expected) '(F32)))
          (eq? (unqualify-type-name (type-prim-name actual))
               (unqualify-type-name (type-prim-name expected)))
          (let ([members (hash-ref (current-union-members) (type-prim-name expected) #f)])

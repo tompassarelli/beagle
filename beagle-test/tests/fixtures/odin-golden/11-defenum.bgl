@@ -1,0 +1,2 @@
+(ns g)
+(defenum Voxel-Type :air :stone :dirt :grass :water)

@@ -1,0 +1,2 @@
+(ns voxel.core)
+(def chunk-size :- Int 16)
