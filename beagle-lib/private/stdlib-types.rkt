@@ -17,7 +17,7 @@
          "stdlib-clj.rkt"
          "stdlib-cljs.rkt"
          "stdlib-bb.rkt"
-         "dormant/stdlib-js.rkt"
+         "stdlib-js.rkt"
          "dormant/stdlib-sql.rkt"
          "dormant/stdlib-py.rkt")
 

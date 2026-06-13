@@ -2,58 +2,58 @@
 (ns app.main)
 (define-mode strict)
 
-(defrecord Product [(name : String) (price : Int) (in-stock : Bool)])
+(defrecord Product [(name :- String) (price :- Int) (in-stock :- Bool)])
 
-(def tax-rate : Float 0.08)
+(def tax-rate :- Float 0.08)
 
-(defn make-product [(name : String) (price : Int)] : Product
+(defn make-product [(name :- String) (price :- Int)] :- Product
   (->Product name price true))
 
-(defn product-total [(p : Product)] : Float
+(defn product-total [(p :- Product)] :- Float
   (+ (product-price p) (* (product-price p) tax-rate)))
 
-(defn discount [(p : Product) (pct : Float)] : Product
+(defn discount [(p :- Product) (pct :- Float)] :- Product
   (with p [:price (- (product-price p) (* (product-price p) pct))]))
 
-(defn cheap? [(p : Product)] : Bool
+(defn cheap? [(p :- Product)] :- Bool
   (< (product-price p) 10))
 
-(defn summarize [(products : (Vec Product))] : (Vec String)
+(defn summarize [(products :- (Vec Product))] :- (Vec String)
   (for [p products]
     (product-name p)))
 
-(defn find-cheap [(products : (Vec Product))] : (Vec Product)
+(defn find-cheap [(products :- (Vec Product))] :- (Vec Product)
   (for [p products :when (cheap? p)]
     p))
 
-(defn process-order [(p : Product)] : String
+(defn process-order [(p :- Product)] :- String
   (if (product-in-stock p)
     (str "Shipping: " (product-name p))
     "Out of stock"))
 
-(defn classify [(p : Product)] : String
+(defn classify [(p :- Product)] :- String
   (cond
     (< (product-price p) 10) "budget"
     (< (product-price p) 50) "mid-range"
     :else "premium"))
 
-(defn safe-lookup [(products : (Vec Product)) (idx : Int)] : String
+(defn safe-lookup [(products :- (Vec Product)) (idx :- Int)] :- String
   (let [p (nth products idx nil)]
     (if (nil? p)
       "not found"
       (product-name p))))
 
-(defn greet [(name : String)] : Nil
+(defn greet [(name :- String)] :- Nil
   (println (str "Hello, " name "!")))
 
 ;; async/await
 (declare-extern fetch-product [Int -> (Promise Product)])
 
-(defn load-and-classify [(id : Int)] : (Promise String)
+(defn load-and-classify [(id :- Int)] :- (Promise String)
   (let [p (js/await (fetch-product id))]
     (classify p)))
 
-(defn load-two [(a : Int) (b : Int)] : (Promise (Vec String))
+(defn load-two [(a :- Int) (b :- Int)] :- (Promise (Vec String))
   (let [p1 (js/await (fetch-product a))
         p2 (js/await (fetch-product b))]
     [(product-name p1) (product-name p2)]))
