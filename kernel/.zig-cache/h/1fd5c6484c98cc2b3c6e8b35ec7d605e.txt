@@ -1,0 +1,16 @@
+0
+1518368 72221557 1000000000 81c4f3b380f0bc3740a8af5a030d2a0b 0 /nix/store/3innqpmxwvmr2vc8h51g47aqdl6zj2b4-alsa-lib-1.2.15.3/lib/libasound.so
+740448 72216929 1000000000 a31e1e462f005a37f68bd5749634b7f2 0 /nix/store/fdqacryg2w9kiwb94c9rzfsyff4im8xj-libglvnd-1.7.0/lib/libGL.so
+1481840 72214342 1000000000 bdcb24fb802999fed211266e11f6a20f 0 /nix/store/5m91jqg1526jzsahrgmd37k4ml3nc5l4-libx11-1.8.13/lib/libX11.so
+87712 72216935 1000000000 d06c0291b811f9d316ff9d8c19e44bf3 0 /nix/store/wnl69g3p3cb415xxxz09hfvrj624fg18-libxi-1.8.2/lib/libXi.so
+54944 72217176 1000000000 eaa409928b396924eb9565f443d6c6c1 0 /nix/store/917cm887c5gz2c56ihys80mf2g8fkjj0-libxcursor-1.2.3/lib/libXcursor.so
+98 126634491 1781282407092232077 61dd1492e935988a9286923a1e11d3b9 0 /home/tom/code/beagle/kernel/zig-pkg/sokol-0.1.0-pb1HK4RrNwA1QTln_ZtLaEBne8Dn6zgZH4UVA45cGdnM/src/sokol/c/sokol_log.c
+98 126634470 1781282407074232134 dd7aa5efbc73f46bdf7a93d3a6c904d2 0 /home/tom/code/beagle/kernel/zig-pkg/sokol-0.1.0-pb1HK4RrNwA1QTln_ZtLaEBne8Dn6zgZH4UVA45cGdnM/src/sokol/c/sokol_app.c
+98 126634481 1781282407081232112 d55221b25cfed3cb527b42c13e68a30b 0 /home/tom/code/beagle/kernel/zig-pkg/sokol-0.1.0-pb1HK4RrNwA1QTln_ZtLaEBne8Dn6zgZH4UVA45cGdnM/src/sokol/c/sokol_gfx.c
+100 126634495 1781282407093232074 80c07b0eebd3290b305d8603d92be0f4 0 /home/tom/code/beagle/kernel/zig-pkg/sokol-0.1.0-pb1HK4RrNwA1QTln_ZtLaEBne8Dn6zgZH4UVA45cGdnM/src/sokol/c/sokol_time.c
+102 126634474 1781282407078232122 00f5076117adf6228d3c8c74895d4656 0 /home/tom/code/beagle/kernel/zig-pkg/sokol-0.1.0-pb1HK4RrNwA1QTln_ZtLaEBne8Dn6zgZH4UVA45cGdnM/src/sokol/c/sokol_audio.c
+119 126634485 1781282407089232086 eae349c59211de9fcd63a1661b144ef3 0 /home/tom/code/beagle/kernel/zig-pkg/sokol-0.1.0-pb1HK4RrNwA1QTln_ZtLaEBne8Dn6zgZH4UVA45cGdnM/src/sokol/c/sokol_gl.c
+133 126634476 1781282407079232118 6dd5b3267faa6608a52f4af958dc2521 0 /home/tom/code/beagle/kernel/zig-pkg/sokol-0.1.0-pb1HK4RrNwA1QTln_ZtLaEBne8Dn6zgZH4UVA45cGdnM/src/sokol/c/sokol_debugtext.c
+125 126634493 1781282407092232077 53b4dff7e4d23527f1ae9fb797aa8b2f 0 /home/tom/code/beagle/kernel/zig-pkg/sokol-0.1.0-pb1HK4RrNwA1QTln_ZtLaEBne8Dn6zgZH4UVA45cGdnM/src/sokol/c/sokol_shape.c
+146 126634487 1781282407091232080 cf8bf065377b67e03c1cc26acc45f795 0 /home/tom/code/beagle/kernel/zig-pkg/sokol-0.1.0-pb1HK4RrNwA1QTln_ZtLaEBne8Dn6zgZH4UVA45cGdnM/src/sokol/c/sokol_glue.c
+102 126634479 1781282407081232112 ae36fc5dabd11d7e00259f269eed8613 0 /home/tom/code/beagle/kernel/zig-pkg/sokol-0.1.0-pb1HK4RrNwA1QTln_ZtLaEBne8Dn6zgZH4UVA45cGdnM/src/sokol/c/sokol_fetch.c

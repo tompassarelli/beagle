@@ -101,6 +101,7 @@
 ;; --- emission state --------------------------------------------------------------
 
 (define current-records (make-parameter (hasheq)))
+(define current-externs (make-parameter (hasheq))) ; declared-extern name → type
 (define current-optionals (make-parameter '())) ; binding syms with ?T types
 (define current-loop-bindings (make-parameter #f)) ; (listof ident-string) for recur
 (define label-counter (make-parameter (box 0)))
@@ -292,11 +293,16 @@
 ;; --- calls ------------------------------------------------------------------------
 
 (define (qualified-rt-name sym)
-  ;; kernel.rt/NAME → rt.name (the prelude). Any other qualified call is
-  ;; out of scope for v1.
-  (define s (symbol->string sym))
-  (define m (regexp-match #rx"^kernel\\.rt/(.+)$" s))
-  (and m (format "rt.~a" (ident (string->symbol (cadr m))))))
+  ;; A qualified call lowers to the runtime prelude (imported as `rt`)
+  ;; iff it was declared as an extern — the zig backend has no module
+  ;; system, so the prelude is the only place a qualified name can
+  ;; resolve, and `declare-extern` is the author's statement that this
+  ;; name is provided there. `ns/NAME` → `rt.name`. require'd Clojure
+  ;; namespaces (str/trim, …) are not externs, have no zig home, and
+  ;; fall through to a pointed rejection.
+  (and (hash-has-key? (current-externs) sym)
+       (let ([m (regexp-match #rx"/(.+)$" (symbol->string sym))])
+         (and m (format "rt.~a" (ident (string->symbol (cadr m))))))))
 
 (define (emit-call e)
   (define fn (call-form-fn e))
@@ -366,7 +372,8 @@
     [(regexp-match #rx"^->(.+)$" (symbol->string fn))
      => (lambda (m) (emit-ctor (string->symbol (cadr m)) args))]
     [(regexp-match? #rx"/" (symbol->string fn))
-     (unsupported "qualified call" (format "~a (only kernel.rt/* in v1)" fn))]
+     (unsupported "qualified call"
+                  (format "~a — only declared externs resolve to the zig runtime prelude (rt)" fn))]
     [else
      ;; user-defined function in this module: ctx is threaded implicitly
      ;; only when the author passes it; emitted call is positional.
@@ -845,7 +852,8 @@
         piece))]))
 
 (define (zig-emit-program prog)
-  (parameterize ([current-records (build-record-table prog)])
+  (parameterize ([current-records (build-record-table prog)]
+                 [current-externs (program-externs prog)])
     (define decls
       (append
        (for/list ([f (in-list (program-forms prog))]

@@ -33,7 +33,7 @@
 
 (define kernel-rt
   (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
-    (simplify-path (build-path dir 'up 'up "kernel" "src" "beagle_rt.zig"))))
+    (simplify-path (build-path dir 'up 'up "beagle-lib" "zig" "beagle_rt.zig"))))
 
 (define bless? (and (getenv "BEAGLE_ZIG_BLESS") #t))
 
@@ -157,6 +157,19 @@
 (check-unsupported/src "zig rejects general qualified calls"
   #rx"qualified"
   "(ns g)\n(require clojure.string :as str)\n(defn f [s :- String] :- String (str/trim s))")
+
+(test-case "extern: a declared extern resolves to the rt prelude (any namespace)"
+  ;; The runtime-namespace is the author's choice via declare-extern; the
+  ;; backend doesn't hardcode one. host.rt/draw and lib/tick both land on rt.
+  (define out (compile-zig-string
+               (string-append
+                "(ns g)\n"
+                "(declare-extern host.rt/draw [Int -> Int])\n"
+                "(declare-extern lib/tick [Int -> Int])\n"
+                "(defn f [x :- Int] :- Int (lib/tick (host.rt/draw x)))")))
+  (check-true (regexp-match? #rx"rt.draw" out))
+  (check-true (regexp-match? #rx"rt.tick" out))
+  (check-false (regexp-match? #rx"kernel" out)))
 
 ;; --- Phase 2: world-escape check + promote ------------------------------------
 
