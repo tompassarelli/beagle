@@ -102,15 +102,27 @@
                   (not (and (> (string-length s) 1)
                             (char=? (string-ref s 1) #\"))))))))
 
+;; Per-form `^{:line :file}` metadata is pure debug provenance — it carries
+;; no runtime semantics, but on a real corpus it dominates emitted size
+;; (los-bb: 96% of bytes, plan.clj 153KB -> 32KB without it) and that bloat
+;; is re-parsed by SCI on every babashka launch. Release builds that don't
+;; need source-mapped stack traces can suppress it with BEAGLE_EMIT_SRCLOC=0.
+;; Default is on, so beagle's own goldens and error provenance are unchanged.
+(define emit-srcloc?
+  (not (member (getenv "BEAGLE_EMIT_SRCLOC") '("0" "off" "false" "no"))))
+
 ;; Prepend Clojure metadata to a raw emission string when the source-location
 ;; table has an entry for the AST node `e` and the emission starts with a
 ;; collection delimiter (metadata only attaches to forms in Clojure).
 (define (with-srcloc-meta e raw)
-  (define tbl (current-emit-src-table))
-  (define loc (and tbl (hash-ref tbl e #f)))
-  (if (and loc (metadatable? raw))
-    (string-append (emit-srcloc loc) raw)
-    raw))
+  (cond
+    [(not emit-srcloc?) raw]
+    [else
+     (define tbl (current-emit-src-table))
+     (define loc (and tbl (hash-ref tbl e #f)))
+     (if (and loc (metadatable? raw))
+       (string-append (emit-srcloc loc) raw)
+       raw)]))
 
 ;; --- top-level -------------------------------------------------------------
 
@@ -180,10 +192,19 @@
        [(Nil) #f]
        [(Any) #f]
        [else
-        ;; User-defined record/scalar/union types — emit as bare name.
-        ;; The JVM compiler only treats it as a class hint if the name
-        ;; resolves; otherwise Clojure ignores it. Safer than guessing.
-        (symbol->string (type-prim-name t))])]
+        ;; User-defined types. A bare-name hint (`^Json`) is only valid if
+        ;; the name resolves to a real class/record at load. It does for
+        ;; program-defined or imported records (defrecord -> a class); it
+        ;; does NOT for opaque `declare-extern` types (e.g. los.json/Json,
+        ;; los.yaml/Yaml), whose clj runtime is a plain value. SCI rejects
+        ;; an unresolvable hint outright ("Unable to resolve symbol: Json"),
+        ;; so emit the hint only for known records and drop it otherwise —
+        ;; a missing hint is always safe; a wrong one breaks the load.
+        (define nm (type-prim-name t))
+        (if (or (hash-has-key? (current-emit-record-fields) nm)
+                (hash-has-key? (current-emit-record-ns) nm))
+          (symbol->string nm)
+          #f)])]
     ;; Parametric / function / union types: no useful hint.
     [else #f]))
 
