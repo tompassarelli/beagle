@@ -93,8 +93,8 @@
      "?"
      '(defn f [(x :- Bool)] :- Int (if x 1 0)))
 
-   (check-js-contains "let -> IIFE"
-     "(() =>"
+   (check-js-contains "let in return position -> inlined const"
+     "const x = 1;"
      '(defn f [] :- Int (let [x 1] (+ x 1))))
 
    (check-js-contains "str -> concat"
@@ -266,16 +266,12 @@
      '(defn safe [(x :- Int)] :- Int
        (try x (catch Exception e 0))))
 
-   (check-js-contains "do -> IIFE"
-     "(() =>"
+   (check-js-contains "do in return position -> inlined stmts"
+     "console.log(\"a\");\n  return console.log(\"b\");"
      '(defn f [] :- Nil (do (println "a") (println "b"))))
 
-   ;; when removed — replaced by if (no else). JS emit-layer renders if
-   ;; (with or without else) as a ternary (`cond ? then : null` when no else).
-   ;; Side-effecting bodies in this position now go through the ternary;
-   ;; runtime behavior is equivalent (ternary evaluates the branch).
-   (check-js-contains "if (no else) -> ternary with null"
-     ": null"
+   (check-js-contains "if (no else) in return position -> if statement"
+     "if (x)"
      '(defn f [(x :- Bool)] :- Nil (if x (println "yes"))))
 
    ;; case removed — replaced by match with literal patterns. JS emits

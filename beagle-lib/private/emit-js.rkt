@@ -474,6 +474,7 @@
 ;; --- context tracking ------------------------------------------------------
 
 (define current-js-context (make-parameter 'stmt))
+(define current-js-inline-scope (make-parameter (set)))
 (define current-js-record-fields (make-parameter (hasheq)))
 (define current-js-record-ns (make-parameter (hasheq)))
 (define current-js-scalar-fns (make-parameter (set)))
@@ -992,7 +993,7 @@
      (define bound (binding-names-from-params (fn-form-params e) (fn-form-rest-param e)))
      (with-bindings bound
        (lambda ()
-         (if (= (length body) 1)
+         (if (and (= (length body) 1) (not (stmt-inline? (car body))))
            (format "~a(~a) => ~a" prefix params (emit-expr (car body)))
            (format "~a(~a) => { ~a }" prefix params (emit-body-return body "")))))]
 
@@ -1587,18 +1588,213 @@
     [else
      (format "return ~a;" (emit-expr e))]))
 
+;; Emit a single expression as the last (returned) thing in a function body.
+;; Inlines let/do/when/when-let/if-let/if to avoid unnecessary IIFEs.
+(define (emit-return-position e indent)
+  (cond
+    [(let-form? e)
+     (define bindings (let-form-bindings e))
+     (define body (let-form-body e))
+     (define let-names (apply append
+       (map (lambda (b) (names-from-binding-target (let-binding-name b))) bindings)))
+     (define shadows? (for/or ([n (in-list let-names)])
+                        (set-member? (current-js-inline-scope) n)))
+     (if shadows?
+       (format "return ~a;" (emit-expr e))
+       (let ()
+         (define-values (bind-strs _)
+           (for/fold ([strs '()] [bound (current-js-bound)])
+                     ([b (in-list bindings)])
+             (define s (parameterize ([current-js-bound bound])
+                         (format "const ~a = ~a;"
+                                 (emit-binding-target (let-binding-name b))
+                                 (emit-expr (let-binding-value b)))))
+             (define new-names (names-from-binding-target (let-binding-name b)))
+             (values (append strs (list s))
+                     (set-union bound (list->set new-names)))))
+         (with-bindings let-names
+           (lambda ()
+             (parameterize ([current-js-inline-scope
+                             (set-union (current-js-inline-scope) (list->set let-names))])
+               (string-append
+                (string-join bind-strs (string-append "\n" indent))
+                "\n" indent
+                (emit-body-return body indent)))))))]
+    [(do-form? e)
+     (emit-body-return (do-form-body e) indent)]
+    [(when-form? e)
+     (define inner (string-append indent "  "))
+     (format "if (~a) {\n~a~a\n~a}"
+             (emit-expr (when-form-cond-expr e))
+             inner
+             (emit-body-return (when-form-body e) inner)
+             indent)]
+    [(when-let-form? e)
+     (define val-str (emit-expr (when-let-form-expr e)))
+     (define name (mangle-name (when-let-form-name e)))
+     (define inner (string-append indent "  "))
+     (with-bindings (list (when-let-form-name e))
+       (lambda ()
+         (format "const ~a = ~a;\n~aif (~a != null) {\n~a~a\n~a}"
+                 name val-str
+                 indent name
+                 inner
+                 (emit-body-return (when-let-form-body e) inner)
+                 indent)))]
+    [(when-some-form? e)
+     (define val-str (emit-expr (when-some-form-expr e)))
+     (define name (mangle-name (when-some-form-name e)))
+     (define inner (string-append indent "  "))
+     (with-bindings (list (when-some-form-name e))
+       (lambda ()
+         (format "const ~a = ~a;\n~aif (~a != null) {\n~a~a\n~a}"
+                 name val-str
+                 indent name
+                 inner
+                 (emit-body-return (when-some-form-body e) inner)
+                 indent)))]
+    [(if-let-form? e)
+     (define val-str (emit-expr (if-let-form-expr e)))
+     (define name (mangle-name (if-let-form-name e)))
+     (define inner (string-append indent "  "))
+     (with-bindings (list (if-let-form-name e))
+       (lambda ()
+         (define then-str (emit-return-position (if-let-form-then-body e) inner))
+         (define else-str (if (if-let-form-else-body e)
+                            (emit-return-position (if-let-form-else-body e) inner)
+                            (format "return null;")))
+         (format "const ~a = ~a;\n~aif (~a != null) {\n~a~a\n~a} else {\n~a~a\n~a}"
+                 name val-str
+                 indent name
+                 inner then-str
+                 indent
+                 inner else-str
+                 indent)))]
+    [(if-some-form? e)
+     (define val-str (emit-expr (if-some-form-expr e)))
+     (define name (mangle-name (if-some-form-name e)))
+     (define inner (string-append indent "  "))
+     (with-bindings (list (if-some-form-name e))
+       (lambda ()
+         (define then-str (emit-return-position (if-some-form-then-body e) inner))
+         (define else-str (emit-return-position (if-some-form-else-body e) inner))
+         (format "const ~a = ~a;\n~aif (~a != null) {\n~a~a\n~a} else {\n~a~a\n~a}"
+                 name val-str
+                 indent name
+                 inner then-str
+                 indent
+                 inner else-str
+                 indent)))]
+    [(and (if-form? e) (not (if-form-else-expr e)))
+     (define inner (string-append indent "  "))
+     (format "if (~a) {\n~a~a\n~a}"
+             (emit-expr (if-form-cond-expr e))
+             inner (emit-return-position (if-form-then-expr e) inner)
+             indent)]
+    [(and (if-form? e) (if-form-else-expr e)
+          (or (stmt-inline? (if-form-then-expr e))
+              (stmt-inline? (if-form-else-expr e))
+              (and (if-form? (if-form-then-expr e))
+                   (not (if-form-else-expr (if-form-then-expr e))))
+              (and (if-form? (if-form-else-expr e))
+                   (not (if-form-else-expr (if-form-else-expr e))))))
+     (define inner (string-append indent "  "))
+     (format "if (~a) {\n~a~a\n~a} else {\n~a~a\n~a}"
+             (emit-expr (if-form-cond-expr e))
+             inner (emit-return-position (if-form-then-expr e) inner)
+             indent
+             inner (emit-return-position (if-form-else-expr e) inner)
+             indent)]
+    [else
+     (format "return ~a;" (emit-expr e))]))
+
+;; Does this expression benefit from statement-position inlining?
+(define (stmt-inline? e)
+  (or (let-form? e) (do-form? e) (when-form? e) (when-let-form? e)
+      (when-some-form? e) (if-let-form? e) (if-some-form? e)
+      (and (if-form? e) (not (if-form-else-expr e)))
+      (and (if-form? e) (if-form-else-expr e)
+           (or (stmt-inline? (if-form-then-expr e))
+               (stmt-inline? (if-form-else-expr e))))))
+
+;; Emit a non-final expression as a statement (no return), inlining where possible.
+(define (emit-stmt-inline e indent)
+  (cond
+    [(let-form? e)
+     (define bindings (let-form-bindings e))
+     (define body (let-form-body e))
+     (define let-names (apply append
+       (map (lambda (b) (names-from-binding-target (let-binding-name b))) bindings)))
+     (define shadows? (for/or ([n (in-list let-names)])
+                        (set-member? (current-js-inline-scope) n)))
+     (if shadows?
+       (emit-expr-stmt e)
+       (let ()
+         (define-values (bind-strs _)
+           (for/fold ([strs '()] [bound (current-js-bound)])
+                     ([b (in-list bindings)])
+             (define s (parameterize ([current-js-bound bound])
+                         (format "const ~a = ~a;"
+                                 (emit-binding-target (let-binding-name b))
+                                 (emit-expr (let-binding-value b)))))
+             (define new-names (names-from-binding-target (let-binding-name b)))
+             (values (append strs (list s))
+                     (set-union bound (list->set new-names)))))
+         (with-bindings let-names
+           (lambda ()
+             (parameterize ([current-js-inline-scope
+                             (set-union (current-js-inline-scope) (list->set let-names))])
+               (string-append
+                (string-join bind-strs (string-append "\n" indent))
+                "\n" indent
+                (emit-body-stmts body indent)))))))]
+    [(do-form? e)
+     (emit-body-stmts (do-form-body e) indent)]
+    [(when-form? e)
+     (define inner (string-append indent "  "))
+     (format "if (~a) {\n~a~a\n~a}"
+             (emit-expr (when-form-cond-expr e))
+             inner
+             (emit-body-stmts (when-form-body e) inner)
+             indent)]
+    [(when-let-form? e)
+     (define val-str (emit-expr (when-let-form-expr e)))
+     (define name (mangle-name (when-let-form-name e)))
+     (define inner (string-append indent "  "))
+     (with-bindings (list (when-let-form-name e))
+       (lambda ()
+         (format "const ~a = ~a;\n~aif (~a != null) {\n~a~a\n~a}"
+                 name val-str
+                 indent name
+                 inner
+                 (emit-body-stmts (when-let-form-body e) inner)
+                 indent)))]
+    [(and (if-form? e) (not (if-form-else-expr e)))
+     (define inner (string-append indent "  "))
+     (format "if (~a) {\n~a~a\n~a}"
+             (emit-expr (if-form-cond-expr e))
+             inner
+             (emit-body-stmts-inline (list (if-form-then-expr e)) inner)
+             indent)]
+    [else
+     (emit-expr-stmt e)]))
+
+(define (emit-body-stmts-inline exprs indent)
+  (string-join (map (lambda (e) (emit-stmt-inline e indent)) exprs)
+               (string-append "\n" indent)))
+
 (define (emit-body-return exprs indent)
   (cond
     [(null? exprs) ""]
     [(= (length exprs) 1)
-     (format "return ~a;" (emit-expr (car exprs)))]
+     (emit-return-position (car exprs) indent)]
     [else
      (define stmts (take exprs (- (length exprs) 1)))
      (define last-e (last exprs))
      (string-append
-      (string-join (map (lambda (e) (emit-expr-stmt e)) stmts) (string-append "\n" indent))
+      (string-join (map (lambda (e) (emit-stmt-inline e indent)) stmts) (string-append "\n" indent))
       (string-append "\n" indent)
-      (format "return ~a;" (emit-expr last-e)))]))
+      (emit-return-position last-e indent))]))
 
 (define (emit-body-stmts exprs indent)
   (string-join (map (lambda (e) (emit-expr-stmt e)) exprs)
