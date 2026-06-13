@@ -1,0 +1,10 @@
+(ns col)
+(defenum Voxel-Type :air :stone :grass :water)
+(defrecord Color [r :- F32 g :- F32 b :- F32])
+(defn voxel-color [v :- Voxel-Type] :- Color
+  (condp = v
+    :air   (->Color 0.0 0.0 0.0)
+    :stone (->Color 0.5 0.5 0.5)
+    :grass (->Color 0.3 0.7 0.2)
+    :water (->Color 0.2 0.4 0.8)
+    (->Color 1.0 0.0 1.0)))

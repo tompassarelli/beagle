@@ -1,0 +1,3 @@
+(ns g)
+(defn key3 [a :- Int b :- Int c :- Int] :- String
+  (str a "," b "," c))

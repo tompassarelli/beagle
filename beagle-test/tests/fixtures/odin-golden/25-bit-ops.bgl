@@ -1,0 +1,6 @@
+(ns g)
+(defn hash32 [x :- Int y :- Int] :- Int
+  (let [h  (bit-xor (* x 374761393) (* y 668265263))
+        h2 (bit-xor h (bit-shift-right h 13))
+        h3 (* h2 1103515245)]
+    (bit-and (bit-xor h3 (bit-shift-right h3 16)) 2147483647)))

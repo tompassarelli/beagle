@@ -1,0 +1,7 @@
+(ns g)
+(defrecord Grid [cells :- (Arr 4 (Arr 4 (Arr 4 Int)))])
+(defn fill [grid :- (Ptr Grid)] :- Nil
+  (doseq [x (range 4)]
+    (doseq [y (range 4)]
+      (doseq [z (range 4)]
+        (set! (nth (nth (nth (:cells (deref grid)) x) y) z) (+ x (+ y z)))))))

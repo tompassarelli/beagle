@@ -1,4 +1,3 @@
-#lang beagle/odin
 (ns e)
 
 (defenum Color :red :green :blue)
