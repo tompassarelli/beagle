@@ -394,6 +394,7 @@
  BRACKET-TAG
  MAP-TAG
  SET-TAG
+ PRIMITIVES
  BUILTIN-UNION-ALIASES
  (struct-out type-prim)
  (struct-out type-fn)

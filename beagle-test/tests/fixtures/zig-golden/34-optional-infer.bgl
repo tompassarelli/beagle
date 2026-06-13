@@ -1,0 +1,23 @@
+(ns g)
+;; Inferred-optional let-bindings: a local bound to an optional-returning
+;; call (declared extern → String?, parse-long → Int?, 2-arg get → V?) is
+;; tracked as optional by the emitter even with NO :- annotation, so its
+;; guarded uses auto-unwrap (.?). The checker proves the guard; the emitter
+;; reconstructs the optionality from the same signatures (it does not write
+;; inferred types back onto the let-binding AST).
+(declare-extern los.rt/lookup [String -> String?])
+
+;; extern returning String? — `hit` is inferred-optional, unwrapped under some?
+(defn resolve-or [key :- String fallback :- String] :- String
+  (let [hit (los.rt/lookup key)]
+    (if (some? hit) hit fallback)))
+
+;; parse-long returns Int? — `n` is inferred-optional, unwrapped under some?
+(defn parsed-or-zero [s :- String] :- Int
+  (let [n (parse-long s)]
+    (if (some? n) n 0)))
+
+;; 2-arg get on a typed map returns V? — `v` is inferred-optional
+(defn count-or-default [m :- (Map String Int) k :- String fallback :- Int] :- Int
+  (let [v (get m k)]
+    (if (nil? v) fallback v)))

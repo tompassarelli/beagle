@@ -25,10 +25,18 @@
    'into       (fn-of '(Any Any) 'Any)
    'conj       (fn-of '(Any) 'Any #:rest 'Any)
    'cons       (fn-of '(Any Any) 'Any)
-   'concat     (fn-of '() 'Any #:rest 'Any)
+   ;; concat/distinct/sort: parametric over the element type so the typed
+   ;; pipeline carries (Vec A) through (the zig backend needs this — it
+   ;; can't bind a native loop's element type to Any). concat stays
+   ;; variadic; the extra vecs share the element type.
+   'concat     (poly-fn '(A) (list (type-app 'Vec (list (tv 'A))))
+                        (type-app 'Vec (list (tv 'A)))
+                        #:rest (type-app 'Vec (list (tv 'A))))
    'reverse    (fn-of '(Any) 'Any)
-   'distinct   (fn-of '(Any) 'Any)
-   'sort       (fn-of '(Any) 'Any #:rest 'Any)
+   'distinct   (poly-fn '(A) (list (type-app 'Vec (list (tv 'A))))
+                        (type-app 'Vec (list (tv 'A))))
+   'sort       (poly-fn '(A) (list (type-app 'Vec (list (tv 'A))))
+                        (type-app 'Vec (list (tv 'A))))
    'sort-by    (fn-of '(Any Any) 'Any #:rest 'Any)
    'ffirst     (fn-of '(Any) 'Any)
    ;; --- higher-order (polymorphic where useful) -----------------------------

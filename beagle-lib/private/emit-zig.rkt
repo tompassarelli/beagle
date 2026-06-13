@@ -81,7 +81,18 @@
        [(Ctx) "*rt.Ctx"]
        [(Any) (unsupported "Any-typed boundary"
                            "annotate with a concrete type")]
-       [else (ident (type-prim-name t))])] ; user record/struct name
+       [else
+        ;; An opaque handle type provided by a non-core runtime module
+        ;; (e.g. los.yaml's Yaml parse-tree handle) threads as a const
+        ;; pointer into that module's type — beagle never constructs or
+        ;; inspects it, only passes it to the module's accessors. Owned
+        ;; module is derived from the externs that mention the type (see
+        ;; build-opaque-handles), so the core prelude stays app-clean.
+        (cond
+          [(hash-ref (current-opaque-handles) (type-prim-name t) #f)
+           => (lambda (mod)
+                (format "*const ~a.~a" mod (type-prim-name t)))]
+          [else (ident (type-prim-name t))])])] ; user record/struct name
     [(type-app? t)
      (case (type-app-ctor t)
        [(Vec) (format "[]const ~a" (type->zig (car (type-app-args t))))]
@@ -108,11 +119,51 @@
         (hash-set h (record-form-name f) (record-form-fields f))
         h)))
 
+;; Opaque runtime-handle types: prim type names that appear in a
+;; non-core extern's signature but are neither beagle primitives nor a
+;; record defined in this program. Each maps to the Zig module its extern
+;; resolves to (los.yaml/* → los_yaml). type->zig then lowers the bare
+;; name to *const <module>.<Type>. Keeping this derivation in the emitter
+;; (not the core prelude) is what lets an application declare an opaque
+;; handle without the language runtime knowing its name.
+(define (build-opaque-handles prog records)
+  (define (walk t module h)
+    (cond
+      [(type-prim? t)
+       (define n (type-prim-name t))
+       (if (and (not (memq n PRIMITIVES))
+                (not (eq? n 'Ctx))
+                (not (hash-has-key? records n)))
+           (hash-set h n module)
+           h)]
+      [(type-app? t) (for/fold ([h h]) ([a (in-list (type-app-args t))]) (walk a module h))]
+      [(type-union? t) (for/fold ([h h]) ([a (in-list (type-union-alts t))]) (walk a module h))]
+      [(type-fn? t)
+       (define h1 (for/fold ([h h]) ([p (in-list (type-fn-params t))]) (walk p module h)))
+       (define h2 (if (type-fn-rest-type t) (walk (type-fn-rest-type t) module h1) h1))
+       (walk (type-fn-ret t) module h2)]
+      [else h]))
+  (for/fold ([h (hasheq)]) ([(name t) (in-hash (program-externs prog))])
+    (define s (symbol->string name))
+    (define m (regexp-match #rx"^([^/]+)/(.+)$" s))
+    (cond
+      [(not m) h]
+      [else
+       (define module (extern-ns->module (cadr m)))
+       (if (string=? module "rt") h (walk t module h))])))
+
 ;; --- emission state --------------------------------------------------------------
 
 (define current-records (make-parameter (hasheq)))
 (define current-externs (make-parameter (hasheq))) ; declared-extern name → type
 (define current-requires (make-parameter (hasheq))) ; alias sym → namespace sym
+(define current-fn-returns (make-parameter (hasheq))) ; local defn name → return type
+;; opaque-handle type-name sym → owning Zig module string (los_yaml, ...).
+;; An opaque handle is a runtime-module type beagle threads but never
+;; builds/inspects (the YAML parse-tree handle is the motivating case); it
+;; lowers to *const <module>.<Type>. Derived from extern signatures so the
+;; core prelude carries no application type names.
+(define current-opaque-handles (make-parameter (hasheq)))
 
 ;; Namespaces the CORE prelude (beagle_rt.zig, imported as `rt`)
 ;; provides directly: the clojure/babashka stdlib the CLI runtime
@@ -147,6 +198,53 @@
 
 (define (optional-binding? sym)
   (memq sym (current-optionals)))
+
+;; The return type of a call expression, if the callee's signature is
+;; known: a declared extern (current-externs holds its type-fn) or a local
+;; defn (current-fn-returns). #f when unknown. This lets the emitter learn
+;; that an *inferred* let-binding holds an optional, matching what the
+;; checker proved — the checker doesn't write inferred types back onto the
+;; immutable let-binding AST, so the emitter reconstructs it from the same
+;; signatures the checker used.
+(define (call-return-type e)
+  (and (call-form? e)
+       (symbol? (call-form-fn e))
+       (let ([fn (call-form-fn e)])
+         (cond
+           [(hash-ref (current-externs) fn #f)
+            => (lambda (t) (and (type-fn? t) (type-fn-ret t)))]
+           [(hash-ref (current-fn-returns) fn #f) => values]
+           [else #f]))))
+
+;; Core stdlib calls that yield an optional (?T) in the runtime, by the
+;; beagle name in fn position. These mirror the checker's nullable-honest
+;; stdlib returns (parse-long → Int?, fs/parent → String?, get/2 → V?);
+;; the emitter only needs the optionality bit to register the binding so
+;; its guarded uses auto-unwrap. (`get` is map lookup — 2-arg only; a
+;; 3-arg get has a default and is non-optional.)
+(define (stdlib-call-optional? e)
+  (define fn (call-form-fn e))
+  (define args (call-form-args e))
+  (cond
+    [(and (eq? fn 'get) (= 2 (length args))) #t]
+    [(eq? fn 'parse-long) #t]
+    ;; fs/parent (any alias of babashka.fs) → nil at a filesystem root.
+    [(and (symbol? fn)
+          (let ([m (regexp-match #rx"/(.+)$" (symbol->string fn))])
+            (and m (equal? (cadr m) "parent")))) #t]
+    [else #f]))
+
+;; Does a let-binding value yield an optional (?T) type? Used to register
+;; inferred-optional locals so their guarded uses auto-unwrap (.?). Trusts
+;; call-return types we can see (externs + local defns) plus the known
+;; optional-returning core stdlib fns; anything else is treated as
+;; non-optional, exactly as before.
+(define (value-optional? e)
+  (and (call-form? e)
+       (symbol? (call-form-fn e))
+       (let ([rt (call-return-type e)])
+         (or (and rt (optional-of rt) #t)
+             (stdlib-call-optional? e)))))
 
 ;; --- operators --------------------------------------------------------------------
 
@@ -213,7 +311,10 @@
   (format "~a{ ~a }" (ident rec)
           (string-join
            (for/list ([f (in-list fields)] [a (in-list args)])
-             (format ".~a = ~a" (ident (param-name f)) (emit-expr a)))
+             ;; field types flow into the arg so container literals ([]
+             ;; / {} / [a b]) lower against the declared field type.
+             (format ".~a = ~a" (ident (param-name f))
+                     (emit-typed-value a (param-type f))))
            ", ")))
 
 ;; --- typed map construction ---------------------------------------------------
@@ -237,12 +338,21 @@
             ([pr (in-list (map-form-pairs e))])
     (format "~a.assoc(~a, ~a)" acc (emit-map-key (car pr)) (emit-expr (cdr pr)))))
 
-;; Emit a value against an expected type: map literals need the type;
-;; everything else ignores it. The one place type flows into emit.
+;; Emit a value against an expected type. Container literals need the
+;; type to lower: a map literal picks rt.Map(V); a vector literal lowers
+;; to a typed `&.{...}` slice (the annotation lets zig coerce, and `[]`
+;; → an empty slice). Everything else ignores the expected type. This is
+;; the one place type flows into emit, so it's reused everywhere a typed
+;; slot accepts a literal (def, let, reduce init, ctor args).
 (define (emit-typed-value v expected)
-  (if (and (map-form? v) expected (map-type? expected))
-      (emit-map-literal v (map-vtype expected))
-      (emit-expr v)))
+  (cond
+    [(and (map-form? v) expected (map-type? expected))
+     (emit-map-literal v (map-vtype expected))]
+    [(and (vec-form? v) expected (type-app? expected)
+          (eq? (type-app-ctor expected) 'Vec))
+     (format "&.{ ~a }"
+             (string-join (map emit-expr (vec-form-items v)) ", "))]
+    [else (emit-expr v)]))
 
 ;; Zig peer-type resolution can't unify branches that are ALL bare
 ;; integer/float literals under runtime control flow ("value with
@@ -318,9 +428,11 @@
     (for/list ([b (in-list bindings)])
       (unless (symbol? (let-binding-name b))
         (unsupported "destructuring binding" "bind fields explicitly in v1"))
+      ;; Optional iff the declared type says so, or — for an inferred local
+      ;; with no annotation — the value's call-return type is ?T.
       (define new-opt
         (let ([t (let-binding-type b)])
-          (and t (optional-of t))))
+          (if t (optional-of t) (value-optional? (let-binding-value b)))))
       (begin0
         (format "const ~a = ~a; "
                 (ident (let-binding-name b))
@@ -543,6 +655,22 @@
        (unsupported "conj" "zig backend spells it (conj ctx v x) — allocation needs ctx"))
      (format "rt.conj(~a, ~a, ~a)"
              (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args)))]
+    ;; (sort xs) / (distinct xs): fresh CLI-arena slices, element type
+    ;; comptime-inferred from the input (rt.* anytype). No alloc ctx —
+    ;; the CLI arena is process-lifetime, reclaimed at exit.
+    [(and (eq? fn 'sort) (= 1 (length args)))
+     (format "rt.sort(~a)" (emit-expr (car args)))]
+    [(eq? fn 'sort)
+     (unsupported "sort" "zig backend supports (sort xs) only — no comparator arg in v1")]
+    [(and (eq? fn 'distinct) (= 1 (length args)))
+     (format "rt.distinct(~a)" (emit-expr (car args)))]
+    ;; (concat a b ...) — left-fold to binary rt.concat (same element type).
+    [(and (eq? fn 'concat) (>= (length args) 2))
+     (for/fold ([acc (emit-expr (car args))]) ([a (in-list (cdr args))])
+       (format "rt.concat(~a, ~a)" acc (emit-expr a)))]
+    [(and (eq? fn 'concat) (= 1 (length args))) (emit-expr (car args))]
+    [(eq? fn 'concat)
+     (unsupported "concat" "zig backend needs at least one (Vec A) arg")]
     ;; (str a b ...) — stringify each arg (rt.str1, comptime-dispatched)
     ;; and concatenate. (str) → "", (str x) → rt.str1(x).
     [(eq? fn 'str)
@@ -602,8 +730,11 @@
          (line! (format "const ~a = ~a;"
                         (ident (let-binding-name b))
                         (emit-typed-value (let-binding-value b) (let-binding-type b))))
-         (let ([t (let-binding-type b)])
-           (when (and t (optional-of t))
+         ;; Optional iff declared ?T, or — inferred local — the value's
+         ;; call-return type is ?T (same rule as emit-block-expr).
+         (let* ([t (let-binding-type b)]
+                [opt? (if t (optional-of t) (value-optional? (let-binding-value b)))])
+           (when opt?
              (current-optionals (cons (let-binding-name b) (current-optionals))))))
        (loop (let-form-body lf))]
       [(list (? do-form? df)) (loop (do-form-body df))]
@@ -673,13 +804,7 @@
   (define v (def-form-value f))
   (define rhs
     (parameterize ([label-counter (box 0)])
-      (if (and (vec-form? v)
-               (type-app? (def-form-type f))
-               (eq? (type-app-ctor (def-form-type f)) 'Vec))
-          ;; typed slice literal: the annotation lets &.{...} coerce
-          (format "&.{ ~a }"
-                  (string-join (map emit-expr (vec-form-items v)) ", "))
-          (emit-typed-value v (def-form-type f)))))
+      (emit-typed-value v (def-form-type f))))
   (format "pub const ~a: ~a = ~a;"
           (ident (def-form-name f))
           (type->zig (def-form-type f))
@@ -1073,9 +1198,20 @@
       mod))
   (remove-duplicates mods))
 
+;; local defn name → declared return type (for call-return-type / optional
+;; inference on inferred let-bindings whose value is a local call).
+(define (build-fn-returns prog)
+  (for/fold ([h (hasheq)]) ([f (in-list (program-forms prog))])
+    (if (and (defn-form? f) (defn-form-return-type f))
+        (hash-set h (defn-form-name f) (defn-form-return-type f))
+        h)))
+
 (define (zig-emit-program prog)
-  (parameterize ([current-records (build-record-table prog)]
+  (define records (build-record-table prog))
+  (parameterize ([current-records records]
                  [current-externs (program-externs prog)]
+                 [current-fn-returns (build-fn-returns prog)]
+                 [current-opaque-handles (build-opaque-handles prog records)]
                  [current-requires
                   (for/fold ([h (hasheq)]) ([r (in-list (program-requires prog))])
                     (if (require-entry-alias r)

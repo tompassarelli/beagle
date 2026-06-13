@@ -56,14 +56,36 @@ pub fn abs_i64(x: i64) i64 {
     return if (x < 0) -x else x;
 }
 
-/// clojure = : content equality. Strings ([]const u8) compare by bytes
-/// (slice == would compare fat-pointers); everything else by value.
-/// Comptime-dispatched so emit stays syntax-directed.
+/// Is T a byte-string the runtime treats as a string value? Either a
+/// `[]const u8` slice or a string-literal pointer (`*const [N:0]u8`) —
+/// both coerce to `[]const u8`. Lets `eq` compare a bound `[]const u8`
+/// against a `"literal"` (whose type is `*const [N:0]u8`, not a slice).
+fn isByteString(comptime T: type) bool {
+    return switch (@typeInfo(T)) {
+        .pointer => |p| switch (p.size) {
+            .slice => p.child == u8,
+            .one => switch (@typeInfo(p.child)) {
+                .array => |arr| arr.child == u8,
+                else => false,
+            },
+            else => false,
+        },
+        else => false,
+    };
+}
+
+/// clojure = : content equality. Strings compare by bytes (slice == would
+/// compare fat-pointers, and a string literal isn't even a slice type);
+/// everything else by value. Comptime-dispatched so emit stays
+/// syntax-directed.
 pub fn eq(a: anytype, b: anytype) bool {
-    if (@TypeOf(a) == []const u8 and @TypeOf(b) == []const u8) {
-        return std.mem.eql(u8, a, b);
+    if (comptime (isByteString(@TypeOf(a)) and isByteString(@TypeOf(b)))) {
+        const sa: []const u8 = a;
+        const sb: []const u8 = b;
+        return std.mem.eql(u8, sa, sb);
+    } else {
+        return a == b;
     }
-    return a == b;
 }
 
 // --- v1 vectors: arena slices ------------------------------------------------
@@ -115,6 +137,20 @@ pub fn cliAlloc() std.mem.Allocator {
     return cli_arena_state.?.allocator();
 }
 
+// --- filesystem I/O context --------------------------------------------------
+// zig 0.17 routes all blocking fs through a threaded `std.Io` instance, not
+// the old free-standing `std.fs.cwd()` calls. A CLI does synchronous,
+// single-threaded I/O, so one lazily-initialized Threaded executor + its
+// `io()` handle backs every slurp/spit/access/stat/list here and in the
+// application runtimes (los_rt imports this `io()` so there is one executor).
+var io_state: ?std.Io.Threaded = null;
+pub fn io() std.Io {
+    if (io_state == null) {
+        io_state = std.Io.Threaded.init(cliAlloc(), .{});
+    }
+    return io_state.?.io();
+}
+
 /// Typed map for the CLI target. Keyword and string keys both lower to
 /// []const u8 keys; the value type V is concrete (records, ints, slices,
 /// other maps) — never a dynamic union. `assoc` is immutable (clone+put)
@@ -164,7 +200,7 @@ pub fn trim(s: []const u8) []const u8 {
     return std.mem.trim(u8, s, WS);
 }
 pub fn trimr(s: []const u8) []const u8 {
-    return std.mem.trimRight(u8, s, WS);
+    return std.mem.trimEnd(u8, s, WS);
 }
 pub fn subs(s: []const u8, start: i64) []const u8 {
     return s[@intCast(start)..];
@@ -223,25 +259,27 @@ pub fn str1(x: anytype) []const u8 {
 
 // --- file I/O (clojure.core slurp/spit) -------------------------------------
 pub fn slurp(p: []const u8) []const u8 {
-    const f = std.fs.cwd().openFile(p, .{}) catch @panic("slurp: open failed");
-    defer f.close();
-    return f.readToEndAlloc(cliAlloc(), 1 << 30) catch @panic("slurp: read failed");
+    return std.Io.Dir.cwd().readFileAlloc(io(), p, cliAlloc(), .unlimited) catch
+        @panic("slurp: read failed");
 }
 pub fn spit(p: []const u8, content: []const u8) void {
-    const f = std.fs.cwd().createFile(p, .{}) catch @panic("spit: create failed");
-    defer f.close();
-    f.writeAll(content) catch @panic("spit: write failed");
+    const f = std.Io.Dir.cwd().createFile(io(), p, .{}) catch @panic("spit: create failed");
+    defer f.close(io());
+    f.writeStreamingAll(io(), content) catch @panic("spit: write failed");
 }
 
 // --- paths (babashka.fs) -----------------------------------------------------
-pub fn parent(p: []const u8) []const u8 {
-    return std.fs.path.dirname(p) orelse "";
+/// (fs/parent p) — the parent directory, or null at a filesystem root.
+/// Nullable to match clojure's babashka.fs/parent (→ nil for a root) and
+/// the checker's String? typing, so source nil-guards lower honestly.
+pub fn parent(p: []const u8) ?[]const u8 {
+    return std.fs.path.dirname(p);
 }
 pub fn path(a: []const u8, b: []const u8) []const u8 {
     return std.fs.path.join(cliAlloc(), &.{ a, b }) catch @panic("oom");
 }
 pub fn exists(p: []const u8) bool {
-    std.fs.cwd().access(p, .{}) catch return false;
+    std.Io.Dir.cwd().access(io(), p, .{}) catch return false;
     return true;
 }
 
@@ -255,4 +293,48 @@ pub fn compare(a: []const u8, b: []const u8) i64 {
         .eq => 0,
         .gt => 1,
     };
+}
+
+// --- clojure.core seq ops (sorted/distinct/concat) --------------------------
+// Allocate fresh slices in the CLI arena (immutable, like clojure). Element
+// type is comptime-inferred from the input slice, so one emit serves Int,
+// String, and other scalar slices. Ordering: strings lexicographic (matches
+// clojure's compare on strings), numerics by value.
+fn lessThan(comptime T: type, _: void, a: T, b: T) bool {
+    if (T == []const u8) return std.mem.order(u8, a, b) == .lt;
+    return a < b;
+}
+/// (sort xs) → new sorted slice (ascending). Stable copy in the CLI arena.
+pub fn sort(xs: anytype) @TypeOf(xs) {
+    const T = std.meta.Elem(@TypeOf(xs));
+    const out = cliAlloc().alloc(T, xs.len) catch @panic("oom");
+    @memcpy(out, xs);
+    std.mem.sort(T, out, {}, struct {
+        fn lt(_: void, a: T, b: T) bool {
+            return lessThan(T, {}, a, b);
+        }
+    }.lt);
+    return out;
+}
+/// (distinct xs) → new slice, first occurrence kept, order preserved.
+pub fn distinct(xs: anytype) @TypeOf(xs) {
+    const T = std.meta.Elem(@TypeOf(xs));
+    const out = cliAlloc().alloc(T, xs.len) catch @panic("oom");
+    var n: usize = 0;
+    outer: for (xs) |x| {
+        for (out[0..n]) |y| {
+            if (eq(x, y)) continue :outer;
+        }
+        out[n] = x;
+        n += 1;
+    }
+    return out[0..n];
+}
+/// (concat a b) → new slice a ++ b (two args; same element type).
+pub fn concat(a: anytype, b: @TypeOf(a)) @TypeOf(a) {
+    const T = std.meta.Elem(@TypeOf(a));
+    const out = cliAlloc().alloc(T, a.len + b.len) catch @panic("oom");
+    @memcpy(out[0..a.len], a);
+    @memcpy(out[a.len..], b);
+    return out;
 }

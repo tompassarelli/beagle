@@ -40,5 +40,19 @@ pub fn error_exit(msg: []const u8) noreturn {
     std.process.exit(1);
 }
 pub fn epoch_seconds() i64 {
-    return std.time.timestamp();
+    // zig 0.17 routes the realtime clock through std.Io (std.time.timestamp
+    // is gone). The stand-in just needs a value of the right type.
+    return std.Io.Timestamp.now(io(), .real).toSeconds();
+}
+var io_state: ?std.Io.Threaded = null;
+fn io() std.Io {
+    if (io_state == null) io_state = std.Io.Threaded.init(alloc(), .{});
+    return io_state.?.io();
+}
+/// String? — null for the "missing" key, exercising the emitter's
+/// inferred-optional unwrap (a let-binding from this call auto-unwraps
+/// at its guarded use sites).
+pub fn lookup(key: []const u8) ?[]const u8 {
+    if (std.mem.eql(u8, key, "missing")) return null;
+    return key;
 }
