@@ -320,7 +320,7 @@
      (define field (substring (symbol->string (kw-access-kw target)) 1))
      (format "~a.~a" (emit-expr (kw-access-target target))
              (ident (string->symbol field)))]
-    [(and (call-form? target) (eq? (call-form-fn target) 'nth)
+    [(and (call-form? target) (memq (call-form-fn target) '(nth get))
           (= 2 (length (call-form-args target))))
      (format "~a[~a]"
              (emit-expr (car (call-form-args target)))
@@ -739,7 +739,7 @@
     ;; bit ops
     [(eq? fn 'bit-and) (format "(~a & ~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
     [(eq? fn 'bit-or) (format "(~a | ~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
-    [(eq? fn 'bit-xor) (format "(~a ~ ~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
+    [(eq? fn 'bit-xor) (format "(~a ~~ ~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
     [(eq? fn 'bit-shift-left)
      (format "(~a << ~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
     [(eq? fn 'bit-shift-right)
