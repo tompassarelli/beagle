@@ -192,17 +192,18 @@
        [(Nil) #f]
        [(Any) #f]
        [else
-        ;; User-defined types. A bare-name hint (`^Json`) is only valid if
-        ;; the name resolves to a real class/record at load. It does for
-        ;; program-defined or imported records (defrecord -> a class); it
-        ;; does NOT for opaque `declare-extern` types (e.g. los.json/Json,
-        ;; los.yaml/Yaml), whose clj runtime is a plain value. SCI rejects
-        ;; an unresolvable hint outright ("Unable to resolve symbol: Json"),
-        ;; so emit the hint only for known records and drop it otherwise —
-        ;; a missing hint is always safe; a wrong one breaks the load.
+        ;; A bare-name hint (`^Rec`) only resolves if the defrecord that
+        ;; creates the class is emitted in THIS file. So hint only records
+        ;; defined in this same module — in the field table but NOT imported.
+        ;; Imported records (in record-ns) would need an (:import ...) the
+        ;; emitter doesn't produce, and opaque `declare-extern` types
+        ;; (los.json/Json, los.yaml/Yaml — in neither table) have no class at
+        ;; all. SCI tolerates such dangling hints, but the JVM/GraalVM AOT
+        ;; compiler rejects them ("Unable to resolve classname"). A missing
+        ;; hint is always safe; a wrong one breaks the load.
         (define nm (type-prim-name t))
-        (if (or (hash-has-key? (current-emit-record-fields) nm)
-                (hash-has-key? (current-emit-record-ns) nm))
+        (if (and (hash-has-key? (current-emit-record-fields) nm)
+                 (not (hash-has-key? (current-emit-record-ns) nm)))
           (symbol->string nm)
           #f)])]
     ;; Parametric / function / union types: no useful hint.
@@ -325,11 +326,23 @@
      ;; param struct. Untyped slots (type = #f) emit no metadata.
      ;; Destructure params (map-destructure / seq-destructure) have no
      ;; type slot — emit no metadata for them.
-     (define name-tag (clj-tag-prefix (defn-form-return-type f)))
+     ;; The JVM's primitive-arg fn interfaces only go to 4 args, so a fn with
+     ;; >4 params can't carry ^long/^double hints (on args OR return) — clj
+     ;; rejects it ("fns taking primitives support only 4 or fewer args"). SCI
+     ;; ignores the hint, but JVM/GraalVM AOT won't compile it. Suppress
+     ;; primitive hints there; class hints (^String etc.) don't hit the limit.
+     (define suppress-prim? (> (length (defn-form-params f)) 4))
+     (define (defn-tag-prefix t)
+       (define tag (and t (clj-tag-for-type t)))
+       (cond
+         [(not tag) ""]
+         [(and suppress-prim? (or (string=? tag "long") (string=? tag "double"))) ""]
+         [else (format "^~a " tag)]))
+     (define name-tag (defn-tag-prefix (defn-form-return-type f)))
      (define param-tags
        (for/list ([p (in-list (defn-form-params f))])
          (cond
-           [(param? p) (clj-tag-prefix (param-type p))]
+           [(param? p) (defn-tag-prefix (param-type p))]
            [else ""])))
      (format "(~a ~a~a~a [~a]\n  ~a)"
              kw
