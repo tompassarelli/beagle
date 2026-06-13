@@ -1162,8 +1162,8 @@
         (define prop
           (if (and (> (string-length method-str) 2)
                    (string=? (substring method-str 0 2) ".-"))
-            (substring method-str 2)
-            (mangle-str (substring method-str 1))))
+            (mangle-prop (substring method-str 2))
+            (mangle-prop (substring method-str 1))))
         (format "(~a.~a = ~a)" (emit-expr (method-call-target target)) prop val)]
        [(symbol? target)
         (format "(~a = ~a)" (mangle-name target) val)]

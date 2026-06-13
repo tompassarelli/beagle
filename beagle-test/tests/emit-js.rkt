@@ -713,4 +713,14 @@
                             '(defn f [(xs :- (Vec Int))] :- Int (count xs))))))))
      (check-equal? stderr-output ""
                    "expected no warning for translated function"))
+
+   (check-js-contains "set! .- property mangles kebab to underscore"
+     "(obj.my_prop = 99)"
+     '(declare-extern obj Any)
+     '(defn f [(obj :- Any)] :- Any (set! (.-my-prop obj) 99)))
+
+   (check-js-contains ".- read property mangles kebab to underscore"
+     "obj.my_prop"
+     '(declare-extern obj Any)
+     '(defn f [(obj :- Any)] :- Any (.-my-prop obj)))
  ))
