@@ -9,9 +9,11 @@ pub fn sum(ctx: *rt.Ctx, xs: []const i64) i64 {
 }
 
 pub fn doubled(ctx: *rt.Ctx, xs: []const i64) []const i64 {
-    return blk1: { const __src = xs; const __out = ctx.tick.alloc(i64, __src.len) catch @panic("oom"); for (__src, 0..) |x, __i| { __out[__i] = (x * 2); } break :blk1 __out; };
+    _ = ctx;
+    return blk1: { const __src = xs; const __out = rt.cliAlloc().alloc(i64, __src.len) catch @panic("oom"); for (__src, 0..) |x, __i| { __out[__i] = (x * 2); } break :blk1 __out; };
 }
 
 pub fn positives(ctx: *rt.Ctx, xs: []const i64) []const i64 {
-    return blk1: { const __src = xs; const __out = ctx.tick.alloc(std.meta.Elem(@TypeOf(__src)), __src.len) catch @panic("oom"); var __n: usize = 0; for (__src) |x| { if ((x > 0)) { __out[__n] = x; __n += 1; } } break :blk1 __out[0..__n]; };
+    _ = ctx;
+    return blk1: { const __src = xs; const __out = rt.cliAlloc().alloc(std.meta.Elem(@TypeOf(__src)), __src.len) catch @panic("oom"); var __n: usize = 0; for (__src) |x| { if ((x > 0)) { __out[__n] = x; __n += 1; } } break :blk1 __out[0..__n]; };
 }

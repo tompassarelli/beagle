@@ -185,9 +185,10 @@
   (check-false (regexp-match? #rx"alloc" out))              ; reduce folds, no alloc
   (check-false (regexp-match? #rx"rt.reduce" out)))         ; not a runtime HOF call
 
-(test-case "mapv: fn inlined, output allocated in the tick arena, elem type from :- U"
+(test-case "mapv: fn inlined, output allocated in the CLI arena, elem type from :- U"
   (define out (ho-emit "(Vec Int)\n  (mapv (fn [x :- Int] :- Int (* x 2)) xs)"))
-  (check-true  (regexp-match? #rx"ctx.tick.alloc.i64" out)) ; elem type from :- Int
+  (check-true  (regexp-match? #rx"cliAlloc" out))          ; CLI run-arena
+  (check-true  (regexp-match? #rx"alloc.i64" out))         ; elem type from :- Int
   (check-true  (regexp-match? #rx"= .x . 2." out))          ; body inlined
   (check-false (regexp-match? #rx"rt.mapv" out)))
 

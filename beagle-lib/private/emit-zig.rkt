@@ -36,11 +36,14 @@
   (string-replace str "-" "_"))
 
 (define (fn-ident s)
-  ;; function names: kebab → camelCase (matches the handwritten harness:
-  ;; belief-update → beliefUpdate).
-  (define parts (string-split (symbol->string s) "-"))
-  (when (regexp-match? #rx"[?!*+<>=/]" (symbol->string s))
+  ;; function names: kebab → camelCase (belief-update → beliefUpdate).
+  ;; Clojure predicate/mutator markers ?! are dropped (valid-iso-date? →
+  ;; validIsoDate); applied identically to defn names and call sites, so
+  ;; they round-trip. Operator chars still can't be fn names.
+  (define clean (regexp-replace* #rx"[?!]" (symbol->string s) ""))
+  (when (regexp-match? #rx"[*+<>=/]" clean)
     (unsupported "function name" (format "~a" s)))
+  (define parts (string-split clean "-"))
   (apply string-append
          (car parts)
          (map (lambda (p)
@@ -132,7 +135,7 @@
 
 (define VARIADIC-OPS (hasheq '+ "+" '* "*" 'and "and" 'or "or"
                              'bit-and "&" 'bit-or "|" 'bit-xor "^"))
-(define BINARY-OPS (hasheq '< "<" '> ">" '<= "<=" '>= ">=" '= "==" 'not= "!="))
+(define BINARY-OPS (hasheq '< "<" '> ">" '<= "<=" '>= ">="))
 
 (define (emit-args args) (map emit-expr args))
 
@@ -325,10 +328,26 @@
         (unsupported "destructuring loop binding"))
       (ident (let-binding-name b))))
   (define lbl (fresh-label))
+  ;; literal inits need an explicit type (a loop var seeded with "" or 0
+  ;; would infer a comptime literal type the body then can't reassign).
+  (define (init-type b)
+    (define t (let-binding-type b))
+    (cond
+      [t (type->zig t)]
+      [else
+       (define v (let-binding-value b))
+       (cond
+         [(string? v) "[]const u8"]
+         [(exact-integer? v) "i64"]
+         [(and (real? v) (not (exact-integer? v))) "f64"]
+         [(boolean? v) "bool"]
+         [else #f])]))
   (define inits
     (for/list ([b (in-list bindings)])
-      (format "var ~a = ~a; " (ident (let-binding-name b))
-              (emit-expr (let-binding-value b)))))
+      (define ty (init-type b))
+      (format "var ~a~a = ~a; " (ident (let-binding-name b))
+              (if ty (format ": ~a" ty) "")
+              (emit-typed-value (let-binding-value b) (let-binding-type b)))))
   (define body-str
     (parameterize ([current-loop-bindings names])
       (emit-body-expr (loop-form-body e))))
@@ -421,9 +440,9 @@
        (unsupported "mapv fn return" "annotate it: (mapv (fn [x :- T] :- U ...) xs)"))
      (define x (ident (param-name (car ps))))
      (define lbl (fresh-label))
-     ;; output allocated in the tick arena; element type from the fn's :- U.
+     ;; output allocated in the CLI run-arena; element type from the fn's :- U.
      (format (string-append "~a: { const __src = ~a; const __out = "
-                            "ctx.tick.alloc(~a, __src.len) catch @panic(\"oom\"); "
+                            "rt.cliAlloc().alloc(~a, __src.len) catch @panic(\"oom\"); "
                             "for (__src, 0..) |~a, __i| { __out[__i] = ~a; } "
                             "break :~a __out; }")
              lbl (emit-expr (cadr args)) (type->zig ret) x
@@ -436,10 +455,16 @@
      ;; output sized to the input (max), element type via @TypeOf — same
      ;; type as input, so no annotation needed; sliced to the kept count.
      (format (string-append "~a: { const __src = ~a; const __out = "
-                            "ctx.tick.alloc(std.meta.Elem(@TypeOf(__src)), __src.len) catch @panic(\"oom\"); "
+                            "rt.cliAlloc().alloc(std.meta.Elem(@TypeOf(__src)), __src.len) catch @panic(\"oom\"); "
                             "var __n: usize = 0; for (__src) |~a| { if (~a) { __out[__n] = ~a; __n += 1; } } "
                             "break :~a __out[0..__n]; }")
              lbl (emit-expr (cadr args)) x (emit-inlined-fn-body f) x lbl)]
+    ;; clojure = / not= : content equality (rt.eq handles strings vs scalars
+    ;; at comptime — slice == would compare pointers). nil cases handled above.
+    [(and (eq? fn '=) (= 2 (length args)))
+     (format "rt.eq(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
+    [(and (eq? fn 'not=) (= 2 (length args)))
+     (format "(!rt.eq(~a, ~a))" (emit-expr (car args)) (emit-expr (cadr args)))]
     [(hash-ref VARIADIC-OPS fn #f)
      => (lambda (op)
           (when (null? args) (unsupported (format "(~a) with no arguments" fn)))
@@ -490,12 +515,25 @@
     ;; v1 vector ops through the prelude (tick-arena allocation only)
     [(eq? fn 'count) (format "rt.count(~a)" (emit-expr (car args)))]
     [(eq? fn 'nth) (format "rt.nth(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
+    [(eq? fn 'first) (format "rt.first(~a)" (emit-expr (car args)))]
+    [(eq? fn 'rest) (format "rt.rest(~a)" (emit-expr (car args)))]
+    [(eq? fn 'empty?) (format "rt.is_empty(~a)" (emit-expr (car args)))]
     [(eq? fn 'conj)
      (unless (= 3 (length args))
        ;; (conj ctx v x): allocation needs the tick arena explicitly.
        (unsupported "conj" "zig backend spells it (conj ctx v x) — allocation needs ctx"))
      (format "rt.conj(~a, ~a, ~a)"
              (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args)))]
+    ;; (str a b ...) — stringify each arg (rt.str1, comptime-dispatched)
+    ;; and concatenate. (str) → "", (str x) → rt.str1(x).
+    [(eq? fn 'str)
+     (cond
+       [(null? args) "\"\""]
+       [(null? (cdr args)) (format "rt.str1(~a)" (emit-expr (car args)))]
+       [else
+        (for/fold ([acc (format "rt.str1(~a)" (emit-expr (car args)))])
+                  ([a (in-list (cdr args))])
+          (format "rt.str2(~a, rt.str1(~a))" acc (emit-expr a)))])]
     ;; CLI runtime stdlib (unqualified clojure.core fns the prelude provides)
     [(eq? fn 'slurp) (format "rt.slurp(~a)" (emit-expr (car args)))]
     [(eq? fn 'spit) (format "rt.spit(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
@@ -505,6 +543,9 @@
     [(eq? fn 'subs) (format "rt.subs(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
     ;; (long x): the checker types it Int already; identity on zig.
     [(eq? fn 'long) (emit-expr (car args))]
+    [(eq? fn 'parse-long) (format "rt.parse_long(~a)" (emit-expr (car args)))]
+    [(eq? fn 'compare)
+     (format "rt.compare(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
     [(qualified-rt-name fn)
      => (lambda (rt-fn)
           (format "~a(~a)" rt-fn (string-join (emit-args args) ", ")))]
@@ -563,10 +604,7 @@
   (cond
     [(symbol? e) (cons e acc)]
     [(call-form? e)
-     ;; mapv/filterv monomorphize to a loop that allocates via ctx.tick,
-     ;; so they reference ctx even though it isn't a written argument.
-     (define base (if (memq (call-form-fn e) '(mapv filterv)) (cons 'ctx acc) acc))
-     (for/fold ([a (refs-of (call-form-fn e) base)]) ([x (in-list (call-form-args e))])
+     (for/fold ([a (refs-of (call-form-fn e) acc)]) ([x (in-list (call-form-args e))])
        (refs-of x a))]
     [(fn-form? e) (for/fold ([a acc]) ([x (in-list (fn-form-body e))]) (refs-of x a))]
     [(kw-access? e) (refs-of (kw-access-target e)

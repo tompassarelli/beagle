@@ -4,5 +4,5 @@ const rt = @import("beagle_rt.zig");
 pub const Ctx = rt.Ctx;
 
 pub fn sumTo(n: i64) i64 {
-    return blk1: { var i = 0; var acc = 0; while (true) { break :blk1 (if ((i > n)) acc else { const __r0 = (i + 1); const __r1 = (acc + i); i = __r0; acc = __r1; continue; }); } };
+    return blk1: { var i: i64 = 0; var acc: i64 = 0; while (true) { break :blk1 (if ((i > n)) acc else { const __r0 = (i + 1); const __r1 = (acc + i); i = __r0; acc = __r1; continue; }); } };
 }

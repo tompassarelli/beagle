@@ -56,6 +56,16 @@ pub fn abs_i64(x: i64) i64 {
     return if (x < 0) -x else x;
 }
 
+/// clojure = : content equality. Strings ([]const u8) compare by bytes
+/// (slice == would compare fat-pointers); everything else by value.
+/// Comptime-dispatched so emit stays syntax-directed.
+pub fn eq(a: anytype, b: anytype) bool {
+    if (@TypeOf(a) == []const u8 and @TypeOf(b) == []const u8) {
+        return std.mem.eql(u8, a, b);
+    }
+    return a == b;
+}
+
 // --- v1 vectors: arena slices ------------------------------------------------
 
 pub fn count(c: anytype) i64 {
@@ -69,6 +79,16 @@ pub fn count(c: anytype) i64 {
 
 pub fn nth(v: anytype, i: i64) std.meta.Elem(@TypeOf(v)) {
     return v[@intCast(i)];
+}
+
+pub fn first(v: anytype) ?std.meta.Elem(@TypeOf(v)) {
+    return if (v.len > 0) v[0] else null;
+}
+pub fn rest(v: anytype) @TypeOf(v) {
+    return if (v.len > 0) v[1..] else v[0..0];
+}
+pub fn is_empty(v: anytype) bool {
+    return v.len == 0;
 }
 
 /// O(n) copy-append in the tick arena; evaporates at reset.
@@ -187,6 +207,19 @@ pub fn split_lines(s: []const u8) []const []const u8 {
 pub fn str2(a: []const u8, b: []const u8) []const u8 {
     return std.mem.concat(cliAlloc(), u8, &.{ a, b }) catch @panic("oom");
 }
+/// (str x) — stringify ONE value the way clojure.core/str does: strings
+/// pass through, ints format as digits, bools as true/false. Comptime
+/// dispatch keeps emit syntax-directed.
+pub fn str1(x: anytype) []const u8 {
+    const T = @TypeOf(x);
+    if (T == []const u8) return x;
+    return switch (@typeInfo(T)) {
+        .int, .comptime_int => std.fmt.allocPrint(cliAlloc(), "{d}", .{x}) catch @panic("oom"),
+        .bool => if (x) "true" else "false",
+        .pointer => x, // string literal / slice
+        else => std.fmt.allocPrint(cliAlloc(), "{any}", .{x}) catch @panic("oom"),
+    };
+}
 
 // --- file I/O (clojure.core slurp/spit) -------------------------------------
 pub fn slurp(p: []const u8) []const u8 {
@@ -240,4 +273,124 @@ pub fn error_exit(msg: []const u8) noreturn {
 }
 pub fn epoch_seconds() i64 {
     return std.time.timestamp();
+}
+pub fn parse_long(s: []const u8) ?i64 {
+    return std.fmt.parseInt(i64, s, 10) catch null;
+}
+pub fn compare(a: []const u8, b: []const u8) i64 {
+    return switch (std.mem.order(u8, a, b)) {
+        .lt => -1,
+        .eq => 0,
+        .gt => 1,
+    };
+}
+/// split after each '\n', keeping the newline on each piece, trailing
+/// empty dropped — matches clojure (str/split s #"(?<=\n)").
+pub fn lines_keep(s: []const u8) []const []const u8 {
+    if (s.len == 0) return &.{};
+    var n: usize = 0;
+    for (s) |c| {
+        if (c == '\n') n += 1;
+    }
+    if (s[s.len - 1] != '\n') n += 1;
+    const out = cliAlloc().alloc([]const u8, n) catch @panic("oom");
+    var start: usize = 0;
+    var j: usize = 0;
+    var i: usize = 0;
+    while (i < s.len) : (i += 1) {
+        if (s[i] == '\n') {
+            out[j] = s[start .. i + 1];
+            j += 1;
+            start = i + 1;
+        }
+    }
+    if (start < s.len) {
+        out[j] = s[start..];
+        j += 1;
+    }
+    return out[0..j];
+}
+// --- dates (proleptic Gregorian, UTC) — native side of los.rt date ops;
+// the clj side keeps java.time, the differential keeps the two honest ----
+fn days_from_civil(y0: i64, m: i64, d: i64) i64 {
+    const y = y0 - @as(i64, if (m <= 2) 1 else 0);
+    const era = @divTrunc(if (y >= 0) y else y - 399, 400);
+    const yoe = y - era * 400;
+    const mp = if (m > 2) m - 3 else m + 9;
+    const doy = @divTrunc(153 * mp + 2, 5) + d - 1;
+    const doe = yoe * 365 + @divTrunc(yoe, 4) - @divTrunc(yoe, 100) + doy;
+    return era * 146097 + doe - 719468;
+}
+const Civil = struct { y: i64, m: i64, d: i64 };
+fn civil_from_days(z0: i64) Civil {
+    const z = z0 + 719468;
+    const era = @divTrunc(if (z >= 0) z else z - 146096, 146097);
+    const doe = z - era * 146097;
+    const yoe = @divTrunc(doe - @divTrunc(doe, 1460) + @divTrunc(doe, 36524) - @divTrunc(doe, 146096), 365);
+    const y = yoe + era * 400;
+    const doy = doe - (365 * yoe + @divTrunc(yoe, 4) - @divTrunc(yoe, 100));
+    const mp = @divTrunc(5 * doy + 2, 153);
+    const d = doy - @divTrunc(153 * mp + 2, 5) + 1;
+    const m = if (mp < 10) mp + 3 else mp - 9;
+    return .{ .y = y + @as(i64, if (m <= 2) 1 else 0), .m = m, .d = d };
+}
+fn fmt_iso(c: Civil) []const u8 {
+    return std.fmt.allocPrint(cliAlloc(), "{d:0>4}-{d:0>2}-{d:0>2}", .{ c.y, c.m, c.d }) catch @panic("oom");
+}
+fn dparse(s: []const u8) i64 {
+    return std.fmt.parseInt(i64, s, 10) catch 0;
+}
+pub fn today_iso() []const u8 {
+    return fmt_iso(civil_from_days(@divTrunc(std.time.timestamp(), 86400)));
+}
+pub fn now_ts_14() []const u8 {
+    const secs = std.time.timestamp();
+    const c = civil_from_days(@divTrunc(secs, 86400));
+    const tod = @mod(secs, 86400);
+    return std.fmt.allocPrint(cliAlloc(), "{d:0>4}{d:0>2}{d:0>2}{d:0>2}{d:0>2}{d:0>2}", .{ c.y, c.m, c.d, @divTrunc(tod, 3600), @divTrunc(@mod(tod, 3600), 60), @mod(tod, 60) }) catch @panic("oom");
+}
+pub fn valid_iso_date(s: []const u8) bool {
+    if (s.len != 10 or s[4] != '-' or s[7] != '-') return false;
+    for (s, 0..) |ch, i| {
+        if (i == 4 or i == 7) continue;
+        if (ch < '0' or ch > '9') return false;
+    }
+    const y = dparse(s[0..4]);
+    const m = dparse(s[5..7]);
+    const d = dparse(s[8..10]);
+    if (m < 1 or m > 12 or d < 1 or d > 31) return false;
+    const c = civil_from_days(days_from_civil(y, m, d));
+    return c.y == y and c.m == m and c.d == d;
+}
+pub fn date_add_days(iso: []const u8, n: i64) []const u8 {
+    const z = days_from_civil(dparse(iso[0..4]), dparse(iso[5..7]), dparse(iso[8..10]));
+    return fmt_iso(civil_from_days(z + n));
+}
+pub fn weekday_abbr(iso: []const u8) []const u8 {
+    const z = days_from_civil(dparse(iso[0..4]), dparse(iso[5..7]), dparse(iso[8..10]));
+    const w: usize = @intCast(@mod(z + 4, 7)); // 0=Sun..6=Sat
+    const names = [_][]const u8{ "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+    return names[w];
+}
+
+/// snake_case slug: lower-case, non-[a-z0-9] runs → single _, trim _.
+/// Matches the (lower → replace [^a-z0-9]+ _ → trim _) regex chain.
+pub fn slugify(s: []const u8) []const u8 {
+    const buf = cliAlloc().alloc(u8, s.len + 1) catch @panic("oom");
+    var n: usize = 0;
+    var prev_us = true; // suppress leading underscores
+    for (s) |c0| {
+        const c = std.ascii.toLower(c0);
+        if ((c >= 'a' and c <= 'z') or (c >= '0' and c <= '9')) {
+            buf[n] = c;
+            n += 1;
+            prev_us = false;
+        } else if (!prev_us) {
+            buf[n] = '_';
+            n += 1;
+            prev_us = true;
+        }
+    }
+    while (n > 0 and buf[n - 1] == '_') n -= 1;
+    return buf[0..n];
 }

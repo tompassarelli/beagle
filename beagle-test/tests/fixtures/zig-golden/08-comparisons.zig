@@ -4,5 +4,5 @@ const rt = @import("beagle_rt.zig");
 pub const Ctx = rt.Ctx;
 
 pub fn cmp(a: i64, b: i64) bool {
-    return ((a < b) and (a <= b) and (b > a) and (b >= a) and (a == a) and (a != b));
+    return ((a < b) and (a <= b) and (b > a) and (b >= a) and rt.eq(a, a) and (!rt.eq(a, b)));
 }
