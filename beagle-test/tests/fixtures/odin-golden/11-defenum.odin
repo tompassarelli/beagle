@@ -3,9 +3,9 @@ package g
 
 
 Voxel_Type :: enum u8 {
-    .Air = 0,
-    .Stone = 1,
-    .Dirt = 2,
-    .Grass = 3,
-    .Water = 4,
+    Air = 0,
+    Stone = 1,
+    Dirt = 2,
+    Grass = 3,
+    Water = 4,
 }

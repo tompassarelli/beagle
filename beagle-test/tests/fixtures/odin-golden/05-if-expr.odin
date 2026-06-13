@@ -2,6 +2,6 @@
 package g
 
 
-abs_val :: proc(n: i64) -> i64 {
+abs_val :: proc(n: int) -> int {
     return ((-n) if (n < 0) else n);
 }

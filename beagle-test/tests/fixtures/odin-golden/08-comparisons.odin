@@ -2,6 +2,6 @@
 package g
 
 
-all_cmp :: proc(a: i64, b: i64) -> bool {
+all_cmp :: proc(a: int, b: int) -> bool {
     return ((a < b) && (a >= 0) && (b <= 100));
 }

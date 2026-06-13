@@ -2,7 +2,7 @@
 package g
 
 
-MAX_SIZE: i64 : 1024;
+MAX_SIZE: int : 1024;
 
 PI: f64 : 3.14159;
 

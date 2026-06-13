@@ -2,7 +2,7 @@
 package g
 
 
-compute :: proc(x: i64) -> i64 {
+compute :: proc(x: int) -> int {
     a := (x * 2);
     b := (a + 1);
     return (a + b);

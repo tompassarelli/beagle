@@ -34,6 +34,13 @@
 (define (fn-ident s)
   (ident s))
 
+(define (keyword-sym? s)
+  (and (symbol? s) (regexp-match? #rx"^:" (symbol->string s))))
+
+(define (keyword->enum-variant s)
+  (define kw-str (substring (symbol->string s) 1))
+  (format ".~a" (string-titlecase (string-replace kw-str "-" "_"))))
+
 ;; --- types -------------------------------------------------------------------
 
 (define (optional-of t)
@@ -53,7 +60,7 @@
                           "the odin backend needs explicit :- types at boundaries")]
     [(type-prim? t)
      (case (type-prim-name t)
-       [(Int) "i64"]
+       [(Int) "int"]
        [(Float) "f64"]
        [(Bool) "bool"]
        [(String) "string"]
@@ -235,6 +242,7 @@
     [(eq? e 'nil) "nil"]
     [(symbol? e)
      (cond
+       [(keyword-sym? e) (keyword->enum-variant e)]
        [(and (optional-binding? e) (not (raw-optional?)))
         (format "~a.?" (ident e))]
        [else (ident e)])]
@@ -334,10 +342,7 @@
 
 (define (condp-test-label test-val)
   (cond
-    [(and (symbol? test-val)
-          (regexp-match? #rx"^:" (symbol->string test-val)))
-     (define kw-str (substring (symbol->string test-val) 1))
-     (format ".~a" (string-titlecase (string-replace kw-str "-" "_")))]
+    [(keyword-sym? test-val) (keyword->enum-variant test-val)]
     [else (emit-expr test-val)]))
 
 (define (emit-condp-expr e)
@@ -565,7 +570,7 @@
      (format "~a{ ~a }" (ident rec)
              (string-join
               (for/list ([f (in-list fields)] [a (in-list args)])
-                (format ".~a = ~a" (ident (param-name f))
+                (format "~a = ~a" (ident (param-name f))
                         (emit-typed-value a (param-type f))))
               ", "))]))
 
@@ -781,13 +786,10 @@
     [(eq? fn 'str)
      (cond
        [(null? args) "\"\""]
-       [(null? (cdr args)) (format "rt.to_string(~a)" (emit-expr (car args)))]
        [else
-        (format "rt.str_concat(~a)"
-                (string-join
-                 (for/list ([a (in-list args)])
-                   (format "rt.to_string(~a)" (emit-expr a)))
-                 ", "))])]
+        (format "fmt.tprintf(~a, ~a)"
+                (format "\"~a\"" (string-join (make-list (length args) "%v") ""))
+                (string-join (map emit-expr args) ", "))])]
     ;; println
     [(eq? fn 'println)
      (cond
@@ -1168,7 +1170,7 @@
       (define vname
         (string-titlecase
          (string-replace (regexp-replace #rx"^:" (symbol->string v) "") "-" "_")))
-      (format "    .~a = ~a," vname i)))
+      (format "    ~a = ~a," vname i)))
   (format "~a :: enum u8 {\n~a\n}" name (string-join entries "\n")))
 
 (define (emit-def f)
@@ -1287,7 +1289,7 @@
           [(defn-form? f) (for/fold ([a acc]) ([e (in-list (defn-form-body f))]) (refs-of e a))]
           [(def-form? f) (refs-of (def-form-value f) acc)]
           [else acc])))
-    (define needs-fmt? (memq 'println all-refs))
+    (define needs-fmt? (ormap (lambda (f) (memq f all-refs)) '(println str)))
     (define MATH-FNS '(cos sin tan acos asin atan atan2 sqrt floor ceil
                        pow log log2 log10))
     (define needs-math? (ormap (lambda (f) (memq f all-refs)) MATH-FNS))

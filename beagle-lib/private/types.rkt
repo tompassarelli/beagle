@@ -56,6 +56,8 @@
 (define current-type-vars (make-parameter '()))
 ;; Set by checker: maps union-name → (listof member-symbol) for subtype checks
 (define current-union-members (make-parameter (hash)))
+;; Set by checker: enum type names (Keyword is compatible with these)
+(define current-enum-types (make-parameter (hasheq)))
 ;; Set by parser: user-defined parametric type names (e.g. Result from parametric defunion)
 (define current-user-parametric (make-parameter (set)))
 
@@ -234,6 +236,12 @@
     [(and (type-prim? actual) (type-app? expected)
           (let ([members (hash-ref (current-union-members) (type-app-ctor expected) #f)])
             (and members (memq (type-prim-name actual) members))))
+     #t]
+
+    ;; Keyword is compatible with enum types (keyword literals used as enum variants)
+    [(and (type-prim? actual) (eq? (type-prim-name actual) 'Keyword)
+          (type-prim? expected)
+          (hash-ref (current-enum-types) (type-prim-name expected) #f))
      #t]
 
     ;; Primitives match by canonical name or union membership.
@@ -421,6 +429,7 @@
  (struct-out type-poly)
  current-type-vars
  current-union-members
+ current-enum-types
  current-user-parametric
  type?
  any-type?

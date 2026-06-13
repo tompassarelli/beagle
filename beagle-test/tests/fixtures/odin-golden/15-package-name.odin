@@ -2,4 +2,4 @@
 package core
 
 
-chunk_size: i64 : 16;
+chunk_size: int : 16;

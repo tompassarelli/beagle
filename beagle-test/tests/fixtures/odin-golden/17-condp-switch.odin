@@ -2,6 +2,6 @@
 package i
 
 
-color_name :: proc(c: i64) -> string {
+color_name :: proc(c: int) -> string {
     return ("red" if (c == .Red) else "green" if (c == .Green) else "blue" if (c == .Blue) else "unknown");
 }

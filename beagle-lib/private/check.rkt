@@ -169,6 +169,8 @@
 (define RECORD-FIELD-ORDER (make-hash))
 ;; Closed union members: union-name -> (listof symbol) of record type names
 (define UNION-MEMBERS (make-hash))
+;; Enum type names: set of symbols registered by defenum
+(define ENUM-TYPES (make-hasheq))
 
 ;; Parametric union definitions: union-name -> (hasheq 'params 'members 'member-fields)
 (define PARAMETRIC-UNIONS (make-hash))
@@ -432,6 +434,7 @@
     (hash-clear! RECORD-FIELDS)
     (hash-clear! RECORD-FIELD-ORDER)
     (hash-clear! UNION-MEMBERS)
+    (hash-clear! ENUM-TYPES)
     (hash-clear! PARAMETRIC-UNIONS)
     (hash-clear! SQL-TABLES)
     (define env (build-initial-env prog))
@@ -453,6 +456,7 @@
           (hash-set! SQL-FKS tbl-col target))))
     (define macro-tbl (program-macro-derived-table prog))
     (parameterize ([current-union-members UNION-MEMBERS]
+                   [current-enum-types ENUM-TYPES]
                    [current-check-target (program-target prog)]
                    [current-nixos-schema nix-schema])
       (for ([form (in-list (program-forms prog))])
@@ -582,7 +586,8 @@
        (hash-set! env name (type-fn (list ANY) (type-prim 'Any) ANY))]
       [(defmethod-form name _ params body)
        (void)]
-      [(defenum-form name values) (void)]
+      [(defenum-form name values)
+       (hash-set! ENUM-TYPES name #t)]
       [(defunion-form name members type-params member-fields)
        (when (>= (current-check-profile) 2)
          (hash-set! UNION-MEMBERS name members))
@@ -2558,6 +2563,7 @@
                    [current-body-locs-table body-locs-tbl]
                    [current-check-target (program-target prog)]
                    [current-union-members UNION-MEMBERS]
+                   [current-enum-types ENUM-TYPES]
                    [current-nixos-schema nix-schema])
       (for ([form (in-list (program-forms prog))]
             [orig-stx (in-list (program-form-stxs prog))])

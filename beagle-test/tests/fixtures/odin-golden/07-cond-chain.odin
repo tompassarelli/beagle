@@ -2,6 +2,6 @@
 package g
 
 
-classify :: proc(n: i64) -> string {
+classify :: proc(n: int) -> string {
     return ("negative" if (n < 0) else "zero" if (n == 0) else "positive");
 }

@@ -3,10 +3,10 @@ package g
 
 
 Point :: struct {
-    x: i64,
-    y: i64,
+    x: int,
+    y: int,
 }
 
-get_x :: proc(p: Point) -> i64 {
+get_x :: proc(p: Point) -> int {
     return p.x;
 }

@@ -2,7 +2,7 @@
 package g
 
 
-sum_to :: proc(n: i64) -> i64 {
+sum_to :: proc(n: int) -> int {
     i := 0;
     acc := 0;
     for {

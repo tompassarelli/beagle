@@ -3,7 +3,7 @@ package g
 
 import "core:fmt"
 
-sum_range :: proc(n: i64) -> i64 {
+sum_range :: proc(n: int) -> int {
     acc := 0;
     i := 0;
     for {
@@ -19,6 +19,6 @@ sum_range :: proc(n: i64) -> i64 {
     }
 }
 
-print_range :: proc(n: i64) {
+print_range :: proc(n: int) {
     for i in 0..<n { fmt.println(i); }
 }

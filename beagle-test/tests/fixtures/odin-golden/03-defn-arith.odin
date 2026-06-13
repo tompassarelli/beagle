@@ -2,18 +2,18 @@
 package g
 
 
-add :: proc(a: i64, b: i64) -> i64 {
+add :: proc(a: int, b: int) -> int {
     return (a + b);
 }
 
-sub :: proc(a: i64, b: i64) -> i64 {
+sub :: proc(a: int, b: int) -> int {
     return (a - b);
 }
 
-mul :: proc(a: i64, b: i64) -> i64 {
+mul :: proc(a: int, b: int) -> int {
     return (a * b);
 }
 
-negate :: proc(n: i64) -> i64 {
+negate :: proc(n: int) -> int {
     return (-n);
 }

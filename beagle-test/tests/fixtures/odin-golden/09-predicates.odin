@@ -2,6 +2,6 @@
 package g
 
 
-checks :: proc(n: i64) -> bool {
+checks :: proc(n: int) -> bool {
     return ((!(n == 0)) && (n > 0) && (n %% 2 == 0));
 }
