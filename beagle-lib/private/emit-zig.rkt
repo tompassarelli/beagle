@@ -196,6 +196,34 @@
              (format ".~a = ~a" (ident (param-name f)) (emit-expr a)))
            ", ")))
 
+;; --- typed map construction ---------------------------------------------------
+;; A map literal only emits where the (Map K V) type is known (def/let
+;; binding, reduce init) — V can't be guessed from a bare literal. Empty
+;; {} → rt.Map(V).empty(); entries chain immutable .assoc (Clojure
+;; semantics). Keyword and string keys both lower to []const u8.
+(define (map-type? t) (and (type-app? t) (eq? (type-app-ctor t) 'Map)))
+(define (map-vtype t) (cadr (type-app-args t)))
+
+(define (emit-map-key k)
+  (cond
+    [(string? k) (format "~v" k)]
+    [(keyword? k) (format "~v" (keyword->string k))]
+    [(and (symbol? k) (regexp-match? #rx"^:" (symbol->string k)))
+     (format "~v" (substring (symbol->string k) 1))]
+    [else (unsupported "map key" "keys must be keyword or string literals")]))
+
+(define (emit-map-literal e vtype)
+  (for/fold ([acc (format "rt.Map(~a).empty()" (type->zig vtype))])
+            ([pr (in-list (map-form-pairs e))])
+    (format "~a.assoc(~a, ~a)" acc (emit-map-key (car pr)) (emit-expr (cdr pr)))))
+
+;; Emit a value against an expected type: map literals need the type;
+;; everything else ignores it. The one place type flows into emit.
+(define (emit-typed-value v expected)
+  (if (and (map-form? v) expected (map-type? expected))
+      (emit-map-literal v (map-vtype expected))
+      (emit-expr v)))
+
 ;; Zig peer-type resolution can't unify branches that are ALL bare
 ;; integer/float literals under runtime control flow ("value with
 ;; comptime-only type 'comptime_int' depends on runtime control
@@ -276,7 +304,7 @@
       (begin0
         (format "const ~a = ~a; "
                 (ident (let-binding-name b))
-                (emit-expr (let-binding-value b)))
+                (emit-typed-value (let-binding-value b) (let-binding-type b)))
         (when new-opt
           (current-optionals (cons (let-binding-name b) (current-optionals)))))))
   (define stmts
@@ -381,9 +409,10 @@
      (define lbl (fresh-label))
      ;; (reduce (fn [acc x] body) init coll) — fold, no allocation. acc is
      ;; typed from its annotation so the init literal isn't comptime_int.
+     ;; init may be {} for a (Map K V) accumulator — type-aware emit.
      (format "~a: { var ~a: ~a = ~a; for (~a) |~a| { ~a = ~a; } break :~a ~a; }"
-             lbl acc (type->zig acc-t) (emit-expr (cadr args)) (emit-expr (caddr args))
-             x acc (emit-inlined-fn-body f) lbl acc)]
+             lbl acc (type->zig acc-t) (emit-typed-value (cadr args) acc-t)
+             (emit-expr (caddr args)) x acc (emit-inlined-fn-body f) lbl acc)]
     [(and (eq? fn 'mapv) (= 2 (length args)) (fn-form? (car args)))
      (define f (car args))
      (define ps (fn-literal-params f "mapv" 1))
@@ -512,7 +541,7 @@
            (unsupported "destructuring binding"))
          (line! (format "const ~a = ~a;"
                         (ident (let-binding-name b))
-                        (emit-expr (let-binding-value b))))
+                        (emit-typed-value (let-binding-value b) (let-binding-type b))))
          (let ([t (let-binding-type b)])
            (when (and t (optional-of t))
              (current-optionals (cons (let-binding-name b) (current-optionals))))))
@@ -593,7 +622,7 @@
           ;; typed slice literal: the annotation lets &.{...} coerce
           (format "&.{ ~a }"
                   (string-join (map emit-expr (vec-form-items v)) ", "))
-          (emit-expr v))))
+          (emit-typed-value v (def-form-type f)))))
   (format "pub const ~a: ~a = ~a;"
           (ident (def-form-name f))
           (type->zig (def-form-type f))
