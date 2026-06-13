@@ -5,27 +5,27 @@
 (declare-extern fetch [String -> (Promise Any)])
 (declare-extern parse-json [String -> Any])
 
-(defn fetch-text [(url : String)] : (Promise String)
+(defn fetch-text [(url :- String)] :- (Promise String)
   (let [resp (js/await (fetch url))]
     (js/await (.text resp))))
 
-(defn fetch-and-parse [(url : String)] : (Promise Any)
+(defn fetch-and-parse [(url :- String)] :- (Promise Any)
   (let [text (js/await (fetch-text url))]
     (parse-json text)))
 
-(defn fetch-both [(a : String) (b : String)] : (Promise (Vec String))
+(defn fetch-both [(a :- String) (b :- String)] :- (Promise (Vec String))
   (let [ta (js/await (fetch-text a))
         tb (js/await (fetch-text b))]
     [ta tb]))
 
-(defn resolve-now [(x : Int)] : (Promise Int)
+(defn resolve-now [(x :- Int)] :- (Promise Int)
   (Promise/resolve x))
 
-(defn reject-with [(msg : String)] : (Promise Nil)
+(defn reject-with [(msg :- String)] :- (Promise Nil)
   (Promise/reject msg))
 
-(defn all-of [(promises : (Vec (Promise Int)))] : (Promise (Vec Int))
+(defn all-of [(promises :- (Vec (Promise Int)))] :- (Promise (Vec Int))
   (Promise/all promises))
 
-(defn race-of [(promises : (Vec (Promise Int)))] : (Promise Int)
+(defn race-of [(promises :- (Vec (Promise Int)))] :- (Promise Int)
   (Promise/race promises))

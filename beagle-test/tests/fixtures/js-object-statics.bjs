@@ -2,35 +2,35 @@
 
 (ns js-object-statics)
 
-(defn obj-keys [(o : Any)] : (Vec String)
+(defn obj-keys [(o :- Any)] :- (Vec String)
   (Object/keys o))
 
-(defn obj-values [(o : Any)] : (Vec Any)
+(defn obj-values [(o :- Any)] :- (Vec Any)
   (Object/values o))
 
-(defn obj-entries [(o : Any)] : (Vec (Vec Any))
+(defn obj-entries [(o :- Any)] :- (Vec (Vec Any))
   (Object/entries o))
 
-(defn merge-objects [(a : Any) (b : Any)] : Any
+(defn merge-objects [(a :- Any) (b :- Any)] :- Any
   (Object/assign a b))
 
-(defn freeze-it [(o : Any)] : Any
+(defn freeze-it [(o :- Any)] :- Any
   (Object/freeze o))
 
-(defn is-frozen? [(o : Any)] : Bool
+(defn is-frozen? [(o :- Any)] :- Bool
   (Object/isFrozen o))
 
-(defn from-entries [(pairs : (Vec (Vec Any)))] : Any
+(defn from-entries [(pairs :- (Vec (Vec Any)))] :- Any
   (Object/fromEntries pairs))
 
-(defn parse-int-of [(s : String)] : Int
+(defn parse-int-of [(s :- String)] :- Int
   (Number/parseInt s 10))
 
-(defn parse-float-of [(s : String)] : Float
+(defn parse-float-of [(s :- String)] :- Float
   (Number/parseFloat s))
 
-(defn array-from [(iter : Any)] : (Vec Any)
+(defn array-from [(iter :- Any)] :- (Vec Any)
   (Array/from iter))
 
-(defn array-is? [(x : Any)] : Bool
+(defn array-is? [(x :- Any)] :- Bool
   (Array/isArray x))

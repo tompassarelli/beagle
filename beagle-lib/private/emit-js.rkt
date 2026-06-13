@@ -7,8 +7,8 @@
          racket/format
          racket/list
          racket/set
-         "../parse.rkt"
-         "../emit-dispatch.rkt"
+         "parse.rkt"
+         "emit-dispatch.rkt"
          "js-capabilities.rkt"
          "js-emit-utils.rkt"
          "emit-jst.rkt"
@@ -455,6 +455,7 @@
     [(kw-access? e) (expr-has-await? (kw-access-target e))]
     [(set!-form? e) (or (expr-has-await? (set!-form-target e))
                         (expr-has-await? (set!-form-value e)))]
+    [(threading-marker? e) (expr-has-await? (threading-marker-desugared e))]
     [(check-expr? e) (expr-has-await? (check-expr-expr e))]
     [(rescue-form? e) (or (expr-has-await? (rescue-form-expr e))
                           (expr-has-await? (rescue-form-fallback e)))]
@@ -743,8 +744,6 @@
      (error 'beagle-js "defmulti is not supported for JS target")]
     [(defmethod-form? f)
      (error 'beagle-js "defmethod is not supported for JS target")]
-    [(deftype-form? f)
-     (error 'beagle-js "deftype is not supported for JS target")]
     [(extend-type-form? f)
      (error 'beagle-js "extend-type is not supported for JS target")]
 
@@ -816,6 +815,9 @@
              (string-join (map emit-expr (set-form-items e)) ", "))]
 
     [(with-meta? e)     (emit-expr (with-meta-expr e))]
+
+    [(threading-marker? e)
+     (emit-expr (threading-marker-desugared e))]
 
     [(js-quote-form? e)
      (emit-js-ast-node (js-quote-form-body e) 0)]
@@ -1361,7 +1363,10 @@
   (define body (for-form-body e))
   (define for-names (apply append
     (for/list ([c (in-list clauses)])
-      (if (for-binding? c) (names-from-binding-target (for-binding-name c)) '()))))
+      (cond
+        [(for-binding? c) (names-from-binding-target (for-binding-name c))]
+        [(for-let? c) (map let-binding-name (for-let-bindings c))]
+        [else '()]))))
   (with-bindings for-names
     (lambda ()
       (define body-str
@@ -1394,6 +1399,19 @@
      (format "~a.map((~a) => ~a)"
              (emit-expr expr)
              (emit-binding-target name)
+             inner)]
+    [(list (? for-let? fl) rest ...)
+     (define binds (for-let-bindings fl))
+     (define let-strs
+       (for/list ([b (in-list binds)])
+         (format "const ~a = ~a"
+                 (mangle-name (let-binding-name b))
+                 (emit-expr (let-binding-value b)))))
+     (define inner
+       (if (null? rest) body-str
+           (emit-for-clauses rest body-str)))
+     (format "(() => { ~a; return ~a; })()"
+             (string-join let-strs "; ")
              inner)]
     [_ (error 'beagle-js "unsupported for clause combination")]))
 
@@ -1546,7 +1564,7 @@
          (define body-str
            (string-join (map (lambda (x) (emit-loop-stmt x bind-names)) body) " "))
          (cond
-           [(and (symbol? test) (eq? test ':else))
+           [(and (symbol? test) (or (eq? test ':else) (eq? test 'else)))
             (format "{ ~a }" body-str)]
            [else
             (format "if (~a) { ~a }" (emit-expr test) body-str)])))

@@ -29,7 +29,7 @@
     (return data))))
 
 ;; 4. Splicing beagle values into JS AST
-(def api-base : String "/api/v1")
+(def api-base :- String "/api/v1")
 
 (js/quote
   (const baseUrl ~api-base)

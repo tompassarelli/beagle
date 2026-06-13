@@ -14,7 +14,8 @@
          ;; tests on the active path without env-var gymnastics.
          "emit-clj.rkt"
          "emit-cljs.rkt"
-         "emit-odin.rkt")
+         "emit-odin.rkt"
+         "emit-js.rkt")
 
 (define-runtime-path dormant-dir "dormant")
 
@@ -23,7 +24,6 @@
 ;; dormant/emit-scheme.rkt is Cyclone target, deferred pending
 ;; runtime-library architecture decision.
 (when (getenv "BEAGLE_ALL_TARGETS")
-  (dynamic-require (build-path dormant-dir "emit-js.rkt")  #f)
   (dynamic-require (build-path dormant-dir "emit-sql.rkt") #f)
   (dynamic-require (build-path dormant-dir "emit-py.rkt")  #f)
   (dynamic-require (build-path dormant-dir "emit-rkt.rkt") #f)

@@ -2,32 +2,32 @@
 
 (ns js-stdlib-statics)
 
-(defn parse-config [(s : String)] : Any
+(defn parse-config [(s :- String)] :- Any
   (JSON/parse s))
 
-(defn to-config [(obj : Any)] : String
+(defn to-config [(obj :- Any)] :- String
   (JSON/stringify obj))
 
-(defn floor-of [(x : Float)] : Int
+(defn floor-of [(x :- Float)] :- Int
   (Math/floor x))
 
-(defn sqrt-of [(x : Float)] : Float
+(defn sqrt-of [(x :- Float)] :- Float
   (Math/sqrt x))
 
-(defn pow-of [(x : Float) (y : Float)] : Float
+(defn pow-of [(x :- Float) (y :- Float)] :- Float
   (Math/pow x y))
 
-(defn random-float [] : Float
+(defn random-float [] :- Float
   (Math/random))
 
-(defn pi-times [(n : Float)] : Float
+(defn pi-times [(n :- Float)] :- Float
   (* Math/PI n))
 
-(defn integer? [(x : Any)] : Bool
+(defn integer? [(x :- Any)] :- Bool
   (Number/isInteger x))
 
-(defn nan? [(x : Any)] : Bool
+(defn nan? [(x :- Any)] :- Bool
   (Number/isNaN x))
 
-(defn parse-int [(s : String)] : Int
+(defn parse-int [(s :- String)] :- Int
   (Number/parseInt s))

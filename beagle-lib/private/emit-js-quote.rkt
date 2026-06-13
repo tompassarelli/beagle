@@ -5,7 +5,7 @@
 
 (require racket/string
          racket/format
-         "../ast.rkt"
+         "ast.rkt"
          "js-emit-utils.rkt")
 
 (define (indent-str depth)

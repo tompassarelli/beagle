@@ -2,26 +2,26 @@
 
 (ns js-array-methods)
 
-(defn push-one [(xs : (Vec Int)) (x : Int)] : Int
+(defn push-one [(xs :- (Vec Int)) (x :- Int)] :- Int
   (.push xs x))
 
-(defn pop-last [(xs : (Vec Int))] : Int
+(defn pop-last [(xs :- (Vec Int))] :- Int
   (.pop xs))
 
-(defn first-idx [(xs : (Vec Int)) (target : Int)] : Int
+(defn first-idx [(xs :- (Vec Int)) (target :- Int)] :- Int
   (.indexOf xs target))
 
-(defn includes? [(xs : (Vec Int)) (target : Int)] : Bool
+(defn includes? [(xs :- (Vec Int)) (target :- Int)] :- Bool
   (.includes xs target))
 
-(defn joined [(xs : (Vec String))] : String
+(defn joined [(xs :- (Vec String))] :- String
   (.join xs ", "))
 
-(defn sliced [(xs : (Vec Int)) (start : Int) (end : Int)] : (Vec Int)
+(defn sliced [(xs :- (Vec Int)) (start :- Int) (end :- Int)] :- (Vec Int)
   (.slice xs start end))
 
-(defn reversed [(xs : (Vec Int))] : (Vec Int)
+(defn reversed [(xs :- (Vec Int))] :- (Vec Int)
   (.reverse xs))
 
-(defn concatenated [(a : (Vec Int)) (b : (Vec Int))] : (Vec Int)
+(defn concatenated [(a :- (Vec Int)) (b :- (Vec Int))] :- (Vec Int)
   (.concat a b))
