@@ -257,6 +257,13 @@ pub fn str1(x: anytype) []const u8 {
     };
 }
 
+// --- stdout (clojure.core println) ------------------------------------------
+pub fn println(s: []const u8) void {
+    const out = std.io.getStdOut();
+    out.writeAll(s) catch {};
+    out.writeAll("\n") catch {};
+}
+
 // --- file I/O (clojure.core slurp/spit) -------------------------------------
 pub fn slurp(p: []const u8) []const u8 {
     return std.Io.Dir.cwd().readFileAlloc(io(), p, cliAlloc(), .unlimited) catch

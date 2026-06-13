@@ -662,6 +662,33 @@
      (format "rt.sort(~a)" (emit-expr (car args)))]
     [(eq? fn 'sort)
      (unsupported "sort" "zig backend supports (sort xs) only — no comparator arg in v1")]
+    ;; (sort-by (fn [x :- T] :- K body) xs) — monomorphized: extract keys,
+    ;; insertion-sort both keys+elements in tandem. Key type must be String
+    ;; (compared via rt.compare). Returns a fresh sorted copy.
+    [(and (eq? fn 'sort-by) (= 2 (length args)) (fn-form? (car args)))
+     (define f (car args))
+     (define ps (fn-literal-params f "sort-by" 1))
+     (define ret (fn-form-return-type f))
+     (unless ret
+       (unsupported "sort-by fn return" "annotate it: (sort-by (fn [x :- T] :- K ...) xs)"))
+     (define x (ident (param-name (car ps))))
+     (define lbl (fresh-label))
+     (format (string-append
+              "~a: { "
+              "const __src = ~a; "
+              "const __out = rt.cliAlloc().alloc(std.meta.Elem(@TypeOf(__src)), __src.len) catch @panic(\"oom\"); "
+              "@memcpy(__out, __src); "
+              "const __keys = rt.cliAlloc().alloc(~a, __src.len) catch @panic(\"oom\"); "
+              "for (__out, 0..) |~a, __ki| { __keys[__ki] = ~a; } "
+              "var __si: usize = 1; "
+              "while (__si < __out.len) : (__si += 1) { "
+              "const __kv = __keys[__si]; const __ev = __out[__si]; var __sj: usize = __si; "
+              "while (__sj > 0 and (rt.compare(__keys[__sj - 1], __kv) > 0)) : (__sj -= 1) { "
+              "__keys[__sj] = __keys[__sj - 1]; __out[__sj] = __out[__sj - 1]; } "
+              "__keys[__sj] = __kv; __out[__sj] = __ev; } "
+              "break :~a __out; }")
+             lbl (emit-expr (cadr args)) (type->zig ret) x
+             (emit-inlined-fn-body f) lbl)]
     [(and (eq? fn 'distinct) (= 1 (length args)))
      (format "rt.distinct(~a)" (emit-expr (car args)))]
     ;; (concat a b ...) — left-fold to binary rt.concat (same element type).
@@ -681,6 +708,17 @@
         (for/fold ([acc (format "rt.str1(~a)" (emit-expr (car args)))])
                   ([a (in-list (cdr args))])
           (format "rt.str2(~a, rt.str1(~a))" acc (emit-expr a)))])]
+    ;; (println x) — str-concat all args, then rt.println.
+    [(eq? fn 'println)
+     (define content
+       (cond
+         [(null? args) "\"\""]
+         [(null? (cdr args)) (format "rt.str1(~a)" (emit-expr (car args)))]
+         [else
+          (for/fold ([acc (format "rt.str1(~a)" (emit-expr (car args)))])
+                    ([a (in-list (cdr args))])
+            (format "rt.str2(~a, rt.str1(~a))" acc (emit-expr a)))]))
+     (format "rt.println(~a)" content)]
     ;; CLI runtime stdlib (unqualified clojure.core fns the prelude provides)
     [(eq? fn 'slurp) (format "rt.slurp(~a)" (emit-expr (car args)))]
     [(eq? fn 'spit) (format "rt.spit(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
@@ -708,15 +746,37 @@
 
 ;; --- statements (fn bodies) ---------------------------------------------------------
 
+;; (doseq [x xs] body...) → for (xs) |x| { body... }
+;; v1: single for-binding clause, symbol name only.
+(define (emit-doseq e)
+  (define clauses (doseq-form-clauses e))
+  (define body (doseq-form-body e))
+  (when (null? clauses)
+    (unsupported "doseq" "empty binding clause"))
+  (define binding (car clauses))
+  (unless (for-binding? binding)
+    (unsupported "doseq" "zig backend supports simple (doseq [x xs] body) only"))
+  (unless (symbol? (for-binding-name binding))
+    (unsupported "doseq binding" "destructuring not supported in zig doseq"))
+  (define var-name (ident (for-binding-name binding)))
+  (define coll (emit-expr (for-binding-expr binding)))
+  (define body-stmts
+    (string-join
+     (for/list ([stmt (in-list body)])
+       (emit-stmt stmt))
+     " "))
+  (format "for (~a) |~a| { ~a }" coll var-name body-stmts))
+
 ;; Flatten top-level let/do chains in a fn body into statements ending in
 ;; `return <expr>;` — keeps the goldens readable instead of one giant block.
 (define (emit-stmt e)
-  ;; discard-position statement; (if c then) without else is legal here.
-  (if (and (if-form? e) (not (if-form-else-expr e)))
-      (format "if (~a) { _ = ~a; }"
-              (emit-expr (if-form-cond-expr e))
-              (emit-expr (if-form-then-expr e)))
-      (format "_ = ~a;" (emit-expr e))))
+  (cond
+    [(and (if-form? e) (not (if-form-else-expr e)))
+     (format "if (~a) { _ = ~a; }"
+             (emit-expr (if-form-cond-expr e))
+             (emit-expr (if-form-then-expr e)))]
+    [(doseq-form? e) (emit-doseq e)]
+    [else (format "_ = ~a;" (emit-expr e))]))
 
 (define (emit-fn-body body ret-type indent)
   (define out '())
@@ -784,6 +844,13 @@
        (refs-of x a))]
     [(recur-form? e) (for/fold ([a acc]) ([x (in-list (recur-form-args e))]) (refs-of x a))]
     [(do-form? e) (for/fold ([a acc]) ([x (in-list (do-form-body e))]) (refs-of x a))]
+    [(doseq-form? e)
+     (for/fold ([a (for/fold ([a0 acc]) ([c (in-list (doseq-form-clauses e))])
+                     (cond [(for-binding? c) (refs-of (for-binding-expr c) a0)]
+                           [(for-when? c) (refs-of (for-when-test c) a0)]
+                           [else a0]))])
+               ([x (in-list (doseq-form-body e))])
+       (refs-of x a))]
     [(threading-marker? e) (refs-of (threading-marker-desugared e) acc)]
     [(vec-form? e) (for/fold ([a acc]) ([x (in-list (vec-form-items e))]) (refs-of x a))]
     [else acc]))
