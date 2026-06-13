@@ -46,6 +46,8 @@
   (js      . (split    "Structural active; behavioral demoted — JS target may become load-bearing via Bun work; currently aspirational"))
   (py      . (split    "Structural active; behavioral demoted — Python target is recent; no load-bearing use yet"))
   (sql     . (active   "Structural-only; no behavioral runner exists yet so nothing to demote"))
+  (odin    . (active   "Native target — Odin + wgpu/SDL3. Structural goldens + pointed rejections"))
+  (zig     . (gated    "Parked 2026-06-13 (pivoting to Odin). Emitter in dormant/; runtime in beagle-lib/zig/. Opt in via BEAGLE_ALL_TARGETS=1"))
   (cyclone . (future   "Cyclone Scheme self-host target — not yet implemented. When it ships, its behavioral tests promote to active (self-host means Cyclone is the substrate Beagle runs on)")))
 
 
@@ -84,9 +86,8 @@
              ;; shared emit-clj backend; no separate emit-cljs.rkt test exists.
              "emit.rkt"                 ; emit-clj structural
              "emit-clj-behavioral.rkt"  ; requires bb (Babashka)
-             ;; Zig backend (thread 20260612232001) — snapshot compile
-             ;; checks self-skip when zig isn't on PATH.
-             "emit-zig.rkt"
+             ;; Odin backend — native target (2026-06-13).
+             "emit-odin.rkt"
              ;; Form × live-backend matrix: every cell emits or rejects
              ;; pointedly (cracks thread 20260613013145 #2).
              "emit-matrix.rkt"
@@ -112,6 +113,8 @@
             "sql-fixtures.rkt"
             "sql-roundtrip.rkt"
             "sql-schema-cache.rkt"
+            ;; Zig backend — parked 2026-06-13, pivoting to Odin.
+            "emit-zig.rkt"
             ;; opt-in oracle/property/exec runners (env-gated)
             "differential.rkt"          ; BEAGLE_ORACLE=1
             "js-exec-oracle.rkt"        ; requires node/bun at runtime

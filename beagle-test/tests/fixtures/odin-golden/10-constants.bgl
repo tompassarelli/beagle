@@ -1,0 +1,5 @@
+(ns g)
+(def MAX-SIZE :- Int 1024)
+(def PI :- Float 3.14159)
+(def GREETING :- String "hello")
+(def ENABLED :- Bool true)

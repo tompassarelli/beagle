@@ -1,0 +1,5 @@
+(ns g)
+(defn compute [x :- Int] :- Int
+  (let [a (* x 2)
+        b (+ a 1)]
+    (+ a b)))

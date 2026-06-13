@@ -53,6 +53,7 @@
     [(py)       stdlib-py-combined]
     [(rkt)      STDLIB-PORTABLE]
     [(zig)      STDLIB-PORTABLE]
+    [(odin)     STDLIB-PORTABLE]
     [else (error 'stdlib-for-target "unknown target: ~a" target)]))
 
 ;; Every bb-runtime entry is JVM/bb-only — excluded from cljs wholesale.

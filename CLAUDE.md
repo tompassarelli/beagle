@@ -1,8 +1,8 @@
 # beagle — session anchor
 
-A typed authoring IR. **Nix, Clj, and CLJS are live targets.** JS, Py,
-Rkt, SQL emitters remain parked under `beagle-lib/private/dormant/` and
-reactivate with `BEAGLE_ALL_TARGETS=1`. Pipeline:
+A typed authoring IR. **Clj, CLJS, and Nix are live targets.** Zig, JS,
+Py, Rkt, SQL emitters are parked under `beagle-lib/private/dormant/` and
+reactivate with `BEAGLE_ALL_TARGETS=1`. Odin is the next native target. Pipeline:
 `parse → check → emit`, all at Racket expand-time inside our custom
 `#%module-begin`.
 

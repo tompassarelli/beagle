@@ -1,0 +1,5 @@
+(ns g)
+(defn add [a :- Int b :- Int] :- Int (+ a b))
+(defn sub [a :- Int b :- Int] :- Int (- a b))
+(defn mul [a :- Int b :- Int] :- Int (* a b))
+(defn negate [n :- Int] :- Int (- n))

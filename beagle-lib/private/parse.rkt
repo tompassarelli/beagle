@@ -784,9 +784,9 @@
 
       [(list 'define-target (? symbol? t))
        (when target-set? (raise-parse-error 'duplicate-meta "duplicate define-target"))
-       (unless (memq t '(clj cljs js nix py sql rkt zig))
+       (unless (memq t '(clj cljs js nix py sql rkt zig odin))
          (raise-parse-error 'bad-meta-value
-                            "unknown target: ~a (expected clj, cljs, js, nix, py, sql, rkt, or zig)" t))
+                            "unknown target: ~a (expected clj, cljs, js, nix, py, sql, rkt, zig, or odin)" t))
        (set! target t)
        (set! target-set? #t)]
 
