@@ -337,7 +337,11 @@
        (define qname (qualify-name prefix name))
        (if (eq? macro-kind 'beagle)
            (register-beagle-macro! registry qname pnames icontracts ret-type body)
-           (register-proc-macro! registry qname pnames icontracts ret-type body))]
+           (register-proc-macro! registry qname pnames icontracts ret-type body))
+       (unless (hash-has-key? registry name)
+         (if (eq? macro-kind 'beagle)
+             (register-beagle-macro! registry name pnames icontracts ret-type body)
+             (register-proc-macro! registry name pnames icontracts ret-type body)))]
       [(cons 'define-macro _)
        (raise-parse-error 'legacy-macro-form
         "(define-macro ...) — `define-macro` is not supported. Use `(defmacro NAME [params] body)` instead.")]
@@ -346,7 +350,9 @@
                     [(bracketed? params) (bracket-body params)]
                     [(list? params) params]
                     [else '()]))
-       (register-macro! registry (qualify-name prefix name) 'defmacro ps template)]
+       (register-macro! registry (qualify-name prefix name) 'defmacro ps template)
+       (unless (hash-has-key? registry name)
+         (register-macro! registry name 'defmacro ps template))]
       [(list 'defrecord (? symbol? name) fields-form)
        (define fields (parse-record-fields fields-form))
        (define rec-type (type-prim name))

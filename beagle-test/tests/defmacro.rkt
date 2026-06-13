@@ -17,6 +17,10 @@
 (define (parse-prog . forms)
   (parse-program (map (lambda (f) (datum->syntax #f f)) forms)))
 
+(define (parse-prog/source source-path . forms)
+  (parse-program (map (lambda (f) (datum->syntax #f f)) forms)
+                 #:source-path source-path))
+
 (define (br . xs) (cons BRACKET-TAG xs))
 
 ;; --- (a) basic unquote ----------------------------------------------------
@@ -247,3 +251,35 @@
       (parse-prog
        '(def b 99)
        '(def x (quasiquote (a (unquote b) c)))))))
+
+;; =============================================================================
+;; Cross-file macro imports
+;; =============================================================================
+
+(define macrolib-fixture-source
+  (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
+    (build-path dir "fixtures" "macrolib.bjs")))
+
+(test-case "cross-file defmacro: qualified name works"
+  (check-not-exn
+    (lambda ()
+      (parse-prog/source macrolib-fixture-source
+       '(define-target js)
+       (list 'ns 'test-consumer (list ':require (br 'macrolib)))
+       '(def x (macrolib/when-pos 5 42))))))
+
+(test-case "cross-file defmacro: bare name via :refer works"
+  (check-not-exn
+    (lambda ()
+      (parse-prog/source macrolib-fixture-source
+       '(define-target js)
+       (list 'ns 'test-consumer (list ':require (br 'macrolib ':refer (br 'when-pos))))
+       '(def x (when-pos 5 42))))))
+
+(test-case "cross-file defmacro: :as alias works"
+  (check-not-exn
+    (lambda ()
+      (parse-prog/source macrolib-fixture-source
+       '(define-target js)
+       (list 'ns 'test-consumer (list ':require (br 'macrolib ':as 'm)))
+       '(def x (m/when-pos 5 42))))))

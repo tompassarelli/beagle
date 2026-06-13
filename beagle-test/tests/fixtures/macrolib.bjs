@@ -1,0 +1,9 @@
+#lang beagle/js
+(ns macrolib)
+(define-mode strict)
+
+(defmacro when-pos [x body]
+  `(if (> ,x 0) ,body nil))
+
+(defmacro swap [a b]
+  `(let [tmp ,a] (set! ,a ,b) (set! ,b tmp)))
