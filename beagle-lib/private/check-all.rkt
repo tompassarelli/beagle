@@ -110,13 +110,26 @@
         (cond
           [(= 1 (length diffs))
            (define exp-el (caar diffs)) (define act-el (cdar diffs))
+           ;; index of the differing type argument (0-based)
+           (define position
+             (for/or ([e (in-list (reprs et))] [a (in-list (reprs at))] [i (in-naturals)]
+                      #:unless (equal? e a))
+               i))
            (hasheq 'confidence "medium"
                    'category "collection-element-type"
                    'fix-safety "type-directed"
                    'description (format "~a type argument differs: expected ~a, got ~a"
                                         ctor exp-el act-el)
                    'fix-hint (format "convert from ~a to ~a (e.g. map a ~a->~a conversion over the ~a)"
-                                     act-el exp-el act-el exp-el ctor))]
+                                     act-el exp-el act-el exp-el ctor)
+                   ;; structured, machine-consumable conversion data — agents and
+                   ;; the out-of-process loop act on this directly instead of
+                   ;; parsing the prose hint. from = what you have, to = what's
+                   ;; needed, at type-argument `position` of `collection`.
+                   'collection ctor
+                   'position position
+                   'from-type act-el
+                   'to-type exp-el)]
           [else
            (hasheq 'confidence "medium"
                    'category "collection-type"
@@ -124,7 +137,13 @@
                    'description (format "~a type arguments differ: expected ~a, got ~a"
                                         ctor (hash-ref et 'repr "?") (hash-ref at 'repr "?"))
                    'fix-hint (format "adjust so the ~a type matches ~a"
-                                     ctor (hash-ref et 'repr "?")))])]
+                                     ctor (hash-ref et 'repr "?"))
+                   'collection ctor
+                   'from-type (hash-ref at 'repr "?")
+                   'to-type (hash-ref et 'repr "?")
+                   ;; each differing position as {from, to}
+                   'diffs (for/list ([d (in-list diffs)])
+                            (hasheq 'from (cdr d) 'to (car d))))])]
 
        ;; --- Type mismatch with single "did you mean?" suggestion ---
        [(and (eq? kind 'type-mismatch)

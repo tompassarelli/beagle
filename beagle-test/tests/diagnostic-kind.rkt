@@ -441,7 +441,12 @@
   ;; the repair compiler reasons over the STRUCTURE: same ctor, element differs
   (define plan (generate-fix-plan e #f))
   (check-equal? (hash-ref plan 'category) "collection-element-type")
-  (check-true (regexp-match? #rx"Int" (hash-ref plan 'description))))
+  (check-true (regexp-match? #rx"Int" (hash-ref plan 'description)))
+  ;; structured conversion data (agent-consumable, not prose)
+  (check-equal? (hash-ref plan 'collection) "Vec")
+  (check-equal? (hash-ref plan 'position) 0)
+  (check-equal? (hash-ref plan 'from-type) "String")
+  (check-equal? (hash-ref plan 'to-type) "Int"))
 
 (test-case "structural fix-plan blames the DIFFERING type argument, not the first (Map)"
   ;; Regression: (Map Keyword Int) vs (Map Keyword String) differs only in the
@@ -460,4 +465,8 @@
   (check-true (regexp-match? #rx"expected Int, got String" desc)
               (format "must blame the value position, got: ~a" desc))
   (check-false (regexp-match? #rx"expected Keyword, got Keyword" desc)
-               "must NOT report the unchanged key as the diff"))
+               "must NOT report the unchanged key as the diff")
+  ;; structured: the differing position is the VALUE (index 1), not the key
+  (check-equal? (hash-ref plan 'position) 1)
+  (check-equal? (hash-ref plan 'from-type) "String")
+  (check-equal? (hash-ref plan 'to-type) "Int"))
