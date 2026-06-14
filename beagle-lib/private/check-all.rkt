@@ -187,7 +187,10 @@
 
      (when (and err-file err-line)
        (if err-col
-           (emit (format "  --> ~a:~a:~a" err-file err-line err-col))
+           ;; rustc-style `-->` shows 1-based line AND column; src-loc-col is
+           ;; 0-based (syntax-column), so add1 here. The JSON `col` stays
+           ;; 0-based (its long-standing convention for tool consumers).
+           (emit (format "  --> ~a:~a:~a" err-file err-line (add1 err-col)))
            (emit (format "  --> ~a:~a" err-file err-line)))
        (define src-line (read-source-line err-file err-line))
        (when src-line

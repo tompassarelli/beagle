@@ -88,7 +88,7 @@
    (E "E007" "Scalar constraint violation"
       "A literal value violates a defscalar :where constraint."
       "Agents pass out-of-range values to constrained scalar constructors."
-      "(defscalar Percentage Int :where [(>= 0) (<= 100)])\n(->Percentage 150)  ;; ERROR: violates constraint (<= 100)"
+      "(defscalar Percentage Int :where (>= 0) (<= 100))\n(->Percentage 150)  ;; ERROR: violates constraint (<= 100)"
       "(->Percentage 75)"
       "Use a value within the declared constraint range.")
 
@@ -236,20 +236,16 @@
 
 ;; --- CLI (bin/beagle-explain is a thin wrapper over this) -------------------
 (module+ main
-  (require racket/cmdline)
-  (define json-mode? (make-parameter #f))
-  (define list-mode? (make-parameter #f))
-  (define code
-    (command-line
-     #:program "beagle-explain"
-     #:once-each
-     [("--json") "machine-readable JSON output" (json-mode? #t)]
-     [("--list") "list all codes" (list-mode? #t)]
-     #:args ([code #f])
-     code))
+  ;; Manual arg parse (not racket/cmdline) so flags work in ANY position —
+  ;; `beagle-explain E002 --json` and `beagle-explain --json E002` are both
+  ;; accepted, matching the old bash CLI's while/case loop.
+  (define args (vector->list (current-command-line-arguments)))
+  (define json-mode? (and (member "--json" args) #t))
+  (define list-mode? (and (member "--list" args) #t))
+  (define code (findf (lambda (a) (not (regexp-match? #rx"^--" a))) args))
   (cond
-    [(list-mode?)
-     (if (json-mode?)
+    [list-mode?
+     (if json-mode?
          (write-json
           (hasheq 'schemaVersion 1
                   'codes (for/list ([c (in-list (all-explanation-codes))])
@@ -261,8 +257,7 @@
            (newline)
            (for ([c (in-list (all-explanation-codes))])
              (printf "  ~a  ~a\n" c (error-explanation-title
-                                     (error-explanation-ref c))))))
-     (newline)]
+                                     (error-explanation-ref c))))))]
     [(not code)
      (eprintf "usage: beagle-explain [--json] <code>    (e.g. beagle-explain E002)\n")
      (eprintf "       beagle-explain --list              (list all codes)\n")
@@ -274,5 +269,5 @@
         (eprintf "beagle-explain: unknown code ~a\n" code)
         (eprintf "Run 'beagle-explain --list' for available codes.\n")
         (exit 1)]
-       [(json-mode?) (write-json (error-explanation->jsexpr e)) (newline)]
+       [json-mode? (write-json (error-explanation->jsexpr e)) (newline)]
        [else (displayln (render-error-explanation e))])]))

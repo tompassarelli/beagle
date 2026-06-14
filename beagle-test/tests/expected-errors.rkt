@@ -71,12 +71,18 @@
 
 ;; --- normalization ----------------------------------------------------------
 
-;; Scrub volatile tokens so comparison is stable across runs/machines:
-;; absolute paths -> <path>, and any gensym suffix `name.NNN` -> `name.N`.
+;; Scrub absolute filesystem paths (e.g. a temp fixture path that leaked into
+;; a message) -> <path>. The path must start at a token boundary with a
+;; leading slash and have at least two segments, so dotted/slashed DIAGNOSTIC
+;; content — a nixos option path (services/nginx/enable), a qualified name
+;; (foo/bar) — is NOT masked. Masking those would hide exactly the message
+;; drift this harness exists to catch (the live nix target emits such paths).
+;; Single-slash target prefixes like nix/assert are also left intact.
+;; (An earlier version scrubbed any multi-slash token and any `name.NNN`
+;; suffix; both over-normalized real content and were removed.)
 (define (normalize-message m)
-  (let* ([m (regexp-replace* #rx"/[^ \t\n\"']*/[^ \t\n\"']+" m "<path>")]
-         [m (regexp-replace* #rx"([a-zA-Z_-]+)\\.[0-9]+" m "\\1.N")])
-    (string-trim m)))
+  (string-trim
+   (regexp-replace* #px"([\\s\"'(=]|^)/[^\\s\"']*/[^\\s\"']+" m "\\1<path>")))
 
 ;; --- annotation parsing -----------------------------------------------------
 
@@ -138,21 +144,27 @@
 
 ;; --- tests ------------------------------------------------------------------
 
-(test-case "inline expected-error fixtures match (or update)"
-  (cond
-    [(not (directory-exists? fixtures-dir*))
-     (printf "  (no fixtures dir ~a — skipping)\n" fixtures-dir*)]
-    [else
-     (define fixtures
-       (sort (for/list ([f (in-list (directory-list fixtures-dir*))]
-                        #:when (regexp-match? #rx"\\.(bclj|bnix|bcljs)$"
-                                              (path->string f)))
-              (build-path fixtures-dir* f))
-             string<? #:key path->string))
-     (when (null? fixtures)
-       (printf "  (no fixtures present yet)\n"))
-     (for ([fx (in-list fixtures)])
-       (run-fixture fx))]))
+;; One test-case PER fixture so a failure in one does not abort the others
+;; (rackunit `fail` unwinds; collapsing all fixtures into a single test-case
+;; would hide simultaneous regressions behind the first).
+(cond
+  [(not (directory-exists? fixtures-dir*))
+   (test-case "inline expected-error fixtures"
+     (printf "  (no fixtures dir ~a — skipping)\n" fixtures-dir*))]
+  [else
+   (define fixtures
+     (sort (for/list ([f (in-list (directory-list fixtures-dir*))]
+                      #:when (regexp-match? #rx"\\.(bclj|bnix|bcljs)$"
+                                            (path->string f)))
+             (build-path fixtures-dir* f))
+           string<? #:key path->string))
+   (when (null? fixtures)
+     (test-case "inline expected-error fixtures"
+       (printf "  (no fixtures present yet)\n")))
+   (for ([fx (in-list fixtures)])
+     (test-case (string-append "expected-error: "
+                               (path->string (file-name-from-path fx)))
+       (run-fixture fx)))])
 
 ;; Harness self-tests — exercise the machinery directly (no fixture files),
 ;; so the compare/normalize/annotation logic is pinned independent of any
@@ -166,9 +178,18 @@
   (check-equal? k "bare-nix-form")
   (check-true (string-prefix? m "(assert ...)")))
 
-(test-case "normalization scrubs volatile tokens"
+(test-case "normalization scrubs absolute paths, not diagnostic content"
+  ;; absolute (temp) path -> <path>
+  (check-equal? (normalize-message "at /tmp/x/y.bclj boom") "at <path> boom")
   (check-equal? (normalize-message "tmp.482 leaked /a/b/c.bclj here")
-                "tmp.N leaked <path> here"))
+                "tmp.482 leaked <path> here")
+  ;; nixos option paths / qualified names / target prefixes must NOT be masked
+  (check-equal? (normalize-message "option services/nginx/enable unknown")
+                "option services/nginx/enable unknown")
+  (check-equal? (normalize-message "namespace foo/bar/baz not found")
+                "namespace foo/bar/baz not found")
+  (check-equal? (normalize-message "use (nix/assert COND BODY)")
+                "use (nix/assert COND BODY)"))
 
 (test-case "compare matches on kind+normalized-message, rejects drift"
   (check-true  (compare-expected "type-mismatch" "expected Int, got String"

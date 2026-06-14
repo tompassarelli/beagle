@@ -12,7 +12,9 @@
 
 (require rackunit
          racket/string
+         racket/file
          beagle/private/error-explanation
+         beagle/private/parse
          (only-in beagle/private/check kind->error-code))
 
 ;; Every diagnostic kind the checker maps to a dedicated code. Mirrors the
@@ -64,3 +66,34 @@
   (check-eq? (error-explanation-ref "E002") (error-explanation-ref "e002"))
   (check-eq? (error-explanation-ref "E002") (error-explanation-ref "2"))
   (check-false (error-explanation-ref "E999")))
+
+;; The regression regex above is a weak proxy; the real guard is that each
+;; example actually PARSES as current beagle surface. (This is what would
+;; have caught the E007 `:where [...]` defect that the regex missed.) The
+;; target-agnostic codes E001-E008 are clj-parseable; E009-E018 are
+;; target-specific (js/sql/nix/js-quote) and excluded here. Examples carry
+;; deliberate TYPE errors, which are NOT parse errors, so parse must succeed.
+(define (parses-clean? src)
+  (define tmp (make-temporary-file "expl-example-~a.bclj"))
+  (dynamic-wind
+   void
+   (lambda ()
+     (call-with-output-file tmp
+       (lambda (o) (display "#lang beagle/clj\n" o) (display src o) (newline o))
+       #:exists 'truncate/replace)
+     (with-handlers ([beagle-parse-error? (lambda (e) (exn-message e))])
+       (parse-program (read-beagle-syntax tmp))
+       #t))
+   (lambda () (delete-file tmp))))
+
+(test-case "registry examples parse as current beagle surface (E001-E008)"
+  (for ([code (in-list '("E001" "E002" "E003" "E004" "E005" "E006" "E007" "E008"))])
+    (define e (error-explanation-ref code))
+    (for ([which (in-list (list (cons 'bad (error-explanation-bad e))
+                                (cons 'good (error-explanation-good e))))])
+      (define src (cdr which))
+      (when (non-empty-string? src)
+        (define r (parses-clean? src))
+        (check-eq? r #t
+                   (format "~a ~a example does not parse: ~a"
+                           code (car which) r))))))
