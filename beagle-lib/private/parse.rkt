@@ -1280,7 +1280,13 @@
             ;; datum with the macro-call's srcloc so diagnostics on the
             ;; expansion point where the author invoked the macro, not at the
             ;; enclosing top-level form. (Lean withRef / fromRef-canonical.)
-            (parse-expr (datum->syntax #f (expand-fully reg d) x))))
+            ;; parse-expr is dual-mode: `x` is a syntax object on the top-level
+            ;; path but a RAW DATUM when parsing a sub-form (e.g. a macro call
+            ;; nested inside another form). datum->syntax's srcloc arg accepts
+            ;; only #f / syntax / srcloc — a raw datum crashes it — so blame the
+            ;; call site only when `x` is real syntax, else #f (no srcloc, same
+            ;; as the pre-blame behavior). Fixes a crash on nested macro calls.
+            (parse-expr (datum->syntax #f (expand-fully reg d) (and (syntax? x) x)))))
         (mark-macro-derived! parsed-node ctx)
         parsed-node]
        [else
