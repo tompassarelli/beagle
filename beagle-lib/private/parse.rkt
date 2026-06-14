@@ -1061,7 +1061,17 @@
             (and (pair? d) (symbol? (car d)) (lookup-macro registry (car d))))
           (define expanded
             (if from-macro? (expand-fully registry d) d))
-          (define (parse-macro-output expansion-stx)
+          (define (parse-macro-output form-datum)
+            ;; Blame the macro CALL SITE for everything the expansion
+            ;; produces. Macro output is generated code with no source of its
+            ;; own, so a parse/type error in the expansion should point at
+            ;; where the author invoked the macro (`s`), not at the whole
+            ;; enclosing top-level form. Tagging the expansion datum with `s`'s
+            ;; srcloc gives every generated node the call-site position — the
+            ;; analog of Lean's withRef / fromRef-canonical, where synthesized
+            ;; nodes inherit the reference position. (When `s` has no srcloc,
+            ;; e.g. structurally-built test input, this is a graceful no-op.)
+            (define expansion-stx (datum->syntax #f form-datum s))
             ;; Set current-macro-expansion-ctx so that any raise-parse-error
             ;; triggered while parsing this macro output rebuckets to
             ;; 'macro-expansion-parse-error. Also record the resulting AST
@@ -1075,11 +1085,11 @@
           (cond
             [(and (pair? expanded) (eq? (car expanded) '#%splice-forms))
              (for/list ([form-datum (in-list (cdr expanded))])
-               (cons (parse-macro-output (datum->syntax #f form-datum)) s))]
+               (cons (parse-macro-output form-datum) s))]
             [(eq? expanded d)
              (list (cons (parse-top s) s))]
             [from-macro?
-             (list (cons (parse-macro-output (datum->syntax #f expanded)) s))]
+             (list (cons (parse-macro-output expanded) s))]
             [else
              (list (cons (parse-top (datum->syntax #f expanded)) s))])))))
   (define parsed (map car pairs))
@@ -1210,7 +1220,11 @@
         (define ctx (make-root-ctx (car d)))
         (define parsed-node
           (parameterize ([current-macro-expansion-ctx ctx])
-            (parse-expr (expand-fully reg d))))
+            ;; Blame the call site `x` for the expansion: tag the generated
+            ;; datum with the macro-call's srcloc so diagnostics on the
+            ;; expansion point where the author invoked the macro, not at the
+            ;; enclosing top-level form. (Lean withRef / fromRef-canonical.)
+            (parse-expr (datum->syntax #f (expand-fully reg d) x))))
         (mark-macro-derived! parsed-node ctx)
         parsed-node]
        [else

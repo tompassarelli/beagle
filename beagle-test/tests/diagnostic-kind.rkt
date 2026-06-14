@@ -220,7 +220,10 @@
 ;; ============================================================================
 
 (require (only-in beagle/private/check beagle-diagnostic? beagle-diagnostic-kind
-                                       beagle-diagnostic-details type-check!))
+                                       beagle-diagnostic-details type-check!)
+         (only-in beagle/private/ast program-forms program-src-table
+                                     def-form? def-form-value
+                                     src-loc? src-loc-line src-loc-origin))
 
 (test-case "diagnostic-kind table: macro-expansion-parse-error maps to surface-divergence"
   (check-eq? (kind->cause-class 'macro-expansion-parse-error) 'surface-divergence)
@@ -296,6 +299,40 @@
   ;; Original symptom (e.g. def-type) is preserved.
   (check-true (string? (hash-ref details 'original-kind #f)))
   (check-equal? (hash-ref details 'macro-name) "bad"))
+
+;; --- Macro-expansion errors blame the CALL SITE ----------------------------
+;; Macro output is generated code; a type error in the expansion should point
+;; at where the author invoked the macro, not at the whole enclosing form.
+;; (Lean withRef / fromRef-canonical: synthesized nodes inherit the ref pos.)
+
+(test-case "macro expansion inherits the call-site source position"
+  ;; `mk` expands to (str "hello") — a call form (store-src! tracks call forms,
+  ;; unlike bare leaves). The (mk) call carries srcloc line 10 while the
+  ;; enclosing def starts on line 9. After expansion, the generated call node
+  ;; must carry the CALL SITE's position (line 10), not be position-less —
+  ;; this is what lets diagnostics on the expansion blame the call site.
+  ;; Asserted at the AST level (independent of any one checker's #:src path).
+  (define mk-call
+    (datum->syntax #f '(mk) (list "t.bclj" 10 4 120 4)))
+  (define def-stx
+    (datum->syntax #f (list 'def 'y (string->symbol ":-") 'Int mk-call)
+                   (list "t.bclj" 9 0 100 30)))
+  (define prog
+    (parse-program
+     (list (datum->syntax #f '(ns t.app))
+           (datum->syntax #f '(define-mode strict))
+           (datum->syntax #f '(define-target clj))
+           (datum->syntax #f (list 'defmacro 'mk (br)
+                                   (list 'quasiquote (list 'str "hello"))))
+           def-stx)))
+  (define the-def (findf def-form? (program-forms prog)))
+  (check-pred def-form? the-def)
+  (define val-loc (hash-ref (program-src-table prog) (def-form-value the-def) #f))
+  (check-pred src-loc? val-loc "expansion node should carry a source position")
+  (check-equal? (src-loc-line val-loc) 10
+                "macro expansion should inherit the (mk) call-site line (10)")
+  ;; The call site is real author syntax, so it's an original position.
+  (check-eq? (src-loc-origin val-loc) 'original))
 
 ;; --- Negative control: non-macro forms keep their original kinds -----------
 
