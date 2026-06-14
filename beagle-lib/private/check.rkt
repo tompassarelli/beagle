@@ -861,10 +861,9 @@
              (raise-diag 'sql-type
                          (format "insert ~a.~a: expected ~a, got ~a"
                                  table col (type->string expected-type) (type->string val-type))
-                         (hasheq 'table (symbol->string table)
-                                 'column (symbol->string col)
-                                 'expected (type->string expected-type)
-                                 'actual (type->string val-type)))))))]
+                         (hash-set* (type-mismatch-details expected-type val-type)
+                                 'table (symbol->string table)
+                                 'column (symbol->string col)))))))]
 
     [(sql-update table set-pairs where-clause)
      (unless (hash-has-key? SQL-TABLES table)

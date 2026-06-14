@@ -6,6 +6,7 @@
 
 (require rackunit
          json
+         racket/file
          beagle/private/diagnostic-kind
          beagle/private/parse
          beagle/private/check
@@ -441,3 +442,22 @@
   (define plan (generate-fix-plan e #f))
   (check-equal? (hash-ref plan 'category) "collection-element-type")
   (check-true (regexp-match? #rx"Int" (hash-ref plan 'description))))
+
+(test-case "structural fix-plan blames the DIFFERING type argument, not the first (Map)"
+  ;; Regression: (Map Keyword Int) vs (Map Keyword String) differs only in the
+  ;; VALUE position. The fix must report Int/String, not the unchanged key.
+  (define tmp (make-temporary-file "fixplan-map-~a.bclj"))
+  (call-with-output-file tmp
+    (lambda (o) (display "#lang beagle/clj\n(def m :- (Map Keyword Int) {:a \"b\"})\n" o))
+    #:exists 'truncate/replace)
+  (define prog (parse-program (read-beagle-syntax tmp) #:source-path tmp))
+  (define e (with-handlers ([beagle-diagnostic? values]) (type-check! prog) 'no-error))
+  (delete-file tmp)
+  (check-pred beagle-diagnostic? e)
+  (define plan (generate-fix-plan e #f))
+  (check-equal? (hash-ref plan 'category) "collection-element-type")
+  (define desc (hash-ref plan 'description))
+  (check-true (regexp-match? #rx"expected Int, got String" desc)
+              (format "must blame the value position, got: ~a" desc))
+  (check-false (regexp-match? #rx"expected Keyword, got Keyword" desc)
+               "must NOT report the unchanged key as the diff"))
