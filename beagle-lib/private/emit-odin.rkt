@@ -94,10 +94,12 @@
         (define inner (car (type-app-args t)))
         (format "^~a" (type->odin inner))]
        [(Map)
-        (define k (car (type-app-args t)))
-        (unless (and (type-prim? k) (memq (type-prim-name k) '(String Keyword)))
-          (unsupported "map key type" "odin maps key on string"))
-        (format "map[string]~a" (type->odin (cadr (type-app-args t))))]
+        ;; Odin maps key on any comparable type. type->odin already rejects
+        ;; non-emittable types, so the key just renders through it (Keyword ->
+        ;; string, Int -> int, an enum/scalar -> its type, etc.).
+        (format "map[~a]~a"
+                (type->odin (car (type-app-args t)))
+                (type->odin (cadr (type-app-args t))))]
        [else (unsupported "parametric type" (type-app-ctor t))])]
     [(type-union? t)
      (cond
@@ -513,7 +515,6 @@
 ;; --- typed value emission (maps/vecs against known types) -------------------
 
 (define (map-type? t) (and (type-app? t) (eq? (type-app-ctor t) 'Map)))
-(define (map-vtype t) (cadr (type-app-args t)))
 
 (define (emit-map-key k)
   (cond
@@ -523,15 +524,21 @@
      (format "\"~a\"" (odin-escape-string (substring (symbol->string k) 1)))]
     [else (unsupported "map key" "keys must be keyword or string literals")]))
 
-(define (emit-map-literal e vtype)
+(define (emit-map-literal e mtype)
   ;; Odin maps are mutable; build by successive assignment.
   ;; In expression position, use an immediately-invoked proc.
+  ;; The declared key type drives the make() so an empty literal for a
+  ;; non-string-keyed map (e.g. (Map Int V)) emits the right type; non-empty
+  ;; literals still only accept keyword/string keys via emit-map-key.
+  (define map-decl (format "map[~a]~a"
+                           (type->odin (car (type-app-args mtype)))
+                           (type->odin (cadr (type-app-args mtype)))))
   (define pairs (map-form-pairs e))
   (if (null? pairs)
-      (format "make(map[string]~a)" (type->odin vtype))
+      (format "make(~a)" map-decl)
       (string-append
        "proc() -> auto { "
-       (format "m := make(map[string]~a); " (type->odin vtype))
+       (format "m := make(~a); " map-decl)
        (apply string-append
               (for/list ([pr (in-list pairs)])
                 (format "m[~a] = ~a; " (emit-map-key (car pr)) (emit-expr (cdr pr)))))
@@ -540,7 +547,7 @@
 (define (emit-typed-value v expected)
   (cond
     [(and (map-form? v) expected (map-type? expected))
-     (emit-map-literal v (map-vtype expected))]
+     (emit-map-literal v expected)]
     [(and (vec-form? v) expected (type-app? expected)
           (eq? (type-app-ctor expected) 'Vec))
      (define items (vec-form-items v))

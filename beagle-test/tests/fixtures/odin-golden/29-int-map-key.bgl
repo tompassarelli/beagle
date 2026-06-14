@@ -1,0 +1,12 @@
+(ns imk)
+(def CKEY-OFFSET :- Int 2000000)
+(def CKEY-STRIDE :- Int 4000001)
+(defn chunk-key [cx :- Int cz :- Int] :- Int
+  (+ (* (+ cx CKEY-OFFSET) CKEY-STRIDE) (+ cz CKEY-OFFSET)))
+(defn chunk-cx [key :- Int] :- Int
+  (- (quot key CKEY-STRIDE) CKEY-OFFSET))
+(defrecord Store [cells :- (Map Int Int)])
+(defn put [s :- (Ptr Store) cx :- Int cz :- Int v :- Int] :- Nil
+  (set! (get (:cells (deref s)) (chunk-key cx cz)) v))
+(defn has [s :- (Ptr Store) cx :- Int cz :- Int] :- Bool
+  (contains? (:cells (deref s)) (chunk-key cx cz)))
