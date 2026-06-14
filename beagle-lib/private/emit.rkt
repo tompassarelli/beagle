@@ -9,7 +9,8 @@
          "emit-js.rkt"
          "emit-nix.rkt"
          "emit-sql.rkt"
-         "emit-py.rkt")
+         "emit-py.rkt"
+         "emit-rkt.rkt")
 
 (define (emit-program prog)
   (define backend (resolve-backend (program-target prog)))
