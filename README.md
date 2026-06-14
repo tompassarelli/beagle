@@ -1,10 +1,10 @@
 # Beagle
 
 Beagle is a typed Clojure subset designed to emit idiomatic code to
-multiple targets from a single AST. Three targets are live today —
-**Clojure**, **ClojureScript**, and **Nix** — and the architecture
-keeps additional targets (JavaScript, Python, SQL, Typed Racket) one
-emitter away if there's pull for them.
+multiple targets from a single AST. Five targets are live today —
+**Clojure**, **ClojureScript**, **JavaScript**, **Nix**, and **Odin**
+— with **Zig**, **Python**, **SQL**, and **Typed Racket** emitters
+parked under `dormant/`, one flag (`BEAGLE_ALL_TARGETS=1`) away.
 
 The active distribution effort is **Nix-first**: the language people
 actively dislike using, with no incumbent typed alternative, and a
@@ -25,10 +25,10 @@ author a NixOS system end to end against the typed schema.
 ## How it compiles
 
 ```
-.bclj / .bcljs / .bnix  ──▶  parse  ──▶  check  ──▶  emit  ──▶  .clj / .cljs / .nix
-                                            ▲
-                              macros, schema, stdlib, type narrowing
-                              all share one AST + diagnostic path
+.bclj / .bcljs / .bjs / .bnix / .bodin  ──▶  parse ──▶ check ──▶ emit  ──▶  .clj / .cljs / .js / .nix / .odin
+                                                          ▲
+                                            macros, schema, stdlib, type narrowing
+                                            all share one AST + diagnostic path
 ```
 
 `check` is where the 16k-option NixOS schema becomes typed context:
@@ -100,7 +100,7 @@ precision — before `nixos-rebuild` is invoked.
 
 Every snippet above passes `bin/beagle-syntax`.
 
-## v0.16 surface highlights
+## Surface highlights
 
 - **Inline `:-` annotations** on `def` / `defn` / `defonce` / `let`.
   The interim `claim` form is gone.
@@ -115,15 +115,16 @@ Every snippet above passes `bin/beagle-syntax`.
   canonicalization (11/11 on the fidelity bench, up from 5/11).
 - **Typo suggestions** against the 16k-option NixOS schema:
   segment-aware Levenshtein, 96.9% Top-1, ~130 ms/query.
-- **Per-target prefixes** (`nix/`, `js/`, `sql/`) for forms whose
-  meaning genuinely diverges per backend.
+- **Per-target prefixes** (`nix/`, `js/`, …) for forms whose meaning
+  genuinely diverges per backend.
 
 ## How it's organized
 
 - `beagle-lib/private/parse.rkt` — surface form set. The source of
   truth; static docs go stale.
 - `beagle-lib/private/check.rkt` — type checker.
-- `beagle-lib/private/emit-{clj,cljs,nix}.rkt` — live emitters.
+- `beagle-lib/private/emit-{clj,cljs,js,nix,odin}.rkt` — live emitters;
+  `beagle-lib/private/dormant/` holds the parked ones.
 - `beagle-lib/private/nixos-schema.rkt` — 16k-option typed environment.
 - `beagle-lib/private/diagnostic-kind.rkt` — `cause-class?` taxonomy.
 - `beagle-test/` — tiered test suite; `beagle-test/tiers.rktd` is the
