@@ -61,6 +61,8 @@
              "check.rkt"
              "defmacro.rkt"
              "diagnostic-kind.rkt"
+             "error-explanation.rkt"    ; in-compiler explanation registry
+
              "lint.rkt"
              "macro-hygiene.rkt"
              "parse.rkt"

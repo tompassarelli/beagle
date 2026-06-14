@@ -311,3 +311,45 @@
   (check-pred beagle-parse-error? e)
   (check-eq? (beagle-parse-error-kind e) 'removed-form)
   (check-false (hash-has-key? (beagle-parse-error-details e) 'macro-name)))
+
+;; ============================================================================
+;; Structured machine-applicable suggestions on pointed-replacement errors
+;;
+;; The pointed-replacement arms (bare-nix family, await, has) attach a
+;; structured `(replace-head from to)` suggestion alongside the prose so
+;; beagle-repair --emit-patch can auto-apply the fix instead of re-deriving
+;; it from the message text. (Lean Suggestion/TryThis: intent -> edit.)
+;; ============================================================================
+
+(define (suggestion-for form)
+  (define e
+    (with-handlers ([beagle-parse-error? values])
+      (parse-program (list (datum->syntax #f form)))
+      'no-error-raised))
+  (and (beagle-parse-error? e)
+       (hash-ref (beagle-parse-error-details e) 'suggestion #f)))
+
+(test-case "bare-nix `assert` carries a replace-head suggestion to nix/assert"
+  (define s (suggestion-for '(assert c b)))
+  (check-pred hash? s)
+  (check-equal? (hash-ref s 'type) "replace-head")
+  (check-equal? (hash-ref s 'from) "assert")
+  (check-equal? (hash-ref s 'to)   "nix/assert")
+  (check-true (string? (hash-ref s 'label)))
+  ;; JSON-serializable so it rides the error stream to beagle-repair.
+  (check-true (jsexpr? s)))
+
+(test-case "bare-nix family + await + has all attach replace-head suggestions"
+  (for ([triple (in-list (list (list '(with-cfg p b) "with-cfg" "nix/with-cfg")
+                               (list '(fn-set f b)   "fn-set"   "nix/fn-set")
+                               (list '(module f b)   "module"   "nix/module")
+                               (list '(overlay f b)  "overlay"  "nix/overlay")
+                               (list '(derivation a) "derivation" "nix/derivation")
+                               (list '(flake a)      "flake"    "nix/flake")
+                               (list '(await x)      "await"    "js/await")
+                               (list '(has m k)      "has"      "contains?")))])
+    (define form (car triple))
+    (define s (suggestion-for form))
+    (check-pred hash? s (format "no suggestion for ~a" form))
+    (check-equal? (hash-ref s 'from) (cadr triple)  (format "from mismatch for ~a" form))
+    (check-equal? (hash-ref s 'to)   (caddr triple) (format "to mismatch for ~a" form))))

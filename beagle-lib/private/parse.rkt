@@ -34,7 +34,19 @@
   details     ; hasheq with structured data (cause, form, etc.)
 ) #:transparent)
 
-(define (raise-parse-error kind fmt . args)
+;; A machine-applicable suggestion attached to a pointed-replacement error so
+;; tools (beagle-repair --emit-patch) can auto-apply the fix instead of
+;; re-deriving it from the prose message. This is the Lean Suggestion/TryThis
+;; split: semantic intent -> applicable edit, carried as structured data
+;; alongside the human message. "replace-head" renames the offending form's
+;; head symbol; the value is JSON-serializable so it rides the error stream.
+(define (replace-head-suggestion from to)
+  (hasheq 'type "replace-head"
+          'from (format "~a" from)
+          'to (format "~a" to)
+          'label (format "Replace `~a` with `~a`" from to)))
+
+(define (raise-parse-error kind fmt #:suggestion [suggestion #f] . args)
   (define msg (apply format fmt args))
   ;; When we're currently parsing the output of a macro expansion
   ;; (current-macro-expansion-ctx non-#f), rebucket the rejection as
@@ -48,7 +60,7 @@
   (define base-details
     (hasheq 'cause (symbol->string (parse-error-kind->cause-class effective-kind))
             'phase "parse"))
-  (define details
+  (define details0
     (cond
       [ctx
        (hash-set* base-details
@@ -56,6 +68,8 @@
                   'macro-name (symbol->string (expansion-ctx-macro-name ctx))
                   'macro-depth (expansion-ctx-depth ctx))]
       [else base-details]))
+  (define details
+    (if suggestion (hash-set details0 'suggestion suggestion) details0))
   (raise (beagle-parse-error
           (format "beagle: ~a" msg)
           (current-continuation-marks)
@@ -1857,7 +1871,8 @@
      (await-form (parse-expr (or (stx-ref subs 1) inner)))]
     [(list 'await _)
      (raise-parse-error 'bare-js-form
-                        "(await ...) — bare `await` is not supported. Beagle namespaces target-specific forms; use `(js/await EXPR)`.")]
+                        "(await ...) — bare `await` is not supported. Beagle namespaces target-specific forms; use `(js/await EXPR)`."
+                        #:suggestion (replace-head-suggestion 'await 'js/await))]
 
     ;; --- Nix-specific forms --------------------------------------------------
 
@@ -1884,7 +1899,8 @@
                  (parse-expr (or (stx-ref subs 2) body-expr)))]
     [(list 'assert _ _)
      (raise-parse-error 'bare-nix-form
-                        "(assert ...) — bare `assert` is not supported. Beagle namespaces target-specific forms; use `(nix/assert COND BODY)`.")]
+                        "(assert ...) — bare `assert` is not supported. Beagle namespaces target-specific forms; use `(nix/assert COND BODY)`."
+                        #:suggestion (replace-head-suggestion 'assert 'nix/assert))]
 
     [(list 'nix/with-cfg path-expr body-expr)
      ;; (nix/with-cfg config.myConfig.modules.X BODY) → introduces `cfg = config...;`
@@ -1894,7 +1910,8 @@
                    (parse-expr (or (stx-ref subs 2) body-expr)))]
     [(list 'with-cfg _ _)
      (raise-parse-error 'bare-nix-form
-                        "(with-cfg ...) — bare `with-cfg` is not supported. Beagle namespaces target-specific forms; use `(nix/with-cfg PATH BODY)`.")]
+                        "(with-cfg ...) — bare `with-cfg` is not supported. Beagle namespaces target-specific forms; use `(nix/with-cfg PATH BODY)`."
+                        #:suggestion (replace-head-suggestion 'with-cfg 'nix/with-cfg))]
 
     [(list 'get-or base path-expr default-expr)
      (nix-get-or (parse-expr (or (stx-ref subs 1) base))
@@ -1910,7 +1927,8 @@
     ;; Clojure spelling; emit-nix lowers it to hasAttr.
     [(list 'has _ _)
      (raise-parse-error 'removed-form
-                        "(has m :k) — `has` is removed. Use `(contains? m :k)` (Clojure spelling; lowers to hasAttr on nix).")]
+                        "(has m :k) — `has` is removed. Use `(contains? m :k)` (Clojure spelling; lowers to hasAttr on nix)."
+                        #:suggestion (replace-head-suggestion 'has 'contains?))]
 
     [(list 'search-path name-expr)
      (define d (->datum (or (stx-ref subs 1) name-expr)))
@@ -1951,7 +1969,8 @@
      (nix-fn-set fl #f at-name (parse-expr (or (stx-ref subs 2) body-expr)))]
     [(list 'fn-set _ _)
      (raise-parse-error 'bare-nix-form
-                        "(fn-set ...) — bare `fn-set` is not supported. Beagle namespaces target-specific forms; use `(nix/fn-set FORMALS BODY)`.")]
+                        "(fn-set ...) — bare `fn-set` is not supported. Beagle namespaces target-specific forms; use `(nix/fn-set FORMALS BODY)`."
+                        #:suggestion (replace-head-suggestion 'fn-set 'nix/fn-set))]
 
     [(list 'nix/module formals body-expr)
      ;; NixOS module / open-attrs lambda: { a, b, ... }: body
@@ -1960,7 +1979,8 @@
      (nix-fn-set fl #t at-name (parse-expr (or (stx-ref subs 2) body-expr)))]
     [(list 'module _ _)
      (raise-parse-error 'bare-nix-form
-                        "(module ...) — bare `module` is not supported. Beagle namespaces target-specific forms; use `(nix/module FORMALS BODY)`.")]
+                        "(module ...) — bare `module` is not supported. Beagle namespaces target-specific forms; use `(nix/module FORMALS BODY)`."
+                        #:suggestion (replace-head-suggestion 'module 'nix/module))]
 
     [(list 'nix/overlay formals body-expr)
      ;; Nix overlay: final: prev: body (curried — NOT attrset-destructure)
@@ -1976,7 +1996,8 @@
               (list (parse-expr (or (stx-ref subs 2) body-expr))))]
     [(list 'overlay _ _)
      (raise-parse-error 'bare-nix-form
-                        "(overlay ...) — bare `overlay` is not supported. Beagle namespaces target-specific forms; use `(nix/overlay [final prev] BODY)`.")]
+                        "(overlay ...) — bare `overlay` is not supported. Beagle namespaces target-specific forms; use `(nix/overlay [final prev] BODY)`."
+                        #:suggestion (replace-head-suggestion 'overlay 'nix/overlay))]
 
     [(list 'nix/derivation attrs-expr)
      ;; mkDerivation sugar: (nix/derivation {:pname ... :version ... :src ...})
@@ -1986,7 +2007,8 @@
      (nix-derivation attrs)]
     [(list 'derivation _)
      (raise-parse-error 'bare-nix-form
-                        "(derivation ...) — bare `derivation` is not supported. Beagle namespaces target-specific forms; use `(nix/derivation ATTRS)`.")]
+                        "(derivation ...) — bare `derivation` is not supported. Beagle namespaces target-specific forms; use `(nix/derivation ATTRS)`."
+                        #:suggestion (replace-head-suggestion 'derivation 'nix/derivation))]
 
     [(list 'nix/flake attrs-expr)
      ;; flake.nix sugar: (nix/flake {:description ... :inputs {...} :outputs (nix/fn-set [self nixpkgs] ...)})
@@ -1994,7 +2016,8 @@
      (nix-flake attrs)]
     [(list 'flake _)
      (raise-parse-error 'bare-nix-form
-                        "(flake ...) — bare `flake` is not supported. Beagle namespaces target-specific forms; use `(nix/flake ATTRS)`.")]
+                        "(flake ...) — bare `flake` is not supported. Beagle namespaces target-specific forms; use `(nix/flake ATTRS)`."
+                        #:suggestion (replace-head-suggestion 'flake 'nix/flake))]
 
     ;; The pipe family (`pipe-to`, `pipe-from`, `implies`, `|>`, `|>>`) was an
     ;; Elixir/F# import — removed per CLAUDE.md "Beagle is Clojure plus types,
