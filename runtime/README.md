@@ -14,7 +14,7 @@ src/           generated .clj files land here
 From the project root:
 
 ```
-bin/beagle-build examples/hello.rkt
+bin/beagle build examples/hello.rkt
 ```
 
 The output path is derived from `(define-namespace ...)` in the source.

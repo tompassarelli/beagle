@@ -1,13 +1,13 @@
-# nvim-lspconfig + beagle-lsp
+# nvim-lspconfig + beagle lsp
 
 Until [nvim-lspconfig](https://github.com/neovim/nvim-lspconfig) merges
 beagle support upstream, drop this stanza into your Neovim config.
 
 ## Setup
 
-### 1. Install beagle (provides `beagle-lsp`)
+### 1. Install beagle (provides `beagle lsp`)
 
-See main repo README. After install, `beagle-lsp` is on your PATH.
+See main repo README. After install, `beagle lsp` is on your PATH.
 
 ### 2. Register the language server
 

@@ -3,11 +3,11 @@
 ## Decision tree
 
 ```
-Error? → beagle-syntax FILE
-  ├─ Delimiter error → beagle-syntax --repair --emit-patch FILE
-  └─ Clean → beagle-daemon query check-enriched FILE
-               ├─ Type error with suggestion → beagle-fix .
-               ├─ Type error, no suggestion → beagle-repair ... --emit-patch
+Error? → beagle syntax FILE
+  ├─ Delimiter error → beagle syntax --repair --emit-patch FILE
+  └─ Clean → beagle daemon query check-enriched FILE
+               ├─ Type error with suggestion → beagle fix .
+               ├─ Type error, no suggestion → beagle repair ... --emit-patch
                │    ├─ Still stuck → beagle-trace ... --focus FN
                │    └─ Multiple failures → beagle-cascade ... --from-failures
                └─ Clean → done
@@ -16,12 +16,12 @@ Error? → beagle-syntax FILE
 ## Tool summary
 
 ### Tier 1: Always try first
-- `beagle-syntax FILE` — structural check (delimiters, brackets)
-- `beagle-check FILE` — type check only
-- `beagle-fix .` — report high-confidence fixes (dry-run by default)
+- `beagle syntax FILE` — structural check (delimiters, brackets)
+- `beagle check FILE` — type check only
+- `beagle fix .` — report high-confidence fixes (dry-run by default)
 
 ### Tier 2: When Tier 1 doesn't resolve
-- `beagle-repair FILE --emit-patch` — unified repair pipeline
+- `beagle repair FILE --emit-patch` — unified repair pipeline
 - `beagle-blame FILE` — semantic property rules + suspicion analysis
 - `beagle-specfix FILE` — 9 candidate strategies with oracle verification
 

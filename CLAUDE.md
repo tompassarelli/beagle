@@ -143,18 +143,18 @@ answer to a question a static doc would otherwise try to encode.
 
 | question | tool |
 |---|---|
-| does this file parse? where? | `bin/beagle-syntax FILE` (`--ledger`, `--repair --emit-patch`) |
-| does this file type-check? | `bin/beagle-check --agent FILE` (`beagle-op-*` is the quarantined operative pipeline — gated behind `BEAGLE_EXPERIMENTAL_OPERATIVE=1`, not the default) |
-| what's the signature of X? | `bin/beagle-sig X FILE...` |
-| what fields does record R have? | `bin/beagle-fields R FILE...` |
-| who calls X? | `bin/beagle-callers X FILE...` |
-| what does FILE export? | `bin/beagle-provides FILE` |
-| change-impact for X? | `bin/beagle-impact X FILE...` |
-| show macro expansion | `bin/beagle-expand FILE` |
-| run tests | `bin/beagle-test` (active-tier default, includes Nix + Clj + CLJS) |
-| compile this | `bin/beagle-build FILE [OUT]` |
+| does this file parse? where? | `bin/beagle syntax FILE` (`--ledger`, `--repair --emit-patch`) |
+| does this file type-check? | `bin/beagle check --agent FILE` (`beagle-op-*` is the quarantined operative pipeline — gated behind `BEAGLE_EXPERIMENTAL_OPERATIVE=1`, not the default) |
+| what's the signature of X? | `bin/beagle sig X FILE...` |
+| what fields does record R have? | `bin/beagle fields R FILE...` |
+| who calls X? | `bin/beagle callers X FILE...` |
+| what does FILE export? | `bin/beagle provides FILE` |
+| change-impact for X? | `bin/beagle impact X FILE...` |
+| show macro expansion | `bin/beagle expand FILE` |
+| run tests | `bin/beagle test` (active-tier default, includes Nix + Clj + CLJS) |
+| compile this | `bin/beagle build FILE [OUT]` |
 
-When stuck after ordinary checks: `bin/beagle-repair --emit-patch`,
+When stuck after ordinary checks: `bin/beagle repair --emit-patch`,
 `bin/beagle-trace --focus FN`, `bin/beagle-cascade --from-failures`,
 `bin/beagle-blame`, `bin/beagle-specfix`.
 
@@ -163,15 +163,15 @@ externs, read `beagle-lib/private/stdlib-nix.rkt` and `stdlib-portable.rkt`.
 
 ## Session start
 
-1. Confirm daemon: `bin/beagle-daemon status`. Start with
-   `bin/beagle-daemon start --watch .` if absent — the PostToolUse
+1. Confirm daemon: `bin/beagle daemon status`. Start with
+   `bin/beagle daemon start --watch .` if absent — the PostToolUse
    hook auto-starts it on first edit but confirming up front avoids
    cold-start delay.
 
 ## Agent loop
 
 1. Trust hook output. Fix syntax errors before type errors. Never
-   count parens by hand — `bin/beagle-syntax` already counted them.
+   count parens by hand — `bin/beagle syntax` already counted them.
 2. Use query tools above before opening large files.
 3. Use `--emit-patch` tools before manual repair.
 
@@ -393,7 +393,7 @@ otherwise collide with a Clojure namesake.
 
 ### Test tiering during surface iteration
 
-`bin/beagle-test` runs the **active tier only** by default — Nix, Clj,
+`bin/beagle test` runs the **active tier only** by default — Nix, Clj,
 and CLJS target tests plus the target-agnostic infrastructure. Dormant
 target tests (JS, Py, Rkt, SQL) and behavioral/oracle suites are gated;
 opt in with `BEAGLE_ALL_TARGETS=1` or per-suite env vars
@@ -455,10 +455,10 @@ Each names the rule, the contrast-doc justification (thread
    because there is no second copy. It is also **not** redundant with
    inference: inference *knows* the type; types-as-view *shows* it, at
    any verbosity, with no type living in the source. And it
-   *generalizes the renderer `bin/beagle-sig` already ships* — this is
+   *generalizes the renderer `bin/beagle sig` already ships* — this is
    "extend what exists," not speculation. Build it as ONE extensible
    head-keyed render engine (`Type`/expr-node → surface) that powers
-   `beagle-explain-type`, editor hover/inlay, error-message type
+   `beagle explain-type`, editor hover/inlay, error-message type
    rendering, and multi-target views. See thread `20260614120025`.
 
 4. **Sourcemap fidelity (preserving error-col through
