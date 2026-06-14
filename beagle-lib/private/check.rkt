@@ -2480,7 +2480,13 @@
             (let ([s (symbol->string fn-name)])
               (and (>= (string-length s) 3)
                    (char=? (string-ref s 0) #\-)
-                   (char=? (string-ref s 1) #\>)))
+                   (char=? (string-ref s 1) #\>)
+                   ;; Only genuine record constructors get the partial /
+                   ;; zero-value allowance — not arbitrary ->prefixed
+                   ;; functions. RECORD-FIELDS includes imported sibling
+                   ;; records (folded in build-initial-env), so this still
+                   ;; covers (->Chunk) across package modules.
+                   (hash-has-key? RECORD-FIELDS (string->symbol (substring s 2)))))
             (<= n-args n-fixed)))
      (unless (or record-ctor-partial? (= n-fixed n-args))
        (define help

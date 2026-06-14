@@ -719,4 +719,45 @@
      "obj.my_prop"
      '(declare-extern obj Any)
      '(defn f [(obj :- Any)] :- Any (.-my-prop obj)))
+
+   ;; --- map destructuring: :as whole-binding across all three let positions,
+   ;;     plus :or defaults and single-evaluation. Regression net for the
+   ;;     d51ae3e :as bug (the fix had landed on only one of three paths).
+   ;;     Maps/vectors must be built with mt/br so the parser sees real
+   ;;     map-destructure / bracket forms (plain {}/[] read as lists here).
+   (check-js-contains "let :as in return position binds whole map from the value"
+     "const whole = m;"
+     `(defn f ((m :- Any)) :- Any
+        (let (,(mt ':keys (br 'a) ':as 'whole) m) whole)))
+
+   (check-js-contains "let :as destructures FROM the whole binding (single source)"
+     "const {a} = whole;"
+     `(defn f ((m :- Any)) :- Any
+        (let (,(mt ':keys (br 'a) ':as 'whole) m) whole)))
+
+   (check-js-contains "let :as in statement position binds whole map"
+     "const whole = m;"
+     `(defn f ((m :- Any)) :- Any
+        (do (let (,(mt ':keys (br 'a) ':as 'whole) m) whole) 99)))
+
+   (check-js-contains "let :as in expression position binds whole map"
+     "const whole ="
+     `(declare-extern mk ,(br 'Any '-> 'Any))
+     `(defn f ((m :- Any)) :- Any
+        ,(br `(let (,(mt ':keys (br 'a) ':as 'whole) (mk m)) whole))))
+
+   (test-case "let :as single-evaluates its value (no double call)"
+     (define result
+       (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+                      `(declare-extern mk ,(br 'Any '-> 'Any))
+                      `(defn f ((m :- Any)) :- Any
+                         ,(br `(let (,(mt ':keys (br 'a) ':as 'whole) (mk m)) whole))))))
+     (define n (length (regexp-match* #rx"mk\\(" result)))
+     (check-equal? n 1
+                   (format "mk(...) should be called exactly once, got ~a in:\n~a" n result)))
+
+   (check-js-contains "let :or default emits JS default value"
+     "a = 10"
+     `(defn f ((m :- Any)) :- Any
+        (let (,(mt ':keys (br 'a) ':or (mt 'a 10)) m) a)))
  ))

@@ -940,18 +940,9 @@
                  ([b (in-list bindings)])
          (define val-str (parameterize ([current-js-bound bound])
                            (emit-expr (let-binding-value b))))
-         (define s (format "const ~a = ~a;"
-                           (emit-binding-target (let-binding-name b))
-                           val-str))
-         (define as-strs
-           (if (and (map-destructure? (let-binding-name b))
-                    (map-destructure-as-name (let-binding-name b)))
-               (list (format "const ~a = ~a;"
-                             (mangle-name (map-destructure-as-name (let-binding-name b)))
-                             val-str))
-               '()))
+         (define stmts (emit-let-binding-stmts (let-binding-name b) val-str))
          (define new-names (names-from-binding-target (let-binding-name b)))
-         (values (append strs (list s) as-strs)
+         (values (append strs stmts)
                  (set-union bound (list->set new-names)))))
      (with-bindings let-names
        (lambda ()
@@ -1522,6 +1513,23 @@
     [(symbol? name) (mangle-name name)]
     [else (error 'beagle-js "unsupported binding target: ~v" name)]))
 
+;; Emit the JS const-binding statement(s) for one let-binding target, given
+;; the already-emitted value string. Returns a LIST of statement strings.
+;; A map-destructure with an :as name binds the value to the :as name first,
+;; then destructures FROM that name — so the value is evaluated exactly once
+;; (matching Clojure single-eval) and the whole-map :as binding is always
+;; available. Every let-emission site routes through here so the :as handling
+;; can never drift between the IIFE, return-position, and statement paths.
+(define (emit-let-binding-stmts target val-str)
+  (define as-name (and (map-destructure? target) (map-destructure-as-name target)))
+  (cond
+    [as-name
+     (define as-js (mangle-name as-name))
+     (list (format "const ~a = ~a;" as-js val-str)
+           (format "const ~a = ~a;" (emit-binding-target target) as-js))]
+    [else
+     (list (format "const ~a = ~a;" (emit-binding-target target) val-str))]))
+
 (define (expr-contains-recur? e)
   (cond
     [(recur-form? e) #t]
@@ -1570,10 +1578,9 @@
     [(and (let-form? e) (body-contains-recur? (let-form-body e)))
      (define let-names (apply append (map (lambda (b) (names-from-binding-target (let-binding-name b))) (let-form-bindings e))))
      (define binding-strs
-       (for/list ([b (in-list (let-form-bindings e))])
-         (format "const ~a = ~a;"
-                 (emit-binding-target (let-binding-name b))
-                 (emit-expr (let-binding-value b)))))
+       (apply append
+         (for/list ([b (in-list (let-form-bindings e))])
+           (emit-let-binding-stmts (let-binding-name b) (emit-expr (let-binding-value b))))))
      (with-bindings let-names
        (lambda ()
          (define body-str
@@ -1620,12 +1627,11 @@
          (define-values (bind-strs _)
            (for/fold ([strs '()] [bound (current-js-bound)])
                      ([b (in-list bindings)])
-             (define s (parameterize ([current-js-bound bound])
-                         (format "const ~a = ~a;"
-                                 (emit-binding-target (let-binding-name b))
-                                 (emit-expr (let-binding-value b)))))
+             (define val-str (parameterize ([current-js-bound bound])
+                               (emit-expr (let-binding-value b))))
+             (define stmts (emit-let-binding-stmts (let-binding-name b) val-str))
              (define new-names (names-from-binding-target (let-binding-name b)))
-             (values (append strs (list s))
+             (values (append strs stmts)
                      (set-union bound (list->set new-names)))))
          (with-bindings let-names
            (lambda ()
@@ -1748,12 +1754,11 @@
          (define-values (bind-strs _)
            (for/fold ([strs '()] [bound (current-js-bound)])
                      ([b (in-list bindings)])
-             (define s (parameterize ([current-js-bound bound])
-                         (format "const ~a = ~a;"
-                                 (emit-binding-target (let-binding-name b))
-                                 (emit-expr (let-binding-value b)))))
+             (define val-str (parameterize ([current-js-bound bound])
+                               (emit-expr (let-binding-value b))))
+             (define stmts (emit-let-binding-stmts (let-binding-name b) val-str))
              (define new-names (names-from-binding-target (let-binding-name b)))
-             (values (append strs (list s))
+             (values (append strs stmts)
                      (set-union bound (list->set new-names)))))
          (with-bindings let-names
            (lambda ()
