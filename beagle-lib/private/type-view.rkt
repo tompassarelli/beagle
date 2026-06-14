@@ -149,7 +149,7 @@
 ;; --- entry ------------------------------------------------------------------
 
 ;; Returns a string (the rendered view) or raises a user error.
-(define (explain-type path #:name [name #f] #:level [level "clean"])
+(define (explain-type path #:name [name #f] #:level [level "clean"] #:write? [write? #f])
   ;; Normalize CRLF->LF so substring offsets align with syntax-position
   ;; (Racket counts a CRLF as a single position). LF files are unchanged.
   (define text (regexp-replace* #rx"\r\n" (file->string path) "\n"))
@@ -165,12 +165,27 @@
     (if name (find-form prog (string->symbol name)) (values #f #f)))
   (when (and name (not form))
     (error 'beagle-explain-type "no top-level definition named `~a` in ~a" name path))
+  (define rendered
+    (cond
+      [(not form) text]   ; no NAME: clean view of the whole file
+      [(string=? level "clean")    (form-source text form-stx)]
+      [(string=? level "inferred") (annotate-inferred text form form-stx src-tbl ty-tbl)]
+      [(string=? level "all")      (annotate-all text form form-stx src-tbl ty-tbl)]
+      [else (error 'beagle-explain-type "unknown --level ~a (use clean|inferred|all)" level)]))
   (cond
-    [(not form) text]   ; no NAME: clean view of the whole file
-    [(string=? level "clean")    (form-source text form-stx)]
-    [(string=? level "inferred") (annotate-inferred text form form-stx src-tbl ty-tbl)]
-    [(string=? level "all")      (annotate-all text form form-stx src-tbl ty-tbl)]
-    [else (error 'beagle-explain-type "unknown --level ~a (use clean|inferred|all)" level)]))
+    [(not write?) rendered]
+    ;; promote: splice the rendered form back into the file in place. Only
+    ;; the inferred level (which round-trips) may be written — `all` is a
+    ;; non-reparseable debug view. Reversible: re-running clean (or hand-
+    ;; deleting the `:- T`) recovers the original; promoting is idempotent.
+    [(not form) (error 'beagle-explain-type "--write needs a NAME (the definition to promote)")]
+    [(not (string=? level "inferred"))
+     (error 'beagle-explain-type "--write supports only --level inferred (got ~a)" level)]
+    [else
+     (define-values (start end) (form-bounds form-stx text))
+     (define new-text (string-append (substring text 0 start) rendered (substring text end)))
+     (call-with-output-file path (lambda (o) (display new-text o)) #:exists 'truncate/replace)
+     (format "promoted inferred types into `~a` (~a)" name path)]))
 
 ;; --- CLI --------------------------------------------------------------------
 
@@ -182,18 +197,23 @@
       (cond [(null? a) "clean"]
             [(and (string=? (car a) "--level") (pair? (cdr a))) (cadr a)]
             [else (loop (cdr a))])))
+  (define write? (and (member "--write" args) #t))
   (define positional
     (let strip ([a args])
       (cond [(null? a) '()]
             [(string=? (car a) "--level") (strip (cddr a))]
+            [(string=? (car a) "--write") (strip (cdr a))]
             [else (cons (car a) (strip (cdr a)))])))
+  ;; --write promotes inferred types in place; it implies --level inferred
+  ;; unless the user explicitly asked for another level (which then errors).
+  (define eff-level (if (and write? (string=? level "clean")) "inferred" level))
   (cond
     [(null? positional)
-     (eprintf "usage: beagle-explain-type FILE [NAME] [--level clean|inferred|all]\n")
+     (eprintf "usage: beagle-explain-type FILE [NAME] [--level clean|inferred|all] [--write]\n")
      (exit 2)]
     [else
      (define file (car positional))
      (define name (and (pair? (cdr positional)) (cadr positional)))
      (with-handlers ([exn:fail? (lambda (e) (eprintf "~a\n" (exn-message e)) (exit 1))])
-       (display (explain-type file #:name name #:level level))
+       (display (explain-type file #:name name #:level eff-level #:write? write?))
        (newline))]))

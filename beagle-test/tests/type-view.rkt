@@ -144,3 +144,30 @@
                   (format "CRLF clean view truncated:\n~v" clean))
       (define inferred (explain-type f #:name "process" #:level "inferred"))
       (check-true (string-contains? inferred "a :- Int (* n 2)") inferred))))
+
+(test-case "promote (--write) materializes inferred types into the file, idempotently"
+  (with-fixture SRC
+    (lambda (f)
+      ;; before: no interior annotations
+      (check-false (string-contains? (file->string f) ":- Int (* n 2)"))
+      (explain-type f #:name "process" #:level "inferred" #:write? #t)
+      (define after (file->string f))
+      ;; after: the inferred types are now in the file
+      (check-true (string-contains? after "a :- Int (* n 2)") after)
+      (check-true (string-contains? after "b :- Int (+ a 1)") after)
+      ;; and it still parses (we wrote real surface, not a debug view)
+      (define g (make-temporary-file "promote-rt-~a.bclj"))
+      (call-with-output-file g (lambda (o) (display after o)) #:exists 'truncate/replace)
+      (check-not-exn (lambda () (parse-program (read-beagle-syntax g))))
+      (delete-file g)
+      ;; idempotent: promoting again is a no-op (bindings are now annotated,
+      ;; so annotate-inferred skips them) — no double `:- Int :- Int`.
+      (explain-type f #:name "process" #:level "inferred" #:write? #t)
+      (check-equal? (file->string f) after)
+      (check-false (string-contains? (file->string f) ":- Int :- Int")))))
+
+(test-case "promote refuses the non-round-tripping `all` level"
+  (with-fixture SRC
+    (lambda (f)
+      (check-exn #rx"--write supports only --level inferred"
+                 (lambda () (explain-type f #:name "process" #:level "all" #:write? #t))))))

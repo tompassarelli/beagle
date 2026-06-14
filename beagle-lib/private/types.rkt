@@ -344,6 +344,15 @@
     (format "(~a ~a)"
             (type-app-ctor t)
             (string-join (map recur (type-app-args t)) " "))))
+;; The full numeric union (BUILTIN-UNION-ALIASES 'Number) renders back as
+;; `Number`, the reverse of the parse-time alias — so an inferred type that
+;; widened to the 11-member numeric union prints as `Number`, not its
+;; expansion. (A one-renderer change, thanks to the registry.)
+(define number-alias-names
+  (sort (map type-prim-name
+             (type-union-alts ((hash-ref BUILTIN-UNION-ALIASES 'Number))))
+        symbol<?))
+
 (register-type-delab! 'union
   (lambda (t recur)
     (define alts (type-union-alts t))
@@ -351,6 +360,8 @@
     (cond
       [(and alt-names (= (length alts) 2)
             (member 'Int alt-names) (member 'Float alt-names))
+       "Number"]
+      [(and alt-names (equal? (sort alt-names symbol<?) number-alias-names))
        "Number"]
       [(and (= (length alts) 2)
             (ormap (lambda (a) (and (type-prim? a) (eq? (type-prim-name a) 'Nil))) alts))
