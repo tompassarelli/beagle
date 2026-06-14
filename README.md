@@ -1,7 +1,26 @@
 # Beagle
 
-Beagle is a typed Clojure subset that emits idiomatic code to multiple
-targets from a single AST. Five targets are live today, four more dormant:
+Beagle is a typed Clojure subset that compiles one AST to idiomatic code
+in many languages — [five live targets, four dormant](#targets).
+
+Its types exist for a specific job: making authoring, diagnostics, and AI
+repair reliable. They check at compile time and erase before emit. The
+point isn't to reject bad code — it's to tell repair tools *what* kind of
+mistake happened, *where* in the source, after *which* canonicalization,
+against *which* target.
+
+Real codebases author against Beagle:
+
+- [firnos](https://github.com/tompassarelli/firnos) — a complete NixOS
+  system, typed end-to-end against its 16k-option schema (Nix target).
+- [gjoa](https://github.com/tompassarelli/gjoa) — a Firefox overlay UI,
+  43 `.bjs` modules ported from TypeScript (JS target).
+
+## Targets
+
+One AST, idiomatic output per backend — Nix as lazy attrsets, Clojure as
+eager maps, ClojureScript as Clojure-shaped JS, Odin as structs and procs.
+Never a lowest-common-denominator transpile.
 
 | Target        | Status  |
 |---------------|---------|
@@ -17,25 +36,6 @@ targets from a single AST. Five targets are live today, four more dormant:
 
 Dormant emitters sit under `dormant/`, one flag (`BEAGLE_ALL_TARGETS=1`)
 away.
-
-Distribution is Nix-first. Nix is the language people actively dislike
-using, has no incumbent typed alternative, and its failure profile —
-eval errors, schema violations, type mismatches in module composition —
-is exactly what Beagle's types catch at compile time, against a
-16k-option typed environment. The language is multi-target. The campaign
-is Nix-first.
-
-Types exist to make authoring, diagnostics, and AI repair reliable; they
-check at compile time and erase before emit. The point isn't to reject
-bad code — it's to tell repair tools what kind of mistake happened, where
-in the source, after which canonicalization, against which target.
-
-Real codebases author against Beagle:
-
-- [firnos](https://github.com/tompassarelli/firnos) uses Beagle to author
-  a complete NixOS system, end-to-end against the typed schema (Nix target).
-- [gjoa](https://github.com/tompassarelli/gjoa) uses Beagle's JS target for
-  a Firefox overlay UI — 43 `.bjs` modules, type-checked end to end.
 
 ## How it compiles
 
@@ -194,8 +194,7 @@ The discipline is intentionally tight:
 - **Divergence from Clojure must serve types or a backend, or it
   dies.** Inert syntactic novelty is rejected.
 - **Each target renders idiomatically** — same surface, faithful per
-  backend (Nix as lazy attrsets, Clojure as eager maps, CLJS as
-  Clojure-shaped JS).
+  backend.
 - **Gates have stated jurisdiction.** When ambiguous, ask; don't
   silently defer.
 
