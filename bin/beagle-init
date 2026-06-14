@@ -34,6 +34,10 @@ if [[ -z "$BEAGLE_PATH" ]]; then
     fi
 fi
 
+# Tracked hook-worker templates (copied into scaffolded projects, not inlined).
+BEAGLE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HOOK_TEMPLATES="$BEAGLE_ROOT/share/claude-hooks"
+
 mkdir -p "$DIR"
 cd "$DIR"
 
@@ -149,117 +153,16 @@ HEOF
     chmod +x .claude/hooks/post-edit-check.sh
 
     # Simple mode worker
-    cat > .claude/hooks/post_edit_check_simple.py << 'PEOF'
-#!/usr/bin/env python3
-"""Simple mode post-edit hook: syntax + type check, report to primary agent."""
-import json, os, shutil, socket, subprocess, sys, time
-
-BEAGLE_EXTENSIONS = frozenset({".bgl",".bclj",".bcljs",".bjs",".bnix",".bsql",".bpy",".rkt"})
-PORT_FILE = os.environ.get("BEAGLE_DAEMON_PORTFILE", "/var/tmp/beagle-daemon.port")
-
-def find_tool(name):
-    hook_dir = os.path.dirname(os.path.abspath(__file__))
-    for rel in [os.path.join(hook_dir, "..", "..", "bin", name)]:
-        if os.path.isfile(rel):
-            return os.path.abspath(rel)
-    bp = os.environ.get("BEAGLE_PATH")
-    if bp:
-        c = os.path.join(bp, "bin", name)
-        if os.path.isfile(c):
-            return c
-    return shutil.which(name)
-
-SYNTAX_BIN = find_tool("beagle-syntax")
-DAEMON_BIN = find_tool("beagle-daemon")
-
-def get_file_path(s):
-    try: return json.loads(s).get("tool_input",{}).get("file_path","")
-    except: return ""
-
-def daemon_running():
-    try:
-        if not os.path.exists(PORT_FILE): return False
-        port = int(open(PORT_FILE).read().strip())
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.settimeout(1)
-        s.connect(("127.0.0.1", port)); s.send(b"ping\n"); s.recv(64); s.close()
-        return True
-    except: return False
-
-def ensure_daemon():
-    if daemon_running(): return
-    if not DAEMON_BIN: return
-    try:
-        subprocess.Popen([DAEMON_BIN,"start"],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-        time.sleep(1.0)
-    except: pass
-
-def syntax_check(fp):
-    if not SYNTAX_BIN: return None
-    try:
-        r = subprocess.run([SYNTAX_BIN,"--json",fp],capture_output=True,text=True,timeout=5)
-        if r.returncode == 0: return None
-        raw = r.stdout or r.stderr
-        d = json.loads(raw)
-        if d.get("status") == "ok": return None
-        fn = os.path.basename(fp)
-        lines = [f"beagle-syntax: {fn} — STRUCTURAL ERROR"]
-        for e in d.get("errors",[]):
-            lines.append(f"  {e.get('line',0)}:{e.get('col',0)} {e.get('detail','')}")
-        for nm, k in [("()","parens"),("[]","brackets"),("{}","braces")]:
-            c = d.get("counts",{}).get(k,{})
-            if c.get("balance",0) != 0:
-                lines.append(f"  {nm} open:{c.get('open',0)} close:{c.get('close',0)} balance:{c['balance']:+d}")
-        rep = d.get("repair")
-        if rep and isinstance(rep,dict) and rep.get("edits"):
-            lines.append(f"  repair: {len(rep['edits'])} edit(s), run: beagle-syntax --repair --write {fp}")
-        return "\n".join(lines)
-    except: return None
-
-def type_check(fp):
-    if not DAEMON_BIN: return None
-    try: subprocess.run([DAEMON_BIN,"query","watch",os.path.dirname(fp)],capture_output=True,text=True,timeout=3)
-    except: pass
-    time.sleep(0.3)
-    try:
-        r = subprocess.run([DAEMON_BIN,"query","check-enriched",fp],capture_output=True,text=True,timeout=8)
-        if r.returncode != 0: return None
-        res = json.loads(r.stdout).get("result")
-        if not res or res == "null" or res.get("error_count",0) == 0: return None
-        fn = os.path.basename(fp)
-        auto = res.get("auto_fixable",0)
-        lines = [f"beagle-check: {fn} ({res['error_count']} error(s), {auto} auto-fixable)"]
-        for e in res.get("errors",[]):
-            msg = e.get("message",""); short = msg.split(": ")[-1] if ": " in msg else msg
-            lines.append(f"  L{e.get('line',0)} [{e.get('kind','?')}]: {short}")
-            fp2 = e.get("fix_plan")
-            if fp2 and isinstance(fp2,dict) and fp2.get("fix-hint"):
-                lines.append(f"    -> {fp2['fix-hint']}")
-        return "\n".join(lines)
-    except: return None
-
-def log_event(pd, **kw):
-    try:
-        lp = os.path.join(pd, ".beagle", "hook-log.jsonl")
-        os.makedirs(os.path.dirname(lp), exist_ok=True)
-        with open(lp,"a") as f: f.write(json.dumps({"ts":time.time(),**kw})+"\n")
-    except: pass
-
-def main():
-    if len(sys.argv) < 2: sys.exit(0)
-    fp = get_file_path(sys.argv[1])
-    if not fp or not any(fp.endswith(e) for e in BEAGLE_EXTENSIONS): sys.exit(0)
-    pd = os.environ.get("CLAUDE_PROJECT_DIR", os.getcwd())
-    t0 = time.time(); ensure_daemon(); out = []; se = te = 0
-    sm = syntax_check(fp)
-    if sm: out.append(sm); se = sm.count("\n")
-    else:
-        tm = type_check(fp)
-        if tm: out.append(tm); te = tm.count("\n")
-    log_event(pd, event="check", file=os.path.basename(fp), syntax_errors=se, type_errors=te, wall_ms=int((time.time()-t0)*1000))
-    if out: print("\n".join(out))
-
-if __name__ == "__main__": main()
-PEOF
+    # Hook workers — copied from the tracked templates (canonical, portable
+    # find_tool resolution), not inlined. Install BOTH so `mode: pool` works.
+    if [[ -d "$HOOK_TEMPLATES" ]]; then
+        cp "$HOOK_TEMPLATES/post_edit_check_simple.py" .claude/hooks/
+        cp "$HOOK_TEMPLATES/post_edit_check_pool.py"   .claude/hooks/
+        chmod +x .claude/hooks/post_edit_check_simple.py .claude/hooks/post_edit_check_pool.py
+        echo "  installed hook workers (simple + pool)"
+    else
+        echo "  WARNING: hook templates missing at $HOOK_TEMPLATES" >&2
+    fi
 
     echo "  created .claude/hooks/ (simple mode)"
 fi
