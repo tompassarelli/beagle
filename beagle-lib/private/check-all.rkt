@@ -82,6 +82,34 @@
                 'fix-hint (format "Remove ~a extra argument(s) from the call"
                                   (- actual expected)))]
 
+       ;; --- Structural reasoning over the typed details (MessageData) ---
+       ;; The repair compiler reads the STRUCTURED expected/actual types, not
+       ;; the prose: a same-constructor collection whose element type differs
+       ;; (e.g. (Vec Int) vs (Vec String)) is a precise, machine-actionable fix
+       ;; that prose-matching could never derive. This is why diagnostics carry
+       ;; type->jsexpr.
+       [(and (memq kind '(type-mismatch return-type def-type let-binding))
+             (let ([et (hash-ref d 'expected-type #f)]
+                   [at (hash-ref d 'actual-type #f)])
+               (and (hash? et) (hash? at)
+                    (equal? (hash-ref et 'kind #f) "app")
+                    (equal? (hash-ref at 'kind #f) "app")
+                    (equal? (hash-ref et 'ctor #f) (hash-ref at 'ctor #f))
+                    (not (equal? (hash-ref et 'args #f) (hash-ref at 'args #f))))))
+        (define et (hash-ref d 'expected-type))
+        (define at (hash-ref d 'actual-type))
+        (define ctor (hash-ref et 'ctor))
+        (define (el j) (let ([as (hash-ref j 'args '())])
+                         (and (pair? as) (hash-ref (car as) 'repr "?"))))
+        (hasheq 'confidence "medium"
+                'category "collection-element-type"
+                'fix-safety "type-directed"
+                'description (format "~a element type differs: expected ~a, got ~a"
+                                     ctor (or (el et) "?") (or (el at) "?"))
+                'fix-hint (format "convert each element from ~a to ~a (e.g. map a ~a->~a conversion over the ~a)"
+                                  (or (el at) "?") (or (el et) "?")
+                                  (or (el at) "?") (or (el et) "?") ctor))]
+
        ;; --- Type mismatch with single "did you mean?" suggestion ---
        [(and (eq? kind 'type-mismatch)
              (pair? (hash-ref d 'suggestions '()))

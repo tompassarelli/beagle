@@ -411,3 +411,33 @@
   (check-pred hash? s "suggestion must be folded into the JSON object")
   (check-equal? (hash-ref s 'type) "replace-head")
   (check-equal? (hash-ref s 'to) "nix/assert"))
+
+;; ============================================================================
+;; Structured types in diagnostics (MessageData for the repair compiler)
+;; ============================================================================
+;; Diagnostics carry the human strings (unchanged — back-compat) AND the
+;; STRUCTURED type jsexpr, so agents and the repair loop reason over the type
+;; structure instead of parsing prose.
+
+(test-case "diagnostics carry structured types + the repair compiler reasons over them"
+  (define prog
+    (parse-prog*
+     '(ns t.app) '(define-mode strict) '(define-target clj)
+     (list 'def 'xs (string->symbol ":-") (list 'Vec 'Int) (br "a"))))
+  (define e
+    (with-handlers ([beagle-diagnostic? values]) (type-check! prog) 'no-error-raised))
+  (check-pred beagle-diagnostic? e)
+  (define d (beagle-diagnostic-details e))
+  ;; human strings unchanged (the ~hundreds of regex-matching tests still pass)
+  (check-equal? (hash-ref d 'expected) "(Vec Int)")
+  (check-equal? (hash-ref d 'actual) "(Vec String)")
+  ;; STRUCTURED type data — what agents / the repair loop consume
+  (define et (hash-ref d 'expected-type))
+  (check-equal? (hash-ref et 'kind) "app")
+  (check-equal? (hash-ref et 'ctor) "Vec")
+  (check-equal? (hash-ref (car (hash-ref et 'args)) 'name) "Int")
+  (check-equal? (hash-ref (car (hash-ref (hash-ref d 'actual-type) 'args)) 'name) "String")
+  ;; the repair compiler reasons over the STRUCTURE: same ctor, element differs
+  (define plan (generate-fix-plan e #f))
+  (check-equal? (hash-ref plan 'category) "collection-element-type")
+  (check-true (regexp-match? #rx"Int" (hash-ref plan 'description))))
