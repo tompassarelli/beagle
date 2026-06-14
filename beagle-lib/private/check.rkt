@@ -2581,7 +2581,11 @@
 (define (drop* xs n)
   (if (or (zero? n) (null? xs)) xs (drop* (cdr xs) (- n 1))))
 
-(define (type-check-with-locs! prog error-handler)
+;; #:capture-types? opts INTO per-node inferred-type capture (for
+;; types-as-view / beagle-explain-type). Default #f, so every production
+;; caller (compile, lsp, daemon, build-all) pays nothing: the type-table stays
+;; unbound and store-type! is a genuine no-op.
+(define (type-check-with-locs! prog error-handler #:capture-types? [capture-types? #f])
   (when (and (eq? (program-mode prog) 'strict)
              (>= (current-check-profile) 1))
     (define env (build-initial-env prog))
@@ -2599,10 +2603,10 @@
           (hash-set! SQL-FKS tbl-col target))))
     (define macro-tbl (program-macro-derived-table prog))
     (define body-locs-tbl (program-body-locs-table prog))
-    ;; Capture per-node inferred types for types-as-view / beagle-explain-type
-    ;; and stash the table on the program so tools can read it post-pass.
-    (define type-tbl (make-hasheq))
-    (register-program-type-table! prog type-tbl)
+    ;; Capture per-node inferred types ONLY when asked (types-as-view /
+    ;; beagle-explain-type). When off, type-tbl is #f so store-type! no-ops.
+    (define type-tbl (and capture-types? (make-hasheq)))
+    (when type-tbl (register-program-type-table! prog type-tbl))
     (parameterize ([current-check-src-table (program-src-table prog)]
                    [current-body-locs-table body-locs-tbl]
                    [current-type-table type-tbl]

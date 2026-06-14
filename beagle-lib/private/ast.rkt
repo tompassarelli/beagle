@@ -68,13 +68,19 @@
 ;; still pointing at a synthetic-but-trustworthy spot (e.g. a macro call
 ;; site that a generated node should be blamed on). Original positions are
 ;; always blamable; canonical synthetic ones are too.
-(struct src-loc (line col source origin canonical) #:transparent)
+;;
+;; `pos` is the 1-based absolute CHARACTER offset (syntax-position). Unlike
+;; `col` (syntax-column, which expands tabs to tab-stops and so is NOT a
+;; codepoint index), `pos` is a true codepoint offset and is the right thing
+;; for slicing/injecting into source text. #f when unavailable.
+(struct src-loc (line col source origin canonical pos) #:transparent)
 
 (define (stx->src-loc s)
   (and (syntax? s)
        (let ([line (syntax-line s)]
              [src  (syntax-source s)])
-         (and line (src-loc line (syntax-column s) src 'original #f)))))
+         (and line (src-loc line (syntax-column s) src 'original #f
+                            (syntax-position s))))))
 
 ;; Derive a synthetic position from a base (a src-loc or a syntax object),
 ;; optionally flagged canonical. This is the analog of Lean's
@@ -85,7 +91,7 @@
                   [(syntax? base) (stx->src-loc base)]
                   [else #f]))
   (and l (src-loc (src-loc-line l) (src-loc-col l) (src-loc-source l)
-                  'synthetic canonical?)))
+                  'synthetic canonical? (src-loc-pos l))))
 
 ;; Blame predicate for canonical-aware lookup: an original position, or a
 ;; synthetic one explicitly marked canonical, is trustworthy to blame.

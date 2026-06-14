@@ -7,7 +7,8 @@
 (require rackunit
          racket/file
          racket/string
-         beagle/private/type-view)
+         beagle/private/type-view
+         beagle/private/parse)
 
 (define SRC
   (string-append
@@ -80,3 +81,66 @@
       ;; inferred is exactly clean + `:- Int ` injections: stripping them
       ;; recovers clean byte-for-byte (proves pure projection, no rewrite).
       (check-equal? (string-replace inferred ":- Int " "") clean))))
+
+;; --- edge cases the first fixture hid (from adversarial review) --------------
+
+(define MIXED
+  (string-append
+   "#lang beagle/clj\n"
+   "(defn process [n :- Int] :- String\n"
+   "  (let [a (* n 2)\n"
+   "        s (str a)]\n"
+   "    s))\n"))
+
+(test-case "inferred reflects the ACTUAL per-binding type, not a hardcoded Int"
+  (with-fixture MIXED
+    (lambda (f)
+      (define out (explain-type f #:name "process" #:level "inferred"))
+      (check-true (string-contains? out "a :- Int (* n 2)") out)
+      (check-true (string-contains? out "s :- String (str a)") out))))
+
+(test-case "inferred output re-parses (round-trips through the reader)"
+  (for ([src (in-list (list SRC MIXED))])
+    (with-fixture src
+      (lambda (f)
+        (define out (explain-type f #:name "process" #:level "inferred"))
+        ;; write the rendered view back out and confirm it still parses —
+        ;; the injected `:- T` is real beagle surface, not a debug artifact.
+        (define g (make-temporary-file "type-view-rt-~a.bclj"))
+        (call-with-output-file g (lambda (o) (display out o)) #:exists 'truncate/replace)
+        (check-not-exn (lambda () (parse-program (read-beagle-syntax g)))
+                       (format "inferred view did not re-parse:\n~a" out))
+        (delete-file g)))))
+
+(test-case "tab-indented source: annotation lands at the right codepoint (not tab-expanded col)"
+  ;; syntax-column expands tabs to tab-stops; using it for offsets would
+  ;; mis-place the injection. We use syntax-position (codepoint), so a leading
+  ;; tab is handled correctly.
+  (define tabbed
+    (string-append "#lang beagle/clj\n"
+                   "(defn process [n :- Int] :- Int\n"
+                   "\t(let [a (* n 2)]\n"
+                   "\t  a))\n"))
+  (with-fixture tabbed
+    (lambda (f)
+      (define out (explain-type f #:name "process" #:level "inferred"))
+      (check-true (string-contains? out "a :- Int (* n 2)")
+                  (format "tab-indented injection mis-placed:\n~a" out)))))
+
+(test-case "CRLF source: clean is not truncated/shifted; inferred still works"
+  (define crlf
+    (string-append "#lang beagle/clj\r\n"
+                   "(defn process [n :- Int] :- Int\r\n"
+                   "  (let [a (* n 2)]\r\n"
+                   "    a))\r\n"))
+  (with-fixture crlf
+    (lambda (f)
+      (define clean (explain-type f #:name "process" #:level "clean"))
+      ;; clean must start at the form (no spurious leading blank line) and
+      ;; include the whole form (no trailing truncation).
+      (check-true (string-prefix? clean "(defn process")
+                  (format "CRLF clean view shifted:\n~v" clean))
+      (check-true (string-suffix? (string-trim clean) "a))")
+                  (format "CRLF clean view truncated:\n~v" clean))
+      (define inferred (explain-type f #:name "process" #:level "inferred"))
+      (check-true (string-contains? inferred "a :- Int (* n 2)") inferred))))

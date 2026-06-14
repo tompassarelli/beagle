@@ -55,24 +55,24 @@
 
 ;; --- offsets ----------------------------------------------------------------
 
-;; Vector v where v[k-1] = char offset of the start of (1-based) line k.
-(define (line-offsets text)
-  (define offs (list 0))
-  (for ([ch (in-string text)] [i (in-naturals)])
-    (when (char=? ch #\newline) (set! offs (cons (add1 i) offs))))
-  (list->vector (reverse offs)))
-
-(define (loc->offset offs loc)
-  (and (src-loc? loc)
-       (src-loc-line loc) (src-loc-col loc)
-       (let ([li (sub1 (src-loc-line loc))])
-         (and (>= li 0) (< li (vector-length offs))
-              (+ (vector-ref offs li) (src-loc-col loc))))))
+;; 0-based codepoint offset of a node's start, from src-loc-pos (syntax-
+;; position). We use `pos`, NOT line/col: syntax-column expands tabs to
+;; tab-stops, so it is not a codepoint index and would mis-place injections
+;; on tab-indented lines. syntax-position is a true codepoint offset (tabs
+;; count as one char), and after CRLF->LF normalization of the text it lines
+;; up exactly with substring indices (Racket counts a CRLF as one position).
+(define (loc-offset loc)
+  (and (src-loc? loc) (src-loc-pos loc) (sub1 (src-loc-pos loc))))
 
 ;; Apply (offset . insert-string) edits to text, right-to-left so earlier
-;; offsets stay valid.
+;; offsets stay valid. Sorted by offset desc then string, so the output is
+;; deterministic even when two nodes share an offset.
 (define (apply-edits text edits)
-  (for/fold ([t text]) ([e (in-list (sort edits > #:key car))])
+  (define ordered
+    (sort edits (lambda (a b)
+                  (or (> (car a) (car b))
+                      (and (= (car a) (car b)) (string<? (cdr a) (cdr b)))))))
+  (for/fold ([t text]) ([e (in-list ordered)])
     (string-append (substring t 0 (car e)) (cdr e) (substring t (car e)))))
 
 ;; --- form lookup ------------------------------------------------------------
@@ -94,39 +94,54 @@
 
 ;; --- view construction ------------------------------------------------------
 
-;; The source substring of one top-level form, from its syntax position/span.
-(define (form-source text form-stx)
-  (define pos (syntax-position form-stx))   ; 1-based char offset
+;; 0-based start / end codepoint offsets of a top-level form, from its syntax
+;; position+span. (text is CRLF-normalized upstream so these align.)
+(define (form-bounds form-stx text)
+  (define pos (syntax-position form-stx))
   (define span (syntax-span form-stx))
-  (if (and pos span)
-      (substring text (sub1 pos) (min (string-length text) (+ (sub1 pos) span)))
-      text))
+  (values (if pos (sub1 pos) 0)
+          (if (and pos span) (min (string-length text) (+ (sub1 pos) span))
+              (string-length text))))
 
-;; inferred: inject `:- T` before each un-annotated let-binding value whose
-;; type was captured. Offsets are relative to the form substring.
+(define (form-source text form-stx)
+  (define-values (start end) (form-bounds form-stx text))
+  (substring text start end))
+
+;; inferred: inject `:- T` before each un-annotated, symbol-named let-binding
+;; value whose type was captured. Destructuring-pattern bindings are skipped
+;; (a single `:- Any` on a whole pattern is unhelpful). Offsets are relative
+;; to the form substring. Reports to stderr when some eligible bindings could
+;; not be annotated (no recorded position/type — e.g. literal/leaf values or
+;; multi-arity bodies), so the gap is never silent.
 (define (annotate-inferred text form form-stx src-tbl ty-tbl)
-  (define base (sub1 (or (syntax-position form-stx) 1)))
-  (define offs (line-offsets text))
+  (define-values (base _end) (form-bounds form-stx text))
+  (define candidates
+    (for/list ([b (in-list (deep-collect let-binding? form))]
+               #:when (and (not (let-binding-type b))
+                           (symbol? (let-binding-name b))))
+      b))
   (define edits
-    (for*/list ([b (in-list (deep-collect let-binding? form))]
-                #:when (not (let-binding-type b))            ; skip already-annotated
+    (for*/list ([b (in-list candidates)]
                 [v (in-value (let-binding-value b))]
                 [loc (in-value (hash-ref src-tbl v #f))]
                 [ty (in-value (hash-ref ty-tbl v #f))]
-                [abs (in-value (and loc (loc->offset offs loc)))]
+                [abs (in-value (loc-offset loc))]
                 #:when (and abs ty))
       (cons (- abs base) (string-append ":- " (type->string ty) " "))))
+  (when (< (length edits) (length candidates))
+    (eprintf "note: annotated ~a of ~a let-binding(s); the rest have no recorded type/position (literal/leaf values, or a multi-arity body)\n"
+             (length edits) (length candidates)))
   (apply-edits (form-source text form-stx) edits))
 
-;; all: pp.all — prefix every typed+positioned node inside the form with ^T.
+;; all (pp.all): a DEBUG projection — prefix every typed+positioned node in
+;; the form with `^T`. Unlike clean/inferred this does NOT round-trip (the
+;; reader treats `^T` as metadata); it is for reading, not re-parsing.
 (define (annotate-all text form form-stx src-tbl ty-tbl)
-  (define start (sub1 (or (syntax-position form-stx) 1)))
-  (define end (+ start (or (syntax-span form-stx) (string-length text))))
-  (define offs (line-offsets text))
+  (define-values (start end) (form-bounds form-stx text))
   (define edits
     (for*/list ([(node ty) (in-hash ty-tbl)]
                 [loc (in-value (hash-ref src-tbl node #f))]
-                [abs (in-value (and loc (loc->offset offs loc)))]
+                [abs (in-value (loc-offset loc))]
                 #:when (and abs (>= abs start) (< abs end)))
       (cons (- abs start) (string-append "^" (type->string ty) " "))))
   (apply-edits (form-source text form-stx) edits))
@@ -135,12 +150,15 @@
 
 ;; Returns a string (the rendered view) or raises a user error.
 (define (explain-type path #:name [name #f] #:level [level "clean"])
-  (define text (file->string path))
+  ;; Normalize CRLF->LF so substring offsets align with syntax-position
+  ;; (Racket counts a CRLF as a single position). LF files are unchanged.
+  (define text (regexp-replace* #rx"\r\n" (file->string path) "\n"))
   (define stxs (read-beagle-syntax path))
   (define prog (parse-program stxs #:source-path path))
-  ;; check to populate the per-node type table (errors are tolerated — a
-  ;; file with a type error still yields partial inferred types).
-  (type-check-with-locs! prog (lambda (e stx) (void)))
+  ;; check WITH type capture (opt-in) to populate the per-node type table.
+  ;; Errors are tolerated — a file with a type error still yields partial
+  ;; inferred types.
+  (type-check-with-locs! prog (lambda (e stx) (void)) #:capture-types? #t)
   (define src-tbl (or (program-src-table prog) (make-hasheq)))
   (define ty-tbl  (or (program-type-table prog) (make-hasheq)))
   (define-values (form form-stx)
