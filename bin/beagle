@@ -31,7 +31,7 @@ Query (the compiler is the source of truth):
   explain-type <file>       Inferred types as a view
 
 Project / loop:
-  init [--claude-code]      Bootstrap a project (+ hooks, daemon, context)
+  init [--hooks] [--target T]  Bootstrap a project (+ portable repair hooks)
   daemon start|status|stop  Watch + cache type results
   test [--active-only]      Run the test tiers
   rejection-stats DIR       Diagnostics by cause-class
@@ -95,148 +95,7 @@ case "$cmd" in
     repl)
         exec "$BIN/beagle-repl" "$@"
         ;;
-    init)
-        claude_code=false
-        target="."
-        for arg in "$@"; do
-            case "$arg" in
-                --claude-code) claude_code=true ;;
-                *) target="$arg" ;;
-            esac
-        done
-
-        mkdir -p "$target/.claude"
-        # Static skill-data is deleted by design — beagle's surface
-        # churns and static reference docs go stale. Agents should
-        # query the live source: `bin/beagle-sig`, `bin/beagle-fields`,
-        # `bin/beagle-provides`, `bin/beagle-syntax`, and read
-        # `parse.rkt` / `stdlib-nix.rkt` directly.
-
-        if [[ "$claude_code" == true ]]; then
-            # Hook script
-            mkdir -p "$target/.claude/hooks"
-            cat > "$target/.claude/hooks/beagle-check.sh" <<'HOOK'
-#!/usr/bin/env bash
-# PostToolUse hook: type-check beagle files after edit/write.
-# Auto-starts daemon if not running. Queries daemon for instant results.
-set -euo pipefail
-INPUT=$(cat)
-FILE=$(echo "$INPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('tool_input',{}).get('file_path',''))" 2>/dev/null || true)
-[[ "$FILE" == *.bclj || "$FILE" == *.bcljs || "$FILE" == *.bjs || "$FILE" == *.bnix || "$FILE" == *.bsql || "$FILE" == *.bpy || "$FILE" == *.bgl || "$FILE" == *.rkt ]] || exit 0
-
-PORT_FILE="${BEAGLE_DAEMON_PORTFILE:-/var/tmp/beagle-daemon.port}"
-
-# Auto-start daemon if not running
-if [[ ! -f "$PORT_FILE" ]] || ! echo "ping" | nc -w 1 127.0.0.1 "$(cat "$PORT_FILE" 2>/dev/null)" >/dev/null 2>&1; then
-    beagle-daemon start >/dev/null 2>&1
-fi
-
-if [[ -f "$PORT_FILE" ]]; then
-    PORT=$(cat "$PORT_FILE")
-    RESULT=$(echo "check $FILE" | nc -w 2 127.0.0.1 "$PORT" 2>/dev/null || true)
-    if [[ -n "$RESULT" ]]; then
-        OK=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('ok',False))" 2>/dev/null || echo "True")
-        if [[ "$OK" == "False" ]]; then
-            echo "--- beagle type errors ---" >&2
-            echo "$RESULT" | python3 -c "
-import sys,json
-data=json.load(sys.stdin)
-for e in data.get('errors',[]):
-    print(f\"  {e.get('file','?')}: {e.get('error','?')}\", file=sys.stderr)
-" 2>&1 >&2
-        fi
-        exit 0
-    fi
-fi
-
-# Fallback: direct check
-beagle check "$FILE" 2>&1 >&2 || true
-HOOK
-            sed -i "s|beagle-daemon start|$BEAGLE_DIR/bin/beagle-daemon start|" "$target/.claude/hooks/beagle-check.sh"
-            sed -i "s|beagle check|$BEAGLE_DIR/bin/beagle check|" "$target/.claude/hooks/beagle-check.sh"
-            chmod +x "$target/.claude/hooks/beagle-check.sh"
-            echo "Created .claude/hooks/beagle-check.sh" >&2
-
-            # Settings with hook
-            if [[ ! -f "$target/.claude/settings.json" ]]; then
-                cat > "$target/.claude/settings.json" <<SETTINGS
-{
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$(cd "$target" && pwd)/.claude/hooks/beagle-check.sh",
-            "timeout": 10
-          }
-        ]
-      }
-    ]
-  }
-}
-SETTINGS
-                echo "Created .claude/settings.json (PostToolUse hook)" >&2
-            else
-                echo ".claude/settings.json already exists — add the hook manually:" >&2
-                echo "  matcher: Edit|Write → .claude/hooks/beagle-check.sh" >&2
-            fi
-
-            # CLAUDE.md — insert/replace <!-- beagle --> section
-            beagle_section="$(cat <<'BEAGLE_SECTION'
-<!-- beagle -->
-## Beagle
-
-Uses [beagle](https://github.com/tompassarelli/beagle) — a typed authoring
-layer for Clojure/JS/Nix. See `.claude/beagle-context.md` for the full
-language reference.
-
-### Workflow
-
-- `beagle check .` — type-check all files
-- `beagle build . --out .build/` — compile to target
-- `beagle sig fn-name .` — query a function's type signature
-- `beagle fields Record .` — query record fields and accessors
-
-The daemon watches for file changes and provides instant type feedback
-after every edit via the PostToolUse hook.
-
-Start it with: `beagle-daemon start --watch .`
-<!-- /beagle -->
-BEAGLE_SECTION
-)"
-            existing_claude=""
-            for f in "$target"/[Cc][Ll][Aa][Uu][Dd][Ee].[Mm][Dd]; do
-                [[ -f "$f" ]] && existing_claude="$f" && break
-            done
-            if [[ -z "$existing_claude" ]]; then
-                printf "# Project\n\n%s\n" "$beagle_section" > "$target/CLAUDE.md"
-                echo "Created CLAUDE.md with beagle section" >&2
-            elif grep -q '<!-- beagle -->' "$existing_claude"; then
-                # Replace in-place between markers (preserves position)
-                tmpfile="$(mktemp)"
-                awk -v section="$beagle_section" '
-                    /<!-- beagle -->/ { print section; skip=1; next }
-                    /<!-- \/beagle -->/ { skip=0; next }
-                    !skip { print }
-                ' "$existing_claude" > "$tmpfile"
-                mv "$tmpfile" "$existing_claude"
-                echo "Updated beagle section in $(basename "$existing_claude")" >&2
-            else
-                # Append section to existing file
-                printf "\n%s\n" "$beagle_section" >> "$existing_claude"
-                echo "Appended beagle section to $(basename "$existing_claude")" >&2
-            fi
-
-            echo "" >&2
-            echo "Setup complete. Start the daemon:" >&2
-            echo "  beagle-daemon start --watch ." >&2
-        else
-            echo "Add to your CLAUDE.md instructions." >&2
-            echo "For full Claude Code setup: beagle init --claude-code" >&2
-        fi
-        ;;
+    init)            exec "$BIN/beagle-init" "$@" ;;
     syntax)          exec "$BIN/beagle-syntax" "$@" ;;
     validate)        exec "$BIN/beagle-validate" "$@" ;;
     repair)          exec "$BIN/beagle-repair" "$@" ;;
