@@ -166,25 +166,24 @@ end; the NixOS system builds from `flake.bnix` directly.
 ## Tooling
 
 Static reference docs are intentionally thin while the surface is
-moving. The compiler is the source of truth; query it directly:
+moving — the compiler is the source of truth, fronted by one CLI:
 
 ```sh
-bin/beagle-doctor                   # is the repair loop online and working?
-bin/beagle-syntax FILE              # parse check + repair
-bin/beagle-validate [FILE...]       # parse + check + schema validation
-bin/beagle-check FILE               # typed checker
-bin/beagle-expand FILE              # macro-expanded source
-bin/beagle-sig NAME FILE...         # typed signature
-bin/beagle-fields RECORD FILE...    # record fields
-bin/beagle-callers NAME FILE...     # call sites
-bin/beagle-rejection-stats DIR      # diagnostics by cause-class
+bin/beagle doctor               # is the repair loop online and working?
+bin/beagle syntax FILE          # parse check (+ --repair --emit-patch)
+bin/beagle check FILE           # typed checker
+bin/beagle validate [FILE...]   # parse + check + schema validation
+bin/beagle sig NAME FILE...     # typed signature
+bin/beagle fields RECORD FILE   # record fields, types, accessors
+bin/beagle callers NAME FILE... # call sites
+bin/beagle expand FILE          # macro-expanded source
+bin/beagle explain-type FILE    # inferred types as a view
 ```
 
-The repair loop — a watch daemon, an on-edit syntax/type hook, and
-machine-applicable fixes — is what makes the types pay off;
-`beagle-doctor` health-checks it end to end. `CLAUDE.md` lists the full
-tool set including the daemon-backed queries and the repair pipeline
-(`beagle-repair`, `beagle-blame`, `beagle-specfix`).
+`bin/beagle help` lists every command. The repair loop — a watch daemon,
+an on-edit syntax/type hook, and machine-applicable fixes — is what makes
+the types pay off; `bin/beagle doctor` health-checks it end to end. Deeper
+dev tools stay as `bin/beagle-*` (blame, specfix, trace, cascade).
 
 ## Design discipline
 

@@ -6,33 +6,39 @@ BIN="$BEAGLE_DIR/bin"
 
 usage() {
     cat >&2 <<'EOF'
-beagle — typed authoring layer for Nix (dormant targets: Clj, CLJS, JS, Py, Rkt, SQL)
+beagle — a typed Clojure subset; one AST → Clojure / ClojureScript /
+JavaScript / Nix / Odin (Zig, Python, SQL, Typed Racket dormant).
 
 Usage: beagle <command> [args...]
 
-Commands:
-  check [--profile 0|1|2|3] [FILE-OR-DIR...]
-                            Type-check without emitting (batch)
-  build [FILE-OR-DIR...]    Compile to target (Nix by default)
-  fix [--dry-run|--apply] [FILE-OR-DIR...]
-                            Auto-fix high-confidence type errors
-  sig <fn-name> <path...>   Print a function's typed signature
-  fields <record> <path...> Print record fields, types, accessors
-  expand <file>              Show source after macro expansion
-  lsp                       Start LSP server (stdio)
-  repl                      Start typed REPL
-  init [--claude-code]      Bootstrap a beagle project
-  init --claude-code        Full Claude Code setup (hooks, daemon, context)
+Author:
+  syntax FILE               Parse-check (--ledger, --repair --emit-patch)
+  check [--profile N] [PATH...]  Type-check without emitting
+  validate [FILE...]        Parse + check + schema validation
+  build [PATH...]           Compile to target (--out DIR, --warn)
+  fix [--dry-run] [PATH...] Surface high-confidence auto-fixes
+  repair DIR VERIFY         Evidence-ranked repair (--emit-patch / --auto)
+  doctor [--deep]           Is the repair loop online and working?
 
-Options:
-  --out DIR                 Output directory (for build)
-  --warn                    Emit despite type errors (for build)
+Query (the compiler is the source of truth):
+  sig <fn> <path...>        Typed signature
+  fields <record> <path>    Record fields, types, accessors
+  callers <fn> <path...>    Call sites
+  provides <file>           Exports
+  impact <fn> <path...>     Change-impact
+  expand <file>             Macro-expanded source
+  explain <CODE>            Diagnostic explanation (E001, …)
+  explain-type <file>       Inferred types as a view
 
-Developer tools (bin/beagle-*):
-  beagle-repair, beagle-blame, beagle-specfix, beagle-trace,
-  beagle-cascade, beagle-oracle, beagle-proptest, beagle-muttest,
-  beagle-dtrace, beagle-daemon, beagle-smap, beagle-callers,
-  beagle-provides, beagle-impact
+Project / loop:
+  init [--claude-code]      Bootstrap a project (+ hooks, daemon, context)
+  daemon start|status|stop  Watch + cache type results
+  test [--active-only]      Run the test tiers
+  rejection-stats DIR       Diagnostics by cause-class
+  lsp | repl                LSP server / typed REPL
+
+Deeper dev tools stay as bin/beagle-* (blame, specfix, trace, cascade,
+oracle, proptest, muttest, dtrace, smap).
 EOF
     exit 1
 }
@@ -231,6 +237,18 @@ BEAGLE_SECTION
             echo "For full Claude Code setup: beagle init --claude-code" >&2
         fi
         ;;
+    syntax)          exec "$BIN/beagle-syntax" "$@" ;;
+    validate)        exec "$BIN/beagle-validate" "$@" ;;
+    repair)          exec "$BIN/beagle-repair" "$@" ;;
+    doctor)          exec "$BIN/beagle-doctor" "$@" ;;
+    callers)         exec "$BIN/beagle-callers" "$@" ;;
+    provides)        exec "$BIN/beagle-provides" "$@" ;;
+    impact)          exec "$BIN/beagle-impact" "$@" ;;
+    explain)         exec "$BIN/beagle-explain" "$@" ;;
+    explain-type)    exec "$BIN/beagle-explain-type" "$@" ;;
+    daemon)          exec "$BIN/beagle-daemon" "$@" ;;
+    test)            exec "$BIN/beagle-test" "$@" ;;
+    rejection-stats) exec "$BIN/beagle-rejection-stats" "$@" ;;
     help|--help|-h)
         usage
         ;;
