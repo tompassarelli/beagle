@@ -152,18 +152,39 @@ if os.path.exists(check_file):
                 confidence_str = plan.get('confidence', 'medium')
                 confidence = {'high': 0.90, 'medium': 0.75, 'low': 0.60}.get(confidence_str, 0.70)
 
-                repairs.append({
-                    'confidence': confidence,
-                    'file': d.get('file', '?'),
-                    'line': d.get('line', '?'),
-                    'category': plan.get('category', 'type-error'),
-                    'description': plan.get('description', d.get('message', '')),
-                    'fix_hint': plan.get('fix_hint', ''),
-                    'before': plan.get('before'),
-                    'after': plan.get('after'),
-                    'evidence': ['type-checker', f"E{d.get('kind', '?')}"],
-                    'auto_applicable': confidence >= 0.85 and plan.get('after'),
-                })
+                if plan.get('category') == 'non-exhaustive-match' and plan.get('clauses'):
+                    # The checker enumerated the exact missing union cases with
+                    # correct binder arity and handed back ready-to-insert clause
+                    # skeletons (throw-bodied → re-verifies green). Insert them
+                    # before the match's closing paren.
+                    repairs.append({
+                        'confidence': confidence,
+                        'file': d.get('file', '?'),
+                        'line': plan.get('insert-line') or d.get('line', '?'),
+                        'category': 'non-exhaustive-match',
+                        'description': plan.get('description', d.get('message', '')),
+                        'fix_hint': plan.get('fix_hint', ''),
+                        'before': None,
+                        'after': None,
+                        'evidence': ['type-checker', 'exhaustive-match',
+                                     f"missing:{','.join(plan.get('missing', []))}"],
+                        'auto_applicable': True,
+                        '_insert_clauses': plan.get('clauses'),
+                        '_insert_line': plan.get('insert-line') or d.get('line'),
+                    })
+                else:
+                    repairs.append({
+                        'confidence': confidence,
+                        'file': d.get('file', '?'),
+                        'line': d.get('line', '?'),
+                        'category': plan.get('category', 'type-error'),
+                        'description': plan.get('description', d.get('message', '')),
+                        'fix_hint': plan.get('fix_hint', ''),
+                        'before': plan.get('before'),
+                        'after': plan.get('after'),
+                        'evidence': ['type-checker', f"E{d.get('kind', '?')}"],
+                        'auto_applicable': confidence >= 0.85 and plan.get('after'),
+                    })
             elif d.get('kind') in ('type-mismatch', 'arity'):
                 # Type error without fix plan — still useful
                 repairs.append({
@@ -497,10 +518,79 @@ def resolve_source_file(repair_entry):
 
 import difflib
 
+def _insert_match_clauses(text, anchor_line, clauses):
+    """Insert clause skeletons before the closing paren of the (match ...) form
+    anchored at anchor_line (1-based). The checker hands back throw-bodied
+    skeletons with correct constructor + binder arity, so the result is a
+    well-formed, exhaustive match that re-verifies. Returns new text, or None."""
+    try:
+        anchor = int(anchor_line)
+    except (TypeError, ValueError):
+        return None
+    src_lines = text.split('\n')
+    if anchor < 1 or anchor > len(src_lines):
+        return None
+    pre = sum(len(l) + 1 for l in src_lines[:anchor - 1])
+    m = re.search(r'\(\s*match\b', text[pre:])
+    if not m:
+        return None
+    open_off = pre + m.start()
+    # Balance parens from the match's '(' to its ')', skipping string contents.
+    depth = 0
+    in_str = False
+    i, n = open_off, len(text)
+    close_off = None
+    while i < n:
+        c = text[i]
+        if in_str:
+            if c == '\\':
+                i += 2
+                continue
+            if c == '"':
+                in_str = False
+        elif c == '"':
+            in_str = True
+        elif c == '(':
+            depth += 1
+        elif c == ')':
+            depth -= 1
+            if depth == 0:
+                close_off = i
+                break
+        i += 1
+    if close_off is None:
+        return None
+    # Reuse the indentation of the first existing clause line.
+    indent = None
+    for ln in text[open_off:close_off].split('\n')[1:]:
+        stripped = ln.lstrip()
+        if stripped.startswith('['):
+            indent = ln[:len(ln) - len(stripped)]
+            break
+    if indent is None:
+        line_start = text.rfind('\n', 0, open_off) + 1
+        indent = text[line_start:open_off] + '  '
+    insertion = ''.join('\n' + indent + c for c in clauses)
+    return text[:close_off] + insertion + text[close_off:]
+
+
 def apply_fix_to_lines(lines, repair):
     """Apply a single repair to a list of lines (mutates). Returns True on success."""
     before = repair.get('before')
     after = repair.get('after')
+
+    # Clause insertion (non-exhaustive-match): drop the checker-provided
+    # skeletons in before the match's closing paren. Operates on whole text
+    # because paren-balancing spans lines.
+    if repair.get('_insert_clauses'):
+        text = ''.join(lines)
+        new_text = _insert_match_clauses(
+            text, repair.get('_insert_line') or repair.get('line'),
+            repair['_insert_clauses'])
+        if not new_text or new_text == text:
+            return False
+        lines[:] = new_text.splitlines(keepends=True)
+        return True
 
     # Structured head-rename (replace-head suggestion from the checker): rename
     # the form's HEAD symbol precisely — `(assert ...)` -> `(nix/assert ...)` —

@@ -178,6 +178,30 @@
                 'description (exn-message e)
                 'fix-hint help-text)]
 
+       ;; --- Non-exhaustive match: the compiler already enumerated the exact
+       ;; missing union cases AND their field arity (check.rkt raise site), so
+       ;; it can hand back ready-to-insert clause skeletons. Throw-bodied
+       ;; skeletons typecheck against any match result type, so this is
+       ;; auto-applicable: insert the clauses, re-verify green, leaving
+       ;; explicit unhandled-case throws for the agent to flesh out. ---
+       [(and (eq? kind 'exhaustive-match)
+             (pair? (hash-ref d 'fix-clauses '())))
+        (define clauses (hash-ref d 'fix-clauses))
+        (define missing (hash-ref d 'missing '()))
+        (define union-name (hash-ref d 'union-name "?"))
+        (hasheq 'confidence "high"
+                'category "non-exhaustive-match"
+                'fix-safety "adds-explicit-throw"
+                'description (format "match on ~a is missing case(s): ~a"
+                                     union-name (string-join missing ", "))
+                'fix-hint (format "Insert ~a missing clause(s) before the match's closing paren: ~a"
+                                  (length clauses) (string-join missing ", "))
+                'clauses clauses
+                'missing missing
+                ;; the match form's line — the consumer balances parens from
+                ;; here to find the insertion point (before the closing paren).
+                'insert-line (or (hash-ref d 'error-line #f) 'null))]
+
        [else #f])]))
 
 (define (format-fix-plan plan)

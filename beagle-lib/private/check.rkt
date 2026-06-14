@@ -1413,13 +1413,44 @@
                   #:when (not (set-member? matched-set m)))
          m))
      (when (not (null? missing))
+       ;; Declared field names per missing constructor (binder arity for the
+       ;; clause skeleton); RECORD-FIELD-ORDER holds declared order for
+       ;; locally-defined records.
+       ;; Field names are stored as colon-prefixed symbols (clojure keyword
+       ;; style); a pattern binder must be a plain identifier, so strip it.
+       (define (binder-of f)
+         (define s (symbol->string f))
+         (if (and (> (string-length s) 0) (char=? (string-ref s 0) #\:))
+             (substring s 1)
+             s))
+       (define (fields-of ctor) (map binder-of (hash-ref RECORD-FIELD-ORDER ctor '())))
+       (define (clause-skeleton ctor)
+         (define fs (fields-of ctor))
+         (define pat
+           (if (null? fs)
+               (format "(~a)" ctor)
+               (format "(~a ~a)" ctor (string-join fs " "))))
+         ;; A throw arm typechecks against any match result type, so the
+         ;; inserted skeletons re-verify green and leave an explicit
+         ;; unhandled-case marker for the agent to flesh out.
+         (format "[~a (throw \"TODO: handle ~a\")]" pat ctor))
+       (define missing-cases
+         (for/list ([m (in-list missing)])
+           (hasheq 'ctor (symbol->string m)
+                   'fields (fields-of m))))
        (raise-diag 'exhaustive-match
          (format "match on ~a is not exhaustive; missing cases: ~a"
                  union-name
                  (string-join (map symbol->string missing) ", "))
-         (hasheq 'union-name union-name
-                 'missing missing
-                 'matched matched-types)
+         ;; Details must be JSON-legal: raw symbols crash write-json (so the
+         ;; agent-facing JSON for the whole exhaustive-match class was broken).
+         ;; Stringify, and add structured per-case info + ready-to-insert
+         ;; clause skeletons for the repair loop.
+         (hasheq 'union-name (symbol->string union-name)
+                 'missing (map symbol->string missing)
+                 'matched (map symbol->string matched-types)
+                 'missing-cases missing-cases
+                 'fix-clauses (map clause-skeleton missing))
          #:src src))]
 
     ;; Heuristic checks for non-union matches

@@ -62,6 +62,7 @@
              "defmacro.rkt"
              "diagnostic-kind.rkt"
              "error-explanation.rkt"    ; in-compiler explanation registry
+             "exhaustive-match-fix.rkt" ; missing-case clause-skeleton repair fix
              "expected-errors.rkt"      ; inline #guard_msgs-style diagnostics
 
              "lint.rkt"
