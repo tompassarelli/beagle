@@ -33,8 +33,13 @@
          (string-append "beagle [lint]: " fmt "\n")
          args))
 
+;; Compiler-generated hygiene aliases (macros.rkt mode-2: `<orig>__hyg`) are
+;; not author code, so they're exempt from the untyped-def style nudge.
+(define (hygiene-alias-name? sym)
+  (and (symbol? sym) (regexp-match? #rx"__hyg[0-9]*$" (symbol->string sym))))
+
 (define (lint-def f)
-  (unless (def-form-type f)
+  (unless (or (def-form-type f) (hygiene-alias-name? (def-form-name f)))
     (warn "untyped def ~a (consider adding `: Type`)"
           (def-form-name f))))
 

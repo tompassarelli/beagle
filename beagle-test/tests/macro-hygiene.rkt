@@ -10,7 +10,11 @@
 ;; Coverage report (updated whenever this file changes):
 ;;
 ;;   1. gensym binder protection         — SAFE today via hygienize-template.
-;;   2. free-variable resolution         — KNOWN LIMITATION (no defsite tracking).
+;;   2. free-variable resolution         — SAFE (mode-2): a template free ref
+;;                                         that names a module-level def is
+;;                                         rewritten to a hygienic alias and a
+;;                                         `(def alias orig)` is injected, so a
+;;                                         use-site binder cannot capture it.
 ;;   3. splice into binding position     — SAFE in the Racket sense
 ;;                                         (lexical binding shadows by name).
 ;;   4. recursive depth-cap              — SAFE; depth-64 cap with provenance.
@@ -25,7 +29,8 @@
          beagle/private/parse
          beagle/private/types
          beagle/private/macros
-         beagle/private/tags)
+         beagle/private/tags
+         (only-in beagle/private/ast program-forms def-form? def-form-name def-form-value))
 
 (define (parse-prog . forms)
   (parse-program (map (lambda (f) (datum->syntax #f f)) forms)))
@@ -75,44 +80,58 @@
   (check-eq? (caddr trailing-set!) binder-name
              "trailing `tmp` reference must be renamed to same gensym"))
 
-;; --- 2. free-variable shadowing -------------------------------------------
+;; --- 2. free-variable resolution (mode-2 hygiene) -------------------------
 ;;
-;; Macro references a free variable `helper`. Naively the result contains
-;; the literal symbol `helper`, which resolves at the USE site — meaning
-;; if the user has their own `helper` in scope, it shadows the macro
-;; author's intended `helper`.
-;;
-;; True syntactic hygiene (Racket / Scheme) tracks the binding scope at
-;; macro definition time, so the embedded `helper` reference points back
-;; to the macro author's lexical environment.
-;;
-;; Beagle today does NOT track this. The test below DOCUMENTS the
-;; limitation: it asserts the (broken) current behavior and includes a
-;; TODO pointer. If you make beagle hygienic in this dimension, FLIP the
-;; assertion and remove the TODO.
+;; A macro references a free variable `helper`. If `helper` names a
+;; module-level definition, beagle rewrites the template's free ref to a
+;; hygienic alias `helper__hyg` and injects `(def helper__hyg helper)` at the
+;; module top level. A use-site binder named `helper` then shadows `helper`
+;; but NOT `helper__hyg`, so the macro's reference still means the module's
+;; `helper` — definition-site resolution, the cross-target-safe form of
+;; Lean's preresolve-globals-at-definition-time. (When `helper` is NOT a
+;; module def, the ref stays bare and resolves at the use site, as before.)
 
-(test-case "hygiene: free variable references are USE-SITE resolved (known limitation)"
-  ;; KNOWN LIMITATION: beagle's defmacro doesn't track the macro author's
-  ;; lexical scope. Free symbols in the template appear as bare symbols
-  ;; in the expansion, and resolve wherever the macro is used.
-  ;;
-  ;; TODO(hygiene): wire a definition-site environment marker so that
-  ;; free symbols in defmacro bodies resolve back to the module they
-  ;; were defined in. See thread on syntactic hygiene; needs a syntax
-  ;; object layer beyond raw datum substitution.
+(test-case "hygiene: free ref to a module def resolves to a capture-immune alias"
   (define reg (make-macro-registry))
   ;; (defmacro double [x] `(helper ,x))
   (register-macro! reg 'double 'defmacro '(x)
-                   (list 'quasiquote
-                         (list 'helper (list 'unquote 'x))))
-  (define expanded (expand-fully reg '(double 5)))
-  ;; What we GET today: (helper 5) — `helper` will resolve at the use site.
-  (check-equal? expanded '(helper 5))
-  ;; What we'd WANT in a hygienic system: the `helper` symbol carries a
-  ;; scope marker pointing back to the defining module, immune to the
-  ;; user's `helper` binding. Removing this comment + flipping the test
-  ;; above is the signal that hygiene Phase 2 landed.
-  (void))
+                   (list 'quasiquote (list 'helper (list 'unquote 'x))))
+  ;; `helper` IS a module def → rewritten to its hygienic alias.
+  (define aliases (make-hasheq))
+  (define expanded
+    (parameterize ([current-module-def-names (hasheq 'helper #t)]
+                   [current-hygiene-alias-table aliases])
+      (expand-fully reg '(double 5))))
+  (check-eq? (hash-ref aliases 'helper #f) 'helper__hyg
+             "free ref to a module def must get a hygienic alias")
+  (check-equal? expanded '(helper__hyg 5))
+  ;; `helper` is NOT a module def → stays bare (use-site resolution).
+  (define expanded2
+    (parameterize ([current-module-def-names (hasheq)]
+                   [current-hygiene-alias-table (make-hasheq)])
+      (expand-fully reg '(double 5))))
+  (check-equal? expanded2 '(helper 5)))
+
+(test-case "hygiene mode-2 end-to-end: a use-site shadow cannot capture the macro's free ref"
+  ;; helper is a module def; `double` references it; `use` shadows `helper`
+  ;; with a local and calls `(double n)`. The expansion must reference the
+  ;; injected alias, and the `(def helper__hyg helper)` alias must be present.
+  (define prog
+    (parse-prog
+     '(ns m)
+     '(defn helper [x] (* x 100))
+     (list 'defmacro 'double (br 'x)
+           (list 'quasiquote (list 'helper (list 'unquote 'x))))
+     (list 'defn 'use (br 'n)
+           (list 'let (br 'helper (list 'fn (br 'y) 'y))
+                 '(double n)))))
+  (define alias-def
+    (findf (lambda (f) (and (def-form? f) (eq? (def-form-name f) 'helper__hyg)))
+           (program-forms prog)))
+  (check-true (and alias-def #t)
+              "a `(def helper__hyg helper)` alias must be injected")
+  (check-eq? (def-form-value alias-def) 'helper
+             "the alias must point at the module's helper"))
 
 ;; --- 3. quasi-quote splice with name collision ----------------------------
 ;;

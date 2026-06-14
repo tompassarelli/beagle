@@ -522,6 +522,19 @@
 ;; check-form that touches a macro-derived program form.
 (define current-macro-expansion-ctx (make-parameter #f))
 
+;; Mode-2 hygiene (definition-site free-var resolution). `current-module-def-names`
+;; is the set (a hasheq) of the current program's top-level definition names;
+;; `current-hygiene-alias-table` maps a macro free reference that names such a
+;; definition to its hygienic alias. parse.rkt pre-scans the name set and a
+;; fresh alias table around expansion, then injects `(def alias orig)` top-level
+;; forms for each entry. A free ref in a defmacro template that names a module
+;; definition is rewritten to its alias, so a use-site binder of the same name
+;; cannot capture it — the cross-target-safe version of Lean's
+;; preresolve-globals-at-definition-time. When unset (e.g. expand-fully called
+;; standalone), free-ref resolution is inert and expansion is unchanged.
+(define current-module-def-names (make-parameter #f))
+(define current-hygiene-alias-table (make-parameter #f))
+
 ;; Per-program macro-derived form tracking. parse.rkt populates this
 ;; (mutable) hash with the top-level AST nodes produced by macro
 ;; expansion; check.rkt reads it to drive `current-macro-expansion-ctx`
@@ -698,17 +711,62 @@
            (rename-in-template (cdr template) renames))]
     [else template]))
 
+;; Is `s` a top-level definition name of the program being compiled?
+(define (module-def-name? s)
+  (define names (current-module-def-names))
+  (and names (symbol? s) (hash-has-key? names s)))
+
+;; Deterministic hygienic alias for a free ref, memoized in the alias table so
+;; every expansion referencing `orig` shares ONE alias (hence one injected
+;; `(def alias orig)`). `<orig>__hyg`, bumped if that name is itself taken.
+(define (hygiene-alias-for! orig)
+  (define tbl (current-hygiene-alias-table))
+  (or (hash-ref tbl orig #f)
+      (let ([alias (let loop ([cand (string->symbol (format "~a__hyg" orig))] [n 1])
+                     (if (module-def-name? cand)
+                         (loop (string->symbol (format "~a__hyg~a" orig n)) (add1 n))
+                         cand))])
+        (hash-set! tbl orig alias)
+        alias)))
+
+;; Free references in TEMPLATE that name a module-level definition and are
+;; neither macro params nor template-introduced binders — the macro author's
+;; globals that must survive use-site shadowing. Skips quote/unquote payloads
+;; (the latter is user-supplied data, not template).
+(define (collect-template-free-refs template macro-params binders)
+  (define refs '())
+  (define (add! s) (unless (memq s refs) (set! refs (cons s refs))))
+  (let walk ([datum template])
+    (cond
+      [(symbol? datum)
+       (when (and (module-def-name? datum)
+                  (not (memq datum macro-params))
+                  (not (memq datum binders)))
+         (add! datum))]
+      [(pair? datum)
+       (cond
+         [(unquote-form? datum) (void)]
+         [(eq? (car datum) 'quote) (void)]
+         [else (for-each walk datum)])]
+      [else (void)]))
+  refs)
+
 (define (hygienize-template template fixed-params rest-param)
   (define macro-params
     (if rest-param (cons rest-param fixed-params) fixed-params))
   (define binders (collect-template-binders template macro-params))
+  ;; Mode-2: rewrite free refs to module defs to their hygienic aliases
+  ;; (inert unless parse.rkt set the def-name set + alias table).
+  (define free-refs
+    (if (and (current-module-def-names) (current-hygiene-alias-table))
+        (collect-template-free-refs template macro-params binders)
+        '()))
+  (define renames (make-hasheq))
+  (for ([b (in-list binders)]) (hash-set! renames b (gensym b)))
+  (for ([r (in-list free-refs)]) (hash-set! renames r (hygiene-alias-for! r)))
   (cond
-    [(null? binders) template]
-    [else
-     (define renames (make-hasheq))
-     (for ([b (in-list binders)])
-       (hash-set! renames b (gensym b)))
-     (rename-in-template template renames)]))
+    [(zero? (hash-count renames)) template]
+    [else (rename-in-template template renames)]))
 
 (provide
  (struct-out macro-def)
@@ -726,6 +784,8 @@
  expand-fully
  current-trace-handler
  current-macro-expansion-ctx
+ current-module-def-names
+ current-hygiene-alias-table
  current-macro-derived-table
  mark-macro-derived!
  macro-derived-ctx

@@ -703,6 +703,39 @@
         (rc-splice-children target d)])]
     [else d]))
 
+;; --- mode-2 hygiene: inject free-ref aliases ------------------------------
+;; The top-level definition name of a form, or #f.
+(define (form-def-name f)
+  (cond [(def-form? f)     (def-form-name f)]
+        [(defn-form? f)     (defn-form-name f)]
+        [(defonce-form? f)  (defonce-form-name f)]
+        [(defn-multi? f)    (defn-multi-name f)]
+        [else #f]))
+
+;; For each (orig -> alias) the expander recorded, insert a synthetic
+;; `(def alias orig)` form immediately AFTER orig's own definition (so the
+;; alias is in scope wherever orig is, on every target — clj defs, the nix
+;; top-level let, etc.). The alias is the capture-immune name the macro's
+;; free reference was rewritten to. forms/stxs are kept parallel.
+(define (inject-hygiene-aliases forms stxs alias-table)
+  (cond
+    [(zero? (hash-count alias-table)) (values forms stxs)]
+    [else
+     (let loop ([fs forms] [ss stxs] [of '()] [os '()])
+       (cond
+         [(null? fs) (values (reverse of) (reverse os))]
+         [else
+          (define f (car fs))
+          (define nm (form-def-name f))
+          (define alias (and nm (hash-ref alias-table nm #f)))
+          (cond
+            [alias
+             (define adef (def-form alias #f nm #f))
+             (define astx (datum->syntax #f (list 'def alias nm)))
+             (loop (cdr fs) (cdr ss) (list* adef f of) (list* astx (car ss) os))]
+            [else
+             (loop (cdr fs) (cdr ss) (cons f of) (cons (car ss) os))])]))]))
+
 ;; --- entry point -----------------------------------------------------------
 
 (define (parse-program stxs* #:source-path [source-path #f])
@@ -1047,11 +1080,22 @@
   (define src-table (make-hasheq))
   (define macro-derived-table (make-hasheq))
   (define body-locs-table (make-hasheq))
+  ;; Mode-2 hygiene: the set of this program's top-level definition names, and
+  ;; a fresh alias table the expander fills with free-ref -> alias entries.
+  (define module-def-name-set
+    (for/fold ([acc (hasheq)]) ([d (in-list datums)])
+      (if (and (pair? d) (memq (car d) '(def defn defonce))
+               (pair? (cdr d)) (symbol? (cadr d)))
+          (hash-set acc (cadr d) #t)
+          acc)))
+  (define hygiene-alias-table (make-hasheq))
   (define pairs
     (parameterize ([current-registry registry]
                    [current-src-table src-table]
                    [current-body-locs-table body-locs-table]
                    [current-macro-derived-table macro-derived-table]
+                   [current-module-def-names module-def-name-set]
+                   [current-hygiene-alias-table hygiene-alias-table]
                    [current-user-parametric (current-user-parametric)])
       (apply append
         (for/list ([d (in-list datums)]
@@ -1092,8 +1136,12 @@
              (list (cons (parse-macro-output expanded) s))]
             [else
              (list (cons (parse-top (datum->syntax #f expanded)) s))])))))
-  (define parsed (map car pairs))
-  (define form-stxs (map cdr pairs))
+  (define parsed0 (map car pairs))
+  (define form-stxs0 (map cdr pairs))
+  ;; Mode-2 hygiene: splice in `(def alias orig)` after each original def for
+  ;; every free-ref alias the expander created (no-op when none were).
+  (define-values (parsed form-stxs)
+    (inject-hygiene-aliases parsed0 form-stxs0 hygiene-alias-table))
 
   (define prog
     (program mode ns parsed registry externs (reverse requires) (reverse imports) form-stxs src-table imp-rec-fields imp-rec-field-order imp-rec-ns (hash-keys imp-scalar-fns) imp-scalar-preds imp-symbol-ns imp-union-members imp-param-unions imp-enums target gen-class?))
