@@ -1,0 +1,3 @@
+#lang beagle/clj
+;; @error[removed-form] (has m :k) — `has` is removed. Use `(contains? m :k)` (Clojure spelling; lowers to hasAttr on nix).
+(has m :k)

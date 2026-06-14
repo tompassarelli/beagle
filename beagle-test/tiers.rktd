@@ -62,6 +62,7 @@
              "defmacro.rkt"
              "diagnostic-kind.rkt"
              "error-explanation.rkt"    ; in-compiler explanation registry
+             "expected-errors.rkt"      ; inline #guard_msgs-style diagnostics
 
              "lint.rkt"
              "macro-hygiene.rkt"

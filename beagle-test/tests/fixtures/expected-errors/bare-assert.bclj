@@ -1,0 +1,3 @@
+#lang beagle/clj
+;; @error[bare-nix-form] (assert ...) — bare `assert` is not supported. Beagle namespaces target-specific forms; use `(nix/assert COND BODY)`.
+(assert true 1)

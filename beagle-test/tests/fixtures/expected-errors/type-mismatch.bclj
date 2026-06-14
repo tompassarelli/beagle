@@ -1,0 +1,5 @@
+#lang beagle/clj
+;; @error[type-mismatch] call to g: arg 1 expected Int, got String
+(defn g [n :- Int] :- Nil nil)
+(defn f [] :- Nil
+  (g "boom"))
