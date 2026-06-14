@@ -72,12 +72,12 @@
 `lib.types.path`, `lib.types.package`, `lib.types.listOf`,
 `lib.types.attrsOf`, `lib.types.enum`, `lib.types.nullOr`,
 `lib.types.submodule`, `lib.types.either`
-(and more — run `beagle-provides` on .bnix files for full list)
+(and more — run `beagle provides` on .bnix files for full list)
 
 ## Lookup
 
 Use query tools for precise signatures:
 ```bash
-beagle-sig map examples/      # typed signature of map
-beagle-fields Point src/      # fields of a record
+beagle sig map examples/      # typed signature of map
+beagle fields Point src/      # fields of a record
 ```

@@ -2,31 +2,31 @@
 
 ## Session start
 
-1. Run `bin/beagle-daemon status` — start with `bin/beagle-daemon start --watch .` if needed
-2. Run `bin/beagle-doctor` to verify environment readiness
+1. Run `bin/beagle daemon status` — start with `bin/beagle daemon start --watch .` if needed
+2. Run `bin/beagle doctor` to verify environment readiness
 
 ## Edit loop
 
 After every edit to a beagle file (.bgl, .bclj, .bcljs, .bjs, .bnix, .bsql):
 
-1. Fix **syntax errors first** — `bin/beagle-syntax FILE`
-2. Then type-check — `bin/beagle-daemon query check-enriched FILE`
+1. Fix **syntax errors first** — `bin/beagle syntax FILE`
+2. Then type-check — `bin/beagle daemon query check-enriched FILE`
 3. Review diagnostics — each has an `error-code` (E001–E015) and `fix-safety` label
-4. For unknown codes — `bin/beagle-explain E002`
+4. For unknown codes — `bin/beagle explain E002`
 5. Auto-apply fixes with `fix-safety: type-directed` or `behavior-preserving`
 6. Pause for human review on `fix-safety: requires-human-review` or `api-changing`
 
 ## Before opening large files — use query tools
 
-- `bin/beagle-sig NAME FILE...` — function signature
-- `bin/beagle-fields RECORD FILE...` — record fields and types
-- `bin/beagle-callers NAME FILE...` — find all call sites
-- `bin/beagle-provides FILE...` — module exports with types
-- `bin/beagle-impact NAME FILE...` — callers + change impact
+- `bin/beagle sig NAME FILE...` — function signature
+- `bin/beagle fields RECORD FILE...` — record fields and types
+- `bin/beagle callers NAME FILE...` — find all call sites
+- `bin/beagle provides FILE...` — module exports with types
+- `bin/beagle impact NAME FILE...` — callers + change impact
 
 ## When stuck — escalate to repair tools
 
-- `bin/beagle-repair ... --emit-patch` — unified repair pipeline
+- `bin/beagle repair ... --emit-patch` — unified repair pipeline
 - `bin/beagle-trace ... --focus FN` — execution trace
 - `bin/beagle-cascade ... --from-failures` — root cause analysis
 - `bin/beagle-blame ...` — error attribution
@@ -47,7 +47,7 @@ Every fix suggestion includes a `fix-safety` label:
 
 ## Diagnostic codes
 
-Run `bin/beagle-explain --list` for the full catalog. Key codes:
+Run `bin/beagle explain --list` for the full catalog. Key codes:
 
 - E001: Arity mismatch
 - E002: Type mismatch (most common)

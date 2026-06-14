@@ -30,15 +30,15 @@ The surface stopped accreting. v0.16 locks beagle's authoring layer to a three-s
 - Conditional family completed: `when`, `when-not`, `if-not`, `unless`, `if-let`, `when-let`, `if-some`, `when-some`, `cond`, `condp`.
 - Stdlib sugar: `inc`, `dec`, `not=` typed in `stdlib-portable.rkt`.
 - Per-target prefixes `nix/`, `js/`, `sql/` for forms whose meaning diverges from Clojure (e.g. `nix/assert`, `nix/with-cfg`, `js/await`).
-- Structured diagnostic taxonomy: `cause-class?`, `surface-divergence`, `type-error`, `logic-error` exported from `diagnostic-kind.rkt`; consumed by `bin/beagle-rejection-stats`.
-- `bin/beagle-rejection-stats <dir|glob> [verify-script]` aggregates failure causes by class.
+- Structured diagnostic taxonomy: `cause-class?`, `surface-divergence`, `type-error`, `logic-error` exported from `diagnostic-kind.rkt`; consumed by `bin/beagle rejection-stats`.
+- `bin/beagle rejection-stats <dir|glob> [verify-script]` aggregates failure causes by class.
 - Schema-typed NixOS option paths: 16k options loaded into the typed environment via `nixos-schema.rkt`.
 
 ### Changed
 
 - `claim` replaced by inline `:-` annotations on binding forms; same checker, less syntax (6fefc09).
 - Keyword access is a single canonical AST node regardless of spelling — emitters and checkers see one shape (2eb7baa).
-- Clj and Cljs emitters promoted to the active tier in `beagle-test/tiers.rktd`; default `bin/beagle-test` run now covers them.
+- Clj and Cljs emitters promoted to the active tier in `beagle-test/tiers.rktd`; default `bin/beagle test` run now covers them.
 - Bare divergent forms now raise with a "use `(prefix/...)`" hint instead of silently emitting (parse.rkt:1577).
 - README reframed around the typed authoring IR and the three-statement generative spec.
 
