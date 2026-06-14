@@ -1659,7 +1659,45 @@
                           acc))])))
   (condp-form pred-expr test-expr pairs default))
 
+;; --- compile-time combiner registry ---------------------------------------
+;; The seed of the unified front-end combiner layer (thread 20260615034227):
+;; a head-symbol -> handler table consulted BEFORE the legacy hardcoded form
+;; dispatch (parse-list-form*). Each handler takes (datum subs) and returns the
+;; SAME typed-IR (AST) node the old match arm produced, so check/emit and the
+;; emit goldens are byte-identical. Built-in special forms migrate here one at a
+;; time; user macros fold into the same table later (thread step 5).
+;; Invariant: a combiner produces a typed-IR node, never emitted code.
+(define COMBINERS (make-hasheq))
+(define (register-combiner! head handler) (hash-set! COMBINERS head handler))
+(define (lookup-combiner head) (hash-ref COMBINERS head #f))
+
+;; `do` — sequence; value is its last expression. (First form migrated.)
+(register-combiner! 'do
+  (lambda (d subs)
+    (do-form (parse-body (or (stx-tail subs 1) (cdr d))))))
+
+;; `if` — conditional (2- and 3-arg). Any other arity falls back to the legacy
+;; dispatch, so malformed `if` is handled exactly as before.
+(register-combiner! 'if
+  (lambda (d subs)
+    (match d
+      [(list 'if c t e)
+       (if-form (parse-expr (or (stx-ref subs 1) c))
+                (parse-expr (or (stx-ref subs 2) t))
+                (parse-expr (or (stx-ref subs 3) e)))]
+      [(list 'if c t)
+       (if-form (parse-expr (or (stx-ref subs 1) c))
+                (parse-expr (or (stx-ref subs 2) t))
+                #f)]
+      [_ (parse-list-form* d subs)])))
+
 (define (parse-list-form d subs)
+  (cond
+    [(and (pair? d) (symbol? (car d)) (lookup-combiner (car d)))
+     => (lambda (handler) (handler d subs))]
+    [else (parse-list-form* d subs)]))
+
+(define (parse-list-form* d subs)
   (match d
     [(list (or 'unsafe 'unsafe-js 'unsafe-clj 'unsafe-py 'unsafe-rkt 'unsafe-nix 'unsafe-expr) _ ...)
      (error 'beagle
@@ -2317,14 +2355,7 @@
      (for-form (parse-for-clauses (or (stx-ref subs 1) bindings-form))
                (parse-body (or (stx-tail subs 2) body)))]
 
-    [(list 'if c t e)
-     (if-form (parse-expr (or (stx-ref subs 1) c))
-              (parse-expr (or (stx-ref subs 2) t))
-              (parse-expr (or (stx-ref subs 3) e)))]
-    [(list 'if c t)
-     (if-form (parse-expr (or (stx-ref subs 1) c))
-              (parse-expr (or (stx-ref subs 2) t))
-              #f)]
+    ;; `if` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; when / when-not / if-not / unless — accept-and-canonicalize.
     ;; These Clojure conditional macros lower 1:1 to (if …) / (if … (do …)).
@@ -2349,8 +2380,7 @@
     [(list 'comment _ ...)
      'nil]
 
-    [(list 'do body ...)
-     (do-form (parse-body (or (stx-tail subs 1) body)))]
+    ;; `do` migrated to the compile-time combiner registry (see register-combiner!).
 
     [(list 'cond clauses ...)
      (cond-form (parse-cond-clauses (or (stx-tail subs 1) clauses)))]
