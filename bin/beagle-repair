@@ -129,13 +129,20 @@ from beagle_repair_apply import insert_match_clauses
 
 def conv_annotation(r):
     """One-line structured conversion summary from the typed fix-plan, e.g.
-    '  => Vec[0]: String->Int'. Empty when the repair carries no conversion."""
+    '  => Vec[0]: String->Int' (single element) or '  => Map: Int->String'
+    (multiple differing positions). Empty when there is no conversion."""
     c = r.get('_conversion')
-    if not c or not c.get('from'):
+    if not c:
         return ''
-    pos = c.get('position')
-    posstr = f"[{pos}]" if pos is not None else ""
-    return f"  => {c.get('collection','')}{posstr}: {c['from']}->{c['to']}"
+    coll = c.get('collection', '')
+    if c.get('from'):
+        pos = c.get('position')
+        posstr = f"[{pos}]" if pos is not None else ""
+        return f"  => {coll}{posstr}: {c['from']}->{c['to']}"
+    if c.get('diffs'):
+        parts = ", ".join(f"{d['from']}->{d['to']}" for d in c['diffs'])
+        return f"  => {coll}: {parts}" if parts else ''
+    return ''
 
 repairs = []
 
@@ -200,6 +207,11 @@ if os.path.exists(check_file):
                             'to': plan.get('to-type'),
                             'position': plan.get('position'),
                             'collection': plan.get('collection'),
+                        }
+                    elif plan.get('diffs'):
+                        conversion = {
+                            'collection': plan.get('collection'),
+                            'diffs': plan.get('diffs'),
                         }
                     repairs.append({
                         'confidence': confidence,
@@ -511,7 +523,19 @@ for r in repairs:
             existing['confidence'] = min(0.98, r['confidence'] + 0.05)
             existing['description'] = r['description']
             existing['fix_hint'] = r['fix_hint']
-            existing['auto_applicable'] = existing['auto_applicable'] or r['auto_applicable']
+        # auto_applicable reflects EITHER source (a lower-confidence repair can
+        # still be the one that carries the applicable edit).
+        existing['auto_applicable'] = existing['auto_applicable'] or r['auto_applicable']
+        # Preserve apply/structured data through the merge: a deduped duplicate
+        # must not take the only applicable edit (or its structured types) with
+        # it. Copy any such field the survivor lacks. (Two genuinely-distinct
+        # applicable fixes that share a file:line still collapse — rare, and a
+        # pre-existing limitation of keying dedup on location alone.)
+        for f in ('before', 'after', '_insert_clauses', '_insert_line',
+                  '_replace_head', '_swap_lines', '_swap_values', '_line_idx',
+                  '_conversion', '_expected_type', '_actual_type', '_module', '_fn'):
+            if not existing.get(f) and r.get(f):
+                existing[f] = r[f]
 
 merged = list(by_location.values())
 

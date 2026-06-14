@@ -108,7 +108,11 @@
                      #:unless (equal? e a))
             (cons e a)))
         (cond
-          [(= 1 (length diffs))
+          ;; Single type-argument differs AND the arg counts match — a clean
+          ;; element conversion. (Differing arg counts are an arity mismatch on
+          ;; the type ctor, not an element conversion; those fall to the else.)
+          [(and (= (length (reprs et)) (length (reprs at)))
+                (= 1 (length diffs)))
            (define exp-el (caar diffs)) (define act-el (cdar diffs))
            ;; index of the differing type argument (0-based)
            (define position
@@ -139,9 +143,10 @@
                    'fix-hint (format "adjust so the ~a type matches ~a"
                                      ctor (hash-ref et 'repr "?"))
                    'collection ctor
-                   'from-type (hash-ref at 'repr "?")
-                   'to-type (hash-ref et 'repr "?")
-                   ;; each differing position as {from, to}
+                   ;; each differing position as {from = actual, to = expected}.
+                   ;; No scalar from-type/to-type here: with multiple differing
+                   ;; args there is no single conversion, so the consumer reads
+                   ;; `diffs`, not a whole-type arrow.
                    'diffs (for/list ([d (in-list diffs)])
                             (hasheq 'from (cdr d) 'to (car d))))])]
 

@@ -22,3 +22,7 @@ runtime/src/promotions.clj
 # Rust build artifacts for tools/
 tools/*/target/
 tools/*/Cargo.lock
+
+# Python bytecode (bin/beagle_repair_apply.py + tests)
+__pycache__/
+*.pyc
