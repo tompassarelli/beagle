@@ -1,14 +1,15 @@
 # beagle — session anchor
 
-A typed authoring IR. **Clj, CLJS, JS, Nix, and Odin are live targets.** Zig,
-Py, Rkt, SQL emitters are parked under `beagle-lib/private/dormant/`
-and reactivate with `BEAGLE_ALL_TARGETS=1`. Pipeline:
-`parse → check → emit`, all at Racket expand-time inside our custom
-`#%module-begin`.
+**What beagle is + the current live/dormant targets → `README.md`.** Don't
+restate them here — that duplication is exactly what rots (AGENTS.md drifted
+a full release behind, still calling beagle "a Nix IR," while README stayed
+current). Pipeline: `parse → check → emit`, all at Racket expand-time inside
+our custom `#%module-begin`.
 
 There is **no static reference documentation** for the form set, types,
 or stdlib. The surface churns; static docs go stale within a day. The
-compiler is the source of truth — query it.
+compiler is the source of truth — query it (`bin/beagle sig|fields|syntax`,
+or `bin/beagle` for the full command list).
 
 ## Standing operating mode — apply the spec, don't ratify it
 
@@ -394,10 +395,11 @@ otherwise collide with a Clojure namesake.
 ### Test tiering during surface iteration
 
 `bin/beagle test` runs the **active tier only** by default — Nix, Clj,
-and CLJS target tests plus the target-agnostic infrastructure. Dormant
-target tests (JS, Py, Rkt, SQL) and behavioral/oracle suites are gated;
-opt in with `BEAGLE_ALL_TARGETS=1` or per-suite env vars
-(`BEAGLE_ORACLE=1`, `BEAGLE_NIX_EVAL_CHECK=1`).
+CLJS, and Odin target tests plus the target-agnostic infrastructure.
+Dormant-target tests (Py, Rkt, SQL, Zig) and behavioral/oracle suites are
+gated; opt in with `BEAGLE_ALL_TARGETS=1` or per-suite env vars
+(`BEAGLE_ORACLE=1`, `BEAGLE_NIX_EVAL_CHECK=1`). (JS is live, but some JS
+suites are still gated — a tiers.rktd inconsistency worth reconciling.)
 
 - Active failures: fix until green.
 - Demoted / gated failures during surface iteration: **leave alone.**
