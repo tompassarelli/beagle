@@ -389,6 +389,34 @@
     [(null? (cdr xs)) (car xs)]
     [else (string-append (car xs) sep (string-join (cdr xs) sep))]))
 
+;; STRUCTURED serialization of a type — the repair-compiler counterpart to the
+;; human-facing type->string. Diagnostics carry this (as `expected-type` /
+;; `actual-type` in their details) so the repair loop can reason over the
+;; actual type structure (e.g. "same ctor, element type differs") instead of
+;; pattern-matching prose. Pure jsexpr (symbol-keyed hashes, string/list
+;; values), so it serializes straight into the JSON error stream and is also
+;; directly inspectable in-process. `repr` on each node carries the string
+;; form for convenience. This is the actionable core of Lean's MessageData.
+(define (type->jsexpr t)
+  (define (node kind . kvs) (apply hasheq 'kind kind 'repr (type->string t) kvs))
+  (cond
+    [(not t)         (hasheq 'kind "unknown" 'repr "?")]
+    [(type-prim? t)  (node "prim" 'name (symbol->string (type-prim-name t)))]
+    [(type-fn? t)    (node "fn"
+                          'params (map type->jsexpr (type-fn-params t))
+                          'rest (let ([r (type-fn-rest-type t)])
+                                  (if r (type->jsexpr r) 'null))
+                          'ret (type->jsexpr (type-fn-ret t)))]
+    [(type-app? t)   (node "app"
+                          'ctor (symbol->string (type-app-ctor t))
+                          'args (map type->jsexpr (type-app-args t)))]
+    [(type-union? t) (node "union" 'alts (map type->jsexpr (type-union-alts t)))]
+    [(type-var? t)   (node "var" 'name (symbol->string (type-var-name t)))]
+    [(type-poly? t)  (node "poly"
+                          'vars (map symbol->string (type-poly-vars t))
+                          'body (type->jsexpr (type-poly-body t)))]
+    [else            (hasheq 'kind "other" 'repr (format "~a" t))]))
+
 ;; --- inferring types of literal expressions --------------------------------
 
 (define (infer-literal-type v)
@@ -458,7 +486,7 @@
  SET-TAG
  PRIMITIVES
  BUILTIN-UNION-ALIASES
- register-type-delab! type-head
+ register-type-delab! type-head type->jsexpr
  (struct-out type-prim)
  (struct-out type-fn)
  (struct-out type-app)

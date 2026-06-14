@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require rackunit
+         json
          beagle/private/types)
 
 ;; --- parse-type ------------------------------------------------------------
@@ -185,3 +186,22 @@
   (define a (type-app 'Promise (list (type-prim 'String))))
   (define b (type-app 'Promise (list (type-prim 'Int))))
   (check-false (type-compatible? a b)))
+
+;; --- type->jsexpr: structured serialization for the repair compiler --------
+
+(test-case "type->jsexpr structures every type constructor (MessageData core)"
+  (define p (type->jsexpr (type-prim 'Int)))
+  (check-equal? (hash-ref p 'kind) "prim")
+  (check-equal? (hash-ref p 'name) "Int")
+  (check-equal? (hash-ref p 'repr) "Int")
+  (define v (type->jsexpr (type-app 'Vec (list (type-prim 'Int)))))
+  (check-equal? (hash-ref v 'kind) "app")
+  (check-equal? (hash-ref v 'ctor) "Vec")
+  (check-equal? (hash-ref v 'repr) "(Vec Int)")
+  (check-equal? (map (lambda (a) (hash-ref a 'name)) (hash-ref v 'args)) (list "Int"))
+  (define f (type->jsexpr (type-fn (list (type-prim 'Int)) #f (type-prim 'Bool))))
+  (check-equal? (hash-ref f 'kind) "fn")
+  (check-equal? (hash-ref (hash-ref f 'ret) 'name) "Bool")
+  ;; pure jsexpr — serializes straight into the JSON error stream
+  (check-true (jsexpr? v))
+  (check-true (jsexpr? f)))

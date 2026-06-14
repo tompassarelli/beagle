@@ -82,6 +82,50 @@
                 'fix-hint (format "Remove ~a extra argument(s) from the call"
                                   (- actual expected)))]
 
+       ;; --- Structural reasoning over the typed details (MessageData) ---
+       ;; The repair compiler reads the STRUCTURED expected/actual types, not
+       ;; the prose: a same-constructor type whose type ARGUMENTS differ (e.g.
+       ;; (Vec Int) vs (Vec String), or (Map String Int) vs (Map String Str))
+       ;; is a precise, machine-actionable fix prose-matching could never
+       ;; derive. Only fires when there's no more-specific accessor suggestion.
+       [(and (memq kind '(type-mismatch return-type def-type let-binding))
+             (null? (hash-ref d 'suggestions '()))
+             (let ([et (hash-ref d 'expected-type #f)]
+                   [at (hash-ref d 'actual-type #f)])
+               (and (hash? et) (hash? at)
+                    (equal? (hash-ref et 'kind #f) "app")
+                    (equal? (hash-ref at 'kind #f) "app")
+                    (equal? (hash-ref et 'ctor #f) (hash-ref at 'ctor #f))
+                    (not (equal? (hash-ref et 'args #f) (hash-ref at 'args #f))))))
+        (define et (hash-ref d 'expected-type))
+        (define at (hash-ref d 'actual-type))
+        (define ctor (hash-ref et 'ctor))
+        (define (reprs j) (map (lambda (a) (hash-ref a 'repr "?")) (hash-ref j 'args '())))
+        ;; The differing type-argument position(s) — NOT just the first arg, so
+        ;; (Map String Int) vs (Map String String) blames the VALUE arg, not key.
+        (define diffs
+          (for/list ([e (in-list (reprs et))] [a (in-list (reprs at))]
+                     #:unless (equal? e a))
+            (cons e a)))
+        (cond
+          [(= 1 (length diffs))
+           (define exp-el (caar diffs)) (define act-el (cdar diffs))
+           (hasheq 'confidence "medium"
+                   'category "collection-element-type"
+                   'fix-safety "type-directed"
+                   'description (format "~a type argument differs: expected ~a, got ~a"
+                                        ctor exp-el act-el)
+                   'fix-hint (format "convert from ~a to ~a (e.g. map a ~a->~a conversion over the ~a)"
+                                     act-el exp-el act-el exp-el ctor))]
+          [else
+           (hasheq 'confidence "medium"
+                   'category "collection-type"
+                   'fix-safety "type-directed"
+                   'description (format "~a type arguments differ: expected ~a, got ~a"
+                                        ctor (hash-ref et 'repr "?") (hash-ref at 'repr "?"))
+                   'fix-hint (format "adjust so the ~a type matches ~a"
+                                     ctor (hash-ref et 'repr "?")))])]
+
        ;; --- Type mismatch with single "did you mean?" suggestion ---
        [(and (eq? kind 'type-mismatch)
              (pair? (hash-ref d 'suggestions '()))

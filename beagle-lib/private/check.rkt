@@ -316,6 +316,18 @@
     [(unresolved-alias)    "E018"]
     [else                 "E000"]))
 
+;; Expected/actual detail pair carrying BOTH the human strings (kept verbatim,
+;; matched by existing tests) AND the STRUCTURED type jsexpr (`expected-type` /
+;; `actual-type`), so the repair compiler — the in-process fix-plan and the
+;; out-of-process JSON repair loop — can reason over the actual type structure
+;; instead of parsing prose. Splat-safe (type->jsexpr is pure jsexpr). This is
+;; the repair-relevant core of Lean's structured MessageData, added additively.
+(define (type-mismatch-details expected-type actual-type)
+  (hasheq 'expected      (type->string expected-type)
+          'actual        (type->string actual-type)
+          'expected-type (type->jsexpr expected-type)
+          'actual-type   (type->jsexpr actual-type)))
+
 (define (raise-diag kind message details #:src [src #f])
   ;; When the form currently under type-check came from macro expansion
   ;; (current-macro-expansion-ctx is set by type-check-with-locs! for
@@ -696,9 +708,8 @@
          (raise-diag 'def-type
                      (format "def ~a: expected ~a, got ~a"
                              name (type->string effective-type) (type->string inferred))
-                     (hasheq 'name (symbol->string name)
-                             'expected (type->string effective-type)
-                             'actual (type->string inferred))
+                     (hash-set (type-mismatch-details effective-type inferred)
+                               'name (symbol->string name))
                      #:src (src-for value))))]
     [(defonce-form name expected-type value _)
      (define inferred (infer-expr value env))
@@ -708,9 +719,8 @@
          (raise-diag 'def-type
                      (format "defonce ~a: expected ~a, got ~a"
                              name (type->string effective-type) (type->string inferred))
-                     (hasheq 'name (symbol->string name)
-                             'expected (type->string effective-type)
-                             'actual (type->string inferred))
+                     (hash-set (type-mismatch-details effective-type inferred)
+                               'name (symbol->string name))
                      #:src (src-for value))))]
 
     [(defn-form name params rest-p expected-ret body _ _ _)
@@ -736,10 +746,9 @@
            (raise-diag 'return-type
                        (format "defn ~a: expected return ~a, got ~a"
                                name (type->string effective-ret) (type->string last-type))
-                       (hasheq 'name (symbol->string name)
-                               'signature (format "~a : ~a" name sig)
-                               'expected (type->string effective-ret)
-                               'actual (type->string last-type))
+                       (hash-set* (type-mismatch-details effective-ret last-type)
+                               'name (symbol->string name)
+                               'signature (format "~a : ~a" name sig))
                        ;; Prefer the AST-level srcloc, but for bare-symbol /
                        ;; literal tail positions (which store-src! refuses)
                        ;; fall back to the parse-time positional anchor via
@@ -766,10 +775,9 @@
                        (format "defn ~a (~a-arity): expected return ~a, got ~a"
                                name (length (arity-clause-params a))
                                (type->string expected-ret) (type->string last-type))
-                       (hasheq 'name (symbol->string name)
-                               'signature (format "~a : ~a" name sig)
-                               'expected (type->string expected-ret)
-                               'actual (type->string last-type))
+                       (hash-set* (type-mismatch-details expected-ret last-type)
+                               'name (symbol->string name)
+                               'signature (format "~a : ~a" name sig))
                        #:src (or (src-for (last a-body))
                                  (body-loc-at a-body (sub1 (length a-body))))))))]
 
@@ -853,10 +861,9 @@
              (raise-diag 'sql-type
                          (format "insert ~a.~a: expected ~a, got ~a"
                                  table col (type->string expected-type) (type->string val-type))
-                         (hasheq 'table (symbol->string table)
-                                 'column (symbol->string col)
-                                 'expected (type->string expected-type)
-                                 'actual (type->string val-type)))))))]
+                         (hash-set* (type-mismatch-details expected-type val-type)
+                                 'table (symbol->string table)
+                                 'column (symbol->string col)))))))]
 
     [(sql-update table set-pairs where-clause)
      (unless (hash-has-key? SQL-TABLES table)
@@ -2056,10 +2063,9 @@
                            (format "with ~a: field ~a expected ~a, got ~a~a"
                                    rec-name kw (type->string expected) (type->string val-type)
                                    suggestion)
-                           (hasheq 'record (symbol->string rec-name)
+                           (hash-set* (type-mismatch-details expected val-type)
+                                   'record (symbol->string rec-name)
                                    'field (symbol->string kw)
-                                   'expected (type->string expected)
-                                   'actual (type->string val-type)
                                    'alternatives alt-fields)
                            #:src (src-for e)))]
             [else
@@ -2405,9 +2411,8 @@
            (raise-diag 'let-binding
                        (format "let binding ~a: expected ~a, got ~a"
                                bname (type->string declared) (type->string inferred))
-                       (hasheq 'name (symbol->string bname)
-                               'expected (type->string declared)
-                               'actual (type->string inferred))
+                       (hash-set (type-mismatch-details declared inferred)
+                                 'name (symbol->string bname))
                        #:src (src-for (let-binding-value b)))))
        (check-binding-accessor-mismatch bname (let-binding-value b) out)
        (hash-set! out bname (or declared inferred ANY))]))
@@ -2565,11 +2570,10 @@
     (raise-diag 'type-mismatch
                 (format "call to ~a: arg ~a expected ~a, got ~a"
                         fn-name i (type->string expected-type) (type->string a-type))
-                (hasheq 'function (symbol->string fn-name)
+                (hash-set* (type-mismatch-details expected-type a-type)
+                        'function (symbol->string fn-name)
                         'signature sig-str
                         'arg-position i
-                        'expected (type->string expected-type)
-                        'actual (type->string a-type)
                         'arg-expr (or arg-expr-str 'null)
                         'arg-signature (or arg-sig 'null)
                         'suggestions suggestions)

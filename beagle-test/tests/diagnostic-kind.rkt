@@ -6,6 +6,7 @@
 
 (require rackunit
          json
+         racket/file
          beagle/private/diagnostic-kind
          beagle/private/parse
          beagle/private/check
@@ -411,3 +412,52 @@
   (check-pred hash? s "suggestion must be folded into the JSON object")
   (check-equal? (hash-ref s 'type) "replace-head")
   (check-equal? (hash-ref s 'to) "nix/assert"))
+
+;; ============================================================================
+;; Structured types in diagnostics (MessageData for the repair compiler)
+;; ============================================================================
+;; Diagnostics carry the human strings (unchanged — back-compat) AND the
+;; STRUCTURED type jsexpr, so agents and the repair loop reason over the type
+;; structure instead of parsing prose.
+
+(test-case "diagnostics carry structured types + the repair compiler reasons over them"
+  (define prog
+    (parse-prog*
+     '(ns t.app) '(define-mode strict) '(define-target clj)
+     (list 'def 'xs (string->symbol ":-") (list 'Vec 'Int) (br "a"))))
+  (define e
+    (with-handlers ([beagle-diagnostic? values]) (type-check! prog) 'no-error-raised))
+  (check-pred beagle-diagnostic? e)
+  (define d (beagle-diagnostic-details e))
+  ;; human strings unchanged (the ~hundreds of regex-matching tests still pass)
+  (check-equal? (hash-ref d 'expected) "(Vec Int)")
+  (check-equal? (hash-ref d 'actual) "(Vec String)")
+  ;; STRUCTURED type data — what agents / the repair loop consume
+  (define et (hash-ref d 'expected-type))
+  (check-equal? (hash-ref et 'kind) "app")
+  (check-equal? (hash-ref et 'ctor) "Vec")
+  (check-equal? (hash-ref (car (hash-ref et 'args)) 'name) "Int")
+  (check-equal? (hash-ref (car (hash-ref (hash-ref d 'actual-type) 'args)) 'name) "String")
+  ;; the repair compiler reasons over the STRUCTURE: same ctor, element differs
+  (define plan (generate-fix-plan e #f))
+  (check-equal? (hash-ref plan 'category) "collection-element-type")
+  (check-true (regexp-match? #rx"Int" (hash-ref plan 'description))))
+
+(test-case "structural fix-plan blames the DIFFERING type argument, not the first (Map)"
+  ;; Regression: (Map Keyword Int) vs (Map Keyword String) differs only in the
+  ;; VALUE position. The fix must report Int/String, not the unchanged key.
+  (define tmp (make-temporary-file "fixplan-map-~a.bclj"))
+  (call-with-output-file tmp
+    (lambda (o) (display "#lang beagle/clj\n(def m :- (Map Keyword Int) {:a \"b\"})\n" o))
+    #:exists 'truncate/replace)
+  (define prog (parse-program (read-beagle-syntax tmp) #:source-path tmp))
+  (define e (with-handlers ([beagle-diagnostic? values]) (type-check! prog) 'no-error))
+  (delete-file tmp)
+  (check-pred beagle-diagnostic? e)
+  (define plan (generate-fix-plan e #f))
+  (check-equal? (hash-ref plan 'category) "collection-element-type")
+  (define desc (hash-ref plan 'description))
+  (check-true (regexp-match? #rx"expected Int, got String" desc)
+              (format "must blame the value position, got: ~a" desc))
+  (check-false (regexp-match? #rx"expected Keyword, got Keyword" desc)
+               "must NOT report the unchanged key as the diff"))
