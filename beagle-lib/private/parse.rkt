@@ -172,28 +172,35 @@
          (define segs (split-ns-segments ns-sym))
          (define base-name (last-of segs))
          (define dir-segs (all-but-last segs))
+         (define abs-source
+           (if (complete-path? source-path)
+             source-path
+             (path->complete-path source-path)))
          (define source-dir
-           (let-values ([(d _n _d?) (split-path
-                                      (if (complete-path? source-path)
-                                        source-path
-                                        (path->complete-path source-path)))])
+           (let-values ([(d _n _d?) (split-path abs-source)])
              d))
-         (define (try-extensions dir-prefix)
-           (for/or ([ext BEAGLE-EXTENSIONS])
-             (define p (if (null? dir-prefix)
-                         (build-path source-dir (string-append base-name ext))
-                         (apply build-path source-dir
-                                (append dir-prefix (list (string-append base-name ext))))))
-             (and (file-exists? p) p)))
-         (or (try-extensions dir-segs)
-             (and (not (null? dir-segs))
-                  (let ([flat (try-extensions '())])
-                    (and flat
-                         (not (equal? (simplify-path flat)
-                                      (simplify-path (if (complete-path? source-path)
-                                                         source-path
-                                                         (path->complete-path source-path)))))
-                         flat)))))))
+         (define (try-at dir-root)
+           (define (try-extensions dir-prefix)
+             (for/or ([ext BEAGLE-EXTENSIONS])
+               (define p (if (null? dir-prefix)
+                           (build-path dir-root (string-append base-name ext))
+                           (apply build-path dir-root
+                                  (append dir-prefix (list (string-append base-name ext))))))
+               (and (file-exists? p) p)))
+           (or (try-extensions dir-segs)
+               (and (not (null? dir-segs))
+                    (let ([flat (try-extensions '())])
+                      (and flat
+                           (not (equal? (simplify-path flat)
+                                        (simplify-path abs-source)))
+                           flat)))))
+         (or (try-at source-dir)
+             (let walk ([cur source-dir])
+               (define-values (parent _name _dir?) (split-path cur))
+               (and (path? parent)
+                    (not (equal? (simplify-path parent) (simplify-path cur)))
+                    (or (try-at parent)
+                        (walk parent))))))))
 
 (define (qualify-name prefix-sym name-sym)
   (string->symbol
@@ -282,8 +289,12 @@
                               #:symbol-ns [imp-symbol-ns #f]
                               #:union-members [imp-union-members #f]
                               #:parametric-unions [imp-param-unions #f]
-                              #:enums [imp-enums #f])
-  (define raw-datums (read-beagle-datums mod-path))
+                              #:enums [imp-enums #f]
+                              #:refer-syms [refer-syms #f]
+                              #:datums [pre-datums #f])
+  ;; pre-datums lets a caller that already read this file (e.g. the sibling
+  ;; scan, to gate on the ns) hand the datums in, avoiding a second read.
+  (define raw-datums (or pre-datums (read-beagle-datums mod-path)))
   ;; Docstrings are surface the importer must see through, same as the
   ;; main parser: (defn name "doc" [params] ...) / (def name "doc" v) /
   ;; (def name :- T "doc" v). Strip them up front so the match arms below
@@ -300,11 +311,14 @@
        (list head name value)]
       [_ d]))
   (define datums (map strip-doc raw-datums))
+  (define refer-set (and refer-syms (list->set refer-syms)))
+  (define (referred? name)
+    (or (not refer-set) (set-member? refer-set name)))
   (define (reg! name type)
     (hash-set! externs (qualify-name prefix name) type)
-    (unless (hash-has-key? externs name)
+    (when (and (referred? name) (not (hash-has-key? externs name)))
       (hash-set! externs name type))
-    (when imp-symbol-ns
+    (when (and imp-symbol-ns (referred? name))
       (hash-set! imp-symbol-ns name prefix)))
   ;; defn-reg! — register an inferred function type for a defn. No
   ;; out-of-band claim pre-pass: claim has been removed; inline `:-`
@@ -342,7 +356,7 @@
        (if (eq? macro-kind 'beagle)
            (register-beagle-macro! registry qname pnames icontracts ret-type body)
            (register-proc-macro! registry qname pnames icontracts ret-type body))
-       (unless (hash-has-key? registry name)
+       (when (and (referred? name) (not (hash-has-key? registry name)))
          (if (eq? macro-kind 'beagle)
              (register-beagle-macro! registry name pnames icontracts ret-type body)
              (register-proc-macro! registry name pnames icontracts ret-type body)))]
@@ -355,7 +369,7 @@
                     [(list? params) params]
                     [else '()]))
        (register-macro! registry (qualify-name prefix name) 'defmacro ps template)
-       (unless (hash-has-key? registry name)
+       (when (and (referred? name) (not (hash-has-key? registry name)))
          (register-macro! registry name 'defmacro ps template))]
       [(list 'defrecord (? symbol? name) fields-form)
        (define fields (parse-record-fields fields-form))
@@ -518,12 +532,17 @@
 ;; compiled on its own).
 
 ;; Cheap datum-level scan: does file `f` declare exactly (ns target-ns)?
-(define (file-declares-ns? f target-ns)
+;; Read a sibling's datums once and return them iff it declares target-ns, so
+;; the caller can gate on the namespace AND reuse the datums for the actual
+;; type import without a second read of the file.
+(define (file-ns-datums f target-ns)
   (with-handlers ([exn:fail? (lambda (_e) #f)])
-    (for/or ([d (in-list (read-beagle-datums f))])
-      (match d
-        [(list* 'ns (? symbol? n) _) (eq? n target-ns)]
-        [_ #f]))))
+    (define datums (read-beagle-datums f))
+    (and (for/or ([d (in-list datums)])
+           (match d
+             [(list* 'ns (? symbol? n) _) (eq? n target-ns)]
+             [_ #f]))
+         datums)))
 
 (define (import-same-ns-siblings! prog source-path)
   (define ns (program-namespace prog))
@@ -534,10 +553,12 @@
     (define-values (dir _name _dir?) (split-path self))
     (when (path? dir)
       (for ([f (in-list (directory-list dir #:build? #t))])
-        (when (and (file-exists? f)
-                   (beagle-source-file? (path->string f))
-                   (not (equal? (simplify-path (path->complete-path f)) self))
-                   (file-declares-ns? f ns))
+        (define sib-datums
+          (and (file-exists? f)
+               (beagle-source-file? (path->string f))
+               (not (equal? (simplify-path (path->complete-path f)) self))
+               (file-ns-datums f ns)))   ;; reads the sibling exactly once
+        (when sib-datums
           (with-handlers ([exn:fail?
                            (lambda (e)
                              (eprintf "warning: sibling type import from ~a failed: ~a\n"
@@ -553,7 +574,8 @@
                                   #:symbol-ns (program-imported-symbol-ns prog)
                                   #:union-members (program-imported-union-members prog)
                                   #:parametric-unions (program-imported-parametric-unions prog)
-                                  #:enums (program-imported-enums prog))))))))
+                                  #:enums (program-imported-enums prog)
+                                  #:datums sib-datums)))))))
 
 ;; --- reader-conditional resolution ----------------------------------------
 ;;
@@ -778,7 +800,8 @@
                               #:scalar-preds imp-scalar-preds
                               #:symbol-ns imp-symbol-ns
                               #:union-members imp-union-members
-                              #:parametric-unions imp-param-unions)))
+                              #:parametric-unions imp-param-unions
+                              #:refer-syms refer-syms)))
     (set! requires (cons (require-entry rn alias refer-syms) requires)))
 
   ;; One require libspec: lib, [lib], [lib :as a], [lib :refer [syms]],
