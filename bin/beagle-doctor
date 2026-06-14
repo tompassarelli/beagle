@@ -1,19 +1,51 @@
 #!/usr/bin/env bash
-# beagle-doctor: check host environment and target readiness.
+# beagle-doctor: check host environment, target readiness, AND prove the
+# repair-compiler loop is FUNCTIONALLY working (not merely alive).
+#
+# Two halves:
+#   environment  — host tools, daemon liveness, cache, target emitters.
+#   repair loop  — FUNCTIONAL canary pairs: a known-bad input that MUST be
+#                  rejected + a known-good input that MUST pass. This is what
+#                  catches SILENT DEGRADATION (a checker stuck "always-pass"
+#                  or "always-fail"), which a version/liveness check cannot see.
+#
+# Use it two ways:
+#   handshake  — run once before coding Beagle; green or don't trust feedback.
+#   heartbeat  — run on a loop while coding; --revive self-heals a dead daemon.
 #
 # Usage:
-#   beagle-doctor              (human-readable)
-#   beagle-doctor --json       (machine-readable)
+#   beagle-doctor [--json] [--revive] [--quiet] [--deep] [DIR]
+#     --json     machine-readable verdict
+#     --revive   restart the daemon (watching DIR) if it is down, then re-check
+#     --quiet    print nothing when healthy (silent heartbeat; loud on degrade)
+#     --deep     also run the full suggestion->patch canary (beagle-repair)
+#     DIR        daemon watch dir for --revive (default: cwd)
+#
+# Exit: 0 = healthy/warnings only, 1 = DEGRADED (a functional check or revive
+# failed). The non-zero exit is what lets a handshake/heartbeat gate on it.
 
-set -euo pipefail
+set -uo pipefail
 source "$(dirname "$0")/_beagle-racket"
+BIN="$(cd "$(dirname "$0")" && pwd)"
 
 JSON=0
-if [[ "${1:-}" == "--json" ]]; then
-    JSON=1
-fi
+REVIVE=0
+QUIET=0
+DEEP=0
+WATCH_DIR="."
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --json)   JSON=1; shift ;;
+        --revive) REVIVE=1; shift ;;
+        --quiet)  QUIET=1; shift ;;
+        --deep)   DEEP=1; shift ;;
+        -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        *)        WATCH_DIR="$1"; shift ;;
+    esac
+done
 
-STATUS="ok"
+STATUS="ok"          # whole-environment rollup (tools + targets) — informational
+REPAIR_STATUS="ok"   # repair-loop health ONLY (daemon + functional canaries) — gates exit
 CHECKS=()
 
 check_tool() {
@@ -59,21 +91,26 @@ else
     [[ "$STATUS" == "ok" ]] && STATUS="warning"
 fi
 
-# Daemon
+# Daemon — liveness, with --revive self-heal. Uses `beagle-daemon status`
+# (returns {"status":"running"}) rather than a raw port ping.
 BEAGLE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PORTFILE="${BEAGLE_DAEMON_PORTFILE:-$(mktemp -u)}"
-DEFAULT_PORTFILE="$(python3 -c 'import tempfile,os; print(os.path.join(tempfile.gettempdir(), "beagle-daemon.port"))')"
-if [[ -f "$DEFAULT_PORTFILE" ]]; then
-    PORT=$(cat "$DEFAULT_PORTFILE")
-    if echo "status" | nc -w 1 127.0.0.1 "$PORT" &>/dev/null; then
-        CHECKS+=("{\"name\":\"daemon\",\"status\":\"ok\",\"message\":\"running on port $PORT\"}")
+daemon_responding() { "$BIN/beagle-daemon" status 2>/dev/null | grep -q '"status":"running"'; }
+if daemon_responding; then
+    CHECKS+=("{\"name\":\"daemon\",\"status\":\"ok\",\"message\":\"running\"}")
+elif [[ "$REVIVE" == "1" ]]; then
+    "$BIN/beagle-daemon" start --watch "$WATCH_DIR" >/dev/null 2>&1 || true
+    for _ in 1 2 3 4 5; do daemon_responding && break; done
+    if daemon_responding; then
+        CHECKS+=("{\"name\":\"daemon\",\"status\":\"ok\",\"message\":\"revived (watch $WATCH_DIR)\"}")
     else
-        CHECKS+=("{\"name\":\"daemon\",\"status\":\"warning\",\"message\":\"port file exists but daemon not responding\"}")
-        [[ "$STATUS" == "ok" ]] && STATUS="warning"
+        CHECKS+=("{\"name\":\"daemon\",\"status\":\"error\",\"message\":\"down; revive failed (beagle-daemon start --watch $WATCH_DIR)\"}")
+        STATUS="error"; REPAIR_STATUS="error"
     fi
 else
-    CHECKS+=("{\"name\":\"daemon\",\"status\":\"warning\",\"message\":\"not running\"}")
-    [[ "$STATUS" == "ok" ]] && STATUS="warning"
+    # daemon powers the watcher + the hook's fast feedback path — its absence
+    # is a real repair-loop degradation, not a benign warning.
+    CHECKS+=("{\"name\":\"daemon\",\"status\":\"error\",\"message\":\"not running (re-run with --revive, or: beagle-daemon start --watch $WATCH_DIR)\"}")
+    STATUS="error"; REPAIR_STATUS="error"
 fi
 
 # Cache directory
@@ -86,6 +123,55 @@ elif [[ -d "$CACHE_DIR" ]]; then
 else
     CHECKS+=("{\"name\":\"cache\",\"status\":\"ok\",\"message\":\"$CACHE_DIR will be created on first use\"}")
 fi
+
+# ---------------------------------------------------------------------------
+# Repair loop — FUNCTIONAL canary pairs. A liveness check says the checker is
+# running; these say it is still TELLING THE TRUTH. Each layer feeds a known
+# input and asserts the known verdict, in BOTH directions (bad must fail, good
+# must pass) so a checker stuck always-pass OR always-fail is caught.
+# ---------------------------------------------------------------------------
+REPAIR_LOOP=()
+rl_ok()   { REPAIR_LOOP+=("{\"name\":\"$1\",\"status\":\"ok\"}"); }
+rl_fail() { REPAIR_LOOP+=("{\"name\":\"$1\",\"status\":\"error\",\"message\":$(printf '%s' "$2" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')}"); STATUS="error"; REPAIR_STATUS="error"; }
+
+DOC_WORK="$(mktemp -d /tmp/beagle-doctor.XXXXXX)"
+printf '#lang beagle/clj\n(ns doctor.canary)\n(defn f [] :- Nil (str "x"\n' > "$DOC_WORK/bad.bclj"
+printf '#lang beagle/clj\n(ns doctor.canary)\n(defn f [] :- Nil nil)\n' > "$DOC_WORK/good.bclj"
+printf '#lang beagle/clj\n(ns doctor.canary)\n(defn g [n :- Int] :- Nil nil)\n(defn f [] :- Nil (g "boom"))\n' > "$DOC_WORK/type-bad.bclj"
+
+# syntax layer (canary pair)
+if "$BIN/beagle-syntax" "$DOC_WORK/bad.bclj" &>/dev/null; then
+    rl_fail "syntax" "accepted a known-malformed file (stuck always-pass)"
+elif ! "$BIN/beagle-syntax" "$DOC_WORK/good.bclj" &>/dev/null; then
+    rl_fail "syntax" "rejected a known-good file (stuck always-fail)"
+else
+    rl_ok "syntax"
+fi
+
+# type-check layer (canary pair)
+if "$BIN/beagle-check-all" --agent "$DOC_WORK/type-bad.bclj" &>/dev/null; then
+    rl_fail "check" "passed a known type error (stuck always-pass)"
+elif ! "$BIN/beagle-check-all" --agent "$DOC_WORK/good.bclj" &>/dev/null; then
+    rl_fail "check" "failed a known-good file (stuck always-fail)"
+else
+    rl_ok "check"
+fi
+
+# full machinery (--deep): parse -> diagnostic -> suggestion -> producer ->
+# consumer -> patch. A bare (assert) in a .bnix must round-trip to a
+# nix/assert rename via beagle-repair --emit-patch.
+if [[ "$DEEP" == "1" ]]; then
+    CN="$DOC_WORK/repair"; mkdir -p "$CN"
+    printf '#lang beagle/nix\n(assert true 1)\n' > "$CN/m.bnix"
+    printf '#!/usr/bin/env bash\ntrue\n' > "$CN/verify.sh"; chmod +x "$CN/verify.sh"
+    PATCH="$("$BIN/beagle-repair" "$CN" "$CN/verify.sh" --emit-patch 2>/dev/null || true)"
+    if grep -q '^+(nix/assert' <<<"$PATCH"; then
+        rl_ok "repair-suggestion"
+    else
+        rl_fail "repair-suggestion" "suggestion->patch did not emit the nix/assert rename"
+    fi
+fi
+rm -rf "$DOC_WORK"
 
 # Target emitters: nix is the live happy path; clj/cljs/js/sql/py/rkt
 # are parked under beagle-lib/private/dormant/. Doctor reports them all
@@ -107,15 +193,27 @@ for target in clj cljs js nix sql py rkt; do
     fi
 done
 
+# --quiet: a healthy heartbeat says nothing. It speaks only when the REPAIR
+# LOOP degrades — not for a missing unused target emitter or a stale inventory.
+if [[ "$QUIET" == "1" && "$REPAIR_STATUS" != "error" && "$JSON" == "0" ]]; then
+    exit 0
+fi
+
 if [[ "$JSON" == "1" ]]; then
     CHECKS_JSON=$(IFS=,; echo "${CHECKS[*]}")
+    REPAIR_JSON=$(IFS=,; echo "${REPAIR_LOOP[*]}")
     TARGETS_JSON=$(IFS=,; echo "${TARGETS[*]}")
-    echo "{\"schemaVersion\":1,\"status\":\"$STATUS\",\"checks\":[$CHECKS_JSON],\"targets\":[$TARGETS_JSON]}"
+    echo "{\"schemaVersion\":1,\"status\":\"$STATUS\",\"repair_status\":\"$REPAIR_STATUS\",\"checks\":[$CHECKS_JSON],\"repair_loop\":[$REPAIR_JSON],\"targets\":[$TARGETS_JSON]}"
 else
     echo "beagle-doctor"
     echo "============="
     echo ""
-    echo "Status: $STATUS"
+    if [[ "$REPAIR_STATUS" == "error" ]]; then
+        echo "Repair loop: DEGRADED  ← do not trust silent green while degraded"
+    else
+        echo "Repair loop: ok  (daemon + functional canaries healthy)"
+    fi
+    echo "Environment: $STATUS"
     echo ""
     echo "Environment:"
     for check in "${CHECKS[@]}"; do
@@ -131,15 +229,34 @@ else
         fi
     done
     echo ""
+    echo "Repair loop (functional):"
+    for rl in "${REPAIR_LOOP[@]}"; do
+        name=$(echo "$rl" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["name"])')
+        status=$(echo "$rl" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["status"])')
+        if [[ "$status" == "ok" ]]; then
+            echo "  [ok]      $name canary"
+        else
+            msg=$(echo "$rl" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("message",""))')
+            echo "  [ERROR]   $name canary: $msg"
+        fi
+    done
+    echo ""
     echo "Target emitters:"
     for target in "${TARGETS[@]}"; do
         name=$(echo "$target" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["name"])')
         status=$(echo "$target" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["status"])')
-        if [[ "$status" == "ok" ]]; then
-            echo "  [ok]      $name"
+        if [[ "$status" == "ok" || "$status" == "live" || "$status" == "dormant" ]]; then
+            echo "  [$status]  $name"
         else
             msg=$(echo "$target" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("message",""))')
             echo "  [ERROR]   $name: $msg"
         fi
     done
 fi
+
+# Exit gates on the REPAIR LOOP only (daemon + functional canaries), NOT on the
+# environment rollup. A stale target inventory or a missing emitter for an
+# unused target must not trip the handshake/heartbeat — only a genuinely
+# degraded repair loop does.
+[[ "$REPAIR_STATUS" == "error" ]] && exit 1
+exit 0
