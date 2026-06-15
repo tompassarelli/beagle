@@ -2534,6 +2534,124 @@
                           "dotimes removed — use (doseq [i (range n)] body...)")]
       [_ (parse-list-form* d subs)])))
 
+;; --- module family migrated to the compile-time combiner registry ---
+
+;; `unsafe` (+ unsafe-js/-clj/-py/-rkt/-nix/-expr) — shared (or …) rejection arm
+;; migrated to the compile-time combiner registry (see register-combiner!).
+(define (unsafe-family-combiner d subs)
+  (match d
+    [(list (or 'unsafe 'unsafe-js 'unsafe-clj 'unsafe-py 'unsafe-rkt 'unsafe-nix 'unsafe-expr) _ ...)
+     (error 'beagle
+            "(~a ...) escape hatches are not available. Beagle has no per-target escape by design — add to stdlib-*.rkt or write a separate target-language file and import it."
+            (car d))]
+    [_ (parse-list-form* d subs)]))
+(register-combiner! 'unsafe        unsafe-family-combiner)
+(register-combiner! 'unsafe-js     unsafe-family-combiner)
+(register-combiner! 'unsafe-clj    unsafe-family-combiner)
+(register-combiner! 'unsafe-py     unsafe-family-combiner)
+(register-combiner! 'unsafe-rkt    unsafe-family-combiner)
+(register-combiner! 'unsafe-nix    unsafe-family-combiner)
+(register-combiner! 'unsafe-expr   unsafe-family-combiner)
+
+;; `inherit` — Nix `inherit name…` migrated to the combiner registry.
+(register-combiner! 'inherit
+  (lambda (d subs)
+    (match d
+      [(list 'inherit names ...)
+       (nix-inherit (map (lambda (n)
+                           (define d (->datum n))
+                           (if (symbol? d) d (error 'beagle "inherit: expected symbol, got ~v" d)))
+                         (or (stx-tail subs 1) names)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `inherit-from` — Nix `inherit (ns) name…` migrated to the combiner registry.
+(register-combiner! 'inherit-from
+  (lambda (d subs)
+    (match d
+      [(list 'inherit-from ns-expr names ...)
+       (nix-inherit-from (parse-expr (or (stx-ref subs 1) ns-expr))
+                         (map (lambda (n)
+                                (define d (->datum n))
+                                (if (symbol? d) d (error 'beagle "inherit-from: expected symbol, got ~v" d)))
+                              (or (stx-tail subs 2) names)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `rec-attrs` — Nix recursive attrset migrated to the combiner registry.
+(register-combiner! 'rec-attrs
+  (lambda (d subs)
+    (match d
+      [(list 'rec-attrs pairs ...)
+       (nix-rec-attrs (parse-nix-rec-pairs (or (stx-tail subs 1) pairs)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `search-path` — Nix `<name>` search-path migrated to the combiner registry.
+(register-combiner! 'search-path
+  (lambda (d subs)
+    (match d
+      [(list 'search-path name-expr)
+       (define d (->datum (or (stx-ref subs 1) name-expr)))
+       (nix-search-path (cond
+                          [(symbol? d) (symbol->string d)]
+                          [(string? d) d]
+                          [else (error 'beagle "search-path: expected symbol or string, got ~v" d)]))]
+      [_ (parse-list-form* d subs)])))
+
+;; `module` — bare `module` HARD-REJECT (use `nix/module`) migrated to the
+;; combiner registry. NOTE: `nix/module` is a DIFFERENT head and stays put.
+(register-combiner! 'module
+  (lambda (d subs)
+    (match d
+      [(list 'module _ _)
+       (raise-parse-error 'bare-nix-form
+                          "(module ...) — bare `module` is not supported. Beagle namespaces target-specific forms; use `(nix/module FORMALS BODY)`."
+                          #:suggestion (replace-head-suggestion 'module 'nix/module))]
+      [_ (parse-list-form* d subs)])))
+
+;; `pipe-to` — removed pipe family; HARD-REJECT (use `->`). Migrated to registry.
+(register-combiner! 'pipe-to
+  (lambda (d subs)
+    (match d
+      [(list 'pipe-to _ ...)
+       (raise-parse-error 'legacy-pipe-form
+                          "(pipe-to …) — the pipe family is removed. Use `(-> x f …)` for thread-first.")]
+      [_ (parse-list-form* d subs)])))
+
+;; `pipe-from` — removed pipe family; HARD-REJECT (use `->>`). Migrated to registry.
+(register-combiner! 'pipe-from
+  (lambda (d subs)
+    (match d
+      [(list 'pipe-from _ ...)
+       (raise-parse-error 'legacy-pipe-form
+                          "(pipe-from …) — the pipe family is removed. Use `(->> x f …)` for thread-last.")]
+      [_ (parse-list-form* d subs)])))
+
+;; `unquote` — `,` outside quasiquote; HARD-REJECT. Migrated to the registry.
+(register-combiner! 'unquote
+  (lambda (d subs)
+    (match d
+      [(list 'unquote _ ...)
+       (raise-parse-error 'unknown-form
+                          "unquote (`,`) outside quasiquote — `,x` is only valid inside a `` `…`` template in a defmacro body")]
+      [_ (parse-list-form* d subs)])))
+
+;; `unquote-splicing` — `,@` outside quasiquote; HARD-REJECT. Migrated to registry.
+(register-combiner! 'unquote-splicing
+  (lambda (d subs)
+    (match d
+      [(list 'unquote-splicing _ ...)
+       (raise-parse-error 'unknown-form
+                          "unquote-splicing (`,@`) outside quasiquote — `,@x` is only valid inside a `` `…`` template in a defmacro body")]
+      [_ (parse-list-form* d subs)])))
+
+;; `quasiquote` — `` ` `` outside defmacro body; HARD-REJECT. Migrated to registry.
+(register-combiner! 'quasiquote
+  (lambda (d subs)
+    (match d
+      [(list 'quasiquote _ ...)
+       (raise-parse-error 'unknown-form
+                          "quasiquote (`` ` ``) outside defmacro body — beagle's quasiquote is macro-template-only; use literal data containers (`'[…]` / `'{…}` / `'(…)`) for inert data construction")]
+      [_ (parse-list-form* d subs)])))
+
 (define (parse-list-form d subs)
   ;; Invariant: macro heads are resolved in parse-expr (and the top-level loop)
   ;; BEFORE control reaches here, so a 'macro head must never arrive — if one
@@ -2552,10 +2670,8 @@
 
 (define (parse-list-form* d subs)
   (match d
-    [(list (or 'unsafe 'unsafe-js 'unsafe-clj 'unsafe-py 'unsafe-rkt 'unsafe-nix 'unsafe-expr) _ ...)
-     (error 'beagle
-            "(~a ...) escape hatches are not available. Beagle has no per-target escape by design — add to stdlib-*.rkt or write a separate target-language file and import it."
-            (car d))]
+    ;; `unsafe` family (unsafe/-js/-clj/-py/-rkt/-nix/-expr) migrated to the
+    ;; compile-time combiner registry (see register-combiner!).
 
     ;; `def` migrated to the compile-time combiner registry (see register-combiner!).
 
@@ -2622,21 +2738,11 @@
 
     ;; --- Nix-specific forms --------------------------------------------------
 
-    [(list 'inherit names ...)
-     (nix-inherit (map (lambda (n)
-                         (define d (->datum n))
-                         (if (symbol? d) d (error 'beagle "inherit: expected symbol, got ~v" d)))
-                       (or (stx-tail subs 1) names)))]
+    ;; `inherit` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'inherit-from ns-expr names ...)
-     (nix-inherit-from (parse-expr (or (stx-ref subs 1) ns-expr))
-                       (map (lambda (n)
-                              (define d (->datum n))
-                              (if (symbol? d) d (error 'beagle "inherit-from: expected symbol, got ~v" d)))
-                            (or (stx-tail subs 2) names)))]
+    ;; `inherit-from` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'rec-attrs pairs ...)
-     (nix-rec-attrs (parse-nix-rec-pairs (or (stx-tail subs 1) pairs)))]
+    ;; `rec-attrs` migrated to the compile-time combiner registry (see register-combiner!).
 
     [(list 'nix/assert cond-expr body-expr)
      ;; Canonical Nix assertion form. Bare `(assert ...)` is HARD-REJECTED —
@@ -2660,12 +2766,7 @@
 
     ;; `has` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'search-path name-expr)
-     (define d (->datum (or (stx-ref subs 1) name-expr)))
-     (nix-search-path (cond
-                        [(symbol? d) (symbol->string d)]
-                        [(string? d) d]
-                        [else (error 'beagle "search-path: expected symbol or string, got ~v" d)]))]
+    ;; `search-path` migrated to the compile-time combiner registry (see register-combiner!).
 
     [(cons 's parts)
      (nix-interpolated-string
@@ -2702,10 +2803,7 @@
      (define-values (fl at-name)
        (parse-nix-fn-set-formals (or (stx-ref subs 1) formals)))
      (nix-fn-set fl #t at-name (parse-expr (or (stx-ref subs 2) body-expr)))]
-    [(list 'module _ _)
-     (raise-parse-error 'bare-nix-form
-                        "(module ...) — bare `module` is not supported. Beagle namespaces target-specific forms; use `(nix/module FORMALS BODY)`."
-                        #:suggestion (replace-head-suggestion 'module 'nix/module))]
+    ;; `module` (bare) migrated to the compile-time combiner registry (see register-combiner!).
 
     [(list 'nix/overlay formals body-expr)
      ;; Nix overlay: final: prev: body (curried — NOT attrset-destructure)
@@ -2747,12 +2845,8 @@
     ;; The pipe family (`pipe-to`, `pipe-from`, `implies`, `|>`, `|>>`) was an
     ;; Elixir/F# import — removed per CLAUDE.md "Beagle is Clojure plus types,
     ;; nothing else." Use Clojure threading (`->`, `->>`) instead.
-    [(list 'pipe-to _ ...)
-     (raise-parse-error 'legacy-pipe-form
-                        "(pipe-to …) — the pipe family is removed. Use `(-> x f …)` for thread-first.")]
-    [(list 'pipe-from _ ...)
-     (raise-parse-error 'legacy-pipe-form
-                        "(pipe-from …) — the pipe family is removed. Use `(->> x f …)` for thread-last.")]
+    ;; `pipe-to` migrated to the compile-time combiner registry (see register-combiner!).
+    ;; `pipe-from` migrated to the compile-time combiner registry (see register-combiner!).
     ;; `implies` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; --- end Nix-specific forms ----------------------------------------------
@@ -3182,15 +3276,8 @@
     ;; the qq-eval pass during expansion, so they never reach parse-list-form.
     ;; If we see them here, the user wrote `,x` or `` `(…) `` outside a
     ;; defmacro body.
-    [(list 'unquote _ ...)
-     (raise-parse-error 'unknown-form
-                        "unquote (`,`) outside quasiquote — `,x` is only valid inside a `` `…`` template in a defmacro body")]
-    [(list 'unquote-splicing _ ...)
-     (raise-parse-error 'unknown-form
-                        "unquote-splicing (`,@`) outside quasiquote — `,@x` is only valid inside a `` `…`` template in a defmacro body")]
-    [(list 'quasiquote _ ...)
-     (raise-parse-error 'unknown-form
-                        "quasiquote (`` ` ``) outside defmacro body — beagle's quasiquote is macro-template-only; use literal data containers (`'[…]` / `'{…}` / `'(…)`) for inert data construction")]
+    ;; `unquote` / `unquote-splicing` / `quasiquote` migrated to the
+    ;; compile-time combiner registry (see register-combiner!).
 
     ;; Literal-key (get target :kw) and (get target :kw default) canonicalize
     ;; to kw-access — same AST as (:kw target). Identity-preserving: same
