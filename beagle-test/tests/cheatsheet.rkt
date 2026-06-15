@@ -13,7 +13,7 @@
          beagle/private/parse
          beagle/private/check)
 
-(define-runtime-path cheatsheet-md "../../CHEATSHEET.md")
+(define-runtime-path cheatsheet-md "../../docs/CHEATSHEET.md")
 
 ;; Read top-level forms from a string with bracket-tagging on (so `[...]`
 ;; reads as (#%brackets ...) exactly as the file reader produces).
@@ -45,5 +45,5 @@
     (check-true (regexp-match? (regexp (regexp-quote (cheat-form c))) doc)
                 (format "rendered cheatsheet should mention ~a" (cheat-form c)))))
 
-(test-case "CHEATSHEET.md is in sync with the module (regenerate: bin/beagle-cheatsheet > CHEATSHEET.md)"
+(test-case "docs/CHEATSHEET.md is in sync with the module (regenerate: bin/beagle-cheatsheet > docs/CHEATSHEET.md)"
   (check-equal? (file->string cheatsheet-md) (render-cheatsheet)))

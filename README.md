@@ -147,6 +147,8 @@ Every snippet above passes `bin/beagle-syntax`.
   three-statement generative spec (Clojure + types / load-bearing
   divergence / idiomatic per target) is the canonical anchor for any
   surface question.
+- `docs/` — distilled, rot-resistant artifacts: `INFLUENCES.md`
+  (lineage + thesis) and the generated `CHEATSHEET.md`.
 
 ## Getting started
 

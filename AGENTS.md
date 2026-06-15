@@ -22,9 +22,6 @@ bin/beagle build [PATH...]              # compile to target (--out DIR, --warn)
 bin/beagle syntax FILE                  # parse-check (fix delimiters first)
 ```
 
-The `beagle-op-*` "operative" tools are a **quarantined experiment** behind
-`BEAGLE_EXPERIMENTAL_OPERATIVE` — not the checker. Use `bin/beagle check`.
-
 ## When you need to know something — ask the compiler
 
 There is no static reference; the surface churns. Query it:
@@ -36,7 +33,7 @@ There is no static reference; the surface churns. Query it:
 | fields of record R? | `bin/beagle fields R FILE...` |
 | who calls X? | `bin/beagle callers X FILE...` |
 | what does FILE export? | `bin/beagle provides FILE` |
-| what can the language DO? | `bin/beagle-cheatsheet` (or read `CHEATSHEET.md`) |
+| what can the language DO? | `bin/beagle-cheatsheet` (or read `docs/CHEATSHEET.md`) |
 | the form set / surface syntax? | read `beagle-lib/private/parse.rkt` |
 | what's in the stdlib? | read `stdlib-nix.rkt` / `stdlib-portable.rkt` |
 | the full command list? | `bin/beagle` (no args) |
@@ -51,12 +48,15 @@ There is no static reference; the surface churns. Query it:
 - Active-tier failures: fix. Demoted/gated failures during surface
   iteration: leave alone (that's what the tiering is for).
 
-## Where surface design lives
+## Where docs and surface design live
 
 Design papers (role-locality, public-contracts, quarantine, …) live in
-`~/code/life-os/threads/` with YAML front matter. Do not create
-`~/code/beagle/docs/` — it was deleted intentionally. In-repo prose belongs
-under `lab/journal/synthesis/` if anywhere.
+`~/code/life-os/threads/` with YAML front matter. `docs/` holds ONLY
+distilled or generated artifacts that can't rot — `docs/INFLUENCES.md`
+(lineage + thesis) and the generated `docs/CHEATSHEET.md`. Do NOT put
+hand-maintained reference prose in `docs/` — that is what rotted the
+previous `docs/` into deletion. Reference lives in `README.md` or the
+compiler.
 
 ## Phase-stable invariants (easy to get wrong)
 

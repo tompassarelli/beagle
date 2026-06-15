@@ -178,7 +178,7 @@ answer to a question a static doc would otherwise try to encode.
 | question | tool |
 |---|---|
 | does this file parse? where? | `bin/beagle syntax FILE` (`--ledger`, `--repair --emit-patch`) |
-| does this file type-check? | `bin/beagle check --agent FILE` (`beagle-op-*` is the quarantined operative pipeline — gated behind `BEAGLE_EXPERIMENTAL_OPERATIVE=1`, not the default) |
+| does this file type-check? | `bin/beagle check --agent FILE` |
 | what's the signature of X? | `bin/beagle sig X FILE...` |
 | what fields does record R have? | `bin/beagle fields R FILE...` |
 | who calls X? | `bin/beagle callers X FILE...` |
@@ -442,15 +442,6 @@ suites are still gated — a tiers.rktd inconsistency worth reconciling.)
 
 Fixture migrations are not test code — they're test inputs and **must**
 be migrated when surface changes break them.
-
-### Don't add features to the operative checker
-
-Classic checker wins; operative is quarantined behind
-`BEAGLE_EXPERIMENTAL_OPERATIVE`. Folding operative→classic or
-deleting it outright is a separate plan; until then **no new
-operative features without an explicit policy override** — bug
-fixes to keep the quarantined path building are fine; new
-capability surface there is not.
 
 ### Type-system gating policies
 
