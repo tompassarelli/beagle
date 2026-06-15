@@ -415,28 +415,28 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
      "42")
 
    (check-js-output "atom reset!"
-     (list '(defn f [] :- Int
+     (list '(defn f! [] :- Int
               (let [a (atom 0)]
                 (do (reset! a 99)
                     (deref a)))))
-     "console.log(f());"
+     "console.log(f_bang());"
      "99")
 
    (check-js-output "atom swap!"
-     (list '(defn f [] :- Int
+     (list '(defn f! [] :- Int
               (let [a (atom 10)]
                 (do (swap! a (fn [(x :- Int)] :- Int (+ x 1)))
                     (deref a)))))
-     "console.log(f());"
+     "console.log(f_bang());"
      "11")
 
    (check-js-output "atom swap! with extra args"
      (list '(defn add [(x :- Int) (y :- Int)] :- Int (+ x y))
-           '(defn f [] :- Int
+           '(defn f! [] :- Int
               (let [a (atom 10)]
                 (do (swap! a add 5)
                     (deref a)))))
-     "console.log(f());"
+     "console.log(f_bang());"
      "15")
 
    ;; --- additional stdlib -----------------------------------------------------
