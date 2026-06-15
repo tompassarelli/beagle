@@ -15,6 +15,8 @@ Real codebases author against Beagle:
   system, typed end-to-end against its 16k-option schema (Nix target).
 - [gjoa](https://github.com/tompassarelli/gjoa) — a Firefox overlay UI,
   43 `.bjs` modules ported from TypeScript (JS target).
+- [chelonia](https://github.com/tompassarelli/chelonia) — a claim-native
+  coordination engine, 7 `.bclj` modules (Clojure target).
 
 ## Targets
 
