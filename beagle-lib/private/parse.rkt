@@ -1847,6 +1847,9 @@
        (defonce-form name #f (parse-expr (or (stx-ref subs 3) value)) doc)]
       [(list 'defonce (? symbol? name) value)
        (defonce-form name #f (parse-expr (or (stx-ref subs 2) value)) #f)]
+      [(cons 'defonce _)
+       (raise-parse-error 'bad-form
+                          "malformed defonce — expected (defonce NAME VALUE), (defonce NAME \"doc\" VALUE), or (defonce NAME :- TYPE VALUE); got: ~v" d)]
       [_ (parse-list-form* d subs)])))
 
 ;; `set!` — mutable assignment.
@@ -1917,61 +1920,140 @@
   (lambda (d subs)
     (parse-try-form (or (stx-tail subs 1) (cdr d)))))
 
-(define (parse-list-form d subs)
-  ;; Invariant: macro heads are resolved in parse-expr (and the top-level loop)
-  ;; BEFORE control reaches here, so a 'macro head must never arrive — if one
-  ;; does, the resolver and the call sites have drifted out of sync. Fail loudly
-  ;; rather than silently mis-dispatching to a built-in/legacy arm. On valid
-  ;; input this arm never fires, so goldens are unaffected.
-  (when (and (pair? d)
-             (eq? (head-meaning (current-registry) (car d)) 'macro))
-    (error 'beagle
-           "internal: macro head ~a reached parse-list-form (should be handled in parse-expr)"
-           (car d)))
-  (cond
-    [(and (pair? d) (symbol? (car d)) (lookup-combiner (car d)))
-     => (lambda (handler) (handler d subs))]
-    [else (parse-list-form* d subs)]))
+;; `when` — Clojure conditional sugar; (when c body…) → (if c (do body…)).
+;; Identity-preserving canonicalization (see the original arm's commentary).
+;; Arity error (no body) re-uses the legacy rejection; anything else falls
+;; through to parse-list-form* so e.g. bare `(when)` still reaches call-form.
+(register-combiner! 'when
+  (lambda (d subs)
+    (match d
+      [(list 'when c body ..1)
+       (parse-expr (rewrite-as
+                    (list 'if
+                          (or (stx-ref subs 1) c)
+                          (cons 'do (or (stx-tail subs 2) body)))))]
+      [(list 'when _ ...)
+       (raise-parse-error 'bad-form
+                          "when requires at least one body expression: (when c body...)")]
+      [_ (parse-list-form* d subs)])))
 
-(define (parse-list-form* d subs)
+;; `when-not` — (when-not c body…) → (if (not c) (do body…)).
+(register-combiner! 'when-not
+  (lambda (d subs)
+    (match d
+      [(list 'when-not c body ..1)
+       (parse-expr (rewrite-as
+                    (list 'if
+                          (list 'not (or (stx-ref subs 1) c))
+                          (cons 'do (or (stx-tail subs 2) body)))))]
+      [(list 'when-not _ ...)
+       (raise-parse-error 'bad-form
+                          "when-not requires at least one body expression: (when-not c body...)")]
+      [_ (parse-list-form* d subs)])))
+
+;; `if-not` — (if-not c t e) → (if c e t).
+(register-combiner! 'if-not
+  (lambda (d subs)
+    (match d
+      [(list 'if-not c then-expr else-expr)
+       (parse-expr (rewrite-as
+                    (list 'if
+                          (or (stx-ref subs 1) c)
+                          (or (stx-ref subs 3) else-expr)
+                          (or (stx-ref subs 2) then-expr))))]
+      [(list 'if-not _ ...)
+       (raise-parse-error 'bad-form
+                          "if-not expects (if-not c then else): three arguments required")]
+      [_ (parse-list-form* d subs)])))
+
+;; Clojure binding-conditional macros — accept-and-canonicalize to the
+;; (let …) (if …) shape via lower-binding-cond. Identity-preserving; malformed
+;; shapes fall through to parse-list-form* exactly as before.
+;;   (if-let    [x v] t e)    → (let [x v] (if x t e))
+;;   (when-let  [x v] body…)  → (let [x v] (if x (do body…)))
+;;   (if-some   [x v] t e)    → (let [x v] (if (not (nil? x)) t e))
+;;   (when-some [x v] body…)  → (let [x v] (if (not (nil? x)) (do body…)))
+(register-combiner! 'if-let
+  (lambda (d subs)
+    (match d
+      [(list 'if-let bindings then-expr else-expr)
+       (parse-expr (rewrite-as
+                    (lower-binding-cond 'if-let
+                                        (or (stx-ref subs 1) bindings)
+                                        (list then-expr else-expr)
+                                        (and subs (stx-tail subs 2)))))]
+      [_ (parse-list-form* d subs)])))
+
+(register-combiner! 'when-let
+  (lambda (d subs)
+    (match d
+      [(list 'when-let bindings body ...)
+       (parse-expr (rewrite-as
+                    (lower-binding-cond 'when-let
+                                        (or (stx-ref subs 1) bindings)
+                                        body
+                                        (and subs (stx-tail subs 2)))))]
+      [_ (parse-list-form* d subs)])))
+
+(register-combiner! 'if-some
+  (lambda (d subs)
+    (match d
+      [(list 'if-some bindings then-expr else-expr)
+       (parse-expr (rewrite-as
+                    (lower-binding-cond 'if-some
+                                        (or (stx-ref subs 1) bindings)
+                                        (list then-expr else-expr)
+                                        (and subs (stx-tail subs 2)))))]
+      [_ (parse-list-form* d subs)])))
+
+(register-combiner! 'when-some
+  (lambda (d subs)
+    (match d
+      [(list 'when-some bindings body ...)
+       (parse-expr (rewrite-as
+                    (lower-binding-cond 'when-some
+                                        (or (stx-ref subs 1) bindings)
+                                        body
+                                        (and subs (stx-tail subs 2)))))]
+      [_ (parse-list-form* d subs)])))
+
+;; --- def family migrated to the compile-time combiner registry ---
+
+;; `def` — top-level binding; inline `:-` type, optional docstring; bare `:`
+;; rejected; any other def shape guarded (no silent call-form bypass).
+(register-combiner! 'def
+  (lambda (d subs)
+    (match d
+      [(list 'def (? symbol? name) ':- type-expr (? string? doc) value)
+       (def-form name (parse-type type-expr)
+                 (parse-expr (or (stx-ref subs 5) value))
+                 doc)]
+      [(list 'def (? symbol? name) ':- type-expr value)
+       (def-form name (parse-type type-expr)
+                 (parse-expr (or (stx-ref subs 4) value))
+                 #f)]
+      ;; Inline bare `:` on def is the legacy surface; reject and point at `:-`.
+      [(list 'def (? symbol? name) ': _ _)
+       (raise-parse-error 'inline-type-annotation
+                          "(def ~a : ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (def ~a :- TYPE VALUE)"
+                          name name)]
+      [(list 'def (? symbol? name) (? string? doc) value)
+       (def-form name #f (parse-expr (or (stx-ref subs 3) value)) doc)]
+      [(list 'def (? symbol? name) value)
+       (def-form name #f (parse-expr (or (stx-ref subs 2) value)) #f)]
+      ;; Any other def shape would fall through to the call-form passthrough
+      ;; and silently bypass the type layer — guard it (bug class 2026-06-12).
+      [(cons 'def _)
+       (raise-parse-error 'bad-form
+                          "malformed def — expected (def NAME VALUE), (def NAME \"doc\" VALUE), (def NAME :- TYPE VALUE), or (def NAME :- TYPE \"doc\" VALUE); got: ~v" d)]
+      [_ (parse-list-form* d subs)])))
+
+;; `defn` / `defn-` — function definition (public/private). These share several
+;; (or 'defn 'defn-) arms, so both heads route to this ONE handler; the arms are
+;; kept in source order (semantically significant), with defn-only and
+;; defn--only arms interleaved exactly as in the legacy match.
+(define (parse-defn-form d subs)
   (match d
-    [(list (or 'unsafe 'unsafe-js 'unsafe-clj 'unsafe-py 'unsafe-rkt 'unsafe-nix 'unsafe-expr) _ ...)
-     (error 'beagle
-            "(~a ...) escape hatches are not available. Beagle has no per-target escape by design — add to stdlib-*.rkt or write a separate target-language file and import it."
-            (car d))]
-
-    ;; Inline `:-` annotations on def/defonce: accepted, populate the type slot.
-    ;; Docstrings (real Clojure def surface) are accepted in both typed and
-    ;; untyped positions and carried to clj/cljs emit.
-    [(list 'def (? symbol? name) ':- type-expr (? string? doc) value)
-     (def-form name (parse-type type-expr)
-               (parse-expr (or (stx-ref subs 5) value))
-               doc)]
-    [(list 'def (? symbol? name) ':- type-expr value)
-     (def-form name (parse-type type-expr)
-               (parse-expr (or (stx-ref subs 4) value))
-               #f)]
-    ;; Inline bare `:` on def is the legacy surface; reject and point at `:-`.
-    [(list 'def (? symbol? name) ': _ _)
-     (raise-parse-error 'inline-type-annotation
-                        "(def ~a : ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (def ~a :- TYPE VALUE)"
-                        name name)]
-    [(list 'def (? symbol? name) (? string? doc) value)
-     (def-form name #f (parse-expr (or (stx-ref subs 3) value)) doc)]
-    [(list 'def (? symbol? name) value)
-     (def-form name #f (parse-expr (or (stx-ref subs 2) value)) #f)]
-    ;; Any other def shape would fall through to the call-form passthrough
-    ;; and silently bypass the type layer — guard it (bug class 2026-06-12).
-    [(cons 'def _)
-     (raise-parse-error 'bad-form
-                        "malformed def — expected (def NAME VALUE), (def NAME \"doc\" VALUE), (def NAME :- TYPE VALUE), or (def NAME :- TYPE \"doc\" VALUE); got: ~v" d)]
-
-    ;; `defonce` success arms migrated to the compile-time combiner registry
-    ;; (see register-combiner!). The guard arm below stays here.
-    [(cons 'defonce _)
-     (raise-parse-error 'bad-form
-                        "malformed defonce — expected (defonce NAME VALUE), (defonce NAME \"doc\" VALUE), or (defonce NAME :- TYPE VALUE); got: ~v" d)]
-
     ;; Docstring on defn/defn- (real Clojure surface): strip it, re-dispatch
     ;; the remaining form through the ordinary arms, then attach the doc to
     ;; the resulting node. Covers single-arity, multi-arity, and ^:private
@@ -2117,23 +2199,1103 @@
      (raise-parse-error 'bad-form
                         "malformed ~a — expected (~a name \"doc\"? [params...] :- RET? body...) or multi-arity (~a name ([params] body...) ([params2] body...)); got: ~v"
                         head head head d)]
+    [_ (parse-list-form* d subs)]))
+(register-combiner! 'defn parse-defn-form)
+(register-combiner! 'defn- parse-defn-form)
 
-    ;; (claim NAME TYPE) is HARD-REJECTED. Beagle's surface is typed Clojure
-    ;; plus inference — type information rides on ordinary bindings via inline
-    ;; `:-` annotations at boundaries. There is no separate type-fact form.
-    ;; This was removed under the Zero-users rule: no transitional alias.
-    [(cons 'claim _)
-     (raise-parse-error 'claim-form-removed
-      (string-append
-       "(claim NAME TYPE) — claim is not a form. Beagle's surface is typed "
-       "Clojure + inference; use inline annotations: "
-       "`(def NAME :- TYPE VALUE)` for top-level bindings, "
-       "`[param :- TYPE]` and `:- RET-TYPE` for defn."))]
+;; `defprotocol` — protocol declaration with method signatures.
+(register-combiner! 'defprotocol
+  (lambda (d subs)
+    (match d
+      [(list 'defprotocol (? symbol? name) sigs ...)
+       (protocol-form name (map parse-protocol-method (or (stx-tail subs 2) sigs)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `defunion` — tagged union; `:throwable` variant routes to deferror-form,
+;; parametric form to parse-parametric-defunion.
+(register-combiner! 'defunion
+  (lambda (d subs)
+    (match d
+      ;; (defunion :throwable Name ...) — throwable variant union.
+      ;; Routes to deferror-form internally (same structural shape; throw/catch
+      ;; semantics live in the type checker's union-as-error logic). Inlined
+      ;; rather than calling parse-deferror because subs offset differs by 1.
+      [(list 'defunion ':throwable (? symbol? name) member-defs ...)
+       (define member-names '())
+       (define mf-hash (make-hasheq))
+       (for ([md (in-list (or (stx-tail subs 3) member-defs))])
+         (define d (->datum md))
+         (cond
+           [(symbol? d)
+            (set! member-names (cons d member-names))
+            (hash-set! mf-hash d '())]
+           [(and (list? d) (>= (length d) 2) (symbol? (car d)))
+            (define mname (car d))
+            (set! member-names (cons mname member-names))
+            (hash-set! mf-hash mname (parse-record-fields (cadr d)))]
+           [else
+            (error 'beagle
+                   "defunion :throwable member must be Symbol or (Name [fields...]): ~v" d)]))
+       (deferror-form name (reverse member-names) mf-hash)]
+
+      [(list 'defunion (? symbol? name) members ...)
+       (define raw (map ->datum (or (stx-tail subs 2) members)))
+       (define mnames (map (lambda (m) (if (pair? m) (car m) m)) raw))
+       (define mf-hash (make-hasheq))
+       (for ([m (in-list raw)])
+         (when (and (pair? m) (>= (length m) 2))
+           (define mname (car m))
+           (define fields-datum (cadr m))
+           (when (and (pair? fields-datum) (eq? (car fields-datum) BRACKET-TAG))
+             (hash-set! mf-hash mname (parse-record-fields fields-datum)))))
+       (defunion-form name mnames '() (if (hash-empty? mf-hash) #f mf-hash))]
+
+      [(list 'defunion (list (? symbol? name) type-vars ...) member-defs ...)
+       (parse-parametric-defunion name type-vars member-defs subs)]
+      [_ (parse-list-form* d subs)])))
+
+;; `deferror` — removed form; pointed rejection naming defunion :throwable.
+(register-combiner! 'deferror
+  (lambda (d subs)
+    (match d
+      [(list 'deferror _ ...)
+       (raise-parse-error 'removed-form
+                          "deferror removed — use (defunion :throwable Name ...) instead")]
+      [_ (parse-list-form* d subs)])))
+
+;; `defmulti` — removed form; pointed rejection naming defprotocol + extend-type.
+(register-combiner! 'defmulti
+  (lambda (d subs)
+    (match d
+      [(list 'defmulti _ ...)
+       (raise-parse-error 'removed-form
+                          "defmulti removed — use defprotocol + extend-type for type-based dispatch")]
+      [_ (parse-list-form* d subs)])))
+
+;; `defmethod` — removed form; pointed rejection naming defprotocol + extend-type.
+(register-combiner! 'defmethod
+  (lambda (d subs)
+    (match d
+      [(list 'defmethod _ ...)
+       (raise-parse-error 'removed-form
+                          "defmethod removed — use defprotocol + extend-type for type-based dispatch")]
+      [_ (parse-list-form* d subs)])))
+
+;; --- control family migrated to the compile-time combiner registry ---
+
+;; `match` — pattern-match dispatch.
+(register-combiner! 'match
+  (lambda (d subs)
+    (match d
+      [(list 'match target-expr clauses ...)
+       (parse-match-form (or (stx-ref subs 1) target-expr)
+                         (or (stx-tail subs 2) clauses))]
+      [_ (parse-list-form* d subs)])))
+
+;; `condp` — predicate-dispatch conditional.
+(register-combiner! 'condp
+  (lambda (d subs)
+    (match d
+      [(list 'condp pred-fn test-expr clauses ...)
+       (parse-condp-form (or (stx-ref subs 1) pred-fn)
+                         (or (stx-ref subs 2) test-expr)
+                         (or (stx-tail subs 3) clauses))]
+      [_ (parse-list-form* d subs)])))
+
+;; `cond->` — conditional thread-first. Desugars to a let-chain / (if …) nodes,
+;; wrapped in threading-marker so the clj/cljs emitter can reconstruct surface.
+(register-combiner! 'cond->
+  (lambda (d subs)
+    (match d
+      [(list 'cond-> init clauses ...)
+       (define orig-stxs (or (and subs (stx-tail subs 1))
+                             (cons init clauses)))
+       (threading-marker
+        'cond->
+        (map parse-expr orig-stxs)
+        (parse-expr (rewrite-as
+                     (expand-cond-thread (or (stx-ref subs 1) init)
+                                         (or (and subs (stx-tail subs 2)) clauses)
+                                         'first))))]
+      [_ (parse-list-form* d subs)])))
+
+;; `cond->>` — conditional thread-last.
+(register-combiner! 'cond->>
+  (lambda (d subs)
+    (match d
+      [(list 'cond->> init clauses ...)
+       (define orig-stxs (or (and subs (stx-tail subs 1))
+                             (cons init clauses)))
+       (threading-marker
+        'cond->>
+        (map parse-expr orig-stxs)
+        (parse-expr (rewrite-as
+                     (expand-cond-thread (or (stx-ref subs 1) init)
+                                         (or (and subs (stx-tail subs 2)) clauses)
+                                         'last))))]
+      [_ (parse-list-form* d subs)])))
+
+;; `as->` — named-binding threading. Success arm + symbol-placeholder rejection.
+(register-combiner! 'as->
+  (lambda (d subs)
+    (match d
+      [(list 'as-> init (? symbol? name) steps ...)
+       (define orig-stxs (or (and subs (stx-tail subs 1))
+                             (cons init (cons name steps))))
+       (threading-marker
+        'as->
+        (map parse-expr orig-stxs)
+        (parse-expr (rewrite-as
+                     (expand-as-thread (or (stx-ref subs 1) init)
+                                       name
+                                       (or (and subs (stx-tail subs 3)) steps)))))]
+      [(list 'as-> _ _ _ ...)
+       (raise-parse-error 'bad-form
+                          "as-> expects a symbol placeholder: (as-> init name steps...)")]
+      [_ (parse-list-form* d subs)])))
+
+;; `some->` — short-circuit thread-first.
+(register-combiner! 'some->
+  (lambda (d subs)
+    (match d
+      [(list 'some-> init steps ...)
+       (define orig-stxs (or (and subs (stx-tail subs 1))
+                             (cons init steps)))
+       (threading-marker
+        'some->
+        (map parse-expr orig-stxs)
+        (parse-expr (rewrite-as
+                     (expand-some-thread (or (stx-ref subs 1) init)
+                                         (or (and subs (stx-tail subs 2)) steps)
+                                         'first))))]
+      [_ (parse-list-form* d subs)])))
+
+;; `some->>` — short-circuit thread-last.
+(register-combiner! 'some->>
+  (lambda (d subs)
+    (match d
+      [(list 'some->> init steps ...)
+       (define orig-stxs (or (and subs (stx-tail subs 1))
+                             (cons init steps)))
+       (threading-marker
+        'some->>
+        (map parse-expr orig-stxs)
+        (parse-expr (rewrite-as
+                     (expand-some-thread (or (stx-ref subs 1) init)
+                                         (or (and subs (stx-tail subs 2)) steps)
+                                         'last))))]
+      [_ (parse-list-form* d subs)])))
+
+;; `recur` — loop/fn tail recursion target.
+(register-combiner! 'recur
+  (lambda (d subs)
+    (match d
+      [(list 'recur args ...)
+       (recur-form (map parse-expr (or (stx-tail subs 1) args)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `get` — literal-key projection canonicalizes to kw-access (2- and 3-arg).
+;; Dynamic-key form (non-literal key) falls through to call-form via legacy.
+(register-combiner! 'get
+  (lambda (d subs)
+    (match d
+      [(list 'get target (? keyword-sym? kw))
+       (kw-access kw (parse-expr (or (stx-ref subs 1) target)) #f)]
+      [(list 'get target (? keyword-sym? kw) default-expr)
+       (kw-access kw
+                  (parse-expr (or (stx-ref subs 1) target))
+                  (parse-expr (or (stx-ref subs 3) default-expr)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `get-or` — Nix attr access with default.
+(register-combiner! 'get-or
+  (lambda (d subs)
+    (match d
+      [(list 'get-or base path-expr default-expr)
+       (nix-get-or (parse-expr (or (stx-ref subs 1) base))
+                   (let ([d (->datum (or (stx-ref subs 2) path-expr))])
+                     (cond
+                       [(symbol? d) (symbol->string d)]
+                       [(and (pair? d) (eq? (car d) 'quote) (pair? (cdr d)))
+                        (symbol->string (cadr d))]
+                       [else (format "~a" d)]))
+                   (parse-expr (or (stx-ref subs 3) default-expr)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `has` — removed 2026-06-12 (zero corpus hits). Pointed rejection at contains?.
+(register-combiner! 'has
+  (lambda (d subs)
+    (match d
+      [(list 'has _ _)
+       (raise-parse-error 'removed-form
+                          "(has m :k) — `has` is removed. Use `(contains? m :k)` (Clojure spelling; lowers to hasAttr on nix)."
+                          #:suggestion (replace-head-suggestion 'has 'contains?))]
+      [_ (parse-list-form* d subs)])))
+
+;; `implies` — removed as part of the pipe family. Pointed rejection.
+(register-combiner! 'implies
+  (lambda (d subs)
+    (match d
+      [(list 'implies _ ...)
+       (raise-parse-error 'legacy-pipe-form
+                          "(implies …) — removed as part of the pipe family. Use `(if a b true)` for logical implication, or `(or (not a) b)`.")]
+      [_ (parse-list-form* d subs)])))
+
+;; `assert` — bare `assert` HARD-REJECTED; canonical Nix form is `nix/assert`.
+(register-combiner! 'assert
+  (lambda (d subs)
+    (match d
+      [(list 'assert _ _)
+       (raise-parse-error 'bare-nix-form
+                          "(assert ...) — bare `assert` is not supported. Beagle namespaces target-specific forms; use `(nix/assert COND BODY)`."
+                          #:suggestion (replace-head-suggestion 'assert 'nix/assert))]
+      [_ (parse-list-form* d subs)])))
+
+;; `rescue` — error-handling expression; named-handler and fallback shapes.
+(register-combiner! 'rescue
+  (lambda (d subs)
+    (match d
+      [(list 'rescue expr (? symbol? err-name) handler)
+       (rescue-form (parse-expr (or (stx-ref subs 1) expr))
+                    (parse-expr (or (stx-ref subs 3) handler))
+                    err-name)]
+      [(list 'rescue expr fallback)
+       (rescue-form (parse-expr (or (stx-ref subs 1) expr))
+                    (parse-expr (or (stx-ref subs 2) fallback))
+                    #f)]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/await` — JS-async await (namespaced).
+(register-combiner! 'js/await
+  (lambda (d subs)
+    (match d
+      [(list 'js/await inner)
+       (await-form (parse-expr (or (stx-ref subs 1) inner)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `await` — bare `await` rejected with a pointed migration message to js/await.
+(register-combiner! 'await
+  (lambda (d subs)
+    (match d
+      [(list 'await _)
+       (raise-parse-error 'bare-js-form
+                          "(await ...) — bare `await` is not supported. Beagle namespaces target-specific forms; use `(js/await EXPR)`."
+                          #:suggestion (replace-head-suggestion 'await 'js/await))]
+      [_ (parse-list-form* d subs)])))
+
+;; `fmt` — removed 2026-06-12 (zero corpus hits; not Clojure). Pointed rejection.
+(register-combiner! 'fmt
+  (lambda (d subs)
+    (match d
+      [(list 'fmt _ ...)
+       (raise-parse-error 'removed-form
+                          "(fmt \"... ${x} ...\") — `fmt` is removed. Use `(str \"... \" x \" ...\")` or `(format \"... %s ...\" x)`.")]
+      [_ (parse-list-form* d subs)])))
+
+;; `ms` — Nix multi-line string.
+(register-combiner! 'ms
+  (lambda (d subs)
+    (match d
+      [(list 'ms lines ...)
+       (nix-multiline-string
+        (map (lambda (line)
+               (define d (->datum line))
+               (if (string? d) d (parse-expr line)))
+             (or (stx-tail subs 1) lines)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `check` — check-expr wrapper.
+(register-combiner! 'check
+  (lambda (d subs)
+    (match d
+      [(list 'check expr)
+       (check-expr (parse-expr (or (stx-ref subs 1) expr)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `claim` — HARD-REJECTED; claim is not a form (use inline `:-` annotations).
+(register-combiner! 'claim
+  (lambda (d subs)
+    (match d
+      [(cons 'claim _)
+       (raise-parse-error 'claim-form-removed
+        (string-append
+         "(claim NAME TYPE) — claim is not a form. Beagle's surface is typed "
+         "Clojure + inference; use inline annotations: "
+         "`(def NAME :- TYPE VALUE)` for top-level bindings, "
+         "`[param :- TYPE]` and `:- RET-TYPE` for defn."))]
+      [_ (parse-list-form* d subs)])))
+
+;; `dotimes` — removed; sugar for (doseq [i (range n)] body...). Pointed rejection.
+(register-combiner! 'dotimes
+  (lambda (d subs)
+    (match d
+      [(list 'dotimes _ ...)
+       (raise-parse-error 'removed-form
+                          "dotimes removed — use (doseq [i (range n)] body...)")]
+      [_ (parse-list-form* d subs)])))
+
+;; --- module family migrated to the compile-time combiner registry ---
+
+;; `unsafe` (+ unsafe-js/-clj/-py/-rkt/-nix/-expr) — shared (or …) rejection arm
+;; migrated to the compile-time combiner registry (see register-combiner!).
+(define (unsafe-family-combiner d subs)
+  (match d
+    [(list (or 'unsafe 'unsafe-js 'unsafe-clj 'unsafe-py 'unsafe-rkt 'unsafe-nix 'unsafe-expr) _ ...)
+     (error 'beagle
+            "(~a ...) escape hatches are not available. Beagle has no per-target escape by design — add to stdlib-*.rkt or write a separate target-language file and import it."
+            (car d))]
+    [_ (parse-list-form* d subs)]))
+(register-combiner! 'unsafe        unsafe-family-combiner)
+(register-combiner! 'unsafe-js     unsafe-family-combiner)
+(register-combiner! 'unsafe-clj    unsafe-family-combiner)
+(register-combiner! 'unsafe-py     unsafe-family-combiner)
+(register-combiner! 'unsafe-rkt    unsafe-family-combiner)
+(register-combiner! 'unsafe-nix    unsafe-family-combiner)
+(register-combiner! 'unsafe-expr   unsafe-family-combiner)
+
+;; `inherit` — Nix `inherit name…` migrated to the combiner registry.
+(register-combiner! 'inherit
+  (lambda (d subs)
+    (match d
+      [(list 'inherit names ...)
+       (nix-inherit (map (lambda (n)
+                           (define d (->datum n))
+                           (if (symbol? d) d (error 'beagle "inherit: expected symbol, got ~v" d)))
+                         (or (stx-tail subs 1) names)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `inherit-from` — Nix `inherit (ns) name…` migrated to the combiner registry.
+(register-combiner! 'inherit-from
+  (lambda (d subs)
+    (match d
+      [(list 'inherit-from ns-expr names ...)
+       (nix-inherit-from (parse-expr (or (stx-ref subs 1) ns-expr))
+                         (map (lambda (n)
+                                (define d (->datum n))
+                                (if (symbol? d) d (error 'beagle "inherit-from: expected symbol, got ~v" d)))
+                              (or (stx-tail subs 2) names)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `rec-attrs` — Nix recursive attrset migrated to the combiner registry.
+(register-combiner! 'rec-attrs
+  (lambda (d subs)
+    (match d
+      [(list 'rec-attrs pairs ...)
+       (nix-rec-attrs (parse-nix-rec-pairs (or (stx-tail subs 1) pairs)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `search-path` — Nix `<name>` search-path migrated to the combiner registry.
+(register-combiner! 'search-path
+  (lambda (d subs)
+    (match d
+      [(list 'search-path name-expr)
+       (define d (->datum (or (stx-ref subs 1) name-expr)))
+       (nix-search-path (cond
+                          [(symbol? d) (symbol->string d)]
+                          [(string? d) d]
+                          [else (error 'beagle "search-path: expected symbol or string, got ~v" d)]))]
+      [_ (parse-list-form* d subs)])))
+
+;; `module` — bare `module` HARD-REJECT (use `nix/module`) migrated to the
+;; combiner registry. NOTE: `nix/module` is a DIFFERENT head and stays put.
+(register-combiner! 'module
+  (lambda (d subs)
+    (match d
+      [(list 'module _ _)
+       (raise-parse-error 'bare-nix-form
+                          "(module ...) — bare `module` is not supported. Beagle namespaces target-specific forms; use `(nix/module FORMALS BODY)`."
+                          #:suggestion (replace-head-suggestion 'module 'nix/module))]
+      [_ (parse-list-form* d subs)])))
+
+;; `pipe-to` — removed pipe family; HARD-REJECT (use `->`). Migrated to registry.
+(register-combiner! 'pipe-to
+  (lambda (d subs)
+    (match d
+      [(list 'pipe-to _ ...)
+       (raise-parse-error 'legacy-pipe-form
+                          "(pipe-to …) — the pipe family is removed. Use `(-> x f …)` for thread-first.")]
+      [_ (parse-list-form* d subs)])))
+
+;; `pipe-from` — removed pipe family; HARD-REJECT (use `->>`). Migrated to registry.
+(register-combiner! 'pipe-from
+  (lambda (d subs)
+    (match d
+      [(list 'pipe-from _ ...)
+       (raise-parse-error 'legacy-pipe-form
+                          "(pipe-from …) — the pipe family is removed. Use `(->> x f …)` for thread-last.")]
+      [_ (parse-list-form* d subs)])))
+
+;; `unquote` — `,` outside quasiquote; HARD-REJECT. Migrated to the registry.
+(register-combiner! 'unquote
+  (lambda (d subs)
+    (match d
+      [(list 'unquote _ ...)
+       (raise-parse-error 'unknown-form
+                          "unquote (`,`) outside quasiquote — `,x` is only valid inside a `` `…`` template in a defmacro body")]
+      [_ (parse-list-form* d subs)])))
+
+;; `unquote-splicing` — `,@` outside quasiquote; HARD-REJECT. Migrated to registry.
+(register-combiner! 'unquote-splicing
+  (lambda (d subs)
+    (match d
+      [(list 'unquote-splicing _ ...)
+       (raise-parse-error 'unknown-form
+                          "unquote-splicing (`,@`) outside quasiquote — `,@x` is only valid inside a `` `…`` template in a defmacro body")]
+      [_ (parse-list-form* d subs)])))
+
+;; `quasiquote` — `` ` `` outside defmacro body; HARD-REJECT. Migrated to registry.
+(register-combiner! 'quasiquote
+  (lambda (d subs)
+    (match d
+      [(list 'quasiquote _ ...)
+       (raise-parse-error 'unknown-form
+                          "quasiquote (`` ` ``) outside defmacro body — beagle's quasiquote is macro-template-only; use literal data containers (`'[…]` / `'{…}` / `'(…)`) for inert data construction")]
+      [_ (parse-list-form* d subs)])))
+
+;; --- nix family migrated to the compile-time combiner registry ---
+
+;; `flake-input` — typed access to flake-input attribute paths.
+(register-combiner! 'flake-input
+  (lambda (d subs)
+    (match d
+      [(list 'flake-input input-name namespace rest ...)
+       (unless (keyword-sym? input-name)
+         (error 'beagle
+                "flake-input: input-name must be a keyword (e.g. :quickshell), got ~v"
+                input-name))
+       (unless (keyword-sym? namespace)
+         (error 'beagle
+                "flake-input: namespace must be a keyword (e.g. :packages or :legacyPackages), got ~v"
+                namespace))
+       ;; Use rest (raw datum from match destructuring) rather than stx-tail —
+       ;; segments are bare symbols, no source-location preservation needed.
+       (for ([s (in-list rest)])
+         (unless (or (keyword-sym? s) (symbol? s))
+           (error 'beagle
+                  "flake-input: path segment must be keyword or symbol, got ~v" s)))
+       (flake-input-form input-name namespace rest)]
+      [_ (parse-list-form* d subs)])))
+
+;; `nix/assert` — canonical Nix assertion form.
+(register-combiner! 'nix/assert
+  (lambda (d subs)
+    (match d
+      [(list 'nix/assert cond-expr body-expr)
+       ;; Canonical Nix assertion form. Bare `(assert ...)` is HARD-REJECTED —
+       ;; see the bare-`assert` arm below.
+       (nix-assert (parse-expr (or (stx-ref subs 1) cond-expr))
+                   (parse-expr (or (stx-ref subs 2) body-expr)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `nix/with-cfg` — config-path scoped let-binding form.
+(register-combiner! 'nix/with-cfg
+  (lambda (d subs)
+    (match d
+      [(list 'nix/with-cfg path-expr body-expr)
+       ;; (nix/with-cfg config.myConfig.modules.X BODY) → introduces `cfg = config...;`
+       ;; let-binding and rewrites config.myConfig.modules.X.foo to cfg.foo in BODY.
+       ;; Bare `(with-cfg ...)` is HARD-REJECTED — see the bare-`with-cfg` arm below.
+       (nix-with-cfg (parse-expr (or (stx-ref subs 1) path-expr))
+                     (parse-expr (or (stx-ref subs 2) body-expr)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `with-cfg` — bare form HARD-REJECTED; point at `nix/with-cfg`.
+(register-combiner! 'with-cfg
+  (lambda (d subs)
+    (match d
+      [(list 'with-cfg _ _)
+       (raise-parse-error 'bare-nix-form
+                          "(with-cfg ...) — bare `with-cfg` is not supported. Beagle namespaces target-specific forms; use `(nix/with-cfg PATH BODY)`."
+                          #:suggestion (replace-head-suggestion 'with-cfg 'nix/with-cfg))]
+      [_ (parse-list-form* d subs)])))
+
+;; `nix/fn-set` — attrset-destructuring lambda: { a, b }: body
+(register-combiner! 'nix/fn-set
+  (lambda (d subs)
+    (match d
+      [(list 'nix/fn-set formals body-expr)
+       (define-values (fl at-name)
+         (parse-nix-fn-set-formals (or (stx-ref subs 1) formals)))
+       (nix-fn-set fl #f at-name (parse-expr (or (stx-ref subs 2) body-expr)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `fn-set` — bare form HARD-REJECTED; point at `nix/fn-set`.
+(register-combiner! 'fn-set
+  (lambda (d subs)
+    (match d
+      [(list 'fn-set _ _)
+       (raise-parse-error 'bare-nix-form
+                          "(fn-set ...) — bare `fn-set` is not supported. Beagle namespaces target-specific forms; use `(nix/fn-set FORMALS BODY)`."
+                          #:suggestion (replace-head-suggestion 'fn-set 'nix/fn-set))]
+      [_ (parse-list-form* d subs)])))
+
+;; `nix/module` — NixOS module / open-attrs lambda: { a, b, ... }: body
+(register-combiner! 'nix/module
+  (lambda (d subs)
+    (match d
+      [(list 'nix/module formals body-expr)
+       ;; NixOS module / open-attrs lambda: { a, b, ... }: body
+       (define-values (fl at-name)
+         (parse-nix-fn-set-formals (or (stx-ref subs 1) formals)))
+       (nix-fn-set fl #t at-name (parse-expr (or (stx-ref subs 2) body-expr)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `nix/overlay` — final: prev: body (curried, NOT attrset-destructure).
+(register-combiner! 'nix/overlay
+  (lambda (d subs)
+    (match d
+      [(list 'nix/overlay formals body-expr)
+       ;; Nix overlay: final: prev: body (curried — NOT attrset-destructure)
+       ;; Emits as fn-form so the nix emitter produces `final: prev: body`.
+       (define-values (f-list _at-name)
+         (parse-nix-fn-set-formals (or (stx-ref subs 1) formals)))
+       (unless (= (length f-list) 2)
+         (error 'beagle "nix/overlay: expected exactly two formals [final prev], got ~a" (length f-list)))
+       (define ps
+         (for/list ([f (in-list f-list)])
+           (param (nix-fn-set-formal-name f) #f)))
+       (fn-form ps #f #f
+                (list (parse-expr (or (stx-ref subs 2) body-expr))))]
+      [_ (parse-list-form* d subs)])))
+
+;; `overlay` — bare form HARD-REJECTED; point at `nix/overlay`.
+(register-combiner! 'overlay
+  (lambda (d subs)
+    (match d
+      [(list 'overlay _ _)
+       (raise-parse-error 'bare-nix-form
+                          "(overlay ...) — bare `overlay` is not supported. Beagle namespaces target-specific forms; use `(nix/overlay [final prev] BODY)`."
+                          #:suggestion (replace-head-suggestion 'overlay 'nix/overlay))]
+      [_ (parse-list-form* d subs)])))
+
+;; `nix/derivation` — mkDerivation sugar.
+(register-combiner! 'nix/derivation
+  (lambda (d subs)
+    (match d
+      [(list 'nix/derivation attrs-expr)
+       ;; mkDerivation sugar: (nix/derivation {:pname ... :version ... :src ...})
+       ;; Emits as `(pkgs.stdenv.mkDerivation { ... })`. Use `:builder pkg` to
+       ;; override the default stdenv (e.g. :builder pkgs.runCommand).
+       (define attrs (parse-expr (or (stx-ref subs 1) attrs-expr)))
+       (nix-derivation attrs)]
+      [_ (parse-list-form* d subs)])))
+
+;; `derivation` — bare form HARD-REJECTED; point at `nix/derivation`.
+(register-combiner! 'derivation
+  (lambda (d subs)
+    (match d
+      [(list 'derivation _)
+       (raise-parse-error 'bare-nix-form
+                          "(derivation ...) — bare `derivation` is not supported. Beagle namespaces target-specific forms; use `(nix/derivation ATTRS)`."
+                          #:suggestion (replace-head-suggestion 'derivation 'nix/derivation))]
+      [_ (parse-list-form* d subs)])))
+
+;; `nix/flake` — flake.nix sugar.
+(register-combiner! 'nix/flake
+  (lambda (d subs)
+    (match d
+      [(list 'nix/flake attrs-expr)
+       ;; flake.nix sugar: (nix/flake {:description ... :inputs {...} :outputs (nix/fn-set [self nixpkgs] ...)})
+       (define attrs (parse-expr (or (stx-ref subs 1) attrs-expr)))
+       (nix-flake attrs)]
+      [_ (parse-list-form* d subs)])))
+
+;; `flake` — bare form HARD-REJECTED; point at `nix/flake`.
+(register-combiner! 'flake
+  (lambda (d subs)
+    (match d
+      [(list 'flake _)
+       (raise-parse-error 'bare-nix-form
+                          "(flake ...) — bare `flake` is not supported. Beagle namespaces target-specific forms; use `(nix/flake ATTRS)`."
+                          #:suggestion (replace-head-suggestion 'flake 'nix/flake))]
+      [_ (parse-list-form* d subs)])))
+
+;; `nix/with` — canonical Nix scope form.
+(register-combiner! 'nix/with
+  (lambda (d subs)
+    (match d
+      [(list 'nix/with ns-expr body-expr)
+       ;; Canonical Nix scope form. Unambiguous (no record-update shape collision).
+       ;; Bare `(with ns body)` Nix-scope shape is HARD-REJECTED — see the
+       ;; bare-`with` arm below.
+       (nix-with (parse-expr (or (stx-ref subs 1) ns-expr))
+                 (parse-expr (or (stx-ref subs 2) body-expr)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `with` — record update (with-form) STAYS bare; Nix-scope shape HARD-REJECTED.
+(register-combiner! 'with
+  (lambda (d subs)
+    (match d
+      [(list 'with target-expr updates ...)
+       ;; (with target [:k v] [:k v] ...) — record update (with-form). STAYS bare;
+       ;;   not a Clojure collision.
+       ;; (with ns body) — Nix scope shape. HARD-REJECTED — point at `nix/with`.
+       ;; Disambiguate by shape: the record-update form has every update as a
+       ;; [:keyword value ...] bracket; anything else is the (removed) Nix-scope
+       ;; shape and gets the migration pointer.
+       (cond
+         [(and (= (length updates) 1)
+               (let ([d (->datum (car updates))])
+                 (not (and (bracketed? d)
+                           (>= (length (bracket-body d)) 2)
+                           (let ([first (car (bracket-body d))])
+                             (and (symbol? first) (keyword-sym? first)))))))
+          ;; Bare `(with ns body)` Nix-scope shape — hard reject.
+          (raise-parse-error 'bare-nix-form
+                             "(with NS BODY) — bare Nix-scope `with` is not supported. Beagle namespaces target-specific forms; use `(nix/with NS BODY)`.")]
+         [else
+          (parse-with-form (or (stx-ref subs 1) target-expr)
+                           (or (stx-tail subs 2) updates))])]
+      [_ (parse-list-form* d subs)])))
+
+;; `nix-ident` — removed form; pointed rejection at flake-input.
+(register-combiner! 'nix-ident
+  (lambda (d subs)
+    (match d
+      [(list 'nix-ident _ ...)
+       (raise-parse-error 'removed-form
+                          "nix-ident removed — use (flake-input :NAME :NAMESPACE :path ...) for flake-input access. nix-ident was an undocumented escape hatch that bypassed the type system.")]
+      [_ (parse-list-form* d subs)])))
+
+;; --- js family migrated to the compile-time combiner registry ---
+;; NOTE: `js/await` was already registered by the control family; skipped here.
+
+;; `js/quote` migrated to the compile-time combiner registry (see register-combiner!).
+(register-combiner! 'js/quote
+  (lambda (d subs)
+    (match d
+      [(cons 'js/quote body)
+       (js-quote-form (parse-js-ast-body (or (stx-tail subs 1) body)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/return` migrated to the compile-time combiner registry (see register-combiner!).
+(register-combiner! 'js/return
+  (lambda (d subs)
+    (match d
+      [(list 'js/return)
+       (jst-return #f)]
+      [(list 'js/return expr-form)
+       (jst-return (parse-expr expr-form))]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/class` migrated to the compile-time combiner registry (see register-combiner!).
+(register-combiner! 'js/class
+  (lambda (d subs)
+    (match d
+      [(list* 'js/class name-form rest)
+       (parse-jst-class name-form rest)]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/template` migrated to the compile-time combiner registry (see register-combiner!).
+(register-combiner! 'js/template
+  (lambda (d subs)
+    (match d
+      [(cons 'js/template parts)
+       (jst-template (map (lambda (p)
+                            (define v (->datum p))
+                            (if (string? v) v (parse-expr p)))
+                          (cdr d)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/spread` migrated to the compile-time combiner registry (see register-combiner!).
+(register-combiner! 'js/spread
+  (lambda (d subs)
+    (match d
+      [(list 'js/spread expr-form)
+       (jst-spread (parse-expr expr-form))]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/typeof` migrated to the compile-time combiner registry (see register-combiner!).
+(register-combiner! 'js/typeof
+  (lambda (d subs)
+    (match d
+      [(list 'js/typeof expr-form)
+       (jst-typeof (parse-expr expr-form))]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/import-meta` migrated to the compile-time combiner registry (see register-combiner!).
+(register-combiner! 'js/import-meta
+  (lambda (d subs)
+    (match d
+      [(list 'js/import-meta)
+       (jst-import-meta)]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/export` migrated to the compile-time combiner registry (see register-combiner!).
+(register-combiner! 'js/export
+  (lambda (d subs)
+    (match d
+      [(list 'js/export inner-form)
+       (define inner (parse-expr inner-form))
+       (cond
+         [(jst-class? inner) (struct-copy jst-class inner [export? #t])]
+         [else (jst-export inner)])]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/export-default` migrated to the compile-time combiner registry (see register-combiner!).
+(register-combiner! 'js/export-default
+  (lambda (d subs)
+    (match d
+      [(list 'js/export-default inner-form)
+       (jst-export-default (parse-expr inner-form))]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/!` migrated to the compile-time combiner registry (see register-combiner!).
+(register-combiner! 'js/!
+  (lambda (d subs)
+    (match d
+      [(list 'js/! expr-form)
+       (jst-unary '! (parse-expr expr-form))]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/void` migrated to the compile-time combiner registry (see register-combiner!).
+(register-combiner! 'js/void
+  (lambda (d subs)
+    (match d
+      [(list 'js/void expr-form)
+       (jst-unary 'void (parse-expr expr-form))]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/-` and `js/+` share one arm (see register-combiner!): both register to this
+;; handler, which keeps the (or 'js/- 'js/+) pattern. The shared arm is deleted once.
+(register-combiner! 'js/-
+  (lambda (d subs)
+    (match d
+      [(list (and op (or 'js/- 'js/+)) expr-form)
+       (define js-op (if (eq? op 'js/-) '- '+))
+       (jst-unary js-op (parse-expr expr-form))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'js/+
+  (lambda (d subs)
+    (match d
+      [(list (and op (or 'js/- 'js/+)) expr-form)
+       (define js-op (if (eq? op 'js/-) '- '+))
+       (jst-unary js-op (parse-expr expr-form))]
+      [_ (parse-list-form* d subs)])))
+
+;; --- SQL-specific forms (migrated to the compile-time combiner registry) ---
+;; All SQL surface forms are namespaced under `sql/` per audit row 6
+;; ("Prefix where meaning diverges"). Bare forms are rejected with
+;; pointed migration messages.
+
+(register-combiner! 'sql/deftable
+  (lambda (d subs)
+    (match d
+      [(list 'sql/deftable (? symbol? name) fields-form)
+       (sql-table name (parse-sql-columns (or (stx-ref subs 2) fields-form)))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'deftable
+  (lambda (d subs)
+    (match d
+      [(list 'deftable _ _)
+       (raise-parse-error 'bare-sql-form
+                          "(deftable ...) — bare `deftable` is not supported. Beagle namespaces target-specific forms; use `(sql/deftable NAME FIELDS)`.")]
+      [_ (parse-list-form* d subs)])))
+
+(register-combiner! 'sql/select
+  (lambda (d subs)
+    (match d
+      [(cons 'sql/select rest)
+       (parse-sql-select (or (stx-tail subs 1) rest) subs #f)]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'select
+  (lambda (d subs)
+    (match d
+      [(cons 'select _)
+       (raise-parse-error 'bare-sql-form
+                          "(select ...) — bare `select` is not supported. Beagle namespaces target-specific forms; use `(sql/select COLS CLAUSES...)`.")]
+      [_ (parse-list-form* d subs)])))
+
+(register-combiner! 'sql/select-distinct
+  (lambda (d subs)
+    (match d
+      [(cons 'sql/select-distinct rest)
+       (parse-sql-select (or (stx-tail subs 1) rest) subs #t)]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'select-distinct
+  (lambda (d subs)
+    (match d
+      [(cons 'select-distinct _)
+       (raise-parse-error 'bare-sql-form
+                          "(select-distinct ...) — bare `select-distinct` is not supported. Beagle namespaces target-specific forms; use `(sql/select-distinct COLS CLAUSES...)`.")]
+      [_ (parse-list-form* d subs)])))
+
+(register-combiner! 'sql/with
+  (lambda (d subs)
+    (match d
+      [(cons 'sql/with rest)
+       #:when (and (pair? rest)
+                   (pair? (car rest))
+                   (let ([first-cte (car rest)])
+                     (and (symbol? (car first-cte))
+                          (pair? (cdr first-cte))
+                          (pair? (cadr first-cte)))))
+       (parse-sql-with (or (stx-tail subs 1) rest))]
+      [_ (parse-list-form* d subs)])))
+
+(register-combiner! 'sql/union
+  (lambda (d subs)
+    (match d
+      [(list 'sql/union left right)
+       (sql-union 'union (parse-sql-top-form left) (parse-sql-top-form right))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'sql/union-all
+  (lambda (d subs)
+    (match d
+      [(list 'sql/union-all left right)
+       (sql-union 'union-all (parse-sql-top-form left) (parse-sql-top-form right))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'sql/intersect
+  (lambda (d subs)
+    (match d
+      [(list 'sql/intersect left right)
+       (sql-union 'intersect (parse-sql-top-form left) (parse-sql-top-form right))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'sql/except
+  (lambda (d subs)
+    (match d
+      [(list 'sql/except left right)
+       (sql-union 'except (parse-sql-top-form left) (parse-sql-top-form right))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'union
+  (lambda (d subs)
+    (match d
+      [(list 'union _ _)
+       (raise-parse-error 'bare-sql-form
+                          "(union ...) — bare `union` is not supported. Beagle namespaces target-specific forms; use `(sql/union LEFT RIGHT)`.")]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'union-all
+  (lambda (d subs)
+    (match d
+      [(list 'union-all _ _)
+       (raise-parse-error 'bare-sql-form
+                          "(union-all ...) — bare `union-all` is not supported. Beagle namespaces target-specific forms; use `(sql/union-all LEFT RIGHT)`.")]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'intersect
+  (lambda (d subs)
+    (match d
+      [(list 'intersect _ _)
+       (raise-parse-error 'bare-sql-form
+                          "(intersect ...) — bare `intersect` is not supported. Beagle namespaces target-specific forms; use `(sql/intersect LEFT RIGHT)`.")]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'except
+  (lambda (d subs)
+    (match d
+      [(list 'except _ _)
+       (raise-parse-error 'bare-sql-form
+                          "(except ...) — bare `except` is not supported. Beagle namespaces target-specific forms; use `(sql/except LEFT RIGHT)`.")]
+      [_ (parse-list-form* d subs)])))
+
+(register-combiner! 'sql/insert
+  (lambda (d subs)
+    (match d
+      [(list 'sql/insert (? symbol? table) cols-form (cons 'values rows))
+       (define values-subs (and subs (stx-subs (stx-ref subs 3))))
+       (sql-insert table
+                   (parse-sql-column-names (or (stx-ref subs 2) cols-form))
+                   (map (lambda (r) (parse-sql-values-row r))
+                        (or (stx-tail values-subs 1) rows)))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'insert
+  (lambda (d subs)
+    (match d
+      [(list 'insert _ _ (cons 'values _))
+       (raise-parse-error 'bare-sql-form
+                          "(insert ...) — bare `insert` is not supported. Beagle namespaces target-specific forms; use `(sql/insert TABLE COLS (values ROWS...))`.")]
+      [_ (parse-list-form* d subs)])))
+
+(register-combiner! 'sql/update
+  (lambda (d subs)
+    (match d
+      [(list 'sql/update (? symbol? table) set-form rest ...)
+       #:when (and (pair? set-form) (eq? (car set-form) 'set))
+       (sql-update table
+                   (parse-sql-set-pairs (or (stx-ref subs 2) set-form))
+                   (parse-sql-where-clause (or (stx-tail subs 3) rest)))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'update
+  (lambda (d subs)
+    (match d
+      [(list 'update _ set-form _ ...)
+       #:when (and (pair? set-form) (eq? (car set-form) 'set))
+       (raise-parse-error 'bare-sql-form
+                          "(update ...) — bare `update` is not supported. Beagle namespaces target-specific forms; use `(sql/update TABLE (set ...) (where ...))`.")]
+      [_ (parse-list-form* d subs)])))
+
+(register-combiner! 'sql/delete
+  (lambda (d subs)
+    (match d
+      [(list 'sql/delete (? symbol? table) rest ...)
+       (sql-delete table
+                   (parse-sql-where-clause (or (stx-tail subs 2) rest)))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'delete
+  (lambda (d subs)
+    (match d
+      [(list 'delete (? symbol? _) _ ...)
+       (raise-parse-error 'bare-sql-form
+                          "(delete ...) — bare `delete` is not supported. Beagle namespaces target-specific forms; use `(sql/delete TABLE (where ...))`.")]
+      [_ (parse-list-form* d subs)])))
+
+;; INSERT...SELECT: (sql/insert-select table [cols] (sql/select ...))
+(register-combiner! 'sql/insert-select
+  (lambda (d subs)
+    (match d
+      [(list 'sql/insert-select (? symbol? table) cols-form query-form)
+       (sql-insert-select table
+                          (parse-sql-column-names (or (stx-ref subs 2) cols-form))
+                          (parse-sql-top-form query-form))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'insert-select
+  (lambda (d subs)
+    (match d
+      [(list 'insert-select _ _ _)
+       (raise-parse-error 'bare-sql-form
+                          "(insert-select ...) — bare `insert-select` is not supported. Beagle namespaces target-specific forms; use `(sql/insert-select TABLE COLS QUERY)`.")]
+      [_ (parse-list-form* d subs)])))
+
+;; RETURNING: (sql/returning stmt [cols])
+(register-combiner! 'sql/returning
+  (lambda (d subs)
+    (match d
+      [(list 'sql/returning stmt-form cols-form)
+       (define stmt-d (->datum stmt-form))
+       (define inner-stmt
+         (cond
+           [(and (pair? stmt-d) (memq (car stmt-d) '(sql/insert sql/update sql/delete)))
+            (parse-list-form stmt-d #f)]
+           [else (error 'beagle "sql/returning: inner statement must be sql/insert/sql/update/sql/delete")]))
+       (sql-returning inner-stmt
+                      (parse-sql-column-names (or (stx-ref subs 2) cols-form)))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'returning
+  (lambda (d subs)
+    (match d
+      [(list 'returning _ _)
+       (raise-parse-error 'bare-sql-form
+                          "(returning ...) — bare `returning` is not supported. Beagle namespaces target-specific forms; use `(sql/returning STMT COLS)`.")]
+      [_ (parse-list-form* d subs)])))
+
+;; CREATE INDEX: (sql/create-index name table [cols])
+(register-combiner! 'sql/create-index
+  (lambda (d subs)
+    (match d
+      [(list 'sql/create-index (? symbol? name) (? symbol? table) cols-form)
+       (sql-create-index #f name table
+                         (parse-sql-column-names (or (stx-ref subs 3) cols-form)))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'sql/create-unique-index
+  (lambda (d subs)
+    (match d
+      [(list 'sql/create-unique-index (? symbol? name) (? symbol? table) cols-form)
+       (sql-create-index #t name table
+                         (parse-sql-column-names (or (stx-ref subs 3) cols-form)))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'create-index
+  (lambda (d subs)
+    (match d
+      [(list 'create-index _ _ _)
+       (raise-parse-error 'bare-sql-form
+                          "(create-index ...) — bare `create-index` is not supported. Beagle namespaces target-specific forms; use `(sql/create-index NAME TABLE COLS)`.")]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'create-unique-index
+  (lambda (d subs)
+    (match d
+      [(list 'create-unique-index _ _ _)
+       (raise-parse-error 'bare-sql-form
+                          "(create-unique-index ...) — bare `create-unique-index` is not supported. Beagle namespaces target-specific forms; use `(sql/create-unique-index NAME TABLE COLS)`.")]
+      [_ (parse-list-form* d subs)])))
+
+;; DROP TABLE: (sql/drop-table name) or (sql/drop-table-if-exists name)
+(register-combiner! 'sql/drop-table
+  (lambda (d subs)
+    (match d
+      [(list 'sql/drop-table (? symbol? name))
+       (sql-drop-table name #f)]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'sql/drop-table-if-exists
+  (lambda (d subs)
+    (match d
+      [(list 'sql/drop-table-if-exists (? symbol? name))
+       (sql-drop-table name #t)]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'drop-table
+  (lambda (d subs)
+    (match d
+      [(list 'drop-table _)
+       (raise-parse-error 'bare-sql-form
+                          "(drop-table ...) — bare `drop-table` is not supported. Beagle namespaces target-specific forms; use `(sql/drop-table NAME)`.")]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'drop-table-if-exists
+  (lambda (d subs)
+    (match d
+      [(list 'drop-table-if-exists _)
+       (raise-parse-error 'bare-sql-form
+                          "(drop-table-if-exists ...) — bare `drop-table-if-exists` is not supported. Beagle namespaces target-specific forms; use `(sql/drop-table-if-exists NAME)`.")]
+      [_ (parse-list-form* d subs)])))
+
+;; ALTER TABLE: (sql/alter-table name (add-column col-def)) etc.
+(register-combiner! 'sql/alter-table
+  (lambda (d subs)
+    (match d
+      [(list 'sql/alter-table (? symbol? table) action-form)
+       (sql-alter-table table (->datum action-form))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'alter-table
+  (lambda (d subs)
+    (match d
+      [(list 'alter-table _ _)
+       (raise-parse-error 'bare-sql-form
+                          "(alter-table ...) — bare `alter-table` is not supported. Beagle namespaces target-specific forms; use `(sql/alter-table TABLE ACTION)`.")]
+      [_ (parse-list-form* d subs)])))
+
+;; TRUNCATE: (sql/truncate table)
+(register-combiner! 'sql/truncate
+  (lambda (d subs)
+    (match d
+      [(list 'sql/truncate (? symbol? table))
+       (sql-truncate table)]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'truncate
+  (lambda (d subs)
+    (match d
+      [(list 'truncate _)
+       (raise-parse-error 'bare-sql-form
+                          "(truncate ...) — bare `truncate` is not supported. Beagle namespaces target-specific forms; use `(sql/truncate TABLE)`.")]
+      [_ (parse-list-form* d subs)])))
+
+(define (parse-list-form d subs)
+  ;; Invariant: macro heads are resolved in parse-expr (and the top-level loop)
+  ;; BEFORE control reaches here, so a 'macro head must never arrive — if one
+  ;; does, the resolver and the call sites have drifted out of sync. Fail loudly
+  ;; rather than silently mis-dispatching to a built-in/legacy arm. On valid
+  ;; input this arm never fires, so goldens are unaffected.
+  (when (and (pair? d)
+             (eq? (head-meaning (current-registry) (car d)) 'macro))
+    (error 'beagle
+           "internal: macro head ~a reached parse-list-form (should be handled in parse-expr)"
+           (car d)))
+  (cond
+    [(and (pair? d) (symbol? (car d)) (lookup-combiner (car d)))
+     => (lambda (handler) (handler d subs))]
+    [else (parse-list-form* d subs)]))
+
+(define (parse-list-form* d subs)
+  (match d
+    ;; `unsafe` family (unsafe/-js/-clj/-py/-rkt/-nix/-expr) migrated to the
+    ;; compile-time combiner registry (see register-combiner!).
+
+    ;; `def` migrated to the compile-time combiner registry (see register-combiner!).
+
+    ;; `defonce` migrated to the compile-time combiner registry (see register-combiner!).
+
+    ;; `defn` / `defn-` migrated to the compile-time combiner registry (see register-combiner!).
+
+    ;; `claim` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; `defrecord` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'defprotocol (? symbol? name) sigs ...)
-     (protocol-form name (map parse-protocol-method (or (stx-tail subs 2) sigs)))]
+    ;; `defprotocol` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; defmulti / defmethod removed — multimethods had ~zero usage in the
     ;; corpus (one fixture file). Use defprotocol + extend-type for
@@ -2146,28 +3308,7 @@
 
     ;; `extend-type` migrated to the compile-time combiner registry (see register-combiner!).
 
-    ;; flake-input: typed access to flake-input attribute paths.
-    ;; (flake-input :NAME :NAMESPACE :path ...) →
-    ;;   inputs.NAME.NAMESPACE.${pkgs.stdenv.hostPlatform.system}.path...
-    ;; System axis collapsed (every flake follows this convention).
-    ;; Result type opaque (NixType); schema-cache for compile-time
-    ;; attribute-path checking is a deferred follow-up.
-    [(list 'flake-input input-name namespace rest ...)
-     (unless (keyword-sym? input-name)
-       (error 'beagle
-              "flake-input: input-name must be a keyword (e.g. :quickshell), got ~v"
-              input-name))
-     (unless (keyword-sym? namespace)
-       (error 'beagle
-              "flake-input: namespace must be a keyword (e.g. :packages or :legacyPackages), got ~v"
-              namespace))
-     ;; Use rest (raw datum from match destructuring) rather than stx-tail —
-     ;; segments are bare symbols, no source-location preservation needed.
-     (for ([s (in-list rest)])
-       (unless (or (keyword-sym? s) (symbol? s))
-         (error 'beagle
-                "flake-input: path segment must be keyword or symbol, got ~v" s)))
-     (flake-input-form input-name namespace rest)]
+    ;; `flake-input` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; `fn` accepts either `:-` (canonical) or `:` (legacy) as the
     ;; return-type marker. Top-level def/defonce/defn reject bare `:` because
@@ -2181,80 +3322,30 @@
     ;; `letfn` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; `loop` migrated to the compile-time combiner registry (see register-combiner!).
-    [(list 'recur args ...)
-     (recur-form (map parse-expr (or (stx-tail subs 1) args)))]
+    ;; `recur` migrated to the compile-time combiner registry (see register-combiner!).
 
-    ;; JS-async await — namespaced under `js/` per audit row 8.
-    ;; Bare `(await …)` is rejected with a pointed migration message.
-    [(list 'js/await inner)
-     (await-form (parse-expr (or (stx-ref subs 1) inner)))]
-    [(list 'await _)
-     (raise-parse-error 'bare-js-form
-                        "(await ...) — bare `await` is not supported. Beagle namespaces target-specific forms; use `(js/await EXPR)`."
-                        #:suggestion (replace-head-suggestion 'await 'js/await))]
+    ;; `js/await` migrated to the compile-time combiner registry (see register-combiner!).
+    ;; `await` (bare) migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; --- Nix-specific forms --------------------------------------------------
 
-    [(list 'inherit names ...)
-     (nix-inherit (map (lambda (n)
-                         (define d (->datum n))
-                         (if (symbol? d) d (error 'beagle "inherit: expected symbol, got ~v" d)))
-                       (or (stx-tail subs 1) names)))]
+    ;; `inherit` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'inherit-from ns-expr names ...)
-     (nix-inherit-from (parse-expr (or (stx-ref subs 1) ns-expr))
-                       (map (lambda (n)
-                              (define d (->datum n))
-                              (if (symbol? d) d (error 'beagle "inherit-from: expected symbol, got ~v" d)))
-                            (or (stx-tail subs 2) names)))]
+    ;; `inherit-from` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'rec-attrs pairs ...)
-     (nix-rec-attrs (parse-nix-rec-pairs (or (stx-tail subs 1) pairs)))]
+    ;; `rec-attrs` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'nix/assert cond-expr body-expr)
-     ;; Canonical Nix assertion form. Bare `(assert ...)` is HARD-REJECTED —
-     ;; see the bare-`assert` arm below.
-     (nix-assert (parse-expr (or (stx-ref subs 1) cond-expr))
-                 (parse-expr (or (stx-ref subs 2) body-expr)))]
-    [(list 'assert _ _)
-     (raise-parse-error 'bare-nix-form
-                        "(assert ...) — bare `assert` is not supported. Beagle namespaces target-specific forms; use `(nix/assert COND BODY)`."
-                        #:suggestion (replace-head-suggestion 'assert 'nix/assert))]
+    ;; `nix/assert` migrated to the compile-time combiner registry (see register-combiner!).
+    ;; `assert` (bare) migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'nix/with-cfg path-expr body-expr)
-     ;; (nix/with-cfg config.myConfig.modules.X BODY) → introduces `cfg = config...;`
-     ;; let-binding and rewrites config.myConfig.modules.X.foo to cfg.foo in BODY.
-     ;; Bare `(with-cfg ...)` is HARD-REJECTED — see the bare-`with-cfg` arm below.
-     (nix-with-cfg (parse-expr (or (stx-ref subs 1) path-expr))
-                   (parse-expr (or (stx-ref subs 2) body-expr)))]
-    [(list 'with-cfg _ _)
-     (raise-parse-error 'bare-nix-form
-                        "(with-cfg ...) — bare `with-cfg` is not supported. Beagle namespaces target-specific forms; use `(nix/with-cfg PATH BODY)`."
-                        #:suggestion (replace-head-suggestion 'with-cfg 'nix/with-cfg))]
+    ;; `nix/with-cfg` migrated to the compile-time combiner registry (see register-combiner!).
+    ;; `with-cfg` (bare) migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'get-or base path-expr default-expr)
-     (nix-get-or (parse-expr (or (stx-ref subs 1) base))
-                 (let ([d (->datum (or (stx-ref subs 2) path-expr))])
-                   (cond
-                     [(symbol? d) (symbol->string d)]
-                     [(and (pair? d) (eq? (car d) 'quote) (pair? (cdr d)))
-                      (symbol->string (cadr d))]
-                     [else (format "~a" d)]))
-                 (parse-expr (or (stx-ref subs 3) default-expr)))]
+    ;; `get-or` migrated to the compile-time combiner registry (see register-combiner!).
 
-    ;; `has` — removed 2026-06-12 (zero corpus hits). `contains?` is the
-    ;; Clojure spelling; emit-nix lowers it to hasAttr.
-    [(list 'has _ _)
-     (raise-parse-error 'removed-form
-                        "(has m :k) — `has` is removed. Use `(contains? m :k)` (Clojure spelling; lowers to hasAttr on nix)."
-                        #:suggestion (replace-head-suggestion 'has 'contains?))]
+    ;; `has` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'search-path name-expr)
-     (define d (->datum (or (stx-ref subs 1) name-expr)))
-     (nix-search-path (cond
-                        [(symbol? d) (symbol->string d)]
-                        [(string? d) d]
-                        [else (error 'beagle "search-path: expected symbol or string, got ~v" d)]))]
+    ;; `search-path` migrated to the compile-time combiner registry (see register-combiner!).
 
     [(cons 's parts)
      (nix-interpolated-string
@@ -2263,12 +3354,7 @@
              (if (string? d) d (parse-expr part)))
            (or (stx-tail subs 1) (cdr d))))]
 
-    [(list 'ms lines ...)
-     (nix-multiline-string
-      (map (lambda (line)
-             (define d (->datum line))
-             (if (string? d) d (parse-expr line)))
-           (or (stx-tail subs 1) lines)))]
+    ;; `ms` migrated to the compile-time combiner registry (see register-combiner!).
 
     [(list '#%block-string tag text)
      (block-string (->datum (or (stx-ref subs 2) text))
@@ -2282,129 +3368,35 @@
                  [(symbol? d) (symbol->string d)]
                  [else (error 'beagle "p: expected string or symbol, got ~v" d)]))]
 
-    [(list 'nix/fn-set formals body-expr)
-     (define-values (fl at-name)
-       (parse-nix-fn-set-formals (or (stx-ref subs 1) formals)))
-     (nix-fn-set fl #f at-name (parse-expr (or (stx-ref subs 2) body-expr)))]
-    [(list 'fn-set _ _)
-     (raise-parse-error 'bare-nix-form
-                        "(fn-set ...) — bare `fn-set` is not supported. Beagle namespaces target-specific forms; use `(nix/fn-set FORMALS BODY)`."
-                        #:suggestion (replace-head-suggestion 'fn-set 'nix/fn-set))]
+    ;; `nix/fn-set` migrated to the compile-time combiner registry (see register-combiner!).
+    ;; `fn-set` (bare) migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'nix/module formals body-expr)
-     ;; NixOS module / open-attrs lambda: { a, b, ... }: body
-     (define-values (fl at-name)
-       (parse-nix-fn-set-formals (or (stx-ref subs 1) formals)))
-     (nix-fn-set fl #t at-name (parse-expr (or (stx-ref subs 2) body-expr)))]
-    [(list 'module _ _)
-     (raise-parse-error 'bare-nix-form
-                        "(module ...) — bare `module` is not supported. Beagle namespaces target-specific forms; use `(nix/module FORMALS BODY)`."
-                        #:suggestion (replace-head-suggestion 'module 'nix/module))]
+    ;; `nix/module` migrated to the compile-time combiner registry (see register-combiner!).
+    ;; `module` (bare) migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'nix/overlay formals body-expr)
-     ;; Nix overlay: final: prev: body (curried — NOT attrset-destructure)
-     ;; Emits as fn-form so the nix emitter produces `final: prev: body`.
-     (define-values (f-list _at-name)
-       (parse-nix-fn-set-formals (or (stx-ref subs 1) formals)))
-     (unless (= (length f-list) 2)
-       (error 'beagle "nix/overlay: expected exactly two formals [final prev], got ~a" (length f-list)))
-     (define ps
-       (for/list ([f (in-list f-list)])
-         (param (nix-fn-set-formal-name f) #f)))
-     (fn-form ps #f #f
-              (list (parse-expr (or (stx-ref subs 2) body-expr))))]
-    [(list 'overlay _ _)
-     (raise-parse-error 'bare-nix-form
-                        "(overlay ...) — bare `overlay` is not supported. Beagle namespaces target-specific forms; use `(nix/overlay [final prev] BODY)`."
-                        #:suggestion (replace-head-suggestion 'overlay 'nix/overlay))]
+    ;; `nix/overlay` migrated to the compile-time combiner registry (see register-combiner!).
+    ;; `overlay` (bare) migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'nix/derivation attrs-expr)
-     ;; mkDerivation sugar: (nix/derivation {:pname ... :version ... :src ...})
-     ;; Emits as `(pkgs.stdenv.mkDerivation { ... })`. Use `:builder pkg` to
-     ;; override the default stdenv (e.g. :builder pkgs.runCommand).
-     (define attrs (parse-expr (or (stx-ref subs 1) attrs-expr)))
-     (nix-derivation attrs)]
-    [(list 'derivation _)
-     (raise-parse-error 'bare-nix-form
-                        "(derivation ...) — bare `derivation` is not supported. Beagle namespaces target-specific forms; use `(nix/derivation ATTRS)`."
-                        #:suggestion (replace-head-suggestion 'derivation 'nix/derivation))]
+    ;; `nix/derivation` migrated to the compile-time combiner registry (see register-combiner!).
+    ;; `derivation` (bare) migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'nix/flake attrs-expr)
-     ;; flake.nix sugar: (nix/flake {:description ... :inputs {...} :outputs (nix/fn-set [self nixpkgs] ...)})
-     (define attrs (parse-expr (or (stx-ref subs 1) attrs-expr)))
-     (nix-flake attrs)]
-    [(list 'flake _)
-     (raise-parse-error 'bare-nix-form
-                        "(flake ...) — bare `flake` is not supported. Beagle namespaces target-specific forms; use `(nix/flake ATTRS)`."
-                        #:suggestion (replace-head-suggestion 'flake 'nix/flake))]
+    ;; `nix/flake` migrated to the compile-time combiner registry (see register-combiner!).
+    ;; `flake` (bare) migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; The pipe family (`pipe-to`, `pipe-from`, `implies`, `|>`, `|>>`) was an
     ;; Elixir/F# import — removed per CLAUDE.md "Beagle is Clojure plus types,
     ;; nothing else." Use Clojure threading (`->`, `->>`) instead.
-    [(list 'pipe-to _ ...)
-     (raise-parse-error 'legacy-pipe-form
-                        "(pipe-to …) — the pipe family is removed. Use `(-> x f …)` for thread-first.")]
-    [(list 'pipe-from _ ...)
-     (raise-parse-error 'legacy-pipe-form
-                        "(pipe-from …) — the pipe family is removed. Use `(->> x f …)` for thread-last.")]
-    [(list 'implies _ ...)
-     (raise-parse-error 'legacy-pipe-form
-                        "(implies …) — removed as part of the pipe family. Use `(if a b true)` for logical implication, or `(or (not a) b)`.")]
+    ;; `pipe-to` migrated to the compile-time combiner registry (see register-combiner!).
+    ;; `pipe-from` migrated to the compile-time combiner registry (see register-combiner!).
+    ;; `implies` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; --- end Nix-specific forms ----------------------------------------------
 
-    ;; --- JS-specific forms (js/quote) -----------------------------------------
-
-    [(cons 'js/quote body)
-     (js-quote-form (parse-js-ast-body (or (stx-tail subs 1) body)))]
-
-    ;; --- Typed JS target forms (js/*) -----------------------------------------
-    ;; Minimal set: only forms with no core beagle equivalent.
-
-    [(list 'js/return)
-     (jst-return #f)]
-
-    [(list 'js/return expr-form)
-     (jst-return (parse-expr expr-form))]
-
-    [(list* 'js/class name-form rest)
-     (parse-jst-class name-form rest)]
-
-    [(cons 'js/template parts)
-     (jst-template (map (lambda (p)
-                          (define v (->datum p))
-                          (if (string? v) v (parse-expr p)))
-                        (cdr d)))]
-
-    [(list 'js/spread expr-form)
-     (jst-spread (parse-expr expr-form))]
-
-    [(list 'js/typeof expr-form)
-     (jst-typeof (parse-expr expr-form))]
-
-    [(list 'js/import-meta)
-     (jst-import-meta)]
-
-    [(list 'js/export inner-form)
-     (define inner (parse-expr inner-form))
-     (cond
-       [(jst-class? inner) (struct-copy jst-class inner [export? #t])]
-       [else (jst-export inner)])]
-
-    ;; `export default <expr>` — JS has no `const default` binding (reserved),
-    ;; so this must be its own form. Used for default module exports.
-    [(list 'js/export-default inner-form)
-     (jst-export-default (parse-expr inner-form))]
-
-    [(list 'js/! expr-form)
-     (jst-unary '! (parse-expr expr-form))]
-
-    [(list 'js/void expr-form)
-     (jst-unary 'void (parse-expr expr-form))]
-
-    [(list (and op (or 'js/- 'js/+)) expr-form)
-     (define js-op (if (eq? op 'js/-) '- '+))
-     (jst-unary js-op (parse-expr expr-form))]
+    ;; --- JS-specific forms (js/*) ---------------------------------------------
+    ;; js/quote, js/return, js/class, js/template, js/spread, js/typeof,
+    ;; js/import-meta, js/export, js/export-default, js/!, js/void, js/-, js/+
+    ;; migrated to the compile-time combiner registry (see register-combiner!).
+    ;; The predicate-headed jst-binary-op arm below stays (no literal head).
 
     [(list (? jst-binary-op? op) left-form right-form)
      (jst-binary (hash-ref JST-BINARY-OPS op) (parse-expr left-form) (parse-expr right-form))]
@@ -2413,152 +3405,7 @@
 
     ;; --- end JS-specific forms ------------------------------------------------
 
-    ;; --- SQL-specific forms ---------------------------------------------------
-    ;; All SQL surface forms are namespaced under `sql/` per audit row 6
-    ;; ("Prefix where meaning diverges"). Bare forms are rejected with
-    ;; pointed migration messages.
-
-    [(list 'sql/deftable (? symbol? name) fields-form)
-     (sql-table name (parse-sql-columns (or (stx-ref subs 2) fields-form)))]
-    [(list 'deftable _ _)
-     (raise-parse-error 'bare-sql-form
-                        "(deftable ...) — bare `deftable` is not supported. Beagle namespaces target-specific forms; use `(sql/deftable NAME FIELDS)`.")]
-
-    [(cons 'sql/select rest)
-     (parse-sql-select (or (stx-tail subs 1) rest) subs #f)]
-    [(cons 'select _)
-     (raise-parse-error 'bare-sql-form
-                        "(select ...) — bare `select` is not supported. Beagle namespaces target-specific forms; use `(sql/select COLS CLAUSES...)`.")]
-
-    [(cons 'sql/select-distinct rest)
-     (parse-sql-select (or (stx-tail subs 1) rest) subs #t)]
-    [(cons 'select-distinct _)
-     (raise-parse-error 'bare-sql-form
-                        "(select-distinct ...) — bare `select-distinct` is not supported. Beagle namespaces target-specific forms; use `(sql/select-distinct COLS CLAUSES...)`.")]
-
-    [(cons 'sql/with rest)
-     #:when (and (pair? rest)
-                 (pair? (car rest))
-                 (let ([first-cte (car rest)])
-                   (and (symbol? (car first-cte))
-                        (pair? (cdr first-cte))
-                        (pair? (cadr first-cte)))))
-     (parse-sql-with (or (stx-tail subs 1) rest))]
-    ;; Note: bare `(with ...)` already has dispatch logic for record-update vs
-    ;; Nix-scope; SQL CTEs route through `sql/with` to avoid further overload.
-
-    [(list 'sql/union left right)
-     (sql-union 'union (parse-sql-top-form left) (parse-sql-top-form right))]
-    [(list 'sql/union-all left right)
-     (sql-union 'union-all (parse-sql-top-form left) (parse-sql-top-form right))]
-    [(list 'sql/intersect left right)
-     (sql-union 'intersect (parse-sql-top-form left) (parse-sql-top-form right))]
-    [(list 'sql/except left right)
-     (sql-union 'except (parse-sql-top-form left) (parse-sql-top-form right))]
-    [(list 'union _ _)
-     (raise-parse-error 'bare-sql-form
-                        "(union ...) — bare `union` is not supported. Beagle namespaces target-specific forms; use `(sql/union LEFT RIGHT)`.")]
-    [(list 'union-all _ _)
-     (raise-parse-error 'bare-sql-form
-                        "(union-all ...) — bare `union-all` is not supported. Beagle namespaces target-specific forms; use `(sql/union-all LEFT RIGHT)`.")]
-    [(list 'intersect _ _)
-     (raise-parse-error 'bare-sql-form
-                        "(intersect ...) — bare `intersect` is not supported. Beagle namespaces target-specific forms; use `(sql/intersect LEFT RIGHT)`.")]
-    [(list 'except _ _)
-     (raise-parse-error 'bare-sql-form
-                        "(except ...) — bare `except` is not supported. Beagle namespaces target-specific forms; use `(sql/except LEFT RIGHT)`.")]
-
-    [(list 'sql/insert (? symbol? table) cols-form (cons 'values rows))
-     (define values-subs (and subs (stx-subs (stx-ref subs 3))))
-     (sql-insert table
-                 (parse-sql-column-names (or (stx-ref subs 2) cols-form))
-                 (map (lambda (r) (parse-sql-values-row r))
-                      (or (stx-tail values-subs 1) rows)))]
-    [(list 'insert _ _ (cons 'values _))
-     (raise-parse-error 'bare-sql-form
-                        "(insert ...) — bare `insert` is not supported. Beagle namespaces target-specific forms; use `(sql/insert TABLE COLS (values ROWS...))`.")]
-
-    [(list 'sql/update (? symbol? table) set-form rest ...)
-     #:when (and (pair? set-form) (eq? (car set-form) 'set))
-     (sql-update table
-                 (parse-sql-set-pairs (or (stx-ref subs 2) set-form))
-                 (parse-sql-where-clause (or (stx-tail subs 3) rest)))]
-    [(list 'update _ set-form _ ...)
-     #:when (and (pair? set-form) (eq? (car set-form) 'set))
-     (raise-parse-error 'bare-sql-form
-                        "(update ...) — bare `update` is not supported. Beagle namespaces target-specific forms; use `(sql/update TABLE (set ...) (where ...))`.")]
-
-    [(list 'sql/delete (? symbol? table) rest ...)
-     (sql-delete table
-                 (parse-sql-where-clause (or (stx-tail subs 2) rest)))]
-    [(list 'delete (? symbol? _) _ ...)
-     (raise-parse-error 'bare-sql-form
-                        "(delete ...) — bare `delete` is not supported. Beagle namespaces target-specific forms; use `(sql/delete TABLE (where ...))`.")]
-
-    ;; INSERT...SELECT: (sql/insert-select table [cols] (sql/select ...))
-    [(list 'sql/insert-select (? symbol? table) cols-form query-form)
-     (sql-insert-select table
-                        (parse-sql-column-names (or (stx-ref subs 2) cols-form))
-                        (parse-sql-top-form query-form))]
-    [(list 'insert-select _ _ _)
-     (raise-parse-error 'bare-sql-form
-                        "(insert-select ...) — bare `insert-select` is not supported. Beagle namespaces target-specific forms; use `(sql/insert-select TABLE COLS QUERY)`.")]
-
-    ;; RETURNING: (sql/returning stmt [cols])
-    [(list 'sql/returning stmt-form cols-form)
-     (define stmt-d (->datum stmt-form))
-     (define inner-stmt
-       (cond
-         [(and (pair? stmt-d) (memq (car stmt-d) '(sql/insert sql/update sql/delete)))
-          (parse-list-form stmt-d #f)]
-         [else (error 'beagle "sql/returning: inner statement must be sql/insert/sql/update/sql/delete")]))
-     (sql-returning inner-stmt
-                    (parse-sql-column-names (or (stx-ref subs 2) cols-form)))]
-    [(list 'returning _ _)
-     (raise-parse-error 'bare-sql-form
-                        "(returning ...) — bare `returning` is not supported. Beagle namespaces target-specific forms; use `(sql/returning STMT COLS)`.")]
-
-    ;; CREATE INDEX: (sql/create-index name table [cols])
-    [(list 'sql/create-index (? symbol? name) (? symbol? table) cols-form)
-     (sql-create-index #f name table
-                       (parse-sql-column-names (or (stx-ref subs 3) cols-form)))]
-    [(list 'sql/create-unique-index (? symbol? name) (? symbol? table) cols-form)
-     (sql-create-index #t name table
-                       (parse-sql-column-names (or (stx-ref subs 3) cols-form)))]
-    [(list 'create-index _ _ _)
-     (raise-parse-error 'bare-sql-form
-                        "(create-index ...) — bare `create-index` is not supported. Beagle namespaces target-specific forms; use `(sql/create-index NAME TABLE COLS)`.")]
-    [(list 'create-unique-index _ _ _)
-     (raise-parse-error 'bare-sql-form
-                        "(create-unique-index ...) — bare `create-unique-index` is not supported. Beagle namespaces target-specific forms; use `(sql/create-unique-index NAME TABLE COLS)`.")]
-
-    ;; DROP TABLE: (sql/drop-table name) or (sql/drop-table-if-exists name)
-    [(list 'sql/drop-table (? symbol? name))
-     (sql-drop-table name #f)]
-    [(list 'sql/drop-table-if-exists (? symbol? name))
-     (sql-drop-table name #t)]
-    [(list 'drop-table _)
-     (raise-parse-error 'bare-sql-form
-                        "(drop-table ...) — bare `drop-table` is not supported. Beagle namespaces target-specific forms; use `(sql/drop-table NAME)`.")]
-    [(list 'drop-table-if-exists _)
-     (raise-parse-error 'bare-sql-form
-                        "(drop-table-if-exists ...) — bare `drop-table-if-exists` is not supported. Beagle namespaces target-specific forms; use `(sql/drop-table-if-exists NAME)`.")]
-
-    ;; ALTER TABLE: (sql/alter-table name (add-column col-def)) etc.
-    [(list 'sql/alter-table (? symbol? table) action-form)
-     (sql-alter-table table (->datum action-form))]
-    [(list 'alter-table _ _)
-     (raise-parse-error 'bare-sql-form
-                        "(alter-table ...) — bare `alter-table` is not supported. Beagle namespaces target-specific forms; use `(sql/alter-table TABLE ACTION)`.")]
-
-    ;; TRUNCATE: (sql/truncate table)
-    [(list 'sql/truncate (? symbol? table))
-     (sql-truncate table)]
-    [(list 'truncate _)
-     (raise-parse-error 'bare-sql-form
-                        "(truncate ...) — bare `truncate` is not supported. Beagle namespaces target-specific forms; use `(sql/truncate TABLE)`.")]
-
-    ;; --- end SQL-specific forms -----------------------------------------------
+    ;; --- SQL-specific forms migrated to the compile-time combiner registry (see register-combiner!) ---
 
     ;; `set!` migrated to the compile-time combiner registry (see register-combiner!).
 
@@ -2588,24 +3435,13 @@
 
     ;; `cond` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'condp pred-fn test-expr clauses ...)
-     (parse-condp-form (or (stx-ref subs 1) pred-fn)
-                       (or (stx-ref subs 2) test-expr)
-                       (or (stx-tail subs 3) clauses))]
+    ;; `condp` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; `try` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'check expr)
-     (check-expr (parse-expr (or (stx-ref subs 1) expr)))]
+    ;; `check` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'rescue expr (? symbol? err-name) handler)
-     (rescue-form (parse-expr (or (stx-ref subs 1) expr))
-                  (parse-expr (or (stx-ref subs 3) handler))
-                  err-name)]
-    [(list 'rescue expr fallback)
-     (rescue-form (parse-expr (or (stx-ref subs 1) expr))
-                  (parse-expr (or (stx-ref subs 2) fallback))
-                  #f)]
+    ;; `rescue` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; `target-case` migrated to the compile-time combiner registry (see register-combiner!).
 
@@ -2614,82 +3450,19 @@
     ;; dotimes removed — sugar for (doseq [i (range n)] body...).
     ;; No broader pattern reinforced; composition is transparent.
 
-    [(list 'nix/with ns-expr body-expr)
-     ;; Canonical Nix scope form. Unambiguous (no record-update shape collision).
-     ;; Bare `(with ns body)` Nix-scope shape is HARD-REJECTED — see the
-     ;; bare-`with` arm below.
-     (nix-with (parse-expr (or (stx-ref subs 1) ns-expr))
-               (parse-expr (or (stx-ref subs 2) body-expr)))]
+    ;; `nix/with` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'with target-expr updates ...)
-     ;; (with target [:k v] [:k v] ...) — record update (with-form). STAYS bare;
-     ;;   not a Clojure collision.
-     ;; (with ns body) — Nix scope shape. HARD-REJECTED — point at `nix/with`.
-     ;; Disambiguate by shape: the record-update form has every update as a
-     ;; [:keyword value ...] bracket; anything else is the (removed) Nix-scope
-     ;; shape and gets the migration pointer.
-     (cond
-       [(and (= (length updates) 1)
-             (let ([d (->datum (car updates))])
-               (not (and (bracketed? d)
-                         (>= (length (bracket-body d)) 2)
-                         (let ([first (car (bracket-body d))])
-                           (and (symbol? first) (keyword-sym? first)))))))
-        ;; Bare `(with ns body)` Nix-scope shape — hard reject.
-        (raise-parse-error 'bare-nix-form
-                           "(with NS BODY) — bare Nix-scope `with` is not supported. Beagle namespaces target-specific forms; use `(nix/with NS BODY)`.")]
-       [else
-        (parse-with-form (or (stx-ref subs 1) target-expr)
-                         (or (stx-tail subs 2) updates))])]
+    ;; `with` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; `defenum` migrated to the compile-time combiner registry (see register-combiner!).
 
-    ;; (defunion :throwable Name ...) — throwable variant union.
-    ;; Routes to deferror-form internally (same structural shape; throw/catch
-    ;; semantics live in the type checker's union-as-error logic). Inlined
-    ;; rather than calling parse-deferror because subs offset differs by 1.
-    [(list 'defunion ':throwable (? symbol? name) member-defs ...)
-     (define member-names '())
-     (define mf-hash (make-hasheq))
-     (for ([md (in-list (or (stx-tail subs 3) member-defs))])
-       (define d (->datum md))
-       (cond
-         [(symbol? d)
-          (set! member-names (cons d member-names))
-          (hash-set! mf-hash d '())]
-         [(and (list? d) (>= (length d) 2) (symbol? (car d)))
-          (define mname (car d))
-          (set! member-names (cons mname member-names))
-          (hash-set! mf-hash mname (parse-record-fields (cadr d)))]
-         [else
-          (error 'beagle
-                 "defunion :throwable member must be Symbol or (Name [fields...]): ~v" d)]))
-     (deferror-form name (reverse member-names) mf-hash)]
+    ;; `defunion` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'defunion (? symbol? name) members ...)
-     (define raw (map ->datum (or (stx-tail subs 2) members)))
-     (define mnames (map (lambda (m) (if (pair? m) (car m) m)) raw))
-     (define mf-hash (make-hasheq))
-     (for ([m (in-list raw)])
-       (when (and (pair? m) (>= (length m) 2))
-         (define mname (car m))
-         (define fields-datum (cadr m))
-         (when (and (pair? fields-datum) (eq? (car fields-datum) BRACKET-TAG))
-           (hash-set! mf-hash mname (parse-record-fields fields-datum)))))
-     (defunion-form name mnames '() (if (hash-empty? mf-hash) #f mf-hash))]
-
-    [(list 'defunion (list (? symbol? name) type-vars ...) member-defs ...)
-     (parse-parametric-defunion name type-vars member-defs subs)]
-
-    [(list 'deferror _ ...)
-     (raise-parse-error 'removed-form
-                        "deferror removed — use (defunion :throwable Name ...) instead")]
+    ;; `deferror` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; `defscalar` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'match target-expr clauses ...)
-     (parse-match-form (or (stx-ref subs 1) target-expr)
-                       (or (stx-tail subs 2) clauses))]
+    ;; `match` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; case removed — folded into match + or-pattern. The case-fold
     ;; optimization in emit-clj.rkt and emit-rkt.rkt lowers literal-only
@@ -2722,11 +3495,7 @@
     [(list (? static-method-sym? cm) args ...)
      (static-call cm (map parse-expr (or (stx-tail subs 1) args)))]
 
-    ;; `fmt` string interpolation — removed 2026-06-12 (zero corpus hits;
-    ;; not Clojure). `str` / `format` are the Clojure spellings.
-    [(list 'fmt _ ...)
-     (raise-parse-error 'removed-form
-                        "(fmt \"... ${x} ...\") — `fmt` is removed. Use `(str \"... \" x \" ...\")` or `(format \"... %s ...\" x)`.")]
+    ;; `fmt` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; Clojure threading family — all parse-time rewrites to ordinary
     ;; composition. `->` and `->>` are the canonical replacements for the
@@ -2758,59 +3527,11 @@
       (parse-expr (rewrite-as
                    (expand-thread-last (or (stx-ref subs 1) init)
                                        (or (and subs (stx-tail subs 2)) steps)))))]
-    [(list 'as-> init (? symbol? name) steps ...)
-     (define orig-stxs (or (and subs (stx-tail subs 1))
-                           (cons init (cons name steps))))
-     (threading-marker
-      'as->
-      (map parse-expr orig-stxs)
-      (parse-expr (rewrite-as
-                   (expand-as-thread (or (stx-ref subs 1) init)
-                                     name
-                                     (or (and subs (stx-tail subs 3)) steps)))))]
-    [(list 'as-> _ _ _ ...)
-     (raise-parse-error 'bad-form
-                        "as-> expects a symbol placeholder: (as-> init name steps...)")]
-    [(list 'cond-> init clauses ...)
-     (define orig-stxs (or (and subs (stx-tail subs 1))
-                           (cons init clauses)))
-     (threading-marker
-      'cond->
-      (map parse-expr orig-stxs)
-      (parse-expr (rewrite-as
-                   (expand-cond-thread (or (stx-ref subs 1) init)
-                                       (or (and subs (stx-tail subs 2)) clauses)
-                                       'first))))]
-    [(list 'cond->> init clauses ...)
-     (define orig-stxs (or (and subs (stx-tail subs 1))
-                           (cons init clauses)))
-     (threading-marker
-      'cond->>
-      (map parse-expr orig-stxs)
-      (parse-expr (rewrite-as
-                   (expand-cond-thread (or (stx-ref subs 1) init)
-                                       (or (and subs (stx-tail subs 2)) clauses)
-                                       'last))))]
-    [(list 'some-> init steps ...)
-     (define orig-stxs (or (and subs (stx-tail subs 1))
-                           (cons init steps)))
-     (threading-marker
-      'some->
-      (map parse-expr orig-stxs)
-      (parse-expr (rewrite-as
-                   (expand-some-thread (or (stx-ref subs 1) init)
-                                       (or (and subs (stx-tail subs 2)) steps)
-                                       'first))))]
-    [(list 'some->> init steps ...)
-     (define orig-stxs (or (and subs (stx-tail subs 1))
-                           (cons init steps)))
-     (threading-marker
-      'some->>
-      (map parse-expr orig-stxs)
-      (parse-expr (rewrite-as
-                   (expand-some-thread (or (stx-ref subs 1) init)
-                                       (or (and subs (stx-tail subs 2)) steps)
-                                       'last))))]
+    ;; `as->` migrated to the compile-time combiner registry (see register-combiner!).
+    ;; `cond->` migrated to the compile-time combiner registry (see register-combiner!).
+    ;; `cond->>` migrated to the compile-time combiner registry (see register-combiner!).
+    ;; `some->` migrated to the compile-time combiner registry (see register-combiner!).
+    ;; `some->>` migrated to the compile-time combiner registry (see register-combiner!).
     ;; Clojure conditional sugar — accept-and-canonicalize to (if …) / (if … (do …)).
     ;; Identity-preserving: same emitted code as the hand-written canonical
     ;; form. The lowerings mirror lower-binding-cond's shape — multi-body
@@ -2826,40 +3547,16 @@
     ;;
     ;; Like if-let/when-let, the surface sugar is welcome; the canonical AST
     ;; is what every downstream pass sees.
-    [(list 'when c body ..1)
-     ;; Embed the original syntax for c (subs[1]) and body (subs[2..]) so
-     ;; their srclocs survive. rewrite-as tags the synthesized outer (if …)
-     ;; with the (when …) form's srcloc; sub-form syntax passes through.
-     (parse-expr (rewrite-as
-                  (list 'if
-                        (or (stx-ref subs 1) c)
-                        (cons 'do (or (stx-tail subs 2) body)))))]
-    [(list 'when-not c body ..1)
-     (parse-expr (rewrite-as
-                  (list 'if
-                        (list 'not (or (stx-ref subs 1) c))
-                        (cons 'do (or (stx-tail subs 2) body)))))]
-    [(list 'if-not c then-expr else-expr)
-     (parse-expr (rewrite-as
-                  (list 'if
-                        (or (stx-ref subs 1) c)
-                        (or (stx-ref subs 3) else-expr)
-                        (or (stx-ref subs 2) then-expr))))]
+    ;; `when` / `when-not` / `if-not` migrated to the compile-time combiner
+    ;; registry (see register-combiner!), success + arity-reject arms both.
     ;; `unless` is NOT Clojure (it's CL/Scheme/Ruby) — zero corpus hits,
     ;; removed 2026-06-12 per the zero-users rule. `when-not` is the
     ;; Clojure spelling.
     [(list 'unless _ ...)
      (raise-parse-error 'removed-form
                         "(unless c body...) — `unless` is not a Clojure form. Use `(when-not c body...)`.")]
-    [(list 'when _ ...)
-     (raise-parse-error 'bad-form
-                        "when requires at least one body expression: (when c body...)")]
-    [(list 'when-not _ ...)
-     (raise-parse-error 'bad-form
-                        "when-not requires at least one body expression: (when-not c body...)")]
-    [(list 'if-not _ ...)
-     (raise-parse-error 'bad-form
-                        "if-not expects (if-not c then else): three arguments required")]
+    ;; `when` / `when-not` / `if-not` arity-reject arms migrated to the
+    ;; compile-time combiner registry (see register-combiner!).
     ;; Clojure binding-conditional macros: accept-and-canonicalize.
     ;; These are lowered to the canonical (let …) (if …) shape — the AST that
     ;; results is byte-identical to what a hand-written equivalent would
@@ -2874,43 +3571,13 @@
     ;; tracked in design-principle.md) will not reuse these names — the
     ;; typed form should be beagle-native, not Clojure-shaped. Until then
     ;; the sugar is welcome.
-    [(list 'if-let bindings then-expr else-expr)
-     (parse-expr (rewrite-as
-                  (lower-binding-cond 'if-let
-                                      (or (stx-ref subs 1) bindings)
-                                      (list then-expr else-expr)
-                                      (and subs (stx-tail subs 2)))))]
-    [(list 'when-let bindings body ...)
-     (parse-expr (rewrite-as
-                  (lower-binding-cond 'when-let
-                                      (or (stx-ref subs 1) bindings)
-                                      body
-                                      (and subs (stx-tail subs 2)))))]
-    [(list 'if-some bindings then-expr else-expr)
-     (parse-expr (rewrite-as
-                  (lower-binding-cond 'if-some
-                                      (or (stx-ref subs 1) bindings)
-                                      (list then-expr else-expr)
-                                      (and subs (stx-tail subs 2)))))]
-    [(list 'when-some bindings body ...)
-     (parse-expr (rewrite-as
-                  (lower-binding-cond 'when-some
-                                      (or (stx-ref subs 1) bindings)
-                                      body
-                                      (and subs (stx-tail subs 2)))))]
-    [(list 'dotimes _ ...)
-     (raise-parse-error 'removed-form
-                        "dotimes removed — use (doseq [i (range n)] body...)")]
-    [(list 'defmulti _ ...)
-     (raise-parse-error 'removed-form
-                        "defmulti removed — use defprotocol + extend-type for type-based dispatch")]
-    [(list 'defmethod _ ...)
-     (raise-parse-error 'removed-form
-                        "defmethod removed — use defprotocol + extend-type for type-based dispatch")]
+    ;; `if-let` / `when-let` / `if-some` / `when-some` migrated to the
+    ;; compile-time combiner registry (see register-combiner!).
+    ;; `dotimes` migrated to the compile-time combiner registry (see register-combiner!).
+    ;; `defmulti` migrated to the compile-time combiner registry (see register-combiner!).
+    ;; `defmethod` migrated to the compile-time combiner registry (see register-combiner!).
     ;; `deftype` migrated to the compile-time combiner registry (see register-combiner!).
-    [(list 'nix-ident _ ...)
-     (raise-parse-error 'removed-form
-                        "nix-ident removed — use (flake-input :NAME :NAMESPACE :path ...) for flake-input access. nix-ident was an undocumented escape hatch that bypassed the type system.")]
+    ;; `nix-ident` migrated to the compile-time combiner registry (see register-combiner!).
     ;; inc / dec / not= live in stdlib-portable.rkt — no parse-time
      ;; rejection. They flow through the ordinary call-form arm below.
     ;; `case` migrated to the compile-time combiner registry (see register-combiner!).
@@ -2932,27 +3599,16 @@
     ;; the qq-eval pass during expansion, so they never reach parse-list-form.
     ;; If we see them here, the user wrote `,x` or `` `(…) `` outside a
     ;; defmacro body.
-    [(list 'unquote _ ...)
-     (raise-parse-error 'unknown-form
-                        "unquote (`,`) outside quasiquote — `,x` is only valid inside a `` `…`` template in a defmacro body")]
-    [(list 'unquote-splicing _ ...)
-     (raise-parse-error 'unknown-form
-                        "unquote-splicing (`,@`) outside quasiquote — `,@x` is only valid inside a `` `…`` template in a defmacro body")]
-    [(list 'quasiquote _ ...)
-     (raise-parse-error 'unknown-form
-                        "quasiquote (`` ` ``) outside defmacro body — beagle's quasiquote is macro-template-only; use literal data containers (`'[…]` / `'{…}` / `'(…)`) for inert data construction")]
+    ;; `unquote` / `unquote-splicing` / `quasiquote` migrated to the
+    ;; compile-time combiner registry (see register-combiner!).
 
     ;; Literal-key (get target :kw) and (get target :kw default) canonicalize
     ;; to kw-access — same AST as (:kw target). Identity-preserving: same
     ;; emitted Nix as the call-form path used to produce. Dynamic-key form
     ;; (where the key is a binding, not a literal keyword) stays call-form
     ;; via the catch-all below — emit-nix lowers that to `target.${expr}`.
-    [(list 'get target (? keyword-sym? kw))
-     (kw-access kw (parse-expr (or (stx-ref subs 1) target)) #f)]
-    [(list 'get target (? keyword-sym? kw) default-expr)
-     (kw-access kw
-                (parse-expr (or (stx-ref subs 1) target))
-                (parse-expr (or (stx-ref subs 3) default-expr)))]
+    ;; `get` (literal-key) migrated to the compile-time combiner registry (see register-combiner!).
+    ;; Dynamic-key (get target expr) falls through to the call-form arm below, as before.
 
     [(list (? symbol? f) args ...)
      (call-form f (map parse-expr (or (stx-tail subs 1) args)))]
