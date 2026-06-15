@@ -239,11 +239,6 @@
     [(regexp-match? #rx"beagle/cljs"   lang-line) 'cljs]
     [(regexp-match? #rx"beagle/clj"    lang-line) 'clj]
     [(regexp-match? #rx"beagle/js"     lang-line) 'js]
-    [(regexp-match? #rx"beagle/py"     lang-line) 'py]
-    [(regexp-match? #rx"beagle/rkt"    lang-line) 'rkt]
-    [(regexp-match? #rx"beagle/zig"    lang-line) 'zig]
-    ;; beagle/scheme — Cyclone target, deferred pending Phase 0 runtime lib
-    [(regexp-match? #rx"beagle/scheme" lang-line) 'scheme]
     [else #f]))
 
 (define (read-beagle-syntax path)
@@ -292,7 +287,7 @@
                    (cons (datum->syntax #f (list 'define-target ext-tgt)) forms))]
              [else
               (error 'beagle
-                     "~a: #lang beagle requires a target — use #lang beagle/js, beagle/clj, beagle/py, beagle/nix, or add (define-target <target>)"
+                     "~a: #lang beagle requires a target — use #lang beagle/js, beagle/clj, beagle/cljs, beagle/nix, beagle/sql, or add (define-target <target>)"
                      (path->string src))])]
           [else forms])))))
 

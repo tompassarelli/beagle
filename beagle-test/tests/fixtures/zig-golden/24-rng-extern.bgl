@@ -1,4 +1,0 @@
-(ns g)
-(declare-extern kernel.rt/rng-below [Ctx Int -> Int])
-(defn roll-pair [ctx :- Ctx] :- Int
-  (+ (kernel.rt/rng-below ctx 6) (kernel.rt/rng-below ctx 6)))

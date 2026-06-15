@@ -1,3 +1,0 @@
-(ns g)
-(defn bits [x :- Int] :- Int
-  (bit-or (bit-and x 255) (bit-xor (bit-shift-left x 2) (bit-shift-right x 3))))

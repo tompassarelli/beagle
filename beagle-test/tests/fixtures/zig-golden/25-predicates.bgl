@@ -1,8 +1,0 @@
-(ns g)
-(defn signs [x :- Int] :- Int
-  (cond
-    [(zero? x) 0]
-    [(pos? x) 1]
-    [(neg? x) (- 0 1)]
-    [(even? x) 2]
-    [:else 3]))

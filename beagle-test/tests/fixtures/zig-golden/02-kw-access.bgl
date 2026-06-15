@@ -1,3 +1,0 @@
-(ns g)
-(defrecord Point [x :- Int y :- Int])
-(defn get-x [p :- Point] :- Int (:x p))

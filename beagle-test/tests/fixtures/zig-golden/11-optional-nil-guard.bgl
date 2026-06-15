@@ -1,3 +1,0 @@
-(ns g)
-(defn or-default [v :- Int? fallback :- Int] :- Int
-  (if (nil? v) fallback v))

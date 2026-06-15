@@ -1,7 +1,0 @@
-(ns g)
-(defn sum [ctx :- Ctx xs :- (Vec Int)] :- Int
-  (reduce (fn [acc :- Int x :- Int] :- Int (+ acc x)) 0 xs))
-(defn doubled [ctx :- Ctx xs :- (Vec Int)] :- (Vec Int)
-  (mapv (fn [x :- Int] :- Int (* x 2)) xs))
-(defn positives [ctx :- Ctx xs :- (Vec Int)] :- (Vec Int)
-  (filterv (fn [x :- Int] :- Bool (> x 0)) xs))

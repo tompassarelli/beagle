@@ -1,3 +1,0 @@
-(ns g)
-(defn poke [x :- Int] :- Nil
-  (when (> x 0) nil))

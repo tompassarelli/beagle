@@ -1,3 +1,0 @@
-(ns g)
-(defn pick [flag :- Bool a :- Int b :- Int] :- Int
-  (if flag a b))

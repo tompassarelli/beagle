@@ -1,3 +1,0 @@
-(ns g)
-(defn gate [a :- Bool b :- Bool c :- Bool] :- Bool
-  (or (and a b) (and (not c) a)))

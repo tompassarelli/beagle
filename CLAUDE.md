@@ -106,7 +106,7 @@ Classify demand- vs thesis-driven *before* gating. When the classification is un
 
 ### Zero escape hatches
 
-No `unsafe-*` (nix/js/clj/py/rkt), no `nix-ident`, no raw verbatim-string-to-target form — all rejected at parse time. When you hit a gap:
+No `unsafe-*` (nix/js/clj), no `nix-ident`, no raw verbatim-string-to-target form — all rejected at parse time. When you hit a gap:
 1. Missing stdlib function → add a one-line typed entry to `beagle-lib/private/stdlib-nix.rkt` (or `stdlib-portable.rkt`).
 2. Missing surface form → add AST struct + parse case + emit case + infer case + lint traversal + test.
 3. Genuinely untypable target snippet → write a sibling `.nix` file next to the `.bnix` and import it.

@@ -1,4 +1,0 @@
-(ns g)
-(defrecord S [v :- Int hits :- Int])
-(defn tick-step [ctx :- Ctx s :- S delta :- Int] :- S
-  (->S (+ (:v s) delta) (inc (:hits s))))

@@ -1,6 +1,0 @@
-(ns g)
-(defn chained [x :- Int] :- Int
-  (let [a (+ x 1)
-        b (* a 2)
-        c (- b a)]
-    (+ a b c)))

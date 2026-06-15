@@ -40,15 +40,11 @@
 
 #hasheq(
   (nix     . (active   "Load-bearing via bnix dogfood (firnos config + heist work)"))
-  (rkt     . (active   "Oracle target — Typed Racket validates Beagle's type promises via raco make; all current tests are structural"))
   (clj     . (active   "Promoted Phase D (2026-05): emit-clj structural + behavioral both active. Fixture-driven .bclj suites reconciled to v0.16 surface (claim form, no inline def/defn type annotations, defrecord+extend-type instead of deftype)"))
   (cljs    . (active   "Promoted Phase D (2026-05): emit-cljs path covered structurally by emit-clj suite (shared backend); .bcljs fixtures reconciled to v0.16 surface"))
   (js      . (split    "Structural active; behavioral demoted — JS target may become load-bearing via Bun work; currently aspirational"))
-  (py      . (split    "Structural active; behavioral demoted — Python target is recent; no load-bearing use yet"))
-  (sql     . (active   "Structural-only; no behavioral runner exists yet so nothing to demote"))
-  (odin    . (active   "Native target — Odin + wgpu/SDL3. Structural goldens + pointed rejections"))
-  (zig     . (gated    "Parked 2026-06-13 (pivoting to Odin). Emitter in dormant/; runtime in beagle-lib/zig/. Opt in via BEAGLE_ALL_TARGETS=1"))
-  (cyclone . (future   "Cyclone Scheme self-host target — not yet implemented. When it ships, its behavioral tests promote to active (self-host means Cyclone is the substrate Beagle runs on)")))
+  (sql     . (active   "Schema-typing live in check.rkt; emitter dormant (BEAGLE_ALL_TARGETS=1). Structural-only"))
+  (odin    . (active   "Native target — Odin + wgpu/SDL3. Structural goldens + pointed rejections")))
 
 
 ;; --- authoritative file-level classification ---
@@ -106,30 +102,24 @@
   (demoted . (;; behavioral runs that hit external interpreters
               "emit-js-behavioral.rkt")) ; requires bun
 
-  (gated . (;; Non-Nix target tests — parked alongside the dormant
-            ;; emitters. Opt in via BEAGLE_ALL_TARGETS=1 when revisiting
-            ;; a quarantined target. See thread 20260528233608 and
-            ;; beagle-lib/private/dormant/.
+  (gated . (;; Non-Nix target tests parked behind BEAGLE_ALL_TARGETS=1.
+            ;; SQL emitter is dormant (its schema-typing in check.rkt is live).
+            ;; (py/rkt/scheme/zig removed 2026-06-15 — tag
+            ;; dormant-targets-archive-2026-06-15 to revive.)
             "emit-js.rkt"
-            "emit-py.rkt"
-            "emit-rkt.rkt"
             "emit-sql.rkt"
             "js-fixtures.rkt"
             "js-quote.rkt"
             "jst.rkt"
-            "py-fixtures.rkt"
             "sql-fixtures.rkt"
             "sql-roundtrip.rkt"
             "sql-schema-cache.rkt"
-            ;; Zig backend — parked 2026-06-13, pivoting to Odin.
-            "emit-zig.rkt"
             ;; opt-in oracle/property/exec runners (env-gated)
             "differential.rkt"          ; BEAGLE_ORACLE=1
             "js-exec-oracle.rkt"        ; requires node/bun at runtime
             "nix-property.rkt"          ; BEAGLE_NIX_EVAL_CHECK=1
             "oracle.rkt"                ; BEAGLE_ORACLE=1
-            "oracle-bun.rkt"            ; BEAGLE_ORACLE=1
-            "py-exec-oracle.rkt")))     ; requires python at runtime
+            "oracle-bun.rkt")))         ; BEAGLE_ORACLE=1
             ;; (The quarantined "operative" checker/evaluator prototype was
             ;; deleted 2026-06-15 — it never ran on the live build path. The
             ;; operative *vision* is realized as the compile-time combiner layer

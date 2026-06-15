@@ -1,4 +1,0 @@
-(ns g)
-(defn square [x :- Int] :- Int (* x x))
-(defn sum-squares [a :- Int b :- Int] :- Int
-  (+ (square a) (square b)))

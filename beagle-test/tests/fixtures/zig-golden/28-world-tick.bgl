@@ -1,5 +1,0 @@
-(ns g)
-(defrecord Inner [count :- Int])
-(defrecord World [score :- Int inner :- Inner])
-(defn world-tick [ctx :- Ctx w :- World] :- World
-  (->World (+ (:score w) 1) (->Inner (inc (:count (:inner w))))))

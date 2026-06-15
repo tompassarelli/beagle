@@ -7,9 +7,8 @@
 ;;   .bcljs → #lang beagle/cljs
 ;;   .bjs   → #lang beagle/js
 ;;   .bnix  → #lang beagle/nix
-;;   .bsql  → #lang beagle/sql
-;;   .bpy   → #lang beagle/py
-;;   .bgl   → target-neutral (default Scheme planned once Cyclone runtime lands)
+;;   .bsql  → #lang beagle/sql (schema-typing live; emitter dormant)
+;;   .bgl   → target-neutral
 ;;   .rkt   → legacy (no validation)
 ;;
 ;; Extension/header mismatch is a hard compile error.
@@ -17,7 +16,7 @@
 (require racket/string)
 
 (define BEAGLE-EXTENSIONS
-  '(".bclj" ".bcljs" ".bjs" ".bnix" ".bsql" ".bpy" ".bzig" ".bodin" ".bgl" ".rkt"))
+  '(".bclj" ".bcljs" ".bjs" ".bnix" ".bsql" ".bodin" ".bgl" ".rkt"))
 
 (define (beagle-source-file? path-str)
   (ormap (lambda (ext) (string-suffix? path-str ext))
@@ -29,8 +28,6 @@
     (".bjs"   . js)
     (".bnix"  . nix)
     (".bsql"  . sql)
-    (".bpy"   . py)
-    (".bzig"  . zig)
     (".bodin" . odin)
     (".bgl"   . #f)     ; target-neutral; default-to-scheme deferred until Cyclone runtime
     (".rkt"   . #f)))   ; legacy — no validation
@@ -42,7 +39,7 @@
   (and match (cdr match)))
 
 ;; Regex matching all beagle source extensions (for directory scanning).
-(define BEAGLE-FILE-RX #rx"\\.(bclj|bcljs|bjs|bnix|bsql|bpy|bzig|bodin|brkt|bgl|rkt)$")
+(define BEAGLE-FILE-RX #rx"\\.(bclj|bcljs|bjs|bnix|bsql|bodin|bgl|rkt)$")
 
 (provide BEAGLE-EXTENSIONS
          beagle-source-file?

@@ -7,7 +7,7 @@ BIN="$BEAGLE_DIR/bin"
 usage() {
     cat >&2 <<'EOF'
 beagle — a typed Clojure subset; one AST → Clojure / ClojureScript /
-JavaScript / Nix / Odin (Zig, Python, SQL, Typed Racket dormant).
+JavaScript / Nix / Odin (SQL emitter dormant; schema-typing live).
 
 Usage: beagle <command> [args...]
 

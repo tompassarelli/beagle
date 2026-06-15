@@ -29,13 +29,12 @@ Never a lowest-common-denominator transpile.
 | JavaScript    | Live    |
 | Nix           | Live    |
 | Odin          | Live    |
-| Zig           | Dormant |
-| Python        | Dormant |
-| SQL           | Dormant |
-| Typed Racket  | Dormant |
+| SQL           | Dormant emitter (schema-typing live) |
 
-Dormant emitters sit under `dormant/`, one flag (`BEAGLE_ALL_TARGETS=1`)
-away.
+The SQL emitter sits under `dormant/`, one flag (`BEAGLE_ALL_TARGETS=1`)
+away; its schema-typing is live in the checker. (Python / Typed Racket /
+Scheme / Zig were removed 2026-06-15 — recoverable from the
+`dormant-targets-archive-2026-06-15` tag.)
 
 ## How it compiles
 
