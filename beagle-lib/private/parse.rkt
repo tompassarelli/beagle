@@ -2857,6 +2857,122 @@
                           "nix-ident removed — use (flake-input :NAME :NAMESPACE :path ...) for flake-input access. nix-ident was an undocumented escape hatch that bypassed the type system.")]
       [_ (parse-list-form* d subs)])))
 
+;; --- js family migrated to the compile-time combiner registry ---
+;; NOTE: `js/await` was already registered by the control family; skipped here.
+
+;; `js/quote` migrated to the compile-time combiner registry (see register-combiner!).
+(register-combiner! 'js/quote
+  (lambda (d subs)
+    (match d
+      [(cons 'js/quote body)
+       (js-quote-form (parse-js-ast-body (or (stx-tail subs 1) body)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/return` migrated to the compile-time combiner registry (see register-combiner!).
+(register-combiner! 'js/return
+  (lambda (d subs)
+    (match d
+      [(list 'js/return)
+       (jst-return #f)]
+      [(list 'js/return expr-form)
+       (jst-return (parse-expr expr-form))]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/class` migrated to the compile-time combiner registry (see register-combiner!).
+(register-combiner! 'js/class
+  (lambda (d subs)
+    (match d
+      [(list* 'js/class name-form rest)
+       (parse-jst-class name-form rest)]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/template` migrated to the compile-time combiner registry (see register-combiner!).
+(register-combiner! 'js/template
+  (lambda (d subs)
+    (match d
+      [(cons 'js/template parts)
+       (jst-template (map (lambda (p)
+                            (define v (->datum p))
+                            (if (string? v) v (parse-expr p)))
+                          (cdr d)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/spread` migrated to the compile-time combiner registry (see register-combiner!).
+(register-combiner! 'js/spread
+  (lambda (d subs)
+    (match d
+      [(list 'js/spread expr-form)
+       (jst-spread (parse-expr expr-form))]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/typeof` migrated to the compile-time combiner registry (see register-combiner!).
+(register-combiner! 'js/typeof
+  (lambda (d subs)
+    (match d
+      [(list 'js/typeof expr-form)
+       (jst-typeof (parse-expr expr-form))]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/import-meta` migrated to the compile-time combiner registry (see register-combiner!).
+(register-combiner! 'js/import-meta
+  (lambda (d subs)
+    (match d
+      [(list 'js/import-meta)
+       (jst-import-meta)]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/export` migrated to the compile-time combiner registry (see register-combiner!).
+(register-combiner! 'js/export
+  (lambda (d subs)
+    (match d
+      [(list 'js/export inner-form)
+       (define inner (parse-expr inner-form))
+       (cond
+         [(jst-class? inner) (struct-copy jst-class inner [export? #t])]
+         [else (jst-export inner)])]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/export-default` migrated to the compile-time combiner registry (see register-combiner!).
+(register-combiner! 'js/export-default
+  (lambda (d subs)
+    (match d
+      [(list 'js/export-default inner-form)
+       (jst-export-default (parse-expr inner-form))]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/!` migrated to the compile-time combiner registry (see register-combiner!).
+(register-combiner! 'js/!
+  (lambda (d subs)
+    (match d
+      [(list 'js/! expr-form)
+       (jst-unary '! (parse-expr expr-form))]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/void` migrated to the compile-time combiner registry (see register-combiner!).
+(register-combiner! 'js/void
+  (lambda (d subs)
+    (match d
+      [(list 'js/void expr-form)
+       (jst-unary 'void (parse-expr expr-form))]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/-` and `js/+` share one arm (see register-combiner!): both register to this
+;; handler, which keeps the (or 'js/- 'js/+) pattern. The shared arm is deleted once.
+(register-combiner! 'js/-
+  (lambda (d subs)
+    (match d
+      [(list (and op (or 'js/- 'js/+)) expr-form)
+       (define js-op (if (eq? op 'js/-) '- '+))
+       (jst-unary js-op (parse-expr expr-form))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'js/+
+  (lambda (d subs)
+    (match d
+      [(list (and op (or 'js/- 'js/+)) expr-form)
+       (define js-op (if (eq? op 'js/-) '- '+))
+       (jst-unary js-op (parse-expr expr-form))]
+      [_ (parse-list-form* d subs)])))
+
 (define (parse-list-form d subs)
   ;; Invariant: macro heads are resolved in parse-expr (and the top-level loop)
   ;; BEFORE control reaches here, so a 'macro head must never arrive — if one
@@ -2985,58 +3101,11 @@
 
     ;; --- end Nix-specific forms ----------------------------------------------
 
-    ;; --- JS-specific forms (js/quote) -----------------------------------------
-
-    [(cons 'js/quote body)
-     (js-quote-form (parse-js-ast-body (or (stx-tail subs 1) body)))]
-
-    ;; --- Typed JS target forms (js/*) -----------------------------------------
-    ;; Minimal set: only forms with no core beagle equivalent.
-
-    [(list 'js/return)
-     (jst-return #f)]
-
-    [(list 'js/return expr-form)
-     (jst-return (parse-expr expr-form))]
-
-    [(list* 'js/class name-form rest)
-     (parse-jst-class name-form rest)]
-
-    [(cons 'js/template parts)
-     (jst-template (map (lambda (p)
-                          (define v (->datum p))
-                          (if (string? v) v (parse-expr p)))
-                        (cdr d)))]
-
-    [(list 'js/spread expr-form)
-     (jst-spread (parse-expr expr-form))]
-
-    [(list 'js/typeof expr-form)
-     (jst-typeof (parse-expr expr-form))]
-
-    [(list 'js/import-meta)
-     (jst-import-meta)]
-
-    [(list 'js/export inner-form)
-     (define inner (parse-expr inner-form))
-     (cond
-       [(jst-class? inner) (struct-copy jst-class inner [export? #t])]
-       [else (jst-export inner)])]
-
-    ;; `export default <expr>` — JS has no `const default` binding (reserved),
-    ;; so this must be its own form. Used for default module exports.
-    [(list 'js/export-default inner-form)
-     (jst-export-default (parse-expr inner-form))]
-
-    [(list 'js/! expr-form)
-     (jst-unary '! (parse-expr expr-form))]
-
-    [(list 'js/void expr-form)
-     (jst-unary 'void (parse-expr expr-form))]
-
-    [(list (and op (or 'js/- 'js/+)) expr-form)
-     (define js-op (if (eq? op 'js/-) '- '+))
-     (jst-unary js-op (parse-expr expr-form))]
+    ;; --- JS-specific forms (js/*) ---------------------------------------------
+    ;; js/quote, js/return, js/class, js/template, js/spread, js/typeof,
+    ;; js/import-meta, js/export, js/export-default, js/!, js/void, js/-, js/+
+    ;; migrated to the compile-time combiner registry (see register-combiner!).
+    ;; The predicate-headed jst-binary-op arm below stays (no literal head).
 
     [(list (? jst-binary-op? op) left-form right-form)
      (jst-binary (hash-ref JST-BINARY-OPS op) (parse-expr left-form) (parse-expr right-form))]
