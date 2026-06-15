@@ -1,5 +1,0 @@
-Hot take|2000
-Tutorial|1200
-Deep dive|800
-Hello|500
-Tips|300
