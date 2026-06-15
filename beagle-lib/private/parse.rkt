@@ -2281,6 +2281,259 @@
                           "defmethod removed — use defprotocol + extend-type for type-based dispatch")]
       [_ (parse-list-form* d subs)])))
 
+;; --- control family migrated to the compile-time combiner registry ---
+
+;; `match` — pattern-match dispatch.
+(register-combiner! 'match
+  (lambda (d subs)
+    (match d
+      [(list 'match target-expr clauses ...)
+       (parse-match-form (or (stx-ref subs 1) target-expr)
+                         (or (stx-tail subs 2) clauses))]
+      [_ (parse-list-form* d subs)])))
+
+;; `condp` — predicate-dispatch conditional.
+(register-combiner! 'condp
+  (lambda (d subs)
+    (match d
+      [(list 'condp pred-fn test-expr clauses ...)
+       (parse-condp-form (or (stx-ref subs 1) pred-fn)
+                         (or (stx-ref subs 2) test-expr)
+                         (or (stx-tail subs 3) clauses))]
+      [_ (parse-list-form* d subs)])))
+
+;; `cond->` — conditional thread-first. Desugars to a let-chain / (if …) nodes,
+;; wrapped in threading-marker so the clj/cljs emitter can reconstruct surface.
+(register-combiner! 'cond->
+  (lambda (d subs)
+    (match d
+      [(list 'cond-> init clauses ...)
+       (define orig-stxs (or (and subs (stx-tail subs 1))
+                             (cons init clauses)))
+       (threading-marker
+        'cond->
+        (map parse-expr orig-stxs)
+        (parse-expr (rewrite-as
+                     (expand-cond-thread (or (stx-ref subs 1) init)
+                                         (or (and subs (stx-tail subs 2)) clauses)
+                                         'first))))]
+      [_ (parse-list-form* d subs)])))
+
+;; `cond->>` — conditional thread-last.
+(register-combiner! 'cond->>
+  (lambda (d subs)
+    (match d
+      [(list 'cond->> init clauses ...)
+       (define orig-stxs (or (and subs (stx-tail subs 1))
+                             (cons init clauses)))
+       (threading-marker
+        'cond->>
+        (map parse-expr orig-stxs)
+        (parse-expr (rewrite-as
+                     (expand-cond-thread (or (stx-ref subs 1) init)
+                                         (or (and subs (stx-tail subs 2)) clauses)
+                                         'last))))]
+      [_ (parse-list-form* d subs)])))
+
+;; `as->` — named-binding threading. Success arm + symbol-placeholder rejection.
+(register-combiner! 'as->
+  (lambda (d subs)
+    (match d
+      [(list 'as-> init (? symbol? name) steps ...)
+       (define orig-stxs (or (and subs (stx-tail subs 1))
+                             (cons init (cons name steps))))
+       (threading-marker
+        'as->
+        (map parse-expr orig-stxs)
+        (parse-expr (rewrite-as
+                     (expand-as-thread (or (stx-ref subs 1) init)
+                                       name
+                                       (or (and subs (stx-tail subs 3)) steps)))))]
+      [(list 'as-> _ _ _ ...)
+       (raise-parse-error 'bad-form
+                          "as-> expects a symbol placeholder: (as-> init name steps...)")]
+      [_ (parse-list-form* d subs)])))
+
+;; `some->` — short-circuit thread-first.
+(register-combiner! 'some->
+  (lambda (d subs)
+    (match d
+      [(list 'some-> init steps ...)
+       (define orig-stxs (or (and subs (stx-tail subs 1))
+                             (cons init steps)))
+       (threading-marker
+        'some->
+        (map parse-expr orig-stxs)
+        (parse-expr (rewrite-as
+                     (expand-some-thread (or (stx-ref subs 1) init)
+                                         (or (and subs (stx-tail subs 2)) steps)
+                                         'first))))]
+      [_ (parse-list-form* d subs)])))
+
+;; `some->>` — short-circuit thread-last.
+(register-combiner! 'some->>
+  (lambda (d subs)
+    (match d
+      [(list 'some->> init steps ...)
+       (define orig-stxs (or (and subs (stx-tail subs 1))
+                             (cons init steps)))
+       (threading-marker
+        'some->>
+        (map parse-expr orig-stxs)
+        (parse-expr (rewrite-as
+                     (expand-some-thread (or (stx-ref subs 1) init)
+                                         (or (and subs (stx-tail subs 2)) steps)
+                                         'last))))]
+      [_ (parse-list-form* d subs)])))
+
+;; `recur` — loop/fn tail recursion target.
+(register-combiner! 'recur
+  (lambda (d subs)
+    (match d
+      [(list 'recur args ...)
+       (recur-form (map parse-expr (or (stx-tail subs 1) args)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `get` — literal-key projection canonicalizes to kw-access (2- and 3-arg).
+;; Dynamic-key form (non-literal key) falls through to call-form via legacy.
+(register-combiner! 'get
+  (lambda (d subs)
+    (match d
+      [(list 'get target (? keyword-sym? kw))
+       (kw-access kw (parse-expr (or (stx-ref subs 1) target)) #f)]
+      [(list 'get target (? keyword-sym? kw) default-expr)
+       (kw-access kw
+                  (parse-expr (or (stx-ref subs 1) target))
+                  (parse-expr (or (stx-ref subs 3) default-expr)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `get-or` — Nix attr access with default.
+(register-combiner! 'get-or
+  (lambda (d subs)
+    (match d
+      [(list 'get-or base path-expr default-expr)
+       (nix-get-or (parse-expr (or (stx-ref subs 1) base))
+                   (let ([d (->datum (or (stx-ref subs 2) path-expr))])
+                     (cond
+                       [(symbol? d) (symbol->string d)]
+                       [(and (pair? d) (eq? (car d) 'quote) (pair? (cdr d)))
+                        (symbol->string (cadr d))]
+                       [else (format "~a" d)]))
+                   (parse-expr (or (stx-ref subs 3) default-expr)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `has` — removed 2026-06-12 (zero corpus hits). Pointed rejection at contains?.
+(register-combiner! 'has
+  (lambda (d subs)
+    (match d
+      [(list 'has _ _)
+       (raise-parse-error 'removed-form
+                          "(has m :k) — `has` is removed. Use `(contains? m :k)` (Clojure spelling; lowers to hasAttr on nix)."
+                          #:suggestion (replace-head-suggestion 'has 'contains?))]
+      [_ (parse-list-form* d subs)])))
+
+;; `implies` — removed as part of the pipe family. Pointed rejection.
+(register-combiner! 'implies
+  (lambda (d subs)
+    (match d
+      [(list 'implies _ ...)
+       (raise-parse-error 'legacy-pipe-form
+                          "(implies …) — removed as part of the pipe family. Use `(if a b true)` for logical implication, or `(or (not a) b)`.")]
+      [_ (parse-list-form* d subs)])))
+
+;; `assert` — bare `assert` HARD-REJECTED; canonical Nix form is `nix/assert`.
+(register-combiner! 'assert
+  (lambda (d subs)
+    (match d
+      [(list 'assert _ _)
+       (raise-parse-error 'bare-nix-form
+                          "(assert ...) — bare `assert` is not supported. Beagle namespaces target-specific forms; use `(nix/assert COND BODY)`."
+                          #:suggestion (replace-head-suggestion 'assert 'nix/assert))]
+      [_ (parse-list-form* d subs)])))
+
+;; `rescue` — error-handling expression; named-handler and fallback shapes.
+(register-combiner! 'rescue
+  (lambda (d subs)
+    (match d
+      [(list 'rescue expr (? symbol? err-name) handler)
+       (rescue-form (parse-expr (or (stx-ref subs 1) expr))
+                    (parse-expr (or (stx-ref subs 3) handler))
+                    err-name)]
+      [(list 'rescue expr fallback)
+       (rescue-form (parse-expr (or (stx-ref subs 1) expr))
+                    (parse-expr (or (stx-ref subs 2) fallback))
+                    #f)]
+      [_ (parse-list-form* d subs)])))
+
+;; `js/await` — JS-async await (namespaced).
+(register-combiner! 'js/await
+  (lambda (d subs)
+    (match d
+      [(list 'js/await inner)
+       (await-form (parse-expr (or (stx-ref subs 1) inner)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `await` — bare `await` rejected with a pointed migration message to js/await.
+(register-combiner! 'await
+  (lambda (d subs)
+    (match d
+      [(list 'await _)
+       (raise-parse-error 'bare-js-form
+                          "(await ...) — bare `await` is not supported. Beagle namespaces target-specific forms; use `(js/await EXPR)`."
+                          #:suggestion (replace-head-suggestion 'await 'js/await))]
+      [_ (parse-list-form* d subs)])))
+
+;; `fmt` — removed 2026-06-12 (zero corpus hits; not Clojure). Pointed rejection.
+(register-combiner! 'fmt
+  (lambda (d subs)
+    (match d
+      [(list 'fmt _ ...)
+       (raise-parse-error 'removed-form
+                          "(fmt \"... ${x} ...\") — `fmt` is removed. Use `(str \"... \" x \" ...\")` or `(format \"... %s ...\" x)`.")]
+      [_ (parse-list-form* d subs)])))
+
+;; `ms` — Nix multi-line string.
+(register-combiner! 'ms
+  (lambda (d subs)
+    (match d
+      [(list 'ms lines ...)
+       (nix-multiline-string
+        (map (lambda (line)
+               (define d (->datum line))
+               (if (string? d) d (parse-expr line)))
+             (or (stx-tail subs 1) lines)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `check` — check-expr wrapper.
+(register-combiner! 'check
+  (lambda (d subs)
+    (match d
+      [(list 'check expr)
+       (check-expr (parse-expr (or (stx-ref subs 1) expr)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `claim` — HARD-REJECTED; claim is not a form (use inline `:-` annotations).
+(register-combiner! 'claim
+  (lambda (d subs)
+    (match d
+      [(cons 'claim _)
+       (raise-parse-error 'claim-form-removed
+        (string-append
+         "(claim NAME TYPE) — claim is not a form. Beagle's surface is typed "
+         "Clojure + inference; use inline annotations: "
+         "`(def NAME :- TYPE VALUE)` for top-level bindings, "
+         "`[param :- TYPE]` and `:- RET-TYPE` for defn."))]
+      [_ (parse-list-form* d subs)])))
+
+;; `dotimes` — removed; sugar for (doseq [i (range n)] body...). Pointed rejection.
+(register-combiner! 'dotimes
+  (lambda (d subs)
+    (match d
+      [(list 'dotimes _ ...)
+       (raise-parse-error 'removed-form
+                          "dotimes removed — use (doseq [i (range n)] body...)")]
+      [_ (parse-list-form* d subs)])))
+
 (define (parse-list-form d subs)
   ;; Invariant: macro heads are resolved in parse-expr (and the top-level loop)
   ;; BEFORE control reaches here, so a 'macro head must never arrive — if one
@@ -2310,17 +2563,7 @@
 
     ;; `defn` / `defn-` migrated to the compile-time combiner registry (see register-combiner!).
 
-    ;; (claim NAME TYPE) is HARD-REJECTED. Beagle's surface is typed Clojure
-    ;; plus inference — type information rides on ordinary bindings via inline
-    ;; `:-` annotations at boundaries. There is no separate type-fact form.
-    ;; This was removed under the Zero-users rule: no transitional alias.
-    [(cons 'claim _)
-     (raise-parse-error 'claim-form-removed
-      (string-append
-       "(claim NAME TYPE) — claim is not a form. Beagle's surface is typed "
-       "Clojure + inference; use inline annotations: "
-       "`(def NAME :- TYPE VALUE)` for top-level bindings, "
-       "`[param :- TYPE]` and `:- RET-TYPE` for defn."))]
+    ;; `claim` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; `defrecord` migrated to the compile-time combiner registry (see register-combiner!).
 
@@ -2372,17 +2615,10 @@
     ;; `letfn` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; `loop` migrated to the compile-time combiner registry (see register-combiner!).
-    [(list 'recur args ...)
-     (recur-form (map parse-expr (or (stx-tail subs 1) args)))]
+    ;; `recur` migrated to the compile-time combiner registry (see register-combiner!).
 
-    ;; JS-async await — namespaced under `js/` per audit row 8.
-    ;; Bare `(await …)` is rejected with a pointed migration message.
-    [(list 'js/await inner)
-     (await-form (parse-expr (or (stx-ref subs 1) inner)))]
-    [(list 'await _)
-     (raise-parse-error 'bare-js-form
-                        "(await ...) — bare `await` is not supported. Beagle namespaces target-specific forms; use `(js/await EXPR)`."
-                        #:suggestion (replace-head-suggestion 'await 'js/await))]
+    ;; `js/await` migrated to the compile-time combiner registry (see register-combiner!).
+    ;; `await` (bare) migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; --- Nix-specific forms --------------------------------------------------
 
@@ -2407,10 +2643,7 @@
      ;; see the bare-`assert` arm below.
      (nix-assert (parse-expr (or (stx-ref subs 1) cond-expr))
                  (parse-expr (or (stx-ref subs 2) body-expr)))]
-    [(list 'assert _ _)
-     (raise-parse-error 'bare-nix-form
-                        "(assert ...) — bare `assert` is not supported. Beagle namespaces target-specific forms; use `(nix/assert COND BODY)`."
-                        #:suggestion (replace-head-suggestion 'assert 'nix/assert))]
+    ;; `assert` (bare) migrated to the compile-time combiner registry (see register-combiner!).
 
     [(list 'nix/with-cfg path-expr body-expr)
      ;; (nix/with-cfg config.myConfig.modules.X BODY) → introduces `cfg = config...;`
@@ -2423,22 +2656,9 @@
                         "(with-cfg ...) — bare `with-cfg` is not supported. Beagle namespaces target-specific forms; use `(nix/with-cfg PATH BODY)`."
                         #:suggestion (replace-head-suggestion 'with-cfg 'nix/with-cfg))]
 
-    [(list 'get-or base path-expr default-expr)
-     (nix-get-or (parse-expr (or (stx-ref subs 1) base))
-                 (let ([d (->datum (or (stx-ref subs 2) path-expr))])
-                   (cond
-                     [(symbol? d) (symbol->string d)]
-                     [(and (pair? d) (eq? (car d) 'quote) (pair? (cdr d)))
-                      (symbol->string (cadr d))]
-                     [else (format "~a" d)]))
-                 (parse-expr (or (stx-ref subs 3) default-expr)))]
+    ;; `get-or` migrated to the compile-time combiner registry (see register-combiner!).
 
-    ;; `has` — removed 2026-06-12 (zero corpus hits). `contains?` is the
-    ;; Clojure spelling; emit-nix lowers it to hasAttr.
-    [(list 'has _ _)
-     (raise-parse-error 'removed-form
-                        "(has m :k) — `has` is removed. Use `(contains? m :k)` (Clojure spelling; lowers to hasAttr on nix)."
-                        #:suggestion (replace-head-suggestion 'has 'contains?))]
+    ;; `has` migrated to the compile-time combiner registry (see register-combiner!).
 
     [(list 'search-path name-expr)
      (define d (->datum (or (stx-ref subs 1) name-expr)))
@@ -2454,12 +2674,7 @@
              (if (string? d) d (parse-expr part)))
            (or (stx-tail subs 1) (cdr d))))]
 
-    [(list 'ms lines ...)
-     (nix-multiline-string
-      (map (lambda (line)
-             (define d (->datum line))
-             (if (string? d) d (parse-expr line)))
-           (or (stx-tail subs 1) lines)))]
+    ;; `ms` migrated to the compile-time combiner registry (see register-combiner!).
 
     [(list '#%block-string tag text)
      (block-string (->datum (or (stx-ref subs 2) text))
@@ -2538,9 +2753,7 @@
     [(list 'pipe-from _ ...)
      (raise-parse-error 'legacy-pipe-form
                         "(pipe-from …) — the pipe family is removed. Use `(->> x f …)` for thread-last.")]
-    [(list 'implies _ ...)
-     (raise-parse-error 'legacy-pipe-form
-                        "(implies …) — removed as part of the pipe family. Use `(if a b true)` for logical implication, or `(or (not a) b)`.")]
+    ;; `implies` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; --- end Nix-specific forms ----------------------------------------------
 
@@ -2779,24 +2992,13 @@
 
     ;; `cond` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'condp pred-fn test-expr clauses ...)
-     (parse-condp-form (or (stx-ref subs 1) pred-fn)
-                       (or (stx-ref subs 2) test-expr)
-                       (or (stx-tail subs 3) clauses))]
+    ;; `condp` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; `try` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'check expr)
-     (check-expr (parse-expr (or (stx-ref subs 1) expr)))]
+    ;; `check` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'rescue expr (? symbol? err-name) handler)
-     (rescue-form (parse-expr (or (stx-ref subs 1) expr))
-                  (parse-expr (or (stx-ref subs 3) handler))
-                  err-name)]
-    [(list 'rescue expr fallback)
-     (rescue-form (parse-expr (or (stx-ref subs 1) expr))
-                  (parse-expr (or (stx-ref subs 2) fallback))
-                  #f)]
+    ;; `rescue` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; `target-case` migrated to the compile-time combiner registry (see register-combiner!).
 
@@ -2841,9 +3043,7 @@
 
     ;; `defscalar` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'match target-expr clauses ...)
-     (parse-match-form (or (stx-ref subs 1) target-expr)
-                       (or (stx-tail subs 2) clauses))]
+    ;; `match` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; case removed — folded into match + or-pattern. The case-fold
     ;; optimization in emit-clj.rkt and emit-rkt.rkt lowers literal-only
@@ -2876,11 +3076,7 @@
     [(list (? static-method-sym? cm) args ...)
      (static-call cm (map parse-expr (or (stx-tail subs 1) args)))]
 
-    ;; `fmt` string interpolation — removed 2026-06-12 (zero corpus hits;
-    ;; not Clojure). `str` / `format` are the Clojure spellings.
-    [(list 'fmt _ ...)
-     (raise-parse-error 'removed-form
-                        "(fmt \"... ${x} ...\") — `fmt` is removed. Use `(str \"... \" x \" ...\")` or `(format \"... %s ...\" x)`.")]
+    ;; `fmt` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; Clojure threading family — all parse-time rewrites to ordinary
     ;; composition. `->` and `->>` are the canonical replacements for the
@@ -2912,59 +3108,11 @@
       (parse-expr (rewrite-as
                    (expand-thread-last (or (stx-ref subs 1) init)
                                        (or (and subs (stx-tail subs 2)) steps)))))]
-    [(list 'as-> init (? symbol? name) steps ...)
-     (define orig-stxs (or (and subs (stx-tail subs 1))
-                           (cons init (cons name steps))))
-     (threading-marker
-      'as->
-      (map parse-expr orig-stxs)
-      (parse-expr (rewrite-as
-                   (expand-as-thread (or (stx-ref subs 1) init)
-                                     name
-                                     (or (and subs (stx-tail subs 3)) steps)))))]
-    [(list 'as-> _ _ _ ...)
-     (raise-parse-error 'bad-form
-                        "as-> expects a symbol placeholder: (as-> init name steps...)")]
-    [(list 'cond-> init clauses ...)
-     (define orig-stxs (or (and subs (stx-tail subs 1))
-                           (cons init clauses)))
-     (threading-marker
-      'cond->
-      (map parse-expr orig-stxs)
-      (parse-expr (rewrite-as
-                   (expand-cond-thread (or (stx-ref subs 1) init)
-                                       (or (and subs (stx-tail subs 2)) clauses)
-                                       'first))))]
-    [(list 'cond->> init clauses ...)
-     (define orig-stxs (or (and subs (stx-tail subs 1))
-                           (cons init clauses)))
-     (threading-marker
-      'cond->>
-      (map parse-expr orig-stxs)
-      (parse-expr (rewrite-as
-                   (expand-cond-thread (or (stx-ref subs 1) init)
-                                       (or (and subs (stx-tail subs 2)) clauses)
-                                       'last))))]
-    [(list 'some-> init steps ...)
-     (define orig-stxs (or (and subs (stx-tail subs 1))
-                           (cons init steps)))
-     (threading-marker
-      'some->
-      (map parse-expr orig-stxs)
-      (parse-expr (rewrite-as
-                   (expand-some-thread (or (stx-ref subs 1) init)
-                                       (or (and subs (stx-tail subs 2)) steps)
-                                       'first))))]
-    [(list 'some->> init steps ...)
-     (define orig-stxs (or (and subs (stx-tail subs 1))
-                           (cons init steps)))
-     (threading-marker
-      'some->>
-      (map parse-expr orig-stxs)
-      (parse-expr (rewrite-as
-                   (expand-some-thread (or (stx-ref subs 1) init)
-                                       (or (and subs (stx-tail subs 2)) steps)
-                                       'last))))]
+    ;; `as->` migrated to the compile-time combiner registry (see register-combiner!).
+    ;; `cond->` migrated to the compile-time combiner registry (see register-combiner!).
+    ;; `cond->>` migrated to the compile-time combiner registry (see register-combiner!).
+    ;; `some->` migrated to the compile-time combiner registry (see register-combiner!).
+    ;; `some->>` migrated to the compile-time combiner registry (see register-combiner!).
     ;; Clojure conditional sugar — accept-and-canonicalize to (if …) / (if … (do …)).
     ;; Identity-preserving: same emitted code as the hand-written canonical
     ;; form. The lowerings mirror lower-binding-cond's shape — multi-body
@@ -3006,9 +3154,7 @@
     ;; the sugar is welcome.
     ;; `if-let` / `when-let` / `if-some` / `when-some` migrated to the
     ;; compile-time combiner registry (see register-combiner!).
-    [(list 'dotimes _ ...)
-     (raise-parse-error 'removed-form
-                        "dotimes removed — use (doseq [i (range n)] body...)")]
+    ;; `dotimes` migrated to the compile-time combiner registry (see register-combiner!).
     ;; `defmulti` migrated to the compile-time combiner registry (see register-combiner!).
     ;; `defmethod` migrated to the compile-time combiner registry (see register-combiner!).
     ;; `deftype` migrated to the compile-time combiner registry (see register-combiner!).
@@ -3051,12 +3197,8 @@
     ;; emitted Nix as the call-form path used to produce. Dynamic-key form
     ;; (where the key is a binding, not a literal keyword) stays call-form
     ;; via the catch-all below — emit-nix lowers that to `target.${expr}`.
-    [(list 'get target (? keyword-sym? kw))
-     (kw-access kw (parse-expr (or (stx-ref subs 1) target)) #f)]
-    [(list 'get target (? keyword-sym? kw) default-expr)
-     (kw-access kw
-                (parse-expr (or (stx-ref subs 1) target))
-                (parse-expr (or (stx-ref subs 3) default-expr)))]
+    ;; `get` (literal-key) migrated to the compile-time combiner registry (see register-combiner!).
+    ;; Dynamic-key (get target expr) falls through to the call-form arm below, as before.
 
     [(list (? symbol? f) args ...)
      (call-form f (map parse-expr (or (stx-tail subs 1) args)))]
