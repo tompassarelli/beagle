@@ -125,49 +125,55 @@ def ensure_daemon_running():
         return False
 
 
-def run_syntax_check(file_path):
-    """Pass 0: structural delimiter check. Returns (message, has_errors)."""
+def _syntax_json(file_path):
+    result = subprocess.run(
+        [SYNTAX_BIN, "--json", file_path],
+        capture_output=True, text=True, timeout=5
+    )
+    if result.returncode == 0:
+        return None
     try:
-        result = subprocess.run(
-            [SYNTAX_BIN, "--json", file_path],
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    return None if data.get("status") == "ok" else data
+
+
+def run_syntax_check(file_path):
+    """Pass 0: structural check with deterministic auto-balance.
+    Returns (message, has_errors)."""
+    try:
+        data = _syntax_json(file_path)
+        if data is None:
+            return None, False
+
+        # Deterministic auto-balance (parinfer indent-mode). --repair --write
+        # applies ONLY when high-confidence + re-verified balanced, so it never
+        # writes a guess. The model must never hand-count parens.
+        subprocess.run(
+            [SYNTAX_BIN, "--repair", "--write", file_path],
             capture_output=True, text=True, timeout=5
         )
-        if result.returncode == 0:
-            return None, False
-
-        try:
-            data = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            return None, False
-
-        if data.get("status") == "ok":
-            return None, False
-
-        errors = data.get("errors", [])
-        counts = data.get("counts", {})
+        after = _syntax_json(file_path)
         filename = os.path.basename(file_path)
-        lines = [f"beagle-syntax: {filename} — STRUCTURAL ERROR"]
 
-        for e in errors:
+        if after is None:
+            return (f"beagle-syntax: {filename} — auto-balanced delimiters "
+                    f"(deterministic, re-verified). File updated on disk — "
+                    f"re-read before further edits.", False)
+
+        lines = [f"beagle-syntax: {filename} — STRUCTURAL ERROR (not auto-fixable; ambiguous)"]
+        for e in after.get("errors", []):
             lines.append(f"  {e.get('line', 0)}:{e.get('col', 0)} {e.get('detail', '')}")
-
         for name, key in [("()", "parens"), ("[]", "brackets"), ("{}", "braces")]:
-            c = counts.get(key, {})
+            c = after.get("counts", {}).get(key, {})
             bal = c.get("balance", 0)
             if bal != 0:
                 lines.append(
                     f"  {name} open:{c.get('open',0)} close:{c.get('close',0)} "
                     f"balance:{bal:+d} UNBALANCED"
                 )
-
-        repair = data.get("repair")
-        if repair and repair != "null" and isinstance(repair, dict):
-            edits = repair.get("edits", [])
-            if edits:
-                conf = repair.get("confidence", "?")
-                lines.append(f"  repair available ({conf}, {len(edits)} edit(s))")
-                lines.append(f"  run: bin/beagle-syntax --repair --write {file_path}")
-
+        lines.append(f"  review: bin/beagle-syntax --repair --emit-patch {file_path}")
         return "\n".join(lines), True
     except (subprocess.TimeoutExpired, Exception):
         return None, False

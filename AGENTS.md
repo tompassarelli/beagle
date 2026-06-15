@@ -41,10 +41,11 @@ There is no static reference; the surface churns. Query it:
 ## Rules with teeth
 
 - No escape hatches anywhere (`unsafe-*`, `nix-ident`, raw passthrough).
-- After an edit, the PostToolUse hook runs `beagle syntax`; fix delimiter
-  errors before type errors.
-- Use the tools above — don't count parens by hand or grep for signatures
-  when `bin/beagle sig` exists.
+- After an edit, the PostToolUse hook runs `beagle syntax` and **auto-balances
+  deterministic paren/delimiter imbalance** (high-confidence + re-verified only);
+  it re-reads cleanly. Only ambiguous cases (e.g. unclosed string) need you.
+- Never count parens by hand (the tool does it deterministically); don't grep
+  for signatures when `bin/beagle sig` exists.
 - Active-tier failures: fix. Demoted/gated failures during surface
   iteration: leave alone (that's what the tiering is for).
 

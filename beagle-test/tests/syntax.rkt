@@ -407,6 +407,30 @@
       (check-true (check-result-valid? (check-structure (repair-result-output r)))))))
 
 ;; ============================================================================
+;; 10. Safe auto-apply gate — the contract `beagle-syntax --repair --write` and
+;; the PostToolUse hook rely on: high-confidence + re-verifies => auto-apply;
+;; low-confidence (e.g. unclosed string) => refuse, never write a guess.
+;; ============================================================================
+
+(define safe-write-gate-suite
+  (test-suite "safe auto-apply gate"
+    (test-case "paren imbalance: high-confidence + re-verifies (auto-applies)"
+      (define r (repair-structure "(defn outer []\n  (let [x 1]\n    (when x\n      (g x)))\n\n(defn next-fn [] 1)"))
+      (check-true (repair-result-changed? r))
+      (check-equal? (repair-result-confidence r) 'high)
+      (check-true (check-result-valid? (check-structure (repair-result-output r)))))
+
+    (test-case "defn-swallow (vim.bjs class): close lands before the next top-level defn"
+      (define out (repair-result-output
+                   (repair-structure "(defn a [x]\n  (foo\n    (bar x)\n\n(defn b [] 2)")))
+      (check-true (check-result-valid? (check-structure out)))
+      ;; `b` survives as its own top-level form — not swallowed into `a`
+      (check-true (regexp-match? #rx"\n\\(defn b" out)))
+
+    (test-case "unclosed string: low confidence => --write refuses (no guess)"
+      (check-equal? (repair-result-confidence (repair-structure "(f \"oops)\n")) 'low))))
+
+;; ============================================================================
 ;; Run
 ;; ============================================================================
 
@@ -419,3 +443,4 @@
 (run-tests patch-suite)
 (run-tests check-suite)
 (run-tests parinfer-suite)
+(run-tests safe-write-gate-suite)

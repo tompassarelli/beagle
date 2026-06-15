@@ -75,9 +75,11 @@ Confirm the daemon up front to avoid cold-start delay:
 
 ## Agent loop
 
-Trust hook output; fix syntax (delimiter) errors before type errors —
-`bin/beagle syntax` already counted the parens. Prefer query tools over
-opening large files, and `--emit-patch` over manual repair.
+Trust hook output. **Never hand-count or hand-fix parens** — the PostToolUse
+hook auto-balances deterministic delimiter imbalance (`beagle-syntax --repair
+--write`, parinfer indent-mode, applied only when high-confidence + re-verified)
+and re-reads cleanly; only genuinely-ambiguous cases (e.g. unclosed string)
+surface for you. Prefer query tools over opening large files.
 
 ## Rules with teeth
 

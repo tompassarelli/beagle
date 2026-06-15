@@ -1,17 +1,20 @@
 #!/usr/bin/env racket
 #lang racket/base
 
-;; beagle-syntax — structural checker with four output layers:
+;; beagle-syntax — structural checker. Mode is selected by a FLAG (not a
+;; positional subcommand):
 ;;
-;;   1. Human summary     beagle-syntax check FILE
-;;   2. Structural ledger beagle-syntax ledger FILE [--around N]
-;;   3. Machine JSON      beagle-syntax check FILE --json
-;;   4. Patch output      beagle-syntax repair FILE --emit-patch
+;;   1. Human summary     beagle-syntax FILE                 (--check, default)
+;;   2. Structural ledger beagle-syntax --ledger FILE [--around N]
+;;   3. Machine JSON      beagle-syntax FILE --json
+;;   4. Patch output      beagle-syntax --repair FILE --emit-patch
 ;;
-;; Other modes:
-;;   repair FILE --write      auto-fix and write back
-;;   repair FILE --diff       show edits without applying
-;;   edits  FILE              repair edits as JSON (for daemon/agent)
+;; Repair modes (all take --repair):
+;;   --repair FILE --write    auto-fix in place, ONLY if high-confidence +
+;;                            re-verified balanced (else refuses); the safe
+;;                            deterministic path the PostToolUse hook uses
+;;   --repair FILE --diff     show edits without applying
+;;   --edits FILE             repair edits as JSON (for daemon/agent)
 
 (require racket/cmdline racket/string racket/port racket/file
          racket/format racket/list json file/sha1
@@ -375,9 +378,29 @@
                       (repair-edit-reason e)))]
 
            [(write-mode?)
-            (fprintf (current-error-port)
-                     "~a: --write is disabled. Use --emit-patch and apply manually.\n" f)
-            (exit 1)]
+            ;; Safe auto-apply: write ONLY when the repair is high-confidence
+            ;; AND the repaired output re-verifies as structurally valid. The
+            ;; re-verify also guards the heuristic fallback (its 'high is not
+            ;; self-verified, unlike parinfer indent-mode). Anything else
+            ;; refuses + points at --emit-patch — never write a guess.
+            (define out (repair-result-output result))
+            (define reverified? (ledger-result-valid? (build-event-ledger out)))
+            (cond
+              [(and (eq? (repair-result-confidence result) 'high) reverified?)
+               (call-with-output-file f #:exists 'replace
+                 (lambda (p) (display out p)))
+               (printf "~a: auto-balanced ~a delimiter edit(s) (confidence: high, re-verified)\n"
+                       f (length (repair-result-edits result)))
+               (for ([e (repair-result-edits result)])
+                 (printf "  ~a:~a ~a\n"
+                         (repair-edit-line e) (repair-edit-col e)
+                         (repair-edit-reason e)))]
+              [else
+               (fprintf (current-error-port)
+                        "~a: repair not auto-applicable (confidence ~a, re-verify ~a) — use --emit-patch and review.\n"
+                        f (repair-result-confidence result)
+                        (if reverified? "ok" "FAILED"))
+               (exit 1)])]
 
            [else
             (printf "~a: ~a edit(s), confidence: ~a\n" f
@@ -466,10 +489,26 @@
 ;; Main
 ;; ---------------------------------------------------------------------------
 
+;; racket's command-line stops parsing flags at the first positional arg, so
+;; `beagle-syntax --repair FILE --write` would silently DROP --write (and fall
+;; through to a no-op display). That position-sensitivity is a footgun — reorder
+;; argv so every flag is recognized regardless of position. --around is the only
+;; value-taking flag; keep its value adjacent.
+(define (reorder-argv argv)
+  (let loop ([items (vector->list argv)] [opts '()] [args '()])
+    (cond
+      [(null? items) (list->vector (append (reverse opts) (reverse args)))]
+      [(let ([s (car items)]) (and (> (string-length s) 0) (char=? (string-ref s 0) #\-)))
+       (if (and (member (car items) '("--around")) (pair? (cdr items)))
+           (loop (cddr items) (list* (cadr items) (car items) opts) args)
+           (loop (cdr items) (cons (car items) opts) args))]
+      [else (loop (cdr items) opts (cons (car items) args))])))
+
 (module+ main
   (define files
     (command-line
      #:program "beagle-syntax"
+     #:argv (reorder-argv (current-command-line-arguments))
      #:once-any
      [("--check") "Validate delimiter structure (default)" (mode 'check)]
      [("--repair") "Auto-fix delimiter structure" (mode 'repair)]
@@ -478,7 +517,7 @@
      #:once-each
      [("--diff") "Show edits without applying" (diff-mode? #t)]
      [("--json") "Output as JSON" (json-mode? #t)]
-     [("--write") "REMOVED — use --emit-patch and apply manually" (void)]
+     [("--write") "Auto-apply repair, but ONLY if high-confidence + re-verified" (write-mode? #t)]
      [("--emit-patch") "Output unified diff from repair" (emit-patch? #t)]
      [("--around") n "Center ledger around line N" (around-line (string->number n))]
      #:args files

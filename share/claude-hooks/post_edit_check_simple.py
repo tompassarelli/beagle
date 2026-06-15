@@ -82,36 +82,58 @@ def ensure_daemon():
         return False
 
 
+def _syntax_json(file_path):
+    """Run the structural check; return the error dict, or None if clean."""
+    r = subprocess.run(
+        [SYNTAX_BIN, "--json", file_path],
+        capture_output=True, text=True, timeout=5,
+    )
+    if r.returncode == 0:
+        return None
+    try:
+        data = json.loads(r.stdout or r.stderr)
+    except Exception:
+        return None
+    return None if data.get("status") == "ok" else data
+
+
 def syntax_check(file_path):
     if not SYNTAX_BIN:
         return None
     try:
-        r = subprocess.run(
-            [SYNTAX_BIN, "--json", file_path],
-            capture_output=True, text=True, timeout=5,
-        )
-        if r.returncode == 0:
-            return None
-        raw = r.stdout or r.stderr
-        data = json.loads(raw)
-        if data.get("status") == "ok":
+        data = _syntax_json(file_path)
+        if data is None:
             return None
 
+        # Deterministic auto-balance: paren/bracket imbalance is a SOLVED
+        # problem (parinfer indent-mode in beagle-syntax). The model must never
+        # hand-count parens. --repair --write applies the fix ONLY when it is
+        # high-confidence AND re-verifies balanced, so this can't write a guess.
+        subprocess.run(
+            [SYNTAX_BIN, "--repair", "--write", file_path],
+            capture_output=True, text=True, timeout=5,
+        )
+        after = _syntax_json(file_path)
+
         filename = os.path.basename(file_path)
-        lines = [f"beagle-syntax: {filename} — STRUCTURAL ERROR"]
-        for e in data.get("errors", []):
+        if after is None:
+            # The imbalance was deterministically fixable and is now resolved.
+            return (f"beagle-syntax: {filename} — auto-balanced delimiters "
+                    f"(deterministic, re-verified). File updated on disk — "
+                    f"re-read it before further edits.")
+
+        # Still broken => genuinely ambiguous (multiple valid closes / unclosed
+        # string). This is the only case the agent should touch by hand.
+        lines = [f"beagle-syntax: {filename} — STRUCTURAL ERROR (not auto-fixable; ambiguous)"]
+        for e in after.get("errors", []):
             lines.append(f"  {e.get('line', 0)}:{e.get('col', 0)} {e.get('detail', '')}")
-        counts = data.get("counts", {})
+        counts = after.get("counts", {})
         for name, key in [("()", "parens"), ("[]", "brackets"), ("{}", "braces")]:
             c = counts.get(key, {})
             bal = c.get("balance", 0)
             if bal != 0:
                 lines.append(f"  {name} open:{c.get('open',0)} close:{c.get('close',0)} balance:{bal:+d}")
-        repair = data.get("repair")
-        if repair and isinstance(repair, dict):
-            edits = repair.get("edits", [])
-            if edits:
-                lines.append(f"  repair: {len(edits)} edit(s), run: beagle-syntax --repair --write {file_path}")
+        lines.append(f"  review the candidates: beagle-syntax --repair --emit-patch {file_path}")
         return "\n".join(lines)
     except Exception:
         return None
