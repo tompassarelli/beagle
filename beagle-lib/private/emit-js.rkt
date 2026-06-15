@@ -451,6 +451,11 @@
     [(when-form? e) (or (expr-has-await? (when-form-cond-expr e))
                         (contains-await? (when-form-body e)))]
     [(for-form? e) (contains-await? (for-form-body e))]
+    [(doseq-form? e) (contains-await? (doseq-form-body e))]
+    [(loop-form? e) (or (for/or ([b (in-list (loop-form-bindings e))])
+                          (expr-has-await? (let-binding-value b)))
+                        (contains-await? (loop-form-body e)))]
+    [(recur-form? e) (contains-await? (recur-form-args e))]
     [(with-form? e) (expr-has-await? (with-form-target e))]
     [(kw-access? e) (expr-has-await? (kw-access-target e))]
     [(set!-form? e) (or (expr-has-await? (set!-form-target e))
@@ -619,7 +624,26 @@
 
 ;; --- module header ---------------------------------------------------------
 
+;; Relative ES-module specifier from the importing module to an imported one,
+;; both given as dotted namespaces (e.g. gjoa.tools.prep.cli importing
+;; gjoa.tools.prep.log → "./log.js"; importing gjoa.tools.security.check →
+;; "../security/check.js"). A `./`-prefixed full-ns path only resolves when the
+;; importer sits at the module root, which is false for any nested module run
+;; un-bundled — so emit a path relative to the importer's own directory.
+(define (relative-js-module-path importer-ns imported-ns)
+  (define imp-parts (string-split importer-ns "."))
+  (define imp-dir (if (null? imp-parts) '() (reverse (cdr (reverse imp-parts)))))
+  (define tgt (string-split imported-ns "."))
+  (let loop ([d imp-dir] [t tgt])
+    (if (and (pair? d) (pair? t) (string=? (car d) (car t)))
+      (loop (cdr d) (cdr t))
+      (let* ([ups (map (lambda (_) "..") d)]
+             [parts (append ups t)]
+             [path (string-append (string-join parts "/") ".js")])
+        (if (string-prefix? path "..") path (string-append "./" path))))))
+
 (define (emit-module-header prog)
+  (define importer-ns (symbol->string (program-namespace prog)))
   (define rs (program-requires prog))
   (if (null? rs)
     ""
@@ -629,10 +653,10 @@
         (define ns-str (symbol->string (require-entry-ns r)))
         (define refer (require-entry-refer r))
         (define module-path
-          (if (or (string-prefix? ns-str "@")
-                  (not (string-contains? ns-str ".")))
-            ns-str
-            (string-append "./" (string-replace ns-str "." "/") ".js")))
+          (cond
+            [(string-prefix? ns-str "@") ns-str]
+            [(not (string-contains? ns-str ".")) ns-str]
+            [else (relative-js-module-path importer-ns ns-str)]))
         (if refer
           (format "import { ~a } from '~a';"
                   (string-join (map mangle-name refer) ", ")
@@ -754,6 +778,7 @@
     ;; --- Typed JS target forms (jst-*) ----------------------------------------
     [(jst-class? f)    (emit-jst-class f)]
     [(jst-export? f)   (string-append "export " (emit-form (jst-export-form f)))]
+    [(jst-export-default? f) (string-append "export default " (emit-form (jst-export-default-form f)))]
     [(jst-return? f)   (emit-jst-return f)]
 
     [else (emit-expr-stmt f)]))
@@ -771,7 +796,7 @@
 (define (emit-expr-core e)
   (cond
     [(block-string? e)  (emit-js-block-string (block-string-text e))]
-    [(string? e)        (~v e)]
+    [(string? e)        (js-string-lit e)]
     [(boolean? e)       (if e "true" "false")]
     [(exact-integer? e) (number->string e)]
     [(real? e)          (emit-js-number e)]
@@ -826,6 +851,7 @@
     ;; --- Typed JS target expression forms (jst-*) -----------------------------
     [(jst-dot? e)      (emit-jst-dot e)]
     [(jst-spread? e)   (format "...~a" (emit-jst-expr (jst-spread-expr e)))]
+    [(jst-import-meta? e) "import.meta"]
     [(jst-typeof? e)   (format "typeof ~a" (emit-jst-expr (jst-typeof-expr e)))]
     [(jst-template? e) (emit-jst-template e)]
     [(jst-binary? e)   (emit-jst-binary e)]
@@ -833,6 +859,7 @@
     [(jst-class? e)    (emit-jst-class e)]
     [(jst-return? e)   (emit-jst-return e)]
     [(jst-export? e)   (string-append "export " (emit-form (jst-export-form e)))]
+    [(jst-export-default? e) (string-append "export default " (emit-form (jst-export-default-form e)))]
 
     [(if-form? e)
      (cond
@@ -915,17 +942,25 @@
 
     [(cond-form? e)
      (define clauses (cond-form-clauses e))
+     (define (else-clause? c)
+       (let ([t (cond-clause-test c)])
+         (and (symbol? t) (or (eq? t ':else) (eq? t 'else)))))
      (define parts
        (for/list ([c (in-list clauses)])
          (define test (cond-clause-test c))
          (define body (cond-clause-body c))
          (define body-str (if (= (length body) 1) (emit-expr (car body)) (emit-body-return body "")))
-         (cond
-           [(and (symbol? test) (or (eq? test ':else) (eq? test 'else)))
-            (format "~a" body-str)]
-           [else
-            (format "(~a) ? ~a" (emit-expr test) body-str)])))
-     (string-join parts " : ")]
+         (if (else-clause? c)
+           (format "~a" body-str)
+           (format "(~a) ? ~a" (emit-expr test) body-str))))
+     ;; Clojure cond with no matching clause yields nil — without a trailing
+     ;; :else the ternary chain would dangle (`a ? x : b ? y` with no final
+     ;; `: …`), so supply the implicit null branch.
+     (define complete-parts
+       (if (and (pair? clauses) (else-clause? (last clauses)))
+         parts
+         (append parts (list "null"))))
+     (string-join complete-parts " : ")]
 
     [(let-form? e)
      (define bindings (let-form-bindings e))
@@ -1289,7 +1324,7 @@
   (define val (pat-literal-value pat))
   (cond
     [(eq? val 'nil) (format "~a == null" tmp)]
-    [(string? val)  (format "~a === ~v" tmp val)]
+    [(string? val)  (format "~a === ~a" tmp (js-string-lit val))]
     [(boolean? val) (format "~a === ~a" tmp (if val "true" "false"))]
     [(keyword-symbol? val)
      (format "~a === ~v" tmp (kw->prop val))]
@@ -1431,10 +1466,18 @@
      (with-bindings doseq-names
        (lambda ()
          (define body-str (emit-body-stmts body "  "))
-         (format "~a.forEach((~a) => {\n  ~a\n});"
-                 (emit-expr expr)
-                 (emit-binding-target name)
-                 body-str)))]
+         (if (contains-await? body)
+           ;; A forEach callback can't `await` sequentially (and the arrow
+           ;; isn't async), so when the body awaits, emit a for-of loop —
+           ;; which sequences awaits correctly inside the enclosing async fn.
+           (format "for (const ~a of ~a) {\n  ~a\n}"
+                   (emit-binding-target name)
+                   (emit-expr expr)
+                   body-str)
+           (format "~a.forEach((~a) => {\n  ~a\n});"
+                   (emit-expr expr)
+                   (emit-binding-target name)
+                   body-str))))]
     [_ (error 'beagle-js "complex doseq clauses not yet supported for JS target")]))
 
 ;; --- defscalar -------------------------------------------------------------
@@ -1574,7 +1617,10 @@
      (if (if-form-else-expr e)
        (let ([else-str (emit-loop-stmt (if-form-else-expr e) bind-names)])
          (format "if (~a) { ~a } else { ~a }" cond-str then-str else-str))
-       (format "if (~a) { ~a }" cond-str then-str))]
+       ;; No else (e.g. from `when`): falling through the condition means no
+       ;; recur fired, so the loop is done — return nil. Without this the
+       ;; enclosing `while (true)` spins forever when the condition goes false.
+       (format "if (~a) { ~a } else { return null; }" cond-str then-str))]
     [(and (let-form? e) (body-contains-recur? (let-form-body e)))
      (define let-names (apply append (map (lambda (b) (names-from-binding-target (let-binding-name b))) (let-form-bindings e))))
      (define binding-strs
@@ -1583,22 +1629,36 @@
            (emit-let-binding-stmts (let-binding-name b) (emit-expr (let-binding-value b))))))
      (with-bindings let-names
        (lambda ()
+         ;; Only the tail form drives the loop (recur/return); earlier forms are
+         ;; side-effecting statements. Running emit-loop-stmt over all of them
+         ;; would `return` a non-tail expression and make the recur unreachable.
+         (define forms (let-form-body e))
          (define body-str
-           (string-join (map (lambda (x) (emit-loop-stmt x bind-names)) (let-form-body e)) " "))
+           (string-append
+             (string-join (map emit-expr-stmt (drop-right forms 1)) " ")
+             (if (> (length forms) 1) " " "")
+             (emit-loop-stmt (last forms) bind-names)))
          (string-append (string-join binding-strs " ") " " body-str)))]
     [(and (cond-form? e) (for/or ([c (in-list (cond-form-clauses e))]) (body-contains-recur? (cond-clause-body c))))
+     (define (else-clause? c)
+       (let ([t (cond-clause-test c)]) (and (symbol? t) (or (eq? t ':else) (eq? t 'else)))))
+     (define (loop-body-seq forms)
+       (string-append
+         (string-join (map emit-expr-stmt (drop-right forms 1)) " ")
+         (if (> (length forms) 1) " " "")
+         (emit-loop-stmt (last forms) bind-names)))
      (define parts
        (for/list ([c (in-list (cond-form-clauses e))])
          (define test (cond-clause-test c))
-         (define body (cond-clause-body c))
-         (define body-str
-           (string-join (map (lambda (x) (emit-loop-stmt x bind-names)) body) " "))
-         (cond
-           [(and (symbol? test) (or (eq? test ':else) (eq? test 'else)))
-            (format "{ ~a }" body-str)]
-           [else
-            (format "if (~a) { ~a }" (emit-expr test) body-str)])))
-     (string-join parts " else ")]
+         (define body-str (loop-body-seq (cond-clause-body c)))
+         (if (else-clause? c)
+           (format "{ ~a }" body-str)
+           (format "if (~a) { ~a }" (emit-expr test) body-str))))
+     ;; No :else means no clause may match — terminate the loop with nil rather
+     ;; than spinning the enclosing while(true).
+     (define has-else? (for/or ([c (in-list (cond-form-clauses e))]) (else-clause? c)))
+     (string-append (string-join parts " else ")
+                    (if has-else? "" " else { return null; }"))]
     [(and (do-form? e) (body-contains-recur? (do-form-body e)))
      (define exprs (do-form-body e))
      (define stmts (drop-right exprs 1))
@@ -1643,6 +1703,12 @@
                 (emit-body-return body indent)))))))]
     [(do-form? e)
      (emit-body-return (do-form-body e) indent)]
+    [(doseq-form? e)
+     ;; doseq is a side-effecting statement (value is nil). Emit it as a
+     ;; statement, not `return <doseq>` — the for-of variant is a statement
+     ;; and can't be returned, and the forEach variant's value is undefined
+     ;; anyway, so the function falls through to an implicit undefined return.
+     (emit-doseq e)]
     [(when-form? e)
      (define inner (string-append indent "  "))
      (format "if (~a) {\n~a~a\n~a}"
@@ -1732,6 +1798,7 @@
 ;; Does this expression benefit from statement-position inlining?
 (define (stmt-inline? e)
   (or (let-form? e) (do-form? e) (when-form? e) (when-let-form? e)
+      (doseq-form? e)
       (when-some-form? e) (if-let-form? e) (if-some-form? e)
       (and (if-form? e) (not (if-form-else-expr e)))
       (and (if-form? e) (if-form-else-expr e)

@@ -1232,6 +1232,14 @@
     [(and (symbol? d) (dynamic-var-sym? d))
      (validate-identifier! d "dynamic var")
      (dynamic-var d)]
+    [(and (symbol? d)
+          (let ([s (symbol->string d)])
+            (and (> (string-length s) 1) (char=? (string-ref s 0) #\@))))
+     ;; `@x` reader-deref sugar → (deref x). Racket's `read` has no `@`
+     ;; readtable entry, so it leaves `@x` as a single symbol; desugar it
+     ;; here. Only fires on symbols literally starting with `@`, which never
+     ;; emit valid code otherwise, so this can't change any existing program.
+     (parse-expr (list 'deref (string->symbol (substring (symbol->string d) 1))))]
     [(symbol? d)
      (validate-identifier! d)
      d]
@@ -2218,11 +2226,19 @@
     [(list 'js/typeof expr-form)
      (jst-typeof (parse-expr expr-form))]
 
+    [(list 'js/import-meta)
+     (jst-import-meta)]
+
     [(list 'js/export inner-form)
      (define inner (parse-expr inner-form))
      (cond
        [(jst-class? inner) (struct-copy jst-class inner [export? #t])]
        [else (jst-export inner)])]
+
+    ;; `export default <expr>` — JS has no `const default` binding (reserved),
+    ;; so this must be its own form. Used for default module exports.
+    [(list 'js/export-default inner-form)
+     (jst-export-default (parse-expr inner-form))]
 
     [(list 'js/! expr-form)
      (jst-unary '! (parse-expr expr-form))]

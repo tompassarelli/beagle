@@ -74,8 +74,36 @@
 
 (define current-emit-expr (make-parameter #f))
 
+;; Render a string VALUE as a valid JS double-quoted string literal. Racket's
+;; ~v writes Racket escapes (e.g. \e for ESC, \a for bell) that are NOT valid
+;; JS — JS drops the backslash, silently losing the control char (broke ANSI).
+;; Emit JS-legal escapes instead.
+(define (js-string-lit s)
+  (define out (open-output-string))
+  (write-char #\" out)
+  (for ([c (in-string s)])
+    (define n (char->integer c))
+    (cond
+      [(char=? c #\") (write-string "\\\"" out)]
+      [(char=? c #\\) (write-string "\\\\" out)]
+      [(char=? c #\newline) (write-string "\\n" out)]
+      [(char=? c #\return) (write-string "\\r" out)]
+      [(char=? c #\tab) (write-string "\\t" out)]
+      [(= n 8)  (write-string "\\b" out)]
+      [(= n 12) (write-string "\\f" out)]
+      [(= n 11) (write-string "\\v" out)]
+      [(or (< n 32) (= n 127))
+       (let ([h (number->string n 16)])
+         (write-string (string-append "\\x" (if (= (string-length h) 1)
+                                                (string-append "0" h) h))
+                       out))]
+      [else (write-char c out)]))
+  (write-char #\" out)
+  (get-output-string out))
+
 (provide
  escape-js-regex-slash escape-js-template-string
+ js-string-lit
  mangle-name mangle-str mangle-prop
  JS-BINARY-OPS JS-ASSIGN-OPS
  js-binary-op? js-assign-op?

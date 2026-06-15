@@ -435,6 +435,8 @@
 (struct jst-binary   (op left right)                              #:transparent)
 (struct jst-unary    (op expr)                                    #:transparent)
 (struct jst-export   (form)                                       #:transparent)
+(struct jst-export-default (form)                                 #:transparent)
+(struct jst-import-meta ()                                        #:transparent)
 
 ;; --- Shared utility structs ------------------------------------------------
 (struct param       (name type)                             #:transparent)
@@ -616,4 +618,5 @@
  (struct-out jst-return) (struct-out jst-class) (struct-out jst-method)
  (struct-out jst-dot) (struct-out jst-spread) (struct-out jst-typeof)
  (struct-out jst-template) (struct-out jst-binary) (struct-out jst-unary)
- (struct-out jst-export))
+ (struct-out jst-export) (struct-out jst-export-default)
+ (struct-out jst-import-meta))
