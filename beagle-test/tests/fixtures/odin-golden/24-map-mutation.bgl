@@ -1,5 +1,5 @@
 (ns g)
-(defn store [m :- (Ptr (Map String Int)) k :- String v :- Int] :- Nil
+(defn store! [m :- (Ptr (Map String Int)) k :- String v :- Int] :- Nil
   (set! (get (deref m) k) v))
 (defn has-key [m :- (Map String Int) k :- String] :- Bool
   (contains? m k))

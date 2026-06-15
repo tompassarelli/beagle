@@ -6,7 +6,7 @@
 (defn chunk-cx [key :- Int] :- Int
   (- (quot key CKEY-STRIDE) CKEY-OFFSET))
 (defrecord Store [cells :- (Map Int Int)])
-(defn put [s :- (Ptr Store) cx :- Int cz :- Int v :- Int] :- Nil
+(defn put! [s :- (Ptr Store) cx :- Int cz :- Int v :- Int] :- Nil
   (set! (get (:cells (deref s)) (chunk-key cx cz)) v))
 (defn has [s :- (Ptr Store) cx :- Int cz :- Int] :- Bool
   (contains? (:cells (deref s)) (chunk-key cx cz)))

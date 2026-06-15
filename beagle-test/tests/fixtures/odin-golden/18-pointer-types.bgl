@@ -1,6 +1,6 @@
 (ns j)
 (defrecord Vec3 [x :- F32 y :- F32 z :- F32])
-(defn scale [v :- (Ptr Vec3) s :- F32] :- Nil
+(defn scale! [v :- (Ptr Vec3) s :- F32] :- Nil
   (set! (:x (deref v)) (* (:x (deref v)) s))
   (set! (:y (deref v)) (* (:y (deref v)) s))
   (set! (:z (deref v)) (* (:z (deref v)) s)))
