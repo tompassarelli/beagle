@@ -54,8 +54,20 @@ case "$TARGET" in
     *)    echo "unknown target: $TARGET (nix is live; clj/cljs/js/sql are dormant)" >&2; exit 1 ;;
 esac
 
-# --- Write example source ---
-if [[ ! -f "src/main.$EXT" ]]; then
+# --- Detect an already-initialized project ---
+# `--hooks` on an EXISTING project should ONLY wire the repair hook — never drop
+# starter files (src/main, CLAUDE.md, flake.nix, .envrc) into a populated repo.
+# A genuinely empty/new dir still gets the full scaffold (+ hooks).
+SCAFFOLD_PROJECT=true
+if [[ -f "CLAUDE.md" || -f ".claude/settings.json" || -d ".git" \
+      || -f "package.json" || -f "flake.nix" || -f "deno.json" ]] \
+   || compgen -G "src/*.b*" >/dev/null 2>&1 \
+   || compgen -G "*.b*"     >/dev/null 2>&1; then
+    SCAFFOLD_PROJECT=false
+fi
+
+# --- Write example source (new projects only) ---
+if [[ "$SCAFFOLD_PROJECT" == true && ! -f "src/main.$EXT" ]]; then
     mkdir -p src
     cat > "src/main.$EXT" << SRCEOF
 #lang $LANG
@@ -66,8 +78,8 @@ SRCEOF
     echo "  created src/main.$EXT"
 fi
 
-# --- Write CLAUDE.md ---
-if [[ ! -f "CLAUDE.md" ]]; then
+# --- Write CLAUDE.md (new projects only) ---
+if [[ "$SCAFFOLD_PROJECT" == true && ! -f "CLAUDE.md" ]]; then
     cat > CLAUDE.md << 'CLEOF'
 # Project — beagle
 
@@ -107,28 +119,44 @@ fi
 if [[ "$HOOKS" == true ]]; then
     mkdir -p .claude/hooks
 
-    # settings.json
-    if [[ ! -f ".claude/settings.json" ]]; then
-        cat > .claude/settings.json << 'SEOF'
-{
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/hooks/post-edit-check.sh",
-            "timeout": 10
-          }
-        ]
-      }
-    ]
-  }
-}
-SEOF
-        echo "  created .claude/settings.json"
-    fi
+    # settings.json — idempotently MERGE the PostToolUse repair hook into any
+    # existing config instead of only writing when absent. Never clobbers other
+    # settings/hooks; re-running is a safe no-op. This is what makes
+    # `beagle init --hooks` a one-shot "sync" for already-initialized repos.
+    python3 - << 'PYEOF'
+import json, os
+PATH = ".claude/settings.json"
+CMD = ".claude/hooks/post-edit-check.sh"
+MATCHER = "Edit|Write|MultiEdit"
+data = {}
+if os.path.exists(PATH):
+    try:
+        with open(PATH) as f:
+            data = json.load(f) or {}
+    except Exception as e:
+        raise SystemExit(f"  ERROR: {PATH} is not valid JSON ({e}); left untouched")
+if not isinstance(data, dict):
+    raise SystemExit(f"  ERROR: {PATH} is not a JSON object; left untouched")
+hooks = data.setdefault("hooks", {})
+ptu = hooks.setdefault("PostToolUse", [])
+if not isinstance(ptu, list):
+    raise SystemExit(f"  ERROR: hooks.PostToolUse in {PATH} is not a list; left untouched")
+def wired(entry):
+    return isinstance(entry, dict) and any(
+        isinstance(h, dict) and h.get("command") == CMD
+        for h in entry.get("hooks", []))
+if any(wired(e) for e in ptu):
+    print("  .claude/settings.json — repair hook already wired (no change)")
+else:
+    ptu.append({
+        "matcher": MATCHER,
+        "hooks": [{"type": "command", "command": CMD, "timeout": 10}],
+    })
+    with open(PATH, "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+    print(f"  wired PostToolUse repair hook into {PATH}")
+PYEOF
 
     # Shell wrapper — inject BEAGLE_PATH discovered at init time
     cat > .claude/hooks/post-edit-check.sh << HEOF
@@ -167,8 +195,8 @@ HEOF
     echo "  created .claude/hooks/ (simple mode)"
 fi
 
-# --- Write flake.nix (follows beagle's nixpkgs for consistent racket) ---
-if [[ ! -f "flake.nix" ]] && [[ -n "$BEAGLE_PATH" ]]; then
+# --- Write flake.nix (new projects only; follows beagle's nixpkgs) ---
+if [[ "$SCAFFOLD_PROJECT" == true && ! -f "flake.nix" && -n "$BEAGLE_PATH" ]]; then
     cat > flake.nix << FEOF
 {
   inputs = {
@@ -190,15 +218,21 @@ FEOF
     echo "  created flake.nix (follows beagle/nixpkgs)"
 fi
 
-# --- Write .envrc ---
-if [[ ! -f ".envrc" ]] && [[ -f "flake.nix" ]]; then
+# --- Write .envrc (new projects only) ---
+if [[ "$SCAFFOLD_PROJECT" == true && ! -f ".envrc" && -f "flake.nix" ]]; then
     echo "use flake" > .envrc
     echo "  created .envrc"
 fi
 
 echo ""
-echo "beagle project initialized (target: $TARGET)"
+if [[ "$SCAFFOLD_PROJECT" == true ]]; then
+    echo "beagle project initialized (target: $TARGET)"
+else
+    echo "existing project detected — left source/config untouched"
+fi
 if [[ "$HOOKS" == true ]]; then
-    echo "Claude Code hooks installed — syntax + type errors appear on every edit."
+    echo "Claude Code repair hook wired — syntax + type errors (and deterministic"
+    echo "paren auto-balancing) run on every edit. Restart the session (or rely on"
+    echo "settings hot-reload) to activate it."
     echo "To switch to pool mode: echo '{\"mode\":\"pool\"}' > .beagle/pool.json"
 fi
