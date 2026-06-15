@@ -3605,6 +3605,15 @@
     ;; `get` (literal-key) migrated to the compile-time combiner registry (see register-combiner!).
     ;; Dynamic-key (get target expr) falls through to the call-form arm below, as before.
 
+    ;; `%` is the anonymous-fn argument shorthand, only meaningful inside #(...).
+    ;; The reader rewrites `%` -> `%1` inside #(), so a bare `%` at parse time can
+    ;; only appear OUTSIDE a lambda — always an error, most often `%` written as
+    ;; modulo, which silently emitted a call to undefined `_pct`. Reject loudly.
+    [(list '% args ...)
+     (raise-parse-error 'percent-not-modulo
+       "`%` is the anonymous-function argument shorthand (only valid inside #(...)) and cannot be a function or call head. For modulo use `rem` (truncate toward zero) or `mod` (floored toward negative infinity)."
+       #:suggestion "(rem a b) or (mod a b)")]
+
     [(list (? symbol? f) args ...)
      (call-form f (map parse-expr (or (stx-tail subs 1) args)))]
 
