@@ -1917,6 +1917,103 @@
   (lambda (d subs)
     (parse-try-form (or (stx-tail subs 1) (cdr d)))))
 
+;; `when` — Clojure conditional sugar; (when c body…) → (if c (do body…)).
+;; Identity-preserving canonicalization (see the original arm's commentary).
+;; Arity error (no body) re-uses the legacy rejection; anything else falls
+;; through to parse-list-form* so e.g. bare `(when)` still reaches call-form.
+(register-combiner! 'when
+  (lambda (d subs)
+    (match d
+      [(list 'when c body ..1)
+       (parse-expr (rewrite-as
+                    (list 'if
+                          (or (stx-ref subs 1) c)
+                          (cons 'do (or (stx-tail subs 2) body)))))]
+      [(list 'when _ ...)
+       (raise-parse-error 'bad-form
+                          "when requires at least one body expression: (when c body...)")]
+      [_ (parse-list-form* d subs)])))
+
+;; `when-not` — (when-not c body…) → (if (not c) (do body…)).
+(register-combiner! 'when-not
+  (lambda (d subs)
+    (match d
+      [(list 'when-not c body ..1)
+       (parse-expr (rewrite-as
+                    (list 'if
+                          (list 'not (or (stx-ref subs 1) c))
+                          (cons 'do (or (stx-tail subs 2) body)))))]
+      [(list 'when-not _ ...)
+       (raise-parse-error 'bad-form
+                          "when-not requires at least one body expression: (when-not c body...)")]
+      [_ (parse-list-form* d subs)])))
+
+;; `if-not` — (if-not c t e) → (if c e t).
+(register-combiner! 'if-not
+  (lambda (d subs)
+    (match d
+      [(list 'if-not c then-expr else-expr)
+       (parse-expr (rewrite-as
+                    (list 'if
+                          (or (stx-ref subs 1) c)
+                          (or (stx-ref subs 3) else-expr)
+                          (or (stx-ref subs 2) then-expr))))]
+      [(list 'if-not _ ...)
+       (raise-parse-error 'bad-form
+                          "if-not expects (if-not c then else): three arguments required")]
+      [_ (parse-list-form* d subs)])))
+
+;; Clojure binding-conditional macros — accept-and-canonicalize to the
+;; (let …) (if …) shape via lower-binding-cond. Identity-preserving; malformed
+;; shapes fall through to parse-list-form* exactly as before.
+;;   (if-let    [x v] t e)    → (let [x v] (if x t e))
+;;   (when-let  [x v] body…)  → (let [x v] (if x (do body…)))
+;;   (if-some   [x v] t e)    → (let [x v] (if (not (nil? x)) t e))
+;;   (when-some [x v] body…)  → (let [x v] (if (not (nil? x)) (do body…)))
+(register-combiner! 'if-let
+  (lambda (d subs)
+    (match d
+      [(list 'if-let bindings then-expr else-expr)
+       (parse-expr (rewrite-as
+                    (lower-binding-cond 'if-let
+                                        (or (stx-ref subs 1) bindings)
+                                        (list then-expr else-expr)
+                                        (and subs (stx-tail subs 2)))))]
+      [_ (parse-list-form* d subs)])))
+
+(register-combiner! 'when-let
+  (lambda (d subs)
+    (match d
+      [(list 'when-let bindings body ...)
+       (parse-expr (rewrite-as
+                    (lower-binding-cond 'when-let
+                                        (or (stx-ref subs 1) bindings)
+                                        body
+                                        (and subs (stx-tail subs 2)))))]
+      [_ (parse-list-form* d subs)])))
+
+(register-combiner! 'if-some
+  (lambda (d subs)
+    (match d
+      [(list 'if-some bindings then-expr else-expr)
+       (parse-expr (rewrite-as
+                    (lower-binding-cond 'if-some
+                                        (or (stx-ref subs 1) bindings)
+                                        (list then-expr else-expr)
+                                        (and subs (stx-tail subs 2)))))]
+      [_ (parse-list-form* d subs)])))
+
+(register-combiner! 'when-some
+  (lambda (d subs)
+    (match d
+      [(list 'when-some bindings body ...)
+       (parse-expr (rewrite-as
+                    (lower-binding-cond 'when-some
+                                        (or (stx-ref subs 1) bindings)
+                                        body
+                                        (and subs (stx-tail subs 2)))))]
+      [_ (parse-list-form* d subs)])))
+
 (define (parse-list-form d subs)
   ;; Invariant: macro heads are resolved in parse-expr (and the top-level loop)
   ;; BEFORE control reaches here, so a 'macro head must never arrive — if one
@@ -2826,40 +2923,16 @@
     ;;
     ;; Like if-let/when-let, the surface sugar is welcome; the canonical AST
     ;; is what every downstream pass sees.
-    [(list 'when c body ..1)
-     ;; Embed the original syntax for c (subs[1]) and body (subs[2..]) so
-     ;; their srclocs survive. rewrite-as tags the synthesized outer (if …)
-     ;; with the (when …) form's srcloc; sub-form syntax passes through.
-     (parse-expr (rewrite-as
-                  (list 'if
-                        (or (stx-ref subs 1) c)
-                        (cons 'do (or (stx-tail subs 2) body)))))]
-    [(list 'when-not c body ..1)
-     (parse-expr (rewrite-as
-                  (list 'if
-                        (list 'not (or (stx-ref subs 1) c))
-                        (cons 'do (or (stx-tail subs 2) body)))))]
-    [(list 'if-not c then-expr else-expr)
-     (parse-expr (rewrite-as
-                  (list 'if
-                        (or (stx-ref subs 1) c)
-                        (or (stx-ref subs 3) else-expr)
-                        (or (stx-ref subs 2) then-expr))))]
+    ;; `when` / `when-not` / `if-not` migrated to the compile-time combiner
+    ;; registry (see register-combiner!), success + arity-reject arms both.
     ;; `unless` is NOT Clojure (it's CL/Scheme/Ruby) — zero corpus hits,
     ;; removed 2026-06-12 per the zero-users rule. `when-not` is the
     ;; Clojure spelling.
     [(list 'unless _ ...)
      (raise-parse-error 'removed-form
                         "(unless c body...) — `unless` is not a Clojure form. Use `(when-not c body...)`.")]
-    [(list 'when _ ...)
-     (raise-parse-error 'bad-form
-                        "when requires at least one body expression: (when c body...)")]
-    [(list 'when-not _ ...)
-     (raise-parse-error 'bad-form
-                        "when-not requires at least one body expression: (when-not c body...)")]
-    [(list 'if-not _ ...)
-     (raise-parse-error 'bad-form
-                        "if-not expects (if-not c then else): three arguments required")]
+    ;; `when` / `when-not` / `if-not` arity-reject arms migrated to the
+    ;; compile-time combiner registry (see register-combiner!).
     ;; Clojure binding-conditional macros: accept-and-canonicalize.
     ;; These are lowered to the canonical (let …) (if …) shape — the AST that
     ;; results is byte-identical to what a hand-written equivalent would
@@ -2874,30 +2947,8 @@
     ;; tracked in design-principle.md) will not reuse these names — the
     ;; typed form should be beagle-native, not Clojure-shaped. Until then
     ;; the sugar is welcome.
-    [(list 'if-let bindings then-expr else-expr)
-     (parse-expr (rewrite-as
-                  (lower-binding-cond 'if-let
-                                      (or (stx-ref subs 1) bindings)
-                                      (list then-expr else-expr)
-                                      (and subs (stx-tail subs 2)))))]
-    [(list 'when-let bindings body ...)
-     (parse-expr (rewrite-as
-                  (lower-binding-cond 'when-let
-                                      (or (stx-ref subs 1) bindings)
-                                      body
-                                      (and subs (stx-tail subs 2)))))]
-    [(list 'if-some bindings then-expr else-expr)
-     (parse-expr (rewrite-as
-                  (lower-binding-cond 'if-some
-                                      (or (stx-ref subs 1) bindings)
-                                      (list then-expr else-expr)
-                                      (and subs (stx-tail subs 2)))))]
-    [(list 'when-some bindings body ...)
-     (parse-expr (rewrite-as
-                  (lower-binding-cond 'when-some
-                                      (or (stx-ref subs 1) bindings)
-                                      body
-                                      (and subs (stx-tail subs 2)))))]
+    ;; `if-let` / `when-let` / `if-some` / `when-some` migrated to the
+    ;; compile-time combiner registry (see register-combiner!).
     [(list 'dotimes _ ...)
      (raise-parse-error 'removed-form
                         "dotimes removed — use (doseq [i (range n)] body...)")]
