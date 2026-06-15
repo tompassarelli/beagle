@@ -62,7 +62,7 @@ if [[ $# -eq 2 ]]; then
     out="$2"
 else
     ns="$(grep -E '^\(ns' "$src" | head -1 | \
-          sed -E 's/^\(ns[[:space:]]+([^)]+)\).*/\1/' | \
+          sed -E 's/^\(ns[[:space:]]+([a-zA-Z0-9._-]+).*/\1/' | \
           tr -d '[:space:]')"
     [[ -z "$ns" ]] && ns="beagle.user"
     rel_path="$(echo "$ns" | tr '.-' '//_')"
