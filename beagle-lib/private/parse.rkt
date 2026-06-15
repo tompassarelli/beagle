@@ -1730,6 +1730,193 @@
                 #f)]
       [_ (parse-list-form* d subs)])))
 
+;; `let` — lexical binding block.
+(register-combiner! 'let
+  (lambda (d subs)
+    (match d
+      [(list 'let bindings-form body ...)
+       (let-form (parse-let-bindings (or (stx-ref subs 1) bindings-form))
+                 (parse-body (or (stx-tail subs 2) body)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `letfn` — mutually-recursive local function block.
+(register-combiner! 'letfn
+  (lambda (d subs)
+    (match d
+      [(list 'letfn fns-form body ...)
+       (letfn-form (parse-letfn-fns (or (stx-ref subs 1) fns-form))
+                   (parse-body (or (stx-tail subs 2) body)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `loop` — recur target with initial bindings.
+(register-combiner! 'loop
+  (lambda (d subs)
+    (match d
+      [(list 'loop bindings-form body ...)
+       (loop-form (parse-let-bindings (or (stx-ref subs 1) bindings-form))
+                  (parse-body (or (stx-tail subs 2) body)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `with-open` — resource-scoped binding block (auto-close on exit).
+(register-combiner! 'with-open
+  (lambda (d subs)
+    (match d
+      [(list 'with-open bindings-form body ...)
+       (with-open-form (parse-let-bindings (or (stx-ref subs 1) bindings-form))
+                       (parse-body (or (stx-tail subs 2) body)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `for` — list comprehension (clauses: bindings, :when, :let).
+(register-combiner! 'for
+  (lambda (d subs)
+    (match d
+      [(list 'for bindings-form body ...)
+       (for-form (parse-for-clauses (or (stx-ref subs 1) bindings-form))
+                 (parse-body (or (stx-tail subs 2) body)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `doseq` — side-effecting iteration (shares for-clause parsing with `for`).
+(register-combiner! 'doseq
+  (lambda (d subs)
+    (match d
+      [(list 'doseq bindings-form body ...)
+       (doseq-form (parse-for-clauses (or (stx-ref subs 1) bindings-form))
+                   (parse-body (or (stx-tail subs 2) body)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `doto` — evaluate target, thread it through side-effecting forms, return it.
+(register-combiner! 'doto
+  (lambda (d subs)
+    (match d
+      [(list 'doto target forms ...)
+       (doto-form (parse-expr (or (stx-ref subs 1) target))
+                  (map parse-expr (or (stx-tail subs 2) forms)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `unless` — removed surface (not Clojure). Pointed rejection naming when-not.
+(register-combiner! 'unless
+  (lambda (d subs)
+    (raise-parse-error 'removed-form
+                       "(unless c body...) — `unless` is not a Clojure form. Use `(when-not c body...)`.")))
+
+;; `cond` — multi-clause conditional. Single arm; parse-cond-clauses owns all
+;; clause-shape validation/errors.
+(register-combiner! 'cond
+  (lambda (d subs)
+    (cond-form (parse-cond-clauses (or (stx-tail subs 1) (cdr d))))))
+
+;; `case` — removed surface. Folded into `match`. Pointed rejection.
+(register-combiner! 'case
+  (lambda (d subs)
+    (raise-parse-error 'removed-form
+                       "case removed — use (match x [v1 body] [v2 body] [_ default]) or (match x [(or v1 v2) shared-body] [_ default]); literal-only matches case-fold to target-native dispatch in emit")))
+
+;; `fn` — anonymous function; optional `:-`/`:` return-type marker.
+(register-combiner! 'fn
+  (lambda (d subs)
+    (match d
+      [(list 'fn params-form marker return-type body ...)
+       #:when (annotation-marker? marker)
+       (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 1) params-form))])
+         (fn-form parsed rest-p
+                  (parse-type return-type)
+                  (parse-body (or (stx-tail subs 4) body))))]
+      [(list 'fn params-form body ...)
+       (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 1) params-form))])
+         (fn-form parsed rest-p
+                  #f (parse-body (or (stx-tail subs 2) body))))]
+      [_ (parse-list-form* d subs)])))
+
+;; `defonce` — once-only top-level binding, optional `:-` type / docstring.
+(register-combiner! 'defonce
+  (lambda (d subs)
+    (match d
+      [(list 'defonce (? symbol? name) ':- type-expr (? string? doc) value)
+       (defonce-form name (parse-type type-expr)
+                     (parse-expr (or (stx-ref subs 5) value))
+                     doc)]
+      [(list 'defonce (? symbol? name) ':- type-expr value)
+       (defonce-form name (parse-type type-expr)
+                     (parse-expr (or (stx-ref subs 4) value))
+                     #f)]
+      [(list 'defonce (? symbol? name) ': _ _)
+       (raise-parse-error 'inline-type-annotation
+                          "(defonce ~a : ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (defonce ~a :- TYPE VALUE)"
+                          name name)]
+      [(list 'defonce (? symbol? name) (? string? doc) value)
+       (defonce-form name #f (parse-expr (or (stx-ref subs 3) value)) doc)]
+      [(list 'defonce (? symbol? name) value)
+       (defonce-form name #f (parse-expr (or (stx-ref subs 2) value)) #f)]
+      [_ (parse-list-form* d subs)])))
+
+;; `set!` — mutable assignment.
+(register-combiner! 'set!
+  (lambda (d subs)
+    (match d
+      [(list 'set! target-expr val-expr)
+       (set!-form (parse-expr (or (stx-ref subs 1) target-expr))
+                  (parse-expr (or (stx-ref subs 2) val-expr)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `defrecord` — typed record shape.
+(register-combiner! 'defrecord
+  (lambda (d subs)
+    (match d
+      [(list 'defrecord (? symbol? name) fields-form)
+       (record-form name (parse-record-fields (or (stx-ref subs 2) fields-form)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `defenum` — keyword-variant enum.
+(register-combiner! 'defenum
+  (lambda (d subs)
+    (match d
+      [(list 'defenum (? symbol? name) values ...)
+       (defenum-form name (map ->datum (or (stx-tail subs 2) values)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `defscalar` — newtype-style scalar over a backing primitive, with optional
+;; :where refinement predicates.
+(register-combiner! 'defscalar
+  (lambda (d subs)
+    (match d
+      [(list 'defscalar (? symbol? name) (? symbol? backing) ':where preds ...)
+       (defscalar-form name (->datum backing) (map parse-scalar-predicate preds))]
+      [(list 'defscalar (? symbol? name) (? symbol? backing))
+       (defscalar-form name (->datum backing) '())]
+      [_ (parse-list-form* d subs)])))
+
+;; `deftype` — removed form; pointed rejection pointing at defrecord + extend-type.
+(register-combiner! 'deftype
+  (lambda (d subs)
+    (match d
+      [(list 'deftype _ ...)
+       (raise-parse-error 'removed-form
+                          "deftype removed — use (defrecord Name [fields]) for the data shape and (extend-type Name Protocol (method ...)) for protocol impls")]
+      [_ (parse-list-form* d subs)])))
+
+;; `extend-type` — attach protocol implementations to a type.
+(register-combiner! 'extend-type
+  (lambda (d subs)
+    (match d
+      [(list 'extend-type (? symbol? type-name) rest ...)
+       (extend-type-form type-name (parse-type-impls (or (stx-tail subs 2) rest)))]
+      [_ (parse-list-form* d subs)])))
+
+;; `comment` — Clojure (comment ...) reads-and-discards; value is nil.
+(register-combiner! 'comment
+  (lambda (d subs)
+    'nil))
+
+;; `target-case` — per-target branch selection; same AST as the legacy arm.
+(register-combiner! 'target-case
+  (lambda (d subs)
+    (parse-target-case (or (stx-tail subs 1) (cdr d)))))
+
+;; `try` — try/catch/finally; delegates to the unchanged parse-try-form.
+(register-combiner! 'try
+  (lambda (d subs)
+    (parse-try-form (or (stx-tail subs 1) (cdr d)))))
+
 (define (parse-list-form d subs)
   ;; Invariant: macro heads are resolved in parse-expr (and the top-level loop)
   ;; BEFORE control reaches here, so a 'macro head must never arrive — if one
@@ -1779,22 +1966,8 @@
      (raise-parse-error 'bad-form
                         "malformed def — expected (def NAME VALUE), (def NAME \"doc\" VALUE), (def NAME :- TYPE VALUE), or (def NAME :- TYPE \"doc\" VALUE); got: ~v" d)]
 
-    [(list 'defonce (? symbol? name) ':- type-expr (? string? doc) value)
-     (defonce-form name (parse-type type-expr)
-                   (parse-expr (or (stx-ref subs 5) value))
-                   doc)]
-    [(list 'defonce (? symbol? name) ':- type-expr value)
-     (defonce-form name (parse-type type-expr)
-                   (parse-expr (or (stx-ref subs 4) value))
-                   #f)]
-    [(list 'defonce (? symbol? name) ': _ _)
-     (raise-parse-error 'inline-type-annotation
-                        "(defonce ~a : ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (defonce ~a :- TYPE VALUE)"
-                        name name)]
-    [(list 'defonce (? symbol? name) (? string? doc) value)
-     (defonce-form name #f (parse-expr (or (stx-ref subs 3) value)) doc)]
-    [(list 'defonce (? symbol? name) value)
-     (defonce-form name #f (parse-expr (or (stx-ref subs 2) value)) #f)]
+    ;; `defonce` success arms migrated to the compile-time combiner registry
+    ;; (see register-combiner!). The guard arm below stays here.
     [(cons 'defonce _)
      (raise-parse-error 'bad-form
                         "malformed defonce — expected (defonce NAME VALUE), (defonce NAME \"doc\" VALUE), or (defonce NAME :- TYPE VALUE); got: ~v" d)]
@@ -1957,8 +2130,7 @@
        "`(def NAME :- TYPE VALUE)` for top-level bindings, "
        "`[param :- TYPE]` and `:- RET-TYPE` for defn."))]
 
-    [(list 'defrecord (? symbol? name) fields-form)
-     (record-form name (parse-record-fields (or (stx-ref subs 2) fields-form)))]
+    ;; `defrecord` migrated to the compile-time combiner registry (see register-combiner!).
 
     [(list 'defprotocol (? symbol? name) sigs ...)
      (protocol-form name (map parse-protocol-method (or (stx-tail subs 2) sigs)))]
@@ -1972,8 +2144,7 @@
     ;; the data shape; extend-type attaches protocol impls. Two distinct
     ;; concepts, two distinct forms.
 
-    [(list 'extend-type (? symbol? type-name) rest ...)
-     (extend-type-form type-name (parse-type-impls (or (stx-tail subs 2) rest)))]
+    ;; `extend-type` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; flake-input: typed access to flake-input attribute paths.
     ;; (flake-input :NAME :NAMESPACE :path ...) →
@@ -2003,28 +2174,13 @@
     ;; their inline-annotation surface was migrated wholesale to `:-`; `fn`
     ;; and arity-clauses retain `:` acceptance to avoid churning the existing
     ;; corpus during the migration window.
-    [(list 'fn params-form marker return-type body ...)
-     #:when (annotation-marker? marker)
-     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 1) params-form))])
-       (fn-form parsed rest-p
-                (parse-type return-type)
-                (parse-body (or (stx-tail subs 4) body))))]
-    [(list 'fn params-form body ...)
-     (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 1) params-form))])
-       (fn-form parsed rest-p
-                #f (parse-body (or (stx-tail subs 2) body))))]
+    ;; `fn` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'let bindings-form body ...)
-     (let-form (parse-let-bindings (or (stx-ref subs 1) bindings-form))
-               (parse-body (or (stx-tail subs 2) body)))]
+    ;; `let` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'letfn fns-form body ...)
-     (letfn-form (parse-letfn-fns (or (stx-ref subs 1) fns-form))
-                 (parse-body (or (stx-tail subs 2) body)))]
+    ;; `letfn` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'loop bindings-form body ...)
-     (loop-form (parse-let-bindings (or (stx-ref subs 1) bindings-form))
-                (parse-body (or (stx-tail subs 2) body)))]
+    ;; `loop` migrated to the compile-time combiner registry (see register-combiner!).
     [(list 'recur args ...)
      (recur-form (map parse-expr (or (stx-tail subs 1) args)))]
 
@@ -2404,13 +2560,9 @@
 
     ;; --- end SQL-specific forms -----------------------------------------------
 
-    [(list 'set! target-expr val-expr)
-     (set!-form (parse-expr (or (stx-ref subs 1) target-expr))
-                (parse-expr (or (stx-ref subs 2) val-expr)))]
+    ;; `set!` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'for bindings-form body ...)
-     (for-form (parse-for-clauses (or (stx-ref subs 1) bindings-form))
-               (parse-body (or (stx-tail subs 2) body)))]
+    ;; `for` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; `if` migrated to the compile-time combiner registry (see register-combiner!).
 
@@ -2426,29 +2578,22 @@
     ;; They are real Clojure; the -some variants test (not (nil? x)) rather
     ;; than truthiness, exactly as in Clojure.
 
-    [(list 'with-open bindings-form body ...)
-     (with-open-form (parse-let-bindings (or (stx-ref subs 1) bindings-form))
-                     (parse-body (or (stx-tail subs 2) body)))]
+    ;; `with-open` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'doto target forms ...)
-     (doto-form (parse-expr (or (stx-ref subs 1) target))
-                (map parse-expr (or (stx-tail subs 2) forms)))]
+    ;; `doto` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'comment _ ...)
-     'nil]
+    ;; `comment` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; `do` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'cond clauses ...)
-     (cond-form (parse-cond-clauses (or (stx-tail subs 1) clauses)))]
+    ;; `cond` migrated to the compile-time combiner registry (see register-combiner!).
 
     [(list 'condp pred-fn test-expr clauses ...)
      (parse-condp-form (or (stx-ref subs 1) pred-fn)
                        (or (stx-ref subs 2) test-expr)
                        (or (stx-tail subs 3) clauses))]
 
-    [(list 'try rest ...)
-     (parse-try-form (or (stx-tail subs 1) rest))]
+    ;; `try` migrated to the compile-time combiner registry (see register-combiner!).
 
     [(list 'check expr)
      (check-expr (parse-expr (or (stx-ref subs 1) expr)))]
@@ -2462,12 +2607,9 @@
                   (parse-expr (or (stx-ref subs 2) fallback))
                   #f)]
 
-    [(list 'target-case rest ...)
-     (parse-target-case (or (stx-tail subs 1) rest))]
+    ;; `target-case` migrated to the compile-time combiner registry (see register-combiner!).
 
-    [(list 'doseq bindings-form body ...)
-     (doseq-form (parse-for-clauses (or (stx-ref subs 1) bindings-form))
-                 (parse-body (or (stx-tail subs 2) body)))]
+    ;; `doseq` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; dotimes removed — sugar for (doseq [i (range n)] body...).
     ;; No broader pattern reinforced; composition is transparent.
@@ -2500,8 +2642,7 @@
         (parse-with-form (or (stx-ref subs 1) target-expr)
                          (or (stx-tail subs 2) updates))])]
 
-    [(list 'defenum (? symbol? name) values ...)
-     (defenum-form name (map ->datum (or (stx-tail subs 2) values)))]
+    ;; `defenum` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; (defunion :throwable Name ...) — throwable variant union.
     ;; Routes to deferror-form internally (same structural shape; throw/catch
@@ -2544,10 +2685,7 @@
      (raise-parse-error 'removed-form
                         "deferror removed — use (defunion :throwable Name ...) instead")]
 
-    [(list 'defscalar (? symbol? name) (? symbol? backing) ':where preds ...)
-     (defscalar-form name (->datum backing) (map parse-scalar-predicate preds))]
-    [(list 'defscalar (? symbol? name) (? symbol? backing))
-     (defscalar-form name (->datum backing) '())]
+    ;; `defscalar` migrated to the compile-time combiner registry (see register-combiner!).
 
     [(list 'match target-expr clauses ...)
      (parse-match-form (or (stx-ref subs 1) target-expr)
@@ -2769,17 +2907,13 @@
     [(list 'defmethod _ ...)
      (raise-parse-error 'removed-form
                         "defmethod removed — use defprotocol + extend-type for type-based dispatch")]
-    [(list 'deftype _ ...)
-     (raise-parse-error 'removed-form
-                        "deftype removed — use (defrecord Name [fields]) for the data shape and (extend-type Name Protocol (method ...)) for protocol impls")]
+    ;; `deftype` migrated to the compile-time combiner registry (see register-combiner!).
     [(list 'nix-ident _ ...)
      (raise-parse-error 'removed-form
                         "nix-ident removed — use (flake-input :NAME :NAMESPACE :path ...) for flake-input access. nix-ident was an undocumented escape hatch that bypassed the type system.")]
     ;; inc / dec / not= live in stdlib-portable.rkt — no parse-time
      ;; rejection. They flow through the ordinary call-form arm below.
-    [(list 'case _ ...)
-     (raise-parse-error 'removed-form
-                        "case removed — use (match x [v1 body] [v2 body] [_ default]) or (match x [(or v1 v2) shared-body] [_ default]); literal-only matches case-fold to target-native dispatch in emit")]
+    ;; `case` migrated to the compile-time combiner registry (see register-combiner!).
     ;; Arity errors for the (:keyword target) form. The valid shape is
     ;; (:k target) — exactly one positional argument. (:k) is meaningless
     ;; (no target); (:k a b ...) was the deprecated default-on-miss form,
