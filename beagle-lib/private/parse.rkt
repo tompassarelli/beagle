@@ -2973,6 +2973,297 @@
        (jst-unary js-op (parse-expr expr-form))]
       [_ (parse-list-form* d subs)])))
 
+;; --- SQL-specific forms (migrated to the compile-time combiner registry) ---
+;; All SQL surface forms are namespaced under `sql/` per audit row 6
+;; ("Prefix where meaning diverges"). Bare forms are rejected with
+;; pointed migration messages.
+
+(register-combiner! 'sql/deftable
+  (lambda (d subs)
+    (match d
+      [(list 'sql/deftable (? symbol? name) fields-form)
+       (sql-table name (parse-sql-columns (or (stx-ref subs 2) fields-form)))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'deftable
+  (lambda (d subs)
+    (match d
+      [(list 'deftable _ _)
+       (raise-parse-error 'bare-sql-form
+                          "(deftable ...) — bare `deftable` is not supported. Beagle namespaces target-specific forms; use `(sql/deftable NAME FIELDS)`.")]
+      [_ (parse-list-form* d subs)])))
+
+(register-combiner! 'sql/select
+  (lambda (d subs)
+    (match d
+      [(cons 'sql/select rest)
+       (parse-sql-select (or (stx-tail subs 1) rest) subs #f)]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'select
+  (lambda (d subs)
+    (match d
+      [(cons 'select _)
+       (raise-parse-error 'bare-sql-form
+                          "(select ...) — bare `select` is not supported. Beagle namespaces target-specific forms; use `(sql/select COLS CLAUSES...)`.")]
+      [_ (parse-list-form* d subs)])))
+
+(register-combiner! 'sql/select-distinct
+  (lambda (d subs)
+    (match d
+      [(cons 'sql/select-distinct rest)
+       (parse-sql-select (or (stx-tail subs 1) rest) subs #t)]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'select-distinct
+  (lambda (d subs)
+    (match d
+      [(cons 'select-distinct _)
+       (raise-parse-error 'bare-sql-form
+                          "(select-distinct ...) — bare `select-distinct` is not supported. Beagle namespaces target-specific forms; use `(sql/select-distinct COLS CLAUSES...)`.")]
+      [_ (parse-list-form* d subs)])))
+
+(register-combiner! 'sql/with
+  (lambda (d subs)
+    (match d
+      [(cons 'sql/with rest)
+       #:when (and (pair? rest)
+                   (pair? (car rest))
+                   (let ([first-cte (car rest)])
+                     (and (symbol? (car first-cte))
+                          (pair? (cdr first-cte))
+                          (pair? (cadr first-cte)))))
+       (parse-sql-with (or (stx-tail subs 1) rest))]
+      [_ (parse-list-form* d subs)])))
+
+(register-combiner! 'sql/union
+  (lambda (d subs)
+    (match d
+      [(list 'sql/union left right)
+       (sql-union 'union (parse-sql-top-form left) (parse-sql-top-form right))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'sql/union-all
+  (lambda (d subs)
+    (match d
+      [(list 'sql/union-all left right)
+       (sql-union 'union-all (parse-sql-top-form left) (parse-sql-top-form right))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'sql/intersect
+  (lambda (d subs)
+    (match d
+      [(list 'sql/intersect left right)
+       (sql-union 'intersect (parse-sql-top-form left) (parse-sql-top-form right))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'sql/except
+  (lambda (d subs)
+    (match d
+      [(list 'sql/except left right)
+       (sql-union 'except (parse-sql-top-form left) (parse-sql-top-form right))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'union
+  (lambda (d subs)
+    (match d
+      [(list 'union _ _)
+       (raise-parse-error 'bare-sql-form
+                          "(union ...) — bare `union` is not supported. Beagle namespaces target-specific forms; use `(sql/union LEFT RIGHT)`.")]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'union-all
+  (lambda (d subs)
+    (match d
+      [(list 'union-all _ _)
+       (raise-parse-error 'bare-sql-form
+                          "(union-all ...) — bare `union-all` is not supported. Beagle namespaces target-specific forms; use `(sql/union-all LEFT RIGHT)`.")]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'intersect
+  (lambda (d subs)
+    (match d
+      [(list 'intersect _ _)
+       (raise-parse-error 'bare-sql-form
+                          "(intersect ...) — bare `intersect` is not supported. Beagle namespaces target-specific forms; use `(sql/intersect LEFT RIGHT)`.")]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'except
+  (lambda (d subs)
+    (match d
+      [(list 'except _ _)
+       (raise-parse-error 'bare-sql-form
+                          "(except ...) — bare `except` is not supported. Beagle namespaces target-specific forms; use `(sql/except LEFT RIGHT)`.")]
+      [_ (parse-list-form* d subs)])))
+
+(register-combiner! 'sql/insert
+  (lambda (d subs)
+    (match d
+      [(list 'sql/insert (? symbol? table) cols-form (cons 'values rows))
+       (define values-subs (and subs (stx-subs (stx-ref subs 3))))
+       (sql-insert table
+                   (parse-sql-column-names (or (stx-ref subs 2) cols-form))
+                   (map (lambda (r) (parse-sql-values-row r))
+                        (or (stx-tail values-subs 1) rows)))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'insert
+  (lambda (d subs)
+    (match d
+      [(list 'insert _ _ (cons 'values _))
+       (raise-parse-error 'bare-sql-form
+                          "(insert ...) — bare `insert` is not supported. Beagle namespaces target-specific forms; use `(sql/insert TABLE COLS (values ROWS...))`.")]
+      [_ (parse-list-form* d subs)])))
+
+(register-combiner! 'sql/update
+  (lambda (d subs)
+    (match d
+      [(list 'sql/update (? symbol? table) set-form rest ...)
+       #:when (and (pair? set-form) (eq? (car set-form) 'set))
+       (sql-update table
+                   (parse-sql-set-pairs (or (stx-ref subs 2) set-form))
+                   (parse-sql-where-clause (or (stx-tail subs 3) rest)))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'update
+  (lambda (d subs)
+    (match d
+      [(list 'update _ set-form _ ...)
+       #:when (and (pair? set-form) (eq? (car set-form) 'set))
+       (raise-parse-error 'bare-sql-form
+                          "(update ...) — bare `update` is not supported. Beagle namespaces target-specific forms; use `(sql/update TABLE (set ...) (where ...))`.")]
+      [_ (parse-list-form* d subs)])))
+
+(register-combiner! 'sql/delete
+  (lambda (d subs)
+    (match d
+      [(list 'sql/delete (? symbol? table) rest ...)
+       (sql-delete table
+                   (parse-sql-where-clause (or (stx-tail subs 2) rest)))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'delete
+  (lambda (d subs)
+    (match d
+      [(list 'delete (? symbol? _) _ ...)
+       (raise-parse-error 'bare-sql-form
+                          "(delete ...) — bare `delete` is not supported. Beagle namespaces target-specific forms; use `(sql/delete TABLE (where ...))`.")]
+      [_ (parse-list-form* d subs)])))
+
+;; INSERT...SELECT: (sql/insert-select table [cols] (sql/select ...))
+(register-combiner! 'sql/insert-select
+  (lambda (d subs)
+    (match d
+      [(list 'sql/insert-select (? symbol? table) cols-form query-form)
+       (sql-insert-select table
+                          (parse-sql-column-names (or (stx-ref subs 2) cols-form))
+                          (parse-sql-top-form query-form))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'insert-select
+  (lambda (d subs)
+    (match d
+      [(list 'insert-select _ _ _)
+       (raise-parse-error 'bare-sql-form
+                          "(insert-select ...) — bare `insert-select` is not supported. Beagle namespaces target-specific forms; use `(sql/insert-select TABLE COLS QUERY)`.")]
+      [_ (parse-list-form* d subs)])))
+
+;; RETURNING: (sql/returning stmt [cols])
+(register-combiner! 'sql/returning
+  (lambda (d subs)
+    (match d
+      [(list 'sql/returning stmt-form cols-form)
+       (define stmt-d (->datum stmt-form))
+       (define inner-stmt
+         (cond
+           [(and (pair? stmt-d) (memq (car stmt-d) '(sql/insert sql/update sql/delete)))
+            (parse-list-form stmt-d #f)]
+           [else (error 'beagle "sql/returning: inner statement must be sql/insert/sql/update/sql/delete")]))
+       (sql-returning inner-stmt
+                      (parse-sql-column-names (or (stx-ref subs 2) cols-form)))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'returning
+  (lambda (d subs)
+    (match d
+      [(list 'returning _ _)
+       (raise-parse-error 'bare-sql-form
+                          "(returning ...) — bare `returning` is not supported. Beagle namespaces target-specific forms; use `(sql/returning STMT COLS)`.")]
+      [_ (parse-list-form* d subs)])))
+
+;; CREATE INDEX: (sql/create-index name table [cols])
+(register-combiner! 'sql/create-index
+  (lambda (d subs)
+    (match d
+      [(list 'sql/create-index (? symbol? name) (? symbol? table) cols-form)
+       (sql-create-index #f name table
+                         (parse-sql-column-names (or (stx-ref subs 3) cols-form)))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'sql/create-unique-index
+  (lambda (d subs)
+    (match d
+      [(list 'sql/create-unique-index (? symbol? name) (? symbol? table) cols-form)
+       (sql-create-index #t name table
+                         (parse-sql-column-names (or (stx-ref subs 3) cols-form)))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'create-index
+  (lambda (d subs)
+    (match d
+      [(list 'create-index _ _ _)
+       (raise-parse-error 'bare-sql-form
+                          "(create-index ...) — bare `create-index` is not supported. Beagle namespaces target-specific forms; use `(sql/create-index NAME TABLE COLS)`.")]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'create-unique-index
+  (lambda (d subs)
+    (match d
+      [(list 'create-unique-index _ _ _)
+       (raise-parse-error 'bare-sql-form
+                          "(create-unique-index ...) — bare `create-unique-index` is not supported. Beagle namespaces target-specific forms; use `(sql/create-unique-index NAME TABLE COLS)`.")]
+      [_ (parse-list-form* d subs)])))
+
+;; DROP TABLE: (sql/drop-table name) or (sql/drop-table-if-exists name)
+(register-combiner! 'sql/drop-table
+  (lambda (d subs)
+    (match d
+      [(list 'sql/drop-table (? symbol? name))
+       (sql-drop-table name #f)]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'sql/drop-table-if-exists
+  (lambda (d subs)
+    (match d
+      [(list 'sql/drop-table-if-exists (? symbol? name))
+       (sql-drop-table name #t)]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'drop-table
+  (lambda (d subs)
+    (match d
+      [(list 'drop-table _)
+       (raise-parse-error 'bare-sql-form
+                          "(drop-table ...) — bare `drop-table` is not supported. Beagle namespaces target-specific forms; use `(sql/drop-table NAME)`.")]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'drop-table-if-exists
+  (lambda (d subs)
+    (match d
+      [(list 'drop-table-if-exists _)
+       (raise-parse-error 'bare-sql-form
+                          "(drop-table-if-exists ...) — bare `drop-table-if-exists` is not supported. Beagle namespaces target-specific forms; use `(sql/drop-table-if-exists NAME)`.")]
+      [_ (parse-list-form* d subs)])))
+
+;; ALTER TABLE: (sql/alter-table name (add-column col-def)) etc.
+(register-combiner! 'sql/alter-table
+  (lambda (d subs)
+    (match d
+      [(list 'sql/alter-table (? symbol? table) action-form)
+       (sql-alter-table table (->datum action-form))]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'alter-table
+  (lambda (d subs)
+    (match d
+      [(list 'alter-table _ _)
+       (raise-parse-error 'bare-sql-form
+                          "(alter-table ...) — bare `alter-table` is not supported. Beagle namespaces target-specific forms; use `(sql/alter-table TABLE ACTION)`.")]
+      [_ (parse-list-form* d subs)])))
+
+;; TRUNCATE: (sql/truncate table)
+(register-combiner! 'sql/truncate
+  (lambda (d subs)
+    (match d
+      [(list 'sql/truncate (? symbol? table))
+       (sql-truncate table)]
+      [_ (parse-list-form* d subs)])))
+(register-combiner! 'truncate
+  (lambda (d subs)
+    (match d
+      [(list 'truncate _)
+       (raise-parse-error 'bare-sql-form
+                          "(truncate ...) — bare `truncate` is not supported. Beagle namespaces target-specific forms; use `(sql/truncate TABLE)`.")]
+      [_ (parse-list-form* d subs)])))
+
 (define (parse-list-form d subs)
   ;; Invariant: macro heads are resolved in parse-expr (and the top-level loop)
   ;; BEFORE control reaches here, so a 'macro head must never arrive — if one
@@ -3114,152 +3405,7 @@
 
     ;; --- end JS-specific forms ------------------------------------------------
 
-    ;; --- SQL-specific forms ---------------------------------------------------
-    ;; All SQL surface forms are namespaced under `sql/` per audit row 6
-    ;; ("Prefix where meaning diverges"). Bare forms are rejected with
-    ;; pointed migration messages.
-
-    [(list 'sql/deftable (? symbol? name) fields-form)
-     (sql-table name (parse-sql-columns (or (stx-ref subs 2) fields-form)))]
-    [(list 'deftable _ _)
-     (raise-parse-error 'bare-sql-form
-                        "(deftable ...) — bare `deftable` is not supported. Beagle namespaces target-specific forms; use `(sql/deftable NAME FIELDS)`.")]
-
-    [(cons 'sql/select rest)
-     (parse-sql-select (or (stx-tail subs 1) rest) subs #f)]
-    [(cons 'select _)
-     (raise-parse-error 'bare-sql-form
-                        "(select ...) — bare `select` is not supported. Beagle namespaces target-specific forms; use `(sql/select COLS CLAUSES...)`.")]
-
-    [(cons 'sql/select-distinct rest)
-     (parse-sql-select (or (stx-tail subs 1) rest) subs #t)]
-    [(cons 'select-distinct _)
-     (raise-parse-error 'bare-sql-form
-                        "(select-distinct ...) — bare `select-distinct` is not supported. Beagle namespaces target-specific forms; use `(sql/select-distinct COLS CLAUSES...)`.")]
-
-    [(cons 'sql/with rest)
-     #:when (and (pair? rest)
-                 (pair? (car rest))
-                 (let ([first-cte (car rest)])
-                   (and (symbol? (car first-cte))
-                        (pair? (cdr first-cte))
-                        (pair? (cadr first-cte)))))
-     (parse-sql-with (or (stx-tail subs 1) rest))]
-    ;; Note: bare `(with ...)` already has dispatch logic for record-update vs
-    ;; Nix-scope; SQL CTEs route through `sql/with` to avoid further overload.
-
-    [(list 'sql/union left right)
-     (sql-union 'union (parse-sql-top-form left) (parse-sql-top-form right))]
-    [(list 'sql/union-all left right)
-     (sql-union 'union-all (parse-sql-top-form left) (parse-sql-top-form right))]
-    [(list 'sql/intersect left right)
-     (sql-union 'intersect (parse-sql-top-form left) (parse-sql-top-form right))]
-    [(list 'sql/except left right)
-     (sql-union 'except (parse-sql-top-form left) (parse-sql-top-form right))]
-    [(list 'union _ _)
-     (raise-parse-error 'bare-sql-form
-                        "(union ...) — bare `union` is not supported. Beagle namespaces target-specific forms; use `(sql/union LEFT RIGHT)`.")]
-    [(list 'union-all _ _)
-     (raise-parse-error 'bare-sql-form
-                        "(union-all ...) — bare `union-all` is not supported. Beagle namespaces target-specific forms; use `(sql/union-all LEFT RIGHT)`.")]
-    [(list 'intersect _ _)
-     (raise-parse-error 'bare-sql-form
-                        "(intersect ...) — bare `intersect` is not supported. Beagle namespaces target-specific forms; use `(sql/intersect LEFT RIGHT)`.")]
-    [(list 'except _ _)
-     (raise-parse-error 'bare-sql-form
-                        "(except ...) — bare `except` is not supported. Beagle namespaces target-specific forms; use `(sql/except LEFT RIGHT)`.")]
-
-    [(list 'sql/insert (? symbol? table) cols-form (cons 'values rows))
-     (define values-subs (and subs (stx-subs (stx-ref subs 3))))
-     (sql-insert table
-                 (parse-sql-column-names (or (stx-ref subs 2) cols-form))
-                 (map (lambda (r) (parse-sql-values-row r))
-                      (or (stx-tail values-subs 1) rows)))]
-    [(list 'insert _ _ (cons 'values _))
-     (raise-parse-error 'bare-sql-form
-                        "(insert ...) — bare `insert` is not supported. Beagle namespaces target-specific forms; use `(sql/insert TABLE COLS (values ROWS...))`.")]
-
-    [(list 'sql/update (? symbol? table) set-form rest ...)
-     #:when (and (pair? set-form) (eq? (car set-form) 'set))
-     (sql-update table
-                 (parse-sql-set-pairs (or (stx-ref subs 2) set-form))
-                 (parse-sql-where-clause (or (stx-tail subs 3) rest)))]
-    [(list 'update _ set-form _ ...)
-     #:when (and (pair? set-form) (eq? (car set-form) 'set))
-     (raise-parse-error 'bare-sql-form
-                        "(update ...) — bare `update` is not supported. Beagle namespaces target-specific forms; use `(sql/update TABLE (set ...) (where ...))`.")]
-
-    [(list 'sql/delete (? symbol? table) rest ...)
-     (sql-delete table
-                 (parse-sql-where-clause (or (stx-tail subs 2) rest)))]
-    [(list 'delete (? symbol? _) _ ...)
-     (raise-parse-error 'bare-sql-form
-                        "(delete ...) — bare `delete` is not supported. Beagle namespaces target-specific forms; use `(sql/delete TABLE (where ...))`.")]
-
-    ;; INSERT...SELECT: (sql/insert-select table [cols] (sql/select ...))
-    [(list 'sql/insert-select (? symbol? table) cols-form query-form)
-     (sql-insert-select table
-                        (parse-sql-column-names (or (stx-ref subs 2) cols-form))
-                        (parse-sql-top-form query-form))]
-    [(list 'insert-select _ _ _)
-     (raise-parse-error 'bare-sql-form
-                        "(insert-select ...) — bare `insert-select` is not supported. Beagle namespaces target-specific forms; use `(sql/insert-select TABLE COLS QUERY)`.")]
-
-    ;; RETURNING: (sql/returning stmt [cols])
-    [(list 'sql/returning stmt-form cols-form)
-     (define stmt-d (->datum stmt-form))
-     (define inner-stmt
-       (cond
-         [(and (pair? stmt-d) (memq (car stmt-d) '(sql/insert sql/update sql/delete)))
-          (parse-list-form stmt-d #f)]
-         [else (error 'beagle "sql/returning: inner statement must be sql/insert/sql/update/sql/delete")]))
-     (sql-returning inner-stmt
-                    (parse-sql-column-names (or (stx-ref subs 2) cols-form)))]
-    [(list 'returning _ _)
-     (raise-parse-error 'bare-sql-form
-                        "(returning ...) — bare `returning` is not supported. Beagle namespaces target-specific forms; use `(sql/returning STMT COLS)`.")]
-
-    ;; CREATE INDEX: (sql/create-index name table [cols])
-    [(list 'sql/create-index (? symbol? name) (? symbol? table) cols-form)
-     (sql-create-index #f name table
-                       (parse-sql-column-names (or (stx-ref subs 3) cols-form)))]
-    [(list 'sql/create-unique-index (? symbol? name) (? symbol? table) cols-form)
-     (sql-create-index #t name table
-                       (parse-sql-column-names (or (stx-ref subs 3) cols-form)))]
-    [(list 'create-index _ _ _)
-     (raise-parse-error 'bare-sql-form
-                        "(create-index ...) — bare `create-index` is not supported. Beagle namespaces target-specific forms; use `(sql/create-index NAME TABLE COLS)`.")]
-    [(list 'create-unique-index _ _ _)
-     (raise-parse-error 'bare-sql-form
-                        "(create-unique-index ...) — bare `create-unique-index` is not supported. Beagle namespaces target-specific forms; use `(sql/create-unique-index NAME TABLE COLS)`.")]
-
-    ;; DROP TABLE: (sql/drop-table name) or (sql/drop-table-if-exists name)
-    [(list 'sql/drop-table (? symbol? name))
-     (sql-drop-table name #f)]
-    [(list 'sql/drop-table-if-exists (? symbol? name))
-     (sql-drop-table name #t)]
-    [(list 'drop-table _)
-     (raise-parse-error 'bare-sql-form
-                        "(drop-table ...) — bare `drop-table` is not supported. Beagle namespaces target-specific forms; use `(sql/drop-table NAME)`.")]
-    [(list 'drop-table-if-exists _)
-     (raise-parse-error 'bare-sql-form
-                        "(drop-table-if-exists ...) — bare `drop-table-if-exists` is not supported. Beagle namespaces target-specific forms; use `(sql/drop-table-if-exists NAME)`.")]
-
-    ;; ALTER TABLE: (sql/alter-table name (add-column col-def)) etc.
-    [(list 'sql/alter-table (? symbol? table) action-form)
-     (sql-alter-table table (->datum action-form))]
-    [(list 'alter-table _ _)
-     (raise-parse-error 'bare-sql-form
-                        "(alter-table ...) — bare `alter-table` is not supported. Beagle namespaces target-specific forms; use `(sql/alter-table TABLE ACTION)`.")]
-
-    ;; TRUNCATE: (sql/truncate table)
-    [(list 'sql/truncate (? symbol? table))
-     (sql-truncate table)]
-    [(list 'truncate _)
-     (raise-parse-error 'bare-sql-form
-                        "(truncate ...) — bare `truncate` is not supported. Beagle namespaces target-specific forms; use `(sql/truncate TABLE)`.")]
-
-    ;; --- end SQL-specific forms -----------------------------------------------
+    ;; --- SQL-specific forms migrated to the compile-time combiner registry (see register-combiner!) ---
 
     ;; `set!` migrated to the compile-time combiner registry (see register-combiner!).
 
