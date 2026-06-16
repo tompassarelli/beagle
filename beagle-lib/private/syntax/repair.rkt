@@ -167,10 +167,31 @@
                  (not (string-suffix? (token-text tok) "\"")))))
         (define sorted (sort edits > #:key repair-edit-offset))
         (define repaired (apply-edits source sorted))
+        ;; Distinguish a safe APPEND from a dangerous RELOCATION by net closer
+        ;; count. Adding closers (`)` -> `)))`) closes forms the author left
+        ;; open at the natural end — safe. REMOVING closers (`)))` -> `))`) means
+        ;; a form the author explicitly closed here now stays open and re-closes
+        ;; somewhere else: the tree is being re-derived from INDENTATION and may
+        ;; be balanced-but-WRONG. Never auto-apply that — downgrade to 'medium so
+        ;; --write refuses and only --diff/--emit-patch surface it for review.
+        (define (count-closers s)
+          (for/sum ([c (in-string s)]) (if (memv c '(#\) #\] #\})) 1 0)))
+        (define relocates?
+          (for/or ([e (in-list sorted)])
+            (define off (repair-edit-offset e))
+            (define len (repair-edit-length e))
+            (define old-span
+              (if (and (>= off 0) (<= (+ off len) (string-length source)))
+                  (substring source off (+ off len))
+                  ""))
+            (< (count-closers (repair-edit-insert-text e))
+               (count-closers old-span))))
         (repair-result repaired
                        (not (string=? repaired source))
                        sorted
-                       (if has-unclosed-string? 'low 'high)
+                       (cond [has-unclosed-string? 'low]
+                             [relocates? 'medium]
+                             [else 'high])
                        '())])]))
 
 (define (list->set lst)
