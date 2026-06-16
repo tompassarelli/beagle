@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# beagle-claims: emit a file/dir's AST as CNF claim triples (analysis projection).
+#
+# Usage:
+#   bin/beagle-claims <file-or-dir> ...
+#
+# Directories are expanded to all beagle source files. Output is a stream of
+#   @file <path>
+#   [<subj> "<pred>" <obj>]
+# blocks, one per file, on stdout. Unlike beagle-build this is target-agnostic:
+# it claims-emits .bjs / .bclj / .bnix alike, ignoring each file's #lang.
+set -euo pipefail
+source "$(dirname "$0")/_beagle-racket"
+
+if [[ $# -lt 1 ]]; then
+    echo "usage: beagle-claims <file-or-dir> ..." >&2
+    exit 2
+fi
+
+files=()
+for a in "$@"; do
+    if [[ -d "$a" ]]; then
+        while IFS= read -r f; do files+=("$f"); done < <(
+            find "$a" -type f \( -name '*.bjs' -o -name '*.bclj' -o -name '*.bcljs' -o -name '*.bnix' \) | sort)
+    else
+        files+=("$a")
+    fi
+done
+
+if [[ ${#files[@]} -eq 0 ]]; then
+    echo "beagle-claims: no beagle source files found" >&2
+    exit 1
+fi
+
+"$RACKET" -e "(require beagle/private/claims-cli)(run-claims (vector->list (current-command-line-arguments)))" -- "${files[@]}"

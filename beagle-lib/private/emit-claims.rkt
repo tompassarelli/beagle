@@ -32,6 +32,16 @@
 (define (emit! s p o)
   (set-box! (cur-triples) (cons (list s p o) (unbox (cur-triples)))))
 
+;; Emit a field edge AND, when the value is a MINTED node (a compound, not an
+;; inlined literal), a uniform `child` edge. This makes structural containment a
+;; SINGLE predicate to traverse transitively (so a defn reaches every nested call
+;; via `child`+), and makes node-refs unambiguous vs literal integers downstream.
+(define (field! parent pred x)
+  (define o (val->obj x))
+  (emit! parent pred o)
+  (unless (lit? x) (emit! parent "child" o))
+  o)
+
 ;; --- literals: inlined as triple objects, NOT minted as nodes (keep leaves compact) ---
 (define (lit? x)
   (or (string? x) (number? x) (boolean? x) (symbol? x) (keyword? x) (char? x) (null? x)))
@@ -57,15 +67,15 @@
 (define (emit-pair! x)
   (define id (fresh-id!))
   (emit! id "form-kind" "pair")
-  (emit! id "key"   (val->obj (car x)))
-  (emit! id "value" (val->obj (cdr x)))
+  (field! id "key"   (car x))
+  (field! id "value" (cdr x))
   id)
 
 (define (seq->id xs)
   (define id (fresh-id!))
   (emit! id "form-kind" "seq")
   (for ([x (in-list xs)] [i (in-naturals)])
-    (emit! id (string-append "f" (number->string i)) (val->obj x)))
+    (field! id (string-append "f" (number->string i)) x))
   id)
 
 (define (strip-kind sym)
@@ -78,8 +88,8 @@
   (define id (fresh-id!))
   (emit! id "form-kind" (strip-kind (vector-ref v 0)))
   (for ([i (in-range 1 (vector-length v))])
-    (emit! id (string-append "f" (number->string (sub1 i)))
-           (val->obj (vector-ref v i))))
+    (field! id (string-append "f" (number->string (sub1 i)))
+            (vector-ref v i)))
   id)
 
 ;; --- semantic overlays for graph-meaningful forms ---
@@ -97,14 +107,16 @@
   (emit! id "form-kind" "defn")
   (emit! id "name" (symbol->string (defn-form-name x)))
   (when (defn-form-private? x) (emit! id "private" #t))
-  (emit! id "body" (seq->id (defn-form-body x)))
+  (define b (seq->id (defn-form-body x)))
+  (emit! id "body" b)
+  (emit! id "child" b)
   id)
 
 (define (emit-def! x)
   (define id (fresh-id!))
   (emit! id "form-kind" "def")
   (emit! id "name" (symbol->string (def-form-name x)))
-  (emit! id "value" (val->obj (def-form-value x)))
+  (field! id "value" (def-form-value x))
   id)
 
 (define (emit-call! x)
@@ -113,15 +125,17 @@
   (define fn (call-form-fn x))
   (if (symbol? fn)
       (emit! id "calls" (symbol->string fn))        ; the call-graph edge
-      (emit! id "calls-expr" (val->obj fn)))
-  (emit! id "args" (seq->id (call-form-args x)))
+      (field! id "calls-expr" fn))
+  (define a (seq->id (call-form-args x)))
+  (emit! id "args" a)
+  (emit! id "child" a)
   id)
 
 (define (emit-record! x)
   (define id (fresh-id!))
   (emit! id "form-kind" "record")
   (emit! id "name" (symbol->string (record-form-name x)))
-  (emit! id "fields" (val->obj (record-form-fields x)))
+  (field! id "fields" (record-form-fields x))
   id)
 
 ;; --- entry point (backend contract: prog -> String) ---
