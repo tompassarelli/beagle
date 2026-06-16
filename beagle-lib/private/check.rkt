@@ -3396,7 +3396,14 @@
           [(defn-multi? f)
            (for ([a (in-list (defn-multi-arities f))])
              (check-defn-purity (defn-multi-name f) (arity-clause-body a) st f))]
-          ;; Descend through wrapper forms (js/export, target-case, …) that may
+          ;; Descend through STRUCT wrapper forms that carry a defn payload.
+          ;; js/export / js/export-default parse to jst-export(-default) structs
+          ;; (not lists), so without these the EXPORTED defns — the public API,
+          ;; exactly what you most want the purity guarantee on — were skipped.
+          [(with-meta? f) (walk (with-meta-expr f))]
+          [(jst-export? f) (walk (jst-export-form f))]
+          [(jst-export-default? f) (walk (jst-export-default-form f))]
+          ;; Descend through list-shaped wrapper forms (target-case, …) that may
           ;; carry a defn payload — same transitive walk type-check! uses.
           [(and (pair? f) (list? f)) (for-each walk (filter pair? (cdr f)))]
           [else (void)])))))
