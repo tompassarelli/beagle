@@ -6,6 +6,22 @@ Format: loosely [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Entrie
 
 This file begins at v0.16.0. Prior history lives in git tags (v0.7.1 → v0.15.3).
 
+## [0.17.1] — 2026-06-16
+
+A patch release of JS-target hardening, driven entirely by authoring a real downstream app (the gjoa Firefox fork) in `#lang beagle/js`. Each item is a silent miscompile or footgun the port hit — now an emit fix or a loud compile-time guard. Active suite 1377/1377.
+
+### Fixed
+
+- **Async IIFEs are awaited in value/statement position** (678bbd1): a `try`/`loop`/`doseq` containing `js/await` compiles to an async IIFE; bound in a `let` without an enclosing `js/await`, it was emitted *without* `await`, so the binding held a pending Promise that downstream code then read synchronously. `emit-js` now awaits async IIFEs in value/statement position — tail position correctly left alone, and the exact `(async () => ` prefix match never double-awaits.
+- **Macro-only `:refer`s are no longer emitted as runtime imports** (69c718a): a refer that resolves to a macro is compile-time only and has no runtime export, but it was emitted in `import { … }` — silently fine when a bundler tree-shakes the dead import, a load-time "does not provide an export named X" for any *unbundled* ESM consumer. `emit-module-header` now drops macro refers and omits the import line entirely when a require's refers are all macros.
+- **The purity check now covers exported functions** (5e18635): `check-purity!` descended only into list-shaped wrapper forms, so `js/export` / `js/export-default` (which parse to *structs*) hid every exported defn — the public API — from the `!`-effect check. Now descends into `jst-export` / `jst-export-default` / `with-meta`.
+
+### Added
+
+- **`swallowed-binding` guard (E020)** (004d291): a `let` binding one paren short silently absorbs the following `name value` pair as body forms, emitting the swallowed name as a bare `name;` statement → runtime `ReferenceError`, while `beagle syntax` reports "ok" (parens net-balance). A non-final body statement that is a bare unbound symbol now errors with a pointed message; tail-position bare symbols (legitimate returns) are not flagged.
+- **`%` rejected as a call head — `percent-not-modulo`** (2f7a441): `(% a b)` emitted `_pct(a, b)` (`%` is the `#()` anonymous-arg shorthand) → undefined call. Now a pointed parse error naming `rem`/`mod` for modulo; `%` inside `#(…)` lambdas is unaffected.
+- **camelCase JS-export lint** (7b5b6d5): kebab names mangle to `snake_case` and camelCase emits as-is, so a camelCase export referenced cross-module in kebab resolves to a *different* identifier (undefined in the bundle). A lint warns and names the kebab fix; it runs in `lint-program!` (fires at `build` and `check`) and is counted by `count-lint-warnings`, so the `--agent` repair loop surfaces it too.
+
 ## [0.17.0] — 2026-06-15
 
 Where 0.16 locked the surface, 0.17 turns the compiler into something its own repair tooling can drive. Diagnostics now carry structured, machine-applicable data; `beagle-doctor` proves the repair loop *works* rather than merely runs; form dispatch unifies onto a single compile-time combiner registry; Odin joins as a live native target and the JS emitter returns to live. Five live targets: Clojure, ClojureScript, JavaScript, Nix, Odin.
