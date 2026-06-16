@@ -22,7 +22,7 @@
          racket/format
          "parse.rkt")
 
-(provide datum->claims claims->datum datum->src)
+(provide datum->claims claims->datum datum->src edn-triples->datum read-edn-triples)
 
 ;; --- datum -> claims --------------------------------------------------------
 (define (split-improper d)            ; pair -> (values proper-prefix tail) ; tail='() if proper
@@ -181,11 +181,15 @@
 ;; re-reads to the identical program — proving text is a faithful VIEW.
 (define %brackets (string->symbol "#%brackets"))
 (define %map      (string->symbol "#%map"))
+(define %set      (string->symbol "#%set"))
+(define %regex    (string->symbol "#%regex"))
 (define (datum->src d)
   (cond
     [(null? d) "()"]
     [(and (pair? d) (eq? (car d) %brackets)) (format "[~a]" (string-join (map datum->src (cdr d)) " "))]
     [(and (pair? d) (eq? (car d) %map))      (format "{~a}" (string-join (map datum->src (cdr d)) " "))]
+    [(and (pair? d) (eq? (car d) %set))      (format "#{~a}" (string-join (map datum->src (cdr d)) " "))]
+    [(and (pair? d) (eq? (car d) %regex) (pair? (cdr d)) (string? (cadr d))) (format "#\"~a\"" (cadr d))]
     [(pair? d)
      (let-values ([(elems tail) (split-improper d)])
        (if (null? tail)
@@ -211,6 +215,15 @@
   (printf "@file ~a\n" path)
   (for ([l (in-list (datum->edn-lines (cons 'beagle-file forms)))]) (displayln l)))
 
+;; render: reconstruct from EDN reader-claims and print idiomatic source. The EDN
+;; may have come straight out of a (mutated) Fram store — this is the "project
+;; source from the graph" half of graph-native authoring.
+(define (render-edn edn-path)
+  (define wrapped (edn-triples->datum (read-edn-triples edn-path)))
+  (define forms (if (and (pair? wrapped) (eq? (car wrapped) 'beagle-file)) (cdr wrapped) (list wrapped)))
+  (display (string-join (map datum->src forms) "\n\n"))
+  (newline))
+
 ;; verify: reconstruct from (post-Fram) EDN, compare to the original source.
 (define (verify edn-path orig-path)
   (define wrapped (edn-triples->datum (read-edn-triples edn-path)))
@@ -221,7 +234,7 @@
   (printf "source: ~a\n" orig-path)
   (printf "forms reconstructed from Fram: ~a   original: ~a\n" (length forms) (length orig))
   (printf "DATUM IDENTITY through the persisted claim store: ~a\n"
-          (if same "PASS — byte-identical program" "FAIL"))
+          (if same "PASS — program reconstructs datum-identically" "FAIL"))
   ;; render the Fram-sourced program back to text and re-read it (text is a view).
   ;; the `#lang` line round-trips as the leading (define-target ...) form already in
   ;; `forms`, so we do NOT re-prepend it (that would double the target declaration).
@@ -242,21 +255,25 @@
 ;; gate: datum -> claims -> datum identity over a corpus.
 (define (run-gate args)
   (define files (expand-paths args))
-  (define forms 0) (define ok 0) (define tris 0) (define res '())
+  (define forms 0) (define ok 0) (define tris 0) (define res '()) (define skipped '())
   (for ([f (in-list files)])
     (define stxs (with-handlers ([exn:fail? (lambda (_) #f)]) (read-beagle-syntax f)))
-    (when stxs
-      (for ([stx (in-list stxs)])
-        (define d (syntax->datum stx))
-        (define-values (root triples) (datum->claims d))
-        (define d2 (claims->datum root triples))
-        (set! forms (add1 forms))
-        (set! tris (+ tris (length triples)))
-        (if (equal? d d2)
-            (set! ok (add1 ok))
-            (when (< (length res) 3) (set! res (cons (list (path->string f) d d2) res)))))))
+    (if (not stxs)
+        (set! skipped (cons (path->string f) skipped))   ; unreadable -> count it, don't let it pass silently
+        (for ([stx (in-list stxs)])
+          (define d (syntax->datum stx))
+          (define-values (root triples) (datum->claims d))
+          (define d2 (claims->datum root triples))
+          (set! forms (add1 forms))
+          (set! tris (+ tris (length triples)))
+          (if (equal? d d2)
+              (set! ok (add1 ok))
+              (when (< (length res) 3) (set! res (cons (list (path->string f) d d2) res)))))))
   (printf "================ TURTLE #3 — source-of-truth gate ================\n")
-  (printf "files: ~a   top-level forms: ~a\n" (length files) forms)
+  (printf "files: ~a (~a read, ~a UNREADABLE/skipped)   top-level forms: ~a\n"
+          (length files) (- (length files) (length skipped)) (length skipped) forms)
+  (unless (null? skipped)
+    (printf "  skipped (did not parse): ~a\n" (string-join (map (lambda (p) (last (string-split p "/"))) skipped) ", ")))
   (printf "claims -> datum IDENTICAL: ~a / ~a   (~a%)\n"
           ok forms (real->decimal-string (* 100.0 (/ ok (max 1 forms))) 2))
   (printf "claim triples emitted: ~a   (~a per form avg)\n"
@@ -288,4 +305,5 @@
   (cond
     [(and (pair? argv) (equal? (car argv) "--emit-edn")) (emit-edn-file (cadr argv))]
     [(and (pair? argv) (equal? (car argv) "--verify"))   (verify (cadr argv) (caddr argv))]
+    [(and (pair? argv) (equal? (car argv) "--render"))   (render-edn (cadr argv))]
     [else (run-gate argv)]))
