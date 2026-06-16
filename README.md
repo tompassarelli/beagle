@@ -188,6 +188,11 @@ an on-edit syntax/type hook, and machine-applicable fixes — is what makes
 the types pay off; `bin/beagle doctor` health-checks it end to end. Deeper
 dev tools stay as `bin/beagle-*` (blame, specfix, trace, cascade).
 
+The `bin/beagle-claims` / `bin/beagle-roundtrip` backends project beagle source
+into a CNF claim graph for **[Chartroom](../chartroom)** (code-as-claims on Fram).
+Why that's a different thing from tools that *derive* a graph from text:
+[comparison](../chartroom/docs/comparison-graphify.md).
+
 ## Design discipline
 
 The discipline is intentionally tight:
