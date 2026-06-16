@@ -328,6 +328,7 @@
     [(macro-expansion-type-error) "E017"]
     [(unresolved-alias)    "E018"]
     [(purity-leak)         "E019"]
+    [(swallowed-binding)   "E020"]
     [else                 "E000"]))
 
 ;; Expected/actual detail pair carrying BOTH the human strings (kept verbatim,
@@ -1117,6 +1118,24 @@
        (define e (car forms))
        (define t (infer-expr e current-env))
        (warn-ignored-result e t)
+       ;; A bare symbol in NON-FINAL (statement) position has no effect — its
+       ;; value is computed and discarded. When that symbol also resolves to
+       ;; nothing (not a local/param/let-binding/extern/builtin/top-level def),
+       ;; it is almost always a binding NAME swallowed into a previous `let`
+       ;; binding's value by an imbalanced paren: the reader accepts it (net
+       ;; parens balance), then the swallowed name emits as a bare `name;` ->
+       ;; runtime ReferenceError. Make it loud. Tail-position symbols are the
+       ;; legitimate return value and are handled by the (null? (cdr forms)) arm.
+       (when (and (symbol? e)
+                  (not (infer-literal-type e))
+                  (not (hash-ref current-env e #f))
+                  (not (hash-ref current-env (canonicalize-qualified-sym e) #f))
+                  (not (schema-type-for-config-sym e)))
+         (raise-diag 'swallowed-binding
+                     (format "bare symbol `~a` in non-final statement position resolves to nothing and has no effect — usually a binding name swallowed by an imbalanced paren in a previous `let` binding's value. Check the enclosing `let` bindings for a missing `)`. If you meant a call, write `(~a ...)`."
+                             e e)
+                     (hasheq 'symbol (symbol->string e))
+                     #:src (body-loc-at body (- (length body) (length forms)))))
        (define next-env
          (if (and (when-form? e)
                   (body-diverges? (when-form-body e)))

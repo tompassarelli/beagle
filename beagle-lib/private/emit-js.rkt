@@ -476,6 +476,19 @@
     (format "(async () => { ~a })()" body-str)
     (format "(() => { ~a })()" body-str)))
 
+;; A control-flow form (try/do/let/loop/when/match…) containing js/await compiles
+;; to an async IIFE `(async () => {...})()`, which RETURNS A PROMISE. In value or
+;; statement position that promise must be awaited — otherwise the binding holds a
+;; pending promise and code after it runs before it settles (the recurring
+;; "fire-and-forget" emit bug). The enclosing fn is necessarily async (its body
+;; contains await), so `await` is valid here. The matched prefix is exactly the
+;; `iife`/loop output, so this never over-awaits an inline-await call like
+;; `f(await g())` (which does not start with `(async () => `).
+(define (await-async-iife s)
+  (if (string-prefix? s "(async () => ")
+    (string-append "await " s)
+    s))
+
 ;; --- context tracking ------------------------------------------------------
 
 (define current-js-context (make-parameter 'stmt))
@@ -790,7 +803,7 @@
     (emit-expr-core e)))
 
 (define (emit-expr-stmt e)
-  (define s (emit-expr-core e))
+  (define s (await-async-iife (emit-expr-core e)))
   (if (string-suffix? s ";") s (string-append s ";")))
 
 (define (emit-expr-core e)
@@ -973,8 +986,9 @@
        (for/fold ([strs '()]
                   [bound (current-js-bound)])
                  ([b (in-list bindings)])
-         (define val-str (parameterize ([current-js-bound bound])
-                           (emit-expr (let-binding-value b))))
+         (define val-str (await-async-iife
+                           (parameterize ([current-js-bound bound])
+                             (emit-expr (let-binding-value b)))))
          (define stmts (emit-let-binding-stmts (let-binding-name b) val-str))
          (define new-names (names-from-binding-target (let-binding-name b)))
          (values (append strs stmts)
@@ -998,7 +1012,7 @@
        (for/list ([b (in-list bindings)])
          (format "let ~a = ~a;"
                  (emit-binding-target (let-binding-name b))
-                 (emit-expr (let-binding-value b)))))
+                 (await-async-iife (emit-expr (let-binding-value b))))))
      (with-bindings loop-names
        (lambda ()
          (define body-str
@@ -1446,7 +1460,7 @@
        (for/list ([b (in-list binds)])
          (format "const ~a = ~a"
                  (mangle-name (let-binding-name b))
-                 (emit-expr (let-binding-value b)))))
+                 (await-async-iife (emit-expr (let-binding-value b))))))
      (define inner
        (if (null? rest) body-str
            (emit-for-clauses rest body-str)))
@@ -1626,7 +1640,7 @@
      (define binding-strs
        (apply append
          (for/list ([b (in-list (let-form-bindings e))])
-           (emit-let-binding-stmts (let-binding-name b) (emit-expr (let-binding-value b))))))
+           (emit-let-binding-stmts (let-binding-name b) (await-async-iife (emit-expr (let-binding-value b)))))))
      (with-bindings let-names
        (lambda ()
          ;; Only the tail form drives the loop (recur/return); earlier forms are
@@ -1687,8 +1701,9 @@
          (define-values (bind-strs _)
            (for/fold ([strs '()] [bound (current-js-bound)])
                      ([b (in-list bindings)])
-             (define val-str (parameterize ([current-js-bound bound])
-                               (emit-expr (let-binding-value b))))
+             (define val-str (await-async-iife
+                               (parameterize ([current-js-bound bound])
+                                 (emit-expr (let-binding-value b)))))
              (define stmts (emit-let-binding-stmts (let-binding-name b) val-str))
              (define new-names (names-from-binding-target (let-binding-name b)))
              (values (append strs stmts)
@@ -1821,8 +1836,9 @@
          (define-values (bind-strs _)
            (for/fold ([strs '()] [bound (current-js-bound)])
                      ([b (in-list bindings)])
-             (define val-str (parameterize ([current-js-bound bound])
-                               (emit-expr (let-binding-value b))))
+             (define val-str (await-async-iife
+                               (parameterize ([current-js-bound bound])
+                                 (emit-expr (let-binding-value b)))))
              (define stmts (emit-let-binding-stmts (let-binding-name b) val-str))
              (define new-names (names-from-binding-target (let-binding-name b)))
              (values (append strs stmts)

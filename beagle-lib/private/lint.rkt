@@ -17,8 +17,47 @@
       (lint-form form))
     (lint-shadows prog)
     (lint-unused-externs prog)
+    (when (eq? (program-target prog) 'js)
+      (lint-export-naming prog))
     (when (eq? (program-target prog) 'nix)
       (lint-nix prog))))
+
+;; --- cross-module naming lint (JS target) -----------------------------------
+;; kebab-case names mangle to snake_case (`build-context-menu` ->
+;; `build_context_menu`); camelCase names emit as-is (`buildContextMenu` ->
+;; `buildContextMenu`). So an EXPORTED camelCase name that a consumer references
+;; in kebab mangles to a DIFFERENT JS identifier and resolves to undefined in the
+;; concatenated bundle. declare-extern is the intentional escape hatch, so warn
+;; (don't hard-error) and name the kebab fix.
+(define (camel-case-name? sym)
+  (define s (symbol->string sym))
+  (and (> (string-length s) 0)
+       (char-lower-case? (string-ref s 0))   ; lowercase start (camelCase, not a PascalCase type name)
+       (regexp-match? #rx"[A-Z]" s)          ; has an uppercase letter
+       (not (regexp-match? #rx"-" s))))       ; no hyphen (so it isn't already kebab)
+
+(define (camel->kebab-str s)
+  (string-downcase (regexp-replace* #rx"([a-z0-9])([A-Z])" s "\\1-\\2")))
+
+(define (lint-export-naming prog)
+  (for ([raw-form (in-list (program-forms prog))])
+    (define form0 (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
+    (when (jst-export? form0)
+      (define name
+        (match (jst-export-form form0)
+          [(defn-form n _ _ _ _ _ _ _) n]
+          [(def-form n _ _ _) n]
+          [(defonce-form n _ _ _) n]
+          [(defn-multi n _ _ _) n]
+          [_ #f]))
+      (when (and (symbol? name) (camel-case-name? name))
+        (warn (string-append
+               "exported `~a` is camelCase — kebab mangles to snake_case but "
+               "camelCase emits as-is, so a kebab cross-module reference (`~a`) "
+               "mangles to a different JS identifier and is undefined in the "
+               "bundle. Rename the export to kebab-case `~a`.")
+              name (camel->kebab-str (symbol->string name))
+              (camel->kebab-str (symbol->string name)))))))
 
 (define (lint-form f)
   (cond
