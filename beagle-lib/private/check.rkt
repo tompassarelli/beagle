@@ -1976,7 +1976,7 @@
                      (= (length (type-app-args coll-type)) 1))
               (car (type-app-args coll-type))
               ANY))
-          (hash-set! body-env (for-binding-name c) elem-type)]
+          (hash-set! body-env (for-binding-name c) (or (for-binding-type c) elem-type))]
          [(for-when? c) (infer-expr (for-when-test c) body-env)]
          [(for-let? c)
           (for ([b (in-list (for-let-bindings c))])
@@ -2082,7 +2082,7 @@
                      (= (length (type-app-args coll-type)) 1))
               (car (type-app-args coll-type))
               ANY))
-          (hash-set! body-env (for-binding-name c) elem-type)]
+          (hash-set! body-env (for-binding-name c) (or (for-binding-type c) elem-type))]
          [(for-when? c) (infer-expr (for-when-test c) body-env)]
          [(for-let? c)
           (for ([b (in-list (for-let-bindings c))])

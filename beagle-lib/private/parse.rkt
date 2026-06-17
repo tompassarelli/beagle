@@ -4351,20 +4351,29 @@
        (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
        (loop (cddr rest)
              (and stxs (>= (length stxs) 2) (cddr stxs))
-             (cons (for-binding destr (parse-expr (or val-stx (cadr rest)))) acc))]
+             (cons (for-binding destr (parse-expr (or val-stx (cadr rest))) #f) acc))]
       [(and (>= (length rest) 2)
             (map-destructure-form? (car rest)))
        (define destr (parse-map-destructure (car rest)))
        (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
        (loop (cddr rest)
              (and stxs (>= (length stxs) 2) (cddr stxs))
-             (cons (for-binding destr (parse-expr (or val-stx (cadr rest)))) acc))]
+             (cons (for-binding destr (parse-expr (or val-stx (cadr rest))) #f) acc))]
+      ;; G7 — typed binding clause [x :- T coll] (parity with loop): strip + carry the type.
+      [(and (>= (length rest) 4)
+            (symbol? (car rest))
+            (eq? (cadr rest) ':-))
+       (define ty (parse-type (->datum (caddr rest))))
+       (define val-stx (and stxs (>= (length stxs) 4) (list-ref stxs 3)))
+       (loop (list-tail rest 4)
+             (and stxs (>= (length stxs) 4) (list-tail stxs 4))
+             (cons (for-binding (car rest) (parse-expr (or val-stx (cadddr rest))) ty) acc))]
       [(and (>= (length rest) 2)
             (symbol? (car rest)))
        (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
        (loop (cddr rest)
              (and stxs (>= (length stxs) 2) (cddr stxs))
-             (cons (for-binding (car rest) (parse-expr (or val-stx (cadr rest)))) acc))]
+             (cons (for-binding (car rest) (parse-expr (or val-stx (cadr rest))) #f) acc))]
       [else (error 'beagle "bad for clause: ~v" rest)])))
 
 

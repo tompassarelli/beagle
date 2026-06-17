@@ -767,6 +767,20 @@
   '(defn uo [v :- Env] :- Int (need-int (:ok v))))
 
 ;; =============================================================================
+;; Tests — G7: for/doseq binding accepts :- T (parity with loop) + honors it
+;; =============================================================================
+
+(check-ok "for binding with a :- T annotation parses + checks"
+  '(defn lens [xss :- (Vec Any)] :- (Vec Int)
+     (for [xs :- (Vec String) xss] (count xs))))
+
+(check-err/rx "for binding :- T is HONORED, not silently Any"
+  #rx"got .Vec String"
+  '(defn need-int [x :- Int] :- Int x)
+  '(defn bad [xss :- (Vec Any)] :- (Vec Int)
+     (for [xs :- (Vec String) xss] (need-int xs))))
+
+;; =============================================================================
 ;; Tests — exhaustive match (fixtures with warnings)
 ;; =============================================================================
 

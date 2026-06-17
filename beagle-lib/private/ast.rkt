@@ -261,7 +261,7 @@
 (struct loop-form  (bindings body)                          #:transparent)
 (struct recur-form (args)                                   #:transparent)
 (struct for-form   (clauses body)                           #:transparent)
-(struct for-binding (name expr)                             #:transparent)
+(struct for-binding (name expr type)                        #:transparent)  ; G7: type = #f | a :- T annotation
 (struct for-when   (test)                                   #:transparent)
 (struct record-form (name fields)                           #:transparent)
 (struct method-call (method-name target args)               #:transparent)

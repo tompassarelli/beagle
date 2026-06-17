@@ -1442,12 +1442,12 @@
 
 (define (emit-for-clauses clauses body-str)
   (match clauses
-    [(list (for-binding name expr))
+    [(list (for-binding name expr _))
      (format "~a.map((~a) => ~a)"
              (emit-expr expr)
              (emit-binding-target name)
              body-str)]
-    [(list (for-binding name expr) (for-when test) rest ...)
+    [(list (for-binding name expr _) (for-when test) rest ...)
      (define inner
        (if (null? rest) body-str
            (emit-for-clauses rest body-str)))
@@ -1457,7 +1457,7 @@
              (emit-expr test)
              (emit-binding-target name)
              inner)]
-    [(list (for-binding name expr) rest ...)
+    [(list (for-binding name expr _) rest ...)
      (define inner
        (if (null? rest) body-str
            (emit-for-clauses rest body-str)))
@@ -1486,7 +1486,7 @@
   (define clauses (doseq-form-clauses e))
   (define body (doseq-form-body e))
   (match clauses
-    [(list (for-binding name expr))
+    [(list (for-binding name expr _))
      (define doseq-names (names-from-binding-target name))
      (with-bindings doseq-names
        (lambda ()
