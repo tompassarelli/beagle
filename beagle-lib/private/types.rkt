@@ -38,7 +38,7 @@
                                                (type-prim 'F32))))))
 
 (define PARAMETRIC-CTORS
-  '(Vec List Set Map Promise NixType Arr Ptr))
+  '(Vec List Set Map Promise NixType Arr Ptr Atom))   ; G2: (Atom T) — see the INVARIANT arm in type-compatible?
 
 ;; --- type AST --------------------------------------------------------------
 
@@ -151,6 +151,12 @@
     [(and (symbol? t) (hash-ref (current-type-aliases) t #f))
      => (lambda (ty) ty)]
 
+    ;; G2 — bare `Atom` resolves to (Atom Any): an untyped mutable cell. Atom is a
+    ;; PARAMETRIC-CTOR, but a bare symbol would parse to (type-prim 'Atom), which a poly
+    ;; deref [(Atom A) -> A] can't match. (Atom Any) keeps bare Atom working (deref -> Any,
+    ;; no regression) while a typed (Atom T) reads precisely.
+    [(eq? t 'Atom) (type-app 'Atom (list (type-prim 'Any)))]
+
     ;; primitive or user-defined type symbol
     [(symbol? t)
      (define canonical
@@ -214,6 +220,25 @@
   (if i
       (string->symbol (substring s (cdar i)))
       sym))
+
+;; G2 — structural type equality for INVARIANT positions (the Atom element). Unlike
+;; type-compatible?, this is symmetric and does NOT treat Any as a wildcard (Any ≡ Any
+;; only, never Any ≡ Int) — that's what keeps the mutable-cell invariance hole closed.
+;; It DOES unqualify prim names (Store ≡ mod/Store) so a record referenced through an
+;; alias still equals itself. Falls back to equal? for shapes not enumerated.
+(define (type-invariant-equal? a b)
+  (cond
+    [(and (type-prim? a) (type-prim? b))
+     (eq? (unqualify-type-name (type-prim-name a)) (unqualify-type-name (type-prim-name b)))]
+    [(and (type-app? a) (type-app? b))
+     (and (eq? (type-app-ctor a) (type-app-ctor b))
+          (= (length (type-app-args a)) (length (type-app-args b)))
+          (andmap type-invariant-equal? (type-app-args a) (type-app-args b)))]
+    [(and (type-union? a) (type-union? b))
+     (and (= (length (type-union-alts a)) (length (type-union-alts b)))
+          (andmap type-invariant-equal? (type-union-alts a) (type-union-alts b)))]
+    [(and (type-var? a) (type-var? b)) (eq? (type-var-name a) (type-var-name b))]
+    [else (equal? a b)]))
 
 (define (type-compatible? actual expected)
   (cond
@@ -302,6 +327,20 @@
         (or (not e-rest)
             (and a-rest (type-compatible? a-rest e-rest)))
         (type-compatible? (type-fn-ret actual) (type-fn-ret expected))))]
+
+    ;; G2 — Atom is a MUTABLE cell, so it is INVARIANT in its element type: (Atom A) is
+    ;; compatible with (Atom B) iff A and B are structurally EQUAL. Covariance here is
+    ;; UNSOUND (a callee holding (Atom Any) could reset! a wrong type into an aliased
+    ;; (Atom Int) while a deref at the original site still statically promises Int). We
+    ;; compare with `equal?` rather than mutual type-compatible? precisely because Any is
+    ;; compatible with everything — mutual-compat would still admit (Atom Int) ~ (Atom Any).
+    ;; "Any atom" is written polymorphic [(Atom A) -> ..]; the tvar binds via
+    ;; infer-type-var-bindings (resolve-poly-call), NOT this arm — by the time
+    ;; type-compatible? runs, the element is concrete, so deref on a typed atom still resolves.
+    [(and (type-app? actual) (type-app? expected)
+          (eq? (type-app-ctor actual) 'Atom) (eq? (type-app-ctor expected) 'Atom))
+     (and (= (length (type-app-args actual)) (length (type-app-args expected)))
+          (andmap type-invariant-equal? (type-app-args actual) (type-app-args expected)))]
 
     [(and (type-app? actual) (type-app? expected))
      (and (eq? (type-app-ctor actual) (type-app-ctor expected))
