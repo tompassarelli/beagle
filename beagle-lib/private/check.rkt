@@ -714,6 +714,29 @@
 
 ;; --- check a top-level form ------------------------------------------------
 
+;; G3 — construct a typed tuple. A vector LITERAL checked against an expected
+;; (HVec t..) is validated POSITIONALLY (Beagle is otherwise bottom-up, so this is
+;; the only way to build an HVec value — and it does NOT change vector's default
+;; (Vec T) type elsewhere). Returns #t when it applies (raising on an arity / per-
+;; element mismatch); #f otherwise, so the caller falls back to type-compatible?.
+(define (check-hvec-literal value expected env src)
+  (and (type-app? expected) (eq? (type-app-ctor expected) 'HVec) (vec-form? value)
+       (let ([items (vec-form-items value)] [elems (type-app-args expected)])
+         (if (not (= (length items) (length elems)))
+             (raise-diag 'type-mismatch
+                         (format "tuple literal: ~a expects ~a element(s), got ~a"
+                                 (type->string expected) (length elems) (length items))
+                         (hasheq) #:src src)
+             (begin
+               (for ([it (in-list items)] [et (in-list elems)] [i (in-naturals)])
+                 (define at (infer-expr it env))
+                 (unless (type-compatible? at et)
+                   (raise-diag 'type-mismatch
+                               (format "tuple element ~a: expected ~a, got ~a"
+                                       i (type->string et) (type->string at))
+                               (hasheq) #:src src)))
+               #t)))))
+
 (define (check-form form env)
   (match form
     [(def-form name expected-type value _)
@@ -722,7 +745,8 @@
      ;; it into env. Either lookup is fine — both point at the same type.
      (define effective-type (or expected-type (hash-ref env name #f)))
      (when effective-type
-       (unless (type-compatible? inferred effective-type)
+       (unless (or (check-hvec-literal value effective-type env (src-for value))
+                   (type-compatible? inferred effective-type))
          (raise-diag 'def-type
                      (format "def ~a: expected ~a, got ~a"
                              name (type->string effective-type) (type->string inferred))
@@ -2213,6 +2237,29 @@
          (alist-set acc2 (car p) (cdr p))))
      ANY]
 
+    ;; G3 — (nth t K)/(first t)/(second t) on an (HVec ..) read the POSITIONAL element
+    ;; type, but ONLY when the index is a CONSTANT in-bounds integer. A dynamic or
+    ;; out-of-bounds index must NOT fabricate a position type — it degrades to the
+    ;; element LUB (merge-types of all positions), sound for any index. nth/first/second
+    ;; on a NON-HVec fall through to the general arm (the poly Vec sigs). (HVec values are
+    ;; constructed via an expected-directed annotated-literal check — see check-value-against.)
+    [(and (call-form? e) (symbol? (call-form-fn e))
+          (memq (call-form-fn e) '(nth first second))
+          (pair? (call-form-args e))
+          (let ([tt (infer-expr (car (call-form-args e)) env)])
+            (and (type-app? tt) (eq? (type-app-ctor tt) 'HVec))))
+     (define fn (call-form-fn e))
+     (define args (call-form-args e))
+     (define elems (type-app-args (infer-expr (car args) env)))
+     (define idx (cond [(eq? fn 'first) 0]
+                       [(eq? fn 'second) 1]
+                       [(and (eq? fn 'nth) (>= (length args) 2)
+                             (exact-integer? (cadr args))) (cadr args)]
+                       [else #f]))
+     (if (and idx (>= idx 0) (< idx (length elems)))
+         (list-ref elems idx)
+         (if (null? elems) ANY (apply merge-types elems)))]
+
     [(call-form? e)
      (warn-target-exclude (call-form-fn e) e)
      (define raw-type (hash-ref env (call-form-fn e) ANY))
@@ -2710,7 +2757,8 @@
                           'enum      (symbol->string (car ev))
                           'members   (map symbol->string (cdr ev)))
                   #:src call-src)))
-  (unless (type-compatible? a-type expected-type)
+  (unless (or (check-hvec-literal arg expected-type env call-src)   ; G3: tuple literal -> HVec param
+              (type-compatible? a-type expected-type))
     (define sig-str (format "~a : ~a" fn-name (type->string fn-type)))
     (define suggestions (find-accessor-suggestions arg expected-type a-type env))
     (define arg-expr-str

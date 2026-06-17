@@ -38,7 +38,7 @@
                                                (type-prim 'F32))))))
 
 (define PARAMETRIC-CTORS
-  '(Vec List Set Map Promise NixType Arr Ptr Atom))   ; G2: (Atom T) — see the INVARIANT arm in type-compatible?
+  '(Vec List Set Map Promise NixType Arr Ptr Atom HVec))   ; G2: Atom (INVARIANT arm); G3: HVec (heterogeneous tuple)
 
 ;; --- type AST --------------------------------------------------------------
 
@@ -341,6 +341,16 @@
           (eq? (type-app-ctor actual) 'Atom) (eq? (type-app-ctor expected) 'Atom))
      (and (= (length (type-app-args actual)) (length (type-app-args expected)))
           (andmap type-invariant-equal? (type-app-args actual) (type-app-args expected)))]
+
+    ;; G3 — a heterogeneous tuple IS a vector: (HVec a b c) <: (Vec T) when every
+    ;; position is compatible with T (immutable, so this widening is sound). One
+    ;; direction only — a plain (Vec T) is NOT an (HVec ..) (no arity/position
+    ;; guarantee); that falls through to the general arm (ctor mismatch -> #f).
+    [(and (type-app? actual) (eq? (type-app-ctor actual) 'HVec)
+          (type-app? expected) (eq? (type-app-ctor expected) 'Vec)
+          (= 1 (length (type-app-args expected))))
+     (andmap (lambda (a) (type-compatible? a (car (type-app-args expected))))
+             (type-app-args actual))]
 
     [(and (type-app? actual) (type-app? expected))
      (and (eq? (type-app-ctor actual) (type-app-ctor expected))

@@ -809,6 +809,44 @@
   '(defn bad! [b :- (Atom Any)] :- Int (want! b)))
 
 ;; =============================================================================
+;; Tests — G3: heterogeneous tuple (HVec a b c). Construct via an expected-directed
+;; literal check (annotation + literal, positional); consume via nth/first/second
+;; (constant in-bounds index narrows to the position; dynamic index -> the LUB,
+;; never a fabricated position). (HVec..) <: (Vec T) one direction; vector's default
+;; (Vec T) type is unchanged.
+;; =============================================================================
+
+(check-ok "hvec: construct (def+literal) + nth positional + HVec<:Vec"
+  `(def t :- (HVec Int String) ,(br 1 "hi"))
+  '(defn u [] :- String (nth t 1))
+  '(defn v [] :- (Vec Any) t))
+
+(check-err/rx "hvec: wrong element type in the literal errors"
+  #rx"tuple element 1: expected String"
+  `(def e :- (HVec Int String) ,(br 1 2)))
+
+(check-err/rx "hvec: wrong arity literal errors"
+  #rx"expects 2 element"
+  `(def e :- (HVec Int String) ,(br 1)))
+
+(check-err/rx "hvec: nth positional type is precise (misuse errors)"
+  #rx"expected Int, got String"
+  `(def t :- (HVec Int String) ,(br 1 "hi"))
+  '(defn need-int [n :- Int] :- Int n)
+  '(defn bad [] :- Int (need-int (nth t 1))))
+
+(check-err/rx "hvec: dynamic nth index degrades to the LUB, not a fabricated position"
+  #rx"U Int String"
+  `(def t :- (HVec Int String) ,(br 1 "hi"))
+  '(defn need-int [n :- Int] :- Int n)
+  '(defn bad [i :- Int] :- Int (need-int (nth t i))))
+
+(check-err/rx "hvec: a plain Vec is NOT an HVec (one direction)"
+  #rx"expected .HVec"
+  '(defn want [t :- (HVec Int String)] :- Int (nth t 0))
+  '(defn bad [v :- (Vec Int)] :- Int (want v)))
+
+;; =============================================================================
 ;; Tests — exhaustive match (fixtures with warnings)
 ;; =============================================================================
 
