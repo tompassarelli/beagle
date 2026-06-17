@@ -150,7 +150,34 @@ else echo "  PASS  let sequential capture refused"; fi
 bb -cp "$FRAM_OUT" "$RES" rename total grand sc "$W/sc.edn" 2>/dev/null
 chk "legitimate sequential rename succeeds (total->grand)" "grep -qF '(* s grand)' <<<\"\$(racket \"$RT\" --render /tmp/resolved-sc.bclj.edn 2>/dev/null)\""
 
+# --- 8. quasiquote templates + bare :refer + import collision (adversarial sweep #2) -
+echo "--- 8. quasiquote macro templates + bare :refer + import collision ---"
+# 8a. a quasiquote template ref to a module def renames (Clojure ` qualifies it / beagle hygiene-aliases)
+printf '#lang beagle/clj\n(ns qq)\n(def base :- Int 1)\n(defmacro add-base [n] (quasiquote (+ base (unquote n))))\n' > "$W/qq.bclj"
+racket "$RT" --emit-edn "$W/qq.bclj" 2>/dev/null > "$W/qq.edn"
+bb -cp "$FRAM_OUT" "$RES" rename base base2 qq "$W/qq.edn" 2>/dev/null
+qq="$(racket "$RT" --render /tmp/resolved-qq.bclj.edn 2>/dev/null)"
+chk "quasiquote template ref renamed (+ base2 ..)" "grep -qF '(+ base2 (unquote n))' <<<\"\$qq\""
+# 8b. CONTROL: a let-local inside a template must NOT rename (hygiene)
+printf '#lang beagle/clj\n(ns qh)\n(def base :- Int 1)\n(defmacro mk [x] (quasiquote (let [tmp (unquote x)] (+ tmp base))))\n' > "$W/qh.bclj"
+racket "$RT" --emit-edn "$W/qh.bclj" 2>/dev/null > "$W/qh.edn"
+bb -cp "$FRAM_OUT" "$RES" rename base base2 qh "$W/qh.edn" 2>/dev/null
+chk "template local 'tmp' untouched, base->base2" "grep -qF '(let [tmp (unquote x)] (+ tmp base2))' <<<\"\$(racket \"$RT\" --render /tmp/resolved-qh.bclj.edn 2>/dev/null)\""
+# 8c. bare (require m :refer [x]) cross-module ref renames (parse-require handles bare :refer)
+printf '#lang beagle/clj\n(ns rlib)\n(defn red [x :- Int] :- Int x)\n' > "$W/rlib.bclj"
+printf '#lang beagle/clj\n(ns rcon)\n(require rlib :refer [red])\n(defn use [y :- Int] :- Int (red y))\n' > "$W/rcon.bclj"
+racket "$RT" --emit-edn "$W/rlib.bclj" 2>/dev/null > "$W/rlib.edn"
+racket "$RT" --emit-edn "$W/rcon.bclj" 2>/dev/null > "$W/rcon.edn"
+bb -cp "$FRAM_OUT" "$RES" rename red crimson rlib "$W/rlib.edn" "$W/rcon.edn" 2>/dev/null
+chk "bare :refer'd ref renames cross-module (red->crimson)" "grep -qF '(crimson y)' <<<\"\$(racket \"$RT\" --render /tmp/resolved-rcon.bclj.edn 2>/dev/null)\""
+# 8d. import collision: consumer :refer's old AND already binds new -> refuse
+printf '#lang beagle/clj\n(ns rcon2)\n(require rlib :refer [red])\n(defn blue [y :- Int] :- Int (red y))\n' > "$W/rcon2.bclj"
+racket "$RT" --emit-edn "$W/rcon2.bclj" 2>/dev/null > "$W/rcon2.edn"
+if bb -cp "$FRAM_OUT" "$RES" rename red blue rlib "$W/rlib.edn" "$W/rcon2.edn" >/dev/null 2>&1; then
+  echo "  FAIL  import collision not refused"; fail=1
+else echo "  PASS  import collision (consumer already binds new) refused"; fi
+
 echo
 if [ "$fail" = 0 ]; then
-  echo "RESULT: PASS — one engine, scope-correct across collision + shadowing + cross-module + types + sequential, recompiles."
+  echo "RESULT: PASS — one engine, scope-correct across collision + shadowing + cross-module + types + sequential + quasiquote, recompiles."
 else echo "RESULT: FAIL"; exit 1; fi
