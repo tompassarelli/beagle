@@ -725,6 +725,28 @@
   '(defn classify [op :- Op] :- Bool (= op :bogus)))
 
 ;; =============================================================================
+;; Tests — defalias (G1: type aliases / synonyms)
+;; =============================================================================
+
+(check-ok "defalias resolves to its expansion in a defn signature"
+  '(defalias Ids (Vec String))
+  '(defn how-many [xs :- Ids] :- Int (count xs)))
+
+(check-ok "nested defalias (alias referencing an earlier alias) resolves"
+  '(defalias Ids (Vec String))
+  '(defalias Lookup (Map String Ids))
+  '(defn keys-of [m :- Lookup] :- Int (count m)))
+
+(check-err/rx "mismatch against an alias is still a type error (expansion shown)"
+  #rx"expected.*Vec"
+  '(defalias Ids (Vec String))
+  '(def bad :- Ids "not-a-vec"))
+
+(check-ok "self-referential defalias terminates (does not loop)"
+  '(defalias Rec (Vec Rec))
+  '(defn rid [r :- Rec] :- Int (count r)))
+
+;; =============================================================================
 ;; Tests — exhaustive match (fixtures with warnings)
 ;; =============================================================================
 

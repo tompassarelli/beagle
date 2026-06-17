@@ -60,6 +60,10 @@
 (define current-enum-types (make-parameter (hasheq)))
 ;; Set by parser: user-defined parametric type names (e.g. Result from parametric defunion)
 (define current-user-parametric (make-parameter (set)))
+;; G1 — Set by parser: user type aliases (defalias Name <type>) -> already-parsed type.
+;; Aliases erase to their expansion at parse-type; there is no alias type node, so
+;; emit + the rest of the checker never see an alias (purely a front-end convenience).
+(define current-type-aliases (make-parameter (hasheq)))
 
 ;; --- parsing types from source datums --------------------------------------
 
@@ -140,6 +144,12 @@
     ;; built-in union alias (Number → (U Int Float))
     [(and (symbol? t) (hash-ref BUILTIN-UNION-ALIASES t #f))
      => (lambda (thunk) (thunk))]
+
+    ;; G1 — user type alias (defalias Name <type>): resolve to its pre-parsed
+    ;; expansion. After built-in aliases / nullable sugar / type-vars, before a bare
+    ;; name falls through to (type-prim name).
+    [(and (symbol? t) (hash-ref (current-type-aliases) t #f))
+     => (lambda (ty) ty)]
 
     ;; primitive or user-defined type symbol
     [(symbol? t)
@@ -497,6 +507,7 @@
  current-union-members
  current-enum-types
  current-user-parametric
+ current-type-aliases
  type?
  any-type?
  parse-type

@@ -909,6 +909,21 @@
        (current-user-parametric (set-add (current-user-parametric) name))]
       [_ (void)]))
 
+  ;; G1 — Pre-scan: register type aliases (defalias Name <type-expr>) in SOURCE
+  ;; ORDER, so parse-type resolves an alias name to its expansion. The body is
+  ;; parsed with the aliases collected SO FAR, so it may reference earlier aliases
+  ;; (and primitives/ctors); a forward/self reference is simply not in the table
+  ;; yet and falls through to the bare-name path (a pointed unknown-type error if
+  ;; the name is otherwise undefined). File-local in v1 (cross-module export TODO).
+  (for ([d (in-list datums)])
+    (match d
+      [(list 'defalias (? symbol? name) type-expr)
+       (current-type-aliases (hash-set (current-type-aliases) name (parse-type type-expr)))]
+      [(cons 'defalias _)
+       (raise-parse-error 'bad-defalias
+                          "defalias requires (defalias Name <type-expr>), got: ~v" d)]
+      [_ (void)]))
+
   (for ([d (in-list datums)])
     (match d
       [(list 'define-mode (? symbol? m))
@@ -1099,7 +1114,8 @@
                    [current-macro-derived-table macro-derived-table]
                    [current-module-def-names module-def-name-set]
                    [current-hygiene-alias-table hygiene-alias-table]
-                   [current-user-parametric (current-user-parametric)])
+                   [current-user-parametric (current-user-parametric)]
+                   [current-type-aliases (current-type-aliases)])
       (apply append
         (for/list ([d (in-list datums)]
                    [s (in-list stxs)]
@@ -1175,7 +1191,8 @@
                        defmacro
                        declare-extern
                        require
-                       import))))
+                       import
+                       defalias))))   ; G1 — aliases erase at parse-type; no IR/emit
 
 
 ;; --- per-form parsing ------------------------------------------------------
