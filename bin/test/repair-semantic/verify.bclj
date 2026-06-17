@@ -1,0 +1,5 @@
+;; beagle-repair requires a verify script. These assertions exercise both
+;; functions and pass — the semantic suspicions are independent of test outcome
+;; (they're soft diagnostics from the name+op rules, surfaced during the build).
+(assert-eq "gt" 3 (grand-total 5 2))
+(assert-eq "te" 3 (total= 5 2))

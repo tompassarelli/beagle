@@ -54,6 +54,13 @@ jobs:
       - name: Graph-native cascade — scope-correctness gate
         run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" bin/test/cascade-graph/run.sh
 
+      # Repair pipeline: beagle-repair consumes blame.rkt's semantic suspicions as
+      # STRUCTURED records, not by regex-scraping the prose SUSPECT line. Gates that
+      # a suspicion on a validly-named function the prose regex can't parse (e.g.
+      # `total=`) survives. (Needs racket + bb, both above; no fram.)
+      - name: Repair pipeline — structured semantic suspicions gate
+        run: bin/test/repair-semantic/run.sh
+
       - name: Show accumulated surface debt
         if: always()
         run: |

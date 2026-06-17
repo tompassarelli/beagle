@@ -12,6 +12,7 @@
          racket/string
          racket/list
          racket/format
+         json
          "parse.rkt")
 
 ;; --- Semantic rules ----------------------------------------------------------
@@ -245,12 +246,40 @@
   (define rounded (/ (round (* n factor)) factor))
   (~a (exact->inexact rounded)))
 
+;; Structured emission. format-suspicion is LOSSY — it collapses six fields to
+;; "[conf]: message", so a consumer must regex the function name back out of the
+;; message prefix (and dies on names with chars outside its class, e.g. `total=`).
+;; This carries every field verbatim as one JSON object per line, prefixed so a
+;; consumer can find it amid other build output. The reason is the message with
+;; the redundant "<fn>: " prefix stripped (it's already in the `function` field).
+(define (suspicion->jsexpr s file)
+  (define name (symbol->string (suspicion-function-name s)))
+  (define msg  (suspicion-message s))
+  (define pfx  (string-append name ": "))
+  (define reason (if (string-prefix? msg pfx) (substring msg (string-length pfx)) msg))
+  (define op   (suspicion-op-found s))
+  (hasheq 'kind       "semantic-suspicion"
+          'function   name
+          'op         (if (symbol? op) (symbol->string op) (format "~a" op))
+          'context    (format "~a" (suspicion-location s))
+          'confidence (exact->inexact (suspicion-confidence s))
+          'reason     reason
+          'file       file))
+
 (define (run-semantic-analysis! prog #:file [file ""])
   (define suspicions (analyze-program-semantics prog))
-  (unless (null? suspicions)
-    (eprintf "beagle [semantic]: ~a suspicion(s) in ~a\n" (length suspicions) file)
-    (for ([s (in-list suspicions)])
-      (eprintf "~a\n" (format-suspicion s))))
+  (cond
+    [(null? suspicions) (void)]
+    ;; Structured path (opt-in): consumers like beagle-repair set this so they
+    ;; get the suspicion as data, not a prose line they have to scrape back.
+    [(getenv "BEAGLE_SEMANTIC_JSON")
+     (for ([s (in-list suspicions)])
+       (eprintf "beagle-semantic-json: ~a\n" (jsexpr->string (suspicion->jsexpr s file))))]
+    ;; Human path (default): the readable warning, unchanged.
+    [else
+     (eprintf "beagle [semantic]: ~a suspicion(s) in ~a\n" (length suspicions) file)
+     (for ([s (in-list suspicions)])
+       (eprintf "~a\n" (format-suspicion s)))])
   suspicions)
 
 (provide analyze-program-semantics

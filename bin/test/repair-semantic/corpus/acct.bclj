@@ -1,0 +1,12 @@
+;; Two functions that both trip the semantic rule "name implies aggregation —
+;; subtraction is suspicious" (rule fires on names matching total|sum-of|aggregate
+;; that use `-` in computation context).
+;;
+;;   grand-total : a regex-parseable name; the old SUSPECT-prose path captures it.
+;;   total=      : a VALID beagle name with '=' (outside the prose regex's char
+;;                 class). The regex matches up to `total`, fails on `=`, and
+;;                 SILENTLY DROPS the whole suspicion. The structured path keeps it.
+(defn grand-total [a :- Int b :- Int] :- Int
+  (- a b))
+(defn total= [a :- Int b :- Int] :- Int
+  (- a b))

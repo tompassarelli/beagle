@@ -65,7 +65,7 @@ echo "─── Phase 1: Compile (--warn mode) ───" >&2
 BUILD_DIR="$WORK_DIR/build"
 mkdir -p "$BUILD_DIR"
 
-"$BEAGLE_BIN/beagle-build-all" --warn "$SOURCE_DIR" --out "$BUILD_DIR" 2> "$WORK_DIR/build-output.txt" || true
+BEAGLE_SEMANTIC_JSON=1 "$BEAGLE_BIN/beagle-build-all" --warn "$SOURCE_DIR" --out "$BUILD_DIR" 2> "$WORK_DIR/build-output.txt" || true
 
 echo "  $(grep -c '\.clj$' "$WORK_DIR/build-output.txt" 2>/dev/null || echo 0) modules compiled" >&2
 
@@ -75,7 +75,7 @@ echo "  $(grep -c '\.clj$' "$WORK_DIR/build-output.txt" 2>/dev/null || echo 0) m
 
 echo "─── Phase 2: Type check (fix plans) ───" >&2
 
-BEAGLE_FIX_PLAN=1 BEAGLE_ERROR_FORMAT=json "$BEAGLE_BIN/beagle-check-all" "$SOURCE_DIR" \
+BEAGLE_FIX_PLAN=1 BEAGLE_ERROR_FORMAT=json BEAGLE_SEMANTIC_JSON=1 "$BEAGLE_BIN/beagle-check-all" "$SOURCE_DIR" \
     2> "$WORK_DIR/check-output.json" || true
 
 TYPE_ERRORS=$(grep -c '"kind"' "$WORK_DIR/check-output.json" 2>/dev/null || echo 0)
@@ -382,59 +382,61 @@ if os.path.exists(blame_file):
                     '_fn': fn_name if fn_name != '?' else None,
                 })
 
-# --- Parse semantic suspicions from build output ---
-# Format: "  SUSPECT [0.7]: fn-name: `op` in `context` -- reason"
-# These appear in stderr from beagle-check-all, captured in build-output.txt
-# Also check the check-output.json file for the same pattern.
+# --- Consume semantic suspicions as STRUCTURED records ---
+# blame.rkt emits one `beagle-semantic-json: {json}` line per suspicion when
+# BEAGLE_SEMANTIC_JSON=1 (set on the build/check invocations above). We read the
+# record directly — function name (including chars like '=' that the old
+# SUSPECT-prose regex matched up to and then SILENTLY DROPPED the whole line on),
+# op, context, confidence — instead of re-deriving them from a lossy prose line.
 semantic_by_function = {}  # (module, fn_name) -> [suspicions]
+_SEM_PREFIX = 'beagle-semantic-json: '
+_seen_semantic = set()     # dedup across build-output + check-output
 
-# The semantic suspicion line comes AFTER a "beagle [semantic]: N suspicion(s) in path/to/module.rkt" line
-# which gives us the module name.
 for output_file_name in ['build-output.txt', 'check-output.json']:
     output_file = os.path.join(work_dir, output_file_name)
     if not os.path.exists(output_file):
         continue
-    current_module = None
     with open(output_file) as f:
         for line in f:
-            line = line.rstrip()
-            # Track current module from context line
-            ctx_m = re.match(r'beagle \[semantic\]: \d+ suspicion\(s\) in (.+)', line)
-            if ctx_m:
-                path = ctx_m.group(1)
-                # Extract module name from path
-                base = os.path.basename(path)
-                current_module = None
-                for _ext in ('.bclj', '.bcljs', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt'):
-                    if base.endswith(_ext):
-                        current_module = base[:-len(_ext)]
-                        break
+            idx = line.find(_SEM_PREFIX)
+            if idx < 0:
                 continue
-            # Parse SUSPECT line
-            susp_m = re.match(r'\s+SUSPECT \[([0-9.]+)\]: ([\w?!<>*+\-/]+): (.+)', line)
-            if susp_m:
-                conf = float(susp_m.group(1))
-                fn_name = susp_m.group(2)
-                reason = susp_m.group(3)
-                module_name = current_module or '?'
-                if module_name != '?':
-                    semantic_by_function.setdefault((module_name, fn_name), []).append({
-                        'confidence': conf, 'reason': reason,
-                    })
-                repairs.append({
-                    'confidence': conf * 0.75,
-                    'file': f'{module_name}.clj' if module_name != '?' else '?',
-                    'line': '?',
-                    'category': 'semantic-suspicion',
-                    'description': f'{fn_name}: {reason}',
-                    'fix_hint': reason,
-                    'before': None,
-                    'after': None,
-                    'evidence': ['semantic-rule'],
-                    'auto_applicable': False,
-                    '_module': module_name,
-                    '_fn': fn_name,
+            try:
+                d = json.loads(line[idx + len(_SEM_PREFIX):])
+            except json.JSONDecodeError:
+                continue
+            if d.get('kind') != 'semantic-suspicion':
+                continue
+            fn_name = d.get('function', '?')
+            conf = float(d.get('confidence', 0.0))
+            module_name = extract_module_from_path(d.get('file')) or '?'
+            op = d.get('op', '')
+            context = d.get('context', '')
+            reason = d.get('reason', '')
+            sig = (module_name, fn_name, op, context, reason)
+            if sig in _seen_semantic:
+                continue
+            _seen_semantic.add(sig)
+            if module_name != '?':
+                semantic_by_function.setdefault((module_name, fn_name), []).append({
+                    'confidence': conf, 'reason': reason,
                 })
+            repairs.append({
+                'confidence': conf * 0.75,
+                'file': f'{module_name}.clj' if module_name != '?' else '?',
+                'line': '?',
+                'category': 'semantic-suspicion',
+                'description': f'{fn_name}: {reason}',
+                'fix_hint': reason,
+                'before': None,
+                'after': None,
+                'evidence': ['semantic-rule'],
+                'auto_applicable': False,
+                '_module': module_name,
+                '_fn': fn_name,
+                '_op': op,
+                '_context': context,
+            })
 
 # ---------------------------------------------------------------------------
 # Cross-evidence correlation
@@ -513,7 +515,15 @@ if correlation_boosts > 0:
 # --- Deduplicate: if specfix and type-error point at same file:line, merge evidence ---
 by_location = {}
 for r in repairs:
-    key = f"{r['file']}:{r['line']}"
+    # Dedup-by-location merges repairs at the SAME concrete file:line (e.g.
+    # specfix + type-error — the same bug seen by two sources). But entries with
+    # no concrete line (line == '?', e.g. semantic suspicions) would ALL share
+    # "file:?" and collapse across different functions — so a module with two
+    # suspicious functions kept only one. Key those by function instead.
+    if r['line'] == '?' and r.get('_fn'):
+        key = f"{r['file']}:fn:{r['_fn']}"
+    else:
+        key = f"{r['file']}:{r['line']}"
     if key not in by_location:
         by_location[key] = r
     else:
