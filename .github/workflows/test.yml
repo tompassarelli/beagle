@@ -107,6 +107,12 @@ jobs:
       - name: Scope-correct rename (shadowing) — refers_to resolver gate
         run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.chartroom" bin/test/code-as-claims/rename-scope.sh
 
+      # NL -> edit authoring layer: prose intent -> a structured edit (what an agent
+      # emits as data) -> dispatched to the canonical engine -> recompile-gated commit,
+      # else fail closed. The deterministic surface an NL/LLM layer drives.
+      - name: NL-to-edit authoring layer — recompile-gated transaction
+        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.chartroom" bin/test/code-as-claims/authoring.sh
+
       - name: Show accumulated surface debt
         if: always()
         run: |
