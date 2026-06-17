@@ -226,7 +226,8 @@
                  [current-emit-record-ns (program-imported-record-ns prog)]
                  [current-emit-target (program-target prog)]
                  [current-emit-scalar-fns (build-scalar-fns prog)]
-                 [current-emit-symbol-ns (program-imported-symbol-ns prog)])
+                 [current-emit-symbol-ns (program-imported-symbol-ns prog)]
+                 [match-counter (box 0)])   ; fresh per program -> deterministic match temps
     ;; Emit body first so we can detect str/ usage for auto-requires.
     (define body
       (string-join
@@ -893,17 +894,28 @@
      (symbol->string val)]
     [else (format "~a" val)]))
 
+;; Deterministic match temp names: a per-program counter (parameterized fresh in
+;; clj-emit-program), NOT (random ...). The same source must compile BYTE-IDENTICALLY
+;; every build — `random` made `match` build-nondeterministic, breaking reproducible
+;; builds (and forcing the code-as-claims recompile gate to guard around it).
+(define match-counter (make-parameter (box 0)))
+(define (fresh-match-sym!)
+  (define b (match-counter))
+  (define n (unbox b))
+  (set-box! b (add1 n))
+  (format "match__~a" n))
+
 (define (emit-match e)
   (define target-str (emit-expr (match-form-target e)))
   (define clauses (match-form-clauses e))
   (cond
     [(case-foldable-match? clauses)
      ;; Optimization: pure literal dispatch → Clojure `case` (O(1)).
-     (define target-sym (format "match__~a" (random 99999)))
+     (define target-sym (fresh-match-sym!))
      (emit-case-folded-match clauses target-sym target-str)]
     [else
      ;; General path: (let [tmp target] (cond ...))
-     (define target-sym (format "match__~a" (random 99999)))
+     (define target-sym (fresh-match-sym!))
      (define cond-pairs
        (for/list ([c (in-list clauses)])
          (emit-match-arm c target-sym)))

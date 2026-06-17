@@ -93,10 +93,12 @@ masking bugs (case 3), corruption hiding behind "no real input triggers it" (cas
 The text/`Any` representation was not a neutral serialization — it was actively
 hiding wrong answers. That is evidence for the thesis, not incidental cleanup.
 
-> **Adjacent finding (not text-concealment — a build-reproducibility bug):** the
-> move-3 recompile-identity gate revealed that `beagle build` is **not byte-
-> reproducible** for `match` (its gensym `match__NNNNN` counter differs between
-> build processes — building the *same* source twice yields different `.clj`). Not a
-> claims-loop loss (the loop is datum-faithful); the gate guards around it by only
-> byte-comparing modules whose build is deterministic. Worth a deterministic-gensym
-> fix in beagle for reproducible builds (e.g. the committed `out/`).
+> **Adjacent finding — FIXED (a build-reproducibility bug):** the move-3
+> recompile-identity gate revealed that `beagle build` was **not byte-reproducible**
+> for `match` — its temp was `(format "match__~a" (random 99999))`, so the *same*
+> source produced different `.clj` each build. Fixed in `emit-clj.rkt`: the temp is
+> now a deterministic per-program counter (`match__0`, `match__1`, … — parameterized
+> fresh in `clj-emit-program`, the emit-odin pattern), so the same source compiles
+> byte-identically every build. Gated by `bin/test/build-reproducible`. Not a
+> claims-loop loss (the loop was always datum-faithful), but it makes the committed
+> `out/` and the recompile gate robust without relying on the build-nondeterminism guard.

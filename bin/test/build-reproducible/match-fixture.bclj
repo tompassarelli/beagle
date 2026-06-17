@@ -1,0 +1,15 @@
+#lang beagle/clj
+(ns demo.match-repro)
+;; a general-path (record-discriminating) match — used to emit match__<random>,
+;; making the build non-reproducible. Now match__<deterministic-counter>.
+(defrecord Ok [(value :- Any)])
+(defrecord Err [(error :- String)])
+(defunion Result Ok Err)
+(defn handle [r :- Result] :- String
+  (match r
+    [(Ok v) "ok"]
+    [(Err e) e]))
+(defn handle2 [r :- Result] :- String
+  (match r
+    [(Ok v) "yes"]
+    [(Err e) "no"]))

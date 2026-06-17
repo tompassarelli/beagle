@@ -43,6 +43,11 @@ jobs:
       - name: Byte-stable emit — fixed-point + locality + comments gate
         run: bin/test/byte-stable-emit/run.sh
 
+      # Build reproducibility: the same source compiles BYTE-IDENTICALLY every build.
+      # match's temp was (random ...) -> non-reproducible; now a deterministic counter.
+      - name: Build reproducibility — deterministic match temps
+        run: bin/test/build-reproducible/run.sh
+
       # Graph-native repair: beagle-cascade derives its call graph from the Fram
       # claim graph (scope-correct), not regex over text. That runs on the Fram
       # engine, so we install babashka + check out fram's committed classpath and
