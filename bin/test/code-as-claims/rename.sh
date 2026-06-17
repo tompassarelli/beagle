@@ -125,7 +125,32 @@ if bb -cp "$FRAM_OUT" "$RES" rename nonexistent whatever tz "$W/tz.edn" >/dev/nu
   echo "  FAIL  rename-of-nothing not refused"; fail=1
 else echo "  PASS  rename matching no binding refused (no silent 0-edit success)"; fi
 
+# --- 7. sequential binding scope + :or defaults (adversarial sweep #2) ---------------
+# let/loop/for bindings are SEQUENTIAL and :or defaults are LIVE refs — both were
+# silent miscompiles (a default left dangling; a sibling-capturing rename accepted).
+echo "--- 7. sequential bindings + :or defaults ---"
+# 7a. :or default referencing a def cascades on rename
+printf '#lang beagle/clj\n(ns sa)\n(def base :- Int 10)\n(defn f [{:keys [x] :or {x base}}] :- Int (+ x 1))\n' > "$W/sa.bclj"
+racket "$RT" --emit-edn "$W/sa.bclj" 2>/dev/null > "$W/sa.edn"
+bb -cp "$FRAM_OUT" "$RES" rename base base2 sa "$W/sa.edn" 2>/dev/null
+chk ":or default ref renamed (not left dangling)" "grep -qF ':or {x base2}' <<<\"\$(racket \"$RT\" --render /tmp/resolved-sa.bclj.edn 2>/dev/null)\""
+# 7b. for :let sequential capture refused
+printf '#lang beagle/clj\n(ns sb)\n(def factor :- Int 10)\n(defn go [xs :- (Vec Int)] :- (Vec Int) (for [x xs :let [g (+ x 1) h (* x factor)]] h))\n' > "$W/sb.bclj"
+racket "$RT" --emit-edn "$W/sb.bclj" 2>/dev/null > "$W/sb.edn"
+if bb -cp "$FRAM_OUT" "$RES" rename factor g sb "$W/sb.edn" >/dev/null 2>&1; then
+  echo "  FAIL  for :let sequential capture not refused"; fail=1
+else echo "  PASS  for :let sequential capture refused"; fi
+# 7c. let sequential capture refused
+printf '#lang beagle/clj\n(ns sc)\n(def total :- Int 100)\n(defn h [x :- Int] :- Int (let [s (+ x 1) t (* s total)] t))\n' > "$W/sc.bclj"
+racket "$RT" --emit-edn "$W/sc.bclj" 2>/dev/null > "$W/sc.edn"
+if bb -cp "$FRAM_OUT" "$RES" rename total s sc "$W/sc.edn" >/dev/null 2>&1; then
+  echo "  FAIL  let sequential capture not refused"; fail=1
+else echo "  PASS  let sequential capture refused"; fi
+# 7d. CONTROL: a legitimate sequential rename still succeeds (no over-refusal)
+bb -cp "$FRAM_OUT" "$RES" rename total grand sc "$W/sc.edn" 2>/dev/null
+chk "legitimate sequential rename succeeds (total->grand)" "grep -qF '(* s grand)' <<<\"\$(racket \"$RT\" --render /tmp/resolved-sc.bclj.edn 2>/dev/null)\""
+
 echo
 if [ "$fail" = 0 ]; then
-  echo "RESULT: PASS — one engine, scope-correct across collision + shadowing + cross-module + types, recompiles."
+  echo "RESULT: PASS — one engine, scope-correct across collision + shadowing + cross-module + types + sequential, recompiles."
 else echo "RESULT: FAIL"; exit 1; fi
