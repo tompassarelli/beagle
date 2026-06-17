@@ -121,6 +121,26 @@
     (datum->syntax #f result (vector src line col pos #f))
     result))
 
+;; #r#"...raw..."#  — Rust-style raw string. Opener is `#r` + N `#` + `"`;
+;; closer is `"` + N `#`. The body is read verbatim (no escape processing), so
+;; JS/SQL/Nix emitter templates can carry quotes, backslashes, and newlines
+;; literally. Restores the raw-string syntax the (removed) beagle-bun reader
+;; provided; the racket reader had only #{ #( #" before.
+(define (read-raw-string port hashes)
+  (define tail (make-string hashes #\#))
+  (let loop ([acc '()])
+    (define c (read-char port))
+    (cond
+      [(eof-object? c)
+       (error 'beagle "unterminated raw string (missing closing \"~a)" tail)]
+      [(char=? c #\")
+       (define peeked (peek-string hashes 0 port))
+       (if (and (string? peeked) (string=? peeked tail))
+         (begin (read-string hashes port)
+                (list->string (reverse acc)))
+         (loop (cons c acc)))]
+      [else (loop (cons c acc))])))
+
 (define (hash-dispatch-local ch port src line col pos)
   (define next (peek-char port))
   (cond
@@ -152,6 +172,24 @@
        (datum->syntax #f result (vector src line col pos
                                         (+ 3 (string-length pattern))))
        result)]
+    ;; #r#"..."# raw string (verbatim body, N matching #s). See read-raw-string.
+    [(and (char? next) (char=? next #\r))
+     (read-char port) ; consume r
+     (define hashes
+       (let loop ([n 0])
+         (define p (peek-char port))
+         (if (and (char? p) (char=? p #\#))
+           (begin (read-char port) (loop (add1 n)))
+           n)))
+     (when (zero? hashes)
+       (error 'beagle "raw string: write #r#\"...\"# (at least one #)"))
+     (define oq (read-char port))
+     (unless (and (char? oq) (char=? oq #\"))
+       (error 'beagle "raw string: expected \" after #r~a" (make-string hashes #\#)))
+     (define s (read-raw-string port hashes))
+     (if src
+       (datum->syntax #f s (vector src line col pos #f))
+       s)]
     [else
      (error 'beagle "unexpected dispatch sequence: #~a" next)]))
 
