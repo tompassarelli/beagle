@@ -1,0 +1,8 @@
+#lang beagle/clj
+;; `helper` is a top-level def AND a shadowing param in `other`.
+(defn helper [x :- Int] :- Int
+  (+ x 1))
+(defn other [helper :- Int] :- Int
+  (* helper 2))
+(defn caller [y :- Int] :- Int
+  (helper y))

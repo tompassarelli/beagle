@@ -58,6 +58,12 @@ jobs:
           repository: tompassarelli/fram
           path: .fram
 
+      - name: Checkout chartroom (Layer-2 code-intelligence: the refers_to resolver)
+        uses: actions/checkout@v5
+        with:
+          repository: tompassarelli/chartroom
+          path: .chartroom
+
       - name: Graph-native cascade — scope-correctness gate
         run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" bin/test/cascade-graph/run.sh
 
@@ -94,6 +100,12 @@ jobs:
       # clean, else fail closed. The deterministic surface an NL/LLM layer drives.
       - name: Authoring substrate — recompile-gated edit transaction
         run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" bin/test/code-as-claims/author.sh
+
+      # Scope-correct rename: renaming a def leaves a SHADOWING local of the same name
+      # untouched, via chartroom's refers_to resolver (binding identity, not spelling).
+      # The Layer-2 code-intelligence engine driven by a beagle gate.
+      - name: Scope-correct rename (shadowing) — refers_to resolver gate
+        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.chartroom" bin/test/code-as-claims/rename-scope.sh
 
       - name: Show accumulated surface debt
         if: always()

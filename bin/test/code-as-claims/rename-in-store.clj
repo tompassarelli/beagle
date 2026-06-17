@@ -11,6 +11,12 @@
 ;; toolchain owns it. Refuses (exit 3) if `new` already binds in a target module
 ;; (the rename-doesn't-collide invariant) — no claims mutated on refusal.
 ;;
+;; SCOPE: this is the MODULE-LOCAL, name-based rename (renames every same-named
+;; symbol leaf in the target module) — correct across MODULES (the mod_a/mod_b
+;; collision), but it would over-rename a SHADOWING local of the same name. The
+;; scope-correct-under-shadowing rename is chartroom's resolve.clj (Turtle #5,
+;; refers_to identity) — gated by bin/test/code-as-claims/rename-scope.sh.
+;;
 ;;   bb -cp <fram>/out rename-in-store.clj <old> <new> <target-substr> <outdir> <edn>...
 (ns rename-in-store
   (:require [clojure.edn :as edn]
