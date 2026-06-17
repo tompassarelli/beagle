@@ -1,0 +1,7 @@
+;; leading comment on area — must survive the claims->source render
+(defn area [w :- Int h :- Int] :- Int
+  (* w h))
+
+(defn describe [w :- Int h :- Int] :- String
+  (let [a (area w h)]
+    (str "the computed area is " a))) ; trailing note — must survive too

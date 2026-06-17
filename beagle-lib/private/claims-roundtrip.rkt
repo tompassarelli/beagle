@@ -267,15 +267,56 @@
     [(vector? d) (values "[" "]" (vector->list d))]
     [else (values #f #f #f)]))
 
+(define BODY-INDENT 2)
+(define DASH (string->symbol ":-"))
+
+;; How many post-head elements stay on the opening line (the "signature") before
+;; the body breaks onto BODY-INDENT-indented lines. Keeps defn/let/if heads intact
+;; so output is idiomatic AND a body edit stays local to the body lines.
+(define (head-keep head after)
+  (define na (length after))
+  (define (dash-at? i) (and (> na i) (eq? (list-ref after i) DASH)))
+  (cond
+    [(memq head '(defn defn-))                  ; name + params [+ :- ret]
+     (cond [(< na 2) na] [(dash-at? 2) 4] [else 2])]
+    [(memq head '(def defonce))                 ; name [+ :- type]; value breaks
+     (cond [(< na 1) na] [(dash-at? 1) 3] [else 1])]
+    [(eq? head 'fn)                             ; [name] params [+ :- ret]
+     (let* ([named? (and (pair? after) (symbol? (car after)))]
+            [base (if named? 2 1)])
+       (if (dash-at? base) (+ base 2) base))]
+    [(memq head '(defrecord deftype)) (min 2 na)]              ; name + field vec
+    [(memq head '(let loop letfn binding for doseq with-open with-local-vars
+                  when-let if-let when-some if-some)) (min 1 na)]
+    [(memq head '(if when when-not when-first while if-not match doto
+                  defprotocol defunion extend-type)) (min 1 na)]
+    [(memq head '(condp as->)) (min 2 na)]                     ; pred+expr / init+binding
+    [(memq head '(do try cond)) 0]
+    [else (min 1 na)]))   ; generic call + threading (-> ->> some-> cond->): head + first
+
 (define (datum->pretty d [col 0])
   (define oneline (datum->src d))
   (define-values (open close elems) (pp-seq-parts d))
   (cond
     [(or (not open) (<= (+ col (string-length oneline)) PP-WIDTH)) oneline]   ; inline
     [(null? elems) (string-append open close)]
+    [(and (string=? open "(") (symbol? (car elems)))
+     ;; list with a symbol head: keep head + signature on line 1; break the body
+     ;; onto BODY-INDENT-indented lines (idiomatic AND a body edit stays local).
+     (define head (car elems))
+     (define after (cdr elems))
+     (define keep (min (head-keep head after) (length after)))
+     (define body-pad (make-string (+ col BODY-INDENT) #\space))
+     (string-append
+      open (datum->src head)
+      (apply string-append (for/list ([e (in-list (take after keep))])
+                             (string-append " " (datum->src e))))
+      (apply string-append (for/list ([e (in-list (drop after keep))])
+                             (string-append "\n" body-pad (datum->pretty e (+ col BODY-INDENT)))))
+      close)]
     [else
-     ;; head on the open line; each remaining element on its own line, aligned one
-     ;; column past the opener; close attaches to the last element (no dangling paren).
+     ;; collection ([ ] { } #{}) or list with non-symbol head: break elements,
+     ;; aligned one column past the opener; close attaches to the last element.
      (define inner-col (+ col (string-length open)))
      (define pad (make-string inner-col #\space))
      (string-append
@@ -452,7 +493,7 @@
     (define cs (comments-of props fid))
     (string-append
       (apply string-append (map (lambda (c) (string-append (cdr c) "\n")) (lead cs)))
-      (datum->src (build fid))
+      (datum->pretty (build fid) 0)
       (apply string-append (map (lambda (c) (string-append " " (cdr c))) (trail cs)))))
   (define file-cs (if wrapped? (comments-of props root) '()))   ; file header/footer comments
   (display (string-join

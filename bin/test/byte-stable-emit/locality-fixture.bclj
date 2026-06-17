@@ -1,0 +1,6 @@
+;; Locality fixture: a multi-line body where the gate changes one token
+;; ((> x threshold) -> (>= x threshold)) and asserts the diff is a single line.
+(defn classify [x :- Int threshold :- Int] :- Keyword
+  (do
+    (println "checking the value now")
+    (if (> x threshold) :high :low)))
