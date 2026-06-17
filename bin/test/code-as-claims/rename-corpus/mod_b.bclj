@@ -1,0 +1,5 @@
+#lang beagle/clj
+(defn helper [x :- Int] :- Int
+  (* x 2))
+(defn use-b [x :- Int] :- Int
+  (helper x))

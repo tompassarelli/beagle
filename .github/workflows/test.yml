@@ -75,6 +75,13 @@ jobs:
       - name: Code as canonical claims — recompile-identity gate
         run: CODE_AS_CLAIMS_CORPUS="$GITHUB_WORKSPACE/.fram/src" FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" bin/test/code-as-claims/run.sh
 
+      # Capstone: repair as a GRAPH OPERATION. A scope-correct rename as a claim edit
+      # on the canonical store — mod_a's `helper` renamed, mod_b's identically-named
+      # one untouched (a text sed would corrupt both), string literals untouched,
+      # renamed tree recompiles, collision refused. Ties moves 1-3.
+      - name: Repair-as-graph-operation — scope-correct rename gate
+        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" bin/test/code-as-claims/rename.sh
+
       - name: Show accumulated surface debt
         if: always()
         run: |
