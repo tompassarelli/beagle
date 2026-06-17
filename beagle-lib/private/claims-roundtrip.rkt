@@ -215,6 +215,31 @@
 ;; datum -> idiomatic beagle source text. Inverts the reader's desugaring
 ;; (`[...]` -> (#%brackets ...), `{...}` -> (#%map ...)) so the rendering
 ;; re-reads to the identical program — proving text is a faithful VIEW.
+;; Render a symbol so it RE-READS to the same symbol. A name containing
+;; whitespace / delimiters / quote / escape chars, or an EMPTY name, must be
+;; pipe-quoted (|name|, escaping \ and |) — bare symbol->string silently corrupts
+;; such symbols (round-trip hole found by adversarial verification: |foo bar| ->
+;; two symbols, \\ -> unreadable, || -> vanished value). Normal beagle identifiers
+;; (-, ?, !, <, >, *, +, /, =, ., :, &, %, $, alphanumerics) never need bars.
+(define (symbol-needs-bars? s)
+  (or (= (string-length s) 0)
+      (regexp-match? #rx"[][ \t\r\n(){}\"|;\\\\,`']" s)))
+(define (symbol->src d)
+  (define s (symbol->string d))
+  (cond
+    ;; Beagle's reader: |...| is a LITERAL run with NO internal escaping (can't
+    ;; carry \ or |), but OUTSIDE bars `\X` escapes any char (\\ -> \, a\ b -> "a b").
+    ;; So backslash-escape each unsafe char per-char; only the empty symbol needs ||.
+    [(= (string-length s) 0) "||"]
+    [(symbol-needs-bars? s)
+     (apply string-append
+            (for/list ([c (in-string s)])
+              (if (or (char-whitespace? c)
+                      (memv c '(#\( #\) #\[ #\] #\{ #\} #\" #\| #\; #\\ #\, #\` #\')))
+                  (string #\\ c)
+                  (string c))))]
+    [else s]))
+
 (define %brackets (string->symbol "#%brackets"))
 (define %map      (string->symbol "#%map"))
 (define %set      (string->symbol "#%set"))
@@ -233,7 +258,7 @@
            (format "(~a . ~a)" (string-join (map datum->src elems) " ") (datum->src tail))))]
     [(vector? d) (format "[~a]" (string-join (map datum->src (vector->list d)) " "))]
     [(string? d)  (format "~s" d)]
-    [(symbol? d)  (symbol->string d)]
+    [(symbol? d)  (symbol->src d)]
     [(boolean? d) (if d "true" "false")]
     [(keyword? d) (string-append ":" (keyword->string d))]
     [(char? d)    (format "\\~a" d)]
@@ -585,28 +610,37 @@
 
 (define (pretty-gate args)             ; idempotent fixed-point + round-trip over a corpus
   (define files (expand-paths args))
-  (define n 0) (define fp 0) (define rt 0) (define bad '())
+  (define n 0) (define fp 0) (define rt 0) (define bad '()) (define skipped '())
   (for ([f (in-list files)])
     (define stxs (with-handlers ([exn:fail? (lambda (_) #f)]) (read-beagle-syntax f)))
-    (when stxs
-      (set! n (add1 n))
-      (define ds (map syntax->datum stxs))
-      (define text1 (string-join (map (lambda (d) (datum->pretty d 0)) ds) "\n\n"))
-      (define tmp (make-temporary-file "ppgate-~a.bjs"))
-      (with-output-to-file tmp #:exists 'replace (lambda () (display text1)))
-      (define ds2 (with-handlers ([exn:fail? (lambda (_) #f)]) (map syntax->datum (read-beagle-syntax tmp))))
-      (delete-file tmp)
-      (define rt-ok (and ds2 (equal? ds2 ds)))
-      (define text2 (and ds2 (string-join (map (lambda (d) (datum->pretty d 0)) ds2) "\n\n")))
-      (define fp-ok (and text2 (string=? text1 text2)))
-      (when rt-ok (set! rt (add1 rt)))
-      (when fp-ok (set! fp (add1 fp)))
-      (when (and (not (and rt-ok fp-ok)) (< (length bad) 3))
-        (set! bad (cons (path->string f) bad)))))
+    (cond
+      ;; A file the reader can't parse is NEITHER pass nor fail under the old code —
+      ;; a silent blind spot (adversarial verification's finding). Count + report it,
+      ;; and fail the gate: a skip is not a pass.
+      [(not stxs) (set! skipped (cons (path->string f) skipped))]
+      [else
+       (set! n (add1 n))
+       (define ds (map syntax->datum stxs))
+       (define text1 (string-join (map (lambda (d) (datum->pretty d 0)) ds) "\n\n"))
+       (define tmp (make-temporary-file "ppgate-~a.bjs"))
+       (with-output-to-file tmp #:exists 'replace (lambda () (display text1)))
+       (define ds2 (with-handlers ([exn:fail? (lambda (_) #f)]) (map syntax->datum (read-beagle-syntax tmp))))
+       (delete-file tmp)
+       (define rt-ok (and ds2 (equal? ds2 ds)))
+       (define text2 (and ds2 (string-join (map (lambda (d) (datum->pretty d 0)) ds2) "\n\n")))
+       (define fp-ok (and text2 (string=? text1 text2)))
+       (when rt-ok (set! rt (add1 rt)))
+       (when fp-ok (set! fp (add1 fp)))
+       (when (and (not (and rt-ok fp-ok)) (< (length bad) 3))
+         (set! bad (cons (path->string f) bad)))]))
   (printf "================ move-2 — byte-stable emit gate ================\n")
-  (printf "files: ~a   round-trip identical: ~a/~a   pretty fixed-point: ~a/~a\n" n rt n fp n)
+  (printf "files: ~a   round-trip identical: ~a/~a   pretty fixed-point: ~a/~a   skipped(unparseable): ~a\n"
+          n rt n fp n (length skipped))
+  (unless (null? skipped)
+    (printf "  SKIPPED (not gated — a skip is not a pass):\n")
+    (for ([s (in-list skipped)]) (printf "    ~a\n" s)))
   (cond
-    [(and (= rt n) (= fp n) (> n 0))
+    [(and (= rt n) (= fp n) (> n 0) (null? skipped))
      (printf "GATE: PASS — pretty emit round-trips and is an idempotent fixed-point.\n")]
     [else
      (printf "GATE: FAIL\n")

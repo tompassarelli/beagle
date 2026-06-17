@@ -47,9 +47,29 @@ A bug hidden behind a bug, both in the text layer.
 **Fix:** structured records survive verbatim; no-line entries dedup by function.
 Gated: `bin/test/repair-semantic`.
 
+## 4. `datum->src` silently corrupted exotic symbols (round-trip hole)
+**Surfaced by:** building the byte-stable emit gate (move 2) + adversarial
+verification of it.
+**The bug:** the source renderer rendered every symbol with bare `symbol->string`,
+never re-applying the reader's escaping. So a symbol whose name contains
+whitespace/delimiters/backslash, or the empty symbol (both constructible —
+`|foo bar|`, `\\`, `||`), did NOT round-trip: `|foo bar|` re-read as TWO symbols,
+`\\` (a one-backslash symbol) rendered to unreadable text, `||` (empty symbol)
+rendered to nothing so the value vanished.
+**Why text hid it:** no real `.bclj` uses such symbols (109 source files + 98
+fixtures all round-trip), so the renderer looked correct for years. Only an
+adversarial probe constructing the pathological symbols exposed that the text
+serialization was lossy for an entire class of values.
+**Fix:** `symbol->src` backslash-escapes unsafe chars per the reader's actual
+convention (`|...|` is a literal run with no internal escaping; `\X` escapes
+outside bars), with the empty symbol rendered `||`. Gated: `bin/test/byte-stable-emit`
++ the `--pretty-gate` skip detector (an unparseable file now fails the gate instead
+of silently not-counting — a second blind spot the same probe found).
+
 ---
 
-**Pattern:** three independent migrations, three concealed correctness bugs, and in
-case 3 one bug was *masking* another. The text/`Any` representation was not a neutral
-serialization — it was actively hiding wrong answers. That is evidence for the
-thesis, not incidental cleanup.
+**Pattern:** four independent migrations, four concealed correctness bugs — and in
+case 3 one bug was *masking* another, in case 4 the corruption hid behind "no real
+input triggers it." The text/`Any` representation was not a neutral serialization —
+it was actively hiding wrong answers. That is evidence for the thesis, not
+incidental cleanup.

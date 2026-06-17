@@ -36,6 +36,13 @@ jobs:
           CI: 'true'
         run: bin/beagle-test
 
+      # Byte-stable emit (move 2): the claims->source pretty-printer must be a
+      # deterministic, LOCAL, comment-preserving, round-trip-preserving formatter —
+      # the precondition for making claims canonical and text a regenerable lowering.
+      # Racket-only (no fram/bb), so it runs right after the suite.
+      - name: Byte-stable emit — fixed-point + locality + comments gate
+        run: bin/test/byte-stable-emit/run.sh
+
       # Graph-native repair: beagle-cascade derives its call graph from the Fram
       # claim graph (scope-correct), not regex over text. That runs on the Fram
       # engine, so we install babashka + check out fram's committed classpath and
