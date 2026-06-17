@@ -1525,12 +1525,55 @@
 
 ;; --- keyword field lookup --------------------------------------------------
 
+;; G4 (kw-access slice) — type of (:kw value) where value : a record-union.
+;; SOUNDNESS: collect the field type from every member that DECLARES the key; if
+;; only SOME members declare it, a value that is one of the others reads nil at
+;; runtime, so the result MUST include Nil (the adversarial soundness review
+;; caught exactly this nil-drop). No member declares it → ANY (never invent a
+;; type no member guarantees).
+(define (field-type-across-members kw-sym member-names target-type)
+  (define declaring
+    (filter (lambda (m)
+              (and (hash-has-key? RECORD-FIELDS m)
+                   (hash-has-key? (hash-ref RECORD-FIELDS m) kw-sym)))
+            member-names))
+  (cond
+    [(null? declaring) ANY]
+    [else
+     (define field-types
+       (for/list ([m (in-list declaring)])
+         (resolve-parametric-field-type
+          (hash-ref (hash-ref RECORD-FIELDS m) kw-sym) target-type)))
+     (define merged (apply merge-types field-types))
+     ;; non-nullable ONLY if EVERY member carries the key; else nil is reachable.
+     (if (= (length declaring) (length member-names))
+         merged
+         (merge-types merged (type-prim 'Nil)))]))
+
 (define (lookup-kw-field-type kw-sym target-type env)
   (cond
     [(and (type-prim? target-type)
           (hash-has-key? RECORD-FIELDS (type-prim-name target-type)))
      (define field-map (hash-ref RECORD-FIELDS (type-prim-name target-type)))
      (hash-ref field-map kw-sym ANY)]
+    ;; Named record-union (param annotated `: Result`, etc.): discriminate the key
+    ;; across members (UNION-MEMBERS), nil-correct for partial coverage.
+    [(and (type-prim? target-type)
+          (hash-ref UNION-MEMBERS (type-prim-name target-type) #f))
+     (field-type-across-members
+      kw-sym (hash-ref UNION-MEMBERS (type-prim-name target-type)) target-type)]
+    ;; Parametric record-union applied to type args (e.g. (Result String Int)).
+    [(and (type-app? target-type)
+          (hash-ref UNION-MEMBERS (type-app-ctor target-type) #f))
+     (field-type-across-members
+      kw-sym (hash-ref UNION-MEMBERS (type-app-ctor target-type)) target-type)]
+    ;; Inline value-level union of record members.
+    [(type-union? target-type)
+     (define member-names
+       (for/list ([alt (in-list (type-union-alts target-type))]
+                  #:when (type-prim? alt))
+         (type-prim-name alt)))
+     (field-type-across-members kw-sym member-names target-type)]
     [else ANY]))
 
 ;; --- with-form completeness hint -------------------------------------------

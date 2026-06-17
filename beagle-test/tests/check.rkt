@@ -747,6 +747,26 @@
   '(defn rid [r :- Rec] :- Int (count r)))
 
 ;; =============================================================================
+;; Tests — G4 kw-access slice: (:kw v) over a record-union discriminates by key,
+;; nil-correct (a key only SOME members declare is nullable — soundness).
+;; =============================================================================
+
+(check-ok "kw-access over a union where ALL members declare the key is non-null"
+  '(defrecord A [code :- Int])
+  '(defrecord B [code :- Int])
+  '(defunion Both A B)
+  '(defn need-int [x :- Int] :- Int x)
+  '(defn uc [v :- Both] :- Int (need-int (:code v))))
+
+(check-err/rx "kw-access over a union where only SOME members declare the key is nullable"
+  #rx"got Int[?]"
+  '(defrecord OkB [ok :- Int])
+  '(defrecord ErB [msg :- String])
+  '(defunion Env OkB ErB)
+  '(defn need-int [x :- Int] :- Int x)
+  '(defn uo [v :- Env] :- Int (need-int (:ok v))))
+
+;; =============================================================================
 ;; Tests — exhaustive match (fixtures with warnings)
 ;; =============================================================================
 
