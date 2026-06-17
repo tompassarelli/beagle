@@ -1,0 +1,3 @@
+#lang beagle/clj
+(ns delcorp.lib)
+(defn shared [x :- Int] :- Int (+ x 10))

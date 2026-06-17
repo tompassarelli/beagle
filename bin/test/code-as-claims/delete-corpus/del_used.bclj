@@ -1,0 +1,4 @@
+#lang beagle/clj
+(ns delcorp.used)
+(defn helper [x :- Int] :- Int (* x 2))
+(defn caller [y :- Int] :- Int (helper y))

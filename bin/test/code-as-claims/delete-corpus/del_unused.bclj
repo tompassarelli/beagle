@@ -1,0 +1,5 @@
+#lang beagle/clj
+(ns delcorp.unused)
+(defn before [x :- Int] :- Int (+ x 1))
+(defn dead [x :- Int] :- Int (* x 999))
+(defn after [x :- Int] :- Int (- x 1))

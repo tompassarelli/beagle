@@ -1,0 +1,4 @@
+#lang beagle/clj
+(ns delcorp.consumer)
+(require delcorp.lib :as l)
+(defn use-it [y :- Int] :- Int (l/shared y))

@@ -90,7 +90,42 @@ if bb -cp "$FRAM_OUT" "$RES" rename total sum l "$W/l.edn" >/dev/null 2>&1; then
   echo "  FAIL  let-local capture NOT refused"; fail=1
 else echo "  PASS  let-local capture refused (no-capture invariant)"; fi
 
+# --- 6. type renames (constructor heads, defunion variants, cross-module, single-colon) -
+# All found by adversarial sweep #2 — each was a silent miss (type renamed, a USE of it
+# left dangling) that recompiled. Types are first-class refactor targets.
+echo "--- 6. type resolution (constructors, defunion, cross-module types, single-colon) ---"
+# 6a. defrecord constructor (Point 1 2) must rename with the type
+printf '#lang beagle/clj\n(ns tp)\n(defrecord Point [(x :- Int) (y :- Int)])\n(defn mk [] :- Point (Point 1 2))\n' > "$W/tp.bclj"
+racket "$RT" --emit-edn "$W/tp.bclj" 2>/dev/null > "$W/tp.edn"
+bb -cp "$FRAM_OUT" "$RES" rename Point Pt tp "$W/tp.edn" 2>/dev/null
+tp="$(racket "$RT" --render /tmp/resolved-tp.bclj.edn 2>/dev/null)"
+chk "constructor (Point ..) renamed with the type" "grep -qF '(Pt 1 2)' <<<\"\$tp\" && ! grep -qF '(Point 1 2)' <<<\"\$tp\""
+# 6b. defunion variant constructor renames (and the union name independently)
+printf '#lang beagle/clj\n(ns tu)\n(defunion Shape (Circle [r :- Float]) (Square [s :- Float]))\n(defn mk [r :- Float] :- Shape (Circle r))\n' > "$W/tu.bclj"
+racket "$RT" --emit-edn "$W/tu.bclj" 2>/dev/null > "$W/tu.edn"
+bb -cp "$FRAM_OUT" "$RES" rename Circle Disc tu "$W/tu.edn" 2>/dev/null
+tu="$(racket "$RT" --render /tmp/resolved-tu.bclj.edn 2>/dev/null)"
+chk "defunion variant (Circle r) renamed" "grep -qF '(Disc r)' <<<\"\$tu\" && grep -qF '(Disc [r' <<<\"\$tu\" && grep -qF '(Square' <<<\"\$tu\""
+# 6c. cross-module type: consumer's t/Type annotation cascades
+printf '#lang beagle/clj\n(ns tlib)\n(defrecord Widget [(n :- Int)])\n' > "$W/tlib.bclj"
+printf '#lang beagle/clj\n(ns tcon)\n(require tlib :as t)\n(defn use [w :- t/Widget] :- Int 1)\n' > "$W/tcon.bclj"
+racket "$RT" --emit-edn "$W/tlib.bclj" 2>/dev/null > "$W/tlib.edn"
+racket "$RT" --emit-edn "$W/tcon.bclj" 2>/dev/null > "$W/tcon.edn"
+bb -cp "$FRAM_OUT" "$RES" rename Widget Gadget tlib "$W/tlib.edn" "$W/tcon.edn" 2>/dev/null
+chk "cross-module type ref t/Widget -> t/Gadget" "grep -qF 't/Gadget' <<<\"\$(racket \"$RT\" --render /tmp/resolved-tcon.bclj.edn 2>/dev/null)\""
+# 6d. single-colon ':' annotation cascades (legal field/param surface)
+printf '#lang beagle/clj\n(ns tsc)\n(defrecord Thing [(n :- Int)])\n(defn f [(x : Thing)] :- Int 1)\n' > "$W/tsc.bclj"
+racket "$RT" --emit-edn "$W/tsc.bclj" 2>/dev/null > "$W/tsc.edn"
+bb -cp "$FRAM_OUT" "$RES" rename Thing Item tsc "$W/tsc.edn" 2>/dev/null
+chk "single-colon (x : Thing) -> (x : Item)" "grep -qF '(x : Item)' <<<\"\$(racket \"$RT\" --render /tmp/resolved-tsc.bclj.edn 2>/dev/null)\""
+# 6e. rename that matches nothing is refused (not a silent 0-edit success)
+printf '#lang beagle/clj\n(ns tz)\n(defn keep-me [x :- Int] :- Int x)\n' > "$W/tz.bclj"
+racket "$RT" --emit-edn "$W/tz.bclj" 2>/dev/null > "$W/tz.edn"
+if bb -cp "$FRAM_OUT" "$RES" rename nonexistent whatever tz "$W/tz.edn" >/dev/null 2>&1; then
+  echo "  FAIL  rename-of-nothing not refused"; fail=1
+else echo "  PASS  rename matching no binding refused (no silent 0-edit success)"; fi
+
 echo
 if [ "$fail" = 0 ]; then
-  echo "RESULT: PASS — one engine, scope-correct across collision + shadowing + cross-module, recompiles."
+  echo "RESULT: PASS — one engine, scope-correct across collision + shadowing + cross-module + types, recompiles."
 else echo "RESULT: FAIL"; exit 1; fi
