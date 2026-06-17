@@ -22,7 +22,7 @@
          racket/format
          "parse.rkt")
 
-(provide datum->claims claims->datum datum->src edn-triples->datum read-edn-triples)
+(provide datum->claims claims->datum datum->src datum->pretty edn-triples->datum read-edn-triples)
 
 ;; --- datum -> claims --------------------------------------------------------
 (define (split-improper d)            ; pair -> (values proper-prefix tail) ; tail='() if proper
@@ -238,6 +238,52 @@
     [(keyword? d) (string-append ":" (keyword->string d))]
     [(char? d)    (format "\\~a" d)]
     [else (format "~a" d)]))                ; numbers
+
+;; --- byte-stable pretty-printer (move 2) ------------------------------------
+;; datum->src renders one line — fine for round-trip identity, but it collapses a
+;; whole top-level form onto one line, so a one-token change rewrites the entire
+;; line: a file-wide diff for a local edit. datum->pretty is the DETERMINISTIC,
+;; LOCAL formatter: fits-in-width stays inline, over-width breaks structurally so a
+;; changed subexpression touches only its own line(s).
+;;
+;; Three properties (the move-2 gate):
+;;   * idempotent fixed-point — pretty(parse(pretty(x))) == pretty(x). FOLLOWS from
+;;     purity (output depends only on the datum + width) + the proven round-trip.
+;;   * locality — a small semantic change yields a small, local diff (each element
+;;     owns its line when expanded).
+;;   * round-trip preserved — only whitespace is inserted between tokens datum->src
+;;     already separates, and the reader is whitespace-insensitive, so it re-reads
+;;     to the identical datum.
+(define PP-WIDTH 80)
+
+(define (pp-seq-parts d)        ; -> (values open close elems) or (values #f #f #f)
+  (cond
+    [(and (pair? d) (eq? (car d) %brackets)) (values "[" "]" (cdr d))]
+    [(and (pair? d) (eq? (car d) %map))      (values "{" "}" (cdr d))]
+    [(and (pair? d) (eq? (car d) %set))      (values "#{" "}" (cdr d))]
+    [(and (pair? d) (eq? (car d) %regex))    (values #f #f #f)]   ; never break a regex
+    [(pair? d) (let-values ([(elems tail) (split-improper d)])
+                 (if (null? tail) (values "(" ")" elems) (values #f #f #f)))] ; not dotted pairs
+    [(vector? d) (values "[" "]" (vector->list d))]
+    [else (values #f #f #f)]))
+
+(define (datum->pretty d [col 0])
+  (define oneline (datum->src d))
+  (define-values (open close elems) (pp-seq-parts d))
+  (cond
+    [(or (not open) (<= (+ col (string-length oneline)) PP-WIDTH)) oneline]   ; inline
+    [(null? elems) (string-append open close)]
+    [else
+     ;; head on the open line; each remaining element on its own line, aligned one
+     ;; column past the opener; close attaches to the last element (no dangling paren).
+     (define inner-col (+ col (string-length open)))
+     (define pad (make-string inner-col #\space))
+     (string-append
+      open (datum->pretty (car elems) inner-col)
+      (apply string-append
+             (for/list ([e (in-list (cdr elems))])
+               (string-append "\n" pad (datum->pretty e inner-col))))
+      close)]))
 
 (define (read-edn-triples path)
   (for/list ([line (in-list (file->lines path))]
@@ -490,10 +536,48 @@
   (printf "text-is-a-view (claims -> source -> re-read identical): ~a / ~a files ~a\n"
           rt-ok rt-files (if (= rt-ok rt-files) "PASS" "")))
 
+;; --- move-2 pretty-printer modes -------------------------------------------
+(define (pretty-file path)             ; render a file's forms via the byte-stable formatter
+  (define ds (map syntax->datum (read-beagle-syntax path)))
+  (display (string-join (map (lambda (d) (datum->pretty d 0)) ds) "\n\n"))
+  (newline))
+
+(define (pretty-gate args)             ; idempotent fixed-point + round-trip over a corpus
+  (define files (expand-paths args))
+  (define n 0) (define fp 0) (define rt 0) (define bad '())
+  (for ([f (in-list files)])
+    (define stxs (with-handlers ([exn:fail? (lambda (_) #f)]) (read-beagle-syntax f)))
+    (when stxs
+      (set! n (add1 n))
+      (define ds (map syntax->datum stxs))
+      (define text1 (string-join (map (lambda (d) (datum->pretty d 0)) ds) "\n\n"))
+      (define tmp (make-temporary-file "ppgate-~a.bjs"))
+      (with-output-to-file tmp #:exists 'replace (lambda () (display text1)))
+      (define ds2 (with-handlers ([exn:fail? (lambda (_) #f)]) (map syntax->datum (read-beagle-syntax tmp))))
+      (delete-file tmp)
+      (define rt-ok (and ds2 (equal? ds2 ds)))
+      (define text2 (and ds2 (string-join (map (lambda (d) (datum->pretty d 0)) ds2) "\n\n")))
+      (define fp-ok (and text2 (string=? text1 text2)))
+      (when rt-ok (set! rt (add1 rt)))
+      (when fp-ok (set! fp (add1 fp)))
+      (when (and (not (and rt-ok fp-ok)) (< (length bad) 3))
+        (set! bad (cons (path->string f) bad)))))
+  (printf "================ move-2 — byte-stable emit gate ================\n")
+  (printf "files: ~a   round-trip identical: ~a/~a   pretty fixed-point: ~a/~a\n" n rt n fp n)
+  (cond
+    [(and (= rt n) (= fp n) (> n 0))
+     (printf "GATE: PASS — pretty emit round-trips and is an idempotent fixed-point.\n")]
+    [else
+     (printf "GATE: FAIL\n")
+     (for ([r (in-list bad)]) (printf "  ~a\n" r))
+     (exit 1)]))
+
 (module+ main
   (define argv (vector->list (current-command-line-arguments)))
   (cond
-    [(and (pair? argv) (equal? (car argv) "--emit-edn")) (emit-edn-file (cadr argv))]
-    [(and (pair? argv) (equal? (car argv) "--verify"))   (verify (cadr argv) (caddr argv))]
-    [(and (pair? argv) (equal? (car argv) "--render"))   (render-edn (cadr argv))]
+    [(and (pair? argv) (equal? (car argv) "--emit-edn"))    (emit-edn-file (cadr argv))]
+    [(and (pair? argv) (equal? (car argv) "--verify"))      (verify (cadr argv) (caddr argv))]
+    [(and (pair? argv) (equal? (car argv) "--render"))      (render-edn (cadr argv))]
+    [(and (pair? argv) (equal? (car argv) "--pretty"))      (pretty-file (cadr argv))]
+    [(and (pair? argv) (equal? (car argv) "--pretty-gate")) (pretty-gate (cdr argv))]
     [else (run-gate argv)]))
