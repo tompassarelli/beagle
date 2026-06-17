@@ -68,6 +68,13 @@ jobs:
       - name: Repair pipeline — structured semantic suspicions gate
         run: bin/test/repair-semantic/run.sh
 
+      # Move 3: code can be claim-canonical. The loop .bclj -> lossless claims ->
+      # (through a real Fram store) -> claims -> byte-stable .bclj is datum-identical
+      # through the engine AND recompiles to the IDENTICAL program (modulo srcloc
+      # debug pointers). Proven over fram/src. Needs racket + bb + fram's out/.
+      - name: Code as canonical claims — recompile-identity gate
+        run: CODE_AS_CLAIMS_CORPUS="$GITHUB_WORKSPACE/.fram/src" FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" bin/test/code-as-claims/run.sh
+
       - name: Show accumulated surface debt
         if: always()
         run: |
