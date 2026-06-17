@@ -478,6 +478,23 @@
                   (type-app 'Vec (list (tv 'K))))
    'vals (poly-fn '(K V) (list (type-app 'Map (list (tv 'K) (tv 'V))))
                   (type-app 'Vec (list (tv 'V))))
+   ;; G2 — (Atom T) parametric (clj overrides the Any-typed portable atom family).
+   ;; Atom is INVARIANT (types.rkt), so the element flows precisely + soundly:
+   ;; deref reads A; reset!/swap! ENFORCE that what's written stays A.
+   'atom   (poly-fn '(A) (list (tv 'A)) (type-app 'Atom (list (tv 'A))))
+   'deref  (poly-fn '(A) (list (type-app 'Atom (list (tv 'A)))) (tv 'A))
+   'reset! (poly-fn '(A) (list (type-app 'Atom (list (tv 'A))) (tv 'A)) (tv 'A))
+   ;; swap! is variadic — (swap! a f & args) = (apply f @a args). The fn must RETURN A
+   ;; (the soundness wall: a wrong-returning fn would poison the cell). Beagle's fn-compat
+   ;; rejects a fn that REQUIRES more fixed args than the slot, so accept a UNION of
+   ;; leading-A fixed-arity shapes (each returning A) to cover (swap! ctx update :k v).
+   'swap!  (poly-fn '(A)
+                    (list (type-app 'Atom (list (tv 'A)))
+                          (type-union (list (type-fn (list (tv 'A)) #f (tv 'A))
+                                            (type-fn (list (tv 'A) (p 'Any)) #f (tv 'A))
+                                            (type-fn (list (tv 'A) (p 'Any) (p 'Any)) #f (tv 'A))
+                                            (type-fn (list (tv 'A) (p 'Any) (p 'Any) (p 'Any)) #f (tv 'A)))))
+                    (tv 'A) #:rest (p 'Any))
    ))
 
 ;; CLJ entries unavailable when targeting CLJS.

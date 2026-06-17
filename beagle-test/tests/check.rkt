@@ -781,6 +781,34 @@
      (for [xs :- (Vec String) xss] (need-int xs))))
 
 ;; =============================================================================
+;; Tests — G2: (Atom T) parametric, INVARIANT (a mutable cell). deref reads the
+;; element; reset!/swap! enforce it; (Atom A) is NOT a subtype of (Atom B) for
+;; A≠B (covariance would be the array-covariance poison hole).
+;; =============================================================================
+
+(check-ok "atom: typed deref + reset! type-check; bare Atom -> Any"
+  '(defn t! [] :- Int (let [a :- (Atom Int) (atom 0)] (reset! a 5) (deref a)))
+  '(defn b [x :- Atom] :- Any (deref x)))
+
+(check-err/rx "atom: reset! a wrong-typed value errors"
+  #rx"expected Int, got String"
+  '(defn bad! [a :- (Atom Int)] :- Int (let [_ (reset! a "x")] (deref a))))
+
+(check-err/rx "atom: swap! fn must return the element type (soundness wall)"
+  #rx"swap!"
+  '(defn bad! [a :- (Atom Int)] :- Int (swap! a (fn [x :- Int] :- String "no"))))
+
+(check-err/rx "atom: INVARIANT — (Atom Int) is not (Atom Any) (the poison hole, closed)"
+  #rx"expected .Atom Any"
+  '(defn anyatom [b :- (Atom Any)] :- Any (deref b))
+  '(defn demo! [] :- Int (let [a :- (Atom Int) (atom 0)] (let [_ (anyatom a)] (deref a)))))
+
+(check-err/rx "atom: INVARIANT both ways — (Atom Any) is not (Atom Int)"
+  #rx"expected .Atom Int"
+  '(defn want! [a :- (Atom Int)] :- Int (deref a))
+  '(defn bad! [b :- (Atom Any)] :- Int (want! b)))
+
+;; =============================================================================
 ;; Tests — exhaustive match (fixtures with warnings)
 ;; =============================================================================
 
