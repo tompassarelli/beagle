@@ -35,6 +35,10 @@ apply_edit() {
       bb -cp "$FRAM_OUT" "$CHARTROOM/src/resolve.clj" rename "$1" "$2" "$3" "${edns[@]}" >/dev/null 2>&1 \
         || { echo REJECTED; rm -rf "$W"; return; }
       for f in "$corpus"/*.bclj; do b="$(basename "$f")"; racket "$RT" --render "/tmp/resolved-$b.edn" 2>/dev/null > "$W/regen/$b"; done ;;
+    delete)  # the second verb: remove a def IFF no reference would orphan, else refuse (fail closed)
+      bb -cp "$FRAM_OUT" "$CHARTROOM/src/resolve.clj" delete "$1" "$2" "${edns[@]}" >/dev/null 2>&1 \
+        || { echo REJECTED; rm -rf "$W"; return; }
+      for f in "$corpus"/*.bclj; do b="$(basename "$f")"; racket "$RT" --render "/tmp/resolved-$b.edn" 2>/dev/null > "$W/regen/$b"; done ;;
     *) echo REJECTED; rm -rf "$W"; return ;;
   esac
   if "$ROOT/bin/beagle-build-all" "$W/regen" --out "$W/o" 2>&1 | grep -q '0 error'; then
@@ -62,7 +66,23 @@ if [ "$r" = REJECTED ] && [ ! -d "$T/b" ]; then
   echo "  PASS  invalid intent (collision) fails closed — nothing committed"
 else echo "  FAIL  expected REJECTED+no-commit, got '$r'"; fail=1; fi
 
+echo '--- NL: "delete the unused dead function" -> the agent emits a delete edit ---'
+echo '    spec: {op delete, name "dead", scope "del_unused"}  (no-orphaned-refs gated)'
+r="$(apply_edit "$T/c" "$HERE/delete-corpus" delete dead del_unused)"
+if [ "$r" = COMMITTED ] && [ -f "$T/c/del_unused.bclj" ] \
+   && ! grep -q 'defn dead' "$T/c/del_unused.bclj" && grep -q 'defn before' "$T/c/del_unused.bclj" \
+   && grep -q 'defn after' "$T/c/del_unused.bclj"; then
+  echo "  PASS  committed; 'dead' removed, before/after survive (no truncation), recompiled"
+else echo "  FAIL  ($r)"; fail=1; fi
+
+echo '--- NL: "delete helper" (still called by caller) -> agent emits delete ---'
+echo '    spec: {op delete, name "helper", scope "del_used"}  -> engine refuses (would orphan)'
+r="$(apply_edit "$T/d" "$HERE/delete-corpus" delete helper del_used 2>/dev/null || echo REJECTED)"
+if [ "$r" = REJECTED ] && [ ! -d "$T/d" ]; then
+  echo "  PASS  unsafe delete (would orphan a caller) fails closed — nothing committed"
+else echo "  FAIL  expected REJECTED+no-commit, got '$r'"; fail=1; fi
+
 echo
 if [ "$fail" = 0 ]; then
-  echo "RESULT: PASS — prose intent -> structured edit -> validated, recompile-gated transaction -> code."
+  echo "RESULT: PASS — prose intent -> structured edit (rename/delete) -> validated, recompile-gated transaction -> code."
 else echo "RESULT: FAIL"; exit 1; fi

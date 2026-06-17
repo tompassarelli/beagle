@@ -95,8 +95,14 @@ jobs:
       - name: Scope-correct rename (collision + shadowing + cross-module) gate
         run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.chartroom" CODE_AS_CLAIMS_CORPUS="$GITHUB_WORKSPACE/.fram/src" bin/test/code-as-claims/rename.sh
 
+      # Delete as a graph op: the no-orphaned-references invariant. A safe delete omits
+      # the form + its subtree and renumbers siblings (no truncation); a delete that
+      # would orphan a reference (this module or a consumer) is refused, fail-closed.
+      - name: Delete as a graph op — no-orphaned-references invariant
+        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.chartroom" bin/test/code-as-claims/delete.sh
+
       # NL -> edit authoring layer: prose intent -> a structured edit (data an agent
-      # emits) -> the rename engine -> recompile-gated commit, else fail closed.
+      # emits) -> the engine (rename/delete) -> recompile-gated commit, else fail closed.
       - name: NL-to-edit authoring layer — recompile-gated transaction
         run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.chartroom" bin/test/code-as-claims/authoring.sh
 
