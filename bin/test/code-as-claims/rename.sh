@@ -321,7 +321,38 @@ pu="$(racket "$RT" --render /tmp/resolved-puse.bclj.edn 2>/dev/null)"
 chk "protocol method def renamed (cost [self] : Int)" "grep -qF '(cost [self] : Int)' <<<\"\$pl\""
 chk "cross-module :refer + call renamed (cost)"        "grep -qF ':refer [cost]' <<<\"\$pu\" && grep -qF '(cost m)' <<<\"\$pu\""
 
+# --- 16. letfn + extend-type binding scopes (adversarial sweep #10) -------------------
+echo "--- 16. letfn + extend-type impl scopes (capture + shadow) ---"
+# 16a. letfn-local capture refused; legitimate rename succeeds + leaves the letfn-local alone
+cat > "$W/lf.bclj" <<'EOF'
+#lang beagle/clj
+(ns lf)
+(defn helper [x :- Int] :- Int (* x 10))
+(defn run [n :- Int] :- Int (letfn [(g [y :- Int] :- Int (+ y 1))] (+ (g n) (helper n))))
+EOF
+racket "$RT" --emit-edn "$W/lf.bclj" 2>/dev/null > "$W/lf.edn"
+if bb -cp "$FRAM_OUT" "$RES" rename helper g lf "$W/lf.edn" >/dev/null 2>&1; then
+  echo "  FAIL  letfn-local capture not refused"; fail=1
+else echo "  PASS  letfn-local capture refused"; fi
+bb -cp "$FRAM_OUT" "$RES" rename helper helper2 lf "$W/lf.edn" 2>/dev/null
+chk "letfn: legit rename succeeds, letfn-local g untouched" "grep -qF '(g n)' <<<\"\$(racket \"$RT\" --render /tmp/resolved-lf.bclj.edn 2>/dev/null)\" && grep -qF '(helper2 n)' <<<\"\$(racket \"$RT\" --render /tmp/resolved-lf.bclj.edn 2>/dev/null)\""
+# 16b. extend-type impl-param capture refused; impl param shadows; module def ref cascades
+cat > "$W/et.bclj" <<'EOF'
+#lang beagle/clj
+(ns et)
+(defrecord Box [(w :- Int)])
+(defprotocol Area (area [self] : Int))
+(def scale :- Int 3)
+(extend-type Box Area (area [self] (* (box-w self) scale)))
+EOF
+racket "$RT" --emit-edn "$W/et.bclj" 2>/dev/null > "$W/et.edn"
+if bb -cp "$FRAM_OUT" "$RES" rename scale self et "$W/et.edn" >/dev/null 2>&1; then
+  echo "  FAIL  extend-type impl-param capture not refused"; fail=1
+else echo "  PASS  extend-type impl-param capture refused"; fi
+bb -cp "$FRAM_OUT" "$RES" rename scale factor et "$W/et.edn" 2>/dev/null
+chk "extend-type: module def ref in impl body cascades; impl param self untouched" "grep -qF '(* (box-w self) factor)' <<<\"\$(racket \"$RT\" --render /tmp/resolved-et.bclj.edn 2>/dev/null)\""
+
 echo
 if [ "$fail" = 0 ]; then
-  echo "RESULT: PASS — one engine: full common beagle surface (local + cross-module, incl FQ + protocol methods), recompiles."
+  echo "RESULT: PASS — one engine: full common beagle surface incl FQ/protocol-methods/letfn/extend-type, recompiles."
 else echo "RESULT: FAIL"; exit 1; fi
