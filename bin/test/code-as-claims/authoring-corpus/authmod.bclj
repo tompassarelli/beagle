@@ -1,0 +1,5 @@
+#lang beagle/clj
+(ns authcorp.authmod)
+;; base is the helper add-two will reference; keep this comment
+(defn base [x :- Int] :- Int (+ x 1))
+(defn use-base [y :- Int] :- Int (base y))
