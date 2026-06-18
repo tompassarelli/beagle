@@ -154,8 +154,9 @@ hiding wrong answers. That is evidence for the thesis, not incidental cleanup.
 > is "correct unlike sed." Verify, don't assume.
 >
 > **Loop-until-dry — the full run (sweeps 1-11).** The sweeps continued until the
-> finder rate fell to genuinely-rare forms. Real silent-miscompiles found per sweep:
-> **3, 17, 7, 7, 6, 5, 3, 3, 1, 5, …** (~57 total), 0 surviving false-positives. Each
+> finder rate fell to a DRY ROUND. Real silent-miscompiles found per sweep:
+> **3, 17, 7, 7, 6, 5, 3, 3, 1, 5, 4, 0** (~61 total) — sweep #12 found ZERO across every
+> area (defmethod/reify, as-> regression, grand identity) → **CONVERGED**. 0 surviving false-positives. Each
 > round probed beagle surface the resolver had never modeled, so this was *completing*
 > the resolver for beagle's real surface, not chasing exotica. The categories closed:
 > sequential/`:or` bindings; the type fleet (constructors, `defunion` variants,
