@@ -276,7 +276,25 @@ fa="$(racket "$RT" --render /tmp/resolved-fa.bclj.edn 2>/dev/null)"
 chk "field accessor point-x -> vertex-x" "grep -qF '(vertex-x p)' <<<\"\$fa\""
 chk "map->Point -> map->Vertex"          "grep -qF '(map->Vertex' <<<\"\$fa\""
 
+# --- 13. cross-module field accessors carry a record rename (adversarial sweep #7) ----
+echo "--- 13. cross-module field accessor (qualified + :refer'd) cascades ---"
+# 13a. qualified c/point-x
+printf '#lang beagle/clj\n(ns acore)\n(defrecord Point [(x :- Int) (y :- Int)])\n' > "$W/acore.bclj"
+printf '#lang beagle/clj\n(ns ause)\n(require acore :as c)\n(defn u [p :- c/Point] :- Int (c/point-x p))\n' > "$W/ause.bclj"
+racket "$RT" --emit-edn "$W/acore.bclj" 2>/dev/null > "$W/acore.edn"
+racket "$RT" --emit-edn "$W/ause.bclj" 2>/dev/null > "$W/ause.edn"
+bb -cp "$FRAM_OUT" "$RES" rename Point Coord acore "$W/acore.edn" "$W/ause.edn" 2>/dev/null
+chk "qualified accessor c/point-x -> c/coord-x" "grep -qF '(c/coord-x p)' <<<\"\$(racket \"$RT\" --render /tmp/resolved-ause.bclj.edn 2>/dev/null)\""
+# 13b. :refer'd point-x (import vector + call site)
+printf '#lang beagle/clj\n(ns rcore)\n(defrecord Point [(x :- Int)])\n' > "$W/rcore.bclj"
+printf '#lang beagle/clj\n(ns ruse)\n(require rcore :refer [Point point-x])\n(defn u [p :- Point] :- Int (point-x p))\n' > "$W/ruse.bclj"
+racket "$RT" --emit-edn "$W/rcore.bclj" 2>/dev/null > "$W/rcore.edn"
+racket "$RT" --emit-edn "$W/ruse.bclj" 2>/dev/null > "$W/ruse.edn"
+bb -cp "$FRAM_OUT" "$RES" rename Point Coord rcore "$W/rcore.edn" "$W/ruse.edn" 2>/dev/null
+ru="$(racket "$RT" --render /tmp/resolved-ruse.bclj.edn 2>/dev/null)"
+chk ":refer'd accessor point-x -> coord-x (import + call)" "grep -qF ':refer [Coord coord-x]' <<<\"\$ru\" && grep -qF '(coord-x p)' <<<\"\$ru\""
+
 echo
 if [ "$fail" = 0 ]; then
-  echo "RESULT: PASS — one engine: scope/types/sequential/quasiquote/idioms/match/factories/accessors, recompiles."
+  echo "RESULT: PASS — one engine: scope/types/sequential/quasiquote/idioms/match/factories/accessors (incl cross-module), recompiles."
 else echo "RESULT: FAIL"; exit 1; fi
