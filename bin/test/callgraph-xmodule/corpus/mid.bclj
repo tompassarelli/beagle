@@ -1,0 +1,4 @@
+#lang beagle/clj
+(ns xm.mid)
+(require xm.lib :as l)
+(defn relay [y :- Int] :- Int (l/target y))

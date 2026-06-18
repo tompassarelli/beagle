@@ -75,6 +75,12 @@ jobs:
       - name: Graph-native cascade — scope-correctness gate
         run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.chartroom" bin/test/cascade-graph/run.sh
 
+      # Reasoning call-graph cross-module completeness: the call graph is derived from the
+      # converged resolver (refers_to), so qualified cross-module calls (a/f, m/f) resolve
+      # and the blast radius is NOT silently emptied. Guards the dangerous "0 callers" lie.
+      - name: Reasoning call-graph — cross-module completeness gate
+        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.chartroom" bin/test/callgraph-xmodule/run.sh
+
       # Repair pipeline: beagle-repair consumes blame.rkt's semantic suspicions as
       # STRUCTURED records, not by regex-scraping the prose SUSPECT line. Gates that
       # a suspicion on a validly-named function the prose regex can't parse (e.g.

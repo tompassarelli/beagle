@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 # beagle-callgraph: emit the SCOPE-CORRECT call graph of a beagle source tree as
-# JSON, derived from the Fram claim graph (calls/child/defn claims) with the
-# transitive blast radius computed by Fram Datalog.
+# JSON, with the transitive blast radius computed by Fram Datalog.
 #
-# This is the graph-native replacement for regex call-graph scraping: a call
-# binds the defn in its OWN module, so same-named functions across modules never
-# collide (the failure mode of bare-symbol text matching). The program is read as
-# a graph, not as text.
+# Derived from chartroom's CONVERGED lexical resolver (resolve.clj `refers_to`) — the
+# SAME resolution that powers scope-correct rename/delete. A call is resolved by binding
+# IDENTITY, so it is correct across module collisions AND cross-module qualified calls
+# (a/f, fully-qualified m/f) and multi-arity defns — which the older bare-callname index
+# silently DROPPED, emptying the blast radius for the dominant cross-module call style.
+# The program is read as a graph, not as text.
 #
 # Usage:   beagle-callgraph <source-dir>
 # Output:  {"defns":[{key,file,module,name}], "edges":[[caller,callee]],
 #           "blast":{callee:[transitive-callers]}}   on stdout (JSON)
 #          a one-line summary on stderr.
 #
-# Requires the Fram classpath (the claim store + Datalog engine). Set FRAM_OUT to
-# override; defaults to ~/code/fram/out.
+# Rents the Layer-2 engine in chartroom (resolve.clj). Set FRAM_OUT / CHARTROOM to override.
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
@@ -24,24 +24,37 @@ fi
 
 DIR="$(cd "$1" && pwd)"
 BIN="$(cd "$(dirname "$0")" && pwd)"
+RT="$BIN/../beagle-lib/private/claims-roundtrip.rkt"
 FRAM_OUT="${FRAM_OUT:-$HOME/code/fram/out}"
-# The scope-correct call-graph ENGINE is Layer 2 and lives in chartroom (callgraph.clj);
-# beagle's tooling RENTS it — one engine, no duplicated copy. Override with CHARTROOM.
+# The call graph is derived from the SAME converged resolver as rename/delete: the Layer-2
+# engine in chartroom (resolve.clj). beagle's tooling RENTS it. Override with CHARTROOM.
 CHARTROOM="${CHARTROOM:-$HOME/code/chartroom}"
+RES="$CHARTROOM/src/resolve.clj"
 
 if [[ ! -d "$FRAM_OUT" ]]; then
     echo "beagle-callgraph: Fram classpath not found at $FRAM_OUT" >&2
     echo "  (graph-native repair runs on the Fram engine — build fram/out or set FRAM_OUT)" >&2
     exit 3
 fi
-if [[ ! -f "$CHARTROOM/src/callgraph.clj" ]]; then
-    echo "beagle-callgraph: Layer-2 call-graph engine not found at $CHARTROOM/src/callgraph.clj" >&2
+if [[ ! -f "$RES" ]]; then
+    echo "beagle-callgraph: Layer-2 resolver not found at $RES" >&2
     echo "  (the engine lives in chartroom; check it out or set CHARTROOM)" >&2
     exit 3
 fi
 
-CLAIMS="$(mktemp /tmp/beagle-callgraph.XXXXXX)"
-trap 'rm -f "$CLAIMS"' EXIT
+WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
-"$BIN/beagle-claims" "$DIR" > "$CLAIMS"
-exec bb -cp "$FRAM_OUT:$CHARTROOM/src" -m callgraph "$CLAIMS"
+# Project each beagle source to its claim-AST (the projection that carries requires/scope,
+# so cross-module calls resolve), then resolve + emit the call graph in chartroom.
+EDNS=(); i=0
+while IFS= read -r f; do
+    racket "$RT" --emit-edn "$f" > "$WORK/$i.edn" 2>/dev/null
+    EDNS+=("$WORK/$i.edn"); i=$((i+1))
+done < <(find "$DIR" -type f \( -name '*.bclj' -o -name '*.bcljs' -o -name '*.bjs' -o -name '*.bnix' -o -name '*.bgl' \) | sort)
+
+if [[ ${#EDNS[@]} -eq 0 ]]; then
+    echo "beagle-callgraph: no beagle source files under $DIR" >&2
+    exit 2
+fi
+
+exec bb -cp "$FRAM_OUT" "$RES" callgraph "${EDNS[@]}"

@@ -1,0 +1,3 @@
+#lang beagle/clj
+(ns xm.lib)
+(defn target [x :- Int] :- Int (+ x 1))
