@@ -15,7 +15,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 RT="$ROOT/beagle-lib/private/claims-roundtrip.rkt"
 FRAM_OUT="${FRAM_OUT:-$HOME/code/fram/out}"
-CHARTROOM="${CHARTROOM:-$HOME/code/chartroom}"
+CHARTROOM="${CHARTROOM:-$HOME/code/fram/chartroom}"
 RES="$CHARTROOM/src/resolve.clj"
 SRC="${CODE_AS_CLAIMS_CORPUS:-$HOME/code/fram/src}"
 export FRAM_OUT CHARTROOM

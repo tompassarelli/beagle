@@ -28,7 +28,7 @@ RT="$BIN/../beagle-lib/private/claims-roundtrip.rkt"
 FRAM_OUT="${FRAM_OUT:-$HOME/code/fram/out}"
 # The call graph is derived from the SAME converged resolver as rename/delete: the Layer-2
 # engine in chartroom (resolve.clj). beagle's tooling RENTS it. Override with CHARTROOM.
-CHARTROOM="${CHARTROOM:-$HOME/code/chartroom}"
+CHARTROOM="${CHARTROOM:-$HOME/code/fram/chartroom}"
 RES="$CHARTROOM/src/resolve.clj"
 
 if [[ ! -d "$FRAM_OUT" ]]; then

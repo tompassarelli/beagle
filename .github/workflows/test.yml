@@ -63,23 +63,20 @@ jobs:
           repository: tompassarelli/fram
           path: .fram
 
-      - name: Checkout chartroom (Layer-2 code-intelligence — refers_to resolver)
-        uses: actions/checkout@v5
-        with:
-          repository: tompassarelli/chartroom
-          path: .chartroom
-
-      # beagle-callgraph RENTS chartroom's scope-correct call-graph engine
-      # (src/callgraph.clj) — the Layer-2 engine lives in chartroom, beagle's tooling
-      # rents it, so CHARTROOM must point at the checked-out copy.
+      # beagle-callgraph RENTS the scope-correct call-graph engine (resolve.clj),
+      # which was FOLDED into the fram repo at fram/chartroom (beagle source
+      # code-intelligence, renting fram's public claim+Datalog API). No separate
+      # chartroom checkout — it ships inside the fram checkout, so CHARTROOM points
+      # at .fram/chartroom. (The fold is licensed by lockstep cadence + this very
+      # friction relief; fram's core_code_blind_test guards the seam stays clean.)
       - name: Graph-native cascade — scope-correctness gate
-        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.chartroom" bin/test/cascade-graph/run.sh
+        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" bin/test/cascade-graph/run.sh
 
       # Reasoning call-graph cross-module completeness: the call graph is derived from the
       # converged resolver (refers_to), so qualified cross-module calls (a/f, m/f) resolve
       # and the blast radius is NOT silently emptied. Guards the dangerous "0 callers" lie.
       - name: Reasoning call-graph — cross-module completeness gate
-        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.chartroom" bin/test/callgraph-xmodule/run.sh
+        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" bin/test/callgraph-xmodule/run.sh
 
       # Repair pipeline: beagle-repair consumes blame.rkt's semantic suspicions as
       # STRUCTURED records, not by regex-scraping the prose SUSPECT line. Gates that
@@ -102,24 +99,24 @@ jobs:
       # an existing binding refused; each renamed tree recompiles. Repair as a graph
       # operation, O(1) (edits the def; references follow refers_to).
       - name: Scope-correct rename (collision + shadowing + cross-module) gate
-        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.chartroom" CODE_AS_CLAIMS_CORPUS="$GITHUB_WORKSPACE/.fram/src" bin/test/code-as-claims/rename.sh
+        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" CODE_AS_CLAIMS_CORPUS="$GITHUB_WORKSPACE/.fram/src" bin/test/code-as-claims/rename.sh
 
       # Delete as a graph op: the no-orphaned-references invariant. A safe delete omits
       # the form + its subtree and renumbers siblings (no truncation); a delete that
       # would orphan a reference (this module or a consumer) is refused, fail-closed.
       - name: Delete as a graph op — no-orphaned-references invariant
-        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.chartroom" bin/test/code-as-claims/delete.sh
+        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" bin/test/code-as-claims/delete.sh
 
       # NL -> edit authoring layer: prose intent -> a structured edit (data an agent
       # emits) -> the engine (rename/delete) -> recompile-gated commit, else fail closed.
       - name: NL-to-edit authoring layer — recompile-gated transaction
-        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.chartroom" bin/test/code-as-claims/authoring.sh
+        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" bin/test/code-as-claims/authoring.sh
 
       # One engine, both pillars, on REAL code: the blast radius (REASON) of fram.cnf/value!
       # predicts the cross-module reach of renaming it (REPAIR), and the repaired tree
       # recompiles — both derived from the same converged refers_to resolver.
       - name: Engine demo — reason + repair consistent on real fram/src
-        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.chartroom" CODE_AS_CLAIMS_CORPUS="$GITHUB_WORKSPACE/.fram/src" bin/test/engine-demo/run.sh
+        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" CODE_AS_CLAIMS_CORPUS="$GITHUB_WORKSPACE/.fram/src" bin/test/engine-demo/run.sh
 
       - name: Show accumulated surface debt
         if: always()

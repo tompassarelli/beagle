@@ -19,7 +19,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 RT="$ROOT/beagle-lib/private/claims-roundtrip.rkt"
 FRAM_OUT="${FRAM_OUT:-$HOME/code/fram/out}"
-CHARTROOM="${CHARTROOM:-$HOME/code/chartroom}"
+CHARTROOM="${CHARTROOM:-$HOME/code/fram/chartroom}"
 fail=0
 
 # apply <outdir> <corpus> <op> <args...> -> prints COMMITTED | REJECTED

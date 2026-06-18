@@ -14,7 +14,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 FRAM_OUT="${FRAM_OUT:-$HOME/code/fram/out}"
-CHARTROOM="${CHARTROOM:-$HOME/code/chartroom}"
+CHARTROOM="${CHARTROOM:-$HOME/code/fram/chartroom}"
 export FRAM_OUT CHARTROOM
 CG="$(cd "$HERE/../../.." && pwd)/bin/beagle-callgraph"
 fail=0
