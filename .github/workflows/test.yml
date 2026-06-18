@@ -69,8 +69,11 @@ jobs:
           repository: tompassarelli/chartroom
           path: .chartroom
 
+      # beagle-callgraph RENTS chartroom's scope-correct call-graph engine
+      # (src/callgraph.clj) — the Layer-2 engine lives in chartroom, beagle's tooling
+      # rents it, so CHARTROOM must point at the checked-out copy.
       - name: Graph-native cascade — scope-correctness gate
-        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" bin/test/cascade-graph/run.sh
+        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.chartroom" bin/test/cascade-graph/run.sh
 
       # Repair pipeline: beagle-repair consumes blame.rkt's semantic suspicions as
       # STRUCTURED records, not by regex-scraping the prose SUSPECT line. Gates that

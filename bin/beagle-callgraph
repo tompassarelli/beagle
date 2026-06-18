@@ -25,10 +25,18 @@ fi
 DIR="$(cd "$1" && pwd)"
 BIN="$(cd "$(dirname "$0")" && pwd)"
 FRAM_OUT="${FRAM_OUT:-$HOME/code/fram/out}"
+# The scope-correct call-graph ENGINE is Layer 2 and lives in chartroom (callgraph.clj);
+# beagle's tooling RENTS it — one engine, no duplicated copy. Override with CHARTROOM.
+CHARTROOM="${CHARTROOM:-$HOME/code/chartroom}"
 
 if [[ ! -d "$FRAM_OUT" ]]; then
     echo "beagle-callgraph: Fram classpath not found at $FRAM_OUT" >&2
     echo "  (graph-native repair runs on the Fram engine — build fram/out or set FRAM_OUT)" >&2
+    exit 3
+fi
+if [[ ! -f "$CHARTROOM/src/callgraph.clj" ]]; then
+    echo "beagle-callgraph: Layer-2 call-graph engine not found at $CHARTROOM/src/callgraph.clj" >&2
+    echo "  (the engine lives in chartroom; check it out or set CHARTROOM)" >&2
     exit 3
 fi
 
@@ -36,4 +44,4 @@ CLAIMS="$(mktemp /tmp/beagle-callgraph.XXXXXX)"
 trap 'rm -f "$CLAIMS"' EXIT
 
 "$BIN/beagle-claims" "$DIR" > "$CLAIMS"
-exec bb -cp "$FRAM_OUT" "$BIN/_beagle-callgraph.clj" "$CLAIMS"
+exec bb -cp "$FRAM_OUT:$CHARTROOM/src" -m callgraph "$CLAIMS"
