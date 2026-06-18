@@ -112,6 +112,12 @@ jobs:
       - name: NL-to-edit authoring layer — recompile-gated transaction
         run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" bin/test/code-as-claims/authoring.sh
 
+      # Graph-native AUTHORING (the dogfood at the root): upsert-form (add/replace a def)
+      # and set-body are CLAIM operations on the AST-claims, not text patches — scope-correct
+      # by identity (an authored ref resolves through refers_to), recompile-gated, fail-closed.
+      - name: Authoring-as-claims — upsert-form + set-body verbs
+        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" bin/test/code-as-claims/authoring-verbs.sh
+
       # One engine, both pillars, on REAL code: the blast radius (REASON) of fram.cnf/value!
       # predicts the cross-module reach of renaming it (REPAIR), and the repaired tree
       # recompiles — both derived from the same converged refers_to resolver.
