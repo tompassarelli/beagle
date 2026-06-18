@@ -309,7 +309,19 @@ if bb -cp "$FRAM_OUT" "$RES" rename Box crate fqp "$W/fqp.edn" "$W/fqc.edn" >/de
   echo "  FAIL  lowercase type rename not refused"; fail=1
 else echo "  PASS  lowercase type rename refused (type-name shape)"; fi
 
+# --- 15. defprotocol method names are renameable cross-module (adversarial sweep #9) --
+echo "--- 15. defprotocol method rename (def + :refer + call) ---"
+printf '#lang beagle/clj\n(ns pp.lib)\n(defprotocol Priced (price [self] : Int))\n' > "$W/plib.bclj"
+printf '#lang beagle/clj\n(ns pp.use)\n(require pp.lib :refer [price])\n(defn total [m :- Int] :- Int (price m))\n' > "$W/puse.bclj"
+racket "$RT" --emit-edn "$W/plib.bclj" 2>/dev/null > "$W/plib.edn"
+racket "$RT" --emit-edn "$W/puse.bclj" 2>/dev/null > "$W/puse.edn"
+bb -cp "$FRAM_OUT" "$RES" rename price cost plib "$W/plib.edn" "$W/puse.edn" 2>/dev/null
+pl="$(racket "$RT" --render /tmp/resolved-plib.bclj.edn 2>/dev/null)"
+pu="$(racket "$RT" --render /tmp/resolved-puse.bclj.edn 2>/dev/null)"
+chk "protocol method def renamed (cost [self] : Int)" "grep -qF '(cost [self] : Int)' <<<\"\$pl\""
+chk "cross-module :refer + call renamed (cost)"        "grep -qF ':refer [cost]' <<<\"\$pu\" && grep -qF '(cost m)' <<<\"\$pu\""
+
 echo
 if [ "$fail" = 0 ]; then
-  echo "RESULT: PASS — one engine: full common beagle surface (local + cross-module, incl FQ), scope-correct, recompiles."
+  echo "RESULT: PASS — one engine: full common beagle surface (local + cross-module, incl FQ + protocol methods), recompiles."
 else echo "RESULT: FAIL"; exit 1; fi
