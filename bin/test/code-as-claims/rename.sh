@@ -177,7 +177,27 @@ if bb -cp "$FRAM_OUT" "$RES" rename red blue rlib "$W/rlib.edn" "$W/rcon2.edn" >
   echo "  FAIL  import collision not refused"; fail=1
 else echo "  PASS  import collision (consumer already binds new) refused"; fi
 
+# --- 9. deeper type/quasiquote forms (adversarial sweep #3) --------------------------
+echo "--- 9. parameterized defunion + protocol return type + quasiquote quote-data ---"
+# 9a. parameterized defunion name (Result T E) renames + its annotations cascade
+printf '#lang beagle/clj\n(ns pd)\n(defunion (Result T E) (Ok [v :- T]) (Err [e :- E]))\n(defn mk [v :- Int] :- (Result Int Int) (Ok v))\n' > "$W/pd.bclj"
+racket "$RT" --emit-edn "$W/pd.bclj" 2>/dev/null > "$W/pd.edn"
+bb -cp "$FRAM_OUT" "$RES" rename Result Either pd "$W/pd.edn" 2>/dev/null
+pd="$(racket "$RT" --render /tmp/resolved-pd.bclj.edn 2>/dev/null)"
+chk "parameterized defunion (Result T E)->(Either T E) + annotation" "grep -qF '(defunion (Either T E)' <<<\"\$pd\" && grep -qF ':- (Either Int Int)' <<<\"\$pd\""
+# 9b. defprotocol method RETURN type cascades
+printf '#lang beagle/clj\n(ns pp)\n(defrecord Box [(v :- Int)])\n(defprotocol Maker (make [self] :- Box))\n' > "$W/pp.bclj"
+racket "$RT" --emit-edn "$W/pp.bclj" 2>/dev/null > "$W/pp.edn"
+bb -cp "$FRAM_OUT" "$RES" rename Box Crate pp "$W/pp.edn" 2>/dev/null
+chk "defprotocol method return :- Box -> :- Crate" "grep -qF '(make [self] :- Crate)' <<<\"\$(racket \"$RT\" --render /tmp/resolved-pp.bclj.edn 2>/dev/null)\""
+# 9c. (quote ..) inside a quasiquote is inert DATA — must NOT be renamed
+printf '#lang beagle/clj\n(ns qd)\n(def red :- Int 1)\n(defmacro mk [] (quasiquote (quote (red))))\n' > "$W/qd.bclj"
+racket "$RT" --emit-edn "$W/qd.bclj" 2>/dev/null > "$W/qd.edn"
+bb -cp "$FRAM_OUT" "$RES" rename red crimson qd "$W/qd.edn" 2>/dev/null
+qd="$(racket "$RT" --render /tmp/resolved-qd.bclj.edn 2>/dev/null)"
+chk "quasiquote (quote (red)) data untouched; def->crimson" "grep -qF '(quote (red))' <<<\"\$qd\" && grep -qF '(def crimson' <<<\"\$qd\""
+
 echo
 if [ "$fail" = 0 ]; then
-  echo "RESULT: PASS — one engine, scope-correct across collision + shadowing + cross-module + types + sequential + quasiquote, recompiles."
+  echo "RESULT: PASS — one engine: collision/shadowing/cross-module/types/sequential/quasiquote, recompiles."
 else echo "RESULT: FAIL"; exit 1; fi

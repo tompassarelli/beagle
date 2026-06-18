@@ -54,7 +54,36 @@ if bb -cp "$FRAM_OUT" "$RES" delete shared lib "$W/lib.edn" "$W/con.edn" >/dev/n
   echo "  FAIL  cross-module orphan NOT refused"; fail=1
 else echo "  PASS  cross-module reference refuses delete (no-orphaned-refs)"; fi
 
+# --- 4. a defunion VARIANT is not an independently-deletable top-level form -> refuse --
+echo "--- 4. defunion variant delete -> refuse (no false 0-form success) ---"
+cat > "$W/uni.bclj" <<'EOF'
+#lang beagle/clj
+(ns delcorp.uni)
+(defunion Shape (Circle [r :- Float]) (Sq [s :- Float]))
+(defn mk [r :- Float] :- Shape (Circle r))
+EOF
+racket "$RT" --emit-edn "$W/uni.bclj" 2>/dev/null > "$W/uni.edn"
+if bb -cp "$FRAM_OUT" "$RES" delete Sq uni "$W/uni.edn" >/dev/null 2>&1; then
+  echo "  FAIL  variant delete reported success on unchanged tree"; fail=1
+else echo "  PASS  defunion variant delete refused (not a top-level form)"; fi
+
+# --- 5. a self-documented def IS deletable (its own doc-comment goes with it) ---------
+echo "--- 5. self-documented def delete (own comment pruned, not counted as orphan) ---"
+cat > "$W/doc.bclj" <<'EOF'
+#lang beagle/clj
+(ns delcorp.doc)
+;; doc mentioning dead
+(defn dead [x :- Int] :- Int x)
+(defn keep-me [y :- Int] :- Int y)
+EOF
+racket "$RT" --emit-edn "$W/doc.bclj" 2>/dev/null > "$W/doc.edn"
+bb -cp "$FRAM_OUT" "$RES" delete dead doc "$W/doc.edn" 2>/dev/null
+dd="$(racket "$RT" --render /tmp/resolved-doc.bclj.edn 2>/dev/null)"
+chk "self-doc def 'dead' removed (not blocked by its own comment)" "! grep -q 'defn dead' <<<\"\$dd\""
+chk "its doc comment removed too"                                  "! grep -q 'doc mentioning dead' <<<\"\$dd\""
+chk "'keep-me' survives"                                           "grep -q 'defn keep-me' <<<\"\$dd\""
+
 echo
 if [ "$fail" = 0 ]; then
-  echo "RESULT: PASS — delete projects when safe (no truncation), refuses when a reference would orphan."
+  echo "RESULT: PASS — delete projects when safe (no truncation), refuses orphans/variants, prunes own comment."
 else echo "RESULT: FAIL"; exit 1; fi
