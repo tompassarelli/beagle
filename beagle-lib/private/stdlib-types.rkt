@@ -16,6 +16,10 @@
          "stdlib-clj.rkt"
          "stdlib-cljs.rkt"
          "stdlib-bb.rkt"
+         ;; GENERATED fram API catalog — `fram bin/fram-primer --beagle-catalog`. Lets
+         ;; .bclj that rents fram (require fram.cnf/datalog/schema) type as the real fram
+         ;; types instead of Any. bb/clj-only (excluded from cljs, like STDLIB-BB).
+         "stdlib-fram.rkt"
          "stdlib-js.rkt"
          "stdlib-odin.rkt"
          "dormant/stdlib-sql.rkt")
@@ -29,7 +33,7 @@
   ;; STDLIB-BB: babashka-runtime entries (fs/process/http/json/yaml/cli +
   ;; java.time). bb IS the clj runtime here; JVM-only-clj consumers don't
   ;; exist (zero-users rule).
-  (merge-hashes STDLIB-PORTABLE STDLIB-CLJ STDLIB-CLJS STDLIB-BB))
+  (merge-hashes STDLIB-PORTABLE STDLIB-CLJ STDLIB-CLJS STDLIB-BB STDLIB-FRAM))
 
 (define stdlib-js-combined
   (merge-hashes STDLIB-PORTABLE STDLIB-JS))
@@ -51,7 +55,7 @@
 
 ;; Every bb-runtime entry is JVM/bb-only — excluded from cljs wholesale.
 (define CLJ+BB-EXCLUDE
-  (set-union CLJ-EXCLUDE (list->set (hash-keys STDLIB-BB))))
+  (set-union CLJ-EXCLUDE (list->set (hash-keys STDLIB-BB)) (list->set (hash-keys STDLIB-FRAM))))
 
 (define (target-excludes-for target)
   (case target
