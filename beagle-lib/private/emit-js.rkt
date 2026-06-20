@@ -998,6 +998,8 @@
                              (expr-has-await? (let-binding-value b)))
                            (contains-await? body)))
      (define let-names (apply append (map (lambda (b) (names-from-binding-target (let-binding-name b))) bindings)))
+     ;; A binding reassigned via `set!` in the body must emit `let`, not `const`.
+     (define mutated-syms (collect-set!-target-syms body))
      (define-values (bind-strs _ignored)
        (for/fold ([strs '()]
                   [bound (current-js-bound)])
@@ -1005,8 +1007,9 @@
          (define val-str (await-async-iife
                            (parameterize ([current-js-bound bound])
                              (emit-expr (let-binding-value b)))))
-         (define stmts (emit-let-binding-stmts (let-binding-name b) val-str))
          (define new-names (names-from-binding-target (let-binding-name b)))
+         (define mutable? (for/or ([nm (in-list new-names)]) (and (memq nm mutated-syms) #t)))
+         (define stmts (emit-let-binding-stmts (let-binding-name b) val-str mutable?))
          (values (append strs stmts)
                  (set-union bound (list->set new-names)))))
      (with-bindings let-names
@@ -1626,15 +1629,68 @@
 ;; (matching Clojure single-eval) and the whole-map :as binding is always
 ;; available. Every let-emission site routes through here so the :as handling
 ;; can never drift between the IIFE, return-position, and statement paths.
-(define (emit-let-binding-stmts target val-str)
+;; Every bare-symbol target of a `set!` anywhere in a subtree. Descends into nested
+;; fn bodies — a closure can reassign an outer let-binding, which then MUST emit as
+;; `let`, not `const` (JS const throws on any reassignment, even from a closure).
+;; Mirrors check.rkt's collect-markers descent; keep the two in sync if forms change.
+(define (collect-set!-target-syms node)
+  (define syms '())
+  (define (note! s) (set! syms (cons s syms)))
+  (define (walk e)
+    (cond
+      [(set!-form? e)
+       (when (symbol? (set!-form-target e)) (note! (set!-form-target e)))
+       (walk (set!-form-value e))]
+      [(call-form? e) (walk (call-form-fn e)) (for-each walk (call-form-args e))]
+      [(if-form? e) (walk (if-form-cond-expr e)) (walk (if-form-then-expr e))
+                    (when (if-form-else-expr e) (walk (if-form-else-expr e)))]
+      [(let-form? e) (for ([b (in-list (let-form-bindings e))]) (walk (let-binding-value b)))
+                     (for-each walk (let-form-body e))]
+      [(when-form? e) (walk (when-form-cond-expr e)) (for-each walk (when-form-body e))]
+      [(do-form? e) (for-each walk (do-form-body e))]
+      [(fn-form? e) (for-each walk (fn-form-body e))]
+      [(cond-form? e) (for ([c (in-list (cond-form-clauses e))])
+                        (walk (cond-clause-test c)) (for-each walk (cond-clause-body c)))]
+      [(for-form? e) (for ([c (in-list (for-form-clauses e))])
+                       (when (for-binding? c) (walk (for-binding-expr c))))
+                     (for-each walk (for-form-body e))]
+      [(doseq-form? e) (for ([c (in-list (doseq-form-clauses e))])
+                         (when (for-binding? c) (walk (for-binding-expr c))))
+                       (for-each walk (doseq-form-body e))]
+      [(case-form? e) (walk (case-form-test e))
+                      (for ([c (in-list (case-form-clauses e))]) (walk (case-clause-body c)))
+                      (when (case-form-default e) (walk (case-form-default e)))]
+      [(loop-form? e) (for-each walk (loop-form-body e))]
+      [(match-form? e) (walk (match-form-target e))
+                       (for ([c (in-list (match-form-clauses e))]) (for-each walk (match-clause-body c)))]
+      [(try-form? e) (for-each walk (try-form-body e))
+                     (for ([c (in-list (try-form-catches e))]) (for-each walk (catch-clause-body c)))
+                     (when (try-form-finally-body e) (for-each walk (try-form-finally-body e)))]
+      [(with-form? e) (walk (with-form-target e))
+                      (for ([u (in-list (with-form-updates e))]) (walk (with-update-value u)))]
+      [(vec-form? e) (for-each walk (vec-form-items e))]
+      [(map-form? e) (for ([p (in-list (map-form-pairs e))]) (walk (car p)) (walk (cdr p)))]
+      [(defn-form? e) (void)]
+      [(defn-multi? e) (void)]
+      [(def-form? e) (void)]
+      [(pair? e) (for-each walk e)]
+      [else (void)]))
+  (for-each walk (if (list? node) node (list node)))
+  syms)
+
+;; mutable? — emit `let` (the binding is reassigned via set! in its scope) instead
+;; of the default `const`. Without this, `(set! <bare-local> v)` compiled to
+;; `const x = …; x = …;` and threw "Assignment to constant variable" at runtime.
+(define (emit-let-binding-stmts target val-str [mutable? #f])
+  (define kw (if mutable? "let" "const"))
   (define as-name (and (map-destructure? target) (map-destructure-as-name target)))
   (cond
     [as-name
      (define as-js (mangle-name as-name))
      (list (format "const ~a = ~a;" as-js val-str)
-           (format "const ~a = ~a;" (emit-binding-target target) as-js))]
+           (format "~a ~a = ~a;" kw (emit-binding-target target) as-js))]
     [else
-     (list (format "const ~a = ~a;" (emit-binding-target target) val-str))]))
+     (list (format "~a ~a = ~a;" kw (emit-binding-target target) val-str))]))
 
 (define (expr-contains-recur? e)
   (cond
@@ -1686,10 +1742,13 @@
        (format "if (~a) { ~a } else { return null; }" cond-str then-str))]
     [(and (let-form? e) (body-contains-recur? (let-form-body e)))
      (define let-names (apply append (map (lambda (b) (names-from-binding-target (let-binding-name b))) (let-form-bindings e))))
+     (define mutated-syms (collect-set!-target-syms (let-form-body e)))
      (define binding-strs
        (apply append
          (for/list ([b (in-list (let-form-bindings e))])
-           (emit-let-binding-stmts (let-binding-name b) (await-async-iife (emit-expr (let-binding-value b)))))))
+           (define new-names (names-from-binding-target (let-binding-name b)))
+           (define mutable? (for/or ([nm (in-list new-names)]) (and (memq nm mutated-syms) #t)))
+           (emit-let-binding-stmts (let-binding-name b) (await-async-iife (emit-expr (let-binding-value b))) mutable?))))
      (with-bindings let-names
        (lambda ()
          ;; Only the tail form drives the loop (recur/return); earlier forms are
@@ -1747,14 +1806,16 @@
      (if shadows?
        (format "return ~a;" (emit-expr e))
        (let ()
+         (define mutated-syms (collect-set!-target-syms body))
          (define-values (bind-strs _)
            (for/fold ([strs '()] [bound (current-js-bound)])
                      ([b (in-list bindings)])
              (define val-str (await-async-iife
                                (parameterize ([current-js-bound bound])
                                  (emit-expr (let-binding-value b)))))
-             (define stmts (emit-let-binding-stmts (let-binding-name b) val-str))
              (define new-names (names-from-binding-target (let-binding-name b)))
+             (define mutable? (for/or ([nm (in-list new-names)]) (and (memq nm mutated-syms) #t)))
+             (define stmts (emit-let-binding-stmts (let-binding-name b) val-str mutable?))
              (values (append strs stmts)
                      (set-union bound (list->set new-names)))))
          (with-bindings let-names
@@ -1882,14 +1943,16 @@
      (if shadows?
        (emit-expr-stmt e)
        (let ()
+         (define mutated-syms (collect-set!-target-syms body))
          (define-values (bind-strs _)
            (for/fold ([strs '()] [bound (current-js-bound)])
                      ([b (in-list bindings)])
              (define val-str (await-async-iife
                                (parameterize ([current-js-bound bound])
                                  (emit-expr (let-binding-value b)))))
-             (define stmts (emit-let-binding-stmts (let-binding-name b) val-str))
              (define new-names (names-from-binding-target (let-binding-name b)))
+             (define mutable? (for/or ([nm (in-list new-names)]) (and (memq nm mutated-syms) #t)))
+             (define stmts (emit-let-binding-stmts (let-binding-name b) val-str mutable?))
              (values (append strs stmts)
                      (set-union bound (list->set new-names)))))
          (with-bindings let-names

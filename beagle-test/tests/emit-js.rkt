@@ -736,6 +736,18 @@
      '(declare-extern obj Any)
      '(defn f [(obj :- Any)] :- Any (.-my-prop obj)))
 
+   ;; A let-binding reassigned via `set!` must emit `let`, not `const` — otherwise
+   ;; the generated `const acc = 0; acc = …` throws "Assignment to constant variable"
+   ;; at runtime. (`f!` is bang-named so the purity check is satisfied.)
+   (check-js-contains "set! on a let-binding emits `let`, not const"
+     "let acc = 0;"
+     '(defn f! [(n :- Any)] :- Any (let [acc 0] (set! acc n) acc)))
+
+   ;; …but a let-binding that is NOT set!-mutated still emits `const` (no over-broadening).
+   (check-js-contains "an unmutated let-binding stays `const`"
+     "const total = "
+     '(defn g [(a :- Any) (b :- Any)] :- Any (let [total (+ a b)] total)))
+
    ;; --- map destructuring: :as whole-binding across all three let positions,
    ;;     plus :or defaults and single-evaluation. Regression net for the
    ;;     d51ae3e :as bug (the fix had landed on only one of three paths).
