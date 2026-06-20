@@ -287,6 +287,13 @@
      ".forEach("
      '(defn f [(xs :- (Vec Int))] :- Nil (doseq [x xs] (println x))))
 
+   ;; doseq in EXPRESSION position (a cond arm) must be IIFE-wrapped so it doesn't
+   ;; splice a bare statement into a ternary (which emits unparseable JS).
+   (check-js-contains "doseq in cond-arm (expr position) is IIFE-wrapped"
+     "(() => {"
+     '(defn f [(xs :- (Vec Int)) (flag :- Bool)] :- Nil
+        (cond flag (doseq [x xs] (println x)) :else nil)))
+
    ;; dotimes removed — use (doseq [i (range n)] body).
 
    ;; --- interop --------------------------------------------------------------
@@ -653,6 +660,15 @@
                  (format "expected property access, got:\n~a" result))
      (check-false (string-contains? result "obj.name(")
                   "should not have parens for property access"))
+
+   (test-case "invoking a .- property-access result emits a call, not a compiler crash"
+     (define result (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+                                   '(declare-extern client Any)
+                                   '(defn f [(client :- Any)] :- Any ((.-newSession client))))))
+     (check-true (string-contains? result "client.newSession")
+                 (format "expected callee property access, got:\n~a" result))
+     (check-true (string-contains? result ")()")
+                 (format "expected the property-access result to be invoked, got:\n~a" result)))
 
    ;; --- JS-NO-EMIT safety net ------------------------------------------------
 

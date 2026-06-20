@@ -1164,7 +1164,14 @@
            #:async? has-await)]
 
     [(doseq-form? e)
-     (emit-doseq e)]
+     ;; emit-doseq yields a STATEMENT (forEach/for-of). In EXPRESSION position
+     ;; (a cond/if arm in return position, a let-binding value) a bare statement
+     ;; splices into a ternary and emits unparseable JS — so wrap it in an IIFE
+     ;; there, exactly like loop/dotimes/try. In statement position keep it bare.
+     (define s (emit-doseq e))
+     (if (eq? (current-js-context) 'expr)
+         (iife s #:async? (contains-await? (doseq-form-body e)))
+         s)]
 
     [(dotimes-form? e)
      (define name (mangle-name (dotimes-form-name e)))
@@ -1260,6 +1267,14 @@
        [(and (js-unary? fn-sym) (= 1 (length args)))
         (format "(~a~a)" (hash-ref JS-UNARY-OPS fn-sym) (emit-expr (car args)))]
        [(emit-core-call fn-sym args) => values]
+       [(not (symbol? fn-sym))
+        ;; higher-order call: the callee is an arbitrary expression — e.g.
+        ;; ((.-newSession client)) or ((get o :k) a) — which parse.rkt emits as a
+        ;; call-form with a non-symbol head. Emit (callee)(args); never run the
+        ;; symbol-only mangle path below, which would `symbol->string` and crash.
+        (format "(~a)(~a)"
+                (emit-expr fn-sym)
+                (string-join (map emit-expr args) ", "))]
        [else
         (define fn-str (symbol->string fn-sym))
         (define mangled
