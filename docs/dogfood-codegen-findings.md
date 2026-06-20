@@ -194,3 +194,33 @@ but they must agree.)
 **Status:** FILED — silent correctness bug, not one-line (the fix is unifying the
 two name-normalization paths, which warrants a deliberate change + round-trip
 regression test).
+
+---
+
+## 10. Emitted import specifier keeps source hyphens, but the emitted filename is snake_cased — they don't match
+
+**Surfaced by:** resolving a module's relative-import graph (to track audit-
+dependency edges) — the import targets pointed at files that didn't exist.
+
+**The issue:** a `.bjs` file named with hyphens (`drag-overlay.bjs`) is emitted to a
+**snake_cased** filename (`drag_overlay.js`), but a sibling that imports it emits the
+specifier with the **original hyphen**:
+```js
+// drawer/index.js (emitted)
+import { make_drag_overlay_bang } from './drag-overlay.js';   // ← hyphen
+// but the emitted file on disk is:  drawer/drag_overlay.js   // ← underscore
+```
+So the two disagree. Under a bundler that resolves by module name this is masked,
+but as **plain ESM the import fails to resolve** (`./drag-overlay.js` does not
+exist). Same root family as #9 — the emitter applies different name normalization in
+two positions — but here it's the **filename ↔ import-specifier** pair rather than
+map-key ↔ property-read.
+
+**Repro:** two files `a-b.bjs` (exports something) and `c.bjs` that `:require`s it;
+build both and observe `c.js` imports `./a-b.js` while the file is `a_b.js`.
+
+**Fix direction:** the filename lowering and the import-specifier lowering must
+share one normalization (snake_case both, or preserve hyphens in both).
+
+**Status:** FILED — emitted ESM is broken for hyphenated module names outside a
+name-resolving bundler; one shared normalization fixes it.
