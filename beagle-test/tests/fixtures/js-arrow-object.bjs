@@ -1,0 +1,12 @@
+#lang beagle/js
+
+(ns js-arrow-object)
+
+;; Regression: an INLINE arrow fn whose body is a single object/map literal must
+;; emit `(x) => ({…})` (an object return), not `(x) => {…}` (a JS block). See the
+;; arrow-objlit fix in emit-js.rkt.
+(defn pairs [(xs :- Any)] :- Any
+  (.map xs (fn [(g :- Any)] :- Any {:k (.-name g) :v (.-v g)})))
+
+(defn empties [(xs :- Any)] :- Any
+  (.map xs (fn [(_x :- Any)] :- Any {})))

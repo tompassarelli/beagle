@@ -179,3 +179,13 @@ JS
   (check-true (string-contains? out "true\n"))
   (check-true (string-contains? out "false\n"))
   (check-true (string-contains? out "Shipping: Widget\n")))
+
+(test-case "js-arrow-object — inline arrow with object-literal body returns the object (not a block)"
+  (define-values (ok? out err)
+    (emit-and-run "js-arrow-object" #<<JS
+console.log(JSON.stringify(pairs([{name: 'a', v: 1}, {name: 'b', v: 2}])));
+console.log(JSON.stringify(empties([0, 0])));
+JS
+    ))
+  (check-true ok? err)
+  (check-equal? out "[{\"k\":\"a\",\"v\":1},{\"k\":\"b\",\"v\":2}]\n[{},{}]\n"))

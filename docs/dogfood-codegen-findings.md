@@ -224,3 +224,29 @@ share one normalization (snake_case both, or preserve hyphens in both).
 
 **Status:** FILED — emitted ESM is broken for hyphenated module names outside a
 name-resolving bundler; one shared normalization fixes it.
+
+---
+
+## 11. Inline arrow fn with a map-literal body emits a JS block, not an object return  · FIXED (#8)
+
+**Surfaced by:** building the gjoa about:sovereignty manifest generator — an inline
+`(fn [g] {map})` passed to `.map` produced JS that wouldn't parse.
+
+**The issue:** an inline anonymous fn whose body is a single map literal lowered to
+an arrow with a BLOCK body:
+```clojure
+(.map xs (fn [g :- Any] :- Any {:pref (.-name g) :what (.-vector g)}))
+;; emitted:  xs.map((g) => {pref: g.name, what: g.vector})   ← {…} is a JS block
+;;           -> SyntaxError: "Expected ; but found :"
+;; correct:  xs.map((g) => ({pref: g.name, what: g.vector}))  ← ({…}) returns the object
+```
+A NAMED `defn` returning a map is fine (it emits `return {…};`). Only the inline
+arrow expression-body case was broken. Workaround at the time: a named `defn`.
+
+**Fix (PR #8):** in `emit-js.rkt` (fn-form case), wrap the expression body in parens
+when it emits starting with `{` — catching anything that lowers to an object
+literal in expression position, not only the syntactic map-form. Non-object bodies
+(`(x) => (x + 1)`) are unchanged. Regression test: `beagle-test` oracle
+`js-arrow-object`.
+
+**Status:** FIXED (#8).
