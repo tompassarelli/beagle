@@ -1,0 +1,4 @@
+#lang beagle/clj
+;; @error[bad-form] multi-arity anonymous `fn` is not yet supported — give it a name with `defn` (which supports multi-arity), or use a single arity.
+(ns demo.fnmulti)
+(def f (fn ([] 0) ([a] a)))
