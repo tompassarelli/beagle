@@ -165,3 +165,32 @@ String`. There's no clean form to set a dynamic string key on a JS object;
 workaround was a JS `Map` (`.set`/`.get`). An `aset`/`oset` accepting string keys
 for objects would help.
 **Status:** FILED — minor ergonomics.
+
+---
+
+## 9. Keyword map-key with `_` emits a doubled underscore; property read does not — write/read disagree
+
+**Surfaced by:** a JSON-backed ledger storing `{:emit_sha256 h ...}` and reading it
+back with `(.-emit_sha256 entry)` — every read returned `undefined`, so the round
+trip silently never matched.
+
+**The issue:** a keyword map-literal key containing `_` is lowered with the `_`
+**doubled**, but the matching property access keeps it **single** — so the key the
+object is written under is not the key it's read from:
+```clojure
+(let [m {:a_b 1}]    ; ->  const m = {a__b: 1};
+  (.-a_b m))         ; ->  return m.a_b;   →  undefined (a__b ≠ a_b)
+```
+The two sides apply different kebab/underscore normalization to the same name.
+This is a silent correctness bug — `check` passes, emit looks plausible, and the
+mismatch only shows at runtime. Workaround was camelCase keys (`:emitSha`), which
+round-trip identically on both sides.
+
+**Fix direction:** make the map-literal-key lowering and the `.-prop` lowering
+share one name-normalization function so a given source name maps to exactly one JS
+identifier regardless of position. (Either both preserve `_`, or both collapse it —
+but they must agree.)
+
+**Status:** FILED — silent correctness bug, not one-line (the fix is unifying the
+two name-normalization paths, which warrants a deliberate change + round-trip
+regression test).
