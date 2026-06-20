@@ -1058,7 +1058,14 @@
      (with-bindings bound
        (lambda ()
          (if (and (= (length body) 1) (not (stmt-inline? (car body))))
-           (format "~a(~a) => ~a" prefix params (emit-expr (car body)))
+           (let ([body-str (emit-expr (car body))])
+             ;; An expression-body arrow whose body emits an OBJECT LITERAL must be
+             ;; parenthesized: `=> {…}` is a JS block (a labeled-statement parse),
+             ;; whereas `=> ({…})` returns the object. Any expression that emits
+             ;; starting with `{` is an object literal in this position, so wrap it.
+             (if (regexp-match? #rx"^[ \t\r\n]*[{]" body-str)
+               (format "~a(~a) => (~a)" prefix params body-str)
+               (format "~a(~a) => ~a" prefix params body-str)))
            (format "~a(~a) => { ~a }" prefix params (emit-body-return body "")))))]
 
     [(letfn-form? e)
