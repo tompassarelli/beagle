@@ -1419,6 +1419,18 @@
   '(defn f [s :- String] :- String
      (first (str/split s (#%regex ",")))))
 
+;; index-of / last-index-of accept the optional 3-arg from-index (Int) form, as in
+;; Clojure. Regression for the extern arity fix (was: "expected 2 arg(s), got 3").
+(check-ok "stdlib: clojure.string/index-of accepts 2-arg and 3-arg from-index"
+  '(define-target clj)
+  '(require clojure.string :as str)
+  '(defn f2 [s :- String sep :- String] :- Int?
+     (str/index-of s sep))
+  '(defn f3 [s :- String sep :- String start :- Int] :- Int?
+     (str/index-of s sep start))
+  '(defn g3 [s :- String sep :- String start :- Int] :- Int?
+     (str/last-index-of s sep start)))
+
 (check-ok "stdlib: comparisons accept the numeric tower"
   '(define-target clj)
   '(def a :- Bool (> 2.5 1))
