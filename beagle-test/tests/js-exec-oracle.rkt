@@ -58,6 +58,19 @@ JS
   (check-true ok? err)
   (check-equal? out "3\n{\"a\":1}\n3\n4\n1024\ntrue\nfalse\ntrue\n42\n"))
 
+;; regression: unary (- x) must lower to -x, not the broken value-wrapper ref _(x).
+;; binary (- a b) must remain a - b. (dogfood-codegen-findings #2)
+(test-case "js-unary-minus — (- x) lowers to -x; binary (- a b) unaffected"
+  (define-values (ok? out err)
+    (emit-and-run "js-unary" #<<JS
+console.log(neg);
+console.log(negate(5));
+console.log(sub(7, 2));
+JS
+    ))
+  (check-true ok? err)
+  (check-equal? out "-1\n-5\n5\n"))
+
 (test-case "js-promises — async/await + Promise.all/race run"
   (define-values (ok? out err)
     (emit-and-run "js-promises" #<<JS

@@ -17,7 +17,7 @@
         'mod "%" 'identical? "==="))
 
 (define JS-UNARY-OPS
-  (hash 'not "!"))
+  (hash 'not "!" '- "-"))
 
 ;; Symbol-only sets for set-union into JS-TRANSLATED.
 (define JS-INFIX-OP-SYMS (list->set (hash-keys JS-INFIX-OPS)))
