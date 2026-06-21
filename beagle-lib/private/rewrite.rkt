@@ -23,7 +23,10 @@
          racket/file
          racket/port
          racket/format
-         racket/string)
+         racket/string
+         ;; THE single beagle readtable — no bespoke subset reader to drift
+         ;; (#19/#32). Datum mode (plain read) yields container/reader tags as data.
+         (only-in "../lang/reader-impl.rkt" beagle-readtable))
 
 (provide rewrite-rule
          rewrite-rule?
@@ -98,48 +101,6 @@
 (define MAP-TAG     '#%map)
 (define SET-TAG     '#%set)
 
-(define (skip-ws+comments port)
-  (let loop ()
-    (define c (peek-char port))
-    (cond
-      [(eof-object? c) (void)]
-      [(char-whitespace? c) (read-char port) (loop)]
-      [(char=? c #\;)
-       (let skip ()
-         (define c2 (read-char port))
-         (unless (or (eof-object? c2) (char=? c2 #\newline)) (skip)))
-       (loop)]
-      [else (void)])))
-
-(define (read-until-close-char port close-char)
-  (let loop ([acc '()])
-    (skip-ws+comments port)
-    (define c (peek-char port))
-    (cond
-      [(eof-object? c) (error 'beagle-rewrite "unterminated form (expected ~a)" close-char)]
-      [(char=? c close-char) (read-char port) (reverse acc)]
-      [else (loop (cons (read port) acc))])))
-
-(define beagle-readtable
-  (make-readtable #f
-    #\{ 'terminating-macro
-        (lambda (ch port src line col pos)
-          (cons MAP-TAG (read-until-close-char port #\})))
-    #\} 'terminating-macro
-        (lambda (ch port src line col pos)
-          (error 'beagle-rewrite "unexpected `}`"))
-    #\# 'dispatch-macro
-        (lambda (ch port src line col pos)
-          (define next (read-char port))
-          (cond
-            [(char=? next #\{)
-             (cons SET-TAG (read-until-close-char port #\}))]
-            [(char=? next #\")
-             ;; #"regex" → (#%regex "regex")
-             (define s (read port))
-             (list '#%regex s)]
-            [else (error 'beagle-rewrite "unsupported #~a dispatch" next)]))))
-
 ;; Read the optional `#lang ...` line at the top of a source file. Returns
 ;; the line as a string (without trailing newline) or #f if absent. Leaves
 ;; the port positioned at the start of the first form after the line.
@@ -154,8 +115,7 @@
   (call-with-input-file path
     (lambda (port)
       (define lang-line (read-lang-line port))
-      (parameterize ([read-square-bracket-with-tag BRACKET-TAG]
-                     [current-readtable beagle-readtable])
+      (parameterize ([current-readtable beagle-readtable])
         (define forms
           (let loop ([acc '()])
             (define x (read port))
@@ -191,6 +151,22 @@
         (display "}" out)]
        [(and (eq? (car form) '#%regex) (= (length form) 2) (string? (cadr form)))
         (display "#" out) (write (cadr form) out)]
+       ;; #?(:tag form ...) / #?@(:tag form ...) — reader conditionals
+       [(eq? (car form) 'reader-conditional)
+        (display "#?(" out) (write-items (cdr form) out (+ indent 3) " ") (display ")" out)]
+       [(eq? (car form) 'reader-conditional-splice)
+        (display "#?@(" out) (write-items (cdr form) out (+ indent 4) " ") (display ")" out)]
+       ;; ^meta form  (privacy / dynamic / metadata)
+       [(and (eq? (car form) '#%meta) (= (length form) 3))
+        (display "^" out) (write-beagle-form (cadr form) out indent)
+        (display " " out) (write-beagle-form (caddr form) out indent)]
+       ;; quote family → ' ` ~ ~@  (only the exact 2-element reader shape)
+       [(and (pair? (cdr form)) (null? (cddr form))
+             (memq (car form) '(quote quasiquote unquote unquote-splicing)))
+        (display (case (car form)
+                   [(quote) "'"] [(quasiquote) "`"]
+                   [(unquote) "~"] [(unquote-splicing) "~@"]) out)
+        (write-beagle-form (cadr form) out indent)]
        [else
         (display "(" out)
         (write-items form out (+ indent 1) " ")
@@ -238,8 +214,7 @@
   (define forms
     (with-input-from-string text
       (lambda ()
-        (parameterize ([read-square-bracket-with-tag BRACKET-TAG]
-                       [current-readtable beagle-readtable])
+        (parameterize ([current-readtable beagle-readtable])
           (let loop ([acc '()])
             (define x (read))
             (if (eof-object? x) (reverse acc) (loop (cons x acc))))))))
