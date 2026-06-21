@@ -359,6 +359,32 @@
       (println @counter)"
      "3")
 
+   ;; --- dynamic vars (^:dynamic + binding) ----------------------------------
+   ;; Regression (the bug beagle-4 flagged): an earmuff/^:dynamic def used to
+   ;; emit a plain `(def *x* …)` with NO ^:dynamic metadata, so `(binding …)`
+   ;; over it threw "Can't dynamically bind non-dynamic var" at RUNTIME —
+   ;; checks-and-builds, breaks when run. These exercise the emitted clj end
+   ;; to end: the `^:dynamic` metadata must reach the var AND beagle's own
+   ;; `binding` form must rebind within the dynamic extent, reverting after.
+   ;; (Forms are post-reader datums — `^:dynamic` reads as `(#%meta :dynamic …)`;
+   ;; the reader macro itself is covered in parse/reader tests.)
+   (check-clj-output "^:dynamic var + beagle binding rebinds within extent then reverts"
+     (list '(def (#%meta :dynamic *mult*) :- Int 1)
+           '(defn scaled [(n : Int)] :- Int (* n *mult*))
+           '(defn scaled-by [(n : Int) (m : Int)] :- Int
+              (binding [*mult* m] (scaled n))))
+     "(println (scaled 5))
+      (println (scaled-by 5 10))
+      (println (scaled 5))"
+     "5\n50\n5")
+
+   (check-clj-output "binding rebinds multiple dynamic vars at once"
+     (list '(def (#%meta :dynamic *a*) :- Int 1)
+           '(def (#%meta :dynamic *b*) :- Int 2)
+           '(defn combine [] :- Int (binding [*a* 10 *b* 20] (+ *a* *b*))))
+     "(println (combine))"
+     "30")
+
    ;; --- nil -----------------------------------------------------------------
 
    (check-clj-output "nil? on nil"

@@ -1791,6 +1791,8 @@
 
     [(with-open-form? e)
      (error 'beagle-js "with-open is not supported for JS target")]
+    [(binding-form? e)
+     (error 'beagle-js "binding (dynamic vars) is not supported for JS target")]
     [(doto-form? e)
      (error 'beagle-js "doto is not supported for JS target")]
 

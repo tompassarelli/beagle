@@ -48,3 +48,28 @@
 (test-case "#?() reader conditional still reads"
   (check-equal? (rd "#?(:clj 1 :nix 2)")
                 '(reader-conditional :clj 1 :nix 2)))
+
+;; --- ^ metadata reader (added for dynamic vars) --------------------------
+;; `^META FORM` → (#%meta META FORM), matching Clojure's metadata reader.
+;; The `#%meta` consumers (def/defn name arms, expression with-meta) already
+;; existed; this macro wires the previously-missing producer.
+
+(test-case "^:dynamic on a def reads as #%meta"
+  (check-equal? (rd "(def ^:dynamic *x* nil)")
+                '(def (#%meta :dynamic *x*) nil)))
+
+(test-case "^:keyword metadata shorthand reads keyword value"
+  (check-equal? (rd "^:dynamic *x*")
+                '(#%meta :dynamic *x*)))
+
+(test-case "^{:map} metadata longhand reads the map"
+  (check-equal? (rd "^{:dynamic true} *x*")
+                '(#%meta (#%map :dynamic true) *x*)))
+
+(test-case "^:private on defn name reads as #%meta (activates private arm)"
+  (check-equal? (rd "(defn ^:private f [x] x)")
+                '(defn (#%meta :private f) (#%brackets x) x)))
+
+(test-case "^ with no following form errors"
+  (check-exn #rx"metadata"
+             (lambda () (rd "^:dynamic"))))

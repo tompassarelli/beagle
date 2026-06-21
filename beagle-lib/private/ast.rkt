@@ -243,12 +243,20 @@
 (struct mode-decl   (mode)                                  #:transparent)
 ;; doc: optional docstring (String or #f). Real Clojure surface — carried
 ;; through to clj/cljs emit; ignored by nix emit and the checker.
-(struct def-form    (name type value doc)                   #:transparent)
+;; dynamic?: #t when defined `(def ^:dynamic *x* …)` — a dynamic (rebindable)
+;; var. Drives the `^:dynamic` metadata in clj emit and gates `binding`
+;; targets in the checker. #f for ordinary defs.
+(struct def-form    (name type value doc dynamic?)          #:transparent)
 (struct defn-form   (name params rest-param return-type body private? raises doc) #:transparent)
 (struct defn-multi  (name arities private? doc)               #:transparent)
 (struct arity-clause (params rest-param return-type body)    #:transparent)
 (struct fn-form     (params rest-param return-type body)    #:transparent)
 (struct let-form    (bindings body)                         #:transparent)
+;; binding-form: Clojure `(binding [*x* v …] body…)` — dynamic-extent
+;; rebinding of dynamic vars. bindings is a list of let-binding (type #f);
+;; each name must reference a `^:dynamic` var (enforced in check). Distinct
+;; from let-form: targets are existing dynamic vars, not new lexical locals.
+(struct binding-form (bindings body)                        #:transparent)
 (struct if-form     (cond-expr then-expr else-expr)         #:transparent)
 (struct cond-form   (clauses)                               #:transparent)
 (struct cond-clause (test body)                             #:transparent)
@@ -543,7 +551,7 @@
  ;; Core AST
  (struct-out ns-decl) (struct-out mode-decl)
  (struct-out def-form) (struct-out defn-form) (struct-out fn-form)
- (struct-out let-form) (struct-out if-form) (struct-out cond-form) (struct-out cond-clause)
+ (struct-out let-form) (struct-out binding-form) (struct-out if-form) (struct-out cond-form) (struct-out cond-clause)
  (struct-out when-form) (struct-out do-form) (struct-out call-form) (struct-out vec-form)
  (struct-out quoted) (struct-out regex-lit)
  (struct-out loop-form) (struct-out recur-form)

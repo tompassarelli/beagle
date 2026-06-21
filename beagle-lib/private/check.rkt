@@ -566,12 +566,18 @@
   ;; extend-with-params), which propagates through subsequent operations
   ;; until a concrete type unifies with them.
 
+  ;; Names of `^:dynamic` vars — consulted by `binding` to reject rebinding a
+  ;; non-dynamic var at compile time (the runtime "Can't dynamically bind
+  ;; non-dynamic var" throw, lifted to a type error). Stashed in `env` under a
+  ;; `#%`-prefixed sentinel key so it rides through every mut-copy body-env.
+  (define dyn-vars (mutable-seteq))
+
   ;; top-level defs / defns (pre-pass so callers can look them up)
   (for ([raw-form (in-list (program-forms prog))])
     (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
     (match form
-      [(def-form name (? type? t) _ _) (hash-set! env name t)]
-      [(def-form name #f _ _) (void)]
+      [(def-form name (? type? t) _ _ dyn?) (hash-set! env name t) (when dyn? (set-add! dyn-vars name))]
+      [(def-form name #f _ _ dyn?) (when dyn? (set-add! dyn-vars name))]
       [(defonce-form name (? type? t) _ _) (hash-set! env name t)]
       [(defonce-form name #f _ _) (void)]
       [(defn-form name params rest-p (? type? ret) _ _ _ _)
@@ -666,6 +672,7 @@
          (hash-set! SCALAR-PREDS name preds))]
       [_ (void)]))
 
+  (hash-set! env '#%dynamic-vars dyn-vars)
   env)
 
 (define (register-parametric-union! name type-params members member-fields env)
@@ -739,7 +746,7 @@
 
 (define (check-form form env)
   (match form
-    [(def-form name expected-type value _)
+    [(def-form name expected-type value _ _)
      (define inferred (infer-expr value env))
      ;; Inline `:-` annotation lives in expected-type; the pre-pass mirrors
      ;; it into env. Either lookup is fine — both point at the same type.
@@ -1877,6 +1884,30 @@
        (when (symbol? (let-binding-name b))
          (hash-set! body-env (let-binding-name b) t)))
      (last-expr-type (with-open-form-body e) body-env)]
+    [(binding-form? e)
+     ;; Each target must be a `^:dynamic` var; rebinding a non-dynamic var
+     ;; throws at runtime ("Can't dynamically bind non-dynamic var"), so we
+     ;; reject it here. The bound value must be compatible with the var's
+     ;; declared type. Targets are NOT new locals — the body sees the var's
+     ;; declared (lexical) type unchanged, so we infer the body in `env`.
+     (define dyn-vars (hash-ref env '#%dynamic-vars (seteq)))
+     (for ([b (in-list (binding-form-bindings e))])
+       (define name (let-binding-name b))
+       (define vt (infer-expr (let-binding-value b) env))
+       (unless (and (symbol? name) (set-member? dyn-vars name))
+         (raise-diag 'type-mismatch
+                     (format "binding: ~a is not a dynamic var — only `(def ^:dynamic ~a ...)` vars can be rebound with `binding`"
+                             name name)
+                     (hash 'name (if (symbol? name) (symbol->string name) (format "~a" name)))
+                     #:src (src-for (let-binding-value b))))
+       (define declared (and (symbol? name) (hash-ref env name #f)))
+       (when (and declared (not (type-compatible? vt declared)))
+         (raise-diag 'type-mismatch
+                     (format "binding ~a: expected ~a, got ~a"
+                             name (type->string declared) (type->string vt))
+                     (type-mismatch-details declared vt)
+                     #:src (src-for (let-binding-value b)))))
+     (last-expr-type (binding-form-body e) env)]
     [(doto-form? e)
      (infer-expr (doto-form-target e) env)]
     [(dotimes-form? e)
@@ -3716,6 +3747,8 @@
        (go-body (doseq-form-body e) l)]
       [(with-open-form? e) (go-bindings (with-open-form-bindings e) l)
                            (go-body (with-open-form-body e) l)]
+      [(binding-form? e) (go-bindings (binding-form-bindings e) l)
+                         (go-body (binding-form-body e) l)]
       [(doto-form? e) (go (doto-form-target e) l)
                       (go-body (doto-form-forms e) l)]
       [(fn-form? e) (go-body (fn-form-body e) l)]

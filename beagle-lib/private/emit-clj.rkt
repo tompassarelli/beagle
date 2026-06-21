@@ -318,7 +318,8 @@
 (define (emit-form f)
   (cond
     [(def-form? f)
-     (format "(def ~a~a~a ~a)"
+     (format "(def ~a~a~a~a ~a)"
+             (if (def-form-dynamic? f) "^:dynamic " "")
              (clj-tag-prefix (def-form-type f))
              (def-form-name f)
              (if (def-form-doc f) (format " ~v" (def-form-doc f)) "")
@@ -526,6 +527,10 @@
      (format "(with-open [~a]\n  ~a)"
              (emit-let-bindings (with-open-form-bindings e))
              (emit-body (with-open-form-body e) "  "))]
+    [(binding-form? e)
+     (format "(binding [~a]\n  ~a)"
+             (emit-let-bindings (binding-form-bindings e))
+             (emit-body (binding-form-body e) "  "))]
     [(doto-form? e)
      (format "(doto ~a\n  ~a)"
              (emit-expr (doto-form-target e))

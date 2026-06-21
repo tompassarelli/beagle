@@ -46,7 +46,7 @@
       (define name
         (match (jst-export-form form0)
           [(defn-form n _ _ _ _ _ _ _) n]
-          [(def-form n _ _ _) n]
+          [(def-form n _ _ _ _) n]
           [(defonce-form n _ _ _) n]
           [(defn-multi n _ _ _) n]
           [_ #f]))
@@ -208,6 +208,11 @@
           (hash-set! inner n #t)])
        (check-shadow (let-binding-value b) inner ctx))
      (for ([e (in-list body)]) (check-shadow e inner ctx))]
+    [(binding-form bindings body)
+     ;; `binding` introduces no new locals — targets reference existing
+     ;; dynamic vars. Walk values + body in the current scope (no shadowing).
+     (for ([b (in-list bindings)]) (check-shadow (let-binding-value b) scope ctx))
+     (for ([e (in-list body)]) (check-shadow e scope ctx))]
     [(letfn-form fns body)
      (define inner (scope-copy scope))
      ;; Add all fn names to scope first (mutually visible)
@@ -265,7 +270,7 @@
        (check-shadow (cdr p) scope ctx))]
     [(set-form items)
      (for ([i (in-list items)]) (check-shadow i scope ctx))]
-    [(def-form _ _ value _)
+    [(def-form _ _ value _ _)
      (check-shadow value scope ctx)]
     [(defonce-form _ _ value _)
      (check-shadow value scope ctx)]
@@ -452,7 +457,7 @@
 (define (collect-symbols form used)
   (match form
     [(? symbol?) (hash-set! used form #t)]
-    [(def-form _ _ value _) (collect-symbols value used)]
+    [(def-form _ _ value _ _) (collect-symbols value used)]
     [(defonce-form _ _ value _) (collect-symbols value used)]
     [(defn-form _ _ _ _ body _ _ _)
      (for ([e (in-list body)]) (collect-symbols e used))]
@@ -460,6 +465,12 @@
      (for ([e (in-list body)]) (collect-symbols e used))]
     [(let-form bindings body)
      (for ([b (in-list bindings)]) (collect-symbols (let-binding-value b) used))
+     (for ([e (in-list body)]) (collect-symbols e used))]
+    [(binding-form bindings body)
+     ;; target names are uses of dynamic vars; values + body are exprs
+     (for ([b (in-list bindings)])
+       (when (symbol? (let-binding-name b)) (hash-set! used (let-binding-name b) #t))
+       (collect-symbols (let-binding-value b) used))
      (for ([e (in-list body)]) (collect-symbols e used))]
     [(letfn-form fns body)
      (for ([f (in-list fns)])

@@ -1517,3 +1517,25 @@
 (check-err/rx "numeric: interior Float chain caught against Int return"
   #rx"got Float"
   '(defn p [a :- Int] :- Int (* (+ a 0.5) 2)))
+
+;; --- dynamic vars: `binding` requires a ^:dynamic target ------------------
+;; The runtime "Can't dynamically bind non-dynamic var" throw is lifted to a
+;; compile error: only `(def ^:dynamic …)` vars may be rebound with `binding`.
+
+(check-ok "binding a ^:dynamic var is accepted"
+  '(def (#%meta :dynamic *x*) :- Int 0)
+  '(defn f [] :- Int (binding [*x* 5] *x*)))
+
+(check-err/rx "binding a non-dynamic var is rejected, pointing at ^:dynamic"
+  #rx"dynamic"
+  '(def *y* :- Int 0)
+  '(defn f [] :- Int (binding [*y* 5] *y*)))
+
+(check-err/rx "binding an undeclared var is rejected as non-dynamic"
+  #rx"dynamic"
+  '(defn f [] :- Int (binding [*z* 5] 0)))
+
+(check-err/rx "binding a ^:dynamic Int var with a String mismatches"
+  #rx"expected Int|got String"
+  '(def (#%meta :dynamic *n*) :- Int 0)
+  '(defn f [] :- Int (binding [*n* "oops"] *n*)))

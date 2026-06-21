@@ -770,7 +770,7 @@
           (define alias (and nm (hash-ref alias-table nm #f)))
           (cond
             [alias
-             (define adef (def-form alias #f nm #f))
+             (define adef (def-form alias #f nm #f #f))
              (define astx (datum->syntax #f (list 'def alias nm)))
              (loop (cdr fs) (cdr ss) (list* adef f of) (list* astx (car ss) os))]
             [else
@@ -1823,6 +1823,18 @@
                        (parse-body (or (stx-tail subs 2) body)))]
       [_ (parse-list-form* d subs)])))
 
+;; `binding` — dynamic-extent rebinding of `^:dynamic` vars. Same binding-pair
+;; surface as `let`, but the targets are existing dynamic vars (checked), not
+;; new lexical locals. Reuses parse-let-bindings (types come from the var).
+(register-combiner! 'binding
+  (lambda (d subs)
+    (match d
+      [(list 'binding bindings-form body ...)
+       (binding-form (parse-let-bindings (or (stx-ref subs 1) bindings-form))
+                     (parse-body (or (stx-tail subs 2) body)))]
+      [_ (raise-parse-error 'bad-form
+                            "malformed binding — expected (binding [*var* val ...] body...); got: ~v" d)])))
+
 ;; `for` — list comprehension (clauses: bindings, :when, :let).
 (register-combiner! 'for
   (lambda (d subs)
@@ -2089,28 +2101,59 @@
 
 ;; --- def family migrated to the compile-time combiner registry ---
 
-;; `def` — top-level binding; inline `:-` type, optional docstring; bare `:`
-;; rejected; any other def shape guarded (no silent call-form bypass).
+;; Detect `^:dynamic` on a def name. The reader yields the metadata value as
+;; either the keyword-symbol `:dynamic` (`^:dynamic` shorthand) or a `#%map`
+;; carrying `:dynamic true` (`^{:dynamic true}` longhand). Any other metadata
+;; (e.g. `^:private`, `^:const`) is accepted and stripped — `:dynamic` is the
+;; only def metadata beagle acts on.
+(define (meta-dynamic? mv)
+  (cond
+    [(eq? mv ':dynamic) #t]
+    [(and (pair? mv) (eq? (car mv) '#%map))
+     (let loop ([kvs (cdr mv)])
+       (cond
+         [(or (null? kvs) (null? (cdr kvs))) #f]
+         [(and (eq? (car kvs) ':dynamic) (eq? (cadr kvs) 'true)) #t]
+         [else (loop (cddr kvs))]))]
+    [else #f]))
+
+;; `def` — top-level binding; inline `:-` type, optional docstring; optional
+;; `^:dynamic` (and other) metadata on the name; bare `:` rejected; any other
+;; def shape guarded (no silent call-form bypass).
 (register-combiner! 'def
   (lambda (d subs)
     (match d
       [(list 'def (? symbol? name) ':- type-expr (? string? doc) value)
        (def-form name (parse-type type-expr)
                  (parse-expr (or (stx-ref subs 5) value))
-                 doc)]
+                 doc #f)]
       [(list 'def (? symbol? name) ':- type-expr value)
        (def-form name (parse-type type-expr)
                  (parse-expr (or (stx-ref subs 4) value))
-                 #f)]
+                 #f #f)]
       ;; Inline bare `:` on def is the legacy surface; reject and point at `:-`.
       [(list 'def (? symbol? name) ': _ _)
        (raise-parse-error 'inline-type-annotation
                           "(def ~a : ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (def ~a :- TYPE VALUE)"
                           name name)]
       [(list 'def (? symbol? name) (? string? doc) value)
-       (def-form name #f (parse-expr (or (stx-ref subs 3) value)) doc)]
+       (def-form name #f (parse-expr (or (stx-ref subs 3) value)) doc #f)]
       [(list 'def (? symbol? name) value)
-       (def-form name #f (parse-expr (or (stx-ref subs 2) value)) #f)]
+       (def-form name #f (parse-expr (or (stx-ref subs 2) value)) #f #f)]
+      ;; `^:dynamic` (or any) metadata on the name. The metadata lives entirely
+      ;; in slot 1, so later `subs` indices match the bare-name arms exactly.
+      [(list 'def (list '#%meta mv (? symbol? name)) ':- type-expr (? string? doc) value)
+       (def-form name (parse-type type-expr)
+                 (parse-expr (or (stx-ref subs 5) value))
+                 doc (meta-dynamic? mv))]
+      [(list 'def (list '#%meta mv (? symbol? name)) ':- type-expr value)
+       (def-form name (parse-type type-expr)
+                 (parse-expr (or (stx-ref subs 4) value))
+                 #f (meta-dynamic? mv))]
+      [(list 'def (list '#%meta mv (? symbol? name)) (? string? doc) value)
+       (def-form name #f (parse-expr (or (stx-ref subs 3) value)) doc (meta-dynamic? mv))]
+      [(list 'def (list '#%meta mv (? symbol? name)) value)
+       (def-form name #f (parse-expr (or (stx-ref subs 2) value)) #f (meta-dynamic? mv))]
       ;; Any other def shape would fall through to the call-form passthrough
       ;; and silently bypass the type layer — guard it (bug class 2026-06-12).
       [(cons 'def _)

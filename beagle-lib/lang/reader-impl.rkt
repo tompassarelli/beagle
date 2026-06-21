@@ -319,8 +319,33 @@
        (datum->syntax #f result (vector src line col pos #f))
        result)]))
 
+;; Metadata-prefix reader. `^META FORM` reads as `(#%meta META FORM)`,
+;; matching Clojure's `^` metadata reader. Both datums are read with the
+;; beagle readtable so nested containers/keywords parse normally:
+;;   ^:dynamic *x*        → (#%meta :dynamic *x*)
+;;   ^{:dynamic true} *x* → (#%meta (#%map :dynamic true) *x*)
+;; The parser consumes `#%meta` in def/defn (privacy, dynamic) and in
+;; expression position (→ with-meta). Without this macro the `#%meta`
+;; consumer arms were dead code (the producer was never wired).
+(define (meta-reader ch port src line col pos)
+  (define meta
+    (parameterize ([current-readtable beagle-readtable])
+      (if src (read-syntax src port) (read port))))
+  (when (eof-object? meta)
+    (error 'beagle "unexpected EOF after `^` (metadata needs a value and a target form)"))
+  (define form
+    (parameterize ([current-readtable beagle-readtable])
+      (if src (read-syntax src port) (read port))))
+  (when (eof-object? form)
+    (error 'beagle "unexpected EOF after `^` metadata (needs a target form to attach to)"))
+  (define result (list '#%meta meta form))
+  (if src
+    (datum->syntax #f result (vector src line col pos #f))
+    result))
+
 (define beagle-readtable
   (make-readtable #f
+    #\^ 'terminating-macro meta-reader
     #\[ 'terminating-macro bracket-reader
     #\] 'terminating-macro
                             (lambda (ch port src line col pos)
