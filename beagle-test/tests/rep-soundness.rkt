@@ -159,6 +159,26 @@
      (check-true (string-contains? js "$$bc.get(")
                  (format "Any-typed coll read must be polymorphic $$bc.get (a native scalar map can flow into an Any read), got:\n~a" js)))
 
+   ;; ---- (b''') #4 runtime dedup: set-builders produce SETS (not arrays);
+   ;;      compound -> hamtSet; count sees through to .size/hamtSetCount ----
+   (test-case "conj onto a native set -> a Set, count -> .size (not array/.length)"
+     (define-values (js tbl prog)
+       (emit+types (list `(defn f () :- Int (count (conj ,(st 1 2) 3))))))
+     (check-true (string-contains? js "new Set(") (format "conj-set must build a Set:\n~a" js))
+     (check-true (string-contains? js ".size")    (format "count of a conj-set must be .size:\n~a" js)))
+   (test-case "conj onto a value-set -> hamtSetAdd"
+     (define-values (js tbl prog)
+       (emit+types (list `(defn f () :- Int (count (conj (set ,(br (br 1 2))) ,(br 1 2)))))))
+     (check-true (string-contains? js "hamtSetAdd(") (format "conj onto a value-set must be hamtSetAdd:\n~a" js)))
+   (test-case "into a value-set -> runtime hamtSetAdd fold"
+     (define-values (js tbl prog)
+       (emit+types (list `(defn f () :- Int (count (into (set ,(br (br 1 2))) ,(br (br 1 2) (br 3 4))))))))
+     (check-true (string-contains? js "hamtSetAdd(") (format "into a value-set must fold hamtSetAdd:\n~a" js)))
+   (test-case "frequencies over compound elems -> hamtMap (value-keyed)"
+     (define-values (js tbl prog)
+       (emit+types (list `(defn f () :- Int (count (frequencies ,(br (br 1 2) (br 1 2))))))))
+     (check-true (string-contains? js "hamtMapAssoc(") (format "frequencies over compound must be hamtMap:\n~a" js)))
+
    ;; (b'') a SCALAR keyword read on a HAMT-repped map must still hit the HAMT —
    ;; (get m :a) / (:a m) canonicalize to kw-access (native dot `m.a`); on a
    ;; hamtMap object that reads `undefined`. Dispatch on the COLL's rep, not the

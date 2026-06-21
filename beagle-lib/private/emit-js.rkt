@@ -97,18 +97,13 @@
            [(hset) (hamt-call "hamtSetCount" (emit-expr coll))]
            [(poly) (begin (use-runtime!) (format "$$bc.count(~a)" (emit-expr coll)))]
            [else
-            (define ty (node-type coll))
-            (cond
-              ;; native Set -> .size (NOT .length, which is undefined on a Set)
-              [(or (set-form? coll)
-                   (and (call-form? coll) (memq (call-form-fn coll) '(set hash-set sorted-set)))
-                   (and (type-app? ty) (eq? (type-app-ctor ty) 'Set)))
-               (format "~a.size" (emit-expr coll))]
+            (case (coll-kind coll)
+              ;; native Set -> .size (NOT .length, which is undefined on a Set);
+              ;; coll-kind sees through conj/into/disj to the underlying set.
+              [(set) (format "~a.size" (emit-expr coll))]
               ;; native object (map) -> own-key count (NOT .length)
-              [(or (map-form? coll)
-                   (and (type-app? ty) (eq? (type-app-ctor ty) 'Map)))
-               (format "Object.keys(~a).length" (emit-expr coll))]
-              ;; array/string -> .length
+              [(map) (format "Object.keys(~a).length" (emit-expr coll))]
+              ;; array/string/unknown -> .length
               [else (format "~a.length" (emit-expr coll))])]))
        #f)]
     [(empty?) (if (= n 1) (format "(~a.length === 0)" (emit-expr (car args))) #f)]
@@ -132,6 +127,12 @@
                (for/fold ([acc (emit-expr (car args))]) ([x (in-list (cdr args))])
                  (use-hamt! "hamtSetAdd")
                  (format "hamtSetAdd(~a, ~a)" acc (emit-expr x)))]
+              ;; conj onto a NATIVE set -> a Set (NOT an array): preserves set-ness
+              [(eq? (coll-kind (car args)) 'set)
+               (tally-rep! 'native)
+               (format "new Set([...~a, ~a])"
+                       (emit-expr (car args))
+                       (string-join (map emit-expr (cdr args)) ", "))]
               [else (tally-rep! 'native)
                     (format "[...~a, ~a]"
                             (emit-expr (car args))
@@ -204,7 +205,17 @@
                [else #f])]
     [(reverse) (if (= n 1) (format "[...~a].reverse()" (emit-expr (car args))) #f)]
     [(sort) (if (= n 1) (format "[...~a].sort()" (emit-expr (car args))) #f)]
-    [(into) (if (= n 2) (format "[...~a, ...~a]" (emit-expr (car args)) (emit-expr (cadr args))) #f)]
+    [(into) (cond
+              [(not (= n 2)) #f]
+              ;; into a value-set -> fold hamtSetAdd over xs at runtime (value dedup)
+              [(eq? (classify-rep (car args)) 'hset)
+               (use-hamt! "hamtSetAdd")
+               (format "~a.reduce((_s, _x) => hamtSetAdd(_s, _x), ~a)"
+                       (emit-expr (cadr args)) (emit-expr (car args)))]
+              ;; into a NATIVE set -> a Set (value-dedups scalars by reference==value)
+              [(eq? (coll-kind (car args)) 'set)
+               (format "new Set([...~a, ...~a])" (emit-expr (car args)) (emit-expr (cadr args)))]
+              [else (format "[...~a, ...~a]" (emit-expr (car args)) (emit-expr (cadr args)))])]
     [(concat) (format "[].concat(~a)" (string-join (map emit-expr args) ", "))]
     [(apply) (if (= n 2) (format "~a(...~a)" (emit-expr (car args)) (emit-expr (cadr args))) #f)]
     [(identity) (if (= n 1) (emit-expr (car args)) #f)]
@@ -321,10 +332,16 @@
                    (format "(() => { const _a = ~a, _b = ~a, _r = []; for (let i = 0; i < Math.min(_a.length, _b.length); i++) { _r.push(_a[i], _b[i]); } return _r; })()"
                            (emit-expr (car args)) (emit-expr (cadr args)))
                    #f)]
-    [(frequencies) (if (= n 1)
-                    (format "~a.reduce((m, x) => (m[x] = (m[x] || 0) + 1, m), {})"
-                            (emit-expr (car args)))
-                    #f)]
+    [(frequencies)
+     (cond
+       [(not (= n 1)) #f]
+       ;; compound elements -> value-keyed hamtMap (native object keys collide).
+       [(not (eq? (key-class (seq-elem-type (arg-type (car args)))) 'native))
+        (use-hamt! "hamtMap") (use-hamt! "hamtMapAssoc") (use-hamt! "hamtMapGet")
+        (format "~a.reduce((_m, _x) => hamtMapAssoc(_m, _x, hamtMapGet(_m, _x, 0) + 1), hamtMap())"
+                (emit-expr (car args)))]
+       [else (format "~a.reduce((m, x) => (m[x] = (m[x] || 0) + 1, m), {})"
+                     (emit-expr (car args)))])]
     [(group-by) (if (= n 2)
                  (format "~a.reduce((m, x) => { const k = ~a(x); (m[k] = m[k] || []).push(x); return m; }, {})"
                          (emit-expr (cadr args)) (emit-expr (car args)))
@@ -785,6 +802,27 @@
            [(not (eq? (key-class (arg-type (car rest))) 'native)) #t]
            [(or (null? (cdr rest)) (null? (cddr rest))) #f]
            [else (loop (cddr rest))]))))
+
+;; Collection KIND of a node — for builder dispatch (conj/into pick set vs vec vs
+;; map semantics, which classify-rep's rep tag alone doesn't distinguish: a native
+;; Set and a native vector are both 'native). 'set | 'vec | 'map | 'unknown.
+(define (coll-kind node)
+  (cond
+    [(set-form? node) 'set]
+    [(vec-form? node) 'vec]
+    [(map-form? node) 'map]
+    [(and (call-form? node) (memq (call-form-fn node) '(set hash-set sorted-set))) 'set]
+    [(and (call-form? node) (memq (call-form-fn node) '(vector vec list cons))) 'vec]
+    [(and (call-form? node) (memq (call-form-fn node) '(hash-map sorted-map zipmap frequencies group-by))) 'map]
+    ;; conj/into/disj preserve the KIND of their collection argument
+    [(and (call-form? node) (memq (call-form-fn node) '(conj into disj))
+          (pair? (call-form-args node)))
+     (coll-kind (car (call-form-args node)))]
+    [else (let ([t (arg-type node)])
+            (cond [(set-type? t) 'set]
+                  [(map-type? t) 'map]
+                  [(and (type-app? t) (memq (type-app-ctor t) '(Vec Vector List))) 'vec]
+                  [else 'unknown]))]))
 
 ;; --- HAMT op import tracking (tree-shakeable named imports) -----------------
 ;; Mirrors needs-runtime?: a mutable set of hamt.js export names actually emitted,
