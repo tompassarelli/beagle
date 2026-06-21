@@ -485,39 +485,39 @@
      '(declare-extern xs Any)
      '(defn f [(xs :- Any)] :- Any (seq xs)))
 
-   ;; value equality: = routes to $$bc.equiv (Clojure = semantics), so
-   ;; (not (= a b)) is !($$bc.equiv ...). P2 is unconditional (no compile-time
+   ;; value equality: = routes to $$bc$equiv (Clojure = semantics), so
+   ;; (not (= a b)) is !($$bc$equiv ...). P2 is unconditional (no compile-time
    ;; scalar === fast-path; that's deferred to the type-table-threaded P3).
-   (check-js-contains "(not (= a b)) emits !($$bc.equiv) — value equality"
-     "!($$bc.equiv(a, b))"
+   (check-js-contains "(not (= a b)) emits !($$bc$equiv) — value equality"
+     "!($$bc$equiv(a, b))"
      '(defn f [(a :- Int) (b :- Int)] :- Bool (not (= a b))))
 
-   ;; value-semantic membership: contains? -> $$bc.contains(coll, x). The runtime
+   ;; value-semantic membership: contains? -> $$bc$contains(coll, x). The runtime
    ;; dispatches on coll type (Set equiv-member / Array valid-index / map key);
    ;; replaces the old (x in coll), which broke Sets + value-keyed maps.
-   (check-js-contains "contains? -> $$bc.contains(coll, x) — value membership"
-     "$$bc.contains(coll, k)"
+   (check-js-contains "contains? -> $$bc$contains(coll, x) — value membership"
+     "$$bc$contains(coll, k)"
      '(declare-extern coll Any)
      '(declare-extern k Any)
      '(defn f [] :- Bool (contains? coll k)))
 
    ;; P3 scalar-=== optimization: when BOTH = operands are statically ===-safe
    ;; scalars (per the per-node type table), emit bare === instead of a runtime
-   ;; $$bc.equiv call. Fires for non-leaf keyed operands (computed scalars).
+   ;; $$bc$equiv call. Fires for non-leaf keyed operands (computed scalars).
    (check-js-contains "= of two computed Ints -> bare === (no runtime equiv)"
      "(xs.length === ys.length)"
      '(defn f [xs :- (Vec Int) ys :- (Vec Int)] :- Bool (= (count xs) (count ys))))
    ;; KNOWN GAP (sound fallback): bare var/param refs are symbol AST leaves, which
    ;; store-type! excludes from the type table, so they can't be proven scalar at
-   ;; emit and fall back to $$bc.equiv. Correct, just unoptimized — closing this
+   ;; emit and fall back to $$bc$equiv. Correct, just unoptimized — closing this
    ;; needs an emit-side param/local type env (follow-up). Asserting current
    ;; behavior so the follow-up flips it intentionally.
    (check-js-contains "= of two Int VAR refs -> equiv (var-refs not yet type-keyed)"
-     "$$bc.equiv(a, b)"
+     "$$bc$equiv(a, b)"
      '(defn f [a :- Int b :- Int] :- Bool (= a b)))
    ;; non-scalar operands always use equiv (value semantics).
    (check-js-contains "= of two vectors -> equiv (non-scalar)"
-     "$$bc.equiv(a, b)"
+     "$$bc$equiv(a, b)"
      '(defn f [a :- (Vec Int) b :- (Vec Int)] :- Bool (= a b)))
 
    (check-js-contains "letfn -> IIFE with function decls"
@@ -549,67 +549,67 @@
 
    ;; --- runtime helpers (beagle/core.js) ------------------------------------
 
-   (check-js-contains "range -> $$bc.range"
-     "$$bc.range(10)"
+   (check-js-contains "range -> $$bc$range"
+     "$$bc$range(10)"
      '(defn f [] :- Any (range 10)))
 
-   (check-js-contains "range auto-imports runtime"
-     "import * as $$bc from 'beagle/core.js';"
+   (check-js-contains "range auto-imports runtime (named, tree-shakeable)"
+     "import { range as $$bc$range } from 'beagle/core.js';"
      '(defn f [] :- Any (range 10)))
 
-   (check-js-contains "remove -> $$bc.remove"
-     "$$bc.remove("
+   (check-js-contains "remove -> $$bc$remove"
+     "$$bc$remove("
      '(declare-extern xs Any)
      '(defn f [(xs :- Any)] :- Any (remove nil? xs)))
 
-   (check-js-contains "mapcat -> $$bc.mapcat"
-     "$$bc.mapcat("
+   (check-js-contains "mapcat -> $$bc$mapcat"
+     "$$bc$mapcat("
      '(declare-extern xs Any)
      '(defn f [(xs :- Any)] :- Any (mapcat identity xs)))
 
-   (check-js-contains "every? -> $$bc.every_p"
-     "$$bc.every_p("
+   (check-js-contains "every? -> $$bc$every_p"
+     "$$bc$every_p("
      '(declare-extern xs Any)
      '(defn f [(xs :- Any)] :- Any (every? some? xs)))
 
-   (check-js-contains "keep -> $$bc.keep"
-     "$$bc.keep("
+   (check-js-contains "keep -> $$bc$keep"
+     "$$bc$keep("
      '(declare-extern xs Any)
      '(defn f [(xs :- Any)] :- Any (keep identity xs)))
 
-   (check-js-contains "map-indexed -> $$bc.map_indexed"
-     "$$bc.map_indexed("
+   (check-js-contains "map-indexed -> $$bc$map_indexed"
+     "$$bc$map_indexed("
      '(declare-extern xs Any)
      '(defn f [(xs :- Any)] :- Any (map-indexed + xs)))
 
-   (check-js-contains "assoc-in -> $$bc.assoc_in"
-     "$$bc.assoc_in("
+   (check-js-contains "assoc-in -> $$bc$assoc_in"
+     "$$bc$assoc_in("
      '(declare-extern m Any)
      `(defn f [(m :- Any)] :- Any (assoc-in m ,(cons BRACKET-TAG '(:a :b)) 42)))
 
-   (check-js-contains "update-in -> $$bc.update_in"
-     "$$bc.update_in("
+   (check-js-contains "update-in -> $$bc$update_in"
+     "$$bc$update_in("
      '(declare-extern m Any)
      `(defn f [(m :- Any)] :- Any (update-in m ,(cons BRACKET-TAG '(:a)) inc)))
 
-   (check-js-contains "select-keys -> $$bc.select_keys"
-     "$$bc.select_keys("
+   (check-js-contains "select-keys -> $$bc$select_keys"
+     "$$bc$select_keys("
      '(declare-extern m Any)
      `(defn f [(m :- Any)] :- Any (select-keys m ,(cons BRACKET-TAG '(:a :b)))))
 
-   (check-js-contains "merge-with -> $$bc.merge_with"
-     "$$bc.merge_with("
+   (check-js-contains "merge-with -> $$bc$merge_with"
+     "$$bc$merge_with("
      '(declare-extern a Any)
      '(declare-extern b Any)
      '(defn f [(a :- Any) (b :- Any)] :- Any (merge-with + a b)))
 
-   (check-js-contains "take-while -> $$bc.take_while"
-     "$$bc.take_while("
+   (check-js-contains "take-while -> $$bc$take_while"
+     "$$bc$take_while("
      '(declare-extern xs Any)
      '(defn f [(xs :- Any)] :- Any (take-while pos? xs)))
 
-   (check-js-contains "drop-while -> $$bc.drop_while"
-     "$$bc.drop_while("
+   (check-js-contains "drop-while -> $$bc$drop_while"
+     "$$bc$drop_while("
      '(declare-extern xs Any)
      '(defn f [(xs :- Any)] :- Any (drop-while neg? xs)))
 

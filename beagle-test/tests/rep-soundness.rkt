@@ -153,11 +153,11 @@
        (emit+types (list `(def m :- Any ,(mt ':a 1 (mt ':b 2) 5)))))
      (check-true (string-contains? js "hamtMap(")
                  (format "heterogeneous-key literal must route to HAMT, got:\n~a" js)))
-   (test-case "read through an Any-typed param routes to polymorphic $$bc.get"
+   (test-case "read through an Any-typed param routes to polymorphic $$bc$get"
      (define-values (js tbl prog)
        (emit+types (list `(defn f ((m :- Any)) :- Any (get m ,(mt ':k 1))))))
-     (check-true (string-contains? js "$$bc.get(")
-                 (format "Any-typed coll read must be polymorphic $$bc.get (a native scalar map can flow into an Any read), got:\n~a" js)))
+     (check-true (string-contains? js "$$bc$get(")
+                 (format "Any-typed coll read must be polymorphic $$bc$get (a native scalar map can flow into an Any read), got:\n~a" js)))
 
    ;; ---- (b''') #4 runtime dedup: set-builders produce SETS (not arrays);
    ;;      compound -> hamtSet; count sees through to .size/hamtSetCount ----
@@ -210,11 +210,11 @@
                  (format "scalar-key read on a HAMT map must be hamtMapGet, got:\n~a" js))
      (check-false (regexp-match? #rx"m\\.a" js)
                   (format "must NOT emit native dot-access m.a on a HAMT:\n~a" js)))
-   (test-case "scalar keyword read on an Any-typed param -> polymorphic $$bc.get"
+   (test-case "scalar keyword read on an Any-typed param -> polymorphic $$bc$get"
      (define-values (js tbl prog)
        (emit+types (list `(defn f ((m :- (Map Any Int))) :- Int (get m :a)))))
-     (check-true (string-contains? js "$$bc.get(m,")
-                 (format "scalar-key read on an Any-typed map must be $$bc.get, got:\n~a" js)))
+     (check-true (string-contains? js "$$bc$get(m,")
+                 (format "scalar-key read on an Any-typed map must be $$bc$get, got:\n~a" js)))
 
    ;; ---- (c) read-through-var consistency (the corruption crux) ----
    (test-case "read through let-bound compound map routes to hamtMapGet (not native index)"

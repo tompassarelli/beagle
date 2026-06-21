@@ -1498,33 +1498,40 @@
      ;; Thread the rep-env (binding-name -> 'hmap|'hset) ALONGSIDE js-bound so a
      ;; later binding's value (and the body) can classify a var-ref read of an
      ;; earlier binding consistently with how that binding's value was emitted.
-     (define-values (bind-strs _ignored rep-env-out)
+     (define-values (bind-strs _ignored rep-env-out type-env-out)
        (for/fold ([strs '()]
                   [bound (current-js-bound)]
-                  [rep-env (current-rep-env)])
+                  [rep-env (current-rep-env)]
+                  [type-env (current-type-env)])
                  ([b (in-list bindings)])
          (define val-str (await-async-iife
                            (parameterize ([current-js-bound bound]
-                                          [current-rep-env rep-env])
+                                          [current-rep-env rep-env]
+                                          [current-type-env type-env])
                              (emit-expr (let-binding-value b)))))
          (define new-names (names-from-binding-target (let-binding-name b)))
          (define mutable? (for/or ([nm (in-list new-names)]) (and (memq nm mutated-syms) #t)))
          (define stmts (emit-let-binding-stmts (let-binding-name b) val-str mutable?))
          ;; Only a single-symbol binding names the collection itself; record its
-         ;; rep when non-native (destructures bind extracted sub-values -> native).
+         ;; rep (when non-native) AND its type (so a native-bound var resolves to
+         ;; native, not poly via a missing type — the lite/full $$bc selection
+         ;; depends on this).
          (define name (let-binding-name b))
+         (define bty (and (symbol? name)
+                          (or (let-binding-type b) (node-type (let-binding-value b)))))
          (define rep (if (symbol? name)
-                         (parameterize ([current-rep-env rep-env])
+                         (parameterize ([current-rep-env rep-env] [current-type-env type-env])
                            (classify-rep (let-binding-value b)))
                          'native))
          (values (append strs stmts)
                  (set-union bound (list->set new-names))
                  (if (and (symbol? name) (not (eq? rep 'native)))
                      (hash-set rep-env name rep)
-                     rep-env))))
+                     rep-env)
+                 (if bty (hash-set type-env name bty) type-env))))
      (with-bindings let-names
        (lambda ()
-         (parameterize ([current-rep-env rep-env-out])
+         (parameterize ([current-rep-env rep-env-out] [current-type-env type-env-out])
            (iife (format "~a ~a" (string-join bind-strs " ") (emit-body-return body ""))
                   #:async? has-await))))]
 
@@ -2374,31 +2381,37 @@
        (format "return ~a;" (emit-expr e))
        (let ()
          (define mutated-syms (collect-set!-target-syms body))
-         (define-values (bind-strs _ rep-env-out)
-           (for/fold ([strs '()] [bound (current-js-bound)] [rep-env (current-rep-env)])
+         (define-values (bind-strs _ rep-env-out type-env-out)
+           (for/fold ([strs '()] [bound (current-js-bound)]
+                      [rep-env (current-rep-env)] [type-env (current-type-env)])
                      ([b (in-list bindings)])
              (define val-str (await-async-iife
                                (parameterize ([current-js-bound bound]
-                                              [current-rep-env rep-env])
+                                              [current-rep-env rep-env]
+                                              [current-type-env type-env])
                                  (emit-expr (let-binding-value b)))))
              (define new-names (names-from-binding-target (let-binding-name b)))
              (define mutable? (for/or ([nm (in-list new-names)]) (and (memq nm mutated-syms) #t)))
              (define stmts (emit-let-binding-stmts (let-binding-name b) val-str mutable?))
              (define name (let-binding-name b))
+             (define bty (and (symbol? name)
+                              (or (let-binding-type b) (node-type (let-binding-value b)))))
              (define rep (if (symbol? name)
-                             (parameterize ([current-rep-env rep-env])
+                             (parameterize ([current-rep-env rep-env] [current-type-env type-env])
                                (classify-rep (let-binding-value b)))
                              'native))
              (values (append strs stmts)
                      (set-union bound (list->set new-names))
                      (if (and (symbol? name) (not (eq? rep 'native)))
                          (hash-set rep-env name rep)
-                         rep-env))))
+                         rep-env)
+                     (if bty (hash-set type-env name bty) type-env))))
          (with-bindings let-names
            (lambda ()
              (parameterize ([current-js-inline-scope
                              (set-union (current-js-inline-scope) (list->set let-names))]
-                            [current-rep-env rep-env-out])
+                            [current-rep-env rep-env-out]
+                            [current-type-env type-env-out])
                (string-append
                 (string-join bind-strs (string-append "\n" indent))
                 "\n" indent
