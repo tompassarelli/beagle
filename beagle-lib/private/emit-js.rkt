@@ -121,13 +121,14 @@
              [else #f])]
     [(conj) (cond
               [(< n 2) #f]
-              ;; conj onto a value-set -> fold hamtSetAdd (value dedup)
-              [(eq? (classify-rep (car args)) 'hset)
+              ;; conj a NOT-provably-scalar element onto a set -> value-dedup HAMT
+              ;; (coerce a native/empty/literal set target to hamtSet first).
+              [(conj-hset? args)
                (tally-rep! 'hamt)
-               (for/fold ([acc (emit-expr (car args))]) ([x (in-list (cdr args))])
+               (for/fold ([acc (emit-set-as-hamt (car args))]) ([x (in-list (cdr args))])
                  (use-hamt! "hamtSetAdd")
                  (format "hamtSetAdd(~a, ~a)" acc (emit-expr x)))]
-              ;; conj onto a NATIVE set -> a Set (NOT an array): preserves set-ness
+              ;; conj scalars onto a NATIVE set -> a Set (NOT an array)
               [(eq? (coll-kind (car args)) 'set)
                (tally-rep! 'native)
                (format "new Set([...~a, ~a])"
@@ -207,12 +208,13 @@
     [(sort) (if (= n 1) (format "[...~a].sort()" (emit-expr (car args))) #f)]
     [(into) (cond
               [(not (= n 2)) #f]
-              ;; into a value-set -> fold hamtSetAdd over xs at runtime (value dedup)
-              [(eq? (classify-rep (car args)) 'hset)
+              ;; into a SET whose ELEMENTS are not provably-scalar -> fold
+              ;; hamtSetAdd over xs at runtime (value dedup); coerce the target.
+              [(into-hset? args)
                (use-hamt! "hamtSetAdd")
                (format "~a.reduce((_s, _x) => hamtSetAdd(_s, _x), ~a)"
-                       (emit-expr (cadr args)) (emit-expr (car args)))]
-              ;; into a NATIVE set -> a Set (value-dedups scalars by reference==value)
+                       (emit-expr (cadr args)) (emit-set-as-hamt (car args)))]
+              ;; into a NATIVE set of scalars -> a Set
               [(eq? (coll-kind (car args)) 'set)
                (format "new Set([...~a, ...~a])" (emit-expr (car args)) (emit-expr (cadr args)))]
               [else (format "[...~a, ...~a]" (emit-expr (car args)) (emit-expr (cadr args)))])]
@@ -769,7 +771,8 @@
      (case fn
        [(assoc assoc!) (if (assoc-hmap? args) 'hmap 'native)]
        [(set) (if (set-hset? args) 'hset 'native)]
-       [(conj) (if (eq? (classify-rep (and (pair? args) (car args))) 'hset) 'hset 'native)]
+       [(conj) (if (conj-hset? args) 'hset 'native)]
+       [(into) (if (into-hset? args) 'hset 'native)]
        [(disj dissoc update merge into-map) (classify-rep (and (pair? args) (car args)))]
        [else (type-read-rep (node-type e))])]  ; non-producer call -> its return type's read-rep
     [else (type-read-rep (node-type e))]))
@@ -823,6 +826,30 @@
                   [(map-type? t) 'map]
                   [(and (type-app? t) (memq (type-app-ctor t) '(Vec Vector List))) 'vec]
                   [else 'unknown]))]))
+
+;; conj/into onto a SET produce a value-deduped HAMT set iff the ELEMENT being
+;; added is not provably-scalar (records/compound/Any) OR the target is already a
+;; HAMT set. Routes on the ELEMENT TYPE, not the target's rep — an empty `#{}` or
+;; a native/compound set LITERAL target classifies native, but `(into #{} compound)`
+;; / `(conj #{} compound)` must still value-dedup. (Native `new Set` ref-dedups.)
+(define (conj-hset? args)   ; (conj coll x ...)
+  (and (pair? args)
+       (eq? (coll-kind (car args)) 'set)
+       (or (eq? (classify-rep (car args)) 'hset)
+           (for/or ([x (in-list (cdr args))]) (not (eq? (key-class (arg-type x)) 'native))))))
+(define (into-hset? args)   ; (into target xs)
+  (and (>= (length args) 2)
+       (eq? (coll-kind (car args)) 'set)
+       (or (eq? (classify-rep (car args)) 'hset)
+           (let ([et (seq-elem-type (arg-type (cadr args)))])
+             (and et (not (eq? (key-class et) 'native)))))))
+
+;; Emit a SET target as a hamtSet: pass through if it already is one, else coerce
+;; its elements (a native Set / set literal is iterable -> hamtSet(<it>)).
+(define (emit-set-as-hamt target)
+  (if (eq? (classify-rep target) 'hset)
+      (emit-expr target)
+      (begin (use-hamt! "hamtSet") (format "hamtSet(~a)" (emit-expr target)))))
 
 ;; --- HAMT op import tracking (tree-shakeable named imports) -----------------
 ;; Mirrors needs-runtime?: a mutable set of hamt.js export names actually emitted,

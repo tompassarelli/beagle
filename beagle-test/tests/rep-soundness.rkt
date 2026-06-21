@@ -178,6 +178,25 @@
      (define-values (js tbl prog)
        (emit+types (list `(defn f () :- Int (count (frequencies ,(br (br 1 2) (br 1 2))))))))
      (check-true (string-contains? js "hamtMapAssoc(") (format "frequencies over compound must be hamtMap:\n~a" js)))
+   ;; ELEMENT-driven (not target-rep): an EMPTY or native/literal set target with
+   ;; compound elements must STILL value-dedup. (Residual caught by beagle-2 —
+   ;; routing on the target's rep alone left these native.)
+   (test-case "into an EMPTY set over compound elems -> hamtSetAdd (element-driven)"
+     (define-values (js tbl prog)
+       (emit+types (list `(defn f () :- Int (count (into ,(st) ,(br (br 1 2) (br 1 2) (br 3 4))))))))
+     (check-true (string-contains? js "hamtSetAdd(") (format "into #{} over compound must value-dedup:\n~a" js)))
+   (test-case "into a compound set LITERAL target -> hamtSetAdd (coerce target)"
+     (define-values (js tbl prog)
+       (emit+types (list `(defn f () :- Int (count (into ,(st (br 1 2)) ,(br (br 1 2) (br 3 4))))))))
+     (check-true (string-contains? js "hamtSetAdd(") (format "into a compound set literal must value-dedup:\n~a" js)))
+   (test-case "conj compound onto an empty set -> hamtSetAdd (element-driven)"
+     (define-values (js tbl prog)
+       (emit+types (list `(defn f () :- Int (count (conj ,(st) ,(mt ':a 1)))))))
+     (check-true (string-contains? js "hamtSetAdd(") (format "conj compound onto #{} must value-dedup:\n~a" js)))
+   (test-case "into a VECTOR stays a native array (not over-promoted)"
+     (define-values (js tbl prog)
+       (emit+types (list `(defn f () :- Int (count (into ,(br 1) ,(br 2 3)))))))
+     (check-false (string-contains? js "hamtSet") (format "into a vector must stay native:\n~a" js)))
 
    ;; (b'') a SCALAR keyword read on a HAMT-repped map must still hit the HAMT —
    ;; (get m :a) / (:a m) canonicalize to kw-access (native dot `m.a`); on a
