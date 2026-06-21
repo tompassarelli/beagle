@@ -161,12 +161,21 @@ prefix ⇒ target.**
 Beagle MAY diverge from Clojure at the stdlib/form level — but ONLY through
 Clojure's own extension mechanism, and governed:
 
-- **The vehicle is a macro/fn in a REQUIRED, namespaced lib**
-  (`(require [beagle.x :refer [...]])`), NEVER a bare core form. A required
-  namespaced form is maximally Clojure-coherent (it is how Clojure — and the
-  models trained on it — expect new forms to arrive), so it diverges in
-  *capability* without diverging from the *language*. A divergent form must lower
+- **A divergent form carries a FIXED prefix that is part of its name and shows at
+  EVERY use site** (`js/await`, `nix/…`; a canonical `beagle/…` for an earned
+  cross-target original) — and is **NEVER `:refer`'d into bare usage.** This is the
+  load-bearing rule: the model learns from the *use site*, and `:refer`'d names get
+  hallucinated as universal core forms (it already happens with Clojure's own
+  refer'd names — a model sees bare `split` and assumes it's core, drops the
+  require, uses it where it isn't defined). So `js/await`, never an imported bare
+  `await`. **The firewall is the use site:** bare-at-use = idiomatic Clojure only;
+  anything divergent is prefix-qualified at use. A divergent form must lower
   soundly to **every** emission target (it is sugar over typed IR).
+- **Agents SELF-APPLY this policy — it is not a gate routed through one steward.**
+  The steward (currently beagle-4) owns the *policy*, the periodic *audit*, and the
+  *strategic per-target-surface design* (e.g. "does the `js/` surface make sense").
+  Individual surface decisions agents make themselves against these rules; escalate
+  only a genuine new-surface-area fork, not every form.
 - **Escalation hierarchy:** target-specific behavior → target prefix
   (`js/`, `nix/`); a cross-target Beagle-original form → a required `beagle.*`
   namespace, promoted *from* a per-target prefix only when it earns it. **The bare
