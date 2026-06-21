@@ -829,4 +829,46 @@
      "a = 10"
      `(defn f ((m :- Any)) :- Any
         (let (,(mt ':keys (br 'a) ':or (mt 'a 10)) m) a)))
+
+   ;; --- P3 representation selection (compound-key -> value-keyed HAMT) -------
+
+   (check-js-contains "compound-key map literal -> hamtMap"
+     "hamtMap(["
+     `(def m :- Any ,(mt (mt ':a 1) ':found)))
+
+   (check-js-contains "assoc with compound key -> hamtMapAssoc"
+     "hamtMapAssoc("
+     `(defn f () :- Any (assoc ,(mt) ,(mt ':k 1) "a")))
+
+   (check-js-contains "get through let-bound compound map -> hamtMapGet"
+     "hamtMapGet(m,"
+     `(defn f () :- Keyword
+        (let (m ,(mt (mt ':a 1) ':x)) (get m ,(mt ':a 1)))))
+
+   (check-js-contains "(set [compound]) -> hamtSet"
+     "hamtSet("
+     `(defn f () :- Any (set ,(br (br 1 2) (br 1 2)))))
+
+   (check-js-contains "count of value-set -> hamtSetCount"
+     "hamtSetCount("
+     `(defn f () :- Int (count (set ,(br (br 1 2))))))
+
+   (check-js-contains "contains? on compound-key map -> hamtMapHas"
+     "hamtMapHas("
+     `(defn f () :- Bool
+        (let (m ,(mt (mt ':a 1) ':x)) (contains? m ,(mt ':a 1)))))
+
+   (check-js-contains "HAMT ops imported as tree-shakeable named imports"
+     "from 'beagle/hamt.js'"
+     `(def m :- Any ,(mt (mt ':a 1) ':found)))
+
+   ;; NEGATIVE: a scalar-keyed map literal must STAY native (no over-promotion).
+   (test-case "scalar-key map literal stays native (no hamtMap)"
+     (define result
+       (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+                      `(def m :- Any ,(mt ':a 1)))))
+     (check-true (string-contains? result "{a: 1}")
+                 (format "expected native object literal in:\n~a" result))
+     (check-false (string-contains? result "hamtMap")
+                  (format "scalar-key map must NOT route to HAMT:\n~a" result)))
  ))
