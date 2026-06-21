@@ -177,12 +177,13 @@ Clojure's own extension mechanism, and governed:
   Individual surface decisions agents make themselves against these rules; escalate
   only a genuine new-surface-area fork, not every form.
 - **Escalation hierarchy:** target-specific behavior → target prefix
-  (`js/`, `nix/`); a cross-target Beagle-original form → a required `beagle.*`
-  namespace, promoted *from* a per-target prefix only when it earns it. **The bare
+  (`js/`, `nix/`); a cross-target Beagle-original form → a canonical `beagle/`
+  prefix (`beagle/foo` — fixed, qualified at every use, never `:refer`'d),
+  promoted *from* a per-target prefix only when it earns it. **The bare
   top-level namespace stays Clojure-only, forever — nothing is ever promoted to a
   bare global form** (that breaches the hallucination firewall above).
 - **Admission bar — high + DEMAND-DRIVEN.** Default REJECT. A form earns a
-  `beagle.*` home only after the *corpus* proves the pattern recurs AND has no
+  `beagle/` home only after the *corpus* proves the pattern recurs AND has no
   clean existing Clojure expression. "Nice in language X" is not enough — keep it
   a local macro. Every admitted form is a small permanent cost outside the model's
   priors.
