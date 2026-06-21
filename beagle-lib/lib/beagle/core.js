@@ -318,6 +318,22 @@ export function distinct_equiv(coll) {
   return out;
 }
 
+export function count(x) {
+  // Clojure `count` over Beagle EMITTED JS representations, rep-dispatched at
+  // runtime — for operands whose collection rep isn't statically known (the
+  // var-ref/leaf case, parallel to `contains`). Native: array/string -> length;
+  // Set/Map -> size; plain object (map/record) -> own-key count. Persistent: a
+  // HAMT wrapper ({_bg:'hamtMap'|'hamtSet', count}) carries its count as a field,
+  // so this reads it directly — core.js never imports hamt.js (stays import-free
+  // and tree-shakeable). nil -> 0.
+  if (x == null) return 0;
+  if (Array.isArray(x)) return x.length;
+  if (typeof x === "string") return x.length;
+  if (x instanceof Map || x instanceof Set) return x.size;
+  if (x._bg === "hamtMap" || x._bg === "hamtSet") return x.count;
+  return Object.keys(x).length;
+}
+
 function mix(h, c) {
   // order-sensitive 32-bit combine.
   return ((h << 5) - h + c) | 0;
