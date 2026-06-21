@@ -193,8 +193,32 @@
     [else
      (error 'beagle "unexpected dispatch sequence: #~a" next)]))
 
+;; Metadata-prefix reader — MUST mirror reader-impl.rkt's meta-reader. There are
+;; two beagle readtables (this one drives read-beagle-syntax → check --agent /
+;; build / repair loop / hooks; reader-impl.rkt's drives #lang module loading).
+;; A reader feature added to one but not the other silently diverges the two
+;; parse entries (this `^` macro was added to reader-impl first and `^:dynamic`
+;; read as a bare symbol here → "malformed def" on every dynamic-var file under
+;; --agent/build). Keep them in sync. `^META FORM` → (#%meta META FORM).
+(define (meta-reader-local ch port src line col pos)
+  (define meta
+    (parameterize ([current-readtable beagle-readtable])
+      (if src (read-syntax src port) (read port))))
+  (when (eof-object? meta)
+    (error 'beagle "unexpected EOF after `^` (metadata needs a value and a target form)"))
+  (define form
+    (parameterize ([current-readtable beagle-readtable])
+      (if src (read-syntax src port) (read port))))
+  (when (eof-object? form)
+    (error 'beagle "unexpected EOF after `^` metadata (needs a target form to attach to)"))
+  (define result (list '#%meta meta form))
+  (if src
+    (datum->syntax #f result (vector src line col pos #f))
+    result))
+
 (define beagle-readtable
   (make-readtable #f
+    #\^ 'terminating-macro meta-reader-local
     #\{ 'terminating-macro curly-reader-local
     #\} 'terminating-macro (lambda (ch port src line col pos)
                              (error 'beagle "unexpected `}`"))

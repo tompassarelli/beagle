@@ -2,6 +2,7 @@
 
 (require rackunit
          (for-syntax racket/base)
+         racket/file
          beagle/private/parse
          beagle/private/types
          beagle/private/macros)
@@ -1595,3 +1596,39 @@
                   (L 'let (br (br 'a (br 'b 'c)) (br 1 (br 2 3)))
                      (L '+ 'a 'b 'c)))))
   (check-true (let-form? f)))
+
+;; --- read-beagle-syntax: `^:dynamic` via the parse.rkt readtable ---------
+;; Regression: parse.rkt has its OWN beagle-readtable (drives read-beagle-syntax
+;; → check --agent / build / repair loop / hooks), SEPARATE from reader-impl's
+;; (#lang module loading). The `^` metadata macro was first added only to
+;; reader-impl, so `^:dynamic` read as a bare symbol here → "malformed def" on
+;; every dynamic-var file under --agent/build (fram-2 #18). Both readtables must
+;; read `^META FORM` → (#%meta META FORM). This drives the EXACT broken path.
+(test-case "read-beagle-syntax reads ^:dynamic (typed) via the parse.rkt readtable"
+  (define tmp (make-temporary-file "beagle-dynread-~a.bclj"))
+  (dynamic-wind
+    void
+    (lambda ()
+      (call-with-output-file tmp #:exists 'truncate
+        (lambda (out)
+          (display (string-append
+                    "#lang beagle/clj\n"
+                    "(def ^:dynamic *x* :- Int 0)\n"
+                    "(defn f [n :- Int] :- Int (binding [*x* n] *x*))\n")
+                   out)))
+      (define stxs (read-beagle-syntax tmp))
+      (define datums (map syntax->datum stxs))
+      ;; must read as (#%meta :dynamic *x*), not bare ^:dynamic
+      (check-true
+       (for/or ([d (in-list datums)])
+         (and (pair? d) (eq? (car d) 'def)
+              (pair? (cdr d)) (pair? (cadr d)) (eq? (car (cadr d)) '#%meta)))
+       "^:dynamic did not read as #%meta in read-beagle-syntax")
+      ;; and parse-program marks the def dynamic?
+      (define forms (program-forms (parse-program stxs #:source-path (path->string tmp))))
+      (define dyndef
+        (for/or ([f (in-list forms)])
+          (and (def-form? f) (eq? (def-form-name f) '*x*) f)))
+      (check-true (and dyndef (def-form-dynamic? dyndef) #t)
+                  "def *x* not marked dynamic via read-beagle-syntax path"))
+    (lambda () (when (file-exists? tmp) (delete-file tmp)))))
