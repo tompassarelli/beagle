@@ -131,13 +131,13 @@
   (define next (peek-char port))
   (cond
     ;; #<<TAG heredoc reader: HARD-REMOVED per audit row 5. Heredocs were
-    ;; never used in any user-facing .bgl/.bnix corpus; tilde-strings
-    ;; (`~"..."` and `~''...''`) cover multi-line Nix strings. The
+    ;; never used in any user-facing .bgl/.bnix corpus; the `(s …)` / `(ms …)`
+    ;; interpolation forms cover single- and multi-line Nix strings. The
     ;; `#%block-string` AST node remains for internal use (fmt-form
     ;; sometimes receives explicit `(#%block-string ...)` lists in tests).
     [(and (char? next) (char=? next #\<))
      (error 'beagle
-            "#<<TAG heredoc reader is not supported. Use a tilde-string `~\"...\"` (single line) or `~''...''` (multi-line) instead.")]
+            "#<<TAG heredoc reader is not supported. Use `(s \"…\" expr …)` (single line) or `(ms \"…\" …)` (multi-line) for Nix strings instead.")]
     ;; Reader conditional: #?(:tag form ...) or #?@(:tag form ...)
     [(and (char? next) (char=? next #\?))
      (read-char port)

@@ -171,23 +171,26 @@
   (check-true (nix-interpolated-string? f))
   (check-equal? (length (nix-interpolated-string-parts f)) 3))
 
-;; --- ~"..." reader ---------------------------------------------------------
+;; --- (s …) interpolation -----------------------------------------------------
+;; The `~"…"` tilde-string sugar was removed (#25 — `~` is now uniform unquote
+;; across all targets); `(s …)` is the interpolation surface (what the tilde
+;; reader desugared to). These parse to the same nix-interpolated-string AST.
 
-(test-case "~\"hi ${name}!\" reader desugars to (s ...)"
-  (define f (first-form "~\"hi ${name}!\""))
+(test-case "(s \"hi \" name \"!\") parses to nix-interpolated-string"
+  (define f (first-form "(s \"hi \" name \"!\")"))
   (check-true (nix-interpolated-string? f))
   (define parts (nix-interpolated-string-parts f))
   (check-equal? (length parts) 3)
   (check-equal? (car parts) "hi ")
   (check-equal? (caddr parts) "!"))
 
-(test-case "~\"no interp\" produces single literal"
-  (define f (first-form "~\"no interp\""))
+(test-case "(s \"no interp\") produces single literal"
+  (define f (first-form "(s \"no interp\")"))
   (check-true (nix-interpolated-string? f))
   (check-equal? (nix-interpolated-string-parts f) '("no interp")))
 
-(test-case "~\"a ${(+ x 1)} b\" parses arbitrary expr"
-  (define f (first-form "~\"a ${(+ x 1)} b\""))
+(test-case "(s \"a \" (+ x 1) \" b\") parses arbitrary expr"
+  (define f (first-form "(s \"a \" (+ x 1) \" b\")"))
   (check-true (nix-interpolated-string? f))
   (define parts (nix-interpolated-string-parts f))
   (check-equal? (length parts) 3)

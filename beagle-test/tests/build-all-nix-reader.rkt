@@ -1,14 +1,11 @@
 #lang racket/base
 
 ;; Regression: read-beagle-syntax (the path used by beagle-build-all and
-;; bin/firn-build) must honour the target's reader extensions. Specifically,
-;; a .bnix file containing ~''…'' must read cleanly via this path — not
-;; just via bin/beagle-build, which loads the .bnix as a #lang module and
-;; therefore always picks up the right reader.
-;;
-;; Before v0.15.3, read-beagle-syntax hard-coded beagle-readtable (the
-;; base readtable, no `~` support); the build-all path failed on any
-;; ~''…'' body that contained the first `}`, `#`, `|`, etc.
+;; bin/firn-build) must read nix .bnix modules cleanly. nix string
+;; interpolation is now the `(ms …)` / `(s …)` forms (the `~''…''`/`~"…"`
+;; tilde-string sugar was removed in #25 — `~` is uniform unquote across all
+;; targets). A `(ms …)` body with shell metachars (`}`, `|`, `#`, `${…}`, `''`)
+;; must read cleanly — they're ordinary string content now, no special reader.
 
 (require rackunit
          racket/file
@@ -23,22 +20,19 @@
     (lambda () (display contents)))
   p)
 
-(test-case "read-beagle-syntax reads ~''…'' bodies with shell metachars"
-  ;; This body contains every char that previously crashed the base
-  ;; reader: `}`, `|`, `#`, `.`, `${…}`, `''${…}`, `''` triple-quote.
+(test-case "read-beagle-syntax reads (ms …) bodies with shell metachars"
+  ;; A (ms …) body whose string parts contain shell metachars (`}`, `|`, `#`,
+  ;; `$`, `''`) — all ordinary string content now — must read cleanly.
   (define src
     (string-append
      "#lang beagle/nix\n"
      "(ns t)\n"
-     "(def x : Any\n"
-     "  ~''\n"
-     "    name=$(echo \"\" | rofi -dmenu)\n"
-     "    [ -n \"$name\" ] && echo \"got $name\"\n"
-     "    #!/bin/sh inside body\n"
-     "    cp \"''${THEMES[@]}\" target\n"
-     "    pair = '''';\n"
-     "    real = ${pkgs.bash}/bin/bash;\n"
-     "    '')\n"))
+     "(def x :- Any\n"
+     "  (ms \"name=$(echo | rofi -dmenu)\"\n"
+     "      \"[ -n \\\"$name\\\" ] && echo \\\"got $name\\\"\"\n"
+     "      \"#!/bin/sh inside body\"\n"
+     "      \"cp target/{a,b}\"\n"
+     "      (s \"real = \" pkgs.bash \"/bin/bash;\")))\n"))
   (define p (mk-tmp-bnix src))
   (define stxs
     (with-handlers ([exn:fail? (lambda (e) e)])
