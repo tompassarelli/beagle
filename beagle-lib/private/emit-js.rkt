@@ -223,7 +223,7 @@
     [(some) (if (= n 2)
              (format "~a.find(~a) ?? null" (emit-expr (cadr args)) (emit-expr (car args)))
              #f)]
-    [(distinct) (if (= n 1) (format "[...new Set(~a)]" (emit-expr (car args))) #f)]
+    [(distinct) (if (= n 1) (begin (use-runtime!) (format "$$bc.distinct_equiv(~a)" (emit-expr (car args)))) #f)]
     [(flatten) (if (= n 1) (format "~a.flat(Infinity)" (emit-expr (car args))) #f)]
     [(not-empty) (if (= n 1)
                      (format "(() => { const _x = ~a; return _x.length > 0 ? _x : null; })()" (emit-expr (car args)))
@@ -1264,6 +1264,26 @@
        [(and (set-member? (current-js-scalar-fns) fn-sym)
              (= 1 (length args)))
         (emit-expr (car args))]
+       ;; Value-equality family routes to the runtime $$bc.equiv (Clojure =
+       ;; semantics: structural, recursive over vectors/sets/maps/records).
+       ;; `identical?` deliberately does NOT come here — it is reference
+       ;; identity by design and stays `===` via the generic js-infix? branch
+       ;; below. Variadic = matches Clojure: all consecutive pairs equal,
+       ;; short-circuiting with &&. not= is `(not (apply = args))`.
+       [(and (memq fn-sym '(= ==)) (>= (length args) 2))
+        (use-runtime!)
+        (define strs (map emit-expr args))
+        (define pairs
+          (for/list ([a (in-list strs)] [b (in-list (cdr strs))])
+            (format "$$bc.equiv(~a, ~a)" a b)))
+        (format "(~a)" (string-join pairs " && "))]
+       [(and (eq? fn-sym 'not=) (>= (length args) 2))
+        (use-runtime!)
+        (define strs (map emit-expr args))
+        (define pairs
+          (for/list ([a (in-list strs)] [b (in-list (cdr strs))])
+            (format "$$bc.equiv(~a, ~a)" a b)))
+        (format "(!(~a))" (string-join pairs " && "))]
        [(and (js-infix? fn-sym) (>= (length args) 2))
         (define op (hash-ref JS-INFIX-OPS fn-sym))
         (format "(~a)" (string-join (map emit-expr args) (format " ~a " op)))]

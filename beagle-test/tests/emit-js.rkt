@@ -478,8 +478,11 @@
      '(declare-extern xs Any)
      '(defn f [(xs :- Any)] :- Any (seq xs)))
 
-   (check-js-contains "(not (= a b)) emits !(===)"
-     "!(a === b)"
+   ;; value equality: = routes to $$bc.equiv (Clojure = semantics), so
+   ;; (not (= a b)) is !($$bc.equiv ...). P2 is unconditional (no compile-time
+   ;; scalar === fast-path; that's deferred to the type-table-threaded P3).
+   (check-js-contains "(not (= a b)) emits !($$bc.equiv) — value equality"
+     "!($$bc.equiv(a, b))"
      '(defn f [(a :- Int) (b :- Int)] :- Bool (not (= a b))))
 
    (check-js-contains "letfn -> IIFE with function decls"
