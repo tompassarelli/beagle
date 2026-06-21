@@ -12,7 +12,7 @@
          "query.rkt"
          "extensions.rkt"
          ;; #33 datum-IR: build straight from claim triples, skipping the text trip
-         (only-in "claims-roundtrip.rkt" edn-triples->datum read-edn-triples))
+         (only-in "claims-roundtrip.rkt" edn-triples->syntax read-edn-triples))
 
 (define (extension-for-target target)
   (case target
@@ -139,10 +139,14 @@
                       (eprintf "  ~a: ~a\n" triples-path (exn-message e)))
                   #f)])
     (define src-path (or (edn-file-source triples-path) triples-path))
-    (define wrapped (edn-triples->datum (read-edn-triples triples-path)))
-    (define form-datums
-      (if (and (pair? wrapped) (eq? (car wrapped) 'beagle-file)) (cdr wrapped) wrapped))
-    (define stxs (map (lambda (d) (datum->syntax #f d)) form-datums))
+    ;; srcloc source must match read-beagle-syntax's (simplify-path∘complete-path)
+    ;; so the emitted ^{:line :file} provenance is byte-identical to the text path.
+    (define srcloc-source (simplify-path (path->complete-path src-path)))
+    (define wrapper (edn-triples->syntax (read-edn-triples triples-path) srcloc-source))
+    (define forms (if wrapper (syntax->list wrapper) '()))
+    (define stxs
+      (if (and (pair? forms) (eq? (syntax->datum (car forms)) 'beagle-file))
+          (cdr forms) forms))
     (build-from-stxs stxs src-path out-dir json? warn? in-place?)))
 
 (define (expand-args args)

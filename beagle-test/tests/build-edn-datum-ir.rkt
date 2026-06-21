@@ -17,7 +17,9 @@
 (require rackunit
          racket/file
          beagle/private/parse
-         (only-in beagle/private/claims-roundtrip datum->edn-lines edn-triples->datum))
+         (only-in beagle/private/claims-roundtrip
+                  datum->edn-lines edn-triples->datum
+                  stx->edn-lines edn-triples->syntax))
 
 ;; The forms the READER produces for a module.
 (define (reader-forms src)
@@ -63,3 +65,32 @@
   (check-equal? (length via-claims) (length reader))
   (for ([r (in-list reader)] [c (in-list via-claims)])
     (check-equal? c r (format "form drifted through claims: ~s" r))))
+
+;; --- slice-2: srcloc claims carry through (closes the slice-1 srcloc gap) -----
+;; stx->claims emits per-node line/col/pos/span; edn-triples->syntax rebuilds
+;; SYNTAX with those positions. So --build-edn emits byte-identical ^{:line :file}
+;; provenance + blame to the text path (verified end-to-end at the CLI; here we
+;; pin the unit invariant: pos survives the claim round-trip, datum unchanged).
+(define (datum-ir-syntax-forms src-path)
+  (define stxs (read-beagle-syntax src-path))
+  (define lines (stx->edn-lines (datum->syntax #f (cons 'beagle-file stxs))))
+  (define triples (map (lambda (l) (read (open-input-string l))) lines))
+  (define wrapper (edn-triples->syntax triples (string->symbol "test-src")))
+  (values stxs (cdr (syntax->list wrapper))))   ; drop (beagle-file …) head
+
+(test-case "slice-2: syntax-positions survive the claim round-trip (and datum unchanged)"
+  (define tmp (make-temporary-file "edn33s-~a.bclj"))
+  (dynamic-wind
+   void
+   (lambda ()
+     (call-with-output-file tmp (lambda (o) (display SRC o)) #:exists 'truncate/replace)
+     (define-values (reader-stxs ir-stxs) (datum-ir-syntax-forms tmp))
+     (check-equal? (length ir-stxs) (length reader-stxs))
+     (for ([r (in-list reader-stxs)] [c (in-list ir-stxs)])
+       ;; datum identity preserved
+       (check-equal? (syntax->datum c) (syntax->datum r))
+       ;; the load-bearing srcloc field (codepoint pos) carried through
+       (check-equal? (syntax-position c) (syntax-position r)
+                     (format "pos dropped for: ~s" (syntax->datum r)))
+       (check-equal? (syntax-span c) (syntax-span r))))
+   (lambda () (delete-file tmp))))

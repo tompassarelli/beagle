@@ -23,7 +23,7 @@
          "parse.rkt")
 
 (provide datum->claims claims->datum datum->src datum->pretty edn-triples->datum read-edn-triples
-         datum->edn-lines)
+         datum->edn-lines stx->edn-lines stx->claims edn-triples->syntax)
 
 ;; --- datum -> claims --------------------------------------------------------
 (define (split-improper d)            ; pair -> (values proper-prefix tail) ; tail='() if proper
@@ -64,6 +64,62 @@
       [(number? d)  (leaf "number" d)]
       [else         (leaf "other" (format "~s" d))]))
   (define root (walk d))
+  (values root (reverse out)))
+
+;; --- #33 slice-2: syntax-walking claims (datum->claims + per-node srcloc) -----
+;; Same structure/ids as datum->claims, but walks the SYNTAX so each node also
+;; carries line/col/pos/span claims (the load-bearing one is `pos`). Source is
+;; the module's @file header, NOT per-node. All four are OPTIONAL: a node missing
+;; a field (synthetic syntax, e.g. the (beagle-file …) wrapper) emits none, and
+;; the build side degrades to #f — so a srcloc-free dump still builds (slice-1).
+(define (stx->claims top-stx)
+  (define out '())
+  (define n 0)
+  (define (fresh!) (set! n (add1 n)) n)
+  (define (emit! s p o) (set! out (cons (list s p o) out)))
+  (define (srcloc! id stx)
+    (when (syntax? stx)
+      (let ([ln (syntax-line stx)] [cl (syntax-column stx)]
+            [ps (syntax-position stx)] [sp (syntax-span stx)])
+        (when ln (emit! id "line" ln))
+        (when cl (emit! id "col" cl))
+        (when ps (emit! id "pos" ps))
+        (when sp (emit! id "span" sp)))))
+  (define (leaf k v stx) (define id (fresh!)) (emit! id "kind" k) (emit! id "v" v) (srcloc! id stx) id)
+  (define (seq! k kid-stxs tail-stx stx)
+    (define id (fresh!))
+    (emit! id "kind" k)
+    (for ([x (in-list kid-stxs)] [i (in-naturals)])
+      (define cid (walk x))
+      (emit! id (string-append "f" (number->string i)) cid)
+      (emit! id "child" cid))
+    (when tail-stx
+      (define tid (walk tail-stx))
+      (emit! id "tail" tid)
+      (emit! id "child" tid))
+    (srcloc! id stx)
+    id)
+  (define (walk stx)
+    (define e (if (syntax? stx) (syntax-e stx) stx))
+    (cond
+      [(null? e)    (define id (fresh!)) (emit! id "kind" "nil") (srcloc! id stx) id]
+      [(pair? e)
+       (define kids (syntax->list stx))         ; proper list → child stxs, else #f
+       (if kids
+           (seq! "list" kids #f stx)
+           (let collect ([s e] [acc '()])       ; improper: proper prefix + tail
+             (if (pair? s)
+                 (collect (let ([d (cdr s)]) (if (syntax? d) (syntax-e d) d)) (cons (car s) acc))
+                 (seq! "list" (reverse acc) s stx))))]
+      [(vector? e) (seq! "vector" (vector->list e) #f stx)]
+      [(symbol? e)  (leaf "symbol" e stx)]
+      [(string? e)  (leaf "string" e stx)]
+      [(keyword? e) (leaf "keyword" e stx)]
+      [(boolean? e) (leaf "bool" e stx)]
+      [(char? e)    (leaf "char" e stx)]
+      [(number? e)  (leaf "number" e stx)]
+      [else         (leaf "other" (format "~s" e) stx)]))
+  (define root (walk top-stx))
   (values root (reverse out)))
 
 ;; --- claims -> datum (the reverse path that did not exist) ------------------
@@ -150,6 +206,10 @@
 (define (datum->edn-lines d)
   (define-values (root triples) (datum->claims d))
   (triples->edn-lines triples))
+;; #33 slice-2: serialize a SYNTAX tree to EDN lines (with srcloc claims).
+(define (stx->edn-lines stx)
+  (define-values (root triples) (stx->claims stx))
+  (triples->edn-lines triples))
 
 ;; shared triple helpers (used by both emit and render paths) -----------------
 (define (triples->props triples)        ; subj -> (mutable hash pred -> obj)
@@ -175,10 +235,17 @@
 ;; reconstruct a datum from EDN triples (each a list (subj pred obj)) ---------
 ;; root = the one subject never referenced as a child — robust even after Fram
 ;; re-mints all ids on its way through the store.
+;; A predicate naming a STRUCTURAL child edge (fN / child / tail) — the only
+;; numeric-valued claims that are node REFS. srcloc claims (line/col/pos/span) are
+;; ALSO numeric but are NOT refs; ref-detection must exclude them or it mistakes a
+;; `pos`/`line` value for a child node id (#33 slice-2).
+(define (ref-pred? p)
+  (or (equal? p "child") (equal? p "tail") (regexp-match? #rx"^f[0-9]+$" p)))
+
 (define (edn-root props)                  ; the structural wrapper (subject never referenced)
   (define refs (make-hash))
   (for ([(s h) (in-hash props)])
-    (for ([(p o) (in-hash h)]) (when (number? o) (hash-set! refs o #t))))
+    (for ([(p o) (in-hash h)]) (when (and (number? o) (ref-pred? p)) (hash-set! refs o #t))))
   (define cands (for/list ([s (in-list (hash-keys props))] #:unless (hash-ref refs s #f)) s))
   ;; prefer the list/vector wrapper over any stray orphan, so reconstruction is
   ;; robust even if an edge was mis-stored (don't depend on hash-key order).
@@ -206,6 +273,37 @@
 (define (edn-triples->datum triples)
   (define props (triples->props triples))
   ((make-edn-build props) (edn-root props)))
+
+;; #33 slice-2: like edn-triples->datum but returns SYNTAX, attaching each node's
+;; line/col/pos/span claims as its srcloc (source = the module @file, passed in).
+;; A node with no srcloc claims gets #f srcloc — so srcloc-free dumps still build
+;; (graceful slice-1 behavior). datum->syntax preserves inner-node srclocs, so the
+;; whole tree carries positions → --build-edn restores blame + ^{:line} emit.
+(define (edn-triples->syntax triples [src #f])
+  (define props (triples->props triples))
+  (define (num h k) (let ([v (hash-ref h k #f)]) (and (number? v) v)))
+  (define (loc-of h)
+    (define ps (num h "pos")) (define ln (num h "line"))
+    (and (or ps ln) (vector src ln (num h "col") ps (num h "span"))))
+  (define (build id)
+    (define h (hash-ref props id))
+    (define k (hash-ref h "kind"))
+    (define loc (loc-of h))
+    (cond
+      [(member k '("symbol" "string" "keyword" "bool" "char" "number" "other"))
+       (datum->syntax #f (decode-leaf k (hash-ref h "v")) loc)]
+      [(equal? k "nil") (datum->syntax #f '() loc)]
+      [(or (equal? k "list") (equal? k "vector"))
+       (define elems
+         (let loop ([i 0] [acc '()])
+           (define key (string-append "f" (number->string i)))
+           (if (hash-has-key? h key) (loop (add1 i) (cons (build (hash-ref h key)) acc)) (reverse acc))))
+       (define tail (if (hash-has-key? h "tail") (build (hash-ref h "tail")) '()))
+       (define lst (foldr cons tail elems))   ; list of syntax (inner srclocs preserved)
+       (datum->syntax #f (if (equal? k "vector") (list->vector lst) lst) loc)]
+      [else (error 'edn->syntax "unknown kind ~a" k)]))
+  (define root (edn-root props))
+  (and root (build root)))
 
 ;; --- Turtle #6: read comment claims back off the triples (render side) ------
 (define (comment-text props cid)          ; concatenate seg0,seg1,... `v`s -> the comment lexeme
@@ -501,9 +599,13 @@
 ;; then append comment claims (Turtle #6) attached to the form nodes by srcloc.
 (define (emit-edn-file path)
   (define stxs (read-beagle-syntax path))
-  (define forms (map syntax->datum stxs))
   (define src (file->string path))
-  (define-values (root triples) (datum->claims (cons 'beagle-file forms)))
+  ;; #33 slice-2: walk the SYNTAX (not syntax->datum) so each node carries its
+  ;; line/col/pos/span as claims. The (beagle-file …) wrapper + its head symbol
+  ;; are synthetic (no srcloc); the form stxs keep theirs (datum->syntax preserves
+  ;; inner syntax). Structure/ids are identical to datum->claims, so the comment
+  ;; machinery + root-kids below are unchanged.
+  (define-values (root triples) (stx->claims (datum->syntax #f (cons 'beagle-file stxs))))
   (define props (triples->props triples))
   (define root-kids (ordered-fN props root))      ; [beagle-file-sym, form0-node, form1-node, ...]
   (define (form-node i) (list-ref root-kids (add1 i)))
