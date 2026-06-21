@@ -162,7 +162,7 @@ Beagle MAY diverge from Clojure at the stdlib/form level — but ONLY through
 Clojure's own extension mechanism, and governed:
 
 - **A divergent form carries a FIXED prefix that is part of its name and shows at
-  EVERY use site** (`js/await`, `nix/…`; a canonical `beagle/…` for an earned
+  EVERY use site** (`js/await`, `nix/…`; a canonical `bgl/…` for an earned
   cross-target original) — and is **NEVER `:refer`'d into bare usage.** This is the
   load-bearing rule: the model learns from the *use site*, and `:refer`'d names get
   hallucinated as universal core forms (it already happens with Clojure's own
@@ -177,13 +177,13 @@ Clojure's own extension mechanism, and governed:
   Individual surface decisions agents make themselves against these rules; escalate
   only a genuine new-surface-area fork, not every form.
 - **Escalation hierarchy:** target-specific behavior → target prefix
-  (`js/`, `nix/`); a cross-target Beagle-original form → a canonical `beagle/`
-  prefix (`beagle/foo` — fixed, qualified at every use, never `:refer`'d),
+  (`js/`, `nix/`); a cross-target Beagle-original form → a canonical `bgl/`
+  prefix (`bgl/foo` — fixed, qualified at every use, never `:refer`'d),
   promoted *from* a per-target prefix only when it earns it. **The bare
   top-level namespace stays Clojure-only, forever — nothing is ever promoted to a
   bare global form** (that breaches the hallucination firewall above).
 - **Admission bar — high + DEMAND-DRIVEN.** Default REJECT. A form earns a
-  `beagle/` home only after the *corpus* proves the pattern recurs AND has no
+  `bgl/` home only after the *corpus* proves the pattern recurs AND has no
   clean existing Clojure expression. "Nice in language X" is not enough — keep it
   a local macro. Every admitted form is a small permanent cost outside the model's
   priors.
