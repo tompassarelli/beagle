@@ -59,6 +59,7 @@
              "claims-render-roundtrip.rkt" ; #17 — renderer reconstructs #lang from leading (define-target)
              "defmacro.rkt"
              "diagnostic-kind.rkt"
+             "expand-tool.rkt"          ; #32 — `beagle expand` reads+renders the full surface (canonical reader)
              "error-explanation.rkt"    ; in-compiler explanation registry
              "exhaustive-match-fix.rkt" ; missing-case clause-skeleton repair fix
              "repair-apply.rkt"         ; beagle-repair clause-insertion (python unit tests)

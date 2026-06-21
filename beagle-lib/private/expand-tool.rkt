@@ -13,7 +13,9 @@
          "parse.rkt"
          "macros.rkt"
          "types.rkt"
-         "tags.rkt")
+         ;; THE single beagle readtable — no bespoke subset reader to drift
+         ;; (#19/#32). Datum mode (plain read) gives container/reader tags as data.
+         (only-in "../lang/reader-impl.rkt" beagle-readtable))
 
 ;; --- entry ----------------------------------------------------------------
 
@@ -68,82 +70,13 @@
          (displayln (datum->beagle-src expanded))
          (newline)]))))
 
-;; Minimal readtable for expand-tool: handles #"...", {...}, and #{...}.
-(define (read-regex port)
-  (let loop ([acc '()])
-    (define c (read-char port))
-    (cond
-      [(eof-object? c) (error 'beagle "unterminated regex literal")]
-      [(char=? c #\")  (list->string (reverse acc))]
-      [(char=? c #\\)
-       (define next (read-char port))
-       (cond
-         [(eof-object? next) (error 'beagle "unterminated regex literal")]
-         [else (loop (cons next (cons #\\ acc)))])]
-      [else (loop (cons c acc))])))
-
-(define (skip-ws-expand port)
-  (let loop ()
-    (define c (peek-char port))
-    (when (and (char? c) (char-whitespace? c))
-      (read-char port)
-      (loop))))
-
-(define (read-until-brace-expand port)
-  (let loop ([acc '()])
-    (skip-ws-expand port)
-    (define c (peek-char port))
-    (cond
-      [(eof-object? c) (error 'beagle "unterminated map/set literal")]
-      [(char=? c #\})
-       (read-char port)
-       (reverse acc)]
-      [else
-       (define val (read port))
-       (loop (cons val acc))])))
-
-(define expand-readtable
-  (make-readtable #f
-    #\{ 'terminating-macro
-         (lambda (ch port src line col pos)
-           (define items (read-until-brace-expand port))
-           (define result (cons MAP-TAG items))
-           (if src (datum->syntax #f result (vector src line col pos #f)) result))
-    #\} 'terminating-macro
-         (lambda (ch port src line col pos) (error 'beagle "unexpected `}`"))
-    #\# 'non-terminating-macro
-         (lambda (ch port src line col pos)
-           (define next (peek-char port))
-           (cond
-             [(and (char? next) (char=? next #\{))
-              (read-char port)
-              (define items (read-until-brace-expand port))
-              (define result (cons SET-TAG items))
-              (if src (datum->syntax #f result (vector src line col pos #f)) result)]
-             [(and (char? next) (char=? next #\"))
-              (read-char port)
-              (define pattern (read-regex port))
-              (define result (list '#%regex pattern))
-              (if src
-                (datum->syntax #f result (vector src line col pos (+ 3 (string-length pattern))))
-                result)]
-             [else
-              (define sym-str
-                (let loop ([acc '()])
-                  (define c (peek-char port))
-                  (if (and (char? c)
-                           (not (char-whitespace? c))
-                           (not (memq c '(#\( #\) #\[ #\] #\{ #\} #\" #\; #\' #\`))))
-                    (begin (read-char port) (loop (cons c acc)))
-                    (list->string (reverse acc)))))
-              (string->symbol (string-append "#" sym-str))]))))
-
 (define (read-file-datums path)
-  ;; Use beagle's reader to preserve [...] vs (...), {...}, and #{...}.
+  ;; Read with THE canonical beagle readtable (datum mode) so the full surface
+  ;; — [..] {..} #{..} #"re" #(..) ^meta #?(..) #?@(..) ' ` ~ ~@ #r"" — is read
+  ;; exactly as the compiler reads it. No bespoke subset reader to drift (#32).
   (with-input-from-file path
     (lambda ()
-      (parameterize ([read-square-bracket-with-tag BRACKET-TAG]
-                     [current-readtable expand-readtable])
+      (parameterize ([current-readtable beagle-readtable])
         ;; Skip the #lang line.
         (read-line)
         (let loop ([acc '()])
@@ -152,29 +85,48 @@
 
 ;; --- rendering ------------------------------------------------------------
 
-;; Render a datum back into beagle-equivalent source. Bracketed lists
-;; (from #%brackets) render with `[...]`; other lists with `(...)`.
-;; Map-tagged render as `{...}`; set-tagged render as `#{...}`.
+;; A 2-element tagged list (head x) — the shape of quote/unquote reader output.
+(define (tagged1? d tag)
+  (and (pair? d) (eq? (car d) tag) (pair? (cdr d)) (null? (cddr d))))
+
+;; Render a datum back into beagle-equivalent source. The reader's tagged forms
+;; round-trip to their surface syntax: #%brackets→[..], #%map→{..}, #%set→#{..},
+;; #%regex→#"..", #%meta→^m f, reader-conditional(-splice)→#?(..)/#?@(..), and
+;; the quote family quote/quasiquote/unquote/unquote-splicing→' ` ~ ~@. Anything
+;; else is a plain list → (..). Booleans are beagle `true`/`false` (not #t/#f).
 (define (datum->beagle-src d)
   (cond
     [(string? d) (~v d)]
-    [(boolean? d) (if d "#t" "#f")]
+    [(boolean? d) (if d "true" "false")]
     [(exact-integer? d) (number->string d)]
     [(real? d) (number->string d)]
     [(symbol? d) (symbol->string d)]
     [(null? d) "()"]
     [(bracketed? d)
-     (format "[~a]"
-             (render-list-body (bracket-body d)))]
+     (format "[~a]" (render-list-body (bracket-body d)))]
     [(map-tagged? d)
-     (format "{~a}"
-             (render-list-body (map-body d)))]
+     (format "{~a}" (render-list-body (map-body d)))]
     [(set-tagged? d)
-     (format "#{~a}"
-             (render-list-body (set-body d)))]
+     (format "#{~a}" (render-list-body (set-body d)))]
+    ;; #"regex" — pattern stored verbatim (escapes preserved by the reader)
+    [(and (tagged1? d '#%regex) (string? (cadr d)))
+     (format "#\"~a\"" (cadr d))]
+    ;; ^meta form  (privacy / dynamic / metadata)
+    [(and (pair? d) (eq? (car d) '#%meta) (= (length d) 3))
+     (format "^~a ~a" (datum->beagle-src (cadr d)) (datum->beagle-src (caddr d)))]
+    ;; #?(:tag form ...) / #?@(:tag form ...) — reader conditionals (unresolved:
+    ;; expand-tool shows surface, target selection is parse-time)
+    [(and (pair? d) (eq? (car d) 'reader-conditional))
+     (format "#?(~a)" (render-list-body (cdr d)))]
+    [(and (pair? d) (eq? (car d) 'reader-conditional-splice))
+     (format "#?@(~a)" (render-list-body (cdr d)))]
+    ;; quote family → ' ` ~ ~@
+    [(tagged1? d 'quote)            (string-append "'"  (datum->beagle-src (cadr d)))]
+    [(tagged1? d 'quasiquote)       (string-append "`"  (datum->beagle-src (cadr d)))]
+    [(tagged1? d 'unquote)          (string-append "~"  (datum->beagle-src (cadr d)))]
+    [(tagged1? d 'unquote-splicing) (string-append "~@" (datum->beagle-src (cadr d)))]
     [(pair? d)
-     (format "(~a)"
-             (render-list-body d))]
+     (format "(~a)" (render-list-body d))]
     [else (~v d)]))
 
 (define (render-list-body items)
@@ -255,4 +207,6 @@
   (parameterize ([current-trace-handler (make-trace-handler)])
     (expand-file path)))
 
-(provide expand-file expand-file-traced expand-datums)
+(provide expand-file expand-file-traced expand-datums
+         ;; exported for tests: the reader + the surface renderer
+         read-file-datums datum->beagle-src)
