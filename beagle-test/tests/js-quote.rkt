@@ -331,18 +331,18 @@
 
      (check-js-quote "splice expr in const value"
        "const greeting ="
-       '(def name : String "world")
+       '(def name :- String "world")
        '(js/quote (const greeting ~name)))
 
      (check-js-quote "splice in function call"
        "alert("
-       '(def msg : String "hello")
+       '(def msg :- String "hello")
        '(js/quote (alert ~msg)))
 
      (check-js-quote "splice in binary op"
        ;; splice beagle expression into JS AST binary op
        "const result ="
-       '(def x : Int 42)
+       '(def x :- Int 42)
        '(js/quote (const result (+ ~x 1))))
 
    ) ;; end splices suite
@@ -352,7 +352,7 @@
 
      (test-case "js/quote returns JsAst type"
        (define prog (js-parse (list '(ns test.app) '(define-mode strict) '(define-target js)
-                                    '(def code : JsAst (js/quote (const x 1))))))
+                                    '(def code :- JsAst (js/quote (const x 1))))))
        (check-not-exn (lambda () (type-check! prog))))
 
      (test-case "js/quote rejected in CLJ target"

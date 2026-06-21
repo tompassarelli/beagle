@@ -117,39 +117,39 @@
 
      (check-jst-emit "js/+ binary"
        "(a + b)"
-       '(def (r : Any) (js/+ a b)))
+       '(def r :- Any (js/+ a b)))
 
      (check-jst-emit "js/=== binary"
        "(a === b)"
-       '(def (r : Any) (js/=== a b)))
+       '(def r :- Any (js/=== a b)))
 
      (check-jst-emit "js/&& binary"
        "(a && b)"
-       '(def (r : Any) (js/&& a b)))
+       '(def r :- Any (js/&& a b)))
 
      (check-jst-emit "js/|| binary"
        "(a || b)"
-       '(def (r : Any) (js/|| a b)))
+       '(def r :- Any (js/|| a b)))
 
      (check-jst-emit "js/?? binary"
        "(a ?? b)"
-       '(def (r : Any) (js/?? a b)))
+       '(def r :- Any (js/?? a b)))
 
      (check-jst-emit "js/! unary"
        "!done"
-       '(def (r : Any) (js/! done)))
+       '(def r :- Any (js/! done)))
 
      (check-jst-emit "js/typeof"
        "typeof x"
-       '(def (r : Any) (js/typeof x)))
+       '(def r :- Any (js/typeof x)))
 
      (check-jst-emit "js/template"
        "`Hello, ${name}!`"
-       '(def (msg : Any) (js/template "Hello, " name "!")))
+       '(def msg :- Any (js/template "Hello, " name "!")))
 
      (check-jst-emit "js/spread"
        "...items"
-       '(def (arr : Any) (js/spread items)))
+       '(def arr :- Any (js/spread items)))
 
      (check-jst-emit "js/return"
        "return 42;"

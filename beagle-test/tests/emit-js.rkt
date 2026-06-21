@@ -415,12 +415,12 @@
    (check-js-contains "reset! -> sets .value"
      ".value ="
      '(declare-extern a Any)
-     '(defn f [(a :- Any)] :- Any (reset! a 42)))
+     '(defn f! [(a :- Any)] :- Any (reset! a 42)))
 
    (check-js-contains "swap! -> compute and set"
      "_a.value = "
      '(declare-extern a Any)
-     '(defn f [(a :- Any)] :- Any (swap! a inc)))
+     '(defn f! [(a :- Any)] :- Any (swap! a inc)))
 
    (check-js-contains "add-watch -> registers watcher"
      ".watches["
@@ -732,7 +732,7 @@
    (check-js-contains "set! .- property mangles kebab to underscore"
      "(obj.my_prop = 99)"
      '(declare-extern obj Any)
-     '(defn f [(obj :- Any)] :- Any (set! (.-my-prop obj) 99)))
+     '(defn f! [(obj :- Any)] :- Any (set! (.-my-prop obj) 99)))
 
    (check-js-contains ".- read property mangles kebab to underscore"
      "obj.my_prop"

@@ -2,11 +2,11 @@
 (ns app.main)
 (define-mode strict)
 
-(defrecord Product [(name :- String) (price :- Int) (in-stock :- Bool)])
+(defrecord Product [(name :- String) (price :- Float) (in-stock :- Bool)])
 
 (def tax-rate :- Float 0.08)
 
-(defn make-product [(name :- String) (price :- Int)] :- Product
+(defn make-product [(name :- String) (price :- Float)] :- Product
   (->Product name price true))
 
 (defn product-total [(p :- Product)] :- Float
