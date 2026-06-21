@@ -143,6 +143,19 @@ target prefix (`nix/`, `js/`, …); bare names are reserved for Clojure-equivale
 behavior. Bare `assert` / `with` / `with-cfg` are HARD-REJECTED — only
 `nix/assert` / `nix/with` / `nix/with-cfg` are accepted.
 
+**The bare top-level namespace is for idiomatic Clojure ONLY — a hallucination
+firewall (existential, per the surface-coherence policy above).** This extends
+the rule from "where behavior *diverges*" to **any target-specific concept at
+all**: a form that's a concept from another target (e.g. JS `async`) with NO
+core-Clojure meaning still goes under its target prefix (`js/async`), never as a
+bare top-level form — even though there is no Clojure namesake to "diverge" from.
+Why: **bare ⇒ the model's Clojure priors are ALWAYS correct (zero hallucination);
+the prefixed set is the enumerable, learnable boundary where target-specific
+behavior lives** (and it compresses to a self-policing agent prompt). Polluting
+the bare namespace with target-specific forms teaches agents to hallucinate
+arbitrary bare forms — a dumpster fire. Keep the firewall: **bare ⇒ Clojure,
+prefix ⇒ target.**
+
 ### Test tiering during surface iteration
 
 `bin/beagle test` runs the **active tier only**; opt into dormant/gated
