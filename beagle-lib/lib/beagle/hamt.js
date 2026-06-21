@@ -154,11 +154,21 @@ function nodeDissoc(node, k, h, shift) {
   return { node: { t: 'n', bitmap, slots }, removed: 1 };
 }
 
-function* nodeSeq(node) {
-  if (node === null) return;
-  if (node.t === 'e') { yield [node.k, node.v]; return; }
-  if (node.t === 'c') { yield* node.bucket; return; }
-  for (const s of node.slots) yield* nodeSeq(s);
+// Direct-callback trie walk: invokes f(acc, k, v) per entry and threads acc,
+// with NO generator and NO per-entry [k,v] allocation — the cljs.core IKVReduce
+// shape. (The previous nodeSeq generator + yield* recursion + spread was the
+// map-iterate hot path, ~9-12x slower than cljs.core; this closes that gap.)
+function nodeReduce(node, f, acc) {
+  if (node === null) return acc;
+  if (node.t === 'e') return f(acc, node.k, node.v);
+  if (node.t === 'c') {
+    const b = node.bucket;
+    for (let i = 0; i < b.length; i++) acc = f(acc, b[i][0], b[i][1]);
+    return acc;
+  }
+  const slots = node.slots;
+  for (let i = 0; i < slots.length; i++) acc = nodeReduce(slots[i], f, acc);
+  return acc;
 }
 
 // --- public, tree-shakeable map API ------------------------------------------
@@ -190,17 +200,13 @@ export function hamtMapDissoc(m, k) {
 
 export function hamtMapCount(m) { return m.count; }
 
-export function hamtMapSeq(m) { return [...nodeSeq(m.root)]; }
+export function hamtMapSeq(m) { return nodeReduce(m.root, (a, k, v) => (a.push([k, v]), a), []); }
 
-export function hamtMapKeys(m) { return [...nodeSeq(m.root)].map(([k]) => k); }
+export function hamtMapKeys(m) { return nodeReduce(m.root, (a, k) => (a.push(k), a), []); }
 
-export function hamtMapVals(m) { return [...nodeSeq(m.root)].map(([, v]) => v); }
+export function hamtMapVals(m) { return nodeReduce(m.root, (a, _k, v) => (a.push(v), a), []); }
 
-export function hamtMapReduce(m, f, init) {
-  let acc = init;
-  for (const [k, v] of nodeSeq(m.root)) acc = f(acc, k, v);
-  return acc;
-}
+export function hamtMapReduce(m, f, init) { return nodeReduce(m.root, f, init); }
 
 // --- public, tree-shakeable set API ------------------------------------------
 // A set reuses the map trie: the element is the key (value slot holds it too, so
@@ -229,4 +235,4 @@ export function hamtSetHas(s, x) {
 
 export function hamtSetCount(s) { return s.count; }
 
-export function hamtSetSeq(s) { return [...nodeSeq(s.root)].map(([k]) => k); }
+export function hamtSetSeq(s) { return nodeReduce(s.root, (a, k) => (a.push(k), a), []); }
