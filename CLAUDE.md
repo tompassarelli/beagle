@@ -104,7 +104,7 @@ Classify demand- vs thesis-driven *before* gating. When the classification is un
 
 ### Macros
 
-`defmacro` + quasiquote is active, supported work. `(define-macro ...)` is hard-rejected at parse time (`'legacy-macro-form` in `parse.rkt`) — write `(defmacro NAME [params] body)`. No `safe`/`unsafe` kind word, no alias. Unquote `,`, splice `,@`; `~"…"`/`~''…''` stay as tilde-strings.
+`defmacro` + quasiquote is active, supported work. `(define-macro ...)` is hard-rejected at parse time (`'legacy-macro-form` in `parse.rkt`) — write `(defmacro NAME [params] body)`. No `safe`/`unsafe` kind word, no alias. Unquote `~`, splice `~@` (Clojure syntax-quote), **uniform across ALL targets** — a metaprogramming operator never varies by emission target. nix `${}` string interpolation is the `(s …)`/`(ms …)` form; the old `~"…"`/`~''…''` tilde-string reader sugar (which squatted on `~` and made nix's reader the lone divergent one) is removed in favor of `(s …)`.
 
 ### Zero escape hatches
 
@@ -193,6 +193,31 @@ Clojure's own extension mechanism, and governed:
   ones (zero-users → delete, per zero-backwards-compat), and confirm every
   divergent form is queryable (`bin/beagle sig`) and reversible. The audit removes
   as much as it adds — accretion is the enemy.
+
+### Hallucination log — data-driven surface pruning
+
+Every hallucination gets LOGGED. A "hallucination" = Beagle code that failed (or a
+"gap" an agent believed) because of a wrong Clojure/prior assumption about the
+surface — a rejected/misparsed/miscompiled form, a name assumed to exist, an
+inherited false gap. **Every agent, the moment it hits one, appends ONE structured
+record to `hallucinations.jsonl` (repo root) — before or as it fixes it. No
+hallucination goes unlogged.**
+
+Why: hallucination-reduction must be DATA-DRIVEN, not vibes. The log is the dataset
+we mine — cluster by `category`, rank by frequency, prune the highest-rate
+divergences at the root, and watch records-per-period trend DOWN over time. The
+periodic surface audit reads this to prioritize root-fixes mathematically.
+
+Record schema (one JSON object per line):
+`{ts, agent, category, target, wrote, expected, reality, severity, resolution, fix}`
+- `category`: reader | stdlib | form | dynamics | interop | prefix | roundtrip | false-gap | …
+- `severity`: silent-misparse | silent-miscompile | build-reject | runtime-throw | false-gap | surface-fragmentation
+- `resolution`: fixed-at-root | worked-around | form-added | fix-queued | non-gap
+- `wrote` = what the agent wrote; `expected` = the wrong prior; `reality` = why it was wrong; `fix` = the ref.
+
+Analysis: JSONL → mechanically aggregable (`jq` by category/period). Reduction rate =
+records-per-period falling as roots are fixed. (Future: each record is claim-shaped
+and migrates cleanly to Fram claims — hallucination-reduction inside the one graph.)
 
 ### Test tiering during surface iteration
 
