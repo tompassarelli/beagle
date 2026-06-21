@@ -95,7 +95,7 @@
          (case (classify-rep coll)
            [(hmap) (hamt-call "hamtMapCount" (emit-expr coll))]
            [(hset) (hamt-call "hamtSetCount" (emit-expr coll))]
-           [(poly) (begin (use-runtime!) (format "$$bc.count(~a)" (emit-expr coll)))]
+           [(poly) (begin (mark-needs-v!) (use-runtime!) (format "$$bc$count(~a)" (emit-expr coll)))]
            [else
             (case (coll-kind coll)
               ;; native Set -> .size (NOT .length, which is undefined on a Set);
@@ -168,30 +168,30 @@
              ;; compound elements -> value-keyed HAMT set (value dedup)
              [(set-hset? args) (tally-rep! 'hamt) (hamt-call "hamtSet" (emit-expr (car args)))]
              [else (tally-rep! 'native) (format "new Set(~a)" (emit-expr (car args)))])]
-    ;; value-semantic membership: routes to runtime $$bc.contains, which
+    ;; value-semantic membership: routes to runtime $$bc$contains, which
     ;; dispatches on coll type per Clojure contains? — Set: equiv-membership
     ;; (not reference Set.has); Array: valid-index; object/map: key present.
     ;; (Compound map keys by value are the P3 representation gap.)
     [(contains?)
      (if (= n 2)
        (case (classify-rep (car args))
-         ;; known-HAMT -> monomorphic O(log n) op; native/poly -> $$bc.contains
+         ;; known-HAMT -> monomorphic O(log n) op; native/poly -> $$bc$contains
          ;; (now polymorphic over native + HAMT).
          [(hmap) (hamt-call "hamtMapHas" (emit-expr (car args)) (emit-expr (cadr args)))]
          [(hset) (hamt-call "hamtSetHas" (emit-expr (car args)) (emit-expr (cadr args)))]
-         [else (begin (use-runtime!)
-                      (format "$$bc.contains(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args))))])
+         [else (begin (mark-needs-v-if-hamtish! (car args)) (use-runtime!)
+                      (format "$$bc$contains(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args))))])
        #f)]
     [(keys) (if (= n 1)
                 (case (classify-rep (car args))
                   [(hmap) (hamt-call "hamtMapKeys" (emit-expr (car args)))]
-                  [(poly) (begin (use-runtime!) (format "$$bc.keys(~a)" (emit-expr (car args))))]
+                  [(poly) (begin (mark-needs-v!) (use-runtime!) (format "$$bc$keys(~a)" (emit-expr (car args))))]
                   [else (format "Object.keys(~a)" (emit-expr (car args)))])
                 #f)]
     [(vals) (if (= n 1)
                 (case (classify-rep (car args))
                   [(hmap) (hamt-call "hamtMapVals" (emit-expr (car args)))]
-                  [(poly) (begin (use-runtime!) (format "$$bc.vals(~a)" (emit-expr (car args))))]
+                  [(poly) (begin (mark-needs-v!) (use-runtime!) (format "$$bc$vals(~a)" (emit-expr (car args))))]
                   [else (format "Object.values(~a)" (emit-expr (car args)))])
                 #f)]
     [(map) (if (= n 2)
@@ -280,11 +280,11 @@
                 (hamt-call "hamtMapGet" (emit-expr (car args)) (emit-expr (cadr args)))]
                [(and (= n 3) (eq? crep 'hmap))
                 (hamt-call "hamtMapGet" (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args)))]
-               ;; poly (Any/union-typed) coll -> polymorphic $$bc.get (native + HAMT)
+               ;; poly (Any/union-typed) coll -> polymorphic $$bc$get (native + HAMT)
                [(and (= n 2) (eq? crep 'poly))
-                (begin (use-runtime!) (format "$$bc.get(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args))))]
+                (begin (mark-needs-v!) (use-runtime!) (format "$$bc$get(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args))))]
                [(and (= n 3) (eq? crep 'poly))
-                (begin (use-runtime!) (format "$$bc.get(~a, ~a, ~a)"
+                (begin (mark-needs-v!) (use-runtime!) (format "$$bc$get(~a, ~a, ~a)"
                                               (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args))))]
                [(= n 2) (format "~a[~a]" (emit-expr (car args)) (emit-expr (cadr args)))]
                [(= n 3) (format "(() => { const _x = ~a, _k = ~a; return _x[_k] != null ? _x[_k] : ~a; })()"
@@ -317,7 +317,13 @@
     [(some) (if (= n 2)
              (format "~a.find(~a) ?? null" (emit-expr (cadr args)) (emit-expr (car args)))
              #f)]
-    [(distinct) (if (= n 1) (begin (use-runtime!) (format "$$bc.distinct_equiv(~a)" (emit-expr (car args)))) #f)]
+    [(distinct) (if (= n 1)
+                    (begin
+                      ;; distinct over elements that could be HAMTs needs distinct_equivV
+                      (when (memq (type-read-rep (seq-elem-type (arg-type (car args)))) '(hmap hset poly))
+                        (mark-needs-v!))
+                      (use-runtime!) (format "$$bc$distinct_equiv(~a)" (emit-expr (car args))))
+                    #f)]
     [(flatten) (if (= n 1) (format "~a.flat(Infinity)" (emit-expr (car args))) #f)]
     [(not-empty) (if (= n 1)
                      (format "(() => { const _x = ~a; return _x.length > 0 ? _x : null; })()" (emit-expr (car args)))
@@ -618,7 +624,7 @@
 ;;     excluded to avoid relying on coincidence (float = is rare).
 ;;   - Any / type vars / unions / functions / parametric (Vec/Map/Set/List): structural.
 ;; DEFAULT-TO-EQUIV: any type off this closed allowlist, and any operand with a
-;; missing/#f type-table entry, falls back to $$bc.equiv. Nothing uncertain is ===.
+;; missing/#f type-table entry, falls back to $$bc$equiv. Nothing uncertain is ===.
 (define SCALAR-EQ-SAFE-PRIMS
   '(Int U8 U16 U32 U64 I8 I16 I32 String Bool Keyword))
 (define (scalar-eq-safe-type? ty)
@@ -727,7 +733,7 @@
 ;;   'poly   : Any / type-var / union / Float / Nil / unknown -> the runtime value
 ;;             could be EITHER rep (Any is a BIDIRECTIONAL wildcard in the type
 ;;             system — a native scalar map <: (Map Any V)), so reads must go through
-;;             the polymorphic $$bc.* primitives; production stores by value (HAMT).
+;;             the polymorphic $$bc$* primitives; production stores by value (HAMT).
 (define (key-class t)
   (cond
     [(scalar-eq-safe-type? t) 'native]
@@ -747,7 +753,7 @@
 ;; PRODUCTION sites (literals / set / assoc / conj) only ever see hmap/hset/native
 ;; (a producer has a concrete structure). READ sites (get/contains/count/...) may
 ;; also see 'poly (an Any/union-typed var or call) -> route to the polymorphic
-;; $$bc.* read. Layers: (1) var-ref -> rep-env, else its declared type's read-rep;
+;; $$bc$* read. Layers: (1) var-ref -> rep-env, else its declared type's read-rep;
 ;; (2) a producer's structural rep (scalar key -> native, else -> HAMT); (3) any
 ;; other typed expr -> its type's read-rep.
 (define (classify-rep e)
@@ -858,7 +864,23 @@
 (define (use-hamt! name)
   (define t (hamt-ops-used))
   (when t (hash-set! t name #t))
+  (mark-needs-v!)        ; an in-module HAMT value will reach equiv/hash/etc.
   name)
+
+;; LITE/FULL $$bc selection (size leg): a box, true iff this module could feed a
+;; HAMT value to a value-op (=/contains/distinct/get/...). When FALSE the module
+;; imports the LITE equiv/hash/contains/distinct_equiv (no HAMT branch -> esbuild
+;; drops the HAMT comparison helpers, recovering the native-only margin); when
+;; TRUE it imports the HAMT-aware V-variants. Set at: any HAMT production
+;; (use-hamt!), any POLY value-op (poly =/contains/distinct/get/keys/vals/count).
+;; A pure-native program (scalar + concrete-native compound, e.g. values/change)
+;; never trips it -> lite.
+(define bc-needs-v? (make-parameter #f))   ; #f, or a box
+(define (mark-needs-v!) (let ([b (bc-needs-v?)]) (when b (set-box! b #t))))
+;; Mark needs-V if a node's collection rep could be a HAMT (hmap/hset) or is
+;; polymorphic (Any/union -> a HAMT may flow in at runtime).
+(define (mark-needs-v-if-hamtish! node)
+  (when (memq (classify-rep node) '(hmap hset poly)) (mark-needs-v!)))
 
 ;; Emit a HAMT op call, recording the op for the import set.
 (define (hamt-call op . arg-strs)
@@ -893,10 +915,10 @@
 
 ;; Convenience: mark runtime as needed and emit a call to one of the
 ;; functions exported by beagle/core.js.
-;;   (runtime-call "range" args) => "$$bc.range(arg1, arg2, ...)"
+;;   (runtime-call "range" args) => "$$bc$range(arg1, arg2, ...)"
 (define (runtime-call js-name args)
   (use-runtime!)
-  (format "$$bc.~a(~a)" js-name (string-join (map emit-expr args) ", ")))
+  (format "$$bc$~a(~a)" js-name (string-join (map emit-expr args) ", ")))
 
 ;; --- binding environment (for value-position wrapper resolution) -----------
 
@@ -1039,6 +1061,7 @@
                  [current-type-table (program-type-table prog)]  ; P3: per-node arg types for scalar-=== dispatch (#f when capture off)
                  [needs-runtime? #f]
                  [hamt-ops-used (make-hash)]
+                 [bc-needs-v? (box #f)]
                  [rep-counts (and rep-metric? (make-hasheq))]
                  [current-js-bound (collect-top-level-names prog)])
     (define header (emit-module-header prog))
@@ -1058,10 +1081,30 @@
             (format "// collection-rep: ~a/~a native (~a%) — ~a HAMT site(s)\n"
                     nat tot (inexact->exact pct) ham))
           "")))
+    ;; LITE/FULL $$bc import (size leg): named imports of EXACTLY the core.js
+    ;; functions this module emitted (scanned from the body as `$$bc$<name>`),
+    ;; each aliased local `<name> as $$bc$<name>`. When the module can't feed a
+    ;; HAMT to a value-op (bc-needs-v? false: pure-native), the splittable four
+    ;; bind the LITE exports (no HAMT branch -> esbuild drops the HAMT comparison
+    ;; helpers, recovering the native-only margin); otherwise the HAMT-aware
+    ;; V-variants. Named (not namespace) imports so esbuild reliably tree-shakes.
+    (define SPLITTABLE-BC '("equiv" "hash" "contains" "distinct_equiv"))
+    (define used-bc
+      (sort (remove-duplicates
+             (regexp-match* #px"[$][$]bc[$]([a-z_]+)" body #:match-select cadr))
+            string<?))
+    (define needs-v (unbox (bc-needs-v?)))
     (define runtime-import
-      (if (needs-runtime?)
-        (format "import * as $$bc from '~a';\n" (string-append js-runtime-prefix "core.js"))
-        ""))
+      (if (null? used-bc)
+        ""
+        (format "import { ~a } from '~a';\n"
+                (string-join
+                 (for/list ([nm (in-list used-bc)])
+                   (if (and needs-v (member nm SPLITTABLE-BC))
+                       (format "~aV as $$bc$~a" nm nm)
+                       (format "~a as $$bc$~a" nm nm)))
+                 ", ")
+                (string-append js-runtime-prefix "core.js"))))
     ;; Tree-shakeable named import of ONLY the HAMT ops this module emitted.
     (define hamt-import
       (let ([ops (sort (hash-keys (hamt-ops-used)) string<?)])
@@ -1701,10 +1744,11 @@
             (hamt-call "hamtMapGet" (emit-expr target) keystr (emit-expr default))
             (hamt-call "hamtMapGet" (emit-expr target) keystr))]
        [(poly)
+        (mark-needs-v!)
         (use-runtime!)
         (if default
-            (format "$$bc.get(~a, ~a, ~a)" (emit-expr target) keystr (emit-expr default))
-            (format "$$bc.get(~a, ~a)" (emit-expr target) keystr))]
+            (format "$$bc$get(~a, ~a, ~a)" (emit-expr target) keystr (emit-expr default))
+            (format "$$bc$get(~a, ~a)" (emit-expr target) keystr))]
        [else
         (define target-str (emit-expr target))
         (if default
@@ -1750,14 +1794,14 @@
        [(and (set-member? (current-js-scalar-fns) fn-sym)
              (= 1 (length args)))
         (emit-expr (car args))]
-       ;; Value-equality family routes to the runtime $$bc.equiv (Clojure =
+       ;; Value-equality family routes to the runtime $$bc$equiv (Clojure =
        ;; semantics: structural, recursive over vectors/sets/maps/records).
        ;; `identical?` deliberately does NOT come here — it is reference
        ;; identity by design and stays `===` via the generic js-infix? branch
        ;; below. Variadic = matches Clojure: all consecutive pairs equal,
        ;; short-circuiting with &&. not= is `(not (apply = args))`.
        ;; P3 scalar-=== optimization: per consecutive pair, emit bare === when
-       ;; BOTH operands are statically ===-safe scalars, else $$bc.equiv.
+       ;; BOTH operands are statically ===-safe scalars, else $$bc$equiv.
        ;; use-runtime! fires ONLY on an equiv pair, so a fully-scalar = emits no
        ;; runtime import. Variadic = = all consecutive pairs equal, joined with &&.
        ;; identical? is NOT here (stays === via the generic js-infix branch below —
@@ -1769,8 +1813,9 @@
                      [as (in-list strs)] [bs (in-list (cdr strs))])
             (if (both-scalar-eq-safe? an bn)
                 (format "~a === ~a" as bs)
-                (begin (use-runtime!)
-                       (format "$$bc.equiv(~a, ~a)" as bs)))))
+                (begin (mark-needs-v-if-hamtish! an) (mark-needs-v-if-hamtish! bn)
+                       (use-runtime!)
+                       (format "$$bc$equiv(~a, ~a)" as bs)))))
         (format "(~a)" (string-join pairs " && "))]
        ;; not= = not(all consecutive pairs equal): keep inner pairs POSITIVE
        ;; (=== or equiv) and negate the whole conjunction. Do NOT switch the
@@ -1782,8 +1827,9 @@
                      [as (in-list strs)] [bs (in-list (cdr strs))])
             (if (both-scalar-eq-safe? an bn)
                 (format "~a === ~a" as bs)
-                (begin (use-runtime!)
-                       (format "$$bc.equiv(~a, ~a)" as bs)))))
+                (begin (mark-needs-v-if-hamtish! an) (mark-needs-v-if-hamtish! bn)
+                       (use-runtime!)
+                       (format "$$bc$equiv(~a, ~a)" as bs)))))
         (format "(!(~a))" (string-join pairs " && "))]
        [(and (js-infix? fn-sym) (>= (length args) 2))
         (define op (hash-ref JS-INFIX-OPS fn-sym))
