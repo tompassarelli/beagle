@@ -435,8 +435,11 @@
      '(require datascript :as ds)
      '(defn f [] :- Any (ds/create-conn)))
 
-   (check-js-contains "dotted require -> relative path"
-     "import * as core from './inventory/core.js';"
+   ;; importer test.app lives at test/app.js, so a root-level sibling module
+   ;; resolves importer-relative as ../inventory/core.js (not ./ — that only
+   ;; works from the module root). See relative-js-module-path in emit-js.rkt.
+   (check-js-contains "dotted require -> importer-relative path"
+     "import * as core from '../inventory/core.js';"
      '(require inventory.core)
      '(defn f [] :- Any (core/init)))
 

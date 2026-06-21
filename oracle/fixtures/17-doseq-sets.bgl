@@ -1,8 +1,0 @@
-#lang beagle/rkt
-
-(def names : (Vec String) ["alice" "bob" "carol"])
-
-(defn process-names [(xs : (Vec String))] : (Vec String)
-  (for [x xs] (str x "!")))
-
-(println (process-names names))
