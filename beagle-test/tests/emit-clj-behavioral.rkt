@@ -497,6 +497,27 @@
      "(f 42)"
      "got: 42")
 
+   ;; --- if-let / when-let: destructuring + typed binders (#22) --------------
+   ;; The binder is bound only in the success branch (temp narrows non-nil first).
+
+   (check-clj-output "if-let with map destructuring binds the keys"
+     (list `(defn f [(m : (Map Keyword Int))] :- Int
+              (if-let [,(mt ':keys (br 'a 'b)) m] (+ a b) 0)))
+     "(println (f {:a 3 :b 4}))"
+     "7")
+
+   (check-clj-output "when-let with seq destructuring"
+     (list `(defn f [(xs : (Vec Int))] :- Int?
+              (when-let [,(br 'a 'b) xs] (+ a b))))
+     "(println (f [10 20]))"
+     "30")
+
+   (check-clj-output "if-let with :- typed binder (narrows nullable to the annotated type)"
+     (list '(defn f [(s : String)] :- Int
+              (if-let [v :- Int (parse-long s)] v 0)))
+     "(println (f \"42\")) (println (f \"nope\"))"
+     "42\n0")
+
    ;; --- defprotocol + defrecord + extend-type --------------------------------
    ;; deftype removed — decomposed into defrecord (data shape) + extend-type
    ;; (protocol impls). Field access via (:field r) instead of (.-field self).

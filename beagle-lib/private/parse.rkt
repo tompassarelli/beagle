@@ -1713,49 +1713,75 @@
 ;; embedding those preserves per-step srcloc in the synthesized output.
 (define (lower-binding-cond head bindings-stx rest [rest-stxs #f])
   (define bdatum (->datum bindings-stx))
+  (define bracketed? (and (pair? bdatum) (eq? (car bdatum) BRACKET-TAG)))
   (define items
     (cond
-      [(and (pair? bdatum) (eq? (car bdatum) BRACKET-TAG)) (cdr bdatum)]
+      [bracketed? (cdr bdatum)]
       [(list? bdatum) bdatum]
       [else (error 'beagle
-                   "~a: bindings must be [name expr], got: ~v" head bdatum)]))
-  (unless (and (= (length items) 2) (symbol? (car items)))
+                   "~a: bindings must be [binder expr], got: ~v" head bdatum)]))
+  (unless (>= (length items) 2)
     (error 'beagle
-           "~a: bindings must be [name expr], got: ~v" head bdatum))
-  (define name (car items))
-  (define val-expr (cadr items))
-  ;; Recover the syntax for the value expression so its srcloc survives.
+           "~a: bindings must be [binder expr], got: ~v" head bdatum))
+  ;; value = last item; binder-part = everything before it (a name, a typed
+  ;; `name :- Type`, or a single map/seq destructure datum).
+  (define rev (reverse items))
+  (define value (car rev))
+  (define binder-part (reverse (cdr rev)))
+  ;; Recover the value's syntax (the LAST sub) so its srcloc survives.
   (define val-stx
-    (let ([bsubs (stx-subs bindings-stx)])
-      (cond
-        ;; BRACKET-TAG-wrapped: subs[0] is BRACKET-TAG, subs[1] is name,
-        ;; subs[2] is the value expression.
-        [(and bsubs (and (pair? bdatum) (eq? (car bdatum) BRACKET-TAG)))
-         (or (stx-ref bsubs 2) val-expr)]
-        [bsubs (or (stx-ref bsubs 1) val-expr)]
-        [else val-expr])))
+    (let ([bsubs (stx-subs bindings-stx)]
+          [idx (if bracketed? (length items) (sub1 (length items)))])
+      (cond [bsubs (or (stx-ref bsubs idx) value)] [else value])))
   ;; Pick the syntax-preserving rest items where possible.
   (define rest-items
     (cond
       [(and rest-stxs (= (length rest-stxs) (length rest))) rest-stxs]
       [else rest]))
-  (define cond-expr
-    (case head
-      [(if-let when-let)   name]
-      [(if-some when-some) (list 'not (list 'nil? name))]))
   (case head
     [(if-let if-some)
      (unless (= (length rest) 2)
-       (error 'beagle "~a: expected (~a [name expr] then else), got: ~v"
-              head head (cons head (cons bdatum rest))))
-     (list 'let (list BRACKET-TAG name val-stx)
-           (list 'if cond-expr (car rest-items) (cadr rest-items)))]
+       (error 'beagle "~a: expected (~a [binder expr] then else), got: ~v"
+              head head (cons head (cons bdatum rest))))]
     [(when-let when-some)
      (when (null? rest)
        (error 'beagle "~a: expected at least one body expression after bindings"
-              head))
-     (list 'let (list BRACKET-TAG name val-stx)
-           (list 'if cond-expr (cons 'do rest-items)))]))
+              head))])
+  (define (success-test v)
+    (case head
+      [(if-let when-let)   v]
+      [(if-some when-some) (list 'not (list 'nil? v))]))
+  (cond
+    ;; Simple `[name expr]`: the bound NAME is the truth test (no temp). Keeps the
+    ;; simple-case lowering byte-identical to the original.
+    [(and (= (length binder-part) 1) (symbol? (car binder-part)))
+     (define name (car binder-part))
+     (define binding (list BRACKET-TAG name val-stx))
+     (define test (success-test name))
+     (case head
+       [(if-let if-some)
+        (list 'let binding (list 'if test (car rest-items) (cadr rest-items)))]
+       [(when-let when-some)
+        (list 'let binding (list 'if test (cons 'do rest-items)))])]
+    ;; Typed `[name :- Type expr]` or destructuring `[{:keys […]} expr]` / `[[a b]
+    ;; expr]`: bind a TEMP, test the temp, and bind the real binder inside the
+    ;; SUCCESS branch only. The temp narrows non-nil in the then-branch, so a
+    ;; `:- Type` annotation applies to the narrowed value (not the raw nullable),
+    ;; and a destructure binder is out of scope on the false/else path (Clojure).
+    [else
+     (define g (gensym 'bind))
+     (define inner-binding (append (list BRACKET-TAG) binder-part (list g)))
+     (define test (success-test g))
+     (case head
+       [(if-let if-some)
+        (list 'let (list BRACKET-TAG g val-stx)
+              (list 'if test
+                    (list 'let inner-binding (car rest-items))
+                    (cadr rest-items)))]
+       [(when-let when-some)
+        (list 'let (list BRACKET-TAG g val-stx)
+              (list 'if test
+                    (list 'let inner-binding (cons 'do rest-items))))])]))
 
 ;; expand-cond-thread, expand-some-thread, expand-as-thread are defined
 ;; above with the rest of the threading family. The Clojure threading
