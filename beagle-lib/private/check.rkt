@@ -2165,11 +2165,27 @@
            (resolve-jvm-call 'method (type-prim-name recv-type) mname overloads
                              (cons (method-call-target e) (method-call-args e)) env e)]
           [else
-           (raise-diag 'type-mismatch
-                       (format ".~a is not a method of ~a"
-                               mname (type-prim-name recv-type))
-                       (hasheq 'function (symbol->string mname))
-                       #:src (src-for e))])]
+           ;; Method not in this class's set. Fall back to the flat stdlib table
+           ;; — universal Object methods (.toString/.equals/.hashCode) live there
+           ;; and are valid on any receiver, so listing them per-class would be
+           ;; noise. Only a method that's in NEITHER the class nor the flat table
+           ;; (a typo, or a wrong-receiver method like .force on a non-channel)
+           ;; is rejected — that keeps the unknown/wrong-method guard intact while
+           ;; not false-rejecting fram on common methods.
+           (define raw-type (hash-ref env method-sym ANY))
+           (define all-args (cons (method-call-target e) (method-call-args e)))
+           (define fn-type
+             (if (type-poly? raw-type) (resolve-poly-call raw-type all-args env) raw-type))
+           (cond
+             [(type-fn? fn-type)
+              (check-args method-sym fn-type all-args env e)
+              (type-fn-ret fn-type)]
+             [else
+              (raise-diag 'type-mismatch
+                          (format ".~a is not a method of ~a"
+                                  mname (type-prim-name recv-type))
+                          (hasheq 'function (symbol->string mname))
+                          #:src (src-for e))])])]
        [else
         (define raw-type (hash-ref env method-sym ANY))
         (define all-args (cons (method-call-target e) (method-call-args e)))

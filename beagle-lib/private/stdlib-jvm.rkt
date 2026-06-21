@@ -109,6 +109,8 @@
              (M (C FILE) 'mkdirs       '() BOOL)
              (M (C FILE) 'delete       '() BOOL)
              (M (C FILE) 'getName      '() STR)
+             (M (C FILE) 'listFiles    '() (ARR (C FILE)))
+             (M (C FILE) 'toPath       '() ANY)
              (M (C FILE) 'toString     '() STR))
        '())
    FIS
@@ -124,6 +126,7 @@
        (list (M (C SOCK) 'getOutputStream '() (C OS))
              (M (C SOCK) 'getInputStream  '() (C IS))
              (M (C SOCK) 'setSoTimeout    (list INT) NIL)
+             (M (C SOCK) 'connect         (list ANY) NIL)   ; SocketAddress
              (M (C SOCK) 'close           '() NIL))
        '())
    SSOCK
