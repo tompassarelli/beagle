@@ -646,10 +646,12 @@
   (define tbl (current-type-table))
   (and tbl (hash-ref tbl node #f)))
 
+(define (map-type? ty) (and (type-app? ty) (eq? (type-app-ctor ty) 'Map)))
+(define (set-type? ty) (and (type-app? ty) (eq? (type-app-ctor ty) 'Set)))
+
 ;; (Map K V) -> K ; else #f
 (define (map-key-type ty)
-  (and (type-app? ty) (eq? (type-app-ctor ty) 'Map)
-       (pair? (type-app-args ty)) (car (type-app-args ty))))
+  (and (map-type? ty) (pair? (type-app-args ty)) (car (type-app-args ty))))
 
 ;; (Vec E)/(List E)/(Set E) -> E ; else #f
 (define (seq-elem-type ty)
@@ -660,31 +662,55 @@
 (define current-rep-env (make-parameter (hasheq)))
 (define (rep-of-binding sym) (hash-ref (current-rep-env) sym 'native))
 
+;; binding-name -> declared/inferred TYPE (set at let/param scopes). Resolves the
+;; var-ref type gap: a bare symbol is excluded from the per-node type table
+;; (interned-leaf), so a var used as a key/elem arg has no node-type — this env
+;; supplies it from the param `:-` annotation or the let value's inferred type.
+(define current-type-env (make-parameter (hasheq)))
+(define (type-of-binding sym) (hash-ref (current-type-env) sym #f))
+
+;; Type of an argument NODE: a var-ref resolves through the type-env; any other
+;; node through the per-node table.
+(define (arg-type node)
+  (if (symbol? node) (type-of-binding node) (node-type node)))
+
+;; Rep a binding of declared TYPE should carry (param seeding / type-directed).
+(define (rep-from-type ty)
+  (cond
+    [(and (map-type? ty) (provably-compound-type? (map-key-type ty))) 'hmap]
+    [(and (set-type? ty) (provably-compound-type? (seq-elem-type ty))) 'hset]
+    [else 'native]))
+
 ;; Classify a NODE's collection representation: 'hmap | 'hset | 'native.
-;; Recurses over node structure (the type table stores Any for constructive
-;; ops, so we read LEAF key/elem types and the rep-env for var refs).
+;; Three layers: (1) var-ref -> rep-env (propagated from the binding's value /
+;; param type); (2) TYPE-DIRECTED — any expr whose node-type is a concrete
+;; compound-keyed Map / compound-elem Set (annotated fn returns, typed exprs);
+;; (3) STRUCTURAL — producers (assoc/set/conj) whose RESULT type is erased to Any.
 (define (classify-rep e)
   (cond
     [(symbol? e) (rep-of-binding e)]
-    [(map-form? e)
-     (define pairs (map-form-pairs e))
-     (cond
-       [(null? pairs) 'native]          ; empty map: native; assoc-coerced if upgraded
-       [(let ([kt (map-key-type (node-type e))])
-          (and kt (provably-compound-type? kt))) 'hmap]
-       [else 'native])]
+    [(and (map-form? e) (null? (map-form-pairs e))) 'native] ; empty map: assoc coerces if upgraded
     [(set-form? e) 'native]             ; set LITERAL: distinct by construction; $$bc handles it
-    [(call-form? e)
-     (define fn (call-form-fn e))
-     (define args (call-form-args e))
-     (case fn
-       [(assoc assoc!) (if (assoc-hmap? args) 'hmap 'native)]
-       [(dissoc update merge into-map) (classify-rep (and (pair? args) (car args)))]
-       [(set) (if (set-hset? args) 'hset 'native)]
-       [(conj) (if (eq? (classify-rep (and (pair? args) (car args))) 'hset) 'hset 'native)]
-       [(disj) (if (eq? (classify-rep (and (pair? args) (car args))) 'hset) 'hset 'native)]
-       [else 'native])]
-    [else 'native]))
+    [else
+     (define t (node-type e))
+     (cond
+       ;; (2) type-directed: the expr's own type proves a compound collection.
+       [(eq? (rep-from-type t) 'hmap) 'hmap]
+       [(eq? (rep-from-type t) 'hset) 'hset]
+       ;; (3) structural: result type erased (assoc/set/conj) — read args.
+       [(map-form? e)
+        (if (provably-compound-type? (map-key-type t)) 'hmap 'native)]
+       [(call-form? e)
+        (define fn (call-form-fn e))
+        (define args (call-form-args e))
+        (case fn
+          [(assoc assoc!) (if (assoc-hmap? args) 'hmap 'native)]
+          [(dissoc update merge into-map) (classify-rep (and (pair? args) (car args)))]
+          [(set) (if (set-hset? args) 'hset 'native)]
+          [(conj) (if (eq? (classify-rep (and (pair? args) (car args))) 'hset) 'hset 'native)]
+          [(disj) (if (eq? (classify-rep (and (pair? args) (car args))) 'hset) 'hset 'native)]
+          [else 'native])]
+       [else 'native])]))
 
 ;; An assoc call yields a HAMT map iff its coll input is already one OR any of
 ;; its key arguments is provably compound. (Result type is erased to Any, so we
@@ -696,18 +722,20 @@
 
 ;; (set X) builds a value-deduped HAMT set iff X's element type is provably
 ;; compound (native `new Set` dedups by reference, keeping value-equal elements).
+;; arg-type resolves a var X (e.g. a param :- (Vec (Vec Int))) through the type-env.
 (define (set-hset? args)
   (and (pair? args)
-       (let ([et (seq-elem-type (node-type (car args)))])
+       (let ([et (seq-elem-type (arg-type (car args)))])
          (and et (provably-compound-type? et) #t))))
 
 ;; assoc key args sit at odd indices (coll k0 v0 k1 v1 ...): any provably compound?
+;; arg-type resolves a var key through the type-env (params/let).
 (define (any-key-arg-compound? args)
   (and (pair? args)
        (let loop ([rest (cdr args)])
          (cond
            [(null? rest) #f]
-           [(provably-compound-type? (node-type (car rest))) #t]
+           [(provably-compound-type? (arg-type (car rest))) #t]
            [(or (null? (cdr rest)) (null? (cddr rest))) #f]
            [else (loop (cddr rest))]))))
 
@@ -767,6 +795,22 @@
 
 (define (with-bindings syms thunk)
   (parameterize ([current-js-bound (set-union (current-js-bound) (list->set syms))])
+    (thunk)))
+
+;; Seed the rep-selection envs from a param list (typed `:-` params): a param's
+;; declared type populates current-type-env (so var key/elem args resolve) and,
+;; when the type is a compound-keyed map / compound-elem set, current-rep-env (so
+;; reads through the param route to HAMT ops). Composes with with-bindings.
+(define (with-param-envs params thunk)
+  (define-values (te re)
+    (for/fold ([te (current-type-env)] [re (current-rep-env)])
+              ([p (in-list params)])
+      (if (and (param? p) (param-type p))
+          (let* ([nm (param-name p)] [ty (param-type p)] [rep (rep-from-type ty)])
+            (values (hash-set te nm ty)
+                    (if (eq? rep 'native) re (hash-set re nm rep))))
+          (values te re))))
+  (parameterize ([current-type-env te] [current-rep-env re])
     (thunk)))
 
 (define (names-from-binding-target name)
@@ -997,7 +1041,9 @@
              (if async? "async " "")
              (mangle-name (defn-form-name f))
              params
-             (with-bindings bound (lambda () (emit-body-return (defn-form-body f) "  "))))]
+             (with-param-envs (defn-form-params f)
+               (lambda ()
+                 (with-bindings bound (lambda () (emit-body-return (defn-form-body f) "  "))))))]
 
     [(defn-multi? f)
      (define name (mangle-name (defn-multi-name f)))
@@ -1018,7 +1064,9 @@
              '()))
          (define all-bindings (append destructure-strs rest-str))
          (define arity-bound (binding-names-from-params (arity-clause-params a) (arity-clause-rest-param a)))
-         (define body (with-bindings arity-bound (lambda () (emit-body-return (arity-clause-body a) "    "))))
+         (define body (with-param-envs (arity-clause-params a)
+                        (lambda ()
+                          (with-bindings arity-bound (lambda () (emit-body-return (arity-clause-body a) "    "))))))
          (define bindings-str (string-join all-bindings "\n    "))
          (define inner (if (null? all-bindings) body (format "~a\n    ~a" bindings-str body)))
          (if rest?
@@ -1366,7 +1414,9 @@
      (define async? (contains-await? body))
      (define prefix (if async? "async " ""))
      (define bound (binding-names-from-params (fn-form-params e) (fn-form-rest-param e)))
-     (with-bindings bound
+     (with-param-envs (fn-form-params e)
+      (lambda ()
+       (with-bindings bound
        (lambda ()
          (if (and (= (length body) 1) (not (stmt-inline? (car body))))
            (let ([body-str (emit-expr (car body))])
@@ -1377,7 +1427,7 @@
              (if (regexp-match? #rx"^[ \t\r\n]*[{]" body-str)
                (format "~a(~a) => (~a)" prefix params body-str)
                (format "~a(~a) => ~a" prefix params body-str)))
-           (format "~a(~a) => { ~a }" prefix params (emit-body-return body "")))))]
+           (format "~a(~a) => { ~a }" prefix params (emit-body-return body ""))))))) ]
 
     [(letfn-form? e)
      (define fns (letfn-form-fns e))
