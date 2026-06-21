@@ -30,3 +30,10 @@
 (test-case "binding a NON-dynamic imported var is still rejected (fix stays precise)"
   (check-exn #rx"not a dynamic var"
              (lambda () (check-file "bad.bclj"))))
+
+;; Coverage for the requiring module living in a DIFFERENT directory than the
+;; dynvar's module (resolved via the module-path walk-up) — the same-dir-only
+;; case was the original test gap (flagged by fram-2). The directly-resolvable
+;; cross-dir case must populate imported-dynamic-vars too.
+(test-case "cross-DIRECTORY binding of an imported ^:dynamic var also type-checks"
+  (check-not-exn (lambda () (check-file "sub/xconsumer.bclj"))))

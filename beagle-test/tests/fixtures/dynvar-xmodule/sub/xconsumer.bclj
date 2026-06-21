@@ -1,0 +1,10 @@
+#lang beagle/clj
+
+;; Cross-DIRECTORY consumer: prov.bclj lives in the PARENT dir; the require
+;; resolves it via the module-path walk-up. Guards that G-A's imported
+;; dynamic-vars populate regardless of the requiring module's directory (the
+;; resolvable case — a same-dir-only regression would turn this red).
+(require prov :as p)
+
+(defn u [] :- String
+  (binding [p/*v* "x"] (p/rd)))
