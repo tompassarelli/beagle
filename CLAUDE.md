@@ -215,8 +215,10 @@ Record schema (one JSON object per line):
 - `resolution`: fixed-at-root | worked-around | form-added | fix-queued | non-gap
 - `wrote` = what the agent wrote; `expected` = the wrong prior; `reality` = why it was wrong; `fix` = the ref.
 
-Analysis: JSONL → mechanically aggregable (`jq` by category/period). Reduction rate =
-records-per-period falling as roots are fixed. (Future: each record is claim-shaped
+Analysis: JSONL → mechanically aggregable. `bin/beagle-halluc` reports counts by
+category / severity / resolution / date (the reduction-rate trend); or parse it with
+any JSON tool (`bb` + `cheshire`). Reduction rate = records-per-period falling as
+roots are fixed. (Future: each record is claim-shaped
 and migrates cleanly to Fram claims — hallucination-reduction inside the one graph.)
 
 ### Test tiering during surface iteration

@@ -1,0 +1,29 @@
+#!/usr/bin/env bb
+;; beagle-halluc — scan the hallucination log (hallucinations.jsonl) for patterns + reduction-rate.
+;; Usage: bin/beagle-halluc [path-to-jsonl]   (default: ./hallucinations.jsonl)
+(require '[cheshire.core :as json] '[clojure.string :as str])
+
+(def path (or (first *command-line-args*) "hallucinations.jsonl"))
+(def recs (->> (slurp path)
+               str/split-lines
+               (remove str/blank?)
+               (mapv #(json/parse-string % true))))
+
+(defn tally [k] (->> recs (map k) frequencies))
+(defn show [title pairs sort-fn]
+  (println (str "\n== " title " =="))
+  (doseq [[k v] (sort-by sort-fn > pairs)]
+    (println (format "%5d  %s" v (str k)))))
+
+(println (format "hallucinations: %d total  (%s … %s)"
+                 (count recs)
+                 (or (first (sort (map :ts recs))) "-")
+                 (or (last  (sort (map :ts recs))) "-")))
+(show "by category"   (tally :category)   val)
+(show "by severity"   (tally :severity)   val)
+(show "by resolution" (tally :resolution) val)
+(show "by target"     (tally :target)     val)
+;; reduction-rate trend: count per date (ascending) — watch this fall over time
+(println "\n== by date (reduction-rate trend) ==")
+(doseq [[d n] (sort-by key (tally :ts))]
+  (println (format "%5d  %s" n d)))
