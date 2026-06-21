@@ -65,6 +65,8 @@
 (define TMF  'javax.net.ssl.TrustManagerFactory)
 (define SSF  'javax.net.ssl.SSLServerSocketFactory)
 (define SF   'javax.net.ssl.SSLSocketFactory)
+(define KM   'javax.net.ssl.KeyManager)
+(define TM   'javax.net.ssl.TrustManager)
 (define SSSOCK 'javax.net.ssl.SSLServerSocket)
 (define SSLSOCK 'javax.net.ssl.SSLSocket)
 (define THREAD 'java.lang.Thread)
@@ -154,19 +156,21 @@
        (list (S 'getInstance (list STR) (C KS))))
    KMF
    (mk KMF '()
-       (list (M (C KMF) 'init           (list (C KS) (ARR ANY)) NIL)
-             (M (C KMF) 'getKeyManagers '() (ARR ANY)))       ; KeyManager[] gap
+       (list (M (C KMF) 'init           (list (C KS) (ARR ANY)) NIL)  ; char[] password (gap)
+             (M (C KMF) 'getKeyManagers '() (ARR (C KM))))            ; KeyManager[] — typed container
        (list (S 'getInstance (list STR) (C KMF))
              (S 'getDefaultAlgorithm '() STR)))
    TMF
    (mk TMF '()
        (list (M (C TMF) 'init             (list (C KS)) NIL)
-             (M (C TMF) 'getTrustManagers '() (ARR ANY)))     ; TrustManager[] gap
+             (M (C TMF) 'getTrustManagers '() (ARR (C TM))))          ; TrustManager[] — typed container
        (list (S 'getInstance (list STR) (C TMF))
              (S 'getDefaultAlgorithm '() STR)))
    SSLC
    (mk SSLC '()
-       (list (M (C SSLC) 'init (list (ARR ANY) (ARR ANY) ANY) NIL) ; KM[]/TM[] gap, SecureRandom Any
+       ;; init(KeyManager[], TrustManager[], SecureRandom) — array containers typed;
+       ;; the arrays flow in from getKeyManagers/getTrustManagers (themselves typed).
+       (list (M (C SSLC) 'init (list (ARR (C KM)) (ARR (C TM)) ANY) NIL)
              (M (C SSLC) 'getServerSocketFactory '() (C SSF))
              (M (C SSLC) 'getSocketFactory '() (C SF)))
        (list (S 'getInstance (list STR) (C SSLC))))
@@ -181,7 +185,7 @@
    SSSOCK
    ;; SSLServerSocket arrives via SSLContext.getServerSocketFactory().createServerSocket()
    (mk SSSOCK '()
-       (list (M (C SSSOCK) 'setEnabledProtocols (list (ARR ANY)) NIL) ; String[] gap
+       (list (M (C SSSOCK) 'setEnabledProtocols (list (ARR STR)) NIL) ; String[] — typed container
              (M (C SSSOCK) 'setNeedClientAuth   (list BOOL) NIL)
              (M (C SSSOCK) 'setReuseAddress     (list BOOL) NIL)
              (M (C SSSOCK) 'setSoTimeout        (list INT) NIL)

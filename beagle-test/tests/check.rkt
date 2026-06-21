@@ -1570,3 +1570,16 @@
 (check-err/rx "JVM method arg-type mismatch is rejected"
   #rx"expected Int|got String"
   '(defn f [] :- Nil (.setSoTimeout (java.net.Socket.) "nope")))
+
+;; typed arrays: container sigs carry precise element types; the gap-listed
+;; construction returns (Arr Any) which flows into them (covariant via Any).
+(check-ok "mTLS typed-array chain: getKeyManagers -> SSLContext.init"
+  '(defn setup [kmf :- javax.net.ssl.KeyManagerFactory
+                tmf :- javax.net.ssl.TrustManagerFactory
+                ctx :- javax.net.ssl.SSLContext] :- Nil
+     (.init ctx (.getKeyManagers kmf) (.getTrustManagers tmf) nil)))
+
+(check-err/rx "wrong array element type to a typed container is rejected"
+  #rx"Arr String|Arr Int"
+  '(defn f [s :- javax.net.ssl.SSLServerSocket a :- (Arr Int)] :- Nil
+     (.setEnabledProtocols s a)))
