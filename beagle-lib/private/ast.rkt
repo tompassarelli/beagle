@@ -221,11 +221,22 @@
               (char=? (string-ref s (- (string-length s) 1)) #\*)))))
 
 (define (constructor-sym? sym)
+  ;; `Foo.` (bare) or `java.io.FileOutputStream.` (FQCN). A trailing `.`, and the
+  ;; CLASS segment (last dotted segment before the trailing dot) is capitalized —
+  ;; so an FQCN ctor (lowercase package prefix) is recognized too, while a plain
+  ;; lowercase dotted name (x.foo.) is not.
   (and (symbol? sym)
        (let ([s (symbol->string sym)])
          (and (> (string-length s) 1)
-              (char-upper-case? (string-ref s 0))
-              (char=? (string-ref s (- (string-length s) 1)) #\.)))))
+              (char=? (string-ref s (- (string-length s) 1)) #\.)
+              (let* ([body (substring s 0 (- (string-length s) 1))]
+                     [cls-start
+                      (let loop ([i (- (string-length body) 1)])
+                        (cond [(< i 0) 0]
+                              [(char=? (string-ref body i) #\.) (+ i 1)]
+                              [else (loop (- i 1))]))])
+                (and (< cls-start (string-length body))
+                     (char-upper-case? (string-ref body cls-start))))))))
 
 (define (keyword-sym? sym)
   (and (symbol? sym)

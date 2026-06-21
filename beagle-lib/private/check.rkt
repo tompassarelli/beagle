@@ -14,6 +14,7 @@
          "parse.rkt"
          "types.rkt"
          "stdlib-types.rkt"
+         "stdlib-jvm.rkt"
          "nixos-schema.rkt"
          "sql-schema.rkt"
          "macros.rkt"
@@ -673,6 +674,18 @@
       [_ (void)]))
 
   (hash-set! env '#%dynamic-vars dyn-vars)
+
+  ;; bare JVM class name -> FQCN, from (import ...) — lets a bare imported
+  ;; `(Socket.)` / `KeyStore/getInstance` resolve against the FQCN-keyed
+  ;; CLASS-TABLE (inline FQCNs like java.io.FileOutputStream need no mapping).
+  (define jvm-imports
+    (for/fold ([h (hasheq)]) ([fqcn (in-list (program-imports prog))])
+      (define s (symbol->string fqcn))
+      (define dot (regexp-match-positions #rx"\\.[^.]*$" s))
+      (if dot
+        (hash-set h (string->symbol (substring s (add1 (caar dot)))) fqcn)
+        (hash-set h fqcn fqcn))))
+  (hash-set! env '#%jvm-imports jvm-imports)
   env)
 
 (define (register-parametric-union! name type-params members member-fields env)
@@ -1778,6 +1791,71 @@
       (when (map-form? val)
         (validate-nixos-map-keys! (map-form-pairs val) env)))))
 
+;; --- JVM class interop (typed host-class resolution) ----------------------
+;; Canonicalize a class name to its FQCN: an inline FQCN (java.io.File) is its
+;; own key; a bare imported name (Socket) maps through the program's (import …).
+(define (canon-class name env)
+  (cond
+    [(hash-ref CLASS-TABLE name #f) name]
+    [(hash-ref (hash-ref env '#%jvm-imports (hasheq)) name #f) => values]
+    [else name]))
+
+;; Drop the leading `.` from a method symbol (.write -> write). CLASS-TABLE keys
+;; methods by bare name; method-call-method-name carries the dot.
+(define (strip-method-dot sym)
+  (define s (symbol->string sym))
+  (if (and (> (string-length s) 0) (char=? (string-ref s 0) #\.))
+    (string->symbol (substring s 1))
+    sym))
+
+;; Drop the trailing `.` from a constructor symbol (Foo. / java.io.File.) to get
+;; the bare class name. parse keeps the dot for emit; CLASS-TABLE is keyed without.
+(define (strip-ctor-dot sym)
+  (define s (symbol->string sym))
+  (if (and (> (string-length s) 0)
+           (char=? (string-ref s (- (string-length s) 1)) #\.))
+    (string->symbol (substring s 0 (- (string-length s) 1)))
+    sym))
+
+;; Split Class/member on the LAST slash (java.security.KeyStore/getInstance).
+(define (split-static sym)
+  (define s (symbol->string sym))
+  (define m (regexp-match-positions #rx"/[^/]*$" s))
+  (if m
+    (values (string->symbol (substring s 0 (caar m)))
+            (string->symbol (substring s (add1 (caar m)))))
+    (values #f #f)))
+
+;; Resolve a ctor/method/static call against an overload set: arity-select,
+;; type-check args (reuse check-args → precise mismatch errors), return the
+;; declared return type. `args` includes the receiver as elem 0 for methods.
+(define (resolve-jvm-call label cls member overloads args env node)
+  (define n (length args))
+  (define by-arity
+    (filter (lambda (ft)
+              (and (not (type-fn-rest-type ft))
+                   (= n (length (type-fn-params ft)))))
+            overloads))
+  (define fn-name (string->symbol (format "~a/~a" cls member)))
+  (cond
+    [(null? by-arity)
+     (raise-diag 'arity
+                 (format "~a ~a/~a: no overload accepts ~a argument(s)" label cls member n)
+                 (hasheq 'function (symbol->string fn-name))
+                 #:src (src-for node))]
+    [(null? (cdr by-arity))
+     (check-args fn-name (car by-arity) args env node)
+     (type-fn-ret (car by-arity))]
+    [else
+     (define arg-types (map (lambda (a) (infer-expr a env)) args))
+     (define hit (findf (lambda (ft) (andmap type-compatible? arg-types (type-fn-params ft))) by-arity))
+     (if hit
+       (type-fn-ret hit)
+       (raise-diag 'type-mismatch
+                   (format "~a ~a/~a: no overload matches the argument types" label cls member)
+                   (hasheq 'function (symbol->string fn-name))
+                   #:src (src-for node)))]))
+
 ;; --- inference -------------------------------------------------------------
 
 ;; infer-expr is the single choke point through which every expression's type
@@ -2071,35 +2149,67 @@
     [(method-call? e)
      (define method-sym (method-call-method-name e))
      (warn-target-exclude method-sym e)
-     (define raw-type (hash-ref env method-sym ANY))
-     (define all-args (cons (method-call-target e) (method-call-args e)))
-     (define fn-type
-       (if (type-poly? raw-type)
-         (resolve-poly-call raw-type all-args env)
-         raw-type))
+     ;; Receiver-typed dispatch: if the target's type is a known JVM class,
+     ;; resolve the method against THAT class's overload set (unknown method on
+     ;; a known class → error; wrong-receiver method → error). Otherwise fall
+     ;; back to the flat stdlib method table (receiver Any/record/unknown).
+     (define recv-type (infer-expr (method-call-target e) env))
+     (define recv-entry (and (type-prim? recv-type)
+                             (hash-ref CLASS-TABLE (type-prim-name recv-type) #f)))
      (cond
-       [(type-fn? fn-type)
-        (check-args method-sym fn-type all-args env e)
-        (type-fn-ret fn-type)]
+       [recv-entry
+        (define mname (strip-method-dot method-sym))
+        (define overloads (hash-ref (class-entry-methods recv-entry) mname #f))
+        (cond
+          [overloads
+           (resolve-jvm-call 'method (type-prim-name recv-type) mname overloads
+                             (cons (method-call-target e) (method-call-args e)) env e)]
+          [else
+           (raise-diag 'type-mismatch
+                       (format ".~a is not a method of ~a"
+                               mname (type-prim-name recv-type))
+                       (hasheq 'function (symbol->string mname))
+                       #:src (src-for e))])]
        [else
-        (infer-expr (method-call-target e) env)
-        (for ([a (in-list (method-call-args e))]) (infer-expr a env))
-        ANY])]
+        (define raw-type (hash-ref env method-sym ANY))
+        (define all-args (cons (method-call-target e) (method-call-args e)))
+        (define fn-type
+          (if (type-poly? raw-type)
+            (resolve-poly-call raw-type all-args env)
+            raw-type))
+        (cond
+          [(type-fn? fn-type)
+           (check-args method-sym fn-type all-args env e)
+           (type-fn-ret fn-type)]
+          [else
+           (for ([a (in-list (method-call-args e))]) (infer-expr a env))
+           ANY])])]
     [(static-call? e)
      (define sym (static-call-class+method e))
      (warn-target-exclude sym e)
-     (define raw-type (hash-ref env sym ANY))
-     (define fn-type
-       (if (type-poly? raw-type)
-         (resolve-poly-call raw-type (static-call-args e) env)
-         raw-type))
+     ;; Typed JVM static: if Class (after import-canonicalization) is a known
+     ;; class with this static, resolve against its static overloads. Otherwise
+     ;; fall back to the flat stdlib table (System/*, Math/*, ns-qualified, …).
+     (define-values (raw-cls member) (split-static sym))
+     (define cls (and raw-cls (canon-class raw-cls env)))
+     (define entry (and cls (hash-ref CLASS-TABLE cls #f)))
+     (define statics (and entry (hash-ref (class-entry-statics entry) member #f)))
      (cond
-       [(type-fn? fn-type)
-        (check-args sym fn-type (static-call-args e) env e)
-        (type-fn-ret fn-type)]
+       [statics
+        (resolve-jvm-call 'static cls member statics (static-call-args e) env e)]
        [else
-        (for ([a (in-list (static-call-args e))]) (infer-expr a env))
-        ANY])]
+        (define raw-type (hash-ref env sym ANY))
+        (define fn-type
+          (if (type-poly? raw-type)
+            (resolve-poly-call raw-type (static-call-args e) env)
+            raw-type))
+        (cond
+          [(type-fn? fn-type)
+           (check-args sym fn-type (static-call-args e) env e)
+           (type-fn-ret fn-type)]
+          [else
+           (for ([a (in-list (static-call-args e))]) (infer-expr a env))
+           ANY])])]
     [(check-expr? e)
      (define inner-type (infer-expr (check-expr-expr e) env))
      (cond
@@ -2185,8 +2295,19 @@
          NIL))
      (apply merge-types default-type clause-types)]
     [(new-form? e)
-     (for ([a (in-list (new-form-args e))]) (infer-expr a env))
-     ANY]
+     ;; Typed JVM constructor: resolve against the CLASS-TABLE (return the class
+     ;; nominal, arg-check via overloads). Unknown class → Any (unchanged), so a
+     ;; JVM class not yet in the manifest doesn't suddenly break.
+     (define cls (canon-class (strip-ctor-dot (new-form-class-name e)) env))
+     (define entry (hash-ref CLASS-TABLE cls #f))
+     (cond
+       [(and entry (pair? (class-entry-ctors entry)))
+        (resolve-jvm-call 'constructor cls 'new (class-entry-ctors entry)
+                          (new-form-args e) env e)
+        (type-prim cls)]
+       [else
+        (for ([a (in-list (new-form-args e))]) (infer-expr a env))
+        ANY])]
     [(kw-access? e)
      ;; (:kw target) — typed keyword-as-fn projection. When target has a
      ;; known record type, resolves to the field's declared type via

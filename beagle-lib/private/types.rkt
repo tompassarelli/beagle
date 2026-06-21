@@ -170,7 +170,14 @@
                  (let ([slash (regexp-match-positions #rx"/" s)])
                    (and slash
                         (< (cdar slash) (string-length s))
-                        (char-upper-case? (string-ref s (cdar slash))))))
+                        (char-upper-case? (string-ref s (cdar slash)))))
+                 ;; JVM fully-qualified class name: a dotted path ending in a
+                 ;; capitalized class segment (java.io.FileOutputStream). Admitted
+                 ;; as a class nominal (type-prim with the FQCN); resolution against
+                 ;; the JVM CLASS-TABLE happens at check-time (unknown class / method
+                 ;; / arg-mismatch error there). Bare names use `/` for qualification,
+                 ;; so a `.` is unambiguously a JVM FQCN.
+                 (regexp-match? #rx"\\.[A-Z][A-Za-z0-9_]*$" s))
        (error 'beagle
               "unknown type: ~a~nexpected primitive, [A B -> R], (Vec T)/(Map K V)/etc., or (U ...)"
               t))

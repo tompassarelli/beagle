@@ -1539,3 +1539,34 @@
   #rx"expected Int|got String"
   '(def (#%meta :dynamic *n*) :- Int 0)
   '(defn f [] :- Int (binding [*n* "oops"] *n*)))
+
+;; --- typed JVM-class interop (CLASS-TABLE receiver-typing) ----------------
+;; FQCN constructors + receiver-typed methods/statics resolve against the JVM
+;; class-signature table (stdlib-jvm.rkt); unknown method / wrong receiver /
+;; arg-mismatch become compile errors instead of bailing to Any.
+
+(check-ok "fsync chain types end-to-end (FileOutputStream -> getChannel -> force)"
+  '(defn write-it [path :- String] :- Nil
+     (let [fos (java.io.FileOutputStream. path true)]
+       (do (.write fos (.getBytes "data"))
+           (.flush fos)
+           (.force (.getChannel fos) true)
+           (.close fos)))))
+
+(check-err/rx "unknown method on a known JVM class is rejected"
+  #rx"not a method"
+  '(defn f [path :- String] :- Nil
+     (.totallyNotAMethod (java.io.FileOutputStream. path true))))
+
+(check-err/rx "wrong-receiver method (.force on FileOutputStream) is rejected"
+  #rx"not a method"
+  '(defn f [path :- String] :- Nil
+     (.force (java.io.FileOutputStream. path true) true)))
+
+(check-err/rx "JVM constructor arg-type mismatch is rejected"
+  #rx"expected String|got Int"
+  '(defn f [] :- Nil (do (java.io.FileOutputStream. 42) nil)))
+
+(check-err/rx "JVM method arg-type mismatch is rejected"
+  #rx"expected Int|got String"
+  '(defn f [] :- Nil (.setSoTimeout (java.net.Socket.) "nope")))
