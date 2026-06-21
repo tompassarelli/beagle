@@ -485,6 +485,15 @@
      "!($$bc.equiv(a, b))"
      '(defn f [(a :- Int) (b :- Int)] :- Bool (not (= a b))))
 
+   ;; value-semantic membership: contains? -> $$bc.contains(coll, x). The runtime
+   ;; dispatches on coll type (Set equiv-member / Array valid-index / map key);
+   ;; replaces the old (x in coll), which broke Sets + value-keyed maps.
+   (check-js-contains "contains? -> $$bc.contains(coll, x) — value membership"
+     "$$bc.contains(coll, k)"
+     '(declare-extern coll Any)
+     '(declare-extern k Any)
+     '(defn f [] :- Bool (contains? coll k)))
+
    (check-js-contains "letfn -> IIFE with function decls"
      "function f(x)"
      '(defn outer [] :- Int

@@ -121,7 +121,11 @@
     [(rand-int) (if (= n 1) (format "Math.floor(Math.random() * ~a)" (emit-expr (car args))) #f)]
     [(vec) (if (= n 1) (format "Array.from(~a)" (emit-expr (car args))) #f)]
     [(set) (if (= n 1) (format "new Set(~a)" (emit-expr (car args))) #f)]
-    [(contains?) (if (= n 2) (format "(~a in ~a)" (emit-expr (cadr args)) (emit-expr (car args))) #f)]
+    ;; value-semantic membership: routes to runtime $$bc.contains, which
+    ;; dispatches on coll type per Clojure contains? — Set: equiv-membership
+    ;; (not reference Set.has); Array: valid-index; object/map: key present.
+    ;; (Compound map keys by value are the P3 representation gap.)
+    [(contains?) (if (= n 2) (begin (use-runtime!) (format "$$bc.contains(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)))) #f)]
     [(keys) (if (= n 1) (format "Object.keys(~a)" (emit-expr (car args))) #f)]
     [(vals) (if (= n 1) (format "Object.values(~a)" (emit-expr (car args))) #f)]
     [(map) (if (= n 2)
