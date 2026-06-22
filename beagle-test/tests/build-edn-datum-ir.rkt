@@ -130,3 +130,62 @@
   (define wrapped (edn-triples->datum triples))   ; consumes the FULL typed dump
   (check-equal? (cdr wrapped) (reader-forms SRC)
                 "type claims must not perturb the reconstructed datum"))
+
+;; --- #36 CRDT slot regression — verb-authored forms must NOT be dropped --------
+;; fram's chartroom verbs (insert-form/upsert-form) position a node's children with
+;; LOGOOT order keys: the predicate is "f<path>~<tie>" (e.g. f262144~12), NOT the
+;; legacy sequential "fN". `--build-edn` consumes such a dump straight from the fram
+;; code-log. The original ordered-fN walked f0,f1,… sequentially and STOPPED at the
+;; first gap → it kept the seed (f0) and SILENTLY DROPPED every verb-positioned form.
+;; This pins the dual-spelling parse + (path,tie) sort: all forms survive, in order.
+;;
+;; We hand-build the wrapper's child slots with CRDT keys to mirror exactly what
+;; fram-build-code emits — independent of the reader, which only mints plain fN.
+(define (manual-triples-build lines)
+  (edn-triples->datum (map (lambda (l) (read (open-input-string l))) lines)))
+
+(test-case "#36: verb-positioned f<path>~<tie> children all survive in (path,tie) order"
+  ;; wrapper node 1 = (beagle-file A B C D); head is plain f0, the four "forms" are
+  ;; symbols positioned by CRDT keys given OUT OF SORTED ORDER on purpose, so a
+  ;; correct (path,tie) sort is what produces A B C D — not hash/emission order.
+  (define lines
+    (list
+     "[1 \"kind\" \"list\"]"
+     "[1 \"f0\" 2]"                       ; head: plain legacy slot (path [65536], tie 0)
+     "[2 \"kind\" \"symbol\"] [2 \"v\" \"beagle-file\"]"
+     ;; deliberately scrambled emission order; deliberately mixed legacy + CRDT keys
+     "[1 \"f393216~34\" 6]"               ; D  (path [393216])
+     "[1 \"f1\" 3]"                       ; A  (legacy path [131072])  ← between head & CRDT
+     "[1 \"f327680~18\" 5]"               ; C  (path [327680])
+     "[1 \"f262144~12\" 4]"               ; B  (path [262144])
+     "[3 \"kind\" \"symbol\"] [3 \"v\" \"A\"]"
+     "[4 \"kind\" \"symbol\"] [4 \"v\" \"B\"]"
+     "[5 \"kind\" \"symbol\"] [5 \"v\" \"C\"]"
+     "[6 \"kind\" \"symbol\"] [6 \"v\" \"D\"]"))
+  ;; one line may carry several triples; split them out the way read-edn-triples does
+  (define flat (apply append (map (lambda (l) (string-split l "] [")) lines)))
+  (define norm (map (lambda (s)
+                      (string-append (if (string-prefix? s "[") "" "[")
+                                     s
+                                     (if (string-suffix? s "]") "" "]")))
+                    flat))
+  (define wrapped (manual-triples-build norm))
+  (check-equal? wrapped '(beagle-file A B C D)
+                "CRDT-positioned children dropped or misordered through --build-edn"))
+
+(test-case "#36: a single legacy f0 + many CRDT siblings — none lost (the seed+verbs shape)"
+  ;; mirrors the reproduction: a seed form at f0, then three verb-inserted forms at
+  ;; f<path>~<tie>. The pre-fix bug kept ONLY the f0 form.
+  (define norm
+    (list
+     "[1 \"kind\" \"list\"]"
+     "[1 \"f0\" 2]"
+     "[1 \"f262144~12\" 3]"
+     "[1 \"f327680~18\" 4]"
+     "[1 \"f393216~34\" 5]"
+     "[2 \"kind\" \"symbol\"]" "[2 \"v\" \"seed\"]"
+     "[3 \"kind\" \"symbol\"]" "[3 \"v\" \"verb1\"]"
+     "[4 \"kind\" \"symbol\"]" "[4 \"v\" \"verb2\"]"
+     "[5 \"kind\" \"symbol\"]" "[5 \"v\" \"verb3\"]"))
+  (check-equal? (manual-triples-build norm) '(seed verb1 verb2 verb3)
+                "verb-authored forms must not be dropped (seed-only is the old bug)"))

@@ -40,6 +40,43 @@
       [(pair? d) (loop (cdr d) (cons (car d) acc))]
       [else      (values (reverse acc) d)])))
 
+;; --- #36 CRDT order keys: a child slot is "f<path>~<tie>", not just "fN" -----
+;; fram's chartroom verbs (insert-form / upsert-form) position children with a
+;; logoot order key: pred "f<path>~<tie>", path = dot-separated ints (dense — a key
+;; strictly between any two always exists), tie = the child node's atomic id (so
+;; concurrent same-gap inserts get distinct keys → both land → commute). The legacy
+;; emit-claims spelling "fN" is the same family at ((N+1)*ORD-STEP, tie 0). A dump
+;; mixes both (seed forms "fN", verb forms "f<path>~<tie>"). We MUST parse the dual
+;; spelling and sort children by (path, tie) — matching resolve.bclj's ord-parse /
+;; ord-cmp exactly — or every verb-positioned form silently vanishes (the sequential
+;; f0/f1/… loop stops at the first gap). Source of truth: fram-lease resolve.bclj.
+(define ORD-STEP 65536)
+(define (parse-fN-slot p)             ; pred string -> {path:(listof int) tie:int} | #f
+  (and (string? p)
+       (let ([m (regexp-match #rx"^f([0-9]+(?:\\.[0-9]+)*)~([0-9]+)$" p)])
+         (cond
+           [m (cons (map string->number (regexp-split #rx"\\." (cadr m)))
+                    (string->number (caddr m)))]
+           [(regexp-match #rx"^f([0-9]+)$" p)
+            => (lambda (m2) (cons (list (* (add1 (string->number (cadr m2))) ORD-STEP)) 0))]
+           [else #f]))))
+(define (fN-slot? p) (and (parse-fN-slot p) #t))
+(define (slot-key<? a b)              ; (path . tie) order: lexicographic path, then tie
+  (let loop ([pa (car a)] [pb (car b)])
+    (cond
+      [(and (null? pa) (null? pb)) (< (cdr a) (cdr b))]   ; equal path → tie-break
+      [(null? pa) #t]                                     ; shorter prefix sorts first
+      [(null? pb) #f]
+      [(< (car pa) (car pb)) #t]
+      [(> (car pa) (car pb)) #f]
+      [else (loop (cdr pa) (cdr pb))])))
+;; a node's ordered child ids: ALL fN slots (legacy + CRDT) by (path,tie). props
+;; here is a node's pred->obj hash. Used by every EDN-side reconstruction path.
+(define (ordered-slot-children h)
+  (map cdr
+       (sort (for/list ([(p o) (in-hash h)] #:when (fN-slot? p)) (cons (parse-fN-slot p) o))
+             slot-key<? #:key car)))
+
 (define (datum->claims d)             ; -> (values root-id (listof (list subj pred obj)))
   (define out '())
   (define n 0)
@@ -142,12 +179,7 @@
       [(member k '("symbol" "string" "keyword" "bool" "char" "number" "other")) (hash-ref h "v")]
       [(equal? k "nil") '()]
       [(or (equal? k "list") (equal? k "vector"))
-       (define elems
-         (let loop ([i 0] [acc '()])
-           (define key (string-append "f" (number->string i)))
-           (if (hash-has-key? h key)
-               (loop (add1 i) (cons (build (hash-ref h key)) acc))
-               (reverse acc))))
+       (define elems (map build (ordered-slot-children h)))
        (define tail (if (hash-has-key? h "tail") (build (hash-ref h "tail")) '()))
        (define lst (foldr cons tail elems))
        (if (equal? k "vector") (list->vector lst) lst)]
@@ -224,11 +256,8 @@
   (for ([t (in-list triples)])
     (hash-update! props (car t) (lambda (h) (hash-set! h (cadr t) (caddr t)) h) (lambda () (make-hash))))
   props)
-(define (ordered-fN props id)           ; node ids of fN children, in order
-  (define h (hash-ref props id (make-hash)))
-  (let loop ([i 0] [acc '()])
-    (define key (string-append "f" (number->string i)))
-    (if (hash-has-key? h key) (loop (add1 i) (cons (hash-ref h key) acc)) (reverse acc))))
+(define (ordered-fN props id)           ; node ids of fN children, in (path,tie) order
+  (ordered-slot-children (hash-ref props id (make-hash))))
 ;; Largest NODE id, so comment/segment ids can be allocated beyond it. Consider
 ;; ONLY subjects (car): every minted node is the subject of its own kind claim, so
 ;; subjects cover all node ids — while objects (caddr) may be LEAF VALUES, and an
@@ -247,7 +276,7 @@
 ;; ALSO numeric but are NOT refs; ref-detection must exclude them or it mistakes a
 ;; `pos`/`line` value for a child node id (#33 slice-2).
 (define (ref-pred? p)
-  (or (equal? p "child") (equal? p "tail") (regexp-match? #rx"^f[0-9]+$" p)))
+  (or (equal? p "child") (equal? p "tail") (fN-slot? p)))   ; fN-slot? covers fN AND f<path>~<tie>
 
 (define (edn-root props)                  ; the structural wrapper (subject never referenced)
   (define refs (make-hash))
@@ -268,10 +297,7 @@
       [(member k '("symbol" "string" "keyword" "bool" "char" "number" "other")) (decode-leaf k (hash-ref h "v"))]
       [(equal? k "nil") '()]
       [(or (equal? k "list") (equal? k "vector"))
-       (define elems
-         (let loop ([i 0] [acc '()])
-           (define key (string-append "f" (number->string i)))
-           (if (hash-has-key? h key) (loop (add1 i) (cons (build (hash-ref h key)) acc)) (reverse acc))))
+       (define elems (map build (ordered-slot-children h)))
        (define tail (if (hash-has-key? h "tail") (build (hash-ref h "tail")) '()))
        (define lst (foldr cons tail elems))
        (if (equal? k "vector") (list->vector lst) lst)]
@@ -301,10 +327,7 @@
        (datum->syntax #f (decode-leaf k (hash-ref h "v")) loc)]
       [(equal? k "nil") (datum->syntax #f '() loc)]
       [(or (equal? k "list") (equal? k "vector"))
-       (define elems
-         (let loop ([i 0] [acc '()])
-           (define key (string-append "f" (number->string i)))
-           (if (hash-has-key? h key) (loop (add1 i) (cons (build (hash-ref h key)) acc)) (reverse acc))))
+       (define elems (map build (ordered-slot-children h)))
        (define tail (if (hash-has-key? h "tail") (build (hash-ref h "tail")) '()))
        (define lst (foldr cons tail elems))   ; list of syntax (inner srclocs preserved)
        (datum->syntax #f (if (equal? k "vector") (list->vector lst) lst) loc)]
