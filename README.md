@@ -5,7 +5,7 @@
 **Typed Clojure that compiles to idiomatic Clojure, ClojureScript, JavaScript, Nix, and Odin.**
 One AST, many back-ends — never a lowest-common-denominator transpile.
 
-[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![license](https://img.shields.io/badge/license-Apache_2.0-blue.svg)](LICENSE)
 [![targets](https://img.shields.io/badge/targets-5%20live%20%2F%201%20dormant-success.svg)](#targets)
 [![Racket](https://img.shields.io/badge/Racket-8.x-9F1D20.svg)](https://racket-lang.org)
 [![status](https://img.shields.io/badge/status-pre--1.0-orange.svg)](#what-it-isnt)
