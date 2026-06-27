@@ -16,7 +16,6 @@
          "stdlib-types.rkt"
          "stdlib-jvm.rkt"
          "nixos-schema.rkt"
-         "sql-schema.rkt"
          "macros.rkt"
          "diagnostic-kind.rkt")
 
@@ -102,20 +101,7 @@
    nix-fn-set?              'nix
    nix-derivation?          'nix
    nix-flake?               'nix
-   nix-with-cfg?            'nix
-   sql-table?               'sql
-   sql-select?              'sql
-   sql-insert?              'sql
-   sql-update?              'sql
-   sql-delete?              'sql
-   sql-with?                'sql
-   sql-union?               'sql
-   sql-insert-select?       'sql
-   sql-returning?           'sql
-   sql-create-index?        'sql
-   sql-drop-table?          'sql
-   sql-alter-table?         'sql
-   sql-truncate?            'sql))
+   nix-with-cfg?            'nix))
 
 ;; Map predicate → display name for error messages.
 (define TARGET-FORM-NAMES
@@ -146,20 +132,7 @@
    nix-fn-set?              "nix/module / nix/fn-set / nix/overlay"
    nix-derivation?          "nix/derivation"
    nix-flake?               "nix/flake"
-   nix-with-cfg?            "with-cfg"
-   sql-table?               "sql/deftable"
-   sql-select?              "sql/select"
-   sql-insert?              "sql/insert"
-   sql-update?              "sql/update"
-   sql-delete?              "sql/delete"
-   sql-with?                "sql/with"
-   sql-union?               "sql/union"
-   sql-insert-select?       "sql/insert-select"
-   sql-returning?           "sql/returning"
-   sql-create-index?        "sql/create-index"
-   sql-drop-table?          "sql/drop-table"
-   sql-alter-table?         "sql/alter-table"
-   sql-truncate?            "sql/truncate"))
+   nix-with-cfg?            "with-cfg"))
 
 ;; Check if expression `e` is a target-specific form used outside its target.
 ;; Raises a compile error if so.
@@ -188,10 +161,6 @@
 
 ;; Parametric union definitions: union-name -> (hasheq 'params 'members 'member-fields)
 (define PARAMETRIC-UNIONS (make-hash))
-
-;; SQL table registry: table-name -> (hash column-name -> type)
-(define SQL-TABLES (make-hash))
-(define SQL-FKS (make-hash)) ; (table-sym . col-sym) → (target-table-sym . target-col-sym)
 
 ;; NixOS option schema for validating dotted map keys in beagle/nix
 (define current-nixos-schema (make-parameter #f))
@@ -319,10 +288,6 @@
     [(scalar-predicate)   "E007"]
     [(type-bound)         "E008"]
     [(target-form)        "E009"]
-    [(sql-group-by)       "E010"]
-    [(sql-table)          "E011"]
-    [(sql-column)         "E012"]
-    [(sql-type)           "E013"]
     [(nixos-unknown-option) "E014"]
     [(nixos-type-mismatch)  "E015"]
     [(template-splice)     "E016"]
@@ -471,24 +436,11 @@
     (hash-clear! UNION-MEMBERS)
     (hash-clear! ENUM-TYPES)
     (hash-clear! PARAMETRIC-UNIONS)
-    (hash-clear! SQL-TABLES)
     (define env (build-initial-env prog))
     (define nix-schema
       (and (eq? (program-target prog) 'nix)
            (let ([src (program-source-file prog)])
              (and src (load-nixos-schema-cached src)))))
-    ;; SQL: seed SQL-TABLES from .beagle-cache/sql-schema.json so queries
-    ;; can reference tables declared anywhere in the project. Same-file
-    ;; deftables (processed below) override cached entries on collision.
-    (when (eq? (program-target prog) 'sql)
-      (define src (program-source-file prog))
-      (define cached (and src (load-sql-schema-cached src)))
-      (when cached
-        (for ([(tbl col-map) (in-hash (sql-schema-tables cached))])
-          (hash-set! SQL-TABLES tbl col-map))
-        (hash-clear! SQL-FKS)
-        (for ([(tbl-col target) (in-hash (sql-schema-fks cached))])
-          (hash-set! SQL-FKS tbl-col target))))
     (define macro-tbl (program-macro-derived-table prog))
     (parameterize ([current-union-members UNION-MEMBERS]
                    [current-enum-types ENUM-TYPES]
@@ -879,125 +831,6 @@
     [(deferror-form _ _ _) (void)]
     [(defscalar-form _ _ _) (void)]
 
-    ;; SQL forms
-    [(sql-table name columns)
-     ;; Register the table schema for column validation
-     (define col-map (make-hash))
-     (for ([col (in-list columns)])
-       (hash-set! col-map (sql-column-name col) (sql-column-type col)))
-     (hash-set! SQL-TABLES name col-map)]
-
-    [(sql-select columns from-clause joins where-clause group-by having order-by limit offset distinct?)
-     (define alias-map (make-hash))
-     (when from-clause
-       (cond
-         [(sql-alias? from-clause)
-          (hash-set! alias-map (sql-alias-alias-name from-clause) (sql-alias-expr from-clause))]
-         [(symbol? from-clause)
-          (hash-set! alias-map from-clause from-clause)]))
-     (for ([j (in-list joins)])
-       (define tbl (sql-join-table j))
-       (define al (or (sql-join-alias j) tbl))
-       (hash-set! alias-map al tbl))
-     (for ([col (in-list columns)])
-       (check-sql-column-ref col alias-map))
-     (when where-clause
-       (check-sql-expr-refs where-clause alias-map))
-     (for ([j (in-list joins)])
-       (when (sql-join-condition j)
-         (check-sql-expr-refs (sql-join-condition j) alias-map)))
-     (when having
-       (check-sql-expr-refs having alias-map))
-     ;; GROUP BY semantic validation
-     (when (and group-by (not (null? group-by)))
-       (for ([col (in-list columns)])
-         (unless (sql-col-aggregated-or-grouped? col group-by)
-           (raise-diag 'sql-group-by
-                       (format "select: column ~a must appear in GROUP BY or be an aggregate"
-                               (sql-col-display-name col))
-                       (hasheq 'column (sql-col-display-name col))))))]
-
-    [(sql-insert table columns values-list)
-     (unless (hash-has-key? SQL-TABLES table)
-       (raise-diag 'sql-table
-                   (format "insert: unknown table ~a~a"
-                           table (sql-table-suggest table))
-                   (hasheq 'table (symbol->string table))))
-     (define col-map (hash-ref SQL-TABLES table))
-     (for ([col (in-list columns)])
-       (unless (hash-has-key? col-map col)
-         (raise-diag 'sql-column
-                     (format "insert ~a: unknown column ~a~a"
-                             table col (sql-column-suggest table col))
-                     (hasheq 'table (symbol->string table)
-                             'column (symbol->string col)))))
-     ;; Validate value types against column types
-     (for ([row (in-list values-list)])
-       (for ([val (in-list row)]
-             [col (in-list columns)])
-         (when (hash-has-key? col-map col)
-           (define expected-type (hash-ref col-map col))
-           (define val-type (sql-literal-type val))
-           (when (and val-type expected-type
-                      (not (type-compatible? val-type expected-type)))
-             (raise-diag 'sql-type
-                         (format "insert ~a.~a: expected ~a, got ~a"
-                                 table col (type->string expected-type) (type->string val-type))
-                         (hash-set* (type-mismatch-details expected-type val-type)
-                                 'table (symbol->string table)
-                                 'column (symbol->string col)))))))]
-
-    [(sql-update table set-pairs where-clause)
-     (unless (hash-has-key? SQL-TABLES table)
-       (raise-diag 'sql-table
-                   (format "update: unknown table ~a~a"
-                           table (sql-table-suggest table))
-                   (hasheq 'table (symbol->string table))))
-     (define col-map (hash-ref SQL-TABLES table))
-     (for ([pair (in-list set-pairs)])
-       (define col-name (car pair))
-       (unless (hash-has-key? col-map col-name)
-         (raise-diag 'sql-column
-                     (format "update ~a: unknown column ~a~a"
-                             table col-name (sql-column-suggest table col-name))
-                     (hasheq 'table (symbol->string table)
-                             'column (symbol->string col-name)))))]
-
-    [(sql-delete table where-clause)
-     (unless (hash-has-key? SQL-TABLES table)
-       (raise-diag 'sql-table
-                   (format "delete: unknown table ~a~a"
-                           table (sql-table-suggest table))
-                   (hasheq 'table (symbol->string table))))]
-
-    [(sql-with ctes body)
-     (for ([cte (in-list ctes)])
-       (check-form (sql-cte-query cte) env))
-     (check-form body env)]
-
-    [(sql-union op left right)
-     (check-form left env)
-     (check-form right env)]
-
-    [(sql-insert-select table columns query)
-     (when (hash-has-key? SQL-TABLES table)
-       (define col-map (hash-ref SQL-TABLES table))
-       (for ([col (in-list columns)])
-         (unless (hash-has-key? col-map col)
-           (raise-diag 'sql-column
-                       (format "insert-select ~a: unknown column ~a" table col)
-                       (hasheq 'table (symbol->string table)
-                               'column (symbol->string col))))))
-     (check-form query env)]
-
-    [(sql-returning stmt columns)
-     (check-form stmt env)]
-
-    [(sql-create-index _ _ _ _) (void)]
-    [(sql-drop-table _ _) (void)]
-    [(sql-alter-table _ _) (void)]
-    [(sql-truncate _) (void)]
-
     [(? with-meta?) (check-form (with-meta-expr form) env)]
 
     ;; threading-marker is transparent to the checker — walk the desugared
@@ -1028,125 +861,6 @@
       [else
        (hash-set! out (param-name p) (or (param-type p) ANY))]))
   out)
-
-;; --- SQL validation helpers -------------------------------------------------
-
-(define (sql-literal-type val)
-  (cond
-    [(string? val) (type-prim 'String)]
-    [(integer? val) (type-prim 'Int)]
-    [(number? val) (type-prim 'Float)]
-    [(boolean? val) (type-prim 'Bool)]
-    [(eq? val 'nil) (type-prim 'Nil)]
-    [else #f]))
-
-;; GROUP BY semantic validation: check whether a column expression
-;; matches any entry in the GROUP BY list.
-(define (sql-col-in-group-by? col group-by-list)
-  (for/or ([gb (in-list group-by-list)])
-    (cond
-      ;; Both bare symbols — exact match
-      [(and (symbol? col) (symbol? gb))
-       (eq? col gb)]
-      ;; Both sql-column-ref — same table+column
-      [(and (sql-column-ref? col) (sql-column-ref? gb))
-       (and (eq? (sql-column-ref-table-or-alias col) (sql-column-ref-table-or-alias gb))
-            (eq? (sql-column-ref-column col) (sql-column-ref-column gb)))]
-      ;; sql-column-ref col matches bare symbol gb if column name matches
-      [(and (sql-column-ref? col) (symbol? gb))
-       (eq? (sql-column-ref-column col) gb)]
-      ;; bare symbol col matches sql-column-ref gb if column name matches
-      [(and (symbol? col) (sql-column-ref? gb))
-       (eq? col (sql-column-ref-column gb))]
-      [else #f])))
-
-;; Check whether a select column is either aggregated or in the GROUP BY list.
-;; Returns #t if the column is valid in a GROUP BY context.
-(define (sql-col-aggregated-or-grouped? col group-by-list)
-  (cond
-    [(sql-aggregate? col) #t]
-    [(sql-window? col) #t]
-    [(sql-alias? col) (sql-col-aggregated-or-grouped? (sql-alias-expr col) group-by-list)]
-    [(or (number? col) (string? col) (boolean? col)) #t]
-    [(and (symbol? col) (eq? col '*)) #t]
-    [else (sql-col-in-group-by? col group-by-list)]))
-
-;; Extract a display name for a column expression (for error messages).
-(define (sql-col-display-name col)
-  (cond
-    [(symbol? col) (symbol->string col)]
-    [(sql-column-ref? col)
-     (format "~a.~a" (sql-column-ref-table-or-alias col) (sql-column-ref-column col))]
-    [(sql-alias? col) (sql-col-display-name (sql-alias-expr col))]
-    [else (format "~a" col)]))
-
-(define (sql-column-suggest table-name col-name)
-  ;; Return a "did you mean: X?" suffix or "" if no near match exists.
-  (define col-map (hash-ref SQL-TABLES table-name #f))
-  (cond
-    [(not col-map) ""]
-    [else
-     (define col-str (symbol->string col-name))
-     (define candidates (map symbol->string (hash-keys col-map)))
-     (define near (find-similar-strs col-str candidates 1))
-     (if (null? near) "" (format " -- did you mean: ~a?" (car near)))]))
-
-(define (sql-table-suggest table-name)
-  (define str (symbol->string table-name))
-  (define candidates (map symbol->string (hash-keys SQL-TABLES)))
-  (define near (find-similar-strs str candidates 1))
-  (if (null? near) "" (format " -- did you mean: ~a?" (car near))))
-
-(define (check-sql-column-ref col alias-map)
-  ;; Validate a column reference (either sql-column-ref, sql-aggregate, or symbol)
-  (cond
-    [(sql-column-ref? col)
-     (define alias (sql-column-ref-table-or-alias col))
-     (define col-name (sql-column-ref-column col))
-     (when (hash-has-key? alias-map alias)
-       (define table-name (hash-ref alias-map alias))
-       (when (and (symbol? table-name) (hash-has-key? SQL-TABLES table-name))
-         (define col-map (hash-ref SQL-TABLES table-name))
-         (unless (hash-has-key? col-map col-name)
-           (raise-diag 'sql-column
-                       (format "select: table ~a has no column ~a~a"
-                               table-name col-name
-                               (sql-column-suggest table-name col-name))
-                       (hasheq 'table (symbol->string table-name)
-                               'column (symbol->string col-name))))))]
-    [(sql-aggregate? col)
-     (when (sql-aggregate-expr col)
-       (check-sql-column-ref (sql-aggregate-expr col) alias-map))]
-    [else (void)]))
-
-(define (check-sql-expr-refs expr alias-map)
-  (cond
-    [(sql-column-ref? expr)
-     (check-sql-column-ref expr alias-map)]
-    [(call-form? expr)
-     (for ([a (in-list (call-form-args expr))])
-       (check-sql-expr-refs a alias-map))]
-    [(sql-aggregate? expr)
-     (when (sql-aggregate-expr expr)
-       (check-sql-expr-refs (sql-aggregate-expr expr) alias-map))]
-    [(sql-window? expr)
-     (for ([a (in-list (sql-window-args expr))])
-       (check-sql-expr-refs a alias-map))]
-    [(sql-case? expr)
-     (for ([c (in-list (sql-case-clauses expr))])
-       (check-sql-expr-refs (sql-case-clause-condition c) alias-map)
-       (check-sql-expr-refs (sql-case-clause-result c) alias-map))
-     (when (sql-case-else-expr expr)
-       (check-sql-expr-refs (sql-case-else-expr expr) alias-map))]
-    [(sql-cast? expr)
-     (check-sql-expr-refs (sql-cast-expr expr) alias-map)]
-    [(sql-exists? expr)
-     (check-sql-expr-refs (sql-exists-subquery expr) alias-map)]
-    [(sql-in-subquery? expr)
-     (check-sql-expr-refs (sql-in-subquery-expr expr) alias-map)]
-    [(sql-select? expr)
-     (check-form expr (make-hash))]
-    [else (void)]))
 
 (define (body-diverges? body)
   (and (pair? body)
@@ -3018,14 +2732,6 @@
       (and (eq? (program-target prog) 'nix)
            (let ([src (program-source-file prog)])
              (and src (load-nixos-schema-cached src)))))
-    (when (eq? (program-target prog) 'sql)
-      (define src (program-source-file prog))
-      (define cached (and src (load-sql-schema-cached src)))
-      (when cached
-        (for ([(tbl col-map) (in-hash (sql-schema-tables cached))])
-          (hash-set! SQL-TABLES tbl col-map))
-        (for ([(tbl-col target) (in-hash (sql-schema-fks cached))])
-          (hash-set! SQL-FKS tbl-col target))))
     (define macro-tbl (program-macro-derived-table prog))
     (define body-locs-tbl (program-body-locs-table prog))
     ;; Capture per-node inferred types ONLY when asked (types-as-view /

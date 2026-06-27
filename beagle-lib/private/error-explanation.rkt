@@ -106,34 +106,6 @@
       ";; In a .bjs file:\n(js/await (fetch \"/api\"))"
       "Move this code to a file with the correct target extension.")
 
-   (E "E010" "SQL GROUP BY violation"
-      "A SELECT column is neither in GROUP BY nor an aggregate function."
-      "Standard SQL rule — agents forget to aggregate non-grouped columns."
-      "(select :users [:name :age] :group-by [:name])\n;; ERROR: column age must appear in GROUP BY or be aggregate"
-      "(select :users [:name (avg :age)] :group-by [:name])"
-      "Add the column to GROUP BY or wrap it in an aggregate function.")
-
-   (E "E011" "Unknown SQL table"
-      "Referenced a table not declared with deftable."
-      "Agents reference tables that haven't been defined in the current module."
-      "(select :users [:name])  ;; ERROR: unknown table users"
-      "(deftable :users {:name String :age Int})\n(select :users [:name])"
-      "Add a deftable declaration or fix the table name.")
-
-   (E "E012" "Unknown SQL column"
-      "Referenced a column that does not exist in the table schema."
-      "Agents use wrong column names — check the deftable definition."
-      "(deftable :users {:name String})\n(select :users [:email])  ;; ERROR: unknown column email"
-      "(select :users [:name])"
-      "Fix the column name to match the deftable schema.")
-
-   (E "E013" "SQL column type mismatch"
-      "Value type does not match the column type declared in deftable."
-      "Agents insert wrong value types into typed SQL columns."
-      "(deftable :users {:name String :age Int})\n(insert :users [:name :age] [[\"Tom\" \"thirty\"]])  ;; ERROR: age expected Int"
-      "(insert :users [:name :age] [[\"Tom\" 30]])"
-      "Fix the value to match the declared column type.")
-
    (E "E014" "Unknown NixOS option"
       "Referenced a NixOS option path that does not exist in the loaded schema."
       "Agents use outdated or misspelled option paths. Check suggestions in the diagnostic."

@@ -1,8 +1,0 @@
-#lang beagle/sql
-(ns test.sql.demo.typo-column)
-
-;; This file intentionally has a typo (`viewz` instead of `views`).
-;; Expected: type error with "did you mean: views?" suggestion.
-
-(sql/insert posts [user_id title viewz]
-  (values [1 "Hello" 0]))

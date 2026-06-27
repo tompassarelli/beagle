@@ -111,12 +111,11 @@ maps, ClojureScript as Clojure-shaped JS, Odin as structs and procs.
 | JavaScript    | Live                                  |
 | Nix           | Live                                  |
 | Odin          | Live                                  |
-| SQL           | Dormant emitter (schema-typing live)  |
 
-SQL's schema-typing is live in the checker; its emitter is parked under
-`dormant/`, loadable with `BEAGLE_ALL_TARGETS=1`. Targets are removed, not
-deprecated, when they stop earning their place — reviving one means re-wiring
-`emit.rkt` and proving it against a real consumer, not flipping a switch.
+Targets are removed, not deprecated, when they stop earning their place —
+reviving one means re-wiring `emit.rkt` and proving it against a real consumer,
+not flipping a switch. (SQL was removed 2026-06-28 — unused, rotting; recover
+from tag `sql-archive-2026-06-28`.)
 
 ## How it compiles
 

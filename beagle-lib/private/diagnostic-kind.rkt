@@ -64,10 +64,6 @@
 ;;                        union it scrutinizes.
 ;;   nixos-type-mismatch: nixos-option value's type doesn't match its
 ;;                        declared schema type.
-;;   sql-group-by       : SQL group-by clause typing problem.
-;;   sql-table          : referenced SQL table doesn't exist.
-;;   sql-column         : referenced SQL column doesn't exist.
-;;   sql-type           : SQL column type doesn't match expression.
 ;;   nixos-unknown-option : nixos-option references a path that doesn't
 ;;                        exist in the schema. (Borderline: could read
 ;;                        either as surface-divergence or type-error.
@@ -107,10 +103,6 @@
    'scalar-predicate    'type-error
    'exhaustive-match    'type-error
    'nixos-type-mismatch 'type-error
-   'sql-group-by        'type-error
-   'sql-table           'type-error
-   'sql-column          'type-error
-   'sql-type            'type-error
    'nixos-unknown-option 'type-error
    'macro-expansion-type-error 'type-error
    'purity-leak          'type-error))

@@ -1,7 +1,0 @@
-#lang beagle/sql
-(ns test.sql.simple-select)
-
-;; Most basic SELECT — bare columns, table, simple WHERE.
-(sql/select [name price]
-  (from products)
-  (where (> price 10)))

@@ -86,7 +86,7 @@
                                (define d (syntax->datum f))
                                (and (pair? d) (eq? (car d) 'define-target)))))
                (raise-syntax-error 'beagle
-                 "target required — use #lang beagle/js, beagle/clj, beagle/cljs, beagle/nix, beagle/sql, or add (define-target <target>)"
+                 "target required — use #lang beagle/js, beagle/clj, beagle/cljs, beagle/nix, or add (define-target <target>)"
                  stx)))))
 
        ;; Multi-module: package-based targets (Odin, Zig) spread one namespace

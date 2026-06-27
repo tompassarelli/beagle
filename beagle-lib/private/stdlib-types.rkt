@@ -9,10 +9,7 @@
 (require racket/set
          "stdlib-portable.rkt"
          "stdlib-nix.rkt"
-         ;; CLJ/CLJS/JS/Odin stdlib catalogs are live. The SQL catalog stays
-         ;; wired (its emitter is dormant but schema-typing in check.rkt is
-         ;; live) because stdlib-types is consumed by query tools (LSP,
-         ;; beagle-sig) that run against any target.
+         ;; CLJ/CLJS/JS/Odin stdlib catalogs are live.
          "stdlib-clj.rkt"
          "stdlib-cljs.rkt"
          "stdlib-bb.rkt"
@@ -21,8 +18,7 @@
          ;; types instead of Any. bb/clj-only (excluded from cljs, like STDLIB-BB).
          "stdlib-fram.rkt"
          "stdlib-js.rkt"
-         "stdlib-odin.rkt"
-         "dormant/stdlib-sql.rkt")
+         "stdlib-odin.rkt")
 
 (define (merge-hashes . hs)
   (for*/fold ([out (hash)]) ([h (in-list hs)]
@@ -41,15 +37,11 @@
 (define stdlib-nix-combined
   (merge-hashes STDLIB-PORTABLE STDLIB-NIX))
 
-(define stdlib-sql-combined
-  (merge-hashes STDLIB-SQL))
-
 (define (stdlib-for-target target)
   (case target
     [(clj cljs) stdlib-clj-combined]
     [(js)       stdlib-js-combined]
     [(nix)      stdlib-nix-combined]
-    [(sql)      stdlib-sql-combined]
     [(odin)     (merge-hashes STDLIB-PORTABLE STDLIB-ODIN)]
     [else (error 'stdlib-for-target "unknown target: ~a" target)]))
 
@@ -72,5 +64,4 @@
          STDLIB-PORTABLE STDLIB-CLJ STDLIB-CLJS STDLIB-BB CLJ-EXCLUDE
          STDLIB-JS JS-NO-EMIT
          STDLIB-NIX
-         STDLIB-ODIN
-         STDLIB-SQL)
+         STDLIB-ODIN)
