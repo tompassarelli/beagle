@@ -2,16 +2,30 @@
 # Resolve the correct Racket for beagle's compiled bytecode.
 # Source this from bin/* scripts: source "$(dirname "$0")/_beagle-racket"
 # Then use $RACKET instead of "racket" and $RACO instead of "raco".
+#
+# Also PREPENDS the pinned racket onto PATH (exported), so child scripts with a
+# bare `#!/usr/bin/env racket` shebang (beagle-syntax, -fix, -lsp, -repl, ...)
+# inherit it instead of an ambient racket. Without this, invoking beagle outside
+# its direnv shell (dispatched agent / CI / cron / a non-direnv subshell) picks
+# the system racket, where beagle-lib is unlinked -> "collection not found:
+# beagle/private/*" -> the syntax + recompile gate fails SILENTLY. The resolved
+# path is cached in _BEAGLE_RACKET so nested sources skip the costly direnv call.
 
 BEAGLE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 RACKET="racket"
 RACO="raco"
 
-if [[ -d "$BEAGLE_ROOT/.direnv" ]]; then
+if [[ -z "${_BEAGLE_RACKET:-}" && -d "$BEAGLE_ROOT/.direnv" ]]; then
     _direnv_racket="$(cd "$BEAGLE_ROOT" && direnv exec . which racket 2>/dev/null || true)"
-    if [[ -n "$_direnv_racket" ]]; then
-        RACKET="$_direnv_racket"
-        RACO="$(dirname "$_direnv_racket")/raco"
-    fi
+    [[ -n "$_direnv_racket" ]] && export _BEAGLE_RACKET="$_direnv_racket"
+fi
+
+if [[ -n "${_BEAGLE_RACKET:-}" ]]; then
+    RACKET="$_BEAGLE_RACKET"
+    RACO="$(dirname "$_BEAGLE_RACKET")/raco"
+    case ":$PATH:" in
+        *":$(dirname "$_BEAGLE_RACKET"):"*) ;;          # pinned racket already on PATH
+        *) export PATH="$(dirname "$_BEAGLE_RACKET"):$PATH" ;;
+    esac
 fi

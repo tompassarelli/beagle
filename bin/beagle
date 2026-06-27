@@ -4,6 +4,10 @@ set -euo pipefail
 BEAGLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$BEAGLE_DIR/bin"
 
+# Pin racket for the whole dispatch tree (incl. bare-shebang racket scripts like
+# beagle-syntax) so `beagle <cmd>` is robust outside the direnv shell.
+source "$BIN/_beagle-racket"
+
 usage() {
     cat >&2 <<'EOF'
 beagle — a typed Clojure subset; one AST → Clojure / ClojureScript /
