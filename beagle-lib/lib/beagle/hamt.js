@@ -179,6 +179,15 @@ export function hamtMap(entries) {
   return m;
 }
 
+// Idempotent coercion to a hamtMap. An ALREADY-hamt value passes through
+// unchanged: Object.entries() on a hamt would surface its struct fields
+// (_bg/root/count), NOT its logical entries — so coercing a hamt corrupts it.
+// Makes the emitter's native->hamt coercion safe when a loop/recur var is
+// statically native (seed {}) but already a hamt at runtime after assoc.
+export function asHamtMap(x) {
+  return (x && x._bg === 'hamtMap') ? x : hamtMap(Object.entries(x));
+}
+
 export function hamtMapGet(m, k, notFound = null) {
   const r = nodeGet(m.root, k, bcHash(k) >>> 0, 0);
   return r === NOT_FOUND ? notFound : r;

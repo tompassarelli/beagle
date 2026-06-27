@@ -892,8 +892,12 @@
 (define (emit-as-hamt-map coll-node)
   (if (eq? (classify-rep coll-node) 'hmap)
       (emit-expr coll-node)
-      (begin (use-hamt! "hamtMap")
-             (format "hamtMap(Object.entries(~a))" (emit-expr coll-node)))))
+      ;; asHamtMap is idempotent: a value that is ALREADY a hamt at runtime (e.g.
+      ;; a loop var seeded native {} but reassigned by assoc) passes through, so
+      ;; we never run Object.entries() on a hamt (which would surface its struct
+      ;; fields instead of its entries and silently drop all prior keys).
+      (begin (use-hamt! "asHamtMap")
+             (format "asHamtMap(~a)" (emit-expr coll-node)))))
 
 ;; --- PHASE D: static per-alloc-site rep metric (fraction-native) ------------
 ;; OPT-IN (BEAGLE_REP_METRIC=1): when set, js-emit-program threads a counter and
