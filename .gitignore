@@ -27,3 +27,10 @@ tools/*/Cargo.lock
 __pycache__/
 *.pyc
 .odin-root/
+
+# Scratch + dogfood/emit output (regenerated; never source)
+.scratch/
+beagle/user.clj
+runtime/src/callgraph.clj
+runtime/src/rename.clj
+runtime/src/roundtrip/
