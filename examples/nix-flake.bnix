@@ -1,10 +1,10 @@
 #lang beagle/nix
 (ns flake)
 
-;; FirnOS flake — converted from nisp flake.rkt
+;; firn flake — converted from nisp flake.rkt
 ;; This exercises nearly every beagle/nix feature.
 
-{:description "FirnOS - A modular, shareable NixOS configuration framework"
+{:description "firn - A modular, shareable NixOS configuration framework"
 
  :inputs
    {:nixpkgs.url "github:nixos/nixpkgs/nixos-25.11"

@@ -108,7 +108,7 @@ proof that the approach generalizes across genuinely different runtime models.
 
 This is already demonstrated where it is hardest, not merely aspired to:
 
-- **Nix** — firnos, a complete NixOS system typed end-to-end against its
+- **Nix** — firn, a complete NixOS system typed end-to-end against its
   16k-option schema. The target where the pain is most real (untyped,
   error-hostile) and writing it by hand is worst.
 - **Clojure** — a different runtime model entirely (eager maps, JVM), driven by

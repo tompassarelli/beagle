@@ -91,7 +91,7 @@ time; wrong-typed values fail at type-check time.
 
 ## Real codebases author against Beagle
 
-- **[firnos](https://github.com/tompassarelli/firnos)** — a complete NixOS
+- **[firn](https://github.com/tompassarelli/firn)** — a complete NixOS
   system, authored in `.bnix` and schema-typed end to end; it builds from
   `flake.bnix` directly (Nix target).
 - **[gjoa](https://github.com/Autonymy/gjoa)** — a Firefox overlay browser UI,
@@ -185,7 +185,7 @@ bin/beagle test --active-only       # active tier
 ```
 
 For a real-world `.bnix` corpus, clone
-[firnos](https://github.com/tompassarelli/firnos) — schema-typed end to end; the
+[firn](https://github.com/tompassarelli/firn) — schema-typed end to end; the
 NixOS system builds from `flake.bnix` directly.
 
 <details>
