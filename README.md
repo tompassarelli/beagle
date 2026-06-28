@@ -18,6 +18,21 @@ isn't to reject bad code — it's to tell repair tools *what* kind of mistake
 happened, *where* in the source, after *which* canonicalization, against
 *which* target.
 
+## Real codebases author against Beagle
+
+- **[firn](https://github.com/tompassarelli/firn)** — a complete NixOS
+  system, authored in `.bnix` and schema-typed end to end; it builds from
+  `flake.bnix` directly (Nix target).
+- **[gjoa](https://github.com/tompassarelli/gjoa)** — a Firefox overlay browser UI,
+  ported from TypeScript to `.bjs` (JS target).
+- **[wake](https://github.com/tompassarelli/wake)** — an application compiler
+  (declare entities, views, routes → plain direct-DOM JS), itself authored in
+  `.bjs` (JS target).
+- **[fram](https://github.com/tompassarelli/fram)** — an append-only claim engine
+  (claims + stratified Datalog), authored in `.bclj` (Clojure target).
+- **[lodestar](https://github.com/tompassarelli/lodestar)** — claim-native work
+  coordination (CLI + MCP, on babashka), authored in `.bclj` (Clojure target).
+
 ## One source, many back-ends
 
 The same source body, saved as `.bclj`, `.bjs`, and `.bnix`:
@@ -88,16 +103,6 @@ emits:
 Assigning a `String` fails at check time with `file:line:col` precision —
 *before* `nixos-rebuild` is ever invoked. Unknown option paths fail at parse
 time; wrong-typed values fail at type-check time.
-
-## Real codebases author against Beagle
-
-- **[firn](https://github.com/tompassarelli/firn)** — a complete NixOS
-  system, authored in `.bnix` and schema-typed end to end; it builds from
-  `flake.bnix` directly (Nix target).
-- **[gjoa](https://github.com/Autonymy/gjoa)** — a Firefox overlay browser UI,
-  ported from TypeScript to `.bjs` (JS target).
-- **[fram](https://github.com/Autonymy/fram)** — an append-only claim engine
-  (claims + stratified Datalog), authored in `.bclj` (Clojure target).
 
 ## Targets
 
