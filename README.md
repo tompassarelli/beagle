@@ -23,8 +23,8 @@ happened, *where* in the source, after *which* canonicalization, against
 - **[firn](https://github.com/tompassarelli/firn)** — a complete NixOS
   system, authored in `.bnix` and schema-typed end to end; it builds from
   `flake.bnix` directly (Nix target).
-- **[gjoa](https://github.com/tompassarelli/gjoa)** — a Firefox overlay browser UI,
-  ported from TypeScript to `.bjs` (JS target).
+- **[gjoa](https://github.com/tompassarelli/gjoa)** — a highly optimized Firefox
+  fork tuned for power users, authored in `.bjs` (JS target).
 - **[wake](https://github.com/tompassarelli/wake)** — an application compiler
   (declare entities, views, routes → plain direct-DOM JS), itself authored in
   `.bjs` (JS target).
