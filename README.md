@@ -29,7 +29,7 @@ happened, *where* in the source, after *which* canonicalization, against
   `.bjs` (JS target).
 - **[fram](https://github.com/tompassarelli/fram)** — an append-only claim engine
   (claims + stratified Datalog), authored in `.bclj` (Clojure target).
-- **[lodestar](https://github.com/tompassarelli/lodestar)** — claim-native work
+- **[tern](https://github.com/tompassarelli/tern)** — claim-native work
   coordination (CLI + MCP, on babashka), authored in `.bclj` (Clojure target).
 
 ## One source, many back-ends
