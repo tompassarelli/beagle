@@ -27,22 +27,55 @@
 (define (mangle-name sym)
   (mangle-str (symbol->string sym)))
 
+;; ESM code is ALWAYS strict mode, so a beagle identifier that mangles to a JS
+;; reserved word — or to strict-mode-restricted `eval`/`arguments` — is a
+;; SyntaxError at its declaration / param / binding site (`function f(private)`,
+;; `let default = …`). Suffix such a name with `$`: a character mangle-str never
+;; otherwise emits, so the `<word>$` namespace can never collide with a
+;; normally-mangled identifier, and because every identifier reference funnels
+;; through mangle-str the rename stays consistent across declaration and use.
+;; Property names go through mangle-prop / kw->prop, NOT here, so a legal member
+;; access like `obj.private` or an object key `{ default: … }` is untouched.
+;;
+;; DELIBERATELY EXCLUDED: `true` `false` `this` `super`. beagle carries these as
+;; literal / keyword SYMBOLS that the emitter routes through mangle-name to emit
+;; as the bare JS keyword (a boolean literal is the symbol `true`; a jst method
+;; body refers to `this`). Mangling them would corrupt those intentional
+;; emissions into `true$` / `this$`. (`nil` never reaches here — emit-js lowers
+;; it to `null` directly — so `null` in this set only ever guards a real
+;; user-authored identifier.)
+(define JS-RESERVED-WORDS
+  (for/hash ([w (in-list '("break" "case" "catch" "class" "const" "continue"
+                           "debugger" "default" "delete" "do" "else" "enum"
+                           "export" "extends" "finally" "for" "function"
+                           "if" "implements" "import" "in" "instanceof"
+                           "interface" "let" "new" "null" "package" "private"
+                           "protected" "public" "return" "static"
+                           "switch" "throw" "try" "typeof" "var"
+                           "void" "while" "with" "yield" "await" "eval"
+                           "arguments"))])
+    (values w #t)))
+
+(define (js-reserved-word? s) (hash-ref JS-RESERVED-WORDS s #f))
+
 (define (mangle-str s)
-  (string-replace
-   (string-replace
+  (define mangled
     (string-replace
      (string-replace
       (string-replace
        (string-replace
         (string-replace
-         (string-replace s "_" "__")
-         "-" "_")
-        "?" "_p")
-       "!" "_bang")
-      "=" "_eq")
-     ">" "_gt")
-    "<" "_lt")
-   "%" "_pct"))
+         (string-replace
+          (string-replace
+           (string-replace s "_" "__")
+           "-" "_")
+          "?" "_p")
+         "!" "_bang")
+        "=" "_eq")
+       ">" "_gt")
+      "<" "_lt")
+     "%" "_pct"))
+  (if (js-reserved-word? mangled) (string-append mangled "$") mangled))
 
 (define (mangle-prop s)
   (string-replace s "-" "_"))

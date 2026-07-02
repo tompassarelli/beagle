@@ -1,0 +1,2 @@
+beagle-test/conformance/corpus/js-set-on-get.bjs:12:0: beagle: beagle: set! target must be a local variable or a field access (.-field); (get …) is not an assignable place on the js target
+  in: (defn put-key! (#%brackets m :- Any k :- String v :- Any) :- Any (set! (get m k) v))

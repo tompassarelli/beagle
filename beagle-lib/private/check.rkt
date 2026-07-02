@@ -1805,7 +1805,31 @@
      (for-each (lambda (a) (infer-expr a env)) (recur-form-args e))
      ANY]
     [(set!-form? e)
-     (infer-expr (set!-form-target e) env)
+     ;; A set! target must be an assignable PLACE. On value targets (js, cljs,
+     ;; clj, nix) the only places are a bare local variable and a field access
+     ;; (`.-field` / `.field`, a method-call node). A general call form like
+     ;; `(get m k)` is NOT a place: emit would lower it to `$$bc$get(m, k) = v`,
+     ;; an invalid assignment target (silent miscompile). The systems targets
+     ;; (odin, zig) DO give `(get …)` / `(nth …)` / `(:kw …)` / deref place
+     ;; semantics — their own emitters validate — so only carve those out.
+     ;; There is no typed string-keyed object mutation surface (aset is
+     ;; (Any Int Any)); until one exists, this reads as a checker rejection
+     ;; rather than a silent miscompile.
+     (define target (set!-form-target e))
+     (unless (or (symbol? target)
+                 (method-call? target)
+                 (memq (current-check-target) '(odin zig)))
+       (define target-desc
+         (if (and (call-form? target) (symbol? (call-form-fn target)))
+             (format "(~a …)" (call-form-fn target))
+             "that form"))
+       (raise-diag 'target-form
+                   (format "set! target must be a local variable or a field access (.-field); ~a is not an assignable place on the ~a target"
+                           target-desc (current-check-target))
+                   (hasheq 'form "set!"
+                           'current-target (symbol->string (or (current-check-target) 'unknown)))
+                   #:src (src-for e)))
+     (infer-expr target env)
      (infer-expr (set!-form-value e) env)
      ANY]
     [(await-form? e)

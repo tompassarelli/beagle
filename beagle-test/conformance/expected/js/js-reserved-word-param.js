@@ -1,4 +1,4 @@
 
-export function use_private(private) {
-  return private;
+export function use_private(private$) {
+  return private$;
 }

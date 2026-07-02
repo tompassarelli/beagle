@@ -24,9 +24,12 @@
  ("js-unary"           "beagle-test/tests/fixtures/js-unary.bjs"           emit)
  ("jsquote-demo"       "beagle-test/tests/fixtures/jsquote-demo.bjs"       emit)
  ("macrolib"           "beagle-test/tests/fixtures/macrolib.bjs"           emit)
- ;; ratchet fixtures — silent miscompiles pinned as data (@019f21fe-b4df)
+ ;; js-reserved-word-param: emit MANGLES strict-mode reserved words (`private`
+ ;; -> `private$`), so this now emits valid ESM (@019f21fe-b4df, fixed).
  ("js-reserved-word-param" "beagle-test/conformance/corpus/js-reserved-word-param.bjs" emit)
- ("js-set-on-get"          "beagle-test/conformance/corpus/js-set-on-get.bjs"          emit)
+ ;; js-set-on-get: check now REJECTS set! on a non-place target (`(get m k)`)
+ ;; on value targets — reject row, golden is the diagnostic (@019f21fe-b4df).
+ ("js-set-on-get"          "beagle-test/conformance/corpus/js-set-on-get.bjs"          reject)
 
  ;; --- clj ------------------------------------------------------------
  ("mathlib"            "beagle-test/tests/fixtures/mathlib.bclj"           emit)
