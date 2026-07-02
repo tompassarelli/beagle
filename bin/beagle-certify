@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# beagle-certify: per-backend conformance gate — the oracle ratchet.
+#
+# Certifies the conformance corpus (beagle-test/conformance/corpus.rktd)
+# against committed goldens sourced from the Racket beagle oracle, validity-
+# checks emitted output with each target's own parser, and enforces the
+# shrink-only known-divergences-<target>.edn ratchet: a NEW unclassified
+# divergence fails, a STALE (resolved) entry fails until deleted.
+#
+# Usage:
+#   bin/beagle-certify                  # the gate (CI: exit 0/1)
+#   bin/beagle-certify --target js,clj  # subset of targets
+#   bin/beagle-certify --regen          # re-source goldens from the oracle
+#
+# Mechanics + maintenance flow: beagle-test/conformance/README.md
+set -euo pipefail
+source "$(dirname "$0")/_beagle-racket"
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Route the `beagle` collection at THIS checkout's beagle-lib. In the canonical
+# checkout this matches the installed pkg link (harmless); in a git worktree it
+# is REQUIRED — the pkg link points at the canonical checkout, and the gate
+# must certify the compiler it sits next to. (Same routing driftlab used.)
+collects="$root/.beagle/collects"
+mkdir -p "$collects"
+ln -sfn "$root/beagle-lib" "$collects/beagle"
+export PLTCOLLECTS="$collects:"
+
+exec "$RACKET" "$root/beagle-test/conformance/certify.rkt" "$@"

@@ -1,0 +1,11 @@
+#lang beagle/clj
+;; REJECT ROW — pins the checker's diagnostic for a plain type error.
+;; The golden (expected/clj/reject-type-mismatch.diag) is the diagnostic
+;; text the oracle emits; a silent acceptance is a reject-mismatch (worst
+;; class), a changed message is diag-divergent (regen after review).
+(ns conformance.reject-type-mismatch)
+
+(defn takes-int [n :- Int] :- Nil nil)
+
+(defn boom [] :- Nil
+  (takes-int "not an int"))

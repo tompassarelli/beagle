@@ -1,0 +1,2 @@
+beagle-test/conformance/corpus/reject-type-mismatch.bclj:10:0: beagle: beagle: call to takes-int: arg 1 expected Int, got String
+  in: (defn boom (#%brackets) :- Nil (takes-int "not an int"))

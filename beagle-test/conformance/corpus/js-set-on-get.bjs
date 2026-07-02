@@ -1,0 +1,13 @@
+#lang beagle/js
+;; RATCHET FIXTURE — silent miscompile (thread @019f21fe-b4df).
+;; (set! (get m k) v) passes check but emits `$$bc$get(m, k) = v` — an
+;; invalid assignment target (parse error under bun/esbuild; V8 defers it
+;; to a runtime ReferenceError, so `node --check` misses it).
+;; The typed surface gap behind it: aset is (Any Int Any), so there is no
+;; string-keyed object mutation form — agents reach for set!-on-get.
+;; Classified :bug in known-divergences-js.edn — delete that entry (and
+;; regen the golden) when check rejects it or emit lowers it soundly.
+(ns conformance.js-set-on-get)
+
+(defn put-key! [m :- Any k :- String v :- Any] :- Any
+  (set! (get m k) v))

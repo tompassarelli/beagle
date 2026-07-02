@@ -44,6 +44,25 @@ jobs:
           CI: 'true'
         run: bin/beagle-test
 
+      # Conformance gate (the oracle ratchet): certify the corpus against
+      # committed goldens sourced from the Racket oracle, validity-check the
+      # emitted output with each target's own parser, and enforce the
+      # shrink-only known-divergences-<target>.edn ledgers. bun + nix are the
+      # js/nix validity oracles — without a tool the gate degrades to
+      # "unenforced" for that dimension (never falsely stale), so install both
+      # to keep the silent-miscompile class armed in CI. bb is installed above.
+      - name: Install bun (js validity oracle for the conformance gate)
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install nix (nix validity oracle for the conformance gate)
+        uses: cachix/install-nix-action@v31
+
+      # _BEAGLE_RACKET pins to the runner's setup-racket (which built all
+      # bytecode in this job); otherwise bin/_beagle-racket would nix-develop
+      # the flake and download a second toolchain.
+      - name: Conformance gate — oracle ratchet
+        run: _BEAGLE_RACKET="$(which racket)" bin/beagle-certify
+
       # Byte-stable emit (move 2): the claims->source pretty-printer must be a
       # deterministic, LOCAL, comment-preserving, round-trip-preserving formatter —
       # the precondition for making claims canonical and text a regenerable lowering.
