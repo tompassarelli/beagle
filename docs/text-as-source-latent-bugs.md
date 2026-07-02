@@ -159,7 +159,7 @@ hiding wrong answers. That is evidence for the thesis, not incidental cleanup.
 > area (defmethod/reify, as-> regression, grand identity) → **CONVERGED**. 0 surviving false-positives. Each
 > round probed beagle surface the resolver had never modeled, so this was *completing*
 > the resolver for beagle's real surface, not chasing exotica. The categories closed:
-> sequential/`:or` bindings; the type fleet (constructors, `defunion` variants,
+> sequential/`:or` bindings; the type family (constructors, `defunion` variants,
 > cross-module types, single-colon `:`); the full quasiquote family (reader-`~`,
 > explicit `(unquote)`, quoted data) — sweep #4 even caught a *regression sweep #3's own
 > fix introduced*, the loop catching itself; the shipped `defrecord`+`defunion` idiom
