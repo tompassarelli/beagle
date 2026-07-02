@@ -1,0 +1,45 @@
+#lang beagle/clj
+(ns selfhost.fixtures.threading)
+
+;; Parity fixture for threading-marker SURFACE PRESERVATION. The Racket
+;; compiler parses the threading family into a marker (surface kind + parsed
+;; orig args + desugared let/if chain) and emit-clj reconstructs the surface
+;; form. Full-chain byte-parity here proves the selfhost chain does the same:
+;;   - all seven threaders round-trip as surface forms in emitted clj
+;;   - the desugared chain still type-checks (marker transparent to check)
+;;   - counter parity: orig args parse FIRST, then the desugar mints, then
+;;     the desugared datum re-parses — nested binder mints number identically
+;; Run: self-host/verify-selfhost.sh self-host/fixtures/threading.bclj
+
+(defn first-int [xs :- (Vec Int)] :- Any
+  (if (> (count xs) 0) (nth xs 0) nil))
+
+(defn pipeline [x :- Int] :- Int
+  (-> x (+ 1) (* 2)))
+
+(defn pipeline-last [x :- Int] :- Int
+  (->> x (+ 1) (* 2)))
+
+(defn selective [n :- Int] :- Int
+  (cond-> n
+    (> n 0) (+ 5)
+    (> n 10) (* 2)))
+
+(defn selective-last [n :- Int] :- Int
+  (cond->> n
+    (> n 0) (- 100)))
+
+(defn shortcut [xs :- (Vec Int)] :- Any
+  (some-> (first-int xs) (+ 1)))
+
+(defn shortcut-last [xs :- (Vec Int)] :- Any
+  (some->> (first-int xs) (- 100)))
+
+(defn renamed [n :- Int] :- Int
+  (as-> n v (+ v 1) (* v 2)))
+
+;; a binder-minting form INSIDE a threading step: the orig-args parse mints
+;; bind__N first, the desugared re-parse mints again — order pinned
+(defn nested-mint [xs :- (Vec Int)] :- Int
+  (-> (if-let [v :- Int (first-int xs)] v 0)
+      (+ 1)))

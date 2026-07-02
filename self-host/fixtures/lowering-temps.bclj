@@ -6,9 +6,8 @@
 ;; per-program counter reset in parse-program. Full-chain byte-parity on this
 ;; module proves temp NAMING and NUMBERING match the Racket compiler. Run:
 ;;   self-host/verify-selfhost.sh self-host/fixtures/lowering-temps.bclj
-;; (cond->/some-> counter advancement is covered at the AST level — their clj
-;; emission keeps the surface sugar via threading-marker, which the selfhost
-;; emitter does not implement yet.)
+;; (cond->/some-> temp advancement + surface preservation live in
+;; threading.bclj; hygiene-rename interleave lives in user-macros.bclj.)
 
 (defn first-int [xs :- (Vec Int)] :- Any
   (if (> (count xs) 0) (nth xs 0) nil))

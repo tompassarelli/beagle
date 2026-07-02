@@ -419,6 +419,16 @@
     [(with-meta? e)
      (expr->json (with-meta-expr e))]
 
+    ;; threading-marker: KIND + surface ARGS drive the clj/cljs emitter's
+    ;; surface reconstruction; DESUGARED is what check (and emit-nix) walk.
+    ;; Serialized in full so an AST-JSON consumer can do either. args and
+    ;; desugared share AST nodes in-memory; the JSON duplicates them.
+    [(threading-marker? e)
+     (hasheq 'node "threading"
+             'kind (symbol->string (threading-marker-kind e))
+             'args (map expr->json (threading-marker-orig-args e))
+             'desugared (expr->json (threading-marker-desugared e)))]
+
     ;; --- Nix-specific forms ---
     [(nix-inherit? e)
      (hasheq 'node "nix-inherit"

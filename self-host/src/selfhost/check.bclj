@@ -757,6 +757,11 @@
   (cond
     (nil? e) ANY
 
+    ;; threading is transparent to the checker — walk the desugared form
+    ;; (check.rkt threading-marker arms); surface args are emit-side only
+    (= (get e "node") "threading")
+      (infer-expr! (get e "desugared") env)
+
     (= (get e "node") "literal")
       (let [t (infer-literal-type e)]
         (if (nil? t) ANY t))

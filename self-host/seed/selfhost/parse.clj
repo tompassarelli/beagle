@@ -226,6 +226,9 @@
 (defn make-static-call [^String class-method args]
   {"node" "static-call" "name" class-method "args" args})
 
+(defn make-threading [^String kind args desugared]
+  {"node" "threading" "kind" kind "args" args "desugared" desugared})
+
 (defn make-kw-access [^String kw target fallback]
   {"node" "kw-access" "kw" kw "target" target "default" (if (nil? fallback) false fallback)})
 
@@ -561,6 +564,8 @@
   (reduce (fn [acc step] (thread-step-insert acc step "last")) init steps))
 
 (defn expand-cond-thread [^String kind init clauses]
+  (if (not= (mod (count clauses) 2) 0) (do
+  (err! (str kind ": expected pairs of (test step) after init; got " (str (mod (count clauses) 2)) " trailing form(s)"))))
   (let [n (count clauses)
    pairs (loop [i 0
    acc []]
@@ -590,7 +595,10 @@
   (if (= i 0) node (recur (- i 1) node))))))))
 
 (defn expand-as-thread [init name steps]
-  (reduce (fn [acc step] ["let" [BRACKET-TAG name acc] step]) init steps))
+  (let [values (into [init] steps)]
+  (loop [i (- (count values) 1)
+   acc name]
+  (if (< i 0) acc (recur (- i 1) ["let" [BRACKET-TAG name (nth values i)] acc])))))
 
 (defn- binding-cond-test [^String head v]
   (if (or (= head "if-let") (= head "when-let")) v ["not" ["nil?" v]]))
@@ -742,13 +750,21 @@
   (and (= head "dotimes") (>= (count rest-items) 1)) (let [binding-items (unwrap-items (nth rest-items 0))]
   (if (= (count binding-items) 2) (make-dotimes (nth binding-items 0) (parse-expr* (nth binding-items 1)) (mapv parse-expr* (subvec rest-items 1))) (make-dotimes "_" (make-literal "number" 0) [])))
   (and (= head "with") (>= (count rest-items) 1)) (parse-with-form (nth rest-items 0) (subvec rest-items 1))
-  (and (= head "->") (>= (count rest-items) 1)) (parse-expr* (expand-thread-first (nth rest-items 0) (subvec rest-items 1)))
-  (and (= head "->>") (>= (count rest-items) 1)) (parse-expr* (expand-thread-last (nth rest-items 0) (subvec rest-items 1)))
-  (and (= head "cond->") (>= (count rest-items) 1)) (parse-expr* (expand-cond-thread "cond->" (nth rest-items 0) (subvec rest-items 1)))
-  (and (= head "cond->>") (>= (count rest-items) 1)) (parse-expr* (expand-cond-thread "cond->>" (nth rest-items 0) (subvec rest-items 1)))
-  (and (= head "some->") (>= (count rest-items) 1)) (parse-expr* (expand-some-thread "some->" (nth rest-items 0) (subvec rest-items 1)))
-  (and (= head "some->>") (>= (count rest-items) 1)) (parse-expr* (expand-some-thread "some->>" (nth rest-items 0) (subvec rest-items 1)))
-  (and (= head "as->") (>= (count rest-items) 2)) (parse-expr* (expand-as-thread (nth rest-items 0) (nth rest-items 1) (subvec rest-items 2)))
+  (and (= head "->") (>= (count rest-items) 1)) (let [args (mapv parse-expr* rest-items)]
+  (make-threading "->" args (parse-expr* (expand-thread-first (nth rest-items 0) (subvec rest-items 1)))))
+  (and (= head "->>") (>= (count rest-items) 1)) (let [args (mapv parse-expr* rest-items)]
+  (make-threading "->>" args (parse-expr* (expand-thread-last (nth rest-items 0) (subvec rest-items 1)))))
+  (and (= head "cond->") (>= (count rest-items) 1)) (let [args (mapv parse-expr* rest-items)]
+  (make-threading "cond->" args (parse-expr* (expand-cond-thread "cond->" (nth rest-items 0) (subvec rest-items 1)))))
+  (and (= head "cond->>") (>= (count rest-items) 1)) (let [args (mapv parse-expr* rest-items)]
+  (make-threading "cond->>" args (parse-expr* (expand-cond-thread "cond->>" (nth rest-items 0) (subvec rest-items 1)))))
+  (and (= head "some->") (>= (count rest-items) 1)) (let [args (mapv parse-expr* rest-items)]
+  (make-threading "some->" args (parse-expr* (expand-some-thread "some->" (nth rest-items 0) (subvec rest-items 1)))))
+  (and (= head "some->>") (>= (count rest-items) 1)) (let [args (mapv parse-expr* rest-items)]
+  (make-threading "some->>" args (parse-expr* (expand-some-thread "some->>" (nth rest-items 0) (subvec rest-items 1)))))
+  (and (= head "as->") (>= (count rest-items) 2) (string? (nth rest-items 1))) (let [args (mapv parse-expr* rest-items)]
+  (make-threading "as->" args (parse-expr* (expand-as-thread (nth rest-items 0) (nth rest-items 1) (subvec rest-items 2)))))
+  (and (= head "as->") (>= (count rest-items) 2)) (err! "as-> expects a symbol placeholder: (as-> init name steps...)")
   (and (string? head) (constructor-sym? head)) (make-new head (mapv parse-expr* rest-items))
   (and (string? head) (keyword-sym? head) (>= (count rest-items) 1)) (make-kw-access head (parse-expr* (nth rest-items 0)) (if (>= (count rest-items) 2) (parse-expr* (nth rest-items 1)) nil))
   (and (string? head) (dot-method-sym? head) (>= (count rest-items) 1)) (make-method-call head (parse-expr* (nth rest-items 0)) (mapv parse-expr* (subvec rest-items 1)))
@@ -1024,10 +1040,16 @@
   (and (= (get node "node") "new") (= (get node "class") "Date."))))
   (expect! "arrow-constructor stays plain ref call (->Latest)" (let [node (parse-expr* ["->Latest" "a"])]
   (and (= (get node "node") "call") (= (get (get node "fn") "name") "->Latest"))))
-  (expect! "-> thread-first" (let [node (parse-expr* ["->" "x" ["foo" 1] ["bar" 2]])]
-  (and (= (get node "node") "call") (= (get (get node "fn") "name") "bar"))))
-  (expect! "->> thread-last" (let [node (parse-expr* ["->>" "x" ["foo" 1] ["bar" 2]])]
-  (and (= (get node "node") "call") (= (get (get node "fn") "name") "bar"))))
+  (expect! "-> thread-first: threading node, desugared call chain" (let [node (parse-expr* ["->" "x" ["foo" 1] ["bar" 2]])]
+  (and (= (get node "node") "threading") (= (get node "kind") "->") (= (count (get node "args")) 3) (= (nth (get node "args") 0) {"node" "ref" "name" "x"}) (= (get (get (get node "desugared") "fn") "name") "bar") (= (get (get (nth (get (get node "desugared") "args") 0) "fn") "name") "foo"))))
+  (expect! "->> thread-last: threaded value is LAST arg" (let [node (parse-expr* ["->>" "x" ["foo" 1] ["bar" 2]])]
+  (and (= (get node "node") "threading") (= (get node "kind") "->>") (= (get (get (nth (get (get node "desugared") "args") 1) "fn") "name") "foo"))))
+  (expect! "cond-> mints fresh temps per step in the desugared chain" (do
+  (mac/reset-lowering-counter!)
+  (let [node (parse-expr* ["cond->" "x" ["pos?" "x"] ["inc"]])]
+  (and (= (get node "node") "threading") (= (get node "kind") "cond->") (= (count (get node "args")) 3) (= (get (nth (get (get node "desugared") "bindings") 0) "name") "cond-thread__0")))))
+  (expect! "as-> keeps placeholder in args; desugars to let chain" (let [node (parse-expr* ["as->" 1 "n" ["+" "n" "n"]])]
+  (and (= (get node "node") "threading") (= (get node "kind") "as->") (= (nth (get node "args") 1) {"node" "ref" "name" "n"}) (= (get (get node "desugared") "node") "let"))))
   (expect! "multi-arity defn" (let [node (parse-expr* ["defn" "f" [[BRACKET-TAG] ["#%string" "zero"]] [[BRACKET-TAG "x"] "x"]])]
   (and (= (get node "node") "defn-multi") (= (get node "name") "f") (= (count (get node "arities")) 2) (= (get (nth (get node "arities") 0) "rest") false))))
   (expect! "vec literal" (let [node (parse-expr* [BRACKET-TAG 1 2 3])]

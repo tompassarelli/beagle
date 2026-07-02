@@ -642,6 +642,15 @@
             (str "(" (get e "kw") " " (emit-expr* (get e "target")) " "
                  (emit-expr* dflt) ")")))
 
+      ;; threading reconstructs the surface form from kind + orig args
+      ;; (emit-clj.rkt threading-marker); the desugared inner is not emitted
+      (= node "threading")
+        (let [args (get e "args")]
+          (if (= (count args) 0)
+            (str "(" (get e "kind") ")")
+            (str "(" (get e "kind") " "
+                 (str/join " " (mapv emit-expr* args)) ")")))
+
       (= node "try")
         (let [body-str (emit-body (get e "body") "  ")
               cljs (= (deref emit-target) "cljs")

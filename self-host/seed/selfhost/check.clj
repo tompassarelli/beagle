@@ -398,6 +398,7 @@
 (defn infer-expr! [e env]
   (cond
   (nil? e) ANY
+  (= (get e "node") "threading") (infer-expr! (get e "desugared") env)
   (= (get e "node") "literal") (let [t (infer-literal-type e)]
   (if (nil? t) ANY t))
   (= (get e "node") "ref") (let [found (get env (get e "name"))]

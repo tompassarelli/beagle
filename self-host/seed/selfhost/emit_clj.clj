@@ -353,6 +353,8 @@
   (= node "new") (str "(" (get e "class") (emit-args (get e "args")) ")")
   (= node "kw-access") (let [dflt (get e "default")]
   (if (absent? dflt) (str "(" (get e "kw") " " (emit-expr* (get e "target")) ")") (str "(" (get e "kw") " " (emit-expr* (get e "target")) " " (emit-expr* dflt) ")")))
+  (= node "threading") (let [args (get e "args")]
+  (if (= (count args) 0) (str "(" (get e "kind") ")") (str "(" (get e "kind") " " (str/join " " (mapv emit-expr* args)) ")")))
   (= node "try") (let [body-str (emit-body (get e "body") "  ")
    cljs (= (deref emit-target) "cljs")
    catch-strs (mapv (fn [c] (if cljs (str "\n  (catch :default " (get c "name") "\n    " (emit-body (get c "body") "    ") ")") (str "\n  (catch " (get c "type") " " (get c "name") "\n    " (emit-body (get c "body") "    ") ")"))) (get e "catches"))
