@@ -40,3 +40,6 @@ docs/private/
 
 # selfhost lab scratch (oracle mints, parity diffs) — derived, re-mintable
 .lab/
+
+# Git worktrees parked inside the checkout (agent workflows) — never tracked.
+.worktrees/
