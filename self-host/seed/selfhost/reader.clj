@@ -22,7 +22,7 @@
   (subs s lo hi)))
 
 (defn ^Boolean whitespace? [^String ch]
-  (or (= ch " ") (= ch "\n") (= ch "\r") (= ch "\t")))
+  (or (= ch " ") (= ch "\n") (= ch "\r") (= ch "\t") (= ch ",")))
 
 (defn ^Boolean newline? [^String ch]
   (or (= ch "\n") (= ch "\r")))
@@ -31,7 +31,7 @@
   (and (= (count ch) 1) (>= (compare ch "0") 0) (<= (compare ch "9") 0)))
 
 (defn ^Boolean delimiter? [^String ch]
-  (or (whitespace? ch) (= ch "(") (= ch ")") (= ch "[") (= ch "]") (= ch "{") (= ch "}") (= ch "\"") (= ch ";")))
+  (or (whitespace? ch) (= ch "(") (= ch ")") (= ch "[") (= ch "]") (= ch "{") (= ch "}") (= ch "\"") (= ch ";") (= ch "~") (= ch "^")))
 
 (defn make-result [value pos]
   {"value" value "pos" pos})
@@ -194,6 +194,20 @@
   (if (nil? inner) (make-result ["quasiquote" nil] (+ p 1)) (make-result ["quasiquote" (get inner "value")] (get inner "pos"))))
   (= ch "@") (let [inner (read-datum src (+ p 1))]
   (if (nil? inner) (make-result ["deref" nil] (+ p 1)) (make-result ["deref" (get inner "value")] (get inner "pos"))))
+  (= ch "~") (if (= (char-at src (+ p 1)) "@") (let [inner (read-datum src (+ p 2))]
+  (if (nil? inner) (do
+  (selfhost.rt/eprint "beagle reader: unexpected EOF after `~@` (unquote-splicing needs a following datum)\n")
+  (make-result ["unquote-splicing" nil] (+ p 2))) (make-result ["unquote-splicing" (get inner "value")] (get inner "pos")))) (let [inner (read-datum src (+ p 1))]
+  (if (nil? inner) (do
+  (selfhost.rt/eprint "beagle reader: unexpected EOF after `~` (unquote needs a following datum)\n")
+  (make-result ["unquote" nil] (+ p 1))) (make-result ["unquote" (get inner "value")] (get inner "pos")))))
+  (= ch "^") (let [meta-r (read-datum src (+ p 1))]
+  (if (nil? meta-r) (do
+  (selfhost.rt/eprint "beagle reader: unexpected EOF after `^` (metadata needs a value and a target form)\n")
+  nil) (let [form-r (read-datum src (get meta-r "pos"))]
+  (if (nil? form-r) (do
+  (selfhost.rt/eprint "beagle reader: unexpected EOF after `^` metadata (needs a target form to attach to)\n")
+  nil) (make-result ["#%meta" (get meta-r "value") (get form-r "value")] (get form-r "pos"))))))
   (or (digit? ch) (and (= ch "-") (< (+ p 1) len) (digit? (char-at src (+ p 1))))) (read-number src p)
   (and (= ch ":") (or (>= (+ p 1) len) (delimiter? (char-at src (+ p 1))))) (make-result ":" (+ p 1))
   (= ch ":") (let [sym-result (read-symbol-text src (+ p 1))]
@@ -282,6 +296,13 @@
   (expect! "quote" (= (rd1 "'foo") ["quote" "foo"]))
   (expect! "deref" (= (rd1 "@state") ["deref" "state"]))
   (expect! "quasiquote" (= (rd1 "`foo") ["quasiquote" "foo"]))
+  (expect! "unquote" (= (rd1 "~x") ["unquote" "x"]))
+  (expect! "unquote-splicing" (= (rd1 "~@xs") ["unquote-splicing" "xs"]))
+  (expect! "unquote terminates symbols" (= (rd1 "`(f ~x)") ["quasiquote" ["f" ["unquote" "x"]]]))
+  (expect! "meta: keyword" (= (rd1 "^:dynamic *x*") ["#%meta" ":dynamic" "*x*"]))
+  (expect! "meta: map (true classifies to boolean per datum encoding)" (= (rd1 "^{:dynamic true} *x*") ["#%meta" [MAP-TAG ":dynamic" true] "*x*"]))
+  (expect! "comma is whitespace" (= (rd1 "[1, 2,3]") [BRACKET-TAG 1 2 3]))
+  (expect! "trailing comma before close" (= (rd1 "{:a 1,}") [MAP-TAG ":a" 1]))
   (expect! "line comment skipped" (= (rd "; ignore\n42") [42]))
   (expect! "inline comment" (= (rd "1 ; comment\n2") [1 2]))
   (expect! "multiple comment lines" (= (rd ";; first\n;; second\n42") [42]))

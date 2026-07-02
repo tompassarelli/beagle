@@ -1,0 +1,42 @@
+#lang beagle/clj
+(ns selfhost.fixtures.user-macros)
+
+;; Parity fixture for IN-CHAIN user-macro (defmacro) expansion. Full-chain
+;; byte-parity on this module proves, against the Racket compiler:
+;;   - defmacro registration + expansion inside the selfhost pipeline
+;;   - qq semantics: quasiquote / unquote / unquote-splicing (variadic body)
+;;   - hygiene renames of template-introduced binders as <base>__<n> off the
+;;     SAME per-program counter as if-let bind__ temps (interleaved below)
+;;   - mode-2 hygiene: a template free ref to a module defn is rewritten to
+;;     its __hyg alias and a `(def alias orig)` is injected after the defn
+;; Run: self-host/verify-selfhost.sh self-host/fixtures/user-macros.bclj
+
+(defn first-int [xs :- (Vec Int)] :- Any
+  (if (> (count xs) 0) (nth xs 0) nil))
+
+(defn scale [n :- Int] :- Int
+  (* n 10))
+
+(defmacro with-scaled [v & body]
+  `(let [s (scale ~v)]
+     (do ~@body)))
+
+;; bind__0 mints here (before the macro use-site advances the counter)
+(defn bound-before [xs :- (Vec Int)] :- Int
+  (if-let [b :- Int (first-int xs)]
+    (+ b 1)
+    0))
+
+;; use-site binds `s` itself — the template's `s` binder must stay distinct
+(defn use-site [s :- Int] :- Int
+  (with-scaled s (+ s 2)))
+
+;; and a second expansion advances the counter again
+(defn twice [n :- Int] :- Int
+  (with-scaled n (with-scaled n n)))
+
+;; bind__ mints here AFTER the hygiene renames — numbering interleave pinned
+(defn bound-after [xs :- (Vec Int)] :- Int
+  (if-let [a :- Int (first-int xs)]
+    (* a 2)
+    0))

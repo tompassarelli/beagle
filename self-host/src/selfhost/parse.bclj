@@ -13,6 +13,7 @@
 
 (require clojure.string :as str)
 (require selfhost.rt)
+(require selfhost.macros :as mac)
 
 (declare-extern selfhost.rt/eprint [String -> Nil])
 
@@ -420,17 +421,18 @@
 ;; Deterministic lowering temps, ported from fix/emit-determinism: names are
 ;; <base>__<n> from ONE counter reset per parse-program!, so minted names depend
 ;; only on module content. Bases mirror parse.rkt: cond-thread / some-thread /
-;; bind. Racket shares this counter with macro-hygiene renames (macros.rkt);
-;; the selfhost chain does not expand user macros yet, so programs with a
-;; defmacro use-site still number differently — that gap closes when macro
-;; expansion is wired into the chain (the shared counter must live here then).
-
-(def LOWERING-COUNTER :- Any (atom 0))
+;; bind. The counter LIVES in selfhost.macros (as in Racket, where parse.rkt
+;; imports macros.rkt's lowering-counter) — shared with macro-hygiene renames.
 
 (defn- fresh-lowered-sym! [base :- String] :- String
-  (let [n (deref LOWERING-COUNTER)]
-    (swap! LOWERING-COUNTER inc)
-    (str base "__" n)))
+  (mac/fresh-lowered-sym! base))
+
+;; --- user-macro registry (macros.rkt registry via current-registry) ------------
+;; Fresh per parse-program!; nested macro applications inside expressions
+;; consult it through this cell (parse.rkt parameterizes current-registry).
+;; nil = no program context (bare parse-expr* in tests) — macro-inert.
+
+(def CURRENT-REGISTRY-CELL :- Any (atom nil))
 
 ;; --- datum->json (quoted datums / case values; ast-json.rkt encoding) ----------
 ;; Symbols tag as {"type" "symbol"}, keywords as {"type" "keyword"} (colon
@@ -1116,6 +1118,13 @@
   (let [head (nth d 0)
         rest-items (subvec d 1)]
     (cond
+      ;; user macro in head position — macros outrank built-in forms outrank
+      ;; legacy (parse.rkt head-meaning); expand fully, parse the expansion
+      (and (string? head)
+           (some? (deref CURRENT-REGISTRY-CELL))
+           (mac/macro-application? (deref CURRENT-REGISTRY-CELL) d))
+        (parse-expr* (mac/expand-fully! (deref CURRENT-REGISTRY-CELL) d 0 nil))
+
       ;; zero escape hatches: unsafe-* rejected at parse (today's surface)
       (and (string? head) (= head "unsafe"))
         (err! "(unsafe \"...\") is not supported — beagle has no verbatim escape hatch; add a typed stdlib entry or a sibling target-language file instead")
@@ -1461,8 +1470,10 @@
   (reset-errors!)
   ;; Fresh lowering-temp counter per program (parse.rkt parameterizes
   ;; lowering-counter here): minted names depend only on THIS module's
-  ;; content, never on what the process parsed before it.
-  (reset! LOWERING-COUNTER 0)
+  ;; content, never on what the process parsed before it. The counter lives
+  ;; in selfhost.macros — shared with macro-hygiene renames, as in Racket.
+  (mac/reset-lowering-counter!)
+  (reset! CURRENT-REGISTRY-CELL (mac/make-macro-registry))
   (let [mode (atom "strict")
         mode-set (atom false)
         namespace (atom "beagle.user")
@@ -1533,8 +1544,17 @@
             (= head "define-macro")
               (do (err! "(define-macro ...) — `define-macro` is not supported. Use `(defmacro NAME [params] body)` instead.") nil)
             ;; defmacro registers with the expander kernel (selfhost.macros);
-            ;; tranche-1 parse records nothing — expansion gap on thread.
-            (= head "defmacro") nil
+            ;; pass 2 expands applications in-chain (parse.rkt pass 1).
+            (= head "defmacro")
+              (if (and (= (count d) 4) (string? (nth d 1))
+                       (or (bracketed? (nth d 2))
+                           (vector? (nth d 2))))
+                (mac/register-macro! (deref CURRENT-REGISTRY-CELL)
+                                     (nth d 1) "defmacro"
+                                     (unwrap-items (nth d 2))
+                                     (nth d 3))
+                (do (err! (str "malformed defmacro — expected (defmacro NAME [params] template) with exactly one template form; wrap multiple forms in `(do ...)`, got: " (str d)))
+                    nil))
             (= head "defalias") nil
             (= head "declare-extern")
               (if (>= (count d) 3)
@@ -1563,10 +1583,55 @@
                       (when (some? r) (swap! requires conj r))))))
             (= head "import") nil
             :else nil))))
-    ;; Pass 2: parse non-meta forms.
+    ;; Mode-2 hygiene context (parse.rkt module-def-name-set): the program's
+    ;; top-level def names, gated to targets whose emitters handle the
+    ;; injected `(def alias orig)` (clj/cljs/nix/js/odin). ^:dynamic defs
+    ;; carry a (#%meta ...) name wrapper — not a plain symbol — and are
+    ;; excluded, as in Racket.
+    (let [hygiene-capable (has-item? ["clj" "cljs" "nix" "js" "odin"] (deref target))
+          def-names (if hygiene-capable
+                      (reduce (fn [acc :- Any dd :- Any] :- Any
+                                (if (and (vector? dd) (not (bracketed? dd))
+                                         (>= (count dd) 2)
+                                         (has-item? ["def" "defn" "defonce"] (nth dd 0))
+                                         (string? (nth dd 1)))
+                                  (assoc acc (nth dd 1) true)
+                                  acc))
+                              {} datums)
+                      nil)]
+      (mac/set-hygiene-context! def-names))
+    ;; Pass 2: expand user macros (top-level applications here; nested ones
+    ;; expand inside parse-expr, mirroring parse.rkt's head-meaning order)
+    ;; and parse non-meta forms. Proc-macro (Vec Form) output arrives as a
+    ;; #%splice-forms wrapper and splices into the top-level form list.
     (doseq [d datums]
       (when (not (meta-form? d))
-        (swap! forms conj (parse-expr* d))))
+        (let [reg (deref CURRENT-REGISTRY-CELL)
+              from-macro (mac/macro-application? reg d)
+              expanded (if from-macro (mac/expand-fully! reg d 0 nil) d)]
+          (if (and (vector? expanded) (> (count expanded) 0)
+                   (= (nth expanded 0) "#%splice-forms"))
+            (doseq [f (subvec expanded 1)]
+              (swap! forms conj (parse-expr* f)))
+            (swap! forms conj (parse-expr* expanded))))))
+    ;; Mode-2 hygiene: inject a synthetic `(def alias orig)` immediately after
+    ;; orig's definition for every free-ref alias the expander recorded
+    ;; (parse.rkt inject-hygiene-aliases; no-op when none were).
+    (let [aliases (mac/hygiene-aliases)]
+      (when (> (count aliases) 0)
+        (reset! forms
+          (reduce (fn [acc :- Any f :- Any] :- Any
+                    (let [node (get f "node")
+                          nm (if (has-item? ["def" "defn" "defonce" "defn-multi"] node)
+                               (get f "name")
+                               nil)
+                          alias (if (string? nm) (get aliases nm) nil)]
+                      (if (some? alias)
+                        (conj acc f (make-def alias nil (make-ref nm)))
+                        (conj acc f))))
+                  [] (deref forms)))))
+    (mac/set-hygiene-context! nil)
+    (reset! CURRENT-REGISTRY-CELL nil)
     {"mode" (deref mode)
      "namespace" (deref namespace)
      "target" (deref target)

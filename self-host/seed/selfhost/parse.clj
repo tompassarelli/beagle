@@ -1,6 +1,7 @@
 (ns selfhost.parse
   (:require [clojure.string :as str]
-            [selfhost.rt :as rt]))
+            [selfhost.rt :as rt]
+            [selfhost.macros :as mac]))
 
 (def ^String BRACKET-TAG "#%brackets")
 
@@ -309,12 +310,10 @@
 (defn make-pat-var [^String name]
   {"type" "var" "name" name})
 
-(def LOWERING-COUNTER (atom 0))
-
 (defn- ^String fresh-lowered-sym! [^String base]
-  (let [n (deref LOWERING-COUNTER)]
-  (swap! LOWERING-COUNTER inc)
-  (str base "__" n)))
+  (mac/fresh-lowered-sym! base))
+
+(def CURRENT-REGISTRY-CELL (atom nil))
 
 (defn datum->json [d]
   (cond
@@ -683,6 +682,7 @@
   (let [head (nth d 0)
    rest-items (subvec d 1)]
   (cond
+  (and (string? head) (some? (deref CURRENT-REGISTRY-CELL)) (mac/macro-application? (deref CURRENT-REGISTRY-CELL) d)) (parse-expr* (mac/expand-fully! (deref CURRENT-REGISTRY-CELL) d 0 nil))
   (and (string? head) (= head "unsafe")) (err! "(unsafe \"...\") is not supported — beagle has no verbatim escape hatch; add a typed stdlib entry or a sibling target-language file instead")
   (and (string? head) (str/starts-with? head "unsafe-")) (err! (str "(" head " \"...\") is not supported — beagle has no verbatim escape hatch; add a typed stdlib entry or a sibling target-language file instead"))
   (= head "fmt") (err! "(fmt ...) is not supported — use str / format")
@@ -806,7 +806,8 @@
 
 (defn parse-program! [datums]
   (reset-errors!)
-  (reset! LOWERING-COUNTER 0)
+  (mac/reset-lowering-counter!)
+  (reset! CURRENT-REGISTRY-CELL (mac/make-macro-registry))
   (let [mode (atom "strict")
    mode-set (atom false)
    namespace (atom "beagle.user")
@@ -863,7 +864,9 @@
   (= head "define-macro") (do
   (err! "(define-macro ...) — `define-macro` is not supported. Use `(defmacro NAME [params] body)` instead.")
   nil)
-  (= head "defmacro") nil
+  (= head "defmacro") (if (and (= (count d) 4) (string? (nth d 1)) (or (bracketed? (nth d 2)) (vector? (nth d 2)))) (mac/register-macro! (deref CURRENT-REGISTRY-CELL) (nth d 1) "defmacro" (unwrap-items (nth d 2)) (nth d 3)) (do
+  (err! (str "malformed defmacro — expected (defmacro NAME [params] template) with exactly one template form; wrap multiple forms in `(do ...)`, got: " (str d)))
+  nil))
   (= head "defalias") nil
   (= head "declare-extern") (if (>= (count d) 3) (let [name-form (nth d 1)
    t (parse-type (nth d 2))
@@ -884,9 +887,24 @@
   (swap! requires conj r)))))))
   (= head "import") nil
   :else nil)))))
+  (let [hygiene-capable (has-item? ["clj" "cljs" "nix" "js" "odin"] (deref target))
+   def-names (if hygiene-capable (reduce (fn [acc dd] (if (and (vector? dd) (not (bracketed? dd)) (>= (count dd) 2) (has-item? ["def" "defn" "defonce"] (nth dd 0)) (string? (nth dd 1))) (assoc acc (nth dd 1) true) acc)) {} datums) nil)]
+  (mac/set-hygiene-context! def-names))
   (doseq [d datums]
   (if (not (meta-form? d)) (do
-  (swap! forms conj (parse-expr* d)))))
+  (let [reg (deref CURRENT-REGISTRY-CELL)
+   from-macro (mac/macro-application? reg d)
+   expanded (if from-macro (mac/expand-fully! reg d 0 nil) d)]
+  (if (and (vector? expanded) (> (count expanded) 0) (= (nth expanded 0) "#%splice-forms")) (doseq [f (subvec expanded 1)]
+  (swap! forms conj (parse-expr* f))) (swap! forms conj (parse-expr* expanded)))))))
+  (let [aliases (mac/hygiene-aliases)]
+  (if (> (count aliases) 0) (do
+  (reset! forms (reduce (fn [acc f] (let [node (get f "node")
+   nm (if (has-item? ["def" "defn" "defonce" "defn-multi"] node) (get f "name") nil)
+   alias (if (string? nm) (get aliases nm) nil)]
+  (if (some? alias) (conj acc f (make-def alias nil (make-ref nm))) (conj acc f)))) [] (deref forms))))))
+  (mac/set-hygiene-context! nil)
+  (reset! CURRENT-REGISTRY-CELL nil)
   {"mode" (deref mode) "namespace" (deref namespace) "target" (deref target) "gen-class" (deref gen-class) "forms" (deref forms) "externs" (deref extern-list) "requires" (deref requires)}))
 
 (def PASSES (atom 0))

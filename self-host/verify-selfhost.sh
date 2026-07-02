@@ -8,7 +8,8 @@
 #   4. full chain: self reader -> parse -> check -> emit-clj vs Racket emit (byte diff)
 #
 # Usage: self-host/verify-selfhost.sh [MODULE.bclj ...]
-#   default oracle module: ~/code/fram/src/fram/fold.bclj
+#   default corpus: every tracked fixture under self-host/fixtures/, plus
+#   ~/code/fram/src/fram/fold.bclj when that checkout exists
 set -uo pipefail
 WT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$WT"
@@ -17,7 +18,10 @@ LAB=.lab
 mkdir -p "$LAB"
 
 MODULES=("$@")
-[ ${#MODULES[@]} -eq 0 ] && MODULES=("$HOME/code/fram/src/fram/fold.bclj")
+if [ ${#MODULES[@]} -eq 0 ]; then
+  MODULES=(self-host/fixtures/*.bclj)
+  [ -f "$HOME/code/fram/src/fram/fold.bclj" ] && MODULES+=("$HOME/code/fram/src/fram/fold.bclj")
+fi
 
 PASS=0; FAIL=0
 ok()  { echo "  PASS: $1"; PASS=$((PASS+1)); }
