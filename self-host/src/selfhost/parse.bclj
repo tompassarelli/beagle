@@ -416,14 +416,21 @@
 (defn make-pat-var [name :- String] :- Any
   {"type" "var" "name" name})
 
-;; --- gensym ------------------------------------------------------------------
+;; --- lowering temps (macros.rkt fresh-lowered-sym!) -----------------------------
+;; Deterministic lowering temps, ported from fix/emit-determinism: names are
+;; <base>__<n> from ONE counter reset per parse-program, so minted names depend
+;; only on module content. Bases mirror parse.rkt: cond-thread / some-thread /
+;; bind. Racket shares this counter with macro-hygiene renames (macros.rkt);
+;; the selfhost chain does not expand user macros yet, so programs with a
+;; defmacro use-site still number differently — that gap closes when macro
+;; expansion is wired into the chain (the shared counter must live here then).
 
-(def GENSYM-COUNTER :- Any (atom 0))
+(def LOWERING-COUNTER :- Any (atom 0))
 
-(defn- gensym-name [prefix :- String] :- String
-  (let [n (deref GENSYM-COUNTER)]
-    (swap! GENSYM-COUNTER inc)
-    (str prefix "__g" n)))
+(defn- fresh-lowered-sym! [base :- String] :- String
+  (let [n (deref LOWERING-COUNTER)]
+    (swap! LOWERING-COUNTER inc)
+    (str base "__" n)))
 
 ;; --- datum->json (quoted datums / case values; ast-json.rkt encoding) ----------
 ;; Symbols tag as {"type" "symbol"}, keywords as {"type" "keyword"} (colon
@@ -879,32 +886,57 @@
           init steps))
 
 (defn expand-cond-thread [kind :- String init :- Any clauses :- Any] :- Any
-  (let [sym (gensym-name "ct")
-        n (count clauses)
+  (let [n (count clauses)
         pairs (loop [i 0 acc :- Any []]
                 (if (>= (+ i 1) n)
                   acc
                   (recur (+ i 2) (conj acc [(nth clauses i) (nth clauses (+ i 1))]))))
         pos (if (= kind "cond->") "first" "last")
-        inner (reduce (fn [acc :- Any pair :- Any] :- Any
-                        ["let" [BRACKET-TAG sym
-                                ["if" (nth pair 0)
-                                 (thread-step-insert sym (nth pair 1) pos)
-                                 sym]]
-                         acc])
-                      sym
-                      (reverse pairs))]
-    ["let" [BRACKET-TAG sym init] inner]))
+        ;; parse.rkt expand-cond-thread: a FRESH temp per step, never one temp
+        ;; rebound (emit-js flattens nested lets into one block, where rebinding
+        ;; emitted a duplicate const). temps[0] binds init; temps[i+1] binds
+        ;; step i's if-form. Pre-minting preserves Racket's counter order —
+        ;; nothing else mints between these.
+        k (count pairs)
+        temps (loop [i 0 acc :- Any [(fresh-lowered-sym! "cond-thread")]]
+                (if (>= i k)
+                  acc
+                  (recur (+ i 1) (conj acc (fresh-lowered-sym! "cond-thread")))))
+        inner (loop [i (- k 1) acc :- Any (nth temps k)]
+                (if (< i 0)
+                  acc
+                  (recur (- i 1)
+                         ["let" [BRACKET-TAG (nth temps (+ i 1))
+                                 ["if" (nth (nth pairs i) 0)
+                                  (thread-step-insert (nth temps i) (nth (nth pairs i) 1) pos)
+                                  (nth temps i)]]
+                          acc])))]
+    ["let" [BRACKET-TAG (nth temps 0) init] inner]))
 
 (defn expand-some-thread [kind :- String init :- Any steps :- Any] :- Any
   (let [pos (if (= kind "some->") "first" "last")
-        sym (gensym-name "st")]
-    (reduce (fn [acc :- Any step :- Any] :- Any
-              ["let" [BRACKET-TAG sym acc]
-               ["if" ["some?" sym]
-                (thread-step-insert sym step pos)
-                "nil"]])
-            init steps)))
+        m (count steps)]
+    (if (= m 0)
+      init
+      ;; parse.rkt expand-some-thread: a temp per step; temps[i] binds the value
+      ;; flowing INTO step i (init, then step i-1's threaded result); nil?-test
+      ;; short-circuits to nil; the LAST step's threaded form is returned bare.
+      (let [temps (loop [i 0 acc :- Any []]
+                    (if (>= i m)
+                      acc
+                      (recur (+ i 1) (conj acc (fresh-lowered-sym! "some-thread")))))
+            threadeds (loop [i 0 acc :- Any []]
+                        (if (>= i m)
+                          acc
+                          (recur (+ i 1)
+                                 (conj acc (thread-step-insert (nth temps i) (nth steps i) pos)))))]
+        (loop [i (- m 1) acc :- Any (nth threadeds (- m 1))]
+          (let [node ["let" [BRACKET-TAG (nth temps i)
+                             (if (= i 0) init (nth threadeds (- i 1)))]
+                      ["if" ["nil?" (nth temps i)] "nil" acc]]]
+            (if (= i 0)
+              node
+              (recur (- i 1) node))))))))
 
 (defn expand-as-thread [init :- Any name :- Any steps :- Any] :- Any
   (reduce (fn [acc :- Any step :- Any] :- Any
@@ -914,9 +946,10 @@
 ;; --- binding-conditional lowering (parse.rkt lower-binding-cond) ----------------
 ;; (if-let [x v] t e)   -> (let [x v] (if x t e))          — simple [name expr]
 ;; (when-some [x v] b…) -> (let [x v] (if (not (nil? x)) (do b…)))
-;; Typed/destructure binders bind a gensym temp and rebind inside the success
-;; branch. NOTE: Racket's gensym naming differs — temp-name AST parity across
-;; implementations only holds for the simple [name expr] arm.
+;; Typed/destructure binders bind a minted temp (bind__<n>, fresh-lowered-sym!)
+;; and rebind inside the success branch. Temp names match the Racket compiler
+;; post fix/emit-determinism — parity holds as long as no EARLIER mint site in
+;; the module diverges (in-chain user-macro expansion is the known such gap).
 
 (defn- binding-cond-test [head :- String v :- Any] :- Any
   (if (or (= head "if-let") (= head "when-let"))
@@ -938,7 +971,7 @@
             (if if-form?
               ["let" binding ["if" test (nth rest-items 0) (nth rest-items 1)]]
               ["let" binding ["if" test (vec (concat ["do"] rest-items))]]))
-          (let [g (gensym-name "bind")
+          (let [g (fresh-lowered-sym! "bind")
                 inner (vec (concat [BRACKET-TAG] binder-part [g]))
                 test (binding-cond-test head g)]
             (if if-form?
@@ -1426,6 +1459,10 @@
 
 (defn parse-program [datums :- Any] :- Any
   (reset-errors!)
+  ;; Fresh lowering-temp counter per program (parse.rkt parameterizes
+  ;; lowering-counter here): minted names depend only on THIS module's
+  ;; content, never on what the process parsed before it.
+  (reset! LOWERING-COUNTER 0)
   (let [mode (atom "strict")
         mode-set (atom false)
         namespace (atom "beagle.user")

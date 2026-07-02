@@ -2,149 +2,149 @@
   (:require [clojure.string :as str]
             [selfhost.rt :as rt]))
 
-^{:line 17 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (def ^String BRACKET-TAG "#%brackets")
+(def ^String BRACKET-TAG "#%brackets")
 
-^{:line 18 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (def ^String MAP-TAG "#%map")
+(def ^String MAP-TAG "#%map")
 
-^{:line 19 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (def ^String SET-TAG "#%set")
+(def ^String SET-TAG "#%set")
 
-^{:line 20 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (def ^String SPLICE-MARKER "splice")
+(def ^String SPLICE-MARKER "splice")
 
-^{:line 21 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (def MAX-EXPANSION-DEPTH 64)
+(def MAX-EXPANSION-DEPTH 64)
 
-^{:line 25 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn make-root-ctx [^String name]
-  ^{:line 26 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} {"macro-name" name "depth" 0 "parent" nil})
+(defn make-root-ctx [^String name]
+  {"macro-name" name "depth" 0 "parent" nil})
 
-^{:line 28 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn push-ctx [parent ^String name]
-  ^{:line 29 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} {"macro-name" name "depth" ^{:line 29 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (+ 1 ^{:line 29 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (get parent "depth")) "parent" parent})
+(defn push-ctx [parent ^String name]
+  {"macro-name" name "depth" (+ 1 (get parent "depth")) "parent" parent})
 
-^{:line 31 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn ^String truncate-datum [datum]
-  ^{:line 32 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [s ^{:line 32 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (selfhost.rt/to-json datum)]
-  ^{:line 33 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 33 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (> ^{:line 33 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (count s) 80) ^{:line 34 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (str ^{:line 34 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (subs s 0 77) "...") s)))
+(defn ^String truncate-datum [datum]
+  (let [s (selfhost.rt/to-json datum)]
+  (if (> (count s) 80) (str (subs s 0 77) "...") s)))
 
-^{:line 37 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn collect-chain-lines [ctx]
-  ^{:line 38 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 38 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nil? ctx) ^{:line 39 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [] ^{:line 40 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (into ^{:line 41 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [^{:line 41 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (str "  in macro: " ^{:line 41 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (get ctx "macro-name") " (depth " ^{:line 41 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (get ctx "depth") ")")] ^{:line 42 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (collect-chain-lines ^{:line 42 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (get ctx "parent")))))
+(defn collect-chain-lines [ctx]
+  (if (nil? ctx) [] (into [(str "  in macro: " (get ctx "macro-name") " (depth " (get ctx "depth") ")")] (collect-chain-lines (get ctx "parent")))))
 
-^{:line 44 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn ^String format-expansion-chain [ctx]
-  ^{:line 45 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [all-lines ^{:line 45 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (collect-chain-lines ctx)
-   n ^{:line 46 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (count all-lines)]
-  ^{:line 47 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 47 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (<= n 10) ^{:line 48 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (str/join "\n" all-lines) ^{:line 49 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [top ^{:line 49 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (subvec all-lines 0 4)
-   bot ^{:line 50 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (subvec all-lines ^{:line 50 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (- n 4) n)]
-  ^{:line 51 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (str/join "\n" ^{:line 51 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (into ^{:line 51 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (conj ^{:line 51 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (vec top) ^{:line 51 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (str "  ... (" ^{:line 51 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (- n 8) " more)")) bot))))))
+(defn ^String format-expansion-chain [ctx]
+  (let [all-lines (collect-chain-lines ctx)
+   n (count all-lines)]
+  (if (<= n 10) (str/join "\n" all-lines) (let [top (subvec all-lines 0 4)
+   bot (subvec all-lines (- n 4) n)]
+  (str/join "\n" (into (conj (vec top) (str "  ... (" (- n 8) " more)")) bot))))))
 
-^{:line 53 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (def KNOWN-FORM-HEADS ^{:line 54 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["def" "defn" "defrecord" "defunion" "deferror" "defscalar" "defonce" "defmulti" "do" "let" "fn" "if" "cond" "when" "unless" "match" "case" "for" "doseq" "dotimes" "loop" "try" "println" "prn" "defn-" "ns" "require" "import" "defmacro" "declare-extern" "set!" "letfn" "when-let" "if-let" "when-some" "if-some" "condp"])
+(def KNOWN-FORM-HEADS ["def" "defn" "defrecord" "defunion" "deferror" "defscalar" "defonce" "defmulti" "do" "let" "fn" "if" "cond" "when" "unless" "match" "case" "for" "doseq" "dotimes" "loop" "try" "println" "prn" "defn-" "ns" "require" "import" "defmacro" "declare-extern" "set!" "letfn" "when-let" "if-let" "when-some" "if-some" "condp"])
 
-^{:line 61 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (def gensym-state ^{:line 61 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (atom ^{:line 61 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} {"counter" 0}))
+(def gensym-state (atom {"counter" 0}))
 
-^{:line 63 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn ^String gensym! [^String prefix]
-  ^{:line 64 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [n ^{:line 64 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (get ^{:line 64 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (deref gensym-state) "counter")]
-  ^{:line 65 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (swap! gensym-state assoc "counter" ^{:line 65 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (+ n 1))
-  ^{:line 66 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (str prefix "__g" ^{:line 66 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (str n))))
+(defn ^String gensym! [^String prefix]
+  (let [n (get (deref gensym-state) "counter")]
+  (swap! gensym-state assoc "counter" (+ n 1))
+  (str prefix "__" (str n))))
 
-^{:line 70 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn ^Boolean datum-pair? [d]
-  ^{:line 71 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (and ^{:line 71 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (vector? d) ^{:line 71 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (> ^{:line 71 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (count d) 0)))
+(defn ^Boolean datum-pair? [d]
+  (and (vector? d) (> (count d) 0)))
 
-^{:line 73 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn datum-car [d]
-  ^{:line 74 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth d 0))
+(defn datum-car [d]
+  (nth d 0))
 
-^{:line 76 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn datum-cdr [d]
-  ^{:line 77 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (subvec d 1))
+(defn datum-cdr [d]
+  (subvec d 1))
 
-^{:line 79 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn datum-cons [h t]
-  ^{:line 80 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 80 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (vector? t) ^{:line 81 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (into ^{:line 81 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [h] t) ^{:line 82 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [h t]))
+(defn datum-cons [h t]
+  (if (vector? t) (into [h] t) [h t]))
 
-^{:line 84 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn ^Boolean datum-null? [d]
-  ^{:line 85 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (and ^{:line 85 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (vector? d) ^{:line 85 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 85 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (count d) 0)))
+(defn ^Boolean datum-null? [d]
+  (and (vector? d) (= (count d) 0)))
 
-^{:line 87 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn datum-append [a b]
-  ^{:line 88 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (into a b))
+(defn datum-append [a b]
+  (into a b))
 
-^{:line 92 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn strip-reader-tags [datum]
-  ^{:line 93 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (cond
-  ^{:line 94 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (and ^{:line 94 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-pair? datum) ^{:line 94 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 94 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-car datum) "quote")) datum
-  ^{:line 96 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (and ^{:line 96 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-pair? datum) ^{:line 96 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 96 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-car datum) BRACKET-TAG)) ^{:line 97 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (mapv strip-reader-tags ^{:line 97 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-cdr datum))
-  ^{:line 98 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (and ^{:line 98 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-pair? datum) ^{:line 98 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 98 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-car datum) MAP-TAG)) ^{:line 99 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-cons "hash" ^{:line 99 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (mapv strip-reader-tags ^{:line 99 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-cdr datum)))
-  ^{:line 100 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (and ^{:line 100 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-pair? datum) ^{:line 100 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 100 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-car datum) SET-TAG)) ^{:line 101 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-cons "set" ^{:line 101 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (mapv strip-reader-tags ^{:line 101 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-cdr datum)))
-  ^{:line 102 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-pair? datum) ^{:line 103 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (mapv strip-reader-tags datum)
+(defn strip-reader-tags [datum]
+  (cond
+  (and (datum-pair? datum) (= (datum-car datum) "quote")) datum
+  (and (datum-pair? datum) (= (datum-car datum) BRACKET-TAG)) (mapv strip-reader-tags (datum-cdr datum))
+  (and (datum-pair? datum) (= (datum-car datum) MAP-TAG)) (datum-cons "hash" (mapv strip-reader-tags (datum-cdr datum)))
+  (and (datum-pair? datum) (= (datum-car datum) SET-TAG)) (datum-cons "set" (mapv strip-reader-tags (datum-cdr datum)))
+  (datum-pair? datum) (mapv strip-reader-tags datum)
   :else datum))
 
-^{:line 108 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn make-macro-registry []
-  ^{:line 108 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (atom ^{:line 108 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} {}))
+(defn make-macro-registry []
+  (atom {}))
 
-^{:line 110 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn register-macro! [reg ^String name ^String kind params template]
-  ^{:line 112 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 112 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (not ^{:line 112 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nil? ^{:line 112 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (get ^{:line 112 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (deref reg) name))) ^{:line 112 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (do
-  ^{:line 113 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (selfhost.rt/eprint ^{:line 113 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (str "beagle: duplicate macro definition: " name "\n"))))
-  ^{:line 114 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [amp-pos ^{:line 114 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (or ^{:line 114 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (clojure.core/first ^{:line 114 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (keep-indexed ^{:line 114 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (fn [i x] ^{:line 114 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 114 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= x "&") i nil)) params)) -1)
-   fixed-params ^{:line 115 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 115 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (> amp-pos -1) ^{:line 115 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (subvec params 0 amp-pos) params)
-   rest-param ^{:line 116 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 116 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (> amp-pos -1) ^{:line 116 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth params ^{:line 116 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (+ amp-pos 1)) nil)]
-  ^{:line 117 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (swap! reg assoc name ^{:line 118 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} {"kind" kind "fixed-params" fixed-params "rest-param" rest-param "template" template})
+(defn register-macro! [reg ^String name ^String kind params template]
+  (if (not (nil? (get (deref reg) name))) (do
+  (selfhost.rt/eprint (str "beagle: duplicate macro definition: " name "\n"))))
+  (let [amp-pos (or (clojure.core/first (keep-indexed (fn [i x] (if (= x "&") i nil)) params)) -1)
+   fixed-params (if (> amp-pos -1) (subvec params 0 amp-pos) params)
+   rest-param (if (> amp-pos -1) (nth params (+ amp-pos 1)) nil)]
+  (swap! reg assoc name {"kind" kind "fixed-params" fixed-params "rest-param" rest-param "template" template})
   nil))
 
-^{:line 121 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn lookup-macro [reg ^String name]
-  ^{:line 122 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (get ^{:line 122 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (deref reg) name))
+(defn lookup-macro [reg ^String name]
+  (get (deref reg) name))
 
-^{:line 126 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn ^Boolean check-datum-contract [datum ^String contract ^String macro-name ^String position]
-  ^{:line 128 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (cond
-  ^{:line 129 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= contract "Syntax") true
-  ^{:line 130 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= contract "Symbol") ^{:line 131 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 131 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (string? datum) true ^{:line 132 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (do
-  ^{:line 132 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (selfhost.rt/eprint ^{:line 133 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (str "beagle: macro " macro-name ": " position ": expected Symbol\n"))
+(defn ^Boolean check-datum-contract [datum ^String contract ^String macro-name ^String position]
+  (cond
+  (= contract "Syntax") true
+  (= contract "Symbol") (if (string? datum) true (do
+  (selfhost.rt/eprint (str "beagle: macro " macro-name ": " position ": expected Symbol\n"))
   false))
-  ^{:line 135 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= contract "String") ^{:line 136 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 136 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (string? datum) true ^{:line 137 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (do
-  ^{:line 137 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (selfhost.rt/eprint ^{:line 138 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (str "beagle: macro " macro-name ": " position ": expected String\n"))
+  (= contract "String") (if (string? datum) true (do
+  (selfhost.rt/eprint (str "beagle: macro " macro-name ": " position ": expected String\n"))
   false))
-  ^{:line 140 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= contract "Int") ^{:line 141 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 141 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (number? datum) true ^{:line 142 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (do
-  ^{:line 142 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (selfhost.rt/eprint ^{:line 143 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (str "beagle: macro " macro-name ": " position ": expected Int\n"))
+  (= contract "Int") (if (number? datum) true (do
+  (selfhost.rt/eprint (str "beagle: macro " macro-name ": " position ": expected Int\n"))
   false))
-  ^{:line 145 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= contract "Bool") ^{:line 146 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 146 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (boolean? datum) true ^{:line 147 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (do
-  ^{:line 147 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (selfhost.rt/eprint ^{:line 148 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (str "beagle: macro " macro-name ": " position ": expected Bool\n"))
+  (= contract "Bool") (if (boolean? datum) true (do
+  (selfhost.rt/eprint (str "beagle: macro " macro-name ": " position ": expected Bool\n"))
   false))
-  ^{:line 150 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= contract "Expr") true
-  ^{:line 151 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= contract "Form") ^{:line 152 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 152 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (and ^{:line 152 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-pair? datum) ^{:line 152 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (string? ^{:line 152 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-car datum))) true ^{:line 153 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (do
-  ^{:line 153 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (selfhost.rt/eprint ^{:line 154 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (str "beagle: macro " macro-name ": " position ": expected Form\n"))
+  (= contract "Expr") true
+  (= contract "Form") (if (and (datum-pair? datum) (string? (datum-car datum))) true (do
+  (selfhost.rt/eprint (str "beagle: macro " macro-name ": " position ": expected Form\n"))
   false))
   :else true))
 
-^{:line 160 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn make-bindings [fixed-params fixed-args rest-name rest-args]
-  ^{:line 162 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [base ^{:line 162 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (reduce ^{:line 162 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (fn [acc i] ^{:line 163 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (assoc acc ^{:line 163 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth fixed-params i) ^{:line 163 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth fixed-args i))) ^{:line 164 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} {} ^{:line 164 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (range ^{:line 164 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (count fixed-params)))]
-  ^{:line 165 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 165 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (not ^{:line 165 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nil? rest-name)) ^{:line 166 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (assoc base rest-name rest-args) base)))
+(defn make-bindings [fixed-params fixed-args rest-name rest-args]
+  (let [base (reduce (fn [acc i] (assoc acc (nth fixed-params i) (nth fixed-args i))) {} (range (count fixed-params)))]
+  (if (not (nil? rest-name)) (assoc base rest-name rest-args) base)))
 
-^{:line 171 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn splice-into-list [head tail]
-  ^{:line 172 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 172 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (and ^{:line 172 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-pair? head) ^{:line 172 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 172 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-car head) "splice-marker")) ^{:line 173 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-append ^{:line 173 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-cdr head) tail) ^{:line 174 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-cons head tail)))
+(defn splice-into-list [head tail]
+  (if (and (datum-pair? head) (= (datum-car head) "splice-marker")) (datum-append (datum-cdr head) tail) (datum-cons head tail)))
 
-^{:line 176 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn substitute [template bindings rest-name]
-  ^{:line 177 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (cond
-  ^{:line 179 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (and ^{:line 179 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-pair? template) ^{:line 179 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 179 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (count template) 2) ^{:line 180 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 180 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-car template) SPLICE-MARKER) ^{:line 181 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (string? ^{:line 181 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth template 1)) ^{:line 182 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (not ^{:line 182 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nil? ^{:line 182 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (get bindings ^{:line 182 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth template 1))))) ^{:line 183 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [list-val ^{:line 183 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (get bindings ^{:line 183 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth template 1))]
-  ^{:line 184 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-cons "splice-marker" ^{:line 185 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (mapv ^{:line 185 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (fn [e] ^{:line 185 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (substitute e bindings rest-name)) list-val)))
-  ^{:line 188 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (and ^{:line 188 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (string? template) ^{:line 188 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (not ^{:line 188 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nil? ^{:line 188 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (get bindings template)))) ^{:line 189 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [val ^{:line 189 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (get bindings template)]
-  ^{:line 190 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 190 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (and ^{:line 190 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (not ^{:line 190 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nil? rest-name)) ^{:line 190 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= template rest-name) ^{:line 190 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (vector? val)) ^{:line 191 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-cons BRACKET-TAG val) val))
-  ^{:line 195 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-pair? template) ^{:line 196 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [head ^{:line 196 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (substitute ^{:line 196 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-car template) bindings rest-name)
-   tail ^{:line 197 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (substitute ^{:line 197 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-cdr template) bindings rest-name)]
-  ^{:line 198 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (splice-into-list head tail))
+(defn substitute [template bindings rest-name]
+  (cond
+  (and (datum-pair? template) (= (count template) 2) (= (datum-car template) SPLICE-MARKER) (string? (nth template 1)) (not (nil? (get bindings (nth template 1))))) (let [list-val (get bindings (nth template 1))]
+  (datum-cons "splice-marker" (mapv (fn [e] (substitute e bindings rest-name)) list-val)))
+  (and (string? template) (not (nil? (get bindings template)))) (let [val (get bindings template)]
+  (if (and (not (nil? rest-name)) (= template rest-name) (vector? val)) (datum-cons BRACKET-TAG val) val))
+  (datum-pair? template) (let [head (substitute (datum-car template) bindings rest-name)
+   tail (substitute (datum-cdr template) bindings rest-name)]
+  (splice-into-list head tail))
   :else template))
 
-^{:line 205 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn unwrap-brackets [form]
-  ^{:line 206 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (cond
-  ^{:line 207 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (and ^{:line 207 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-pair? form) ^{:line 207 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 207 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-car form) BRACKET-TAG)) ^{:line 208 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-cdr form)
-  ^{:line 209 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (vector? form) form
-  :else ^{:line 210 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} []))
+(defn unwrap-brackets [form]
+  (cond
+  (and (datum-pair? form) (= (datum-car form) BRACKET-TAG)) (datum-cdr form)
+  (vector? form) form
+  :else []))
 
-^{:line 212 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn collect-param-binders [form macro-params]
-  ^{:line 213 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [items ^{:line 213 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (unwrap-brackets form)]
-  ^{:line 214 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (reduce ^{:line 214 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (fn [acc item] ^{:line 215 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (cond
-  ^{:line 216 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (and ^{:line 216 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (string? item) ^{:line 216 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (not= item "&") ^{:line 216 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (not ^{:line 216 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (clojure.core/contains? ^{:line 216 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (set macro-params) item))) ^{:line 217 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (conj acc item)
-  ^{:line 218 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (and ^{:line 218 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (vector? item) ^{:line 218 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 218 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (count item) 3) ^{:line 218 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (string? ^{:line 218 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth item 0)) ^{:line 219 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 219 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth item 1) ":") ^{:line 219 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (not ^{:line 219 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (clojure.core/contains? ^{:line 219 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (set macro-params) ^{:line 219 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth item 0)))) ^{:line 220 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (conj acc ^{:line 220 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth item 0))
-  :else acc)) ^{:line 222 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [] items)))
+(defn collect-param-binders [form macro-params]
+  (let [items (unwrap-brackets form)]
+  (reduce (fn [acc item] (cond
+  (and (string? item) (not= item "&") (not (clojure.core/contains? (set macro-params) item))) (conj acc item)
+  (and (vector? item) (= (count item) 3) (string? (nth item 0)) (= (nth item 1) ":") (not (clojure.core/contains? (set macro-params) (nth item 0)))) (conj acc (nth item 0))
+  :else acc)) [] items)))
 
-^{:line 224 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn collect-let-binders [form macro-params]
-  ^{:line 225 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [items ^{:line 225 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (unwrap-brackets form)]
-  ^{:line 226 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (reduce ^{:line 226 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (fn [acc i] ^{:line 227 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 227 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (and ^{:line 227 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 227 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (mod i 2) 0) ^{:line 227 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (< ^{:line 227 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (+ i 1) ^{:line 227 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (count items))) ^{:line 228 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [item ^{:line 228 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth items i)]
-  ^{:line 229 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (cond
-  ^{:line 230 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (and ^{:line 230 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (vector? item) ^{:line 230 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 230 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (count item) 3) ^{:line 230 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (string? ^{:line 230 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth item 0)) ^{:line 231 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 231 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth item 1) ":") ^{:line 231 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (not ^{:line 231 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (clojure.core/contains? ^{:line 231 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (set macro-params) ^{:line 231 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth item 0)))) ^{:line 232 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (conj acc ^{:line 232 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth item 0))
-  ^{:line 233 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (and ^{:line 233 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (string? item) ^{:line 233 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (not ^{:line 233 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (clojure.core/contains? ^{:line 233 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (set macro-params) item))) ^{:line 234 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (conj acc item)
-  :else acc)) acc)) ^{:line 237 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [] ^{:line 237 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (range ^{:line 237 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (count items)))))
+(defn collect-let-binders [form macro-params]
+  (let [items (unwrap-brackets form)]
+  (reduce (fn [acc i] (if (and (= (mod i 2) 0) (< (+ i 1) (count items))) (let [item (nth items i)]
+  (cond
+  (and (vector? item) (= (count item) 3) (string? (nth item 0)) (= (nth item 1) ":") (not (clojure.core/contains? (set macro-params) (nth item 0)))) (conj acc (nth item 0))
+  (and (string? item) (not (clojure.core/contains? (set macro-params) item))) (conj acc item)
+  :else acc)) acc)) [] (range (count items)))))
 
-^{:line 241 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn collect-template-binders [template macro-params]
-  ^{:line 242 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (letfn [(add-unique [acc name] (if (clojure.core/contains? (set acc) name) acc (conj acc name)))
+(defn collect-template-binders [template macro-params]
+  (letfn [(add-unique [acc name] (if (clojure.core/contains? (set acc) name) acc (conj acc name)))
           (walk [acc datum] (if (datum-pair? datum) (let [head (datum-car datum)]
   (cond
   (= head "let") (let [acc2 (if (> (count datum) 2) (reduce add-unique acc (collect-let-binders (nth datum 1) macro-params)) acc)]
@@ -156,144 +156,144 @@
    acc2 (if (> (count datum) 3) (reduce add-unique acc1 (collect-param-binders (nth datum 2) macro-params)) acc1)]
   (reduce walk acc2 (datum-cdr datum)))
   :else (reduce walk acc datum))) acc))]
-  ^{:line 271 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (walk ^{:line 271 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [] template)))
+  (walk [] template)))
 
-^{:line 273 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn rename-in-template [template renames]
-  ^{:line 274 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (cond
-  ^{:line 275 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (and ^{:line 275 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (string? template) ^{:line 275 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (not ^{:line 275 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nil? ^{:line 275 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (get renames template)))) ^{:line 276 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (get renames template)
-  ^{:line 277 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (and ^{:line 277 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-pair? template) ^{:line 277 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 277 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-car template) "quote")) template
-  ^{:line 279 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-pair? template) ^{:line 280 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (mapv ^{:line 280 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (fn [item] ^{:line 280 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (rename-in-template item renames)) template)
+(defn rename-in-template [template renames]
+  (cond
+  (and (string? template) (not (nil? (get renames template)))) (get renames template)
+  (and (datum-pair? template) (= (datum-car template) "quote")) template
+  (datum-pair? template) (mapv (fn [item] (rename-in-template item renames)) template)
   :else template))
 
-^{:line 283 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn hygienize-template! [template fixed-params rest-param]
-  ^{:line 285 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [macro-params ^{:line 285 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 285 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nil? rest-param) fixed-params ^{:line 287 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (into ^{:line 287 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [rest-param] fixed-params))
-   binders ^{:line 288 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (collect-template-binders template macro-params)]
-  ^{:line 289 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 289 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 289 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (count binders) 0) template ^{:line 291 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [renames ^{:line 291 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (reduce ^{:line 291 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (fn [acc b] ^{:line 292 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (assoc acc b ^{:line 292 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (gensym! b))) ^{:line 293 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} {} binders)]
-  ^{:line 294 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (rename-in-template template renames)))))
+(defn hygienize-template! [template fixed-params rest-param]
+  (let [macro-params (if (nil? rest-param) fixed-params (into [rest-param] fixed-params))
+   binders (collect-template-binders template macro-params)]
+  (if (= (count binders) 0) template (let [renames (reduce (fn [acc b] (assoc acc b (gensym! b))) {} binders)]
+  (rename-in-template template renames)))))
 
-^{:line 298 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn expand-template-macro! [m ^String name args]
-  ^{:line 299 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [fixed ^{:line 299 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (get m "fixed-params")
-   rest-name ^{:line 300 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (get m "rest-param")
-   template ^{:line 301 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 301 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 301 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (get m "kind") "safe") ^{:line 302 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (hygienize-template! ^{:line 302 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (get m "template") fixed rest-name) ^{:line 303 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (get m "template"))]
-  ^{:line 304 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 304 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (not ^{:line 304 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nil? rest-name)) ^{:line 305 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [fixed-args ^{:line 305 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (subvec args 0 ^{:line 305 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (count fixed))
-   rest-args ^{:line 306 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (subvec args ^{:line 306 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (count fixed))
-   bindings ^{:line 307 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (make-bindings fixed fixed-args rest-name rest-args)]
-  ^{:line 308 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (substitute template bindings rest-name)) ^{:line 309 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [bindings ^{:line 309 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (make-bindings fixed args nil ^{:line 309 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [])]
-  ^{:line 310 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (substitute template bindings nil)))))
+(defn expand-template-macro! [m ^String name args]
+  (let [fixed (get m "fixed-params")
+   rest-name (get m "rest-param")
+   template (if (= (get m "kind") "safe") (hygienize-template! (get m "template") fixed rest-name) (get m "template"))]
+  (if (not (nil? rest-name)) (let [fixed-args (subvec args 0 (count fixed))
+   rest-args (subvec args (count fixed))
+   bindings (make-bindings fixed fixed-args rest-name rest-args)]
+  (substitute template bindings rest-name)) (let [bindings (make-bindings fixed args nil [])]
+  (substitute template bindings nil)))))
 
-^{:line 312 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn expand-macro [reg ^String name args ctx]
-  ^{:line 313 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [m ^{:line 313 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (lookup-macro reg name)]
-  ^{:line 314 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 314 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nil? m) ^{:line 315 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (do
-  ^{:line 315 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (selfhost.rt/eprint ^{:line 315 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (str "beagle: no macro named " name "\n"))
-  ^{:line 316 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-cons name args)) ^{:line 317 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expand-template-macro! m name args))))
+(defn expand-macro [reg ^String name args ctx]
+  (let [m (lookup-macro reg name)]
+  (if (nil? m) (do
+  (selfhost.rt/eprint (str "beagle: no macro named " name "\n"))
+  (datum-cons name args)) (expand-template-macro! m name args))))
 
-^{:line 321 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn ^Boolean macro-application? [reg datum]
-  ^{:line 322 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (and ^{:line 322 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-pair? datum) ^{:line 323 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (string? ^{:line 323 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-car datum)) ^{:line 324 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (not ^{:line 324 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nil? ^{:line 324 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (lookup-macro reg ^{:line 324 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-car datum))))))
+(defn ^Boolean macro-application? [reg datum]
+  (and (datum-pair? datum) (string? (datum-car datum)) (not (nil? (lookup-macro reg (datum-car datum))))))
 
-^{:line 330 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn expand-fully-no-marker [reg datum depth ctx]
-  ^{:line 331 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (cond
-  ^{:line 332 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (>= depth MAX-EXPANSION-DEPTH) ^{:line 333 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [chain ^{:line 333 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 333 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nil? ctx) "" ^{:line 333 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (str "\n" ^{:line 333 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (format-expansion-chain ctx)))]
-  ^{:line 334 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (selfhost.rt/eprint ^{:line 335 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (str "beagle: macro expansion exceeded depth " ^{:line 335 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (str MAX-EXPANSION-DEPTH) chain "\n"))
+(defn expand-fully-no-marker [reg datum depth ctx]
+  (cond
+  (>= depth MAX-EXPANSION-DEPTH) (let [chain (if (nil? ctx) "" (str "\n" (format-expansion-chain ctx)))]
+  (selfhost.rt/eprint (str "beagle: macro expansion exceeded depth " (str MAX-EXPANSION-DEPTH) chain "\n"))
   datum)
-  ^{:line 337 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (macro-application? reg datum) ^{:line 338 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [name ^{:line 338 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-car datum)
-   next-ctx ^{:line 339 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 339 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nil? ctx) ^{:line 339 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (make-root-ctx name) ^{:line 339 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (push-ctx ctx name))
-   expanded ^{:line 340 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expand-macro reg name ^{:line 340 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-cdr datum) next-ctx)]
-  ^{:line 341 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expand-fully-no-marker reg expanded ^{:line 341 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (+ depth 1) next-ctx))
-  ^{:line 342 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-pair? datum) ^{:line 343 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (mapv ^{:line 343 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (fn [item] ^{:line 343 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expand-fully-no-marker reg item depth ctx)) datum)
+  (macro-application? reg datum) (let [name (datum-car datum)
+   next-ctx (if (nil? ctx) (make-root-ctx name) (push-ctx ctx name))
+   expanded (expand-macro reg name (datum-cdr datum) next-ctx)]
+  (expand-fully-no-marker reg expanded (+ depth 1) next-ctx))
+  (datum-pair? datum) (mapv (fn [item] (expand-fully-no-marker reg item depth ctx)) datum)
   :else datum))
 
-^{:line 346 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn expand-fully [reg datum depth ctx]
-  ^{:line 347 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (cond
-  ^{:line 348 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (>= depth MAX-EXPANSION-DEPTH) ^{:line 349 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [chain ^{:line 349 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 349 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nil? ctx) "" ^{:line 349 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (str "\n" ^{:line 349 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (format-expansion-chain ctx)))]
-  ^{:line 350 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (selfhost.rt/eprint ^{:line 351 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (str "beagle: macro expansion exceeded depth " ^{:line 351 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (str MAX-EXPANSION-DEPTH) chain "\n"))
+(defn expand-fully [reg datum depth ctx]
+  (cond
+  (>= depth MAX-EXPANSION-DEPTH) (let [chain (if (nil? ctx) "" (str "\n" (format-expansion-chain ctx)))]
+  (selfhost.rt/eprint (str "beagle: macro expansion exceeded depth " (str MAX-EXPANSION-DEPTH) chain "\n"))
   datum)
-  ^{:line 353 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (macro-application? reg datum) ^{:line 354 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [name ^{:line 354 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-car datum)
-   next-ctx ^{:line 355 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 355 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nil? ctx) ^{:line 355 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (make-root-ctx name) ^{:line 355 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (push-ctx ctx name))
-   m ^{:line 356 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (lookup-macro reg name)
-   expanded ^{:line 357 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expand-macro reg name ^{:line 357 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-cdr datum) next-ctx)]
-  ^{:line 358 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if ^{:line 358 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 358 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (get m "kind") "unsafe") ^{:line 359 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["unsafe-expr" ^{:line 359 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expand-fully-no-marker reg expanded ^{:line 359 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (+ depth 1) next-ctx)] ^{:line 360 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expand-fully reg expanded ^{:line 360 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (+ depth 1) next-ctx)))
-  ^{:line 361 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (datum-pair? datum) ^{:line 362 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (mapv ^{:line 362 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (fn [item] ^{:line 362 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expand-fully reg item depth ctx)) datum)
+  (macro-application? reg datum) (let [name (datum-car datum)
+   next-ctx (if (nil? ctx) (make-root-ctx name) (push-ctx ctx name))
+   m (lookup-macro reg name)
+   expanded (expand-macro reg name (datum-cdr datum) next-ctx)]
+  (if (= (get m "kind") "unsafe") ["unsafe-expr" (expand-fully-no-marker reg expanded (+ depth 1) next-ctx)] (expand-fully reg expanded (+ depth 1) next-ctx)))
+  (datum-pair? datum) (mapv (fn [item] (expand-fully reg item depth ctx)) datum)
   :else datum))
 
-^{:line 367 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (def passes ^{:line 367 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (atom ^{:line 367 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} []))
+(def passes (atom []))
 
-^{:line 368 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (def failures ^{:line 368 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (atom ^{:line 368 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} []))
+(def failures (atom []))
 
-^{:line 370 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn- expect [^String label ^Boolean result]
-  ^{:line 371 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (if result ^{:line 372 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (do
-  ^{:line 372 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (swap! passes conj true)
-  nil) ^{:line 373 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (do
-  ^{:line 373 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (swap! failures conj label)
+(defn- expect [^String label ^Boolean result]
+  (if result (do
+  (swap! passes conj true)
+  nil) (do
+  (swap! failures conj label)
   nil)))
 
-^{:line 375 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (defn run-tests! []
-  ^{:line 376 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (reset! passes ^{:line 376 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [])
-  ^{:line 377 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (reset! failures ^{:line 377 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [])
-  ^{:line 380 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [reg ^{:line 380 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (make-macro-registry)]
-  ^{:line 381 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (register-macro! reg "inc1" "safe" ^{:line 381 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["x"] ^{:line 381 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["+" "x" 1])
-  ^{:line 382 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [result ^{:line 382 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expand-macro reg "inc1" ^{:line 382 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [5] nil)]
-  ^{:line 383 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "simple substitution: (inc1 5) -> (+ 5 1)" ^{:line 384 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= result ^{:line 384 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["+" 5 1]))))
-  ^{:line 387 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [reg ^{:line 387 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (make-macro-registry)]
-  ^{:line 388 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (register-macro! reg "add" "safe" ^{:line 388 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["a" "b"] ^{:line 388 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["+" "a" "b"])
-  ^{:line 389 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [result ^{:line 389 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expand-macro reg "add" ^{:line 389 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [3 4] nil)]
-  ^{:line 390 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "multi-param: (add 3 4) -> (+ 3 4)" ^{:line 391 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= result ^{:line 391 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["+" 3 4]))))
-  ^{:line 394 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [reg ^{:line 394 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (make-macro-registry)]
-  ^{:line 395 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (register-macro! reg "square" "safe" ^{:line 395 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["x"] ^{:line 395 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["*" "x" "x"])
-  ^{:line 396 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [result ^{:line 396 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expand-macro reg "square" ^{:line 396 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [7] nil)]
-  ^{:line 397 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "nested: (square 7) -> (* 7 7)" ^{:line 398 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= result ^{:line 398 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["*" 7 7]))))
-  ^{:line 401 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [reg ^{:line 401 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (make-macro-registry)]
-  ^{:line 402 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (register-macro! reg "wrap-do" "safe" ^{:line 402 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["head" "&" "body"] ^{:line 403 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["do" "head" ^{:line 403 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [SPLICE-MARKER "body"]])
-  ^{:line 404 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [result ^{:line 404 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expand-macro reg "wrap-do" ^{:line 404 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["a" "b" "c"] nil)]
-  ^{:line 405 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "variadic splice: (wrap-do a b c) -> (do a b c)" ^{:line 406 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= result ^{:line 406 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["do" "a" "b" "c"]))))
-  ^{:line 409 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [reg ^{:line 409 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (make-macro-registry)]
-  ^{:line 410 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (register-macro! reg "wrap-vec" "safe" ^{:line 410 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["head" "&" "rest"] ^{:line 411 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["list" "head" "rest"])
-  ^{:line 412 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [result ^{:line 412 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expand-macro reg "wrap-vec" ^{:line 412 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["a" "b" "c"] nil)]
-  ^{:line 413 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "rest as vec: (wrap-vec a b c) -> (list a [#%brackets b c])" ^{:line 414 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= result ^{:line 414 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["list" "a" ^{:line 414 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [BRACKET-TAG "b" "c"]]))))
-  ^{:line 417 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [reg ^{:line 417 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (make-macro-registry)]
-  ^{:line 418 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (register-macro! reg "raw" "unsafe" ^{:line 418 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["form"] ^{:line 419 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["do" ^{:line 419 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["println" "trace"] "form"])
-  ^{:line 420 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [result ^{:line 420 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expand-macro reg "raw" ^{:line 420 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [^{:line 420 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["+ " 1 2]] nil)]
-  ^{:line 421 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "unsafe substitution" ^{:line 422 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= result ^{:line 422 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["do" ^{:line 422 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["println" "trace"] ^{:line 422 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["+ " 1 2]]))))
-  ^{:line 425 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [reg ^{:line 425 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (make-macro-registry)]
-  ^{:line 426 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (register-macro! reg "with-tmp" "safe" ^{:line 426 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["body"] ^{:line 427 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["let" ^{:line 427 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["tmp" 0] "body"])
-  ^{:line 428 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [result ^{:line 428 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expand-macro reg "with-tmp" ^{:line 428 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [^{:line 428 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["println" "tmp"]] nil)
-   binds ^{:line 429 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth result 1)
-   bind-name ^{:line 430 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth binds 0)]
-  ^{:line 431 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "hygiene: let result is let form" ^{:line 432 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 432 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth result 0) "let"))
-  ^{:line 433 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "hygiene: let binder renamed from tmp" ^{:line 434 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (not= bind-name "tmp"))
-  ^{:line 435 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "hygiene: user ref to tmp preserved" ^{:line 436 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 436 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth result 2) ^{:line 436 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["println" "tmp"]))))
-  ^{:line 439 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [reg ^{:line 439 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (make-macro-registry)]
-  ^{:line 440 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (register-macro! reg "with-fn" "safe" ^{:line 440 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["body"] ^{:line 441 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["fn" ^{:line 441 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["x"] "body"])
-  ^{:line 442 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [result ^{:line 442 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expand-macro reg "with-fn" ^{:line 442 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [^{:line 442 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["println" "x"]] nil)
-   params ^{:line 443 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth result 1)
-   param-name ^{:line 444 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth params 0)]
-  ^{:line 445 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "hygiene: fn result is fn form" ^{:line 446 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 446 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth result 0) "fn"))
-  ^{:line 447 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "hygiene: fn param renamed from x" ^{:line 448 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (not= param-name "x"))
-  ^{:line 449 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "hygiene: user ref to x preserved" ^{:line 450 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 450 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (nth result 2) ^{:line 450 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["println" "x"]))))
-  ^{:line 453 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [reg ^{:line 453 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (make-macro-registry)]
-  ^{:line 454 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (register-macro! reg "inc1" "unsafe" ^{:line 454 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["x"] ^{:line 454 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["+" "x" 1])
-  ^{:line 455 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (register-macro! reg "inc2" "unsafe" ^{:line 455 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["x"] ^{:line 455 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["inc1" ^{:line 455 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["inc1" "x"]])
-  ^{:line 456 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [result ^{:line 456 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expand-fully reg ^{:line 456 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["inc2" 5] 0 nil)]
-  ^{:line 457 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "recursive expansion: (inc2 5) -> (unsafe-expr (+ (+ 5 1) 1))" ^{:line 458 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= result ^{:line 458 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["unsafe-expr" ^{:line 458 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["+" ^{:line 458 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["+" 5 1] 1]]))))
-  ^{:line 461 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [reg ^{:line 461 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (make-macro-registry)]
-  ^{:line 462 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (register-macro! reg "inc1" "unsafe" ^{:line 462 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["x"] ^{:line 462 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["+" "x" 1])
-  ^{:line 463 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [result ^{:line 463 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expand-fully reg ^{:line 463 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["println" ^{:line 463 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["inc1" 5]] 0 nil)]
-  ^{:line 464 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "expand-fully: non-macro forms preserved" ^{:line 465 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= result ^{:line 465 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["println" ^{:line 465 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["unsafe-expr" ^{:line 465 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["+" 5 1]]]))))
-  ^{:line 468 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "contract: Symbol accepts string" ^{:line 469 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (check-datum-contract "x" "Symbol" "test" "arg"))
-  ^{:line 470 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "contract: Symbol rejects number" ^{:line 471 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (not ^{:line 471 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (check-datum-contract 42 "Symbol" "test" "arg")))
-  ^{:line 472 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "contract: Form accepts list with symbol head" ^{:line 473 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (check-datum-contract ^{:line 473 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["defn" "foo"] "Form" "test" "arg"))
-  ^{:line 474 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "contract: Form rejects non-list" ^{:line 475 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (not ^{:line 475 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (check-datum-contract 42 "Form" "test" "arg")))
-  ^{:line 476 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "contract: Syntax accepts anything" ^{:line 477 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (check-datum-contract 42 "Syntax" "test" "arg"))
-  ^{:line 480 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "strip: bracket tag removed" ^{:line 481 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 481 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (strip-reader-tags ^{:line 481 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [BRACKET-TAG "a" "b"]) ^{:line 481 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["a" "b"]))
-  ^{:line 482 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "strip: map tag -> hash" ^{:line 483 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 483 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (strip-reader-tags ^{:line 483 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [MAP-TAG "k" "v"]) ^{:line 483 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["hash" "k" "v"]))
-  ^{:line 484 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "strip: set tag -> set" ^{:line 485 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 485 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (strip-reader-tags ^{:line 485 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [SET-TAG "a"]) ^{:line 485 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["set" "a"]))
-  ^{:line 486 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "strip: nested" ^{:line 487 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 487 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (strip-reader-tags ^{:line 487 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["fn" ^{:line 487 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [BRACKET-TAG "x"] ^{:line 487 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [MAP-TAG "k" "x"]]) ^{:line 488 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["fn" ^{:line 488 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["x"] ^{:line 488 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["hash" "k" "x"]]))
-  ^{:line 489 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "strip: quote preserved" ^{:line 490 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (= ^{:line 490 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (strip-reader-tags ^{:line 490 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["quote" ^{:line 490 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [BRACKET-TAG "a"]]) ^{:line 490 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["quote" ^{:line 490 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} [BRACKET-TAG "a"]]))
-  ^{:line 493 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (let [reg ^{:line 493 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (make-macro-registry)]
-  ^{:line 494 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (register-macro! reg "inc1" "safe" ^{:line 494 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["x"] ^{:line 494 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["+" "x" 1])
-  ^{:line 495 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "macro-app?: true for registered" ^{:line 496 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (macro-application? reg ^{:line 496 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["inc1" 5]))
-  ^{:line 497 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "macro-app?: false for unknown" ^{:line 498 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (not ^{:line 498 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (macro-application? reg ^{:line 498 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} ["unknown" 5])))
-  ^{:line 499 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (expect "macro-app?: false for non-pair" ^{:line 500 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (not ^{:line 500 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (macro-application? reg "atom"))))
-  ^{:line 503 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (doseq [f ^{:line 503 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (deref failures)]
-  ^{:line 504 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (selfhost.rt/eprint ^{:line 504 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (str "  FAIL: " f "\n")))
-  ^{:line 505 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (println ^{:line 505 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (str "  MACROS: " ^{:line 505 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (count ^{:line 505 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (deref passes)) " passed, " ^{:line 506 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (count ^{:line 506 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (deref failures)) " failed"))
-  ^{:line 507 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (count ^{:line 507 :file "/home/tom/code/beagle/.worktrees/selfhost/self-host/src/selfhost/macros.bclj"} (deref failures)))
+(defn run-tests! []
+  (reset! passes [])
+  (reset! failures [])
+  (let [reg (make-macro-registry)]
+  (register-macro! reg "inc1" "safe" ["x"] ["+" "x" 1])
+  (let [result (expand-macro reg "inc1" [5] nil)]
+  (expect "simple substitution: (inc1 5) -> (+ 5 1)" (= result ["+" 5 1]))))
+  (let [reg (make-macro-registry)]
+  (register-macro! reg "add" "safe" ["a" "b"] ["+" "a" "b"])
+  (let [result (expand-macro reg "add" [3 4] nil)]
+  (expect "multi-param: (add 3 4) -> (+ 3 4)" (= result ["+" 3 4]))))
+  (let [reg (make-macro-registry)]
+  (register-macro! reg "square" "safe" ["x"] ["*" "x" "x"])
+  (let [result (expand-macro reg "square" [7] nil)]
+  (expect "nested: (square 7) -> (* 7 7)" (= result ["*" 7 7]))))
+  (let [reg (make-macro-registry)]
+  (register-macro! reg "wrap-do" "safe" ["head" "&" "body"] ["do" "head" [SPLICE-MARKER "body"]])
+  (let [result (expand-macro reg "wrap-do" ["a" "b" "c"] nil)]
+  (expect "variadic splice: (wrap-do a b c) -> (do a b c)" (= result ["do" "a" "b" "c"]))))
+  (let [reg (make-macro-registry)]
+  (register-macro! reg "wrap-vec" "safe" ["head" "&" "rest"] ["list" "head" "rest"])
+  (let [result (expand-macro reg "wrap-vec" ["a" "b" "c"] nil)]
+  (expect "rest as vec: (wrap-vec a b c) -> (list a [#%brackets b c])" (= result ["list" "a" [BRACKET-TAG "b" "c"]]))))
+  (let [reg (make-macro-registry)]
+  (register-macro! reg "raw" "unsafe" ["form"] ["do" ["println" "trace"] "form"])
+  (let [result (expand-macro reg "raw" [["+ " 1 2]] nil)]
+  (expect "unsafe substitution" (= result ["do" ["println" "trace"] ["+ " 1 2]]))))
+  (let [reg (make-macro-registry)]
+  (register-macro! reg "with-tmp" "safe" ["body"] ["let" ["tmp" 0] "body"])
+  (let [result (expand-macro reg "with-tmp" [["println" "tmp"]] nil)
+   binds (nth result 1)
+   bind-name (nth binds 0)]
+  (expect "hygiene: let result is let form" (= (nth result 0) "let"))
+  (expect "hygiene: let binder renamed from tmp" (not= bind-name "tmp"))
+  (expect "hygiene: user ref to tmp preserved" (= (nth result 2) ["println" "tmp"]))))
+  (let [reg (make-macro-registry)]
+  (register-macro! reg "with-fn" "safe" ["body"] ["fn" ["x"] "body"])
+  (let [result (expand-macro reg "with-fn" [["println" "x"]] nil)
+   params (nth result 1)
+   param-name (nth params 0)]
+  (expect "hygiene: fn result is fn form" (= (nth result 0) "fn"))
+  (expect "hygiene: fn param renamed from x" (not= param-name "x"))
+  (expect "hygiene: user ref to x preserved" (= (nth result 2) ["println" "x"]))))
+  (let [reg (make-macro-registry)]
+  (register-macro! reg "inc1" "unsafe" ["x"] ["+" "x" 1])
+  (register-macro! reg "inc2" "unsafe" ["x"] ["inc1" ["inc1" "x"]])
+  (let [result (expand-fully reg ["inc2" 5] 0 nil)]
+  (expect "recursive expansion: (inc2 5) -> (unsafe-expr (+ (+ 5 1) 1))" (= result ["unsafe-expr" ["+" ["+" 5 1] 1]]))))
+  (let [reg (make-macro-registry)]
+  (register-macro! reg "inc1" "unsafe" ["x"] ["+" "x" 1])
+  (let [result (expand-fully reg ["println" ["inc1" 5]] 0 nil)]
+  (expect "expand-fully: non-macro forms preserved" (= result ["println" ["unsafe-expr" ["+" 5 1]]]))))
+  (expect "contract: Symbol accepts string" (check-datum-contract "x" "Symbol" "test" "arg"))
+  (expect "contract: Symbol rejects number" (not (check-datum-contract 42 "Symbol" "test" "arg")))
+  (expect "contract: Form accepts list with symbol head" (check-datum-contract ["defn" "foo"] "Form" "test" "arg"))
+  (expect "contract: Form rejects non-list" (not (check-datum-contract 42 "Form" "test" "arg")))
+  (expect "contract: Syntax accepts anything" (check-datum-contract 42 "Syntax" "test" "arg"))
+  (expect "strip: bracket tag removed" (= (strip-reader-tags [BRACKET-TAG "a" "b"]) ["a" "b"]))
+  (expect "strip: map tag -> hash" (= (strip-reader-tags [MAP-TAG "k" "v"]) ["hash" "k" "v"]))
+  (expect "strip: set tag -> set" (= (strip-reader-tags [SET-TAG "a"]) ["set" "a"]))
+  (expect "strip: nested" (= (strip-reader-tags ["fn" [BRACKET-TAG "x"] [MAP-TAG "k" "x"]]) ["fn" ["x"] ["hash" "k" "x"]]))
+  (expect "strip: quote preserved" (= (strip-reader-tags ["quote" [BRACKET-TAG "a"]]) ["quote" [BRACKET-TAG "a"]]))
+  (let [reg (make-macro-registry)]
+  (register-macro! reg "inc1" "safe" ["x"] ["+" "x" 1])
+  (expect "macro-app?: true for registered" (macro-application? reg ["inc1" 5]))
+  (expect "macro-app?: false for unknown" (not (macro-application? reg ["unknown" 5])))
+  (expect "macro-app?: false for non-pair" (not (macro-application? reg "atom"))))
+  (doseq [f (deref failures)]
+  (selfhost.rt/eprint (str "  FAIL: " f "\n")))
+  (println (str "  MACROS: " (count (deref passes)) " passed, " (count (deref failures)) " failed"))
+  (count (deref failures)))

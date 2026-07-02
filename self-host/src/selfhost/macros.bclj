@@ -56,14 +56,18 @@
    "loop" "try" "println" "prn" "defn-" "ns" "require" "import" "defmacro"
    "declare-extern" "set!" "letfn" "when-let" "if-let" "when-some" "if-some" "condp"])
 
-;; --- gensym ------------------------------------------------------------------
+;; --- gensym (macros.rkt fresh-lowered-sym naming: <base>__<n>) ----------------
+;; Racket shares ONE counter between hygiene renames and parse's lowering
+;; temps, parameterized fresh per parse-program. This module is standalone
+;; (chain doesn't expand user macros yet), so the counter is module-local;
+;; when expansion is wired into the chain it must share parse's counter.
 
 (def gensym-state :- Any (atom {"counter" 0}))
 
 (defn gensym! [prefix :- String] :- String
   (let [n (get (deref gensym-state) "counter")]
     (swap! gensym-state assoc "counter" (+ n 1))
-    (str prefix "__g" (str n))))
+    (str prefix "__" (str n))))
 
 ;; --- datum helpers (arrays as cons lists) ------------------------------------
 

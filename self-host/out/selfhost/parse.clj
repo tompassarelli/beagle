@@ -309,12 +309,12 @@
 (defn make-pat-var [^String name]
   {"type" "var" "name" name})
 
-(def GENSYM-COUNTER (atom 0))
+(def LOWERING-COUNTER (atom 0))
 
-(defn- ^String gensym-name [^String prefix]
-  (let [n (deref GENSYM-COUNTER)]
-  (swap! GENSYM-COUNTER inc)
-  (str prefix "__g" n)))
+(defn- ^String fresh-lowered-sym! [^String base]
+  (let [n (deref LOWERING-COUNTER)]
+  (swap! LOWERING-COUNTER inc)
+  (str base "__" n)))
 
 (defn datum->json [d]
   (cond
@@ -562,19 +562,33 @@
   (reduce (fn [acc step] (thread-step-insert acc step "last")) init steps))
 
 (defn expand-cond-thread [^String kind init clauses]
-  (let [sym (gensym-name "ct")
-   n (count clauses)
+  (let [n (count clauses)
    pairs (loop [i 0
    acc []]
   (if (>= (+ i 1) n) acc (recur (+ i 2) (conj acc [(nth clauses i) (nth clauses (+ i 1))]))))
    pos (if (= kind "cond->") "first" "last")
-   inner (reduce (fn [acc pair] ["let" [BRACKET-TAG sym ["if" (nth pair 0) (thread-step-insert sym (nth pair 1) pos) sym]] acc]) sym (reverse pairs))]
-  ["let" [BRACKET-TAG sym init] inner]))
+   k (count pairs)
+   temps (loop [i 0
+   acc [(fresh-lowered-sym! "cond-thread")]]
+  (if (>= i k) acc (recur (+ i 1) (conj acc (fresh-lowered-sym! "cond-thread")))))
+   inner (loop [i (- k 1)
+   acc (nth temps k)]
+  (if (< i 0) acc (recur (- i 1) ["let" [BRACKET-TAG (nth temps (+ i 1)) ["if" (nth (nth pairs i) 0) (thread-step-insert (nth temps i) (nth (nth pairs i) 1) pos) (nth temps i)]] acc])))]
+  ["let" [BRACKET-TAG (nth temps 0) init] inner]))
 
 (defn expand-some-thread [^String kind init steps]
   (let [pos (if (= kind "some->") "first" "last")
-   sym (gensym-name "st")]
-  (reduce (fn [acc step] ["let" [BRACKET-TAG sym acc] ["if" ["some?" sym] (thread-step-insert sym step pos) "nil"]]) init steps)))
+   m (count steps)]
+  (if (= m 0) init (let [temps (loop [i 0
+   acc []]
+  (if (>= i m) acc (recur (+ i 1) (conj acc (fresh-lowered-sym! "some-thread")))))
+   threadeds (loop [i 0
+   acc []]
+  (if (>= i m) acc (recur (+ i 1) (conj acc (thread-step-insert (nth temps i) (nth steps i) pos)))))]
+  (loop [i (- m 1)
+   acc (nth threadeds (- m 1))]
+  (let [node ["let" [BRACKET-TAG (nth temps i) (if (= i 0) init (nth threadeds (- i 1)))] ["if" ["nil?" (nth temps i)] "nil" acc]]]
+  (if (= i 0) node (recur (- i 1) node))))))))
 
 (defn expand-as-thread [init name steps]
   (reduce (fn [acc step] ["let" [BRACKET-TAG name acc] step]) init steps))
@@ -592,7 +606,7 @@
   (if (and (= (count binder-part) 1) (string? (nth binder-part 0))) (let [name (nth binder-part 0)
    binding [BRACKET-TAG name value]
    test (binding-cond-test head name)]
-  (if if-form? ["let" binding ["if" test (nth rest-items 0) (nth rest-items 1)]] ["let" binding ["if" test (vec (concat ["do"] rest-items))]])) (let [g (gensym-name "bind")
+  (if if-form? ["let" binding ["if" test (nth rest-items 0) (nth rest-items 1)]] ["let" binding ["if" test (vec (concat ["do"] rest-items))]])) (let [g (fresh-lowered-sym! "bind")
    inner (vec (concat [BRACKET-TAG] binder-part [g]))
    test (binding-cond-test head g)]
   (if if-form? ["let" [BRACKET-TAG g value] ["if" test ["let" inner (nth rest-items 0)] (nth rest-items 1)]] ["let" [BRACKET-TAG g value] ["if" test ["let" inner (vec (concat ["do"] rest-items))]]])))))))
@@ -792,6 +806,7 @@
 
 (defn parse-program [datums]
   (reset-errors!)
+  (reset! LOWERING-COUNTER 0)
   (let [mode (atom "strict")
    mode-set (atom false)
    namespace (atom "beagle.user")
