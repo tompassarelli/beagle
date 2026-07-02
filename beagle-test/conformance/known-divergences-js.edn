@@ -1,0 +1,20 @@
+{:doc
+ "RATCHET — known divergences for the js target. Every entry is a corpus row
+  currently flagged by bin/beagle-certify whose divergence a human classified.
+  The gate FAILS on a NEW (unlisted) flagged row and on a STALE entry (listed
+  but no longer flagged) — this file only shrinks; fixing a bug forces the
+  fixer to delete its entry in the same commit. No commas (the file is read by
+  both EDN readers and the Racket reader). Keyed by [:id :bucket].
+  Categories: :bug (tracked defect) | :host-model (target-inherent semantics
+  gap e.g. nix laziness) | :strictness (beagle intentionally stricter)."
+ :entries
+ [{:id "js-reserved-word-param"
+   :bucket :invalid-output
+   :category :bug
+   :thread "@019f21fe-b4df"
+   :note "emit-js does not mangle JS strict-mode reserved words; param `private` emits invalid ESM. Silent-miscompile class."}
+  {:id "js-set-on-get"
+   :bucket :invalid-output
+   :category :bug
+   :thread "@019f21fe-b4df"
+   :note "set! on (get m k) passes check but emits `$$bc$get(m k) = v` — invalid assignment target. Root gap: no typed string-keyed object mutation surface (aset is (Any Int Any)). Silent-miscompile class."}]}

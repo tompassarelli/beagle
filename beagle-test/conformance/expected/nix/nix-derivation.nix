@@ -1,0 +1,10 @@
+{ pkgs, ... }:
+
+(pkgs.stdenv.mkDerivation {
+  pname = "hello-rust";
+  version = "0.1.0";
+  src = ./src;
+  nativeBuildInputs = [ pkgs.rustc pkgs.cargo ];
+  buildPhase = "cargo build --release";
+  installPhase = "install -Dm755 target/release/hello $out/bin/hello";
+})
