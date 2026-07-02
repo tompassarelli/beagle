@@ -1177,6 +1177,14 @@
         (make-let (parse-let-bindings (nth rest-items 0))
                   (mapv parse-expr* (subvec rest-items 1)))
 
+      ;; binding: dynamic-var rebinding; bindings share the let-binding shape.
+      (and (= head "binding") (>= (count rest-items) 1))
+        {"node" "binding"
+         "bindings" (parse-let-bindings (nth rest-items 0))
+         "body" (mapv parse-expr* (subvec rest-items 1))}
+      (= head "binding")
+        (err! (str "malformed binding — expected (binding [*var* val ...] body...); got: " (str d)))
+
       (and (= head "letfn") (>= (count rest-items) 1))
         (make-letfn (parse-letfn-fns (nth rest-items 0))
                     (mapv parse-expr* (subvec rest-items 1)))
@@ -1427,6 +1435,7 @@
         extern-seen (atom {})
         extern-list (atom [])
         requires (atom [])
+        gen-class (atom false)
         forms (atom [])]
     ;; Pre-scan: register parametric defunion names for parse-type.
     (doseq [d datums]
@@ -1478,7 +1487,7 @@
                         nil
                       (and (vector? clause) (> (count clause) 0)
                            (= (nth clause 0) ":gen-class"))
-                        nil
+                        (do (reset! gen-class true) nil)
                       (and (vector? clause) (> (count clause) 0)
                            (= (nth clause 0) ":use"))
                         (do (err! (str "(ns " (nth d 1) " (:use ...)) — :use is not supported. Use (:require [lib :refer [sym ...]]) instead.")) nil)
@@ -1524,6 +1533,7 @@
     {"mode" (deref mode)
      "namespace" (deref namespace)
      "target" (deref target)
+     "gen-class" (deref gen-class)
      "forms" (deref forms)
      "externs" (deref extern-list)
      "requires" (deref requires)}))
@@ -1653,6 +1663,14 @@
            (= (count (get node "bindings")) 2)
            (= (get (nth (get node "bindings") 0) "name") "x")
            (= (get (nth (get node "bindings") 1) "name") "y"))))
+  (expect "binding form (dynamic-var rebinding, let-binding shape)"
+    (let [node (parse-expr* ["binding" [BRACKET-TAG "*out*" "*err*"]
+                             ["println" ["#%string" "x"]]])]
+      (and (= (get node "node") "binding")
+           (= (nth (get node "bindings") 0)
+              {"name" "*out*" "ann" nil
+               "value" {"node" "dynamic-var" "name" "*err*"}})
+           (= (count (get node "body")) 1))))
   (expect "let flat typed binding (name :- TYPE value)"
     (let [node (parse-expr* ["let" [BRACKET-TAG "t" ":-" "Any" [":tx" "a"]]
                             "t"])]
@@ -2040,10 +2058,14 @@
     (let [prog (parse-program [["require" "my.lib" ":refer" ["#%brackets" "f" "g"]]])]
       (= (get prog "requires")
          [{"ns" "my.lib" "alias" false "refer" ["f" "g"]}])))
-  (expect "parse-program default mode strict + target clj"
+  (expect "parse-program default mode strict + target clj + gen-class false"
     (let [prog (parse-program [["ns" "x.y"]])]
       (and (= (get prog "mode") "strict")
-           (= (get prog "target") "clj"))))
+           (= (get prog "target") "clj")
+           (= (get prog "gen-class") false))))
+  (expect "parse-program (:gen-class) sets program flag"
+    (let [prog (parse-program [["ns" "fram.main" [":gen-class"]]])]
+      (= (get prog "gen-class") true)))
 
   ;; --- summary ---
   (let [fails (deref FAILURES)]

@@ -697,6 +697,8 @@
   (and (= head "fn") (>= (count rest-items) 1)) (let [parsed-params (parse-params (nth rest-items 0))]
   (make-fn (get parsed-params "params") (get parsed-params "rest-param") nil (mapv parse-expr* (subvec rest-items 1))))
   (and (= head "let") (>= (count rest-items) 1)) (make-let (parse-let-bindings (nth rest-items 0)) (mapv parse-expr* (subvec rest-items 1)))
+  (and (= head "binding") (>= (count rest-items) 1)) {"node" "binding" "bindings" (parse-let-bindings (nth rest-items 0)) "body" (mapv parse-expr* (subvec rest-items 1))}
+  (= head "binding") (err! (str "malformed binding — expected (binding [*var* val ...] body...); got: " (str d)))
   (and (= head "letfn") (>= (count rest-items) 1)) (make-letfn (parse-letfn-fns (nth rest-items 0)) (mapv parse-expr* (subvec rest-items 1)))
   (and (= head "loop") (>= (count rest-items) 1)) (make-loop (parse-let-bindings (nth rest-items 0)) (mapv parse-expr* (subvec rest-items 1)))
   (= head "recur") (make-recur (mapv parse-expr* rest-items))
@@ -799,6 +801,7 @@
    extern-seen (atom {})
    extern-list (atom [])
    requires (atom [])
+   gen-class (atom false)
    forms (atom [])]
   (doseq [d datums]
   (if (and (vector? d) (not (bracketed? d)) (>= (count d) 2) (= (nth d 0) "defunion") (vector? (nth d 1)) (not (bracketed? (nth d 1))) (> (count (nth d 1)) 0) (string? (nth (nth d 1) 0))) (do
@@ -833,7 +836,9 @@
   (if (some? r) (do
   (swap! requires conj r)))))
   (and (vector? clause) (> (count clause) 0) (= (nth clause 0) ":import")) nil
-  (and (vector? clause) (> (count clause) 0) (= (nth clause 0) ":gen-class")) nil
+  (and (vector? clause) (> (count clause) 0) (= (nth clause 0) ":gen-class")) (do
+  (reset! gen-class true)
+  nil)
   (and (vector? clause) (> (count clause) 0) (= (nth clause 0) ":use")) (do
   (err! (str "(ns " (nth d 1) " (:use ...)) — :use is not supported. Use (:require [lib :refer [sym ...]]) instead."))
   nil)
@@ -867,7 +872,7 @@
   (doseq [d datums]
   (if (not (meta-form? d)) (do
   (swap! forms conj (parse-expr* d)))))
-  {"mode" (deref mode) "namespace" (deref namespace) "target" (deref target) "forms" (deref forms) "externs" (deref extern-list) "requires" (deref requires)}))
+  {"mode" (deref mode) "namespace" (deref namespace) "target" (deref target) "gen-class" (deref gen-class) "forms" (deref forms) "externs" (deref extern-list) "requires" (deref requires)}))
 
 (def PASSES (atom 0))
 
@@ -924,6 +929,8 @@
   (and (= (get node "node") "fn") (nil? (get node "ret")))))
   (expect "let with bindings" (let [node (parse-expr* ["let" [BRACKET-TAG "x" 1 "y" 2] ["+" "x" "y"]])]
   (and (= (get node "node") "let") (= (count (get node "bindings")) 2) (= (get (nth (get node "bindings") 0) "name") "x") (= (get (nth (get node "bindings") 1) "name") "y"))))
+  (expect "binding form (dynamic-var rebinding, let-binding shape)" (let [node (parse-expr* ["binding" [BRACKET-TAG "*out*" "*err*"] ["println" ["#%string" "x"]]])]
+  (and (= (get node "node") "binding") (= (nth (get node "bindings") 0) {"name" "*out*" "ann" nil "value" {"node" "dynamic-var" "name" "*err*"}}) (= (count (get node "body")) 1))))
   (expect "let flat typed binding (name :- TYPE value)" (let [node (parse-expr* ["let" [BRACKET-TAG "t" ":-" "Any" [":tx" "a"]] "t"])]
   (and (= (count (get node "bindings")) 1) (= (get (nth (get node "bindings") 0) "name") "t") (= (get (get (nth (get node "bindings") 0) "ann") "name") "Any") (= (get (get (nth (get node "bindings") 0) "value") "node") "kw-access"))))
   (expect "if with else" (let [node (parse-expr* ["if" true "yes" "no"])]
@@ -1063,8 +1070,10 @@
   (= (get prog "requires") [{"ns" "clojure.string" "alias" "str" "refer" false}])))
   (expect "parse-program require :refer" (let [prog (parse-program [["require" "my.lib" ":refer" ["#%brackets" "f" "g"]]])]
   (= (get prog "requires") [{"ns" "my.lib" "alias" false "refer" ["f" "g"]}])))
-  (expect "parse-program default mode strict + target clj" (let [prog (parse-program [["ns" "x.y"]])]
-  (and (= (get prog "mode") "strict") (= (get prog "target") "clj"))))
+  (expect "parse-program default mode strict + target clj + gen-class false" (let [prog (parse-program [["ns" "x.y"]])]
+  (and (= (get prog "mode") "strict") (= (get prog "target") "clj") (= (get prog "gen-class") false))))
+  (expect "parse-program (:gen-class) sets program flag" (let [prog (parse-program [["ns" "fram.main" [":gen-class"]]])]
+  (= (get prog "gen-class") true)))
   (let [fails (deref FAILURES)]
   (doseq [f fails]
   (selfhost.rt/eprint (str "  FAIL: " f "\n")))
