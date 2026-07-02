@@ -3,7 +3,7 @@
 
 (def NODE {"node" "if" "depth" 0})
 
-(defn collect [xs]
+(defn collect! [xs]
   (let [acc (atom [])]
   (doseq [x xs]
   (swap! acc conj (+ x 1)))
@@ -29,7 +29,7 @@
   (if (and (vector? d) (> (count d) 0)) (subvec d 1) []))
 
 (defn -main [& args]
-  (println (str "collect=" (collect [1 2 3])))
+  (println (str "collect=" (collect! [1 2 3])))
   (println (str "char-at=" (char-at "hello" 1) "|" (char-at "hello" 99) "|"))
   (println (str "substring2=" (substring2 "hello" 1 3) "|" (substring2 "hello" 3 99)))
   (println (str "to-int=" (to-int "42") "," (to-int "xx")))

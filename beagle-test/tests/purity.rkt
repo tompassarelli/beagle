@@ -165,6 +165,19 @@
     (check-regexp-match #rx"purity leak" o)
     (check-regexp-match #rx"'make-handler'" o)))
 
+(test-case "-main is exempt: the entry-point contract name cannot carry `!`"
+  (define entry
+    (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
+           '(defn run! [v] (reset! (atom nil) v))
+           '(defn -main [& args] (run! args))))
+  (parameterize ([current-purity-enforcement 'warn])
+    (define o (check-output entry))
+    (check-false (regexp-match? #rx"purity leak" o)))
+  (check-not-exn
+   (lambda ()
+     (parameterize ([current-purity-enforcement 'error])
+       (type-check! entry)))))
+
 ;; ============================================================================
 ;; Diagnostic-kind wiring
 ;; ============================================================================

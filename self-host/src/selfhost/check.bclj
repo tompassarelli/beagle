@@ -2,7 +2,7 @@
 (ns selfhost.check
   "Self-hosted type checker — matches beagle-lib/private/check.rkt semantics on
   the program AST JSON (string-keyed maps per ast-json.rkt). Public entry:
-  check-program [Any -> Any] returning a vector of error strings (empty =
+  check-program! [Any -> Any] returning a vector of error strings (empty =
   accepted). Ported from ~/code/beagle/.worktrees/driftlab/self-host/check.bjs
   (.bjs target): JS mutable env objects -> threaded immutable maps; the global
   registry + diagnostics -> a module-level atom (STATE); mutating fns get a `!`.")
@@ -1377,13 +1377,11 @@
     {"diagnostics" diags
      "count" (count diags)}))
 
-;; === check-program (public entry: program -> vec of error strings) ============
-;; Contract name (selfhost.main calls c/check-program): the pure-named boundary
-;; over the atom-backed checker. `check --agent` flags a purity leak here for the
-;; type-check! call — intentional; the mandated public name overrides the `!`
-;; convention (build passes; the lint ships dark by default).
+;; === check-program! (public entry: program -> vec of error strings) ============
+;; Bang-named per the `!`-purity lint: the checker is atom-backed (type-check!),
+;; so the boundary carries the marker. Racket counterpart: type-check!.
 
-(defn check-program [prog :- Any] :- Any
+(defn check-program! [prog :- Any] :- Any
   (get (type-check! prog) "diagnostics"))
 
 ;; === test data helpers =======================================================
@@ -1745,13 +1743,13 @@
           result (type-check! prog)]
       (= (get result "count") 0)))
 
-  ;; --- check-program contract (empty vec = accepted, non-empty = errors) ---
-  (expect! "check-program: accepts well-typed"
+  ;; --- check-program! contract (empty vec = accepted, non-empty = errors) ---
+  (expect! "check-program!: accepts well-typed"
     (let [prog (make-prog [(make-def-node "x" (make-prim "Int") (make-lit "number" 42))])]
-      (= (count (check-program prog)) 0)))
-  (expect! "check-program: reports errors"
+      (= (count (check-program! prog)) 0)))
+  (expect! "check-program!: reports errors"
     (let [prog (make-prog [(make-def-node "x" (make-prim "String") (make-lit "number" 42))])]
-      (> (count (check-program prog)) 0)))
+      (> (count (check-program! prog)) 0)))
 
   ;; --- summary ---
   (doseq [f (deref failures)]

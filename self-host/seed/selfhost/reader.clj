@@ -230,7 +230,7 @@
 
 (def failures (atom []))
 
-(defn- expect [^String label ^Boolean result]
+(defn- expect! [^String label ^Boolean result]
   (if result (do
   (swap! passes conj true)
   nil) (do
@@ -246,82 +246,82 @@
 (defn run-tests! []
   (reset! passes [])
   (reset! failures [])
-  (expect "number: integer" (= (rd1 "42") 42))
-  (expect "number: float" (= (rd1 "3.14") 3.14))
-  (expect "number: negative" (= (rd1 "-7") -7))
-  (expect "number: negative float" (= (rd1 "-3.14") -3.14))
-  (expect "boolean: true" (= (rd1 "true") true))
-  (expect "boolean: false" (= (rd1 "false") false))
-  (expect "symbol" (= (rd1 "foo") "foo"))
-  (expect "nil symbol" (= (rd1 "nil") "nil"))
-  (expect "keyword" (= (rd1 ":name") ":name"))
-  (expect "standalone colon" (= (rd1 ":") ":"))
-  (expect "type marker :-" (= (rd1 ":-") ":-"))
-  (expect "string literal" (= (rd1 "\"hello\"") [STRING-TAG "hello"]))
-  (expect "string with escapes" (= (rd1 "\"a\\nb\"") [STRING-TAG "a\nb"]))
-  (expect "string with tab" (= (rd1 "\"a\\tb\"") [STRING-TAG "a\tb"]))
-  (expect "string with escaped quote" (= (rd1 "\"say \\\"hi\\\"\"") [STRING-TAG "say \"hi\""]))
-  (expect "string with \\u0001 escape" (= (rd1 "\"\\u0001\"") [STRING-TAG "\u0001"]))
-  (expect "\\uXXXX in context" (= (rd1 "\"a\\u0041b\"") [STRING-TAG "aAb"]))
-  (expect "\\uXXXX yields real control char (len 1)" (= (count (nth (rd1 "\"\\u0001\"") 1)) 1))
-  (expect "1.0 stays float (not int)" (not (= (rd1 "1.0") 1)))
-  (expect "1.0 equals 1.0 float" (= (rd1 "1.0") 1.0))
-  (expect "1 stays int" (= (rd1 "1") 1))
-  (expect "exponent 1e5" (= (rd1 "1e5") 100000.0))
-  (expect "exponent 1E5 upper" (= (rd1 "1E5") 100000.0))
-  (expect "float exponent 1.5e-3" (= (rd1 "1.5e-3") 0.0015))
-  (expect "negative exponent -2e3" (= (rd1 "-2e3") -2000.0))
-  (expect "exponent classifies as float" (not (= (rd1 "1e2") 100)))
-  (expect "simple list" (= (rd1 "(+ 1 2)") ["+" 1 2]))
-  (expect "nested list" (= (rd1 "(+ (* 2 3) 4)") ["+" ["*" 2 3] 4]))
-  (expect "bracket vector" (= (rd1 "[1 2 3]") [BRACKET-TAG 1 2 3]))
-  (expect "map literal" (= (rd1 "{:a 1 :b 2}") [MAP-TAG ":a" 1 ":b" 2]))
-  (expect "set literal" (= (rd1 "#{1 2 3}") [SET-TAG 1 2 3]))
-  (expect "regex literal" (= (rd1 "#\"[a-z]+\"") [REGEX-TAG "[a-z]+"]))
-  (expect "regex preserves backslash" (= (rd1 "#\"\\d+\"") [REGEX-TAG "\\d+"]))
-  (expect "quote" (= (rd1 "'foo") ["quote" "foo"]))
-  (expect "deref" (= (rd1 "@state") ["deref" "state"]))
-  (expect "quasiquote" (= (rd1 "`foo") ["quasiquote" "foo"]))
-  (expect "line comment skipped" (= (rd "; ignore\n42") [42]))
-  (expect "inline comment" (= (rd "1 ; comment\n2") [1 2]))
-  (expect "multiple comment lines" (= (rd ";; first\n;; second\n42") [42]))
-  (expect "#lang beagle/clj" (= (get (read-all "#lang beagle/clj\n") "target") "clj"))
-  (expect "#lang beagle/js" (let [result (read-all "#lang beagle/js\n(ns app)")]
+  (expect! "number: integer" (= (rd1 "42") 42))
+  (expect! "number: float" (= (rd1 "3.14") 3.14))
+  (expect! "number: negative" (= (rd1 "-7") -7))
+  (expect! "number: negative float" (= (rd1 "-3.14") -3.14))
+  (expect! "boolean: true" (= (rd1 "true") true))
+  (expect! "boolean: false" (= (rd1 "false") false))
+  (expect! "symbol" (= (rd1 "foo") "foo"))
+  (expect! "nil symbol" (= (rd1 "nil") "nil"))
+  (expect! "keyword" (= (rd1 ":name") ":name"))
+  (expect! "standalone colon" (= (rd1 ":") ":"))
+  (expect! "type marker :-" (= (rd1 ":-") ":-"))
+  (expect! "string literal" (= (rd1 "\"hello\"") [STRING-TAG "hello"]))
+  (expect! "string with escapes" (= (rd1 "\"a\\nb\"") [STRING-TAG "a\nb"]))
+  (expect! "string with tab" (= (rd1 "\"a\\tb\"") [STRING-TAG "a\tb"]))
+  (expect! "string with escaped quote" (= (rd1 "\"say \\\"hi\\\"\"") [STRING-TAG "say \"hi\""]))
+  (expect! "string with \\u0001 escape" (= (rd1 "\"\\u0001\"") [STRING-TAG "\u0001"]))
+  (expect! "\\uXXXX in context" (= (rd1 "\"a\\u0041b\"") [STRING-TAG "aAb"]))
+  (expect! "\\uXXXX yields real control char (len 1)" (= (count (nth (rd1 "\"\\u0001\"") 1)) 1))
+  (expect! "1.0 stays float (not int)" (not (= (rd1 "1.0") 1)))
+  (expect! "1.0 equals 1.0 float" (= (rd1 "1.0") 1.0))
+  (expect! "1 stays int" (= (rd1 "1") 1))
+  (expect! "exponent 1e5" (= (rd1 "1e5") 100000.0))
+  (expect! "exponent 1E5 upper" (= (rd1 "1E5") 100000.0))
+  (expect! "float exponent 1.5e-3" (= (rd1 "1.5e-3") 0.0015))
+  (expect! "negative exponent -2e3" (= (rd1 "-2e3") -2000.0))
+  (expect! "exponent classifies as float" (not (= (rd1 "1e2") 100)))
+  (expect! "simple list" (= (rd1 "(+ 1 2)") ["+" 1 2]))
+  (expect! "nested list" (= (rd1 "(+ (* 2 3) 4)") ["+" ["*" 2 3] 4]))
+  (expect! "bracket vector" (= (rd1 "[1 2 3]") [BRACKET-TAG 1 2 3]))
+  (expect! "map literal" (= (rd1 "{:a 1 :b 2}") [MAP-TAG ":a" 1 ":b" 2]))
+  (expect! "set literal" (= (rd1 "#{1 2 3}") [SET-TAG 1 2 3]))
+  (expect! "regex literal" (= (rd1 "#\"[a-z]+\"") [REGEX-TAG "[a-z]+"]))
+  (expect! "regex preserves backslash" (= (rd1 "#\"\\d+\"") [REGEX-TAG "\\d+"]))
+  (expect! "quote" (= (rd1 "'foo") ["quote" "foo"]))
+  (expect! "deref" (= (rd1 "@state") ["deref" "state"]))
+  (expect! "quasiquote" (= (rd1 "`foo") ["quasiquote" "foo"]))
+  (expect! "line comment skipped" (= (rd "; ignore\n42") [42]))
+  (expect! "inline comment" (= (rd "1 ; comment\n2") [1 2]))
+  (expect! "multiple comment lines" (= (rd ";; first\n;; second\n42") [42]))
+  (expect! "#lang beagle/clj" (= (get (read-all "#lang beagle/clj\n") "target") "clj"))
+  (expect! "#lang beagle/js" (let [result (read-all "#lang beagle/js\n(ns app)")]
   (and (= (get result "target") "js") (= (get result "datums") [["ns" "app"]]))))
-  (expect "no #lang" (let [result (read-all "(ns app)")]
+  (expect! "no #lang" (let [result (read-all "(ns app)")]
   (and (nil? (get result "target")) (= (get result "datums") [["ns" "app"]]))))
-  (expect "defn form flat params" (let [result (rd1 "(defn foo [x :- Int] :- String x)")]
+  (expect! "defn form flat params" (let [result (rd1 "(defn foo [x :- Int] :- String x)")]
   (and (= (nth result 0) "defn") (= (nth result 1) "foo") (= (nth result 2) [BRACKET-TAG "x" ":-" "Int"]) (= (nth result 3) ":-") (= (nth result 4) "String") (= (nth result 5) "x"))))
-  (expect "defrecord flat fields" (let [result (rd1 "(defrecord Point [x :- Int y :- Int])")]
+  (expect! "defrecord flat fields" (let [result (rd1 "(defrecord Point [x :- Int y :- Int])")]
   (and (= (nth result 0) "defrecord") (= (nth result 1) "Point") (= (nth result 2) [BRACKET-TAG "x" ":-" "Int" "y" ":-" "Int"]))))
-  (expect "def with string value" (let [result (rd1 "(def greeting :- String \"hello\")")]
+  (expect! "def with string value" (let [result (rd1 "(def greeting :- String \"hello\")")]
   (and (= (nth result 0) "def") (= (nth result 1) "greeting") (= (nth result 2) ":-") (= (nth result 3) "String") (= (nth result 4) [STRING-TAG "hello"]))))
-  (expect "declare-extern with fn type" (let [result (rd1 "(declare-extern fetch [String -> (Promise Any)])")]
+  (expect! "declare-extern with fn type" (let [result (rd1 "(declare-extern fetch [String -> (Promise Any)])")]
   (and (= (nth result 0) "declare-extern") (= (nth result 1) "fetch") (= (nth result 2) [BRACKET-TAG "String" "->" ["Promise" "Any"]]))))
-  (expect "method call" (= (rd1 "(.toString x)") [".toString" "x"]))
-  (expect "property access" (= (rd1 "(.-length arr)") [".-length" "arr"]))
-  (expect "static call" (= (rd1 "(Math/abs x)") ["Math/abs" "x"]))
-  (expect "qualified require alias" (= (rd1 "(:tx a)") [":tx" "a"]))
-  (expect "threading macro" (= (rd1 "(-> x inc str)") ["->" "x" "inc" "str"]))
-  (expect "negative number in list" (= (rd1 "(+ x -5)") ["+" "x" -5]))
-  (expect "minus as symbol" (= (rd1 "(- 5 3)") ["-" 5 3]))
-  (expect "dot method symbol" (= (rd1 ".charAt") ".charAt"))
-  (expect "dynamic var" (= (rd1 "*state*") "*state*"))
-  (expect "constructor symbol" (= (rd1 "Point.") "Point."))
-  (expect "empty list" (= (rd1 "()") []))
-  (expect "empty vector" (= (rd1 "[]") [BRACKET-TAG]))
-  (expect "empty map" (= (rd1 "{}") [MAP-TAG]))
-  (expect "multiple top-level forms" (let [result (rd "(def x 1)\n(def y 2)")]
+  (expect! "method call" (= (rd1 "(.toString x)") [".toString" "x"]))
+  (expect! "property access" (= (rd1 "(.-length arr)") [".-length" "arr"]))
+  (expect! "static call" (= (rd1 "(Math/abs x)") ["Math/abs" "x"]))
+  (expect! "qualified require alias" (= (rd1 "(:tx a)") [":tx" "a"]))
+  (expect! "threading macro" (= (rd1 "(-> x inc str)") ["->" "x" "inc" "str"]))
+  (expect! "negative number in list" (= (rd1 "(+ x -5)") ["+" "x" -5]))
+  (expect! "minus as symbol" (= (rd1 "(- 5 3)") ["-" 5 3]))
+  (expect! "dot method symbol" (= (rd1 ".charAt") ".charAt"))
+  (expect! "dynamic var" (= (rd1 "*state*") "*state*"))
+  (expect! "constructor symbol" (= (rd1 "Point.") "Point."))
+  (expect! "empty list" (= (rd1 "()") []))
+  (expect! "empty vector" (= (rd1 "[]") [BRACKET-TAG]))
+  (expect! "empty map" (= (rd1 "{}") [MAP-TAG]))
+  (expect! "multiple top-level forms" (let [result (rd "(def x 1)\n(def y 2)")]
   (and (= (count result) 2) (= (nth (nth result 0) 1) "x") (= (nth (nth result 1) 1) "y"))))
-  (expect "string in list" (let [result (rd1 "(str \"hello\" \" world\")")]
+  (expect! "string in list" (let [result (rd1 "(str \"hello\" \" world\")")]
   (and (= (nth result 0) "str") (= (nth result 1) [STRING-TAG "hello"]) (= (nth result 2) [STRING-TAG " world"]))))
-  (expect "keyword :else in map" (= (rd1 "{:else true}") [MAP-TAG ":else" true]))
-  (expect "str concat call" (let [result (rd1 "(str \"Hello, \" name \"!\")")]
+  (expect! "keyword :else in map" (= (rd1 "{:else true}") [MAP-TAG ":else" true]))
+  (expect! "str concat call" (let [result (rd1 "(str \"Hello, \" name \"!\")")]
   (and (= (nth result 0) "str") (= (nth result 1) [STRING-TAG "Hello, "]) (= (nth result 2) "name") (= (nth result 3) [STRING-TAG "!"]))))
-  (expect "full clj header" (let [result (read-all "#lang beagle/clj\n(ns app.main)\n(define-mode strict)")]
+  (expect! "full clj header" (let [result (read-all "#lang beagle/clj\n(ns app.main)\n(define-mode strict)")]
   (and (= (get result "target") "clj") (= (count (get result "datums")) 2) (= (nth (nth (get result "datums") 0) 0) "ns") (= (nth (nth (get result "datums") 1) 0) "define-mode"))))
-  (expect "read-program returns datum vector" (= (read-program "#lang beagle/clj\n(ns app)\n(def x 1)") [["ns" "app"] ["def" "x" 1]]))
-  (expect "read-datum returns value+pos" (let [r (read-datum "42 rest" 0)]
+  (expect! "read-program returns datum vector" (= (read-program "#lang beagle/clj\n(ns app)\n(def x 1)") [["ns" "app"] ["def" "x" 1]]))
+  (expect! "read-datum returns value+pos" (let [r (read-datum "42 rest" 0)]
   (and (= (get r "value") 42) (= (get r "pos") 2))))
   (doseq [f (deref failures)]
   (selfhost.rt/eprint (str "  FAIL: " f "\n")))

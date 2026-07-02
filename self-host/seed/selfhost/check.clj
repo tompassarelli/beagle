@@ -774,7 +774,7 @@
   (let [diags (get (deref STATE) "diagnostics")]
   {"diagnostics" diags "count" (count diags)}))
 
-(defn check-program [prog]
+(defn check-program! [prog]
   (get (type-check! prog) "diagnostics"))
 
 (defn make-lit [^String kind value]
@@ -958,10 +958,10 @@
   (expect! "dynamic mode: no errors" (let [prog {"mode" "dynamic" "namespace" "test" "target" "js" "forms" [(make-def-node "x" (make-prim "String") (make-lit "number" 42))] "externs" [] "requires" []}
    result (type-check! prog)]
   (= (get result "count") 0)))
-  (expect! "check-program: accepts well-typed" (let [prog (make-prog [(make-def-node "x" (make-prim "Int") (make-lit "number" 42))])]
-  (= (count (check-program prog)) 0)))
-  (expect! "check-program: reports errors" (let [prog (make-prog [(make-def-node "x" (make-prim "String") (make-lit "number" 42))])]
-  (> (count (check-program prog)) 0)))
+  (expect! "check-program!: accepts well-typed" (let [prog (make-prog [(make-def-node "x" (make-prim "Int") (make-lit "number" 42))])]
+  (= (count (check-program! prog)) 0)))
+  (expect! "check-program!: reports errors" (let [prog (make-prog [(make-def-node "x" (make-prim "String") (make-lit "number" 42))])]
+  (> (count (check-program! prog)) 0)))
   (doseq [f (deref failures)]
   (selfhost.rt/eprint (str "  FAIL: " f "\n")))
   (println (str "  CHECK: " (count (deref passes)) " passed, " (count (deref failures)) " failed"))

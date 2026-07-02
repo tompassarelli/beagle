@@ -3571,7 +3571,10 @@
     [else    'off]))
 
 (define (check-defn-purity name body src-table node)
-  (define markers (collect-markers body))
+  ;; `-main` is exempt: the name IS the runtime entry-point contract
+  ;; (clj/bb `-m ns` resolves `ns/-main` literally), so the author cannot
+  ;; rename it — and an entry point is definitionally effectful.
+  (define markers (if (eq? name '-main) '() (collect-markers body)))
   (when (and (not (bang-name? name)) (pair? markers))
     (define src (and src-table (hash-ref src-table node #f)))
     (define msg
