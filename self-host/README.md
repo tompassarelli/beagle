@@ -75,3 +75,20 @@ absolute checkout paths and remain byte-stable across machines.
   srcloc-free by construction, so this cannot affect seed bytes.
 - **Non-clj targets** — the chain emits the `clj` target only (no nix
   reader macros / `nix-*` forms, no js/cljs/odin emitters).
+
+## Native distribution binary
+
+`native/` builds a self-contained GraalVM native-image of the seed compiler
+(the same emitted `.clj` babashka runs — the seed is also real JVM Clojure):
+
+```sh
+nix shell nixpkgs#graalvmPackages.graalvm-ce -c self-host/native/build.sh
+self-host/native/beagle-selfhost emit FILE.bclj     # ast | check | emit-from-ast too
+```
+
+Zero reflection config (one Jackson `--initialize-at-build-time` class-init
+flag only — see `native/build.sh`). Parity gate:
+
+```sh
+self-host/native/verify-native.sh   # native == bb == Racket oracle, byte-for-byte
+```

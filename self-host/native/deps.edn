@@ -1,0 +1,4 @@
+{:paths ["../seed" "classes"]
+ :deps {org.clojure/clojure {:mvn/version "1.12.1"}
+        cheshire/cheshire {:mvn/version "5.13.0"}
+        com.github.clj-easy/graal-build-time {:mvn/version "1.0.6"}}}

@@ -2,7 +2,10 @@
 (ns selfhost.main
   "Self-hosted compiler driver: reader -> parse -> check -> emit-clj on
   babashka. Commands: ast FILE | check FILE | emit FILE | emit-from-ast.
-  Host IO via selfhost.rt externs; the compiler stages are pure .bclj.")
+  Host IO via selfhost.rt externs; the compiler stages are pure .bclj.
+  (:gen-class) so the JVM/GraalVM native-image path has a -main entry class;
+  babashka ignores it."
+  (:gen-class))
 (define-mode strict)
 
 (require selfhost.rt)
@@ -54,4 +57,7 @@
       (= cmd "emit-from-ast") (cmd-emit-from-ast!)
       :else
         (do (selfhost.rt/eprint "usage: selfhost.main ast|check|emit FILE, or emit-from-ast < ast.json\n")
-            (selfhost.rt/exit 2)))))
+            (selfhost.rt/exit 2)))
+    ;; clojure.main flushes *out* in a finally; the gen-class/native-image entry
+    ;; bypasses clojure.main, so an unflushed `print` would exit with empty stdout.
+    (flush)))
