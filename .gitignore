@@ -33,3 +33,10 @@ __pycache__/
 # throwaway emit can't pollute the tracked tree (override root with BEAGLE_OUT).
 .scratch/
 .beagle-out/
+
+# Internal agent notes / status / scratch / handoffs — NOT user-facing docs.
+# Keep out of git. Put private notes under docs/private/.
+docs/private/
+
+# selfhost lab scratch (oracle mints, parity diffs) — derived, re-mintable
+.lab/

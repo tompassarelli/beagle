@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+# beagle-remint: the self-host bootstrap fixpoint gate.
+#
+# The self-hosted compiler is seeded by its own emitted output: the .clj under
+# self-host/seed/ is a blessed, TRACKED artifact that babashka runs directly.
+# This script closes the bootstrap loop — the seed compiler compiles the
+# compiler's own sources (self-host/src/selfhost/*.bclj) and the result must
+# reproduce the seed BYTE-FOR-BYTE. Emission is deterministic, so any
+# divergence means seed and sources no longer agree: the gate fails.
+#
+# Usage:
+#   bin/beagle-remint             # gate: selfhost-emit(src) == seed (bb only)
+#   bin/beagle-remint --oracle    # gate + Racket-oracle emit == seed (three-way)
+#   bin/beagle-remint --promote   # bless fresh output as the new seed, gated on
+#                                 # CONVERGENCE: gen2 (emitted by gen1) must be
+#                                 # byte-identical to gen1, and gen1's module
+#                                 # self-tests must pass. Combine with --oracle
+#                                 # to also require Racket agreement on gen1.
+#
+# rt.clj is the hand-written bb runtime (never compiled): the gate requires the
+# seed copy to match self-host/src/selfhost/rt.clj byte-for-byte; --promote
+# copies it.
+#
+# Exit 0 iff every comparison is byte-identical (and, under --promote, the
+# convergence + self-test gate is green).
+set -uo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$root"
+
+SRC=self-host/src/selfhost
+SEED=self-host/seed/selfhost
+BUILD=.lab/remint            # scratch, gitignored, re-mintable
+
+ORACLE=0; PROMOTE=0
+for arg in "$@"; do
+    case "$arg" in
+        --oracle)  ORACLE=1 ;;
+        --promote) PROMOTE=1 ;;
+        *) echo "usage: bin/beagle-remint [--oracle] [--promote]" >&2; exit 2 ;;
+    esac
+done
+
+command -v bb >/dev/null || { echo "beagle-remint: babashka (bb) not on PATH" >&2; exit 1; }
+
+rm -rf "$BUILD"
+mkdir -p "$BUILD/gen1/selfhost"
+
+# Module set = every .bclj source. ns selfhost.emit-clj -> file emit_clj.clj.
+MODULES=()
+for f in "$SRC"/*.bclj; do
+    MODULES+=("$(basename "$f" .bclj)")
+done
+clj_name() { echo "$1" | tr '-' '_'; }
+
+PASS=0; FAIL=0
+ok()  { echo "  PASS: $1"; PASS=$((PASS+1)); }
+bad() { echo "  FAIL: $1"; FAIL=$((FAIL+1)); }
+
+emit_with() { # emit_with <classpath> <module> <outfile>
+    bb -cp "$1" -m selfhost.main emit "$SRC/$2.bclj" > "$3" 2>"$3.err"
+}
+
+echo "=== remint: seed compiler ($SEED) over its own sources ==="
+for m in "${MODULES[@]}"; do
+    out="$BUILD/gen1/selfhost/$(clj_name "$m").clj"
+    if emit_with "self-host/seed" "$m" "$out"; then
+        ok "gen1 emit $m"
+    else
+        bad "gen1 emit $m — $(head -3 "$out.err" | tr '\n' ' ')"
+    fi
+done
+cp "$SRC/rt.clj" "$BUILD/gen1/selfhost/rt.clj"
+
+# Stale-seed check: every seed .clj must correspond to a current source.
+for s in "$SEED"/*.clj; do
+    base="$(basename "$s")"
+    [ -f "$BUILD/gen1/selfhost/$base" ] || bad "stale seed file with no source: $s"
+done
+
+compare_tree() { # compare_tree <candidate-dir> <label>
+    for m in "${MODULES[@]}"; do
+        f="selfhost/$(clj_name "$m").clj"
+        if diff -q "$SEED/$(basename "$f")" "$1/$f" >/dev/null 2>&1; then
+            ok "$2 $m byte-identical"
+        else
+            bad "$2 $m DIVERGES — diff $SEED/$(basename "$f") $1/$f"
+        fi
+    done
+    if diff -q "$SEED/rt.clj" "$1/selfhost/rt.clj" >/dev/null 2>&1; then
+        ok "$2 rt.clj byte-identical"
+    else
+        bad "$2 rt.clj DIVERGES — diff $SEED/rt.clj $1/selfhost/rt.clj"
+    fi
+}
+
+if [ "$PROMOTE" -eq 0 ]; then
+    echo "=== fixpoint: gen1 vs seed ==="
+    compare_tree "$BUILD/gen1" "selfhost"
+fi
+
+if [ "$ORACLE" -eq 1 ]; then
+    echo "=== oracle: Racket emission of the same sources ==="
+    source "$root/bin/_beagle-racket"
+    # Route the beagle collection at THIS checkout (worktree-safe; see beagle-certify).
+    collects="$root/.beagle/collects"
+    mkdir -p "$collects"
+    ln -sfn "$root/beagle-lib" "$collects/beagle"
+    export PLTCOLLECTS="$collects:"
+    mkdir -p "$BUILD/oracle/selfhost"
+    for m in "${MODULES[@]}"; do
+        out="$BUILD/oracle/selfhost/$(clj_name "$m").clj"
+        if BEAGLE_EMIT_SRCLOC=0 bin/beagle-build "$SRC/$m.bclj" "$out" >/dev/null 2>"$out.err"; then
+            # Reference: the seed in gate mode; gen1 when promoting new sources.
+            ref="$SEED/$(clj_name "$m").clj"
+            [ "$PROMOTE" -eq 1 ] && ref="$BUILD/gen1/selfhost/$(clj_name "$m").clj"
+            if diff -q "$ref" "$out" >/dev/null 2>&1; then
+                ok "oracle $m agrees"
+            else
+                bad "oracle $m DIVERGES — diff $ref $out"
+            fi
+        else
+            bad "oracle emit $m — $(head -3 "$out.err" | tr '\n' ' ')"
+        fi
+    done
+fi
+
+if [ "$PROMOTE" -eq 1 ]; then
+    echo "=== promote gate 1/2: convergence (gen1 compiles sources -> gen2 == gen1) ==="
+    mkdir -p "$BUILD/gen2/selfhost"
+    for m in "${MODULES[@]}"; do
+        g1="$BUILD/gen1/selfhost/$(clj_name "$m").clj"
+        g2="$BUILD/gen2/selfhost/$(clj_name "$m").clj"
+        if emit_with "$BUILD/gen1" "$m" "$g2"; then
+            if diff -q "$g1" "$g2" >/dev/null 2>&1; then
+                ok "converged $m (gen1 == gen2)"
+            else
+                bad "NOT converged $m — diff $g1 $g2"
+            fi
+        else
+            bad "gen2 emit $m — $(head -3 "$g2.err" | tr '\n' ' ')"
+        fi
+    done
+
+    echo "=== promote gate 2/2: module self-tests on gen1 ==="
+    for m in "${MODULES[@]}"; do
+        ns="selfhost.$m"
+        if bb -cp "$BUILD/gen1" -e "(require '[$ns]) (if-let [f (resolve '$ns/run-tests!)] (System/exit (f)) (System/exit 0))" >/dev/null 2>&1; then
+            ok "self-tests $m"
+        else
+            bad "self-tests $m"
+        fi
+    done
+fi
+
+echo ""
+echo "=== beagle-remint: $PASS passed, $FAIL failed ==="
+if [ "$FAIL" -ne 0 ]; then exit 1; fi
+
+if [ "$PROMOTE" -eq 1 ]; then
+    changed=0
+    for f in "$BUILD/gen1/selfhost/"*.clj; do
+        base="$(basename "$f")"
+        if ! diff -q "$SEED/$base" "$f" >/dev/null 2>&1; then
+            echo "  promoting: $base (changed)"
+            changed=1
+        fi
+        cp "$f" "$SEED/$base"
+    done
+    [ "$changed" -eq 0 ] && echo "  promote: seed already at fixpoint (no file changed)"
+    echo "beagle-remint: seed promoted — commit self-host/seed/ to bless it"
+fi

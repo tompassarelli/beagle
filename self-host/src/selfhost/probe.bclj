@@ -1,0 +1,48 @@
+#lang beagle/clj
+(ns selfhost.probe)
+(define-mode strict)
+
+(require clojure.string :as str)
+
+;; probe 1: string-keyed map literal (PoC AST nodes use string keys)
+(def NODE :- (Map String Any) {"node" "if" "depth" 0})
+
+;; probe 2: atom-backed accumulation (replaces JS .push mutation)
+(defn collect [xs :- (Vec Int)] :- (Vec Int)
+  (let [acc :- Any (atom [])]
+    (doseq [x xs]
+      (swap! acc conj (+ x 1)))
+    (deref acc)))
+
+;; probe 3: char-at convention (JS charAt -> bounds-checked 1-char substring)
+(defn char-at [s :- String i :- Int] :- String
+  (if (and (>= i 0) (< i (count s))) (subs s i (+ i 1)) ""))
+
+;; probe 4: JS substring semantics (clamped)
+(defn substring2 [s :- String a :- Int b :- Int] :- String
+  (let [n (count s)
+        lo (if (< a 0) 0 (if (> a n) n a))
+        hi (if (< b lo) lo (if (> b n) n b))]
+    (subs s lo hi)))
+
+;; probe 5: parse-long nullable + guard
+(defn to-int [s :- String] :- Int
+  (let [n (parse-long s)]
+    (if (nil? n) 0 n)))
+
+;; probe 6: nested Any access on string-keyed maps
+(defn node-kind [d :- Any] :- String
+  (if (and (map? d) (string? (get d "node"))) (get d "node") "?"))
+
+;; probe 7: vector ops on Any
+(defn tail [d :- Any] :- Any
+  (if (and (vector? d) (> (count d) 0)) (subvec d 1) []))
+
+(defn -main [& args :- (Vec String)] :- Nil
+  (println (str "collect=" (collect [1 2 3])))
+  (println (str "char-at=" (char-at "hello" 1) "|" (char-at "hello" 99) "|"))
+  (println (str "substring2=" (substring2 "hello" 1 3) "|" (substring2 "hello" 3 99)))
+  (println (str "to-int=" (to-int "42") "," (to-int "xx")))
+  (println (str "node-kind=" (node-kind NODE)))
+  (println (str "tail=" (tail ["a" "b" "c"])))
+  (println (str "join=" (str/join " " ["x" "y"]))))

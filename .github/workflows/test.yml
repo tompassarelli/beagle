@@ -13,6 +13,26 @@ on:
     branches: [main]
 
 jobs:
+  # Self-host bootstrap fixpoint: the seed .clj under self-host/seed/ IS the
+  # compiler babashka runs; reminting the compiler's own sources with it must
+  # reproduce the seed byte-for-byte (emission is deterministic — that is what
+  # makes the seed CI-enforceable). Any byte divergence between
+  # self-host/src/ and the blessed seed fails here. bb-only, so it gates fast
+  # and independently of the Racket toolchain; the three-way check with the
+  # Racket oracle runs inside the main test job below.
+  selfhost-remint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install babashka (pinned)
+        uses: turtlequeue/setup-babashka@v1.8.0
+        with:
+          babashka-version: '1.12.218'
+
+      - name: Remint fixpoint gate
+        run: bin/beagle-remint
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -62,6 +82,14 @@ jobs:
       # the flake and download a second toolchain.
       - name: Conformance gate — oracle ratchet
         run: _BEAGLE_RACKET="$(which racket)" bin/beagle-certify
+
+      # Self-host three-way agreement: the blessed seed (self-host/seed/), the
+      # seed compiler's remint of its own sources, and the Racket oracle's
+      # emission of the same sources must all be byte-identical. The bb-only
+      # fixpoint also runs standalone in the selfhost-remint job; this adds the
+      # Racket side (racket + bb are both built/installed above).
+      - name: Self-host remint — three-way oracle agreement
+        run: _BEAGLE_RACKET="$(which racket)" bin/beagle-remint --oracle
 
       # Byte-stable emit (move 2): the claims->source pretty-printer must be a
       # deterministic, LOCAL, comment-preserving, round-trip-preserving formatter —

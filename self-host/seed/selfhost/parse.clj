@@ -1,0 +1,1096 @@
+(ns selfhost.parse
+  (:require [clojure.string :as str]
+            [selfhost.rt :as rt]))
+
+(def ^String BRACKET-TAG "#%brackets")
+
+(def ^String MAP-TAG "#%map")
+
+(def ^String SET-TAG "#%set")
+
+(def META-FORMS ["ns" "define-mode" "define-target" "define-macro" "defmacro" "defalias" "declare-extern" "require" "import"])
+
+(def ERRORS (atom []))
+
+(defn parse-errors []
+  (deref ERRORS))
+
+(defn reset-errors! []
+  (reset! ERRORS [])
+  nil)
+
+(defn- err! [^String msg]
+  (swap! ERRORS conj msg)
+  (selfhost.rt/eprint (str "beagle: " msg "\n"))
+  {"node" "literal" "kind" "nil"})
+
+(defn- ^String char-at [^String s i]
+  (if (and (>= i 0) (< i (count s))) (subs s i (+ i 1)) ""))
+
+(defn- index-of-item [xs x]
+  (let [n (count xs)]
+  (loop [i 0]
+  (cond
+  (>= i n) -1
+  (= (nth xs i) x) i
+  :else (recur (+ i 1))))))
+
+(defn- ^Boolean has-item? [xs x]
+  (not (= -1 (index-of-item xs x))))
+
+(defn- str-index-of [^String s ^String sub]
+  (let [r (str/index-of s sub)]
+  (if (nil? r) -1 r)))
+
+(def PARSE-TYPE-CELL (atom nil))
+
+(def PARSE-EXPR-CELL (atom nil))
+
+(defn- parse-type* [t]
+  (apply (deref PARSE-TYPE-CELL) [t]))
+
+(defn- parse-expr* [d]
+  (apply (deref PARSE-EXPR-CELL) [d]))
+
+(defn ^Boolean bracketed? [d]
+  (and (vector? d) (> (count d) 0) (= (nth d 0) BRACKET-TAG)))
+
+(defn bracket-body [d]
+  (subvec d 1))
+
+(defn ^Boolean map-tagged? [d]
+  (and (vector? d) (> (count d) 0) (= (nth d 0) MAP-TAG)))
+
+(defn map-body [d]
+  (subvec d 1))
+
+(defn ^Boolean set-tagged? [d]
+  (and (vector? d) (> (count d) 0) (= (nth d 0) SET-TAG)))
+
+(defn set-body [d]
+  (subvec d 1))
+
+(defn unwrap-items [d]
+  (cond
+  (bracketed? d) (bracket-body d)
+  (vector? d) d
+  :else []))
+
+(defn ^Boolean string-datum? [d]
+  (or (string? d) (and (vector? d) (= (count d) 2) (= (nth d 0) "#%string"))))
+
+(defn ^String extract-string [d]
+  (if (string? d) d (nth d 1)))
+
+(def ^String UPPER "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+(defn- ^Boolean upper-case-start? [^String sym]
+  (and (> (count sym) 0) (str/includes? UPPER (char-at sym 0))))
+
+(defn ^Boolean dot-method-sym? [^String sym]
+  (and (> (count sym) 1) (= (char-at sym 0) ".")))
+
+(defn ^Boolean static-method-sym? [^String sym]
+  (let [slash-pos (str-index-of sym "/")]
+  (and (> slash-pos 0) (< (+ slash-pos 1) (count sym)) (or (upper-case-start? sym) (str/starts-with? sym "js/")))))
+
+(defn ^Boolean constructor-sym? [^String sym]
+  (and (> (count sym) 1) (upper-case-start? sym) (= (char-at sym (- (count sym) 1)) ".")))
+
+(defn ^Boolean keyword-sym? [^String sym]
+  (and (> (count sym) 1) (= (char-at sym 0) ":")))
+
+(defn ^Boolean dynamic-var-sym? [^String sym]
+  (and (>= (count sym) 3) (= (char-at sym 0) "*") (= (char-at sym (- (count sym) 1)) "*")))
+
+(defn ^Boolean annotation-marker? [sym]
+  (or (= sym ":-") (= sym ":")))
+
+(defn ^Boolean canonical-marker? [sym]
+  (= sym ":-"))
+
+(def PARAMETRIC-CTORS ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec"])
+
+(def CLJ-ALIASES {"Long" "Int" "Double" "Float" "Boolean" "Bool" "Integer" "Int"})
+
+(def USER-PARAMETRIC (atom {}))
+
+(def TYPE-ALIASES (atom {}))
+
+(defn make-prim [^String name]
+  {"kind" "prim" "name" name})
+
+(defn make-fn-type [params rest-type ret]
+  {"kind" "fn" "params" params "rest" rest-type "ret" ret})
+
+(defn make-app [^String ctor args]
+  {"kind" "app" "name" ctor "args" args})
+
+(defn make-union [members]
+  {"kind" "union" "members" members})
+
+(defn make-type-var [^String name]
+  {"kind" "var" "name" name})
+
+(defn parse-fn-type-items [items]
+  (let [arrow-pos (index-of-item items "->")]
+  (if (= arrow-pos -1) (make-prim "Any") (let [before (subvec items 0 arrow-pos)
+   after (subvec items (+ arrow-pos 1))]
+  (if (not (= (count after) 1)) (make-prim "Any") (let [amp-pos (index-of-item before "&")]
+  (if (> amp-pos -1) (make-fn-type (mapv parse-type* (subvec before 0 amp-pos)) (parse-type* (nth (subvec before (+ amp-pos 1)) 0)) (parse-type* (nth after 0))) (make-fn-type (mapv parse-type* before) nil (parse-type* (nth after 0))))))))))
+
+(defn parse-type [t]
+  (cond
+  (and (vector? t) (> (count t) 0) (= (nth t 0) BRACKET-TAG)) (parse-fn-type-items (subvec t 1))
+  (and (vector? t) (= (count t) 3) (= (nth t 0) "forall")) (let [vars-form (nth t 1)
+   raw-vars (if (and (vector? vars-form) (> (count vars-form) 0) (= (nth vars-form 0) BRACKET-TAG)) (subvec vars-form 1) vars-form)
+   vars (filterv string? raw-vars)]
+  {"kind" "poly" "vars" vars "body" (parse-type (nth t 2)) "bounds" nil})
+  (and (vector? t) (> (count t) 1) (= (nth t 0) "U")) (make-union (mapv parse-type (subvec t 1)))
+  (and (vector? t) (> (count t) 0) (string? (nth t 0)) (or (has-item? PARAMETRIC-CTORS (nth t 0)) (= true (get (deref USER-PARAMETRIC) (nth t 0))))) (make-app (nth t 0) (mapv parse-type (subvec t 1)))
+  (and (string? t) (some? (get (deref TYPE-ALIASES) t))) (get (deref TYPE-ALIASES) t)
+  (and (string? t) (> (count t) 1) (= (char-at t (- (count t) 1)) "?")) (let [base (subs t 0 (- (count t) 1))]
+  (make-union [(parse-type base) (make-prim "Nil")]))
+  (and (string? t) (= t "Number")) (make-union [(make-prim "Int") (make-prim "Float")])
+  (and (string? t) (some? (get CLJ-ALIASES t))) (make-prim (get CLJ-ALIASES t))
+  (string? t) (make-prim t)
+  :else (make-prim "Any")))
+
+(reset! PARSE-TYPE-CELL parse-type)
+
+(defn make-literal [^String kind value]
+  (if (= kind "nil") {"node" "literal" "kind" "nil"} {"node" "literal" "kind" kind "value" value}))
+
+(defn make-ref [^String name]
+  {"node" "ref" "name" name})
+
+(def NIL-LITERAL {"node" "literal" "kind" "nil"})
+
+(def FALSE-LITERAL {"node" "literal" "kind" "bool" "value" false})
+
+(defn make-def [^String name ann value]
+  {"node" "def" "name" name "ann" ann "value" value})
+
+(defn make-defonce [^String name ann value]
+  {"node" "defonce" "name" name "ann" ann "value" value})
+
+(defn make-defn [^String name params rest-param ret body ^Boolean priv]
+  {"node" "defn" "name" name "params" params "rest" (if (nil? rest-param) false rest-param) "ret" ret "body" body "private" priv})
+
+(defn make-defn-multi [^String name arities ^Boolean priv]
+  {"node" "defn-multi" "name" name "arities" arities "private" priv})
+
+(defn make-fn [params rest-param ret body]
+  {"node" "fn" "params" params "rest" (if (nil? rest-param) false rest-param) "ret" ret "body" body})
+
+(defn make-let [bindings body]
+  {"node" "let" "bindings" bindings "body" body})
+
+(defn make-if [test then-expr else-expr]
+  {"node" "if" "cond" test "then" then-expr "else" (if (nil? else-expr) FALSE-LITERAL else-expr)})
+
+(defn make-cond [clauses]
+  {"node" "cond" "clauses" clauses})
+
+(defn make-do [body]
+  {"node" "do" "body" body})
+
+(defn make-call [fn-expr args]
+  {"node" "call" "fn" fn-expr "args" args})
+
+(defn make-vec [items]
+  {"node" "vec" "items" items})
+
+(defn make-map [pairs]
+  {"node" "map" "pairs" pairs})
+
+(defn make-set-form [items]
+  {"node" "set" "items" items})
+
+(defn make-quoted [datum]
+  {"node" "quoted" "datum" datum})
+
+(defn make-loop [bindings body]
+  {"node" "loop" "bindings" bindings "body" body})
+
+(defn make-recur [args]
+  {"node" "recur" "args" args})
+
+(defn make-for [clauses body]
+  {"node" "for" "clauses" clauses "body" body})
+
+(defn make-method-call [^String method target args]
+  {"node" "method-call" "method" method "target" target "args" args})
+
+(defn make-static-call [^String class-method args]
+  {"node" "static-call" "name" class-method "args" args})
+
+(defn make-kw-access [^String kw target fallback]
+  {"node" "kw-access" "kw" kw "target" target "default" (if (nil? fallback) false fallback)})
+
+(defn make-try [body catches finally-body]
+  {"node" "try" "body" body "catches" catches "finally" (if (nil? finally-body) false finally-body)})
+
+(defn make-case [test clauses fallback]
+  {"node" "case" "test" test "clauses" clauses "default" (if (nil? fallback) false fallback)})
+
+(defn make-match [target clauses]
+  {"node" "match" "target" target "clauses" clauses})
+
+(defn make-with [target updates]
+  {"node" "with" "target" target "updates" updates})
+
+(defn make-defrecord [^String name fields]
+  {"node" "record" "name" name "fields" fields})
+
+(defn make-defenum [^String name values]
+  {"node" "defenum" "name" name "values" values})
+
+(defn make-defunion [^String name members type-params member-fields]
+  (if (nil? member-fields) {"node" "defunion" "name" name "members" members "type-params" type-params} {"node" "defunion" "name" name "members" members "type-params" type-params "member-fields" member-fields}))
+
+(defn make-deferror [^String name members member-fields]
+  (if (nil? member-fields) {"node" "deferror" "name" name "members" members} {"node" "deferror" "name" name "members" members "member-fields" member-fields}))
+
+(defn make-defscalar [^String name backing]
+  {"node" "defscalar" "name" name "backing" backing})
+
+(defn make-condp [pred-fn test-expr clauses fallback]
+  {"node" "condp" "pred" pred-fn "test" test-expr "clauses" clauses "default" (if (nil? fallback) false fallback)})
+
+(defn make-dotimes [^String name count-expr body]
+  {"node" "dotimes" "name" name "count" count-expr "body" body})
+
+(defn make-doseq [clauses body]
+  {"node" "doseq" "clauses" clauses "body" body})
+
+(defn make-letfn [fns body]
+  {"node" "letfn" "fns" fns "body" body})
+
+(defn make-set! [target value]
+  {"node" "set!" "target" target "value" value})
+
+(defn make-await [expr]
+  {"node" "await" "expr" expr})
+
+(defn make-new [^String class-name args]
+  {"node" "new" "class" class-name "args" args})
+
+(defn make-regex [^String pattern]
+  {"node" "regex" "pattern" pattern})
+
+(defn make-dynamic-var [^String name]
+  {"node" "dynamic-var" "name" name})
+
+(defn make-param [^String name ann]
+  {"type" "param" "name" name "ann" ann})
+
+(defn make-map-destructure [keys as-name]
+  {"type" "map-destructure" "keys" keys "as" (if (nil? as-name) false as-name)})
+
+(defn make-seq-destructure [names rest-name]
+  {"type" "seq-destructure" "names" names "rest" (if (nil? rest-name) false rest-name)})
+
+(defn make-let-binding [name ann value]
+  {"name" name "ann" ann "value" value})
+
+(defn make-pat-wildcard []
+  {"type" "wildcard"})
+
+(defn make-pat-literal [value]
+  {"type" "literal" "value" value})
+
+(defn make-pat-record [^String type-name bindings]
+  {"type" "record" "name" type-name "bindings" bindings})
+
+(defn make-pat-map [entries]
+  {"type" "map" "entries" entries})
+
+(defn make-pat-var [^String name]
+  {"type" "var" "name" name})
+
+(def LOWERING-COUNTER (atom 0))
+
+(defn- ^String fresh-lowered-sym! [^String base]
+  (let [n (deref LOWERING-COUNTER)]
+  (swap! LOWERING-COUNTER inc)
+  (str base "__" n)))
+
+(defn datum->json [d]
+  (cond
+  (and (vector? d) (= (count d) 2) (= (nth d 0) "#%string")) (nth d 1)
+  (and (string? d) (keyword-sym? d)) {"type" "keyword" "value" (subs d 1)}
+  (string? d) {"type" "symbol" "value" d}
+  (number? d) d
+  (boolean? d) d
+  (nil? d) nil
+  (vector? d) (mapv datum->json d)
+  :else (str d)))
+
+(defn ^Boolean map-destructure-form? [item]
+  (and (map-tagged? item) (let [body (map-body item)]
+  (and (>= (count body) 2) (= (nth body 0) ":keys") (bracketed? (nth body 1))))))
+
+(defn parse-map-destructure [item]
+  (let [body (map-body item)
+   keys-bracket (nth body 1)
+   key-names (bracket-body keys-bracket)
+   n (count body)]
+  (loop [i 2
+   as-name nil]
+  (cond
+  (>= i n) (make-map-destructure key-names as-name)
+  (and (= (nth body i) ":as") (< (+ i 1) n) (string? (nth body (+ i 1)))) (recur (+ i 2) (nth body (+ i 1)))
+  (and (= (nth body i) ":or") (< (+ i 1) n)) (recur (+ i 2) as-name)
+  :else (recur (+ i 1) as-name)))))
+
+(defn parse-seq-destructure [item]
+  (let [body (bracket-body item)
+   n (count body)]
+  (loop [i 0
+   names []
+   rest-name nil]
+  (cond
+  (>= i n) (make-seq-destructure names rest-name)
+  (= (nth body i) "&") (if (and (< (+ i 1) n) (string? (nth body (+ i 1)))) (make-seq-destructure names (nth body (+ i 1))) (make-seq-destructure names nil))
+  (string? (nth body i)) (recur (+ i 1) (conj names (nth body i)) rest-name)
+  :else (make-seq-destructure names rest-name)))))
+
+(defn- ^Boolean wrapped-annotated? [item]
+  (and (vector? item) (not (bracketed? item)) (= (count item) 3) (string? (nth item 0)) (annotation-marker? (nth item 1))))
+
+(defn- parse-rest-param [after]
+  (cond
+  (and (= (count after) 1) (string? (nth after 0))) (make-param (nth after 0) nil)
+  (and (= (count after) 1) (wrapped-annotated? (nth after 0))) (make-param (nth (nth after 0) 0) (parse-type (nth (nth after 0) 2)))
+  (and (= (count after) 3) (string? (nth after 0)) (annotation-marker? (nth after 1))) (make-param (nth after 0) (parse-type (nth after 2)))
+  :else (do
+  (err! (str "bad rest parameter after &: " (str after)))
+  nil)))
+
+(defn parse-params [params-form]
+  (let [items (unwrap-items params-form)
+   n (count items)]
+  (loop [i 0
+   fixed []
+   rest-param nil]
+  (cond
+  (>= i n) {"params" fixed "rest-param" rest-param}
+  (= (nth items i) "&") (if (< (+ i 1) n) {"params" fixed "rest-param" (parse-rest-param (subvec items (+ i 1)))} (do
+  (err! "& must be followed by a rest parameter")
+  {"params" fixed "rest-param" nil}))
+  (and (string? (nth items i)) (< (+ i 2) (+ n 1)) (< (+ i 2) n) (canonical-marker? (nth items (+ i 1)))) (recur (+ i 3) (conj fixed (make-param (nth items i) (parse-type (nth items (+ i 2))))) rest-param)
+  (and (string? (nth items i)) (< (+ i 2) n) (= (nth items (+ i 1)) ":")) (do
+  (err! (str "[" (nth items i) " : ...] — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  [" (nth items i) " :- TYPE ...]"))
+  (recur (+ i 3) fixed rest-param))
+  :else (let [item (nth items i)]
+  (cond
+  (bracketed? item) (recur (+ i 1) (conj fixed (parse-seq-destructure item)) rest-param)
+  (map-destructure-form? item) (recur (+ i 1) (conj fixed (parse-map-destructure item)) rest-param)
+  (wrapped-annotated? item) (recur (+ i 1) (conj fixed (make-param (nth item 0) (parse-type (nth item 2)))) rest-param)
+  (string? item) (recur (+ i 1) (conj fixed (make-param item nil)) rest-param)
+  :else (do
+  (err! (str "bad parameter: " (str item) " — expected name, name :- Type, (name :- Type), [seq...], or {:keys [...]}"))
+  (recur (+ i 1) fixed rest-param))))))))
+
+(defn parse-let-bindings [b]
+  (let [items (unwrap-items b)
+   n (count items)]
+  (loop [i 0
+   acc []]
+  (cond
+  (>= i n) acc
+  (and (< (+ i 1) n) (wrapped-annotated? (nth items i))) (recur (+ i 2) (conj acc (make-let-binding (nth (nth items i) 0) (parse-type (nth (nth items i) 2)) (parse-expr* (nth items (+ i 1))))))
+  (and (< (+ i 1) n) (map-destructure-form? (nth items i))) (recur (+ i 2) (conj acc (make-let-binding (parse-map-destructure (nth items i)) nil (parse-expr* (nth items (+ i 1))))))
+  (and (< (+ i 1) n) (bracketed? (nth items i))) (recur (+ i 2) (conj acc (make-let-binding (parse-seq-destructure (nth items i)) nil (parse-expr* (nth items (+ i 1))))))
+  (and (< (+ i 3) (+ n 0)) (string? (nth items i)) (canonical-marker? (nth items (+ i 1)))) (recur (+ i 4) (conj acc (make-let-binding (nth items i) (parse-type (nth items (+ i 2))) (parse-expr* (nth items (+ i 3))))))
+  (and (< (+ i 3) n) (string? (nth items i)) (= (nth items (+ i 1)) ":")) (do
+  (err! (str "(let [" (nth items i) " : ...] ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (let [" (nth items i) " :- TYPE VALUE ...] ...)"))
+  (recur (+ i 4) acc))
+  (and (< (+ i 1) n) (string? (nth items i))) (recur (+ i 2) (conj acc (make-let-binding (nth items i) nil (parse-expr* (nth items (+ i 1))))))
+  :else (do
+  (err! (str "bad let bindings at: " (str (nth items i))))
+  acc)))))
+
+(defn parse-record-fields [f]
+  (let [items (unwrap-items f)
+   n (count items)]
+  (loop [i 0
+   acc []]
+  (cond
+  (>= i n) acc
+  (and (string? (nth items i)) (< (+ i 2) n) (annotation-marker? (nth items (+ i 1)))) (recur (+ i 3) (conj acc {"name" (nth items i) "ann" (parse-type (nth items (+ i 2)))}))
+  (wrapped-annotated? (nth items i)) (recur (+ i 1) (conj acc {"name" (nth (nth items i) 0) "ann" (parse-type (nth (nth items i) 2))}))
+  :else (do
+  (err! (str "defrecord field needs a type annotation — use [name :- Type ...], got: " (str (nth items i))))
+  (recur (+ i 1) acc))))))
+
+(defn- parse-cond-test [test-datum]
+  (if (or (= test-datum ":else") (= test-datum "else")) (make-ref "else") (parse-expr* test-datum)))
+
+(defn parse-cond-clauses [clauses]
+  (cond
+  (= (count clauses) 0) []
+  (bracketed? (nth clauses 0)) (mapv (fn [c] (let [items (if (bracketed? c) (bracket-body c) c)]
+  (if (and (vector? items) (> (count items) 1)) {"test" (parse-cond-test (nth items 0)) "body" (mapv parse-expr* (subvec items 1))} {"test" (parse-cond-test c) "body" []}))) clauses)
+  :else (let [n (count clauses)]
+  (loop [i 0
+   acc []]
+  (cond
+  (>= i n) acc
+  (< (+ i 1) n) (recur (+ i 2) (conj acc {"test" (parse-cond-test (nth clauses i)) "body" [(parse-expr* (nth clauses (+ i 1)))]}))
+  :else acc)))))
+
+(defn parse-for-clauses [b]
+  (let [items (unwrap-items b)
+   n (count items)]
+  (loop [i 0
+   acc []]
+  (cond
+  (>= i n) acc
+  (and (< (+ i 1) n) (= (nth items i) ":when")) (recur (+ i 2) (conj acc {"type" "when" "test" (parse-expr* (nth items (+ i 1)))}))
+  (and (< (+ i 1) n) (= (nth items i) ":let")) (recur (+ i 2) (conj acc {"type" "let" "bindings" (parse-let-bindings (nth items (+ i 1)))}))
+  (and (< (+ i 1) n) (string? (nth items i))) (recur (+ i 2) (conj acc {"type" "binding" "name" (nth items i) "expr" (parse-expr* (nth items (+ i 1)))}))
+  :else (recur (+ i 1) acc)))))
+
+(defn- ^Boolean catch-clause? [item]
+  (and (vector? item) (not (bracketed? item)) (> (count item) 0) (= (nth item 0) "catch")))
+
+(defn- ^Boolean finally-clause? [item]
+  (and (vector? item) (not (bracketed? item)) (> (count item) 0) (= (nth item 0) "finally")))
+
+(defn parse-try-form [rest-items]
+  (let [n (count rest-items)]
+  (loop [i 0
+   body []
+   catches []
+   finally-body nil]
+  (if (>= i n) (make-try body catches finally-body) (let [item (nth rest-items i)]
+  (cond
+  (catch-clause? item) (if (>= (count item) 4) (recur (+ i 1) body (conj catches {"type" (nth item 1) "name" (nth item 2) "body" (mapv parse-expr* (subvec item 3))}) finally-body) (recur (+ i 1) body catches finally-body))
+  (finally-clause? item) (recur (+ i 1) body catches (mapv parse-expr* (subvec item 1)))
+  (and (= (count catches) 0) (nil? finally-body)) (recur (+ i 1) (conj body (parse-expr* item)) catches finally-body)
+  :else (recur (+ i 1) body catches finally-body)))))))
+
+(defn parse-case-pairs [items]
+  (let [n (count items)]
+  (loop [i 0
+   acc []]
+  (cond
+  (>= i n) acc
+  (< (+ i 1) n) (recur (+ i 2) (conj acc {"value" (datum->json (nth items i)) "body" (parse-expr* (nth items (+ i 1)))}))
+  :else acc))))
+
+(defn parse-case-form [test-datum clauses]
+  (let [test (parse-expr* test-datum)]
+  (cond
+  (= (count clauses) 0) (make-case test [] nil)
+  (= (mod (count clauses) 2) 1) (let [pairs (subvec clauses 0 (- (count clauses) 1))
+   fallback (parse-expr* (nth clauses (- (count clauses) 1)))]
+  (make-case test (parse-case-pairs pairs) fallback))
+  :else (make-case test (parse-case-pairs clauses) nil))))
+
+(defn parse-map-pattern [entries]
+  (let [n (count entries)]
+  (loop [i 0
+   acc []]
+  (cond
+  (>= i n) (make-pat-map acc)
+  (and (< (+ i 1) n) (string? (nth entries i)) (keyword-sym? (nth entries i))) (recur (+ i 2) (conj acc {"key" (datum->json (nth entries i)) "name" (nth entries (+ i 1))}))
+  :else (recur (+ i 1) acc)))))
+
+(defn parse-pattern [p]
+  (cond
+  (= p "_") (make-pat-wildcard)
+  (= p "nil") (make-pat-literal nil)
+  (and (string? p) (keyword-sym? p)) (make-pat-literal (datum->json p))
+  (number? p) (make-pat-literal p)
+  (boolean? p) (make-pat-literal p)
+  (string-datum? p) (make-pat-literal (extract-string p))
+  (and (vector? p) (> (count p) 0) (= (nth p 0) MAP-TAG)) (parse-map-pattern (subvec p 1))
+  (and (vector? p) (not (bracketed? p)) (> (count p) 0) (string? (nth p 0)) (upper-case-start? (nth p 0))) (make-pat-record (nth p 0) (mapv (fn [b] {"name" b}) (subvec p 1)))
+  (string? p) (make-pat-var p)
+  :else (make-pat-literal (datum->json p))))
+
+(defn parse-match-form [target-datum clauses]
+  (make-match (parse-expr* target-datum) (mapv (fn [c] (let [items (if (bracketed? c) (bracket-body c) c)]
+  (if (and (vector? items) (>= (count items) 2)) {"pattern" (parse-pattern (nth items 0)) "body" (mapv parse-expr* (subvec items 1))} {"pattern" (parse-pattern c) "body" []}))) clauses)))
+
+(defn parse-with-form [target-datum updates]
+  (make-with (parse-expr* target-datum) (mapv (fn [u] (if (and (bracketed? u) (>= (count (bracket-body u)) 2)) (let [items (bracket-body u)]
+  {"field" (nth items 0) "value" (parse-expr* (nth items 1))}) {"field" "" "value" nil})) updates)))
+
+(defn parse-letfn-fns [form]
+  (let [items (unwrap-items form)]
+  (mapv (fn [item] (if (and (vector? item) (>= (count item) 3) (string? (nth item 0))) (let [name (nth item 0)
+   params-form (nth item 1)
+   rest-forms (subvec item 2)
+   parsed-params (parse-params params-form)
+   rp (get parsed-params "rest-param")]
+  (if (and (>= (count rest-forms) 2) (annotation-marker? (nth rest-forms 0))) {"name" name "params" (get parsed-params "params") "rest" (if (nil? rp) false rp) "ret" (parse-type (nth rest-forms 1)) "body" (mapv parse-expr* (subvec rest-forms 2))} {"name" name "params" (get parsed-params "params") "rest" (if (nil? rp) false rp) "ret" nil "body" (mapv parse-expr* rest-forms)})) nil)) items)))
+
+(defn parse-condp-form [pred-datum test-datum clause-datums]
+  (let [pred-expr (parse-expr* pred-datum)
+   test-expr (parse-expr* test-datum)
+   n (count clause-datums)]
+  (loop [i 0
+   pairs []
+   fallback nil]
+  (cond
+  (>= i n) (make-condp pred-expr test-expr pairs fallback)
+  (= i (- n 1)) (make-condp pred-expr test-expr pairs (parse-expr* (nth clause-datums i)))
+  (< (+ i 1) n) (recur (+ i 2) (conj pairs {"test" (parse-expr* (nth clause-datums i)) "body" (parse-expr* (nth clause-datums (+ i 1)))}) fallback)
+  :else (make-condp pred-expr test-expr pairs fallback)))))
+
+(defn ^Boolean multi-arity-form? [d]
+  (and (vector? d) (not (bracketed? d)) (> (count d) 0) (vector? (nth d 0)) (bracketed? (nth d 0))))
+
+(defn parse-arity-clause [clause]
+  (let [params-form (nth clause 0)
+   rest-forms (subvec clause 1)
+   parsed-params (parse-params params-form)
+   rp (get parsed-params "rest-param")]
+  (if (and (>= (count rest-forms) 2) (annotation-marker? (nth rest-forms 0))) {"params" (get parsed-params "params") "rest" (if (nil? rp) false rp) "ret" (parse-type (nth rest-forms 1)) "body" (mapv parse-expr* (subvec rest-forms 2))} {"params" (get parsed-params "params") "rest" (if (nil? rp) false rp) "ret" nil "body" (mapv parse-expr* rest-forms)})))
+
+(defn thread-step-insert [val step ^String position]
+  (if (vector? step) (if (= position "first") (vec (concat [(nth step 0)] [val] (subvec step 1))) (conj step val)) [step val]))
+
+(defn expand-thread-first [init steps]
+  (reduce (fn [acc step] (thread-step-insert acc step "first")) init steps))
+
+(defn expand-thread-last [init steps]
+  (reduce (fn [acc step] (thread-step-insert acc step "last")) init steps))
+
+(defn expand-cond-thread [^String kind init clauses]
+  (let [n (count clauses)
+   pairs (loop [i 0
+   acc []]
+  (if (>= (+ i 1) n) acc (recur (+ i 2) (conj acc [(nth clauses i) (nth clauses (+ i 1))]))))
+   pos (if (= kind "cond->") "first" "last")
+   k (count pairs)
+   temps (loop [i 0
+   acc [(fresh-lowered-sym! "cond-thread")]]
+  (if (>= i k) acc (recur (+ i 1) (conj acc (fresh-lowered-sym! "cond-thread")))))
+   inner (loop [i (- k 1)
+   acc (nth temps k)]
+  (if (< i 0) acc (recur (- i 1) ["let" [BRACKET-TAG (nth temps (+ i 1)) ["if" (nth (nth pairs i) 0) (thread-step-insert (nth temps i) (nth (nth pairs i) 1) pos) (nth temps i)]] acc])))]
+  ["let" [BRACKET-TAG (nth temps 0) init] inner]))
+
+(defn expand-some-thread [^String kind init steps]
+  (let [pos (if (= kind "some->") "first" "last")
+   m (count steps)]
+  (if (= m 0) init (let [temps (loop [i 0
+   acc []]
+  (if (>= i m) acc (recur (+ i 1) (conj acc (fresh-lowered-sym! "some-thread")))))
+   threadeds (loop [i 0
+   acc []]
+  (if (>= i m) acc (recur (+ i 1) (conj acc (thread-step-insert (nth temps i) (nth steps i) pos)))))]
+  (loop [i (- m 1)
+   acc (nth threadeds (- m 1))]
+  (let [node ["let" [BRACKET-TAG (nth temps i) (if (= i 0) init (nth threadeds (- i 1)))] ["if" ["nil?" (nth temps i)] "nil" acc]]]
+  (if (= i 0) node (recur (- i 1) node))))))))
+
+(defn expand-as-thread [init name steps]
+  (reduce (fn [acc step] ["let" [BRACKET-TAG name acc] step]) init steps))
+
+(defn- binding-cond-test [^String head v]
+  (if (or (= head "if-let") (= head "when-let")) v ["not" ["nil?" v]]))
+
+(defn- lower-binding-cond [^String head bindings-form rest-items]
+  (let [items (unwrap-items bindings-form)]
+  (if (< (count items) 2) (do
+  (err! (str head ": bindings must be [binder expr], got: " (str bindings-form)))
+  "nil") (let [value (nth items (- (count items) 1))
+   binder-part (subvec items 0 (- (count items) 1))
+   if-form? (or (= head "if-let") (= head "if-some"))]
+  (if (and (= (count binder-part) 1) (string? (nth binder-part 0))) (let [name (nth binder-part 0)
+   binding [BRACKET-TAG name value]
+   test (binding-cond-test head name)]
+  (if if-form? ["let" binding ["if" test (nth rest-items 0) (nth rest-items 1)]] ["let" binding ["if" test (vec (concat ["do"] rest-items))]])) (let [g (fresh-lowered-sym! "bind")
+   inner (vec (concat [BRACKET-TAG] binder-part [g]))
+   test (binding-cond-test head g)]
+  (if if-form? ["let" [BRACKET-TAG g value] ["if" test ["let" inner (nth rest-items 0)] (nth rest-items 1)]] ["let" [BRACKET-TAG g value] ["if" test ["let" inner (vec (concat ["do"] rest-items))]]])))))))
+
+(defn parse-simple-defunion [^String name raw-members]
+  (let [n (count raw-members)]
+  (loop [i 0
+   mnames []
+   mf {}
+   has-fields false]
+  (if (>= i n) (make-defunion name mnames nil (if has-fields mf nil)) (let [m (nth raw-members i)]
+  (if (and (vector? m) (not (bracketed? m)) (> (count m) 0)) (if (and (>= (count m) 2) (vector? (nth m 1))) (recur (+ i 1) (conj mnames (nth m 0)) (assoc mf (nth m 0) (parse-record-fields (nth m 1))) true) (recur (+ i 1) (conj mnames (nth m 0)) mf has-fields)) (recur (+ i 1) (conj mnames m) mf has-fields)))))))
+
+(defn parse-parametric-defunion [^String name type-vars member-defs]
+  (swap! USER-PARAMETRIC assoc name true)
+  (let [n (count member-defs)]
+  (loop [i 0
+   mnames []
+   mf {}]
+  (if (>= i n) (make-defunion name mnames type-vars mf) (let [md (nth member-defs i)]
+  (if (and (vector? md) (>= (count md) 2) (string? (nth md 0))) (recur (+ i 1) (conj mnames (nth md 0)) (assoc mf (nth md 0) (parse-record-fields (nth md 1)))) (recur (+ i 1) mnames mf)))))))
+
+(defn parse-deferror-form [^String name member-defs]
+  (let [n (count member-defs)]
+  (loop [i 0
+   mnames []
+   mf {}]
+  (if (>= i n) (make-deferror name mnames mf) (let [md (nth member-defs i)]
+  (cond
+  (string? md) (recur (+ i 1) (conj mnames md) (assoc mf md []))
+  (and (vector? md) (>= (count md) 2) (string? (nth md 0))) (recur (+ i 1) (conj mnames (nth md 0)) (assoc mf (nth md 0) (parse-record-fields (nth md 1))))
+  :else (recur (+ i 1) mnames mf)))))))
+
+(defn parse-map-literal [items]
+  (let [n (count items)]
+  (loop [i 0
+   pairs []]
+  (cond
+  (>= i n) (make-map pairs)
+  (< (+ i 1) n) (recur (+ i 2) (conj pairs {"key" (parse-expr* (nth items i)) "val" (parse-expr* (nth items (+ i 1)))}))
+  :else (make-map pairs)))))
+
+(defn- parse-defn-tail [^String name after-name ^Boolean priv]
+  (cond
+  (and (>= (count after-name) 1) (multi-arity-form? (nth after-name 0))) (make-defn-multi name (mapv parse-arity-clause after-name) priv)
+  (and (>= (count after-name) 3) (canonical-marker? (nth after-name 1))) (let [parsed-params (parse-params (nth after-name 0))
+   ret (parse-type (nth after-name 2))
+   tail (subvec after-name 3)
+   body-forms (if (and (>= (count tail) 2) (= (nth tail 0) ":raises")) (subvec tail 2) tail)]
+  (make-defn name (get parsed-params "params") (get parsed-params "rest-param") ret (mapv parse-expr* body-forms) priv))
+  (and (>= (count after-name) 3) (= (nth after-name 1) ":")) (err! (str "(defn " name " [params] : RET ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (defn " name " [params] :- RET body...)"))
+  (>= (count after-name) 2) (let [parsed-params (parse-params (nth after-name 0))]
+  (make-defn name (get parsed-params "params") (get parsed-params "rest-param") nil (mapv parse-expr* (subvec after-name 1)) priv))
+  :else (err! (str "malformed defn " name))))
+
+(defn- ^Boolean meta-name? [d]
+  (and (vector? d) (= (count d) 3) (= (nth d 0) "#%meta") (string? (nth d 2))))
+
+(defn- parse-def-form [^String kw rest-items]
+  (let [mk (if (= kw "defonce") make-defonce make-def)
+   name-form (nth rest-items 0)
+   name (if (meta-name? name-form) (nth name-form 2) name-form)
+   items (subvec rest-items 1)]
+  (cond
+  (not (string? name)) (err! (str "malformed " kw ": " (str rest-items)))
+  (and (>= (count items) 4) (canonical-marker? (nth items 0)) (string-datum? (nth items 2)) (vector? (nth items 2))) (mk name (parse-type (nth items 1)) (parse-expr* (nth items 3)))
+  (and (>= (count items) 3) (canonical-marker? (nth items 0))) (mk name (parse-type (nth items 1)) (parse-expr* (nth items 2)))
+  (and (>= (count items) 3) (= (nth items 0) ":")) (err! (str "(" kw " " name " : ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (" kw " " name " :- TYPE VALUE)"))
+  (and (= (count items) 2) (vector? (nth items 0)) (= (count (nth items 0)) 2) (= (nth (nth items 0) 0) "#%string")) (mk name nil (parse-expr* (nth items 1)))
+  (= (count items) 1) (mk name nil (parse-expr* (nth items 0)))
+  :else (err! (str "malformed " kw " — expected (" kw " NAME VALUE), (" kw " NAME \"doc\" VALUE), (" kw " NAME :- TYPE VALUE), or (" kw " NAME :- TYPE \"doc\" VALUE)")))))
+
+(defn parse-list-form [d]
+  (let [head (nth d 0)
+   rest-items (subvec d 1)]
+  (cond
+  (and (string? head) (= head "unsafe")) (err! "(unsafe \"...\") is not supported — beagle has no verbatim escape hatch; add a typed stdlib entry or a sibling target-language file instead")
+  (and (string? head) (str/starts-with? head "unsafe-")) (err! (str "(" head " \"...\") is not supported — beagle has no verbatim escape hatch; add a typed stdlib entry or a sibling target-language file instead"))
+  (= head "fmt") (err! "(fmt ...) is not supported — use str / format")
+  (= head "def") (parse-def-form "def" rest-items)
+  (= head "defonce") (parse-def-form "defonce" rest-items)
+  (and (= head "defn") (>= (count rest-items) 2)) (let [name-form (nth rest-items 0)
+   priv0 false]
+  (cond
+  (and (string? name-form) (not (keyword-sym? name-form)) (string-datum? (nth rest-items 1)) (>= (count rest-items) 3) (vector? (nth rest-items 1))) (parse-defn-tail name-form (subvec rest-items 2) priv0)
+  (meta-name? name-form) (parse-defn-tail (nth name-form 2) (subvec rest-items 1) true)
+  (string? name-form) (if (and (>= (count rest-items) 3) (vector? (nth rest-items 1)) (= (count (nth rest-items 1)) 2) (= (nth (nth rest-items 1) 0) "#%string")) (parse-defn-tail name-form (subvec rest-items 2) priv0) (parse-defn-tail name-form (subvec rest-items 1) priv0))
+  :else (err! (str "malformed defn: " (str d)))))
+  (and (= head "defn-") (>= (count rest-items) 2)) (cond
+  (meta-name? (nth rest-items 0)) (parse-defn-tail (nth (nth rest-items 0) 2) (subvec rest-items 1) true)
+  (string? (nth rest-items 0)) (if (and (>= (count rest-items) 3) (vector? (nth rest-items 1)) (= (count (nth rest-items 1)) 2) (= (nth (nth rest-items 1) 0) "#%string")) (parse-defn-tail (nth rest-items 0) (subvec rest-items 2) true) (parse-defn-tail (nth rest-items 0) (subvec rest-items 1) true))
+  :else (err! (str "malformed defn-: " (str d))))
+  (and (= head "defrecord") (= (count rest-items) 2)) (make-defrecord (nth rest-items 0) (parse-record-fields (nth rest-items 1)))
+  (and (= head "defenum") (>= (count rest-items) 1)) (make-defenum (nth rest-items 0) (subvec rest-items 1))
+  (and (= head "defunion") (>= (count rest-items) 1) (vector? (nth rest-items 0)) (not (bracketed? (nth rest-items 0)))) (let [name-form (nth rest-items 0)]
+  (if (and (>= (count name-form) 2) (string? (nth name-form 0))) (parse-parametric-defunion (nth name-form 0) (subvec name-form 1) (subvec rest-items 1)) (parse-simple-defunion (nth rest-items 0) (subvec rest-items 1))))
+  (and (= head "defunion") (>= (count rest-items) 1) (string? (nth rest-items 0))) (parse-simple-defunion (nth rest-items 0) (subvec rest-items 1))
+  (and (= head "deferror") (>= (count rest-items) 1)) (parse-deferror-form (nth rest-items 0) (subvec rest-items 1))
+  (and (= head "defscalar") (>= (count rest-items) 2)) (make-defscalar (nth rest-items 0) (parse-type (nth rest-items 1)))
+  (and (= head "fn") (>= (count rest-items) 3) (canonical-marker? (nth rest-items 1))) (let [parsed-params (parse-params (nth rest-items 0))]
+  (make-fn (get parsed-params "params") (get parsed-params "rest-param") (parse-type (nth rest-items 2)) (mapv parse-expr* (subvec rest-items 3))))
+  (and (= head "fn") (>= (count rest-items) 1)) (let [parsed-params (parse-params (nth rest-items 0))]
+  (make-fn (get parsed-params "params") (get parsed-params "rest-param") nil (mapv parse-expr* (subvec rest-items 1))))
+  (and (= head "let") (>= (count rest-items) 1)) (make-let (parse-let-bindings (nth rest-items 0)) (mapv parse-expr* (subvec rest-items 1)))
+  (and (= head "binding") (>= (count rest-items) 1)) {"node" "binding" "bindings" (parse-let-bindings (nth rest-items 0)) "body" (mapv parse-expr* (subvec rest-items 1))}
+  (= head "binding") (err! (str "malformed binding — expected (binding [*var* val ...] body...); got: " (str d)))
+  (and (= head "letfn") (>= (count rest-items) 1)) (make-letfn (parse-letfn-fns (nth rest-items 0)) (mapv parse-expr* (subvec rest-items 1)))
+  (and (= head "loop") (>= (count rest-items) 1)) (make-loop (parse-let-bindings (nth rest-items 0)) (mapv parse-expr* (subvec rest-items 1)))
+  (= head "recur") (make-recur (mapv parse-expr* rest-items))
+  (and (= head "await") (= (count rest-items) 1)) (make-await (parse-expr* (nth rest-items 0)))
+  (and (= head "set!") (= (count rest-items) 2)) (make-set! (parse-expr* (nth rest-items 0)) (parse-expr* (nth rest-items 1)))
+  (and (= head "for") (>= (count rest-items) 1)) (make-for (parse-for-clauses (nth rest-items 0)) (mapv parse-expr* (subvec rest-items 1)))
+  (and (= head "if") (= (count rest-items) 3)) (make-if (parse-expr* (nth rest-items 0)) (parse-expr* (nth rest-items 1)) (parse-expr* (nth rest-items 2)))
+  (and (= head "if") (= (count rest-items) 2)) (make-if (parse-expr* (nth rest-items 0)) (parse-expr* (nth rest-items 1)) nil)
+  (and (= head "when") (>= (count rest-items) 2)) (parse-expr* ["if" (nth rest-items 0) (vec (concat ["do"] (subvec rest-items 1)))])
+  (= head "when") (err! "when requires at least one body expression: (when c body...)")
+  (and (= head "when-not") (>= (count rest-items) 2)) (parse-expr* ["if" ["not" (nth rest-items 0)] (vec (concat ["do"] (subvec rest-items 1)))])
+  (= head "when-not") (err! "when-not requires at least one body expression: (when-not c body...)")
+  (and (= head "if-not") (= (count rest-items) 3)) (parse-expr* ["if" (nth rest-items 0) (nth rest-items 2) (nth rest-items 1)])
+  (= head "if-not") (err! "if-not expects (if-not c then else): three arguments required")
+  (and (= head "when-let") (>= (count rest-items) 2)) (parse-expr* (lower-binding-cond "when-let" (nth rest-items 0) (subvec rest-items 1)))
+  (and (= head "if-let") (= (count rest-items) 3)) (parse-expr* (lower-binding-cond "if-let" (nth rest-items 0) (subvec rest-items 1)))
+  (and (= head "when-some") (>= (count rest-items) 2)) (parse-expr* (lower-binding-cond "when-some" (nth rest-items 0) (subvec rest-items 1)))
+  (and (= head "if-some") (= (count rest-items) 3)) (parse-expr* (lower-binding-cond "if-some" (nth rest-items 0) (subvec rest-items 1)))
+  (= head "comment") NIL-LITERAL
+  (= head "do") (make-do (mapv parse-expr* rest-items))
+  (= head "cond") (make-cond (parse-cond-clauses rest-items))
+  (and (= head "condp") (>= (count rest-items) 2)) (parse-condp-form (nth rest-items 0) (nth rest-items 1) (subvec rest-items 2))
+  (= head "try") (parse-try-form rest-items)
+  (and (= head "match") (>= (count rest-items) 1)) (parse-match-form (nth rest-items 0) (subvec rest-items 1))
+  (and (= head "case") (>= (count rest-items) 1)) (parse-case-form (nth rest-items 0) (subvec rest-items 1))
+  (and (= head "doseq") (>= (count rest-items) 1)) (make-doseq (parse-for-clauses (nth rest-items 0)) (mapv parse-expr* (subvec rest-items 1)))
+  (and (= head "dotimes") (>= (count rest-items) 1)) (let [binding-items (unwrap-items (nth rest-items 0))]
+  (if (= (count binding-items) 2) (make-dotimes (nth binding-items 0) (parse-expr* (nth binding-items 1)) (mapv parse-expr* (subvec rest-items 1))) (make-dotimes "_" (make-literal "number" 0) [])))
+  (and (= head "with") (>= (count rest-items) 1)) (parse-with-form (nth rest-items 0) (subvec rest-items 1))
+  (and (= head "->") (>= (count rest-items) 1)) (parse-expr* (expand-thread-first (nth rest-items 0) (subvec rest-items 1)))
+  (and (= head "->>") (>= (count rest-items) 1)) (parse-expr* (expand-thread-last (nth rest-items 0) (subvec rest-items 1)))
+  (and (= head "cond->") (>= (count rest-items) 1)) (parse-expr* (expand-cond-thread "cond->" (nth rest-items 0) (subvec rest-items 1)))
+  (and (= head "cond->>") (>= (count rest-items) 1)) (parse-expr* (expand-cond-thread "cond->>" (nth rest-items 0) (subvec rest-items 1)))
+  (and (= head "some->") (>= (count rest-items) 1)) (parse-expr* (expand-some-thread "some->" (nth rest-items 0) (subvec rest-items 1)))
+  (and (= head "some->>") (>= (count rest-items) 1)) (parse-expr* (expand-some-thread "some->>" (nth rest-items 0) (subvec rest-items 1)))
+  (and (= head "as->") (>= (count rest-items) 2)) (parse-expr* (expand-as-thread (nth rest-items 0) (nth rest-items 1) (subvec rest-items 2)))
+  (and (string? head) (constructor-sym? head)) (make-new head (mapv parse-expr* rest-items))
+  (and (string? head) (keyword-sym? head) (>= (count rest-items) 1)) (make-kw-access head (parse-expr* (nth rest-items 0)) (if (>= (count rest-items) 2) (parse-expr* (nth rest-items 1)) nil))
+  (and (string? head) (dot-method-sym? head) (>= (count rest-items) 1)) (make-method-call head (parse-expr* (nth rest-items 0)) (mapv parse-expr* (subvec rest-items 1)))
+  (and (string? head) (static-method-sym? head)) (make-static-call head (mapv parse-expr* rest-items))
+  (string? head) (make-call (make-ref head) (mapv parse-expr* rest-items))
+  (vector? head) (make-call (parse-expr* head) (mapv parse-expr* rest-items))
+  :else NIL-LITERAL)))
+
+(defn parse-expr [d]
+  (cond
+  (nil? d) NIL-LITERAL
+  (boolean? d) (make-ref (if d "true" "false"))
+  (and (number? d) (int? d)) (make-literal "number" d)
+  (number? d) (make-literal "float" d)
+  (and (vector? d) (= (count d) 2) (= (nth d 0) "#%string")) (make-literal "string" (nth d 1))
+  (and (string? d) (= d "nil")) NIL-LITERAL
+  (and (string? d) (keyword-sym? d)) (make-literal "keyword" (subs d 1))
+  (and (string? d) (dynamic-var-sym? d)) (make-dynamic-var d)
+  (string? d) (make-ref d)
+  (and (vector? d) (= (count d) 2) (= (nth d 0) "#%regex")) (make-regex (nth d 1))
+  (bracketed? d) (make-vec (mapv parse-expr* (bracket-body d)))
+  (map-tagged? d) (parse-map-literal (map-body d))
+  (set-tagged? d) (make-set-form (mapv parse-expr* (set-body d)))
+  (and (vector? d) (= (count d) 2) (= (nth d 0) "quote")) (make-quoted (datum->json (nth d 1)))
+  (and (vector? d) (> (count d) 0)) (parse-list-form d)
+  :else NIL-LITERAL))
+
+(reset! PARSE-EXPR-CELL parse-expr)
+
+(defn ^Boolean meta-form? [d]
+  (and (vector? d) (not (bracketed? d)) (> (count d) 0) (has-item? META-FORMS (nth d 0))))
+
+(defn- parse-require-libspec [spec]
+  (let [unq (if (and (vector? spec) (= (count spec) 2) (= (nth spec 0) "quote")) (nth spec 1) spec)]
+  (cond
+  (string? unq) {"ns" unq "alias" false "refer" false}
+  (bracketed? unq) (let [items (bracket-body unq)]
+  (if (and (> (count items) 0) (string? (nth items 0))) (let [rn (nth items 0)
+   n (count items)]
+  (loop [i 1
+   alias false
+   refer false]
+  (cond
+  (>= i n) {"ns" rn "alias" alias "refer" refer}
+  (and (= (nth items i) ":as") (< (+ i 1) n) (string? (nth items (+ i 1)))) (recur (+ i 2) (nth items (+ i 1)) refer)
+  (and (= (nth items i) ":refer") (< (+ i 1) n) (bracketed? (nth items (+ i 1)))) (recur (+ i 2) alias (bracket-body (nth items (+ i 1))))
+  :else (do
+  (err! (str "require: unsupported libspec option " (str (nth items i)) " — supported: [lib], [lib :as alias], [lib :refer [syms]], [lib :as alias :refer [syms]]"))
+  {"ns" rn "alias" alias "refer" refer})))) (do
+  (err! (str "require: libspec must start with a namespace symbol, got: " (str unq)))
+  nil)))
+  :else (do
+  (err! (str "require: bad libspec " (str unq) " — expected a namespace symbol or [lib :as alias] / [lib :refer [syms]]"))
+  nil))))
+
+(defn parse-program [datums]
+  (reset-errors!)
+  (reset! LOWERING-COUNTER 0)
+  (let [mode (atom "strict")
+   mode-set (atom false)
+   namespace (atom "beagle.user")
+   ns-set (atom false)
+   target (atom "clj")
+   target-set (atom false)
+   extern-seen (atom {})
+   extern-list (atom [])
+   requires (atom [])
+   gen-class (atom false)
+   forms (atom [])]
+  (doseq [d datums]
+  (if (and (vector? d) (not (bracketed? d)) (>= (count d) 2) (= (nth d 0) "defunion") (vector? (nth d 1)) (not (bracketed? (nth d 1))) (> (count (nth d 1)) 0) (string? (nth (nth d 1) 0))) (do
+  (swap! USER-PARAMETRIC assoc (nth (nth d 1) 0) true))))
+  (doseq [d datums]
+  (if (and (vector? d) (not (bracketed? d)) (= (count d) 3) (= (nth d 0) "defalias") (string? (nth d 1))) (do
+  (swap! TYPE-ALIASES assoc (nth d 1) (parse-type (nth d 2))))))
+  (doseq [d datums]
+  (if (and (vector? d) (not (bracketed? d)) (>= (count d) 2)) (do
+  (let [head (nth d 0)]
+  (cond
+  (= head "define-mode") (do
+  (if (deref mode-set) (do
+  (err! "duplicate define-mode")))
+  (if (or (= (nth d 1) "strict") (= (nth d 1) "dynamic")) (reset! mode (nth d 1)) (err! (str "unknown mode: " (str (nth d 1)) " (expected strict or dynamic)")))
+  (reset! mode-set true))
+  (= head "define-target") (do
+  (if (deref target-set) (do
+  (err! "duplicate define-target")))
+  (if (has-item? ["clj" "cljs" "js" "nix" "py" "rkt" "zig" "odin"] (nth d 1)) (reset! target (nth d 1)) (err! (str "unknown target: " (str (nth d 1)))))
+  (reset! target-set true))
+  (= head "ns") (do
+  (if (deref ns-set) (do
+  (err! "duplicate ns form")))
+  (reset! namespace (nth d 1))
+  (reset! ns-set true)
+  (doseq [clause (subvec d 2)]
+  (cond
+  (string-datum? clause) nil
+  (and (vector? clause) (> (count clause) 0) (= (nth clause 0) ":require")) (doseq [spec (subvec clause 1)]
+  (let [r (parse-require-libspec spec)]
+  (if (some? r) (do
+  (swap! requires conj r)))))
+  (and (vector? clause) (> (count clause) 0) (= (nth clause 0) ":import")) nil
+  (and (vector? clause) (> (count clause) 0) (= (nth clause 0) ":gen-class")) (do
+  (reset! gen-class true)
+  nil)
+  (and (vector? clause) (> (count clause) 0) (= (nth clause 0) ":use")) (do
+  (err! (str "(ns " (nth d 1) " (:use ...)) — :use is not supported. Use (:require [lib :refer [sym ...]]) instead."))
+  nil)
+  :else (do
+  (err! (str "(ns " (nth d 1) " ...): unsupported ns clause " (str clause)))
+  nil))))
+  (= head "define-macro") (do
+  (err! "(define-macro ...) — `define-macro` is not supported. Use `(defmacro NAME [params] body)` instead.")
+  nil)
+  (= head "defmacro") nil
+  (= head "defalias") nil
+  (= head "declare-extern") (if (>= (count d) 3) (let [name-form (nth d 1)
+   t (parse-type (nth d 2))
+   add-extern! (fn [nm] (if (some? (get (deref extern-seen) nm)) (do
+  (err! (str "duplicate declare-extern: " nm))
+  nil) (do
+  (swap! extern-seen assoc nm true)
+  (swap! extern-list conj {"name" nm "type" t})
+  nil)))]
+  (if (bracketed? name-form) (doseq [nm (bracket-body name-form)]
+  (add-extern! nm)) (add-extern! name-form))) (err! "malformed declare-extern — expected (declare-extern name TYPE) or (declare-extern [name1 name2 ...] TYPE)"))
+  (= head "require") (let [specs (subvec d 1)]
+  (if (and (> (count specs) 0) (string? (nth specs 0))) (let [r (parse-require-libspec (vec (concat [BRACKET-TAG] specs)))]
+  (if (some? r) (do
+  (swap! requires conj r)))) (doseq [spec specs]
+  (let [r (parse-require-libspec spec)]
+  (if (some? r) (do
+  (swap! requires conj r)))))))
+  (= head "import") nil
+  :else nil)))))
+  (doseq [d datums]
+  (if (not (meta-form? d)) (do
+  (swap! forms conj (parse-expr* d)))))
+  {"mode" (deref mode) "namespace" (deref namespace) "target" (deref target) "gen-class" (deref gen-class) "forms" (deref forms) "externs" (deref extern-list) "requires" (deref requires)}))
+
+(def PASSES (atom 0))
+
+(def FAILURES (atom []))
+
+(defn- expect [^String label ^Boolean result]
+  (if result (do
+  (swap! PASSES inc)
+  nil) (do
+  (swap! FAILURES conj label)
+  nil))
+  nil)
+
+(defn run-tests! []
+  (reset! PASSES 0)
+  (reset! FAILURES [])
+  (reset-errors!)
+  (expect "literal: number" (= (parse-expr* 42) {"node" "literal" "kind" "number" "value" 42}))
+  (expect "literal: float" (= (parse-expr* 3.14) {"node" "literal" "kind" "float" "value" 3.14}))
+  (expect "bare true normalizes to ref (oracle parity)" (= (parse-expr* true) {"node" "ref" "name" "true"}))
+  (expect "bare false normalizes to ref (oracle parity)" (= (parse-expr* false) {"node" "ref" "name" "false"}))
+  (expect "cond :else canonicalizes to ref else (oracle parity)" (let [node (parse-expr* ["cond" [BRACKET-TAG "x" "a"] [BRACKET-TAG ":else" "b"]])]
+  (= (get (nth (get node "clauses") 1) "test") {"node" "ref" "name" "else"})))
+  (expect "literal: nil (null) — no value key (ast-json parity)" (= (parse-expr* nil) {"node" "literal" "kind" "nil"}))
+  (expect "literal: nil symbol" (= (get (parse-expr* "nil") "kind") "nil"))
+  (expect "literal: keyword" (= (parse-expr* ":name") {"node" "literal" "kind" "keyword" "value" "name"}))
+  (expect "literal: string datum" (= (parse-expr* ["#%string" "hi"]) {"node" "literal" "kind" "string" "value" "hi"}))
+  (expect "ref: symbol" (= (parse-expr* "x") {"node" "ref" "name" "x"}))
+  (expect "ref: hyphenated" (= (parse-expr* "my-var") {"node" "ref" "name" "my-var"}))
+  (expect "ref: qualified lowercase stays ref (k/single?)" (= (parse-expr* "k/single?") {"node" "ref" "name" "k/single?"}))
+  (expect "def without annotation" (let [node (parse-expr* ["def" "x" 42])]
+  (and (= (get node "node") "def") (= (get node "name") "x") (nil? (get node "ann")) (= (get (get node "value") "value") 42))))
+  (expect "def with :- annotation" (let [node (parse-expr* ["def" "x" ":-" "Int" 42])]
+  (and (= (get node "node") "def") (= (get node "name") "x") (= (get (get node "ann") "name") "Int") (= (get (get node "value") "value") 42))))
+  (expect "def with docstring" (let [node (parse-expr* ["def" "x" ["#%string" "doc"] 42])]
+  (and (= (get node "node") "def") (= (get (get node "value") "value") 42))))
+  (expect "def bare `:` rejected" (do
+  (reset-errors!)
+  (parse-expr* ["def" "x" ":" "Int" 42])
+  (> (count (parse-errors)) 0)))
+  (expect "defn flat typed params + return type" (let [node (parse-expr* ["defn" "foo" [BRACKET-TAG "x" ":-" "Int"] ":-" "String" ["str" "x"]])]
+  (and (= (get node "node") "defn") (= (get node "name") "foo") (= (count (get node "params")) 1) (= (get (nth (get node "params") 0) "name") "x") (= (get (get (nth (get node "params") 0) "ann") "name") "Int") (= (get node "ret") {"kind" "prim" "name" "String"}) (= (get node "private") false) (= (get node "rest") false))))
+  (expect "defn wrapped params still accepted" (let [node (parse-expr* ["defn" "foo" [BRACKET-TAG ["x" ":-" "Int"]] ":-" "String" ["str" "x"]])]
+  (and (= (get node "node") "defn") (= (get (get (nth (get node "params") 0) "ann") "name") "Int"))))
+  (expect "defn without return type" (let [node (parse-expr* ["defn" "bar" [BRACKET-TAG "x"] ["+" "x" 1]])]
+  (and (= (get node "node") "defn") (nil? (get node "ret")))))
+  (expect "defn mixed param vector [a :- Int b c :- String]" (let [node (parse-expr* ["defn" "f" [BRACKET-TAG "a" ":-" "Int" "b" "c" ":-" "String"] "a"])]
+  (and (= (count (get node "params")) 3) (= (get (nth (get node "params") 0) "name") "a") (= (get (get (nth (get node "params") 0) "ann") "name") "Int") (= (get (nth (get node "params") 1) "name") "b") (nil? (get (nth (get node "params") 1) "ann")) (= (get (get (nth (get node "params") 2) "ann") "name") "String"))))
+  (expect "defn with docstring (stripped)" (let [node (parse-expr* ["defn" "f" ["#%string" "doc"] [BRACKET-TAG "x"] "x"])]
+  (and (= (get node "node") "defn") (= (get node "name") "f") (= (count (get node "body")) 1))))
+  (expect "fn with return type" (let [node (parse-expr* ["fn" [BRACKET-TAG "x" ":-" "Int"] ":-" "Int" ["+" "x" 1]])]
+  (and (= (get node "node") "fn") (= (count (get node "params")) 1) (= (get (get node "ret") "name") "Int"))))
+  (expect "fn without return type" (let [node (parse-expr* ["fn" [BRACKET-TAG "x"] ["+" "x" 1]])]
+  (and (= (get node "node") "fn") (nil? (get node "ret")))))
+  (expect "let with bindings" (let [node (parse-expr* ["let" [BRACKET-TAG "x" 1 "y" 2] ["+" "x" "y"]])]
+  (and (= (get node "node") "let") (= (count (get node "bindings")) 2) (= (get (nth (get node "bindings") 0) "name") "x") (= (get (nth (get node "bindings") 1) "name") "y"))))
+  (expect "binding form (dynamic-var rebinding, let-binding shape)" (let [node (parse-expr* ["binding" [BRACKET-TAG "*out*" "*err*"] ["println" ["#%string" "x"]]])]
+  (and (= (get node "node") "binding") (= (nth (get node "bindings") 0) {"name" "*out*" "ann" nil "value" {"node" "dynamic-var" "name" "*err*"}}) (= (count (get node "body")) 1))))
+  (expect "let flat typed binding (name :- TYPE value)" (let [node (parse-expr* ["let" [BRACKET-TAG "t" ":-" "Any" [":tx" "a"]] "t"])]
+  (and (= (count (get node "bindings")) 1) (= (get (nth (get node "bindings") 0) "name") "t") (= (get (get (nth (get node "bindings") 0) "ann") "name") "Any") (= (get (get (nth (get node "bindings") 0) "value") "node") "kw-access"))))
+  (expect "if with else" (let [node (parse-expr* ["if" true "yes" "no"])]
+  (and (= (get node "node") "if") (= (get (get node "then") "name") "yes") (= (get (get node "else") "name") "no"))))
+  (expect "if without else — bool-false literal (ast-json parity)" (let [node (parse-expr* ["if" true "yes"])]
+  (and (= (get node "node") "if") (= (get node "else") {"node" "literal" "kind" "bool" "value" false}))))
+  (expect "cond flat style" (let [node (parse-expr* ["cond" true "a" false "b"])]
+  (and (= (get node "node") "cond") (= (count (get node "clauses")) 2))))
+  (expect "cond bracket style" (let [node (parse-expr* ["cond" [BRACKET-TAG true "a"] [BRACKET-TAG ":else" "b"]])]
+  (and (= (get node "node") "cond") (= (count (get node "clauses")) 2))))
+  (expect "when canonicalizes to (if c (do ...)) — oracle parity" (let [node (parse-expr* ["when" "c" "a" "b"])]
+  (and (= (get node "node") "if") (= (get (get node "then") "node") "do") (= (count (get (get node "then") "body")) 2) (= (get node "else") {"node" "literal" "kind" "bool" "value" false}))))
+  (expect "when-not canonicalizes to (if (not c) (do ...))" (let [node (parse-expr* ["when-not" "c" "a"])]
+  (and (= (get node "node") "if") (= (get (get (get node "cond") "fn") "name") "not"))))
+  (expect "if-not swaps branches (oracle parity)" (let [node (parse-expr* ["if-not" "c" "t" "e"])]
+  (and (= (get node "node") "if") (= (get (get node "cond") "name") "c") (= (get (get node "then") "name") "e") (= (get (get node "else") "name") "t"))))
+  (expect "do" (let [node (parse-expr* ["do" "a" "b"])]
+  (and (= (get node "node") "do") (= (count (get node "body")) 2))))
+  (expect "loop" (let [node (parse-expr* ["loop" [BRACKET-TAG "i" 0] ["recur" ["+" "i" 1]]])]
+  (and (= (get node "node") "loop") (= (count (get node "bindings")) 1) (= (get (nth (get node "bindings") 0) "name") "i"))))
+  (expect "recur" (let [node (parse-expr* ["recur" 1 2])]
+  (and (= (get node "node") "recur") (= (count (get node "args")) 2))))
+  (expect "for with binding" (let [node (parse-expr* ["for" [BRACKET-TAG "x" "items"] "x"])]
+  (and (= (get node "node") "for") (= (count (get node "clauses")) 1) (= (get (nth (get node "clauses") 0) "type") "binding"))))
+  (expect "for with :when" (let [node (parse-expr* ["for" [BRACKET-TAG "x" "items" ":when" ["even?" "x"]] "x"])]
+  (and (= (count (get node "clauses")) 2) (= (get (nth (get node "clauses") 1) "type") "when"))))
+  (expect "match with patterns" (let [node (parse-expr* ["match" "x" [BRACKET-TAG "_" "default"] [BRACKET-TAG "y" ["+" "y" 1]]])]
+  (and (= (get node "node") "match") (= (count (get node "clauses")) 2) (= (get (get (nth (get node "clauses") 0) "pattern") "type") "wildcard"))))
+  (expect "match record pattern" (let [node (parse-expr* ["match" "shape" [BRACKET-TAG ["Circle" "r"] ["*" 3.14 ["*" "r" "r"]]] [BRACKET-TAG ["Rect" "w" "h"] ["*" "w" "h"]]])]
+  (and (= (get (get (nth (get node "clauses") 0) "pattern") "type") "record") (= (get (get (nth (get node "clauses") 0) "pattern") "name") "Circle"))))
+  (expect "case with default" (let [node (parse-expr* ["case" "x" 1 ["#%string" "one"] 2 ["#%string" "two"] ["#%string" "other"]])]
+  (and (= (get node "node") "case") (= (count (get node "clauses")) 2) (= (get (nth (get node "clauses") 0) "body") {"node" "literal" "kind" "string" "value" "one"}) (not (= false (get node "default"))))))
+  (expect "case without default" (let [node (parse-expr* ["case" "x" 1 ["#%string" "one"] 2 ["#%string" "two"]])]
+  (and (= (get node "node") "case") (= (count (get node "clauses")) 2) (= (get node "default") false))))
+  (expect "try with catch" (let [node (parse-expr* ["try" ["foo"] ["catch" "Exception" "e" ["bar" "e"]]])]
+  (and (= (get node "node") "try") (= (count (get node "body")) 1) (= (count (get node "catches")) 1) (= (get (nth (get node "catches") 0) "name") "e") (= (get node "finally") false))))
+  (expect "defrecord flat fields" (let [node (parse-expr* ["defrecord" "Assertion" [BRACKET-TAG "tx" ":-" "Int" "op" ":-" "String"]])]
+  (and (= (get node "node") "record") (= (get node "name") "Assertion") (= (count (get node "fields")) 2) (= (nth (get node "fields") 0) {"name" "tx" "ann" {"kind" "prim" "name" "Int"}}) (nil? (get node "private")))))
+  (expect "defrecord wrapped fields still accepted" (let [node (parse-expr* ["defrecord" "Point" [BRACKET-TAG ["x" ":-" "Float"] ["y" ":-" "Float"]]])]
+  (and (= (get node "node") "record") (= (count (get node "fields")) 2))))
+  (expect "defunion simple" (let [node (parse-expr* ["defunion" "Shape" "Circle" "Rect"])]
+  (and (= (get node "node") "defunion") (= (get node "name") "Shape") (= (count (get node "members")) 2) (nil? (get node "type-params")))))
+  (expect "defenum" (let [node (parse-expr* ["defenum" "Color" "Red" "Green" "Blue"])]
+  (and (= (get node "node") "defenum") (= (get node "name") "Color") (= (count (get node "values")) 3))))
+  (expect "defscalar" (let [node (parse-expr* ["defscalar" "Email" "String"])]
+  (and (= (get node "node") "defscalar") (= (get node "name") "Email"))))
+  (expect "deferror" (let [node (parse-expr* ["deferror" "AppError" "NotFound" "Forbidden"])]
+  (and (= (get node "node") "deferror") (= (get node "name") "AppError") (= (count (get node "members")) 2))))
+  (expect "method-call" (let [node (parse-expr* [".push" "arr" 42])]
+  (and (= (get node "node") "method-call") (= (get node "method") ".push") (= (get (get node "target") "name") "arr"))))
+  (expect "kw-access without default — false (ast-json parity)" (let [node (parse-expr* [":name" "m"])]
+  (and (= (get node "node") "kw-access") (= (get node "kw") ":name") (= (get node "default") false))))
+  (expect "kw-access with default" (let [node (parse-expr* [":name" "m" "fallback"])]
+  (and (= (get node "node") "kw-access") (not (= false (get node "default"))))))
+  (expect "static-call" (let [node (parse-expr* ["Math/abs" -1])]
+  (and (= (get node "node") "static-call") (= (get node "name") "Math/abs"))))
+  (expect "constructor" (let [node (parse-expr* ["Date." 2024])]
+  (and (= (get node "node") "new") (= (get node "class") "Date."))))
+  (expect "arrow-constructor stays plain ref call (->Latest)" (let [node (parse-expr* ["->Latest" "a"])]
+  (and (= (get node "node") "call") (= (get (get node "fn") "name") "->Latest"))))
+  (expect "-> thread-first" (let [node (parse-expr* ["->" "x" ["foo" 1] ["bar" 2]])]
+  (and (= (get node "node") "call") (= (get (get node "fn") "name") "bar"))))
+  (expect "->> thread-last" (let [node (parse-expr* ["->>" "x" ["foo" 1] ["bar" 2]])]
+  (and (= (get node "node") "call") (= (get (get node "fn") "name") "bar"))))
+  (expect "multi-arity defn" (let [node (parse-expr* ["defn" "f" [[BRACKET-TAG] ["#%string" "zero"]] [[BRACKET-TAG "x"] "x"]])]
+  (and (= (get node "node") "defn-multi") (= (get node "name") "f") (= (count (get node "arities")) 2) (= (get (nth (get node "arities") 0) "rest") false))))
+  (expect "vec literal" (let [node (parse-expr* [BRACKET-TAG 1 2 3])]
+  (and (= (get node "node") "vec") (= (count (get node "items")) 3))))
+  (expect "map literal" (let [node (parse-expr* [MAP-TAG ":a" 1 ":b" 2])]
+  (and (= (get node "node") "map") (= (count (get node "pairs")) 2))))
+  (expect "set literal" (let [node (parse-expr* [SET-TAG 1 2 3])]
+  (and (= (get node "node") "set") (= (count (get node "items")) 3))))
+  (expect "quote symbol datum" (let [node (parse-expr* ["quote" "hello"])]
+  (and (= (get node "node") "quoted") (= (get node "datum") {"type" "symbol" "value" "hello"}))))
+  (expect "quote list with keyword + string" (let [node (parse-expr* ["quote" ["a" ":k" ["#%string" "s"]]])]
+  (= (get node "datum") [{"type" "symbol" "value" "a"} {"type" "keyword" "value" "k"} "s"])))
+  (expect "regex literal" (let [node (parse-expr* ["#%regex" "\\d+"])]
+  (and (= (get node "node") "regex") (= (get node "pattern") "\\d+"))))
+  (expect "when-let lowers to (let [x v] (if x (do ...)))" (let [node (parse-expr* ["when-let" [BRACKET-TAG "x" "foo"] "x"])]
+  (and (= (get node "node") "let") (= (get (nth (get node "bindings") 0) "name") "x") (= (get (nth (get node "body") 0) "node") "if") (= (get (get (nth (get node "body") 0) "cond") "name") "x"))))
+  (expect "if-let lowers to (let [x v] (if x t e))" (let [node (parse-expr* ["if-let" [BRACKET-TAG "x" "foo"] "x" "y"])]
+  (and (= (get node "node") "let") (= (get (get (nth (get node "body") 0) "else") "name") "y"))))
+  (expect "when-some lowers with nil? test" (let [node (parse-expr* ["when-some" [BRACKET-TAG "x" "foo"] "x"])]
+  (let [test (get (nth (get node "body") 0) "cond")]
+  (and (= (get node "node") "let") (= (get (get test "fn") "name") "not")))))
+  (expect "condp" (let [node (parse-expr* ["condp" "=" "x" 1 ["#%string" "one"] 2 ["#%string" "two"] ["#%string" "other"]])]
+  (and (= (get node "node") "condp") (= (count (get node "clauses")) 2) (not (= false (get node "default"))))))
+  (expect "doseq" (let [node (parse-expr* ["doseq" [BRACKET-TAG "x" "items"] ["println" "x"]])]
+  (and (= (get node "node") "doseq") (= (count (get node "clauses")) 1))))
+  (expect "dotimes" (let [node (parse-expr* ["dotimes" [BRACKET-TAG "i" 10] ["println" "i"]])]
+  (and (= (get node "node") "dotimes") (= (get node "name") "i"))))
+  (expect "set!" (let [node (parse-expr* ["set!" "x" 42])]
+  (and (= (get node "node") "set!") (= (get (get node "target") "name") "x"))))
+  (expect "await" (let [node (parse-expr* ["await" ["fetch" "url"]])]
+  (and (= (get node "node") "await") (= (get (get node "expr") "node") "call"))))
+  (expect "defonce" (let [node (parse-expr* ["defonce" "db" ["connect"]])]
+  (and (= (get node "node") "defonce") (= (get node "name") "db"))))
+  (expect "letfn" (let [node (parse-expr* ["letfn" [BRACKET-TAG ["even?" [BRACKET-TAG "n"] ["odd?" ["dec" "n"]]] ["odd?" [BRACKET-TAG "n"] ["even?" ["dec" "n"]]]] ["even?" 10]])]
+  (and (= (get node "node") "letfn") (= (count (get node "fns")) 2))))
+  (expect "dynamic-var" (let [node (parse-expr* "*state*")]
+  (and (= (get node "node") "dynamic-var") (= (get node "name") "*state*"))))
+  (expect "generic call" (let [node (parse-expr* ["println" ["#%string" "hello"]])]
+  (and (= (get node "node") "call") (= (get (get node "fn") "node") "ref") (= (get (get node "fn") "name") "println"))))
+  (expect "defn- private" (let [node (parse-expr* ["defn-" "helper" [BRACKET-TAG "x"] "x"])]
+  (and (= (get node "node") "defn") (= (get node "private") true))))
+  (expect "with form" (let [node (parse-expr* ["with" "point" [BRACKET-TAG ":x" 10] [BRACKET-TAG ":y" 20]])]
+  (and (= (get node "node") "with") (= (count (get node "updates")) 2))))
+  (expect "parse-params flat typed" (let [result (parse-params [BRACKET-TAG "x" ":-" "Int" "y" ":-" "String"])]
+  (and (= (count (get result "params")) 2) (= (get (nth (get result "params") 0) "name") "x") (= (get (get (nth (get result "params") 0) "ann") "name") "Int") (= (get (get (nth (get result "params") 1) "ann") "name") "String"))))
+  (expect "parse-params with rest" (let [result (parse-params [BRACKET-TAG "x" "&" "rest"])]
+  (and (= (count (get result "params")) 1) (some? (get result "rest-param")) (= (get (get result "rest-param") "name") "rest"))))
+  (expect "parse-params flat typed rest (& args :- (Vec String))" (let [result (parse-params [BRACKET-TAG "x" "&" "args" ":-" ["Vec" "String"]])]
+  (and (= (get (get result "rest-param") "name") "args") (= (get (get (get result "rest-param") "ann") "kind") "app"))))
+  (expect "parse-let-bindings plain" (let [bindings (parse-let-bindings [BRACKET-TAG "x" 1 "y" 2])]
+  (and (= (count bindings) 2) (= (get (nth bindings 0) "name") "x") (= (get (nth bindings 1) "name") "y"))))
+  (expect "unsafe-js rejected" (do
+  (reset-errors!)
+  (parse-expr* ["unsafe-js" ["#%string" "1+1"]])
+  (> (count (parse-errors)) 0)))
+  (expect "parse-type primitive" (= (parse-type "Int") {"kind" "prim" "name" "Int"}))
+  (expect "parse-type nullable" (let [t (parse-type "String?")]
+  (and (= (get t "kind") "union") (= (count (get t "members")) 2))))
+  (expect "parse-type fn" (let [t (parse-type [BRACKET-TAG "Int" "->" "String"])]
+  (and (= (get t "kind") "fn") (= (count (get t "params")) 1))))
+  (expect "parse-type Vec app" (let [t (parse-type ["Vec" "String"])]
+  (and (= (get t "kind") "app") (= (get t "name") "Vec"))))
+  (expect "parse-type union" (let [t (parse-type ["U" "Int" "String"])]
+  (and (= (get t "kind") "union") (= (count (get t "members")) 2))))
+  (expect "parse-type clj alias Long" (= (parse-type "Long") {"kind" "prim" "name" "Int"}))
+  (expect "parse-program meta extraction" (let [prog (parse-program [["ns" "my.app"] ["define-mode" "strict"] ["define-target" "js"] ["declare-extern" "console" "Any"] ["def" "x" 42]])]
+  (and (= (get prog "namespace") "my.app") (= (get prog "mode") "strict") (= (get prog "target") "js") (= (count (get prog "forms")) 1) (= (get (nth (get prog "forms") 0) "node") "def") (= (count (get prog "externs")) 1) (= (get (nth (get prog "externs") 0) "name") "console"))))
+  (expect "parse-program require :as (fold shape)" (let [prog (parse-program [["ns" "fram.fold"] ["require" "fram.kernel" ":as" "k"]])]
+  (= (get prog "requires") [{"ns" "fram.kernel" "alias" "k" "refer" false}])))
+  (expect "parse-program ns docstring dropped" (let [prog (parse-program [["ns" "fram.fold" ["#%string" "Replay the log."]]])]
+  (and (= (get prog "namespace") "fram.fold") (= (count (get prog "forms")) 0))))
+  (expect "parse-program ns (:require [lib :as a])" (let [prog (parse-program [["ns" "my.app" [":require" ["#%brackets" "clojure.string" ":as" "str"]]]])]
+  (= (get prog "requires") [{"ns" "clojure.string" "alias" "str" "refer" false}])))
+  (expect "parse-program require :refer" (let [prog (parse-program [["require" "my.lib" ":refer" ["#%brackets" "f" "g"]]])]
+  (= (get prog "requires") [{"ns" "my.lib" "alias" false "refer" ["f" "g"]}])))
+  (expect "parse-program default mode strict + target clj + gen-class false" (let [prog (parse-program [["ns" "x.y"]])]
+  (and (= (get prog "mode") "strict") (= (get prog "target") "clj") (= (get prog "gen-class") false))))
+  (expect "parse-program (:gen-class) sets program flag" (let [prog (parse-program [["ns" "fram.main" [":gen-class"]]])]
+  (= (get prog "gen-class") true)))
+  (let [fails (deref FAILURES)]
+  (doseq [f fails]
+  (selfhost.rt/eprint (str "  FAIL: " f "\n")))
+  (println (str "  PARSE: " (deref PASSES) " passed, " (count fails) " failed"))
+  (count fails)))

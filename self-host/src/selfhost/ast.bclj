@@ -1,0 +1,453 @@
+#lang beagle/clj
+(ns selfhost.ast)
+(define-mode strict)
+
+;; Self-hosted AST definitions — matches beagle-lib/private/ast.rkt.
+;; AST node constructors, tag utilities, symbol predicates.
+;; Uses plain string-keyed maps with a "node" discriminator rather than classes.
+;; Ported from ~/code/beagle/.worktrees/driftlab/self-host/ast.bjs (.bjs target).
+
+(require selfhost.rt)
+(declare-extern selfhost.rt/eprint [String -> Nil])
+
+(require clojure.string :as str)
+
+;; --- small string helpers (duplicated per module — PoC pattern) --------------
+
+(defn char-at [s :- String i :- Int] :- String
+  (if (and (>= i 0) (< i (count s))) (subs s i (+ i 1)) ""))
+
+(defn substring2 [s :- String a :- Int b :- Int] :- String
+  (let [n (count s)
+        lo (if (< a 0) 0 (if (> a n) n a))
+        hi (if (< b lo) lo (if (> b n) n b))]
+    (subs s lo hi)))
+
+;; --- tag constants -------------------------------------------------------------
+
+(def BRACKET-TAG :- String "#%brackets")
+(def MAP-TAG :- String "#%map")
+(def SET-TAG :- String "#%set")
+
+;; --- tag utilities ---------------------------------------------------------------
+
+(defn bracketed? [d :- Any] :- Bool
+  (and (vector? d) (> (count d) 0) (= (nth d 0) BRACKET-TAG)))
+
+(defn bracket-body [d :- Any] :- Any
+  (if (vector? d) (subvec d 1) []))
+
+(defn map-tagged? [d :- Any] :- Bool
+  (and (vector? d) (> (count d) 0) (= (nth d 0) MAP-TAG)))
+
+(defn map-body [d :- Any] :- Any
+  (if (vector? d) (subvec d 1) []))
+
+(defn set-tagged? [d :- Any] :- Bool
+  (and (vector? d) (> (count d) 0) (= (nth d 0) SET-TAG)))
+
+(defn set-body [d :- Any] :- Any
+  (if (vector? d) (subvec d 1) []))
+
+(defn unwrap-items [d :- Any what :- String] :- Any
+  (cond
+    (bracketed? d) (bracket-body d)
+    (vector? d) d
+    :else []))
+
+;; --- symbol predicates -------------------------------------------------------
+
+(defn dot-method-sym? [sym :- String] :- Bool
+  (and (> (count sym) 1) (= (char-at sym 0) ".")))
+
+(defn upper-case-char? [code :- Int] :- Bool
+  (and (>= code 65) (<= code 90)))
+
+(defn static-method-sym? [sym :- String] :- Bool
+  (let [idx (str/index-of sym "/")
+        slash-pos (if (nil? idx) -1 idx)]
+    (and (> slash-pos 0) (< (+ slash-pos 1) (count sym))
+         (or (upper-case-char? (int (.charAt sym 0)))
+             (= (substring2 sym 0 3) "js/")))))
+
+(defn dynamic-var-sym? [sym :- String] :- Bool
+  (and (>= (count sym) 3)
+       (= (char-at sym 0) "*")
+       (= (char-at sym (- (count sym) 1)) "*")))
+
+(defn constructor-sym? [sym :- String] :- Bool
+  (and (> (count sym) 1)
+       (upper-case-char? (int (.charAt sym 0)))
+       (= (char-at sym (- (count sym) 1)) ".")))
+
+(defn keyword-sym? [sym :- String] :- Bool
+  (and (> (count sym) 1) (= (char-at sym 0) ":")))
+
+;; --- AST node constructors ---------------------------------------------------
+;; Each returns a plain string-keyed map with a "node" discriminator matching
+;; ast-json.rkt.
+
+(defn make-ns-decl [name :- String] :- Any
+  {"node" "ns" "name" name})
+
+(defn make-def [name :- String ann :- Any value :- Any] :- Any
+  {"node" "def" "name" name "ann" ann "value" value})
+
+(defn make-defonce [name :- String ann :- Any value :- Any] :- Any
+  {"node" "defonce" "name" name "ann" ann "value" value})
+
+(defn make-defn [name :- String params :- (Vec Any) rest-param :- Any
+                  ret :- Any body :- (Vec Any) private- :- Bool] :- Any
+  {"node" "defn" "name" name "params" params "rest-param" rest-param
+   "ret" ret "body" body "private" private-})
+
+(defn make-defn-multi [name :- String arities :- (Vec Any) private- :- Bool] :- Any
+  {"node" "defn-multi" "name" name "arities" arities "private" private-})
+
+(defn make-fn [params :- (Vec Any) rest-param :- Any ret :- Any body :- (Vec Any)] :- Any
+  {"node" "fn" "params" params "rest-param" rest-param "ret" ret "body" body})
+
+(defn make-let [bindings :- (Vec Any) body :- (Vec Any)] :- Any
+  {"node" "let" "bindings" bindings "body" body})
+
+(defn make-if [test :- Any then-expr :- Any else-expr :- Any] :- Any
+  {"node" "if" "test" test "then" then-expr "else" else-expr})
+
+(defn make-cond [clauses :- (Vec Any)] :- Any
+  {"node" "cond" "clauses" clauses})
+
+(defn make-when [test :- Any body :- (Vec Any)] :- Any
+  {"node" "when" "test" test "body" body})
+
+(defn make-do [body :- (Vec Any)] :- Any
+  {"node" "do" "body" body})
+
+(defn make-call [fn-name :- Any args :- (Vec Any)] :- Any
+  {"node" "call" "fn" fn-name "args" args})
+
+(defn make-ref [name :- String] :- Any
+  {"node" "ref" "name" name})
+
+(defn make-literal [kind :- String value :- Any] :- Any
+  {"node" "literal" "kind" kind "value" value})
+
+(defn make-vec [items :- (Vec Any)] :- Any
+  {"node" "vec" "items" items})
+
+(defn make-quoted [datum :- Any] :- Any
+  {"node" "quoted" "datum" datum})
+
+(defn make-unsafe [code :- String] :- Any
+  {"node" "unsafe" "code" code})
+
+(defn make-regex [pattern :- String] :- Any
+  {"node" "regex" "pattern" pattern})
+
+(defn make-loop [bindings :- (Vec Any) body :- (Vec Any)] :- Any
+  {"node" "loop" "bindings" bindings "body" body})
+
+(defn make-recur [args :- (Vec Any)] :- Any
+  {"node" "recur" "args" args})
+
+(defn make-for [clauses :- (Vec Any) body :- Any] :- Any
+  {"node" "for" "clauses" clauses "body" body})
+
+(defn make-record [name :- String fields :- (Vec Any)] :- Any
+  {"node" "record" "name" name "fields" fields})
+
+(defn make-method-call [method :- String target :- Any args :- (Vec Any)] :- Any
+  {"node" "method-call" "method" method "target" target "args" args})
+
+(defn make-static-call [class-method :- String args :- (Vec Any)] :- Any
+  {"node" "static-call" "class-method" class-method "args" args})
+
+(defn make-map [pairs :- (Vec Any)] :- Any
+  {"node" "map" "pairs" pairs})
+
+(defn make-set [items :- (Vec Any)] :- Any
+  {"node" "set" "items" items})
+
+(defn make-kw-access [kw :- String target :- Any fallback :- Any] :- Any
+  {"node" "kw-access" "kw" kw "target" target "default" fallback})
+
+(defn make-try [body :- (Vec Any) catches :- (Vec Any) finally-body :- Any] :- Any
+  {"node" "try" "body" body "catches" catches "finally" finally-body})
+
+(defn make-catch [exception-type :- String name :- String body :- (Vec Any)] :- Any
+  {"node" "catch" "exception-type" exception-type "name" name "body" body})
+
+(defn make-doseq [clauses :- (Vec Any) body :- (Vec Any)] :- Any
+  {"node" "doseq" "clauses" clauses "body" body})
+
+(defn make-case [test :- Any clauses :- (Vec Any) fallback :- Any] :- Any
+  {"node" "case" "test" test "clauses" clauses "default" fallback})
+
+(defn make-match [target :- Any clauses :- (Vec Any)] :- Any
+  {"node" "match" "target" target "clauses" clauses})
+
+(defn make-with [target :- Any updates :- (Vec Any)] :- Any
+  {"node" "with" "target" target "updates" updates})
+
+(defn make-defrecord [name :- String fields :- (Vec Any)] :- Any
+  {"node" "defrecord" "name" name "fields" fields})
+
+(defn make-defenum [name :- String values :- (Vec String)] :- Any
+  {"node" "defenum" "name" name "values" values})
+
+(defn make-defunion [name :- String members :- (Vec String)
+                      type-params :- Any member-fields :- Any] :- Any
+  {"node" "defunion" "name" name "members" members
+   "type-params" type-params "member-fields" member-fields})
+
+(defn make-deferror [name :- String members :- (Vec String) member-fields :- Any] :- Any
+  {"node" "deferror" "name" name "members" members "member-fields" member-fields})
+
+(defn make-defscalar [name :- String backing :- Any predicates :- (Vec Any)] :- Any
+  {"node" "defscalar" "name" name "backing" backing "predicates" predicates})
+
+(defn make-when-let [name :- String expr :- Any body :- (Vec Any)] :- Any
+  {"node" "when-let" "name" name "expr" expr "body" body})
+
+(defn make-if-let [name :- String expr :- Any then-body :- Any else-body :- Any] :- Any
+  {"node" "if-let" "name" name "expr" expr "then" then-body "else" else-body})
+
+(defn make-when-some [name :- String expr :- Any body :- (Vec Any)] :- Any
+  {"node" "when-some" "name" name "expr" expr "body" body})
+
+(defn make-if-some [name :- String expr :- Any then-body :- Any else-body :- Any] :- Any
+  {"node" "if-some" "name" name "expr" expr "then" then-body "else" else-body})
+
+(defn make-condp [pred-fn :- String test-expr :- Any clauses :- (Vec Any) fallback :- Any] :- Any
+  {"node" "condp" "pred-fn" pred-fn "test-expr" test-expr "clauses" clauses "default" fallback})
+
+(defn make-dotimes [name :- String count-expr :- Any body :- (Vec Any)] :- Any
+  {"node" "dotimes" "name" name "count-expr" count-expr "body" body})
+
+(defn make-letfn [fns :- (Vec Any) body :- (Vec Any)] :- Any
+  {"node" "letfn" "fns" fns "body" body})
+
+(defn make-set! [target :- Any value :- Any] :- Any
+  {"node" "set!" "target" target "value" value})
+
+(defn make-await [expr :- Any] :- Any
+  {"node" "await" "expr" expr})
+
+(defn make-block-string [text :- String tag :- String] :- Any
+  {"node" "block-string" "text" text "tag" tag})
+
+;; --- param constructors ------------------------------------------------------
+
+(defn make-param [name :- String ann :- Any] :- Any
+  {"type" "param" "name" name "ann" ann})
+
+(defn make-map-destructure [keys :- (Vec String) as-name :- Any] :- Any
+  {"type" "map-destructure" "keys" keys "as" as-name})
+
+(defn make-seq-destructure [names :- (Vec String) rest-name :- Any] :- Any
+  {"type" "seq-destructure" "names" names "rest" rest-name})
+
+(defn make-let-binding [name :- String ann :- Any value :- Any] :- Any
+  {"name" name "ann" ann "value" value})
+
+;; --- pattern constructors ----------------------------------------------------
+
+(defn make-pat-wildcard [] :- Any
+  {"pattern" "wildcard"})
+
+(defn make-pat-literal [value :- Any] :- Any
+  {"pattern" "literal" "value" value})
+
+(defn make-pat-record [type-name :- String bindings :- (Vec Any)] :- Any
+  {"pattern" "record" "type-name" type-name "bindings" bindings})
+
+(defn make-pat-map [entries :- (Vec Any)] :- Any
+  {"pattern" "map" "entries" entries})
+
+(defn make-pat-var [name :- String] :- Any
+  {"pattern" "var" "name" name})
+
+;; --- Nix AST constructors ----------------------------------------------------
+
+(defn make-nix-inherit [names :- (Vec String)] :- Any
+  {"node" "nix-inherit" "names" names})
+
+(defn make-nix-inherit-from [ns-expr :- Any names :- (Vec String)] :- Any
+  {"node" "nix-inherit-from" "ns-expr" ns-expr "names" names})
+
+(defn make-nix-with [ns-expr :- Any body :- Any] :- Any
+  {"node" "nix-with" "ns-expr" ns-expr "body" body})
+
+(defn make-nix-rec-attrs [pairs :- (Vec Any)] :- Any
+  {"node" "nix-rec-attrs" "pairs" pairs})
+
+(defn make-nix-assert [cond-expr :- Any body :- Any] :- Any
+  {"node" "nix-assert" "cond-expr" cond-expr "body" body})
+
+(defn make-nix-get-or [base :- Any path :- Any fallback :- Any] :- Any
+  {"node" "nix-get-or" "base" base "path" path "default" fallback})
+
+(defn make-nix-has-attr [base :- Any path :- Any] :- Any
+  {"node" "nix-has-attr" "base" base "path" path})
+
+(defn make-nix-search-path [name :- String] :- Any
+  {"node" "nix-search-path" "name" name})
+
+(defn make-nix-interpolated-string [parts :- (Vec Any)] :- Any
+  {"node" "nix-interpolated-string" "parts" parts})
+
+(defn make-nix-multiline-string [lines :- (Vec Any)] :- Any
+  {"node" "nix-multiline-string" "lines" lines})
+
+(defn make-nix-path [path :- String] :- Any
+  {"node" "nix-path" "path" path})
+
+(defn make-nix-fn-set [formals :- (Vec Any) rest :- Bool at-name :- Any body :- Any] :- Any
+  {"node" "nix-fn-set" "formals" formals "rest" rest "at-name" at-name "body" body})
+
+(defn make-nix-pipe [direction :- String lhs :- Any rhs :- Any] :- Any
+  {"node" "nix-pipe" "direction" direction "lhs" lhs "rhs" rhs})
+
+(defn make-nix-impl [lhs :- Any rhs :- Any] :- Any
+  {"node" "nix-impl" "lhs" lhs "rhs" rhs})
+
+;; --- program -----------------------------------------------------------------
+
+(def DEFAULT-MODE :- String "strict")
+(def DEFAULT-TARGET :- String "clj")
+(def DEFAULT-NAMESPACE :- String "beagle.user")
+
+(defn make-program [mode :- String namespace :- String target :- String
+                     forms :- (Vec Any) externs :- Any requires :- (Vec Any)] :- Any
+  {"mode" mode "namespace" namespace "target" target
+   "forms" forms "externs" externs "requires" requires})
+
+;; --- identifier validation ---------------------------------------------------
+
+(defn validate-identifier [sym :- String] :- Bool
+  (let [bad-chars ";'\"` (){}[],"]
+    (every? (fn [c :- String] :- Bool (nil? (str/index-of bad-chars c)))
+      (map str (seq sym)))))
+
+(defn validate-module-path [path :- String] :- Bool
+  (and (every? (fn [c :- String] :- Bool
+                 (let [code (int (.charAt c 0))]
+                   (or (upper-case-char? code)
+                       (and (>= code 97) (<= code 122))
+                       (and (>= code 48) (<= code 57))
+                       (= c ".") (= c "_") (= c "/") (= c "-"))))
+               (map str (seq path)))
+       (nil? (str/index-of path ".."))))
+
+;; === test runner =============================================================
+
+(def passes :- Any (atom []))
+(def failures :- Any (atom []))
+
+(defn- expect! [label :- String result :- Bool] :- Nil
+  (if result
+    (do (swap! passes conj true) nil)
+    (do (swap! failures conj label) nil)))
+
+(defn run-tests! [] :- Int
+  (reset! passes [])
+  (reset! failures [])
+
+  ;; --- tag utilities tests ---
+
+  (expect! "bracketed?" (bracketed? [BRACKET-TAG "a" "b"]))
+  (expect! "not bracketed?" (not (bracketed? ["a" "b"])))
+  (expect! "bracket-body" (= (bracket-body [BRACKET-TAG "x" "y"]) ["x" "y"]))
+  (expect! "map-tagged?" (map-tagged? [MAP-TAG "k" "v"]))
+  (expect! "not map-tagged?" (not (map-tagged? ["k" "v"])))
+  (expect! "set-tagged?" (set-tagged? [SET-TAG "a"]))
+
+  ;; --- symbol predicate tests ---
+
+  (expect! "dot-method: .foo" (dot-method-sym? ".foo"))
+  (expect! "dot-method: not foo" (not (dot-method-sym? "foo")))
+  (expect! "dot-method: not ." (not (dot-method-sym? ".")))
+  (expect! "static: Math/abs" (static-method-sym? "Math/abs"))
+  (expect! "static: js/console" (static-method-sym? "js/console"))
+  (expect! "static: not foo/bar" (not (static-method-sym? "foo/bar")))
+  (expect! "dynamic: *state*" (dynamic-var-sym? "*state*"))
+  (expect! "dynamic: not *x" (not (dynamic-var-sym? "*x")))
+  (expect! "constructor: Point." (constructor-sym? "Point."))
+  (expect! "constructor: not point." (not (constructor-sym? "point.")))
+  (expect! "keyword: :name" (keyword-sym? ":name"))
+  (expect! "keyword: not name" (not (keyword-sym? "name")))
+
+  ;; --- AST node construction tests ---
+
+  (let [node (make-def "x" nil (make-literal "number" 42))]
+    (expect! "make-def node type" (= (get node "node") "def"))
+    (expect! "make-def name" (= (get node "name") "x"))
+    (expect! "make-def value" (= (get (get node "value") "kind") "number")))
+
+  (let [node (make-defn "foo" [(make-param "x" {"kind" "prim" "name" "Int"})]
+               nil {"kind" "prim" "name" "String"}
+               [(make-call "str" [(make-ref "x")])] false)]
+    (expect! "make-defn node type" (= (get node "node") "defn"))
+    (expect! "make-defn params" (= (count (get node "params")) 1))
+    (expect! "make-defn param name" (= (get (nth (get node "params") 0) "name") "x")))
+
+  (let [node (make-if (make-literal "bool" true)
+               (make-literal "string" "yes")
+               (make-literal "string" "no"))]
+    (expect! "make-if" (= (get node "node") "if"))
+    (expect! "make-if then" (= (get (get node "then") "value") "yes")))
+
+  (let [node (make-match (make-ref "x")
+               [{"pattern" (make-pat-record "Circle" ["r"])
+                 "body" (make-ref "r")}])]
+    (expect! "make-match" (= (get node "node") "match"))
+    (expect! "make-match target" (= (get (get node "target") "name") "x")))
+
+  (let [node (make-defunion "Shape" ["Circle" "Rect"] nil nil)]
+    (expect! "make-defunion" (= (get node "node") "defunion"))
+    (expect! "make-defunion members" (= (count (get node "members")) 2)))
+
+  ;; --- param constructors ---
+
+  (let [p (make-param "x" {"kind" "prim" "name" "Int"})]
+    (expect! "param type" (= (get p "type") "param"))
+    (expect! "param name" (= (get p "name") "x"))
+    (expect! "param ann" (= (get (get p "ann") "name") "Int")))
+
+  (let [d (make-map-destructure ["a" "b"] "m")]
+    (expect! "map-destructure type" (= (get d "type") "map-destructure"))
+    (expect! "map-destructure keys" (= (count (get d "keys")) 2)))
+
+  (let [d (make-seq-destructure ["x" "y"] "rest")]
+    (expect! "seq-destructure type" (= (get d "type") "seq-destructure"))
+    (expect! "seq-destructure rest" (= (get d "rest") "rest")))
+
+  ;; --- pattern constructors ---
+
+  (expect! "pat-wildcard" (= (get (make-pat-wildcard) "pattern") "wildcard"))
+  (expect! "pat-literal" (= (get (make-pat-literal 42) "value") 42))
+  (expect! "pat-record" (= (get (make-pat-record "Circle" ["r"]) "type-name") "Circle"))
+  (expect! "pat-var" (= (get (make-pat-var "x") "name") "x"))
+
+  ;; --- Nix constructors ---
+
+  (let [node (make-nix-inherit ["a" "b"])]
+    (expect! "nix-inherit" (= (get node "node") "nix-inherit"))
+    (expect! "nix-inherit names" (= (count (get node "names")) 2)))
+
+  (let [node (make-nix-fn-set [{"name" "x" "default" nil}] true "args" (make-ref "x"))]
+    (expect! "nix-fn-set" (= (get node "node") "nix-fn-set"))
+    (expect! "nix-fn-set rest" (= (get node "rest") true)))
+
+  ;; --- constants ---
+
+  (expect! "DEFAULT-MODE" (= DEFAULT-MODE "strict"))
+  (expect! "DEFAULT-TARGET" (= DEFAULT-TARGET "clj"))
+  (expect! "DEFAULT-NAMESPACE" (= DEFAULT-NAMESPACE "beagle.user"))
+
+  ;; --- summary ---
+
+  (doseq [f (deref failures)]
+    (selfhost.rt/eprint (str "  FAIL: " f "\n")))
+  (println (str "  AST: " (count (deref passes)) " passed, "
+                (count (deref failures)) " failed"))
+  (count (deref failures)))
