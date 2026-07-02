@@ -1,4 +1,5 @@
 (ns selfhost.main
+  (:gen-class)
   (:require [selfhost.rt :as rt]
             [selfhost.reader :as rd]
             [selfhost.parse :as p]
@@ -39,4 +40,5 @@
   (= cmd "emit-from-ast") (cmd-emit-from-ast!)
   :else (do
   (selfhost.rt/eprint "usage: selfhost.main ast|check|emit FILE, or emit-from-ast < ast.json\n")
-  (selfhost.rt/exit 2)))))
+  (selfhost.rt/exit 2)))
+  (flush)))

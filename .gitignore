@@ -40,3 +40,8 @@ docs/private/
 
 # selfhost lab scratch (oracle mints, parity diffs) — derived, re-mintable
 .lab/
+
+# selfhost native-image build artifacts — derived (self-host/native/build.sh)
+self-host/native/classes/
+self-host/native/.cpcache/
+self-host/native/beagle-selfhost
