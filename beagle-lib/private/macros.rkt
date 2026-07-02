@@ -758,6 +758,22 @@
       [else (void)]))
   refs)
 
+;; Deterministic lowering temps — build reproducibility, not just uniqueness.
+;; Racket's `gensym` numbers from a process-global counter, so a minted name
+;; bakes BUILD CONTEXT (everything parsed earlier in the process) into emitted
+;; text: the same module emitted different bytes under daemon / build-all /
+;; standalone. One counter parameterized fresh per parse-program makes names
+;; depend only on module content (the emit-clj match-counter pattern; gated by
+;; bin/test/build-reproducible). The default box keeps out-of-program callers
+;; (repl, tools) working, merely process-scoped. Names are `<base>__<n>`;
+;; lint's gensym-name? recognizes the `__<n>` suffix.
+(define lowering-counter (make-parameter (box 0)))
+(define (fresh-lowered-sym base)
+  (define b (lowering-counter))
+  (define n (unbox b))
+  (set-box! b (add1 n))
+  (string->symbol (format "~a__~a" base n)))
+
 (define (hygienize-template template fixed-params rest-param)
   (define macro-params
     (if rest-param (cons rest-param fixed-params) fixed-params))
@@ -769,7 +785,7 @@
         (collect-template-free-refs template macro-params binders)
         '()))
   (define renames (make-hasheq))
-  (for ([b (in-list binders)]) (hash-set! renames b (gensym b)))
+  (for ([b (in-list binders)]) (hash-set! renames b (fresh-lowered-sym b)))
   (for ([r (in-list free-refs)]) (hash-set! renames r (hygiene-alias-for! r)))
   (cond
     [(zero? (hash-count renames)) template]
@@ -793,6 +809,8 @@
  current-macro-expansion-ctx
  current-module-def-names
  current-hygiene-alias-table
+ lowering-counter
+ fresh-lowered-sym
  current-macro-derived-table
  mark-macro-derived!
  macro-derived-ctx

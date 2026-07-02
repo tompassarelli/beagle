@@ -293,7 +293,7 @@
            (cond
              [(and (list? p) (= (length p) 3) (symbol? (car p)) (eq? (cadr p) ':))
               (values (car p) (caddr p))]
-             [else (values (if (symbol? p) p (gensym)) 'Syntax)])))
+             [else (values (if (symbol? p) p (fresh-lowered-sym 'p)) 'Syntax)])))
        (define qname (qualify-name prefix name))
        (if (eq? macro-kind 'beagle)
            (register-beagle-macro! registry qname pnames icontracts ret-type body)
@@ -678,7 +678,15 @@
 
 ;; --- entry point -----------------------------------------------------------
 
+;; Wrapper: fresh lowering-temp counter per program, so minted names
+;; (cond-thread__N / some-thread__N / bind__N / macro-hygiene renames) depend
+;; only on THIS module's content, never on what else the process parsed
+;; before it (daemon, build-all, check-all). Byte-reproducible builds.
 (define (parse-program stxs* #:source-path [source-path #f])
+  (parameterize ([lowering-counter (box 0)])
+    (parse-program* stxs* #:source-path source-path)))
+
+(define (parse-program* stxs* #:source-path [source-path #f])
   (define raw-datums (map syntax->datum stxs*))
 
   ;; Determine target up-front so reader-conditionals can be resolved before
@@ -1492,16 +1500,18 @@
   (chain (cons init steps)))
 
 ;; (cond-> x t1 s1 t2 s2 …)
-;;   → (let [g x]
-;;        (let [g (if t1 (thread-first g s1) g)]
-;;          (let [g (if t2 (thread-first g s2) g)] g)))
+;;   → (let [g0 x]
+;;        (let [g1 (if t1 (thread-first g0 s1) g0)]
+;;          (let [g2 (if t2 (thread-first g1 s2) g1)] g2)))
 ;; Each step is thread-first like `->`. If the test is falsy, the prior
-;; value is preserved (NOT rethreaded). Uses a gensym to avoid capturing
-;; user identifiers across the chain.
+;; value is preserved (NOT rethreaded). Uses minted temps to avoid capturing
+;; user identifiers across the chain — a FRESH temp per step, never one temp
+;; rebound: emit-js flattens nested lets into one block, where rebinding the
+;; same name emitted a duplicate `const` (a JS SyntaxError).
 ;;
 ;; Type-preservation: each step's expansion must produce a value of the
 ;; same type as the threaded value, because the if-form's else-branch
-;; returns the prior gensym. The type checker enforces this naturally via
+;; returns the prior temp. The type checker enforces this naturally via
 ;; if-form type-merge — no special handling needed in parse.
 (define (expand-cond-thread init clauses position)
   (unless (even? (length clauses))
@@ -1509,25 +1519,26 @@
            "~a: expected pairs of (test step) after init; got ~a trailing form(s)"
            (if (eq? position 'first) 'cond-> 'cond->>)
            (length clauses)))
-  (define g (gensym 'cond-thread))
+  (define g0 (fresh-lowered-sym 'cond-thread))
   (define pairs (let loop ([cs clauses] [acc '()])
                   (cond [(null? cs) (reverse acc)]
                         [else (loop (cddr cs) (cons (cons (car cs) (cadr cs)) acc))])))
   (cond
     [(null? pairs)
      ;; (cond-> x) with no clauses — degenerate; just bind & return.
-     (list 'let (list BRACKET-TAG g init) g)]
+     (list 'let (list BRACKET-TAG g0 init) g0)]
     [else
-     (list 'let (list BRACKET-TAG g init)
-           (let chain-loop ([qs pairs])
+     (list 'let (list BRACKET-TAG g0 init)
+           (let chain-loop ([qs pairs] [g g0])
              (cond
                [(null? qs) g]
                [else
                 (define test (car (car qs)))
                 (define step (cdr (car qs)))
                 (define threaded (thread-step-insert g step position))
-                (list 'let (list BRACKET-TAG g (list 'if test threaded g))
-                      (chain-loop (cdr qs)))])))]))
+                (define g* (fresh-lowered-sym 'cond-thread))
+                (list 'let (list BRACKET-TAG g* (list 'if test threaded g))
+                      (chain-loop (cdr qs) g*))])))]))
 
 ;; (some-> x f g h)
 ;;   → (let [g0 x]
@@ -1547,7 +1558,7 @@
        (cond
          [(null? rest) prev]
          [else
-          (define g (gensym 'some-thread))
+          (define g (fresh-lowered-sym 'some-thread))
           (define threaded (thread-step-insert g (car rest) position))
           (list 'let (list BRACKET-TAG g prev)
                 (list 'if (list 'nil? g)
@@ -1625,7 +1636,7 @@
     ;; `:- Type` annotation applies to the narrowed value (not the raw nullable),
     ;; and a destructure binder is out of scope on the false/else path (Clojure).
     [else
-     (define g (gensym 'bind))
+     (define g (fresh-lowered-sym 'bind))
      (define inner-binding (append (list BRACKET-TAG) binder-part (list g)))
      (define test (success-test g))
      (case head
