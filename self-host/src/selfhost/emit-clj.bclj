@@ -11,7 +11,7 @@
 
 (require clojure.string :as str)
 
-;; --- module state (reset per emit-program) -----------------------------------
+;; --- module state (reset per emit-program!) -----------------------------------
 
 ;; record name -> field-name vector; includes defunion/deferror members
 ;; (mirrors emit-clj.rkt build-record-field-table — drives ^Rec hints and
@@ -29,8 +29,8 @@
 (def emit-target :- Any (atom "clj"))
 
 ;; SCI (babashka) rejects forward references at load, and beagle emits no
-;; (declare ...) — so the emit-expr recursion hub routes through an atom-held
-;; fn: helpers defined BEFORE emit-expr call it via emit-expr*.
+;; (declare ...) — so the emit-expr! recursion hub routes through an atom-held
+;; fn: helpers defined BEFORE emit-expr! call it via emit-expr*.
 (def emit-expr-ref :- Any (atom nil))
 
 (defn emit-expr* [e :- Any] :- String
@@ -285,7 +285,7 @@
                      (emit-variant-defrecord m (vec (get mf m))))
                    (get e "members")))))))
 
-;; --- match (emit-clj.rkt emit-match: counter temps + case-fold) -------------------
+;; --- match (emit-clj.rkt emit-match!: counter temps + case-fold) -------------------
 
 (defn fresh-match-sym! [] :- String
   (let [n (deref match-counter)]
@@ -431,7 +431,7 @@
       :else
         (str ":else " body-str))))
 
-(defn emit-match [e :- Any] :- String
+(defn emit-match! [e :- Any] :- String
   (let [target-str (emit-expr* (get e "target"))
         clauses (get e "clauses")]
     (if (case-foldable-match? clauses)
@@ -459,7 +459,7 @@
            (= (get els "kind") "bool")
            (false? (get els "value")))))
 
-(defn emit-expr [e :- Any] :- String
+(defn emit-expr! [e :- Any] :- String
   (let [node (get e "node")]
     (cond
       (= node "literal")
@@ -684,7 +684,7 @@
             (str "(condp " pred " " test-val "\n  " body "\n  " (emit-expr* dflt) ")")))
 
       (= node "match")
-        (emit-match e)
+        (emit-match! e)
 
       (= node "with")
         (let [update-strs (mapv (fn [u :- Any] :- String
@@ -776,14 +776,14 @@
         :else nil)))
   nil)
 
-(defn emit-program [prog :- Any] :- String
-  (reset! emit-expr-ref emit-expr)
+(defn emit-program! [prog :- Any] :- String
+  (reset! emit-expr-ref emit-expr!)
   (reset! record-fields {})
   (reset! scalar-fns {})
   (reset! match-counter 0)
   (reset! emit-target (get prog "target"))
   (register-tables! (get prog "forms"))
-  (let [body (str/join "\n\n" (mapv emit-expr (get prog "forms")))]
+  (let [body (str/join "\n\n" (mapv emit-expr! (get prog "forms")))]
     (str (emit-ns-form prog body) "\n\n" body "\n")))
 
 ;; --- self-tests ----------------------------------------------------------------
@@ -791,14 +791,14 @@
 (def passes :- Any (atom []))
 (def failures :- Any (atom []))
 
-(defn expect [label :- String result :- Bool] :- Nil
+(defn expect! [label :- String result :- Bool] :- Nil
   (if result
     (do (swap! passes conj true) nil)
     (do (swap! failures conj label) nil))
   nil)
 
 (defn run-tests! [] :- Int
-  (reset! emit-expr-ref emit-expr)
+  (reset! emit-expr-ref emit-expr!)
   (reset! record-fields {})
   (reset! scalar-fns {})
   (reset! match-counter 0)
@@ -806,40 +806,40 @@
   (reset! passes [])
   (reset! failures [])
 
-  (expect "string: plain" (= (write-clj-string "hi") "\"hi\""))
-  (expect "string: newline" (= (write-clj-string "a\nb") "\"a\\nb\""))
-  (expect "string: tab+quote+backslash"
+  (expect! "string: plain" (= (write-clj-string "hi") "\"hi\""))
+  (expect! "string: newline" (= (write-clj-string "a\nb") "\"a\\nb\""))
+  (expect! "string: tab+quote+backslash"
     (= (write-clj-string "a\tb\"c\\d") "\"a\\tb\\\"c\\\\d\""))
-  (expect "string: u0001"
+  (expect! "string: u0001"
     (= (write-clj-string (str "x" (char 1) "y")) "\"x\\u0001y\""))
-  (expect "string: u007F" (= (write-clj-string (str (char 127))) "\"\\u007F\""))
-  (expect "string: bell named" (= (write-clj-string (str (char 7))) "\"\\a\""))
-  (expect "float: whole" (= (emit-float 1.0) "1.0"))
-  (expect "float: frac" (= (emit-float 3.14) "3.14"))
+  (expect! "string: u007F" (= (write-clj-string (str (char 127))) "\"\\u007F\""))
+  (expect! "string: bell named" (= (write-clj-string (str (char 7))) "\"\\a\""))
+  (expect! "float: whole" (= (emit-float 1.0) "1.0"))
+  (expect! "float: frac" (= (emit-float 3.14) "3.14"))
 
-  (expect "require: alias" (= (emit-require {"ns" "fram.kernel" "alias" "k" "refer" nil})
+  (expect! "require: alias" (= (emit-require {"ns" "fram.kernel" "alias" "k" "refer" nil})
                               "[fram.kernel :as k]"))
-  (expect "require: default alias"
+  (expect! "require: default alias"
     (= (emit-require {"ns" "fram.rt" "alias" nil "refer" nil}) "[fram.rt :as rt]"))
-  (expect "require: refer"
+  (expect! "require: refer"
     (= (emit-require {"ns" "x.y" "alias" nil "refer" ["a" "b"]}) "[x.y :refer [a b]]"))
 
-  (expect "defenum keywords"
+  (expect! "defenum keywords"
     (= (emit-defenum {"name" "Color" "values" ["red" "blue"]})
        "(def Color-values #{:red :blue})"))
 
-  (expect "record accessors"
+  (expect! "record accessors"
     (= (emit-record-form {"name" "Pt" "fields" [{"name" "x"} {"name" "y"}]})
        "(defrecord Pt [x y])\n\n(defn pt-x [r] (:x r))\n\n(defn pt-y [r] (:y r))"))
 
-  (expect "if: else-less encodes 2-arity"
-    (= (emit-expr {"node" "if"
+  (expect! "if: else-less encodes 2-arity"
+    (= (emit-expr! {"node" "if"
                    "cond" {"node" "ref" "name" "p"}
                    "then" {"node" "ref" "name" "t"}
                    "else" {"node" "literal" "kind" "bool" "value" false}})
        "(if p t)"))
 
-  (expect "match temps deterministic"
+  (expect! "match temps deterministic"
     (do (reset! match-counter 0)
         (= (fresh-match-sym!) "match__0")))
 

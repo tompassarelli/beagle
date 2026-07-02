@@ -17,6 +17,14 @@ isn't to reject bad code — it's to tell repair tools *what* kind of mistake
 happened, *where* in the source, after *which* canonicalization, against
 *which* target.
 
+## The compiler compiles itself
+
+The `clj`-target compiler is written in Beagle (`self-host/`). The checked-in
+seed is that compiler's own emitted output, and CI holds the pair to a
+byte-level bootstrap fixpoint (`bin/beagle-remint`) plus byte-agreement with
+the original Racket compiler, which now serves as the conformance oracle
+(`bin/beagle-certify`). Details: [`self-host/README.md`](self-host/README.md).
+
 ## Real codebases author against Beagle
 
 - **[firn](https://github.com/tompassarelli/firn)** — a complete NixOS

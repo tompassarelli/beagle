@@ -45,7 +45,7 @@ for src in "${MODULES[@]}"; do
   bin/beagle-ast "$src" > "$astj" 2>/dev/null || { bad "$name racket AST (oracle mint)"; continue; }
 
   echo "=== 2. emit parity (racket AST -> self emit) : $name ==="
-  bb -cp "$OUT" -e "(require '[selfhost.emit-clj :as e] '[cheshire.core :as json]) (print (e/emit-program (json/parse-string (slurp \"$astj\") false)))" > "$LAB/$name-stage2.clj" 2>"$LAB/$name-stage2.err"
+  bb -cp "$OUT" -e "(require '[selfhost.emit-clj :as e] '[cheshire.core :as json]) (print (e/emit-program! (json/parse-string (slurp \"$astj\") false)))" > "$LAB/$name-stage2.clj" 2>"$LAB/$name-stage2.err"
   if diff -q "$oracle" "$LAB/$name-stage2.clj" >/dev/null 2>&1; then
     ok "$name emit byte-parity (stage-isolated)"
   else
@@ -53,7 +53,7 @@ for src in "${MODULES[@]}"; do
   fi
 
   echo "=== 3. AST parity (self reader+parse vs beagle-ast) : $name ==="
-  bb -cp "$OUT" -e "(require '[selfhost.reader :as r] '[selfhost.parse :as p] '[cheshire.core :as json]) (print (json/generate-string (p/parse-program (r/read-program (slurp \"$src\")))))" > "$LAB/$name-self-ast.json" 2>"$LAB/$name-stage3.err"
+  bb -cp "$OUT" -e "(require '[selfhost.reader :as r] '[selfhost.parse :as p] '[cheshire.core :as json]) (print (json/generate-string (p/parse-program! (r/read-program (slurp \"$src\")))))" > "$LAB/$name-self-ast.json" 2>"$LAB/$name-stage3.err"
   if python3 - "$LAB/$name-self-ast.json" "$astj" <<'EOF' >/dev/null 2>&1
 import json, sys
 a = json.load(open(sys.argv[1])); b = json.load(open(sys.argv[2]))

@@ -297,7 +297,7 @@
                              {} binders)]
         (rename-in-template template renames)))))
 
-;; --- expand-macro (dispatch) ------------------------------------------------
+;; --- expand-macro! (dispatch) ------------------------------------------------
 
 (defn expand-template-macro! [m :- Any name :- String args :- (Vec Any)] :- Any
   (let [fixed (get m "fixed-params")
@@ -313,7 +313,7 @@
       (let [bindings (make-bindings fixed args nil [])]
         (substitute template bindings nil)))))
 
-(defn expand-macro [reg :- Any name :- String args :- (Vec Any) ctx :- Any] :- Any
+(defn expand-macro! [reg :- Any name :- String args :- (Vec Any) ctx :- Any] :- Any
   (let [m (lookup-macro reg name)]
     (if (nil? m)
       (do (selfhost.rt/eprint (str "beagle: no macro named " name "\n"))
@@ -327,11 +327,11 @@
        (string? (datum-car datum))
        (not (nil? (lookup-macro reg (datum-car datum))))))
 
-;; --- expand-fully (recursive) ------------------------------------------------
-;; expand-fully-no-marker defined first: expand-fully calls it (unsafe branch),
+;; --- expand-fully! (recursive) ------------------------------------------------
+;; expand-fully-no-marker! defined first: expand-fully! calls it (unsafe branch),
 ;; not vice versa — avoids a forward reference under bb/sci.
 
-(defn expand-fully-no-marker [reg :- Any datum :- Any depth :- Int ctx :- Any] :- Any
+(defn expand-fully-no-marker! [reg :- Any datum :- Any depth :- Int ctx :- Any] :- Any
   (cond
     (>= depth MAX-EXPANSION-DEPTH)
       (let [chain (if (nil? ctx) "" (str "\n" (format-expansion-chain ctx)))]
@@ -341,13 +341,13 @@
     (macro-application? reg datum)
       (let [name (datum-car datum)
             next-ctx (if (nil? ctx) (make-root-ctx name) (push-ctx ctx name))
-            expanded (expand-macro reg name (datum-cdr datum) next-ctx)]
-        (expand-fully-no-marker reg expanded (+ depth 1) next-ctx))
+            expanded (expand-macro! reg name (datum-cdr datum) next-ctx)]
+        (expand-fully-no-marker! reg expanded (+ depth 1) next-ctx))
     (datum-pair? datum)
-      (mapv (fn [item :- Any] :- Any (expand-fully-no-marker reg item depth ctx)) datum)
+      (mapv (fn [item :- Any] :- Any (expand-fully-no-marker! reg item depth ctx)) datum)
     :else datum))
 
-(defn expand-fully [reg :- Any datum :- Any depth :- Int ctx :- Any] :- Any
+(defn expand-fully! [reg :- Any datum :- Any depth :- Int ctx :- Any] :- Any
   (cond
     (>= depth MAX-EXPANSION-DEPTH)
       (let [chain (if (nil? ctx) "" (str "\n" (format-expansion-chain ctx)))]
@@ -358,12 +358,12 @@
       (let [name (datum-car datum)
             next-ctx (if (nil? ctx) (make-root-ctx name) (push-ctx ctx name))
             m (lookup-macro reg name)
-            expanded (expand-macro reg name (datum-cdr datum) next-ctx)]
+            expanded (expand-macro! reg name (datum-cdr datum) next-ctx)]
         (if (= (get m "kind") "unsafe")
-          ["unsafe-expr" (expand-fully-no-marker reg expanded (+ depth 1) next-ctx)]
-          (expand-fully reg expanded (+ depth 1) next-ctx)))
+          ["unsafe-expr" (expand-fully-no-marker! reg expanded (+ depth 1) next-ctx)]
+          (expand-fully! reg expanded (+ depth 1) next-ctx)))
     (datum-pair? datum)
-      (mapv (fn [item :- Any] :- Any (expand-fully reg item depth ctx)) datum)
+      (mapv (fn [item :- Any] :- Any (expand-fully! reg item depth ctx)) datum)
     :else datum))
 
 ;; === test runner =============================================================
@@ -371,7 +371,7 @@
 (def passes :- Any (atom []))
 (def failures :- Any (atom []))
 
-(defn- expect [label :- String result :- Bool] :- Nil
+(defn- expect! [label :- String result :- Bool] :- Nil
   (if result
     (do (swap! passes conj true) nil)
     (do (swap! failures conj label) nil)))
@@ -383,124 +383,124 @@
   ;; --- test: simple substitution ---
   (let [reg (make-macro-registry)]
     (register-macro! reg "inc1" "safe" ["x"] ["+" "x" 1])
-    (let [result (expand-macro reg "inc1" [5] nil)]
-      (expect "simple substitution: (inc1 5) -> (+ 5 1)"
+    (let [result (expand-macro! reg "inc1" [5] nil)]
+      (expect! "simple substitution: (inc1 5) -> (+ 5 1)"
         (= result ["+" 5 1]))))
 
   ;; --- test: multi-param ---
   (let [reg (make-macro-registry)]
     (register-macro! reg "add" "safe" ["a" "b"] ["+" "a" "b"])
-    (let [result (expand-macro reg "add" [3 4] nil)]
-      (expect "multi-param: (add 3 4) -> (+ 3 4)"
+    (let [result (expand-macro! reg "add" [3 4] nil)]
+      (expect! "multi-param: (add 3 4) -> (+ 3 4)"
         (= result ["+" 3 4]))))
 
   ;; --- test: nested substitution ---
   (let [reg (make-macro-registry)]
     (register-macro! reg "square" "safe" ["x"] ["*" "x" "x"])
-    (let [result (expand-macro reg "square" [7] nil)]
-      (expect "nested: (square 7) -> (* 7 7)"
+    (let [result (expand-macro! reg "square" [7] nil)]
+      (expect! "nested: (square 7) -> (* 7 7)"
         (= result ["*" 7 7]))))
 
   ;; --- test: variadic with splice ---
   (let [reg (make-macro-registry)]
     (register-macro! reg "wrap-do" "safe" ["head" "&" "body"]
       ["do" "head" [SPLICE-MARKER "body"]])
-    (let [result (expand-macro reg "wrap-do" ["a" "b" "c"] nil)]
-      (expect "variadic splice: (wrap-do a b c) -> (do a b c)"
+    (let [result (expand-macro! reg "wrap-do" ["a" "b" "c"] nil)]
+      (expect! "variadic splice: (wrap-do a b c) -> (do a b c)"
         (= result ["do" "a" "b" "c"]))))
 
   ;; --- test: rest-param without splice wraps in bracket ---
   (let [reg (make-macro-registry)]
     (register-macro! reg "wrap-vec" "safe" ["head" "&" "rest"]
       ["list" "head" "rest"])
-    (let [result (expand-macro reg "wrap-vec" ["a" "b" "c"] nil)]
-      (expect "rest as vec: (wrap-vec a b c) -> (list a [#%brackets b c])"
+    (let [result (expand-macro! reg "wrap-vec" ["a" "b" "c"] nil)]
+      (expect! "rest as vec: (wrap-vec a b c) -> (list a [#%brackets b c])"
         (= result ["list" "a" [BRACKET-TAG "b" "c"]]))))
 
   ;; --- test: unsafe macro (no hygiene) ---
   (let [reg (make-macro-registry)]
     (register-macro! reg "raw" "unsafe" ["form"]
       ["do" ["println" "trace"] "form"])
-    (let [result (expand-macro reg "raw" [["+ " 1 2]] nil)]
-      (expect "unsafe substitution"
+    (let [result (expand-macro! reg "raw" [["+ " 1 2]] nil)]
+      (expect! "unsafe substitution"
         (= result ["do" ["println" "trace"] ["+ " 1 2]]))))
 
   ;; --- test: hygiene renames template-introduced let binders ---
   (let [reg (make-macro-registry)]
     (register-macro! reg "with-tmp" "safe" ["body"]
       ["let" ["tmp" 0] "body"])
-    (let [result (expand-macro reg "with-tmp" [["println" "tmp"]] nil)
+    (let [result (expand-macro! reg "with-tmp" [["println" "tmp"]] nil)
           binds (nth result 1)
           bind-name (nth binds 0)]
-      (expect "hygiene: let result is let form"
+      (expect! "hygiene: let result is let form"
         (= (nth result 0) "let"))
-      (expect "hygiene: let binder renamed from tmp"
+      (expect! "hygiene: let binder renamed from tmp"
         (not= bind-name "tmp"))
-      (expect "hygiene: user ref to tmp preserved"
+      (expect! "hygiene: user ref to tmp preserved"
         (= (nth result 2) ["println" "tmp"]))))
 
   ;; --- test: hygiene renames fn params ---
   (let [reg (make-macro-registry)]
     (register-macro! reg "with-fn" "safe" ["body"]
       ["fn" ["x"] "body"])
-    (let [result (expand-macro reg "with-fn" [["println" "x"]] nil)
+    (let [result (expand-macro! reg "with-fn" [["println" "x"]] nil)
           params (nth result 1)
           param-name (nth params 0)]
-      (expect "hygiene: fn result is fn form"
+      (expect! "hygiene: fn result is fn form"
         (= (nth result 0) "fn"))
-      (expect "hygiene: fn param renamed from x"
+      (expect! "hygiene: fn param renamed from x"
         (not= param-name "x"))
-      (expect "hygiene: user ref to x preserved"
+      (expect! "hygiene: user ref to x preserved"
         (= (nth result 2) ["println" "x"]))))
 
-  ;; --- test: expand-fully (recursive expansion) ---
+  ;; --- test: expand-fully! (recursive expansion) ---
   (let [reg (make-macro-registry)]
     (register-macro! reg "inc1" "unsafe" ["x"] ["+" "x" 1])
     (register-macro! reg "inc2" "unsafe" ["x"] ["inc1" ["inc1" "x"]])
-    (let [result (expand-fully reg ["inc2" 5] 0 nil)]
-      (expect "recursive expansion: (inc2 5) -> (unsafe-expr (+ (+ 5 1) 1))"
+    (let [result (expand-fully! reg ["inc2" 5] 0 nil)]
+      (expect! "recursive expansion: (inc2 5) -> (unsafe-expr (+ (+ 5 1) 1))"
         (= result ["unsafe-expr" ["+" ["+" 5 1] 1]]))))
 
-  ;; --- test: expand-fully leaves non-macros alone ---
+  ;; --- test: expand-fully! leaves non-macros alone ---
   (let [reg (make-macro-registry)]
     (register-macro! reg "inc1" "unsafe" ["x"] ["+" "x" 1])
-    (let [result (expand-fully reg ["println" ["inc1" 5]] 0 nil)]
-      (expect "expand-fully: non-macro forms preserved"
+    (let [result (expand-fully! reg ["println" ["inc1" 5]] 0 nil)]
+      (expect! "expand-fully!: non-macro forms preserved"
         (= result ["println" ["unsafe-expr" ["+" 5 1]]]))))
 
   ;; --- test: contract checking ---
-  (expect "contract: Symbol accepts string"
+  (expect! "contract: Symbol accepts string"
     (check-datum-contract "x" "Symbol" "test" "arg"))
-  (expect "contract: Symbol rejects number"
+  (expect! "contract: Symbol rejects number"
     (not (check-datum-contract 42 "Symbol" "test" "arg")))
-  (expect "contract: Form accepts list with symbol head"
+  (expect! "contract: Form accepts list with symbol head"
     (check-datum-contract ["defn" "foo"] "Form" "test" "arg"))
-  (expect "contract: Form rejects non-list"
+  (expect! "contract: Form rejects non-list"
     (not (check-datum-contract 42 "Form" "test" "arg")))
-  (expect "contract: Syntax accepts anything"
+  (expect! "contract: Syntax accepts anything"
     (check-datum-contract 42 "Syntax" "test" "arg"))
 
   ;; --- test: strip-reader-tags ---
-  (expect "strip: bracket tag removed"
+  (expect! "strip: bracket tag removed"
     (= (strip-reader-tags [BRACKET-TAG "a" "b"]) ["a" "b"]))
-  (expect "strip: map tag -> hash"
+  (expect! "strip: map tag -> hash"
     (= (strip-reader-tags [MAP-TAG "k" "v"]) ["hash" "k" "v"]))
-  (expect "strip: set tag -> set"
+  (expect! "strip: set tag -> set"
     (= (strip-reader-tags [SET-TAG "a"]) ["set" "a"]))
-  (expect "strip: nested"
+  (expect! "strip: nested"
     (= (strip-reader-tags ["fn" [BRACKET-TAG "x"] [MAP-TAG "k" "x"]])
        ["fn" ["x"] ["hash" "k" "x"]]))
-  (expect "strip: quote preserved"
+  (expect! "strip: quote preserved"
     (= (strip-reader-tags ["quote" [BRACKET-TAG "a"]]) ["quote" [BRACKET-TAG "a"]]))
 
   ;; --- test: macro-application? ---
   (let [reg (make-macro-registry)]
     (register-macro! reg "inc1" "safe" ["x"] ["+" "x" 1])
-    (expect "macro-app?: true for registered"
+    (expect! "macro-app?: true for registered"
       (macro-application? reg ["inc1" 5]))
-    (expect "macro-app?: false for unknown"
+    (expect! "macro-app?: false for unknown"
       (not (macro-application? reg ["unknown" 5])))
-    (expect "macro-app?: false for non-pair"
+    (expect! "macro-app?: false for non-pair"
       (not (macro-application? reg "atom"))))
 
   ;; --- summary ---

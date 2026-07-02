@@ -57,7 +57,9 @@ jobs:
       # (a missing #f exec path -> system* contract violation). It is also used by
       # the graph-native gates further down. (Was installed too late, after the suite.)
       - name: Install babashka (CLJ oracle + graph-native repair tooling)
-        run: curl -sL https://raw.githubusercontent.com/babashka/babashka/master/install | sudo bash
+        uses: turtlequeue/setup-babashka@v1.8.0
+        with:
+          babashka-version: '1.12.218'
 
       - name: Run tiered test suite
         env:

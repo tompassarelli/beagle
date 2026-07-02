@@ -10,11 +10,24 @@ docs go stale within a day. The compiler is the source of truth: query it
 
 ## Architecture — read this before touching the front end
 
-There is **exactly one compiler**, an ordinary ahead-of-time `parse → check →
-emit`. Entry points: `beagle-lib/main.rkt` (`#lang beagle`) and
-`beagle-lib/private/check-all.rkt` (`bin/beagle check/build`). Type checker is
-`check.rkt`. Verify any doubt against the require closure of `check-all.rkt` —
-nothing else runs.
+There are **exactly two compilers**, both ordinary ahead-of-time `parse →
+check → emit`, held byte-identical by gates:
+
+1. **Racket (the oracle)** — `beagle-lib/*.rkt`, all five targets. Entry
+   points: `beagle-lib/main.rkt` (`#lang beagle`) and
+   `beagle-lib/private/check-all.rkt` (`bin/beagle check/build`). Type checker
+   is `check.rkt`. Verify any doubt against the require closure of
+   `check-all.rkt` — nothing else runs there.
+2. **Self-hosted (`clj` target)** — `self-host/src/selfhost/*.bclj`, written
+   in beagle, running as its own emitted output (`self-host/seed/`) under
+   babashka. `bin/beagle-remint` enforces the bootstrap byte-fixpoint in CI;
+   `self-host/verify-selfhost.sh` holds it byte-identical to the Racket
+   compiler. Read `self-host/README.md` before touching it.
+
+The Racket compiler is the conformance oracle (`bin/beagle-certify`, shrink-only
+divergence ledgers); the self-hosted compiler is the language's own. A behavior
+change on one side is incomplete until the gates prove the other side agrees —
+or a ledger entry records why it deliberately doesn't.
 
 Form dispatch is the **combiner registry** in `parse.rkt`
 (`register-combiner!`). Built-in special forms register there; user macros are

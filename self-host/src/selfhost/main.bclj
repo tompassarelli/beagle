@@ -21,11 +21,11 @@
 (declare-extern selfhost.rt/exit [Int -> Nil])
 (declare-extern selfhost.rt/eprint [String -> Nil])
 
-(defn- parse-file [path :- String] :- Any
-  (p/parse-program (rd/read-program (selfhost.rt/slurp-file path))))
+(defn- parse-file! [path :- String] :- Any
+  (p/parse-program! (rd/read-program (selfhost.rt/slurp-file path))))
 
 (defn- check-or-die! [prog :- Any] :- Any
-  (let [errors :- Any (c/check-program prog)]
+  (let [errors :- Any (c/check-program! prog)]
     (if (> (count errors) 0)
       (do
         (doseq [err errors]
@@ -35,17 +35,17 @@
       prog)))
 
 (defn- cmd-ast! [path :- String] :- Nil
-  (println (selfhost.rt/to-json (parse-file path))))
+  (println (selfhost.rt/to-json (parse-file! path))))
 
 (defn- cmd-check! [path :- String] :- Nil
-  (check-or-die! (parse-file path))
+  (check-or-die! (parse-file! path))
   (selfhost.rt/eprint "ok\n"))
 
 (defn- cmd-emit! [path :- String] :- Nil
-  (print (e/emit-program (check-or-die! (parse-file path)))))
+  (print (e/emit-program! (check-or-die! (parse-file! path)))))
 
 (defn- cmd-emit-from-ast! [] :- Nil
-  (print (e/emit-program (selfhost.rt/parse-json (selfhost.rt/read-stdin)))))
+  (print (e/emit-program! (selfhost.rt/parse-json (selfhost.rt/read-stdin)))))
 
 (defn -main [& args :- (Vec String)] :- Nil
   (let [cmd (if (> (count args) 0) (nth args 0) "")

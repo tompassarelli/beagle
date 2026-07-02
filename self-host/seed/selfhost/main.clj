@@ -6,11 +6,11 @@
             [selfhost.check :as c]
             [selfhost.emit-clj :as e]))
 
-(defn- parse-file [^String path]
-  (p/parse-program (rd/read-program (selfhost.rt/slurp-file path))))
+(defn- parse-file! [^String path]
+  (p/parse-program! (rd/read-program (selfhost.rt/slurp-file path))))
 
 (defn- check-or-die! [prog]
-  (let [errors (c/check-program prog)]
+  (let [errors (c/check-program! prog)]
   (if (> (count errors) 0) (do
   (doseq [err errors]
   (selfhost.rt/eprint (str "beagle [check]: " err "\n")))
@@ -18,17 +18,17 @@
   prog) prog)))
 
 (defn- cmd-ast! [^String path]
-  (println (selfhost.rt/to-json (parse-file path))))
+  (println (selfhost.rt/to-json (parse-file! path))))
 
 (defn- cmd-check! [^String path]
-  (check-or-die! (parse-file path))
+  (check-or-die! (parse-file! path))
   (selfhost.rt/eprint "ok\n"))
 
 (defn- cmd-emit! [^String path]
-  (print (e/emit-program (check-or-die! (parse-file path)))))
+  (print (e/emit-program! (check-or-die! (parse-file! path)))))
 
 (defn- cmd-emit-from-ast! []
-  (print (e/emit-program (selfhost.rt/parse-json (selfhost.rt/read-stdin)))))
+  (print (e/emit-program! (selfhost.rt/parse-json (selfhost.rt/read-stdin)))))
 
 (defn -main [& args]
   (let [cmd (if (> (count args) 0) (nth args 0) "")
