@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # beagle-doctor: check host environment, target readiness, AND prove the
-# repair-compiler loop is FUNCTIONALLY working (not merely alive).
+# repair loop is FUNCTIONALLY working (not merely alive). The compiler is the
+# loop's oracle; vocabulary in docs/authoring-loops.md.
 #
 # Two halves:
 #   environment  — host tools, daemon liveness, cache, target emitters.
