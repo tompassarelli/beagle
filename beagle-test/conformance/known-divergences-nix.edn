@@ -1,0 +1,11 @@
+{:doc
+ "RATCHET — known divergences for the nix target. Shrink-only; see
+  known-divergences-js.edn for the schema and bin/beagle-certify for the gate.
+  Host-model gaps (nix laziness etc.) belong here as :host-model when the
+  runtime-value dimension lands. No commas (dual EDN/Racket-readable)."
+ :entries
+ [{:id "nix-interp-ms"
+   :bucket :invalid-output
+   :category :host-model
+   :thread "@019f221f-8f10"
+   :note "Showcase fixture: intentionally-undefined ref (vendor.id) — valid in its intended ambient scope; nix-instantiate --parse scope-checks and rejects it in isolation. Same class as the nix-property.rkt EVAL-SKIP list (which documents this exact fixture). The gate keeps no silent skip list — this ledger is the skip list. Thread holds the open question: should check reject free dotted names on the nix target?"}]}

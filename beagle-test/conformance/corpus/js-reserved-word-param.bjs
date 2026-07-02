@@ -1,0 +1,10 @@
+#lang beagle/js
+;; RATCHET FIXTURE — silent miscompile (thread @019f21fe-b4df).
+;; emit-js does not guard JS strict-mode reserved words: a param named
+;; `private` emits `function use_private(private)`, a SyntaxError in any
+;; ES module (modules are always strict mode).
+;; Classified :bug in known-divergences-js.edn — delete that entry (and
+;; regen the golden) when the emitter mangles reserved identifiers.
+(ns conformance.js-reserved-word-param)
+
+(js/export (defn use-private [private :- Int] :- Int private))

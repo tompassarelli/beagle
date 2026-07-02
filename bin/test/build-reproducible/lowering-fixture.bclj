@@ -1,0 +1,27 @@
+#lang beagle/clj
+(ns demo.lowering-repro)
+;; Exercises every parse-level lowering that mints temps: typed if-let (bind__N),
+;; cond-> / some-> (cond-thread__N / some-thread__N), and a defmacro binder
+;; (hygiene rename). These used Racket's process-global gensym, so the SAME
+;; module emitted different bytes depending on what else the process had parsed
+;; before it (daemon / build-all / standalone). Now: per-program counter.
+
+(defmacro twice [e]
+  `(let [tmp ~e]
+     (+ tmp tmp)))
+
+(defn use-macro [x :- Int]
+  (twice (+ x 1)))
+
+(defn threaded [x :- Int]
+  (cond-> x
+    (pos? x) (+ 1)
+    (neg? x) (- 1)))
+
+(defn maybe-chain [m]
+  (some-> m :a :b))
+
+(defn bound [m]
+  (if-let [v :- Int (get m :k)]
+    (+ v 1)
+    0))

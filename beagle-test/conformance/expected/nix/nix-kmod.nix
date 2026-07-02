@@ -1,0 +1,20 @@
+{ config, lib, ... }:
+
+{
+  options.hardware.framework.enableKmod = (lib.mkEnableOption "the Framework kernel module" // {
+    default = lib.versionAtLeast config.boot.kernelPackages.kernel.version "6.10";
+    defaultText = "enabled by default if kernel >= 6.10";
+  });
+  config = lib.mkIf config.hardware.framework.enableKmod {
+    assertions = [
+      {
+        assertion = lib.versionAtLeast config.boot.kernelPackages.kernel.version "6.10";
+        message = "Requires Linux 6.10 or above";
+      }
+    ];
+    boot = {
+      extraModulePackages = with config.boot.kernelPackages; [ framework-laptop-kmod ];
+      kernelModules = [ "cros_ec" "cros_ec_lpcs" ];
+    };
+  };
+}
