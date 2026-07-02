@@ -3,13 +3,32 @@
 (define-mode strict)
 
 ;; Self-hosted parser for beagle — port of driftlab self-host/parse.bjs,
-;; upgraded to today's surface (beagle-lib/private/parse.rkt @ a85d842).
+;; upgraded to today's surface (beagle-lib/private/parse.rkt).
 ;; Input: vector of top-level datums (selfhost.reader encoding).
 ;; Output: program AST matching beagle-lib/private/ast-json.rkt exactly.
-;; Skips (tranche-1 gaps, recorded on thread): module resolution (require'd
-;; types don't populate externs), user-macro expansion (defmacro registered
-;; as meta-form only), Nix/JST forms, source locations, bare-vector
-;; multi-arity defn, (s ...) string interpolation.
+;;
+;; REMAINING GAP — MODULE RESOLUTION (the k/* permissive-Any gap; recorded
+;; on thread). parse.rkt's require scan (resolve-module-path +
+;; import-module-types!, ~300 lines) READS each required module's source
+;; and imports: typed externs for def/defn/defonce (alias-qualified +
+;; :refer-bare), defrecord field/ctor/accessor types, defunion members
+;; (incl. parametric), defenum values, defscalar backing types + preds,
+;; deferror members, imported ^:dynamic vars, and required modules' MACROS
+;; (qualified) — incl. the one fresh-lowered-sym site not mirrored here
+;; (parse.rkt (fresh-lowered-sym 'p) for non-symbol imported-proc-macro
+;; params). This chain does NONE of that: qualified refs (k/x) and :refer
+;; imports type as Any, so cross-module type errors pass the selfhost
+;; check (the Racket oracle still catches them). Emitted BYTES are
+;; unaffected for programs that compile under the oracle — externs shape
+;; typing, not emission — which is why verify-selfhost's AST-parity rung
+;; compares forms/requires/namespace/mode/target and excludes externs.
+;; Porting it needs a module loader (path resolution + file IO + recursive
+;; reader/parse) in what is today a pure datum->AST stage (IO lives in
+;; rt.clj/main.bclj): a tranche of its own, not a tail item.
+;;
+;; Also unported: source locations (this chain carries none; seed emission
+;; is srcloc-free by construction) and non-clj target surfaces (nix reader
+;; macros / nix-* forms — the selfhost chain emits the clj target only).
 
 (require clojure.string :as str)
 (require selfhost.rt)

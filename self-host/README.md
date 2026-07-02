@@ -57,3 +57,21 @@ bb -cp self-host/seed -m selfhost.main ast   FILE.bclj   # typed-AST JSON
 Seed emission is normalized: source-location metadata is off
 (`BEAGLE_EMIT_SRCLOC=0` on the Racket side), so seed files never embed
 absolute checkout paths and remain byte-stable across machines.
+
+## Known gaps (vs the Racket compiler)
+
+- **Module resolution / externs** — the Racket parser reads each required
+  module's source and imports its typed surface (externs, record/union/
+  scalar/enum tables, `^:dynamic` vars, qualified macros). The selfhost
+  chain does not: qualified refs (`k/x`) and `:refer` imports type as
+  `Any`, so cross-module type errors pass the selfhost check (the Racket
+  oracle still catches them in CI). Emitted bytes are unaffected for
+  programs that compile under the oracle — externs shape typing, not
+  emission — which is why the AST-parity rung excludes externs. Closing
+  this needs a module loader (path resolution + IO + recursive parse) in
+  the currently pure parse stage; see the header of
+  `src/selfhost/parse.bclj` for the precise inventory.
+- **Source locations** — the chain carries none; seed emission is
+  srcloc-free by construction, so this cannot affect seed bytes.
+- **Non-clj targets** — the chain emits the `clj` target only (no nix
+  reader macros / `nix-*` forms, no js/cljs/odin emitters).
