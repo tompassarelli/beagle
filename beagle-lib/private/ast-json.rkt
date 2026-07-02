@@ -86,7 +86,11 @@
      (hasheq 'node "def"
              'name (symbol->string (def-form-name e))
              'ann (type->json (def-form-type e))
-             'value (expr->json (def-form-value e)))]
+             'value (expr->json (def-form-value e))
+             ;; emit-relevant flags: emit-clj renders "doc" and ^:dynamic;
+             ;; check consults dynamic? for the `binding` target registry
+             'doc (or (def-form-doc e) #f)
+             'dynamic (and (def-form-dynamic? e) #t))]
 
     [(defn-form? e)
      (hasheq 'node "defn"
@@ -371,6 +375,8 @@
                                         'expr (expr->json (for-binding-expr c)))]
                                [(for-when? c)
                                 (hasheq 'type "when" 'test (expr->json (for-when-test c)))]
+                               [(for-let? c)
+                                (hasheq 'type "let" 'bindings (map binding->json (for-let-bindings c)))]
                                [else (hasheq 'type "unknown")]))
                            (doseq-form-clauses e))
              'body (map expr->json (doseq-form-body e)))]
@@ -398,18 +404,21 @@
              'fallback (expr->json (rescue-form-fallback e))
              'err (and (rescue-form-err-name e) (symbol->string (rescue-form-err-name e))))]
 
+    ;; cases live in a hasheq (unordered) — serialize sorted by target name
+    ;; so the JSON is deterministic and the selfhost AST can match it.
     [(target-case-form? e)
+     (define cases (target-case-form-cases e))
      (hasheq 'node "target-case"
-             'cases (map (lambda (c)
-                           (hasheq 'target (symbol->string (car c))
-                                   'body (expr->json (cdr c))))
-                         (target-case-form-cases e)))]
+             'cases (for/list ([k (in-list (sort (hash-keys cases) symbol<?))])
+                      (hasheq 'target (symbol->string k)
+                              'body (expr->json (hash-ref cases k)))))]
 
     [(defonce-form? e)
      (hasheq 'node "defonce"
              'name (symbol->string (defonce-form-name e))
              'ann (type->json (defonce-form-type e))
-             'value (expr->json (defonce-form-value e)))]
+             'value (expr->json (defonce-form-value e))
+             'doc (or (defonce-form-doc e) #f))]
 
     [(block-string? e)
      (hasheq 'node "block-string"

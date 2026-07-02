@@ -441,9 +441,13 @@
   (= (get e "node") "binding") (do
   (doseq [b (get e "bindings")]
   (let [vt (infer-expr! (get b "value") env)
-   declared (get env (get b "name"))]
+   nm (get b "name")
+   dyn-vars (get env "#%dynamic-vars")
+   declared (get env nm)]
+  (if (nil? (get dyn-vars nm)) (do
+  (emit-diag! (str "beagle: binding: " nm " is not a dynamic var — only `(def ^:dynamic " nm " ...)` vars can be rebound with `binding`"))))
   (if (and (not (nil? declared)) (not (type-compatible? vt declared))) (do
-  (emit-diag! (str "beagle: binding " (get b "name") ": expected " (type->string declared) ", got " (type->string vt)))))))
+  (emit-diag! (str "beagle: binding " nm ": expected " (type->string declared) ", got " (type->string vt)))))))
   (last-expr-type! (get e "body") env))
   (= (get e "node") "letfn") (let [body-env (reduce (fn [be f] (let [rp (opt-field (get f "rest"))
    p-types (mapv param-type-or-any (get f "params"))
@@ -554,6 +558,7 @@
   (= ct "when") (do
   (infer-expr! (get c "test") be)
   be)
+  (= ct "let") (reduce (fn [be2 b] (assoc be2 (get b "name") (infer-expr! (get b "value") be2))) be (get c "bindings"))
   :else be))) env (get e "clauses"))]
   (last-expr-type! (get e "body") body-env)
   ANY)
@@ -708,10 +713,16 @@
   (or (= (get e "node") "nix-inherit") (= (get e "node") "nix-inherit-from") (= (get e "node") "nix-with") (= (get e "node") "nix-rec-attrs") (= (get e "node") "nix-assert") (= (get e "node") "nix-get-or") (= (get e "node") "nix-has-attr") (= (get e "node") "nix-search-path") (= (get e "node") "nix-interpolated-string") (= (get e "node") "nix-multiline-string") (= (get e "node") "nix-indented-string") (= (get e "node") "nix-path") (= (get e "node") "nix-fn-set") (= (get e "node") "nix-pipe") (= (get e "node") "nix-impl")) ANY
   :else ANY))
 
+(def CLJ-BUILTIN-DYNAMIC-VARS ["*out*" "*err*" "*in*" "*ns*" "*print-length*" "*print-level*" "*print-readably*" "*print-dup*" "*print-meta*" "*flush-on-newline*" "*warn-on-reflection*" "*unchecked-math*" "*math-context*" "*read-eval*" "*command-line-args*" "*file*" "*assert*" "*data-readers*" "*default-data-reader-fn*" "*compile-path*" "*source-path*" "*clojure-version*" "*agent*"])
+
 (defn build-initial-env! [prog]
   (let [externs (get prog "externs")
    forms (get prog "forms")
-   env-with-externs (if (not (nil? externs)) (reduce (fn [env ext] (assoc env (get ext "name") (get ext "type"))) STDLIB externs) STDLIB)]
+   env-with-externs (if (not (nil? externs)) (reduce (fn [env ext] (assoc env (get ext "name") (get ext "type"))) STDLIB externs) STDLIB)
+   dyn-from-defs (reduce (fn [acc f] (if (and (= (get f "node") "def") (= (get f "dynamic") true)) (assoc acc (get f "name") true) acc)) {} forms)
+   dyn-vars (if (= (get prog "target") "clj") (reduce (fn [acc nm] (assoc acc nm true)) dyn-from-defs CLJ-BUILTIN-DYNAMIC-VARS) dyn-from-defs)
+   env-with-externs (assoc env-with-externs "#%dynamic-vars" dyn-vars)
+   env-with-externs (if (= (get prog "target") "clj") (reduce (fn [env nm] (if (nil? (get env nm)) (assoc env nm ANY) env)) env-with-externs CLJ-BUILTIN-DYNAMIC-VARS) env-with-externs)]
   (reduce (fn [env raw-form] (let [form (if (= (get raw-form "node") "with-meta") (get raw-form "expr") raw-form)
    node (get form "node")]
   (cond
@@ -875,6 +886,17 @@
   (expect! "call: wrong arity" (let [prog {"mode" "strict" "namespace" "test" "target" "js" "forms" [(make-def-node "r" nil (make-call "add" [(make-lit "number" 1)]))] "externs" [{"name" "add" "type" (make-fn [(make-prim "Int") (make-prim "Int")] nil (make-prim "Int"))}] "requires" []}
    result (type-check! prog)]
   (> (get result "count") 0)))
+  (expect! "binding: ^:dynamic def target accepted" (let [dyn-def (assoc (make-def-node "*lvl*" (make-prim "Int") (make-lit "number" 0)) "dynamic" true)
+   prog {"mode" "strict" "namespace" "test" "target" "clj" "forms" [dyn-def (make-defn-node "f" [] (make-prim "Int") [{"node" "binding" "bindings" [(make-let-binding "*lvl*" nil (make-lit "number" 5))] "body" [(make-lit "number" 1)]}])] "externs" [] "requires" []}
+   result (type-check! prog)]
+  (= (get result "count") 0)))
+  (expect! "binding: non-dynamic def target rejected" (let [plain-def (make-def-node "*lvl*" (make-prim "Int") (make-lit "number" 0))
+   prog {"mode" "strict" "namespace" "test" "target" "clj" "forms" [plain-def (make-defn-node "f" [] (make-prim "Int") [{"node" "binding" "bindings" [(make-let-binding "*lvl*" nil (make-lit "number" 5))] "body" [(make-lit "number" 1)]}])] "externs" [] "requires" []}
+   result (type-check! prog)]
+  (> (get result "count") 0)))
+  (expect! "binding: clojure.core builtin *out* accepted on clj" (let [prog {"mode" "strict" "namespace" "test" "target" "clj" "forms" [(make-defn-node "f" [] (make-prim "Int") [{"node" "binding" "bindings" [(make-let-binding "*out*" nil (make-ref "*err*"))] "body" [(make-lit "number" 1)]}])] "externs" [] "requires" []}
+   result (type-check! prog)]
+  (= (get result "count") 0)))
   (expect! "compat: union target accepts member" (type-compatible? (make-prim "String") (make-union [(make-prim "String") (make-prim "Nil")])))
   (expect! "compat: union target rejects non-member" (not (type-compatible? (make-prim "Int") (make-union [(make-prim "String") (make-prim "Nil")]))))
   (expect! "infer: vec of ints" (let [t1 (infer-expr! (make-vec-node [(make-lit "number" 1) (make-lit "number" 2)]) {})]

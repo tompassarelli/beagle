@@ -1,0 +1,47 @@
+#lang beagle/clj
+(ns selfhost.fixtures.forms-tail)
+
+;; Parity fixture for the parity-tail form ports. Full-chain byte-parity
+;; here proves, against the Racket compiler:
+;;   - (get m :k) / (get m :k default) canonicalize to kw-access — emit as
+;;     (:k m) / (:k m default), identical to keyword-head access
+;;   - bare-vector multi-arity defn canonicalizes to wrapped arity clauses
+;;   - doseq :let (+ :when) clauses survive the chain (ast-json for-let)
+;;   - target-case parses per-target branches; emit picks the clj branch
+;;   - ^:dynamic def + `binding` round-trip (def emits the ^:dynamic tag;
+;;     the checker's dynamic-var registry accepts the rebind)
+;;   - def/defonce docstrings survive to emitted clj
+;; Run: self-host/verify-selfhost.sh self-host/fixtures/forms-tail.bclj
+
+(def greeting :- String "the canonical greeting" "hello")
+
+(defonce cache :- (Map String Int) "memo table" {})
+
+(defn kw-get [m :- Any] :- Any
+  (get m :name))
+
+(defn kw-get-default [m :- Any] :- Any
+  (get m :count 0))
+
+;; bare-vector multi-arity (no wrapping parens around the clauses)
+(defn arity-sum
+  [a :- Int] a
+  [a :- Int b :- Int] (+ a b))
+
+(defn sum-doubled! [xs :- (Vec Int)] :- Int
+  (let [total (atom 0)]
+    (doseq [x xs
+            :let [dbl (* x 2)]
+            :when (> dbl 4)]
+      (swap! total + dbl))
+    (deref total)))
+
+;; deliberately unsorted branch order — cases serialize sorted by target
+(def runtime-name :- String
+  (target-case :js "node" :clj "jvm"))
+
+(def ^:dynamic *level* :- Int 0)
+
+(defn with-level [n :- Int] :- Int
+  (binding [*level* n]
+    (+ *level* 1)))

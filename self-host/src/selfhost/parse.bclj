@@ -255,11 +255,13 @@
 (def NIL-LITERAL :- Any {"node" "literal" "kind" "nil"})
 (def FALSE-LITERAL :- Any {"node" "literal" "kind" "bool" "value" false})
 
-(defn make-def [name :- String ann :- Any value :- Any] :- Any
-  {"node" "def" "name" name "ann" ann "value" value})
+(defn make-def [name :- String ann :- Any value :- Any doc :- Any dyn :- Bool] :- Any
+  {"node" "def" "name" name "ann" ann "value" value
+   "doc" (if (nil? doc) false doc) "dynamic" dyn})
 
-(defn make-defonce [name :- String ann :- Any value :- Any] :- Any
-  {"node" "defonce" "name" name "ann" ann "value" value})
+(defn make-defonce [name :- String ann :- Any value :- Any doc :- Any] :- Any
+  {"node" "defonce" "name" name "ann" ann "value" value
+   "doc" (if (nil? doc) false doc)})
 
 (defn make-defn [name :- String params :- Any rest-param :- Any
                  ret :- Any body :- Any priv :- Bool] :- Any
@@ -1052,11 +1054,50 @@
 
 ;; --- defn family --------------------------------------------------------------
 
+;; Bare-vector multi-arity (parse.rkt bare-multi-arity-clauses):
+;;   (defn name [a] body [a b] body)
+;; canonicalizes to list-wrapped clauses ((params body…) …). Returns nil
+;; unless the strict shape holds: first arg is a params vec, >= 2 top-level
+;; vecs, every vec followed by >= 1 non-vec body form, and no top-level `:-`
+;; (that is a single-arity RETURN annotation, never an arity boundary).
+(defn- bare-multi-arity-clauses [args :- Any] :- Any
+  (cond
+    (or (= (count args) 0) (not (bracketed? (nth args 0)))) nil
+    (has-item? args ":-") nil
+    :else
+      (let [n (count args)
+            state (loop [i 0 segments :- Any [] cur :- Any [] ok true]
+                    (if (or (>= i n) (not ok))
+                      {"segments" segments "cur" cur "ok" ok}
+                      (let [arg (nth args i)]
+                        (if (bracketed? arg)
+                          (cond
+                            (= (count cur) 0)
+                              (recur (+ i 1) segments [arg] ok)
+                            (= (count cur) 1)
+                              (recur (+ i 1) segments cur false)
+                            :else
+                              (recur (+ i 1) (conj segments cur) [arg] ok))
+                          (if (= (count cur) 0)
+                            (recur (+ i 1) segments cur false)
+                            (recur (+ i 1) segments (conj cur arg) ok))))))]
+        (cond
+          (not (get state "ok")) nil
+          (<= (count (get state "cur")) 1) nil
+          :else
+            (let [all (conj (get state "segments") (get state "cur"))]
+              (if (>= (count all) 2) all nil))))))
+
 (defn- parse-defn-tail! [name :- String after-name :- Any priv :- Bool] :- Any
   (cond
-    ;; multi-arity
+    ;; multi-arity (list-wrapped clauses)
     (and (>= (count after-name) 1) (multi-arity-form? (nth after-name 0)))
       (make-defn-multi name (mapv parse-arity-clause! after-name) priv)
+    ;; bare-vector multi-arity canonicalizes to the same clauses
+    (some? (bare-multi-arity-clauses after-name))
+      (make-defn-multi name
+                       (mapv parse-arity-clause! (bare-multi-arity-clauses after-name))
+                       priv)
     ;; with return type: params :- RET [:raises ERR] body...
     (and (>= (count after-name) 3)
          (canonical-marker? (nth after-name 1)))
@@ -1091,25 +1132,54 @@
 (defn- meta-name? [d :- Any] :- Bool
   (and (vector? d) (= (count d) 3) (= (nth d 0) "#%meta") (string? (nth d 2))))
 
-;; --- def/defonce arms (docstring-aware; doc is parsed, not serialized) ---------
+;; --- def/defonce arms (docstring + ^:dynamic recorded on the node) -------------
+
+;; `^:dynamic` on a def name: the metadata value is either the keyword
+;; `:dynamic` (shorthand) or a #%map carrying `:dynamic true` (longhand);
+;; any other metadata is accepted and stripped (parse.rkt meta-dynamic?).
+(defn- meta-dynamic? [mv :- Any] :- Bool
+  (cond
+    (= mv ":dynamic") true
+    (map-tagged? mv)
+      (let [kvs (map-body mv)
+            n (count kvs)]
+        (loop [i 0]
+          (cond
+            (>= (+ i 1) n) false
+            (and (= (nth kvs i) ":dynamic") (= (nth kvs (+ i 1)) true)) true
+            :else (recur (+ i 2)))))
+    :else false))
+
+(defn- mk-def-node [kw :- String name :- String ann :- Any value :- Any
+                    doc :- Any dyn :- Bool] :- Any
+  (if (= kw "defonce")
+    (make-defonce name ann value doc)
+    (make-def name ann value doc dyn)))
 
 (defn- parse-def-form! [kw :- String rest-items :- Any] :- Any
-  (let [mk (if (= kw "defonce") make-defonce make-def)
-        name-form (nth rest-items 0)
+  (let [name-form (nth rest-items 0)
         name (if (meta-name? name-form) (nth name-form 2) name-form)
+        dyn (and (= kw "def") (meta-name? name-form)
+                 (meta-dynamic? (nth name-form 1)))
         items (subvec rest-items 1)]
     (cond
       (not (string? name))
         (err! (str "malformed " kw ": " (str rest-items)))
+      ;; defonce takes a plain name only (parse.rkt defonce arms have no
+      ;; #%meta variant — a meta-wrapped name is malformed there)
+      (and (= kw "defonce") (meta-name? name-form))
+        (err! "malformed defonce — expected (defonce NAME VALUE), (defonce NAME \"doc\" VALUE), or (defonce NAME :- TYPE VALUE)")
       ;; name :- TYPE "doc" value
       (and (>= (count items) 4)
            (canonical-marker? (nth items 0))
            (string-datum? (nth items 2))
            (vector? (nth items 2)))
-        (mk name (parse-type (nth items 1)) (parse-expr* (nth items 3)))
+        (mk-def-node kw name (parse-type (nth items 1)) (parse-expr* (nth items 3))
+                     (extract-string (nth items 2)) dyn)
       ;; name :- TYPE value
       (and (>= (count items) 3) (canonical-marker? (nth items 0)))
-        (mk name (parse-type (nth items 1)) (parse-expr* (nth items 2)))
+        (mk-def-node kw name (parse-type (nth items 1)) (parse-expr* (nth items 2))
+                     nil dyn)
       ;; bare `:` — pointed rejection
       (and (>= (count items) 3) (= (nth items 0) ":"))
         (err! (str "(" kw " " name " : ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (" kw " " name " :- TYPE VALUE)"))
@@ -1118,12 +1188,41 @@
            (vector? (nth items 0))
            (= (count (nth items 0)) 2)
            (= (nth (nth items 0) 0) "#%string"))
-        (mk name nil (parse-expr* (nth items 1)))
+        (mk-def-node kw name nil (parse-expr* (nth items 1))
+                     (extract-string (nth items 0)) dyn)
       ;; name value
       (= (count items) 1)
-        (mk name nil (parse-expr* (nth items 0)))
+        (mk-def-node kw name nil (parse-expr* (nth items 0)) nil dyn)
       :else
         (err! (str "malformed " kw " — expected (" kw " NAME VALUE), (" kw " NAME \"doc\" VALUE), (" kw " NAME :- TYPE VALUE), or (" kw " NAME :- TYPE \"doc\" VALUE)")))))
+
+;; --- target-case (parse.rkt parse-target-case) ---------------------------------
+;; (target-case :clj E :js E …) — branches parse in SOURCE order (counter
+;; parity); duplicate targets: last wins (Racket hash-set!). The cases list
+;; serializes SORTED by target name, matching ast-json.rkt's deterministic
+;; ordering of the underlying hasheq.
+
+(defn- parse-target-case! [items :- Any] :- Any
+  (let [n (count items)
+        cases (loop [i 0 acc :- Any {}]
+                (cond
+                  (>= i n) acc
+                  (< (+ i 1) n)
+                    (let [kw (nth items i)]
+                      (if (and (string? kw) (keyword-sym? kw))
+                        (recur (+ i 2)
+                               (assoc acc (subs kw 1) (parse-expr* (nth items (+ i 1)))))
+                        (do (err! (str "target-case: expected target keyword, got: " (str kw)))
+                            (recur (+ i 2) acc))))
+                  :else
+                    (do (err! (str "target-case: expected keyword-expression pairs, got trailing: " (str (subvec items i))))
+                        acc)))]
+    (if (= (count cases) 0)
+      (err! "target-case: no branches provided")
+      {"node" "target-case"
+       "cases" (mapv (fn [k :- String] :- Any
+                       {"target" k "body" (get cases k)})
+                     (vec (sort (vec (keys cases)))))})))
 
 ;; --- parse-list-form!: the big dispatch ---------------------------------------
 
@@ -1214,6 +1313,12 @@
         (make-defscalar (nth rest-items 0) (parse-type (nth rest-items 1)))
 
       ;; fn with return type
+      ;; multi-arity anonymous fn — list-wrapped or bare-vector — is rejected
+      ;; with the pointed defn migration (parse.rkt fn arms, detected FIRST)
+      (and (= head "fn") (>= (count rest-items) 1)
+           (or (multi-arity-form? (nth rest-items 0))
+               (some? (bare-multi-arity-clauses rest-items))))
+        (err! "multi-arity anonymous `fn` is not yet supported — give it a name with `defn` (which supports multi-arity), or use a single arity.")
       (and (= head "fn") (>= (count rest-items) 3)
            (canonical-marker? (nth rest-items 1)))
         (let [parsed-params (parse-params! (nth rest-items 0))]
@@ -1325,6 +1430,10 @@
       (and (= head "case") (>= (count rest-items) 1))
         (parse-case-form (nth rest-items 0) (subvec rest-items 1))
 
+      ;; per-target branch selection
+      (= head "target-case")
+        (parse-target-case! rest-items)
+
       (and (= head "doseq") (>= (count rest-items) 1))
         (make-doseq (parse-for-clauses (nth rest-items 0))
                     (mapv parse-expr* (subvec rest-items 1)))
@@ -1380,6 +1489,18 @@
                                            (subvec rest-items 2)))))
       (and (= head "as->") (>= (count rest-items) 2))
         (err! "as-> expects a symbol placeholder: (as-> init name steps...)")
+
+      ;; (get m :k) / (get m :k default) — literal-keyword-key projection
+      ;; canonicalizes to kw-access, same AST as (:k m) (parse.rkt get
+      ;; combiner); dynamic/non-keyword keys fall through to call-form
+      (and (= head "get") (= (count rest-items) 2)
+           (string? (nth rest-items 1)) (keyword-sym? (nth rest-items 1)))
+        (make-kw-access (nth rest-items 1) (parse-expr* (nth rest-items 0)) nil)
+      (and (= head "get") (= (count rest-items) 3)
+           (string? (nth rest-items 1)) (keyword-sym? (nth rest-items 1)))
+        (make-kw-access (nth rest-items 1)
+                        (parse-expr* (nth rest-items 0))
+                        (parse-expr* (nth rest-items 2)))
 
       ;; constructor: (Type. args...)
       (and (string? head) (constructor-sym? head))
@@ -1662,7 +1783,7 @@
                                nil)
                           alias (if (string? nm) (get aliases nm) nil)]
                       (if (some? alias)
-                        (conj acc f (make-def alias nil (make-ref nm)))
+                        (conj acc f (make-def alias nil (make-ref nm) nil false))
                         (conj acc f))))
                   [] (deref forms)))))
     (mac/set-hygiene-context! nil)
@@ -1970,6 +2091,16 @@
     (let [node (parse-expr* [":name" "m" "fallback"])]
       (and (= (get node "node") "kw-access")
            (not (= false (get node "default"))))))
+  (expect! "(get m :k) canonicalizes to kw-access — same AST as (:k m)"
+    (= (parse-expr* ["get" "m" ":k"])
+       (parse-expr* [":k" "m"])))
+  (expect! "(get m :k default) canonicalizes to kw-access with default"
+    (= (parse-expr* ["get" "m" ":k" 0])
+       (parse-expr* [":k" "m" 0])))
+  (expect! "(get m k) dynamic key stays a call"
+    (= (get (parse-expr* ["get" "m" "k"]) "node") "call"))
+  (expect! "(get m \"k\") string key stays a call"
+    (= (get (parse-expr* ["get" "m" ["#%string" "k"]]) "node") "call"))
   (expect! "static-call"
     (let [node (parse-expr* ["Math/abs" -1])]
       (and (= (get node "node") "static-call")
@@ -2023,6 +2154,32 @@
            (= (get node "name") "f")
            (= (count (get node "arities")) 2)
            (= (get (nth (get node "arities") 0) "rest") false))))
+  (expect! "bare-vector multi-arity defn canonicalizes to wrapped clauses"
+    (= (parse-expr* ["defn" "f" [BRACKET-TAG "a"] "a"
+                     [BRACKET-TAG "a" "b"] ["+" "a" "b"]])
+       (parse-expr* ["defn" "f" [[BRACKET-TAG "a"] "a"]
+                     [[BRACKET-TAG "a" "b"] ["+" "a" "b"]]])))
+  (expect! "single-arity defn with vec body is NOT multi-arity"
+    (= (get (parse-expr* ["defn" "f" [BRACKET-TAG "a"] [BRACKET-TAG 1 2]]) "node")
+       "defn"))
+
+  ;; --- target-case ---
+  (expect! "target-case: cases sorted by target name; branches parse"
+    (= (parse-expr* ["target-case" ":js" 2 ":clj" 1])
+       {"node" "target-case"
+        "cases" [{"target" "clj" "body" {"node" "literal" "kind" "number" "value" 1}}
+                 {"target" "js" "body" {"node" "literal" "kind" "number" "value" 2}}]}))
+
+  ;; --- def flags (ast-json doc/dynamic parity) ---
+  (expect! "^:dynamic def sets the dynamic flag"
+    (= (get (parse-expr* ["def" ["#%meta" ":dynamic" "*x*"] 1]) "dynamic") true))
+  (expect! "^{:dynamic true} longhand sets the dynamic flag"
+    (= (get (parse-expr* ["def" ["#%meta" [MAP-TAG ":dynamic" true] "*x*"] 1]) "dynamic") true))
+  (expect! "plain def: dynamic false, doc false"
+    (let [node (parse-expr* ["def" "x" 1])]
+      (and (= (get node "dynamic") false) (= (get node "doc") false))))
+  (expect! "def docstring recorded"
+    (= (get (parse-expr* ["def" "x" ["#%string" "d"] 1]) "doc") "d"))
 
   ;; --- vec / map / set ---
   (expect! "vec literal"

@@ -294,8 +294,10 @@
   (= kind "keyword") (str ":" (get e "value"))
   :else "nil"))
   (= node "ref") (get e "name")
-  (= node "def") (str "(def " (clj-tag-prefix (get e "ann")) (get e "name") " " (emit-expr* (get e "value")) ")")
-  (= node "defonce") (str "(defonce " (clj-tag-prefix (get e "ann")) (get e "name") " " (emit-expr* (get e "value")) ")")
+  (= node "def") (let [doc (get e "doc")]
+  (str "(def " (if (= (get e "dynamic") true) "^:dynamic " "") (clj-tag-prefix (get e "ann")) (get e "name") (if (string? doc) (str " " (write-clj-string doc)) "") " " (emit-expr* (get e "value")) ")"))
+  (= node "defonce") (let [doc (get e "doc")]
+  (str "(defonce " (clj-tag-prefix (get e "ann")) (get e "name") (if (string? doc) (str " " (write-clj-string doc)) "") " " (emit-expr* (get e "value")) ")"))
   (= node "defn") (let [kw (if (get e "private") "defn-" "defn")
    name (get e "name")
    name-tag (clj-tag-prefix (get e "ret"))

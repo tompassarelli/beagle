@@ -831,15 +831,22 @@
         (last-expr-type! (get e "body") body-env))
 
     ;; binding — per check.rkt: targets are dynamic vars, NOT new locals; the
-    ;; body sees env unchanged. Each value is checked against the var's declared
-    ;; type when known. Tranche-1 gap: no #%dynamic-vars registry, so the
-    ;; "target must be ^:dynamic" rejection is skipped (permissive).
+    ;; body sees env unchanged. Each target must be in the `^:dynamic`
+    ;; registry (env "#%dynamic-vars"; rebinding a non-dynamic var throws at
+    ;; runtime, so it is rejected here); each value is checked against the
+    ;; var's declared type when known.
     (= (get e "node") "binding")
       (do (doseq [b (get e "bindings")]
             (let [vt (infer-expr! (get b "value") env)
-                  declared (get env (get b "name"))]
+                  nm (get b "name")
+                  dyn-vars (get env "#%dynamic-vars")
+                  declared (get env nm)]
+              (when (nil? (get dyn-vars nm))
+                (emit-diag! (str "beagle: binding: " nm
+                                 " is not a dynamic var — only `(def ^:dynamic " nm
+                                 " ...)` vars can be rebound with `binding`")))
               (when (and (not (nil? declared)) (not (type-compatible? vt declared)))
-                (emit-diag! (str "beagle: binding " (get b "name") ": expected "
+                (emit-diag! (str "beagle: binding " nm ": expected "
                                  (type->string declared) ", got " (type->string vt))))))
           (last-expr-type! (get e "body") env))
 
@@ -1046,6 +1053,12 @@
                                  (assoc be (get c "name") elem-type))
                              (= ct "when")
                                (do (infer-expr! (get c "test") be) be)
+                             ;; :let clauses bind sequentially (check.rkt
+                             ;; doseq for-let, same as `for`)
+                             (= ct "let")
+                               (reduce (fn [be2 :- Any b :- Any] :- Any
+                                         (assoc be2 (get b "name") (infer-expr! (get b "value") be2)))
+                                       be (get c "bindings"))
                              :else be)))
                        env (get e "clauses"))]
         (last-expr-type! (get e "body") body-env)
@@ -1290,6 +1303,16 @@
 
 ;; === build-initial-env! =======================================================
 
+;; clojure.core's built-in dynamic vars — dynamic on the clj target only
+;; (check.rkt seeds these so idiomatic `(binding [*out* …] …)` passes).
+(def CLJ-BUILTIN-DYNAMIC-VARS :- (Vec String)
+  ["*out*" "*err*" "*in*" "*ns*" "*print-length*" "*print-level*"
+   "*print-readably*" "*print-dup*" "*print-meta*" "*flush-on-newline*"
+   "*warn-on-reflection*" "*unchecked-math*" "*math-context*"
+   "*read-eval*" "*command-line-args*" "*file*" "*assert*"
+   "*data-readers*" "*default-data-reader-fn*" "*compile-path*"
+   "*source-path*" "*clojure-version*" "*agent*"])
+
 (defn build-initial-env! [prog :- Any] :- Any
   (let [externs (get prog "externs")
         forms (get prog "forms")
@@ -1297,7 +1320,31 @@
                            (reduce (fn [env :- Any ext :- Any] :- Any
                                      (assoc env (get ext "name") (get ext "type")))
                                    STDLIB externs)
-                           STDLIB)]
+                           STDLIB)
+        ;; ^:dynamic registry (check.rkt dyn-vars): names of `(def ^:dynamic
+        ;; …)` forms, consulted by `binding` to reject non-dynamic targets.
+        ;; Stashed under a #% sentinel key that no surface ref can collide
+        ;; with. clj builtins seed below (after the form pre-pass, so a user
+        ;; def of *out* keeps its declared type).
+        dyn-from-defs (reduce (fn [acc :- Any f :- Any] :- Any
+                                (if (and (= (get f "node") "def")
+                                         (= (get f "dynamic") true))
+                                  (assoc acc (get f "name") true)
+                                  acc))
+                              {} forms)
+        dyn-vars (if (= (get prog "target") "clj")
+                   (reduce (fn [acc :- Any nm :- String] :- Any
+                             (assoc acc nm true))
+                           dyn-from-defs CLJ-BUILTIN-DYNAMIC-VARS)
+                   dyn-from-defs)
+        env-with-externs (assoc env-with-externs "#%dynamic-vars" dyn-vars)
+        env-with-externs (if (= (get prog "target") "clj")
+                           (reduce (fn [env :- Any nm :- String] :- Any
+                                     (if (nil? (get env nm))
+                                       (assoc env nm ANY)
+                                       env))
+                                   env-with-externs CLJ-BUILTIN-DYNAMIC-VARS)
+                           env-with-externs)]
     (reduce
       (fn [env :- Any raw-form :- Any] :- Any
         (let [form (if (= (get raw-form "node") "with-meta")
@@ -1557,6 +1604,40 @@
                 "requires" []}
           result (type-check! prog)]
       (> (get result "count") 0)))
+
+  ;; --- ^:dynamic registry: binding-target rejection (check.rkt dyn-vars) ---
+  (expect! "binding: ^:dynamic def target accepted"
+    (let [dyn-def (assoc (make-def-node "*lvl*" (make-prim "Int") (make-lit "number" 0))
+                         "dynamic" true)
+          prog {"mode" "strict" "namespace" "test" "target" "clj"
+                "forms" [dyn-def
+                         (make-defn-node "f" [] (make-prim "Int")
+                           [{"node" "binding"
+                             "bindings" [(make-let-binding "*lvl*" nil (make-lit "number" 5))]
+                             "body" [(make-lit "number" 1)]}])]
+                "externs" [] "requires" []}
+          result (type-check! prog)]
+      (= (get result "count") 0)))
+  (expect! "binding: non-dynamic def target rejected"
+    (let [plain-def (make-def-node "*lvl*" (make-prim "Int") (make-lit "number" 0))
+          prog {"mode" "strict" "namespace" "test" "target" "clj"
+                "forms" [plain-def
+                         (make-defn-node "f" [] (make-prim "Int")
+                           [{"node" "binding"
+                             "bindings" [(make-let-binding "*lvl*" nil (make-lit "number" 5))]
+                             "body" [(make-lit "number" 1)]}])]
+                "externs" [] "requires" []}
+          result (type-check! prog)]
+      (> (get result "count") 0)))
+  (expect! "binding: clojure.core builtin *out* accepted on clj"
+    (let [prog {"mode" "strict" "namespace" "test" "target" "clj"
+                "forms" [(make-defn-node "f" [] (make-prim "Int")
+                           [{"node" "binding"
+                             "bindings" [(make-let-binding "*out*" nil (make-ref "*err*"))]
+                             "body" [(make-lit "number" 1)]}])]
+                "externs" [] "requires" []}
+          result (type-check! prog)]
+      (= (get result "count") 0)))
 
   ;; --- type compatibility ---
   (expect! "compat: union target accepts member"
