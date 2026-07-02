@@ -340,6 +340,13 @@
 
 ;; --- environment helpers (env is a threaded immutable String->type map) ------
 
+;; Today's ast-json.rkt serializes ABSENT optional fields as JSON false (the
+;; (and x ...) pattern): defn/fn/defn-multi rest, kw-access default, try
+;; finally, case default, if-let else, condp default. The era .bjs assumed
+;; null. Normalize false -> nil at every optional-field read.
+(defn opt-field [x :- Any] :- Any
+  (if (= x false) nil x))
+
 (defn param-type-or-any [p :- Any] :- Any
   (let [t (get p "type")]
     (cond
@@ -420,16 +427,17 @@
              "type" (make-prim "Nil")
              "negated" true}
 
-          (and (not (nil? fn-name)) (= fn-name "=")
+          (and (not (nil? fn-name)) (or (= fn-name "=") (= fn-name "not="))
                (= (count args) 2))
-            (let [a1 (nth args 0) a2 (nth args 1)]
+            (let [a1 (nth args 0) a2 (nth args 1)
+                  neg (= fn-name "not=")]
               (cond
                 (and (= (get a1 "node") "ref")
                      (= (get a2 "node") "literal") (= (get a2 "kind") "nil"))
-                  {"var" (get a1 "name") "type" (make-prim "Nil") "negated" false}
+                  {"var" (get a1 "name") "type" (make-prim "Nil") "negated" neg}
                 (and (= (get a1 "node") "literal") (= (get a1 "kind") "nil")
                      (= (get a2 "node") "ref"))
-                  {"var" (get a2 "name") "type" (make-prim "Nil") "negated" false}
+                  {"var" (get a2 "name") "type" (make-prim "Nil") "negated" neg}
                 :else {"var" nil "type" nil "negated" false}))
 
           (and (not (nil? fn-name)) (= fn-name "not")
@@ -442,21 +450,84 @@
 
           :else {"var" nil "type" nil "negated" false}))))
 
+(defn type-could-be-false? [t :- Any] :- Bool
+  (cond
+    (any-type? t) true
+    (prim? t) (= (get t "name") "Bool")
+    (union-type? t)
+      (reduce (fn [acc :- Bool m :- Any] :- Bool (or acc (type-could-be-false? m)))
+              false (get t "members"))
+    :else false))
+
+(defn call-fn-name [e :- Any] :- Any
+  (if (= (get e "node") "call")
+    (let [fn-ref (get e "fn")]
+      (if (and (not (nil? fn-ref)) (= (get fn-ref "node") "ref"))
+        (get fn-ref "name")
+        (if (string? fn-ref) fn-ref nil)))
+    nil))
+
+;; test-narrowings — flow-narrowing composition, per check.rkt test-narrowings.
+;; Returns {"then" {name type ..} "else" {name type ..}}: bindings refined in
+;; the true/false branch. (not T) swaps branches. (and T1 T2 ..) accumulates
+;; every conjunct's then-narrowings left-to-right, each conjunct analyzed under
+;; the overlay so far (so (and (some? x) (string? x)) compounds); else-branch
+;; gets nothing except single-conjunct. (or ..) is the De Morgan dual. Leaves:
+;; bare-ref truthiness (no else-narrow to Nil when the non-nil remainder could
+;; itself be false) and the extract-narrowing predicates. Only env-bound
+;; locals narrow.
+(defn test-narrowings [cond-expr :- Any env :- Any] :- Any
+  (let [fn-name (call-fn-name cond-expr)
+        args (get cond-expr "args")
+        fold-branch (fn [xs :- Any pick-then :- Bool] :- Any
+                      (reduce (fn [acc :- Any a :- Any] :- Any
+                                (let [tn (test-narrowings a (merge env acc))]
+                                  (merge acc (get tn (if pick-then "then" "else")))))
+                              {} xs))]
+    (cond
+      (and (= fn-name "not") (= (count args) 1))
+        (let [tn (test-narrowings (nth args 0) env)]
+          {"then" (get tn "else") "else" (get tn "then")})
+
+      (and (= fn-name "and") (> (count args) 0))
+        (if (= (count args) 1)
+          (test-narrowings (nth args 0) env)
+          {"then" (fold-branch args true) "else" {}})
+
+      (and (= fn-name "or") (> (count args) 0))
+        (if (= (count args) 1)
+          (test-narrowings (nth args 0) env)
+          {"then" {} "else" (fold-branch args false)})
+
+      (= (get cond-expr "node") "ref")
+        (let [v (get cond-expr "name")
+              cur (get env v)]
+          (if (nil? cur)
+            {"then" {} "else" {}}
+            (let [non-nil (remove-from-union cur (make-prim "Nil"))]
+              {"then" {v non-nil}
+               "else" (if (type-could-be-false? non-nil)
+                        {}
+                        {v (make-prim "Nil")})})))
+
+      :else
+        (let [info (extract-narrowing cond-expr)
+              v (get info "var")]
+          (if (nil? v)
+            {"then" {} "else" {}}
+            (let [cur (get env v)]
+              (if (nil? cur)
+                {"then" {} "else" {}}
+                (let [pos {v (get info "type")}
+                      neg {v (remove-from-union cur (get info "type"))}]
+                  (if (get info "negated")
+                    {"then" neg "else" pos}
+                    {"then" pos "else" neg})))))))))
+
 (defn narrow-env-for-condition [env :- Any cond-expr :- Any] :- Any
-  (let [info (extract-narrowing cond-expr)
-        v (get info "var")
-        narrow-type (get info "type")
-        negated (get info "negated")]
-    (if (nil? v)
-      {"then" env "else" env}
-      (let [current-type (get env v)]
-        (if (nil? current-type)
-          {"then" env "else" env}
-          (let [pos-env (assoc env v narrow-type)
-                neg-env (assoc env v (remove-from-union current-type narrow-type))]
-            (if negated
-              {"then" neg-env "else" pos-env}
-              {"then" pos-env "else" neg-env})))))))
+  (let [tn (test-narrowings cond-expr env)]
+    {"then" (merge env (get tn "then"))
+     "else" (merge env (get tn "else"))}))
 
 ;; --- match arm narrowing -----------------------------------------------------
 
@@ -712,7 +783,7 @@
 
     (= (get e "node") "defn")
       (let [params (get e "params")
-            rest-param (get e "rest-param")
+            rest-param (opt-field (get e "rest"))
             expected-ret (get e "ret")
             body-env (extend-with-params env params rest-param)
             body-type (last-expr-type! (get e "body") body-env)]
@@ -730,7 +801,7 @@
 
     (= (get e "node") "defn-multi")
       (do (doseq [a (get e "arities")]
-            (let [body-env (extend-with-params env (get a "params") (get a "rest"))
+            (let [body-env (extend-with-params env (get a "params") (opt-field (get a "rest")))
                   body-type (last-expr-type! (get a "body") body-env)
                   expected-ret (get a "ret")]
               (when (and (not (nil? expected-ret))
@@ -744,7 +815,7 @@
     (= (get e "node") "fn")
       (let [params (get e "params")
             p-types (mapv param-type-or-any params)
-            body-env (extend-with-params env params (get e "rest-param"))
+            body-env (extend-with-params env params (opt-field (get e "rest")))
             ret (if (not (nil? (get e "ret")))
                   (get e "ret")
                   (last-expr-type! (get e "body") body-env))]
@@ -754,17 +825,29 @@
       (let [body-env (extend-with-let-bindings! env (get e "bindings"))]
         (last-expr-type! (get e "body") body-env))
 
+    ;; binding — per check.rkt: targets are dynamic vars, NOT new locals; the
+    ;; body sees env unchanged. Each value is checked against the var's declared
+    ;; type when known. Tranche-1 gap: no #%dynamic-vars registry, so the
+    ;; "target must be ^:dynamic" rejection is skipped (permissive).
+    (= (get e "node") "binding")
+      (do (doseq [b (get e "bindings")]
+            (let [vt (infer-expr! (get b "value") env)
+                  declared (get env (get b "name"))]
+              (when (and (not (nil? declared)) (not (type-compatible? vt declared)))
+                (emit-diag! (str "beagle: binding " (get b "name") ": expected "
+                                 (type->string declared) ", got " (type->string vt))))))
+          (last-expr-type! (get e "body") env))
+
     (= (get e "node") "letfn")
       (let [body-env (reduce (fn [be :- Any f :- Any] :- Any
-                               (let [p-types (mapv param-type-or-any (get f "params"))
-                                     rtype (if (not (nil? (get f "rest")))
-                                             (param-type-or-any (get f "rest"))
-                                             nil)
+                               (let [rp (opt-field (get f "rest"))
+                                     p-types (mapv param-type-or-any (get f "params"))
+                                     rtype (if (not (nil? rp)) (param-type-or-any rp) nil)
                                      ret (if (not (nil? (get f "ret"))) (get f "ret") ANY)]
                                  (assoc be (get f "name") (make-fn p-types rtype ret))))
                              env (get e "fns"))]
         (doseq [f (get e "fns")]
-          (let [fn-env (extend-with-params body-env (get f "params") (get f "rest"))]
+          (let [fn-env (extend-with-params body-env (get f "params") (opt-field (get f "rest")))]
             (last-expr-type! (get f "body") fn-env)))
         (last-expr-type! (get e "body") body-env))
 
@@ -874,8 +957,9 @@
       (let [val-type (infer-expr! (get e "expr") env)
             then-env (assoc env (get e "name") val-type)
             then-type (infer-expr! (get e "then") then-env)
-            else-type (if (not (nil? (get e "else")))
-                        (infer-expr! (get e "else") env)
+            els (opt-field (get e "else"))
+            else-type (if (not (nil? els))
+                        (infer-expr! els env)
                         NIL-TYPE)]
         (merge-types then-type else-type))
 
@@ -898,9 +982,10 @@
           (let [clause-types (mapv (fn [c :- Any] :- Any
                                      (infer-expr! (get c "test") env)
                                      (infer-expr! (get c "body") env))
-                                   (get e "clauses"))]
-            (if (not (nil? (get e "default")))
-              (merge-types-list (conj clause-types (infer-expr! (get e "default") env)))
+                                   (get e "clauses"))
+                dflt (opt-field (get e "default"))]
+            (if (not (nil? dflt))
+              (merge-types-list (conj clause-types (infer-expr! dflt env)))
               (if (= (count clause-types) 0)
                 ANY
                 (merge-types-list clause-types)))))
@@ -975,8 +1060,9 @@
       (do (infer-expr! (get e "test") env)
           (let [clause-types (mapv (fn [c :- Any] :- Any (infer-expr! (get c "body") env))
                                    (get e "clauses"))
-                fallback-type (if (not (nil? (get e "default")))
-                                (infer-expr! (get e "default") env)
+                dflt (opt-field (get e "default"))
+                fallback-type (if (not (nil? dflt))
+                                (infer-expr! dflt env)
                                 NIL-TYPE)]
             (merge-types-list (into [fallback-type] clause-types))))
 
@@ -987,9 +1073,10 @@
                                                   (assoc env (get c "name") ANY)
                                                   env)]
                                   (last-expr-type! (get c "body") catch-env)))
-                              (get e "catches"))]
-        (when (not (nil? (get e "finally")))
-          (last-expr-type! (get e "finally") env))
+                              (get e "catches"))
+            fin (opt-field (get e "finally"))]
+        (when (not (nil? fin))
+          (last-expr-type! fin env))
         (merge-types-list (into [body-type] catch-types)))
 
     (= (get e "node") "new")
@@ -997,8 +1084,9 @@
           ANY)
 
     (= (get e "node") "kw-access")
-      (let [target-type (infer-expr! (get e "target") env)]
-        (when (not (nil? (get e "default"))) (infer-expr! (get e "default") env))
+      (let [target-type (infer-expr! (get e "target") env)
+            dflt (opt-field (get e "default"))]
+        (when (not (nil? dflt)) (infer-expr! dflt env))
         (lookup-kw-field-type (get e "kw") target-type))
 
     (= (get e "node") "with")
@@ -1078,6 +1166,21 @@
           :else
             (do (doseq [a (get e "args")] (infer-expr! a env))
                 ANY)))
+
+    ;; and/or evaluate left-to-right with short-circuit, per check.rkt: each
+    ;; argument is checked under the narrowings established by the previous
+    ;; arguments ((and (some? x) (f x)) sees x non-nil at arg 2; (or (nil? x)
+    ;; (f x)) likewise — arg 2 only runs when arg 1 was falsy). Result is Any.
+    (and (= (get e "node") "call")
+         (or (= (call-fn-name e) "and") (= (call-fn-name e) "or")))
+      (do (reduce (fn [acc :- Any a :- Any] :- Any
+                    (let [env* (merge env acc)]
+                      (infer-expr! a env*)
+                      (let [tn (test-narrowings a env*)]
+                        (merge acc (get tn (if (= (call-fn-name e) "and")
+                                             "then" "else"))))))
+                  {} (get e "args"))
+          ANY)
 
     (= (get e "node") "call")
       (let [fn-ref (get e "fn")
@@ -1207,7 +1310,7 @@
                 env)
             (= node "defn")
               (let [params (get form "params")
-                    rest-param (get form "rest-param")
+                    rest-param (opt-field (get form "rest"))
                     p-types (mapv param-type-or-any params)
                     rtype (if (not (nil? rest-param)) (param-type-or-any rest-param) nil)
                     ret (if (not (nil? (get form "ret"))) (get form "ret") ANY)]
@@ -1215,7 +1318,7 @@
             (= node "defn-multi")
               (let [arities (get form "arities")
                     alt-types (mapv (fn [a :- Any] :- Any
-                                      (let [rp (get a "rest")
+                                      (let [rp (opt-field (get a "rest"))
                                             p-types (mapv param-type-or-any (get a "params"))
                                             rtype (if (not (nil? rp)) (param-type-or-any rp) nil)
                                             ret (if (not (nil? (get a "ret"))) (get a "ret") ANY)]
@@ -1295,7 +1398,7 @@
   {"node" "def" "name" name "ann" ann "value" value})
 
 (defn make-defn-node [name :- String params :- (Vec Any) ret :- Any body :- (Vec Any)] :- Any
-  {"node" "defn" "name" name "params" params "rest-param" nil
+  {"node" "defn" "name" name "params" params "rest" false
    "ret" ret "body" body "private" false})
 
 (defn make-param [name :- String ann :- Any] :- Any
@@ -1504,6 +1607,66 @@
       (and (prim? (get then-env "x"))
            (= (get (get then-env "x") "name") "String")
            (nil-type? (get else-env "x")))))
+  (expect! "narrowing: (and (some? x) ...) compounds into then-branch"
+    (let [env {"n" (make-union [(make-prim "Int") (make-prim "Nil")])}
+          ce (make-call "and" [(make-call "some?" [(make-ref "n")])
+                               (make-call ">" [(make-ref "n") (make-lit "number" 0)])])
+          then-env (get (narrow-env-for-condition env ce) "then")]
+      (and (prim? (get then-env "n"))
+           (= (get (get then-env "n") "name") "Int"))))
+  (expect! "narrowing: (or (nil? x) ...) narrows else-branch"
+    (let [env {"x" (make-union [(make-prim "String") (make-prim "Nil")])}
+          ce (make-call "or" [(make-call "nil?" [(make-ref "x")])
+                              (make-lit "bool" false)])
+          else-env (get (narrow-env-for-condition env ce) "else")]
+      (and (prim? (get else-env "x"))
+           (= (get (get else-env "x") "name") "String"))))
+  (expect! "narrowing: (not= x nil) narrows then-branch"
+    (let [env {"x" (make-union [(make-prim "Int") (make-prim "Nil")])}
+          ce (make-call "not=" [(make-ref "x") (make-lit "nil" nil)])
+          then-env (get (narrow-env-for-condition env ce) "then")]
+      (and (prim? (get then-env "x"))
+           (= (get (get then-env "x") "name") "Int"))))
+  (expect! "narrowing: bare-ref truthiness (no else Nil when remainder falsy)"
+    (let [env {"x" (make-union [(make-prim "String") (make-prim "Nil")])
+               "b" (make-union [(make-prim "Bool") (make-prim "Nil")])}
+          nx (narrow-env-for-condition env (make-ref "x"))
+          nb (narrow-env-for-condition env (make-ref "b"))]
+      (and (= (get (get (get nx "then") "x") "name") "String")
+           (nil-type? (get (get nx "else") "x"))
+           (= (get (get (get nb "then") "b") "name") "Bool")
+           (union-type? (get (get nb "else") "b")))))
+  (expect! "and-call: later conjuncts checked under earlier narrows"
+    (do (swap! STATE assoc "diagnostics" [])
+        (infer-expr! (make-call "and"
+                                [(make-call "some?" [(make-ref "pa")])
+                                 (make-call "f" [(make-ref "pa")])])
+                     {"pa" (make-union [(make-prim "String") (make-prim "Nil")])
+                      "f" (make-fn [(make-prim "String")] nil (make-prim "Bool"))})
+        (= 0 (count (get (deref STATE) "diagnostics")))))
+  (expect! "or-call: later disjuncts checked under earlier else-narrows"
+    (do (swap! STATE assoc "diagnostics" [])
+        (infer-expr! (make-call "or"
+                                [(make-call "nil?" [(make-ref "pa")])
+                                 (make-call "f" [(make-ref "pa")])])
+                     {"pa" (make-union [(make-prim "String") (make-prim "Nil")])
+                      "f" (make-fn [(make-prim "String")] nil (make-prim "Bool"))})
+        (= 0 (count (get (deref STATE) "diagnostics")))))
+
+  ;; --- binding (dynamic var rebinding; targets are not new locals) ---
+  (expect! "binding: returns body's last type, env unchanged"
+    (let [e {"node" "binding"
+             "bindings" [{"name" "*out*" "ann" nil "value" {"node" "dynamic-var" "name" "*err*"}}]
+             "body" [(make-lit "number" 7)]}
+          t1 (infer-expr! e {})]
+      (and (prim? t1) (= (get t1 "name") "Int"))))
+  (expect! "binding: value vs declared var type mismatch"
+    (do (swap! STATE assoc "diagnostics" [])
+        (infer-expr! {"node" "binding"
+                      "bindings" [{"name" "*mode*" "ann" nil "value" (make-lit "number" 1)}]
+                      "body" [(make-lit "nil" nil)]}
+                     {"*mode*" (make-prim "String")})
+        (> (count (get (deref STATE) "diagnostics")) 0)))
 
   ;; --- match exhaustiveness ---
   (expect! "match: exhaustive union check"
@@ -1523,7 +1686,7 @@
   ;; --- fn type inference ---
   (expect! "infer: fn returns fn type"
     (let [e {"node" "fn" "params" [(make-param "x" (make-prim "Int"))]
-             "rest-param" nil "ret" (make-prim "Bool")
+             "rest" false "ret" (make-prim "Bool")
              "body" [(make-lit "bool" true)]}
           t1 (infer-expr! e {})]
       (and (fn-type? t1)
