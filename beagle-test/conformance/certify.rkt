@@ -107,8 +107,8 @@
 ;; one racket process amortizes the compiler load across the whole corpus)
 ;; ---------------------------------------------------------------------------
 
-;; Diagnostics embed absolute paths; strip the checkout prefix so goldens are
-;; stable across checkouts/worktrees.
+;; Diagnostics and emitted srcloc metadata embed absolute paths; strip the
+;; checkout prefix so goldens are stable across checkouts/worktrees/CI.
 (define (normalize-diag s)
   (regexp-replace* (regexp (regexp-quote repo-root-str)) s ""))
 
@@ -125,7 +125,7 @@
     (parameterize ([current-output-port out]
                    [current-error-port (open-output-string)])
       (dynamic-require `(file ,(path->string abs)) #f))
-    (list 'ok (get-output-string out))))
+    (list 'ok (normalize-diag (get-output-string out)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Target validity — parse the EMITTED output with the target's own tooling.
