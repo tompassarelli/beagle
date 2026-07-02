@@ -53,30 +53,25 @@ echo "--- regenerated SOURCE byte-identical to original: $srcid/$srctot files --
 
 # 2. recompile-identity: the emitted PROGRAM must be identical, modulo srcloc debug
 # pointers (^{:line N :file "..."} reflect text layout/location, not the program; in
-# the flipped world they point at the canonical regenerated text). GUARD against
-# beagle BUILD nondeterminism (e.g. match's gensym counter differs between build
-# processes — a separate beagle bug): build the original TWICE; only byte-compare
-# modules whose build is deterministic, and rely on datum-identity (above) for the
-# rest. So this gate blames the loop only when the loop actually changed the program.
-echo "--- recompile-identity (beagle build orig vs regen, modulo srcloc; build-nondeterminism guarded) ---"
+# the flipped world they point at the canonical regenerated text). STRICT: beagle
+# emission is byte-deterministic (match temps + parse lowering temps are per-program
+# counters — gated by bin/test/build-reproducible), so EVERY module byte-compares;
+# no double-build nondeterminism guard. A mismatch means the loop changed the program.
+echo "--- recompile-identity (beagle build orig vs regen, modulo srcloc; strict byte-compare) ---"
 "$ROOT/bin/beagle-build-all" "$SRC"   --out "$WORK/o1" >/dev/null 2>&1
-"$ROOT/bin/beagle-build-all" "$SRC"   --out "$WORK/o2" >/dev/null 2>&1   # baseline: same tree, twice
 "$ROOT/bin/beagle-build-all" "$REGEN" --out "$WORK/rg" >/dev/null 2>&1
 STRIP='s/\^\{:line [0-9]+ :file "[^"]*"\} ?//g'
-for d in o1 o2 rg; do find "$WORK/$d" -name '*.clj' -exec sed -i -E "$STRIP" {} + ; done
-det=0; nondet=0; mismatch=0
+for d in o1 rg; do find "$WORK/$d" -name '*.clj' -exec sed -i -E "$STRIP" {} + ; done
+total=0; mismatch=0
 while IFS= read -r oclj; do
   rel="${oclj#"$WORK/o1/"}"
-  if ! diff -q "$WORK/o1/$rel" "$WORK/o2/$rel" >/dev/null 2>&1; then
-    nondet=$((nondet+1)); continue   # beagle build itself nondeterministic here — datum-identity covers it
-  fi
-  det=$((det+1))
+  total=$((total+1))
   if ! diff -q "$WORK/o1/$rel" "$WORK/rg/$rel" >/dev/null 2>&1; then
     echo "  MISMATCH — loop changed the program: $rel"; mismatch=$((mismatch+1)); fail=1
   fi
 done < <(find "$WORK/o1" -name '*.clj')
-echo "  modules: $det deterministic (byte-compared), $nondet build-nondeterministic (datum-identity only)"
-[ "$mismatch" = 0 ] && echo "  PASS — every deterministically-built module recompiles to the IDENTICAL program"
+echo "  modules byte-compared: $total (all of them)"
+[ "$mismatch" = 0 ] && echo "  PASS — every module recompiles to the IDENTICAL program"
 
 echo
 if [ "$fail" = 0 ]; then

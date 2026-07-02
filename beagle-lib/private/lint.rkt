@@ -410,9 +410,11 @@
     [(jst-export form) (check-shadow form scope ctx)]
     [_ (void)]))
 
+;; Compiler-minted lowering temps (fresh-lowered-sym in macros.rkt):
+;; `<base>__<n>` — cond-thread__0, bind__3, macro-hygiene renames, match__N.
+;; Shadow warnings on these would blame the lowering, not the user.
 (define (gensym-name? n)
-  (and (symbol? n) (regexp-match? #rx"[0-9]+$" (symbol->string n))
-       (regexp-match? #rx"^(ct|st)" (symbol->string n))))
+  (and (symbol? n) (regexp-match? #rx"__[0-9]+$" (symbol->string n))))
 
 (define (warn-shadow kind name ctx)
   (unless (gensym-name? name)

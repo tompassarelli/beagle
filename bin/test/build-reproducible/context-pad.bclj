@@ -1,0 +1,9 @@
+#lang beagle/clj
+(ns demo.context-pad)
+;; Parsed BEFORE lowering-fixture in the context-independence check — consumes
+;; lowering temps so a process-global counter would shift the fixture's names.
+
+(defn pad [m]
+  (if-let [v :- Int (get m :k)]
+    v
+    0))

@@ -45,5 +45,26 @@ if [ -z "$ja" ] || [ -z "$jb" ]; then echo "  FAIL  js fixtures did not build"; 
   else echo "  FAIL  js build is non-deterministic"; fail=1; fi
 fi
 
+# --- lowering temps: content-deterministic, never build-context-dependent -----
+# parse.rkt lowers typed if-let / cond-> / some-> and macro-hygiene binder
+# renames through minted temps. Those used Racket's process-global gensym, so
+# the SAME module emitted different bytes depending on what else the process
+# had parsed before it (daemon / build-all / standalone). Now a per-program
+# counter (fresh-lowered-sym, parameterized in parse-program). Assert: module
+# built ALONE == module built AFTER another module, byte-identical.
+echo "================ build reproducibility — lowering temps content-deterministic ================"
+"$ROOT/bin/beagle-build-all" "$HERE/lowering-fixture.bclj" --out "$W/l1" >/dev/null 2>&1
+"$ROOT/bin/beagle-build-all" "$HERE/context-pad.bclj" "$HERE/lowering-fixture.bclj" --out "$W/l2" >/dev/null 2>&1
+lf="$(find "$W/l1" -name 'lowering_repro.clj' | head -1)"   # output path = ns (demo.lowering-repro)
+if [ -z "$lf" ]; then echo "  FAIL  lowering fixture did not build"; fail=1; else
+  echo "  temps emitted: $(grep -oE '[A-Za-z-]+__[0-9]+' "$lf" | sort -u | tr '\n' ' ')(per-program counter, not process gensym)"
+  rel="${lf#"$W/l1/"}"
+  if [ -f "$W/l2/$rel" ] && diff -q "$W/l1/$rel" "$W/l2/$rel" >/dev/null 2>&1; then
+    echo "  PASS  same module -> byte-identical .clj built alone vs after another module"
+  else
+    echo "  FAIL  lowering temps depend on build context:"; diff "$W/l1/$rel" "$W/l2/$rel" 2>&1 | head; fail=1
+  fi
+fi
+
 echo
-[ "$fail" = 0 ] && echo "RESULT: PASS — emit is byte-reproducible (clj + js match temps deterministic, per-program)." || { echo "RESULT: FAIL"; exit 1; }
+[ "$fail" = 0 ] && echo "RESULT: PASS — emit is byte-reproducible (match + lowering temps deterministic, per-program)." || { echo "RESULT: FAIL"; exit 1; }
