@@ -89,8 +89,11 @@
   (let [fixed (str/join " " (mapv emit-param-tagged params))]
   (if rest-p (if (= fixed "") (str "& " (emit-param rest-p)) (str fixed " & " (emit-param rest-p))) fixed)))
 
+(defn ^String emit-binding-target [target]
+  (if (string? target) target (emit-param target)))
+
 (defn ^String emit-let-bindings [bindings]
-  (str/join "\n   " (mapv (fn [b] (str (get b "name") " " (emit-expr* (get b "value")))) bindings)))
+  (str/join "\n   " (mapv (fn [b] (str (emit-binding-target (get b "name")) " " (emit-expr* (get b "value")))) bindings)))
 
 (defn ^String emit-for-clauses [clauses]
   (str/join "\n   " (mapv (fn [c] (let [t (get c "type")]
@@ -463,6 +466,11 @@
   (expect! "match temps deterministic" (do
   (reset! match-counter 0)
   (= (fresh-match-sym!) "match__0")))
+  (expect! "binding-target: plain name passes through" (= (emit-binding-target "x") "x"))
+  (expect! "binding-target: seq-destructure -> [a b]" (= (emit-binding-target {"type" "seq-destructure" "names" ["a" "b"] "rest" false}) "[a b]"))
+  (expect! "binding-target: map-destructure -> {:keys [id b]}" (= (emit-binding-target {"type" "map-destructure" "keys" ["id" "b"] "as" false}) "{:keys [id b]}"))
+  (expect! "let-bindings: seq-destructure binder (no raw JSON leak)" (= (emit-let-bindings [{"name" {"type" "seq-destructure" "names" ["a" "b"] "rest" false} "value" {"node" "ref" "name" "p"}}]) "[a b] p"))
+  (expect! "let-bindings: map-destructure binder (no raw JSON leak)" (= (emit-let-bindings [{"name" {"type" "map-destructure" "keys" ["id" "b"] "as" false} "value" {"node" "ref" "name" "m"}}]) "{:keys [id b]} m"))
   (doseq [f (deref failures)]
   (println (str "  FAIL: " f)))
   (println (str "  EMIT-CLJ: " (count (deref passes)) " passed, " (count (deref failures)) " failed"))

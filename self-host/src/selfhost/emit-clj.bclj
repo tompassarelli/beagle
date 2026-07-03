@@ -148,10 +148,19 @@
 
 ;; --- bindings / clauses / bodies (recursion via emit-expr*) --------------------
 
+;; A binding target is either a plain name (string) or a destructure pattern
+;; node (map with a "type" of map-/seq-destructure). emit-param already renders
+;; both pattern shapes; strings pass through. One target-emitter for every
+;; binding context (let / loop / binding / with-open / for :let).
+(defn emit-binding-target [target :- Any] :- String
+  (if (string? target)
+    target
+    (emit-param target)))
+
 (defn emit-let-bindings [bindings :- Any] :- String
   (str/join "\n   "
     (mapv (fn [b :- Any] :- String
-            (str (get b "name") " " (emit-expr* (get b "value"))))
+            (str (emit-binding-target (get b "name")) " " (emit-expr* (get b "value"))))
           bindings)))
 
 (defn emit-for-clauses [clauses :- Any] :- String
@@ -856,6 +865,29 @@
   (expect! "match temps deterministic"
     (do (reset! match-counter 0)
         (= (fresh-match-sym!) "match__0")))
+
+  ;; regression: destructure binders in LET position must render as patterns,
+  ;; not the raw AST JSON node (fuzz campaign: emit-let-bindings str-printed
+  ;; {"type" "seq-destructure", ...}). emit-binding-target dispatches through
+  ;; emit-param; plain string names pass through unchanged.
+  (expect! "binding-target: plain name passes through"
+    (= (emit-binding-target "x") "x"))
+  (expect! "binding-target: seq-destructure -> [a b]"
+    (= (emit-binding-target {"type" "seq-destructure" "names" ["a" "b"] "rest" false})
+       "[a b]"))
+  (expect! "binding-target: map-destructure -> {:keys [id b]}"
+    (= (emit-binding-target {"type" "map-destructure" "keys" ["id" "b"] "as" false})
+       "{:keys [id b]}"))
+  (expect! "let-bindings: seq-destructure binder (no raw JSON leak)"
+    (= (emit-let-bindings
+         [{"name" {"type" "seq-destructure" "names" ["a" "b"] "rest" false}
+           "value" {"node" "ref" "name" "p"}}])
+       "[a b] p"))
+  (expect! "let-bindings: map-destructure binder (no raw JSON leak)"
+    (= (emit-let-bindings
+         [{"name" {"type" "map-destructure" "keys" ["id" "b"] "as" false}
+           "value" {"node" "ref" "name" "m"}}])
+       "{:keys [id b]} m"))
 
   (doseq [f (deref failures)]
     (println (str "  FAIL: " f)))
