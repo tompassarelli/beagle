@@ -88,7 +88,18 @@
 (def INT-EDGES [0 1 -1 2 3 7 10 42 -42 100 255 256 1000 65535 -65536
                 2147483647 -2147483648 999999])
 (def FLOAT-EDGES ["0.0" "1.5" "-3.14" "100.0" "-2.5" "0.5" "3.14159"])
-(def CHAR-EDGES ["\\a" "\\A" "\\0" "\\space" "\\newline" "\\tab" "\\z"])
+(def CHAR-EDGES ["\\a" "\\A" "\\0" "\\space" "\\newline" "\\tab" "\\z"
+                 ;; uNNNN unicode escapes: valid + boundary cases
+                 ;; reader.bclj decode-char-lit + reader-impl.rkt char-lit-reader
+                 "\\u0041"  ;; 'A' — printable ASCII (same as \A)
+                 "\\u0000"  ;; NULL — lower boundary
+                 "\\u0001"  ;; SOH — first non-null control
+                 "\\u007f"  ;; DEL — highest ASCII
+                 "\\u0080"  ;; PAD — first non-ASCII
+                 "\\u00e9"  ;; 'é' — Latin small letter e with acute
+                 "\\uffff"  ;; U+FFFF — upper BMP boundary
+                 "\\u0020"  ;; SPACE — same as \space
+                 ])
 (def KW-POOL ["a" "b" "c" "k1" "k2" "name" "count" "x" "y" "kind" "id" "val"])
 (def KW-POOL-KW (mapv #(str ":" %) KW-POOL))
 (def STR-EDGES ["" "a" "hello world" "with \\\"quote\\\"" "tab\\there"
@@ -218,9 +229,13 @@
 
 (defn gen-threading! [ctx env d]
   (let [r (:rng ctx)
-        kind (rpick! r ["->" "->>" "cond->" "some->"])
+        ;; Expanded: both compilers accept ->, ->>, cond->, cond->>, some->, some->>
+        ;; as-> omitted: needs a placeholder symbol that must appear in steps (complex
+        ;; to generate correctly without type errors).
+        kind (rpick! r ["->" "->>" "cond->" "cond->>" "some->" "some->>"])
         nsteps (+ 1 (rint! r 3))
-        last? (= kind "->>")
+        ;; last? = true for ->-family variants that thread as LAST arg
+        last? (or (= kind "->>") (= kind "cond->>") (= kind "some->>"))
         init (gen ctx env (if last? :any :int) (dec d))
         steps (str/join " "
                 (for [_ (range nsteps)]
@@ -286,6 +301,17 @@
         env' (conj env {:name i :type :int})]
     (format "(dotimes [%s %s] %s)" i (rpick! r ["1" "2" "3" "5"])
             (gen ctx env' :any (dec d)))))
+
+(defn gen-when-not! [ctx env d]
+  (let [r (:rng ctx)]
+    (format "(when-not %s %s)" (gen-safe-bool ctx env (dec d)) (gen ctx env :any (dec d)))))
+
+(defn gen-if-not! [ctx env d]
+  (let [r (:rng ctx)]
+    (format "(if-not %s %s %s)"
+            (gen-safe-bool ctx env (dec d))
+            (gen ctx env :any (dec d))
+            (gen ctx env :any (dec d)))))
 
 (defn gen-case! [ctx env d]
   (let [r (:rng ctx)
@@ -370,7 +396,9 @@
               [1 #(gen-fn-lit! ctx env d (+ 1 (rint! r 2)) :any)]
               [3 (opt #(call-user-fn! ctx env d))]
               [2 (opt #(call-macro! ctx env d))]
-              [1 #(format "(when %s %s)" (gen ctx env :bool (dec d)) (gen ctx env :any (dec d)))]]
+              [1 #(format "(when %s %s)" (gen ctx env :bool (dec d)) (gen ctx env :any (dec d)))]
+              [1 #(gen-when-not! ctx env d)]
+              [1 #(gen-if-not! ctx env d)]]
         ;; per-target extras
         extra (case tgt
                 :clj [[2 #(gen-doseq! ctx env d)]
