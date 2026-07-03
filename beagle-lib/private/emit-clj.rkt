@@ -407,6 +407,28 @@
 
 ;; --- expressions -----------------------------------------------------------
 
+;; Emit a Racket char? as a Clojure character literal (\tab, \z, A, …).
+;; Named chars use their Clojure spelling; printable ASCII use bare \X;
+;; everything else gets a \uNNNN hex escape (zero-padded to 4 digits).
+(define (emit-clj-char c)
+  (case c
+    [(#\space)     "\\space"]
+    [(#\tab)       "\\tab"]
+    [(#\newline)   "\\newline"]
+    [(#\return)    "\\return"]
+    [(#\page)      "\\formfeed"]
+    [(#\backspace) "\\backspace"]
+    [else
+     (define n (char->integer c))
+     (if (and (>= n 33) (<= n 126))
+       ;; printable ASCII (excluding space, which is named above)
+       (string #\\ c)
+       ;; non-printable / non-ASCII → \uNNNN
+       (string-append "\\u"
+                      (let ([h (number->string n 16)])
+                        (string-append (make-string (max 0 (- 4 (string-length h))) #\0)
+                                       h))))]))
+
 (define (emit-expr e)
   (with-srcloc-meta e (emit-expr-core e)))
 
@@ -429,6 +451,7 @@
     [(boolean? e)       (if e "true" "false")]
     [(exact-integer? e) (number->string e)]
     [(real? e)          (emit-clj-number e)]
+    [(char? e)          (emit-clj-char e)]
     [(symbol? e)        (symbol->string e)]
     [(quoted? e)
      ;; '[…] / '{…} / '#{…} containers are self-evaluating in Clojure
@@ -895,6 +918,7 @@
     [(eq? val 'nil) "nil"]
     [(string? val) (format "~v" val)]
     [(boolean? val) (if val "true" "false")]
+    [(char? val) (emit-clj-char val)]
     [(and (symbol? val) (char=? (string-ref (symbol->string val) 0) #\:))
      (symbol->string val)]
     [else (format "~a" val)]))
@@ -937,6 +961,7 @@
     [(eq? val 'nil) (format "(nil? ~a)" target-sym)]
     [(string? val)  (format "(= ~a ~v)" target-sym val)]
     [(boolean? val) (format "(~a ~a)" (if val "true?" "false?") target-sym)]
+    [(char? val)    (format "(= ~a ~a)" target-sym (emit-clj-char val))]
     [(and (symbol? val) (char=? (string-ref (symbol->string val) 0) #\:))
      (format "(= ~a ~a)" target-sym (symbol->string val))]
     [else (format "(= ~a ~a)" target-sym val)]))
@@ -1140,6 +1165,7 @@
     [(boolean? d)       (if d "true" "false")]
     [(exact-integer? d) (number->string d)]
     [(real? d)          (emit-clj-number d)]
+    [(char? d)          (emit-clj-char d)]
     [(symbol? d)        (symbol->string d)]
     [(null? d)          "()"]
     [(bracketed? d)

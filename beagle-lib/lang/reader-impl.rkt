@@ -357,6 +357,70 @@
     (datum->syntax #f result (vector src line col pos #f))
     result))
 
+;; Clojure char literal reader.
+;;
+;; Clojure uses `\X` (backslash prefix) for character literals:
+;;   \z          → char 'z'   (single printable char)
+;;   \tab        → tab char   (named: tab / space / newline / return / formfeed / backspace)
+;;   \uNNNN      → unicode char (4 hex digits)
+;;
+;; Racket's default readtable treats `\` as an identifier-escape that strips
+;; the backslash and keeps the following char as part of an identifier, so
+;; `\tab` → symbol `tab` and `\z` → symbol `z`. This is silent and wrong
+;; for Beagle/Clojure sources. Registering `\` as a terminating-macro fixes it.
+;;
+;; Returns a Racket char? value; the parse/emit layers handle it from there.
+(define (char-lit-reader ch port src line col pos)
+  (define next (peek-char port))
+  (cond
+    [(eof-object? next)
+     (error 'beagle "unexpected EOF after `\\` (char literal needs a character)")]
+    ;; \uNNNN — four-hex-digit unicode escape
+    [(char=? next #\u)
+     (define lookahead (peek-string 5 0 port))  ; "uNNNN"
+     (if (and (string? lookahead)
+              (= (string-length lookahead) 5)
+              (regexp-match? #rx"^u[0-9a-fA-F]{4}$" lookahead))
+       (begin
+         (read-char port) ; u
+         (let* ([hex    (read-string 4 port)]
+                [result (integer->char (string->number hex 16))])
+           (if src (datum->syntax #f result (vector src line col pos 6)) result)))
+       ;; not a unicode escape — `u` is the single char
+       (begin (read-char port)
+              (if src (datum->syntax #f next (vector src line col pos 2)) next)))]
+    ;; alphabetic: may be a named char (tab, space, newline, …) or single letter
+    [(char-alphabetic? next)
+     (define name
+       (let loop ([acc '()])
+         (define c (peek-char port))
+         (if (and (char? c) (char-alphabetic? c))
+           (begin (read-char port) (loop (cons c acc)))
+           (list->string (reverse acc)))))
+     (define result
+       (if (= (string-length name) 1)
+         ;; single letter (\z, \a, etc.)
+         (string-ref name 0)
+         ;; named char
+         (case (string->symbol name)
+           [(space)     #\space]
+           [(tab)       #\tab]
+           [(newline)   #\newline]
+           [(return)    #\return]
+           [(formfeed)  #\page]
+           [(backspace) #\backspace]
+           [else
+            (error 'beagle
+                   "unknown character name: \\~a\n  known names: \\tab \\space \\newline \\return \\formfeed \\backspace\n  for single char: write \\~a"
+                   name (substring name 0 1))])))
+     (if src
+       (datum->syntax #f result (vector src line col pos (+ 1 (string-length name))))
+       result)]
+    ;; single non-alphabetic char: \0, \!, \[, \newline (literal), etc.
+    [else
+     (read-char port)
+     (if src (datum->syntax #f next (vector src line col pos 2)) next)]))
+
 (define beagle-readtable
   (make-readtable #f
     #\^ 'terminating-macro meta-reader
@@ -377,6 +441,11 @@
     ;; so `~`=unquote here does not collide.)
     #\, #\space #f
     #\~ 'terminating-macro unquote-reader
+    ;; `\` is Clojure's char-literal prefix (\z, \tab, \space, \uNNNN).
+    ;; Racket's default readtable treats `\` as an identifier-escape (strips it,
+    ;; so `\tab` → symbol `tab`). Registering as terminating-macro intercepts it
+    ;; before any identifier-reading starts.
+    #\\ 'terminating-macro char-lit-reader
     #\# 'non-terminating-macro hash-dispatch))
 
 (define (beagle-read in)

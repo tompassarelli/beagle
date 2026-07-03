@@ -1608,7 +1608,7 @@
 (define (infer-expr* e env)
   (check-target-form e)
   (cond
-    [(or (string? e) (boolean? e) (exact-integer? e) (real? e))
+    [(or (string? e) (boolean? e) (exact-integer? e) (real? e) (char? e))
      (or (infer-literal-type e) ANY)]
     [(symbol? e)
      (or (infer-literal-type e)

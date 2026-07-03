@@ -1312,6 +1312,8 @@
     [(boolean? e)       (if e "true" "false")]
     [(exact-integer? e) (number->string e)]
     [(real? e)          (emit-js-number e)]
+    ;; Char literals lower to single-character strings in JS (no char type).
+    [(char? e)          (js-string-lit (string e))]
     [(symbol? e)
      (cond
        [(eq? e 'nil) "null"]
