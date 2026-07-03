@@ -22,6 +22,18 @@ LAB=.lab
 GOLD=beagle-test/conformance/expected/nix
 mkdir -p "$LAB"
 
+# Stage0 compiler: prefer the native binary (self-host/native/beagle-selfhost)
+# when present + executable; fall back to the bb-run seed otherwise. The bb path
+# is the dev fallback and stays fully working. BEAGLE_NATIVE_BIN overrides the
+# native binary path (same convention as verify-native.sh); empty forces bb. The
+# stage-isolated -e evals (rungs 1-3) stay bb — native exposes only the CLI.
+NATIVE_BIN="${BEAGLE_NATIVE_BIN-self-host/native/beagle-selfhost}"
+if [ -n "$NATIVE_BIN" ] && [ -x "$NATIVE_BIN" ]; then STAGE0=native; else STAGE0=bb; fi
+sh_main() { # selfhost CLI: <subcommand> [args...]
+  if [ "$STAGE0" = native ]; then "$NATIVE_BIN" "$@"; else bb -cp "$OUT" -m selfhost.main "$@"; fi
+}
+[ "$STAGE0" = native ] && echo "=== stage0: native ($NATIVE_BIN) ===" || echo "=== stage0: bb seed ($OUT) ==="
+
 FIXTURES=("$@")
 if [ ${#FIXTURES[@]} -eq 0 ]; then
   FIXTURES=(beagle-test/tests/fixtures/nix-*.bnix)
@@ -75,8 +87,8 @@ EOF
     bad "$name AST parity — compare $LAB/$name-nix-self-ast.json vs $astj"
   fi
 
-  echo "=== 4. full self-hosted chain (bb) vs golden : $name ==="
-  bb -cp "$OUT" -m selfhost.main emit --target nix "$src" > "$LAB/$name-nix-chain.nix" 2>"$LAB/$name-nix-chain.err"
+  echo "=== 4. full self-hosted chain ($STAGE0) vs golden : $name ==="
+  sh_main emit --target nix "$src" > "$LAB/$name-nix-chain.nix" 2>"$LAB/$name-nix-chain.err"
   if diff -q "$gold" "$LAB/$name-nix-chain.nix" >/dev/null 2>&1; then
     ok "$name FULL-CHAIN byte-parity"
   else
@@ -88,7 +100,7 @@ echo "=== 5. E021 free-dotted-name — oracle + selfhost must BOTH reject ==="
 if [ -f "$FREE_DOTTED" ]; then
   if BEAGLE_EMIT_SRCLOC=0 bin/beagle-build "$FREE_DOTTED" /dev/null >/dev/null 2>&1; then
     bad "nix-free-dotted oracle accepted (should reject E021)"
-  elif bb -cp "$OUT" -m selfhost.main check --target nix "$FREE_DOTTED" >/dev/null 2>&1; then
+  elif sh_main check --target nix "$FREE_DOTTED" >/dev/null 2>&1; then
     bad "nix-free-dotted selfhost accepted (should reject E021)"
   else
     ok "nix-free-dotted E021 rejected (oracle + selfhost, exit nonzero)"

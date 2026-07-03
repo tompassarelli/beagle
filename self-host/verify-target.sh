@@ -36,6 +36,18 @@ case "$TARGET" in
 esac
 
 command -v bb >/dev/null 2>&1 || { echo "verify-target: bb (babashka) not on PATH"; exit 2; }
+
+# Stage0 compiler: prefer the native binary (self-host/native/beagle-selfhost)
+# when present + executable; fall back to the bb-run seed otherwise. The bb path
+# is the dev fallback and stays fully working. BEAGLE_NATIVE_BIN overrides the
+# native binary path (same convention as verify-native.sh); empty forces bb.
+NATIVE_BIN="${BEAGLE_NATIVE_BIN-self-host/native/beagle-selfhost}"
+if [ -n "$NATIVE_BIN" ] && [ -x "$NATIVE_BIN" ]; then STAGE0=native; else STAGE0=bb; fi
+sh_main() { # selfhost CLI: <subcommand> [args...]
+  if [ "$STAGE0" = native ]; then "$NATIVE_BIN" "$@"; else bb -cp "$SEED" -m selfhost.main "$@"; fi
+}
+[ "$STAGE0" = native ] && echo "=== stage0: native ($NATIVE_BIN) ===" || echo "=== stage0: bb seed ($SEED) ==="
+
 have_oracle=1
 if [ -f bin/_beagle-racket ]; then source bin/_beagle-racket 2>/dev/null || have_oracle=0; else have_oracle=0; fi
 
@@ -50,8 +62,8 @@ norm() { awk 'BEGIN{RS="\0"} {sub(/\n*$/,"\n"); printf "%s", $0}' "$1"; }
 
 # selfhost parse -> emit for TARGET, isolated from the checker
 selfhost_emit() { # <src> <out>
-  bb -cp "$SEED" -m selfhost.main ast --target "$TARGET" "$1" 2>/dev/null \
-    | bb -cp "$SEED" -m selfhost.main emit-from-ast --target "$TARGET" > "$2" 2>"$2.err"
+  sh_main ast --target "$TARGET" "$1" 2>/dev/null \
+    | sh_main emit-from-ast --target "$TARGET" > "$2" 2>"$2.err"
 }
 
 # find a corpus source by golden id (tests/fixtures or conformance/corpus)
@@ -91,7 +103,7 @@ if [ -d "$EXPECT" ]; then
     [ -f "$diag" ] || continue
     id="$(basename "$diag" .diag)"
     src="$(find_src "$id")" || { bad "$id (no source .$EXT found)"; continue; }
-    if bb -cp "$SEED" -m selfhost.main check --target "$TARGET" "$src" >/dev/null 2>&1; then
+    if sh_main check --target "$TARGET" "$src" >/dev/null 2>&1; then
       bad "$id selfhost accepted (should reject)"
     else
       ok "$id selfhost rejects (nonzero)"
