@@ -17,6 +17,20 @@ OUT=self-host/seed
 LAB=.lab
 mkdir -p "$LAB"
 
+# Stage0 compiler: prefer the native binary (self-host/native/beagle-selfhost)
+# when present + executable; fall back to the bb-run seed otherwise. The bb path
+# is the dev fallback and the remint loop's substrate — it stays fully working.
+# BEAGLE_NATIVE_BIN overrides the native binary path (same convention as
+# verify-native.sh); set it empty to force the bb fallback.
+NATIVE_BIN="${BEAGLE_NATIVE_BIN-self-host/native/beagle-selfhost}"
+if [ -n "$NATIVE_BIN" ] && [ -x "$NATIVE_BIN" ]; then STAGE0=native; else STAGE0=bb; fi
+# selfhost CLI dispatch — only the main-driver subcommands (emit/check/ast) route
+# to native; the stage-isolated -e evals below stay bb (native exposes only the CLI).
+sh_main() { # <subcommand> [args...]
+  if [ "$STAGE0" = native ]; then "$NATIVE_BIN" "$@"; else bb -cp "$OUT" -m selfhost.main "$@"; fi
+}
+[ "$STAGE0" = native ] && echo "=== stage0: native ($NATIVE_BIN) ===" || echo "=== stage0: bb seed ($OUT) ==="
+
 MODULES=("$@")
 if [ ${#MODULES[@]} -eq 0 ]; then
   MODULES=(self-host/fixtures/*.bclj)
@@ -70,8 +84,8 @@ EOF
     bad "$name AST parity — compare $LAB/$name-self-ast.json vs $astj"
   fi
 
-  echo "=== 4. full self-hosted chain (bb) vs racket emit : $name ==="
-  bb -cp "$OUT" -m selfhost.main emit "$src" > "$LAB/$name-chain.clj" 2>"$LAB/$name-chain.err"
+  echo "=== 4. full self-hosted chain ($STAGE0) vs racket emit : $name ==="
+  sh_main emit "$src" > "$LAB/$name-chain.clj" 2>"$LAB/$name-chain.err"
   if diff -q "$oracle" "$LAB/$name-chain.clj" >/dev/null 2>&1; then
     ok "$name FULL-CHAIN byte-parity"
   else
@@ -89,7 +103,7 @@ if [ -d "self-host/fixtures/invalid" ]; then
       continue
     fi
     # selfhost must exit nonzero
-    if bb -cp "$OUT" -m selfhost.main check "$inv" >"$LAB/$iname-inv.out" 2>&1; then
+    if sh_main check "$inv" >"$LAB/$iname-inv.out" 2>&1; then
       bad "$iname selfhost accepted (should reject)"
     else
       ok "$iname selfhost rejects (exit nonzero)"
@@ -112,14 +126,14 @@ if [ -d "self-host/fixtures/modules" ]; then
     BEAGLE_EMIT_SRCLOC=0 bin/beagle-build "$src" "$oracle" >/dev/null 2>&1 || { bad "$name mod oracle emit"; continue; }
     bin/beagle-ast "$src" > "$oast" 2>/dev/null || { bad "$name mod oracle ast"; continue; }
 
-    bb -cp "$OUT" -m selfhost.main emit "$src" > "$LAB/$name-mod-chain.clj" 2>"$LAB/$name-mod-chain.err"
+    sh_main emit "$src" > "$LAB/$name-mod-chain.clj" 2>"$LAB/$name-mod-chain.err"
     if diff -q "$oracle" "$LAB/$name-mod-chain.clj" >/dev/null 2>&1; then
       ok "$name mod FULL-CHAIN byte-parity"
     else
       bad "$name mod FULL-CHAIN byte-parity — diff $oracle $LAB/$name-mod-chain.clj"
     fi
 
-    bb -cp "$OUT" -m selfhost.main ast "$src" > "$LAB/$name-mod-self.json" 2>/dev/null
+    sh_main ast "$src" > "$LAB/$name-mod-self.json" 2>/dev/null
     if python3 - "$LAB/$name-mod-self.json" "$oast" <<'EOF' >/dev/null 2>&1
 import json, sys
 a = json.load(open(sys.argv[1])); b = json.load(open(sys.argv[2]))
@@ -145,7 +159,7 @@ if [ -d "self-host/fixtures/modules/invalid" ]; then
       bad "$iname oracle accepted (should reject)"
       continue
     fi
-    if bb -cp "$OUT" -m selfhost.main check "$inv" >"$LAB/$iname-modinv.out" 2>&1; then
+    if sh_main check "$inv" >"$LAB/$iname-modinv.out" 2>&1; then
       bad "$iname selfhost accepted (should reject)"
     else
       ok "$iname selfhost rejects (exit nonzero)"
