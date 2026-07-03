@@ -1,0 +1,4 @@
+#lang beagle/clj
+(ns fuzz.case00992)
+
+(def g__9 (cond->> "tab\there" (int? \u0020) (conj (mapv (fn [p__10] nil) nil)) (= 2 999999) (- 255) false (dec)))

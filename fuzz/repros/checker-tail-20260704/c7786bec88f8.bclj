@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns fuzz.case00272)
+
+(defn f__11
+  [p__12] (str :x 256)
+  [p__13 p__14 p__15] (cond->> "  padded  " (not true) (+ (+ 255 7)) (> 10 1000) (inc) false (inc)))
