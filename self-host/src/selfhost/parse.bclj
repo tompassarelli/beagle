@@ -53,10 +53,13 @@
 (def ERRORS :- Any (atom []))
 
 (defn parse-errors [] :- Any
-  (deref ERRORS))
+  ;; macro-expansion errors (arity, depth) are parse-time diagnostics too;
+  ;; fold them in so the driver's exit gate treats them like any parse error.
+  (into (deref ERRORS) (mac/macro-errors)))
 
 (defn reset-errors! [] :- Nil
   (reset! ERRORS [])
+  (mac/reset-macro-errors!)
   nil)
 
 (defn- err! [msg :- String] :- Any
@@ -2337,6 +2340,24 @@
     (do (reset-errors!)
         (parse-expr* ["unsafe-js" ["#%string" "1+1"]])
         (> (count (parse-errors)) 0)))
+
+  ;; --- parse diagnostics gate the driver exit code (fuzz: `check` printed
+  ;; parse errors but still exited 0/'ok'; main now fails on non-empty
+  ;; parse-errors). Lock the surface main reads: a parse diagnostic and a
+  ;; macro-expansion diagnostic both show up in (parse-errors), and
+  ;; reset-errors! clears both. ---
+  (expect! "let bare `:` recorded as parse error"
+    (do (reset-errors!)
+        (parse-let-bindings! [BRACKET-TAG "y" ":" "Int" 3])
+        (> (count (parse-errors)) 0)))
+  (expect! "parse-errors folds macro-expansion errors; reset clears both"
+    (do (reset-errors!)
+        (let [reg (mac/make-macro-registry)]
+          (mac/register-macro! reg "zero0" "safe" [] ["+" 1 2])
+          (mac/expand-fully! reg ["zero0" 9] 0 nil))
+        (let [folded (> (count (parse-errors)) 0)]
+          (reset-errors!)
+          (and folded (= (count (parse-errors)) 0)))))
 
   ;; --- type parsing ---
   (expect! "parse-type primitive"

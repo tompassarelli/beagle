@@ -14,10 +14,11 @@
 (def ERRORS (atom []))
 
 (defn parse-errors []
-  (deref ERRORS))
+  (into (deref ERRORS) (mac/macro-errors)))
 
 (defn reset-errors! []
   (reset! ERRORS [])
+  (mac/reset-macro-errors!)
   nil)
 
 (defn- err! [^String msg]
@@ -1173,6 +1174,18 @@
   (reset-errors!)
   (parse-expr* ["unsafe-js" ["#%string" "1+1"]])
   (> (count (parse-errors)) 0)))
+  (expect! "let bare `:` recorded as parse error" (do
+  (reset-errors!)
+  (parse-let-bindings! [BRACKET-TAG "y" ":" "Int" 3])
+  (> (count (parse-errors)) 0)))
+  (expect! "parse-errors folds macro-expansion errors; reset clears both" (do
+  (reset-errors!)
+  (let [reg (mac/make-macro-registry)]
+  (mac/register-macro! reg "zero0" "safe" [] ["+" 1 2])
+  (mac/expand-fully! reg ["zero0" 9] 0 nil))
+  (let [folded (> (count (parse-errors)) 0)]
+  (reset-errors!)
+  (and folded (= (count (parse-errors)) 0)))))
   (expect! "parse-type primitive" (= (parse-type "Int") {"kind" "prim" "name" "Int"}))
   (expect! "parse-type nullable" (let [t (parse-type "String?")]
   (and (= (get t "kind") "union") (= (count (get t "members")) 2))))

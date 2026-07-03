@@ -20,6 +20,28 @@
 (def SPLICE-MARKER :- String "splice")
 (def MAX-EXPANSION-DEPTH :- Int 64)
 
+;; --- macro error sink --------------------------------------------------------
+;; Racket raises on a macro error (arity, depth-exceeded) and aborts the whole
+;; compile. The self-host chain collects instead (tranche-1 discipline): record
+;; the message so parse.bclj folds it into parse-errors (nonzero exit / no
+;; 'ok'), and expansion returns an INERT non-macro datum so the parse loop does
+;; not re-dispatch the still-a-macro-application form forever.
+(def MACRO-ERRORS :- Any (atom []))
+
+(defn macro-errors [] :- Any
+  (deref MACRO-ERRORS))
+
+(defn reset-macro-errors! [] :- Nil
+  (reset! MACRO-ERRORS [])
+  nil)
+
+(defn- macro-err! [msg :- String] :- Any
+  (swap! MACRO-ERRORS conj msg)
+  (selfhost.rt/eprint (str "beagle: " msg "\n"))
+  ;; the `nil` symbol datum parses to a nil literal and is not a datum-pair,
+  ;; so macro-application? is false and expand-fully!/parse-list-form! stop.
+  "nil")
+
 ;; --- expansion provenance ----------------------------------------------------
 
 (defn make-root-ctx [name :- String] :- Any
@@ -458,18 +480,18 @@
         kind (get m "kind")
         template (hygienize-template! (get m "template") fixed rest-name reg)]
     (cond
-      ;; arity errors: eprint + return the form unexpanded (expand-fully!'s
-      ;; depth cap terminates the retry loop; Racket raises here instead)
+      ;; arity errors: record + return an INERT datum (Racket raises + aborts
+      ;; here). Returning the form unexpanded would keep it a macro-application,
+      ;; which parse-list-form! re-dispatches into expand-fully! forever (the
+      ;; depth cap only bounds a single pass, not the outer parse retry).
       (and (some? rest-name) (< (count args) (count fixed)))
-        (do (selfhost.rt/eprint
-              (str "beagle: macro " name ": expected at least " (str (count fixed))
-                   " arg(s), got " (str (count args)) "\n"))
-            (datum-cons name args))
+        (macro-err!
+          (str "macro " name ": expected at least " (str (count fixed))
+               " arg(s), got " (str (count args))))
       (and (nil? rest-name) (not= (count args) (count fixed)))
-        (do (selfhost.rt/eprint
-              (str "beagle: macro " name ": expected " (str (count fixed))
-                   " arg(s), got " (str (count args)) "\n"))
-            (datum-cons name args))
+        (macro-err!
+          (str "macro " name ": expected " (str (count fixed))
+               " arg(s), got " (str (count args))))
       :else
         (let [substituted
                 (if (some? rest-name)
@@ -503,10 +525,12 @@
   (cond
     (>= depth MAX-EXPANSION-DEPTH)
       (let [chain (if (nil? ctx) "" (str "\n" (format-expansion-chain ctx)))]
-        (selfhost.rt/eprint
-          (str "beagle: macro expansion exceeded depth " (str MAX-EXPANSION-DEPTH)
-               " (possible infinite recursion)" chain "\n"))
-        datum)
+        ;; record + return inert: returning `datum` (still a macro-application)
+        ;; makes parse-list-form! re-dispatch it into a fresh expand-fully!,
+        ;; an unbounded outer loop. Racket raises + aborts here.
+        (macro-err!
+          (str "macro expansion exceeded depth " (str MAX-EXPANSION-DEPTH)
+               " (possible infinite recursion)" chain)))
     (macro-application? reg datum)
       (let [name (datum-car datum)
             next-ctx (if (nil? ctx) (make-root-ctx name) (push-ctx ctx name))
@@ -711,6 +735,20 @@
       (not (macro-application? reg ["unknown" 5])))
     (expect! "macro-app?: false for non-pair"
       (not (macro-application? reg "atom"))))
+
+  ;; --- test: arity error halts expansion (fuzz: 0-arg macro bare threading
+  ;; step looped forever — expand-fully! returned the still-a-macro-application
+  ;; form, parse-list-form! re-dispatched it endlessly). Now expand-fully!
+  ;; returns an INERT non-macro datum and records the error. ---
+  (let [reg (make-macro-registry)]
+    (register-macro! reg "zero" "safe" [] ["+" 1 2])
+    (reset-macro-errors!)
+    (let [result (expand-fully! reg ["zero" 5] 0 nil)]
+      (expect! "arity halt: returns inert non-macro datum"
+        (not (macro-application? reg result)))
+      (expect! "arity halt: records a macro error"
+        (= (count (macro-errors)) 1)))
+    (reset-macro-errors!))
 
   ;; --- summary ---
   (doseq [f (deref failures)]
