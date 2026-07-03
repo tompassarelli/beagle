@@ -8,11 +8,13 @@
   (:gen-class))
 (define-mode strict)
 
+(require clojure.string :as str)
 (require selfhost.rt)
 (require selfhost.reader :as rd)
 (require selfhost.parse :as p)
 (require selfhost.check :as c)
 (require selfhost.emit-clj :as e)
+(require selfhost.emit-js :as ejs)
 
 (declare-extern selfhost.rt/slurp-file [String -> String])
 (declare-extern selfhost.rt/read-stdin [-> String])
@@ -21,8 +23,20 @@
 (declare-extern selfhost.rt/exit [Int -> Nil])
 (declare-extern selfhost.rt/eprint [String -> Nil])
 
-(defn- parse-file! [path :- String] :- Any
-  (let [prog (p/parse-program! (rd/read-program (selfhost.rt/slurp-file path)))
+;; Inject the requested emit target into the datum stream when the source
+;; declares none, so parse (js/quote combiner, target-case) + emit agree. The
+;; #lang line is consumed by the reader (target dropped from read-program), and
+;; the CLI --target is authoritative; a source-level (define-target ...) wins if
+;; present (duplicate would be a parse error).
+(defn- has-define-target? [datums :- Any] :- Bool
+  (> (count (filterv (fn [d :- Any] :- Bool
+                       (and (vector? d) (>= (count d) 2) (= (nth d 0) "define-target")))
+                     datums)) 0))
+
+(defn- parse-file-target! [path :- String target :- String] :- Any
+  (let [datums0 (rd/read-program (selfhost.rt/slurp-file path))
+        datums (if (has-define-target? datums0) datums0 (into [["define-target" target]] datums0))
+        prog (p/parse-program! datums)
         perrs :- Any (p/parse-errors)]
     ;; Racket raises on a parse diagnostic and exits nonzero. The self-host
     ;; parser collects + eprints, so the driver must fail explicitly: any parse
@@ -42,29 +56,55 @@
         prog)
       prog)))
 
-(defn- cmd-ast! [path :- String] :- Nil
-  (println (selfhost.rt/to-json (parse-file! path))))
+;; Emit dispatch by target. Default clj keeps current behavior; each backend
+;; adds one branch here (parallel target ports union into this table).
+(defn- emit-for-target [target :- String prog :- Any] :- String
+  (cond
+    (= target "js") (ejs/emit-program! prog)
+    :else (e/emit-program! prog)))
 
-(defn- cmd-check! [path :- String] :- Nil
-  (check-or-die! (parse-file! path))
+(defn- cmd-ast! [path :- String target :- String] :- Nil
+  (println (selfhost.rt/to-json (parse-file-target! path target))))
+
+(defn- cmd-check! [path :- String target :- String] :- Nil
+  (check-or-die! (parse-file-target! path target))
   (selfhost.rt/eprint "ok\n"))
 
-(defn- cmd-emit! [path :- String] :- Nil
-  (print (e/emit-program! (check-or-die! (parse-file! path)))))
+(defn- cmd-emit! [path :- String target :- String] :- Nil
+  (print (emit-for-target target (check-or-die! (parse-file-target! path target)))))
 
-(defn- cmd-emit-from-ast! [] :- Nil
-  (print (e/emit-program! (selfhost.rt/parse-json (selfhost.rt/read-stdin)))))
+(defn- cmd-emit-from-ast! [target :- String] :- Nil
+  (print (emit-for-target target (selfhost.rt/parse-json (selfhost.rt/read-stdin)))))
+
+;; Extract `--target VALUE` (default clj); returns the first non-flag positional
+;; after the command as the path.
+(defn- flag-value [args :- Any flag :- String default :- String] :- String
+  (loop [i 0]
+    (if (>= i (count args)) default
+      (if (and (= (nth args i) flag) (< (+ i 1) (count args)))
+        (nth args (+ i 1))
+        (recur (+ i 1))))))
+
+(defn- first-positional [args :- Any] :- String
+  (loop [i 1]
+    (if (>= i (count args)) ""
+      (let [a (nth args i)]
+        (cond
+          (= a "--target") (recur (+ i 2))
+          (str/starts-with? a "--") (recur (+ i 1))
+          :else a)))))
 
 (defn -main [& args :- (Vec String)] :- Nil
   (let [cmd (if (> (count args) 0) (nth args 0) "")
-        path (if (> (count args) 1) (nth args 1) "")]
+        target (flag-value args "--target" "clj")
+        path (first-positional args)]
     (cond
-      (= cmd "ast") (cmd-ast! path)
-      (= cmd "check") (cmd-check! path)
-      (= cmd "emit") (cmd-emit! path)
-      (= cmd "emit-from-ast") (cmd-emit-from-ast!)
+      (= cmd "ast") (cmd-ast! path target)
+      (= cmd "check") (cmd-check! path target)
+      (= cmd "emit") (cmd-emit! path target)
+      (= cmd "emit-from-ast") (cmd-emit-from-ast! target)
       :else
-        (do (selfhost.rt/eprint "usage: selfhost.main ast|check|emit FILE, or emit-from-ast < ast.json\n")
+        (do (selfhost.rt/eprint "usage: selfhost.main [--target clj|js] ast|check|emit FILE, or emit-from-ast < ast.json\n")
             (selfhost.rt/exit 2)))
     ;; clojure.main flushes *out* in a finally; the gen-class/native-image entry
     ;; bypasses clojure.main, so an unflushed `print` would exit with empty stdout.
