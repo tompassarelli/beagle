@@ -208,6 +208,12 @@
 ;; arrives as JSON false, not null.
 (defn absent? [x :- Any] :- Bool (or (nil? x) (false? x)))
 
+;; ast-json encodes an absent `if`/`if-some` else as expr->json(#f) = a literal
+;; false-bool node (as well as JSON false / null). Match emit-clj else-less-if?.
+(defn else-less-if? [els :- Any] :- Bool
+  (or (nil? els) (false? els)
+      (and (map? els) (= (get els "node") "literal") (= (get els "kind") "bool") (false? (get els "value")))))
+
 ;; --- await detection (emit-js.rkt contains-await? / expr-has-await?) ----------
 ;; await is the js/await static-call. Descends control-flow + call args but NOT
 ;; fn bodies (an inner arrow's await doesn't make the outer fn async).
@@ -708,7 +714,7 @@
         (or (= node "let") (= node "do") (= node "when") (= node "when-let")
             (= node "doseq") (= node "when-some") (= node "if-let") (= node "if-some")) true
         (= node "if") (let [el (get e "else")]
-                        (if (absent? el) true (or (stmt-inline? (get e "then")) (stmt-inline? el))))
+                        (if (else-less-if? el) true (or (stmt-inline? (get e "then")) (stmt-inline? el))))
         :else false))))
 
 ;; --- for / doseq --------------------------------------------------------------
@@ -791,7 +797,7 @@
               (fn [] :- String
                 (str "const " name " = " val-str ";\n" indent "if (" name " != null) {\n" inner
                      (emit-body-stmts (get e "body") inner) "\n" indent "}"))))
-        (and (= node "if") (absent? (get e "else")))
+        (and (= node "if") (else-less-if? (get e "else")))
           (str "if (" (emit-expr* (get e "cond")) ") {\n" inner (emit-stmt-inline (get e "then") inner) "\n" indent "}")
         :else (emit-expr-stmt e)))))
 
@@ -843,7 +849,7 @@
                       else-str (emit-return-position (get e "else") inner)]
                   (str "const " name " = " val-str ";\n" indent "if (" name " != null) {\n" inner
                        then-str "\n" indent "} else {\n" inner else-str "\n" indent "}")))))
-        (and (= node "if") (absent? (get e "else")))
+        (and (= node "if") (else-less-if? (get e "else")))
           (str "if (" (emit-expr* (get e "cond")) ") {\n" inner (emit-return-position (get e "then") inner) "\n" indent "}")
         (and (= node "if")
              (or (stmt-inline? (get e "then")) (stmt-inline? (get e "else"))
@@ -906,7 +912,7 @@
           (let [cond-str (emit-expr* (get e "cond"))
                 then-str (emit-loop-stmt (get e "then") bind-names)
                 el (get e "else")]
-            (if (absent? el)
+            (if (else-less-if? el)
               (str "if (" cond-str ") { " then-str " } else { return null; }")
               (str "if (" cond-str ") { " then-str " } else { " (emit-loop-stmt el bind-names) " }")))
         (and (= node "let") (body-contains-recur? (get e "body")))
@@ -1158,7 +1164,7 @@
         (= node "defonce") (str "const " (mangle-name (get e "name")) " = " (emit-expr* (get e "value")) ";")
         (= node "if")
           (let [el (get e "else")]
-            (if (absent? el)
+            (if (else-less-if? el)
               (str "(" (emit-expr* (get e "cond")) " ? " (emit-expr* (get e "then")) " : null)")
               (str "(" (emit-expr* (get e "cond")) " ? " (emit-expr* (get e "then")) " : " (emit-expr* el) ")")))
         (= node "when")
@@ -1266,10 +1272,9 @@
             (if (absent? dflt)
               (str target-str "." prop)
               (str "(" target-str "." prop " != null ? " target-str "." prop " : " (emit-expr* dflt) ")")))
-        (= node "threading")
-          (let [args (get e "args")]
-            (if (= 0 (count args)) (str "(" (get e "kind") ")")
-              (str "(" (get e "kind") " " (str/join " " (mapv emit-expr* args)) ")")))
+        ;; JS emits the DESUGARED threading chain (emit-js.rkt threading-marker),
+        ;; unlike clj which reconstructs the surface form.
+        (= node "threading") (emit-expr* (get e "desugared"))
         (= node "try")
           (let [body-str (emit-body-return* (get e "body") "  ")
                 catch-strs (mapv (fn [c :- Any] :- String

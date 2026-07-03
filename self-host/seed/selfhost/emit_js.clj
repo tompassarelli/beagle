@@ -128,6 +128,9 @@
 (defn ^Boolean absent? [x]
   (or (nil? x) (false? x)))
 
+(defn ^Boolean else-less-if? [els]
+  (or (nil? els) (false? els) (and (map? els) (= (get els "node") "literal") (= (get els "kind") "bool") (false? (get els "value")))))
+
 (defn ^Boolean expr-has-await? [e]
   (if (not (map? e)) false (let [node (get e "node")
    anyb (fn [xs] (> (count (filterv (fn [x] (expr-has-await? x)) xs)) 0))]
@@ -511,7 +514,7 @@
   (cond
   (or (= node "let") (= node "do") (= node "when") (= node "when-let") (= node "doseq") (= node "when-some") (= node "if-let") (= node "if-some")) true
   (= node "if") (let [el (get e "else")]
-  (if (absent? el) true (or (stmt-inline? (get e "then")) (stmt-inline? el))))
+  (if (else-less-if? el) true (or (stmt-inline? (get e "then")) (stmt-inline? el))))
   :else false))))
 
 (defn ^String emit-for-clauses [clauses ^String body-str]
@@ -570,7 +573,7 @@
   (= node "when-let") (let [val-str (emit-expr* (get e "expr"))
    name (mangle-name (get e "name"))]
   (with-bound [(get e "name")] (fn [] (str "const " name " = " val-str ";\n" indent "if (" name " != null) {\n" inner (emit-body-stmts (get e "body") inner) "\n" indent "}"))))
-  (and (= node "if") (absent? (get e "else"))) (str "if (" (emit-expr* (get e "cond")) ") {\n" inner (emit-stmt-inline (get e "then") inner) "\n" indent "}")
+  (and (= node "if") (else-less-if? (get e "else"))) (str "if (" (emit-expr* (get e "cond")) ") {\n" inner (emit-stmt-inline (get e "then") inner) "\n" indent "}")
   :else (emit-expr-stmt e)))))
 
 (defn ^String emit-return-position [e ^String indent]
@@ -606,7 +609,7 @@
   (with-bound [(get e "name")] (fn [] (let [then-str (emit-return-position (get e "then") inner)
    else-str (emit-return-position (get e "else") inner)]
   (str "const " name " = " val-str ";\n" indent "if (" name " != null) {\n" inner then-str "\n" indent "} else {\n" inner else-str "\n" indent "}")))))
-  (and (= node "if") (absent? (get e "else"))) (str "if (" (emit-expr* (get e "cond")) ") {\n" inner (emit-return-position (get e "then") inner) "\n" indent "}")
+  (and (= node "if") (else-less-if? (get e "else"))) (str "if (" (emit-expr* (get e "cond")) ") {\n" inner (emit-return-position (get e "then") inner) "\n" indent "}")
   (and (= node "if") (or (stmt-inline? (get e "then")) (stmt-inline? (get e "else")) (and (map? (get e "then")) (= (get (get e "then") "node") "if") (absent? (get (get e "then") "else"))) (and (map? (get e "else")) (= (get (get e "else") "node") "if") (absent? (get (get e "else") "else"))))) (str "if (" (emit-expr* (get e "cond")) ") {\n" inner (emit-return-position (get e "then") inner) "\n" indent "} else {\n" inner (emit-return-position (get e "else") inner) "\n" indent "}")
   :else (str "return " (emit-expr* e) ";")))))
 
@@ -653,7 +656,7 @@
   (and (= node "if") (expr-contains-recur? e)) (let [cond-str (emit-expr* (get e "cond"))
    then-str (emit-loop-stmt (get e "then") bind-names)
    el (get e "else")]
-  (if (absent? el) (str "if (" cond-str ") { " then-str " } else { return null; }") (str "if (" cond-str ") { " then-str " } else { " (emit-loop-stmt el bind-names) " }")))
+  (if (else-less-if? el) (str "if (" cond-str ") { " then-str " } else { return null; }") (str "if (" cond-str ") { " then-str " } else { " (emit-loop-stmt el bind-names) " }")))
   (and (= node "let") (body-contains-recur? (get e "body"))) (let [bindings (get e "bindings")
    body (get e "body")
    lnames (let-names-of bindings)
@@ -851,7 +854,7 @@
   (= node "def") (str "const " (mangle-name (get e "name")) " = " (emit-expr* (get e "value")) ";")
   (= node "defonce") (str "const " (mangle-name (get e "name")) " = " (emit-expr* (get e "value")) ";")
   (= node "if") (let [el (get e "else")]
-  (if (absent? el) (str "(" (emit-expr* (get e "cond")) " ? " (emit-expr* (get e "then")) " : null)") (str "(" (emit-expr* (get e "cond")) " ? " (emit-expr* (get e "then")) " : " (emit-expr* el) ")")))
+  (if (else-less-if? el) (str "(" (emit-expr* (get e "cond")) " ? " (emit-expr* (get e "then")) " : null)") (str "(" (emit-expr* (get e "cond")) " ? " (emit-expr* (get e "then")) " : " (emit-expr* el) ")")))
   (= node "when") (iife (str "if (" (emit-expr* (get e "cond")) ") { " (emit-body-return* (get e "body") "") " }") (or (expr-has-await? (get e "cond")) (contains-await? (get e "body"))))
   (= node "when-let") (let [val-str (emit-expr* (get e "expr"))
    name (mangle-name (get e "name"))]
@@ -924,8 +927,7 @@
    prop (kw->prop (get e "kw"))
    dflt (get e "default")]
   (if (absent? dflt) (str target-str "." prop) (str "(" target-str "." prop " != null ? " target-str "." prop " : " (emit-expr* dflt) ")")))
-  (= node "threading") (let [args (get e "args")]
-  (if (= 0 (count args)) (str "(" (get e "kind") ")") (str "(" (get e "kind") " " (str/join " " (mapv emit-expr* args)) ")")))
+  (= node "threading") (emit-expr* (get e "desugared"))
   (= node "try") (let [body-str (emit-body-return* (get e "body") "  ")
    catch-strs (mapv (fn [c] (with-bound [(get c "name")] (fn [] (str "catch (" (mangle-name (get c "name")) ") {\n    " (emit-body-return* (get c "body") "    ") "\n  }")))) (get e "catches"))
    fin (get e "finally")
