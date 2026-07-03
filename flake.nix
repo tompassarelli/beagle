@@ -8,12 +8,23 @@
     # latest tagged release per the §9.6 decision — bump deliberately.
     zig-overlay.url = "github:mitchellh/zig-overlay";
     zig-overlay.inputs.nixpkgs.follows = "nixpkgs";
+    # clj-nix: the standard tool for a PURE, reproducible GraalVM native-image
+    # of a deps.edn Clojure project — a fixed-output deps derivation (from a
+    # committed deps-lock.json) makes the maven fetch pure, and mkGraalBin wraps
+    # nixpkgs' buildGraalvmNativeImage. Used ONLY at build time for
+    # packages.beagle-selfhost; EPL-2.0, the same license class as the clojure
+    # and babashka already in this toolchain (not linked into the emitted binary).
+    clj-nix.url = "github:jlesquembre/clj-nix";
+    clj-nix.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { self, nixpkgs, flake-utils, zig-overlay }:
+  outputs = { self, nixpkgs, flake-utils, zig-overlay, clj-nix }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        # clj-nix builders (mkCljBin uberjar + mkGraalBin native-image), already
+        # instantiated for this system's pkgs.
+        cljpkgs = clj-nix.packages.${system};
 
         # --- THE PIN ---------------------------------------------------------
         # Racket is pinned through this flake's locked nixpkgs. The whole point
@@ -164,6 +175,36 @@
       {
         packages.default = beagle;
         packages.beagle = beagle;
+
+        # --- STAGE0 NATIVE COMPILER -----------------------------------------
+        # The canonical Beagle builder: a GraalVM native-image of the blessed
+        # seed (self-host/seed/), the self-hosted compiler's own emitted
+        # Clojure. `nix build .#beagle-selfhost` produces the ~20 MB, ~7 ms
+        # binary purely — clj-nix's deps-lock.json FOD makes the maven fetch
+        # reproducible and native-image runs offline in the sandbox.
+        #
+        # Same three native-image flags as self-host/native/build.sh (the manual
+        # nix-shell flow): graal-build-time initializes Clojure's classes at
+        # build time, and cheshire's Jackson factory (instantiated at namespace
+        # load) must be build-time-initialized too. Zero reflection config.
+        #
+        # projectSrc = ./self-host so deps.edn's :paths ["seed"] resolves inside
+        # the sandbox (native/deps.edn's "../seed" would escape it). Regenerate
+        # deps-lock.json with `nix run github:jlesquembre/clj-nix#deps-lock` in
+        # self-host/ whenever self-host/deps.edn changes.
+        packages.beagle-selfhost = cljpkgs.mkGraalBin {
+          cljDrv = cljpkgs.mkCljBin {
+            projectSrc = ./self-host;
+            name = "beagle/beagle-selfhost";
+            main-ns = "selfhost.main";
+          };
+          graalvm = pkgs.graalvmPackages.graalvm-ce;
+          extraNativeImageBuildArgs = [
+            "--no-fallback"
+            "--features=clj_easy.graal_build_time.InitClojureClasses"
+            "--initialize-at-build-time=com.fasterxml.jackson"
+          ];
+        };
 
         apps = {
           default = mkApp "beagle";

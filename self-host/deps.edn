@@ -1,0 +1,12 @@
+;; Nix-build manifest for the stage0 native compiler (packages.beagle-selfhost
+;; in flake.nix, via clj-nix mkCljBin -> mkGraalBin). projectSrc is ./self-host,
+;; so :paths is sandbox-relative ("seed", not native/deps.edn's "../seed") and
+;; the classes/ AOT dir is dropped — clj-nix does the uberjar AOT itself.
+;;
+;; native/deps.edn stays the manifest for the manual build.sh flow (nix shell
+;; graalvm-ce+clojure -c build.sh, which cd's into native/); the two share the
+;; same three pinned deps. Bump both together.
+{:paths ["seed"]
+ :deps {org.clojure/clojure {:mvn/version "1.12.1"}
+        cheshire/cheshire {:mvn/version "5.13.0"}
+        com.github.clj-easy/graal-build-time {:mvn/version "1.0.6"}}}

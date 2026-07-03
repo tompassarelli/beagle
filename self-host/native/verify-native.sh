@@ -9,10 +9,11 @@
 #   default corpus: ~/code/fram/src/fram/*.bclj + self-host/fixtures/lowering-temps.bclj
 # Requires: self-host/native/beagle-selfhost (run build.sh first), bb, the
 # checkout's pinned racket (resolved via bin/_beagle-racket).
+# BEAGLE_NATIVE_BIN overrides the binary under test (e.g. a nix-built result).
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
-NATIVE=self-host/native/beagle-selfhost
+NATIVE="${BEAGLE_NATIVE_BIN:-self-host/native/beagle-selfhost}"
 SEED=self-host/seed
 LAB=.lab/native-verify
 mkdir -p "$LAB"
