@@ -23,7 +23,15 @@ The `clj`-target compiler is written in Beagle (`self-host/`). The checked-in
 seed is that compiler's own emitted output, and CI holds the pair to a
 byte-level bootstrap fixpoint (`bin/beagle-remint`) plus byte-agreement with
 the original Racket compiler, which now serves as the conformance oracle
-(`bin/beagle-certify`). Details: [`self-host/README.md`](self-host/README.md).
+(`bin/beagle-certify`).
+
+**Stage0 is a native binary.** The canonical self-hosted compiler ships as a
+self-contained GraalVM native-image (`self-host/native/beagle-selfhost`), built
+reproducibly with `nix build .#beagle-selfhost`. Running the seed under babashka
+(`bb -cp self-host/seed …`) is a dev convenience and the substrate for the
+remint fixpoint loop — the two are held byte-identical, so the native binary is
+the distribution artifact and bb is the fallback. Details:
+[`self-host/README.md`](self-host/README.md).
 
 ## Real codebases author against Beagle
 
