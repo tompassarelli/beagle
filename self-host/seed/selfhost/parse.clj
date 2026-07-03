@@ -9,6 +9,8 @@
 
 (def ^String SET-TAG "#%set")
 
+(def ^String CHAR-TAG "#%char")
+
 (def META-FORMS ["ns" "define-mode" "define-target" "define-macro" "defmacro" "defalias" "declare-extern" "require" "import"])
 
 (def ERRORS (atom []))
@@ -811,6 +813,7 @@
   (boolean? d) (make-ref (if d "true" "false"))
   (and (number? d) (int? d)) (make-literal "number" d)
   (number? d) (make-literal "float" d)
+  (and (vector? d) (= (count d) 2) (= (nth d 0) CHAR-TAG)) (make-literal "char" (nth d 1))
   (and (vector? d) (= (count d) 2) (= (nth d 0) "#%string")) (make-literal "string" (nth d 1))
   (and (string? d) (= d "nil")) NIL-LITERAL
   (and (string? d) (keyword-sym? d)) (make-literal "keyword" (subs d 1))

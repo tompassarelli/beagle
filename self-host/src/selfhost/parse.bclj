@@ -41,6 +41,7 @@
 (def BRACKET-TAG :- String "#%brackets")
 (def MAP-TAG :- String "#%map")
 (def SET-TAG :- String "#%set")
+(def CHAR-TAG :- String "#%char")
 
 (def META-FORMS :- (Vec String)
   ["ns" "define-mode" "define-target" "define-macro" "defmacro" "defalias"
@@ -1529,6 +1530,11 @@
     (boolean? d) (make-ref (if d "true" "false"))
     (and (number? d) (int? d)) (make-literal "number" d)
     (number? d) (make-literal "float" d)
+
+    ;; char literal: [#%char code] — code is the Unicode code point (Int).
+    ;; emit-clj canonicalizes via emit-char-lit (mirrors oracle emit-clj-char).
+    (and (vector? d) (= (count d) 2) (= (nth d 0) CHAR-TAG))
+      (make-literal "char" (nth d 1))
 
     ;; string literal: [#%string value]
     (and (vector? d) (= (count d) 2) (= (nth d 0) "#%string"))

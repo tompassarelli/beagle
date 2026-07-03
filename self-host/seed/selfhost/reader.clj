@@ -12,6 +12,8 @@
 
 (def ^String REGEX-TAG "#%regex")
 
+(def ^String CHAR-TAG "#%char")
+
 (defn ^String char-at [^String s i]
   (if (and (>= i 0) (< i (count s))) (subs s i (+ i 1)) ""))
 
@@ -70,6 +72,18 @@
 
 (defn decode-u4 [^String src i]
   (+ (* 4096 (hex-val (char-at src i))) (* 256 (hex-val (char-at src (+ i 1)))) (* 16 (hex-val (char-at src (+ i 2)))) (hex-val (char-at src (+ i 3)))))
+
+(defn decode-char-lit [^String suffix]
+  (cond
+  (= suffix "space") 32
+  (= suffix "tab") 9
+  (= suffix "newline") 10
+  (= suffix "return") 13
+  (= suffix "formfeed") 12
+  (= suffix "backspace") 8
+  (and (= (count suffix) 5) (= (char-at suffix 0) "u")) (decode-u4 suffix 1)
+  (= (count suffix) 1) (int (.charAt suffix 0))
+  :else 65533))
 
 (defn read-string-literal [^String src pos]
   (let [len (count src)]
@@ -215,6 +229,10 @@
   (or (= ch ")") (= ch "]") (= ch "}")) (do
   (selfhost.rt/eprint (str "beagle reader: unexpected '" ch "'\n"))
   nil)
+  (= ch "\\") (let [sfx-result (read-symbol-text src (+ p 1))
+   sfx (get sfx-result "value")
+   code (decode-char-lit sfx)]
+  (make-result [CHAR-TAG code] (get sfx-result "pos")))
   :else (let [sym-result (read-symbol-text src p)
    text (get sym-result "value")]
   (make-result (classify-atom text) (get sym-result "pos"))))))))
@@ -306,6 +324,17 @@
   (expect! "line comment skipped" (= (rd "; ignore\n42") [42]))
   (expect! "inline comment" (= (rd "1 ; comment\n2") [1 2]))
   (expect! "multiple comment lines" (= (rd ";; first\n;; second\n42") [42]))
+  (expect! "char: named tab" (= (rd1 "\\tab") [CHAR-TAG 9]))
+  (expect! "char: named space" (= (rd1 "\\space") [CHAR-TAG 32]))
+  (expect! "char: named newline" (= (rd1 "\\newline") [CHAR-TAG 10]))
+  (expect! "char: named return" (= (rd1 "\\return") [CHAR-TAG 13]))
+  (expect! "char: named formfeed" (= (rd1 "\\formfeed") [CHAR-TAG 12]))
+  (expect! "char: named backspace" (= (rd1 "\\backspace") [CHAR-TAG 8]))
+  (expect! "char: single printable A" (= (rd1 "\\A") [CHAR-TAG 65]))
+  (expect! "char: single printable z" (= (rd1 "\\z") [CHAR-TAG 122]))
+  (expect! "char: \\uNNNN printable" (= (rd1 "\\u0041") [CHAR-TAG 65]))
+  (expect! "char: \\uNNNN non-ascii" (= (rd1 "\\u00e9") [CHAR-TAG 233]))
+  (expect! "char: in list" (= (rd1 "(str \\A \\space)") ["str" [CHAR-TAG 65] [CHAR-TAG 32]]))
   (expect! "#lang beagle/clj" (= (get (read-all "#lang beagle/clj\n") "target") "clj"))
   (expect! "#lang beagle/js" (let [result (read-all "#lang beagle/js\n(ns app)")]
   (and (= (get result "target") "js") (= (get result "datums") [["ns" "app"]]))))

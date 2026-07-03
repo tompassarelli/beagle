@@ -284,6 +284,17 @@
 (defn ^Boolean else-less-if? [els]
   (or (nil? els) (false? els) (and (= (get els "node") "literal") (= (get els "kind") "bool") (false? (get els "value")))))
 
+(defn ^String emit-char-lit [n]
+  (cond
+  (= n 32) "\\space"
+  (= n 9) "\\tab"
+  (= n 10) "\\newline"
+  (= n 13) "\\return"
+  (= n 12) "\\formfeed"
+  (= n 8) "\\backspace"
+  (and (>= n 33) (<= n 126)) (str "\\" (str (char n)))
+  :else (str "\\u" (format "%04x" n))))
+
 (defn ^String emit-expr! [e]
   (let [node (get e "node")]
   (cond
@@ -295,6 +306,7 @@
   (= kind "bool") (if (get e "value") "true" "false")
   (= kind "nil") "nil"
   (= kind "keyword") (str ":" (get e "value"))
+  (= kind "char") (emit-char-lit (get e "value"))
   :else "nil"))
   (= node "ref") (get e "name")
   (= node "def") (let [doc (get e "doc")]
@@ -449,6 +461,19 @@
   (expect! "string: u0001" (= (write-clj-string (str "x" (char 1) "y")) "\"x\\u0001y\""))
   (expect! "string: u007F" (= (write-clj-string (str (char 127))) "\"\\u007F\""))
   (expect! "string: bell named" (= (write-clj-string (str (char 7))) "\"\\a\""))
+  (expect! "char: named space" (= (emit-char-lit 32) "\\space"))
+  (expect! "char: named tab" (= (emit-char-lit 9) "\\tab"))
+  (expect! "char: named newline" (= (emit-char-lit 10) "\\newline"))
+  (expect! "char: named return" (= (emit-char-lit 13) "\\return"))
+  (expect! "char: named formfeed" (= (emit-char-lit 12) "\\formfeed"))
+  (expect! "char: named backspace" (= (emit-char-lit 8) "\\backspace"))
+  (expect! "char: printable A" (= (emit-char-lit 65) "\\A"))
+  (expect! "char: printable z" (= (emit-char-lit 122) "\\z"))
+  (expect! "char: printable !" (= (emit-char-lit 33) "\\!"))
+  (expect! "char: printable ~" (= (emit-char-lit 126) "\\~"))
+  (expect! "char: non-ascii e-acute" (= (emit-char-lit 233) "\\u00e9"))
+  (expect! "char: non-ascii U+0001" (= (emit-char-lit 1) "\\u0001"))
+  (expect! "char: \\u0041 canonicalizes to \\A" (= (emit-char-lit 65) "\\A"))
   (expect! "float: whole" (= (emit-float 1.0) "1.0"))
   (expect! "float: frac" (= (emit-float 3.14) "3.14"))
   (expect! "require: alias" (= (emit-require {"ns" "fram.kernel" "alias" "k" "refer" nil}) "[fram.kernel :as k]"))
