@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns fuzz.case07849)
+
+(defn f__4
+  [p__5] (->> (some-> 1 (str "back\\slash") (+ 65535)) (inc) (conj (some? g__3)))
+  [p__6 p__7 p__8] (let [v__9 :- Int (- 0)] (str p__6 :k2 0)))

@@ -1,0 +1,8 @@
+#lang beagle/clj
+(ns fuzz.case09079)
+
+(defn f__22
+  [p__23] (count :x)
+  [p__24 p__25 p__26] (nth (-> -2147483648 (conj -42) (conj 1) (- 10)) (min 1000 2)))
+
+(defonce g__27 :- String (str (if-let [w__28 7] :c 3.14159) (first 0) (doseq [x__29 100 :let [y__30 (str x__29)] :when (nil? x__29)] y__30)))

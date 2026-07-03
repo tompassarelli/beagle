@@ -1,0 +1,8 @@
+#lang beagle/clj
+(ns fuzz.case05523)
+
+(defn f__2
+  [p__3] (let [n__6 nil] -2147483648)
+  [p__4 p__5] (nth (->> p__4 (+ 0)) (+ 10 255)))
+
+(defn bad__11 [] (let [z :- String 100] z))

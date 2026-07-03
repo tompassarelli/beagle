@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns fuzz.case07786)
+
+(def g__1 :- Int (+ (inc 1) 256))
+
+(defonce g__6 (cond-> (if (> g__1 g__1) 7 42) (string? g__1) (- (min 255 g__1))))

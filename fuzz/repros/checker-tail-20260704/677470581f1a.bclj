@@ -1,0 +1,5 @@
+#lang beagle/clj
+(ns fuzz.case04405)
+
+(defn f__2 [p__3 p__4 :- Int]
+  (first (cond true -3.14 false :k2 false p__4 :else -2147483648)))

@@ -1,0 +1,8 @@
+#lang beagle/clj
+(ns fuzz.case04585)
+
+(def g__3 :- Bool "kind doc" true)
+
+(defn f__10
+  [] (cond (not (string? g__3)) (get nil :b) (not g__3) (mapv (fn [p__14] p__14) g__3) (< *dyn__4* *dyn__4*) (first true) :else #{:k2})
+  [p__11 p__12 p__13] (:k2 (binding [*dyn__4* 1000] p__13)))

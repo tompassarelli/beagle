@@ -1,0 +1,8 @@
+#lang beagle/clj
+(ns fuzz.case03638)
+
+(def g__3 :- Bool (keyword? (assoc 100 :name -1)))
+
+(defn f__16
+  [p__17] #{:id :x}
+  [p__18 p__19 p__20] (cond (not (string? g__3)) (let [[a__21 b__22] :c {:keys [b id]} true] 0.0) (not g__3) "" (int? p__19) (first :k1) :else (mapv (fn [p__23] 999999) p__20)))

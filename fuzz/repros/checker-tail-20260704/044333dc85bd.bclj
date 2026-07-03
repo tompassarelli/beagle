@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns fuzz.case05899)
+
+(defn f__16
+  [p__17] (get (get "hello world" :y) :b)
+  [p__18 p__19 p__20] (first (->> nil (- 1))))

@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns fuzz.case02556)
+
+(defn f__9
+  [p__10] g__1
+  [p__11 p__12 p__13] [(assoc -42 :b g__1) (f__7 (nil? g__1) 10 "  padded  ")])

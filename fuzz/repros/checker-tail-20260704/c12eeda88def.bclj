@@ -1,0 +1,8 @@
+#lang beagle/clj
+(ns fuzz.case07530)
+
+(def ^:dynamic *dyn__3* :- Int (- 255))
+
+(defn f__13
+  [p__14] (if true "12345" g__9)
+  [p__15 p__16] (nth (cond false 1.5 (int? p__15) *dyn__3* :else true) *dyn__3*))

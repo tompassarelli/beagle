@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns fuzz.case06887)
+
+(defonce g__14 "a doc" (->> (filterv (fn [p__15] true) 1000) (dec) (map inc) (map inc)))
+
+(def bad__19 :- Int "with \"quote\"")

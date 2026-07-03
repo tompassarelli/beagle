@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns fuzz.case09494)
+
+(defn f__8
+  [] (int? *dyn__3*)
+  [p__9 p__10] (first (some-> -2147483648 (str *dyn__3*) (- -65536))))

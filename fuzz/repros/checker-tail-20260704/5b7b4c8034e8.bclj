@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns fuzz.case04940)
+
+(defn f__19
+  [p__20] {:a (fn [p__24 p__25] *dyn__3*)}
+  [p__21 p__22 p__23] (nth (-> 255 (conj "  padded  ") (+ 3)) (+ *dyn__3* *dyn__3*)))

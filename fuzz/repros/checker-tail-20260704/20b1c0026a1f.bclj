@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns fuzz.case00853)
+
+(defn f__14
+  [p__15] (let [v__18 (mapv (fn [p__19] :y) \a)] (- 1000))
+  [p__16 p__17] (nth {:b 3 :k2 100.0} (count "unicode λé")))

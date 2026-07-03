@@ -1,0 +1,4 @@
+#lang beagle/clj
+(ns fuzz.case01611)
+
+(defonce g__2 (nth (->> 0.5 (* 65535)) (- 256)))

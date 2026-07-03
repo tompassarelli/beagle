@@ -1,0 +1,7 @@
+#lang beagle/clj
+(ns fuzz.case01158)
+
+(def ^:dynamic *dyn__3* :- Int (- 7 1000))
+
+(defn f__16 []
+  (first (cond (string? g__2) :y true -3.14 :else *dyn__3*)))

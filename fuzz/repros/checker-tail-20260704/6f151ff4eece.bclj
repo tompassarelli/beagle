@@ -1,0 +1,4 @@
+#lang beagle/clj
+(ns fuzz.case02754)
+
+(def g__4 (nth (if-let [w__5 100.0] 0.0 -1) (if true 0 3)))
