@@ -6,6 +6,7 @@
             [selfhost.parse :as p]
             [selfhost.check :as c]
             [selfhost.emit-clj :as e]
+            [selfhost.emit-nix :as en]
             [selfhost.emit-js :as ejs]))
 
 (defn- ^Boolean has-define-target? [datums]
@@ -31,6 +32,7 @@
 (defn- ^String emit-for-target [^String target prog]
   (cond
   (= target "js") (ejs/emit-program! prog)
+  (= target "nix") (en/emit-program! prog)
   :else (e/emit-program! prog)))
 
 (defn- cmd-ast! [^String path ^String target]
@@ -68,6 +70,6 @@
   (= cmd "emit") (cmd-emit! path target)
   (= cmd "emit-from-ast") (cmd-emit-from-ast! target)
   :else (do
-  (selfhost.rt/eprint "usage: selfhost.main [--target clj|js] ast|check|emit FILE, or emit-from-ast < ast.json\n")
+  (selfhost.rt/eprint "usage: selfhost.main [--target clj|js|nix] ast|check|emit FILE, or emit-from-ast < ast.json\n")
   (selfhost.rt/exit 2)))
   (flush)))
