@@ -22,7 +22,15 @@
 (declare-extern selfhost.rt/eprint [String -> Nil])
 
 (defn- parse-file! [path :- String] :- Any
-  (p/parse-program! (rd/read-program (selfhost.rt/slurp-file path))))
+  (let [prog (p/parse-program! (rd/read-program (selfhost.rt/slurp-file path)))
+        perrs :- Any (p/parse-errors)]
+    ;; Racket raises on a parse diagnostic and exits nonzero. The self-host
+    ;; parser collects + eprints, so the driver must fail explicitly: any parse
+    ;; diagnostic => nonzero exit, no 'ok', no emit. (err! already printed each.)
+    (if (> (count perrs) 0)
+      (do (selfhost.rt/exit 1)
+          prog)
+      prog)))
 
 (defn- check-or-die! [prog :- Any] :- Any
   (let [errors :- Any (c/check-program! prog)]
