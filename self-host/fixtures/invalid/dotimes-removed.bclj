@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns dotimes-removed.test)
+
+;; dotimes removed — selfhost must reject with pointed guidance
+(defn run [] :- nil
+  (dotimes [i 5] :y))

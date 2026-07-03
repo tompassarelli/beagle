@@ -533,11 +533,6 @@
   (infer-expr! (get c "body") env)) (get e "clauses"))
    dflt (opt-field (get e "default"))]
   (if (not (nil? dflt)) (merge-types-list (conj clause-types (infer-expr! dflt env))) (if (= (count clause-types) 0) ANY (merge-types-list clause-types)))))
-  (= (get e "node") "dotimes") (do
-  (infer-expr! (get e "count") env)
-  (let [body-env (assoc env (get e "name") (make-prim "Int"))]
-  (last-expr-type! (get e "body") body-env)
-  NIL-TYPE))
   (= (get e "node") "for") (let [body-env (reduce (fn [be c] (let [ct (get c "type")]
   (cond
   (= ct "binding") (let [coll-type (infer-expr! (get c "expr") be)
@@ -568,12 +563,6 @@
   (last-expr-type! (get c "body") arm-env))) clauses)]
   (check-match-exhaustiveness! target-type clauses)
   (if (= (count arm-types) 0) ANY (merge-types-list arm-types)))
-  (= (get e "node") "case") (do
-  (infer-expr! (get e "test") env)
-  (let [clause-types (mapv (fn [c] (infer-expr! (get c "body") env)) (get e "clauses"))
-   dflt (opt-field (get e "default"))
-   fallback-type (if (not (nil? dflt)) (infer-expr! dflt env) NIL-TYPE)]
-  (merge-types-list (into [fallback-type] clause-types))))
   (= (get e "node") "try") (let [body-type (last-expr-type! (get e "body") env)
    catch-types (mapv (fn [c] (let [catch-env (if (not (nil? (get c "name"))) (assoc env (get c "name") ANY) env)]
   (last-expr-type! (get c "body") catch-env))) (get e "catches"))

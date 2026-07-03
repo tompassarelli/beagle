@@ -7,7 +7,11 @@
             [selfhost.emit-clj :as e]))
 
 (defn- parse-file! [^String path]
-  (p/parse-program! (rd/read-program (selfhost.rt/slurp-file path))))
+  (let [prog (p/parse-program! (rd/read-program (selfhost.rt/slurp-file path)))
+   perrs (p/parse-errors)]
+  (if (> (count perrs) 0) (do
+  (selfhost.rt/exit 1)
+  prog) prog)))
 
 (defn- check-or-die! [prog]
   (let [errors (c/check-program! prog)]

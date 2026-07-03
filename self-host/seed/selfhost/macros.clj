@@ -12,6 +12,20 @@
 
 (def MAX-EXPANSION-DEPTH 64)
 
+(def MACRO-ERRORS (atom []))
+
+(defn macro-errors []
+  (deref MACRO-ERRORS))
+
+(defn reset-macro-errors! []
+  (reset! MACRO-ERRORS [])
+  nil)
+
+(defn- macro-err! [^String msg]
+  (swap! MACRO-ERRORS conj msg)
+  (selfhost.rt/eprint (str "beagle: " msg "\n"))
+  "nil")
+
 (defn make-root-ctx [^String name]
   {"macro-name" name "depth" 0 "parent" nil})
 
@@ -253,12 +267,8 @@
    kind (get m "kind")
    template (hygienize-template! (get m "template") fixed rest-name reg)]
   (cond
-  (and (some? rest-name) (< (count args) (count fixed))) (do
-  (selfhost.rt/eprint (str "beagle: macro " name ": expected at least " (str (count fixed)) " arg(s), got " (str (count args)) "\n"))
-  (datum-cons name args))
-  (and (nil? rest-name) (not= (count args) (count fixed))) (do
-  (selfhost.rt/eprint (str "beagle: macro " name ": expected " (str (count fixed)) " arg(s), got " (str (count args)) "\n"))
-  (datum-cons name args))
+  (and (some? rest-name) (< (count args) (count fixed))) (macro-err! (str "macro " name ": expected at least " (str (count fixed)) " arg(s), got " (str (count args))))
+  (and (nil? rest-name) (not= (count args) (count fixed))) (macro-err! (str "macro " name ": expected " (str (count fixed)) " arg(s), got " (str (count args))))
   :else (let [substituted (if (some? rest-name) (let [fixed-args (subvec args 0 (count fixed))
    rest-args (subvec args (count fixed))
    bindings (make-bindings fixed fixed-args rest-name rest-args)]
@@ -278,8 +288,7 @@
 (defn expand-fully! [reg datum depth ctx]
   (cond
   (>= depth MAX-EXPANSION-DEPTH) (let [chain (if (nil? ctx) "" (str "\n" (format-expansion-chain ctx)))]
-  (selfhost.rt/eprint (str "beagle: macro expansion exceeded depth " (str MAX-EXPANSION-DEPTH) " (possible infinite recursion)" chain "\n"))
-  datum)
+  (macro-err! (str "macro expansion exceeded depth " (str MAX-EXPANSION-DEPTH) " (possible infinite recursion)" chain)))
   (macro-application? reg datum) (let [name (datum-car datum)
    next-ctx (if (nil? ctx) (make-root-ctx name) (push-ctx ctx name))
    expanded (expand-macro! reg name (datum-cdr datum) next-ctx)]
@@ -393,6 +402,13 @@
   (expect! "macro-app?: true for registered" (macro-application? reg ["inc1" 5]))
   (expect! "macro-app?: false for unknown" (not (macro-application? reg ["unknown" 5])))
   (expect! "macro-app?: false for non-pair" (not (macro-application? reg "atom"))))
+  (let [reg (make-macro-registry)]
+  (register-macro! reg "zero" "safe" [] ["+" 1 2])
+  (reset-macro-errors!)
+  (let [result (expand-fully! reg ["zero" 5] 0 nil)]
+  (expect! "arity halt: returns inert non-macro datum" (not (macro-application? reg result)))
+  (expect! "arity halt: records a macro error" (= (count (macro-errors)) 1)))
+  (reset-macro-errors!))
   (doseq [f (deref failures)]
   (selfhost.rt/eprint (str "  FAIL: " f "\n")))
   (println (str "  MACROS: " (count (deref passes)) " passed, " (count (deref failures)) " failed"))

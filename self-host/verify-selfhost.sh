@@ -79,6 +79,24 @@ EOF
   fi
 done
 
+echo "=== 5. invalid fixtures — selfhost must exit 1 with pointed error ==="
+if [ -d "self-host/fixtures/invalid" ]; then
+  for inv in self-host/fixtures/invalid/*.bclj; do
+    iname="$(basename "$inv" .bclj)"
+    # oracle must also reject
+    if BEAGLE_EMIT_SRCLOC=0 bin/beagle-build "$inv" /dev/null >/dev/null 2>&1; then
+      bad "$iname oracle accepted (should reject)"
+      continue
+    fi
+    # selfhost must exit nonzero
+    if bb -cp "$OUT" -m selfhost.main check "$inv" >"$LAB/$iname-inv.out" 2>&1; then
+      bad "$iname selfhost accepted (should reject)"
+    else
+      ok "$iname selfhost rejects (exit nonzero)"
+    fi
+  done
+fi
+
 echo ""
 echo "=== verify-selfhost: $PASS passed, $FAIL failed ==="
 [ "$FAIL" -eq 0 ]

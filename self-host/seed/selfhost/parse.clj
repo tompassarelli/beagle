@@ -14,10 +14,11 @@
 (def ERRORS (atom []))
 
 (defn parse-errors []
-  (deref ERRORS))
+  (into (deref ERRORS) (mac/macro-errors)))
 
 (defn reset-errors! []
   (reset! ERRORS [])
+  (mac/reset-macro-errors!)
   nil)
 
 (defn- err! [^String msg]
@@ -235,9 +236,6 @@
 (defn make-try [body catches finally-body]
   {"node" "try" "body" body "catches" catches "finally" (if (nil? finally-body) false finally-body)})
 
-(defn make-case [test clauses fallback]
-  {"node" "case" "test" test "clauses" clauses "default" (if (nil? fallback) false fallback)})
-
 (defn make-match [target clauses]
   {"node" "match" "target" target "clauses" clauses})
 
@@ -261,9 +259,6 @@
 
 (defn make-condp [pred-fn test-expr clauses fallback]
   {"node" "condp" "pred" pred-fn "test" test-expr "clauses" clauses "default" (if (nil? fallback) false fallback)})
-
-(defn make-dotimes [^String name count-expr body]
-  {"node" "dotimes" "name" name "count" count-expr "body" body})
 
 (defn make-doseq [clauses body]
   {"node" "doseq" "clauses" clauses "body" body})
@@ -473,24 +468,6 @@
   (finally-clause? item) (recur (+ i 1) body catches (mapv parse-expr* (subvec item 1)))
   (and (= (count catches) 0) (nil? finally-body)) (recur (+ i 1) (conj body (parse-expr* item)) catches finally-body)
   :else (recur (+ i 1) body catches finally-body)))))))
-
-(defn parse-case-pairs [items]
-  (let [n (count items)]
-  (loop [i 0
-   acc []]
-  (cond
-  (>= i n) acc
-  (< (+ i 1) n) (recur (+ i 2) (conj acc {"value" (datum->json (nth items i)) "body" (parse-expr* (nth items (+ i 1)))}))
-  :else acc))))
-
-(defn parse-case-form [test-datum clauses]
-  (let [test (parse-expr* test-datum)]
-  (cond
-  (= (count clauses) 0) (make-case test [] nil)
-  (= (mod (count clauses) 2) 1) (let [pairs (subvec clauses 0 (- (count clauses) 1))
-   fallback (parse-expr* (nth clauses (- (count clauses) 1)))]
-  (make-case test (parse-case-pairs pairs) fallback))
-  :else (make-case test (parse-case-pairs clauses) nil))))
 
 (defn parse-map-pattern [entries]
   (let [n (count entries)]
@@ -798,11 +775,10 @@
   (and (= head "condp") (>= (count rest-items) 2)) (parse-condp-form (nth rest-items 0) (nth rest-items 1) (subvec rest-items 2))
   (= head "try") (parse-try-form rest-items)
   (and (= head "match") (>= (count rest-items) 1)) (parse-match-form (nth rest-items 0) (subvec rest-items 1))
-  (and (= head "case") (>= (count rest-items) 1)) (parse-case-form (nth rest-items 0) (subvec rest-items 1))
+  (= head "case") (err! "case removed — use (match x [v1 body] [v2 body] [_ default]) or (match x [(or v1 v2) shared-body] [_ default]); literal-only matches case-fold to target-native dispatch in emit")
   (= head "target-case") (parse-target-case! rest-items)
   (and (= head "doseq") (>= (count rest-items) 1)) (make-doseq (parse-for-clauses (nth rest-items 0)) (mapv parse-expr* (subvec rest-items 1)))
-  (and (= head "dotimes") (>= (count rest-items) 1)) (let [binding-items (unwrap-items (nth rest-items 0))]
-  (if (= (count binding-items) 2) (make-dotimes (nth binding-items 0) (parse-expr* (nth binding-items 1)) (mapv parse-expr* (subvec rest-items 1))) (make-dotimes "_" (make-literal "number" 0) [])))
+  (= head "dotimes") (err! "dotimes removed — use (doseq [i (range n)] body...)")
   (and (= head "with") (>= (count rest-items) 1)) (parse-with-form (nth rest-items 0) (subvec rest-items 1))
   (and (= head "->") (>= (count rest-items) 1)) (let [args (mapv parse-expr* rest-items)]
   (make-threading "->" args (parse-expr* (expand-thread-first (nth rest-items 0) (subvec rest-items 1)))))
@@ -1066,10 +1042,6 @@
   (and (= (get node "node") "match") (= (count (get node "clauses")) 2) (= (get (get (nth (get node "clauses") 0) "pattern") "type") "wildcard"))))
   (expect! "match record pattern" (let [node (parse-expr* ["match" "shape" [BRACKET-TAG ["Circle" "r"] ["*" 3.14 ["*" "r" "r"]]] [BRACKET-TAG ["Rect" "w" "h"] ["*" "w" "h"]]])]
   (and (= (get (get (nth (get node "clauses") 0) "pattern") "type") "record") (= (get (get (nth (get node "clauses") 0) "pattern") "name") "Circle"))))
-  (expect! "case with default" (let [node (parse-expr* ["case" "x" 1 ["#%string" "one"] 2 ["#%string" "two"] ["#%string" "other"]])]
-  (and (= (get node "node") "case") (= (count (get node "clauses")) 2) (= (get (nth (get node "clauses") 0) "body") {"node" "literal" "kind" "string" "value" "one"}) (not (= false (get node "default"))))))
-  (expect! "case without default" (let [node (parse-expr* ["case" "x" 1 ["#%string" "one"] 2 ["#%string" "two"]])]
-  (and (= (get node "node") "case") (= (count (get node "clauses")) 2) (= (get node "default") false))))
   (expect! "try with catch" (let [node (parse-expr* ["try" ["foo"] ["catch" "Exception" "e" ["bar" "e"]]])]
   (and (= (get node "node") "try") (= (count (get node "body")) 1) (= (count (get node "catches")) 1) (= (get (nth (get node "catches") 0) "name") "e") (= (get node "finally") false))))
   (expect! "defrecord flat fields" (let [node (parse-expr* ["defrecord" "Assertion" [BRACKET-TAG "tx" ":-" "Int" "op" ":-" "String"]])]
@@ -1143,8 +1115,14 @@
   (and (= (get node "node") "condp") (= (count (get node "clauses")) 2) (not (= false (get node "default"))))))
   (expect! "doseq" (let [node (parse-expr* ["doseq" [BRACKET-TAG "x" "items"] ["println" "x"]])]
   (and (= (get node "node") "doseq") (= (count (get node "clauses")) 1))))
-  (expect! "dotimes" (let [node (parse-expr* ["dotimes" [BRACKET-TAG "i" 10] ["println" "i"]])]
-  (and (= (get node "node") "dotimes") (= (get node "name") "i"))))
+  (expect! "dotimes rejected with pointed error" (let [_ (reset-errors!)
+   _ (parse-expr* ["dotimes" [BRACKET-TAG "i" 10] ["println" "i"]])
+   errs (parse-errors)]
+  (and (> (count errs) 0) (str/includes? (nth errs 0) "dotimes removed"))))
+  (expect! "case rejected with pointed error" (let [_ (reset-errors!)
+   _ (parse-expr* ["case" "x" 1 ["#%string" "one"]])
+   errs (parse-errors)]
+  (and (> (count errs) 0) (str/includes? (nth errs 0) "case removed"))))
   (expect! "set!" (let [node (parse-expr* ["set!" "x" 42])]
   (and (= (get node "node") "set!") (= (get (get node "target") "name") "x"))))
   (expect! "await" (let [node (parse-expr* ["await" ["fetch" "url"]])]
@@ -1173,6 +1151,18 @@
   (reset-errors!)
   (parse-expr* ["unsafe-js" ["#%string" "1+1"]])
   (> (count (parse-errors)) 0)))
+  (expect! "let bare `:` recorded as parse error" (do
+  (reset-errors!)
+  (parse-let-bindings! [BRACKET-TAG "y" ":" "Int" 3])
+  (> (count (parse-errors)) 0)))
+  (expect! "parse-errors folds macro-expansion errors; reset clears both" (do
+  (reset-errors!)
+  (let [reg (mac/make-macro-registry)]
+  (mac/register-macro! reg "zero0" "safe" [] ["+" 1 2])
+  (mac/expand-fully! reg ["zero0" 9] 0 nil))
+  (let [folded (> (count (parse-errors)) 0)]
+  (reset-errors!)
+  (and folded (= (count (parse-errors)) 0)))))
   (expect! "parse-type primitive" (= (parse-type "Int") {"kind" "prim" "name" "Int"}))
   (expect! "parse-type nullable" (let [t (parse-type "String?")]
   (and (= (get t "kind") "union") (= (count (get t "members")) 2))))
