@@ -545,6 +545,26 @@
     ;; driftlab D1: nix-pipe / nix-impl AST structs removed upstream
     ;; (pipe family hard-removed) — serializer cases amputated.
 
+    ;; nix sugar forms whose validation/rewrite happens in emit-nix. Serialized
+    ;; so the selfhost chain (parse->emit-nix) can round-trip them. `attrs` is a
+    ;; map-form expr; the emitter validates its shape (derivation/flake key sets).
+    [(nix-derivation? e)
+     (hasheq 'node "nix-derivation" 'attrs (expr->json (nix-derivation-attrs e)))]
+
+    [(nix-flake? e)
+     (hasheq 'node "nix-flake" 'attrs (expr->json (nix-flake-attrs e)))]
+
+    [(nix-with-cfg? e)
+     (hasheq 'node "nix-with-cfg"
+             'path (expr->json (nix-with-cfg-path e))
+             'body (expr->json (nix-with-cfg-body e)))]
+
+    [(flake-input-form? e)
+     (hasheq 'node "flake-input"
+             'input-name (symbol->string (flake-input-form-input-name e))
+             'namespace (symbol->string (flake-input-form-namespace e))
+             'path-segments (map symbol->string (flake-input-form-path-segments e)))]
+
     [else (hasheq 'node "unknown" 'raw (~a e))]))
 
 (define (pattern->json p)

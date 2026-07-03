@@ -449,9 +449,29 @@
             (recur (skip-ws src (get result "pos"))
                    (conj datums (get result "value")))))))))
 
+;; Does the datum stream already carry an explicit (define-target ...) form?
+(defn- has-define-target? [datums :- Any] :- Bool
+  (loop [i 0]
+    (if (>= i (count datums)) false
+      (let [d (nth datums i)]
+        (if (and (vector? d) (> (count d) 0) (= (nth d 0) "define-target"))
+          true
+          (recur (+ i 1)))))))
+
 ;; read-program: public contract — vector of top-level datums (#lang handled).
+;; The #lang line is the target declaration; parse-program only reads target
+;; from a `(define-target ...)` datum (defaulting "clj"), so surface the #lang
+;; target by prepending a synthetic define-target for non-clj languages that
+;; lack an explicit one. clj is the parser default (and the reader tests pin no
+;; injection for it); an explicit define-target already present wins.
 (defn read-program [src :- String] :- Any
-  (get (read-all src) "datums"))
+  (let [all (read-all src)
+        target (get all "target")
+        datums (get all "datums")]
+    (if (and (some? target) (not= target "clj")
+             (not (has-define-target? datums)))
+      (into [["define-target" target]] datums)
+      datums)))
 
 ;; === tests ===================================================================
 
@@ -639,6 +659,16 @@
   (expect! "read-program returns datum vector"
     (= (read-program "#lang beagle/clj\n(ns app)\n(def x 1)")
        [["ns" "app"] ["def" "x" 1]]))
+  (expect! "read-program: clj target injects NO define-target (parser default)"
+    (= (read-program "#lang beagle/clj\n(ns app)") [["ns" "app"]]))
+  (expect! "read-program: nix target prepends (define-target nix)"
+    (= (read-program "#lang beagle/nix\n(ns app)")
+       [["define-target" "nix"] ["ns" "app"]]))
+  (expect! "read-program: no #lang -> no injection"
+    (= (read-program "(ns app)") [["ns" "app"]]))
+  (expect! "read-program: explicit define-target present -> no double injection"
+    (= (read-program "#lang beagle/cljs\n(define-target cljs)\n(ns app)")
+       [["define-target" "cljs"] ["ns" "app"]]))
   (expect! "read-datum returns value+pos"
     (let [r (read-datum "42 rest" 0)]
       (and (= (get r "value") 42) (= (get r "pos") 2))))

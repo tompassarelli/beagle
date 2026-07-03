@@ -13,6 +13,7 @@
 (require selfhost.parse :as p)
 (require selfhost.check :as c)
 (require selfhost.emit-clj :as e)
+(require selfhost.emit-nix :as en)
 
 (declare-extern selfhost.rt/slurp-file [String -> String])
 (declare-extern selfhost.rt/read-stdin [-> String])
@@ -49,22 +50,48 @@
   (check-or-die! (parse-file! path))
   (selfhost.rt/eprint "ok\n"))
 
-(defn- cmd-emit! [path :- String] :- Nil
-  (print (e/emit-program! (check-or-die! (parse-file! path)))))
+;; Per-target emit dispatch. `--target` (default clj) selects the backend;
+;; parse/check derive the program's own target from #lang. One branch per
+;; target — parallel target-port agents each add their own line here.
+(defn- emit-for-target! [target :- String prog :- Any] :- Nil
+  (cond
+    (= target "nix") (print (en/emit-program! prog))
+    :else (print (e/emit-program! prog))))
 
-(defn- cmd-emit-from-ast! [] :- Nil
-  (print (e/emit-program! (selfhost.rt/parse-json (selfhost.rt/read-stdin)))))
+(defn- cmd-emit! [target :- String path :- String] :- Nil
+  (emit-for-target! target (check-or-die! (parse-file! path))))
+
+(defn- cmd-emit-from-ast! [target :- String] :- Nil
+  (emit-for-target! target (selfhost.rt/parse-json (selfhost.rt/read-stdin))))
+
+;; --target <t> flag scan (default clj); positional args are everything else.
+(defn- parse-target [argv :- (Vec String)] :- String
+  (loop [i 0]
+    (cond
+      (>= i (count argv)) "clj"
+      (= (nth argv i) "--target") (if (< (+ i 1) (count argv)) (nth argv (+ i 1)) "clj")
+      :else (recur (+ i 1)))))
+
+(defn- positional-args [argv :- (Vec String)] :- (Vec String)
+  (loop [i 0 acc :- (Vec String) []]
+    (cond
+      (>= i (count argv)) acc
+      (= (nth argv i) "--target") (recur (+ i 2) acc)
+      :else (recur (+ i 1) (conj acc (nth argv i))))))
 
 (defn -main [& args :- (Vec String)] :- Nil
-  (let [cmd (if (> (count args) 0) (nth args 0) "")
-        path (if (> (count args) 1) (nth args 1) "")]
+  (let [argv :- (Vec String) (vec args)
+        target (parse-target argv)
+        pos (positional-args argv)
+        cmd (if (> (count pos) 0) (nth pos 0) "")
+        path (if (> (count pos) 1) (nth pos 1) "")]
     (cond
       (= cmd "ast") (cmd-ast! path)
       (= cmd "check") (cmd-check! path)
-      (= cmd "emit") (cmd-emit! path)
-      (= cmd "emit-from-ast") (cmd-emit-from-ast!)
+      (= cmd "emit") (cmd-emit! target path)
+      (= cmd "emit-from-ast") (cmd-emit-from-ast! target)
       :else
-        (do (selfhost.rt/eprint "usage: selfhost.main ast|check|emit FILE, or emit-from-ast < ast.json\n")
+        (do (selfhost.rt/eprint "usage: selfhost.main [--target clj|nix] ast|check|emit FILE, or emit-from-ast < ast.json\n")
             (selfhost.rt/exit 2)))
     ;; clojure.main flushes *out* in a finally; the gen-class/native-image entry
     ;; bypasses clojure.main, so an unflushed `print` would exit with empty stdout.

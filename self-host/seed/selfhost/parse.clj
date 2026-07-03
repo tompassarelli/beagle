@@ -83,6 +83,9 @@
 (defn ^Boolean string-datum? [d]
   (or (string? d) (and (vector? d) (= (count d) 2) (= (nth d 0) "#%string"))))
 
+(defn ^Boolean string-literal-datum? [d]
+  (and (vector? d) (= (count d) 2) (= (nth d 0) "#%string")))
+
 (defn ^String extract-string [d]
   (if (string? d) d (nth d 1)))
 
@@ -243,6 +246,54 @@
 
 (defn make-with [target updates]
   {"node" "with" "target" target "updates" updates})
+
+(defn make-nix-inherit [names]
+  {"node" "nix-inherit" "names" names})
+
+(defn make-nix-inherit-from [ns-expr names]
+  {"node" "nix-inherit-from" "ns-expr" ns-expr "names" names})
+
+(defn make-nix-with [ns-expr body]
+  {"node" "nix-with" "ns-expr" ns-expr "body" body})
+
+(defn make-nix-rec-attrs [pairs]
+  {"node" "nix-rec-attrs" "pairs" pairs})
+
+(defn make-nix-assert [cond-expr body]
+  {"node" "nix-assert" "cond" cond-expr "body" body})
+
+(defn make-nix-get-or [base ^String path default]
+  {"node" "nix-get-or" "base" base "path" path "default" default})
+
+(defn make-nix-has-attr [base ^String path]
+  {"node" "nix-has-attr" "base" base "path" path})
+
+(defn make-nix-search-path [^String name]
+  {"node" "nix-search-path" "name" name})
+
+(defn make-nix-interpolated-string [parts]
+  {"node" "nix-interpolated-string" "parts" parts})
+
+(defn make-nix-multiline-string [lines]
+  {"node" "nix-multiline-string" "lines" lines})
+
+(defn make-nix-path [^String path]
+  {"node" "nix-path" "path" path})
+
+(defn make-nix-fn-set [formals ^Boolean rest at-name body]
+  {"node" "nix-fn-set" "formals" formals "rest" rest "at-name" at-name "body" body})
+
+(defn make-nix-derivation [attrs]
+  {"node" "nix-derivation" "attrs" attrs})
+
+(defn make-nix-flake [attrs]
+  {"node" "nix-flake" "attrs" attrs})
+
+(defn make-nix-with-cfg [path body]
+  {"node" "nix-with-cfg" "path" path "body" body})
+
+(defn make-flake-input [input-name namespace path]
+  {"node" "flake-input" "input-name" input-name "namespace" namespace "path" path})
 
 (defn make-defrecord [^String name fields]
   {"node" "record" "name" name "fields" fields})
@@ -501,6 +552,42 @@
   (make-with (parse-expr* target-datum) (mapv (fn [u] (if (and (bracketed? u) (>= (count (bracket-body u)) 2)) (let [items (bracket-body u)]
   {"field" (nth items 0) "value" (parse-expr* (nth items 1))}) {"field" "" "value" nil})) updates)))
 
+(defn parse-nix-fn-set-formals! [formals-form]
+  (let [items (cond
+  (bracketed? formals-form) (bracket-body formals-form)
+  (vector? formals-form) formals-form
+  :else (do
+  (err! "fn-set: expected list of formals")
+  []))]
+  (loop [i 0
+   before []
+   at-name false]
+  (cond
+  (>= i (count items)) {"formals" (mapv (fn [item] (cond
+  (string? item) {"name" item "default" false}
+  (and (bracketed? item) (= (count (bracket-body item)) 2)) {"name" (nth (bracket-body item) 0) "default" (parse-expr* (nth (bracket-body item) 1))}
+  (and (vector? item) (= (count item) 2)) {"name" (nth item 0) "default" (parse-expr* (nth item 1))}
+  :else (do
+  (err! (str "fn-set formal: expected name or (name default), got " (str item)))
+  {"name" (str item) "default" false}))) (filterv (fn [x] (not= x "...")) before)) "at-name" at-name}
+  (= (nth items i) ":as") (if (>= (+ i 1) (count items)) (do
+  (err! "fn-set/module: :as requires a name")
+  {"formals" [] "at-name" false}) (recur (count items) before (nth items (+ i 1))))
+  :else (recur (+ i 1) (conj before (nth items i)) at-name)))))
+
+(defn parse-nix-rec-pairs! [items]
+  (loop [i 0
+   acc []]
+  (cond
+  (>= i (count items)) acc
+  (>= (+ i 1) (count items)) (do
+  (err! "rec-attrs: expected key value pairs, got odd number of forms")
+  acc)
+  :else (recur (+ i 2) (conj acc {"key" (let [k (nth items i)]
+  (if (string? k) k (do
+  (err! (str "rec-attrs: key must be symbol, got " (str k)))
+  (str k)))) "val" (parse-expr* (nth items (+ i 1)))})))))
+
 (defn parse-letfn-fns! [form]
   (let [items (unwrap-items form)]
   (mapv (fn [item] (if (and (vector? item) (>= (count item) 3) (string? (nth item 0))) (let [name (nth item 0)
@@ -746,7 +833,7 @@
   (and (= head "deferror") (>= (count rest-items) 1)) (parse-deferror-form (nth rest-items 0) (subvec rest-items 1))
   (and (= head "defscalar") (>= (count rest-items) 2)) (make-defscalar (nth rest-items 0) (parse-type (nth rest-items 1)))
   (and (= head "fn") (>= (count rest-items) 1) (or (multi-arity-form? (nth rest-items 0)) (some? (bare-multi-arity-clauses rest-items)))) (err! "multi-arity anonymous `fn` is not yet supported — give it a name with `defn` (which supports multi-arity), or use a single arity.")
-  (and (= head "fn") (>= (count rest-items) 3) (canonical-marker? (nth rest-items 1))) (let [parsed-params (parse-params! (nth rest-items 0))]
+  (and (= head "fn") (>= (count rest-items) 3) (annotation-marker? (nth rest-items 1))) (let [parsed-params (parse-params! (nth rest-items 0))]
   (make-fn (get parsed-params "params") (get parsed-params "rest-param") (parse-type (nth rest-items 2)) (mapv parse-expr* (subvec rest-items 3))))
   (and (= head "fn") (>= (count rest-items) 1)) (let [parsed-params (parse-params! (nth rest-items 0))]
   (make-fn (get parsed-params "params") (get parsed-params "rest-param") nil (mapv parse-expr* (subvec rest-items 1))))
@@ -782,6 +869,48 @@
   (and (= head "doseq") (>= (count rest-items) 1)) (make-doseq (parse-for-clauses (nth rest-items 0)) (mapv parse-expr* (subvec rest-items 1)))
   (= head "dotimes") (err! "dotimes removed — use (doseq [i (range n)] body...)")
   (and (= head "with") (>= (count rest-items) 1)) (parse-with-form (nth rest-items 0) (subvec rest-items 1))
+  (= head "s") (make-nix-interpolated-string (mapv (fn [part] (if (string-literal-datum? part) {"type" "text" "value" (extract-string part)} {"type" "expr" "value" (parse-expr* part)})) rest-items))
+  (= head "ms") (make-nix-multiline-string (mapv (fn [line] (if (string-literal-datum? line) {"type" "text" "value" (extract-string line)} (let [e (parse-expr* line)]
+  (if (= (get e "node") "nix-interpolated-string") {"type" "interp" "parts" (get e "parts")} {"type" "expr" "value" e})))) rest-items))
+  (and (= head "p") (= (count rest-items) 1)) (let [pd (nth rest-items 0)]
+  (cond
+  (string-datum? pd) (make-nix-path (extract-string pd))
+  (string? pd) (make-nix-path pd)
+  :else (err! "p: expected string or symbol")))
+  (= head "inherit") (make-nix-inherit (mapv (fn [n] (if (string? n) n (do
+  (err! "inherit: expected symbol")
+  (str n)))) rest-items))
+  (and (= head "inherit-from") (>= (count rest-items) 1)) (make-nix-inherit-from (parse-expr* (nth rest-items 0)) (mapv (fn [n] (if (string? n) n (do
+  (err! "inherit-from: expected symbol")
+  (str n)))) (subvec rest-items 1)))
+  (= head "rec-attrs") (make-nix-rec-attrs (parse-nix-rec-pairs! rest-items))
+  (and (= head "search-path") (= (count rest-items) 1)) (let [d (nth rest-items 0)]
+  (make-nix-search-path (if (string-datum? d) (extract-string d) (str d))))
+  (and (= head "get-or") (= (count rest-items) 3)) (make-nix-get-or (parse-expr* (nth rest-items 0)) (let [pd (nth rest-items 1)]
+  (cond
+  (string? pd) pd
+  (and (vector? pd) (> (count pd) 1) (= (nth pd 0) "quote")) (str (nth pd 1))
+  :else (str pd))) (parse-expr* (nth rest-items 2)))
+  (and (= head "nix/assert") (= (count rest-items) 2)) (make-nix-assert (parse-expr* (nth rest-items 0)) (parse-expr* (nth rest-items 1)))
+  (and (= head "nix/with") (= (count rest-items) 2)) (make-nix-with (parse-expr* (nth rest-items 0)) (parse-expr* (nth rest-items 1)))
+  (and (= head "nix/module") (= (count rest-items) 2)) (let [fl (parse-nix-fn-set-formals! (nth rest-items 0))]
+  (make-nix-fn-set (get fl "formals") true (get fl "at-name") (parse-expr* (nth rest-items 1))))
+  (and (= head "nix/fn-set") (= (count rest-items) 2)) (let [fl (parse-nix-fn-set-formals! (nth rest-items 0))]
+  (make-nix-fn-set (get fl "formals") false (get fl "at-name") (parse-expr* (nth rest-items 1))))
+  (and (= head "nix/overlay") (= (count rest-items) 2)) (let [fl (parse-nix-fn-set-formals! (nth rest-items 0))
+   formals (get fl "formals")]
+  (if (not= (count formals) 2) (err! "nix/overlay: expected exactly two formals [final prev]") (make-fn (mapv (fn [f] (make-param (get f "name") nil)) formals) nil nil [(parse-expr* (nth rest-items 1))])))
+  (and (= head "nix/with-cfg") (= (count rest-items) 2)) (make-nix-with-cfg (parse-expr* (nth rest-items 0)) (parse-expr* (nth rest-items 1)))
+  (and (= head "nix/derivation") (= (count rest-items) 1)) (make-nix-derivation (parse-expr* (nth rest-items 0)))
+  (and (= head "nix/flake") (= (count rest-items) 1)) (make-nix-flake (parse-expr* (nth rest-items 0)))
+  (and (= head "flake-input") (>= (count rest-items) 2)) (make-flake-input (nth rest-items 0) (nth rest-items 1) (mapv (fn [s] (str s)) (subvec rest-items 2)))
+  (and (= head "assert") (= (count rest-items) 2)) (err! "(assert ...) — bare `assert` is not supported. Use `(nix/assert COND BODY)`.")
+  (and (= head "with-cfg") (= (count rest-items) 2)) (err! "(with-cfg ...) — bare `with-cfg` is not supported. Use `(nix/with-cfg PATH BODY)`.")
+  (and (= head "overlay") (= (count rest-items) 2)) (err! "(overlay ...) — bare `overlay` is not supported. Use `(nix/overlay [final prev] BODY)`.")
+  (and (= head "derivation") (= (count rest-items) 1)) (err! "(derivation ...) — bare `derivation` is not supported. Use `(nix/derivation ATTRS)`.")
+  (and (= head "flake") (= (count rest-items) 1)) (err! "(flake ...) — bare `flake` is not supported. Use `(nix/flake ATTRS)`.")
+  (and (= head "fn-set") (= (count rest-items) 2)) (err! "(fn-set ...) — bare `fn-set` is not supported. Use `(nix/fn-set FORMALS BODY)`.")
+  (and (= head "module") (= (count rest-items) 2)) (err! "(module ...) — bare `module` is not supported. Use `(nix/module FORMALS BODY)`.")
   (and (= head "->") (>= (count rest-items) 1)) (let [args (mapv parse-expr* rest-items)]
   (make-threading "->" args (parse-expr* (expand-thread-first (nth rest-items 0) (subvec rest-items 1)))))
   (and (= head "->>") (>= (count rest-items) 1)) (let [args (mapv parse-expr* rest-items)]
@@ -1190,6 +1319,46 @@
   (and (= (get prog "mode") "strict") (= (get prog "target") "clj") (= (get prog "gen-class") false))))
   (expect! "parse-program! (:gen-class) sets program flag" (let [prog (parse-program! [["ns" "fram.main" [":gen-class"]]])]
   (= (get prog "gen-class") true)))
+  (expect! "nix: (s ...) interpolated-string — literal parts are text, others expr" (let [node (parse-expr* ["s" ["#%string" "#!"] "pkgs.bash" ["#%string" "/bin"]])]
+  (and (= (get node "node") "nix-interpolated-string") (= (nth (get node "parts") 0) {"type" "text" "value" "#!"}) (= (nth (get node "parts") 1) {"type" "expr" "value" {"node" "ref" "name" "pkgs.bash"}}) (= (nth (get node "parts") 2) {"type" "text" "value" "/bin"}))))
+  (expect! "nix: bare symbol in (s ...) is an expr part, NOT text" (let [node (parse-expr* ["s" "hostName" ["#%string" ".local"]])]
+  (and (= (get (nth (get node "parts") 0) "type") "expr") (= (get (nth (get node "parts") 1) "type") "text"))))
+  (expect! "nix: (ms ...) multiline — nested (s) is interp line, literal is text" (let [node (parse-expr* ["ms" ["s" ["#%string" "a"] "x"] ["#%string" "lit"]])]
+  (and (= (get node "node") "nix-multiline-string") (= (get (nth (get node "lines") 0) "type") "interp") (= (get (nth (get node "lines") 1) "type") "text"))))
+  (expect! "nix: (p \"./x\") -> nix-path" (= (parse-expr* ["p" ["#%string" "./hardware.nix"]]) {"node" "nix-path" "path" "./hardware.nix"}))
+  (expect! "nix: (nix/with ns body) -> nix-with" (let [node (parse-expr* ["nix/with" "pkgs" [BRACKET-TAG "a"]])]
+  (and (= (get node "node") "nix-with") (= (get node "ns-expr") {"node" "ref" "name" "pkgs"}))))
+  (expect! "nix: (nix/assert c b) -> nix-assert" (let [node (parse-expr* ["nix/assert" "cnd" [BRACKET-TAG]])]
+  (and (= (get node "node") "nix-assert") (= (get node "cond") {"node" "ref" "name" "cnd"}))))
+  (expect! "nix: (rec-attrs k v ...) -> nix-rec-attrs, symbol keys" (let [node (parse-expr* ["rec-attrs" "hostName" ["#%string" "h"]])]
+  (and (= (get node "node") "nix-rec-attrs") (= (nth (get node "pairs") 0) {"key" "hostName" "val" {"node" "literal" "kind" "string" "value" "h"}}))))
+  (expect! "nix: (inherit a b) -> nix-inherit" (= (parse-expr* ["inherit" "a" "b"]) {"node" "nix-inherit" "names" ["a" "b"]}))
+  (expect! "nix: (inherit-from (ns) a) -> nix-inherit-from" (let [node (parse-expr* ["inherit-from" "pkgs" "a"])]
+  (and (= (get node "node") "nix-inherit-from") (= (get node "ns-expr") {"node" "ref" "name" "pkgs"}) (= (get node "names") ["a"]))))
+  (expect! "nix: (get-or base path default) -> nix-get-or" (let [node (parse-expr* ["get-or" "m" "foo" ["#%string" "d"]])]
+  (and (= (get node "node") "nix-get-or") (= (get node "path") "foo"))))
+  (expect! "nix: (search-path name) -> nix-search-path" (= (parse-expr* ["search-path" "nixpkgs"]) {"node" "nix-search-path" "name" "nixpkgs"}))
+  (expect! "nix: (nix/module [a b] body) -> nix-fn-set rest=true, at-name=false" (let [node (parse-expr* ["nix/module" [BRACKET-TAG "config" "lib"] [BRACKET-TAG]])]
+  (and (= (get node "node") "nix-fn-set") (= (get node "rest") true) (= (get node "at-name") false) (= (get node "formals") [{"name" "config" "default" false} {"name" "lib" "default" false}]))))
+  (expect! "nix: (nix/fn-set [x] body) -> nix-fn-set rest=false" (let [node (parse-expr* ["nix/fn-set" [BRACKET-TAG "x"] "x"])]
+  (and (= (get node "rest") false) (= (get node "formals") [{"name" "x" "default" false}]))))
+  (expect! "nix: nix/module rest-marker ... filtered from formals" (let [node (parse-expr* ["nix/module" [BRACKET-TAG "pkgs" "..."] [BRACKET-TAG]])]
+  (= (get node "formals") [{"name" "pkgs" "default" false}])))
+  (expect! "nix: (nix/overlay [final prev] body) -> curried fn (ret nil, rest false)" (let [node (parse-expr* ["nix/overlay" [BRACKET-TAG "final" "prev"] [BRACKET-TAG]])]
+  (and (= (get node "node") "fn") (= (get node "rest") false) (nil? (get node "ret")) (= (mapv (fn [p] (get p "name")) (get node "params")) ["final" "prev"]))))
+  (expect! "nix: (nix/derivation attrs) -> nix-derivation" (= (get (parse-expr* ["nix/derivation" [BRACKET-TAG]]) "node") "nix-derivation"))
+  (expect! "nix: (nix/flake attrs) -> nix-flake" (= (get (parse-expr* ["nix/flake" [BRACKET-TAG]]) "node") "nix-flake"))
+  (expect! "nix: (nix/with-cfg path body) -> nix-with-cfg" (= (get (parse-expr* ["nix/with-cfg" "config.x" [BRACKET-TAG]]) "node") "nix-with-cfg"))
+  (expect! "nix: bare assert HARD-REJECTED (point at nix/assert)" (do
+  (reset-errors!)
+  (parse-expr* ["assert" "c" [BRACKET-TAG]])
+  (> (count (parse-errors)) 0)))
+  (expect! "nix: bare module HARD-REJECTED (point at nix/module)" (do
+  (reset-errors!)
+  (parse-expr* ["module" [BRACKET-TAG] [BRACKET-TAG]])
+  (> (count (parse-errors)) 0)))
+  (reset-errors!)
+  (expect! "nix: parse-program! with injected (define-target nix) sets target nix" (= (get (parse-program! [["define-target" "nix"] ["ns" "x"]]) "target") "nix"))
   (let [fails (deref FAILURES)]
   (doseq [f fails]
   (selfhost.rt/eprint (str "  FAIL: " f "\n")))

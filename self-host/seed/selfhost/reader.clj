@@ -255,8 +255,16 @@
   (if (>= p (count src)) {"target" target "datums" datums} (let [result (read-datum src p)]
   (if (nil? result) {"target" target "datums" datums} (recur (skip-ws src (get result "pos")) (conj datums (get result "value")))))))))
 
+(defn- ^Boolean has-define-target? [datums]
+  (loop [i 0]
+  (if (>= i (count datums)) false (let [d (nth datums i)]
+  (if (and (vector? d) (> (count d) 0) (= (nth d 0) "define-target")) true (recur (+ i 1)))))))
+
 (defn read-program [^String src]
-  (get (read-all src) "datums"))
+  (let [all (read-all src)
+   target (get all "target")
+   datums (get all "datums")]
+  (if (and (some? target) (not= target "clj") (not (has-define-target? datums))) (into [["define-target" target]] datums) datums)))
 
 (def passes (atom []))
 
@@ -371,6 +379,10 @@
   (expect! "full clj header" (let [result (read-all "#lang beagle/clj\n(ns app.main)\n(define-mode strict)")]
   (and (= (get result "target") "clj") (= (count (get result "datums")) 2) (= (nth (nth (get result "datums") 0) 0) "ns") (= (nth (nth (get result "datums") 1) 0) "define-mode"))))
   (expect! "read-program returns datum vector" (= (read-program "#lang beagle/clj\n(ns app)\n(def x 1)") [["ns" "app"] ["def" "x" 1]]))
+  (expect! "read-program: clj target injects NO define-target (parser default)" (= (read-program "#lang beagle/clj\n(ns app)") [["ns" "app"]]))
+  (expect! "read-program: nix target prepends (define-target nix)" (= (read-program "#lang beagle/nix\n(ns app)") [["define-target" "nix"] ["ns" "app"]]))
+  (expect! "read-program: no #lang -> no injection" (= (read-program "(ns app)") [["ns" "app"]]))
+  (expect! "read-program: explicit define-target present -> no double injection" (= (read-program "#lang beagle/cljs\n(define-target cljs)\n(ns app)") [["define-target" "cljs"] ["ns" "app"]]))
   (expect! "read-datum returns value+pos" (let [r (read-datum "42 rest" 0)]
   (and (= (get r "value") 42) (= (get r "pos") 2))))
   (doseq [f (deref failures)]
