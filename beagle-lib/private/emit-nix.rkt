@@ -327,6 +327,8 @@
     [(number? e) (emit-nix-number e)]
     [(string? e) (format "\"~a\"" (escape-nix e))]
     [(boolean? e) (if e "true" "false")]
+    ;; Char literals lower to single-character strings in Nix (no char type).
+    [(char? e) (format "\"~a\"" (escape-nix (string e)))]
     [(eq? e 'nil) "null"]
 
     [(symbol? e)

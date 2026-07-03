@@ -1196,6 +1196,9 @@
     [(boolean? d)       d]
     [(exact-integer? d) d]
     [(real? d)          d]
+    ;; Clojure char literal (\z, \tab, \space, …) — the reader produces a
+    ;; Racket char? value; pass it through to the emit layer unchanged.
+    [(char? d)          d]
     [(and (symbol? d) (dynamic-var-sym? d))
      (validate-identifier! d "dynamic var")
      (dynamic-var d)]
