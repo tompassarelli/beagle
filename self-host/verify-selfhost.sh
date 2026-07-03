@@ -97,6 +97,62 @@ if [ -d "self-host/fixtures/invalid" ]; then
   done
 fi
 
+echo "=== 6. multi-module fixtures (driver: require resolution + externs import) ==="
+# The driver (selfhost.main) resolves (require ...) across sibling files and
+# imports each dep's typed surface as externs — the module-resolution port.
+# Two checks per fixture: (a) full-chain emit byte-identical to the oracle
+# (resolution must not perturb bytes), (b) AST + externs parity, externs
+# compared as a SET (ast-json serializes them in hash order, so order is not
+# meaningful — the pre-port rung excluded externs entirely; now they must match).
+if [ -d "self-host/fixtures/modules" ]; then
+  for src in self-host/fixtures/modules/*.bclj; do
+    [ -e "$src" ] || continue
+    name="$(basename "$src" .bclj)"
+    oracle="$LAB/$name-mod-oracle.clj"; oast="$LAB/$name-mod-oracle.json"
+    BEAGLE_EMIT_SRCLOC=0 bin/beagle-build "$src" "$oracle" >/dev/null 2>&1 || { bad "$name mod oracle emit"; continue; }
+    bin/beagle-ast "$src" > "$oast" 2>/dev/null || { bad "$name mod oracle ast"; continue; }
+
+    bb -cp "$OUT" -m selfhost.main emit "$src" > "$LAB/$name-mod-chain.clj" 2>"$LAB/$name-mod-chain.err"
+    if diff -q "$oracle" "$LAB/$name-mod-chain.clj" >/dev/null 2>&1; then
+      ok "$name mod FULL-CHAIN byte-parity"
+    else
+      bad "$name mod FULL-CHAIN byte-parity — diff $oracle $LAB/$name-mod-chain.clj"
+    fi
+
+    bb -cp "$OUT" -m selfhost.main ast "$src" > "$LAB/$name-mod-self.json" 2>/dev/null
+    if python3 - "$LAB/$name-mod-self.json" "$oast" <<'EOF' >/dev/null 2>&1
+import json, sys
+a = json.load(open(sys.argv[1])); b = json.load(open(sys.argv[2]))
+an = {(e["name"], json.dumps(e["type"], sort_keys=True)) for e in a.get("externs", [])}
+bn = {(e["name"], json.dumps(e["type"], sort_keys=True)) for e in b.get("externs", [])}
+core = all(a.get(k) == b.get(k) for k in ["forms","requires","namespace","mode","target"])
+sys.exit(0 if (an == bn and core) else 1)
+EOF
+    then
+      ok "$name mod externs+AST parity (driver, externs set-compare)"
+    else
+      bad "$name mod externs/AST parity — compare $LAB/$name-mod-self.json vs $oast"
+    fi
+  done
+fi
+
+echo "=== 7. invalid module fixtures — unresolved alias must exit 1 both sides ==="
+if [ -d "self-host/fixtures/modules/invalid" ]; then
+  for inv in self-host/fixtures/modules/invalid/*.bclj; do
+    [ -e "$inv" ] || continue
+    iname="$(basename "$inv" .bclj)"
+    if BEAGLE_EMIT_SRCLOC=0 bin/beagle-build "$inv" "$LAB/$iname-modinv-o.clj" >/dev/null 2>&1; then
+      bad "$iname oracle accepted (should reject)"
+      continue
+    fi
+    if bb -cp "$OUT" -m selfhost.main check "$inv" >"$LAB/$iname-modinv.out" 2>&1; then
+      bad "$iname selfhost accepted (should reject)"
+    else
+      ok "$iname selfhost rejects (exit nonzero)"
+    fi
+  done
+fi
+
 echo ""
 echo "=== verify-selfhost: $PASS passed, $FAIL failed ==="
 [ "$FAIL" -eq 0 ]

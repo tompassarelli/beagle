@@ -1555,6 +1555,75 @@
         (nix-free-dotted-walk! form false bound))))
   nil)
 
+;; === unresolved-alias check ==================================================
+;; parse.rkt check-qualified-resolution!: a qualified ref `p/member` whose
+;; prefix `p` was never (require ...)d is an unresolved alias — it crashes at
+;; load. Gated to clj/cljs + strict. Exempt: uppercase-first (interop / static
+;; calls like System/getenv), the `clojure.` prefix, refs already bound in env
+;; (a resolved cross-module import or a local), and prefixes that ARE required
+;; (their calls just type as Any, not an error). This chain carries no srcloc,
+;; so the message omits the oracle's `(line N)` — pointed-message parity.
+
+(def LOWER-ALPHA :- String "abcdefghijklmnopqrstuvwxyz")
+
+(defn- lower-alpha-first? [s :- String] :- Bool
+  (and (> (count s) 0)
+       (some? (str/index-of LOWER-ALPHA (subs s 0 1)))))
+
+(defn collect-ref-names [x :- Any acc :- Any] :- Any
+  (cond
+    (map? x)
+      (let [acc1 (if (= (get x "node") "ref")
+                   (let [nm (get x "name")] (if (string? nm) (conj acc nm) acc))
+                   acc)]
+        (reduce (fn [a :- Any v :- Any] :- Any (collect-ref-names v a)) acc1 (vals x)))
+    (vector? x)
+      (reduce (fn [a :- Any v :- Any] :- Any (collect-ref-names v a)) acc x)
+    :else acc))
+
+(defn check-qualified-resolution! [prog :- Any env :- Any] :- Nil
+  (let [target (get prog "target")]
+    (when (and (or (= target "clj") (= target "cljs"))
+               (= (get prog "mode") "strict"))
+      (let [required (reduce
+                       (fn [m :- Any r :- Any] :- Any
+                         (let [ns (get r "ns")
+                               alias (get r "alias")
+                               m1 (assoc m ns true)]
+                           (if (and (some? alias) (not (= alias false)))
+                             (assoc m1 alias true)
+                             m1)))
+                       {"str" true} (get prog "requires"))
+            names (reduce (fn [a :- Any f :- Any] :- Any (collect-ref-names f a))
+                          [] (get prog "forms"))
+            seen (atom {})
+            bad (atom [])]
+        (doseq [s names]
+          (let [idx (str/index-of s "/")]
+            (when (and (some? idx) (> idx 0) (< idx (- (count s) 1))
+                       (lower-alpha-first? s)
+                       (not (str/starts-with? s "clojure."))
+                       (nil? (get env s)))
+              (let [p (subs s 0 idx)]
+                (when (and (nil? (get required p))
+                           (not (= true (get (deref seen) s))))
+                  (swap! seen assoc s true)
+                  (swap! bad conj {"sym" s "prefix" p}))))))
+        (when (> (count (deref bad)) 0)
+          (let [vs (deref bad)
+                plural (> (count vs) 1)
+                lines (str/join "\n"
+                        (mapv (fn [v :- Any] :- String
+                                (str "  " (get v "sym") " — alias `" (get v "prefix")
+                                     "` is not required"))
+                              vs))]
+            (emit-diag!
+              (str "unresolved namespace alias" (if plural "es" "")
+                   " — these will crash at " target " load:\n"
+                   lines
+                   "\nAdd the missing (require NS :as ALIAS) form(s), or fix the alias."))))))
+    nil))
+
 ;; === type-check! (mutates STATE; returns {diagnostics count}) =================
 
 (defn type-check! [prog :- Any] :- Any
@@ -1569,7 +1638,8 @@
       (let [env (build-initial-env! prog)]
         (doseq [form (get prog "forms")]
           (check-form! form env))
-        (check-nix-free-dotted! prog))))
+        (check-nix-free-dotted! prog)
+        (check-qualified-resolution! prog env))))
   (let [diags (get (deref STATE) "diagnostics")]
     {"diagnostics" diags
      "count" (count diags)}))

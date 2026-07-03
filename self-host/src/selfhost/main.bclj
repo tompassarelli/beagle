@@ -24,6 +24,107 @@
 (declare-extern selfhost.rt/parse-json [String -> Any])
 (declare-extern selfhost.rt/exit [Int -> Nil])
 (declare-extern selfhost.rt/eprint [String -> Nil])
+(declare-extern selfhost.rt/file-exists? [String -> Bool])
+(declare-extern selfhost.rt/abs-path [String -> String])
+
+;; --- module resolution (driver-level; parse stays pure) ----------------------
+;; Mirror of beagle-lib parse.rkt resolve-module-path + register-require!: for
+;; each (require ...) resolve a sibling beagle source, read + parse it (pure),
+;; extract its typed surface via p/import-module-surface, and merge the imported
+;; externs into the program so cross-module refs type-check like the oracle. IO
+;; (file-exists?/slurp) lives here; the parse stage takes only datums. A require
+;; that resolves to no beagle source (external / .clj runtime) is skipped, and
+;; its calls type as Any — exactly the oracle's behavior.
+
+(def BEAGLE-EXTENSIONS :- (Vec String)
+  [".bclj" ".bcljs" ".bjs" ".bnix" ".bodin" ".bgl" ".rkt"])
+
+(defn- split-dots [s :- String] :- Any
+  (loop [i 0 start 0 acc :- Any []]
+    (cond
+      (>= i (count s)) (conj acc (subs s start i))
+      (= (subs s i (+ i 1)) ".") (recur (+ i 1) (+ i 1) (conj acc (subs s start i)))
+      :else (recur (+ i 1) start acc))))
+
+(defn- last-slash [s :- String] :- Int
+  (loop [i (- (count s) 1)]
+    (cond
+      (< i 0) -1
+      (= (subs s i (+ i 1)) "/") i
+      :else (recur (- i 1)))))
+
+(defn- dir-of [path :- String] :- String
+  (let [i (last-slash path)]
+    (if (< i 0) "" (subs path 0 i))))
+
+(defn- join-slash [segs :- Any] :- String
+  (if (= (count segs) 0)
+    ""
+    (reduce (fn [a :- String s :- String] :- String (str a "/" s))
+            (nth segs 0) (subvec segs 1))))
+
+(defn- try-ext [dir :- String rel :- String] :- Any
+  (loop [i 0]
+    (if (>= i (count BEAGLE-EXTENSIONS))
+      nil
+      (let [p (str dir "/" rel (nth BEAGLE-EXTENSIONS i))]
+        (if (selfhost.rt/file-exists? p) p (recur (+ i 1)))))))
+
+;; nested (dir-segs/base) first, then a flat (base) fallback guarded against
+;; resolving to the source file itself — parse.rkt try-at.
+(defn- try-at-dir [dir :- String dir-segs :- Any base :- String abs-source :- String] :- Any
+  (let [nested-rel (if (> (count dir-segs) 0) (str (join-slash dir-segs) "/" base) base)
+        nested (try-ext dir nested-rel)]
+    (if (some? nested)
+      nested
+      (if (> (count dir-segs) 0)
+        (let [flat (try-ext dir base)]
+          (if (and (some? flat) (not (= flat abs-source))) flat nil))
+        nil))))
+
+(defn- resolve-ns-path [ns :- String source-path :- String] :- Any
+  (let [segs (split-dots ns)
+        base (nth segs (- (count segs) 1))
+        dir-segs (subvec segs 0 (- (count segs) 1))
+        abs-source (selfhost.rt/abs-path source-path)
+        src-dir (dir-of abs-source)]
+    (loop [cur src-dir]
+      (let [hit (try-at-dir cur dir-segs base abs-source)]
+        (if (some? hit)
+          hit
+          (let [parent (dir-of cur)]
+            (if (or (= parent "") (= parent cur)) nil (recur parent))))))))
+
+(defn- dedup-externs [xs :- Any] :- Any
+  (loop [i 0 seen :- Any {} acc :- Any []]
+    (if (>= i (count xs))
+      acc
+      (let [e (nth xs i) nm (get e "name")]
+        (if (= true (get seen nm))
+          (recur (+ i 1) seen acc)
+          (recur (+ i 1) (assoc seen nm true) (conj acc e)))))))
+
+(defn- resolve-imports! [prog :- Any source-path :- String] :- Any
+  (let [requires (get prog "requires")
+        own-externs (get prog "externs")
+        imported (reduce
+                   (fn [acc :- Any r :- Any] :- Any
+                     (let [ns (get r "ns")
+                           alias (get r "alias")
+                           refer (get r "refer")
+                           prefix (if (and (some? alias) (not (= alias false)))
+                                    alias
+                                    (let [segs (split-dots ns)] (nth segs (- (count segs) 1))))
+                           refer-syms (if (and (some? refer) (not (= refer false))) refer nil)
+                           path (resolve-ns-path ns source-path)]
+                       (if (some? path)
+                         (into acc (p/import-module-surface
+                                     (rd/read-program (selfhost.rt/slurp-file path))
+                                     prefix refer-syms))
+                         acc)))
+                   [] requires)]
+    ;; own declare-externs are first, so they win any name collision.
+    (assoc prog "externs" (dedup-externs (into own-externs imported)))))
 
 ;; Inject the requested emit target into the datum stream when the source
 ;; declares none, so parse (js/quote combiner, target-case) + emit agree. The
@@ -38,7 +139,7 @@
 (defn- parse-file-target! [path :- String target :- String] :- Any
   (let [datums0 (rd/read-program (selfhost.rt/slurp-file path))
         datums (if (has-define-target? datums0) datums0 (into [["define-target" target]] datums0))
-        prog (p/parse-program! datums)
+        prog (resolve-imports! (p/parse-program! datums) path)
         perrs :- Any (p/parse-errors)]
     ;; Racket raises on a parse diagnostic and exits nonzero. The self-host
     ;; parser collects + eprints, so the driver must fail explicitly: any parse

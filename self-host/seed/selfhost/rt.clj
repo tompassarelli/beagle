@@ -11,6 +11,13 @@
 
 (defn read-stdin [] (slurp *in*))
 
+;; Module resolution needs to probe the filesystem for sibling beagle sources
+;; and canonicalize the entry path (resolve-module-path walks from the source
+;; dir up the parent chain). The driver owns this IO; the parse stage stays pure.
+(defn file-exists? [path] (.isFile (java.io.File. ^String path)))
+
+(defn abs-path [path] (.getAbsolutePath (java.io.File. ^String path)))
+
 ;; --- JSON (string keys preserved — AST/datum values are string-keyed) ----------
 
 (defn to-json [x] (cheshire/generate-string x))
