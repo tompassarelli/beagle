@@ -24,6 +24,18 @@
 (defn make-poly [vars body bounds]
   {"kind" "poly" "vars" vars "body" body "bounds" bounds})
 
+(def INT-TYPE {"kind" "prim" "name" "Int"})
+
+(def FLOAT-TYPE {"kind" "prim" "name" "Float"})
+
+(def NUMBER-TYPE {"kind" "union" "members" [{"kind" "prim" "name" "Int"} {"kind" "prim" "name" "Float"}]})
+
+(def VEC-ACCESS-POLY (make-poly ["A"] (make-fn [(make-app "Vec" [(make-var "A")])] nil (make-var "A")) nil))
+
+(def NTH-POLY (make-poly ["A"] (make-fn [(make-app "Vec" [(make-var "A")]) (make-prim "Int")] (make-prim "Any") (make-var "A")) nil))
+
+(def MAPV-POLY (make-poly ["A" "B"] (make-fn [(make-fn [(make-var "A")] nil (make-var "B")) ANY] nil (make-app "Vec" [(make-var "B")])) nil))
+
 (defn ^Boolean prim? [t]
   (and (not (nil? t)) (not= (get t "kind") nil) (= (get t "kind") "prim")))
 
@@ -61,9 +73,12 @@
    args (get t "args")
    arg-strs (mapv (fn [a] (type->string a)) args)]
   (str "(" ctor " " (str/join " " arg-strs) ")"))
-  (union-type? t) (let [members (get t "members")
-   member-strs (mapv (fn [m] (type->string m)) members)]
-  (str "(U " (str/join " " member-strs) ")"))
+  (union-type? t) (let [members (get t "members")]
+  (cond
+  (and (= (count members) 2) (every? prim? members) (boolean (some (fn [m] (= (get m "name") "Int")) members)) (boolean (some (fn [m] (= (get m "name") "Float")) members))) "Number"
+  (and (= (count members) 2) (boolean (some nil-type? members))) (let [non-nil (first (filterv (fn [m] (not (nil-type? m))) members))]
+  (str (type->string non-nil) "?"))
+  :else (str "(U " (str/join " " (mapv (fn [m] (type->string m)) members)) ")")))
   (var-type? t) (get t "name")
   (poly-type? t) (str "(forall [" (str/join " " (get t "vars")) "] " (type->string (get t "body")) ")")
   :else "?"))
@@ -101,7 +116,8 @@
   (and (any-type? t1) (any-type? t2)) ANY
   (any-type? t1) t2
   (any-type? t2) t1
-  (type-compatible? t1 t2) t1
+  (type-compatible? t1 t2) t2
+  (type-compatible? t2 t1) t1
   :else (let [flat1 (if (union-type? t1) (get t1 "members") [t1])
    flat2 (if (union-type? t2) (get t2 "members") [t2])
    all (into (vec flat1) flat2)
@@ -133,7 +149,21 @@
   (= kind "nil") (make-prim "Nil")
   (= kind "keyword") (make-prim "Keyword")
   (= kind "symbol") (make-prim "Symbol")
+  (= kind "char") (make-prim "Char")
   :else nil)))
+
+(defn ^Boolean synthetic-absent-else? [e]
+  (and (not (nil? e)) (= (get e "node") "literal") (= (get e "kind") "bool") (= (get e "value") false)))
+
+(defn ^Boolean numeric-prim? [t]
+  (and (prim? t) (or (= (get t "name") "Int") (= (get t "name") "Float"))))
+
+(defn collection-elem-type [types]
+  (cond
+  (= (count types) 0) ANY
+  (every? numeric-prim? types) (if (boolean (some (fn [t] (= (get t "name") "Float")) types)) FLOAT-TYPE INT-TYPE)
+  (and (not (any-type? (nth types 0))) (every? (fn [t] (type-compatible? t (nth types 0))) (drop 1 types))) (nth types 0)
+  :else ANY))
 
 (defn infer-type-var-bindings! [expected actual bindings]
   (cond
@@ -175,7 +205,7 @@
   (swap! STATE update "diagnostics" conj msg)
   nil)
 
-(def STDLIB {"int?" (make-fn [ANY] nil (make-prim "Bool")) "nil?" (make-fn [ANY] nil (make-prim "Bool")) "some?" (make-fn [ANY] nil (make-prim "Bool")) "string?" (make-fn [ANY] nil (make-prim "Bool")) "number?" (make-fn [ANY] nil (make-prim "Bool")) "integer?" (make-fn [ANY] nil (make-prim "Bool")) "keyword?" (make-fn [ANY] nil (make-prim "Bool")) "symbol?" (make-fn [ANY] nil (make-prim "Bool")) "boolean?" (make-fn [ANY] nil (make-prim "Bool")) "float?" (make-fn [ANY] nil (make-prim "Bool")) "map?" (make-fn [ANY] nil (make-prim "Bool")) "vector?" (make-fn [ANY] nil (make-prim "Bool")) "empty?" (make-fn [ANY] nil (make-prim "Bool")) "not" (make-fn [ANY] nil (make-prim "Bool")) "=" (make-fn [ANY] ANY (make-prim "Bool")) "not=" (make-fn [ANY] ANY (make-prim "Bool")) ">" (make-fn [ANY] ANY (make-prim "Bool")) "<" (make-fn [ANY] ANY (make-prim "Bool")) ">=" (make-fn [ANY] ANY (make-prim "Bool")) "<=" (make-fn [ANY] ANY (make-prim "Bool")) "and" (make-fn [] ANY ANY) "or" (make-fn [] ANY ANY) "+" (make-fn [] ANY (make-prim "Int")) "-" (make-fn [ANY] ANY (make-prim "Int")) "*" (make-fn [] ANY (make-prim "Int")) "max" (make-fn [ANY] ANY (make-prim "Int")) "min" (make-fn [ANY] ANY (make-prim "Int")) "inc" (make-fn [ANY] nil (make-prim "Int")) "dec" (make-fn [ANY] nil (make-prim "Int")) "count" (make-fn [ANY] nil (make-prim "Int")) "str" (make-fn [] ANY (make-prim "String")) "get" (make-fn [ANY ANY] ANY ANY) "get-in" (make-fn [ANY ANY] ANY ANY) "assoc" (make-fn [ANY ANY ANY] ANY ANY) "assoc-in" (make-fn [ANY ANY ANY] nil ANY) "update" (make-fn [ANY ANY ANY] ANY ANY) "dissoc" (make-fn [ANY ANY] ANY ANY) "conj" (make-fn [ANY] ANY ANY) "cons" (make-fn [ANY ANY] nil ANY) "into" (make-fn [ANY ANY] nil ANY) "vec" (make-fn [ANY] nil ANY) "vals" (make-fn [ANY] nil ANY) "keys" (make-fn [ANY] nil ANY) "first" (make-fn [ANY] nil ANY) "second" (make-fn [ANY] nil ANY) "rest" (make-fn [ANY] nil ANY) "nth" (make-fn [ANY ANY] ANY ANY) "reduce" (make-fn [ANY ANY] ANY ANY) "map" (make-fn [ANY] ANY ANY) "mapv" (make-fn [ANY] ANY ANY) "filter" (make-fn [ANY ANY] nil ANY) "filterv" (make-fn [ANY ANY] nil ANY) "remove" (make-fn [ANY ANY] nil ANY) "some" (make-fn [ANY ANY] nil ANY) "every?" (make-fn [ANY ANY] nil (make-prim "Bool"))})
+(def STDLIB {"true" (make-prim "Bool") "false" (make-prim "Bool") "int?" (make-fn [ANY] nil (make-prim "Bool")) "nil?" (make-fn [ANY] nil (make-prim "Bool")) "some?" (make-fn [ANY] nil (make-prim "Bool")) "string?" (make-fn [ANY] nil (make-prim "Bool")) "number?" (make-fn [ANY] nil (make-prim "Bool")) "integer?" (make-fn [ANY] nil (make-prim "Bool")) "keyword?" (make-fn [ANY] nil (make-prim "Bool")) "symbol?" (make-fn [ANY] nil (make-prim "Bool")) "boolean?" (make-fn [ANY] nil (make-prim "Bool")) "float?" (make-fn [ANY] nil (make-prim "Bool")) "map?" (make-fn [ANY] nil (make-prim "Bool")) "vector?" (make-fn [ANY] nil (make-prim "Bool")) "empty?" (make-fn [ANY] nil (make-prim "Bool")) "not" (make-fn [ANY] nil (make-prim "Bool")) "=" (make-fn [ANY] ANY (make-prim "Bool")) "not=" (make-fn [ANY] ANY (make-prim "Bool")) ">" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) ">=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "and" (make-fn [] ANY ANY) "or" (make-fn [] ANY ANY) "+" (make-fn [] ANY (make-prim "Int")) "-" (make-fn [ANY] ANY (make-prim "Int")) "*" (make-fn [] ANY (make-prim "Int")) "max" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "min" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "inc" (make-fn [NUMBER-TYPE] nil INT-TYPE) "dec" (make-fn [NUMBER-TYPE] nil INT-TYPE) "count" (make-fn [ANY] nil (make-prim "Int")) "str" (make-fn [] ANY (make-prim "String")) "get" (make-fn [ANY ANY] ANY ANY) "get-in" (make-fn [ANY ANY] ANY ANY) "assoc" (make-fn [ANY ANY ANY] ANY ANY) "assoc-in" (make-fn [ANY ANY ANY] nil ANY) "update" (make-fn [ANY ANY ANY] ANY ANY) "dissoc" (make-fn [ANY ANY] ANY ANY) "conj" (make-fn [ANY] ANY ANY) "cons" (make-fn [ANY ANY] nil ANY) "into" (make-fn [ANY ANY] nil ANY) "vec" (make-fn [ANY] nil ANY) "vals" (make-fn [ANY] nil ANY) "keys" (make-fn [ANY] nil ANY) "first" VEC-ACCESS-POLY "second" VEC-ACCESS-POLY "rest" (make-fn [ANY] nil ANY) "nth" NTH-POLY "reduce" (make-fn [ANY ANY] ANY ANY) "map" (make-fn [ANY] ANY ANY) "mapv" MAPV-POLY "filter" (make-fn [ANY ANY] nil ANY) "filterv" (make-fn [ANY ANY] nil ANY) "remove" (make-fn [ANY ANY] nil ANY) "some" (make-fn [ANY ANY] nil ANY) "every?" (make-fn [ANY ANY] nil (make-prim "Bool"))})
 
 (defn opt-field [x]
   (if (= x false) nil x))
@@ -209,7 +239,7 @@
   (emit-diag! (str "beagle: let binding " bname ": expected " (type->string declared) ", got " (type->string inferred)))))
   (assoc out bname (if (not (nil? declared)) declared inferred)))) env bindings))
 
-(def TYPE-PREDICATES {"nil?" "Nil" "string?" "String" "number?" "Int" "integer?" "Int" "keyword?" "Keyword" "symbol?" "Symbol" "boolean?" "Bool" "float?" "Float" "int?" "Int"})
+(def TYPE-PREDICATES {"nil?" "Nil" "string?" "String" "number?" "Int" "integer?" "Int" "keyword?" "Keyword" "symbol?" "Symbol" "boolean?" "Bool"})
 
 (defn extract-narrowing [cond-expr]
   (cond
@@ -464,7 +494,7 @@
    then-env (get narrowed "then")
    else-env (get narrowed "else")
    tt (infer-expr! (get e "then") then-env)
-   et (if (not (nil? (get e "else"))) (infer-expr! (get e "else") else-env) NIL-TYPE)]
+   et (if (or (nil? (get e "else")) (synthetic-absent-else? (get e "else"))) NIL-TYPE (infer-expr! (get e "else") else-env))]
   (merge-types tt et)))
   (= (get e "node") "when") (do
   (infer-expr! (get e "cond") env)
@@ -487,18 +517,12 @@
   (= (get e "node") "await") (let [inner-type (infer-expr! (get e "expr") env)]
   (if (and (app-type? inner-type) (= (get inner-type "name") "Promise") (= (count (get inner-type "args")) 1)) (nth (get inner-type "args") 0) ANY))
   (= (get e "node") "vec") (let [items (get e "items")]
-  (if (= (count items) 0) (make-app "Vec" [ANY]) (let [elem-types (mapv (fn [it] (infer-expr! it env)) items)
-   first-t (nth elem-types 0)
-   all-same (and (not (any-type? first-t)) (every? (fn [t] (type-compatible? t first-t)) (drop 1 elem-types)))]
-  (if all-same (make-app "Vec" [first-t]) (make-app "Vec" [ANY])))))
+  (if (= (count items) 0) (make-app "Vec" [ANY]) (let [elem-types (mapv (fn [it] (infer-expr! it env)) items)]
+  (make-app "Vec" [(collection-elem-type elem-types)]))))
   (= (get e "node") "map") (let [pairs (get e "pairs")]
   (if (= (count pairs) 0) (make-app "Map" [ANY ANY]) (let [key-types (mapv (fn [p] (infer-expr! (get p "key") env)) pairs)
-   val-types (mapv (fn [p] (infer-expr! (get p "val") env)) pairs)
-   first-k (nth key-types 0)
-   first-v (nth val-types 0)
-   kt (if (and (not (any-type? first-k)) (every? (fn [t] (type-compatible? t first-k)) (drop 1 key-types))) first-k ANY)
-   vt (if (and (not (any-type? first-v)) (every? (fn [t] (type-compatible? t first-v)) (drop 1 val-types))) first-v ANY)]
-  (make-app "Map" [kt vt]))))
+   val-types (mapv (fn [p] (infer-expr! (get p "val") env)) pairs)]
+  (make-app "Map" [(collection-elem-type key-types) (collection-elem-type val-types)]))))
   (= (get e "node") "set") (let [items (get e "items")]
   (if (= (count items) 0) (make-app "Set" [ANY]) (let [elem-types (mapv (fn [it] (infer-expr! it env)) items)
    first-t (nth elem-types 0)

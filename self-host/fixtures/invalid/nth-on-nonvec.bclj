@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns nth-on-nonvec.test)
+
+;; nth's first arg is (Vec A); a scalar (Keyword) is rejected by both compilers.
+(defn run [] :- Any
+  (nth :not-a-vector 0))

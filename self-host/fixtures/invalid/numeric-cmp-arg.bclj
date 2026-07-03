@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns numeric-cmp-arg.test)
+
+;; `<=` takes the numeric tower (Number); a String arg is rejected by both.
+(defn run [s :- String] :- Bool
+  (<= s 10))

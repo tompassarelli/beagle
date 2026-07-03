@@ -1,0 +1,7 @@
+#lang beagle/clj
+(ns thread-prim-arg.test)
+
+;; Threading a vector into `dec` — the desugared call chain must type-check its
+;; prim args: dec expects Number, gets (Vec Any). Both compilers reject.
+(defn run [] :- Int
+  (->> [1 2 3] (dec) (inc)))
