@@ -37,6 +37,10 @@
  ("result"             "beagle-test/tests/fixtures/result.bclj"            emit)
  ("kitchen-sink"       "beagle-test/tests/fixtures/kitchen-sink.bclj"      emit)
  ("reject-type-mismatch" "beagle-test/conformance/corpus/reject-type-mismatch.bclj" reject)
+ ;; char-literal: named (\tab \space …), plain (\z \0), let-binding and predicate
+ ;; positions. Regression row for the oracle reader/emitter char-literal bug
+ ;; (was: \tab → bare symbol `tab`; fixed: reader now produces Racket char? values).
+ ("charlit"             "beagle-test/conformance/corpus/charlit.bclj"            emit)
 
  ;; --- cljs -----------------------------------------------------------
  ("hello-cljs"         "beagle-test/tests/fixtures/hello-cljs.bcljs"       emit)

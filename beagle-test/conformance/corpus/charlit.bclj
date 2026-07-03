@@ -1,0 +1,17 @@
+#lang beagle/clj
+;; Char-literal conformance: all surface forms round-trip through the oracle.
+;; Named chars (\tab \space \newline \return \backspace \formfeed),
+;; plain single chars (\z \0), and a let-binding position.
+(ns conformance.charlit)
+
+(defn named-chars [] :- Any
+  [\tab \space \newline \return \backspace \formfeed])
+
+(defn plain-chars [] :- Any
+  [\z \0 \!])
+
+(defn char-in-let [] :- Bool
+  (let [c \a] (char? c)))
+
+(defn char-predicate [] :- Bool
+  (char? \z))

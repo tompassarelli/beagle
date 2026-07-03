@@ -491,6 +491,7 @@
     [(boolean? v)        (type-prim 'Bool)]
     [(exact-integer? v)  (type-prim 'Int)]
     [(real? v)           (type-prim 'Float)]
+    [(char? v)           (type-prim 'Char)]
     [(eq? v 'nil)        (type-prim 'Nil)]
     [(eq? v 'true)       (type-prim 'Bool)]
     [(eq? v 'false)      (type-prim 'Bool)]

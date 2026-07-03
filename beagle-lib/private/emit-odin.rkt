@@ -245,6 +245,8 @@
        (if (regexp-match? #rx"[.e]" s) s (string-append s ".0")))]
     [(boolean? e) (if e "true" "false")]
     [(string? e) (format "\"~a\"" (odin-escape-string e))]
+    ;; Char literals lower to single-character strings in Odin (no char type).
+    [(char? e) (format "\"~a\"" (odin-escape-string (string e)))]
     [(eq? e 'nil) "nil"]
     [(symbol? e)
      (cond
