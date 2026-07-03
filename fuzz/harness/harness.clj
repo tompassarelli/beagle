@@ -82,9 +82,16 @@
 
 (defn error-fingerprint [^String stderr]
   ;; Extract a stable error class string from stderr, stripping volatile parts.
+  ;; Strip to the message CORE (after the last "beagle:" marker) BEFORE
+  ;; truncating: the oracle's srcloc prefix otherwise eats ~40 chars of the
+  ;; cap, so two identical long messages keep different 120-char windows and
+  ;; compare unequal (false :diagnostic on every case/dotimes rejection).
   (let [lines (str/split-lines (or stderr ""))
-        sig   (first (filter #(re-find #"(?i)error|fail|beagle:|check:|parse:|type:" %) lines))]
-    (-> (or sig (first lines) "unknown-error")
+        sig   (first (filter #(re-find #"(?i)error|fail|beagle:|check:|parse:|type:" %) lines))
+        raw   (or sig (first lines) "unknown-error")
+        i     (.lastIndexOf ^String raw "beagle:")
+        core  (if (neg? i) raw (subs raw (+ i (count "beagle:"))))]
+    (-> core
         ;; strip absolute paths
         (str/replace #"(?:/[^\s:\"',\(\)]+|~/[^\s:\"',\(\)]+)" "<path>")
         ;; strip numeric line/col references like :42:7 or @42:7
