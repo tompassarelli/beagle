@@ -1,0 +1,86 @@
+name: fuzz-nightly
+
+# Nightly differential-fuzz campaign: a fresh-seed corpus (default 800 cases)
+# run through the dual-compiler harness (Racket oracle vs self-hosted bb seed).
+# The seed is derived from the UTC date, so each night is fresh AND every run
+# reproduces locally with the one command printed in bin/beagle-fuzz-nightly's
+# banner. The gate (fuzz/harness/gate.clj) is GREEN on today's main and RED on
+# any NEW divergence: any :emission bucket is fatal (zero tolerance); an
+# :acceptance/:diagnostic bucket is fatal only if its signature is absent from
+# fuzz/known-buckets.txt (the known checker-message-precision tail).
+#
+# This workflow OWNS only .github/workflows/fuzz-nightly.yml. It reuses the
+# Racket + babashka provisioning pattern from test.yml but does NOT touch it.
+
+on:
+  schedule:
+    # 07:17 UTC daily — offset off the hour to dodge scheduler congestion.
+    - cron: '17 7 * * *'
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: 'Fuzz seed (blank = derive from UTC date)'
+        required: false
+        default: ''
+      count:
+        description: 'Number of cases'
+        required: false
+        default: '800'
+      target:
+        description: 'Target (clj|js|nix)'
+        required: false
+        default: 'clj'
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Racket oracle side — full CS distribution, pinned as in test.yml.
+      - name: Install Racket
+        uses: Bogdanp/setup-racket@v1.14
+        with:
+          architecture: x64
+          distribution: full
+          variant: CS
+          version: '9.1'
+
+      - name: Link beagle packages
+        run: |
+          raco pkg install --auto --link \
+            beagle-lib/ beagle-test/ beagle/
+
+      # babashka — runs the generator, the harness, the gate, AND is the
+      # self-hosted compiler (bb seed fallback; no native binary needed in CI).
+      - name: Install babashka (pinned)
+        uses: turtlequeue/setup-babashka@v1.8.0
+        with:
+          babashka-version: '1.12.218'
+
+      # _BEAGLE_RACKET pins bin/_beagle-racket to the runner's setup-racket
+      # (bytecode built in this job); otherwise it would nix-develop the flake
+      # and pull a second toolchain. Same pattern as test.yml's conformance gate.
+      # FUZZ_SEED/FUZZ_COUNT: the entrypoint derives the seed from the UTC date
+      # when unset; workflow_dispatch inputs override for on-demand replays.
+      - name: Nightly differential-fuzz campaign
+        env:
+          FUZZ_SEED: ${{ github.event.inputs.seed }}
+          FUZZ_COUNT: ${{ github.event.inputs.count }}
+        run: |
+          _BEAGLE_RACKET="$(which racket)" \
+            bin/beagle-fuzz-nightly \
+              --count "${FUZZ_COUNT:-800}" \
+              --target "${{ github.event.inputs.target || 'clj' }}"
+
+      # Shrunk repros + report of any FAILING (fatal) bucket, for offline triage.
+      # if: failure() — only meaningful when the gate went RED.
+      - name: Upload failing-bucket repros
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-nightly-repros
+          path: |
+            fuzz/nightly-out/harness/repros/
+            fuzz/nightly-out/harness/report.edn
+          if-no-files-found: warn

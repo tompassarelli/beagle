@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# bin/beagle-fuzz-nightly — differential-fuzz nightly campaign (ONE code path
+# for CI and local dev).
+#
+# Generates a fresh-seed corpus, runs the dual-compiler differential harness,
+# and applies the nightly gate policy (fuzz/harness/gate.clj):
+#   - any :emission bucket                    → RED (zero tolerance)
+#   - any :acceptance/:diagnostic bucket whose signature is NOT allowlisted in
+#     fuzz/known-buckets.txt                   → RED
+#   - allowlisted buckets (known checker-tail) → GREEN
+#
+# The seed is derived from the UTC date by default (fresh each night) and
+# PRINTED prominently, so any failure reproduces locally with one command.
+#
+# Usage:
+#   bin/beagle-fuzz-nightly [--seed N] [--count N] [--jobs N] [--target clj|js|nix]
+#                           [--out DIR] [--allowlist FILE]
+#
+# Env:
+#   FUZZ_SEED   — overrides the derived seed (same effect as --seed)
+#   FUZZ_COUNT  — overrides the default case count
+#
+# Exit 0 = GREEN, exit 1 = RED (new divergence), exit 2 = infrastructure error.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BEAGLE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# ─── Defaults ─────────────────────────────────────────────────────────────────
+SEED="${FUZZ_SEED:-$(date -u +%Y%m%d)}"
+COUNT="${FUZZ_COUNT:-800}"
+JOBS="$(nproc 2>/dev/null || echo 4)"
+TARGET="clj"
+OUT_DIR=""
+ALLOWLIST="$BEAGLE_ROOT/fuzz/known-buckets.txt"
+
+# ─── Parse args ───────────────────────────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --seed)      SEED="$2";      shift 2 ;;
+    --count)     COUNT="$2";     shift 2 ;;
+    --jobs)      JOBS="$2";      shift 2 ;;
+    --target)    TARGET="$2";    shift 2 ;;
+    --out)       OUT_DIR="$2";   shift 2 ;;
+    --allowlist) ALLOWLIST="$2"; shift 2 ;;
+    -h|--help)
+      grep '^#' "$0" | sed 's/^# \{0,1\}//'
+      exit 0 ;;
+    *) echo "beagle-fuzz-nightly: unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+OUT_DIR="${OUT_DIR:-$BEAGLE_ROOT/fuzz/nightly-out}"
+
+case "$TARGET" in
+  clj) EXT=".bclj" ;;
+  js)  EXT=".bjs" ;;
+  nix) EXT=".bnix" ;;
+  *) echo "beagle-fuzz-nightly: bad --target '$TARGET' (clj|js|nix)" >&2; exit 2 ;;
+esac
+
+# ─── Reproduce banner (PROMINENT — failures replay from here) ─────────────────
+REPRO_CMD="bin/beagle-fuzz-nightly --seed $SEED --count $COUNT --target $TARGET"
+echo "════════════════════════════════════════════════════════════════════════"
+echo "  beagle differential-fuzz nightly campaign"
+echo "    seed      : $SEED"
+echo "    count     : $COUNT"
+echo "    target    : $TARGET"
+echo "    jobs      : $JOBS"
+echo "    allowlist : $ALLOWLIST"
+echo "    out       : $OUT_DIR"
+echo "  ────────────────────────────────────────────────────────────────────"
+echo "  REPRODUCE THIS EXACT RUN LOCALLY:"
+echo "    $REPRO_CMD"
+echo "════════════════════════════════════════════════════════════════════════"
+
+# ─── Clean + prepare output ───────────────────────────────────────────────────
+CORPUS_DIR="$OUT_DIR/corpus"
+HARNESS_OUT="$OUT_DIR/harness"
+rm -rf "$OUT_DIR"
+mkdir -p "$CORPUS_DIR" "$HARNESS_OUT"
+
+# ─── Stage 1: generate fresh corpus ───────────────────────────────────────────
+echo ">> generating $COUNT cases (seed=$SEED target=$TARGET) ..."
+bb "$BEAGLE_ROOT/fuzz/gen/generate.clj" \
+  --seed "$SEED" --count "$COUNT" --out "$CORPUS_DIR" --target "$TARGET"
+
+GEN_N="$(find "$CORPUS_DIR" -name "*$EXT" -type f | wc -l | tr -d ' ')"
+echo ">> generated $GEN_N case files"
+if [[ "$GEN_N" -eq 0 ]]; then
+  echo "beagle-fuzz-nightly: generator produced no $EXT files" >&2
+  exit 2
+fi
+
+# ─── Stage 2: differential harness ────────────────────────────────────────────
+echo ">> running differential harness ..."
+"$BEAGLE_ROOT/fuzz/harness/run.sh" "$CORPUS_DIR" "$HARNESS_OUT" --target "$TARGET" --jobs "$JOBS"
+
+REPORT="$HARNESS_OUT/report.edn"
+if [[ ! -f "$REPORT" ]]; then
+  echo "beagle-fuzz-nightly: harness produced no report.edn" >&2
+  exit 2
+fi
+
+# ─── Stage 3: apply nightly gate policy ───────────────────────────────────────
+echo ">> applying gate policy (allowlist: $ALLOWLIST) ..."
+set +e
+bb "$BEAGLE_ROOT/fuzz/harness/gate.clj" \
+  --report "$REPORT" \
+  --allowlist "$ALLOWLIST" \
+  --repros "$HARNESS_OUT/repros"
+GATE_RC=$?
+set -e
+
+echo ""
+if [[ "$GATE_RC" -eq 0 ]]; then
+  echo "beagle-fuzz-nightly: GREEN (seed=$SEED, $GEN_N cases)"
+else
+  echo "beagle-fuzz-nightly: RED (seed=$SEED, $GEN_N cases) — reproduce: $REPRO_CMD"
+fi
+exit "$GATE_RC"
