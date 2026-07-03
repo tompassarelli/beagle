@@ -1,0 +1,28 @@
+#lang beagle/clj
+(ns fixtures.charlit)
+
+;; Char literals in every position the fuzzer caught divergence: the oracle's
+;; reader silently turned \X into a bare symbol until 1213a9b, and no corpus
+;; row exercised chars at all. Named, plain, and \uNNNN forms; expression,
+;; let-binding, and collection positions.
+
+(defn named-chars [] :- String
+  (str \tab \space \newline \return \formfeed \backspace))
+
+(defn plain-chars [] :- String
+  (let [z \z
+        zero \0]
+    (str z zero \a)))
+
+(defn unicode-char [] :- String
+  (str \u00e9))
+
+(defn chars-in-collections [] :- Any
+  {:tab \tab :vec [\a \b \c]})
+
+;; Canonicalization gate: \uNNNN where NNNN decodes to a printable ASCII
+;; code point must re-emit as \X, not \uNNNN.
+;; \u0020 (space=32) must re-emit as \space.
+;; Both oracle and selfhost must emit: (str \A \space)
+(defn char-canonical [] :- String
+  (str \u0041 \u0020))
