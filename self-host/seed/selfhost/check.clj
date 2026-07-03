@@ -510,8 +510,13 @@
   (doseq [a (get e "args")]
   (infer-expr! a env))
   ANY)
-  (= (get e "node") "set!") (do
-  (infer-expr! (get e "target") env)
+  (= (get e "node") "set!") (let [target (get e "target")
+   tnode (get target "node")
+   tgt (get (deref STATE) "target")]
+  (if (not (or (= tnode "ref") (= tnode "method-call") (= tgt "odin") (= tgt "zig"))) (do
+  (let [target-desc (if (and (= tnode "call") (= (get (get target "fn") "node") "ref")) (str "(" (get (get target "fn") "name") " …)") "that form")]
+  (emit-diag! (str "beagle: set! target must be a local variable or a field access (.-field); " target-desc " is not an assignable place on the " (str tgt) " target")))))
+  (infer-expr! target env)
   (infer-expr! (get e "value") env)
   ANY)
   (= (get e "node") "await") (let [inner-type (infer-expr! (get e "expr") env)]
@@ -842,7 +847,7 @@
 (defn type-check! [prog]
   (let [mode (get prog "mode")]
   (if (= mode "strict") (do
-  (reset! STATE {"record-fields" {} "record-field-order" {} "union-members" {} "parametric-unions" {} "diagnostics" []})
+  (reset! STATE {"record-fields" {} "record-field-order" {} "union-members" {} "parametric-unions" {} "target" (get prog "target") "diagnostics" []})
   (let [env (build-initial-env! prog)]
   (doseq [form (get prog "forms")]
   (check-form! form env))
