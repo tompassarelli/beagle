@@ -60,17 +60,29 @@ absolute checkout paths and remain byte-stable across machines.
 
 ## Known gaps (vs the Racket compiler)
 
-- **Module resolution / externs** — the Racket parser reads each required
-  module's source and imports its typed surface (externs, record/union/
-  scalar/enum tables, `^:dynamic` vars, qualified macros). The selfhost
-  chain does not: qualified refs (`k/x`) and `:refer` imports type as
-  `Any`, so cross-module type errors pass the selfhost check (the Racket
-  oracle still catches them in CI). Emitted bytes are unaffected for
-  programs that compile under the oracle — externs shape typing, not
-  emission — which is why the AST-parity rung excludes externs. Closing
-  this needs a module loader (path resolution + IO + recursive parse) in
-  the currently pure parse stage; see the header of
-  `src/selfhost/parse.bclj` for the precise inventory.
+- **Module resolution / externs** — CLOSED. The driver (`main.bclj`) now
+  resolves each `(require ...)` to a sibling beagle source (mirroring
+  `parse.rkt` `resolve-module-path`: ns-segments → path, source-dir then
+  parent walk, `BEAGLE-EXTENSIONS`), reads + parses it (pure), and imports
+  its typed surface via `parse.bclj` `import-module-surface` — a port of
+  `import-module-types!` `reg!`: alias-qualified externs for declare-extern,
+  `defrecord` ctor/accessors, `defscalar`, `defunion`, typed `def`/`defonce`,
+  `^:dynamic` vars, and `defn` signatures (`:refer` also binds bare). These
+  merge into `prog.externs` before `check`, so `k/x` refs type against real
+  signatures and cross-module type errors are caught like the oracle. The
+  `check.rkt` unresolved-alias diagnostic is ported too (`check.bclj`
+  `check-qualified-resolution!`: a qualified ref whose prefix was never
+  required → exit 1). The parse stage stays PURE — all IO lives in the
+  driver (`selfhost.rt` `file-exists?`/`slurp-file`/`abs-path`). Verified by
+  `verify-selfhost.sh` rungs 6/7 and the fram corpus (byte-identical emit +
+  externs parity). Externs are compared as a SET: `ast-json.rkt` serializes
+  the oracle's externs in hash order, so byte order is not reproducible.
+  Remaining sub-gaps (none exercised by any current corpus): cross-module
+  MACRO import (qualified `defmacro`/`define-macro` — surfaced to the macro
+  registry by the oracle, not ported here; ast-json externs carry none),
+  keyword field access on an imported record (needs the oracle's
+  per-record field table, not the flat externs), and parametric-union
+  member ctors/accessors (only the union name is imported).
 - **Source locations** — the chain carries none; seed emission is
   srcloc-free by construction, so this cannot affect seed bytes.
 - **Non-clj targets** — the chain emits the `clj` target only (no nix

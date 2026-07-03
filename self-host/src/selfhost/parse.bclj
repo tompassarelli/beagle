@@ -7,24 +7,25 @@
 ;; Input: vector of top-level datums (selfhost.reader encoding).
 ;; Output: program AST matching beagle-lib/private/ast-json.rkt exactly.
 ;;
-;; REMAINING GAP — MODULE RESOLUTION (the k/* permissive-Any gap; recorded
-;; on thread). parse.rkt's require scan (resolve-module-path +
-;; import-module-types!, ~300 lines) READS each required module's source
-;; and imports: typed externs for def/defn/defonce (alias-qualified +
-;; :refer-bare), defrecord field/ctor/accessor types, defunion members
-;; (incl. parametric), defenum values, defscalar backing types + preds,
-;; deferror members, imported ^:dynamic vars, and required modules' MACROS
-;; (qualified) — incl. the one fresh-lowered-sym site not mirrored here
-;; (parse.rkt (fresh-lowered-sym 'p) for non-symbol imported-proc-macro
-;; params). This chain does NONE of that: qualified refs (k/x) and :refer
-;; imports type as Any, so cross-module type errors pass the selfhost
-;; check (the Racket oracle still catches them). Emitted BYTES are
-;; unaffected for programs that compile under the oracle — externs shape
-;; typing, not emission — which is why verify-selfhost's AST-parity rung
-;; compares forms/requires/namespace/mode/target and excludes externs.
-;; Porting it needs a module loader (path resolution + file IO + recursive
-;; reader/parse) in what is today a pure datum->AST stage (IO lives in
-;; rt.clj/main.bclj): a tranche of its own, not a tail item.
+;; MODULE RESOLUTION — CLOSED. `import-module-surface` (below) is the port of
+;; parse.rkt import-module-types!'s reg! calls: given a required module's RAW
+;; datums + the import prefix (alias / last ns segment) + optional :refer list,
+;; it returns the alias-qualified externs the importer sees — declare-extern,
+;; defrecord ctor/accessors, defscalar ctor/accessor, defunion (plain/throwable/
+;; parametric name), typed def/defonce, ^:dynamic vars, and defn signatures.
+;; It is PURE (datums in, externs out) — path resolution + file IO live in the
+;; DRIVER (main.bclj resolve-ns-path/resolve-imports! + selfhost.rt externs),
+;; which reads each sibling source and merges the imported externs into
+;; prog.externs before check. So qualified refs (k/x) now type against real
+;; signatures and cross-module type errors are caught like the oracle; the
+;; unresolved-alias diagnostic is ported in check.bclj. externs are a SET
+;; (ast-json.rkt serializes the oracle's in hash order), so verify-selfhost
+;; compares them order-insensitively. Remaining sub-gaps, none in any corpus:
+;; cross-module qualified MACROS (surfaced to the macro registry by the oracle,
+;; incl. its (fresh-lowered-sym 'p) site for non-symbol proc-macro params — not
+;; ported; ast-json externs carry none), keyword field access on an imported
+;; record (needs the oracle's per-record field table), and parametric-union
+;; member ctors/accessors (only the union name is imported).
 ;;
 ;; Also unported: source locations (this chain carries none; seed emission
 ;; is srcloc-free by construction) and non-clj target surfaces (nix reader
