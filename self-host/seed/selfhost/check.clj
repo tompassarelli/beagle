@@ -789,13 +789,64 @@
   (infer-expr! form env)
   nil))))
 
+(def NIX-QUALIFIED-PREFIXES ["lib." "builtins." "pkgs."])
+
+(defn nix-dotted-root [^String s]
+  (if (str/starts-with? s ":") nil (let [i (str/index-of s ".")]
+  (if (or (nil? i) (= i 0)) nil (subs s 0 i)))))
+
+(defn ^Boolean nix-qualified? [^String s]
+  (or (str/includes? s "/") (< 0 (count (filterv (fn [p] (str/starts-with? s p)) NIX-QUALIFIED-PREFIXES)))))
+
+(defn nix-collect-bound [x acc]
+  (cond
+  (map? x) (if (= (get x "node") "quoted") acc (let [nm (get x "name")
+   acc1 (if (string? nm) (conj acc nm) acc)
+   acc2 (if (= (get x "node") "nix-with-cfg") (conj acc1 "cfg") acc1)]
+  (reduce (fn [a v] (nix-collect-bound v a)) acc2 (vals x))))
+  (vector? x) (reduce (fn [a v] (nix-collect-bound v a)) acc x)
+  :else acc))
+
+(defn nix-free-dotted-walk! [x ^Boolean under-with bound]
+  (cond
+  (map? x) (let [node (get x "node")]
+  (cond
+  (= node "quoted") nil
+  (= node "ref") (let [nm (get x "name")
+   root (nix-dotted-root nm)]
+  (if (and (some? root) (not under-with) (not (nix-qualified? nm)) (not (contains? bound root)) (not (= root "builtins"))) (do
+  (emit-diag! (str "unbound name `" nm "` on the nix target: it descends into `" root "`, but `" root "` is not a nix/module formal, a let-binding, or any " "other binding in scope. It emits `${" nm "}`, which nix rejects as an " "undefined variable. Declare `" root "` as a `nix/module` formal, bind it " "with `let`, or fix the name. (Names inside `nix/with` are exempt — their " "scope is dynamic.)"))))
+  nil)
+  (= node "nix-with") (do
+  (nix-free-dotted-walk! (get x "ns-expr") under-with bound)
+  (nix-free-dotted-walk! (get x "body") true bound)
+  nil)
+  :else (do
+  (doseq [v (vals x)]
+  (nix-free-dotted-walk! v under-with bound))
+  nil)))
+  (vector? x) (do
+  (doseq [v x]
+  (nix-free-dotted-walk! v under-with bound))
+  nil)
+  :else nil))
+
+(defn check-nix-free-dotted! [prog]
+  (if (and (= (get prog "target") "nix") (= (get prog "mode") "strict")) (do
+  (let [forms (get prog "forms")
+   bound (reduce (fn [a f] (nix-collect-bound f a)) #{} forms)]
+  (doseq [form forms]
+  (nix-free-dotted-walk! form false bound)))))
+  nil)
+
 (defn type-check! [prog]
   (let [mode (get prog "mode")]
   (if (= mode "strict") (do
   (reset! STATE {"record-fields" {} "record-field-order" {} "union-members" {} "parametric-unions" {} "diagnostics" []})
   (let [env (build-initial-env! prog)]
   (doseq [form (get prog "forms")]
-  (check-form! form env))))))
+  (check-form! form env))
+  (check-nix-free-dotted! prog)))))
   (let [diags (get (deref STATE) "diagnostics")]
   {"diagnostics" diags "count" (count diags)}))
 
@@ -998,6 +1049,18 @@
   (= (count (check-program! prog)) 0)))
   (expect! "check-program!: reports errors" (let [prog (make-prog [(make-def-node "x" (make-prim "String") (make-lit "number" 42))])]
   (> (count (check-program! prog)) 0)))
+  (expect! "E021: free dotted root rejected" (let [prog {"mode" "strict" "namespace" "t" "target" "nix" "externs" [] "requires" [] "forms" [{"node" "nix-fn-set" "rest" true "at-name" false "formals" [{"name" "config" "default" false}] "body" {"node" "ref" "name" "vendor.id"}}]}]
+  (> (count (check-program! prog)) 0)))
+  (expect! "E021: formal-rooted dotted accepted" (let [prog {"mode" "strict" "namespace" "t" "target" "nix" "externs" [] "requires" [] "forms" [{"node" "nix-fn-set" "rest" true "at-name" false "formals" [{"name" "config" "default" false}] "body" {"node" "ref" "name" "config.services.foo"}}]}]
+  (= (count (check-program! prog)) 0)))
+  (expect! "E021: qualified lib. dotted exempt" (let [prog {"mode" "strict" "namespace" "t" "target" "nix" "externs" [] "requires" [] "forms" [{"node" "nix-fn-set" "rest" true "at-name" false "formals" [] "body" {"node" "ref" "name" "lib.mkIf"}}]}]
+  (= (count (check-program! prog)) 0)))
+  (expect! "E021: builtins global root exempt" (let [prog {"mode" "strict" "namespace" "t" "target" "nix" "externs" [] "requires" [] "forms" [{"node" "nix-fn-set" "rest" true "at-name" false "formals" [] "body" {"node" "ref" "name" "builtins.length"}}]}]
+  (= (count (check-program! prog)) 0)))
+  (expect! "E021: nix/with body exempts free root" (let [prog {"mode" "strict" "namespace" "t" "target" "nix" "externs" [] "requires" [] "forms" [{"node" "nix-fn-set" "rest" true "at-name" false "formals" [{"name" "config" "default" false}] "body" {"node" "nix-with" "ns-expr" {"node" "ref" "name" "config.boot"} "body" {"node" "ref" "name" "framework.foo"}}}]}]
+  (= (count (check-program! prog)) 0)))
+  (expect! "E021: not fired on clj target" (let [prog {"mode" "strict" "namespace" "t" "target" "clj" "externs" [] "requires" [] "forms" [{"node" "def" "name" "x" "ann" nil "dynamic" false "value" {"node" "ref" "name" "vendor.id"}}]}]
+  (= (count (check-program! prog)) 0)))
   (doseq [f (deref failures)]
   (selfhost.rt/eprint (str "  FAIL: " f "\n")))
   (println (str "  CHECK: " (count (deref passes)) " passed, " (count (deref failures)) " failed"))
