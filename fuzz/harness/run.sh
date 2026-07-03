@@ -2,7 +2,7 @@
 # fuzz/harness/run.sh — differential fuzzing harness entry point.
 #
 # Usage:
-#   fuzz/harness/run.sh <corpus-dir> <out-dir> [--jobs N]
+#   fuzz/harness/run.sh <corpus-dir> <out-dir> [--target clj|js|nix] [--jobs N]
 #
 # Env overrides:
 #   FUZZ_SELFHOST_BIN — path to the self-hosted compiler binary
@@ -10,7 +10,7 @@
 #
 # Output:
 #   <out-dir>/report.edn          — summary + divergence list
-#   <out-dir>/repros/<sig>.bclj   — shrunk repro per unique divergence signature
+#   <out-dir>/repros/<sig>.<ext>  — shrunk repro per unique divergence signature
 
 set -euo pipefail
 
@@ -19,7 +19,7 @@ BEAGLE_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # ─── Parse arguments ──────────────────────────────────────────────────────────
 if [[ $# -lt 2 ]]; then
-  echo "usage: $0 <corpus-dir> <out-dir> [--jobs N]" >&2
+  echo "usage: $0 <corpus-dir> <out-dir> [--target clj|js|nix] [--jobs N]" >&2
   exit 1
 fi
 
@@ -27,11 +27,13 @@ CORPUS_DIR="$1"
 OUT_DIR="$2"
 shift 2
 
+TARGET="clj"
 JOBS="$(nproc 2>/dev/null || echo 4)"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --jobs) JOBS="$2"; shift 2 ;;
-    *)      echo "Unknown argument: $1" >&2; exit 1 ;;
+    --target) TARGET="$2"; shift 2 ;;
+    --jobs)   JOBS="$2";   shift 2 ;;
+    *)        echo "Unknown argument: $1" >&2; exit 1 ;;
   esac
 done
 
@@ -63,16 +65,17 @@ fi
 
 echo "run.sh: oracle=$RACKET"
 echo "run.sh: selfhost=$SELFHOST_BIN"
-echo "run.sh: corpus=$CORPUS_DIR  out=$OUT_DIR  jobs=$JOBS"
+echo "run.sh: target=$TARGET  corpus=$CORPUS_DIR  out=$OUT_DIR  jobs=$JOBS"
 
 # ─── Prepare output directory ─────────────────────────────────────────────────
 mkdir -p "$OUT_DIR" "$OUT_DIR/repros"
 
 # ─── Run harness ──────────────────────────────────────────────────────────────
 exec bb "$SCRIPT_DIR/harness.clj" \
-  --corpus    "$CORPUS_DIR"  \
-  --out       "$OUT_DIR"     \
-  --jobs      "$JOBS"        \
+  --corpus      "$CORPUS_DIR"  \
+  --out         "$OUT_DIR"     \
+  --jobs        "$JOBS"        \
+  --target      "$TARGET"      \
   --beagle-root "$BEAGLE_ROOT" \
-  --racket    "$RACKET"      \
+  --racket      "$RACKET"      \
   --selfhost-bin "$SELFHOST_BIN"

@@ -5,6 +5,9 @@
 #   1. Fixture parity      — run harness over self-host/fixtures/*.bclj; expect all :ok
 #   2. Classifier unit     — fabricate synthetic divergent pairs, test classify-pair logic
 #   3. Shrinker unit       — multi-form file where only one form triggers a synthetic predicate
+#   4. Target plumbing     — generator --target flag produces correct header+ext per target;
+#                            harness command construction stubs assert correct selfhost args;
+#                            clj path has no --target flag (byte-identical to original)
 #
 # Exit 0 = all pass. Prints PASS/FAIL per test.
 
@@ -173,15 +176,6 @@ fi
 echo ""
 echo "=== 3. Shrinker unit test (multi-form file, only one form triggers) ==="
 
-# Strategy: write a .bclj corpus with one file that has multiple forms.
-# The "divergence" is real: a form that produces different output from the two compilers.
-# We use a synthetic acceptance case: we'll fabricate a file where the selfhost
-# accepts but oracle rejects due to a missing #lang header (deliberately invalid).
-# But that won't work since we need real compilers.
-#
-# Instead: build a multi-form file where ALL forms are valid parity.
-# Then test the splitter + shrinker logic in isolation with a synthetic predicate.
-
 SHRINK_TEST="$TMPDIR_BASE/shrink-test.clj"
 cat > "$SHRINK_TEST" << 'BBEOF'
 (require '[clojure.string :as str])
@@ -280,6 +274,96 @@ if bb "$SHRINK_TEST" 2>&1; then
   ok "shrinker unit test: splitter + greedy shrinker correct"
 else
   bad "shrinker unit test: failed (see above)"
+fi
+
+# ─── Test 4: Target plumbing ──────────────────────────────────────────────────
+echo ""
+echo "=== 4. Target plumbing (--target flag: generator + harness command construction) ==="
+
+TARGET_TEST="$TMPDIR_BASE/target-test.clj"
+cat > "$TARGET_TEST" << 'BBEOF'
+(require '[clojure.string :as str]
+         '[clojure.java.io :as io]
+         '[clojure.java.shell :as sh])
+
+(def beagle-root (System/getenv "BEAGLE_ROOT"))
+(def gen-script  (str beagle-root "/fuzz/gen/generate.clj"))
+
+;; ── 4a: generator --target produces correct #lang header + file extension ──
+(defn check-generator [target expected-lang expected-ext]
+  (let [out-dir (str (System/getProperty "java.io.tmpdir")
+                     "/bgl-tgt-" target "-" (System/currentTimeMillis))
+        _       (.mkdirs (io/file out-dir))
+        result  (sh/sh "bb" gen-script
+                        "--seed" "1" "--count" "1"
+                        "--out" out-dir "--target" target)]
+    (if (zero? (:exit result))
+      (let [files (seq (.listFiles (io/file out-dir)))]
+        (if (nil? files)
+          (do (println (str "  FAIL [gen:" target "]: no output files")) false)
+          (let [f     (first files)
+                fname (.getName f)]
+            (if (str/ends-with? fname (str "." expected-ext))
+              (let [content   (slurp f)
+                    header-ok (str/starts-with? content (str "#lang " expected-lang))]
+                (if header-ok
+                  (do (println (str "  PASS [gen:" target "]: " fname " / #lang " expected-lang))
+                      true)
+                  (do (println (str "  FAIL [gen:" target "]: wrong header in " fname))
+                      false)))
+              (do (println (str "  FAIL [gen:" target "]: wrong ext " fname
+                                " (expected ." expected-ext ")"))
+                  false)))))
+      (do (println (str "  FAIL [gen:" target "]: exit " (:exit result) " / " (:err result)))
+          false))))
+
+;; ── 4b: harness selfhost extra-args — mirrors run-selfhost logic in harness.clj ──
+;;   clj → [] (no --target, byte-identical to original)
+;;   js  → ["--target" "js"]
+;;   nix → ["--target" "nix"]
+(defn extra-args-for-target [target]
+  (if (= target "clj") [] ["--target" target]))
+
+;; ── 4c: corpus-ext mapping — mirrors harness.clj ──
+(defn corpus-ext-for [target]
+  (case target "clj" ".bclj" "js" ".bjs" "nix" ".bnix" ".bclj"))
+
+(let [failures (atom 0)]
+  ;; Generator header + ext
+  (doseq [[t lang ext] [["clj" "beagle/clj" "bclj"]
+                         ["js"  "beagle/js"  "bjs"]
+                         ["nix" "beagle/nix" "bnix"]]]
+    (when-not (check-generator t lang ext) (swap! failures inc)))
+
+  ;; Selfhost args (clj must have NO --target)
+  (let [clj-args (extra-args-for-target "clj")]
+    (if (= clj-args [])
+      (println "  PASS [harness:clj]: no --target (byte-identical path preserved)")
+      (do (println (str "  FAIL [harness:clj]: expected [] got " clj-args))
+          (swap! failures inc))))
+
+  (doseq [t ["js" "nix"]]
+    (let [args (extra-args-for-target t)]
+      (if (= args ["--target" t])
+        (println (str "  PASS [harness:" t "]: selfhost gets --target " t))
+        (do (println (str "  FAIL [harness:" t "]: expected [--target " t "] got " args))
+            (swap! failures inc)))))
+
+  ;; Corpus ext
+  (doseq [[t ext] [["clj" ".bclj"] ["js" ".bjs"] ["nix" ".bnix"]]]
+    (let [got (corpus-ext-for t)]
+      (if (= got ext)
+        (println (str "  PASS [corpus-ext:" t "]: " got))
+        (do (println (str "  FAIL [corpus-ext:" t "]: expected " ext " got " got))
+            (swap! failures inc)))))
+
+  (System/exit @failures))
+BBEOF
+
+if BEAGLE_ROOT="$BEAGLE_ROOT" bb "$TARGET_TEST" 2>&1; then
+  ok "target plumbing: all 9 checks pass (3 generator, 3 selfhost args, 3 corpus-ext)"
+else
+  bad "target plumbing: some checks failed (see above)"
 fi
 
 # ─── Summary ─────────────────────────────────────────────────────────────────
