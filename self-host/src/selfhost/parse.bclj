@@ -356,10 +356,6 @@
   {"node" "try" "body" body "catches" catches
    "finally" (if (nil? finally-body) false finally-body)})
 
-(defn make-case [test :- Any clauses :- Any fallback :- Any] :- Any
-  {"node" "case" "test" test "clauses" clauses
-   "default" (if (nil? fallback) false fallback)})
-
 (defn make-match [target :- Any clauses :- Any] :- Any
   {"node" "match" "target" target "clauses" clauses})
 
@@ -390,9 +386,6 @@
 (defn make-condp [pred-fn :- Any test-expr :- Any clauses :- Any fallback :- Any] :- Any
   {"node" "condp" "pred" pred-fn "test" test-expr "clauses" clauses
    "default" (if (nil? fallback) false fallback)})
-
-(defn make-dotimes [name :- String count-expr :- Any body :- Any] :- Any
-  {"node" "dotimes" "name" name "count" count-expr "body" body})
 
 (defn make-doseq [clauses :- Any body :- Any] :- Any
   {"node" "doseq" "clauses" clauses "body" body})
@@ -746,32 +739,6 @@
             (and (= (count catches) 0) (nil? finally-body))
               (recur (+ i 1) (conj body (parse-expr* item)) catches finally-body)
             :else (recur (+ i 1) body catches finally-body)))))))
-
-;; --- parse-case-form ---------------------------------------------------------
-;; Clause body is a SINGLE expr in ast-json (case-clause-body), not a vector.
-
-(defn parse-case-pairs [items :- Any] :- Any
-  (let [n (count items)]
-    (loop [i 0 acc :- Any []]
-      (cond
-        (>= i n) acc
-        (< (+ i 1) n)
-          (recur (+ i 2)
-                 (conj acc {"value" (datum->json (nth items i))
-                            "body" (parse-expr* (nth items (+ i 1)))}))
-        :else acc))))
-
-(defn parse-case-form [test-datum :- Any clauses :- Any] :- Any
-  (let [test (parse-expr* test-datum)]
-    (cond
-      (= (count clauses) 0)
-        (make-case test [] nil)
-      (= (mod (count clauses) 2) 1)
-        (let [pairs (subvec clauses 0 (- (count clauses) 1))
-              fallback (parse-expr* (nth clauses (- (count clauses) 1)))]
-          (make-case test (parse-case-pairs pairs) fallback))
-      :else
-        (make-case test (parse-case-pairs clauses) nil))))
 
 ;; --- parse-match-form --------------------------------------------------------
 
@@ -1449,8 +1416,9 @@
       (and (= head "match") (>= (count rest-items) 1))
         (parse-match-form (nth rest-items 0) (subvec rest-items 1))
 
-      (and (= head "case") (>= (count rest-items) 1))
-        (parse-case-form (nth rest-items 0) (subvec rest-items 1))
+      ;; `case` removed — folded into match + or-pattern. Pointed rejection.
+      (= head "case")
+        (err! "case removed — use (match x [v1 body] [v2 body] [_ default]) or (match x [(or v1 v2) shared-body] [_ default]); literal-only matches case-fold to target-native dispatch in emit")
 
       ;; per-target branch selection
       (= head "target-case")
@@ -1460,13 +1428,9 @@
         (make-doseq (parse-for-clauses (nth rest-items 0))
                     (mapv parse-expr* (subvec rest-items 1)))
 
-      (and (= head "dotimes") (>= (count rest-items) 1))
-        (let [binding-items (unwrap-items (nth rest-items 0))]
-          (if (= (count binding-items) 2)
-            (make-dotimes (nth binding-items 0)
-                          (parse-expr* (nth binding-items 1))
-                          (mapv parse-expr* (subvec rest-items 1)))
-            (make-dotimes "_" (make-literal "number" 0) [])))
+      ;; `dotimes` removed — sugar for (doseq [i (range n)] body...). Pointed rejection.
+      (= head "dotimes")
+        (err! "dotimes removed — use (doseq [i (range n)] body...)")
 
       ;; bare `with` is nix-prefixed today; the record-update `with` form
       ;; remains under this head in the AST (ast-json with-form).
@@ -2036,20 +2000,6 @@
       (and (= (get (get (nth (get node "clauses") 0) "pattern") "type") "record")
            (= (get (get (nth (get node "clauses") 0) "pattern") "name") "Circle"))))
 
-  ;; --- case (body = single expr; default false when absent) ---
-  (expect! "case with default"
-    (let [node (parse-expr* ["case" "x" 1 ["#%string" "one"] 2 ["#%string" "two"] ["#%string" "other"]])]
-      (and (= (get node "node") "case")
-           (= (count (get node "clauses")) 2)
-           (= (get (nth (get node "clauses") 0) "body")
-              {"node" "literal" "kind" "string" "value" "one"})
-           (not (= false (get node "default"))))))
-  (expect! "case without default"
-    (let [node (parse-expr* ["case" "x" 1 ["#%string" "one"] 2 ["#%string" "two"]])]
-      (and (= (get node "node") "case")
-           (= (count (get node "clauses")) 2)
-           (= (get node "default") false))))
-
   ;; --- try ---
   (expect! "try with catch"
     (let [node (parse-expr* ["try" ["foo"]
@@ -2260,10 +2210,19 @@
     (let [node (parse-expr* ["doseq" [BRACKET-TAG "x" "items"] ["println" "x"]])]
       (and (= (get node "node") "doseq")
            (= (count (get node "clauses")) 1))))
-  (expect! "dotimes"
-    (let [node (parse-expr* ["dotimes" [BRACKET-TAG "i" 10] ["println" "i"]])]
-      (and (= (get node "node") "dotimes")
-           (= (get node "name") "i"))))
+  ;; removed forms reject with pointed guidance
+  (expect! "dotimes rejected with pointed error"
+    (let [_ (reset-errors!)
+          _ (parse-expr* ["dotimes" [BRACKET-TAG "i" 10] ["println" "i"]])
+          errs (parse-errors)]
+      (and (> (count errs) 0)
+           (str/includes? (nth errs 0) "dotimes removed"))))
+  (expect! "case rejected with pointed error"
+    (let [_ (reset-errors!)
+          _ (parse-expr* ["case" "x" 1 ["#%string" "one"]])
+          errs (parse-errors)]
+      (and (> (count errs) 0)
+           (str/includes? (nth errs 0) "case removed"))))
   (expect! "set!"
     (let [node (parse-expr* ["set!" "x" 42])]
       (and (= (get node "node") "set!")

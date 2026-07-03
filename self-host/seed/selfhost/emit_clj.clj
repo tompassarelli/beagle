@@ -341,7 +341,6 @@
   (= node "recur") (str "(recur" (emit-args (get e "args")) ")")
   (= node "for") (str "(for [" (emit-for-clauses (get e "clauses")) "]\n  " (emit-body (get e "body") "  ") ")")
   (= node "doseq") (str "(doseq [" (emit-for-clauses (get e "clauses")) "]\n  " (emit-body (get e "body") "  ") ")")
-  (= node "dotimes") (str "(dotimes [" (get e "name") " " (emit-expr* (get e "count")) "]\n  " (emit-body (get e "body") "  ") ")")
   (= node "call") (let [fn-expr (get e "fn")
    args (get e "args")]
   (if (= (get fn-expr "node") "ref") (let [fname (get fn-expr "name")]
@@ -366,11 +365,6 @@
    fin (get e "finally")
    finally-str (if (absent? fin) "" (str "\n  (finally\n    " (emit-body fin "    ") ")"))]
   (str "(try\n  " body-str (str/join "" catch-strs) finally-str ")"))
-  (= node "case") (let [test-str (emit-expr* (get e "test"))
-   clause-strs (mapv (fn [c] (str (datum-clj (get c "value")) " " (emit-expr* (get c "body")))) (get e "clauses"))
-   body (str/join "\n  " clause-strs)
-   dflt (get e "default")]
-  (if (absent? dflt) (str "(case " test-str "\n  " body ")") (str "(case " test-str "\n  " body "\n  " (emit-expr* dflt) ")")))
   (= node "condp") (let [pred (emit-expr* (get e "pred"))
    test-val (emit-expr* (get e "test"))
    clause-strs (mapv (fn [c] (str (emit-expr* (get c "test")) " " (emit-expr* (get c "body")))) (get e "clauses"))

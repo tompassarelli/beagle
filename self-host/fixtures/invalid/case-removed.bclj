@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns case-removed.test)
+
+;; case removed — selfhost must reject with pointed guidance
+(defn run [x :- Int] :- String
+  (case x 1 "one" 2 "two" "other"))
