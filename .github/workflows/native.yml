@@ -1,0 +1,112 @@
+name: native
+
+# Stage0 native compiler CI. The GraalVM native-image of the blessed seed
+# (self-host/seed/) is the canonical Beagle builder. Every push to main and
+# every PR builds the binary via self-host/native/build.sh and gates it with
+# self-host/native/verify-native.sh — the native binary's emit must be
+# byte-for-byte identical to BOTH the babashka seed emit AND the Racket oracle
+# emit, over the real fram/src corpus. On a version tag (v*) the built binary
+# is published as a GitHub release artifact.
+#
+# Why a workflow separate from test.yml: this pipeline needs the GraalVM +
+# Clojure toolchain (via nix) that the Racket test matrix does not, and it
+# carries the tag -> release logic. Keeping it standalone lets the native lane
+# evolve and fail independently of the Racket suite, and keeps a version tag
+# from spinning up the entire Racket conformance matrix. This file owns the
+# native/stage0 CI (test.yml keeps the self-host fixpoint + oracle gates).
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    # gh release create needs write access to repo contents (the release + asset).
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      # GraalVM native-image links against a C toolchain + zlib at build time.
+      # The ubuntu runner ships them, but install explicitly so a base-image
+      # change can't silently break the image link step.
+      - name: Install C toolchain (native-image link deps)
+        run: sudo apt-get update && sudo apt-get install -y build-essential libz-dev
+
+      - name: Install nix (provides graalvm-ce native-image + clojure CLI)
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      # verify-native's three-way parity needs the Racket oracle. beagle-lib
+      # compiles fresh under this same racket (no .zo/runtime version skew), and
+      # _BEAGLE_RACKET pins bin/_beagle-racket to it so verify-native does not
+      # try to nix-develop a second, slower toolchain. Same pin as test.yml.
+      - name: Install Racket (oracle leg of verify-native)
+        uses: Bogdanp/setup-racket@v1.14
+        with:
+          architecture: x64
+          distribution: full
+          variant: CS
+          version: '9.1'
+
+      - name: Link beagle packages
+        run: |
+          raco pkg install --auto --link \
+            beagle-lib/ beagle-test/ beagle/
+
+      # bb runs the blessed seed (self-host/seed/) — the middle leg of the
+      # three-way parity (native == bb seed == Racket oracle). Same pin as test.yml.
+      - name: Install babashka (bb seed-emit leg of verify-native)
+        uses: turtlequeue/setup-babashka@v1.8.0
+        with:
+          babashka-version: '1.12.218'
+
+      # verify-native's default corpus is ~/code/fram/src/fram/*.bclj. Check out
+      # fram so the native binary is gated against the same real modules the
+      # local run uses, not just an in-repo fixture.
+      - name: Checkout fram (real-module corpus for verify-native)
+        uses: actions/checkout@v5
+        with:
+          repository: tompassarelli/fram
+          path: .fram
+
+      # native-image + AOT compile run under the ambient-registry nixpkgs
+      # graalvm-ce + clojure. Build tools are intentionally unpinned here — the
+      # byte-for-byte parity gate below is what certifies the binary; a build
+      # regression cannot slip past a byte-identical emit check.
+      - name: Build stage0 native binary (GraalVM native-image via nix)
+        run: nix shell nixpkgs#graalvmPackages.graalvm-ce nixpkgs#clojure -c ./self-host/native/build.sh
+
+      - name: Verify native == bb seed == Racket oracle (byte-for-byte)
+        run: _BEAGLE_RACKET="$(which racket)" self-host/native/verify-native.sh .fram/src/fram/*.bclj self-host/fixtures/lowering-temps.bclj
+
+      # Version tag -> GitHub release with the built binary attached. Tag is the
+      # release title; the body documents what the artifact is. gh is preinstalled
+      # on the runner (no third-party action); GH_TOKEN is the workflow token.
+      - name: Publish native binary as release artifact (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            self-host/native/beagle-selfhost \
+            --verify-tag \
+            --title "${{ github.ref_name }}" \
+            --notes "$(cat <<'EOF'
+          **beagle-selfhost** — stage0 native compiler (GraalVM native-image of the blessed seed).
+
+          The canonical Beagle builder: emits all certified targets (clj / js / nix / cljs) plus module resolution. ~20 MB, ~7 ms startup, zero reflection config.
+
+          Byte-for-byte parity gated in CI: native emit == babashka seed emit == Racket oracle emit, over the fram/src corpus.
+
+          ```sh
+          ./beagle-selfhost emit FILE.bclj          # also: ast | check | emit-from-ast --target js|nix|cljs
+          ```
+          EOF
+          )"
