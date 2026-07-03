@@ -1341,6 +1341,76 @@
   (reset! CURRENT-REGISTRY-CELL nil)
   {"mode" (deref mode) "namespace" (deref namespace) "target" (deref target) "gen-class" (deref gen-class) "forms" (deref forms) "externs" (deref extern-list) "requires" (deref requires)}))
 
+(defn- import-strip-doc [d]
+  (if (and (vector? d) (not (bracketed? d)) (>= (count d) 2) (string? (nth d 0))) (let [head (nth d 0)]
+  (cond
+  (and (or (= head "defn") (= head "defn-")) (>= (count d) 4) (string? (nth d 1)) (string-literal-datum? (nth d 2))) (into [head (nth d 1)] (subvec d 3))
+  (and (or (= head "def") (= head "defonce")) (= (count d) 6) (string? (nth d 1)) (= (nth d 2) ":-") (string-literal-datum? (nth d 4))) [head (nth d 1) ":-" (nth d 3) (nth d 5)]
+  (and (or (= head "def") (= head "defonce")) (= (count d) 4) (string? (nth d 1)) (string-literal-datum? (nth d 2))) [head (nth d 1) (nth d 3)]
+  :else d)) d))
+
+(defn- import-fn-ptypes [params-form]
+  (mapv (fn [p] (let [a (get p "ann")]
+  (if (some? a) a (make-prim "Any")))) (get (parse-params! params-form) "params")))
+
+(defn- import-fn-rest [params-form]
+  (let [rp (get (parse-params! params-form) "rest-param")]
+  (if (some? rp) (let [a (get rp "ann")]
+  (if (some? a) a (make-prim "Any"))) nil)))
+
+(defn import-module-surface [datums ^String prefix refer-syms]
+  (let [refer-set (if (some? refer-syms) (reduce (fn [m s] (assoc m s true)) {} refer-syms) nil)
+   referred? (fn [nm] (and (some? refer-set) (= true (get refer-set nm))))
+   out (atom [])
+   seen (atom {})
+   emit! (fn [nm t] (let [q (str prefix "/" nm)]
+  (if (not (= true (get (deref seen) q))) (do
+  (swap! seen assoc q true)
+  (swap! out conj {"name" q "type" t})))
+  (if (and (referred? nm) (not (= true (get (deref seen) nm)))) (do
+  (swap! seen assoc nm true)
+  (swap! out conj {"name" nm "type" t}))))
+  nil)]
+  (doseq [d0 datums]
+  (let [d (import-strip-doc d0)]
+  (if (and (vector? d) (not (bracketed? d)) (>= (count d) 2) (string? (nth d 0))) (do
+  (let [head (nth d 0)]
+  (cond
+  (= head "declare-extern") (if (>= (count d) 3) (do
+  (let [name-form (nth d 1)
+   t (parse-type (nth d 2))]
+  (if (bracketed? name-form) (doseq [nm (bracket-body name-form)]
+  (emit! nm t)) (emit! name-form t)))))
+  (and (= head "defrecord") (= (count d) 3) (string? (nth d 1))) (let [nm (nth d 1)
+   fields (parse-record-fields! (nth d 2))
+   nlow (str/lower-case nm)]
+  (emit! (str "->" nm) (make-fn-type (mapv (fn [f] (get f "ann")) fields) nil (make-prim nm)))
+  (doseq [f fields]
+  (emit! (str nlow "-" (get f "name")) (make-fn-type [(make-prim nm)] nil (get f "ann")))))
+  (and (= head "defscalar") (>= (count d) 3) (string? (nth d 1)) (string? (nth d 2))) (let [nm (nth d 1)
+   backing (parse-type (nth d 2))
+   nlow (str/lower-case nm)]
+  (emit! (str "->" nm) (make-fn-type [backing] nil (make-prim nm)))
+  (emit! (str nlow "-value") (make-fn-type [(make-prim nm)] nil backing)))
+  (= head "defunion") (cond
+  (= (nth d 1) ":throwable") (if (and (>= (count d) 3) (string? (nth d 2))) (do
+  (emit! (nth d 2) (make-prim (nth d 2)))))
+  (bracketed? (nth d 1)) (let [body (bracket-body (nth d 1))]
+  (if (and (> (count body) 0) (string? (nth body 0))) (do
+  (emit! (nth body 0) (make-prim (nth body 0))))))
+  (string? (nth d 1)) (emit! (nth d 1) (make-union (mapv make-prim (filterv string? (subvec d 2)))))
+  :else nil)
+  (or (= head "def") (= head "defonce")) (cond
+  (and (>= (count d) 5) (string? (nth d 1)) (= (nth d 2) ":-")) (emit! (nth d 1) (parse-type (nth d 3)))
+  (and (>= (count d) 3) (meta-name? (nth d 1))) (let [nm (nth (nth d 1) 2)]
+  (if (and (>= (count d) 5) (= (nth d 2) ":-")) (emit! nm (parse-type (nth d 3))) (emit! nm (make-prim "Any"))))
+  :else nil)
+  (= head "defn") (if (and (>= (count d) 3) (string? (nth d 1))) (do
+  (let [after (subvec d 2)]
+  (if (and (>= (count after) 3) (= (nth after 1) ":-")) (emit! (nth d 1) (make-fn-type (import-fn-ptypes (nth after 0)) (import-fn-rest (nth after 0)) (parse-type (nth after 2)))) (emit! (nth d 1) (make-fn-type (import-fn-ptypes (nth after 0)) (import-fn-rest (nth after 0)) (make-prim "Any")))))))
+  :else nil))))))
+  (deref out)))
+
 (def PASSES (atom 0))
 
 (def FAILURES (atom []))

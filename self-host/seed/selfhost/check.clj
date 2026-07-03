@@ -844,6 +844,43 @@
   (nix-free-dotted-walk! form false bound)))))
   nil)
 
+(def ^String LOWER-ALPHA "abcdefghijklmnopqrstuvwxyz")
+
+(defn- ^Boolean lower-alpha-first? [^String s]
+  (and (> (count s) 0) (some? (str/index-of LOWER-ALPHA (subs s 0 1)))))
+
+(defn collect-ref-names [x acc]
+  (cond
+  (map? x) (let [acc1 (if (= (get x "node") "ref") (let [nm (get x "name")]
+  (if (string? nm) (conj acc nm) acc)) acc)]
+  (reduce (fn [a v] (collect-ref-names v a)) acc1 (vals x)))
+  (vector? x) (reduce (fn [a v] (collect-ref-names v a)) acc x)
+  :else acc))
+
+(defn check-qualified-resolution! [prog env]
+  (let [target (get prog "target")]
+  (if (and (or (= target "clj") (= target "cljs")) (= (get prog "mode") "strict")) (do
+  (let [required (reduce (fn [m r] (let [ns (get r "ns")
+   alias (get r "alias")
+   m1 (assoc m ns true)]
+  (if (and (some? alias) (not (= alias false))) (assoc m1 alias true) m1))) {"str" true} (get prog "requires"))
+   names (reduce (fn [a f] (collect-ref-names f a)) [] (get prog "forms"))
+   seen (atom {})
+   bad (atom [])]
+  (doseq [s names]
+  (let [idx (str/index-of s "/")]
+  (if (and (some? idx) (> idx 0) (< idx (- (count s) 1)) (lower-alpha-first? s) (not (str/starts-with? s "clojure.")) (nil? (get env s))) (do
+  (let [p (subs s 0 idx)]
+  (if (and (nil? (get required p)) (not (= true (get (deref seen) s)))) (do
+  (swap! seen assoc s true)
+  (swap! bad conj {"sym" s "prefix" p}))))))))
+  (if (> (count (deref bad)) 0) (do
+  (let [vs (deref bad)
+   plural (> (count vs) 1)
+   lines (str/join "\n" (mapv (fn [v] (str "  " (get v "sym") " — alias `" (get v "prefix") "` is not required")) vs))]
+  (emit-diag! (str "unresolved namespace alias" (if plural "es" "") " — these will crash at " target " load:\n" lines "\nAdd the missing (require NS :as ALIAS) form(s), or fix the alias."))))))))
+  nil))
+
 (defn type-check! [prog]
   (let [mode (get prog "mode")]
   (if (= mode "strict") (do
@@ -851,7 +888,8 @@
   (let [env (build-initial-env! prog)]
   (doseq [form (get prog "forms")]
   (check-form! form env))
-  (check-nix-free-dotted! prog)))))
+  (check-nix-free-dotted! prog)
+  (check-qualified-resolution! prog env)))))
   (let [diags (get (deref STATE) "diagnostics")]
   {"diagnostics" diags "count" (count diags)}))
 
