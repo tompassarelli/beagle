@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns fuzz.case00199)
+
+(defn f__14
+  [] (->> (cond->> true false (map inc) false (* 100) true (- 10)) (dec) (* 42) (* (let [n__18 999999] 65535)))
+  [p__15 p__16 p__17] p__17)
