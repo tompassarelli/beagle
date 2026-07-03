@@ -46,6 +46,17 @@
 
 (defn short-sig [s] (subs (sha1-hex s) 0 12))
 
+(defn normalize-for-sig [^String s]
+  ;; Bucket-collapse normalization: generated cases differ in gensym counters,
+  ;; per-case ns names, and literal values, but those never distinguish BUG
+  ;; CLASSES — hashing them fragments one bug into hundreds of signatures
+  ;; (each paying a full shrink). Shrunk repros keep the raw content, so
+  ;; over-merging here costs nothing but a shared repro file.
+  (-> s
+      (str/replace #"__\d+" "__N")
+      (str/replace #"case\d+" "caseN")
+      (str/replace #"\d+" "N")))
+
 (defn normalize-output [^String s]
   ;; Strip trailing whitespace per line, normalize line endings.
   (-> s
@@ -99,9 +110,18 @@
                                    (when (not= ol sl)
                                      (str "oracle: " (subs ol 0 (min 60 (count ol)))
                                           " | self: " (subs sl 0 (min 60 (count sl))))))
-                                 (map vector o-lines s-lines))]
+                                 (map vector o-lines s-lines))
+                ;; Signature = only the differing line pairs, normalized —
+                ;; identical bug shapes across cases collapse to one bucket.
+                diff-key (str/join "\n"
+                                   (distinct
+                                    (keep (fn [[ol sl]]
+                                            (when (not= ol sl)
+                                              (str (normalize-for-sig ol) "|" (normalize-for-sig sl))))
+                                          (map vector o-lines s-lines))))
+                tail-key (if (= (count o-lines) (count s-lines)) "" ":tail-mismatch")]
             {:class     :emission
-             :signature (short-sig (str "emission:" (sha1-hex (str o-out "\0" s-out))))
+             :signature (short-sig (str "emission:" diff-key tail-key))
              :detail    (or first-diff
                             (str "line-count: oracle=" (count o-lines) " self=" (count s-lines)))})))
 
@@ -109,9 +129,10 @@
       (not= o-ok s-ok)
       {:class     :acceptance
        :signature (short-sig (str "acceptance:" (if o-ok "oracle-ok" "self-ok")
-                                  ":" (if o-ok
-                                        (error-fingerprint (:err selfhost))
-                                        (error-fingerprint (:err oracle)))))
+                                  ":" (normalize-for-sig
+                                       (if o-ok
+                                         (error-fingerprint (:err selfhost))
+                                         (error-fingerprint (:err oracle))))))
        :detail    (str "oracle=" (if o-ok "accept" "reject")
                        " selfhost=" (if s-ok "accept" "reject")
                        " | "
@@ -119,14 +140,22 @@
                          (str "self-err: " (error-fingerprint (:err selfhost)))
                          (str "oracle-err: " (error-fingerprint (:err oracle)))))}
 
-      ;; Both reject: compare error fingerprints
+      ;; Both reject: compare error MESSAGE CORES, not full fingerprints —
+      ;; the oracle prefixes srcloc ("main.rkt:12:7: beagle: ...") while
+      ;; selfhost tags the phase ("beagle [check]: ..."); both carry the real
+      ;; message after the last "beagle:" marker. Format difference alone is
+      ;; not a divergence; message difference is.
       :else
       (let [o-fp (error-fingerprint (:err oracle))
-            s-fp (error-fingerprint (:err selfhost))]
-        (if (= o-fp s-fp)
+            s-fp (error-fingerprint (:err selfhost))
+            core (fn [^String fp]
+                   (let [i (.lastIndexOf fp "beagle:")]
+                     (if (neg? i) fp (str/trim (subs fp (+ i (count "beagle:")))))))]
+        (if (= (core o-fp) (core s-fp))
           {:class :ok}
           {:class     :diagnostic
-           :signature (short-sig (str "diagnostic:" o-fp "\0" s-fp))
+           :signature (short-sig (str "diagnostic:" (normalize-for-sig o-fp)
+                                      "\0" (normalize-for-sig s-fp)))
            :detail    (str "oracle-err: " o-fp " | self-err: " s-fp)})))))
 
 ;; ─── Top-level form splitter ─────────────────────────────────────────────────
