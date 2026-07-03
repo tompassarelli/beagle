@@ -112,7 +112,14 @@
 (define (normalize-diag s)
   (regexp-replace* (regexp (regexp-quote repo-root-str)) s ""))
 
-(define (norm-text s) (regexp-replace #rx"\n*$" s "\n"))
+;; Strip per-form srcloc metadata before comparison: ^{:line N :file "..."} is
+;; debug provenance, not semantic output.  Selfhost emitters never produce it
+;; (BEAGLE_EMIT_SRCLOC=0 is their only mode); goldens and oracle output that DO
+;; carry it still compare equal once stripped.  norm-text strips then finalises.
+(define (strip-srcloc s)
+  (regexp-replace* #rx"\\^\\{:line [0-9]+ :file \"[^\"]*\"\\} " s ""))
+
+(define (norm-text s) (regexp-replace #rx"\n*$" (strip-srcloc s) "\n"))
 
 ;; -> (list 'ok emitted-string) | (list 'fail diag-string)
 (define (compile-fixture rel-path)
