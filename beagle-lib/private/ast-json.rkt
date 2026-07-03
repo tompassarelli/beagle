@@ -47,8 +47,28 @@
                         (symbol->string (seq-destructure-rest-name p))))]
     [else (hasheq 'type "unknown" 'raw (~a p))]))
 
+;; Serialize a let-binding target.  Simple bindings carry a symbol; destructure
+;; positions carry a map-destructure or seq-destructure struct — dispatch rather
+;; than blindly calling symbol->string.  seq-destructure names may themselves
+;; contain nested destructure structs (Clojure nested binding), so we recurse.
+(define (binding-target->json target)
+  (cond
+    [(symbol? target)
+     (symbol->string target)]
+    [(map-destructure? target)
+     (hasheq 'type "map-destructure"
+             'keys (map symbol->string (map-destructure-keys target))
+             'as (and (map-destructure-as-name target)
+                      (symbol->string (map-destructure-as-name target))))]
+    [(seq-destructure? target)
+     (hasheq 'type "seq-destructure"
+             'names (map binding-target->json (seq-destructure-names target))
+             'rest (and (seq-destructure-rest-name target)
+                        (symbol->string (seq-destructure-rest-name target))))]
+    [else (~a target)]))
+
 (define (binding->json b)
-  (hasheq 'name (symbol->string (let-binding-name b))
+  (hasheq 'name (binding-target->json (let-binding-name b))
           'ann (type->json (let-binding-type b))
           'value (expr->json (let-binding-value b))))
 
@@ -60,6 +80,7 @@
     [(string? d) d]
     [(number? d) d]
     [(boolean? d) d]
+    [(char? d)   (hasheq 'type "char" 'value (char->integer d))]
     [(symbol? d) (hasheq 'type "symbol" 'value (symbol->string d))]
     [(keyword? d) (hasheq 'type "keyword" 'value (keyword->string d))]
     [(list? d) (map datum->json d)]
@@ -70,6 +91,10 @@
 (define (expr->json e)
   (cond
     [(string? e)  (hasheq 'node "literal" 'kind "string" 'value e)]
+    ;; value is the integer code point: JSON has no char type, and the
+    ;; selfhost consumer re-emits canonically from the value (emit-clj-char
+    ;; rules), never from surface text.
+    [(char? e)    (hasheq 'node "literal" 'kind "char" 'value (char->integer e))]
     [(and (number? e) (inexact? e))
      (hasheq 'node "literal" 'kind "float" 'value e)]
     [(number? e)  (hasheq 'node "literal" 'kind "number" 'value e)]

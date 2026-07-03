@@ -1,0 +1,18 @@
+#lang beagle/clj
+(ns test.let-destructure)
+
+(defn seq-destructure-let [] :- String
+  (let [[a b] ["hello" "world"]]
+    (str a " " b)))
+
+(defn map-destructure-let [] :- String
+  (let [{:keys [x y]} {:x "foo" :y "bar"}]
+    (str x " " y)))
+
+(defn map-destructure-with-as [] :- String
+  (let [{:keys [x] :as m} {:x "baz"}]
+    (str x)))
+
+(defn nested-seq-destructure [] :- String
+  (let [[[a b] c] [["p" "q"] "r"]]
+    (str a b c)))
