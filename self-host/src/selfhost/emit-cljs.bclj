@@ -1,0 +1,72 @@
+#lang beagle/clj
+(ns selfhost.emit-cljs
+  "CLJS emitter — thin adapter over selfhost.emit-clj.
+   CLJS and CLJ share ~95% of emission (same s-expression surface, same
+   defrecord/threading/match semantics). The only structural differences
+   are branched inside emit-clj via (deref emit-target):
+     - gen-class: suppressed when target=cljs
+     - try/catch: (catch :default name body) instead of (catch Type name body)
+   This module delegates emit-program! to emit-clj and gives verify-target.sh
+   a selfhost.emit-cljs namespace + run-tests! entry point to probe.")
+(define-mode strict)
+
+(require clojure.string :as str)
+(require selfhost.emit-clj :as ec)
+
+;; emit-program! delegates to emit-clj; prog[\"target\"] == \"cljs\" so
+;; emit-clj's emit-target atom fires the CLJS-specific branches.
+(defn emit-program! [prog :- Any] :- String
+  (ec/emit-program! prog))
+
+;; --- self-tests (cljs-specific branches in emit-clj) -------------------------
+
+(def passes :- Any (atom []))
+(def failures :- Any (atom []))
+
+(defn expect! [label :- String result :- Bool] :- Nil
+  (if result
+    (do (swap! passes conj true) nil)
+    (do (swap! failures conj label) nil))
+  nil)
+
+(defn run-tests! [] :- Int
+  (reset! passes [])
+  (reset! failures [])
+
+  ;; gen-class must be ABSENT from ns form when target=cljs
+  (expect! "cljs: gen-class suppressed in ns form"
+    (let [prog {"namespace" "test.gc" "target" "cljs" "gen-class" true
+                "requires" [] "forms" []}]
+      (not (str/includes? (ec/emit-program! prog) ":gen-class"))))
+
+  ;; try/catch must emit (catch :default ...) for cljs, not (catch Type ...)
+  (expect! "cljs: try/catch uses :default, not type"
+    (let [prog {"namespace" "t.tc" "target" "cljs" "gen-class" false
+                "requires" []
+                "forms" [{"node" "def" "name" "safe" "type" nil
+                          "value" {"node" "try"
+                                   "body" [{"node" "literal" "kind" "int" "value" 1}]
+                                   "catches" [{"type" "Exception" "name" "e"
+                                               "body" [{"node" "literal"
+                                                        "kind" "int" "value" 0}]}]
+                                   "finally" false}}]}]
+      (str/includes? (ec/emit-program! prog) "(catch :default")))
+
+  ;; CLJ path: must still emit (catch Type ...) when target=clj
+  (expect! "clj: try/catch uses type name, not :default"
+    (let [prog {"namespace" "t.tc2" "target" "clj" "gen-class" false
+                "requires" []
+                "forms" [{"node" "def" "name" "safe" "type" nil
+                          "value" {"node" "try"
+                                   "body" [{"node" "literal" "kind" "int" "value" 1}]
+                                   "catches" [{"type" "Exception" "name" "e"
+                                               "body" [{"node" "literal"
+                                                        "kind" "int" "value" 0}]}]
+                                   "finally" false}}]}]
+      (str/includes? (ec/emit-program! prog) "(catch Exception")))
+
+  (doseq [f (deref failures)]
+    (println (str "  FAIL: " f)))
+  (println (str "  EMIT-CLJS: " (count (deref passes)) " passed, "
+                (count (deref failures)) " failed"))
+  (count (deref failures)))
