@@ -1,13 +1,20 @@
 (ns selfhost.main
   (:gen-class)
-  (:require [selfhost.rt :as rt]
+  (:require [clojure.string :as str]
+            [selfhost.rt :as rt]
             [selfhost.reader :as rd]
             [selfhost.parse :as p]
             [selfhost.check :as c]
-            [selfhost.emit-clj :as e]))
+            [selfhost.emit-clj :as e]
+            [selfhost.emit-js :as ejs]))
 
-(defn- parse-file! [^String path]
-  (let [prog (p/parse-program! (rd/read-program (selfhost.rt/slurp-file path)))
+(defn- ^Boolean has-define-target? [datums]
+  (> (count (filterv (fn [d] (and (vector? d) (>= (count d) 2) (= (nth d 0) "define-target"))) datums)) 0))
+
+(defn- parse-file-target! [^String path ^String target]
+  (let [datums0 (rd/read-program (selfhost.rt/slurp-file path))
+   datums (if (has-define-target? datums0) datums0 (into [["define-target" target]] datums0))
+   prog (p/parse-program! datums)
    perrs (p/parse-errors)]
   (if (> (count perrs) 0) (do
   (selfhost.rt/exit 1)
@@ -21,28 +28,46 @@
   (selfhost.rt/exit 1)
   prog) prog)))
 
-(defn- cmd-ast! [^String path]
-  (println (selfhost.rt/to-json (parse-file! path))))
+(defn- ^String emit-for-target [^String target prog]
+  (cond
+  (= target "js") (ejs/emit-program! prog)
+  :else (e/emit-program! prog)))
 
-(defn- cmd-check! [^String path]
-  (check-or-die! (parse-file! path))
+(defn- cmd-ast! [^String path ^String target]
+  (println (selfhost.rt/to-json (parse-file-target! path target))))
+
+(defn- cmd-check! [^String path ^String target]
+  (check-or-die! (parse-file-target! path target))
   (selfhost.rt/eprint "ok\n"))
 
-(defn- cmd-emit! [^String path]
-  (print (e/emit-program! (check-or-die! (parse-file! path)))))
+(defn- cmd-emit! [^String path ^String target]
+  (print (emit-for-target target (check-or-die! (parse-file-target! path target)))))
 
-(defn- cmd-emit-from-ast! []
-  (print (e/emit-program! (selfhost.rt/parse-json (selfhost.rt/read-stdin)))))
+(defn- cmd-emit-from-ast! [^String target]
+  (print (emit-for-target target (selfhost.rt/parse-json (selfhost.rt/read-stdin)))))
+
+(defn- ^String flag-value [args ^String flag ^String default]
+  (loop [i 0]
+  (if (>= i (count args)) default (if (and (= (nth args i) flag) (< (+ i 1) (count args))) (nth args (+ i 1)) (recur (+ i 1))))))
+
+(defn- ^String first-positional [args]
+  (loop [i 1]
+  (if (>= i (count args)) "" (let [a (nth args i)]
+  (cond
+  (= a "--target") (recur (+ i 2))
+  (str/starts-with? a "--") (recur (+ i 1))
+  :else a)))))
 
 (defn -main [& args]
   (let [cmd (if (> (count args) 0) (nth args 0) "")
-   path (if (> (count args) 1) (nth args 1) "")]
+   target (flag-value args "--target" "clj")
+   path (first-positional args)]
   (cond
-  (= cmd "ast") (cmd-ast! path)
-  (= cmd "check") (cmd-check! path)
-  (= cmd "emit") (cmd-emit! path)
-  (= cmd "emit-from-ast") (cmd-emit-from-ast!)
+  (= cmd "ast") (cmd-ast! path target)
+  (= cmd "check") (cmd-check! path target)
+  (= cmd "emit") (cmd-emit! path target)
+  (= cmd "emit-from-ast") (cmd-emit-from-ast! target)
   :else (do
-  (selfhost.rt/eprint "usage: selfhost.main ast|check|emit FILE, or emit-from-ast < ast.json\n")
+  (selfhost.rt/eprint "usage: selfhost.main [--target clj|js] ast|check|emit FILE, or emit-from-ast < ast.json\n")
   (selfhost.rt/exit 2)))
   (flush)))
