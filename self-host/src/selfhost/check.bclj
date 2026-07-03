@@ -978,9 +978,23 @@
           ANY)
 
     (= (get e "node") "set!")
-      (do (infer-expr! (get e "target") env)
-          (infer-expr! (get e "value") env)
-          ANY)
+      ;; A set! target must be an assignable PLACE. On value targets (js, cljs,
+      ;; clj, nix) the only places are a bare local (ref) and a field access
+      ;; (.-field / .field, a method-call). A call like (get m k) is NOT a place;
+      ;; the systems targets (odin, zig) give it place semantics — carve those out.
+      (let [target (get e "target")
+            tnode (get target "node")
+            tgt (get (deref STATE) "target")]
+        (when (not (or (= tnode "ref") (= tnode "method-call")
+                       (= tgt "odin") (= tgt "zig")))
+          (let [target-desc (if (and (= tnode "call") (= (get (get target "fn") "node") "ref"))
+                              (str "(" (get (get target "fn") "name") " …)")
+                              "that form")]
+            (emit-diag! (str "beagle: set! target must be a local variable or a field access (.-field); "
+                             target-desc " is not an assignable place on the " (str tgt) " target"))))
+        (infer-expr! target env)
+        (infer-expr! (get e "value") env)
+        ANY)
 
     (= (get e "node") "await")
       (let [inner-type (infer-expr! (get e "expr") env)]
@@ -1471,6 +1485,7 @@
                      "record-field-order" {}
                      "union-members" {}
                      "parametric-unions" {}
+                     "target" (get prog "target")
                      "diagnostics" []})
       (let [env (build-initial-env! prog)]
         (doseq [form (get prog "forms")]
