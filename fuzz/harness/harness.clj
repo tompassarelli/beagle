@@ -1,11 +1,19 @@
 #!/usr/bin/env bb
 ;; fuzz/harness/harness.clj — differential fuzzing harness for beagle dual compilers.
 ;;
-;; Runs the Racket oracle and the self-hosted compiler over a corpus of .bclj files,
-;; classifies divergences into :acceptance / :diagnostic / :emission / :ok,
-;; shrinks repros via greedy delta-debug, and writes report.edn.
+;; Runs the Racket oracle and the self-hosted compiler over a corpus of beagle
+;; source files (.bclj / .bjs / .bnix), classifies divergences into
+;; :acceptance / :diagnostic / :emission / :ok, shrinks repros via greedy
+;; delta-debug, and writes report.edn.
 ;;
 ;; Called from run.sh; do not run directly.
+;;
+;; --target clj|js|nix (default clj):
+;;   oracle side — $RACKET dispatches by the file's #lang header (no extra arg)
+;;   selfhost side — calls `selfhost.main emit` for clj (byte-identical to the
+;;                   original harness); passes `--target <t>` for js/nix (CLI
+;;                   contract from parallel port lanes; tested with stubs in
+;;                   self-test.sh until the binary ships it)
 
 (require '[clojure.java.shell :as sh-api]
          '[clojure.string :as str]
@@ -27,14 +35,23 @@
           (recur (assoc m (keyword (subs k 2)) v) (drop 2 argv))
           (recur m (rest argv)))))))
 
-(def opts        (parse-args *command-line-args*))
-(def corpus-dir  (:corpus opts))
-(def out-dir     (:out opts))
-(def jobs        (Integer/parseInt (or (:jobs opts) "4")))
-(def beagle-root (:beagle-root opts))
-(def racket-bin  (:racket opts))
+(def opts         (parse-args *command-line-args*))
+(def corpus-dir   (:corpus opts))
+(def out-dir      (:out opts))
+(def jobs         (Integer/parseInt (or (:jobs opts) "4")))
+(def beagle-root  (:beagle-root opts))
+(def racket-bin   (:racket opts))
 (def selfhost-bin (:selfhost-bin opts))
-(def bb-seed-cp  (str beagle-root "/self-host/seed"))
+(def target       (or (:target opts) "clj"))   ;; "clj" | "js" | "nix"
+(def bb-seed-cp   (str beagle-root "/self-host/seed"))
+
+;; File extension for the chosen target
+(def corpus-ext
+  (case target
+    "clj" ".bclj"
+    "js"  ".bjs"
+    "nix" ".bnix"
+    ".bclj"))
 
 ;; ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -82,15 +99,21 @@
 
 (defn run-oracle [^java.io.File file]
   ;; Run Racket oracle: BEAGLE_EMIT_SRCLOC=0 $RACKET file
+  ;; #lang header in the file drives target dispatch — no extra arg needed.
   ;; Returns {:exit N :out "" :err ""}
   (sh-api/sh racket-bin (str file) :env oracle-env))
 
 (defn run-selfhost [^java.io.File file]
-  ;; Run self-hosted compiler (native binary or bb fallback)
+  ;; Run self-hosted compiler (native binary or bb fallback).
+  ;; clj: no --target flag (byte-identical to the original harness).
+  ;; js/nix: pass --target <t> (contract from parallel port lanes).
   ;; Returns {:exit N :out "" :err ""}
-  (if (= selfhost-bin "bb_fallback")
-    (sh-api/sh "bb" "-cp" bb-seed-cp "-m" "selfhost.main" "emit" (str file))
-    (sh-api/sh selfhost-bin "emit" (str file))))
+  (let [extra-args (if (= target "clj") [] ["--target" target])]
+    (if (= selfhost-bin "bb_fallback")
+      (apply sh-api/sh "bb" "-cp" bb-seed-cp "-m" "selfhost.main" "emit"
+             (concat extra-args [(str file)]))
+      (apply sh-api/sh selfhost-bin "emit"
+             (concat extra-args [(str file)])))))
 
 ;; ─── Classification ──────────────────────────────────────────────────────────
 
@@ -220,7 +243,7 @@
 
 (defn diverges? [^String content target-class target-sig]
   "Write content to a temp file, run both compilers, return true if same divergence."
-  (let [tmp (java.io.File/createTempFile "beagle-shrink" ".bclj")]
+  (let [tmp (java.io.File/createTempFile "beagle-shrink" corpus-ext)]
     (try
       (spit tmp content)
       (let [oracle   (run-oracle tmp)
@@ -289,19 +312,21 @@
 
 (defn -main []
   (when (nil? corpus-dir)
-    (println "Usage: harness.clj --corpus <dir> --out <dir> --jobs N --beagle-root <dir> --racket <bin> --selfhost-bin <bin>")
+    (println "Usage: harness.clj --corpus <dir> --out <dir> --jobs N --beagle-root <dir>"
+             "--racket <bin> --selfhost-bin <bin> [--target clj|js|nix]")
     (System/exit 1))
 
   (let [corpus-files (->> (fs/list-dir corpus-dir)
-                          (filter #(str/ends-with? (str %) ".bclj"))
+                          (filter #(str/ends-with? (str %) corpus-ext))
                           (sort-by str)
                           vec)]
     (when (empty? corpus-files)
       (binding [*out* *err*]
-        (println "harness: no .bclj files in" corpus-dir))
+        (println "harness: no" corpus-ext "files in" corpus-dir))
       (System/exit 1))
 
-    (println (str "harness: " (count corpus-files) " files, " jobs " jobs, beagle-root=" beagle-root))
+    (println (str "harness: " (count corpus-files) " files, " jobs " jobs"
+                  ", target=" target ", beagle-root=" beagle-root))
     (println (str "  oracle:   " racket-bin))
     (println (str "  selfhost: " selfhost-bin))
 
@@ -326,7 +351,7 @@
                       fpath (:file ex)]]
           (let [repro (shrink-file fpath klass sig)]
             (when repro
-              (let [rpath (str out-dir "/repros/" sig ".bclj")]
+              (let [rpath (str out-dir "/repros/" sig corpus-ext)]
                 (io/make-parents rpath)
                 (spit rpath repro)
                 (println (str "  repro [" (name klass) "]: " rpath))))))
@@ -341,6 +366,7 @@
                     divs)
               report {:total       total
                       :ok          ok-cnt
+                      :target      target
                       :divergences div-records}
               rpath  (str out-dir "/report.edn")]
           (spit rpath (with-out-str (pp/pprint report)))

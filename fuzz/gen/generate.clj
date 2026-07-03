@@ -1,23 +1,29 @@
 #!/usr/bin/env bb
-;; generate.clj — grammar-driven generator of self-contained beagle .bclj
-;; programs for differential fuzzing (self-hosted clj compiler vs Racket oracle).
+;; generate.clj — grammar-driven generator of self-contained beagle programs
+;; for differential fuzzing (self-hosted compiler vs Racket oracle).
 ;;
 ;; FROZEN CLI (coordinator-owned):
 ;;   bb fuzz/gen/generate.clj --seed <int> --count <n> --out <dir>
-;;     [--invalid-ratio <0.0-1.0>=0.15] [--max-forms <n>=8]
+;;     [--target clj|js|nix=clj] [--invalid-ratio <0.0-1.0>=0.15]
+;;     [--max-forms <n>=8]
 ;;
-;; Output: flat dir of case-NNNNN.bclj — each a single-file beagle module,
-;; #lang beagle/clj, NO imports/module refs (module resolution is a selfhost
-;; gap). Deterministic: same seed+count -> byte-identical corpus (single
+;; Output: flat dir of case-NNNNN.<ext> — each a single-file beagle module.
+;;   clj → #lang beagle/clj  → case-NNNNN.bclj
+;;   js  → #lang beagle/js   → case-NNNNN.bjs
+;;   nix → #lang beagle/nix  → case-NNNNN.bnix
+;;
+;; Grammar is per-target: valid cases pass BOTH compilers' checkers for the
+;; chosen target. Per-target restrictions derived from beagle-lib emit-*.rkt:
+;;
+;;   clj — full grammar (binding, doseq, dotimes, multi-arity defn, loop)
+;;   js  — no binding (beagle-js: not supported); otherwise full
+;;   nix — no doseq/dotimes (side-effecting/unsupported); no binding; no
+;;          multi-arity defn (emit-nix.rkt errors); loop/recur OK (nix emits
+;;          as recursive let); target-case needs :nix branch
+;;
+;; Determinism: same seed+count+target → byte-identical corpus (single
 ;; splitmix64 stream, fixed file order, no unordered-collection iteration).
-;;
-;; Grammar derived from self-host/src/selfhost/{parse,check}.bclj (authoritative)
-;; + self-host/fixtures/*.bclj idiom. Generation is TYPE-TRACKED: every emitted
-;; annotation matches the inferred type of its value, every ref is in scope, and
-;; every user-fn call respects arity + arg types — so valid cases pass BOTH
-;; compilers' checkers (not just the permissive selfhost one). The --invalid
-;; slice deliberately trips prim-mismatch / arity / parse diagnostics for
-;; diagnostic-parity fuzzing.
+;; --invalid-ratio dial works per target.
 
 (ns generate
   (:require [clojure.string :as str]
@@ -61,11 +67,12 @@
 
 ;; ------------------------------------------------------------------ env / ctx
 ;; env  : vector of {:name String :type kw}  (in-scope value bindings)
-;; ctx  : {:rng r :fns atom :dyns atom :macs atom :gs atom}
-;;   :fns  vector of {:name :arities [ [param-type-kw...] ] :ret kw}
-;;   :dyns vector of {:name :type}
-;;   :macs vector of {:name :arity}
-;;   :gs   gensym counter atom (deterministic fresh names)
+;; ctx  : {:rng r :fns atom :dyns atom :macs atom :gs atom :target kw}
+;;   :fns    vector of {:name :arities [ [param-type-kw...] ] :ret kw}
+;;   :dyns   vector of {:name :type}
+;;   :macs   vector of {:name :arity}
+;;   :gs     gensym counter atom (deterministic fresh names)
+;;   :target :clj | :js | :nix
 
 (def TYPES [:int :str :bool :any])
 (defn ann [t] (case t :int "Int" :str "String" :bool "Bool" :any "Any"))
@@ -252,9 +259,8 @@
     (format "(let [%s] %s)" (str/join " " binds) body)))
 
 (defn gen-fn-lit! [ctx env d params-n body-want]
-  (let [ctx* ctx
-        pnames (vec (repeatedly params-n #(fresh! ctx "p")))
-        env' (into env (map (fn [n] {:name n :type :any}) pnames))]
+  (let [pnames (vec (repeatedly params-n #(fresh! ctx "p")))
+        env'   (into env (map (fn [n] {:name n :type :any}) pnames))]
     (format "(fn [%s] %s)" (str/join " " pnames)
             (gen ctx env' body-want (dec d)))))
 
@@ -283,7 +289,6 @@
 
 (defn gen-case! [ctx env d]
   (let [r (:rng ctx)
-        vals (take 3 (distinct INT-EDGES))
         clauses (str/join " "
                   (for [v [1 2 3]] (format "%d %s" v (gen ctx env :any (dec d)))))]
     (format "(case %s %s %s)" (gen ctx env :any (dec d)) clauses
@@ -316,47 +321,66 @@
                 (gen ctx env (:type dv) (dec d))
                 (gen ctx env :any (dec d)))))))
 
+;; target-case: emit the branch(es) appropriate for the current target.
+;;   clj/js: both :clj and :js branches (valid for either oracle pass)
+;;   nix:    only :nix branch
 (defn gen-target-case! [ctx env d]
-  (format "(target-case :clj %s :js %s)"
-          (gen ctx env :any (dec d)) (gen ctx env :any (dec d))))
+  (case (:target ctx)
+    :nix (format "(target-case :nix %s)" (gen ctx env :any (dec d)))
+    (format "(target-case :clj %s :js %s)"
+            (gen ctx env :any (dec d)) (gen ctx env :any (dec d)))))
+
+;; ------------------------------------------------------------------ per-target gen-any
+;; Controls which forms appear in the generated corpus. Restrictions:
+;;   clj: full grammar
+;;   js:  no binding (beagle-js error at compile time); otherwise full
+;;   nix: no doseq, dotimes, binding (side-effecting or unsupported)
 
 (defn gen-any [ctx env d]
-  (let [r (:rng ctx)
-        opt (fn [thunk] (fn [] (or (thunk) (gen-leaf ctx env :any))))]
-    (wchoose! r
-      [[4 #(gen-leaf ctx env :any)]
-       [2 #(gen ctx env :int (dec d))]
-       [2 #(gen ctx env :str (dec d))]
-       [2 #(gen ctx env :bool (dec d))]
-       [2 #(let [ks (distinct-kws! r (+ 1 (rint! r 3)))]
-             (str "{" (str/join " " (for [k ks] (format "%s %s" k (gen ctx env :any (dec d))))) "}"))]
-       [2 #(str "[" (str/join " " (repeatedly (+ 1 (rint! r 3))
-                                     (fn [] (gen ctx env :any (dec d))))) "]")]
-       [1 #(str "#{" (str/join " " (distinct-kws! r (+ 1 (rint! r 2)))) "}")]
-       [2 #(format "(%s %s)" (rpick! r KW-POOL-KW) (gen ctx env :any (dec d)))]
-       [2 #(format "(get %s %s)" (gen ctx env :any (dec d)) (kw-lit! r))]
-       [2 #(format "(assoc %s %s %s)" (gen ctx env :any (dec d)) (kw-lit! r) (gen ctx env :any (dec d)))]
-       [1 #(format "(conj %s %s)" (gen ctx env :any (dec d)) (gen ctx env :any (dec d)))]
-       [1 #(format "(first %s)" (gen ctx env :any (dec d)))]
-       [1 #(format "(nth %s %s)" (gen ctx env :any (dec d)) (gen ctx env :int (dec d)))]
-       [2 #(format "(mapv %s %s)" (gen-fn-lit! ctx env d 1 :any) (gen ctx env :any (dec d)))]
-       [1 #(format "(filterv %s %s)" (gen-fn-lit! ctx env d 1 :bool) (gen ctx env :any (dec d)))]
-       [1 #(format "(reduce %s %s %s)" (gen-fn-lit! ctx env d 2 :any)
-                   (gen ctx env :any (dec d)) (gen ctx env :any (dec d)))]
-       [3 #(gen-threading! ctx env d)]
-       [2 #(gen-let! ctx env d)]
-       [2 #(gen-loop! ctx env d)]
-       [2 #(gen-doseq! ctx env d)]
-       [1 #(gen-dotimes! ctx env d)]
-       [2 #(gen-case! ctx env d)]
-       [2 #(gen-cond! ctx env d)]
-       [2 #(gen-if-let! ctx env d)]
-       [1 #(gen-target-case! ctx env d)]
-       [1 #(gen-fn-lit! ctx env d (+ 1 (rint! r 2)) :any)]
-       [2 (opt #(gen-binding! ctx env d))]
-       [3 (opt #(call-user-fn! ctx env d))]
-       [2 (opt #(call-macro! ctx env d))]
-       [1 #(format "(when %s %s)" (gen ctx env :bool (dec d)) (gen ctx env :any (dec d)))]])))
+  (let [r    (:rng ctx)
+        tgt  (:target ctx)
+        opt  (fn [thunk] (fn [] (or (thunk) (gen-leaf ctx env :any))))
+        ;; base weights valid on all targets
+        base [[4 #(gen-leaf ctx env :any)]
+              [2 #(gen ctx env :int (dec d))]
+              [2 #(gen ctx env :str (dec d))]
+              [2 #(gen ctx env :bool (dec d))]
+              [2 #(let [ks (distinct-kws! r (+ 1 (rint! r 3)))]
+                    (str "{" (str/join " " (for [k ks] (format "%s %s" k (gen ctx env :any (dec d))))) "}"))]
+              [2 #(str "[" (str/join " " (repeatedly (+ 1 (rint! r 3))
+                                           (fn [] (gen ctx env :any (dec d))))) "]")]
+              [1 #(str "#{" (str/join " " (distinct-kws! r (+ 1 (rint! r 2)))) "}")]
+              [2 #(format "(%s %s)" (rpick! r KW-POOL-KW) (gen ctx env :any (dec d)))]
+              [2 #(format "(get %s %s)" (gen ctx env :any (dec d)) (kw-lit! r))]
+              [2 #(format "(assoc %s %s %s)" (gen ctx env :any (dec d)) (kw-lit! r) (gen ctx env :any (dec d)))]
+              [1 #(format "(conj %s %s)" (gen ctx env :any (dec d)) (gen ctx env :any (dec d)))]
+              [1 #(format "(first %s)" (gen ctx env :any (dec d)))]
+              [1 #(format "(nth %s %s)" (gen ctx env :any (dec d)) (gen ctx env :int (dec d)))]
+              [2 #(format "(mapv %s %s)" (gen-fn-lit! ctx env d 1 :any) (gen ctx env :any (dec d)))]
+              [1 #(format "(filterv %s %s)" (gen-fn-lit! ctx env d 1 :bool) (gen ctx env :any (dec d)))]
+              [1 #(format "(reduce %s %s %s)" (gen-fn-lit! ctx env d 2 :any)
+                          (gen ctx env :any (dec d)) (gen ctx env :any (dec d)))]
+              [3 #(gen-threading! ctx env d)]
+              [2 #(gen-let! ctx env d)]
+              [2 #(gen-loop! ctx env d)]
+              [2 #(gen-case! ctx env d)]
+              [2 #(gen-cond! ctx env d)]
+              [2 #(gen-if-let! ctx env d)]
+              [1 #(gen-target-case! ctx env d)]
+              [1 #(gen-fn-lit! ctx env d (+ 1 (rint! r 2)) :any)]
+              [3 (opt #(call-user-fn! ctx env d))]
+              [2 (opt #(call-macro! ctx env d))]
+              [1 #(format "(when %s %s)" (gen ctx env :bool (dec d)) (gen ctx env :any (dec d)))]]
+        ;; per-target extras
+        extra (case tgt
+                :clj [[2 #(gen-doseq! ctx env d)]
+                      [1 #(gen-dotimes! ctx env d)]
+                      [2 (opt #(gen-binding! ctx env d))]]
+                :js  [[2 #(gen-doseq! ctx env d)]
+                      [1 #(gen-dotimes! ctx env d)]]
+                ;; nix: no doseq, dotimes, binding
+                :nix [])]
+    (wchoose! r (into base extra))))
 
 (defn gen [ctx env want d]
   (if (<= d 0)
@@ -387,9 +411,10 @@
       [[] []] types)))
 
 (defn gen-defn! [ctx tl-env]
-  (let [r (:rng ctx)
-        nm (fresh! ctx "f")
-        multi? (rchance! r 0.25)]
+  (let [r      (:rng ctx)
+        nm     (fresh! ctx "f")
+        ;; Multi-arity defn not supported on nix (emit-nix.rkt hard-errors).
+        multi? (and (not= (:target ctx) :nix) (rchance! r 0.25))]
     (if multi?
       ;; multi-arity: two arities, all-Any params (safe for calls)
       (let [n1 (rint! r 2) n2 (+ 2 (rint! r 2))
@@ -404,13 +429,13 @@
                                 :ret :any})
         (format "(defn %s\n  [%s] %s\n  [%s] %s)"
                 nm (str/join " " p1) b1 (str/join " " p2) b2))
-      (let [np (rint! r 4)
+      (let [np     (rint! r 4)
             ptypes (vec (repeatedly np #(rpick! r TYPES)))
             [pstr padd] (param-list ctx ptypes)
-            ret (rpick! r TYPES)
-            env' (into tl-env padd)
-            body (gen ctx env' ret 2)
-            ann? (rchance! r 0.6)]
+            ret    (rpick! r TYPES)
+            env'   (into tl-env padd)
+            body   (gen ctx env' ret 2)
+            ann?   (rchance! r 0.6)]
         (swap! (:fns ctx) conj {:name nm :arities [ptypes] :ret ret})
         (format "(defn %s [%s]%s\n  %s)"
                 nm (str/join " " pstr)
@@ -488,22 +513,33 @@
        [2 #(format "(defonce %s :- Int %s)" nm (str-lit! r))]])))
 
 ;; ------------------------------------------------------------------ program
+(defn target->lang [target]
+  (case target :clj "beagle/clj" :js "beagle/js" :nix "beagle/nix"))
+
+(defn target->ext [target]
+  (case target :clj "bclj" :js "bjs" :nix "bnix"))
+
+(defn target->nsname-prefix [target]
+  (case target :clj "fuzz.case" :js "fuzz.js.case" :nix "fuzz.nix.case"))
+
 (defn gen-program [ctx idx invalid? max-forms]
-  (let [r (:rng ctx)
-        nsname (format "fuzz.case%05d" idx)
-        header (format "#lang beagle/clj\n(ns %s)\n" nsname)
-        ;; preamble: seed scope with fns/vars/macros/dyns/types so bodies have refs
-        pre (atom [])
-        tl (atom [])
-        add! (fn [form] (swap! pre conj form))
+  (let [r      (:rng ctx)
+        tgt    (:target ctx)
+        lang   (target->lang tgt)
+        nsname (format "%s%05d" (target->nsname-prefix tgt) idx)
+        header (format "#lang %s\n(ns %s)\n" lang nsname)
+        pre    (atom [])
+        tl     (atom [])
+        add!     (fn [form] (swap! pre conj form))
         add-var! (fn [v form] (swap! tl conj v) (add! form))]
-    ;; a handful of definitional forms first (deterministic mix)
+    ;; preamble: seed scope with fns/vars/macros so bodies have refs
     (when (rchance! r 0.7) (add! (gen-defmacro! ctx)))
     (when (rchance! r 0.4) (add! (gen-defrecord! ctx)))
     (when (rchance! r 0.3) (add! (gen-defenum! ctx)))
     (when (rchance! r 0.6)
       (let [[v f] (gen-def! ctx @tl)] (add-var! v f)))
-    (when (rchance! r 0.5)
+    ;; dynamic vars only on clj (binding not supported on js/nix)
+    (when (and (= tgt :clj) (rchance! r 0.5))
       (let [[v f] (gen-dynvar! ctx @tl)] (add-var! v f)))
     ;; a couple helper defns to populate the fn registry
     (add! (gen-defn! ctx @tl))
@@ -520,7 +556,7 @@
 
 ;; ------------------------------------------------------------------ CLI
 (defn parse-args [argv]
-  (loop [a argv m {:invalid-ratio 0.15 :max-forms 8}]
+  (loop [a argv m {:invalid-ratio 0.15 :max-forms 8 :target "clj"}]
     (if (empty? a)
       m
       (let [[k v & more] a]
@@ -529,29 +565,38 @@
                  "--seed"          (assoc m :seed (Long/parseLong v))
                  "--count"         (assoc m :count (Long/parseLong v))
                  "--out"           (assoc m :out v)
+                 "--target"        (assoc m :target v)
                  "--invalid-ratio" (assoc m :invalid-ratio (Double/parseDouble v))
                  "--max-forms"     (assoc m :max-forms (Long/parseLong v))
                  (throw (ex-info (str "unknown flag: " k) {}))))))))
 
 (defn -main [& argv]
-  (let [{:keys [seed count out invalid-ratio max-forms]} (parse-args argv)]
+  (let [{:keys [seed count out invalid-ratio max-forms target]} (parse-args argv)]
     (when (or (nil? seed) (nil? count) (nil? out))
       (binding [*out* *err*]
         (println "usage: generate.clj --seed <int> --count <n> --out <dir>"
-                 "[--invalid-ratio 0.15] [--max-forms 8]"))
+                 "[--target clj|js|nix] [--invalid-ratio 0.15] [--max-forms 8]"))
       (System/exit 2))
-    (.mkdirs (io/file out))
-    (let [r (make-rng seed)]
-      (dotimes [i count]
-        ;; per-case ctx: fresh registries; shared rng stream -> determinism
-        (let [ctx {:rng r :fns (atom []) :dyns (atom []) :macs (atom [])
-                   :gs (atom 0)}
-              invalid? (rchance! r invalid-ratio)
-              prog (gen-program ctx (inc i) invalid? max-forms)
-              fname (format "case-%05d.bclj" (inc i))]
-          (spit (io/file out fname) prog))))
-    (binding [*out* *err*]
-      (println (format "generated %d cases -> %s (seed=%d invalid-ratio=%.2f max-forms=%d)"
-                       count out seed invalid-ratio max-forms)))))
+    (let [tgt-kw (case target
+                   "clj" :clj
+                   "js"  :js
+                   "nix" :nix
+                   (do (binding [*out* *err*]
+                         (println (str "unknown --target: " target " (valid: clj|js|nix)")))
+                       (System/exit 2)))]
+      (.mkdirs (io/file out))
+      (let [r   (make-rng seed)
+            ext (target->ext tgt-kw)]
+        (dotimes [i count]
+          ;; per-case ctx: fresh registries; shared rng stream -> determinism
+          (let [ctx {:rng r :fns (atom []) :dyns (atom []) :macs (atom [])
+                     :gs (atom 0) :target tgt-kw}
+                invalid? (rchance! r invalid-ratio)
+                prog     (gen-program ctx (inc i) invalid? max-forms)
+                fname    (format "case-%05d.%s" (inc i) ext)]
+            (spit (io/file out fname) prog))))
+      (binding [*out* *err*]
+        (println (format "generated %d cases -> %s (seed=%d target=%s invalid-ratio=%.2f max-forms=%d)"
+                         count out seed target invalid-ratio max-forms))))))
 
 (apply -main *command-line-args*)
