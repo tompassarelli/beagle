@@ -1,0 +1,6 @@
+#lang beagle/clj
+(ns fixtures.unresolved-alias)
+
+;; q/ is never required — an unresolved namespace alias. Oracle and selfhost
+;; both reject (exit 1): the call would crash at clj load.
+(defn boom [x :- Int] :- Int (q/frob x))

@@ -1,0 +1,17 @@
+#lang beagle/clj
+(ns fixtures.shapes)
+(require fixtures.geom :as g)
+
+;; Cross-module refs: g/->Point (ctor), g/point-x (accessor), g/manhattan +
+;; g/origin (fns), g/UNIT (var). The record TYPE crosses the boundary bare
+;; (Point), matching the oracle (import-module-types! registers ->Point and
+;; point-x, not a qualified type name).
+(defn diag [n :- Int] :- Point (g/->Point n n))
+
+(defn total [p :- Point] :- Int (g/manhattan p))
+
+(defn just-x [p :- Point] :- Int (g/point-x p))
+
+(defn from-origin [] :- Int (g/manhattan (g/origin)))
+
+(defn scaled [] :- Point (g/->Point g/UNIT g/UNIT))
