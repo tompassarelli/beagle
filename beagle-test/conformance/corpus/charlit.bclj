@@ -15,3 +15,6 @@
 
 (defn char-predicate [] :- Bool
   (char? \z))
+
+(defn char-unicode-escape [] :- String
+  (str \u00e9 \u0007))

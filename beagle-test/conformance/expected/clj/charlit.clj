@@ -12,3 +12,6 @@
 
 ^{:line 16 :file "beagle-test/conformance/corpus/charlit.bclj"} (defn ^Boolean char-predicate []
   ^{:line 17 :file "beagle-test/conformance/corpus/charlit.bclj"} (char? \z))
+
+^{:line 19 :file "beagle-test/conformance/corpus/charlit.bclj"} (defn ^String char-unicode-escape []
+  ^{:line 20 :file "beagle-test/conformance/corpus/charlit.bclj"} (str \u00e9 \u0007))

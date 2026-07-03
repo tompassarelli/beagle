@@ -380,7 +380,10 @@
      (define lookahead (peek-string 5 0 port))  ; "uNNNN"
      (if (and (string? lookahead)
               (= (string-length lookahead) 5)
-              (regexp-match? #rx"^u[0-9a-fA-F]{4}$" lookahead))
+              ;; #px, not #rx: POSIX regexp syntax treats {4} literally, so the
+              ;; hex check never matched and every \uNNNN fell through to the
+              ;; single-char branch — reading as TWO datums (\u then a number).
+              (regexp-match? #px"^u[0-9a-fA-F]{4}$" lookahead))
        (begin
          (read-char port) ; u
          (let* ([hex    (read-string 4 port)]
