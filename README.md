@@ -248,12 +248,6 @@ on-edit syntax/type hook, and machine-applicable fixes — is where the type
 signal becomes applied edits; `bin/beagle doctor` health-checks it end to end.
 Deeper dev tools stay as `bin/beagle-*` (blame, specfix, trace, cascade).
 
-The `bin/beagle-claims` / `bin/beagle-roundtrip` backends project Beagle source
-into a claim graph for Fram's
-[Chartroom](https://github.com/tompassarelli/fram/tree/main/chartroom). The claim log
-is canonical there — the source text is a view onto the claims, not a graph
-derived from text after the fact.
-
 </details>
 
 <details>
