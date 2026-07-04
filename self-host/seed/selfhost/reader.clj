@@ -382,7 +382,7 @@
   (expect! "read-program: clj target injects NO define-target (parser default)" (= (read-program "#lang beagle/clj\n(ns app)") [["ns" "app"]]))
   (expect! "read-program: nix target prepends (define-target nix)" (= (read-program "#lang beagle/nix\n(ns app)") [["define-target" "nix"] ["ns" "app"]]))
   (expect! "read-program: no #lang -> no injection" (= (read-program "(ns app)") [["ns" "app"]]))
-  (expect! "read-program: explicit define-target present -> no double injection" (= (read-program "#lang beagle/cljs\n(define-target cljs)\n(ns app)") [["define-target" "cljs"] ["ns" "app"]]))
+  (expect! "read-program: explicit define-target present -> no double injection" (= (read-program "#lang beagle/js\n(define-target js)\n(ns app)") [["define-target" "js"] ["ns" "app"]]))
   (expect! "read-datum returns value+pos" (let [r (read-datum "42 rest" 0)]
   (and (= (get r "value") 42) (= (get r "pos") 2))))
   (doseq [f (deref failures)]

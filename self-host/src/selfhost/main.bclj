@@ -16,7 +16,6 @@
 (require selfhost.emit-clj :as e)
 (require selfhost.emit-nix :as en)
 (require selfhost.emit-js :as ejs)
-(require selfhost.emit-cljs :as ecljs)
 
 (declare-extern selfhost.rt/slurp-file [String -> String])
 (declare-extern selfhost.rt/read-stdin [-> String])
@@ -37,7 +36,7 @@
 ;; its calls type as Any — exactly the oracle's behavior.
 
 (def BEAGLE-EXTENSIONS :- (Vec String)
-  [".bclj" ".bcljs" ".bjs" ".bnix" ".bodin" ".bgl" ".rkt"])
+  [".bclj" ".bjs" ".bnix" ".bodin" ".bgl" ".rkt"])
 
 (defn- split-dots [s :- String] :- Any
   (loop [i 0 start 0 acc :- Any []]
@@ -165,7 +164,6 @@
   (cond
     (= target "js") (ejs/emit-program! prog)
     (= target "nix") (en/emit-program! prog)
-    (= target "cljs") (ecljs/emit-program! prog)
     :else (e/emit-program! prog)))
 
 (defn- cmd-ast! [path :- String target :- String] :- Nil
@@ -209,7 +207,7 @@
       (= cmd "emit") (cmd-emit! path target)
       (= cmd "emit-from-ast") (cmd-emit-from-ast! target)
       :else
-        (do (selfhost.rt/eprint "usage: selfhost.main [--target clj|js|nix|cljs] ast|check|emit FILE, or emit-from-ast < ast.json\n")
+        (do (selfhost.rt/eprint "usage: selfhost.main [--target clj|js|nix] ast|check|emit FILE, or emit-from-ast < ast.json\n")
             (selfhost.rt/exit 2)))
     ;; clojure.main flushes *out* in a finally; the gen-class/native-image entry
     ;; bypasses clojure.main, so an unflushed `print` would exit with empty stdout.

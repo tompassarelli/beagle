@@ -1271,7 +1271,7 @@
   (= head "define-target") (do
   (if (deref target-set) (do
   (err! "duplicate define-target")))
-  (if (has-item? ["clj" "cljs" "js" "nix" "py" "rkt" "zig" "odin"] (nth d 1)) (reset! target (nth d 1)) (err! (str "unknown target: " (str (nth d 1)))))
+  (if (has-item? ["clj" "js" "nix" "py" "rkt" "zig" "odin"] (nth d 1)) (reset! target (nth d 1)) (err! (str "unknown target: " (str (nth d 1)))))
   (reset! target-set true))
   (= head "ns") (do
   (if (deref ns-set) (do
@@ -1321,7 +1321,7 @@
   (swap! requires conj r)))))))
   (= head "import") nil
   :else nil)))))
-  (let [hygiene-capable (has-item? ["clj" "cljs" "nix" "js" "odin"] (deref target))
+  (let [hygiene-capable (has-item? ["clj" "nix" "js" "odin"] (deref target))
    def-names (if hygiene-capable (reduce (fn [acc dd] (if (and (vector? dd) (not (bracketed? dd)) (>= (count dd) 2) (has-item? ["def" "defn" "defonce"] (nth dd 0)) (string? (nth dd 1))) (assoc acc (nth dd 1) true) acc)) {} datums) nil)]
   (mac/set-hygiene-context! def-names))
   (doseq [d datums]

@@ -353,7 +353,7 @@
 (defn make-static-call [class-method :- String args :- Any] :- Any
   {"node" "static-call" "name" class-method "args" args})
 
-;; threading-marker (ast.rkt): kind + parsed surface args (clj/cljs surface
+;; threading-marker (ast.rkt): kind + parsed surface args (clj surface
 ;; reconstruction) + parsed desugared form (what check walks).
 (defn make-threading [kind :- String args :- Any desugared :- Any] :- Any
   {"node" "threading" "kind" kind "args" args "desugared" desugared})
@@ -2181,7 +2181,7 @@
             (= head "define-target")
               (do (when (deref target-set)
                     (err! "duplicate define-target"))
-                  (if (has-item? ["clj" "cljs" "js" "nix" "py" "rkt" "zig" "odin"] (nth d 1))
+                  (if (has-item? ["clj" "js" "nix" "py" "rkt" "zig" "odin"] (nth d 1))
                     (reset! target (nth d 1))
                     (err! (str "unknown target: " (str (nth d 1)))))
                   (reset! target-set true))
@@ -2254,10 +2254,10 @@
             :else nil))))
     ;; Mode-2 hygiene context (parse.rkt module-def-name-set): the program's
     ;; top-level def names, gated to targets whose emitters handle the
-    ;; injected `(def alias orig)` (clj/cljs/nix/js/odin). ^:dynamic defs
+    ;; injected `(def alias orig)` (clj/nix/js/odin). ^:dynamic defs
     ;; carry a (#%meta ...) name wrapper — not a plain symbol — and are
     ;; excluded, as in Racket.
-    (let [hygiene-capable (has-item? ["clj" "cljs" "nix" "js" "odin"] (deref target))
+    (let [hygiene-capable (has-item? ["clj" "nix" "js" "odin"] (deref target))
           def-names (if hygiene-capable
                       (reduce (fn [acc :- Any dd :- Any] :- Any
                                 (if (and (vector? dd) (not (bracketed? dd))

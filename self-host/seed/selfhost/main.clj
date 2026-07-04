@@ -7,10 +7,9 @@
             [selfhost.check :as c]
             [selfhost.emit-clj :as e]
             [selfhost.emit-nix :as en]
-            [selfhost.emit-js :as ejs]
-            [selfhost.emit-cljs :as ecljs]))
+            [selfhost.emit-js :as ejs]))
 
-(def BEAGLE-EXTENSIONS [".bclj" ".bcljs" ".bjs" ".bnix" ".bodin" ".bgl" ".rkt"])
+(def BEAGLE-EXTENSIONS [".bclj" ".bjs" ".bnix" ".bodin" ".bgl" ".rkt"])
 
 (defn- split-dots [^String s]
   (loop [i 0
@@ -102,7 +101,6 @@
   (cond
   (= target "js") (ejs/emit-program! prog)
   (= target "nix") (en/emit-program! prog)
-  (= target "cljs") (ecljs/emit-program! prog)
   :else (e/emit-program! prog)))
 
 (defn- cmd-ast! [^String path ^String target]
@@ -140,6 +138,6 @@
   (= cmd "emit") (cmd-emit! path target)
   (= cmd "emit-from-ast") (cmd-emit-from-ast! target)
   :else (do
-  (selfhost.rt/eprint "usage: selfhost.main [--target clj|js|nix|cljs] ast|check|emit FILE, or emit-from-ast < ast.json\n")
+  (selfhost.rt/eprint "usage: selfhost.main [--target clj|js|nix] ast|check|emit FILE, or emit-from-ast < ast.json\n")
   (selfhost.rt/exit 2)))
   (flush)))

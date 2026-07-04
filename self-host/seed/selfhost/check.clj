@@ -871,7 +871,7 @@
 
 (defn check-qualified-resolution! [prog env]
   (let [target (get prog "target")]
-  (if (and (or (= target "clj") (= target "cljs")) (= (get prog "mode") "strict")) (do
+  (if (and (= target "clj") (= (get prog "mode") "strict")) (do
   (let [required (reduce (fn [m r] (let [ns (get r "ns")
    alias (get r "alias")
    m1 (assoc m ns true)]

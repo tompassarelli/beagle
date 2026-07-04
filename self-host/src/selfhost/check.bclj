@@ -1054,7 +1054,7 @@
           ANY)
 
     (= (get e "node") "set!")
-      ;; A set! target must be an assignable PLACE. On value targets (js, cljs,
+      ;; A set! target must be an assignable PLACE. On value targets (js,
       ;; clj, nix) the only places are a bare local (ref) and a field access
       ;; (.-field / .field, a method-call). A call like (get m k) is NOT a place;
       ;; the systems targets (odin, zig) give it place semantics — carve those out.
@@ -1634,7 +1634,7 @@
 ;; === unresolved-alias check ==================================================
 ;; parse.rkt check-qualified-resolution!: a qualified ref `p/member` whose
 ;; prefix `p` was never (require ...)d is an unresolved alias — it crashes at
-;; load. Gated to clj/cljs + strict. Exempt: uppercase-first (interop / static
+;; load. Gated to clj + strict. Exempt: uppercase-first (interop / static
 ;; calls like System/getenv), the `clojure.` prefix, refs already bound in env
 ;; (a resolved cross-module import or a local), and prefixes that ARE required
 ;; (their calls just type as Any, not an error). This chain carries no srcloc,
@@ -1659,7 +1659,7 @@
 
 (defn check-qualified-resolution! [prog :- Any env :- Any] :- Nil
   (let [target (get prog "target")]
-    (when (and (or (= target "clj") (= target "cljs"))
+    (when (and (= target "clj")
                (= (get prog "mode") "strict"))
       (let [required (reduce
                        (fn [m :- Any r :- Any] :- Any
