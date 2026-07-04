@@ -111,6 +111,33 @@ if [ -d "self-host/fixtures/invalid" ]; then
   done
 fi
 
+echo "=== 5b. checker-tail repros — accept/reject + error-core parity vs oracle ==="
+# The differential-fuzz checker-precision tail (union-member narrowing family):
+# each repro must produce the SAME accept/reject verdict AND, when both reject,
+# the SAME error core (the message after the last `beagle:` marker) as the Racket
+# oracle. This is the regression wall for the root fix — a re-widened union, a
+# lost narrowing, or a reverted lint re-opens a divergence here.
+TAIL_DIR=fuzz/repros/checker-tail-20260704
+tail_core() { grep -aoE 'beagle: .*' | head -1 | sed -E 's|.*beagle: (beagle: )?||'; }
+if [ -d "$TAIL_DIR" ]; then
+  for rp in "$TAIL_DIR"/*.bclj; do
+    rname="$(basename "$rp" .bclj)"
+    BEAGLE_EMIT_SRCLOC=0 bin/beagle check "$rp" >/dev/null 2>"$LAB/$rname-tail-o.err"; o_exit=$?
+    sh_main check "$rp" >"$LAB/$rname-tail-s.err" 2>&1; s_exit=$?
+    [ $o_exit -eq 0 ] && o_acc=A || o_acc=R
+    [ $s_exit -eq 0 ] && s_acc=A || s_acc=R
+    o_core="$(tail_core <"$LAB/$rname-tail-o.err")"
+    s_core="$(tail_core <"$LAB/$rname-tail-s.err")"
+    if [ "$o_acc" != "$s_acc" ]; then
+      bad "$rname accept/reject diverges (oracle=$o_acc selfhost=$s_acc)"
+    elif [ "$o_acc" = R ] && [ "$o_core" != "$s_core" ]; then
+      bad "$rname error-core diverges | O: $o_core | S: $s_core"
+    else
+      ok "$rname tail parity ($o_acc)"
+    fi
+  done
+fi
+
 echo "=== 6. multi-module fixtures (driver: require resolution + externs import) ==="
 # The driver (selfhost.main) resolves (require ...) across sibling files and
 # imports each dep's typed surface as externs — the module-resolution port.
