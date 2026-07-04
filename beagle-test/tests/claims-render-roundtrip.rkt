@@ -52,3 +52,60 @@
    (test-case "render reconstructs #lang beagle/nix"
      (define out (render-roundtrip "#lang beagle/nix\n(def x :- Int 1)\n"))
      (check-true (string-prefix? out "#lang beagle/nix") out))))
+
+;; ---------------------------------------------------------------------------
+;; EXP-025 (G1–G5): the renderer must INVERT the five Clojure reader-macros the
+;; beagle reader normalizes to Scheme-style heads — else the emitted text leaks
+;; `(#%meta …)` / `(quasiquote …)` / `(unquote …)` / `(unquote-splicing …)` /
+;; `(syntax …)`, which is invalid Clojure (won't compile) even though beagle's
+;; own reader round-trips it. Each case asserts: the correct surface glyph is
+;; present, the raw normalized head is ABSENT (no leak), and render is an
+;; idempotent fixed point (⇒ the emitted text re-reads to the identical datum,
+;; i.e. it is valid, re-readable beagle/Clojure).
+(define (gap-case name src #:has has #:no [no '()])
+  (test-case name
+    (define out (render-roundtrip src))
+    (for ([g (in-list has)])
+      (check-true (string-contains? out g)
+                  (format "expected ~s in rendered output:\n~a" g out)))
+    (for ([g (in-list no)])
+      (check-false (string-contains? out g)
+                   (format "leaked normalized head ~s in rendered output:\n~a" g out)))
+    ;; idempotence: feeding the rendered text back through emit→render must be a
+    ;; no-op. Fails loudly if the emitted text is not re-readable beagle.
+    (check-equal? (render-roundtrip out) out
+                  (format "render is not a fixed point (emitted text not re-readable):\n~a" out))))
+
+(run-tests
+ (test-suite "claims render — EXP-025 reader-macro inversion (G1–G5)"
+
+   ;; G1 metadata `^m form`
+   (gap-case "G1 type hint ^String"
+             "(defn f [^String s] s)\n"
+             #:has '("^String") #:no '("#%meta"))
+   (gap-case "G1 flag ^:dynamic"
+             "(def ^:dynamic *x* 1)\n"
+             #:has '("^:dynamic *x*") #:no '("#%meta"))
+   (gap-case "G1 map ^{:private true}"
+             "(def ^{:private true} q 2)\n"
+             #:has '("^{:private true}") #:no '("#%meta"))
+   (gap-case "G1 nested metadata ^a ^b x"
+             "(def y ^a ^b x)\n"
+             #:has '("^a ^b x") #:no '("#%meta"))
+   (gap-case "G1 metadata on a collection"
+             "(def m ^:foo [1 2 3])\n"
+             #:has '("^:foo [1 2 3]") #:no '("#%meta"))
+   (gap-case "G1 metadata on an ns form"
+             "(ns ^{:deprecated \"5.0.0\"} cheshire.custom)\n"
+             #:has '("(ns ^{:deprecated \"5.0.0\"} cheshire.custom)") #:no '("#%meta"))
+
+   ;; G2 syntax-quote `` `form ``  / G3 unquote ~x / G4 splice ~@x (all in one macro)
+   (gap-case "G2/G3/G4 quasiquote + unquote + unquote-splicing"
+             "(defmacro m [obj xs] `(vary-meta ~obj assoc :tags `[~@xs]))\n"
+             #:has '("`(vary-meta " "~obj" "`[~@xs]")
+             #:no '("quasiquote" "(unquote"))
+
+   ;; G5 var-quote `#'form`
+   (gap-case "G5 var-quote #'foo"
+             "(def v #'foo)\n"
+             #:has '("#'foo") #:no '("(syntax "))))

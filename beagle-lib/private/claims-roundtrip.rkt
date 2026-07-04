@@ -385,6 +385,25 @@
 (define %map      (string->symbol "#%map"))
 (define %set      (string->symbol "#%set"))
 (define %regex    (string->symbol "#%regex"))
+(define %meta     (string->symbol "#%meta"))
+
+;; Beagle's reader normalizes Clojure reader-macros to Scheme-style heads
+;; (`^`→#%meta, `` ` ``→quasiquote, ~→unquote, ~@→unquote-splicing, #'→syntax).
+;; Invert them here so the rendered text is valid CLOJURE — not just re-readable
+;; by beagle's own reader (which accepts the raw `(#%meta …)` list too, why
+;; datum-identity already held while the emitted text was invalid Clojure).
+;; meta is 2-arg `^m form`; the four prefix macros are single-operand.
+(define (meta-form? d)
+  (and (pair? d) (eq? (car d) %meta)
+       (pair? (cdr d)) (pair? (cddr d)) (null? (cdddr d))))
+(define (prefix-macro d)              ; -> prefix string | #f (single-operand reader macro)
+  (and (pair? d) (pair? (cdr d)) (null? (cddr d))
+       (case (car d)
+         [(quasiquote)       "`"]
+         [(unquote)          "~"]
+         [(unquote-splicing) "~@"]
+         [(syntax)           "#'"]
+         [else #f])))
 (define (datum->src d)
   (cond
     [(null? d) "()"]
@@ -392,6 +411,13 @@
     [(and (pair? d) (eq? (car d) %map))      (format "{~a}" (string-join (map datum->src (cdr d)) " "))]
     [(and (pair? d) (eq? (car d) %set))      (format "#{~a}" (string-join (map datum->src (cdr d)) " "))]
     [(and (pair? d) (eq? (car d) %regex) (pair? (cdr d)) (string? (cadr d))) (format "#\"~a\"" (cadr d))]
+    ;; `^m form` — `^` glued to the meta datum, one space, then the target form.
+    ;; Handles type hints (^String), flags (^:dynamic), maps (^{:private true}),
+    ;; nested meta (^a ^b x = (#%meta a (#%meta b x)) → recursion) and meta on
+    ;; collections (form renders via the container clauses above).
+    [(meta-form? d) (format "^~a ~a" (datum->src (cadr d)) (datum->src (caddr d)))]
+    ;; `` `x `` / ~x / ~@x / #'x — prefix glued to its single operand, no space.
+    [(prefix-macro d) => (lambda (px) (string-append px (datum->src (cadr d))))]
     [(pair? d)
      (let-values ([(elems tail) (split-improper d)])
        (if (null? tail)
@@ -428,6 +454,7 @@
     [(and (pair? d) (eq? (car d) %map))      (values "{" "}" (cdr d))]
     [(and (pair? d) (eq? (car d) %set))      (values "#{" "}" (cdr d))]
     [(and (pair? d) (eq? (car d) %regex))    (values #f #f #f)]   ; never break a regex
+    [(or (meta-form? d) (prefix-macro d))    (values #f #f #f)]   ; reader macros: glued in datum->pretty, never broken generically
     [(pair? d) (let-values ([(elems tail) (split-improper d)])
                  (if (null? tail) (values "(" ")" elems) (values #f #f #f)))] ; not dotted pairs
     [(vector? d) (values "[" "]" (vector->list d))]
@@ -464,7 +491,18 @@
   (define oneline (datum->src d))
   (define-values (open close elems) (pp-seq-parts d))
   (cond
-    [(or (not open) (<= (+ col (string-length oneline)) PP-WIDTH)) oneline]   ; inline
+    [(<= (+ col (string-length oneline)) PP-WIDTH) oneline]   ; fits on this line — inline
+    ;; single-operand reader macro (`` ` `` ~ ~@ #'): glue the prefix, let the one
+    ;; operand break beneath it. No trailing space, so the prefix stays attached.
+    [(prefix-macro d)
+     => (lambda (px) (string-append px (datum->pretty (cadr d) (+ col (string-length px)))))]
+    ;; metadata `^m form`: `^` glued to the meta datum (kept one-line — metas are
+    ;; small), one space, then the target form breaks at the correct column, so
+    ;; the meta stays glued to its form across the break (idempotent: pure in col).
+    [(meta-form? d)
+     (let ([pfx (string-append "^" (datum->src (cadr d)) " ")])
+       (string-append pfx (datum->pretty (caddr d) (+ col (string-length pfx)))))]
+    [(not open) oneline]                                      ; unbreakable atom over width
     [(null? elems) (string-append open close)]
     [(and (string=? open "(") (symbol? (car elems)))
      ;; list with a symbol head: keep head + signature on line 1; break the body
