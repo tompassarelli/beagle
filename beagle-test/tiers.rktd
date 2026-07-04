@@ -41,7 +41,6 @@
 #hasheq(
   (nix     . (active   "Load-bearing via bnix dogfood (firnos config + heist work)"))
   (clj     . (active   "Promoted Phase D (2026-05): emit-clj structural + behavioral both active. Fixture-driven .bclj suites reconciled to v0.16 surface (claim form, no inline def/defn type annotations, defrecord+extend-type instead of deftype)"))
-  (cljs    . (active   "Promoted Phase D (2026-05): emit-cljs path covered structurally by emit-clj suite (shared backend); .bcljs fixtures reconciled to v0.16 surface"))
   (js      . (split    "Structural active; behavioral demoted — JS target may become load-bearing via Bun work; currently aspirational"))
   (sql     . (active   "Schema-typing live in check.rkt; emitter dormant (BEAGLE_ALL_TARGETS=1). Structural-only"))
   (odin    . (active   "Native target — Odin + wgpu/SDL3. Structural goldens + pointed rejections")))
@@ -90,10 +89,9 @@
              "nix-parse.rkt"
              "nix-roundtrip.rkt"
              "validate-nix.rkt"
-             ;; Clojure / ClojureScript — promoted Phase D (2026-05).
+             ;; Clojure — promoted Phase D (2026-05).
              ;; emit.rkt is the clj structural suite; emit-clj-behavioral.rkt
-             ;; runs the emitted clj via bb (Babashka). cljs is covered by the
-             ;; shared emit-clj backend; no separate emit-cljs.rkt test exists.
+             ;; runs the emitted clj via bb (Babashka).
              "emit.rkt"                 ; emit-clj structural
              "emit-clj-behavioral.rkt"  ; requires bb (Babashka)
              ;; Odin backend — native target (2026-06-13).

@@ -399,7 +399,7 @@
 ;;
 ;; The threading family (-> / ->> / as-> / cond-> / cond->> / some-> / some->>)
 ;; desugars at parse-time for the type checker and the Nix emitter, but the
-;; clj/cljs emitter recognises the threading-marker wrapper and reconstructs
+;; clj emitter recognises the threading-marker wrapper and reconstructs
 ;; the surface form so the emitted Clojure is idiomatic (not a flattened call
 ;; chain). orig-args carries the parsed surface args; emit walks them with
 ;; emit-expr so any inner forms also emit normally.

@@ -1037,70 +1037,6 @@
 (check-fixture-ok "match arms with same type infer that type"
   "match-union-return.bclj")
 
-;; --- CLJS target tests ---
-
-(define (check-cljs-prog . forms)
-  (define prog (parse-program
-                (map (lambda (f) (datum->syntax #f f))
-                     (cons '(define-target cljs) forms))))
-  (type-check! prog))
-
-(define-syntax-rule (check-cljs-ok name form ...)
-  (test-case name (check-not-exn (lambda () (check-cljs-prog form ...)))))
-
-(define-syntax-rule (check-cljs-warns name rx form ...)
-  (test-case name
-    (let ([output (open-output-string)])
-      (parameterize ([current-error-port output])
-        (check-cljs-prog form ...))
-      (check-regexp-match rx (get-output-string output)))))
-
-(define-syntax-rule (check-cljs-silent name form ...)
-  (test-case name
-    (let ([output (open-output-string)])
-      (parameterize ([current-error-port output])
-        (check-cljs-prog form ...))
-      (check-equal? "" (get-output-string output)))))
-
-(check-cljs-ok "cljs: js/parseInt type-checks"
-  '(def x :- Int (js/parseInt "42")))
-
-(check-cljs-ok "cljs: js/Math.sqrt type-checks"
-  '(def x :- Float (js/Math.sqrt 16.0)))
-
-(test-case "cljs: js/console.log type-checks"
-  (check-not-exn
-   (lambda ()
-     (check-cljs-prog '(defn log-it [(msg : String)] :- Nil (js/console.log msg))))))
-
-(check-cljs-ok "cljs: standard fns work in cljs"
-  '(def x :- Int (+ 1 1)))
-
-(check-cljs-ok "cljs: js/parseFloat type-checks"
-  '(def x :- Float (js/parseFloat "3.14")))
-
-(check-cljs-ok "cljs: js/isNaN type-checks"
-  '(def x :- Bool (js/isNaN 0)))
-
-(check-cljs-warns "cljs: slurp warns as JVM-only"
-  #rx"JVM-only"
-  '(def x (slurp "file.txt")))
-
-(check-cljs-warns "cljs: System/getProperty warns as JVM-only"
-  #rx"JVM-only"
-  '(def x (System/getProperty "user.home")))
-
-(check-cljs-warns "cljs: .trim warns as JVM-only"
-  #rx"JVM-only"
-  '(def x (.trim " hello ")))
-
-(check-cljs-warns "cljs: *command-line-args* warns as JVM-only"
-  #rx"JVM-only"
-  '(def x (first *command-line-args*)))
-
-(check-cljs-silent "cljs: universal fn produces no JVM-only warning"
-  '(def x :- Int (+ 1 1)))
-
 ;; --- metadata type checking --------------------------------------------------
 
 (test-case "metadata is transparent to type checking"
@@ -1436,7 +1372,7 @@
   '(def a :- Bool (> 2.5 1))
   '(def b :- Bool (<= 1 2)))
 
-;; --- 2026-06-12 qualified-call resolution (clj/cljs) --------------------------
+;; --- 2026-06-12 qualified-call resolution (clj) -------------------------------
 
 (check-err/rx "qualified: unresolved alias is an error naming the require"
   #rx"require babashka\\.fs :as fs"

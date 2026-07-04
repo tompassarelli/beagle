@@ -156,7 +156,7 @@
    (lambda () (delete-file tmp))))
 
 (test-case "mode-2 hygiene compiles with the alias on every live target"
-  (for ([spec (in-list '((clj "bclj") (cljs "bcljs") (nix "bnix")
+  (for ([spec (in-list '((clj "bclj") (nix "bnix")
                          (js "bjs") (odin "bodin")))])
     (define tgt (car spec))
     (define out (emit-via-lang tgt (cadr spec)))

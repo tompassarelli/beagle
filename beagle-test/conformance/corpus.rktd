@@ -3,7 +3,7 @@
 ;; Row: (id path kind)
 ;;   id    — stable case id; the ratchet (known-divergences-<target>.edn) keys on it.
 ;;   path  — repo-relative source file; target derived from extension
-;;           (.bjs -> js, .bclj -> clj, .bcljs -> cljs, .bnix -> nix).
+;;           (.bjs -> js, .bclj -> clj, .bnix -> nix).
 ;;   kind  — emit   : golden = emitted output (expected/<target>/<id>.<ext>)
 ;;           reject : source must FAIL check; golden = diagnostic text
 ;;                    (expected/<target>/<id>.diag)
@@ -41,10 +41,6 @@
  ;; positions. Regression row for the oracle reader/emitter char-literal bug
  ;; (was: \tab → bare symbol `tab`; fixed: reader now produces Racket char? values).
  ("charlit"             "beagle-test/conformance/corpus/charlit.bclj"            emit)
-
- ;; --- cljs -----------------------------------------------------------
- ("hello-cljs"         "beagle-test/tests/fixtures/hello-cljs.bcljs"       emit)
- ("cljs-interop"       "beagle-test/tests/fixtures/cljs-interop.bcljs"     emit)
 
  ;; --- nix ------------------------------------------------------------
  ("nix-builtins"       "beagle-test/tests/fixtures/nix-builtins.bnix"      emit)

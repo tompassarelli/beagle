@@ -1,9 +1,0 @@
-#lang beagle
-
-(define-target cljs)
-(ns heist.hello)
-
-(defn greet [(name : String)] :- String
-  (str "Hello, " name "!"))
-
-(def message (greet "Heist"))

@@ -59,7 +59,7 @@
  #:once-each
  [("--regen") "Re-source expected/ goldens from the current compiler (the oracle)"
               (regen? #t)]
- [("--target") targets "Comma-separated target subset (js,clj,cljs,nix)"
+ [("--target") targets "Comma-separated target subset (js,clj,nix)"
                (target-filter
                 (for/seteq ([t (string-split targets ",")]) (string->symbol t)))])
 
@@ -78,7 +78,6 @@
   (define p (row-path r))
   (cond
     [(regexp-match? #rx"\\.bjs$" p)   'js]
-    [(regexp-match? #rx"\\.bcljs$" p) 'cljs]
     [(regexp-match? #rx"\\.bclj$" p)  'clj]
     [(regexp-match? #rx"\\.bnix$" p)  'nix]
     [else (error 'certify "cannot derive target from path: ~a" p)]))
@@ -154,7 +153,7 @@
   (case target
     [(js)       bun-path]
     [(nix)      nix-path]
-    [(clj cljs) bb-path]
+    [(clj)      bb-path]
     [else #f]))
 
 (define tmp-dir (make-temporary-file "beagle-certify-~a" 'directory))
@@ -198,10 +197,10 @@
         (define-values (ok? err) (run-quiet nix-path "--parse" (path->string f)))
         (verdict "nix-instantiate" ok? err)]
        [else (list 'skipped "no nix-instantiate")])]
-    [(clj cljs)
+    [(clj)
      (cond
        [bb-path
-        (define f (write-tmp (if (eq? target 'cljs) ".cljs" ".clj")))
+        (define f (write-tmp ".clj"))
         (define-values (ok? err)
           (run-quiet bb-path "-e" bb-reader-prog (path->string f)))
         (verdict "bb" ok? err)]

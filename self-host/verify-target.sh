@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # verify-target: byte-parity gate for a NON-clj emit target of the self-hosted
-# compiler (js today; the same pattern serves nix/cljs/…).
+# compiler (js today; the same pattern serves nix/…).
 #
 #   self-host/verify-target.sh <target>        # e.g. js
 #
@@ -31,7 +31,6 @@ EXPECT="beagle-test/conformance/expected/$TARGET"
 case "$TARGET" in
   js)  EXT="bjs";  LANG="#lang beagle/js" ;;
   nix) EXT="bnix"; LANG="#lang beagle/nix" ;;
-  cljs) EXT="bcljs"; LANG="#lang beagle/cljs" ;;
   *) echo "verify-target: unknown target '$TARGET'"; exit 2 ;;
 esac
 

@@ -1,6 +1,0 @@
-{:doc
- "RATCHET — known divergences for the cljs target. Shrink-only; see
-  known-divergences-js.edn for the schema and bin/beagle-certify for the gate.
-  No commas (dual EDN/Racket-readable)."
- :entries
- []}

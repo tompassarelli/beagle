@@ -154,7 +154,7 @@
   [else
    (define fixtures
      (sort (for/list ([f (in-list (directory-list fixtures-dir*))]
-                      #:when (regexp-match? #rx"\\.(bclj|bnix|bcljs)$"
+                      #:when (regexp-match? #rx"\\.(bclj|bnix)$"
                                             (path->string f)))
              (build-path fixtures-dir* f))
            string<? #:key path->string))
