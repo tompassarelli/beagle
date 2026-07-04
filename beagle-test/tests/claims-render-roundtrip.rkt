@@ -169,4 +169,21 @@
    ;; G11 symbolic values ##Inf / ##-Inf / ##NaN
    (gap-case "G11 ##NaN ##Inf ##-Inf"
              "(def s [##NaN ##Inf ##-Inf])\n"
-             #:has '("##NaN" "##Inf" "##-Inf") #:no '("#%symbolic-val" "nan.0" "inf.0"))))
+             #:has '("##NaN" "##Inf" "##-Inf") #:no '("#%symbolic-val" "nan.0" "inf.0"))
+
+   ;; G9 bare-dot interop `(. Target member)` (READ-side fix; render was never
+   ;; the gap — a lone `.` is an ordinary symbol that already renders bare). These
+   ;; assert the whole emit→render path is a fixed point on malli's java.time shape
+   ;; and that the interop head stays a bare `.`, never a pipe-quoted `|.|`.
+   (gap-case "G9 `(. Target -field)` interop head renders bare"
+             "(def m (. LocalTime -MIN))\n"
+             #:has '("(. LocalTime -MIN)") #:no '("|.|"))
+   (gap-case "G9 `(. obj method arg)` interop renders bare"
+             "(def r (. obj method arg))\n"
+             #:has '("(. obj method arg)") #:no '("|.|"))
+   (gap-case "G9 `.method` sugar unchanged through render"
+             "(def m (.method obj))\n"
+             #:has '("(.method obj)"))
+   (gap-case "G9 java.time schema map round-trips"
+             "(def s {:min (. LocalTime -MIN) :max (. LocalTime -MAX)})\n"
+             #:has '("(. LocalTime -MIN)" "(. LocalTime -MAX)") #:no '("|.|"))))

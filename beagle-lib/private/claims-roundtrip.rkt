@@ -456,7 +456,13 @@
            (format "(~a)" (string-join (map datum->src elems) " "))
            (format "(~a . ~a)" (string-join (map datum->src elems) " ") (datum->src tail))))]
     [(vector? d) (format "[~a]" (string-join (map datum->src (vector->list d)) " "))]
-    [(string? d)  (format "~s" d)]
+    ;; edn-string, NOT `~s`: Racket's write escapes control chars with Racket-only
+    ;; sequences (ESC → `\e`, BEL → `\a`, …) that Clojure's reader REJECTS
+    ;; ("Unsupported escape character: \e"). edn-string emits the Clojure/EDN-valid
+    ;; `\uNNNN` form, re-readable by BOTH beagle's (Racket) reader and Clojure —
+    ;; required for the rendered tree to load as Clojure (EXP-025 malli oracle;
+    ;; malli/dev/virhe.cljc holds raw ANSI-ESC strings `"\033[38;5;…"`).
+    [(string? d)  (edn-string d)]
     [(symbol? d)  (symbol->src d)]
     [(boolean? d) (if d "true" "false")]
     [(keyword? d) (string-append ":" (keyword->string d))]

@@ -481,6 +481,41 @@
      (read-char port)
      (if src (datum->syntax #f next (vector src line col pos 2)) next)]))
 
+;; `.` bare-dot reader (Clojure interop special-form head). Racket's default
+;; reader reserves a lone `.` as the improper-list (dotted-pair) separator and
+;; errors on `(. Target member)` with "read: illegal use of `.`" (EXP-025 G9,
+;; malli's java.time interop: `(. LocalTime -MIN)`, `(. obj method arg)`). In
+;; Clojure `.` is an ordinary symbol — the interop special form's head — and
+;; beagle is Clojure, so there are no dotted pairs to protect: `.` reads as the
+;; symbol `.`.
+;;
+;; Registered NON-terminating (like `#` and `'`), so it fires ONLY at token
+;; start — mid-token dots (`foo.bar`, `1.5`) stay untouched constituents. At
+;; token start we accumulate the whole token against beagle's delimiter set,
+;; matching the self-hosted reader's read-symbol-text (structural parity):
+;;   `.`        (followed by delimiter/EOF) → symbol `.`      (the bare special form)
+;;   `.method`                              → symbol `.method` (unchanged; method-call sugar)
+;;   `.-field`                              → symbol `.-field` (unchanged; field-access sugar)
+;; Delimiters mirror the readtable's terminating chars + whitespace; `'` and `#`
+;; are NON-terminating constituents (so a primed/`#`-bearing tail stays one
+;; symbol, per the G6 primed-symbol rule) and are therefore NOT delimiters.
+(define (dot-token-delimiter? c)
+  (or (eof-object? c)
+      (char-whitespace? c)
+      (memv c '(#\, #\( #\) #\[ #\] #\{ #\} #\" #\; #\~ #\^ #\` #\\))))
+
+(define (dot-reader ch port src line col pos)
+  ;; ch (the leading `.`) is already consumed by the readtable dispatch.
+  (define sym
+    (let loop ([acc (list #\.)])
+      (define c (peek-char port))
+      (if (dot-token-delimiter? c)
+        (string->symbol (list->string (reverse acc)))
+        (begin (read-char port) (loop (cons c acc))))))
+  (if src
+    (datum->syntax #f sym (vector src line col pos (string-length (symbol->string sym))))
+    sym))
+
 (define beagle-readtable
   (make-readtable #f
     #\^ 'terminating-macro meta-reader
@@ -513,6 +548,12 @@
     ;; so `\tab` → symbol `tab`). Registering as terminating-macro intercepts it
     ;; before any identifier-reading starts.
     #\\ 'terminating-macro char-lit-reader
+    ;; `.` is NON-terminating (like `#`): fires only when it STARTS a token
+    ;; (`(. Target member)` → symbol `.`), and is an ordinary constituent
+    ;; mid-token (`foo.bar`, `1.5`). Overrides Racket's default dotted-pair
+    ;; reading of a lone `.` (EXP-025 G9). Self-hosted reader already agrees
+    ;; (reader.bclj's `delimiter?` excludes `.`, so it reads `.` as a symbol).
+    #\. 'non-terminating-macro dot-reader
     #\# 'non-terminating-macro hash-dispatch))
 
 (define (beagle-read in)

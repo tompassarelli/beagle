@@ -112,3 +112,29 @@
 (test-case "## with an unknown symbolic name errors"
   (check-exn #rx"symbolic value"
              (lambda () (rd "##Bogus"))))
+
+;; --- EXP-025 G9 bare-dot interop `(. Target member)` (malli java.time) --------
+;; Racket's default reader reserves a lone `.` as the dotted-pair separator and
+;; errors on `(. LocalTime -MIN)` ("illegal use of `.`"). Beagle is Clojure, so
+;; `.` is the ordinary interop special-form head → the symbol `.`. `.method` /
+;; `.-field` prefixed tokens are constituents already and MUST stay unchanged.
+(test-case "G9 bare `.` reads as the symbol `.`"
+  (check-equal? (rd ".") (string->symbol ".")))
+(test-case "G9 `(. Target -field)` interop reads with `.` head"
+  (check-equal? (rd "(. LocalTime -MIN)")
+                (list (string->symbol ".") 'LocalTime '-MIN)))
+(test-case "G9 `(. obj method arg)` interop reads with `.` head"
+  (check-equal? (rd "(. obj method arg)")
+                (list (string->symbol ".") 'obj 'method 'arg)))
+(test-case "G9 `.method` sugar is UNCHANGED (single symbol, `.` not fired)"
+  (check-equal? (rd "(.method obj)") '(.method obj)))
+(test-case "G9 `.-field` sugar is UNCHANGED (single symbol)"
+  (check-equal? (rd "(.-field obj)") '(.-field obj)))
+(test-case "G9 mid-token dot is a constituent — `foo.bar` stays one symbol"
+  (check-equal? (rd "foo.bar") 'foo.bar))
+(test-case "G9 mid-token dot in a number — `1.5` still a number"
+  (check-equal? (rd "1.5") 1.5))
+(test-case "G9 the java.time schema shape round-trips at read"
+  (check-equal? (rd "{:min (. LocalTime -MIN) :max (. LocalTime -MAX)}")
+                (list '#%map ':min (list (string->symbol ".") 'LocalTime '-MIN)
+                            ':max (list (string->symbol ".") 'LocalTime '-MAX))))
