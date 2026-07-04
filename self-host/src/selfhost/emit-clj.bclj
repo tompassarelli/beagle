@@ -239,7 +239,7 @@
              (conj rs0 {"ns" "clojure.string" "alias" "str" "refer" nil})
              rs0)
         ns-name (get prog "namespace")
-        gen-class (and (get prog "gen-class") (not (= (deref emit-target) "cljs")))
+        gen-class (get prog "gen-class")
         req-clause (if (= 0 (count rs))
                      nil
                      (str "(:require "
@@ -682,13 +682,9 @@
 
       (= node "try")
         (let [body-str (emit-body (get e "body") "  ")
-              cljs (= (deref emit-target) "cljs")
               catch-strs (mapv (fn [c :- Any] :- String
-                                 (if cljs
-                                   (str "\n  (catch :default " (get c "name")
-                                        "\n    " (emit-body (get c "body") "    ") ")")
-                                   (str "\n  (catch " (get c "type") " " (get c "name")
-                                        "\n    " (emit-body (get c "body") "    ") ")")))
+                                 (str "\n  (catch " (get c "type") " " (get c "name")
+                                      "\n    " (emit-body (get c "body") "    ") ")"))
                                (get e "catches"))
               fin (get e "finally")
               finally-str (if (absent? fin)

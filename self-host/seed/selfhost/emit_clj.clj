@@ -146,7 +146,7 @@
    rs0 (vec (get prog "requires"))
    rs (if (and needs (not (has-clojure-string? rs0))) (conj rs0 {"ns" "clojure.string" "alias" "str" "refer" nil}) rs0)
    ns-name (get prog "namespace")
-   gen-class (and (get prog "gen-class") (not (= (deref emit-target) "cljs")))
+   gen-class (get prog "gen-class")
    req-clause (if (= 0 (count rs)) nil (str "(:require " (str/join "\n            " (mapv emit-require rs)) ")"))
    clauses (filterv some? [(if gen-class "(:gen-class)" nil) req-clause])]
   (if (= 0 (count clauses)) (str "(ns " ns-name ")") (str "(ns " ns-name "\n  " (str/join "\n  " clauses) ")"))))
@@ -372,8 +372,7 @@
   (= node "threading") (let [args (get e "args")]
   (if (= (count args) 0) (str "(" (get e "kind") ")") (str "(" (get e "kind") " " (str/join " " (mapv emit-expr* args)) ")")))
   (= node "try") (let [body-str (emit-body (get e "body") "  ")
-   cljs (= (deref emit-target) "cljs")
-   catch-strs (mapv (fn [c] (if cljs (str "\n  (catch :default " (get c "name") "\n    " (emit-body (get c "body") "    ") ")") (str "\n  (catch " (get c "type") " " (get c "name") "\n    " (emit-body (get c "body") "    ") ")"))) (get e "catches"))
+   catch-strs (mapv (fn [c] (str "\n  (catch " (get c "type") " " (get c "name") "\n    " (emit-body (get c "body") "    ") ")")) (get e "catches"))
    fin (get e "finally")
    finally-str (if (absent? fin) "" (str "\n  (finally\n    " (emit-body fin "    ") ")"))]
   (str "(try\n  " body-str (str/join "" catch-strs) finally-str ")"))
