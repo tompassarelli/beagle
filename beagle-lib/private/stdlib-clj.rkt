@@ -544,8 +544,8 @@
    ;; clojure.repl: REPL/JVM-only — no CLJS port
    'clojure.repl/doc 'clojure.repl/source 'clojure.repl/dir 'clojure.repl/pst
    'clojure.repl/apropos 'clojure.repl/find-doc 'clojure.repl/demunge
-   ;; clojure.zip: same on JVM and CLJS — but `clojure.zip` ns is JVM-only
-   ;; (CLJS uses `cljs.zip`); excluded to surface ns mismatches at type time
+   ;; clojure.zip: `clojure.zip` ns is JVM-only —
+   ;; excluded to surface ns mismatches at type time
    'clojure.zip/zipper 'clojure.zip/seq-zip 'clojure.zip/vector-zip 'clojure.zip/xml-zip
    'clojure.zip/node 'clojure.zip/branch? 'clojure.zip/children 'clojure.zip/make-node
    'clojure.zip/path 'clojure.zip/lefts 'clojure.zip/rights

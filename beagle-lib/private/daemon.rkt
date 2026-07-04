@@ -570,7 +570,6 @@
 
 (define (target-extension target)
   (case target
-    [(cljs) ".cljs"]
     [(js)   ".js"]
     [(py)   ".py"]
     [else   ".clj"]))

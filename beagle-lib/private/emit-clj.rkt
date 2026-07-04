@@ -2,10 +2,7 @@
 
 ;; Clojure emitter backend.
 ;;
-;; Registers the 'clj target. The 'cljs target is registered by
-;; emit-cljs.rkt, which reuses this backend but flips the
-;; current-emit-target parameter so per-expression branches (try/catch,
-;; ns :import) emit the CLJS spelling.
+;; Registers the 'clj target.
 ;;
 ;; Surface decisions for v0.16:
 ;;
@@ -245,17 +242,13 @@
 (define (emit-ns prog #:needs-clj-string? [needs-clj-string? #f])
   (define ns (program-namespace prog))
   (define rs (auto-inject-clj-string (program-requires prog) needs-clj-string?))
-  ;; JVM :import clauses are CLJ-only; CLJS uses :require for classes.
-  (define is (if (eq? (current-emit-target) 'cljs)
-                 '()
-                 (program-imports prog)))
+  (define is (program-imports prog))
   (define clauses
     (filter values
       (list
        ;; (:gen-class) — AOT / GraalVM-native entry; babashka treats it as a
-       ;; no-op. CLJS has no gen-class, so omit it there.
+       ;; no-op.
        (and (program-gen-class? prog)
-            (not (eq? (current-emit-target) 'cljs))
             "(:gen-class)")
        (and (not (null? rs))
             (format "(:require ~a)"
@@ -498,7 +491,7 @@
     ;; cond->>'s clauses are a flat (test step test step …) sequence —
     ;; orig-args preserves that flatness, so the generic emit works.
     ;; The desugared inner is not emitted; downstream type-check &
-    ;; emit-nix continue to walk it, but for clj/cljs we want the
+    ;; emit-nix continue to walk it, but for clj we want the
     ;; idiomatic surface.
     [(threading-marker? e)
      (define kind (threading-marker-kind e))
@@ -640,18 +633,13 @@
        (error 'beagle "target-case: no branch for target ~a" target))
      (emit-expr branch)]
     [(try-form? e)
-     (define cljs? (eq? (current-emit-target) 'cljs))
      (format "(try\n  ~a~a~a)"
              (emit-body (try-form-body e) "  ")
              (string-join (for/list ([c (try-form-catches e)])
-               (if cljs?
-                 (format "\n  (catch :default ~a\n    ~a)"
-                         (catch-clause-name c)
-                         (emit-body (catch-clause-body c) "    "))
                  (format "\n  (catch ~a ~a\n    ~a)"
                          (catch-clause-exception-type c)
                          (catch-clause-name c)
-                         (emit-body (catch-clause-body c) "    ")))) "")
+                         (emit-body (catch-clause-body c) "    "))) "")
              (if (try-form-finally-body e)
                (format "\n  (finally\n    ~a)" (emit-body (try-form-finally-body e) "    "))
                ""))]
@@ -1195,10 +1183,6 @@
   (emitter-backend 'clj clj-emit-program))
 
 (register-backend! 'clj clj-backend)
-
-;; 'cljs is registered separately by emit-cljs.rkt. It reuses
-;; clj-emit-program but parameterizes current-emit-target so per-branch
-;; CLJS spellings (try/catch, ns :import vs :require) emit correctly.
 
 (provide clj-backend
          clj-emit-program

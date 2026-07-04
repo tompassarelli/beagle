@@ -16,7 +16,6 @@
 
 (define (extension-for-target target)
   (case target
-    [(cljs) ".cljs"]
     [(js)   ".js"]
     [(py)   ".py"]
     [(nix)  ".nix"]

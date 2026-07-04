@@ -156,7 +156,6 @@
 (define (lang-line->target lang-line)
   (cond
     [(regexp-match? #rx"beagle/nix"    lang-line) 'nix]
-    [(regexp-match? #rx"beagle/cljs"   lang-line) 'cljs]
     [(regexp-match? #rx"beagle/clj"    lang-line) 'clj]
     [(regexp-match? #rx"beagle/js"     lang-line) 'js]
     [else #f]))
@@ -206,7 +205,7 @@
                    (cons (datum->syntax #f (list 'define-target ext-tgt)) forms))]
              [else
               (error 'beagle
-                     "~a: #lang beagle requires a target — use #lang beagle/js, beagle/clj, beagle/cljs, beagle/nix, or add (define-target <target>)"
+                     "~a: #lang beagle requires a target — use #lang beagle/js, beagle/clj, beagle/nix, or add (define-target <target>)"
                      (path->string src))])]
           [else forms])))))
 
@@ -891,9 +890,9 @@
 
       [(list 'define-target (? symbol? t))
        (when target-set? (raise-parse-error 'duplicate-meta "duplicate define-target"))
-       (unless (memq t '(clj cljs js nix py rkt zig odin))
+       (unless (memq t '(clj js nix py rkt zig odin))
          (raise-parse-error 'bad-meta-value
-                            "unknown target: ~a (expected clj, cljs, js, nix, py, rkt, zig, or odin)" t))
+                            "unknown target: ~a (expected clj, js, nix, py, rkt, zig, or odin)" t))
        (set! target t)
        (set! target-set? #t)]
 
@@ -1025,7 +1024,7 @@
                           "malformed defmacro — expected (defmacro NAME [params] template) with exactly one template form; wrap multiple forms in `(do ...)`, got: ~v" d)]
       [(cons 'define-target _)
        (raise-parse-error 'bad-meta-value
-                          "malformed define-target — expected (define-target clj|cljs|nix|js|py|rkt), got: ~v" d)]
+                          "malformed define-target — expected (define-target clj|nix|js|py|rkt), got: ~v" d)]
       [(cons 'define-mode _)
        (raise-parse-error 'bad-meta-value
                           "malformed define-mode — expected (define-mode strict|dynamic), got: ~v" d)]
@@ -1048,12 +1047,12 @@
   ;; Mode-2 hygiene: the set of this program's top-level definition names, and
   ;; a fresh alias table the expander fills with free-ref -> alias entries.
   ;; GATED to the live targets that emit the injected `(def alias orig)`
-  ;; correctly — clj/cljs/nix/js, and odin (emit-odin renders an untyped
+  ;; correctly — clj/nix/js, and odin (emit-odin renders an untyped
   ;; identifier-valued def as a constant alias `name :: value`). Dormant
   ;; targets (py/rkt/zig) keep use-site resolution until their emitters
   ;; are verified to handle the alias form. When the set is #f, free-ref
   ;; resolution is inert and expansion is unchanged.
-  (define hygiene-capable? (memq target '(clj cljs nix js odin)))
+  (define hygiene-capable? (memq target '(clj nix js odin)))
   (define module-def-name-set
     (and hygiene-capable?
          (for/fold ([acc (hasheq)]) ([d (in-list datums)])

@@ -16,7 +16,7 @@
 ;;   #lang beagle
 ;;   (ns my.module)
 ;;   (define-mode strict)
-;;   (define-target clj | cljs | js | nix | odin)
+;;   (define-target clj | js | nix | odin)
 ;; The test prepends that preamble before checking each example.
 
 (require racket/string)
@@ -105,7 +105,7 @@
   (fprintf out "`bin/beagle-cheatsheet` from beagle-lib/private/cheatsheet.rkt; every\n")
   (fprintf out "example is parse+type-checked by the test suite, so nothing here is stale.\n\n")
   (fprintf out "Files begin with `#lang beagle`, then `(ns ...)`, `(define-mode strict)`,\n")
-  (fprintf out "and `(define-target clj | cljs | js | nix | odin)`. For signatures, fields,\n")
+  (fprintf out "and `(define-target clj | js | nix | odin)`. For signatures, fields,\n")
   (fprintf out "and the full form set, query the compiler (`bin/beagle sig|fields|syntax`,\n")
   (fprintf out "or `bin/beagle` for all commands).\n")
   (for ([cat (in-list (cheat-categories))])

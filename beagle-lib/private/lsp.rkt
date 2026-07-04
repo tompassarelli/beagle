@@ -481,7 +481,7 @@
                   (let-values ([(base _name _dir?) (split-path (string->path path))])
                     base)))
     (for ([f (in-directory dir)]
-          #:when (regexp-match? #rx"\\.(bclj|bcljs|bjs|bnix|bpy|bgl|rkt)$" (path->string f))
+          #:when (regexp-match? #rx"\\.(bclj|bjs|bnix|bpy|bgl|rkt)$" (path->string f))
           #:when (not (equal? (path->string f) path)))
       (define mod-name
         (path->string (let-values ([(_base name _dir?) (split-path f)]) name)))

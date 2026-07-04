@@ -11,8 +11,7 @@
 ;; entry is existence + arity + the precise positions; an Any here is a
 ;; deliberate shallow type, not a TODO.
 ;;
-;; Merged into the clj-target stdlib (stdlib-types.rkt); excluded from
-;; cljs via the programmatic exclude (every key in this table).
+;; Merged into the clj-target stdlib (stdlib-types.rkt).
 
 (require "types.rkt"
          "stdlib-helpers.rkt")

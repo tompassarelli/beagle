@@ -67,7 +67,7 @@
          (if (ormap (λ (a) (type-compatible? t a)) acc) acc (cons t acc))))
      (if (= (length deduped) 1) (car deduped) (type-union (reverse deduped)))]))
 
-;; Current compile target ('clj, 'cljs, 'js, or 'py) — set during type-check!
+;; Current compile target ('clj, 'js, or 'py) — set during type-check!
 (define current-check-target (make-parameter 'clj))
 
 ;; --- target-form gating -----------------------------------------------------
@@ -1807,7 +1807,7 @@
      (for-each (lambda (a) (infer-expr a env)) (recur-form-args e))
      ANY]
     [(set!-form? e)
-     ;; A set! target must be an assignable PLACE. On value targets (js, cljs,
+     ;; A set! target must be an assignable PLACE. On value targets (js,
      ;; clj, nix) the only places are a bare local variable and a field access
      ;; (`.-field` / `.field`, a method-call node). A general call form like
      ;; `(get m k)` is NOT a place: emit would lower it to `$$bc$get(m, k) = v`,
@@ -3679,7 +3679,7 @@
            (check-world-type! (type-prim-name ft) entry (cons rec-name seen))]
           [else (void)])))))
 
-;; --- qualified-call resolution (clj/cljs) -----------------------------------
+;; --- qualified-call resolution (clj) ----------------------------------------
 ;;
 ;; Qualified symbols (alias/name) were previously exempt from every
 ;; undefined-symbol check, so a typo'd alias or missing require was
@@ -3808,7 +3808,7 @@
     [else (go form)]))
 
 (define (check-qualified-resolution! prog env)
-  (when (and (memq (program-target prog) '(clj cljs))
+  (when (and (eq? (program-target prog) 'clj)
              (eq? (program-mode prog) 'strict)
              (>= (current-check-profile) 1))
     (define src-table (program-src-table prog))

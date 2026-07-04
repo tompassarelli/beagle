@@ -188,7 +188,7 @@
 
 ;; --- gate runner ------------------------------------------------------------
 (define (beagle-file? p)
-  (regexp-match? #rx"\\.(bjs|bclj|bcljs|bnix)$" (if (path? p) (path->string p) p)))
+  (regexp-match? #rx"\\.(bjs|bclj|bnix)$" (if (path? p) (path->string p) p)))
 
 (define (expand-paths args)
   (append-map (lambda (p)
@@ -392,6 +392,26 @@
 (define %set      (string->symbol "#%set"))
 (define %regex    (string->symbol "#%regex"))
 (define %meta     (string->symbol "#%meta"))
+;; #-reader markers whose text is glued to a single operand (G8/G10/G11). Same
+;; interned symbols the reader mints in reader-impl.rkt.
+(define %discard      (string->symbol "#%discard"))       ; #_form
+(define %js           (string->symbol "#%js"))            ; #js form
+(define %symbolic-val (string->symbol "#%symbolic-val"))  ; ##Inf / ##-Inf / ##NaN
+
+;; Reader-conditional heads (produced by reader-impl, resolved at parse time).
+;; Variadic tail = alternating tag/form list, spliced verbatim inside #?( ) / #?@( ).
+(define (rcond-form? d)        (and (pair? d) (eq? (car d) 'reader-conditional)))
+(define (rcond-splice-form? d) (and (pair? d) (eq? (car d) 'reader-conditional-splice)))
+;; single-operand glued #-reader form -> its prefix string (else #f). #_form,
+;; #js form, and ##Name all render as prefix + the operand's own rendering
+;; (`##` + symbol name -> ##Inf/##-Inf/##NaN).
+(define (hash-prefix d)
+  (and (pair? d) (pair? (cdr d)) (null? (cddr d))
+       (cond
+         [(eq? (car d) %discard) "#_"]
+         [(eq? (car d) %js)      "#js "]
+         [(and (eq? (car d) %symbolic-val) (symbol? (cadr d))) "##"]
+         [else #f])))
 
 ;; Beagle's reader normalizes Clojure reader-macros to Scheme-style heads
 ;; (`^`→#%meta, `` ` ``→quasiquote, ~→unquote, ~@→unquote-splicing, #'→syntax).
@@ -424,6 +444,12 @@
     [(meta-form? d) (format "^~a ~a" (datum->src (cadr d)) (datum->src (caddr d)))]
     ;; `` `x `` / ~x / ~@x / #'x — prefix glued to its single operand, no space.
     [(prefix-macro d) => (lambda (px) (string-append px (datum->src (cadr d))))]
+    ;; reader conditionals: (reader-conditional tag form …) → #?(tag form …);
+    ;; splice → #?@(…). Tail spliced verbatim (already alternating tag/form).
+    [(rcond-form? d)        (format "#?(~a)"  (string-join (map datum->src (cdr d)) " "))]
+    [(rcond-splice-form? d) (format "#?@(~a)" (string-join (map datum->src (cdr d)) " "))]
+    ;; #_form / #js form / ##Name — prefix glued to its single operand.
+    [(hash-prefix d) => (lambda (px) (string-append px (datum->src (cadr d))))]
     [(pair? d)
      (let-values ([(elems tail) (split-improper d)])
        (if (null? tail)
@@ -460,6 +486,9 @@
     [(and (pair? d) (eq? (car d) %map))      (values "{" "}" (cdr d))]
     [(and (pair? d) (eq? (car d) %set))      (values "#{" "}" (cdr d))]
     [(and (pair? d) (eq? (car d) %regex))    (values #f #f #f)]   ; never break a regex
+    [(rcond-form? d)        (values "#?(" ")" (cdr d))]           ; #?(…): breakable, tail spliced
+    [(rcond-splice-form? d) (values "#?@(" ")" (cdr d))]          ; #?@(…): breakable
+    [(hash-prefix d)                         (values #f #f #f)]   ; #_ / #js / ## : glued in datum->pretty
     [(or (meta-form? d) (prefix-macro d))    (values #f #f #f)]   ; reader macros: glued in datum->pretty, never broken generically
     [(pair? d) (let-values ([(elems tail) (split-improper d)])
                  (if (null? tail) (values "(" ")" elems) (values #f #f #f)))] ; not dotted pairs
@@ -501,6 +530,10 @@
     ;; single-operand reader macro (`` ` `` ~ ~@ #'): glue the prefix, let the one
     ;; operand break beneath it. No trailing space, so the prefix stays attached.
     [(prefix-macro d)
+     => (lambda (px) (string-append px (datum->pretty (cadr d) (+ col (string-length px)))))]
+    ;; #_form / #js form / ##Name — prefix glued, single operand breaks beneath it.
+    ;; (##Name always fits the width test above, so only #_ / #js reach here big.)
+    [(hash-prefix d)
      => (lambda (px) (string-append px (datum->pretty (cadr d) (+ col (string-length px)))))]
     ;; metadata `^m form`: `^` glued to the meta datum (kept one-line — metas are
     ;; small), one space, then the target form breaks at the correct column, so

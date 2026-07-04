@@ -96,7 +96,7 @@
               "$out/beagle-lib/main.rkt"
               "$out/beagle-lib/lang/reader.rkt"
             )
-            for d in clj cljs js nix odin sql py; do
+            for d in clj js nix odin sql py; do
               [ -f "$out/beagle-lib/$d/main.rkt" ] && core_roots+=("$out/beagle-lib/$d/main.rkt")
               [ -f "$out/beagle-lib/$d/lang/reader.rkt" ] && core_roots+=("$out/beagle-lib/$d/lang/reader.rkt")
             done

@@ -256,7 +256,7 @@
 (struct ns-decl     (name)                                  #:transparent)
 (struct mode-decl   (mode)                                  #:transparent)
 ;; doc: optional docstring (String or #f). Real Clojure surface — carried
-;; through to clj/cljs emit; ignored by nix emit and the checker.
+;; through to clj emit; ignored by nix emit and the checker.
 ;; dynamic?: #t when defined `(def ^:dynamic *x* …)` — a dynamic (rebindable)
 ;; var. Drives the `^:dynamic` metadata in clj emit and gates `binding`
 ;; targets in the checker. #f for ordinary defs.

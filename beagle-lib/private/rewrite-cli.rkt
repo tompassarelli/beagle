@@ -23,7 +23,7 @@
   (define ext (path-get-extension path))
   (and ext
        (member (bytes->string/utf-8 ext)
-               '(".bgl" ".bclj" ".bcljs" ".bjs" ".bnix" ".bpy" ".rkt"))
+               '(".bgl" ".bclj" ".bjs" ".bnix" ".bpy" ".rkt"))
        #t))
 
 (define (collect-files target)
