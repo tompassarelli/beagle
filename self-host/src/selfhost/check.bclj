@@ -63,6 +63,15 @@
     (make-fn [(make-fn [(make-var "A")] nil (make-var "B")) ANY]
              nil (make-app "Vec" [(make-var "B")]))
     nil))
+;; filterv : (A -> Any) -> Any -> (Vec A) — preserves the predicate's element
+;; type in the result vector, mirroring stdlib-portable.rkt (so a non-Vec
+;; downstream consumer, e.g. (inc (filterv ..)), rejects on (Vec A)). filter and
+;; remove stay Any-returning, also per the oracle.
+(def FILTERV-POLY :- Any
+  (make-poly ["A"]
+    (make-fn [(make-fn [(make-var "A")] nil ANY) ANY]
+             nil (make-app "Vec" [(make-var "A")]))
+    nil))
 
 ;; --- type predicates ---------------------------------------------------------
 
@@ -167,6 +176,18 @@
 
     (and (prim? actual) (prim? expected))
       (or (= (get actual "name") (get expected "name"))
+          ;; Int widens to Float, one direction only (JVM/Clojure numeric
+          ;; semantics: a Float-typed slot accepts an Int operand). This is what
+          ;; lets a union collapse Int under a present Float (merge-types dedup),
+          ;; matching the oracle's (U .. Float) narrowing.
+          (and (= (get expected "name") "Float") (= (get actual "name") "Int"))
+          ;; Numeric width widening (Odin/Zig integer + float subtypes).
+          (and (= (get actual "name") "Int")
+               (or (= (get expected "name") "I8") (= (get expected "name") "I16")
+                   (= (get expected "name") "I32") (= (get expected "name") "U8")
+                   (= (get expected "name") "U16") (= (get expected "name") "U32")
+                   (= (get expected "name") "U64") (= (get expected "name") "F32")))
+          (and (= (get actual "name") "Float") (= (get expected "name") "F32"))
           (= (unqualify-name (get actual "name"))
              (unqualify-name (get expected "name"))))
 
@@ -203,10 +224,13 @@
     (and (any-type? t1) (any-type? t2)) ANY
     (any-type? t1) t2
     (any-type? t2) t1
-    ;; JOIN, not meet: when one branch type subsumes the other, keep the WIDER
-    ;; one (t1 <: t2 ⇒ t2). Returning the subtype dropped the nil arm of an
-    ;; `(if c t)`/some-> chain — collapsing (U Nil Int) back to Nil.
-    (type-compatible? t1 t2) t2
+    ;; JOIN, single-direction — mirror check.rkt merge-types: collapse only when
+    ;; the SECOND type is a subtype of the first (t2 <: t1 ⇒ t1). The reverse
+    ;; direction is deliberately NOT collapsed, so [Int Float] stays (U Int Float)
+    ;; = "Number" while [Float Int] collapses to Float (Int widens to Float),
+    ;; matching the oracle's asymmetric numeric join. The dedup arm below still
+    ;; drops a subtype member (e.g. Int under a present Float), preserving nil
+    ;; arms via first-occurrence order.
     (type-compatible? t2 t1) t1
     :else
       (let [flat1 (if (union-type? t1) (get t1 "members") [t1])
@@ -268,22 +292,58 @@
        (= (get e "kind") "bool")
        (= (get e "value") false)))
 
-(defn numeric-prim? [t :- Any] :- Bool
-  (and (prim? t) (or (= (get t "name") "Int") (= (get t "name") "Float"))))
-
-;; Element type of a collection literal. Oracle widens numerics (Int ⊔ Float ->
-;; Float) for collection elements — distinct from control-flow joins, which make
-;; a (U Int Float) = "Number". Non-numeric: all-same -> that type, else Any.
+;; Element type of a collection literal (vec / map key / map value). Mirrors the
+;; oracle's vec-form / map-form inference (check.rkt): the FIRST element type if
+;; every other element is compatible with it, else Any. Numerics are NOT widened
+;; here — a `[1 1.0]` literal is (Vec Any), not (Vec Float); numeric widening is
+;; a control-flow-join concern (merge-types), never a collection-element one.
 (defn collection-elem-type [types :- (Vec Any)] :- Any
+  (if (and (> (count types) 0)
+           (not (any-type? (nth types 0)))
+           (every? (fn [t :- Any] :- Bool (type-compatible? t (nth types 0))) (drop 1 types)))
+    (nth types 0)
+    ANY))
+
+;; --- numeric-preserving arithmetic (mirrors check.rkt numeric-refine) ---------
+;; + - * inc dec min max abs keep Int when every operand is Int, produce Float on
+;; any Float operand, Number on any Number operand, and fall back to the declared
+;; stdlib return (Any for + - *; Int for inc dec min max) the moment ANY operand
+;; is non-numeric ('other) — so a bad-arg arithmetic call dissolves to Any and
+;; drops out of downstream unions, exactly as the oracle narrows.
+(defn numeric-preserving-op? [op :- String] :- Bool
+  (or (= op "+") (= op "-") (= op "*") (= op "inc") (= op "dec")
+      (= op "min") (= op "max") (= op "abs")))
+
+(defn numeric-class [t :- Any] :- String
   (cond
-    (= (count types) 0) ANY
-    (every? numeric-prim? types)
-      (if (boolean (some (fn [t :- Any] :- Bool (= (get t "name") "Float")) types))
-        FLOAT-TYPE INT-TYPE)
-    (and (not (any-type? (nth types 0)))
-         (every? (fn [t :- Any] :- Bool (type-compatible? t (nth types 0))) (drop 1 types)))
-      (nth types 0)
-    :else ANY))
+    (and (prim? t) (= (get t "name") "Int")) "int"
+    (and (prim? t) (= (get t "name") "Float")) "float"
+    (and (prim? t) (= (get t "name") "Number")) "number"
+    (and (union-type? t)
+         (> (count (get t "members")) 0)
+         (every? (fn [a :- Any] :- Bool
+                   (let [c (numeric-class a)]
+                     (or (= c "int") (= c "float") (= c "number"))))
+                 (get t "members")))
+      "number"
+    :else "other"))
+
+(defn numeric-refine [op :- String arg-types :- (Vec Any) declared :- Any] :- Any
+  (cond
+    (not (numeric-preserving-op? op)) declared
+    (not (or (any-type? declared)
+             (and (prim? declared)
+                  (or (= (get declared "name") "Int")
+                      (= (get declared "name") "Float")
+                      (= (get declared "name") "Number")))))
+      declared
+    :else
+      (let [classes (mapv (fn [t :- Any] :- String (numeric-class t)) arg-types)]
+        (cond
+          (boolean (some (fn [c :- Any] :- Bool (= c "other")) classes)) declared
+          (boolean (some (fn [c :- Any] :- Bool (= c "float")) classes)) FLOAT-TYPE
+          (boolean (some (fn [c :- Any] :- Bool (= c "number")) classes)) NUMBER-TYPE
+          :else INT-TYPE))))
 
 ;; --- polymorphic helpers (bindings is an atom holding a String->type map) -----
 
@@ -373,7 +433,7 @@
    "map?"     (make-fn [ANY] nil (make-prim "Bool"))
    "vector?"  (make-fn [ANY] nil (make-prim "Bool"))
    "empty?"   (make-fn [ANY] nil (make-prim "Bool"))
-   "not"      (make-fn [ANY] nil (make-prim "Bool"))
+   "not"      (make-fn [(make-prim "Bool")] nil (make-prim "Bool"))
    "="        (make-fn [ANY] ANY (make-prim "Bool"))
    "not="     (make-fn [ANY] ANY (make-prim "Bool"))
    ">"        (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool"))
@@ -382,9 +442,9 @@
    "<="       (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool"))
    "and"      (make-fn [] ANY ANY)
    "or"       (make-fn [] ANY ANY)
-   "+"        (make-fn [] ANY (make-prim "Int"))
-   "-"        (make-fn [ANY] ANY (make-prim "Int"))
-   "*"        (make-fn [] ANY (make-prim "Int"))
+   "+"        (make-fn [] ANY ANY)
+   "-"        (make-fn [ANY] ANY ANY)
+   "*"        (make-fn [] ANY ANY)
    "max"      (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE)
    "min"      (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE)
    "inc"      (make-fn [NUMBER-TYPE] nil INT-TYPE)
@@ -411,7 +471,7 @@
    "map"      (make-fn [ANY] ANY ANY)
    "mapv"     MAPV-POLY
    "filter"   (make-fn [ANY ANY] nil ANY)
-   "filterv"  (make-fn [ANY ANY] nil ANY)
+   "filterv"  FILTERV-POLY
    "remove"   (make-fn [ANY ANY] nil ANY)
    "some"     (make-fn [ANY ANY] nil ANY)
    "every?"   (make-fn [ANY ANY] nil (make-prim "Bool"))})
@@ -699,53 +759,69 @@
 
 ;; --- last-expr-type! ----------------------------------------------------------
 
+;; A bare symbol in NON-FINAL (statement) position that resolves to nothing is
+;; almost always a binding name swallowed into a previous `let` binding's value
+;; by an imbalanced paren (net parens still balance, so the reader accepts it).
+;; Mirror check.rkt last-expr-type and make it loud. Qualified (`mod/name`) and
+;; dotted (`config.x`) names are exempted — the oracle canonicalizes those
+;; against the env / nixos schema, resolution selfhost doesn't model here.
+(defn bare-swallowed-ref? [e :- Any env :- Any] :- Bool
+  (and (= (get e "node") "ref")
+       (nil? (get env (get e "name")))
+       (nil? (str/index-of (get e "name") "/"))
+       (nil? (str/index-of (get e "name") "."))))
+
 (defn last-expr-type! [body :- (Vec Any) env :- Any] :- Any
-  (if (= (count body) 0)
-    ANY
-    (reduce (fn [acc :- Any e :- Any] :- Any (infer-expr! e env)) ANY body)))
+  (let [n (count body)]
+    (if (= n 0)
+      ANY
+      (reduce (fn [acc :- Any i :- Int] :- Any
+                (let [e (nth body i)]
+                  (when (and (< i (- n 1)) (bare-swallowed-ref? e env))
+                    (emit-diag! (str "beagle: bare symbol `" (get e "name")
+                                     "` in non-final statement position resolves to nothing"
+                                     " and has no effect — usually a binding name swallowed by"
+                                     " an imbalanced paren in a previous `let` binding's value."
+                                     " Check the enclosing `let` bindings for a missing `)`."
+                                     " If you meant a call, write `(" (get e "name") " ...)`.")))
+                  (infer-expr! e env)))
+              ANY (range n)))))
 
 ;; --- check-args! --------------------------------------------------------------
 
-(defn check-args! [fn-name :- String fn-t :- Any args :- (Vec Any) env :- Any] :- Nil
+;; Returns the vector of inferred argument types (in order), so callers can
+;; refine numeric-preserving returns without re-inferring (which would duplicate
+;; nested-call diagnostics) — mirrors check.rkt check-args. A variadic call
+;; infers every arg (fixed slots vs their param type, trailing slots vs rest);
+;; a fixed-arity call infers only the first n-fixed args (oracle's parallel
+;; for/list stops at the shorter of params/args), so extra args aren't inferred.
+;; The per-arg message is "arg N" for BOTH fixed and rest positions (oracle
+;; check-one-arg does not distinguish a "rest arg").
+(defn check-args! [fn-name :- String fn-t :- Any args :- (Vec Any) env :- Any] :- (Vec Any)
   (let [fixed (get fn-t "params")
         rest-t (get fn-t "rest")
         n-fixed (count fixed)
-        n-args (count args)]
+        n-args (count args)
+        check-slot (fn [i :- Int] :- Any
+                     (let [actual (infer-expr! (nth args i) env)
+                           expected (if (< i n-fixed) (nth fixed i) rest-t)]
+                       (when (not (type-compatible? actual expected))
+                         (emit-diag! (str "beagle: call to " fn-name ": arg " (+ i 1)
+                                          " expected " (type->string expected)
+                                          ", got " (type->string actual))))
+                       actual))]
     (cond
       (not (nil? rest-t))
         (do (when (< n-args n-fixed)
               (emit-diag! (str "beagle: call to " fn-name ": expected at least "
                                n-fixed " arg(s), got " n-args)))
-            (let [n-check (if (< n-fixed n-args) n-fixed n-args)]
-              (doseq [i (range n-check)]
-                (let [expected (nth fixed i)
-                      actual (infer-expr! (nth args i) env)]
-                  (when (not (type-compatible? actual expected))
-                    (emit-diag! (str "beagle: call to " fn-name ": arg " (+ i 1)
-                                     " expected " (type->string expected)
-                                     ", got " (type->string actual)))))))
-            (doseq [i (range (- n-args n-fixed))]
-              (let [actual (infer-expr! (nth args (+ n-fixed i)) env)]
-                (when (not (type-compatible? actual rest-t))
-                  (emit-diag! (str "beagle: call to " fn-name ": rest arg "
-                                   (+ n-fixed i 1)
-                                   " expected " (type->string rest-t)
-                                   ", got " (type->string actual))))))
-            nil)
+            (mapv check-slot (range n-args)))
 
       :else
         (do (when (not= n-fixed n-args)
               (emit-diag! (str "beagle: call to " fn-name ": expected "
                                n-fixed " arg(s), got " n-args)))
-            (let [n-check (if (< n-fixed n-args) n-fixed n-args)]
-              (doseq [i (range n-check)]
-                (let [expected (nth fixed i)
-                      actual (infer-expr! (nth args i) env)]
-                  (when (not (type-compatible? actual expected))
-                    (emit-diag! (str "beagle: call to " fn-name ": arg " (+ i 1)
-                                     " expected " (type->string expected)
-                                     ", got " (type->string actual)))))))
-            nil))))
+            (mapv check-slot (range (if (< n-fixed n-args) n-fixed n-args)))))))
 
 ;; --- infer-cond-clauses! ------------------------------------------------------
 
@@ -1286,8 +1362,8 @@
                     (do (doseq [a args] (infer-expr! a env))
                         ANY)))
               (and (not (nil? raw-type)) (fn-type? raw-type))
-                (do (check-args! fn-name raw-type args env)
-                    (get raw-type "ret"))
+                (let [arg-types (check-args! fn-name raw-type args env)]
+                  (numeric-refine fn-name arg-types (get raw-type "ret")))
               (and (not (nil? raw-type)) (union-type? raw-type)
                    (every? (fn [m :- Any] :- Bool (fn-type? m)) (get raw-type "members")))
                 (let [n-args (count args)
