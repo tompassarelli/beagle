@@ -364,7 +364,13 @@
 ;; (-, ?, !, <, >, *, +, /, =, ., :, &, %, $, alphanumerics) never need bars.
 (define (symbol-needs-bars? s)
   (or (= (string-length s) 0)
-      (regexp-match? #rx"[][ \t\r\n(){}\"|;\\\\,`']" s)))
+      ;; A LEADING `'` re-reads as the quote prefix, so such a name is not a bare
+      ;; symbol. But `'` mid/trailing is an ordinary constituent (EXP-025 G6 — `v'`,
+      ;; `x''`, `f'x`) and MUST stay bare: escaping it to `v\'` is broken, because
+      ;; the reader's `\` is a terminating char-literal macro (`v\'` → symbol `v` +
+      ;; char `'`). So flag `'` only in leading position; elsewhere it needs nothing.
+      (char=? (string-ref s 0) #\')
+      (regexp-match? #rx"[][ \t\r\n(){}\"|;\\\\,`]" s)))
 (define (symbol->src d)
   (define s (symbol->string d))
   (cond

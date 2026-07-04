@@ -94,6 +94,45 @@
                (regexp-match? #rx"quasiquote" (exn-message e))))
         (lambda () (read-beagle "`"))))))
 
+;; EXP-025 G6 — primed symbols. `'` is a legal symbol constituent in Clojure
+;; EXCEPT in leading position (where it is the quote reader macro). The base
+;; readtable registers `'` as a NON-terminating macro so it fires only at token
+;; start; mid/trailing it is an ordinary symbol character. A `terminating-macro`
+;; here split `v'` into symbol `v` + a spurious quote of the next form.
+(define primed-symbol-suite
+  (test-suite "beagle base readtable: primed symbols (EXP-025 G6)"
+
+    (test-case "v' reads as the single symbol v' (not v + quote)"
+      (check-equal? (read-beagle "v'") (string->symbol "v'")))
+
+    (test-case "x'' reads as the single symbol x''"
+      (check-equal? (read-beagle "x''") (string->symbol "x''")))
+
+    (test-case "f'x reads as the single symbol f'x (embedded prime)"
+      (check-equal? (read-beagle "f'x") (string->symbol "f'x")))
+
+    (test-case "primed binding in a let: (let [v' (f v)] v')"
+      (check-equal? (read-beagle "(let [v' (f v)] v')")
+                    (list 'let (list '#%brackets (string->symbol "v'") '(f v))
+                          (string->symbol "v'"))))
+
+    (test-case "primed symbol terminates at whitespace: (a v' b) reads as three items"
+      (check-equal? (read-beagle "(a v' b)")
+                    (list 'a (string->symbol "v'") 'b)))
+
+    ;; UNCHANGED: a LEADING `'` is still the quote reader macro.
+    (test-case "'x still reads as (quote x) — leading quote unchanged"
+      (check-equal? (read-beagle "'x") '(quote x)))
+
+    (test-case "(quote x) reads as (quote x) — explicit quote unchanged"
+      (check-equal? (read-beagle "(quote x)") '(quote x)))
+
+    (test-case "'(a b) still reads as (quote (a b)) — leading quote on a list"
+      (check-equal? (read-beagle "'(a b)") '(quote (a b))))
+
+    (test-case "leading quote inside a form: (a 'b c) reads as (a (quote b) c)"
+      (check-equal? (read-beagle "(a 'b c)") '(a (quote b) c)))))
+
 (define nix-suite
   (test-suite "beagle/nix readtable: quasiquote + Clojure-whitespace comma"
     ;; nix inherits the base readtable, so `,` is WHITESPACE here too (coherent
@@ -112,4 +151,5 @@
 
 (module+ test
   (run-tests base-suite)
+  (run-tests primed-symbol-suite)
   (run-tests nix-suite))

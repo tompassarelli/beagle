@@ -108,4 +108,22 @@
    ;; G5 var-quote `#'form`
    (gap-case "G5 var-quote #'foo"
              "(def v #'foo)\n"
-             #:has '("#'foo") #:no '("(syntax "))))
+             #:has '("#'foo") #:no '("(syntax "))
+
+   ;; G6 primed symbols (EXP-025 ring-core). A trailing/embedded `'` is a legal
+   ;; Clojure symbol char; the reader must keep `v'` as ONE symbol (not `v` +
+   ;; quote), and the renderer must print it BARE (`v'`, never `v\'` — an escape
+   ;; the reader would re-split at `\`). The exact ring params.clj construct:
+   (gap-case "G6 primed let-binding (v')"
+             "(defn assoc-param-map [req k v] (some-> req (assoc k (if-let [v' (req k)] (reduce-kv assoc v' v) v))))\n"
+             #:has '("[v' (req k)]" "(reduce-kv assoc v' v)")
+             #:no '("(quote " "v\\'"))
+   (gap-case "G6 double-primed symbol (x'')"
+             "(def y x'')\n"
+             #:has '("x''") #:no '("(quote " "x\\'"))
+   ;; UNCHANGED: a LEADING quote is still normalized to (quote …) (the renderer
+   ;; does not invert 1-arg quote — pre-existing, valid Clojure), and `x''` in a
+   ;; quoted context stays intact.
+   (gap-case "G6 leading quote unchanged ('sym → (quote sym))"
+             "(def q 'sym)\n"
+             #:has '("(quote sym)") #:no '("sym\\'"))))

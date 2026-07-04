@@ -435,7 +435,14 @@
     #\} 'terminating-macro
                             (lambda (ch port src line col pos)
                               (error 'beagle "unexpected `}`"))
-    #\' 'terminating-macro quote-reader
+    ;; `'` is NON-terminating: it fires the quote-reader only when it STARTS a
+    ;; token (`'x` → (quote x)), and is an ordinary symbol constituent mid-token
+    ;; (`v'`, `x''`, `f'x` → one symbol). This matches Clojure, where `'` is a
+    ;; legal symbol character except in leading position. A `terminating-macro`
+    ;; here split primed bindings like `v'` into symbol `v` + a spurious quote of
+    ;; the next form (EXP-025 G6). Mirrors `#` below (also non-terminating). The
+    ;; self-hosted reader already agrees: reader.bclj's `delimiter?` excludes `'`.
+    #\' 'non-terminating-macro quote-reader
     #\` 'terminating-macro quasiquote-reader
     ;; `,` is WHITESPACE in Clojure (ignored), NOT unquote. Unquote is `~` /
     ;; `~@` (Clojure's syntax-quote unquote). Beagle had the CL-style `,`=unquote
