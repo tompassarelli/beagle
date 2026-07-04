@@ -3,8 +3,6 @@
 # Each line is a 12-hex short-sig (harness.clj short-sig) of a KNOWN-BENIGN
 # divergence bucket: the checker-message-precision tail (both compilers REJECT,
 # differing only in error-message wording — :diagnostic / :acceptance class).
-# Sourced from the 20k-case campaign on main 2026-07-04; shrunk repros live in
-# fuzz/repros/checker-tail-20260704/<sig>.bclj.
 #
 # The nightly gate (fuzz/harness/gate.clj) treats a bucket as FATAL when:
 #   - class is :emission  (backend output divergence — ALWAYS fatal, never listed here), OR
@@ -14,24 +12,10 @@
 # To allowlist a newly-triaged benign tail bucket: confirm it is NOT :emission,
 # then add its signature (the repro filename stem) on its own line below.
 # Blank lines and #-comments are ignored.
-044333dc85bd
-1c04be588e62
-20b1c0026a1f
-3a907432853b
-3d41f6a456b1
-42ad2d259ad2
-509a72f87c74
-5b7b4c8034e8
-62bd65163f0f
-677470581f1a
-6f151ff4eece
-7e9a14983210
-94c783024a2d
-9e37d4c1f2b7
-c12eeda88def
-e6a120c21932
-f810eec7c391
-fbeb9210ee4d
-c7786bec88f8
-f036de687e29
-1ecc23512d15
+#
+# EMPTY — as of the 2026-07-04 union-member-narrowing root fix (selfhost check.bclj
+# now byte-matches the Racket oracle across the whole checker-precision family: see
+# fuzz/repros/checker-tail-20260704/ + the verify-selfhost.sh 5b regression rung).
+# The prior 21 allowlisted sigs are all resolved. Re-add a signature ONLY after
+# triaging a genuinely new divergence per the rule above; a growing list here is
+# the smell that the checkers have drifted apart again.
