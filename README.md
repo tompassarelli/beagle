@@ -2,11 +2,11 @@
 
 # Beagle
 
-**Typed Clojure that compiles to idiomatic Clojure, ClojureScript, JavaScript, Nix, and Odin.**
+**Typed Clojure that compiles to idiomatic Clojure, JavaScript, Nix, and Odin.**
 One AST, many back-ends — never a lowest-common-denominator transpile.
 
 [![license](https://img.shields.io/badge/license-Apache_2.0-blue.svg)](LICENSE)
-[![Racket](https://img.shields.io/badge/Racket-8.x-9F1D20.svg)](https://racket-lang.org)
+[![nix](https://img.shields.io/badge/nix-flake-5277C3.svg)](flake.nix)
 [![status](https://img.shields.io/badge/status-pre--1.0-orange.svg)](#what-it-isnt)
 
 </div>
@@ -24,6 +24,12 @@ seed is that compiler's own emitted output, and CI holds the pair to a
 byte-level bootstrap fixpoint (`bin/beagle-remint`) plus byte-agreement with
 the original Racket compiler, which now serves as the conformance oracle
 (`bin/beagle-certify`).
+
+On top of the fixed corpus, a nightly differential-fuzz campaign (`fuzz/`,
+`.github/workflows/fuzz-nightly.yml`) generates fresh programs and holds the
+two compilers to byte-exact agreement — acceptance, diagnostics, and emitted
+output — with an **empty** exemption list. Any divergence, of any class, is a
+red build with a shrunk repro attached.
 
 **Stage0 is a native binary.** The canonical self-hosted compiler ships as a
 self-contained GraalVM native-image (`self-host/native/beagle-selfhost`), built
@@ -122,20 +128,20 @@ time; wrong-typed values fail at type-check time.
 ## Targets
 
 One AST, idiomatic output per backend — Nix as lazy attrsets, Clojure as eager
-maps, ClojureScript as Clojure-shaped JS, Odin as structs and procs.
+maps, JavaScript as native arrays and arrows, Odin as structs and procs.
 
-| Target        | Status                                |
-|---------------|---------------------------------------|
-| Clojure       | Live                                  |
-| ClojureScript | Live                                  |
-| JavaScript    | Live                                  |
-| Nix           | Live                                  |
-| Odin          | Live                                  |
+| Target     | Status                                                        |
+|------------|---------------------------------------------------------------|
+| Clojure    | Live — self-hosted, oracle-certified, fuzz-guarded            |
+| JavaScript | Live — self-hosted, oracle-certified, fuzz-guarded            |
+| Nix        | Live — self-hosted, oracle-certified, fuzz-guarded            |
+| Odin       | Live — Racket emitter (self-host port pending conformance goldens) |
 
 Targets are removed, not deprecated, when they stop earning their place —
-reviving one means re-wiring `emit.rkt` and proving it against a real consumer,
-not flipping a switch. (SQL was removed 2026-06-28 — unused, rotting; recover
-from tag `sql-archive-2026-06-28`.)
+reviving one means re-wiring the emitter and proving it against a real
+consumer, not flipping a switch. (SQL removed 2026-06-28 — unused, rotting;
+tag `sql-archive-2026-06-28`. ClojureScript removed 2026-07-04 — zero users,
+redundant against the native JS target; tag `cljs-final`.)
 
 ## How it compiles
 
@@ -165,7 +171,7 @@ A taste of the surface — every snippet here passes `bin/beagle syntax`:
 
 ;; Clojure threading family, reader conditionals, canonical keyword access
 (-> 1 (+ 2) (* 3))
-(def msg #?(:clj "hello" :cljs "hi" :nix "bonjour"))
+(def msg #?(:clj "hello" :nix "bonjour" :default "hi"))
 (:name {:name "ada"})
 ```
 
@@ -174,7 +180,7 @@ A taste of the surface — every snippet here passes `bin/beagle syntax`:
 - **`defmacro` + quasi-quote / unquote / unquote-splicing.**
 - **Clojure threading family:** `->`, `->>`, `as->`, `cond->`, `cond->>`,
   `some->`, `some->>`.
-- **Reader conditionals** `#?(:clj … :cljs … :nix … :default …)` and `#?@(…)`.
+- **Reader conditionals** `#?(:clj … :nix … :default …)` and `#?@(…)`.
 - **Quoted containers** `'[…]`, `'{…}`, `'#{…}` self-evaluate.
 - **Sourcemap fidelity:** the author's position survives every
   canonicalization, guarded by a dedicated bench.
@@ -195,11 +201,21 @@ A taste of the surface — every snippet here passes `bin/beagle syntax`:
 
 ## Getting started
 
-Requires Racket 8.x+.
+**Just compile something** — the stage0 native binary needs no Racket, no JVM:
 
 ```sh
-git clone https://github.com/Autonymy/beagle
+git clone https://github.com/tompassarelli/beagle
 cd beagle
+nix build .#beagle-selfhost
+./result/bin/beagle-selfhost emit --target js hello.bjs   # ~7ms startup
+```
+
+**Hack on the compiler** — the flake pins everything, including the exact
+Racket the oracle compiles under (never use a system Racket here; see
+`bin/_beagle-racket`):
+
+```sh
+direnv allow                        # flake devshell
 raco pkg install --link beagle-lib/ beagle-test/ beagle/
 bin/beagle test --active-only       # active tier
 ```
@@ -234,7 +250,7 @@ Deeper dev tools stay as `bin/beagle-*` (blame, specfix, trace, cascade).
 
 The `bin/beagle-claims` / `bin/beagle-roundtrip` backends project Beagle source
 into a claim graph for Fram's
-[Chartroom](https://github.com/Autonymy/fram/tree/main/chartroom). The claim log
+[Chartroom](https://github.com/tompassarelli/fram/tree/main/chartroom). The claim log
 is canonical there — the source text is a view onto the claims, not a graph
 derived from text after the fact.
 
@@ -273,4 +289,4 @@ See [`CLAUDE.md`](CLAUDE.md) for the full rule set.
 
 ## License
 
-MIT. See [`LICENSE`](LICENSE).
+Apache 2.0. See [`LICENSE`](LICENSE).
