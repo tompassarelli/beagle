@@ -166,6 +166,16 @@
              "(def o #js {:a 1})\n"
              #:has '("#js {:a 1}") #:no '("#%js"))
 
+   ;; G12 #^ legacy metadata shorthand — reads as (#%meta …), same as `^`, and
+   ;; renders NORMALIZED to `^` (the legacy #^ spelling is not preserved; #^ → ^
+   ;; is the correct, desired inversion since both mean identical metadata).
+   (gap-case "G12 #^String param tag renders as ^String"
+             "(defn f [#^String s] s)\n"
+             #:has '("^String") #:no '("#^" "#%meta"))
+   (gap-case "G12 #^{:tag} longhand renders as ^{:tag …}"
+             "(def #^{:tag String} x 1)\n"
+             #:has '("^{:tag String}") #:no '("#^" "#%meta"))
+
    ;; G11 symbolic values ##Inf / ##-Inf / ##NaN
    (gap-case "G11 ##NaN ##Inf ##-Inf"
              "(def s [##NaN ##Inf ##-Inf])\n"

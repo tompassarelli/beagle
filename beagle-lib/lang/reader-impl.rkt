@@ -185,6 +185,14 @@
      (if src
        (datum->syntax #f result (vector src line col pos #f))
        result)]
+    ;; #^ legacy metadata shorthand (pre-Clojure-1.2, still legal): `#^META FORM`
+    ;; behaves EXACTLY like `^META FORM`. Consume the `^` and delegate to the same
+    ;; meta-reader, yielding an identical (#%meta META FORM) datum — so render
+    ;; inverts it to `^` (normalizing #^ → ^ is CORRECT and desired; the legacy
+    ;; spelling is not preserved). meta-reader's `ch` arg is unused.
+    [(and (char? next) (char=? next #\^))
+     (read-char port)  ; consume ^
+     (meta-reader #\^ port src line col pos)]
     ;; #js tagged literal (ClojureScript JS object/array). Kept as (#%js form),
     ;; inverted to `#js form` on render. Guard the token so `#j…`/`#justfoo` fall
     ;; through to the default reader — fire only on `#js` + delimiter/open/EOF.

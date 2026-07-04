@@ -102,6 +102,18 @@
                          (rd "#jsx"))
                        '(#%js x))))
 
+;; G12 #^ legacy metadata shorthand (pre-Clojure-1.2, still legal) — behaves
+;; EXACTLY like `^`, producing the same (#%meta …) datum (render normalizes #^ → ^).
+(test-case "#^:keyword reads identically to ^:keyword"
+  (check-equal? (rd "#^:dynamic *x*") '(#%meta :dynamic *x*)))
+(test-case "#^{:map} longhand reads the map, same as ^{…}"
+  (check-equal? (rd "#^{:tag String} x") '(#%meta (#%map :tag String) x)))
+(test-case "#^String tag reads as (#%meta String …)"
+  (check-equal? (rd "#^String s") '(#%meta String s)))
+(test-case "#^ with no following form errors"
+  (check-exn #rx"metadata"
+             (lambda () (rd "#^:dynamic"))))
+
 ;; G11 ##Inf / ##-Inf / ##NaN symbolic values — kept as symbolic name, not a double
 (test-case "##Inf reads as (#%symbolic-val Inf)"
   (check-equal? (rd "##Inf") '(#%symbolic-val Inf)))
