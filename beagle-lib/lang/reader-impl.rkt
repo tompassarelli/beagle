@@ -127,6 +127,13 @@
     (datum->syntax #f result (vector src line col pos #f))
     result))
 
+;; Reader-internal marker heads (mirror #%brackets/#%map/#%set): un-spoofable in
+;; user source, so no collision with a real identifier. The render inversions in
+;; claims-roundtrip.rkt key off the SAME interned symbols.
+(define %symbolic-val (string->symbol "#%symbolic-val"))  ; ##Inf / ##-Inf / ##NaN
+(define %discard      (string->symbol "#%discard"))       ; #_form
+(define %js           (string->symbol "#%js"))            ; #js form
+
 (define (hash-dispatch ch port src line col pos)
   (define next (peek-char port))
   (cond
@@ -148,6 +155,56 @@
         (read-reader-conditional-body port src line col pos #t)]
        [else
         (read-reader-conditional-body port src line col pos #f)])]
+    ;; ## symbolic values: ##Inf / ##-Inf / ##NaN (Clojure symbolic-value reader).
+    ;; Keep the symbolic NAME, not a +inf.0/+nan.0 double — a plain double datum
+    ;; could not re-emit the `##Name` source on render.
+    [(and (char? next) (char=? next #\#))
+     (read-char port)  ; consume the second #
+     (define name
+       (parameterize ([current-readtable beagle-readtable])
+         (if src (read-syntax src port) (read port))))
+     (define nsym (if (syntax? name) (syntax-e name) name))
+     (unless (memq nsym '(Inf -Inf NaN))
+       (error 'beagle
+              "## symbolic value: expected ##Inf, ##-Inf, or ##NaN, got ##~a" nsym))
+     (define result (list %symbolic-val nsym))
+     (if src
+       (datum->syntax #f result (vector src line col pos #f))
+       result)]
+    ;; #_ discard reader macro. Clojure DROPS the next form; beagle KEEPS it as a
+    ;; (#%discard form) datum — text is a view, no silent loss — inverted back to
+    ;; `#_form` on render.
+    [(and (char? next) (char=? next #\_))
+     (read-char port)  ; consume _
+     (define form
+       (parameterize ([current-readtable beagle-readtable])
+         (if src (read-syntax src port) (read port))))
+     (when (eof-object? form)
+       (error 'beagle "#_ discard: expected a form to follow"))
+     (define result (list %discard form))
+     (if src
+       (datum->syntax #f result (vector src line col pos #f))
+       result)]
+    ;; #js tagged literal (ClojureScript JS object/array). Kept as (#%js form),
+    ;; inverted to `#js form` on render. Guard the token so `#j…`/`#justfoo` fall
+    ;; through to the default reader — fire only on `#js` + delimiter/open/EOF.
+    [(and (char? next) (char=? next #\j)
+          (let ([la (peek-string 3 0 port)])
+            (and (string? la) (>= (string-length la) 2)
+                 (string=? (substring la 0 2) "js")
+                 (or (= (string-length la) 2)
+                     (let ([c (string-ref la 2)])
+                       (or (char-whitespace? c) (memv c '(#\[ #\{ #\( #\,))))))))
+     (read-string 2 port)  ; consume js
+     (define form
+       (parameterize ([current-readtable beagle-readtable])
+         (if src (read-syntax src port) (read port))))
+     (when (eof-object? form)
+       (error 'beagle "#js: expected a form (vector/map) to follow"))
+     (define result (list %js form))
+     (if src
+       (datum->syntax #f result (vector src line col pos #f))
+       result)]
     [(and (char? next) (char=? next #\{))
      (read-char port)
      (define items (read-until-close port #\}))

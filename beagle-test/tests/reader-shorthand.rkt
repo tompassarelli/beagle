@@ -73,3 +73,42 @@
 (test-case "^ with no following form errors"
   (check-exn #rx"metadata"
              (lambda () (rd "^:dynamic"))))
+
+;; --- EXP-025 G8/G10/G11 reader macros (malli) ----------------------------
+;; The reader keeps each as an un-spoofable #%-marker datum; the renderer
+;; (claims-roundtrip.rkt) inverts it back to the surface glyph.
+
+;; G8 #_ discard — Clojure DROPS the next form; beagle KEEPS it (text is a view).
+(test-case "#_ discard keeps the form as (#%discard …)"
+  (check-equal? (rd "[1 #_2 3]")
+                '(#%brackets 1 (#%discard 2) 3)))
+(test-case "#_ discard of a list form"
+  (check-equal? (rd "#_(a b c)")
+                '(#%discard (a b c))))
+(test-case "#_ with no following form errors"
+  (check-exn #rx"discard"
+             (lambda () (rd "#_"))))
+
+;; G10 #js tagged literal
+(test-case "#js [] reads as (#%js (#%brackets))"
+  (check-equal? (rd "#js []") '(#%js (#%brackets))))
+(test-case "#js {…} reads as (#%js (#%map …))"
+  (check-equal? (rd "#js {:a 1}") '(#%js (#%map :a 1))))
+(test-case "#js is guarded — #jsx is NOT the js tagged literal"
+  ;; the 3rd char is a symbol constituent, so the js arm must not fire;
+  ;; it falls through to the default reader (reads `#jsx…` some other way,
+  ;; or errors — either way it is NOT (#%js …)).
+  (check-false (equal? (with-handlers ([exn:fail? (lambda (_) 'threw)])
+                         (rd "#jsx"))
+                       '(#%js x))))
+
+;; G11 ##Inf / ##-Inf / ##NaN symbolic values — kept as symbolic name, not a double
+(test-case "##Inf reads as (#%symbolic-val Inf)"
+  (check-equal? (rd "##Inf") '(#%symbolic-val Inf)))
+(test-case "##-Inf reads as (#%symbolic-val -Inf)"
+  (check-equal? (rd "##-Inf") '(#%symbolic-val -Inf)))
+(test-case "##NaN reads as (#%symbolic-val NaN)"
+  (check-equal? (rd "##NaN") '(#%symbolic-val NaN)))
+(test-case "## with an unknown symbolic name errors"
+  (check-exn #rx"symbolic value"
+             (lambda () (rd "##Bogus"))))

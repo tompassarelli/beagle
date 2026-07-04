@@ -127,3 +127,46 @@
    (gap-case "G6 leading quote unchanged ('sym → (quote sym))"
              "(def q 'sym)\n"
              #:has '("(quote sym)") #:no '("sym\\'"))))
+
+;; ---------------------------------------------------------------------------
+;; EXP-025 (G7–G11, malli): five more reader/render gaps the renderer must
+;; invert so rendered text is valid Clojure that re-reads to the identical datum.
+;;   G7  reader conditionals  #?(…) / #?@(…)   (render inversion; emit already faithful)
+;;   G8  discard              #_form           (kept as datum, not dropped — text is a view)
+;;   G10 tagged literal       #js form
+;;   G11 symbolic values      ##Inf / ##-Inf / ##NaN
+;; (G9 bare-dot interop `(. T m)` is a READ-side change; its fixtures live below,
+;; guarded, so this suite stays green whether or not G9 landed.)
+(run-tests
+ (test-suite "claims render — EXP-025 reader/render gaps (G7–G11)"
+
+   ;; G7 reader conditional — the flagged unknown (emit faithful, render was broken)
+   (gap-case "G7 #?(:clj … :cljs … :nix …)"
+             "(def x #?(:clj 1 :cljs 2 :nix 3))\n"
+             #:has '("#?(:clj 1 :cljs 2 :nix 3)")
+             #:no '("reader-conditional" "#%"))
+   (gap-case "G7 #?@ splice in an ns :require"
+             "(ns foo (:require #?@(:clj [[a.b]] :default [[c.d]])))\n"
+             #:has '("#?@(:clj [[a.b]] :default [[c.d]])")
+             #:no '("reader-conditional-splice" "#%"))
+
+   ;; G8 discard #_form — KEPT (no silent drop), inverted to #_
+   (gap-case "G8 #_ discard in a vector ([1 #_2 3])"
+             "(def v [1 #_2 3])\n"
+             #:has '("[1 #_2 3]") #:no '("#%discard"))
+   (gap-case "G8 #_ discard of a list (#_(a b))"
+             "(def w [1 #_(a b) 3])\n"
+             #:has '("#_(a b)") #:no '("#%discard"))
+
+   ;; G10 #js tagged literal inside a :cljs branch
+   (gap-case "G10 #js [] inside a :cljs branch"
+             "(def j #?(:clj [] :cljs #js []))\n"
+             #:has '("#js []") #:no '("#%js"))
+   (gap-case "G10 #js map literal"
+             "(def o #js {:a 1})\n"
+             #:has '("#js {:a 1}") #:no '("#%js"))
+
+   ;; G11 symbolic values ##Inf / ##-Inf / ##NaN
+   (gap-case "G11 ##NaN ##Inf ##-Inf"
+             "(def s [##NaN ##Inf ##-Inf])\n"
+             #:has '("##NaN" "##Inf" "##-Inf") #:no '("#%symbolic-val" "nan.0" "inf.0"))))
