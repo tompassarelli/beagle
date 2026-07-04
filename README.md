@@ -140,7 +140,7 @@ from tag `sql-archive-2026-06-28`.)
 ## How it compiles
 
 ```
-.bclj / .bcljs / .bjs / .bnix / .bodin  ──▶  parse ──▶ check ──▶ emit  ──▶  .clj / .cljs / .js / .nix / .odin
+.bclj / .bjs / .bnix / .bodin  ──▶  parse ──▶ check ──▶ emit  ──▶  .clj / .js / .nix / .odin
                                                           ▲
                                             macros, schema, stdlib, type narrowing
                                             all share one AST + diagnostic path
@@ -245,7 +245,7 @@ derived from text after the fact.
 
 - `beagle-lib/private/parse.rkt` — surface form set; the source of truth.
 - `beagle-lib/private/check.rkt` — type checker.
-- `beagle-lib/private/emit-{clj,cljs,js,nix,odin}.rkt` — live emitters;
+- `beagle-lib/private/emit-{clj,js,nix,odin}.rkt` — live emitters;
   `beagle-lib/private/dormant/` holds the parked ones.
 - `beagle-lib/private/nixos-schema.rkt` — the typed NixOS-option environment.
 - `beagle-lib/private/diagnostic-kind.rkt` — the `cause-class?` taxonomy.

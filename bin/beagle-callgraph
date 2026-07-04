@@ -50,7 +50,7 @@ EDNS=(); i=0
 while IFS= read -r f; do
     racket "$RT" --emit-edn "$f" > "$WORK/$i.edn" 2>/dev/null
     EDNS+=("$WORK/$i.edn"); i=$((i+1))
-done < <(find "$DIR" -type f \( -name '*.bclj' -o -name '*.bcljs' -o -name '*.bjs' -o -name '*.bnix' -o -name '*.bgl' \) | sort)
+done < <(find "$DIR" -type f \( -name '*.bclj' -o -name '*.bjs' -o -name '*.bnix' -o -name '*.bgl' \) | sort)
 
 if [[ ${#EDNS[@]} -eq 0 ]]; then
     echo "beagle-callgraph: no beagle source files under $DIR" >&2

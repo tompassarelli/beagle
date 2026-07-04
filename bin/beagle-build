@@ -2,19 +2,19 @@
 # beagle-build: compile a beagle source file to target output.
 #
 # Usage:
-#   bin/beagle-build <source.bclj|.bjs|.bnix|.bcljs|.bsql|.bodin> [output]
+#   bin/beagle-build <source.bclj|.bjs|.bnix|.bsql|.bodin> [output]
 #
 # If the output path is omitted, it is derived from the namespace declared
 # in the source via (ns ...) and dropped under .beagle-out/ (gitignored, so
 # throwaway emit never pollutes the tracked tree). Override the output root
 # with BEAGLE_OUT (e.g. BEAGLE_OUT=runtime/src to build into the runtime project).
-# Extension is determined by target: .clj (default), .cljs, .js, .py, .nix.
+# Extension is determined by target: .clj (default), .js, .py, .nix.
 
 set -euo pipefail
 source "$(dirname "$0")/_beagle-racket"
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
-    echo "usage: beagle-build <source.bclj|.bjs|.bnix|.bcljs> [output]" >&2
+    echo "usage: beagle-build <source.bclj|.bjs|.bnix> [output]" >&2
     exit 2
 fi
 
@@ -29,7 +29,6 @@ fi
 ## detect target from file extension, then fall back to source content
 ext="clj"
 case "$src" in
-    *.bcljs) ext="cljs" ;;
     *.bjs)   ext="js" ;;
     *.bnix)  ext="nix" ;;
     *.bsql)  ext="sql" ;;
@@ -39,9 +38,7 @@ case "$src" in
     *.bodin) ext="odin" ;;
     *)
         # Legacy .bgl/.rkt: detect from file content
-        if grep -qE '^\(define-target[[:space:]]+cljs\)' "$src" 2>/dev/null; then
-            ext="cljs"
-        elif grep -qE '^\(define-target[[:space:]]+js\)' "$src" 2>/dev/null || \
+        if grep -qE '^\(define-target[[:space:]]+js\)' "$src" 2>/dev/null || \
              grep -qE '^#lang beagle/js' "$src" 2>/dev/null; then
             ext="js"
         elif grep -qE '^\(define-target[[:space:]]+py\)' "$src" 2>/dev/null || \

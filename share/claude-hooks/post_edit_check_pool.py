@@ -60,7 +60,7 @@ POOL_CONFIG_FILE = f"{PROJECT_DIR}/.beagle/pool.json"
 PORT_FILE = os.environ.get("BEAGLE_DAEMON_PORTFILE", "/var/tmp/beagle-daemon.port")
 
 BEAGLE_EXTENSIONS = frozenset({
-    ".bgl", ".bclj", ".bcljs", ".bjs", ".bnix", ".bsql", ".bpy", ".rkt",
+    ".bgl", ".bclj", ".bjs", ".bnix", ".bsql", ".bpy", ".rkt",
 })
 
 DEFAULT_POOL_CONFIG = {

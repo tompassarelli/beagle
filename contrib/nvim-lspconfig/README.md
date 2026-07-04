@@ -20,7 +20,6 @@ vim.filetype.add({
   extension = {
     bnix  = 'beagle',
     bclj  = 'beagle',
-    bcljs = 'beagle',
     bjs   = 'beagle',
     bpy   = 'beagle',
     bsql  = 'beagle',

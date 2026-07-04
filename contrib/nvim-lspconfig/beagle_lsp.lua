@@ -11,7 +11,7 @@
 --
 --   vim.filetype.add({
 --     extension = {
---       bnix  = 'beagle', bclj  = 'beagle', bcljs = 'beagle',
+--       bnix  = 'beagle', bclj  = 'beagle',
 --       bjs   = 'beagle', bpy   = 'beagle', bsql  = 'beagle',
 --       bgl   = 'beagle',
 --     },
@@ -28,7 +28,6 @@ return {
       -- ftdetect rule above:
       'bnix',
       'bclj',
-      'bcljs',
       'bjs',
       'bpy',
       'bsql',

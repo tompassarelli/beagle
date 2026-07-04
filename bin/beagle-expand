@@ -2,7 +2,7 @@
 # beagle-expand: show a beagle program after macro expansion.
 #
 # Usage:
-#   bin/beagle-expand [--trace] <source.bclj|.bjs|.bnix|.bcljs>
+#   bin/beagle-expand [--trace] <source.bclj|.bjs|.bnix>
 #
 # Prints the expanded beagle source (macros applied, but not yet emitted
 # as Clojure). Use this to audit what your macros actually do.
@@ -19,7 +19,7 @@ if [[ "${1:-}" == "--trace" ]]; then
 fi
 
 if [[ $# -ne 1 ]]; then
-    echo "usage: beagle-expand [--trace] <source.bclj|.bjs|.bnix|.bcljs>" >&2
+    echo "usage: beagle-expand [--trace] <source.bclj|.bjs|.bnix>" >&2
     exit 2
 fi
 

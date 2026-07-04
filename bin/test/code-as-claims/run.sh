@@ -40,7 +40,7 @@ while IFS= read -r f; do
     echo "  DATUM round-trip FAIL: $rel"; rtfail=$((rtfail+1)); fail=1
   fi
   n=$((n+1))
-done < <(find "$SRC" \( -name '*.bclj' -o -name '*.bjs' -o -name '*.bcljs' -o -name '*.bnix' \) | sort)
+done < <(find "$SRC" \( -name '*.bclj' -o -name '*.bjs' -o -name '*.bnix' \) | sort)
 echo "--- $n files imported→(Fram)→exported; datum round-trip failures: $rtfail ---"
 
 # Bonus, the strongest possible result: is the regenerated SOURCE byte-identical?
@@ -48,7 +48,7 @@ srcid=0; srctot=0
 while IFS= read -r f; do
   rel="${f#"$SRC"/}"; srctot=$((srctot+1))
   cmp -s "$f" "$REGEN/$rel" && srcid=$((srcid+1))
-done < <(find "$SRC" \( -name '*.bclj' -o -name '*.bjs' -o -name '*.bcljs' -o -name '*.bnix' \) | sort)
+done < <(find "$SRC" \( -name '*.bclj' -o -name '*.bjs' -o -name '*.bnix' \) | sort)
 echo "--- regenerated SOURCE byte-identical to original: $srcid/$srctot files ---"
 
 # 2. recompile-identity: the emitted PROGRAM must be identical, modulo srcloc debug

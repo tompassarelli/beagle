@@ -2377,7 +2377,7 @@
       [_ (parse-list-form* d subs)])))
 
 ;; `cond->` — conditional thread-first. Desugars to a let-chain / (if …) nodes,
-;; wrapped in threading-marker so the clj/cljs emitter can reconstruct surface.
+;; wrapped in threading-marker so the clj emitter can reconstruct surface.
 (register-combiner! 'cond->
   (lambda (d subs)
     (match d
@@ -3284,7 +3284,7 @@
     ;; threaders lower to let-chains and (if …) nodes.
     ;;
     ;; Each arm wraps its desugared output with `threading-marker` so the
-    ;; clj/cljs emitter can reconstruct the surface form. The marker is
+    ;; clj emitter can reconstruct the surface form. The marker is
     ;; transparent to check.rkt and emit-nix.rkt (both walk the desugared
     ;; field). orig-args is the parsed list of surface arg AST nodes —
     ;; for `->` / `->>` / `some->` / `some->>` it's (init steps...); for

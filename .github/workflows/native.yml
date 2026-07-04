@@ -101,12 +101,12 @@ jobs:
             --notes "$(cat <<'EOF'
           **beagle-selfhost** — stage0 native compiler (GraalVM native-image of the blessed seed).
 
-          The canonical Beagle builder: emits all certified targets (clj / js / nix / cljs) plus module resolution. ~20 MB, ~7 ms startup, zero reflection config.
+          The canonical Beagle builder: emits all certified targets (clj / js / nix) plus module resolution. ~20 MB, ~7 ms startup, zero reflection config.
 
           Byte-for-byte parity gated in CI: native emit == babashka seed emit == Racket oracle emit, over the fram/src corpus.
 
           ```sh
-          ./beagle-selfhost emit FILE.bclj          # also: ast | check | emit-from-ast --target js|nix|cljs
+          ./beagle-selfhost emit FILE.bclj          # also: ast | check | emit-from-ast --target js|nix
           ```
           EOF
           )"

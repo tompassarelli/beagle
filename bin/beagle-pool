@@ -359,7 +359,7 @@ async def handle_socket_client(reader, writer, pool):
 
 def scan_mtimes(directory):
     mtimes = {}
-    for ext in ('.bclj', '.bcljs', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt'):
+    for ext in ('.bclj', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt'):
         for f in glob.glob(os.path.join(directory, "*" + ext)):
             try:
                 mtimes[f] = os.path.getmtime(f)

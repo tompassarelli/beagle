@@ -2,7 +2,7 @@
 # beagle-check: type-check a beagle file without emitting Clojure.
 #
 # Usage:
-#   bin/beagle-check [--agent] [--profile 0|1|2|3] <source.bclj|.bjs|.bnix|.bcljs>
+#   bin/beagle-check [--agent] [--profile 0|1|2|3] <source.bclj|.bjs|.bnix>
 #
 # Exits 0 if the file compiles cleanly, non-zero otherwise. Stderr carries
 # warnings and errors. Stdout is suppressed (no generated Clojure).
@@ -37,7 +37,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$FILE" ]]; then
-    echo "usage: beagle-check [--agent] [--profile 0|1|2|3] <source.bclj|.bjs|.bnix|.bcljs>" >&2
+    echo "usage: beagle-check [--agent] [--profile 0|1|2|3] <source.bclj|.bjs|.bnix>" >&2
     exit 2
 fi
 

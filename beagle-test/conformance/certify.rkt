@@ -11,7 +11,7 @@
 ;;     every golden from it (jolt's regen-corpus role). A later run diffs
 ;;     the live compiler against the blessed snapshot.
 ;;   * Emitted output is additionally VALIDITY-checked against the target's
-;;     own parser (js: bun/node, nix: nix-instantiate, clj/cljs: bb reader)
+;;     own parser (js: bun/node, nix: nix-instantiate, clj: bb reader)
 ;;     — this is what catches the silent-miscompile class, where output
 ;;     matches the golden but is not even parseable on the target.
 ;;   * Buckets per row:

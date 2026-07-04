@@ -28,7 +28,7 @@ Defn param-folding policy:
   fills in for bare-named params; if both sides give a type, the existing
   defn-side annotation wins (it's the more local fact).
 
-Both .bclj and .bcljs are handled identically. .rkt test files are also
+.bclj files are handled. .rkt test files are also
 swept for `'(claim NAME T)`/`'(def NAME V)` paired-quoted forms.
 """
 
@@ -616,7 +616,7 @@ def main():
     paths = []
     for arg in sys.argv[1:]:
         if os.path.isdir(arg):
-            for ext in ('bclj', 'bcljs', 'rkt', 'bnix'):
+            for ext in ('bclj', 'rkt', 'bnix'):
                 paths.extend(glob.glob(os.path.join(arg, '**', f'*.{ext}'),
                                        recursive=True))
         else:

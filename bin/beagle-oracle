@@ -68,7 +68,7 @@ work_dir = sys.argv[4]
 out_file = sys.argv[5]
 diff_dir = sys.argv[6]
 
-BEAGLE_EXTENSIONS = ('.bclj', '.bcljs', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt')
+BEAGLE_EXTENSIONS = ('.bclj', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt')
 def is_beagle_source(fname):
     return any(fname.endswith(ext) for ext in BEAGLE_EXTENSIONS)
 def strip_beagle_ext(fname):

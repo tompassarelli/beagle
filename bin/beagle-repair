@@ -151,7 +151,7 @@ def extract_module_from_path(path):
     if not path or path == '?':
         return None
     base = os.path.basename(path)
-    for ext in ['.bclj', '.bcljs', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt', '.clj']:
+    for ext in ['.bclj', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt', '.clj']:
         if base.endswith(ext):
             return base[:-len(ext)]
     return None
@@ -568,8 +568,8 @@ def resolve_source_file(repair_entry):
         return f
     # Try source_dir + beagle extension versions
     base = os.path.basename(f)
-    source_exts = ('.bclj', '.bcljs', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt')
-    for ext_from in ('.clj', '.cljs', '.js', '.nix'):
+    source_exts = ('.bclj', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt')
+    for ext_from in ('.clj', '.js', '.nix'):
         if base.endswith(ext_from):
             for ext_to in source_exts:
                 candidate = os.path.join(source_dir, base[:-len(ext_from)] + ext_to)

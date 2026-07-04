@@ -21,7 +21,7 @@ files=()
 for a in "$@"; do
     if [[ -d "$a" ]]; then
         while IFS= read -r f; do files+=("$f"); done < <(
-            find "$a" -type f \( -name '*.bjs' -o -name '*.bclj' -o -name '*.bcljs' -o -name '*.bnix' \) | sort)
+            find "$a" -type f \( -name '*.bjs' -o -name '*.bclj' -o -name '*.bnix' \) | sort)
     else
         files+=("$a")
     fi

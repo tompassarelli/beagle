@@ -7,7 +7,7 @@
 
 ## Edit loop
 
-After every edit to a beagle file (.bgl, .bclj, .bcljs, .bjs, .bnix, .bsql):
+After every edit to a beagle file (.bgl, .bclj, .bjs, .bnix, .bsql):
 
 1. Fix **syntax errors first** — `bin/beagle syntax FILE`
 2. Then type-check — `bin/beagle daemon query check-enriched FILE`

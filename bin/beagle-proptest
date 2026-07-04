@@ -60,7 +60,7 @@ source_dir = sys.argv[1]
 beagle_bin = sys.argv[2]
 work_dir = sys.argv[3]
 
-BEAGLE_EXTENSIONS = ('.bclj', '.bcljs', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt')
+BEAGLE_EXTENSIONS = ('.bclj', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt')
 def is_beagle_source(fname):
     return any(fname.endswith(ext) for ext in BEAGLE_EXTENSIONS)
 
@@ -699,7 +699,7 @@ golden_dir = sys.argv[1]
 modified_dir = sys.argv[2]
 work_dir = sys.argv[3]
 
-BEAGLE_EXTENSIONS = ('.bclj', '.bcljs', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt')
+BEAGLE_EXTENSIONS = ('.bclj', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt')
 def is_beagle_source(fname):
     return any(fname.endswith(ext) for ext in BEAGLE_EXTENSIONS)
 def strip_beagle_ext(fname):

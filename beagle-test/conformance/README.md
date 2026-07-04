@@ -15,7 +15,7 @@ The gate kills semantic drift across targets in three independent dimensions:
    (`expected/<target>/<id>.diag`, checkout prefix stripped).
 2. **Target validity** — the emitted output is parsed by the *target's own
    tooling* (js: `bun build --no-bundle`; nix: `nix-instantiate --parse`,
-   which also scope-checks; clj/cljs: the `bb` reader). This is what catches
+   which also scope-checks; clj: the `bb` reader). This is what catches
    the **silent-miscompile class**, where output matches the golden but is
    not even parseable on the target. A golden diff alone would bless garbage
    forever. js is bun-or-skip deliberately: `node --check` only surfaces

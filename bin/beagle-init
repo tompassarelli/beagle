@@ -6,7 +6,7 @@
 #
 # Options:
 #   --hooks        Also scaffold .claude/ hooks for the repair/check loop
-#   --target T     Default target: clj (default), cljs, js, nix, sql
+#   --target T     Default target: clj (default), js, nix, sql
 #   DIRECTORY      Project directory (default: current directory)
 
 set -euo pipefail
@@ -48,10 +48,9 @@ cd "$DIR"
 case "$TARGET" in
     nix)  LANG="beagle/nix";  EXT="bnix" ;;
     clj)  LANG="beagle";      EXT="bclj"  ;; # dormant
-    cljs) LANG="beagle/cljs"; EXT="bcljs" ;; # dormant
     js)   LANG="beagle/js";   EXT="bjs"   ;; # dormant
     sql)  LANG="beagle/sql";  EXT="bsql"  ;; # dormant
-    *)    echo "unknown target: $TARGET (nix is live; clj/cljs/js/sql are dormant)" >&2; exit 1 ;;
+    *)    echo "unknown target: $TARGET (nix is live; clj/js/sql are dormant)" >&2; exit 1 ;;
 esac
 
 # --- Detect an already-initialized project ---

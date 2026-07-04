@@ -5,7 +5,6 @@
 | Target | Extension | `#lang` header | Runtime |
 |--------|-----------|----------------|---------|
 | Clojure | `.bclj` | `#lang beagle/clj` | JVM |
-| ClojureScript | `.bcljs` | `#lang beagle/cljs` | JS (browser/Node) |
 | JavaScript | `.bjs` | `#lang beagle/js` | Node/browser |
 | Nix | `.bnix` | `#lang beagle/nix` | Nix evaluator |
 | SQL | `.bsql` | `#lang beagle/sql` | Database |
@@ -20,9 +19,9 @@ Extension/`#lang` mismatch is a hard error.
 
 | Form | Targets | Notes |
 |------|---------|-------|
-| `await` | js, cljs | Async point; function auto-marked async |
+| `await` | js | Async point; function auto-marked async |
 | `js-quote` | js | Raw JS string literal |
-| `doto` | clj, cljs | Mutate object, return original |
+| `doto` | clj | Mutate object, return original |
 | `with-open` | clj | Java resource management |
 | `inh` | nix | Nix inherit |
 | `fn-set` | nix | Nix function with attrset arg |
@@ -34,7 +33,6 @@ Extension/`#lang` mismatch is a hard error.
 
 - Portable: 269 entries (available in all targets)
 - Clojure: 352 entries (Java interop, Clojure collections)
-- ClojureScript: 75 entries (browser/Node APIs)
 - JavaScript: 38 entries (Math, JSON, Promise, fetch, timers)
 - Nix: 120 entries (builtins.*, lib.*, lib.types.*)
 - SQL: 43 entries (aggregates, window functions, operators)
