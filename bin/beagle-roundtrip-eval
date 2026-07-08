@@ -100,8 +100,8 @@ nix_primary_cmp() {
 # CURATION RATIONALE for the leaf list (when implemented).
 # Each leaf is included because it represents a stable user-facing surface
 # whose divergence is meaningfully localizable. The curation is a *design
-# decision*, not a default — adding a leaf is a claim that its drift would
-# be real signal; removing one is a claim that its drift is noise. Either
+# decision*, not a default — adding a leaf is an assertion that its drift would
+# be real signal; removing one is an assertion that its drift is noise. Either
 # change wants explicit rationale in this comment, not in commit messages
 # alone.
 #
@@ -110,7 +110,7 @@ nix_primary_cmp() {
 #   - system.stateVersion: identity, never changes once set
 #   - time.timeZone: identity, user-set
 #   - users.users.<u>.shell.pname: stable name of user shell (drvPath flaps;
-#     pname is the identity claim)
+#     pname is the identity assertion)
 #   - environment.systemPackages [pname]: package *identities*, drift here
 #     means package set differs, not that inputs moved
 #   - services.*.enable filtered: the main "what is on" signal

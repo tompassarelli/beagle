@@ -1,10 +1,10 @@
 #lang racket/base
 
-;; beagle-claims: emit a file's AST as CNF claim triples.
+;; beagle-facts: emit a file's AST as CNF fact triples.
 ;;
-;; Claims are a CROSS-CUTTING ANALYSIS projection, not a compile target — you
+;; Facts are a CROSS-CUTTING ANALYSIS projection, not a compile target — you
 ;; want them for .bjs, .bclj, .bnix alike, regardless of each file's #lang. So
-;; this is a dedicated command (parse -> claims-emit-program), bypassing the
+;; this is a dedicated command (parse -> facts-emit-program), bypassing the
 ;; per-file target dispatch in emit.rkt. Output per file:
 ;;
 ;;   @file <path>
@@ -12,16 +12,16 @@
 ;;   ...
 ;;
 ;; The downstream loader (chartroom) namespaces node-ids by file and folds the
-;; triples into a Fram claim store.
+;; triples into a Fram fact store.
 
 (require "parse.rkt"
          "emit-facts.rkt")
 
-(provide run-claims)
+(provide run-facts)
 
-(define (run-claims args)
+(define (run-facts args)
   (for ([path (in-list args)])
     (printf "@file ~a\n" path)
     (define prog (parse-program (read-beagle-syntax path) #:source-path path))
-    (display (claims-emit-program prog))
+    (display (facts-emit-program prog))
     (newline)))

@@ -73,8 +73,8 @@
 ;; `col` (syntax-column, which expands tabs to tab-stops and so is NOT a
 ;; codepoint index), `pos` is a true codepoint offset and is the right thing
 ;; for slicing/injecting into source text. #f when unavailable.
-;; `span` (syntax-span, char count) added for #33 typed-AST claims: the (pos,span)
-;; pair is the join key between check's per-node types and the datum claims (pos
+;; `span` (syntax-span, char count) added for #33 typed-AST facts: the (pos,span)
+;; pair is the join key between check's per-node types and the datum facts (pos
 ;; alone collides — a node + its first child share a start pos). #f when unknown.
 (struct src-loc (line col source origin canonical pos span) #:transparent)
 

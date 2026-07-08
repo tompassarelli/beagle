@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # beagle-cascade: cross-module impact propagation and predictive blame — GRAPH-NATIVE.
 #
-# The call graph is derived from the Fram claim graph (via beagle-callgraph):
+# The call graph is derived from the Fram fact graph (via beagle-callgraph):
 # every call binds the defn in its OWN module (scope-correct), so same-named
 # functions across modules never collide. This replaces the old regex call-graph
 # scraping, which was structurally incapable of telling two `helper`s apart — it
@@ -46,7 +46,7 @@ WORK_DIR="$(mktemp -d /tmp/beagle-cascade.XXXXXX)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
 # ---------------------------------------------------------------------------
-# Phase 1: Build the call graph — from the Fram claim graph, not text.
+# Phase 1: Build the call graph — from the Fram fact graph, not text.
 # ---------------------------------------------------------------------------
 echo "─── Phase 1: Building call graph (graph-native, scope-correct) ───" >&2
 GRAPH_JSON="$WORK_DIR/callgraph.json"
@@ -65,7 +65,7 @@ from_failures    = sys.argv[6] == 'true'
 graph_path       = sys.argv[7]
 
 # ---------------------------------------------------------------------------
-# The call graph, scope-correct, straight off the Fram claim graph.
+# The call graph, scope-correct, straight off the Fram fact graph.
 #   defns: [{key, file, module, name}]          edges: [[caller_key, callee_key]]
 #   blast: {callee_key: [transitive caller keys]}   (closure by Fram Datalog)
 # ---------------------------------------------------------------------------

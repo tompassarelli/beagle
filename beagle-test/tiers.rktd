@@ -54,9 +54,9 @@
 #hasheq(
   (active . (;; target-agnostic infrastructure
              "check.rkt"
-             "build-edn-datum-ir.rkt"   ; #33 — --build-edn datum-IR round-trip identity (compile from claims)
+             "build-edn-datum-ir.rkt"   ; #33 — --build-edn datum-IR round-trip identity (compile from facts)
              "cheatsheet.rkt"           ; capability cheatsheet — every example must parse+check
-             "claims-render-roundtrip.rkt" ; #17 — renderer reconstructs #lang from leading (define-target)
+             "facts-render-roundtrip.rkt" ; #17 — renderer reconstructs #lang from leading (define-target)
              "cross-module-dynvar.rkt"  ; G-A — cross-module `binding` of an imported ^:dynamic var
              "defmacro.rkt"
              "diagnostic-kind.rkt"

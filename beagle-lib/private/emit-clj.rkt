@@ -914,7 +914,7 @@
 ;; Deterministic match temp names: a per-program counter (parameterized fresh in
 ;; clj-emit-program), NOT (random ...). The same source must compile BYTE-IDENTICALLY
 ;; every build — `random` made `match` build-nondeterministic, breaking reproducible
-;; builds (and forcing the code-as-claims recompile gate to guard around it).
+;; builds (and forcing the code-as-facts recompile gate to guard around it).
 (define match-counter (make-parameter (box 0)))
 (define (fresh-match-sym!)
   (define b (match-counter))

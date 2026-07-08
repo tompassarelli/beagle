@@ -11,7 +11,7 @@
          "error-format.rkt"
          "query.rkt"
          "extensions.rkt"
-         ;; #33 datum-IR: build straight from claim triples, skipping the text trip
+         ;; #33 datum-IR: build straight from fact triples, skipping the text trip
          (only-in "facts-roundtrip.rkt" edn-triples->syntax read-edn-triples))
 
 (define (extension-for-target target)
@@ -28,7 +28,7 @@
 
 ;; Compile a syntax list to a target file. Shared by the text path
 ;; (build-one-file → read-beagle-syntax) and the datum-IR path (build-one-edn →
-;; claim triples). `path` is the SOURCE .b* path — used for require resolution
+;; fact triples). `path` is the SOURCE .b* path — used for require resolution
 ;; (#:source-path), the extension/header check, in-place output naming, and error
 ;; locations. The two front-ends differ ONLY in how they obtain `stxs`.
 (define (build-from-stxs stxs path out-dir json? warn? in-place?)
@@ -125,12 +125,12 @@
          (string=? (substring line 0 6) "@file ")
          (string-trim (substring line 6)))))
 
-;; #33 datum-IR front-end: compile straight from claim triples (the --emit-edn
+;; #33 datum-IR front-end: compile straight from fact triples (the --emit-edn
 ;; shape), skipping the text round-trip. edn-triples->datum rebuilds the
 ;; (beagle-file form ...) datum the reader would have produced; we drop the
 ;; wrapper head and hand the forms — as syntax — to the SAME compile tail, so the
 ;; output is identical to the text path (KEYSTONE-B). Slice-1: the datum is bare,
-;; so blame/srclocs degrade (closed later by adding line/col/pos claims).
+;; so blame/srclocs degrade (closed later by adding line/col/pos facts).
 (define (build-one-edn triples-path out-dir json? #:warn? [warn? #f] #:in-place? [in-place? #f])
   (with-handlers
     ([exn:fail? (lambda (e)

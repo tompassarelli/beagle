@@ -1,9 +1,9 @@
 #lang racket/base
-;; claims-to-clj — emit clj DIRECTLY from a module's claim EDN, no .bclj text
-;; round-trip. The graph-native build: claims -> syntax -> AST -> clj.
-;; Mirrors render-edn (which does claims -> datum -> pretty .bclj TEXT) but routes
+;; facts-to-clj — emit clj DIRECTLY from a module's fact EDN, no .bclj text
+;; round-trip. The graph-native build: facts -> syntax -> AST -> clj.
+;; Mirrors render-edn (which does facts -> datum -> pretty .bclj TEXT) but routes
 ;; the reconstructed program through the real clj emitter instead of a printer.
-;;   racket claims-to-clj.rkt <module.edn>   ; <module.edn> = `--emit-edn` output
+;;   racket facts-to-clj.rkt <module.edn>   ; <module.edn> = `--emit-edn` output
 (require racket/port
          "facts-roundtrip.rkt"   ; read-edn-triples, edn-triples->syntax
          "parse.rkt"              ; parse-program

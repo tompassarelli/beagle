@@ -129,7 +129,7 @@
 
 ;; Reader-internal marker heads (mirror #%brackets/#%map/#%set): un-spoofable in
 ;; user source, so no collision with a real identifier. The render inversions in
-;; claims-roundtrip.rkt key off the SAME interned symbols.
+;; facts-roundtrip.rkt key off the SAME interned symbols.
 (define %symbolic-val (string->symbol "#%symbolic-val"))  ; ##Inf / ##-Inf / ##NaN
 (define %discard      (string->symbol "#%discard"))       ; #_form
 (define %js           (string->symbol "#%js"))            ; #js form

@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# beagle-claims: emit a file/dir's AST as CNF claim triples (analysis projection).
+# beagle-facts: emit a file/dir's AST as CNF fact triples (analysis projection).
 #
 # Usage:
-#   bin/beagle-claims <file-or-dir> ...
+#   bin/beagle-facts <file-or-dir> ...
 #
 # Directories are expanded to all beagle source files. Output is a stream of
 #   @file <path>
 #   [<subj> "<pred>" <obj>]
 # blocks, one per file, on stdout. Unlike beagle-build this is target-agnostic:
-# it claims-emits .bjs / .bclj / .bnix alike, ignoring each file's #lang.
+# it facts-emits .bjs / .bclj / .bnix alike, ignoring each file's #lang.
 set -euo pipefail
 source "$(dirname "$0")/_beagle-racket"
 
 if [[ $# -lt 1 ]]; then
-    echo "usage: beagle-claims <file-or-dir> ..." >&2
+    echo "usage: beagle-facts <file-or-dir> ..." >&2
     exit 2
 fi
 
@@ -28,8 +28,8 @@ for a in "$@"; do
 done
 
 if [[ ${#files[@]} -eq 0 ]]; then
-    echo "beagle-claims: no beagle source files found" >&2
+    echo "beagle-facts: no beagle source files found" >&2
     exit 1
 fi
 
-"$RACKET" -e "(require beagle/private/facts-cli)(run-claims (vector->list (current-command-line-arguments)))" -- "${files[@]}"
+"$RACKET" -e "(require beagle/private/facts-cli)(run-facts (vector->list (current-command-line-arguments)))" -- "${files[@]}"

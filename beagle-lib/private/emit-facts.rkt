@@ -1,6 +1,6 @@
 #lang racket/base
 
-;; In-tree beagle backend: emit a parsed program's AST as CNF claim triples.
+;; In-tree beagle backend: emit a parsed program's AST as CNF fact triples.
 ;;
 ;; Backbone is a REFLECTIVE walk over the transparent AST structs (ast.rkt) — so
 ;; coverage is complete by construction: every current and future form is walked
@@ -18,7 +18,7 @@
          "parse.rkt"          ; re-exports ast.rkt structs + program accessors
          "emit-dispatch.rkt")
 
-(provide claims-emit-program)
+(provide facts-emit-program)
 
 ;; --- per-program state (fresh per emit) ---
 (define cur-triples (make-parameter #f))   ; box of (listof (list subj pred obj))
@@ -62,7 +62,7 @@
     [(list? x)    (seq->id x)]
     [(pair? x)    (emit-pair! x)]       ; dotted pair, e.g. a map entry (:k . v)
     [(vector? x)  (seq->id (vector->list x))]
-    [else (error 'emit-claims "unrepresentable value: ~s" x)]))
+    [else (error 'emit-facts "unrepresentable value: ~s" x)]))
 
 (define (emit-pair! x)
   (define id (fresh-id!))
@@ -139,7 +139,7 @@
   id)
 
 ;; --- entry point (backend contract: prog -> String) ---
-(define (claims-emit-program prog)
+(define (facts-emit-program prog)
   (parameterize ([cur-triples (box '())] [cur-id (box 0)])
     (for ([form (in-list (program-forms prog))])
       (val->obj form))
@@ -155,4 +155,4 @@
     [(boolean? o) (if o "true" "false")]
     [else o]))                           ; integers (node ids), numbers
 
-(register-backend! 'claims (emitter-backend 'claims claims-emit-program))
+(register-backend! 'facts (emitter-backend 'facts facts-emit-program))

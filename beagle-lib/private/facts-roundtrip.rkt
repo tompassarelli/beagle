@@ -1,19 +1,19 @@
 #lang racket/base
 
-;; claims-roundtrip: the source-of-truth gate.
+;; facts-roundtrip: the source-of-truth gate.
 ;;
-;; Turtle #2's emit-claims is a LOSSY query projection (overlays drop types/params;
+;; Turtle #2's emit-facts is a LOSSY query projection (overlays drop types/params;
 ;; reconstruction needs an AST unparser that doesn't exist). Losslessness lives one
 ;; layer down — at the READER DATUM tree, where type annotations (`:- Int`) are just
-;; tokens. This proves `datum -> claims -> datum` is the identity over a real corpus:
-;; the claim graph is a faithful, regenerable representation of the program source.
+;; tokens. This proves `datum -> facts -> datum` is the identity over a real corpus:
+;; the fact graph is a faithful, regenerable representation of the program source.
 ;;
-;;   racket beagle-lib/private/claims-roundtrip.rkt <file-or-dir> ...
+;;   racket beagle-lib/private/facts-roundtrip.rkt <file-or-dir> ...
 ;;
 ;; Every datum node is minted (leaves carry kind+value; lists/vectors carry ordered
 ;; fN children + a uniform `child` edge + an optional improper `tail`). That is the
 ;; deliberate trade: this projection is VERBOSE but LOSSLESS, where the query
-;; projection is COMPACT but lossy — two views of one source, like Fram's claim vs
+;; projection is COMPACT but lossy — two views of one source, like Fram's fact vs
 ;; markdown views of a thread.
 
 (require racket/list
@@ -22,17 +22,17 @@
          racket/format
          "parse.rkt"
          ;; #33 typed-AST (slice-3): check captures per-node types; join to the
-         ;; datum claims by (pos,span) to emit derived `[node "type" T]` claims.
+         ;; datum facts by (pos,span) to emit derived `[node "type" T]` facts.
          (only-in "check.rkt" type-check-with-locs!)
          (only-in "ast.rkt" program-type-table program-src-table
                   src-loc? src-loc-pos src-loc-span)
          (only-in "types.rkt" type->string))
 
-(provide datum->claims claims->datum datum->src datum->pretty edn-triples->datum read-edn-triples
-         datum->edn-lines stx->edn-lines stx->claims edn-triples->syntax
+(provide datum->facts facts->datum datum->src datum->pretty edn-triples->datum read-edn-triples
+         datum->edn-lines stx->edn-lines stx->facts edn-triples->syntax
          emit-edn-typed-file)
 
-;; --- datum -> claims --------------------------------------------------------
+;; --- datum -> facts --------------------------------------------------------
 (define (split-improper d)            ; pair -> (values proper-prefix tail) ; tail='() if proper
   (let loop ([d d] [acc '()])
     (cond
@@ -45,7 +45,7 @@
 ;; logoot order key: pred "f<path>~<tie>", path = dot-separated ints (dense — a key
 ;; strictly between any two always exists), tie = the child node's atomic id (so
 ;; concurrent same-gap inserts get distinct keys → both land → commute). The legacy
-;; emit-claims spelling "fN" is the same family at ((N+1)*ORD-STEP, tie 0). A dump
+;; emit-facts spelling "fN" is the same family at ((N+1)*ORD-STEP, tie 0). A dump
 ;; mixes both (seed forms "fN", verb forms "f<path>~<tie>"). We MUST parse the dual
 ;; spelling and sort children by (path, tie) — matching resolve.bclj's ord-parse /
 ;; ord-cmp exactly — or every verb-positioned form silently vanishes (the sequential
@@ -77,7 +77,7 @@
        (sort (for/list ([(p o) (in-hash h)] #:when (fN-slot? p)) (cons (parse-fN-slot p) o))
              slot-key<? #:key car)))
 
-(define (datum->claims d)             ; -> (values root-id (listof (list subj pred obj)))
+(define (datum->facts d)             ; -> (values root-id (listof (list subj pred obj)))
   (define out '())
   (define n 0)
   (define (fresh!) (set! n (add1 n)) n)
@@ -110,13 +110,13 @@
   (define root (walk d))
   (values root (reverse out)))
 
-;; --- #33 slice-2: syntax-walking claims (datum->claims + per-node srcloc) -----
-;; Same structure/ids as datum->claims, but walks the SYNTAX so each node also
-;; carries line/col/pos/span claims (the load-bearing one is `pos`). Source is
+;; --- #33 slice-2: syntax-walking facts (datum->facts + per-node srcloc) -----
+;; Same structure/ids as datum->facts, but walks the SYNTAX so each node also
+;; carries line/col/pos/span facts (the load-bearing one is `pos`). Source is
 ;; the module's @file header, NOT per-node. All four are OPTIONAL: a node missing
 ;; a field (synthetic syntax, e.g. the (beagle-file …) wrapper) emits none, and
 ;; the build side degrades to #f — so a srcloc-free dump still builds (slice-1).
-(define (stx->claims top-stx)
+(define (stx->facts top-stx)
   (define out '())
   (define n 0)
   (define (fresh!) (set! n (add1 n)) n)
@@ -166,8 +166,8 @@
   (define root (walk top-stx))
   (values root (reverse out)))
 
-;; --- claims -> datum (the reverse path that did not exist) ------------------
-(define (claims->datum root triples)
+;; --- facts -> datum (the reverse path that did not exist) ------------------
+(define (facts->datum root triples)
   (define props (make-hash))          ; subj -> (mutable hash pred->obj)
   (for ([t (in-list triples)])
     (define s (car t)) (define p (cadr t)) (define o (caddr t))
@@ -183,7 +183,7 @@
        (define tail (if (hash-has-key? h "tail") (build (hash-ref h "tail")) '()))
        (define lst (foldr cons tail elems))
        (if (equal? k "vector") (list->vector lst) lst)]
-      [else (error 'claims->datum "unknown kind ~a" k)]))
+      [else (error 'facts->datum "unknown kind ~a" k)]))
   (build root))
 
 ;; --- gate runner ------------------------------------------------------------
@@ -198,7 +198,7 @@
 
 ;; --- EDN serialization (universal-safe: every obj is an int node-ref OR a
 ;; quoted string; NO bool/keyword/nil/char literals, so Racket `read` and
-;; Clojure `edn/read` parse it identically; leaf type lives in the `kind` claim) -
+;; Clojure `edn/read` parse it identically; leaf type lives in the `kind` fact) -
 (define (edn-string s)                ; Racket string -> a quoted literal both readers accept
   (define o (open-output-string))
   (write-char #\" o)
@@ -243,11 +243,11 @@
       [(equal? p "v")    (format "[~a \"v\" ~a]" s (edn-string (encode-leaf (hash-ref kind-of s) o)))]
       [else              (format "[~a ~a ~a]" s (edn-string p) o)])))   ; fN/child/tail -> int ref
 (define (datum->edn-lines d)
-  (define-values (root triples) (datum->claims d))
+  (define-values (root triples) (datum->facts d))
   (triples->edn-lines triples))
-;; #33 slice-2: serialize a SYNTAX tree to EDN lines (with srcloc claims).
+;; #33 slice-2: serialize a SYNTAX tree to EDN lines (with srcloc facts).
 (define (stx->edn-lines stx)
-  (define-values (root triples) (stx->claims stx))
+  (define-values (root triples) (stx->facts stx))
   (triples->edn-lines triples))
 
 ;; shared triple helpers (used by both emit and render paths) -----------------
@@ -259,7 +259,7 @@
 (define (ordered-fN props id)           ; node ids of fN children, in (path,tie) order
   (ordered-slot-children (hash-ref props id (make-hash))))
 ;; Largest NODE id, so comment/segment ids can be allocated beyond it. Consider
-;; ONLY subjects (car): every minted node is the subject of its own kind claim, so
+;; ONLY subjects (car): every minted node is the subject of its own kind fact, so
 ;; subjects cover all node ids — while objects (caddr) may be LEAF VALUES, and an
 ;; integer-valued float value (e.g. 2.0, 16.0; Racket's `integer?` is #t for those)
 ;; would otherwise make the allocated ids FLOATS, which downstream node-ref tests
@@ -272,7 +272,7 @@
 ;; root = the one subject never referenced as a child — robust even after Fram
 ;; re-mints all ids on its way through the store.
 ;; A predicate naming a STRUCTURAL child edge (fN / child / tail) — the only
-;; numeric-valued claims that are node REFS. srcloc claims (line/col/pos/span) are
+;; numeric-valued facts that are node REFS. srcloc facts (line/col/pos/span) are
 ;; ALSO numeric but are NOT refs; ref-detection must exclude them or it mistakes a
 ;; `pos`/`line` value for a child node id (#33 slice-2).
 (define (ref-pred? p)
@@ -308,8 +308,8 @@
   ((make-edn-build props) (edn-root props)))
 
 ;; #33 slice-2: like edn-triples->datum but returns SYNTAX, attaching each node's
-;; line/col/pos/span claims as its srcloc (source = the module @file, passed in).
-;; A node with no srcloc claims gets #f srcloc — so srcloc-free dumps still build
+;; line/col/pos/span facts as its srcloc (source = the module @file, passed in).
+;; A node with no srcloc facts gets #f srcloc — so srcloc-free dumps still build
 ;; (graceful slice-1 behavior). datum->syntax preserves inner-node srclocs, so the
 ;; whole tree carries positions → --build-edn restores blame + ^{:line} emit.
 (define (edn-triples->syntax triples [src #f])
@@ -335,7 +335,7 @@
   (define root (edn-root props))
   (and root (build root)))
 
-;; --- Turtle #6: read comment claims back off the triples (render side) ------
+;; --- Turtle #6: read comment facts back off the triples (render side) ------
 (define (comment-text props cid)          ; concatenate seg0,seg1,... `v`s -> the comment lexeme
   (define h (hash-ref props cid))
   (apply string-append
@@ -686,12 +686,12 @@
       [(and (pair? out) (eq? (caar out) 'text) (eq? (caar s) 'text))
        (merge (cdr s) (cons (cons 'text (string-append (cdar out) (cdar s))) (cdr out)))]
       [else (merge (cdr s) (cons (car s) out))])))
-(define (format-claim s p o)            ; one EDN triple; obj int=node-ref, string=literal
+(define (format-fact s p o)            ; one EDN triple; obj int=node-ref, string=literal
   (if (integer? o) (format "[~a ~a ~a]" s (edn-string p) o)
       (format "[~a ~a ~a]" s (edn-string p) (edn-string o))))
 (define (comment-edn-lines comments form-node root fresh!)
   (define lines '())
-  (define (add! s p o) (set! lines (cons (format-claim s p o) lines)))
+  (define (add! s p o) (set! lines (cons (format-fact s p o) lines)))
   (define cidx (make-hash))             ; anchor node -> next comment index
   (for ([c (in-list comments)])
     (define placement (first c)) (define spec (second c)) (define lex (third c))
@@ -708,9 +708,9 @@
   (reverse lines))
 
 ;; --- modes ------------------------------------------------------------------
-;; the slice-2 lossless projection of ONE file as EDN lines: datum claims (each
+;; the slice-2 lossless projection of ONE file as EDN lines: datum facts (each
 ;; node carries line/col/pos/span — we walk the SYNTAX, not syntax->datum) THEN
-;; comment claims (Turtle #6) attached to form nodes by srcloc. The (beagle-file …)
+;; comment facts (Turtle #6) attached to form nodes by srcloc. The (beagle-file …)
 ;; wrapper + its head symbol are synthetic (no srcloc); form stxs keep theirs
 ;; (datum->syntax preserves inner syntax). ONE id space — emit-edn-typed's type
 ;; overlay keys directly off these datum node-ids (comment ids are minted ABOVE
@@ -719,7 +719,7 @@
 (define (file->datum-projection path)
   (define stxs (read-beagle-syntax path))
   (define src (file->string path))
-  (define-values (root triples) (stx->claims (datum->syntax #f (cons 'beagle-file stxs))))
+  (define-values (root triples) (stx->facts (datum->syntax #f (cons 'beagle-file stxs))))
   (define props (triples->props triples))
   (define root-kids (ordered-fN props root))      ; [beagle-file-sym, form0-node, form1-node, ...]
   (define (form-node i) (list-ref root-kids (add1 i)))
@@ -737,10 +737,10 @@
 
 ;; #33 slice-3: a strict SUPERSET of --emit-edn — the full slice-2 datum+comment
 ;; projection PLUS the TYPED layer: each checked node's inferred type as a DERIVED
-;; `[node "type" T]` claim. Same id space, so the type subjects ARE the durable
+;; `[node "type" T]` fact. Same id space, so the type subjects ARE the durable
 ;; datum node-ids and fram just extracts the [id "type" T] lines for its warm
 ;; overlay (no re-join fram-side). The join key is (pos,span): check's type-table
-;; is keyed by AST-node, the datum claims by int node-id, and both carry a source
+;; is keyed by AST-node, the datum facts by int node-id, and both carry a source
 ;; (pos,span) — so a type attaches to the datum node sharing its span. Types are
 ;; ADDITIVE + DERIVED (re-derive == re-check, zero staleness) — the build path
 ;; ignores them (string-valued, not fN/child/tail), so a typed dump still builds
@@ -772,7 +772,7 @@
   (for ([id (in-list (sort (hash-keys typed) <))])
     (displayln (format "[~a \"type\" ~a]" id (edn-string (hash-ref typed id))))))
 
-;; render: reconstruct from EDN reader-claims and print idiomatic source. The EDN
+;; render: reconstruct from EDN reader-facts and print idiomatic source. The EDN
 ;; may have come straight out of a (mutated) Fram store — this is the "project
 ;; source from the graph" half of graph-native authoring.
 (define (render-edn edn-path)
@@ -820,7 +820,7 @@
   (printf "================ TURTLE #3 — round-trip THROUGH a Fram store ================\n")
   (printf "source: ~a\n" orig-path)
   (printf "forms reconstructed from Fram: ~a   original: ~a\n" (length forms) (length orig))
-  (printf "DATUM IDENTITY through the persisted claim store: ~a\n"
+  (printf "DATUM IDENTITY through the persisted fact store: ~a\n"
           (if same "PASS — program reconstructs datum-identically" "FAIL"))
   ;; render the Fram-sourced program back to text and re-read it (text is a view).
   ;; the `#lang` line round-trips as the leading (define-target ...) form already in
@@ -830,7 +830,7 @@
   (with-output-to-file tmp #:exists 'replace (lambda () (display txt)))
   (define reread (with-handlers ([exn:fail? (lambda (_) #f)])
                    (map syntax->datum (read-beagle-syntax tmp))))
-  (printf "claims -> rendered beagle text -> re-read: ~a\n"
+  (printf "facts -> rendered beagle text -> re-read: ~a\n"
           (cond [(not reread) "render produced unreadable text"]
                 [(equal? reread orig) "PASS — re-reads to the identical program"]
                 [else "re-read diverged"]))
@@ -839,7 +839,7 @@
                        (for/first ([a orig] [b forms] #:unless (equal? a b)) a)
                        (for/first ([a orig] [b forms] #:unless (equal? a b)) b))))
 
-;; gate: datum -> claims -> datum identity over a corpus.
+;; gate: datum -> facts -> datum identity over a corpus.
 (define (run-gate args)
   (define files (expand-paths args))
   (define forms 0) (define ok 0) (define tris 0) (define res '()) (define skipped '())
@@ -849,8 +849,8 @@
         (set! skipped (cons (path->string f) skipped))   ; unreadable -> count it, don't let it pass silently
         (for ([stx (in-list stxs)])
           (define d (syntax->datum stx))
-          (define-values (root triples) (datum->claims d))
-          (define d2 (claims->datum root triples))
+          (define-values (root triples) (datum->facts d))
+          (define d2 (facts->datum root triples))
           (set! forms (add1 forms))
           (set! tris (+ tris (length triples)))
           (if (equal? d d2)
@@ -861,12 +861,12 @@
           (length files) (- (length files) (length skipped)) (length skipped) forms)
   (unless (null? skipped)
     (printf "  skipped (did not parse): ~a\n" (string-join (map (lambda (p) (last (string-split p "/"))) skipped) ", ")))
-  (printf "claims -> datum IDENTICAL: ~a / ~a   (~a%)\n"
+  (printf "facts -> datum IDENTICAL: ~a / ~a   (~a%)\n"
           ok forms (real->decimal-string (* 100.0 (/ ok (max 1 forms))) 2))
-  (printf "claim triples emitted: ~a   (~a per form avg)\n"
+  (printf "fact triples emitted: ~a   (~a per form avg)\n"
           tris (real->decimal-string (/ tris (max 1 forms)) 1))
   (if (= ok forms)
-      (printf "GATE: PASS — every form regenerates claim-identically from its claims.\n")
+      (printf "GATE: PASS — every form regenerates fact-identically from its facts.\n")
       (begin
         (printf "GATE: ~a residual form(s) (showing up to 3):\n" (- forms ok))
         (for ([r (in-list res)])
@@ -884,7 +884,7 @@
       (define re (with-handlers ([exn:fail? (lambda (_) #f)]) (map syntax->datum (read-beagle-syntax tmp))))
       (delete-file tmp)
       (when (and re (equal? re ds)) (set! rt-ok (add1 rt-ok)))))
-  (printf "text-is-a-view (claims -> source -> re-read identical): ~a / ~a files ~a\n"
+  (printf "text-is-a-view (facts -> source -> re-read identical): ~a / ~a files ~a\n"
           rt-ok rt-files (if (= rt-ok rt-files) "PASS" "")))
 
 ;; --- move-2 pretty-printer modes -------------------------------------------

@@ -76,7 +76,7 @@
 
 ;; --- EXP-025 G8/G10/G11 reader macros (malli) ----------------------------
 ;; The reader keeps each as an un-spoofable #%-marker datum; the renderer
-;; (claims-roundtrip.rkt) inverts it back to the surface glyph.
+;; (facts-roundtrip.rkt) inverts it back to the surface glyph.
 
 ;; G8 #_ discard — Clojure DROPS the next form; beagle KEEPS it (text is a view).
 (test-case "#_ discard keeps the form as (#%discard …)"

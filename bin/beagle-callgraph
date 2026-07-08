@@ -24,7 +24,7 @@ fi
 
 DIR="$(cd "$1" && pwd)"
 BIN="$(cd "$(dirname "$0")" && pwd)"
-RT="$BIN/../beagle-lib/private/claims-roundtrip.rkt"
+RT="$BIN/../beagle-lib/private/facts-roundtrip.rkt"
 FRAM_OUT="${FRAM_OUT:-$HOME/code/fram/out}"
 # The call graph is derived from the SAME converged resolver as rename/delete: the Layer-2
 # engine in chartroom (resolve.clj). beagle's tooling RENTS it. Override with CHARTROOM.
@@ -44,7 +44,7 @@ fi
 
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
-# Project each beagle source to its claim-AST (the projection that carries requires/scope,
+# Project each beagle source to its fact-AST (the projection that carries requires/scope,
 # so cross-module calls resolve), then resolve + emit the call graph in chartroom.
 EDNS=(); i=0
 while IFS= read -r f; do

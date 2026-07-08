@@ -1,6 +1,6 @@
 #lang racket/base
 
-;; #17 regression: the claims renderer (`--render`) must reconstruct the `#lang`
+;; #17 regression: the facts renderer (`--render`) must reconstruct the `#lang`
 ;; header from the leading `(define-target X)` form (read-beagle-syntax
 ;; canonicalizes `#lang beagle/X` -> that form). A rendered module that led with
 ;; `(define-target …)` instead of `#lang` was rejected by bin/beagle check's
@@ -40,7 +40,7 @@
     (lambda () (when (file-exists? f) (delete-file f)) (when (file-exists? edn) (delete-file edn)))))
 
 (run-tests
- (test-suite "claims render — #lang reconstruction (#17)"
+ (test-suite "facts render — #lang reconstruction (#17)"
 
    (test-case "render reconstructs #lang beagle/clj from leading (define-target clj)"
      (define out (render-roundtrip "#lang beagle/clj\n\n;; hdr\n(def x :- Int 42)\n"))
@@ -77,7 +77,7 @@
                   (format "render is not a fixed point (emitted text not re-readable):\n~a" out))))
 
 (run-tests
- (test-suite "claims render — EXP-025 reader-macro inversion (G1–G5)"
+ (test-suite "facts render — EXP-025 reader-macro inversion (G1–G5)"
 
    ;; G1 metadata `^m form`
    (gap-case "G1 type hint ^String"
@@ -138,7 +138,7 @@
 ;; (G9 bare-dot interop `(. T m)` is a READ-side change; its fixtures live below,
 ;; guarded, so this suite stays green whether or not G9 landed.)
 (run-tests
- (test-suite "claims render — EXP-025 reader/render gaps (G7–G11)"
+ (test-suite "facts render — EXP-025 reader/render gaps (G7–G11)"
 
    ;; G7 reader conditional — the flagged unknown (emit faithful, render was broken)
    (gap-case "G7 #?(:clj … :cljs … :nix …)"
