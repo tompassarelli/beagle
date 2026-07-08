@@ -19,7 +19,7 @@ RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
 FRAM_OUT="${FRAM_OUT:-$HOME/code/fram/out}"
 CHARTROOM="${CHARTROOM:-$HOME/code/fram/chartroom}"
 RES="$CHARTROOM/src/resolve.clj"
-FRAM_SRC="${CODE_AS_CLAIMS_CORPUS:-$HOME/code/fram/src}"
+FRAM_SRC="${CODE_AS_FACTS_CORPUS:-$HOME/code/fram/src}"
 fail=0
 
 echo "================ scope-correct rename — the complete engine (resolve.clj) ================"

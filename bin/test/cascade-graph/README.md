@@ -2,7 +2,7 @@
 
 `beagle-cascade` predicts the blast radius of a code change: change a function,
 which callers (and which test assertions) break? This is the first repair tool
-moved **off text and onto the Fram claim graph**.
+moved **off text and onto the Fram fact graph**.
 
 ## Why it had to change
 
@@ -13,8 +13,8 @@ module's `helper` is reported as breaking callers of the *other* module's `helpe
 — a function it never touched. No amount of polish fixes this; text doesn't know
 what calls what.
 
-The new cascade derives its call graph from the claim graph (`beagle-callgraph` →
-`beagle-claims` → Fram store → Datalog transitive closure). Every call binds the
+The new cascade derives its call graph from the fact graph (`beagle-callgraph` →
+`beagle-facts` → Fram store → Datalog transitive closure). Every call binds the
 defn in its **own module** (module-local lexical scope; else a unique global; else
 dropped). The blast radius is a `reaches(_, X)` query, not a text scan.
 
@@ -53,7 +53,7 @@ bin/test/cascade-graph/run.sh      # asserts scope-correctness; prints the recei
 ```
 
 Requires the Fram engine (`FRAM_OUT`, default `~/code/fram/out`) — graph-native
-repair runs on the claim store. The scope-correctness assertions gate in CI; the
+repair runs on the fact store. The scope-correctness assertions gate in CI; the
 side-by-side receipt is rendered when the pre-migration cascade is reachable in git.
 
 ## Scope (what this is and isn't)

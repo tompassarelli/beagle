@@ -18,7 +18,7 @@ RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
 FRAM_OUT="${FRAM_OUT:-$HOME/code/fram/out}"
 CHARTROOM="${CHARTROOM:-$HOME/code/fram/chartroom}"
 RES="$CHARTROOM/src/resolve.clj"
-SRC="${CODE_AS_CLAIMS_CORPUS:-$HOME/code/fram/src}"
+SRC="${CODE_AS_FACTS_CORPUS:-$HOME/code/fram/src}"
 export FRAM_OUT CHARTROOM
 fail=0
 

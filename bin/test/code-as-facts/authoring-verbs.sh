@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# AUTHORING-as-claims gate (move 4, the GAP closed).
+# AUTHORING-as-facts gate (move 4, the GAP closed).
 #
 # rename/delete (authoring.sh) only EDIT or REMOVE existing names. The ~95% case —
 # AUTHORING new code — had NO graph operation and fell back to text Edit/Write. This
-# gate proves the missing verbs exist as CLAIM OPERATIONS on the lossless AST-claims
+# gate proves the missing verbs exist as FACT OPERATIONS on the lossless AST-facts
 # projection, reusing resolve.clj's edit+render machinery (the rename/delete template):
 #
 #   upsert-form : add a NEW top-level def (append a wrapper fN edge) OR replace an
@@ -11,16 +11,16 @@
 #   set-body    : replace a defn's BODY (supersede its post-params fN edges -> a fresh body)
 #
 # The structured edit spec the agent emits is data, not text: an EDN datum (the new
-# form / body) minted into the SAME Fram store as kind/v/fN claims. For each verb the
+# form / body) minted into the SAME Fram store as kind/v/fN facts. For each verb the
 # gate runs the full loop and HARD-ASSERTS:
-#   1. project .bclj -> claims          (claims-roundtrip --emit-edn)
-#   2. apply the edit AS A CLAIM OP      (resolve.clj upsert-form / set-body)
+#   1. project .bclj -> facts          (facts-roundtrip --emit-edn)
+#   2. apply the edit AS A FACT OP      (resolve.clj upsert-form / set-body)
 #   3. regenerate byte-stable .bclj      (--render)
 #   4. the edit is PRESENT, the module RECOMPILES (beagle-build-all '0 error'),
 #      it is SCOPE-CORRECT (a new def references an existing one and resolves via
 #      refers_to; a body edit leaves sibling forms + comments intact), and the edit
-#      was a CLAIM OP not a text splice (the EDN delta shows freshly-minted node ids
-#      carrying kind/v/fN claims + a re-pointed wrapper/body fN edge).
+#      was a FACT OP not a text splice (the EDN delta shows freshly-minted node ids
+#      carrying kind/v/fN facts + a re-pointed wrapper/body fN edge).
 #
 # Needs racket + bb + fram out/ + chartroom (resolve.clj). Fail-closed: an edit the
 # engine refuses, or that does not recompile, is REJECTED with no tree written.
@@ -61,11 +61,11 @@ author() {
   rm -rf "$W" $RESOLVE_OUT/resolved-*.edn 2>/dev/null || true
 }
 
-# claim_node_growth <corpus> <op> <args...> -> prints "<orig_nodes> <proj_nodes>".
-# The edit projects to MORE kind-claim nodes (a minted subtree), and the projected
-# EDN carries kind/v/fN claims the agent never wrote as text -> a graph op, not a
-# text splice (a sed/Edit changes characters in place; it mints no claim nodes).
-claim_node_growth() {
+# fact_node_growth <corpus> <op> <args...> -> prints "<orig_nodes> <proj_nodes>".
+# The edit projects to MORE kind-fact nodes (a minted subtree), and the projected
+# EDN carries kind/v/fN facts the agent never wrote as text -> a graph op, not a
+# text splice (a sed/Edit changes characters in place; it mints no fact nodes).
+fact_node_growth() {
   local corpus="$1" op="$2"; shift 2
   local W; W="$(mktemp -d)"; local E="$W/e"; mkdir -p "$E"
   local f b first_edn=""
@@ -83,7 +83,7 @@ claim_node_growth() {
   rm -rf "$W" $RESOLVE_OUT/resolved-*.edn 2>/dev/null || true
 }
 
-echo "================ AUTHORING-as-claims gate (upsert-form + set-body) ================"
+echo "================ AUTHORING-as-facts gate (upsert-form + set-body) ================"
 [ -d "$FRAM_OUT" ] || { echo "  (need FRAM_OUT)"; exit 3; }
 [ -f "$RESOLVE" ]  || { echo "  (need CHARTROOM resolve.clj)"; exit 3; }
 CORPUS="$HERE/authoring-corpus"
@@ -94,7 +94,7 @@ T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 echo '--- NL: "add a function add-two that calls base" -> agent emits {op upsert-form, scope authmod, form <datum>} ---'
 SPEC1="$T/spec_add.edn"; printf '(defn add-two [x :- Int] :- Int (base (+ x 2)))' > "$SPEC1"
 r="$(author "$T/add" "$CORPUS" upsert-form authmod "$SPEC1")"
-read -r O P <<<"$(claim_node_growth "$CORPUS" upsert-form authmod "$SPEC1")"   # orig vs projected kind-claim nodes
+read -r O P <<<"$(fact_node_growth "$CORPUS" upsert-form authmod "$SPEC1")"   # orig vs projected kind-fact nodes
 if [ "$r" = COMMITTED ] \
    && grep -q 'defn add-two' "$T/add/authmod.bclj" \
    && grep -q '(base (+ x 2))' "$T/add/authmod.bclj" \
@@ -103,13 +103,13 @@ if [ "$r" = COMMITTED ] \
    && grep -q ';; base is the helper' "$T/add/authmod.bclj" \
    && [ "${P:-0}" -gt "${O:-0}" ]; then
   echo "  PASS  committed; add-two PRESENT + references base (scope-correct), siblings+comment intact,"
-  echo "        recompiled, projection grew $O -> $P kind-claim nodes (minted subtree = graph op, not a text splice)"
+  echo "        recompiled, projection grew $O -> $P kind-fact nodes (minted subtree = graph op, not a text splice)"
 else echo "  FAIL  (result=$r nodes:$O->$P)"; fail=1; fi
 
 # ---------------------------------------------------------------------------
 echo '--- NL: "set base body to (* x 10)" -> agent emits {op set-body, name base, scope authmod, body <datum>} ---'
 BODY1="$T/body_base.edn"; printf '(* x 10)' > "$BODY1"
-# capture the projected EDN to prove the new body's leaves entered the store as v-claims
+# capture the projected EDN to prove the new body's leaves entered the store as v-facts
 PROJSAVE="$T/setb.proj.edn"
 racket "$RT" --emit-edn "$CORPUS/authmod.bclj" 2>/dev/null > "$T/setb.orig.edn"
 bb -cp "$FRAM_OUT" "$RESOLVE" set-body base authmod "$BODY1" "$T/setb.orig.edn" >/dev/null 2>&1
@@ -122,7 +122,7 @@ if [ "$r" = COMMITTED ] \
    && grep -q ';; base is the helper' "$T/setb/authmod.bclj" \
    && grep -q '"v" "\*"'  "$PROJSAVE" && grep -q '"v" "10"' "$PROJSAVE"; then
   echo "  PASS  committed; base body replaced (params/ret-type/comment intact), use-base sibling NOT corrupted,"
-  echo "        recompiled; new body leaves entered the store as v-claims (\"*\", \"10\") = graph op, not a text splice"
+  echo "        recompiled; new body leaves entered the store as v-facts (\"*\", \"10\") = graph op, not a text splice"
 else echo "  FAIL  ($r)"; fail=1; fi
 
 # ---------------------------------------------------------------------------
@@ -164,5 +164,5 @@ else echo "  FAIL  expected REJECTED+no-commit, got '$r'"; fail=1; fi
 
 echo
 if [ "$fail" = 0 ]; then
-  echo "RESULT: PASS — authoring (add/replace def + set body) IS a recompile-gated CLAIM operation on the lossless AST projection."
+  echo "RESULT: PASS — authoring (add/replace def + set body) IS a recompile-gated FACT operation on the lossless AST projection."
 else echo "RESULT: FAIL"; exit 1; fi

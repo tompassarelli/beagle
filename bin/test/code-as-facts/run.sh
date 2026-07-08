@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# move 3 — code can be claim-canonical.
+# move 3 — code can be fact-canonical.
 #
 # Proves the loop
-#   .bclj --import--> lossless claims --(through a Fram store)--> claims --export--> .bclj'
+#   .bclj --import--> lossless facts --(through a Fram store)--> facts --export--> .bclj'
 # is both:
 #   (a) DATUM-IDENTICAL through the engine   (the program survives the canonical store)
 #   (b) RECOMPILE-IDENTICAL                   (beagle build of the regenerated tree ==
 #                                              beagle build of the original, byte-for-byte)
-# (b) is the killer proof: a Beagle program can live as canonical claims and the
-# regenerated text compiles to the IDENTICAL program — claims-canonical loses
-# nothing for the compiler. Import = claims-roundtrip --emit-edn; the canonical
+# (b) is the killer proof: a Beagle program can live as canonical facts and the
+# regenerated text compiles to the IDENTICAL program — facts-canonical loses
+# nothing for the compiler. Import = facts-roundtrip --emit-edn; the canonical
 # store = a real Fram store (through-fram.clj); export = byte-stable datum->pretty
 # (--render). Needs racket + bb + fram's classpath (FRAM_OUT).
 set -uo pipefail
@@ -18,10 +18,10 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
 FRAM_OUT="${FRAM_OUT:-$HOME/code/fram/out}"
-SRC="${CODE_AS_CLAIMS_CORPUS:-$HOME/code/fram/src}"
+SRC="${CODE_AS_FACTS_CORPUS:-$HOME/code/fram/src}"
 fail=0
 
-echo "================ move 3 — code as canonical claims ================"
+echo "================ move 3 — code as canonical facts ================"
 echo "corpus: $SRC"
 if [ ! -d "$FRAM_OUT" ]; then echo "  (need FRAM_OUT — fram classpath)"; exit 3; fi
 
@@ -75,7 +75,7 @@ echo "  modules byte-compared: $total (all of them)"
 
 echo
 if [ "$fail" = 0 ]; then
-  echo "RESULT: PASS — code is losslessly claim-canonical (datum-identical through the Fram store + recompile-identical)."
+  echo "RESULT: PASS — code is losslessly fact-canonical (datum-identical through the Fram store + recompile-identical)."
 else
   echo "RESULT: FAIL"; exit 1
 fi

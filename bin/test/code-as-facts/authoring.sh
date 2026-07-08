@@ -24,7 +24,7 @@ CHARTROOM="${CHARTROOM:-$HOME/code/fram/chartroom}"
 fail=0
 
 # apply <outdir> <corpus> <op> <args...> -> prints COMMITTED | REJECTED
-# A claim edit the engine refuses, OR that does not recompile, is REJECTED with no
+# A fact edit the engine refuses, OR that does not recompile, is REJECTED with no
 # tree written (fail closed). The deterministic, validated authoring transaction.
 apply_edit() {
   local outdir="$1" corpus="$2" op="$3"; shift 3

@@ -2,12 +2,12 @@
 # Regression test + proof for move 2 — byte-stable emit.
 #
 # The pretty-printer (datum->pretty in beagle-lib/private/facts-roundtrip.rkt)
-# turns claims back into source. It must satisfy the move-2 contract:
+# turns facts back into source. It must satisfy the move-2 contract:
 #   1. idempotent fixed-point  — pretty(parse(pretty(x))) == pretty(x)
 #   2. round-trip preserving   — pretty text re-reads to the IDENTICAL datum
 #   3. LOCAL                    — a one-token change => a small, local diff
 #                                (the property determinism does NOT give for free)
-#   4. comment-preserving       — comments survive the claims->source render
+#   4. comment-preserving       — comments survive the facts->source render
 #
 # Racket-only (no fram, no bb). Gates in CI.
 set -uo pipefail
@@ -37,7 +37,7 @@ echo "  diff lines for a one-token change: $CHANGED  (a single changed line = 2:
 [ "$CHANGED" -le 2 ] || { echo "  FAIL: one-token change touched $CHANGED diff-lines (>2) — not local"; fail=1; }
 rm -rf "$T"
 
-# 4: comments survive the claims->source render, and the render re-reads cleanly.
+# 4: comments survive the facts->source render, and the render re-reads cleanly.
 echo "--- comment preservation + rendered text round-trips ---"
 T="$(mktemp -d)"
 racket "$RT" --emit-edn "$HERE/comment-fixture.bclj" > "$T/c.edn" 2>/dev/null

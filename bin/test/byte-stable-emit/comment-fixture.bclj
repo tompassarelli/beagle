@@ -1,4 +1,4 @@
-;; leading comment on area — must survive the claims->source render
+;; leading comment on area — must survive the facts->source render
 (defn area [w :- Int h :- Int] :- Int
   (* w h))
 

@@ -1,10 +1,10 @@
 # Byte-stable emit — move 2
 
-`datum->pretty` (in `beagle-lib/private/claims-roundtrip.rkt`) renders a parsed
-Beagle program (or one reconstructed from claims) back to source. It is the
+`datum->pretty` (in `beagle-lib/private/facts-roundtrip.rkt`) renders a parsed
+Beagle program (or one reconstructed from facts) back to source. It is the
 deterministic, local, comment-preserving formatter that lets the graph be
 canonical and text be a regenerable lowering — the precondition for the
-claim-canonical flip (move 3).
+fact-canonical flip (move 3).
 
 ## The contract (what `run.sh` gates)
 
@@ -15,7 +15,7 @@ claim-canonical flip (move 3).
    its line when a form breaks). This is the property determinism does NOT give for
    free.
 4. **Comment-preserving** — leading/trailing/file comments survive the
-   claims→source render (`render-edn` uses `datum->pretty`, keeping Turtle #6
+   facts→source render (`render-edn` uses `datum->pretty`, keeping Turtle #6
    placement).
 
 `run.sh` proves all four: fixed-point + round-trip over the in-repo fixture corpus

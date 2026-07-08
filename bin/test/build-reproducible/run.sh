@@ -3,7 +3,7 @@
 #
 # match's emit used (random 99999) for its `match__N` temp, so two builds of the
 # same source produced different .clj (broke byte-reproducible builds + forced the
-# code-as-claims recompile gate to guard around it). Now the temp is a deterministic
+# code-as-facts recompile gate to guard around it). Now the temp is a deterministic
 # per-program counter. This gate builds a match-using module TWICE and asserts the
 # emitted .clj is byte-identical. Racket-only.
 set -uo pipefail

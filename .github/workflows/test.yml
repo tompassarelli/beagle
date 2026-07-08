@@ -93,9 +93,9 @@ jobs:
       - name: Self-host remint — three-way oracle agreement
         run: _BEAGLE_RACKET="$(which racket)" bin/beagle-remint --oracle
 
-      # Byte-stable emit (move 2): the claims->source pretty-printer must be a
+      # Byte-stable emit (move 2): the facts->source pretty-printer must be a
       # deterministic, LOCAL, comment-preserving, round-trip-preserving formatter —
-      # the precondition for making claims canonical and text a regenerable lowering.
+      # the precondition for making facts canonical and text a regenerable lowering.
       # Racket-only (no fram/bb), so it runs right after the suite.
       - name: Byte-stable emit — fixed-point + locality + comments gate
         run: bin/test/byte-stable-emit/run.sh
@@ -106,12 +106,12 @@ jobs:
         run: bin/test/build-reproducible/run.sh
 
       # Graph-native repair: beagle-cascade derives its call graph from the Fram
-      # claim graph (scope-correct), not regex over text. That runs on the Fram
+      # fact graph (scope-correct), not regex over text. That runs on the Fram
       # engine, so we check out fram's committed classpath and gate the
       # scope-correctness proof (a change to mod_a/helper must NOT blast mod_b's
       # same-named helper). This is the load-bearing test for the thesis that
       # graph-backed repair beats text-backed repair. (babashka installed above.)
-      - name: Checkout fram (the claim engine cascade runs on)
+      - name: Checkout fram (the fact engine cascade runs on)
         uses: actions/checkout@v5
         with:
           repository: tompassarelli/fram
@@ -119,7 +119,7 @@ jobs:
 
       # beagle-callgraph RENTS the scope-correct call-graph engine (resolve.clj),
       # which was FOLDED into the fram repo at fram/chartroom (beagle source
-      # code-intelligence, renting fram's public claim+Datalog API). No separate
+      # code-intelligence, renting fram's public fact+Datalog API). No separate
       # chartroom checkout — it ships inside the fram checkout, so CHARTROOM points
       # at .fram/chartroom. (The fold is licensed by lockstep cadence + this very
       # friction relief; fram's core_code_blind_test guards the seam stays clean.)
@@ -139,12 +139,12 @@ jobs:
       - name: Repair pipeline — structured semantic suspicions gate
         run: bin/test/repair-semantic/run.sh
 
-      # Move 3: code can be claim-canonical. The loop .bclj -> lossless claims ->
-      # (through a real Fram store) -> claims -> byte-stable .bclj is datum-identical
+      # Move 3: code can be fact-canonical. The loop .bclj -> lossless facts ->
+      # (through a real Fram store) -> facts -> byte-stable .bclj is datum-identical
       # through the engine AND recompiles to the IDENTICAL program (modulo srcloc
       # debug pointers). Proven over fram/src. Needs racket + bb + fram's out/.
-      - name: Code as canonical claims — recompile-identity gate
-        run: CODE_AS_CLAIMS_CORPUS="$GITHUB_WORKSPACE/.fram/src" FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" bin/test/code-as-claims/run.sh
+      - name: Code as canonical facts — recompile-identity gate
+        run: CODE_AS_FACTS_CORPUS="$GITHUB_WORKSPACE/.fram/src" FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" bin/test/code-as-facts/run.sh
 
       # Scope-correct rename — the COMPLETE engine (chartroom's resolve.clj, refers_to),
       # ONE gate across every scope hazard: mod_a/helper renamed but mod_b's untouched
@@ -153,30 +153,30 @@ jobs:
       # an existing binding refused; each renamed tree recompiles. Repair as a graph
       # operation, O(1) (edits the def; references follow refers_to).
       - name: Scope-correct rename (collision + shadowing + cross-module) gate
-        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" CODE_AS_CLAIMS_CORPUS="$GITHUB_WORKSPACE/.fram/src" bin/test/code-as-claims/rename.sh
+        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" CODE_AS_FACTS_CORPUS="$GITHUB_WORKSPACE/.fram/src" bin/test/code-as-facts/rename.sh
 
       # Delete as a graph op: the no-orphaned-references invariant. A safe delete omits
       # the form + its subtree and renumbers siblings (no truncation); a delete that
       # would orphan a reference (this module or a consumer) is refused, fail-closed.
       - name: Delete as a graph op — no-orphaned-references invariant
-        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" bin/test/code-as-claims/delete.sh
+        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" bin/test/code-as-facts/delete.sh
 
       # NL -> edit authoring layer: prose intent -> a structured edit (data an agent
       # emits) -> the engine (rename/delete) -> recompile-gated commit, else fail closed.
       - name: NL-to-edit authoring layer — recompile-gated transaction
-        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" bin/test/code-as-claims/authoring.sh
+        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" bin/test/code-as-facts/authoring.sh
 
       # Graph-native AUTHORING (the dogfood at the root): upsert-form (add/replace a def)
-      # and set-body are CLAIM operations on the AST-claims, not text patches — scope-correct
+      # and set-body are FACT operations on the AST-facts, not text patches — scope-correct
       # by identity (an authored ref resolves through refers_to), recompile-gated, fail-closed.
-      - name: Authoring-as-claims — upsert-form + set-body verbs
-        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" bin/test/code-as-claims/authoring-verbs.sh
+      - name: Authoring-as-facts — upsert-form + set-body verbs
+        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" bin/test/code-as-facts/authoring-verbs.sh
 
       # One engine, both pillars, on REAL code: the blast radius (REASON) of fram.cnf/value!
       # predicts the cross-module reach of renaming it (REPAIR), and the repaired tree
       # recompiles — both derived from the same converged refers_to resolver.
       - name: Engine demo — reason + repair consistent on real fram/src
-        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" CODE_AS_CLAIMS_CORPUS="$GITHUB_WORKSPACE/.fram/src" bin/test/engine-demo/run.sh
+        run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" CODE_AS_FACTS_CORPUS="$GITHUB_WORKSPACE/.fram/src" bin/test/engine-demo/run.sh
 
       - name: Show accumulated surface debt
         if: always()

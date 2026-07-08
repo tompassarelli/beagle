@@ -2,7 +2,7 @@
 # Delete as a graph operation — the no-orphaned-references invariant.
 #
 # The second verb in the authoring vocabulary (after rename). Deleting a def is a
-# claim edit on the canonical store, gated by a REASONING query the graph can answer
+# fact edit on the canonical store, gated by a REASONING query the graph can answer
 # exactly and text cannot: "does any reference point at this binding?" (refers_to).
 #   - SAFE (no references): remove the def's form + project; the rest of the file
 #     survives (the renderer reads fN children consecutively, so the engine must

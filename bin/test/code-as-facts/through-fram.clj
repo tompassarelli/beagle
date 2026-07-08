@@ -1,12 +1,12 @@
 #!/usr/bin/env bb
-;; through-fram: load reader-level claims into a REAL Fram store, then re-extract
-;; them FROM the store. This is the "through the engine" leg of the code-as-claims
-;; loop: source -> claims -> Fram -> claims -> source. Proves the program persists
-;; through the claim engine (the canonical store), not just an in-memory map.
+;; through-fram: load reader-level facts into a REAL Fram store, then re-extract
+;; them FROM the store. This is the "through the engine" leg of the code-as-facts
+;; loop: source -> facts -> Fram -> facts -> source. Proves the program persists
+;; through the fact engine (the canonical store), not just an in-memory map.
 ;;
-;;   racket .../claims-roundtrip.rkt --emit-edn FILE > a.edn
+;;   racket .../facts-roundtrip.rkt --emit-edn FILE > a.edn
 ;;   bb -cp <fram>/out through-fram.clj a.edn > b.edn
-;;   racket .../claims-roundtrip.rkt --render b.edn   # byte-stable source
+;;   racket .../facts-roundtrip.rkt --render b.edn   # byte-stable source
 ;;
 ;; (Mirrors chartroom's roundtrip_fram.clj; inlined here so the move-3 gate is
 ;; self-contained — beagle CI already checks out fram for the classpath.)
@@ -36,9 +36,9 @@
     (c/claim! ctx L P R tx)))
 
 (binding [*out* *err*]
-  (println "loaded" (count (c/current-claims ctx)) "claims into a Fram store"))
+  (println "loaded" (count (c/current-claims ctx)) "facts into a Fram store"))
 
-;; re-extract every live claim straight from the store, back to EDN triples.
+;; re-extract every live fact straight from the store, back to EDN triples.
 (doseq [cid (c/current-claims ctx)]
   (let [cl (c/claim-of ctx cid)
         l (:l cl) p (:p cl) r (:r cl)
