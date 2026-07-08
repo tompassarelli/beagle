@@ -32,4 +32,4 @@ if [[ ${#files[@]} -eq 0 ]]; then
     exit 1
 fi
 
-"$RACKET" -e "(require beagle/private/claims-cli)(run-claims (vector->list (current-command-line-arguments)))" -- "${files[@]}"
+"$RACKET" -e "(require beagle/private/facts-cli)(run-claims (vector->list (current-command-line-arguments)))" -- "${files[@]}"

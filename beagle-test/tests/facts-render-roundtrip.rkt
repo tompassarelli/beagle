@@ -15,7 +15,7 @@
          racket/string)
 
 (define crt-path
-  (path->string (collection-file-path "claims-roundtrip.rkt" "beagle" "private")))
+  (path->string (collection-file-path "facts-roundtrip.rkt" "beagle" "private")))
 
 (define (run . args)
   (define-values (proc out in err) (apply subprocess #f #f #f (find-executable-path "racket") crt-path args))

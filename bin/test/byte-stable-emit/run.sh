@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Regression test + proof for move 2 — byte-stable emit.
 #
-# The pretty-printer (datum->pretty in beagle-lib/private/claims-roundtrip.rkt)
+# The pretty-printer (datum->pretty in beagle-lib/private/facts-roundtrip.rkt)
 # turns claims back into source. It must satisfy the move-2 contract:
 #   1. idempotent fixed-point  — pretty(parse(pretty(x))) == pretty(x)
 #   2. round-trip preserving   — pretty text re-reads to the IDENTICAL datum
@@ -14,7 +14,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"   # repo root (bin/test/byte-stable-emit -> 3 up)
-RT="$ROOT/beagle-lib/private/claims-roundtrip.rkt"
+RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
 fail=0
 
 echo "================ move 2 — byte-stable emit gate ================"

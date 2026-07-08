@@ -19,7 +19,7 @@
          racket/port
          racket/string
          beagle/private/parse
-         (only-in beagle/private/claims-roundtrip
+         (only-in beagle/private/facts-roundtrip
                   datum->edn-lines edn-triples->datum
                   stx->edn-lines edn-triples->syntax
                   emit-edn-typed-file))

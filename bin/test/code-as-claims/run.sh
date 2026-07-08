@@ -16,7 +16,7 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
-RT="$ROOT/beagle-lib/private/claims-roundtrip.rkt"
+RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
 FRAM_OUT="${FRAM_OUT:-$HOME/code/fram/out}"
 SRC="${CODE_AS_CLAIMS_CORPUS:-$HOME/code/fram/src}"
 fail=0

@@ -15,7 +15,7 @@
 ;; triples into a Fram claim store.
 
 (require "parse.rkt"
-         "emit-claims.rkt")
+         "emit-facts.rkt")
 
 (provide run-claims)
 

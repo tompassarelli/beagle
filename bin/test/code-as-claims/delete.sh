@@ -16,7 +16,7 @@ export RESOLVE_OUT="$(mktemp -d)"   # hermetic: per-run render output (no global
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
-RT="$ROOT/beagle-lib/private/claims-roundtrip.rkt"
+RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
 FRAM_OUT="${FRAM_OUT:-$HOME/code/fram/out}"
 CHARTROOM="${CHARTROOM:-$HOME/code/fram/chartroom}"
 RES="$CHARTROOM/src/resolve.clj"

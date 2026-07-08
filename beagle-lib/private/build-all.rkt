@@ -12,7 +12,7 @@
          "query.rkt"
          "extensions.rkt"
          ;; #33 datum-IR: build straight from claim triples, skipping the text trip
-         (only-in "claims-roundtrip.rkt" edn-triples->syntax read-edn-triples))
+         (only-in "facts-roundtrip.rkt" edn-triples->syntax read-edn-triples))
 
 (define (extension-for-target target)
   (case target

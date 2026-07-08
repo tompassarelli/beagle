@@ -5,7 +5,7 @@
 ;; the reconstructed program through the real clj emitter instead of a printer.
 ;;   racket claims-to-clj.rkt <module.edn>   ; <module.edn> = `--emit-edn` output
 (require racket/port
-         "claims-roundtrip.rkt"   ; read-edn-triples, edn-triples->syntax
+         "facts-roundtrip.rkt"   ; read-edn-triples, edn-triples->syntax
          "parse.rkt"              ; parse-program
          "emit.rkt")              ; emit-program (dispatches by target)
 

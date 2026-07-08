@@ -8,7 +8,7 @@
 ;;   racket claims-check-emit.rkt <module.edn>   ; <module.edn> = `--emit-edn` output
 ;; stdout = the module's clj (on PASS); exit 1 + stderr diagnostics (on type error).
 (require racket/port
-         "claims-roundtrip.rkt"   ; read-edn-triples, edn-triples->syntax
+         "facts-roundtrip.rkt"   ; read-edn-triples, edn-triples->syntax
          "parse.rkt"              ; parse-program
          "emit.rkt"               ; emit-program
          "check.rkt")             ; type-check-with-locs!
