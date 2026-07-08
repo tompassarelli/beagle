@@ -4,7 +4,7 @@ A running ledger. The thesis behind graph-native repair is that **text-as-source
 isn't neutral** — it doesn't just make analysis slower, it *silently corrupts and
 conceals*. Each entry below is a real correctness bug that existed for some time,
 invisible, and became visible only when a layer moved from text/`Any` to structured
-claims. "Migrating off text *found* these" is the receipt that the boat deserved to
+facts. "Migrating off text *found* these" is the receipt that the boat deserved to
 burn.
 
 The bar for an entry: a genuine wrong-answer or data-loss bug (not a style nit),
@@ -23,7 +23,7 @@ unchecked as untyped Clojure. Expressing the real type (`Int?`) forced the guard
 
 ## 2. `beagle-cascade` bare-name blast radius merged across modules
 **Surfaced by:** moving cascade's call graph from regex-over-text to the Fram
-`calls` claim graph (move 1, tool 1).
+`calls` fact graph (move 1, tool 1).
 **The bug:** the regex call graph keyed callers by **bare function name**, so a
 `helper` defined in two modules merged into one node. Changing `mod_a/helper` was
 reported as breaking callers of `mod_b/helper` — a function never touched. Wrong
@@ -83,7 +83,7 @@ fine; only a source with a float literal + comments through a *real store* expos
 the loader treats any bare number as a node-ref (leaf values are quoted strings in
 the EDN); `edn-root` prefers the structural wrapper over hash order. (Same probe also
 found `emit-edn` crashing on `.bnix` top-level brace-maps where `syntax-span`=#f —
-fixed with a guard.) Gated: `bin/test/code-as-claims`.
+fixed with a guard.) Gated: `bin/test/code-as-facts`.
 
 ---
 
@@ -100,7 +100,7 @@ hiding wrong answers. That is evidence for the thesis, not incidental cleanup.
 > now a deterministic per-program counter (`match__0`, `match__1`, … — parameterized
 > fresh in `clj-emit-program`, the emit-odin pattern), so the same source compiles
 > byte-identically every build. Gated by `bin/test/build-reproducible`. Not a
-> claims-loop loss (the loop was always datum-faithful), but it makes the committed
+> facts-loop loss (the loop was always datum-faithful), but it makes the committed
 > `out/` and the recompile gate robust without relying on the build-nondeterminism guard.
 >
 > **Same class in the JS backend — FIXED (found by adversarial verification):** the
@@ -118,7 +118,7 @@ hiding wrong answers. That is evidence for the thesis, not incidental cleanup.
 > **Scope-correctness holes in graph-native RENAME — FIXED (adversarial verification).**
 > Distinct from the migration findings above (those were *text* hiding bugs); these were
 > bugs in the *graph engine itself*, found by adversarially stress-testing the headline
-> claim "graph-native rename is scope-correct, unlike sed." Both **recompiled clean** —
+> fact "graph-native rename is scope-correct, unlike sed." Both **recompiled clean** —
 > the most dangerous failure mode (a silent meaning change a green build endorses):
 > 1. **Typed paren-param `(x :- T)` not collected as a binding.** `collect-bind-syms`
 >    handled bare/`[..]`/`{..}` params but not the legal paren form, so a param `(red :- Int)`
@@ -132,7 +132,7 @@ hiding wrong answers. That is evidence for the thesis, not incidental cleanup.
 >    the resolver's exact frame construction) refuses the rename if any reference to the
 >    renamed def has `new` bound by an enclosing local — checked across all files, since a
 >    `:refer`'d bare reference lives in a consumer module. Both gated by
->    `bin/test/code-as-claims/rename.sh §5`. The lesson mirrors the thesis: scope-correctness
+>    `bin/test/code-as-facts/rename.sh §5`. The lesson mirrors the thesis: scope-correctness
 >    is a *property to be verified adversarially*, not assumed because the graph "knows scope."
 >
 > **The lesson, quantified — adversarial sweep #2 found SEVENTEEN more.** A second,
@@ -169,7 +169,7 @@ hiding wrong answers. That is evidence for the thesis, not incidental cleanup.
 > `module-name/Name` refs; `defprotocol` method names; and `letfn` + `extend-type`
 > binding scopes. Every fix is CI-gated (`rename.sh §1-§16`, `delete.sh §1-§10`,
 > `authoring.sh`) and move-3 identity (datum + recompile) held throughout. The deepest
-> lesson, now quantified at ~57: "the graph knows scope" is a *claim to be earned per
+> lesson, now quantified at ~57: "the graph knows scope" is a *fact to be earned per
 > form*, not a property of being a graph — an adversarial loop, run until dry, is how
 > you earn it. (Acceptable known-limitations, not bugs: comment prose-word over-rename;
 > `:rename` map, which beagle rejects; fused reader `~x` in macro templates, which the

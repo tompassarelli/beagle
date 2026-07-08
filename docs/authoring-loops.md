@@ -31,7 +31,7 @@ from "repair-compiler loop" — the loop is the repairer; the compiler is its
 oracle. *(Prior art: APR generate-and-validate; TDD red→green.)*
 
 **edit channel** — HOW a change lands: text re-emit (whole-file, def-level)
-or graph edit (claim changeset). Channels differ in cost and blast; they
+or graph edit (fact changeset). Channels differ in cost and blast; they
 share one oracle ladder. *(Already house vocabulary: "edit-channel".)*
 
 **blast zone** — what a change can reach: transitive callers/dependents,
@@ -40,8 +40,8 @@ diagnostics — consulted before proposing, not after failing.
 *(Prior art: change-impact analysis; "blast radius" from ops.)*
 
 **reasoning loop** — the agent's cycle around one task: gather context
-(blast zone, claims, docs) → form intent → drive repair loops → verify
-intent against witnesses → record the outcome as claims. The only loop with
+(blast zone, facts, docs) → form intent → drive repair loops → verify
+intent against witnesses → record the outcome as facts. The only loop with
 judgment in it. *(Prior art: OODA; the agentic loop.)*
 
 **task loop** — session scale: many reasoning loops under one goal,

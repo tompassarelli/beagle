@@ -117,7 +117,7 @@ with SpiderMonkey flagging possible unimplementability
 
 ---
 
-## 4. The maximal claim
+## 4. The maximal assertion
 
 > The Squint-vs-Cherry tradeoff — small bundle **XOR** faithful Clojure semantics —
 > exists only because both are untyped. Beagle, because it has types, **collapses it**:
@@ -183,14 +183,14 @@ their inputs' *content*. That is Eddy's next reactivity tier, blocked precisely 
 value-semantics this doc owns. Dependency direction is Eddy → Beagle, so it lands with
 *no new Eddy work*.
 
-**The deeper convergence (ambition).** Eddy's store *is already claim-shaped*: stable
+**The deeper convergence (ambition).** Eddy's store *is already fact-shaped*: stable
 integer **eid** identity, an append **event log** (`notify({add|update|remove, eid,
 attr, old, new})` = supersettable assertions), **undo/redo as a fold over that log**,
-and **derived views** over the entities. Eddy independently reinvented a claim store in
+and **derived views** over the entities. Eddy independently reinvented a fact store in
 emitted JS — and reached for **identity addressing (eid)**, independently corroborating
 the addressing thesis (fram `docs/ADDRESSING_THESIS.md`). This is where the *two
 customers converge*: value-semantics-ownership (sound `=`/hash/change-detection over the
-log) and the claim engine (eid substrate, supersession, Datalog derived-views replacing
+log) and the fact engine (eid substrate, supersession, Datalog derived-views replacing
 hand-rolled `byContact` filters) are the two halves that make Eddy's store rigorous. See
 the existing `web/spike/eddy-on-claims/` probe — this work is its value-semantics half.
 
@@ -298,7 +298,7 @@ This is value-resolution *owned by the language*, exactly as name-resolution is.
 
 ## 9. The cross-target conformance harness (the falsifier)
 
-The single artifact that makes the whole claim testable.
+The single artifact that makes the whole assertion testable.
 
 - **Shape.** A corpus of small Beagle programs, each computing values / exercising `=`,
   `hash`, set-membership, and map-by-value-key. Compile each to **all five targets**,
@@ -357,7 +357,7 @@ profiling. The *correctness* invariant and harness are not gated.)
 Owned resolution has so far been about **names** — Beagle owns what a reference points
 to; the target can't (see fram `docs/ADDRESSING_THESIS.md`). This is the **second
 axis: Beagle owns what a value *is and means*, identically across Clojure, CLJS, JS,
-Nix, Odin — the target can't.** Same founding claim ("graph-as-truth requires owned
+Nix, Odin — the target can't.** Same founding assertion ("graph-as-truth requires owned
 resolution requires a language"), applied to value semantics instead of identity — and
 unlike name-resolution, this one is *immediately demonstrable* via §9.
 
@@ -367,13 +367,13 @@ This work compiles away the *value-semantics runtime* — it resolves representa
 compile time and emits native where provable. Same move, different layer, **stacked**:
 Eddy on top of Beagle. React resolves "what changed" at runtime; Eddy resolves it at
 compile time. Cherry resolves "what do these values mean" at runtime; Beagle resolves it
-at compile time. One claim — *resolve at compile time what others resolve at runtime,
+at compile time. One assertion — *resolve at compile time what others resolve at runtime,
 emit minimal code you own* — demonstrated at two layers, with Eddy as the proof it
 composes.
 
-**Discipline (so the dissertation doesn't eat the talk):** the *talk-sized* claim is
+**Discipline (so the dissertation doesn't eat the talk):** the *talk-sized* assertion is
 "owned value-resolution: identical semantics across five targets, proven by one
-differential suite." The *research-program-sized* claim is the full
+differential suite." The *research-program-sized* assertion is the full
 representation-selection-beats-Cherry result. Lead with the former; the latter is the
 field behind it.
 

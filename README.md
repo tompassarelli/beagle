@@ -49,9 +49,9 @@ the distribution artifact and bb is the fallback. Details:
 - **[wake](https://github.com/tompassarelli/wake)** — an application compiler
   (declare entities, views, routes → plain direct-DOM JS), itself authored in
   `.bjs` (JS target).
-- **[fram](https://github.com/tompassarelli/fram)** — an append-only claim engine
-  (claims + stratified Datalog), authored in `.bclj` (Clojure target).
-- **[tern](https://github.com/tompassarelli/tern)** — claim-native work
+- **[fram](https://github.com/tompassarelli/fram)** — an append-only fact engine
+  (facts + stratified Datalog), authored in `.bclj` (Clojure target).
+- **[tern](https://github.com/tompassarelli/tern)** — fact-native work
   coordination (CLI + MCP, on babashka), authored in `.bclj` (Clojure target).
 
 ## One source, many back-ends
