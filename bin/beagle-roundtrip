@@ -5,7 +5,7 @@
 #   bin/beagle-roundtrip --emit-edn <file>      # reader-level facts as EDN (for Fram)
 #   bin/beagle-roundtrip --verify <edn> <src>   # verify EDN reconstructs <src>
 #
-# Proves a beagle program round-trips through its CNF fact graph losslessly:
+# Proves a beagle program round-trips through its store-layer fact graph losslessly:
 # the graph is a source of truth; text is a regenerable view.
 set -o pipefail
 source "$(dirname "$0")/_beagle-racket"

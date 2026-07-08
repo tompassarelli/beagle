@@ -13,7 +13,7 @@
 (ns through-fram
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
-            [fram.cnf :as c]))
+            [fram.store :as c]))
 
 (def edn-path (first *command-line-args*))
 
