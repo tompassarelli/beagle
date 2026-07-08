@@ -33,14 +33,14 @@
         ;; numbers — so ANY number object is a node-ref (incl. float ids, which the
         ;; old `integer?` test mis-stored as values, orphaning the comment subtree).
         R (if (number? o) (ent o) (c/value! ctx o))]
-    (c/claim! ctx L P R tx)))
+    (c/fact! ctx L P R tx)))
 
 (binding [*out* *err*]
-  (println "loaded" (count (c/current-claims ctx)) "facts into a Fram store"))
+  (println "loaded" (count (c/current-facts ctx)) "facts into a Fram store"))
 
 ;; re-extract every live fact straight from the store, back to EDN triples.
-(doseq [cid (c/current-claims ctx)]
-  (let [cl (c/claim-of ctx cid)
+(doseq [cid (c/current-facts ctx)]
+  (let [cl (c/fact-of ctx cid)
         l (:l cl) p (:p cl) r (:r cl)
         ps (c/literal ctx p)]
     (if (c/value-object? ctx r)
