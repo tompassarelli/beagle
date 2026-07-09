@@ -51,7 +51,7 @@ the distribution artifact and bb is the fallback. Details:
   `.bjs` (JS target).
 - **[fram](https://github.com/tompassarelli/fram)** — an append-only fact engine
   (facts + stratified Datalog), authored in `.bclj` (Clojure target).
-- **[tern](https://github.com/tompassarelli/tern)** — fact-native work
+- **[north](https://github.com/tompassarelli/north)** — fact-native work
   coordination (CLI + MCP, on babashka), authored in `.bclj` (Clojure target).
 
 ## One source, many back-ends
