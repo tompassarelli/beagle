@@ -79,6 +79,10 @@
             mkdir -p "$out"
             cp -r beagle-lib "$out/beagle-lib"
             cp -r bin "$out/bin"
+            # bin/test/ is the test-harness DIRECTORY, not an executable — if it
+            # lands on PATH it shadows POSIX `test` system-wide (root shell-outs
+            # exec a directory -> EACCES; broke nixos-rebuild 2026-07-09).
+            rm -rf "$out/bin/test"
             if [ -d share ]; then cp -r share "$out/share"; fi
             chmod -R u+w "$out/beagle-lib" "$out/bin"
 
