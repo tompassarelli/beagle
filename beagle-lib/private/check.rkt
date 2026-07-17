@@ -43,7 +43,7 @@
 ;; BEAGLE_PURITY ('off | 'warn | 'error). Default is now 'error: a strict-mode
 ;; defn whose body mutates (set! or a `!`-named call) must itself be `!`-named,
 ;; or it is a hard compile error. Opt down with BEAGLE_PURITY=off|warn. All
-;; live consumers (gjoa/chelonia/nixos) and beagle's own corpus are clean at
+;; live consumers (gjoa/fram/nixos-config) and beagle's own corpus are clean at
 ;; 'error as of the flip; mirrors the BEAGLE_CHECK_PROFILE env precedent.
 (define current-purity-enforcement
   (make-parameter
