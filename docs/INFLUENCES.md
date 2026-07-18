@@ -69,7 +69,74 @@ killed.
 ground-truth in `20260615034227` (compile-time combiner unification). See also
 `CLAUDE.md` → "Architecture".
 
-## Typed Lisp lineage — Clojure surface, erased types
+## ML family — type semantics, not ML's grammar
+
+Beagle's type discipline is ML-lineage in *semantics*, deliberately not in
+*surface*: algebraic data types, exhaustiveness checking over their cases,
+explicit and bounded polymorphism, variance, and heterogeneous positional
+types (`HVec`) all read as "what would a Hindley-Milner-family checker
+enforce here" — realized as `defrecord`/`match`/`forall (T <: Bound)` inside
+Clojure's own grammar, never ML's `let ... in`/`match ... with` concrete
+syntax. Two amputations are deliberate, not oversights:
+
+- **No ML grammar.** The borrowing stops at what the checker *proves*, not
+  what the source *looks like* — see "The Lisp/Clojure/EDN surface" below for
+  why the authoring medium stays s-expressions.
+- **No claim to full Hindley-Milner.** Beagle infers interiors under explicit
+  top-level annotations (`:-`); it does not claim principal-type global
+  inference, unification-driven generalization, or any of the rest of HM's
+  machinery. "ADTs and exhaustiveness" is a much smaller, honestly-scoped debt
+  than "we implemented ML."
+
+*Why it matters here:* exhaustiveness and bounded polymorphism are exactly
+the failures the repair loop is best at — a missing match arm or a bound
+violation is structured, located, and machine-fixable in a way an untyped
+runtime error never is.
+
+## Unison — names versus identity, realized as FRAM stable binding identity
+
+Unison's core insight is that a definition's *name* and its *identity*
+(content hash) are separate concerns — you can rename freely without
+breaking a reference, because references bind to identity, not to a string.
+Beagle (via FRAM) borrows that **separation**, not Unison's runtime:
+
+- **Stable binding identity.** A binding's identity in FRAM survives rename —
+  callers, the fact graph, and the repair loop track *what a definition is*,
+  not the string that currently labels it.
+- **Not content-addressed code.** Beagle does not adopt Unison's
+  content-addressed storage, its hash-as-filename codebase model, or its
+  structural-diff-as-deployment story. FRAM's identity is a stable binding
+  key inside the ordinary compiler pipeline, not a replacement runtime or
+  storage substrate.
+
+*Why it matters here:* the repair loop rewrites code (renames, clause
+skeletons, tree splices). A fix that survives a rename — because it targets
+identity, not a name string — is a fix that doesn't shatter the next time
+someone edits nearby.
+
+## Datalog — recursive, stratified derivations, scoped to FRAM's graph
+
+Datalog contributes a narrow, specific borrowing: recursive and stratified
+derivation over a fact graph — the way FRAM computes transitive closures
+(callers-of-callers, blast radius, leverage) as a fixpoint over base facts,
+not as hand-written recursive traversal code.
+
+- **Scoped to FRAM's graph layer.** This is how the *coordination and
+  code-graph substrate* answers relational questions (`codegraph`'s "who
+  calls X, transitively"), not a claim that Beagle's ordinary compiled
+  programs execute as Datalog or that logic programming is a language
+  feature.
+- **Not ordinary computation.** A `.bclj` function body is still eager,
+  typed, imperative-shaped Clojure-family code lowered to its target. The
+  Datalog borrowing lives one layer up, in how the graph that *represents*
+  the code answers queries about itself.
+
+*Why it matters here:* the repair loop's diagnoses ("this call site breaks
+if you change that signature") are graph-shaped questions. Stratified
+recursive derivation is the right tool for exactly that shape, without
+smuggling logic-programming semantics into the compiled language itself.
+
+## The Lisp/Clojure/EDN surface — the one small structural authoring medium
 
 - **Clojure as the surface.** Beagle is "Clojure plus types, nothing else." Any
   divergence from Clojure must be load-bearing for the type system or a backend,
@@ -81,16 +148,28 @@ ground-truth in `20260615034227` (compile-time combiner unification). See also
 - **Parens as a machine-editable medium.** A fix is a tree splice, not a regex
   over free-form syntax. The s-expression surface is what makes auto-apply
   tractable.
+- **Exact Clojure syntax is not inevitable; the typed EDN/Lisp *family* is
+  what wins.** Nothing about the repair loop requires parentheses spelled
+  exactly Clojure's way — a different bracket convention or reader could carry
+  the same property. What is load-bearing is the *family*: a small,
+  homoiconic, structurally-editable EDN/Lisp medium, because that is what
+  makes "the fix is a tree splice, not a regex" true. Clojure was the specific
+  member of that family Beagle picked to start from; the family, not the
+  specific grammar, is the thing the thesis depends on.
 
 ## The synthesis
 
-The borrowings are not a remix — each is a means to the same end:
+The borrowings are not a remix — each is a means to the same end, and each is
+scoped to a specific concern rather than an adopted surface or runtime:
 
-| Borrowed | Serves the repair loop by… |
-|---|---|
-| Lean diagnostics | giving the loop something *precise* to repair |
-| Kernel uniformity | making the whole surface analyzable as one thing → one IR |
-| Typed Lisp | generating the diagnoses (types) over a machine-editable medium (parens) |
+| Borrowed from | Concern it supplies | Serves the repair loop by… |
+|---|---|---|
+| Lean | diagnostics discipline | giving the loop something *precise* to repair |
+| Kernel | combiner uniformity | making the whole surface analyzable as one thing → one IR |
+| ML family | type semantics (ADTs, exhaustiveness, explicit/bounded polymorphism, variance, heterogeneous positional types) — not ML's grammar, no full-HM claim | generating diagnoses (types) that are structured and machine-fixable, without importing a second concrete syntax |
+| Unison | names-vs-identity separation, realized as FRAM stable binding identity — not content-addressed code | letting a repair (rename, splice) target *what a binding is*, so it survives edits instead of shattering on the next rename |
+| Datalog | recursive/stratified derivation inside FRAM's graph — not Beagle's ordinary computation | answering the graph-shaped questions ("what breaks if this changes") the repair loop's diagnoses depend on |
+| Lisp/Clojure/EDN | one small structural authoring surface — the family, not Clojure's exact grammar | making the medium itself machine-editable, so fixes are tree splices instead of textual guesses |
 
 On top of that foundation sits the part with no upstream analogue: the
 **auto-repair loop** — `detect → diagnose → fix → re-verify` — where the
