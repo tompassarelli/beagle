@@ -136,7 +136,16 @@
             (str "(U " (str/join " " (mapv (fn [m :- Any] :- String (type->string m)) members)) ")")))
     (var-type? t) (get t "name")
     (poly-type? t)
-      (str "(forall [" (str/join " " (get t "vars")) "] " (type->string (get t "body")) ")")
+      ;; Render bounded vars as (T <: Bound), bare vars as T — mirrors the oracle
+      ;; type-poly delaborator (types.rkt).
+      (let [bounds (get t "bounds")
+            var-strs (mapv (fn [v :- String] :- String
+                             (let [b (if (nil? bounds) nil (get bounds v))]
+                               (if (nil? b)
+                                 v
+                                 (str "(" v " <: " (type->string b) ")"))))
+                           (get t "vars"))]
+        (str "(forall [" (str/join " " var-strs) "] " (type->string (get t "body")) ")"))
     :else "?"))
 
 ;; --- unqualify ---------------------------------------------------------------
@@ -144,6 +153,32 @@
 (defn unqualify-name [name :- String] :- String
   (let [idx (str/index-of name "/")]
     (if (some? idx) (subs name (+ idx 1)) name)))
+
+;; --- type-invariant-equal? ---------------------------------------------------
+
+;; Structural equality for INVARIANT positions (the Atom element). Symmetric and
+;; does NOT treat Any as a wildcard (Any ≡ Any only, never Any ≡ Int) — that is
+;; what keeps the mutable-cell invariance hole closed. Unqualifies prim names so
+;; a record referenced through an alias still equals itself. Mirrors the oracle
+;; type-invariant-equal? (types.rkt).
+(defn type-invariant-equal? [a :- Any b :- Any] :- Bool
+  (cond
+    (and (prim? a) (prim? b))
+      (= (unqualify-name (get a "name")) (unqualify-name (get b "name")))
+    (and (app-type? a) (app-type? b))
+      (and (= (get a "name") (get b "name"))
+           (= (count (get a "args")) (count (get b "args")))
+           (every? (fn [i :- Int] :- Bool
+                     (type-invariant-equal? (nth (get a "args") i) (nth (get b "args") i)))
+                   (range (count (get a "args")))))
+    (and (union-type? a) (union-type? b))
+      (and (= (count (get a "members")) (count (get b "members")))
+           (every? (fn [i :- Int] :- Bool
+                     (type-invariant-equal? (nth (get a "members") i) (nth (get b "members") i)))
+                   (range (count (get a "members")))))
+    (and (var-type? a) (var-type? b))
+      (= (get a "name") (get b "name"))
+    :else (= a b)))
 
 ;; --- type-compatible? --------------------------------------------------------
 
@@ -202,6 +237,29 @@
              (= (nil? ar) (nil? er))
              (or (nil? ar) (type-compatible? ar er))
              (type-compatible? (get actual "ret") (get expected "ret"))))
+
+    ;; Atom is a MUTABLE cell, so it is INVARIANT in its element type: (Atom A) is
+    ;; compatible with (Atom B) iff A and B are structurally EQUAL. Covariance here
+    ;; would be UNSOUND (a callee holding (Atom Any) could reset! a wrong type into
+    ;; an aliased (Atom Int)). Compared with invariant-equal (Any is NOT a
+    ;; wildcard), NOT type-compatible?. Mirrors the oracle G2 arm (types.rkt).
+    (and (app-type? actual) (app-type? expected)
+         (= (get actual "name") "Atom") (= (get expected "name") "Atom"))
+      (and (= (count (get actual "args")) (count (get expected "args")))
+           (every? (fn [i :- Int] :- Bool
+                     (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i)))
+                   (range (count (get actual "args")))))
+
+    ;; A heterogeneous tuple IS a vector: (HVec a b ..) <: (Vec T) when every
+    ;; position is compatible with T (immutable, so this widening is sound). One
+    ;; direction only — a plain (Vec T) is NOT an (HVec ..). Mirrors the oracle
+    ;; G3 arm (types.rkt).
+    (and (app-type? actual) (= (get actual "name") "HVec")
+         (app-type? expected) (= (get expected "name") "Vec")
+         (= 1 (count (get expected "args"))))
+      (every? (fn [a :- Any] :- Bool
+                (type-compatible? a (nth (get expected "args") 0)))
+              (get actual "args"))
 
     (and (app-type? actual) (app-type? expected))
       (and (= (get actual "name") (get expected "name"))
@@ -755,6 +813,18 @@
     (when (and (not (nil? rest-t)) (> (count arg-types) n-fixed))
       (doseq [at (drop n-fixed arg-types)]
         (infer-type-var-bindings! rest-t at bindings)))
+    ;; Bounded forall: a var inferred to a type outside its (T <: Bound) bound is
+    ;; a static error. Mirrors resolve-poly-call bound enforcement (check.rkt).
+    (let [bounds (get poly-t "bounds")]
+      (when (not (nil? bounds))
+        (doseq [var (keys bounds)]
+          (let [bound (get bounds var)
+                inferred (get (deref bindings) var)]
+            (when (and (not (nil? inferred)) (not (any-type? inferred))
+                       (not (type-compatible? inferred bound)))
+              (emit-diag! (str "beagle: type variable " var " was inferred as "
+                               (type->string inferred) ", which doesn't satisfy bound "
+                               (type->string bound))))))))
     (apply-type-bindings body bindings)))
 
 ;; --- last-expr-type! ----------------------------------------------------------
@@ -910,6 +980,29 @@
 
 ;; === infer-expr! (the core engine) ============================================
 
+;; Expected-directed tuple literal: a vector LITERAL checked against an expected
+;; (HVec t..) is validated POSITIONALLY (Beagle is otherwise bottom-up, so this
+;; is the only way to build an HVec value). Returns true when it applies (raising
+;; per-arity / per-element diagnostics), false otherwise so the caller falls back
+;; to type-compatible?. Mirrors the oracle check-hvec-literal (check.rkt).
+(defn check-hvec-literal! [value :- Any expected :- Any env :- Any] :- Bool
+  (if (and (app-type? expected) (= (get expected "name") "HVec")
+           (not (nil? value)) (= (get value "node") "vec"))
+    (let [items (get value "items")
+          elems (get expected "args")]
+      (if (not (= (count items) (count elems)))
+        (do (emit-diag! (str "beagle: tuple literal: " (type->string expected)
+                             " expects " (count elems) " element(s), got " (count items)))
+            true)
+        (do (doseq [i (range (count items))]
+              (let [at (infer-expr! (nth items i) env)
+                    et (nth elems i)]
+                (when (not (type-compatible? at et))
+                  (emit-diag! (str "beagle: tuple element " i ": expected "
+                                   (type->string et) ", got " (type->string at))))))
+            true)))
+    false))
+
 (defn infer-expr! [e :- Any env :- Any] :- Any
   (cond
     (nil? e) ANY
@@ -928,20 +1021,24 @@
         (if (nil? found) ANY found))
 
     (= (get e "node") "def")
-      (let [inferred (infer-expr! (get e "value") env)
-            expected (get e "ann")]
-        (when (and (not (nil? expected)) (not (type-compatible? inferred expected)))
-          (emit-diag! (str "beagle: def " (get e "name") ": expected "
-                           (type->string expected) ", got " (type->string inferred))))
-        inferred)
+      (let [expected (get e "ann")]
+        (if (and (not (nil? expected)) (check-hvec-literal! (get e "value") expected env))
+          expected
+          (let [inferred (infer-expr! (get e "value") env)]
+            (when (and (not (nil? expected)) (not (type-compatible? inferred expected)))
+              (emit-diag! (str "beagle: def " (get e "name") ": expected "
+                               (type->string expected) ", got " (type->string inferred))))
+            inferred)))
 
     (= (get e "node") "defonce")
-      (let [inferred (infer-expr! (get e "value") env)
-            expected (get e "ann")]
-        (when (and (not (nil? expected)) (not (type-compatible? inferred expected)))
-          (emit-diag! (str "beagle: defonce " (get e "name") ": expected "
-                           (type->string expected) ", got " (type->string inferred))))
-        inferred)
+      (let [expected (get e "ann")]
+        (if (and (not (nil? expected)) (check-hvec-literal! (get e "value") expected env))
+          expected
+          (let [inferred (infer-expr! (get e "value") env)]
+            (when (and (not (nil? expected)) (not (type-compatible? inferred expected)))
+              (emit-diag! (str "beagle: defonce " (get e "name") ": expected "
+                               (type->string expected) ", got " (type->string inferred))))
+            inferred)))
 
     (= (get e "node") "defn")
       (let [params (get e "params")
@@ -1339,6 +1436,32 @@
                                              "then" "else"))))))
                   {} (get e "args"))
           ANY)
+
+    ;; (nth t K)/(first t)/(second t) on an (HVec ..) reads the POSITIONAL
+    ;; element type, but ONLY when the index is a CONSTANT in-bounds integer. A
+    ;; dynamic or out-of-bounds index degrades to the element LUB (merge of all
+    ;; positions), sound for any index. On a NON-HVec the general call arm (poly
+    ;; Vec sigs) handles it. Mirrors the oracle G3 nth/first/second arm (check.rkt).
+    (and (= (get e "node") "call")
+         (let [fn-name (call-fn-name e)]
+           (or (= fn-name "nth") (= fn-name "first") (= fn-name "second")))
+         (> (count (get e "args")) 0)
+         (let [tt (infer-expr! (nth (get e "args") 0) env)]
+           (and (app-type? tt) (= (get tt "name") "HVec"))))
+      (let [fn-name (call-fn-name e)
+            args (get e "args")
+            elems (get (infer-expr! (nth args 0) env) "args")
+            idx (cond
+                  (= fn-name "first") 0
+                  (= fn-name "second") 1
+                  (and (= fn-name "nth") (>= (count args) 2)
+                       (= (get (nth args 1) "node") "literal")
+                       (= (get (nth args 1) "kind") "number"))
+                    (get (nth args 1) "value")
+                  :else nil)]
+        (if (and (not (nil? idx)) (>= idx 0) (< idx (count elems)))
+          (nth elems idx)
+          (if (= (count elems) 0) ANY (merge-types-list elems))))
 
     (= (get e "node") "call")
       (let [fn-ref (get e "fn")
@@ -2164,6 +2287,82 @@
                 "forms" [{"node" "def" "name" "x" "ann" nil "dynamic" false
                           "value" {"node" "ref" "name" "vendor.id"}}]}]
       (= (count (check-program! prog)) 0)))
+
+  ;; --- ML soundness: Atom invariance, HVec<:Vec width, bounded forall ---
+
+  ;; Atom invariance: element compared with invariant-equal (Any NOT wildcard).
+  (expect! "atom: (Atom Int) ~ (Atom Int)"
+    (type-compatible? (make-app "Atom" [(make-prim "Int")])
+                      (make-app "Atom" [(make-prim "Int")])))
+  (expect! "atom: (Atom Int) NOT ~ (Atom Any)"
+    (not (type-compatible? (make-app "Atom" [(make-prim "Int")])
+                           (make-app "Atom" [ANY]))))
+  (expect! "atom: (Atom Any) NOT ~ (Atom Int)"
+    (not (type-compatible? (make-app "Atom" [ANY])
+                           (make-app "Atom" [(make-prim "Int")]))))
+  (expect! "atom: (Atom Int) NOT ~ (Atom String)"
+    (not (type-compatible? (make-app "Atom" [(make-prim "Int")])
+                           (make-app "Atom" [(make-prim "String")]))))
+
+  ;; HVec <: Vec width subtyping, one direction only.
+  (expect! "hvec: (HVec Int String) <: (Vec Any)"
+    (type-compatible? (make-app "HVec" [(make-prim "Int") (make-prim "String")])
+                      (make-app "Vec" [ANY])))
+  (expect! "hvec: (HVec Int Int) <: (Vec Int)"
+    (type-compatible? (make-app "HVec" [(make-prim "Int") (make-prim "Int")])
+                      (make-app "Vec" [(make-prim "Int")])))
+  (expect! "hvec: (HVec Int String) NOT <: (Vec Int)"
+    (not (type-compatible? (make-app "HVec" [(make-prim "Int") (make-prim "String")])
+                           (make-app "Vec" [(make-prim "Int")]))))
+  (expect! "hvec: plain (Vec Int) NOT <: (HVec Int)"
+    (not (type-compatible? (make-app "Vec" [(make-prim "Int")])
+                           (make-app "HVec" [(make-prim "Int")]))))
+
+  ;; first/second on a constant HVec index reads the POSITIONAL element type.
+  (expect! "hvec: (first hvec) -> position 0"
+    (let [t (infer-expr! (make-call "first" [(make-ref "p")])
+                         {"p" (make-app "HVec" [(make-prim "Int") (make-prim "String")])})]
+      (and (prim? t) (= (get t "name") "Int"))))
+  (expect! "hvec: (second hvec) -> position 1"
+    (let [t (infer-expr! (make-call "second" [(make-ref "p")])
+                         {"p" (make-app "HVec" [(make-prim "Int") (make-prim "String")])})]
+      (and (prim? t) (= (get t "name") "String"))))
+
+  ;; Expected-directed HVec literal: arity + per-position check.
+  (expect! "hvec-literal: matching literal accepted"
+    (let [prog (make-prog [(make-def-node "pair"
+                  (make-app "HVec" [(make-prim "Int") (make-prim "String")])
+                  (make-vec-node [(make-lit "number" 1) (make-lit "string" "hi")]))])]
+      (= (count (check-program! prog)) 0)))
+  (expect! "hvec-literal: arity mismatch rejected"
+    (let [prog (make-prog [(make-def-node "pair"
+                  (make-app "HVec" [(make-prim "Int") (make-prim "String")])
+                  (make-vec-node [(make-lit "number" 1)]))])]
+      (> (count (check-program! prog)) 0)))
+  (expect! "hvec-literal: element mismatch rejected"
+    (let [prog (make-prog [(make-def-node "pair"
+                  (make-app "HVec" [(make-prim "Int") (make-prim "String")])
+                  (make-vec-node [(make-lit "string" "x") (make-lit "string" "hi")]))])]
+      (> (count (check-program! prog)) 0)))
+
+  ;; Bounded forall: render + reject/accept a call by inferred binding.
+  (expect! "bound: render (forall [(T <: Number)] [T -> T])"
+    (= (type->string (make-poly ["T"]
+                       (make-fn [(make-var "T")] nil (make-var "T"))
+                       {"T" NUMBER-TYPE}))
+       "(forall [(T <: Number)] [T -> T])"))
+  (expect! "bound: violating call rejected"
+    (do (swap! STATE assoc "diagnostics" [])
+        (resolve-poly-call!
+          (make-poly ["T"] (make-fn [(make-var "T")] nil (make-var "T")) {"T" NUMBER-TYPE})
+          [(make-lit "string" "no")] {})
+        (> (count (get (deref STATE) "diagnostics")) 0)))
+  (expect! "bound: satisfying call accepted"
+    (do (swap! STATE assoc "diagnostics" [])
+        (resolve-poly-call!
+          (make-poly ["T"] (make-fn [(make-var "T")] nil (make-var "T")) {"T" NUMBER-TYPE})
+          [(make-lit "number" 3)] {})
+        (= (count (get (deref STATE) "diagnostics")) 0)))
 
   ;; --- summary ---
   (doseq [f (deref failures)]

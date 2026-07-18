@@ -43,7 +43,7 @@
   {"Long" "Int" "Double" "Float" "Boolean" "Bool" "Integer" "Int"})
 
 (def PARAMETRIC-CTORS :- (Vec String)
-  ["Vec" "List" "Set" "Map" "Promise"])
+  ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec"])
 
 ;; --- type constructors (same JSON format as ast-json.rkt) --------------------
 
@@ -152,6 +152,29 @@
       name
       (substring2 name (+ idx 1) (count name)))))
 
+;; --- type-invariant-equal? (matches Racket type-invariant-equal?) ------------
+
+;; Structural equality for INVARIANT positions (the Atom element). Symmetric and
+;; does NOT treat Any as a wildcard (Any ≡ Any only). Unqualifies prim names.
+(defn type-invariant-equal? [a :- Any b :- Any] :- Bool
+  (cond
+    (and (prim? a) (prim? b))
+      (= (unqualify-name (get a "name")) (unqualify-name (get b "name")))
+    (and (app-type? a) (app-type? b))
+      (and (= (get a "name") (get b "name"))
+           (= (count (get a "args")) (count (get b "args")))
+           (every? (fn [i :- Int] :- Bool
+                     (type-invariant-equal? (nth (get a "args") i) (nth (get b "args") i)))
+                   (range (count (get a "args")))))
+    (and (union-type? a) (union-type? b))
+      (and (= (count (get a "members")) (count (get b "members")))
+           (every? (fn [i :- Int] :- Bool
+                     (type-invariant-equal? (nth (get a "members") i) (nth (get b "members") i)))
+                   (range (count (get a "members")))))
+    (and (var-type? a) (var-type? b))
+      (= (get a "name") (get b "name"))
+    :else (= a b)))
+
 ;; --- type-compatible? (matches Racket type-compatible?) ----------------------
 
 (defn type-compatible? [actual :- Any expected :- Any] :- Bool
@@ -198,6 +221,23 @@
              (or (nil? ar) (type-compatible? ar er))
              (type-compatible? (get actual "ret") (get expected "ret"))))
 
+    ;; Atom is INVARIANT in its element (mutable cell): compare with
+    ;; invariant-equal (Any is NOT a wildcard), never covariantly.
+    (and (app-type? actual) (app-type? expected)
+         (= (get actual "name") "Atom") (= (get expected "name") "Atom"))
+      (and (= (count (get actual "args")) (count (get expected "args")))
+           (every? (fn [i :- Int] :- Bool
+                     (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i)))
+                   (range (count (get actual "args")))))
+
+    ;; (HVec a b ..) <: (Vec T) when every position fits T; one direction only.
+    (and (app-type? actual) (= (get actual "name") "HVec")
+         (app-type? expected) (= (get expected "name") "Vec")
+         (= 1 (count (get expected "args"))))
+      (every? (fn [a :- Any] :- Bool
+                (type-compatible? a (nth (get expected "args") 0)))
+              (get actual "args"))
+
     (and (app-type? actual) (app-type? expected))
       (and (= (get actual "name") (get expected "name"))
            (= (count (get actual "args")) (count (get expected "args")))
@@ -213,6 +253,33 @@
 (def user-parametric :- (Map String Bool) {})
 
 (declare parse-type)
+
+;; Var-ize: convert prim types whose name is a forall var into type-vars (the
+;; oracle consults current-type-vars while parsing; this parser var-izes after).
+(defn varize-type [t :- Any vars :- Any] :- Any
+  (cond
+    (nil? t) t
+    (and (= (get t "kind") "prim") (>= (index-of2 vars (get t "name")) 0))
+      (make-var (get t "name"))
+    (= (get t "kind") "fn")
+      {"kind" "fn"
+       "params" (mapv (fn [p :- Any] :- Any (varize-type p vars)) (get t "params"))
+       "rest" (if (nil? (get t "rest")) nil (varize-type (get t "rest") vars))
+       "ret" (varize-type (get t "ret") vars)}
+    (= (get t "kind") "app")
+      {"kind" "app" "name" (get t "name")
+       "args" (mapv (fn [a :- Any] :- Any (varize-type a vars)) (get t "args"))}
+    (= (get t "kind") "union")
+      {"kind" "union"
+       "members" (mapv (fn [m :- Any] :- Any (varize-type m vars)) (get t "members"))}
+    :else t))
+
+;; A forall var entry is a bare name (unbounded) or (T <: Bound).
+(defn forall-entry-var [e :- Any] :- Any
+  (cond
+    (string? e) e
+    (and (vector? e) (= (count e) 3) (= (nth e 1) "<:") (string? (nth e 0))) (nth e 0)
+    :else nil))
 
 (defn parse-fn-type [items :- (Vec Any)] :- Any
   (let [arrow-idx (index-of2 items "->")]
@@ -239,15 +306,23 @@
     (and (vector? t) (> (count t) 0) (= (nth t 0) "#%brackets"))
       (parse-fn-type (subvec t 1))
 
-    ;; forall: ["forall", vars, body]
+    ;; forall: ["forall", vars, body]; vars entries are bare names or (T <: Bound)
     (and (vector? t) (= (count t) 3) (= (nth t 0) "forall"))
       (let [vars-form (nth t 1)
             raw-vars (if (and (vector? vars-form) (> (count vars-form) 0)
                               (= (nth vars-form 0) "#%brackets"))
                        (subvec vars-form 1)
                        vars-form)
-            vars (vec (filter string? raw-vars))]
-        (make-poly vars (parse-type (nth t 2)) nil))
+            vars (vec (filter (fn [x :- Any] :- Bool (not (nil? x)))
+                              (mapv forall-entry-var raw-vars)))
+            bounds (reduce (fn [acc :- Any e :- Any] :- Any
+                             (if (and (vector? e) (= (count e) 3) (= (nth e 1) "<:")
+                                      (string? (nth e 0)))
+                               (assoc acc (nth e 0) (varize-type (parse-type (nth e 2)) vars))
+                               acc))
+                           {} raw-vars)]
+        (make-poly vars (varize-type (parse-type (nth t 2)) vars)
+                   (if (= (count bounds) 0) nil bounds)))
 
     ;; Union: ["U", ...]
     (and (vector? t) (> (count t) 1) (= (nth t 0) "U"))
@@ -498,6 +573,43 @@
   (expect! "pt: nested (Vec (Map String Int))"
     (= (parse-type ["Vec" ["Map" "String" "Int"]])
        (make-app "Vec" [(make-app "Map" [(make-prim "String") (make-prim "Int")])])))
+
+  ;; --- ML soundness: Atom invariance ---
+  (expect! "tc: (Atom Int) ~ (Atom Int)"
+    (type-compatible? (make-app "Atom" [(make-prim "Int")])
+                      (make-app "Atom" [(make-prim "Int")])))
+  (expect! "tc: (Atom Int) NOT ~ (Atom Any)"
+    (not (type-compatible? (make-app "Atom" [(make-prim "Int")])
+                           (make-app "Atom" [(make-prim "Any")]))))
+  (expect! "tc: (Atom Any) NOT ~ (Atom Int)"
+    (not (type-compatible? (make-app "Atom" [(make-prim "Any")])
+                           (make-app "Atom" [(make-prim "Int")]))))
+
+  ;; --- ML soundness: HVec <: Vec width subtyping ---
+  (expect! "tc: (HVec Int String) <: (Vec Any)"
+    (type-compatible? (make-app "HVec" [(make-prim "Int") (make-prim "String")])
+                      (make-app "Vec" [(make-prim "Any")])))
+  (expect! "tc: (HVec Int String) NOT <: (Vec Int)"
+    (not (type-compatible? (make-app "HVec" [(make-prim "Int") (make-prim "String")])
+                           (make-app "Vec" [(make-prim "Int")]))))
+  (expect! "tc: (Vec Int) NOT <: (HVec Int)"
+    (not (type-compatible? (make-app "Vec" [(make-prim "Int")])
+                           (make-app "HVec" [(make-prim "Int")]))))
+
+  ;; --- ML soundness: bounded forall parse + render ---
+  (expect! "pt: bounded forall (T <: Number)"
+    (= (parse-type ["forall" ["#%brackets" ["T" "<:" "Number"]] ["#%brackets" "T" "->" "T"]])
+       (make-poly ["T"]
+         (make-fn [(make-var "T")] nil (make-var "T"))
+         {"T" (make-union [(make-prim "Int") (make-prim "Float")])})))
+  (expect! "ts: bounded forall render"
+    (= (type->string (make-poly ["T"]
+                       (make-fn [(make-var "T")] nil (make-var "T"))
+                       {"T" (make-union [(make-prim "Int") (make-prim "Float")])}))
+       "(forall [(T <: Number)] [T -> T])"))
+  (expect! "pt: unbounded forall var-izes body"
+    (= (parse-type ["forall" ["#%brackets" "T"] ["#%brackets" "T" "->" "T"]])
+       (make-poly ["T"] (make-fn [(make-var "T")] nil (make-var "T")) nil)))
 
   ;; --- infer-literal-type tests ---
 

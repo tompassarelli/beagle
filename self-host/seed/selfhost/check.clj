@@ -82,12 +82,23 @@
   (str (type->string non-nil) "?"))
   :else (str "(U " (str/join " " (mapv (fn [m] (type->string m)) members)) ")")))
   (var-type? t) (get t "name")
-  (poly-type? t) (str "(forall [" (str/join " " (get t "vars")) "] " (type->string (get t "body")) ")")
+  (poly-type? t) (let [bounds (get t "bounds")
+   var-strs (mapv (fn [v] (let [b (if (nil? bounds) nil (get bounds v))]
+  (if (nil? b) v (str "(" v " <: " (type->string b) ")")))) (get t "vars"))]
+  (str "(forall [" (str/join " " var-strs) "] " (type->string (get t "body")) ")"))
   :else "?"))
 
 (defn ^String unqualify-name [^String name]
   (let [idx (str/index-of name "/")]
   (if (some? idx) (subs name (+ idx 1)) name)))
+
+(defn ^Boolean type-invariant-equal? [a b]
+  (cond
+  (and (prim? a) (prim? b)) (= (unqualify-name (get a "name")) (unqualify-name (get b "name")))
+  (and (app-type? a) (app-type? b)) (and (= (get a "name") (get b "name")) (= (count (get a "args")) (count (get b "args"))) (every? (fn [i] (type-invariant-equal? (nth (get a "args") i) (nth (get b "args") i))) (range (count (get a "args")))))
+  (and (union-type? a) (union-type? b)) (and (= (count (get a "members")) (count (get b "members"))) (every? (fn [i] (type-invariant-equal? (nth (get a "members") i) (nth (get b "members") i))) (range (count (get a "members")))))
+  (and (var-type? a) (var-type? b)) (= (get a "name") (get b "name"))
+  :else (= a b)))
 
 (defn ^Boolean type-compatible? [actual expected]
   (cond
@@ -107,6 +118,8 @@
    ar (get actual "rest")
    er (get expected "rest")]
   (and (= (count ap) (count ep)) (every? (fn [i] (type-compatible? (nth ap i) (nth ep i))) (range (count ap))) (= (nil? ar) (nil? er)) (or (nil? ar) (type-compatible? ar er)) (type-compatible? (get actual "ret") (get expected "ret"))))
+  (and (app-type? actual) (app-type? expected) (= (get actual "name") "Atom") (= (get expected "name") "Atom")) (and (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args")))))
+  (and (app-type? actual) (= (get actual "name") "HVec") (app-type? expected) (= (get expected "name") "Vec") (= 1 (count (get expected "args")))) (every? (fn [a] (type-compatible? a (nth (get expected "args") 0))) (get actual "args"))
   (and (app-type? actual) (app-type? expected)) (and (= (get actual "name") (get expected "name")) (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-compatible? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args")))))
   :else false))
 
@@ -365,6 +378,13 @@
   (if (and (not (nil? rest-t)) (> (count arg-types) n-fixed)) (do
   (doseq [at (drop n-fixed arg-types)]
   (infer-type-var-bindings! rest-t at bindings))))
+  (let [bounds (get poly-t "bounds")]
+  (if (not (nil? bounds)) (do
+  (doseq [var (keys bounds)]
+  (let [bound (get bounds var)
+   inferred (get (deref bindings) var)]
+  (if (and (not (nil? inferred)) (not (any-type? inferred)) (not (type-compatible? inferred bound))) (do
+  (emit-diag! (str "beagle: type variable " var " was inferred as " (type->string inferred) ", which doesn't satisfy bound " (type->string bound))))))))))
   (apply-type-bindings body bindings)))
 
 (defn ^Boolean bare-swallowed-ref? [e env]
@@ -438,6 +458,19 @@
   (swap! STATE assoc-in ["record-field-order" m] field-order)
   e2) e))) env1 members) env1)))))
 
+(defn ^Boolean check-hvec-literal! [value expected env]
+  (if (and (app-type? expected) (= (get expected "name") "HVec") (not (nil? value)) (= (get value "node") "vec")) (let [items (get value "items")
+   elems (get expected "args")]
+  (if (not (= (count items) (count elems))) (do
+  (emit-diag! (str "beagle: tuple literal: " (type->string expected) " expects " (count elems) " element(s), got " (count items)))
+  true) (do
+  (doseq [i (range (count items))]
+  (let [at (infer-expr! (nth items i) env)
+   et (nth elems i)]
+  (if (not (type-compatible? at et)) (do
+  (emit-diag! (str "beagle: tuple element " i ": expected " (type->string et) ", got " (type->string at)))))))
+  true))) false))
+
 (defn infer-expr! [e env]
   (cond
   (nil? e) ANY
@@ -446,16 +479,16 @@
   (if (nil? t) ANY t))
   (= (get e "node") "ref") (let [found (get env (get e "name"))]
   (if (nil? found) ANY found))
-  (= (get e "node") "def") (let [inferred (infer-expr! (get e "value") env)
-   expected (get e "ann")]
+  (= (get e "node") "def") (let [expected (get e "ann")]
+  (if (and (not (nil? expected)) (check-hvec-literal! (get e "value") expected env)) expected (let [inferred (infer-expr! (get e "value") env)]
   (if (and (not (nil? expected)) (not (type-compatible? inferred expected))) (do
   (emit-diag! (str "beagle: def " (get e "name") ": expected " (type->string expected) ", got " (type->string inferred)))))
-  inferred)
-  (= (get e "node") "defonce") (let [inferred (infer-expr! (get e "value") env)
-   expected (get e "ann")]
+  inferred)))
+  (= (get e "node") "defonce") (let [expected (get e "ann")]
+  (if (and (not (nil? expected)) (check-hvec-literal! (get e "value") expected env)) expected (let [inferred (infer-expr! (get e "value") env)]
   (if (and (not (nil? expected)) (not (type-compatible? inferred expected))) (do
   (emit-diag! (str "beagle: defonce " (get e "name") ": expected " (type->string expected) ", got " (type->string inferred)))))
-  inferred)
+  inferred)))
   (= (get e "node") "defn") (let [params (get e "params")
    rest-param (opt-field (get e "rest"))
    expected-ret (get e "ret")
@@ -689,6 +722,17 @@
   (let [tn (test-narrowings a env*)]
   (merge acc (get tn (if (= (call-fn-name e) "and") "then" "else")))))) {} (get e "args"))
   ANY)
+  (and (= (get e "node") "call") (let [fn-name (call-fn-name e)]
+  (or (= fn-name "nth") (= fn-name "first") (= fn-name "second"))) (> (count (get e "args")) 0) (let [tt (infer-expr! (nth (get e "args") 0) env)]
+  (and (app-type? tt) (= (get tt "name") "HVec")))) (let [fn-name (call-fn-name e)
+   args (get e "args")
+   elems (get (infer-expr! (nth args 0) env) "args")
+   idx (cond
+  (= fn-name "first") 0
+  (= fn-name "second") 1
+  (and (= fn-name "nth") (>= (count args) 2) (= (get (nth args 1) "node") "literal") (= (get (nth args 1) "kind") "number")) (get (nth args 1) "value")
+  :else nil)]
+  (if (and (not (nil? idx)) (>= idx 0) (< idx (count elems))) (nth elems idx) (if (= (count elems) 0) ANY (merge-types-list elems))))
   (= (get e "node") "call") (let [fn-ref (get e "fn")
    fn-name (cond
   (and (not (nil? fn-ref)) (= (get fn-ref "node") "ref")) (get fn-ref "name")
@@ -1116,6 +1160,33 @@
   (= (count (check-program! prog)) 0)))
   (expect! "E021: not fired on clj target" (let [prog {"mode" "strict" "namespace" "t" "target" "clj" "externs" [] "requires" [] "forms" [{"node" "def" "name" "x" "ann" nil "dynamic" false "value" {"node" "ref" "name" "vendor.id"}}]}]
   (= (count (check-program! prog)) 0)))
+  (expect! "atom: (Atom Int) ~ (Atom Int)" (type-compatible? (make-app "Atom" [(make-prim "Int")]) (make-app "Atom" [(make-prim "Int")])))
+  (expect! "atom: (Atom Int) NOT ~ (Atom Any)" (not (type-compatible? (make-app "Atom" [(make-prim "Int")]) (make-app "Atom" [ANY]))))
+  (expect! "atom: (Atom Any) NOT ~ (Atom Int)" (not (type-compatible? (make-app "Atom" [ANY]) (make-app "Atom" [(make-prim "Int")]))))
+  (expect! "atom: (Atom Int) NOT ~ (Atom String)" (not (type-compatible? (make-app "Atom" [(make-prim "Int")]) (make-app "Atom" [(make-prim "String")]))))
+  (expect! "hvec: (HVec Int String) <: (Vec Any)" (type-compatible? (make-app "HVec" [(make-prim "Int") (make-prim "String")]) (make-app "Vec" [ANY])))
+  (expect! "hvec: (HVec Int Int) <: (Vec Int)" (type-compatible? (make-app "HVec" [(make-prim "Int") (make-prim "Int")]) (make-app "Vec" [(make-prim "Int")])))
+  (expect! "hvec: (HVec Int String) NOT <: (Vec Int)" (not (type-compatible? (make-app "HVec" [(make-prim "Int") (make-prim "String")]) (make-app "Vec" [(make-prim "Int")]))))
+  (expect! "hvec: plain (Vec Int) NOT <: (HVec Int)" (not (type-compatible? (make-app "Vec" [(make-prim "Int")]) (make-app "HVec" [(make-prim "Int")]))))
+  (expect! "hvec: (first hvec) -> position 0" (let [t (infer-expr! (make-call "first" [(make-ref "p")]) {"p" (make-app "HVec" [(make-prim "Int") (make-prim "String")])})]
+  (and (prim? t) (= (get t "name") "Int"))))
+  (expect! "hvec: (second hvec) -> position 1" (let [t (infer-expr! (make-call "second" [(make-ref "p")]) {"p" (make-app "HVec" [(make-prim "Int") (make-prim "String")])})]
+  (and (prim? t) (= (get t "name") "String"))))
+  (expect! "hvec-literal: matching literal accepted" (let [prog (make-prog [(make-def-node "pair" (make-app "HVec" [(make-prim "Int") (make-prim "String")]) (make-vec-node [(make-lit "number" 1) (make-lit "string" "hi")]))])]
+  (= (count (check-program! prog)) 0)))
+  (expect! "hvec-literal: arity mismatch rejected" (let [prog (make-prog [(make-def-node "pair" (make-app "HVec" [(make-prim "Int") (make-prim "String")]) (make-vec-node [(make-lit "number" 1)]))])]
+  (> (count (check-program! prog)) 0)))
+  (expect! "hvec-literal: element mismatch rejected" (let [prog (make-prog [(make-def-node "pair" (make-app "HVec" [(make-prim "Int") (make-prim "String")]) (make-vec-node [(make-lit "string" "x") (make-lit "string" "hi")]))])]
+  (> (count (check-program! prog)) 0)))
+  (expect! "bound: render (forall [(T <: Number)] [T -> T])" (= (type->string (make-poly ["T"] (make-fn [(make-var "T")] nil (make-var "T")) {"T" NUMBER-TYPE})) "(forall [(T <: Number)] [T -> T])"))
+  (expect! "bound: violating call rejected" (do
+  (swap! STATE assoc "diagnostics" [])
+  (resolve-poly-call! (make-poly ["T"] (make-fn [(make-var "T")] nil (make-var "T")) {"T" NUMBER-TYPE}) [(make-lit "string" "no")] {})
+  (> (count (get (deref STATE) "diagnostics")) 0)))
+  (expect! "bound: satisfying call accepted" (do
+  (swap! STATE assoc "diagnostics" [])
+  (resolve-poly-call! (make-poly ["T"] (make-fn [(make-var "T")] nil (make-var "T")) {"T" NUMBER-TYPE}) [(make-lit "number" 3)] {})
+  (= (count (get (deref STATE) "diagnostics")) 0)))
   (doseq [f (deref failures)]
   (selfhost.rt/eprint (str "  FAIL: " f "\n")))
   (println (str "  CHECK: " (count (deref passes)) " passed, " (count (deref failures)) " failed"))

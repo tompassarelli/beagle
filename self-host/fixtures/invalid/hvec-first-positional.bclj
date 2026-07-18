@@ -1,0 +1,8 @@
+#lang beagle/clj
+(ns hvec-first-positional.test)
+
+;; (first (HVec Int String)) reads the POSITIONAL element type Int (constant
+;; index 0), not the element LUB. The oracle rejects a String return; a
+;; self-host that degrades the position to Any would wrongly accept.
+(defn run [p :- (HVec Int String)] :- String
+  (first p))

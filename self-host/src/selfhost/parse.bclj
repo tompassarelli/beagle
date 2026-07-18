@@ -230,6 +230,36 @@
                 nil
                 (parse-type* (nth after 0))))))))))
 
+;; Convert prim types whose name is a forall var into type-vars. The oracle
+;; parse-type consults current-type-vars while parsing the forall body; this
+;; checker parses bottom-up, so we var-ize the parsed body afterwards. Without
+;; this, `T` inside a forall body parses as a nominal prim and never binds.
+(defn varize-type [t :- Any vars :- Any] :- Any
+  (cond
+    (nil? t) t
+    (and (= (get t "kind") "prim") (has-item? vars (get t "name")))
+      (make-type-var (get t "name"))
+    (= (get t "kind") "fn")
+      {"kind" "fn"
+       "params" (mapv (fn [p :- Any] :- Any (varize-type p vars)) (get t "params"))
+       "rest" (if (nil? (get t "rest")) nil (varize-type (get t "rest") vars))
+       "ret" (varize-type (get t "ret") vars)}
+    (= (get t "kind") "app")
+      {"kind" "app" "name" (get t "name")
+       "args" (mapv (fn [a :- Any] :- Any (varize-type a vars)) (get t "args"))}
+    (= (get t "kind") "union")
+      {"kind" "union"
+       "members" (mapv (fn [m :- Any] :- Any (varize-type m vars)) (get t "members"))}
+    :else t))
+
+;; Parse a forall var entry: a bare name string is an unbounded var; a
+;; (T <: Bound) list is a bounded var. Mirrors parse-forall-vars (types.rkt).
+(defn- forall-entry-var [e :- Any] :- Any
+  (cond
+    (string? e) e
+    (and (vector? e) (= (count e) 3) (= (nth e 1) "<:") (string? (nth e 0))) (nth e 0)
+    :else nil))
+
 (defn parse-type [t :- Any] :- Any
   (cond
     (and (vector? t) (> (count t) 0) (= (nth t 0) BRACKET-TAG))
@@ -241,8 +271,17 @@
                               (= (nth vars-form 0) BRACKET-TAG))
                        (subvec vars-form 1)
                        vars-form)
-            vars (filterv string? raw-vars)]
-        {"kind" "poly" "vars" vars "body" (parse-type (nth t 2)) "bounds" nil})
+            vars (vec (filter (fn [x :- Any] :- Bool (not (nil? x)))
+                              (mapv forall-entry-var raw-vars)))
+            bounds (reduce (fn [acc :- Any e :- Any] :- Any
+                             (if (and (vector? e) (= (count e) 3) (= (nth e 1) "<:")
+                                      (string? (nth e 0)))
+                               (assoc acc (nth e 0) (varize-type (parse-type (nth e 2)) vars))
+                               acc))
+                           {} raw-vars)]
+        {"kind" "poly" "vars" vars
+         "body" (varize-type (parse-type (nth t 2)) vars)
+         "bounds" (if (= (count bounds) 0) nil bounds)})
 
     (and (vector? t) (> (count t) 1) (= (nth t 0) "U"))
       (make-union (mapv parse-type (subvec t 1)))

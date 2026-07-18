@@ -146,13 +146,29 @@
   (if (not (= (count after) 1)) (make-prim "Any") (let [amp-pos (index-of-item before "&")]
   (if (> amp-pos -1) (make-fn-type (mapv parse-type* (subvec before 0 amp-pos)) (parse-type* (nth (subvec before (+ amp-pos 1)) 0)) (parse-type* (nth after 0))) (make-fn-type (mapv parse-type* before) nil (parse-type* (nth after 0))))))))))
 
+(defn varize-type [t vars]
+  (cond
+  (nil? t) t
+  (and (= (get t "kind") "prim") (has-item? vars (get t "name"))) (make-type-var (get t "name"))
+  (= (get t "kind") "fn") {"kind" "fn" "params" (mapv (fn [p] (varize-type p vars)) (get t "params")) "rest" (if (nil? (get t "rest")) nil (varize-type (get t "rest") vars)) "ret" (varize-type (get t "ret") vars)}
+  (= (get t "kind") "app") {"kind" "app" "name" (get t "name") "args" (mapv (fn [a] (varize-type a vars)) (get t "args"))}
+  (= (get t "kind") "union") {"kind" "union" "members" (mapv (fn [m] (varize-type m vars)) (get t "members"))}
+  :else t))
+
+(defn- forall-entry-var [e]
+  (cond
+  (string? e) e
+  (and (vector? e) (= (count e) 3) (= (nth e 1) "<:") (string? (nth e 0))) (nth e 0)
+  :else nil))
+
 (defn parse-type [t]
   (cond
   (and (vector? t) (> (count t) 0) (= (nth t 0) BRACKET-TAG)) (parse-fn-type-items (subvec t 1))
   (and (vector? t) (= (count t) 3) (= (nth t 0) "forall")) (let [vars-form (nth t 1)
    raw-vars (if (and (vector? vars-form) (> (count vars-form) 0) (= (nth vars-form 0) BRACKET-TAG)) (subvec vars-form 1) vars-form)
-   vars (filterv string? raw-vars)]
-  {"kind" "poly" "vars" vars "body" (parse-type (nth t 2)) "bounds" nil})
+   vars (vec (filter (fn [x] (not (nil? x))) (mapv forall-entry-var raw-vars)))
+   bounds (reduce (fn [acc e] (if (and (vector? e) (= (count e) 3) (= (nth e 1) "<:") (string? (nth e 0))) (assoc acc (nth e 0) (varize-type (parse-type (nth e 2)) vars)) acc)) {} raw-vars)]
+  {"kind" "poly" "vars" vars "body" (varize-type (parse-type (nth t 2)) vars) "bounds" (if (= (count bounds) 0) nil bounds)})
   (and (vector? t) (> (count t) 1) (= (nth t 0) "U")) (make-union (mapv parse-type (subvec t 1)))
   (and (vector? t) (> (count t) 0) (string? (nth t 0)) (or (has-item? PARAMETRIC-CTORS (nth t 0)) (= true (get (deref USER-PARAMETRIC) (nth t 0))))) (make-app (nth t 0) (mapv parse-type (subvec t 1)))
   (and (string? t) (some? (get (deref TYPE-ALIASES) t))) (get (deref TYPE-ALIASES) t)

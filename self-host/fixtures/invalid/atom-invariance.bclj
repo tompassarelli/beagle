@@ -1,0 +1,11 @@
+#lang beagle/clj
+(ns atom-invariance.test)
+
+;; (Atom T) is INVARIANT in its element (mutable cell): (Atom Int) is NOT
+;; usable where (Atom Any) is expected — a callee could reset! a non-Int into
+;; the aliased cell. The oracle rejects with structural invariant equality
+;; (Any is NOT a wildcard here). Self-host must reject too.
+(defn sink [a :- (Atom Any)] :- Nil nil)
+
+(defn run [b :- (Atom Int)] :- Nil
+  (sink b))

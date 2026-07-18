@@ -23,7 +23,7 @@
 
 (def CLJ-ALIASES {"Long" "Int" "Double" "Float" "Boolean" "Bool" "Integer" "Int"})
 
-(def PARAMETRIC-CTORS ["Vec" "List" "Set" "Map" "Promise"])
+(def PARAMETRIC-CTORS ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec"])
 
 (defn make-prim [^String name]
   {"kind" "prim" "name" name})
@@ -98,6 +98,14 @@
   (let [idx (str/index-of name "/")]
   (if (nil? idx) name (substring2 name (+ idx 1) (count name)))))
 
+(defn ^Boolean type-invariant-equal? [a b]
+  (cond
+  (and (prim? a) (prim? b)) (= (unqualify-name (get a "name")) (unqualify-name (get b "name")))
+  (and (app-type? a) (app-type? b)) (and (= (get a "name") (get b "name")) (= (count (get a "args")) (count (get b "args"))) (every? (fn [i] (type-invariant-equal? (nth (get a "args") i) (nth (get b "args") i))) (range (count (get a "args")))))
+  (and (union-type? a) (union-type? b)) (and (= (count (get a "members")) (count (get b "members"))) (every? (fn [i] (type-invariant-equal? (nth (get a "members") i) (nth (get b "members") i))) (range (count (get a "members")))))
+  (and (var-type? a) (var-type? b)) (= (get a "name") (get b "name"))
+  :else (= a b)))
+
 (defn ^Boolean type-compatible? [actual expected]
   (cond
   (or (nil? actual) (nil? expected)) true
@@ -116,12 +124,29 @@
    ar (get actual "rest")
    er (get expected "rest")]
   (and (= (count ap) (count ep)) (every? identity (map-indexed (fn [i p] (type-compatible? p (nth ep i))) ap)) (= (nil? ar) (nil? er)) (or (nil? ar) (type-compatible? ar er)) (type-compatible? (get actual "ret") (get expected "ret"))))
+  (and (app-type? actual) (app-type? expected) (= (get actual "name") "Atom") (= (get expected "name") "Atom")) (and (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args")))))
+  (and (app-type? actual) (= (get actual "name") "HVec") (app-type? expected) (= (get expected "name") "Vec") (= 1 (count (get expected "args")))) (every? (fn [a] (type-compatible? a (nth (get expected "args") 0))) (get actual "args"))
   (and (app-type? actual) (app-type? expected)) (and (= (get actual "name") (get expected "name")) (= (count (get actual "args")) (count (get expected "args"))) (every? identity (map-indexed (fn [i a] (type-compatible? a (nth (get expected "args") i))) (get actual "args"))))
   :else false))
 
 (def user-parametric {})
 
 (declare parse-type)
+
+(defn varize-type [t vars]
+  (cond
+  (nil? t) t
+  (and (= (get t "kind") "prim") (>= (index-of2 vars (get t "name")) 0)) (make-var (get t "name"))
+  (= (get t "kind") "fn") {"kind" "fn" "params" (mapv (fn [p] (varize-type p vars)) (get t "params")) "rest" (if (nil? (get t "rest")) nil (varize-type (get t "rest") vars)) "ret" (varize-type (get t "ret") vars)}
+  (= (get t "kind") "app") {"kind" "app" "name" (get t "name") "args" (mapv (fn [a] (varize-type a vars)) (get t "args"))}
+  (= (get t "kind") "union") {"kind" "union" "members" (mapv (fn [m] (varize-type m vars)) (get t "members"))}
+  :else t))
+
+(defn forall-entry-var [e]
+  (cond
+  (string? e) e
+  (and (vector? e) (= (count e) 3) (= (nth e 1) "<:") (string? (nth e 0))) (nth e 0)
+  :else nil))
 
 (defn parse-fn-type [items]
   (let [arrow-idx (index-of2 items "->")]
@@ -135,8 +160,9 @@
   (and (vector? t) (> (count t) 0) (= (nth t 0) "#%brackets")) (parse-fn-type (subvec t 1))
   (and (vector? t) (= (count t) 3) (= (nth t 0) "forall")) (let [vars-form (nth t 1)
    raw-vars (if (and (vector? vars-form) (> (count vars-form) 0) (= (nth vars-form 0) "#%brackets")) (subvec vars-form 1) vars-form)
-   vars (vec (filter string? raw-vars))]
-  (make-poly vars (parse-type (nth t 2)) nil))
+   vars (vec (filter (fn [x] (not (nil? x))) (mapv forall-entry-var raw-vars)))
+   bounds (reduce (fn [acc e] (if (and (vector? e) (= (count e) 3) (= (nth e 1) "<:") (string? (nth e 0))) (assoc acc (nth e 0) (varize-type (parse-type (nth e 2)) vars)) acc)) {} raw-vars)]
+  (make-poly vars (varize-type (parse-type (nth t 2)) vars) (if (= (count bounds) 0) nil bounds)))
   (and (vector? t) (> (count t) 1) (= (nth t 0) "U")) (make-union (mapv parse-type (subvec t 1)))
   (and (vector? t) (> (count t) 0) (string? (nth t 0)) (or (>= (index-of2 PARAMETRIC-CTORS (nth t 0)) 0) (= (get user-parametric (nth t 0)) true))) (make-app (nth t 0) (mapv parse-type (subvec t 1)))
   (and (string? t) (> (count t) 1) (= (char-at t (- (count t) 1)) "?")) (let [base (substring2 t 0 (- (count t) 1))]
@@ -250,6 +276,15 @@
   (expect! "pt: fn type" (= (parse-type ["#%brackets" "Int" "->" "String"]) (make-fn [(make-prim "Int")] nil (make-prim "String"))))
   (expect! "pt: variadic fn" (= (parse-type ["#%brackets" "Int" "&" "String" "->" "Bool"]) (make-fn [(make-prim "Int")] (make-prim "String") (make-prim "Bool"))))
   (expect! "pt: nested (Vec (Map String Int))" (= (parse-type ["Vec" ["Map" "String" "Int"]]) (make-app "Vec" [(make-app "Map" [(make-prim "String") (make-prim "Int")])])))
+  (expect! "tc: (Atom Int) ~ (Atom Int)" (type-compatible? (make-app "Atom" [(make-prim "Int")]) (make-app "Atom" [(make-prim "Int")])))
+  (expect! "tc: (Atom Int) NOT ~ (Atom Any)" (not (type-compatible? (make-app "Atom" [(make-prim "Int")]) (make-app "Atom" [(make-prim "Any")]))))
+  (expect! "tc: (Atom Any) NOT ~ (Atom Int)" (not (type-compatible? (make-app "Atom" [(make-prim "Any")]) (make-app "Atom" [(make-prim "Int")]))))
+  (expect! "tc: (HVec Int String) <: (Vec Any)" (type-compatible? (make-app "HVec" [(make-prim "Int") (make-prim "String")]) (make-app "Vec" [(make-prim "Any")])))
+  (expect! "tc: (HVec Int String) NOT <: (Vec Int)" (not (type-compatible? (make-app "HVec" [(make-prim "Int") (make-prim "String")]) (make-app "Vec" [(make-prim "Int")]))))
+  (expect! "tc: (Vec Int) NOT <: (HVec Int)" (not (type-compatible? (make-app "Vec" [(make-prim "Int")]) (make-app "HVec" [(make-prim "Int")]))))
+  (expect! "pt: bounded forall (T <: Number)" (= (parse-type ["forall" ["#%brackets" ["T" "<:" "Number"]] ["#%brackets" "T" "->" "T"]]) (make-poly ["T"] (make-fn [(make-var "T")] nil (make-var "T")) {"T" (make-union [(make-prim "Int") (make-prim "Float")])})))
+  (expect! "ts: bounded forall render" (= (type->string (make-poly ["T"] (make-fn [(make-var "T")] nil (make-var "T")) {"T" (make-union [(make-prim "Int") (make-prim "Float")])})) "(forall [(T <: Number)] [T -> T])"))
+  (expect! "pt: unbounded forall var-izes body" (= (parse-type ["forall" ["#%brackets" "T"] ["#%brackets" "T" "->" "T"]]) (make-poly ["T"] (make-fn [(make-var "T")] nil (make-var "T")) nil)))
   (expect! "lit: string" (= (infer-literal-type {"kind" "string" "value" "hi"}) (make-prim "String")))
   (expect! "lit: int" (= (infer-literal-type {"kind" "number" "value" 42}) (make-prim "Int")))
   (expect! "lit: float" (= (infer-literal-type {"kind" "float" "value" 3.14}) (make-prim "Float")))
