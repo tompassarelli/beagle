@@ -111,14 +111,23 @@
 (define (normalize-diag s)
   (regexp-replace* (regexp (regexp-quote repo-root-str)) s ""))
 
-;; Strip per-form srcloc metadata before comparison: ^{:line N :file "..."} is
-;; debug provenance, not semantic output.  Selfhost emitters never produce it
-;; (BEAGLE_EMIT_SRCLOC=0 is their only mode); goldens and oracle output that DO
-;; carry it still compare equal once stripped.  norm-text strips then finalises.
+;; Strip per-form srcloc metadata before COMPARISON only: ^{:line N :file
+;; "..."} is debug provenance, not semantic output.  Selfhost emitters never
+;; produce it (BEAGLE_EMIT_SRCLOC=0 is their only mode); goldens and oracle
+;; output that DO carry it still compare equal once stripped, so a selfhost
+;; run and the Racket-oracle run both certify against the same golden.
+;; This must NOT touch what gets WRITTEN to a golden on --regen: emit-clj.rkt
+;; documents "Default is on, so beagle's own goldens ... are unchanged" —
+;; the oracle (this script always runs the Racket compiler, never selfhost)
+;; emits srcloc metadata by default, and the committed goldens are meant to
+;; carry it verbatim. finalize-text is the write-path counterpart: trailing-
+;; newline normalization only, no stripping, so --regen doesn't silently
+;; discard real provenance the oracle actually emitted.
 (define (strip-srcloc s)
   (regexp-replace* #rx"\\^\\{:line [0-9]+ :file \"[^\"]*\"\\} " s ""))
 
-(define (norm-text s) (regexp-replace #rx"\n*$" (strip-srcloc s) "\n"))
+(define (finalize-text s) (regexp-replace #rx"\n*$" s "\n"))
+(define (norm-text s) (finalize-text (strip-srcloc s)))
 
 ;; -> (list 'ok emitted-string) | (list 'fail diag-string)
 (define (compile-fixture rel-path)
@@ -223,7 +232,7 @@
        [(regen?)
         (make-parent-directory* gp)
         (call-with-output-file gp #:exists 'truncate
-          (lambda (o) (display emitted o)))
+          (lambda (o) (display (finalize-text (cadr res)) o)))
         (list 'regen "golden written")]
        [(not (file-exists? gp))
         (list 'no-golden "run bin/beagle-certify --regen")]
@@ -258,7 +267,7 @@
     [(regen?)
      (make-parent-directory* gp)
      (call-with-output-file gp #:exists 'truncate
-       (lambda (o) (display (norm-text (cadr res)) o)))
+       (lambda (o) (display (finalize-text (cadr res)) o)))
      (list 'regen "diag golden written")]
     [(not (file-exists? gp))
      (list 'no-golden "run bin/beagle-certify --regen")]
