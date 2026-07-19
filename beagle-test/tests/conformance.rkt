@@ -32,9 +32,10 @@
 ;; CORPUS is organized into categories:
 ;;   A. nested/mixed equality   B. hash consistency
 ;;   C. set/map membership      D. immutability (no input mutation)
-;;   E. dedup by value          F. compound-value map keys  ('known-gap — HAMT)
-;; F is soft-reported (no hard assert) until the value-keyed HAMT lands; native
-;; JS object keys coerce compound keys to "[object Object]" and collide.
+;;   E. dedup by value          F. compound-value map keys (hard, value-keyed HAMT)
+;; F is asserted-green via the value-keyed HAMT; native JS object keys would
+;; coerce compound keys to "[object Object]" and collide, but Beagle routes
+;; compound-key maps to lib/beagle/hamt.js instead.
 ;;
 ;; DIVERGENCES (below CORPUS): a parallel list of DELIBERATE Beagle-JS ≠ Clojure
 ;; differences, pinned in BOTH directions — clj must return its value AND js its
@@ -226,9 +227,9 @@
 
 ;; ---------------------------------------------------------------------------
 ;; THE CORPUS. Each entry: (name expr return-type kind)
-;;   kind ∈ {'scalar 'compound 'known-gap}
-;; 'known-gap cases are expected NOT to agree today and are reported, not
-;; asserted (they must not crash the machinery).
+;;   kind ∈ {'scalar 'compound}
+;; A target that fails to compile/run is still reported (not asserted) so a
+;; genuine environment gap does not crash the harness machinery.
 ;; ---------------------------------------------------------------------------
 
 (define CORPUS
@@ -296,15 +297,9 @@
    ;; Set value-dedup via count. NB: a LITERAL `#{[1 2] [1 2]}` is a Clojure
    ;; READER error (duplicate set key) — uninstantiable as an oracle — so we
    ;; build the set at runtime with `(set [...])`, which is what actually
-   ;; exercises value-dedup. FINDING (emit-js, not owned here): `(count <set>)`
-   ;; emits `<set>.length`, but JS `Set` has `.size` not `.length`, so it yields
-   ;; `undefined` — and `set` uses native `new Set([...])` (reference dedup), so
-   ;; there is no value-dedup either. RED on JS. Marked 'known-gap (soft-report)
-   ;; because the fix lives in emit-js/check.rkt (count-of-set + value-Set),
-   ;; owned by another seam; the oracle still computes the truthful 1.
-   ;; P3 rep-selection: `set` over compound elements -> value-keyed hamtSet
-   ;; (value dedup); `count` -> hamtSetCount. Was 'known-gap (native `new Set`
-   ;; ref-dedup kept both + `.length` on a Set -> undefined). NOW asserted-green.
+   ;; exercises value-dedup. `set` over compound elements routes to a
+   ;; value-keyed hamtSet (value dedup); `count` routes to hamtSetCount.
+   ;; Hard-asserted green.
    (list "count-set-vec-dedup"  "(count (set [[1 2] [1 2]]))"        "Int"  'compound)
    (list "count-set-map-dedup"  "(count (set [{:a 1} {:a 1}]))"      "Int"  'compound)
 
@@ -396,18 +391,6 @@
                  (printf "KNOWN GAP [~a/~a]: ~a (~a)\n"
                          (target-name tgt) name st
                          (string-trim (car (string-split val "\n"))))]
-                [(eq? kind 'known-gap)
-                 ;; KNOWN GAP that DOES compile+run but is not GUARANTEED to
-                 ;; agree (no value-keyed map / count-of-set gap). Soft report,
-                 ;; do NOT hard-assert. Some F cases agree by string-coercion
-                 ;; COINCIDENCE (same literal both sides) — that is not a real
-                 ;; fix, so we note agreement without asserting it; a genuine
-                 ;; close happens when the HAMT lands and ALL key shapes agree.
-                 (if (equal? val clj-val)
-                     (printf "KNOWN GAP [~a/~a]: agrees with oracle (~a) — likely coercion-coincidental, NOT yet a real fix; keep as gap until the HAMT lands.\n"
-                             (target-name tgt) name clj-val)
-                     (printf "KNOWN GAP [~a/~a]: disagrees as expected (oracle ~a, ~a ~a)\n"
-                             (target-name tgt) name clj-val (target-name tgt) val))]
                 [else
                  ;; ACTUAL value-level agreement assertion against the oracle.
                  (check-equal? val clj-val
