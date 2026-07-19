@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# beagle-downstream: gate C1 — derive every live Beagle consumer's membership
+# from its OWN authoritative enumerator and fail closed on enumerator drift.
+#
+# Usage:
+#   bin/beagle-downstream --list                    # summary to stdout
+#   bin/beagle-downstream --list --json PATH        # + JSON receipt (count+sha256)
+#   bin/beagle-downstream --list --consumer NAME    # one consumer only
+#   bin/beagle-downstream --list --registry PATH    # alternate registry file
+#
+# Consumer repos are READ-ONLY: this derives the source roster, it does not
+# compile, mutate, or run any consumer build script. Repo paths default to
+# ~/code/<name> and are overridable per consumer (GJOA_REPO, WAKE_REPO,
+# NORTH_REPO, FRAM_REPO, NIXOS_CONFIG_REPO).
+#
+# Exit codes: 0 = all consumers enumerated; 2 = usage; 3 = enumerator drift.
+set -euo pipefail
+source "$(dirname "$0")/_beagle-racket"
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Route the `beagle` collection at THIS checkout's beagle-lib (required in a
+# git worktree, harmless in the canonical checkout). Mirrors beagle-certify.
+collects="$root/.beagle/collects"
+mkdir -p "$collects"
+ln -sfn "$root/beagle-lib" "$collects/beagle"
+export PLTCOLLECTS="$collects:"
+
+exec "$RACKET" "$root/contrib/downstream/main.rkt" "$@"
