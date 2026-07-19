@@ -165,6 +165,27 @@ else
     rl_ok "check"
 fi
 
+# package-scope canary — the FALSE-GREEN backstop. Global `raco pkg` links for
+# beagle/beagle-lib/beagle-test point at ONE checkout; a git worktree sharing the
+# pinned racket would resolve `(require beagle/...)` to that SIBLING tree and
+# silently test the wrong parse.rkt while every other canary stayed green
+# (observed on agent/js-census-019f791c). Resolve the `beagle` collection the way
+# tests do (in doctor's own env, which _beagle-racket has already scoped) and
+# assert it lives under THIS checkout. Fail CLOSED with exact roots + repair on
+# mismatch — never let doctor bless a cross-loaded checkout.
+_scope_probe="$("$RACKET" -e '(require setup/collection-search)(with-handlers ([exn:fail? (lambda (e) (displayln "UNRESOLVED"))]) (displayln (path->string (collection-file-path "parse.rkt" "beagle" "private"))))' 2>/dev/null | head -1)"
+_scope_root="$(cd "$BEAGLE_ROOT" && pwd -P)"
+if [[ -z "$_scope_probe" || "$_scope_probe" == "UNRESOLVED" ]]; then
+    rl_fail "package-scope" "beagle collection unresolvable (no pkg link and no PLTCOLLECTS scope). Repair: run bin/beagle from a real checkout, or 'source bin/_beagle-racket' which auto-scopes PLTCOLLECTS at this root ($_scope_root)."
+else
+    _scope_probe_real="$(cd "$(dirname "$_scope_probe")" 2>/dev/null && pwd -P || echo "$_scope_probe")"
+    if [[ "$_scope_probe_real" != "$_scope_root" && "$_scope_probe_real" != "$_scope_root"/* ]]; then
+        rl_fail "package-scope" "beagle collection resolves to $_scope_probe (root $_scope_probe_real) but THIS checkout is $_scope_root — tests would load a SIBLING parse.rkt (false green). Repair: invoke via bin/* (they 'source bin/_beagle-racket', which scopes PLTCOLLECTS at this root with NO global pkg mutation); never rely on the global 'raco pkg' links inside a worktree."
+    else
+        rl_ok "package-scope"
+    fi
+fi
+
 # full machinery (--deep): parse -> diagnostic -> suggestion -> producer ->
 # consumer -> patch. A bare (assert) in a .bnix must round-trip to a
 # nix/assert rename via beagle-repair --emit-patch.

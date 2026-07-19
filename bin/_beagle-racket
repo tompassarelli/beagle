@@ -44,3 +44,31 @@ if [[ -n "${_BEAGLE_RACKET:-}" ]]; then
         *) export PATH="$(dirname "$_BEAGLE_RACKET"):$PATH" ;;
     esac
 fi
+
+# --- Worktree-local package scope (NO global mutation) -----------------------
+# The global `raco pkg` links for beagle/beagle-lib/beagle-test point at ONE
+# checkout (canonically ~/code/beagle). With the pinned racket shared across
+# checkouts, EVERY other checkout would silently resolve `(require beagle/...)`
+# through those links to the canonical tree — a git worktree's tests would
+# exercise the WRONG parse.rkt and doctor would still say healthy (observed on
+# agent/js-census-019f791c). Fix at the seam every bin/* script already sources:
+# prepend PLTCOLLECTS roots that route the `beagle` collection — contributed by
+# BOTH beagle-lib (beagle/private/*, beagle/lang/*, …) and beagle-test
+# (beagle/tests/*) — at THIS checkout. Racket merges a collection across collects
+# roots, so each half resolves to this root. Idempotent symlinks under the
+# gitignored .beagle/; touches no global pkg state; the trailing default keeps
+# every OTHER collection (base, rackunit, cnf-*, …) resolving via the pkg links.
+if [[ -d "$BEAGLE_ROOT/beagle-lib" && "${_BEAGLE_SCOPE_ROOT:-}" != "$BEAGLE_ROOT" ]]; then
+    _bscope="$BEAGLE_ROOT/.beagle/scope"
+    if mkdir -p "$_bscope/lib" "$_bscope/test" 2>/dev/null; then
+        ln -sfn "$BEAGLE_ROOT/beagle-lib" "$_bscope/lib/beagle" 2>/dev/null || true
+        [[ -d "$BEAGLE_ROOT/beagle-test" ]] && ln -sfn "$BEAGLE_ROOT/beagle-test" "$_bscope/test/beagle" 2>/dev/null || true
+        if [[ -n "${PLTCOLLECTS:-}" ]]; then
+            export PLTCOLLECTS="$_bscope/lib:$_bscope/test:$PLTCOLLECTS"
+        else
+            export PLTCOLLECTS="$_bscope/lib:$_bscope/test:"   # trailing : => append the default search
+        fi
+        export _BEAGLE_SCOPE_ROOT="$BEAGLE_ROOT"
+    fi
+    unset _bscope
+fi
