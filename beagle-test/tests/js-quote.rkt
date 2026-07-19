@@ -317,6 +317,14 @@
        "{delete: 1}"
        '(js/quote (const o (object delete 1))))
 
+     (check-js-quote "predicate punctuation in method property is char-mangled"
+       "gate.ready_p()"
+       '(js/quote (.ready? gate)))
+
+     (check-js-quote "predicate punctuation in member property is char-mangled"
+       "obj.ready_p"
+       '(js/quote (const v (dot obj ready?))))
+
      (check-js-quote "assignment"
        "x = 10;"
        '(js/quote (= x 10)))

@@ -191,6 +191,15 @@ console.assert(threw, 'frozen record should reject mutation');
                 (throw (new Error "delete did not remove key")))))
      "")
 
+   ;; Ordinary Beagle dotted calls use authored property spelling too. The
+   ;; punctuation must be made identifier-safe without treating it as a
+   ;; binding (which would apply reserved-word suffixing).
+   (check-js-output "ordinary dotted predicate method char-mangles property"
+     (list '(defn invoke-ready [(gate :- Any)] :- Bool
+              (.ready? gate)))
+     "console.log(invoke_ready({ ready_p() { return true; } }));"
+     "true")
+
    ;; --- seam 2: effect-position control flow executes correctly -------------
    ;; Semantics must be preserved through the idiomatic-statement lowering.
    (check-js-output "seam2: effect-position if-else runs then-branch"

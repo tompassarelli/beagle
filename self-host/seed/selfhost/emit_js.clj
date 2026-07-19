@@ -88,7 +88,7 @@
   (mangle-str s))
 
 (defn ^String mangle-prop [^String s]
-  (str/replace s "-" "_"))
+  (mangle-chars s))
 
 (defn ^String kw->prop [^String kw]
   (if (str/starts-with? kw ":") (mangle-chars (subs kw 1)) (mangle-chars kw)))
@@ -1145,6 +1145,8 @@
   (expect! "mangle: bang" (= (mangle-str "swap!") "swap_bang"))
   (expect! "mangle: reserved private" (= (mangle-str "private") "private$"))
   (expect! "mangle: underscore doubles" (= (mangle-str "a_b") "a__b"))
+  (expect! "mangle-prop: predicate punctuation" (= (mangle-prop "ready?") "ready_p"))
+  (expect! "mangle-prop: reserved word unchanged" (= (mangle-prop "delete") "delete"))
   (expect! "string: plain" (= (js-string-lit "hi") "\"hi\""))
   (expect! "string: newline" (= (js-string-lit "a\nb") "\"a\\nb\""))
   (expect! "string: control x01" (= (js-string-lit (str "x" (char 1) "y")) "\"x\\x01y\""))

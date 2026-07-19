@@ -114,7 +114,7 @@
     (if (contains? JS-RESERVED m) (str m "$") m)))
 
 (defn mangle-name [s :- String] :- String (mangle-str s))
-(defn mangle-prop [s :- String] :- String (str/replace s "-" "_"))
+(defn mangle-prop [s :- String] :- String (mangle-chars s))
 
 ;; kw->prop: strip a leading ":" if present, then mangle. Map-literal keys arrive
 ;; already-stripped ("k"); with/kw-access fields arrive as ":price". PROPERTY
@@ -1555,6 +1555,8 @@
   (expect! "mangle: bang" (= (mangle-str "swap!") "swap_bang"))
   (expect! "mangle: reserved private" (= (mangle-str "private") "private$"))
   (expect! "mangle: underscore doubles" (= (mangle-str "a_b") "a__b"))
+  (expect! "mangle-prop: predicate punctuation" (= (mangle-prop "ready?") "ready_p"))
+  (expect! "mangle-prop: reserved word unchanged" (= (mangle-prop "delete") "delete"))
   (expect! "string: plain" (= (js-string-lit "hi") "\"hi\""))
   (expect! "string: newline" (= (js-string-lit "a\nb") "\"a\\nb\""))
   (expect! "string: control x01" (= (js-string-lit (str "x" (char 1) "y")) "\"x\\x01y\""))

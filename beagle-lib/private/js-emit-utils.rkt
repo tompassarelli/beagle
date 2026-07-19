@@ -85,7 +85,7 @@
   (if (js-reserved-word? mangled) (string-append mangled "$") mangled))
 
 (define (mangle-prop s)
-  (string-replace s "-" "_"))
+  (mangle-chars s))
 
 ;; --- canonical JS binary/assign operator tables -----------------------------
 ;; Shared by parse-js-quote (recognition during parse) and the emitters
