@@ -30,7 +30,7 @@
 
 (provide datum->facts facts->datum datum->src datum->pretty edn-triples->datum read-edn-triples
          datum->edn-lines stx->edn-lines stx->facts edn-triples->syntax
-         emit-edn-typed-file)
+         emit-edn-typed-file emit-edn-file render-edn)
 
 ;; --- datum -> facts --------------------------------------------------------
 (define (split-improper d)            ; pair -> (values proper-prefix tail) ; tail='() if proper
