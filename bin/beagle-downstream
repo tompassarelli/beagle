@@ -1,19 +1,26 @@
 #!/usr/bin/env bash
-# beagle-downstream: gate C1 — derive every live Beagle consumer's membership
-# from its OWN authoritative enumerator and fail closed on enumerator drift.
+# beagle-downstream: derive every live Beagle consumer's membership from its OWN
+# authoritative enumerator (gate C1), and compile that roster with the candidate
+# compiler into external scratch, asserting byte-cleanliness (gate C2).
 #
 # Usage:
-#   bin/beagle-downstream --list                    # summary to stdout
-#   bin/beagle-downstream --list --json PATH        # + JSON receipt (count+sha256)
-#   bin/beagle-downstream --list --consumer NAME    # one consumer only
-#   bin/beagle-downstream --list --registry PATH    # alternate registry file
+#   bin/beagle-downstream --list                    # membership summary
+#   bin/beagle-downstream --list --json PATH        # + list receipt (count+sha256)
+#   bin/beagle-downstream --run  --json PATH        # compile all + byte-clean receipt
+#   bin/beagle-downstream --run  --allow-dirty      # proceed past dirty consumer trees
+#   bin/beagle-downstream --run  --jobs N --timeout SECS
+#   bin/beagle-downstream ... --consumer NAME       # one consumer only
+#   bin/beagle-downstream ... --registry PATH       # alternate registry file
 #
-# Consumer repos are READ-ONLY: this derives the source roster, it does not
-# compile, mutate, or run any consumer build script. Repo paths default to
-# ~/code/<name> and are overridable per consumer (GJOA_REPO, WAKE_REPO,
-# NORTH_REPO, FRAM_REPO, NIXOS_CONFIG_REPO).
+# --run compiles each consumer's derived roster (emit, not just check) into an
+# EXTERNAL scratch tree outside every repo — it NEVER runs a consumer build
+# script and NEVER writes into a consumer repo, so the gate is byte-clean by
+# construction (proven in-band by a before/after `git status --porcelain` hash).
+# Consumer repo paths default to ~/code/<name>, overridable per consumer
+# (GJOA_REPO, WAKE_REPO, NORTH_REPO, FRAM_REPO, NIXOS_CONFIG_REPO).
 #
-# Exit codes: 0 = all consumers enumerated; 2 = usage; 3 = enumerator drift.
+# Exit codes: 0 = ok; 1 = a consumer failed / not byte-clean; 2 = usage / dirty
+# refusal; 3 = enumerator drift.
 set -euo pipefail
 source "$(dirname "$0")/_beagle-racket"
 
