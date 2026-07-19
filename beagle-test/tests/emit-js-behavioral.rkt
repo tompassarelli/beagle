@@ -333,6 +333,16 @@ console.assert(threw, 'frozen record should reject mutation');
      "console.log(typeof d);"
      "object")
 
+   ;; A set!-mutated let local must execute as mutable JS (`let`, not `const`).
+   ;; Static emitter coverage alone misses "Assignment to constant variable".
+   (check-js-output "set!-mutated let local executes"
+     (list '(defn overwrite-local! [(n :- Int)] :- Int
+              (let [acc 0]
+                (set! acc n)
+                acc)))
+     "console.log(overwrite_local_bang(42));"
+     "42")
+
    ;; --- multi-arity ---------------------------------------------------------
 
    (check-js-output "multi-arity dispatch"

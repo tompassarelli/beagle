@@ -1,0 +1,6 @@
+#lang beagle/js
+;; @error[bare-constructor-form] (`new` ...) is not a Beagle constructor call. Use `(X. args...)`, for example `(Set. xs)`.
+(ns app.bare-new)
+(define-mode strict)
+(declare-extern xs (Vec Int))
+(new Set xs)

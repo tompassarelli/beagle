@@ -3391,6 +3391,14 @@
     ;; `get` (literal-key) migrated to the compile-time combiner registry (see register-combiner!).
     ;; Dynamic-key (get target expr) falls through to the call-form arm below, as before.
 
+    ;; `new` is a host special form, not Beagle's constructor surface. Letting
+    ;; it fall through as a call emits `new$(...)` on JS and defers the mistake
+    ;; to a runtime ReferenceError. Constructors use Clojure's `Class.` head.
+    [(list 'new _ ...)
+     (raise-parse-error 'bare-constructor-form
+       "(`new` ...) is not a Beagle constructor call. Use `(X. args...)`, for example `(Set. xs)`."
+       #:suggestion "(X. args...)")]
+
     ;; `%` is the anonymous-fn argument shorthand, only meaningful inside #(...).
     ;; The reader rewrites `%` -> `%1` inside #(), so a bare `%` at parse time can
     ;; only appear OUTSIDE a lambda — always an error, most often `%` written as
