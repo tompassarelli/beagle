@@ -85,33 +85,39 @@
    "void" true "while" true "with" true "yield" true "await" true "eval" true
    "arguments" true})
 
-(defn mangle-str [s :- String] :- String
-  (let [m (str/replace
+;; Char-level mangle only (PROPERTY spelling): no reserved-word `$` suffix.
+;; Bindings layer the suffix on top in mangle-str.
+(defn mangle-chars [s :- String] :- String
+  (str/replace
+    (str/replace
+      (str/replace
+        (str/replace
+          (str/replace
             (str/replace
               (str/replace
-                (str/replace
-                  (str/replace
-                    (str/replace
-                      (str/replace
-                        (str/replace s "_" "__")
-                        "-" "_")
-                      "?" "_p")
-                    "!" "_bang")
-                  "=" "_eq")
-                ">" "_gt")
-              "<" "_lt")
-            "%" "_pct")]
+                (str/replace s "_" "__")
+                "-" "_")
+              "?" "_p")
+            "!" "_bang")
+          "=" "_eq")
+        ">" "_gt")
+      "<" "_lt")
+    "%" "_pct"))
+
+(defn mangle-str [s :- String] :- String
+  (let [m (mangle-chars s)]
     (if (contains? JS-RESERVED m) (str m "$") m)))
 
 (defn mangle-name [s :- String] :- String (mangle-str s))
 (defn mangle-prop [s :- String] :- String (str/replace s "-" "_"))
 
 ;; kw->prop: strip a leading ":" if present, then mangle. Map-literal keys arrive
-;; already-stripped ("k"); with/kw-access fields arrive as ":price".
+;; already-stripped ("k"); with/kw-access fields arrive as ":price". PROPERTY
+;; position -> char-mangle only, never the reserved-word `$` suffix.
 (defn kw->prop [kw :- String] :- String
   (if (str/starts-with? kw ":")
-    (mangle-str (subs kw 1))
-    (mangle-str kw)))
+    (mangle-chars (subs kw 1))
+    (mangle-chars kw)))
 
 ;; --- JS string literal (js-emit-utils.rkt js-string-lit) ----------------------
 
@@ -350,22 +356,37 @@
         fields (field-names-of (get f "fields"))
         name-mangled (mangle-name name)
         accessor-prefix (mangle-str (str/lower-case name))
+        ;; PARAMS/accessor-name are bindings; object KEYS + reads are PROPERTY
+        ;; positions (char-mangle only, no `$`). Keep shorthand `{x}` when the
+        ;; two spellings coincide (non-reserved) so output stays byte-identical.
         field-params (mapv mangle-name fields)
+        field-props (mapv mangle-chars fields)
+        field-entries (map-indexed
+                        (fn [i :- Int prop :- String] :- String
+                          (let [param (nth field-params i)]
+                            (if (= prop param) param (str prop ": " param))))
+                        field-props)
         factory (str "function " name-mangled "(" (str/join ", " field-params) ") {\n"
                      "  return Object.freeze({_tag: " (js-string-lit name) ", "
-                     (str/join ", " field-params) "});\n}")
-        accessors (mapv (fn [fp :- String] :- String
-                          (str "function " accessor-prefix "_" fp "(r) { return r." fp "; }"))
-                        field-params)]
+                     (str/join ", " field-entries) "});\n}")
+        accessors (mapv (fn [prop :- String] :- String
+                          (str "function " accessor-prefix "_" prop "(r) { return r." prop "; }"))
+                        field-props)]
     (str/join "\n\n" (into [factory] accessors))))
 
 (defn emit-tagged-factory [member-name :- String fields :- Any] :- String
   (let [m-str (mangle-name member-name)
-        field-names (mapv mangle-name (field-names-of fields))]
-    (str "function " m-str "(" (str/join ", " field-names) ") { return Object.freeze({ _tag: "
+        raw-fields (field-names-of fields)
+        ;; params are BINDINGS (suffixed); object KEYS are PROPERTIES (no `$`).
+        field-params (mapv mangle-name raw-fields)
+        field-props (mapv mangle-chars raw-fields)]
+    (str "function " m-str "(" (str/join ", " field-params) ") { return Object.freeze({ _tag: "
          (js-string-lit member-name)
-         (if (= 0 (count field-names)) ""
-           (str ", " (str/join ", " (mapv (fn [n :- String] :- String (str n ": " n)) field-names))))
+         (if (= 0 (count field-params)) ""
+           (str ", " (str/join ", " (map-indexed
+                                      (fn [i :- Int prop :- String] :- String
+                                        (str prop ": " (nth field-params i)))
+                                      field-props))))
          " }); }")))
 
 (defn emit-defenum [f :- Any] :- String
@@ -596,7 +617,8 @@
                              (if (or (>= i (count bindings)) (>= i (count fields))) acc
                                (recur (+ i 1)
                                       (conj acc (str "const " (mangle-name (get (nth bindings i) "name"))
-                                                     " = " tmp "." (mangle-str (nth fields i)) ";")))))
+                                                     ;; read reaches a record PROPERTY: char-mangle, no `$`
+                                                     " = " tmp "." (mangle-chars (nth fields i)) ";")))))
                   bnames (mapv (fn [b :- Any] :- String (get b "name")) bindings)]
               (str "if (" test ") { " (str/join " " let-strs) " " (emit-match-body body bnames) " } else"))))
       (= pt "map")
@@ -703,6 +725,9 @@
   (let [s (await-async-iife (emit-expr* e))]
     (if (str/ends-with? s ";") s (str s ";"))))
 
+;; Statement-context body: route each form through emit-stmt-inline so
+;; effect-position ctrl-flow (if/cond/when/let/do) lowers to idiomatic
+;; statements recursively rather than value-position ternary/IIFE.
 (defn emit-body-stmts [exprs :- Any indent :- String] :- String
   (str/join (str "\n" indent) (mapv (fn [e :- Any] :- String (emit-expr-stmt e)) exprs)))
 
@@ -987,7 +1012,8 @@
       (= k "member")
         (if (get n "computed")
           (str (ajs-expr (get n "object")) "[" (ajs-expr (get n "property")) "]")
-          (str (ajs-expr (get n "object")) "." (ajs-ident (get n "property"))))
+          ;; PROPERTY position: fixed authored JS label -> mangle-prop, no `$`
+          (str (ajs-expr (get n "object")) "." (mangle-prop (get n "property"))))
       (= k "index")
         (str (ajs-expr (get n "object")) "[" (ajs-expr (get n "idx")) "]")
       (= k "arrow")
@@ -1015,7 +1041,9 @@
                        (let [key (get p "key") val (get p "val")]
                          (cond
                            (= (get key "jsk") "ident")
-                             (let [kk (ajs-ident (get key "name")) vv (ajs-expr val)]
+                             ;; KEY is a property (mangle-prop); VALUE ident is a
+                             ;; binding ref (mangle-name). Shorthand only when equal.
+                             (let [kk (mangle-prop (get key "name")) vv (ajs-expr val)]
                                (if (and (= (get val "jsk") "ident") (= kk (ajs-ident (get val "name")))) kk (str kk ": " vv)))
                            (= (get key "jsk") "literal") (str (ajs-expr key) ": " (ajs-expr val))
                            :else (str "[" (ajs-expr key) "]: " (ajs-expr val))))) (get n "pairs"))) "}")

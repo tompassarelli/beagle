@@ -58,23 +58,30 @@
 
 (define (js-reserved-word? s) (hash-ref JS-RESERVED-WORDS s #f))
 
-(define (mangle-str s)
-  (define mangled
+;; Character-level mangle only: turns a beagle symbol/keyword spelling into a
+;; syntactically legal JS identifier (kebab -> snake, `?`/`!`/… -> words). This
+;; is the PROPERTY spelling — no reserved-word `$` suffix. Bindings add the
+;; suffix on top (mangle-str), because a reserved word is illegal only in
+;; declaration/param/reference position, never as a member name or object key.
+(define (mangle-chars s)
+  (string-replace
+   (string-replace
     (string-replace
      (string-replace
       (string-replace
        (string-replace
         (string-replace
-         (string-replace
-          (string-replace
-           (string-replace s "_" "__")
-           "-" "_")
-          "?" "_p")
-         "!" "_bang")
-        "=" "_eq")
-       ">" "_gt")
-      "<" "_lt")
-     "%" "_pct"))
+         (string-replace s "_" "__")
+         "-" "_")
+        "?" "_p")
+       "!" "_bang")
+      "=" "_eq")
+     ">" "_gt")
+    "<" "_lt")
+   "%" "_pct"))
+
+(define (mangle-str s)
+  (define mangled (mangle-chars s))
   (if (js-reserved-word? mangled) (string-append mangled "$") mangled))
 
 (define (mangle-prop s)
@@ -137,7 +144,7 @@
 (provide
  escape-js-regex-slash escape-js-template-string
  js-string-lit
- mangle-name mangle-str mangle-prop
+ mangle-name mangle-str mangle-prop mangle-chars
  JS-BINARY-OPS JS-ASSIGN-OPS
  js-binary-op? js-assign-op?
  current-emit-expr)

@@ -213,7 +213,10 @@
      (define prop (js-ast-member-property node))
      (if (js-ast-member-computed? node)
        (format "~a[~a]" obj-str (emit-js-ast-expr-str prop))
-       (format "~a.~a" obj-str (emit-js-ast-ident-str prop)))]
+       ;; PROPERTY position: a fixed member label the user authored (`.delete`,
+       ;; `.get`) is never reserved-word-mangled -> mangle-prop, matching the
+       ;; regular method-call path. Only identifier/binding positions get `$`.
+       (format "~a.~a" obj-str (mangle-prop (symbol->string prop))))]
 
     [(js-ast-index? node)
      (format "~a[~a]"
@@ -272,7 +275,10 @@
           (define key-str
             (cond
               [(js-ast-ident? key)
-               (define k (emit-js-ast-ident-str (js-ast-ident-name key)))
+               ;; KEY is a property position (mangle-prop, no `$`); the VALUE,
+               ;; when an ident, is a binding reference (mangle-name). Shorthand
+               ;; `{name}` only when the two spellings coincide (non-reserved).
+               (define k (mangle-prop (symbol->string (js-ast-ident-name key))))
                (define v (emit-js-ast-expr-str val))
                (if (and (js-ast-ident? val)
                         (string=? k (emit-js-ast-ident-str (js-ast-ident-name val))))

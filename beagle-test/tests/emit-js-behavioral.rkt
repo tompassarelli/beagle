@@ -152,6 +152,45 @@ console.assert(threw, 'frozen record should reject mutation');
      "console.log(area(Circle(5))); console.log(area(Rect(3, 4)));"
      "25\n12")
 
+   ;; --- seam 1: reserved-word field/property positions ----------------------
+   ;; A record field named for a JS reserved word must round-trip through its
+   ;; generated accessor. Pre-fix the accessor is emitted as `cfg_delete$` but
+   ;; the call site emits `cfg_delete` (the whole `cfg-delete` symbol is not
+   ;; reserved) -> ReferenceError. Property positions never get the `$` suffix.
+   (check-js-output "record reserved-word field accessors round-trip"
+     (list '(defrecord Cfg [(delete :- Bool) (default :- Int)])
+           '(defn main [] :- Nil
+              (let [c (->Cfg true 5)]
+                (do (println (cfg-delete c))
+                    (println (cfg-default c))))))
+     "main();"
+     "true\n5")
+
+   (check-js-output "record reserved-word field match-destructure"
+     (list '(defrecord Cfg [(delete :- Bool) (default :- Int)])
+           `(defn describe [(c :- Cfg)] :- Int
+              (match c
+                ,(br '(Cfg d df) 'df)))
+           '(defn main [] :- Nil
+              (println (describe (->Cfg true 7)))))
+     "main();"
+     "7")
+
+   ;; js/quote emits fixed JS labels: `.delete`/`.get` on a real Map must call
+   ;; the native methods, not the mangled `.delete$` (which throws TypeError).
+   (check-js-behavior "js/quote reserved-word methods call native Map"
+     (list '(js/quote
+              (const m (new Map))
+              (.set m "k" 1)
+              (const before (.get m "k"))
+              (.delete m "k")
+              (const after (.get m "k"))
+              (if (!== before 1)
+                (throw (new Error "get returned wrong value")))
+              (if (!== after undefined)
+                (throw (new Error "delete did not remove key")))))
+     "")
+
    ;; --- nil / null ----------------------------------------------------------
 
    (check-js-output "nil maps to null"

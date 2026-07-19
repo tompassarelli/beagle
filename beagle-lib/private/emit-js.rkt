@@ -46,7 +46,10 @@
 ;; Accepts either the full string (":x") or a symbol whose first char is `:`.
 (define (kw->prop kw)
   (define s (if (symbol? kw) (symbol->string kw) kw))
-  (mangle-str (substring s 1)))
+  ;; PROPERTY position: char-mangle only, never the reserved-word `$` suffix
+  ;; (`:delete` -> `delete`, not `delete$`). Store + read both funnel here so
+  ;; the map/record property spelling stays internally consistent.
+  (mangle-chars (substring s 1)))
 
 (define (keyword-symbol? sym)
   (and (symbol? sym)
@@ -1891,15 +1894,19 @@
 ;; Shared by defunion and deferror members (both produce tagged variant ctors).
 (define (emit-tagged-factory member-name fields)
   (define m-str (mangle-name member-name))
-  (define field-names (map (compose mangle-name param-name) fields))
+  ;; params are BINDINGS (reserved-word-suffixed); the object KEYS are
+  ;; PROPERTIES (char-mangle only). Split them so `{ delete: delete$ }`.
+  (define field-params (map (compose mangle-name param-name) fields))
+  (define field-props (map (compose mangle-chars symbol->string param-name) fields))
   (format "function ~a(~a) { return Object.freeze({ _tag: ~v~a }); }"
           m-str
-          (string-join field-names ", ")
+          (string-join field-params ", ")
           (symbol->string member-name)
-          (if (null? field-names) ""
+          (if (null? field-params) ""
               (string-append ", "
                              (string-join
-                              (map (lambda (n) (format "~a: ~a" n n)) field-names)
+                              (map (lambda (prop param) (format "~a: ~a" prop param))
+                                   field-props field-params)
                               ", ")))))
 
 (define (emit-record f)
@@ -1908,17 +1915,28 @@
   (define name-str (symbol->string name))
   (define name-mangled (mangle-name name))
   (define accessor-prefix (mangle-str (string-downcase name-str)))
+  ;; field PARAMS/accessor-name-suffix are bindings; field PROPS are property
+  ;; positions. The accessor name mirrors the `<lcname>-<field>` call site,
+  ;; which mangles the whole (non-reserved) symbol -> char-mangle, no `$`.
   (define field-params (map (compose mangle-name param-name) fields))
+  (define field-props (map (compose mangle-chars symbol->string param-name) fields))
+  ;; Keep the object shorthand `{x}` when prop == param (the common,
+  ;; non-reserved case, byte-identical to before); only reserved fields need
+  ;; the explicit `delete: delete$` split.
+  (define field-entries
+    (map (lambda (prop param)
+           (if (string=? prop param) param (format "~a: ~a" prop param)))
+         field-props field-params))
   (define factory
     (format "function ~a(~a) {\n  return Object.freeze({_tag: ~v, ~a});\n}"
             name-mangled
             (string-join field-params ", ")
             name-str
-            (string-join field-params ", ")))
+            (string-join field-entries ", ")))
   (define accessors
-    (for/list ([fp (in-list field-params)])
+    (for/list ([prop (in-list field-props)])
       (format "function ~a_~a(r) { return r.~a; }"
-              accessor-prefix fp fp)))
+              accessor-prefix prop prop)))
   (string-join (cons factory accessors) "\n\n"))
 
 ;; --- with (record update) --------------------------------------------------
@@ -2010,8 +2028,10 @@
         (define let-strs
           (for/list ([b (in-list bindings)]
                      [fname (in-list fields)])
+            ;; `b` is a fresh BINDING (suffixed); the read reaches a record
+            ;; PROPERTY (char-mangle only) -> must match factory storage.
             (format "const ~a = ~a.~a;"
-                    (mangle-name b) tmp (mangle-str fname))))
+                    (mangle-name b) tmp (mangle-chars fname))))
         (format "if (~a) { ~a ~a } else"
                 test (string-join let-strs " ") (make-body-str bindings))])]
     [(pat-map? pat)

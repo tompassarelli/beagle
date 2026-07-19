@@ -302,6 +302,21 @@
        "obj.name"
        '(js/quote (const v (dot obj name))))
 
+     ;; --- seam 1: reserved words in PROPERTY/METHOD position are NOT
+     ;; identifier-mangled. A JS method/member is a fixed label the user
+     ;; authored; only binding positions get the reserved-word `$` suffix.
+     (check-js-quote "reserved-word method call not mangled"
+       "m.delete(k)"
+       '(js/quote (.delete m k)))
+
+     (check-js-quote "reserved-word member access not mangled"
+       "= obj.delete;"
+       '(js/quote (const v (dot obj delete))))
+
+     (check-js-quote "reserved-word object key not mangled"
+       "{delete: 1}"
+       '(js/quote (const o (object delete 1))))
+
      (check-js-quote "assignment"
        "x = 10;"
        '(js/quote (= x 10)))

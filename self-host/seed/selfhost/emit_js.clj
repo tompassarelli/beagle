@@ -71,8 +71,11 @@
 
 (def JS-RESERVED {"break" true "case" true "catch" true "class" true "const" true "continue" true "debugger" true "default" true "delete" true "do" true "else" true "enum" true "export" true "extends" true "finally" true "for" true "function" true "if" true "implements" true "import" true "in" true "instanceof" true "interface" true "let" true "new" true "null" true "package" true "private" true "protected" true "public" true "return" true "static" true "switch" true "throw" true "try" true "typeof" true "var" true "void" true "while" true "with" true "yield" true "await" true "eval" true "arguments" true})
 
+(defn ^String mangle-chars [^String s]
+  (str/replace (str/replace (str/replace (str/replace (str/replace (str/replace (str/replace (str/replace s "_" "__") "-" "_") "?" "_p") "!" "_bang") "=" "_eq") ">" "_gt") "<" "_lt") "%" "_pct"))
+
 (defn ^String mangle-str [^String s]
-  (let [m (str/replace (str/replace (str/replace (str/replace (str/replace (str/replace (str/replace (str/replace s "_" "__") "-" "_") "?" "_p") "!" "_bang") "=" "_eq") ">" "_gt") "<" "_lt") "%" "_pct")]
+  (let [m (mangle-chars s)]
   (if (contains? JS-RESERVED m) (str m "$") m)))
 
 (defn ^String mangle-name [^String s]
@@ -82,7 +85,7 @@
   (str/replace s "-" "_"))
 
 (defn ^String kw->prop [^String kw]
-  (if (str/starts-with? kw ":") (mangle-str (subs kw 1)) (mangle-str kw)))
+  (if (str/starts-with? kw ":") (mangle-chars (subs kw 1)) (mangle-chars kw)))
 
 (def ^String HEX "0123456789abcdef")
 
@@ -239,14 +242,19 @@
    name-mangled (mangle-name name)
    accessor-prefix (mangle-str (str/lower-case name))
    field-params (mapv mangle-name fields)
-   factory (str "function " name-mangled "(" (str/join ", " field-params) ") {\n" "  return Object.freeze({_tag: " (js-string-lit name) ", " (str/join ", " field-params) "});\n}")
-   accessors (mapv (fn [fp] (str "function " accessor-prefix "_" fp "(r) { return r." fp "; }")) field-params)]
+   field-props (mapv mangle-chars fields)
+   field-entries (map-indexed (fn [i prop] (let [param (nth field-params i)]
+  (if (= prop param) param (str prop ": " param)))) field-props)
+   factory (str "function " name-mangled "(" (str/join ", " field-params) ") {\n" "  return Object.freeze({_tag: " (js-string-lit name) ", " (str/join ", " field-entries) "});\n}")
+   accessors (mapv (fn [prop] (str "function " accessor-prefix "_" prop "(r) { return r." prop "; }")) field-props)]
   (str/join "\n\n" (into [factory] accessors))))
 
 (defn ^String emit-tagged-factory [^String member-name fields]
   (let [m-str (mangle-name member-name)
-   field-names (mapv mangle-name (field-names-of fields))]
-  (str "function " m-str "(" (str/join ", " field-names) ") { return Object.freeze({ _tag: " (js-string-lit member-name) (if (= 0 (count field-names)) "" (str ", " (str/join ", " (mapv (fn [n] (str n ": " n)) field-names)))) " }); }")))
+   raw-fields (field-names-of fields)
+   field-params (mapv mangle-name raw-fields)
+   field-props (mapv mangle-chars raw-fields)]
+  (str "function " m-str "(" (str/join ", " field-params) ") { return Object.freeze({ _tag: " (js-string-lit member-name) (if (= 0 (count field-params)) "" (str ", " (str/join ", " (map-indexed (fn [i prop] (str prop ": " (nth field-params i))) field-props)))) " }); }")))
 
 (defn ^String emit-defenum [f]
   (str "const " (mangle-name (get f "name")) "_values = new Set([" (str/join ", " (mapv (fn [v] (js-string-lit v)) (get f "values"))) "]);"))
@@ -430,7 +438,7 @@
    test (str tmp "._tag === " (js-string-lit rec-name))]
   (if (or (= 0 (count bindings)) (nil? fields)) (str "if (" test ") { " (emit-match-body body []) " } else") (let [let-strs (loop [i 0
    acc []]
-  (if (or (>= i (count bindings)) (>= i (count fields))) acc (recur (+ i 1) (conj acc (str "const " (mangle-name (get (nth bindings i) "name")) " = " tmp "." (mangle-str (nth fields i)) ";")))))
+  (if (or (>= i (count bindings)) (>= i (count fields))) acc (recur (+ i 1) (conj acc (str "const " (mangle-name (get (nth bindings i) "name")) " = " tmp "." (mangle-chars (nth fields i)) ";")))))
    bnames (mapv (fn [b] (get b "name")) bindings)]
   (str "if (" test ") { " (str/join " " let-strs) " " (emit-match-body body bnames) " } else"))))
   (= pt "map") (let [entries (vec (get pat "entries"))
@@ -713,7 +721,7 @@
   (= k "splice-expr") (emit-expr* (get n "bexpr"))
   (= k "splice-json") (str "JSON.parse(" (emit-expr* (get n "bexpr")) ")")
   (= k "call") (str (ajs-expr (get n "callee")) "(" (str/join ", " (mapv ajs-expr (get n "args"))) ")")
-  (= k "member") (if (get n "computed") (str (ajs-expr (get n "object")) "[" (ajs-expr (get n "property")) "]") (str (ajs-expr (get n "object")) "." (ajs-ident (get n "property"))))
+  (= k "member") (if (get n "computed") (str (ajs-expr (get n "object")) "[" (ajs-expr (get n "property")) "]") (str (ajs-expr (get n "object")) "." (mangle-prop (get n "property"))))
   (= k "index") (str (ajs-expr (get n "object")) "[" (ajs-expr (get n "idx")) "]")
   (= k "arrow") (let [params-str (ajs-params (get n "params"))
    body (get n "body")]
@@ -726,7 +734,7 @@
   (= k "object") (str "{" (str/join ", " (mapv (fn [p] (let [key (get p "key")
    val (get p "val")]
   (cond
-  (= (get key "jsk") "ident") (let [kk (ajs-ident (get key "name"))
+  (= (get key "jsk") "ident") (let [kk (mangle-prop (get key "name"))
    vv (ajs-expr val)]
   (if (and (= (get val "jsk") "ident") (= kk (ajs-ident (get val "name")))) kk (str kk ": " vv)))
   (= (get key "jsk") "literal") (str (ajs-expr key) ": " (ajs-expr val))
