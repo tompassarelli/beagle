@@ -52,9 +52,12 @@
          racket/port
          racket/system
          racket/runtime-path
-         racket/file)
+         racket/file
+         (only-in "../../beagle-lib/private/batch-compile.rkt" compile-source))
 
 (define-runtime-path beagle-build "../../bin/beagle-build")
+(define-runtime-path conformance-repo-root "../..")
+(define repo-root-str (path->string (simplify-path conformance-repo-root)))
 
 ;; Repo-relative path to the JS runtime core (equiv/hash/contains/...). This
 ;; file lives at <repo>/beagle-test/tests/conformance.rkt, so the core is at
@@ -105,18 +108,43 @@
 ;; ---------------------------------------------------------------------------
 
 ;; Compile a Beagle source string to `out-path`. Returns #t on success.
+;;
+;; Two seams, selected by BEAGLE_CONFORMANCE_SUBPROCESS:
+;;   - default (unset/not "1"): in-process via batch-compile.rkt's
+;;     compile-source (D2) — one racket process amortizes the compiler's
+;;     module-graph load across the whole corpus instead of paying a fresh
+;;     cold start per case (the harness's dominant cost per the parent
+;;     thread's B0 profile).
+;;   - BEAGLE_CONFORMANCE_SUBPROCESS=1: the ORIGINAL one-shot subprocess path
+;;     (bin/beagle-build per case), kept byte-for-byte as an exact rollback.
 (define (compile-beagle src-text src-path out-path)
   (call-with-output-file src-path #:exists 'truncate
     (lambda (p) (display src-text p)))
-  (define out-cap (open-output-string))
-  (define err-cap (open-output-string))
-  (define ok?
-    (parameterize ([current-output-port out-cap]
-                   [current-error-port  err-cap])
-      (system* (path->string beagle-build)
-               (path->string src-path)
-               (path->string out-path))))
-  (values ok? (get-output-string err-cap)))
+  (cond
+    [(equal? (getenv "BEAGLE_CONFORMANCE_SUBPROCESS") "1")
+     (define out-cap (open-output-string))
+     (define err-cap (open-output-string))
+     (define ok?
+       (parameterize ([current-output-port out-cap]
+                      [current-error-port  err-cap])
+         (system* (path->string beagle-build)
+                  (path->string src-path)
+                  (path->string out-path))))
+     (values ok? (get-output-string err-cap))]
+    [else
+     (define-values (status text)
+       (compile-source (path->string src-path) #:root repo-root-str))
+     (cond
+       [(eq? status 'ok)
+        ;; Write the emitted bytes to out-path so downstream target-run
+        ;; helpers (clj-run/js-run), which read out-path from disk, are
+        ;; unchanged — same file-based contract as the subprocess path.
+        (make-parent-directory* out-path)
+        (call-with-output-file out-path #:exists 'truncate
+          (lambda (p) (display text p)))
+        (values #t "")]
+       [else
+        (values #f text)])]))
 
 ;; Run a shell command list, capturing stdout/stderr + exit status.
 (define (run-capture exe . args)
