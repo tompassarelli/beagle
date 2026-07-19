@@ -1,9 +1,16 @@
 #lang racket/base
 
 ;; Importer round-trip: bin/beagle-import-nix → .bnix → emit → .nix.
-;; Asserts the importer emits ~''…'' form (no cursed (ms "STR-WITH-\n"))
+;; Asserts the importer emits the structural `(ms …)` / `(s …)` form (no
+;; cursed (ms "STR-WITH-\n") single-operand-with-embedded-newline form)
 ;; AND the final Nix preserves multi-line content, real interps, literal
 ;; ${X} via ''$, and literal '' via '''.
+;;
+;; NOTE: `~''…''` reader sugar was removed (#25, 3fec6ca) — `~` is now
+;; uniformly Clojure's unquote across every target. `(ms …)`/`(s …)` are
+;; the current (and only) surface for nix multi-line/interpolated
+;; strings; a bnix source using the retired `~''…''` sugar does not
+;; parse.
 
 (require rackunit
          racket/port
@@ -28,13 +35,14 @@
     (apply system* cmd args))
   (values (get-output-string out) (get-output-string err)))
 
-(test-case "importer emits ~''…'' (not cursed (ms STR-WITH-\\n))"
+(test-case "importer emits structural (ms …) (not cursed (ms STR-WITH-\\n))"
   (define-values (bnix _err) (run (path->string importer-bin)
                                   (path->string fixture-nix)))
   ;; The fixture has indented heredocs that previously imported as
-  ;; (ms "BIG STRING WITH \\n…").  The fixed importer emits ~''…''.
-  (check-true (regexp-match? #rx"~''" bnix)
-              "importer emits at least one ~'' block")
+  ;; (ms "BIG STRING WITH \\n…"). The fixed importer emits the structural
+  ;; (ms …) form, one operand per physical line.
+  (check-true (regexp-match? #rx"\\(ms " bnix)
+              "importer emits at least one (ms …) block")
   ;; No legacy (ms "..." with a \\n hidden inside the literal:
   (check-false (regexp-match? #rx"\\(ms \"[^\"]*\\\\n" bnix)
                "importer must not emit (ms \"…\\n…\") form")
@@ -50,10 +58,18 @@
                                   (path->string fixture-nix)))
   (with-output-to-file bnix-path #:exists 'replace
     (lambda () (display bnix)))
+  ;; Delete any stale nix-path FIRST — build-bin only writes it on
+  ;; success, so a leftover file from a previous (unrelated) passing run
+  ;; would otherwise let a build FAILURE here silently read old content
+  ;; and false-pass the checks below.
+  (when (file-exists? nix-path) (delete-file nix-path))
   (define-values (_build-out _build-err)
     (run (path->string build-bin)
          (path->string bnix-path)
          (path->string nix-path)))
+  (check-true (file-exists? nix-path)
+              (format "beagle-build must produce ~a (stderr: ~a)"
+                      nix-path _build-err))
   (define out (file->string nix-path))
   ;; Real interp ${pkgs.bash} preserved
   (check-true (string-contains? out "#!${pkgs.bash}/bin/bash"))

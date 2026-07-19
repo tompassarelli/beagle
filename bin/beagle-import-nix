@@ -688,53 +688,80 @@
        [else
         (format "(s ~a)" (string-join s-args " "))])]))
 
-;; Compose an indented Nix string as bnix's ~''…'' reader form.
-;; `parts` is a list whose elements are either strings (literal body
-;; text from the rnix parser, with no interp) or (interp AST) markers.
-;; The output is `~''\n<indented body>\n<close-indent>''` where each
-;; body line is prefixed with 2*(depth+1) spaces; the reader's
-;; nix-dedent strips that uniformly, so the AST round-trips to the same
-;; nix-multiline-string as the legacy single-string-with-\n form.
+;; Compose an indented Nix string as beagle/nix's structural `(ms …)`
+;; multi-line-string form (each operand = one physical output line,
+;; joined with \n by emit-nix-multiline-string). The `~''…''` reader
+;; sugar this used to target was removed (#25, 3fec6ca) — `~` is now
+;; uniformly Clojure's unquote across every target, so that literal
+;; syntax no longer parses. `(ms …)` / `(s …)` are the CURRENT (and
+;; only) surface for nix multi-line/interpolated strings; see the `ms`
+;; and `s` combiners in parse.rkt.
 ;;
-;; Body escapes (so the reader produces the intended raw characters):
-;;   ''  →  '''   (reader's literal-double-quote escape)
-;;   ${  →  ''${  (reader's ''$ escape consumes the $; the { that
-;;                follows is then just a literal `{` character, so the
-;;                resulting AST string holds a literal `${`)
-;; The emitter (legacy escape-nix or operative escape-ind-string) re-
-;; escapes that literal `${` to `''${` in the Nix output. Real interps
-;; come in as (interp AST) markers and emit as ${EXPR} — those are NOT
-;; escaped.
+;; `parts` is a list whose elements are either strings (literal body
+;; text from the rnix parser — already Nix-escape-DECODED, so a literal
+;; `''` or `${` in here is a genuine two/one-character literal, not an
+;; escape sequence) or (interp AST) markers for real Nix interpolation.
+;;
+;; Nix-level re-escaping (`''` → `'''`, literal `${` → `''${`) is the
+;; EMITTER's job (emit-nix-strings.rkt's escape-nix, #:multiline? #t) —
+;; it runs on each string operand when the .bnix is compiled to .nix.
+;; Here we only need valid Racket string syntax (`~v`/write handles
+;; `\n`/`\"`/`\\`), plus regrouping the flat parts stream into one `ms`
+;; operand per physical line: a pure-literal line emits as a plain
+;; string, a line mixing literal text with interpolation(s) emits as
+;; `(s "…" EXPR "…")` (nix-interpolated-string), matching what
+;; emit-nix-strings.rkt's emit-nix-multiline-string dispatches on.
 (define (emit-ms-tilde parts depth)
-  (define body
-    (apply string-append
-      (for/list ([p (in-list parts)])
-        (cond
-          [(string? p) (escape-ms-tilde-body p)]
-          [(and (pair? p) (eq? (car p) 'interp))
-           ;; The reader's ${…} must stay on a single line; collapse any
-           ;; newlines+leading-space in the rendered expression to one
-           ;; space. For typical interp content (ident, dotted path,
-           ;; simple call) this is a no-op.
-           (define expr-str (emit-expr (cadr p) depth))
-           (format "${~a}" (regexp-replace* #rx"\n[ \t]*" expr-str " "))]
-          [else (error 'emit-ms-tilde "unexpected ms part: ~v" p)]))))
-  (define ind (indent (+ depth 1)))
-  (define close-ind (indent depth))
-  (define lines (string-split body "\n" #:trim? #f))
-  (define indented
-    (string-join
-      (for/list ([l (in-list lines)])
-        (if (regexp-match? #rx"^[ \t]*$" l) "" (string-append ind l)))
-      "\n"))
-  (format "~~''\n~a\n~a''" indented close-ind))
+  (define line-groups (nix-ms-split-lines parts))
+  (define line-ops
+    (for/list ([grp (in-list line-groups)])
+      (emit-ms-line-group grp depth)))
+  (format "(ms ~a)" (string-join line-ops " ")))
 
-(define (escape-ms-tilde-body s)
-  (define s1 (regexp-replace* #rx"''" s "'''"))
-  ;; Literal replacement "''${" — neither $ nor { is special in Racket
-  ;; regexp-replace*'s insert string (only & and \0..\9). See
-  ;; escape-literal-dollars below for the same idiom.
-  (regexp-replace* #rx"\\$\\{" s1 "''${"))
+;; Regroup a flat PARTS stream (list of literal strings and (interp AST)
+;; markers, as delivered by rnix's per-string-node interpolation split)
+;; into one sub-list per PHYSICAL output line. A literal string chunk
+;; may itself embed `\n` (raw multi-line body text between two
+;; interpolations, or the whole line when there's only one) -- each `\n`
+;; inside it starts a new line group; an (interp AST) marker always
+;; attaches to whichever line group is currently open (interpolation
+;; markers never carry a newline themselves).
+(define (nix-ms-split-lines parts)
+  (let loop ([parts parts] [cur '()] [lines '()])
+    (cond
+      [(null? parts) (reverse (cons (reverse cur) lines))]
+      [(string? (car parts))
+       (define segs (string-split (car parts) "\n" #:trim? #f))
+       (cond
+         [(null? (cdr segs)) ; no `\n` in this chunk
+          (loop (cdr parts) (cons (car segs) cur) lines)]
+         [else
+          (define finished-line (reverse (cons (car segs) cur)))
+          (define middle-lines (map list (drop-right (cdr segs) 1)))
+          (loop (cdr parts)
+                (list (last segs))
+                (append (reverse middle-lines) (cons finished-line lines)))])]
+      [else (loop (cdr parts) (cons (car parts) cur) lines)])))
+
+;; Emit ONE `ms` operand for one physical line's item group: a plain
+;; Racket string literal if the line is pure literal text (or empty),
+;; else `(s "..." EXPR "...")` (nix-interpolated-string) mixing literal
+;; chunks with real interpolation(s) -- matching what
+;; emit-nix-strings.rkt's emit-nix-multiline-string dispatches on.
+(define (emit-ms-line-group grp depth)
+  (cond
+    [(null? grp) (format "~v" "")]
+    [(and (null? (cdr grp)) (string? (car grp)))
+     (format "~v" (escape-literal-dollars (car grp)))]
+    [else
+     (define chunks
+       (for/list ([item (in-list grp)])
+         (cond
+           [(string? item) (format "~v" (escape-literal-dollars item))]
+           [(and (pair? item) (eq? (car item) 'interp))
+            (emit-expr (cadr item) depth)]
+           [else (error 'emit-ms-line-group "unexpected ms part: ~v" item)])))
+     (format "(s ~a)" (string-join chunks " "))]))
 
 (define (escape-literal-dollars s)
   ;; Re-escape literal ${ → $${ so beagle's emit-nix produces \${ in the
