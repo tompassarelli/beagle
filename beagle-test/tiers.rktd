@@ -41,7 +41,7 @@
 #hasheq(
   (nix     . (active   "Load-bearing via bnix dogfood (firnos config + heist work)"))
   (clj     . (active   "Promoted Phase D (2026-05): emit-clj structural + behavioral both active. Fixture-driven .bclj suites reconciled to v0.16 surface (claim form, no inline def/defn type annotations, defrecord+extend-type instead of deftype)"))
-  (js      . (split    "Structural active; behavioral demoted — JS target may become load-bearing via Bun work; currently aspirational"))
+  (js      . (active   "Structural + behavioral both active (promoted 2026-07-19): JS runtime-correctness seams landed (reserved-word property/method mangling fixed, effect-position if/cond lowering). emit-js-behavioral.rkt runs emitted JS under bun and is now load-bearing/blocking."))
   (sql     . (active   "Schema-typing live in check.rkt; emitter dormant (BEAGLE_ALL_TARGETS=1). Structural-only"))
   (odin    . (active   "Native target — Odin + wgpu/SDL3. Structural goldens + pointed rejections")))
 
@@ -124,10 +124,14 @@
              ;; cross-checks the HAMT-site count against the emitter's actual
              ;; output. Structural (emits + inspects JS strings; no node/bb), so
              ;; it stays active as a permanent regression lock on rep-selection.
-             "rep-soundness.rkt"))
+             "rep-soundness.rkt"
+             ;; JS behavioral — promoted demoted→active 2026-07-19 (thread
+             ;; 019f791c-3c99). Runs emitted JS under bun; blocks the build.
+             ;; Load-bearing after the JS runtime-correctness seams landed
+             ;; (reserved-property mangling + effect-position lowering).
+             "emit-js-behavioral.rkt")) ; requires bun
 
-  (demoted . (;; behavioral runs that hit external interpreters
-              "emit-js-behavioral.rkt")) ; requires bun
+  (demoted . ()) ; (empty) emit-js-behavioral.rkt promoted to active 2026-07-19
 
   (gated . (;; Non-Nix target tests parked behind BEAGLE_ALL_TARGETS=1.
             ;; SQL emitter is dormant (its schema-typing in check.rkt is live).
