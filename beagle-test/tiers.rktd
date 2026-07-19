@@ -54,6 +54,7 @@
 #hasheq(
   (active . (;; target-agnostic infrastructure
              "check.rkt"
+             "batch-compile.rkt"        ; D1 — compile-source oracle vs one-shot bin/beagle-build (not yet wired to any consumer)
              "build-edn-datum-ir.rkt"   ; #33 — --build-edn datum-IR round-trip identity (compile from facts)
              "cheatsheet.rkt"           ; capability cheatsheet — every example must parse+check
              "facts-render-roundtrip.rkt" ; #17 — renderer reconstructs #lang from leading (define-target)
