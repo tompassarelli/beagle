@@ -1,0 +1,14 @@
+#lang beagle/js
+;; Sensitivity-proof micro-consumer (gate C3, thread 019f797d-e793).
+;; A minimal, representative JS-target module using a LEGAL set!-place —
+;; `(set! (.-field obj) v)`, a plain field mutation, distinct from the
+;; genuinely-illegal `(set! (get m k) v)` covered by the conformance
+;; corpus's js-set-on-get.bjs. Compiles clean (0 diagnostics) against the
+;; real compiler; the checked-in seed diff
+;; (seed-check-target-form.diff) makes ONLY a temporary compiler copy
+;; wrongly reject this legal form with the same target-form/E009
+;; diagnostic class.
+(ns fixture.downstream-sensitivity)
+
+(defn bump! [obj :- Any] :- Any
+  (set! (.-count obj) (+ (.-count obj) 1)))

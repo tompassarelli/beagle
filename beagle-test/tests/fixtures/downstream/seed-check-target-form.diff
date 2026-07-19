@@ -1,0 +1,23 @@
+# Deterministic seeded regression (gate C3, thread 019f797d-e793):
+# drops the `method-call?` carve-out from the set!-place check, so a
+# LEGAL field-mutation place — `(set! (.-field obj) v)`, the emit path
+# exercised by beagle-test/tests/fixtures/downstream/seed-micro-consumer.bjs
+# — is wrongly rejected as a non-place, raising the SAME diagnostic class
+# (kind 'target-form / error-code E009, "not an assignable place") that
+# beagle-test/conformance/corpus/js-set-on-get.bjs correctly raises today
+# for the real defect (set!-on-get) and that gjoa's scheduler.bjs trips in
+# the wild (see C2 bar_evidence). This diff applies ONLY to a temporary
+# copy of beagle-lib (never live source, never a consumer) and proves the
+# downstream gate is sensitive to a representative type-checker
+# regression in this diagnostic class — a controlled complement to the
+# honest, unmasked, real gjoa E009 failure.
+--- a/private/check.rkt
++++ b/private/check.rkt
+@@ -1819,7 +1819,6 @@
+      ;; rather than a silent miscompile.
+      (define target (set!-form-target e))
+      (unless (or (symbol? target)
+-                 (method-call? target)
+                  (memq (current-check-target) '(odin zig)))
+        (define target-desc
+          (if (and (call-form? target) (symbol? (call-form-fn target)))
