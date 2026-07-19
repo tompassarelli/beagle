@@ -124,6 +124,41 @@
     (environment-variables-set! ev name val))
   ev)
 
+;; Concurrently drain a child's stdout and stderr to EOF, then reap it.
+;;
+;; Reading both streams IN PARALLEL is a correctness requirement, not a perf
+;; tweak: the sequential "read stdout fully, then stderr" order deadlocks the
+;; moment the child fills either pipe's OS buffer (~64KiB on Linux). If the
+;; child fills the un-drained stream it blocks writing and never closes the one
+;; we are blocked reading, so `port->string` on that stream never returns. A
+;; BOUNDED pair of readers — this thread drains stdout, one helper thread drains
+;; stderr — drains both regardless of which the child fills first, so neither
+;; side can wedge the other. No new buffering beyond the two result strings the
+;; caller already accumulated; result assembly stays deterministic (stdout bytes
+;; and stderr bytes are each captured whole, independent of interleave).
+;;
+;; Cleanup is total on EVERY exit path — normal return, a read exception, or a
+;; break: the dynamic-wind after-thunk reaps the reader thread and closes both
+;; ports, so no reader thread or open port leaks. On cancellation the owning
+;; custodian (child-custodian, established by `run`) is the backstop: the reader
+;; thread is spawned under it, so `custodian-shutdown-all` kills it exactly as it
+;; kills the raco-test children.
+(define (drain-child sp stdout stderr)
+  (define stderr-box (box ""))
+  (define reader
+    (thread (lambda () (set-box! stderr-box (port->string stderr)))))
+  (dynamic-wind
+    void
+    (lambda ()
+      (define stdout-str (port->string stdout))
+      (thread-wait reader)
+      (subprocess-wait sp)
+      (values stdout-str (unbox stderr-box) (subprocess-status sp)))
+    (lambda ()
+      (kill-thread reader)              ; no-op once the reader has finished
+      (close-input-port stdout)
+      (close-input-port stderr))))
+
 (define (run-test-file fname)
   (define full-path (build-path tests-dir fname))
   (cond
@@ -145,12 +180,9 @@
          (subprocess #f #f #f (find-executable-path "raco")
                      "test" (path->string full-path))))
      (close-output-port stdin)
-     (define stdout-str (port->string stdout))
-     (define stderr-str (port->string stderr))
-     (subprocess-wait sp)
-     (define code (subprocess-status sp))
-     (close-input-port stdout)
-     (close-input-port stderr)
+     ;; Concurrent drain: cannot deadlock even when the child floods stderr
+     ;; past pipe capacity while stdout is still open (see drain-child).
+     (define-values (stdout-str stderr-str code) (drain-child sp stdout stderr))
      (define all-lines (append (string-split stdout-str "\n")
                                (string-split stderr-str "\n")))
      (define summary (parse-raco-summary all-lines))
@@ -497,6 +529,100 @@
                   "caller environment is not mutated")
     (delete-directory/files probe))
 
+  ;; --- concurrent drain: pipe-fill deadlock + cleanup ----------------------
+  ;;
+  ;; A planted child floods stderr far past the OS pipe buffer WHILE stdout is
+  ;; still open, the exact shape that wedges a sequential "stdout-then-stderr"
+  ;; drain. Each drain runs under a strict timeout: if drain-child cannot
+  ;; complete, the child is deadlocked and the check fails instead of hanging
+  ;; the suite. We assert exact captured bytes, deterministic assembly, the
+  ;; child's exit code, and zero leaked reader thread / open port on every exit.
+
+  (define racket-exe
+    (or (find-executable-path (find-system-path 'exec-file))
+        (find-executable-path "racket")))
+
+  ;; A 64-byte stderr line; 4096 of them = 256KiB, well past the ~64KiB pipe.
+  (define big-line (string-append (make-string 63 #\e) "\n"))
+  (define stderr-reps 4096)
+  (define expected-stderr-len (* (string-length big-line) stderr-reps)) ; 262144
+
+  ;; Child: emit "OUT-A", flood 256KiB to stderr (blocking on a full pipe while
+  ;; stdout stays open — the deadlock trigger), emit "OUT-B", exit `code`.
+  (define (planted-prog code)
+    (format
+     (string-append
+      "(let ([o (current-output-port)] [e (current-error-port)])"
+      "  (write-string \"OUT-A\\n\" o) (flush-output o)"
+      "  (for ([i (in-range ~a)]) (write-string ~s e))"
+      "  (write-string \"OUT-B\\n\" o) (flush-output o)"
+      "  (exit ~a))")
+     stderr-reps big-line code))
+
+  (define (launch-planted prog cust)
+    (parameterize ([current-custodian cust]
+                   [current-subprocess-custodian-mode 'kill]
+                   [subprocess-group-enabled #t])
+      (define-values (sp out in err)
+        (subprocess #f #f #f racket-exe "-e" prog))
+      (close-output-port in)
+      (values sp out err)))
+
+  ;; Run drain-child on its own thread and enforce a hard timeout: returns the
+  ;; (list stdout stderr code) it produced, or fails the test on a deadlock.
+  (define (drain/timeout sp out err seconds)
+    (define result (box #f))
+    (define t
+      (thread (lambda ()
+                (set-box! result
+                          (call-with-values (lambda () (drain-child sp out err)) list)))))
+    (cond
+      [(sync/timeout seconds (thread-dead-evt t)) (unbox result)]
+      [else (kill-thread t)
+            (fail (format "drain-child did not finish within ~as — pipe-fill deadlock" seconds))
+            #f]))
+
+  ;; Success + nonzero-exit variants: both drain fully and deterministically.
+  (for ([exit-code (in-list '(0 3))])
+    (let* ([root (current-custodian)]
+           [cust (make-custodian)])
+      (define-values (sp out err) (launch-planted (planted-prog exit-code) cust))
+      (define res
+        (parameterize ([current-custodian cust]) (drain/timeout sp out err 30)))
+      (check-pred list? res
+                  (format "drain-child completed under timeout, exit ~a (no deadlock)" exit-code))
+      (when (list? res)
+        (match-define (list out-str err-str code) res)
+        (check-equal? out-str "OUT-A\nOUT-B\n"
+                      "stdout captured exactly, in order, across the stderr flood")
+        (check-equal? (string-length err-str) expected-stderr-len
+                      "full oversized stderr captured — no truncation")
+        (check-equal? err-str (apply string-append (make-list stderr-reps big-line))
+                      "stderr bytes are exact and deterministic")
+        (check-eqv? code exit-code
+                    (format "child reaped with exit code ~a" exit-code)))
+      (check-true (port-closed? out) "stdout port closed after drain")
+      (check-true (port-closed? err) "stderr port closed after drain")
+      (check-equal? (filter thread? (custodian-managed-list cust root)) '()
+                    "no reader thread leaked after a clean drain")
+      (custodian-shutdown-all cust)))
+
+  ;; Read-exception variant: close stdout before draining so the stdout read
+  ;; raises. The dynamic-wind after-thunk must still reap the reader thread and
+  ;; close stderr — no leak on the exception path.
+  (let* ([root (current-custodian)]
+         [cust (make-custodian)])
+    (define-values (sp out err) (launch-planted (planted-prog 0) cust))
+    (close-input-port out)
+    (check-exn exn:fail?
+               (lambda () (parameterize ([current-custodian cust]) (drain-child sp out err)))
+               "a read exception on the stdout drain propagates")
+    (check-true (port-closed? err)
+                "stderr port closed after a read exception (after-thunk cleanup)")
+    (check-equal? (filter thread? (custodian-managed-list cust root)) '()
+                  "no reader thread leaked after a read exception")
+    (custodian-shutdown-all cust))
+
   ;; teardown! reaps the child process group FIRST, then deletes the runner-
   ;; owned root — the exact mechanism that runs on normal completion, seeded
   ;; failure, SIGINT/SIGTERM/SIGHUP and crash. (This mutates the module-level
@@ -512,13 +638,40 @@
           (subprocess #f #f #f (find-executable-path "sleep") "30"))
         (close-output-port in) (close-input-port out) (close-input-port err)
         p))
+    ;; A second child that NEVER exits, drained by a live drain-child on a
+    ;; background thread under child-custodian — so a real reader thread is
+    ;; blocked on the child's stderr at teardown time. This proves that on
+    ;; SIGINT/SIGTERM/SIGHUP/crash (all of which route through teardown! =>
+    ;; custodian-shutdown-all) the reader thread is reaped along with the child,
+    ;; leaving zero reader threads — the exact mechanism drain-child relies on.
+    (define hang-prog
+      "(let ([e (current-error-port)]) (write-string \"x\" e) (flush-output e) (sync never-evt))")
+    (define-values (hsp hout herr)
+      (parameterize ([current-custodian child-custodian]
+                     [current-subprocess-custodian-mode 'kill]
+                     [subprocess-group-enabled #t])
+        (define-values (p out in err)
+          (subprocess #f #f #f racket-exe "-e" hang-prog))
+        (close-output-port in)
+        (values p out err)))
+    (define drain-thd
+      (parameterize ([current-custodian child-custodian])
+        (thread (lambda () (drain-child hsp hout herr)))))
     (check-eq? (subprocess-status sp) 'running "child is live before teardown")
+    (check-eq? (subprocess-status hsp) 'running "hanging child is live before teardown")
+    (check-false (thread-dead? drain-thd) "reader thread is blocked draining before teardown")
     (check-true (directory-exists? child-scratch)
                 "child scratch lives inside the runner-owned root before teardown")
     (teardown!)
     (subprocess-wait sp)
+    (subprocess-wait hsp)
+    (sync/timeout 5 (thread-dead-evt drain-thd))
     (check-not-eq? (subprocess-status sp) 'running
                    "teardown! SIGKILLed the child process group")
+    (check-not-eq? (subprocess-status hsp) 'running
+                   "teardown! SIGKILLed the hanging child")
+    (check-true (thread-dead? drain-thd)
+                "teardown! reaped the blocked reader thread (zero reader threads survive)")
     (check-false (directory-exists? root)
                  "teardown! deleted the runner-owned temp root (child scratch swept with it)")
     (check-not-exn teardown! "teardown! is idempotent")))
