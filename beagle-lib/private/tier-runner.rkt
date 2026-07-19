@@ -8,6 +8,7 @@
 ;; Exit code: 0 if all active tests pass, 1 if any active failure.
 
 (require racket/cmdline
+         racket/file          ; make-temporary-directory, delete-directory/files
          racket/future        ; processor-count
          racket/list
          racket/match
@@ -86,15 +87,63 @@
             [else (loop (cdr rest) (list 'fail s t))])]
          [else (loop (cdr rest) best)])])))
 
+;; --- runner-owned temp containment -----------------------------------------
+;;
+;; Every raco-test child — and each test module it loads (conformance.rkt,
+;; facts-render-roundtrip.rkt, …) — makes its scratch with make-temporary-file
+;; / make-temporary-directory, which resolve (find-system-path 'temp-dir) =
+;; $TMPDIR / $TMP / $TEMP (falling back to the system default only when none is
+;; set to an existing directory). A child force-killed on cancellation (SIGKILL
+;; via the custodian) never runs its own delete-directory/files, so that scratch
+;; would orphan under the shared system temp dir — the one bar D4 left open.
+;;
+;; Containment: the runner owns ONE freshly-created temp root per run and hands
+;; each child its own subdirectory under that root through TMPDIR/TMP/TEMP — set
+;; ONLY in the child's private environment copy, so the caller's environment is
+;; never mutated and every other inherited variable (PATH, PLTCOLLECTS, …) is
+;; preserved. On teardown we reap the child process groups (custodian) FIRST,
+;; then delete the whole root in a single sweep (`teardown!`, below) — no
+;; test-specific globbing, and a SIGKILLed child's orphaned scratch is swept
+;; along with everything else.
+
+;; The runner-owned root for this run; #f until `run` establishes it. The name
+;; is distinctive so it is trivially separable from ambient temp dirs.
+(define run-temp-root (box #f))
+
+;; Custodian owning every raco-test child. Shutting it down SIGKILLs each live
+;; child by process group; `teardown!` does so before deleting the root.
+(define child-custodian (make-custodian))
+
+;; A private environment copy with TMPDIR/TMP/TEMP pointed at `dir`. Copying
+;; leaves (current-environment-variables) — and thus the caller's environment —
+;; untouched; all other inherited variables are carried through verbatim.
+(define (env-with-tmpdir dir)
+  (define ev (environment-variables-copy (current-environment-variables)))
+  (define val (path->bytes (path->directory-path dir)))
+  (for ([name (in-list '(#"TMPDIR" #"TMP" #"TEMP"))])
+    (environment-variables-set! ev name val))
+  ev)
+
 (define (run-test-file fname)
   (define full-path (build-path tests-dir fname))
   (cond
     [(not (file-exists? full-path))
      (file-result fname 'skip 0 0 (list (format "MISSING: ~a" full-path)))]
     [else
+     ;; Per-child temp subdir under the runner-owned root, exported to the child
+     ;; via TMPDIR/TMP/TEMP so all its make-temporary-* scratch is contained
+     ;; there and swept on teardown. Absent a root (e.g. a direct unit-test call)
+     ;; the child inherits the caller's environment unchanged.
+     (define root (unbox run-temp-root))
+     (define child-tmp
+       (and root (make-temporary-directory "child-~a" #:base-dir root)))
      (define-values (sp stdout stdin stderr)
-       (subprocess #f #f #f (find-executable-path "raco")
-                   "test" (path->string full-path)))
+       (parameterize ([current-environment-variables
+                       (if child-tmp
+                           (env-with-tmpdir child-tmp)
+                           (current-environment-variables))])
+         (subprocess #f #f #f (find-executable-path "raco")
+                     "test" (path->string full-path))))
      (close-output-port stdin)
      (define stdout-str (port->string stdout))
      (define stderr-str (port->string stderr))
@@ -126,13 +175,12 @@
 ;; vector in manifest order, so the report is byte-identical to the sequential
 ;; report modulo timing — launch order never leaks into the output.
 ;;
-;; A dedicated child custodian with subprocess-kill mode + process groups owns
-;; every child: a break (Ctrl-C) or a crash unwinds through dynamic-wind and
-;; shuts the custodian down, which SIGKILLs every live raco-test process group
-;; — no orphaned child processes. The scheduler itself creates no temp; a
-;; force-killed test's own temp (its make-temporary-file) is cleaned only by
-;; that test's graceful exit, which SIGKILL by design bypasses — same as
-;; Ctrl-C'ing the sequential runner mid-file.
+;; Cancellation/crash cleanup is owned at the `run` level (see `teardown!`): a
+;; single child custodian with subprocess-kill mode + process groups owns every
+;; child of BOTH the sequential and the parallel path, so a break (SIGINT/
+;; SIGTERM/SIGHUP) or a crash reaps every live raco-test process group and then
+;; deletes the runner-owned temp root. The scheduler below therefore just runs
+;; the worker threads; it inherits the custodian and kill mode from `run`.
 
 (define default-jobs (max 1 (min (processor-count) 16)))
 
@@ -175,25 +223,18 @@
       (lambda ()
         (define o (unbox pending))
         (and (pair? o) (begin (set-box! pending (cdr o)) (car o))))))
-  (define cust (make-custodian))
-  (dynamic-wind
-   void
-   (lambda ()
-     (parameterize ([current-custodian cust]
-                    [current-subprocess-custodian-mode 'kill]
-                    [subprocess-group-enabled #t])
-       (define workers
-         (for/list ([_ (in-range k)])
-           (thread
-            (lambda ()
-              (let loop ()
-                (define idx (claim!))
-                (when idx
-                  (vector-set! results idx (run-test-file (vector-ref vec idx)))
-                  (loop)))))))
-       (for-each thread-wait workers)))
-   ;; Runs on normal completion AND on break/exn unwind: reap every child.
-   (lambda () (custodian-shutdown-all cust)))
+  ;; Workers inherit current-custodian = child-custodian and the subprocess
+  ;; kill/process-group mode from `run`; `teardown!` reaps them on every exit.
+  (define workers
+    (for/list ([_ (in-range k)])
+      (thread
+       (lambda ()
+         (let loop ()
+           (define idx (claim!))
+           (when idx
+             (vector-set! results idx (run-test-file (vector-ref vec idx)))
+             (loop)))))))
+  (for-each thread-wait workers)
   (vector->list results))
 
 ;; Run a tier's files, returning results in MANIFEST order regardless of K.
@@ -260,7 +301,42 @@
 (define active-only? (make-parameter (not full-suite-env?)))
 (define include-gated? (make-parameter #f))
 
+;; Reap every child process group, THEN delete the runner-owned temp root.
+;; Idempotent and break-masked, so it runs exactly once and cannot be aborted
+;; by a second signal. Invoked from the exit handler (normal completion / seeded
+;; failure) and from the break/exn handler (SIGINT/SIGTERM/SIGHUP / crash).
+(define teardown-done (box #f))
+(define teardown-lock (make-semaphore 1))
+
+(define (teardown!)
+  (call-with-semaphore teardown-lock
+    (lambda ()
+      (unless (unbox teardown-done)
+        (set-box! teardown-done #t)
+        (parameterize-break #f
+          ;; 1. reap every live raco-test process group
+          (custodian-shutdown-all child-custodian)
+          ;; 2. then remove the runner-owned temp root in one sweep
+          (define root (unbox run-temp-root))
+          (when (and root (directory-exists? root))
+            (with-handlers ([exn:fail? void])
+              (delete-directory/files root #:must-exist? #f))))))))
+
+;; Establish the runner-owned temp root and guarantee teardown on EVERY exit
+;; path, then run the tiers under the child custodian + subprocess kill mode:
+;;   normal completion / seeded failure -> (exit N) -> exit handler -> teardown!
+;;   SIGINT/SIGTERM/SIGHUP -> exn:break* ; crash -> exn -> handler -> teardown!
 (define (run)
+  (set-box! run-temp-root (make-temporary-directory "beagle-test-run-~a"))
+  (define next-exit (exit-handler))
+  (exit-handler (lambda (code) (teardown!) (next-exit code)))
+  (with-handlers ([exn? (lambda (e) (teardown!) (raise e))])
+    (parameterize ([current-custodian child-custodian]
+                   [current-subprocess-custodian-mode 'kill]
+                   [subprocess-group-enabled #t])
+      (run-body))))
+
+(define (run-body)
   (define classification (read-manifest))
   (define active-files  (files-in 'active classification))
   (define demoted-files (files-in 'demoted classification))
@@ -399,4 +475,50 @@
   (check-equal? (parameterize ([jobs 3]) (resolve-jobs)) 3
                 "explicit --jobs overrides everything")
   (check-true (>= default-jobs 1) "default jobs is at least 1")
-  (check-true (<= default-jobs 16) "default jobs is capped at 16"))
+  (check-true (<= default-jobs 16) "default jobs is capped at 16")
+
+  ;; --- runner-owned temp containment ---------------------------------------
+
+  ;; env-with-tmpdir redirects TMPDIR/TMP/TEMP, preserves every other inherited
+  ;; variable, and does NOT mutate the caller's environment.
+  (let* ([probe (make-temporary-directory "env-probe-~a")]
+         [caller-tmpdir-before
+          (environment-variables-ref (current-environment-variables) #"TMPDIR")]
+         [ev (env-with-tmpdir probe)]
+         [want (path->bytes (path->directory-path probe))])
+    (check-equal? (environment-variables-ref ev #"TMPDIR") want "TMPDIR redirected")
+    (check-equal? (environment-variables-ref ev #"TMP") want "TMP redirected")
+    (check-equal? (environment-variables-ref ev #"TEMP") want "TEMP redirected")
+    (check-equal? (environment-variables-ref ev #"PATH")
+                  (environment-variables-ref (current-environment-variables) #"PATH")
+                  "PATH (and other inherited vars) preserved in the child env")
+    (check-equal? (environment-variables-ref (current-environment-variables) #"TMPDIR")
+                  caller-tmpdir-before
+                  "caller environment is not mutated")
+    (delete-directory/files probe))
+
+  ;; teardown! reaps the child process group FIRST, then deletes the runner-
+  ;; owned root — the exact mechanism that runs on normal completion, seeded
+  ;; failure, SIGINT/SIGTERM/SIGHUP and crash. (This mutates the module-level
+  ;; child-custodian / run-temp-root, so it is the last check.)
+  (let ([root (make-temporary-directory "beagle-test-run-selftest-~a")])
+    (set-box! run-temp-root root)
+    (define child-scratch (make-temporary-directory "child-~a" #:base-dir root))
+    (define sp
+      (parameterize ([current-custodian child-custodian]
+                     [current-subprocess-custodian-mode 'kill]
+                     [subprocess-group-enabled #t])
+        (define-values (p out in err)
+          (subprocess #f #f #f (find-executable-path "sleep") "30"))
+        (close-output-port in) (close-input-port out) (close-input-port err)
+        p))
+    (check-eq? (subprocess-status sp) 'running "child is live before teardown")
+    (check-true (directory-exists? child-scratch)
+                "child scratch lives inside the runner-owned root before teardown")
+    (teardown!)
+    (subprocess-wait sp)
+    (check-not-eq? (subprocess-status sp) 'running
+                   "teardown! SIGKILLed the child process group")
+    (check-false (directory-exists? root)
+                 "teardown! deleted the runner-owned temp root (child scratch swept with it)")
+    (check-not-exn teardown! "teardown! is idempotent")))
