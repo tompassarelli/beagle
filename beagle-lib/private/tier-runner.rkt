@@ -8,6 +8,7 @@
 ;; Exit code: 0 if all active tests pass, 1 if any active failure.
 
 (require racket/cmdline
+         racket/future        ; processor-count
          racket/list
          racket/match
          racket/port
@@ -112,6 +113,97 @@
      (file-result fname status (cadr summary) (caddr summary)
                   (if (eq? status 'fail) all-lines '()))]))
 
+;; --- bounded parallel scheduling -------------------------------------------
+;;
+;; jobs=1 IS the exact legacy path: (map run-test-file files), one raco-test
+;; subprocess at a time in manifest order.
+;;
+;; jobs>1 runs a bounded K-worker queue over the SAME per-file raco-test
+;; subprocesses. Files are LAUNCHED heavy-first (the few stragglers whose
+;; single-file wall dominates the tier go out first, so the queue never ends
+;; up blocked on a straggler that started last), but each result is COLLECTED
+;; into a vector BY MANIFEST INDEX. The print phase is unchanged and reads that
+;; vector in manifest order, so the report is byte-identical to the sequential
+;; report modulo timing — launch order never leaks into the output.
+;;
+;; A dedicated child custodian with subprocess-kill mode + process groups owns
+;; every child: a break (Ctrl-C) or a crash unwinds through dynamic-wind and
+;; shuts the custodian down, which SIGKILLs every live raco-test process group
+;; — no orphaned child processes. The scheduler itself creates no temp; a
+;; force-killed test's own temp (its make-temporary-file) is cleaned only by
+;; that test's graceful exit, which SIGKILL by design bypasses — same as
+;; Ctrl-C'ing the sequential runner mid-file.
+
+(define default-jobs (max 1 (min (processor-count) 16)))
+
+;; #f => resolve from BEAGLE_TEST_JOBS, else default. --jobs sets it directly.
+(define jobs (make-parameter #f))
+
+(define (resolve-jobs)
+  (define (pos n) (and n (exact-integer? n) (positive? n) n))
+  (or (jobs)
+      (let ([e (getenv "BEAGLE_TEST_JOBS")])
+        (and e (pos (string->number e))))
+      default-jobs))
+
+;; The stragglers (measured): a single-file wall that dominates the tier.
+;; Launching them first shrinks the parallel tail. Absent files are ignored.
+(define heavy-first-files '("conformance.rkt" "facts-render-roundtrip.rkt"))
+
+;; Indices into `files`: heavy stragglers first (in listed order), then the
+;; remainder in manifest order.
+(define (launch-order files)
+  (define n (length files))
+  (define heavy
+    (append-map
+     (lambda (h)
+       (for/list ([f (in-list files)] [i (in-naturals)]
+                  #:when (string=? f h))
+         i))
+     heavy-first-files))
+  (append heavy
+          (for/list ([i (in-range n)] #:unless (memv i heavy)) i)))
+
+(define (run-files-parallel files k)
+  (define vec (list->vector files))
+  (define n (vector-length vec))
+  (define results (make-vector n #f))
+  (define pending (box (launch-order files)))   ; shared claim queue
+  (define lock (make-semaphore 1))
+  (define (claim!)
+    (call-with-semaphore lock
+      (lambda ()
+        (define o (unbox pending))
+        (and (pair? o) (begin (set-box! pending (cdr o)) (car o))))))
+  (define cust (make-custodian))
+  (dynamic-wind
+   void
+   (lambda ()
+     (parameterize ([current-custodian cust]
+                    [current-subprocess-custodian-mode 'kill]
+                    [subprocess-group-enabled #t])
+       (define workers
+         (for/list ([_ (in-range k)])
+           (thread
+            (lambda ()
+              (let loop ()
+                (define idx (claim!))
+                (when idx
+                  (vector-set! results idx (run-test-file (vector-ref vec idx)))
+                  (loop)))))))
+       (for-each thread-wait workers)))
+   ;; Runs on normal completion AND on break/exn unwind: reap every child.
+   (lambda () (custodian-shutdown-all cust)))
+  (vector->list results))
+
+;; Run a tier's files, returning results in MANIFEST order regardless of K.
+(define (run-test-files files)
+  (define n (length files))
+  (define k (min (resolve-jobs) (max 1 n)))
+  (cond
+    [(<= k 1) (map run-test-file files)]   ; exact legacy sequential path
+    [else (run-files-parallel files k)]))
+
 ;; --- debt file -------------------------------------------------------------
 
 ;; --- output formatting ----------------------------------------------------
@@ -176,13 +268,13 @@
 
   (printf "=== Beagle tiered test runner ===\n\n")
 
-  (define active-results  (map run-test-file active-files))
+  (define active-results  (run-test-files active-files))
   (print-tier-section "ACTIVE TIER (blocks iteration)" active-results)
 
   (define demoted-results
     (cond
       [(active-only?) '()]
-      [else (map run-test-file demoted-files)]))
+      [else (run-test-files demoted-files)]))
 
   (cond
     [(active-only?)
@@ -192,7 +284,7 @@
 
   (define gated-results
     (cond
-      [(include-gated?) (map run-test-file gated-files)]
+      [(include-gated?) (run-test-files gated-files)]
       [else '()]))
 
   (cond
@@ -243,13 +335,68 @@
      (printf "BUILD OK — all active tests passing.\n")
      (exit 0)]))
 
-(command-line
- #:program "beagle-test"
- #:once-each
- [("--active-only") "Run active tier only (skip demoted)" (active-only? #t)]
- [("--full") "Run active + demoted (overrides CI/BEAGLE_FULL_SUITE check)"
-             (active-only? #f)]
- [("--include-gated") "Also run gated tier (requires env vars)"
-                      (include-gated? #t)]
- #:args ()
- (run))
+;; CLI entry lives in `main` so `raco test` (which runs the `test` submodule
+;; below) does NOT fire the runner; `racket tier-runner.rkt` still runs it.
+(module+ main
+  (command-line
+   #:program "beagle-test"
+   #:once-each
+   [("-j" "--jobs") n
+    "Parallel worker count (default min(nproc,16); 1 = legacy sequential)"
+    (let ([v (string->number n)])
+      (unless (and v (exact-integer? v) (positive? v))
+        (raise-user-error 'beagle-test "--jobs expects a positive integer, got: ~a" n))
+      (jobs v))]
+   [("--active-only") "Run active tier only (skip demoted)" (active-only? #t)]
+   [("--full") "Run active + demoted (overrides CI/BEAGLE_FULL_SUITE check)"
+               (active-only? #f)]
+   [("--include-gated") "Also run gated tier (requires env vars)"
+                        (include-gated? #t)]
+   #:args ()
+   (run)))
+
+;; --- scheduler invariants (unit) -------------------------------------------
+;; These exercise the pure scheduling logic — launch order and manifest-index
+;; collection — WITHOUT spawning subprocesses, so they are fast and hermetic.
+;; The report-ordering / exit / 1658-total / interrupt guarantees are proven
+;; by the end-to-end runs recorded on the D4 thread.
+(module+ test
+  (require rackunit)
+
+  (define manifest
+    (list "a.rkt" "b.rkt" "conformance.rkt" "c.rkt"
+          "facts-render-roundtrip.rkt" "d.rkt"))
+
+  ;; launch-order is a permutation of the indices (every file launched once).
+  (check-equal? (sort (launch-order manifest) <)
+                (build-list (length manifest) values)
+                "launch-order is a permutation — no file dropped or duplicated")
+
+  ;; heavy stragglers launch first, in the declared order.
+  (check-equal? (take (launch-order manifest) 2) (list 2 4)
+                "conformance then facts-render-roundtrip go out first")
+
+  ;; the remainder keeps manifest order.
+  (check-equal? (drop (launch-order manifest) 2) (list 0 1 3 5)
+                "non-heavy files stay in manifest order")
+
+  ;; a manifest with no heavy files => identity order.
+  (check-equal? (launch-order (list "x.rkt" "y.rkt" "z.rkt")) (list 0 1 2)
+                "no straggler => manifest order unchanged")
+
+  ;; THE core invariant: whatever the launch order, writing each result into a
+  ;; vector by its manifest index and reading the vector back yields manifest
+  ;; order. This is exactly what run-files-parallel does with real results.
+  (let* ([n (length manifest)]
+         [results (make-vector n #f)])
+    (for ([idx (in-list (launch-order manifest))])
+      (vector-set! results idx (format "result:~a" (list-ref manifest idx))))
+    (check-equal? (vector->list results)
+                  (map (lambda (f) (format "result:~a" f)) manifest)
+                  "collection-by-index reproduces manifest order regardless of launch order"))
+
+  ;; resolve-jobs: --jobs (parameter) wins over env and default.
+  (check-equal? (parameterize ([jobs 3]) (resolve-jobs)) 3
+                "explicit --jobs overrides everything")
+  (check-true (>= default-jobs 1) "default jobs is at least 1")
+  (check-true (<= default-jobs 16) "default jobs is capped at 16"))
