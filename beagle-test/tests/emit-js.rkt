@@ -871,4 +871,47 @@
                  (format "expected native object literal in:\n~a" result))
      (check-false (string-contains? result "hamtMap")
                   (format "scalar-key map must NOT route to HAMT:\n~a" result)))
+
+   ;; --- seam 2: effect-position control flow -> idiomatic statements ---------
+   ;; Value/tail positions keep ternary (unchanged, tested above). Only the
+   ;; effect (statement) position lowers to if/else + if/else-if chains.
+   (test-case "seam2: do-interior if-with-else -> if/else stmt, no ternary"
+     (define result
+       (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+                      '(def c true)
+                      '(do (if c (println "a") (println "b")) (println "z")))))
+     (check-true (string-contains? result "if (c) {")
+                 (format "expected effect-position if-stmt in:\n~a" result))
+     (check-false (string-contains? result "? console.log")
+                  (format "effect-position if must NOT be a ternary:\n~a" result)))
+
+   (test-case "seam2: cond in effect position -> if/else-if/else chain"
+     (define result
+       (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+                      '(def c true)
+                      '(do (cond c (println "x") :else (println "y")) (println "z")))))
+     (check-true (string-contains? result "if (c) {")
+                 (format "expected if/else-if chain in:\n~a" result))
+     (check-false (string-contains? result "? console.log")
+                  (format "effect-position cond must NOT be a ternary:\n~a" result)))
+
+   (test-case "seam2: nested if inside when body lowers idiomatically"
+     (define result
+       (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+                      '(def c true) '(def d false)
+                      '(when c (if d (println "a") (println "b"))))))
+     (check-true (string-contains? result "if (d) {")
+                 (format "expected nested if-stmt in when body in:\n~a" result))
+     (check-false (string-contains? result "? console.log")
+                  (format "nested if in when body must NOT be a ternary:\n~a" result)))
+
+   (test-case "seam2: nested if inside let body lowers idiomatically"
+     (define result
+       (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+                      '(def c true)
+                      '(let (x 1) (if c (println "a") (println "b"))))))
+     (check-true (string-contains? result "if (c) {")
+                 (format "expected nested if-stmt in let body in:\n~a" result))
+     (check-false (string-contains? result "? console.log")
+                  (format "nested if in let body must NOT be a ternary:\n~a" result)))
  ))

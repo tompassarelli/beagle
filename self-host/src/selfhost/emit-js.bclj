@@ -33,6 +33,7 @@
 (def emit-expr-ref :- Any (atom nil))
 (def body-return-ref :- Any (atom nil))
 (def body-stmts-ref :- Any (atom nil))
+(def stmt-inline-ref :- Any (atom nil))
 (def form-ref :- Any (atom nil))
 
 (defn emit-expr* [e :- Any] :- String
@@ -45,6 +46,10 @@
 
 (defn emit-body-stmts* [exprs :- Any indent :- String] :- String
   (let [f :- [Any String -> String] (deref body-stmts-ref)] (f exprs indent)))
+
+;; forward ref: emit-body-stmts (defined earlier) recurses into emit-stmt-inline
+(defn emit-stmt-inline* [e :- Any indent :- String] :- String
+  (let [f :- [Any String -> String] (deref stmt-inline-ref)] (f e indent)))
 
 (defn emit-form* [f :- Any] :- String
   (let [g :- [Any -> String] (deref form-ref)] (g f)))
@@ -729,7 +734,7 @@
 ;; effect-position ctrl-flow (if/cond/when/let/do) lowers to idiomatic
 ;; statements recursively rather than value-position ternary/IIFE.
 (defn emit-body-stmts [exprs :- Any indent :- String] :- String
-  (str/join (str "\n" indent) (mapv (fn [e :- Any] :- String (emit-expr-stmt e)) exprs)))
+  (str/join (str "\n" indent) (mapv (fn [e :- Any] :- String (emit-stmt-inline* e indent)) exprs)))
 
 (defn stmt-inline? [e :- Any] :- Bool
   (if (not (map? e))
@@ -824,6 +829,24 @@
                      (emit-body-stmts (get e "body") inner) "\n" indent "}"))))
         (and (= node "if") (else-less-if? (get e "else")))
           (str "if (" (emit-expr* (get e "cond")) ") {\n" inner (emit-stmt-inline (get e "then") inner) "\n" indent "}")
+        ;; EFFECT position: if-WITH-else -> if/else statement. Value/tail keep
+        ;; the ternary. Branches recurse so nested ctrl-flow lowers.
+        (= node "if")
+          (str "if (" (emit-expr* (get e "cond")) ") {\n" inner (emit-stmt-inline (get e "then") inner)
+               "\n" indent "} else {\n" inner (emit-stmt-inline (get e "else") inner) "\n" indent "}")
+        ;; EFFECT position: cond -> if/else-if/else chain, no trailing null.
+        (= node "cond")
+          (let [clauses (get e "clauses")
+                else? (fn [c :- Any] :- Bool
+                        (let [t (get c "test")]
+                          (or (and (map? t) (= (get t "node") "ref") (= (get t "name") "else"))
+                              (and (map? t) (= (get t "node") "literal") (= (get t "kind") "keyword") (= (get t "value") "else")))))
+                parts (mapv (fn [c :- Any] :- String
+                              (let [body-str (emit-body-stmts (get c "body") inner)]
+                                (if (else? c)
+                                  (str "{\n" inner body-str "\n" indent "}")
+                                  (str "if (" (emit-expr* (get c "test")) ") {\n" inner body-str "\n" indent "}")))) clauses)]
+            (str/join " else " parts))
         :else (emit-expr-stmt e)))))
 
 (defn emit-return-position [e :- Any indent :- String] :- String
@@ -1407,7 +1430,9 @@
       (and (= node "static-call") (= (get f "name") "js/export")) (str "export " (emit-form (nth (get f "args") 0)))
       (and (= node "static-call") (= (get f "name") "js/quote")) (emit-js-ast-node (get f "js-body") 0)
       (= node "js-quote") (emit-js-ast-node (get f "body") 0)
-      :else (emit-expr-stmt f))))
+      ;; Top-level effect-position forms: route ctrl-flow through the statement
+      ;; lowering; emit-stmt-inline falls back to emit-expr-stmt for plain exprs.
+      :else (emit-stmt-inline f ""))))
 
 ;; --- module header + program --------------------------------------------------
 
@@ -1484,6 +1509,7 @@
   (reset! emit-expr-ref emit-expr!)
   (reset! body-return-ref emit-body-return)
   (reset! body-stmts-ref emit-body-stmts)
+  (reset! stmt-inline-ref emit-stmt-inline)
   (reset! form-ref emit-form)
   (reset! ajs-expr-ref ajs-expr)
   (reset! ajs-stmt-ref ajs-stmt)

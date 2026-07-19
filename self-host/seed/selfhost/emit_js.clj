@@ -19,6 +19,8 @@
 
 (def body-stmts-ref (atom nil))
 
+(def stmt-inline-ref (atom nil))
+
 (def form-ref (atom nil))
 
 (defn ^String emit-expr* [e]
@@ -33,6 +35,10 @@
 (defn ^String emit-body-stmts* [exprs ^String indent]
   (let [f (deref body-stmts-ref)]
   (f exprs indent)))
+
+(defn ^String emit-stmt-inline* [e ^String indent]
+  (let [f (deref stmt-inline-ref)]
+  (f e indent)))
 
 (defn ^String emit-form* [f]
   (let [g (deref form-ref)]
@@ -515,7 +521,7 @@
   (if (str/ends-with? s ";") s (str s ";"))))
 
 (defn ^String emit-body-stmts [exprs ^String indent]
-  (str/join (str "\n" indent) (mapv (fn [e] (emit-expr-stmt e)) exprs)))
+  (str/join (str "\n" indent) (mapv (fn [e] (emit-stmt-inline* e indent)) exprs)))
 
 (defn ^Boolean stmt-inline? [e]
   (if (not (map? e)) false (let [node (get e "node")]
@@ -582,6 +588,13 @@
    name (mangle-name (get e "name"))]
   (with-bound [(get e "name")] (fn [] (str "const " name " = " val-str ";\n" indent "if (" name " != null) {\n" inner (emit-body-stmts (get e "body") inner) "\n" indent "}"))))
   (and (= node "if") (else-less-if? (get e "else"))) (str "if (" (emit-expr* (get e "cond")) ") {\n" inner (emit-stmt-inline (get e "then") inner) "\n" indent "}")
+  (= node "if") (str "if (" (emit-expr* (get e "cond")) ") {\n" inner (emit-stmt-inline (get e "then") inner) "\n" indent "} else {\n" inner (emit-stmt-inline (get e "else") inner) "\n" indent "}")
+  (= node "cond") (let [clauses (get e "clauses")
+   else? (fn [c] (let [t (get c "test")]
+  (or (and (map? t) (= (get t "node") "ref") (= (get t "name") "else")) (and (map? t) (= (get t "node") "literal") (= (get t "kind") "keyword") (= (get t "value") "else")))))
+   parts (mapv (fn [c] (let [body-str (emit-body-stmts (get c "body") inner)]
+  (if (else? c) (str "{\n" inner body-str "\n" indent "}") (str "if (" (emit-expr* (get c "test")) ") {\n" inner body-str "\n" indent "}")))) clauses)]
+  (str/join " else " parts))
   :else (emit-expr-stmt e)))))
 
 (defn ^String emit-return-position [e ^String indent]
@@ -1016,7 +1029,7 @@
   (and (= node "static-call") (= (get f "name") "js/export")) (str "export " (emit-form (nth (get f "args") 0)))
   (and (= node "static-call") (= (get f "name") "js/quote")) (emit-js-ast-node (get f "js-body") 0)
   (= node "js-quote") (emit-js-ast-node (get f "body") 0)
-  :else (emit-expr-stmt f))))
+  :else (emit-stmt-inline f ""))))
 
 (defn ^String last-seg [^String s]
   (let [idx (str/last-index-of s ".")]
@@ -1083,6 +1096,7 @@
   (reset! emit-expr-ref emit-expr!)
   (reset! body-return-ref emit-body-return)
   (reset! body-stmts-ref emit-body-stmts)
+  (reset! stmt-inline-ref emit-stmt-inline)
   (reset! form-ref emit-form)
   (reset! ajs-expr-ref ajs-expr)
   (reset! ajs-stmt-ref ajs-stmt)

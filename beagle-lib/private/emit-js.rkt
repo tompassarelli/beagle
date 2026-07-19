@@ -1296,7 +1296,10 @@
     [(jst-export-default? f) (string-append "export default " (emit-form (jst-export-default-form f)))]
     [(jst-return? f)   (emit-jst-return f)]
 
-    [else (emit-expr-stmt f)]))
+    ;; Top-level effect-position forms: route ctrl-flow (if/cond/when/let/do)
+    ;; through the statement lowering; emit-stmt-inline falls back to
+    ;; emit-expr-stmt for plain expressions, so non-ctrl-flow output is unchanged.
+    [else (emit-stmt-inline f "")]))
 
 ;; --- expressions -----------------------------------------------------------
 
@@ -2609,6 +2612,29 @@
              inner
              (emit-body-stmts-inline (list (if-form-then-expr e)) inner)
              indent)]
+    ;; EFFECT position: if-WITH-else lowers to `if(c){...}else{...}`. Value/tail
+    ;; positions keep the ternary (emit-expr-core / emit-return-position). Both
+    ;; branches recurse through emit-body-stmts-inline so nested ctrl-flow lowers.
+    [(if-form? e)
+     (define inner (string-append indent "  "))
+     (format "if (~a) {\n~a~a\n~a} else {\n~a~a\n~a}"
+             (emit-expr (if-form-cond-expr e))
+             inner (emit-body-stmts-inline (list (if-form-then-expr e)) inner) indent
+             inner (emit-body-stmts-inline (list (if-form-else-expr e)) inner) indent)]
+    ;; EFFECT position: cond lowers to an if / else-if / else chain. No trailing
+    ;; `else { return null; }` — a statement context needs no value fallthrough.
+    [(cond-form? e)
+     (define inner (string-append indent "  "))
+     (define (else-clause? c)
+       (let ([t (cond-clause-test c)]) (and (symbol? t) (or (eq? t ':else) (eq? t 'else)))))
+     (define parts
+       (for/list ([c (in-list (cond-form-clauses e))])
+         (define body-str (emit-body-stmts-inline (cond-clause-body c) inner))
+         (if (else-clause? c)
+           (format "{\n~a~a\n~a}" inner body-str indent)
+           (format "if (~a) {\n~a~a\n~a}"
+                   (emit-expr (cond-clause-test c)) inner body-str indent))))
+     (string-join parts " else ")]
     [else
      (emit-expr-stmt e)]))
 
@@ -2629,8 +2655,11 @@
       (string-append "\n" indent)
       (emit-return-position last-e indent))]))
 
+;; Statement-context body: each form routes through emit-stmt-inline so
+;; effect-position ctrl-flow (if/cond/when/let/do) lowers to idiomatic
+;; statements recursively, instead of value-position ternary/IIFE.
 (define (emit-body-stmts exprs indent)
-  (string-join (map (lambda (e) (emit-expr-stmt e)) exprs)
+  (string-join (map (lambda (e) (emit-stmt-inline e indent)) exprs)
                (string-append "\n" indent)))
 
 ;; --- block string -----------------------------------------------------------

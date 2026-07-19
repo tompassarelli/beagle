@@ -191,6 +191,30 @@ console.assert(threw, 'frozen record should reject mutation');
                 (throw (new Error "delete did not remove key")))))
      "")
 
+   ;; --- seam 2: effect-position control flow executes correctly -------------
+   ;; Semantics must be preserved through the idiomatic-statement lowering.
+   (check-js-output "seam2: effect-position if-else runs then-branch"
+     (list '(defn main [] :- Nil
+              (do (if true (println "a") (println "b"))
+                  (println "z"))))
+     "main();"
+     "a\nz")
+
+   (check-js-output "seam2: effect-position cond selects else branch"
+     (list '(defn main [(n :- Int)] :- Nil
+              (do (cond (> n 10) (println "big")
+                        :else (println "small"))
+                  (println "done"))))
+     "main(3);"
+     "small\ndone")
+
+   (check-js-output "seam2: nested if inside when body executes"
+     (list '(defn main [(d :- Bool)] :- Nil
+              (when true
+                (if d (println "yes") (println "no")))))
+     "main(false);"
+     "no")
+
    ;; --- nil / null ----------------------------------------------------------
 
    (check-js-output "nil maps to null"
