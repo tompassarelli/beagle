@@ -706,8 +706,43 @@
      (check-shadow-js-ast (js-ast-typeof-expr node) scope ctx)]
     [else (void)]))
 
+;; js/quote is raw-JS passthrough: a call-shaped head that happens to share a
+;; name with a Beagle form (`or`, `and`, `when`) does NOT become that form —
+;; it emits a literal JS call to an undefined function (`or(...)`), which
+;; throws at runtime with no compile-time signal otherwise. Two-operand
+;; `(or a b)` / `(and a b)` is NOT this trap: parse-js-ast already recognizes
+;; those as the `||` / `&&` binary operators (see js-binary-op? dispatch in
+;; parse-js-quote.rkt), so they never reach here as a js-ast-call at all.
+;; Advisory only — raw passthrough semantics (and the build) are unchanged;
+;; an intentionally-defined JS function literally named `or`/`and`/`when`
+;; (declare-extern, an imported helper, ...) is a legitimate reason to ignore
+;; the warning, so this never hard-errors.
+(define JS-QUOTE-TRAP-HEAD-REPLACEMENTS
+  (hasheq
+   'or   "the `||` operator — two operands parse as `||` automatically (see js-binary-op?); for 3+, nest `(or a (or b c))` or splice a Beagle `(or ...)` value in with `~expr`"
+   'and  "the `&&` operator — two operands parse as `&&` automatically (see js-binary-op?); for 3+, nest `(and a (and b c))` or splice a Beagle `(and ...)` value in with `~expr`"
+   'when "a JS `if` statement — write `(if cond stmt...)`; js/quote has no `when` form"))
+
+(define (warn-js-quote-trap-call node)
+  (define callee (js-ast-call-callee node))
+  (when (js-ast-ident? callee)
+    (define name (js-ast-ident-name callee))
+    (define replacement (hash-ref JS-QUOTE-TRAP-HEAD-REPLACEMENTS name #f))
+    (when replacement
+      (warn (string-append
+             "js/quote: `(~a ...)` is call-shaped and compiles to a literal "
+             "raw-JS call `~a(...)`, NOT the Beagle `~a` form — this throws "
+             "at runtime since no such function exists. Use ~a instead. If "
+             "`~a` is an intentionally-defined JS function here (declare-extern, "
+             "an imported helper, ...), ignore this warning.")
+            name name name replacement name))))
+
 (define (collect-symbols-js-ast node used)
   (cond
+    [(js-ast-call? node)
+     (warn-js-quote-trap-call node)
+     (collect-symbols-js-ast (js-ast-call-callee node) used)
+     (for ([a (in-list (js-ast-call-args node))]) (collect-symbols-js-ast a used))]
     [(js-ast-splice-expr? node)
      (collect-symbols (js-ast-splice-expr-beagle-expr node) used)]
     [(js-ast-splice-stmts? node)
@@ -747,9 +782,6 @@
      (when (js-ast-class-extends-expr node) (collect-symbols-js-ast (js-ast-class-extends-expr node) used))
      (for ([m (in-list (js-ast-class-methods node))]) (collect-symbols-js-ast m used))]
     [(js-ast-method? node) (collect-symbols-js-ast (js-ast-method-body node) used)]
-    [(js-ast-call? node)
-     (collect-symbols-js-ast (js-ast-call-callee node) used)
-     (for ([a (in-list (js-ast-call-args node))]) (collect-symbols-js-ast a used))]
     [(js-ast-member? node) (collect-symbols-js-ast (js-ast-member-object node) used)]
     [(js-ast-index? node)
      (collect-symbols-js-ast (js-ast-index-object node) used)

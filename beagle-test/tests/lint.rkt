@@ -88,3 +88,37 @@
 (test-case "defenum does not crash lint"
   (define out (lint-prog '(defenum Color :red :green :blue)))
   (check-true (string? out)))
+
+;; --- js/quote Beagle-form-shaped call-head traps ----------------------------
+;; (or ...) / (and ...) with 3+ operands, or (when ...) at all, don't match
+;; the two-operand binary-op parse rule and fall through to a raw JS call —
+;; `or(...)` — which throws at runtime. Advisory warning, no error, no change
+;; to emitted JS (see js-quote.rkt golden-byte-identical tests).
+
+(test-case "js/quote (or a b c) 3-operand call warns naming trap head + replacement"
+  (define out (lint-prog '(js/quote (or (=== v null) (=== v undefined) (=== v 0)))))
+  (check-true (regexp-match? #rx"js/quote.*`\\(or \\.\\.\\.\\)`.*raw-JS call `or\\(\\.\\.\\.\\)`" out)
+              (format "expected trap warning naming `or`, got:\n~a" out))
+  (check-true (regexp-match? #rx"\\|\\|" out) "warning should name the `||` replacement"))
+
+(test-case "js/quote (and a b c) 3-operand call warns naming trap head + replacement"
+  (define out (lint-prog '(js/quote (and (> a 0) (> b 0) (> c 0)))))
+  (check-true (regexp-match? #rx"js/quote.*`\\(and \\.\\.\\.\\)`.*raw-JS call `and\\(\\.\\.\\.\\)`" out)
+              (format "expected trap warning naming `and`, got:\n~a" out))
+  (check-true (regexp-match? #rx"&&" out) "warning should name the `&&` replacement"))
+
+(test-case "js/quote (when cond body) warns naming trap head + if-statement replacement"
+  (define out (lint-prog '(js/quote (when (> x 0) (console.log x)))))
+  (check-true (regexp-match? #rx"js/quote.*`\\(when \\.\\.\\.\\)`.*raw-JS call `when\\(\\.\\.\\.\\)`" out)
+              (format "expected trap warning naming `when`, got:\n~a" out))
+  (check-true (regexp-match? #rx"if" out) "warning should name the `if` replacement"))
+
+(test-case "js/quote (or a b) 2-operand does NOT warn — binary-op, not a call"
+  (define out (lint-prog '(js/quote (const r (or a b)))))
+  (check-false (regexp-match? #rx"js/quote" out)
+               (format "2-operand (or a b) should not trigger the call-head trap, got:\n~a" out)))
+
+(test-case "js/quote (and a b) 2-operand does NOT warn — binary-op, not a call"
+  (define out (lint-prog '(js/quote (const r (and a b)))))
+  (check-false (regexp-match? #rx"js/quote" out)
+               (format "2-operand (and a b) should not trigger the call-head trap, got:\n~a" out)))
