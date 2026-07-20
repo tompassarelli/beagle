@@ -16,6 +16,16 @@
 #       layer is load-bearing there. BEAGLE_DOWNSTREAM_REGISTRY/_CONSUMER/
 #       _ALLOW_DIRTY forward to bin/beagle-downstream for probes/fixtures.
 #
+#       Receipt lifecycle: the layer-5 receipt is EPHEMERAL by default — it
+#       lives inside a per-run owned temp root and is reclaimed on EVERY exit
+#       path (success, forced consumer failure, timeout, planted exception,
+#       SIGINT, SIGTERM), so repeated default gate runs leave zero new receipt
+#       or temp roots on disk. To keep a durable, schema-valid
+#       (beagle-downstream/1) receipt, set BEAGLE_DOWNSTREAM_RECEIPT=<path> —
+#       that caller-owned destination is written and never reclaimed here.
+#       Cleanup is exact and identity-scoped (removes only this run's own root
+#       by literal path); a concurrent gate run's root is never touched.
+#
 # Exits non-zero if any layer fails.
 
 set -euo pipefail
@@ -57,15 +67,82 @@ fi
 if [[ "${BEAGLE_DOWNSTREAM_GATE:-0}" == "1" ]]; then
     echo
     echo "=== 5/5: bin/beagle-downstream — hermetic five-consumer downstream gate ==="
-    downstream_receipt="$(mktemp -t beagle-ci-downstream-receipt.XXXXXX)"
+
+    # Per-run OWNED temp root. The default (ephemeral) receipt lives inside it,
+    # so reclamation is a single literal-path removal of OUR root only — never
+    # a glob over the shared prefix, so a concurrent gate run's root survives.
+    ci_downstream_root="$(mktemp -d -t beagle-ci-downstream.XXXXXX)"
+
+    # Receipt destination. An explicit caller-owned path (BEAGLE_DOWNSTREAM_RECEIPT)
+    # is DURABLE — written by the gate (schema beagle-downstream/1) and never
+    # reclaimed here. Absent it, the receipt is ephemeral inside the owned root
+    # and dies with it on every exit path.
+    if [[ -n "${BEAGLE_DOWNSTREAM_RECEIPT:-}" ]]; then
+        downstream_receipt="$BEAGLE_DOWNSTREAM_RECEIPT"
+        downstream_receipt_durable=1
+    else
+        downstream_receipt="$ci_downstream_root/receipt.json"
+        downstream_receipt_durable=0
+    fi
+
+    downstream_child=""
+    downstream_sigtarget=""
+    _ci_downstream_reclaim() {
+        # Reap OUR whole downstream SUBTREE (the gate + every per-consumer
+        # compile it spawned — an orphaned grandchild is still an owned child)
+        # with a graceful INT so the gate's own scratch dynamic-wind unwinds,
+        # then remove ONLY our owned root by literal path. `:?` aborts on an
+        # empty/unset root rather than ever `rm -rf`-ing bare.
+        if [[ -n "$downstream_child" ]] && kill -0 "$downstream_child" 2>/dev/null; then
+            kill -INT "$downstream_sigtarget" 2>/dev/null || true
+            wait "$downstream_child" 2>/dev/null || true
+        fi
+        rm -rf "${ci_downstream_root:?}"
+    }
+    _ci_downstream_on_signal() { # <signal-name> <signal-number>
+        _ci_downstream_reclaim
+        trap - EXIT INT TERM
+        kill -"$1" "$$" 2>/dev/null || true    # re-raise -> truthful 128+n exit
+        exit $((128 + $2))
+    }
+    trap '_ci_downstream_reclaim' EXIT
+    trap '_ci_downstream_on_signal INT 2'  INT
+    trap '_ci_downstream_on_signal TERM 15' TERM
+
     downstream_args=(--run --json "$downstream_receipt")
     [[ -n "${BEAGLE_DOWNSTREAM_REGISTRY:-}" ]] && downstream_args+=(--registry "$BEAGLE_DOWNSTREAM_REGISTRY")
     [[ -n "${BEAGLE_DOWNSTREAM_CONSUMER:-}" ]] && downstream_args+=(--consumer "$BEAGLE_DOWNSTREAM_CONSUMER")
     [[ -n "${BEAGLE_DOWNSTREAM_ALLOW_DIRTY:-}" ]] && downstream_args+=(--allow-dirty)
-    # No `| tail`: this layer's exit code must propagate to beagle-ci itself
-    # undisguised (it is the release path's load-bearing gate, not advisory).
-    bin/beagle-downstream "${downstream_args[@]}"
-    echo "  receipt -> $downstream_receipt"
+
+    # Backgrounded + waited (not foreground): bash defers traps until a
+    # FOREGROUND child returns, so a directed SIGINT/SIGTERM to this script
+    # would otherwise never run our cleanup nor forward to the child. With
+    # `wait`, a signal interrupts it, the trap fires, the subtree is forwarded
+    # + reaped, and our root is reclaimed. `setsid` puts the gate in its own
+    # process group so reclamation can INT the WHOLE subtree (`-PGID`) — the
+    # gate never shares a group with this script, so we never self-signal.
+    # Exit code still propagates undisguised (no `| tail`): this is the release
+    # path's load-bearing gate.
+    if command -v setsid >/dev/null 2>&1; then
+        setsid bin/beagle-downstream "${downstream_args[@]}" &
+        downstream_child=$!
+        downstream_sigtarget="-$downstream_child"   # negative == its process group
+    else
+        bin/beagle-downstream "${downstream_args[@]}" &
+        downstream_child=$!
+        downstream_sigtarget="$downstream_child"
+    fi
+    downstream_status=0
+    wait "$downstream_child" || downstream_status=$?
+    downstream_child=""
+    if [[ "$downstream_receipt_durable" == "1" ]]; then
+        echo "  receipt -> $downstream_receipt"
+    else
+        echo "  receipt -> $downstream_receipt (ephemeral; reclaimed on exit)"
+    fi
+    if [[ "$downstream_status" -ne 0 ]]; then
+        exit "$downstream_status"
+    fi
 else
     echo
     echo "=== 5/5: downstream consumer gate (skipped — set BEAGLE_DOWNSTREAM_GATE=1) ==="
