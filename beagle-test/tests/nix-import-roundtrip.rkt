@@ -35,6 +35,98 @@
     (apply system* cmd args))
   (values (get-output-string out) (get-output-string err)))
 
+;; ---------------------------------------------------------------------------
+;; Virgin-clone bootstrap for the nix-parse-json helper.
+;;
+;; bin/beagle-import-nix shells out to
+;;   tools/nix-parse-json/target/release/nix-parse-json
+;; a cargo-built Rust binary whose `target/` is gitignored (.gitignore:
+;; `tools/*/target/`), so a brand-new clone has no artifact and every
+;; round-trip test below fails identically — the importer aborts before it
+;; can emit any `(ms …)`. That was the V2 fresh-clone finding (thread
+;; 019f7ce9): the full suite silently depends on a manually-prebuilt untracked
+;; binary.
+;;
+;; This makes the ordinary full-suite entrypoint (`bin/beagle test`, which runs
+;; this file via the active tier) self-bootstrapping: build the helper from its
+;; TRACKED source (Cargo.toml + Cargo.lock + src/main.rs) with the flake-pinned
+;; Rust toolchain (declared in devShells.default; installed in CI) before the
+;; tests run. The committed Cargo.lock + `--locked` make the build deterministic
+;; from tracked inputs. No binary is committed and no escape hatch is added — a
+;; missing toolchain or a failed build raises LOUDLY (fails the suite) instead
+;; of degrading into the same silent three-failure red-herring. The build lands
+;; in the gitignored `target/`, exactly where the importer looks, so the tree
+;; stays byte-clean.
+(define nix-parse-json-manifest
+  (build-path repo-root "tools" "nix-parse-json" "Cargo.toml"))
+(define nix-parse-json-bin
+  (build-path repo-root "tools" "nix-parse-json" "target" "release"
+              "nix-parse-json"))
+
+(define (helper-built?)
+  (and (file-exists? nix-parse-json-bin)
+       (and (memq 'execute
+                  (file-or-directory-permissions nix-parse-json-bin))
+            #t)))
+
+;; Build (or locate) the helper deterministically from tracked inputs. Idempotent
+;; and concurrent-safe: a present artifact short-circuits, and cargo's own
+;; target-dir lock serializes any overlapping build. Returns the binary path or
+;; raises with a pointed, actionable message.
+(define (ensure-nix-parse-json!)
+  (cond
+    [(helper-built?) nix-parse-json-bin]
+    [else
+     (define cargo (find-executable-path "cargo"))
+     (unless cargo
+       (error 'nix-import-roundtrip
+              (string-append
+               "nix-parse-json helper is not built and `cargo` is not on PATH — "
+               "cannot bootstrap the Nix importer.\n"
+               "  Enter the flake devshell (direnv allow / nix develop — it now "
+               "declares the pinned cargo/rustc) and re-run, or build manually:\n"
+               "    cargo build --release --locked --manifest-path "
+               (path->string nix-parse-json-manifest))))
+     (define log (open-output-string))
+     (define ok?
+       (parameterize ([current-output-port log]
+                      [current-error-port log])
+         ;; --locked: build from the committed Cargo.lock exactly (pinned
+         ;; rnix/rowan), so the bootstrap is deterministic from tracked inputs
+         ;; and errors loudly rather than silently re-resolving if the lock is
+         ;; stale/absent.
+         (system* cargo "build" "--release" "--locked"
+                  "--manifest-path" (path->string nix-parse-json-manifest))))
+     (unless (and ok? (helper-built?))
+       (error 'nix-import-roundtrip
+              (string-append
+               "failed to build the nix-parse-json helper from tracked source "
+               "(`cargo build --release`).\n  cargo output:\n"
+               (get-output-string log))))
+     nix-parse-json-bin]))
+
+;; Bootstrap once at module load — every round-trip test below needs the helper,
+;; and the importer resolves this exact path. A build failure here fails the file
+;; loudly rather than three checks down.
+(define nix-parse-json-binary (ensure-nix-parse-json!))
+
+(test-case "virgin-clone bootstrap: nix-parse-json helper built from tracked source"
+  ;; Load-bearing regression for the V2 fresh-clone finding. On a brand-new
+  ;; clone with no `tools/nix-parse-json/target/` artifact, the full-suite
+  ;; entrypoint must materialize the helper from tracked inputs — never rely on
+  ;; a manually-prebuilt untracked binary. Pre-fix this file red-herrings three
+  ;; failures; the bootstrap turns that green. If the bootstrap were removed or
+  ;; silently skipped, this check fails LOUDLY instead of masquerading as an
+  ;; importer bug downstream.
+  (check-true (helper-built?)
+              "nix-parse-json helper binary is present and executable after bootstrap")
+  ;; And it actually runs: emits an S-expression AST for the fixture (proves the
+  ;; artifact is a working build of the tracked source, not a stale stub).
+  (define-values (ast-out ast-err)
+    (run (path->string nix-parse-json-binary) (path->string fixture-nix)))
+  (check-true (regexp-match? #rx"^\\(" (string-trim ast-out))
+              (format "helper emits an S-expression AST (stderr: ~a)" ast-err)))
+
 (test-case "importer emits structural (ms …) (not cursed (ms STR-WITH-\\n))"
   (define-values (bnix _err) (run (path->string importer-bin)
                                   (path->string fixture-nix)))

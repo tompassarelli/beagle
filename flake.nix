@@ -227,6 +227,14 @@
             pkgs.babashka
             pkgs.clojure
             pkgs.bun
+            # Rust toolchain for tools/nix-parse-json (the rnix-backed Nix
+            # importer helper). The nix-import-roundtrip test bootstraps this
+            # helper via `cargo build --locked` from tracked source; pinning
+            # cargo/rustc HERE (through this flake's locked nixpkgs) means the
+            # documented dev/test entrypoint provides the toolchain rather than
+            # relying on an undeclared ambient system cargo.
+            pkgs.cargo
+            pkgs.rustc
             # Zig backend + tick kernel (thread 20260612232001)
             zig-overlay.packages.${system}.master
             # sokol_app X11/GLX link deps (kernel render harness)

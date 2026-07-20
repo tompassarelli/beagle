@@ -19,9 +19,11 @@ result
 runtime/src/kea/
 runtime/src/promotions.clj
 
-# Rust build artifacts for tools/
+# Rust build artifacts for tools/ (the built binary stays out of git).
+# Cargo.lock IS tracked: the nix-import-roundtrip test bootstraps
+# tools/nix-parse-json deterministically from tracked inputs (`cargo build
+# --locked`), so its pinned dependency versions must be committed.
 tools/*/target/
-tools/*/Cargo.lock
 
 # Python bytecode (bin/beagle_repair_apply.py + tests)
 __pycache__/

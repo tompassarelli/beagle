@@ -61,6 +61,16 @@ jobs:
         with:
           babashka-version: '1.12.218'
 
+      # Rust toolchain for the nix-import-roundtrip active-tier test, which
+      # bootstraps tools/nix-parse-json (the rnix Nix-importer helper) from
+      # tracked source via `cargo build --locked`. Declared here so CI provides
+      # cargo/rustc rather than depending on whatever the runner ships — a
+      # missing toolchain would make the active suite fail loudly, so it must be
+      # explicit. (Ubuntu runners preinstall a rustup toolchain; this step is
+      # the declared, version-explicit surface.)
+      - name: Install Rust (nix-parse-json helper bootstrap)
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Run tiered test suite
         env:
           CI: 'true'

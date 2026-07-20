@@ -91,6 +91,11 @@
              "nix-lints.rkt"
              "nix-parse.rkt"
              "nix-roundtrip.rkt"
+             ;; bin/beagle-import-nix .nix→.bnix→.nix round-trip. Self-bootstraps
+             ;; the tracked tools/nix-parse-json rnix helper via `cargo build
+             ;; --locked` (flake-pinned cargo in devShells.default; installed in
+             ;; CI). Requires cargo like emit-clj-behavioral requires bb.
+             "nix-import-roundtrip.rkt"
              "validate-nix.rkt"
              ;; Clojure — promoted Phase D (2026-05).
              ;; emit.rkt is the clj structural suite; emit-clj-behavioral.rkt
