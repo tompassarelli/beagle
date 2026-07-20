@@ -777,6 +777,37 @@
      '(declare-extern obj Any)
      '(defn f [(obj :- Any)] :- Any (.-my-prop obj)))
 
+   (test-case "authored underscores stay literal in every ordinary property position"
+     (define result
+       (js-emit
+        (list '(ns test.app) '(define-mode strict) '(define-target js)
+              '(defn read-wall [(obj :- Any)] :- Any (.-wall_s obj))
+              '(defn call-context [(obj :- Any)] :- Any (.ctx_str obj))
+              '(defn write-total! [(obj :- Any) (v :- Any)] :- Any
+                 (set! (.-total_str obj) v))
+              `(def metrics :- Any ,(mt ':wall_s 1 ':ctx_str 2 ':total_str 3))
+              '(defrecord Snapshot [(wall_s :- Int) (ctx_str :- String) (total_str :- String)]))))
+     (for ([expected (in-list '("obj.wall_s"
+                                "obj.ctx_str()"
+                                "(obj.total_str = v)"
+                                "{wall_s: 1, ctx_str: 2, total_str: 3}"
+                                "wall_s: wall__s"
+                                "ctx_str: ctx__str"
+                                "total_str: total__str"
+                                "function snapshot_wall__s(r) { return r.wall_s; }"
+                                "function snapshot_ctx__str(r) { return r.ctx_str; }"
+                                "function snapshot_total__str(r) { return r.total_str; }"))])
+       (check-true (string-contains? result expected)
+                   (format "expected ~v in:\n~a" expected result)))
+     (for ([forbidden (in-list '("obj.wall__s" "obj.ctx__str" "obj.total__str"
+                                 "{wall__s:" "ctx__str: 2" "total__str: 3"))])
+       (check-false (string-contains? result forbidden)
+                    (format "property spelling drifted to ~v in:\n~a" forbidden result))))
+
+   (check-js-contains "property mangle preserves underscore while mapping mixed punctuation"
+     "obj.wall_s_ready_p_bang__gt_eq_lt_pct"
+     '(defn mixed [(obj :- Any)] :- Any (.-wall_s-ready?!->=<% obj)))
+
    ;; A let-binding reassigned via `set!` must emit `let`, not `const` — otherwise
    ;; the generated `const acc = 0; acc = …` throws "Assignment to constant variable"
    ;; at runtime. (`f!` is bang-named so the purity check is satisfied.)

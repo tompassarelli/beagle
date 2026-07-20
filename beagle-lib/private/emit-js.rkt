@@ -49,7 +49,7 @@
   ;; PROPERTY position: char-mangle only, never the reserved-word `$` suffix
   ;; (`:delete` -> `delete`, not `delete$`). Store + read both funnel here so
   ;; the map/record property spelling stays internally consistent.
-  (mangle-chars (substring s 1)))
+  (mangle-prop (substring s 1)))
 
 (define (keyword-symbol? sym)
   (and (symbol? sym)
@@ -1900,7 +1900,7 @@
   ;; params are BINDINGS (reserved-word-suffixed); the object KEYS are
   ;; PROPERTIES (char-mangle only). Split them so `{ delete: delete$ }`.
   (define field-params (map (compose mangle-name param-name) fields))
-  (define field-props (map (compose mangle-chars symbol->string param-name) fields))
+  (define field-props (map (compose mangle-prop symbol->string param-name) fields))
   (format "function ~a(~a) { return Object.freeze({ _tag: ~v~a }); }"
           m-str
           (string-join field-params ", ")
@@ -1917,12 +1917,12 @@
   (define fields (record-form-fields f))
   (define name-str (symbol->string name))
   (define name-mangled (mangle-name name))
-  (define accessor-prefix (mangle-str (string-downcase name-str)))
   ;; field PARAMS/accessor-name-suffix are bindings; field PROPS are property
   ;; positions. The accessor name mirrors the `<lcname>-<field>` call site,
-  ;; which mangles the whole (non-reserved) symbol -> char-mangle, no `$`.
+  ;; so mangle that whole authored binding independently of the property.
+  (define field-source-names (map (compose symbol->string param-name) fields))
   (define field-params (map (compose mangle-name param-name) fields))
-  (define field-props (map (compose mangle-chars symbol->string param-name) fields))
+  (define field-props (map mangle-prop field-source-names))
   ;; Keep the object shorthand `{x}` when prop == param (the common,
   ;; non-reserved case, byte-identical to before); only reserved fields need
   ;; the explicit `delete: delete$` split.
@@ -1937,9 +1937,11 @@
             name-str
             (string-join field-entries ", ")))
   (define accessors
-    (for/list ([prop (in-list field-props)])
-      (format "function ~a_~a(r) { return r.~a; }"
-              accessor-prefix prop prop)))
+    (for/list ([field-name (in-list field-source-names)]
+               [prop (in-list field-props)])
+      (format "function ~a(r) { return r.~a; }"
+              (mangle-str (format "~a-~a" (string-downcase name-str) field-name))
+              prop)))
   (string-join (cons factory accessors) "\n\n"))
 
 ;; --- with (record update) --------------------------------------------------
@@ -2034,7 +2036,7 @@
             ;; `b` is a fresh BINDING (suffixed); the read reaches a record
             ;; PROPERTY (char-mangle only) -> must match factory storage.
             (format "const ~a = ~a.~a;"
-                    (mangle-name b) tmp (mangle-chars fname))))
+                    (mangle-name b) tmp (mangle-prop fname))))
         (format "if (~a) { ~a ~a } else"
                 test (string-join let-strs " ") (make-body-str bindings))])]
     [(pat-map? pat)

@@ -200,6 +200,25 @@ console.assert(threw, 'frozen record should reject mutation');
      "console.log(invoke_ready({ ready_p() { return true; } }));"
      "true")
 
+   (check-js-output "authored underscore properties round-trip through read call set and object"
+     (list '(defn exercise! [(obj :- Any)] :- String
+              (do (set! (.-total_str obj) (str (.-wall_s obj) ":" (.ctx_str obj)))
+                  (.-total_str obj)))
+           `(defn snapshot [] :- Any ,(mt ':wall_s 8 ':ctx_str "ctx" ':total_str "total")))
+     "console.log(exercise_bang({wall_s: 'wall', ctx_str() { return 'ctx'; }, total_str: ''}));
+console.log(JSON.stringify(snapshot()));"
+     "wall:ctx\n{\"wall_s\":8,\"ctx_str\":\"ctx\",\"total_str\":\"total\"}")
+
+   (check-js-output "underscored record fields keep literal properties and binding-safe accessors"
+     (list '(defrecord Snapshot [(wall_s :- Int) (ctx_str :- String) (total_str :- String)])
+           '(defn main [] :- Nil
+              (let [s (->Snapshot 8 "ctx" "total")]
+                (do (println (snapshot-wall_s s))
+                    (println (snapshot-ctx_str s))
+                    (println (snapshot-total_str s))))))
+     "main();"
+     "8\nctx\ntotal")
+
    ;; --- seam 2: effect-position control flow executes correctly -------------
    ;; Semantics must be preserved through the idiomatic-statement lowering.
    (check-js-output "seam2: effect-position if-else runs then-branch"

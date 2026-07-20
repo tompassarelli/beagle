@@ -58,21 +58,17 @@
 
 (define (js-reserved-word? s) (hash-ref JS-RESERVED-WORDS s #f))
 
-;; Character-level mangle only: turns a beagle symbol/keyword spelling into a
-;; syntactically legal JS identifier (kebab -> snake, `?`/`!`/… -> words). This
-;; is the PROPERTY spelling — no reserved-word `$` suffix. Bindings add the
-;; suffix on top (mangle-str), because a reserved word is illegal only in
-;; declaration/param/reference position, never as a member name or object key.
-(define (mangle-chars s)
+;; Punctuation shared by binding and property names. Binding names first escape
+;; authored `_` so `a_b` cannot collide with `a-b`; property names preserve it
+;; because an authored JS label such as `wall_s` must remain exactly `wall_s`.
+(define (mangle-punctuation s)
   (string-replace
    (string-replace
     (string-replace
      (string-replace
       (string-replace
        (string-replace
-        (string-replace
-         (string-replace s "_" "__")
-         "-" "_")
+        (string-replace s "-" "_")
         "?" "_p")
        "!" "_bang")
       "=" "_eq")
@@ -80,12 +76,15 @@
     "<" "_lt")
    "%" "_pct"))
 
+(define (mangle-chars s)
+  (mangle-punctuation (string-replace s "_" "__")))
+
 (define (mangle-str s)
   (define mangled (mangle-chars s))
   (if (js-reserved-word? mangled) (string-append mangled "$") mangled))
 
 (define (mangle-prop s)
-  (mangle-chars s))
+  (mangle-punctuation s))
 
 ;; --- canonical JS binary/assign operator tables -----------------------------
 ;; Shared by parse-js-quote (recognition during parse) and the emitters

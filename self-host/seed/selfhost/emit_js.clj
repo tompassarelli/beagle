@@ -77,8 +77,11 @@
 
 (def JS-RESERVED {"break" true "case" true "catch" true "class" true "const" true "continue" true "debugger" true "default" true "delete" true "do" true "else" true "enum" true "export" true "extends" true "finally" true "for" true "function" true "if" true "implements" true "import" true "in" true "instanceof" true "interface" true "let" true "new" true "null" true "package" true "private" true "protected" true "public" true "return" true "static" true "switch" true "throw" true "try" true "typeof" true "var" true "void" true "while" true "with" true "yield" true "await" true "eval" true "arguments" true})
 
+(defn ^String mangle-punctuation [^String s]
+  (str/replace (str/replace (str/replace (str/replace (str/replace (str/replace (str/replace s "-" "_") "?" "_p") "!" "_bang") "=" "_eq") ">" "_gt") "<" "_lt") "%" "_pct"))
+
 (defn ^String mangle-chars [^String s]
-  (str/replace (str/replace (str/replace (str/replace (str/replace (str/replace (str/replace (str/replace s "_" "__") "-" "_") "?" "_p") "!" "_bang") "=" "_eq") ">" "_gt") "<" "_lt") "%" "_pct"))
+  (mangle-punctuation (str/replace s "_" "__")))
 
 (defn ^String mangle-str [^String s]
   (let [m (mangle-chars s)]
@@ -88,10 +91,10 @@
   (mangle-str s))
 
 (defn ^String mangle-prop [^String s]
-  (mangle-chars s))
+  (mangle-punctuation s))
 
 (defn ^String kw->prop [^String kw]
-  (if (str/starts-with? kw ":") (mangle-chars (subs kw 1)) (mangle-chars kw)))
+  (if (str/starts-with? kw ":") (mangle-prop (subs kw 1)) (mangle-prop kw)))
 
 (def ^String HEX "0123456789abcdef")
 
@@ -246,20 +249,19 @@
   (let [name (get f "name")
    fields (field-names-of (get f "fields"))
    name-mangled (mangle-name name)
-   accessor-prefix (mangle-str (str/lower-case name))
    field-params (mapv mangle-name fields)
-   field-props (mapv mangle-chars fields)
+   field-props (mapv mangle-prop fields)
    field-entries (map-indexed (fn [i prop] (let [param (nth field-params i)]
   (if (= prop param) param (str prop ": " param)))) field-props)
    factory (str "function " name-mangled "(" (str/join ", " field-params) ") {\n" "  return Object.freeze({_tag: " (js-string-lit name) ", " (str/join ", " field-entries) "});\n}")
-   accessors (mapv (fn [prop] (str "function " accessor-prefix "_" prop "(r) { return r." prop "; }")) field-props)]
+   accessors (map-indexed (fn [i prop] (str "function " (mangle-str (str (str/lower-case name) "-" (nth fields i))) "(r) { return r." prop "; }")) field-props)]
   (str/join "\n\n" (into [factory] accessors))))
 
 (defn ^String emit-tagged-factory [^String member-name fields]
   (let [m-str (mangle-name member-name)
    raw-fields (field-names-of fields)
    field-params (mapv mangle-name raw-fields)
-   field-props (mapv mangle-chars raw-fields)]
+   field-props (mapv mangle-prop raw-fields)]
   (str "function " m-str "(" (str/join ", " field-params) ") { return Object.freeze({ _tag: " (js-string-lit member-name) (if (= 0 (count field-params)) "" (str ", " (str/join ", " (map-indexed (fn [i prop] (str prop ": " (nth field-params i))) field-props)))) " }); }")))
 
 (defn ^String emit-defenum [f]
@@ -444,7 +446,7 @@
    test (str tmp "._tag === " (js-string-lit rec-name))]
   (if (or (= 0 (count bindings)) (nil? fields)) (str "if (" test ") { " (emit-match-body body []) " } else") (let [let-strs (loop [i 0
    acc []]
-  (if (or (>= i (count bindings)) (>= i (count fields))) acc (recur (+ i 1) (conj acc (str "const " (mangle-name (get (nth bindings i) "name")) " = " tmp "." (mangle-chars (nth fields i)) ";")))))
+  (if (or (>= i (count bindings)) (>= i (count fields))) acc (recur (+ i 1) (conj acc (str "const " (mangle-name (get (nth bindings i) "name")) " = " tmp "." (mangle-prop (nth fields i)) ";")))))
    bnames (mapv (fn [b] (get b "name")) bindings)]
   (str "if (" test ") { " (str/join " " let-strs) " " (emit-match-body body bnames) " } else"))))
   (= pt "map") (let [entries (vec (get pat "entries"))
@@ -1145,7 +1147,9 @@
   (expect! "mangle: bang" (= (mangle-str "swap!") "swap_bang"))
   (expect! "mangle: reserved private" (= (mangle-str "private") "private$"))
   (expect! "mangle: underscore doubles" (= (mangle-str "a_b") "a__b"))
+  (expect! "mangle-prop: authored underscore preserved" (= (mangle-prop "wall_s") "wall_s"))
   (expect! "mangle-prop: predicate punctuation" (= (mangle-prop "ready?") "ready_p"))
+  (expect! "mangle-prop: mixed punctuation" (= (mangle-prop "wall_s-ready?!->=<%") "wall_s_ready_p_bang__gt_eq_lt_pct"))
   (expect! "mangle-prop: reserved word unchanged" (= (mangle-prop "delete") "delete"))
   (expect! "string: plain" (= (js-string-lit "hi") "\"hi\""))
   (expect! "string: newline" (= (js-string-lit "a\nb") "\"a\\nb\""))

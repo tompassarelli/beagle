@@ -325,6 +325,29 @@
        "obj.ready_p"
        '(js/quote (const v (dot obj ready?))))
 
+     (test-case "js/quote preserves authored underscores only in property positions"
+       (define result
+         (js-emit
+          (list '(ns test.app) '(define-mode strict) '(define-target js)
+                '(js/quote
+                  (const total_str 7)
+                  (const wall (dot obj wall_s))
+                  (.ctx_str obj)
+                  (const snapshot (object total_str total_str))))))
+       (for ([expected (in-list '("const total__str = 7;"
+                                  "obj.wall_s"
+                                  "obj.ctx_str()"
+                                  "{total_str: total__str}"))])
+         (check-true (string-contains? result expected)
+                     (format "expected ~v in:\n~a" expected result)))
+       (for ([forbidden (in-list '("obj.wall__s" "obj.ctx__str" "{total__str:"))])
+         (check-false (string-contains? result forbidden)
+                      (format "property spelling drifted to ~v in:\n~a" forbidden result))))
+
+     (check-js-quote "js/quote maps mixed property punctuation without escaping underscore"
+       "obj.wall_s_ready_p_bang__gt_eq_lt_pct()"
+       '(js/quote (.wall_s-ready?!->=<% obj)))
+
      (check-js-quote "assignment"
        "x = 10;"
        '(js/quote (= x 10)))
