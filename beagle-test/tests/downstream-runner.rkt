@@ -104,6 +104,65 @@
      (check-true (hash-ref receipt 'byteclean_all))))
   (delete-directory/files base))
 
+;; --- DRIFT TRANSPORT: registry drift surfaces synchronously, not from a worker
+;; A drift in membership derivation must reach run-consumers' CALLER as
+;; exn:fail:drift (the CLI's exit-3 seam), NOT escape a worker thread as an
+;; uncaught traceback that leaves a #f in the results vector (the pre-fix exit-1
+;; bug). run-consumers derives every roster up front, in the caller's thread,
+;; before spawning any worker — so this check-exn catches the drift class.
+(test-case "drift: bash-array shape drift reaches run-consumers' caller as exn:fail:drift"
+  (define base (make-temporary-file "c2-drift-array-~a" 'directory))
+  (define repo (build-path base "repo"))
+  (write-file! (build-path repo "web" "bin" "wake-compile") "MODULES=(alpha)\n") ; marker gone
+  (write-file! (build-path repo "web" "compiler" "alpha.bjs") ";;\n")
+  (init-repo! repo)
+  (define consumers
+    (list `(consumer (name "wakedrift") (repo-env "WAKEDRIFT_FIXREPO")
+                     (repo-default ,(path->string repo)) (target "js")
+                     (enumerators ((enumerator (kind bash-array)
+                                    (source "web/bin/wake-compile") (array-name "modules")
+                                    (template "web/compiler/{}.bjs")
+                                    (shape-markers ("modules=("))))))))
+  (with-scratch
+   (lambda (scratch)
+     (check-exn exn:fail:drift?
+                (lambda () (run-consumers consumers scratch #:jobs 2 #:timeout 120)))))
+  (delete-directory/files base))
+
+(test-case "drift: missing consumer repo reaches the caller as exn:fail:drift (not a worker traceback)"
+  (define base (make-temporary-file "c2-drift-missing-~a" 'directory))
+  (define gone (build-path base "not-there"))   ; never created
+  (define consumers (list (glob-consumer "gonejs" gone "js" ".bjs")))
+  (with-scratch
+   (lambda (scratch)
+     (check-exn exn:fail:drift?
+                (lambda () (run-consumers consumers scratch #:jobs 1 #:timeout 60)))))
+  (delete-directory/files base))
+
+;; A drift in ONE consumer aborts the whole run before any partial result — the
+;; up-front derivation fails closed rather than compiling the healthy siblings.
+(test-case "drift: one drifting consumer aborts the run (no partial results)"
+  (define base (make-temporary-file "c2-drift-mixed-~a" 'directory))
+  (define good-repo (build-path base "good"))
+  (write-file! (build-path good-repo "js" "ok.bjs") GOOD-JS)
+  (init-repo! good-repo)
+  (define bad-repo (build-path base "bad"))
+  (write-file! (build-path bad-repo "web" "bin" "wake-compile") "MODULES=(x)\n")
+  (init-repo! bad-repo)
+  (define consumers
+    (list (glob-consumer "aagood" good-repo "js" ".bjs")
+          `(consumer (name "zzdrift") (repo-env "ZZDRIFT_FIXREPO")
+                     (repo-default ,(path->string bad-repo)) (target "js")
+                     (enumerators ((enumerator (kind bash-array)
+                                    (source "web/bin/wake-compile") (array-name "modules")
+                                    (template "web/compiler/{}.bjs")
+                                    (shape-markers ("modules=("))))))))
+  (with-scratch
+   (lambda (scratch)
+     (check-exn exn:fail:drift?
+                (lambda () (run-consumers consumers scratch #:jobs 4 #:timeout 120)))))
+  (delete-directory/files base))
+
 ;; --- STAGING + ORDERING: north resolves fram via external scratch link -------
 ;; Exercises stage-consumer! (the north-specific fram injection) and the
 ;; fram-before-north scheduler edge at jobs=1 (must not deadlock). north's

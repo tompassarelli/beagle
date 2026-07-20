@@ -161,10 +161,11 @@
    diagnostics porcelain-before porcelain-after byteclean?)
   #:transparent)
 
-(define (compile-consumer c scratch timeout-secs consumers)
+;; `derived` is the consumer's C1 membership, derived UP FRONT by run-consumers
+;; in the caller's thread (never here in the worker) — see run-consumers for why.
+(define (compile-consumer c derived scratch timeout-secs consumers)
   (define name (consumer-name c))
   (define repo (consumer-repo-path c))
-  (define derived (derive-consumer c))          ; C1 membership derivation
   (define relpaths (consumer-result-relpaths derived))
   (define target (consumer-result-target derived))
   (define before (porcelain-sha repo))
@@ -205,6 +206,17 @@
 (define CONSUMER-DEPS (hash "north" '("fram")))
 
 (define (run-consumers consumers scratch #:jobs [jobs 4] #:timeout [timeout-secs 300])
+  ;; Derive every consumer's membership UP FRONT — in THIS (the caller's) thread,
+  ;; before any worker thread is spawned. Membership derivation is the sole
+  ;; source of exn:fail:drift (missing consumer, stale enumerator shape, manifest
+  ;; growth, vanished enumerated source). Deriving it here rather than inside a
+  ;; worker means a drift exn propagates synchronously to the caller's
+  ;; exn:fail:drift handler (the CLI's exit-3 seam) instead of escaping a worker
+  ;; thread as an uncaught Racket traceback (which would exit 1). Registry order
+  ;; makes the FIRST drift deterministic, so the diagnostic is one stable line.
+  (define derived-map
+    (for/hash ([c (in-list consumers)])
+      (values (consumer-name c) (derive-consumer c))))
   (define n (length consumers))
   (define name->done
     (for/hash ([c (in-list consumers)]) (values (consumer-name c) (make-semaphore 0))))
@@ -222,7 +234,9 @@
          (dynamic-wind
           (lambda () (semaphore-wait job-sem))
           (lambda ()
-            (vector-set! results i (compile-consumer c scratch timeout-secs consumers)))
+            (vector-set! results i
+                         (compile-consumer c (hash-ref derived-map (consumer-name c))
+                                           scratch timeout-secs consumers)))
           (lambda ()
             (semaphore-post job-sem)
             (semaphore-post (hash-ref name->done (consumer-name c)))))))))
