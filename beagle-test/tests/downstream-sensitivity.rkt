@@ -84,11 +84,73 @@
    (lambda () (proc scratch))
    (lambda () (when (directory-exists? scratch) (delete-directory/files scratch)))))
 
-;; A fresh copy of the real compiler under scratch, `seeded?` controls
-;; whether the checked-in diff is applied to THIS copy only.
-(define (make-compiler-copy! scratch seeded?)
+;; --- bytecode hygiene: the copied compiler must be SOURCE-TRUTHFUL -----------
+;; `copy-directory/files #:keep-modify-seconds? #t` faithfully carries the live
+;; tree's untracked `compiled/*.zo`/`*.dep` bytecode into the scratch copy with
+;; their original mtimes. Under racket's default 'modify-seconds freshness
+;; check, a `.zo` whose mtime is >= its source is trusted WITHOUT recompiling.
+;; So a copied clean pre-seed check_rkt.zo that happens to be future-dated (a
+;; real condition on developer/CI machines with clock skew or a touched tree)
+;; SHADOWS the seed-patched check.rkt: the seeded leg would silently run the
+;; unpatched checker and false-green (exit 0) instead of raising the expected
+;; E009 class. The CONTROL test below reproduces this vector in-suite against
+;; the pre-fix path (invalidate? #f) and asserts it really does false-green.
+;;
+;; THE FIX: after copying (and after any seed), delete every compiled artifact
+;; in the copy, forcing the exec-file racket to recompile the actual sources.
+;; This touches ONLY the scratch copy — the live-repo preservation proofs
+;; (porcelain + check.rkt sha) are unaffected.
+(define (has-suffix? p s) (string-suffix? (path->string p) s))
+(define (compiled-artifact? p) (or (has-suffix? p ".zo") (has-suffix? p ".dep")))
+(define (rkt-source? p) (has-suffix? p ".rkt"))
+
+(define (invalidate-copied-bytecode! dest)
+  ;; Collect first (delete-during-iterate is unsafe), then remove every
+  ;; `compiled/` directory wholesale so no stale/future-dated .zo survives.
+  (define compiled-dirs
+    (for/list ([p (in-directory dest)]
+               #:when (and (directory-exists? p)
+                           (equal? (path->string (file-name-from-path p)) "compiled")))
+      p))
+  (for ([d (in-list compiled-dirs)] #:when (directory-exists? d))
+    (delete-directory/files d)))
+
+;; Compile a copy's sources into a full bytecode tree with the SAME pinned
+;; racket running this test (raco next to exec-file), so the control/regression
+;; can plant a real, populated `.zo` tree regardless of the live tree's ambient
+;; compiled/ state — fully hermetic, no dependence on a prior `raco make`.
+(define (raco-make! target)
+  (define exec (find-system-path 'exec-file))
+  (define raco (build-path (path-only exec) "raco"))
+  (parameterize ([current-output-port (open-output-nowhere)]
+                 [current-error-port (open-output-nowhere)])
+    (unless (system* (path->string raco) "make" (path->string target))
+      (error 'raco-make! "failed to precompile ~a" target))))
+
+;; Adversarial planter used only by the reproduction control/regression:
+;; materialize a CLEAN pre-seed bytecode tree, then force it to be
+;; authoritatively "newer than source" (every .zo/.dep far in the future, every
+;; .rkt in the past) — the exact stale-bytecode condition that false-greens an
+;; unhardened harness. Runs BEFORE the seed, so the planted bytecode is clean.
+(define FUTURE-SECS (+ (current-seconds) (* 400 24 60 60)))
+(define PAST-SECS   (- (current-seconds) (* 400 24 60 60)))
+(define (plant-future-dated-bytecode! dest)
+  (raco-make! (build-path dest "private" "build-all.rkt"))
+  (for ([p (in-directory dest)] #:when (file-exists? p))
+    (cond [(rkt-source? p)        (file-or-directory-modify-seconds p PAST-SECS)]
+          [(compiled-artifact? p) (file-or-directory-modify-seconds p FUTURE-SECS)])))
+
+;; A fresh copy of the real compiler under scratch. `seeded?` controls whether
+;; the checked-in diff is applied to THIS copy only. `after-copy` is a seam for
+;; the control/regression to plant stale bytecode BEFORE the seed. `invalidate?`
+;; (default #t) drops all copied bytecode so the copy is source-truthful — the
+;; seal that makes every leg deterministic regardless of the live tree's .zo.
+(define (make-compiler-copy! scratch seeded?
+                             #:after-copy [after-copy void]
+                             #:invalidate? [invalidate? #t])
   (define dest (build-path scratch (if seeded? "compiler-seeded" "compiler-clean")))
   (copy-directory/files beagle-lib-src dest #:keep-modify-seconds? #t)
+  (after-copy dest)
   (when seeded?
     (define ok?
       (parameterize ([current-output-port (open-output-nowhere)]
@@ -96,6 +158,7 @@
         (system* (find-executable-path "patch") "-p1" "-d" (path->string dest)
                  "-i" (path->string seed-diff))))
     (unless ok? (error 'make-compiler-copy! "seed diff failed to apply to scratch copy")))
+  (when invalidate? (invalidate-copied-bytecode! dest))
   dest)
 
 ;; --- compile one file with one compiler copy, bounded + captured ------------
@@ -169,6 +232,45 @@
                   "unseeded gate raises none of the seeded diagnostic class")
      (check-true (file-exists? (build-path out-dir "fixture" "downstream_sensitivity.js"))
                  "unseeded compile actually emitted the target file"))))
+
+;; --- CONTROL: the stale-bytecode vector is REAL (load-bearing pre-fix proof) -
+;; Same copy + seed, but with invalidation DISABLED and a future-dated clean
+;; pre-seed bytecode tree planted over the patched check.rkt. This is exactly
+;; the pre-fix (c30a514) code path. It MUST false-green — exit 0, no E009 —
+;; because racket trusts the future-dated .zo and never recompiles the seed.
+;; If this control ever stopped false-greening, the regression below would be
+;; vacuous, so we assert the vector's reality explicitly.
+(test-case "CONTROL: future-dated pre-seed .zo masks the seed when bytecode is NOT invalidated"
+  (with-scratch
+   (lambda (scratch)
+     (define compiler
+       (make-compiler-copy! scratch #t
+                            #:after-copy plant-future-dated-bytecode!
+                            #:invalidate? #f))
+     (define out-dir (build-path scratch "out-control"))
+     (define-values (status stderr) (compile-with compiler micro-consumer out-dir))
+     (check-equal? status 0
+                   "pre-fix path false-greens: stale future-dated .zo shadows the seed")
+     (check-false (string-contains? stderr TARGET-FORM-PHRASE)
+                  "masked seed raises none of the E009 class — the exact vector"))))
+
+;; --- REGRESSION: invalidation defeats the future-dated stale .zo (the seal) --
+;; Identical plant, but through the DEFAULT (invalidate? #t) production path.
+;; Dropping the copied bytecode forces recompilation of the seed-patched
+;; check.rkt, so the seeded leg reaches the expected E009 class regardless of
+;; any future-dated .zo. RED on c30a514 (no invalidation ⇒ exit 0, cf. the
+;; CONTROL above); GREEN on the candidate.
+(test-case "REGRESSION: seeded leg still fails RED with E009 even under a future-dated stale .zo"
+  (with-scratch
+   (lambda (scratch)
+     (define compiler
+       (make-compiler-copy! scratch #t #:after-copy plant-future-dated-bytecode!))
+     (define out-dir (build-path scratch "out-regress"))
+     (define-values (status stderr) (compile-with compiler micro-consumer out-dir))
+     (check-equal? status 1
+                   "invalidated copy recompiles the seed — stale bytecode cannot mask it")
+     (check-true (string-contains? stderr TARGET-FORM-PHRASE)
+                 "seeded failure is the expected target-form/E009 class, not a crash"))))
 
 ;; --- after snapshot: prove zero repo mutation across the whole run ----------
 (test-case "no-mutation: live repo and live check.rkt are byte-identical before/after"
