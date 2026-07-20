@@ -53,7 +53,8 @@
          racket/system
          racket/runtime-path
          racket/file
-         (only-in "../../beagle-lib/private/batch-compile.rkt" compile-source))
+         (only-in "../../beagle-lib/private/batch-compile.rkt" compile-source)
+         (only-in "scratch-containment.rkt" call-with-scratch-containment))
 
 (define-runtime-path beagle-build "../../bin/beagle-build")
 (define-runtime-path conformance-repo-root "../..")
@@ -74,7 +75,13 @@
       (let ([p "/run/current-system/sw/bin/node"])
         (and (file-exists? p) p))))
 
-(define tmp-dir (make-temporary-file "beagle-conformance-~a" 'directory))
+;; The scratch root for THIS run. Bound by call-with-scratch-containment at the
+;; bottom of the module (see run block), so the root — and any bb/node child
+;; still live at cancellation — is reaped on EVERY exit path: normal completion,
+;; seeded rackunit failure, a raised exception, and SIGINT/SIGTERM/SIGHUP.
+;; Identity-scoped: only this exact root is deleted, never a name-prefix glob,
+;; so a concurrent conformance run's root is never swept.
+(define tmp-dir #f)
 
 ;; ---------------------------------------------------------------------------
 ;; node_modules scaffold so emitted JS can resolve `import * as $$bc from
@@ -99,8 +106,6 @@
     (make-file-or-directory-link (path->string (simplify-path src)) link-path))
   (link-runtime! beagle-core-js "core.js")
   (link-runtime! beagle-hamt-js "hamt.js"))
-
-(setup-beagle-node-module!)
 
 ;; ---------------------------------------------------------------------------
 ;; Compile + run helpers (subprocess patterns reused from
@@ -510,5 +515,26 @@
                          "  was RESOLVED — move this entry into CORPUS as an agreement.")
                         name js-val js-want clj-want)))))))
 
-(run-conformance)
-(run-divergences)
+;; Own the scratch root under exception-/signal-safe containment: bind tmp-dir,
+;; plant the node_modules scaffold, then run both suites. Output and diagnostics
+;; are byte-unchanged — only the previously-orphaned root's lifetime is fixed.
+;;
+;; `run-conformance` and `run-divergences` were two TOP-LEVEL forms, so `raco
+;; test` echoed each suite's failure-count (a bare `0`) between them. Now that
+;; both run inside one containment extent, only the final value is echoed by
+;; raco; reproduce the first suite's echo explicitly — matching raco's own rule
+;; (echo non-void results only) — so stdout stays byte-identical.
+(call-with-scratch-containment
+ "beagle-conformance-~a"
+ (lambda (root)
+   (set! tmp-dir root)
+   (setup-beagle-node-module!)
+   ;; Probe-only hook (off unless the env var is set): plant an exception inside
+   ;; the live containment extent to prove root-reap on a raised exception —
+   ;; the exact with-handlers arm a SIGINT/SIGTERM break also takes. Never fires
+   ;; on a normal `raco test` / `racket` run, so output stays byte-identical.
+   (when (getenv "BEAGLE_SCRATCH_SELFTEST_RAISE")
+     (error 'scratch-selftest "planted exception in contained extent"))
+   (let ([r (run-conformance)])
+     (unless (void? r) (println r)))
+   (run-divergences)))

@@ -18,7 +18,8 @@
          racket/port
          racket/runtime-path
          racket/system
-         beagle/private/batch-compile)
+         beagle/private/batch-compile
+         (only-in "scratch-containment.rkt" call-with-scratch-containment))
 
 (define-runtime-path beagle-build "../../bin/beagle-build")
 (define-runtime-path repo-root "../..")
@@ -44,7 +45,14 @@
           (and ok? (file-exists? out-path) (file->string out-path))
           (get-output-string err-cap)))
 
-(define tmp-dir (make-temporary-file "beagle-batch-compile-~a" 'directory))
+;; The scratch root for THIS run. Bound by call-with-scratch-containment at the
+;; bottom of the module, so the root — and any beagle-build child still live at
+;; cancellation — is reaped on EVERY exit path: normal completion, seeded
+;; rackunit failure (exit 1), a raised exception, and SIGINT/SIGTERM/SIGHUP.
+;; Identity-scoped: only this exact root is deleted, never a name-prefix glob,
+;; so a concurrent batch-compile run's root is never swept. (The old teardown
+;; ran only on normal completion, orphaning the root on signal/crash.)
+(define tmp-dir #f)
 
 (define (tmp-path name) (build-path tmp-dir name))
 
@@ -82,7 +90,11 @@
   (call-with-output-file p #:exists 'truncate (lambda (o) (display src-text o)))
   p)
 
-(define generated-success-fixtures
+;; Fixtures write to tmp-dir, so they are BUILT inside the containment run
+;; (below), after tmp-dir is bound. The vars are populated there; the suite's
+;; test-case bodies reference them lazily.
+(define generated-success-fixtures #f)
+(define (build-generated-success-fixtures!)
   (list
    (write-fixture! "gen-success.bclj"
                     "#lang beagle/clj\n(ns gen.success)\n(defn add [x :- Int y :- Int] :- Int (+ x y))\n(def total :- Int (add 1 2))\n")
@@ -96,7 +108,8 @@
 ;; classifies as 'compile-fail. Second entry is a nonexistent path — no
 ;; parseable source at all — proving compile-source's with-handlers catches
 ;; errors that occur BEFORE any beagle-specific compiler stage runs.
-(define generated-failure-fixtures
+(define generated-failure-fixtures #f)
+(define (build-generated-failure-fixtures!)
   (list
    (write-fixture! "gen-fail.bclj"
                     "#lang beagle/clj\n(ns gen.fail)\n(defn add [x :- Int y :- Int] :- Int (+ x y))\n(def bad :- Int (add \"nope\" 2))\n")
@@ -199,11 +212,29 @@
      (define-values (status2 emitted2) (compile-source (first generated-success-fixtures) #:root repo-root-str))
      (check-eq? status2 'ok "process must survive an intercepted (exit N) and keep compiling"))))
 
-(define failures (run-tests suite 'verbose))
+;; Own the scratch root under exception-/signal-safe containment: bind tmp-dir,
+;; write the generated fixtures, then run the suite. Verbose output and
+;; diagnostics are byte-unchanged; only the orphan-on-signal/crash path is
+;; fixed. containment reaps tmp-dir (fixtures + CLI oracle output files) and any
+;; live beagle-build child on EVERY exit path — normal, seeded exit 1, raised
+;; exception, SIGINT/SIGTERM.
+(define failures
+  (call-with-scratch-containment
+   "beagle-batch-compile-~a"
+   (lambda (root)
+     (set! tmp-dir root)
+     (set! generated-success-fixtures (build-generated-success-fixtures!))
+     (set! generated-failure-fixtures (build-generated-failure-fixtures!))
+     ;; Probe-only hook (off unless the env var is set): plant an exception in
+     ;; the live containment extent to prove root-reap on a raised exception —
+     ;; the exact with-handlers arm a SIGINT/SIGTERM break also takes. Never
+     ;; fires on a normal run, so output/diagnostics stay byte-identical.
+     (when (getenv "BEAGLE_SCRATCH_SELFTEST_RAISE")
+       (error 'scratch-selftest "planted exception in contained extent"))
+     (run-tests suite 'verbose))))
 
-;; Resource cleanup: this test file's own tmp-dir (fixtures it wrote + CLI
-;; oracle output files) is fully reaped — no stray state survives the run.
-(delete-directory/files tmp-dir #:must-exist? #f)
+;; Self-check: containment fully reaped this file's tmp-dir on the normal path —
+;; no stray state survives the run.
 (check-false (directory-exists? tmp-dir) "tmp-dir must be fully cleaned up")
 
 (when (positive? failures) (exit 1))
