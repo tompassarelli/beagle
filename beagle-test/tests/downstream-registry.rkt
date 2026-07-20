@@ -98,24 +98,163 @@
      ;; macros.bjs, test/c.bjs, d.test.bjs skipped; a.bjs + sub/b.bjs kept.
      (check-equal? (consumer-result-relpaths r) '("root/a.bjs" "root/sub/b.bjs")))))
 
-(test-case "find-exclude extraction drops find-not-paths + excludes"
+;; --- find-exclude fixture harness --------------------------------------------
+;; A hermetic nixos-config-shaped repo: firn-build (emit) + firn-validate
+;; (validate) enumerator sources carrying their real shape markers, plus a
+;; .bnix set spanning membership + every excluded class.
+(define firn-build-src
+  (string-append
+   "find . -name '*.bnix' -not -path './result*' -not -path './.direnv/*' -print0\n"
+   "  ./scripts/*) continue ;;\n"
+   "  ./tests/*) continue ;;\n"
+   "  ./docs/fixtures/*) continue ;;\n"
+   "  */enabled-tags.bnix) continue ;;\n"))
+(define firn-validate-src
+  "find . -type f -name '*.bnix' -not -path './tests/fixtures/*' -not -path './result/*'\n")
+
+(define (std-firn-tree! repo)
+  (write-file! (build-path repo "scripts" "firn-build") firn-build-src)
+  (write-file! (build-path repo "scripts" "firn-validate") firn-validate-src)
+  (for ([f '("a.bnix" "nested/b.bnix" "tests/fixtures/bad.bnix"
+             "hosts/x/enabled-tags.bnix" "docs/fixtures/ex.bnix" "result/r.bnix")])
+    (write-file! (build-path repo f) "{}\n")))
+
+(define standard-classified
+  '((exclude (relpath "tests/fixtures/bad.bnix")     (class negative-fixture))
+    (exclude (relpath "hosts/x/enabled-tags.bnix")   (class resolver-input))
+    (exclude (relpath "docs/fixtures/ex.bnix")       (class doc-fixture))))
+
+(define (firn-enum classified)
+  `(enumerator (kind find-exclude)
+               (source "scripts/firn-build")
+               (ext ".bnix")
+               (find-not-paths ("result" ".direnv"))
+               (exclude-relpath-prefixes ("scripts/" "tests/" "docs/fixtures/"))
+               (exclude-basenames ("enabled-tags.bnix"))
+               (shape-markers ("find . -name '*.bnix' -not -path './result*'"
+                               "./scripts/*) continue"
+                               "./tests/*) continue"
+                               "./docs/fixtures/*) continue"
+                               "*/enabled-tags.bnix) continue"))
+               (validate-source "scripts/firn-validate")
+               (validate-shape-markers ("find . -type f -name '*.bnix'"
+                                        "-not -path './tests/fixtures/*'"))
+               (validate-negative-prefixes ("tests/fixtures/"))
+               (classified-excludes ,classified)))
+
+(define (derive-firn repo classified)
+  (derive-consumer (consumer-spec "firn-fix" repo (list (firn-enum classified)))))
+
+(test-case "find-exclude: membership = firn-build emit set; excludes classified"
   (with-fixture-repo
    (lambda (repo)
-     (write-file! (build-path repo "scripts" "firn-build")
-                  "find . -name '*.bnix' -not -path './result*' enabled-tags.bnix\n")
-     (for ([f '("a.bnix" "hosts/x/enabled-tags.bnix" "scripts/z.bnix"
-                "tests/t.bnix" "nested/b.bnix" "result/r.bnix")])
-       (write-file! (build-path repo f) "{}\n")) ; result/ pruned by walk
-     (define r (derive-consumer
-                (consumer-spec "firn-fix" repo
-                               '((enumerator (kind find-exclude)
-                                             (source "scripts/firn-build")
-                                             (ext ".bnix")
-                                             (find-not-paths ("result" ".direnv"))
-                                             (exclude-relpath-prefixes ("scripts/" "tests/"))
-                                             (exclude-basenames ("enabled-tags.bnix"))
-                                             (shape-markers ("-name '*.bnix' -not -path './result*'")))))))
-     (check-equal? (consumer-result-relpaths r) '("a.bnix" "nested/b.bnix")))))
+     (std-firn-tree! repo)
+     (define r (derive-firn repo standard-classified))
+     ;; membership is firn-build's emit set (broad excludes applied); result/
+     ;; pruned as find-not-paths noise.
+     (check-equal? (consumer-result-relpaths r) '("a.bnix" "nested/b.bnix"))
+     (check-equal? (consumer-result-count r) 2)
+     ;; every non-membership .bnix is explicitly classified.
+     (check-equal? (sort (map car (consumer-result-excluded r)) string<?)
+                   '("docs/fixtures/ex.bnix" "hosts/x/enabled-tags.bnix"
+                     "tests/fixtures/bad.bnix"))
+     (check-equal? (cdr (assoc "tests/fixtures/bad.bnix" (consumer-result-excluded r)))
+                   'negative-fixture)
+     (check-equal? (cdr (assoc "hosts/x/enabled-tags.bnix" (consumer-result-excluded r)))
+                   'resolver-input)
+     (check-equal? (cdr (assoc "docs/fixtures/ex.bnix" (consumer-result-excluded r)))
+                   'doc-fixture))))
+
+(test-case "find-exclude: membership ∪ excluded accounts for every discovered .bnix"
+  (with-fixture-repo
+   (lambda (repo)
+     (std-firn-tree! repo)
+     (define r (derive-firn repo standard-classified))
+     (define accounted
+       (sort (append (consumer-result-relpaths r)
+                     (map car (consumer-result-excluded r)))
+             string<?))
+     ;; result/r.bnix is the only unaccounted file — VCS/build noise both firn
+     ;; scripts prune. Everything else is membership or an explicit exclude.
+     (check-equal? accounted
+                   '("a.bnix" "docs/fixtures/ex.bnix" "hosts/x/enabled-tags.bnix"
+                     "nested/b.bnix" "tests/fixtures/bad.bnix")))))
+
+;; ---- fail-closed accounting: the silent-membership-gap the gate closes ------
+(test-case "drift: an unclassified excluded .bnix (silent-membership gap) fails closed"
+  (with-fixture-repo
+   (lambda (repo)
+     (std-firn-tree! repo)
+     ;; a future good source dropped under a formerly-broad excluded prefix
+     (write-file! (build-path repo "scripts" "newtool.bnix") "{}\n")
+     (check-exn exn:fail:drift? (lambda () (derive-firn repo standard-classified))))))
+
+(test-case "drift: planting under every formerly-broad prefix fails closed"
+  (for ([p '("scripts/z.bnix" "tests/t.bnix" "docs/fixtures/x.bnix")])
+    (with-fixture-repo
+     (lambda (repo)
+       (std-firn-tree! repo)
+       (write-file! (build-path repo p) "{}\n")
+       (check-exn exn:fail:drift?
+                  (lambda () (derive-firn repo standard-classified))
+                  (format "planted ~a must trip drift, not vanish" p))))))
+
+(test-case "drift: a new negative fixture must be classified (no silent add)"
+  (with-fixture-repo
+   (lambda (repo)
+     (std-firn-tree! repo)
+     (write-file! (build-path repo "tests" "fixtures" "extra.bnix") "{}\n")
+     (check-exn exn:fail:drift? (lambda () (derive-firn repo standard-classified))))))
+
+(test-case "resolution: classifying a planted file restores green membership"
+  (with-fixture-repo
+   (lambda (repo)
+     (std-firn-tree! repo)
+     (write-file! (build-path repo "tests" "fixtures" "extra.bnix") "{}\n")
+     (define r (derive-firn repo
+                            (cons '(exclude (relpath "tests/fixtures/extra.bnix")
+                                            (class negative-fixture))
+                                  standard-classified)))
+     (check-equal? (consumer-result-count r) 2)
+     (check-true (and (assoc "tests/fixtures/extra.bnix" (consumer-result-excluded r)) #t)))))
+
+(test-case "drift: a stale classification (file gone) fails closed"
+  (with-fixture-repo
+   (lambda (repo)
+     (std-firn-tree! repo)
+     (check-exn exn:fail:drift?
+                (lambda () (derive-firn repo
+                                        (cons '(exclude (relpath "tests/fixtures/ghost.bnix")
+                                                        (class negative-fixture))
+                                              standard-classified)))))))
+
+(test-case "drift: negative-fixture class on a firn-validated file fails closed"
+  (with-fixture-repo
+   (lambda (repo)
+     (std-firn-tree! repo)
+     ;; enabled-tags is validated by firn-validate -> it is not a negative fixture
+     (check-exn exn:fail:drift?
+                (lambda () (derive-firn repo
+                  '((exclude (relpath "tests/fixtures/bad.bnix")   (class negative-fixture))
+                    (exclude (relpath "hosts/x/enabled-tags.bnix") (class negative-fixture))
+                    (exclude (relpath "docs/fixtures/ex.bnix")     (class doc-fixture)))))))))
+
+(test-case "drift: resolver-input class on a tests/fixtures file fails closed"
+  (with-fixture-repo
+   (lambda (repo)
+     (std-firn-tree! repo)
+     (check-exn exn:fail:drift?
+                (lambda () (derive-firn repo
+                  '((exclude (relpath "tests/fixtures/bad.bnix")   (class resolver-input))
+                    (exclude (relpath "hosts/x/enabled-tags.bnix") (class resolver-input))
+                    (exclude (relpath "docs/fixtures/ex.bnix")     (class doc-fixture)))))))))
+
+(test-case "drift: firn-validate shape change fails closed"
+  (with-fixture-repo
+   (lambda (repo)
+     (std-firn-tree! repo)
+     (write-file! (build-path repo "scripts" "firn-validate") "find . -name '*.bnix'\n")
+     (check-exn exn:fail:drift? (lambda () (derive-firn repo standard-classified))))))
 
 ;; ============================================================================
 ;; RED — enumerator shape drift fails closed
@@ -148,21 +287,13 @@
                                                          (template "src/fram/{}.bclj")
                                                          (shape-markers ("for m in")))))))))))
 
-(test-case "find-exclude drift: find line changed trips the guard"
+(test-case "find-exclude drift: firn-build find/skip shape changed trips the guard"
   (with-fixture-repo
    (lambda (repo)
+     (std-firn-tree! repo)
      (write-file! (build-path repo "scripts" "firn-build")
-                  "find . -name '*.nix'\n") ; the recorded find marker is gone
-     (check-exn exn:fail:drift?
-                (lambda () (derive-consumer
-                            (consumer-spec "firn-drift" repo
-                                           '((enumerator (kind find-exclude)
-                                                         (source "scripts/firn-build")
-                                                         (ext ".bnix")
-                                                         (find-not-paths ("result"))
-                                                         (exclude-relpath-prefixes ())
-                                                         (exclude-basenames ())
-                                                         (shape-markers ("-name '*.bnix' -not -path './result*'")))))))))))
+                  "find . -name '*.nix'\n") ; the recorded find + skip markers are gone
+     (check-exn exn:fail:drift? (lambda () (derive-firn repo standard-classified))))))
 
 (test-case "glob require-absent drift: a manifest appears trips the guard"
   (with-fixture-repo
@@ -220,3 +351,23 @@
                      (sort (remove-duplicates (consumer-result-relpaths r)) string<?)))]
     [else
      (printf "~a\n" "(skipping live derivation: not all consumer repos checked out)")]))
+
+(test-case "live nixos-config: every excluded .bnix is classified and disjoint from membership"
+  (define nc (findf (lambda (c) (string=? (consumer-name c) "nixos-config"))
+                    (load-consumers)))
+  (cond
+    [(directory-exists? (consumer-repo-path nc))
+     ;; derive-consumer fails closed on any unclassified .bnix, so reaching here
+     ;; already proves the live tree has no silent-membership gap.
+     (define r (derive-consumer nc))
+     (check-true (pair? (consumer-result-excluded r))
+                 "nixos-config carries explicit classified excludes")
+     (for ([p (in-list (consumer-result-excluded r))])
+       (check-true (and (memq (cdr p) '(negative-fixture resolver-input doc-fixture)) #t)
+                   (format "~a has a known exclude class" (car p))))
+     ;; membership and excludes never overlap.
+     (for ([p (in-list (consumer-result-excluded r))])
+       (check-false (and (member (car p) (consumer-result-relpaths r)) #t)
+                    (format "~a is excluded, not in membership" (car p))))]
+    [else
+     (printf "~a\n" "(skipping live nixos-config: repo not checked out)")]))

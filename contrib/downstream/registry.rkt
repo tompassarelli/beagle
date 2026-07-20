@@ -116,13 +116,16 @@
   (path->string (find-relative-path (path->directory-path repo) full)))
 
 ;; --- enumerator kinds --------------------------------------------------------
-;; Each returns a sorted list of repo-relative source paths (as strings), and
-;; raises exn:fail:drift when the enumerator's shape no longer matches.
+;; Each returns (values sorted-relpaths excluded-alist): a sorted list of
+;; repo-relative membership paths plus an alist of (relpath . class) for
+;; accountable non-membership files (only find-exclude classifies excludes;
+;; the others return '()). Raises exn:fail:drift when the enumerator's shape
+;; no longer matches or accounting fails closed.
 (define (derive-enumerator repo enum)
   (case (spec-ref enum 'kind)
-    [(glob)          (derive-glob repo enum)]
-    [(bash-array)    (derive-bash-array repo enum)]
-    [(bash-for-list) (derive-bash-for-list repo enum)]
+    [(glob)          (values (derive-glob repo enum) '())]
+    [(bash-array)    (values (derive-bash-array repo enum) '())]
+    [(bash-for-list) (values (derive-bash-for-list repo enum) '())]
     [(find-exclude)  (derive-find-exclude repo enum)]
     [else (error 'derive-enumerator "unknown kind ~a" (spec-ref enum 'kind))]))
 
@@ -203,28 +206,100 @@
      rel)
    string<?))
 
+(define (rel-basename rel) (last (string-split rel "/")))
+
+;; find-exclude derives firn-build's EMIT membership (discovery minus the
+;; firn-build skip arms) and reconciles the excluded remainder against an
+;; explicit classification, failing closed on any silent membership gap.
 (define (derive-find-exclude repo enum)
-  (define source (spec-ref enum 'source))
-  (assert-shape-markers (read-enumerator-source repo source)
+  ;; 1. firn-build's emit-discovery contract — source of the membership rule.
+  (define build-source (spec-ref enum 'source))
+  (assert-shape-markers (read-enumerator-source repo build-source)
                         (spec-ref enum 'shape-markers '())
-                        (format "find-exclude ~a" source))
+                        (format "find-exclude ~a" build-source))
+  ;; 2. firn-validate's broader discovery contract — the authority that
+  ;;    separates intentionally-broken fixtures from real-but-non-emitted
+  ;;    sources. Its presence + shape is asserted so a change to firn's
+  ;;    validation surface trips drift too.
+  (define validate-source (spec-ref enum 'validate-source #f))
+  (when validate-source
+    (assert-shape-markers (read-enumerator-source repo validate-source)
+                          (spec-ref enum 'validate-shape-markers '())
+                          (format "find-exclude ~a" validate-source)))
   (define ext (spec-ref enum 'ext))
   (define not-paths (spec-ref enum 'find-not-paths '()))
   (define excl-prefixes (spec-ref enum 'exclude-relpath-prefixes '()))
   (define excl-basenames (spec-ref enum 'exclude-basenames '()))
-  (define files (walk-ext repo ext #:recursive? #t #:prune-extra not-paths))
-  (sort
-   (for/list ([f (in-list files)]
-              #:unless (let ([rel (relpath repo f)]
-                             [base (path->string (file-name-from-path f))])
-                         (or (ormap (lambda (p) (string-prefix? rel (string-append p "/"))) not-paths)
-                             (ormap (lambda (p) (string-prefix? rel p)) excl-prefixes)
-                             (member base excl-basenames))))
-     (relpath repo f))
-   string<?))
+  (define neg-prefixes (spec-ref enum 'validate-negative-prefixes '()))
+  ;; classified-excludes: ((relpath R) (class C)) specs -> alist relpath->class.
+  (define classified-alist
+    (for/list ([entry (in-list (spec-ref enum 'classified-excludes '()))])
+      (cons (spec-ref entry 'relpath) (spec-ref entry 'class))))
+  ;; discovery: every .bnix under the repo, pruning only VCS/build noise. This
+  ;; is firn-validate's discovery universe (a superset of firn-build's emit set).
+  (define discovered
+    (sort (map (lambda (f) (relpath repo f))
+               (walk-ext repo ext #:recursive? #t #:prune-extra not-paths))
+          string<?))
+  ;; firn-build's emit membership: discovery minus the firn-build skip arms.
+  (define (firn-build-excludes? rel)
+    (or (ormap (lambda (p) (string-prefix? rel p)) excl-prefixes)
+        (member (rel-basename rel) excl-basenames)))
+  (define membership (filter (lambda (r) (not (firn-build-excludes? r))) discovered))
+  (define excluded   (filter firn-build-excludes? discovered))
+  ;; --- FAIL-CLOSED ACCOUNTING ------------------------------------------------
+  ;; (a) Every firn-build-excluded .bnix must be explicitly classified. A good
+  ;;     source dropped under an excluded prefix, or a new negative fixture,
+  ;;     therefore trips a pointed drift instead of silently leaving membership.
+  (define classified-set (map car classified-alist))
+  (for ([rel (in-list excluded)])
+    (unless (member rel classified-set)
+      (drift-error (string-append
+                    "firn-build excludes ~s from its emit membership but the registry "
+                    "has not classified it — add a classified-excludes entry "
+                    "(class negative-fixture | resolver-input | doc-fixture) or make it "
+                    "a real firn module (silent-membership-gap guard)")
+                   rel)))
+  ;; (b) No stale classification: every classified relpath must still be a
+  ;;     firn-build-excluded discovered file.
+  (for ([entry (in-list classified-alist)])
+    (define rel (car entry))
+    (unless (member rel excluded)
+      (drift-error (string-append
+                    "classified exclude ~s is stale — it is not a firn-build-excluded "
+                    "discovered .bnix (file removed, moved, or now in membership); "
+                    "remove it from the registry")
+                   rel)))
+  ;; (c) firn-validate reconciliation of each class:
+  ;;     negative-fixture      <=> firn-validate ALSO excludes it (under a
+  ;;                               validate-negative-prefix);
+  ;;     resolver-input/doc-fixture <=> firn-validate validates it (NOT under one).
+  (define (under-neg? rel) (ormap (lambda (p) (string-prefix? rel p)) neg-prefixes))
+  (for ([entry (in-list classified-alist)])
+    (define rel (car entry))
+    (define cls (cdr entry))
+    (case cls
+      [(negative-fixture)
+       (unless (under-neg? rel)
+         (drift-error (string-append
+                       "~s is classified negative-fixture but firn-validate does not "
+                       "exclude it (not under ~a); reclassify as resolver-input/doc-fixture")
+                      rel neg-prefixes))]
+      [(resolver-input doc-fixture)
+       (when (under-neg? rel)
+         (drift-error (string-append
+                       "~s is classified ~a but firn-validate excludes it as a fixture; "
+                       "reclassify as negative-fixture")
+                      rel cls))]
+      [else (drift-error "unknown exclude class ~a for ~s (expected negative-fixture | resolver-input | doc-fixture)"
+                         cls rel)]))
+  (values membership (sort classified-alist string<? #:key car)))
 
 ;; --- consumer-level derivation -----------------------------------------------
-(struct consumer-result (name repo rev target relpaths count sha256 enumerators)
+;; `excluded` is an alist of (relpath . class-symbol): the accountable
+;; non-membership files a find-exclude enumerator classified. Empty for every
+;; other enumerator kind.
+(struct consumer-result (name repo rev target relpaths count sha256 enumerators excluded)
   #:transparent)
 
 ;; enumerators here is a list of (source . count) provenance pairs.
@@ -234,12 +309,14 @@
     (drift-error "consumer ~a: repo ~a not found" (consumer-name c) repo))
   (define enums (spec-ref c 'enumerators))
   (define provenance '())
+  (define excluded '())
   (define all
     (append*
      (for/list ([enum (in-list enums)])
-       (define paths (derive-enumerator repo enum))
+       (define-values (paths exc) (derive-enumerator repo enum))
        (set! provenance
              (cons (cons (spec-ref enum 'source #f) (length paths)) provenance))
+       (set! excluded (append excluded exc))
        paths)))
   (define relpaths (sort (remove-duplicates all) string<?))
   (consumer-result
@@ -250,7 +327,8 @@
    relpaths
    (length relpaths)
    (sha256-of-string (string-join relpaths "\n"))
-   (reverse provenance)))
+   (reverse provenance)
+   (sort excluded string<? #:key car)))
 
 (define (load-consumers [path (registry-path)])
   (call-with-input-file path read))
@@ -270,7 +348,10 @@
                   'enumerators
                   (for/list ([p (in-list (consumer-result-enumerators r))])
                     (hasheq 'source (or (car p) 'null) 'count (cdr p)))
-                  'relpaths (consumer-result-relpaths r))))
+                  'relpaths (consumer-result-relpaths r)
+                  'excluded
+                  (for/list ([p (in-list (consumer-result-excluded r))])
+                    (hasheq 'relpath (car p) 'class (symbol->string (cdr p)))))))
 
 (define (list->jsexpr results)
   (hasheq 'schema "beagle-downstream-list/1"
