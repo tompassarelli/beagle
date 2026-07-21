@@ -183,7 +183,7 @@ jobs:
       - name: Authoring-as-facts — upsert-form + set-body verbs
         run: FRAM_OUT="$GITHUB_WORKSPACE/.fram/out" CHARTROOM="$GITHUB_WORKSPACE/.fram/chartroom" bin/test/code-as-facts/authoring-verbs.sh
 
-      # One engine, both pillars, on REAL code: the blast radius (REASON) of fram.cnf/value!
+      # One engine, both pillars, on REAL code: the blast radius (REASON) of fram.store/value!
       # predicts the cross-module reach of renaming it (REPAIR), and the repaired tree
       # recompiles — both derived from the same converged refers_to resolver.
       - name: Engine demo — reason + repair consistent on real fram/src

@@ -2,7 +2,7 @@
 # Engine demo — ONE engine answers REASON and REPAIR consistently, on REAL code.
 #
 # The agent-facing loop, end-to-end on fram/src (real multi-module beagle):
-#   NL: "what breaks if I change fram.cnf/value! ?"  -> REASON: blast radius (call graph)
+#   NL: "what breaks if I change fram.store/value! ?"  -> REASON: blast radius (call graph)
 #   NL: "rename value! to intern!"                   -> REPAIR: scope-correct cross-module rename
 # Both answers come from the SAME converged refers_to resolver (chartroom resolve.clj):
 # reasoning (read) derives the blast radius; repair (write) performs the cascade. The payoff
@@ -29,30 +29,30 @@ echo "================ engine demo — one engine: REASON + REPAIR on real code 
 chk() { if eval "$2"; then echo "  PASS  $1"; else echo "  FAIL  $1"; fail=1; fi; }
 W="$(mktemp -d)"; trap 'rm -rf "$W" $RESOLVE_OUT/resolved-*.edn' EXIT
 
-# ---- REASON: blast radius of fram.cnf/value! (the call graph, cross-module) -----------
-echo '--- NL: "what breaks if I change fram.cnf/value! ?"  -> REASON (blast radius) ---'
+# ---- REASON: blast radius of fram.store/value! (the call graph, cross-module) ---------
+echo '--- NL: "what breaks if I change fram.store/value! ?"  -> REASON (blast radius) ---'
 BLAST_MODS="$("$ROOT/bin/beagle-callgraph" "$SRC" 2>/dev/null | python3 -c "
 import json,sys
 d=json.load(sys.stdin); nm={x['key']:(x['name'],x['module']) for x in d['defns']}
-vk=[k for k,(n,m) in nm.items() if n=='value!' and m=='fram.cnf']
+vk=[k for k,(n,m) in nm.items() if n=='value!' and m=='fram.store']
 mods=set(); defs=set()
 for k in vk:
     for b in d['blast'].get(k,[]):
         n,m=nm[b]; mods.add(m); defs.add(n)
 print('MODS '+' '.join(sorted(mods)))
-print('  reasoning: changing fram.cnf/value! impacts %d function(s) across modules %s:' % (len(defs), sorted(mods)), file=sys.stderr)
+print('  reasoning: changing fram.store/value! impacts %d function(s) across modules %s:' % (len(defs), sorted(mods)), file=sys.stderr)
 print('   ', sorted(defs), file=sys.stderr)
 ")"
 echo "$BLAST_MODS" | grep -v '^MODS' >&2 || true
 MODS="$(grep '^MODS' <<<"$BLAST_MODS" | sed 's/^MODS //')"
-chk "blast radius is non-empty AND cross-module (impacts a module other than fram.cnf)" \
-    "[ -n \"\$MODS\" ] && grep -qv 'fram.cnf' <<<\"\$(tr ' ' '\n' <<<\"\$MODS\")\""
+chk "blast radius is non-empty AND cross-module (impacts a module other than fram.store)" \
+    "[ -n \"\$MODS\" ] && grep -qv 'fram.store' <<<\"\$(tr ' ' '\n' <<<\"\$MODS\")\""
 
 # ---- REPAIR: rename value! -> intern! across fram/src (the cascade) -------------------
-echo '--- NL: "rename fram.cnf/value! to intern!"  -> REPAIR (scope-correct cross-module rename) ---'
+echo '--- NL: "rename fram.store/value! to intern!"  -> REPAIR (scope-correct cross-module rename) ---'
 E="$W/e"; mkdir -p "$E" "$W/regen"; edns=()
 while IFS= read -r f; do b="$(basename "$f")"; racket "$RT" --emit-edn "$f" 2>/dev/null > "$E/$b.edn"; edns+=("$E/$b.edn"); done < <(find "$SRC" -name '*.bclj' | sort)
-bb -cp "$FRAM_OUT" "$RES" rename value! intern! cnf "${edns[@]}" 2>/dev/null
+bb -cp "$FRAM_OUT" "$RES" rename value! intern! store "${edns[@]}" 2>/dev/null
 while IFS= read -r f; do b="$(basename "$f")"; racket "$RT" --render "$RESOLVE_OUT/resolved-$b.edn" 2>/dev/null > "$W/regen/$b"; done < <(find "$SRC" -name '*.bclj' | sort)
 chk "repair recompiles (the renamed tree builds clean)" \
     "\"$ROOT/bin/beagle-build-all\" '$W/regen' --out '$W/o' 2>&1 | grep -q '0 error'"
@@ -66,7 +66,7 @@ TOUCHED="$(grep -rl '/intern!' "$W/regen/" 2>/dev/null | while read -r f; do gre
 echo "    reason → impacted modules: [$MODS]"
 echo "    repair → rewrote modules:  [$TOUCHED]"
 miss=0
-for m in $TOUCHED; do grep -qw "$m" <<<"$MODS" || { [ "$m" = "fram.cnf" ] || miss=1; }; done
+for m in $TOUCHED; do grep -qw "$m" <<<"$MODS" || { [ "$m" = "fram.store" ] || miss=1; }; done
 chk "repair's cross-module reach ⊆ reasoning's blast radius (one engine, consistent)" "[ $miss -eq 0 ]"
 
 echo
