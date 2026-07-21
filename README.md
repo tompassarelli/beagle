@@ -255,8 +255,7 @@ Deeper dev tools stay as `bin/beagle-*` (blame, specfix, trace, cascade).
 
 - `beagle-lib/private/parse.rkt` — surface form set; the source of truth.
 - `beagle-lib/private/check.rkt` — type checker.
-- `beagle-lib/private/emit-{clj,js,nix,odin}.rkt` — live emitters;
-  `beagle-lib/private/dormant/` holds the parked ones.
+- `beagle-lib/private/emit-{clj,js,nix,odin}.rkt` — the live target emitters.
 - `beagle-lib/private/nixos-schema.rkt` — the typed NixOS-option environment.
 - `beagle-lib/private/diagnostic-kind.rkt` — the `cause-class?` taxonomy.
 - `beagle-test/` — tiered test suite; `beagle-test/tiers.rktd` is the
