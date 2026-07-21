@@ -3,6 +3,7 @@ name = "nix-parse-json"
 version = "0.1.0"
 edition = "2021"
 description = "Lossless Nix → S-expression parser for beagle-import-nix"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 rnix = "0.11"

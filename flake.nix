@@ -163,7 +163,7 @@
           meta = {
             description = "Agent-native typed authoring layer that compiles to Clojure / ClojureScript / JavaScript / Nix / Odin";
             homepage = "https://github.com/Autonymy/beagle";
-            license = pkgs.lib.licenses.mit;
+            license = [ pkgs.lib.licenses.mit pkgs.lib.licenses.asl20 ];
             platforms = pkgs.lib.platforms.unix;
             mainProgram = "beagle";
           };

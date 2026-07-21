@@ -70,6 +70,7 @@
              "expected-errors.rkt"      ; inline #guard_msgs-style diagnostics
 
              "lint.rkt"
+             "license-metadata.rkt"       ; root license files and package metadata stay in sync
              "macro-hygiene.rkt"
              "parse.rkt"
              "purity.rkt"               ; `!`-purity enforcement (Phase 6, dark by default)

@@ -5,7 +5,7 @@
 **Typed Clojure that compiles to idiomatic Clojure, JavaScript, Nix, and Odin.**
 One AST, many back-ends — never a lowest-common-denominator transpile.
 
-[![license](https://img.shields.io/badge/license-Apache_2.0-blue.svg)](LICENSE)
+[![license](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-blue.svg)](LICENSE)
 [![nix](https://img.shields.io/badge/nix-flake-5277C3.svg)](flake.nix)
 [![status](https://img.shields.io/badge/status-pre--1.0-orange.svg)](#what-it-isnt)
 
@@ -283,4 +283,6 @@ See [`CLAUDE.md`](CLAUDE.md) for the full rule set.
 
 ## License
 
-Apache 2.0. See [`LICENSE`](LICENSE).
+Licensed under either the [MIT License](LICENSE-MIT) or the
+[Apache License, Version 2.0](LICENSE-APACHE), at your option. See
+[`LICENSE`](LICENSE) for the chooser.
