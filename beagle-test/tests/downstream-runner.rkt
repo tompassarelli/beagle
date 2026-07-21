@@ -177,10 +177,11 @@
   (init-repo! fram-repo)
   (write-file! (build-path north-repo "src" "north" "main.bclj")
                "#lang beagle/clj\n(ns north.main)\n(require fram.thing :as t)\n(defn go [] :- Int (t/double 21))\n")
-  (make-directory* (build-path north-repo "web-bjs" "src"))  ; stage links it
   (init-repo! north-repo)
-  ;; north spec must be named "north" to trigger staging; single glob enumerator
-  ;; over src/north keeps membership to the .bclj (web-bjs stays empty here).
+  (check-false (directory-exists? (build-path north-repo "web-bjs"))
+               "CLI/MCP-only North fixture has no retired web source tree")
+  ;; north spec must be named "north" to trigger staging; its current source
+  ;; contract is exclusively src/north .bclj modules.
   (define north-spec
     `(consumer (name "north") (repo-env "NORTH_FIXREPO")
                (repo-default ,(path->string north-repo)) (target "clj")

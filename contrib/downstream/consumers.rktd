@@ -66,25 +66,14 @@
   (name "north")
   (repo-env "NORTH_REPO")
   (repo-default "~/code/north")
-  (target "clj+js")
+  (target "clj")
   (enumerators
    ((enumerator
      (kind bash-for-list)
      (source "build.sh")
      (loop-var "m")
      (template "src/north/{}.bclj")
-     (shape-markers ("for m in")))
-    (enumerator
-     (kind glob)
-     (source #f)
-     (root "web-bjs/src")
-     (ext ".bjs")
-     (recursive #f)
-     (skip-basenames ())
-     (skip-suffixes ())
-     (skip-prefixes ())
-     (require-absent "web-bjs/build.sh")
-     (shape-markers ())))))
+     (shape-markers ("for m in"))))))
 
  (consumer
   (name "fram")

@@ -348,7 +348,14 @@
                      (sha256 (string-join (consumer-result-relpaths r) "\n")))
        ;; Sorted + unique.
        (check-equal? (consumer-result-relpaths r)
-                     (sort (remove-duplicates (consumer-result-relpaths r)) string<?)))]
+                     (sort (remove-duplicates (consumer-result-relpaths r)) string<?)))
+     (define north-result
+       (findf (lambda (r) (string=? (consumer-result-name r) "north")) run1))
+     (check-true
+      (and north-result
+           (andmap (lambda (path) (string-prefix? path "src/north/"))
+                   (consumer-result-relpaths north-result)))
+      "live North membership is exclusively its current src/north build contract")]
     [else
      (printf "~a\n" "(skipping live derivation: not all consumer repos checked out)")]))
 

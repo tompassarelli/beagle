@@ -94,13 +94,10 @@
     [(string=? name "north")
      (define base (build-path scratch "stage" "north"))
      (make-directory* (build-path base "src"))
-     (make-directory* (build-path base "web-bjs"))
      (make-file-or-directory-link (build-path repo "src" "north")
                                   (build-path base "src" "north"))
      (make-file-or-directory-link (build-path (fram-repo-path consumers) "src" "fram")
                                   (build-path base "src" "fram"))
-     (make-file-or-directory-link (build-path repo "web-bjs" "src")
-                                  (build-path base "web-bjs" "src"))
      (lambda (rel) (build-path base rel))]
     [else #f]))
 
