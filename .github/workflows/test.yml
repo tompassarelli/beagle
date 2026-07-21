@@ -159,7 +159,8 @@ jobs:
       # Scope-correct rename — the COMPLETE engine (chartroom's resolve.clj, refers_to),
       # ONE gate across every scope hazard: mod_a/helper renamed but mod_b's untouched
       # (collision); a shadowing local untouched (shadowing); every cross-module reader
-      # renamed (cross-file, fram.cnf/value! -> intern! over fram/src); a collision onto
+      # renamed (cross-file, fram.store/value! -> intern! over fram/src); the retired
+      # fram.cnf module is rejected instead of silently succeeding with zero edits; a collision onto
       # an existing binding refused; each renamed tree recompiles. Repair as a graph
       # operation, O(1) (edits the def; references follow refers_to).
       - name: Scope-correct rename (collision + shadowing + cross-module) gate

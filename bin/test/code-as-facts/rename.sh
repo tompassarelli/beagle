@@ -47,12 +47,15 @@ chk "def + ref renamed to add-one"   "grep -q 'defn add-one' <<<\"\$sm\" && grep
 chk "shadowing param + use UNTOUCHED" "grep -qE 'other \[helper' <<<\"\$sm\" && grep -qF '(* helper 2)' <<<\"\$sm\""
 
 # --- 3. cross-module: rename a def + all its qualified readers across files ------
-echo "--- 3. cross-module (fram.cnf/value! -> intern! across fram/src, recompiles) ---"
+echo "--- 3. cross-module (fram.store/value! -> intern! across fram/src, recompiles) ---"
 E="$W/e"; mkdir -p "$E" "$W/r/fram"; edns=()
 while IFS= read -r f; do b="$(basename "$f")"; racket "$RT" --emit-edn "$f" 2>/dev/null > "$E/$b.edn"; edns+=("$E/$b.edn"); done < <(find "$FRAM_SRC" -name '*.bclj' | sort)
-bb -cp "$FRAM_OUT" "$RES" rename value! intern! cnf "${edns[@]}" 2>/dev/null
+if bb -cp "$FRAM_OUT" "$RES" rename value! stale-intern! cnf "${edns[@]}" >/dev/null 2>&1; then
+  echo "  FAIL  retired fram.cnf module unexpectedly remained renameable"; fail=1
+else echo "  PASS  retired fram.cnf module is rejected (no silent stale-name success)"; fi
+bb -cp "$FRAM_OUT" "$RES" rename value! intern! store "${edns[@]}" 2>/dev/null
 while IFS= read -r f; do b="$(basename "$f")"; racket "$RT" --render "$RESOLVE_OUT/resolved-$b.edn" 2>/dev/null > "$W/r/fram/$b"; done < <(find "$FRAM_SRC" -name '*.bclj' | sort)
-chk "cnf def renamed (intern!)"               "grep -q 'defn intern!' '$W/r/fram/cnf.bclj'"
+chk "store def renamed (intern!)"             "grep -q 'defn intern!' '$W/r/fram/store.bclj'"
 chk "NO '/value!' cross-module ref left"      "! grep -rqh '/value!' '$W/r/fram/'"
 chk "'/intern!' cross-module refs present"    "grep -rqh '/intern!' '$W/r/fram/'"
 chk "value-id UNTOUCHED (diff symbol)"        "grep -rqh 'value-id' '$W/r/fram/'"
@@ -158,12 +161,12 @@ printf '#lang beagle/clj\n(ns qq)\n(def base :- Int 1)\n(defmacro add-base [n] (
 racket "$RT" --emit-edn "$W/qq.bclj" 2>/dev/null > "$W/qq.edn"
 bb -cp "$FRAM_OUT" "$RES" rename base base2 qq "$W/qq.edn" 2>/dev/null
 qq="$(racket "$RT" --render $RESOLVE_OUT/resolved-qq.bclj.edn 2>/dev/null)"
-chk "quasiquote template ref renamed (+ base2 ..)" "grep -qF '(+ base2 (unquote n))' <<<\"\$qq\""
+chk "quasiquote template ref renamed (+ base2 ..)" "grep -qF '\`(+ base2 ~n)' <<<\"\$qq\""
 # 8b. CONTROL: a let-local inside a template must NOT rename (hygiene)
 printf '#lang beagle/clj\n(ns qh)\n(def base :- Int 1)\n(defmacro mk [x] (quasiquote (let [tmp (unquote x)] (+ tmp base))))\n' > "$W/qh.bclj"
 racket "$RT" --emit-edn "$W/qh.bclj" 2>/dev/null > "$W/qh.edn"
 bb -cp "$FRAM_OUT" "$RES" rename base base2 qh "$W/qh.edn" 2>/dev/null
-chk "template local 'tmp' untouched, base->base2" "grep -qF '(let [tmp (unquote x)] (+ tmp base2))' <<<\"\$(racket \"$RT\" --render $RESOLVE_OUT/resolved-qh.bclj.edn 2>/dev/null)\""
+chk "template local 'tmp' untouched, base->base2" "grep -qF '\`(let [tmp ~x] (+ tmp base2))' <<<\"\$(racket \"$RT\" --render $RESOLVE_OUT/resolved-qh.bclj.edn 2>/dev/null)\""
 # 8c. bare (require m :refer [x]) cross-module ref renames (parse-require handles bare :refer)
 printf '#lang beagle/clj\n(ns rlib)\n(defn red [x :- Int] :- Int x)\n' > "$W/rlib.bclj"
 printf '#lang beagle/clj\n(ns rcon)\n(require rlib :refer [red])\n(defn use [y :- Int] :- Int (red y))\n' > "$W/rcon.bclj"
@@ -204,7 +207,7 @@ echo "--- 10. unquote-inside-quote + nullary defunion variant ---"
 printf '#lang beagle/clj\n(ns qn)\n(defn red [x :- Int] :- Int x)\n(defmacro mk [] (quasiquote (quote (unquote (red 1)))))\n' > "$W/qn.bclj"
 racket "$RT" --emit-edn "$W/qn.bclj" 2>/dev/null > "$W/qn.edn"
 bb -cp "$FRAM_OUT" "$RES" rename red crimson qn "$W/qn.edn" 2>/dev/null
-chk "unquote inside quote escapes + renames" "grep -qF '(unquote (crimson 1))' <<<\"\$(racket \"$RT\" --render $RESOLVE_OUT/resolved-qn.bclj.edn 2>/dev/null)\""
+chk "unquote inside quote escapes + renames" "grep -qF '\`(quote ~(crimson 1))' <<<\"\$(racket \"$RT\" --render $RESOLVE_OUT/resolved-qn.bclj.edn 2>/dev/null)\""
 # 10b. a nullary (bare-symbol) defunion variant is renameable
 printf '#lang beagle/clj\n(ns nv)\n(defunion Maybe (Some [v :- Int]) None)\n(defn f [x :- Int] :- Int x)\n' > "$W/nv.bclj"
 racket "$RT" --emit-edn "$W/nv.bclj" 2>/dev/null > "$W/nv.edn"
