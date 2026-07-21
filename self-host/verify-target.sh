@@ -126,6 +126,21 @@ if [ "$have_oracle" -eq 1 ]; then
       else
         bad "$name fixture->$TARGET byte-parity — diff $oracle $LAB/$name-self.$TARGET"
       fi
+
+      # Racket AST JSON -> self-host emitter is a distinct production bridge.
+      # A full self-host parse can agree while ast-json silently drops a node.
+      bridge_ast="$LAB/$name-racket-ast.json"
+      bridge_out="$LAB/$name-racket-ast-self.$TARGET"
+      if bin/beagle-ast "$tmp" > "$bridge_ast" 2>"$bridge_ast.err" \
+          && sh_main emit-from-ast --target "$TARGET" < "$bridge_ast" > "$bridge_out" 2>"$bridge_out.err"; then
+        if diff <(norm "$oracle") <(norm "$bridge_out") >/dev/null 2>&1; then
+          ok "$name Racket-AST bridge byte-parity"
+        else
+          bad "$name Racket-AST bridge byte-parity — diff $oracle $bridge_out"
+        fi
+      else
+        bad "$name Racket-AST bridge failed — inspect $bridge_ast.err / $bridge_out.err"
+      fi
     else
       skip "$name (oracle cannot emit $TARGET — clj-only forms)"
     fi

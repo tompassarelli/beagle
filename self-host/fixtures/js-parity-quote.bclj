@@ -1,0 +1,12 @@
+#lang beagle/clj
+(ns selfhost.fixtures.js-parity-quote)
+
+(def suffix :- String "!")
+
+(js/quote
+  (function render (input_value)
+    (const nested (object total_str input_value delete 1 ready? true))
+    (if (.ready? nested)
+      (return (=> (x) (tpl "value:" x ~suffix)))
+      else
+      (return null))))

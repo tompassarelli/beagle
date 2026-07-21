@@ -57,6 +57,21 @@
       (program->json prog))
     (lambda () (delete-file tmp))))
 
+(define (parse+check-json/js src-string)
+  (define tmp (make-temporary-file "beagle-ast-json-js-test-~a.bjs"))
+  (dynamic-wind
+    void
+    (lambda ()
+      (call-with-output-file tmp #:exists 'truncate
+        (lambda (out)
+          (display "#lang beagle/js\n" out)
+          (display src-string out)))
+      (define forms (read-beagle-syntax tmp))
+      (define prog (parse-program forms #:source-path (path->string tmp)))
+      (type-check! prog)
+      (program->json prog))
+    (lambda () (delete-file tmp))))
+
 (define (first-let-binding json)
   ;; First binding of the first let node in the first defn's body.
   (define defn (car (hash-ref json 'forms)))
@@ -112,6 +127,28 @@
      (type-check! prog)
      (define json-str (program->json-string prog))
      (check-true (string? json-str))
-     (check-true (> (string-length json-str) 0)))))
+     (check-true (> (string-length json-str) 0)))
+
+   (test-case "js/quote serializes complete nested wire shape and source"
+     (define json
+       (parse+check-json/js
+        (string-append
+         "(ns t)\n"
+         "(js/quote (function render (input_value) "
+         "(const payload (object total_str input_value delete 1 ready? true)) "
+         "(return (.ready? payload))))")))
+     (define quote-node (car (hash-ref json 'forms)))
+     (define body (hash-ref quote-node 'body))
+     (check-equal? (hash-ref quote-node 'node) "js-quote")
+     (check-equal? (hash-ref body 'jsk) "function")
+     (check-equal? (hash-ref body 'params) '("input_value"))
+     (check-equal? (hash-ref (hash-ref body 'body) 'jsk) "block")
+     (check-true (exact-positive-integer? (hash-ref (hash-ref quote-node 'source) 'line))))
+
+   (test-case "malformed js/quote remains a pointed parse error"
+     (check-exn #rx"js/quote"
+                (lambda ()
+                  (parse+check-json/js
+                   "(ns t)\n(js/quote (const x (object dangling-key)))"))))))
 
 (run-tests tests)
