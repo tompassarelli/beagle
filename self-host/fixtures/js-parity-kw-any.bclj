@@ -1,0 +1,8 @@
+#lang beagle/clj
+(ns selfhost.fixtures.js-parity-kw-any)
+
+(defn lookup [(value :- Any)] :- Any
+  (get value :wall_s-ready?!))
+
+(defn lookup-default [(value :- Any)] :- Any
+  (get value :delete "missing"))

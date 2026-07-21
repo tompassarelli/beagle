@@ -9,6 +9,10 @@
 
 (def bound-vars (atom {}))
 
+(def type-env (atom {}))
+
+(def bc-get-used (atom false))
+
 (def inline-scope (atom {}))
 
 (def ctx (atom "stmt"))
@@ -73,6 +77,28 @@
   (reset! bound-vars (add-names saved names))
   (let [r (thunk)]
   (reset! bound-vars saved)
+  r)))
+
+(defn add-types [m entries]
+  (reduce (fn [acc entry] (let [name (get entry "name")
+   ann (get entry "ann")]
+  (if (or (nil? ann) (false? ann)) acc (assoc acc name ann)))) m entries))
+
+(defn param-type-entries [params rest-p]
+  (let [base (filterv (fn [p] (= (get p "type") "param")) params)]
+  (if (or (nil? rest-p) (false? rest-p)) base (conj base rest-p))))
+
+(defn binding-type-entries [bindings]
+  (filterv (fn [b] (string? (get b "name"))) bindings))
+
+(defn ^String with-bound-types [names entries thunk]
+  (let [saved-bound (deref bound-vars)
+   saved-types (deref type-env)]
+  (reset! bound-vars (add-names saved-bound names))
+  (reset! type-env (add-types saved-types entries))
+  (let [r (thunk)]
+  (reset! type-env saved-types)
+  (reset! bound-vars saved-bound)
   r)))
 
 (def JS-RESERVED {"break" true "case" true "catch" true "class" true "const" true "continue" true "debugger" true "default" true "delete" true "do" true "else" true "enum" true "export" true "extends" true "finally" true "for" true "function" true "if" true "implements" true "import" true "in" true "instanceof" true "interface" true "let" true "new" true "null" true "package" true "private" true "protected" true "public" true "return" true "static" true "switch" true "throw" true "try" true "typeof" true "var" true "void" true "while" true "with" true "yield" true "await" true "eval" true "arguments" true})
@@ -194,8 +220,11 @@
   (= c "{") true
   :else false))))))
 
+(defn ^Boolean poly-read-type? [t]
+  (and (not (nil? t)) (or (= (get t "kind") "var") (= (get t "kind") "union") (and (= (get t "kind") "prim") (= (get t "name") "Any")))))
+
 (defn ^String classify-rep [e]
-  "native")
+  (if (and (map? e) (= (get e "node") "ref") (poly-read-type? (get (deref type-env) (get e "name")))) "poly" "native"))
 
 (defn ^String coll-kind [node]
   (if (map? node) (let [n (get node "node")]
@@ -579,7 +608,7 @@
    body (get e "body")
    lnames (let-names-of bindings)]
   (if (shadows-inline? lnames) (emit-expr-stmt e) (let [bind-strs (emit-let-bind-strs bindings body)]
-  (with-bound lnames (fn [] (let [saved (deref inline-scope)]
+  (with-bound-types lnames (binding-type-entries bindings) (fn [] (let [saved (deref inline-scope)]
   (reset! inline-scope (add-names saved lnames))
   (let [r (str (str/join (str "\n" indent) bind-strs) "\n" indent (emit-body-stmts body indent))]
   (reset! inline-scope saved)
@@ -607,7 +636,7 @@
    body (get e "body")
    lnames (let-names-of bindings)]
   (if (shadows-inline? lnames) (str "return " (emit-expr* e) ";") (let [bind-strs (emit-let-bind-strs bindings body)]
-  (with-bound lnames (fn [] (let [saved (deref inline-scope)]
+  (with-bound-types lnames (binding-type-entries bindings) (fn [] (let [saved (deref inline-scope)]
   (reset! inline-scope (add-names saved lnames))
   (let [r (str (str/join (str "\n" indent) bind-strs) "\n" indent (emit-body-return* body indent))]
   (reset! inline-scope saved)
@@ -684,7 +713,7 @@
    body (get e "body")
    lnames (let-names-of bindings)
    binding-strs (emit-let-bind-strs bindings body)]
-  (with-bound lnames (fn [] (let [forms body
+  (with-bound-types lnames (binding-type-entries bindings) (fn [] (let [forms body
    n (count forms)
    side (subvec forms 0 (- n 1))
    side-str (str/join " " (mapv (fn [x] (emit-expr-stmt x)) side))
@@ -832,7 +861,7 @@
    async? (contains-await? body)
    prefix (if async? "async " "")
    bound (binding-names-from-params (get e "params") (get e "rest"))]
-  (with-bound bound (fn [] (if (and (= 1 (count body)) (not (stmt-inline? (nth body 0)))) (let [body-str (emit-expr* (nth body 0))]
+  (with-bound-types bound (param-type-entries (get e "params") (get e "rest")) (fn [] (if (and (= 1 (count body)) (not (stmt-inline? (nth body 0)))) (let [body-str (emit-expr* (nth body 0))]
   (if (leading-brace? body-str) (str prefix "(" params ") => (" body-str ")") (str prefix "(" params ") => " body-str))) (str prefix "(" params ") => { " (emit-body-return* body "") " }"))))))
 
 (defn ^String emit-eq-pairs [args]
@@ -910,14 +939,14 @@
    has-await (or (contains-await? (mapv (fn [b] (get b "value")) bindings)) (contains-await? body))
    lnames (let-names-of bindings)
    bind-strs (emit-let-bind-strs bindings body)]
-  (with-bound lnames (fn [] (iife (str (str/join " " bind-strs) " " (emit-body-return* body "")) has-await))))
+  (with-bound-types lnames (binding-type-entries bindings) (fn [] (iife (str (str/join " " bind-strs) " " (emit-body-return* body "")) has-await))))
   (= node "loop") (let [bindings (get e "bindings")
    body (get e "body")
    has-await (or (contains-await? (mapv (fn [b] (get b "value")) bindings)) (contains-await? body))
    lnames (let-names-of bindings)
    bind-names (mapv (fn [b] (emit-binding-target (get b "name"))) bindings)
    bind-strs (mapv (fn [b] (str "let " (emit-binding-target (get b "name")) " = " (await-async-iife (emit-expr* (get b "value"))) ";")) bindings)]
-  (with-bound lnames (fn [] (let [body-str (str/join "\n    " (mapv (fn [x] (emit-loop-stmt x bind-names)) body))
+  (with-bound-types lnames (binding-type-entries bindings) (fn [] (let [body-str (str/join "\n    " (mapv (fn [x] (emit-loop-stmt x bind-names)) body))
    prefix (if has-await "async " "")]
   (str "(" prefix "() => { " (str/join " " bind-strs) " while (true) {\n    " body-str "\n  } })()")))))
   (= node "recur") (str (str/join "; " (loop [i 0
@@ -949,7 +978,9 @@
   (= node "kw-access") (let [target-str (emit-expr* (get e "target"))
    prop (kw->prop (get e "kw"))
    dflt (get e "default")]
-  (if (absent? dflt) (str target-str "." prop) (str "(" target-str "." prop " != null ? " target-str "." prop " : " (emit-expr* dflt) ")")))
+  (if (= (classify-rep (get e "target")) "poly") (do
+  (reset! bc-get-used true)
+  (if (absent? dflt) (str "$$bc$get(" target-str ", " (js-string-lit prop) ")") (str "$$bc$get(" target-str ", " (js-string-lit prop) ", " (emit-expr* dflt) ")"))) (if (absent? dflt) (str target-str "." prop) (str "(" target-str "." prop " != null ? " target-str "." prop " : " (emit-expr* dflt) ")"))))
   (= node "threading") (emit-expr* (get e "desugared"))
   (= node "try") (let [body-str (emit-body-return* (get e "body") "  ")
    catch-strs (mapv (fn [c] (with-bound [(get c "name")] (fn [] (str "catch (" (mangle-name (get c "name")) ") {\n    " (emit-body-return* (get c "body") "    ") "\n  }")))) (get e "catches"))
@@ -979,7 +1010,7 @@
    has-await (or (> (count (filterv (fn [f] (contains-await? (get f "body"))) fns)) 0) (contains-await? body))]
   (with-bound fn-names (fn [] (let [fn-strs (mapv (fn [f] (let [fb (binding-names-from-params (get f "params") (get f "rest"))
    fa? (contains-await? (get f "body"))]
-  (with-bound fb (fn [] (str (if fa? "async " "") "function " (mangle-name (get f "name")) "(" (emit-js-params (get f "params") (get f "rest")) ") { " (emit-body-return* (get f "body") "") " }"))))) fns)]
+  (with-bound-types fb (param-type-entries (get f "params") (get f "rest")) (fn [] (str (if fa? "async " "") "function " (mangle-name (get f "name")) "(" (emit-js-params (get f "params") (get f "rest")) ") { " (emit-body-return* (get f "body") "") " }"))))) fns)]
   (iife (str (str/join " " fn-strs) " " (emit-body-return* body "")) has-await)))))
   (= node "target-case") (let [cases (vec (get e "cases"))
    js-branch (first (filterv (fn [c] (= (get c "target") "js")) cases))]
@@ -1006,7 +1037,7 @@
   (= node "defn") (let [params (emit-js-params (get f "params") (get f "rest"))
    async? (contains-await? (get f "body"))
    bound (binding-names-from-params (get f "params") (get f "rest"))]
-  (str (if async? "async " "") "function " (mangle-name (get f "name")) "(" params ") {\n  " (with-bound bound (fn [] (emit-body-return* (get f "body") "  "))) "\n}"))
+  (str (if async? "async " "") "function " (mangle-name (get f "name")) "(" params ") {\n  " (with-bound-types bound (param-type-entries (get f "params") (get f "rest")) (fn [] (emit-body-return* (get f "body") "  "))) "\n}"))
   (= node "defn-multi") (let [name (mangle-name (get f "name"))
    arities (get f "arities")
    async? (> (count (filterv (fn [a] (contains-await? (get a "body"))) arities)) 0)
@@ -1019,7 +1050,7 @@
    rest-str (if (absent? rest?) [] [(str "const " (emit-js-param rest?) " = _args.slice(" np ");")])
    allb (into dstrs rest-str)
    abound (binding-names-from-params ps rest?)
-   body (with-bound abound (fn [] (emit-body-return* (get a "body") "    ")))
+   body (with-bound-types abound (param-type-entries ps rest?) (fn [] (emit-body-return* (get a "body") "    ")))
    inner (if (= 0 (count allb)) body (str (str/join "\n    " allb) "\n    " body))]
   (if (absent? rest?) (str "  if (arguments.length === " np ") {\n    " inner "\n  }") (str "  if (arguments.length >= " np ") {\n    " inner "\n  }")))) arities)]
   (str (if async? "async " "") "function " name "(..._args) {\n" (str/join "\n" branches) "\n  throw new Error('No matching arity: ' + _args.length);\n}"))
@@ -1110,15 +1141,19 @@
   (reset! record-fields {})
   (reset! scalar-fns {})
   (reset! match-counter 0)
+  (reset! type-env {})
+  (reset! bc-get-used false)
   (reset! inline-scope {})
   (reset! ctx "stmt")
   (let [forms (get prog "forms")]
   (register-tables! forms)
   (reset! bound-vars (collect-top-names forms (get prog "requires") (get prog "externs")))
-  (let [header (emit-module-header prog)
-   body (str/join "\n\n" (mapv (fn [f] (reset! ctx "stmt")
-  (emit-form f)) forms))]
-  (str header "\n" body "\n"))))
+  (reset! type-env (add-types {} (filterv (fn [f] (or (= (get f "node") "def") (= (get f "node") "defonce"))) forms)))
+  (let [body (str/join "\n\n" (mapv (fn [f] (reset! ctx "stmt")
+  (emit-form f)) forms))
+   header (emit-module-header prog)
+   runtime-import (if (deref bc-get-used) "import { get as $$bc$get } from 'beagle/core.js';\n" "")]
+  (str header runtime-import "\n" body "\n"))))
 
 (def passes (atom []))
 
@@ -1138,6 +1173,8 @@
   (reset! scalar-fns {})
   (reset! match-counter 0)
   (reset! bound-vars {})
+  (reset! type-env {})
+  (reset! bc-get-used false)
   (reset! inline-scope {})
   (reset! ctx "stmt")
   (reset! passes [])

@@ -664,6 +664,21 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
      "console.log(f([1,null,2,null,3]).length);"
      "2")
 
+   (check-js-output "kw-access on Any uses nil-safe polymorphic lookup"
+     (list '(defrecord Payload [(wall_s-ready?! :- Int)])
+           `(defunion Event (Hit ,(br '(delete : String))))
+           '(defn lookup [(value :- Any)] :- Any (get value :wall_s-ready?!))
+           '(defn lookup-default [(value :- Any)] :- Any (get value :delete "missing")))
+     (string-append
+      "console.log(JSON.stringify(["
+      "lookup({wall_s_ready_p_bang: 4}),"
+      "lookup(Payload(5)),"
+      "lookup_default(Hit('tagged')) ,"
+      "lookup_default({}),"
+      "lookup_default(42),"
+      "lookup_default(null)]));")
+     "[4,5,\"tagged\",\"missing\",\"missing\",\"missing\"]")
+
    (check-js-output "user-defined inc shadows stdlib in map"
      (list '(defn inc [(x :- Int)] :- Int (* x 10))
            '(defn f [(xs :- (Vec Int))] :- Any (map inc xs)))
