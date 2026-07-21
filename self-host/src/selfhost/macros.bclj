@@ -9,7 +9,6 @@
 (require clojure.string :as str)
 (require selfhost.rt)
 
-(declare-extern selfhost.rt/to-json [Any -> String])
 (declare-extern selfhost.rt/eprint [String -> Nil])
 
 ;; --- constants ---------------------------------------------------------------
@@ -50,12 +49,6 @@
 (defn push-ctx [parent :- Any name :- String] :- Any
   {"macro-name" name "depth" (+ 1 (get parent "depth")) "parent" parent})
 
-(defn truncate-datum [datum :- Any] :- String
-  (let [s (selfhost.rt/to-json datum)]
-    (if (> (count s) 80)
-      (str (subs s 0 77) "...")
-      s)))
-
 (defn collect-chain-lines [ctx :- Any] :- (Vec String)
   (if (nil? ctx)
     []
@@ -71,12 +64,6 @@
       (let [top (subvec all-lines 0 4)
             bot (subvec all-lines (- n 4) n)]
         (str/join "\n" (into (conj (vec top) (str "  ... (" (- n 8) " more)")) bot))))))
-
-(def KNOWN-FORM-HEADS :- (Vec String)
-  ["def" "defn" "defrecord" "defunion" "deferror" "defscalar" "defonce" "defmulti"
-   "do" "let" "fn" "if" "cond" "when" "unless" "match" "case" "for" "doseq" "dotimes"
-   "loop" "try" "println" "prn" "defn-" "ns" "require" "import" "defmacro"
-   "declare-extern" "set!" "letfn" "when-let" "if-let" "when-some" "if-some" "condp"])
 
 ;; --- deterministic lowering temps (macros.rkt lowering-counter) ---------------
 ;; ONE counter shared between macro-hygiene renames (here) and parse's
@@ -145,9 +132,6 @@
   (if (vector? t)
     (into [h] t)
     [h t]))
-
-(defn datum-null? [d :- Any] :- Bool
-  (and (vector? d) (= (count d) 0)))
 
 (defn datum-append [a :- Any b :- Any] :- Any
   (into a b))

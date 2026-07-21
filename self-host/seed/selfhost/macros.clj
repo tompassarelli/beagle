@@ -32,10 +32,6 @@
 (defn push-ctx [parent ^String name]
   {"macro-name" name "depth" (+ 1 (get parent "depth")) "parent" parent})
 
-(defn ^String truncate-datum [datum]
-  (let [s (selfhost.rt/to-json datum)]
-  (if (> (count s) 80) (str (subs s 0 77) "...") s)))
-
 (defn collect-chain-lines [ctx]
   (if (nil? ctx) [] (into [(str "  in macro: " (get ctx "macro-name") " (depth " (get ctx "depth") ")")] (collect-chain-lines (get ctx "parent")))))
 
@@ -45,8 +41,6 @@
   (if (<= n 10) (str/join "\n" all-lines) (let [top (subvec all-lines 0 4)
    bot (subvec all-lines (- n 4) n)]
   (str/join "\n" (into (conj (vec top) (str "  ... (" (- n 8) " more)")) bot))))))
-
-(def KNOWN-FORM-HEADS ["def" "defn" "defrecord" "defunion" "deferror" "defscalar" "defonce" "defmulti" "do" "let" "fn" "if" "cond" "when" "unless" "match" "case" "for" "doseq" "dotimes" "loop" "try" "println" "prn" "defn-" "ns" "require" "import" "defmacro" "declare-extern" "set!" "letfn" "when-let" "if-let" "when-some" "if-some" "condp"])
 
 (def LOWERING-COUNTER (atom 0))
 
@@ -93,9 +87,6 @@
 
 (defn datum-cons [h t]
   (if (vector? t) (into [h] t) [h t]))
-
-(defn ^Boolean datum-null? [d]
-  (and (vector? d) (= (count d) 0)))
 
 (defn datum-append [a b]
   (into a b))

@@ -19,8 +19,6 @@
 (defn obj-set! [obj k v]
   (swap! obj assoc k v))
 
-(def PRIMITIVES ["String" "Int" "Float" "Bool" "Keyword" "Symbol" "Nil" "Any"])
-
 (def CLJ-ALIASES {"Long" "Int" "Double" "Float" "Boolean" "Bool" "Integer" "Int"})
 
 (def PARAMETRIC-CTORS ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec"])

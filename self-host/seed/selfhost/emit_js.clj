@@ -36,10 +36,6 @@
   (let [f (deref body-return-ref)]
   (f exprs indent)))
 
-(defn ^String emit-body-stmts* [exprs ^String indent]
-  (let [f (deref body-stmts-ref)]
-  (f exprs indent)))
-
 (defn ^String emit-stmt-inline* [e ^String indent]
   (let [f (deref stmt-inline-ref)]
   (f e indent)))
@@ -53,10 +49,6 @@
 (def ajs-stmt-ref (atom nil))
 
 (def ajs-block-ref (atom nil))
-
-(defn ^String ajs-expr* [n]
-  (let [f (deref ajs-expr-ref)]
-  (f n)))
 
 (defn ^String ajs-stmt* [n depth]
   (let [f (deref ajs-stmt-ref)]

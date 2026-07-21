@@ -36,9 +36,6 @@
 
 ;; --- constants ---------------------------------------------------------------
 
-(def PRIMITIVES :- (Vec String)
-  ["String" "Int" "Float" "Bool" "Keyword" "Symbol" "Nil" "Any"])
-
 (def CLJ-ALIASES :- (Map String String)
   {"Long" "Int" "Double" "Float" "Boolean" "Bool" "Integer" "Int"})
 

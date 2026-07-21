@@ -45,9 +45,6 @@
 (defn emit-body-return* [exprs :- Any indent :- String] :- String
   (let [f :- [Any String -> String] (deref body-return-ref)] (f exprs indent)))
 
-(defn emit-body-stmts* [exprs :- Any indent :- String] :- String
-  (let [f :- [Any String -> String] (deref body-stmts-ref)] (f exprs indent)))
-
 ;; forward ref: emit-body-stmts (defined earlier) recurses into emit-stmt-inline
 (defn emit-stmt-inline* [e :- Any indent :- String] :- String
   (let [f :- [Any String -> String] (deref stmt-inline-ref)] (f e indent)))
@@ -59,7 +56,6 @@
 (def ajs-expr-ref :- Any (atom nil))
 (def ajs-stmt-ref :- Any (atom nil))
 (def ajs-block-ref :- Any (atom nil))
-(defn ajs-expr* [n :- Any] :- String (let [f :- [Any -> String] (deref ajs-expr-ref)] (f n)))
 (defn ajs-stmt* [n :- Any depth :- Int] :- String (let [f :- [Any Int -> String] (deref ajs-stmt-ref)] (f n depth)))
 (defn ajs-block* [n :- Any depth :- Int] :- String (let [f :- [Any Int -> String] (deref ajs-block-ref)] (f n depth)))
 
