@@ -17,15 +17,27 @@
 (define (mt . xs) (cons MAP-TAG xs))
 (define (st . xs) (cons SET-TAG xs))
 
+(define (find-bun-in-store store)
+  (and (directory-exists? store)
+       (for/or ([p (in-list (directory-list store))])
+         (define candidate (build-path store p "bin" "bun"))
+         (and (file-exists? candidate) candidate))))
+
 (define BUN-PATH
   (or (find-executable-path "bun")
-      (let ([nix-bun (for/or ([p (in-list (directory-list (string->path "/nix/store")))])
-                       (define candidate (build-path "/nix/store" p "bin" "bun"))
-                       (and (file-exists? candidate) candidate))])
-        nix-bun)
+      (find-bun-in-store (string->path "/nix/store"))
       (begin
         (displayln "SKIP: bun not found, skipping behavioral JS tests")
         #f)))
+
+(module+ test
+  (define sandbox (make-temporary-file "beagle-missing-store-~a" 'directory))
+  (dynamic-wind
+    void
+    (lambda ()
+      (check-false (find-bun-in-store (build-path sandbox "store"))))
+    (lambda ()
+      (delete-directory/files sandbox))))
 
 (define (js-emit src-forms)
   (define prog
