@@ -168,12 +168,6 @@
 
 ;; --- AST contracts ----------------------------------------------------------
 
-(define KNOWN-FORM-HEADS
-  '(def defn defrecord defunion deferror defscalar defonce defmulti
-    do let fn if cond when unless match case for doseq dotimes
-    loop try println prn defn- ns require import define-macro
-    declare-extern set! letfn when-let if-let when-some if-some condp))
-
 (define (check-datum-contract datum contract macro-name position)
   (cond
     [(eq? contract 'Syntax) (void)]

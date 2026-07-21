@@ -290,30 +290,6 @@
 
 ;; --- New command handlers ---------------------------------------------------
 
-(define (format-error-summary result)
-  (define errors (hash-ref result 'errors '()))
-  (define auto-n (hash-ref result 'auto_fixable 0))
-  (define total (hash-ref result 'error_count 0))
-  (define lines '())
-  (define (emit s) (set! lines (cons s lines)))
-  (for ([e (in-list errors)])
-    (define line (hash-ref e 'line 0))
-    (define kind (hash-ref e 'kind "?"))
-    (define msg (hash-ref e 'message ""))
-    (define fix (hash-ref e 'fix_plan 'null))
-    (define src (hash-ref e 'source_line 'null))
-    (cond
-      [(and (hash? fix) (equal? (hash-ref fix 'confidence "") "high"))
-       (emit (format "  L~a [auto]: ~a" line (hash-ref fix 'description "")))]
-      [(hash? fix)
-       (emit (format "  L~a: ~a" line (hash-ref fix 'fix-hint "")))]
-      [else
-       (emit (format "  L~a: ~a" line msg))]))
-  (define suspicions (hash-ref result 'suspicions '()))
-  (for ([s (in-list suspicions)])
-    (emit (format "  SUSPECT [~a]: ~a" (hash-ref s 'confidence 0) (hash-ref s 'message ""))))
-  (string-join (reverse lines) "\n"))
-
 (define (handle-watch args)
   (when (null? args) (error "watch requires: <dir>"))
   (define dir (car args))

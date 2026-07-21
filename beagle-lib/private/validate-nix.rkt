@@ -74,23 +74,6 @@
                   (list->vector (reverse acc))
                   (loop (cons line acc))))))))))
 
-;; Find the line number (1-based) and column of a key string like ":foo.bar"
-;; in the source file. Returns (values line col) or (values #f #f).
-(define (find-key-in-source path key-str)
-  (define lines (file-lines path))
-  (cond
-    [(not lines) (values #f #f)]
-    [else
-     (let loop ([i 0])
-       (cond
-         [(>= i (vector-length lines)) (values #f #f)]
-         [else
-          (define ln (vector-ref lines i))
-          (define pos (regexp-match-positions (regexp-quote key-str) ln))
-          (if pos
-              (values (add1 i) (add1 (caar pos)))
-              (loop (add1 i)))]))]))
-
 ;; Find the Nth occurrence of key-str (for duplicate handling).
 (define (find-key-in-source-nth path key-str n)
   (define lines (file-lines path))

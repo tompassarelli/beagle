@@ -171,11 +171,6 @@
 (define current-loop-bindings (make-parameter #f))
 (define temp-counter (make-parameter (box 0)))
 
-(define (fresh-temp)
-  (define b (temp-counter))
-  (set-box! b (add1 (unbox b)))
-  (format "_t~a" (unbox b)))
-
 (define (optional-binding? sym)
   (memq sym (current-optionals)))
 

@@ -1159,10 +1159,6 @@
      (emit-expr key (+ depth 1))]
     [else (format "${~a}" (emit-expr key (+ depth 1)))]))
 
-(define (interp-key? key)
-  (and (symbol? key)
-       (not (string-prefix? (symbol->string key) ":"))))
-
 (define (flattenable-map? val)
   (and (map-form? val)
        (= (length (map-form-pairs val)) 1)

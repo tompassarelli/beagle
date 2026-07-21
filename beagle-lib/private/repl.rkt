@@ -28,7 +28,6 @@
 ;; Persistent environment across REPL inputs
 (define repl-env (make-hash))
 (define repl-records (make-hash))
-(define repl-forms '())
 
 (define (init-repl-env!)
   (for ([(k v) (in-hash STDLIB-TYPES)])

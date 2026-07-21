@@ -549,8 +549,6 @@
 ;; (which must be a sequence — bare list, or #%brackets/#%map/#%set with the
 ;; head dropped) into the surrounding container in place of the marker.
 
-(define READER-COND-TAGS '(clj cljs nix zig default))
-
 ;; Fast structural scan — returns #t iff the datum tree contains a
 ;; reader-conditional or reader-conditional-splice marker. The common case
 ;; (no reader conditionals anywhere in the program) lets parse-program
@@ -1655,13 +1653,6 @@
 ;; expand-cond-thread, expand-some-thread, expand-as-thread are defined
 ;; above with the rest of the threading family. The Clojure threading
 ;; macros are the canonical replacement for the removed pipe family.
-
-(define (parse-cond-let-binding b)
-  (define d (->datum b))
-  (define items (unwrap-items d "conditional let binding"))
-  (unless (and (= (length items) 2) (symbol? (car items)))
-    (error 'beagle "conditional let binding must be [name expr], got: ~v" items))
-  (values (car items) (parse-expr (cadr items))))
 
 (define (parse-condp-form pred-stx test-stx clause-stxs)
   (define pred-expr (parse-expr pred-stx))
