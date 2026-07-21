@@ -1,4 +1,4 @@
-#lang beagle/clj
+#lang beagle/js
 (ns selfhost.fixtures.js-parity-quote)
 
 (def suffix :- String "!")

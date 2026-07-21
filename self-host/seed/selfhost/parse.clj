@@ -716,7 +716,9 @@
    mnames []
    mf {}]
   (if (>= i n) (make-defunion name mnames type-vars mf) (let [md (nth member-defs i)]
-  (if (and (vector? md) (>= (count md) 2) (string? (nth md 0))) (recur (+ i 1) (conj mnames (nth md 0)) (assoc mf (nth md 0) (parse-record-fields! (nth md 1)))) (recur (+ i 1) mnames mf)))))))
+  (if (and (vector? md) (>= (count md) 2) (string? (nth md 0))) (let [fields (parse-record-fields! (nth md 1))
+   typed-fields (mapv (fn [p] (assoc p "ann" (varize-type (get p "ann") type-vars))) fields)]
+  (recur (+ i 1) (conj mnames (nth md 0)) (assoc mf (nth md 0) typed-fields))) (recur (+ i 1) mnames mf)))))))
 
 (defn parse-deferror-form [^String name member-defs]
   (let [n (count member-defs)]

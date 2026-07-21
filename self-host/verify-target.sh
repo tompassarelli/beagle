@@ -112,9 +112,9 @@ fi
 
 echo "=== 4. self-host/fixtures/*.bclj forced to $TARGET (vs oracle) ==="
 if [ "$have_oracle" -eq 1 ]; then
-  for src in self-host/fixtures/*.bclj; do
+  for src in self-host/fixtures/*.bclj self-host/fixtures/*.bjs; do
     [ -f "$src" ] || continue
-    name="$(basename "$src" .bclj)"
+    name="$(basename "$src")"; name="${name%.*}"
     # force the oracle to emit TARGET: temp copy with the target #lang + ext
     tmp="$LAB/$name.$EXT"
     { echo "$LANG"; tail -n +2 "$src"; } > "$tmp"
