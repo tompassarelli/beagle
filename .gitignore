@@ -47,6 +47,7 @@ docs/private/
 self-host/native/classes/
 self-host/native/.cpcache/
 self-host/native/beagle-selfhost
+self-host/native/beagle-selfhost.seed-nar-hash
 
 # Git worktrees parked inside the checkout (agent workflows) — never tracked.
 .worktrees/

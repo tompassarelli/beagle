@@ -28,4 +28,7 @@ time native-image -cp "$CP" \
   -o beagle-selfhost \
   selfhost.main
 
-echo "== done -> $(pwd)/beagle-selfhost =="; ls -lh beagle-selfhost
+nix hash path ../seed > beagle-selfhost.seed-nar-hash
+
+echo "== done -> $(pwd)/beagle-selfhost =="
+ls -lh beagle-selfhost beagle-selfhost.seed-nar-hash

@@ -12,9 +12,10 @@ compiler is a self-contained GraalVM native-image
 fixpoint loop bootstraps from — the seed `.clj` *is* the native binary's
 source, held byte-identical to it. So: native binary = the artifact; bb seed =
 the fallback that always works. The parity harnesses (`verify-selfhost.sh`,
-`verify-target.sh`, `verify-target-nix.sh`) prefer the native binary when it is
-present + executable and fall back to the bb seed otherwise (override the path
-with `BEAGLE_NATIVE_BIN`; set it empty to force the bb fallback).
+`verify-target.sh`, `verify-target-nix.sh`) prefer a checkout-local native only
+when its `.seed-nar-hash` sidecar matches the exact blessed seed; a missing or
+stale sidecar falls pointedly back to the current bb seed. Override the path
+deliberately with `BEAGLE_NATIVE_BIN`; set it empty to force the bb fallback.
 
 ## Layout
 
@@ -133,6 +134,10 @@ Ad-hoc build (dev, needs a GraalVM on PATH):
 nix shell nixpkgs#graalvmPackages.graalvm-ce -c self-host/native/build.sh
 self-host/native/beagle-selfhost emit FILE.bclj      # ast | check | emit-from-ast too
 ```
+
+The ad-hoc build writes `beagle-selfhost.seed-nar-hash` beside the binary.
+Keep the pair together: default parity runs will not execute an unproven local
+binary, so a compiler-source change cannot be masked by stale build output.
 
 Zero reflection config (one Jackson `--initialize-at-build-time` class-init
 flag only — see `native/build.sh`). Parity gate:

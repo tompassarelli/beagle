@@ -43,6 +43,9 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
+      - name: Prove stale local stage0 artifacts cannot be selected
+        run: self-host/native/stage0-select-test.sh
+
       # verify-native's three-way parity needs the Racket oracle. beagle-lib
       # compiles fresh under this same racket (no .zo/runtime version skew), and
       # _BEAGLE_RACKET pins bin/_beagle-racket to it so verify-native does not
@@ -96,6 +99,7 @@ jobs:
         run: |
           gh release create "${{ github.ref_name }}" \
             self-host/native/beagle-selfhost \
+            self-host/native/beagle-selfhost.seed-nar-hash \
             --verify-tag \
             --title "${{ github.ref_name }}" \
             --notes "$(cat <<'EOF'

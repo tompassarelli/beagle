@@ -36,16 +36,14 @@ esac
 
 command -v bb >/dev/null 2>&1 || { echo "verify-target: bb (babashka) not on PATH"; exit 2; }
 
-# Stage0 compiler: prefer the native binary (self-host/native/beagle-selfhost)
-# when present + executable; fall back to the bb-run seed otherwise. The bb path
-# is the dev fallback and stays fully working. BEAGLE_NATIVE_BIN overrides the
-# native binary path (same convention as verify-native.sh); empty forces bb.
-NATIVE_BIN="${BEAGLE_NATIVE_BIN-self-host/native/beagle-selfhost}"
-if [ -n "$NATIVE_BIN" ] && [ -x "$NATIVE_BIN" ]; then STAGE0=native; else STAGE0=bb; fi
+# A checkout-local native is mutable build output. Use it only when its seed
+# provenance sidecar matches this checkout; otherwise use the current seed.
+source self-host/native/stage0-select.sh
+beagle_select_stage0 "$SEED" self-host/native/beagle-selfhost || exit $?
 sh_main() { # selfhost CLI: <subcommand> [args...]
   if [ "$STAGE0" = native ]; then "$NATIVE_BIN" "$@"; else bb -cp "$SEED" -m selfhost.main "$@"; fi
 }
-[ "$STAGE0" = native ] && echo "=== stage0: native ($NATIVE_BIN) ===" || echo "=== stage0: bb seed ($SEED) ==="
+beagle_stage0_banner "$SEED"
 
 have_oracle=1
 if [ -f bin/_beagle-racket ]; then source bin/_beagle-racket 2>/dev/null || have_oracle=0; else have_oracle=0; fi

@@ -17,19 +17,16 @@ OUT=self-host/seed
 LAB=.lab
 mkdir -p "$LAB"
 
-# Stage0 compiler: prefer the native binary (self-host/native/beagle-selfhost)
-# when present + executable; fall back to the bb-run seed otherwise. The bb path
-# is the dev fallback and the remint loop's substrate — it stays fully working.
-# BEAGLE_NATIVE_BIN overrides the native binary path (same convention as
-# verify-native.sh); set it empty to force the bb fallback.
-NATIVE_BIN="${BEAGLE_NATIVE_BIN-self-host/native/beagle-selfhost}"
-if [ -n "$NATIVE_BIN" ] && [ -x "$NATIVE_BIN" ]; then STAGE0=native; else STAGE0=bb; fi
+# A checkout-local native is mutable build output. Use it only when its seed
+# provenance sidecar matches this checkout; otherwise use the current seed.
+source self-host/native/stage0-select.sh
+beagle_select_stage0 "$OUT" self-host/native/beagle-selfhost || exit $?
 # selfhost CLI dispatch — only the main-driver subcommands (emit/check/ast) route
 # to native; the stage-isolated -e evals below stay bb (native exposes only the CLI).
 sh_main() { # <subcommand> [args...]
   if [ "$STAGE0" = native ]; then "$NATIVE_BIN" "$@"; else bb -cp "$OUT" -m selfhost.main "$@"; fi
 }
-[ "$STAGE0" = native ] && echo "=== stage0: native ($NATIVE_BIN) ===" || echo "=== stage0: bb seed ($OUT) ==="
+beagle_stage0_banner "$OUT"
 
 MODULES=("$@")
 if [ ${#MODULES[@]} -eq 0 ]; then
