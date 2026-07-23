@@ -442,6 +442,14 @@
      '(require datascript :as ds)
      '(defn f [] :- Any (ds/create-conn)))
 
+   ;; Regression: validate-module-path! (ast.rkt) rejected `@scope/pkg` npm
+   ;; specifiers even though emit-module-header already special-cases an
+   ;; `@`-prefixed namespace and passes it through verbatim.
+   (check-js-contains "scoped npm import (@scope/pkg) -> passes through verbatim"
+     "import * as sdk from '@anthropic-ai/claude-agent-sdk';"
+     '(require @anthropic-ai/claude-agent-sdk :as sdk)
+     '(defn f [] :- Any (sdk/query)))
+
    ;; importer test.app lives at test/app.js, so a root-level sibling module
    ;; resolves importer-relative as ../inventory/core.js (not ./ — that only
    ;; works from the module root). See relative-js-module-path in emit-js.rkt.

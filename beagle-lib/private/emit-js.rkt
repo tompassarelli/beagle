@@ -934,6 +934,21 @@
 (define (js-bound? sym)
   (set-member? (current-js-bound) sym))
 
+;; A `let`/return-position-let with a repeated (shadowed) binding name — legal,
+;; idiomatic Clojure (`(let [x 1 x (+ x 1)] x)`) — lowers each binding to a flat
+;; `const`/`let` statement in ONE JS block; declaring the same identifier twice
+;; in one block is a JS SyntaxError even though the source type-checks clean.
+;; `current-rename-env` maps a shadowed source symbol to the freshened JS
+;; identifier actually declared for its latest binding (see
+;; `emit-let-bindings`), and every var-ref / binding-target site resolves a
+;; name through it before falling back to the ordinary `mangle-name`. Mirrors
+;; `loop`'s `_recur_N` freshening for the same reason: distinct JS identifiers
+;; per rebinding, one flat block.
+(define current-rename-env (make-parameter (hash)))
+
+(define (resolved-name sym)
+  (hash-ref (current-rename-env) sym (lambda () (mangle-name sym))))
+
 (define (with-bindings syms thunk)
   (parameterize ([current-js-bound (set-union (current-js-bound) (list->set syms))])
     (thunk)))
@@ -1324,7 +1339,7 @@
      (cond
        [(eq? e 'nil) "null"]
        [(keyword-symbol? e) (~v (kw->prop e))]
-       [(js-bound? e) (mangle-name e)]
+       [(js-bound? e) (resolved-name e)]
        [(hash-ref JS-VALUE-WRAPPERS e #f) => values]
        [else
         (let ([m (mangle-name e)])
@@ -1510,40 +1525,14 @@
      ;; Thread the rep-env (binding-name -> 'hmap|'hset) ALONGSIDE js-bound so a
      ;; later binding's value (and the body) can classify a var-ref read of an
      ;; earlier binding consistently with how that binding's value was emitted.
-     (define-values (bind-strs _ignored rep-env-out type-env-out)
-       (for/fold ([strs '()]
-                  [bound (current-js-bound)]
-                  [rep-env (current-rep-env)]
-                  [type-env (current-type-env)])
-                 ([b (in-list bindings)])
-         (define val-str (await-async-iife
-                           (parameterize ([current-js-bound bound]
-                                          [current-rep-env rep-env]
-                                          [current-type-env type-env])
-                             (emit-expr (let-binding-value b)))))
-         (define new-names (names-from-binding-target (let-binding-name b)))
-         (define mutable? (for/or ([nm (in-list new-names)]) (and (memq nm mutated-syms) #t)))
-         (define stmts (emit-let-binding-stmts (let-binding-name b) val-str mutable?))
-         ;; Only a single-symbol binding names the collection itself; record its
-         ;; rep (when non-native) AND its type (so a native-bound var resolves to
-         ;; native, not poly via a missing type — the lite/full $$bc selection
-         ;; depends on this).
-         (define name (let-binding-name b))
-         (define bty (and (symbol? name)
-                          (or (let-binding-type b) (node-type (let-binding-value b)))))
-         (define rep (if (symbol? name)
-                         (parameterize ([current-rep-env rep-env] [current-type-env type-env])
-                           (classify-rep (let-binding-value b)))
-                         'native))
-         (values (append strs stmts)
-                 (set-union bound (list->set new-names))
-                 (if (and (symbol? name) (not (eq? rep 'native)))
-                     (hash-set rep-env name rep)
-                     rep-env)
-                 (if bty (hash-set type-env name bty) type-env))))
+     ;; emit-let-bindings also freshens any repeated (shadowed) binding name so
+     ;; the flat const/let sequence below never redeclares one JS identifier.
+     (define-values (bind-strs rep-env-out type-env-out rename-env-out)
+       (emit-let-bindings bindings mutated-syms))
      (with-bindings let-names
        (lambda ()
-         (parameterize ([current-rep-env rep-env-out] [current-type-env type-env-out])
+         (parameterize ([current-rep-env rep-env-out] [current-type-env type-env-out]
+                        [current-rename-env rename-env-out])
            (iife (format "~a ~a" (string-join bind-strs " ") (emit-body-return body ""))
                   #:async? has-await))))]
 
@@ -2206,15 +2195,15 @@
        (for/list ([k (in-list (map-destructure-keys p))])
          (define default-pair (assq k or-alist))
          (if default-pair
-             (format "~a = ~a" (mangle-name k) (emit-expr (cdr default-pair)))
-             (mangle-name k))))
+             (format "~a = ~a" (resolved-name k) (emit-expr (cdr default-pair)))
+             (resolved-name k))))
      (format "{~a}" (string-join key-strs ", "))]
     [(seq-destructure? p)
-     (define mangled (map mangle-name (seq-destructure-names p)))
+     (define mangled (map resolved-name (seq-destructure-names p)))
      (cond
        [(seq-destructure-rest-name p)
         (format "[~a, ...~a]" (string-join mangled ", ")
-                (mangle-name (seq-destructure-rest-name p)))]
+                (resolved-name (seq-destructure-rest-name p)))]
        [else
         (format "[~a]" (string-join mangled ", "))])]
     [else #f]))
@@ -2226,7 +2215,7 @@
 (define (emit-binding-target name)
   (cond
     [(emit-destructure name) => values]
-    [(symbol? name) (mangle-name name)]
+    [(symbol? name) (resolved-name name)]
     [else (error 'beagle-js "unsupported binding target: ~v" name)]))
 
 ;; Emit the JS const-binding statement(s) for one let-binding target, given
@@ -2293,11 +2282,67 @@
   (define as-name (and (map-destructure? target) (map-destructure-as-name target)))
   (cond
     [as-name
-     (define as-js (mangle-name as-name))
+     (define as-js (resolved-name as-name))
      (list (format "const ~a = ~a;" as-js val-str)
            (format "~a ~a = ~a;" kw (emit-binding-target target) as-js))]
     [else
      (list (format "~a ~a = ~a;" kw (emit-binding-target target) val-str))]))
+
+;; Shared binding-sequence emitter for BOTH `let`-as-IIFE (emit-expr-core) and
+;; the return-position inline `let` (emit-return-position) — same flat
+;; const/let statement sequence in one JS block either way, so both need the
+;; same shadow-freshening for a repeated (same-name) binding. See
+;; `current-rename-env` above for why: without it, `(let [x 1 x (+ x 1)] x)`
+;; emits two `const x = …;` in one block -> JS SyntaxError at runtime despite
+;; passing `beagle check`. Returns (values bind-strs rep-env-out type-env-out
+;; rename-env-out); callers still compute `let-names` themselves for
+;; `with-bindings`/inline-scope tracking.
+(define (emit-let-bindings bindings mutated-syms)
+  (define-values (strs _bound rep-env type-env rename-env _seen)
+    (for/fold ([strs '()]
+               [bound (current-js-bound)]
+               [rep-env (current-rep-env)]
+               [type-env (current-type-env)]
+               [rename-env (current-rename-env)]
+               [seen (hash)])
+              ([b (in-list bindings)])
+      (define val-str (await-async-iife
+                        (parameterize ([current-js-bound bound]
+                                       [current-rep-env rep-env]
+                                       [current-type-env type-env]
+                                       [current-rename-env rename-env])
+                          (emit-expr (let-binding-value b)))))
+      (define new-names (names-from-binding-target (let-binding-name b)))
+      ;; Freshen any name this SAME let-sequence already declared: 1st
+      ;; occurrence keeps its plain mangled name (also overrides any stale
+      ;; mapping inherited from an outer scope's rename-env — a fresh nested
+      ;; `let` binding the same source name is a fresh JS scope, not a clash),
+      ;; every later occurrence gets a `_shadowN` suffix so the block declares
+      ;; distinct identifiers.
+      (define-values (rename-env* seen*)
+        (for/fold ([re rename-env] [sn seen]) ([nm (in-list new-names)])
+          (define n (hash-ref sn nm 0))
+          (define js-name (if (zero? n) (mangle-name nm) (format "~a_shadow~a" (mangle-name nm) n)))
+          (values (hash-set re nm js-name) (hash-set sn nm (add1 n)))))
+      (define mutable? (for/or ([nm (in-list new-names)]) (and (memq nm mutated-syms) #t)))
+      (define stmts (parameterize ([current-rename-env rename-env*])
+                      (emit-let-binding-stmts (let-binding-name b) val-str mutable?)))
+      (define name (let-binding-name b))
+      (define bty (and (symbol? name)
+                       (or (let-binding-type b) (node-type (let-binding-value b)))))
+      (define rep (if (symbol? name)
+                      (parameterize ([current-rep-env rep-env] [current-type-env type-env])
+                        (classify-rep (let-binding-value b)))
+                      'native))
+      (values (append strs stmts)
+              (set-union bound (list->set new-names))
+              (if (and (symbol? name) (not (eq? rep 'native)))
+                  (hash-set rep-env name rep)
+                  rep-env)
+              (if bty (hash-set type-env name bty) type-env)
+              rename-env*
+              seen*)))
+  (values strs rep-env type-env rename-env))
 
 (define (expr-contains-recur? e)
   (cond
@@ -2414,37 +2459,15 @@
        (format "return ~a;" (emit-expr e))
        (let ()
          (define mutated-syms (collect-set!-target-syms body))
-         (define-values (bind-strs _ rep-env-out type-env-out)
-           (for/fold ([strs '()] [bound (current-js-bound)]
-                      [rep-env (current-rep-env)] [type-env (current-type-env)])
-                     ([b (in-list bindings)])
-             (define val-str (await-async-iife
-                               (parameterize ([current-js-bound bound]
-                                              [current-rep-env rep-env]
-                                              [current-type-env type-env])
-                                 (emit-expr (let-binding-value b)))))
-             (define new-names (names-from-binding-target (let-binding-name b)))
-             (define mutable? (for/or ([nm (in-list new-names)]) (and (memq nm mutated-syms) #t)))
-             (define stmts (emit-let-binding-stmts (let-binding-name b) val-str mutable?))
-             (define name (let-binding-name b))
-             (define bty (and (symbol? name)
-                              (or (let-binding-type b) (node-type (let-binding-value b)))))
-             (define rep (if (symbol? name)
-                             (parameterize ([current-rep-env rep-env] [current-type-env type-env])
-                               (classify-rep (let-binding-value b)))
-                             'native))
-             (values (append strs stmts)
-                     (set-union bound (list->set new-names))
-                     (if (and (symbol? name) (not (eq? rep 'native)))
-                         (hash-set rep-env name rep)
-                         rep-env)
-                     (if bty (hash-set type-env name bty) type-env))))
+         (define-values (bind-strs rep-env-out type-env-out rename-env-out)
+           (emit-let-bindings bindings mutated-syms))
          (with-bindings let-names
            (lambda ()
              (parameterize ([current-js-inline-scope
                              (set-union (current-js-inline-scope) (list->set let-names))]
                             [current-rep-env rep-env-out]
-                            [current-type-env type-env-out])
+                            [current-type-env type-env-out]
+                            [current-rename-env rename-env-out])
                (string-append
                 (string-join bind-strs (string-append "\n" indent))
                 "\n" indent
@@ -2567,21 +2590,15 @@
        (emit-expr-stmt e)
        (let ()
          (define mutated-syms (collect-set!-target-syms body))
-         (define-values (bind-strs _)
-           (for/fold ([strs '()] [bound (current-js-bound)])
-                     ([b (in-list bindings)])
-             (define val-str (await-async-iife
-                               (parameterize ([current-js-bound bound])
-                                 (emit-expr (let-binding-value b)))))
-             (define new-names (names-from-binding-target (let-binding-name b)))
-             (define mutable? (for/or ([nm (in-list new-names)]) (and (memq nm mutated-syms) #t)))
-             (define stmts (emit-let-binding-stmts (let-binding-name b) val-str mutable?))
-             (values (append strs stmts)
-                     (set-union bound (list->set new-names)))))
+         (define-values (bind-strs rep-env-out type-env-out rename-env-out)
+           (emit-let-bindings bindings mutated-syms))
          (with-bindings let-names
            (lambda ()
              (parameterize ([current-js-inline-scope
-                             (set-union (current-js-inline-scope) (list->set let-names))])
+                             (set-union (current-js-inline-scope) (list->set let-names))]
+                            [current-rep-env rep-env-out]
+                            [current-type-env type-env-out]
+                            [current-rename-env rename-env-out])
                (string-append
                 (string-join bind-strs (string-append "\n" indent))
                 "\n" indent

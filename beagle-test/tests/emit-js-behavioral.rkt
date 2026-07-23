@@ -7,6 +7,7 @@
          racket/port
          racket/format
          racket/file
+         racket/list
          setup/collects
          (file "../../beagle-lib/private/parse.rkt")
          (file "../../beagle-lib/private/check.rkt")
@@ -316,6 +317,55 @@ console.log(JSON.stringify(snapshot()));"
                 (+ (let [y 10] y) x))))
      "console.log(f());"
      "11")
+
+   ;; Regression: a `let` that rebinds the same name twice (ordinary Clojure
+   ;; shadowing, e.g. an ignored `_` result used twice) type-checked clean but
+   ;; emitted two `const x = …;` in one JS block -> SyntaxError at runtime.
+   ;; See emit-js.rkt's `current-rename-env` / `emit-let-bindings`.
+   (check-js-output "let with repeated binding name (return position)"
+     (list '(defn f [] :- Int
+              (let [x 1
+                    x (+ x 1)]
+                x)))
+     "console.log(f());"
+     "2")
+
+   (check-js-output "let with repeated binding name (non-return position)"
+     (list '(defn f [] :- Int
+              (let [x 1
+                    x (+ x 1)]
+                x))
+           '(defn main [] :- Nil
+              (do (println (f))
+                  (println (f)))))
+     "main();"
+     "2\n2")
+
+   (check-js-output "let with three-times-repeated binding name"
+     (list '(defn f [] :- Int
+              (let [x 1
+                    x (+ x 1)
+                    x (* x 10)]
+                x)))
+     "console.log(f());"
+     "20")
+
+   (check-js-behavior "let with repeated binding name emits distinct JS identifiers"
+     (list '(defn f [] :- Int
+              (let [x 1
+                    x (+ x 1)]
+                x)))
+     "if (f() !== 2) throw new Error('expected 2');")
+
+   (test-case "let with repeated binding name never emits duplicate const/let in one block"
+     (define js (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
+                                '(defn f [] :- Int
+                                   (let [x 1
+                                         x (+ x 1)]
+                                     x)))))
+     (define decls (regexp-match* #rx"(const|let) x[a-zA-Z0-9_]* =" js))
+     (check-equal? (length (remove-duplicates decls)) (length decls)
+                   (format "duplicate JS declaration among ~v in:\n~a" decls js)))
 
    ;; --- loop/recur ----------------------------------------------------------
 

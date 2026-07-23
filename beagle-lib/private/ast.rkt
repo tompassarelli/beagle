@@ -42,7 +42,14 @@
              "~a '~a' contains characters that would inject code in target output"
              context s))))
 
-(define valid-module-path-rx #rx"^[a-zA-Z0-9._/-]+$")
+;; A leading `@` is allowed exactly once, matching npm's scoped-package
+;; specifier shape (`@scope/pkg`, `@scope/pkg/sub`) — emit-js.rkt's
+;; `emit-module-header` already special-cases an `@`-prefixed namespace
+;; (passes it through verbatim as the JS import specifier), so this validator
+;; must accept what that emission path already handles. `@` is restricted to
+;; the first character only; the character class for the remainder is
+;; unchanged, so this stays exactly as strict against injection as before.
+(define valid-module-path-rx #rx"^@?[a-zA-Z0-9._/-]+$")
 (define (validate-module-path! sym)
   (when (symbol? sym)
     (define s (symbol->string sym))
