@@ -731,6 +731,27 @@
                                (hasheq) #:src src)))
                #t)))))
 
+;; G2b — annotation-directed Atom CONSTRUCTION. A fresh cell checked against an
+;; expected (Atom T) adopts T when the value IS the constructor call `(atom init)`:
+;; the init is checked against T (raising pointedly), so `(atom nil)` can be born
+;; as (Atom Int?) under an annotation. Constructor literal ONLY — an existing
+;; reference still meets INVARIANT (Atom A)≠(Atom B): a fresh cell has no aliases,
+;; so adopting the annotation is sound; aliased widening stays the poison hole.
+;; Returns #t when it applies; #f so the caller falls back to type-compatible?.
+(define (check-atom-ctor value expected env src)
+  (and (type-app? expected) (eq? (type-app-ctor expected) 'Atom)
+       (= (length (type-app-args expected)) 1)
+       (call-form? value) (eq? (call-form-fn value) 'atom)
+       (= (length (call-form-args value)) 1)
+       (let ([elem (car (type-app-args expected))]
+             [it (infer-expr (car (call-form-args value)) env)])
+         (unless (type-compatible? it elem)
+           (raise-diag 'type-mismatch
+                       (format "atom init: expected ~a, got ~a"
+                               (type->string elem) (type->string it))
+                       (hasheq) #:src src))
+         #t)))
+
 (define (check-form form env)
   (match form
     [(def-form name expected-type value _ _)
@@ -740,6 +761,7 @@
      (define effective-type (or expected-type (hash-ref env name #f)))
      (when effective-type
        (unless (or (check-hvec-literal value effective-type env (src-for value))
+                   (check-atom-ctor value effective-type env (src-for value))
                    (type-compatible? inferred effective-type))
          (raise-diag 'def-type
                      (format "def ~a: expected ~a, got ~a"
@@ -751,7 +773,8 @@
      (define inferred (infer-expr value env))
      (define effective-type (or expected-type (hash-ref env name #f)))
      (when effective-type
-       (unless (type-compatible? inferred effective-type)
+       (unless (or (check-atom-ctor value effective-type env (src-for value))
+                   (type-compatible? inferred effective-type))
          (raise-diag 'def-type
                      (format "defonce ~a: expected ~a, got ~a"
                              name (type->string effective-type) (type->string inferred))
@@ -2510,7 +2533,9 @@
          (hash-set! out (seq-destructure-rest-name bname) (or inferred ANY)))]
       [else
        (when declared
-         (unless (type-compatible? inferred declared)
+         (unless (or (check-atom-ctor (let-binding-value b) declared out
+                                      (src-for (let-binding-value b)))
+                     (type-compatible? inferred declared))
            (raise-diag 'let-binding
                        (format "let binding ~a: expected ~a, got ~a"
                                bname (type->string declared) (type->string inferred))

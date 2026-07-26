@@ -808,6 +808,27 @@
   '(defn want! [a :- (Atom Int)] :- Int (deref a))
   '(defn bad! [b :- (Atom Any)] :- Int (want! b)))
 
+;; G2b — annotation-directed Atom CONSTRUCTION. A fresh cell checked against an
+;; expected (Atom T) adopts T when the value is the constructor call `(atom init)`;
+;; the init is checked against T. Constructor literal only — existing references
+;; stay INVARIANT (a fresh cell has no aliases, so adoption is sound).
+
+(check-ok "atom G2b: annotated cell born empty — (atom nil) under (Atom Int?)"
+  '(def st :- (Atom Int?) (atom nil))
+  '(defn fill! [] :- Int? (reset! st 5)))
+
+(check-ok "atom G2b: annotation widens the constructor in a let binding"
+  '(defn t! [] :- Int? (let [a :- (Atom Int?) (atom nil)] (do (reset! a 5) (deref a)))))
+
+(check-err/rx "atom G2b: constructor init must fit the annotated element"
+  #rx"atom init: expected Int"
+  '(def bad :- (Atom Int) (atom "x")))
+
+(check-err/rx "atom G2b: UNannotated (atom nil) stays (Atom Nil) — widening needs the annotation"
+  #rx"expected .Atom"
+  '(defn want! [a :- (Atom Int?)] :- Any (deref a))
+  '(defn bad! [] :- Any (let [u (atom nil)] (want! u))))
+
 ;; =============================================================================
 ;; Tests — G3: heterogeneous tuple (HVec a b c). Construct via an expected-directed
 ;; literal check (annotation + literal, positional); consume via nth/first/second

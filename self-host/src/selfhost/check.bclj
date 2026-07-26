@@ -584,7 +584,9 @@
       (let [inferred (infer-expr! (get b "value") out)
             declared (get b "ann")
             bname (get b "name")]
-        (when (and (not (nil? declared)) (not (type-compatible? inferred declared)))
+        (when (and (not (nil? declared))
+                   (not (check-atom-ctor! (get b "value") declared out))
+                   (not (type-compatible? inferred declared)))
           (emit-diag! (str "beagle: let binding " bname ": expected "
                            (type->string declared) ", got " (type->string inferred))))
         (assoc out bname (if (not (nil? declared)) declared inferred))))
@@ -1003,6 +1005,25 @@
             true)))
     false))
 
+;; G2b — annotation-directed Atom CONSTRUCTION. Mirrors the oracle check-atom-ctor
+;; (check.rkt): a fresh cell checked against an expected (Atom T) adopts T when the
+;; value IS the constructor call (atom init); the init is checked against T. Only
+;; the constructor literal — existing references stay INVARIANT (a fresh cell has
+;; no aliases, so adoption is sound). Returns true when it applies; false so the
+;; caller falls back to type-compatible?.
+(defn check-atom-ctor! [value :- Any expected :- Any env :- Any] :- Bool
+  (if (and (app-type? expected) (= (get expected "name") "Atom")
+           (= (count (get expected "args")) 1)
+           (not (nil? value)) (= (call-fn-name value) "atom")
+           (= (count (get value "args")) 1))
+    (let [elem (nth (get expected "args") 0)
+          it (infer-expr! (nth (get value "args") 0) env)]
+      (when (not (type-compatible? it elem))
+        (emit-diag! (str "beagle: atom init: expected " (type->string elem)
+                         ", got " (type->string it))))
+      true)
+    false))
+
 (defn infer-expr! [e :- Any env :- Any] :- Any
   (cond
     (nil? e) ANY
@@ -1022,7 +1043,8 @@
 
     (= (get e "node") "def")
       (let [expected (get e "ann")]
-        (if (and (not (nil? expected)) (check-hvec-literal! (get e "value") expected env))
+        (if (and (not (nil? expected)) (or (check-hvec-literal! (get e "value") expected env)
+                                           (check-atom-ctor! (get e "value") expected env)))
           expected
           (let [inferred (infer-expr! (get e "value") env)]
             (when (and (not (nil? expected)) (not (type-compatible? inferred expected)))
@@ -1032,7 +1054,8 @@
 
     (= (get e "node") "defonce")
       (let [expected (get e "ann")]
-        (if (and (not (nil? expected)) (check-hvec-literal! (get e "value") expected env))
+        (if (and (not (nil? expected)) (or (check-hvec-literal! (get e "value") expected env)
+                                           (check-atom-ctor! (get e "value") expected env)))
           expected
           (let [inferred (infer-expr! (get e "value") env)]
             (when (and (not (nil? expected)) (not (type-compatible? inferred expected)))
