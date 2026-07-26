@@ -1,11 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname "$0")/_beagle-racket"
+source "$(dirname "$0")/_beagle-daemon-files"
 
-_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/var/tmp}"
-PORTFILE="${BEAGLE_DAEMON_PORTFILE:-${_RUNTIME_DIR}/beagle-daemon.port}"
-PIDFILE="${BEAGLE_DAEMON_PIDFILE:-${_RUNTIME_DIR}/beagle-daemon.pid}"
+PORTFILE="$BEAGLE_DAEMON_PORTFILE_PRIMARY"
+PIDFILE="$BEAGLE_DAEMON_PIDFILE_PRIMARY"
 export BEAGLE_DAEMON_PORTFILE="$PORTFILE"
+
+# Mirror the runtime files into the repo (.beagle/run) so sandboxed processes
+# that cannot read $XDG_RUNTIME_DIR can still discover the daemon.
+mirror_runtime_files() {
+    mkdir -p "$BEAGLE_DAEMON_RUN_LOCAL" 2>/dev/null || return 0
+    cp -f "$PORTFILE" "$BEAGLE_DAEMON_PORTFILE_MIRROR" 2>/dev/null || true
+    cp -f "$PIDFILE" "$BEAGLE_DAEMON_PIDFILE_MIRROR" 2>/dev/null || true
+}
+
+clean_runtime_files() {
+    rm -f "$PORTFILE" "$PIDFILE" \
+          "$BEAGLE_DAEMON_PORTFILE_MIRROR" "$BEAGLE_DAEMON_PIDFILE_MIRROR"
+}
 
 usage() {
     cat >&2 <<'EOF'
@@ -43,15 +56,19 @@ EOF
 }
 
 is_running() {
-    [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null
+    # PID-signal liveness first; TCP ping as the sandbox-tolerant fallback
+    # (a sandboxed caller may be unable to kill -0 an outside PID or read the
+    # XDG pidfile, yet can still connect when network access is granted).
+    if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+        return 0
+    fi
+    local port
+    port=$(get_port)
+    [[ -n "$port" ]] && (exec 3<>/dev/tcp/127.0.0.1/"$port") 2>/dev/null
 }
 
 get_port() {
-    if [[ -f "$PORTFILE" ]]; then
-        cat "$PORTFILE"
-    else
-        echo ""
-    fi
+    beagle_daemon_port
 }
 
 send_query() {
@@ -77,7 +94,7 @@ cmd_start() {
         exit 0
     fi
 
-    rm -f "$PORTFILE" "$PIDFILE"
+    clean_runtime_files
 
     "$RACKET" -e '(require beagle/private/daemon) (run-daemon-tcp)' &
     local pid=$!
@@ -112,13 +129,14 @@ cmd_start() {
 
     local port
     port=$(get_port)
+    mirror_runtime_files
     echo "Daemon started (pid $pid, port $port)" >&2
 }
 
 cmd_stop() {
     if ! is_running; then
         echo "Daemon not running" >&2
-        rm -f "$PIDFILE" "$PORTFILE"
+        clean_runtime_files
         exit 0
     fi
 
@@ -138,7 +156,7 @@ cmd_stop() {
         kill "$pid" 2>/dev/null || true
     fi
 
-    rm -f "$PIDFILE" "$PORTFILE"
+    clean_runtime_files
     echo "Daemon stopped (pid $pid)" >&2
 }
 
@@ -147,7 +165,12 @@ cmd_status() {
         send_query "ping"
     else
         echo '{"ok":false,"status":"stopped"}'
-        rm -f "$PIDFILE" "$PORTFILE"
+        # Only clean when we can actually SEE the primary location: a sandboxed
+        # caller with a masked $XDG_RUNTIME_DIR and no network must not delete
+        # the mirrors of a daemon it merely cannot reach.
+        if [[ -w "$(dirname "$PORTFILE")" ]]; then
+            clean_runtime_files
+        fi
     fi
 }
 

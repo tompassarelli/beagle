@@ -1,0 +1,35 @@
+# _beagle-daemon-files — the ONE resolver for daemon runtime files (port/pid).
+# Source this; never hardcode a portfile path. Resolution order:
+#   1. explicit $BEAGLE_DAEMON_PORTFILE / $BEAGLE_DAEMON_PIDFILE (env always wins)
+#   2. $XDG_RUNTIME_DIR (user-scoped tmpfs; /var/tmp when XDG is unset)
+#   3. the repo-local mirror .beagle/run/ — written by `beagle-daemon start` so
+#      sandboxed processes (e.g. Codex workspace-write masks /run/user/*) can
+#      still DISCOVER the daemon through the workspace. Connection then needs
+#      the sandbox's network_access; discovery needs only this file.
+# Readers use beagle_daemon_portfile_read (first readable candidate); the
+# daemon itself keeps XDG as the primary write target and mirrors afterward.
+_BEAGLE_FILES_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BEAGLE_DAEMON_RUN_LOCAL="$_BEAGLE_FILES_ROOT/.beagle/run"
+_beagle_runtime_dir="${XDG_RUNTIME_DIR:-/var/tmp}"
+
+BEAGLE_DAEMON_PORTFILE_PRIMARY="${BEAGLE_DAEMON_PORTFILE:-${_beagle_runtime_dir}/beagle-daemon.port}"
+BEAGLE_DAEMON_PIDFILE_PRIMARY="${BEAGLE_DAEMON_PIDFILE:-${_beagle_runtime_dir}/beagle-daemon.pid}"
+BEAGLE_DAEMON_PORTFILE_MIRROR="$BEAGLE_DAEMON_RUN_LOCAL/daemon.port"
+BEAGLE_DAEMON_PIDFILE_MIRROR="$BEAGLE_DAEMON_RUN_LOCAL/daemon.pid"
+
+# Print the first readable portfile, or nothing. (A masked /run/user/<uid>
+# makes the primary unreadable, not merely absent — test -r covers both.)
+beagle_daemon_portfile_read() {
+    if [[ -r "$BEAGLE_DAEMON_PORTFILE_PRIMARY" ]]; then
+        echo "$BEAGLE_DAEMON_PORTFILE_PRIMARY"
+    elif [[ -r "$BEAGLE_DAEMON_PORTFILE_MIRROR" ]]; then
+        echo "$BEAGLE_DAEMON_PORTFILE_MIRROR"
+    fi
+}
+
+# Port number from whichever portfile is readable, or nothing.
+beagle_daemon_port() {
+    local f
+    f="$(beagle_daemon_portfile_read)"
+    [[ -n "$f" ]] && cat "$f"
+}

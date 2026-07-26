@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname "$0")/_beagle-racket"
+source "$(dirname "$0")/_beagle-daemon-files"
 
 if [[ $# -lt 2 ]]; then
     echo "usage: beagle-fields <RecordName> <file-or-dir> ..." >&2
@@ -8,7 +9,7 @@ if [[ $# -lt 2 ]]; then
 fi
 
 # Route through daemon if running
-PORTFILE="${BEAGLE_DAEMON_PORTFILE:-/var/tmp/beagle-daemon.port}"
+PORTFILE="$(beagle_daemon_portfile_read || true)"
 if [[ -f "$PORTFILE" ]]; then
     port=$(cat "$PORTFILE")
     if (exec 3<>/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then
