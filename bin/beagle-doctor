@@ -27,6 +27,7 @@
 
 set -uo pipefail
 source "$(dirname "$0")/_beagle-racket"
+source "$(dirname "$0")/_beagle-daemon-files"
 BIN="$(cd "$(dirname "$0")" && pwd)"
 
 JSON=0
