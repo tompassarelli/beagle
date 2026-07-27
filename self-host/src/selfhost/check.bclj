@@ -540,6 +540,18 @@
    "some"     (make-fn [ANY ANY] nil ANY)
    "every?"   (make-fn [ANY ANY] nil (make-prim "Bool"))})
 
+;; Clojure 1.12 Class/method instance-position calls carry the receiver as the
+;; first surface element, while declare-extern describes only the Java method
+;; parameters. Keep this classification explicit: an unknown declared static
+;; must continue to check every supplied argument (gate-c), never be guessed
+;; into instance dispatch from an arity mismatch.
+(def JVM-INSTANCE-POSITION-METHODS :- Any
+  {"Socket/connect" true
+   "java.net.Socket/connect" true})
+
+(defn jvm-instance-position-method? [sym :- String] :- Bool
+  (= true (get JVM-INSTANCE-POSITION-METHODS sym)))
+
 ;; --- environment helpers (env is a threaded immutable String->type map) ------
 
 ;; Today's ast-json.rkt serializes ABSENT optional fields as JSON false (the
@@ -1435,20 +1447,27 @@
 
     (= (get e "node") "static-call")
       (let [sym (get e "name")
-            raw-type (get env sym)]
+            raw-type (get env sym)
+            instance-position (jvm-instance-position-method? sym)
+            all-args (get e "args")
+            call-args (if (and instance-position (> (count all-args) 0))
+                        (subvec all-args 1)
+                        all-args)]
+        (when (and instance-position (> (count all-args) 0))
+          (infer-expr! (nth all-args 0) env))
         (cond
           (and (not (nil? raw-type)) (poly-type? raw-type))
-            (let [resolved (resolve-poly-call! raw-type (get e "args") env)]
+            (let [resolved (resolve-poly-call! raw-type call-args env)]
               (if (fn-type? resolved)
-                (do (check-args! sym resolved (get e "args") env)
+                (do (check-args! sym resolved call-args env)
                     (get resolved "ret"))
-                (do (doseq [a (get e "args")] (infer-expr! a env))
+                (do (doseq [a call-args] (infer-expr! a env))
                     ANY)))
           (and (not (nil? raw-type)) (fn-type? raw-type))
-            (do (check-args! sym raw-type (get e "args") env)
+            (do (check-args! sym raw-type call-args env)
                 (get raw-type "ret"))
           :else
-            (do (doseq [a (get e "args")] (infer-expr! a env))
+            (do (doseq [a call-args] (infer-expr! a env))
                 ANY)))
 
     ;; and/or evaluate left-to-right with short-circuit, per check.rkt: each

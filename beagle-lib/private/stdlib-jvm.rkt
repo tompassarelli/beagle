@@ -129,6 +129,7 @@
              (M (C SOCK) 'getInputStream  '() (C IS))
              (M (C SOCK) 'setSoTimeout    (list INT) NIL)
              (M (C SOCK) 'connect         (list ANY) NIL)   ; SocketAddress
+             (M (C SOCK) 'connect         (list ANY INT) NIL) ; SocketAddress, timeout
              (M (C SOCK) 'close           '() NIL))
        '())
    SSOCK

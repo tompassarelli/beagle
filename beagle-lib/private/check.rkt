@@ -1587,15 +1587,24 @@
 
 ;; Resolve a ctor/method/static call against an overload set: arity-select,
 ;; type-check args (reuse check-args → precise mismatch errors), return the
-;; declared return type. `args` includes the receiver as elem 0 for methods.
+;; declared return type. `args` includes the receiver as elem 0 for methods,
+;; but method arity is the Java argument count (the receiver is not an arg).
 (define (resolve-jvm-call label cls member overloads args env node)
-  (define n (length args))
+  (define method? (eq? label 'method))
+  (define call-args (if method? (cdr args) args))
+  (define n (length call-args))
   (define by-arity
     (filter (lambda (ft)
               (and (not (type-fn-rest-type ft))
-                   (= n (length (type-fn-params ft)))))
+                   (= n (length (if method?
+                                  (cdr (type-fn-params ft))
+                                  (type-fn-params ft))))))
             overloads))
   (define fn-name (string->symbol (format "~a/~a" cls member)))
+  (define (method-args-only ft)
+    (if method?
+      (type-fn (cdr (type-fn-params ft)) (type-fn-rest-type ft) (type-fn-ret ft))
+      ft))
   (cond
     [(null? by-arity)
      (raise-diag 'arity
@@ -1603,11 +1612,16 @@
                  (hasheq 'function (symbol->string fn-name))
                  #:src (src-for node))]
     [(null? (cdr by-arity))
-     (check-args fn-name (car by-arity) args env node)
+     (check-args fn-name (method-args-only (car by-arity)) call-args env node)
      (type-fn-ret (car by-arity))]
     [else
-     (define arg-types (map (lambda (a) (infer-expr a env)) args))
-     (define hit (findf (lambda (ft) (andmap type-compatible? arg-types (type-fn-params ft))) by-arity))
+     (define arg-types (map (lambda (a) (infer-expr a env)) call-args))
+     (define hit
+       (findf (lambda (ft)
+                (andmap type-compatible?
+                        arg-types
+                        (type-fn-params (method-args-only ft))))
+              by-arity))
      (if hit
        (type-fn-ret hit)
        (raise-diag 'type-mismatch
@@ -1987,15 +2001,34 @@
      (define sym (static-call-class+method e))
      (warn-target-exclude sym e)
      ;; Typed JVM static: if Class (after import-canonicalization) is a known
-     ;; class with this static, resolve against its static overloads. Otherwise
-     ;; fall back to the flat stdlib table (System/*, Math/*, ns-qualified, …).
+     ;; class with this static, resolve against its static overloads. Clojure
+     ;; 1.12 also permits Class/method with the instance in position 1; when
+     ;; the member is a known instance method, resolve that receiver separately.
+     ;; Otherwise fall back to the flat stdlib table (System/*, Math/*,
+     ;; ns-qualified, …).
      (define-values (raw-cls member) (split-static sym))
      (define cls (and raw-cls (canon-class raw-cls env)))
      (define entry (and cls (hash-ref CLASS-TABLE cls #f)))
      (define statics (and entry (hash-ref (class-entry-statics entry) member #f)))
+     (define methods (and entry (hash-ref (class-entry-methods entry) member #f)))
      (cond
        [statics
         (resolve-jvm-call 'static cls member statics (static-call-args e) env e)]
+       [methods
+        (define args (static-call-args e))
+        (when (pair? args)
+          (define recv-type (infer-expr (car args) env))
+          (define canon-recv-type
+            (if (type-prim? recv-type)
+              (type-prim (canon-class (type-prim-name recv-type) env))
+              recv-type))
+          (unless (type-compatible? canon-recv-type (type-prim cls))
+            (raise-diag 'type-mismatch
+                        (format "~a/~a receiver: expected ~a, got ~a"
+                                cls member cls (type->string recv-type))
+                        (hasheq 'function (symbol->string sym))
+                        #:src (src-for (car args)))))
+        (resolve-jvm-call 'method cls member methods args env e)]
        [else
         (define raw-type (hash-ref env sym ANY))
         (define fn-type
