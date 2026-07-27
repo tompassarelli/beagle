@@ -101,7 +101,11 @@
    (write-fixture! "gen-success.bjs"
                     "#lang beagle/js\n(ns gen.success.js)\n(defn add [x :- Int y :- Int] :- Int (+ x y))\n")
    (write-fixture! "gen-success.bnix"
-                    "#lang beagle/nix\n(ns gen.success.nix)\n(def greeting :- String \"hi\")\n")))
+                    "#lang beagle/nix\n(ns gen.success.nix)\n(def greeting :- String \"hi\")\n")
+   ;; Pattern is deliberately outside the narrow JVM signature table. Its
+   ;; declaration supplies the type at this explicit host boundary.
+   (write-fixture! "gen-declared-jvm-static.bclj"
+                    "#lang beagle/clj\n(ns gen.declared-jvm-static)\n(declare-extern java.util.regex.Pattern/quote [String -> String])\n(def quoted :- String (java.util.regex.Pattern/quote \"x\"))\n")))
 
 ;; Deliberately ill-typed / rejected source: a real check-time reject, not a
 ;; parse error, so the diagnostic exercises the same failure path certify
@@ -113,6 +117,11 @@
   (list
    (write-fixture! "gen-fail.bclj"
                     "#lang beagle/clj\n(ns gen.fail)\n(defn add [x :- Int y :- Int] :- Int (+ x y))\n(def bad :- Int (add \"nope\" 2))\n")
+   ;; Pattern is deliberately outside the narrow JVM signature table.  A
+   ;; declaration makes this host boundary explicit and typed; without it the
+   ;; checker must reject the static instead of silently inferring Any.
+   (write-fixture! "gen-undeclared-jvm-static.bclj"
+                    "#lang beagle/clj\n(ns gen.undeclared-jvm-static)\n(def quoted :- String (java.util.regex.Pattern/quote \"x\"))\n")
    (tmp-path "does-not-exist.bclj")))
 
 ;; ---------------------------------------------------------------------------
