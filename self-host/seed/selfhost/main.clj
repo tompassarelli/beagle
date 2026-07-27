@@ -7,7 +7,8 @@
             [selfhost.check :as c]
             [selfhost.emit-clj :as e]
             [selfhost.emit-nix :as en]
-            [selfhost.emit-js :as ejs]))
+            [selfhost.emit-js :as ejs]
+            [selfhost.facts-roundtrip :as fr]))
 
 (def BEAGLE-EXTENSIONS [".bclj" ".bjs" ".bnix" ".bodin" ".bgl" ".rkt"])
 
@@ -137,7 +138,8 @@
   (= cmd "check") (cmd-check! path target)
   (= cmd "emit") (cmd-emit! path target)
   (= cmd "emit-from-ast") (cmd-emit-from-ast! target)
+  (= cmd "facts-roundtrip") (fr/run! (rest args))
   :else (do
-  (selfhost.rt/eprint "usage: selfhost.main [--target clj|js|nix] ast|check|emit FILE, or emit-from-ast < ast.json\n")
+  (selfhost.rt/eprint "usage: selfhost.main [--target clj|js|nix] ast|check|emit FILE, emit-from-ast < ast.json, or facts-roundtrip MODE FILE\n")
   (selfhost.rt/exit 2)))
   (flush)))

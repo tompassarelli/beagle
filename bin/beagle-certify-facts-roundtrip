@@ -19,7 +19,6 @@ MATERIALIZED="$LAB/corpus"
 ORACLE="$LAB/oracle"
 PORT="$LAB/port"
 RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
-PORT_CP="$ROOT/self-host/seed"
 
 usage() {
   echo "usage: bin/beagle-certify-facts-roundtrip capture-original|certify" >&2
@@ -84,10 +83,7 @@ for ((start=0; start<${#CASES[@]}; start+=ORACLE_CHUNK)); do
 done
 
 run_port() {
-  bb -cp "$PORT_CP" \
-    -e '(require (quote [selfhost.facts-roundtrip :as rt]))
-        (rt/run! *command-line-args*)' \
-    -- "$@"
+  bin/beagle facts-roundtrip "$@"
 }
 
 if [[ "$MODE" == "capture-original" ]]; then

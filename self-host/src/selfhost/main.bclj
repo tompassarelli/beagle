@@ -1,7 +1,8 @@
 #lang beagle/clj
 (ns selfhost.main
   "Self-hosted compiler driver: reader -> parse -> check -> emit-clj on
-  babashka. Commands: ast FILE | check FILE | emit FILE | emit-from-ast.
+  babashka. Commands: ast FILE | check FILE | emit FILE | emit-from-ast |
+  facts-roundtrip MODE FILE.
   Host IO via selfhost.rt externs; the compiler stages are pure .bclj.
   (:gen-class) so the JVM/GraalVM native-image path has a -main entry class;
   babashka ignores it."
@@ -16,6 +17,7 @@
 (require selfhost.emit-clj :as e)
 (require selfhost.emit-nix :as en)
 (require selfhost.emit-js :as ejs)
+(require selfhost.facts-roundtrip :as fr)
 
 (declare-extern selfhost.rt/slurp-file [String -> String])
 (declare-extern selfhost.rt/read-stdin [-> String])
@@ -206,8 +208,9 @@
       (= cmd "check") (cmd-check! path target)
       (= cmd "emit") (cmd-emit! path target)
       (= cmd "emit-from-ast") (cmd-emit-from-ast! target)
+      (= cmd "facts-roundtrip") (fr/run! (rest args))
       :else
-        (do (selfhost.rt/eprint "usage: selfhost.main [--target clj|js|nix] ast|check|emit FILE, or emit-from-ast < ast.json\n")
+        (do (selfhost.rt/eprint "usage: selfhost.main [--target clj|js|nix] ast|check|emit FILE, emit-from-ast < ast.json, or facts-roundtrip MODE FILE\n")
             (selfhost.rt/exit 2)))
     ;; clojure.main flushes *out* in a finally; the gen-class/native-image entry
     ;; bypasses clojure.main, so an unflushed `print` would exit with empty stdout.

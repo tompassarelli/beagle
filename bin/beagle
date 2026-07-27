@@ -33,6 +33,7 @@ Query (the compiler is the source of truth):
   expand <file>             Macro-expanded source
   explain <CODE>            Diagnostic explanation (E001, …)
   explain-type <file>       Inferred types as a view
+  facts-roundtrip MODE FILE Lossless source/fact projection (--emit-edn|--render)
 
 Project / loop:
   init [--hooks] [--target T]  Bootstrap a project (+ portable repair hooks)
@@ -109,6 +110,10 @@ case "$cmd" in
     impact)          exec "$BIN/beagle-impact" "$@" ;;
     explain)         exec "$BIN/beagle-explain" "$@" ;;
     explain-type)    exec "$BIN/beagle-explain-type" "$@" ;;
+    facts-roundtrip)
+        exec bb -cp "$BEAGLE_DIR/self-host/seed" \
+            -m selfhost.main facts-roundtrip "$@"
+        ;;
     daemon)          exec "$BIN/beagle-daemon" "$@" ;;
     test)            exec "$BIN/beagle-test" "$@" ;;
     rejection-stats) exec "$BIN/beagle-rejection-stats" "$@" ;;

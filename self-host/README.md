@@ -72,6 +72,21 @@ Both accept the same subcommands (`emit` / `check` / `ast` / `emit-from-ast`,
 `--target <t>`) and emit byte-identical output — that byte-identity is the
 gate.
 
+## Lossless source/fact interface
+
+Fram should depend on the repository CLI, not the self-host namespace or seed
+layout:
+
+```sh
+bin/beagle facts-roundtrip --emit-edn FILE.bclj > module.edn
+bin/beagle facts-roundtrip --render module.edn > FILE.bclj
+```
+
+The subcommand runs the self-hosted implementation. Its output is certified
+byte-for-byte against the pinned-Racket original by
+`bin/beagle-certify-facts-roundtrip certify`; the Fram-side adoption is a
+separate follow-up cut.
+
 ## Changing the compiler
 
 1. Edit `src/selfhost/*.bclj` (or `src/selfhost/rt.clj`).
