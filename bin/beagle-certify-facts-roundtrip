@@ -19,6 +19,7 @@ MATERIALIZED="$LAB/corpus"
 ORACLE="$LAB/oracle"
 PORT="$LAB/port"
 RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
+PORT_CP="$ROOT/self-host/seed"
 
 usage() {
   echo "usage: bin/beagle-certify-facts-roundtrip capture-original|certify" >&2
@@ -59,10 +60,35 @@ capture_oracle() {
   "$RACKET" "$RT" --render "$ORACLE/$name.emit" > "$ORACLE/$name.render"
 }
 
-for row in "${CASES[@]}"; do
-  IFS=$'\t' read -r name src <<<"$row"
-  capture_oracle "$name" "$src"
+# Pinned Racket startup dominates this gate. Run four independent cases per
+# chunk and print each settled chunk so long certification runs stay observable.
+ORACLE_CHUNK=4
+for ((start=0; start<${#CASES[@]}; start+=ORACLE_CHUNK)); do
+  pids=()
+  stop=$((start + ORACLE_CHUNK))
+  (( stop > ${#CASES[@]} )) && stop=${#CASES[@]}
+  for ((idx=start; idx<stop; idx++)); do
+    IFS=$'\t' read -r name src <<<"${CASES[$idx]}"
+    capture_oracle "$name" "$src" &
+    pids+=("$!")
+  done
+  chunk_fail=0
+  for pid in "${pids[@]}"; do
+    wait "$pid" || chunk_fail=1
+  done
+  [[ "$chunk_fail" -eq 0 ]] || {
+    echo "facts-roundtrip certify: pinned-Racket oracle chunk failed" >&2
+    exit 1
+  }
+  echo "oracle chunk: $stop/${#CASES[@]} cases captured"
 done
+
+run_port() {
+  bb -cp "$PORT_CP" \
+    -e '(require (quote [selfhost.facts-roundtrip :as rt]))
+        (rt/run! *command-line-args*)' \
+    -- "$@"
+}
 
 if [[ "$MODE" == "capture-original" ]]; then
   {
@@ -88,7 +114,7 @@ fail=0
 passed=0
 for row in "${CASES[@]}"; do
   IFS=$'\t' read -r name src <<<"$row"
-  expected="$(awk -F $'\t' -v n="$name" '$1 == n {print $2 \" \" $3}' "$GOLDEN")"
+  expected="$(awk -F $'\t' -v n="$name" '$1 == n {print $2 " " $3}' "$GOLDEN")"
   read -r expected_emit expected_render <<<"$expected"
   oracle_emit="$(sha256sum "$ORACLE/$name.emit" | cut -d' ' -f1)"
   oracle_render="$(sha256sum "$ORACLE/$name.render" | cut -d' ' -f1)"
@@ -98,12 +124,12 @@ for row in "${CASES[@]}"; do
     continue
   fi
 
-  if ! bin/beagle facts-roundtrip --emit-edn "$src" > "$PORT/$name.emit"; then
+  if ! run_port --emit-edn "$src" > "$PORT/$name.emit"; then
     echo "FAIL $name: self-host emit exited nonzero" >&2
     fail=$((fail + 1))
     continue
   fi
-  if ! bin/beagle facts-roundtrip --render "$PORT/$name.emit" > "$PORT/$name.render"; then
+  if ! run_port --render "$PORT/$name.emit" > "$PORT/$name.render"; then
     echo "FAIL $name: self-host render exited nonzero" >&2
     fail=$((fail + 1))
     continue
@@ -115,6 +141,10 @@ for row in "${CASES[@]}"; do
   else
     echo "FAIL $name: byte divergence (inspect $LAB)" >&2
     fail=$((fail + 1))
+  fi
+  settled=$((passed + fail))
+  if (( settled % 4 == 0 || settled == ${#CASES[@]} )); then
+    echo "port chunk: $settled/${#CASES[@]} cases compared"
   fi
 done
 

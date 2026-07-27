@@ -66,6 +66,20 @@
                    (mapv (fn [child :- Any] :- Any (replace-loc child loc)) children)
                    nil))))
 
+(defn- map-context-node [node :- Any loc :- Any] :- Any
+  (let [children (get node "children")
+        bool? (= (get node "kind") "bool")]
+    (assoc node
+      "kind" (if bool? "symbol" (get node "kind"))
+      "value" (if bool? (if (get node "value") "true" "false")
+                (get node "value"))
+      "loc" loc
+      "children" (if (some? children)
+                   (mapv (fn [child :- Any] :- Any
+                           (map-context-node child loc))
+                         children)
+                   nil))))
+
 (defn- relative-loc [node :- Any base :- Int] :- Any
   (let [loc (get node "loc")
         pos (get loc "pos")
@@ -191,8 +205,11 @@
                  "next" (get result "pos")))
       (= ch "{")
         (let [result (scan-delimited src (+ p 1) "}")
-              loc (source-loc src p nil)]
-          (assoc (tagged-node ast/MAP-TAG (get result "nodes") loc loc)
+              loc (source-loc src p nil)
+              items (mapv (fn [child :- Any] :- Any
+                            (map-context-node child loc))
+                          (get result "nodes"))]
+          (assoc (tagged-node ast/MAP-TAG items loc loc)
                  "next" (get result "pos")))
       (= ch "'") (prefixed-node src p "quote" (+ p 1))
       (= ch "`") (prefixed-node src p "quasiquote" (+ p 1))
@@ -631,11 +648,14 @@
 (defn- datum-tail [datum :- Any] :- Any
   (if (> (count datum) 1) (subvec datum 1) []))
 
-(defn- escaped-symbol-char? [ch :- String] :- Bool
+(defn- symbol-trigger-char? [ch :- String] :- Bool
   (or (rd/whitespace? ch)
       (= ch "(") (= ch ")") (= ch "[") (= ch "]")
       (= ch "{") (= ch "}") (= ch "\"") (= ch "|")
-      (= ch ";") (= ch "\\") (= ch ",") (= ch "`") (= ch "'")))
+      (= ch ";") (= ch "\\") (= ch ",") (= ch "`")))
+
+(defn- symbol-escape-char? [ch :- String] :- Bool
+  (or (symbol-trigger-char? ch) (= ch "'")))
 
 (defn- symbol-needs-bars? [text :- String] :- Bool
   (or (= (count text) 0)
@@ -643,7 +663,7 @@
       (loop [i 0]
         (cond
           (>= i (count text)) false
-          (escaped-symbol-char? (rd/char-at text i)) true
+          (symbol-trigger-char? (rd/char-at text i)) true
           :else (recur (+ i 1))))))
 
 (defn- symbol-source [text :- String] :- String
@@ -654,7 +674,7 @@
         (if (>= i (count text))
           out
           (let [ch (rd/char-at text i)
-                unsafe? (escaped-symbol-char? ch)]
+                unsafe? (symbol-escape-char? ch)]
             (recur (+ i 1) (str out (if unsafe? "\\" "") ch)))))
     :else text))
 

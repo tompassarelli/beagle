@@ -43,6 +43,11 @@
   (let [children (get node "children")]
   (assoc node "loc" loc "children" (if (some? children) (mapv (fn [child] (replace-loc child loc)) children) nil))))
 
+(defn- map-context-node [node loc]
+  (let [children (get node "children")
+   bool? (= (get node "kind") "bool")]
+  (assoc node "kind" (if bool? "symbol" (get node "kind")) "value" (if bool? (if (get node "value") "true" "false") (get node "value")) "loc" loc "children" (if (some? children) (mapv (fn [child] (map-context-node child loc)) children) nil))))
+
 (defn- relative-loc [node base]
   (let [loc (get node "loc")
    pos (get loc "pos")
@@ -144,8 +149,9 @@
    loc (source-loc src p nil)]
   (assoc (tagged-node ast/BRACKET-TAG (get result "nodes") loc loc) "next" (get result "pos")))
   (= ch "{") (let [result (scan-delimited src (+ p 1) "}")
-   loc (source-loc src p nil)]
-  (assoc (tagged-node ast/MAP-TAG (get result "nodes") loc loc) "next" (get result "pos")))
+   loc (source-loc src p nil)
+   items (mapv (fn [child] (map-context-node child loc)) (get result "nodes"))]
+  (assoc (tagged-node ast/MAP-TAG items loc loc) "next" (get result "pos")))
   (= ch "'") (prefixed-node src p "quote" (+ p 1))
   (= ch "`") (prefixed-node src p "quasiquote" (+ p 1))
   (= ch "@") (prefixed-node src p "deref" (+ p 1))
@@ -444,14 +450,17 @@
 (defn- datum-tail [datum]
   (if (> (count datum) 1) (subvec datum 1) []))
 
-(defn- ^Boolean escaped-symbol-char? [^String ch]
-  (or (rd/whitespace? ch) (= ch "(") (= ch ")") (= ch "[") (= ch "]") (= ch "{") (= ch "}") (= ch "\"") (= ch "|") (= ch ";") (= ch "\\") (= ch ",") (= ch "`") (= ch "'")))
+(defn- ^Boolean symbol-trigger-char? [^String ch]
+  (or (rd/whitespace? ch) (= ch "(") (= ch ")") (= ch "[") (= ch "]") (= ch "{") (= ch "}") (= ch "\"") (= ch "|") (= ch ";") (= ch "\\") (= ch ",") (= ch "`")))
+
+(defn- ^Boolean symbol-escape-char? [^String ch]
+  (or (symbol-trigger-char? ch) (= ch "'")))
 
 (defn- ^Boolean symbol-needs-bars? [^String text]
   (or (= (count text) 0) (= (rd/char-at text 0) "'") (loop [i 0]
   (cond
   (>= i (count text)) false
-  (escaped-symbol-char? (rd/char-at text i)) true
+  (symbol-trigger-char? (rd/char-at text i)) true
   :else (recur (+ i 1))))))
 
 (defn- ^String symbol-source [^String text]
@@ -460,7 +469,7 @@
   (symbol-needs-bars? text) (loop [i 0
    out ""]
   (if (>= i (count text)) out (let [ch (rd/char-at text i)
-   unsafe? (escaped-symbol-char? ch)]
+   unsafe? (symbol-escape-char? ch)]
   (recur (+ i 1) (str out (if unsafe? "\\" "") ch)))))
   :else text))
 
