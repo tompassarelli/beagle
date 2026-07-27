@@ -32,7 +32,7 @@ ROOT="$(cd "$HERE/../../.." && pwd)"
 RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
 FRAM_OUT="${FRAM_OUT:-$HOME/code/fram/out}"
 CHARTROOM="${CHARTROOM:-$HOME/code/fram/chartroom}"
-RESOLVE="$CHARTROOM/src/resolve.clj"
+source "$ROOT/bin/_fram-resolver"
 fail=0
 
 # author <outdir> <corpus> <op> <args...> -> prints COMMITTED | REJECTED
@@ -85,7 +85,7 @@ fact_node_growth() {
 
 echo "================ AUTHORING-as-facts gate (upsert-form + set-body) ================"
 [ -d "$FRAM_OUT" ] || { echo "  (need FRAM_OUT)"; exit 3; }
-[ -f "$RESOLVE" ]  || { echo "  (need CHARTROOM resolve.clj)"; exit 3; }
+RESOLVE="$(find_fram_resolver)" || exit 3
 CORPUS="$HERE/authoring-corpus"
 [ -d "$CORPUS" ]   || { echo "  (need authoring-corpus)"; exit 3; }
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT

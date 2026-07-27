@@ -18,13 +18,13 @@ ROOT="$(cd "$HERE/../../.." && pwd)"
 RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
 FRAM_OUT="${FRAM_OUT:-$HOME/code/fram/out}"
 CHARTROOM="${CHARTROOM:-$HOME/code/fram/chartroom}"
-RES="$CHARTROOM/src/resolve.clj"
+source "$ROOT/bin/_fram-resolver"
 FRAM_SRC="${CODE_AS_FACTS_CORPUS:-$HOME/code/fram/src}"
 fail=0
 
 echo "================ scope-correct rename — the complete engine (resolve.clj) ================"
 [ -d "$FRAM_OUT" ] || { echo "  (need FRAM_OUT)"; exit 3; }
-[ -f "$RES" ]     || { echo "  (need CHARTROOM resolve.clj)"; exit 3; }
+RES="$(find_fram_resolver)" || exit 3
 chk() { if eval "$2"; then echo "  PASS  $1"; else echo "  FAIL  $1"; fail=1; fi; }
 W="$(mktemp -d)"; trap 'rm -rf "$W" $RESOLVE_OUT/resolved-*.edn' EXIT
 

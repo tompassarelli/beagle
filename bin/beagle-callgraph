@@ -14,7 +14,7 @@
 #           "blast":{callee:[transitive-callers]}}   on stdout (JSON)
 #          a one-line summary on stderr.
 #
-# Rents the Layer-2 engine in chartroom (resolve.clj). Set FRAM_OUT / CHARTROOM to override.
+# Rents Fram's Layer-2 engine (resolve.clj). Set FRAM_OUT / CHARTROOM to override.
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
@@ -27,21 +27,16 @@ BIN="$(cd "$(dirname "$0")" && pwd)"
 RT="$BIN/../beagle-lib/private/facts-roundtrip.rkt"
 FRAM_OUT="${FRAM_OUT:-$HOME/code/fram/out}"
 # The call graph is derived from the SAME converged resolver as rename/delete: the Layer-2
-# engine in chartroom (resolve.clj). beagle's tooling RENTS it. Override with CHARTROOM.
+# Fram engine (resolve.clj). beagle's tooling RENTS it. CHARTROOM remains the legacy override.
 CHARTROOM="${CHARTROOM:-$HOME/code/fram/chartroom}"
-RES="$CHARTROOM/src/resolve.clj"
+source "$BIN/_fram-resolver"
+RES="$(find_fram_resolver)" || exit 3
 
 if [[ ! -d "$FRAM_OUT" ]]; then
     echo "beagle-callgraph: Fram classpath not found at $FRAM_OUT" >&2
     echo "  (graph-native repair runs on the Fram engine — build fram/out or set FRAM_OUT)" >&2
     exit 3
 fi
-if [[ ! -f "$RES" ]]; then
-    echo "beagle-callgraph: Layer-2 resolver not found at $RES" >&2
-    echo "  (the engine lives in chartroom; check it out or set CHARTROOM)" >&2
-    exit 3
-fi
-
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
 # Project each beagle source to its fact-AST (the projection that carries requires/scope,

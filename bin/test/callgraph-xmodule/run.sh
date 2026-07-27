@@ -13,15 +13,17 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$HERE/../../.." && pwd)"
 FRAM_OUT="${FRAM_OUT:-$HOME/code/fram/out}"
 CHARTROOM="${CHARTROOM:-$HOME/code/fram/chartroom}"
 export FRAM_OUT CHARTROOM
-CG="$(cd "$HERE/../../.." && pwd)/bin/beagle-callgraph"
+source "$ROOT/bin/_fram-resolver"
+CG="$ROOT/bin/beagle-callgraph"
 fail=0
 
 echo "================ reasoning call-graph — cross-module completeness ================"
 [ -d "$FRAM_OUT" ] || { echo "  (need FRAM_OUT)"; exit 3; }
-[ -f "$CHARTROOM/src/resolve.clj" ] || { echo "  (need CHARTROOM resolve.clj)"; exit 3; }
+RES="$(find_fram_resolver)" || exit 3
 
 JSON="$("$CG" "$HERE/corpus" 2>/dev/null)"
 chk() { if eval "$2"; then echo "  PASS  $1"; else echo "  FAIL  $1"; fail=1; fi; }

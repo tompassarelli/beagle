@@ -17,14 +17,14 @@ ROOT="$(cd "$HERE/../../.." && pwd)"
 RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
 FRAM_OUT="${FRAM_OUT:-$HOME/code/fram/out}"
 CHARTROOM="${CHARTROOM:-$HOME/code/fram/chartroom}"
-RES="$CHARTROOM/src/resolve.clj"
+source "$ROOT/bin/_fram-resolver"
 SRC="${CODE_AS_FACTS_CORPUS:-$HOME/code/fram/src}"
 export FRAM_OUT CHARTROOM
 fail=0
 
 echo "================ engine demo — one engine: REASON + REPAIR on real code ================"
 [ -d "$FRAM_OUT" ] || { echo "  (need FRAM_OUT)"; exit 3; }
-[ -f "$RES" ]     || { echo "  (need CHARTROOM resolve.clj)"; exit 3; }
+RES="$(find_fram_resolver)" || exit 3
 [ -d "$SRC" ]     || { echo "  (need fram/src)"; exit 3; }
 chk() { if eval "$2"; then echo "  PASS  $1"; else echo "  FAIL  $1"; fail=1; fi; }
 W="$(mktemp -d)"; trap 'rm -rf "$W" $RESOLVE_OUT/resolved-*.edn' EXIT
