@@ -1,0 +1,4 @@
+#lang beagle/js
+(defn red [x :- Any] :- Any x)
+(defn crimson [z :- Any] :- Any z)
+(defn use [] :- Any (red (crimson 1)))

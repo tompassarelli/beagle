@@ -1,0 +1,106 @@
+#lang beagle/clj
+(ns fram.import
+  "Import thread files into the fact-op log. A file is a block of
+  `@subject predicate object` lines, then `---`, then a prose body. Every line
+  IS a fact, so this is GENERIC — no per-field knowledge, no schema. Objects are
+  either refs (`@id`) or EDN literals. Host IO via fram.rt externs.")
+
+(require fram.kernel :as k)
+(require fram.fold :as fold)
+(require clojure.string :as str)
+(require fram.rt)
+
+(declare-extern fram.rt/slurp [String -> String])
+(declare-extern fram.rt/list-md [String -> (Vec String)])
+(declare-extern fram.rt/split-on [String String -> (Vec String)])
+(declare-extern fram.rt/split-kv [String -> (Vec String)])
+(declare-extern fram.rt/edn-unquote [String -> String])
+
+;; --- split a file into [fact-head, prose-body] on the first `---` line -------
+(defrecord Doc [head :- String body :- String])
+
+(defn- split-doc [content :- String] :- Doc
+  (let [lines (fram.rt/split-on content "\n")
+        n (count lines)]
+    (loop [i 0]
+      (cond
+        [(>= i n) (->Doc content "")]
+        [(= "---" (str/trim (nth lines i)))
+         (->Doc (str/join "\n" (subvec (vec lines) 0 i))
+                (str/join "\n" (subvec (vec lines) (+ i 1) n)))]
+        [:else (recur (+ i 1))]))))
+
+;; --- one object token: @ref kept as-is; "quoted" via EDN; else bare literal ---
+(defn- parse-obj [tok :- String] :- String
+  (cond
+    [(str/starts-with? tok "@") tok]
+    [(str/starts-with? tok "\"") (fram.rt/edn-unquote tok)]
+    [:else tok]))
+
+;; stderr warning — import runs as a CLI; a skipped/dropped thread must be
+;; VISIBLE, never silent (the crash-vs-skip asymmetry the log read already has).
+(defn- warn [msg :- String] :- Nil
+  (binding [*out* *err*] (println (str "WARN import: " msg))))
+
+;; --- a file -> its facts (subject from the leading @line; body -> a fact) ---
+;; `path` is carried only to name the file in warnings (#16: a head with no
+;; @subject line). It does not affect the parse.
+(defn- file->facts [path :- String content :- String] :- (Vec k/Fact)
+  (let [doc (split-doc content)
+        lines (fram.rt/split-on (:head doc) "\n")
+        n (count lines)
+        si (loop [i 0]
+             (cond
+               [(>= i n) (- 0 1)]
+               [(str/starts-with? (str/trim (nth lines i)) "@") i]
+               [:else (recur (+ i 1))]))]
+    (if (< si 0)
+      ;; No @subject line — the WHOLE thread (title/owner/body/edges) would be
+      ;; dropped. Warn loudly instead of silently importing zero facts, unless
+      ;; the head is genuinely empty (a blank/body-only file is not an error).
+      (do
+        (if (str/blank? (:head doc))
+          nil
+          (warn (str path " — no @subject line found in head; dropping " n
+                     " head line(s) (a corrupted/hand-edited first line, or a stray BOM/whitespace before @?)")))
+        [])
+      (let [subj (str/trim (nth lines si))
+            facts (loop [i (+ si 1) acc []]
+                     (if (>= i n)
+                       acc
+                       (let [t (str/trim (nth lines i))]
+                         (if (str/blank? t)
+                           (recur (+ i 1) acc)
+                           (let [kv (fram.rt/split-kv t)]
+                             (recur (+ i 1)
+                                    (conj acc (k/->Fact subj (nth kv 0) (parse-obj (nth kv 1))))))))))
+            body (:body doc)]
+        (if (str/blank? body) facts (conj facts (k/->Fact subj "body" body)))))))
+
+;; --- corpus -> numbered fact-ops (frame "import") --------------------------
+(defn- number-fact-ops [facts :- (Vec k/Fact)] :- (Vec fold/FactOp)
+  (loop [cs facts i 1 acc []]
+    (if (empty? cs)
+      acc
+      (let [c (first cs)]
+        (recur (rest cs) (+ i 1)
+               (conj acc (fold/->FactOp i "assert" (:l c) (:p c) (:r c) "import")))))))
+
+;; Parse ONE file into facts, isolating any failure to that file. A single
+;; malformed line (e.g. an unterminated quoted literal -> fram.rt/edn-unquote
+;; throws "EOF while reading string") must skip THAT file with a warning, not
+;; abort the whole corpus import — the same crash-vs-skip discipline read-log
+;; already applies per log line.
+(defn- safe-file->facts [path :- String] :- (Vec k/Fact)
+  (try (file->facts path (fram.rt/slurp path))
+       (catch Exception e
+         (warn (str path " — skipped (could not parse): " (.getMessage e)))
+         [])))
+
+(defn load-corpus [threads-dir :- String] :- (Vec fold/FactOp)
+  (let [files (fram.rt/list-md threads-dir)
+        facts (reduce (fn [acc :- (Vec k/Fact) path :- String] :- (Vec k/Fact)
+                         (vec (concat acc (safe-file->facts path))))
+                       []
+                       files)]
+    (number-fact-ops facts)))

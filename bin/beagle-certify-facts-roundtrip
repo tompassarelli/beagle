@@ -96,7 +96,7 @@ if [[ "$MODE" == "capture-original" ]]; then
       printf '%s\t%s\t%s\n' "$name" "$emit_sha" "$render_sha"
     done
   } > "$GOLDEN"
-  echo "facts-roundtrip capture: ${#CASES[@]} corpus cases, 72 oracle artifacts, masks=0"
+  echo "facts-roundtrip capture: ${#CASES[@]} corpus cases, $((${#CASES[@]} * 2)) oracle artifacts, masks=0"
   echo "golden: ${GOLDEN#$ROOT/}"
   exit 0
 fi

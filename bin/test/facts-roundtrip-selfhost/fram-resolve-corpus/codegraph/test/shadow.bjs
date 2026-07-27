@@ -1,0 +1,6 @@
+#lang beagle/js
+(defn red [x :- Any] :- Any x)
+(defn outer [y :- Any] :- Any
+  (let [red y]
+    (red red))
+  (red y))

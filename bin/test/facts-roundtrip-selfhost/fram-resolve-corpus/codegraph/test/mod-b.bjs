@@ -1,0 +1,3 @@
+#lang beagle/js
+(defn red [y :- Any] :- Any y)
+(defn use-b [] :- Any (red 2))

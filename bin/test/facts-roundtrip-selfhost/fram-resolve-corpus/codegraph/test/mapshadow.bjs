@@ -1,0 +1,5 @@
+#lang beagle/js
+(defn red [x :- Any] :- Any x)
+(defn f [m :- Any] :- Any
+  (let [{:keys [red]} m] (red red))
+  (red m))

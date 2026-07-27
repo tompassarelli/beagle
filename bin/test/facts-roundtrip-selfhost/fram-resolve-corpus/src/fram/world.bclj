@@ -1,0 +1,268 @@
+#lang beagle/clj
+
+;; @upstream:graph — the code lives in the Fram fact graph; this text is
+;; GENERATED. Author via the fram MCP graph-edit verbs (add-def / set-body /
+;; rename-def / insert-after / replace-in-body), never Edit/Write — a text edit
+;; would desync the graph. De-adopt (drop sentinel + registry entry) to edit as
+;; text; that is a deliberate workflow change. SEEDED 2026-07-22 (greenfield
+;; world-kernel bootstrap, worktree world-kernel-v0) — seed only, no
+;; substantive forms yet; authoring continues via mcp__fram__* graph-edit
+;; verbs per the code-as-facts skill.
+;; ============================================================================
+;; fram.world — world-kernel: versioned views over the claim graph (worlds).
+;; ============================================================================
+(ns fram.world)
+
+(def max-blob-bytes :- Int 524288)
+
+(def max-record-bytes :- Int 786432)
+
+(def max-name-bytes :- Int 63)
+
+(def max-slot-bytes :- Int 1024)
+
+(def nul :- String (str (char 0)))
+
+(def blob-tag :- String (str "fram.world.v1.blob" nul))
+
+(def version-tag :- String (str "fram.world.v1.version" nul))
+
+(def candidate-tag :- String (str "fram.world.v1.candidate" nul))
+
+(def manifest-tag :- String (str "fram.world.v1.manifest" nul))
+
+(def lock-tag :- String (str "fram.world.v1.lock" nul))
+
+(def receipt-tag :- String (str "fram.world.v1.receipt" nul))
+
+(defn utf8 [text :- String] :- Any (.getBytes text "UTF-8"))
+
+(defn byte-len [text :- String] :- Int (alength (utf8 text)))
+
+(defn hex-of [digest :- Any] :- String
+  (apply str
+    (mapv (fn [b :- Any] :- String (format "%02x" (bit-and (int b) 255)))
+      (vec digest))))
+
+(defn domain-hash [tag :- String content :- Any] :- String
+  (let [md (. java.security.MessageDigest getInstance "SHA-256") primed (.update md (utf8 tag))]
+    (hex-of (.digest md content))))
+
+(defn hash-text [tag :- String text :- String] :- String
+  (domain-hash tag (utf8 text)))
+
+(defn byte-key [text :- Any] :- String
+  (apply str
+    (mapv (fn [b :- Any] :- String (str (char (bit-and (int b) 255))))
+      (vec (utf8 (str text))))))
+
+(defn join-space [parts :- Any] :- String
+  (let [v (vec parts)]
+    (if (empty? v)
+      ""
+      (reduce (fn [acc :- Any part :- Any] :- String (str acc " " part))
+        (first v)
+        (vec (rest v))))))
+
+(defn plain-string? [text :- String] :- Bool
+  (loop [i 0]
+    (if (>= i (count text))
+      true
+      (let [n (int (.charAt text i))]
+        (if (or (< n 32) (= n 34) (= n 92)) false (recur (inc i)))))))
+
+(defn render-string [text :- String] :- String
+  (if (plain-string? text)
+    (str "\"" text "\"")
+    (str "\""
+      (apply str
+        (mapv (fn [i :- Int] :- String (let [n (int (.charAt text i))] (cond [(= n 34) "\\\""] [(= n 92) "\\\\"] [(= n 10) "\\n"] [(= n 13) "\\r"] [(= n 9) "\\t"] [(< n 32) (format "\\u%04x" n)] [:else (subs text i (inc i))])))
+          (vec (range (count text)))))
+      "\"")))
+
+(defn render-key [k :- Any] :- String
+  (cond
+    [(keyword? k) (str k)]
+    [(string? k) (render-string k)]
+    [:else
+     (throw (ex-info "fram.world: map key outside the canonical domain" {:reject :world-uncanonical-key}))]))
+
+(defn render-value [v :- Any] :- String
+  (cond
+    [(nil? v) "nil"]
+    [(boolean? v) (if v "true" "false")]
+    [(string? v) (render-string v)]
+    [(keyword? v) (str v)]
+    [(number? v) (str v)]
+    [(vector? v)
+     (str "["
+       (join-space (mapv (fn [x :- Any] :- String (render-value x)) v))
+       "]")]
+    [(map? v)
+     (let [ks (vec (sort-by (fn [k :- Any] :- String (byte-key (render-key k))) (vec (keys v))))]
+       (str "{"
+         (join-space (mapv (fn [k :- Any] :- String (str (render-key k) " " (render-value (get v k)))) ks))
+         "}"))]
+    [:else
+     (throw (ex-info "fram.world: value outside the canonical EDN domain" {:reject :world-uncanonical-value}))]))
+
+(defn render-record [record :- Any] :- String (render-value record))
+
+(defn record-bytes [record :- Any] :- Int (byte-len (render-record record)))
+
+(defn blob-id [raw :- Any] :- String (domain-hash blob-tag raw))
+
+(defn blob-b64 [raw :- Any] :- String
+  (.encodeToString (. java.util.Base64 getEncoder) raw))
+
+(defn validate-blob [raw :- Any] :- Any
+  (let [n (alength raw)]
+    (if (> n max-blob-bytes)
+      {:reject :world-blob-too-large :bytes n :max max-blob-bytes}
+      nil)))
+
+(defn validate-record [record :- Any] :- Any
+  (let [n (record-bytes record)]
+    (if (> n max-record-bytes)
+      {:reject :world-record-too-large :bytes n :max max-record-bytes}
+      nil)))
+
+(defn clean-text? [text :- String] :- Bool
+  (loop [i 0]
+    (if (>= i (count text))
+      true
+      (let [n (int (.charAt text i))]
+        (if (or (< n 32) (= n 92) (and (<= 127 n) (<= n 159)))
+          false
+          (recur (inc i)))))))
+
+(defn validate-world-name [name0 :- Any] :- Any
+  (if (string? name0)
+    (let [n (byte-len name0)]
+      (cond
+        [(zero? n) {:reject :world-name-illegal}]
+        [(> n max-name-bytes)
+         {:reject :world-name-too-long :bytes n :max max-name-bytes}]
+        [(not (clean-text? name0)) {:reject :world-name-illegal}]
+        [(not (. java.text.Normalizer isNormalized name0 (. java.text.Normalizer$Form valueOf "NFC")))
+         {:reject :world-name-illegal}]
+        [:else nil]))
+    {:reject :world-name-illegal}))
+
+(defn split-slash [text :- String] :- (Vec String)
+  (loop [i 0 start 0 out []]
+    (if (>= i (count text))
+      (conj out (subs text start i))
+      (if (= (int (.charAt text i)) 47)
+        (recur (inc i) (inc i) (conj out (subs text start i)))
+        (recur (inc i) start out)))))
+
+(defn slot-segments-ok? [text :- String] :- Bool
+  (every? (fn [seg :- Any] :- Bool (and (pos? (count seg)) (not= seg ".") (not= seg "..")))
+    (split-slash text)))
+
+(defn validate-slot [slot :- Any] :- Any
+  (if (string? slot)
+    (let [n (byte-len slot)]
+      (cond
+        [(zero? n) {:reject :world-slot-illegal}]
+        [(not (clean-text? slot)) {:reject :world-slot-illegal}]
+        [(not (slot-segments-ok? slot)) {:reject :world-slot-illegal}]
+        [(not (. java.text.Normalizer isNormalized slot (. java.text.Normalizer$Form valueOf "NFC")))
+         {:reject :world-slot-not-nfc}]
+        [(> n max-slot-bytes)
+         {:reject :world-slot-too-long :bytes n :max max-slot-bytes}]
+        [:else nil]))
+    {:reject :world-slot-illegal}))
+
+(defn validate-mode [mode :- Any] :- Any
+  (if (or (= mode "100644") (= mode "100755"))
+    nil
+    {:reject :world-illegal-mode :mode mode}))
+
+(defn put-op [slot :- String mode :- String id :- String] :- Any
+  {:op :put :slot slot :mode mode :blob-id id})
+
+(defn delete-op [slot :- String] :- Any {:op :delete :slot slot})
+
+(defn inherit-op [slot :- String] :- Any {:op :inherit :slot slot})
+
+(defn overlay-of [ops :- Any] :- Any
+  (let [v (vec ops) by-slot (reduce (fn [acc :- Any op :- Any] :- Any (assoc acc (get op :slot) op)) {} v) slots (vec (sort-by (fn [s :- Any] :- String (byte-key s)) (vec (keys by-slot))))]
+    (mapv (fn [s :- Any] :- Any (get by-slot s)) slots)))
+
+(defn version-record [base-version-id :- Any ops :- Any] :- Any
+  {:kind :world/version :base base-version-id :overlay (overlay-of ops)})
+
+(defn version-id [base-version-id :- Any ops :- Any] :- String
+  (hash-text version-tag (render-record (version-record base-version-id ops))))
+
+(defn overlay-entry [record :- Any slot :- Any] :- Any
+  (let [hits (filterv (fn [e :- Any] :- Bool (= (get e :slot) slot)) (vec (get record :overlay)))]
+    (if (empty? hits) nil (first hits))))
+
+(defn resolve-slot [versions :- Any version :- Any slot :- Any] :- Any
+  (loop [vid version]
+    (if (nil? vid)
+      {:present false :origin nil}
+      (let [record (get versions vid)]
+        (if (nil? record)
+          {:present false :origin nil}
+          (let [e (overlay-entry record slot)]
+            (cond
+              [(nil? e) (recur (get record :base))]
+              [(= (get e :op) :inherit) (recur (get record :base))]
+              [(= (get e :op) :delete) {:present false :origin vid}]
+              [:else
+               {:present
+                true
+                :mode
+                (get e :mode)
+                :blob-id
+                (get e :blob-id)
+                :origin
+                vid}])))))))
+
+(defn chain-slots [versions :- Any version :- Any] :- Any
+  (loop [vid version acc []]
+    (if (nil? vid)
+      (vec (distinct acc))
+      (let [record (get versions vid)]
+        (if (nil? record)
+          (vec (distinct acc))
+          (recur (get record :base)
+            (vec (concat acc (mapv (fn [e :- Any] :- Any (get e :slot)) (vec (get record :overlay)))))))))))
+
+(defn manifest [versions :- Any version :- Any] :- Any
+  (let [slots (vec (sort-by (fn [s :- Any] :- String (byte-key s)) (chain-slots versions version)))]
+    (filterv (fn [row :- Any] :- Bool (not (nil? row)))
+      (mapv (fn [s :- Any] :- Any (let [r (resolve-slot versions version s)] (if (get r :present) {:slot s :mode (get r :mode) :blob-id (get r :blob-id) :origin (get r :origin)} nil)))
+        slots))))
+
+(defn compose [versions :- Any base-version-id :- Any selections :- Any] :- Any
+  (let [ops (filterv (fn [op :- Any] :- Bool (not (nil? op))) (mapv (fn [sel :- Any] :- Any (let [pair (vec sel) slot (get pair 0) source (get pair 1) rs (resolve-slot versions source slot) rb (resolve-slot versions base-version-id slot)] (cond [(get rs :present) (if (and (get rb :present) (= (get rb :blob-id) (get rs :blob-id)) (= (get rb :mode) (get rs :mode))) nil (put-op slot (get rs :mode) (get rs :blob-id)))] [(get rb :present) (delete-op slot)] [:else nil]))) (vec selections)))]
+    (version-record base-version-id ops)))
+
+(defn nonce-hex? [nonce :- Any] :- Bool
+  (if (string? nonce)
+    (and (= 32 (count nonce)) (.matches nonce "[0-9a-f]{32}"))
+    false))
+
+(defn candidate-id [world-name :- String expected-head :- Any nonce :- String] :- String
+  (if (nonce-hex? nonce)
+    (hash-text candidate-tag
+      (render-record {:kind :world/candidate :world world-name :expected-head expected-head :nonce nonce}))
+    (throw (ex-info "fram.world: candidate nonce must be exactly 32 lowercase hex" {:reject :world-nonce-inadmissible}))))
+
+(defn fork-head [world-name :- String version :- String] :- Any
+  {:kind :world/head :world world-name :version version})
+
+(defn derive-head [claims :- Any world-name :- Any] :- Any
+  (let [hits (filterv (fn [c :- Any] :- Bool (and (= (get c :kind) :world/head) (= (get c :world) world-name))) (vec claims))]
+    (if (empty? hits) nil (get (last hits) :version))))
+
+(defn lock-record [version :- Any build-spec :- Any] :- Any
+  {:kind :world/lock :version version :build-spec build-spec})
+
+(defn world-lock-id [version :- Any build-spec :- Any] :- String
+  (hash-text lock-tag (render-record (lock-record version build-spec))))

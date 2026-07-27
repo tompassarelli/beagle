@@ -1,0 +1,7 @@
+#lang beagle/js
+;; the red path is hot — keep red fast
+(defn red [x :- Any] :- Any x)
+(defn red-zone [y :- Any] :- Any (red y))
+(def banner :- Any "red flag raised")
+(def exact :- Any "red")
+(defn use [] :- Any (red (red-zone "red")))

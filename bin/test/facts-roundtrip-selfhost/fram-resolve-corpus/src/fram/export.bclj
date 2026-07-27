@@ -1,0 +1,61 @@
+#lang beagle/clj
+(ns fram.export
+  "Inverse of import: project the fact graph back to thread files as fact
+  triples. GENERIC — groups a subject's facts and renders `@id` + `predicate
+  object` lines (canonical order) + the prose body. Refs render as `@id`;
+  literals via EDN (fram.rt/edn-quote) so re-import reproduces the fact set.
+  Pure string production; file IO lives in fram.main via rt externs.")
+
+(require fram.kernel :as k)
+(require clojure.string :as str)
+(require fram.rt)
+
+(declare-extern fram.rt/edn-quote [String -> String])
+
+;; canonical predicate order (body is rendered separately, after the `---`)
+(def order :- (Vec String)
+  ["title" "owner" "lead" "driver" "source" "proposed_by" "created_by"
+   "created_at" "updated_at" "committed" "do_on" "valid_until" "estimate_hours"
+   "repo" "part_of" "depends_on" "relates_to" "clarifies" "amends" "outcome" "abandoned"])
+
+;; predicates whose object is a thread/person REF (@id), emitted bare. Everything
+;; else is a literal — EDN-quoted when needed. Deciding ref-vs-literal by the
+;; PREDICATE (not the @ prefix) is what makes a literal that happens to start with
+;; @ round-trip correctly (it gets quoted instead of misread as a ref).
+(def ref-preds :- (Vec String)
+  ["depends_on" "part_of" "relates_to" "clarifies" "amends"
+   "created_by" "lead" "driver" "proposed_by"])
+
+(defn- distinct-s [xs :- (Vec String)] :- (Vec String)
+  (reduce (fn [acc :- (Vec String) x :- String] :- (Vec String)
+            (if (k/vec-contains? acc x) acc (conj acc x)))
+          [] xs))
+
+;; a ref-pred's value renders as its @id bare; a literal is EDN-quoted whenever
+;; bare would be ambiguous — whitespace, NEWLINE, empty, or a leading @/".
+(defn- render-obj [p :- String v :- String] :- String
+  (if (k/vec-contains? ref-preds p)
+    v
+    (if (or (str/blank? v)
+            (str/includes? v " ") (str/includes? v "\t")
+            (str/includes? v "\n") (str/includes? v "\r")
+            (str/starts-with? v "@") (str/starts-with? v "\""))
+      (fram.rt/edn-quote v)
+      v)))
+
+(defn thread-md [facts :- (Vec k/Fact) te :- String] :- String
+  (let [present (distinct-s (mapv (fn [c :- k/Fact] :- String (:p c)) (k/q-by-l facts te)))
+        ordered (filterv (fn [p :- String] :- Bool (k/vec-contains? present p)) order)
+        extra (vec (sort (filterv (fn [p :- String] :- Bool
+                                    (and (not (k/vec-contains? order p)) (not (= p "body"))))
+                                  present)))
+        preds (vec (concat ordered extra))
+        lines (reduce (fn [acc :- (Vec String) p :- String] :- (Vec String)
+                        (vec (concat acc
+                                     (mapv (fn [v :- String] :- String (str p "  " (render-obj p v)))
+                                           (k/many facts te p)))))
+                      []
+                      preds)
+        b (k/one facts te "body")
+        body (if (some? b) b "")]
+    (str te "\n" (str/join "\n" lines) "\n---\n" body)))

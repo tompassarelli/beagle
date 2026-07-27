@@ -1,0 +1,5 @@
+#lang beagle/js
+(defn red [x :- Any] :- Any x)
+(defn g [xs :- Any] :- Any
+  (doseq [red xs] (red red))
+  (red xs))

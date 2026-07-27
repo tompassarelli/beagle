@@ -1,0 +1,4 @@
+#lang beagle/js
+(defrecord Color [r :- Int g :- Int])
+(defn paint [c :- Color] :- Color c)
+(def default :- Color c)

@@ -1,0 +1,10 @@
+#lang beagle/js
+(def s1 :- Any #{1 2 3})
+(def s2 :- Any #{})
+(def rx :- Any #"a.*b")
+(def af :- Any #(+ % 1))
+(def rt :- Any 1/2)
+(def big :- Any 12345678901234567890)
+(defn ^:private p [a :- Any] :- Any a)
+(def nested :- Any [[[[1]]]])
+(def kw :- Any :foo/bar)
