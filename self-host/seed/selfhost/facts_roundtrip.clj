@@ -4,16 +4,38 @@
             [selfhost.reader :as rd]
             [selfhost.ast :as ast]))
 
+(def ^String EXACT-NUMBER-TAG "#%exact-number")
+
+(def CODEPOINT-OFFSETS (atom []))
+
+(defn- ^Boolean surrogate-pair-at? [^String src i]
+  (if (>= (+ i 1) (count src)) false (let [hi (int (.charAt src i))
+   lo (int (.charAt src (+ i 1)))]
+  (and (>= hi 55296) (<= hi 56319) (>= lo 56320) (<= lo 57343)))))
+
+(defn- build-codepoint-offsets [^String src]
+  (loop [i 0
+   codepoints 0
+   out [0]]
+  (if (>= i (count src)) out (let [next-count (+ codepoints 1)]
+  (if (surrogate-pair-at? src i) (recur (+ i 2) next-count (conj (conj out next-count) next-count)) (recur (+ i 1) next-count (conj out next-count)))))))
+
+(defn- codepoint-offset [^String src off]
+  (let [offsets (deref CODEPOINT-OFFSETS)]
+  (if (= (count offsets) (+ (count src) 1)) (nth offsets off) (loop [i 0
+   result 0]
+  (if (>= i off) result (recur (+ i (if (surrogate-pair-at? src i) 2 1)) (+ result 1)))))))
+
 (defn- line-col [^String src off]
   (loop [i 0
    line 1
    col 0]
-  (if (>= i off) [line col] (if (= (rd/char-at src i) "\n") (recur (+ i 1) (+ line 1) 0) (recur (+ i 1) line (+ col 1))))))
+  (if (>= i off) [line col] (if (= (rd/char-at src i) "\n") (recur (+ i 1) (+ line 1) 0) (recur (+ i (if (surrogate-pair-at? src i) 2 1)) line (+ col 1))))))
 
 (defn- source-loc [^String src start end]
   (let [lc (line-col src start)
-   base {"line" (nth lc 0) "col" (nth lc 1) "pos" (+ start 1)}]
-  (if (some? end) (assoc base "span" (- end start)) base)))
+   base {"line" (nth lc 0) "col" (nth lc 1) "pos" (+ (codepoint-offset src start) 1) "source-start" start}]
+  (if (some? end) (assoc base "span" (- (codepoint-offset src end) (codepoint-offset src start)) "source-end" end) base)))
 
 (defn- pos-loc [start end]
   (let [base {"pos" (+ start 1) "relative" true}]
@@ -48,14 +70,14 @@
    bool? (= (get node "kind") "bool")]
   (assoc node "kind" (if bool? "symbol" (get node "kind")) "value" (if bool? (if (get node "value") "true" "false") (get node "value")) "loc" loc "children" (if (some? children) (mapv (fn [child] (map-context-node child loc)) children) nil))))
 
-(defn- relative-loc [node base]
+(defn- relative-loc [node base-codepoint]
   (let [loc (get node "loc")
    pos (get loc "pos")
    span (get loc "span")
-   rel (if (some? pos) (- pos (+ base 1)) 0)
+   rel (if (some? pos) (- pos (+ base-codepoint 1)) 0)
    next-loc (if (some? span) (pos-loc rel (+ rel span)) (pos-loc rel nil))
    children (get node "children")]
-  (assoc node "loc" next-loc "children" (if (some? children) (mapv (fn [child] (relative-loc child base)) children) nil))))
+  (assoc node "loc" next-loc "children" (if (some? children) (mapv (fn [child] (relative-loc child base-codepoint)) children) nil))))
 
 (defn- result-leaf [^String src start result]
   (let [value (get result "value")
@@ -63,7 +85,7 @@
   (cond
   (and (vector? value) (= (count value) 2) (= (nth value 0) rd/STRING-TAG)) (leaf-node "string" (nth value 1) src start end)
   (and (vector? value) (= (count value) 2) (= (nth value 0) rd/CHAR-TAG)) (leaf-node "char" (nth value 1) src start end)
-  (boolean? value) (leaf-node "bool" value src start end)
+  (boolean? value) (leaf-node "symbol" (if value "true" "false") src start end)
   (number? value) (leaf-node "number" value src start end)
   :else (leaf-node "symbol" value src start end))))
 
@@ -109,7 +131,7 @@
 (defn- syntax-quote-node [^String src start]
   (let [inner-r (scan-datum src (+ start 2))
    next (get inner-r "next")
-   child (relative-loc (dissoc inner-r "next") start)
+   child (relative-loc (dissoc inner-r "next") (codepoint-offset src start))
    head (make-node "symbol" "syntax" (pos-loc 0 2) nil)
    wrapper (list-node [head child] (pos-loc 0 (- next start)))]
   (assoc wrapper "next" next)))
@@ -137,11 +159,53 @@
    loc (source-loc src start nil)]
   (assoc (list-node [(synthetic-leaf "#%js" loc) child] loc) "next" (get inner-r "next"))))
 
+(defn- fn-placeholder-index [node]
+  (if (= (get node "kind") "symbol") (let [value (get node "value")]
+  (cond
+  (= value "%") 1
+  (some? (re-matches #"^%[1-9][0-9]*$" value)) (let [parsed (parse-long (subs value 1))]
+  (if (nil? parsed) 0 parsed))
+  :else 0)) 0))
+
+(defn- max-placeholder-index [node]
+  (let [own (fn-placeholder-index node)
+   children (get node "children")]
+  (if (some? children) (reduce (fn [best child] (max best (max-placeholder-index child))) own children) own)))
+
+(defn- ^Boolean rest-placeholder? [node]
+  (let [own (and (= (get node "kind") "symbol") (= (get node "value") "%&"))
+   children (get node "children")]
+  (if own true (if (some? children) (reduce (fn [found child] (or found (rest-placeholder? child))) false children) false))))
+
+(defn- rewrite-fn-placeholders [node]
+  (let [children (get node "children")
+   rewritten (if (and (= (get node "kind") "symbol") (= (get node "value") "%")) (assoc node "value" "%1") node)]
+  (if (some? children) (assoc rewritten "children" (mapv (fn [child] (rewrite-fn-placeholders child)) children)) rewritten)))
+
+(defn- fn-param-nodes [max-index ^Boolean rest? loc]
+  (let [positional (loop [i 1
+   out []]
+  (if (> i max-index) out (recur (+ i 1) (conj out (synthetic-leaf (str "%" i) loc)))))]
+  (if rest? (into positional [(synthetic-leaf "&" loc) (synthetic-leaf "%&" loc)]) positional)))
+
+(defn- anonymous-fn-node [^String src start]
+  (let [result (scan-delimited src (+ start 2) ")")
+   raw-body (list-node (get result "nodes") nil)
+   max-index (max-placeholder-index raw-body)
+   rest? (rest-placeholder? raw-body)
+   loc (source-loc src start nil)
+   body (replace-loc (rewrite-fn-placeholders raw-body) loc)
+   params (tagged-node ast/BRACKET-TAG (fn-param-nodes max-index rest? loc) loc loc)
+   expanded (list-node [(synthetic-leaf "fn" loc) params body] loc)]
+  (assoc expanded "next" (get result "pos"))))
+
 (defn scan-datum [^String src pos]
   (let [p (rd/skip-ws src pos)
    ch (rd/char-at src p)
    next1 (rd/char-at src (+ p 1))
-   next2 (rd/char-at src (+ p 2))]
+   next2 (rd/char-at src (+ p 2))
+   atom-r (rd/read-symbol-text src p)
+   atom-text (get atom-r "value")]
   (cond
   (= ch "(") (let [result (scan-delimited src (+ p 1) ")")]
   (assoc (list-node (get result "nodes") (source-loc src p (get result "pos"))) "next" (get result "pos")))
@@ -165,7 +229,10 @@
   (and (= ch "#") (= next1 "j") (= next2 "s")) (js-node src p)
   (and (= ch "#") (= next1 "#")) (symbolic-value-node src p)
   (and (= ch "#") (= next1 "{")) (set-node src p)
+  (and (= ch "#") (= next1 "(")) (anonymous-fn-node src p)
   (and (= ch "#") (= next1 "\"")) (regex-node src p)
+  (some? (re-matches #"^-?[0-9]+/[0-9]+$" atom-text)) (assoc (leaf-node "number" atom-text src p (get atom-r "pos")) "next" (get atom-r "pos"))
+  (and (some? (re-matches #"^-?[0-9]+$" atom-text)) (nil? (parse-long atom-text))) (assoc (leaf-node "number" atom-text src p (get atom-r "pos")) "next" (get atom-r "pos"))
   :else (let [result (rd/read-datum src p)]
   (assoc (result-leaf src p result) "next" (get result "pos"))))))
 
@@ -185,7 +252,8 @@
   (recur (rd/skip-ws src (get node "next")) (conj out (dissoc node "next"))))))
    target-form (if (some? target) [(list-node [(synthetic-leaf "define-target" nil) (synthetic-leaf target nil)] nil)] [])]
   (if (some? target) (into target-form forms) (let [newline (str/index-of src "\n")
-   shift (if (nil? newline) (count src) (+ newline 1))
+   shift-units (if (nil? newline) (count src) (+ newline 1))
+   shift (codepoint-offset src shift-units)
    shifted (mapv (fn [node] (shift-node-location node shift)) forms)]
   shifted))))
 
@@ -257,8 +325,13 @@
    out []]
   (if (>= i (count forms)) out (let [loc (get (nth forms i) "loc")
    pos (get loc "pos")
-   span (get loc "span")]
-  (recur (+ i 1) (if (and (some? pos) (some? span)) (conj out [i (- pos 1 shift) (+ (- pos 1 shift) span)]) out))))))
+   span (get loc "span")
+   source-start (get loc "source-start")
+   source-end (get loc "source-end")]
+  (recur (+ i 1) (cond
+  (and (some? source-start) (some? source-end)) (conj out [i source-start source-end])
+  (and (some? pos) (some? span)) (conj out [i (- pos 1 shift) (+ (- pos 1 shift) span)])
+  :else out))))))
 
 (defn- ^Boolean in-span? [off spans]
   (loop [i 0]
@@ -310,7 +383,7 @@
   :else ["trailing" "file" text]))) (line-comments src spans)))
 
 (defn- ^Boolean symbol-char? [^String ch]
-  (some? (re-matches #"[A-Za-z0-9_\-*+!?<>=/.&%$]" ch)))
+  (some? (re-matches #"[\p{L}\p{N}_\-*+!?<>=/.&%$]" ch)))
 
 (defn- raw-comment-segments [^String text]
   (loop [i 0
@@ -349,7 +422,8 @@
   nil)
 
 (defn- projection-lines [^String src]
-  (let [lang (rd/parse-lang-line src)
+  (let [_offsets (reset! CODEPOINT-OFFSETS (build-codepoint-offsets src))
+   lang (rd/parse-lang-line src)
    newline (str/index-of src "\n")
    shift (if (some? (get lang "target")) 0 (if (nil? newline) (count src) (+ newline 1)))
    forms (located-program src)
@@ -422,7 +496,11 @@
   (if (> (count structural) 0) (nth structural 0) (if (> (count candidates) 0) (nth candidates 0) nil))))
 
 (defn- decode-number [^String text]
-  (if (or (str/includes? text ".") (str/includes? text "e") (str/includes? text "E")) (parse-double text) (parse-long text)))
+  (cond
+  (str/includes? text "/") [EXACT-NUMBER-TAG text]
+  (or (str/includes? text ".") (str/includes? text "e") (str/includes? text "E")) (parse-double text)
+  :else (let [parsed (parse-long text)]
+  (if (nil? parsed) [EXACT-NUMBER-TAG text] parsed))))
 
 (declare build-datum)
 
@@ -442,7 +520,7 @@
   :else [])))
 
 (defn- ^Boolean datum-list? [datum]
-  (and (vector? datum) (not (tagged-string? datum)) (not (and (= (count datum) 2) (= (nth datum 0) rd/CHAR-TAG)))))
+  (and (vector? datum) (not (tagged-string? datum)) (not (and (= (count datum) 2) (= (nth datum 0) rd/CHAR-TAG))) (not (and (= (count datum) 2) (= (nth datum 0) EXACT-NUMBER-TAG)))))
 
 (defn- ^Boolean head-is? [datum ^String head]
   (and (datum-list? datum) (> (count datum) 0) (= (nth datum 0) head)))
@@ -507,6 +585,7 @@
 (defn ^String datum-source [datum]
   (cond
   (tagged-string? datum) (edn-string (nth datum 1))
+  (and (vector? datum) (= (count datum) 2) (= (nth datum 0) EXACT-NUMBER-TAG)) (nth datum 1)
   (and (vector? datum) (= (count datum) 2) (= (nth datum 0) rd/CHAR-TAG)) (str "\\" (char (nth datum 1)))
   (ast/bracketed? datum) (str "[" (joined-source (ast/bracket-body datum)) "]")
   (ast/map-tagged? datum) (str "{" (joined-source (ast/map-body datum)) "}")

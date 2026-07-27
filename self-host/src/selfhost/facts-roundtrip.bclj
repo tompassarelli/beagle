@@ -12,10 +12,41 @@
 (declare-extern selfhost.rt/eprint [String -> Nil])
 (declare-extern selfhost.rt/exit [Int -> Nil])
 
+(def EXACT-NUMBER-TAG :- String "#%exact-number")
+(def CODEPOINT-OFFSETS :- Any (atom []))
+
 ;; The reader's public datum encoding is reused verbatim. This module adds the
 ;; source-location layer that facts-roundtrip needs but the compiler stages do
 ;; not: each located node carries a reader datum, its fact kind/value, optional
 ;; srcloc, and ordered children.
+
+(defn- surrogate-pair-at? [src :- String i :- Int] :- Bool
+  (if (>= (+ i 1) (count src))
+    false
+    (let [hi (int (.charAt src i))
+          lo (int (.charAt src (+ i 1)))]
+      (and (>= hi 55296) (<= hi 56319)
+           (>= lo 56320) (<= lo 57343)))))
+
+(defn- build-codepoint-offsets [src :- String] :- Any
+  (loop [i 0 codepoints 0 out :- Any [0]]
+    (if (>= i (count src))
+      out
+      (let [next-count (+ codepoints 1)]
+        (if (surrogate-pair-at? src i)
+          (recur (+ i 2) next-count
+                 (conj (conj out next-count) next-count))
+          (recur (+ i 1) next-count (conj out next-count)))))))
+
+(defn- codepoint-offset [src :- String off :- Int] :- Int
+  (let [offsets (deref CODEPOINT-OFFSETS)]
+    (if (= (count offsets) (+ (count src) 1))
+      (nth offsets off)
+      (loop [i 0 result 0]
+        (if (>= i off)
+          result
+          (recur (+ i (if (surrogate-pair-at? src i) 2 1))
+                 (+ result 1)))))))
 
 (defn- line-col [src :- String off :- Int] :- Any
   (loop [i 0 line 1 col 0]
@@ -23,12 +54,21 @@
       [line col]
       (if (= (rd/char-at src i) "\n")
         (recur (+ i 1) (+ line 1) 0)
-        (recur (+ i 1) line (+ col 1))))))
+        (recur (+ i (if (surrogate-pair-at? src i) 2 1))
+               line (+ col 1))))))
 
 (defn- source-loc [src :- String start :- Int end :- Any] :- Any
   (let [lc (line-col src start)
-        base {"line" (nth lc 0) "col" (nth lc 1) "pos" (+ start 1)}]
-    (if (some? end) (assoc base "span" (- end start)) base)))
+        base {"line" (nth lc 0)
+              "col" (nth lc 1)
+              "pos" (+ (codepoint-offset src start) 1)
+              "source-start" start}]
+    (if (some? end)
+      (assoc base
+        "span" (- (codepoint-offset src end)
+                  (codepoint-offset src start))
+        "source-end" end)
+      base)))
 
 (defn- pos-loc [start :- Int end :- Any] :- Any
   (let [base {"pos" (+ start 1) "relative" true}]
@@ -80,17 +120,19 @@
                          children)
                    nil))))
 
-(defn- relative-loc [node :- Any base :- Int] :- Any
+(defn- relative-loc [node :- Any base-codepoint :- Int] :- Any
   (let [loc (get node "loc")
         pos (get loc "pos")
         span (get loc "span")
-        rel (if (some? pos) (- pos (+ base 1)) 0)
+        rel (if (some? pos) (- pos (+ base-codepoint 1)) 0)
         next-loc (if (some? span) (pos-loc rel (+ rel span)) (pos-loc rel nil))
         children (get node "children")]
     (assoc node
       "loc" next-loc
       "children" (if (some? children)
-                   (mapv (fn [child :- Any] :- Any (relative-loc child base)) children)
+                   (mapv (fn [child :- Any] :- Any
+                           (relative-loc child base-codepoint))
+                         children)
                    nil))))
 
 (defn- result-leaf [src :- String start :- Int result :- Any] :- Any
@@ -103,7 +145,11 @@
       (and (vector? value) (= (count value) 2)
            (= (nth value 0) rd/CHAR-TAG))
         (leaf-node "char" (nth value 1) src start end)
-      (boolean? value) (leaf-node "bool" value src start end)
+      ;; Beagle's canonical readtable preserves true/false as symbols. The
+      ;; shared self-host reader classifies them for compiler use, so invert
+      ;; that classification at this lossless source-projection boundary.
+      (boolean? value)
+        (leaf-node "symbol" (if value "true" "false") src start end)
       (number? value) (leaf-node "number" value src start end)
       :else (leaf-node "symbol" value src start end))))
 
@@ -156,7 +202,8 @@
 (defn- syntax-quote-node [src :- String start :- Int] :- Any
   (let [inner-r (scan-datum src (+ start 2))
         next (get inner-r "next")
-        child (relative-loc (dissoc inner-r "next") start)
+        child (relative-loc (dissoc inner-r "next")
+                            (codepoint-offset src start))
         head (make-node "symbol" "syntax" (pos-loc 0 2) nil)
         wrapper (list-node [head child] (pos-loc 0 (- next start)))]
     (assoc wrapper "next" next)))
@@ -187,11 +234,85 @@
     (assoc (list-node [(synthetic-leaf "#%js" loc) child] loc)
            "next" (get inner-r "next"))))
 
+(defn- fn-placeholder-index [node :- Any] :- Int
+  (if (= (get node "kind") "symbol")
+    (let [value (get node "value")]
+      (cond
+        (= value "%") 1
+        (some? (re-matches #"^%[1-9][0-9]*$" value))
+          (let [parsed (parse-long (subs value 1))]
+            (if (nil? parsed) 0 parsed))
+        :else 0))
+    0))
+
+(defn- max-placeholder-index [node :- Any] :- Int
+  (let [own (fn-placeholder-index node)
+        children (get node "children")]
+    (if (some? children)
+      (reduce
+        (fn [best :- Int child :- Any] :- Int
+          (max best (max-placeholder-index child)))
+        own children)
+      own)))
+
+(defn- rest-placeholder? [node :- Any] :- Bool
+  (let [own (and (= (get node "kind") "symbol")
+                 (= (get node "value") "%&"))
+        children (get node "children")]
+    (if own
+      true
+      (if (some? children)
+        (reduce
+          (fn [found :- Bool child :- Any] :- Bool
+            (or found (rest-placeholder? child)))
+          false children)
+        false))))
+
+(defn- rewrite-fn-placeholders [node :- Any] :- Any
+  (let [children (get node "children")
+        rewritten (if (and (= (get node "kind") "symbol")
+                           (= (get node "value") "%"))
+                    (assoc node "value" "%1")
+                    node)]
+    (if (some? children)
+      (assoc rewritten "children"
+             (mapv (fn [child :- Any] :- Any
+                     (rewrite-fn-placeholders child))
+                   children))
+      rewritten)))
+
+(defn- fn-param-nodes [max-index :- Int rest? :- Bool loc :- Any] :- Any
+  (let [positional
+        (loop [i 1 out :- Any []]
+          (if (> i max-index)
+            out
+            (recur (+ i 1)
+                   (conj out (synthetic-leaf (str "%" i) loc)))))]
+    (if rest?
+      (into positional [(synthetic-leaf "&" loc)
+                        (synthetic-leaf "%&" loc)])
+      positional)))
+
+(defn- anonymous-fn-node [src :- String start :- Int] :- Any
+  (let [result (scan-delimited src (+ start 2) ")")
+        raw-body (list-node (get result "nodes") nil)
+        max-index (max-placeholder-index raw-body)
+        rest? (rest-placeholder? raw-body)
+        loc (source-loc src start nil)
+        body (replace-loc (rewrite-fn-placeholders raw-body) loc)
+        params (tagged-node ast/BRACKET-TAG
+                            (fn-param-nodes max-index rest? loc)
+                            loc loc)
+        expanded (list-node [(synthetic-leaf "fn" loc) params body] loc)]
+    (assoc expanded "next" (get result "pos"))))
+
 (defn scan-datum [src :- String pos :- Int] :- Any
   (let [p (rd/skip-ws src pos)
         ch (rd/char-at src p)
         next1 (rd/char-at src (+ p 1))
-        next2 (rd/char-at src (+ p 2))]
+        next2 (rd/char-at src (+ p 2))
+        atom-r (rd/read-symbol-text src p)
+        atom-text (get atom-r "value")]
     (cond
       (= ch "(")
         (let [result (scan-delimited src (+ p 1) ")")]
@@ -233,8 +354,17 @@
         (symbolic-value-node src p)
       (and (= ch "#") (= next1 "{"))
         (set-node src p)
+      (and (= ch "#") (= next1 "("))
+        (anonymous-fn-node src p)
       (and (= ch "#") (= next1 "\""))
         (regex-node src p)
+      (some? (re-matches #"^-?[0-9]+/[0-9]+$" atom-text))
+        (assoc (leaf-node "number" atom-text src p (get atom-r "pos"))
+               "next" (get atom-r "pos"))
+      (and (some? (re-matches #"^-?[0-9]+$" atom-text))
+           (nil? (parse-long atom-text)))
+        (assoc (leaf-node "number" atom-text src p (get atom-r "pos"))
+               "next" (get atom-r "pos"))
       :else
         (let [result (rd/read-datum src p)]
           (assoc (result-leaf src p result) "next" (get result "pos"))))))
@@ -276,7 +406,8 @@
       ;; port. Racket preserves that port-count offset after rewind, so its
       ;; public srclocs are shifted by exactly the consumed first line.
       (let [newline (str/index-of src "\n")
-            shift (if (nil? newline) (count src) (+ newline 1))
+            shift-units (if (nil? newline) (count src) (+ newline 1))
+            shift (codepoint-offset src shift-units)
             shifted (mapv (fn [node :- Any] :- Any
                             (shift-node-location node shift))
                           forms)]
@@ -360,11 +491,16 @@
       out
       (let [loc (get (nth forms i) "loc")
             pos (get loc "pos")
-            span (get loc "span")]
+            span (get loc "span")
+            source-start (get loc "source-start")
+            source-end (get loc "source-end")]
         (recur (+ i 1)
-               (if (and (some? pos) (some? span))
-                 (conj out [i (- pos 1 shift) (+ (- pos 1 shift) span)])
-                 out))))))
+               (cond
+                 (and (some? source-start) (some? source-end))
+                   (conj out [i source-start source-end])
+                 (and (some? pos) (some? span))
+                   (conj out [i (- pos 1 shift) (+ (- pos 1 shift) span)])
+                 :else out))))))
 
 (defn- in-span? [off :- Int spans :- Any] :- Bool
   (loop [i 0]
@@ -439,7 +575,7 @@
     (line-comments src spans)))
 
 (defn- symbol-char? [ch :- String] :- Bool
-  (some? (re-matches #"[A-Za-z0-9_\-*+!?<>=/.&%$]" ch)))
+  (some? (re-matches #"[\p{L}\p{N}_\-*+!?<>=/.&%$]" ch)))
 
 (defn- raw-comment-segments [text :- String] :- Any
   (loop [i 0 out :- Any []]
@@ -495,7 +631,8 @@
   nil)
 
 (defn- projection-lines [src :- String] :- Any
-  (let [lang (rd/parse-lang-line src)
+  (let [_offsets (reset! CODEPOINT-OFFSETS (build-codepoint-offsets src))
+        lang (rd/parse-lang-line src)
         newline (str/index-of src "\n")
         shift (if (some? (get lang "target"))
                 0
@@ -611,11 +748,15 @@
       (if (> (count candidates) 0) (nth candidates 0) nil))))
 
 (defn- decode-number [text :- String] :- Any
-  (if (or (str/includes? text ".")
-          (str/includes? text "e")
-          (str/includes? text "E"))
-    (parse-double text)
-    (parse-long text)))
+  (cond
+    (str/includes? text "/") [EXACT-NUMBER-TAG text]
+    (or (str/includes? text ".")
+        (str/includes? text "e")
+        (str/includes? text "E"))
+      (parse-double text)
+    :else
+      (let [parsed (parse-long text)]
+        (if (nil? parsed) [EXACT-NUMBER-TAG text] parsed))))
 
 (declare build-datum)
 
@@ -640,7 +781,9 @@
 
 (defn- datum-list? [datum :- Any] :- Bool
   (and (vector? datum) (not (tagged-string? datum))
-       (not (and (= (count datum) 2) (= (nth datum 0) rd/CHAR-TAG)))))
+       (not (and (= (count datum) 2) (= (nth datum 0) rd/CHAR-TAG)))
+       (not (and (= (count datum) 2)
+                 (= (nth datum 0) EXACT-NUMBER-TAG)))))
 
 (defn- head-is? [datum :- Any head :- String] :- Bool
   (and (datum-list? datum) (> (count datum) 0) (= (nth datum 0) head)))
@@ -716,6 +859,9 @@
 (defn datum-source [datum :- Any] :- String
   (cond
     (tagged-string? datum) (edn-string (nth datum 1))
+    (and (vector? datum) (= (count datum) 2)
+         (= (nth datum 0) EXACT-NUMBER-TAG))
+      (nth datum 1)
     (and (vector? datum) (= (count datum) 2) (= (nth datum 0) rd/CHAR-TAG))
       (str "\\" (char (nth datum 1)))
     (ast/bracketed? datum) (str "[" (joined-source (ast/bracket-body datum)) "]")
