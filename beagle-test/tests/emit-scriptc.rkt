@@ -80,6 +80,44 @@
                           (cons '#%brackets (list map-param))
                           ':- 'Any
                           'x))))))
+   ;; Regression: annotation used to be a whole-output regexp, so a string
+   ;; literal that merely LOOKED like a declaration was rewritten instead of the
+   ;; declaration itself — leaving the real function untyped (TS7006 under
+   ;; strict TypeScript). Annotation is now structural, at the defn node.
+   (test-case "function-like strings stay byte-stable and the real declaration is typed"
+     (define output
+       (scriptc-emit
+        (list '(println "function add(x) {")
+              '(defn add [(x :- Int)] :- Int x))))
+     (check-true (string-contains? output "console.log(\"function add(x) {\");")
+                 (format "string literal must be emitted verbatim in:\n~a" output))
+     (check-true (string-contains? output "function add(x: number): number {")
+                 (format "the actual declaration must be typed in:\n~a" output))
+     (check-false (string-contains? output "console.log(\"function add(x: number)")
+                  (format "string literal must NOT be annotated in:\n~a" output))
+     (check-false (regexp-match? #rx"\nfunction add\\(x\\) \\{" output)
+                  (format "no untyped declaration may survive in:\n~a" output)))
+
+   ;; A declaration-shaped string AFTER the defn pins the other regexp ordering.
+   (test-case "function-like strings after the declaration are also byte-stable"
+     (define output
+       (scriptc-emit
+        (list '(defn add [(x :- Int)] :- Int x)
+              '(println "function add(x) {"))))
+     (check-true (string-contains? output "console.log(\"function add(x) {\");"))
+     (check-true (string-contains? output "function add(x: number): number {")))
+
+   (test-case "ordinary JS emission is unchanged by the scriptc signature seam"
+     (define output
+       (target-emit 'js
+                    (list '(println "function add(x) {")
+                          '(defn add [(x :- Int)] :- Int x))))
+     (check-true (string-contains? output "console.log(\"function add(x) {\");"))
+     (check-true (string-contains? output "function add(x) {\n  return x;\n}")
+                 (format "JS defn must stay untyped and byte-stable in:\n~a" output))
+     (check-false (string-contains? output ": number")
+                  (format "JS output must carry no TypeScript annotation in:\n~a" output)))
+
    (test-case "self-host Known gaps records scriptc as oracle-only"
      (define readme (file->string self-host-readme))
      (check-true

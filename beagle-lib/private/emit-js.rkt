@@ -17,6 +17,16 @@
 
 (define current-js-emit-target (make-parameter 'js))
 
+;; How a top-level `defn`'s signature text is rendered, up to but excluding the
+;; opening brace. Targets layered over JS lowering (scriptc) override this to
+;; type the declaration AT its AST node. Annotating emitted TEXT instead is
+;; unsound: a string literal reading `"function add(x) {"` is indistinguishable
+;; from the declaration it names. The default reproduces ordinary JS byte for byte.
+(define (js-defn-signature form #:async? async? #:name name #:params params)
+  (format "~afunction ~a(~a)" (if async? "async " "") name params))
+
+(define current-js-defn-signature (make-parameter js-defn-signature))
+
 ;; match temp counter — a PARAMETER holding a box, reset fresh per program (see
 ;; js-emit-program) so the same source emits byte-identical .js every build, exactly
 ;; as emit-clj does. A module-level box would leak across programs in one process.
@@ -1216,10 +1226,11 @@
      (define params (emit-js-params (defn-form-params f) (defn-form-rest-param f)))
      (define async? (contains-await? (defn-form-body f)))
      (define bound (binding-names-from-params (defn-form-params f) (defn-form-rest-param f)))
-     (format "~afunction ~a(~a) {\n  ~a\n}"
-             (if async? "async " "")
-             (mangle-name (defn-form-name f))
-             params
+     (format "~a {\n  ~a\n}"
+             ((current-js-defn-signature) f
+                                          #:async? async?
+                                          #:name (mangle-name (defn-form-name f))
+                                          #:params params)
              (with-param-envs (defn-form-params f)
                (lambda ()
                  (with-bindings bound (lambda () (emit-body-return (defn-form-body f) "  "))))))]
@@ -2701,4 +2712,5 @@
 (register-backend! 'js js-backend)
 
 (provide js-backend
-         current-js-emit-target)
+         current-js-emit-target
+         current-js-defn-signature)

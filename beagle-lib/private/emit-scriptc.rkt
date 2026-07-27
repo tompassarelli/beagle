@@ -45,27 +45,28 @@
       (scriptc-type (param-type p)))
     (scriptc-type (defn-form-return-type form))))
 
-(define (annotate-defn output form)
-  (define params
+;; Renders the TypeScript boundary at the defn node the JS emitter is lowering,
+;; so nothing else in the output can be mistaken for the declaration. `async?`
+;; is #f on checked ScriptC programs because the checker rejects js/await
+;; outside beagle/js; the guard below protects callers passing an unchecked AST.
+(define (scriptc-defn-signature form #:async? async? #:name name #:params params)
+  (when async?
+    (error 'beagle/scriptc
+           "unsupported await in ~a; experimental scriptc has no async boundary, because an async function returns Promise<T> rather than the declared type"
+           (defn-form-name form)))
+  (define typed-params
     (string-join
      (for/list ([p (in-list (defn-form-params form))])
        (format "~a: ~a" (mangle-name (param-name p)) (scriptc-type (param-type p))))
      ", "))
-  (define name (mangle-name (defn-form-name form)))
-  (define replacement
-    (format "function ~a(~a): ~a {" name params
-            (scriptc-type (defn-form-return-type form))))
-  (regexp-replace (regexp (format "function ~a\\([^)]*\\) \\{"
-                                  (regexp-quote name)))
-                  output
-                  replacement))
+  (format "function ~a(~a): ~a"
+          name typed-params (scriptc-type (defn-form-return-type form))))
 
 (define (scriptc-emit-program prog)
   (validate-scriptc! prog)
-  (parameterize ([current-js-emit-target 'scriptc])
-    (for/fold ([output ((emitter-backend-emit-program js-backend) prog)])
-              ([form (in-list (program-forms prog))] #:when (defn-form? form))
-      (annotate-defn output form))))
+  (parameterize ([current-js-emit-target 'scriptc]
+                 [current-js-defn-signature scriptc-defn-signature])
+    ((emitter-backend-emit-program js-backend) prog)))
 
 (define scriptc-backend (emitter-backend 'scriptc scriptc-emit-program))
 (register-backend! 'scriptc scriptc-backend)
