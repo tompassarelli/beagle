@@ -116,8 +116,10 @@
   (and (fn-type? actual) (fn-type? expected)) (let [ap (get actual "params")
    ep (get expected "params")
    ar (get actual "rest")
-   er (get expected "rest")]
-  (and (= (count ap) (count ep)) (every? (fn [i] (type-compatible? (nth ap i) (nth ep i))) (range (count ap))) (= (nil? ar) (nil? er)) (or (nil? ar) (type-compatible? ar er)) (type-compatible? (get actual "ret") (get expected "ret"))))
+   er (get expected "rest")
+   an (count ap)
+   en (count ep)]
+  (and (<= an en) (or (= an en) (some? ar)) (every? (fn [i] (type-compatible? (nth ap i) (nth ep i))) (range an)) (or (nil? ar) (every? (fn [p] (type-compatible? ar p)) (drop an ep))) (or (nil? er) (and (some? ar) (type-compatible? ar er))) (type-compatible? (get actual "ret") (get expected "ret"))))
   (and (app-type? actual) (app-type? expected) (= (get actual "name") "Atom") (= (get expected "name") "Atom")) (and (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args")))))
   (and (app-type? actual) (= (get actual "name") "HVec") (app-type? expected) (= (get expected "name") "Vec") (= 1 (count (get expected "args")))) (every? (fn [a] (type-compatible? a (nth (get expected "args") 0))) (get actual "args"))
   (and (app-type? actual) (app-type? expected)) (and (= (get actual "name") (get expected "name")) (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-compatible? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args")))))
@@ -1069,6 +1071,8 @@
   (= (get result "count") 0)))
   (expect! "compat: union target accepts member" (type-compatible? (make-prim "String") (make-union [(make-prim "String") (make-prim "Nil")])))
   (expect! "compat: union target rejects non-member" (not (type-compatible? (make-prim "Int") (make-union [(make-prim "String") (make-prim "Nil")]))))
+  (expect! "compat: variadic actual satisfies unary expected" (type-compatible? (make-fn [] ANY (make-prim "String")) (make-fn [ANY] nil (make-prim "String"))))
+  (expect! "compat: fixed actual cannot satisfy variadic expected" (not (type-compatible? (make-fn [ANY] nil (make-prim "String")) (make-fn [] ANY (make-prim "String")))))
   (expect! "infer: vec of ints" (let [t1 (infer-expr! (make-vec-node [(make-lit "number" 1) (make-lit "number" 2)]) {})]
   (and (app-type? t1) (= (get t1 "name") "Vec") (prim? (nth (get t1 "args") 0)) (= (get (nth (get t1 "args") 0) "name") "Int"))))
   (expect! "infer: empty vec" (let [t1 (infer-expr! (make-vec-node []) {})]

@@ -230,12 +230,18 @@
       (let [ap (get actual "params")
             ep (get expected "params")
             ar (get actual "rest")
-            er (get expected "rest")]
-        (and (= (count ap) (count ep))
+            er (get expected "rest")
+            an (count ap)
+            en (count ep)]
+        (and (<= an en)
+             (or (= an en) (some? ar))
              (every? (fn [i :- Int] :- Bool (type-compatible? (nth ap i) (nth ep i)))
-                     (range (count ap)))
-             (= (nil? ar) (nil? er))
-             (or (nil? ar) (type-compatible? ar er))
+                     (range an))
+             (or (nil? ar)
+                 (every? (fn [p :- Any] :- Bool (type-compatible? ar p))
+                         (drop an ep)))
+             (or (nil? er)
+                 (and (some? ar) (type-compatible? ar er)))
              (type-compatible? (get actual "ret") (get expected "ret"))))
 
     ;; Atom is a MUTABLE cell, so it is INVARIANT in its element type: (Atom A) is
@@ -2083,6 +2089,14 @@
   (expect! "compat: union target rejects non-member"
     (not (type-compatible? (make-prim "Int")
       (make-union [(make-prim "String") (make-prim "Nil")]))))
+  (expect! "compat: variadic actual satisfies unary expected"
+    (type-compatible?
+      (make-fn [] ANY (make-prim "String"))
+      (make-fn [ANY] nil (make-prim "String"))))
+  (expect! "compat: fixed actual cannot satisfy variadic expected"
+    (not (type-compatible?
+      (make-fn [ANY] nil (make-prim "String"))
+      (make-fn [] ANY (make-prim "String")))))
 
   ;; --- vec/map collection inference ---
   (expect! "infer: vec of ints"
