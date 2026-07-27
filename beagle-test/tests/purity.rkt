@@ -155,6 +155,28 @@
     (check-regexp-match #rx"purity leak" o)
     (check-regexp-match #rx"'refresh'" o)))
 
+(test-case "warn: locally effectful defs propagate through every purity boundary"
+  (define indirect
+    (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
+           '(defn write-cache [box v] (reset! box v))
+           '(defn refresh-cache [box v] (write-cache box v))
+           '(defn run-refresh [box v] (refresh-cache box v))))
+  (parameterize ([current-purity-enforcement 'warn])
+    (define o (check-output indirect))
+    (check-equal? (length (regexp-match* #rx"warning: purity leak" o)) 3)
+    (check-regexp-match #rx"'write-cache'" o)
+    (check-regexp-match #rx"'refresh-cache'" o)
+    (check-regexp-match #rx"'run-refresh'" o)))
+
+(test-case "warn: calls through pure local defs remain pure"
+  (define pure-chain
+    (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
+           '(defn add-one [x] (+ x 1))
+           '(defn add-two [x] (add-one (add-one x)))))
+  (parameterize ([current-purity-enforcement 'warn])
+    (define o (check-output pure-chain))
+    (check-false (regexp-match? #rx"purity leak" o))))
+
 (test-case "warn: a mutation inside an inner fn still counts (effects run in the call)"
   (define inner
     (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
