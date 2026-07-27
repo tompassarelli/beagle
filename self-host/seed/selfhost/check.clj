@@ -239,6 +239,11 @@
 
 (def STDLIB {"true" (make-prim "Bool") "false" (make-prim "Bool") "int?" (make-fn [ANY] nil (make-prim "Bool")) "nil?" (make-fn [ANY] nil (make-prim "Bool")) "some?" (make-fn [ANY] nil (make-prim "Bool")) "string?" (make-fn [ANY] nil (make-prim "Bool")) "number?" (make-fn [ANY] nil (make-prim "Bool")) "integer?" (make-fn [ANY] nil (make-prim "Bool")) "keyword?" (make-fn [ANY] nil (make-prim "Bool")) "symbol?" (make-fn [ANY] nil (make-prim "Bool")) "boolean?" (make-fn [ANY] nil (make-prim "Bool")) "float?" (make-fn [ANY] nil (make-prim "Bool")) "map?" (make-fn [ANY] nil (make-prim "Bool")) "vector?" (make-fn [ANY] nil (make-prim "Bool")) "empty?" (make-fn [ANY] nil (make-prim "Bool")) "not" (make-fn [(make-prim "Bool")] nil (make-prim "Bool")) "=" (make-fn [ANY] ANY (make-prim "Bool")) "not=" (make-fn [ANY] ANY (make-prim "Bool")) ">" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) ">=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "and" (make-fn [] ANY ANY) "or" (make-fn [] ANY ANY) "+" (make-fn [] ANY ANY) "-" (make-fn [ANY] ANY ANY) "*" (make-fn [] ANY ANY) "max" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "min" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "inc" (make-fn [NUMBER-TYPE] nil INT-TYPE) "dec" (make-fn [NUMBER-TYPE] nil INT-TYPE) "count" (make-fn [ANY] nil (make-prim "Int")) "str" (make-fn [] ANY (make-prim "String")) "get" (make-fn [ANY ANY] ANY ANY) "get-in" (make-fn [ANY ANY] ANY ANY) "assoc" (make-fn [ANY ANY ANY] ANY ANY) "assoc-in" (make-fn [ANY ANY ANY] nil ANY) "update" (make-fn [ANY ANY ANY] ANY ANY) "dissoc" (make-fn [ANY ANY] ANY ANY) "conj" (make-fn [ANY] ANY ANY) "cons" (make-fn [ANY ANY] nil ANY) "into" (make-fn [ANY ANY] nil ANY) "vec" (make-fn [ANY] nil ANY) "vals" (make-fn [ANY] nil ANY) "keys" (make-fn [ANY] nil ANY) "first" VEC-ACCESS-POLY "second" VEC-ACCESS-POLY "rest" (make-fn [ANY] nil ANY) "nth" NTH-POLY "reduce" (make-fn [ANY ANY] ANY ANY) "map" (make-fn [ANY] ANY ANY) "mapv" MAPV-POLY "filter" (make-fn [ANY ANY] nil ANY) "filterv" FILTERV-POLY "remove" (make-fn [ANY ANY] nil ANY) "some" (make-fn [ANY ANY] nil ANY) "every?" (make-fn [ANY ANY] nil (make-prim "Bool"))})
 
+(def JVM-INSTANCE-POSITION-METHODS {"Socket/connect" true "java.net.Socket/connect" true})
+
+(defn ^Boolean jvm-instance-position-method? [^String sym]
+  (= true (get JVM-INSTANCE-POSITION-METHODS sym)))
+
 (defn opt-field [x]
   (if (= x false) nil x))
 
@@ -709,20 +714,25 @@
   (infer-expr! a env))
   ANY)))
   (= (get e "node") "static-call") (let [sym (get e "name")
-   raw-type (get env sym)]
+   raw-type (get env sym)
+   instance-position (jvm-instance-position-method? sym)
+   all-args (get e "args")
+   call-args (if (and instance-position (> (count all-args) 0)) (subvec all-args 1) all-args)]
+  (if (and instance-position (> (count all-args) 0)) (do
+  (infer-expr! (nth all-args 0) env)))
   (cond
-  (and (not (nil? raw-type)) (poly-type? raw-type)) (let [resolved (resolve-poly-call! raw-type (get e "args") env)]
+  (and (not (nil? raw-type)) (poly-type? raw-type)) (let [resolved (resolve-poly-call! raw-type call-args env)]
   (if (fn-type? resolved) (do
-  (check-args! sym resolved (get e "args") env)
+  (check-args! sym resolved call-args env)
   (get resolved "ret")) (do
-  (doseq [a (get e "args")]
+  (doseq [a call-args]
   (infer-expr! a env))
   ANY)))
   (and (not (nil? raw-type)) (fn-type? raw-type)) (do
-  (check-args! sym raw-type (get e "args") env)
+  (check-args! sym raw-type call-args env)
   (get raw-type "ret"))
   :else (do
-  (doseq [a (get e "args")]
+  (doseq [a call-args]
   (infer-expr! a env))
   ANY)))
   (and (= (get e "node") "call") (or (= (call-fn-name e) "and") (= (call-fn-name e) "or"))) (do
@@ -979,6 +989,9 @@
 (defn make-call [^String fn-name args]
   {"node" "call" "fn" {"node" "ref" "name" fn-name} "args" args})
 
+(defn make-static-call [^String name args]
+  {"node" "static-call" "name" name "args" args})
+
 (defn make-if-node [cond-expr then-expr else-expr]
   {"node" "if" "cond" cond-expr "then" then-expr "else" else-expr})
 
@@ -1056,6 +1069,15 @@
    result (type-check! prog)]
   (> (get result "count") 0)))
   (expect! "call: wrong arity" (let [prog {"mode" "strict" "namespace" "test" "target" "js" "forms" [(make-def-node "r" nil (make-call "add" [(make-lit "number" 1)]))] "externs" [{"name" "add" "type" (make-fn [(make-prim "Int") (make-prim "Int")] nil (make-prim "Int"))}] "requires" []}
+   result (type-check! prog)]
+  (> (get result "count") 0)))
+  (expect! "JVM instance-position: receiver excluded from declared arity" (let [prog {"mode" "strict" "namespace" "test" "target" "clj" "forms" [(make-defn-node "connect-with-timeout" [(make-param "sock" (make-prim "Socket")) (make-param "addr" ANY) (make-param "timeout-ms" (make-prim "Int"))] (make-prim "Nil") [(make-static-call "Socket/connect" [(make-ref "sock") (make-ref "addr") (make-ref "timeout-ms")])])] "externs" [{"name" "Socket/connect" "type" (make-fn [ANY (make-prim "Int")] nil (make-prim "Nil"))}] "requires" []}
+   result (type-check! prog)]
+  (= (get result "count") 0)))
+  (expect! "JVM instance-position: wrong Java arity rejected" (let [prog {"mode" "strict" "namespace" "test" "target" "clj" "forms" [(make-defn-node "connect-with-too-many-args" [(make-param "sock" (make-prim "Socket")) (make-param "addr" ANY) (make-param "timeout-ms" (make-prim "Int"))] (make-prim "Nil") [(make-static-call "Socket/connect" [(make-ref "sock") (make-ref "addr") (make-ref "timeout-ms") (make-ref "timeout-ms")])])] "externs" [{"name" "Socket/connect" "type" (make-fn [ANY (make-prim "Int")] nil (make-prim "Nil"))}] "requires" []}
+   result (type-check! prog)]
+  (> (get result "count") 0)))
+  (expect! "JVM static gate-c: declared unknown static checks every argument" (let [prog {"mode" "strict" "namespace" "test" "target" "clj" "forms" [(make-def-node "quoted" (make-prim "String") (make-static-call "java.util.regex.Pattern/quote" [(make-lit "string" "x") (make-lit "string" "y")]))] "externs" [{"name" "java.util.regex.Pattern/quote" "type" (make-fn [(make-prim "String")] nil (make-prim "String"))}] "requires" []}
    result (type-check! prog)]
   (> (get result "count") 0)))
   (expect! "binding: ^:dynamic def target accepted" (let [dyn-def (assoc (make-def-node "*lvl*" (make-prim "Int") (make-lit "number" 0)) "dynamic" true)
