@@ -1,0 +1,14 @@
+#lang beagle/clj
+;; @upstream:graph
+(ns selfhost.facts-roundtrip
+  "Lossless Beagle source ↔ fact-triple roundtrip. The Fram graph is upstream;
+  substantive definitions are authored only through sealed graph-edit verbs.")
+(define-mode strict)
+
+(require clojure.string :as str)
+(require selfhost.rt)
+(require selfhost.reader :as rd)
+
+(declare-extern selfhost.rt/slurp-file [String -> String])
+(declare-extern selfhost.rt/eprint [String -> Nil])
+(declare-extern selfhost.rt/exit [Int -> Nil])
