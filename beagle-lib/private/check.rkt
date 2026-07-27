@@ -3483,17 +3483,19 @@
 ;; The operative thesis's load-bearing promise is static-reasoning recovery:
 ;; "the absence of mutation markers in a piece of code means that code is
 ;; functionally pure." check-purity! makes the `!`-suffix naming convention a
-;; checked invariant, one direction only and purely syntactically:
+;; checked invariant, one direction only:
 ;;
 ;;   A defn/defn- whose NAME does not end in `!` must have a PURE BODY — its
 ;;   body must contain no mutation marker (no set!-form, and no call whose head
-;;   is a symbol ending in `!`). If it does, that is a 'purity-leak.
+;;   is a symbol ending in `!` or names a locally tracked effectful def). If it
+;;   does, that is a 'purity-leak.
 ;;
-;; Intraprocedural and syntactic only: it descends let/if/do/fn/when/cond/…
-;; (an inner fn's effects still run when this function is called) but never
-;; across defn/def boundaries — those are separate definitions. No
-;; interprocedural inference, no effect rows; the converse (a `!`-named defn
-;; with a pure body) is allowed.
+;; The marker walk descends let/if/do/fn/when/cond/… (an inner fn's effects
+;; still run when this function is called). A module-local fixed point tracks
+;; defs whose bodies reach a marker, so every purity boundary is reported in
+;; one run instead of requiring rename-and-rerun cycles. It never crosses a
+;; module boundary and introduces no effect rows; the converse (a `!`-named
+;; defn with a pure body) is allowed.
 ;;
 ;; GATING (so it never breaks the live consumers):
 ;;   * mode gate    — runs only under (define-mode strict);
@@ -3512,7 +3514,7 @@
 ;; `!`-headed call) lexically present in an AST subtree. Reuses the same
 ;; sub-expression descent as walk-for-provenance/symbols-in so it tracks new
 ;; forms automatically; it does NOT recurse across nested defn/def boundaries.
-(define (collect-markers node)
+(define (collect-markers node [effectful-defs (set)])
   (define markers '())
   (define (note! m) (set! markers (cons m markers)))
   (define (walk e)
@@ -3523,7 +3525,9 @@
        (walk (set!-form-value e))]
       [(call-form? e)
        (define fn (call-form-fn e))
-       (when (bang-name? fn) (note! fn))
+       (when (or (bang-name? fn)
+                 (and (symbol? fn) (set-member? effectful-defs fn)))
+         (note! fn))
        (walk fn)
        (for-each walk (call-form-args e))]
       [(let-form? e)
@@ -3583,6 +3587,40 @@
   (for-each walk (if (list? node) node (list node)))
   (remove-duplicates (reverse markers)))
 
+;; Collect each checkable definition once, including definitions carried by
+;; export/target wrappers. A vector keeps NAME, BODY, and the source-bearing
+;; definition node together; multi-arity defs contribute one entry per body.
+(define (collect-purity-defs prog)
+  (define defs '())
+  (define (note! name body node)
+    (set! defs (cons (vector name body node) defs)))
+  (define (walk f)
+    (cond
+      [(defn-form? f)
+       (note! (defn-form-name f) (defn-form-body f) f)]
+      [(defn-multi? f)
+       (for ([a (in-list (defn-multi-arities f))])
+         (note! (defn-multi-name f) (arity-clause-body a) f))]
+      [(with-meta? f) (walk (with-meta-expr f))]
+      [(jst-export? f) (walk (jst-export-form f))]
+      [(jst-export-default? f) (walk (jst-export-default-form f))]
+      [(and (pair? f) (list? f)) (for-each walk (filter pair? (cdr f)))]
+      [else (void)]))
+  (for-each walk (program-forms prog))
+  (reverse defs))
+
+;; Least fixed point of module-local defs whose bodies reach a direct marker or
+;; another effectful local def. Repeating from the previous complete set makes
+;; the result independent of source order.
+(define (derive-effectful-defs defs)
+  (let loop ([known (set)])
+    (define next
+      (for/fold ([acc known]) ([d (in-list defs)])
+        (if (pair? (collect-markers (vector-ref d 1) known))
+            (set-add acc (vector-ref d 0))
+            acc)))
+    (if (set=? known next) known (loop next))))
+
 ;; Effective severity from the two enforcement dials.
 ;;   'off  flag           -> 'off  (nothing fires; the pass is dark)
 ;;   'error flag          -> 'error (author pins a hard stop)
@@ -3595,11 +3633,14 @@
     [(warn)  (if (>= (current-check-profile) 3) 'error 'warn)]
     [else    'off]))
 
-(define (check-defn-purity name body src-table node)
+(define (check-defn-purity name body src-table node effectful-defs)
   ;; `-main` is exempt: the name IS the runtime entry-point contract
   ;; (clj/bb `-m ns` resolves `ns/-main` literally), so the author cannot
   ;; rename it — and an entry point is definitionally effectful.
-  (define markers (if (eq? name '-main) '() (collect-markers body)))
+  (define markers
+    (if (eq? name '-main)
+        '()
+        (collect-markers body (set-remove effectful-defs name))))
   (when (and (not (bang-name? name)) (pair? markers))
     (define src (and src-table (hash-ref src-table node #f)))
     (define msg
@@ -3623,25 +3664,14 @@
     ;; Mode + flag gate passed; per-diagnostic severity is decided by
     ;; purity-severity (warn below profile 3, hard error at >= 3).
     (define st (program-src-table prog))
-    (for ([form (in-list (program-forms prog))])
-      (let walk ([f form])
-        (cond
-          [(defn-form? f)
-           (check-defn-purity (defn-form-name f) (defn-form-body f) st f)]
-          [(defn-multi? f)
-           (for ([a (in-list (defn-multi-arities f))])
-             (check-defn-purity (defn-multi-name f) (arity-clause-body a) st f))]
-          ;; Descend through STRUCT wrapper forms that carry a defn payload.
-          ;; js/export / js/export-default parse to jst-export(-default) structs
-          ;; (not lists), so without these the EXPORTED defns — the public API,
-          ;; exactly what you most want the purity guarantee on — were skipped.
-          [(with-meta? f) (walk (with-meta-expr f))]
-          [(jst-export? f) (walk (jst-export-form f))]
-          [(jst-export-default? f) (walk (jst-export-default-form f))]
-          ;; Descend through list-shaped wrapper forms (target-case, …) that may
-          ;; carry a defn payload — same transitive walk type-check! uses.
-          [(and (pair? f) (list? f)) (for-each walk (filter pair? (cdr f)))]
-          [else (void)])))))
+    (define defs (collect-purity-defs prog))
+    (define effectful-defs (derive-effectful-defs defs))
+    (for ([d (in-list defs)])
+      (check-defn-purity (vector-ref d 0)
+                         (vector-ref d 1)
+                         st
+                         (vector-ref d 2)
+                         effectful-defs))))
 
 
 ;; --- zig world-escape check (thread 20260612232001, Phase 2) ---------------

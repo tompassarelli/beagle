@@ -5,7 +5,9 @@
 ;; The static-reasoning thesis: "the absence of mutation markers means the
 ;; code is pure." check-purity! turns the `!`-suffix convention into a checked
 ;; invariant: a defn/defn- whose name lacks `!` must have a pure body (no
-;; set!-form and no `!`-headed call), one direction only, intraprocedural.
+;; set!-form, `!`-headed call, or call to a locally tracked effectful def), one
+;; direction only. Local effectfulness propagates to a fixed point so one run
+;; exposes every rename boundary.
 ;;
 ;; These tests pin BOTH halves of the Phase 6.0 contract:
 ;;   * the pass FIRES correctly when enabled (warn/error, under strict mode);
