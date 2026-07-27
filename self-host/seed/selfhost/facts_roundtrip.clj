@@ -8,6 +8,8 @@
 
 (def CODEPOINT-OFFSETS (atom []))
 
+(def LINE-COLS (atom []))
+
 (defn- ^Boolean surrogate-pair-at? [^String src i]
   (if (>= (+ i 1) (count src)) false (let [hi (int (.charAt src i))
    lo (int (.charAt src (+ i 1)))]
@@ -20,6 +22,14 @@
   (if (>= i (count src)) out (let [next-count (+ codepoints 1)]
   (if (surrogate-pair-at? src i) (recur (+ i 2) next-count (conj (conj out next-count) next-count)) (recur (+ i 1) next-count (conj out next-count)))))))
 
+(defn- build-line-cols [^String src]
+  (loop [i 0
+   line 1
+   col 0
+   out [[1 0]]]
+  (if (>= i (count src)) out (if (= (rd/char-at src i) "\n") (recur (+ i 1) (+ line 1) 0 (conj out [(+ line 1) 0])) (let [next-col (+ col 1)]
+  (if (surrogate-pair-at? src i) (recur (+ i 2) line next-col (conj (conj out [line next-col]) [line next-col])) (recur (+ i 1) line next-col (conj out [line next-col]))))))))
+
 (defn- codepoint-offset [^String src off]
   (let [offsets (deref CODEPOINT-OFFSETS)]
   (if (= (count offsets) (+ (count src) 1)) (nth offsets off) (loop [i 0
@@ -27,10 +37,11 @@
   (if (>= i off) result (recur (+ i (if (surrogate-pair-at? src i) 2 1)) (+ result 1)))))))
 
 (defn- line-col [^String src off]
-  (loop [i 0
+  (let [line-cols (deref LINE-COLS)]
+  (if (= (count line-cols) (+ (count src) 1)) (nth line-cols off) (loop [i 0
    line 1
    col 0]
-  (if (>= i off) [line col] (if (= (rd/char-at src i) "\n") (recur (+ i 1) (+ line 1) 0) (recur (+ i (if (surrogate-pair-at? src i) 2 1)) line (+ col 1))))))
+  (if (>= i off) [line col] (if (= (rd/char-at src i) "\n") (recur (+ i 1) (+ line 1) 0) (recur (+ i (if (surrogate-pair-at? src i) 2 1)) line (+ col 1))))))))
 
 (defn- source-loc [^String src start end]
   (let [lc (line-col src start)
@@ -423,6 +434,7 @@
 
 (defn- projection-lines [^String src]
   (let [_offsets (reset! CODEPOINT-OFFSETS (build-codepoint-offsets src))
+   _line-cols (reset! LINE-COLS (build-line-cols src))
    lang (rd/parse-lang-line src)
    newline (str/index-of src "\n")
    shift (if (some? (get lang "target")) 0 (if (nil? newline) (count src) (+ newline 1)))
