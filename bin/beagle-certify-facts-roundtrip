@@ -116,26 +116,31 @@ for row in "${CASES[@]}"; do
   oracle_render="$(sha256sum "$ORACLE/$name.render" | cut -d' ' -f1)"
   if [[ "$oracle_emit" != "$expected_emit" || "$oracle_render" != "$expected_render" ]]; then
     echo "FAIL $name: Racket original drifted from committed golden" >&2
+    echo "CERTIFY-CASE $name diff"
     fail=$((fail + 1))
     continue
   fi
 
   if ! run_port --emit-edn "$src" > "$PORT/$name.emit"; then
     echo "FAIL $name: self-host emit exited nonzero" >&2
+    echo "CERTIFY-CASE $name diff"
     fail=$((fail + 1))
     continue
   fi
   if ! run_port --render "$PORT/$name.emit" > "$PORT/$name.render"; then
     echo "FAIL $name: self-host render exited nonzero" >&2
+    echo "CERTIFY-CASE $name diff"
     fail=$((fail + 1))
     continue
   fi
 
   if cmp -s "$ORACLE/$name.emit" "$PORT/$name.emit" &&
      cmp -s "$ORACLE/$name.render" "$PORT/$name.render"; then
+    echo "CERTIFY-CASE $name ok"
     passed=$((passed + 1))
   else
     echo "FAIL $name: byte divergence (inspect $LAB)" >&2
+    echo "CERTIFY-CASE $name diff"
     fail=$((fail + 1))
   fi
   settled=$((passed + fail))
