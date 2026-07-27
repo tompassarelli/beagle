@@ -1,0 +1,4 @@
+(ns g)
+(defn nested [x :- Int] :- Int
+  (let [a (let [inner (* x 2)] (+ inner 1))]
+    (+ a x)))

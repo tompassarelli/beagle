@@ -1,0 +1,16 @@
+(ns g)
+
+(defn lookup [k :- String] :- Int?
+  (let [m :- (Map String Int) {"x" 10 "y" 20}]
+    (get m k)))
+
+(defn empty-then-get [k :- String] :- Int?
+  (let [m :- (Map String Int) {}]
+    (get m k)))
+
+;; build a map by folding assoc over a vector (the los frontmatter pattern)
+(defn tally [ks :- (Vec String)] :- (Map String Int)
+  (reduce (fn [m :- (Map String Int) k :- String] :- (Map String Int)
+            (assoc m k 1))
+          {}
+          ks))

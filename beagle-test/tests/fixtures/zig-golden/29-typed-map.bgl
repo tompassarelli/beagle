@@ -1,0 +1,9 @@
+(ns g)
+(defn lookup [m :- (Map String Int) k :- String] :- Int?
+  (get m k))
+(defn has [m :- (Map String Int) k :- String] :- Bool
+  (contains? m k))
+(defn size [m :- (Map String Int)] :- Int
+  (count m))
+(defn put [m :- (Map String Int) k :- String v :- Int] :- (Map String Int)
+  (assoc m k v))

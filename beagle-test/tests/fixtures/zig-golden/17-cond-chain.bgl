@@ -1,0 +1,7 @@
+(ns g)
+(defn bucket [v :- Int] :- Int
+  (cond
+    [(>= v 750) 3]
+    [(>= v 500) 2]
+    [(>= v 250) 1]
+    [:else 0]))

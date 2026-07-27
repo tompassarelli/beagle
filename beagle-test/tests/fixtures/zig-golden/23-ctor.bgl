@@ -1,0 +1,4 @@
+(ns g)
+(defrecord Pair [a :- Int b :- Int])
+(defn flip [p :- Pair] :- Pair
+  (->Pair (:b p) (:a p)))

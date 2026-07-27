@@ -1,0 +1,2 @@
+(ns g)
+(defrecord Point [x :- Int y :- Int])

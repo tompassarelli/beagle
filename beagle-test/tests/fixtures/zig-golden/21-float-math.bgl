@@ -1,0 +1,4 @@
+(ns g)
+(def HALF :- Float 0.5)
+(defn lerp [a :- Float b :- Float t :- Float] :- Float
+  (+ a (* (- b a) t)))
