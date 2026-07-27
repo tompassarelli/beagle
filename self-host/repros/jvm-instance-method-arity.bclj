@@ -1,0 +1,12 @@
+#lang beagle/clj
+
+(ns selfhost.repro.jvm-instance-method-arity
+  (:import [java.net Socket InetSocketAddress]))
+
+(declare-extern Socket/connect [Any Int -> Nil])
+
+(defn connect-with-timeout
+  [sock :- Socket
+   addr :- InetSocketAddress
+   timeout-ms :- Int] :- Nil
+  (Socket/connect sock addr timeout-ms))
