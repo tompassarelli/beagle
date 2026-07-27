@@ -1,0 +1,12 @@
+#lang beagle/scriptc
+;; RATCHET FIXTURE — fixed-width scalars at the ScriptC boundary.
+;; TypeScript's `number` (and ScriptC's native C double) is f64-backed, so an
+;; I32 boundary has no faithful representation today. Classified :host-model in
+;; known-divergences-scriptc.edn — a temporary host-model ratchet, NOT an
+;; inapplicable row: delete the entry when a fixed-width representation lands.
+(ns conformance.sc-fixed-width-reject)
+
+(defn widen [(x :- I32)] :- I32
+  x)
+
+(println (widen 7))

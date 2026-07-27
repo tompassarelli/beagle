@@ -1,0 +1,11 @@
+#lang beagle/scriptc
+;; RATCHET FIXTURE — D9-topform-leaks-structs.
+;; A typed top-level `def` is a target-neutral form ScriptC can host, but the
+;; validator rejects it by printing the raw def-form struct at the user.
+;; reject row: the diagnostic golden is pinned AND required to name `def`, so
+;; the struct leak is a :bug ratchet, not a silent reject-match pass.
+(ns conformance.sc-untyped-def)
+
+(def answer :- Int 42)
+
+(println answer)

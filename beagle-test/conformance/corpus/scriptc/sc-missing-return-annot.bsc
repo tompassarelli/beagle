@@ -1,0 +1,12 @@
+#lang beagle/scriptc
+;; RATCHET FIXTURE — D8-boundary-any-unpointed.
+;; A defn with no `:-` return annotation reaches the ScriptC boundary as Any and
+;; the diagnostic prints the raw type value instead of naming the missing `:-`.
+;; reject row: the diagnostic golden is pinned AND required to name `:-`, so the
+;; unpointed message is a :bug ratchet, not a silent reject-match pass.
+(ns conformance.sc-missing-return-annot)
+
+(defn untyped-return [(x :- Int)]
+  x)
+
+(println (untyped-return 1))

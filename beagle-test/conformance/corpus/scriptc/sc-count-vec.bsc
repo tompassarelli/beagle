@@ -1,0 +1,6 @@
+#lang beagle/scriptc
+;; Vector literal + count at the top level (the boundary stays primitive).
+;; native row: golden TS + 100% ScriptC static coverage + Node/native parity.
+(ns conformance.sc-count-vec)
+
+(println (count [1 2 3]))

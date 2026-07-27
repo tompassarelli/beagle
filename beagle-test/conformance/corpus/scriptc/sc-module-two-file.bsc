@@ -1,0 +1,10 @@
+#lang beagle/scriptc
+;; RATCHET FIXTURE — D4/D5/D6 module surface.
+;; Entry module of the two-file ScriptC module row: it requires
+;; sc-module-two-file-lib.bsc, whose emitted .ts carries no ESM export, so both
+;; Node and ScriptC see "not a module". Classified :bug; delete the entry once
+;; provided definitions emit real ESM exports.
+(ns conformance.sc-module-two-file
+  (:require [conformance.sc-module-two-file-lib :refer [triple]]))
+
+(println (triple 14))

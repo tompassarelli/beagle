@@ -1,0 +1,14 @@
+#lang beagle/scriptc
+;; loop/recur lowered to a JS-family trampoline, run natively.
+;; native row: golden TS + 100% ScriptC static coverage + Node/native parity.
+(ns conformance.sc-loop-recur)
+
+(defn sum-to [(n :- Int)] :- Int
+  (loop [i 1
+         acc 0]
+    (if (< n i)
+      acc
+      (recur (+ i 1) (+ acc i)))))
+
+(println (sum-to 10))
+(println (sum-to 0))

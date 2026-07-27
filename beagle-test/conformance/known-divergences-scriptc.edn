@@ -1,0 +1,118 @@
+{:doc
+ "RATCHET — known divergences for the scriptc target. Shrink-only; see
+  known-divergences-js.edn for the schema and bin/beagle-certify for the gate.
+  Keyed by [:id :bucket]. Categories: :bug (tracked defect, carries :thread) |
+  :host-model (target-inherent gap) | :strictness (beagle intentionally
+  stricter). No commas (dual EDN/Racket-readable).
+
+  Every entry below is a CURRENT PRODUCT GAP, not an inapplicable row. The
+  scriptc rows are declared at the behavior beagle owes — a `static` row must
+  compile 100% statically, a `native` row must also match Node — so the gap
+  fires as a classified bucket instead of being hidden behind a weaker row
+  kind. Closing a gap turns its entry STALE and the gate fails until the entry
+  is deleted (and the golden regenerated) in the same commit.
+
+  Upstream ScriptC (Apache-2.0, rev 20c3a6c27da4807f607ebe496663842b67e87f0e)
+  is used only as a black-box executable oracle: it compiles async/await,
+  records/arrays, Map and Set statically with native parity, which is why the
+  rows below are :bug (beagle owes the lowering) and not :host-model."
+ :entries
+ [
+  ;; --- D1: JS-family string lowering is not ScriptC-compilable -------------
+  {:id "sc-str-concat" :bucket :static-incomplete :category :bug
+   :thread "@019fa49d-1276-71d6-a925-7b42ca81ff2a"
+   :note "`str` lowers to \"\".concat(...); scriptc has no lowering for
+          String.prototype.concat (SC2020) so the row is 0/1 static. Delete
+          when emit-js lowers string building to a ScriptC-compilable form."}
+
+  ;; --- D2: inner/local functions emit implicit-any parameters --------------
+  {:id "sc-inner-fn" :bucket :invalid-output :category :bug
+   :thread "@019fa49d-1276-71d6-a925-7b42ca81ff2a"
+   :note "A `fn` inside a defn emits `const bump = (n) => ...`; ScriptC's real
+          tsc rejects the implicit any (SC0001), so the emitted .ts does not
+          even type-check — the silent-miscompile class. Delete when nested/
+          rest/default/destructured/catch boundaries emit typed signatures."}
+
+  ;; --- D3: declare-extern emits no ambient declaration ---------------------
+  {:id "sc-extern" :bucket :invalid-output :category :bug
+   :thread "@019fa49d-1276-71d6-a925-7b42ca81ff2a"
+   :note "declare-extern states a host contract but emits nothing, so the call
+          site is an unresolved bare identifier (SC0001). Delete when the
+          ambient extern declaration contract lands (decision gate D0: inline
+          vs build sidecar — either satisfies this row)."}
+
+  ;; --- D4/D5/D6: the module surface has no ESM exports --------------------
+  {:id "sc-module-two-file" :bucket :invalid-output :category :bug
+   :thread "@019fa49d-1276-71d6-a925-7b42ca81ff2a"
+   :note "The library module emits no `export`, so its .ts is not a module,
+          and the entry emits a namespace-qualified call
+          (sc_module_two_file_lib.triple) that no import binds. The same defect
+          breaks the js target under Node. Delete when provided definitions
+          emit real ESM exports and the entry calls the imported binding."}
+
+  ;; --- validator: target-neutral forms rejected at the top level ----------
+  {:id "sc-record" :bucket :compile-fail :category :bug
+   :thread "@019fa49d-1276-71d6-a925-7b42ca81ff2a"
+   :note "defrecord is rejected as an unsupported top-level form. Upstream
+          ScriptC compiles records/arrays 35/35 statically, so this is a beagle
+          admission gap. Delete when typed record lowering + admission land."}
+
+  {:id "sc-map-set-literal" :bucket :compile-fail :category :bug
+   :thread "@019fa49d-1276-71d6-a925-7b42ca81ff2a"
+   :note "Typed top-level defs of map/set literals are rejected by the scriptc
+          validator. Upstream ScriptC is 50/50 on Map and 47/47 on Set, so this
+          is admission, not a host limit. Delete when the validator admits them
+          and the native row proves value semantics."}
+
+  {:id "sc-comment-neutral" :bucket :compile-fail :category :bug
+   :thread "@019fa49d-1276-71d6-a925-7b42ca81ff2a"
+   :note "A target-neutral top-level (comment ...) parses to nil and the
+          validator rejects it — a false rejection of a form every other target
+          erases. Delete when comments are erased/accepted for scriptc."}
+
+  {:id "sc-target-case" :bucket :compile-fail :category :bug
+   :thread "@019fa49d-1276-71d6-a925-7b42ca81ff2a"
+   :note "target-case picks the :scriptc branch correctly INSIDE an admitted
+          defn, but a top-level def carrying one is rejected, so branch
+          selection is unreachable at the top level. Delete when branch
+          selection is pinned across top-level contexts."}
+
+  ;; --- async boundary types are not admitted by the scriptc validator -----
+  {:id "sc-await-reject" :bucket :compile-fail :category :bug
+   :thread "@019fa49d-1276-71d6-a925-7b42ca81ff2a"
+   :note "RECONCILED at 519cd6fe629aa6d1165f044d9f8134e0c034b596: the
+          JS-family gate this row originally pinned is CLOSED — check.rkt now
+          admits js/await for scriptc, so the old `js/await is only supported
+          in beagle/js` message is gone. The row still compile-fails one layer
+          deeper, in emit-scriptc's validator: `unsupported boundary type
+          (type-app 'Promise (list (type-prim 'Int))); experimental scriptc
+          supports primitive function boundaries only`. Upstream ScriptC
+          compiles async/await 15/15 statically with native stdout/exit parity,
+          so this stays implementation scope, never an inapplicable row. Delete
+          when the validator admits Promise-typed boundaries."}
+
+  ;; --- host model: f64-backed scalars ------------------------------------
+  {:id "sc-fixed-width-reject" :bucket :compile-fail :category :host-model
+   :thread "@019fa49d-1276-71d6-a925-7b42ca81ff2a"
+   :note "TEMPORARY host-model ratchet, not an inapplicable row: TypeScript's
+          number and ScriptC's native C double are both f64, so an I32/U64
+          boundary has no faithful representation yet. The row stays declared
+          as `static` (the behavior beagle owes) so a representation decision
+          — boxed fixed-width carriers, or a documented narrowing — turns this
+          entry STALE and forces its deletion."}
+
+  ;; --- diagnostics that reject correctly but are not user-facing ---------
+  {:id "sc-missing-return-annot" :bucket :diag-unpointed :category :bug
+   :thread "@019fa49d-1276-71d6-a925-7b42ca81ff2a"
+   :note "D8. The defn rejects, but the message is `unsupported boundary type
+          #f` — it prints an internal absent-type value instead of naming the
+          missing `:-` return annotation. Delete when the diagnostic names
+          `:-`."}
+
+  {:id "sc-untyped-def" :bucket :diag-unpointed :category :bug
+   :thread "@019fa49d-1276-71d6-a925-7b42ca81ff2a"
+   :note "D9. The top-level def rejects by printing the raw def-form struct at
+          the user. Delete when the validator emits a pointed user-facing
+          message (and again, as a compile-fail entry, if top-level def stays
+          unimplemented for longer)."}
+ ]}

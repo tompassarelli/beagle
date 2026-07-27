@@ -1,0 +1,6 @@
+#lang beagle/scriptc
+;; Library module for the sc-module-two-file module row (see the entry module).
+(ns conformance.sc-module-two-file-lib)
+
+(defn triple [(n :- Int)] :- Int
+  (* n 3))

@@ -1,0 +1,16 @@
+#lang beagle/scriptc
+;; RATCHET FIXTURE — top-level target-case.
+;; `target-case` selects the :scriptc branch correctly inside an admitted defn,
+;; but the ScriptC validator admits only defn and calls at the top level, so a
+;; top-level branch cannot be expressed. Classified :bug; delete the entry once
+;; branch selection is pinned across top-level contexts.
+(ns conformance.sc-target-case)
+
+(defn target-name [] :- String
+  (target-case :js "js" :scriptc "scriptc"))
+
+(def banner :- String
+  (target-case :js "from js" :scriptc "from scriptc"))
+
+(println (target-name))
+(println banner)

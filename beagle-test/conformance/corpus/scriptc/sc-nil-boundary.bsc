@@ -1,0 +1,13 @@
+#lang beagle/scriptc
+;; Nil boundary: Beagle Nil lowers to TypeScript `null` on both sides.
+;; native row: golden TS + 100% ScriptC static coverage + Node/native parity.
+(ns conformance.sc-nil-boundary)
+
+(defn nil-value [(x :- Nil)] :- Nil
+  x)
+
+(defn nil-or-zero [(x :- Nil)] :- Int
+  (if (nil? x) 0 1))
+
+(println (nil-value nil))
+(println (nil-or-zero nil))
