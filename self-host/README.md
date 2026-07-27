@@ -113,8 +113,10 @@ absolute checkout paths and remain byte-stable across machines.
   member ctors/accessors (only the union name is imported).
 - **Source locations** — the chain carries none; seed emission is
   srcloc-free by construction, so this cannot affect seed bytes.
-- **Non-clj targets** — the chain emits the `clj` target only (no nix
-  reader macros / `nix-*` forms, no js/odin emitters).
+- **Non-clj targets** — this gap is target-specific: the chain emits the `clj`
+  target only (no nix reader macros / `nix-*` forms, no js/odin emitters).
+  The Racket oracle's experimental `scriptc` target is therefore oracle-only;
+  the self-host has no `scriptc` parser, checker, or emitter route.
 
 ## Native distribution binary (stage0)
 

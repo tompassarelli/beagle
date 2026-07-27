@@ -30,6 +30,7 @@ fi
 ext="clj"
 case "$src" in
     *.bjs)   ext="js" ;;
+    *.bsc)   ext="ts" ;;
     *.bnix)  ext="nix" ;;
     *.bsql)  ext="sql" ;;
     *.bpy)   ext="py" ;;

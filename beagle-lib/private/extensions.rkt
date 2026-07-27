@@ -14,7 +14,7 @@
 (require racket/string)
 
 (define BEAGLE-EXTENSIONS
-  '(".bclj" ".bjs" ".bnix" ".bodin" ".bgl" ".rkt"))
+  '(".bclj" ".bjs" ".bsc" ".bnix" ".bodin" ".bgl" ".rkt"))
 
 (define (beagle-source-file? path-str)
   (ormap (lambda (ext) (string-suffix? path-str ext))
@@ -23,6 +23,7 @@
 (define EXTENSION-TARGET-MAP
   '((".bclj"  . clj)
     (".bjs"   . js)
+    (".bsc"   . scriptc)
     (".bnix"  . nix)
     (".bodin" . odin)
     (".bgl"   . #f)     ; target-neutral; default-to-scheme deferred until Cyclone runtime
@@ -35,7 +36,7 @@
   (and match (cdr match)))
 
 ;; Regex matching all beagle source extensions (for directory scanning).
-(define BEAGLE-FILE-RX #rx"\\.(bclj|bjs|bnix|bodin|bgl|rkt)$")
+(define BEAGLE-FILE-RX #rx"\\.(bclj|bjs|bsc|bnix|bodin|bgl|rkt)$")
 
 (provide BEAGLE-EXTENSIONS
          beagle-source-file?

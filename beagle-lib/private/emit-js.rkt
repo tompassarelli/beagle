@@ -15,6 +15,8 @@
          "emit-jst.rkt"
          "emit-js-quote.rkt")
 
+(define current-js-emit-target (make-parameter 'js))
+
 ;; match temp counter — a PARAMETER holding a box, reset fresh per program (see
 ;; js-emit-program) so the same source emits byte-identical .js every build, exactly
 ;; as emit-clj does. A module-level box would leak across programs in one process.
@@ -1662,10 +1664,11 @@
      (iife (format "const r = ~a;\nif (r && r.__tag === \"Ok\") return r.value;\nconst ~a = r;\nreturn ~a;"
                    inner err-name fallback))]
     [(target-case-form? e)
+     (define target (current-js-emit-target))
      (define cases (target-case-form-cases e))
-     (define branch (or (hash-ref cases 'js #f)))
+     (define branch (hash-ref cases target #f))
      (unless branch
-       (error 'beagle "target-case: no branch for target js"))
+       (error 'beagle "target-case: no branch for target ~a" target))
      (emit-expr branch)]
     [(try-form? e)
      (define body-str (emit-body-return (try-form-body e) "  "))
@@ -2697,4 +2700,5 @@
 
 (register-backend! 'js js-backend)
 
-(provide js-backend)
+(provide js-backend
+         current-js-emit-target)

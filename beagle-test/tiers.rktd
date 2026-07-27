@@ -105,6 +105,7 @@
              "emit-clj-behavioral.rkt"  ; requires bb (Babashka)
              ;; Odin backend — native target (2026-06-13).
              "emit-odin.rkt"
+             "emit-scriptc.rkt"        ; experimental structural TypeScript slice
              ;; Form × live-backend matrix: every cell emits or rejects
              ;; pointedly (cracks thread 20260613013145 #2).
              "emit-matrix.rkt"

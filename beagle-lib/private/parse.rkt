@@ -158,6 +158,7 @@
     [(regexp-match? #rx"beagle/nix"    lang-line) 'nix]
     [(regexp-match? #rx"beagle/clj"    lang-line) 'clj]
     [(regexp-match? #rx"beagle/js"     lang-line) 'js]
+    [(regexp-match? #rx"beagle/scriptc" lang-line) 'scriptc]
     [else #f]))
 
 (define (read-beagle-syntax path)
@@ -888,9 +889,9 @@
 
       [(list 'define-target (? symbol? t))
        (when target-set? (raise-parse-error 'duplicate-meta "duplicate define-target"))
-       (unless (memq t '(clj js nix py rkt zig odin))
-         (raise-parse-error 'bad-meta-value
-                            "unknown target: ~a (expected clj, js, nix, py, rkt, zig, or odin)" t))
+      (unless (memq t '(clj js scriptc nix py rkt zig odin))
+        (raise-parse-error 'bad-meta-value
+                            "unknown target: ~a (expected clj, js, scriptc, nix, py, rkt, zig, or odin)" t))
        (set! target t)
        (set! target-set? #t)]
 

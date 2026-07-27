@@ -38,14 +38,14 @@
 (define (stdlib-for-target target)
   (case target
     [(clj)  stdlib-clj-combined]
-    [(js)   stdlib-js-combined]
+    [(js scriptc) stdlib-js-combined]
     [(nix)  stdlib-nix-combined]
     [(odin) (merge-hashes STDLIB-PORTABLE STDLIB-ODIN)]
     [else (error 'stdlib-for-target "unknown target: ~a" target)]))
 
 (define (target-excludes-for target)
   (case target
-    [(js) JS-NO-EMIT]
+    [(js scriptc) JS-NO-EMIT]
     [else #f]))
 
 ;; Backward compatibility: STDLIB-TYPES = full CLJ combined set
