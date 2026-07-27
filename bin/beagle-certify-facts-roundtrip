@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# Certify the self-hosted facts-roundtrip CLI against the pinned Racket oracle.
+#
+# capture-original must run and commit BEFORE the port is authored. It records
+# exact stdout hashes for both legs of every corpus case. certify later checks
+# those committed hashes and byte-compares Racket vs self-host output directly.
+# There are no masks, path rewrites, line filters, or diagnostic normalizers.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+source "$ROOT/bin/_beagle-racket"
+
+MODE="${1:-certify}"
+CORPUS="$ROOT/bin/test/facts-roundtrip-selfhost/corpus.edn"
+GOLDEN="$ROOT/bin/test/facts-roundtrip-selfhost/golden.sha256"
+LAB="$ROOT/.lab/facts-roundtrip-certify"
+MATERIALIZED="$LAB/corpus"
+ORACLE="$LAB/oracle"
+PORT="$LAB/port"
+RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
+
+usage() {
+  echo "usage: bin/beagle-certify-facts-roundtrip capture-original|certify" >&2
+  exit 2
+}
+
+case "$MODE" in
+  capture-original|certify) ;;
+  *) usage ;;
+esac
+
+rm -rf "${LAB:?}"
+mkdir -p "$MATERIALIZED" "$ORACLE" "$PORT"
+
+# Materialize inline fixtures under one stable repo-relative path. Path-backed
+# cases remain at their checked-in paths; their oracle hashes pin their bytes.
+bb -e '
+  (require (quote [clojure.edn :as edn])
+           (quote [clojure.java.io :as io]))
+  (let [[manifest out-root] *command-line-args*]
+    (doseq [{:keys [name ext source]} (edn/read-string (slurp manifest))
+            :when source]
+      (spit (io/file out-root (str name ext)) source)))' \
+  "$CORPUS" "$MATERIALIZED"
+
+mapfile -t CASES < <(
+  bb -e '
+    (require (quote [clojure.edn :as edn]))
+    (doseq [{:keys [name ext source path]} (edn/read-string (slurp (first *command-line-args*)))]
+      (println (str name "\t" (or path (str ".lab/facts-roundtrip-certify/corpus/" name ext)))))' \
+    "$CORPUS"
+)
+
+capture_oracle() {
+  local name="$1"
+  local src="$2"
+  "$RACKET" "$RT" --emit-edn "$src" > "$ORACLE/$name.emit"
+  "$RACKET" "$RT" --render "$ORACLE/$name.emit" > "$ORACLE/$name.render"
+}
+
+for row in "${CASES[@]}"; do
+  IFS=$'\t' read -r name src <<<"$row"
+  capture_oracle "$name" "$src"
+done
+
+if [[ "$MODE" == "capture-original" ]]; then
+  {
+    echo "# facts-roundtrip oracle stdout; sha256; corpus=$((${#CASES[@]})); masks=0"
+    for row in "${CASES[@]}"; do
+      IFS=$'\t' read -r name _src <<<"$row"
+      emit_sha="$(sha256sum "$ORACLE/$name.emit" | cut -d' ' -f1)"
+      render_sha="$(sha256sum "$ORACLE/$name.render" | cut -d' ' -f1)"
+      printf '%s\t%s\t%s\n' "$name" "$emit_sha" "$render_sha"
+    done
+  } > "$GOLDEN"
+  echo "facts-roundtrip capture: ${#CASES[@]} corpus cases, 72 oracle artifacts, masks=0"
+  echo "golden: ${GOLDEN#$ROOT/}"
+  exit 0
+fi
+
+[[ -f "$GOLDEN" ]] || {
+  echo "facts-roundtrip certify: missing committed golden $GOLDEN" >&2
+  exit 1
+}
+
+fail=0
+passed=0
+for row in "${CASES[@]}"; do
+  IFS=$'\t' read -r name src <<<"$row"
+  expected="$(awk -F $'\t' -v n="$name" '$1 == n {print $2 \" \" $3}' "$GOLDEN")"
+  read -r expected_emit expected_render <<<"$expected"
+  oracle_emit="$(sha256sum "$ORACLE/$name.emit" | cut -d' ' -f1)"
+  oracle_render="$(sha256sum "$ORACLE/$name.render" | cut -d' ' -f1)"
+  if [[ "$oracle_emit" != "$expected_emit" || "$oracle_render" != "$expected_render" ]]; then
+    echo "FAIL $name: Racket original drifted from committed golden" >&2
+    fail=$((fail + 1))
+    continue
+  fi
+
+  if ! bin/beagle facts-roundtrip --emit-edn "$src" > "$PORT/$name.emit"; then
+    echo "FAIL $name: self-host emit exited nonzero" >&2
+    fail=$((fail + 1))
+    continue
+  fi
+  if ! bin/beagle facts-roundtrip --render "$PORT/$name.emit" > "$PORT/$name.render"; then
+    echo "FAIL $name: self-host render exited nonzero" >&2
+    fail=$((fail + 1))
+    continue
+  fi
+
+  if cmp -s "$ORACLE/$name.emit" "$PORT/$name.emit" &&
+     cmp -s "$ORACLE/$name.render" "$PORT/$name.render"; then
+    passed=$((passed + 1))
+  else
+    echo "FAIL $name: byte divergence (inspect $LAB)" >&2
+    fail=$((fail + 1))
+  fi
+done
+
+echo "facts-roundtrip certify: $passed/${#CASES[@]} cases byte-identical, $fail failed, masks=0"
+[[ "$fail" -eq 0 ]]

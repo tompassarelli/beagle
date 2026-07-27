@@ -1,0 +1,101 @@
+[
+ {:name "plain-clj"
+  :ext ".bclj"
+  :source "#lang beagle/clj\n\n;; hdr\n(def x :- Int 42)\n"}
+ {:name "plain-nix"
+  :ext ".bnix"
+  :source "#lang beagle/nix\n(def x :- Int 1)\n"}
+ {:name "g1-type-hint"
+  :ext ".bclj"
+  :source "(defn f [^String s] s)\n"}
+ {:name "g1-flag"
+  :ext ".bclj"
+  :source "(def ^:dynamic *x* 1)\n"}
+ {:name "g1-map"
+  :ext ".bclj"
+  :source "(def ^{:private true} q 2)\n"}
+ {:name "g1-nested"
+  :ext ".bclj"
+  :source "(def y ^a ^b x)\n"}
+ {:name "g1-collection"
+  :ext ".bclj"
+  :source "(def m ^:foo [1 2 3])\n"}
+ {:name "g1-ns"
+  :ext ".bclj"
+  :source "(ns ^{:deprecated \"5.0.0\"} cheshire.custom)\n"}
+ {:name "g2-g3-g4-quasiquote"
+  :ext ".bclj"
+  :source "(defmacro m [obj xs] `(vary-meta ~obj assoc :tags `[~@xs]))\n"}
+ {:name "g5-var-quote"
+  :ext ".bclj"
+  :source "(def v #'foo)\n"}
+ {:name "g6-primed-let"
+  :ext ".bclj"
+  :source "(defn assoc-param-map [req k v] (some-> req (assoc k (if-let [v' (req k)] (reduce-kv assoc v' v) v))))\n"}
+ {:name "g6-double-primed"
+  :ext ".bclj"
+  :source "(def y x'')\n"}
+ {:name "g6-leading-quote"
+  :ext ".bclj"
+  :source "(def q 'sym)\n"}
+ {:name "g7-reader-conditional"
+  :ext ".bclj"
+  :source "(def x #?(:clj 1 :cljs 2 :nix 3))\n"}
+ {:name "g7-reader-conditional-splice"
+  :ext ".bclj"
+  :source "(ns foo (:require #?@(:clj [[a.b]] :default [[c.d]])))\n"}
+ {:name "g8-discard-vector"
+  :ext ".bclj"
+  :source "(def v [1 #_2 3])\n"}
+ {:name "g8-discard-list"
+  :ext ".bclj"
+  :source "(def w [1 #_(a b) 3])\n"}
+ {:name "g10-js-vector"
+  :ext ".bcljs"
+  :source "(def j #?(:clj [] :cljs #js []))\n"}
+ {:name "g10-js-map"
+  :ext ".bcljs"
+  :source "(def o #js {:a 1})\n"}
+ {:name "g12-legacy-meta-param"
+  :ext ".bclj"
+  :source "(defn f [#^String s] s)\n"}
+ {:name "g12-legacy-meta-longhand"
+  :ext ".bclj"
+  :source "(def #^{:tag String} x 1)\n"}
+ {:name "g11-symbolic-values"
+  :ext ".bclj"
+  :source "(def s [##NaN ##Inf ##-Inf])\n"}
+ {:name "g9-interop-field"
+  :ext ".bclj"
+  :source "(def m (. LocalTime -MIN))\n"}
+ {:name "g9-interop-method"
+  :ext ".bclj"
+  :source "(def r (. obj method arg))\n"}
+ {:name "g9-dot-sugar"
+  :ext ".bclj"
+  :source "(def m (.method obj))\n"}
+ {:name "g9-java-time-schema"
+  :ext ".bclj"
+  :source "(def s {:min (. LocalTime -MIN) :max (. LocalTime -MAX)})\n"}
+
+ {:name "byte-stable-comment"
+  :path "bin/test/byte-stable-emit/comment-fixture.bclj"}
+ {:name "byte-stable-locality"
+  :path "bin/test/byte-stable-emit/locality-fixture.bclj"}
+ {:name "facts-authoring"
+  :path "bin/test/code-as-facts/authoring-corpus/authmod.bclj"}
+ {:name "facts-delete-consumer"
+  :path "bin/test/code-as-facts/delete-corpus/del_consumer.bclj"}
+ {:name "facts-delete-lib"
+  :path "bin/test/code-as-facts/delete-corpus/del_lib.bclj"}
+ {:name "facts-delete-unused"
+  :path "bin/test/code-as-facts/delete-corpus/del_unused.bclj"}
+ {:name "facts-delete-used"
+  :path "bin/test/code-as-facts/delete-corpus/del_used.bclj"}
+ {:name "facts-rename-a"
+  :path "bin/test/code-as-facts/rename-corpus/mod_a.bclj"}
+ {:name "facts-rename-b"
+  :path "bin/test/code-as-facts/rename-corpus/mod_b.bclj"}
+ {:name "facts-shadow"
+  :path "bin/test/code-as-facts/shadow-corpus/mod.bclj"}
+]
