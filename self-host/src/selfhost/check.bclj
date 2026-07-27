@@ -576,7 +576,7 @@
 ;; infer-expr! is mutually recursive with the helpers below (and register-*!);
 ;; beagle/clj has no `declare` combiner, but a passthrough (declare ...) emits a
 ;; Clojure (declare ...) so the forward ref resolves at load time.
-(declare infer-expr!)
+(declare infer-expr! check-atom-ctor!)
 
 (defn extend-with-let-bindings! [env :- Any bindings :- (Vec Any)] :- Any
   (reduce

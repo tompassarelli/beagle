@@ -259,13 +259,13 @@
   :else out))) env params)]
   (if (and (not (nil? rest-param)) (= (get rest-param "type") "param")) (assoc env1 (get rest-param "name") (param-type-or-any rest-param)) env1)))
 
-(declare infer-expr!)
+(declare infer-expr! check-atom-ctor!)
 
 (defn extend-with-let-bindings! [env bindings]
   (reduce (fn [out b] (let [inferred (infer-expr! (get b "value") out)
    declared (get b "ann")
    bname (get b "name")]
-  (if (and (not (nil? declared)) (not (type-compatible? inferred declared))) (do
+  (if (and (not (nil? declared)) (not (check-atom-ctor! (get b "value") declared out)) (not (type-compatible? inferred declared))) (do
   (emit-diag! (str "beagle: let binding " bname ": expected " (type->string declared) ", got " (type->string inferred)))))
   (assoc out bname (if (not (nil? declared)) declared inferred)))) env bindings))
 
@@ -471,6 +471,13 @@
   (emit-diag! (str "beagle: tuple element " i ": expected " (type->string et) ", got " (type->string at)))))))
   true))) false))
 
+(defn ^Boolean check-atom-ctor! [value expected env]
+  (if (and (app-type? expected) (= (get expected "name") "Atom") (= (count (get expected "args")) 1) (not (nil? value)) (= (call-fn-name value) "atom") (= (count (get value "args")) 1)) (let [elem (nth (get expected "args") 0)
+   it (infer-expr! (nth (get value "args") 0) env)]
+  (if (not (type-compatible? it elem)) (do
+  (emit-diag! (str "beagle: atom init: expected " (type->string elem) ", got " (type->string it)))))
+  true) false))
+
 (defn infer-expr! [e env]
   (cond
   (nil? e) ANY
@@ -480,12 +487,12 @@
   (= (get e "node") "ref") (let [found (get env (get e "name"))]
   (if (nil? found) ANY found))
   (= (get e "node") "def") (let [expected (get e "ann")]
-  (if (and (not (nil? expected)) (check-hvec-literal! (get e "value") expected env)) expected (let [inferred (infer-expr! (get e "value") env)]
+  (if (and (not (nil? expected)) (or (check-hvec-literal! (get e "value") expected env) (check-atom-ctor! (get e "value") expected env))) expected (let [inferred (infer-expr! (get e "value") env)]
   (if (and (not (nil? expected)) (not (type-compatible? inferred expected))) (do
   (emit-diag! (str "beagle: def " (get e "name") ": expected " (type->string expected) ", got " (type->string inferred)))))
   inferred)))
   (= (get e "node") "defonce") (let [expected (get e "ann")]
-  (if (and (not (nil? expected)) (check-hvec-literal! (get e "value") expected env)) expected (let [inferred (infer-expr! (get e "value") env)]
+  (if (and (not (nil? expected)) (or (check-hvec-literal! (get e "value") expected env) (check-atom-ctor! (get e "value") expected env))) expected (let [inferred (infer-expr! (get e "value") env)]
   (if (and (not (nil? expected)) (not (type-compatible? inferred expected))) (do
   (emit-diag! (str "beagle: defonce " (get e "name") ": expected " (type->string expected) ", got " (type->string inferred)))))
   inferred)))
