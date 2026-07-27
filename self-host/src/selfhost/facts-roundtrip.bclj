@@ -1,8 +1,6 @@
 #lang beagle/clj
-;; @upstream:graph
 (ns selfhost.facts-roundtrip
-  "Lossless Beagle source ↔ fact-triple roundtrip. The Fram graph is upstream;
-  substantive definitions are authored only through sealed graph-edit verbs.")
+  "Lossless Beagle source ↔ fact-triple roundtrip.")
 (define-mode strict)
 
 (require clojure.string :as str)
