@@ -1,0 +1,3 @@
+(ns test.graph-mint-render-seed)
+
+^{:line 6 :file "/tmp/beagle-lane-lane-ms39b95d-85ba56cd-14c3-4d14-ad25-0f5cc40d833b/beagle-test/tests/fixtures/graph-mint-render-seed.bclj"} (def baseline 1)
