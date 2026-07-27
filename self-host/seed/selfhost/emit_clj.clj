@@ -481,6 +481,8 @@
   (expect! "defenum keywords" (= (emit-defenum {"name" "Color" "values" ["red" "blue"]}) "(def Color-values #{:red :blue})"))
   (expect! "record accessors" (= (emit-record-form {"name" "Pt" "fields" [{"name" "x"} {"name" "y"}]}) "(defrecord Pt [x y])\n\n(defn pt-x [r] (:x r))\n\n(defn pt-y [r] (:y r))"))
   (expect! "if: else-less encodes 2-arity" (= (emit-expr! {"node" "if" "cond" {"node" "ref" "name" "p"} "then" {"node" "ref" "name" "t"} "else" {"node" "literal" "kind" "bool" "value" false}}) "(if p t)"))
+  (expect! "call: keyword access in function position" (= (emit-expr! {"node" "call" "fn" {"node" "kw-access" "kw" ":k" "target" {"node" "ref" "name" "m"} "default" false} "args" []}) "((:k m))"))
+  (expect! "def: dynamic metadata survives emission" (= (emit-expr! {"node" "def" "name" "*arity-check?*" "ann" {"kind" "prim" "name" "Bool"} "doc" false "dynamic" true "value" {"node" "literal" "kind" "bool" "value" true}}) "(def ^:dynamic ^Boolean *arity-check?* true)"))
   (expect! "match temps deterministic" (do
   (reset! match-counter 0)
   (= (fresh-match-sym!) "match__0")))
