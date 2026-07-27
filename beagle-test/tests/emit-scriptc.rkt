@@ -11,6 +11,9 @@
 
 (define-runtime-path self-host-readme "../../self-host/README.md")
 
+(define (br . xs) (cons '#%brackets xs))
+(define (mt . xs) (cons '#%map xs))
+
 (define (target-emit target forms)
   (define prog
     (parse-program
@@ -117,6 +120,75 @@
                  (format "JS defn must stay untyped and byte-stable in:\n~a" output))
      (check-false (string-contains? output ": number")
                   (format "JS output must carry no TypeScript annotation in:\n~a" output)))
+
+   (test-case "nested/rest/default/destructured/catch boundaries are fully annotated"
+     (define map-param
+       (mt ':keys (br 'x) ':or (mt 'x 1)))
+     (define seq-param (br 'head '& 'tail))
+     (define output
+       (scriptc-emit
+        (list
+         (list 'defn 'exercise (br) ':- 'Int
+               (list
+                'let
+                (br
+                 'variadic
+                 (list 'fn (br 'n ':- 'Int '& 'more ':- 'Int)
+                       ':- 'Int 'n)
+                 'defaulted
+                 (list 'fn (br map-param) ':- 'Int 'x)
+                 'sequenced
+                 (list 'fn (br seq-param) ':- 'Any 'head))
+                (list 'try
+                      (list 'variadic 1)
+                      (list 'catch 'Exception 'err
+                            (list 'defaulted (mt ':x 3)))))))))
+     (for ([expected
+            (in-list
+             '("(n: number, ...more: (number)[]): number =>"
+               "({x = 1}: { x?: number }): number =>"
+               "([head, ...tail]: unknown[]): unknown =>"
+               "catch (_caught) {"
+               "const err: Error = _caught as Error;"))])
+       (check-true (string-contains? output expected)
+                   (format "expected ~v in:\n~a" expected output)))
+     (for ([forbidden (in-list '("(n) =>" "...more) =>" "catch (err)"))])
+       (check-false (string-contains? output forbidden)
+                    (format "unannotated boundary ~v survived in:\n~a"
+                            forbidden output))))
+
+   (test-case "declare-extern renders one module-local ambient declaration"
+     (define output
+       (scriptc-emit
+        (list `(declare-extern host-parse ,(br 'String '-> 'Int))
+              '(defn parse-or-zero [(s :- String)] :- Int (host-parse s))
+              '(println (parse-or-zero "17")))))
+     (check-true
+      (string-prefix? output
+                      "export {};\ndeclare function host_parse(_arg0: string): number;\n")
+      (format "ambient declarations must precede executable statements:\n~a" output))
+     (check-equal? (length (regexp-match* #rx"declare function host_parse" output)) 1))
+
+   (test-case "ScriptC str avoids String.prototype.concat while JS stays byte-stable"
+     (define forms
+       (list '(println (str "beagle" "-" "scriptc"))))
+     (define scriptc-output (scriptc-emit forms))
+     (define js-output (target-emit 'js forms))
+     (check-true
+      (string-contains? scriptc-output
+                        "console.log((\"\" + \"beagle\" + \"-\" + \"scriptc\"));"))
+     (check-false (string-contains? scriptc-output ".concat("))
+     (check-true
+      (string-contains? js-output
+                        "console.log((\"\".concat(\"beagle\", \"-\", \"scriptc\")));")))
+
+   (test-case "defn-only ScriptC modules export their public bindings"
+     (define output
+       (scriptc-emit
+        (list '(defn triple [(n :- Int)] :- Int (* n 3)))))
+     (check-true
+      (string-contains? output
+                        "export function triple(n: number): number {")))
 
    (test-case "self-host Known gaps records scriptc as oracle-only"
      (define readme (file->string self-host-readme))

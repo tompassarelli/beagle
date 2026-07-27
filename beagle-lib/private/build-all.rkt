@@ -3,10 +3,12 @@
 (require racket/path
          racket/file
          racket/list
+         racket/set
          racket/string
          "parse.rkt"
          "check.rkt"
          "emit.rkt"
+         (only-in "emit-js.rkt" current-js-export-names)
          "lint.rkt"
          "error-format.rkt"
          "query.rkt"
@@ -32,7 +34,7 @@
 ;; fact triples). `path` is the SOURCE .b* path — used for require resolution
 ;; (#:source-path), the extension/header check, in-place output naming, and error
 ;; locations. The two front-ends differ ONLY in how they obtain `stxs`.
-(define (build-from-stxs stxs path out-dir json? warn? in-place?)
+(define (build-from-stxs stxs path out-dir json? warn? in-place? export-plan)
   (define type-errors 0)
 
   (define (handle-error e [loc-stx #f])
@@ -80,9 +82,14 @@
     (unless (getenv "BEAGLE_NO_LINT")
       (lint-program! prog))
 
-    (define source (emit-program prog))
     (define ns (program-namespace prog))
     (define target (program-target prog))
+    (define source
+      (parameterize
+        ([current-js-export-names
+          (and (memq target '(js scriptc))
+               (hash-ref export-plan ns (set)))])
+        (emit-program prog)))
     (define out-path
       (cond
         [in-place?
@@ -110,13 +117,15 @@
           #t))))
 
 ;; Text front-end: read source text → syntax → shared compile tail.
-(define (build-one-file path out-dir json? #:warn? [warn? #f] #:in-place? [in-place? #f])
+(define (build-one-file path out-dir json? export-plan
+                        #:warn? [warn? #f] #:in-place? [in-place? #f])
   (with-handlers
     ([exn:fail? (lambda (e)
                   (if json? (write-json-error (exn-message e) #f)
                       (eprintf "  ~a: ~a\n" path (exn-message e)))
                   #f)])
-    (build-from-stxs (read-beagle-syntax path) path out-dir json? warn? in-place?)))
+    (build-from-stxs
+     (read-beagle-syntax path) path out-dir json? warn? in-place? export-plan)))
 
 ;; The `@file <path>` header line an --emit-edn dump carries (the original source
 ;; path) — used as #:source-path so cross-module requires still resolve.
@@ -132,7 +141,8 @@
 ;; wrapper head and hand the forms — as syntax — to the SAME compile tail, so the
 ;; output is identical to the text path (KEYSTONE-B). Slice-1: the datum is bare,
 ;; so blame/srclocs degrade (closed later by adding line/col/pos facts).
-(define (build-one-edn triples-path out-dir json? #:warn? [warn? #f] #:in-place? [in-place? #f])
+(define (build-one-edn triples-path out-dir json? export-plan
+                       #:warn? [warn? #f] #:in-place? [in-place? #f])
   (with-handlers
     ([exn:fail? (lambda (e)
                   (if json? (write-json-error (exn-message e) #f)
@@ -147,7 +157,44 @@
     (define stxs
       (if (and (pair? forms) (eq? (syntax->datum (car forms)) 'beagle-file))
           (cdr forms) forms))
-    (build-from-stxs stxs src-path out-dir json? warn? in-place?)))
+    (build-from-stxs
+     stxs src-path out-dir json? warn? in-place? export-plan)))
+
+;; Exact ESM export demand for a batch. A named `:refer` requests only those
+;; bindings; a namespace import requests every public defn. The emitter keeps
+;; declaration rendering separate and receives only this set-valued sink plan.
+(define (build-export-plan files build-edn?)
+  (define programs
+    (for/list ([f (in-list files)])
+      (with-handlers ([exn:fail? (lambda (_) #f)])
+        (cond
+          [build-edn?
+           (define src-path (or (edn-file-source f) f))
+           (define srcloc-source (simplify-path (path->complete-path src-path)))
+           (define wrapper
+             (edn-triples->syntax (read-edn-triples f) srcloc-source))
+           (define forms (if wrapper (syntax->list wrapper) '()))
+           (define stxs
+             (if (and (pair? forms)
+                      (eq? (syntax->datum (car forms)) 'beagle-file))
+                 (cdr forms)
+                 forms))
+           (parse-program stxs #:source-path src-path)]
+          [else
+           (parse-program (read-beagle-syntax f) #:source-path f)]))))
+  (for/fold ([plan (hash)])
+            ([prog (in-list programs)]
+             #:when prog)
+    (for/fold ([next plan])
+              ([r (in-list (program-requires prog))])
+      (define ns (require-entry-ns r))
+      (define requested
+        (if (require-entry-refer r)
+            (list->set (require-entry-refer r))
+            (set '*)))
+      (hash-update next ns
+                   (lambda (prior) (set-union prior requested))
+                   (set)))))
 
 (define (expand-args args)
   (sort
@@ -208,14 +255,17 @@
     (exit 2))
 
   (define json? (json-error-mode?))
+  (define export-plan (build-export-plan files build-edn?))
   (define built 0)
   (define errors 0)
 
   (for ([f (in-list files)])
     (define ok?
       (if build-edn?
-          (build-one-edn f out-dir json? #:warn? warn? #:in-place? in-place?)
-          (build-one-file f out-dir json? #:warn? warn? #:in-place? in-place?)))
+          (build-one-edn f out-dir json? export-plan
+                         #:warn? warn? #:in-place? in-place?)
+          (build-one-file f out-dir json? export-plan
+                          #:warn? warn? #:in-place? in-place?)))
     (if ok? (set! built (+ built 1)) (set! errors (+ errors 1))))
 
   (unless json?

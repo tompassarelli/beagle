@@ -1,9 +1,8 @@
 #lang beagle/scriptc
 ;; RATCHET FIXTURE — D1-str-lowering.
-;; `str` lowers to `"".concat(...)`, which ScriptC does not compile statically
-;; (SC2020). The golden emission matches, so only the static dimension is red:
-;; classified :bug in known-divergences-scriptc.edn. Delete that entry when the
-;; JS-family string lowering becomes ScriptC-compilable.
+;; `str` must use a ScriptC-static construction rather than
+;; String.prototype.concat while ordinary JavaScript retains its established
+;; byte output.
 (ns conformance.sc-str-concat)
 
 (println (str "beagle" "-" "scriptc"))

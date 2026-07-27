@@ -18,38 +18,6 @@
   rows below are :bug (beagle owes the lowering) and not :host-model."
  :entries
  [
-  ;; --- D1: JS-family string lowering is not ScriptC-compilable -------------
-  {:id "sc-str-concat" :bucket :static-incomplete :category :bug
-   :thread "@019fa49d-1276-71d6-a925-7b42ca81ff2a"
-   :note "`str` lowers to \"\".concat(...); scriptc has no lowering for
-          String.prototype.concat (SC2020) so the row is 0/1 static. Delete
-          when emit-js lowers string building to a ScriptC-compilable form."}
-
-  ;; --- D2: inner/local functions emit implicit-any parameters --------------
-  {:id "sc-inner-fn" :bucket :invalid-output :category :bug
-   :thread "@019fa49d-1276-71d6-a925-7b42ca81ff2a"
-   :note "A `fn` inside a defn emits `const bump = (n) => ...`; ScriptC's real
-          tsc rejects the implicit any (SC0001), so the emitted .ts does not
-          even type-check — the silent-miscompile class. Delete when nested/
-          rest/default/destructured/catch boundaries emit typed signatures."}
-
-  ;; --- D3: declare-extern emits no ambient declaration ---------------------
-  {:id "sc-extern" :bucket :invalid-output :category :bug
-   :thread "@019fa49d-1276-71d6-a925-7b42ca81ff2a"
-   :note "declare-extern states a host contract but emits nothing, so the call
-          site is an unresolved bare identifier (SC0001). Delete when the
-          ambient extern declaration contract lands (decision gate D0: inline
-          vs build sidecar — either satisfies this row)."}
-
-  ;; --- D4/D5/D6: the module surface has no ESM exports --------------------
-  {:id "sc-module-two-file" :bucket :invalid-output :category :bug
-   :thread "@019fa49d-1276-71d6-a925-7b42ca81ff2a"
-   :note "The library module emits no `export`, so its .ts is not a module,
-          and the entry emits a namespace-qualified call
-          (sc_module_two_file_lib.triple) that no import binds. The same defect
-          breaks the js target under Node. Delete when provided definitions
-          emit real ESM exports and the entry calls the imported binding."}
-
   ;; --- validator: target-neutral forms rejected at the top level ----------
   {:id "sc-record" :bucket :compile-fail :category :bug
    :thread "@019fa49d-1276-71d6-a925-7b42ca81ff2a"

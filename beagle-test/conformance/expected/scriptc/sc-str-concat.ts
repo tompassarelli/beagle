@@ -1,2 +1,2 @@
 
-console.log(("".concat("beagle", "-", "scriptc")));
+console.log(("" + "beagle" + "-" + "scriptc"));

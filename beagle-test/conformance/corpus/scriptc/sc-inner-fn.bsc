@@ -1,12 +1,11 @@
 #lang beagle/scriptc
 ;; RATCHET FIXTURE — D2-inner-fn-untyped.
-;; A `fn` bound inside a defn emits an arrow with implicit-any parameters, so
-;; ScriptC's real tsc rejects it (SC0001). Classified :bug; delete the entry
-;; once inner/local function signatures are emitted typed.
+;; A typed `fn` bound inside a defn must preserve its inferred/declared
+;; TypeScript boundary instead of emitting an implicit-any arrow parameter.
 (ns conformance.sc-inner-fn)
 
 (defn apply-twice [(x :- Int)] :- Int
-  (let [bump (fn [n] (+ n 1))]
+  (let [bump (fn [n :- Int] :- Int (+ n 1))]
     (bump (bump x))))
 
 (println (apply-twice 40))

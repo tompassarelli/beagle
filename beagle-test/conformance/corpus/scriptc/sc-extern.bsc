@@ -1,8 +1,7 @@
 #lang beagle/scriptc
 ;; RATCHET FIXTURE — D3-declare-extern.
-;; `declare-extern` states a host contract but emits no ambient declaration, so
-;; the reference is an unresolved bare identifier under ScriptC's tsc (SC0001).
-;; Classified :bug; delete the entry once the ambient declaration contract lands.
+;; `declare-extern` renders a module-local inline ambient declaration before
+;; executable statements. It is compile-time-only and has no .d.ts sidecar.
 (ns conformance.sc-extern)
 
 (declare-extern host-parse [String -> Int])

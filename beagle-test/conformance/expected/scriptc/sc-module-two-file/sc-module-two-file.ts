@@ -1,3 +1,3 @@
-import { triple } from './sc-module-two-file-lib.js';
+import { triple } from './sc-module-two-file-lib.ts';
 
-console.log(sc_module_two_file_lib.triple(14));
+console.log(triple(14));
