@@ -23,7 +23,21 @@ echo "fixture: helper defined in BOTH mod_a and mod_b; change ONLY mod_a/helper.
 echo
 
 # --- 1. the graph result, and the assertions that make it a proof ----------
-GRAPH_OUT="$("$BIN/beagle-cascade" "$CORPUS" "$VERIFY" --modified mod_a/helper 2>/dev/null)"
+GRAPH_ERR="$(mktemp)"
+graph_status=0
+GRAPH_OUT="$("$BIN/beagle-cascade" "$CORPUS" "$VERIFY" --modified mod_a/helper 2>"$GRAPH_ERR")" \
+  || graph_status=$?
+if [[ "$graph_status" -ne 0 || -z "$GRAPH_OUT" ]]; then
+  cat "$GRAPH_ERR" >&2
+  rm -f "$GRAPH_ERR"
+  if [[ "$graph_status" -ne 0 ]]; then
+    echo "cascade-graph: beagle-cascade failed (exit $graph_status)" >&2
+  else
+    echo "cascade-graph: beagle-cascade produced empty output" >&2
+  fi
+  exit 1
+fi
+rm -f "$GRAPH_ERR"
 
 check() {  # check <description> <grep-pattern> <must-be-present:yes|no>
   local desc="$1" pat="$2" want="$3"

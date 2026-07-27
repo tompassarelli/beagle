@@ -25,7 +25,25 @@ echo "================ reasoning call-graph — cross-module completeness ======
 [ -d "$FRAM_OUT" ] || { echo "  (need FRAM_OUT)"; exit 3; }
 RES="$(find_fram_resolver)" || exit 3
 
-JSON="$("$CG" "$HERE/corpus" 2>/dev/null)"
+capture_callgraph() {
+  local dest="$1" corpus="$2" err output status=0
+  err="$(mktemp)"
+  output="$("$CG" "$corpus" 2>"$err")" || status=$?
+  if [[ "$status" -ne 0 || -z "$output" ]]; then
+    cat "$err" >&2
+    rm -f "$err"
+    if [[ "$status" -ne 0 ]]; then
+      echo "callgraph-xmodule: beagle-callgraph failed (exit $status)" >&2
+    else
+      echo "callgraph-xmodule: beagle-callgraph produced empty output" >&2
+    fi
+    exit 1
+  fi
+  rm -f "$err"
+  printf -v "$dest" '%s' "$output"
+}
+
+capture_callgraph JSON "$HERE/corpus"
 chk() { if eval "$2"; then echo "  PASS  $1"; else echo "  FAIL  $1"; fail=1; fi; }
 
 # blast(target) — its transitive callers — must contain BOTH relay (:as caller) and
@@ -67,7 +85,7 @@ cat > "$ATT/c/e.bclj" <<'EOF'
 (defprotocol Show (render [self] : Int))
 (extend-type Box Show (render [self] (wrap (box-w self))))
 EOF
-AJ="$("$CG" "$ATT/c" 2>/dev/null)"
+capture_callgraph AJ "$ATT/c"
 agot="$(python3 - "$AJ" <<'PY'
 import json,sys
 d=json.loads(sys.argv[1]); nm={x['key']:x['name'] for x in d['edges'] and [] or []}
