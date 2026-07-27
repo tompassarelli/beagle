@@ -37,6 +37,8 @@
    'fram.datalog/nlit                     (fn-of '(String Any) 'Any)
    'fram.datalog/rule                     (fn-of '(String Any Any) 'Any)
    'fram.datalog/edb                      (fn-of '(Any) 'Any)
+   'fram.datalog/base-index               (fn-of '(Any) 'Any)
+   'fram.datalog/fixpoint-bi              (fn-of '(Any Any Any) 'Any)
    'fram.datalog/fixpoint                 (fn-of '(Any Any) 'Any)
    'fram.datalog/run-rules                (fn-of '(Any Any) 'Any)
    'fram.datalog/run-strata               (fn-of '(Any Any) 'Any)
