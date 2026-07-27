@@ -690,14 +690,16 @@
        ;; Scalar constructors/accessors erase to identity (zero runtime cost)
        [(and (set-member? (current-emit-scalar-fns) fn-sym)
              (= 1 (length (call-form-args e))))
-        (emit-expr (car (call-form-args e)))]
+       (emit-expr (car (call-form-args e)))]
        [else
-        (define sym-str (symbol->string fn-sym))
         (define qualified-str
-          (let ([mod-prefix (hash-ref (current-emit-symbol-ns) fn-sym #f)])
-            (if (and mod-prefix (not (string-contains? sym-str "/")))
-                (string-append (symbol->string mod-prefix) "/" sym-str)
-                sym-str)))
+          (if (symbol? fn-sym)
+              (let* ([sym-str (symbol->string fn-sym)]
+                     [mod-prefix (hash-ref (current-emit-symbol-ns) fn-sym #f)])
+                (if (and mod-prefix (not (string-contains? sym-str "/")))
+                    (string-append (symbol->string mod-prefix) "/" sym-str)
+                    sym-str))
+              (emit-expr fn-sym)))
         (format "(~a~a)"
                 qualified-str
                 (emit-args (call-form-args e)))])]
