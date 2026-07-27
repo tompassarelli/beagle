@@ -91,3 +91,10 @@
    (read-all (rewrite-result-rewritten res))
    (read-all
     "(match outer [:a (match inner [\"x\" 1] [_ 0])] [_ 2])")))
+
+(test-case "case-to-match leaves symbol dispatch for manual cond migration"
+  (define source "(case (first form) ns :namespace require :dependency :other)")
+  (define res (rewrite-text (get-rule 'case-to-match) source))
+  (check-false (rewrite-result-changed? res))
+  (check-equal? (read-all (rewrite-result-rewritten res))
+                (read-all source)))

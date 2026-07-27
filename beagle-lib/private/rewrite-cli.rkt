@@ -14,7 +14,8 @@
          racket/string
          "rewrite.rkt"
          ;; Side-effect: register all rewrite rules.
-         "rewrites/drop-when.rkt")
+         "rewrites/drop-when.rkt"
+         "rewrites/case-to-match.rkt")
 
 (define apply-changes? (make-parameter #f))
 (define list-rules? (make-parameter #f))
