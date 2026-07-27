@@ -40,6 +40,7 @@
     [(clj)  stdlib-clj-combined]
     [(js scriptc) stdlib-js-combined]
     [(nix)  stdlib-nix-combined]
+    [(zig)  STDLIB-PORTABLE]
     [(odin) (merge-hashes STDLIB-PORTABLE STDLIB-ODIN)]
     [else (error 'stdlib-for-target "unknown target: ~a" target)]))
 

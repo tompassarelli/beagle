@@ -43,7 +43,8 @@
   (clj     . (active   "Promoted Phase D (2026-05): emit-clj structural + behavioral both active. Fixture-driven .bclj suites reconciled to v0.16 surface (claim form, no inline def/defn type annotations, defrecord+extend-type instead of deftype)"))
   (js      . (active   "Structural + behavioral both active (promoted 2026-07-19): JS runtime-correctness seams landed (reserved-word property/method mangling fixed, effect-position if/cond lowering). emit-js-behavioral.rkt runs emitted JS under bun and is now load-bearing/blocking."))
   (sql     . (active   "Schema-typing live in check.rkt; emitter dormant (BEAGLE_ALL_TARGETS=1). Structural-only"))
-  (odin    . (active   "Native target — Odin + wgpu/SDL3. Structural goldens + pointed rejections")))
+  (odin    . (active   "Native target — Odin + wgpu/SDL3. Structural goldens + pointed rejections"))
+  (zig     . (active   "Strategic native target — restored structural goldens + pointed rejections")))
 
 
 ;; --- authoritative file-level classification ---
@@ -105,6 +106,8 @@
              "emit-clj-behavioral.rkt"  ; requires bb (Babashka)
              ;; Odin backend — native target (2026-06-13).
              "emit-odin.rkt"
+             ;; Zig backend — restored strategic native target (2026-07-28).
+             "emit-zig.rkt"
              "emit-scriptc.rkt"        ; experimental structural TypeScript slice
              ;; Form × live-backend matrix: every cell emits or rejects
              ;; pointedly (cracks thread 20260613013145 #2).
@@ -145,7 +148,7 @@
 
   (gated . (;; Non-Nix target tests parked behind BEAGLE_ALL_TARGETS=1.
             ;; SQL emitter is dormant (its schema-typing in check.rkt is live).
-            ;; (py/rkt/scheme/zig removed 2026-06-15 — tag
+            ;; (py/rkt/scheme removed 2026-06-15 — tag
             ;; dormant-targets-archive-2026-06-15 to revive.)
             "emit-js.rkt"
             "emit-sql.rkt"

@@ -2,19 +2,19 @@
 # beagle-build: compile a beagle source file to target output.
 #
 # Usage:
-#   bin/beagle-build <source.bclj|.bjs|.bnix|.bsql|.bodin> [output]
+#   bin/beagle-build <source.bclj|.bjs|.bnix|.bzig|.bodin> [output]
 #
 # If the output path is omitted, it is derived from the namespace declared
 # in the source via (ns ...) and dropped under .beagle-out/ (gitignored, so
 # throwaway emit never pollutes the tracked tree). Override the output root
 # with BEAGLE_OUT (e.g. BEAGLE_OUT=runtime/src to build into the runtime project).
-# Extension is determined by target: .clj (default), .js, .py, .nix.
+# Extension is determined by target: .clj (default), .js, .ts, .nix, .zig, .odin.
 
 set -euo pipefail
 source "$(dirname "$0")/_beagle-racket"
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
-    echo "usage: beagle-build <source.bclj|.bjs|.bnix> [output]" >&2
+    echo "usage: beagle-build <source.bclj|.bjs|.bnix|.bzig|.bodin> [output]" >&2
     exit 2
 fi
 

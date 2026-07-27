@@ -1023,7 +1023,7 @@
                           "malformed defmacro — expected (defmacro NAME [params] template) with exactly one template form; wrap multiple forms in `(do ...)`, got: ~v" d)]
       [(cons 'define-target _)
        (raise-parse-error 'bad-meta-value
-                          "malformed define-target — expected (define-target clj|nix|js|py|rkt), got: ~v" d)]
+                          "malformed define-target — expected (define-target clj|js|scriptc|nix|py|rkt|zig|odin), got: ~v" d)]
       [(cons 'define-mode _)
        (raise-parse-error 'bad-meta-value
                           "malformed define-mode — expected (define-mode strict|dynamic), got: ~v" d)]

@@ -259,9 +259,9 @@ pub fn str1(x: anytype) []const u8 {
 
 // --- stdout (clojure.core println) ------------------------------------------
 pub fn println(s: []const u8) void {
-    const out = std.io.getStdOut();
-    out.writeAll(s) catch {};
-    out.writeAll("\n") catch {};
+    const out = std.Io.File.stdout();
+    out.writeStreamingAll(io(), s) catch {};
+    out.writeStreamingAll(io(), "\n") catch {};
 }
 
 // --- file I/O (clojure.core slurp/spit) -------------------------------------

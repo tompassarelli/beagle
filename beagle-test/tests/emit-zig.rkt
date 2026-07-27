@@ -53,7 +53,14 @@
 
 (define (compile-zig-src src-path)
   (define stxs (read-beagle-syntax src-path))
-  (define forms (cons (datum->syntax #f '(define-target zig)) stxs))
+  (define has-target?
+    (for/or ([stx (in-list stxs)])
+      (define d (syntax->datum stx))
+      (and (pair? d) (eq? (car d) 'define-target))))
+  (define forms
+    (if has-target?
+        stxs
+        (cons (datum->syntax #f '(define-target zig)) stxs)))
   (define prog (parse-program forms #:source-path src-path))
   (type-check! prog)
   (emit-program prog))
@@ -79,6 +86,16 @@
 (unless ZIG
   (displayln "note: zig not on PATH — snapshot compile checks skipped"))
 
+(define (zig-env dir)
+  (define ev (environment-variables-copy (current-environment-variables)))
+  (define global-cache (build-path dir "zig-global-cache"))
+  (define local-cache (build-path dir "zig-local-cache"))
+  (make-directory* global-cache)
+  (make-directory* local-cache)
+  (environment-variables-set! ev #"ZIG_GLOBAL_CACHE_DIR" (path->bytes global-cache))
+  (environment-variables-set! ev #"ZIG_LOCAL_CACHE_DIR" (path->bytes local-cache))
+  ev)
+
 (define (zig-compiles? zig-src name)
   (define dir (make-temporary-file "zigck~a" 'directory))
   (dynamic-wind
@@ -95,12 +112,43 @@
       (define ok
         (parameterize ([current-output-port out]
                        [current-error-port out]
+                       [current-environment-variables (zig-env dir)]
                        [current-directory dir])
           (system* ZIG "build-obj" "-fno-emit-bin" (path->string f))))
       (unless ok
         (eprintf "zig compile check failed for ~a:\n~a\n" name
                  (get-output-string out)))
       ok)
+    (lambda () (delete-directory/files dir))))
+
+(define (zig-build-exe-and-run zig-src)
+  (define dir (make-temporary-file "zigsmoke~a" 'directory))
+  (dynamic-wind
+    void
+    (lambda ()
+      (copy-file kernel-rt (build-path dir "beagle_rt.zig"))
+      (define src (build-path dir "main.zig"))
+      (define exe (build-path dir "zig-smoke"))
+      (call-with-output-file src (lambda (p) (display zig-src p)))
+      (define build-log (open-output-string))
+      (define built?
+        (parameterize ([current-output-port build-log]
+                       [current-error-port build-log]
+                       [current-environment-variables (zig-env dir)]
+                       [current-directory dir])
+          (system* ZIG "build-exe" (path->string src)
+                   (format "-femit-bin=~a" (path->string exe)))))
+      (unless built?
+        (error 'zig-smoke "zig build-exe failed:\n~a" (get-output-string build-log)))
+      (define run-out (open-output-string))
+      (define ran?
+        (parameterize ([current-output-port run-out]
+                       [current-error-port run-out]
+                       [current-directory dir])
+          (system* exe)))
+      (unless ran?
+        (error 'zig-smoke "emitted binary failed:\n~a" (get-output-string run-out)))
+      (get-output-string run-out))
     (lambda () (delete-directory/files dir))))
 
 (define fixture-files
@@ -123,6 +171,13 @@
   (when ZIG
     (test-case (format "golden: ~a compiles as zig" name)
       (check-true (zig-compiles? emitted name)))))
+
+(when ZIG
+  (test-case "typed beagle smoke emits, build-exe compiles, and binary runs"
+    (define smoke
+      (build-path fixtures-dir 'up "zig-smoke" "main.bzig"))
+    (check-equal? (zig-build-exe-and-run (compile-zig-src smoke))
+                  "zig revival alive\n")))
 
 ;; --- determinism: same input → byte-identical output --------------------------
 
@@ -459,4 +514,3 @@
   (string-append
    "(ns g)\n(defrecord E [x :- Int])\n(defrecord O [x :- Float])\n"
    "(defn tick-step [ctx :- Ctx e :- E] :- O (->O 1.0))"))
-

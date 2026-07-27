@@ -7,7 +7,7 @@ pub fn lookup(m: rt.Map(i64), k: []const u8) ?i64 {
     return m.get(k);
 }
 
-pub fn has(m: rt.Map(i64), k: []const u8) bool {
+pub fn includesKey(m: rt.Map(i64), k: []const u8) bool {
     return m.contains(k);
 }
 

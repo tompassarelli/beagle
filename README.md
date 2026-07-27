@@ -136,6 +136,7 @@ maps, JavaScript as native arrays and arrows, Odin as structs and procs.
 | JavaScript | Live — self-hosted, oracle-certified, fuzz-guarded            |
 | Nix        | Live — self-hosted, oracle-certified, fuzz-guarded            |
 | Odin       | Live — Racket emitter (self-host port pending conformance goldens) |
+| Zig        | Live — restored Racket emitter with structural goldens        |
 
 Targets are removed, not deprecated, when they stop earning their place —
 reviving one means re-wiring the emitter and proving it against a real
@@ -146,7 +147,7 @@ redundant against the native JS target; tag `cljs-final`.)
 ## How it compiles
 
 ```
-.bclj / .bjs / .bnix / .bodin  ──▶  parse ──▶ check ──▶ emit  ──▶  .clj / .js / .nix / .odin
+.bclj / .bjs / .bnix / .bodin / .bzig  ──▶  parse ──▶ check ──▶ emit  ──▶  .clj / .js / .nix / .odin / .zig
                                                           ▲
                                             macros, schema, stdlib, type narrowing
                                             all share one AST + diagnostic path
@@ -255,7 +256,7 @@ Deeper dev tools stay as `bin/beagle-*` (blame, specfix, trace, cascade).
 
 - `beagle-lib/private/parse.rkt` — surface form set; the source of truth.
 - `beagle-lib/private/check.rkt` — type checker.
-- `beagle-lib/private/emit-{clj,js,nix,odin}.rkt` — the live target emitters.
+- `beagle-lib/private/emit-{clj,js,nix,odin,zig}.rkt` — the live target emitters.
 - `beagle-lib/private/nixos-schema.rkt` — the typed NixOS-option environment.
 - `beagle-lib/private/diagnostic-kind.rkt` — the `cause-class?` taxonomy.
 - `beagle-test/` — tiered test suite; `beagle-test/tiers.rktd` is the
