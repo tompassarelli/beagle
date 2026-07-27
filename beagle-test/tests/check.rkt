@@ -1528,6 +1528,25 @@
   #rx"expected Int|got String"
   '(defn f [] :- Nil (.setSoTimeout (java.net.Socket.) "nope")))
 
+(check-ok "qualified JVM instance method excludes receiver from declared arity"
+  `(ns test.jvm-instance (:import ,(br 'java.net 'Socket)))
+  `(declare-extern Socket/connect ,(br 'Any 'Int '-> 'Nil))
+  '(defn f [sock :- Socket addr :- Any timeout-ms :- Int] :- Nil
+     (Socket/connect sock addr timeout-ms)))
+
+(check-err/rx "qualified JVM instance method still rejects wrong Java arity"
+  #rx"no overload accepts 3 argument"
+  `(ns test.jvm-instance-wrong (:import ,(br 'java.net 'Socket)))
+  `(declare-extern Socket/connect ,(br 'Any 'Int '-> 'Nil))
+  '(defn f [sock :- Socket addr :- Any timeout-ms :- Int] :- Nil
+     (Socket/connect sock addr timeout-ms timeout-ms)))
+
+(check-err/rx "declared unknown JVM static keeps all arguments in arity"
+  #rx"expected 1 arg.*got 2"
+  `(ns test.jvm-static (:import ,(br 'java.util.regex 'Pattern)))
+  `(declare-extern Pattern/quote ,(br 'String '-> 'String))
+  '(def quoted :- String (Pattern/quote "x" "y")))
+
 ;; typed arrays: container sigs carry precise element types; the gap-listed
 ;; construction returns (Arr Any) which flows into them (covariant via Any).
 (check-ok "mTLS typed-array chain: getKeyManagers -> SSLContext.init"

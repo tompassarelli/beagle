@@ -1919,6 +1919,9 @@
 (defn make-call [fn-name :- String args :- (Vec Any)] :- Any
   {"node" "call" "fn" {"node" "ref" "name" fn-name} "args" args})
 
+(defn make-static-call [name :- String args :- (Vec Any)] :- Any
+  {"node" "static-call" "name" name "args" args})
+
 (defn make-if-node [cond-expr :- Any then-expr :- Any else-expr :- Any] :- Any
   {"node" "if" "cond" cond-expr "then" then-expr "else" else-expr})
 
@@ -2063,6 +2066,47 @@
                 "forms" [(make-def-node "r" nil
                            (make-call "add" [(make-lit "number" 1)]))]
                 "externs" [{"name" "add" "type" (make-fn [(make-prim "Int") (make-prim "Int")] nil (make-prim "Int"))}]
+                "requires" []}
+          result (type-check! prog)]
+      (> (get result "count") 0)))
+
+  ;; --- qualified JVM instance-position interop ---
+  (expect! "JVM instance-position: receiver excluded from declared arity"
+    (let [prog {"mode" "strict" "namespace" "test" "target" "clj"
+                "forms" [(make-defn-node "connect-with-timeout"
+                           [(make-param "sock" (make-prim "Socket"))
+                            (make-param "addr" ANY)
+                            (make-param "timeout-ms" (make-prim "Int"))]
+                           (make-prim "Nil")
+                           [(make-static-call "Socket/connect"
+                              [(make-ref "sock") (make-ref "addr") (make-ref "timeout-ms")])])]
+                "externs" [{"name" "Socket/connect"
+                            "type" (make-fn [ANY (make-prim "Int")] nil (make-prim "Nil"))}]
+                "requires" []}
+          result (type-check! prog)]
+      (= (get result "count") 0)))
+  (expect! "JVM instance-position: wrong Java arity rejected"
+    (let [prog {"mode" "strict" "namespace" "test" "target" "clj"
+                "forms" [(make-defn-node "connect-with-too-many-args"
+                           [(make-param "sock" (make-prim "Socket"))
+                            (make-param "addr" ANY)
+                            (make-param "timeout-ms" (make-prim "Int"))]
+                           (make-prim "Nil")
+                           [(make-static-call "Socket/connect"
+                              [(make-ref "sock") (make-ref "addr")
+                               (make-ref "timeout-ms") (make-ref "timeout-ms")])])]
+                "externs" [{"name" "Socket/connect"
+                            "type" (make-fn [ANY (make-prim "Int")] nil (make-prim "Nil"))}]
+                "requires" []}
+          result (type-check! prog)]
+      (> (get result "count") 0)))
+  (expect! "JVM static gate-c: declared unknown static checks every argument"
+    (let [prog {"mode" "strict" "namespace" "test" "target" "clj"
+                "forms" [(make-def-node "quoted" (make-prim "String")
+                           (make-static-call "java.util.regex.Pattern/quote"
+                             [(make-lit "string" "x") (make-lit "string" "y")]))]
+                "externs" [{"name" "java.util.regex.Pattern/quote"
+                            "type" (make-fn [(make-prim "String")] nil (make-prim "String"))}]
                 "requires" []}
           result (type-check! prog)]
       (> (get result "count") 0)))
