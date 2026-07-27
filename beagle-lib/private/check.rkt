@@ -67,12 +67,15 @@
          (if (ormap (λ (a) (type-compatible? t a)) acc) acc (cons t acc))))
      (if (= (length deduped) 1) (car deduped) (type-union (reverse deduped)))]))
 
-;; Current compile target ('clj, 'js, or 'py) — set during type-check!
+;; Current compile target — set during type-check!
 (define current-check-target (make-parameter 'clj))
 
 ;; --- target-form gating -----------------------------------------------------
 ;; Target-specific AST forms must only appear in their target.
 ;; Maps predicate → required target symbol.
+(define (js-family-target? target)
+  (memq target '(js scriptc)))
+
 (define TARGET-ONLY-FORMS
   (hash
    js-quote-form?           'js
@@ -101,7 +104,8 @@
    nix-fn-set?              'nix
    nix-derivation?          'nix
    nix-flake?               'nix
-   nix-with-cfg?            'nix))
+   nix-with-cfg?            'nix
+   flake-input-form?        'nix))
 
 ;; Map predicate → display name for error messages.
 (define TARGET-FORM-NAMES
@@ -132,7 +136,8 @@
    nix-fn-set?              "nix/module / nix/fn-set / nix/overlay"
    nix-derivation?          "nix/derivation"
    nix-flake?               "nix/flake"
-   nix-with-cfg?            "with-cfg"))
+   nix-with-cfg?            "with-cfg"
+   flake-input-form?        "flake-input"))
 
 ;; Check if expression `e` is a target-specific form used outside its target.
 ;; Raises a compile error if so.
@@ -140,7 +145,9 @@
   (for ([(pred required-target) (in-hash TARGET-ONLY-FORMS)])
     (when (pred e)
       (define current (current-check-target))
-      (unless (eq? current required-target)
+      (unless (or (eq? current required-target)
+                  (and (eq? required-target 'js)
+                       (js-family-target? current)))
         (define name (hash-ref TARGET-FORM-NAMES pred "unknown"))
         (raise-diag 'target-form
                     (format "~a is only supported in beagle/~a (current target: ~a)"

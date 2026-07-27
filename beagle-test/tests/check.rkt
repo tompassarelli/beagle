@@ -1140,6 +1140,16 @@
 (define-syntax-rule (check-js-err/rx name rx form ...)
   (test-case name (check-exn rx (lambda () (check-js-prog form ...)))))
 
+;; Helpers for ScriptC-target tests. ScriptC is a checked JS-family target.
+(define (check-scriptc-prog . forms)
+  (define prog (parse-program
+                (map (lambda (f) (datum->syntax #f f))
+                     (cons '(define-target scriptc) forms))))
+  (type-check! prog))
+
+(define-syntax-rule (check-scriptc-ok name form ...)
+  (test-case name (check-not-exn (lambda () (check-scriptc-prog form ...)))))
+
 ;; Helpers for Nix-target tests
 (define (check-nix-prog . forms)
   (define prog (parse-program
@@ -1191,6 +1201,13 @@
   `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
   '(defn f [(url : String)] :- (Promise String) (js/await (fetch-data url))))
 
+(check-scriptc-ok "JS-family forms are accepted in beagle/scriptc"
+  `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
+  '(defn await-f [(url :- String)] :- (Promise String)
+     (js/await (fetch-data url)))
+  '(def template :- String (js/template "Hello, " "ScriptC" "!"))
+  '(def quoted :- JsAst (js/quote (const x 42))))
+
 ;; Nix forms rejected outside beagle/nix
 (check-err/rx "inherit rejected in beagle/clj"
   #rx"inherit is only supported in beagle/nix"
@@ -1218,6 +1235,13 @@
 
 (check-nix-ok "s accepted in beagle/nix"
   '(def x :- Any (s "hello " name)))
+
+(check-nix-ok "flake-input accepted in beagle/nix"
+  '(def input :- Any (flake-input :quickshell :packages :default)))
+
+(check-js-err/rx "flake-input rejected in beagle/js"
+  #rx"flake-input is only supported in beagle/nix"
+  '(def input :- Any (flake-input :quickshell :packages :default)))
 
 ;; =============================================================================
 ;; Tests — check/rescue
