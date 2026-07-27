@@ -690,7 +690,7 @@
        ;; Scalar constructors/accessors erase to identity (zero runtime cost)
        [(and (set-member? (current-emit-scalar-fns) fn-sym)
              (= 1 (length (call-form-args e))))
-       (emit-expr (car (call-form-args e)))]
+        (emit-expr (car (call-form-args e)))]
        [else
         (define qualified-str
           (if (symbol? fn-sym)

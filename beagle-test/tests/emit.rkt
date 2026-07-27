@@ -75,6 +75,14 @@
   (define out (compile '(def y (add 1 2))))
   (check-true (matches? #rx"\\(add 1 2\\)" out)))
 
+(test-case "keyword access in call position emits as an expression-valued head"
+  (define out (compile '(defn call-keyword [m] ((:k m)))))
+  (check-true (matches? #rx"\\(\\(:k m\\)\\)" out)))
+
+(test-case "^:dynamic def metadata survives Clojure emission"
+  (define out (compile '(def (#%meta :dynamic *arity-check?*) :- Bool true)))
+  (check-true (matches? #rx"\\(def \\^:dynamic \\^Boolean \\*arity-check\\?\\* true\\)" out)))
+
 (test-case "boolean literals render Clojure-style"
   (define a (compile '(def y true)))
   (define b (compile '(def y false)))

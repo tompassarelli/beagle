@@ -32,6 +32,7 @@ ROOT="$(cd "$HERE/../../.." && pwd)"
 RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
 FRAM_OUT="${FRAM_OUT:-$HOME/code/fram/out}"
 CHARTROOM="${CHARTROOM:-$HOME/code/fram/chartroom}"
+source "$ROOT/bin/_beagle-racket"
 source "$ROOT/bin/_fram-resolver"
 fail=0
 
@@ -43,16 +44,16 @@ author() {
   local outdir="$1" corpus="$2" op="$3"; shift 3
   local W; W="$(mktemp -d)"; local E="$W/e"; mkdir -p "$E" "$W/regen"
   local edns=() f b
-  for f in "$corpus"/*.bclj; do b="$(basename "$f")"; racket "$RT" --emit-edn "$f" 2>/dev/null > "$E/$b.edn"; edns+=("$E/$b.edn"); done
+  for f in "$corpus"/*.bclj; do b="$(basename "$f")"; "$RACKET" "$RT" --emit-edn "$f" 2>/dev/null > "$E/$b.edn"; edns+=("$E/$b.edn"); done
   case "$op" in
     upsert-form)  # add a new top-level def, or replace an existing one by name
       bb -cp "$FRAM_OUT" "$RESOLVE" upsert-form "$1" "$2" "${edns[@]}" >/dev/null 2>&1 \
         || { echo REJECTED; rm -rf "$W"; return; }
-      for f in "$corpus"/*.bclj; do b="$(basename "$f")"; racket "$RT" --render "$RESOLVE_OUT/resolved-$b.edn" 2>/dev/null > "$W/regen/$b"; done ;;
+      for f in "$corpus"/*.bclj; do b="$(basename "$f")"; "$RACKET" "$RT" --render "$RESOLVE_OUT/resolved-$b.edn" 2>/dev/null > "$W/regen/$b"; done ;;
     set-body)     # replace a defn's body
       bb -cp "$FRAM_OUT" "$RESOLVE" set-body "$1" "$2" "$3" "${edns[@]}" >/dev/null 2>&1 \
         || { echo REJECTED; rm -rf "$W"; return; }
-      for f in "$corpus"/*.bclj; do b="$(basename "$f")"; racket "$RT" --render "$RESOLVE_OUT/resolved-$b.edn" 2>/dev/null > "$W/regen/$b"; done ;;
+      for f in "$corpus"/*.bclj; do b="$(basename "$f")"; "$RACKET" "$RT" --render "$RESOLVE_OUT/resolved-$b.edn" 2>/dev/null > "$W/regen/$b"; done ;;
     *) echo REJECTED; rm -rf "$W"; return ;;
   esac
   if "$ROOT/bin/beagle-build-all" "$W/regen" --out "$W/o" 2>&1 | grep -q '0 error'; then
@@ -69,7 +70,7 @@ fact_node_growth() {
   local corpus="$1" op="$2"; shift 2
   local W; W="$(mktemp -d)"; local E="$W/e"; mkdir -p "$E"
   local f b first_edn=""
-  for f in "$corpus"/*.bclj; do b="$(basename "$f")"; racket "$RT" --emit-edn "$f" 2>/dev/null > "$E/$b.edn"
+  for f in "$corpus"/*.bclj; do b="$(basename "$f")"; "$RACKET" "$RT" --emit-edn "$f" 2>/dev/null > "$E/$b.edn"
     [ -z "$first_edn" ] && first_edn="$E/$b.edn"; done
   local edns=("$E"/*.edn)
   case "$op" in
@@ -87,7 +88,9 @@ echo "================ AUTHORING-as-facts gate (upsert-form + set-body) ========
 [ -d "$FRAM_OUT" ] || { echo "  (need FRAM_OUT)"; exit 3; }
 RESOLVE="$(find_fram_resolver)" || exit 3
 CORPUS="$HERE/authoring-corpus"
+MINT_CORPUS="$HERE/mint-render-corpus"
 [ -d "$CORPUS" ]   || { echo "  (need authoring-corpus)"; exit 3; }
+[ -d "$MINT_CORPUS" ] || { echo "  (need mint-render-corpus)"; exit 3; }
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 
 # ---------------------------------------------------------------------------
@@ -111,7 +114,7 @@ echo '--- NL: "set base body to (* x 10)" -> agent emits {op set-body, name base
 BODY1="$T/body_base.edn"; printf '(* x 10)' > "$BODY1"
 # capture the projected EDN to prove the new body's leaves entered the store as v-facts
 PROJSAVE="$T/setb.proj.edn"
-racket "$RT" --emit-edn "$CORPUS/authmod.bclj" 2>/dev/null > "$T/setb.orig.edn"
+"$RACKET" "$RT" --emit-edn "$CORPUS/authmod.bclj" 2>/dev/null > "$T/setb.orig.edn"
 bb -cp "$FRAM_OUT" "$RESOLVE" set-body base authmod "$BODY1" "$T/setb.orig.edn" >/dev/null 2>&1
 cp "$RESOLVE_OUT/resolved-authmod.bclj.edn" "$PROJSAVE" 2>/dev/null || true
 rm -f $RESOLVE_OUT/resolved-*.edn 2>/dev/null || true
@@ -140,19 +143,35 @@ else echo "  FAIL  ($r)"; fail=1; fi
 echo '--- scope-correctness: a rename of `base` must follow the AUTHORED add-two reference ---'
 echo '    (proves add-two`s `base` call carries a real refers_to identity edge into the graph, not a name match)'
 # author add-two into the corpus, render, then rename base->renamed-base on the AUTHORED tree.
-racket "$RT" --emit-edn "$CORPUS/authmod.bclj" 2>/dev/null > "$T/sc.edn"
+"$RACKET" "$RT" --emit-edn "$CORPUS/authmod.bclj" 2>/dev/null > "$T/sc.edn"
 SPEC3="$T/spec_sc.edn"; printf '(defn add-two [x :- Int] :- Int (base (+ x 2)))' > "$SPEC3"
 bb -cp "$FRAM_OUT" "$RESOLVE" upsert-form authmod "$SPEC3" "$T/sc.edn" >/dev/null 2>&1
-racket "$RT" --render $RESOLVE_OUT/resolved-authmod.bclj.edn 2>/dev/null > "$T/sc_authored.bclj"; rm -f $RESOLVE_OUT/resolved-*.edn
-racket "$RT" --emit-edn "$T/sc_authored.bclj" 2>/dev/null > "$T/sc_authored.edn"
+"$RACKET" "$RT" --render $RESOLVE_OUT/resolved-authmod.bclj.edn 2>/dev/null > "$T/sc_authored.bclj"; rm -f $RESOLVE_OUT/resolved-*.edn
+"$RACKET" "$RT" --emit-edn "$T/sc_authored.bclj" 2>/dev/null > "$T/sc_authored.edn"
 bb -cp "$FRAM_OUT" "$RESOLVE" rename base renamed-base sc_authored "$T/sc_authored.edn" >/dev/null 2>&1 \
-  && racket "$RT" --render $RESOLVE_OUT/resolved-sc_authored.bclj.edn 2>/dev/null > "$T/sc_renamed.bclj"
+  && "$RACKET" "$RT" --render $RESOLVE_OUT/resolved-sc_authored.bclj.edn 2>/dev/null > "$T/sc_renamed.bclj"
 if grep -q '(defn add-two \[x :- Int\] :- Int (renamed-base (+ x 2)))' "$T/sc_renamed.bclj" 2>/dev/null \
    && grep -q '(defn renamed-base ' "$T/sc_renamed.bclj"; then
   echo "  PASS  rename of base (O(1), one binding) propagated to the authored add-two call site"
   echo "        -> the authored reference is wired into the graph by IDENTITY (refers_to), fully scope-correct"
 else echo "  FAIL  authored reference did not follow rename (not scope-correct)"; fail=1; fi
 rm -f $RESOLVE_OUT/resolved-*.edn 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+echo '--- graph mint/render: ^:dynamic metadata survives add-def and recompile ---'
+r="$(author "$T/dynamic" "$MINT_CORPUS" upsert-form graph-mint-render-seed "$MINT_CORPUS/graph-mint-dynamic.edn")"
+if [ "$r" = COMMITTED ] \
+   && grep -q '(def \^:dynamic \*arity-check?\* :- Bool true)' "$T/dynamic/graph-mint-render-seed.bclj"; then
+  echo "  PASS  ^:dynamic metadata preserved through mint -> render -> recompile"
+else echo "  FAIL  ^:dynamic mint/render (result=$r)"; fail=1; fi
+
+# ---------------------------------------------------------------------------
+echo '--- graph mint/render: keyword access survives in function position ---'
+r="$(author "$T/kw-access" "$MINT_CORPUS" upsert-form graph-mint-render-seed "$MINT_CORPUS/graph-mint-kw-access.edn")"
+if [ "$r" = COMMITTED ] \
+   && grep -q '((:k m))' "$T/kw-access/graph-mint-render-seed.bclj"; then
+  echo "  PASS  keyword-position access preserved through mint -> render -> recompile"
+else echo "  FAIL  keyword-position access mint/render (result=$r)"; fail=1; fi
 
 # ---------------------------------------------------------------------------
 echo '--- NL: "set the body of nonexistent-fn" -> agent emits set-body on a missing target ---'
