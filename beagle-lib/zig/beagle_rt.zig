@@ -228,6 +228,492 @@ pub fn replace(s: []const u8, needle: []const u8, repl: []const u8) []const u8 {
     _ = std.mem.replace(u8, s, needle, repl, out);
     return out;
 }
+
+// --- checked regex contract --------------------------------------------------
+// The checker admits a deliberately small, portable subset: concatenation,
+// groups, classes, anchors, greedy quantifiers, and the common ASCII escape
+// classes. Matching advances by UTF-8 code point; returned values remain byte
+// slices into the original string.
+pub const Regex = struct {
+    pattern: []const u8,
+};
+
+pub fn regex(pattern: []const u8) Regex {
+    return .{ .pattern = pattern };
+}
+
+pub fn RegexMatch(comptime n: usize) type {
+    return [n]?[]const u8;
+}
+
+const regex_max_captures = 16;
+const regex_max_results = 256;
+
+const RegexState = struct {
+    pos: usize,
+    starts: [regex_max_captures]?usize = @splat(null),
+    ends: [regex_max_captures]?usize = @splat(null),
+};
+
+const RegexStates = struct {
+    values: [regex_max_results]RegexState = undefined,
+    len: usize = 0,
+
+    fn add(self: *RegexStates, value: RegexState) void {
+        if (self.len == self.values.len) return;
+        self.values[self.len] = value;
+        self.len += 1;
+    }
+};
+
+const RegexAtomKind = enum { literal, dot, class, group, anchor_start, anchor_end };
+
+const RegexAtom = struct {
+    kind: RegexAtomKind,
+    next: usize,
+    value: u21 = 0,
+    class_start: usize = 0,
+    class_end: usize = 0,
+    group_start: usize = 0,
+    group_end: usize = 0,
+    capture: ?usize = null,
+};
+
+const RegexQuantifier = struct {
+    min: usize,
+    max: usize,
+    next: usize,
+};
+
+const Codepoint = struct {
+    value: u21,
+    next: usize,
+};
+
+fn regexCodepointAt(s: []const u8, pos: usize) ?Codepoint {
+    if (pos >= s.len) return null;
+    const width = std.unicode.utf8ByteSequenceLength(s[pos]) catch return null;
+    const end = pos + width;
+    if (end > s.len) return null;
+    return .{
+        .value = std.unicode.utf8Decode(s[pos..end]) catch return null,
+        .next = end,
+    };
+}
+
+fn regexEscapedClass(ch: u8, cp: u21) ?bool {
+    const ascii = cp <= 0x7f;
+    const c: u8 = if (ascii) @intCast(cp) else 0;
+    return switch (ch) {
+        'd' => ascii and std.ascii.isDigit(c),
+        'D' => !(ascii and std.ascii.isDigit(c)),
+        's' => ascii and std.ascii.isWhitespace(c),
+        'S' => !(ascii and std.ascii.isWhitespace(c)),
+        'w' => ascii and (std.ascii.isAlphanumeric(c) or c == '_'),
+        'W' => !(ascii and (std.ascii.isAlphanumeric(c) or c == '_')),
+        else => null,
+    };
+}
+
+fn regexCaptureIndex(pattern: []const u8, stop: usize) usize {
+    var capture_index: usize = 1;
+    var i: usize = 0;
+    var in_class = false;
+    while (i < stop) {
+        if (pattern[i] == '\\') {
+            i += @min(2, stop - i);
+            continue;
+        }
+        if (pattern[i] == '[') in_class = true;
+        if (pattern[i] == ']') in_class = false;
+        if (!in_class and pattern[i] == '(' and
+            !(i + 2 < pattern.len and pattern[i + 1] == '?' and pattern[i + 2] == ':'))
+        {
+            capture_index += 1;
+        }
+        i += 1;
+    }
+    return capture_index;
+}
+
+fn regexGroupEnd(pattern: []const u8, start: usize, end: usize) usize {
+    var depth: usize = 1;
+    var i = start;
+    var in_class = false;
+    while (i < end) {
+        if (pattern[i] == '\\') {
+            i += @min(2, end - i);
+            continue;
+        }
+        if (pattern[i] == '[') {
+            in_class = true;
+        } else if (pattern[i] == ']') {
+            in_class = false;
+        } else if (!in_class and pattern[i] == '(') {
+            depth += 1;
+        } else if (!in_class and pattern[i] == ')') {
+            depth -= 1;
+            if (depth == 0) return i;
+        }
+        i += 1;
+    }
+    unreachable;
+}
+
+fn regexAtom(pattern: []const u8, at: usize, end: usize) RegexAtom {
+    const ch = pattern[at];
+    if (ch == '^') return .{ .kind = .anchor_start, .next = at + 1 };
+    if (ch == '$') return .{ .kind = .anchor_end, .next = at + 1 };
+    if (ch == '.') return .{ .kind = .dot, .next = at + 1 };
+    if (ch == '[') {
+        var i = at + 1;
+        if (i < end and pattern[i] == '^') i += 1;
+        while (i < end and pattern[i] != ']') {
+            i += if (pattern[i] == '\\') @min(2, end - i) else 1;
+        }
+        return .{
+            .kind = .class,
+            .next = i + 1,
+            .class_start = at + 1,
+            .class_end = i,
+        };
+    }
+    if (ch == '(') {
+        const noncapturing =
+            at + 2 < end and pattern[at + 1] == '?' and pattern[at + 2] == ':';
+        const body_start = at + (if (noncapturing) @as(usize, 3) else 1);
+        const close = regexGroupEnd(pattern, body_start, end);
+        return .{
+            .kind = .group,
+            .next = close + 1,
+            .group_start = body_start,
+            .group_end = close,
+            .capture = if (noncapturing) null else regexCaptureIndex(pattern, at),
+        };
+    }
+    if (ch == '\\') {
+        const escaped = pattern[at + 1];
+        if (regexEscapedClass(escaped, 0) != null) {
+            return .{ .kind = .class, .next = at + 2, .class_start = at, .class_end = at + 2 };
+        }
+        return .{ .kind = .literal, .next = at + 2, .value = escaped };
+    }
+    const cp = regexCodepointAt(pattern, at).?;
+    return .{ .kind = .literal, .next = cp.next, .value = cp.value };
+}
+
+fn regexUnsigned(pattern: []const u8, at: *usize, end: usize) usize {
+    var value: usize = 0;
+    while (at.* < end and std.ascii.isDigit(pattern[at.*])) : (at.* += 1) {
+        value = value * 10 + pattern[at.*] - '0';
+    }
+    return value;
+}
+
+fn regexQuantifier(pattern: []const u8, at: usize, end: usize, source_len: usize) RegexQuantifier {
+    if (at >= end) return .{ .min = 1, .max = 1, .next = at };
+    return switch (pattern[at]) {
+        '?' => .{ .min = 0, .max = 1, .next = at + 1 },
+        '*' => .{ .min = 0, .max = source_len + 1, .next = at + 1 },
+        '+' => .{ .min = 1, .max = source_len + 1, .next = at + 1 },
+        '{' => blk: {
+            var i = at + 1;
+            const min = regexUnsigned(pattern, &i, end);
+            if (i < end and pattern[i] == '}') {
+                break :blk .{ .min = min, .max = min, .next = i + 1 };
+            }
+            i += 1;
+            const max = if (i < end and pattern[i] == '}')
+                source_len + 1
+            else
+                regexUnsigned(pattern, &i, end);
+            break :blk .{ .min = min, .max = max, .next = i + 1 };
+        },
+        else => .{ .min = 1, .max = 1, .next = at },
+    };
+}
+
+fn regexClassMatches(pattern: []const u8, start: usize, end: usize, cp: u21) bool {
+    var i = start;
+    const negated = i < end and pattern[i] == '^';
+    if (negated) i += 1;
+    var matched = false;
+    while (i < end) {
+        if (pattern[i] == '\\') {
+            const escaped = pattern[i + 1];
+            if (regexEscapedClass(escaped, cp)) |yes| {
+                matched = matched or yes;
+            } else {
+                matched = matched or cp == escaped;
+            }
+            i += 2;
+            continue;
+        }
+        const range_start = regexCodepointAt(pattern, i).?;
+        if (range_start.next < end and pattern[range_start.next] == '-' and range_start.next + 1 < end) {
+            const last = regexCodepointAt(pattern, range_start.next + 1).?;
+            matched = matched or (cp >= range_start.value and cp <= last.value);
+            i = last.next;
+        } else {
+            matched = matched or cp == range_start.value;
+            i = range_start.next;
+        }
+    }
+    return if (negated) !matched else matched;
+}
+
+fn regexCollectSequence(
+    pattern: []const u8,
+    at: usize,
+    end: usize,
+    source: []const u8,
+    state: RegexState,
+    out: *RegexStates,
+) void {
+    if (out.len == regex_max_results) return;
+    if (at >= end) {
+        out.add(state);
+        return;
+    }
+    const atom = regexAtom(pattern, at, end);
+    const quant = regexQuantifier(pattern, atom.next, end, source.len);
+    regexCollectRepeat(pattern, atom, quant, quant.next, end, source, state, 0, out);
+}
+
+fn regexCollectAtom(
+    pattern: []const u8,
+    atom: RegexAtom,
+    source: []const u8,
+    state: RegexState,
+    out: *RegexStates,
+) void {
+    switch (atom.kind) {
+        .anchor_start => if (state.pos == 0) out.add(state),
+        .anchor_end => if (state.pos == source.len) out.add(state),
+        .literal, .dot, .class => {
+            const cp = regexCodepointAt(source, state.pos) orelse return;
+            const matched = switch (atom.kind) {
+                .literal => cp.value == atom.value,
+                .dot => cp.value != '\n',
+                .class => if (atom.class_start == atom.class_end - 2 and
+                    pattern[atom.class_start] == '\\')
+                    regexEscapedClass(pattern[atom.class_start + 1], cp.value).?
+                else
+                    regexClassMatches(pattern, atom.class_start, atom.class_end, cp.value),
+                else => unreachable,
+            };
+            if (matched) {
+                var next = state;
+                next.pos = cp.next;
+                out.add(next);
+            }
+        },
+        .group => {
+            var initial = state;
+            if (atom.capture) |capture| {
+                initial.starts[capture] = state.pos;
+                initial.ends[capture] = null;
+            }
+            var matches = RegexStates{};
+            regexCollectSequence(
+                pattern,
+                atom.group_start,
+                atom.group_end,
+                source,
+                initial,
+                &matches,
+            );
+            for (matches.values[0..matches.len]) |raw| {
+                var matched = raw;
+                if (atom.capture) |capture| matched.ends[capture] = raw.pos;
+                out.add(matched);
+            }
+        },
+    }
+}
+
+fn regexCollectRepeat(
+    pattern: []const u8,
+    atom: RegexAtom,
+    quant: RegexQuantifier,
+    pattern_next: usize,
+    end: usize,
+    source: []const u8,
+    state: RegexState,
+    repetition_count: usize,
+    out: *RegexStates,
+) void {
+    if (repetition_count < quant.max) {
+        var next_states = RegexStates{};
+        regexCollectAtom(pattern, atom, source, state, &next_states);
+        for (next_states.values[0..next_states.len]) |next| {
+            if (next.pos != state.pos or quant.max == 1) {
+                regexCollectRepeat(
+                    pattern,
+                    atom,
+                    quant,
+                    pattern_next,
+                    end,
+                    source,
+                    next,
+                    repetition_count + 1,
+                    out,
+                );
+            }
+        }
+    }
+    if (repetition_count >= quant.min) {
+        regexCollectSequence(pattern, pattern_next, end, source, state, out);
+    }
+}
+
+fn regexFindStateFrom(re: Regex, source: []const u8, from: usize) ?RegexState {
+    var start = from;
+    while (start <= source.len) {
+        var initial = RegexState{ .pos = start };
+        initial.starts[0] = start;
+        var matches = RegexStates{};
+        regexCollectSequence(re.pattern, 0, re.pattern.len, source, initial, &matches);
+        if (matches.len > 0) {
+            var result = matches.values[0];
+            result.ends[0] = result.pos;
+            return result;
+        }
+        const cp = regexCodepointAt(source, start) orelse break;
+        start = cp.next;
+    }
+    return null;
+}
+
+fn regexMatchesState(re: Regex, source: []const u8) ?RegexState {
+    var initial = RegexState{ .pos = 0 };
+    initial.starts[0] = 0;
+    var matches = RegexStates{};
+    regexCollectSequence(re.pattern, 0, re.pattern.len, source, initial, &matches);
+    for (matches.values[0..matches.len]) |raw| {
+        if (raw.pos == source.len) {
+            var result = raw;
+            result.ends[0] = source.len;
+            return result;
+        }
+    }
+    return null;
+}
+
+fn regexSlice(source: []const u8, state: RegexState, index: usize) ?[]const u8 {
+    const start = state.starts[index] orelse return null;
+    const end = state.ends[index] orelse return null;
+    return source[start..end];
+}
+
+pub fn re_find0(re: Regex, source: []const u8) ?[]const u8 {
+    const state = regexFindStateFrom(re, source, 0) orelse return null;
+    return regexSlice(source, state, 0);
+}
+
+pub fn re_find(comptime capture_count: usize, re: Regex, source: []const u8) ?RegexMatch(capture_count + 1) {
+    const state = regexFindStateFrom(re, source, 0) orelse return null;
+    var result: RegexMatch(capture_count + 1) = undefined;
+    inline for (0..capture_count + 1) |i| result[i] = regexSlice(source, state, i);
+    return result;
+}
+
+pub fn re_matches0(re: Regex, source: []const u8) ?[]const u8 {
+    const state = regexMatchesState(re, source) orelse return null;
+    return regexSlice(source, state, 0);
+}
+
+pub fn re_matches(comptime capture_count: usize, re: Regex, source: []const u8) ?RegexMatch(capture_count + 1) {
+    const state = regexMatchesState(re, source) orelse return null;
+    var result: RegexMatch(capture_count + 1) = undefined;
+    inline for (0..capture_count + 1) |i| result[i] = regexSlice(source, state, i);
+    return result;
+}
+
+pub fn regex_replace(source: []const u8, re: Regex, replacement: []const u8) []const u8 {
+    var cursor: usize = 0;
+    var size: usize = 0;
+    while (regexFindStateFrom(re, source, cursor)) |matched| {
+        const start = matched.starts[0].?;
+        const end = matched.ends[0].?;
+        size += start - cursor + replacement.len;
+        if (end == start) {
+            const cp = regexCodepointAt(source, end) orelse {
+                cursor = end;
+                break;
+            };
+            size += cp.next - end;
+            cursor = cp.next;
+        } else {
+            cursor = end;
+        }
+    }
+    size += source.len - cursor;
+
+    const out = cliAlloc().alloc(u8, size) catch @panic("oom");
+    cursor = 0;
+    var written: usize = 0;
+    while (regexFindStateFrom(re, source, cursor)) |matched| {
+        const start = matched.starts[0].?;
+        const end = matched.ends[0].?;
+        @memcpy(out[written .. written + start - cursor], source[cursor..start]);
+        written += start - cursor;
+        @memcpy(out[written .. written + replacement.len], replacement);
+        written += replacement.len;
+        if (end == start) {
+            const cp = regexCodepointAt(source, end) orelse {
+                cursor = end;
+                break;
+            };
+            @memcpy(out[written .. written + cp.next - end], source[end..cp.next]);
+            written += cp.next - end;
+            cursor = cp.next;
+        } else {
+            cursor = end;
+        }
+    }
+    @memcpy(out[written..], source[cursor..]);
+    return out;
+}
+
+pub fn regex_split(source: []const u8, re: Regex) []const []const u8 {
+    var match_count: usize = 0;
+    var cursor: usize = 0;
+    while (regexFindStateFrom(re, source, cursor)) |matched| {
+        match_count += 1;
+        const start = matched.starts[0].?;
+        const end = matched.ends[0].?;
+        if (end == start) {
+            const cp = regexCodepointAt(source, end) orelse break;
+            cursor = cp.next;
+        } else {
+            cursor = end;
+        }
+    }
+    const out = cliAlloc().alloc([]const u8, match_count + 1) catch @panic("oom");
+    cursor = 0;
+    var piece_count: usize = 0;
+    while (regexFindStateFrom(re, source, cursor)) |matched| {
+        const start = matched.starts[0].?;
+        const end = matched.ends[0].?;
+        out[piece_count] = source[cursor..start];
+        piece_count += 1;
+        if (end == start) {
+            const cp = regexCodepointAt(source, end) orelse {
+                cursor = end;
+                break;
+            };
+            cursor = cp.next;
+        } else {
+            cursor = end;
+        }
+    }
+    out[piece_count] = source[cursor..];
+    piece_count += 1;
+    while (piece_count > 0 and out[piece_count - 1].len == 0) piece_count -= 1;
+    return out[0..piece_count];
+}
+
 pub fn split_lines(s: []const u8) []const []const u8 {
     var n: usize = 1;
     for (s) |c| {

@@ -16,6 +16,7 @@
          "emit-js-quote.rkt")
 
 (define current-js-emit-target (make-parameter 'js))
+(define current-js-semantic-contracts (make-parameter #f))
 
 (define current-js-export-names (make-parameter #f))
 
@@ -267,8 +268,15 @@
               [(= n 2) (format "~a.substring(~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
               [(= n 3) (format "~a.substring(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args)))]
               [else #f])]
-    [(re-find) (if (= n 2) (format "(~a.match(~a) || [])[0] || null"
-                                   (emit-expr (cadr args)) (emit-expr (car args))) #f)]
+    [(re-find)
+     (if (= n 2)
+         (if (eq? (current-js-emit-target) 'scriptc)
+             (format "(~a.match(~a) || [])[0] || null"
+                     (emit-expr (cadr args)) (emit-expr (car args)))
+             (format
+              "(() => { const _r = ~a, _f = _r.flags.replace(/[gy]/g, \"\") + (_r.flags.includes(\"u\") ? \"\" : \"u\"), _m = ~a.match(new RegExp(_r.source, _f)); return _m == null ? null : (_m.length === 1 ? _m[0] : Array.from(_m, _x => _x ?? null)); })()"
+              (emit-expr (car args)) (emit-expr (cadr args))))
+         #f)]
     [(atom) (if (= n 1) (format "({value: ~a, watches: {}})" (emit-expr (car args))) #f)]
     [(deref) (if (= n 1) (format "~a.value" (emit-expr (car args))) #f)]
     [(reset!) (if (= n 2)
@@ -466,7 +474,14 @@
                                       (string-join (map emit-expr args) ", ") (number->string n)) #f)]
     ;; --- string / regex --------------------------------------------------------
     [(re-pattern) (if (= n 1) (format "new RegExp(~a)" (emit-expr (car args))) #f)]
-    [(re-matches) (if (= n 2) (format "~a.match(~a)" (emit-expr (cadr args)) (emit-expr (car args))) #f)]
+    [(re-matches)
+     (if (= n 2)
+         (if (eq? (current-js-emit-target) 'scriptc)
+             (format "~a.match(~a)" (emit-expr (cadr args)) (emit-expr (car args)))
+             (format
+              "(() => { const _r = ~a, _f = _r.flags.replace(/[gy]/g, \"\") + (_r.flags.includes(\"u\") ? \"\" : \"u\"), _m = ~a.match(new RegExp(\"^(?:\" + _r.source + \")$\", _f)); return _m == null ? null : (_m.length === 1 ? _m[0] : Array.from(_m, _x => _x ?? null)); })()"
+              (emit-expr (car args)) (emit-expr (cadr args))))
+         #f)]
     [(re-seq) (if (= n 2) (format "[...~a.matchAll(~a)].map(m => m[0])"
                                   (emit-expr (cadr args)) (emit-expr (car args))) #f)]
     [(re-groups) (if (= n 1) (format "~a" (emit-expr (car args))) #f)]
@@ -1285,6 +1300,7 @@
                  [current-js-record-ns (program-imported-record-ns prog)]
                  [current-js-scalar-fns (build-scalar-fns prog)]
                  [current-js-symbol-ns (program-imported-symbol-ns prog)]
+                 [current-js-semantic-contracts (program-semantic-contracts prog)]
                  [current-type-table (program-type-table prog)]  ; P3: per-node arg types for scalar-=== dispatch (#f when capture off)
                  [needs-runtime? #f]
                  [hamt-ops-used (make-hash)]
@@ -2112,6 +2128,25 @@
         (format "(~a)" (string-join (map emit-expr args) (format " ~a " op)))]
        [(and (js-unary? fn-sym) (= 1 (length args)))
         (format "(~a~a)" (hash-ref JS-UNARY-OPS fn-sym) (emit-expr (car args)))]
+       [(and (not (eq? (current-js-emit-target) 'scriptc))
+             (current-js-semantic-contracts)
+             (hash-ref (current-js-semantic-contracts) e #f)
+             (= (length args) 3)
+             (regexp-match? #rx"/replace$" (symbol->string fn-sym)))
+        (format
+         "(() => { const _r = ~a, _f = _r.flags.replace(/[gy]/g, \"\") + (_r.flags.includes(\"u\") ? \"g\" : \"gu\"); return ~a.replace(new RegExp(_r.source, _f), ~a); })()"
+         (emit-expr (cadr args))
+         (emit-expr (car args))
+         (emit-expr (caddr args)))]
+       [(and (not (eq? (current-js-emit-target) 'scriptc))
+             (current-js-semantic-contracts)
+             (hash-ref (current-js-semantic-contracts) e #f)
+             (= (length args) 2)
+             (regexp-match? #rx"/split$" (symbol->string fn-sym)))
+        (format
+         "(() => { const _s = ~a, _r = ~a, _f = _r.flags.replace(/[gy]/g, \"\") + (_r.flags.includes(\"u\") ? \"g\" : \"gu\"), _out = []; let _last = 0; for (const _m of _s.matchAll(new RegExp(_r.source, _f))) { _out.push(_s.slice(_last, _m.index)); _last = _m.index + _m[0].length; if (_m[0].length === 0 && _last < _s.length) _last += Array.from(_s.slice(_last))[0].length; } _out.push(_s.slice(_last)); while (_out.length > 0 && _out[_out.length - 1] === \"\") _out.pop(); return _out; })()"
+         (emit-expr (car args))
+         (emit-expr (cadr args)))]
        [(emit-core-call fn-sym args) => values]
        [(not (symbol? fn-sym))
         ;; higher-order call: the callee is an arbitrary expression — e.g.

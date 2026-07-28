@@ -103,6 +103,8 @@
     (lambda () (delete-file f))))
 
 (define ZIG (find-executable-path "zig"))
+(define NODE (find-executable-path "node"))
+(define CLOJURE (find-executable-path "clojure"))
 (unless ZIG
   (displayln "note: zig not on PATH — snapshot compile checks skipped"))
 
@@ -140,6 +142,40 @@
                  (get-output-string out)))
       ok)
     (lambda () (delete-directory/files dir))))
+
+(define (zig-tests? zig-src tests name)
+  (define dir (make-temporary-file "zigtest~a" 'directory))
+  (dynamic-wind
+    void
+    (lambda ()
+      (copy-file kernel-rt (build-path dir "beagle_rt.zig"))
+      (define f (build-path dir (format "~a.zig" name)))
+      (call-with-output-file f
+        (lambda (p)
+          (display zig-src p)
+          (newline p)
+          (display tests p)))
+      (define out (open-output-string))
+      (define ok
+        (parameterize ([current-output-port out]
+                       [current-error-port out]
+                       [current-environment-variables (zig-env dir)]
+                       [current-directory dir])
+          (system* ZIG "test" (path->string f))))
+      (unless ok
+        (eprintf "zig behavior check failed for ~a:\n~a\n" name
+                 (get-output-string out)))
+      ok)
+    (lambda () (delete-directory/files dir))))
+
+(define (run-command-output executable . args)
+  (define out (open-output-string))
+  (define err (open-output-string))
+  (define ok?
+    (parameterize ([current-output-port out]
+                   [current-error-port err])
+      (apply system* executable args)))
+  (values ok? (get-output-string out) (get-output-string err)))
 
 (define (zig-build-exe-and-run zig-src)
   (define dir (make-temporary-file "zigsmoke~a" 'directory))
@@ -271,10 +307,74 @@
 ;; --- semantic contract 2: regex value and match shape -----------------------
 
 (test-case "regex contract pins CLJ bytes and emits compiling Zig"
-  (semantic-golden 'clj regex-src "regex")
+  (define clj-src (semantic-golden 'clj regex-src "regex"))
   (define zig-src (semantic-golden 'zig regex-src "regex"))
+  (when CLOJURE
+    (define clj-file (make-temporary-file "semantic-regex~a.clj"))
+    (dynamic-wind
+      void
+      (lambda ()
+        (call-with-output-file clj-file
+          #:exists 'replace
+          (lambda (p)
+            (display clj-src p)
+            (display
+             "\n(prn [(find-no-capture \"cat\") (find-no-capture \"dog\") (match-optional-capture \"ab\") (match-optional-capture \"b\") (match-optional-capture \"ba\") (match-multiple-captures \"abc-42\") (match-escaped-group \"(x)\") (replace-runs \"A--b c\") (split-runs \"a,b;;c\")])\n"
+             p)))
+        (define-values (ok? out err)
+          (run-command-output CLOJURE (path->string clj-file)))
+        (check-true ok? err)
+        (check-equal?
+         out
+         "[\"cat\" nil [\"ab\" \"a\"] [\"b\" nil] nil [\"abc-42\" \"abc\" \"42\"] \"(x)\" \"_b_c\" [\"a\" \"b\" \"c\"]]\n"))
+      (lambda () (delete-file clj-file))))
+  (when NODE
+    (define js-src (compile-semantic-target-src 'js regex-src))
+    (define runnable
+      (regexp-replace* #px"(?m:^import [^\n]*\n)" js-src ""))
+    (define-values (ok? out err)
+      (run-command-output
+       NODE "--input-type=module" "-e"
+       (string-append
+        runnable
+        "\nconsole.log(JSON.stringify([find_no_capture(\"cat\"), find_no_capture(\"dog\"), match_optional_capture(\"ab\"), match_optional_capture(\"b\"), match_optional_capture(\"ba\"), match_multiple_captures(\"abc-42\"), match_escaped_group(\"(x)\"), replace_runs(\"A--b c\"), split_runs(\"a,b;;c\")]));\n")))
+    (check-true ok? err)
+    (check-equal?
+     out
+     "[\"cat\",null,[\"ab\",\"a\"],[\"b\",null],null,[\"abc-42\",\"abc\",\"42\"],\"(x)\",\"_b_c\",[\"a\",\"b\",\"c\"]]\n"))
   (when ZIG
-    (check-true (zig-compiles? zig-src "semantic-regex"))))
+    (check-true (zig-compiles? zig-src "semantic-regex"))
+    (check-true
+     (zig-tests?
+      zig-src
+      #<<ZIG
+test "regex semantic contract behavior" {
+    try std.testing.expectEqualStrings("cat", findNoCapture("cat").?);
+    try std.testing.expect(findNoCapture("dog") == null);
+
+    const optional_present = matchOptionalCapture("ab").?;
+    try std.testing.expectEqualStrings("ab", optional_present[0].?);
+    try std.testing.expectEqualStrings("a", optional_present[1].?);
+    const optional_absent = matchOptionalCapture("b").?;
+    try std.testing.expectEqualStrings("b", optional_absent[0].?);
+    try std.testing.expect(optional_absent[1] == null);
+    try std.testing.expect(matchOptionalCapture("ba") == null);
+
+    const multiple = matchMultipleCaptures("abc-42").?;
+    try std.testing.expectEqualStrings("abc-42", multiple[0].?);
+    try std.testing.expectEqualStrings("abc", multiple[1].?);
+    try std.testing.expectEqualStrings("42", multiple[2].?);
+    try std.testing.expectEqualStrings("(x)", matchEscapedGroup("(x)").?);
+    try std.testing.expectEqualStrings("_b_c", replaceRuns("A--b c"));
+
+    const pieces = splitRuns("a,b;;c");
+    try std.testing.expectEqual(@as(usize, 3), pieces.len);
+    try std.testing.expectEqualStrings("a", pieces[0]);
+    try std.testing.expectEqualStrings("b", pieces[1]);
+    try std.testing.expectEqualStrings("c", pieces[2]);
+}
+ZIG
+      "semantic-regex-behavior"))))
 
 (test-case "regex checker records static construction and normalized match shape"
   (define prog

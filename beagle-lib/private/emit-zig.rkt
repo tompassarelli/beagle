@@ -67,6 +67,12 @@
             (car alts)]
            [else #f]))))
 
+(define (regex-string-type? t)
+  (or (and (type-prim? t) (eq? (type-prim-name t) 'String))
+      (let ([inner (optional-of t)])
+        (and inner (type-prim? inner)
+             (eq? (type-prim-name inner) 'String)))))
+
 (define (type->zig t)
   (cond
     [(not t) (unsupported "missing type annotation"
@@ -77,6 +83,7 @@
        [(Float) "f64"]
        [(Bool) "bool"]
        [(String) "[]const u8"]
+       [(Regex) "rt.Regex"]
        [(Nil) "void"]
        [(Ctx) "*rt.Ctx"]
        [(Any) (unsupported "Any-typed boundary"
@@ -103,6 +110,12 @@
         (unless (and (type-prim? k) (memq (type-prim-name k) '(String Keyword)))
           (unsupported "map key type" "zig maps key on String or Keyword (→ []const u8)"))
         (format "rt.Map(~a)" (type->zig (cadr (type-app-args t))))]
+       [(HVec)
+        (unless (andmap regex-string-type? (type-app-args t))
+          (unsupported "heterogeneous vector type"
+                       "zig HVec lowering is currently the checked regex match shape"))
+        (format "rt.RegexMatch(~a)" (length (type-app-args t)))]
+       [(Regex) "rt.Regex"]
        [else (unsupported "parametric type" (type-app-ctor t))])]
     [(type-union? t)
      (cond
@@ -158,6 +171,8 @@
 (define current-externs (make-parameter (hasheq))) ; declared-extern name → type
 (define current-requires (make-parameter (hasheq))) ; alias sym → namespace sym
 (define current-fn-returns (make-parameter (hasheq))) ; local defn name → return type
+(define current-semantic-contracts (make-parameter #f))
+(define current-regex-bindings (make-parameter (hasheq)))
 ;; opaque-handle type-name sym → owning Zig module string (los_yaml, ...).
 ;; An opaque handle is a runtime-module type beagle threads but never
 ;; builds/inspects (the YAML parse-tree handle is the motivating case); it
@@ -246,6 +261,23 @@
          (or (and rt (optional-of rt) #t)
              (stdlib-call-optional? e)))))
 
+(define (regex-contract-of e)
+  (or (and (current-semantic-contracts)
+           (hash-ref (current-semantic-contracts) e #f))
+      (and (symbol? e) (hash-ref (current-regex-bindings) e #f))))
+
+(define (regex-capture-count contract)
+  (define match-type (regex-contract-match-type contract))
+  (cond
+    [(and (type-prim? match-type)
+          (eq? (type-prim-name match-type) 'String))
+     0]
+    [(and (type-app? match-type)
+          (eq? (type-app-ctor match-type) 'HVec))
+     (sub1 (length (type-app-args match-type)))]
+    [else
+     (unsupported "regex match type" (type->string match-type))]))
+
 ;; --- operators --------------------------------------------------------------------
 
 (define VARIADIC-OPS (hasheq '+ "+" '* "*" 'and "and" 'or "or"
@@ -299,7 +331,7 @@
     [(call-form? e) (emit-call e)]
     [(map-form? e) (unsupported "map literal" "use records (v1 has no dynamic maps)")]
     [(set-form? e) (unsupported "set literal")]
-    [(regex-lit? e) (unsupported "regex literal")]
+    [(regex-lit? e) (format "rt.regex(~v)" (regex-lit-pattern e))]
     [else (unsupported (format "~a" e))]))
 
 (define (emit-ctor rec args)
@@ -533,6 +565,36 @@
   (define args (call-form-args e))
   (cond
     [(not (symbol? fn)) (unsupported "higher-order call" "fn position must be a name in v1")]
+    [(eq? fn 're-pattern)
+     (unless (= (length args) 1)
+       (unsupported "regex pattern arity" (length args)))
+     (format "rt.regex(~a)" (emit-expr (car args)))]
+    [(and (memq fn '(re-find re-matches)) (= (length args) 2))
+     (define contract
+       (or (regex-contract-of e)
+           (unsupported "regex consumer contract" fn)))
+     (define captures (regex-capture-count contract))
+     (define runtime-name
+       (string-append
+        (if (eq? fn 're-find) "re_find" "re_matches")
+        (if (zero? captures) "0" "")))
+     (format "rt.~a(~a~a, ~a)"
+             runtime-name
+             (if (zero? captures) "" (format "~a, " captures))
+             (emit-expr (car args))
+             (emit-expr (cadr args)))]
+    [(and (= (length args) 2)
+          (regexp-match? #rx"/split$" (symbol->string fn))
+          (regex-contract-of e))
+     (format "rt.regex_split(~a, ~a)"
+             (emit-expr (car args)) (emit-expr (cadr args)))]
+    [(and (= (length args) 3)
+          (regexp-match? #rx"/replace$" (symbol->string fn))
+          (regex-contract-of e))
+     (format "rt.regex_replace(~a, ~a, ~a)"
+             (emit-expr (car args))
+             (emit-expr (cadr args))
+             (emit-expr (caddr args)))]
     ;; nil-tests look at the raw optional, no unwrap
     [(and (memq fn '(nil? some?)) (= 1 (length args)))
      (define raw (parameterize ([raw-optional? #t]) (emit-expr (car args))))
@@ -1273,11 +1335,30 @@
         (hash-set h (defn-form-name f) (defn-form-return-type f))
         h)))
 
+(define (build-regex-bindings prog)
+  (define contracts (program-semantic-contracts prog))
+  (for/fold ([h (hasheq)]) ([raw-form (in-list (program-forms prog))])
+    (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
+    (cond
+      [(def-form? form)
+       (define contract (hash-ref contracts (def-form-value form) #f))
+       (if contract
+           (hash-set h (def-form-name form) contract)
+           h)]
+      [(defonce-form? form)
+       (define contract (hash-ref contracts (defonce-form-value form) #f))
+       (if contract
+           (hash-set h (defonce-form-name form) contract)
+           h)]
+      [else h])))
+
 (define (zig-emit-program prog)
   (define records (build-record-table prog))
   (parameterize ([current-records records]
                  [current-externs (program-externs prog)]
                  [current-fn-returns (build-fn-returns prog)]
+                 [current-semantic-contracts (program-semantic-contracts prog)]
+                 [current-regex-bindings (build-regex-bindings prog)]
                  [current-opaque-handles (build-opaque-handles prog records)]
                  [current-requires
                   (for/fold ([h (hasheq)]) ([r (in-list (program-requires prog))])

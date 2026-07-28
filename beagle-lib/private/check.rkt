@@ -492,6 +492,12 @@
        (define capture-types
          (for/list ([optional? (in-list captures)])
            (if optional? (nullable-type STRING) STRING)))
+       (when (and (eq? (current-check-target) 'zig)
+                  (> (length capture-types) 15))
+         (regex-contract-error
+          node
+          "zig regex supports at most 15 capturing groups"
+          (hasheq 'target "zig" 'captures (length capture-types) 'limit 15)))
        (regex-contract
         pattern
         (if (null? capture-types)
@@ -619,11 +625,12 @@
                      (and (type-app? match-type)
                           (eq? (type-app-ctor match-type) 'HVec)
                           (pair? (type-app-args match-type))
+                          (type-compatible? (car (type-app-args match-type)) STRING)
                           (andmap
                            (lambda (part)
                              (or (type-compatible? part STRING)
                                  (type-compatible? part (nullable-type STRING))))
-                           (type-app-args match-type))))
+                           (cdr (type-app-args match-type)))))
            (regex-contract-error
             node
             (format "Regex match shape must be String or (HVec String String? ...), got ~a"
