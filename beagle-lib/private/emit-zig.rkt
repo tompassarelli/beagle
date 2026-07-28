@@ -1105,6 +1105,23 @@
 (define (rt-fn-name name-str)
   (string-replace (regexp-replace* #rx"[?!]" name-str "") "-" "_"))
 
+(define (emit-named-unary-stdlib fn arg)
+  (cond
+    [(eq? fn 'str) (format "rt.str1(~a)" (emit-expr arg))]
+    [(and (symbol? fn)
+          (regexp-match? #rx"/trim$" (symbol->string fn))
+          (qualified-rt-name fn))
+     (format "~a(~a)" (qualified-rt-name fn) (emit-expr arg))]
+    [(and (symbol? fn)
+          (regexp-match? #rx"/blank\\?$" (symbol->string fn))
+          (qualified-rt-name fn))
+     (format "~a(~a)" (qualified-rt-name fn) (emit-expr arg))]
+    [else
+     (unsupported
+      "named unary stdlib function"
+      (format "~a — zig supports str, clojure.string/trim, and clojure.string/blank? here"
+              fn))]))
+
 (define (emit-call e)
   (define fn (call-form-fn e))
   (define args (call-form-args e))
@@ -1167,6 +1184,54 @@
      (if (eq? fn 'nil?)
          (format "(~a == null)" raw)
          (format "(~a != null)" raw))]
+    ;; rt_core's named stdlib pipelines are monomorphized just like fn-literal
+    ;; mapv/filterv below. The function value never survives into Zig.
+    [(and (eq? fn 'map) (= 2 (length args)) (symbol? (car args)))
+     (define mapper (car args))
+     (define x (string->symbol (format "__map_x_~a" (fresh-label))))
+     (define lbl (fresh-label))
+     (format (string-append
+              "~a: { const __src = ~a; const __out = ~a; "
+              "for (__src, 0..) |~a, __i| { __out[__i] = ~a; } "
+              "break :~a __out; }")
+             lbl
+             (emit-expr (cadr args))
+             (emit-alloc "[]const u8" "__src.len")
+             (ident x)
+             (emit-named-unary-stdlib mapper x)
+             lbl)]
+    [(and (eq? fn 'remove) (= 2 (length args)) (symbol? (car args)))
+     (define pred (car args))
+     (define x (string->symbol (format "__remove_x_~a" (fresh-label))))
+     (define lbl (fresh-label))
+     (format (string-append
+              "~a: { const __src = ~a; const __out = ~a; "
+              "var __n: usize = 0; for (__src) |~a| { "
+              "if (!(~a)) { __out[__n] = ~a; __n += 1; } } "
+              "break :~a __out[0..__n]; }")
+             lbl
+             (emit-expr (cadr args))
+             (emit-alloc "std.meta.Elem(@TypeOf(__src))" "__src.len")
+             (ident x)
+             (emit-named-unary-stdlib pred x)
+             (ident x)
+             lbl)]
+    [(and (eq? fn 'vec) (= 1 (length args)))
+     (emit-expr (car args))]
+    [(and (eq? fn 'repeat) (= 2 (length args)))
+     (define lbl (fresh-label))
+     (format (string-append
+              "~a: { const __n: usize = @intCast(@max(0, ~a)); "
+              "const __value: []const u8 = rt.str1(~a); "
+              "const __out = ~a; for (__out) |*__slot| { __slot.* = __value; } "
+              "break :~a __out; }")
+             lbl
+             (emit-expr (car args))
+             (emit-expr (cadr args))
+             (emit-alloc "[]const u8" "__n")
+             lbl)]
+    [(and (eq? fn 'apply) (= 2 (length args)) (eq? (car args) 'str))
+     (format "rt.join(\"\", ~a)" (emit-expr (cadr args)))]
     [(and (memq fn '(= not=)) (= 2 (length args))
           (or (eq? (car args) 'nil) (eq? (cadr args) 'nil)))
      (define other (if (eq? (car args) 'nil) (cadr args) (car args)))

@@ -455,6 +455,10 @@ pub fn ends_with(s: []const u8, p: []const u8) bool {
 pub fn includes(s: []const u8, needle: []const u8) bool {
     return std.mem.indexOf(u8, s, needle) != null;
 }
+pub fn index_of(s: []const u8, needle: []const u8) ?i64 {
+    const index = std.mem.indexOf(u8, s, needle) orelse return null;
+    return @intCast(index);
+}
 pub fn blank(s: []const u8) bool {
     return std.mem.trim(u8, s, WS).len == 0;
 }

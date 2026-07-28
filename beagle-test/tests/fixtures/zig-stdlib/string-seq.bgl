@@ -7,5 +7,5 @@
   (let [clean (vec (remove str/blank? (map str/trim INPUT)))
         index (str/index-of "banana" "na")]
     (println (str (count clean) ":" (nth clean 0) ":" (nth clean 1)))
-    (println (str index))
+    (println (if (some? index) (str index) "nil"))
     (println (apply str (repeat 3 "xo")))))
