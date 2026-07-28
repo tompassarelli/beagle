@@ -31,6 +31,10 @@
   (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
     (build-path dir "fixtures" "zig-golden")))
 
+(define semantic-contract-dir
+  (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
+    (build-path dir "fixtures" "semantic-contract")))
+
 (define kernel-rt
   (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
     (simplify-path (build-path dir 'up 'up "beagle-lib" "zig" "beagle_rt.zig"))))
@@ -51,7 +55,7 @@
 
 (define bless? (and (getenv "BEAGLE_ZIG_BLESS") #t))
 
-(define (compile-zig-src src-path)
+(define (parse-target-src target src-path)
   (define stxs (read-beagle-syntax src-path))
   (define has-target?
     (for/or ([stx (in-list stxs)])
@@ -60,10 +64,16 @@
   (define forms
     (if has-target?
         stxs
-        (cons (datum->syntax #f '(define-target zig)) stxs)))
-  (define prog (parse-program forms #:source-path src-path))
+        (cons (datum->syntax #f `(define-target ,target)) stxs)))
+  (parse-program forms #:source-path src-path))
+
+(define (compile-target-src target src-path)
+  (define prog (parse-target-src target src-path))
   (type-check! prog)
   (emit-program prog))
+
+(define (compile-zig-src src-path)
+  (compile-target-src 'zig src-path))
 
 (define (compile-zig-forms . datums)
   (define forms (map (lambda (d) (datum->syntax #f d))
@@ -178,6 +188,55 @@
       (build-path fixtures-dir 'up "zig-smoke" "main.bzig"))
     (check-equal? (zig-build-exe-and-run (compile-zig-src smoke))
                   "zig revival alive\n")))
+
+;; --- semantic contract 1: concrete native boundaries -------------------------
+
+(define semantic-bless? (and (getenv "BEAGLE_SEMANTIC_BLESS") #t))
+(define any-boundary-src (build-path semantic-contract-dir "any-boundary.bgl"))
+(define concrete-boundary-src (build-path semantic-contract-dir "concrete-boundary.bgl"))
+
+(define (parse-semantic-target-src target src)
+  ;; Source locations contain an absolute checkout path. Strip only that
+  ;; incidental metadata so these cross-worktree byte goldens stay portable.
+  (define datums
+    (for/list ([stx (in-list (read-beagle-syntax src))])
+      (datum->syntax #f (syntax->datum stx))))
+  (parse-program (cons (datum->syntax #f `(define-target ,target)) datums)))
+
+(define (compile-semantic-target-src target src)
+  (define prog (parse-semantic-target-src target src))
+  (type-check! prog)
+  (emit-program prog))
+
+(define (semantic-golden target src name)
+  (define ext (if (eq? target 'clj) ".clj" ".zig"))
+  (define path (build-path semantic-contract-dir (string-append name ext)))
+  (define emitted (compile-semantic-target-src target src))
+  (when semantic-bless?
+    (call-with-output-file path #:exists 'replace
+      (lambda (p) (display emitted p))))
+  (check-true (file-exists? path)
+              (format "missing semantic-contract golden ~a (run with BEAGLE_SEMANTIC_BLESS=1)"
+                      path))
+  (check-equal? emitted (file->string path))
+  emitted)
+
+(test-case "Any boundary remains byte-identical on CLJ"
+  (semantic-golden 'clj any-boundary-src "any-boundary"))
+
+(test-case "Zig rejects Any at the checker boundary"
+  (check-exn
+   (lambda (e)
+     (and (beagle-diagnostic? e)
+          (eq? (beagle-diagnostic-kind e) 'type-mismatch)
+          (regexp-match? #rx"native boundary" (exn-message e))))
+   (lambda () (type-check! (parse-semantic-target-src 'zig any-boundary-src)))))
+
+(test-case "concrete boundary remains byte-identical on CLJ and emits Zig"
+  (semantic-golden 'clj concrete-boundary-src "concrete-boundary")
+  (define zig-src (semantic-golden 'zig concrete-boundary-src "concrete-boundary"))
+  (when ZIG
+    (check-true (zig-compiles? zig-src "semantic-concrete-boundary"))))
 
 ;; --- determinism: same input → byte-identical output --------------------------
 

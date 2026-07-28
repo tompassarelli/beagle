@@ -1,0 +1,3 @@
+(ns semantic-contract.any-boundary)
+
+(defn round-trip [value :- Any] :- Any value)

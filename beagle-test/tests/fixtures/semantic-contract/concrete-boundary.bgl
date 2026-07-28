@@ -1,0 +1,9 @@
+(ns semantic-contract.concrete-boundary)
+
+(def VALUE :- Int 41)
+
+(defrecord Box [value :- Int])
+
+(defn increment [value :- Int] :- Int (+ value 1))
+
+(defn box [value :- Int] :- Box (->Box (increment value)))
