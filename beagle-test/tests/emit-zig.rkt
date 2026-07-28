@@ -25,6 +25,7 @@
          racket/system
          beagle/private/parse
          beagle/private/check
+         beagle/private/tags
          beagle/private/emit)
 
 (define fixtures-dir
@@ -81,6 +82,13 @@
   (define prog (parse-program forms))
   (type-check! prog)
   (emit-program prog))
+
+(define (check-zig-forms . datums)
+  (define forms (map (lambda (d) (datum->syntax #f d))
+                     (cons '(define-target zig) datums)))
+  (type-check! (parse-program forms)))
+
+(define (br . xs) (cons BRACKET-TAG xs))
 
 (define (compile-zig-string src)
   ;; through the REAL beagle reader (brackets/braces), via a temp file.
@@ -232,6 +240,25 @@
           (regexp-match? #rx"native boundary" (exn-message e))))
    (lambda () (type-check! (parse-semantic-target-src 'zig any-boundary-src)))))
 
+(define (native-boundary-rejection? e)
+  (and (beagle-diagnostic? e)
+       (eq? (beagle-diagnostic-kind e) 'type-mismatch)
+       (regexp-match? #rx"zig native boundary" (exn-message e))
+       (regexp-match? #rx"concrete :- type" (exn-message e))))
+
+(for ([case (in-list
+             (list
+              (cons "def" '((def value :- Any 1)))
+              (cons "parameter" '((defn f [value :- Any] :- Int 1)))
+              (cons "return" '((defn f [] :- Any 1)))
+              (cons "record field" '((defrecord Box [value :- Any])))
+              (cons "nested extern"
+                    (list `(declare-extern app.rt/read
+                             ,(br 'String '-> '(Map Keyword Any)))))))])
+  (test-case (format "Zig checker rejects Any in ~a boundary" (car case))
+    (check-exn native-boundary-rejection?
+               (lambda () (apply check-zig-forms (cdr case))))))
+
 (test-case "concrete boundary remains byte-identical on CLJ and emits Zig"
   (semantic-golden 'clj concrete-boundary-src "concrete-boundary")
   (define zig-src (semantic-golden 'zig concrete-boundary-src "concrete-boundary"))
@@ -313,7 +340,7 @@
                (string-append
                 "(ns g)\n"
                 "(declare-extern los.rt/slugify [String -> String])\n"
-                "(declare-extern los.yaml/parse [String -> Any])\n"
+                "(declare-extern los.yaml/parse [String -> Yaml])\n"
                 "(defn f [s :- String] :- String (los.rt/slugify s))")))
   (check-true (regexp-match? #rx"los_rt.slugify" out))
   (check-true (regexp-match? #rx"const los_rt = @import\\(\"los_rt.zig\"\\);" out))

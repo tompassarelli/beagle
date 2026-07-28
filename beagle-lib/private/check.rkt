@@ -465,10 +465,76 @@
           (check-target-form form)
           (check-form form env))))
     (check-qualified-resolution! prog env)
+    (check-zig-native-boundaries! prog)
     (check-zig-world-escape! prog)
     (check-scalar-provenance! prog)
     (check-nix-free-dotted! prog)
     (check-purity! prog)))
+
+;; --- concrete native boundaries ---------------------------------------------
+
+;; `Any` is universal during ordinary inference, so compatibility checking
+;; cannot enforce a native ABI. Zig has no runtime representation for it:
+;; every declaration type the emitter renders must be recursively concrete.
+;; Keep this target well-formedness rule separate from check-form so GC/dynamic
+;; targets retain their existing Any behavior and emitted bytes.
+(define (type-contains-any? t)
+  (cond
+    [(not t) #f]
+    [(type-prim? t) (eq? (type-prim-name t) 'Any)]
+    [(type-app? t) (ormap type-contains-any? (type-app-args t))]
+    [(type-union? t) (ormap type-contains-any? (type-union-alts t))]
+    [(type-fn? t)
+     (or (ormap type-contains-any? (type-fn-params t))
+         (and (type-fn-rest-type t)
+              (type-contains-any? (type-fn-rest-type t)))
+         (type-contains-any? (type-fn-ret t)))]
+    [(type-poly? t)
+     (or (type-contains-any? (type-poly-body t))
+         (and (type-poly-bounds t)
+              (for/or ([bound (in-hash-values (type-poly-bounds t))])
+                (type-contains-any? bound))))]
+    [else #f]))
+
+(define (check-zig-native-boundaries! prog)
+  (when (eq? (program-target prog) 'zig)
+    (define (check! label t [node #f])
+      (when (type-contains-any? t)
+        (raise-diag
+         'type-mismatch
+         (format "zig native boundary ~a cannot contain Any — annotate it with a concrete :- type"
+                 label)
+         (hasheq 'target "zig"
+                 'boundary label
+                 'declared (type->string t)
+                 'expected "concrete native type"
+                 'actual "Any")
+         #:src (and node (src-for node)))))
+    (for ([raw-form (in-list (program-forms prog))])
+      (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
+      (match form
+        [(def-form name t _ _ _)
+         (check! (format "def ~a" name) t form)]
+        [(defonce-form name t _ _)
+         (check! (format "defonce ~a" name) t form)]
+        [(defn-form name params rest-p ret _ _ raises _)
+         (for ([p (in-list params)]
+               #:when (param? p))
+           (check! (format "defn ~a parameter ~a" name (param-name p))
+                   (param-type p) form))
+         (when (and rest-p (param? rest-p))
+           (check! (format "defn ~a rest parameter ~a" name (param-name rest-p))
+                   (param-type rest-p) form))
+         (check! (format "defn ~a return" name) ret form)
+         (when raises
+           (check! (format "defn ~a :raises" name) raises form))]
+        [(record-form name fields)
+         (for ([field (in-list fields)])
+           (check! (format "record ~a field ~a" name (param-name field))
+                   (param-type field) form))]
+        [_ (void)]))
+    (for ([(name t) (in-hash (program-externs prog))])
+      (check! (format "extern ~a" name) t))))
 
 ;; --- environment -----------------------------------------------------------
 

@@ -2,7 +2,7 @@
 (require clojure.string :as str)
 (declare-extern los.rt/split-on [String String -> (Vec String)])
 (declare-extern los.rt/repeat-str [String Int -> String])
-(declare-extern los.rt/error-exit [String -> Any])
+(declare-extern los.rt/error-exit [String -> String])
 (declare-extern los.rt/epoch-seconds [-> Int])
 
 (defn parts [s :- String] :- (Vec String)
