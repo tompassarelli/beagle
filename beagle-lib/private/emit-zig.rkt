@@ -1108,6 +1108,12 @@
 (define (emit-call e)
   (define fn (call-form-fn e))
   (define args (call-form-args e))
+  (define order-projection
+    (and (= (length args) 1)
+         (call-form? (car args))
+         (memq (call-form-fn (car args)) '(keys vals))
+         (= (length (call-form-args (car args))) 1)
+         (car args)))
   (cond
     [(dynamic-condition-info e) => emit-dynamic-condition]
     [(not (symbol? fn)) (unsupported "higher-order call" "fn position must be a name in v1")]
@@ -1143,6 +1149,18 @@
              (emit-expr (car args))
              (emit-expr (cadr args))
              (emit-expr (caddr args)))]
+    ;; A map projection may flow into a consumer that destroys order. Lower
+    ;; those shapes without ever materializing an ordered key/value sequence.
+    [(and (eq? fn 'set) order-projection)
+     (format "~a.~aSet()"
+             (emit-expr (car (call-form-args order-projection)))
+             (if (eq? (call-form-fn order-projection) 'keys)
+                 "key"
+                 "value"))]
+    [(and (memq fn '(count empty?)) order-projection)
+     (format "rt.~a(~a)"
+             (if (eq? fn 'count) "count" "is_empty")
+             (emit-expr (car (call-form-args order-projection))))]
     ;; nil-tests look at the raw optional, no unwrap
     [(and (memq fn '(nil? some?)) (= 1 (length args)))
      (define raw (parameterize ([raw-optional? #t]) (emit-expr (car args))))

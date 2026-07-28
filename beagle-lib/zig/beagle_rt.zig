@@ -212,7 +212,10 @@ pub fn rest(v: anytype) @TypeOf(v) {
     return if (v.len > 0) v[1..] else v[0..0];
 }
 pub fn is_empty(v: anytype) bool {
-    return v.len == 0;
+    return switch (@typeInfo(@TypeOf(v))) {
+        .pointer => v.len == 0,
+        else => v.len() == 0,
+    };
 }
 
 /// O(n) copy-append in the tick arena; evaporates at reset.
@@ -281,6 +284,24 @@ pub fn Map(comptime V: type) type {
         pub fn len(self: Self) i64 {
             return @intCast(self.inner.count());
         }
+        pub fn keySet(self: Self) ValueSet([]const u8) {
+            var out = ValueSet([]const u8).empty();
+            var inner = self.inner;
+            var iterator = inner.iterator();
+            while (iterator.next()) |entry| {
+                out = out.conj(entry.key_ptr.*);
+            }
+            return out;
+        }
+        pub fn valueSet(self: Self) ValueSet(V) {
+            var out = ValueSet(V).empty();
+            var inner = self.inner;
+            var iterator = inner.iterator();
+            while (iterator.next()) |entry| {
+                out = out.conj(entry.value_ptr.*);
+            }
+            return out;
+        }
         pub fn eql(self: Self, other: Self) bool {
             if (self.inner.count() != other.inner.count()) return false;
             var inner = self.inner;
@@ -348,6 +369,20 @@ pub fn ValueMap(comptime K: type, comptime V: type) type {
         }
         pub fn len(self: Self) i64 {
             return @intCast(self.entries.len);
+        }
+        pub fn keySet(self: Self) ValueSet(K) {
+            var out = ValueSet(K).empty();
+            for (self.entries) |entry| {
+                out = out.conj(entry.key);
+            }
+            return out;
+        }
+        pub fn valueSet(self: Self) ValueSet(V) {
+            var out = ValueSet(V).empty();
+            for (self.entries) |entry| {
+                out = out.conj(entry.value);
+            }
+            return out;
         }
         pub fn eql(self: Self, other: Self) bool {
             if (self.entries.len != other.entries.len) return false;
