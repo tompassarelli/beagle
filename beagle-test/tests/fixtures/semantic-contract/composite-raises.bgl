@@ -1,0 +1,26 @@
+(ns semantic-contract.composite-raises)
+
+(defunion :throwable RewriteCrashError
+  (RewriteCrash [message :- String path :- String refusal :- Bool]))
+
+(defn classify-rewrite-crash [coord :- String live-ino :- Int? old-ino :- Int? new-ino :- Int? old-bytes :- Int? old-sha :- String? new-sha1 :- String? live-line1-sha :- String? live-prefix-sha :- String?] :- Keyword
+  :raises (U AllocationError RewriteCrashError)
+  (cond
+    (nil? live-ino)
+    (throw
+      (ex-info
+        (str "rewrite intent present but " coord " does not exist — refusing to classify")
+        {:path coord :refusal true}))
+    (and (some? old-ino) (= live-ino old-ino))
+    :roll-back
+    (and (some? new-ino) (= live-ino new-ino))
+    :roll-forward
+    (and (some? new-sha1) (= new-sha1 live-line1-sha))
+    :roll-forward
+    (and (some? old-bytes) (some? old-sha) (= old-sha live-prefix-sha))
+    :roll-back
+    :else
+    (throw
+      (ex-info
+        (str "rewrite intent does not match the live corpus at " coord " (neither source nor replacement inode/sha) — refusing to classify; operator intervention required")
+        {:path coord :refusal true}))))

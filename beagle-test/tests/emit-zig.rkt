@@ -307,6 +307,8 @@
   (build-path semantic-contract-dir "ownership-lifetime.bgl"))
 (define typed-errors-src
   (build-path semantic-contract-dir "typed-errors.bgl"))
+(define composite-raises-src
+  (build-path semantic-contract-dir "composite-raises.bgl"))
 
 (define (parse-semantic-target-src target src)
   ;; Source locations contain an absolute checkout path. Strip only that
@@ -1090,6 +1092,10 @@ ZIG
     (semantic-golden 'clj typed-errors-src "typed-errors"))
   (define zig-src
     (semantic-golden 'zig typed-errors-src "typed-errors"))
+  (define composite-clj-src
+    (semantic-golden 'clj composite-raises-src "composite-raises"))
+  (define composite-zig-src
+    (semantic-golden 'zig composite-raises-src "composite-raises"))
   (when CLOJURE
     (define clj-file (make-temporary-file "semantic-typed-errors~a.clj"))
     (dynamic-wind
@@ -1169,6 +1175,8 @@ JS
       "[\"mismatch\",\"/tmp/coord\",true]\n")))
   (when ZIG
     (check-true (zig-compiles? zig-src "semantic-typed-errors"))
+    (check-true
+     (zig-compiles? composite-zig-src "semantic-composite-raises"))
     (check-true
      (zig-tests?
       zig-src
@@ -1250,7 +1258,26 @@ ZIG
    '((RewriteFailure
       (message . "String")
       (path . "String")
-      (refusal . "Bool")))))
+      (refusal . "Bool"))))
+  (define allocation-prog
+    (parse-semantic-target-src 'zig allocation-failure-src))
+  (type-check! allocation-prog)
+  (define single-raise-summary
+    (string-append
+     "map-fallible :raises "
+     (type->string
+      (defn-form-raises
+       (for/first ([form (in-list (program-forms allocation-prog))]
+                   #:when (and (defn-form? form)
+                               (eq? (defn-form-name form) 'map-fallible)))
+         form)))
+     "\nclassify :raises "
+     (type->string (defn-form-raises classify-form))
+     "\n"))
+  (check-equal?
+   single-raise-summary
+   (file->string
+    (build-path semantic-contract-dir "single-raises.checker-golden"))))
 
 (test-case "typed error checker rejects throw without :raises"
   (check-exn
