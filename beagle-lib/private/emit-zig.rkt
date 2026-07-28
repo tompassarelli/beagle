@@ -73,6 +73,11 @@
         (and inner (type-prim? inner)
              (eq? (type-prim-name inner) 'String)))))
 
+(define current-dynamic-types (make-parameter (hash)))
+(define current-binding-types (make-parameter (hasheq)))
+(define current-dynamic-remaining (make-parameter (hasheq)))
+(define current-dynamic-arms (make-parameter (hasheq)))
+
 (define (type->zig t)
   (cond
     [(not t) (unsupported "missing type annotation"
@@ -116,6 +121,11 @@
                        "zig HVec lowering is currently the checked regex match shape"))
         (format "rt.RegexMatch(~a)" (length (type-app-args t)))]
        [(Regex) "rt.Regex"]
+       [(Dyn)
+        (hash-ref (current-dynamic-types) t
+                  (lambda ()
+                    (unsupported "closed dynamic type"
+                                 "missing checked dynamic-contract side-table entry")))]
        [else (unsupported "parametric type" (type-app-ctor t))])]
     [(type-union? t)
      (cond
@@ -171,6 +181,7 @@
 (define current-externs (make-parameter (hasheq))) ; declared-extern name → type
 (define current-requires (make-parameter (hasheq))) ; alias sym → namespace sym
 (define current-fn-returns (make-parameter (hasheq))) ; local defn name → return type
+(define current-fn-types (make-parameter (hasheq))) ; local defn name → complete function type
 (define current-semantic-contracts (make-parameter #f))
 (define current-regex-bindings (make-parameter (hasheq)))
 ;; opaque-handle type-name sym → owning Zig module string (los_yaml, ...).
@@ -205,6 +216,73 @@
 (define current-loop-bindings (make-parameter #f)) ; (listof ident-string) for recur
 (define label-counter (make-parameter (box 0)))
 (define raw-optional? (make-parameter #f)) ; inside nil?/some? arg
+
+(define (dynamic-type-for-contract contract)
+  (type-app 'Dyn (dynamic-contract-alternatives contract)))
+
+(define (collect-dynamic-contracts prog)
+  (define contracts (program-semantic-contracts prog))
+  (define seen (make-hash))
+  (define out '())
+  (define (add-node! node)
+    (define contract (and node (hash-ref contracts node #f)))
+    (when (dynamic-contract? contract)
+      (define dyn-type (dynamic-type-for-contract contract))
+      (unless (hash-has-key? seen dyn-type)
+        (hash-set! seen dyn-type #t)
+        (set! out (cons (cons dyn-type contract) out)))))
+  (for ([raw-form (in-list (program-forms prog))])
+    (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
+    (match form
+      [(or (def-form _ _ _ _ _) (defonce-form _ _ _ _))
+       (add-node! form)]
+      [(defn-form _ params rest-p _ _ _ _ _)
+       (for ([p (in-list params)] #:when (param? p)) (add-node! p))
+       (when (and rest-p (param? rest-p)) (add-node! rest-p))
+       (add-node! form)]
+      [(record-form _ fields)
+       (for ([field (in-list fields)]) (add-node! field))]
+      [_ (void)]))
+  (reverse out))
+
+(define (dynamic-alt-base-name t)
+  (cond
+    [(and (type-prim? t) (eq? (type-prim-name t) 'Bool)) "boolean"]
+    [else
+     (string-trim
+      (string-downcase
+       (regexp-replace* #px"[^A-Za-z0-9]+" (type->string t) "_"))
+      "_")]))
+
+(define (dynamic-tag-name dyn-type alt)
+  (define alternatives (type-app-args dyn-type))
+  (define bases (map dynamic-alt-base-name alternatives))
+  (define index
+    (for/first ([candidate (in-list alternatives)]
+                [i (in-naturals)]
+                #:when (type-invariant-equal? candidate alt))
+      i))
+  (define base (list-ref bases index))
+  (if (> (count (lambda (candidate) (string=? candidate base)) bases) 1)
+      (format "~a_~a" base index)
+      base))
+
+(define (emit-dynamic-declaration dyn-type contract name)
+  (define tag-name (string-append name "Tag"))
+  (define tag-lines
+    (for/list ([entry (in-list (dynamic-contract-tag-abi contract))])
+      (format "    ~a = ~a,"
+              (dynamic-tag-name dyn-type (car entry))
+              (cdr entry))))
+  (define payload-lines
+    (for/list ([alt (in-list (dynamic-contract-alternatives contract))])
+      (format "    ~a: ~a,"
+              (dynamic-tag-name dyn-type alt)
+              (type->zig alt))))
+  (format
+   "pub const ~a = enum(u16) {\n~a\n};\npub const ~a = union(~a) {\n~a\n};"
+   tag-name (string-join tag-lines "\n")
+   name tag-name (string-join payload-lines "\n")))
 
 (define (fresh-label)
   (define b (label-counter))
@@ -278,6 +356,119 @@
     [else
      (unsupported "regex match type" (type->string match-type))]))
 
+(define DYNAMIC-PREDICATE-KINDS
+  (hasheq 'string? 'String
+          'number? 'Int
+          'integer? 'Int
+          'int? 'Int
+          'boolean? 'Bool
+          'keyword? 'Keyword
+          'symbol? 'Symbol
+          'map? 'Map
+          'vector? 'Vec))
+
+(define (dynamic-alt-matches? alt kind)
+  (case kind
+    [(Map) (and (type-app? alt) (eq? (type-app-ctor alt) 'Map))]
+    [(Vec) (and (type-app? alt) (memq (type-app-ctor alt) '(Vec HVec)))]
+    [else
+     (and (type-prim? alt) (eq? (type-prim-name alt) kind))]))
+
+(define (dynamic-condition-info e)
+  (and (call-form? e)
+       (= (length (call-form-args e)) 1)
+       (symbol? (car (call-form-args e)))
+       (hash-ref DYNAMIC-PREDICATE-KINDS (call-form-fn e) #f)
+       (let* ([sym (car (call-form-args e))]
+              [dyn-type (hash-ref (current-binding-types) sym #f)])
+         (and (dynamic-type? dyn-type)
+              (let* ([available
+                      (hash-ref (current-dynamic-remaining)
+                                sym
+                                (type-app-args dyn-type))]
+                     [selected
+                      (filter
+                       (lambda (alt)
+                         (dynamic-alt-matches?
+                          alt
+                          (hash-ref DYNAMIC-PREDICATE-KINDS
+                                    (call-form-fn e))))
+                       available)]
+                     [remaining
+                      (filter
+                       (lambda (alt)
+                         (not (ormap
+                               (lambda (chosen)
+                                 (type-invariant-equal? alt chosen))
+                               selected)))
+                       available)])
+                (and (pair? selected)
+                     (list sym dyn-type selected remaining)))))))
+
+(define (emit-dynamic-condition info)
+  (match-define (list sym dyn-type selected _) info)
+  (define checks
+    (for/list ([alt (in-list selected)])
+      (format "(std.meta.activeTag(~a) == .~a)"
+              (ident sym)
+              (dynamic-tag-name dyn-type alt))))
+  (if (= (length checks) 1)
+      (car checks)
+      (format "(~a)" (string-join checks " or "))))
+
+(define (with-dynamic-branch info then? thunk)
+  (cond
+    [(not info) (thunk)]
+    [else
+     (match-define (list sym _ selected remaining) info)
+     (define available (if then? selected remaining))
+     (parameterize
+         ([current-dynamic-remaining
+           (hash-set (current-dynamic-remaining) sym available)]
+          [current-dynamic-arms
+           (if (= (length available) 1)
+               (hash-set (current-dynamic-arms) sym (car available))
+               (hash-remove (current-dynamic-arms) sym))])
+       (thunk))]))
+
+(define (expr-static-type e)
+  (cond
+    [(string? e) (type-prim 'String)]
+    [(exact-integer? e) (type-prim 'Int)]
+    [(and (real? e) (not (exact-integer? e))) (type-prim 'Float)]
+    [(boolean? e) (type-prim 'Bool)]
+    [(symbol? e)
+     (or (hash-ref (current-dynamic-arms) e #f)
+         (hash-ref (current-binding-types) e #f))]
+    [(and (call-form? e)
+          (regexp-match #rx"^->(.+)$" (symbol->string (call-form-fn e))))
+     => (lambda (m) (type-prim (string->symbol (cadr m))))]
+    [(call-form? e)
+     (or (hash-ref (current-fn-returns) (call-form-fn e) #f)
+         (let ([extern-type (hash-ref (current-externs) (call-form-fn e) #f)])
+           (and (type-fn? extern-type) (type-fn-ret extern-type))))]
+    [else #f]))
+
+(define (dynamic-value-alternative v expected)
+  (define actual (expr-static-type v))
+  (cond
+    [(and actual (dynamic-type? actual)
+          (type-invariant-equal? actual expected))
+     expected]
+    [else
+     (define candidates
+       (filter
+        (lambda (alt)
+          (cond
+            [actual (type-compatible? actual alt)]
+            [(vec-form? v)
+             (and (type-app? alt) (eq? (type-app-ctor alt) 'Vec))]
+            [(map-form? v)
+             (and (type-app? alt) (eq? (type-app-ctor alt) 'Map))]
+            [else #f]))
+        (type-app-args expected)))
+     (and (= (length candidates) 1) (car candidates))]))
+
 ;; --- operators --------------------------------------------------------------------
 
 (define VARIADIC-OPS (hasheq '+ "+" '* "*" 'and "and" 'or "or"
@@ -285,6 +476,16 @@
 (define BINARY-OPS (hasheq '< "<" '> ">" '<= "<=" '>= ">="))
 
 (define (emit-args args) (map emit-expr args))
+(define (emit-typed-args args fn-type)
+  (define fixed (and (type-fn? fn-type) (type-fn-params fn-type)))
+  (define rest-type (and (type-fn? fn-type) (type-fn-rest-type fn-type)))
+  (for/list ([arg (in-list args)] [i (in-naturals)])
+    (define expected
+      (cond
+        [(and fixed (< i (length fixed))) (list-ref fixed i)]
+        [rest-type rest-type]
+        [else #f]))
+    (if expected (emit-typed-value arg expected) (emit-expr arg))))
 
 ;; --- expressions ------------------------------------------------------------------
 
@@ -298,9 +499,14 @@
     [(string? e) (format "~v" e)]
     [(eq? e 'nil) "null"]
     [(symbol? e)
-     (if (and (optional-binding? e) (not (raw-optional?)))
-         (format "~a.?" (ident e))
-         (ident e))]
+     (cond
+       [(hash-ref (current-dynamic-arms) e #f)
+        => (lambda (alt)
+             (define dyn-type (hash-ref (current-binding-types) e))
+             (format "~a.~a" (ident e) (dynamic-tag-name dyn-type alt)))]
+       [(and (optional-binding? e) (not (raw-optional?)))
+        (format "~a.?" (ident e))]
+       [else (ident e)])]
     [(kw-access? e)
      (when (kw-access-default e)
        (unsupported "kw-access with default" "use records + explicit branches"))
@@ -316,10 +522,17 @@
        (unsupported "if without else in expression position"))
      (define t (if-form-then-expr e))
      (define el (if-form-else-expr e))
+     (define dynamic-info (dynamic-condition-info (if-form-cond-expr e)))
      (format "(if (~a) ~a else ~a)"
-             (emit-expr (if-form-cond-expr e))
-             (anchor-literal-branch t (list t el))
-             (emit-expr el))]
+             (if dynamic-info
+                 (emit-dynamic-condition dynamic-info)
+                 (emit-expr (if-form-cond-expr e)))
+             (with-dynamic-branch
+              dynamic-info #t
+              (lambda () (anchor-literal-branch t (list t el))))
+             (with-dynamic-branch
+              dynamic-info #f
+              (lambda () (emit-expr el))))]
     [(cond-form? e) (emit-cond e)]
     [(do-form? e) (emit-block-expr '() (do-form-body e))]
     [(let-form? e) (emit-block-expr (let-form-bindings e) (let-form-body e))]
@@ -378,6 +591,18 @@
 ;; slot accepts a literal (def, let, reduce init, ctor args).
 (define (emit-typed-value v expected)
   (cond
+    [(and expected (dynamic-type? expected))
+     (define alt (dynamic-value-alternative v expected))
+     (unless alt
+       (unsupported "closed dynamic value"
+                    (format "cannot select one declared arm for ~a"
+                            (type->string expected))))
+     (if (dynamic-type? alt)
+         (emit-expr v)
+         (format "~a{ .~a = ~a }"
+                 (type->zig expected)
+                 (dynamic-tag-name expected alt)
+                 (emit-typed-value v alt)))]
     [(and (map-form? v) expected (map-type? expected))
      (emit-map-literal v (map-vtype expected))]
     [(and (vec-form? v) expected (type-app? expected)
@@ -564,6 +789,7 @@
   (define fn (call-form-fn e))
   (define args (call-form-args e))
   (cond
+    [(dynamic-condition-info e) => emit-dynamic-condition]
     [(not (symbol? fn)) (unsupported "higher-order call" "fn position must be a name in v1")]
     [(eq? fn 're-pattern)
      (unless (= (length args) 1)
@@ -795,7 +1021,11 @@
      (format "rt.compare(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
     [(qualified-rt-name fn)
      => (lambda (rt-fn)
-          (format "~a(~a)" rt-fn (string-join (emit-args args) ", ")))]
+          (format "~a(~a)"
+                  rt-fn
+                  (string-join
+                   (emit-typed-args args (hash-ref (current-externs) fn #f))
+                   ", ")))]
     [(regexp-match #rx"^->(.+)$" (symbol->string fn))
      => (lambda (m) (emit-ctor (string->symbol (cadr m)) args))]
     [(regexp-match? #rx"/" (symbol->string fn))
@@ -804,7 +1034,11 @@
     [else
      ;; user-defined function in this module: ctx is threaded implicitly
      ;; only when the author passes it; emitted call is positional.
-     (format "~a(~a)" (fn-ident fn) (string-join (emit-args args) ", "))]))
+     (format "~a(~a)"
+             (fn-ident fn)
+             (string-join
+              (emit-typed-args args (hash-ref (current-fn-types) fn #f))
+              ", "))]))
 
 ;; --- statements (fn bodies) ---------------------------------------------------------
 
@@ -849,9 +1083,17 @@
        (for ([b (in-list (let-form-bindings lf))])
          (unless (symbol? (let-binding-name b))
            (unsupported "destructuring binding"))
+         (define binding-type
+           (or (let-binding-type b)
+               (expr-static-type (let-binding-value b))))
          (line! (format "const ~a = ~a;"
                         (ident (let-binding-name b))
                         (emit-typed-value (let-binding-value b) (let-binding-type b))))
+         (when binding-type
+           (current-binding-types
+            (hash-set (current-binding-types)
+                      (let-binding-name b)
+                      binding-type)))
          ;; Optional iff declared ?T, or — inferred local — the value's
          ;; call-return type is ?T (same rule as emit-block-expr).
          (let* ([t (let-binding-type b)]
@@ -863,7 +1105,7 @@
       [(list e)
        (if (and (type-prim? ret-type) (eq? (type-prim-name ret-type) 'Nil))
            (line! (emit-stmt e))
-           (line! (format "return ~a;" (emit-expr e))))]
+           (line! (format "return ~a;" (emit-typed-value e ret-type))))]
       [(cons e rest)
        (line! (emit-stmt e))
        (loop rest)]
@@ -964,7 +1206,17 @@
      (for/list ([p (in-list params)])
        (format "~a: ~a" (ident (param-name p)) (type->zig (param-type p))))
      ", "))
+  (define binding-types
+    (for/hash ([p (in-list params)])
+      (values (param-name p) (param-type p))))
+  (define dynamic-remaining
+    (for/hash ([p (in-list params)]
+               #:when (dynamic-type? (param-type p)))
+      (values (param-name p) (type-app-args (param-type p)))))
   (parameterize ([current-optionals opt-params]
+                 [current-binding-types binding-types]
+                 [current-dynamic-remaining dynamic-remaining]
+                 [current-dynamic-arms (hasheq)]
                  [label-counter (box 0)])
     (format "pub fn ~a(~a) ~a {\n~a~a\n}"
             name sig (type->zig ret)
@@ -1335,6 +1587,21 @@
         (hash-set h (defn-form-name f) (defn-form-return-type f))
         h)))
 
+(define (build-fn-types prog)
+  (for/fold ([h (hasheq)]) ([f (in-list (program-forms prog))])
+    (if (and (defn-form? f) (defn-form-return-type f))
+        (hash-set
+         h
+         (defn-form-name f)
+         (type-fn
+          (for/list ([p (in-list (defn-form-params f))])
+            (and (param? p) (param-type p)))
+          (and (defn-form-rest-param f)
+               (param? (defn-form-rest-param f))
+               (param-type (defn-form-rest-param f)))
+          (defn-form-return-type f)))
+        h)))
+
 (define (build-regex-bindings prog)
   (define contracts (program-semantic-contracts prog))
   (for/fold ([h (hasheq)]) ([raw-form (in-list (program-forms prog))])
@@ -1354,9 +1621,16 @@
 
 (define (zig-emit-program prog)
   (define records (build-record-table prog))
+  (define dynamic-contracts (collect-dynamic-contracts prog))
+  (define dynamic-types
+    (for/hash ([entry (in-list dynamic-contracts)]
+               [i (in-naturals)])
+      (values (car entry) (format "Dyn~a" i))))
   (parameterize ([current-records records]
                  [current-externs (program-externs prog)]
                  [current-fn-returns (build-fn-returns prog)]
+                 [current-fn-types (build-fn-types prog)]
+                 [current-dynamic-types dynamic-types]
                  [current-semantic-contracts (program-semantic-contracts prog)]
                  [current-regex-bindings (build-regex-bindings prog)]
                  [current-opaque-handles (build-opaque-handles prog records)]
@@ -1365,8 +1639,15 @@
                     (if (require-entry-alias r)
                         (hash-set h (require-entry-alias r) (require-entry-ns r))
                         h))])
+    (define dynamic-decls
+      (for/list ([entry (in-list dynamic-contracts)])
+        (emit-dynamic-declaration
+         (car entry)
+         (cdr entry)
+         (hash-ref dynamic-types (car entry)))))
     (define decls
       (append
+       dynamic-decls
        (for/list ([f (in-list (program-forms prog))]
                   #:unless (eq? f 'nil)) ; (comment ...) parses to nil
          (cond

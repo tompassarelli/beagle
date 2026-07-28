@@ -414,10 +414,63 @@ ZIG
 ;; --- semantic contract 3: closed dynamic values -----------------------------
 
 (test-case "closed dynamic contract pins CLJ bytes and emits compiling Zig"
-  (semantic-golden 'clj closed-dynamic-src "closed-dynamic")
+  (define clj-src (semantic-golden 'clj closed-dynamic-src "closed-dynamic"))
   (define zig-src (semantic-golden 'zig closed-dynamic-src "closed-dynamic"))
+  (when CLOJURE
+    (define clj-file (make-temporary-file "semantic-closed-dynamic~a.clj"))
+    (dynamic-wind
+      void
+      (lambda ()
+        (call-with-output-file clj-file
+          #:exists 'replace
+          (lambda (p)
+            (display clj-src p)
+            (display
+             "\n(prn [(observe (round-trip (dyn-string \"ok\"))) (observe (round-trip (dyn-int 7))) (observe (round-trip (dyn-bool true))) (observe (round-trip (dyn-vector [\"a\" \"b\"]))) (observe (round-trip (dyn-map {\"k\" 1})))])\n"
+             p)))
+        (define-values (ok? out err)
+          (run-command-output CLOJURE (path->string clj-file)))
+        (check-true ok? err)
+        (check-equal?
+         out
+         "[\"string:ok\" \"int:7\" \"bool:true\" \"vec:2\" \"map\"]\n"))
+      (lambda () (delete-file clj-file))))
+  (when NODE
+    (define js-src (compile-semantic-target-src 'js closed-dynamic-src))
+    (define runnable
+      (regexp-replace* #px"(?m:^import [^\n]*\n)" js-src ""))
+    (define-values (ok? out err)
+      (run-command-output
+       NODE "--input-type=module" "-e"
+       (string-append
+        runnable
+        "\nconsole.log(JSON.stringify([observe(round_trip(dyn_string(\"ok\"))), observe(round_trip(dyn_int(7))), observe(round_trip(dyn_bool(true))), observe(round_trip(dyn_vector([\"a\", \"b\"]))), observe(round_trip(dyn_map({\"k\": 1})))]));\n")))
+    (check-true ok? err)
+    (check-equal?
+     out
+     "[\"string:ok\",\"int:7\",\"bool:true\",\"vec:2\",\"map\"]\n"))
   (when ZIG
-    (check-true (zig-compiles? zig-src "semantic-closed-dynamic"))))
+    (check-true (zig-compiles? zig-src "semantic-closed-dynamic"))
+    (check-true
+     (zig-tests?
+      zig-src
+      #<<ZIG
+test "closed dynamic semantic contract behavior" {
+    try std.testing.expectEqualStrings("string:ok", observe(roundTrip(dynString("ok"))));
+    try std.testing.expectEqualStrings("int:7", observe(roundTrip(dynInt(7))));
+    try std.testing.expectEqualStrings("bool:true", observe(roundTrip(dynBool(true))));
+    try std.testing.expectEqualStrings("vec:2", observe(roundTrip(dynVector(&.{ "a", "b" }))));
+    const value_map = rt.Map(i64).empty().assoc("k", 1);
+    try std.testing.expectEqualStrings("map", observe(roundTrip(dynMap(value_map))));
+
+    try std.testing.expectEqual(@as(u16, 0), @intFromEnum(std.meta.activeTag(dynString("ok"))));
+    try std.testing.expectEqual(@as(u16, 1), @intFromEnum(std.meta.activeTag(dynInt(7))));
+    try std.testing.expectEqual(@as(u16, 2), @intFromEnum(std.meta.activeTag(dynBool(true))));
+    try std.testing.expectEqual(@as(u16, 3), @intFromEnum(std.meta.activeTag(dynVector(&.{ "a" }))));
+    try std.testing.expectEqual(@as(u16, 4), @intFromEnum(std.meta.activeTag(dynMap(value_map))));
+}
+ZIG
+      "semantic-closed-dynamic-behavior"))))
 
 (define (dynamic-contract-rejection? e)
   (and (beagle-diagnostic? e)
