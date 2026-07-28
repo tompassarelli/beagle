@@ -1042,6 +1042,49 @@ ZIG
 
 ;; --- semantic contract 7: typed errors and payloads --------------------------
 
+(test-case "typed error CLJ diff is exactly the carrier declaration"
+  (define (compile-clj-forms . datums)
+    (define forms
+      (map (lambda (d) (datum->syntax #f d))
+           (cons '(define-target clj) datums)))
+    (define prog (parse-program forms))
+    (type-check! prog)
+    (emit-program prog))
+  (define params
+    (br 'missing ':- 'Bool
+        'mismatch ':- 'Bool
+        'path ':- 'String))
+  (define body
+    `(cond
+       missing
+       (throw (ex-info "missing" ,(mp ':path 'path ':refusal 'true)))
+       mismatch
+       (throw (ex-info "mismatch" ,(mp ':path 'path ':refusal 'true)))
+       :else
+       "roll-back"))
+  (define baseline
+    (compile-clj-forms
+     '(ns semantic-contract.carrier-diff)
+     `(defn classify ,params :- String ,body)))
+  (define carried
+    (compile-clj-forms
+     '(ns semantic-contract.carrier-diff)
+     `(defunion :throwable RewriteError
+        (RewriteFailure
+         ,(br 'message ':- 'String
+              'path ':- 'String
+              'refusal ':- 'Bool)))
+     `(defn classify ,params :- String :raises RewriteError ,body)))
+  (check-equal?
+   carried
+   (string-replace
+    baseline
+    "(defn ^String classify"
+    (string-append
+     ";; error RewriteError = RewriteFailure\n"
+     "(defrecord RewriteFailure [message path refusal])\n\n"
+     "(defn ^String classify"))))
+
 (test-case "typed error contract pins CLJ bytes and emits compiling Zig"
   (define clj-src
     (semantic-golden 'clj typed-errors-src "typed-errors"))
@@ -1059,13 +1102,26 @@ ZIG
             (display
              #<<CLJ
 
-(prn [(classify false "/tmp/coord")
-      (propagate false "/tmp/coord")
-      (render true "/tmp/coord")])
-(try
-  (classify true "/tmp/coord")
-  (catch clojure.lang.ExceptionInfo e
-    (prn [(ex-message e) (:path (ex-data e)) (:refusal (ex-data e))])))
+(defn legacy-classify [missing mismatch path]
+  (cond
+    missing (throw (ex-info "missing" {:path path :refusal true}))
+    mismatch (throw (ex-info "mismatch" {:path path :refusal true}))
+    :else "roll-back"))
+(defn observe [f missing mismatch path]
+  (try
+    {:ok (f missing mismatch path)}
+    (catch clojure.lang.ExceptionInfo e
+      {:class (class e) :message (ex-message e) :data (ex-data e)})))
+(prn [(= (observe classify false false "/tmp/coord")
+         (observe legacy-classify false false "/tmp/coord"))
+      (= (observe classify true false "/tmp/coord")
+         (observe legacy-classify true false "/tmp/coord"))
+      (= (observe classify false true "/tmp/coord")
+         (observe legacy-classify false true "/tmp/coord"))])
+(prn [(classify false false "/tmp/coord")
+      (propagate false false "/tmp/coord")
+      (render true false "/tmp/coord")
+      (render false true "/tmp/coord")])
 CLJ
              p)))
         (define-values (ok? out err)
@@ -1073,7 +1129,7 @@ CLJ
         (check-true ok? err)
         (check-equal?
          out
-         "[\"roll-back\" \"roll-back\" \"missing\"]\n[\"missing\" \"/tmp/coord\" true]\n"))
+         "[true true true]\n[\"roll-back\" \"roll-back\" \"missing\" \"mismatch\"]\n"))
       (lambda () (delete-file clj-file))))
   (when NODE
     (define js-src (compile-semantic-target-src 'js typed-errors-src))
@@ -1087,12 +1143,18 @@ CLJ
         #<<JS
 
 console.log(JSON.stringify([
-  classify(false, "/tmp/coord"),
-  propagate(false, "/tmp/coord"),
-  render(true, "/tmp/coord"),
+  classify(false, false, "/tmp/coord"),
+  propagate(false, false, "/tmp/coord"),
+  render(true, false, "/tmp/coord"),
+  render(false, true, "/tmp/coord"),
 ]));
 try {
-  classify(true, "/tmp/coord");
+  classify(true, false, "/tmp/coord");
+} catch (e) {
+  console.log(JSON.stringify([e.message, e.data.path, e.data.refusal]));
+}
+try {
+  classify(false, true, "/tmp/coord");
 } catch (e) {
   console.log(JSON.stringify([e.message, e.data.path, e.data.refusal]));
 }
@@ -1101,7 +1163,10 @@ JS
     (check-true ok? err)
     (check-equal?
      out
-     "[\"roll-back\",\"roll-back\",\"missing\"]\n[\"missing\",\"/tmp/coord\",true]\n"))
+     (string-append
+      "[\"roll-back\",\"roll-back\",\"missing\",\"mismatch\"]\n"
+      "[\"missing\",\"/tmp/coord\",true]\n"
+      "[\"mismatch\",\"/tmp/coord\",true]\n")))
   (when ZIG
     (check-true (zig-compiles? zig-src "semantic-typed-errors"))
     (check-true
@@ -1112,13 +1177,13 @@ test "typed error success, payload, rescue, and propagation" {
     var errors = RewriteErrorCarrier{};
     try std.testing.expectEqualStrings(
         "roll-back",
-        try classify(&errors, false, "/tmp/coord"),
+        try classify(&errors, false, false, "/tmp/coord"),
     );
     try std.testing.expect(errors.payload == null);
 
     try std.testing.expectError(
         error.RewriteFailure,
-        classify(&errors, true, "/tmp/coord"),
+        classify(&errors, true, false, "/tmp/coord"),
     );
     switch (errors.payload.?) {
         .rewrite_failure => |payload| {
@@ -1128,15 +1193,32 @@ test "typed error success, payload, rescue, and propagation" {
         },
     }
 
+    var mismatch_errors = RewriteErrorCarrier{};
+    try std.testing.expectError(
+        error.RewriteFailure,
+        classify(&mismatch_errors, false, true, "/tmp/coord"),
+    );
+    switch (mismatch_errors.payload.?) {
+        .rewrite_failure => |payload| {
+            try std.testing.expectEqualStrings("mismatch", payload.message);
+            try std.testing.expectEqualStrings("/tmp/coord", payload.path);
+            try std.testing.expect(payload.refusal);
+        },
+    }
+
     var propagated = RewriteErrorCarrier{};
     try std.testing.expectError(
         error.RewriteFailure,
-        propagate(&propagated, true, "/tmp/coord"),
+        propagate(&propagated, true, false, "/tmp/coord"),
     );
     try std.testing.expect(propagated.payload != null);
     try std.testing.expectEqualStrings(
         "missing",
-        render(true, "/tmp/coord"),
+        render(true, false, "/tmp/coord"),
+    );
+    try std.testing.expectEqualStrings(
+        "mismatch",
+        render(false, true, "/tmp/coord"),
     );
 }
 ZIG
