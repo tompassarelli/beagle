@@ -1,0 +1,16 @@
+(ns zig-stdlib.pr-str)
+
+(defn render
+  [record :- (Map Keyword (U String Int Bool Keyword Nil (Vec String)))]
+  :- String
+  (pr-str record))
+
+(defn main [] :- Nil
+  (println
+    (render
+      {:name "fram"
+       :version 7
+       :ready true
+       :kind :engine
+       :note nil
+       :parts ["core" "graph"]})))
