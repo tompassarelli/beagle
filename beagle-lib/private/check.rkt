@@ -973,7 +973,9 @@
     (case kind
       [(Map) (cadr args)]
       [else (car args)]))
-  (when (and key-type (not (collection-value-contract? key-type)))
+  (when (and (eq? (current-check-target) 'zig)
+             key-type
+             (not (collection-value-contract? key-type)))
     (collection-contract-error
      node
      (format "~a key/element type ~a does not support clojure-value equality and clojure-hash"
@@ -1414,6 +1416,7 @@
                'actual (type->string actual)
                'position label))))
   (and
+   (eq? (current-check-target) 'zig)
    (collection-type? expected)
    (case (type-app-ctor expected)
      [(Vec List)

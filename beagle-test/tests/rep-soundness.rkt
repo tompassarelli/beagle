@@ -67,13 +67,14 @@
 
 ;; Count alloc sites the ORACLE predicts must be HAMT, walking the type table:
 ;;   - a non-empty map literal whose key type is compound
-;;   - a `set` call whose argument's element type is compound
+;;   - a set literal or `set` call whose element type is compound
 ;;   - an `assoc` call with any compound key argument
-;; (set LITERALS are never HAMT — distinct by construction, $$bc handles them.)
 (define (oracle-hamt-site-count tbl)
   (for/sum ([(n t) (in-hash tbl)])
     (cond
       [(and (map-form? n) (pair? (map-form-pairs n)) (compound-type? (map-key-of t))) 1]
+      [(and (set-form? n) (pair? (set-form-items n))
+            (compound-type? (seq-elem-of t))) 1]
       [(and (call-form? n) (eq? (call-form-fn n) 'set))
        (define arg (and (pair? (call-form-args n)) (car (call-form-args n))))
        (if (compound-type? (seq-elem-of (and arg (hash-ref tbl arg #f)))) 1 0)]
@@ -114,7 +115,7 @@
      `(def m :- Any ,(mt ':a (br 1 2) ':b (mt ':c 3))))
    (assert-native "vector literal (always native COW array)"
      `(def v :- Any ,(br 1 2 3)))
-   (assert-native "set literal with compound elems (distinct by construction)"
+   (assert-hamt "set literal with compound elems uses value equality" "hamtSet("
      `(defn f () :- Bool (contains? ,(st (br 1 2) (br 3 4)) ,(br 1 2))))
    (assert-native "scalar assoc (key arg scalar)"
      `(defn f () :- Any (assoc ,(mt ':a 1) ':b 2)))
