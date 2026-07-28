@@ -382,6 +382,8 @@
   (cond
     [(and (eq? fn 'get) (= 2 (length args))) #t]
     [(eq? fn 'parse-long) #t]
+    [(and (symbol? fn)
+          (regexp-match? #rx"/index-of$" (symbol->string fn))) #t]
     ;; fs/parent (any alias of babashka.fs) → nil at a filesystem root.
     [(and (symbol? fn)
           (let ([m (regexp-match #rx"/(.+)$" (symbol->string fn))])

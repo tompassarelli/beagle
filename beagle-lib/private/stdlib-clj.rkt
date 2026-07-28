@@ -22,7 +22,6 @@
    'deliver    (fn-of '(Any Any) 'Any)
    'promise    (fn-of '() 'Any)
    ;; --- type coercion: CLJ-specific -----------------------------------------
-   'long       (fn-of '(Any) 'Int)
    'float      (fn-of '(Any) 'Float)
    'short      (fn-of '(Any) 'Int)
    'byte       (fn-of '(Any) 'Int)
@@ -35,7 +34,6 @@
    'char?      (fn-of '(Any) 'Bool)
    'float?     (fn-of '(Any) 'Bool)
    'double?    (fn-of '(Any) 'Bool)
-   'int?       (fn-of '(Any) 'Bool)
    'nat-int?   (fn-of '(Any) 'Bool)
    'pos-int?   (fn-of '(Any) 'Bool)
    'neg-int?   (fn-of '(Any) 'Bool)

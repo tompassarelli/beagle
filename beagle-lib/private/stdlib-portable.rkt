@@ -111,6 +111,9 @@
    'identical? (fn-of '(Any Any) 'Bool)
    'compare    (fn-of '(Any Any) 'Int)
    'boolean    (fn-of '(Any) 'Bool)
+   ;; Native backends lower both to their fixed-width integer model.
+   'long       (fn-of '(Any) 'Int)
+   'int?       (fn-of '(Any) 'Bool)
    ;; --- boolean ------------------------------------------------------------
    'not        (fn-of '(Bool) 'Bool)
    'and        (fn-of '() 'Any #:rest 'Any)
