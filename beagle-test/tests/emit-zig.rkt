@@ -251,6 +251,8 @@
   (build-path semantic-contract-dir "collections-layout.bgl"))
 (define allocation-failure-src
   (build-path semantic-contract-dir "allocation-failure.bgl"))
+(define ownership-lifetime-src
+  (build-path semantic-contract-dir "ownership-lifetime.bgl"))
 
 (define (parse-semantic-target-src target src)
   ;; Source locations contain an absolute checkout path. Strip only that
@@ -813,6 +815,68 @@ ZIG
   (check-equal? (hash-ref contracts fallible-call) fallible-contract)
   (check-equal? (allocation-contract-region (hash-ref contracts string-call))
                 'process))
+
+;; --- semantic contract 6: ownership and lifetime ----------------------------
+
+(test-case "ownership contract pins CLJ bytes and emits compiling Zig"
+  (define clj-src
+    (semantic-golden 'clj ownership-lifetime-src "ownership-lifetime"))
+  (define zig-src
+    (semantic-golden 'zig ownership-lifetime-src "ownership-lifetime"))
+  (when CLOJURE
+    (define clj-file (make-temporary-file "semantic-ownership-lifetime~a.clj"))
+    (dynamic-wind
+      void
+      (lambda ()
+        (call-with-output-file clj-file
+          #:exists 'replace
+          (lambda (p)
+            (display clj-src p)
+            (display "\n(prn (observe nil))\n" p)))
+        (define-values (ok? out err)
+          (run-command-output CLOJURE (path->string clj-file)))
+        (check-true ok? err)
+        (check-equal? out "16\n"))
+      (lambda () (delete-file clj-file))))
+  (when NODE
+    (define js-src (compile-semantic-target-src 'js ownership-lifetime-src))
+    (define runnable
+      (regexp-replace*
+       #rx"['\"]beagle/core.js['\"]"
+       js-src
+       (format "\"file://~a\""
+               (path->string (build-path js-runtime-dir "core.js")))))
+    (define-values (ok? out err)
+      (run-command-output
+       NODE "--input-type=module" "-e"
+       (string-append runnable "\nconsole.log(observe(null));\n")))
+    (check-true ok? err)
+    (check-equal? out "16\n"))
+  (when ZIG
+    (check-true (zig-compiles? zig-src "semantic-ownership-lifetime"))
+    (check-true
+     (zig-tests?
+      zig-src
+      #<<ZIG
+test "ownership semantic contract behavior and explicit promotion" {
+    var storage: [64]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&storage);
+    var rng = rt.Splitmix64.init(1);
+    var ctx = rt.Ctx{
+        .tick = fba.allocator(),
+        .rng = &rng,
+    };
+    try std.testing.expectEqual(@as(i64, 16), observe(&ctx));
+
+    const copied = promote(World{
+        .cell = Cell{ .value = 5 },
+        .score = 11,
+    });
+    try std.testing.expectEqual(@as(i64, 5), copied.cell.value);
+    try std.testing.expectEqual(@as(i64, 11), copied.score);
+}
+ZIG
+      "semantic-ownership-lifetime-behavior"))))
 
 ;; --- determinism: same input → byte-identical output --------------------------
 
