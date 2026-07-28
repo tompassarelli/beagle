@@ -498,6 +498,7 @@
   (kind key-type value-type equality hashing order layout)
   #:transparent)
 (struct allocation-contract (region failure) #:transparent)
+(struct ownership-contract (storage lifetime transfer) #:transparent)
 
 (struct program (mode
                  namespace
@@ -590,6 +591,7 @@
  (struct-out dynamic-contract)
  (struct-out collection-contract)
  (struct-out allocation-contract)
+ (struct-out ownership-contract)
  (struct-out program)
  ;; Nix AST
  (struct-out nix-inherit) (struct-out nix-inherit-from) (struct-out nix-with)

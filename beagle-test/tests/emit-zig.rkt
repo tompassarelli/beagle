@@ -878,6 +878,58 @@ test "ownership semantic contract behavior and explicit promotion" {
 ZIG
       "semantic-ownership-lifetime-behavior"))))
 
+(define (ownership-contract-rejection? e)
+  (and (beagle-diagnostic? e)
+       (eq? (beagle-diagnostic-kind e) 'ownership-contract)))
+
+(test-case "ownership checker records storage, lifetime, and transfer"
+  (define prog
+    (parse-semantic-target-src 'zig ownership-lifetime-src))
+  (type-check! prog)
+  (define contracts (program-semantic-contracts prog))
+  (define world-tick-form
+    (for/first ([form (in-list (program-forms prog))]
+                #:when (and (defn-form? form)
+                            (eq? (defn-form-name form) 'world-tick)))
+      form))
+  (define records
+    (for/hash ([form (in-list (program-forms prog))]
+               #:when (record-form? form))
+      (values (record-form-name form) form)))
+  (define return-contract (hash-ref contracts world-tick-form))
+  (check-equal? (ownership-contract-storage return-contract) 'owned)
+  (check-equal? (ownership-contract-lifetime return-contract) 'process)
+  (check-equal? (ownership-contract-transfer return-contract) 'copy)
+  (for ([parameter (in-list (defn-form-params world-tick-form))])
+    (define contract (hash-ref contracts parameter))
+    (check-equal? (ownership-contract-storage contract) 'borrowed)
+    (check-equal? (ownership-contract-lifetime contract) 'tick)
+    (check-equal? (ownership-contract-transfer contract) 'retain))
+  (for* ([record-name (in-list '(World Cell))]
+         [field (in-list
+                 (record-form-fields (hash-ref records record-name)))])
+    (define contract (hash-ref contracts field))
+    (check-equal? (ownership-contract-storage contract) 'owned)
+    (check-equal? (ownership-contract-lifetime contract) 'process)
+    (check-equal? (ownership-contract-transfer contract) 'copy)))
+
+(test-case "ownership checker rejects returned borrowed storage on GC targets"
+  (define datums
+    (list
+     '(define-target clj)
+     '(ns ownership-contract-rejection)
+     `(defrecord World ,(br 'name ':- 'String))
+     `(defn world-tick
+        ,(br 'ctx ':- 'Ctx 'world ':- 'World)
+        :- World
+        world)))
+  (check-exn
+   ownership-contract-rejection?
+   (lambda ()
+     (type-check!
+      (parse-program
+       (map (lambda (datum) (datum->syntax #f datum)) datums))))))
+
 ;; --- determinism: same input → byte-identical output --------------------------
 
 (test-case "emission is deterministic"

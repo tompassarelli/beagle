@@ -110,6 +110,8 @@
 ;;                        boundary layout violates the checked value contract.
 ;;   allocation-contract: an allocating expression lacks a declared region or
 ;;                        allocation-failure policy.
+;;   ownership-contract: a borrowed/owned/shared value violates its declared
+;;                        lifetime or transfer policy.
 (define check-kind-cause-table
   (hasheq
    'target-form         'surface-divergence
@@ -129,6 +131,7 @@
    'dynamic-contract     'type-error
    'collection-contract  'type-error
    'allocation-contract  'type-error
+   'ownership-contract   'type-error
    'purity-leak          'type-error
    'free-dotted-name     'type-error))
 

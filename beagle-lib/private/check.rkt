@@ -311,6 +311,7 @@
     [(regex-contract)      "E022"]
     [(collection-contract) "E023"]
     [(allocation-contract) "E024"]
+    [(ownership-contract)  "E025"]
     [else                 "E000"]))
 
 ;; Expected/actual detail pair carrying BOTH the human strings (kept verbatim,
@@ -767,6 +768,7 @@
       (prepare-dynamic-contracts! prog)
       (prepare-collection-contracts! prog)
       (prepare-allocation-contracts! prog)
+      (prepare-ownership-contracts! prog)
       (parameterize ([current-regex-bindings regex-bindings]
                      [current-regex-string-ops regex-string-ops])
         (for ([form (in-list (program-forms prog))])
@@ -781,7 +783,7 @@
             (check-form form env)))
         (check-qualified-resolution! prog env)
         (check-zig-native-boundaries! prog)
-        (check-zig-world-escape! prog)
+        (check-ownership-contracts! prog)
         (check-scalar-provenance! prog)
         (check-nix-free-dotted! prog)
         (check-purity! prog)))))
@@ -3850,6 +3852,7 @@
           (prepare-dynamic-contracts! prog)
           (prepare-collection-contracts! prog)
           (prepare-allocation-contracts! prog)
+          (prepare-ownership-contracts! prog)
           (values bindings string-ops)))
       (parameterize ([current-regex-bindings regex-bindings]
                      [current-regex-string-ops regex-string-ops])
@@ -3868,7 +3871,7 @@
         (with-handlers ([exn:fail? (lambda (e) (error-handler e #f))])
           (check-qualified-resolution! prog env)
           (check-zig-native-boundaries! prog)
-          (check-zig-world-escape! prog))))))
+          (check-ownership-contracts! prog))))))
 
 ;; =============================================================================
 ;; Scalar provenance lint pass
@@ -4726,19 +4729,20 @@
                          effectful-defs))))
 
 
-;; --- zig world-escape check (thread 20260612232001, Phase 2) ---------------
+;; --- ownership and lifetime -------------------------------------------------
 ;;
-;; Convention B, generalized to systems (ECS direction, 2026-06-13):
-;; `world-tick` (whole-world transition) or ANY `*-step` defn whose
-;; first param is Ctx (a per-entity system — the engine generates SoA
-;; stores and range loops for each) marks its RETURN record type as
-;; world-lifetime — the value that crosses the commit boundary out of
-;; tick memory. World-lifetime types must be copyable by value: no
-;; tick-arena references reachable from their fields. v1: slices
-;; ((Vec T), String) and maps are rejected; nested records recurse.
-;; The emitter pairs this with generated promotion functions.
+;; The migration bridge preserves the committed world-tick/*-step convention
+;; while moving its meaning into the shared semantic-contract table. The name
+;; rule seeds facts; checker and emitter consume those facts. Once the Fram
+;; corpus carries explicit/inferred contracts, this seed can disappear without
+;; changing the checked or emitted contract.
 
-(define (zig-tick-entry? form)
+(define BORROWED-TICK-RETAIN
+  (ownership-contract 'borrowed 'tick 'retain))
+(define OWNED-PROCESS-COPY
+  (ownership-contract 'owned 'process 'copy))
+
+(define (ownership-migration-entry? form)
   (and (defn-form? form)
        (or (eq? (defn-form-name form) 'world-tick)
            (and (regexp-match? #rx"-step$" (symbol->string (defn-form-name form)))
@@ -4747,43 +4751,148 @@
                 (let ([t (param-type (car (defn-form-params form)))])
                   (and t (type-prim? t) (eq? (type-prim-name t) 'Ctx)))))))
 
-(define (check-zig-world-escape! prog)
-  (when (eq? (program-target prog) 'zig)
-    (for ([form (in-list (program-forms prog))])
-      (when (zig-tick-entry? form)
-        (define ret (defn-form-return-type form))
-        (unless (and ret (type-prim? ret))
-          (raise-diag 'world-escape
-                      (format "~a must return a record type (its return is world-lifetime state)"
-                              (defn-form-name form))
-                      (hasheq 'entry (symbol->string (defn-form-name form)))))
-        (check-world-type! (type-prim-name ret) (defn-form-name form) '())))))
+(define (tick-backed-type? t)
+  (cond
+    [(and (type-prim? t) (eq? (type-prim-name t) 'String)) #t]
+    [(and (type-app? t) (memq (type-app-ctor t) '(Vec List Set Map))) #t]
+    [(type-union? t) (ormap tick-backed-type? (type-union-alts t))]
+    [else #f]))
 
-(define (check-world-type! rec-name entry seen)
+(define (prepare-ownership-contracts! prog)
+  (define table (program-semantic-contracts prog))
+  (define local-records
+    (for/hash ([raw-form (in-list (program-forms prog))]
+               #:do [(define form
+                       (if (with-meta? raw-form)
+                           (with-meta-expr raw-form)
+                           raw-form))]
+               #:when (record-form? form))
+      (values (record-form-name form) form)))
+  (define (seed-record! rec-name seen)
+    (unless (memq rec-name seen)
+      (define record (hash-ref local-records rec-name #f))
+      (when record
+        (for ([field (in-list (record-form-fields record))])
+          (define field-type (param-type field))
+          (hash-set! table field
+                     (if (tick-backed-type? field-type)
+                         BORROWED-TICK-RETAIN
+                         OWNED-PROCESS-COPY))
+          (when (and (type-prim? field-type)
+                     (hash-has-key? RECORD-FIELDS
+                                    (type-prim-name field-type)))
+            (seed-record! (type-prim-name field-type)
+                          (cons rec-name seen)))))))
+  (for ([raw-form (in-list (program-forms prog))])
+    (define form
+      (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
+    (when (ownership-migration-entry? form)
+      (hash-set! table form OWNED-PROCESS-COPY)
+      (for ([p (in-list (defn-form-params form))]
+            #:when (param? p))
+        (hash-set! table p BORROWED-TICK-RETAIN))
+      (define ret (defn-form-return-type form))
+      (when (and ret (type-prim? ret))
+        (seed-record! (type-prim-name ret) '())))))
+
+(define (ownership-contract-error node message [details (hasheq)])
+  (raise-diag 'ownership-contract message details
+              #:src (and node (src-for node))))
+
+(define (local-record-field-nodes prog rec-name)
+  (for/first ([raw-form (in-list (program-forms prog))]
+              #:do [(define form
+                      (if (with-meta? raw-form)
+                          (with-meta-expr raw-form)
+                          raw-form))]
+              #:when (and (record-form? form)
+                          (eq? (record-form-name form) rec-name)))
+    (for/hash ([field (in-list (record-form-fields form))])
+      (values (string->symbol
+               (string-append ":" (symbol->string (param-name field))))
+              field))))
+
+(define (check-ownership-contracts! prog)
+  (define table (program-semantic-contracts prog))
+  (for ([raw-form (in-list (program-forms prog))])
+    (define form
+      (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
+    (define contract (hash-ref table form #f))
+    (when (ownership-contract? contract)
+      (unless (equal? contract OWNED-PROCESS-COPY)
+        (ownership-contract-error
+         form
+         (format "~a return must transfer owned process-lifetime state by copy"
+                 (defn-form-name form))
+         (hasheq 'entry (symbol->string (defn-form-name form))
+                 'storage (symbol->string
+                           (ownership-contract-storage contract))
+                 'lifetime (symbol->string
+                            (ownership-contract-lifetime contract))
+                 'transfer (symbol->string
+                            (ownership-contract-transfer contract)))))
+      (for ([p (in-list (defn-form-params form))]
+            #:when (param? p))
+        (unless (equal? (hash-ref table p #f) BORROWED-TICK-RETAIN)
+          (ownership-contract-error
+           p
+           (format "~a parameter ~a must be borrowed within tick lifetime"
+                   (defn-form-name form) (param-name p))
+           (hasheq 'entry (symbol->string (defn-form-name form))
+                   'parameter (symbol->string (param-name p))))))
+      (define ret (defn-form-return-type form))
+      (unless (and ret (type-prim? ret)
+                   (hash-has-key? RECORD-FIELDS (type-prim-name ret)))
+        (ownership-contract-error
+         form
+         (format "~a must return a record type (its return is process-lifetime state)"
+                 (defn-form-name form))
+         (hasheq 'entry (symbol->string (defn-form-name form)))))
+      (check-owned-process-type!
+       prog (type-prim-name ret) (defn-form-name form) '()))))
+
+(define (check-owned-process-type! prog rec-name entry seen)
   (unless (memq rec-name seen)
     (define field-map (hash-ref RECORD-FIELDS rec-name #f))
     (when field-map ; non-record prims (Int etc.) are value types — fine
+      (define local-fields (local-record-field-nodes prog rec-name))
       (for ([(kw ft) (in-hash field-map)])
         (define field (substring (symbol->string kw) 1))
+        (define field-node
+          (and local-fields (hash-ref local-fields kw #f)))
+        (define field-contract
+          (or (and field-node
+                   (hash-ref (program-semantic-contracts prog)
+                             field-node #f))
+              (if (tick-backed-type? ft)
+                  BORROWED-TICK-RETAIN
+                  OWNED-PROCESS-COPY)))
         (define (reject! why)
-          (raise-diag 'world-escape
-                      (format "world-state type ~a carries tick-lifetime field ~a : ~a — ~a. World state crosses ticks by copy; use scalar or record fields (v1)."
-                              rec-name field (type->string ft) why)
-                      (hasheq 'record (symbol->string rec-name)
-                              'field field
-                              'entry (symbol->string entry))))
+          (ownership-contract-error
+           (or field-node #f)
+           (format "world-state type ~a carries tick-lifetime field ~a : ~a — ~a. World state crosses ticks by copy; use scalar or record fields (v1)."
+                   rec-name field (type->string ft) why)
+           (hasheq 'record (symbol->string rec-name)
+                   'field field
+                   'entry (symbol->string entry)
+                   'storage (symbol->string
+                             (ownership-contract-storage field-contract))
+                   'lifetime (symbol->string
+                              (ownership-contract-lifetime field-contract))
+                   'transfer (symbol->string
+                              (ownership-contract-transfer field-contract)))))
         (cond
-          [(and (type-app? ft) (memq (type-app-ctor ft) '(Vec List Set Map)))
-           (reject! "slices/collections live in the tick arena")]
-          [(and (type-prim? ft) (eq? (type-prim-name ft) 'String))
-           (reject! "strings are slices")]
-          [(type-union? ft)
-           (for ([alt (in-list (type-union-alts ft))])
-             (when (and (type-app? alt) (memq (type-app-ctor alt) '(Vec List Set Map)))
-               (reject! "slices/collections live in the tick arena")))]
+          [(and (ownership-contract? field-contract)
+                (eq? (ownership-contract-lifetime field-contract) 'tick))
+           (reject!
+            (if (and (type-prim? ft)
+                     (eq? (type-prim-name ft) 'String))
+                "strings are slices"
+                "slices/collections live in the tick arena"))]
           [(and (type-prim? ft)
                 (hash-has-key? RECORD-FIELDS (type-prim-name ft)))
-           (check-world-type! (type-prim-name ft) entry (cons rec-name seen))]
+           (check-owned-process-type!
+            prog (type-prim-name ft) entry (cons rec-name seen))]
           [else (void)])))))
 
 ;; --- qualified-call resolution (clj) ----------------------------------------
