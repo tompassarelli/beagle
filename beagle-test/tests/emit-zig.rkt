@@ -38,6 +38,10 @@
   (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
     (build-path dir "fixtures" "semantic-contract")))
 
+(define zig-stdlib-dir
+  (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
+    (build-path dir "fixtures" "zig-stdlib")))
+
 (define kernel-rt
   (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
     (simplify-path (build-path dir 'up 'up "beagle-lib" "zig" "beagle_rt.zig"))))
@@ -240,6 +244,49 @@
       (build-path fixtures-dir 'up "zig-smoke" "main.bzig"))
     (check-equal? (zig-build-exe-and-run (compile-zig-src smoke))
                   "zig revival alive\n")))
+
+;; --- Fram rt_core stdlib conformance ----------------------------------------
+
+(define zig-stdlib-cases
+  '(("string-seq" "zig-stdlib.string-seq" "2:a:b\n2\nxoxoxo\n")
+    ("predicates" "zig-stdlib.predicates" "true:true:true:true:true:true\n")
+    ("pr-str" "zig-stdlib.pr-str" "{:name \"fram\", :version 7}\n")))
+
+(for ([entry (in-list zig-stdlib-cases)])
+  (define name (car entry))
+  (define namespace (cadr entry))
+  (define expected (caddr entry))
+  (define src (build-path zig-stdlib-dir (string-append name ".bgl")))
+  (define snapshot (build-path zig-stdlib-dir (string-append name ".zig")))
+  (define zig-src (compile-zig-src src))
+  (when bless?
+    (call-with-output-file snapshot #:exists 'replace
+      (lambda (out) (display zig-src out))))
+  (test-case (format "rt_core stdlib: ~a Zig snapshot" name)
+    (check-true (file-exists? snapshot)
+                (format "missing snapshot ~a (run with BEAGLE_ZIG_BLESS=1)"
+                        snapshot))
+    (check-equal? zig-src (file->string snapshot)))
+  (when CLOJURE
+    (test-case (format "rt_core stdlib: ~a CLJ behavior" name)
+      (define clj-src (compile-target-src 'clj src))
+      (define clj-file (make-temporary-file "zig-stdlib~a.clj"))
+      (dynamic-wind
+        void
+        (lambda ()
+          (call-with-output-file clj-file #:exists 'replace
+            (lambda (out) (display clj-src out)))
+          (define-values (ok? stdout stderr)
+            (run-command-output
+             CLOJURE
+             "-i" (path->string clj-file)
+             "-e" (format "(~a/main)" namespace)))
+          (check-true ok? stderr)
+          (check-equal? stdout expected))
+        (lambda () (delete-file clj-file)))))
+  (when ZIG
+    (test-case (format "rt_core stdlib: ~a Zig behavior agrees with CLJ" name)
+      (check-equal? (zig-build-exe-and-run zig-src) expected))))
 
 ;; --- semantic contract 1: concrete native boundaries -------------------------
 
