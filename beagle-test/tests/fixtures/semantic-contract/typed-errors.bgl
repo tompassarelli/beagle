@@ -1,0 +1,23 @@
+(ns semantic-contract.typed-errors)
+
+(defunion :throwable RewriteError
+  (RewriteFailure [message :- String path :- String refusal :- Bool]))
+
+(defn classify [missing? :- Bool path :- String] :- String
+  :raises RewriteError
+  (if missing?
+    (throw
+      (ex-info
+        (str "missing " path)
+        {:path path :refusal true}))
+    "roll-back"))
+
+(defn propagate [missing? :- Bool path :- String] :- String
+  :raises RewriteError
+  (check (classify missing? path)))
+
+(defn render [missing? :- Bool path :- String] :- String
+  (rescue
+    (classify missing? path)
+    err
+    (rewrite-failure-message err)))

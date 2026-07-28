@@ -253,6 +253,8 @@
   (build-path semantic-contract-dir "allocation-failure.bgl"))
 (define ownership-lifetime-src
   (build-path semantic-contract-dir "ownership-lifetime.bgl"))
+(define typed-errors-src
+  (build-path semantic-contract-dir "typed-errors.bgl"))
 
 (define (parse-semantic-target-src target src)
   ;; Source locations contain an absolute checkout path. Strip only that
@@ -943,6 +945,170 @@ ZIG
   (check-exn
    #rx"ownership contract for world-tick"
    (lambda () (emit-program prog))))
+
+;; --- semantic contract 7: typed errors and payloads --------------------------
+
+(test-case "typed error contract pins CLJ bytes and emits compiling Zig"
+  (define clj-src
+    (semantic-golden 'clj typed-errors-src "typed-errors"))
+  (define zig-src
+    (semantic-golden 'zig typed-errors-src "typed-errors"))
+  (when CLOJURE
+    (define clj-file (make-temporary-file "semantic-typed-errors~a.clj"))
+    (dynamic-wind
+      void
+      (lambda ()
+        (call-with-output-file clj-file
+          #:exists 'replace
+          (lambda (p)
+            (display clj-src p)
+            (display
+             #<<CLJ
+
+(prn [(classify false "/tmp/coord")
+      (propagate false "/tmp/coord")
+      (render true "/tmp/coord")])
+(try
+  (classify true "/tmp/coord")
+  (catch clojure.lang.ExceptionInfo e
+    (prn [(ex-message e) (:path (ex-data e)) (:refusal (ex-data e))])))
+CLJ
+             p)))
+        (define-values (ok? out err)
+          (run-command-output CLOJURE (path->string clj-file)))
+        (check-true ok? err)
+        (check-equal?
+         out
+         "[\"roll-back\" \"roll-back\" \"missing /tmp/coord\"]\n[\"missing /tmp/coord\" \"/tmp/coord\" true]\n"))
+      (lambda () (delete-file clj-file))))
+  (when NODE
+    (define js-src (compile-semantic-target-src 'js typed-errors-src))
+    (define runnable
+      (regexp-replace* #px"(?m:^import [^\n]*\n)" js-src ""))
+    (define-values (ok? out err)
+      (run-command-output
+       NODE "--input-type=module" "-e"
+       (string-append
+        runnable
+        #<<JS
+
+console.log(JSON.stringify([
+  classify(false, "/tmp/coord"),
+  propagate(false, "/tmp/coord"),
+  render(true, "/tmp/coord"),
+]));
+try {
+  classify(true, "/tmp/coord");
+} catch (e) {
+  console.log(JSON.stringify([e.message, e.data.path, e.data.refusal]));
+}
+JS
+        )))
+    (check-true ok? err)
+    (check-equal?
+     out
+     "[\"roll-back\",\"roll-back\",\"missing /tmp/coord\"]\n[\"missing /tmp/coord\",\"/tmp/coord\",true]\n"))
+  (when ZIG
+    (check-true (zig-compiles? zig-src "semantic-typed-errors"))
+    (check-true
+     (zig-tests?
+      zig-src
+      #<<ZIG
+test "typed error success, payload, rescue, and propagation" {
+    var errors = RewriteErrorCarrier{};
+    try std.testing.expectEqualStrings(
+        "roll-back",
+        try classify(&errors, false, "/tmp/coord"),
+    );
+    try std.testing.expect(errors.payload == null);
+
+    try std.testing.expectError(
+        error.RewriteFailure,
+        classify(&errors, true, "/tmp/coord"),
+    );
+    switch (errors.payload.?) {
+        .rewrite_failure => |payload| {
+            try std.testing.expectEqualStrings("missing /tmp/coord", payload.message);
+            try std.testing.expectEqualStrings("/tmp/coord", payload.path);
+            try std.testing.expect(payload.refusal);
+        },
+    }
+
+    var propagated = RewriteErrorCarrier{};
+    try std.testing.expectError(
+        error.RewriteFailure,
+        propagate(&propagated, true, "/tmp/coord"),
+    );
+    try std.testing.expect(propagated.payload != null);
+    try std.testing.expectEqualStrings(
+        "missing /tmp/coord",
+        render(true, "/tmp/coord"),
+    );
+}
+ZIG
+      "semantic-typed-errors-behavior"))))
+
+(define (error-contract-rejection? e)
+  (and (beagle-diagnostic? e)
+       (eq? (beagle-diagnostic-kind e) 'error-contract)))
+
+(test-case "typed error checker records type, payload layout, and mode"
+  (define prog (parse-semantic-target-src 'zig typed-errors-src))
+  (type-check! prog)
+  (define contracts (program-semantic-contracts prog))
+  (define classify-form
+    (for/first ([form (in-list (program-forms prog))]
+                #:when (and (defn-form? form)
+                            (eq? (defn-form-name form) 'classify)))
+      form))
+  (define contract (hash-ref contracts classify-form))
+  (check-equal? (type->string (error-contract-error-type contract))
+                "RewriteError")
+  (check-equal? (error-contract-mode contract) 'native-error-union)
+  (check-equal?
+   (for/list ([variant (in-list (error-contract-payload-layout contract))])
+     (cons (car variant)
+           (for/list ([field (in-list (cdr variant))])
+             (cons (param-name field)
+                   (type->string (param-type field))))))
+   '((RewriteFailure
+      (message . "String")
+      (path . "String")
+      (refusal . "Bool")))))
+
+(test-case "typed error checker rejects throw without :raises"
+  (check-exn
+   error-contract-rejection?
+   (lambda ()
+     (check-zig-forms
+      '(defunion :throwable RewriteError
+         (RewriteFailure [message :- String path :- String refusal :- Bool]))
+      '(defn bad [path :- String] :- String
+         (throw (ex-info "missing" {:path path :refusal true})))))))
+
+(test-case "typed error checker rejects a wrong payload type"
+  (check-exn
+   error-contract-rejection?
+   (lambda ()
+     (check-zig-forms
+      '(defunion :throwable RewriteError
+         (RewriteFailure [message :- String path :- String refusal :- Bool]))
+      '(defn bad [path :- String] :- String
+         :raises RewriteError
+         (throw (ex-info "missing" {:path path :refusal "yes"})))))))
+
+(test-case "typed error checker rejects an unhandled throwing call"
+  (check-exn
+   error-contract-rejection?
+   (lambda ()
+     (check-zig-forms
+      '(defunion :throwable RewriteError
+         (RewriteFailure [message :- String path :- String refusal :- Bool]))
+      '(defn fail [path :- String] :- String
+         :raises RewriteError
+         (throw (ex-info "missing" {:path path :refusal true})))
+      '(defn main [path :- String] :- String
+         (fail path))))))
 
 ;; --- determinism: same input → byte-identical output --------------------------
 
