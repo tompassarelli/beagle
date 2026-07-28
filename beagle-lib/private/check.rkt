@@ -862,12 +862,51 @@
 
 (define (prepare-dynamic-contracts! prog)
   (define table (program-semantic-contracts prog))
+  ;; Every parsed type object is itself an existing transparent AST node.
+  ;; Record contracts there as the universal fallback (locals and extern-only
+  ;; types have no enclosing top-level declaration node), while the boundary
+  ;; pass below also records on params/forms for direct consumer lookup.
+  (define (record-type-node! ty owner)
+    (cond
+      [(dynamic-type? ty)
+       (define contract (make-dynamic-contract ty owner))
+       (hash-set! table ty contract)
+       (for ([alt (in-list (type-app-args ty))])
+         (record-type-node! alt owner))]
+      [(type-app? ty)
+       (for ([arg (in-list (type-app-args ty))])
+         (record-type-node! arg owner))]
+      [(type-union? ty)
+       (for ([alt (in-list (type-union-alts ty))])
+         (record-type-node! alt owner))]
+      [(type-fn? ty)
+       (for ([p (in-list (type-fn-params ty))])
+         (record-type-node! p owner))
+       (when (type-fn-rest-type ty)
+         (record-type-node! (type-fn-rest-type ty) owner))
+       (record-type-node! (type-fn-ret ty) owner)]
+      [else (void)]))
+  (define (walk-ast! value owner)
+    (cond
+      [(type? value) (record-type-node! value owner)]
+      [(struct? value)
+       (for ([field (in-vector (struct->vector value))]
+             [i (in-naturals)]
+             #:when (positive? i))
+         (walk-ast! field (or owner value)))]
+      [(pair? value)
+       (walk-ast! (car value) owner)
+       (walk-ast! (cdr value) owner)]
+      [(vector? value)
+       (for ([item (in-vector value)]) (walk-ast! item owner))]
+      [else (void)]))
   (define (record! node t)
     (when t
       (define (walk ty)
         (cond
           [(dynamic-type? ty)
            (define contract (make-dynamic-contract ty node))
+           (hash-set! table ty contract)
            (when node (hash-set! table node contract))
            (for ([alt (in-list (type-app-args ty))]) (walk alt))]
           [(type-app? ty) (for ([arg (in-list (type-app-args ty))]) (walk arg))]
@@ -879,6 +918,7 @@
           [else (void)]))
       (walk t)))
   (for ([raw-form (in-list (program-forms prog))])
+    (walk-ast! raw-form raw-form)
     (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
     (match form
       [(def-form _ t _ _ _) (record! form t)]
@@ -895,6 +935,7 @@
          (record! field (param-type field)))]
       [_ (void)]))
   (for ([(name t) (in-hash (program-externs prog))])
+    (record-type-node! t #f)
     (record! #f t)))
 
 (define (check-zig-native-boundaries! prog)

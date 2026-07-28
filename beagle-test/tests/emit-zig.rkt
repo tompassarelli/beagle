@@ -498,6 +498,36 @@ ZIG
      (check-zig-forms
       '(defn bad [value :- Bool] :- (Dyn String Int) value)))))
 
+(test-case "closed dynamic checker validates local annotations"
+  (check-exn
+   dynamic-contract-rejection?
+   (lambda ()
+     (check-zig-forms
+      '(defn bad [] :- Int
+         (let [value :- (Dyn String Any) "x"] 0))))))
+
+(test-case "closed dynamic lowering discovers local-only contracts"
+  (define out
+    (compile-zig-forms
+     '(defn local-dynamic [value :- String] :- String
+        (let [closed :- (Dyn String Int) value]
+          (if (string? closed) closed "")))))
+  (check-true (regexp-match? #rx"pub const Dyn0 = union" out))
+  (check-true (regexp-match? #rx"const closed = Dyn0\\{ \\.string = value \\}" out))
+  (when ZIG
+    (check-true (zig-compiles? out "semantic-local-closed-dynamic"))))
+
+(test-case "closed dynamic lowering discovers extern-only contracts"
+  (define out
+    (compile-zig-string
+     (string-append
+      "(ns dynamic-extern)\n"
+      "(declare-extern app.rt/tag [(Dyn String Int) -> Int])\n"
+      "(defn call-tag [value :- String] :- Int (app.rt/tag value))")))
+  (check-true (regexp-match? #rx"pub const Dyn0 = union" out))
+  (check-true
+   (regexp-match? #rx"app_rt\\.tag\\(Dyn0\\{ \\.string = value \\}\\)" out)))
+
 (test-case "closed dynamic contract records declared-order integer tags"
   (define prog
     (parse-program

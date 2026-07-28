@@ -224,6 +224,43 @@
   (define contracts (program-semantic-contracts prog))
   (define seen (make-hash))
   (define out '())
+  (define (add-type! ty)
+    (when (dynamic-type? ty)
+      (define contract (hash-ref contracts ty #f))
+      (unless (dynamic-contract? contract)
+        (unsupported "closed dynamic type"
+                     "missing checked dynamic-contract side-table entry"))
+      (unless (hash-has-key? seen ty)
+        (hash-set! seen ty #t)
+        (set! out (cons (cons ty contract) out)))))
+  (define (walk-type! ty)
+    (cond
+      [(dynamic-type? ty)
+       (add-type! ty)
+       (for ([alt (in-list (type-app-args ty))]) (walk-type! alt))]
+      [(type-app? ty)
+       (for ([arg (in-list (type-app-args ty))]) (walk-type! arg))]
+      [(type-union? ty)
+       (for ([alt (in-list (type-union-alts ty))]) (walk-type! alt))]
+      [(type-fn? ty)
+       (for ([p (in-list (type-fn-params ty))]) (walk-type! p))
+       (when (type-fn-rest-type ty) (walk-type! (type-fn-rest-type ty)))
+       (walk-type! (type-fn-ret ty))]
+      [else (void)]))
+  (define (walk-ast! value)
+    (cond
+      [(type? value) (walk-type! value)]
+      [(struct? value)
+       (for ([field (in-vector (struct->vector value))]
+             [i (in-naturals)]
+             #:when (positive? i))
+         (walk-ast! field))]
+      [(pair? value)
+       (walk-ast! (car value))
+       (walk-ast! (cdr value))]
+      [(vector? value)
+       (for ([item (in-vector value)]) (walk-ast! item))]
+      [else (void)]))
   (define (add-node! node)
     (define contract (and node (hash-ref contracts node #f)))
     (when (dynamic-contract? contract)
@@ -232,6 +269,7 @@
         (hash-set! seen dyn-type #t)
         (set! out (cons (cons dyn-type contract) out)))))
   (for ([raw-form (in-list (program-forms prog))])
+    (walk-ast! raw-form)
     (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
     (match form
       [(or (def-form _ _ _ _ _) (defonce-form _ _ _ _))
@@ -243,6 +281,12 @@
       [(record-form _ fields)
        (for ([field (in-list fields)]) (add-node! field))]
       [_ (void)]))
+  (for ([extern-type
+         (in-list
+          (sort (hash-values (program-externs prog))
+                string<?
+                #:key type->string))])
+    (walk-type! extern-type))
   (reverse out))
 
 (define (dynamic-alt-base-name t)
@@ -690,10 +734,25 @@
       (define new-opt
         (let ([t (let-binding-type b)])
           (if t (optional-of t) (value-optional? (let-binding-value b)))))
+      (define binding-type
+        (or (let-binding-type b)
+            (expr-static-type (let-binding-value b))))
+      (define rendered
+        (emit-typed-value (let-binding-value b) (let-binding-type b)))
       (begin0
         (format "const ~a = ~a; "
                 (ident (let-binding-name b))
-                (emit-typed-value (let-binding-value b) (let-binding-type b)))
+                rendered)
+        (when binding-type
+          (current-binding-types
+           (hash-set (current-binding-types)
+                     (let-binding-name b)
+                     binding-type))
+          (when (dynamic-type? binding-type)
+            (current-dynamic-remaining
+             (hash-set (current-dynamic-remaining)
+                       (let-binding-name b)
+                       (type-app-args binding-type)))))
         (when new-opt
           (current-optionals (cons (let-binding-name b) (current-optionals)))))))
   (define stmts
@@ -1093,7 +1152,12 @@
            (current-binding-types
             (hash-set (current-binding-types)
                       (let-binding-name b)
-                      binding-type)))
+                      binding-type))
+           (when (dynamic-type? binding-type)
+             (current-dynamic-remaining
+              (hash-set (current-dynamic-remaining)
+                        (let-binding-name b)
+                        (type-app-args binding-type)))))
          ;; Optional iff declared ?T, or — inferred local — the value's
          ;; call-return type is ?T (same rule as emit-block-expr).
          (let* ([t (let-binding-type b)]
