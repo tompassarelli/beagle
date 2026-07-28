@@ -574,11 +574,9 @@ pub fn truthy(value: anytype) bool {
     };
 }
 pub fn is_string(value: anytype) bool {
-    _ = value;
     return isByteString(@TypeOf(value));
 }
 pub fn is_map(value: anytype) bool {
-    _ = value;
     const T = @TypeOf(value);
     return switch (@typeInfo(T)) {
         .@"struct" => @hasDecl(T, "beagle_map"),
@@ -586,14 +584,12 @@ pub fn is_map(value: anytype) bool {
     };
 }
 pub fn is_int(value: anytype) bool {
-    _ = value;
     return switch (@typeInfo(@TypeOf(value))) {
         .int, .comptime_int => true,
         else => false,
     };
 }
 pub fn is_sequential(value: anytype) bool {
-    _ = value;
     const T = @TypeOf(value);
     if (isByteString(T)) return false;
     return switch (@typeInfo(T)) {
