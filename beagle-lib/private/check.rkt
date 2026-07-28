@@ -1381,39 +1381,45 @@
   (cond
     [(ex-info-throw-components e)
      => (lambda (parts)
-          (unless current-contract
-            (error-contract-error
-             e
-             "throwing path is not covered by :raises"
-             (hasheq 'repair ":raises <ThrowableUnion>")))
-          (define message (cadr parts))
-          (define payload (caddr parts))
-          (define message-type (infer-expr message env))
-          (unless (type-compatible? message-type STRING)
-            (error-contract-error
-             message
-             (format "ex-info message expects String, got ~a"
-                     (type->string message-type))
-             (type-mismatch-details STRING message-type)))
-          (define-values (variant pairs)
-            (variant-for-payload current-contract payload e))
-          (for ([field (in-list (variant-fields-without-message variant))])
-            (define value (cdr (assq (param-name field) pairs)))
-            (define actual (infer-expr value env))
-            (unless (type-compatible? actual (param-type field))
+          (cond
+            [(not current-contract)
+             (if (positive? (hash-count (current-error-definitions)))
+                 (error-contract-error
+                  e
+                  "throwing path is not covered by :raises"
+                  (hasheq 'repair ":raises <ThrowableUnion>"))
+                 (begin
+                   (check-error-expr! (cadr parts) env)
+                   (check-error-expr! (caddr parts) env)))]
+            [else
+             (define message (cadr parts))
+             (define payload (caddr parts))
+             (define message-type (infer-expr message env))
+             (unless (type-compatible? message-type STRING)
               (error-contract-error
-               value
-               (format "throwable payload ~a.~a expects ~a, got ~a"
-                       (car variant)
-                       (param-name field)
-                       (type->string (param-type field))
-                       (type->string actual))
-               (hash-set*
-                (type-mismatch-details (param-type field) actual)
-                'member (symbol->string (car variant))
-                'field (symbol->string (param-name field))))))
-          (hash-set! table e current-contract)
-          (hash-set! table (car parts) current-contract))]
+               message
+               (format "ex-info message expects String, got ~a"
+                       (type->string message-type))
+               (type-mismatch-details STRING message-type)))
+             (define-values (variant pairs)
+               (variant-for-payload current-contract payload e))
+             (for ([field (in-list (variant-fields-without-message variant))])
+               (define value (cdr (assq (param-name field) pairs)))
+               (define actual (infer-expr value env))
+               (unless (type-compatible? actual (param-type field))
+                 (error-contract-error
+                  value
+                  (format "throwable payload ~a.~a expects ~a, got ~a"
+                          (car variant)
+                          (param-name field)
+                          (type->string (param-type field))
+                          (type->string actual))
+                  (hash-set*
+                   (type-mismatch-details (param-type field) actual)
+                   'member (symbol->string (car variant))
+                   'field (symbol->string (param-name field))))))
+             (hash-set! table e current-contract)
+             (hash-set! table (car parts) current-contract)]))]
     [(check-expr? e)
      (define inner (check-expr-expr e))
      (define contract (raising-call-contract inner))
