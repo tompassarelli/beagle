@@ -310,6 +310,7 @@
     [(free-dotted-name)    "E021"]
     [(regex-contract)      "E022"]
     [(collection-contract) "E023"]
+    [(allocation-contract) "E024"]
     [else                 "E000"]))
 
 ;; Expected/actual detail pair carrying BOTH the human strings (kept verbatim,
@@ -765,6 +766,7 @@
         (prepare-regex-contracts! prog))
       (prepare-dynamic-contracts! prog)
       (prepare-collection-contracts! prog)
+      (prepare-allocation-contracts! prog)
       (parameterize ([current-regex-bindings regex-bindings]
                      [current-regex-string-ops regex-string-ops])
         (for ([form (in-list (program-forms prog))])
@@ -1094,6 +1096,112 @@
        (hasheq 'function (symbol->string fn)
                'declared (type->string coll-type)
                'order "unspecified")))))
+
+;; --- allocation region and allocation failure -------------------------------
+
+(define ALLOCATING-FNS
+  '(mapv filterv sort sort-by distinct concat str assoc conj set
+    clojure.string/lower-case clojure.string/upper-case
+    clojure.string/join clojure.string/replace clojure.string/split))
+
+(define ZIG-FALLIBLE-ALLOCATING-FNS '(mapv filterv sort-by))
+
+(define (allocation-contract-error node message [details (hasheq)])
+  (raise-diag 'allocation-contract message details
+              #:src (and node (src-for node))))
+
+(define (allocating-call? value)
+  (and (call-form? value)
+       (symbol? (call-form-fn value))
+       (memq (call-form-fn value) ALLOCATING-FNS)
+       (case (call-form-fn value)
+         [(str concat) (>= (length (call-form-args value)) 2)]
+         [else #t])))
+
+(define (ctx-first-defn? form)
+  (and (defn-form? form)
+       (pair? (defn-form-params form))
+       (let ([first-param (car (defn-form-params form))])
+         (and (param? first-param)
+              (param-type first-param)
+              (type-prim? (param-type first-param))
+              (eq? (type-prim-name (param-type first-param)) 'Ctx)))))
+
+(define (allocation-region target form failure)
+  (case target
+    [(clj js scriptc nix) 'gc]
+    [(zig odin)
+     ;; Existing unannotated CLI lowering is a committed process/abort ABI.
+     ;; A Ctx becomes the tick allocator only when :raises makes allocation
+     ;; failure explicit; this preserves old target bytes while removing
+     ;; hidden allocator selection from the new fallible path.
+     (if (and (ctx-first-defn? form) (pair? failure)) 'tick 'process)]
+    [else 'process]))
+
+(define (allocation-failure form)
+  (define raises (and (defn-form? form) (defn-form-raises form)))
+  (if raises (list 'raises raises) 'abort))
+
+(define (prepare-allocation-contracts! prog)
+  (define table (program-semantic-contracts prog))
+  (define target (program-target prog))
+  (define (walk value found)
+    (cond
+      [(allocating-call? value)
+       (define with-call (cons value found))
+       (for/fold ([out with-call])
+                 ([arg (in-list (call-form-args value))])
+         (walk arg out))]
+      [(struct? value)
+       (for/fold ([out found])
+                 ([field (in-vector (struct->vector value))]
+                  [i (in-naturals)]
+                  #:when (positive? i))
+         (walk field out))]
+      [(pair? value)
+       (walk (cdr value) (walk (car value) found))]
+      [(vector? value)
+       (for/fold ([out found]) ([item (in-vector value)])
+         (walk item out))]
+      [else found]))
+  (for ([raw-form (in-list (program-forms prog))])
+    (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
+    (when (defn-form? form)
+      (define allocating-exprs
+        (reverse
+         (for/fold ([found '()]) ([expr (in-list (defn-form-body form))])
+           (walk expr found))))
+      (unless (null? allocating-exprs)
+        (define failure (allocation-failure form))
+        (when (and (pair? failure)
+                   (not (and (type-prim? (cadr failure))
+                             (eq? (type-prim-name (cadr failure))
+                                  'AllocationError))))
+          (allocation-contract-error
+           form
+           (format "allocating function ~a declares :raises ~a, but allocation failure requires :raises AllocationError"
+                   (defn-form-name form)
+                   (type->string (cadr failure)))
+           (hasheq 'function (symbol->string (defn-form-name form))
+                   'declared (type->string (cadr failure))
+                   'required "AllocationError"
+                   'repair ":raises AllocationError")))
+        (when (and (eq? target 'zig) (pair? failure))
+          (for ([expr (in-list allocating-exprs)])
+            (unless (memq (call-form-fn expr) ZIG-FALLIBLE-ALLOCATING-FNS)
+              (allocation-contract-error
+               expr
+               (format "zig typed allocation failure is not yet available for ~a"
+                       (call-form-fn expr))
+               (hasheq 'function
+                       (symbol->string (defn-form-name form))
+                       'operation (symbol->string (call-form-fn expr))
+                       'failure "raises AllocationError")))))
+        (define contract
+          (allocation-contract (allocation-region target form failure) failure))
+        (hash-set! table form contract)
+        (for ([expr (in-list allocating-exprs)])
+          (hash-set! table expr contract))))))
 
 (define (check-zig-native-boundaries! prog)
   (when (eq? (program-target prog) 'zig)
@@ -3740,6 +3848,8 @@
           (define-values (bindings string-ops)
             (prepare-regex-contracts! prog))
           (prepare-dynamic-contracts! prog)
+          (prepare-collection-contracts! prog)
+          (prepare-allocation-contracts! prog)
           (values bindings string-ops)))
       (parameterize ([current-regex-bindings regex-bindings]
                      [current-regex-string-ops regex-string-ops])

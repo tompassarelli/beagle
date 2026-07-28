@@ -497,6 +497,7 @@
 (struct collection-contract
   (kind key-type value-type equality hashing order layout)
   #:transparent)
+(struct allocation-contract (region failure) #:transparent)
 
 (struct program (mode
                  namespace
@@ -588,6 +589,7 @@
  (struct-out regex-contract)
  (struct-out dynamic-contract)
  (struct-out collection-contract)
+ (struct-out allocation-contract)
  (struct-out program)
  ;; Nix AST
  (struct-out nix-inherit) (struct-out nix-inherit-from) (struct-out nix-with)

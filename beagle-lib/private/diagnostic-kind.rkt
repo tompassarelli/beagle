@@ -108,6 +108,8 @@
 ;;                        alternative set, narrowing, or total-operation rule.
 ;;   collection-contract: a collection key/element, observable order, or native
 ;;                        boundary layout violates the checked value contract.
+;;   allocation-contract: an allocating expression lacks a declared region or
+;;                        allocation-failure policy.
 (define check-kind-cause-table
   (hasheq
    'target-form         'surface-divergence
@@ -126,6 +128,7 @@
    'regex-contract       'type-error
    'dynamic-contract     'type-error
    'collection-contract  'type-error
+   'allocation-contract  'type-error
    'purity-leak          'type-error
    'free-dotted-name     'type-error))
 
