@@ -190,6 +190,8 @@
 (define current-fn-returns (make-parameter (hasheq))) ; local defn name → return type
 (define current-fn-types (make-parameter (hasheq))) ; local defn name → complete function type
 (define current-semantic-contracts (make-parameter #f))
+(define current-allocation-contract (make-parameter #f))
+(define current-allocation-ctx (make-parameter #f))
 (define current-regex-bindings (make-parameter (hasheq)))
 ;; opaque-handle type-name sym → owning Zig module string (los_yaml, ...).
 ;; An opaque handle is a runtime-module type beagle threads but never
@@ -869,6 +871,32 @@
 
 ;; --- calls ------------------------------------------------------------------------
 
+(define (fallible-allocation-contract? contract)
+  (and (allocation-contract? contract)
+       (pair? (allocation-contract-failure contract))
+       (eq? (car (allocation-contract-failure contract)) 'raises)))
+
+(define (emit-alloc elem-type count)
+  (define contract (current-allocation-contract))
+  (cond
+    [(fallible-allocation-contract? contract)
+     (case (allocation-contract-region contract)
+       [(tick)
+        (define ctx (current-allocation-ctx))
+        (unless ctx
+          (unsupported "tick allocation contract"
+                       "a Ctx parameter must supply the allocator"))
+        (format "try ~a.tick.alloc(~a, ~a)" ctx elem-type count)]
+       [(process)
+        (format "try rt.cliAlloc().alloc(~a, ~a)" elem-type count)]
+       [else
+        (unsupported "allocation region"
+                     (allocation-contract-region contract))])]
+    [else
+     ;; Preserve the committed legacy process/abort lowering byte-for-byte.
+     (format "rt.cliAlloc().alloc(~a, ~a) catch @panic(\"oom\")"
+             elem-type count)]))
+
 (define (qualified-rt-name sym)
   ;; A qualified call lowers to a Zig module iff it was declared as an
   ;; extern (declare-extern is the author's statement that this name is
@@ -970,10 +998,12 @@
      (define lbl (fresh-label))
      ;; output allocated in the CLI run-arena; element type from the fn's :- U.
      (format (string-append "~a: { const __src = ~a; const __out = "
-                            "rt.cliAlloc().alloc(~a, __src.len) catch @panic(\"oom\"); "
+                            "~a; "
                             "for (__src, 0..) |~a, __i| { __out[__i] = ~a; } "
                             "break :~a __out; }")
-             lbl (emit-expr (cadr args)) (type->zig ret) x
+             lbl (emit-expr (cadr args))
+             (emit-alloc (type->zig ret) "__src.len")
+             x
              (emit-inlined-fn-body f) lbl)]
     [(and (eq? fn 'filterv) (= 2 (length args)) (fn-form? (car args)))
      (define f (car args))
@@ -983,10 +1013,12 @@
      ;; output sized to the input (max), element type via @TypeOf — same
      ;; type as input, so no annotation needed; sliced to the kept count.
      (format (string-append "~a: { const __src = ~a; const __out = "
-                            "rt.cliAlloc().alloc(std.meta.Elem(@TypeOf(__src)), __src.len) catch @panic(\"oom\"); "
+                            "~a; "
                             "var __n: usize = 0; for (__src) |~a| { if (~a) { __out[__n] = ~a; __n += 1; } } "
                             "break :~a __out[0..__n]; }")
-             lbl (emit-expr (cadr args)) x (emit-inlined-fn-body f) x lbl)]
+             lbl (emit-expr (cadr args))
+             (emit-alloc "std.meta.Elem(@TypeOf(__src))" "__src.len")
+             x (emit-inlined-fn-body f) x lbl)]
     ;; clojure = / not= : content equality (rt.eq handles strings vs scalars
     ;; at comptime — slice == would compare pointers). nil cases handled above.
     [(and (eq? fn '=) (= 2 (length args)))
@@ -1074,9 +1106,9 @@
      (format (string-append
               "~a: { "
               "const __src = ~a; "
-              "const __out = rt.cliAlloc().alloc(std.meta.Elem(@TypeOf(__src)), __src.len) catch @panic(\"oom\"); "
+              "const __out = ~a; "
               "@memcpy(__out, __src); "
-              "const __keys = rt.cliAlloc().alloc(~a, __src.len) catch @panic(\"oom\"); "
+              "const __keys = ~a; "
               "for (__out, 0..) |~a, __ki| { __keys[__ki] = ~a; } "
               "var __si: usize = 1; "
               "while (__si < __out.len) : (__si += 1) { "
@@ -1085,7 +1117,10 @@
               "__keys[__sj] = __keys[__sj - 1]; __out[__sj] = __out[__sj - 1]; } "
               "__keys[__sj] = __kv; __out[__sj] = __ev; } "
               "break :~a __out; }")
-             lbl (emit-expr (cadr args)) (type->zig ret) x
+             lbl (emit-expr (cadr args))
+             (emit-alloc "std.meta.Elem(@TypeOf(__src))" "__src.len")
+             (emit-alloc (type->zig ret) "__src.len")
+             x
              (emit-inlined-fn-body f) lbl)]
     [(and (eq? fn 'distinct) (= 1 (length args)))
      (format "rt.distinct(~a)" (emit-expr (car args)))]
@@ -1328,14 +1363,36 @@
     (for/hash ([p (in-list params)]
                #:when (dynamic-type? (param-type p)))
       (values (param-name p) (type-app-args (param-type p)))))
+  (define allocation-contract
+    (and (current-semantic-contracts)
+         (hash-ref (current-semantic-contracts) f #f)))
+  (define allocation-ctx
+    (and (allocation-contract? allocation-contract)
+         (eq? (allocation-contract-region allocation-contract) 'tick)
+         (pair? params)
+         (ident (param-name (car params)))))
+  (define emitted-ret
+    (if (fallible-allocation-contract? allocation-contract)
+        (format "std.mem.Allocator.Error!~a" (type->zig ret))
+        (type->zig ret)))
+  (define effective-discards
+    (if allocation-ctx
+        (filter (lambda (line)
+                  (not (string=? line (format "    _ = ~a;" allocation-ctx))))
+                discards)
+        discards))
   (parameterize ([current-optionals opt-params]
                  [current-binding-types binding-types]
                  [current-dynamic-remaining dynamic-remaining]
                  [current-dynamic-arms (hasheq)]
+                 [current-allocation-contract allocation-contract]
+                 [current-allocation-ctx allocation-ctx]
                  [label-counter (box 0)])
     (format "pub fn ~a(~a) ~a {\n~a~a\n}"
-            name sig (type->zig ret)
-            (if (null? discards) "" (string-append (string-join discards "\n") "\n"))
+            name sig emitted-ret
+            (if (null? effective-discards)
+                ""
+                (string-append (string-join effective-discards "\n") "\n"))
             (emit-fn-body (defn-form-body f) ret "    "))))
 
 ;; Commit-boundary copy for the whole-world entry's return type. The
