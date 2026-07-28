@@ -1338,7 +1338,14 @@
        (let ([s (symbol->string value)])
          (and (positive? (string-length s))
               (char=? (string-ref s 0) #\:)
-              (string->symbol (substring s 1))))))
+              (let* ([body (substring s 1)]
+                     [parts (string-split body "/")]
+                     [local (and (pair? parts) (last parts))])
+                (and local
+                     (not (string=? local ""))
+                     (string->symbol local)))))))
+
+(struct error-payload-pair (field-name keyword value) #:transparent)
 
 (define (ex-info-throw-components e)
   (and (call-form? e)
@@ -1365,7 +1372,28 @@
        (car pair)
        "typed ex-info payload keys must be keywords"
        (hasheq 'required ":field")))
-    (cons name (cdr pair))))
+    (error-payload-pair name (car pair) (cdr pair))))
+
+(define (record-error-payload-key! field pair node)
+  (define table (current-semantic-contracts))
+  (define key (error-payload-pair-keyword pair))
+  (define prior (hash-ref table field #f))
+  (when (and (error-payload-key-contract? prior)
+             (not (eq? (error-payload-key-contract-keyword prior) key)))
+    (error-contract-error
+     node
+     (format
+      "throwable payload field ~a is mapped to both ~a and ~a"
+      (param-name field)
+      (error-payload-key-contract-keyword prior)
+      key)
+     (hasheq
+      'field (symbol->string (param-name field))
+      'first-key
+      (symbol->string (error-payload-key-contract-keyword prior))
+      'second-key (symbol->string key)
+      'repair "use one canonical host keyword for each throwable field")))
+  (hash-set! table field (error-payload-key-contract key)))
 
 (define (variant-fields-without-message variant)
   (filter (lambda (field) (not (eq? (param-name field) 'message)))
@@ -1381,7 +1409,7 @@
 
 (define (variant-for-payload contract payload node)
   (define pairs (payload-pairs payload node))
-  (define names (map car pairs))
+  (define names (map error-payload-pair-field-name pairs))
   (unless (= (length names) (length (remove-duplicates names)))
     (error-contract-error
      node
@@ -1408,7 +1436,16 @@
       'payload-keys (map symbol->string names)
       'candidates (map (lambda (variant) (symbol->string (car variant)))
                        candidates))))
-  (values (car candidates) pairs))
+  (define variant (car candidates))
+  (for ([field (in-list (variant-fields-without-message variant))])
+    (define pair
+      (findf
+       (lambda (candidate)
+         (eq? (param-name field)
+              (error-payload-pair-field-name candidate)))
+       pairs))
+    (record-error-payload-key! field pair node))
+  (values variant pairs))
 
 (define (same-error-contract? left right)
   (and left right
@@ -1444,7 +1481,13 @@
              (define-values (variant pairs)
                (variant-for-payload current-contract payload e))
              (for ([field (in-list (variant-fields-without-message variant))])
-               (define value (cdr (assq (param-name field) pairs)))
+               (define pair
+                 (findf
+                  (lambda (candidate)
+                    (eq? (param-name field)
+                         (error-payload-pair-field-name candidate)))
+                  pairs))
+               (define value (error-payload-pair-value pair))
                (define actual (infer-expr value env))
                (unless (type-compatible? actual (param-type field))
                  (error-contract-error

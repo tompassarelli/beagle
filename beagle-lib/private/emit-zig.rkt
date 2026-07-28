@@ -585,7 +585,12 @@
        (let ([s (symbol->string value)])
          (and (positive? (string-length s))
               (char=? (string-ref s 0) #\:)
-              (string->symbol (substring s 1))))))
+              (let* ([body (substring s 1)]
+                     [parts (string-split body "/")]
+                     [local (and (pair? parts) (last parts))])
+                (and local
+                     (not (string=? local ""))
+                     (string->symbol local)))))))
 
 (define (error-throw-components e)
   (and (call-form? e)

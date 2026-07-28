@@ -94,6 +94,14 @@
   (type-check! prog)
   (emit-program prog))
 
+(define (compile-target-forms target . datums)
+  (define forms
+    (map (lambda (d) (datum->syntax #f d))
+         (cons `(define-target ,target) datums)))
+  (define prog (parse-program forms))
+  (type-check! prog)
+  (emit-program prog))
+
 (define (check-zig-forms . datums)
   (define forms (map (lambda (d) (datum->syntax #f d))
                      (cons '(define-target zig) datums)))
@@ -1328,6 +1336,144 @@ ZIG
    single-raise-summary
    (file->string
     (build-path semantic-contract-dir "single-raises.checker-golden"))))
+
+(test-case "typed errors preserve namespaced host payload keys"
+  (define forms
+    (list
+     '(ns semantic-contract.namespaced-error)
+     '(defunion :throwable RewriteCrashError
+        (RewriteCrash
+         [message :- String
+          path :- String
+          doctor-refusal :- Bool]))
+     `(defn classify-ns [path :- String] :- String
+        :raises RewriteCrashError
+        (throw
+         (ex-info
+          "refusal"
+          ,(mp ':path 'path ':fram/doctor-refusal 'true))))
+     '(defn render-ns [path :- String] :- String
+        (rescue
+         (classify-ns path)
+         err
+         (if (:doctor-refusal err) "refused" "allowed")))))
+  (define clj-src (apply compile-target-forms 'clj forms))
+  (check-true
+   (string-contains?
+    clj-src
+    "(:fram/doctor-refusal (ex-data err__exception))"))
+  (check-true
+   (string-contains?
+    clj-src
+    "(defrecord RewriteCrash [message path doctor-refusal])"))
+  (when CLOJURE
+    (define clj-file
+      (make-temporary-file "semantic-namespaced-error~a.clj"))
+    (dynamic-wind
+      void
+      (lambda ()
+        (call-with-output-file clj-file
+          #:exists 'replace
+          (lambda (p)
+            (display clj-src p)
+            (display
+             #<<CLJ
+
+(prn
+ [(render-ns "/tmp/coord")
+  (try
+    (classify-ns "/tmp/coord")
+    (catch clojure.lang.ExceptionInfo e
+      [(:path (ex-data e))
+       (:fram/doctor-refusal (ex-data e))
+       (contains? (ex-data e) :doctor-refusal)]))])
+CLJ
+             p)))
+        (define-values (ok? out err)
+          (run-command-output CLOJURE (path->string clj-file)))
+        (check-true ok? err)
+        (check-equal? out "[\"refused\" [\"/tmp/coord\" true false]]\n"))
+      (lambda () (delete-file clj-file))))
+  (when NODE
+    (define js-src (apply compile-target-forms 'js forms))
+    (check-true
+     (string-contains?
+      js-src
+      "err__exception.data[\"fram/doctor_refusal\"]"))
+    (define runnable
+      (regexp-replace* #px"(?m:^import [^\n]*\n)" js-src ""))
+    (define-values (ok? out err)
+      (run-command-output
+       NODE "--input-type=module" "-e"
+       (string-append
+        runnable
+        #<<JS
+
+console.log(JSON.stringify([
+  render_ns("/tmp/coord"),
+  (() => {
+    try {
+      classify_ns("/tmp/coord");
+    } catch (e) {
+      return [
+        e.data.path,
+        e.data["fram/doctor_refusal"],
+        Object.hasOwn(e.data, "doctor_refusal"),
+      ];
+    }
+  })(),
+]));
+JS
+        )))
+    (check-true ok? err)
+    (check-equal? out "[\"refused\",[\"/tmp/coord\",true,false]]\n"))
+  (when ZIG
+    (define zig-src (apply compile-target-forms 'zig forms))
+    (check-true
+     (zig-tests?
+      zig-src
+      #<<ZIG
+test "namespaced host key maps to the declared payload field" {
+    try std.testing.expectEqualStrings("refused", renderNs("/tmp/coord"));
+
+    var errors = RewriteCrashErrorCarrier{};
+    try std.testing.expectError(
+        error.RewriteCrash,
+        classifyNs(&errors, "/tmp/coord"),
+    );
+    switch (errors.payload.?) {
+        .rewrite_crash => |payload| {
+            try std.testing.expectEqualStrings("/tmp/coord", payload.path);
+            try std.testing.expect(payload.doctor_refusal);
+        },
+    }
+}
+ZIG
+      "semantic-namespaced-error"))))
+
+(test-case "typed errors reject ambiguous host-key mappings"
+  (check-exn
+   #rx"mapped to both"
+   (lambda ()
+     (check-zig-forms
+      '(defunion :throwable RewriteCrashError
+         (RewriteCrash
+          [message :- String
+           path :- String
+           doctor-refusal :- Bool]))
+      `(defn inconsistent
+         [namespaced :- Bool path :- String]
+         :- String
+         :raises RewriteCrashError
+         (if namespaced
+             (throw
+              (ex-info
+               "namespaced"
+               ,(mp ':path 'path ':fram/doctor-refusal 'true)))
+             (throw
+              (ex-info
+               "unqualified"
+               ,(mp ':path 'path ':doctor-refusal 'true)))))))))
 
 (test-case "typed error checker rejects throw without :raises"
   (check-exn

@@ -77,6 +77,14 @@
 (define current-emit-record-ns (make-parameter (hasheq)))
 (define current-emit-target (make-parameter 'clj))
 (define current-clj-semantic-contracts (make-parameter #f))
+
+(define (error-payload-keyword field)
+  (define contract
+    (and (current-clj-semantic-contracts)
+         (hash-ref (current-clj-semantic-contracts) field #f)))
+  (if (error-payload-key-contract? contract)
+      (error-payload-key-contract-keyword contract)
+      (string->symbol (format ":~a" (param-name field)))))
 ;; Scalar constructors/accessors that erase to identity at runtime
 (define current-emit-scalar-fns (make-parameter (set)))
 ;; Unqualified imported symbol → module prefix (for qualifying in output)
@@ -640,8 +648,8 @@
                    (for/list ([field (in-list fields)])
                      (if (eq? (param-name field) 'message)
                          "(ex-message err__exception)"
-                         (format "(:~a (ex-data err__exception))"
-                                 (param-name field))))
+                         (format "(~a (ex-data err__exception))"
+                                 (error-payload-keyword field))))
                    " "))])
            (format
             (string-append

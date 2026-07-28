@@ -18,6 +18,20 @@
 (define current-js-emit-target (make-parameter 'js))
 (define current-js-semantic-contracts (make-parameter #f))
 
+(define (error-payload-keyword field)
+  (define contract
+    (and (current-js-semantic-contracts)
+         (hash-ref (current-js-semantic-contracts) field #f)))
+  (if (error-payload-key-contract? contract)
+      (error-payload-key-contract-keyword contract)
+      (string->symbol (format ":~a" (param-name field)))))
+
+(define (emit-error-data-access field)
+  (define prop (kw->prop (error-payload-keyword field)))
+  (if (string-contains? prop "/")
+      (format "err__exception.data[~v]" prop)
+      (format "err__exception.data.~a" prop)))
+
 (define current-js-export-names (make-parameter #f))
 
 ;; How a top-level `defn`'s signature text is rendered, up to but excluding the
@@ -1988,9 +2002,7 @@
                    (for/list ([field (in-list fields)])
                      (if (eq? (param-name field) 'message)
                          "err__exception.message"
-                         (format "err__exception.data.~a"
-                                 (mangle-prop
-                                  (symbol->string (param-name field))))))
+                         (emit-error-data-access field)))
                    ", "))])
            (iife
             (format
