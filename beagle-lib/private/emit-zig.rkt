@@ -1422,6 +1422,8 @@
         (for/fold ([acc (format "rt.str1(~a)" (emit-expr (car args)))])
                   ([a (in-list (cdr args))])
           (format "rt.str2(~a, rt.str1(~a))" acc (emit-expr a)))])]
+    [(and (eq? fn 'pr-str) (= 1 (length args)))
+     (format "rt.pr_str(~a)" (emit-expr (car args)))]
     ;; (println x) — str-concat all args, then rt.println.
     [(eq? fn 'println)
      (define content

@@ -322,6 +322,20 @@ pub fn Map(comptime V: type) type {
             }
             return mixHash(7, acc);
         }
+        pub fn prStr(self: Self) []const u8 {
+            var out: []const u8 = "{";
+            var first_entry = true;
+            var inner = self.inner;
+            var iterator = inner.iterator();
+            while (iterator.next()) |entry| {
+                if (!first_entry) out = str2(out, ", ");
+                out = str2(out, pr_str(entry.key_ptr.*));
+                out = str2(out, " ");
+                out = str2(out, pr_str(entry.value_ptr.*));
+                first_entry = false;
+            }
+            return str2(out, "}");
+        }
     };
 }
 
@@ -401,6 +415,16 @@ pub fn ValueMap(comptime K: type, comptime V: type) type {
             }
             return mixHash(7, acc);
         }
+        pub fn prStr(self: Self) []const u8 {
+            var out: []const u8 = "{";
+            for (self.entries, 0..) |entry, i| {
+                if (i > 0) out = str2(out, ", ");
+                out = str2(out, pr_str(entry.key));
+                out = str2(out, " ");
+                out = str2(out, pr_str(entry.value));
+            }
+            return str2(out, "}");
+        }
     };
 }
 
@@ -443,6 +467,100 @@ pub fn ValueSet(comptime T: type) type {
             for (self.values) |item| acc +%= hash32(item);
             return mixHash(6, acc);
         }
+        pub fn prStr(self: Self) []const u8 {
+            var out: []const u8 = "#{";
+            for (self.values, 0..) |item, i| {
+                if (i > 0) out = str2(out, " ");
+                out = str2(out, pr_str(item));
+            }
+            return str2(out, "}");
+        }
+    };
+}
+
+fn quoted_string(value: []const u8) []const u8 {
+    var size: usize = 2;
+    for (value) |byte| {
+        size += switch (byte) {
+            '\\', '"', '\n', '\r', '\t' => 2,
+            else => 1,
+        };
+    }
+    const out = cliAlloc().alloc(u8, size) catch @panic("oom");
+    out[0] = '"';
+    var i: usize = 1;
+    for (value) |byte| {
+        switch (byte) {
+            '\\', '"' => {
+                out[i] = '\\';
+                out[i + 1] = byte;
+                i += 2;
+            },
+            '\n', '\r', '\t' => {
+                out[i] = '\\';
+                out[i + 1] = switch (byte) {
+                    '\n' => 'n',
+                    '\r' => 'r',
+                    else => 't',
+                };
+                i += 2;
+            },
+            else => {
+                out[i] = byte;
+                i += 1;
+            },
+        }
+    }
+    out[i] = '"';
+    return out;
+}
+
+pub fn pr_str(value: anytype) []const u8 {
+    const T = @TypeOf(value);
+    if (comptime isByteString(T)) {
+        const bytes: []const u8 = value;
+        return quoted_string(bytes);
+    }
+    if (comptime T == Keyword) {
+        const prefix = if (value.namespace.len == 0)
+            ":"
+        else
+            str2(str2(":", value.namespace), "/");
+        return str2(prefix, value.name);
+    }
+    return switch (@typeInfo(T)) {
+        .int, .comptime_int => std.fmt.allocPrint(cliAlloc(), "{d}", .{value}) catch @panic("oom"),
+        .float, .comptime_float => std.fmt.allocPrint(cliAlloc(), "{d}", .{value}) catch @panic("oom"),
+        .bool => if (value) "true" else "false",
+        .void => "nil",
+        .optional => if (value) |present| pr_str(present) else "nil",
+        .pointer => |pointer| switch (pointer.size) {
+            .slice => blk: {
+                var out: []const u8 = "[";
+                for (value, 0..) |item, i| {
+                    if (i > 0) out = str2(out, " ");
+                    out = str2(out, pr_str(item));
+                }
+                break :blk str2(out, "]");
+            },
+            else => std.fmt.allocPrint(cliAlloc(), "{any}", .{value}) catch @panic("oom"),
+        },
+        .array => blk: {
+            var out: []const u8 = "[";
+            for (value, 0..) |item, i| {
+                if (i > 0) out = str2(out, " ");
+                out = str2(out, pr_str(item));
+            }
+            break :blk str2(out, "]");
+        },
+        .@"struct" => if (@hasDecl(T, "prStr"))
+            value.prStr()
+        else
+            std.fmt.allocPrint(cliAlloc(), "{any}", .{value}) catch @panic("oom"),
+        .@"union" => switch (value) {
+            inline else => |payload| pr_str(payload),
+        },
+        else => std.fmt.allocPrint(cliAlloc(), "{any}", .{value}) catch @panic("oom"),
     };
 }
 

@@ -1,7 +1,7 @@
 (ns zig-stdlib.pr-str)
 
 (defn render
-  [record :- (Map Keyword (U String Int Bool Keyword Nil (Vec String)))]
+  [record :- (Map Keyword (Dyn String Int))]
   :- String
   (pr-str record))
 
@@ -9,8 +9,4 @@
   (println
     (render
       {:name "fram"
-       :version 7
-       :ready true
-       :kind :engine
-       :note nil
-       :parts ["core" "graph"]})))
+       :version 7})))
