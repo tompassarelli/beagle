@@ -112,6 +112,8 @@
 ;;                        allocation-failure policy.
 ;;   ownership-contract: a borrowed/owned/shared value violates its declared
 ;;                        lifetime or transfer policy.
+;;   error-contract     : a throwing path, payload, propagation, or recovery
+;;                        site violates its declared typed-error contract.
 (define check-kind-cause-table
   (hasheq
    'target-form         'surface-divergence
@@ -132,6 +134,7 @@
    'collection-contract  'type-error
    'allocation-contract  'type-error
    'ownership-contract   'type-error
+   'error-contract       'type-error
    'purity-leak          'type-error
    'free-dotted-name     'type-error))
 

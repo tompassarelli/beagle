@@ -74,6 +74,9 @@
 (define current-semantic-contracts (make-parameter #f))
 (define current-regex-bindings (make-parameter (hasheq)))
 (define current-regex-string-ops (make-parameter (seteq)))
+(define current-error-definitions (make-parameter (hasheq)))
+(define current-raising-functions (make-parameter (hasheq)))
+(define current-check-error-contract (make-parameter #f))
 
 ;; --- target-form gating -----------------------------------------------------
 ;; Target-specific AST forms must only appear in their target.
@@ -762,6 +765,8 @@
                    [current-enum-types ENUM-TYPES]
                    [current-check-target (program-target prog)]
                    [current-semantic-contracts (program-semantic-contracts prog)]
+                   [current-error-definitions (hasheq)]
+                   [current-raising-functions (hasheq)]
                    [current-nixos-schema nix-schema])
       (define-values (regex-bindings regex-string-ops)
         (prepare-regex-contracts! prog))
@@ -769,6 +774,7 @@
       (prepare-collection-contracts! prog)
       (prepare-allocation-contracts! prog)
       (prepare-ownership-contracts! prog)
+      (prepare-error-contracts! prog)
       (parameterize ([current-regex-bindings regex-bindings]
                      [current-regex-string-ops regex-string-ops])
         (for ([form (in-list (program-forms prog))])
@@ -1205,6 +1211,275 @@
         (for ([expr (in-list allocating-exprs)])
           (hash-set! table expr contract))))))
 
+;; --- typed errors and payloads ----------------------------------------------
+
+(define (error-contract-error node message [details (hasheq)])
+  (raise-diag 'error-contract message details
+              #:src (and node (src-for node))))
+
+(define (error-type-name t)
+  (and (type-prim? t) (type-prim-name t)))
+
+(define (error-mode target)
+  (case target
+    [(clj js scriptc) 'exception]
+    [(zig) 'native-error-union]
+    [else 'result]))
+
+(define (error-payload-layout form)
+  (for/list ([member (in-list (deferror-form-members form))])
+    (cons member
+          (hash-ref (deferror-form-member-fields form) member '()))))
+
+(define (prepare-error-contracts! prog)
+  (define table (program-semantic-contracts prog))
+  (define definitions
+    (for/hasheq ([form (in-list (program-forms prog))]
+                 #:when (deferror-form? form))
+      (values (deferror-form-name form) form)))
+  (define contracts
+    (for/hasheq ([(name form) (in-hash definitions)])
+      (define layout (error-payload-layout form))
+      (when (null? layout)
+        (error-contract-error
+         form
+         (format "throwable union ~a must declare at least one payload variant"
+                 name)
+         (hasheq 'error-type (symbol->string name))))
+      (for ([variant (in-list layout)])
+        (define member (car variant))
+        (define fields (cdr variant))
+        (when (eq? (program-target prog) 'zig)
+          (for ([field (in-list fields)])
+            (when (type-contains-any? (param-type field))
+              (error-contract-error
+               field
+               (format "zig throwable payload ~a.~a cannot contain Any"
+                       member (param-name field))
+               (hasheq 'error-type (symbol->string name)
+                       'member (symbol->string member)
+                       'field (symbol->string (param-name field))
+                       'actual "Any"))))))
+      (values name
+              (error-contract
+               (type-prim name)
+               layout
+               (error-mode (program-target prog))))))
+  (for ([(name form) (in-hash definitions)])
+    (hash-set! table form (hash-ref contracts name)))
+  (define raising-functions
+    (for/hasheq ([form (in-list (program-forms prog))]
+                 #:when
+                 (and (defn-form? form)
+                      (defn-form-raises form)
+                      (hash-has-key?
+                       contracts
+                       (error-type-name (defn-form-raises form)))))
+      (define contract
+        (hash-ref contracts (error-type-name (defn-form-raises form))))
+      (hash-set! table form contract)
+      (values (defn-form-name form) contract)))
+  (current-error-definitions definitions)
+  (current-raising-functions raising-functions))
+
+(define (error-contract-for-node node)
+  (and (current-semantic-contracts)
+       (hash-ref (current-semantic-contracts) node #f)
+       (let ([contract (hash-ref (current-semantic-contracts) node)])
+         (and (error-contract? contract) contract))))
+
+(define (raising-call-contract e)
+  (and (call-form? e)
+       (symbol? (call-form-fn e))
+       (hash-ref (current-raising-functions) (call-form-fn e) #f)))
+
+(define (keyword->field-name value)
+  (and (symbol? value)
+       (let ([s (symbol->string value)])
+         (and (positive? (string-length s))
+              (char=? (string-ref s 0) #\:)
+              (string->symbol (substring s 1))))))
+
+(define (ex-info-throw-components e)
+  (and (call-form? e)
+       (eq? (call-form-fn e) 'throw)
+       (= (length (call-form-args e)) 1)
+       (let ([inner (car (call-form-args e))])
+         (and (call-form? inner)
+              (eq? (call-form-fn inner) 'ex-info)
+              (= (length (call-form-args inner)) 2)
+              (list inner
+                    (car (call-form-args inner))
+                    (cadr (call-form-args inner)))))))
+
+(define (payload-pairs payload node)
+  (unless (map-form? payload)
+    (error-contract-error
+     node
+     "typed ex-info payload must be a map literal"
+     (hasheq 'required "{:field value ...}")))
+  (for/list ([pair (in-list (map-form-pairs payload))])
+    (define name (keyword->field-name (car pair)))
+    (unless name
+      (error-contract-error
+       (car pair)
+       "typed ex-info payload keys must be keywords"
+       (hasheq 'required ":field")))
+    (cons name (cdr pair))))
+
+(define (variant-fields-without-message variant)
+  (filter (lambda (field) (not (eq? (param-name field) 'message)))
+          (cdr variant)))
+
+(define (variant-ex-info-compatible? variant)
+  (define message-fields
+    (filter (lambda (field) (eq? (param-name field) 'message))
+            (cdr variant)))
+  (and (= (length message-fields) 1)
+       (type-prim? (param-type (car message-fields)))
+       (eq? (type-prim-name (param-type (car message-fields))) 'String)))
+
+(define (variant-for-payload contract payload node)
+  (define pairs (payload-pairs payload node))
+  (define names (map car pairs))
+  (unless (= (length names) (length (remove-duplicates names)))
+    (error-contract-error
+     node
+     "typed ex-info payload contains duplicate keys"
+     (hasheq 'keys (map symbol->string names))))
+  (define candidates
+    (filter
+     (lambda (variant)
+       (define fields (variant-fields-without-message variant))
+       (and (variant-ex-info-compatible? variant)
+            (= (length fields) (length pairs))
+            (andmap (lambda (field)
+                      (member (param-name field) names))
+                    fields)))
+     (error-contract-payload-layout contract)))
+  (unless (= (length candidates) 1)
+    (error-contract-error
+     node
+     (if (null? candidates)
+         "typed ex-info payload does not match any declared throwable member"
+         "typed ex-info payload matches more than one throwable member")
+     (hasheq
+      'error-type (type->string (error-contract-error-type contract))
+      'payload-keys (map symbol->string names)
+      'candidates (map (lambda (variant) (symbol->string (car variant)))
+                       candidates))))
+  (values (car candidates) pairs))
+
+(define (same-error-contract? left right)
+  (and left right
+       (equal? (error-contract-error-type left)
+               (error-contract-error-type right))))
+
+(define (check-error-expr! e env)
+  (define table (current-semantic-contracts))
+  (define current-contract (current-check-error-contract))
+  (cond
+    [(ex-info-throw-components e)
+     => (lambda (parts)
+          (unless current-contract
+            (error-contract-error
+             e
+             "throwing path is not covered by :raises"
+             (hasheq 'repair ":raises <ThrowableUnion>")))
+          (define message (cadr parts))
+          (define payload (caddr parts))
+          (define message-type (infer-expr message env))
+          (unless (type-compatible? message-type STRING)
+            (error-contract-error
+             message
+             (format "ex-info message expects String, got ~a"
+                     (type->string message-type))
+             (type-mismatch-details STRING message-type)))
+          (define-values (variant pairs)
+            (variant-for-payload current-contract payload e))
+          (for ([field (in-list (variant-fields-without-message variant))])
+            (define value (cdr (assq (param-name field) pairs)))
+            (define actual (infer-expr value env))
+            (unless (type-compatible? actual (param-type field))
+              (error-contract-error
+               value
+               (format "throwable payload ~a.~a expects ~a, got ~a"
+                       (car variant)
+                       (param-name field)
+                       (type->string (param-type field))
+                       (type->string actual))
+               (hash-set*
+                (type-mismatch-details (param-type field) actual)
+                'member (symbol->string (car variant))
+                'field (symbol->string (param-name field))))))
+          (hash-set! table e current-contract)
+          (hash-set! table (car parts) current-contract))]
+    [(check-expr? e)
+     (define inner (check-expr-expr e))
+     (define contract (raising-call-contract inner))
+     (when contract
+       (unless (same-error-contract? current-contract contract)
+         (error-contract-error
+          e
+          (format "check propagates ~a, but the enclosing function does not declare matching :raises"
+                  (type->string (error-contract-error-type contract)))
+          (hasheq
+           'raised (type->string (error-contract-error-type contract))
+           'repair (format ":raises ~a"
+                           (type->string
+                            (error-contract-error-type contract))))))
+       (hash-set! table e contract)
+       (hash-set! table inner contract))
+     (if contract
+         (for ([arg (in-list (call-form-args inner))])
+           (check-error-expr! arg env))
+         (check-error-expr! inner env))]
+    [(rescue-form? e)
+     (define inner (rescue-form-expr e))
+     (define contract (raising-call-contract inner))
+     (when contract
+       (when (and (eq? (current-check-target) 'zig)
+                  (> (length (error-contract-payload-layout contract)) 1))
+         (error-contract-error
+          e
+          "zig rescue currently requires a single declared payload variant"
+          (hasheq
+           'error-type (type->string (error-contract-error-type contract))
+           'variants (length (error-contract-payload-layout contract)))))
+       (hash-set! table e contract)
+       (hash-set! table inner contract))
+     (if contract
+         (for ([arg (in-list (call-form-args inner))])
+           (check-error-expr! arg env))
+         (check-error-expr! inner env))
+     (check-error-expr! (rescue-form-fallback e) env)]
+    [(raising-call-contract e)
+     => (lambda (contract)
+          (error-contract-error
+           e
+           (format "call to ~a raises ~a and must be wrapped in check or rescue"
+                   (call-form-fn e)
+                   (type->string (error-contract-error-type contract)))
+           (hasheq
+            'function (symbol->string (call-form-fn e))
+            'raised (type->string (error-contract-error-type contract))
+            'repair "(check (call ...)) or (rescue (call ...) ...)")))]
+    [(call-form? e)
+     (for ([arg (in-list (call-form-args e))])
+       (check-error-expr! arg env))]
+    [(struct? e)
+     (for ([field (in-vector (struct->vector e))]
+           [i (in-naturals)]
+           #:when (positive? i))
+       (check-error-expr! field env))]
+    [(pair? e)
+     (check-error-expr! (car e) env)
+     (check-error-expr! (cdr e) env)]
+    [(vector? e)
+     (for ([item (in-vector e)])
+       (check-error-expr! item env))]
+    [else (void)]))
+
 (define (check-zig-native-boundaries! prog)
   (when (eq? (program-target prog) 'zig)
     (define (check! label t [node #f])
@@ -1629,7 +1904,11 @@
      (define effective-ret
        (or expected-ret
            (and env-fn (type-fn? env-fn) (type-fn-ret env-fn))))
-     (parameterize ([current-check-fn-name name])
+     (parameterize ([current-check-fn-name name]
+                    [current-check-error-contract
+                     (hash-ref (current-raising-functions) name #f)])
+       (for ([expr (in-list body)])
+         (check-error-expr! expr body-env))
        (define last-type (last-expr-type body body-env))
        (when effective-ret
          (unless (or (check-collection-literal
@@ -3010,6 +3289,7 @@
      (define inner-type (infer-expr (check-expr-expr e) env))
      (cond
        [(< (current-check-profile) 3) ANY]
+       [(error-contract-for-node e) inner-type]
        [(and (type-app? inner-type)
              (hash-has-key? PARAMETRIC-UNIONS (type-app-ctor inner-type))
              (let ([members (hash-ref (hash-ref PARAMETRIC-UNIONS (type-app-ctor inner-type)) 'members '())])
@@ -3019,15 +3299,25 @@
        [else ANY])]
     [(rescue-form? e)
      (define inner-type (infer-expr (rescue-form-expr e) env))
+     (define error-contract (error-contract-for-node e))
      (define fallback-env
        (if (rescue-form-err-name e)
            (let ([env2 (mut-copy env)])
-             (hash-set! env2 (rescue-form-err-name e) ANY)
+             (hash-set!
+              env2
+              (rescue-form-err-name e)
+              (if error-contract
+                  (let ([layout (error-contract-payload-layout error-contract)])
+                    (if (= (length layout) 1)
+                        (type-prim (caar layout))
+                        (error-contract-error-type error-contract)))
+                  ANY))
              env2)
            env))
      (define fallback-type (infer-expr (rescue-form-fallback e) fallback-env))
      (cond
        [(< (current-check-profile) 3) fallback-type]
+       [error-contract (merge-types inner-type fallback-type)]
        [(and (type-app? inner-type)
              (hash-has-key? PARAMETRIC-UNIONS (type-app-ctor inner-type))
              (let ([members (hash-ref (hash-ref PARAMETRIC-UNIONS (type-app-ctor inner-type)) 'members '())])
@@ -3839,6 +4129,8 @@
                    [current-type-table type-tbl]
                    [current-check-target (program-target prog)]
                    [current-semantic-contracts (program-semantic-contracts prog)]
+                   [current-error-definitions (hasheq)]
+                   [current-raising-functions (hasheq)]
                    [current-union-members UNION-MEMBERS]
                    [current-enum-types ENUM-TYPES]
                    [current-nixos-schema nix-schema])
@@ -3853,6 +4145,7 @@
           (prepare-collection-contracts! prog)
           (prepare-allocation-contracts! prog)
           (prepare-ownership-contracts! prog)
+          (prepare-error-contracts! prog)
           (values bindings string-ops)))
       (parameterize ([current-regex-bindings regex-bindings]
                      [current-regex-string-ops regex-string-ops])

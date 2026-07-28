@@ -499,6 +499,7 @@
   #:transparent)
 (struct allocation-contract (region failure) #:transparent)
 (struct ownership-contract (storage lifetime transfer) #:transparent)
+(struct error-contract (error-type payload-layout mode) #:transparent)
 
 (struct program (mode
                  namespace
@@ -592,6 +593,7 @@
  (struct-out collection-contract)
  (struct-out allocation-contract)
  (struct-out ownership-contract)
+ (struct-out error-contract)
  (struct-out program)
  ;; Nix AST
  (struct-out nix-inherit) (struct-out nix-inherit-from) (struct-out nix-with)
