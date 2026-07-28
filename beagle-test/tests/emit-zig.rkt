@@ -249,6 +249,8 @@
 (define closed-dynamic-src (build-path semantic-contract-dir "closed-dynamic.bgl"))
 (define collections-layout-src
   (build-path semantic-contract-dir "collections-layout.bgl"))
+(define allocation-failure-src
+  (build-path semantic-contract-dir "allocation-failure.bgl"))
 
 (define (parse-semantic-target-src target src)
   ;; Source locations contain an absolute checkout path. Strip only that
@@ -699,6 +701,118 @@ ZIG
     (hash-ref (program-semantic-contracts prog) vec-type))
   (check-equal? (collection-contract-layout contract)
                 '(abi-record beagle.vec 1)))
+
+;; --- semantic contract 5: allocation region and allocation failure ----------
+
+(test-case "allocation contract pins CLJ bytes and emits compiling Zig"
+  (define clj-src
+    (semantic-golden 'clj allocation-failure-src "allocation-failure"))
+  (define zig-src
+    (semantic-golden 'zig allocation-failure-src "allocation-failure"))
+  (when CLOJURE
+    (define clj-file (make-temporary-file "semantic-allocation-failure~a.clj"))
+    (dynamic-wind
+      void
+      (lambda ()
+        (call-with-output-file clj-file
+          #:exists 'replace
+          (lambda (p)
+            (display clj-src p)
+            (display
+             "\n(prn [(map-abort [1 2 3]) (map-fallible nil [4 5]) (string-abort \"beagle-\" \"zig\")])\n"
+             p)))
+        (define-values (ok? out err)
+          (run-command-output CLOJURE (path->string clj-file)))
+        (check-true ok? err)
+        (check-equal? out "[[2 3 4] [5 6] \"beagle-zig\"]\n"))
+      (lambda () (delete-file clj-file))))
+  (when NODE
+    (define js-src (compile-semantic-target-src 'js allocation-failure-src))
+    (define runnable
+      (regexp-replace* #px"(?m:^import [^\n]*\n)" js-src ""))
+    (define-values (ok? out err)
+      (run-command-output
+       NODE "--input-type=module" "-e"
+       (string-append
+        runnable
+        "\nconsole.log(JSON.stringify([map_abort([1, 2, 3]), map_fallible(null, [4, 5]), string_abort(\"beagle-\", \"zig\")]));\n")))
+    (check-true ok? err)
+    (check-equal? out "[[2,3,4],[5,6],\"beagle-zig\"]\n"))
+  (when ZIG
+    (check-true (zig-compiles? zig-src "semantic-allocation-failure"))
+    (check-true
+     (zig-tests?
+      zig-src
+      #<<ZIG
+test "allocation semantic contract success and injected failure" {
+    const mapped = mapAbort(&.{ 1, 2, 3 });
+    try std.testing.expectEqualSlices(i64, &.{ 2, 3, 4 }, mapped);
+    try std.testing.expectEqualStrings("beagle-zig", stringAbort("beagle-", "zig"));
+
+    var success_storage: [256]u8 = undefined;
+    var success_fba = std.heap.FixedBufferAllocator.init(&success_storage);
+    var success_rng = rt.Splitmix64.init(1);
+    var success_ctx = rt.Ctx{
+        .tick = success_fba.allocator(),
+        .rng = &success_rng,
+    };
+    const fallible = try mapFallible(&success_ctx, &.{ 4, 5 });
+    try std.testing.expectEqualSlices(i64, &.{ 5, 6 }, fallible);
+
+    var failed_storage: [1]u8 = undefined;
+    var failed_fba = std.heap.FixedBufferAllocator.init(&failed_storage);
+    var failed_rng = rt.Splitmix64.init(2);
+    var failed_ctx = rt.Ctx{
+        .tick = failed_fba.allocator(),
+        .rng = &failed_rng,
+    };
+    try std.testing.expectError(
+        error.OutOfMemory,
+        mapFallible(&failed_ctx, &.{ 7, 8 }),
+    );
+}
+ZIG
+      "semantic-allocation-failure-behavior"))))
+
+(define (allocation-contract-rejection? e)
+  (and (beagle-diagnostic? e)
+       (eq? (beagle-diagnostic-kind e) 'allocation-contract)))
+
+(test-case "allocation checker rejects a typed failure without AllocationError"
+  (check-exn
+   allocation-contract-rejection?
+   (lambda ()
+     (check-zig-forms
+      '(defn bad [ctx :- Ctx xs :- (Vec Int)] :- (Vec Int)
+         :raises IOError
+         (mapv (fn [x :- Int] :- Int x) xs))))))
+
+(test-case "allocation checker records region and failure on boundaries and expressions"
+  (define prog
+    (parse-semantic-target-src 'zig allocation-failure-src))
+  (type-check! prog)
+  (define (named-defn name)
+    (for/first ([form (in-list (program-forms prog))]
+                #:when (and (defn-form? form)
+                            (eq? (defn-form-name form) name)))
+      form))
+  (define abort-form (named-defn 'map-abort))
+  (define fallible-form (named-defn 'map-fallible))
+  (define string-form (named-defn 'string-abort))
+  (define contracts (program-semantic-contracts prog))
+  (define abort-contract (hash-ref contracts abort-form))
+  (define fallible-contract (hash-ref contracts fallible-form))
+  (define fallible-call (car (defn-form-body fallible-form)))
+  (define string-call (car (defn-form-body string-form)))
+  (check-equal? (allocation-contract-region abort-contract) 'process)
+  (check-equal? (allocation-contract-failure abort-contract) 'abort)
+  (check-equal? (allocation-contract-region fallible-contract) 'tick)
+  (define fallible-failure (allocation-contract-failure fallible-contract))
+  (check-equal? (car fallible-failure) 'raises)
+  (check-equal? (type->string (cadr fallible-failure)) "AllocationError")
+  (check-equal? (hash-ref contracts fallible-call) fallible-contract)
+  (check-equal? (allocation-contract-region (hash-ref contracts string-call))
+                'process))
 
 ;; --- determinism: same input → byte-identical output --------------------------
 
