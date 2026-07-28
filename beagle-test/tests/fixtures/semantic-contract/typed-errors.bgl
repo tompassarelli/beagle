@@ -8,7 +8,7 @@
   (if missing?
     (throw
       (ex-info
-        (str "missing " path)
+        "missing"
         {:path path :refusal true}))
     "roll-back"))
 

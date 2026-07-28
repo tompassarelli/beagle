@@ -5,7 +5,7 @@
 
 (defn ^String classify [missing? ^String path]
   (if missing?
-    (throw (ex-info (str "missing " path) {:path path, :refusal true}))
+    (throw (ex-info "missing" {:path path, :refusal true}))
     "roll-back"))
 
 (defn ^String propagate [missing? ^String path]

@@ -979,7 +979,7 @@ CLJ
         (check-true ok? err)
         (check-equal?
          out
-         "[\"roll-back\" \"roll-back\" \"missing /tmp/coord\"]\n[\"missing /tmp/coord\" \"/tmp/coord\" true]\n"))
+         "[\"roll-back\" \"roll-back\" \"missing\"]\n[\"missing\" \"/tmp/coord\" true]\n"))
       (lambda () (delete-file clj-file))))
   (when NODE
     (define js-src (compile-semantic-target-src 'js typed-errors-src))
@@ -1007,7 +1007,7 @@ JS
     (check-true ok? err)
     (check-equal?
      out
-     "[\"roll-back\",\"roll-back\",\"missing /tmp/coord\"]\n[\"missing /tmp/coord\",\"/tmp/coord\",true]\n"))
+     "[\"roll-back\",\"roll-back\",\"missing\"]\n[\"missing\",\"/tmp/coord\",true]\n"))
   (when ZIG
     (check-true (zig-compiles? zig-src "semantic-typed-errors"))
     (check-true
@@ -1028,7 +1028,7 @@ test "typed error success, payload, rescue, and propagation" {
     );
     switch (errors.payload.?) {
         .rewrite_failure => |payload| {
-            try std.testing.expectEqualStrings("missing /tmp/coord", payload.message);
+            try std.testing.expectEqualStrings("missing", payload.message);
             try std.testing.expectEqualStrings("/tmp/coord", payload.path);
             try std.testing.expect(payload.refusal);
         },
@@ -1041,7 +1041,7 @@ test "typed error success, payload, rescue, and propagation" {
     );
     try std.testing.expect(propagated.payload != null);
     try std.testing.expectEqualStrings(
-        "missing /tmp/coord",
+        "missing",
         render(true, "/tmp/coord"),
     );
 }

@@ -22,7 +22,7 @@ pub const RewriteError = error{
 };
 
 pub fn classify(__errors: *RewriteErrorCarrier, missing: bool, path: []const u8) RewriteError![]const u8 {
-    return if (missing) blk1: { __errors.payload = .{ .rewrite_failure = RewriteFailure{ .message = rt.str2(rt.str1("missing "), rt.str1(path)), .path = path, .refusal = true } }; break :blk1 error.RewriteFailure; } else "roll-back";
+    return if (missing) blk1: { __errors.payload = .{ .rewrite_failure = RewriteFailure{ .message = "missing", .path = path, .refusal = true } }; break :blk1 error.RewriteFailure; } else "roll-back";
 }
 
 pub fn propagate(__errors: *RewriteErrorCarrier, missing: bool, path: []const u8) RewriteError![]const u8 {
