@@ -20,4 +20,4 @@
   (rescue
     (classify missing? path)
     err
-    (rewrite-failure-message err)))
+    (:message err)))

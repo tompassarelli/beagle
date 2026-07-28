@@ -19,4 +19,4 @@
                   (ex-message err__exception)
                   (:path (ex-data err__exception))
                   (:refusal (ex-data err__exception)))]
-        (rewrite-failure-message err)))))
+        (:message err)))))
