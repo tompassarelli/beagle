@@ -471,6 +471,11 @@
      "dynamic regex pattern requires an explicit match shape at its Regex boundary"
      (hasheq 'expected "compile-time String pattern"
              'actual (format "~v" pattern))))
+  (when (eq? (current-check-target) 'odin)
+    (regex-contract-error
+     node
+     "odin regex runtime capability is not selected"
+     (hasheq 'target "odin" 'capability "regex-runtime")))
   (when (and (eq? (current-check-target) 'zig)
              (> (string-length pattern) 512))
     (regex-contract-error
@@ -2708,18 +2713,38 @@
           (memq (call-form-fn e) '(nth first second))
           (pair? (call-form-args e))
           (let ([tt (infer-expr (car (call-form-args e)) env)])
-            (and (type-app? tt) (eq? (type-app-ctor tt) 'HVec))))
+            (or (and (type-app? tt) (eq? (type-app-ctor tt) 'HVec))
+                (and (type-union? tt)
+                     (ormap (lambda (alt)
+                              (and (type-app? alt)
+                                   (eq? (type-app-ctor alt) 'HVec)))
+                            (type-union-alts tt))
+                     (ormap (lambda (alt)
+                              (and (type-prim? alt)
+                                   (eq? (type-prim-name alt) 'Nil)))
+                            (type-union-alts tt))))))
      (define fn (call-form-fn e))
      (define args (call-form-args e))
-     (define elems (type-app-args (infer-expr (car args) env)))
+     (define tuple-type (infer-expr (car args) env))
+     (define nullable-tuple? (type-union? tuple-type))
+     (define hvec-type
+       (if nullable-tuple?
+           (for/first ([alt (in-list (type-union-alts tuple-type))]
+                       #:when (and (type-app? alt)
+                                   (eq? (type-app-ctor alt) 'HVec)))
+             alt)
+           tuple-type))
+     (define elems (type-app-args hvec-type))
      (define idx (cond [(eq? fn 'first) 0]
                        [(eq? fn 'second) 1]
                        [(and (eq? fn 'nth) (>= (length args) 2)
                              (exact-integer? (cadr args))) (cadr args)]
                        [else #f]))
-     (if (and idx (>= idx 0) (< idx (length elems)))
-         (list-ref elems idx)
-         (if (null? elems) ANY (apply merge-types elems)))]
+     (define selected
+       (if (and idx (>= idx 0) (< idx (length elems)))
+           (list-ref elems idx)
+           (if (null? elems) ANY (apply merge-types elems))))
+     (if nullable-tuple? (nullable-type selected) selected)]
 
     [(call-form? e)
      (warn-target-exclude (call-form-fn e) e)
