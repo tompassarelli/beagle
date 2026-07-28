@@ -78,6 +78,9 @@
 (define current-dynamic-remaining (make-parameter (hasheq)))
 (define current-dynamic-arms (make-parameter (hasheq)))
 
+(define (string-prim-type? t)
+  (and (type-prim? t) (eq? (type-prim-name t) 'String)))
+
 (define (type->zig t)
   (cond
     [(not t) (unsupported "missing type annotation"
@@ -88,6 +91,7 @@
        [(Float) "f64"]
        [(Bool) "bool"]
        [(String) "[]const u8"]
+       [(Keyword) "rt.Keyword"]
        [(Regex) "rt.Regex"]
        [(Nil) "void"]
        [(Ctx) "*rt.Ctx"]
@@ -107,14 +111,17 @@
           [else (ident (type-prim-name t))])])] ; user record/struct name
     [(type-app? t)
      (case (type-app-ctor t)
-       [(Vec) (format "[]const ~a" (type->zig (car (type-app-args t))))]
+       [(Vec List) (format "[]const ~a" (type->zig (car (type-app-args t))))]
+       [(Set)
+        (format "rt.ValueSet(~a)" (type->zig (car (type-app-args t))))]
        [(Map)
-        ;; (Map K V) → rt.Map(V). Keyword and String keys both lower to
-        ;; []const u8 keys inside rt.Map; only the value type V is carried.
         (define k (car (type-app-args t)))
-        (unless (and (type-prim? k) (memq (type-prim-name k) '(String Keyword)))
-          (unsupported "map key type" "zig maps key on String or Keyword (→ []const u8)"))
-        (format "rt.Map(~a)" (type->zig (cadr (type-app-args t))))]
+        (define v (cadr (type-app-args t)))
+        ;; Preserve the landed String-map ABI/goldens. Keyword and compound
+        ;; keys need the checked clojure-value equality/hash wrapper.
+        (if (string-prim-type? k)
+            (format "rt.Map(~a)" (type->zig v))
+            (format "rt.ValueMap(~a, ~a)" (type->zig k) (type->zig v)))]
        [(HVec)
         (unless (andmap regex-string-type? (type-app-args t))
           (unsupported "heterogeneous vector type"
@@ -481,6 +488,10 @@
     [(exact-integer? e) (type-prim 'Int)]
     [(and (real? e) (not (exact-integer? e))) (type-prim 'Float)]
     [(boolean? e) (type-prim 'Bool)]
+    [(keyword? e) (type-prim 'Keyword)]
+    [(and (symbol? e)
+          (regexp-match? #rx"^:" (symbol->string e)))
+     (type-prim 'Keyword)]
     [(symbol? e)
      (or (hash-ref (current-dynamic-arms) e #f)
          (hash-ref (current-binding-types) e #f))]
@@ -533,6 +544,22 @@
 
 ;; --- expressions ------------------------------------------------------------------
 
+(define (keyword-value-string value)
+  (cond
+    [(keyword? value) (keyword->string value)]
+    [(and (symbol? value)
+          (regexp-match? #rx"^:" (symbol->string value)))
+     (substring (symbol->string value) 1)]
+    [else #f]))
+
+(define (emit-keyword value)
+  (define source (keyword-value-string value))
+  (unless source (unsupported "keyword value" value))
+  (match (regexp-match #rx"^([^/]*)/(.*)$" source)
+    [(list _ namespace name)
+     (format "rt.keyword(~v, ~v)" namespace name)]
+    [_ (format "rt.keyword(\"\", ~v)" source)]))
+
 (define (emit-expr e)
   (cond
     [(exact-integer? e) (number->string e)]
@@ -541,9 +568,11 @@
        (if (regexp-match? #rx"[.e]" s) s (string-append s ".0")))]
     [(boolean? e) (if e "true" "false")]
     [(string? e) (format "~v" e)]
+    [(keyword? e) (emit-keyword e)]
     [(eq? e 'nil) "null"]
     [(symbol? e)
      (cond
+       [(keyword-value-string e) (emit-keyword e)]
        [(hash-ref (current-dynamic-arms) e #f)
         => (lambda (alt)
              (define dyn-type (hash-ref (current-binding-types) e))
@@ -609,23 +638,26 @@
 ;; --- typed map construction ---------------------------------------------------
 ;; A map literal only emits where the (Map K V) type is known (def/let
 ;; binding, reduce init) — V can't be guessed from a bare literal. Empty
-;; {} → rt.Map(V).empty(); entries chain immutable .assoc (Clojure
-;; semantics). Keyword and string keys both lower to []const u8.
+;; {} → the selected runtime map wrapper; entries chain immutable .assoc
+;; (Clojure semantics). String-key maps retain the original rt.Map(V) ABI;
+;; other concrete key types use rt.ValueMap(K, V).
 (define (map-type? t) (and (type-app? t) (eq? (type-app-ctor t) 'Map)))
+(define (map-ktype t) (car (type-app-args t)))
 (define (map-vtype t) (cadr (type-app-args t)))
 
-(define (emit-map-key k)
-  (cond
-    [(string? k) (format "~v" k)]
-    [(keyword? k) (format "~v" (keyword->string k))]
-    [(and (symbol? k) (regexp-match? #rx"^:" (symbol->string k)))
-     (format "~v" (substring (symbol->string k) 1))]
-    [else (unsupported "map key" "keys must be keyword or string literals")]))
-
-(define (emit-map-literal e vtype)
-  (for/fold ([acc (format "rt.Map(~a).empty()" (type->zig vtype))])
+(define (emit-map-literal e ktype vtype)
+  (define map-type (type-app 'Map (list ktype vtype)))
+  (for/fold ([acc (format "~a.empty()" (type->zig map-type))])
             ([pr (in-list (map-form-pairs e))])
-    (format "~a.assoc(~a, ~a)" acc (emit-map-key (car pr)) (emit-expr (cdr pr)))))
+    (format "~a.assoc(~a, ~a)"
+            acc
+            (emit-typed-value (car pr) ktype)
+            (emit-typed-value (cdr pr) vtype))))
+
+(define (emit-set-literal e elem-type)
+  (for/fold ([acc (format "rt.ValueSet(~a).empty()" (type->zig elem-type))])
+            ([item (in-list (set-form-items e))])
+    (format "~a.conj(~a)" acc (emit-typed-value item elem-type))))
 
 ;; Emit a value against an expected type. Container literals need the
 ;; type to lower: a map literal picks rt.Map(V); a vector literal lowers
@@ -648,11 +680,29 @@
                  (dynamic-tag-name expected alt)
                  (emit-typed-value v alt)))]
     [(and (map-form? v) expected (map-type? expected))
-     (emit-map-literal v (map-vtype expected))]
+     (emit-map-literal v (map-ktype expected) (map-vtype expected))]
     [(and (vec-form? v) expected (type-app? expected)
-          (eq? (type-app-ctor expected) 'Vec))
+          (memq (type-app-ctor expected) '(Vec List)))
+     (define elem-type (car (type-app-args expected)))
      (format "&.{ ~a }"
-             (string-join (map emit-expr (vec-form-items v)) ", "))]
+             (string-join
+              (for/list ([item (in-list (vec-form-items v))])
+                (emit-typed-value item elem-type))
+              ", "))]
+    [(and (set-form? v) expected (type-app? expected)
+          (eq? (type-app-ctor expected) 'Set))
+     (emit-set-literal v (car (type-app-args expected)))]
+    [(and (call-form? v) expected (type-app? expected)
+          (eq? (type-app-ctor expected) 'Set)
+          (eq? (call-form-fn v) 'set)
+          (= (length (call-form-args v)) 1)
+          (vec-form? (car (call-form-args v))))
+     (define elem-type (car (type-app-args expected)))
+     (for/fold ([acc (format "rt.ValueSet(~a).empty()"
+                             (type->zig elem-type))])
+               ([item (in-list
+                       (vec-form-items (car (call-form-args v))))])
+       (format "~a.conj(~a)" acc (emit-typed-value item elem-type)))]
     [else (emit-expr v)]))
 
 ;; Zig peer-type resolution can't unify branches that are ALL bare
@@ -990,6 +1040,7 @@
     [(eq? fn 'assoc)
      (format "~a.assoc(~a, ~a)"
              (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args)))]
+    [(eq? fn 'hash) (format "rt.hash(~a)" (emit-expr (car args)))]
     ;; v1 vector ops through the prelude (tick-arena allocation only)
     [(eq? fn 'count) (format "rt.count(~a)" (emit-expr (car args)))]
     [(eq? fn 'nth) (format "rt.nth(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)))]

@@ -74,18 +74,120 @@ fn isByteString(comptime T: type) bool {
     };
 }
 
+/// Versioned logical keyword ABI. Namespace and name remain distinct UTF-8
+/// byte slices, so `:name`, `:ns/name`, and the strings `"name"` /
+/// `"ns/name"` never collapse onto one native key.
+pub const Keyword = struct {
+    pub const abi_version: u16 = 1;
+
+    namespace: []const u8,
+    name: []const u8,
+
+    pub fn eql(self: Keyword, other: Keyword) bool {
+        return std.mem.eql(u8, self.namespace, other.namespace) and
+            std.mem.eql(u8, self.name, other.name);
+    }
+
+    pub fn hashValue(self: Keyword) i32 {
+        return mixHash(9, mixHash(hash32(self.namespace), hash32(self.name)));
+    }
+};
+
+pub fn keyword(namespace: []const u8, name: []const u8) Keyword {
+    return .{ .namespace = namespace, .name = name };
+}
+
+fn eqSame(comptime T: type, a: T, b: T) bool {
+    return switch (@typeInfo(T)) {
+        .pointer => |p| switch (p.size) {
+            .slice => blk: {
+                if (a.len != b.len) break :blk false;
+                for (a, b) |left, right| {
+                    if (!eq(left, right)) break :blk false;
+                }
+                break :blk true;
+            },
+            else => a == b,
+        },
+        .array => blk: {
+            for (a, b) |left, right| {
+                if (!eq(left, right)) break :blk false;
+            }
+            break :blk true;
+        },
+        .optional => if (a == null or b == null)
+            a == null and b == null
+        else
+            eq(a.?, b.?),
+        .@"struct" => if (@hasDecl(T, "eql")) a.eql(b) else std.meta.eql(a, b),
+        else => a == b,
+    };
+}
+
 /// clojure = : content equality. Strings compare by bytes (slice == would
 /// compare fat-pointers, and a string literal isn't even a slice type);
-/// everything else by value. Comptime-dispatched so emit stays
-/// syntax-directed.
+/// vectors, maps, sets, and keywords compare recursively by logical value.
+/// Comptime-dispatched so emit stays syntax-directed.
 pub fn eq(a: anytype, b: anytype) bool {
     if (comptime (isByteString(@TypeOf(a)) and isByteString(@TypeOf(b)))) {
         const sa: []const u8 = a;
         const sb: []const u8 = b;
         return std.mem.eql(u8, sa, sb);
+    } else if (comptime @TypeOf(a) == @TypeOf(b)) {
+        return eqSame(@TypeOf(a), a, b);
     } else {
-        return a == b;
+        return false;
     }
+}
+
+fn mixHash(h: i32, c: i32) i32 {
+    return h *% 31 +% c;
+}
+
+fn hash32(value: anytype) i32 {
+    const T = @TypeOf(value);
+    if (comptime isByteString(T)) {
+        const bytes: []const u8 = value;
+        var out: i32 = 2;
+        for (bytes) |byte| out = mixHash(out, @as(i32, byte));
+        return out;
+    }
+    return switch (@typeInfo(T)) {
+        .int, .comptime_int => blk: {
+            const narrowed: i32 = @truncate(value);
+            break :blk mixHash(1, narrowed) ^ (narrowed *% -1640531535);
+        },
+        .float, .comptime_float => blk: {
+            const narrowed: i32 = @intFromFloat(value);
+            break :blk mixHash(1, narrowed) ^ (narrowed *% -1640531535);
+        },
+        .bool => if (value) 3 else 4,
+        .pointer => |p| switch (p.size) {
+            .slice => blk: {
+                var out: i32 = 5;
+                for (value) |item| out = mixHash(out, hash32(item));
+                break :blk out;
+            },
+            else => mixHash(8, 0),
+        },
+        .array => blk: {
+            var out: i32 = 5;
+            for (value) |item| out = mixHash(out, hash32(item));
+            break :blk out;
+        },
+        .optional => if (value) |present| hash32(present) else 0,
+        .@"struct" => if (@hasDecl(T, "hashValue"))
+            value.hashValue()
+        else
+            mixHash(8, 0),
+        else => mixHash(8, 0),
+    };
+}
+
+/// Stable signed 32-bit logical hash widened to Beagle Int. Equal values always
+/// return the same result; maps and sets combine entries order-independently.
+pub fn hash(value: anytype) i64 {
+    return @as(i64, hash32(value));
 }
 
 // --- v1 vectors: arena slices ------------------------------------------------
@@ -178,6 +280,131 @@ pub fn Map(comptime V: type) type {
         }
         pub fn len(self: Self) i64 {
             return @intCast(self.inner.count());
+        }
+        pub fn eql(self: Self, other: Self) bool {
+            if (self.inner.count() != other.inner.count()) return false;
+            var inner = self.inner;
+            var iterator = inner.iterator();
+            while (iterator.next()) |entry| {
+                const other_value = other.inner.get(entry.key_ptr.*) orelse return false;
+                if (!eq(entry.value_ptr.*, other_value)) return false;
+            }
+            return true;
+        }
+        pub fn hashValue(self: Self) i32 {
+            var acc: i32 = 0;
+            var inner = self.inner;
+            var iterator = inner.iterator();
+            while (iterator.next()) |entry| {
+                acc +%= mixHash(hash32(entry.key_ptr.*), hash32(entry.value_ptr.*));
+            }
+            return mixHash(7, acc);
+        }
+    };
+}
+
+/// Persistent target-private map for keyword and compound keys. Linear lookup
+/// keeps the implementation small while preserving clojure-value equality,
+/// clojure-hash, and immutable assoc semantics.
+pub fn ValueMap(comptime K: type, comptime V: type) type {
+    return struct {
+        const Self = @This();
+        const Entry = struct { key: K, value: V };
+
+        entries: []const Entry,
+
+        pub fn empty() Self {
+            return .{ .entries = &.{} };
+        }
+        pub fn assoc(self: Self, key: K, value: V) Self {
+            var found: ?usize = null;
+            for (self.entries, 0..) |entry, i| {
+                if (eq(entry.key, key)) {
+                    found = i;
+                    break;
+                }
+            }
+            const out_len = self.entries.len + @intFromBool(found == null);
+            const out = cliAlloc().alloc(Entry, out_len) catch @panic("oom");
+            @memcpy(out[0..self.entries.len], self.entries);
+            if (found) |i| {
+                out[i] = .{ .key = key, .value = value };
+            } else {
+                out[self.entries.len] = .{ .key = key, .value = value };
+            }
+            return .{ .entries = out };
+        }
+        pub fn get(self: Self, key: K) ?V {
+            for (self.entries) |entry| {
+                if (eq(entry.key, key)) return entry.value;
+            }
+            return null;
+        }
+        pub fn contains(self: Self, key: K) bool {
+            for (self.entries) |entry| {
+                if (eq(entry.key, key)) return true;
+            }
+            return false;
+        }
+        pub fn len(self: Self) i64 {
+            return @intCast(self.entries.len);
+        }
+        pub fn eql(self: Self, other: Self) bool {
+            if (self.entries.len != other.entries.len) return false;
+            for (self.entries) |entry| {
+                const other_value = other.get(entry.key) orelse return false;
+                if (!eq(entry.value, other_value)) return false;
+            }
+            return true;
+        }
+        pub fn hashValue(self: Self) i32 {
+            var acc: i32 = 0;
+            for (self.entries) |entry| {
+                acc +%= mixHash(hash32(entry.key), hash32(entry.value));
+            }
+            return mixHash(7, acc);
+        }
+    };
+}
+
+/// Persistent target-private set. Elements deduplicate by logical value and
+/// hash order-independently.
+pub fn ValueSet(comptime T: type) type {
+    return struct {
+        const Self = @This();
+
+        values: []const T,
+
+        pub fn empty() Self {
+            return .{ .values = &.{} };
+        }
+        pub fn conj(self: Self, value: T) Self {
+            if (self.contains(value)) return self;
+            const out = cliAlloc().alloc(T, self.values.len + 1) catch @panic("oom");
+            @memcpy(out[0..self.values.len], self.values);
+            out[self.values.len] = value;
+            return .{ .values = out };
+        }
+        pub fn contains(self: Self, value: T) bool {
+            for (self.values) |item| {
+                if (eq(item, value)) return true;
+            }
+            return false;
+        }
+        pub fn len(self: Self) i64 {
+            return @intCast(self.values.len);
+        }
+        pub fn eql(self: Self, other: Self) bool {
+            if (self.values.len != other.values.len) return false;
+            for (self.values) |item| {
+                if (!other.contains(item)) return false;
+            }
+            return true;
+        }
+        pub fn hashValue(self: Self) i32 {
+            var acc: i32 = 0;
+            for (self.values) |item| acc +%= hash32(item);
+            return mixHash(6, acc);
         }
     };
 }

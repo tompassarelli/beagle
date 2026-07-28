@@ -66,6 +66,12 @@
   ;; the map/record property spelling stays internally consistent.
   (mangle-prop (substring s 1)))
 
+(define (kw->object-key kw)
+  (define prop (kw->prop kw))
+  ;; Preserve existing bare-key bytes for ordinary keywords. A namespace slash
+  ;; is not legal in a JS identifier, so only that ABI-bearing case is quoted.
+  (if (string-contains? prop "/") (~v prop) prop))
+
 (define (keyword-symbol? sym)
   (and (symbol? sym)
        (let ([s (symbol->string sym)])
@@ -966,7 +972,11 @@
      (define re (rep-of-binding e))
      (if (eq? re 'native) (type-read-rep (type-of-binding e)) re)]
     [(and (map-form? e) (null? (map-form-pairs e))) 'native] ; empty map: assoc coerces if upgraded
-    [(set-form? e) 'native]             ; set LITERAL: distinct by construction; $$bc handles it
+    [(set-form? e)
+     (if (for/or ([item (in-list (set-form-items e))])
+           (or (vec-form? item) (map-form? item) (set-form? item)))
+         'hset
+         'native)]
     [(map-form? e)
      ;; Classify a LITERAL by its actual KEY DATA (per pair), NOT the node-type —
      ;; a nested literal (e.g. a map built inside a `.map` arrow) may have no
@@ -1002,8 +1012,21 @@
 ;; regardless of the runtime element). arg-type resolves a var X via the type-env.
 (define (set-hset? args)
   (and (pair? args)
-       (let ([et (seq-elem-type (arg-type (car args)))])
-         (and et (not (eq? (key-class et) 'native)) #t))))
+       (or
+        (let ([et (seq-elem-type (arg-type (car args)))])
+          (and et (not (eq? (key-class et) 'native)) #t))
+        ;; A freshly parsed nested literal may not yet have a type-table entry.
+        ;; Its element syntax is still decisive: collection elements require
+        ;; value-dedup and therefore the HAMT path.
+        (and (not (eq? (current-js-emit-target) 'scriptc))
+             (vec-form? (car args))
+             (for/or ([item (in-list (vec-form-items (car args)))])
+               (or (vec-form? item) (map-form? item) (set-form? item)))))))
+
+(define (keyword-string-mixed? left right)
+  (and (not (eq? (current-js-emit-target) 'scriptc))
+       (or (and (keyword-symbol? left) (string? right))
+           (and (string? left) (keyword-symbol? right)))))
 
 ;; assoc key args sit at odd indices (coll k0 v0 k1 v1 ...): any NOT provably-scalar?
 ;; arg-type resolves a var key through the type-env (params/let).
@@ -1630,15 +1653,21 @@
                         (define v (cdr p))
                         (define key-str
                           (cond
-                            [(keyword-symbol? k) (kw->prop k)]
+                            [(keyword-symbol? k) (kw->object-key k)]
                             [else (format "[~a]" (emit-expr k))]))
                         (format "~a: ~a" key-str (emit-expr v)))
                       (map-form-pairs e))
                  ", "))])]
     [(set-form? e)
-     (tally-rep! 'native)  ; set literal (distinct elems by construction)
-     (format "new Set([~a])"
-             (string-join (map emit-expr (set-form-items e)) ", "))]
+     (define items
+       (string-join (map emit-expr (set-form-items e)) ", "))
+     (if (eq? (classify-rep e) 'hset)
+         (begin
+           (tally-rep! 'hamt)
+           (hamt-call "hamtSet" (format "[~a]" items)))
+         (begin
+           (tally-rep! 'native)
+           (format "new Set([~a])" items)))]
 
     [(with-meta? e)     (emit-expr (with-meta-expr e))]
 
@@ -2103,11 +2132,14 @@
         (define pairs
           (for/list ([an (in-list args)] [bn (in-list (cdr args))]
                      [as (in-list strs)] [bs (in-list (cdr strs))])
-            (if (both-scalar-eq-safe? an bn)
-                (format "~a === ~a" as bs)
-                (begin (mark-needs-v-if-hamtish! an) (mark-needs-v-if-hamtish! bn)
-                       (use-runtime!)
-                       (format "$$bc$equiv(~a, ~a)" as bs)))))
+            (cond
+              [(keyword-string-mixed? an bn) "false"]
+              [(both-scalar-eq-safe? an bn) (format "~a === ~a" as bs)]
+              [else
+               (mark-needs-v-if-hamtish! an)
+               (mark-needs-v-if-hamtish! bn)
+               (use-runtime!)
+               (format "$$bc$equiv(~a, ~a)" as bs)])))
         (format "(~a)" (string-join pairs " && "))]
        ;; not= = not(all consecutive pairs equal): keep inner pairs POSITIVE
        ;; (=== or equiv) and negate the whole conjunction. Do NOT switch the
@@ -2117,11 +2149,14 @@
         (define pairs
           (for/list ([an (in-list args)] [bn (in-list (cdr args))]
                      [as (in-list strs)] [bs (in-list (cdr strs))])
-            (if (both-scalar-eq-safe? an bn)
-                (format "~a === ~a" as bs)
-                (begin (mark-needs-v-if-hamtish! an) (mark-needs-v-if-hamtish! bn)
-                       (use-runtime!)
-                       (format "$$bc$equiv(~a, ~a)" as bs)))))
+            (cond
+              [(keyword-string-mixed? an bn) "false"]
+              [(both-scalar-eq-safe? an bn) (format "~a === ~a" as bs)]
+              [else
+               (mark-needs-v-if-hamtish! an)
+               (mark-needs-v-if-hamtish! bn)
+               (use-runtime!)
+               (format "$$bc$equiv(~a, ~a)" as bs)])))
         (format "(!(~a))" (string-join pairs " && "))]
        [(and (js-infix? fn-sym) (>= (length args) 2))
         (define op (hash-ref JS-INFIX-OPS fn-sym))

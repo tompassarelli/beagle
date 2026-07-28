@@ -42,6 +42,11 @@
   (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
     (simplify-path (build-path dir 'up 'up "beagle-lib" "zig" "beagle_rt.zig"))))
 
+(define js-runtime-dir
+  (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
+    (simplify-path
+     (build-path dir 'up 'up "beagle-lib" "lib" "beagle"))))
+
 ;; Non-core runtime modules (los_rt, los_yaml, ...) lower to their OWN
 ;; `@import("X.zig")` (Phase 1). The golden compile check copies a
 ;; self-contained stand-in for each from fixtures/zig-support/ so it stays
@@ -579,7 +584,14 @@ ZIG
   (when NODE
     (define js-src (compile-semantic-target-src 'js collections-layout-src))
     (define runnable
-      (regexp-replace* #px"(?m:^import [^\n]*\n)" js-src ""))
+      (for/fold ([source js-src])
+                ([name (in-list '("core.js" "hamt.js"))])
+        (regexp-replace*
+         (regexp
+          (format "['\"]beagle/~a['\"]" (regexp-quote name)))
+         source
+         (format "\"file://~a\""
+                 (path->string (build-path js-runtime-dir name))))))
     (define-values (ok? out err)
       (run-command-output
        NODE "--input-type=module" "-e"

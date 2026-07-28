@@ -985,6 +985,8 @@
              'hashing "clojure-hash")))
   (define layout
     (cond
+      [(not (eq? (current-check-target) 'zig))
+       'target-private]
       [(and extern-name (type-contains-any? t))
        ;; The concrete-native-boundary pass owns the more fundamental Any
        ;; diagnostic. Do not mask it with the later layout contract.
@@ -1423,13 +1425,23 @@
                             (format "collection element ~a" i)))
              #t))]
      [(Set)
-      (and (set-form? value)
-           (begin
-             (for ([item (in-list (set-form-items value))]
-                   [i (in-naturals)])
-               (check-item! item (car (type-app-args expected))
-                            (format "set element ~a" i)))
-             #t))]
+      (define elem-type (car (type-app-args expected)))
+      (cond
+        [(set-form? value)
+         (for ([item (in-list (set-form-items value))]
+               [i (in-naturals)])
+           (check-item! item elem-type (format "set element ~a" i)))
+         #t]
+        [(and (call-form? value)
+              (eq? (call-form-fn value) 'set)
+              (= (length (call-form-args value)) 1)
+              (vec-form? (car (call-form-args value))))
+         (check-collection-literal
+          (car (call-form-args value))
+          (type-app 'Vec (list elem-type))
+          env
+          src)]
+        [else #f])]
      [(Map)
       (and (map-form? value)
            (let ([key-type (car (type-app-args expected))]
