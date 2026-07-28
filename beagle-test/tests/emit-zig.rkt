@@ -241,6 +241,7 @@
 (define any-boundary-src (build-path semantic-contract-dir "any-boundary.bgl"))
 (define concrete-boundary-src (build-path semantic-contract-dir "concrete-boundary.bgl"))
 (define regex-src (build-path semantic-contract-dir "regex.bgl"))
+(define closed-dynamic-src (build-path semantic-contract-dir "closed-dynamic.bgl"))
 
 (define (parse-semantic-target-src target src)
   ;; Source locations contain an absolute checkout path. Strip only that
@@ -409,6 +410,14 @@ ZIG
      (check-zig-forms
       '(ns regex-contract-feature)
       '(def value :- Regex (re-pattern "(?=a)a"))))))
+
+;; --- semantic contract 3: closed dynamic values -----------------------------
+
+(test-case "closed dynamic contract pins CLJ bytes and emits compiling Zig"
+  (semantic-golden 'clj closed-dynamic-src "closed-dynamic")
+  (define zig-src (semantic-golden 'zig closed-dynamic-src "closed-dynamic"))
+  (when ZIG
+    (check-true (zig-compiles? zig-src "semantic-closed-dynamic"))))
 
 ;; --- determinism: same input → byte-identical output --------------------------
 
