@@ -72,3 +72,46 @@ if [[ -d "$BEAGLE_ROOT/beagle-lib" && "${_BEAGLE_SCOPE_ROOT:-}" != "$BEAGLE_ROOT
     fi
     unset _bscope
 fi
+
+# --- Bytecode version gate ---------------------------------------------------
+# Racket refuses to load a .zo compiled by a different Racket, and the death is
+# opaque: "body of /nix/store/…/raco.rkt" with no mention of bytecode. Every
+# flake bump of the pinned Racket therefore bricks every bin/* script until
+# someone hand-runs `raco make`, and the error names neither the cause nor the
+# cure. Recompile automatically instead: stamp the racket that produced the
+# current .zo files, and rebuild when the resolved racket no longer matches.
+#
+# Cost when current is one file read; `raco make` (~0.5s, or minutes cold) runs
+# only on an actual version change. Failure here is never fatal — falling
+# through to the original error beats masking it with a build failure.
+# Gated on _BEAGLE_RACKET, not RACO: an unresolved pinned racket means RACO is
+# the ambient one, and compiling with it would bake in the very skew this fixes.
+if [[ -n "${_BEAGLE_RACKET:-}" && -d "$BEAGLE_ROOT/beagle-lib" && -z "${_BEAGLE_ZO_CHECKED:-}" ]]; then
+    export _BEAGLE_ZO_CHECKED=1
+    _zo_stamp="$BEAGLE_ROOT/.beagle/zo-racket"
+    _zo_want="$_BEAGLE_RACKET"
+    if [[ "$(cat "$_zo_stamp" 2>/dev/null || true)" != "$_zo_want" ]]; then
+        # mkdir is the atomic test-and-set: concurrent bin/* invocations race
+        # here constantly (hooks, daemon, agents), and two raco makes writing the
+        # same compiled/ dir corrupt each other. Loser skips rather than waits —
+        # it would only reach the same stale bytecode the winner is fixing, and
+        # blocking every script behind one cold compile is worse than one
+        # confusing failure.
+        if mkdir "$BEAGLE_ROOT/.beagle/zo-lock" 2>/dev/null; then
+            trap 'rmdir "$BEAGLE_ROOT/.beagle/zo-lock" 2>/dev/null || true' EXIT
+            echo "beagle: racket changed; recompiling bytecode (once)…" >&2
+            if "$RACO" make -j "$(nproc 2>/dev/null || echo 4)" \
+                   "$BEAGLE_ROOT/beagle-lib/main.rkt" \
+                   "$BEAGLE_ROOT/beagle-lib/private/check-all.rkt" \
+                   "$BEAGLE_ROOT/beagle-lib/private/daemon.rkt" >&2; then
+                printf '%s' "$_zo_want" > "$_zo_stamp"
+                echo "beagle: bytecode current." >&2
+            else
+                echo "beagle: bytecode recompile FAILED — expect stale-.zo errors." >&2
+            fi
+            rmdir "$BEAGLE_ROOT/.beagle/zo-lock" 2>/dev/null || true
+            trap - EXIT
+        fi
+    fi
+    unset _zo_stamp _zo_want
+fi
