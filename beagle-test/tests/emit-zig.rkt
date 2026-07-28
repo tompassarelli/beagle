@@ -1179,6 +1179,56 @@ JS
      (zig-compiles? composite-zig-src "semantic-composite-raises"))
     (check-true
      (zig-tests?
+      composite-zig-src
+      #<<ZIG
+test "allocation and domain errors compose" {
+    var success_errors = RewriteCrashErrorCarrier{};
+    const result = try classifyRewriteCrash(
+        &success_errors,
+        "/tmp/coord",
+        7,
+        7,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+    );
+    try std.testing.expect(rt.eq(result, rt.keyword("", "roll-back")));
+    try std.testing.expect(success_errors.payload == null);
+
+    var crash_errors = RewriteCrashErrorCarrier{};
+    try std.testing.expectError(
+        error.RewriteCrash,
+        classifyRewriteCrash(
+            &crash_errors,
+            "/tmp/coord",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+        ),
+    );
+    switch (crash_errors.payload.?) {
+        .rewrite_crash => |payload| {
+            try std.testing.expectEqualStrings(
+                "rewrite intent present but /tmp/coord does not exist — refusing to classify",
+                payload.message,
+            );
+            try std.testing.expectEqualStrings("/tmp/coord", payload.path);
+            try std.testing.expect(payload.refusal);
+        },
+    }
+}
+ZIG
+      "semantic-composite-raises-behavior"))
+    (check-true
+     (zig-tests?
       zig-src
       #<<ZIG
 test "typed error success, payload, rescue, and propagation" {

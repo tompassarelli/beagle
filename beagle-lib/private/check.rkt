@@ -1121,7 +1121,7 @@
     clojure.string/lower-case clojure.string/upper-case
     clojure.string/join clojure.string/replace clojure.string/split))
 
-(define ZIG-FALLIBLE-ALLOCATING-FNS '(mapv filterv sort-by))
+(define ZIG-FALLIBLE-ALLOCATING-FNS '(mapv filterv sort-by str))
 
 (define (allocation-contract-error node message [details (hasheq)])
   (raise-diag 'allocation-contract message details
@@ -1155,9 +1155,24 @@
      (if (and (ctx-first-defn? form) (pair? failure)) 'tick 'process)]
     [else 'process]))
 
+(define (raise-alternatives raises)
+  (cond
+    [(not raises) '()]
+    [(type-union? raises) (type-union-alts raises)]
+    [else (list raises)]))
+
+(define (raise-includes? raises name)
+  (for/or ([candidate (in-list (raise-alternatives raises))])
+    (and (type-prim? candidate)
+         (eq? (type-prim-name candidate) name))))
+
 (define (allocation-failure form)
   (define raises (and (defn-form? form) (defn-form-raises form)))
-  (if raises (list 'raises raises) 'abort))
+  (cond
+    [(not raises) 'abort]
+    [(raise-includes? raises 'AllocationError)
+     (list 'raises (type-prim 'AllocationError))]
+    [else (list 'raises raises)]))
 
 (define (prepare-allocation-contracts! prog)
   (define table (program-semantic-contracts prog))
@@ -1191,9 +1206,8 @@
       (unless (null? allocating-exprs)
         (define failure (allocation-failure form))
         (when (and (pair? failure)
-                   (not (and (type-prim? (cadr failure))
-                             (eq? (type-prim-name (cadr failure))
-                                  'AllocationError))))
+                   (not (raise-includes? (defn-form-raises form)
+                                         'AllocationError)))
           (allocation-contract-error
            form
            (format "allocating function ~a declares :raises ~a, but allocation failure requires :raises AllocationError"
@@ -1228,6 +1242,25 @@
 
 (define (error-type-name t)
   (and (type-prim? t) (type-prim-name t)))
+
+(define (declared-error-contract raises contracts node)
+  (define matches
+    (for/list ([candidate (in-list (raise-alternatives raises))]
+               #:when
+               (and (type-prim? candidate)
+                    (hash-has-key? contracts (type-prim-name candidate))))
+      (hash-ref contracts (type-prim-name candidate))))
+  (when (> (length matches) 1)
+    (error-contract-error
+     node
+     "a composite :raises set currently supports one throwable domain union"
+     (hasheq
+      'declared
+      (map (lambda (contract)
+             (type->string (error-contract-error-type contract)))
+           matches)
+      'repair "(U AllocationError <ThrowableUnion>)")))
+  (and (pair? matches) (car matches)))
 
 (define (error-mode target)
   (case target
@@ -1278,14 +1311,12 @@
     (hash-set! table form (hash-ref contracts name)))
   (define raising-functions
     (for/hasheq ([form (in-list (program-forms prog))]
-                 #:when
-                 (and (defn-form? form)
-                      (defn-form-raises form)
-                      (hash-has-key?
-                       contracts
-                       (error-type-name (defn-form-raises form)))))
-      (define contract
-        (hash-ref contracts (error-type-name (defn-form-raises form))))
+                 #:when (defn-form? form)
+                 #:do
+                 [(define contract
+                    (declared-error-contract
+                     (defn-form-raises form) contracts form))]
+                 #:when contract)
       (hash-set! table form contract)
       (values (defn-form-name form) contract)))
   (current-error-definitions definitions)

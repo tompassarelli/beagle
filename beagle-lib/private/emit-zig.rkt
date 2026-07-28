@@ -1061,22 +1061,28 @@
        (pair? (allocation-contract-failure contract))
        (eq? (car (allocation-contract-failure contract)) 'raises)))
 
+(define (allocation-allocator)
+  (define contract (current-allocation-contract))
+  (case (and (allocation-contract? contract)
+             (allocation-contract-region contract))
+    [(tick)
+     (define ctx (current-allocation-ctx))
+     (unless ctx
+       (unsupported "tick allocation contract"
+                    "a Ctx parameter must supply the allocator"))
+     (format "~a.tick" ctx)]
+    [(process) "rt.cliAlloc()"]
+    [else
+     (unsupported "allocation region"
+                  (and (allocation-contract? contract)
+                       (allocation-contract-region contract)))]))
+
 (define (emit-alloc elem-type count)
   (define contract (current-allocation-contract))
   (cond
     [(fallible-allocation-contract? contract)
-     (case (allocation-contract-region contract)
-       [(tick)
-        (define ctx (current-allocation-ctx))
-        (unless ctx
-          (unsupported "tick allocation contract"
-                       "a Ctx parameter must supply the allocator"))
-        (format "try ~a.tick.alloc(~a, ~a)" ctx elem-type count)]
-       [(process)
-        (format "try rt.cliAlloc().alloc(~a, ~a)" elem-type count)]
-       [else
-        (unsupported "allocation region"
-                     (allocation-contract-region contract))])]
+     (format "try ~a.alloc(~a, ~a)"
+             (allocation-allocator) elem-type count)]
     [else
      ;; Preserve the committed legacy process/abort lowering byte-for-byte.
      (format "rt.cliAlloc().alloc(~a, ~a) catch @panic(\"oom\")"
@@ -1419,11 +1425,29 @@
     [(eq? fn 'str)
      (cond
        [(null? args) "\"\""]
-       [(null? (cdr args)) (format "rt.str1(~a)" (emit-expr (car args)))]
+       [(null? (cdr args))
+        (if (fallible-allocation-contract? (current-allocation-contract))
+            (format "try rt.str1Alloc(~a, ~a)"
+                    (allocation-allocator)
+                    (emit-expr (car args)))
+            (format "rt.str1(~a)" (emit-expr (car args))))]
        [else
-        (for/fold ([acc (format "rt.str1(~a)" (emit-expr (car args)))])
-                  ([a (in-list (cdr args))])
-          (format "rt.str2(~a, rt.str1(~a))" acc (emit-expr a)))])]
+        (if (fallible-allocation-contract? (current-allocation-contract))
+            (for/fold
+                ([acc (format "try rt.str1Alloc(~a, ~a)"
+                              (allocation-allocator)
+                              (emit-expr (car args)))])
+                ([a (in-list (cdr args))])
+              (format
+               "try rt.str2Alloc(~a, ~a, try rt.str1Alloc(~a, ~a))"
+               (allocation-allocator)
+               acc
+               (allocation-allocator)
+               (emit-expr a)))
+            (for/fold ([acc (format "rt.str1(~a)" (emit-expr (car args)))])
+                      ([a (in-list (cdr args))])
+              (format "rt.str2(~a, rt.str1(~a))"
+                      acc (emit-expr a))))])]
     [(and (eq? fn 'pr-str) (= 1 (length args)))
      (format "rt.pr_str(~a)" (emit-expr (car args)))]
     ;; (println x) — str-concat all args, then rt.println.
@@ -1709,9 +1733,31 @@
     (for/hash ([p (in-list params)]
                #:when (dynamic-type? (param-type p)))
       (values (param-name p) (type-app-args (param-type p)))))
+  (define (find-allocation-contract value)
+    (define direct
+      (and (current-semantic-contracts)
+           (hash-ref (current-semantic-contracts) value #f)))
+    (cond
+      [(allocation-contract? direct) direct]
+      [(struct? value)
+       (for/or ([field (in-vector (struct->vector value))]
+                [i (in-naturals)]
+                #:when (positive? i))
+         (find-allocation-contract field))]
+      [(pair? value)
+       (or (find-allocation-contract (car value))
+           (find-allocation-contract (cdr value)))]
+      [(vector? value)
+       (for/or ([item (in-vector value)])
+         (find-allocation-contract item))]
+      [else #f]))
   (define allocation-contract
-    (and (current-semantic-contracts)
-         (hash-ref (current-semantic-contracts) f #f)))
+    (or (and (current-semantic-contracts)
+             (let ([contract
+                    (hash-ref (current-semantic-contracts) f #f)])
+               (and (allocation-contract? contract) contract)))
+        (for/or ([expr (in-list (defn-form-body f))])
+          (find-allocation-contract expr))))
   (define error-contract
     (hash-ref (current-fn-error-contracts) (defn-form-name f) #f))
   (define allocation-ctx
@@ -1721,6 +1767,11 @@
          (ident (param-name (car params)))))
   (define emitted-ret
     (cond
+      [(and error-contract
+            (fallible-allocation-contract? allocation-contract))
+       (format "(std.mem.Allocator.Error || ~a)!~a"
+               (ident (error-type-name error-contract))
+               (type->zig ret))]
       [error-contract
        (format "~a!~a"
                (ident (error-type-name error-contract))

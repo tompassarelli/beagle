@@ -1147,6 +1147,10 @@ pub fn split_lines(s: []const u8) []const []const u8 {
 pub fn str2(a: []const u8, b: []const u8) []const u8 {
     return std.mem.concat(cliAlloc(), u8, &.{ a, b }) catch @panic("oom");
 }
+/// Fallible `str` concatenation for a checked allocation contract.
+pub fn str2Alloc(allocator: std.mem.Allocator, a: []const u8, b: []const u8) std.mem.Allocator.Error![]const u8 {
+    return try std.mem.concat(allocator, u8, &.{ a, b });
+}
 /// (str x) — stringify ONE value the way clojure.core/str does: strings
 /// pass through, ints format as digits, bools as true/false. Comptime
 /// dispatch keeps emit syntax-directed.
@@ -1158,6 +1162,17 @@ pub fn str1(x: anytype) []const u8 {
         .bool => if (x) "true" else "false",
         .pointer => x, // string literal / slice
         else => std.fmt.allocPrint(cliAlloc(), "{any}", .{x}) catch @panic("oom"),
+    };
+}
+/// Fallible `str` conversion for a checked allocation contract.
+pub fn str1Alloc(allocator: std.mem.Allocator, x: anytype) std.mem.Allocator.Error![]const u8 {
+    const T = @TypeOf(x);
+    if (T == []const u8) return x;
+    return switch (@typeInfo(T)) {
+        .int, .comptime_int => try std.fmt.allocPrint(allocator, "{d}", .{x}),
+        .bool => if (x) "true" else "false",
+        .pointer => x,
+        else => try std.fmt.allocPrint(allocator, "{any}", .{x}),
     };
 }
 
