@@ -20,7 +20,7 @@ pub fn compoundMapPresent() bool {
 }
 
 pub fn setDedupCount() i64 {
-    const values = rt.ValueSet([]const i64).empty().conj(&.{ 1, 2 }).conj(&.{ 1, 2 }).conj(&.{ 2, 3 });
+    const values = rt.ValueSet([]const i64).empty().conj(&.{ 1, 2 }).conj(&.{ (0 + 1), 2 }).conj(&.{ 2, 3 });
     return rt.count(values);
 }
 

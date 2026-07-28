@@ -14,7 +14,7 @@
     (contains? values needle)))
 
 (defn set-dedup-count [] :- Int
-  (let [values :- (Set (Vec Int)) #{[1 2] [1 2] [2 3]}]
+  (let [values :- (Set (Vec Int)) (set [[1 2] [(inc 0) 2] [2 3]])]
     (count values)))
 
 (defn set-present [] :- Bool

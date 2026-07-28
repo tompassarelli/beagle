@@ -14,7 +14,7 @@
   (contains? values needle)))
 
 (defn set-dedup-count []
-  (let [values #{[1 2] [1 2] [2 3]}]
+  (let [values (set [[1 2] [(inc 0) 2] [2 3]])]
   (count values)))
 
 (defn ^Boolean set-present []
