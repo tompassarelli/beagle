@@ -21,14 +21,14 @@ pub const RewriteError = error{
     RewriteFailure,
 };
 
-pub fn classify(__errors: *RewriteErrorCarrier, missing: bool, path: []const u8) RewriteError![]const u8 {
-    return (if (missing) blk1: { __errors.payload = .{ .rewrite_failure = RewriteFailure{ .message = "missing", .path = path, .refusal = true } }; break :blk1 error.RewriteFailure; } else "roll-back");
+pub fn classify(__errors: *RewriteErrorCarrier, missing: bool, mismatch: bool, path: []const u8) RewriteError![]const u8 {
+    return (if (missing) blk1: { __errors.payload = .{ .rewrite_failure = RewriteFailure{ .message = "missing", .path = path, .refusal = true } }; break :blk1 error.RewriteFailure; } else if (mismatch) blk2: { __errors.payload = .{ .rewrite_failure = RewriteFailure{ .message = "mismatch", .path = path, .refusal = true } }; break :blk2 error.RewriteFailure; } else "roll-back");
 }
 
-pub fn propagate(__errors: *RewriteErrorCarrier, missing: bool, path: []const u8) RewriteError![]const u8 {
-    return try classify(__errors, missing, path);
+pub fn propagate(__errors: *RewriteErrorCarrier, missing: bool, mismatch: bool, path: []const u8) RewriteError![]const u8 {
+    return try classify(__errors, missing, mismatch, path);
 }
 
-pub fn render(missing: bool, path: []const u8) []const u8 {
-    return blk1: { var __errors_blk1: RewriteErrorCarrier = .{}; const __value = classify(&__errors_blk1, missing, path) catch { const err = __errors_blk1.payload.?.rewrite_failure; break :blk1 err.message; }; break :blk1 __value; };
+pub fn render(missing: bool, mismatch: bool, path: []const u8) []const u8 {
+    return blk1: { var __errors_blk1: RewriteErrorCarrier = .{}; const __value = classify(&__errors_blk1, missing, mismatch, path) catch { const err = __errors_blk1.payload.?.rewrite_failure; break :blk1 err.message; }; break :blk1 __value; };
 }

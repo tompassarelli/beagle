@@ -3,15 +3,18 @@
 ;; error RewriteError = RewriteFailure
 (defrecord RewriteFailure [message path refusal])
 
-(defn ^String classify [^Boolean missing ^String path]
-  (if missing (throw (ex-info "missing" {:path path :refusal true})) "roll-back"))
+(defn ^String classify [^Boolean missing ^Boolean mismatch ^String path]
+  (cond
+  missing (throw (ex-info "missing" {:path path :refusal true}))
+  mismatch (throw (ex-info "mismatch" {:path path :refusal true}))
+  :else "roll-back"))
 
-(defn ^String propagate [^Boolean missing ^String path]
-  (classify missing path))
+(defn ^String propagate [^Boolean missing ^Boolean mismatch ^String path]
+  (classify missing mismatch path))
 
-(defn ^String render [^Boolean missing ^String path]
+(defn ^String render [^Boolean missing ^Boolean mismatch ^String path]
   (try
-  (classify missing path)
+  (classify missing mismatch path)
   (catch clojure.lang.ExceptionInfo err__exception
     (let [err (->RewriteFailure (ex-message err__exception) (:path (ex-data err__exception)) (:refusal (ex-data err__exception)))]
       (:message err)))))
