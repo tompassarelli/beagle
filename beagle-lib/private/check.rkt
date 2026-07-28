@@ -309,6 +309,7 @@
     [(swallowed-binding)   "E020"]
     [(free-dotted-name)    "E021"]
     [(regex-contract)      "E022"]
+    [(collection-contract) "E023"]
     [else                 "E000"]))
 
 ;; Expected/actual detail pair carrying BOTH the human strings (kept verbatim,
@@ -763,6 +764,7 @@
       (define-values (regex-bindings regex-string-ops)
         (prepare-regex-contracts! prog))
       (prepare-dynamic-contracts! prog)
+      (prepare-collection-contracts! prog)
       (parameterize ([current-regex-bindings regex-bindings]
                      [current-regex-string-ops regex-string-ops])
         (for ([form (in-list (program-forms prog))])
@@ -937,6 +939,157 @@
   (for ([(name t) (in-hash (program-externs prog))])
     (record-type-node! t #f)
     (record! #f t)))
+
+;; --- collections, equality, and native layout -------------------------------
+
+(define COLLECTION-CTORS '(Vec List Set Map))
+
+(define (collection-type? t)
+  (and (type-app? t) (memq (type-app-ctor t) COLLECTION-CTORS)))
+
+(define (collection-contract-error node message [details (hasheq)])
+  (raise-diag 'collection-contract message details
+              #:src (and node (src-for node))))
+
+(define (collection-value-contract? t)
+  (cond
+    [(type-prim? t)
+     (not (memq (type-prim-name t) '(Any Regex Ctx Symbol)))]
+    [(type-app? t)
+     (and (memq (type-app-ctor t) COLLECTION-CTORS)
+          (andmap collection-value-contract? (type-app-args t)))]
+    [(type-union? t)
+     (andmap collection-value-contract? (type-union-alts t))]
+    [else #f]))
+
+(define (make-collection-contract t node #:extern [extern-name #f])
+  (define kind (type-app-ctor t))
+  (define args (type-app-args t))
+  (define key-type
+    (case kind
+      [(Map Set) (car args)]
+      [else #f]))
+  (define value-type
+    (case kind
+      [(Map) (cadr args)]
+      [else (car args)]))
+  (when (and key-type (not (collection-value-contract? key-type)))
+    (collection-contract-error
+     node
+     (format "~a key/element type ~a does not support clojure-value equality and clojure-hash"
+             kind (type->string key-type))
+     (hasheq 'collection (symbol->string kind)
+             'declared (type->string t)
+             'key-type (type->string key-type)
+             'equality "clojure-value"
+             'hashing "clojure-hash")))
+  (define layout
+    (cond
+      [(and extern-name (type-contains-any? t))
+       ;; The concrete-native-boundary pass owns the more fundamental Any
+       ;; diagnostic. Do not mask it with the later layout contract.
+       'target-private]
+      [(and extern-name (memq kind '(Vec List)))
+       (list 'abi-record
+             (string->symbol
+              (format "beagle.~a" (string-downcase (symbol->string kind))))
+             1)]
+      [extern-name
+       (collection-contract-error
+        node
+        (format "extern ~a cannot expose target-private ~a layout — wrap it in a named versioned ABI record"
+                extern-name kind)
+        (hasheq 'extern (symbol->string extern-name)
+                'collection (symbol->string kind)
+                'declared (type->string t)
+                'layout "target-private"
+                'repair "named versioned ABI record"))]
+      [else 'target-private]))
+  (collection-contract
+   kind
+   key-type
+   value-type
+   'clojure-value
+   'clojure-hash
+   (if (memq kind '(Vec List)) 'insertion 'unspecified)
+   layout))
+
+(define (prepare-collection-contracts! prog)
+  (define table (program-semantic-contracts prog))
+  (define (walk-type! t owner [extern-name #f])
+    (cond
+      [(collection-type? t)
+       (define contract
+         (make-collection-contract t owner #:extern extern-name))
+       (hash-set! table t contract)
+       (when owner (hash-set! table owner contract))
+       (for ([arg (in-list (type-app-args t))])
+         (walk-type! arg #f extern-name))]
+      [(type-app? t)
+       (for ([arg (in-list (type-app-args t))])
+         (walk-type! arg owner extern-name))]
+      [(type-union? t)
+       (for ([alt (in-list (type-union-alts t))])
+         (walk-type! alt owner extern-name))]
+      [(type-fn? t)
+       (for ([p (in-list (type-fn-params t))])
+         (walk-type! p owner extern-name))
+       (when (type-fn-rest-type t)
+         (walk-type! (type-fn-rest-type t) owner extern-name))
+       (walk-type! (type-fn-ret t) owner extern-name)]
+      [else (void)]))
+  (define (walk-ast! value owner)
+    (cond
+      [(type? value) (walk-type! value owner)]
+      [(struct? value)
+       (for ([field (in-vector (struct->vector value))]
+             [i (in-naturals)]
+             #:when (positive? i))
+         (walk-ast! field (or owner value)))]
+      [(pair? value)
+       (walk-ast! (car value) owner)
+       (walk-ast! (cdr value) owner)]
+      [(vector? value)
+       (for ([item (in-vector value)])
+         (walk-ast! item owner))]
+      [else (void)]))
+  (for ([raw-form (in-list (program-forms prog))])
+    (walk-ast! raw-form raw-form)
+    (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
+    (match form
+      [(def-form _ t _ _ _) (when t (walk-type! t form))]
+      [(defonce-form _ t _ _) (when t (walk-type! t form))]
+      [(defn-form _ params rest-p ret _ _ raises _)
+       (for ([p (in-list params)] #:when (param? p))
+         (when (param-type p) (walk-type! (param-type p) p)))
+       (when (and rest-p (param? rest-p) (param-type rest-p))
+         (walk-type! (param-type rest-p) rest-p))
+       (when ret (walk-type! ret form))
+       (when raises (walk-type! raises form))]
+      [(record-form _ fields)
+       (for ([field (in-list fields)])
+         (when (param-type field)
+           (walk-type! (param-type field) field)))]
+      [_ (void)]))
+  (for ([(name t) (in-hash (program-externs prog))])
+    (walk-type! t #f name)))
+
+(define (check-collection-order-use! call env)
+  (define fn (call-form-fn call))
+  (define args (call-form-args call))
+  (when (and (symbol? fn)
+             (memq fn '(keys vals seq first second rest nth))
+             (pair? args))
+    (define coll-type (infer-expr (car args) env))
+    (when (and (collection-type? coll-type)
+               (memq (type-app-ctor coll-type) '(Map Set)))
+      (collection-contract-error
+       call
+       (format "~a observes iteration order of ~a, whose collection contract declares order unspecified"
+               fn (type->string coll-type))
+       (hasheq 'function (symbol->string fn)
+               'declared (type->string coll-type)
+               'order "unspecified")))))
 
 (define (check-zig-native-boundaries! prog)
   (when (eq? (program-target prog) 'zig)
@@ -1246,6 +1399,48 @@
                                (hasheq) #:src src)))
                #t)))))
 
+(define (check-collection-literal value expected env src)
+  (define (check-item! item item-type label)
+    (define actual (infer-expr item env))
+    (unless (or (check-collection-literal item item-type env src)
+                (type-compatible? actual item-type))
+      (collection-contract-error
+       item
+       (format "~a expects ~a, got ~a"
+               label (type->string item-type) (type->string actual))
+       (hasheq 'expected (type->string item-type)
+               'actual (type->string actual)
+               'position label))))
+  (and
+   (collection-type? expected)
+   (case (type-app-ctor expected)
+     [(Vec List)
+      (and (vec-form? value)
+           (begin
+             (for ([item (in-list (vec-form-items value))]
+                   [i (in-naturals)])
+               (check-item! item (car (type-app-args expected))
+                            (format "collection element ~a" i)))
+             #t))]
+     [(Set)
+      (and (set-form? value)
+           (begin
+             (for ([item (in-list (set-form-items value))]
+                   [i (in-naturals)])
+               (check-item! item (car (type-app-args expected))
+                            (format "set element ~a" i)))
+             #t))]
+     [(Map)
+      (and (map-form? value)
+           (let ([key-type (car (type-app-args expected))]
+                 [value-type (cadr (type-app-args expected))])
+             (for ([pair (in-list (map-form-pairs value))]
+                   [i (in-naturals)])
+               (check-item! (car pair) key-type (format "map key ~a" i))
+               (check-item! (cdr pair) value-type (format "map value ~a" i)))
+             #t))]
+     [else #f])))
+
 ;; G2b — annotation-directed Atom CONSTRUCTION. A fresh cell checked against an
 ;; expected (Atom T) adopts T when the value IS the constructor call `(atom init)`:
 ;; the init is checked against T (raising pointedly), so `(atom nil)` can be born
@@ -1276,6 +1471,7 @@
      (define effective-type (or expected-type (hash-ref env name #f)))
      (when effective-type
        (unless (or (check-hvec-literal value effective-type env (src-for value))
+                   (check-collection-literal value effective-type env (src-for value))
                    (check-atom-ctor value effective-type env (src-for value))
                    (type-compatible? inferred effective-type))
          (raise-diag 'def-type
@@ -1288,7 +1484,8 @@
      (define inferred (infer-expr value env))
      (define effective-type (or expected-type (hash-ref env name #f)))
      (when effective-type
-       (unless (or (check-atom-ctor value effective-type env (src-for value))
+       (unless (or (check-collection-literal value effective-type env (src-for value))
+                   (check-atom-ctor value effective-type env (src-for value))
                    (type-compatible? inferred effective-type))
          (raise-diag 'def-type
                      (format "defonce ~a: expected ~a, got ~a"
@@ -1310,7 +1507,11 @@
      (parameterize ([current-check-fn-name name])
        (define last-type (last-expr-type body body-env))
        (when effective-ret
-         (unless (or (type-compatible? last-type effective-ret)
+         (unless (or (check-collection-literal
+                      (last body) effective-ret body-env
+                      (or (src-for (last body))
+                          (body-loc-at body (sub1 (length body)))))
+                     (type-compatible? last-type effective-ret)
                      (and (type-app? effective-ret)
                           (eq? (type-app-ctor effective-ret) 'Promise)
                           (= 1 (length (type-app-args effective-ret)))
@@ -2922,6 +3123,7 @@
 
     [(call-form? e)
      (warn-target-exclude (call-form-fn e) e)
+     (check-collection-order-use! e env)
      (define raw-type (hash-ref env (call-form-fn e) ANY))
      (define fn-type
        (if (type-poly? raw-type)
@@ -3224,7 +3426,10 @@
          (hash-set! out (seq-destructure-rest-name bname) (or inferred ANY)))]
       [else
        (when declared
-         (unless (or (check-atom-ctor (let-binding-value b) declared out
+         (unless (or (check-collection-literal
+                      (let-binding-value b) declared out
+                      (src-for (let-binding-value b)))
+                     (check-atom-ctor (let-binding-value b) declared out
                                       (src-for (let-binding-value b)))
                      (type-compatible? inferred declared))
            (raise-diag 'let-binding
@@ -3437,6 +3642,7 @@
              'declared (type->string a-type)
              'repair "guard the value with a type predicate before this operation")))
   (unless (or (check-hvec-literal arg expected-type env call-src)   ; G3: tuple literal -> HVec param
+              (check-collection-literal arg expected-type env call-src)
               (type-compatible? a-type expected-type))
     (define sig-str (format "~a : ~a" fn-name (type->string fn-type)))
     (define suggestions (find-accessor-suggestions arg expected-type a-type env))

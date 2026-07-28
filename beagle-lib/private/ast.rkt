@@ -494,6 +494,9 @@
 ;; --- program structure -----------------------------------------------------
 (struct regex-contract (pattern-source match-type unit) #:transparent)
 (struct dynamic-contract (alternatives tag-abi) #:transparent)
+(struct collection-contract
+  (kind key-type value-type equality hashing order layout)
+  #:transparent)
 
 (struct program (mode
                  namespace
@@ -584,6 +587,7 @@
  ;; Program
  (struct-out regex-contract)
  (struct-out dynamic-contract)
+ (struct-out collection-contract)
  (struct-out program)
  ;; Nix AST
  (struct-out nix-inherit) (struct-out nix-inherit-from) (struct-out nix-with)

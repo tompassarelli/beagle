@@ -634,6 +634,60 @@ ZIG
       `(declare-extern app.rt/send
          ,(br '(Map Keyword Int) '-> 'Int))))))
 
+(test-case "collection checker rejects an annotation-widened literal element"
+  (check-exn
+   collection-contract-rejection?
+   (lambda ()
+     (check-zig-forms
+      `(defn bad [] :- Int
+         (let ,(br 'values ':- '(Vec Int) (br 1 "wrong"))
+           (count values)))))))
+
+(test-case "collection checker records value semantics, order, and layout"
+  (define prog
+    (parse-program
+     (map (lambda (datum) (datum->syntax #f datum))
+          `((define-target zig)
+            (ns collection-contract-shape)
+            (defn lookup ,(br 'values ':- '(Map (Vec Int) String))
+              :- Bool
+              (let ,(br 'needle ':- '(Vec Int) (br 1))
+                (contains? values needle)))))))
+  (type-check! prog)
+  (define lookup-form
+    (for/first ([form (in-list (program-forms prog))]
+                #:when (and (defn-form? form)
+                            (eq? (defn-form-name form) 'lookup)))
+      form))
+  (define contract
+    (hash-ref (program-semantic-contracts prog)
+              (car (defn-form-params lookup-form))))
+  (check-equal? (collection-contract-kind contract) 'Map)
+  (check-equal? (type->string (collection-contract-key-type contract))
+                "(Vec Int)")
+  (check-equal? (type->string (collection-contract-value-type contract))
+                "String")
+  (check-equal? (collection-contract-equality contract) 'clojure-value)
+  (check-equal? (collection-contract-hashing contract) 'clojure-hash)
+  (check-equal? (collection-contract-order contract) 'unspecified)
+  (check-equal? (collection-contract-layout contract) 'target-private))
+
+(test-case "collection checker names the built-in Vec extern ABI"
+  (define prog
+    (parse-program
+     (map (lambda (datum) (datum->syntax #f datum))
+          `((define-target zig)
+            (ns collection-contract-extern)
+            (declare-extern app.rt/size
+              ,(br '(Vec String) '-> 'Int))))))
+  (type-check! prog)
+  (define extern-type (hash-ref (program-externs prog) 'app.rt/size))
+  (define vec-type (car (type-fn-params extern-type)))
+  (define contract
+    (hash-ref (program-semantic-contracts prog) vec-type))
+  (check-equal? (collection-contract-layout contract)
+                '(abi-record beagle.vec 1)))
+
 ;; --- determinism: same input → byte-identical output --------------------------
 
 (test-case "emission is deterministic"

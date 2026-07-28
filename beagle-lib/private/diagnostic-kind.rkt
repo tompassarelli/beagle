@@ -106,6 +106,8 @@
 ;;                        checked Regex match-shape contract.
 ;;   dynamic-contract   : a closed Dyn declaration or use violates its finite
 ;;                        alternative set, narrowing, or total-operation rule.
+;;   collection-contract: a collection key/element, observable order, or native
+;;                        boundary layout violates the checked value contract.
 (define check-kind-cause-table
   (hasheq
    'target-form         'surface-divergence
@@ -123,6 +125,7 @@
    'macro-expansion-type-error 'type-error
    'regex-contract       'type-error
    'dynamic-contract     'type-error
+   'collection-contract  'type-error
    'purity-leak          'type-error
    'free-dotted-name     'type-error))
 
