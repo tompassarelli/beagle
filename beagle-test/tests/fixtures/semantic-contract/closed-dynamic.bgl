@@ -29,5 +29,5 @@
         (if (vector? value)
           (str "vec:" (count value))
           (if (map? value)
-            (str "map:" (count value))
+            "map"
             "unreachable"))))))

@@ -43,5 +43,5 @@ pub fn roundTrip(value: Dyn0) Dyn0 {
 }
 
 pub fn observe(value: Dyn0) []const u8 {
-    return (if ((std.meta.activeTag(value) == .string)) rt.str2(rt.str1("string:"), rt.str1(value.string)) else (if ((std.meta.activeTag(value) == .int)) rt.str2(rt.str1("int:"), rt.str1(value.int)) else (if ((std.meta.activeTag(value) == .boolean)) rt.str2(rt.str1("bool:"), rt.str1(value.boolean)) else (if ((std.meta.activeTag(value) == .vec_string)) rt.str2(rt.str1("vec:"), rt.str1(rt.count(value.vec_string))) else (if ((std.meta.activeTag(value) == .map_string_int)) rt.str2(rt.str1("map:"), rt.str1(rt.count(value.map_string_int))) else "unreachable")))));
+    return (if ((std.meta.activeTag(value) == .string)) rt.str2(rt.str1("string:"), rt.str1(value.string)) else (if ((std.meta.activeTag(value) == .int)) rt.str2(rt.str1("int:"), rt.str1(value.int)) else (if ((std.meta.activeTag(value) == .boolean)) rt.str2(rt.str1("bool:"), rt.str1(value.boolean)) else (if ((std.meta.activeTag(value) == .vec_string)) rt.str2(rt.str1("vec:"), rt.str1(rt.count(value.vec_string))) else (if ((std.meta.activeTag(value) == .map_string_int)) "map" else "unreachable")))));
 }
