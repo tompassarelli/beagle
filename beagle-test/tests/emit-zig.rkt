@@ -202,6 +202,7 @@
 (define semantic-bless? (and (getenv "BEAGLE_SEMANTIC_BLESS") #t))
 (define any-boundary-src (build-path semantic-contract-dir "any-boundary.bgl"))
 (define concrete-boundary-src (build-path semantic-contract-dir "concrete-boundary.bgl"))
+(define regex-src (build-path semantic-contract-dir "regex.bgl"))
 
 (define (parse-semantic-target-src target src)
   ;; Source locations contain an absolute checkout path. Strip only that
@@ -264,6 +265,14 @@
   (define zig-src (semantic-golden 'zig concrete-boundary-src "concrete-boundary"))
   (when ZIG
     (check-true (zig-compiles? zig-src "semantic-concrete-boundary"))))
+
+;; --- semantic contract 2: regex value and match shape -----------------------
+
+(test-case "regex contract pins CLJ bytes and emits compiling Zig"
+  (semantic-golden 'clj regex-src "regex")
+  (define zig-src (semantic-golden 'zig regex-src "regex"))
+  (when ZIG
+    (check-true (zig-compiles? zig-src "semantic-regex"))))
 
 ;; --- determinism: same input → byte-identical output --------------------------
 
