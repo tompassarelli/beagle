@@ -12,7 +12,7 @@
 ;;
 ;; When adding a surface form: add a catalog entry. The matrix then
 ;; forces the form to be handled (or pointedly rejected) on nix, clj,
-;; AND odin before it ships. (Zig parked to dormant 2026-06-13.)
+;; odin, and zig before it ships.
 
 (require rackunit
          racket/file
@@ -20,7 +20,7 @@
          beagle/private/check
          beagle/private/emit)
 
-(define LIVE-TARGETS '(nix clj odin))
+(define LIVE-TARGETS '(nix clj odin zig))
 
 ;; Compile SRC (a full beagle program, real reader: brackets/braces)
 ;; for TARGET. Returns the emitted string or raises whatever parse/

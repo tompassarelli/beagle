@@ -5,10 +5,11 @@
 ;; success (emitted bytes) and failure (diagnostic reason), and MUST NOT let
 ;; one item's exception/exit abort progress on later items in the same batch.
 ;;
-;; compile-source is NOT wired into any consumer yet (D1 scope) — these tests
-;; exercise it standalone against the corpus + generated fixtures, oracled
-;; against bin/beagle-build exactly as conformance.rkt's compile-beagle helper
-;; already does (subprocess pattern reused verbatim).
+;; These tests exercise compile-source against the corpus + generated fixtures,
+;; oracled against bin/beagle-build exactly as conformance.rkt's
+;; compile-beagle helper does (subprocess pattern reused verbatim). They also
+;; pin opt-in source retargeting: a production .bclj fixture compiled as Zig
+;; must byte-match the equivalent one-shot .bzig module.
 
 (require rackunit
          rackunit/text-ui
@@ -24,6 +25,10 @@
 (define-runtime-path beagle-build "../../bin/beagle-build")
 (define-runtime-path repo-root "../..")
 (define-runtime-path conformance-corpus-rktd "../conformance/corpus.rktd")
+(define-runtime-path retarget-clj-fixture
+  "fixtures/batch-compile/retarget-source.bclj")
+(define-runtime-path retarget-zig-oracle
+  "fixtures/batch-compile/zig-oracle/retarget-source.bzig")
 
 (define repo-root-str (path->string (simplify-path repo-root)))
 
@@ -102,6 +107,8 @@
                     "#lang beagle/js\n(ns gen.success.js)\n(defn add [x :- Int y :- Int] :- Int (+ x y))\n")
    (write-fixture! "gen-success.bnix"
                     "#lang beagle/nix\n(ns gen.success.nix)\n(def greeting :- String \"hi\")\n")
+   (write-fixture! "gen-success.bzig"
+                    "#lang beagle/zig\n(ns gen.success.zig)\n(defn add [x :- Int y :- Int] :- Int (+ x y))\n")
    ;; Pattern is deliberately outside the narrow JVM signature table. Its
    ;; declaration supplies the type at this explicit host boundary.
    (write-fixture! "gen-declared-jvm-static.bclj"
@@ -169,6 +176,30 @@
        (define-values (ok? cli-bytes err) (cli-compile src out))
        (check-true ok? (format "~a: CLI oracle failed: ~a" src err))
        (check-equal? emitted cli-bytes (format "~a: compile-source output != CLI output" src))))
+
+   (test-case "production .bclj retargets to Zig byte-identically"
+     (define-values (status retargeted)
+       (compile-source retarget-clj-fixture
+                       #:root repo-root-str
+                       #:target 'zig))
+     (check-eq? status 'ok
+                (format "retargeted .bclj failed: ~a" retargeted))
+
+     ;; The ordinary in-process .bzig path remains the dynamic-require oracle.
+     (define-values (zig-status in-process-zig)
+       (compile-source retarget-zig-oracle #:root repo-root-str))
+     (check-eq? zig-status 'ok
+                (format "ordinary .bzig compile failed: ~a" in-process-zig))
+
+     ;; And the unchanged one-shot CLI remains the byte-level external oracle.
+     (define out (fresh-cli-out-path))
+     (define-values (ok? cli-zig err)
+       (cli-compile retarget-zig-oracle out))
+     (check-true ok? (format "one-shot .bzig oracle failed: ~a" err))
+     (check-equal? in-process-zig cli-zig
+                   "ordinary in-process .bzig output != one-shot output")
+     (check-equal? retargeted cli-zig
+                   "retargeted .bclj Zig output != equivalent one-shot .bzig output"))
 
    (test-case "generated failure fixtures: normalized diagnostic, CLI agrees on failure"
      (for ([src (in-list generated-failure-fixtures)])
