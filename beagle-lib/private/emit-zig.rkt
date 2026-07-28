@@ -1400,11 +1400,27 @@
 ;; promotion is a by-value struct copy — but the boundary stays an
 ;; explicit, generated artifact the harness must call. Per-entity
 ;; systems (*-step) get their own SoA promotion in the engine layer.
+(define (owned-process-copy-contract? contract)
+  (and (ownership-contract? contract)
+       (eq? (ownership-contract-storage contract) 'owned)
+       (eq? (ownership-contract-lifetime contract) 'process)
+       (eq? (ownership-contract-transfer contract) 'copy)))
+
+(define (require-owned-process-copy! prog f)
+  (define contract
+    (hash-ref (program-semantic-contracts prog) f #f))
+  (unless (owned-process-copy-contract? contract)
+    (unsupported
+     (format "ownership contract for ~a" (defn-form-name f))
+     "commit-boundary lowering requires owned process-lifetime transfer by copy"))
+  contract)
+
 (define (emit-promote prog)
   (define entries
     (for/list ([f (in-list (program-forms prog))]
                #:when (and (defn-form? f)
                            (eq? (defn-form-name f) 'world-tick)))
+      (require-owned-process-copy! prog f)
       f))
   (cond
     [(null? entries) '()]
@@ -1673,7 +1689,7 @@
 ;; A system: name ends in -step, first param is Ctx. (A *-step fn
 ;; whose first param is NOT Ctx is an ordinary function — the Ctx
 ;; anchor is what makes the convention unmistakable.)
-(define (system-entry? f)
+(define (system-entry-shape? f)
   (and (defn-form? f)
        (regexp-match? #rx"-step$" (symbol->string (defn-form-name f)))
        (pair? (defn-form-params f))
@@ -1682,7 +1698,11 @@
          (and t (type-prim? t) (eq? (type-prim-name t) 'Ctx)))))
 
 (define (emit-engine prog)
-  (define entries (filter system-entry? (program-forms prog)))
+  (define entries
+    (for/list ([f (in-list (program-forms prog))]
+               #:when (system-entry-shape? f))
+      (require-owned-process-copy! prog f)
+      f))
   (cond
     [(null? entries) '()]
     [else

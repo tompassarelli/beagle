@@ -930,6 +930,20 @@ ZIG
       (parse-program
        (map (lambda (datum) (datum->syntax #f datum)) datums))))))
 
+(test-case "ownership lowering fails closed without the checked side-table fact"
+  (define prog
+    (parse-semantic-target-src 'zig ownership-lifetime-src))
+  (type-check! prog)
+  (define world-tick-form
+    (for/first ([form (in-list (program-forms prog))]
+                #:when (and (defn-form? form)
+                            (eq? (defn-form-name form) 'world-tick)))
+      form))
+  (hash-remove! (program-semantic-contracts prog) world-tick-form)
+  (check-exn
+   #rx"ownership contract for world-tick"
+   (lambda () (emit-program prog))))
+
 ;; --- determinism: same input → byte-identical output --------------------------
 
 (test-case "emission is deterministic"
