@@ -961,6 +961,14 @@
   (raise-diag 'collection-contract message details
               #:src (and node (src-for node))))
 
+(define current-order-killing-consumer? (make-parameter #f))
+
+(define (order-killing-collection-arg? fn-name index arg)
+  (and (= index 1)
+       (memq fn-name '(set count empty?))
+       (call-form? arg)
+       (memq (call-form-fn arg) '(keys vals))))
+
 (define (collection-value-contract? t)
   (cond
     [(type-prim? t)
@@ -1096,7 +1104,8 @@
              (pair? args))
     (define coll-type (infer-expr (car args) env))
     (when (and (collection-type? coll-type)
-               (memq (type-app-ctor coll-type) '(Map Set)))
+               (memq (type-app-ctor coll-type) '(Map Set))
+               (not (current-order-killing-consumer?)))
       (collection-contract-error
        call
        (format "~a observes iteration order of ~a, whose collection contract declares order unspecified"
@@ -4041,7 +4050,11 @@
       (memq fn-name '(some?))))
 
 (define (check-one-arg fn-name fn-type i expected-type arg env call-src)
-  (define a-type (infer-expr arg env))
+  (define a-type
+    (parameterize
+        ([current-order-killing-consumer?
+          (order-killing-collection-arg? fn-name i arg)])
+      (infer-expr arg env)))
   (let ([ev (enum-member-violation expected-type arg)])
     (when ev
       (raise-diag 'type-mismatch
