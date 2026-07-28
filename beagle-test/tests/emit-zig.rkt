@@ -242,6 +242,8 @@
 (define concrete-boundary-src (build-path semantic-contract-dir "concrete-boundary.bgl"))
 (define regex-src (build-path semantic-contract-dir "regex.bgl"))
 (define closed-dynamic-src (build-path semantic-contract-dir "closed-dynamic.bgl"))
+(define collections-layout-src
+  (build-path semantic-contract-dir "collections-layout.bgl"))
 
 (define (parse-semantic-target-src target src)
   ;; Source locations contain an absolute checkout path. Strip only that
@@ -549,6 +551,88 @@ ZIG
   (check-equal? (map type->string (dynamic-contract-alternatives contract))
                 '("String" "Int" "Bool"))
   (check-equal? (map cdr (dynamic-contract-tag-abi contract)) '(0 1 2)))
+
+;; --- semantic contract 4: collections, equality, and native layout ----------
+
+(test-case "collection contract pins CLJ bytes and emits compiling Zig"
+  (define clj-src
+    (semantic-golden 'clj collections-layout-src "collections-layout"))
+  (define zig-src
+    (semantic-golden 'zig collections-layout-src "collections-layout"))
+  (when CLOJURE
+    (define clj-file (make-temporary-file "semantic-collections-layout~a.clj"))
+    (dynamic-wind
+      void
+      (lambda ()
+        (call-with-output-file clj-file
+          #:exists 'replace
+          (lambda (p)
+            (display clj-src p)
+            (display
+             "\n(prn [(keyword-map-count) (keyword-map-absent) (compound-map-present) (set-dedup-count) (set-present) (compound-equal) (compound-hash-consistent) (keyword-distinct-from-string)])\n"
+             p)))
+        (define-values (ok? out err)
+          (run-command-output CLOJURE (path->string clj-file)))
+        (check-true ok? err)
+        (check-equal? out "[2 true true 2 true true true true]\n"))
+      (lambda () (delete-file clj-file))))
+  (when NODE
+    (define js-src (compile-semantic-target-src 'js collections-layout-src))
+    (define runnable
+      (regexp-replace* #px"(?m:^import [^\n]*\n)" js-src ""))
+    (define-values (ok? out err)
+      (run-command-output
+       NODE "--input-type=module" "-e"
+       (string-append
+        runnable
+        "\nconsole.log(JSON.stringify([keyword_map_count(), keyword_map_absent(), compound_map_present(), set_dedup_count(), set_present(), compound_equal(), compound_hash_consistent(), keyword_distinct_from_string()]));\n")))
+    (check-true ok? err)
+    (check-equal? out "[2,true,true,2,true,true,true,true]\n"))
+  (when ZIG
+    (check-true (zig-compiles? zig-src "semantic-collections-layout"))
+    (check-true
+     (zig-tests?
+      zig-src
+      #<<ZIG
+test "collection semantic contract behavior and keyword ABI metadata" {
+    try std.testing.expectEqual(@as(i64, 2), keywordMapCount());
+    try std.testing.expect(keywordMapAbsent());
+    try std.testing.expect(compoundMapPresent());
+    try std.testing.expectEqual(@as(i64, 2), setDedupCount());
+    try std.testing.expect(setPresent());
+    try std.testing.expect(compoundEqual());
+    try std.testing.expect(compoundHashConsistent());
+    try std.testing.expect(keywordDistinctFromString());
+
+    try std.testing.expectEqual(@as(u16, 1), rt.Keyword.abi_version);
+    try std.testing.expectEqual(@as(usize, 0), @offsetOf(rt.Keyword, "namespace"));
+    try std.testing.expectEqual(
+        @sizeOf([]const u8) * 2,
+        @sizeOf(rt.Keyword),
+    );
+}
+ZIG
+      "semantic-collections-layout-behavior"))))
+
+(define (collection-contract-rejection? e)
+  (and (beagle-diagnostic? e)
+       (eq? (beagle-diagnostic-kind e) 'collection-contract)))
+
+(test-case "collection checker rejects observable unspecified map order"
+  (check-exn
+   collection-contract-rejection?
+   (lambda ()
+     (check-zig-forms
+      '(defn bad [values :- (Map Keyword Int)] :- Keyword
+         (first (keys values)))))))
+
+(test-case "collection checker rejects target-private map extern layout"
+  (check-exn
+   collection-contract-rejection?
+   (lambda ()
+     (check-zig-forms
+      `(declare-extern app.rt/send
+         ,(br '(Map Keyword Int) '-> 'Int))))))
 
 ;; --- determinism: same input → byte-identical output --------------------------
 

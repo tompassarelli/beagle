@@ -1,0 +1,36 @@
+(ns semantic-contract.collections-layout)
+
+(defn keyword-map-count [] :- Int
+  (let [values :- (Map Keyword Int) {:alpha 1 :beagle/beta 2}]
+    (count values)))
+
+(defn keyword-map-absent [] :- Bool
+  (let [values :- (Map Keyword Int) {:alpha 1}]
+    (not (contains? values :missing))))
+
+(defn compound-map-present [] :- Bool
+  (let [needle :- (Vec Int) [1 2]
+        values :- (Map (Vec Int) String) {[1 2] "pair"}]
+    (contains? values needle)))
+
+(defn set-dedup-count [] :- Int
+  (let [values :- (Set (Vec Int)) #{[1 2] [1 2] [2 3]}]
+    (count values)))
+
+(defn set-present [] :- Bool
+  (let [needle :- (Vec Int) [1 2]
+        values :- (Set (Vec Int)) #{[1 2] [2 3]}]
+    (contains? values needle)))
+
+(defn compound-equal [] :- Bool
+  (let [left :- (Vec (Vec Int)) [[1 2] [3]]
+        right :- (Vec (Vec Int)) [[1 2] [3]]]
+    (= left right)))
+
+(defn compound-hash-consistent [] :- Bool
+  (let [left :- (Vec (Vec Int)) [[1 2] [3]]
+        right :- (Vec (Vec Int)) [[1 2] [3]]]
+    (= (hash left) (hash right))))
+
+(defn keyword-distinct-from-string [] :- Bool
+  (not= :alpha "alpha"))
