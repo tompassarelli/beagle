@@ -1184,6 +1184,19 @@
      (if (eq? fn 'nil?)
          (format "(~a == null)" raw)
          (format "(~a != null)" raw))]
+    [(and (eq? fn 'boolean) (= 1 (length args)))
+     (format "rt.truthy(~a)"
+             (parameterize ([raw-optional? #t])
+               (emit-expr (car args))))]
+    [(and (memq fn '(string? map? int? integer? sequential?))
+          (= 1 (length args)))
+     (format "rt.~a(~a)"
+             (case fn
+               [(string?) "is_string"]
+               [(map?) "is_map"]
+               [(int? integer?) "is_int"]
+               [(sequential?) "is_sequential"])
+             (emit-expr (car args)))]
     ;; rt_core's named stdlib pipelines are monomorphized just like fn-literal
     ;; mapv/filterv below. The function value never survives into Zig.
     [(and (eq? fn 'map) (= 2 (length args)) (symbol? (car args)))

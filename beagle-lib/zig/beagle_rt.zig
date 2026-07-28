@@ -265,6 +265,7 @@ pub fn io() std.Io {
 pub fn Map(comptime V: type) type {
     return struct {
         const Self = @This();
+        pub const beagle_map = true;
         inner: std.StringHashMap(V),
 
         pub fn empty() Self {
@@ -330,6 +331,7 @@ pub fn Map(comptime V: type) type {
 pub fn ValueMap(comptime K: type, comptime V: type) type {
     return struct {
         const Self = @This();
+        pub const beagle_map = true;
         const Entry = struct { key: K, value: V };
 
         entries: []const Entry,
@@ -446,6 +448,42 @@ pub fn ValueSet(comptime T: type) type {
 
 // --- strings (clojure.string + clojure.core) --------------------------------
 const WS = " \t\r\n";
+pub fn truthy(value: anytype) bool {
+    return switch (@typeInfo(@TypeOf(value))) {
+        .bool => value,
+        .optional => if (value) |present| truthy(present) else false,
+        else => true,
+    };
+}
+pub fn is_string(value: anytype) bool {
+    _ = value;
+    return isByteString(@TypeOf(value));
+}
+pub fn is_map(value: anytype) bool {
+    _ = value;
+    const T = @TypeOf(value);
+    return switch (@typeInfo(T)) {
+        .@"struct" => @hasDecl(T, "beagle_map"),
+        else => false,
+    };
+}
+pub fn is_int(value: anytype) bool {
+    _ = value;
+    return switch (@typeInfo(@TypeOf(value))) {
+        .int, .comptime_int => true,
+        else => false,
+    };
+}
+pub fn is_sequential(value: anytype) bool {
+    _ = value;
+    const T = @TypeOf(value);
+    if (isByteString(T)) return false;
+    return switch (@typeInfo(T)) {
+        .pointer => |p| p.size == .slice,
+        .array => true,
+        else => false,
+    };
+}
 pub fn starts_with(s: []const u8, p: []const u8) bool {
     return std.mem.startsWith(u8, s, p);
 }
