@@ -104,6 +104,8 @@
 ;;                        consistency check. Off by default (BEAGLE_PURITY).
 ;;   regex-contract     : a regex construction or consumer cannot preserve the
 ;;                        checked Regex match-shape contract.
+;;   dynamic-contract   : a closed Dyn declaration or use violates its finite
+;;                        alternative set, narrowing, or total-operation rule.
 (define check-kind-cause-table
   (hasheq
    'target-form         'surface-divergence
@@ -120,6 +122,7 @@
    'nixos-unknown-option 'type-error
    'macro-expansion-type-error 'type-error
    'regex-contract       'type-error
+   'dynamic-contract     'type-error
    'purity-leak          'type-error
    'free-dotted-name     'type-error))
 

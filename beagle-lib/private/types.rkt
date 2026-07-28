@@ -38,7 +38,7 @@
                                                (type-prim 'F32))))))
 
 (define PARAMETRIC-CTORS
-  '(Vec List Set Map Promise NixType Arr Ptr Atom HVec Regex))   ; G2: Atom (INVARIANT arm); G3: HVec (heterogeneous tuple)
+  '(Vec List Set Map Promise NixType Arr Ptr Atom HVec Regex Dyn))   ; G2: Atom (INVARIANT arm); G3: HVec (heterogeneous tuple)
 
 ;; --- type AST --------------------------------------------------------------
 
@@ -250,6 +250,10 @@
 (define (type-compatible? actual expected)
   (cond
     [(or (not actual) (not expected)) #t]
+    ;; A closed dynamic boundary is not an `Any` escape hatch. Values enter
+    ;; only through one of its declared alternatives, and two Dyn types agree
+    ;; only when their ordered alternatives agree exactly (the order is ABI).
+    [(and (dynamic-type? expected) (any-type? actual)) #f]
     [(any-type? actual)   #t]
     [(any-type? expected) #t]
     [(type-var? actual)   #t]
@@ -359,6 +363,18 @@
      (andmap (lambda (a) (type-compatible? a (car (type-app-args expected))))
              (type-app-args actual))]
 
+    [(dynamic-type? expected)
+     (cond
+       [(dynamic-type? actual)
+        (and (= (length (type-app-args actual))
+                (length (type-app-args expected)))
+             (andmap type-invariant-equal?
+                     (type-app-args actual)
+                     (type-app-args expected)))]
+       [else
+        (ormap (lambda (alt) (type-compatible? actual alt))
+               (type-app-args expected))])]
+
     ;; A shaped regex is a first-class Regex value. The argument is semantic
     ;; match-shape metadata, not a distinct runtime representation.
     [(and (type-app? actual) (eq? (type-app-ctor actual) 'Regex)
@@ -374,6 +390,9 @@
 
 (define (any-type? t)
   (and (type-prim? t) (eq? (type-prim-name t) 'Any)))
+
+(define (dynamic-type? t)
+  (and (type-app? t) (eq? (type-app-ctor t) 'Dyn)))
 
 ;; --- the type delaborator: an extensible head-keyed render registry --------
 ;; type->string is the single universal type renderer (every consumer — sig,
@@ -573,8 +592,10 @@
  current-type-aliases
  type?
  any-type?
+ dynamic-type?
  parse-type
  type-compatible?
+ type-invariant-equal?
  type->string
  infer-literal-type
  infer-type-var-bindings

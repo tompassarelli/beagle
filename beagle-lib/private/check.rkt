@@ -762,6 +762,7 @@
                    [current-nixos-schema nix-schema])
       (define-values (regex-bindings regex-string-ops)
         (prepare-regex-contracts! prog))
+      (prepare-dynamic-contracts! prog)
       (parameterize ([current-regex-bindings regex-bindings]
                      [current-regex-string-ops regex-string-ops])
         (for ([form (in-list (program-forms prog))])
@@ -805,6 +806,96 @@
               (for/or ([bound (in-hash-values (type-poly-bounds t))])
                 (type-contains-any? bound))))]
     [else #f]))
+
+;; --- closed dynamic values ---------------------------------------------------
+
+(define (dynamic-contract-error node message [details (hasheq)])
+  (raise-diag 'dynamic-contract message details #:src (and node (src-for node))))
+
+(define (type-contains-open-variable? t)
+  (cond
+    [(not t) #f]
+    [(type-var? t) #t]
+    [(type-poly? t) #t]
+    [(type-app? t) (ormap type-contains-open-variable? (type-app-args t))]
+    [(type-union? t) (ormap type-contains-open-variable? (type-union-alts t))]
+    [(type-fn? t)
+     (or (ormap type-contains-open-variable? (type-fn-params t))
+         (and (type-fn-rest-type t)
+              (type-contains-open-variable? (type-fn-rest-type t)))
+         (type-contains-open-variable? (type-fn-ret t)))]
+    [else #f]))
+
+(define (make-dynamic-contract t node)
+  (define alternatives (type-app-args t))
+  (when (null? alternatives)
+    (dynamic-contract-error
+     node "Dyn requires at least one concrete alternative"
+     (hasheq 'declared (type->string t))))
+  (for ([alt (in-list alternatives)])
+    (when (type-contains-any? alt)
+      (dynamic-contract-error
+       node
+       (format "Dyn alternative ~a cannot contain Any" (type->string alt))
+       (hasheq 'declared (type->string t) 'alternative (type->string alt))))
+    (when (type-contains-open-variable? alt)
+      (dynamic-contract-error
+       node
+       (format "Dyn alternative ~a must be a closed semantic type" (type->string alt))
+       (hasheq 'declared (type->string t) 'alternative (type->string alt)))))
+  (define duplicate
+    (for*/first ([alt (in-list alternatives)]
+                 [other (in-list alternatives)]
+                 #:when (and (not (eq? alt other))
+                             (type-invariant-equal? alt other)))
+      alt))
+  (when duplicate
+    (dynamic-contract-error
+     node
+     (format "Dyn alternatives must be unique; duplicate ~a"
+             (type->string duplicate))
+     (hasheq 'declared (type->string t) 'duplicate (type->string duplicate))))
+  (dynamic-contract
+   alternatives
+   (for/list ([alt (in-list alternatives)] [tag (in-naturals)])
+     (cons alt tag))))
+
+(define (prepare-dynamic-contracts! prog)
+  (define table (program-semantic-contracts prog))
+  (define (record! node t)
+    (when t
+      (define (walk ty)
+        (cond
+          [(dynamic-type? ty)
+           (define contract (make-dynamic-contract ty node))
+           (when node (hash-set! table node contract))
+           (for ([alt (in-list (type-app-args ty))]) (walk alt))]
+          [(type-app? ty) (for ([arg (in-list (type-app-args ty))]) (walk arg))]
+          [(type-union? ty) (for ([alt (in-list (type-union-alts ty))]) (walk alt))]
+          [(type-fn? ty)
+           (for ([p (in-list (type-fn-params ty))]) (walk p))
+           (when (type-fn-rest-type ty) (walk (type-fn-rest-type ty)))
+           (walk (type-fn-ret ty))]
+          [else (void)]))
+      (walk t)))
+  (for ([raw-form (in-list (program-forms prog))])
+    (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
+    (match form
+      [(def-form _ t _ _ _) (record! form t)]
+      [(defonce-form _ t _ _) (record! form t)]
+      [(defn-form _ params rest-p ret _ _ raises _)
+       (for ([p (in-list params)] #:when (param? p))
+         (record! p (param-type p)))
+       (when (and rest-p (param? rest-p))
+         (record! rest-p (param-type rest-p)))
+       (record! form ret)
+       (record! form raises)]
+      [(record-form _ fields)
+       (for ([field (in-list fields)])
+         (record! field (param-type field)))]
+      [_ (void)]))
+  (for ([(name t) (in-hash (program-externs prog))])
+    (record! #f t)))
 
 (define (check-zig-native-boundaries! prog)
   (when (eq? (program-target prog) 'zig)
@@ -1349,9 +1440,12 @@
    'string?  'String
    'number?  'Int
    'integer? 'Int
+   'int?     'Int
    'keyword? 'Keyword
    'symbol?  'Symbol
    'boolean? 'Bool
+   'map?     'Map
+   'vector?  'Vec
    ;; Nix builtins — flow-narrow on these in beagle/nix code.
    'builtins/isString    'String
    'builtins/isInt       'Int
@@ -1363,9 +1457,43 @@
   (and (type-prim? a) (type-prim? b)
        (eq? (type-prim-name a) (type-prim-name b))))
 
+(define (type-matches-predicate? t predicate-type)
+  (case predicate-type
+    [(Map) (and (type-app? t) (eq? (type-app-ctor t) 'Map))]
+    [(Vec) (and (type-app? t) (memq (type-app-ctor t) '(Vec HVec)))]
+    [else
+     (and (type-prim? t)
+          (eq? (type-prim-name t) predicate-type))]))
+
+(define (alternatives->closed-type alternatives)
+  (cond
+    [(null? alternatives) #f]
+    [(null? (cdr alternatives)) (car alternatives)]
+    [else (type-app 'Dyn alternatives)]))
+
+(define (predicate-narrowing-type current-type predicate-type)
+  (cond
+    [(dynamic-type? current-type)
+     (alternatives->closed-type
+      (filter (lambda (alt) (type-matches-predicate? alt predicate-type))
+              (type-app-args current-type)))]
+    [(memq predicate-type '(Map Vec)) #f]
+    [else (type-prim predicate-type)]))
+
 (define (remove-from-union current-type remove-type)
   (cond
     [(any-type? current-type) current-type]
+    [(dynamic-type? current-type)
+     (define removed
+       (if (dynamic-type? remove-type)
+           (type-app-args remove-type)
+           (list remove-type)))
+     (define remaining
+       (filter
+        (lambda (alt)
+          (not (ormap (lambda (r) (type-invariant-equal? alt r)) removed)))
+        (type-app-args current-type)))
+     (or (alternatives->closed-type remaining) current-type)]
     [(type-union? current-type)
      (define alts (type-union-alts current-type))
      (define remaining (filter (lambda (alt) (not (type-equal? alt remove-type))) alts))
@@ -1380,15 +1508,20 @@
 ;; truthiness live in test-narrowings below. Returns
 ;; (values var narrow-to-type negated?): the var's type IS narrow-to in
 ;; the true branch (negated? #f) or in the false branch (negated? #t).
-(define (extract-narrowing cond-expr)
+(define (extract-narrowing cond-expr env)
   (cond
     [(and (call-form? cond-expr)
           (hash-has-key? TYPE-PREDICATES (call-form-fn cond-expr))
           (= (length (call-form-args cond-expr)) 1)
           (symbol? (car (call-form-args cond-expr))))
-     (values (car (call-form-args cond-expr))
-             (type-prim (hash-ref TYPE-PREDICATES (call-form-fn cond-expr)))
-             #f)]
+     (define var (car (call-form-args cond-expr)))
+     (define target
+       (predicate-narrowing-type
+        (hash-ref env var ANY)
+        (hash-ref TYPE-PREDICATES (call-form-fn cond-expr))))
+     (if target
+         (values var target #f)
+         (values #f #f #f))]
     [(and (call-form? cond-expr)
           (eq? (call-form-fn cond-expr) 'some?)
           (= (length (call-form-args cond-expr)) 1)
@@ -1500,7 +1633,7 @@
                        '() ; falsy branch may be `false`, not nil
                        (list (cons cond-expr (type-prim 'Nil)))))])]
        [else
-        (define-values (var ntype neg?) (extract-narrowing cond-expr))
+        (define-values (var ntype neg?) (extract-narrowing cond-expr env))
         (cond
           [(not var) (values '() '())]
           [else
@@ -3233,6 +3366,13 @@
 ;; collects these so callers can refine return types — numeric
 ;; preservation — without re-inferring, which would duplicate
 ;; diagnostics from nested calls).
+(define (dynamic-total-operation? fn-name)
+  ;; Runtime type predicates inspect only the stable Dyn tag and are total over
+  ;; every alternative. Other Any-typed stdlib calls are not presumed total:
+  ;; they must receive an arm after occurrence typing proves it.
+  (or (hash-has-key? TYPE-PREDICATES fn-name)
+      (memq fn-name '(some?))))
+
 (define (check-one-arg fn-name fn-type i expected-type arg env call-src)
   (define a-type (infer-expr arg env))
   (let ([ev (enum-member-violation expected-type arg)])
@@ -3245,6 +3385,16 @@
                           'enum      (symbol->string (car ev))
                           'members   (map symbol->string (cdr ev)))
                   #:src call-src)))
+  (when (and (dynamic-type? a-type)
+             (any-type? expected-type)
+             (not (dynamic-total-operation? fn-name)))
+    (dynamic-contract-error
+     arg
+     (format "call to ~a cannot consume ~a without narrowing to a declared alternative"
+             fn-name (type->string a-type))
+     (hasheq 'function (symbol->string fn-name)
+             'declared (type->string a-type)
+             'repair "guard the value with a type predicate before this operation")))
   (unless (or (check-hvec-literal arg expected-type env call-src)   ; G3: tuple literal -> HVec param
               (type-compatible? a-type expected-type))
     (define sig-str (format "~a : ~a" fn-name (type->string fn-type)))
@@ -3325,7 +3475,10 @@
                          (lambda (e)
                            (error-handler e #f)
                            (values (hasheq) (seteq)))])
-          (prepare-regex-contracts! prog)))
+          (define-values (bindings string-ops)
+            (prepare-regex-contracts! prog))
+          (prepare-dynamic-contracts! prog)
+          (values bindings string-ops)))
       (parameterize ([current-regex-bindings regex-bindings]
                      [current-regex-string-ops regex-string-ops])
         (for ([form (in-list (program-forms prog))]

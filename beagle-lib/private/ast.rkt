@@ -493,6 +493,7 @@
 
 ;; --- program structure -----------------------------------------------------
 (struct regex-contract (pattern-source match-type unit) #:transparent)
+(struct dynamic-contract (alternatives tag-abi) #:transparent)
 
 (struct program (mode
                  namespace
@@ -582,6 +583,7 @@
  (struct-out let-binding) (struct-out require-entry)
  ;; Program
  (struct-out regex-contract)
+ (struct-out dynamic-contract)
  (struct-out program)
  ;; Nix AST
  (struct-out nix-inherit) (struct-out nix-inherit-from) (struct-out nix-with)

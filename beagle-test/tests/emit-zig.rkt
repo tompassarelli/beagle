@@ -419,6 +419,54 @@ ZIG
   (when ZIG
     (check-true (zig-compiles? zig-src "semantic-closed-dynamic"))))
 
+(define (dynamic-contract-rejection? e)
+  (and (beagle-diagnostic? e)
+       (eq? (beagle-diagnostic-kind e) 'dynamic-contract)))
+
+(for ([case (in-list
+             (list
+              (cons "empty"
+                    '((defn bad [value :- (Dyn)] :- Int 0)))
+              (cons "nested Any"
+                    '((defn bad [value :- (Dyn String (Vec Any))] :- Int 0)))
+              (cons "duplicate alternative"
+                    '((defn bad [value :- (Dyn String String)] :- Int 0)))
+              (cons "use without narrowing"
+                    '((defn bad [value :- (Dyn String Int)] :- Int
+                        (count value))))))])
+  (test-case (format "closed dynamic checker rejects ~a" (car case))
+    (check-exn dynamic-contract-rejection?
+               (lambda () (apply check-zig-forms (cdr case))))))
+
+(test-case "closed dynamic checker rejects an unlisted runtime value"
+  (check-exn
+   #rx"expected return \\(Dyn String Int\\), got Bool"
+   (lambda ()
+     (check-zig-forms
+      '(defn bad [value :- Bool] :- (Dyn String Int) value)))))
+
+(test-case "closed dynamic contract records declared-order integer tags"
+  (define prog
+    (parse-program
+     (map (lambda (datum) (datum->syntax #f datum))
+          '((define-target zig)
+            (ns dynamic-contract-shape)
+            (defn identity [value :- (Dyn String Int Bool)]
+              :- (Dyn String Int Bool)
+              value)))))
+  (type-check! prog)
+  (define identity-form
+    (for/first ([form (in-list (program-forms prog))]
+                #:when (and (defn-form? form)
+                            (eq? (defn-form-name form) 'identity)))
+      form))
+  (define contract
+    (hash-ref (program-semantic-contracts prog)
+              (car (defn-form-params identity-form))))
+  (check-equal? (map type->string (dynamic-contract-alternatives contract))
+                '("String" "Int" "Bool"))
+  (check-equal? (map cdr (dynamic-contract-tag-abi contract)) '(0 1 2)))
+
 ;; --- determinism: same input → byte-identical output --------------------------
 
 (test-case "emission is deterministic"
