@@ -250,6 +250,10 @@
 (define closed-dynamic-src (build-path semantic-contract-dir "closed-dynamic.bgl"))
 (define collections-layout-src
   (build-path semantic-contract-dir "collections-layout.bgl"))
+(define collection-order-killed-src
+  (build-path semantic-contract-dir "collection-order-killed.bgl"))
+(define collection-order-observed-src
+  (build-path semantic-contract-dir "collection-order-observed.bgl"))
 (define allocation-failure-src
   (build-path semantic-contract-dir "allocation-failure.bgl"))
 (define ownership-lifetime-src
@@ -644,6 +648,48 @@ ZIG
      (check-zig-forms
       '(defn bad [values :- (Map Keyword Int)] :- Keyword
          (first (keys values)))))))
+
+(test-case "collection checker accepts order-killing consumers and pins target bytes"
+  (define clj-src
+    (semantic-golden 'clj collection-order-killed-src
+                     "collection-order-killed"))
+  (define zig-src
+    (semantic-golden 'zig collection-order-killed-src
+                     "collection-order-killed"))
+  (when ZIG
+    (check-true (zig-compiles? zig-src "semantic-collection-order-killed"))
+    (check-true
+     (zig-tests?
+      zig-src
+      #<<ZIG
+test "order-killed keys and vals remain order-free" {
+    const populated = rt.ValueMap(rt.Keyword, i64).empty()
+        .assoc(rt.keyword("", "beta"), 2)
+        .assoc(rt.keyword("", "alpha"), 1);
+    const empty = rt.ValueMap(rt.Keyword, i64).empty();
+    try std.testing.expect(keySetMatches(populated));
+    try std.testing.expectEqual(@as(i64, 2), keyCount(populated));
+    try std.testing.expect(valuesEmpty(empty));
+    try std.testing.expect(keyPresent(populated));
+}
+ZIG
+      "semantic-collection-order-killed-behavior"))))
+
+(test-case "collection checker pins E023 for order-observing consumer"
+  (define expected-path
+    (build-path semantic-contract-dir
+                "collection-order-observed.checker-error"))
+  (define actual
+    (with-handlers
+      ([beagle-diagnostic?
+        (lambda (e)
+          (format "~a\n~a\n"
+                  (hash-ref (beagle-diagnostic-details e) 'error-code)
+                  (exn-message e)))])
+      (type-check!
+       (parse-semantic-target-src 'zig collection-order-observed-src))
+      "NO ERROR\n"))
+  (check-equal? actual (file->string expected-path)))
 
 (test-case "collection checker rejects target-private map extern layout"
   (check-exn
