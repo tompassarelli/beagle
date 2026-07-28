@@ -48,6 +48,7 @@ done
 
 STATUS="ok"          # whole-environment rollup (tools + targets) — informational
 REPAIR_STATUS="ok"   # repair-loop health ONLY (daemon + functional canaries) — gates exit
+ENVIRONMENT_TRUSTED=1 # package scope must resolve this checkout before USE is safe
 CHECKS=()
 
 check_tool() {
@@ -100,25 +101,36 @@ else
     [[ "$STATUS" == "ok" ]] && STATUS="warning"
 fi
 
-# Daemon — liveness, with --revive self-heal. Uses `beagle-daemon status`
-# (returns {"status":"running"}) rather than a raw port ping.
+# Daemon — liveness, with --revive self-heal. Probe the endpoint directly:
+# `beagle-daemon status` also inspects PID/runtime-file environment shape,
+# which sandboxed clones cannot always observe when TCP is reachable.
 BEAGLE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-daemon_responding() { "$BIN/beagle-daemon" status 2>/dev/null | grep -q '"status":"running"'; }
+DAEMON_REACHABLE=0
+DAEMON_REVIVED=0
+daemon_responding() {
+    local port response
+    port="$(beagle_daemon_port 2>/dev/null || true)"
+    [[ "$port" =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 )) || return 1
+    exec 3<>"/dev/tcp/127.0.0.1/$port" 2>/dev/null || return 1
+    printf 'ping\n' >&3 || { exec 3>&-; return 1; }
+    IFS= read -r -t 2 response <&3 || { exec 3>&-; return 1; }
+    exec 3>&-
+    [[ "$response" == *'"ok":true'* && "$response" == *'"status":"running"'* ]]
+}
 if daemon_responding; then
-    CHECKS+=("{\"name\":\"daemon\",\"status\":\"ok\",\"message\":\"running\"}")
+    DAEMON_REACHABLE=1
 elif [[ "$REVIVE" == "1" ]]; then
     "$BIN/beagle-daemon" start --watch "$WATCH_DIR" >/dev/null 2>&1 || true
     for _ in 1 2 3 4 5; do daemon_responding && break; done
     if daemon_responding; then
-        CHECKS+=("{\"name\":\"daemon\",\"status\":\"ok\",\"message\":\"revived (watch $WATCH_DIR)\"}")
+        DAEMON_REACHABLE=1
+        DAEMON_REVIVED=1
     else
-        CHECKS+=("{\"name\":\"daemon\",\"status\":\"error\",\"message\":\"down; revive failed (beagle-daemon start --watch $WATCH_DIR)\"}")
         STATUS="error"; REPAIR_STATUS="error"
     fi
 else
     # daemon powers the watcher + the hook's fast feedback path — its absence
     # is a real repair-loop degradation, not a benign warning.
-    CHECKS+=("{\"name\":\"daemon\",\"status\":\"error\",\"message\":\"not running (re-run with --revive, or: beagle-daemon start --watch $WATCH_DIR)\"}")
     STATUS="error"; REPAIR_STATUS="error"
 fi
 
@@ -177,14 +189,30 @@ fi
 _scope_probe="$("$RACKET" -e '(require setup/collection-search)(with-handlers ([exn:fail? (lambda (e) (displayln "UNRESOLVED"))]) (displayln (path->string (collection-file-path "parse.rkt" "beagle" "private"))))' 2>/dev/null | head -1)"
 _scope_root="$(cd "$BEAGLE_ROOT" && pwd -P)"
 if [[ -z "$_scope_probe" || "$_scope_probe" == "UNRESOLVED" ]]; then
+    ENVIRONMENT_TRUSTED=0
     rl_fail "package-scope" "beagle collection unresolvable (no pkg link and no PLTCOLLECTS scope). Repair: run bin/beagle from a real checkout, or 'source bin/_beagle-racket' which auto-scopes PLTCOLLECTS at this root ($_scope_root)."
 else
     _scope_probe_real="$(cd "$(dirname "$_scope_probe")" 2>/dev/null && pwd -P || echo "$_scope_probe")"
     if [[ "$_scope_probe_real" != "$_scope_root" && "$_scope_probe_real" != "$_scope_root"/* ]]; then
+        ENVIRONMENT_TRUSTED=0
         rl_fail "package-scope" "beagle collection resolves to $_scope_probe (root $_scope_probe_real) but THIS checkout is $_scope_root — tests would load a SIBLING parse.rkt (false green). Repair: invoke via bin/* (they 'source bin/_beagle-racket', which scopes PLTCOLLECTS at this root with NO global pkg mutation); never rely on the global 'raco pkg' links inside a worktree."
     else
         rl_ok "package-scope"
     fi
+fi
+
+# A reachable endpoint and an unusable checkout are distinct diagnoses. Do not
+# turn package-scope distrust into a false "not running" daemon report.
+if [[ "$DAEMON_REACHABLE" == "1" ]]; then
+    if [[ "$ENVIRONMENT_TRUSTED" == "0" ]]; then
+        CHECKS+=("{\"name\":\"daemon\",\"status\":\"warning\",\"message\":\"reachable, environment untrusted\"}")
+    elif [[ "$DAEMON_REVIVED" == "1" ]]; then
+        CHECKS+=("{\"name\":\"daemon\",\"status\":\"ok\",\"message\":\"revived (watch $WATCH_DIR)\"}")
+    else
+        CHECKS+=("{\"name\":\"daemon\",\"status\":\"ok\",\"message\":\"running\"}")
+    fi
+else
+    CHECKS+=("{\"name\":\"daemon\",\"status\":\"error\",\"message\":\"not running (re-run with --revive, or: beagle-daemon start --watch $WATCH_DIR)\"}")
 fi
 
 # full machinery (--deep): parse -> diagnostic -> suggestion -> producer ->
