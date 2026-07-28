@@ -71,9 +71,9 @@
    'clojure.string/join     (fn-of '(Any) 'String #:rest 'Any)
    ;; (split s re) and (split s re limit) — Clojure's 3-arg form takes an Int
    ;; limit (-1 keeps trailing empties). Optional 3rd arg via a rest Int.
-   'clojure.string/split    (type-fn (list (p 'String) (p 'Any)) (p 'Int)
+   'clojure.string/split    (type-fn (list (p 'String) (p 'Regex)) (p 'Int)
                                      (type-app 'Vec (list (p 'String))))
-   'clojure.string/replace  (fn-of '(String Any Any) 'String)
+   'clojure.string/replace  (fn-of '(String (U String Regex) String) 'String)
    'clojure.string/trim     (fn-of '(String) 'String)
    'clojure.string/triml    (fn-of '(String) 'String)
    'clojure.string/trimr    (fn-of '(String) 'String)

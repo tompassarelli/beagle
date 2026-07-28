@@ -1120,7 +1120,12 @@
     (inject-hygiene-aliases parsed0 form-stxs0 hygiene-alias-table))
 
   (define prog
-    (program mode ns parsed registry externs (reverse requires) (reverse imports) form-stxs src-table imp-rec-fields imp-rec-field-order imp-rec-ns (hash-keys imp-scalar-fns) imp-scalar-preds imp-symbol-ns imp-union-members imp-param-unions imp-enums imp-dyn-vars target gen-class?))
+    (program mode ns parsed registry externs (reverse requires) (reverse imports)
+             form-stxs src-table (make-hasheq)
+             imp-rec-fields imp-rec-field-order imp-rec-ns
+             (hash-keys imp-scalar-fns) imp-scalar-preds imp-symbol-ns
+             imp-union-members imp-param-unions imp-enums imp-dyn-vars
+             target gen-class?))
   ;; Stash the macro-derived-table keyed by the program so check.rkt
   ;; can recover it via program-macro-derived-table after this call
   ;; returns and the parameterize unwinds.

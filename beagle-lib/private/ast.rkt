@@ -492,6 +492,8 @@
 (struct require-entry (ns alias refer) #:transparent)
 
 ;; --- program structure -----------------------------------------------------
+(struct regex-contract (pattern-source match-type unit) #:transparent)
+
 (struct program (mode
                  namespace
                  forms
@@ -501,6 +503,7 @@
                  imports
                  form-stxs
                  src-table
+                 semantic-contracts
                  imported-record-fields
                  imported-record-field-order
                  imported-record-ns
@@ -578,6 +581,7 @@
  (struct-out type-impl) (struct-out impl-method)
  (struct-out let-binding) (struct-out require-entry)
  ;; Program
+ (struct-out regex-contract)
  (struct-out program)
  ;; Nix AST
  (struct-out nix-inherit) (struct-out nix-inherit-from) (struct-out nix-with)

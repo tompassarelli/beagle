@@ -18,7 +18,7 @@
          "tags.rkt")
 
 (define PRIMITIVES
-  '(String Int Float Bool Keyword Symbol Nil Any NixType
+  '(String Int Float Bool Keyword Symbol Nil Any Regex NixType
     ;; Odin/low-level numeric types — concrete widths for native backends
     U8 U16 U32 U64 I8 I16 I32 F32))
 
@@ -38,7 +38,7 @@
                                                (type-prim 'F32))))))
 
 (define PARAMETRIC-CTORS
-  '(Vec List Set Map Promise NixType Arr Ptr Atom HVec))   ; G2: Atom (INVARIANT arm); G3: HVec (heterogeneous tuple)
+  '(Vec List Set Map Promise NixType Arr Ptr Atom HVec Regex))   ; G2: Atom (INVARIANT arm); G3: HVec (heterogeneous tuple)
 
 ;; --- type AST --------------------------------------------------------------
 
@@ -358,6 +358,12 @@
           (= 1 (length (type-app-args expected))))
      (andmap (lambda (a) (type-compatible? a (car (type-app-args expected))))
              (type-app-args actual))]
+
+    ;; A shaped regex is a first-class Regex value. The argument is semantic
+    ;; match-shape metadata, not a distinct runtime representation.
+    [(and (type-app? actual) (eq? (type-app-ctor actual) 'Regex)
+          (type-prim? expected) (eq? (type-prim-name expected) 'Regex))
+     #t]
 
     [(and (type-app? actual) (type-app? expected))
      (and (eq? (type-app-ctor actual) (type-app-ctor expected))

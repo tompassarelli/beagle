@@ -24,6 +24,8 @@
 
 (define ANY (type-prim 'Any))
 (define NIL (type-prim 'Nil))
+(define REGEX (type-prim 'Regex))
+(define STRING (type-prim 'String))
 
 ;; Check-profile levels:
 ;;   0 — parse only (no type checking)
@@ -69,6 +71,9 @@
 
 ;; Current compile target — set during type-check!
 (define current-check-target (make-parameter 'clj))
+(define current-semantic-contracts (make-parameter #f))
+(define current-regex-bindings (make-parameter (hasheq)))
+(define current-regex-string-ops (make-parameter (seteq)))
 
 ;; --- target-form gating -----------------------------------------------------
 ;; Target-specific AST forms must only appear in their target.
@@ -303,6 +308,7 @@
     [(purity-leak)         "E019"]
     [(swallowed-binding)   "E020"]
     [(free-dotted-name)    "E021"]
+    [(regex-contract)      "E022"]
     [else                 "E000"]))
 
 ;; Expected/actual detail pair carrying BOTH the human strings (kept verbatim,
@@ -436,6 +442,293 @@
                (hash-set! nixos-schema-cache schema-path (cons mtime schema))
                schema)))))
 
+;; --- regex semantic contracts ----------------------------------------------
+
+(define (nullable-type t)
+  (type-union (list t NIL)))
+
+(define (regex-contract-error node message [details (hasheq)])
+  (raise-diag 'regex-contract message details #:src (src-for node)))
+
+(define (mark-captures-optional captures start)
+  (for/list ([optional? (in-list captures)]
+             [i (in-naturals)])
+    (if (>= i start) #t optional?)))
+
+(define (zero-min-quantifier? pattern i)
+  (and (< i (string-length pattern))
+       (or (memq (string-ref pattern i) '(#\? #\*))
+           (and (char=? (string-ref pattern i) #\{)
+                (< (add1 i) (string-length pattern))
+                (char=? (string-ref pattern (add1 i)) #\0)))))
+
+;; Parse only the semantic shape: balanced structure, capture optionality, and
+;; target capability. Host regex engines remain responsible for execution.
+(define (analyze-regex-pattern pattern node)
+  (unless (string? pattern)
+    (regex-contract-error
+     node
+     "dynamic regex pattern requires an explicit match shape at its Regex boundary"
+     (hasheq 'expected "compile-time String pattern"
+             'actual (format "~v" pattern))))
+  (when (and (eq? (current-check-target) 'zig)
+             (> (string-length pattern) 512))
+    (regex-contract-error
+     node
+     "zig regex pattern exceeds the checked 512-byte static limit"
+     (hasheq 'target "zig" 'limit 512)))
+  (define captures '())
+  ;; frame = (list capture-start-index open-offset)
+  (define groups '())
+  (define n (string-length pattern))
+  (let loop ([i 0])
+    (cond
+      [(>= i n)
+       (unless (null? groups)
+         (regex-contract-error
+          node
+          (format "unclosed regex group beginning at offset ~a" (cadar groups))
+          (hasheq 'pattern pattern)))
+       (define capture-types
+         (for/list ([optional? (in-list captures)])
+           (if optional? (nullable-type STRING) STRING)))
+       (regex-contract
+        pattern
+        (if (null? capture-types)
+            STRING
+            (type-app 'HVec (cons STRING capture-types)))
+        'utf8-codepoint)]
+      [else
+       (define ch (string-ref pattern i))
+       (cond
+         [(char=? ch #\\)
+          (when (= (add1 i) n)
+            (regex-contract-error node "regex pattern ends with a dangling escape"
+                                  (hasheq 'pattern pattern 'offset i)))
+          (define escaped (string-ref pattern (add1 i)))
+          (when (and (eq? (current-check-target) 'zig)
+                     (or (char-numeric? escaped)
+                         (memq escaped '(#\p #\P))))
+            (regex-contract-error
+             node
+             (format "zig regex does not support \\~a" escaped)
+             (hasheq 'target "zig" 'pattern pattern 'offset i)))
+          (loop (+ i 2))]
+         [(char=? ch #\[)
+          (let class-loop ([j (add1 i)] [escaped? #f])
+            (cond
+              [(>= j n)
+               (regex-contract-error node "unclosed regex character class"
+                                     (hasheq 'pattern pattern 'offset i))]
+              [escaped? (class-loop (add1 j) #f)]
+              [(char=? (string-ref pattern j) #\\)
+               (class-loop (add1 j) #t)]
+              [(char=? (string-ref pattern j) #\])
+               (loop (add1 j))]
+              [else (class-loop (add1 j) #f)]))]
+         [(char=? ch #\()
+          (define special?
+            (and (< (+ i 1) n) (char=? (string-ref pattern (+ i 1)) #\?)))
+          (define noncapturing?
+            (and special? (< (+ i 2) n)
+                 (char=? (string-ref pattern (+ i 2)) #\:)))
+          (when (and special? (not noncapturing?)
+                     (eq? (current-check-target) 'zig))
+            (regex-contract-error
+             node
+             "zig regex supports non-capturing (?:...) groups, but not lookaround, inline flags, or named groups"
+             (hasheq 'target "zig" 'pattern pattern 'offset i)))
+          (define capture-start (length captures))
+          (unless special?
+            (set! captures (append captures (list #f))))
+          (set! groups (cons (list capture-start i) groups))
+          (loop (if noncapturing? (+ i 3) (add1 i)))]
+         [(char=? ch #\))
+          (when (null? groups)
+            (regex-contract-error node "unmatched regex closing parenthesis"
+                                  (hasheq 'pattern pattern 'offset i)))
+          (define frame (car groups))
+          (set! groups (cdr groups))
+          (when (zero-min-quantifier? pattern (add1 i))
+            (set! captures (mark-captures-optional captures (car frame))))
+          (loop (add1 i))]
+         [(char=? ch #\|)
+          (set! captures (map (lambda (_) #t) captures))
+          (when (eq? (current-check-target) 'zig)
+            (regex-contract-error
+             node
+             "zig regex alternation is not yet supported"
+             (hasheq 'target "zig" 'pattern pattern 'offset i)))
+          (loop (add1 i))]
+         [(and (memq ch '(#\* #\+ #\?))
+               (< (add1 i) n)
+               (char=? (string-ref pattern (add1 i)) #\?))
+          (when (eq? (current-check-target) 'zig)
+            (regex-contract-error
+             node
+             "zig regex lazy quantifiers are not yet supported"
+             (hasheq 'target "zig" 'pattern pattern 'offset i)))
+          (loop (+ i 2))]
+         [else (loop (add1 i))])])))
+
+(define (store-regex-contract! node contract)
+  (define table (current-semantic-contracts))
+  (when (and table node contract)
+    (hash-set! table node contract))
+  contract)
+
+(define (regex-construction-contract e)
+  (or (and (current-semantic-contracts)
+           (hash-ref (current-semantic-contracts) e #f))
+      (cond
+    [(regex-lit? e)
+     (store-regex-contract!
+      e (analyze-regex-pattern (regex-lit-pattern e) e))]
+    [(and (call-form? e) (eq? (call-form-fn e) 're-pattern))
+     (define args (call-form-args e))
+     (unless (= (length args) 1)
+       (regex-contract-error e "re-pattern expects exactly one pattern String"
+                             (hasheq 'actual-arity (length args))))
+     (unless (string? (car args))
+       (regex-contract-error
+        e
+        "dynamic re-pattern requires an explicit match shape at its Regex boundary"
+        (hasheq 'expected "compile-time String pattern")))
+     (store-regex-contract! e (analyze-regex-pattern (car args) e))]
+    [else #f])))
+
+(define (regex-contract-for-expr e)
+  (or (and (current-semantic-contracts)
+           (hash-ref (current-semantic-contracts) e #f))
+      (and (symbol? e) (hash-ref (current-regex-bindings) e #f))
+      (regex-construction-contract e)))
+
+(define (regex-type? t)
+  (or (and (type-prim? t) (eq? (type-prim-name t) 'Regex))
+      (and (type-app? t)
+           (eq? (type-app-ctor t) 'Regex)
+           (= (length (type-app-args t)) 1))))
+
+(define (regex-contract-from-type t node)
+  (and (type-app? t)
+       (eq? (type-app-ctor t) 'Regex)
+       (= (length (type-app-args t)) 1)
+       (let ([match-type (car (type-app-args t))])
+         (unless (or (and (type-prim? match-type)
+                          (eq? (type-prim-name match-type) 'String))
+                     (and (type-app? match-type)
+                          (eq? (type-app-ctor match-type) 'HVec)
+                          (pair? (type-app-args match-type))
+                          (andmap
+                           (lambda (part)
+                             (or (type-compatible? part STRING)
+                                 (type-compatible? part (nullable-type STRING))))
+                           (type-app-args match-type))))
+           (regex-contract-error
+            node
+            (format "Regex match shape must be String or (HVec String String? ...), got ~a"
+                    (type->string match-type))
+            (hasheq 'declared (type->string t))))
+         (regex-contract #f match-type 'utf8-codepoint))))
+
+(define (check-regex-arg! e env who)
+  (define t (infer-expr e env))
+  (unless (regex-type? t)
+    (regex-contract-error
+     e
+     (format "~a expects a Regex value, got ~a" who (type->string t))
+     (hash-set* (type-mismatch-details REGEX t)
+                'function (symbol->string who))))
+  (or (regex-contract-for-expr e)
+      (regex-contract-from-type t e)
+      (regex-contract-error
+       e
+       (format "~a received a Regex without a declared match shape" who)
+       (hasheq 'function (symbol->string who)
+               'repair "construct it from a compile-time pattern at a typed Regex boundary"))))
+
+(define (check-string-arg! e env who)
+  (define t (infer-expr e env))
+  (unless (type-compatible? t STRING)
+    (regex-contract-error
+     e
+     (format "~a expects String, got ~a" who (type->string t))
+     (hash-set* (type-mismatch-details STRING t)
+                'function (symbol->string who)))))
+
+(define (prepare-regex-contracts! prog)
+  (define table (program-semantic-contracts prog))
+  (hash-clear! table)
+  (define bindings (make-hasheq))
+  (for ([raw-form (in-list (program-forms prog))])
+    (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
+    (define-values (name declared-type value)
+      (cond
+        [(def-form? form)
+         (values (def-form-name form) (def-form-type form) (def-form-value form))]
+        [(defonce-form? form)
+         (values (defonce-form-name form) (defonce-form-type form)
+                 (defonce-form-value form))]
+        [else (values #f #f #f)]))
+    (when name
+      (define declared-contract
+        (and declared-type (regex-contract-from-type declared-type form)))
+      (define contract
+        (cond
+          [(and (call-form? value)
+                (eq? (call-form-fn value) 're-pattern)
+                (= (length (call-form-args value)) 1)
+                (not (string? (car (call-form-args value)))))
+           (or declared-contract
+               (regex-contract-error
+                value
+                "dynamic re-pattern requires an explicit match shape at its Regex boundary"
+                (hasheq 'expected "(Regex MATCH-TYPE)")))]
+          [else (regex-construction-contract value)]))
+      (when contract
+        (when (and declared-contract
+                   (not (type-compatible?
+                         (regex-contract-match-type contract)
+                         (regex-contract-match-type declared-contract))))
+          (regex-contract-error
+           value
+           (format "declared Regex match shape ~a disagrees with static pattern shape ~a"
+                   (type->string (regex-contract-match-type declared-contract))
+                   (type->string (regex-contract-match-type contract)))
+           (hasheq 'declared
+                   (type->string (regex-contract-match-type declared-contract))
+                   'inferred
+                   (type->string (regex-contract-match-type contract)))))
+        (store-regex-contract! value contract)
+        (hash-set! bindings name contract)
+        (hash-set! table form contract)))
+    (when (defn-form? form)
+      (define body (defn-form-body form))
+      (define return-contract
+        (and (defn-form-return-type form)
+             (regex-contract-from-type (defn-form-return-type form) form)))
+      (when (and return-contract (pair? body))
+        (define value (last body))
+        (when (and (call-form? value)
+                   (eq? (call-form-fn value) 're-pattern)
+                   (= (length (call-form-args value)) 1)
+                   (not (string? (car (call-form-args value)))))
+          (store-regex-contract! value return-contract)))))
+  (define aliases
+    (for/fold ([names (seteq 'clojure.string/split
+                            'clojure.string/replace)])
+              ([r (in-list (program-requires prog))])
+      (if (eq? (require-entry-ns r) 'clojure.string)
+          (let ([prefix (require-entry-alias r)])
+            (if prefix
+                (set-add
+                 (set-add names
+                          (string->symbol (format "~a/split" prefix)))
+                 (string->symbol (format "~a/replace" prefix)))
+                names))
+          names)))
+  (values bindings aliases))
+
 (define (type-check! prog)
   (when (and (eq? (program-mode prog) 'strict)
              (>= (current-check-profile) 1))
@@ -453,23 +746,28 @@
     (parameterize ([current-union-members UNION-MEMBERS]
                    [current-enum-types ENUM-TYPES]
                    [current-check-target (program-target prog)]
+                   [current-semantic-contracts (program-semantic-contracts prog)]
                    [current-nixos-schema nix-schema])
-      (for ([form (in-list (program-forms prog))])
-        ;; Walk the form transitively — a top-level def-form may wrap a
-        ;; macro-derived value inside (def-form y "hello"). Setting the
-        ;; ctx on transitive matches lets raise-diag rebucket the error
-        ;; even when it fires on the outer def-form.
-        (define macro-ctx (form-macro-derived-ctx macro-tbl form))
-        (parameterize ([current-macro-expansion-ctx
-                        (if (eq? macro-ctx #f) #f macro-ctx)])
-          (check-target-form form)
-          (check-form form env))))
-    (check-qualified-resolution! prog env)
-    (check-zig-native-boundaries! prog)
-    (check-zig-world-escape! prog)
-    (check-scalar-provenance! prog)
-    (check-nix-free-dotted! prog)
-    (check-purity! prog)))
+      (define-values (regex-bindings regex-string-ops)
+        (prepare-regex-contracts! prog))
+      (parameterize ([current-regex-bindings regex-bindings]
+                     [current-regex-string-ops regex-string-ops])
+        (for ([form (in-list (program-forms prog))])
+          ;; Walk the form transitively — a top-level def-form may wrap a
+          ;; macro-derived value inside (def-form y "hello"). Setting the
+          ;; ctx on transitive matches lets raise-diag rebucket the error
+          ;; even when it fires on the outer def-form.
+          (define macro-ctx (form-macro-derived-ctx macro-tbl form))
+          (parameterize ([current-macro-expansion-ctx
+                          (if (eq? macro-ctx #f) #f macro-ctx)])
+            (check-target-form form)
+            (check-form form env)))
+        (check-qualified-resolution! prog env)
+        (check-zig-native-boundaries! prog)
+        (check-zig-world-escape! prog)
+        (check-scalar-provenance! prog)
+        (check-nix-free-dotted! prog)
+        (check-purity! prog)))))
 
 ;; --- concrete native boundaries ---------------------------------------------
 
@@ -1727,7 +2025,88 @@
          (schema-type-for-config-sym e)
          ANY)]
     [(quoted? e) ANY]
-    [(regex-lit? e) ANY]
+    [(regex-lit? e)
+     (regex-construction-contract e)
+     REGEX]
+    [(and (call-form? e) (eq? (call-form-fn e) 're-pattern))
+     (define contract (regex-construction-contract e))
+     (type-app 'Regex (list (regex-contract-match-type contract)))]
+    [(and (call-form? e)
+          (memq (call-form-fn e) '(re-find re-matches)))
+     (define fn (call-form-fn e))
+     (define args (call-form-args e))
+     (unless (= (length args) 2)
+       (regex-contract-error
+        e
+        (format "~a expects Regex and String arguments" fn)
+        (hasheq 'function (symbol->string fn)
+                'actual-arity (length args))))
+     (define contract (check-regex-arg! (car args) env fn))
+     (check-string-arg! (cadr args) env fn)
+     (store-regex-contract! e contract)
+     (nullable-type (regex-contract-match-type contract))]
+    [(and (call-form? e)
+          (set-member? (current-regex-string-ops) (call-form-fn e))
+          (regexp-match? #rx"/split$" (symbol->string (call-form-fn e))))
+     (define fn (call-form-fn e))
+     (define args (call-form-args e))
+     (unless (memq (length args) '(2 3))
+       (regex-contract-error
+        e
+        (format "~a expects String, Regex, and optional Int limit" fn)
+        (hasheq 'function (symbol->string fn)
+                'actual-arity (length args))))
+     (when (and (eq? (current-check-target) 'zig)
+                (= (length args) 3))
+       (regex-contract-error
+        e
+        "zig regex split limit is not yet supported"
+        (hasheq 'target "zig" 'function (symbol->string fn))))
+     (check-string-arg! (car args) env fn)
+     (define contract (check-regex-arg! (cadr args) env fn))
+     (when (= (length args) 3)
+       (define limit-type (infer-expr (caddr args) env))
+       (unless (type-compatible? limit-type (type-prim 'Int))
+         (regex-contract-error
+          (caddr args)
+          (format "~a limit expects Int, got ~a" fn (type->string limit-type))
+          (type-mismatch-details (type-prim 'Int) limit-type))))
+     (store-regex-contract! e contract)
+     (type-app 'Vec (list STRING))]
+    [(and (call-form? e)
+          (set-member? (current-regex-string-ops) (call-form-fn e))
+          (regexp-match? #rx"/replace$" (symbol->string (call-form-fn e))))
+     (define fn (call-form-fn e))
+     (define args (call-form-args e))
+     (unless (= (length args) 3)
+       (regex-contract-error
+        e
+        (format "~a expects String, String-or-Regex, and String" fn)
+        (hasheq 'function (symbol->string fn)
+                'actual-arity (length args))))
+     (check-string-arg! (car args) env fn)
+     (define pattern-type (infer-expr (cadr args) env))
+     (cond
+       [(regex-type? pattern-type)
+        (define contract (check-regex-arg! (cadr args) env fn))
+        (when (and (eq? (current-check-target) 'zig)
+                   (string? (caddr args))
+                   (regexp-match? #rx"\\$[0-9]" (caddr args)))
+          (regex-contract-error
+           (caddr args)
+           "zig regex replacement capture references are not yet supported"
+           (hasheq 'target "zig" 'replacement (caddr args))))
+        (store-regex-contract! e contract)]
+       [(type-compatible? pattern-type STRING) (void)]
+       [else
+        (regex-contract-error
+         (cadr args)
+         (format "~a pattern expects String or Regex, got ~a"
+                 fn (type->string pattern-type))
+         (type-mismatch-details
+          (type-union (list STRING REGEX)) pattern-type))])
+     (check-string-arg! (caddr args) env fn)
+     STRING]
     [(flake-input-form? e) (type-prim 'NixType)]
     [(vec-form? e)
      (define items (vec-form-items e))
@@ -2905,24 +3284,34 @@
                    [current-body-locs-table body-locs-tbl]
                    [current-type-table type-tbl]
                    [current-check-target (program-target prog)]
+                   [current-semantic-contracts (program-semantic-contracts prog)]
                    [current-union-members UNION-MEMBERS]
                    [current-enum-types ENUM-TYPES]
                    [current-nixos-schema nix-schema])
-      (for ([form (in-list (program-forms prog))]
-            [orig-stx (in-list (program-form-stxs prog))])
-        (define macro-ctx (form-macro-derived-ctx macro-tbl form))
-        (with-handlers ([exn:fail? (lambda (e) (error-handler e orig-stx))])
-          (parameterize ([current-macro-expansion-ctx
-                          (if (eq? macro-ctx #f) #f macro-ctx)])
-            (check-form form env)
-            (when nix-free-bound
-              (check-nix-free-dotted-form! form nix-free-bound (program-src-table prog))))))
-      ;; Qualified-call resolution runs program-wide (it aggregates all
-      ;; violations into one diagnostic), so it reports through the same
-      ;; handler with no specific form stx.
-      (with-handlers ([exn:fail? (lambda (e) (error-handler e #f))])
-        (check-qualified-resolution! prog env)
-        (check-zig-world-escape! prog)))))
+      (define-values (regex-bindings regex-string-ops)
+        (with-handlers ([exn:fail?
+                         (lambda (e)
+                           (error-handler e #f)
+                           (values (hasheq) (seteq)))])
+          (prepare-regex-contracts! prog)))
+      (parameterize ([current-regex-bindings regex-bindings]
+                     [current-regex-string-ops regex-string-ops])
+        (for ([form (in-list (program-forms prog))]
+              [orig-stx (in-list (program-form-stxs prog))])
+          (define macro-ctx (form-macro-derived-ctx macro-tbl form))
+          (with-handlers ([exn:fail? (lambda (e) (error-handler e orig-stx))])
+            (parameterize ([current-macro-expansion-ctx
+                            (if (eq? macro-ctx #f) #f macro-ctx)])
+              (check-form form env)
+              (when nix-free-bound
+                (check-nix-free-dotted-form! form nix-free-bound (program-src-table prog))))))
+        ;; Qualified-call resolution runs program-wide (it aggregates all
+        ;; violations into one diagnostic), so it reports through the same
+        ;; handler with no specific form stx.
+        (with-handlers ([exn:fail? (lambda (e) (error-handler e #f))])
+          (check-qualified-resolution! prog env)
+          (check-zig-native-boundaries! prog)
+          (check-zig-world-escape! prog))))))
 
 ;; =============================================================================
 ;; Scalar provenance lint pass

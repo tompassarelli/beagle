@@ -102,6 +102,8 @@
 ;;                        the static-reasoning guarantee. Type-error: the form
 ;;                        parses fine; the rejection is a name/body
 ;;                        consistency check. Off by default (BEAGLE_PURITY).
+;;   regex-contract     : a regex construction or consumer cannot preserve the
+;;                        checked Regex match-shape contract.
 (define check-kind-cause-table
   (hasheq
    'target-form         'surface-divergence
@@ -117,6 +119,7 @@
    'nixos-type-mismatch 'type-error
    'nixos-unknown-option 'type-error
    'macro-expansion-type-error 'type-error
+   'regex-contract       'type-error
    'purity-leak          'type-error
    'free-dotted-name     'type-error))
 

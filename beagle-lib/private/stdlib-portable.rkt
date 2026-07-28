@@ -254,9 +254,9 @@
    'map-keys   (fn-of '(Any Any) 'Any)
    'map-vals   (fn-of '(Any Any) 'Any)
    ;; --- regex / matching ---------------------------------------------------
-   're-pattern (fn-of '(String) 'Any)
-   're-matches (fn-of '(Any String) 'Any)
-   're-find    (fn-of '(Any) 'Any #:rest 'Any)
+   're-pattern (fn-of '(String) 'Regex)
+   're-matches (fn-of '(Regex String) 'Any)
+   're-find    (fn-of '(Regex String) 'Any)
    're-seq     (fn-of '(Any String) 'Any)
    're-groups  (fn-of '(Any) 'Any)
    ;; --- namespace / var inspection (portable subset) -----------------------

@@ -23,9 +23,11 @@
          racket/path
          racket/string
          racket/system
+         beagle/private/ast
          beagle/private/parse
          beagle/private/check
          beagle/private/tags
+         beagle/private/types
          beagle/private/emit)
 
 (define fixtures-dir
@@ -273,6 +275,40 @@
   (define zig-src (semantic-golden 'zig regex-src "regex"))
   (when ZIG
     (check-true (zig-compiles? zig-src "semantic-regex"))))
+
+(test-case "regex checker records static construction and normalized match shape"
+  (define prog
+    (parse-program
+     (map (lambda (datum) (datum->syntax #f datum))
+          '((define-target zig)
+            (ns regex-contract-shape)
+            (def optional :- Regex (re-pattern "^(a)?b$"))
+            (defn match-it [s :- String] :- (U (HVec String String?) Nil)
+              (re-matches optional s))))))
+  (type-check! prog)
+  (define optional-def
+    (for/first ([form (in-list (program-forms prog))]
+                #:when (and (def-form? form) (eq? (def-form-name form) 'optional)))
+      form))
+  (define contract
+    (hash-ref (program-semantic-contracts prog) (def-form-value optional-def)))
+  (check-equal? (regex-contract-pattern-source contract) "^(a)?b$")
+  (check-equal? (type->string (regex-contract-match-type contract))
+                "(HVec String String?)")
+  (check-equal? (regex-contract-unit contract) 'utf8-codepoint))
+
+(test-case "zig regex checker admits a dynamic pattern with explicit match shape"
+  (check-zig-forms
+   '(ns regex-contract-dynamic)
+   '(defn make-it [s :- String] :- (Regex String) (re-pattern s))))
+
+(test-case "zig regex checker rejects unsupported pattern features"
+  (check-exn
+   #rx"not lookaround, inline flags, or named groups"
+   (lambda ()
+     (check-zig-forms
+      '(ns regex-contract-feature)
+      '(def value :- Regex (re-pattern "(?=a)a"))))))
 
 ;; --- determinism: same input → byte-identical output --------------------------
 
