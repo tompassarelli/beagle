@@ -1950,16 +1950,55 @@
 
     [(check-expr? e)
      (define inner (emit-expr (check-expr-expr e)))
-     (iife (format "const r = ~a;\nif (r && r.__tag === \"Ok\") return r.value;\nthrow new Error(\"check failed: \" + JSON.stringify(r));"
-                   inner))]
+     (define contract
+       (and (eq? (current-js-emit-target) 'js)
+            (current-js-semantic-contracts)
+            (hash-ref (current-js-semantic-contracts) e #f)))
+     (if (error-contract? contract)
+         inner
+         (iife
+          (format "const r = ~a;\nif (r && r.__tag === \"Ok\") return r.value;\nthrow new Error(\"check failed: \" + JSON.stringify(r));"
+                  inner)))]
     [(rescue-form? e)
      (define inner (emit-expr (rescue-form-expr e)))
-     (define fallback (emit-expr (rescue-form-fallback e)))
      (define err-name (if (rescue-form-err-name e)
                           (mangle-name (rescue-form-err-name e))
                           "_err"))
-     (iife (format "const r = ~a;\nif (r && r.__tag === \"Ok\") return r.value;\nconst ~a = r;\nreturn ~a;"
-                   inner err-name fallback))]
+     (define contract
+       (and (eq? (current-js-emit-target) 'js)
+            (current-js-semantic-contracts)
+            (hash-ref (current-js-semantic-contracts) e #f)))
+     (if (error-contract? contract)
+         (let* ([variant (car (error-contract-payload-layout contract))]
+                [member (car variant)]
+                [fields (cdr variant)]
+                [fallback
+                 (parameterize
+                     ([current-type-env
+                       (hash-set
+                        (current-type-env)
+                        (or (rescue-form-err-name e) '_err)
+                        (type-prim member))])
+                   (emit-expr (rescue-form-fallback e)))]
+                [payload
+                 (format
+                  "~a(~a)"
+                  (mangle-name member)
+                  (string-join
+                   (for/list ([field (in-list fields)])
+                     (if (eq? (param-name field) 'message)
+                         "err__exception.message"
+                         (format "err__exception.data.~a"
+                                 (mangle-prop
+                                  (symbol->string (param-name field))))))
+                   ", "))])
+           (iife
+            (format
+             "try { return ~a; } catch (err__exception) {\nconst ~a = ~a;\nreturn ~a;\n}"
+             inner err-name payload fallback)))
+         (let ([fallback (emit-expr (rescue-form-fallback e))])
+           (iife (format "const r = ~a;\nif (r && r.__tag === \"Ok\") return r.value;\nconst ~a = r;\nreturn ~a;"
+                         inner err-name fallback))))]
     [(target-case-form? e)
      (define target (current-js-emit-target))
      (define cases (target-case-form-cases e))

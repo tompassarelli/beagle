@@ -145,9 +145,14 @@
 ;; record name → field params (ordered), local + imported.
 (define (build-record-table prog)
   (for/fold ([h (hasheq)]) ([f (in-list (program-forms prog))])
-    (if (record-form? f)
-        (hash-set h (record-form-name f) (record-form-fields f))
-        h)))
+    (cond
+      [(record-form? f)
+       (hash-set h (record-form-name f) (record-form-fields f))]
+      [(deferror-form? f)
+       (for/fold ([out h]) ([member (in-list (deferror-form-members f))])
+         (hash-set out member
+                   (hash-ref (deferror-form-member-fields f) member '())))]
+      [else h])))
 
 ;; Opaque runtime-handle types: prim type names that appear in a
 ;; non-core extern's signature but are neither beagle primitives nor a
@@ -190,6 +195,9 @@
 (define current-fn-returns (make-parameter (hasheq))) ; local defn name → return type
 (define current-fn-types (make-parameter (hasheq))) ; local defn name → complete function type
 (define current-semantic-contracts (make-parameter #f))
+(define current-fn-error-contracts (make-parameter (hasheq)))
+(define current-error-carrier (make-parameter #f))
+(define current-error-contract (make-parameter #f))
 (define current-allocation-contract (make-parameter #f))
 (define current-allocation-ctx (make-parameter #f))
 (define current-regex-bindings (make-parameter (hasheq)))
@@ -544,6 +552,177 @@
         [else #f]))
     (if expected (emit-typed-value arg expected) (emit-expr arg))))
 
+;; --- typed errors ------------------------------------------------------------
+
+(define (error-contract-of node)
+  (and (current-semantic-contracts)
+       (hash-ref (current-semantic-contracts) node #f)
+       (let ([contract (hash-ref (current-semantic-contracts) node)])
+         (and (error-contract? contract) contract))))
+
+(define (error-type-name contract)
+  (type-prim-name (error-contract-error-type contract)))
+
+(define (error-payload-name contract)
+  (string->symbol
+   (format "~aPayload" (error-type-name contract))))
+
+(define (error-carrier-name contract)
+  (string->symbol
+   (format "~aCarrier" (error-type-name contract))))
+
+(define (error-tag member)
+  (string-downcase
+   (regexp-replace*
+    #px"([a-z0-9])([A-Z])"
+    (string-replace (symbol->string member) "-" "_")
+    "\\1_\\2")))
+
+(define (error-map-key-name value)
+  (and (symbol? value)
+       (let ([s (symbol->string value)])
+         (and (positive? (string-length s))
+              (char=? (string-ref s 0) #\:)
+              (string->symbol (substring s 1))))))
+
+(define (error-throw-components e)
+  (and (call-form? e)
+       (eq? (call-form-fn e) 'throw)
+       (= (length (call-form-args e)) 1)
+       (let ([inner (car (call-form-args e))])
+         (and (call-form? inner)
+              (eq? (call-form-fn inner) 'ex-info)
+              (= (length (call-form-args inner)) 2)
+              (list (car (call-form-args inner))
+                    (cadr (call-form-args inner)))))))
+
+(define (error-variant-for-payload contract payload)
+  (unless (map-form? payload)
+    (unsupported "typed error payload" "checker admitted a non-map payload"))
+  (define names
+    (for/list ([pair (in-list (map-form-pairs payload))])
+      (or (error-map-key-name (car pair))
+          (unsupported "typed error payload key"))))
+  (define candidates
+    (filter
+     (lambda (variant)
+       (define payload-fields
+         (filter
+          (lambda (field) (not (eq? (param-name field) 'message)))
+          (cdr variant)))
+       (and (= (length payload-fields) (length names))
+            (andmap
+             (lambda (field) (member (param-name field) names))
+             payload-fields)))
+     (error-contract-payload-layout contract)))
+  (unless (= (length candidates) 1)
+    (unsupported "typed error payload"
+                 "checker did not select one declared variant"))
+  (car candidates))
+
+(define (error-payload-value payload field)
+  (for/first ([pair (in-list (map-form-pairs payload))]
+              #:when
+              (eq? (error-map-key-name (car pair)) (param-name field)))
+    (cdr pair)))
+
+(define (emit-error-call e carrier)
+  (define fn (call-form-fn e))
+  (define args
+    (emit-typed-args
+     (call-form-args e)
+     (hash-ref (current-fn-types) fn #f)))
+  (format "~a(~a)"
+          (fn-ident fn)
+          (string-join (cons carrier args) ", ")))
+
+(define (emit-error-throw e contract)
+  (define carrier (current-error-carrier))
+  (unless carrier
+    (unsupported "typed throw" "missing checked payload carrier"))
+  (define parts
+    (or (error-throw-components e)
+        (unsupported "typed throw" "expected (throw (ex-info message payload))")))
+  (define message (car parts))
+  (define payload (cadr parts))
+  (define variant (error-variant-for-payload contract payload))
+  (define member (car variant))
+  (define fields (cdr variant))
+  (define field-initializers
+    (for/list ([field (in-list fields)])
+      (define value
+        (if (eq? (param-name field) 'message)
+            message
+            (error-payload-value payload field)))
+      (format ".~a = ~a"
+              (ident (param-name field))
+              (emit-typed-value value (param-type field)))))
+  (define label (fresh-label))
+  (format
+   "~a: { ~a.payload = .{ .~a = ~a{ ~a } }; break :~a error.~a; }"
+   label
+   carrier
+   (error-tag member)
+   (ident member)
+   (string-join field-initializers ", ")
+   label
+   (ident member)))
+
+(define (emit-error-check e contract)
+  (define carrier (current-error-carrier))
+  (unless carrier
+    (unsupported
+     "typed error propagation"
+     (format "the enclosing function must declare :raises ~a"
+             (error-type-name contract))))
+  (define inner (check-expr-expr e))
+  (unless (and (call-form? inner)
+               (hash-ref (current-fn-error-contracts)
+                         (call-form-fn inner)
+                         #f))
+    (unsupported "typed error check" "expected a checked throwing call"))
+  (format "try ~a" (emit-error-call inner carrier)))
+
+(define (emit-error-rescue e contract)
+  (define inner (rescue-form-expr e))
+  (unless (and (call-form? inner)
+               (hash-ref (current-fn-error-contracts)
+                         (call-form-fn inner)
+                         #f))
+    (unsupported "typed error rescue" "expected a checked throwing call"))
+  (define variant (car (error-contract-payload-layout contract)))
+  (define member (car variant))
+  (define label (fresh-label))
+  (define carrier
+    (string-append "__errors_" (string-replace label ":" "_")))
+  (define err-name
+    (ident (or (rescue-form-err-name e) '__error_payload)))
+  (define fallback
+    (parameterize
+        ([current-binding-types
+          (hash-set
+           (current-binding-types)
+           (or (rescue-form-err-name e) '__error_payload)
+           (type-prim member))])
+      (emit-expr (rescue-form-fallback e))))
+  (format
+   (string-append
+    "~a: { var ~a: ~a = .{}; "
+    "const __value = ~a catch { "
+    "const ~a = ~a.payload.?.~a; "
+    "break :~a ~a; }; "
+    "break :~a __value; }")
+   label
+   carrier
+   (ident (error-carrier-name contract))
+   (emit-error-call inner (format "&~a" carrier))
+   err-name
+   carrier
+   (error-tag member)
+   label
+   fallback
+   label))
+
 ;; --- expressions ------------------------------------------------------------------
 
 (define (keyword-value-string value)
@@ -613,6 +792,10 @@
     [(let-form? e) (emit-block-expr (let-form-bindings e) (let-form-body e))]
     [(loop-form? e) (emit-loop e)]
     [(recur-form? e) (emit-recur e)]
+    [(and (check-expr? e) (error-contract-of e))
+     => (lambda (contract) (emit-error-check e contract))]
+    [(and (rescue-form? e) (error-contract-of e))
+     => (lambda (contract) (emit-error-rescue e contract))]
     [(vec-form? e)
      (unsupported "untyped vector literal"
                   "bind it via (def name :- (Vec T) [...]) or build with rt.conj")]
@@ -928,6 +1111,8 @@
   (cond
     [(dynamic-condition-info e) => emit-dynamic-condition]
     [(not (symbol? fn)) (unsupported "higher-order call" "fn position must be a name in v1")]
+    [(and (eq? fn 'throw) (error-contract-of e))
+     => (lambda (contract) (emit-error-throw e contract))]
     [(eq? fn 're-pattern)
      (unless (= (length args) 1)
        (unsupported "regex pattern arity" (length args)))
@@ -1176,6 +1361,10 @@
     [(regexp-match? #rx"/" (symbol->string fn))
      (unsupported "qualified call"
                   (format "~a — only declared externs resolve to the zig runtime prelude (rt)" fn))]
+    [(hash-ref (current-fn-error-contracts) fn #f)
+     (unsupported
+      "typed error call"
+      (format "~a must be wrapped in check or rescue" fn))]
     [else
      ;; user-defined function in this module: ctx is threaded implicitly
      ;; only when the author passes it; emitted call is positional.
@@ -1297,6 +1486,10 @@
                ([x (in-list (loop-form-body e))])
        (refs-of x a))]
     [(recur-form? e) (for/fold ([a acc]) ([x (in-list (recur-form-args e))]) (refs-of x a))]
+    [(check-expr? e) (refs-of (check-expr-expr e) acc)]
+    [(rescue-form? e)
+     (refs-of (rescue-form-expr e)
+              (refs-of (rescue-form-fallback e) acc))]
     [(do-form? e) (for/fold ([a acc]) ([x (in-list (do-form-body e))]) (refs-of x a))]
     [(doseq-form? e)
      (for/fold ([a (for/fold ([a0 acc]) ([c (in-list (doseq-form-clauses e))])
@@ -1307,6 +1500,9 @@
        (refs-of x a))]
     [(threading-marker? e) (refs-of (threading-marker-desugared e) acc)]
     [(vec-form? e) (for/fold ([a acc]) ([x (in-list (vec-form-items e))]) (refs-of x a))]
+    [(map-form? e)
+     (for/fold ([a acc]) ([pair (in-list (map-form-pairs e))])
+       (refs-of (cdr pair) (refs-of (car pair) a)))]
     [else acc]))
 
 ;; --- top-level forms ------------------------------------------------------------------
@@ -1318,6 +1514,56 @@
            (for/list ([p (in-list (record-form-fields f))])
              (format "    ~a: ~a," (ident (param-name p)) (type->zig (param-type p))))
            "\n")))
+
+(define (emit-error-declaration f)
+  (define contract
+    (or (error-contract-of f)
+        (unsupported
+         (format "error contract for ~a" (deferror-form-name f))
+         "missing checked semantic-contract side-table entry")))
+  (define variants (error-contract-payload-layout contract))
+  (define member-declarations
+    (for/list ([variant (in-list variants)])
+      (define member (car variant))
+      (define fields (cdr variant))
+      (format
+       "pub const ~a = struct {\n~a\n};"
+       (ident member)
+       (string-join
+        (for/list ([field (in-list fields)])
+          (format "    ~a: ~a,"
+                  (ident (param-name field))
+                  (type->zig (param-type field))))
+        "\n"))))
+  (define payload-declaration
+    (format
+     "pub const ~a = union(enum) {\n~a\n};"
+     (ident (error-payload-name contract))
+     (string-join
+      (for/list ([variant (in-list variants)])
+        (format "    ~a: ~a,"
+                (error-tag (car variant))
+                (ident (car variant))))
+      "\n")))
+  (define carrier-declaration
+    (format
+     "pub const ~a = struct {\n    payload: ?~a = null,\n};"
+     (ident (error-carrier-name contract))
+     (ident (error-payload-name contract))))
+  (define error-declaration
+    (format
+     "pub const ~a = error{\n~a\n};"
+     (ident (error-type-name contract))
+     (string-join
+      (for/list ([variant (in-list variants)])
+        (format "    ~a," (ident (car variant))))
+      "\n")))
+  (string-join
+   (append member-declarations
+           (list payload-declaration
+                 carrier-declaration
+                 error-declaration))
+   "\n\n"))
 
 (define (emit-def f)
   (unless (def-form-type f)
@@ -1366,15 +1612,30 @@
   (define allocation-contract
     (and (current-semantic-contracts)
          (hash-ref (current-semantic-contracts) f #f)))
+  (define error-contract
+    (hash-ref (current-fn-error-contracts) (defn-form-name f) #f))
   (define allocation-ctx
     (and (allocation-contract? allocation-contract)
          (eq? (allocation-contract-region allocation-contract) 'tick)
          (pair? params)
          (ident (param-name (car params)))))
   (define emitted-ret
-    (if (fallible-allocation-contract? allocation-contract)
-        (format "std.mem.Allocator.Error!~a" (type->zig ret))
-        (type->zig ret)))
+    (cond
+      [error-contract
+       (format "~a!~a"
+               (ident (error-type-name error-contract))
+               (type->zig ret))]
+      [(fallible-allocation-contract? allocation-contract)
+       (format "std.mem.Allocator.Error!~a" (type->zig ret))]
+      [else (type->zig ret)]))
+  (define emitted-sig
+    (if error-contract
+        (string-append
+         "__errors: *"
+         (ident (error-carrier-name error-contract))
+         (if (string=? sig "") "" ", ")
+         sig)
+        sig))
   (define effective-discards
     (if allocation-ctx
         (filter (lambda (line)
@@ -1387,9 +1648,11 @@
                  [current-dynamic-arms (hasheq)]
                  [current-allocation-contract allocation-contract]
                  [current-allocation-ctx allocation-ctx]
+                 [current-error-contract error-contract]
+                 [current-error-carrier (and error-contract "__errors")]
                  [label-counter (box 0)])
     (format "pub fn ~a(~a) ~a {\n~a~a\n}"
-            name sig emitted-ret
+            name emitted-sig emitted-ret
             (if (null? effective-discards)
                 ""
                 (string-append (string-join effective-discards "\n") "\n"))
@@ -1794,6 +2057,15 @@
           (defn-form-return-type f)))
         h)))
 
+(define (build-fn-error-contracts prog)
+  (define contracts (program-semantic-contracts prog))
+  (for/hasheq ([form (in-list (program-forms prog))]
+               #:when
+               (and (defn-form? form)
+                    (let ([contract (hash-ref contracts form #f)])
+                      (and (error-contract? contract) contract))))
+    (values (defn-form-name form) (hash-ref contracts form))))
+
 (define (build-regex-bindings prog)
   (define contracts (program-semantic-contracts prog))
   (for/fold ([h (hasheq)]) ([raw-form (in-list (program-forms prog))])
@@ -1822,6 +2094,7 @@
                  [current-externs (program-externs prog)]
                  [current-fn-returns (build-fn-returns prog)]
                  [current-fn-types (build-fn-types prog)]
+                 [current-fn-error-contracts (build-fn-error-contracts prog)]
                  [current-dynamic-types dynamic-types]
                  [current-semantic-contracts (program-semantic-contracts prog)]
                  [current-regex-bindings (build-regex-bindings prog)]
@@ -1844,6 +2117,7 @@
                   #:unless (eq? f 'nil)) ; (comment ...) parses to nil
          (cond
            [(record-form? f) (emit-record f)]
+           [(deferror-form? f) (emit-error-declaration f)]
            [(def-form? f) (emit-def f)]
            [(defn-form? f) (emit-defn f)]
            [(defn-multi? f) (unsupported "multi-arity defn")]

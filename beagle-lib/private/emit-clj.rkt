@@ -76,6 +76,7 @@
 (define current-emit-record-fields (make-parameter (hasheq)))
 (define current-emit-record-ns (make-parameter (hasheq)))
 (define current-emit-target (make-parameter 'clj))
+(define current-clj-semantic-contracts (make-parameter #f))
 ;; Scalar constructors/accessors that erase to identity at runtime
 (define current-emit-scalar-fns (make-parameter (set)))
 ;; Unqualified imported symbol → module prefix (for qualifying in output)
@@ -222,6 +223,8 @@
                  [current-emit-record-fields (build-record-field-table prog)]
                  [current-emit-record-ns (program-imported-record-ns prog)]
                  [current-emit-target (program-target prog)]
+                 [current-clj-semantic-contracts
+                  (program-semantic-contracts prog)]
                  [current-emit-scalar-fns (build-scalar-fns prog)]
                  [current-emit-symbol-ns (program-imported-symbol-ns prog)]
                  [match-counter (box 0)])   ; fresh per program -> deterministic match temps
@@ -606,24 +609,55 @@
      (symbol->string (dynamic-var-name e))]
     [(check-expr? e)
      (define inner (emit-expr (check-expr-expr e)))
-     (format
-      (string-append
-       "(let [r__check ~a]\n"
-       "  (if (instance? Ok r__check)\n"
-       "    (ok-value r__check)\n"
-       "    (throw (ex-info (str \"check failed: \" (err-error r__check)) {:error r__check}))))")
-      inner)]
+     (define contract
+       (and (current-clj-semantic-contracts)
+            (hash-ref (current-clj-semantic-contracts) e #f)))
+     (if (error-contract? contract)
+         inner
+         (format
+          (string-append
+           "(let [r__check ~a]\n"
+           "  (if (instance? Ok r__check)\n"
+           "    (ok-value r__check)\n"
+           "    (throw (ex-info (str \"check failed: \" (err-error r__check)) {:error r__check}))))")
+          inner))]
     [(rescue-form? e)
      (define inner (emit-expr (rescue-form-expr e)))
      (define fallback (emit-expr (rescue-form-fallback e)))
      (define err-name (or (rescue-form-err-name e) '_))
-     (format
-      (string-append
-       "(let [r__rescue ~a]\n"
-       "  (if (instance? Ok r__rescue)\n"
-       "    (ok-value r__rescue)\n"
-       "    (let [~a r__rescue] ~a)))")
-      inner err-name fallback)]
+     (define contract
+       (and (current-clj-semantic-contracts)
+            (hash-ref (current-clj-semantic-contracts) e #f)))
+     (if (error-contract? contract)
+         (let* ([variant (car (error-contract-payload-layout contract))]
+                [member (car variant)]
+                [fields (cdr variant)]
+                [payload
+                 (format
+                  "(->~a ~a)"
+                  member
+                  (string-join
+                   (for/list ([field (in-list fields)])
+                     (if (eq? (param-name field) 'message)
+                         "(ex-message err__exception)"
+                         (format "(:~a (ex-data err__exception))"
+                                 (param-name field))))
+                   " "))])
+           (format
+            (string-append
+             "(try\n"
+             "  ~a\n"
+             "  (catch clojure.lang.ExceptionInfo err__exception\n"
+             "    (let [~a ~a]\n"
+             "      ~a)))")
+            inner err-name payload fallback))
+         (format
+          (string-append
+           "(let [r__rescue ~a]\n"
+           "  (if (instance? Ok r__rescue)\n"
+           "    (ok-value r__rescue)\n"
+           "    (let [~a r__rescue] ~a)))")
+          inner err-name fallback))]
     [(target-case-form? e)
      (define target (current-emit-target))
      (define cases (target-case-form-cases e))

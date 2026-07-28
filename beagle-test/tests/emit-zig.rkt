@@ -96,6 +96,7 @@
   (type-check! (parse-program forms)))
 
 (define (br . xs) (cons BRACKET-TAG xs))
+(define (mp . xs) (cons MAP-TAG xs))
 
 (define (compile-zig-string src)
   ;; through the REAL beagle reader (brackets/braces), via a temp file.
@@ -1083,8 +1084,8 @@ ZIG
      (check-zig-forms
       '(defunion :throwable RewriteError
          (RewriteFailure [message :- String path :- String refusal :- Bool]))
-      '(defn bad [path :- String] :- String
-         (throw (ex-info "missing" {:path path :refusal true})))))))
+      `(defn bad [path :- String] :- String
+         (throw (ex-info "missing" ,(mp ':path 'path ':refusal 'true))))))))
 
 (test-case "typed error checker rejects a wrong payload type"
   (check-exn
@@ -1093,9 +1094,9 @@ ZIG
      (check-zig-forms
       '(defunion :throwable RewriteError
          (RewriteFailure [message :- String path :- String refusal :- Bool]))
-      '(defn bad [path :- String] :- String
+      `(defn bad [path :- String] :- String
          :raises RewriteError
-         (throw (ex-info "missing" {:path path :refusal "yes"})))))))
+         (throw (ex-info "missing" ,(mp ':path 'path ':refusal "yes"))))))))
 
 (test-case "typed error checker rejects an unhandled throwing call"
   (check-exn
@@ -1104,9 +1105,9 @@ ZIG
      (check-zig-forms
       '(defunion :throwable RewriteError
          (RewriteFailure [message :- String path :- String refusal :- Bool]))
-      '(defn fail [path :- String] :- String
+      `(defn fail [path :- String] :- String
          :raises RewriteError
-         (throw (ex-info "missing" {:path path :refusal true})))
+         (throw (ex-info "missing" ,(mp ':path 'path ':refusal 'true))))
       '(defn main [path :- String] :- String
          (fail path))))))
 
