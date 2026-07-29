@@ -244,15 +244,28 @@
 
 ;; record name → field params (ordered), local + imported.
 (define (build-record-table prog)
-  (for/fold ([h (hasheq)]) ([f (in-list (program-forms prog))])
-    (cond
-      [(record-form? f)
-       (hash-set h (record-form-name f) (record-form-fields f))]
-      [(deferror-form? f)
-       (for/fold ([out h]) ([member (in-list (deferror-form-members f))])
-         (hash-set out member
-                   (hash-ref (deferror-form-member-fields f) member '())))]
-      [else h])))
+  (define local
+    (for/fold ([h (hasheq)]) ([f (in-list (program-forms prog))])
+      (cond
+        [(record-form? f)
+         (hash-set h (record-form-name f) (record-form-fields f))]
+        [(deferror-form? f)
+         (for/fold ([out h]) ([member (in-list (deferror-form-members f))])
+           (hash-set out member
+                     (hash-ref (deferror-form-member-fields f) member '())))]
+        [else h])))
+  (for/fold ([h local])
+            ([(record-name field-order)
+              (in-hash (program-imported-record-field-order prog))])
+    (define field-types
+      (hash-ref (program-imported-record-fields prog) record-name))
+    (hash-set
+     h record-name
+     (for/list ([field-name (in-list field-order)])
+       (define field (string->symbol field-name))
+       (param field
+              (hash-ref field-types
+                        (string->symbol (string-append ":" field-name))))))))
 
 ;; Opaque runtime-handle types: prim type names that appear in a
 ;; non-core extern's signature but are neither beagle primitives nor a
@@ -290,6 +303,7 @@
 ;; --- emission state --------------------------------------------------------------
 
 (define current-records (make-parameter (hasheq)))
+(define current-imported-record-ns (make-parameter (hasheq)))
 (define current-externs (make-parameter (hasheq))) ; declared-extern name → type
 (define current-fn-returns (make-parameter (hasheq))) ; local defn name → return type
 (define current-fn-types (make-parameter (hasheq))) ; local defn name → complete function type
@@ -1071,13 +1085,16 @@
     [(regex-lit? e) (format "rt.regex(~v)" (regex-lit-pattern e))]
     [else (unsupported (format "~a" e))]))
 
-(define (emit-ctor rec args)
+(define (emit-ctor rec args [module #f])
   (define fields (hash-ref (current-records) rec
                            (lambda () (unsupported "constructor for unknown record" rec))))
   (unless (= (length fields) (length args))
     (unsupported "constructor arity"
                  (format "->~a expects ~a fields" rec (length fields))))
-  (format "~a{ ~a }" (ident rec)
+  (format "~a{ ~a }"
+          (if module
+              (format "~a.~a" module (ident rec))
+              (ident rec))
           (string-join
            (for/list ([f (in-list fields)] [a (in-list args)])
              ;; field types flow into the arg so container literals ([]
@@ -1655,6 +1672,19 @@
      (format "~a.~a" (extern-ns->module (cadr m)) (rt-fn-name (caddr m)))]
     [else #f]))
 
+(define (qualified-record-ctor fn)
+  (define match
+    (regexp-match #rx"^([^/]+)/->([^/]+)$" (symbol->string fn)))
+  (and match
+       (let* ([prefix (string->symbol (cadr match))]
+              [record-name (string->symbol (caddr match))]
+              [namespace (hash-ref (current-requires) prefix #f)])
+         (and namespace
+              (hash-has-key? (current-records) record-name)
+              (equal? (hash-ref (current-imported-record-ns) record-name #f)
+                      namespace)
+              (cons record-name (zig-module-name namespace))))))
+
 ;; clojure stdlib fn name → prelude ident: drop ?!, kebab→snake (matches
 ;; the prelude's rng_below / starts_with convention).
 (define (rt-fn-name name-str)
@@ -1713,6 +1743,9 @@
                     "the Zig store bridge currently lowers record fields only"))
      (emit-record-update
       target target-type (cadr args) (caddr args) (cdddr args))]
+    [(qualified-record-ctor fn)
+     => (lambda (ctor)
+          (emit-ctor (car ctor) args (cdr ctor)))]
     [(and (eq? fn 'throw) (error-contract-of e))
      => (lambda (contract) (emit-error-throw e contract))]
     [(eq? fn 're-pattern)
@@ -3068,6 +3101,7 @@
                  [current-semantic-contracts (program-semantic-contracts prog)]
                  [current-regex-bindings (build-regex-bindings prog)]
                  [current-opaque-handles (build-opaque-handles prog records)]
+                 [current-imported-record-ns (program-imported-record-ns prog)]
                  [current-requires (build-zig-requires prog)])
     (define dynamic-decls
       (for/list ([entry (in-list dynamic-contracts)])

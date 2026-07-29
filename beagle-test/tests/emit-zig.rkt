@@ -263,7 +263,7 @@
                   "zig revival alive\n")))
 
 (when ZIG
-  (test-case "imported record types lower through canonical Zig modules in nested positions"
+  (test-case "imported record types and constructors lower through canonical Zig modules"
     (define dir (make-temporary-file "zig-imported-records~a" 'directory))
     (dynamic-wind
       void

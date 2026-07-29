@@ -31,5 +31,5 @@
   value)
 
 (defn main [] :- Nil
-  (let [store :- types/Store (types/make-store 42)]
+  (let [store :- types/Store (types/->Store 42)]
     (println (types/store-value (pass-store store)))))
