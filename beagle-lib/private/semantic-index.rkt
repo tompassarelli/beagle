@@ -220,20 +220,68 @@
 (define (source-key-locations source symbols)
   ;; The Beagle map reader currently gives every map child its enclosing map
   ;; location. Use the parsed walk to decide WHICH authored keys matter, then
-  ;; recover those exact token spans from source text.
+  ;; recover those exact token spans from source text. This scan is deliberately
+  ;; lexical only: the real reader/AST decides the keys, while the scan ignores
+  ;; comments and string bodies that cannot be authored map-key tokens.
   (define text (file->string source))
+  (define wanted
+    (for/hash ([symbol (in-list (remove-duplicates symbols eq?))])
+      (values (symbol->string symbol) symbol)))
+  (define found (make-hasheq))
+  (define length (string-length text))
+  (define (starts-at? index literal)
+    (define end (+ index (string-length literal)))
+    (and (<= end length)
+         (string=? (substring text index end) literal)))
+  (define (token-end start)
+    (let loop ([index start])
+      (if (or (>= index length) (token-boundary? text index))
+          index
+          (loop (add1 index)))))
+  (let loop ([index 0] [state 'code])
+    (cond
+      [(>= index length) (void)]
+      [else
+       (define char (string-ref text index))
+       (case state
+         [(line-comment)
+          (loop (add1 index)
+                (if (char=? char #\newline) 'code 'line-comment))]
+         [(string)
+          (cond
+            [(char=? char #\\) (loop (min length (+ index 2)) 'string)]
+            [(char=? char #\") (loop (add1 index) 'code)]
+            [else (loop (add1 index) 'string)])]
+         [(nix-multiline)
+          (if (starts-at? index "''")
+              (loop (+ index 2) 'code)
+              (loop (add1 index) 'nix-multiline))]
+         [else
+          (cond
+            [(char=? char #\;) (loop (add1 index) 'line-comment)]
+            [(char=? char #\") (loop (add1 index) 'string)]
+            [(starts-at? index "~''") (loop (+ index 3) 'nix-multiline)]
+            ;; A Clojure character literal can spell quote or semicolon; neither
+            ;; starts a string/comment in that position.
+            [(char=? char #\\)
+             (loop (min length (+ index 2)) 'code)]
+            [(and (char=? char #\:)
+                  (token-boundary? text (sub1 index)))
+             (define end (token-end index))
+             (define token (substring text index end))
+             (define symbol (hash-ref wanted token #f))
+             (when symbol
+               (hash-update!
+                found
+                symbol
+                (lambda (locations)
+                  (cons (offset->src-loc source text index (- end index))
+                        locations))
+                '()))
+             (loop end 'code)]
+            [else (loop (add1 index) 'code)])])]))
   (for/hash ([symbol (in-list (remove-duplicates symbols eq?))])
-    (define key (symbol->string symbol))
-    (define matches
-      (for/list ([match (in-list
-                         (regexp-match-positions*
-                          (regexp (regexp-quote key))
-                          text))]
-                 #:when
-                 (and (token-boundary? text (sub1 (car match)))
-                      (token-boundary? text (cdr match))))
-        (offset->src-loc source text (car match) (- (cdr match) (car match)))))
-    (values symbol matches)))
+    (values symbol (reverse (hash-ref found symbol '())))))
 
 (define (loc->json loc)
   (hasheq 'line (src-loc-line loc)
