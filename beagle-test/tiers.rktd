@@ -62,6 +62,7 @@
              "cheatsheet.rkt"           ; capability cheatsheet — every example must parse+check
              "facts-render-roundtrip.rkt" ; #17 — renderer reconstructs #lang from leading (define-target)
              "cross-module-dynvar.rkt"  ; G-A — cross-module `binding` of an imported ^:dynamic var
+             "world-check.rkt"          ; coherent multi-EDN candidate overlay + cross-module interfaces
              "defmacro.rkt"
              "diagnostic-kind.rkt"
              "expand-tool.rkt"          ; #32 — `beagle expand` reads+renders the full surface (canonical reader)

@@ -11,6 +11,7 @@
          "macros.rkt"
          "extensions.rkt"
          "ast.rkt"
+         "module-interface.rkt"
          "parse-jst.rkt"
          "parse-js-quote.rkt"
          "diagnostic-kind.rkt"
@@ -680,11 +681,17 @@
 ;; (cond-thread__N / some-thread__N / bind__N / macro-hygiene renames) depend
 ;; only on THIS module's content, never on what else the process parsed
 ;; before it (daemon, build-all, check-all). Byte-reproducible builds.
-(define (parse-program stxs* #:source-path [source-path #f])
+(define (parse-program stxs*
+                       #:source-path [source-path #f]
+                       #:module-resolver [module-resolver #f])
   (parameterize ([lowering-counter (box 0)])
-    (parse-program* stxs* #:source-path source-path)))
+    (parse-program* stxs*
+                    #:source-path source-path
+                    #:module-resolver module-resolver)))
 
-(define (parse-program* stxs* #:source-path [source-path #f])
+(define (parse-program* stxs*
+                        #:source-path [source-path #f]
+                        #:module-resolver [module-resolver #f])
   (define raw-datums (map syntax->datum stxs*))
 
   ;; Determine target up-front so reader-conditionals can be resolved before
@@ -771,6 +778,7 @@
   (define imp-param-unions (make-hash))
   (define imp-enums (make-hash))
   (define imp-dyn-vars (mutable-seteq))  ; G-A: imported ^:dynamic vars (qualified)
+  (define imp-module-interfaces '())
 
   ;; Shared require registration: resolve sibling beagle modules for type
   ;; import, then record the require-entry. Used by the top-level
@@ -778,25 +786,79 @@
   (define (register-require! rn alias refer-syms)
     (validate-module-path! rn)
     (define prefix (or alias (string->symbol (last-of (split-ns-segments rn)))))
+    (define candidate
+      (and module-resolver (module-resolver rn source-path)))
+    (when (and candidate (not (module-source? candidate)))
+      (error 'beagle
+             "module resolver returned ~v for ~a; expected module-source or #f"
+             candidate rn))
     ;; A failed sibling-module import must be VISIBLE: silently voiding it
     ;; (the pre-2026-06-12 behavior) meant a parse error in the required
     ;; module just erased its types, and downstream code typed as Any.
     ;; External (non-beagle) requires never reach the handler — they fail
     ;; resolve-module-path and skip the import cleanly.
-    (with-handlers ([exn:fail?
-                     (lambda (e)
-                       (eprintf "warning: type import from ~a failed: ~a\n"
-                                rn (exn-message e)))])
-      (define mod-path (resolve-module-path rn source-path))
-      (when mod-path
-        (import-module-types! mod-path prefix externs registry imp-rec-fields imp-rec-field-order imp-rec-ns rn
-                              #:scalar-fns imp-scalar-fns
-                              #:scalar-preds imp-scalar-preds
-                              #:symbol-ns imp-symbol-ns
-                              #:union-members imp-union-members
-                              #:parametric-unions imp-param-unions
-                              #:dynamic-vars imp-dyn-vars
-                              #:refer-syms refer-syms)))
+    (cond
+      [candidate
+       ;; Candidate-world modules are authoritative and fail closed.  Their
+       ;; source datums win over any old provider still present on disk.
+       (unless (eq? (module-source-namespace candidate) rn)
+         (error 'beagle
+                "module resolver returned namespace ~a for required module ~a"
+                (module-source-namespace candidate) rn))
+       (import-module-types!
+        (module-source-source-id candidate)
+        prefix externs registry imp-rec-fields imp-rec-field-order imp-rec-ns rn
+        #:scalar-fns imp-scalar-fns
+        #:scalar-preds imp-scalar-preds
+        #:symbol-ns imp-symbol-ns
+        #:union-members imp-union-members
+        #:parametric-unions imp-param-unions
+        #:dynamic-vars imp-dyn-vars
+        #:refer-syms refer-syms
+        #:datums (module-source-datums candidate))
+       (define interface (module-source-interface candidate))
+       (when interface
+         (for ([name (in-list (or refer-syms '()))])
+           (unless (module-interface-export? interface name)
+             (error 'beagle
+                    "required module ~a does not export referred name ~a"
+                    rn name)))
+         ;; The authoritative pass imports public binding types from the
+         ;; canonical interface.  The datum importer above still supplies the
+         ;; richer legacy record/union/macro registries, but it no longer gets
+         ;; the final word on a binding's signature.
+         (for ([(name binding)
+                (in-hash (module-interface-bindings interface))]
+               #:unless (eq? (interface-binding-kind binding) 'macro))
+           (define binding-type (interface-binding-type binding))
+           (hash-set! externs (qualify-name prefix name) binding-type)
+           (hash-set!
+            externs
+            (qualify-name (module-interface-namespace interface) name)
+            binding-type)
+           (when (and refer-syms (memq name refer-syms))
+             (hash-set! externs name binding-type)
+             (hash-set! imp-symbol-ns name prefix)))
+         (set! imp-module-interfaces
+               (cons (module-import interface prefix refer-syms)
+                     imp-module-interfaces)))]
+      [else
+       (with-handlers ([exn:fail?
+                        (lambda (e)
+                          (eprintf "warning: type import from ~a failed: ~a\n"
+                                   rn (exn-message e)))])
+         (define mod-path (resolve-module-path rn source-path))
+         (when mod-path
+           (import-module-types!
+            mod-path prefix externs registry
+            imp-rec-fields imp-rec-field-order imp-rec-ns rn
+            #:scalar-fns imp-scalar-fns
+            #:scalar-preds imp-scalar-preds
+            #:symbol-ns imp-symbol-ns
+            #:union-members imp-union-members
+            #:parametric-unions imp-param-unions
+            #:dynamic-vars imp-dyn-vars
+            #:refer-syms refer-syms)))])
     (set! requires (cons (require-entry rn alias refer-syms) requires)))
 
   ;; One require libspec: lib, [lib], [lib :as a], [lib :refer [syms]],
@@ -1125,6 +1187,7 @@
              imp-rec-fields imp-rec-field-order imp-rec-ns
              (hash-keys imp-scalar-fns) imp-scalar-preds imp-symbol-ns
              imp-union-members imp-param-unions imp-enums imp-dyn-vars
+             (reverse imp-module-interfaces)
              target gen-class?))
   ;; Stash the macro-derived-table keyed by the program so check.rkt
   ;; can recover it via program-macro-derived-table after this call
@@ -4157,6 +4220,7 @@
 
 (provide
  (all-from-out "ast.rkt")
+ (all-from-out "module-interface.rkt")
  (all-from-out "parse-jst.rkt")
  (all-from-out "parse-js-quote.rkt")
  parse-program

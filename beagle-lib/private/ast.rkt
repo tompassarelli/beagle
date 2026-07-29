@@ -522,6 +522,7 @@
                  imported-parametric-unions
                  imported-enums
                  imported-dynamic-vars
+                 imported-module-interfaces
                  target
                  gen-class?)
   #:transparent)

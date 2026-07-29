@@ -315,6 +315,7 @@
     [(collection-contract) "E023"]
     [(allocation-contract) "E024"]
     [(ownership-contract)  "E025"]
+    [(missing-export)      "E026"]
     [else                 "E000"]))
 
 ;; Expected/actual detail pair carrying BOTH the human strings (kept verbatim,
@@ -787,6 +788,7 @@
                           (if (eq? macro-ctx #f) #f macro-ctx)])
             (check-target-form form)
             (check-form form env)))
+        (check-module-interface-resolution! prog)
         (check-qualified-resolution! prog env)
         (check-zig-native-boundaries! prog)
         (check-ownership-contracts! prog)
@@ -1273,14 +1275,44 @@
     (cons member
           (hash-ref (deferror-form-member-fields form) member '()))))
 
+(define (interface-error-contracts interface target)
+  (for/hasheq ([(name error) (in-hash (module-interface-errors interface))])
+    (values
+     name
+     (error-contract
+      (type-prim name)
+      (for/list ([member (in-list (interface-error-members error))])
+        (cons member
+              (hash-ref
+               (interface-error-member-fields error)
+               member
+               '())))
+      (error-mode target)))))
+
+(define (qualified-interface-name prefix name)
+  (string->symbol (format "~a/~a" prefix name)))
+
 (define (prepare-error-contracts! prog)
   (define table (program-semantic-contracts prog))
-  (define definitions
+  (define local-definitions
     (for/hasheq ([form (in-list (program-forms prog))]
                  #:when (deferror-form? form))
       (values (deferror-form-name form) form)))
-  (define contracts
-    (for/hasheq ([(name form) (in-hash definitions)])
+  (define contracts (make-hasheq))
+  (define definitions (make-hasheq))
+  ;; Imported throwable definitions are part of the consumer's checking world.
+  ;; Populate them before local definitions so a local declaration remains the
+  ;; authoritative spelling on a same-name collision.
+  (for ([import (in-list (program-imported-module-interfaces prog))])
+    (define interface (module-import-interface import))
+    (for ([(name error) (in-hash (module-interface-errors interface))])
+      (hash-set! definitions name error))
+    (for ([(name contract)
+           (in-hash
+            (interface-error-contracts interface (program-target prog)))])
+      (hash-set! contracts name contract)))
+  (for ([(name form) (in-hash local-definitions)])
+    (hash-set! definitions name form)
       (define layout (error-payload-layout form))
       (when (null? layout)
         (error-contract-error
@@ -1302,23 +1334,51 @@
                        'member (symbol->string member)
                        'field (symbol->string (param-name field))
                        'actual "Any"))))))
-      (values name
-              (error-contract
-               (type-prim name)
-               layout
-               (error-mode (program-target prog))))))
-  (for ([(name form) (in-hash definitions)])
+    (hash-set!
+     contracts
+     name
+     (error-contract
+      (type-prim name)
+      layout
+      (error-mode (program-target prog)))))
+  (for ([(name form) (in-hash local-definitions)])
     (hash-set! table form (hash-ref contracts name)))
-  (define raising-functions
-    (for/hasheq ([form (in-list (program-forms prog))]
-                 #:when (defn-form? form)
-                 #:do
-                 [(define contract
-                    (declared-error-contract
-                     (defn-form-raises form) contracts form))]
-                 #:when contract)
+  (define raising-functions (make-hasheq))
+  ;; Effects cross the module boundary under the exact names consumers use.
+  (for ([import (in-list (program-imported-module-interfaces prog))])
+    (define interface (module-import-interface import))
+    (define prefix (module-import-prefix import))
+    (define refer (module-import-refer import))
+    (define provider-contracts
+      (interface-error-contracts interface (program-target prog)))
+    (for ([(name binding) (in-hash (module-interface-bindings interface))]
+          #:when (interface-binding-raises binding))
+      (define contract
+        (declared-error-contract
+         (interface-binding-raises binding)
+         provider-contracts
+         #f))
+      (when contract
+        (hash-set!
+         raising-functions
+         (qualified-interface-name prefix name)
+         contract)
+        (hash-set!
+         raising-functions
+         (qualified-interface-name
+          (module-interface-namespace interface)
+          name)
+         contract)
+        (when (and refer (memq name refer))
+          (hash-set! raising-functions name contract)))))
+  (for ([form (in-list (program-forms prog))]
+        #:when (defn-form? form))
+    (define contract
+      (declared-error-contract
+       (defn-form-raises form) contracts form))
+    (when contract
       (hash-set! table form contract)
-      (values (defn-form-name form) contract)))
+      (hash-set! raising-functions (defn-form-name form) contract)))
   (current-error-definitions definitions)
   (current-raising-functions raising-functions))
 
@@ -4255,6 +4315,7 @@
         ;; violations into one diagnostic), so it reports through the same
         ;; handler with no specific form stx.
         (with-handlers ([exn:fail? (lambda (e) (error-handler e #f))])
+          (check-module-interface-resolution! prog)
           (check-qualified-resolution! prog env)
           (check-zig-native-boundaries! prog)
           (check-ownership-contracts! prog))))))
@@ -5408,6 +5469,70 @@
        (for ([m (in-list (type-impl-methods impl))])
          (go-body (impl-method-body m) #f)))]
     [else (go form)]))
+
+(define (check-module-interface-resolution! prog)
+  (when (and (eq? (program-mode prog) 'strict)
+             (>= (current-check-profile) 1)
+             (pair? (program-imported-module-interfaces prog)))
+    (define prefix->interface (make-hash))
+    (for ([import (in-list (program-imported-module-interfaces prog))])
+      (define interface (module-import-interface import))
+      (hash-set! prefix->interface
+                 (symbol->string (module-import-prefix import))
+                 interface)
+      ;; A fully-qualified use remains valid even when the require also names
+      ;; an alias.
+      (hash-set! prefix->interface
+                 (symbol->string (module-interface-namespace interface))
+                 interface))
+    (define violations '())
+    (define (visit! sym loc)
+      (define spelling (symbol->string sym))
+      (define slash
+        (for/first ([index (in-range (string-length spelling))]
+                    #:when (char=? (string-ref spelling index) #\/))
+          index))
+      (when (and slash
+                 (> slash 0)
+                 (< slash (sub1 (string-length spelling))))
+        (define prefix (substring spelling 0 slash))
+        (define member
+          (string->symbol (substring spelling (add1 slash))))
+        (define interface (hash-ref prefix->interface prefix #f))
+        (when (and interface
+                   (not (module-interface-export? interface member)))
+          (set! violations
+                (cons (list sym member interface loc) violations)))))
+    (for ([form (in-list (program-forms prog))])
+      (walk-exprs-for-syms form (program-src-table prog) visit!))
+    (when (pair? violations)
+      (define ordered (reverse violations))
+      (define lines
+        (for/list ([violation (in-list ordered)])
+          (define sym (car violation))
+          (define interface (caddr violation))
+          (define loc (cadddr violation))
+          (format
+           "  ~a~a — ~a does not export ~a"
+           sym
+           (if (and loc (src-loc-line loc))
+               (format " (line ~a)" (src-loc-line loc))
+               "")
+           (module-interface-namespace interface)
+           (cadr violation))))
+      (raise-diag
+       'missing-export
+       (format
+        "required Beagle module export~a missing:\n~a\nUpdate the provider and consumer in the same candidate world, or fix the reference."
+        (if (> (length ordered) 1) "s are" " is")
+        (string-join lines "\n"))
+       (hasheq
+        'count (length ordered)
+        'references
+        (map (lambda (violation)
+               (symbol->string (car violation)))
+             ordered))
+       #:src (cadddr (car ordered))))))
 
 (define (check-qualified-resolution! prog env)
   (when (and (eq? (program-target prog) 'clj)

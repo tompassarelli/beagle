@@ -135,6 +135,7 @@
    'allocation-contract  'type-error
    'ownership-contract   'type-error
    'error-contract       'type-error
+   'missing-export       'type-error
    'purity-leak          'type-error
    'free-dotted-name     'type-error))
 
