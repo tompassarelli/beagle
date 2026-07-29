@@ -101,6 +101,7 @@
 (define current-binding-types (make-parameter (hasheq)))
 (define current-dynamic-remaining (make-parameter (hasheq)))
 (define current-dynamic-arms (make-parameter (hasheq)))
+(define current-requires (make-parameter (hasheq))) ; use-site prefix sym → namespace sym
 
 (define (string-prim-type? t)
   (and (type-prim? t) (eq? (type-prim-name t) 'String)))
@@ -112,6 +113,22 @@
 
 (define (atom-element-type t)
   (and (atom-type? t) (car (type-app-args t))))
+
+(define (imported-nominal-type->zig name)
+  (define match
+    (regexp-match #rx"^([^/]+)/([^/]+)$" (symbol->string name)))
+  (and
+   match
+   (let ([namespace
+          (hash-ref
+           (current-requires)
+           (string->symbol (cadr match))
+           #f)])
+     (and
+      namespace
+      (format "~a.~a"
+              (zig-module-name namespace)
+              (ident (string->symbol (caddr match))))))))
 
 (define (type->zig t)
   (cond
@@ -140,6 +157,8 @@
           [(hash-ref (current-opaque-handles) (type-prim-name t) #f)
            => (lambda (mod)
                 (format "*const ~a.~a" mod (type-prim-name t)))]
+          [(imported-nominal-type->zig (type-prim-name t))
+           => values]
           [else (ident (type-prim-name t))])])] ; user record/struct name
     [(type-app? t)
      (case (type-app-ctor t)
@@ -272,7 +291,6 @@
 
 (define current-records (make-parameter (hasheq)))
 (define current-externs (make-parameter (hasheq))) ; declared-extern name → type
-(define current-requires (make-parameter (hasheq))) ; use-site prefix sym → namespace sym
 (define current-fn-returns (make-parameter (hasheq))) ; local defn name → return type
 (define current-fn-types (make-parameter (hasheq))) ; local defn name → complete function type
 (define current-fn-allocation-modes (make-parameter (hasheq))) ; local defn name → hidden | explicit

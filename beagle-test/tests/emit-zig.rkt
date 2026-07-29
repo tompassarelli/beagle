@@ -42,6 +42,14 @@
   (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
     (build-path dir "fixtures" "zig-stdlib")))
 
+(define imported-record-types-dir
+  (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
+    (build-path dir "fixtures" "zig-imported-record-types")))
+
+(define beagle-cli
+  (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
+    (simplify-path (build-path dir 'up 'up "bin" "beagle"))))
+
 (define kernel-rt
   (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
     (simplify-path (build-path dir 'up 'up "beagle-lib" "zig" "beagle_rt.zig"))))
@@ -253,6 +261,39 @@
       (build-path fixtures-dir 'up "zig-smoke" "main.bzig"))
     (check-equal? (zig-build-exe-and-run (compile-zig-src smoke))
                   "zig revival alive\n")))
+
+(when ZIG
+  (test-case "imported record types lower through canonical Zig modules in nested positions"
+    (define dir (make-temporary-file "zig-imported-records~a" 'directory))
+    (dynamic-wind
+      void
+      (lambda ()
+        (define executable (build-path dir "imported-records"))
+        (define build-output (open-output-string))
+        (define built?
+          (parameterize ([current-output-port build-output]
+                         [current-error-port build-output]
+                         [current-environment-variables (zig-env dir)]
+                         [current-directory dir])
+            (system*
+             beagle-cli
+             "build"
+             "--target"
+             "zig"
+             "--exe"
+             (path->string executable)
+             (path->string (build-path imported-record-types-dir "types.bclj"))
+             (path->string (build-path imported-record-types-dir "main.bclj")))))
+        (check-true built? (get-output-string build-output))
+        (define run-output (open-output-string))
+        (define ran?
+          (parameterize ([current-output-port run-output]
+                         [current-error-port run-output]
+                         [current-directory dir])
+            (system* executable)))
+        (check-true ran? (get-output-string run-output))
+        (check-equal? (get-output-string run-output) "42\n"))
+      (lambda () (delete-directory/files dir)))))
 
 ;; --- Fram rt_core stdlib conformance ----------------------------------------
 

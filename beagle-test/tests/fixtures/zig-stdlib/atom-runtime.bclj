@@ -11,7 +11,7 @@
 (defn read-value [cell :- (Atom Counter)] :- Int
   (:value (deref cell)))
 
-(defn exercise [] :- Int
+(defn exercise! [] :- Int
   (let [cell :- (Atom Counter) (atom (->Counter 1 false))
         alias :- (Atom Counter) cell
         reset-value :- Counter (reset! alias (->Counter 5 false))
@@ -24,6 +24,3 @@
          (:value assoc-value)
          (read-value alias))
       -1)))
-
-(defn main [] :- Nil
-  (println (exercise)))

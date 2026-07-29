@@ -1,0 +1,35 @@
+#lang beagle/clj
+(ns zig-imported-record-types.main
+  (:require [zig-imported-record-types.types :as types]))
+(define-mode strict)
+
+(defn pass-store [value :- types/Store] :- types/Store value)
+
+(defn pass-atom
+  [value :- (Atom types/Store)]
+  :- (Atom types/Store)
+  value)
+
+(defn pass-map
+  [value :- (Map String types/Store)]
+  :- (Map String types/Store)
+  value)
+
+(defn pass-vector
+  [value :- (Vec types/Store)]
+  :- (Vec types/Store)
+  value)
+
+(defn pass-optional
+  [value :- (U types/Store Nil)]
+  :- (U types/Store Nil)
+  value)
+
+(defn pass-nested
+  [value :- (Map String (Vec (U types/Store Nil)))]
+  :- (Map String (Vec (U types/Store Nil)))
+  value)
+
+(defn main [] :- Nil
+  (let [store :- types/Store (types/make-store 42)]
+    (println (types/store-value (pass-store store)))))
