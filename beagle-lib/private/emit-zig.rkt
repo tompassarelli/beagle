@@ -1633,7 +1633,10 @@
         ([arg (in-list extra-args)]
          [name (in-list extra-syms)])
       (define arg-type (expr-static-type arg))
-      (if (and (symbol? name) arg-type)
+      ;; A preserved symbol is already in the binding environment.  In a
+      ;; narrowed Dyn branch its expression type is one arm, but the binding
+      ;; must retain the enclosing sum type so `emit-expr` can select that arm.
+      (if (and (symbol? name) arg-type (not (eq? name arg)))
           (hash-set types name arg-type)
           types)))
   (define application
