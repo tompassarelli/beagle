@@ -40,19 +40,27 @@
   ;; function names: kebab → camelCase (belief-update → beliefUpdate).
   ;; Clojure predicate/mutator markers ?! are dropped (valid-iso-date? →
   ;; validIsoDate); applied identically to defn names and call sites, so
-  ;; they round-trip. Operator chars still can't be fn names.
-  (define clean (regexp-replace* #rx"[?!]" (symbol->string s) ""))
-  (when (regexp-match? #rx"[*+<>=/]" clean)
+  ;; they round-trip. `=` uses Zig's escaped identifier spelling instead:
+  ;; it is legal, keeps existing names unchanged, and cannot collide with a
+  ;; normal camel-cased identifier.
+  (define raw (symbol->string s))
+  (cond
+    [(regexp-match? #rx"=" raw)
+     (format "@\"~a\""
+             (string-replace (string-replace raw "\\" "\\\\") "\"" "\\\""))]
+    [else
+     (define clean (regexp-replace* #rx"[?!]" raw ""))
+     (when (regexp-match? #rx"[*+<>=/]" clean)
     (unsupported "function name" (format "~a" s)))
-  (define parts (string-split clean "-"))
-  (apply string-append
-         (car parts)
-         (map (lambda (p)
-                (if (zero? (string-length p))
-                    p
-                    (string-append (string-upcase (substring p 0 1))
-                                   (substring p 1))))
-              (cdr parts))))
+     (define parts (string-split clean "-"))
+     (apply string-append
+            (car parts)
+            (map (lambda (p)
+                   (if (zero? (string-length p))
+                       p
+                       (string-append (string-upcase (substring p 0 1))
+                                      (substring p 1))))
+                 (cdr parts)))]))
 
 ;; Namespace-derived Zig module names are independent of a consumer's local
 ;; require alias.  This gives a declared module set one stable filename/link

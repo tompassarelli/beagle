@@ -1125,6 +1125,22 @@ ZIG
   (check-regexp-match #rx"rt\\.split_lines\\(__ctx\\.tick, s\\)" out)
   (check-regexp-match #rx"rt\\.path\\(__ctx\\.tick, a, b\\)" out))
 
+(test-case "zig function names containing = use collision-free escaped identifiers"
+  (define out
+    (compile-zig-string
+     (string-append
+      "(ns zig.function-names)\n"
+      "(defn store-value=? [a :- Int b :- Int] :- Bool (= a b))\n"
+      "(defn store-value= [a :- Int b :- Int] :- Bool false)\n"
+      "(defn main [] :- Nil\n"
+      "  (do (println (store-value=? 1 1))\n"
+      "      (println (store-value= 1 1))))\n")))
+  (check-regexp-match #rx"pub fn @\"store-value=\\?\"" out)
+  (check-regexp-match #rx"pub fn @\"store-value=\"" out)
+  (check-regexp-match #rx"@\"store-value=\\?\"\\(1, 1\\)" out)
+  (check-regexp-match #rx"@\"store-value=\"\\(1, 1\\)" out)
+  (check-equal? (zig-build-exe-and-run out) "true\nfalse\n"))
+
 (test-case "zig allocating main owns one local arena while pure main stays direct"
   (define pure
     (compile-zig-forms '(defn main [] :- Nil nil)))
