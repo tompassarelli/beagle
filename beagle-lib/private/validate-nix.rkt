@@ -171,11 +171,14 @@
   (define lint-warnings '())
   (define occurrence-counts (make-hash))
 
-  (define (record-key! key-sym val)
-    (define key-str (symbol->string key-sym))
+  (define (record-key! path-sym val [authored-key-sym path-sym])
+    (define key-str (symbol->string authored-key-sym))
     (define occ (hash-ref occurrence-counts key-str 0))
     (hash-set! occurrence-counts key-str (add1 occ))
-    (set! found (cons (found-key (key-sym->path key-sym) val key-sym occ)
+    (set! found (cons (found-key (key-sym->path path-sym)
+                                val
+                                authored-key-sym
+                                occ)
                       found)))
 
   (define (add-lint! msg)
@@ -249,13 +252,15 @@
          (walk-map-pairs (map-form-pairs val) scope
                          #:prefix (substring (symbol->string full-path) 1))]
         [full-path
-         (record-key! full-path val)]
+         (record-key! full-path val key)]
         [(and (dotted-option-key? key) (map-form? val))
          (walk-map-pairs (map-form-pairs val) scope
                          #:prefix (key-sym->path key))]
         [(dotted-option-key? key)
          (record-key! key val)]
-        [else (void)])
+        [else
+         (when (map-form? val)
+           (walk val scope))])
       (unless (map-form? val) (walk val scope))))
 
   ;; Extract binding names from a let-form
@@ -904,6 +909,7 @@
 
 (provide validate-files
          validate-file-keys
+         collect-program-keys
          collect-myconfig-declarations
          detect-myconfig-errors
          error->jsexpr

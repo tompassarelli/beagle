@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+source "$(dirname "$0")/_beagle-racket"
+BEAGLE_SEMANTIC_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+exec "$RACKET" \
+  "$BEAGLE_SEMANTIC_ROOT/beagle-lib/private/semantic-index-cli.rkt" \
+  "$@"
