@@ -21,4 +21,5 @@ source "$(dirname "$0")/_beagle-racket"
 
 BEAGLE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+"$BEAGLE_ROOT/bin/test/checkout-first/run.sh" || exit 1
 exec "$RACKET" "$BEAGLE_ROOT/beagle-lib/private/tier-runner.rkt" "$@"

@@ -38,6 +38,7 @@ Query (the compiler is the source of truth):
 Project / loop:
   init [--hooks] [--target T]  Bootstrap a project (+ portable repair hooks)
   daemon start|status|stop  Watch + cache type results
+  promote [REV]             Promote clean checkout HEAD + restart its daemon
   test [--active-only]      Run the test tiers
   rejection-stats DIR       Diagnostics by cause-class
   lsp | repl                LSP server / typed REPL
@@ -115,6 +116,7 @@ case "$cmd" in
             -m selfhost.main facts-roundtrip "$@"
         ;;
     daemon)          exec "$BIN/beagle-daemon" "$@" ;;
+    promote)         exec "$BIN/beagle-promote" "$@" ;;
     test)            exec "$BIN/beagle-test" "$@" ;;
     rejection-stats) exec "$BIN/beagle-rejection-stats" "$@" ;;
     help|--help|-h)

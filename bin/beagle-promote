@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BEAGLE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BIN="$BEAGLE_ROOT/bin"
+
+die() {
+    echo "beagle promote: $*" >&2
+    exit 1
+}
+
+if [[ $# -gt 1 ]] || [[ ${1:-} == "-h" ]] || [[ ${1:-} == "--help" ]]; then
+    cat >&2 <<'EOF'
+usage: beagle promote [REV]
+
+Promote the clean commit currently checked out, then restart only this
+checkout's Beagle daemon. REV defaults to HEAD and must resolve to HEAD.
+Nix remains the release/system baseline; promotion does not build or switch it.
+EOF
+    [[ $# -le 1 ]] && exit 0
+    exit 2
+fi
+
+revision="${1:-HEAD}"
+git -C "$BEAGLE_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
+    die "checkout is not a Git worktree: $BEAGLE_ROOT"
+
+head_commit="$(git -C "$BEAGLE_ROOT" rev-parse --verify HEAD^{commit} 2>/dev/null)" ||
+    die "checkout has no committed HEAD"
+requested_commit="$(git -C "$BEAGLE_ROOT" rev-parse --verify "$revision^{commit}" 2>/dev/null)" ||
+    die "revision does not name a commit: $revision"
+[[ "$requested_commit" == "$head_commit" ]] ||
+    die "revision must be the checked-out HEAD ($head_commit), got $requested_commit"
+
+status="$(git -C "$BEAGLE_ROOT" status --porcelain=v1 --untracked-files=normal)"
+[[ -z "$status" ]] ||
+    die "checkout is dirty; commit or remove every tracked, staged, and untracked change before promotion"
+
+daemon="${BEAGLE_PROMOTE_DAEMON:-$BIN/beagle-daemon}"
+[[ -x "$daemon" ]] || die "daemon command is not executable: $daemon"
+
+"$daemon" stop
+"$daemon" start --watch "$BEAGLE_ROOT"
+daemon_status="$("$daemon" status)"
+grep -Eq '"ok"[[:space:]]*:[[:space:]]*true' <<<"$daemon_status" ||
+    die "daemon did not report healthy after restart: $daemon_status"
+
+after_commit="$(git -C "$BEAGLE_ROOT" rev-parse --verify HEAD^{commit})"
+after_status="$(git -C "$BEAGLE_ROOT" status --porcelain=v1 --untracked-files=normal)"
+[[ "$after_commit" == "$head_commit" && -z "$after_status" ]] ||
+    die "checkout changed during promotion; daemon restart is not attributed to a stable clean commit"
+
+printf 'beagle promote: checkout=%s commit=%s runtime=beagle-daemon\n' \
+    "$BEAGLE_ROOT" "$head_commit"
