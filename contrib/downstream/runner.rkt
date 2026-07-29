@@ -80,7 +80,7 @@
   (define fram (findf (lambda (c) (string=? (consumer-name c) "fram")) consumers))
   (if fram (consumer-repo-path fram)
       (let ([env (getenv "FRAM_REPO")])
-        (simplify-path (path->complete-path (or env (expand-home "~/code/fram")))))))
+        (simplify-path (path->complete-path (or env (expand-home "~/code/fram/main")))))))
 
 (define (expand-home p)
   (if (string-prefix? p "~/")

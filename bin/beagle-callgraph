@@ -25,10 +25,11 @@ fi
 DIR="$(cd "$1" && pwd)"
 BIN="$(cd "$(dirname "$0")" && pwd)"
 RT="$BIN/../beagle-lib/private/facts-roundtrip.rkt"
-FRAM_OUT="${FRAM_OUT:-$HOME/code/fram/out}"
+FRAM_REPO="${FRAM_REPO:-$HOME/code/fram/main}"
+FRAM_OUT="${FRAM_OUT:-$FRAM_REPO/out}"
 # The call graph is derived from the SAME converged resolver as rename/delete: the Layer-2
 # Fram engine (resolve.clj). beagle's tooling RENTS it. CHARTROOM remains the legacy override.
-CHARTROOM="${CHARTROOM:-$HOME/code/fram/chartroom}"
+CHARTROOM="${CHARTROOM:-$FRAM_REPO/chartroom}"
 source "$BIN/_fram-resolver"
 RES="$(find_fram_resolver)" || exit 3
 

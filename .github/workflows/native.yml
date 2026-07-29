@@ -70,7 +70,7 @@ jobs:
         with:
           babashka-version: '1.12.218'
 
-      # verify-native's default corpus is ~/code/fram/src/fram/*.bclj. Check out
+      # verify-native's default corpus is ~/code/fram/main/src/fram/*.bclj. Check out
       # fram so the native binary is gated against the same real modules the
       # local run uses, not just an in-repo fixture.
       - name: Checkout fram (real-module corpus for verify-native)

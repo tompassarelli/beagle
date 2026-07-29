@@ -9,7 +9,7 @@
 #
 # Usage: self-host/verify-selfhost.sh [MODULE.bclj ...]
 #   default corpus: every tracked fixture under self-host/fixtures/, plus
-#   ~/code/fram/src/fram/fold.bclj when that checkout exists
+#   $FRAM_REPO/src/fram/fold.bclj when that checkout exists
 set -uo pipefail
 WT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$WT"
@@ -28,10 +28,11 @@ sh_main() { # <subcommand> [args...]
 }
 beagle_stage0_banner "$OUT"
 
+FRAM_REPO="${FRAM_REPO:-$HOME/code/fram/main}"
 MODULES=("$@")
 if [ ${#MODULES[@]} -eq 0 ]; then
   MODULES=(self-host/fixtures/*.bclj)
-  [ -f "$HOME/code/fram/src/fram/fold.bclj" ] && MODULES+=("$HOME/code/fram/src/fram/fold.bclj")
+  [ -f "$FRAM_REPO/src/fram/fold.bclj" ] && MODULES+=("$FRAM_REPO/src/fram/fold.bclj")
 fi
 
 PASS=0; FAIL=0

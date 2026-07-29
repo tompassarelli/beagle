@@ -15,10 +15,11 @@ export RESOLVE_OUT="$(mktemp -d)"   # hermetic: per-run render output (no global
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
-FRAM_OUT="${FRAM_OUT:-$HOME/code/fram/out}"
-CHARTROOM="${CHARTROOM:-$HOME/code/fram/chartroom}"
+FRAM_REPO="${FRAM_REPO:-$HOME/code/fram/main}"
+FRAM_OUT="${FRAM_OUT:-$FRAM_REPO/out}"
+CHARTROOM="${CHARTROOM:-$FRAM_REPO/chartroom}"
 source "$ROOT/bin/_fram-resolver"
-SRC="${CODE_AS_FACTS_CORPUS:-$HOME/code/fram/src}"
+SRC="${CODE_AS_FACTS_CORPUS:-$FRAM_REPO/src}"
 export FRAM_OUT CHARTROOM
 fail=0
 

@@ -52,7 +52,7 @@ That is *correct where regex is structurally incapable of being correct* — not
 bin/test/cascade-graph/run.sh      # asserts scope-correctness; prints the receipt
 ```
 
-Requires the Fram engine (`FRAM_OUT`, default `~/code/fram/out`) — graph-native
+Requires the Fram engine (`FRAM_OUT`, default `~/code/fram/main/out`) — graph-native
 repair runs on the fact store. The scope-correctness assertions gate in CI; the
 side-by-side receipt is rendered when the pre-migration cascade is reachable in git.
 

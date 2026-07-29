@@ -26,8 +26,8 @@ if [[ -z "${_BEAGLE_RACKET:-}" ]]; then
     #    mismatches the flake-pinned bytecode and dies with "body of raco.rkt".
     #    Fall back to the canonical checkout's resolved racket (same flake.lock
     #    => same racket); internally consistent even for a worktree.
-    if [[ -z "${_direnv_racket:-}" && -d "$HOME/code/beagle/.direnv" && "$BEAGLE_ROOT" != "$HOME/code/beagle" ]]; then
-        _direnv_racket="$(cd "$HOME/code/beagle" && direnv exec . which racket 2>/dev/null || true)"
+    if [[ -z "${_direnv_racket:-}" && -d "$HOME/code/beagle/main/.direnv" && "$BEAGLE_ROOT" != "$HOME/code/beagle/main" ]]; then
+        _direnv_racket="$(cd "$HOME/code/beagle/main" && direnv exec . which racket 2>/dev/null || true)"
     fi
     # 3. Last resort: evaluate this flake directly (slow, but always correct).
     if [[ -z "${_direnv_racket:-}" && -f "$BEAGLE_ROOT/flake.nix" ]] && command -v nix >/dev/null 2>&1; then
@@ -47,7 +47,7 @@ fi
 
 # --- Worktree-local package scope (NO global mutation) -----------------------
 # The global `raco pkg` links for beagle/beagle-lib/beagle-test point at ONE
-# checkout (canonically ~/code/beagle). With the pinned racket shared across
+# checkout (canonically ~/code/beagle/main). With the pinned racket shared across
 # checkouts, EVERY other checkout would silently resolve `(require beagle/...)`
 # through those links to the canonical tree — a git worktree's tests would
 # exercise the WRONG parse.rkt and doctor would still say healthy (observed on

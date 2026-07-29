@@ -17,8 +17,9 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 RT="$ROOT/beagle-lib/private/facts-roundtrip.rkt"
-FRAM_OUT="${FRAM_OUT:-$HOME/code/fram/out}"
-SRC="${CODE_AS_FACTS_CORPUS:-$HOME/code/fram/src}"
+FRAM_REPO="${FRAM_REPO:-$HOME/code/fram/main}"
+FRAM_OUT="${FRAM_OUT:-$FRAM_REPO/out}"
+SRC="${CODE_AS_FACTS_CORPUS:-$FRAM_REPO/src}"
 fail=0
 
 echo "================ move 3 — code as canonical facts ================"

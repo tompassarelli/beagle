@@ -51,7 +51,7 @@ fi
 if [[ "${BEAGLE_VALIDATE_NIXOS_CONFIG:-0}" == "1" ]]; then
     echo
     echo "=== 4/5: nixos-config firn-build + firn-validate ==="
-    nixos_repo="${NIXOS_CONFIG_REPO:-$HOME/code/nixos-config}"
+    nixos_repo="${NIXOS_CONFIG_REPO:-$HOME/code/nixos-config/main}"
     if [[ ! -d "$nixos_repo" ]]; then
         echo "  (skipped — $nixos_repo not found; set NIXOS_CONFIG_REPO=<path>)"
     else

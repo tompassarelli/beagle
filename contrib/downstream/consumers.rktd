@@ -65,7 +65,7 @@
  (consumer
   (name "north")
   (repo-env "NORTH_REPO")
-  (repo-default "~/code/north")
+  (repo-default "~/code/north/main")
   (target "clj")
   (enumerators
    ((enumerator
@@ -78,7 +78,7 @@
  (consumer
   (name "fram")
   (repo-env "FRAM_REPO")
-  (repo-default "~/code/fram")
+  (repo-default "~/code/fram/main")
   (target "clj")
   (enumerators
    ((enumerator
@@ -91,7 +91,7 @@
  (consumer
   (name "nixos-config")
   (repo-env "NIXOS_CONFIG_REPO")
-  (repo-default "~/code/nixos-config")
+  (repo-default "~/code/nixos-config/main")
   (target "nix")
   (enumerators
    ((enumerator

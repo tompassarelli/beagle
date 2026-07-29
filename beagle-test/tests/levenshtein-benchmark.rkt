@@ -47,7 +47,7 @@
 ;; ============================================================================
 ;;
 ;; 20 real NixOS option paths confirmed present in
-;; /home/tom/code/nixos-config/.beagle-cache/schema.json.
+;; /home/tom/code/nixos-config/main/.beagle-cache/schema.json.
 
 (define ANCHOR-PATHS
   '("services.openssh.enable"
@@ -323,7 +323,7 @@
               (format "synthetic Top-1 rate ~a below 90% floor" (real->decimal-string (* 100.0 rate) 1))))
 
 ;; Real-corpus benchmark — opt-in via BEAGLE_BENCH_REAL_SCHEMA env var
-;; pointing at a schema.json (e.g. /home/tom/code/nixos-config/.beagle-cache/schema.json).
+;; pointing at a schema.json (e.g. /home/tom/code/nixos-config/main/.beagle-cache/schema.json).
 ;; This is where Top-1 ranking actually gets stressed against 16k+ candidates.
 (test-case "benchmark Top-1 rate against real 16k schema (opt-in)"
   (define env-path (getenv "BEAGLE_BENCH_REAL_SCHEMA"))

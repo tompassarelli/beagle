@@ -14,8 +14,9 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
-FRAM_OUT="${FRAM_OUT:-$HOME/code/fram/out}"
-CHARTROOM="${CHARTROOM:-$HOME/code/fram/chartroom}"
+FRAM_REPO="${FRAM_REPO:-$HOME/code/fram/main}"
+FRAM_OUT="${FRAM_OUT:-$FRAM_REPO/out}"
+CHARTROOM="${CHARTROOM:-$FRAM_REPO/chartroom}"
 export FRAM_OUT CHARTROOM
 source "$ROOT/bin/_fram-resolver"
 CG="$ROOT/bin/beagle-callgraph"
