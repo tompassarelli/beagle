@@ -31,10 +31,10 @@ pub fn matchEscapedGroup(s: []const u8) ?[]const u8 {
     return rt.re_matches0(ESCAPED_GROUP, s);
 }
 
-pub fn replaceRuns(s: []const u8) []const u8 {
-    return rt.regex_replace(s, REPLACE_RUN, "_");
+pub fn replaceRuns(__ctx: *rt.Ctx, s: []const u8) []const u8 {
+    return rt.regex_replace(__ctx.tick, s, REPLACE_RUN, "_");
 }
 
-pub fn splitRuns(s: []const u8) []const []const u8 {
-    return rt.regex_split(s, SPLIT_RUN);
+pub fn splitRuns(__ctx: *rt.Ctx, s: []const u8) []const []const u8 {
+    return rt.regex_split(__ctx.tick, s, SPLIT_RUN);
 }

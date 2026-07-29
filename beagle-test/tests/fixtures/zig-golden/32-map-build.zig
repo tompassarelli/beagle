@@ -3,16 +3,16 @@ const std = @import("std");
 const rt = @import("beagle_rt.zig");
 pub const Ctx = rt.Ctx;
 
-pub fn lookup(k: []const u8) ?i64 {
-    const m = rt.Map(i64).empty().assoc("x", 10).assoc("y", 20);
+pub fn lookup(__ctx: *rt.Ctx, k: []const u8) ?i64 {
+    const m = rt.Map(i64).empty(__ctx.tick).assoc(__ctx.tick, "x", 10).assoc(__ctx.tick, "y", 20);
     return m.get(k);
 }
 
-pub fn emptyThenGet(k: []const u8) ?i64 {
-    const m = rt.Map(i64).empty();
+pub fn emptyThenGet(__ctx: *rt.Ctx, k: []const u8) ?i64 {
+    const m = rt.Map(i64).empty(__ctx.tick);
     return m.get(k);
 }
 
-pub fn tally(ks: []const []const u8) rt.Map(i64) {
-    return blk1: { var m: rt.Map(i64) = rt.Map(i64).empty(); for (ks) |k| { m = m.assoc(k, 1); } break :blk1 m; };
+pub fn tally(__ctx: *rt.Ctx, ks: []const []const u8) rt.Map(i64) {
+    return blk1: { var m: rt.Map(i64) = rt.Map(i64).empty(__ctx.tick); for (ks) |k| { m = m.assoc(__ctx.tick, k, 1); } break :blk1 m; };
 }

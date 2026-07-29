@@ -20,7 +20,18 @@ pub fn dynInt(value: i64) Dyn0 {
     return Dyn0{ .int = value };
 }
 
+pub fn __beagle_main(__ctx: *rt.Ctx) void {
+    const record = rt.ValueMap(rt.Keyword, Dyn0).empty(__ctx.tick).assoc(__ctx.tick, rt.keyword("", "name"), dynString("fram")).assoc(__ctx.tick, rt.keyword("", "version"), dynInt(7));
+    _ = rt.println(rt.str1(__ctx.tick, rt.pr_str(__ctx.tick, record)));
+}
+
 pub fn main() void {
-    const record = rt.ValueMap(rt.Keyword, Dyn0).empty().assoc(rt.keyword("", "name"), dynString("fram")).assoc(rt.keyword("", "version"), dynInt(7));
-    _ = rt.println(rt.str1(rt.pr_str(record)));
+    var __arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer __arena.deinit();
+    var __rng = rt.Splitmix64.init(0);
+    var __ctx = rt.Ctx{
+        .tick = __arena.allocator(),
+        .rng = &__rng,
+    };
+    __beagle_main(&__ctx);
 }

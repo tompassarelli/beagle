@@ -11,7 +11,7 @@ source "$BIN/_beagle-racket"
 usage() {
     cat >&2 <<'EOF'
 beagle — a typed Clojure subset; one AST → Clojure / ClojureScript /
-JavaScript / Nix / Odin (SQL emitter dormant; schema-typing live).
+JavaScript / Nix / Zig / Odin (SQL emitter dormant; schema-typing live).
 
 Usage: beagle <command> [args...]
 
@@ -19,7 +19,7 @@ Author:
   syntax FILE               Parse-check (--ledger, --repair --emit-patch)
   check [--profile N] [PATH...]  Type-check without emitting
   validate [FILE...]        Parse + check + schema validation
-  build [PATH...]           Compile to target (--out DIR, --warn)
+  build [--target T] PATH   Compile, optionally retargeting portable source
   fix [--dry-run] [PATH...] Surface high-confidence auto-fixes
   repair DIR VERIFY         Evidence-ranked repair (--emit-patch / --auto)
   doctor [--deep]           Is the repair loop online and working?
@@ -77,7 +77,10 @@ case "$cmd" in
         fi
         ;;
     build)
-        if [[ $# -ge 1 ]] && [[ -f "$1" ]] && [[ $# -le 2 ]] && [[ "${2:-}" != --* ]]; then
+        if [[ "${1:-}" == "--target" ]] &&
+           [[ $# -ge 3 && $# -le 4 ]]; then
+            exec "$BIN/beagle-build" "$@"
+        elif [[ $# -ge 1 ]] && [[ -f "$1" ]] && [[ $# -le 2 ]] && [[ "${2:-}" != --* ]]; then
             exec "$BIN/beagle-build" "$@"
         else
             exec "$BIN/beagle-build-all" "$@"

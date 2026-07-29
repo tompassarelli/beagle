@@ -1118,10 +1118,14 @@
 
 ;; --- allocation region and allocation failure -------------------------------
 
-(define ALLOCATING-FNS
+(define PORTABLE-ALLOCATING-FNS
   '(mapv filterv sort sort-by distinct concat str assoc conj set
     clojure.string/lower-case clojure.string/upper-case
     clojure.string/join clojure.string/replace clojure.string/split))
+
+(define NATIVE-ALLOCATING-FNS
+  '(map filter remove vec repeat apply pr-str println keys vals slurp path
+    clojure.string/split-lines babashka.fs/path))
 
 (define ZIG-FALLIBLE-ALLOCATING-FNS '(mapv filterv sort-by str))
 
@@ -1129,13 +1133,30 @@
   (raise-diag 'allocation-contract message details
               #:src (and node (src-for node))))
 
-(define (allocating-call? value)
+(define (native-allocation-target? target)
+  (memq target '(zig odin)))
+
+(define (allocating-call? value target canonical-fn)
   (and (call-form? value)
-       (symbol? (call-form-fn value))
-       (memq (call-form-fn value) ALLOCATING-FNS)
-       (case (call-form-fn value)
+       (symbol? canonical-fn)
+       (or (memq canonical-fn PORTABLE-ALLOCATING-FNS)
+           (and (native-allocation-target? target)
+                (memq canonical-fn NATIVE-ALLOCATING-FNS)))
+       (case canonical-fn
          [(str concat) (>= (length (call-form-args value)) 2)]
+         ;; Only `(apply str xs)` is an allocating apply lowering. Other
+         ;; higher-order applications are classified by their selected callee.
+         [(apply) (and (pair? (call-form-args value))
+                       (eq? (car (call-form-args value)) 'str))]
          [else #t])))
+
+;; Container literals are allocation sites when evaluated inside a function.
+;; The Zig emitter can borrow fully-static top-level storage, but a runtime
+;; literal — especially one returned from a function — must never become an
+;; escaping `&.{...}` temporary. Maps/sets likewise lower through persistent
+;; collection construction and therefore consume the current arena.
+(define (allocating-literal? value)
+  (or (vec-form? value) (map-form? value) (set-form? value)))
 
 (define (ctx-first-defn? form)
   (and (defn-form? form)
@@ -1149,12 +1170,12 @@
 (define (allocation-region target form failure)
   (case target
     [(clj js scriptc nix) 'gc]
-    [(zig odin)
-     ;; Existing unannotated CLI lowering is a committed process/abort ABI.
-     ;; A Ctx becomes the tick allocator only when :raises makes allocation
-     ;; failure explicit; this preserves old target bytes while removing
-     ;; hidden allocator selection from the new fallible path.
-     (if (and (ctx-first-defn? form) (pair? failure)) 'tick 'process)]
+    [(zig)
+     ;; Zig always receives allocation policy from its caller. A source-visible
+     ;; Ctx is the tick arena; the hidden native ABI is classified explicitly
+     ;; as caller-owned rather than pretending it is process-global.
+     (if (ctx-first-defn? form) 'tick 'caller)]
+    [(odin) (if (ctx-first-defn? form) 'tick 'process)]
     [else 'process]))
 
 (define (raise-alternatives raises)
@@ -1179,33 +1200,120 @@
 (define (prepare-allocation-contracts! prog)
   (define table (program-semantic-contracts prog))
   (define target (program-target prog))
-  (define (walk value found)
+  (define native-target? (native-allocation-target? target))
+  (define require-aliases
+    (for/hasheq ([entry (in-list (program-requires prog))]
+                 #:when (require-entry-alias entry))
+      (values (require-entry-alias entry) (require-entry-ns entry))))
+  (define (canonical-call-fn value)
+    (define fn (and (call-form? value) (call-form-fn value)))
     (cond
-      [(allocating-call? value)
-       (define with-call (cons value found))
-       (for/fold ([out with-call])
-                 ([arg (in-list (call-form-args value))])
-         (walk arg out))]
-      [(struct? value)
-       (for/fold ([out found])
-                 ([field (in-vector (struct->vector value))]
-                  [i (in-naturals)]
-                  #:when (positive? i))
-         (walk field out))]
-      [(pair? value)
-       (walk (cdr value) (walk (car value) found))]
-      [(vector? value)
-       (for/fold ([out found]) ([item (in-vector value)])
-         (walk item out))]
-      [else found]))
-  (for ([raw-form (in-list (program-forms prog))])
-    (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
-    (when (defn-form? form)
-      (define allocating-exprs
-        (reverse
-         (for/fold ([found '()]) ([expr (in-list (defn-form-body form))])
-           (walk expr found))))
-      (unless (null? allocating-exprs)
+      [(not (symbol? fn)) fn]
+      [else
+       (define match
+         (regexp-match #rx"^([^/]+)/(.+)$" (symbol->string fn)))
+       (if (not match)
+           fn
+           (let* ([prefix (string->symbol (cadr match))]
+                  [namespace (hash-ref require-aliases prefix #f)])
+             (if namespace
+                 (string->symbol
+                  (format "~a/~a" namespace (caddr match)))
+                 fn)))]))
+  (define defns
+    (for/list ([raw-form (in-list (program-forms prog))]
+               #:do [(define form
+                        (if (with-meta? raw-form)
+                            (with-meta-expr raw-form)
+                            raw-form))]
+               #:when (defn-form? form))
+      form))
+  (define local-names
+    (for/seteq ([form (in-list defns)]) (defn-form-name form)))
+
+  ;; Collect both direct lowered-allocation sites and local callees. The latter
+  ;; drives a fixed point: a function that only calls an allocating local
+  ;; function still needs the hidden allocator context in its native ABI.
+  (define (collect form)
+    (define sites '())
+    (define calls '())
+    (define (walk-error-payload value)
+      ;; The ex-info map is syntax for a typed error carrier on native targets,
+      ;; not a persistent Map allocation. Payload VALUES may still allocate and
+      ;; must retain their ordinary effects.
+      (if (map-form? value)
+          (for ([entry (in-list (map-form-pairs value))])
+            (walk (cdr entry)))
+          (walk value)))
+    (define (walk value)
+      (cond
+        [(call-form? value)
+         (define canonical-fn (canonical-call-fn value))
+         (when (allocating-call? value target canonical-fn)
+           (set! sites (cons value sites)))
+         (when (and (symbol? (call-form-fn value))
+                    (set-member? local-names (call-form-fn value)))
+           (set! calls (cons value calls)))
+         (for ([arg (in-list (call-form-args value))]
+               [index (in-naturals)])
+           (if (and (eq? canonical-fn 'ex-info)
+                    (= index 1))
+               (walk-error-payload arg)
+               (walk arg)))]
+        [(vec-form? value)
+         (when native-target? (set! sites (cons value sites)))
+         (for ([item (in-list (vec-form-items value))]) (walk item))]
+        [(map-form? value)
+         (when native-target? (set! sites (cons value sites)))
+         (for ([entry (in-list (map-form-pairs value))])
+           (walk (car entry))
+           (walk (cdr entry)))]
+        [(set-form? value)
+         (when native-target? (set! sites (cons value sites)))
+         (for ([item (in-list (set-form-items value))]) (walk item))]
+        [(struct? value)
+         (for ([field (in-vector (struct->vector value))]
+               [i (in-naturals)]
+               #:when (positive? i))
+           (walk field))]
+        [(pair? value) (walk (car value)) (walk (cdr value))]
+        [(vector? value) (for ([item (in-vector value)]) (walk item))]
+        [else (void)]))
+    (for ([expr (in-list (defn-form-body form))]) (walk expr))
+    (values (reverse sites) (reverse calls)))
+
+  (define direct-sites (make-hasheq))
+  (define local-calls (make-hasheq))
+  (for ([form (in-list defns)])
+    (define-values (sites calls) (collect form))
+    (hash-set! direct-sites form sites)
+    (hash-set! local-calls form calls))
+
+  (define direct-allocating
+    (for/seteq ([form (in-list defns)]
+                #:when (pair? (hash-ref direct-sites form)))
+      (defn-form-name form)))
+  (define allocating-names
+    (if native-target?
+        (let loop ([known direct-allocating])
+          (define next
+            (for/fold ([out known]) ([form (in-list defns)])
+              (if (for/or ([callee (in-list (hash-ref local-calls form))])
+                    (set-member? known (call-form-fn callee)))
+                  (set-add out (defn-form-name form))
+                  out)))
+          (if (set=? known next) known (loop next)))
+        direct-allocating))
+
+  (for ([form (in-list defns)]
+        #:when (set-member? allocating-names (defn-form-name form)))
+      (define allocating-exprs (hash-ref direct-sites form))
+      (define allocating-local-calls
+        (for/list ([call (in-list (hash-ref local-calls form))]
+                   #:when
+                   (set-member? allocating-names (call-form-fn call)))
+          call))
+      (let ()
         (define failure (allocation-failure form))
         (when (and (pair? failure)
                    (not (raise-includes? (defn-form-raises form)
@@ -1221,20 +1329,39 @@
                    'repair ":raises AllocationError")))
         (when (and (eq? target 'zig) (pair? failure))
           (for ([expr (in-list allocating-exprs)])
-            (unless (memq (call-form-fn expr) ZIG-FALLIBLE-ALLOCATING-FNS)
-              (allocation-contract-error
-               expr
-               (format "zig typed allocation failure is not yet available for ~a"
-                       (call-form-fn expr))
-               (hasheq 'function
-                       (symbol->string (defn-form-name form))
-                       'operation (symbol->string (call-form-fn expr))
-                       'failure "raises AllocationError")))))
+            ;; Literal construction already lowers through the same fallible
+            ;; arena primitive as mapv/filterv. Only named calls need the
+            ;; backend-support allowlist.
+            (cond
+              [(or (map-form? expr) (set-form? expr))
+               (allocation-contract-error
+                expr
+                "zig typed allocation failure is not yet available for Map/Set literals"
+                (hasheq 'function
+                        (symbol->string (defn-form-name form))
+                        'operation (if (map-form? expr) "Map literal" "Set literal")
+                        'failure "raises AllocationError"))]
+              [(and (call-form? expr)
+                    (not (memq (canonical-call-fn expr)
+                               ZIG-FALLIBLE-ALLOCATING-FNS)))
+               (allocation-contract-error
+                expr
+                (format "zig typed allocation failure is not yet available for ~a"
+                        (call-form-fn expr))
+                (hasheq 'function
+                        (symbol->string (defn-form-name form))
+                        'operation (symbol->string (call-form-fn expr))
+                        'failure "raises AllocationError"))])))
         (define contract
           (allocation-contract (allocation-region target form failure) failure))
         (hash-set! table form contract)
-        (for ([expr (in-list allocating-exprs)])
-          (hash-set! table expr contract))))))
+        ;; Keep the effect visible on transitive call nodes too. A function
+        ;; node can simultaneously carry a typed-error contract, whose later
+        ;; checker pass owns the node's primary slot; call-site facts preserve
+        ;; the allocation ABI without conflating the two contracts.
+        (for ([expr (in-list (append allocating-exprs
+                                     allocating-local-calls))])
+          (hash-set! table expr contract)))))
 
 ;; --- typed errors and payloads ----------------------------------------------
 

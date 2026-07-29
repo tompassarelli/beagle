@@ -221,6 +221,8 @@
    'reader-conditional-no-match 'surface-divergence
    'duplicate-meta         'type-error
    'bad-meta-value         'type-error
+   'missing-type-export    'type-error
+   'type-application       'type-error
    'bad-form               'surface-divergence))
 
 ;; validate-nix.rkt kinds — emitted by validation-error struct.

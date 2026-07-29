@@ -15,6 +15,6 @@ pub fn size(m: rt.Map(i64)) i64 {
     return rt.count(m);
 }
 
-pub fn put(m: rt.Map(i64), k: []const u8, v: i64) rt.Map(i64) {
-    return m.assoc(k, v);
+pub fn put(__ctx: *rt.Ctx, m: rt.Map(i64), k: []const u8, v: i64) rt.Map(i64) {
+    return m.assoc(__ctx.tick, k, v);
 }

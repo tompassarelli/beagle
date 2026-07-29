@@ -3,8 +3,8 @@ const std = @import("std");
 const rt = @import("beagle_rt.zig");
 pub const Ctx = rt.Ctx;
 
-pub fn norm(s: []const u8) []const u8 {
-    return rt.trim(rt.lower_case(s));
+pub fn norm(__ctx: *rt.Ctx, s: []const u8) []const u8 {
+    return rt.trim(rt.lower_case(__ctx.tick, s));
 }
 
 pub fn flags(s: []const u8) bool {
@@ -19,28 +19,28 @@ pub fn tail(s: []const u8) []const u8 {
     return rt.subs(s, 1);
 }
 
-pub fn glue(parts: []const []const u8) []const u8 {
-    return rt.join(",", parts);
+pub fn glue(__ctx: *rt.Ctx, parts: []const []const u8) []const u8 {
+    return rt.join(__ctx.tick, ",", parts);
 }
 
-pub fn fix(s: []const u8) []const u8 {
-    return rt.replace(s, "a", "b");
+pub fn fix(__ctx: *rt.Ctx, s: []const u8) []const u8 {
+    return rt.replace(__ctx.tick, s, "a", "b");
 }
 
-pub fn lines(s: []const u8) []const []const u8 {
-    return rt.split_lines(s);
+pub fn lines(__ctx: *rt.Ctx, s: []const u8) []const []const u8 {
+    return rt.split_lines(__ctx.tick, s);
 }
 
 pub fn dir(p: []const u8) []const u8 {
     return rt.parent(p);
 }
 
-pub fn under(a: []const u8, b: []const u8) []const u8 {
-    return rt.path(a, b);
+pub fn under(__ctx: *rt.Ctx, a: []const u8, b: []const u8) []const u8 {
+    return rt.path(__ctx.tick, a, b);
 }
 
-pub fn readIt(p: []const u8) []const u8 {
-    return rt.slurp(p);
+pub fn readIt(__ctx: *rt.Ctx, p: []const u8) []const u8 {
+    return rt.slurp(__ctx.tick, p);
 }
 
 pub fn writeIt(p: []const u8, s: []const u8) void {

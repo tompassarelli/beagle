@@ -3,42 +3,42 @@ const std = @import("std");
 const rt = @import("beagle_rt.zig");
 pub const Ctx = rt.Ctx;
 
-pub fn keywordMapCount() i64 {
-    const values = rt.ValueMap(rt.Keyword, i64).empty().assoc(rt.keyword("", "alpha"), 1).assoc(rt.keyword("beagle", "beta"), 2);
+pub fn keywordMapCount(__ctx: *rt.Ctx) i64 {
+    const values = rt.ValueMap(rt.Keyword, i64).empty(__ctx.tick).assoc(__ctx.tick, rt.keyword("", "alpha"), 1).assoc(__ctx.tick, rt.keyword("beagle", "beta"), 2);
     return rt.count(values);
 }
 
-pub fn keywordMapAbsent() bool {
-    const values = rt.ValueMap(rt.Keyword, i64).empty().assoc(rt.keyword("", "alpha"), 1);
+pub fn keywordMapAbsent(__ctx: *rt.Ctx) bool {
+    const values = rt.ValueMap(rt.Keyword, i64).empty(__ctx.tick).assoc(__ctx.tick, rt.keyword("", "alpha"), 1);
     return (!values.contains(rt.keyword("", "missing")));
 }
 
-pub fn compoundMapPresent() bool {
-    const needle = &.{ 1, 2 };
-    const values = rt.ValueMap([]const i64, []const u8).empty().assoc(&.{ 1, 2 }, "pair");
+pub fn compoundMapPresent(__ctx: *rt.Ctx) bool {
+    const needle = blk1: { const __vec_blk1 = __ctx.tick.alloc(i64, 2) catch @panic("oom"); __vec_blk1[0] = 1; __vec_blk1[1] = 2;  break :blk1 __vec_blk1; };
+    const values = rt.ValueMap([]const i64, []const u8).empty(__ctx.tick).assoc(__ctx.tick, blk2: { const __vec_blk2 = __ctx.tick.alloc(i64, 2) catch @panic("oom"); __vec_blk2[0] = 1; __vec_blk2[1] = 2;  break :blk2 __vec_blk2; }, "pair");
     return values.contains(needle);
 }
 
-pub fn setDedupCount() i64 {
-    const values = rt.ValueSet([]const i64).empty().conj(&.{ 1, 2 }).conj(&.{ (0 + 1), 2 }).conj(&.{ 2, 3 });
+pub fn setDedupCount(__ctx: *rt.Ctx) i64 {
+    const values = rt.ValueSet([]const i64).empty().conj(__ctx.tick, blk1: { const __vec_blk1 = __ctx.tick.alloc(i64, 2) catch @panic("oom"); __vec_blk1[0] = 1; __vec_blk1[1] = 2;  break :blk1 __vec_blk1; }).conj(__ctx.tick, blk2: { const __vec_blk2 = __ctx.tick.alloc(i64, 2) catch @panic("oom"); __vec_blk2[0] = (0 + 1); __vec_blk2[1] = 2;  break :blk2 __vec_blk2; }).conj(__ctx.tick, blk3: { const __vec_blk3 = __ctx.tick.alloc(i64, 2) catch @panic("oom"); __vec_blk3[0] = 2; __vec_blk3[1] = 3;  break :blk3 __vec_blk3; });
     return rt.count(values);
 }
 
-pub fn setPresent() bool {
-    const needle = &.{ 1, 2 };
-    const values = rt.ValueSet([]const i64).empty().conj(&.{ 1, 2 }).conj(&.{ 2, 3 });
+pub fn setPresent(__ctx: *rt.Ctx) bool {
+    const needle = blk1: { const __vec_blk1 = __ctx.tick.alloc(i64, 2) catch @panic("oom"); __vec_blk1[0] = 1; __vec_blk1[1] = 2;  break :blk1 __vec_blk1; };
+    const values = rt.ValueSet([]const i64).empty().conj(__ctx.tick, blk2: { const __vec_blk2 = __ctx.tick.alloc(i64, 2) catch @panic("oom"); __vec_blk2[0] = 1; __vec_blk2[1] = 2;  break :blk2 __vec_blk2; }).conj(__ctx.tick, blk3: { const __vec_blk3 = __ctx.tick.alloc(i64, 2) catch @panic("oom"); __vec_blk3[0] = 2; __vec_blk3[1] = 3;  break :blk3 __vec_blk3; });
     return values.contains(needle);
 }
 
-pub fn compoundEqual() bool {
-    const left = &.{ &.{ 1, 2 }, &.{ 3 } };
-    const right = &.{ &.{ 1, 2 }, &.{ 3 } };
+pub fn compoundEqual(__ctx: *rt.Ctx) bool {
+    const left = blk1: { const __vec_blk1 = __ctx.tick.alloc([]const i64, 2) catch @panic("oom"); __vec_blk1[0] = blk2: { const __vec_blk2 = __ctx.tick.alloc(i64, 2) catch @panic("oom"); __vec_blk2[0] = 1; __vec_blk2[1] = 2;  break :blk2 __vec_blk2; }; __vec_blk1[1] = blk3: { const __vec_blk3 = __ctx.tick.alloc(i64, 1) catch @panic("oom"); __vec_blk3[0] = 3;  break :blk3 __vec_blk3; };  break :blk1 __vec_blk1; };
+    const right = blk4: { const __vec_blk4 = __ctx.tick.alloc([]const i64, 2) catch @panic("oom"); __vec_blk4[0] = blk5: { const __vec_blk5 = __ctx.tick.alloc(i64, 2) catch @panic("oom"); __vec_blk5[0] = 1; __vec_blk5[1] = 2;  break :blk5 __vec_blk5; }; __vec_blk4[1] = blk6: { const __vec_blk6 = __ctx.tick.alloc(i64, 1) catch @panic("oom"); __vec_blk6[0] = 3;  break :blk6 __vec_blk6; };  break :blk4 __vec_blk4; };
     return rt.eq(left, right);
 }
 
-pub fn compoundHashConsistent() bool {
-    const left = &.{ &.{ 1, 2 }, &.{ 3 } };
-    const right = &.{ &.{ 1, 2 }, &.{ 3 } };
+pub fn compoundHashConsistent(__ctx: *rt.Ctx) bool {
+    const left = blk1: { const __vec_blk1 = __ctx.tick.alloc([]const i64, 2) catch @panic("oom"); __vec_blk1[0] = blk2: { const __vec_blk2 = __ctx.tick.alloc(i64, 2) catch @panic("oom"); __vec_blk2[0] = 1; __vec_blk2[1] = 2;  break :blk2 __vec_blk2; }; __vec_blk1[1] = blk3: { const __vec_blk3 = __ctx.tick.alloc(i64, 1) catch @panic("oom"); __vec_blk3[0] = 3;  break :blk3 __vec_blk3; };  break :blk1 __vec_blk1; };
+    const right = blk4: { const __vec_blk4 = __ctx.tick.alloc([]const i64, 2) catch @panic("oom"); __vec_blk4[0] = blk5: { const __vec_blk5 = __ctx.tick.alloc(i64, 2) catch @panic("oom"); __vec_blk5[0] = 1; __vec_blk5[1] = 2;  break :blk5 __vec_blk5; }; __vec_blk4[1] = blk6: { const __vec_blk6 = __ctx.tick.alloc(i64, 1) catch @panic("oom"); __vec_blk6[0] = 3;  break :blk6 __vec_blk6; };  break :blk4 __vec_blk4; };
     return rt.eq(rt.hash(left), rt.hash(right));
 }
 

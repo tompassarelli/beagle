@@ -281,6 +281,553 @@
       #rx"nothing emitted"
       err))))
 
+(test-case "removed qualified nominal types fail closed in alias and full-ns spellings"
+  (with-world-files
+   (lambda (root provider-source consumer-source)
+     (define provider-edn
+       (candidate!
+        root "type-provider" provider-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.provider)\n"
+         "(defrecord Replacement [name :- String])\n")))
+     (for ([type-name (in-list '("p/User" "world.provider/User"))]
+           [stem (in-list '("missing-alias-type" "missing-full-type"))])
+       (define consumer-edn
+         (candidate!
+          root stem consumer-source
+          (string-append
+           "#lang beagle/clj\n"
+           "(ns world.consumer (:require [world.provider :as p]))\n"
+           (format
+            "(defn keep [x :- ~a] :- ~a x)\n"
+            type-name
+            type-name))))
+       (define result
+         (check-edn-world (list provider-edn consumer-edn)))
+       (check-false (world-check-result-ok? result))
+       (check-regexp-match
+        #rx"world\\.provider does not export type User"
+        (diagnostic-text result)))
+     (define cli-consumer
+       (candidate!
+        root "missing-cli-type" consumer-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.consumer (:require [world.provider :as p]))\n"
+         "(defn keep [x :- p/User] :- p/User x)\n")))
+     (define-values (status out err)
+       (run-world-cli
+        "--check"
+        "world.consumer"
+        (path->string provider-edn)
+        (path->string cli-consumer)))
+     (check-equal? status 1)
+     (check-equal? out "")
+     (check-regexp-match
+      #rx"world\\.provider does not export type User"
+      err)
+     (check-regexp-match #rx"nothing emitted" err))))
+
+(test-case "exported qualified nominal type checks through the candidate interface"
+  (with-world-files
+   (lambda (root provider-source consumer-source)
+     (define provider-edn
+       (candidate!
+        root "record-provider" provider-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.provider)\n"
+         "(defrecord User [name :- String])\n")))
+     (define consumer-edn
+       (candidate!
+        root "record-consumer" consumer-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.consumer (:require [world.provider :as p]))\n"
+         "(defn keep [x :- p/User] :- p/User x)\n")))
+     (define result
+       (check-edn-world (list consumer-edn provider-edn)))
+     (check-true
+      (world-check-result-ok? result)
+      (diagnostic-text result))
+     (define provider
+       (for/first
+           ([module (in-list (world-check-result-modules result))]
+            #:when
+            (eq? (checked-world-module-namespace module) 'world.provider))
+         module))
+     (check-true
+       (module-interface-type-export?
+       (checked-world-module-interface provider)
+       'User)))))
+
+(test-case "cross-module aliases expand transparently in source order"
+  (with-world-files
+   (lambda (root provider-source consumer-source)
+     (define provider-edn
+       (candidate!
+        root "alias-provider" provider-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.provider)\n"
+         "(defalias Text String)\n"
+         "(defalias MaybeText (U Text Nil))\n")))
+     (define consumer-edn
+       (candidate!
+        root "alias-consumer" consumer-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.consumer (:require [world.provider :as p]))\n"
+         "(defn none [] :- p/MaybeText nil)\n"
+         "(defn full [] :- world.provider/Text \"ok\")\n")))
+     (define result
+       (check-edn-world (list provider-edn consumer-edn)))
+     (check-true
+      (world-check-result-ok? result)
+      (diagnostic-text result)))))
+
+(test-case "exported alias to provider record keeps provider-qualified identity"
+  (with-world-files
+   (lambda (root provider-source consumer-source)
+     (define provider-edn
+       (candidate!
+        root "record-alias-provider" provider-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.provider)\n"
+         "(defrecord User [name :- String])\n"
+         "(defalias Users (Vec User))\n")))
+     (define consumer-edn
+       (candidate!
+        root "record-alias-consumer" consumer-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.consumer (:require [world.provider :as p]))\n"
+         "(defn keep [xs :- p/Users] :- p/Users xs)\n")))
+     (define result
+       (check-edn-world (list consumer-edn provider-edn)))
+     (check-true (world-check-result-ok? result) (diagnostic-text result))
+     (define expected '(app Vec (prim world.provider/User)))
+     (define provider
+       (for/first
+           ([module (in-list (world-check-result-modules result))]
+            #:when
+            (eq? (checked-world-module-namespace module) 'world.provider))
+         module))
+     (define consumer
+       (for/first
+           ([module (in-list (world-check-result-modules result))]
+            #:when
+            (eq? (checked-world-module-namespace module) 'world.consumer))
+         module))
+     (define users-export
+       (module-interface-type-export-ref
+        (checked-world-module-interface provider)
+        'Users))
+     (check-equal?
+      (type->canonical-datum
+       (interface-type-export-expansion users-export))
+      expected)
+     (define keep
+       (for/first
+           ([form
+             (in-list
+              (program-forms
+               (checked-world-module-program consumer)))]
+            #:when
+            (and (defn-form? form)
+                 (eq? (defn-form-name form) 'keep)))
+         form))
+     (check-equal?
+      (type->canonical-datum
+       (param-type (car (defn-form-params keep))))
+      expected)
+     (check-equal?
+      (type->canonical-datum (defn-form-return-type keep))
+      expected))))
+
+(test-case "exported alias to provider parametric type keeps canonical ctor"
+  (with-world-files
+   (lambda (root provider-source consumer-source)
+     (define provider-edn
+       (candidate!
+        root "param-alias-provider" provider-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.provider)\n"
+         "(defunion (Box T) (BoxValue [value :- T]))\n"
+         "(defalias TextBox (Box String))\n")))
+     (define consumer-edn
+       (candidate!
+        root "param-alias-consumer" consumer-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.consumer (:require [world.provider :as p]))\n"
+         "(defn keep [box :- p/TextBox] :- p/TextBox box)\n")))
+     (define result
+       (check-edn-world (list provider-edn consumer-edn)))
+     (check-true (world-check-result-ok? result) (diagnostic-text result))
+     (define expected '(app world.provider/Box (prim String)))
+     (define provider
+       (for/first
+           ([module (in-list (world-check-result-modules result))]
+            #:when
+            (eq? (checked-world-module-namespace module) 'world.provider))
+         module))
+     (define consumer
+       (for/first
+           ([module (in-list (world-check-result-modules result))]
+            #:when
+            (eq? (checked-world-module-namespace module) 'world.consumer))
+         module))
+     (define alias-export
+       (module-interface-type-export-ref
+        (checked-world-module-interface provider)
+        'TextBox))
+     (check-equal?
+      (type->canonical-datum
+       (interface-type-export-expansion alias-export))
+      expected)
+     (define keep
+       (for/first
+           ([form
+             (in-list
+              (program-forms
+               (checked-world-module-program consumer)))]
+            #:when
+            (and (defn-form? form)
+                 (eq? (defn-form-name form) 'keep)))
+         form))
+     (check-equal?
+      (type->canonical-datum
+       (param-type (car (defn-form-params keep))))
+      expected)
+     (check-equal?
+      (type->canonical-datum (defn-form-return-type keep))
+      expected))))
+
+(test-case "record alias re-export preserves the origin provider identity"
+  (with-world-files
+   (lambda (root origin-source consumer-source)
+     (define bridge-source (build-path root "world" "bridge.bclj"))
+     (define origin-edn
+       (candidate!
+        root "record-origin" origin-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.origin)\n"
+         "(defrecord User [name :- String])\n")))
+     (define bridge-edn
+       (candidate!
+        root "record-bridge" bridge-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.bridge (:require [world.origin :as local]))\n"
+         "(defalias Users (Vec local/User))\n")))
+     (define consumer-edn
+       (candidate!
+        root "record-reexport-consumer" consumer-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.consumer (:require [world.bridge :as b]))\n"
+         "(defn keep [xs :- b/Users] :- b/Users xs)\n")))
+     (define result
+       (check-edn-world (list consumer-edn bridge-edn origin-edn)))
+     (check-true (world-check-result-ok? result) (diagnostic-text result))
+     (define expected '(app Vec (prim world.origin/User)))
+     (define bridge
+       (for/first
+           ([module (in-list (world-check-result-modules result))]
+            #:when
+            (eq? (checked-world-module-namespace module) 'world.bridge))
+         module))
+     (define consumer
+       (for/first
+           ([module (in-list (world-check-result-modules result))]
+            #:when
+            (eq? (checked-world-module-namespace module) 'world.consumer))
+         module))
+     (define users-export
+       (module-interface-type-export-ref
+        (checked-world-module-interface bridge)
+        'Users))
+     (check-equal?
+      (type->canonical-datum
+       (interface-type-export-expansion users-export))
+      expected)
+     (define keep
+       (for/first
+           ([form
+             (in-list
+              (program-forms
+               (checked-world-module-program consumer)))]
+            #:when
+            (and (defn-form? form)
+                 (eq? (defn-form-name form) 'keep)))
+         form))
+     (check-equal?
+      (type->canonical-datum
+       (param-type (car (defn-form-params keep))))
+      expected)
+     (check-equal?
+      (type->canonical-datum (defn-form-return-type keep))
+      expected))))
+
+(test-case "parametric alias re-export preserves the origin provider ctor"
+  (with-world-files
+   (lambda (root origin-source consumer-source)
+     (define bridge-source (build-path root "world" "bridge.bclj"))
+     (define origin-edn
+       (candidate!
+        root "param-origin" origin-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.origin)\n"
+         "(defunion (Box T) (BoxValue [value :- T]))\n")))
+     (define bridge-edn
+       (candidate!
+        root "param-bridge" bridge-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.bridge (:require [world.origin :as local]))\n"
+         "(defalias TextBox (local/Box String))\n")))
+     (define consumer-edn
+       (candidate!
+        root "param-reexport-consumer" consumer-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.consumer (:require [world.bridge :as b]))\n"
+         "(defn keep [box :- b/TextBox] :- b/TextBox box)\n")))
+     (define result
+       (check-edn-world (list bridge-edn origin-edn consumer-edn)))
+     (check-true (world-check-result-ok? result) (diagnostic-text result))
+     (define expected '(app world.origin/Box (prim String)))
+     (define bridge
+       (for/first
+           ([module (in-list (world-check-result-modules result))]
+            #:when
+            (eq? (checked-world-module-namespace module) 'world.bridge))
+         module))
+     (define consumer
+       (for/first
+           ([module (in-list (world-check-result-modules result))]
+            #:when
+            (eq? (checked-world-module-namespace module) 'world.consumer))
+         module))
+     (define alias-export
+       (module-interface-type-export-ref
+        (checked-world-module-interface bridge)
+        'TextBox))
+     (check-equal?
+      (type->canonical-datum
+       (interface-type-export-expansion alias-export))
+      expected)
+     (define keep
+       (for/first
+           ([form
+             (in-list
+              (program-forms
+               (checked-world-module-program consumer)))]
+            #:when
+            (and (defn-form? form)
+                 (eq? (defn-form-name form) 'keep)))
+         form))
+     (check-equal?
+      (type->canonical-datum
+       (param-type (car (defn-form-params keep))))
+      expected)
+     (check-equal?
+      (type->canonical-datum (defn-form-return-type keep))
+      expected))))
+
+(test-case "qualified parametric exports prove existence and arity"
+  (with-world-files
+   (lambda (root provider-source consumer-source)
+     (define provider-edn
+       (candidate!
+        root "param-provider" provider-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.provider)\n"
+         "(defunion (Box T) (BoxValue [value :- T]))\n")))
+     (define good-edn
+       (candidate!
+        root "param-good" consumer-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.consumer (:require [world.provider :as p]))\n"
+         "(defn keep [x :- (p/Box String)] :- (p/Box String) x)\n")))
+     (define good
+       (check-edn-world (list good-edn provider-edn)))
+     (check-true (world-check-result-ok? good) (diagnostic-text good))
+     (define missing-edn
+       (candidate!
+        root "param-missing" consumer-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.consumer (:require [world.provider :as p]))\n"
+         "(defn keep [x :- (p/Missing String)] :- String \"no\")\n")))
+     (define missing
+       (check-edn-world (list provider-edn missing-edn)))
+     (check-false (world-check-result-ok? missing))
+     (check-regexp-match
+      #rx"world\\.provider does not export type Missing"
+      (diagnostic-text missing))
+     (define arity-edn
+       (candidate!
+        root "param-arity" consumer-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.consumer (:require [world.provider :as p]))\n"
+         "(defn keep [x :- (p/Box String Int)] :- String \"no\")\n")))
+     (define arity
+       (check-edn-world (list provider-edn arity-edn)))
+     (check-false (world-check-result-ok? arity))
+     (check-regexp-match
+      #rx"p/Box expects 1 argument, got 2"
+      (diagnostic-text arity))
+     (define unapplied-edn
+       (candidate!
+        root "param-unapplied" consumer-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.consumer (:require [world.provider :as p]))\n"
+         "(defn keep [x :- p/Box] :- String \"no\")\n")))
+     (define unapplied
+       (check-edn-world (list provider-edn unapplied-edn)))
+     (check-false (world-check-result-ok? unapplied))
+     (check-regexp-match
+      #rx"p/Box expects 1 argument, got 0"
+      (diagnostic-text unapplied)))))
+
+(test-case "interface v2 rejects stale schemas and malformed export arity"
+  (with-world-files
+   (lambda (_root provider-source consumer-source)
+     (write-text!
+      provider-source
+      (string-append
+       "#lang beagle/clj\n"
+       "(ns world.provider)\n"
+       "(defunion (Box T) (BoxValue [value :- T]))\n"))
+     (write-text!
+      consumer-source
+      (string-append
+       "#lang beagle/clj\n"
+       "(ns world.consumer (:require [world.provider :as p]))\n"
+       "(defn keep [x :- (p/Box String)] :- (p/Box String) x)\n"))
+     (define provider-stxs (read-beagle-syntax provider-source))
+     (define provider-datums (map syntax->datum provider-stxs))
+     (define valid-interface
+       (program->module-interface
+        (parse-program provider-stxs #:source-path provider-source)
+        #:source-id (path->string provider-source)
+        #:datums provider-datums))
+     (define (parse-consumer interface)
+       (define candidate
+         (module-source
+          'world.provider
+          (path->string provider-source)
+          provider-stxs
+          provider-datums
+          interface))
+       (parse-program
+        (read-beagle-syntax consumer-source)
+        #:source-path consumer-source
+        #:module-resolver
+        (lambda (namespace _importer-source)
+          (and (eq? namespace 'world.provider) candidate))))
+     (define stale-interface
+       (struct-copy
+        module-interface
+        valid-interface
+        [schema-version 1]))
+     (check-exn
+      #rx"uses interface schema v1; this compiler requires v2"
+      (lambda () (parse-consumer stale-interface)))
+     (define valid-box
+       (module-interface-type-export-ref valid-interface 'Box))
+     (define malformed-exports
+       (hash-copy (module-interface-type-exports valid-interface)))
+     (hash-set!
+      malformed-exports
+      'Box
+      (struct-copy
+       interface-type-export
+       valid-box
+       [arity 'one]))
+     (define malformed-interface
+       (struct-copy
+        module-interface
+        valid-interface
+        [type-exports malformed-exports]))
+     (check-exn
+      #rx"Box: arity must be an exact nonnegative integer, got 'one"
+      (lambda () (parse-consumer malformed-interface))))))
+
+(test-case "type aliases and parametric names cannot leak between parses"
+  (with-world-files
+   (lambda (root provider-source consumer-source)
+     (define aliases-edn
+       (candidate!
+        root "leak-source" provider-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.aliases)\n"
+         "(defalias Leaked (U String Nil))\n")))
+     (define first (check-edn-world (list aliases-edn)))
+     (check-true (world-check-result-ok? first) (diagnostic-text first))
+     (define unrelated-edn
+       (candidate!
+        root "leak-sink" consumer-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.unrelated)\n"
+         "(defn accidental [] :- Leaked nil)\n")))
+     (define second (check-edn-world (list unrelated-edn)))
+     (check-false
+      (world-check-result-ok? second)
+      "a prior parse must not license an unrelated bare alias"))))
+
+(test-case "interface v2 forbids interface-only consumer pruning"
+  (with-world-files
+   (lambda (root provider-source _consumer-source)
+     (check-equal? INTERFACE-SCHEMA-VERSION 2)
+     (check-false INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE?)
+     (define plain-edn
+       (candidate!
+        root "plain-dynamic" provider-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.provider)\n"
+         "(def *setting* \"default\")\n")))
+     (define dynamic-edn
+       (candidate!
+        root "marked-dynamic" provider-source
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns world.provider)\n"
+         "(def ^:dynamic *setting* \"default\")\n")))
+     (define (digests edn)
+       (define result (check-edn-world (list edn) #:emit? #f))
+       (check-true (world-check-result-ok? result)
+                   (diagnostic-text result))
+       (values
+        (module-interface-digest
+         (checked-world-module-interface
+          (car (world-check-result-modules result))))
+        (world-check-result-world-digest result)))
+     (define-values (plain-interface plain-world) (digests plain-edn))
+     (define-values (dynamic-interface dynamic-world) (digests dynamic-edn))
+     (check-equal?
+      plain-interface
+      dynamic-interface
+      "^:dynamic is not yet an interface-pruning key")
+     (check-not-equal?
+      plain-world
+      dynamic-world
+      "the full world receipt must still force reverse-closure checking"))))
+
 (define raising-provider
   (string-append
    "#lang beagle/clj\n"

@@ -3,14 +3,14 @@ const std = @import("std");
 const rt = @import("beagle_rt.zig");
 pub const Ctx = rt.Ctx;
 
-pub fn mapAbort(xs: []const i64) []const i64 {
-    return blk1: { const __src = xs; const __out = rt.cliAlloc().alloc(i64, __src.len) catch @panic("oom"); for (__src, 0..) |x, __i| { __out[__i] = (x + 1); } break :blk1 __out; };
+pub fn mapAbort(__ctx: *rt.Ctx, xs: []const i64) []const i64 {
+    return blk1: { const __src = xs; const __out = __ctx.tick.alloc(i64, __src.len) catch @panic("oom"); for (__src, 0..) |x, __i| { __out[__i] = (x + 1); } break :blk1 __out; };
 }
 
 pub fn mapFallible(ctx: *rt.Ctx, xs: []const i64) std.mem.Allocator.Error![]const i64 {
     return blk1: { const __src = xs; const __out = try ctx.tick.alloc(i64, __src.len); for (__src, 0..) |x, __i| { __out[__i] = (x + 1); } break :blk1 __out; };
 }
 
-pub fn stringAbort(left: []const u8, right: []const u8) []const u8 {
-    return rt.str2(rt.str1(left), rt.str1(right));
+pub fn stringAbort(__ctx: *rt.Ctx, left: []const u8, right: []const u8) []const u8 {
+    return rt.str2(__ctx.tick, rt.str1(__ctx.tick, left), rt.str1(__ctx.tick, right));
 }

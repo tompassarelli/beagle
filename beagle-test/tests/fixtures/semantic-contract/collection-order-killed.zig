@@ -3,19 +3,21 @@ const std = @import("std");
 const rt = @import("beagle_rt.zig");
 pub const Ctx = rt.Ctx;
 
-pub fn keySetMatches(record: rt.ValueMap(rt.Keyword, i64)) bool {
-    const expected = rt.ValueSet(rt.Keyword).empty().conj(rt.keyword("", "alpha")).conj(rt.keyword("", "beta"));
-    return rt.eq(expected, record.keySet());
+pub fn keySetMatches(__ctx: *rt.Ctx, record: rt.ValueMap(rt.Keyword, i64)) bool {
+    const expected = rt.ValueSet(rt.Keyword).empty().conj(__ctx.tick, rt.keyword("", "alpha")).conj(__ctx.tick, rt.keyword("", "beta"));
+    return rt.eq(expected, record.keySet(__ctx.tick));
 }
 
-pub fn keyCount(record: rt.ValueMap(rt.Keyword, i64)) i64 {
+pub fn keyCount(__ctx: *rt.Ctx, record: rt.ValueMap(rt.Keyword, i64)) i64 {
+    _ = __ctx;
     return rt.count(record);
 }
 
-pub fn valuesEmpty(record: rt.ValueMap(rt.Keyword, i64)) bool {
+pub fn valuesEmpty(__ctx: *rt.Ctx, record: rt.ValueMap(rt.Keyword, i64)) bool {
+    _ = __ctx;
     return rt.is_empty(record);
 }
 
-pub fn keyPresent(record: rt.ValueMap(rt.Keyword, i64)) bool {
-    return record.keySet().contains(rt.keyword("", "alpha"));
+pub fn keyPresent(__ctx: *rt.Ctx, record: rt.ValueMap(rt.Keyword, i64)) bool {
+    return record.keySet(__ctx.tick).contains(rt.keyword("", "alpha"));
 }

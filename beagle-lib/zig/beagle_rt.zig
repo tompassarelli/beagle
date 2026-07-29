@@ -129,15 +129,35 @@ fn eqSame(comptime T: type, a: T, b: T) bool {
 /// vectors, maps, sets, and keywords compare recursively by logical value.
 /// Comptime-dispatched so emit stays syntax-directed.
 pub fn eq(a: anytype, b: anytype) bool {
-    if (comptime (isByteString(@TypeOf(a)) and isByteString(@TypeOf(b)))) {
+    const A = @TypeOf(a);
+    const B = @TypeOf(b);
+    if (comptime @typeInfo(A) == .@"union") {
+        return switch (a) {
+            inline else => |payload| eq(payload, b),
+        };
+    } else if (comptime @typeInfo(B) == .@"union") {
+        return switch (b) {
+            inline else => |payload| eq(a, payload),
+        };
+    } else if (comptime @typeInfo(A) == .optional) {
+        return if (a) |present| eq(present, b) else is_nil(b);
+    } else if (comptime @typeInfo(B) == .optional) {
+        return if (b) |present| eq(a, present) else is_nil(a);
+    } else if (comptime (isByteString(A) and isByteString(B))) {
         const sa: []const u8 = a;
         const sb: []const u8 = b;
         return std.mem.eql(u8, sa, sb);
-    } else if (comptime @TypeOf(a) == @TypeOf(b)) {
-        return eqSame(@TypeOf(a), a, b);
+    } else if (comptime A == B) {
+        return eqSame(A, a, b);
     } else {
         return false;
     }
+}
+
+pub fn widen_union(comptime To: type, value: anytype) To {
+    return switch (value) {
+        inline else => |payload, tag| @unionInit(To, @tagName(tag), payload),
+    };
 }
 
 fn mixHash(h: i32, c: i32) i32 {
@@ -176,6 +196,9 @@ fn hash32(value: anytype) i32 {
             break :blk out;
         },
         .optional => if (value) |present| hash32(present) else 0,
+        .@"union" => switch (value) {
+            inline else => |payload| hash32(payload),
+        },
         .@"struct" => if (@hasDecl(T, "hashValue"))
             value.hashValue()
         else
@@ -228,19 +251,9 @@ pub fn conj(ctx: *Ctx, v: anytype, x: std.meta.Elem(@TypeOf(v))) @TypeOf(v) {
 }
 
 // === CLI runtime ============================================================
-// The game kernel above allocates only through ctx.tick and frees nothing.
-// A CLI is a different but equally allocation-disciplined shape: it runs
-// once and exits, so everything goes through ONE process-lifetime arena,
-// reclaimed by the OS at exit. This is for compiling TYPED beagle CLIs to
-// native — concrete types only, no dynamic Value boxing.
-
-var cli_arena_state: ?std.heap.ArenaAllocator = null;
-pub fn cliAlloc() std.mem.Allocator {
-    if (cli_arena_state == null) {
-        cli_arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    }
-    return cli_arena_state.?.allocator();
-}
+// Every buffer returned to emitted code is owned by the caller's Ctx arena.
+// The runtime accepts that allocator explicitly, owns no allocation policy,
+// frees nothing, and keeps concrete native types (no dynamic Value boxing).
 
 // --- filesystem I/O context --------------------------------------------------
 // zig 0.17 routes all blocking fs through a threaded `std.Io` instance, not
@@ -251,7 +264,10 @@ pub fn cliAlloc() std.mem.Allocator {
 var io_state: ?std.Io.Threaded = null;
 pub fn io() std.Io {
     if (io_state == null) {
-        io_state = std.Io.Threaded.init(cliAlloc(), .{});
+        // The executor is the one enumerated process-global mutable cell in
+        // this bounded cut. Its bookkeeping is not returned as a Beagle value;
+        // value buffers still come exclusively from the caller's allocator.
+        io_state = std.Io.Threaded.init(std.heap.page_allocator, .{});
     }
     return io_state.?.io();
 }
@@ -268,11 +284,11 @@ pub fn Map(comptime V: type) type {
         pub const beagle_map = true;
         inner: std.StringHashMap(V),
 
-        pub fn empty() Self {
-            return .{ .inner = std.StringHashMap(V).init(cliAlloc()) };
+        pub fn empty(allocator: std.mem.Allocator) Self {
+            return .{ .inner = std.StringHashMap(V).init(allocator) };
         }
-        pub fn assoc(self: Self, k: []const u8, v: V) Self {
-            var m = self.inner.clone() catch @panic("oom");
+        pub fn assoc(self: Self, allocator: std.mem.Allocator, k: []const u8, v: V) Self {
+            var m = self.inner.cloneWithAllocator(allocator) catch @panic("oom");
             m.put(k, v) catch @panic("oom");
             return .{ .inner = m };
         }
@@ -285,21 +301,21 @@ pub fn Map(comptime V: type) type {
         pub fn len(self: Self) i64 {
             return @intCast(self.inner.count());
         }
-        pub fn keySet(self: Self) ValueSet([]const u8) {
+        pub fn keySet(self: Self, allocator: std.mem.Allocator) ValueSet([]const u8) {
             var out = ValueSet([]const u8).empty();
             var inner = self.inner;
             var iterator = inner.iterator();
             while (iterator.next()) |entry| {
-                out = out.conj(entry.key_ptr.*);
+                out = out.conj(allocator, entry.key_ptr.*);
             }
             return out;
         }
-        pub fn valueSet(self: Self) ValueSet(V) {
+        pub fn valueSet(self: Self, allocator: std.mem.Allocator) ValueSet(V) {
             var out = ValueSet(V).empty();
             var inner = self.inner;
             var iterator = inner.iterator();
             while (iterator.next()) |entry| {
-                out = out.conj(entry.value_ptr.*);
+                out = out.conj(allocator, entry.value_ptr.*);
             }
             return out;
         }
@@ -322,19 +338,19 @@ pub fn Map(comptime V: type) type {
             }
             return mixHash(7, acc);
         }
-        pub fn prStr(self: Self) []const u8 {
+        pub fn prStr(self: Self, allocator: std.mem.Allocator) []const u8 {
             var out: []const u8 = "{";
             var first_entry = true;
             var inner = self.inner;
             var iterator = inner.iterator();
             while (iterator.next()) |entry| {
-                if (!first_entry) out = str2(out, ", ");
-                out = str2(out, pr_str(entry.key_ptr.*));
-                out = str2(out, " ");
-                out = str2(out, pr_str(entry.value_ptr.*));
+                if (!first_entry) out = str2(allocator, out, ", ");
+                out = str2(allocator, out, pr_str(allocator, entry.key_ptr.*));
+                out = str2(allocator, out, " ");
+                out = str2(allocator, out, pr_str(allocator, entry.value_ptr.*));
                 first_entry = false;
             }
-            return str2(out, "}");
+            return str2(allocator, out, "}");
         }
     };
 }
@@ -350,10 +366,10 @@ pub fn ValueMap(comptime K: type, comptime V: type) type {
 
         entries: []const Entry,
 
-        pub fn empty() Self {
+        pub fn empty(_: std.mem.Allocator) Self {
             return .{ .entries = &.{} };
         }
-        pub fn assoc(self: Self, key: K, value: V) Self {
+        pub fn assoc(self: Self, allocator: std.mem.Allocator, key: K, value: V) Self {
             var found: ?usize = null;
             for (self.entries, 0..) |entry, i| {
                 if (eq(entry.key, key)) {
@@ -362,7 +378,7 @@ pub fn ValueMap(comptime K: type, comptime V: type) type {
                 }
             }
             const out_len = self.entries.len + @intFromBool(found == null);
-            const out = cliAlloc().alloc(Entry, out_len) catch @panic("oom");
+            const out = allocator.alloc(Entry, out_len) catch @panic("oom");
             @memcpy(out[0..self.entries.len], self.entries);
             if (found) |i| {
                 out[i] = .{ .key = key, .value = value };
@@ -386,17 +402,17 @@ pub fn ValueMap(comptime K: type, comptime V: type) type {
         pub fn len(self: Self) i64 {
             return @intCast(self.entries.len);
         }
-        pub fn keySet(self: Self) ValueSet(K) {
+        pub fn keySet(self: Self, allocator: std.mem.Allocator) ValueSet(K) {
             var out = ValueSet(K).empty();
             for (self.entries) |entry| {
-                out = out.conj(entry.key);
+                out = out.conj(allocator, entry.key);
             }
             return out;
         }
-        pub fn valueSet(self: Self) ValueSet(V) {
+        pub fn valueSet(self: Self, allocator: std.mem.Allocator) ValueSet(V) {
             var out = ValueSet(V).empty();
             for (self.entries) |entry| {
-                out = out.conj(entry.value);
+                out = out.conj(allocator, entry.value);
             }
             return out;
         }
@@ -415,15 +431,15 @@ pub fn ValueMap(comptime K: type, comptime V: type) type {
             }
             return mixHash(7, acc);
         }
-        pub fn prStr(self: Self) []const u8 {
+        pub fn prStr(self: Self, allocator: std.mem.Allocator) []const u8 {
             var out: []const u8 = "{";
             for (self.entries, 0..) |entry, i| {
-                if (i > 0) out = str2(out, ", ");
-                out = str2(out, pr_str(entry.key));
-                out = str2(out, " ");
-                out = str2(out, pr_str(entry.value));
+                if (i > 0) out = str2(allocator, out, ", ");
+                out = str2(allocator, out, pr_str(allocator, entry.key));
+                out = str2(allocator, out, " ");
+                out = str2(allocator, out, pr_str(allocator, entry.value));
             }
-            return str2(out, "}");
+            return str2(allocator, out, "}");
         }
     };
 }
@@ -439,9 +455,12 @@ pub fn ValueSet(comptime T: type) type {
         pub fn empty() Self {
             return .{ .values = &.{} };
         }
-        pub fn conj(self: Self, value: T) Self {
+        pub fn fromStatic(values: []const T) Self {
+            return .{ .values = values };
+        }
+        pub fn conj(self: Self, allocator: std.mem.Allocator, value: T) Self {
             if (self.contains(value)) return self;
-            const out = cliAlloc().alloc(T, self.values.len + 1) catch @panic("oom");
+            const out = allocator.alloc(T, self.values.len + 1) catch @panic("oom");
             @memcpy(out[0..self.values.len], self.values);
             out[self.values.len] = value;
             return .{ .values = out };
@@ -467,18 +486,18 @@ pub fn ValueSet(comptime T: type) type {
             for (self.values) |item| acc +%= hash32(item);
             return mixHash(6, acc);
         }
-        pub fn prStr(self: Self) []const u8 {
+        pub fn prStr(self: Self, allocator: std.mem.Allocator) []const u8 {
             var out: []const u8 = "#{";
             for (self.values, 0..) |item, i| {
-                if (i > 0) out = str2(out, " ");
-                out = str2(out, pr_str(item));
+                if (i > 0) out = str2(allocator, out, " ");
+                out = str2(allocator, out, pr_str(allocator, item));
             }
-            return str2(out, "}");
+            return str2(allocator, out, "}");
         }
     };
 }
 
-fn quoted_string(value: []const u8) []const u8 {
+fn quoted_string(allocator: std.mem.Allocator, value: []const u8) []const u8 {
     var size: usize = 2;
     for (value) |byte| {
         size += switch (byte) {
@@ -486,7 +505,7 @@ fn quoted_string(value: []const u8) []const u8 {
             else => 1,
         };
     }
-    const out = cliAlloc().alloc(u8, size) catch @panic("oom");
+    const out = allocator.alloc(u8, size) catch @panic("oom");
     out[0] = '"';
     var i: usize = 1;
     for (value) |byte| {
@@ -515,52 +534,52 @@ fn quoted_string(value: []const u8) []const u8 {
     return out;
 }
 
-pub fn pr_str(value: anytype) []const u8 {
+pub fn pr_str(allocator: std.mem.Allocator, value: anytype) []const u8 {
     const T = @TypeOf(value);
     if (comptime isByteString(T)) {
         const bytes: []const u8 = value;
-        return quoted_string(bytes);
+        return quoted_string(allocator, bytes);
     }
     if (comptime T == Keyword) {
         const prefix = if (value.namespace.len == 0)
             ":"
         else
-            str2(str2(":", value.namespace), "/");
-        return str2(prefix, value.name);
+            str2(allocator, str2(allocator, ":", value.namespace), "/");
+        return str2(allocator, prefix, value.name);
     }
     return switch (@typeInfo(T)) {
-        .int, .comptime_int => std.fmt.allocPrint(cliAlloc(), "{d}", .{value}) catch @panic("oom"),
-        .float, .comptime_float => std.fmt.allocPrint(cliAlloc(), "{d}", .{value}) catch @panic("oom"),
+        .int, .comptime_int => std.fmt.allocPrint(allocator, "{d}", .{value}) catch @panic("oom"),
+        .float, .comptime_float => std.fmt.allocPrint(allocator, "{d}", .{value}) catch @panic("oom"),
         .bool => if (value) "true" else "false",
         .void => "nil",
-        .optional => if (value) |present| pr_str(present) else "nil",
+        .optional => if (value) |present| pr_str(allocator, present) else "nil",
         .pointer => |pointer| switch (pointer.size) {
             .slice => blk: {
                 var out: []const u8 = "[";
                 for (value, 0..) |item, i| {
-                    if (i > 0) out = str2(out, " ");
-                    out = str2(out, pr_str(item));
+                    if (i > 0) out = str2(allocator, out, " ");
+                    out = str2(allocator, out, pr_str(allocator, item));
                 }
-                break :blk str2(out, "]");
+                break :blk str2(allocator, out, "]");
             },
-            else => std.fmt.allocPrint(cliAlloc(), "{any}", .{value}) catch @panic("oom"),
+            else => std.fmt.allocPrint(allocator, "{any}", .{value}) catch @panic("oom"),
         },
         .array => blk: {
             var out: []const u8 = "[";
             for (value, 0..) |item, i| {
-                if (i > 0) out = str2(out, " ");
-                out = str2(out, pr_str(item));
+                if (i > 0) out = str2(allocator, out, " ");
+                out = str2(allocator, out, pr_str(allocator, item));
             }
-            break :blk str2(out, "]");
+            break :blk str2(allocator, out, "]");
         },
         .@"struct" => if (@hasDecl(T, "prStr"))
-            value.prStr()
+            value.prStr(allocator)
         else
-            std.fmt.allocPrint(cliAlloc(), "{any}", .{value}) catch @panic("oom"),
+            std.fmt.allocPrint(allocator, "{any}", .{value}) catch @panic("oom"),
         .@"union" => switch (value) {
-            inline else => |payload| pr_str(payload),
+            inline else => |payload| pr_str(allocator, payload),
         },
-        else => std.fmt.allocPrint(cliAlloc(), "{any}", .{value}) catch @panic("oom"),
+        else => std.fmt.allocPrint(allocator, "{any}", .{value}) catch @panic("oom"),
     };
 }
 
@@ -570,15 +589,44 @@ pub fn truthy(value: anytype) bool {
     return switch (@typeInfo(@TypeOf(value))) {
         .bool => value,
         .optional => if (value) |present| truthy(present) else false,
+        .@"union" => switch (value) {
+            inline else => |payload| truthy(payload),
+        },
+        .void, .null => false,
         else => true,
     };
 }
+pub fn is_nil(value: anytype) bool {
+    return switch (@typeInfo(@TypeOf(value))) {
+        .optional => if (value) |present| is_nil(present) else true,
+        .@"union" => switch (value) {
+            inline else => |payload| is_nil(payload),
+        },
+        .void, .null => true,
+        else => false,
+    };
+}
+pub fn is_some(value: anytype) bool {
+    return !is_nil(value);
+}
 pub fn is_string(value: anytype) bool {
-    return isByteString(@TypeOf(value));
+    const T = @TypeOf(value);
+    if (isByteString(T)) return true;
+    return switch (@typeInfo(T)) {
+        .optional => if (value) |present| is_string(present) else false,
+        .@"union" => switch (value) {
+            inline else => |payload| is_string(payload),
+        },
+        else => false,
+    };
 }
 pub fn is_map(value: anytype) bool {
     const T = @TypeOf(value);
     return switch (@typeInfo(T)) {
+        .optional => if (value) |present| is_map(present) else false,
+        .@"union" => switch (value) {
+            inline else => |payload| is_map(payload),
+        },
         .@"struct" => @hasDecl(T, "beagle_map"),
         else => false,
     };
@@ -586,6 +634,10 @@ pub fn is_map(value: anytype) bool {
 pub fn is_int(value: anytype) bool {
     return switch (@typeInfo(@TypeOf(value))) {
         .int, .comptime_int => true,
+        .optional => if (value) |present| is_int(present) else false,
+        .@"union" => switch (value) {
+            inline else => |payload| is_int(payload),
+        },
         else => false,
     };
 }
@@ -593,6 +645,10 @@ pub fn is_sequential(value: anytype) bool {
     const T = @TypeOf(value);
     if (isByteString(T)) return false;
     return switch (@typeInfo(T)) {
+        .optional => if (value) |present| is_sequential(present) else false,
+        .@"union" => switch (value) {
+            inline else => |payload| is_sequential(payload),
+        },
         .pointer => |p| p.size == .slice,
         .array => true,
         else => false,
@@ -626,23 +682,23 @@ pub fn subs(s: []const u8, start: i64) []const u8 {
 pub fn subs3(s: []const u8, start: i64, end: i64) []const u8 {
     return s[@intCast(start)..@intCast(end)];
 }
-pub fn lower_case(s: []const u8) []const u8 {
-    const out = cliAlloc().alloc(u8, s.len) catch @panic("oom");
+pub fn lower_case(allocator: std.mem.Allocator, s: []const u8) []const u8 {
+    const out = allocator.alloc(u8, s.len) catch @panic("oom");
     for (s, 0..) |c, i| out[i] = std.ascii.toLower(c);
     return out;
 }
-pub fn upper_case(s: []const u8) []const u8 {
-    const out = cliAlloc().alloc(u8, s.len) catch @panic("oom");
+pub fn upper_case(allocator: std.mem.Allocator, s: []const u8) []const u8 {
+    const out = allocator.alloc(u8, s.len) catch @panic("oom");
     for (s, 0..) |c, i| out[i] = std.ascii.toUpper(c);
     return out;
 }
-pub fn join(sep: []const u8, parts: []const []const u8) []const u8 {
-    return std.mem.join(cliAlloc(), sep, parts) catch @panic("oom");
+pub fn join(allocator: std.mem.Allocator, sep: []const u8, parts: []const []const u8) []const u8 {
+    return std.mem.join(allocator, sep, parts) catch @panic("oom");
 }
-pub fn replace(s: []const u8, needle: []const u8, repl: []const u8) []const u8 {
+pub fn replace(allocator: std.mem.Allocator, s: []const u8, needle: []const u8, repl: []const u8) []const u8 {
     if (needle.len == 0) return s;
     const size = std.mem.replacementSize(u8, s, needle, repl);
-    const out = cliAlloc().alloc(u8, size) catch @panic("oom");
+    const out = allocator.alloc(u8, size) catch @panic("oom");
     _ = std.mem.replace(u8, s, needle, repl, out);
     return out;
 }
@@ -1048,7 +1104,7 @@ pub fn re_matches(comptime capture_count: usize, re: Regex, source: []const u8) 
     return result;
 }
 
-pub fn regex_replace(source: []const u8, re: Regex, replacement: []const u8) []const u8 {
+pub fn regex_replace(allocator: std.mem.Allocator, source: []const u8, re: Regex, replacement: []const u8) []const u8 {
     var cursor: usize = 0;
     var size: usize = 0;
     while (regexFindStateFrom(re, source, cursor)) |matched| {
@@ -1068,7 +1124,7 @@ pub fn regex_replace(source: []const u8, re: Regex, replacement: []const u8) []c
     }
     size += source.len - cursor;
 
-    const out = cliAlloc().alloc(u8, size) catch @panic("oom");
+    const out = allocator.alloc(u8, size) catch @panic("oom");
     cursor = 0;
     var written: usize = 0;
     while (regexFindStateFrom(re, source, cursor)) |matched| {
@@ -1094,7 +1150,7 @@ pub fn regex_replace(source: []const u8, re: Regex, replacement: []const u8) []c
     return out;
 }
 
-pub fn regex_split(source: []const u8, re: Regex) []const []const u8 {
+pub fn regex_split(allocator: std.mem.Allocator, source: []const u8, re: Regex) []const []const u8 {
     var match_count: usize = 0;
     var cursor: usize = 0;
     while (regexFindStateFrom(re, source, cursor)) |matched| {
@@ -1108,7 +1164,7 @@ pub fn regex_split(source: []const u8, re: Regex) []const []const u8 {
             cursor = end;
         }
     }
-    const out = cliAlloc().alloc([]const u8, match_count + 1) catch @panic("oom");
+    const out = allocator.alloc([]const u8, match_count + 1) catch @panic("oom");
     cursor = 0;
     var piece_count: usize = 0;
     while (regexFindStateFrom(re, source, cursor)) |matched| {
@@ -1132,20 +1188,20 @@ pub fn regex_split(source: []const u8, re: Regex) []const []const u8 {
     return out[0..piece_count];
 }
 
-pub fn split_lines(s: []const u8) []const []const u8 {
+pub fn split_lines(allocator: std.mem.Allocator, s: []const u8) []const []const u8 {
     var n: usize = 1;
     for (s) |c| {
         if (c == '\n') n += 1;
     }
-    const out = cliAlloc().alloc([]const u8, n) catch @panic("oom");
+    const out = allocator.alloc([]const u8, n) catch @panic("oom");
     var it = std.mem.splitScalar(u8, s, '\n');
     var i: usize = 0;
     while (it.next()) |line| : (i += 1) out[i] = line;
     return out[0..i];
 }
 /// str (clojure.core) over two args; the common shape. Concatenates.
-pub fn str2(a: []const u8, b: []const u8) []const u8 {
-    return std.mem.concat(cliAlloc(), u8, &.{ a, b }) catch @panic("oom");
+pub fn str2(allocator: std.mem.Allocator, a: []const u8, b: []const u8) []const u8 {
+    return std.mem.concat(allocator, u8, &.{ a, b }) catch @panic("oom");
 }
 /// Fallible `str` concatenation for a checked allocation contract.
 pub fn str2Alloc(allocator: std.mem.Allocator, a: []const u8, b: []const u8) std.mem.Allocator.Error![]const u8 {
@@ -1154,14 +1210,19 @@ pub fn str2Alloc(allocator: std.mem.Allocator, a: []const u8, b: []const u8) std
 /// (str x) — stringify ONE value the way clojure.core/str does: strings
 /// pass through, ints format as digits, bools as true/false. Comptime
 /// dispatch keeps emit syntax-directed.
-pub fn str1(x: anytype) []const u8 {
+pub fn str1(allocator: std.mem.Allocator, x: anytype) []const u8 {
     const T = @TypeOf(x);
     if (T == []const u8) return x;
     return switch (@typeInfo(T)) {
-        .int, .comptime_int => std.fmt.allocPrint(cliAlloc(), "{d}", .{x}) catch @panic("oom"),
+        .int, .comptime_int => std.fmt.allocPrint(allocator, "{d}", .{x}) catch @panic("oom"),
         .bool => if (x) "true" else "false",
+        .optional => if (x) |present| str1(allocator, present) else "",
+        .@"union" => switch (x) {
+            inline else => |payload| str1(allocator, payload),
+        },
+        .void, .null => "",
         .pointer => x, // string literal / slice
-        else => std.fmt.allocPrint(cliAlloc(), "{any}", .{x}) catch @panic("oom"),
+        else => std.fmt.allocPrint(allocator, "{any}", .{x}) catch @panic("oom"),
     };
 }
 /// Fallible `str` conversion for a checked allocation contract.
@@ -1171,6 +1232,11 @@ pub fn str1Alloc(allocator: std.mem.Allocator, x: anytype) std.mem.Allocator.Err
     return switch (@typeInfo(T)) {
         .int, .comptime_int => try std.fmt.allocPrint(allocator, "{d}", .{x}),
         .bool => if (x) "true" else "false",
+        .optional => if (x) |present| try str1Alloc(allocator, present) else "",
+        .@"union" => switch (x) {
+            inline else => |payload| try str1Alloc(allocator, payload),
+        },
+        .void, .null => "",
         .pointer => x,
         else => try std.fmt.allocPrint(allocator, "{any}", .{x}),
     };
@@ -1184,8 +1250,8 @@ pub fn println(s: []const u8) void {
 }
 
 // --- file I/O (clojure.core slurp/spit) -------------------------------------
-pub fn slurp(p: []const u8) []const u8 {
-    return std.Io.Dir.cwd().readFileAlloc(io(), p, cliAlloc(), .unlimited) catch
+pub fn slurp(allocator: std.mem.Allocator, p: []const u8) []const u8 {
+    return std.Io.Dir.cwd().readFileAlloc(io(), p, allocator, .unlimited) catch
         @panic("slurp: read failed");
 }
 pub fn spit(p: []const u8, content: []const u8) void {
@@ -1201,8 +1267,8 @@ pub fn spit(p: []const u8, content: []const u8) void {
 pub fn parent(p: []const u8) ?[]const u8 {
     return std.fs.path.dirname(p);
 }
-pub fn path(a: []const u8, b: []const u8) []const u8 {
-    return std.fs.path.join(cliAlloc(), &.{ a, b }) catch @panic("oom");
+pub fn path(allocator: std.mem.Allocator, a: []const u8, b: []const u8) []const u8 {
+    return std.fs.path.join(allocator, &.{ a, b }) catch @panic("oom");
 }
 pub fn exists(p: []const u8) bool {
     std.Io.Dir.cwd().access(io(), p, .{}) catch return false;
@@ -1222,7 +1288,7 @@ pub fn compare(a: []const u8, b: []const u8) i64 {
 }
 
 // --- clojure.core seq ops (sorted/distinct/concat) --------------------------
-// Allocate fresh slices in the CLI arena (immutable, like clojure). Element
+// Allocate fresh slices in the caller arena (immutable, like clojure). Element
 // type is comptime-inferred from the input slice, so one emit serves Int,
 // String, and other scalar slices. Ordering: strings lexicographic (matches
 // clojure's compare on strings), numerics by value.
@@ -1230,10 +1296,10 @@ fn lessThan(comptime T: type, _: void, a: T, b: T) bool {
     if (T == []const u8) return std.mem.order(u8, a, b) == .lt;
     return a < b;
 }
-/// (sort xs) → new sorted slice (ascending). Stable copy in the CLI arena.
-pub fn sort(xs: anytype) @TypeOf(xs) {
+/// (sort xs) → new sorted slice (ascending). Stable copy in the caller arena.
+pub fn sort(allocator: std.mem.Allocator, xs: anytype) @TypeOf(xs) {
     const T = std.meta.Elem(@TypeOf(xs));
-    const out = cliAlloc().alloc(T, xs.len) catch @panic("oom");
+    const out = allocator.alloc(T, xs.len) catch @panic("oom");
     @memcpy(out, xs);
     std.mem.sort(T, out, {}, struct {
         fn lt(_: void, a: T, b: T) bool {
@@ -1243,9 +1309,9 @@ pub fn sort(xs: anytype) @TypeOf(xs) {
     return out;
 }
 /// (distinct xs) → new slice, first occurrence kept, order preserved.
-pub fn distinct(xs: anytype) @TypeOf(xs) {
+pub fn distinct(allocator: std.mem.Allocator, xs: anytype) @TypeOf(xs) {
     const T = std.meta.Elem(@TypeOf(xs));
-    const out = cliAlloc().alloc(T, xs.len) catch @panic("oom");
+    const out = allocator.alloc(T, xs.len) catch @panic("oom");
     var n: usize = 0;
     outer: for (xs) |x| {
         for (out[0..n]) |y| {
@@ -1257,9 +1323,9 @@ pub fn distinct(xs: anytype) @TypeOf(xs) {
     return out[0..n];
 }
 /// (concat a b) → new slice a ++ b (two args; same element type).
-pub fn concat(a: anytype, b: @TypeOf(a)) @TypeOf(a) {
+pub fn concat(allocator: std.mem.Allocator, a: anytype, b: @TypeOf(a)) @TypeOf(a) {
     const T = std.meta.Elem(@TypeOf(a));
-    const out = cliAlloc().alloc(T, a.len + b.len) catch @panic("oom");
+    const out = allocator.alloc(T, a.len + b.len) catch @panic("oom");
     @memcpy(out[0..a.len], a);
     @memcpy(out[a.len..], b);
     return out;

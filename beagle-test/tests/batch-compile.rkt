@@ -23,6 +23,7 @@
          (only-in "scratch-containment.rkt" call-with-scratch-containment))
 
 (define-runtime-path beagle-build "../../bin/beagle-build")
+(define-runtime-path beagle-cli "../../bin/beagle")
 (define-runtime-path repo-root "../..")
 (define-runtime-path conformance-corpus-rktd "../conformance/corpus.rktd")
 (define-runtime-path retarget-clj-fixture
@@ -200,6 +201,26 @@
                    "ordinary in-process .bzig output != one-shot output")
      (check-equal? retargeted cli-zig
                    "retargeted .bclj Zig output != equivalent one-shot .bzig output"))
+
+   (test-case "public build --target zig exposes the in-process retarget path"
+     (define out (fresh-cli-out-path))
+     (define err-cap (open-output-string))
+     (define ok?
+       (parameterize ([current-output-port (open-output-string)]
+                      [current-error-port err-cap])
+         (system* (path->string beagle-cli)
+                  "build"
+                  "--target"
+                  "zig"
+                  (path->string retarget-clj-fixture)
+                  (path->string out))))
+     (check-true ok? (get-output-string err-cap))
+     (define-values (status expected)
+       (compile-source retarget-clj-fixture
+                       #:root repo-root-str
+                       #:target 'zig))
+     (check-eq? status 'ok expected)
+     (check-equal? (file->string out) expected))
 
    (test-case "generated failure fixtures: normalized diagnostic, CLI agrees on failure"
      (for ([src (in-list generated-failure-fixtures)])

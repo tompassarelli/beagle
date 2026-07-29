@@ -378,7 +378,17 @@
        (reg! name (type-prim name))]
       [(list 'defunion (list (? symbol? name) type-vars ...) member-defs ...)
        (define mnames (map car member-defs))
-       (current-user-parametric (set-add (current-user-parametric) name))
+       ;; The bootstrap candidate-world pass has provider datums but not yet a
+       ;; canonical interface.  Admit the exact qualified spellings here so a
+       ;; consumer annotation such as (api/Result String) can reach the
+       ;; authoritative second pass, where the interface resolver proves the
+       ;; export and validates arity.
+       (current-user-parametric
+        (set-add
+         (set-add
+          (set-add (current-user-parametric) name)
+          (qualify-name prefix name))
+         (qualify-name mod-ns name)))
        (reg! name (type-prim name))
        (when imp-union-members
          (hash-set! imp-union-members name mnames))
@@ -677,6 +687,162 @@
 
 ;; --- entry point -----------------------------------------------------------
 
+;; Authoritative candidate-world type namespaces.  Values are installed from a
+;; module-interface during require registration, then consulted indirectly by
+;; types.rkt's current-qualified-type-resolver at every annotation position.
+;; External/non-overlay namespaces are deliberately absent and retain the
+;; legacy nominal/JVM path.
+(define current-candidate-type-bindings (make-parameter #f))
+(define current-candidate-type-prefixes (make-parameter #f))
+
+(define INTERFACE-TYPE-EXPORT-KINDS
+  '(record protocol enum union parametric-union union-member
+    throwable-union throwable-member scalar alias))
+
+(define (raise-invalid-interface-type-export interface name detail . args)
+  (apply
+   raise-parse-error
+   'module-interface
+   (string-append
+    "required Beagle module ~a has invalid schema-v~a type export ~a: "
+    detail)
+   (module-interface-namespace interface)
+   (module-interface-schema-version interface)
+   name
+   args))
+
+(define (validate-interface-type-export! interface key export)
+  (unless (interface-type-export? export)
+    (raise-invalid-interface-type-export
+     interface key "expected an interface-type-export, got ~v" export))
+  (define name (interface-type-export-name export))
+  (define kind (interface-type-export-kind export))
+  (define arity (interface-type-export-arity export))
+  (define expansion (interface-type-export-expansion export))
+  (unless (and (symbol? key) (eq? key name))
+    (raise-invalid-interface-type-export
+     interface key "table key and declared name disagree (~v)" name))
+  (unless (memq kind INTERFACE-TYPE-EXPORT-KINDS)
+    (raise-invalid-interface-type-export
+     interface name "unknown kind ~v" kind))
+  (unless (exact-nonnegative-integer? arity)
+    (raise-invalid-interface-type-export
+     interface name
+     "arity must be an exact nonnegative integer, got ~v"
+     arity))
+  (if (eq? kind 'parametric-union)
+      (unless (positive? arity)
+        (raise-invalid-interface-type-export
+         interface name "parametric union arity must be positive, got ~v" arity))
+      (unless (zero? arity)
+        (raise-invalid-interface-type-export
+         interface name "non-parametric type arity must be 0, got ~v" arity)))
+  (if (eq? kind 'alias)
+      (unless (type? expansion)
+        (raise-invalid-interface-type-export
+         interface name "alias expansion must be a canonical type, got ~v"
+         expansion))
+      (when expansion
+        (raise-invalid-interface-type-export
+         interface name "only aliases may carry an expansion, got ~v"
+         expansion))))
+
+(define (qualified-type-head datum)
+  (cond
+    [(symbol? datum) datum]
+    [(and (pair? datum) (symbol? (car datum))) (car datum)]
+    [else #f]))
+
+(define (qualified-type-prefix name)
+  (and
+   name
+   (let* ([spelling (symbol->string name)]
+          [slash (regexp-match-positions #rx"/" spelling)])
+     (and slash (substring spelling 0 (caar slash))))))
+
+(define (qualified-type-member name)
+  (define spelling (symbol->string name))
+  (define slash (regexp-match-positions #rx"/" spelling))
+  (and slash
+       (string->symbol (substring spelling (cdar slash)))))
+
+(define (resolve-candidate-qualified-type datum)
+  (define name (qualified-type-head datum))
+  (define prefix (qualified-type-prefix name))
+  (define bindings (current-candidate-type-bindings))
+  (define prefixes (current-candidate-type-prefixes))
+  (cond
+    [(or (not name) (not prefix) (not bindings) (not prefixes)) #f]
+    [(hash-ref bindings name #f)
+     =>
+     (lambda (entry)
+       (define interface (car entry))
+       (define export (cdr entry))
+       (define arity (interface-type-export-arity export))
+       (define canonical-name
+         (qualify-name
+          (module-interface-namespace interface)
+          (interface-type-export-name export)))
+       (cond
+         [(symbol? datum)
+          (when (positive? arity)
+            (raise-parse-error
+             'type-application
+             "type ~a expects ~a argument~a, got 0"
+             name
+             arity
+             (if (= arity 1) "" "s")))
+          (or (interface-type-export-expansion export)
+              (type-prim canonical-name))]
+         [(pair? datum)
+          (define args (cdr datum))
+          (unless
+              (eq? (interface-type-export-kind export) 'parametric-union)
+            (raise-parse-error
+             'type-application
+             "type ~a exported by ~a is not parametric and cannot be applied"
+             name
+             (module-interface-namespace interface)))
+          (unless
+              (= (length args) arity)
+            (raise-parse-error
+             'type-application
+             "type ~a expects ~a argument~a, got ~a"
+             name
+             arity
+             (if (= arity 1) "" "s")
+             (length args)))
+          (type-app canonical-name (map parse-type args))]
+         [else #f]))]
+    [(hash-ref prefixes prefix #f)
+     =>
+     (lambda (provider)
+       (cond
+         [(module-interface? provider)
+          (raise-parse-error
+           'missing-type-export
+           "required Beagle module ~a does not export type ~a (referenced as ~a); update the provider and consumer in the same candidate world, or fix the annotation"
+           (module-interface-namespace provider)
+           (qualified-type-member name)
+           name)]
+         [else
+         ;; Bootstrap pass: the candidate namespace is known, but its
+         ;; canonical interface is not built yet.  Admit an opaque shape so
+         ;; every module can parse independent of overlay order; the
+         ;; authoritative pass replaces PROVIDER with the interface and
+         ;; proves the exact export before checking/emission.  Canonicalize
+         ;; immediately to the provider namespace: otherwise a module that
+         ;; re-exports `(defalias A (local/T ...))` leaks its private require
+         ;; prefix into A's public expansion.
+          (define canonical-name
+            (qualify-name provider (qualified-type-member name)))
+          (if (symbol? datum)
+              (type-prim canonical-name)
+              (type-app
+               canonical-name
+               (map parse-type (cdr datum))))]))]
+    [else #f]))
+
 ;; Wrapper: fresh lowering-temp counter per program, so minted names
 ;; (cond-thread__N / some-thread__N / bind__N / macro-hygiene renames) depend
 ;; only on THIS module's content, never on what else the process parsed
@@ -684,7 +850,17 @@
 (define (parse-program stxs*
                        #:source-path [source-path #f]
                        #:module-resolver [module-resolver #f])
-  (parameterize ([lowering-counter (box 0)])
+  (parameterize ([lowering-counter (box 0)]
+                 ;; Type aliases and parametric declaration names are
+                 ;; program-local.  Freshening them here prevents one module
+                 ;; parsed by a long-lived daemon/world gate from licensing an
+                 ;; otherwise unknown type in the next module.
+                 [current-user-parametric (set)]
+                 [current-type-aliases (hasheq)]
+                 [current-candidate-type-bindings (make-hasheq)]
+                 [current-candidate-type-prefixes (make-hash)]
+                 [current-qualified-type-resolver
+                  resolve-candidate-qualified-type])
     (parse-program* stxs*
                     #:source-path source-path
                     #:module-resolver module-resolver)))
@@ -779,19 +955,100 @@
   (define imp-enums (make-hash))
   (define imp-dyn-vars (mutable-seteq))  ; G-A: imported ^:dynamic vars (qualified)
   (define imp-module-interfaces '())
+  (define declared-type-aliases (make-hasheq))
+
+  (define (register-interface-types! interface prefix)
+    (unless
+        (equal?
+         (module-interface-schema-version interface)
+         INTERFACE-SCHEMA-VERSION)
+      (raise-parse-error
+       'module-interface
+       "required Beagle module ~a uses interface schema v~v; this compiler requires v~a"
+       (module-interface-namespace interface)
+       (module-interface-schema-version interface)
+       INTERFACE-SCHEMA-VERSION))
+    (unless (symbol? (module-interface-namespace interface))
+      (raise-parse-error
+       'module-interface
+       "required Beagle interface schema v~a has invalid namespace ~v"
+       INTERFACE-SCHEMA-VERSION
+       (module-interface-namespace interface)))
+    (unless (hash? (module-interface-type-exports interface))
+      (raise-parse-error
+       'module-interface
+       "required Beagle module ~a has invalid schema-v~a type export table: expected a hash, got ~v"
+       (module-interface-namespace interface)
+       INTERFACE-SCHEMA-VERSION
+       (module-interface-type-exports interface)))
+    (define namespace (module-interface-namespace interface))
+    (define prefixes (current-candidate-type-prefixes))
+    (define bindings (current-candidate-type-bindings))
+    (hash-set! prefixes (symbol->string prefix) interface)
+    (hash-set! prefixes (symbol->string namespace) interface)
+    (for ([(name export)
+           (in-hash (module-interface-type-exports interface))])
+      (validate-interface-type-export! interface name export)
+      (define prefixed (qualify-name prefix name))
+      (define fully-qualified (qualify-name namespace name))
+      (define qualified-names
+        (if (eq? prefixed fully-qualified)
+            (list prefixed)
+            (list prefixed fully-qualified)))
+      (for ([qualified-name (in-list qualified-names)])
+        (hash-set! bindings qualified-name (cons interface export))
+        (when (interface-type-export-expansion export)
+          (current-type-aliases
+           (hash-set
+            (current-type-aliases)
+            qualified-name
+            (interface-type-export-expansion export))))
+        (when
+            (eq? (interface-type-export-kind export) 'parametric-union)
+          (current-user-parametric
+           (set-add (current-user-parametric) qualified-name))))))
 
   ;; Shared require registration: resolve sibling beagle modules for type
   ;; import, then record the require-entry. Used by the top-level
   ;; (require ...) arms and by (ns ... (:require ...)) clauses.
-  (define (register-require! rn alias refer-syms)
+  (define (candidate-for-require rn)
     (validate-module-path! rn)
-    (define prefix (or alias (string->symbol (last-of (split-ns-segments rn)))))
     (define candidate
       (and module-resolver (module-resolver rn source-path)))
     (when (and candidate (not (module-source? candidate)))
       (error 'beagle
              "module resolver returned ~v for ~a; expected module-source or #f"
              candidate rn))
+    (when
+        (and candidate
+             (not (eq? (module-source-namespace candidate) rn)))
+      (error 'beagle
+             "module resolver returned namespace ~a for required module ~a"
+             (module-source-namespace candidate)
+             rn))
+    candidate)
+
+  (define (pre-register-require-types! rn alias _refer-syms)
+    (define candidate (candidate-for-require rn))
+    (when candidate
+      (define prefix
+        (or alias (string->symbol (last-of (split-ns-segments rn)))))
+      (define interface (module-source-interface candidate))
+      (if interface
+          ;; Authoritative pass: aliases may expand imported aliases and must
+          ;; fail closed against the exact provider type export set.
+          (register-interface-types! interface prefix)
+          ;; Bootstrap pass: the provider namespace is already authoritative
+          ;; even though its export set is not built yet.  This is enough to
+          ;; canonicalize nested qualified identities before local aliases are
+          ;; captured in this module's interface.
+          (let ([prefixes (current-candidate-type-prefixes)])
+            (hash-set! prefixes (symbol->string prefix) rn)
+            (hash-set! prefixes (symbol->string rn) rn)))))
+
+  (define (register-require! rn alias refer-syms)
+    (define prefix (or alias (string->symbol (last-of (split-ns-segments rn)))))
+    (define candidate (candidate-for-require rn))
     ;; A failed sibling-module import must be VISIBLE: silently voiding it
     ;; (the pre-2026-06-12 behavior) meant a parse error in the required
     ;; module just erased its types, and downstream code typed as Any.
@@ -801,10 +1058,12 @@
       [candidate
        ;; Candidate-world modules are authoritative and fail closed.  Their
        ;; source datums win over any old provider still present on disk.
-       (unless (eq? (module-source-namespace candidate) rn)
-         (error 'beagle
-                "module resolver returned namespace ~a for required module ~a"
-                (module-source-namespace candidate) rn))
+       ;; Make the qualifier visible during the bootstrap parse.  The namespace
+       ;; symbol is a deliberate provisional marker; the authoritative pass
+       ;; overwrites it with the canonical module-interface below.
+       (define candidate-prefixes (current-candidate-type-prefixes))
+       (hash-set! candidate-prefixes (symbol->string prefix) rn)
+       (hash-set! candidate-prefixes (symbol->string rn) rn)
        (import-module-types!
         (module-source-source-id candidate)
         prefix externs registry imp-rec-fields imp-rec-field-order imp-rec-ns rn
@@ -818,6 +1077,7 @@
         #:datums (module-source-datums candidate))
        (define interface (module-source-interface candidate))
        (when interface
+         (register-interface-types! interface prefix)
          (for ([name (in-list (or refer-syms '()))])
            (unless (module-interface-export? interface name)
              (error 'beagle
@@ -861,6 +1121,9 @@
             #:refer-syms refer-syms)))])
     (set! requires (cons (require-entry rn alias refer-syms) requires)))
 
+  (define current-require-registration
+    (make-parameter register-require!))
+
   ;; One require libspec: lib, [lib], [lib :as a], [lib :refer [syms]],
   ;; [lib :as a :refer [syms]] — possibly quoted ('[lib :as a]). Anything
   ;; else is a pointed rejection, never a silent drop.
@@ -868,7 +1131,8 @@
     (define d0 (->datum spec))
     (define unq (if (and (pair? d0) (eq? (car d0) 'quote) (pair? (cdr d0))) (cadr d0) d0))
     (cond
-      [(symbol? unq) (register-require! unq #f #f)]
+      [(symbol? unq)
+       ((current-require-registration) unq #f #f)]
       [(and (pair? unq) (eq? (car unq) BRACKET-TAG))
        (define items (cdr unq))
        (unless (and (pair? items) (symbol? (car items)))
@@ -877,7 +1141,8 @@
        (define rn (car items))
        (let loop ([rest (cdr items)] [alias #f] [refer-syms #f])
          (cond
-           [(null? rest) (register-require! rn alias refer-syms)]
+           [(null? rest)
+            ((current-require-registration) rn alias refer-syms)]
            [(and (eq? (car rest) ':as) (pair? (cdr rest)) (symbol? (cadr rest)))
             (loop (cddr rest) (cadr rest) refer-syms)]
            [(and (eq? (car rest) ':refer) (pair? (cdr rest)))
@@ -917,6 +1182,37 @@
        (raise-parse-error 'bad-meta-value
                           "~a: bad import spec ~v — expected ClassName symbol or (package Class1 Class2 ...)" context d)]))
 
+  ;; Candidate type knowledge must precede alias expansion.  Full value/macro
+  ;; import remains in the ordinary metadata pass below; this pre-pass only
+  ;; installs the namespace/type boundary needed by parse-type.
+  (parameterize
+      ([current-require-registration pre-register-require-types!])
+    (for ([d (in-list datums)])
+      (match d
+        [(list* 'ns (? symbol?) ns-rest)
+         (for ([clause (in-list ns-rest)]
+               #:when
+               (and (pair? clause) (eq? (car clause) ':require)))
+           (for ([spec (in-list (cdr clause))])
+             (register-require-libspec! spec "ns :require")))]
+        [(list* 'require specs)
+         #:when (and (pair? specs) (symbol? (car specs)))
+         (register-require-libspec!
+          (cons BRACKET-TAG specs)
+          "require")]
+        [(list* 'require specs)
+         #:when
+         (and
+          (pair? specs)
+          (for/and ([spec (in-list specs)])
+            (let ([datum (->datum spec)])
+              (and
+               (pair? datum)
+               (memq (car datum) (list 'quote BRACKET-TAG))))))
+         (for ([spec (in-list specs)])
+           (register-require-libspec! spec "require"))]
+        [_ (void)])))
+
   ;; Pre-scan: register parametric defunion names so parse-type can handle them
   (for ([d (in-list datums)])
     (match d
@@ -928,12 +1224,16 @@
   ;; ORDER, so parse-type resolves an alias name to its expansion. The body is
   ;; parsed with the aliases collected SO FAR, so it may reference earlier aliases
   ;; (and primitives/ctors); a forward/self reference is simply not in the table
-  ;; yet and falls through to the bare-name path (a pointed unknown-type error if
-  ;; the name is otherwise undefined). File-local in v1 (cross-module export TODO).
+  ;; yet and falls through to the bare-name path.  Resolved local expansions are
+  ;; retained on the program so the canonical module interface can export aliases
+  ;; transparently without reparsing or depending on ambient parser state.
   (for ([d (in-list datums)])
     (match d
       [(list 'defalias (? symbol? name) type-expr)
-       (current-type-aliases (hash-set (current-type-aliases) name (parse-type type-expr)))]
+       (define expansion (parse-type type-expr))
+       (current-type-aliases
+        (hash-set (current-type-aliases) name expansion))
+       (hash-set! declared-type-aliases name expansion)]
       [(cons 'defalias _)
        (raise-parse-error 'bad-defalias
                           "defalias requires (defalias Name <type-expr>), got: ~v" d)]
@@ -1184,6 +1484,7 @@
   (define prog
     (program mode ns parsed registry externs (reverse requires) (reverse imports)
              form-stxs src-table (make-hasheq)
+             (hash-copy declared-type-aliases)
              imp-rec-fields imp-rec-field-order imp-rec-ns
              (hash-keys imp-scalar-fns) imp-scalar-preds imp-symbol-ns
              imp-union-members imp-param-unions imp-enums imp-dyn-vars

@@ -109,6 +109,7 @@
 
 (define (br . xs) (cons BRACKET-TAG xs))
 (define (mp . xs) (cons MAP-TAG xs))
+(define (st . xs) (cons SET-TAG xs))
 
 (define (compile-zig-string src)
   ;; through the REAL beagle reader (brackets/braces), via a temp file.
@@ -425,6 +426,11 @@
       zig-src
       #<<ZIG
 test "regex semantic contract behavior" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var rng = rt.Splitmix64.init(1);
+    var ctx = rt.Ctx{ .tick = arena.allocator(), .rng = &rng };
+
     try std.testing.expectEqualStrings("cat", findNoCapture("cat").?);
     try std.testing.expect(findNoCapture("dog") == null);
 
@@ -441,9 +447,9 @@ test "regex semantic contract behavior" {
     try std.testing.expectEqualStrings("abc", multiple[1].?);
     try std.testing.expectEqualStrings("42", multiple[2].?);
     try std.testing.expectEqualStrings("(x)", matchEscapedGroup("(x)").?);
-    try std.testing.expectEqualStrings("_b_c", replaceRuns("A--b c"));
+    try std.testing.expectEqualStrings("_b_c", replaceRuns(&ctx, "A--b c"));
 
-    const pieces = splitRuns("a,b;;c");
+    const pieces = splitRuns(&ctx, "a,b;;c");
     try std.testing.expectEqual(@as(usize, 3), pieces.len);
     try std.testing.expectEqualStrings("a", pieces[0]);
     try std.testing.expectEqualStrings("b", pieces[1]);
@@ -531,12 +537,17 @@ ZIG
       zig-src
       #<<ZIG
 test "closed dynamic semantic contract behavior" {
-    try std.testing.expectEqualStrings("string:ok", observe(roundTrip(dynString("ok"))));
-    try std.testing.expectEqualStrings("int:7", observe(roundTrip(dynInt(7))));
-    try std.testing.expectEqualStrings("bool:true", observe(roundTrip(dynBool(true))));
-    try std.testing.expectEqualStrings("vec:2", observe(roundTrip(dynVector(&.{ "a", "b" }))));
-    const value_map = rt.Map(i64).empty().assoc("k", 1);
-    try std.testing.expectEqualStrings("map", observe(roundTrip(dynMap(value_map))));
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var rng = rt.Splitmix64.init(1);
+    var ctx = rt.Ctx{ .tick = arena.allocator(), .rng = &rng };
+
+    try std.testing.expectEqualStrings("string:ok", observe(&ctx, roundTrip(dynString("ok"))));
+    try std.testing.expectEqualStrings("int:7", observe(&ctx, roundTrip(dynInt(7))));
+    try std.testing.expectEqualStrings("bool:true", observe(&ctx, roundTrip(dynBool(true))));
+    try std.testing.expectEqualStrings("vec:2", observe(&ctx, roundTrip(dynVector(&.{ "a", "b" }))));
+    const value_map = rt.Map(i64).empty(ctx.tick).assoc(ctx.tick, "k", 1);
+    try std.testing.expectEqualStrings("map", observe(&ctx, roundTrip(dynMap(value_map))));
 
     try std.testing.expectEqual(@as(u16, 0), @intFromEnum(std.meta.activeTag(dynString("ok"))));
     try std.testing.expectEqual(@as(u16, 1), @intFromEnum(std.meta.activeTag(dynInt(7))));
@@ -675,13 +686,18 @@ ZIG
       zig-src
       #<<ZIG
 test "collection semantic contract behavior and keyword ABI metadata" {
-    try std.testing.expectEqual(@as(i64, 2), keywordMapCount());
-    try std.testing.expect(keywordMapAbsent());
-    try std.testing.expect(compoundMapPresent());
-    try std.testing.expectEqual(@as(i64, 2), setDedupCount());
-    try std.testing.expect(setPresent());
-    try std.testing.expect(compoundEqual());
-    try std.testing.expect(compoundHashConsistent());
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var rng = rt.Splitmix64.init(1);
+    var ctx = rt.Ctx{ .tick = arena.allocator(), .rng = &rng };
+
+    try std.testing.expectEqual(@as(i64, 2), keywordMapCount(&ctx));
+    try std.testing.expect(keywordMapAbsent(&ctx));
+    try std.testing.expect(compoundMapPresent(&ctx));
+    try std.testing.expectEqual(@as(i64, 2), setDedupCount(&ctx));
+    try std.testing.expect(setPresent(&ctx));
+    try std.testing.expect(compoundEqual(&ctx));
+    try std.testing.expect(compoundHashConsistent(&ctx));
     try std.testing.expect(keywordDistinctFromString());
 
     try std.testing.expectEqual(@as(u16, 1), rt.Keyword.abi_version);
@@ -720,14 +736,19 @@ ZIG
       zig-src
       #<<ZIG
 test "order-killed keys and vals remain order-free" {
-    const populated = rt.ValueMap(rt.Keyword, i64).empty()
-        .assoc(rt.keyword("", "beta"), 2)
-        .assoc(rt.keyword("", "alpha"), 1);
-    const empty = rt.ValueMap(rt.Keyword, i64).empty();
-    try std.testing.expect(keySetMatches(populated));
-    try std.testing.expectEqual(@as(i64, 2), keyCount(populated));
-    try std.testing.expect(valuesEmpty(empty));
-    try std.testing.expect(keyPresent(populated));
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var rng = rt.Splitmix64.init(1);
+    var ctx = rt.Ctx{ .tick = arena.allocator(), .rng = &rng };
+
+    const populated = rt.ValueMap(rt.Keyword, i64).empty(ctx.tick)
+        .assoc(ctx.tick, rt.keyword("", "beta"), 2)
+        .assoc(ctx.tick, rt.keyword("", "alpha"), 1);
+    const empty = rt.ValueMap(rt.Keyword, i64).empty(ctx.tick);
+    try std.testing.expect(keySetMatches(&ctx, populated));
+    try std.testing.expectEqual(@as(i64, 2), keyCount(&ctx, populated));
+    try std.testing.expect(valuesEmpty(&ctx, empty));
+    try std.testing.expect(keyPresent(&ctx, populated));
 }
 ZIG
       "semantic-collection-order-killed-behavior"))))
@@ -853,10 +874,6 @@ ZIG
       zig-src
       #<<ZIG
 test "allocation semantic contract success and injected failure" {
-    const mapped = mapAbort(&.{ 1, 2, 3 });
-    try std.testing.expectEqualSlices(i64, &.{ 2, 3, 4 }, mapped);
-    try std.testing.expectEqualStrings("beagle-zig", stringAbort("beagle-", "zig"));
-
     var success_storage: [256]u8 = undefined;
     var success_fba = std.heap.FixedBufferAllocator.init(&success_storage);
     var success_rng = rt.Splitmix64.init(1);
@@ -864,6 +881,12 @@ test "allocation semantic contract success and injected failure" {
         .tick = success_fba.allocator(),
         .rng = &success_rng,
     };
+    const mapped = mapAbort(&success_ctx, &.{ 1, 2, 3 });
+    try std.testing.expectEqualSlices(i64, &.{ 2, 3, 4 }, mapped);
+    try std.testing.expectEqualStrings(
+        "beagle-zig",
+        stringAbort(&success_ctx, "beagle-", "zig"),
+    );
     const fallible = try mapFallible(&success_ctx, &.{ 4, 5 });
     try std.testing.expectEqualSlices(i64, &.{ 5, 6 }, fallible);
 
@@ -912,7 +935,7 @@ ZIG
   (define fallible-contract (hash-ref contracts fallible-form))
   (define fallible-call (car (defn-form-body fallible-form)))
   (define string-call (car (defn-form-body string-form)))
-  (check-equal? (allocation-contract-region abort-contract) 'process)
+  (check-equal? (allocation-contract-region abort-contract) 'caller)
   (check-equal? (allocation-contract-failure abort-contract) 'abort)
   (check-equal? (allocation-contract-region fallible-contract) 'tick)
   (define fallible-failure (allocation-contract-failure fallible-contract))
@@ -920,7 +943,184 @@ ZIG
   (check-equal? (type->string (cadr fallible-failure)) "AllocationError")
   (check-equal? (hash-ref contracts fallible-call) fallible-contract)
   (check-equal? (allocation-contract-region (hash-ref contracts string-call))
-                'process))
+                'caller))
+
+(test-case "zig allocator ABI propagates through local calls and leaves pure siblings alone"
+  (define xs-param (br 'xs ':- '(Vec Int)))
+  (define mapper
+    `(fn ,(br 'x ':- 'Int) :- Int (inc x)))
+  (define out
+    (compile-zig-forms
+     `(defn leaf ,xs-param :- (Vec Int) (mapv ,mapper xs))
+     `(defn middle ,xs-param :- (Vec Int) (leaf xs))
+     `(defn top ,xs-param :- (Vec Int) (middle xs))
+     `(defn pure ,(br 'x ':- 'Int) :- Int (inc x))))
+  (for ([name (in-list '("leaf" "middle" "top"))])
+    (check-regexp-match
+     (regexp (format "pub fn ~a\\(__ctx: \\*rt\\.Ctx" name))
+     out))
+  (check-regexp-match #rx"return leaf\\(__ctx, xs\\);" out)
+  (check-regexp-match #rx"return middle\\(__ctx, xs\\);" out)
+  (check-regexp-match #rx"pub fn pure\\(x: i64\\) i64" out)
+  (check-false (regexp-match? #rx"pub fn pure\\(__ctx" out)))
+
+(test-case "zig runtime-valued Vec uses caller storage and propagates fixed-buffer OOM"
+  (define out
+    (compile-zig-forms
+     `(defn pair ,(br 'left ':- 'String 'right ':- 'String)
+        :- (Vec String)
+        :raises AllocationError
+        ,(br 'left 'right))))
+  (check-regexp-match
+   #rx"pub fn pair\\(__ctx: \\*rt\\.Ctx.*Allocator\\.Error!"
+   out)
+  (check-false (regexp-match? #rx"cliAlloc|cli_arena_state" out))
+  (when ZIG
+    (check-true
+     (zig-tests?
+      out
+      #<<ZIG
+test "caller-owned Vec storage and OOM" {
+    var success_storage: [64]u8 = undefined;
+    var success_fba = std.heap.FixedBufferAllocator.init(&success_storage);
+    var success_rng = rt.Splitmix64.init(1);
+    var success_ctx = rt.Ctx{
+        .tick = success_fba.allocator(),
+        .rng = &success_rng,
+    };
+    const values = try pair(&success_ctx, "left", "right");
+    try std.testing.expectEqualStrings("left", values[0]);
+    try std.testing.expectEqualStrings("right", values[1]);
+
+    var failed_storage: [1]u8 = undefined;
+    var failed_fba = std.heap.FixedBufferAllocator.init(&failed_storage);
+    var failed_rng = rt.Splitmix64.init(2);
+    var failed_ctx = rt.Ctx{
+        .tick = failed_fba.allocator(),
+        .rng = &failed_rng,
+    };
+    try std.testing.expectError(
+        error.OutOfMemory,
+        pair(&failed_ctx, "left", "right"),
+    );
+}
+ZIG
+      "caller-owned-vec-oom"))))
+
+(test-case "zig static top-level Set borrows storage without an allocator"
+  (define out
+    (compile-zig-forms
+     `(def names :- (Set Keyword) ,(st ':alpha ':beta))
+     '(defn size [] :- Int (count names))))
+  (check-regexp-match
+   #rx"ValueSet\\(rt\\.Keyword\\)\\.fromStatic"
+   out)
+  (check-false (regexp-match? #rx"cliAlloc|cli_arena_state|__ctx" out)))
+
+(test-case "zig fallible Map and Set literals fail closed"
+  (for ([return-type (in-list '((Map Keyword Int) (Set Keyword)))]
+        [literal (in-list (list (mp ':alpha 1) (st ':alpha)))])
+    (check-exn
+     (lambda (e)
+       (and (allocation-contract-rejection? e)
+            (regexp-match? #rx"Map/Set literals" (exn-message e))))
+     (lambda ()
+       (check-zig-forms
+        `(defn bad ,(br) :- ,return-type
+           :raises AllocationError
+           ,literal))))))
+
+(test-case "zig allocation aliases receive the hidden caller context"
+  (define out
+    (compile-zig-string
+     (string-append
+      "(ns allocator.aliases (:require [clojure.string :as str] [babashka.fs :as fs]))\n"
+      "(defn lower [s :- String] :- String (str/lower-case s))\n"
+      "(defn fix [s :- String] :- String (str/replace s \"a\" \"b\"))\n"
+      "(defn lines [s :- String] :- (Vec String) (str/split-lines s))\n"
+      "(defn under [a :- String b :- String] :- String (fs/path a b))\n")))
+  (for ([name (in-list '("lower" "fix" "lines" "under"))])
+    (check-regexp-match
+     (regexp (format "pub fn ~a\\(__ctx: \\*rt\\.Ctx" name))
+     out))
+  (check-regexp-match #rx"rt\\.lower_case\\(__ctx\\.tick, s\\)" out)
+  (check-regexp-match #rx"rt\\.replace\\(__ctx\\.tick, s" out)
+  (check-regexp-match #rx"rt\\.split_lines\\(__ctx\\.tick, s\\)" out)
+  (check-regexp-match #rx"rt\\.path\\(__ctx\\.tick, a, b\\)" out))
+
+(test-case "zig allocating main owns one local arena while pure main stays direct"
+  (define pure
+    (compile-zig-forms '(defn main [] :- Nil nil)))
+  (check-regexp-match #rx"pub fn main\\(\\) void" pure)
+  (check-false (regexp-match? #rx"__beagle_main|ArenaAllocator" pure))
+  (define allocating
+    (compile-zig-forms '(defn main [] :- Nil (println "ok"))))
+  (check-regexp-match
+   #rx"pub fn __beagle_main\\(__ctx: \\*rt\\.Ctx\\) void"
+   allocating)
+  (check-regexp-match #rx"pub fn main\\(\\) void" allocating)
+  (check-regexp-match #rx"ArenaAllocator\\.init\\(std\\.heap\\.page_allocator\\)"
+                      allocating)
+  (check-regexp-match #rx"defer __arena\\.deinit\\(\\);" allocating)
+  (check-regexp-match #rx"__beagle_main\\(&__ctx\\);" allocating))
+
+(test-case "zig core runtime owns no global value allocator"
+  (define runtime (file->string kernel-rt))
+  (check-false (regexp-match? #rx"cliAlloc|cli_arena_state" runtime)))
+
+(test-case "zig non-optional unions use deterministic tagged storage"
+  (define value-param (br 'value ':- '(U String Int)))
+  (define nullable-param (br 'value ':- '(U String Int Nil)))
+  (define out
+    (compile-zig-forms
+     `(defn number-or-zero ,value-param :- Int
+        (if (integer? value) value 0))
+     `(defn is-missing? ,nullable-param :- Bool
+        (nil? value))
+     `(defn widen ,value-param :- (U String Int Bool)
+        value)
+     `(defn wrap ,value-param :- (Map Keyword (U String Int))
+        ,(mp ':value 'value))))
+  (check-regexp-match #rx"pub const Union0 = union\\(enum\\)" out)
+  (check-regexp-match #rx"rt\\.widen_union\\(Union2, value\\)" out)
+  (check-regexp-match #rx"rt\\.is_nil\\(value\\)" out)
+  (when ZIG
+    (check-true
+     (zig-tests?
+      out
+      #<<ZIG
+test "tagged unions narrow, widen, and survive map storage" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var rng = rt.Splitmix64.init(1);
+    var ctx = rt.Ctx{ .tick = arena.allocator(), .rng = &rng };
+
+    try std.testing.expectEqual(
+        @as(i64, 7),
+        numberOrZero(Union0{ .int = 7 }),
+    );
+    try std.testing.expectEqual(
+        @as(i64, 0),
+        numberOrZero(Union0{ .string = "ok" }),
+    );
+    try std.testing.expect(isMissing(Union1{ .nil = {} }));
+    try std.testing.expect(!isMissing(Union1{ .string = "present" }));
+
+    const widened = widen(Union0{ .int = 11 });
+    switch (widened) {
+        .int => |value| try std.testing.expectEqual(@as(i64, 11), value),
+        else => return error.TestUnexpectedResult,
+    }
+
+    const wrapped = wrap(&ctx, Union0{ .int = 13 });
+    const stored = wrapped.get(rt.keyword("", "value")).?;
+    switch (stored) {
+        .int => |value| try std.testing.expectEqual(@as(i64, 13), value),
+        else => return error.TestUnexpectedResult,
+    }
+}
+ZIG
+      "tagged-union-storage"))))
 
 ;; --- semantic contract 6: ownership and lifetime ----------------------------
 
@@ -1190,8 +1390,14 @@ JS
       composite-zig-src
       #<<ZIG
 test "allocation and domain errors compose" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var rng = rt.Splitmix64.init(1);
+    var ctx = rt.Ctx{ .tick = arena.allocator(), .rng = &rng };
+
     var success_errors = RewriteCrashErrorCarrier{};
     const result = try classifyRewriteCrash(
+        &ctx,
         &success_errors,
         "/tmp/coord",
         7,
@@ -1210,6 +1416,7 @@ test "allocation and domain errors compose" {
     try std.testing.expectError(
         error.RewriteCrash,
         classifyRewriteCrash(
+            &ctx,
             &crash_errors,
             "/tmp/coord",
             null,
@@ -1605,9 +1812,9 @@ ZIG
   (check-false (regexp-match? #rx"alloc" out))              ; reduce folds, no alloc
   (check-false (regexp-match? #rx"rt.reduce" out)))         ; not a runtime HOF call
 
-(test-case "mapv: fn inlined, output allocated in the CLI arena, elem type from :- U"
+(test-case "mapv: fn inlined, output allocated in the caller arena, elem type from :- U"
   (define out (ho-emit "(Vec Int)\n  (mapv (fn [x :- Int] :- Int (* x 2)) xs)"))
-  (check-true  (regexp-match? #rx"cliAlloc" out))          ; CLI run-arena
+  (check-true  (regexp-match? #rx"ctx\\.tick\\.alloc" out)) ; caller-owned arena
   (check-true  (regexp-match? #rx"alloc.i64" out))         ; elem type from :- Int
   (check-true  (regexp-match? #rx"= .x . 2." out))          ; body inlined
   (check-false (regexp-match? #rx"rt.mapv" out)))

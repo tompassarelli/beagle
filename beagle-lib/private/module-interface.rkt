@@ -17,15 +17,23 @@
          "ast.rkt"
          "types.rkt")
 
-(define INTERFACE-SCHEMA-VERSION 1)
+(define INTERFACE-SCHEMA-VERSION 2)
+;; V2 proves names/signatures/type exports/domain :raises, but does not yet
+;; encode every cross-module semantic contract (notably ^:dynamic status).
+;; Therefore an unchanged interface digest MUST NOT prune reverse-require
+;; consumers: Fram must keep selecting the complete reverse closure from the
+;; changed source/world digest until this flag can truthfully become #t.
+(define INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE? #f)
 (define ANY (type-prim 'Any))
 
 (struct interface-binding (name kind type raises) #:transparent)
 (struct interface-error (name members member-fields) #:transparent)
 (struct interface-type-declaration (name kind details) #:transparent)
+(struct interface-type-export (name kind arity expansion) #:transparent)
 (struct module-interface
   (schema-version namespace target bindings macro-fingerprints
-                  type-declarations errors requires digest source-digest source-id)
+                  type-declarations type-exports errors requires
+                  digest source-digest source-id)
   #:transparent)
 
 ;; A resolver returns a module-source.  DATUMS are consumed by the compatibility
@@ -172,7 +180,7 @@
       [_ (void)]))
   out)
 
-(define (raw-interface-bindings datums)
+(define (raw-interface-bindings datums externs)
   ;; Meta forms are absent from program-forms.  Keep their actual public names
   ;; in the exact export set so macro/extern use is not falsely rejected.
   (for/fold ([out (hasheq)]) ([datum (in-list datums)])
@@ -186,13 +194,25 @@
       [(list 'declare-extern (? symbol? name) type-expression)
        (hash-set out name
                  (interface-binding
-                  name 'extern (parse-type type-expression) #f))]
+                  name
+                  'extern
+                  (hash-ref
+                   externs
+                   name
+                   (lambda () (parse-type type-expression)))
+                  #f))]
       [(list 'declare-extern names-form type-expression)
        #:when (bracketed? names-form)
        (for/fold ([next out]) ([name (in-list (bracket-body names-form))])
          (hash-set next name
                    (interface-binding
-                    name 'extern (parse-type type-expression) #f)))]
+                    name
+                    'extern
+                    (hash-ref
+                     externs
+                     name
+                     (lambda () (parse-type type-expression)))
+                    #f)))]
       [_ out])))
 
 (define (raw-macro-fingerprints datums)
@@ -218,8 +238,16 @@
         (values member
                 (hash-ref (deferror-form-member-fields form) member '())))))))
 
-(define (program-type-declarations forms)
-  (for/fold ([declarations (hasheq)])
+(define (program-type-declarations forms declared-type-aliases)
+  (define alias-declarations
+    (for/hasheq ([(name expansion) (in-hash declared-type-aliases)])
+      (values
+       name
+       (interface-type-declaration
+        name
+        'alias
+        `(expansion ,(type->canonical-datum expansion))))))
+  (for/fold ([declarations alias-declarations])
             ([raw-form (in-list forms)])
     (define form (unwrap-public-form raw-form))
     (define declaration
@@ -280,19 +308,108 @@
          declaration)
         declarations)))
 
-(define (raw-type-declarations datums)
-  ;; Type aliases erase during parsing, so retain their public expansion in the
-  ;; interface directly from the canonical reader datum.
-  (for/fold ([declarations (hasheq)])
-            ([datum (in-list datums)])
-    (match datum
-      [(list 'defalias (? symbol? name) type-expression)
-       (hash-set
-        declarations
+(define (program-type-exports forms declared-type-aliases)
+  ;; This is the authoritative namespace for type-position resolution.  Keep it
+  ;; separate from value bindings: a record/union/alias may be a valid type
+  ;; export without being a value named by the same symbol.
+  (define exports (make-hasheq))
+  (define (add! name kind [arity 0] [expansion #f])
+    (hash-set!
+     exports
+     name
+     (interface-type-export name kind arity expansion)))
+  (for ([raw-form (in-list forms)])
+    (define form (unwrap-public-form raw-form))
+    (match form
+      [(record-form name _)
+       (add! name 'record)]
+      [(protocol-form name _)
+       (add! name 'protocol)]
+      [(defenum-form name _)
+       (add! name 'enum)]
+      [(defunion-form name members type-params _)
+       (add!
         name
-        (interface-type-declaration
-         name 'alias `(expansion ,type-expression)))]
-      [_ declarations])))
+        (if (null? type-params) 'union 'parametric-union)
+        (length type-params))
+       (for ([member (in-list members)])
+         (add! member 'union-member))]
+      [(deferror-form name members _)
+       (add! name 'throwable-union)
+       (for ([member (in-list members)])
+         (add! member 'throwable-member))]
+      [(defscalar-form name _ _)
+       (add! name 'scalar)]
+      [_ (void)]))
+  (for ([(name expansion) (in-hash declared-type-aliases)])
+    (add! name 'alias 0 expansion))
+  exports)
+
+(define (qualify-type-name namespace name)
+  (string->symbol
+   (string-append
+    (symbol->string namespace)
+    "/"
+    (symbol->string name))))
+
+(define (qualify-provider-local-type-references
+         type namespace local-type-names)
+  ;; Alias expansion is a public type boundary.  Bare provider-local names are
+  ;; meaningful only while parsing the provider; once exported they must carry
+  ;; the provider namespace so a consumer's own same-spelled type cannot capture
+  ;; them.  Built-ins, type variables, and already-qualified/imported identities
+  ;; remain unchanged.
+  (define (qualify-local name)
+    (if (set-member? local-type-names name)
+        (qualify-type-name namespace name)
+        name))
+  (define (recur nested)
+    (qualify-provider-local-type-references
+     nested namespace local-type-names))
+  (cond
+    [(type-prim? type)
+     (type-prim (qualify-local (type-prim-name type)))]
+    [(type-var? type) type]
+    [(type-app? type)
+     (type-app
+      (qualify-local (type-app-ctor type))
+      (map recur (type-app-args type)))]
+    [(type-union? type)
+     (type-union (map recur (type-union-alts type)))]
+    [(type-fn? type)
+     (type-fn
+      (map recur (type-fn-params type))
+      (and (type-fn-rest-type type)
+           (recur (type-fn-rest-type type)))
+      (recur (type-fn-ret type)))]
+    [(type-poly? type)
+     (define bounds (type-poly-bounds type))
+     (type-poly
+      (type-poly-vars type)
+      (recur (type-poly-body type))
+      (and
+       bounds
+       (for/hasheq ([(name bound) (in-hash bounds)])
+         (values name (recur bound)))))]
+    [else type]))
+
+(define (canonical-exported-aliases
+         namespace forms declared-type-aliases)
+  (define local-type-names
+    (and
+     (symbol? namespace)
+     (list->seteq
+      (hash-keys
+       (program-type-exports forms declared-type-aliases)))))
+  (for/hasheq ([(name expansion) (in-hash declared-type-aliases)])
+    (values
+     name
+     (if local-type-names
+         (qualify-provider-local-type-references
+          expansion namespace local-type-names)
+         ;; Namespace-free graph modules cannot satisfy a namespace require, so
+         ;; their aliases have no cross-module identity to qualify.
+         expansion))))
 
 (define (type->canonical-datum type)
   (cond
@@ -327,9 +444,11 @@
 
 (define (interface-canonical-datum
          namespace mode target gen-class? bindings macro-fingerprints
-         type-declarations errors requires)
+         type-declarations type-exports errors requires)
   `(module-interface
     (schema ,INTERFACE-SCHEMA-VERSION)
+    (consumer-pruning-safe
+     ,INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE?)
     (namespace ,namespace)
     (mode ,mode)
     (target ,target)
@@ -360,6 +479,18 @@
           name
           (interface-type-declaration-kind declaration)
           (interface-type-declaration-details declaration))))
+    (type-exports
+     ,@(for/list
+        ([name (in-list (sort (hash-keys type-exports) symbol<?))])
+         (define export (hash-ref type-exports name))
+         (list
+          name
+          (interface-type-export-kind export)
+          (interface-type-export-arity export)
+          (and
+           (interface-type-export-expansion export)
+           (type->canonical-datum
+            (interface-type-export-expansion export))))))
     (errors
      ,@(for/list ([name (in-list (sort (hash-keys errors) symbol<?))])
          (define error (hash-ref errors name))
@@ -388,16 +519,25 @@
                                    #:datums [datums '()])
   (define ast-bindings (ast-interface-bindings (program-forms prog)))
   (define bindings (hash-copy ast-bindings))
-  (for ([(name binding) (in-hash (raw-interface-bindings datums))])
+  (for ([(name binding)
+         (in-hash
+          (raw-interface-bindings datums (program-externs prog)))])
     (hash-set! bindings name binding))
   (define errors (program-errors (program-forms prog)))
   (define macro-fingerprints (raw-macro-fingerprints datums))
+  (define exported-aliases
+    (canonical-exported-aliases
+     (program-namespace prog)
+     (program-forms prog)
+     (program-declared-type-aliases prog)))
   (define type-declarations
-    (for/fold
-     ([declarations
-       (program-type-declarations (program-forms prog))])
-     ([(name declaration) (in-hash (raw-type-declarations datums))])
-      (hash-set declarations name declaration)))
+    (program-type-declarations
+     (program-forms prog)
+     exported-aliases))
+  (define type-exports
+    (program-type-exports
+     (program-forms prog)
+     exported-aliases))
   (define canonical
     (interface-canonical-datum
      (program-namespace prog)
@@ -407,6 +547,7 @@
      bindings
      macro-fingerprints
      type-declarations
+     type-exports
      errors
      (program-requires prog)))
   (module-interface
@@ -416,6 +557,7 @@
    bindings
    macro-fingerprints
    type-declarations
+   type-exports
    errors
    (program-requires prog)
    (sha256-datum canonical)
@@ -427,6 +569,12 @@
 
 (define (module-interface-binding-ref interface name [failure #f])
   (hash-ref (module-interface-bindings interface) name failure))
+
+(define (module-interface-type-export? interface name)
+  (hash-has-key? (module-interface-type-exports interface) name))
+
+(define (module-interface-type-export-ref interface name [failure #f])
+  (hash-ref (module-interface-type-exports interface) name failure))
 
 (define (module-interfaces-world-digest interfaces)
   (sha256-datum
@@ -451,14 +599,18 @@
 
 (provide
  INTERFACE-SCHEMA-VERSION
+ INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE?
  type->canonical-datum
  program->module-interface
  module-interface-export?
  module-interface-binding-ref
+ module-interface-type-export?
+ module-interface-type-export-ref
  module-interfaces-world-digest
  (struct-out interface-binding)
  (struct-out interface-error)
  (struct-out interface-type-declaration)
+ (struct-out interface-type-export)
  (struct-out module-interface)
  (struct-out module-source)
  (struct-out module-import))

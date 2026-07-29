@@ -67,6 +67,18 @@
             (car alts)]
            [else #f]))))
 
+(define (boxed-union-type? t)
+  (and (type-union? t) (not (optional-of t))))
+
+(define (closed-sum-type? t)
+  (or (dynamic-type? t) (boxed-union-type? t)))
+
+(define (sum-type-alternatives t)
+  (cond
+    [(dynamic-type? t) (type-app-args t)]
+    [(boxed-union-type? t) (type-union-alts t)]
+    [else '()]))
+
 (define (regex-string-type? t)
   (or (and (type-prim? t) (eq? (type-prim-name t) 'String))
       (let ([inner (optional-of t)])
@@ -74,6 +86,7 @@
              (eq? (type-prim-name inner) 'String)))))
 
 (define current-dynamic-types (make-parameter (hash)))
+(define current-union-types (make-parameter (hash)))
 (define current-binding-types (make-parameter (hasheq)))
 (define current-dynamic-remaining (make-parameter (hasheq)))
 (define current-dynamic-arms (make-parameter (hasheq)))
@@ -137,7 +150,13 @@
     [(type-union? t)
      (cond
        [(optional-of t) => (lambda (inner) (format "?~a" (type->zig inner)))]
-       [else (unsupported "union type" "only (U T Nil) optionals in v1")])]
+       [else
+        (hash-ref
+         (current-union-types)
+         t
+         (lambda ()
+           (unsupported "union type"
+                        "missing deterministic tagged-union declaration")))])]
     [else (unsupported "type" t)]))
 
 ;; --- program-level tables ------------------------------------------------------
@@ -194,13 +213,22 @@
 (define current-requires (make-parameter (hasheq))) ; alias sym → namespace sym
 (define current-fn-returns (make-parameter (hasheq))) ; local defn name → return type
 (define current-fn-types (make-parameter (hasheq))) ; local defn name → complete function type
+(define current-fn-allocation-modes (make-parameter (hasheq))) ; local defn name → hidden | explicit
 (define current-semantic-contracts (make-parameter #f))
 (define current-fn-error-contracts (make-parameter (hasheq)))
+(define current-fn-name (make-parameter #f))
 (define current-error-carrier (make-parameter #f))
 (define current-error-contract (make-parameter #f))
 (define current-allocation-contract (make-parameter #f))
 (define current-allocation-ctx (make-parameter #f))
 (define current-regex-bindings (make-parameter (hasheq)))
+(define NATIVE-MAIN-IMPL "__beagle_main")
+
+(define (emitted-fn-ident name)
+  (if (and (eq? name 'main)
+           (eq? (hash-ref (current-fn-allocation-modes) name #f) 'hidden))
+      NATIVE-MAIN-IMPL
+      (fn-ident name)))
 ;; opaque-handle type-name sym → owning Zig module string (los_yaml, ...).
 ;; An opaque handle is a runtime-module type beagle threads but never
 ;; builds/inspects (the YAML parse-tree handle is the motivating case); it
@@ -236,6 +264,52 @@
 
 (define (dynamic-type-for-contract contract)
   (type-app 'Dyn (dynamic-contract-alternatives contract)))
+
+(define (collect-boxed-union-types prog)
+  (define seen (make-hash))
+  (define out '())
+  (define (walk-type! ty)
+    (cond
+      [(boxed-union-type? ty)
+       (unless (hash-has-key? seen ty)
+         (hash-set! seen ty #t)
+         (set! out (cons ty out)))
+       (for ([alt (in-list (type-union-alts ty))]) (walk-type! alt))]
+      [(type-union? ty)
+       (for ([alt (in-list (type-union-alts ty))]) (walk-type! alt))]
+      [(type-app? ty)
+       (for ([arg (in-list (type-app-args ty))]) (walk-type! arg))]
+      [(type-fn? ty)
+       (for ([p (in-list (type-fn-params ty))]) (walk-type! p))
+       (when (type-fn-rest-type ty) (walk-type! (type-fn-rest-type ty)))
+       (walk-type! (type-fn-ret ty))]
+      [else (void)]))
+  (define (walk-ast! value)
+    (cond
+      ;; Raises are lowered through the checked error contract, not the value
+      ;; ABI. Walk only the value-bearing parts of a defn.
+      [(defn-form? value)
+       (for ([p (in-list (defn-form-params value))]) (walk-ast! p))
+       (when (defn-form-rest-param value)
+         (walk-ast! (defn-form-rest-param value)))
+       (walk-type! (defn-form-return-type value))
+       (for ([expr (in-list (defn-form-body value))]) (walk-ast! expr))]
+      [(type? value) (walk-type! value)]
+      [(struct? value)
+       (for ([field (in-vector (struct->vector value))]
+             [i (in-naturals)]
+             #:when (positive? i))
+         (walk-ast! field))]
+      [(pair? value)
+       (walk-ast! (car value))
+       (walk-ast! (cdr value))]
+      [(vector? value)
+       (for ([item (in-vector value)]) (walk-ast! item))]
+      [else (void)]))
+  (for ([form (in-list (program-forms prog))]) (walk-ast! form))
+  (for ([extern-type (in-hash-values (program-externs prog))])
+    (walk-type! extern-type))
+  (reverse out))
 
 (define (collect-dynamic-contracts prog)
   (define contracts (program-semantic-contracts prog))
@@ -315,8 +389,7 @@
        (regexp-replace* #px"[^A-Za-z0-9]+" (type->string t) "_"))
       "_")]))
 
-(define (dynamic-tag-name dyn-type alt)
-  (define alternatives (type-app-args dyn-type))
+(define (sum-tag-name alternatives alt)
   (define bases (map dynamic-alt-base-name alternatives))
   (define index
     (for/first ([candidate (in-list alternatives)]
@@ -327,6 +400,17 @@
   (if (> (count (lambda (candidate) (string=? candidate base)) bases) 1)
       (format "~a_~a" base index)
       base))
+
+(define (dynamic-tag-name dyn-type alt)
+  (sum-tag-name (type-app-args dyn-type) alt))
+
+(define (union-tag-name union-type alt)
+  (sum-tag-name (type-union-alts union-type) alt))
+
+(define (sum-tag-name-for type alt)
+  (if (dynamic-type? type)
+      (dynamic-tag-name type alt)
+      (union-tag-name type alt)))
 
 (define (emit-dynamic-declaration dyn-type contract name)
   (define tag-name (string-append name "Tag"))
@@ -344,6 +428,17 @@
    "pub const ~a = enum(u16) {\n~a\n};\npub const ~a = union(~a) {\n~a\n};"
    tag-name (string-join tag-lines "\n")
    name tag-name (string-join payload-lines "\n")))
+
+(define (emit-union-declaration union-type name)
+  (format
+   "pub const ~a = union(enum) {\n~a\n};"
+   name
+   (string-join
+    (for/list ([alt (in-list (type-union-alts union-type))])
+      (format "    ~a: ~a,"
+              (union-tag-name union-type alt)
+              (type->zig alt)))
+    "\n")))
 
 (define (fresh-label)
   (define b (label-counter))
@@ -396,15 +491,20 @@
 ;; optional-returning core stdlib fns; anything else is treated as
 ;; non-optional, exactly as before.
 (define (value-optional? e)
-  (and (call-form? e)
-       (symbol? (call-form-fn e))
-       (let ([rt (call-return-type e)])
-         (or (and rt (optional-of rt) #t)
-             (stdlib-call-optional? e)))))
+  (or
+   (and (kw-access? e)
+        (map-type? (expr-static-type (kw-access-target e))))
+   (and (call-form? e)
+        (symbol? (call-form-fn e))
+        (let ([rt (call-return-type e)])
+          (or (and rt (optional-of rt) #t)
+              (stdlib-call-optional? e))))))
 
 (define (regex-contract-of e)
   (or (and (current-semantic-contracts)
-           (hash-ref (current-semantic-contracts) e #f))
+           (let ([contract
+                  (hash-ref (current-semantic-contracts) e #f)])
+             (and (regex-contract? contract) contract)))
       (and (symbol? e) (hash-ref (current-regex-bindings) e #f))))
 
 (define (regex-capture-count contract)
@@ -444,11 +544,11 @@
        (hash-ref DYNAMIC-PREDICATE-KINDS (call-form-fn e) #f)
        (let* ([sym (car (call-form-args e))]
               [dyn-type (hash-ref (current-binding-types) sym #f)])
-         (and (dynamic-type? dyn-type)
+         (and (closed-sum-type? dyn-type)
               (let* ([available
                       (hash-ref (current-dynamic-remaining)
                                 sym
-                                (type-app-args dyn-type))]
+                                (sum-type-alternatives dyn-type))]
                      [selected
                       (filter
                        (lambda (alt)
@@ -470,14 +570,23 @@
 
 (define (emit-dynamic-condition info)
   (match-define (list sym dyn-type selected _) info)
+  (define base (ident sym))
+  (define value
+    (if (optional-binding? sym)
+        (format "~a.?" base)
+        base))
   (define checks
     (for/list ([alt (in-list selected)])
       (format "(std.meta.activeTag(~a) == .~a)"
-              (ident sym)
-              (dynamic-tag-name dyn-type alt))))
-  (if (= (length checks) 1)
-      (car checks)
-      (format "(~a)" (string-join checks " or "))))
+              value
+              (sum-tag-name-for dyn-type alt))))
+  (define tag-check
+    (if (= (length checks) 1)
+        (car checks)
+        (format "(~a)" (string-join checks " or "))))
+  (if (optional-binding? sym)
+      (format "((~a != null) and ~a)" base tag-check)
+      tag-check))
 
 (define (with-dynamic-branch info then? thunk)
   (cond
@@ -504,9 +613,19 @@
     [(and (symbol? e)
           (regexp-match? #rx"^:" (symbol->string e)))
      (type-prim 'Keyword)]
+    [(eq? e 'nil) (type-prim 'Nil)]
     [(symbol? e)
      (or (hash-ref (current-dynamic-arms) e #f)
          (hash-ref (current-binding-types) e #f))]
+    [(kw-access? e)
+     (define target-type (expr-static-type (kw-access-target e)))
+     (and (map-type? target-type) (map-vtype target-type))]
+    [(and (call-form? e)
+          (eq? (call-form-fn e) 'assoc)
+          (= 3 (length (call-form-args e))))
+     (define target-type
+       (expr-static-type (car (call-form-args e))))
+     (and (map-type? target-type) target-type)]
     [(and (call-form? e)
           (regexp-match #rx"^->(.+)$" (symbol->string (call-form-fn e))))
      => (lambda (m) (type-prim (string->symbol (cadr m))))]
@@ -516,10 +635,10 @@
            (and (type-fn? extern-type) (type-fn-ret extern-type))))]
     [else #f]))
 
-(define (dynamic-value-alternative v expected)
+(define (sum-value-alternative v expected)
   (define actual (expr-static-type v))
   (cond
-    [(and actual (dynamic-type? actual)
+    [(and actual (closed-sum-type? actual)
           (type-invariant-equal? actual expected))
      expected]
     [else
@@ -533,8 +652,22 @@
             [(map-form? v)
              (and (type-app? alt) (eq? (type-app-ctor alt) 'Map))]
             [else #f]))
-        (type-app-args expected)))
+        (sum-type-alternatives expected)))
      (and (= (length candidates) 1) (car candidates))]))
+
+(define (union-subset? actual expected)
+  (and (boxed-union-type? actual)
+       (closed-sum-type? expected)
+       (for/and ([actual-alt (in-list (type-union-alts actual))])
+         (ormap (lambda (expected-alt)
+                  (type-invariant-equal? actual-alt expected-alt))
+                (sum-type-alternatives expected)))))
+
+(define (emit-present-value v)
+  (define rendered (emit-expr v))
+  (if (value-optional? v)
+      (format "(~a).?" rendered)
+      rendered))
 
 ;; --- operators --------------------------------------------------------------------
 
@@ -639,9 +772,18 @@
     (emit-typed-args
      (call-form-args e)
      (hash-ref (current-fn-types) fn #f)))
+  (define with-carrier (cons carrier args))
+  (define emitted-args
+    (if (eq? (hash-ref (current-fn-allocation-modes) fn #f) 'hidden)
+        (cons
+         (or (current-allocation-ctx)
+             (unsupported "allocator context"
+                          (format "calling allocating function ~a from a pure function" fn)))
+         with-carrier)
+        with-carrier))
   (format "~a(~a)"
-          (fn-ident fn)
-          (string-join (cons carrier args) ", ")))
+          (emitted-fn-ident fn)
+          (string-join emitted-args ", ")))
 
 (define (emit-error-throw e contract)
   (define carrier (current-error-carrier))
@@ -761,18 +903,41 @@
     [(symbol? e)
      (cond
        [(keyword-value-string e) (emit-keyword e)]
-       [(hash-ref (current-dynamic-arms) e #f)
-        => (lambda (alt)
-             (define dyn-type (hash-ref (current-binding-types) e))
-             (format "~a.~a" (ident e) (dynamic-tag-name dyn-type alt)))]
-       [(and (optional-binding? e) (not (raw-optional?)))
-        (format "~a.?" (ident e))]
-       [else (ident e)])]
+       [else
+        (define value
+          (if (and (optional-binding? e) (not (raw-optional?)))
+              (format "~a.?" (ident e))
+              (ident e)))
+        (cond
+          [(hash-ref (current-dynamic-arms) e #f)
+           => (lambda (alt)
+                (define sum-type (hash-ref (current-binding-types) e))
+                (format "~a.~a"
+                        value
+                        (sum-tag-name-for sum-type alt)))]
+          [else value])])]
     [(kw-access? e)
-     (when (kw-access-default e)
-       (unsupported "kw-access with default" "use records + explicit branches"))
-     (define field (substring (symbol->string (kw-access-kw e)) 1))
-     (format "~a.~a" (emit-expr (kw-access-target e)) (ident (string->symbol field)))]
+     (define target-type (expr-static-type (kw-access-target e)))
+     (cond
+       [(map-type? target-type)
+        (define lookup
+          (format "~a.get(~a)"
+                  (emit-expr (kw-access-target e))
+                  (emit-keyword (kw-access-kw e))))
+        (if (kw-access-default e)
+            (format "(~a orelse ~a)"
+                    lookup
+                    (emit-typed-value
+                     (kw-access-default e)
+                     (map-vtype target-type)))
+            lookup)]
+       [else
+        (when (kw-access-default e)
+          (unsupported "kw-access with default" "use records + explicit branches"))
+        (define field (substring (symbol->string (kw-access-kw e)) 1))
+        (format "~a.~a"
+                (emit-expr (kw-access-target e))
+                (ident (string->symbol field)))])]
     [(new-form? e)
      ;; class-name carries the `->` prefix: '->Mind
      (emit-ctor (string->symbol (substring (symbol->string (new-form-class-name e)) 2))
@@ -838,18 +1003,65 @@
 (define (map-vtype t) (cadr (type-app-args t)))
 
 (define (emit-map-literal e ktype vtype)
+  (unless (current-allocation-ctx)
+    (unsupported
+     "top-level map allocation"
+     "move runtime map construction into a function with a caller-owned Ctx"))
   (define map-type (type-app 'Map (list ktype vtype)))
-  (for/fold ([acc (format "~a.empty()" (type->zig map-type))])
+  (define allocator (allocation-allocator))
+  (for/fold ([acc (format "~a.empty(~a)" (type->zig map-type) allocator)])
             ([pr (in-list (map-form-pairs e))])
-    (format "~a.assoc(~a, ~a)"
+    (format "~a.assoc(~a, ~a, ~a)"
             acc
+            allocator
             (emit-typed-value (car pr) ktype)
             (emit-typed-value (cdr pr) vtype))))
 
 (define (emit-set-literal e elem-type)
-  (for/fold ([acc (format "rt.ValueSet(~a).empty()" (type->zig elem-type))])
-            ([item (in-list (set-form-items e))])
-    (format "~a.conj(~a)" acc (emit-typed-value item elem-type))))
+  (cond
+    [(current-allocation-ctx)
+     (define allocator (allocation-allocator))
+     (for/fold ([acc (format "rt.ValueSet(~a).empty()"
+                             (type->zig elem-type))])
+               ([item (in-list (set-form-items e))])
+       (format "~a.conj(~a, ~a)"
+               acc allocator (emit-typed-value item elem-type)))]
+    [else
+     ;; A top-level literal is durable borrowed storage, not process
+     ;; initialization. Every element must itself be statically expressible;
+     ;; Zig enforces that property on the emitted const initializer.
+     (format "rt.ValueSet(~a).fromStatic(&.{ ~a })"
+             (type->zig elem-type)
+             (string-join
+              (for/list ([item (in-list (set-form-items e))])
+                (emit-typed-value item elem-type))
+              ", "))]))
+
+(define (emit-vec-literal e elem-type)
+  (define items (vec-form-items e))
+  (cond
+    [(not (current-allocation-ctx))
+     (format "&.{ ~a }"
+             (string-join
+              (for/list ([item (in-list items)])
+                (emit-typed-value item elem-type))
+              ", "))]
+    [(null? items) "&.{}"]
+    [else
+     (define lbl (fresh-label))
+     (define out-name (format "__vec_~a" lbl))
+     (format
+      "~a: { const ~a = ~a; ~a break :~a ~a; }"
+      lbl
+      out-name
+      (emit-alloc (type->zig elem-type) (number->string (length items)))
+      (apply
+       string-append
+       (for/list ([item (in-list items)] [i (in-naturals)])
+         (format "~a[~a] = ~a; "
+                 out-name i (emit-typed-value item elem-type))))
+      lbl
+      out-name)]))
 
 ;; Emit a value against an expected type. Container literals need the
 ;; type to lower: a map literal picks rt.Map(V); a vector literal lowers
@@ -859,28 +1071,34 @@
 ;; slot accepts a literal (def, let, reduce init, ctor args).
 (define (emit-typed-value v expected)
   (cond
-    [(and expected (dynamic-type? expected))
-     (define alt (dynamic-value-alternative v expected))
-     (unless alt
-       (unsupported "closed dynamic value"
-                    (format "cannot select one declared arm for ~a"
-                            (type->string expected))))
-     (if (dynamic-type? alt)
-         (emit-expr v)
-         (format "~a{ .~a = ~a }"
-                 (type->zig expected)
-                 (dynamic-tag-name expected alt)
-                 (emit-typed-value v alt)))]
+    [(and expected (closed-sum-type? expected))
+     (define actual (expr-static-type v))
+     (cond
+       [(and actual (type-invariant-equal? actual expected))
+        (emit-present-value v)]
+       [(and actual (union-subset? actual expected))
+        (format "rt.widen_union(~a, ~a)"
+                (type->zig expected)
+                (emit-present-value v))]
+       [else
+        (define alt (sum-value-alternative v expected))
+        (unless alt
+          (unsupported "closed union value"
+                       (format "cannot select one declared arm for ~a"
+                               (type->string expected))))
+        (format "~a{ .~a = ~a }"
+                (type->zig expected)
+                (sum-tag-name-for expected alt)
+                (if (and (type-prim? alt)
+                         (eq? (type-prim-name alt) 'Nil))
+                    "{}"
+                    (emit-typed-value v alt)))])]
     [(and (map-form? v) expected (map-type? expected))
      (emit-map-literal v (map-ktype expected) (map-vtype expected))]
     [(and (vec-form? v) expected (type-app? expected)
           (memq (type-app-ctor expected) '(Vec List)))
      (define elem-type (car (type-app-args expected)))
-     (format "&.{ ~a }"
-             (string-join
-              (for/list ([item (in-list (vec-form-items v))])
-                (emit-typed-value item elem-type))
-              ", "))]
+     (emit-vec-literal v elem-type)]
     [(and (set-form? v) expected (type-app? expected)
           (eq? (type-app-ctor expected) 'Set))
      (emit-set-literal v (car (type-app-args expected)))]
@@ -890,11 +1108,16 @@
           (= (length (call-form-args v)) 1)
           (vec-form? (car (call-form-args v))))
      (define elem-type (car (type-app-args expected)))
+     (unless (current-allocation-ctx)
+       (unsupported "top-level set construction"
+                    "use a Set literal for static borrowed storage"))
+     (define allocator (allocation-allocator))
      (for/fold ([acc (format "rt.ValueSet(~a).empty()"
                              (type->zig elem-type))])
                ([item (in-list
                        (vec-form-items (car (call-form-args v))))])
-       (format "~a.conj(~a)" acc (emit-typed-value item elem-type)))]
+       (format "~a.conj(~a, ~a)"
+               acc allocator (emit-typed-value item elem-type)))]
     [else (emit-expr v)]))
 
 ;; Zig peer-type resolution can't unify branches that are ALL bare
@@ -990,11 +1213,11 @@
            (hash-set (current-binding-types)
                      (let-binding-name b)
                      binding-type))
-          (when (dynamic-type? binding-type)
+          (when (closed-sum-type? binding-type)
             (current-dynamic-remaining
              (hash-set (current-dynamic-remaining)
                        (let-binding-name b)
-                       (type-app-args binding-type)))))
+                       (sum-type-alternatives binding-type)))))
         (when new-opt
           (current-optionals (cons (let-binding-name b) (current-optionals)))))))
   (define stmts
@@ -1068,19 +1291,17 @@
 
 (define (allocation-allocator)
   (define contract (current-allocation-contract))
-  (case (and (allocation-contract? contract)
-             (allocation-contract-region contract))
-    [(tick)
-     (define ctx (current-allocation-ctx))
-     (unless ctx
-       (unsupported "tick allocation contract"
-                    "a Ctx parameter must supply the allocator"))
-     (format "~a.tick" ctx)]
-    [(process) "rt.cliAlloc()"]
-    [else
-     (unsupported "allocation region"
-                  (and (allocation-contract? contract)
-                       (allocation-contract-region contract)))]))
+  (unless (allocation-contract? contract)
+    (unsupported "allocation contract"
+                 "the checker must classify every lowered allocation site"))
+  (define ctx (current-allocation-ctx))
+  (unless ctx
+    (unsupported
+     "allocator context"
+     (format "~a allocation in ~a requires a caller-owned *rt.Ctx"
+             (allocation-contract-region contract)
+             (or (current-fn-name) "<top-level>"))))
+  (format "~a.tick" ctx))
 
 (define (emit-alloc elem-type count)
   (define contract (current-allocation-contract))
@@ -1089,9 +1310,8 @@
      (format "try ~a.alloc(~a, ~a)"
              (allocation-allocator) elem-type count)]
     [else
-     ;; Preserve the committed legacy process/abort lowering byte-for-byte.
-     (format "rt.cliAlloc().alloc(~a, ~a) catch @panic(\"oom\")"
-             elem-type count)]))
+     (format "~a.alloc(~a, ~a) catch @panic(\"oom\")"
+             (allocation-allocator) elem-type count)]))
 
 (define (qualified-rt-name sym)
   ;; A qualified call lowers to a Zig module iff it was declared as an
@@ -1120,7 +1340,8 @@
 
 (define (emit-named-unary-stdlib fn arg)
   (cond
-    [(eq? fn 'str) (format "rt.str1(~a)" (emit-expr arg))]
+    [(eq? fn 'str)
+     (format "rt.str1(~a, ~a)" (allocation-allocator) (emit-expr arg))]
     [(and (symbol? fn)
           (regexp-match? #rx"/trim$" (symbol->string fn))
           (qualified-rt-name fn))
@@ -1170,33 +1391,41 @@
     [(and (= (length args) 2)
           (regexp-match? #rx"/split$" (symbol->string fn))
           (regex-contract-of e))
-     (format "rt.regex_split(~a, ~a)"
+     (format "rt.regex_split(~a, ~a, ~a)"
+             (allocation-allocator)
              (emit-expr (car args)) (emit-expr (cadr args)))]
     [(and (= (length args) 3)
           (regexp-match? #rx"/replace$" (symbol->string fn))
           (regex-contract-of e))
-     (format "rt.regex_replace(~a, ~a, ~a)"
+     (format "rt.regex_replace(~a, ~a, ~a, ~a)"
+             (allocation-allocator)
              (emit-expr (car args))
              (emit-expr (cadr args))
              (emit-expr (caddr args)))]
     ;; A map projection may flow into a consumer that destroys order. Lower
     ;; those shapes without ever materializing an ordered key/value sequence.
     [(and (eq? fn 'set) order-projection)
-     (format "~a.~aSet()"
+     (format "~a.~aSet(~a)"
              (emit-expr (car (call-form-args order-projection)))
              (if (eq? (call-form-fn order-projection) 'keys)
                  "key"
-                 "value"))]
+                 "value")
+             (allocation-allocator))]
     [(and (memq fn '(count empty?)) order-projection)
      (format "rt.~a(~a)"
              (if (eq? fn 'count) "count" "is_empty")
              (emit-expr (car (call-form-args order-projection))))]
     ;; nil-tests look at the raw optional, no unwrap
     [(and (memq fn '(nil? some?)) (= 1 (length args)))
-     (define raw (parameterize ([raw-optional? #t]) (emit-expr (car args))))
-     (if (eq? fn 'nil?)
-         (format "(~a == null)" raw)
-         (format "(~a != null)" raw))]
+     (define arg (car args))
+     (define raw (parameterize ([raw-optional? #t]) (emit-expr arg)))
+     (cond
+       [(boxed-union-type? (expr-static-type arg))
+        (format "rt.~a(~a)"
+                (if (eq? fn 'nil?) "is_nil" "is_some")
+                raw)]
+       [(eq? fn 'nil?) (format "(~a == null)" raw)]
+       [else (format "(~a != null)" raw)])]
     [(and (eq? fn 'boolean) (= 1 (length args)))
      (format "rt.truthy(~a)"
              (parameterize ([raw-optional? #t])
@@ -1248,21 +1477,30 @@
      (define lbl (fresh-label))
      (format (string-append
               "~a: { const __n: usize = @intCast(@max(0, ~a)); "
-              "const __value: []const u8 = rt.str1(~a); "
+              "const __value: []const u8 = rt.str1(~a, ~a); "
               "const __out = ~a; for (__out) |*__slot| { __slot.* = __value; } "
               "break :~a __out; }")
              lbl
              (emit-expr (car args))
+             (allocation-allocator)
              (emit-expr (cadr args))
              (emit-alloc "[]const u8" "__n")
              lbl)]
     [(and (eq? fn 'apply) (= 2 (length args)) (eq? (car args) 'str))
-     (format "rt.join(\"\", ~a)" (emit-expr (cadr args)))]
+     (format "rt.join(~a, \"\", ~a)"
+             (allocation-allocator)
+             (emit-expr (cadr args)))]
     [(and (memq fn '(= not=)) (= 2 (length args))
           (or (eq? (car args) 'nil) (eq? (cadr args) 'nil)))
      (define other (if (eq? (car args) 'nil) (cadr args) (car args)))
      (define raw (parameterize ([raw-optional? #t]) (emit-expr other)))
-     (format "(~a ~a null)" raw (if (eq? fn '=) "==" "!="))]
+     (cond
+       [(boxed-union-type? (expr-static-type other))
+        (format "~art.is_nil(~a)"
+                (if (eq? fn '=) "" "!")
+                raw)]
+       [else
+        (format "(~a ~a null)" raw (if (eq? fn '=) "==" "!="))])]
     ;; --- higher-order seq ops, monomorphized to flat loops ----------------
     ;; The fn argument is INLINED, not passed as a value. This is the typed
     ;; lowering: terse (mapv f xs) / (reduce f init xs) becomes a flat,
@@ -1364,8 +1602,18 @@
     [(eq? fn 'contains?)
      (format "~a.contains(~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
     [(eq? fn 'assoc)
-     (format "~a.assoc(~a, ~a)"
-             (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args)))]
+     (define target-type (expr-static-type (car args)))
+     (if (map-type? target-type)
+         (format "~a.assoc(~a, ~a, ~a)"
+                 (emit-expr (car args))
+                 (allocation-allocator)
+                 (emit-typed-value (cadr args) (map-ktype target-type))
+                 (emit-typed-value (caddr args) (map-vtype target-type)))
+         (format "~a.assoc(~a, ~a, ~a)"
+                 (emit-expr (car args))
+                 (allocation-allocator)
+                 (emit-expr (cadr args))
+                 (emit-expr (caddr args))))]
     [(eq? fn 'hash) (format "rt.hash(~a)" (emit-expr (car args)))]
     ;; v1 vector ops through the prelude (tick-arena allocation only)
     [(eq? fn 'count) (format "rt.count(~a)" (emit-expr (car args)))]
@@ -1379,11 +1627,11 @@
        (unsupported "conj" "zig backend spells it (conj ctx v x) — allocation needs ctx"))
      (format "rt.conj(~a, ~a, ~a)"
              (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args)))]
-    ;; (sort xs) / (distinct xs): fresh CLI-arena slices, element type
-    ;; comptime-inferred from the input (rt.* anytype). No alloc ctx —
-    ;; the CLI arena is process-lifetime, reclaimed at exit.
+    ;; (sort xs) / (distinct xs): fresh caller-arena slices, element type
+    ;; comptime-inferred from the input (rt.* anytype).
     [(and (eq? fn 'sort) (= 1 (length args)))
-     (format "rt.sort(~a)" (emit-expr (car args)))]
+     (format "rt.sort(~a, ~a)"
+             (allocation-allocator) (emit-expr (car args)))]
     [(eq? fn 'sort)
      (unsupported "sort" "zig backend supports (sort xs) only — no comparator arg in v1")]
     ;; (sort-by (fn [x :- T] :- K body) xs) — monomorphized: extract keys,
@@ -1417,11 +1665,13 @@
              x
              (emit-inlined-fn-body f) lbl)]
     [(and (eq? fn 'distinct) (= 1 (length args)))
-     (format "rt.distinct(~a)" (emit-expr (car args)))]
+     (format "rt.distinct(~a, ~a)"
+             (allocation-allocator) (emit-expr (car args)))]
     ;; (concat a b ...) — left-fold to binary rt.concat (same element type).
     [(and (eq? fn 'concat) (>= (length args) 2))
      (for/fold ([acc (emit-expr (car args))]) ([a (in-list (cdr args))])
-       (format "rt.concat(~a, ~a)" acc (emit-expr a)))]
+       (format "rt.concat(~a, ~a, ~a)"
+               (allocation-allocator) acc (emit-expr a)))]
     [(and (eq? fn 'concat) (= 1 (length args))) (emit-expr (car args))]
     [(eq? fn 'concat)
      (unsupported "concat" "zig backend needs at least one (Vec A) arg")]
@@ -1435,7 +1685,9 @@
             (format "try rt.str1Alloc(~a, ~a)"
                     (allocation-allocator)
                     (emit-expr (car args)))
-            (format "rt.str1(~a)" (emit-expr (car args))))]
+            (format "rt.str1(~a, ~a)"
+                    (allocation-allocator)
+                    (emit-expr (car args))))]
        [else
         (if (fallible-allocation-contract? (current-allocation-contract))
             (for/fold
@@ -1449,25 +1701,41 @@
                acc
                (allocation-allocator)
                (emit-expr a)))
-            (for/fold ([acc (format "rt.str1(~a)" (emit-expr (car args)))])
+            (for/fold ([acc (format "rt.str1(~a, ~a)"
+                                    (allocation-allocator)
+                                    (emit-expr (car args)))])
                       ([a (in-list (cdr args))])
-              (format "rt.str2(~a, rt.str1(~a))"
-                      acc (emit-expr a))))])]
+              (format "rt.str2(~a, ~a, rt.str1(~a, ~a))"
+                      (allocation-allocator)
+                      acc
+                      (allocation-allocator)
+                      (emit-expr a))))])]
     [(and (eq? fn 'pr-str) (= 1 (length args)))
-     (format "rt.pr_str(~a)" (emit-expr (car args)))]
+     (format "rt.pr_str(~a, ~a)"
+             (allocation-allocator) (emit-expr (car args)))]
     ;; (println x) — str-concat all args, then rt.println.
     [(eq? fn 'println)
      (define content
        (cond
          [(null? args) "\"\""]
-         [(null? (cdr args)) (format "rt.str1(~a)" (emit-expr (car args)))]
+         [(null? (cdr args))
+          (format "rt.str1(~a, ~a)"
+                  (allocation-allocator) (emit-expr (car args)))]
          [else
-          (for/fold ([acc (format "rt.str1(~a)" (emit-expr (car args)))])
+          (for/fold ([acc (format "rt.str1(~a, ~a)"
+                                  (allocation-allocator)
+                                  (emit-expr (car args)))])
                     ([a (in-list (cdr args))])
-            (format "rt.str2(~a, rt.str1(~a))" acc (emit-expr a)))]))
+            (format "rt.str2(~a, ~a, rt.str1(~a, ~a))"
+                    (allocation-allocator)
+                    acc
+                    (allocation-allocator)
+                    (emit-expr a)))]))
      (format "rt.println(~a)" content)]
     ;; CLI runtime stdlib (unqualified clojure.core fns the prelude provides)
-    [(eq? fn 'slurp) (format "rt.slurp(~a)" (emit-expr (car args)))]
+    [(eq? fn 'slurp)
+     (format "rt.slurp(~a, ~a)"
+             (allocation-allocator) (emit-expr (car args)))]
     [(eq? fn 'spit) (format "rt.spit(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
     [(and (eq? fn 'subs) (= 3 (length args)))
      (format "rt.subs3(~a, ~a, ~a)"
@@ -1480,10 +1748,22 @@
      (format "rt.compare(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
     [(qualified-rt-name fn)
      => (lambda (rt-fn)
+          (define emitted
+            (emit-typed-args args (hash-ref (current-externs) fn #f)))
+          (define basename
+            (let ([m (regexp-match #rx"/([^/]+)$" (symbol->string fn))])
+              (and m (cadr m))))
+          (define allocator-bearing?
+            (and (string-prefix? rt-fn "rt.")
+                 (member basename
+                         '("lower-case" "upper-case" "join" "replace"
+                           "split" "split-lines" "path"))))
           (format "~a(~a)"
                   rt-fn
                   (string-join
-                   (emit-typed-args args (hash-ref (current-externs) fn #f))
+                   (if allocator-bearing?
+                       (cons (allocation-allocator) emitted)
+                       emitted)
                    ", ")))]
     [(regexp-match #rx"^->(.+)$" (symbol->string fn))
      => (lambda (m) (emit-ctor (string->symbol (cadr m)) args))]
@@ -1495,13 +1775,24 @@
       "typed error call"
       (format "~a must be wrapped in check or rescue" fn))]
     [else
-     ;; user-defined function in this module: ctx is threaded implicitly
-     ;; only when the author passes it; emitted call is positional.
+     ;; The source stays ordinary typed Clojure. Native allocation context is
+     ;; an emitter ABI effect: direct and transitive allocating callees receive
+     ;; the caller's hidden context, while pure and explicit-Ctx callees retain
+     ;; their source-visible positional signatures.
+     (define emitted-args
+       (emit-typed-args args (hash-ref (current-fn-types) fn #f)))
+     (define call-args
+       (if (eq? (hash-ref (current-fn-allocation-modes) fn #f) 'hidden)
+           (cons
+            (or (current-allocation-ctx)
+                (unsupported
+                 "allocator context"
+                 (format "calling allocating function ~a from a pure function" fn)))
+            emitted-args)
+           emitted-args))
      (format "~a(~a)"
-             (fn-ident fn)
-             (string-join
-              (emit-typed-args args (hash-ref (current-fn-types) fn #f))
-              ", "))]))
+             (emitted-fn-ident fn)
+             (string-join call-args ", "))]))
 
 ;; --- statements (fn bodies) ---------------------------------------------------------
 
@@ -1546,22 +1837,30 @@
        (for ([b (in-list (let-form-bindings lf))])
          (unless (symbol? (let-binding-name b))
            (unsupported "destructuring binding"))
+         (define contextual-map-type
+           (and (not (let-binding-type b))
+                (map-form? (let-binding-value b))
+                (map-type? ret-type)
+                ret-type))
          (define binding-type
            (or (let-binding-type b)
+               contextual-map-type
                (expr-static-type (let-binding-value b))))
          (line! (format "const ~a = ~a;"
                         (ident (let-binding-name b))
-                        (emit-typed-value (let-binding-value b) (let-binding-type b))))
+                        (emit-typed-value
+                         (let-binding-value b)
+                         binding-type)))
          (when binding-type
            (current-binding-types
             (hash-set (current-binding-types)
                       (let-binding-name b)
                       binding-type))
-           (when (dynamic-type? binding-type)
+           (when (closed-sum-type? binding-type)
              (current-dynamic-remaining
               (hash-set (current-dynamic-remaining)
                         (let-binding-name b)
-                        (type-app-args binding-type)))))
+                        (sum-type-alternatives binding-type)))))
          ;; Optional iff declared ?T, or — inferred local — the value's
          ;; call-return type is ?T (same rule as emit-block-expr).
          (let* ([t (let-binding-type b)]
@@ -1707,7 +2006,7 @@
           rhs))
 
 (define (emit-defn f)
-  (define name (fn-ident (defn-form-name f)))
+  (define name (emitted-fn-ident (defn-form-name f)))
   (when (defn-form-rest-param f) (unsupported "variadic defn"))
   (define params (defn-form-params f))
   (for ([p (in-list params)])
@@ -1736,40 +2035,25 @@
       (values (param-name p) (param-type p))))
   (define dynamic-remaining
     (for/hash ([p (in-list params)]
-               #:when (dynamic-type? (param-type p)))
-      (values (param-name p) (type-app-args (param-type p)))))
-  (define (find-allocation-contract value)
-    (define direct
-      (and (current-semantic-contracts)
-           (hash-ref (current-semantic-contracts) value #f)))
-    (cond
-      [(allocation-contract? direct) direct]
-      [(struct? value)
-       (for/or ([field (in-vector (struct->vector value))]
-                [i (in-naturals)]
-                #:when (positive? i))
-         (find-allocation-contract field))]
-      [(pair? value)
-       (or (find-allocation-contract (car value))
-           (find-allocation-contract (cdr value)))]
-      [(vector? value)
-       (for/or ([item (in-vector value)])
-         (find-allocation-contract item))]
-      [else #f]))
+               #:when (closed-sum-type? (param-type p)))
+      (values (param-name p) (sum-type-alternatives (param-type p)))))
   (define allocation-contract
-    (or (and (current-semantic-contracts)
-             (let ([contract
-                    (hash-ref (current-semantic-contracts) f #f)])
-               (and (allocation-contract? contract) contract)))
-        (for/or ([expr (in-list (defn-form-body f))])
-          (find-allocation-contract expr))))
+    (and (current-semantic-contracts)
+         (defn-allocation-contract f (current-semantic-contracts))))
+  (define allocation-mode
+    (hash-ref (current-fn-allocation-modes) (defn-form-name f) #f))
   (define error-contract
     (hash-ref (current-fn-error-contracts) (defn-form-name f) #f))
   (define allocation-ctx
-    (and (allocation-contract? allocation-contract)
-         (eq? (allocation-contract-region allocation-contract) 'tick)
-         (pair? params)
-         (ident (param-name (car params)))))
+    (case allocation-mode
+      [(hidden) "__ctx"]
+      [(explicit)
+       (unless (pair? params)
+         (unsupported "explicit allocator context"
+                      (format "~a has no first Ctx parameter"
+                              (defn-form-name f))))
+       (ident (param-name (car params)))]
+      [else #f]))
   (define emitted-ret
     (cond
       [(and error-contract
@@ -1784,7 +2068,7 @@
       [(fallible-allocation-contract? allocation-contract)
        (format "std.mem.Allocator.Error!~a" (type->zig ret))]
       [else (type->zig ret)]))
-  (define emitted-sig
+  (define error-sig
     (if error-contract
         (string-append
          "__errors: *"
@@ -1792,13 +2076,15 @@
          (if (string=? sig "") "" ", ")
          sig)
         sig))
-  (define effective-discards
-    (if allocation-ctx
-        (filter (lambda (line)
-                  (not (string=? line (format "    _ = ~a;" allocation-ctx))))
-                discards)
-        discards))
+  (define emitted-sig
+    (if (eq? allocation-mode 'hidden)
+        (string-append
+         "__ctx: *rt.Ctx"
+         (if (string=? error-sig "") "" ", ")
+         error-sig)
+        error-sig))
   (parameterize ([current-optionals opt-params]
+                 [current-fn-name (defn-form-name f)]
                  [current-binding-types binding-types]
                  [current-dynamic-remaining dynamic-remaining]
                  [current-dynamic-arms (hasheq)]
@@ -1807,12 +2093,27 @@
                  [current-error-contract error-contract]
                  [current-error-carrier (and error-contract "__errors")]
                  [label-counter (box 0)])
+    (define emitted-body (emit-fn-body (defn-form-body f) ret "    "))
+    (define allocation-ctx-used?
+      (and allocation-ctx (string-contains? emitted-body allocation-ctx)))
+    (define effective-discards
+      (cond
+        [(not allocation-ctx) discards]
+        [allocation-ctx-used?
+         (filter (lambda (line)
+                   (not (string=?
+                         line
+                         (format "    _ = ~a;" allocation-ctx))))
+                 discards)]
+        [(eq? allocation-mode 'hidden)
+         (cons (format "    _ = ~a;" allocation-ctx) discards)]
+        [else discards]))
     (format "pub fn ~a(~a) ~a {\n~a~a\n}"
             name emitted-sig emitted-ret
             (if (null? effective-discards)
                 ""
                 (string-append (string-join effective-discards "\n") "\n"))
-            (emit-fn-body (defn-form-body f) ret "    "))))
+            emitted-body)))
 
 ;; Commit-boundary copy for the whole-world entry's return type. The
 ;; escape check (check.rkt) guarantees the type is slice-free, so v1
@@ -2213,6 +2514,110 @@
           (defn-form-return-type f)))
         h)))
 
+(define (ctx-param? p)
+  (and (param? p)
+       (type-prim? (param-type p))
+       (eq? (type-prim-name (param-type p)) 'Ctx)))
+
+(define (allocation-contract-in value contracts)
+  (define direct (hash-ref contracts value #f))
+  (cond
+    [(allocation-contract? direct) direct]
+    [(struct? value)
+     (for/or ([field (in-vector (struct->vector value))]
+              [i (in-naturals)]
+              #:when (positive? i))
+       (allocation-contract-in field contracts))]
+    [(pair? value)
+     (or (allocation-contract-in (car value) contracts)
+         (allocation-contract-in (cdr value) contracts))]
+    [(vector? value)
+     (for/or ([item (in-vector value)])
+       (allocation-contract-in item contracts))]
+    [else #f]))
+
+(define (defn-allocation-contract form contracts)
+  (define direct (hash-ref contracts form #f))
+  (or (and (allocation-contract? direct) direct)
+      (for/or ([expr (in-list (defn-form-body form))])
+        (allocation-contract-in expr contracts))))
+
+(define (build-fn-allocation-modes prog)
+  (define contracts (program-semantic-contracts prog))
+  (for/hasheq ([raw-form (in-list (program-forms prog))]
+               #:do [(define f
+                        (if (with-meta? raw-form)
+                            (with-meta-expr raw-form)
+                            raw-form))]
+               #:when
+               (and (defn-form? f)
+                    (defn-allocation-contract f contracts)))
+    (values
+     (defn-form-name f)
+     (if (and (pair? (defn-form-params f))
+              (ctx-param? (car (defn-form-params f))))
+         'explicit
+         'hidden))))
+
+(define (program-main-defn prog)
+  (for/first ([raw-form (in-list (program-forms prog))]
+              #:do [(define form
+                       (if (with-meta? raw-form)
+                           (with-meta-expr raw-form)
+                           raw-form))]
+              #:when (and (defn-form? form)
+                          (eq? (defn-form-name form) 'main)))
+    form))
+
+(define (emit-native-main-wrapper prog allocation-modes error-contracts)
+  (define main-form (program-main-defn prog))
+  (cond
+    [(not (and main-form
+               (eq? (hash-ref allocation-modes 'main #f) 'hidden)))
+     #f]
+    [else
+     (unless (and (null? (defn-form-params main-form))
+                  (not (defn-form-rest-param main-form)))
+       (unsupported
+        "allocating main boundary"
+        "main must take zero source parameters; the emitter supplies its Ctx"))
+     (define ret (defn-form-return-type main-form))
+     (unless (and (type-prim? ret) (eq? (type-prim-name ret) 'Nil))
+       (unsupported "allocating main boundary" "main must return Nil"))
+     (when (hash-ref error-contracts 'main #f)
+       (unsupported
+        "allocating main boundary"
+        "typed domain errors at main require an explicit host policy"))
+     (for ([raw-form (in-list (program-forms prog))])
+       (define form
+         (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
+       (when (and (defn-form? form)
+                  (not (eq? (defn-form-name form) 'main))
+                  (string=? (fn-ident (defn-form-name form))
+                            NATIVE-MAIN-IMPL))
+         (unsupported
+          "allocating main boundary"
+          (format "~a collides with the reserved Zig entry implementation name"
+                  (defn-form-name form)))))
+     (define contract
+       (hash-ref (program-semantic-contracts prog) main-form #f))
+     (define fallible? (fallible-allocation-contract? contract))
+     (format
+      (string-append
+       "pub fn main() ~a {\n"
+       "    var __arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);\n"
+       "    defer __arena.deinit();\n"
+       "    var __rng = rt.Splitmix64.init(0);\n"
+       "    var __ctx = rt.Ctx{\n"
+       "        .tick = __arena.allocator(),\n"
+       "        .rng = &__rng,\n"
+       "    };\n"
+       "    ~a~a(&__ctx);\n"
+       "}")
+      (if fallible? "!void" "void")
+      (if fallible? "try " "")
+      NATIVE-MAIN-IMPL)]))
+
 (define (build-fn-error-contracts prog)
   (define contracts (program-semantic-contracts prog))
   (for/hasheq ([form (in-list (program-forms prog))]
@@ -2241,7 +2646,14 @@
 
 (define (zig-emit-program prog)
   (define records (build-record-table prog))
+  (define allocation-modes (build-fn-allocation-modes prog))
+  (define error-contracts (build-fn-error-contracts prog))
   (define dynamic-contracts (collect-dynamic-contracts prog))
+  (define boxed-unions (collect-boxed-union-types prog))
+  (define union-types
+    (for/hash ([union-type (in-list boxed-unions)]
+               [i (in-naturals)])
+      (values union-type (format "Union~a" i))))
   (define dynamic-types
     (for/hash ([entry (in-list dynamic-contracts)]
                [i (in-naturals)])
@@ -2250,8 +2662,10 @@
                  [current-externs (program-externs prog)]
                  [current-fn-returns (build-fn-returns prog)]
                  [current-fn-types (build-fn-types prog)]
-                 [current-fn-error-contracts (build-fn-error-contracts prog)]
+                 [current-fn-allocation-modes allocation-modes]
+                 [current-fn-error-contracts error-contracts]
                  [current-dynamic-types dynamic-types]
+                 [current-union-types union-types]
                  [current-semantic-contracts (program-semantic-contracts prog)]
                  [current-regex-bindings (build-regex-bindings prog)]
                  [current-opaque-handles (build-opaque-handles prog records)]
@@ -2266,8 +2680,14 @@
          (car entry)
          (cdr entry)
          (hash-ref dynamic-types (car entry)))))
+    (define union-decls
+      (for/list ([union-type (in-list boxed-unions)])
+        (emit-union-declaration
+         union-type
+         (hash-ref union-types union-type))))
     (define decls
       (append
+       union-decls
        dynamic-decls
        (for/list ([f (in-list (program-forms prog))]
                   #:unless (eq? f 'nil)) ; (comment ...) parses to nil
@@ -2280,6 +2700,8 @@
            [else (unsupported (format "top-level form ~a" f))]))
        (emit-promote prog)
        (emit-engine prog)))
+    (define main-wrapper
+      (emit-native-main-wrapper prog allocation-modes error-contracts))
     (define extern-imports
       (for/list ([mod (in-list (referenced-extern-modules prog (program-externs prog)))])
         (format "const ~a = @import(\"~a.zig\");\n" mod mod)))
@@ -2290,6 +2712,7 @@
      (apply string-append extern-imports)
      "pub const Ctx = rt.Ctx;\n\n"
      (string-join decls "\n\n")
+     (if main-wrapper (string-append "\n\n" main-wrapper) "")
      "\n")))
 
 (register-backend! 'zig (emitter-backend 'zig zig-emit-program))
