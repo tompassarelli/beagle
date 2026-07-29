@@ -105,6 +105,14 @@
 (define (string-prim-type? t)
   (and (type-prim? t) (eq? (type-prim-name t) 'String)))
 
+(define (atom-type? t)
+  (and (type-app? t)
+       (eq? (type-app-ctor t) 'Atom)
+       (= (length (type-app-args t)) 1)))
+
+(define (atom-element-type t)
+  (and (atom-type? t) (car (type-app-args t))))
+
 (define (type->zig t)
   (cond
     [(not t) (unsupported "missing type annotation"
@@ -135,6 +143,8 @@
           [else (ident (type-prim-name t))])])] ; user record/struct name
     [(type-app? t)
      (case (type-app-ctor t)
+       [(Atom)
+        (format "*rt.Atom(~a)" (type->zig (atom-element-type t)))]
        [(Vec List) (format "[]const ~a" (type->zig (car (type-app-args t))))]
        [(Set)
         (format "rt.ValueSet(~a)" (type->zig (car (type-app-args t))))]
@@ -677,7 +687,21 @@
           (= 3 (length (call-form-args e))))
      (define target-type
        (expr-static-type (car (call-form-args e))))
-     (and (map-type? target-type) target-type)]
+     target-type]
+    [(and (call-form? e)
+          (eq? (call-form-fn e) 'update)
+          (>= (length (call-form-args e)) 3))
+     (expr-static-type (car (call-form-args e)))]
+    [(and (call-form? e)
+          (eq? (call-form-fn e) 'atom)
+          (= (length (call-form-args e)) 1))
+     (define elem (expr-static-type (car (call-form-args e))))
+     (and elem (type-app 'Atom (list elem)))]
+    [(and (call-form? e)
+          (memq (call-form-fn e) '(deref reset! swap!))
+          (pair? (call-form-args e)))
+     (atom-element-type
+      (expr-static-type (car (call-form-args e))))]
     [(and (call-form? e)
           (regexp-match #rx"^->(.+)$" (symbol->string (call-form-fn e))))
      => (lambda (m) (type-prim (string->symbol (cadr m))))]
@@ -1115,6 +1139,15 @@
       lbl
       out-name)]))
 
+(define (emit-atom-constructor init atom-type)
+  (define elem-type
+    (or (atom-element-type atom-type)
+        (unsupported "atom constructor" "expected (Atom T)")))
+  (format "rt.makeAtom(~a, ~a, ~a)"
+          (type->zig elem-type)
+          (allocation-allocator)
+          (emit-typed-value init elem-type)))
+
 ;; Emit a value against an expected type. Container literals need the
 ;; type to lower: a map literal picks rt.Map(V); a vector literal lowers
 ;; to a typed `&.{...}` slice (the annotation lets zig coerce, and `[]`
@@ -1123,6 +1156,11 @@
 ;; slot accepts a literal (def, let, reduce init, ctor args).
 (define (emit-typed-value v expected)
   (cond
+    [(and (call-form? v)
+          (eq? (call-form-fn v) 'atom)
+          (= (length (call-form-args v)) 1)
+          (atom-type? expected))
+     (emit-atom-constructor (car (call-form-args v)) expected)]
     [(and expected (closed-sum-type? expected))
      (define actual (expr-static-type v))
      (cond
@@ -1365,6 +1403,216 @@
      (format "~a.alloc(~a, ~a) catch @panic(\"oom\")"
              (allocation-allocator) elem-type count)]))
 
+(define (record-field-type record-type field)
+  (and
+   (type-prim? record-type)
+   (let* ([name (type-prim-name record-type)]
+          [raw (symbol->string name)]
+          [parts (string-split raw "/")]
+          [local (string->symbol (last parts))]
+          [fields
+           (or (hash-ref (current-records) name #f)
+               (hash-ref (current-records) local #f))])
+     (and fields
+          (for/first ([candidate (in-list fields)]
+                      #:when (eq? (param-name candidate) field))
+            (param-type candidate))))))
+
+(define (literal-field-name-maybe value)
+  (and (keyword-value-string value)
+       (let ([parts (string-split (keyword-value-string value) "/")])
+         (and (pair? parts)
+              (not (string=? (last parts) ""))
+              (string->symbol (last parts))))))
+
+(define (literal-field-name value who)
+  (or (literal-field-name-maybe value)
+      (unsupported who "zig record mutation needs a literal keyword field")))
+
+(define (emit-updater-application updater args)
+  (cond
+    [(symbol? updater)
+     (emit-call (call-form updater args))]
+    [(fn-form? updater)
+     (define params
+       (fn-literal-params updater "swap!/update" (length args)))
+     (define lbl (fresh-label))
+     (define binding-types
+       (for/fold ([types (current-binding-types)])
+                 ([param (in-list params)])
+         (if (param-type param)
+             (hash-set types (param-name param) (param-type param))
+             types)))
+     (define bindings
+       (for/list ([param (in-list params)]
+                  [arg (in-list args)])
+         (format "const ~a~a = ~a; "
+                 (ident (param-name param))
+                 (if (param-type param)
+                     (format ": ~a" (type->zig (param-type param)))
+                     "")
+                 (emit-typed-value arg (param-type param)))))
+     (parameterize ([current-binding-types binding-types])
+       (format "~a: { ~abreak :~a ~a; }"
+               lbl
+               (apply string-append bindings)
+               lbl
+               (emit-inlined-fn-body updater)))]
+    [else
+     (unsupported "swap!/update function"
+                  "zig supports a named function or fn literal")]))
+
+(define (emit-record-assoc target target-type key value)
+  (define field (literal-field-name key "assoc"))
+  (define field-type (record-field-type target-type field))
+  (define lbl (fresh-label))
+  (define current-name (format "__record_~a" lbl))
+  (define next-name (format "__next_~a" lbl))
+  (format
+   "~a: { const ~a = ~a; var ~a = ~a; ~a.~a = ~a; break :~a ~a; }"
+   lbl
+   current-name
+   (emit-expr target)
+   next-name
+   current-name
+   next-name
+   (ident field)
+   (emit-typed-value value field-type)
+   lbl
+   next-name))
+
+(define (emit-record-update target target-type key updater extra-args)
+  (define field (literal-field-name key "update"))
+  (define field-type (record-field-type target-type field))
+  (define lbl (fresh-label))
+  (define current-sym
+    (string->symbol (format "__record_~a" lbl)))
+  (define next-sym
+    (string->symbol (format "__next_~a" lbl)))
+  (define old-sym
+    (string->symbol (format "__old_~a" lbl)))
+  (define extra-syms
+    (for/list ([arg (in-list extra-args)]
+               [i (in-naturals)])
+      (string->symbol (format "__arg_~a_~a" lbl i))))
+  (define extra-lines
+    (for/list ([arg (in-list extra-args)]
+               [name (in-list extra-syms)])
+      (format "const ~a = ~a; " (ident name) (emit-expr arg))))
+  (define extended-types
+    (for/fold ([types
+                (hash-set
+                 (hash-set (current-binding-types) current-sym target-type)
+                 next-sym
+                 target-type)])
+              ([arg (in-list extra-args)]
+               [name (in-list extra-syms)])
+      (define arg-type (expr-static-type arg))
+      (if arg-type (hash-set types name arg-type) types)))
+  (define application
+    (parameterize
+        ([current-binding-types
+          (if field-type
+              (hash-set extended-types old-sym field-type)
+              extended-types)])
+      (emit-updater-application updater (cons old-sym extra-syms))))
+  (format
+   "~a: { const ~a = ~a; ~avar ~a = ~a; const ~a~a = ~a.~a; ~a.~a = ~a; break :~a ~a; }"
+   lbl
+   (ident current-sym)
+   (emit-expr target)
+   (apply string-append extra-lines)
+   (ident next-sym)
+   (ident current-sym)
+   (ident old-sym)
+   (if field-type (format ": ~a" (type->zig field-type)) "")
+   (ident current-sym)
+   (ident field)
+   (ident next-sym)
+   (ident field)
+   application
+   lbl
+   (ident next-sym)))
+
+(define (emit-reset cell value)
+  (define elem-type
+    (or (atom-element-type (expr-static-type cell))
+        (unsupported "reset!" "cell must have type (Atom T)")))
+  (define lbl (fresh-label))
+  (define cell-name (format "__cell_~a" lbl))
+  (define value-name (format "__value_~a" lbl))
+  (format
+   "~a: { const ~a = ~a; const ~a: ~a = ~a; ~a.value = ~a; break :~a ~a; }"
+   lbl
+   cell-name
+   (emit-expr cell)
+   value-name
+   (type->zig elem-type)
+   (emit-typed-value value elem-type)
+   cell-name
+   value-name
+   lbl
+   value-name))
+
+(define (emit-swap cell updater extra-args)
+  (define cell-type (expr-static-type cell))
+  (define elem-type
+    (or (atom-element-type cell-type)
+        (unsupported "swap!" "cell must have type (Atom T)")))
+  (define lbl (fresh-label))
+  (define cell-sym (string->symbol (format "__cell_~a" lbl)))
+  (define old-sym (string->symbol (format "__old_~a" lbl)))
+  (define next-sym (string->symbol (format "__next_~a" lbl)))
+  ;; Names/keywords/fn literals are compile-time HOF tokens in the Zig
+  ;; lowering, not runtime function values. Preserve those AST nodes while
+  ;; sequencing ordinary value expressions before reading the cell.
+  (define extra-syms
+    (for/list ([arg (in-list extra-args)]
+               [i (in-naturals)])
+      (if (or (symbol? arg) (keyword-value-string arg) (fn-form? arg))
+          arg
+          (string->symbol (format "__arg_~a_~a" lbl i)))))
+  (define extra-lines
+    (for/list ([arg (in-list extra-args)]
+               [name (in-list extra-syms)]
+               #:unless (eq? arg name))
+      (format "const ~a = ~a; " (ident name) (emit-expr arg))))
+  (define binding-types
+    (for/fold
+        ([types
+          (hash-set
+           (hash-set
+            (hash-set (current-binding-types) cell-sym cell-type)
+            old-sym
+            elem-type)
+           next-sym
+           elem-type)])
+        ([arg (in-list extra-args)]
+         [name (in-list extra-syms)])
+      (define arg-type (expr-static-type arg))
+      (if (and (symbol? name) arg-type)
+          (hash-set types name arg-type)
+          types)))
+  (define application
+    (parameterize ([current-binding-types binding-types])
+      (emit-updater-application updater (cons old-sym extra-syms))))
+  (format
+   "~a: { const ~a = ~a; ~aconst ~a: ~a = ~a.value; const ~a: ~a = ~a; ~a.value = ~a; break :~a ~a; }"
+   lbl
+   (ident cell-sym)
+   (emit-expr cell)
+   (apply string-append extra-lines)
+   (ident old-sym)
+   (type->zig elem-type)
+   (ident cell-sym)
+   (ident next-sym)
+   (type->zig elem-type)
+   application
+   (ident cell-sym)
+   (ident next-sym)
+   lbl
+   (ident next-sym)))
+
 (define (qualified-rt-name sym)
   ;; A qualified call lowers to a Zig module iff it was declared as an
   ;; extern (declare-extern is the author's statement that this name is
@@ -1424,6 +1672,29 @@
   (cond
     [(dynamic-condition-info e) => emit-dynamic-condition]
     [(not (symbol? fn)) (unsupported "higher-order call" "fn position must be a name in v1")]
+    [(and (eq? fn 'atom) (= (length args) 1))
+     (define inferred (expr-static-type e))
+     (emit-atom-constructor
+      (car args)
+      (or inferred
+          (unsupported "atom constructor"
+                       "annotate the cell as (Atom T)")))]
+    [(and (eq? fn 'deref) (= (length args) 1))
+     (unless (atom-element-type (expr-static-type (car args)))
+       (unsupported "deref" "cell must have type (Atom T)"))
+     (format "~a.value" (emit-expr (car args)))]
+    [(and (eq? fn 'reset!) (= (length args) 2))
+     (emit-reset (car args) (cadr args))]
+    [(and (eq? fn 'swap!) (>= (length args) 2))
+     (emit-swap (car args) (cadr args) (cddr args))]
+    [(and (eq? fn 'update) (>= (length args) 3))
+     (define target (car args))
+     (define target-type (expr-static-type target))
+     (when (map-type? target-type)
+       (unsupported "update on Map"
+                    "the Zig store bridge currently lowers record fields only"))
+     (emit-record-update
+      target target-type (cadr args) (caddr args) (cdddr args))]
     [(and (eq? fn 'throw) (error-contract-of e))
      => (lambda (contract) (emit-error-throw e contract))]
     [(eq? fn 're-pattern)
@@ -1659,17 +1930,23 @@
      (format "~a.contains(~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
     [(eq? fn 'assoc)
      (define target-type (expr-static-type (car args)))
-     (if (map-type? target-type)
-         (format "~a.assoc(~a, ~a, ~a)"
-                 (emit-expr (car args))
-                 (allocation-allocator)
-                 (emit-typed-value (cadr args) (map-ktype target-type))
-                 (emit-typed-value (caddr args) (map-vtype target-type)))
-         (format "~a.assoc(~a, ~a, ~a)"
-                 (emit-expr (car args))
-                 (allocation-allocator)
-                 (emit-expr (cadr args))
-                 (emit-expr (caddr args))))]
+     (cond
+       [(map-type? target-type)
+        (format "~a.assoc(~a, ~a, ~a)"
+                (emit-expr (car args))
+                (allocation-allocator)
+                (emit-typed-value (cadr args) (map-ktype target-type))
+                (emit-typed-value (caddr args) (map-vtype target-type)))]
+       [(and (type-prim? target-type)
+             (literal-field-name-maybe (cadr args)))
+        (emit-record-assoc
+         (car args) target-type (cadr args) (caddr args))]
+       [else
+        (format "~a.assoc(~a, ~a, ~a)"
+                (emit-expr (car args))
+                (allocation-allocator)
+                (emit-expr (cadr args))
+                (emit-expr (caddr args)))])]
     [(eq? fn 'hash) (format "rt.hash(~a)" (emit-expr (car args)))]
     ;; v1 vector ops through the prelude (tick-arena allocation only)
     [(eq? fn 'count) (format "rt.count(~a)" (emit-expr (car args)))]

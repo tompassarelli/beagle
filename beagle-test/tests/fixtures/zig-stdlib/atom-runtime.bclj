@@ -1,0 +1,29 @@
+#lang beagle/clj
+(ns zig-stdlib.atom-runtime)
+
+(defrecord Counter
+  [value :- Int
+   active :- Bool])
+
+(defn add-delta [value :- Int delta :- Int] :- Int
+  (+ value delta))
+
+(defn read-value [cell :- (Atom Counter)] :- Int
+  (:value (deref cell)))
+
+(defn exercise [] :- Int
+  (let [cell :- (Atom Counter) (atom (->Counter 1 false))
+        alias :- (Atom Counter) cell
+        reset-value :- Counter (reset! alias (->Counter 5 false))
+        swap-value :- Counter (swap! cell update :value add-delta 2)
+        assoc-value :- Counter (swap! alias assoc :active true)
+        current :- Counter (deref cell)]
+    (if (:active current)
+      (+ (:value reset-value)
+         (:value swap-value)
+         (:value assoc-value)
+         (read-value alias))
+      -1)))
+
+(defn main [] :- Nil
+  (println (exercise)))

@@ -33,6 +33,20 @@ pub const Ctx = struct {
     rng: *Splitmix64,
 };
 
+/// A caller-arena reference cell. Access is intentionally unsynchronized:
+/// Fram serializes mutations in one process, and aliases share this pointer.
+pub fn Atom(comptime T: type) type {
+    return struct {
+        value: T,
+    };
+}
+
+pub fn makeAtom(comptime T: type, allocator: std.mem.Allocator, initial: T) *Atom(T) {
+    const cell = allocator.create(Atom(T)) catch @panic("oom");
+    cell.* = .{ .value = initial };
+    return cell;
+}
+
 /// Splitmix64 finalizer as a pure mix — the counter-rng basis used by
 /// the generated engine loop (per-(seed,tick,entity) determinism).
 pub fn mix64(v: u64) u64 {

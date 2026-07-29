@@ -16,6 +16,7 @@
          ;; types instead of Any. bb/clj-only.
          "stdlib-fram.rkt"
          "stdlib-js.rkt"
+         "stdlib-zig.rkt"
          "stdlib-odin.rkt")
 
 (define (merge-hashes . hs)
@@ -35,12 +36,15 @@
 (define stdlib-nix-combined
   (merge-hashes STDLIB-PORTABLE STDLIB-NIX))
 
+(define stdlib-zig-combined
+  (merge-hashes STDLIB-PORTABLE STDLIB-ZIG))
+
 (define (stdlib-for-target target)
   (case target
     [(clj)  stdlib-clj-combined]
     [(js scriptc) stdlib-js-combined]
     [(nix)  stdlib-nix-combined]
-    [(zig)  STDLIB-PORTABLE]
+    [(zig)  stdlib-zig-combined]
     [(odin) (merge-hashes STDLIB-PORTABLE STDLIB-ODIN)]
     [else (error 'stdlib-for-target "unknown target: ~a" target)]))
 
@@ -57,4 +61,5 @@
          STDLIB-PORTABLE STDLIB-CLJ STDLIB-BB CLJ-EXCLUDE
          STDLIB-JS JS-NO-EMIT
          STDLIB-NIX
+         STDLIB-ZIG
          STDLIB-ODIN)

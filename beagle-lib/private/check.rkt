@@ -1155,7 +1155,8 @@
 ;; --- allocation region and allocation failure -------------------------------
 
 (define PORTABLE-ALLOCATING-FNS
-  '(mapv filterv sort sort-by distinct concat str assoc conj set
+  '(mapv filterv sort sort-by distinct concat str assoc update conj set
+    atom swap!
     clojure.string/lower-case clojure.string/upper-case
     clojure.string/join clojure.string/replace clojure.string/split))
 

@@ -297,6 +297,42 @@
     (test-case (format "rt_core stdlib: ~a Zig behavior agrees with CLJ" name)
       (check-equal? (zig-build-exe-and-run zig-src) expected))))
 
+(define atom-runtime-src
+  (build-path zig-stdlib-dir "atom-runtime.bclj"))
+
+(define (compile-retarget-fixture target src)
+  (define datums
+    (for/list ([stx (in-list (read-beagle-syntax src))]
+               #:unless
+               (let ([datum (syntax->datum stx)])
+                 (and (pair? datum) (eq? (car datum) 'define-target))))
+      (datum->syntax #f (syntax->datum stx))))
+  (define prog
+    (parse-program
+     (cons (datum->syntax #f `(define-target ,target)) datums)))
+  (type-check! prog)
+  (emit-program prog))
+
+(test-case "Zig Atom preserves aliases, mutation results, and arena ownership"
+  (define zig-src (compile-retarget-fixture 'zig atom-runtime-src))
+  (check-true (string-contains? zig-src "*rt.Atom(Counter)"))
+  (check-true (string-contains? zig-src "rt.makeAtom(Counter, __ctx.tick"))
+  (when ZIG
+    (check-true
+     (zig-tests?
+      zig-src
+      #<<ZIG
+test "Atom aliases observe reset and swap in order" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var rng = rt.Splitmix64.init(1);
+    var ctx = rt.Ctx{ .tick = arena.allocator(), .rng = &rng };
+
+    try std.testing.expectEqual(@as(i64, 26), exercise(&ctx));
+}
+ZIG
+      "atom-runtime"))))
+
 ;; --- semantic contract 1: concrete native boundaries -------------------------
 
 (define semantic-bless? (and (getenv "BEAGLE_SEMANTIC_BLESS") #t))
