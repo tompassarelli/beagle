@@ -18,6 +18,7 @@
          racket/path
          racket/port
          racket/runtime-path
+         racket/string
          racket/system
          beagle/private/batch-compile
          (only-in "scratch-containment.rkt" call-with-scratch-containment))
@@ -30,6 +31,12 @@
   "fixtures/batch-compile/retarget-source.bclj")
 (define-runtime-path retarget-zig-oracle
   "fixtures/batch-compile/zig-oracle/retarget-source.bzig")
+(define-runtime-path zig-multimodule-core
+  "fixtures/zig-multimodule/core.bclj")
+(define-runtime-path zig-multimodule-bridge
+  "fixtures/zig-multimodule/bridge.bclj")
+(define-runtime-path zig-multimodule-main
+  "fixtures/zig-multimodule/main.bclj")
 
 (define repo-root-str (path->string (simplify-path repo-root)))
 
@@ -221,6 +228,76 @@
                        #:target 'zig))
      (check-eq? status 'ok expected)
      (check-equal? (file->string out) expected))
+
+   (test-case "ordered Zig module set emits canonical imports and links one executable"
+     (define sources
+       (list zig-multimodule-core
+             zig-multimodule-bridge
+             zig-multimodule-main))
+     (define-values (status modules)
+       (compile-source-set
+        sources
+        #:root repo-root-str
+        #:target 'zig))
+     (check-eq? status 'ok
+                (format "multi-module retarget failed: ~a" modules))
+     (check-equal?
+      (map compiled-source-namespace modules)
+      '(fram.rt-core zig-multimodule.bridge zig-multimodule.main)
+      "compiler result must preserve the declared module order")
+     (define bridge-zig (compiled-source-emitted (second modules)))
+     (define main-zig (compiled-source-emitted (third modules)))
+     (check-true
+      (string-contains?
+       bridge-zig
+       "const fram_rt_core = @import(\"fram_rt_core.zig\");"))
+     (check-true
+      (string-contains? bridge-zig "fram_rt_core.strLt(a, b)"))
+     (check-true
+      (string-contains?
+       main-zig
+       "const zig_multimodule_bridge = @import(\"zig_multimodule_bridge.zig\");"))
+     (check-true
+      (string-contains?
+       main-zig
+       "zig_multimodule_bridge.before(\"alpha\", \"beta\")"))
+     (check-not-false
+      (find-executable-path "zig")
+      "multi-module Zig build requires the pinned Zig on PATH")
+     (define executable (tmp-path "zig-multimodule"))
+     (define build-output (open-output-string))
+     (define built?
+       (parameterize ([current-output-port build-output]
+                      [current-error-port build-output])
+         (system*
+          (path->string beagle-cli)
+          "build"
+          "--target"
+          "zig"
+          "--exe"
+          (path->string executable)
+          (path->string zig-multimodule-core)
+          (path->string zig-multimodule-bridge)
+          (path->string zig-multimodule-main))))
+     (check-true built? (get-output-string build-output))
+     (check-false
+      (string-contains?
+       (get-output-string build-output)
+       "unused declare-extern")
+      "candidate-world imports are not explicit host extern declarations")
+     (check-true
+      (and (file-exists? executable)
+           (positive? (file-size executable)))
+      "zig build-exe must publish one nonempty executable")
+     (define run-output (open-output-string))
+     (define ran?
+       (parameterize ([current-output-port run-output]
+                      [current-error-port run-output])
+         (system* (path->string executable))))
+     (check-true ran? (get-output-string run-output))
+     (check-equal?
+      (get-output-string run-output)
+      "multi-module zig ok\n"))
 
    (test-case "generated failure fixtures: normalized diagnostic, CLI agrees on failure"
      (for ([src (in-list generated-failure-fixtures)])

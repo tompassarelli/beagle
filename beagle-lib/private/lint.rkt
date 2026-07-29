@@ -438,6 +438,17 @@
   ;; a commitment to call every export — skip them; the lint is about
   ;; EXPLICIT (declare-extern ...) forms only.
   (define imported (program-imported-symbol-ns prog))
+  (define imported-prefixes (make-hasheq))
+  (define referred-imports (make-hasheq))
+  (for ([module-import (in-list (program-imported-module-interfaces prog))])
+    (define interface (module-import-interface module-import))
+    (hash-set! imported-prefixes (module-import-prefix module-import) #t)
+    (hash-set!
+     imported-prefixes
+     (module-interface-namespace interface)
+     #t)
+    (for ([name (in-list (or (module-import-refer module-import) '()))])
+      (hash-set! referred-imports name #t)))
   (define (imported-name? name)
     (define s (symbol->string name))
     (define idx (for/first ([i (in-naturals)]
@@ -449,8 +460,12 @@
        (define p (substring s 0 idx))
        (define base (string->symbol (substring s (+ idx 1))))
        (define reg-prefix (hash-ref imported base #f))
-       (and reg-prefix (equal? (symbol->string reg-prefix) p))]
-      [else (hash-has-key? imported name)]))
+       (or
+        (hash-has-key? imported-prefixes (string->symbol p))
+        (and reg-prefix (equal? (symbol->string reg-prefix) p)))]
+      [else
+       (or (hash-has-key? referred-imports name)
+           (hash-has-key? imported name))]))
   (for ([(name _) (in-hash (program-externs prog))])
     (unless (or (hash-has-key? used name)
                 (imported-name? name))

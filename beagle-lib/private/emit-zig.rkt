@@ -20,6 +20,7 @@
          racket/list
          "ast.rkt"
          "types.rkt"
+         "module-interface.rkt"
          "emit-dispatch.rkt")
 
 (define (unsupported what [detail #f])
@@ -52,6 +53,16 @@
                     (string-append (string-upcase (substring p 0 1))
                                    (substring p 1))))
               (cdr parts))))
+
+;; Namespace-derived Zig module names are independent of a consumer's local
+;; require alias.  This gives a declared module set one stable filename/link
+;; identity (fram.rt-core → fram_rt_core.zig) in every build.
+(define (zig-module-name namespace)
+  (define raw (symbol->string namespace))
+  (define clean (regexp-replace* #rx"[^A-Za-z0-9_]" raw "_"))
+  (if (regexp-match? #rx"^[0-9]" clean)
+      (string-append "m_" clean)
+      clean))
 
 ;; --- types -------------------------------------------------------------------
 
@@ -161,6 +172,47 @@
 
 ;; --- program-level tables ------------------------------------------------------
 
+(define (imported-binding-names prog)
+  (define names (make-hasheq))
+  (define prefixes (make-hasheq))
+  (for ([import (in-list (program-imported-module-interfaces prog))])
+    (define interface (module-import-interface import))
+    (define namespace (module-interface-namespace interface))
+    (define prefix (module-import-prefix import))
+    (define refer (module-import-refer import))
+    (hash-set! prefixes prefix #t)
+    (hash-set! prefixes namespace #t)
+    (for ([name (in-hash-keys (module-interface-bindings interface))])
+      (hash-set!
+       names
+       (string->symbol (format "~a/~a" prefix name))
+       #t)
+      (hash-set!
+       names
+       (string->symbol (format "~a/~a" namespace name))
+       #t)
+      (when (and refer (memq name refer))
+        (hash-set! names name #t))))
+  ;; The compatibility datum importer also contributes internal type/error
+  ;; entries that are not public interface bindings (for example
+  ;; rt/:throwable).  Prefix ownership still proves they came from the
+  ;; candidate module, so they are not host externs either.
+  (for ([name (in-hash-keys (program-externs prog))])
+    (define match
+      (regexp-match #rx"^([^/]+)/" (symbol->string name)))
+    (when (and match
+               (hash-has-key?
+                prefixes
+                (string->symbol (cadr match))))
+      (hash-set! names name #t)))
+  names)
+
+(define (program-host-externs prog)
+  (define imported (imported-binding-names prog))
+  (for/hasheq ([(name type) (in-hash (program-externs prog))]
+               #:unless (hash-has-key? imported name))
+    (values name type)))
+
 ;; record name → field params (ordered), local + imported.
 (define (build-record-table prog)
   (for/fold ([h (hasheq)]) ([f (in-list (program-forms prog))])
@@ -197,7 +249,7 @@
        (define h2 (if (type-fn-rest-type t) (walk (type-fn-rest-type t) module h1) h1))
        (walk (type-fn-ret t) module h2)]
       [else h]))
-  (for/fold ([h (hasheq)]) ([(name t) (in-hash (program-externs prog))])
+  (for/fold ([h (hasheq)]) ([(name t) (in-hash (program-host-externs prog))])
     (define s (symbol->string name))
     (define m (regexp-match #rx"^([^/]+)/(.+)$" s))
     (cond
@@ -210,7 +262,7 @@
 
 (define current-records (make-parameter (hasheq)))
 (define current-externs (make-parameter (hasheq))) ; declared-extern name → type
-(define current-requires (make-parameter (hasheq))) ; alias sym → namespace sym
+(define current-requires (make-parameter (hasheq))) ; use-site prefix sym → namespace sym
 (define current-fn-returns (make-parameter (hasheq))) ; local defn name → return type
 (define current-fn-types (make-parameter (hasheq))) ; local defn name → complete function type
 (define current-fn-allocation-modes (make-parameter (hasheq))) ; local defn name → hidden | explicit
@@ -256,7 +308,7 @@
 (define (extern-ns->module ns-str)
   (if (memq (string->symbol ns-str) ZIG-CORE-NAMESPACES)
       "rt"
-      (string-replace ns-str "." "_")))
+      (zig-module-name (string->symbol ns-str))))
 (define current-optionals (make-parameter '())) ; binding syms with ?T types
 (define current-loop-bindings (make-parameter #f)) ; (listof ident-string) for recur
 (define label-counter (make-parameter (box 0)))
@@ -307,7 +359,7 @@
        (for ([item (in-vector value)]) (walk-ast! item))]
       [else (void)]))
   (for ([form (in-list (program-forms prog))]) (walk-ast! form))
-  (for ([extern-type (in-hash-values (program-externs prog))])
+  (for ([extern-type (in-hash-values (program-host-externs prog))])
     (walk-type! extern-type))
   (reverse out))
 
@@ -374,7 +426,7 @@
       [_ (void)]))
   (for ([extern-type
          (in-list
-          (sort (hash-values (program-externs prog))
+          (sort (hash-values (program-host-externs prog))
                 string<?
                 #:key type->string))])
     (walk-type! extern-type))
@@ -1326,11 +1378,15 @@
   (define m (regexp-match #rx"^([^/]+)/(.+)$" s))
   (cond
     [(not m) #f]
+    [(hash-ref (current-requires) (string->symbol (cadr m)) #f)
+     => (lambda (namespace)
+          (if (memq namespace ZIG-RUNTIME-NAMESPACES)
+              (format "rt.~a" (rt-fn-name (caddr m)))
+              (format "~a.~a"
+                      (zig-module-name namespace)
+                      (fn-ident (string->symbol (caddr m))))))]
     [(hash-has-key? (current-externs) sym)
      (format "~a.~a" (extern-ns->module (cadr m)) (rt-fn-name (caddr m)))]
-    [(memq (hash-ref (current-requires) (string->symbol (cadr m)) #f)
-           ZIG-RUNTIME-NAMESPACES)
-     (format "rt.~a" (rt-fn-name (caddr m)))]
     [else #f]))
 
 ;; clojure stdlib fn name → prelude ident: drop ?!, kebab→snake (matches
@@ -2486,6 +2542,16 @@
                #:when (and (symbol? sym) (hash-has-key? externs sym))
                #:do [(define m (regexp-match #rx"^([^/]+)/(.+)$" (symbol->string sym)))]
                #:when m
+               ;; Candidate-world imports are emitted from their canonical
+               ;; provider namespace below.  Imported bindings also inhabit
+               ;; the extern type table, but must not create a second
+               ;; alias-named runtime import (bridge.zig beside
+               ;; zig_multimodule_bridge.zig).
+               #:unless
+               (hash-ref
+                (current-requires)
+                (string->symbol (cadr m))
+                #f)
                #:do [(define mod (extern-ns->module (cadr m)))]
                #:unless (string=? mod "rt"))
       mod))
@@ -2644,6 +2710,44 @@
            h)]
       [else h])))
 
+(define (namespace-default-prefix namespace)
+  (string->symbol
+   (last (string-split (symbol->string namespace) "."))))
+
+(define (build-zig-requires prog)
+  ;; Candidate-world interfaces identify real Beagle modules.  Record both the
+  ;; local prefix and fully-qualified namespace so either checked spelling
+  ;; lowers to the same canonical Zig module.
+  (define module-prefixes
+    (for/fold ([h (hasheq)])
+              ([import (in-list (program-imported-module-interfaces prog))])
+      (define namespace
+        (module-interface-namespace (module-import-interface import)))
+      (hash-set
+       (hash-set h (module-import-prefix import) namespace)
+       namespace
+       namespace)))
+  ;; Runtime namespaces have no candidate interface; retain their declared
+  ;; aliases so clojure.string/babashka.fs calls keep lowering to `rt`.
+  (for/fold ([h module-prefixes])
+            ([entry (in-list (program-requires prog))]
+             #:when (memq (require-entry-ns entry) ZIG-RUNTIME-NAMESPACES))
+    (define namespace (require-entry-ns entry))
+    (define prefix
+      (or (require-entry-alias entry)
+          (namespace-default-prefix namespace)))
+    (hash-set (hash-set h prefix namespace) namespace namespace)))
+
+(define (zig-imported-namespaces prog)
+  (remove-duplicates
+   (for/list
+       ([import (in-list (program-imported-module-interfaces prog))]
+        #:do
+        [(define namespace
+           (module-interface-namespace (module-import-interface import)))]
+        #:unless (memq namespace ZIG-CORE-NAMESPACES))
+     namespace)))
+
 (define (zig-emit-program prog)
   (define records (build-record-table prog))
   (define allocation-modes (build-fn-allocation-modes prog))
@@ -2669,11 +2773,7 @@
                  [current-semantic-contracts (program-semantic-contracts prog)]
                  [current-regex-bindings (build-regex-bindings prog)]
                  [current-opaque-handles (build-opaque-handles prog records)]
-                 [current-requires
-                  (for/fold ([h (hasheq)]) ([r (in-list (program-requires prog))])
-                    (if (require-entry-alias r)
-                        (hash-set h (require-entry-alias r) (require-entry-ns r))
-                        h))])
+                 [current-requires (build-zig-requires prog)])
     (define dynamic-decls
       (for/list ([entry (in-list dynamic-contracts)])
         (emit-dynamic-declaration
@@ -2705,10 +2805,15 @@
     (define extern-imports
       (for/list ([mod (in-list (referenced-extern-modules prog (program-externs prog)))])
         (format "const ~a = @import(\"~a.zig\");\n" mod mod)))
+    (define module-imports
+      (for/list ([namespace (in-list (zig-imported-namespaces prog))])
+        (define module (zig-module-name namespace))
+        (format "const ~a = @import(\"~a.zig\");\n" module module)))
     (string-append
      "// generated by beagle (zig backend) — do not edit\n"
      "const std = @import(\"std\");\n"
      "const rt = @import(\"beagle_rt.zig\");\n"
+     (apply string-append module-imports)
      (apply string-append extern-imports)
      "pub const Ctx = rt.Ctx;\n\n"
      (string-join decls "\n\n")
@@ -2717,4 +2822,4 @@
 
 (register-backend! 'zig (emitter-backend 'zig zig-emit-program))
 
-(provide zig-emit-program)
+(provide zig-emit-program zig-module-name)

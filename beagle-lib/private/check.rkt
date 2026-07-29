@@ -1038,8 +1038,43 @@
    (if (memq kind '(Vec List)) 'insertion 'unspecified)
    layout))
 
+(define (imported-interface-binding-names prog)
+  (define imported-bindings (mutable-seteq))
+  (define imported-prefixes (mutable-seteq))
+  (for ([import (in-list (program-imported-module-interfaces prog))])
+    (define interface (module-import-interface import))
+    (define namespace (module-interface-namespace interface))
+    (define prefix (module-import-prefix import))
+    (define refer (module-import-refer import))
+    (set-add! imported-prefixes prefix)
+    (set-add! imported-prefixes namespace)
+    (for ([name (in-hash-keys (module-interface-bindings interface))])
+      (set-add!
+       imported-bindings
+       (string->symbol (format "~a/~a" prefix name)))
+      (set-add!
+       imported-bindings
+       (string->symbol (format "~a/~a" namespace name)))
+      (when (and refer (memq name refer))
+        (set-add! imported-bindings name))))
+  (for ([name (in-hash-keys (program-externs prog))])
+    (define match
+      (regexp-match #rx"^([^/]+)/" (symbol->string name)))
+    (when (and match
+               (set-member?
+                imported-prefixes
+                (string->symbol (cadr match))))
+      (set-add! imported-bindings name)))
+  imported-bindings)
+
 (define (prepare-collection-contracts! prog)
   (define table (program-semantic-contracts prog))
+  ;; Imported Beagle bindings inhabit program-externs as typed call
+  ;; boundaries, but they are not host/runtime externs.  Their concrete
+  ;; collection layout is owned by the provider emitted in the same candidate
+  ;; world, so the host-ABI record rule must not reject an unused imported
+  ;; Map/Set signature.
+  (define imported-bindings (imported-interface-binding-names prog))
   (define (walk-type! t owner [extern-name #f])
     (cond
       [(collection-type? t)
@@ -1095,7 +1130,8 @@
          (when (param-type field)
            (walk-type! (param-type field) field)))]
       [_ (void)]))
-  (for ([(name t) (in-hash (program-externs prog))])
+  (for ([(name t) (in-hash (program-externs prog))]
+        #:unless (set-member? imported-bindings name))
     (walk-type! t #f name)))
 
 (define (check-collection-order-use! call env)
@@ -1758,6 +1794,7 @@
 
 (define (check-zig-native-boundaries! prog)
   (when (eq? (program-target prog) 'zig)
+    (define imported-bindings (imported-interface-binding-names prog))
     (define (check! label t [node #f])
       (when (type-contains-any? t)
         (raise-diag
@@ -1793,7 +1830,8 @@
            (check! (format "record ~a field ~a" name (param-name field))
                    (param-type field) form))]
         [_ (void)]))
-    (for ([(name t) (in-hash (program-externs prog))])
+    (for ([(name t) (in-hash (program-externs prog))]
+          #:unless (set-member? imported-bindings name))
       (check! (format "extern ~a" name) t))))
 
 ;; --- environment -----------------------------------------------------------

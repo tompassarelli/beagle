@@ -20,6 +20,8 @@ Author:
   check [--profile N] [PATH...]  Type-check without emitting
   validate [FILE...]        Parse + check + schema validation
   build [--target T] PATH   Compile, optionally retargeting portable source
+  build --target zig --exe OUT SOURCE... ENTRY
+                            Retarget and link an ordered Zig module set
   fix [--dry-run] [PATH...] Surface high-confidence auto-fixes
   repair DIR VERIFY         Evidence-ranked repair (--emit-patch / --auto)
   doctor [--deep]           Is the repair loop online and working?
@@ -77,7 +79,9 @@ case "$cmd" in
         fi
         ;;
     build)
-        if [[ "${1:-}" == "--target" ]] &&
+        if [[ "${1:-}" == "--target" && "${3:-}" == "--exe" ]]; then
+            exec "$BIN/beagle-build" "$@"
+        elif [[ "${1:-}" == "--target" ]] &&
            [[ $# -ge 3 && $# -le 4 ]]; then
             exec "$BIN/beagle-build" "$@"
         elif [[ $# -ge 1 ]] && [[ -f "$1" ]] && [[ $# -le 2 ]] && [[ "${2:-}" != --* ]]; then
