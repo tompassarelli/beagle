@@ -100,6 +100,13 @@ fn isByteString(comptime T: type) bool {
     };
 }
 
+fn isIntegral(comptime T: type) bool {
+    return switch (@typeInfo(T)) {
+        .int, .comptime_int => true,
+        else => false,
+    };
+}
+
 /// Versioned logical keyword ABI. Namespace and name remain distinct UTF-8
 /// byte slices, so `:name`, `:ns/name`, and the strings `"name"` /
 /// `"ns/name"` never collapse onto one native key.
@@ -173,6 +180,8 @@ pub fn eq(a: anytype, b: anytype) bool {
         const sa: []const u8 = a;
         const sb: []const u8 = b;
         return std.mem.eql(u8, sa, sb);
+    } else if (comptime (isIntegral(A) and isIntegral(B))) {
+        return std.math.compare(a, .eq, b);
     } else if (comptime A == B) {
         return eqSame(A, a, b);
     } else {
