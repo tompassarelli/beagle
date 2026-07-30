@@ -2188,6 +2188,73 @@ ZIG
                  (ho-emit "Int\n  (reduce (fn [acc :- Int x :- Int] :- Int (+ acc x)) 0 xs)")
                  "ho-reduce"))))
 
+;; --- fn-name arguments, monomorphized per (callee, parameter, defn) ----------
+
+(define reachable-from-src
+  (string-append
+   "(ns zig.hof-mono)\n"
+   "(def A-SUCC :- (Vec String) [\"b\"])\n"
+   "(def B-SUCC :- (Vec String) [\"c\"])\n"
+   "(def C-SUCC :- (Vec String) [\"a\"])\n"
+   "(def NO-SUCC :- (Vec String) [])\n"
+   "(defn next-nodes [node :- String] :- (Vec String)\n"
+   "  (cond\n"
+   "    [(= node \"a\") A-SUCC]\n"
+   "    [(= node \"b\") B-SUCC]\n"
+   "    [(= node \"c\") C-SUCC]\n"
+   "    [:else NO-SUCC]))\n"
+   "(defn reachable-from? [succ :- [String -> (Vec String)]\n"
+   "                       frontier :- (Vec String)\n"
+   "                       fuel :- Int\n"
+   "                       target :- String] :- Bool\n"
+   "  (loop [front frontier n fuel]\n"
+   "    (cond\n"
+   "      [(empty? front) false]\n"
+   "      [(<= n 0) false]\n"
+   "      [(= (nth front 0) target) true]\n"
+   "      [:else (recur (vec (concat (rest front) (succ (nth front 0)))) (dec n))])))\n"
+   "(defn cycle? [start :- String] :- Bool\n"
+   "  (reachable-from? next-nodes (next-nodes start) 16 start))\n"
+   "(defn main [] :- Nil\n"
+   "  (println (str (cycle? \"a\") \":\" (cycle? \"d\"))))\n"))
+
+(test-case "a top-level defn in argument position specializes the callee"
+  (define out (compile-zig-string reachable-from-src))
+  ;; the fn argument is erased from the signature, not passed as a value
+  (check-regexp-match
+   #rx"pub fn reachableFrom__succ__nextNodes\\(__ctx: \\*rt\\.Ctx, frontier: \\[\\]const \\[\\]const u8, fuel: i64, target: \\[\\]const u8\\) bool"
+   out)
+  (check-regexp-match #rx"reachableFrom__succ__nextNodes\\(__ctx, nextNodes\\(start\\), 16, start\\)" out)
+  ;; the generic form has no Zig representation and is never emitted
+  (check-false (regexp-match? #rx"pub fn reachableFrom\\(" out))
+  (check-false (regexp-match? #rx"succ" (regexp-replace* #rx"__succ__" out ""))))
+
+(test-case "one callee specializes per distinct fn argument"
+  (define out
+    (compile-zig-string
+     (string-append
+      "(ns zig.hof-two)\n"
+      "(defn double [x :- Int] :- Int (* x 2))\n"
+      "(defn negate [x :- Int] :- Int (- 0 x))\n"
+      "(defn apply-twice [f :- [Int -> Int] x :- Int] :- Int (f (f x)))\n"
+      "(defn main [] :- Nil\n"
+      "  (println (str (apply-twice double 5) \":\" (apply-twice negate 5))))\n")))
+  (check-regexp-match #rx"pub fn applyTwice__f__double\\(x: i64\\) i64 \\{\n    return double\\(double\\(x\\)\\);" out)
+  (check-regexp-match #rx"pub fn applyTwice__f__negate\\(x: i64\\) i64 \\{\n    return negate\\(negate\\(x\\)\\);" out))
+
+(when ZIG
+  (test-case "a monomorphized traversal compiles, runs, and detects the cycle"
+    (check-equal?
+     (zig-build-exe-and-run (compile-zig-string reachable-from-src))
+     "true:false\n")))
+
+(check-unsupported/src "zig rejects a fn value in a monomorphized argument slot"
+  #rx"higher-order argument"
+  (string-append
+   "(ns zig.hof-literal)\n"
+   "(defn apply-twice [f :- [Int -> Int] x :- Int] :- Int (f (f x)))\n"
+   "(defn run [] :- Int (apply-twice (fn [x :- Int] :- Int (+ x 1)) 5))\n"))
+
 ;; --- Phase 2: world-escape check + promote ------------------------------------
 
 (define-syntax-rule (check-escape name rx src)

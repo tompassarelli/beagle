@@ -434,6 +434,9 @@
 (define current-fn-returns (make-parameter (hasheq))) ; local defn name → return type
 (define current-fn-types (make-parameter (hasheq))) ; local defn name → complete function type
 (define current-fn-allocation-modes (make-parameter (hasheq))) ; local defn name → hidden | explicit
+(define current-fn-forms (make-parameter (hasheq))) ; local defn name → defn-form
+(define current-hof-substitutions (make-parameter (hasheq))) ; monomorphized fn param → top-level defn name
+(define current-hof-specializations (make-parameter #f)) ; box of pending specializations
 (define current-semantic-contracts (make-parameter #f))
 (define current-fn-error-contracts (make-parameter (hasheq)))
 (define current-fn-name (make-parameter #f))
@@ -2051,6 +2054,130 @@
       (format "~a — zig supports str, clojure.string/trim, and clojure.string/blank? here"
               fn))]))
 
+;; --- fn-name arguments, monomorphized ---------------------------------------
+;; A function-typed parameter has no Zig representation: the callee is
+;; specialized per (callee, parameter, top-level defn) and the argument is
+;; erased from the signature.
+
+;; Argument indices of `fn` whose declared parameter type is a function type.
+(define (hof-argument-positions fn args)
+  (define fn-type (hash-ref (current-fn-types) fn #f))
+  (define params (and (type-fn? fn-type) (type-fn-params fn-type)))
+  (and params
+       (hash-ref (current-fn-forms) fn #f)
+       (let ([positions
+              (for/list ([p (in-list params)]
+                         [i (in-naturals)]
+                         #:when (and (type-fn? p) (< i (length args))))
+                i)])
+         (and (pair? positions) positions))))
+
+;; Any occurrence of `sym` other than a call head or a monomorphized argument
+;; slot: the parameter carries no value, so it can only be called or forwarded.
+(define (hof-param-escapes? value sym)
+  (let walk ([v value])
+    (cond
+      [(eq? v sym) #t]
+      [(call-form? v)
+       (define positions
+         (or (hof-argument-positions (call-form-fn v) (call-form-args v)) '()))
+       (for/or ([a (in-list (call-form-args v))]
+                [i (in-naturals)])
+         (and (not (and (eq? a sym) (memv i positions)))
+              (walk a)))]
+      [(struct? v)
+       (for/or ([field (in-vector (struct->vector v) 1)]) (walk field))]
+      [(pair? v) (or (walk (car v)) (walk (cdr v)))]
+      [(vector? v) (for/or ([x (in-vector v)]) (walk x))]
+      [else #f])))
+
+(define (hof-specialization-name fn params positions concretes)
+  (string-join
+   (cons (fn-ident fn)
+         (for/list ([i (in-list positions)] [c (in-list concretes)])
+           (format "~a__~a" (ident (param-name (list-ref params i))) (fn-ident c))))
+   "__"))
+
+(define (register-hof-specialization! spec-name fn positions concretes)
+  (define pending
+    (or (current-hof-specializations)
+        (unsupported "higher-order call"
+                     "specializations can only be emitted inside a program")))
+  (unless (assoc spec-name (unbox pending))
+    (set-box! pending
+              (append (unbox pending)
+                      (list (list spec-name fn positions concretes))))))
+
+(define (emit-monomorphized-call fn args positions)
+  (define params (defn-form-params (hash-ref (current-fn-forms) fn)))
+  (define concretes
+    (for/list ([i (in-list positions)])
+      (define a (list-ref args i))
+      (define resolved
+        (and (symbol? a) (hash-ref (current-hof-substitutions) a a)))
+      (unless (and resolved (hash-ref (current-fn-forms) resolved #f))
+        (unsupported
+         "higher-order argument"
+         (format "~a for ~a — pass a top-level defn name; closures and local function values have no zig representation"
+                 (if (symbol? a) a "expression")
+                 (param-name (list-ref params i)))))
+      resolved))
+  (define spec-name (hof-specialization-name fn params positions concretes))
+  (register-hof-specialization! spec-name fn positions concretes)
+  (define fn-type (hash-ref (current-fn-types) fn #f))
+  (define kept-args
+    (for/list ([a (in-list args)] [i (in-naturals)] #:unless (memv i positions)) a))
+  (define kept-type
+    (and (type-fn? fn-type)
+         (type-fn
+          (for/list ([p (in-list (type-fn-params fn-type))]
+                     [i (in-naturals)]
+                     #:unless (memv i positions))
+            p)
+          (type-fn-rest-type fn-type)
+          (type-fn-ret fn-type))))
+  (define emitted-args (emit-typed-args kept-args kept-type))
+  (define call-args
+    (if (eq? (hash-ref (current-fn-allocation-modes) fn #f) 'hidden)
+        (cons
+         (or (current-allocation-ctx)
+             (unsupported
+              "allocator context"
+              (format "calling allocating function ~a from a pure function" fn)))
+         emitted-args)
+        emitted-args))
+  (format "~a(~a)" spec-name (string-join call-args ", ")))
+
+(define (emit-hof-specialization spec)
+  (match-define (list spec-name fn positions concretes) spec)
+  (define callee (hash-ref (current-fn-forms) fn))
+  (define params (defn-form-params callee))
+  (define substitutions
+    (for/fold ([h (hasheq)]) ([i (in-list positions)] [c (in-list concretes)])
+      (hash-set h (param-name (list-ref params i)) c)))
+  (for ([i (in-list positions)])
+    (define pname (param-name (list-ref params i)))
+    (when (ormap (lambda (b) (hof-param-escapes? b pname))
+                 (defn-form-body callee))
+      (unsupported
+       "higher-order parameter"
+       (format "~a escapes call position in ~a — a monomorphized function parameter can only be called"
+               pname fn))))
+  (define kept-params
+    (for/list ([p (in-list params)] [i (in-naturals)] #:unless (memv i positions)) p))
+  (parameterize ([current-hof-substitutions substitutions])
+    (emit-defn (struct-copy defn-form callee [params kept-params]) spec-name)))
+
+;; Specializing a body can request further specializations, so drive the
+;; pending list by index rather than iterating a snapshot.
+(define (emit-hof-specializations)
+  (define pending (current-hof-specializations))
+  (let loop ([i 0] [out '()])
+    (define specs (unbox pending))
+    (if (>= i (length specs))
+        (reverse out)
+        (loop (add1 i) (cons (emit-hof-specialization (list-ref specs i)) out)))))
+
 (define (emit-call e)
   (define fn (call-form-fn e))
   (define args (call-form-args e))
@@ -2063,6 +2190,9 @@
   (cond
     [(dynamic-condition-info e) => emit-dynamic-condition]
     [(not (symbol? fn)) (unsupported "higher-order call" "fn position must be a name in v1")]
+    ;; inside a specialization the erased parameter IS its concrete function
+    [(hash-ref (current-hof-substitutions) fn #f)
+     => (lambda (concrete) (emit-call (call-form concrete args)))]
     [(hash-ref (current-imported-record-accessors) fn #f)
      => (lambda (field)
           (unless (= (length args) 1)
@@ -2564,6 +2694,8 @@
      (unsupported
       "typed error call"
       (format "~a must be wrapped in check or rescue" fn))]
+    [(hof-argument-positions fn args)
+     => (lambda (positions) (emit-monomorphized-call fn args positions))]
     [else
      ;; The source stays ordinary typed Clojure. Native allocation context is
      ;; an emitter ABI effect: direct and transitive allocating callees receive
@@ -2799,8 +2931,8 @@
           (type->zig (def-form-type f))
           rhs))
 
-(define (emit-defn f)
-  (define name (emitted-fn-ident (defn-form-name f)))
+(define (emit-defn f [name-override #f])
+  (define name (or name-override (emitted-fn-ident (defn-form-name f))))
   (when (defn-form-rest-param f) (unsupported "variadic defn"))
   (define params (defn-form-params f))
   (for ([p (in-list params)])
@@ -3303,6 +3435,17 @@
         (hash-set h (defn-form-name f) (defn-form-return-type f))
         h)))
 
+;; Only its specializations reach Zig — a function-typed parameter has no
+;; representation, so the generic form is never emitted.
+(define (hof-generic-defn? f)
+  (and (defn-form? f)
+       (ormap (lambda (p) (and (param? p) (type-fn? (param-type p))))
+              (defn-form-params f))))
+
+(define (build-fn-forms prog)
+  (for/fold ([h (hasheq)]) ([f (in-list (program-forms prog))])
+    (if (defn-form? f) (hash-set h (defn-form-name f) f) h)))
+
 (define (build-fn-types prog)
   (for/fold ([h (hasheq)]) ([f (in-list (program-forms prog))])
     (if (and (defn-form? f) (defn-form-return-type f))
@@ -3604,6 +3747,8 @@
                  [current-fn-returns (build-fn-returns prog)]
                  [current-fn-types (build-fn-types prog)]
                  [current-fn-allocation-modes allocation-modes]
+                 [current-fn-forms (build-fn-forms prog)]
+                 [current-hof-specializations (box '())]
                  [current-fn-error-contracts error-contracts]
                  [current-dynamic-types dynamic-types]
                  [current-union-types union-types]
@@ -3648,7 +3793,8 @@
        union-decls
        dynamic-decls
        (for/list ([f (in-list (program-forms prog))]
-                  #:unless (eq? f 'nil)) ; (comment ...) parses to nil
+                  #:unless (eq? f 'nil) ; (comment ...) parses to nil
+                  #:unless (hof-generic-defn? f))
          (cond
            [(record-form? f) (emit-record f)]
            [(deferror-form? f) (emit-error-declaration f)]
@@ -3658,6 +3804,8 @@
            [else (unsupported (format "top-level form ~a" f))]))
        (emit-promote prog)
        (emit-engine prog)))
+    ;; after `decls`: emitting a body is what discovers a specialization
+    (define specialization-decls (emit-hof-specializations))
     (define main-wrapper
       (emit-native-main-wrapper prog allocation-modes error-contracts))
     (define extern-imports
@@ -3700,7 +3848,7 @@
      (apply string-append module-imports)
      (apply string-append extern-imports)
      "pub const Ctx = rt.Ctx;\n\n"
-     (string-join decls "\n\n")
+     (string-join (append decls specialization-decls) "\n\n")
      (if main-wrapper (string-append "\n\n" main-wrapper) "")
      "\n")))
 
