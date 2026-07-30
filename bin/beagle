@@ -34,6 +34,8 @@ Author:
   build [--target T] PATH   Compile, optionally retargeting portable source
   build --target zig --exe OUT SOURCE... ENTRY
                             Retarget and link an ordered Zig module set
+  build --target zig --lib OUTDIR SOURCE...
+                            Stage modules only; do not synthesize or link main
   fix [--dry-run] [PATH...] Surface high-confidence auto-fixes
   repair DIR VERIFY         Evidence-ranked repair (--emit-patch / --auto)
   doctor [--deep]           Is the repair loop online and working?
@@ -95,7 +97,7 @@ case "$cmd" in
         fi
         ;;
     build)
-        if [[ "${1:-}" == "--target" && "${3:-}" == "--exe" ]]; then
+        if [[ "${1:-}" == "--target" && ("${3:-}" == "--exe" || "${3:-}" == "--lib") ]]; then
             exec "$BIN/beagle-build" "$@"
         elif [[ "${1:-}" == "--target" ]] &&
            [[ $# -ge 3 && $# -le 4 ]]; then

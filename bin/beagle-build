@@ -5,6 +5,10 @@
 #   bin/beagle-build [--target TARGET] SOURCE [output]   # `beagle langs` lists
 #                                                        # every TARGET + ext
 #   bin/beagle-build --target zig --exe OUTPUT [--zig-module PATH]... SOURCE...
+#   bin/beagle-build --target zig --lib OUTDIR [--zig-module PATH]... SOURCE...
+#   (--lib stages the set + beagle_rt.zig + support modules in OUTDIR for a
+#   consumer's own build.zig to @import; no entry point is synthesized and
+#   nothing is linked.)
 #
 # If the output path is omitted, it is derived from the namespace declared
 # in the source via (ns ...) and dropped under .beagle-out/ (gitignored, so
@@ -118,10 +122,11 @@ if [[ "${1:-}" == "--exe" ]]; then
     for zig_module_destination in "${zig_module_destinations[@]}"; do
         rm -f "${emit_dir:?}/$zig_module_destination"
     done
-    entry="$(
+    generated="$(
         "$RACKET" "$beagle_root/beagle-lib/private/retarget-cli.rkt" \
             --module-dir "$emit_dir" zig "${sources[@]}"
     )"
+    entry="$(tail -n 1 <<< "$generated")"
     if [[ -e "$emit_dir/beagle_rt.zig" ]]; then
         echo "beagle-build: generated Zig module collides with reserved destination 'beagle_rt.zig'" >&2
         exit 2
@@ -155,8 +160,124 @@ if [[ "${1:-}" == "--exe" ]]; then
     exit 0
 fi
 
+if [[ "${1:-}" == "--lib" ]]; then
+    if [[ "$target" != "zig" || $# -lt 3 ]]; then
+        echo "usage: beagle-build --target zig --lib OUTDIR [--zig-module PATH]... SOURCE..." >&2
+        exit 2
+    fi
+    out_dir="$2"
+    shift 2
+    zig_modules=()
+    zig_module_destinations=()
+    declare -A zig_module_sources=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --zig-module)
+                if [[ $# -lt 2 ]]; then
+                    echo "beagle-build: --zig-module requires a Zig source path" >&2
+                    exit 2
+                fi
+                zig_module="$2"
+                if [[ ! -f "$zig_module" ]]; then
+                    echo "beagle-build: Zig support module not found: $zig_module" >&2
+                    exit 1
+                fi
+                zig_module_destination="$(basename "$zig_module")"
+                if [[ "$zig_module_destination" != *.zig ]]; then
+                    echo "beagle-build: Zig support module must end in .zig: $zig_module" >&2
+                    exit 2
+                fi
+                if [[ -n "${zig_module_sources[$zig_module_destination]+x}" ]]; then
+                    echo "beagle-build: ambiguous Zig module destination '$zig_module_destination' from '${zig_module_sources[$zig_module_destination]}' and '$zig_module'" >&2
+                    exit 2
+                fi
+                zig_module_sources["$zig_module_destination"]="$zig_module"
+                zig_modules+=("$zig_module")
+                zig_module_destinations+=("$zig_module_destination")
+                shift 2
+                ;;
+            --)
+                shift
+                break
+                ;;
+            --*)
+                echo "beagle-build: unknown Zig library option: $1" >&2
+                exit 2
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+    if [[ $# -lt 1 ]]; then
+        echo "usage: beagle-build --target zig --lib OUTDIR [--zig-module PATH]... SOURCE..." >&2
+        exit 2
+    fi
+    sources=("$@")
+    for source in "${sources[@]}"; do
+        if [[ ! -f "$source" ]]; then
+            echo "beagle-build: source file not found: $source" >&2
+            exit 1
+        fi
+    done
+    beagle_root="$(cd "$(dirname "$0")/.." && pwd)"
+    mkdir -p "$out_dir"
+    abs_out_dir="$(cd "$out_dir" && pwd)"
+    # Scratch dir keyed on OUTDIR, wiped every run: retarget-cli emits fresh
+    # here so a canonical-name collision with beagle_rt.zig or a
+    # --zig-module destination shows up in its listing before OUTDIR is touched.
+    out_hash="$(printf '%s' "$abs_out_dir" | cksum | cut -d' ' -f1)"
+    scratch_dir="$(dirname "$abs_out_dir")/.beagle-zig-lib-build.$out_hash"
+    rm -rf "${scratch_dir:?}"
+    mkdir -p "$scratch_dir"
+    generated="$(
+        "$RACKET" "$beagle_root/beagle-lib/private/retarget-cli.rkt" \
+            --module-dir "$scratch_dir" zig "${sources[@]}"
+    )"
+    while IFS= read -r generated_path; do
+        [[ -z "$generated_path" ]] && continue
+        generated_name="$(basename "$generated_path")"
+        if [[ "$generated_name" == "beagle_rt.zig" ]]; then
+            rm -rf "${scratch_dir:?}"
+            echo "beagle-build: generated Zig module collides with reserved destination 'beagle_rt.zig'" >&2
+            exit 2
+        fi
+        if [[ -n "${zig_module_sources[$generated_name]+x}" ]]; then
+            rm -rf "${scratch_dir:?}"
+            echo "beagle-build: generated Zig module collides with support module destination '$generated_name'" >&2
+            exit 2
+        fi
+    done <<< "$generated"
+    staged=()
+    while IFS= read -r generated_path; do
+        [[ -z "$generated_path" ]] && continue
+        generated_name="$(basename "$generated_path")"
+        dest="$out_dir/$generated_name"
+        if ! cmp -s "$generated_path" "$dest" 2>/dev/null; then
+            cp "$generated_path" "$dest"
+        fi
+        staged+=("$dest")
+    done <<< "$generated"
+    if ! cmp -s "$beagle_root/beagle-lib/zig/beagle_rt.zig" "$out_dir/beagle_rt.zig" 2>/dev/null; then
+        cp "$beagle_root/beagle-lib/zig/beagle_rt.zig" "$out_dir/beagle_rt.zig"
+    fi
+    staged+=("$out_dir/beagle_rt.zig")
+    for i in "${!zig_modules[@]}"; do
+        dest="$out_dir/${zig_module_destinations[$i]}"
+        if ! cmp -s "${zig_modules[$i]}" "$dest" 2>/dev/null; then
+            cp "${zig_modules[$i]}" "$dest"
+        fi
+        staged+=("$dest")
+    done
+    rm -rf "${scratch_dir:?}"
+    for f in "${staged[@]}"; do
+        printf '%s\n' "$f" >&2
+    done
+    exit 0
+fi
+
 if [[ $# -lt 1 || $# -gt 2 ]]; then
-    echo "usage: beagle-build [--target TARGET] SOURCE [OUTPUT] | beagle-build --target zig --exe OUTPUT [--zig-module PATH]... SOURCE..." >&2
+    echo "usage: beagle-build [--target TARGET] SOURCE [OUTPUT] | beagle-build --target zig --exe OUTPUT [--zig-module PATH]... SOURCE... | beagle-build --target zig --lib OUTDIR [--zig-module PATH]... SOURCE..." >&2
     exit 2
 fi
 
