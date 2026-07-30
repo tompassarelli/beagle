@@ -2360,7 +2360,7 @@
                          '("lower-case" "upper-case" "join" "replace"
                            "split" "split-lines" "path"
                            "args" "getenv" "process-capture"
-                           "unique-id" "json-escape"))))
+                           "temp-dir" "unique-id" "json-escape"))))
           (define imported
             (let ([match
                    (regexp-match

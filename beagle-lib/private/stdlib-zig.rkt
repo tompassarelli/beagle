@@ -32,6 +32,10 @@
    (fn-of '(zig/ProcessResult) 'String)
    'zig/process-result-exit
    (fn-of '(zig/ProcessResult) 'Int)
+   'zig/create-dirs (fn-of '(String) 'Nil)
+   'zig/temp-dir (fn-of '() 'String)
+   'zig/remove-tree (fn-of '(String) 'Nil)
+   'zig/append-text (fn-of '(String String) 'Nil)
    'zig/monotonic-ms (fn-of '() 'Int)
    'zig/unix-ms (fn-of '() 'Int)
    'zig/unique-id (fn-of '() 'String)

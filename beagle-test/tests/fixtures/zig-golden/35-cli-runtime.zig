@@ -7,6 +7,8 @@ pub const RUN_COMMAND: []const []const u8 = &.{ "sh", "-c", "exit 9" };
 
 pub const CAPTURE_COMMAND: []const []const u8 = &.{ "sh", "-c", "printf captured-out; printf captured-err >&2; exit 7" };
 
+pub const PWD_COMMAND: []const []const u8 = &.{ "sh", "-c", "pwd" };
+
 pub fn cliArgs(__ctx: *rt.Ctx) []const []const u8 {
     return rt.args(__ctx.tick);
 }
@@ -44,7 +46,23 @@ pub fn __beagle_main(__ctx: *rt.Ctx) void {
     const value = rt.getenv(__ctx.tick, "BEAGLE_CLI_TEST_VALUE");
     const run_exit = rt.process_run(RUN_COMMAND, null);
     const captured = rt.process_capture(__ctx.tick, CAPTURE_COMMAND, null);
-    _ = rt.println(rt.str1(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str1(__ctx.tick, rt.nth(argv, 1)), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, (if ((value != null)) value else "missing"))), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, rt.json_escape(__ctx.tick, "a\"b\nc"))), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, run_exit)), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, rt.process_result_stdout(captured))), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, rt.process_result_stderr(captured))), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, rt.process_result_exit(captured)))));
+    const temporary = rt.temp_dir(__ctx.tick);
+    const nested = rt.path(__ctx.tick, temporary, "nested");
+    const append_file = rt.path(__ctx.tick, nested, "append.txt");
+    _ = rt.create_dirs(nested);
+    _ = rt.append_text(append_file, "alpha");
+    _ = rt.append_text(append_file, "beta");
+    const appended = rt.slurp(__ctx.tick, append_file);
+    const cwd_result = rt.process_capture(__ctx.tick, PWD_COMMAND, nested);
+    const cwd_ok = rt.eq(rt.process_result_stdout(cwd_result), rt.str2(__ctx.tick, rt.str1(__ctx.tick, nested), rt.str1(__ctx.tick, "\n")));
+    const existed = rt.exists(temporary);
+    const first_id = rt.unique_id(__ctx.tick);
+    const second_id = rt.unique_id(__ctx.tick);
+    const ids_ok = (!rt.eq(first_id, second_id));
+    const time_ok = ((rt.monotonic_ms() >= 0) and (rt.unix_ms() > 1700000000000));
+    _ = rt.remove_tree(temporary);
+    const cleaned = (!rt.exists(temporary));
+    _ = rt.println(rt.str1(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str1(__ctx.tick, rt.nth(argv, 1)), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, (if ((value != null)) value else "missing"))), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, rt.json_escape(__ctx.tick, "a\"b\nc"))), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, run_exit)), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, rt.process_result_stdout(captured))), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, rt.process_result_stderr(captured))), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, rt.process_result_exit(captured))), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, appended)), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, cwd_ok)), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, existed)), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, ids_ok)), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, time_ok)), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, cleaned))));
 }
 
 pub fn main(__process: std.process.Init.Minimal) void {

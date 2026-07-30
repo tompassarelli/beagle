@@ -1,11 +1,15 @@
 (ns cli.runtime)
 (define-target zig)
+(require babashka.fs :as fs)
 
 (def RUN-COMMAND :- (Vec String)
   ["sh" "-c" "exit 9"])
 
 (def CAPTURE-COMMAND :- (Vec String)
   ["sh" "-c" "printf captured-out; printf captured-err >&2; exit 7"])
+
+(def PWD-COMMAND :- (Vec String)
+  ["sh" "-c" "pwd"])
 
 (defn cli-args [] :- (Vec String)
   (zig/args))
@@ -38,17 +42,47 @@
         value (zig/getenv "BEAGLE_CLI_TEST_VALUE")
         run-exit (zig/process-run RUN-COMMAND nil)
         captured (zig/process-capture CAPTURE-COMMAND nil)]
-    (println
-     (str (nth argv 1)
-          ":"
-          (if (some? value) value "missing")
-          ":"
-          (zig/json-escape "a\"b\nc")
-          ":"
-          run-exit
-          ":"
-          (zig/process-result-stdout captured)
-          ":"
-          (zig/process-result-stderr captured)
-          ":"
-          (zig/process-result-exit captured)))))
+    (let [temporary (zig/temp-dir)
+          nested (fs/path temporary "nested")
+          append-file (fs/path nested "append.txt")]
+      (zig/create-dirs nested)
+      (zig/append-text append-file "alpha")
+      (zig/append-text append-file "beta")
+      (let [appended (slurp append-file)
+            cwd-result (zig/process-capture PWD-COMMAND nested)
+            cwd-ok (= (zig/process-result-stdout cwd-result)
+                      (str nested "\n"))
+            existed (fs/exists? temporary)
+            first-id (zig/unique-id)
+            second-id (zig/unique-id)
+            ids-ok (not (= first-id second-id))
+            time-ok (and (>= (zig/monotonic-ms) 0)
+                         (> (zig/unix-ms) 1700000000000))]
+        (zig/remove-tree temporary)
+        (let [cleaned (not (fs/exists? temporary))]
+          (println
+           (str (nth argv 1)
+                ":"
+                (if (some? value) value "missing")
+                ":"
+                (zig/json-escape "a\"b\nc")
+                ":"
+                run-exit
+                ":"
+                (zig/process-result-stdout captured)
+                ":"
+                (zig/process-result-stderr captured)
+                ":"
+                (zig/process-result-exit captured)
+                ":"
+                appended
+                ":"
+                cwd-ok
+                ":"
+                existed
+                ":"
+                ids-ok
+                ":"
+                time-ok
+                ":"
+                cleaned)))))))

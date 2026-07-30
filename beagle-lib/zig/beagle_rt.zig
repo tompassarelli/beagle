@@ -1341,6 +1341,47 @@ pub fn process_result_exit(result: ProcessResult) i64 {
     return result.exit_code;
 }
 
+pub fn create_dirs(path_value: []const u8) void {
+    std.Io.Dir.cwd().createDirPath(io(), path_value) catch
+        @panic("zig/create-dirs failed");
+}
+
+pub fn temp_dir(allocator: std.mem.Allocator) []const u8 {
+    const current = process_environ orelse @panic("zig/temp-dir requires an emitted main");
+    const configured = current.getAlloc(allocator, "TMPDIR") catch |err| switch (err) {
+        error.EnvironmentVariableMissing => "/tmp",
+        else => @panic("zig/temp-dir failed"),
+    };
+    const base = if (configured.len == 0) "/tmp" else configured;
+    while (true) {
+        const name = std.fmt.allocPrint(allocator, "beagle-{s}", .{unique_id(allocator)}) catch
+            @panic("oom");
+        const candidate = std.fs.path.join(allocator, &.{ base, name }) catch
+            @panic("oom");
+        const status = std.Io.Dir.cwd().createDirPathStatus(
+            io(),
+            candidate,
+            .default_dir,
+        ) catch @panic("zig/temp-dir failed");
+        if (status == .created) return candidate;
+    }
+}
+
+pub fn remove_tree(path_value: []const u8) void {
+    std.Io.Dir.cwd().deleteTree(io(), path_value) catch
+        @panic("zig/remove-tree failed");
+}
+
+pub fn append_text(path_value: []const u8, content: []const u8) void {
+    const file = std.Io.Dir.cwd().createFile(io(), path_value, .{
+        .truncate = false,
+    }) catch @panic("zig/append-text failed");
+    defer file.close(io());
+    const end = (file.stat(io()) catch @panic("zig/append-text stat failed")).size;
+    file.writePositionalAll(io(), content, end) catch
+        @panic("zig/append-text write failed");
+}
+
 pub fn monotonic_ms() i64 {
     return std.Io.Clock.awake.now(io()).toMilliseconds();
 }
