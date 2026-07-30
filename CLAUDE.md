@@ -35,8 +35,7 @@ still a separate registry (`macros.rkt`). Both lower to typed IR before any
 backend runs.
 
 **Do not build a runtime operative/fexpr evaluator.** It's impossible — we emit
-Nix, which has no runtime `eval`/reified environments. A prototype that tried
-this was deleted; don't resurrect it.
+Nix, which has no runtime `eval`/reified environments.
 
 ## Standing operating mode — apply the spec, don't ratify it
 
@@ -216,10 +215,10 @@ inherited false gap. **Every agent, the moment it hits one, appends ONE structur
 record to `hallucinations.jsonl` (repo root) — before or as it fixes it. No
 hallucination goes unlogged.**
 
-Why: hallucination-reduction must be DATA-DRIVEN, not vibes. The log is the dataset
-we mine — cluster by `category`, rank by frequency, prune the highest-rate
-divergences at the root, and watch records-per-period trend DOWN over time. The
-periodic surface audit reads this to prioritize root-fixes mathematically.
+The log is the dataset we mine — cluster by `category`, rank by frequency, prune
+the highest-rate divergences at the root, and watch records-per-period trend
+DOWN over time. The periodic surface audit reads this to prioritize root-fixes
+mathematically.
 
 Record schema (one JSON object per line):
 `{ts, agent, category, target, wrote, expected, reality, severity, resolution, fix}`
