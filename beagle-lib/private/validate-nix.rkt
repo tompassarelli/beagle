@@ -166,10 +166,11 @@
 ;; that reference variables or embed attr path segments.
 ;;
 ;; Returns (values found-keys lint-warnings)
-(define (collect-program-keys prog)
+(define (collect-program-keys prog #:schemas [schemas '()])
   (define found '())
   (define lint-warnings '())
   (define occurrence-counts (make-hash))
+  (define current-lint-prefix (make-parameter #f))
 
   (define (record-key! path-sym val [authored-key-sym path-sym])
     (define key-str (symbol->string authored-key-sym))
@@ -189,7 +190,10 @@
 
   (define (freeform-context? prefix)
     (and prefix
-         (ormap (lambda (p) (string-prefix? prefix p)) freeform-prefixes)))
+         (or (ormap (lambda (p) (string-prefix? prefix p)) freeform-prefixes)
+             (ormap (lambda (schema)
+                      (nixos-option-freeform-container? schema prefix))
+                    schemas))))
 
   (define (looks-like-filename? s)
     (or (string-prefix? s ".")
@@ -235,10 +239,17 @@
       (define key (car pair))
       (define val (cdr pair))
       (define key-str (if (symbol? key) (symbol->string key) #f))
+      (define inherited-lint-prefix
+        (and (freeform-context? (current-lint-prefix))
+             (current-lint-prefix)))
 
       ;; Lint: check string keys for suspicious patterns
       (when (string? key)
-        (define warning (lint-string-key key scope prefix))
+        (define warning
+          (lint-string-key key scope
+                           (or inherited-lint-prefix
+                               (current-lint-prefix)
+                               prefix)))
         (when warning (add-lint! warning)))
 
       (define full-path
@@ -249,19 +260,28 @@
           [else #f]))
       (cond
         [(and full-path (map-form? val))
-         (walk-map-pairs (map-form-pairs val) scope
-                         #:prefix (substring (symbol->string full-path) 1))]
+         (define next-prefix (substring (symbol->string full-path) 1))
+         (parameterize ([current-lint-prefix
+                         (or inherited-lint-prefix next-prefix)])
+           (walk-map-pairs (map-form-pairs val) scope
+                           #:prefix next-prefix))]
         [full-path
          (record-key! full-path val key)]
         [(and (dotted-option-key? key) (map-form? val))
-         (walk-map-pairs (map-form-pairs val) scope
-                         #:prefix (key-sym->path key))]
+         (define next-prefix (key-sym->path key))
+         (parameterize ([current-lint-prefix
+                         (or inherited-lint-prefix next-prefix)])
+           (walk-map-pairs (map-form-pairs val) scope
+                           #:prefix next-prefix))]
         [(dotted-option-key? key)
          (record-key! key val)]
         [else
          (when (map-form? val)
-           (walk val scope))])
-      (unless (map-form? val) (walk val scope))))
+           (parameterize ([current-lint-prefix inherited-lint-prefix])
+             (walk val scope)))])
+      (unless (map-form? val)
+        (parameterize ([current-lint-prefix inherited-lint-prefix])
+          (walk val scope)))))
 
   ;; Extract binding names from a let-form
   (define (let-scope bindings)
@@ -445,7 +465,9 @@
 ;; Schema validation
 ;; ============================================================================
 
-(define (validate-file-keys file-path keys schema #:hm-schema [hm-schema #f])
+(define (validate-file-keys file-path keys schema
+                            #:hm-schema [hm-schema #f]
+                            #:alternate-schema [alternate-schema #f])
   ;; If the active validator-config has no explicit HM roots, derive them from
   ;; the HM schema (its top-level prefixes) so callers don't have to set the
   ;; parameter to get sensible unknown-option detection.
@@ -464,16 +486,23 @@
     (set! errors (cons (validation-error file-path line col msg kind path)
                        errors)))
 
-  (define (check-type-against-entry fk path-str entry label)
-    (cond
-      [(eq? entry 'permissive) (void)]
-      [else
-       (define val-type (infer-literal-type-simple (found-key-value fk)))
-       (define result (nixos-check-value-type entry val-type))
-       (when (and (pair? result) (eq? (car result) 'mismatch))
-         (add-error! fk
-                     (format "~a option ~a: ~a" label path-str (cadr result))
-                     'type-mismatch path-str))]))
+  (define (check-type-against-entries fk path-str entries label)
+    (define val-type (infer-literal-type-simple (found-key-value fk)))
+    (define results
+      (for/list ([entry (in-list entries)])
+        (if (eq? entry 'permissive)
+            'ok
+            (nixos-check-value-type entry val-type))))
+    (unless (ormap (lambda (result) (eq? result 'ok)) results)
+      (define mismatch
+        (for/first ([result (in-list results)]
+                    #:when (and (pair? result)
+                                (eq? (car result) 'mismatch)))
+          (cadr result)))
+      (when mismatch
+        (add-error! fk
+                    (format "~a option ~a: ~a" label path-str mismatch)
+                    'type-mismatch path-str))))
 
   (for ([fk (in-list keys)])
     (define path-str (found-key-path fk))
@@ -486,15 +515,23 @@
       [(string-prefix? path-str "myConfig.") (void)]
       [else
        (define entry (nixos-option-lookup/wildcard schema path-str))
+       (define alternate-entry
+         (and alternate-schema
+              (nixos-option-lookup/wildcard alternate-schema path-str)))
        (cond
-         [entry
-          (check-type-against-entry fk path-str entry "NixOS")]
+         [(or entry alternate-entry)
+          (check-type-against-entries
+           fk path-str (filter values (list entry alternate-entry))
+           (if alternate-entry "NixOS/Darwin" "NixOS"))]
          [else
           (define hm-entry
             (and hm-schema (nixos-option-lookup/wildcard hm-schema path-str)))
           (cond
             [hm-entry
-             (check-type-against-entry fk path-str hm-entry "HM")]
+             (check-type-against-entries fk path-str (list hm-entry) "HM")]
+            [(and hm-schema
+                  (nixos-implicit-settings-path? hm-schema path-str))
+             (void)]
             [(member top-ns effective-hm-roots)
              (when hm-schema
                ;; Only error if the second-level namespace exists in the HM schema.
@@ -590,7 +627,8 @@
       (unless (or (member top-ns MODULE-STRUCTURAL-KEYS)
                   (string-prefix? path-str "options.")
                   (string-contains? fp-str "template/")
-                  (string-contains? fp-str "hosts/"))
+                  (string-contains? fp-str "hosts/")
+                  (regexp-match? #rx"(^|/)flake\\.bnix$" fp-str))
         (hash-update! global-map path-str
                       (lambda (prev) (cons (list file-path fk) prev))
                       '()))))
@@ -779,6 +817,15 @@
     (eprintf "beagle-validate: loaded HM schema from ~a (~a options)\n"
              hm-schema-path hm-count))
 
+  (define darwin-schema-path (find-darwin-schema-json (car files)))
+  (define darwin-schema
+    (and darwin-schema-path (load-nixos-schema darwin-schema-path)))
+  (define darwin-count
+    (if darwin-schema (hash-count (nixos-schema-table darwin-schema)) 0))
+  (when (and verbose? darwin-schema)
+    (eprintf "beagle-validate: loaded Darwin schema from ~a (~a options)\n"
+             darwin-schema-path darwin-count))
+
   ;; Load validator config alongside schema; auto-discover HM roots if absent.
   (define loaded-cfg (load-validator-config schema-path))
   (define cfg
@@ -819,7 +866,10 @@
                  file (program-target prog)))
 
       (when (eq? (program-target prog) 'nix)
-        (define-values (keys lint-warnings) (collect-program-keys prog))
+        (define-values (keys lint-warnings)
+          (collect-program-keys
+           prog
+           #:schemas (filter values (list schema hm-schema darwin-schema))))
         (set! all-file-keys (cons (cons file keys) all-file-keys))
 
         ;; Lint warnings from scope-aware string key analysis
@@ -829,16 +879,20 @@
                       all-errors)))
 
         ;; Schema validation
-        (define schema-errors (validate-file-keys file keys schema #:hm-schema hm-schema))
+        (define is-flake?
+          (let ([fp (if (path? file) (path->string file) file)])
+            (regexp-match? #rx"/flake\\.bnix$|^flake\\.bnix$" fp)))
+        (define schema-errors
+          (validate-file-keys
+           file keys schema
+           #:hm-schema hm-schema
+           #:alternate-schema (and is-flake? darwin-schema)))
         (set! all-errors (append all-errors schema-errors))
 
         ;; Duplicate detection
         ;; flake.bnix routinely defines the same nixos-option in multiple
         ;; sub-system builders (mkSystem vs mkDarwinSystem) — they're in
         ;; separate module instantiations, not actual duplicates. Skip.
-        (define is-flake?
-          (let ([fp (if (path? file) (path->string file) file)])
-            (regexp-match? #rx"/flake\\.bnix$|^flake\\.bnix$" fp)))
         (unless is-flake?
           (define dup-errors (detect-duplicates file keys))
           (set! all-errors (append all-errors dup-errors)))

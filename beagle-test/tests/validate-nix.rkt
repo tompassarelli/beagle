@@ -23,6 +23,38 @@
     #:exists 'truncate/replace)
   tmp)
 
+(define (write-json-file path value)
+  (call-with-output-file path
+    (lambda (out) (write-json value out))
+    #:exists 'truncate/replace))
+
+(define (write-bnix-file dir name body)
+  (define path (build-path dir name))
+  (call-with-output-file path
+    (lambda (out)
+      (display "#lang beagle/nix\n\n" out)
+      (display body out)
+      (newline out))
+    #:exists 'truncate/replace)
+  path)
+
+(define (validator-count files)
+  (parameterize ([current-error-port (open-output-string)])
+    (validate-files files)))
+
+(define (make-validator-repo nixos-entries
+                             #:hm [hm-entries #f]
+                             #:darwin [darwin-entries #f])
+  (define dir (make-temporary-directory))
+  (define cache-dir (build-path dir ".beagle-cache"))
+  (make-directory cache-dir)
+  (write-json-file (build-path cache-dir "schema.json") nixos-entries)
+  (when hm-entries
+    (write-json-file (build-path cache-dir "schema-hm.json") hm-entries))
+  (when darwin-entries
+    (write-json-file (build-path cache-dir "schema-darwin.json") darwin-entries))
+  dir)
+
 (test-case "load-nixos-schema reads 'p' field format"
   (define path (make-temp-schema
     (list (hasheq 'p "boot.loader.grub.enable" 't "bool")
@@ -81,6 +113,47 @@
   (check-equal? (nixos-option-lookup/wildcard schema
     "nixpkgs.config.allowUnfree")
     'permissive)
+  (delete-file path))
+
+(test-case "freeform-container detection follows nested attrsOf values"
+  (define path
+    (make-temp-schema
+     (list
+      (hasheq 'p "services.pipewire.wireplumber.extraConfig"
+              't "attrsOf"
+              'inner
+              (hasheq 't "attrsOf"
+                      'inner
+                      (hasheq 't "nullOr"
+                              'inner
+                              (hasheq 't "attrsOf"
+                                      'inner (hasheq 't "either")))))
+      (hasheq 'p "home-manager.users"
+              't "attrsOf"
+              'inner (hasheq 't "submodule")))))
+  (define schema (load-nixos-schema path))
+  (check-true
+   (nixos-option-freeform-container?
+    schema "services.pipewire.wireplumber.extraConfig"))
+  (check-false
+   (nixos-option-freeform-container? schema "home-manager.users"))
+  (delete-file path))
+
+(test-case "implicit HM settings fallback is scoped to a known module namespace"
+  (define path
+    (make-temp-schema
+     (list (hasheq 'name "programs.ghostty.enable" 't "bool")
+           (hasheq 'name "programs.ghostty.package" 't "package")
+           (hasheq 'name "programs.git.enable" 't "bool"))))
+  (define schema (load-nixos-schema path))
+  (check-true
+   (nixos-implicit-settings-path?
+    schema "programs.ghostty.settings.window-padding-x"))
+  (check-false
+   (nixos-implicit-settings-path? schema "programs.ghostty.typo"))
+  (check-false
+   (nixos-implicit-settings-path?
+    schema "programs.unknown.settings.window-padding-x"))
   (delete-file path))
 
 ;; ============================================================================
@@ -144,6 +217,20 @@
   (check-false (find-hm-schema-json (path->string dummy-file)))
   (delete-directory/files tmp-dir))
 
+(test-case "find-darwin-schema-json locates schema-darwin.json"
+  (define tmp-dir (make-temporary-directory))
+  (define cache-dir (build-path tmp-dir ".beagle-cache"))
+  (make-directory cache-dir)
+  (define darwin-path (build-path cache-dir "schema-darwin.json"))
+  (write-json-file
+   darwin-path
+   (list (hasheq 'name "system.stateVersion" 't "intBetween")))
+  (define dummy-file (build-path tmp-dir "test.bnix"))
+  (call-with-output-file dummy-file (lambda (out) (display "" out)))
+  (check-true
+   (path? (find-darwin-schema-json (path->string dummy-file))))
+  (delete-directory/files tmp-dir))
+
 ;; ============================================================================
 ;; Full validation with HM schema
 ;; ============================================================================
@@ -184,6 +271,126 @@
   (check-equal? (length errs) 0 "HM path should be silently skipped without HM schema")
 
   (delete-file nixos-path))
+
+(test-case "HM freeform settings accept Ghostty and Mako values but reject siblings"
+  (define dir
+    (make-validator-repo
+     (list (hasheq 'name "boot.loader.grub.enable" 't "bool"))
+     #:hm
+     (list (hasheq 'name "programs.ghostty.enable" 't "bool")
+           (hasheq 'name "programs.ghostty.package" 't "package")
+           (hasheq 'name "services.mako.enable" 't "bool")
+           (hasheq 'name "services.mako.extraConfig" 't "lines"))))
+  (define settings-file
+    (write-bnix-file
+     dir "settings.bnix"
+     #<<BNIX
+(ns settings)
+(def config-value
+  {:programs.ghostty
+    {:settings
+      {:window-padding-x 6
+       :window-padding-y 4
+       :app-notifications "no-clipboard-copy"
+       :command "/run/current-system/sw/bin/bash"
+       :working-directory "home"}}
+   :services.mako
+    {:settings
+      {:default-timeout 0
+       :icons 0}}})
+BNIX
+     ))
+  (check-equal? (validator-count (list settings-file)) 0)
+
+  (define typo-file
+    (write-bnix-file
+     dir "hm-typo.bnix"
+     "(ns hm-typo)\n(def config-value {:programs.ghostty.typo true})"))
+  (check-equal? (validator-count (list typo-file)) 1)
+  (delete-directory/files dir))
+
+(test-case "freeform schema context suppresses dotted literal keys only inside it"
+  (define dir
+    (make-validator-repo
+     (list
+      (hasheq 'name "services.pipewire.wireplumber.extraConfig"
+              't "attrsOf"
+              'inner
+              (hasheq 't "attrsOf"
+                      'inner
+                      (hasheq 't "nullOr"
+                              'inner
+                              (hasheq 't "attrsOf"
+                                      'inner (hasheq 't "either"))))))))
+  (define freeform-file
+    (write-bnix-file
+     dir "freeform.bnix"
+     #<<BNIX
+(ns freeform)
+(def config-value
+  {:services.pipewire.wireplumber.extraConfig
+    {"51-framework13-mic"
+      {"monitor.alsa.rules"
+        [{:matches [{"device.name" "alsa_card.pci-0000_c1_00.6"}]
+          :actions
+           {:update-props
+             {"device.profile" "HiFi (Mic1, Mic2, Speaker)"}}}]}}})
+BNIX
+     ))
+  (check-equal? (validator-count (list freeform-file)) 0)
+
+  (define suspicious-file
+    (write-bnix-file
+     dir "suspicious.bnix"
+     "(ns suspicious)\n(def config-value {\"wrong.attributepath\" 1})"))
+  (check-equal? (validator-count (list suspicious-file)) 1)
+  (delete-directory/files dir))
+
+(test-case "mixed-platform flake accepts Darwin stateVersion without cross-file conflict"
+  (define dir
+    (make-validator-repo
+     (list (hasheq 'name "system.stateVersion" 't "str")
+           (hasheq 'name "services.demo.port" 't "int"))
+     #:darwin
+     (list (hasheq 'name "system.stateVersion" 't "intBetween"))))
+  (define flake-file
+    (write-bnix-file
+     dir "flake.bnix"
+     "(ns flake)\n(def darwin-config {:system.stateVersion 6})"))
+  (define system-file
+    (write-bnix-file
+     dir "system.bnix"
+     "(ns system)\n(def nixos-config {:system.stateVersion \"25.05\"})"))
+  (check-equal? (validator-count (list flake-file system-file)) 0)
+
+  (define invalid-nixos-file
+    (write-bnix-file
+     dir "invalid-nixos.bnix"
+     "(ns invalid-nixos)\n(def nixos-config {:system.stateVersion 6})"))
+  (check-equal? (validator-count (list invalid-nixos-file)) 1)
+
+  (define ordinary-a
+    (write-bnix-file
+     dir "ordinary-a.bnix"
+     "(ns ordinary-a)\n(def config-a {:services.demo.port 1})"))
+  (define ordinary-b
+    (write-bnix-file
+     dir "ordinary-b.bnix"
+     "(ns ordinary-b)\n(def config-b {:services.demo.port 2})"))
+  (check-equal? (validator-count (list ordinary-a ordinary-b)) 1)
+  (delete-directory/files dir))
+
+(test-case "ordinary NixOS unknown paths still reject"
+  (define dir
+    (make-validator-repo
+     (list (hasheq 'name "boot.loader.grub.enable" 't "bool"))
+     #:hm (list (hasheq 'name "programs.git.enable" 't "bool"))))
+  (define source-file
+    (write-bnix-file
+     dir "ordinary-typo.bnix"
+     "(ns ordinary-typo)\n(def config-value {:boot.loader.grub.enabel true})"))
+  (check-equal? (validator-count (list source-file)) 1)
+  (delete-directory/files dir))
 
 ;; ============================================================================
 ;; myConfig introspective validation

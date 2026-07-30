@@ -22,11 +22,14 @@
  load-nixos-schema
  find-schema-json
  find-hm-schema-json
+ find-darwin-schema-json
 
  ;; Lookup
  nixos-option-lookup
  nixos-option-lookup/wildcard
  nixos-namespace-exists?
+ nixos-option-freeform-container?
+ nixos-implicit-settings-path?
 
  ;; Type checking
  nixos-check-value-type
@@ -90,6 +93,9 @@
 (define (find-hm-schema-json source-path)
   (find-schema-in-cache source-path "schema-hm.json"))
 
+(define (find-darwin-schema-json source-path)
+  (find-schema-in-cache source-path "schema-darwin.json"))
+
 ;; ============================================================================
 ;; Lookup
 ;; ============================================================================
@@ -140,6 +146,34 @@
 
 (define (nixos-namespace-exists? schema path-str)
   (set-member? (nixos-schema-prefixes schema) path-str))
+
+(define (entry-freeform-container? entry)
+  (define t (hash-ref entry 't "?"))
+  (cond
+    [(member t FREEFORM-TYPES) #t]
+    [(member t '("attrsOf" "lazyAttrsOf" "nullOr"))
+     (define inner (hash-ref entry 'inner #f))
+     (and inner (hash? inner) (entry-freeform-container? inner))]
+    [else #f]))
+
+(define (nixos-option-freeform-container? schema path-str)
+  (define entry (nixos-option-lookup schema path-str))
+  (and entry (entry-freeform-container? entry) #t))
+
+;; Home Manager's generated schema can omit a `settings` option when its
+;; pkgs.formats-backed type cannot be materialized by getSubOptions. Preserve
+;; validation of the surrounding module namespace, but treat descendants of
+;; that missing conventional container as freeform. Explicit settings options
+;; or children still go through the normal schema lookup first.
+(define (nixos-implicit-settings-path? schema path-str)
+  (define parts (string-split path-str "."))
+  (for/or ([i (in-range 2 (length parts))]
+           #:when (string=? (list-ref parts i) "settings"))
+    (define module-prefix (string-join (take parts i) "."))
+    (define settings-prefix (string-join (take parts (add1 i)) "."))
+    (and (nixos-namespace-exists? schema module-prefix)
+         (not (nixos-option-lookup schema settings-prefix))
+         (not (nixos-namespace-exists? schema settings-prefix)))))
 
 ;; ============================================================================
 ;; Type checking
