@@ -1382,6 +1382,10 @@ pub fn append_text(path_value: []const u8, content: []const u8) void {
         @panic("zig/append-text write failed");
 }
 
+pub fn exit(code: i64) noreturn {
+    std.process.exit(@intCast(code));
+}
+
 pub fn monotonic_ms() i64 {
     return std.Io.Clock.awake.now(io()).toMilliseconds();
 }

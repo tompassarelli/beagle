@@ -41,6 +41,10 @@ pub fn escaped(__ctx: *rt.Ctx, value: []const u8) []const u8 {
     return rt.json_escape(__ctx.tick, value);
 }
 
+pub fn exitWith(code: i64) void {
+    _ = rt.exit(code);
+}
+
 pub fn __beagle_main(__ctx: *rt.Ctx) void {
     const argv = rt.args(__ctx.tick);
     const value = rt.getenv(__ctx.tick, "BEAGLE_CLI_TEST_VALUE");

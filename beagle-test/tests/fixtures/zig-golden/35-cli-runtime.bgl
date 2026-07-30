@@ -37,6 +37,9 @@
 (defn escaped [value :- String] :- String
   (zig/json-escape value))
 
+(defn exit-with [code :- Int] :- Nil
+  (zig/exit code))
+
 (defn main [] :- Nil
   (let [argv (zig/args)
         value (zig/getenv "BEAGLE_CLI_TEST_VALUE")

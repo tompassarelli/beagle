@@ -36,6 +36,7 @@
    'zig/temp-dir (fn-of '() 'String)
    'zig/remove-tree (fn-of '(String) 'Nil)
    'zig/append-text (fn-of '(String String) 'Nil)
+   'zig/exit (fn-of '(Int) 'Nil)
    'zig/monotonic-ms (fn-of '() 'Int)
    'zig/unix-ms (fn-of '() 'Int)
    'zig/unique-id (fn-of '() 'String)

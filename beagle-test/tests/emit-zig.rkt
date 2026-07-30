@@ -206,7 +206,8 @@
 
 (define (zig-build-exe-and-run zig-src
                                #:args [args '()]
-                               #:env [environment '()])
+                               #:env [environment '()]
+                               #:exit-code [expected-exit 0])
   (define dir (make-temporary-file "zigsmoke~a" 'directory))
   (dynamic-wind
     void
@@ -234,14 +235,16 @@
          run-env
          (string->bytes/utf-8 (car entry))
          (string->bytes/utf-8 (cdr entry))))
-      (define ran?
+      (define actual-exit
         (parameterize ([current-output-port run-out]
                        [current-error-port run-out]
                        [current-environment-variables run-env]
                        [current-directory dir])
-          (apply system* exe args)))
-      (unless ran?
-        (error 'zig-smoke "emitted binary failed:\n~a" (get-output-string run-out)))
+          (apply system*/exit-code exe args)))
+      (unless (= actual-exit expected-exit)
+        (error 'zig-smoke
+               "emitted binary exited ~a, expected ~a:\n~a"
+               actual-exit expected-exit (get-output-string run-out)))
       (get-output-string run-out))
     (lambda () (delete-directory/files dir))))
 
@@ -285,6 +288,15 @@
      (string-append
       "arg-value:env-value:a\\\"b\\nc:9:captured-out:captured-err:7"
       ":alphabeta:true:true:true:true:true\n"))))
+
+(when ZIG
+  (test-case "zig/exit propagates the exact native status"
+    (define emitted
+      (compile-zig-forms
+       '(defn main [] :- Nil (zig/exit 23))))
+    (check-equal?
+     (zig-build-exe-and-run emitted #:exit-code 23)
+     "")))
 
 (when ZIG
   (test-case "imported record types and constructors lower through canonical Zig modules"
