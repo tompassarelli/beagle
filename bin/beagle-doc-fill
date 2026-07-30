@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# beagle-doc-fill: refill every compiler-owned span in the committed docs.
+#
+# Sites are listed in contrib/docfill/sites.rktd; each marked span is replaced
+# with the matching `beagle langs` view. `--check` reports drift and exits 3
+# (same convention as bin/beagle-downstream) instead of writing — that is what
+# beagle-test/tests/docfill.rkt runs, so drift fails the build.
+set -euo pipefail
+source "$(dirname "$0")/_beagle-racket"
+BEAGLE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec "$RACKET" "$BEAGLE_ROOT/beagle-lib/private/docfill.rkt" --root "$BEAGLE_ROOT" "$@"

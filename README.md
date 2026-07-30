@@ -2,7 +2,7 @@
 
 # Beagle
 
-**Typed Clojure that compiles to idiomatic Clojure, JavaScript, Nix, and Odin.**
+**Typed Clojure that compiles to idiomatic <!-- beagle:langs names -->Clojure, JavaScript, Nix, Odin, Zig, and TypeScript<!-- /beagle:langs -->.**
 One AST, many back-ends — never a lowest-common-denominator transpile.
 
 [![license](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-blue.svg)](LICENSE)
@@ -127,16 +127,24 @@ time; wrong-typed values fail at type-check time.
 
 ## Targets
 
-One AST, idiomatic output per backend — Nix as lazy attrsets, Clojure as eager
-maps, JavaScript as native arrays and arrows, Odin as structs and procs.
+One AST, idiomatic output per backend — <!-- beagle:langs idioms -->Clojure eager persistent maps, JavaScript plain objects and ES modules, Nix lazy attrsets, Odin structs and explicit context, Zig explicit allocators and error unions, TypeScript typed function boundaries over JS<!-- /beagle:langs -->.
 
-| Target     | Status                                                        |
-|------------|---------------------------------------------------------------|
-| Clojure    | Live — self-hosted, oracle-certified, fuzz-guarded            |
-| JavaScript | Live — self-hosted, oracle-certified, fuzz-guarded            |
-| Nix        | Live — self-hosted, oracle-certified, fuzz-guarded            |
-| Odin       | Live — Racket emitter (self-host port pending conformance goldens) |
-| Zig        | Live — restored Racket emitter with structural goldens        |
+The table below is generated from `beagle-lib/private/targets.rkt` by
+`bin/beagle doc-fill`; query it live with `bin/beagle langs` (`--view domains`
+for what each target is *for*).
+
+<!-- beagle:langs table -->
+| target | language | source | `#lang` | output | status |
+|---|---|---|---|---|---|
+| `clj` | Clojure | `.bclj` | `#lang beagle` | `.clj` | live — self-hosted, oracle-certified, fuzz-guarded |
+| `js` | JavaScript | `.bjs` | `#lang beagle/js` | `.js` | live — self-hosted, oracle-certified, fuzz-guarded |
+| `nix` | Nix | `.bnix` | `#lang beagle/nix` | `.nix` | live — self-hosted, oracle-certified, fuzz-guarded |
+| `odin` | Odin | `.bodin` | `#lang beagle/odin` | `.odin` | live — Racket emitter; self-host port pending conformance goldens |
+| `zig` | Zig | `.bzig` | `#lang beagle/zig` | `.zig` | live — Racket emitter with restored structural goldens |
+| `scriptc` | TypeScript | `.bsc` | `#lang beagle/scriptc` | `.ts` | live — Racket emitter over the JS lowering; experimental boundary |
+
+Six language targets. `facts` is not one of them — it is the lossless CNF fact-triple projection of the AST (`bin/beagle facts-roundtrip`), a query surface rather than a language you author against.
+<!-- /beagle:langs -->
 
 Targets are removed, not deprecated, when they stop earning their place —
 reviving one means re-wiring the emitter and proving it against a real
@@ -146,12 +154,14 @@ redundant against the native JS target; tag `cljs-final`.)
 
 ## How it compiles
 
+<!-- beagle:langs pipeline -->
 ```
-.bclj / .bjs / .bnix / .bodin / .bzig  ──▶  parse ──▶ check ──▶ emit  ──▶  .clj / .js / .nix / .odin / .zig
-                                                          ▲
-                                            macros, schema, stdlib, type narrowing
-                                            all share one AST + diagnostic path
+.bclj / .bjs / .bnix / .bodin / .bzig / .bsc  ──▶  parse ──▶ check ──▶ emit  ──▶  .clj / .js / .nix / .odin / .zig / .ts
+                                                               ▲
+                                                 macros, schema, stdlib, type narrowing
+                                                 all share one AST + diagnostic path
 ```
+<!-- /beagle:langs -->
 
 `check` is where the NixOS option schema (loaded from a cache at compile time)
 becomes typed context: unknown option paths fail at parse time, wrong-typed
@@ -256,7 +266,13 @@ Deeper dev tools stay as `bin/beagle-*` (blame, specfix, trace, cascade).
 
 - `beagle-lib/private/parse.rkt` — surface form set; the source of truth.
 - `beagle-lib/private/check.rkt` — type checker.
-- `beagle-lib/private/emit-{clj,js,nix,odin,zig}.rkt` — the live target emitters.
+- `beagle-lib/private/targets.rkt` — the canonical language-target table; every
+  target list in this repo is a rendered view of it (`bin/beagle langs`).
+<!-- beagle:langs emitters -->
+- `beagle-lib/private/emit-{clj,js,nix,odin,zig,scriptc}.rkt` — the live target emitters (one row each in
+  `beagle-lib/private/targets.rkt`, the canonical target table).
+- `beagle-lib/private/emit-facts.rkt` — the lossless CNF fact-triple projection of the AST (`bin/beagle facts-roundtrip`), a query surface rather than a language you author against.
+<!-- /beagle:langs -->
 - `beagle-lib/private/nixos-schema.rkt` — the typed NixOS-option environment.
 - `beagle-lib/private/diagnostic-kind.rkt` — the `cause-class?` taxonomy.
 - `beagle-test/` — tiered test suite; `beagle-test/tiers.rktd` is the

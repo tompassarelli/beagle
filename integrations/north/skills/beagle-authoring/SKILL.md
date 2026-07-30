@@ -2,7 +2,8 @@
 name: beagle-authoring
 description: >-
   Use WHENEVER writing, editing, or debugging Beagle source in ANY project —
-  files ending .bclj/.bcljs/.bjs/.bnix/.bgl, starting with `#lang beagle`, or
+  files with a beagle extension (any `.b*` — the live set is `beagle langs
+  --view extensions`), files starting with `#lang beagle`, or
   anything under ~/code/beagle. Establishes the repair loop is online and
   functionally working BEFORE coding; the compiler is the loop's oracle and
   the source of truth, never a static cheat sheet. NOT for relational queries
@@ -12,7 +13,7 @@ description: >-
 # Beagle authoring
 
 Beagle is a typed authoring IR — **Clojure plus types**, compiled `parse →
-check → emit` to Nix / Clj / CLJS / JS / Odin. The reason to author in Beagle
+check → emit` to <!-- beagle:langs names -->Clojure, JavaScript, Nix, Odin, Zig, and TypeScript<!-- /beagle:langs -->. The reason to author in Beagle
 at all is the **repair loop**: pointed, structured errors and machine-applicable
 repairs fed back fast. If that loop is offline or silently degraded, you are
 writing Beagle blind. So the loop comes first.
@@ -113,16 +114,18 @@ the *current* surface, **query the compiler**:
 | fields of record R? | `beagle fields R FILE...` |
 | who calls X? | `beagle callers X FILE...` |
 | what does FILE export? | `beagle provides FILE` |
+| which targets exist, for what? | `beagle langs` (`--view domains`, `--json`) |
 | change-impact of X? | `beagle impact X FILE...` |
 | macro expansion? | `beagle expand FILE` |
-| run tests | `beagle test` (active tier; `BEAGLE_ALL_TARGETS=1` for dormant) |
+| run tests | `beagle test` (active tier; per-suite env opts into gated suites) |
 | compile | `beagle build FILE [OUT]` |
 | is the repair loop healthy? | `beagle doctor [--deep]` |
 | auto-repair | `beagle repair --emit-patch` (also `beagle-trace`, `beagle-blame`, `beagle-cascade`, `beagle-specfix`) |
 
 For forms/types/stdlib themselves, **read the source** — never restate it:
 `parse.rkt` (forms), `types.rkt` (types), `stdlib-*.rkt` (externs),
-`extensions.rkt` (ext→target). The authoritative living anchor is
+`targets.rkt` (the canonical target table; `extensions.rkt` derives ext→target
+from it). The authoritative living anchor is
 **`beagle:CLAUDE.md`** — read it when you start Beagle work in a session;
 if the surface looks different than you expect, `git log` it.
 
@@ -150,16 +153,33 @@ if the surface looks different than you expect, `git log` it.
   answer falls out. Fix the code and report what was measured — don't surface
   option menus for questions the spec already settles.
 
+<!-- beagle:langs extensions -->
 | extension | target |
 |---|---|
-| `.bclj` | clj |
-| `.bcljs` | cljs |
-| `.bjs` | js |
-| `.bnix` | nix |
-| `.bgl` | target-neutral |
+| `.bclj` | `clj` (`#lang beagle`) |
+| `.bjs` | `js` (`#lang beagle/js`) |
+| `.bnix` | `nix` (`#lang beagle/nix`) |
+| `.bodin` | `odin` (`#lang beagle/odin`) |
+| `.bzig` | `zig` (`#lang beagle/zig`) |
+| `.bsc` | `scriptc` (`#lang beagle/scriptc`) |
+| `.bgl` | target-neutral — declare with `#lang beagle/<target>` or `(define-target …)` |
+| `.rkt` | legacy — no extension/header validation |
+<!-- /beagle:langs -->
 
-(Dormant: `.bsql`/`.bpy`/`.bzig`; `.bodin` → odin. `extensions.rkt` is
-authoritative.)
+Which target to reach for:
+
+<!-- beagle:langs domains -->
+- **Clojure** (`clj`, `.bclj`) — JVM and babashka Clojure: application code, tooling, and beagle's own self-hosted compiler.
+- **JavaScript** (`js`, `.bjs`) — Browser, Node, and Bun JavaScript: anything that ships to a JS runtime.
+- **Nix** (`nix`, `.bnix`) — Nix expressions type-checked against the NixOS option schema: system and package configuration.
+- **Odin** (`odin`, `.bodin`) — Native Odin for graphics and systems work against wgpu and SDL3.
+- **Zig** (`zig`, `.bzig`) — Native Zig for standalone linked executables and low-level systems code.
+- **TypeScript** (`scriptc`, `.bsc`) — A narrow TypeScript boundary over the JS lowering: typed exports for TypeScript consumers (experimental; primitive-typed defn only).
+<!-- /beagle:langs -->
+
+(Both tables are filled by `bin/beagle doc-fill` from
+`beagle-lib/private/targets.rkt`, the canonical table `extensions.rkt` itself
+derives from. Query it live with `beagle langs`.)
 
 ## 4. `Any` is opting OUT of the type system — don't reach for it (POLICY)
 

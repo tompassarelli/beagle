@@ -1,6 +1,7 @@
 # beagle — session anchor
 
-**What beagle is + live/dormant targets → `README.md`.** Don't restate here —
+**What beagle is + the live target list → `README.md`, or `bin/beagle langs`
+(rendered from `beagle-lib/private/targets.rkt`).** Don't restate here —
 that duplication is what rots. Pipeline: `parse → check → emit`, at Racket
 expand-time inside our `#%module-begin`.
 
@@ -13,7 +14,7 @@ docs go stale within a day. The compiler is the source of truth: query it
 There are **exactly two compilers**, both ordinary ahead-of-time `parse →
 check → emit`, held byte-identical by gates:
 
-1. **Racket (the oracle)** — `beagle-lib/*.rkt`, all five targets. Entry
+1. **Racket (the oracle)** — `beagle-lib/*.rkt`, all <!-- beagle:langs count -->six<!-- /beagle:langs --> targets. Entry
    points: `beagle-lib/main.rkt` (`#lang beagle`) and
    `beagle-lib/private/check-all.rkt` (`bin/beagle check/build`). Type checker
    is `check.rkt`. Verify any doubt against the require closure of
@@ -43,7 +44,7 @@ The spec is **generative** — three statements determine every surface question
 
 1. **Beagle is Clojure plus types.** Clojure surface, types threaded through.
 2. **Divergence from Clojure must be load-bearing for the type system or a backend, or it dies.** (See "Rules with teeth".)
-3. **Each target renders the same surface idiomatically** (Nix lazy attrsets, Clojure eager maps, CLJS Clojure-shaped JS). Idiomatic-per-target is not divergence.
+3. **Each target renders the same surface idiomatically** (<!-- beagle:langs idioms -->Clojure eager persistent maps, JavaScript plain objects and ES modules, Nix lazy attrsets, Odin structs and explicit context, Zig explicit allocators and error unions, TypeScript typed function boundaries over JS<!-- /beagle:langs -->). Idiomatic-per-target is not divergence.
 
 Run a form through these and one answer falls out. **Do not surface decisions the spec already determines** — fact-finds ("what does bare `{…}` mean?" → match Clojure), unfinished analysis ("N rows ambiguous" → run the load-bearing test: does the divergence buy type precision or a backend anything?), and invisible implementation choices (AST shape, helper placement) are not forks. Pick, execute, report.
 
@@ -235,9 +236,8 @@ and migrates cleanly to Fram facts — hallucination-reduction inside the one gr
 
 ### Test tiering during surface iteration
 
-`bin/beagle test` runs the **active tier only**; opt into dormant/gated
-suites with `BEAGLE_ALL_TARGETS=1` or per-suite env (`BEAGLE_ORACLE=1`,
-`BEAGLE_NIX_EVAL_CHECK=1`). Authoritative tier assignment lives in
+`bin/beagle test` runs the **active tier only**; opt into the demoted/gated
+suites with per-suite env (`BEAGLE_ORACLE=1`, `BEAGLE_NIX_EVAL_CHECK=1`). Authoritative tier assignment lives in
 `beagle-test/tiers.rktd` — read it, don't trust a hand-maintained list.
 
 Fixture migrations are test **inputs**, not demoted test code: when a

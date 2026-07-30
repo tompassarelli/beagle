@@ -6,10 +6,17 @@
 #
 # Options:
 #   --hooks        Also scaffold .claude/ hooks for the repair/check loop
-#   --target T     Default target: clj (default), js, nix, sql
+#   --target T     Default target for the scaffold; `beagle langs` lists them
+#                  all (default: clj)
 #   DIRECTORY      Project directory (default: current directory)
 
 set -euo pipefail
+
+# Target → #lang/extension comes from the generated projection of
+# beagle-lib/private/targets.rkt, so `--target` accepts exactly the targets the
+# compiler has (this is what `beagle build --target odin` always accepted and
+# `beagle init --target odin` used to reject). Regenerate: `beagle doc-fill`.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/share/targets.sh"
 
 # --- Parse args ---
 TARGET="clj"
@@ -41,17 +48,15 @@ HOOK_TEMPLATES="$BEAGLE_ROOT/share/claude-hooks"
 mkdir -p "$DIR"
 cd "$DIR"
 
-# --- Target → lang/extension ---
-# Nix is the live target; non-Nix targets are dormant and need
-# BEAGLE_ALL_TARGETS=1 at runtime, but the scaffolding can still
-# be generated against them.
-case "$TARGET" in
-    nix)  LANG="beagle/nix";  EXT="bnix" ;;
-    clj)  LANG="beagle";      EXT="bclj"  ;; # dormant
-    js)   LANG="beagle/js";   EXT="bjs"   ;; # dormant
-    sql)  LANG="beagle/sql";  EXT="bsql"  ;; # dormant
-    *)    echo "unknown target: $TARGET (nix is live; clj/js/sql are dormant)" >&2; exit 1 ;;
-esac
+# --- Target → lang/extension (derived; never hand-listed) ---
+if ! beagle_known_target "$TARGET"; then
+    echo "unknown target: $TARGET (expected $BEAGLE_TARGET_IDS_LIST)" >&2
+    exit 1
+fi
+# NOT `LANG` — that is the exported locale variable, and assigning it here
+# would leak a bogus locale into every subprocess this script runs.
+BEAGLE_LANG="${BEAGLE_TARGET_LANG[$TARGET]}"
+EXT="${BEAGLE_TARGET_SRC_EXT[$TARGET]}"
 
 # --- Detect an already-initialized project ---
 # `--hooks` on an EXISTING project should ONLY wire the repair hook — never drop
@@ -69,10 +74,10 @@ fi
 if [[ "$SCAFFOLD_PROJECT" == true && ! -f "src/main.$EXT" ]]; then
     mkdir -p src
     cat > "src/main.$EXT" << SRCEOF
-#lang $LANG
+#lang $BEAGLE_LANG
 (ns main)
 
-(def greeting "hello from beagle")
+(defn greeting [] :- String "hello from beagle")
 SRCEOF
     echo "  created src/main.$EXT"
 fi
@@ -107,9 +112,10 @@ or inspect deeper errors until delimiters pass.
 - `beagle-fields RECORD FILE...` — record field types
 - `beagle-syntax --repair --write FILE` — auto-fix delimiter errors
 
-For the form set, types, and stdlib: read `parse.rkt` and
-`stdlib-nix.rkt` in the beagle source. There is no static reference
-document — it would go stale within a day.
+For the form set, types, and stdlib: read `parse.rkt` and the
+`stdlib-*.rkt` files in the beagle source; for the target list, run
+`beagle langs`. There is no static reference document — it would go
+stale within a day.
 CLEOF
     echo "  created CLAUDE.md"
 fi

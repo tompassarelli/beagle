@@ -7,10 +7,13 @@ trap 'rm -rf "${scratch:?}"' EXIT
 
 project="$scratch/project"
 forbidden="$scratch/forbidden"
-mkdir -p "$project/bin" "$forbidden"
+mkdir -p "$project/bin" "$project/share" "$forbidden"
 
 cp "$ROOT/bin/beagle" "$ROOT/bin/_beagle-racket" \
    "$ROOT/bin/beagle-promote" "$project/bin/"
+# bin/beagle sources the generated target projection for its usage banner; a
+# real checkout always has it, so the fixture carries it too.
+cp "$ROOT/share/targets.sh" "$project/share/"
 
 daemon_log="$scratch/daemon.log"
 forbidden_log="$scratch/forbidden.log"
@@ -41,7 +44,7 @@ done
 git -C "$project" init -q
 git -C "$project" config user.name "Beagle checkout-first test"
 git -C "$project" config user.email "beagle-test@example.invalid"
-git -C "$project" add bin
+git -C "$project" add bin share
 git -C "$project" -c commit.gpgsign=false commit -qm "clean checkout"
 head_commit="$(git -C "$project" rev-parse HEAD)"
 

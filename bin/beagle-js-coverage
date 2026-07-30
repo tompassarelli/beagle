@@ -3,8 +3,8 @@
 
 (require racket/set
          beagle/private/stdlib-types
-         beagle/private/dormant/js-capabilities
-         beagle/private/dormant/stdlib-js)
+         beagle/private/js-capabilities
+         beagle/private/stdlib-js)
 
 (define js-stdlib (stdlib-for-target 'js))
 (define all-keys (list->set (hash-keys js-stdlib)))

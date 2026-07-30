@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# beagle-langs: the language-target table, rendered.
+#
+# One canonical row per target lives in beagle-lib/private/targets.rkt; every
+# view here (and every <!-- beagle:langs … --> doc span filled by
+# `beagle doc-fill`) is rendered from it, so no consumer ever re-enumerates
+# targets. See also `bin/beagle` for the command list.
+set -euo pipefail
+source "$(dirname "$0")/_beagle-racket"
+BEAGLE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec "$RACKET" "$BEAGLE_ROOT/beagle-lib/private/langs.rkt" "$@"

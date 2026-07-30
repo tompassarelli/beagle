@@ -31,21 +31,15 @@
 ;; correct: optionality is preserved (emitter code exists, structural tests
 ;; pass) at low cost (no behavioral maintenance).
 ;;
-;; --- per-target tier summary (human-readable navigation) ---
+;; --- per-target tier summary: DELETED 2026-07-30 ---
 ;;
-;; NOTE: this is a SUMMARY VIEW for navigation. The authoritative tier
-;; assignment is the file-level list below — the runner reads from there.
-;; "split" below is shorthand for "structural-active + behavioral-demoted";
-;; the runner does not know about a "split" tier.
-
-#hasheq(
-  (nix     . (active   "Load-bearing via bnix dogfood (firnos config + heist work)"))
-  (clj     . (active   "Promoted Phase D (2026-05): emit-clj structural + behavioral both active. Fixture-driven .bclj suites reconciled to v0.16 surface (claim form, no inline def/defn type annotations, defrecord+extend-type instead of deftype)"))
-  (js      . (active   "Structural + behavioral both active (promoted 2026-07-19): JS runtime-correctness seams landed (reserved-word property/method mangling fixed, effect-position if/cond lowering). emit-js-behavioral.rkt runs emitted JS under bun and is now load-bearing/blocking."))
-  (sql     . (active   "Schema-typing live in check.rkt; emitter dormant (BEAGLE_ALL_TARGETS=1). Structural-only"))
-  (odin    . (active   "Native target — Odin + wgpu/SDL3. Structural goldens + pointed rejections"))
-  (zig     . (active   "Strategic native target — restored structural goldens + pointed rejections")))
-
+;; This file used to carry a second, human-readable per-target summary datum.
+;; The runner never read it, so it rotted unchecked (it still listed the SQL
+;; target months after removal and never learned about scriptc). Nothing
+;; replaces it: which targets exist and how each is held correct is
+;; `bin/beagle langs` (rendered from beagle-lib/private/targets.rkt), and which
+;; SUITES run in which tier is the authoritative list below — the only thing
+;; the runner has ever read.
 
 ;; --- authoritative file-level classification ---
 ;;
@@ -60,6 +54,7 @@
 
              "build-edn-datum-ir.rkt"   ; #33 — --build-edn datum-IR round-trip identity (compile from facts)
              "cheatsheet.rkt"           ; capability cheatsheet — every example must parse+check
+             "docfill.rkt"              ; every compiler-owned doc span vs beagle-lib/private/targets.rkt (fix: bin/beagle doc-fill)
              "facts-render-roundtrip.rkt" ; #17 — renderer reconstructs #lang from leading (define-target)
              "cross-module-dynvar.rkt"  ; G-A — cross-module `binding` of an imported ^:dynamic var
              "world-check.rkt"          ; coherent multi-EDN candidate overlay + cross-module interfaces

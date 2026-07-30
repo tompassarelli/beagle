@@ -2,20 +2,25 @@
 # beagle-build: compile a beagle source file to target output.
 #
 # Usage:
-#   bin/beagle-build [--target TARGET] <source.bclj|.bjs|.bnix|.bzig|.bodin> [output]
+#   bin/beagle-build [--target TARGET] SOURCE [output]   # `beagle langs` lists
+#                                                        # every TARGET + ext
 #   bin/beagle-build --target zig --exe OUTPUT SOURCE... ENTRY
 #
 # If the output path is omitted, it is derived from the namespace declared
 # in the source via (ns ...) and dropped under .beagle-out/ (gitignored, so
 # throwaway emit never pollutes the tracked tree). Override the output root
 # with BEAGLE_OUT (e.g. BEAGLE_OUT=runtime/src to build into the runtime project).
-# Extension is determined by target: .clj (default), .js, .ts, .nix, .zig, .odin.
+# The output extension comes from the target table (`beagle langs --view table`).
 #
 # --target retargets a portable source through the production in-process
 # reader → parser → checker → emitter path without rewriting the source file.
 
 set -euo pipefail
 source "$(dirname "$0")/_beagle-racket"
+# Target validation and the extension map are DERIVED from
+# beagle-lib/private/targets.rkt via the generated share/targets.sh — never
+# hand-listed here. Regenerate with `bin/beagle doc-fill`.
+source "$(cd "$(dirname "$0")/.." && pwd)/share/targets.sh"
 
 target=""
 if [[ "${1:-}" == "--target" ]]; then
@@ -25,13 +30,10 @@ if [[ "${1:-}" == "--target" ]]; then
     }
     target="$2"
     shift 2
-    case "$target" in
-        clj|js|nix|zig|odin|scriptc) ;;
-        *)
-            echo "beagle-build: unsupported --target '$target' (expected clj, js, nix, zig, odin, or scriptc)" >&2
-            exit 2
-            ;;
-    esac
+    if ! beagle_known_target "$target"; then
+        echo "beagle-build: unsupported --target '$target' (expected $BEAGLE_TARGET_IDS_LIST)" >&2
+        exit 2
+    fi
 fi
 
 if [[ "${1:-}" == "--exe" ]]; then
@@ -98,40 +100,26 @@ fi
 ## detect target from file extension, then fall back to source content
 ext="clj"
 if [[ -n "$target" ]]; then
-    case "$target" in
-        scriptc) ext="c" ;;
-        *) ext="$target" ;;
-    esac
+    ext="${BEAGLE_TARGET_OUT_EXT[$target]}"
 else
-    case "$src" in
-        *.bjs)   ext="js" ;;
-        *.bsc)   ext="ts" ;;
-        *.bnix)  ext="nix" ;;
-        *.bsql)  ext="sql" ;;
-        *.bpy)   ext="py" ;;
-        *.bclj)  ext="clj" ;;
-        *.bzig)  ext="zig" ;;
-        *.bodin) ext="odin" ;;
-        *)
-            # Legacy .bgl/.rkt: detect from file content
-            if grep -qE '^\(define-target[[:space:]]+js\)' "$src" 2>/dev/null || \
-                 grep -qE '^#lang beagle/js' "$src" 2>/dev/null; then
-                ext="js"
-            elif grep -qE '^\(define-target[[:space:]]+py\)' "$src" 2>/dev/null || \
-                 grep -qE '^#lang beagle/py' "$src" 2>/dev/null; then
-                ext="py"
-            elif grep -qE '^\(define-target[[:space:]]+nix\)' "$src" 2>/dev/null || \
-                 grep -qE '^#lang beagle/nix' "$src" 2>/dev/null; then
-                ext="nix"
-            elif grep -qE '^\(define-target[[:space:]]+zig\)' "$src" 2>/dev/null || \
-                 grep -qE '^#lang beagle/zig' "$src" 2>/dev/null; then
-                ext="zig"
-            elif grep -qE '^\(define-target[[:space:]]+odin\)' "$src" 2>/dev/null || \
-                 grep -qE '^#lang beagle/odin' "$src" 2>/dev/null; then
-                ext="odin"
+    _matched=""
+    for _t in "${BEAGLE_TARGET_IDS[@]}"; do
+        if [[ "$src" == *".${BEAGLE_TARGET_SRC_EXT[$_t]}" ]]; then
+            ext="${BEAGLE_TARGET_OUT_EXT[$_t]}"
+            _matched="$_t"
+            break
+        fi
+    done
+    # Legacy .bgl/.rkt: detect from file content, same table, no second list.
+    if [[ -z "$_matched" ]]; then
+        for _t in "${BEAGLE_TARGET_IDS[@]}"; do
+            if grep -qE "^\(define-target[[:space:]]+${_t}\)" "$src" 2>/dev/null || \
+               grep -qE "^#lang ${BEAGLE_TARGET_LANG[$_t]}[[:space:]]*$" "$src" 2>/dev/null; then
+                ext="${BEAGLE_TARGET_OUT_EXT[$_t]}"
+                break
             fi
-            ;;
-    esac
+        done
+    fi
 fi
 
 if [[ $# -eq 2 ]]; then

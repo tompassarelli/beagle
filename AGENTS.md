@@ -1,7 +1,7 @@
 # beagle — agent instructions
 
-Operational quick-map for agents. **What beagle is, the live/dormant
-targets, and the surface syntax → `README.md` and the compiler — not here.**
+Operational quick-map for agents. **What beagle is, which targets are live,
+and the surface syntax → `README.md` and the compiler — not here.**
 This file deliberately restates no fact that rots (target list, form set,
 stdlib); those drift fast, so query the source of truth instead of trusting
 a stale copy. (`bin/beagle` with no args prints the full command list.)
@@ -10,7 +10,6 @@ a stale copy. (`bin/beagle` with no args prints the full command list.)
 
 ```
 bin/beagle test                       # run the test tiers
-BEAGLE_ALL_TARGETS=1 bin/beagle test  # + dormant-target tests
 raco test beagle-test/tests/parse.rkt # one file
 ```
 
@@ -37,6 +36,7 @@ There is no static reference; the surface churns. Query it:
 | the form set / surface syntax? | read `beagle-lib/private/parse.rkt` |
 | what's in the stdlib? | read `stdlib-nix.rkt` / `stdlib-portable.rkt` |
 | the full command list? | `bin/beagle` (no args) |
+| which targets exist, and for what? | `bin/beagle langs` (`--view domains`) |
 
 ## Rules with teeth
 

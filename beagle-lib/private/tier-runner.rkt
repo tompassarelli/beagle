@@ -42,9 +42,9 @@
 (define (read-manifest)
   (call-with-input-file manifest-path
     (lambda (in)
-      ;; First datum: per-target summary (informational; ignored by runner).
-      ;; Second datum: per-file classification (authoritative).
-      (read in)
+      ;; ONE datum: the per-file tier classification. (A second, purely
+      ;; informational per-target summary datum used to lead the file; it was
+      ;; deleted 2026-07-30 after rotting unread — see the manifest header.)
       (read in))))
 
 (define (files-in tier classification)

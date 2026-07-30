@@ -12,14 +12,20 @@
 ;; reference; the compiler is the source of truth" rule. Render it with
 ;; `bin/beagle-cheatsheet`.
 ;;
-;; Examples omit the file preamble for brevity. Every beagle file begins with:
-;;   #lang beagle
-;;   (ns my.module)
-;;   (define-mode strict)
-;;   (define-target clj | js | nix | odin | zig)
-;; The test prepends that preamble before checking each example.
+;; Examples omit the file preamble for brevity. Every beagle file begins with
+;; a #lang line, (ns …), (define-mode strict), and a (define-target …) naming
+;; one of the language targets — that list is rendered from targets.rkt below,
+;; never spelled out here. The test prepends that preamble before checking
+;; each example.
 
-(require racket/string)
+(require racket/string
+         "targets.rkt")
+
+;; "clj | js | nix | odin | zig | scriptc", from the canonical table.
+(define (target-alternatives)
+  (string-join (for/list ([t (in-list TARGETS)])
+                 (symbol->string (target-id t)))
+               " | "))
 
 (provide (struct-out cheat)
          CHEATSHEET
@@ -105,9 +111,10 @@
   (fprintf out "`bin/beagle-cheatsheet` from beagle-lib/private/cheatsheet.rkt; every\n")
   (fprintf out "example is parse+type-checked by the test suite, so nothing here is stale.\n\n")
   (fprintf out "Files begin with `#lang beagle`, then `(ns ...)`, `(define-mode strict)`,\n")
-  (fprintf out "and `(define-target clj | js | nix | odin | zig)`. For signatures, fields,\n")
-  (fprintf out "and the full form set, query the compiler (`bin/beagle sig|fields|syntax`,\n")
-  (fprintf out "or `bin/beagle` for all commands).\n")
+  (fprintf out "and `(define-target ~a)`.\n" (target-alternatives))
+  (fprintf out "For signatures, fields, and the full form set, query the compiler\n")
+  (fprintf out "(`bin/beagle sig|fields|syntax`, or `bin/beagle` for all commands);\n")
+  (fprintf out "for the target list itself, `bin/beagle langs`.\n")
   (for ([cat (in-list (cheat-categories))])
     (fprintf out "\n## ~a\n\n" cat)
     (for ([c (in-list CHEATSHEET)]

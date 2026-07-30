@@ -1,7 +1,9 @@
 # Value-Semantics Ownership & Type-Driven Representation Selection
 
 **Status:** Design / proposal (not yet built). 2026-06-21.
-**Scope:** Primarily the JS backend; the invariant and harness span all five targets.
+**Scope:** Primarily the JS backend; the invariant and harness span *every* language
+target (`bin/beagle langs` — this design doc deliberately points at the table rather
+than copying a count that goes stale).
 **Load-bearing consumer:** Eddy (`.eddy → Beagle/JS`) — see [§5](#5-the-load-bearing-case-eddy-the-downstream-consumer).
 **Thesis hook:** the *second axis* of owned resolution — see [§12](#12-thesis-framing-owned-resolution-second-axis).
 
@@ -301,7 +303,7 @@ This is value-resolution *owned by the language*, exactly as name-resolution is.
 The single artifact that makes the whole assertion testable.
 
 - **Shape.** A corpus of small Beagle programs, each computing values / exercising `=`,
-  `hash`, set-membership, and map-by-value-key. Compile each to **all five targets**,
+  `hash`, set-membership, and map-by-value-key. Compile each to **every target** (`bin/beagle langs`),
   run, and assert results agree against a reference oracle (the Clojure target is the
   natural oracle, since Clojure `=`/hash are the definition).
 - **Today it fails** on JS (`(= {:a 1} {:a 1})` ⇒ `false`). The deliverable is: **it
@@ -372,7 +374,7 @@ emit minimal code you own* — demonstrated at two layers, with Eddy as the proo
 composes.
 
 **Discipline (so the dissertation doesn't eat the talk):** the *talk-sized* assertion is
-"owned value-resolution: identical semantics across five targets, proven by one
+"owned value-resolution: identical semantics across every target, proven by one
 differential suite." The *research-program-sized* assertion is the full
 representation-selection-beats-Cherry result. Lead with the former; the latter is the
 field behind it.
@@ -383,8 +385,8 @@ field behind it.
 
 1. **P1 — Invariant + falsifier.** Canonical IR value-identity ([§8](#8-canonical-value-identity-in-the-ir))
    + cross-target conformance harness ([§9](#9-the-cross-target-conformance-harness-the-falsifier)).
-   Establishes the owned definition and measures current divergence across all five
-   targets. *This is what to build first — not the JS-only patch.*
+   Establishes the owned definition and measures current divergence across every
+   target. *This is what to build first — not the JS-only patch.*
 2. **P2 — JS conformance.** Type-directed `equiv` + structural `hash` in `core.js`,
    wired to `=`/`not=`/`contains?`/`distinct`/set-membership (scalar args → native ops;
    compound → `equiv`). Closes the correctness gap everywhere **except** compound keys.

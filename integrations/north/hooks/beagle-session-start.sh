@@ -169,11 +169,24 @@ is_beagle() {
   # Beagle sources at the project root or src/ (precise — NOT a broad subdir
   # scan, so a parent dir like ~ or /tmp that merely contains a beagle project
   # one level down does not trigger).
-  local g
-  for g in *.bclj *.bcljs *.bjs *.bnix *.bgl \
-           src/*.bclj src/*.bcljs src/*.bjs src/*.bnix; do
-    [ -e "$g" ] && return 0
-  done
+  # Extensions come from the generated target projection in THIS hook's own
+  # checkout (the hook ships inside the beagle repo, so readlink -f finds it
+  # even when ~/.agents/hooks symlinks it). The old hand list globbed a
+  # phantom .bcljs and never learned about .bodin/.bzig/.bsc. If the
+  # projection is unreachable the extension probe is simply skipped — the
+  # .beagle/ marker and path checks above still identify a beagle project, so
+  # no stale duplicate list is kept as a fallback.
+  local g e hook_root
+  hook_root="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")/../../.." 2>/dev/null && pwd)" || hook_root=""
+  if [ -n "$hook_root" ] && [ -f "$hook_root/share/targets.sh" ]; then
+    # shellcheck source=/dev/null
+    . "$hook_root/share/targets.sh"
+    for e in "${BEAGLE_TARGET_IDS[@]}" bgl; do
+      for g in ./*".${BEAGLE_TARGET_SRC_EXT[$e]:-$e}" ./src/*".${BEAGLE_TARGET_SRC_EXT[$e]:-$e}"; do
+        [ -e "$g" ] && return 0
+      done
+    done
+  fi
   return 1
 }
 

@@ -8,10 +8,22 @@ BIN="$BEAGLE_DIR/bin"
 # beagle-syntax) so `beagle <cmd>` is robust outside the direnv shell.
 source "$BIN/_beagle-racket"
 
+# Generated target projection of beagle-lib/private/targets.rkt (the canonical
+# table). Regenerate with `bin/beagle doc-fill`; drift fails the test suite.
+# Guarded: a partial copy of bin/ (the checkout-first gate builds one) must
+# still dispatch. It then says the table is MISSING rather than printing a
+# hand-written list, which is the whole point of generating it.
+if [[ -f "$BEAGLE_DIR/share/targets.sh" ]]; then
+    source "$BEAGLE_DIR/share/targets.sh"
+else
+    BEAGLE_TARGET_NAMES="<share/targets.sh missing — run: beagle doc-fill>"
+    BEAGLE_TARGET_COUNT="?"
+fi
+
 usage() {
-    cat >&2 <<'EOF'
-beagle — a typed Clojure subset; one AST → Clojure / ClojureScript /
-JavaScript / Nix / Zig / Odin (SQL emitter dormant; schema-typing live).
+    cat >&2 <<EOF
+beagle — a typed Clojure subset; one AST → $BEAGLE_TARGET_NAMES.
+($BEAGLE_TARGET_COUNT live targets; \`beagle langs\` renders the table.)
 
 Usage: beagle <command> [args...]
 
@@ -36,6 +48,10 @@ Query (the compiler is the source of truth):
   explain <CODE>            Diagnostic explanation (E001, …)
   explain-type <file>       Inferred types as a view
   facts-roundtrip MODE FILE Lossless source/fact projection (--emit-edn|--render)
+  langs [--json] [--view V] Language targets from the canonical table
+                            (views: names, table, extensions, domains, pipeline)
+  doc-fill [--check]        Refill every doc span the table owns
+                            (--check exits 3 on drift)
 
 Project / loop:
   init [--hooks] [--target T]  Bootstrap a project (+ portable repair hooks)
@@ -118,6 +134,8 @@ case "$cmd" in
     impact)          exec "$BIN/beagle-impact" "$@" ;;
     explain)         exec "$BIN/beagle-explain" "$@" ;;
     explain-type)    exec "$BIN/beagle-explain-type" "$@" ;;
+    langs)           exec "$BIN/beagle-langs" "$@" ;;
+    doc-fill)        exec "$BIN/beagle-doc-fill" "$@" ;;
     facts-roundtrip)
         exec bb -cp "$BEAGLE_DIR/self-host/seed" \
             -m selfhost.main facts-roundtrip "$@"

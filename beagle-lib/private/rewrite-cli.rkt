@@ -15,16 +15,18 @@
          "rewrite.rkt"
          ;; Side-effect: register all rewrite rules.
          "rewrites/drop-when.rkt"
-         "rewrites/case-to-match.rkt")
+         "rewrites/case-to-match.rkt"
+         (only-in "extensions.rkt" BEAGLE-EXTENSIONS))
 
 (define apply-changes? (make-parameter #f))
 (define list-rules? (make-parameter #f))
 
 (define (file-is-beagle? path)
+  ;; Derived from extensions.rkt (itself a view of targets.rkt) — never a
+  ;; second hand-written list. The old literal still carried ".bpy".
   (define ext (path-get-extension path))
   (and ext
-       (member (bytes->string/utf-8 ext)
-               '(".bgl" ".bclj" ".bjs" ".bnix" ".bpy" ".rkt"))
+       (member (bytes->string/utf-8 ext) BEAGLE-EXTENSIONS)
        #t))
 
 (define (collect-files target)

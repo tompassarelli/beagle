@@ -10,8 +10,9 @@
 ;; target source, and the runtime `(display)`s it.
 ;;
 ;; .bgl files must declare a target explicitly via #lang beagle/<target>
-;; or (define-target <target>). Target-specific extensions (.bclj, .bjs,
-;; .bnix, .bpy) set the target from the #lang line.
+;; or (define-target <target>). Every other beagle extension sets the target
+;; from the #lang line; the extension->target map is private/extensions.rkt,
+;; itself a view of private/targets.rkt (`bin/beagle langs --view extensions`).
 
 (require (for-syntax racket/base
                      racket/string

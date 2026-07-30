@@ -231,24 +231,22 @@ if [[ "$DEEP" == "1" ]]; then
 fi
 rm -rf "$DOC_WORK"
 
-# Target emitters — derived DYNAMICALLY from the authoritative target map
-# (extensions.rkt EXTENSION-TARGET-MAP) and classified by emitter location, so
-# the inventory never goes stale: live = beagle-lib/private/emit-<t>.rkt,
-# dormant = dormant/emit-<t>.rkt. A target the map declares but that has no
-# emitter is a soft warning, never a repair-loop failure. No hardcoded list.
+# Target emitters — the roster AND each target's declared status come from the
+# canonical table (beagle-lib/private/targets.rkt, projected into
+# share/targets.sh); this script classifies only what it can OBSERVE, namely
+# whether the declared emitter module is actually present. A declared target
+# with no emitter on disk is a soft warning, never a repair-loop failure.
 TARGETS=()
-_extmap="$BEAGLE_ROOT/beagle-lib/private/extensions.rkt"
-while IFS= read -r target; do
-    [ -n "$target" ] || continue
+source "$BEAGLE_ROOT/share/targets.sh"
+for target in "${BEAGLE_TARGET_IDS[@]}"; do
+    declared="${BEAGLE_TARGET_STATUS[$target]}"
     if [ -f "$BEAGLE_ROOT/beagle-lib/private/emit-${target}.rkt" ]; then
-        TARGETS+=("{\"name\":\"$target\",\"status\":\"live\"}")
-    elif [ -f "$BEAGLE_ROOT/beagle-lib/private/dormant/emit-${target}.rkt" ]; then
-        TARGETS+=("{\"name\":\"$target\",\"status\":\"dormant\"}")
+        TARGETS+=("{\"name\":\"$target\",\"status\":\"$declared\"}")
     else
         TARGETS+=("{\"name\":\"$target\",\"status\":\"not-built\"}")
         [[ "$STATUS" == "ok" ]] && STATUS="warning"
     fi
-done < <(grep -oE '\.[[:space:]]+[a-z]+\)' "$_extmap" 2>/dev/null | grep -oE '[a-z]+' | sort -u)
+done
 
 # --quiet: a healthy heartbeat says nothing. It speaks only when the REPAIR
 # LOOP degrades — not for a missing unused target emitter or a stale inventory.
@@ -302,10 +300,10 @@ else
     for target in "${TARGETS[@]}"; do
         name=$(echo "$target" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["name"])')
         status=$(echo "$target" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["status"])')
-        if [[ "$status" == "ok" || "$status" == "live" || "$status" == "dormant" ]]; then
+        if [[ "$status" == "ok" || "$status" == "live" ]]; then
             echo "  [$status]  $name"
         elif [[ "$status" == "not-built" ]]; then
-            echo "  [warn]    $name: declared in the extension map but no emitter built"
+            echo "  [warn]    $name: in the target table but no emitter module built"
         else
             msg=$(echo "$target" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("message",""))')
             echo "  [ERROR]   $name: $msg"
