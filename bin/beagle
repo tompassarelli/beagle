@@ -95,7 +95,7 @@ case "$cmd" in
         fi
         ;;
     build)
-        if [[ "${1:-}" == "--target" && "${3:-}" == "--exe" ]]; then
+        if [[ "${1:-}" == "--target" && ("${3:-}" == "--exe" || "${3:-}" == "--lib") ]]; then
             exec "$BIN/beagle-build" "$@"
         elif [[ "${1:-}" == "--target" ]] &&
            [[ $# -ge 3 && $# -le 4 ]]; then

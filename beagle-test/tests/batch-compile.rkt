@@ -339,6 +339,79 @@
        (get-output-string collision-output)
        "collides with generated build input")))
 
+   (test-case "public build --target zig --lib stages a library set with no entry point"
+     (define out-dir (tmp-path "zig-lib-out"))
+     (define build-output (open-output-string))
+     (define built?
+       (parameterize ([current-output-port build-output]
+                      [current-error-port build-output])
+         (system*
+          (path->string beagle-cli)
+          "build"
+          "--target"
+          "zig"
+          "--lib"
+          (path->string out-dir)
+          (path->string zig-multimodule-core)
+          (path->string zig-multimodule-bridge)
+          (path->string zig-multimodule-main))))
+     (check-true built? (get-output-string build-output))
+     (define expected-names
+       '("fram_rt_core.zig" "zig_multimodule_bridge.zig"
+         "zig_multimodule_main.zig" "beagle_rt.zig"))
+     (for ([name (in-list expected-names)])
+       (check-true (file-exists? (build-path out-dir name))
+                   (format "~a not staged in --lib OUTDIR" name)))
+     (define staged-mtimes
+       (for/hash ([name (in-list expected-names)])
+         (values name (file-or-directory-modify-seconds (build-path out-dir name)))))
+     ;; Second run of the same OUTDIR must rewrite nothing: unchanged content
+     ;; keeps its mtime.
+     (define rerun-output (open-output-string))
+     (define rerun?
+       (parameterize ([current-output-port rerun-output]
+                      [current-error-port rerun-output])
+         (system*
+          (path->string beagle-cli)
+          "build"
+          "--target"
+          "zig"
+          "--lib"
+          (path->string out-dir)
+          (path->string zig-multimodule-core)
+          (path->string zig-multimodule-bridge)
+          (path->string zig-multimodule-main))))
+     (check-true rerun? (get-output-string rerun-output))
+     (for ([name (in-list expected-names)])
+       (check-equal?
+        (file-or-directory-modify-seconds (build-path out-dir name))
+        (hash-ref staged-mtimes name)
+        (format "~a mtime changed on unchanged second --lib run" name)))
+     ;; No entry point is emitted or linked: no executable artifact appears.
+     (check-false (file-exists? (build-path out-dir "artifact")))
+
+     (define collision-output (open-output-string))
+     (define collision-built?
+       (parameterize ([current-output-port collision-output]
+                      [current-error-port collision-output])
+         (system*
+          (path->string beagle-cli)
+          "build"
+          "--target"
+          "zig"
+          "--lib"
+          (path->string (tmp-path "zig-lib-collision"))
+          "--zig-module"
+          (path->string zig-support-module-host)
+          "--zig-module"
+          (path->string zig-support-module-host)
+          (path->string zig-support-module-main))))
+     (check-false collision-built?)
+     (check-true
+      (string-contains?
+       (get-output-string collision-output)
+       "ambiguous Zig module destination 'test_host.zig'")))
+
    (test-case "ordered Zig module set emits canonical imports and links one executable"
      (define sources
        (list zig-multimodule-core

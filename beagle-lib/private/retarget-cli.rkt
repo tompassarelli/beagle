@@ -71,9 +71,10 @@
                          (eprintf "~a\n" (exn-message e))
                          (exit 1))])
         (define outputs (write-module-set! output-dir payload))
-        ;; The declared set is ordered; its final module is the executable
-        ;; entry point consumed by the shell adapter.
-        (displayln (path->string (last outputs))))]
+        ;; One path per line, declared order — an --exe caller wants the last
+        ;; line (entry); a --lib caller wants every line.
+        (for ([output (in-list outputs)])
+          (displayln (path->string output))))]
      [else
       (eprintf "~a\n" payload)
       (exit 1)])]
