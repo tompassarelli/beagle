@@ -290,6 +290,22 @@
       ":alphabeta:true:true:true:true:true\n"))))
 
 (when ZIG
+  (test-case "zig process children inherit the emitted program environment"
+    (define emitted
+      (compile-zig-string
+       (string-append
+        "(ns zig.process-env)\n"
+        "(defn main [] :- Nil\n"
+        "  (let [run-exit (zig/process-run [\"sh\" \"-c\" \"test x$BEAGLE_CHILD_ENV = xinherited\"] nil)\n"
+        "        captured (zig/process-capture [\"sh\" \"-c\" \"printf %s $BEAGLE_CHILD_ENV\"] nil)]\n"
+        "    (println (str run-exit \":\" (zig/process-result-stdout captured) \":\" (zig/process-result-exit captured)))))\n")))
+    (check-equal?
+     (zig-build-exe-and-run
+      emitted
+      #:env '(("BEAGLE_CHILD_ENV" . "inherited")))
+     "0:inherited:0\n")))
+
+(when ZIG
   (test-case "zig/exit propagates the exact native status"
     (define emitted
       (compile-zig-forms

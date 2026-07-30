@@ -6,11 +6,14 @@ const std = @import("std");
 
 var process_args: ?std.process.Args = null;
 var process_environ: ?std.process.Environ = null;
+var process_environ_map: ?std.process.Environ.Map = null;
 var unique_counter = std.atomic.Value(u64).init(0);
 
 pub fn install_process_context(init: std.process.Init.Minimal) void {
     process_args = init.args;
     process_environ = init.environ;
+    process_environ_map = init.environ.createMap(std.heap.page_allocator) catch
+        @panic("installing process environment failed");
 }
 
 pub const Splitmix64 = struct {
@@ -1296,6 +1299,11 @@ fn processCwd(cwd: ?[]const u8) std.process.Child.Cwd {
     return if (cwd) |path_value| .{ .path = path_value } else .inherit;
 }
 
+fn processEnvironMap() *const std.process.Environ.Map {
+    if (process_environ_map) |*environ_map| return environ_map;
+    @panic("process spawning requires an emitted main");
+}
+
 fn processExit(term: std.process.Child.Term) i64 {
     return switch (term) {
         .exited => |code| code,
@@ -1309,6 +1317,7 @@ pub fn process_run(argv: []const []const u8, cwd: ?[]const u8) i64 {
     var child = std.process.spawn(io(), .{
         .argv = argv,
         .cwd = processCwd(cwd),
+        .environ_map = processEnvironMap(),
     }) catch @panic("zig/process-run failed");
     return processExit(child.wait(io()) catch @panic("zig/process-run wait failed"));
 }
@@ -1321,6 +1330,7 @@ pub fn process_capture(
     const result = std.process.run(allocator, io(), .{
         .argv = argv,
         .cwd = processCwd(cwd),
+        .environ_map = processEnvironMap(),
     }) catch @panic("zig/process-capture failed");
     return .{
         .stdout = result.stdout,
