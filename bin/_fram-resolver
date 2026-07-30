@@ -8,6 +8,7 @@ find_fram_resolver() {
     for candidate in \
         "$CHARTROOM/src/resolve.clj" \
         "$CHARTROOM/resolve.clj" \
+        "$FRAM_OUT/resolve.clj" \
         "$fram_root/resolve.clj"
     do
         if [[ -f "$candidate" ]]; then
@@ -19,6 +20,7 @@ find_fram_resolver() {
     echo "Fram resolver not found; checked:" >&2
     echo "  $CHARTROOM/src/resolve.clj" >&2
     echo "  $CHARTROOM/resolve.clj" >&2
+    echo "  $FRAM_OUT/resolve.clj" >&2
     echo "  $fram_root/resolve.clj" >&2
     return 1
 }
