@@ -449,6 +449,90 @@
        (get-output-string collision-output)
        "ambiguous Zig module destination 'test_host.zig'")))
 
+   (test-case "Zig library rejects reserved support modules before staging"
+     (define reserved-runtime
+       (write-fixture!
+        "beagle_rt.zig"
+        "pub const overwritten_runtime = true;\n"))
+     (define rejected-out-dir (tmp-path "zig-lib-reserved-collision"))
+     (define rejection-output (open-output-string))
+     (define rejected?
+       (parameterize ([current-output-port rejection-output]
+                      [current-error-port rejection-output])
+         (system*
+          (path->string beagle-cli)
+          "build"
+          "--target"
+          "zig"
+          "--lib"
+          (path->string rejected-out-dir)
+          "--zig-module"
+          (path->string reserved-runtime)
+          (path->string zig-multimodule-core)
+          (path->string zig-multimodule-bridge))))
+     (check-false rejected?)
+     (check-true
+      (string-contains?
+       (get-output-string rejection-output)
+       "reserved destination 'beagle_rt.zig'"))
+     (check-false
+      (directory-exists? rejected-out-dir)
+      "reserved collision must publish no partial library directory")
+
+     (define generated-collision
+       (write-fixture!
+        "fram_rt_core.zig"
+        "pub const overwritten_generated_module = true;\n"))
+     (define generated-collision-out-dir
+       (tmp-path "zig-lib-generated-collision"))
+     (define generated-collision-output (open-output-string))
+     (define generated-collision-built?
+       (parameterize ([current-output-port generated-collision-output]
+                      [current-error-port generated-collision-output])
+         (system*
+          (path->string beagle-cli)
+          "build"
+          "--target"
+          "zig"
+          "--lib"
+          (path->string generated-collision-out-dir)
+          "--zig-module"
+          (path->string generated-collision)
+          (path->string zig-multimodule-core)
+          (path->string zig-multimodule-bridge))))
+     (check-false generated-collision-built?)
+     (check-true
+      (string-contains?
+       (get-output-string generated-collision-output)
+       "generated Zig module collides with support module destination 'fram_rt_core.zig'"))
+     (check-false
+      (directory-exists? generated-collision-out-dir)
+      "generated collision must publish no partial library directory")
+
+     (define legitimate-out-dir (tmp-path "zig-lib-legitimate-support"))
+     (define legitimate-output (open-output-string))
+     (define legitimate-built?
+       (parameterize ([current-output-port legitimate-output]
+                      [current-error-port legitimate-output])
+         (system*
+          (path->string beagle-cli)
+          "build"
+          "--target"
+          "zig"
+          "--lib"
+          (path->string legitimate-out-dir)
+          "--zig-module"
+          (path->string zig-support-module-host)
+          (path->string zig-multimodule-core)
+          (path->string zig-multimodule-bridge))))
+     (check-true legitimate-built? (get-output-string legitimate-output))
+     (check-equal?
+      (file->bytes (build-path legitimate-out-dir "test_host.zig"))
+      (file->bytes zig-support-module-host))
+     (check-equal?
+      (file->bytes (build-path legitimate-out-dir "beagle_rt.zig"))
+      (file->bytes (build-path repo-root "beagle-lib" "zig" "beagle_rt.zig"))))
+
    (test-case "ordered Zig module set emits canonical imports and links one executable"
      (define sources
        (list zig-multimodule-core

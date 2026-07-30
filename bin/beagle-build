@@ -67,6 +67,10 @@ if [[ "${1:-}" == "--exe" ]]; then
                     echo "beagle-build: Zig support module must end in .zig: $zig_module" >&2
                     exit 2
                 fi
+                if [[ "$zig_module_destination" == "beagle_rt.zig" ]]; then
+                    echo "beagle-build: Zig support module destination 'beagle_rt.zig' collides with reserved destination 'beagle_rt.zig'" >&2
+                    exit 2
+                fi
                 if [[ -n "${zig_module_sources[$zig_module_destination]+x}" ]]; then
                     echo "beagle-build: ambiguous Zig module destination '$zig_module_destination' from '${zig_module_sources[$zig_module_destination]}' and '$zig_module'" >&2
                     exit 2
@@ -187,6 +191,10 @@ if [[ "${1:-}" == "--lib" ]]; then
                     echo "beagle-build: Zig support module must end in .zig: $zig_module" >&2
                     exit 2
                 fi
+                if [[ "$zig_module_destination" == "beagle_rt.zig" ]]; then
+                    echo "beagle-build: Zig support module destination 'beagle_rt.zig' collides with reserved destination 'beagle_rt.zig'" >&2
+                    exit 2
+                fi
                 if [[ -n "${zig_module_sources[$zig_module_destination]+x}" ]]; then
                     echo "beagle-build: ambiguous Zig module destination '$zig_module_destination' from '${zig_module_sources[$zig_module_destination]}' and '$zig_module'" >&2
                     exit 2
@@ -221,8 +229,9 @@ if [[ "${1:-}" == "--lib" ]]; then
         fi
     done
     beagle_root="$(cd "$(dirname "$0")/.." && pwd)"
-    mkdir -p "$out_dir"
-    abs_out_dir="$(cd "$out_dir" && pwd)"
+    out_parent="$(dirname "$out_dir")"
+    mkdir -p "$out_parent"
+    abs_out_dir="$(cd "$out_parent" && pwd)/$(basename "$out_dir")"
     # Scratch dir keyed on OUTDIR, wiped every run: retarget-cli emits fresh
     # here so a canonical-name collision with beagle_rt.zig or a
     # --zig-module destination shows up in its listing before OUTDIR is touched.
@@ -248,6 +257,7 @@ if [[ "${1:-}" == "--lib" ]]; then
             exit 2
         fi
     done <<< "$generated"
+    mkdir -p "$out_dir"
     staged=()
     while IFS= read -r generated_path; do
         [[ -z "$generated_path" ]] && continue
