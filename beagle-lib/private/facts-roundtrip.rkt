@@ -278,14 +278,27 @@
 (define (ref-pred? p)
   (or (equal? p "child") (equal? p "tail") (fN-slot? p)))   ; fN-slot? covers fN AND f<path>~<tie>
 
+(define (beagle-file-wrapper? props id)
+  (define h (hash-ref props id (make-hash)))
+  (define head (hash-ref h "f0" #f))
+  (and (exact-integer? head)
+       (equal?
+        (hash-ref (hash-ref props head (make-hash)) "v" #f)
+        "beagle-file")))
+
 (define (edn-root props)                  ; the structural wrapper (subject never referenced)
   (define refs (make-hash))
   (for ([(s h) (in-hash props)])
     (for ([(p o) (in-hash h)]) (when (and (number? o) (ref-pred? p)) (hash-set! refs o #t))))
   (define cands (for/list ([s (in-list (hash-keys props))] #:unless (hash-ref refs s #f)) s))
-  ;; prefer the list/vector wrapper over any stray orphan, so reconstruction is
-  ;; robust even if an edge was mis-stored (don't depend on hash-key order).
+  ;; A graph may retain old list bodies through compatibility `child` edges
+  ;; after its authoritative fN slot moves. Prefer the explicit file wrapper
+  ;; before the generic list fallback so those unreachable facts cannot make
+  ;; reconstruction depend on hash-key order.
   (or (for/first ([s (in-list cands)]
+                  #:when (beagle-file-wrapper? props s))
+        s)
+      (for/first ([s (in-list cands)]
                   #:when (member (hash-ref (hash-ref props s (make-hash)) "kind" #f) '("list" "vector")))
         s)
       (and (pair? cands) (car cands))))

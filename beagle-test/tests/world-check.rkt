@@ -71,6 +71,43 @@
   (source->edn! edn source-id source-text)
   edn)
 
+(define (append-edn-lines! path lines)
+  (call-with-output-file
+   path
+   (lambda (out)
+     (for ([line (in-list lines)])
+       (displayln line out)))
+   #:exists 'append))
+
+(define (structural-edge-predicate? predicate)
+  (or (equal? predicate "child")
+      (equal? predicate "tail")
+      (regexp-match?
+       #px"^f[0-9]+(?:\\.[0-9]+)*(?:~[0-9]+)?$"
+       predicate)))
+
+(define (shift-edn-node-ids! path delta)
+  (define source-line (car (file->lines path)))
+  (define triples (read-edn-triples path))
+  (call-with-output-file
+   path
+   (lambda (out)
+     (displayln source-line out)
+     (for ([triple (in-list triples)])
+       (define subject (car triple))
+       (define predicate (cadr triple))
+       (define object (caddr triple))
+       (fprintf
+        out
+        "[~s ~s ~s]\n"
+        (+ subject delta)
+        predicate
+        (if (and (exact-integer? object)
+                 (structural-edge-predicate? predicate))
+            (+ object delta)
+            object))))
+   #:exists 'truncate/replace))
+
 (define (run-world-cli . args)
   ;; Stay on the exact runtime driving this test (Fram pins Racket 9.1).  Using
   ;; PATH here can accidentally spawn a newer system Racket and create
@@ -197,6 +234,55 @@
      (check-equal?
       (checked-world-module-source checked)
       "graph.fixture.selected"))))
+
+(test-case "explicit file wrapper wins over orphaned legacy body lists"
+  (with-world-files
+   (lambda (root _provider-source _consumer-source)
+     (define selected-edn (build-path root "selected-with-orphans.edn"))
+     (source->edn!
+      selected-edn
+      "graph.fixture.selected"
+      "#lang beagle/clj\n(def answer :- Int 42)\n")
+     ;; Match the stable IDs of the post-commit Fram regression so the old
+     ;; hash-order root heuristic deterministically selects an orphan body.
+     (shift-edn-node-ids! selected-edn 1543)
+     ;; Fram's historical `child` overlay can retain old list bodies after the
+     ;; authoritative fN slot moves. They are harmless unreachable facts, but
+     ;; they must not outrank the explicit beagle-file wrapper as EDN root.
+     (append-edn-lines!
+      selected-edn
+      '("[1936 \"kind\" \"list\"]"
+        "[1938 \"kind\" \"symbol\"]"
+        "[1938 \"v\" \"orphan-a\"]"
+        "[1936 \"f0\" 1938]"
+        "[2186 \"kind\" \"list\"]"
+        "[2188 \"kind\" \"symbol\"]"
+        "[2188 \"v\" \"orphan-b\"]"
+        "[2186 \"f0\" 2188]"))
+     (define result
+       (check-edn-world
+        (list selected-edn)
+        #:check-sources '("graph.fixture.selected")))
+     (check-true
+      (world-check-result-ok? result)
+      (diagnostic-text result)))))
+
+(test-case "an unwrapped candidate remains a malformed world"
+  (with-world-files
+   (lambda (root _provider-source _consumer-source)
+     (define malformed-edn (build-path root "unwrapped.edn"))
+     (call-with-output-file
+      malformed-edn
+      (lambda (out)
+        (displayln "@file graph.fixture.unwrapped" out)
+        (for ([line (in-list (datum->edn-lines '(def answer :- Int 42)))])
+          (displayln line out)))
+      #:exists 'truncate/replace)
+     (define result (check-edn-world (list malformed-edn)))
+     (check-false (world-check-result-ok? result))
+     (check-regexp-match
+      #rx"EDN root is not a beagle-file wrapper"
+      (diagnostic-text result)))))
 
 (test-case "CLI source selector returns one atomic JSON receipt"
   (with-world-files
