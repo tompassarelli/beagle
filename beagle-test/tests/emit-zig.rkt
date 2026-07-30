@@ -307,6 +307,17 @@
      "0:inherited:0\n")))
 
 (when ZIG
+  (test-case "zig equality compares process exit codes with Int literals"
+    (define emitted
+      (compile-zig-string
+       (string-append
+        "(ns zig.process-exit-equality)\n"
+        "(defn main [] :- Nil\n"
+        "  (let [result (zig/process-capture [\"sh\" \"-c\" \"exit 0\"] nil)]\n"
+        "    (println (= (zig/process-result-exit result) 0))))\n")))
+    (check-equal? (zig-build-exe-and-run emitted) "true\n")))
+
+(when ZIG
   (test-case "zig/exit propagates the exact native status"
     (define emitted
       (compile-zig-forms
