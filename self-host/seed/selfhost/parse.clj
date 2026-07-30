@@ -737,8 +737,12 @@
    pairs []]
   (cond
   (>= i n) (make-map pairs)
+  (let [item (nth items i)]
+  (and (vector? item) (> (count item) 0) (or (= (nth item 0) "inherit") (= (nth item 0) "inherit-from")))) (recur (+ i 1) (conj pairs {"key" (parse-expr* (nth items i)) "val" FALSE-LITERAL}))
   (< (+ i 1) n) (recur (+ i 2) (conj pairs {"key" (parse-expr* (nth items i)) "val" (parse-expr* (nth items (+ i 1)))}))
-  :else (make-map pairs)))))
+  :else (do
+  (err! (str "map literal: odd number of forms (expected key/value pair after position " (count pairs) ")"))
+  (make-map pairs))))))
 
 (defn- bare-multi-arity-clauses [args]
   (cond
@@ -1677,7 +1681,16 @@
   (and (= (get node "node") "nix-assert") (= (get node "cond") {"node" "ref" "name" "cnd"}))))
   (expect! "nix: (rec-attrs k v ...) -> nix-rec-attrs, symbol keys" (let [node (parse-expr* ["rec-attrs" "hostName" ["#%string" "h"]])]
   (and (= (get node "node") "nix-rec-attrs") (= (nth (get node "pairs") 0) {"key" "hostName" "val" {"node" "literal" "kind" "string" "value" "h"}}))))
+  (do
   (expect! "nix: (inherit a b) -> nix-inherit" (= (parse-expr* ["inherit" "a" "b"]) {"node" "nix-inherit" "names" ["a" "b"]}))
+  (expect! "nix: map literal keeps singleton inherit before ordinary pairs" (= (parse-map-literal [["inherit" "pkgs"] ":beagle" "beagle"]) {"node" "map" "pairs" [{"key" {"node" "nix-inherit" "names" ["pkgs"]} "val" FALSE-LITERAL} {"key" {"node" "literal" "kind" "keyword" "value" "beagle"} "val" {"node" "ref" "name" "beagle"}}]}))
+  (expect! "nix: map literal keeps singleton inherit-from" (= (parse-map-literal [["inherit-from" "inputs" "north"]]) {"node" "map" "pairs" [{"key" {"node" "nix-inherit-from" "ns-expr" {"node" "ref" "name" "inputs"} "names" ["north"]} "val" FALSE-LITERAL}]}))
+  (expect! "map literal rejects an unpaired non-inherit tail" (let [_ (reset-errors!)
+   _ (parse-map-literal [":a" 1 ":dangling"])
+   errs (parse-errors)
+   rejected (and (= (count errs) 1) (str/includes? (nth errs 0) "map literal: odd number of forms"))]
+  (reset-errors!)
+  rejected)))
   (expect! "nix: (inherit-from (ns) a) -> nix-inherit-from" (let [node (parse-expr* ["inherit-from" "pkgs" "a"])]
   (and (= (get node "node") "nix-inherit-from") (= (get node "ns-expr") {"node" "ref" "name" "pkgs"}) (= (get node "names") ["a"]))))
   (expect! "nix: (get-or base path default) -> nix-get-or" (let [node (parse-expr* ["get-or" "m" "foo" ["#%string" "d"]])]
