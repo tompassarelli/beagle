@@ -982,6 +982,9 @@
   (cond
     [(type-prim? t)
      (not (memq (type-prim-name t) '(Any Regex Ctx Symbol)))]
+    [(dynamic-type? t)
+     (and (pair? (type-app-args t))
+          (andmap collection-value-contract? (type-app-args t)))]
     [(type-app? t)
      (and (memq (type-app-ctor t) COLLECTION-CTORS)
           (andmap collection-value-contract? (type-app-args t)))]
