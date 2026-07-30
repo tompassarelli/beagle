@@ -281,7 +281,7 @@
       (compile-zig-src cli-runtime)
       #:args '("arg-value")
       #:env '(("BEAGLE_CLI_TEST_VALUE" . "env-value")))
-     "arg-value:env-value:a\\\"b\\nc\n")))
+     "arg-value:env-value:a\\\"b\\nc:9:captured-out:captured-err:7\n")))
 
 (when ZIG
   (test-case "imported record types and constructors lower through canonical Zig modules"

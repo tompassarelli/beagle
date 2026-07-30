@@ -14,6 +14,24 @@
    (type-fn (list (p 'String))
             #f
             (type-union (list (p 'String) (p 'Nil))))
+   'zig/process-run
+   (type-fn
+    (list (type-app 'Vec (list (p 'String)))
+          (type-union (list (p 'String) (p 'Nil))))
+    #f
+    (p 'Int))
+   'zig/process-capture
+   (type-fn
+    (list (type-app 'Vec (list (p 'String)))
+          (type-union (list (p 'String) (p 'Nil))))
+    #f
+    (p 'zig/ProcessResult))
+   'zig/process-result-stdout
+   (fn-of '(zig/ProcessResult) 'String)
+   'zig/process-result-stderr
+   (fn-of '(zig/ProcessResult) 'String)
+   'zig/process-result-exit
+   (fn-of '(zig/ProcessResult) 'Int)
    'zig/monotonic-ms (fn-of '() 'Int)
    'zig/unix-ms (fn-of '() 'Int)
    'zig/unique-id (fn-of '() 'String)

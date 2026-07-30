@@ -3,12 +3,24 @@ const std = @import("std");
 const rt = @import("beagle_rt.zig");
 pub const Ctx = rt.Ctx;
 
+pub const RUN_COMMAND: []const []const u8 = &.{ "sh", "-c", "exit 9" };
+
+pub const CAPTURE_COMMAND: []const []const u8 = &.{ "sh", "-c", "printf captured-out; printf captured-err >&2; exit 7" };
+
 pub fn cliArgs(__ctx: *rt.Ctx) []const []const u8 {
     return rt.args(__ctx.tick);
 }
 
 pub fn envValue(__ctx: *rt.Ctx, name: []const u8) ?[]const u8 {
     return rt.getenv(__ctx.tick, name);
+}
+
+pub fn runProcess(argv: []const []const u8, cwd: ?[]const u8) i64 {
+    return rt.process_run(argv, cwd);
+}
+
+pub fn captureProcess(__ctx: *rt.Ctx, argv: []const []const u8, cwd: ?[]const u8) rt.ProcessResult {
+    return rt.process_capture(__ctx.tick, argv, cwd);
 }
 
 pub fn monotonicNow() i64 {
@@ -30,7 +42,9 @@ pub fn escaped(__ctx: *rt.Ctx, value: []const u8) []const u8 {
 pub fn __beagle_main(__ctx: *rt.Ctx) void {
     const argv = rt.args(__ctx.tick);
     const value = rt.getenv(__ctx.tick, "BEAGLE_CLI_TEST_VALUE");
-    _ = rt.println(rt.str1(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str1(__ctx.tick, rt.nth(argv, 1)), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, (if ((value != null)) value else "missing"))), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, rt.json_escape(__ctx.tick, "a\"b\nc")))));
+    const run_exit = rt.process_run(RUN_COMMAND, null);
+    const captured = rt.process_capture(__ctx.tick, CAPTURE_COMMAND, null);
+    _ = rt.println(rt.str1(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str2(__ctx.tick, rt.str1(__ctx.tick, rt.nth(argv, 1)), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, (if ((value != null)) value else "missing"))), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, rt.json_escape(__ctx.tick, "a\"b\nc"))), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, run_exit)), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, rt.process_result_stdout(captured))), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, rt.process_result_stderr(captured))), rt.str1(__ctx.tick, ":")), rt.str1(__ctx.tick, rt.process_result_exit(captured)))));
 }
 
 pub fn main(__process: std.process.Init.Minimal) void {

@@ -1286,6 +1286,61 @@ pub fn getenv(allocator: std.mem.Allocator, name: []const u8) ?[]const u8 {
     };
 }
 
+pub const ProcessResult = struct {
+    stdout: []const u8,
+    stderr: []const u8,
+    exit_code: i64,
+};
+
+fn processCwd(cwd: ?[]const u8) std.process.Child.Cwd {
+    return if (cwd) |path_value| .{ .path = path_value } else .inherit;
+}
+
+fn processExit(term: std.process.Child.Term) i64 {
+    return switch (term) {
+        .exited => |code| code,
+        .signal => |signal| 128 + @as(i64, @intFromEnum(signal)),
+        .stopped => |signal| 128 + @as(i64, @intFromEnum(signal)),
+        .unknown => |code| code,
+    };
+}
+
+pub fn process_run(argv: []const []const u8, cwd: ?[]const u8) i64 {
+    var child = std.process.spawn(io(), .{
+        .argv = argv,
+        .cwd = processCwd(cwd),
+    }) catch @panic("zig/process-run failed");
+    return processExit(child.wait(io()) catch @panic("zig/process-run wait failed"));
+}
+
+pub fn process_capture(
+    allocator: std.mem.Allocator,
+    argv: []const []const u8,
+    cwd: ?[]const u8,
+) ProcessResult {
+    const result = std.process.run(allocator, io(), .{
+        .argv = argv,
+        .cwd = processCwd(cwd),
+    }) catch @panic("zig/process-capture failed");
+    return .{
+        .stdout = result.stdout,
+        .stderr = result.stderr,
+        .exit_code = processExit(result.term),
+    };
+}
+
+pub fn process_result_stdout(result: ProcessResult) []const u8 {
+    return result.stdout;
+}
+
+pub fn process_result_stderr(result: ProcessResult) []const u8 {
+    return result.stderr;
+}
+
+pub fn process_result_exit(result: ProcessResult) i64 {
+    return result.exit_code;
+}
+
 pub fn monotonic_ms() i64 {
     return std.Io.Clock.awake.now(io()).toMilliseconds();
 }

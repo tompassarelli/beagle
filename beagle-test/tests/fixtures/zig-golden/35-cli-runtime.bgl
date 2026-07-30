@@ -1,11 +1,25 @@
 (ns cli.runtime)
 (define-target zig)
 
+(def RUN-COMMAND :- (Vec String)
+  ["sh" "-c" "exit 9"])
+
+(def CAPTURE-COMMAND :- (Vec String)
+  ["sh" "-c" "printf captured-out; printf captured-err >&2; exit 7"])
+
 (defn cli-args [] :- (Vec String)
   (zig/args))
 
 (defn env-value [name :- String] :- String?
   (zig/getenv name))
+
+(defn run-process [argv :- (Vec String) cwd :- String?] :- Int
+  (zig/process-run argv cwd))
+
+(defn capture-process
+  [argv :- (Vec String) cwd :- String?]
+  :- zig/ProcessResult
+  (zig/process-capture argv cwd))
 
 (defn monotonic-now [] :- Int
   (zig/monotonic-ms))
@@ -21,10 +35,20 @@
 
 (defn main [] :- Nil
   (let [argv (zig/args)
-        value (zig/getenv "BEAGLE_CLI_TEST_VALUE")]
+        value (zig/getenv "BEAGLE_CLI_TEST_VALUE")
+        run-exit (zig/process-run RUN-COMMAND nil)
+        captured (zig/process-capture CAPTURE-COMMAND nil)]
     (println
      (str (nth argv 1)
           ":"
           (if (some? value) value "missing")
           ":"
-          (zig/json-escape "a\"b\nc")))))
+          (zig/json-escape "a\"b\nc")
+          ":"
+          run-exit
+          ":"
+          (zig/process-result-stdout captured)
+          ":"
+          (zig/process-result-stderr captured)
+          ":"
+          (zig/process-result-exit captured)))))

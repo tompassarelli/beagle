@@ -20,6 +20,7 @@
          racket/list
          "ast.rkt"
          "types.rkt"
+         "stdlib-zig.rkt"
          "module-interface.rkt"
          "emit-dispatch.rkt")
 
@@ -1359,6 +1360,9 @@
           (= (length (call-form-args v)) 1)
           (atom-type? expected))
      (emit-atom-constructor (car (call-form-args v)) expected)]
+    [(and expected (optional-of expected))
+     (parameterize ([raw-optional? #t])
+       (emit-expr v))]
     [(and expected (closed-sum-type? expected))
      (define actual (expr-static-type v))
      (cond
@@ -2342,8 +2346,11 @@
      (format "rt.compare(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
     [(qualified-rt-name fn)
      => (lambda (rt-fn)
+          (define fn-type
+            (or (hash-ref (current-externs) fn #f)
+                (hash-ref STDLIB-ZIG fn #f)))
           (define emitted
-            (emit-typed-args args (hash-ref (current-externs) fn #f)))
+            (emit-typed-args args fn-type))
           (define basename
             (let ([m (regexp-match #rx"/([^/]+)$" (symbol->string fn))])
               (and m (cadr m))))
@@ -2352,7 +2359,8 @@
                  (member basename
                          '("lower-case" "upper-case" "join" "replace"
                            "split" "split-lines" "path"
-                           "args" "getenv" "unique-id" "json-escape"))))
+                           "args" "getenv" "process-capture"
+                           "unique-id" "json-escape"))))
           (define imported
             (let ([match
                    (regexp-match
