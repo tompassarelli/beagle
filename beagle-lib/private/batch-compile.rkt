@@ -30,6 +30,7 @@
 (require "parse.rkt"
          "check.rkt"
          "emit.rkt"
+         "emit-zig.rkt"
          "lint.rkt"
          "module-interface.rkt")
 
@@ -141,6 +142,48 @@
    #:source-path (module-source-source-id source)
    #:module-resolver resolver))
 
+(define (programs->interface-sources entries)
+  (for/list ([entry (in-list entries)])
+    (define source (car entry))
+    (define prog (cdr entry))
+    (struct-copy
+     module-source
+     source
+     [interface
+      (program->module-interface
+       prog
+       #:source-id (module-source-source-id source)
+       #:datums (module-source-datums source))])))
+
+(define (interface-digests sources)
+  (for/list ([source (in-list sources)])
+    (module-interface-digest (module-source-interface source))))
+
+;; A public signature may mention an alias imported from another declared
+;; module.  The bootstrap interface intentionally treats that name as opaque;
+;; reparsing once resolves the direct import, but a third module must consume
+;; the rebuilt signature rather than the bootstrap placeholder.  Advance the
+;; complete declared set until its public interface digests stop changing.
+(define (stabilize-interface-world initial-sources)
+  (let loop ([sources initial-sources]
+             [remaining (add1 (length initial-sources))])
+    (define resolver (overlay-resolver (source-overlay sources)))
+    (define programs
+      (for/list ([source (in-list sources)])
+        (cons source (parse-module-source source resolver))))
+    (define next-sources (programs->interface-sources programs))
+    (cond
+      [(equal? (interface-digests sources)
+               (interface-digests next-sources))
+       (values next-sources programs)]
+      [(zero? remaining)
+       (error
+        'compile-source-set
+        "declared module interfaces did not stabilize after ~a pass(es)"
+        (add1 (length initial-sources)))]
+      [else
+       (loop next-sources (sub1 remaining))])))
+
 (define (compile-source-set source-paths
                             #:root [root-str #f]
                             #:target [target 'zig])
@@ -163,44 +206,45 @@
     (define bootstrap-programs
       (for/list ([source (in-list sources)])
         (cons source (parse-module-source source bootstrap-resolver))))
-    (define authoritative-sources
-      (for/list ([entry (in-list bootstrap-programs)])
-        (define source (car entry))
-        (define prog (cdr entry))
-        (struct-copy
-         module-source
-         source
-         [interface
-          (program->module-interface
-           prog
-           #:source-id (module-source-source-id source)
-           #:datums (module-source-datums source))])))
-    (define authoritative-overlay (source-overlay authoritative-sources))
-    (define authoritative-resolver (overlay-resolver authoritative-overlay))
-    (define programs
-      (for/list ([source (in-list authoritative-sources)])
-        (cons source (parse-module-source source authoritative-resolver))))
+    (define bootstrap-interface-sources
+      (programs->interface-sources bootstrap-programs))
+    (define-values (_authoritative-sources programs)
+      (stabilize-interface-world bootstrap-interface-sources))
+    (define zig-dynamic-abi
+      (and (eq? target 'zig)
+           (make-zig-dynamic-abi (map cdr programs))))
     ;; Compile into private memory in declaration order.  No bytes escape this
     ;; function unless the complete set succeeds; emitting beside each check
     ;; also keeps target-local checker registries scoped to that module rather
     ;; than leaking a later consumer's imported union table into its provider.
     (define compiled '())
+    (define zig-allocation-modes (make-hasheq))
     (for ([entry (in-list programs)])
       (define source (car entry))
       (define prog (cdr entry))
-      (type-check-with-locs!
-       prog
-       (lambda (e _loc-stx) (raise e))
-       #:capture-types? #t)
+      (parameterize
+          ([current-imported-allocation-modes zig-allocation-modes])
+        (type-check-with-locs!
+         prog
+         (lambda (e _loc-stx) (raise e))
+         #:capture-types? #t))
       (unless (getenv "BEAGLE_NO_LINT")
         (lint-program! prog))
+      (when (eq? target 'zig)
+        (for ([(name mode)
+               (in-hash (zig-program-allocation-modes prog))])
+          (hash-set! zig-allocation-modes name mode)))
       (set!
        compiled
        (cons
         (compiled-source
          (module-source-namespace source)
          (module-source-source-id source)
-         (emit-program prog))
+         (parameterize
+             ([current-zig-dynamic-abi zig-dynamic-abi]
+              [current-zig-world-allocation-modes
+               zig-allocation-modes])
+           (emit-program prog)))
         compiled)))
     (values 'ok (reverse compiled))))
 

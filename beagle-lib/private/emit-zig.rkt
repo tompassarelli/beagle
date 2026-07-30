@@ -119,6 +119,83 @@
 (define current-dynamic-arms (make-parameter (hasheq)))
 (define current-requires (make-parameter (hasheq))) ; use-site prefix sym → namespace sym
 
+;; Closed dynamic unions are nominal Zig types.  A multi-module build therefore
+;; assigns each structural Dyn contract to one declared owner and makes every
+;; module reference that exact exported declaration.  Without this world-level
+;; table, equal Beagle types become unrelated module-local Dyn0 unions.
+(struct zig-dynamic-abi-entry (type namespace name) #:transparent)
+(struct zig-dynamic-abi (entries by-type) #:transparent)
+(define current-zig-dynamic-abi (make-parameter #f))
+(define current-zig-world-allocation-modes (make-parameter (hasheq)))
+
+(define (program-dynamic-types prog)
+  (define seen (make-hash))
+  (define out '())
+  (define (add! ty)
+    (unless (hash-has-key? seen ty)
+      (hash-set! seen ty #t)
+      (set! out (cons ty out))))
+  (define (walk-type! ty)
+    (cond
+      [(dynamic-type? ty)
+       (add! ty)
+       (for ([alt (in-list (type-app-args ty))]) (walk-type! alt))]
+      [(type-app? ty)
+       (for ([arg (in-list (type-app-args ty))]) (walk-type! arg))]
+      [(type-union? ty)
+       (for ([alt (in-list (type-union-alts ty))]) (walk-type! alt))]
+      [(type-fn? ty)
+       (for ([param (in-list (type-fn-params ty))]) (walk-type! param))
+       (when (type-fn-rest-type ty)
+         (walk-type! (type-fn-rest-type ty)))
+       (walk-type! (type-fn-ret ty))]
+      [else (void)]))
+  (define (walk-ast! value)
+    (cond
+      [(type? value) (walk-type! value)]
+      [(struct? value)
+       (for ([field (in-vector (struct->vector value))]
+             [i (in-naturals)]
+             #:when (positive? i))
+         (walk-ast! field))]
+      [(pair? value)
+       (walk-ast! (car value))
+       (walk-ast! (cdr value))]
+      [(vector? value)
+       (for ([item (in-vector value)]) (walk-ast! item))]
+      [else (void)]))
+  ;; Prefer the earliest declared alias owner.  `beagle build --exe` already
+  ;; takes provider modules before the final entry module, so this keeps the
+  ;; shared ABI in the foundational type module instead of a consumer.
+  (for ([name (in-list
+               (sort (hash-keys (program-declared-type-aliases prog))
+                     symbol<?))])
+    (walk-type! (hash-ref (program-declared-type-aliases prog) name)))
+  (for ([form (in-list (program-forms prog))]) (walk-ast! form))
+  (for ([extern-type
+         (in-list
+          (sort (hash-values (program-externs prog))
+                string<?
+                #:key type->string))])
+    (walk-type! extern-type))
+  (reverse out))
+
+(define (make-zig-dynamic-abi programs)
+  (define by-type (make-hash))
+  (define next-index (make-hasheq))
+  (define entries '())
+  (for ([prog (in-list programs)])
+    (define namespace (program-namespace prog))
+    (for ([ty (in-list (program-dynamic-types prog))])
+      (unless (hash-has-key? by-type ty)
+        (define index (hash-ref next-index namespace 0))
+        (define entry
+          (zig-dynamic-abi-entry ty namespace (format "Dyn~a" index)))
+        (hash-set! next-index namespace (add1 index))
+        (hash-set! by-type ty entry)
+        (set! entries (cons entry entries)))))
+  (zig-dynamic-abi (reverse entries) by-type))
+
 (define (string-prim-type? t)
   (and (type-prim? t) (eq? (type-prim-name t) 'String)))
 
@@ -260,6 +337,33 @@
 
 ;; record name → field params (ordered), local + imported.
 (define (build-record-table prog)
+  (define imported-record-namespaces (program-imported-record-ns prog))
+  (define (qualify-imported-records type)
+    (cond
+      [(type-prim? type)
+       (define name (type-prim-name type))
+       (define namespace
+         (and
+          (not (regexp-match? #rx"/" (symbol->string name)))
+          (hash-ref imported-record-namespaces name #f)))
+       (if namespace
+           (type-prim
+            (string->symbol (format "~a/~a" namespace name)))
+           type)]
+      [(type-app? type)
+       (type-app
+        (type-app-ctor type)
+        (map qualify-imported-records (type-app-args type)))]
+      [(type-union? type)
+       (type-union
+        (map qualify-imported-records (type-union-alts type)))]
+      [(type-fn? type)
+       (type-fn
+        (map qualify-imported-records (type-fn-params type))
+        (and (type-fn-rest-type type)
+             (qualify-imported-records (type-fn-rest-type type)))
+        (qualify-imported-records (type-fn-ret type)))]
+      [else type]))
   (define local
     (for/fold ([h (hasheq)]) ([f (in-list (program-forms prog))])
       (cond
@@ -280,8 +384,10 @@
      (for/list ([field-name (in-list field-order)])
        (define field (string->symbol field-name))
        (param field
-              (hash-ref field-types
-                        (string->symbol (string-append ":" field-name))))))))
+              (qualify-imported-records
+               (hash-ref
+                field-types
+                (string->symbol (string-append ":" field-name)))))))))
 
 ;; Opaque runtime-handle types: prim type names that appear in a
 ;; non-core extern's signature but are neither beagle primitives nor a
@@ -320,6 +426,7 @@
 
 (define current-records (make-parameter (hasheq)))
 (define current-imported-record-ns (make-parameter (hasheq)))
+(define current-imported-record-accessors (make-parameter (hasheq)))
 (define current-referred-bindings (make-parameter (hasheq)))
 (define current-externs (make-parameter (hasheq))) ; declared-extern name → type
 (define current-fn-returns (make-parameter (hasheq))) ; local defn name → return type
@@ -340,6 +447,29 @@
            (eq? (hash-ref (current-fn-allocation-modes) name #f) 'hidden))
       NATIVE-MAIN-IMPL
       (fn-ident name)))
+
+(define (canonical-imported-fn namespace name)
+  (string->symbol (format "~a/~a" namespace name)))
+
+(define (imported-call-args namespace name emitted)
+  (if
+      (eq?
+       (hash-ref
+        (current-zig-world-allocation-modes)
+        (canonical-imported-fn namespace name)
+        #f)
+       'hidden)
+      (cons
+       (or
+        (current-allocation-ctx)
+        (unsupported
+         "allocator context"
+         (format
+          "calling allocating function ~a/~a from a pure function"
+          namespace
+          name)))
+       emitted)
+      emitted))
 ;; opaque-handle type-name sym → owning Zig module string (los_yaml, ...).
 ;; An opaque handle is a runtime-module type beagle threads but never
 ;; builds/inspects (the YAML parse-tree handle is the motivating case); it
@@ -801,6 +931,21 @@
 (define BINARY-OPS (hasheq '< "<" '> ">" '<= "<=" '>= ">="))
 
 (define (emit-args args) (map emit-expr args))
+
+(define (emit-equality-operand value counterpart)
+  (define counterpart-type (expr-static-type counterpart))
+  (define concrete-counterpart
+    (or (and counterpart-type (optional-of counterpart-type))
+        counterpart-type))
+  ;; Zig leaves a source integer literal as `comptime_int`; rt.eq correctly
+  ;; rejects unrelated runtime numeric types, so give a Beagle Int literal its
+  ;; canonical i64 representation when the other side establishes that type.
+  (if (and (exact-integer? value)
+           (type-prim? concrete-counterpart)
+           (eq? (type-prim-name concrete-counterpart) 'Int))
+      (format "@as(i64, ~a)" value)
+      (emit-expr value)))
+
 (define (emit-typed-args args fn-type)
   (define fixed (and (type-fn? fn-type) (type-fn-params fn-type)))
   (define rest-type (and (type-fn? fn-type) (type-fn-rest-type fn-type)))
@@ -1740,6 +1885,15 @@
   (cond
     [(dynamic-condition-info e) => emit-dynamic-condition]
     [(not (symbol? fn)) (unsupported "higher-order call" "fn position must be a name in v1")]
+    [(hash-ref (current-imported-record-accessors) fn #f)
+     => (lambda (field)
+          (unless (= (length args) 1)
+            (unsupported
+             "record accessor arity"
+             (format "~a expects one record value" fn)))
+          (format "(~a).~a"
+                  (emit-expr (car args))
+                  (ident field)))]
     [(and (eq? fn 'atom) (= (length args) 1))
      (define inferred (expr-static-type e))
      (emit-atom-constructor
@@ -1772,12 +1926,14 @@
             [constructor
              (emit-ctor (string->symbol (cadr constructor)) args module)]
             [else
+             (define emitted
+               (emit-typed-args args (hash-ref (current-externs) fn #f)))
              (format
               "~a.~a(~a)"
               module
               (fn-ident fn)
               (string-join
-               (emit-typed-args args (hash-ref (current-externs) fn #f))
+               (imported-call-args namespace fn emitted)
                ", "))]))]
     [(qualified-record-ctor fn)
      => (lambda (ctor)
@@ -1968,9 +2124,15 @@
     ;; clojure = / not= : content equality (rt.eq handles strings vs scalars
     ;; at comptime — slice == would compare pointers). nil cases handled above.
     [(and (eq? fn '=) (= 2 (length args)))
-     (format "rt.eq(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
+     (format
+      "rt.eq(~a, ~a)"
+      (emit-equality-operand (car args) (cadr args))
+      (emit-equality-operand (cadr args) (car args)))]
     [(and (eq? fn 'not=) (= 2 (length args)))
-     (format "(!rt.eq(~a, ~a))" (emit-expr (car args)) (emit-expr (cadr args)))]
+     (format
+      "(!rt.eq(~a, ~a))"
+      (emit-equality-operand (car args) (cadr args))
+      (emit-equality-operand (cadr args) (car args)))]
     [(hash-ref VARIADIC-OPS fn #f)
      => (lambda (op)
           (when (null? args) (unsupported (format "(~a) with no arguments" fn)))
@@ -2187,12 +2349,28 @@
                  (member basename
                          '("lower-case" "upper-case" "join" "replace"
                            "split" "split-lines" "path"))))
+          (define imported
+            (let ([match
+                   (regexp-match
+                    #rx"^([^/]+)/(.+)$"
+                    (symbol->string fn))])
+              (and
+               match
+               (let* ([prefix (string->symbol (cadr match))]
+                      [namespace (hash-ref (current-requires) prefix #f)])
+                 (and namespace
+                      (not (memq namespace ZIG-CORE-NAMESPACES))
+                      (cons namespace (string->symbol (caddr match))))))))
           (format "~a(~a)"
                   rt-fn
                   (string-join
-                   (if allocator-bearing?
-                       (cons (allocation-allocator) emitted)
-                       emitted)
+                   (cond
+                     [allocator-bearing?
+                      (cons (allocation-allocator) emitted)]
+                     [imported
+                      (imported-call-args
+                       (car imported) (cdr imported) emitted)]
+                     [else emitted])
                    ", ")))]
     [(regexp-match #rx"^->(.+)$" (symbol->string fn))
      => (lambda (m) (emit-ctor (string->symbol (cadr m)) args))]
@@ -2998,6 +3176,13 @@
          'explicit
          'hidden))))
 
+(define (zig-program-allocation-modes prog)
+  (for/hasheq
+      ([(name mode) (in-hash (build-fn-allocation-modes prog))])
+    (values
+     (canonical-imported-fn (program-namespace prog) name)
+     mode)))
+
 (define (program-main-defn prog)
   (for/first ([raw-form (in-list (program-forms prog))]
               #:do [(define form
@@ -3126,6 +3311,50 @@
                  prior namespace)))
       (hash-set next name namespace))))
 
+(define (interface-accessor-field binding)
+  (and
+   (eq? (interface-binding-kind binding) 'accessor)
+   (let ([type (interface-binding-type binding)])
+     (and
+      (type-fn? type)
+      (= (length (type-fn-params type)) 1)
+      (type-prim? (car (type-fn-params type)))
+      (let* ([record
+              (symbol->string
+               (unqualify-type-name
+                (type-prim-name (car (type-fn-params type)))))]
+             [prefix (string-append (string-downcase record) "-")]
+             [accessor
+              (symbol->string (interface-binding-name binding))])
+        (and
+         (string-prefix? accessor prefix)
+         (> (string-length accessor) (string-length prefix))
+         (string->symbol
+          (substring accessor (string-length prefix)))))))))
+
+(define (build-zig-imported-record-accessors prog)
+  (for/fold
+      ([accessors (hasheq)])
+      ([import (in-list (program-imported-module-interfaces prog))])
+    (define interface (module-import-interface import))
+    (define namespace (module-interface-namespace interface))
+    (define prefix (module-import-prefix import))
+    (define refer (module-import-refer import))
+    (for/fold
+        ([next accessors])
+        ([(name binding) (in-hash (module-interface-bindings interface))]
+         #:do [(define field (interface-accessor-field binding))]
+         #:when field)
+      (define prefixed
+        (string->symbol (format "~a/~a" prefix name)))
+      (define canonical
+        (string->symbol (format "~a/~a" namespace name)))
+      (define with-qualified
+        (hash-set (hash-set next prefixed field) canonical field))
+      (if (and refer (memq name refer))
+          (hash-set with-qualified name field)
+          with-qualified))))
+
 (define (zig-imported-namespaces prog)
   (remove-duplicates
    (for/list
@@ -3140,16 +3369,30 @@
   (define records (build-record-table prog))
   (define allocation-modes (build-fn-allocation-modes prog))
   (define error-contracts (build-fn-error-contracts prog))
-  (define dynamic-contracts (collect-dynamic-contracts prog))
+  (define world-dynamic-abi (current-zig-dynamic-abi))
+  (define dynamic-contracts
+    (and (not world-dynamic-abi) (collect-dynamic-contracts prog)))
   (define boxed-unions (collect-boxed-union-types prog))
   (define union-types
     (for/hash ([union-type (in-list boxed-unions)]
                [i (in-naturals)])
       (values union-type (format "Union~a" i))))
   (define dynamic-types
-    (for/hash ([entry (in-list dynamic-contracts)]
-               [i (in-naturals)])
-      (values (car entry) (format "Dyn~a" i))))
+    (if world-dynamic-abi
+        (for/hash
+            ([entry (in-list (zig-dynamic-abi-entries world-dynamic-abi))])
+          (define owner (zig-dynamic-abi-entry-namespace entry))
+          (values
+           (zig-dynamic-abi-entry-type entry)
+           (if (eq? owner (program-namespace prog))
+               (zig-dynamic-abi-entry-name entry)
+               (format
+                "~a.~a"
+                (zig-module-binding-name owner)
+                (zig-dynamic-abi-entry-name entry)))))
+        (for/hash ([entry (in-list dynamic-contracts)]
+                   [i (in-naturals)])
+          (values (car entry) (format "Dyn~a" i)))))
   (parameterize ([current-records records]
                  [current-externs (program-externs prog)]
                  [current-fn-returns (build-fn-returns prog)]
@@ -3162,14 +3405,33 @@
                  [current-regex-bindings (build-regex-bindings prog)]
                  [current-opaque-handles (build-opaque-handles prog records)]
                  [current-imported-record-ns (program-imported-record-ns prog)]
+                 [current-imported-record-accessors
+                  (build-zig-imported-record-accessors prog)]
                  [current-referred-bindings (build-zig-referred-bindings prog)]
                  [current-requires (build-zig-requires prog)])
     (define dynamic-decls
-      (for/list ([entry (in-list dynamic-contracts)])
-        (emit-dynamic-declaration
-         (car entry)
-         (cdr entry)
-         (hash-ref dynamic-types (car entry)))))
+      (if world-dynamic-abi
+          (for/list
+              ([entry (in-list (zig-dynamic-abi-entries world-dynamic-abi))]
+               #:when
+               (eq? (zig-dynamic-abi-entry-namespace entry)
+                    (program-namespace prog)))
+            (define dyn-type (zig-dynamic-abi-entry-type entry))
+            (define contract
+              (hash-ref (program-semantic-contracts prog) dyn-type #f))
+            (unless (dynamic-contract? contract)
+              (unsupported
+               "closed dynamic type"
+               "owning module is missing checked dynamic-contract metadata"))
+            (emit-dynamic-declaration
+             dyn-type
+             contract
+             (zig-dynamic-abi-entry-name entry)))
+          (for/list ([entry (in-list dynamic-contracts)])
+            (emit-dynamic-declaration
+             (car entry)
+             (cdr entry)
+             (hash-ref dynamic-types (car entry))))))
     (define union-decls
       (for/list ([union-type (in-list boxed-unions)])
         (emit-union-declaration
@@ -3201,8 +3463,26 @@
          "const ~a = @import(\"~a.zig\");\n"
          (zig-module-binding-name namespace)
          (zig-module-name namespace))))
+    (define dynamic-owner-imports
+      (if world-dynamic-abi
+          (for/list
+              ([ty (in-list (program-dynamic-types prog))]
+               #:do
+               [(define entry
+                  (hash-ref (zig-dynamic-abi-by-type world-dynamic-abi) ty))]
+               #:when
+               (not
+                (eq? (zig-dynamic-abi-entry-namespace entry)
+                     (program-namespace prog))))
+            (zig-dynamic-abi-entry-namespace entry))
+          '()))
     (define module-imports
-      (for/list ([namespace (in-list (zig-imported-namespaces prog))])
+      (for/list
+          ([namespace
+            (in-list
+             (remove-duplicates
+              (append (zig-imported-namespaces prog)
+                      dynamic-owner-imports)))])
         (format
          "const ~a = @import(\"~a.zig\");\n"
          (zig-module-binding-name namespace)
@@ -3220,4 +3500,9 @@
 
 (register-backend! 'zig (emitter-backend 'zig zig-emit-program))
 
-(provide zig-emit-program zig-module-name)
+(provide zig-emit-program
+         zig-module-name
+         make-zig-dynamic-abi
+         current-zig-dynamic-abi
+         zig-program-allocation-modes
+         current-zig-world-allocation-modes)

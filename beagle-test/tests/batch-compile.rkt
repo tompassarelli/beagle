@@ -366,6 +366,64 @@
      (check-true
       (string-contains? emitted "beagle_module_zig_refer_provider.twice(21)")))
 
+   (test-case "transitive imported alias stabilizes before third-module Zig call"
+     (define provider
+       (write-fixture!
+        "zig-alias-provider.bclj"
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns zig-alias.provider)\n"
+         "(define-mode strict)\n"
+         "(defalias StoreValue (Dyn String Int))\n")))
+     (define bridge
+       (write-fixture!
+        "zig-alias-bridge.bclj"
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns zig-alias.bridge\n"
+         "  (:require [zig-alias.provider :as provider]))\n"
+         "(define-mode strict)\n"
+         "(defrecord Result [accepted :- Bool version :- Int])\n"
+         "(defn inspect [value :- provider/StoreValue] :- Result\n"
+         "  (let [cell :- (Atom provider/StoreValue) (atom value)]\n"
+         "    (->Result (string? (deref cell)) 1)))\n")))
+     (define consumer
+       (write-fixture!
+        "zig-alias-consumer.bclj"
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns zig-alias.consumer\n"
+         "  (:require [zig-alias.bridge :as bridge]))\n"
+         "(define-mode strict)\n"
+         "(defn main [] :- Nil\n"
+         "  (let [result (bridge/inspect \"ready\")]\n"
+         "    (println (if (and (bridge/result-accepted result)\n"
+         "                      (= 1 (bridge/result-version result)))\n"
+         "               \"alias-chain ok\" \"alias-chain failed\"))))\n")))
+     (define executable (tmp-path "zig-alias-chain"))
+     (define build-output (open-output-string))
+     (define built?
+       (parameterize ([current-output-port build-output]
+                      [current-error-port build-output])
+         (system*
+          (path->string beagle-cli)
+          "build"
+          "--target"
+          "zig"
+          "--exe"
+          (path->string executable)
+          (path->string provider)
+          (path->string bridge)
+          (path->string consumer))))
+     (check-true built? (get-output-string build-output))
+     (define run-output (open-output-string))
+     (define ran?
+       (parameterize ([current-output-port run-output]
+                      [current-error-port run-output])
+         (system* (path->string executable))))
+     (check-true ran? (get-output-string run-output))
+     (check-equal? (get-output-string run-output) "alias-chain ok\n"))
+
    (test-case "ambiguous unqualified :refer providers fail closed"
      (define left
        (write-fixture!

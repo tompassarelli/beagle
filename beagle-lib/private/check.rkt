@@ -931,6 +931,13 @@
            (walk (type-fn-ret ty))]
           [else (void)]))
       (walk t)))
+  ;; Type aliases erase before the checked AST, but a closed Dyn alias still
+  ;; owns a concrete native ABI when a declared Zig module set shares it.
+  ;; Record its contract now so the owning module can materialize that ABI
+  ;; even when the alias is only mentioned by downstream interfaces.
+  (for ([ty (in-hash-values (program-declared-type-aliases prog))])
+    (record-type-node! ty #f)
+    (record! #f ty))
   (for ([raw-form (in-list (program-forms prog))])
     (walk-ast! raw-form raw-form)
     (define form (if (with-meta? raw-form) (with-meta-expr raw-form) raw-form))
@@ -1166,6 +1173,12 @@
 
 (define ZIG-FALLIBLE-ALLOCATING-FNS '(mapv filterv sort-by str))
 
+;; Candidate-world compilation populates this incrementally in declared module
+;; order.  Keys are canonical provider/name symbols and values are native
+;; allocation modes.  Imported allocating calls then participate in the same
+;; local fixed point as allocating local callees.
+(define current-imported-allocation-modes (make-parameter (hasheq)))
+
 (define (allocation-contract-error node message [details (hasheq)])
   (raise-diag 'allocation-contract message details
               #:src (and node (src-for node))))
@@ -1284,9 +1297,12 @@
           (walk value)))
     (define (walk value)
       (cond
-        [(call-form? value)
+       [(call-form? value)
          (define canonical-fn (canonical-call-fn value))
-         (when (allocating-call? value target canonical-fn)
+         (when (or (allocating-call? value target canonical-fn)
+                   (hash-has-key?
+                    (current-imported-allocation-modes)
+                    canonical-fn))
            (set! sites (cons value sites)))
          (when (and (symbol? (call-form-fn value))
                     (set-member? local-names (call-form-fn value)))
@@ -5815,4 +5831,5 @@
          kind->error-code
          current-check-profile
          current-purity-enforcement
+         current-imported-allocation-modes
          check-form infer-expr build-initial-env)
