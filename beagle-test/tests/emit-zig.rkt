@@ -711,7 +711,9 @@ ZIG
       "(defn call-tag [value :- String] :- Int (app.rt/tag value))")))
   (check-true (regexp-match? #rx"pub const Dyn0 = union" out))
   (check-true
-   (regexp-match? #rx"app_rt\\.tag\\(Dyn0\\{ \\.string = value \\}\\)" out)))
+   (regexp-match?
+    #rx"beagle_module_app_rt\\.tag\\(Dyn0\\{ \\.string = value \\}\\)"
+    out)))
 
 (test-case "closed dynamic contract records declared-order integer tags"
   (define prog
@@ -1888,8 +1890,8 @@ ZIG
   ;; namespaces (clojure.*, babashka.*, kernel.rt) stay on the `rt`
   ;; prelude; any other namespace lowers to its own module — namespace
   ;; with '.'→'_' — with a matching @import header. So kernel.rt/draw →
-  ;; rt.draw (no @import beyond beagle_rt), but app.rt/tick → app_rt.tick
-  ;; behind const app_rt = @import("app_rt.zig").
+  ;; rt.draw (no @import beyond beagle_rt), but app.rt/tick routes through a
+  ;; collision-free binding for @import("app_rt.zig").
   (define out (compile-zig-string
                (string-append
                 "(ns g)\n"
@@ -1897,8 +1899,11 @@ ZIG
                 "(declare-extern app.rt/tick [Int -> Int])\n"
                 "(defn f [x :- Int] :- Int (app.rt/tick (kernel.rt/draw x)))")))
   (check-true (regexp-match? #rx"rt.draw" out))          ; kernel.rt → core rt
-  (check-true (regexp-match? #rx"app_rt.tick" out))       ; app.rt → own module
-  (check-true (regexp-match? #rx"const app_rt = @import\\(\"app_rt.zig\"\\);" out))
+  (check-true (regexp-match? #rx"beagle_module_app_rt.tick" out))
+  (check-true
+   (regexp-match?
+    #rx"const beagle_module_app_rt = @import\\(\"app_rt.zig\"\\);"
+    out))
   (check-false (regexp-match? #rx"const kernel" out)))    ; kernel.rt NOT split
 
 (test-case "los.rt and los.yaml each lower to their own module + @import"
@@ -1908,8 +1913,11 @@ ZIG
                 "(declare-extern los.rt/slugify [String -> String])\n"
                 "(declare-extern los.yaml/parse [String -> Yaml])\n"
                 "(defn f [s :- String] :- String (los.rt/slugify s))")))
-  (check-true (regexp-match? #rx"los_rt.slugify" out))
-  (check-true (regexp-match? #rx"const los_rt = @import\\(\"los_rt.zig\"\\);" out))
+  (check-true (regexp-match? #rx"beagle_module_los_rt.slugify" out))
+  (check-true
+   (regexp-match?
+    #rx"const beagle_module_los_rt = @import\\(\"los_rt.zig\"\\);"
+    out))
   ;; los.yaml is declared but never CALLED → no spurious import.
   (check-false (regexp-match? #rx"los_yaml" out)))
 

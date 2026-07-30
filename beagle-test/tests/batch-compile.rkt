@@ -250,24 +250,60 @@
      (check-true
       (string-contains?
        bridge-zig
-       "const fram_rt_core = @import(\"fram_rt_core.zig\");"))
+       "const beagle_module_fram_rt_core = @import(\"fram_rt_core.zig\");"))
      (check-true
-      (string-contains? bridge-zig "fram_rt_core.strLt(a, b)"))
-     (check-true
-      (string-contains?
-       main-zig
-       "const zig_multimodule_bridge = @import(\"zig_multimodule_bridge.zig\");"))
+      (string-contains? bridge-zig "beagle_module_fram_rt_core.strLt(a, b)"))
      (check-true
       (string-contains?
        main-zig
-       "zig_multimodule_bridge.before(\"alpha\", \"beta\")"))
+       "const beagle_module_zig_multimodule_bridge = @import(\"zig_multimodule_bridge.zig\");"))
+     (check-true
+      (string-contains?
+       main-zig
+       "beagle_module_zig_multimodule_bridge.before(\"alpha\", \"beta\")"))
      (check-not-false
       (find-executable-path "zig")
       "multi-module Zig build requires the pinned Zig on PATH")
      (define executable (tmp-path "zig-multimodule"))
+     (define mv-shim-dir (tmp-path "atomic-publish-bin"))
+     (make-directory* mv-shim-dir)
+     (define mv-shim (build-path mv-shim-dir "mv"))
+     (define real-mv (find-executable-path "mv"))
+     (check-not-false real-mv "atomic publication probe requires mv on PATH")
+     (call-with-output-file
+      mv-shim
+      #:exists 'truncate
+      (lambda (out)
+        (fprintf
+         out
+         (string-append
+          "#!/usr/bin/env bash\n"
+          "set -euo pipefail\n"
+          "stage_root=\"${BEAGLE_EXPECT_STAGE_ROOT%/}\"\n"
+          "case \"$1\" in\n"
+          "  \"${stage_root:?}\"/.beagle-zig-build.*/artifact) ;;\n"
+          "  *) echo \"artifact was not staged beside its destination: $1\" >&2; exit 97 ;;\n"
+          "esac\n"
+          "exec ~s \"$@\"\n")
+         (path->string real-mv))))
+     (file-or-directory-permissions mv-shim #o755)
+     (define build-env
+       (environment-variables-copy (current-environment-variables)))
+     (environment-variables-set!
+      build-env
+      #"BEAGLE_EXPECT_STAGE_ROOT"
+      (path->bytes (path-only executable)))
+     (environment-variables-set!
+      build-env
+      #"PATH"
+      (bytes-append
+       (path->bytes mv-shim-dir)
+       #":"
+       (or (environment-variables-ref build-env #"PATH") #"")))
      (define build-output (open-output-string))
      (define built?
-       (parameterize ([current-output-port build-output]
+       (parameterize ([current-environment-variables build-env]
+                      [current-output-port build-output]
                       [current-error-port build-output])
          (system*
           (path->string beagle-cli)
@@ -298,6 +334,103 @@
      (check-equal?
       (get-output-string run-output)
       "multi-module zig ok\n"))
+
+   (test-case "unqualified :refer lowers through its canonical provider module"
+     (define provider
+       (write-fixture!
+        "zig-refer-provider.bclj"
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns zig-refer.provider)\n"
+         "(define-mode strict)\n"
+         "(defn twice [x :- Int] :- Int (* x 2))\n")))
+     (define consumer
+       (write-fixture!
+        "zig-refer-consumer.bclj"
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns zig-refer.consumer\n"
+         "  (:require [zig-refer.provider :refer [twice]]))\n"
+         "(define-mode strict)\n"
+         "(defn answer [] :- Int (twice 21))\n")))
+     (define-values (status modules)
+       (compile-source-set (list provider consumer)
+                           #:root repo-root-str
+                           #:target 'zig))
+     (check-eq? status 'ok (format "~a" modules))
+     (define emitted (compiled-source-emitted (second modules)))
+     (check-true
+      (string-contains?
+       emitted
+       "const beagle_module_zig_refer_provider = @import(\"zig_refer_provider.zig\");"))
+     (check-true
+      (string-contains? emitted "beagle_module_zig_refer_provider.twice(21)")))
+
+   (test-case "ambiguous unqualified :refer providers fail closed"
+     (define left
+       (write-fixture!
+        "zig-refer-left.bclj"
+        "#lang beagle/clj\n(ns zig-refer.left)\n(define-mode strict)\n(defn choose [x :- Int] :- Int x)\n"))
+     (define right
+       (write-fixture!
+        "zig-refer-right.bclj"
+        "#lang beagle/clj\n(ns zig-refer.right)\n(define-mode strict)\n(defn choose [x :- Int] :- Int (+ x 1))\n"))
+     (define consumer
+       (write-fixture!
+        "zig-refer-ambiguous.bclj"
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns zig-refer.ambiguous\n"
+         "  (:require [zig-refer.left :refer [choose]]\n"
+         "            [zig-refer.right :refer [choose]]))\n"
+         "(define-mode strict)\n"
+         "(defn answer [] :- Int (choose 1))\n")))
+     (define-values (status diagnostic)
+       (compile-source-set (list left right consumer)
+                           #:root repo-root-str
+                           #:target 'zig))
+     (check-eq? status 'fail (format "~a" diagnostic))
+     (check-regexp-match #rx"ambiguous :refer binding choose" diagnostic))
+
+   (test-case "reserved Zig module names receive collision-free bindings"
+     (define namespaces '(std rt Ctx const))
+     (define providers
+       (for/list ([namespace (in-list namespaces)])
+         (write-fixture!
+          (format "zig-reserved-~a.bclj" namespace)
+          (format
+           "#lang beagle/clj\n(ns ~a)\n(define-mode strict)\n(defn ok? [] :- Bool true)\n"
+           namespace))))
+     (define consumer
+       (write-fixture!
+        "zig-reserved-consumer.bclj"
+        (string-append
+         "#lang beagle/clj\n"
+         "(ns zig-reserved.consumer\n"
+         "  (:require [std :as s]\n"
+         "            [rt :as r]\n"
+         "            [Ctx :as c]\n"
+         "            [const :as k]))\n"
+         "(define-mode strict)\n"
+         "(defn all-ok? [] :- Bool (and (s/ok?) (r/ok?) (c/ok?) (k/ok?)))\n")))
+     (define-values (status modules)
+       (compile-source-set (append providers (list consumer))
+                           #:root repo-root-str
+                           #:target 'zig))
+     (check-eq? status 'ok (format "~a" modules))
+     (define emitted (compiled-source-emitted (last modules)))
+     (for ([namespace (in-list namespaces)])
+       (define module (symbol->string namespace))
+       (check-true
+        (string-contains?
+         emitted
+         (format
+          "const beagle_module_~a = @import(\"~a.zig\");"
+          module module)))
+       (check-true
+        (string-contains?
+         emitted
+         (format "beagle_module_~a.ok()" module)))))
 
    (test-case "generated failure fixtures: normalized diagnostic, CLI agrees on failure"
      (for ([src (in-list generated-failure-fixtures)])

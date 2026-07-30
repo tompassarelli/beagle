@@ -53,8 +53,12 @@ if [[ "${1:-}" == "--exe" ]]; then
         exit 1
     fi
     beagle_root="$(cd "$(dirname "$0")/.." && pwd)"
-    mkdir -p "$(dirname "$out")"
-    emit_dir="$(mktemp -d)"
+    out_dir="$(dirname "$out")"
+    mkdir -p "$out_dir"
+    # The final rename is atomic only when its source is on the destination
+    # filesystem. Keep the full Zig staging tree beside OUT rather than under
+    # the process-global temp directory, which may be a different mount.
+    emit_dir="$(mktemp -d "$out_dir/.beagle-zig-build.XXXXXX")"
     trap 'rm -rf "${emit_dir:?}"' EXIT
     entry="$(
         "$RACKET" "$beagle_root/beagle-lib/private/retarget-cli.rkt" \

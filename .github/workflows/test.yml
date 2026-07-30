@@ -71,10 +71,18 @@ jobs:
       - name: Install Rust (nix-parse-json helper bootstrap)
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install nix (pinned Beagle test environment)
+        uses: cachix/install-nix-action@v31
+
+      - name: Install direnv from the flake's nixpkgs input
+        run: nix profile install --inputs-from . nixpkgs#direnv
+
       - name: Run tiered test suite
         env:
           CI: 'true'
-        run: bin/beagle-test
+        run: |
+          direnv allow .
+          direnv exec . bin/beagle-test
 
       # Conformance gate (the oracle ratchet): certify the corpus against
       # committed goldens sourced from the Racket oracle, validity-check the
@@ -85,9 +93,6 @@ jobs:
       # to keep the silent-miscompile class armed in CI. bb is installed above.
       - name: Install bun (js validity oracle for the conformance gate)
         uses: oven-sh/setup-bun@v2
-
-      - name: Install nix (nix validity oracle for the conformance gate)
-        uses: cachix/install-nix-action@v31
 
       # _BEAGLE_RACKET pins to the runner's setup-racket (which built all
       # bytecode in this job); otherwise bin/_beagle-racket would nix-develop

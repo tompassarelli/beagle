@@ -81,6 +81,7 @@
              "reader-path-parity.rkt"   ; #19 guard — parse path & #lang path read identically (one table)
              "reader-shorthand.rkt"     ; #() fn shorthand (2026-06-12)
              "rewrite-roundtrip.rkt"    ; #32 guard — codemod read→write→re-read identity (full surface)
+             "semantic-index.rkt"       ; deterministic native-consumer index + exact authored key spans
              "sourcemap-fidelity.rkt"   ; diagnostic srcloc fidelity benchmark
              "syntax.rkt"
              "test-tags.rkt"

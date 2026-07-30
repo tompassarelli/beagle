@@ -220,9 +220,9 @@
 (define (source-key-locations source symbols)
   ;; The Beagle map reader currently gives every map child its enclosing map
   ;; location. Use the parsed walk to decide WHICH authored keys matter, then
-  ;; recover those exact token spans from source text. This scan is deliberately
-  ;; lexical only: the real reader/AST decides the keys, while the scan ignores
-  ;; comments and string bodies that cannot be authored map-key tokens.
+  ;; recover those exact token spans from source text. The scanner only records
+  ;; the key position of each real `{key value}` pair; an identical keyword in
+  ;; a value, comment, or string is not a candidate occurrence.
   (define text (file->string source))
   (define wanted
     (for/hash ([symbol (in-list (remove-duplicates symbols eq?))])
@@ -238,48 +238,107 @@
       (if (or (>= index length) (token-boundary? text index))
           index
           (loop (add1 index)))))
-  (let loop ([index 0] [state 'code])
+  (define (skip-string start)
+    (let loop ([index (add1 start)])
+      (cond
+        [(>= index length) length]
+        [(char=? (string-ref text index) #\\)
+         (loop (min length (+ index 2)))]
+        [(char=? (string-ref text index) #\")
+         (add1 index)]
+        [else (loop (add1 index))])))
+  (define (skip-nix-multiline start)
+    (let loop ([index (+ start 3)])
+      (cond
+        [(>= index length) length]
+        [(starts-at? index "''") (+ index 2)]
+        [else (loop (add1 index))])))
+  (define (skip-comment start)
+    (let loop ([index (add1 start)])
+      (cond
+        [(>= index length) length]
+        [(char=? (string-ref text index) #\newline) (add1 index)]
+        [else (loop (add1 index))])))
+  (define (skip-layout start)
+    (let loop ([index start])
+      (cond
+        [(>= index length) length]
+        [(or (char-whitespace? (string-ref text index))
+             (char=? (string-ref text index) #\,))
+         (loop (add1 index))]
+        [(char=? (string-ref text index) #\;)
+         (loop (skip-comment index))]
+        [else index])))
+  (define (record-key! start end)
+    (define token (substring text start end))
+    (define symbol (hash-ref wanted token #f))
+    (when symbol
+      (hash-update!
+       found
+       symbol
+       (lambda (locations)
+         (cons (offset->src-loc source text start (- end start))
+               locations))
+       '())))
+  (define (scan-delimited start close)
+    (let loop ([index start])
+      (define next (skip-layout index))
+      (cond
+        [(>= next length) length]
+        [(char=? (string-ref text next) close) (add1 next)]
+        [else (loop (scan-form next))])))
+  (define (scan-map start)
+    (let loop ([index (add1 start)])
+      (define key-start (skip-layout index))
+      (cond
+        [(>= key-start length) length]
+        [(char=? (string-ref text key-start) #\}) (add1 key-start)]
+        [else
+         (when (char=? (string-ref text key-start) #\:)
+           (record-key! key-start (token-end key-start)))
+         (define after-key (scan-form key-start))
+         (define value-start (skip-layout after-key))
+         (cond
+           [(>= value-start length) length]
+           ;; The real reader rejects odd maps. Avoid inventing a value or
+           ;; looping here if a malformed source reaches this recovery pass.
+           [(char=? (string-ref text value-start) #\}) (add1 value-start)]
+           [else (loop (scan-form value-start))])])))
+  (define (scan-form start)
+    (define index (skip-layout start))
     (cond
-      [(>= index length) (void)]
+      [(>= index length) length]
+      [(starts-at? index "~''") (skip-nix-multiline index)]
+      [(starts-at? index "#{") (scan-delimited (+ index 2) #\})]
+      [(starts-at? index "#(") (scan-delimited (+ index 2) #\))]
+      [(starts-at? index "#\"") (skip-string (add1 index))]
       [else
        (define char (string-ref text index))
-       (case state
-         [(line-comment)
-          (loop (add1 index)
-                (if (char=? char #\newline) 'code 'line-comment))]
-         [(string)
-          (cond
-            [(char=? char #\\) (loop (min length (+ index 2)) 'string)]
-            [(char=? char #\") (loop (add1 index) 'code)]
-            [else (loop (add1 index) 'string)])]
-         [(nix-multiline)
-          (if (starts-at? index "''")
-              (loop (+ index 2) 'code)
-              (loop (add1 index) 'nix-multiline))]
+       (cond
+         [(char=? char #\") (skip-string index)]
+         [(char=? char #\() (scan-delimited (add1 index) #\))]
+         [(char=? char #\[) (scan-delimited (add1 index) #\])]
+         [(char=? char #\{) (scan-map index)]
+         ;; Reader prefixes form one datum with the following form. Metadata
+         ;; consumes both its metadata datum and the annotated datum.
+         [(memv char '(#\' #\` #\@))
+          (scan-form (add1 index))]
+         [(char=? char #\~)
+          (scan-form (+ index (if (starts-at? index "~@") 2 1)))]
+         [(char=? char #\^)
+          (scan-form (scan-form (add1 index)))]
+         ;; Character literals may spell a quote or semicolon without starting
+         ;; a string/comment. Consume the escaped character before scanning on.
+         [(char=? char #\\)
+          (token-end (min length (+ index 2)))]
+         [(memv char '(#\) #\] #\})) (add1 index)]
          [else
-          (cond
-            [(char=? char #\;) (loop (add1 index) 'line-comment)]
-            [(char=? char #\") (loop (add1 index) 'string)]
-            [(starts-at? index "~''") (loop (+ index 3) 'nix-multiline)]
-            ;; A Clojure character literal can spell quote or semicolon; neither
-            ;; starts a string/comment in that position.
-            [(char=? char #\\)
-             (loop (min length (+ index 2)) 'code)]
-            [(and (char=? char #\:)
-                  (token-boundary? text (sub1 index)))
-             (define end (token-end index))
-             (define token (substring text index end))
-             (define symbol (hash-ref wanted token #f))
-             (when symbol
-               (hash-update!
-                found
-                symbol
-                (lambda (locations)
-                  (cons (offset->src-loc source text index (- end index))
-                        locations))
-                '()))
-             (loop end 'code)]
-            [else (loop (add1 index) 'code)])])]))
+          (define end (token-end index))
+          (if (= end index) (add1 index) end)])]))
+  (let loop ([index 0])
+    (define next (skip-layout index))
+    (unless (>= next length)
+      (loop (scan-form next))))
   (for/hash ([symbol (in-list (remove-duplicates symbols eq?))])
     (values symbol (reverse (hash-ref found symbol '())))))
 

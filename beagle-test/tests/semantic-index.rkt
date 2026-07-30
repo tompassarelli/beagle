@@ -22,6 +22,7 @@
    "   :flake-inputs {:demo {:url \"github:example/demo\" :flake false}}\n"
    "   ;; :options.myConfig.modules.demo.enable is documentation, not a key\n"
    "   :note \":options.myConfig.modules.demo.enable is also inert in a string\"\n"
+   "   :example-value :options.myConfig.modules.demo.enable\n"
    "   :options.myConfig.modules.demo.enable\n"
    "    (lib.mkEnableOption \"demo\")\n"
    "   :config {:services.demo.enable true}})\n"))
@@ -102,7 +103,7 @@
         (option-ref module "options.myConfig.modules.demo.enable"))
       (check-not-false direct-option)
       (define direct-span (hash-ref direct-option 'span))
-      (check-equal? (hash-ref direct-span 'line) 13)
+      (check-equal? (hash-ref direct-span 'line) 14)
       (check-equal? (hash-ref direct-span 'col) 3)
       (check-equal? (hash-ref direct-span 'span)
                     (string-length ":options.myConfig.modules.demo.enable"))

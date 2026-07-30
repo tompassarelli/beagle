@@ -72,6 +72,14 @@
       (string-append "m_" clean)
       clean))
 
+;; Import bindings live in the same Zig top-level namespace as `std`, `rt`,
+;; `Ctx`, user declarations, keywords, and predeclared types. Keep the stable
+;; provider-derived filename, but give every generated binding its own
+;; non-language namespace so a provider literally named `std`, `rt`, `Ctx`, or
+;; `const` cannot shadow or redeclare one of those names.
+(define (zig-module-binding-name namespace)
+  (string-append "beagle_module_" (zig-module-name namespace)))
+
 ;; --- types -------------------------------------------------------------------
 
 (define (optional-of t)
@@ -135,7 +143,7 @@
      (and
       namespace
       (format "~a.~a"
-              (zig-module-name namespace)
+              (zig-module-binding-name namespace)
               (ident (string->symbol (caddr match))))))))
 
 (define (type->zig t)
@@ -312,6 +320,7 @@
 
 (define current-records (make-parameter (hasheq)))
 (define current-imported-record-ns (make-parameter (hasheq)))
+(define current-referred-bindings (make-parameter (hasheq)))
 (define current-externs (make-parameter (hasheq))) ; declared-extern name → type
 (define current-fn-returns (make-parameter (hasheq))) ; local defn name → return type
 (define current-fn-types (make-parameter (hasheq))) ; local defn name → complete function type
@@ -358,7 +367,7 @@
 (define (extern-ns->module ns-str)
   (if (memq (string->symbol ns-str) ZIG-CORE-NAMESPACES)
       "rt"
-      (zig-module-name (string->symbol ns-str))))
+      (zig-module-binding-name (string->symbol ns-str))))
 (define current-optionals (make-parameter '())) ; binding syms with ?T types
 (define current-loop-bindings (make-parameter #f)) ; (listof ident-string) for recur
 (define label-counter (make-parameter (box 0)))
@@ -1677,7 +1686,7 @@
           (if (memq namespace ZIG-RUNTIME-NAMESPACES)
               (format "rt.~a" (rt-fn-name (caddr m)))
               (format "~a.~a"
-                      (zig-module-name namespace)
+                      (zig-module-binding-name namespace)
                       (fn-ident (string->symbol (caddr m))))))]
     [(hash-has-key? (current-externs) sym)
      (format "~a.~a" (extern-ns->module (cadr m)) (rt-fn-name (caddr m)))]
@@ -1694,7 +1703,7 @@
               (hash-has-key? (current-records) record-name)
               (equal? (hash-ref (current-imported-record-ns) record-name #f)
                       namespace)
-              (cons record-name (zig-module-name namespace))))))
+              (cons record-name (zig-module-binding-name namespace))))))
 
 ;; clojure stdlib fn name → prelude ident: drop ?!, kebab→snake (matches
 ;; the prelude's rng_below / starts_with convention).
@@ -1754,6 +1763,22 @@
                     "the Zig store bridge currently lowers record fields only"))
      (emit-record-update
       target target-type (cadr args) (caddr args) (cdddr args))]
+    [(hash-ref (current-referred-bindings) fn #f)
+     => (lambda (namespace)
+          (define module (zig-module-binding-name namespace))
+          (define constructor
+            (regexp-match #rx"^->(.+)$" (symbol->string fn)))
+          (cond
+            [constructor
+             (emit-ctor (string->symbol (cadr constructor)) args module)]
+            [else
+             (format
+              "~a.~a(~a)"
+              module
+              (fn-ident fn)
+              (string-join
+               (emit-typed-args args (hash-ref (current-externs) fn #f))
+               ", "))]))]
     [(qualified-record-ctor fn)
      => (lambda (ctor)
           (emit-ctor (car ctor) args (cdr ctor)))]
@@ -2873,12 +2898,12 @@
                                                              (caddr spec))))])
         piece))]))
 
-;; The non-core Zig modules a program ACTUALLY references: walk every
+;; The non-core Zig module namespaces a program ACTUALLY references: walk every
 ;; top-level form's body, collect the qualified symbols that are declared
-;; externs (so they resolve to a module), keep the ones whose namespace
-;; maps to something other than the core `rt` prelude. Returns the distinct
-;; module names in first-appearance order (deterministic emit).
-(define (referenced-extern-modules prog externs)
+;; externs (so they resolve to a module), and keep namespaces outside the core
+;; `rt` prelude. The namespace is retained so binding and filename spellings can
+;; differ safely. Returns distinct namespaces in first-appearance order.
+(define (referenced-extern-namespaces prog externs)
   (define refs
     (for/fold ([acc '()]) ([f (in-list (program-forms prog))])
       (cond
@@ -2900,9 +2925,9 @@
                 (current-requires)
                 (string->symbol (cadr m))
                 #f)
-               #:do [(define mod (extern-ns->module (cadr m)))]
-               #:unless (string=? mod "rt"))
-      mod))
+               #:do [(define namespace (string->symbol (cadr m)))]
+               #:unless (memq namespace ZIG-CORE-NAMESPACES))
+      namespace))
   (remove-duplicates mods))
 
 ;; local defn name → declared return type (for call-return-type / optional
@@ -3086,6 +3111,21 @@
           (namespace-default-prefix namespace)))
     (hash-set (hash-set h prefix namespace) namespace namespace)))
 
+(define (build-zig-referred-bindings prog)
+  (for/fold ([bindings (hasheq)])
+            ([import (in-list (program-imported-module-interfaces prog))])
+    (define namespace
+      (module-interface-namespace (module-import-interface import)))
+    (for/fold ([next bindings])
+              ([name (in-list (or (module-import-refer import) '()))])
+      (define prior (hash-ref next name #f))
+      (when (and prior (not (eq? prior namespace)))
+        (unsupported
+         (format "ambiguous :refer binding ~a" name)
+         (format "both ~a and ~a provide the unqualified name"
+                 prior namespace)))
+      (hash-set next name namespace))))
+
 (define (zig-imported-namespaces prog)
   (remove-duplicates
    (for/list
@@ -3122,6 +3162,7 @@
                  [current-regex-bindings (build-regex-bindings prog)]
                  [current-opaque-handles (build-opaque-handles prog records)]
                  [current-imported-record-ns (program-imported-record-ns prog)]
+                 [current-referred-bindings (build-zig-referred-bindings prog)]
                  [current-requires (build-zig-requires prog)])
     (define dynamic-decls
       (for/list ([entry (in-list dynamic-contracts)])
@@ -3152,12 +3193,20 @@
     (define main-wrapper
       (emit-native-main-wrapper prog allocation-modes error-contracts))
     (define extern-imports
-      (for/list ([mod (in-list (referenced-extern-modules prog (program-externs prog)))])
-        (format "const ~a = @import(\"~a.zig\");\n" mod mod)))
+      (for/list
+          ([namespace
+            (in-list
+             (referenced-extern-namespaces prog (program-externs prog)))])
+        (format
+         "const ~a = @import(\"~a.zig\");\n"
+         (zig-module-binding-name namespace)
+         (zig-module-name namespace))))
     (define module-imports
       (for/list ([namespace (in-list (zig-imported-namespaces prog))])
-        (define module (zig-module-name namespace))
-        (format "const ~a = @import(\"~a.zig\");\n" module module)))
+        (format
+         "const ~a = @import(\"~a.zig\");\n"
+         (zig-module-binding-name namespace)
+         (zig-module-name namespace))))
     (string-append
      "// generated by beagle (zig backend) — do not edit\n"
      "const std = @import(\"std\");\n"
