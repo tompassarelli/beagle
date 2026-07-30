@@ -4,6 +4,15 @@
 
 const std = @import("std");
 
+var process_args: ?std.process.Args = null;
+var process_environ: ?std.process.Environ = null;
+var unique_counter = std.atomic.Value(u64).init(0);
+
+pub fn install_process_context(init: std.process.Init.Minimal) void {
+    process_args = init.args;
+    process_environ = init.environ;
+}
+
 pub const Splitmix64 = struct {
     state: u64,
 
@@ -1261,6 +1270,52 @@ pub fn println(s: []const u8) void {
     const out = std.Io.File.stdout();
     out.writeStreamingAll(io(), s) catch {};
     out.writeStreamingAll(io(), "\n") catch {};
+}
+
+// --- native CLI -------------------------------------------------------------
+pub fn args(allocator: std.mem.Allocator) []const []const u8 {
+    const current = process_args orelse @panic("zig/args requires an emitted main");
+    return current.toSlice(allocator) catch @panic("zig/args failed");
+}
+
+pub fn getenv(allocator: std.mem.Allocator, name: []const u8) ?[]const u8 {
+    const current = process_environ orelse @panic("zig/getenv requires an emitted main");
+    return current.getAlloc(allocator, name) catch |err| switch (err) {
+        error.EnvironmentVariableMissing => null,
+        else => @panic("zig/getenv failed"),
+    };
+}
+
+pub fn monotonic_ms() i64 {
+    return std.Io.Clock.awake.now(io()).toMilliseconds();
+}
+
+pub fn unix_ms() i64 {
+    return std.Io.Clock.real.now(io()).toMilliseconds();
+}
+
+pub fn unique_id(allocator: std.mem.Allocator) []const u8 {
+    const serial = unique_counter.fetchAdd(1, .monotonic);
+    return std.fmt.allocPrint(allocator, "{d}-{d}", .{ unix_ms(), serial }) catch
+        @panic("oom");
+}
+
+pub fn json_escape(allocator: std.mem.Allocator, source: []const u8) []const u8 {
+    var escaped = std.ArrayList(u8).empty;
+    for (source) |byte| switch (byte) {
+        '"' => escaped.appendSlice(allocator, "\\\"") catch @panic("oom"),
+        '\\' => escaped.appendSlice(allocator, "\\\\") catch @panic("oom"),
+        '\n' => escaped.appendSlice(allocator, "\\n") catch @panic("oom"),
+        '\r' => escaped.appendSlice(allocator, "\\r") catch @panic("oom"),
+        '\t' => escaped.appendSlice(allocator, "\\t") catch @panic("oom"),
+        0...8, 11...12, 14...0x1f => {
+            var buffer: [6]u8 = undefined;
+            const encoded = std.fmt.bufPrint(&buffer, "\\u{x:0>4}", .{byte}) catch unreachable;
+            escaped.appendSlice(allocator, encoded) catch @panic("oom");
+        },
+        else => escaped.append(allocator, byte) catch @panic("oom"),
+    };
+    return escaped.toOwnedSlice(allocator) catch @panic("oom");
 }
 
 // --- file I/O (clojure.core slurp/spit) -------------------------------------

@@ -237,6 +237,7 @@
        [(Regex) "rt.Regex"]
        [(Nil) "void"]
        [(Ctx) "*rt.Ctx"]
+       [(zig/ProcessResult) "rt.ProcessResult"]
        [(Any) (unsupported "Any-typed boundary"
                            "annotate with a concrete type")]
        [else
@@ -1826,6 +1827,8 @@
   (define m (regexp-match #rx"^([^/]+)/(.+)$" s))
   (cond
     [(not m) #f]
+    [(eq? (string->symbol (cadr m)) 'zig)
+     (format "rt.~a" (rt-fn-name (caddr m)))]
     [(hash-ref (current-requires) (string->symbol (cadr m)) #f)
      => (lambda (namespace)
           (if (memq namespace ZIG-RUNTIME-NAMESPACES)
@@ -2348,7 +2351,8 @@
             (and (string-prefix? rt-fn "rt.")
                  (member basename
                          '("lower-case" "upper-case" "join" "replace"
-                           "split" "split-lines" "path"))))
+                           "split" "split-lines" "path"
+                           "args" "getenv" "unique-id" "json-escape"))))
           (define imported
             (let ([match
                    (regexp-match
@@ -3193,6 +3197,18 @@
                           (eq? (defn-form-name form) 'main)))
     form))
 
+(define (program-needs-process-context? prog)
+  (for/or ([form (in-list (program-forms prog))])
+    (define refs
+      (cond
+        [(def-form? form) (refs-of (def-form-value form) '())]
+        [(defn-form? form)
+         (for/fold ([acc '()]) ([expr (in-list (defn-form-body form))])
+           (refs-of expr acc))]
+        [else '()]))
+    (for/or ([name (in-list refs)])
+      (memq name '(zig/args zig/getenv)))))
+
 (define (emit-native-main-wrapper prog allocation-modes error-contracts)
   (define main-form (program-main-defn prog))
   (cond
@@ -3226,9 +3242,14 @@
      (define contract
        (hash-ref (program-semantic-contracts prog) main-form #f))
      (define fallible? (fallible-allocation-contract? contract))
+     (define process-context? (program-needs-process-context? prog))
      (format
       (string-append
-       "pub fn main() ~a {\n"
+       (if process-context?
+           (string-append
+            "pub fn main(__process: std.process.Init.Minimal) ~a {\n"
+            "    rt.install_process_context(__process);\n")
+           "pub fn main() ~a {\n")
        "    var __arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);\n"
        "    defer __arena.deinit();\n"
        "    var __rng = rt.Splitmix64.init(0);\n"

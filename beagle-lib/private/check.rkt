@@ -1169,7 +1169,8 @@
 
 (define NATIVE-ALLOCATING-FNS
   '(map filter remove vec repeat apply pr-str println keys vals slurp path
-    clojure.string/split-lines babashka.fs/path))
+    clojure.string/split-lines babashka.fs/path
+    zig/args zig/getenv zig/unique-id zig/json-escape))
 
 (define ZIG-FALLIBLE-ALLOCATING-FNS '(mapv filterv sort-by str))
 

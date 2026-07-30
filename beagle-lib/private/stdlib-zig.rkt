@@ -8,6 +8,16 @@
 
 (define STDLIB-ZIG
   (hash
+   'zig/args
+   (type-fn '() #f (type-app 'Vec (list (p 'String))))
+   'zig/getenv
+   (type-fn (list (p 'String))
+            #f
+            (type-union (list (p 'String) (p 'Nil))))
+   'zig/monotonic-ms (fn-of '() 'Int)
+   'zig/unix-ms (fn-of '() 'Int)
+   'zig/unique-id (fn-of '() 'String)
+   'zig/json-escape (fn-of '(String) 'String)
    'atom   (poly-fn '(A) (list (tv 'A)) (type-app 'Atom (list (tv 'A))))
    'deref  (poly-fn '(A) (list (type-app 'Atom (list (tv 'A)))) (tv 'A))
    'reset! (poly-fn '(A)

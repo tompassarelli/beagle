@@ -1,0 +1,30 @@
+(ns cli.runtime)
+(define-target zig)
+
+(defn cli-args [] :- (Vec String)
+  (zig/args))
+
+(defn env-value [name :- String] :- String?
+  (zig/getenv name))
+
+(defn monotonic-now [] :- Int
+  (zig/monotonic-ms))
+
+(defn unix-now [] :- Int
+  (zig/unix-ms))
+
+(defn fresh-id [] :- String
+  (zig/unique-id))
+
+(defn escaped [value :- String] :- String
+  (zig/json-escape value))
+
+(defn main [] :- Nil
+  (let [argv (zig/args)
+        value (zig/getenv "BEAGLE_CLI_TEST_VALUE")]
+    (println
+     (str (nth argv 1)
+          ":"
+          (if (some? value) value "missing")
+          ":"
+          (zig/json-escape "a\"b\nc")))))

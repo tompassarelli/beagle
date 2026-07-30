@@ -204,7 +204,9 @@
       (apply system* executable args)))
   (values ok? (get-output-string out) (get-output-string err)))
 
-(define (zig-build-exe-and-run zig-src)
+(define (zig-build-exe-and-run zig-src
+                               #:args [args '()]
+                               #:env [environment '()])
   (define dir (make-temporary-file "zigsmoke~a" 'directory))
   (dynamic-wind
     void
@@ -224,11 +226,19 @@
       (unless built?
         (error 'zig-smoke "zig build-exe failed:\n~a" (get-output-string build-log)))
       (define run-out (open-output-string))
+      (define run-env
+        (environment-variables-copy (current-environment-variables)))
+      (for ([entry (in-list environment)])
+        (environment-variables-set!
+         run-env
+         (string->bytes/utf-8 (car entry))
+         (string->bytes/utf-8 (cdr entry))))
       (define ran?
         (parameterize ([current-output-port run-out]
                        [current-error-port run-out]
+                       [current-environment-variables run-env]
                        [current-directory dir])
-          (system* exe)))
+          (apply system* exe args)))
       (unless ran?
         (error 'zig-smoke "emitted binary failed:\n~a" (get-output-string run-out)))
       (get-output-string run-out))
@@ -261,6 +271,17 @@
       (build-path fixtures-dir 'up "zig-smoke" "main.bzig"))
     (check-equal? (zig-build-exe-and-run (compile-zig-src smoke))
                   "zig revival alive\n")))
+
+(when ZIG
+  (test-case "zig CLI runtime exposes argv, environment, and JSON escaping"
+    (define cli-runtime
+      (build-path fixtures-dir "35-cli-runtime.bgl"))
+    (check-equal?
+     (zig-build-exe-and-run
+      (compile-zig-src cli-runtime)
+      #:args '("arg-value")
+      #:env '(("BEAGLE_CLI_TEST_VALUE" . "env-value")))
+     "arg-value:env-value:a\\\"b\\nc\n")))
 
 (when ZIG
   (test-case "imported record types and constructors lower through canonical Zig modules"
