@@ -1237,6 +1237,7 @@
               dynamic-info #f
               (lambda () (emit-expr el))))]
     [(cond-form? e) (emit-cond e)]
+    [(match-form? e) (emit-match e)]
     [(do-form? e) (emit-block-expr '() (do-form-body e))]
     [(let-form? e) (emit-block-expr (let-form-bindings e) (let-form-body e))]
     [(loop-form? e) (emit-loop e)]
@@ -1461,6 +1462,171 @@
   (if (= 1 (length body))
       (emit-expr (car body))
       (emit-block-expr '() body)))
+
+;; --- match on a closed union ------------------------------------------------
+;; Zig needs a total switch and rejects an else prong that covers nothing;
+;; check.rkt's E006 exhaustiveness rule only fires for defunion targets, so
+;; coverage of an inline (U ...) target is settled here.
+
+(define (union-alternative-named union-type rec-name)
+  (for/first ([alt (in-list (type-union-alts union-type))]
+              #:when (and (type-prim? alt)
+                          (eq? (type-prim-name alt) rec-name)))
+    alt))
+
+(define (clause-refs clause)
+  (for/fold ([acc '()]) ([x (in-list (match-clause-body clause))])
+    (refs-of x acc)))
+
+;; Bind pattern binders to the captured payload's declared fields, then emit
+;; the arm body under those bindings. Binders the body never mentions are
+;; dropped: Zig rejects an unused local.
+(define (emit-match-record-arm clause alt payload-name)
+  (define pat (match-clause-pattern clause))
+  (define rec-name (pat-record-type-name pat))
+  (define fields
+    (hash-ref (current-records) rec-name
+              (lambda ()
+                (unsupported "match clause"
+                             (format "~a is not a record declared in this module"
+                                     rec-name)))))
+  (define binders (pat-record-bindings pat))
+  (unless (<= (length binders) (length fields))
+    (unsupported "match clause"
+                 (format "(~a ...) binds ~a name(s) but ~a has ~a field(s)"
+                         rec-name (length binders) rec-name (length fields))))
+  (define used (clause-refs clause))
+  (define live
+    (for/list ([b (in-list binders)]
+               [f (in-list fields)]
+               #:when (and (symbol? b) (memq b used)))
+      (cons b f)))
+  (define arm-binding-types
+    (for/fold ([acc (current-binding-types)]) ([pr (in-list live)])
+      (hash-set acc (car pr) (param-type (cdr pr)))))
+  (define arm-optionals
+    (append (for/list ([pr (in-list live)]
+                       #:when (and (param-type (cdr pr))
+                                   (optional-of (param-type (cdr pr)))))
+              (car pr))
+            (current-optionals)))
+  (parameterize ([current-binding-types arm-binding-types]
+                 [current-optionals arm-optionals])
+    (cond
+      [(null? live)
+       (emit-body-expr (match-clause-body clause))]
+      [else
+       (define lbl (fresh-label))
+       (format "|~a| ~a: { ~abreak :~a ~a; }"
+               payload-name
+               lbl
+               (apply string-append
+                      (for/list ([pr (in-list live)])
+                        (format "const ~a = ~a.~a; "
+                                (ident (car pr))
+                                payload-name
+                                (ident (param-name (cdr pr))))))
+               lbl
+               (emit-body-expr (match-clause-body clause)))])))
+
+;; The default arm binds the whole union value, so it captures nothing from
+;; the tag — `else => |x|` has no single payload type.
+(define (emit-match-default-arm clause value-name target-type)
+  (define pat (match-clause-pattern clause))
+  (cond
+    [(pat-wildcard? pat) (emit-body-expr (match-clause-body clause))]
+    [(not (memq (pat-var-name pat) (clause-refs clause)))
+     (emit-body-expr (match-clause-body clause))]
+    [else
+     (define name (pat-var-name pat))
+     (define lbl (fresh-label))
+     (parameterize ([current-binding-types
+                     (hash-set (current-binding-types) name target-type)])
+       (format "~a: { const ~a = ~a; break :~a ~a; }"
+               lbl (ident name) value-name lbl
+               (emit-body-expr (match-clause-body clause))))]))
+
+(define (emit-match e)
+  (define target (match-form-target e))
+  (define target-type (expr-static-type target))
+  (unless (boxed-union-type? target-type)
+    (unsupported
+     "match target"
+     (if target-type
+         (format "~a — the zig backend matches closed unions ((U A B ...)); narrow a closed dynamic with type predicates"
+                 (type->string target-type))
+         "needs a statically known closed union ((U A B ...)) target")))
+  (define alternatives (type-union-alts target-type))
+  (define clauses (match-form-clauses e))
+  (define lbl (fresh-label))
+  (define value-name (format "__~a_value" lbl))
+  (define payload-name (format "__~a_payload" lbl))
+  ;; single-expr literal bodies across every arm → anchor the first, or Zig
+  ;; leaves the whole chain comptime_int under runtime control flow.
+  (define bodies (map match-clause-body clauses))
+  (define literal-chain?
+    (andmap (lambda (b) (and (= 1 (length b)) (real? (car b)))) bodies))
+  (define covered '())
+  (define default-clause #f)
+  (define prongs
+    (for/list ([c (in-list clauses)]
+               [k (in-naturals)])
+      (define pat (match-clause-pattern c))
+      (when default-clause
+        (unsupported "match clause"
+                     "a default clause must come last in a closed-union match"))
+      (define (arm-body render)
+        (if (and literal-chain? (zero? k))
+            (anchor-literal-branch (car (match-clause-body c)) (map car bodies))
+            (render)))
+      (cond
+        [(or (pat-wildcard? pat) (pat-var? pat))
+         (set! default-clause c)
+         (cons 'else
+               (arm-body
+                (lambda () (emit-match-default-arm c value-name target-type))))]
+        [(pat-record? pat)
+         (define rec-name (pat-record-type-name pat))
+         (define alt
+           (or (union-alternative-named target-type rec-name)
+               (unsupported
+                "match clause"
+                (format "~a is not an alternative of ~a"
+                        rec-name (type->string target-type)))))
+         (when (memf (lambda (a) (type-invariant-equal? a alt)) covered)
+           (unsupported "match clause"
+                        (format "~a is matched more than once" rec-name)))
+         (set! covered (cons alt covered))
+         (cons (union-tag-name target-type alt)
+               (arm-body
+                (lambda () (emit-match-record-arm c alt payload-name))))]
+        [else
+         (unsupported
+          "match pattern"
+          "the zig backend supports record patterns and a default clause on a closed union")])))
+  (define missing
+    (for/list ([alt (in-list alternatives)]
+               #:unless (memf (lambda (a) (type-invariant-equal? a alt)) covered))
+      alt))
+  (when (and (pair? missing) (not default-clause))
+    (unsupported
+     "non-exhaustive match on closed union"
+     (format "~a has no clause for ~a — add the missing record clause(s) or a default [_ ...] arm"
+             (type->string target-type)
+             (string-join (map type->string missing) ", "))))
+  ;; Zig rejects an else prong that covers nothing.
+  (define effective-prongs
+    (if (and default-clause (null? missing))
+        (filter (lambda (p) (not (eq? (car p) 'else))) prongs)
+        prongs))
+  (format "~a: { const ~a = ~a; break :~a switch (~a) { ~a }; }"
+          lbl value-name (emit-expr target) lbl value-name
+          (string-join
+           (for/list ([p (in-list effective-prongs)])
+             (format "~a => ~a,"
+                     (if (eq? (car p) 'else) "else" (format ".~a" (car p)))
+                     (cdr p)))
+           " ")))
 
 ;; Inline a fn-literal's body as an expression. Its params are emitted
 ;; as their own idents, so the caller binds matching loop vars (capture
@@ -2551,6 +2717,10 @@
                ([x (in-list (doseq-form-body e))])
        (refs-of x a))]
     [(threading-marker? e) (refs-of (threading-marker-desugared e) acc)]
+    [(match-form? e)
+     (for/fold ([a (refs-of (match-form-target e) acc)])
+               ([c (in-list (match-form-clauses e))])
+       (for/fold ([a2 a]) ([x (in-list (match-clause-body c))]) (refs-of x a2)))]
     [(vec-form? e) (for/fold ([a acc]) ([x (in-list (vec-form-items e))]) (refs-of x a))]
     [(map-form? e)
      (for/fold ([a acc]) ([pair (in-list (map-form-pairs e))])
