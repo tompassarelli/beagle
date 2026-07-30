@@ -503,9 +503,11 @@
   (if (and (number? object) (ref-predicate? predicate)) (assoc inner object true) inner))) out (nth subject-entry 1))) {} props)
    candidates (reduce (fn [out entry] (let [id (nth entry 0)]
   (if (= true (get refs id)) out (conj out id)))) [] props)
+   wrappers (filterv (fn [id] (let [head (get (get props id {}) "f0")]
+  (and (number? head) (= (get (get props head {}) "v") "beagle-file")))) candidates)
    structural (filterv (fn [id] (let [kind (get (get props id {}) "kind")]
   (or (= kind "list") (= kind "vector")))) candidates)]
-  (if (> (count structural) 0) (nth structural 0) (if (> (count candidates) 0) (nth candidates 0) nil))))
+  (if (> (count wrappers) 0) (nth wrappers 0) (if (> (count structural) 0) (nth structural 0) (if (> (count candidates) 0) (nth candidates 0) nil)))))
 
 (defn- decode-number [^String text]
   (cond
@@ -732,3 +734,7 @@
   (selfhost.rt/eprint "usage: beagle facts-roundtrip --emit-edn FILE | --render EDN\n")
   (selfhost.rt/exit 2))))
   nil)
+
+(defn- ^Boolean beagle-file-wrapper? [props id]
+  (let [head (get (get props id {}) "f0")]
+  (and (number? head) (= (get (get props head {}) "v") "beagle-file"))))
