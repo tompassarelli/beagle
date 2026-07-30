@@ -37,6 +37,8 @@
   "fixtures/zig-multimodule/bridge.bclj")
 (define-runtime-path zig-multimodule-main
   "fixtures/zig-multimodule/main.bclj")
+(define-runtime-path zig-single-module-main
+  "fixtures/zig-smoke/main.bzig")
 
 (define repo-root-str (path->string (simplify-path repo-root)))
 
@@ -228,6 +230,38 @@
                        #:target 'zig))
      (check-eq? status 'ok expected)
      (check-equal? (file->string out) expected))
+
+   (test-case "public build --target zig --exe accepts one source"
+     (check-not-false
+      (find-executable-path "zig")
+      "single-module Zig build requires the pinned Zig on PATH")
+     (define executable (tmp-path "zig-single-module"))
+     (define build-output (open-output-string))
+     (define built?
+       (parameterize ([current-output-port build-output]
+                      [current-error-port build-output])
+         (system*
+          (path->string beagle-cli)
+          "build"
+          "--target"
+          "zig"
+          "--exe"
+          (path->string executable)
+          (path->string zig-single-module-main))))
+     (check-true built? (get-output-string build-output))
+     (check-true
+      (and (file-exists? executable)
+           (positive? (file-size executable)))
+      "zig build-exe must publish one nonempty executable")
+     (define run-output (open-output-string))
+     (define ran?
+       (parameterize ([current-output-port run-output]
+                      [current-error-port run-output])
+         (system* (path->string executable))))
+     (check-true ran? (get-output-string run-output))
+     (check-equal?
+      (get-output-string run-output)
+      "zig revival alive\n"))
 
    (test-case "ordered Zig module set emits canonical imports and links one executable"
      (define sources

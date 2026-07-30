@@ -50,7 +50,7 @@
      [else
       (eprintf "~a\n" payload)
       (exit 1)])]
-  [(and (>= (length args) 5)
+  [(and (>= (length args) 4)
         (equal? (car args) "--module-dir"))
    (define output-dir (cadr args))
    (define target (string->symbol (caddr args)))

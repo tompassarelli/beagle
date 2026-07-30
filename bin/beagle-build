@@ -4,7 +4,7 @@
 # Usage:
 #   bin/beagle-build [--target TARGET] SOURCE [output]   # `beagle langs` lists
 #                                                        # every TARGET + ext
-#   bin/beagle-build --target zig --exe OUTPUT SOURCE... ENTRY
+#   bin/beagle-build --target zig --exe OUTPUT SOURCE...
 #
 # If the output path is omitted, it is derived from the namespace declared
 # in the source via (ns ...) and dropped under .beagle-out/ (gitignored, so
@@ -37,8 +37,8 @@ if [[ "${1:-}" == "--target" ]]; then
 fi
 
 if [[ "${1:-}" == "--exe" ]]; then
-    if [[ "$target" != "zig" || $# -lt 4 ]]; then
-        echo "usage: beagle-build --target zig --exe OUTPUT SOURCE... ENTRY" >&2
+    if [[ "$target" != "zig" || $# -lt 3 ]]; then
+        echo "usage: beagle-build --target zig --exe OUTPUT SOURCE..." >&2
         exit 2
     fi
     out="$2"
@@ -85,7 +85,7 @@ if [[ "${1:-}" == "--exe" ]]; then
 fi
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
-    echo "usage: beagle-build [--target TARGET] SOURCE [OUTPUT] | beagle-build --target zig --exe OUTPUT SOURCE... ENTRY" >&2
+    echo "usage: beagle-build [--target TARGET] SOURCE [OUTPUT] | beagle-build --target zig --exe OUTPUT SOURCE..." >&2
     exit 2
 fi
 
