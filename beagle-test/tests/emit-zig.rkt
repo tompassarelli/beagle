@@ -299,6 +299,15 @@
      "")))
 
 (when ZIG
+  (test-case "zig/temp-dir installs process context independently"
+    (define emitted
+      (compile-zig-forms
+       '(defn main [] :- Nil
+          (let [temporary (zig/temp-dir)]
+            (zig/remove-tree temporary)))))
+    (check-equal? (zig-build-exe-and-run emitted) "")))
+
+(when ZIG
   (test-case "imported record types and constructors lower through canonical Zig modules"
     (define dir (make-temporary-file "zig-imported-records~a" 'directory))
     (dynamic-wind

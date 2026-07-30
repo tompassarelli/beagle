@@ -3215,7 +3215,7 @@
            (refs-of expr acc))]
         [else '()]))
     (for/or ([name (in-list refs)])
-      (memq name '(zig/args zig/getenv)))))
+      (memq name '(zig/args zig/getenv zig/temp-dir)))))
 
 (define (emit-native-main-wrapper prog allocation-modes error-contracts)
   (define main-form (program-main-defn prog))
