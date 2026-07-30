@@ -2017,11 +2017,20 @@
     [(eq? fn 'rest) (format "rt.rest(~a)" (emit-expr (car args)))]
     [(eq? fn 'empty?) (format "rt.is_empty(~a)" (emit-expr (car args)))]
     [(eq? fn 'conj)
-     (unless (= 3 (length args))
-       ;; (conj ctx v x): allocation needs the tick arena explicitly.
-       (unsupported "conj" "zig backend spells it (conj ctx v x) — allocation needs ctx"))
-     (format "rt.conj(~a, ~a, ~a)"
-             (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args)))]
+     (case (length args)
+       [(2)
+        ;; Ordinary portable conj uses the allocator context the checker
+        ;; already threaded into this allocating function.
+        (format "rt.conj(~a, ~a, ~a)"
+                (current-allocation-ctx)
+                (emit-expr (car args))
+                (emit-expr (cadr args)))]
+       [(3)
+        ;; Keep the established explicit Ctx form for callers that use it.
+        (format "rt.conj(~a, ~a, ~a)"
+                (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args)))]
+       [else
+        (unsupported "conj" "zig backend supports (conj v x) or (conj ctx v x)")])]
     ;; (sort xs) / (distinct xs): fresh caller-arena slices, element type
     ;; comptime-inferred from the input (rt.* anytype).
     [(and (eq? fn 'sort) (= 1 (length args)))

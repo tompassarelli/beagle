@@ -374,6 +374,28 @@ test "Atom aliases observe reset and swap in order" {
 ZIG
       "atom-runtime"))))
 
+(test-case "ordinary portable conj allocates through the hidden Zig context"
+  (define zig-src
+    (compile-zig-string
+     "(ns g)\n(defn append-value [xs :- (Vec Int) x :- Int] :- (Vec Int) (conj xs x))"))
+  (check-true (string-contains? zig-src "rt.conj(__ctx, xs, x)"))
+  (when ZIG
+    (check-true
+     (zig-tests?
+      zig-src
+      #<<ZIG
+test "ordinary conj preserves input and appends one value" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var rng = rt.Splitmix64.init(1);
+    var ctx = rt.Ctx{ .tick = arena.allocator(), .rng = &rng };
+
+    const out = appendValue(&ctx, &.{ 1, 2 }, 3);
+    try std.testing.expectEqualSlices(i64, &.{ 1, 2, 3 }, out);
+}
+ZIG
+      "ordinary-conj"))))
+
 ;; --- semantic contract 1: concrete native boundaries -------------------------
 
 (define semantic-bless? (and (getenv "BEAGLE_SEMANTIC_BLESS") #t))
