@@ -134,6 +134,24 @@
    "(ns world.consumer (:require [world.provider :as p]))\n"
    "(defn use [x :- String] :- String (p/f x))\n"))
 
+(define duplicate-a-string
+  (string-append
+   "#lang beagle/clj\n"
+   "(ns world.duplicate)\n"
+   "(defn f [x :- String] :- String x)\n"))
+
+(define duplicate-b-string
+  (string-append
+   "#lang beagle/clj\n"
+   "(ns world.duplicate)\n"
+   "(defn g [x :- String] :- String x)\n"))
+
+(define duplicate-consumer-string
+  (string-append
+   "#lang beagle/clj\n"
+   "(ns world.consumer (:require [world.duplicate :as duplicate]))\n"
+   "(defn use [x :- String] :- String (duplicate/f x))\n"))
+
 (test-case "candidate provider overlays an older provider on disk"
   (with-world-files
    (lambda (root provider-source consumer-source)
@@ -206,6 +224,69 @@
      (check-false (world-check-result-ok? result))
      (check-regexp-match
       #rx"checked namespace world\\.missing is absent"
+      (diagnostic-text result)))))
+
+(test-case "duplicate standalone namespaces permit exact source selection"
+  (with-world-files
+   (lambda (root _provider-source _consumer-source)
+     (define duplicate-a-edn
+       (candidate!
+        root "duplicate-a" "graph.fixture.duplicate-a" duplicate-a-string))
+     (define duplicate-b-edn
+       (candidate!
+        root "duplicate-b" "graph.fixture.duplicate-b" duplicate-b-string))
+     (define result
+       (check-edn-world
+        (list duplicate-b-edn duplicate-a-edn)
+        #:check-sources '("graph.fixture.duplicate-a")))
+     (check-true
+      (world-check-result-ok? result)
+      (diagnostic-text result))
+     (check-equal?
+      (map checked-world-module-source
+           (world-check-result-modules result))
+      '("graph.fixture.duplicate-a")))))
+
+(test-case "ambiguous namespace selectors fail with sorted candidate sources"
+  (with-world-files
+   (lambda (root _provider-source _consumer-source)
+     (define duplicate-a-edn
+       (candidate!
+        root "duplicate-a" "graph.fixture.duplicate-a" duplicate-a-string))
+     (define duplicate-b-edn
+       (candidate!
+        root "duplicate-b" "graph.fixture.duplicate-b" duplicate-b-string))
+     (define result
+       (check-edn-world
+        (list duplicate-b-edn duplicate-a-edn)
+        #:check-namespaces '(world.duplicate)))
+     (check-false (world-check-result-ok? result))
+     (check-regexp-match
+      #rx"checked namespace world\\.duplicate is ambiguous across candidate sources: graph\\.fixture\\.duplicate-a, graph\\.fixture\\.duplicate-b"
+      (diagnostic-text result)))))
+
+(test-case "ambiguous imports name the importer and sorted candidate providers"
+  (with-world-files
+   (lambda (root _provider-source _consumer-source)
+     (define duplicate-a-edn
+       (candidate!
+        root "duplicate-a" "graph.fixture.duplicate-a" duplicate-a-string))
+     (define duplicate-b-edn
+       (candidate!
+        root "duplicate-b" "graph.fixture.duplicate-b" duplicate-b-string))
+     (define consumer-edn
+       (candidate!
+        root
+        "duplicate-consumer"
+        "graph.fixture.consumer"
+        duplicate-consumer-string))
+     (define result
+       (check-edn-world
+        (list duplicate-b-edn consumer-edn duplicate-a-edn)
+        #:check-sources '("graph.fixture.consumer")))
+     (check-false (world-check-result-ok? result))
+     (check-regexp-match
+      #rx"ambiguous candidate namespace world\\.duplicate required by graph\\.fixture\\.consumer; providers: graph\\.fixture\\.duplicate-a, graph\\.fixture\\.duplicate-b"
       (diagnostic-text result)))))
 
 (test-case "@file source selectors support namespace-free graph modules"

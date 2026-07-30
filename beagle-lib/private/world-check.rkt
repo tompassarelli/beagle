@@ -78,12 +78,18 @@
 
 (struct candidate-overlay (by-namespace by-source) #:transparent)
 
+(define (module-source-id-string source)
+  (format "~a" (module-source-source-id source)))
+
+(define (candidate-source-list sources)
+  (string-join (map module-source-id-string sources) ", "))
+
 (define (source-overlay sources)
   (define by-namespace (make-hasheq))
   (define by-source (make-hash))
   (for ([source (in-list sources)])
     (define namespace (module-source-namespace source))
-    (define source-id (format "~a" (module-source-source-id source)))
+    (define source-id (module-source-id-string source))
     (when (hash-has-key? by-source source-id)
       (error
        'check-edn-world
@@ -91,19 +97,32 @@
        source-id))
     (hash-set! by-source source-id source)
     (when namespace
-      (when (hash-has-key? by-namespace namespace)
-        (error
-         'check-edn-world
-         "duplicate candidate namespace ~a from ~a and ~a"
-         namespace
-         (module-source-source-id (hash-ref by-namespace namespace))
-         (module-source-source-id source)))
-      (hash-set! by-namespace namespace source)))
+      ;; Namespace identity can be shared; source identity stays authoritative.
+      (hash-update! by-namespace namespace
+                    (lambda (existing) (cons source existing))
+                    '())))
+  (for ([(namespace namespace-sources) (in-hash by-namespace)])
+    (hash-set! by-namespace
+               namespace
+               (sort namespace-sources
+                     string<?
+                     #:key module-source-id-string)))
   (candidate-overlay by-namespace by-source))
 
 (define (overlay-resolver overlay)
-  (lambda (namespace _importer-source)
-    (hash-ref (candidate-overlay-by-namespace overlay) namespace #f)))
+  (lambda (namespace importer-source)
+    (define sources
+      (hash-ref (candidate-overlay-by-namespace overlay) namespace '()))
+    (cond
+      [(null? sources) #f]
+      [(null? (cdr sources)) (car sources)]
+      [else
+       (error
+        'check-edn-world
+        "ambiguous candidate namespace ~a required by ~a; providers: ~a"
+        namespace
+        importer-source
+        (candidate-source-list sources))])))
 
 (define (parse-source source resolver)
   (parse-program
@@ -219,19 +238,33 @@
          "check-edn-world: explicit checked module selector set is empty"
          (current-continuation-marks)))))
     (for ([namespace (in-list (or selected-namespaces '()))])
-      (unless
-          (hash-has-key?
-           (candidate-overlay-by-namespace authoritative-overlay)
-           namespace)
-        (abort
-         (failed-result
-          #f
-          'index
-          (make-exn:fail
-           (format
-            "check-edn-world: checked namespace ~a is absent from the candidate overlay"
-            namespace)
-           (current-continuation-marks))))))
+      (define sources
+        (hash-ref
+         (candidate-overlay-by-namespace authoritative-overlay)
+         namespace
+         '()))
+      (cond
+        [(null? sources)
+         (abort
+          (failed-result
+           #f
+           'index
+           (make-exn:fail
+            (format
+             "check-edn-world: checked namespace ~a is absent from the candidate overlay"
+             namespace)
+            (current-continuation-marks))))]
+        [(pair? (cdr sources))
+         (abort
+          (failed-result
+           #f
+           'index
+           (make-exn:fail
+            (format
+             "check-edn-world: checked namespace ~a is ambiguous across candidate sources: ~a"
+             namespace
+             (candidate-source-list sources))
+            (current-continuation-marks))))]))
     (for ([source-id (in-list (or selected-sources '()))])
       (unless
           (hash-has-key?
