@@ -550,7 +550,12 @@
        (for ([item (in-vector value)]) (walk-ast! item))]
       [else (void)]))
   (for ([form (in-list (program-forms prog))]) (walk-ast! form))
-  (for ([extern-type (in-hash-values (program-host-externs prog))])
+  ;; Sorted, not hash order: this walk order numbers Union<i> positionally.
+  (for ([extern-type
+         (in-list
+          (sort (hash-values (program-host-externs prog))
+                string<?
+                #:key type->string))])
     (walk-type! extern-type))
   (reverse out))
 

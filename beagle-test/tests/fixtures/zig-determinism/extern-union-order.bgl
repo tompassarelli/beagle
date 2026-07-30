@@ -1,0 +1,14 @@
+;; Determinism fixture, not a golden: every boxed union is reachable ONLY via a
+;; host-extern signature, and declaration / extern-name-hash / type->string
+;; orders are three different orders here — so emission can match only one.
+(define-target zig)
+(ns g)
+(declare-extern los.rt/read-scalar [String -> (U Int Float Bool)])
+(declare-extern los.rt/read-cell [Bool -> (U Int String)])
+(declare-extern los.rt/probe-flag [Int -> (U Bool Float)])
+
+(defn go [s :- String] :- Int
+  (do (los.rt/read-cell true)
+      (los.rt/probe-flag 1)
+      (los.rt/read-scalar s)
+      0))

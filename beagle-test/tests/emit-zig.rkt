@@ -21,6 +21,7 @@
 (require rackunit
          racket/file
          racket/path
+         racket/port
          racket/string
          racket/system
          beagle/private/ast
@@ -1896,9 +1897,73 @@ ZIG
 
 ;; --- determinism: same input → byte-identical output --------------------------
 
+(define extern-union-fixture
+  (build-path fixtures-dir 'up "zig-determinism" "extern-union-order.bgl"))
+
+;; "Union0: int string" — positional name plus alternatives in emission order.
+(define (emitted-union-decls zig-src)
+  (for/list ([m (in-list (regexp-match*
+                          #px"pub const (Union[0-9]+) = union\\(enum\\) \\{([^}]*)\\}"
+                          zig-src
+                          #:match-select values))])
+    (format "~a: ~a"
+            (cadr m)
+            (string-join
+             (regexp-match* #px"([a-z_][a-z0-9_]*):" (caddr m) #:match-select cadr)
+             " "))))
+
+;; Emit in a FRESH racket process: same pinned racket, but the compiler is
+;; required by ABSOLUTE path so a worktree never resolves beagle/* through the
+;; global pkg links to the canonical checkout.
+(define (emit-zig-in-fresh-process src-path)
+  (define private-dir
+    (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
+      (simplify-path (build-path dir 'up 'up "beagle-lib" "private"))))
+  (define (lib name) (path->string (build-path private-dir name)))
+  (define eval-str
+    (format
+     (string-append
+      "(require (file ~s) (file ~s) (file ~s))"
+      "(define src (string->path (vector-ref (current-command-line-arguments) 0)))"
+      "(define prog (parse-program (read-beagle-syntax src) #:source-path src))"
+      "(type-check! prog)"
+      "(display (emit-program prog))")
+     (lib "parse.rkt") (lib "check.rkt") (lib "emit.rkt")))
+  (define out (open-output-string))
+  (define err (open-output-string))
+  (define-values (proc pout pin perr)
+    (subprocess #f #f #f (find-system-path 'exec-file)
+                "-e" eval-str "--" (path->string src-path)))
+  (close-output-port pin)
+  (define drain-out (thread (lambda () (copy-port pout out))))
+  (define drain-err (thread (lambda () (copy-port perr err))))
+  (subprocess-wait proc)
+  (thread-wait drain-out)
+  (thread-wait drain-err)
+  (unless (zero? (subprocess-status proc))
+    (error 'emit-zig-in-fresh-process "child racket exited ~a:\n~a"
+           (subprocess-status proc) (get-output-string err)))
+  (get-output-string out))
+
 (test-case "emission is deterministic"
   (define f (build-path fixtures-dir "07-loop-recur.bgl"))
   (check-equal? (compile-zig-src f) (compile-zig-src f)))
+
+(test-case "extern-only boxed unions emit identically in two fresh processes"
+  (define a (emit-zig-in-fresh-process extern-union-fixture))
+  (define b (emit-zig-in-fresh-process extern-union-fixture))
+  ;; guard the guard: the fixture must actually reach the union-numbering path
+  (check-equal? (length (emitted-union-decls a)) 3)
+  (check-equal? a b)
+  (check-equal? a (compile-zig-src extern-union-fixture)))
+
+(test-case "extern-only boxed unions are numbered in canonical type order"
+  ;; Sorted by extern type->string ([Bool -> …] < [Int -> …] < [String -> …]),
+  ;; NOT by declaration order and not by extern-name hash order.
+  (check-equal? (emitted-union-decls (compile-zig-src extern-union-fixture))
+                '("Union0: int string"
+                  "Union1: boolean float"
+                  "Union2: int float boolean")))
 
 ;; --- pointed rejections (out-of-table IR) --------------------------------------
 
