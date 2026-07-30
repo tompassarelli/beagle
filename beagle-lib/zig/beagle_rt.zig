@@ -309,80 +309,391 @@ pub fn io() std.Io {
 
 /// Typed map for the CLI target. Keyword and string keys both lower to
 /// []const u8 keys; the value type V is concrete (records, ints, slices,
-/// other maps) — never a dynamic union. `assoc` is immutable (clone+put)
-/// to match Clojure semantics; CLI maps are small (per-record
-/// frontmatter), so O(n) assoc is fine. `get` returns ?V — exactly
+/// other maps) — never a dynamic union. `get` returns ?V — exactly
 /// beagle's `V?` optional, so it flows straight into nil-narrowing.
+///
+/// Persistent hash-array-mapped trie over a Wyhash key digest: 32-way
+/// branching on 5-bit chunks, path-copied on `assoc`. Nodes are never
+/// mutated after construction, so a map value that predates an assoc still
+/// observes its own contents.
+///
+/// Iteration order: a node's inline entries in ascending slot order, then
+/// its child slots in ascending order. Under `assoc` alone the shape is a
+/// function of the key set, so that order is insertion-order independent;
+/// `dissoc` may leave a deeper shape, which no consumer observes because
+/// equality and hash are content-based.
 pub fn Map(comptime V: type) type {
     return struct {
         const Self = @This();
         pub const beagle_map = true;
-        inner: std.StringHashMap(V),
 
-        pub fn empty(allocator: std.mem.Allocator) Self {
-            return .{ .inner = std.StringHashMap(V).init(allocator) };
+        const Entry = struct { key: []const u8, value: V };
+
+        /// `entry_map` and `node_map` are disjoint slot bitmaps over the
+        /// node's 5-bit chunk; `entries` and `children` are compact and
+        /// stay in ascending slot order. Both bitmaps zero marks a
+        /// collision leaf, whose entries share a full 64-bit digest and are
+        /// scanned linearly.
+        const Node = struct {
+            entry_map: u32,
+            node_map: u32,
+            entries: []const Entry,
+            children: []const *const Node,
+        };
+
+        /// Shift 60 consumes the digest's last four bits, so a conflict at
+        /// that level is a true full-digest collision, not a deeper prefix.
+        const last_shift: u8 = 60;
+        /// 13 chunk levels plus one collision leaf, rounded up.
+        const max_depth: usize = 16;
+
+        root: ?*const Node,
+        size: u32,
+
+        fn digest(k: []const u8) u64 {
+            return std.hash.Wyhash.hash(0, k);
+        }
+        fn slotOf(h: u64, shift: u8) u5 {
+            return @truncate(h >> @intCast(shift));
+        }
+        fn maskOf(h: u64, shift: u8) u32 {
+            return @as(u32, 1) << slotOf(h, shift);
+        }
+        fn indexOf(bitmap: u32, bit: u32) usize {
+            return @popCount(bitmap & (bit - 1));
+        }
+        fn isCollision(node: *const Node) bool {
+            return node.entry_map == 0 and node.node_map == 0;
+        }
+        fn mkNode(
+            allocator: std.mem.Allocator,
+            entry_map: u32,
+            node_map: u32,
+            entries: []const Entry,
+            children: []const *const Node,
+        ) *const Node {
+            const node = allocator.create(Node) catch @panic("oom");
+            node.* = .{
+                .entry_map = entry_map,
+                .node_map = node_map,
+                .entries = entries,
+                .children = children,
+            };
+            return node;
+        }
+        fn allocEntries(allocator: std.mem.Allocator, n: usize) []Entry {
+            return allocator.alloc(Entry, n) catch @panic("oom");
+        }
+        fn allocChildren(allocator: std.mem.Allocator, n: usize) []*const Node {
+            return allocator.alloc(*const Node, n) catch @panic("oom");
+        }
+
+        /// The subtree holding two entries that agree on every chunk above
+        /// `shift`. Recurses one level per shared chunk, bottoming out in a
+        /// collision leaf once the digest is exhausted.
+        fn mergeEntries(
+            allocator: std.mem.Allocator,
+            shift: u8,
+            ha: u64,
+            a: Entry,
+            hb: u64,
+            b: Entry,
+        ) *const Node {
+            if (shift > last_shift) {
+                const entries = allocEntries(allocator, 2);
+                entries[0] = a;
+                entries[1] = b;
+                return mkNode(allocator, 0, 0, entries, &.{});
+            }
+            const sa = slotOf(ha, shift);
+            const sb = slotOf(hb, shift);
+            if (sa != sb) {
+                const entries = allocEntries(allocator, 2);
+                entries[0] = if (sa < sb) a else b;
+                entries[1] = if (sa < sb) b else a;
+                const bits = (@as(u32, 1) << sa) | (@as(u32, 1) << sb);
+                return mkNode(allocator, bits, 0, entries, &.{});
+            }
+            const child = mergeEntries(allocator, shift + 5, ha, a, hb, b);
+            const children = allocChildren(allocator, 1);
+            children[0] = child;
+            return mkNode(allocator, 0, @as(u32, 1) << sa, &.{}, children);
+        }
+
+        fn nodeFind(node: *const Node, h: u64, shift: u8, k: []const u8) ?Entry {
+            if (isCollision(node)) {
+                for (node.entries) |entry| {
+                    if (std.mem.eql(u8, entry.key, k)) return entry;
+                }
+                return null;
+            }
+            const bit = maskOf(h, shift);
+            if (node.entry_map & bit != 0) {
+                const entry = node.entries[indexOf(node.entry_map, bit)];
+                return if (std.mem.eql(u8, entry.key, k)) entry else null;
+            }
+            if (node.node_map & bit != 0) {
+                return nodeFind(node.children[indexOf(node.node_map, bit)], h, shift + 5, k);
+            }
+            return null;
+        }
+
+        const Assoc = struct { node: *const Node, added: bool };
+
+        fn nodeAssoc(
+            allocator: std.mem.Allocator,
+            node: *const Node,
+            h: u64,
+            shift: u8,
+            incoming: Entry,
+        ) Assoc {
+            if (isCollision(node)) {
+                for (node.entries, 0..) |entry, i| {
+                    if (!std.mem.eql(u8, entry.key, incoming.key)) continue;
+                    const entries = allocEntries(allocator, node.entries.len);
+                    @memcpy(entries, node.entries);
+                    entries[i] = incoming;
+                    return .{ .node = mkNode(allocator, 0, 0, entries, &.{}), .added = false };
+                }
+                const entries = allocEntries(allocator, node.entries.len + 1);
+                @memcpy(entries[0..node.entries.len], node.entries);
+                entries[node.entries.len] = incoming;
+                return .{ .node = mkNode(allocator, 0, 0, entries, &.{}), .added = true };
+            }
+            const bit = maskOf(h, shift);
+            if (node.entry_map & bit != 0) {
+                const i = indexOf(node.entry_map, bit);
+                const existing = node.entries[i];
+                if (std.mem.eql(u8, existing.key, incoming.key)) {
+                    const entries = allocEntries(allocator, node.entries.len);
+                    @memcpy(entries, node.entries);
+                    entries[i] = incoming;
+                    return .{
+                        .node = mkNode(allocator, node.entry_map, node.node_map, entries, node.children),
+                        .added = false,
+                    };
+                }
+                // Both keys claim this slot: the resident entry moves down
+                // into a fresh subtree and its bit migrates to `node_map`.
+                const child = mergeEntries(
+                    allocator,
+                    shift + 5,
+                    digest(existing.key),
+                    existing,
+                    h,
+                    incoming,
+                );
+                const entries = allocEntries(allocator, node.entries.len - 1);
+                @memcpy(entries[0..i], node.entries[0..i]);
+                @memcpy(entries[i..], node.entries[i + 1 ..]);
+                const ci = indexOf(node.node_map, bit);
+                const children = allocChildren(allocator, node.children.len + 1);
+                @memcpy(children[0..ci], node.children[0..ci]);
+                children[ci] = child;
+                @memcpy(children[ci + 1 ..], node.children[ci..]);
+                return .{
+                    .node = mkNode(allocator, node.entry_map & ~bit, node.node_map | bit, entries, children),
+                    .added = true,
+                };
+            }
+            if (node.node_map & bit != 0) {
+                const i = indexOf(node.node_map, bit);
+                const result = nodeAssoc(allocator, node.children[i], h, shift + 5, incoming);
+                const children = allocChildren(allocator, node.children.len);
+                @memcpy(children, node.children);
+                children[i] = result.node;
+                return .{
+                    .node = mkNode(allocator, node.entry_map, node.node_map, node.entries, children),
+                    .added = result.added,
+                };
+            }
+            const i = indexOf(node.entry_map, bit);
+            const entries = allocEntries(allocator, node.entries.len + 1);
+            @memcpy(entries[0..i], node.entries[0..i]);
+            entries[i] = incoming;
+            @memcpy(entries[i + 1 ..], node.entries[i..]);
+            return .{
+                .node = mkNode(allocator, node.entry_map | bit, node.node_map, entries, node.children),
+                .added = true,
+            };
+        }
+
+        const Removal = struct { node: ?*const Node, removed: bool };
+
+        fn nodeDissoc(
+            allocator: std.mem.Allocator,
+            node: *const Node,
+            h: u64,
+            shift: u8,
+            k: []const u8,
+        ) Removal {
+            if (isCollision(node)) {
+                for (node.entries, 0..) |entry, i| {
+                    if (!std.mem.eql(u8, entry.key, k)) continue;
+                    if (node.entries.len == 1) return .{ .node = null, .removed = true };
+                    const entries = allocEntries(allocator, node.entries.len - 1);
+                    @memcpy(entries[0..i], node.entries[0..i]);
+                    @memcpy(entries[i..], node.entries[i + 1 ..]);
+                    return .{ .node = mkNode(allocator, 0, 0, entries, &.{}), .removed = true };
+                }
+                return .{ .node = node, .removed = false };
+            }
+            const bit = maskOf(h, shift);
+            if (node.entry_map & bit != 0) {
+                const i = indexOf(node.entry_map, bit);
+                if (!std.mem.eql(u8, node.entries[i].key, k)) {
+                    return .{ .node = node, .removed = false };
+                }
+                if (node.entries.len == 1 and node.children.len == 0) {
+                    return .{ .node = null, .removed = true };
+                }
+                const entries = allocEntries(allocator, node.entries.len - 1);
+                @memcpy(entries[0..i], node.entries[0..i]);
+                @memcpy(entries[i..], node.entries[i + 1 ..]);
+                return .{
+                    .node = mkNode(allocator, node.entry_map & ~bit, node.node_map, entries, node.children),
+                    .removed = true,
+                };
+            }
+            if (node.node_map & bit != 0) {
+                const i = indexOf(node.node_map, bit);
+                const result = nodeDissoc(allocator, node.children[i], h, shift + 5, k);
+                if (!result.removed) return .{ .node = node, .removed = false };
+                if (result.node) |child| {
+                    const children = allocChildren(allocator, node.children.len);
+                    @memcpy(children, node.children);
+                    children[i] = child;
+                    return .{
+                        .node = mkNode(allocator, node.entry_map, node.node_map, node.entries, children),
+                        .removed = true,
+                    };
+                }
+                if (node.entries.len == 0 and node.children.len == 1) {
+                    return .{ .node = null, .removed = true };
+                }
+                const children = allocChildren(allocator, node.children.len - 1);
+                @memcpy(children[0..i], node.children[0..i]);
+                @memcpy(children[i..], node.children[i + 1 ..]);
+                return .{
+                    .node = mkNode(allocator, node.entry_map, node.node_map & ~bit, node.entries, children),
+                    .removed = true,
+                };
+            }
+            return .{ .node = node, .removed = false };
+        }
+
+        /// Allocation-free depth-first walk — `eql` and `hashValue` take no
+        /// allocator, so the frame stack has to be inline and depth-bounded.
+        pub const Iterator = struct {
+            const Frame = struct { node: *const Node, entry_i: usize, child_i: usize };
+
+            frames: [max_depth]Frame,
+            depth: usize,
+
+            pub fn next(self: *Iterator) ?Entry {
+                while (self.depth > 0) {
+                    const frame = &self.frames[self.depth - 1];
+                    if (frame.entry_i < frame.node.entries.len) {
+                        const entry = frame.node.entries[frame.entry_i];
+                        frame.entry_i += 1;
+                        return entry;
+                    }
+                    if (frame.child_i < frame.node.children.len) {
+                        const child = frame.node.children[frame.child_i];
+                        frame.child_i += 1;
+                        self.frames[self.depth] = .{ .node = child, .entry_i = 0, .child_i = 0 };
+                        self.depth += 1;
+                        continue;
+                    }
+                    self.depth -= 1;
+                }
+                return null;
+            }
+        };
+
+        pub fn iterator(self: Self) Iterator {
+            var it = Iterator{ .frames = undefined, .depth = 0 };
+            if (self.root) |root| {
+                it.frames[0] = .{ .node = root, .entry_i = 0, .child_i = 0 };
+                it.depth = 1;
+            }
+            return it;
+        }
+
+        pub fn empty(_: std.mem.Allocator) Self {
+            return .{ .root = null, .size = 0 };
         }
         pub fn assoc(self: Self, allocator: std.mem.Allocator, k: []const u8, v: V) Self {
-            var m = self.inner.cloneWithAllocator(allocator) catch @panic("oom");
-            m.put(k, v) catch @panic("oom");
-            return .{ .inner = m };
+            const h = digest(k);
+            const incoming = Entry{ .key = k, .value = v };
+            if (self.root) |root| {
+                const result = nodeAssoc(allocator, root, h, 0, incoming);
+                return .{ .root = result.node, .size = self.size + @intFromBool(result.added) };
+            }
+            const entries = allocEntries(allocator, 1);
+            entries[0] = incoming;
+            return .{ .root = mkNode(allocator, maskOf(h, 0), 0, entries, &.{}), .size = 1 };
+        }
+        pub fn dissoc(self: Self, allocator: std.mem.Allocator, k: []const u8) Self {
+            const root = self.root orelse return self;
+            const result = nodeDissoc(allocator, root, digest(k), 0, k);
+            if (!result.removed) return self;
+            return .{ .root = result.node, .size = self.size - 1 };
         }
         pub fn get(self: Self, k: []const u8) ?V {
-            return self.inner.get(k);
+            const root = self.root orelse return null;
+            const entry = nodeFind(root, digest(k), 0, k) orelse return null;
+            return entry.value;
         }
         pub fn contains(self: Self, k: []const u8) bool {
-            return self.inner.contains(k);
+            const root = self.root orelse return false;
+            return nodeFind(root, digest(k), 0, k) != null;
         }
         pub fn len(self: Self) i64 {
-            return @intCast(self.inner.count());
+            return @intCast(self.size);
         }
         pub fn keySet(self: Self, allocator: std.mem.Allocator) ValueSet([]const u8) {
             var out = ValueSet([]const u8).empty();
-            var inner = self.inner;
-            var iterator = inner.iterator();
-            while (iterator.next()) |entry| {
-                out = out.conj(allocator, entry.key_ptr.*);
+            var it = self.iterator();
+            while (it.next()) |entry| {
+                out = out.conj(allocator, entry.key);
             }
             return out;
         }
         pub fn valueSet(self: Self, allocator: std.mem.Allocator) ValueSet(V) {
             var out = ValueSet(V).empty();
-            var inner = self.inner;
-            var iterator = inner.iterator();
-            while (iterator.next()) |entry| {
-                out = out.conj(allocator, entry.value_ptr.*);
+            var it = self.iterator();
+            while (it.next()) |entry| {
+                out = out.conj(allocator, entry.value);
             }
             return out;
         }
         pub fn eql(self: Self, other: Self) bool {
-            if (self.inner.count() != other.inner.count()) return false;
-            var inner = self.inner;
-            var iterator = inner.iterator();
-            while (iterator.next()) |entry| {
-                const other_value = other.inner.get(entry.key_ptr.*) orelse return false;
-                if (!eq(entry.value_ptr.*, other_value)) return false;
+            if (self.size != other.size) return false;
+            var it = self.iterator();
+            while (it.next()) |entry| {
+                const other_value = other.get(entry.key) orelse return false;
+                if (!eq(entry.value, other_value)) return false;
             }
             return true;
         }
         pub fn hashValue(self: Self) i32 {
             var acc: i32 = 0;
-            var inner = self.inner;
-            var iterator = inner.iterator();
-            while (iterator.next()) |entry| {
-                acc +%= mixHash(hash32(entry.key_ptr.*), hash32(entry.value_ptr.*));
+            var it = self.iterator();
+            while (it.next()) |entry| {
+                acc +%= mixHash(hash32(entry.key), hash32(entry.value));
             }
             return mixHash(7, acc);
         }
         pub fn prStr(self: Self, allocator: std.mem.Allocator) []const u8 {
             var out: []const u8 = "{";
             var first_entry = true;
-            var inner = self.inner;
-            var iterator = inner.iterator();
-            while (iterator.next()) |entry| {
+            var it = self.iterator();
+            while (it.next()) |entry| {
                 if (!first_entry) out = str2(allocator, out, ", ");
-                out = str2(allocator, out, pr_str(allocator, entry.key_ptr.*));
+                out = str2(allocator, out, pr_str(allocator, entry.key));
                 out = str2(allocator, out, " ");
-                out = str2(allocator, out, pr_str(allocator, entry.value_ptr.*));
+                out = str2(allocator, out, pr_str(allocator, entry.value));
                 first_entry = false;
             }
             return str2(allocator, out, "}");

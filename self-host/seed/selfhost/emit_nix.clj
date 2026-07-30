@@ -182,8 +182,13 @@
   (if (>= i (count pairs)) acc (let [pair (nth pairs i)
    key (get pair "key")
    val (get pair "val")
-   key-str (emit-key key depth)]
-  (recur (+ i 1) (if (and (map-node? val) (str/includes? key-str ".") (= 1 (count (map-pairs val)))) (into acc (flatten-dot-path key-str (map-pairs val) depth)) (conj acc (str ind key-str " = " (emit-expr* val (+ depth 1)) ";")))))))]
+   key-node (get key "node")
+   sentinel? (and (= (get val "node") "literal") (= (get val "kind") "bool") (= (get val "value") false))]
+  (recur (+ i 1) (cond
+  (and sentinel? (= key-node "nix-inherit")) (conj acc (str ind "inherit " (str/join " " (get key "names")) ";"))
+  (and sentinel? (= key-node "nix-inherit-from")) (conj acc (str ind "inherit (" (emit-expr* (get key "ns-expr") (+ depth 1)) ") " (str/join " " (get key "names")) ";"))
+  :else (let [key-str (emit-key key depth)]
+  (if (and (map-node? val) (str/includes? key-str ".") (= 1 (count (map-pairs val)))) (into acc (flatten-dot-path key-str (map-pairs val) depth)) (conj acc (str ind key-str " = " (emit-expr* val (+ depth 1)) ";")))))))))]
   (str "{\n" (str/join "\n" entries) "\n" (indent depth) "}"))))
 
 (defn ^String emit-nix-list [items depth]
@@ -674,7 +679,10 @@
   (expect! "qualified call" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "lib/mkDefault"} "args" [{"node" "literal" "kind" "string" "value" "nixos"}]} 0) "lib.mkDefault \"nixos\""))
   (expect! "empty list" (= (emit-nix-list [] 0) "[ ]"))
   (expect! "small list single-line" (= (emit-nix-list [{"node" "literal" "kind" "number" "value" 1} {"node" "literal" "kind" "number" "value" 2}] 0) "[ 1 2 ]"))
+  (do
   (expect! "attrs keyword key" (= (emit-nix-attrs [{"key" {"node" "literal" "kind" "keyword" "value" "a"} "val" {"node" "literal" "kind" "number" "value" 1}}] 0) "{\n  a = 1;\n}"))
+  (expect! "attrs singleton inherit sentinel" (= (emit-nix-attrs [{"key" {"node" "nix-inherit" "names" ["pkgs"]} "val" {"node" "literal" "kind" "bool" "value" false}}] 0) "{\n  inherit pkgs;\n}"))
+  (expect! "attrs singleton inherit-from sentinel" (= (emit-nix-attrs [{"key" {"node" "nix-inherit-from" "ns-expr" {"node" "ref" "name" "inputs"} "names" ["north"]} "val" {"node" "literal" "kind" "bool" "value" false}}] 0) "{\n  inherit (inputs) north;\n}")))
   (expect! "dotted keyword key emits verbatim" (= (emit-key {"node" "literal" "kind" "keyword" "value" "a.b.c"} 0) "a.b.c"))
   (expect! "fn-set depth0 pattern" (= (emit-nix-fn-set {"formals" [{"name" "pkgs" "default" false}] "rest" true "at-name" false "body" {"node" "literal" "kind" "nil"}} 0) "{ pkgs, ... }:\n\nnull"))
   (expect! "interp string" (= (emit-interp-string [{"type" "text" "value" "hi "} {"type" "expr" "value" {"node" "ref" "name" "x"}}] 0) "\"hi ${x}\""))

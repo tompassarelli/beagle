@@ -1343,6 +1343,60 @@ test "tagged unions narrow, widen, and survive map storage" {
 ZIG
       "tagged-union-storage"))))
 
+;; --- match on a closed union ------------------------------------------------
+
+(define union-match-src
+  (string-append
+   "(ns zig.union-match)\n"
+   "(defrecord Circle [(radius :- Int)])\n"
+   "(defrecord Square [(side :- Int)])\n"
+   "(defn describe [shape :- (U Circle Square Int)] :- String\n"
+   "  (match shape\n"
+   "    [(Circle r) (str \"circle:\" r)]\n"
+   "    [(Square s) (str \"square:\" s)]\n"
+   "    [_ \"scalar\"]))\n"
+   "(defn tag-of [shape :- (U Circle Square Int)] :- String\n"
+   "  (match shape\n"
+   "    [(Circle ignored) \"circle\"]\n"
+   "    [other (describe other)]))\n"
+   "(defn measure [shape :- (U Circle Square)] :- Int\n"
+   "  (match shape\n"
+   "    [(Circle r) (* r 2)]\n"
+   "    [(Square s) (* s s)]))\n"
+   "(defn main [] :- Nil\n"
+   "  (println (str (describe (->Circle 3)) \":\"\n"
+   "                (describe (->Square 4)) \":\"\n"
+   "                (describe 7) \":\"\n"
+   "                (tag-of (->Circle 9)) \":\"\n"
+   "                (tag-of (->Square 4)) \":\"\n"
+   "                (measure (->Circle 5)) \":\"\n"
+   "                (measure (->Square 6)))))\n"))
+
+(test-case "zig match on a closed union switches on the tag"
+  (define out (compile-zig-string union-match-src))
+  ;; two RECORD alternatives of one union — no type predicate can tell them
+  ;; apart, so the lowering must go through the tag.
+  (check-regexp-match
+   #rx"switch \\(__blk1_value\\) \\{ \\.circle => \\|__blk1_payload\\| blk2: \\{ const r = __blk1_payload\\.radius;"
+   out)
+  (check-regexp-match #rx"\\.square => \\|__blk1_payload\\| blk3: \\{ const s = __blk1_payload\\.side;" out)
+  (check-regexp-match #rx"else => \"scalar\"," out)
+  ;; a binder the arm never mentions is dropped (Zig rejects an unused local)
+  (check-false (regexp-match? #rx"const ignored" out))
+  ;; the default arm rebinds the whole union value — else has no payload
+  (check-regexp-match #rx"else => blk[0-9]+: \\{ const other = __blk[0-9]+_value; " out)
+  ;; measure covers every alternative: Zig rejects an else prong that covers
+  ;; nothing, so none is emitted.
+  (define measure-body
+    (cadr (regexp-match #px"pub fn measure\\(shape: Union1\\) i64 \\{\n([^\n]*)\n" out)))
+  (check-false (regexp-match? #rx"else =>" measure-body)))
+
+(when ZIG
+  (test-case "zig closed-union match compiles, runs, and extracts payloads"
+    (check-equal?
+     (zig-build-exe-and-run (compile-zig-string union-match-src))
+     "circle:3:square:4:scalar:circle:square:4:10:36\n")))
+
 ;; --- semantic contract 6: ownership and lifetime ----------------------------
 
 (test-case "ownership contract pins CLJ bytes and emits compiling Zig"
@@ -2049,6 +2103,32 @@ ZIG
   #rx"quot"
   '(defn f [a :- Int b :- Int] :- Int (/ a b)))
 
+(check-unsupported/src "zig rejects a non-exhaustive closed-union match"
+  #rx"non-exhaustive match on closed union"
+  (string-append
+   "(ns zig.union-match-partial)\n"
+   "(defrecord Circle [(radius :- Int)])\n"
+   "(defrecord Square [(side :- Int)])\n"
+   "(defn f [shape :- (U Circle Square)] :- Int\n"
+   "  (match shape [(Circle r) r]))\n"))
+
+(check-unsupported/src "zig rejects a match clause outside the target union"
+  #rx"is not an alternative of"
+  (string-append
+   "(ns zig.union-match-foreign)\n"
+   "(defrecord Circle [(radius :- Int)])\n"
+   "(defrecord Square [(side :- Int)])\n"
+   "(defrecord Blob [(size :- Int)])\n"
+   "(defn f [shape :- (U Circle Square)] :- Int\n"
+   "  (match shape [(Circle r) r] [(Square s) s] [(Blob b) b]))\n"))
+
+(check-unsupported/src "zig rejects match on a target that is not a closed union"
+  #rx"match target"
+  (string-append
+   "(ns zig.union-match-scalar)\n"
+   "(defn f [n :- Int] :- Int\n"
+   "  (match n [1 10] [_ 0]))\n"))
+
 (check-unsupported/src "zig rejects qualified calls to non-runtime namespaces"
   #rx"qualified"
   "(ns g)\n(require some.random.lib :as q)\n(defn f [s :- String] :- String (q/frobnicate s))")
@@ -2127,6 +2207,73 @@ ZIG
     (check-true (zig-compiles?
                  (ho-emit "Int\n  (reduce (fn [acc :- Int x :- Int] :- Int (+ acc x)) 0 xs)")
                  "ho-reduce"))))
+
+;; --- fn-name arguments, monomorphized per (callee, parameter, defn) ----------
+
+(define reachable-from-src
+  (string-append
+   "(ns zig.hof-mono)\n"
+   "(def A-SUCC :- (Vec String) [\"b\"])\n"
+   "(def B-SUCC :- (Vec String) [\"c\"])\n"
+   "(def C-SUCC :- (Vec String) [\"a\"])\n"
+   "(def NO-SUCC :- (Vec String) [])\n"
+   "(defn next-nodes [node :- String] :- (Vec String)\n"
+   "  (cond\n"
+   "    [(= node \"a\") A-SUCC]\n"
+   "    [(= node \"b\") B-SUCC]\n"
+   "    [(= node \"c\") C-SUCC]\n"
+   "    [:else NO-SUCC]))\n"
+   "(defn reachable-from? [succ :- [String -> (Vec String)]\n"
+   "                       frontier :- (Vec String)\n"
+   "                       fuel :- Int\n"
+   "                       target :- String] :- Bool\n"
+   "  (loop [front frontier n fuel]\n"
+   "    (cond\n"
+   "      [(empty? front) false]\n"
+   "      [(<= n 0) false]\n"
+   "      [(= (nth front 0) target) true]\n"
+   "      [:else (recur (vec (concat (rest front) (succ (nth front 0)))) (dec n))])))\n"
+   "(defn cycle? [start :- String] :- Bool\n"
+   "  (reachable-from? next-nodes (next-nodes start) 16 start))\n"
+   "(defn main [] :- Nil\n"
+   "  (println (str (cycle? \"a\") \":\" (cycle? \"d\"))))\n"))
+
+(test-case "a top-level defn in argument position specializes the callee"
+  (define out (compile-zig-string reachable-from-src))
+  ;; the fn argument is erased from the signature, not passed as a value
+  (check-regexp-match
+   #rx"pub fn reachableFrom__succ__nextNodes\\(__ctx: \\*rt\\.Ctx, frontier: \\[\\]const \\[\\]const u8, fuel: i64, target: \\[\\]const u8\\) bool"
+   out)
+  (check-regexp-match #rx"reachableFrom__succ__nextNodes\\(__ctx, nextNodes\\(start\\), 16, start\\)" out)
+  ;; the generic form has no Zig representation and is never emitted
+  (check-false (regexp-match? #rx"pub fn reachableFrom\\(" out))
+  (check-false (regexp-match? #rx"succ" (regexp-replace* #rx"__succ__" out ""))))
+
+(test-case "one callee specializes per distinct fn argument"
+  (define out
+    (compile-zig-string
+     (string-append
+      "(ns zig.hof-two)\n"
+      "(defn double [x :- Int] :- Int (* x 2))\n"
+      "(defn negate [x :- Int] :- Int (- 0 x))\n"
+      "(defn apply-twice [f :- [Int -> Int] x :- Int] :- Int (f (f x)))\n"
+      "(defn main [] :- Nil\n"
+      "  (println (str (apply-twice double 5) \":\" (apply-twice negate 5))))\n")))
+  (check-regexp-match #rx"pub fn applyTwice__f__double\\(x: i64\\) i64 \\{\n    return double\\(double\\(x\\)\\);" out)
+  (check-regexp-match #rx"pub fn applyTwice__f__negate\\(x: i64\\) i64 \\{\n    return negate\\(negate\\(x\\)\\);" out))
+
+(when ZIG
+  (test-case "a monomorphized traversal compiles, runs, and detects the cycle"
+    (check-equal?
+     (zig-build-exe-and-run (compile-zig-string reachable-from-src))
+     "true:false\n")))
+
+(check-unsupported/src "zig rejects a fn value in a monomorphized argument slot"
+  #rx"higher-order argument"
+  (string-append
+   "(ns zig.hof-literal)\n"
+   "(defn apply-twice [f :- [Int -> Int] x :- Int] :- Int (f (f x)))\n"
+   "(defn run [] :- Int (apply-twice (fn [x :- Int] :- Int (+ x 1)) 5))\n"))
 
 ;; --- Phase 2: world-escape check + promote ------------------------------------
 

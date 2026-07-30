@@ -434,6 +434,9 @@
 (define current-fn-returns (make-parameter (hasheq))) ; local defn name → return type
 (define current-fn-types (make-parameter (hasheq))) ; local defn name → complete function type
 (define current-fn-allocation-modes (make-parameter (hasheq))) ; local defn name → hidden | explicit
+(define current-fn-forms (make-parameter (hasheq))) ; local defn name → defn-form
+(define current-hof-substitutions (make-parameter (hasheq))) ; monomorphized fn param → top-level defn name
+(define current-hof-specializations (make-parameter #f)) ; box of pending specializations
 (define current-semantic-contracts (make-parameter #f))
 (define current-fn-error-contracts (make-parameter (hasheq)))
 (define current-fn-name (make-parameter #f))
@@ -1261,6 +1264,7 @@
               dynamic-info #f
               (lambda () (emit-expr el))))]
     [(cond-form? e) (emit-cond e)]
+    [(match-form? e) (emit-match e)]
     [(do-form? e) (emit-block-expr '() (do-form-body e))]
     [(let-form? e) (emit-block-expr (let-form-bindings e) (let-form-body e))]
     [(loop-form? e) (emit-loop e)]
@@ -1485,6 +1489,171 @@
   (if (= 1 (length body))
       (emit-expr (car body))
       (emit-block-expr '() body)))
+
+;; --- match on a closed union ------------------------------------------------
+;; Zig needs a total switch and rejects an else prong that covers nothing;
+;; check.rkt's E006 exhaustiveness rule only fires for defunion targets, so
+;; coverage of an inline (U ...) target is settled here.
+
+(define (union-alternative-named union-type rec-name)
+  (for/first ([alt (in-list (type-union-alts union-type))]
+              #:when (and (type-prim? alt)
+                          (eq? (type-prim-name alt) rec-name)))
+    alt))
+
+(define (clause-refs clause)
+  (for/fold ([acc '()]) ([x (in-list (match-clause-body clause))])
+    (refs-of x acc)))
+
+;; Bind pattern binders to the captured payload's declared fields, then emit
+;; the arm body under those bindings. Binders the body never mentions are
+;; dropped: Zig rejects an unused local.
+(define (emit-match-record-arm clause alt payload-name)
+  (define pat (match-clause-pattern clause))
+  (define rec-name (pat-record-type-name pat))
+  (define fields
+    (hash-ref (current-records) rec-name
+              (lambda ()
+                (unsupported "match clause"
+                             (format "~a is not a record declared in this module"
+                                     rec-name)))))
+  (define binders (pat-record-bindings pat))
+  (unless (<= (length binders) (length fields))
+    (unsupported "match clause"
+                 (format "(~a ...) binds ~a name(s) but ~a has ~a field(s)"
+                         rec-name (length binders) rec-name (length fields))))
+  (define used (clause-refs clause))
+  (define live
+    (for/list ([b (in-list binders)]
+               [f (in-list fields)]
+               #:when (and (symbol? b) (memq b used)))
+      (cons b f)))
+  (define arm-binding-types
+    (for/fold ([acc (current-binding-types)]) ([pr (in-list live)])
+      (hash-set acc (car pr) (param-type (cdr pr)))))
+  (define arm-optionals
+    (append (for/list ([pr (in-list live)]
+                       #:when (and (param-type (cdr pr))
+                                   (optional-of (param-type (cdr pr)))))
+              (car pr))
+            (current-optionals)))
+  (parameterize ([current-binding-types arm-binding-types]
+                 [current-optionals arm-optionals])
+    (cond
+      [(null? live)
+       (emit-body-expr (match-clause-body clause))]
+      [else
+       (define lbl (fresh-label))
+       (format "|~a| ~a: { ~abreak :~a ~a; }"
+               payload-name
+               lbl
+               (apply string-append
+                      (for/list ([pr (in-list live)])
+                        (format "const ~a = ~a.~a; "
+                                (ident (car pr))
+                                payload-name
+                                (ident (param-name (cdr pr))))))
+               lbl
+               (emit-body-expr (match-clause-body clause)))])))
+
+;; The default arm binds the whole union value, so it captures nothing from
+;; the tag — `else => |x|` has no single payload type.
+(define (emit-match-default-arm clause value-name target-type)
+  (define pat (match-clause-pattern clause))
+  (cond
+    [(pat-wildcard? pat) (emit-body-expr (match-clause-body clause))]
+    [(not (memq (pat-var-name pat) (clause-refs clause)))
+     (emit-body-expr (match-clause-body clause))]
+    [else
+     (define name (pat-var-name pat))
+     (define lbl (fresh-label))
+     (parameterize ([current-binding-types
+                     (hash-set (current-binding-types) name target-type)])
+       (format "~a: { const ~a = ~a; break :~a ~a; }"
+               lbl (ident name) value-name lbl
+               (emit-body-expr (match-clause-body clause))))]))
+
+(define (emit-match e)
+  (define target (match-form-target e))
+  (define target-type (expr-static-type target))
+  (unless (boxed-union-type? target-type)
+    (unsupported
+     "match target"
+     (if target-type
+         (format "~a — the zig backend matches closed unions ((U A B ...)); narrow a closed dynamic with type predicates"
+                 (type->string target-type))
+         "needs a statically known closed union ((U A B ...)) target")))
+  (define alternatives (type-union-alts target-type))
+  (define clauses (match-form-clauses e))
+  (define lbl (fresh-label))
+  (define value-name (format "__~a_value" lbl))
+  (define payload-name (format "__~a_payload" lbl))
+  ;; single-expr literal bodies across every arm → anchor the first, or Zig
+  ;; leaves the whole chain comptime_int under runtime control flow.
+  (define bodies (map match-clause-body clauses))
+  (define literal-chain?
+    (andmap (lambda (b) (and (= 1 (length b)) (real? (car b)))) bodies))
+  (define covered '())
+  (define default-clause #f)
+  (define prongs
+    (for/list ([c (in-list clauses)]
+               [k (in-naturals)])
+      (define pat (match-clause-pattern c))
+      (when default-clause
+        (unsupported "match clause"
+                     "a default clause must come last in a closed-union match"))
+      (define (arm-body render)
+        (if (and literal-chain? (zero? k))
+            (anchor-literal-branch (car (match-clause-body c)) (map car bodies))
+            (render)))
+      (cond
+        [(or (pat-wildcard? pat) (pat-var? pat))
+         (set! default-clause c)
+         (cons 'else
+               (arm-body
+                (lambda () (emit-match-default-arm c value-name target-type))))]
+        [(pat-record? pat)
+         (define rec-name (pat-record-type-name pat))
+         (define alt
+           (or (union-alternative-named target-type rec-name)
+               (unsupported
+                "match clause"
+                (format "~a is not an alternative of ~a"
+                        rec-name (type->string target-type)))))
+         (when (memf (lambda (a) (type-invariant-equal? a alt)) covered)
+           (unsupported "match clause"
+                        (format "~a is matched more than once" rec-name)))
+         (set! covered (cons alt covered))
+         (cons (union-tag-name target-type alt)
+               (arm-body
+                (lambda () (emit-match-record-arm c alt payload-name))))]
+        [else
+         (unsupported
+          "match pattern"
+          "the zig backend supports record patterns and a default clause on a closed union")])))
+  (define missing
+    (for/list ([alt (in-list alternatives)]
+               #:unless (memf (lambda (a) (type-invariant-equal? a alt)) covered))
+      alt))
+  (when (and (pair? missing) (not default-clause))
+    (unsupported
+     "non-exhaustive match on closed union"
+     (format "~a has no clause for ~a — add the missing record clause(s) or a default [_ ...] arm"
+             (type->string target-type)
+             (string-join (map type->string missing) ", "))))
+  ;; Zig rejects an else prong that covers nothing.
+  (define effective-prongs
+    (if (and default-clause (null? missing))
+        (filter (lambda (p) (not (eq? (car p) 'else))) prongs)
+        prongs))
+  (format "~a: { const ~a = ~a; break :~a switch (~a) { ~a }; }"
+          lbl value-name (emit-expr target) lbl value-name
+          (string-join
+           (for/list ([p (in-list effective-prongs)])
+             (format "~a => ~a,"
+                     (if (eq? (car p) 'else) "else" (format ".~a" (car p)))
+                     (cdr p)))
+           " ")))
 
 ;; Inline a fn-literal's body as an expression. Its params are emitted
 ;; as their own idents, so the caller binds matching loop vars (capture
@@ -1909,6 +2078,130 @@
       (format "~a — zig supports str, clojure.string/trim, and clojure.string/blank? here"
               fn))]))
 
+;; --- fn-name arguments, monomorphized ---------------------------------------
+;; A function-typed parameter has no Zig representation: the callee is
+;; specialized per (callee, parameter, top-level defn) and the argument is
+;; erased from the signature.
+
+;; Argument indices of `fn` whose declared parameter type is a function type.
+(define (hof-argument-positions fn args)
+  (define fn-type (hash-ref (current-fn-types) fn #f))
+  (define params (and (type-fn? fn-type) (type-fn-params fn-type)))
+  (and params
+       (hash-ref (current-fn-forms) fn #f)
+       (let ([positions
+              (for/list ([p (in-list params)]
+                         [i (in-naturals)]
+                         #:when (and (type-fn? p) (< i (length args))))
+                i)])
+         (and (pair? positions) positions))))
+
+;; Any occurrence of `sym` other than a call head or a monomorphized argument
+;; slot: the parameter carries no value, so it can only be called or forwarded.
+(define (hof-param-escapes? value sym)
+  (let walk ([v value])
+    (cond
+      [(eq? v sym) #t]
+      [(call-form? v)
+       (define positions
+         (or (hof-argument-positions (call-form-fn v) (call-form-args v)) '()))
+       (for/or ([a (in-list (call-form-args v))]
+                [i (in-naturals)])
+         (and (not (and (eq? a sym) (memv i positions)))
+              (walk a)))]
+      [(struct? v)
+       (for/or ([field (in-vector (struct->vector v) 1)]) (walk field))]
+      [(pair? v) (or (walk (car v)) (walk (cdr v)))]
+      [(vector? v) (for/or ([x (in-vector v)]) (walk x))]
+      [else #f])))
+
+(define (hof-specialization-name fn params positions concretes)
+  (string-join
+   (cons (fn-ident fn)
+         (for/list ([i (in-list positions)] [c (in-list concretes)])
+           (format "~a__~a" (ident (param-name (list-ref params i))) (fn-ident c))))
+   "__"))
+
+(define (register-hof-specialization! spec-name fn positions concretes)
+  (define pending
+    (or (current-hof-specializations)
+        (unsupported "higher-order call"
+                     "specializations can only be emitted inside a program")))
+  (unless (assoc spec-name (unbox pending))
+    (set-box! pending
+              (append (unbox pending)
+                      (list (list spec-name fn positions concretes))))))
+
+(define (emit-monomorphized-call fn args positions)
+  (define params (defn-form-params (hash-ref (current-fn-forms) fn)))
+  (define concretes
+    (for/list ([i (in-list positions)])
+      (define a (list-ref args i))
+      (define resolved
+        (and (symbol? a) (hash-ref (current-hof-substitutions) a a)))
+      (unless (and resolved (hash-ref (current-fn-forms) resolved #f))
+        (unsupported
+         "higher-order argument"
+         (format "~a for ~a — pass a top-level defn name; closures and local function values have no zig representation"
+                 (if (symbol? a) a "expression")
+                 (param-name (list-ref params i)))))
+      resolved))
+  (define spec-name (hof-specialization-name fn params positions concretes))
+  (register-hof-specialization! spec-name fn positions concretes)
+  (define fn-type (hash-ref (current-fn-types) fn #f))
+  (define kept-args
+    (for/list ([a (in-list args)] [i (in-naturals)] #:unless (memv i positions)) a))
+  (define kept-type
+    (and (type-fn? fn-type)
+         (type-fn
+          (for/list ([p (in-list (type-fn-params fn-type))]
+                     [i (in-naturals)]
+                     #:unless (memv i positions))
+            p)
+          (type-fn-rest-type fn-type)
+          (type-fn-ret fn-type))))
+  (define emitted-args (emit-typed-args kept-args kept-type))
+  (define call-args
+    (if (eq? (hash-ref (current-fn-allocation-modes) fn #f) 'hidden)
+        (cons
+         (or (current-allocation-ctx)
+             (unsupported
+              "allocator context"
+              (format "calling allocating function ~a from a pure function" fn)))
+         emitted-args)
+        emitted-args))
+  (format "~a(~a)" spec-name (string-join call-args ", ")))
+
+(define (emit-hof-specialization spec)
+  (match-define (list spec-name fn positions concretes) spec)
+  (define callee (hash-ref (current-fn-forms) fn))
+  (define params (defn-form-params callee))
+  (define substitutions
+    (for/fold ([h (hasheq)]) ([i (in-list positions)] [c (in-list concretes)])
+      (hash-set h (param-name (list-ref params i)) c)))
+  (for ([i (in-list positions)])
+    (define pname (param-name (list-ref params i)))
+    (when (ormap (lambda (b) (hof-param-escapes? b pname))
+                 (defn-form-body callee))
+      (unsupported
+       "higher-order parameter"
+       (format "~a escapes call position in ~a — a monomorphized function parameter can only be called"
+               pname fn))))
+  (define kept-params
+    (for/list ([p (in-list params)] [i (in-naturals)] #:unless (memv i positions)) p))
+  (parameterize ([current-hof-substitutions substitutions])
+    (emit-defn (struct-copy defn-form callee [params kept-params]) spec-name)))
+
+;; Specializing a body can request further specializations, so drive the
+;; pending list by index rather than iterating a snapshot.
+(define (emit-hof-specializations)
+  (define pending (current-hof-specializations))
+  (let loop ([i 0] [out '()])
+    (define specs (unbox pending))
+    (if (>= i (length specs))
+        (reverse out)
+        (loop (add1 i) (cons (emit-hof-specialization (list-ref specs i)) out)))))
+
 (define (emit-call e)
   (define fn (call-form-fn e))
   (define args (call-form-args e))
@@ -1921,6 +2214,9 @@
   (cond
     [(dynamic-condition-info e) => emit-dynamic-condition]
     [(not (symbol? fn)) (unsupported "higher-order call" "fn position must be a name in v1")]
+    ;; inside a specialization the erased parameter IS its concrete function
+    [(hash-ref (current-hof-substitutions) fn #f)
+     => (lambda (concrete) (emit-call (call-form concrete args)))]
     [(hash-ref (current-imported-record-accessors) fn #f)
      => (lambda (field)
           (unless (= (length args) 1)
@@ -2422,6 +2718,8 @@
      (unsupported
       "typed error call"
       (format "~a must be wrapped in check or rescue" fn))]
+    [(hof-argument-positions fn args)
+     => (lambda (positions) (emit-monomorphized-call fn args positions))]
     [else
      ;; The source stays ordinary typed Clojure. Native allocation context is
      ;; an emitter ABI effect: direct and transitive allocating callees receive
@@ -2575,6 +2873,10 @@
                ([x (in-list (doseq-form-body e))])
        (refs-of x a))]
     [(threading-marker? e) (refs-of (threading-marker-desugared e) acc)]
+    [(match-form? e)
+     (for/fold ([a (refs-of (match-form-target e) acc)])
+               ([c (in-list (match-form-clauses e))])
+       (for/fold ([a2 a]) ([x (in-list (match-clause-body c))]) (refs-of x a2)))]
     [(vec-form? e) (for/fold ([a acc]) ([x (in-list (vec-form-items e))]) (refs-of x a))]
     [(map-form? e)
      (for/fold ([a acc]) ([pair (in-list (map-form-pairs e))])
@@ -2653,8 +2955,8 @@
           (type->zig (def-form-type f))
           rhs))
 
-(define (emit-defn f)
-  (define name (emitted-fn-ident (defn-form-name f)))
+(define (emit-defn f [name-override #f])
+  (define name (or name-override (emitted-fn-ident (defn-form-name f))))
   (when (defn-form-rest-param f) (unsupported "variadic defn"))
   (define params (defn-form-params f))
   (for ([p (in-list params)])
@@ -3157,6 +3459,17 @@
         (hash-set h (defn-form-name f) (defn-form-return-type f))
         h)))
 
+;; Only its specializations reach Zig — a function-typed parameter has no
+;; representation, so the generic form is never emitted.
+(define (hof-generic-defn? f)
+  (and (defn-form? f)
+       (ormap (lambda (p) (and (param? p) (type-fn? (param-type p))))
+              (defn-form-params f))))
+
+(define (build-fn-forms prog)
+  (for/fold ([h (hasheq)]) ([f (in-list (program-forms prog))])
+    (if (defn-form? f) (hash-set h (defn-form-name f) f) h)))
+
 (define (build-fn-types prog)
   (for/fold ([h (hasheq)]) ([f (in-list (program-forms prog))])
     (if (and (defn-form? f) (defn-form-return-type f))
@@ -3458,6 +3771,8 @@
                  [current-fn-returns (build-fn-returns prog)]
                  [current-fn-types (build-fn-types prog)]
                  [current-fn-allocation-modes allocation-modes]
+                 [current-fn-forms (build-fn-forms prog)]
+                 [current-hof-specializations (box '())]
                  [current-fn-error-contracts error-contracts]
                  [current-dynamic-types dynamic-types]
                  [current-union-types union-types]
@@ -3502,7 +3817,8 @@
        union-decls
        dynamic-decls
        (for/list ([f (in-list (program-forms prog))]
-                  #:unless (eq? f 'nil)) ; (comment ...) parses to nil
+                  #:unless (eq? f 'nil) ; (comment ...) parses to nil
+                  #:unless (hof-generic-defn? f))
          (cond
            [(record-form? f) (emit-record f)]
            [(deferror-form? f) (emit-error-declaration f)]
@@ -3512,6 +3828,8 @@
            [else (unsupported (format "top-level form ~a" f))]))
        (emit-promote prog)
        (emit-engine prog)))
+    ;; after `decls`: emitting a body is what discovers a specialization
+    (define specialization-decls (emit-hof-specializations))
     (define main-wrapper
       (emit-native-main-wrapper prog allocation-modes error-contracts))
     (define extern-imports
@@ -3554,7 +3872,7 @@
      (apply string-append module-imports)
      (apply string-append extern-imports)
      "pub const Ctx = rt.Ctx;\n\n"
-     (string-join decls "\n\n")
+     (string-join (append decls specialization-decls) "\n\n")
      (if main-wrapper (string-append "\n\n" main-wrapper) "")
      "\n")))
 
