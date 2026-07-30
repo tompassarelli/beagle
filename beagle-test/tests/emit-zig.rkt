@@ -651,6 +651,17 @@ ZIG
                 "(HVec String String?)")
   (check-equal? (regex-contract-unit contract) 'utf8-codepoint))
 
+(test-case "regex checker retains a static contract through an Any annotation"
+  (define prog
+    (parse-program
+     (map (lambda (datum) (datum->syntax #f datum))
+          '((define-target clj)
+            (ns regex-contract-any)
+            (def legacy-pattern :- Any (re-pattern "^[a-z]+$"))
+            (defn match-it [s :- String] :- Any
+              (re-matches legacy-pattern s))))))
+  (check-not-exn (lambda () (type-check! prog))))
+
 (test-case "zig regex checker admits a dynamic pattern with explicit match shape"
   (check-zig-forms
    '(ns regex-contract-dynamic)

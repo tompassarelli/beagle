@@ -652,13 +652,14 @@
 
 (define (check-regex-arg! e env who)
   (define t (infer-expr e env))
-  (unless (regex-type? t)
+  (define contract (regex-contract-for-expr e))
+  (unless (or (regex-type? t) contract)
     (regex-contract-error
      e
      (format "~a expects a Regex value, got ~a" who (type->string t))
      (hash-set* (type-mismatch-details REGEX t)
                 'function (symbol->string who))))
-  (or (regex-contract-for-expr e)
+  (or contract
       (regex-contract-from-type t e)
       (regex-contract-error
        e
