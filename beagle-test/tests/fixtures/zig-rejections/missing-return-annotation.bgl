@@ -1,0 +1,2 @@
+(ns zig-rejections.missing-return-annotation)
+(defn f [x :- Int] x)

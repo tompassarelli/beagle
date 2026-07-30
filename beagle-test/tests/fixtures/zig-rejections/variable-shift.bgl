@@ -1,0 +1,2 @@
+(ns zig-rejections.variable-shift)
+(defn f [x :- Int n :- Int] :- Int (bit-shift-left x n))

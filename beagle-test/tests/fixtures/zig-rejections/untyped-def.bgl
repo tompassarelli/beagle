@@ -1,0 +1,2 @@
+(ns zig-rejections.untyped-def)
+(def x 42)

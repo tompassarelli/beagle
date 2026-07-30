@@ -1,0 +1,2 @@
+(ns zig-rejections.multi-arity)
+(defn f ([a :- Int] :- Int a) ([a :- Int b :- Int] :- Int (+ a b)))

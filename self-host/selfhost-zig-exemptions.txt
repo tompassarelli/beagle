@@ -1,0 +1,65 @@
+# Fixtures the self-host compiler has not yet ported to the Zig backend.
+#
+# One `KIND:FIXTURE` per line (KIND = emit | diag), as reported by
+# bin/beagle-selfhost-zig-parity. A listed fixture may be `unported`; a fixture
+# NOT listed must reach byte parity with the Racket emitter or the gate fails.
+# Deleting a line is a port slice's done-bar — the gate refuses a stale
+# exemption, so parity and this file can never silently drift apart.
+#
+# Initial state: every corpus row, i.e. the self-host emits no Zig at all
+# (self-host/src/selfhost/main.bclj emit-for-target has no zig branch).
+emit:semantic-contract/allocation-failure
+emit:semantic-contract/closed-dynamic
+emit:semantic-contract/collection-order-killed
+emit:semantic-contract/collections-layout
+emit:semantic-contract/composite-raises
+emit:semantic-contract/concrete-boundary
+emit:semantic-contract/ownership-lifetime
+emit:semantic-contract/regex
+emit:semantic-contract/typed-errors
+emit:zig-golden/01-record
+emit:zig-golden/02-kw-access
+emit:zig-golden/03-defn-arith
+emit:zig-golden/04-let-chain
+emit:zig-golden/05-if-expr
+emit:zig-golden/06-do-seq
+emit:zig-golden/07-loop-recur
+emit:zig-golden/08-comparisons
+emit:zig-golden/09-bit-ops
+emit:zig-golden/10-max-min-abs
+emit:zig-golden/11-optional-nil-guard
+emit:zig-golden/12-optional-some
+emit:zig-golden/13-vec-ops
+emit:zig-golden/14-vec-def
+emit:zig-golden/15-constants
+emit:zig-golden/16-multi-fn
+emit:zig-golden/17-cond-chain
+emit:zig-golden/18-void-fn
+emit:zig-golden/19-threading
+emit:zig-golden/20-bool-ops
+emit:zig-golden/21-float-math
+emit:zig-golden/22-nested-let
+emit:zig-golden/23-ctor
+emit:zig-golden/24-rng-extern
+emit:zig-golden/25-predicates
+emit:zig-golden/26-loop-in-expr
+emit:zig-golden/27-tick-step
+emit:zig-golden/28-world-tick
+emit:zig-golden/29-typed-map
+emit:zig-golden/30-higher-order
+emit:zig-golden/31-cli-runtime
+emit:zig-golden/32-map-build
+emit:zig-golden/33-los-rt
+emit:zig-golden/34-optional-infer
+emit:zig-golden/35-cli-runtime
+emit:zig-stdlib/predicates
+emit:zig-stdlib/pr-str
+emit:zig-stdlib/string-seq
+diag:semantic-contract/any-boundary
+diag:semantic-contract/collection-order-observed
+diag:zig-rejections/map-literal
+diag:zig-rejections/missing-return-annotation
+diag:zig-rejections/multi-arity
+diag:zig-rejections/non-exhaustive-union-match
+diag:zig-rejections/untyped-def
+diag:zig-rejections/variable-shift
