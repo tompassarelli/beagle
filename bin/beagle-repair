@@ -125,7 +125,7 @@ beagle_bin = sys.argv[6]
 
 # Shared, unit-tested apply helpers (bin/beagle_repair_apply.py).
 sys.path.insert(0, beagle_bin)
-from beagle_repair_apply import insert_match_clauses
+from beagle_repair_apply import insert_match_clauses, resolve_source_file
 
 def conv_annotation(r):
     """One-line structured conversion summary from the typed fix-plan, e.g.
@@ -151,7 +151,7 @@ def extract_module_from_path(path):
     if not path or path == '?':
         return None
     base = os.path.basename(path)
-    for ext in ['.bclj', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt', '.clj']:
+    for ext in ['.bclj', '.bjs', '.bnix', '.bodin', '.bzig', '.bsc', '.bsql', '.bpy', '.bgl', '.rkt', '.clj']:
         if base.endswith(ext):
             return base[:-len(ext)]
     return None
@@ -556,30 +556,9 @@ merged.sort(key=lambda x: -x['confidence'])
 auto_count = sum(1 for r in merged if r['auto_applicable'] and r['confidence'] >= threshold)
 
 # ---------------------------------------------------------------------------
-# --emit-patch: unified diff output for machine consumption
+# --emit-patch: unified diff output for machine consumption (resolve_source_file
+# lives in beagle_repair_apply.py, unit-tested there)
 # ---------------------------------------------------------------------------
-def resolve_source_file(repair_entry):
-    """Find the beagle source file corresponding to a repair entry."""
-    f = repair_entry.get('file', '?')
-    if f == '?' or not f:
-        return None
-    # Try as-is (might be absolute path)
-    if os.path.exists(f):
-        return f
-    # Try source_dir + beagle extension versions
-    base = os.path.basename(f)
-    source_exts = ('.bclj', '.bjs', '.bnix', '.bsql', '.bpy', '.bgl', '.rkt')
-    for ext_from in ('.clj', '.js', '.nix'):
-        if base.endswith(ext_from):
-            for ext_to in source_exts:
-                candidate = os.path.join(source_dir, base[:-len(ext_from)] + ext_to)
-                if os.path.exists(candidate):
-                    return candidate
-    # Try just the basename in source_dir
-    candidate = os.path.join(source_dir, base)
-    if os.path.exists(candidate):
-        return candidate
-    return None
 
 import difflib
 
@@ -742,7 +721,7 @@ if emit_patch:
     by_file = {}
     skipped = []
     for r in applicable:
-        src_path = resolve_source_file(r)
+        src_path = resolve_source_file(r.get('file', '?'), source_dir)
         if not src_path:
             skipped.append(r)
             continue

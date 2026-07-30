@@ -1,0 +1,12 @@
+#lang beagle/zig
+(ns badadd.zig)
+
+;; Deliberate arity error: `add` needs 2 args, called with 1. The type
+;; checker's fix-plan (category "missing-argument") names this .bzig file
+;; directly in its structured diagnostic — beagle-repair's resolver must
+;; locate the file back for fix-plan application.
+(defn add [a :- Int b :- Int] :- Int
+  (+ a b))
+
+(defn main [] :- Int
+  (add 1))

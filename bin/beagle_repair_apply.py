@@ -5,7 +5,39 @@ running the full diagnostic pipeline. See beagle-test/tests/repair_apply_test.py
 and ~/code/life-os/threads/20260615005103-beagle_python_repair_consume_structured.md
 """
 
+import os
 import re
+
+# Hand-kept mirror of targets.rkt's TARGETS source/output extensions (`bin/beagle
+# langs --view extensions` renders the canonical list).
+SOURCE_EXTS = ('.bclj', '.bjs', '.bnix', '.bodin', '.bzig', '.bsc', '.bsql', '.bpy', '.bgl', '.rkt')
+OUTPUT_EXTS = ('.clj', '.js', '.nix', '.odin', '.zig', '.ts')
+
+
+def resolve_source_file(file_field, source_dir):
+    """Find the beagle source file corresponding to a repair entry's file field.
+
+    Tries the path as-is (already absolute/existing), then source_dir +
+    beagle-extension variants of the basename (translating a compiled-output
+    extension back to a source extension), then just the basename in
+    source_dir. Returns None if nothing resolves.
+    """
+    f = file_field
+    if not f or f == '?':
+        return None
+    if os.path.exists(f):
+        return f
+    base = os.path.basename(f)
+    for ext_from in OUTPUT_EXTS:
+        if base.endswith(ext_from):
+            for ext_to in SOURCE_EXTS:
+                candidate = os.path.join(source_dir, base[:-len(ext_from)] + ext_to)
+                if os.path.exists(candidate):
+                    return candidate
+    candidate = os.path.join(source_dir, base)
+    if os.path.exists(candidate):
+        return candidate
+    return None
 
 
 def insert_match_clauses(text, anchor_line, clauses):
