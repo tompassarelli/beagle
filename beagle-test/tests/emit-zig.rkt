@@ -1249,6 +1249,26 @@ ZIG
   (check-regexp-match #rx"@\"store-value=\"\\(1, 1\\)" out)
   (check-equal? (zig-build-exe-and-run out) "true\nfalse\n"))
 
+(test-case "zig string literals use Zig control escapes without changing printable Unicode"
+  (define controls
+    (list->string
+     (map integer->char '(0 1 7 8 11 12 27 31 127))))
+  (define stable "printable λ🙂 \"quoted\" \\ slash\n\t\r")
+  (define out
+    (compile-zig-forms
+     `(def controls :- String ,controls)
+     `(def stable :- String ,stable)))
+  (check-true
+   (string-contains?
+    out
+    "pub const controls: []const u8 = \"\\x00\\x01\\x07\\x08\\x0b\\x0c\\x1b\\x1f\\x7f\";"))
+  (check-true
+   (string-contains?
+    out
+    (format "pub const stable: []const u8 = ~v;" stable)))
+  (when ZIG
+    (check-true (zig-compiles? out "string-control-escapes"))))
+
 (test-case "zig allocating main owns one local arena while pure main stays direct"
   (define pure
     (compile-zig-forms '(defn main [] :- Nil nil)))

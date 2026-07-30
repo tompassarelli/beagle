@@ -1159,13 +1159,37 @@
      (substring (symbol->string value) 1)]
     [else #f]))
 
+(define (zig-string-literal value)
+  (string-append
+   "\""
+   (apply
+    string-append
+    (for/list ([ch (in-string value)])
+      (cond
+        [(char=? ch #\") "\\\""]
+        [(char=? ch #\\) "\\\\"]
+        [(char=? ch #\newline) "\\n"]
+        [(char=? ch #\return) "\\r"]
+        [(char=? ch #\tab) "\\t"]
+        [else
+         (define codepoint (char->integer ch))
+         (if (or (< codepoint #x20) (= codepoint #x7f))
+             (let ([hex (number->string codepoint 16)])
+               (string-append "\\x"
+                              (if (= 1 (string-length hex)) "0" "")
+                              hex))
+             (string ch))])))
+   "\""))
+
 (define (emit-keyword value)
   (define source (keyword-value-string value))
   (unless source (unsupported "keyword value" value))
   (match (regexp-match #rx"^([^/]*)/(.*)$" source)
     [(list _ namespace name)
-     (format "rt.keyword(~v, ~v)" namespace name)]
-    [_ (format "rt.keyword(\"\", ~v)" source)]))
+     (format "rt.keyword(~a, ~a)"
+             (zig-string-literal namespace)
+             (zig-string-literal name))]
+    [_ (format "rt.keyword(\"\", ~a)" (zig-string-literal source))]))
 
 (define (emit-expr e)
   (cond
@@ -1174,7 +1198,7 @@
      (let ([s (number->string e)])
        (if (regexp-match? #rx"[.e]" s) s (string-append s ".0")))]
     [(boolean? e) (if e "true" "false")]
-    [(string? e) (format "~v" e)]
+    [(string? e) (zig-string-literal e)]
     [(keyword? e) (emit-keyword e)]
     [(eq? e 'nil) "null"]
     [(symbol? e)
