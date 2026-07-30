@@ -1714,7 +1714,11 @@
       (and (= head "defenum") (>= (count rest-items) 1))
         (make-defenum (nth rest-items 0) (subvec rest-items 1))
 
-      ;; defunion — parametric (defunion (Name T E) ...) or simple
+      ;; defunion — throwable, parametric (defunion (Name T E) ...), or simple
+      (and (= head "defunion") (>= (count rest-items) 2)
+           (= (nth rest-items 0) ":throwable")
+           (string? (nth rest-items 1)))
+        (parse-deferror-form (nth rest-items 1) (subvec rest-items 2))
       (and (= head "defunion") (>= (count rest-items) 1)
            (vector? (nth rest-items 0)) (not (bracketed? (nth rest-items 0))))
         (let [name-form (nth rest-items 0)]
@@ -2732,6 +2736,13 @@
            (= (get node "name") "Shape")
            (= (count (get node "members")) 2)
            (nil? (get node "type-params")))))
+  (expect! "defunion throwable"
+    (let [node (parse-expr* ["defunion" ":throwable" "RewriteError"
+                             ["RewriteCrash" [BRACKET-TAG "message" ":-" "String"]]])]
+      (and (= (get node "node") "deferror")
+           (= (get node "name") "RewriteError")
+           (= (get node "members") ["RewriteCrash"])
+           (= (count (get (get node "member-fields") "RewriteCrash")) 1))))
   (expect! "defenum"
     (let [node (parse-expr* ["defenum" "Color" "Red" "Green" "Blue"])]
       (and (= (get node "node") "defenum")

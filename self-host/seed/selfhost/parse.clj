@@ -1099,6 +1099,7 @@
   :else (err! (str "malformed defn-: " (str d))))
   (and (= head "defrecord") (= (count rest-items) 2)) (make-defrecord (nth rest-items 0) (parse-record-fields! (nth rest-items 1)))
   (and (= head "defenum") (>= (count rest-items) 1)) (make-defenum (nth rest-items 0) (subvec rest-items 1))
+  (and (= head "defunion") (>= (count rest-items) 2) (= (nth rest-items 0) ":throwable") (string? (nth rest-items 1))) (parse-deferror-form (nth rest-items 1) (subvec rest-items 2))
   (and (= head "defunion") (>= (count rest-items) 1) (vector? (nth rest-items 0)) (not (bracketed? (nth rest-items 0)))) (let [name-form (nth rest-items 0)]
   (if (and (>= (count name-form) 2) (string? (nth name-form 0))) (parse-parametric-defunion! (nth name-form 0) (subvec name-form 1) (subvec rest-items 1)) (parse-simple-defunion (nth rest-items 0) (subvec rest-items 1))))
   (and (= head "defunion") (>= (count rest-items) 1) (string? (nth rest-items 0))) (parse-simple-defunion (nth rest-items 0) (subvec rest-items 1))
@@ -1524,6 +1525,8 @@
   (and (= (get node "node") "record") (= (count (get node "fields")) 2))))
   (expect! "defunion simple" (let [node (parse-expr* ["defunion" "Shape" "Circle" "Rect"])]
   (and (= (get node "node") "defunion") (= (get node "name") "Shape") (= (count (get node "members")) 2) (nil? (get node "type-params")))))
+  (expect! "defunion throwable" (let [node (parse-expr* ["defunion" ":throwable" "RewriteError" ["RewriteCrash" [BRACKET-TAG "message" ":-" "String"]]])]
+  (and (= (get node "node") "deferror") (= (get node "name") "RewriteError") (= (get node "members") ["RewriteCrash"]) (= (count (get (get node "member-fields") "RewriteCrash")) 1))))
   (expect! "defenum" (let [node (parse-expr* ["defenum" "Color" "Red" "Green" "Blue"])]
   (and (= (get node "node") "defenum") (= (get node "name") "Color") (= (count (get node "values")) 3))))
   (expect! "defscalar" (let [node (parse-expr* ["defscalar" "Email" "String"])]
