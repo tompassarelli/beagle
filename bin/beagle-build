@@ -103,11 +103,21 @@ if [[ "${1:-}" == "--exe" ]]; then
     beagle_root="$(cd "$(dirname "$0")/.." && pwd)"
     out_dir="$(dirname "$out")"
     mkdir -p "$out_dir"
-    # The final rename is atomic only when its source is on the destination
-    # filesystem. Keep the full Zig staging tree beside OUT rather than under
-    # the process-global temp directory, which may be a different mount.
-    emit_dir="$(mktemp -d "$out_dir/.beagle-zig-build.XXXXXX")"
-    trap 'rm -rf "${emit_dir:?}"' EXIT
+    # Deterministic (hash-of-OUT) staging dir, not mktemp, and a persistent
+    # Zig cache root outside it: stable file identities plus a cache Zig can
+    # actually reuse across invocations, instead of throwing both away.
+    zig_cache_root="${XDG_CACHE_HOME:-$HOME/.cache}/beagle/zig-cache"
+    mkdir -p "$zig_cache_root/cache" "$zig_cache_root/global-cache"
+    out_hash="$(printf '%s' "$(cd "$out_dir" && pwd)/$(basename "$out")" | cksum | cut -d' ' -f1)"
+    emit_dir="$out_dir/.beagle-zig-build.$out_hash"
+    mkdir -p "$emit_dir"
+    # Reserved destinations are staged by this script below, not by
+    # retarget-cli; clear any leftover from a prior build of this target so
+    # the collision check only fires on a genuine module-set collision.
+    rm -f "${emit_dir:?}/beagle_rt.zig"
+    for zig_module_destination in "${zig_module_destinations[@]}"; do
+        rm -f "${emit_dir:?}/$zig_module_destination"
+    done
     entry="$(
         "$RACKET" "$beagle_root/beagle-lib/private/retarget-cli.rkt" \
             --module-dir "$emit_dir" zig "${sources[@]}"
@@ -116,19 +126,24 @@ if [[ "${1:-}" == "--exe" ]]; then
         echo "beagle-build: generated Zig module collides with reserved destination 'beagle_rt.zig'" >&2
         exit 2
     fi
-    cp "$beagle_root/beagle-lib/zig/beagle_rt.zig" "$emit_dir/beagle_rt.zig"
+    # Copy-if-changed: preserve mtime (and Zig's cache hit) when the support
+    # module content is unchanged from the prior build.
+    if ! cmp -s "$beagle_root/beagle-lib/zig/beagle_rt.zig" "$emit_dir/beagle_rt.zig" 2>/dev/null; then
+        cp "$beagle_root/beagle-lib/zig/beagle_rt.zig" "$emit_dir/beagle_rt.zig"
+    fi
     for i in "${!zig_modules[@]}"; do
         zig_module_destination="${zig_module_destinations[$i]}"
         if [[ -e "$emit_dir/$zig_module_destination" ]]; then
             echo "beagle-build: Zig support module destination '$zig_module_destination' collides with generated build input" >&2
             exit 2
         fi
-        cp "${zig_modules[$i]}" "$emit_dir/$zig_module_destination"
+        if ! cmp -s "${zig_modules[$i]}" "$emit_dir/$zig_module_destination" 2>/dev/null; then
+            cp "${zig_modules[$i]}" "$emit_dir/$zig_module_destination"
+        fi
     done
-    mkdir -p "$emit_dir/zig-cache" "$emit_dir/zig-global-cache"
     zig build-exe \
-        --cache-dir "$emit_dir/zig-cache" \
-        --global-cache-dir "$emit_dir/zig-global-cache" \
+        --cache-dir "$zig_cache_root/cache" \
+        --global-cache-dir "$zig_cache_root/global-cache" \
         "-femit-bin=$emit_dir/artifact" \
         "$entry"
     if [[ ! -s "$emit_dir/artifact" ]]; then
@@ -136,8 +151,6 @@ if [[ "${1:-}" == "--exe" ]]; then
         exit 1
     fi
     mv "$emit_dir/artifact" "$out"
-    trap - EXIT
-    rm -rf "${emit_dir:?}"
     printf '%s -> %s\n' "${sources[*]}" "$out" >&2
     exit 0
 fi

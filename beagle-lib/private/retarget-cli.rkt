@@ -32,10 +32,17 @@
   (for/list ([module (in-list modules)]
              [filename (in-list filenames)])
     (define output (build-path output-dir filename))
-    (call-with-output-file
-     output
-     #:exists 'truncate
-     (lambda (port) (display (compiled-source-emitted module) port)))
+    (define content (compiled-source-emitted module))
+    ;; Skip the write when bytes are unchanged so mtime (and therefore
+    ;; Zig's incremental cache) survives a byte-identical re-emission.
+    (define unchanged?
+      (and (file-exists? output)
+           (equal? (file->string output) content)))
+    (unless unchanged?
+      (call-with-output-file
+       output
+       #:exists 'truncate
+       (lambda (port) (display content port))))
     output))
 
 (cond
