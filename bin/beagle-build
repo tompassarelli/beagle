@@ -4,7 +4,7 @@
 # Usage:
 #   bin/beagle-build [--target TARGET] SOURCE [output]   # `beagle langs` lists
 #                                                        # every TARGET + ext
-#   bin/beagle-build --target zig --exe OUTPUT SOURCE...
+#   bin/beagle-build --target zig --exe OUTPUT [--zig-module PATH]... SOURCE...
 #
 # If the output path is omitted, it is derived from the namespace declared
 # in the source via (ns ...) and dropped under .beagle-out/ (gitignored, so
@@ -38,11 +38,57 @@ fi
 
 if [[ "${1:-}" == "--exe" ]]; then
     if [[ "$target" != "zig" || $# -lt 3 ]]; then
-        echo "usage: beagle-build --target zig --exe OUTPUT SOURCE..." >&2
+        echo "usage: beagle-build --target zig --exe OUTPUT [--zig-module PATH]... SOURCE..." >&2
         exit 2
     fi
     out="$2"
     shift 2
+    zig_modules=()
+    zig_module_destinations=()
+    declare -A zig_module_sources=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --zig-module)
+                if [[ $# -lt 2 ]]; then
+                    echo "beagle-build: --zig-module requires a Zig source path" >&2
+                    exit 2
+                fi
+                zig_module="$2"
+                if [[ ! -f "$zig_module" ]]; then
+                    echo "beagle-build: Zig support module not found: $zig_module" >&2
+                    exit 1
+                fi
+                zig_module_destination="$(basename "$zig_module")"
+                if [[ "$zig_module_destination" != *.zig ]]; then
+                    echo "beagle-build: Zig support module must end in .zig: $zig_module" >&2
+                    exit 2
+                fi
+                if [[ -n "${zig_module_sources[$zig_module_destination]+x}" ]]; then
+                    echo "beagle-build: ambiguous Zig module destination '$zig_module_destination' from '${zig_module_sources[$zig_module_destination]}' and '$zig_module'" >&2
+                    exit 2
+                fi
+                zig_module_sources["$zig_module_destination"]="$zig_module"
+                zig_modules+=("$zig_module")
+                zig_module_destinations+=("$zig_module_destination")
+                shift 2
+                ;;
+            --)
+                shift
+                break
+                ;;
+            --*)
+                echo "beagle-build: unknown Zig executable option: $1" >&2
+                exit 2
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+    if [[ $# -lt 1 ]]; then
+        echo "usage: beagle-build --target zig --exe OUTPUT [--zig-module PATH]... SOURCE..." >&2
+        exit 2
+    fi
     sources=("$@")
     for source in "${sources[@]}"; do
         if [[ ! -f "$source" ]]; then
@@ -66,7 +112,19 @@ if [[ "${1:-}" == "--exe" ]]; then
         "$RACKET" "$beagle_root/beagle-lib/private/retarget-cli.rkt" \
             --module-dir "$emit_dir" zig "${sources[@]}"
     )"
+    if [[ -e "$emit_dir/beagle_rt.zig" ]]; then
+        echo "beagle-build: generated Zig module collides with reserved destination 'beagle_rt.zig'" >&2
+        exit 2
+    fi
     cp "$beagle_root/beagle-lib/zig/beagle_rt.zig" "$emit_dir/beagle_rt.zig"
+    for i in "${!zig_modules[@]}"; do
+        zig_module_destination="${zig_module_destinations[$i]}"
+        if [[ -e "$emit_dir/$zig_module_destination" ]]; then
+            echo "beagle-build: Zig support module destination '$zig_module_destination' collides with generated build input" >&2
+            exit 2
+        fi
+        cp "${zig_modules[$i]}" "$emit_dir/$zig_module_destination"
+    done
     mkdir -p "$emit_dir/zig-cache" "$emit_dir/zig-global-cache"
     zig build-exe \
         --cache-dir "$emit_dir/zig-cache" \
@@ -85,7 +143,7 @@ if [[ "${1:-}" == "--exe" ]]; then
 fi
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
-    echo "usage: beagle-build [--target TARGET] SOURCE [OUTPUT] | beagle-build --target zig --exe OUTPUT SOURCE..." >&2
+    echo "usage: beagle-build [--target TARGET] SOURCE [OUTPUT] | beagle-build --target zig --exe OUTPUT [--zig-module PATH]... SOURCE..." >&2
     exit 2
 fi
 

@@ -39,6 +39,10 @@
   "fixtures/zig-multimodule/main.bclj")
 (define-runtime-path zig-single-module-main
   "fixtures/zig-smoke/main.bzig")
+(define-runtime-path zig-support-module-main
+  "fixtures/zig-support-module/main.bclj")
+(define-runtime-path zig-support-module-host
+  "fixtures/zig-support-module/test_host.zig")
 
 (define repo-root-str (path->string (simplify-path repo-root)))
 
@@ -262,6 +266,78 @@
      (check-equal?
       (get-output-string run-output)
       "zig revival alive\n"))
+
+   (test-case "public Zig executable build stages an explicit support module"
+     (check-not-false
+      (find-executable-path "zig")
+      "Zig support-module build requires the pinned Zig on PATH")
+     (define executable (tmp-path "zig-support-module"))
+     (define build-output (open-output-string))
+     (define built?
+       (parameterize ([current-output-port build-output]
+                      [current-error-port build-output])
+         (system*
+          (path->string beagle-cli)
+          "build"
+          "--target"
+          "zig"
+          "--exe"
+          (path->string executable)
+          "--zig-module"
+          (path->string zig-support-module-host)
+          (path->string zig-support-module-main))))
+     (check-true built? (get-output-string build-output))
+     (define run-output (open-output-string))
+     (define ran?
+       (parameterize ([current-output-port run-output]
+                      [current-error-port run-output])
+         (system* (path->string executable))))
+     (check-true ran? (get-output-string run-output))
+     (check-equal? (get-output-string run-output) "42\n")
+
+     (define ambiguous-output (open-output-string))
+     (define ambiguous-built?
+       (parameterize ([current-output-port ambiguous-output]
+                      [current-error-port ambiguous-output])
+         (system*
+          (path->string beagle-cli)
+          "build"
+          "--target"
+          "zig"
+          "--exe"
+          (path->string (tmp-path "zig-support-ambiguous"))
+          "--zig-module"
+          (path->string zig-support-module-host)
+          "--zig-module"
+          (path->string zig-support-module-host)
+          (path->string zig-support-module-main))))
+     (check-false ambiguous-built?)
+     (check-true
+      (string-contains?
+       (get-output-string ambiguous-output)
+       "ambiguous Zig module destination 'test_host.zig'"))
+
+     (define colliding-host (tmp-path "zig_support_module_main.zig"))
+     (copy-file zig-support-module-host colliding-host)
+     (define collision-output (open-output-string))
+     (define collision-built?
+       (parameterize ([current-output-port collision-output]
+                      [current-error-port collision-output])
+         (system*
+          (path->string beagle-cli)
+          "build"
+          "--target"
+          "zig"
+          "--exe"
+          (path->string (tmp-path "zig-support-collision"))
+          "--zig-module"
+          (path->string colliding-host)
+          (path->string zig-support-module-main))))
+     (check-false collision-built?)
+     (check-true
+      (string-contains?
+       (get-output-string collision-output)
+       "collides with generated build input")))
 
    (test-case "ordered Zig module set emits canonical imports and links one executable"
      (define sources
