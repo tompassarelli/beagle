@@ -1,0 +1,7 @@
+#lang beagle/clj
+
+(require alias-owner :as t)
+(define-mode strict)
+
+(defn accepts? [value :- t/StoreValue] :- Bool
+  (string? value))

@@ -1,0 +1,7 @@
+#lang beagle/clj
+
+(require provider :as p)
+(define-mode strict)
+
+(def value :- Any "ready")
+(def accepted :- Bool (p/accepts? value))

@@ -211,6 +211,136 @@
                      (path->string src))])]
           [else forms])))))
 
+(define (copy-type type)
+  (cond
+    [(type-prim? type) (type-prim (type-prim-name type))]
+    [(type-var? type) (type-var (type-var-name type))]
+    [(type-app? type)
+     (type-app (type-app-ctor type) (map copy-type (type-app-args type)))]
+    [(type-union? type)
+     (type-union (map copy-type (type-union-alts type)))]
+    [(type-fn? type)
+     (type-fn (map copy-type (type-fn-params type))
+              (and (type-fn-rest-type type)
+                   (copy-type (type-fn-rest-type type)))
+              (copy-type (type-fn-ret type)))]
+    [(type-poly? type)
+     (define bounds (type-poly-bounds type))
+     (type-poly
+      (type-poly-vars type)
+      (copy-type (type-poly-body type))
+      (and bounds
+           (for/hasheq ([(name bound) (in-hash bounds)])
+             (values name (copy-type bound)))))]
+    [else type]))
+
+(define (require-specs-in datum)
+  (match datum
+    [(list* 'require specs)
+     (if (and (pair? specs) (symbol? (car specs)))
+         (list (cons BRACKET-TAG specs))
+         specs)]
+    [(list* 'ns (? symbol?) clauses)
+     (for/fold ([specs '()]) ([clause (in-list clauses)])
+       (if (and (pair? clause) (eq? (car clause) ':require))
+           (append specs (cdr clause))
+           specs))]
+    [_ '()]))
+
+(define (decode-require-spec spec)
+  (define unquoted
+    (if (and (pair? spec) (eq? (car spec) 'quote) (pair? (cdr spec)))
+        (cadr spec)
+        spec))
+  (define items
+    (cond
+      [(symbol? unquoted) (list unquoted)]
+      [(and (pair? unquoted) (eq? (car unquoted) BRACKET-TAG))
+       (cdr unquoted)]
+      [else '()]))
+  (and (pair? items)
+       (symbol? (car items))
+       (let ([namespace (car items)])
+         (let loop ([rest (cdr items)] [alias #f] [referred '()])
+           (cond
+             [(null? rest)
+              (list namespace
+                    (or alias
+                        (string->symbol
+                         (last-of (split-ns-segments namespace))))
+                    referred)]
+             [(and (eq? (car rest) ':as)
+                   (pair? (cdr rest))
+                   (symbol? (cadr rest)))
+              (loop (cddr rest) (cadr rest) referred)]
+             [(and (eq? (car rest) ':refer) (pair? (cdr rest)))
+              (define names (cadr rest))
+              (if (and (pair? names) (eq? (car names) BRACKET-TAG))
+                  (loop (cddr rest) alias (cdr names))
+                  #f)]
+             [else #f])))))
+
+(define (collect-local-type-aliases datums imported-aliases)
+  (define-values (local _visible)
+    (for/fold ([local (hasheq)] [visible imported-aliases])
+              ([datum (in-list datums)])
+      (match datum
+        [(list 'defalias (? symbol? name) type-expr)
+         (with-handlers ([exn:fail? (lambda (_e) (values local visible))])
+           (define expansion
+             (copy-type
+              (parameterize ([current-type-aliases visible])
+                (parse-type type-expr))))
+           (values (hash-set local name expansion)
+                   (hash-set visible name expansion)))]
+        [_ (values local visible)])))
+  local)
+
+;; Provider-private type qualifiers must resolve while its signatures are read,
+;; but must not enter the consumer's alias namespace.
+(define (collect-required-type-aliases datums source-path seen)
+  (for*/fold ([aliases (hasheq)])
+             ([datum (in-list datums)]
+              [spec (in-list (require-specs-in datum))])
+    (match (decode-require-spec spec)
+      [(list namespace prefix referred)
+       (define dependency-path (resolve-module-path namespace source-path))
+       (define canonical-path
+         (and dependency-path
+              (simplify-path (path->complete-path dependency-path))))
+       (if (or (not canonical-path) (set-member? seen canonical-path))
+           aliases
+           (with-handlers ([exn:fail? (lambda (_e) aliases)])
+             (define dependency-datums (read-beagle-datums canonical-path))
+             (define dependency-imports
+               (collect-required-type-aliases
+                dependency-datums canonical-path (set-add seen canonical-path)))
+             (define dependency-locals
+               (collect-local-type-aliases dependency-datums dependency-imports))
+             (for/fold ([visible aliases])
+                       ([(name expansion) (in-hash dependency-locals)])
+               (define prefixed-name (qualify-name prefix name))
+               (define prefixed-expansion
+                 (register-type-alias-display! (copy-type expansion) prefixed-name))
+               (define with-prefixed
+                 (hash-set visible prefixed-name prefixed-expansion))
+               (define full-name (qualify-name namespace name))
+               (define with-full
+                 (if (eq? prefixed-name full-name)
+                     with-prefixed
+                     (hash-set
+                      with-prefixed
+                      full-name
+                      (register-type-alias-display!
+                       (copy-type expansion) full-name))))
+               (if (memq name referred)
+                   (hash-set
+                    with-full
+                    name
+                    (register-type-alias-display! (copy-type expansion) name))
+                   with-full))))]
+      [_ aliases])))
+
 
 (define (import-module-types! mod-path prefix externs registry imp-rec-fields imp-rec-field-order imp-rec-ns mod-ns
                               #:scalar-fns [imp-scalar-fns #f]
@@ -243,6 +373,44 @@
       [_ d]))
   (define datums (map strip-doc raw-datums))
   (define refer-set (and refer-syms (list->set refer-syms)))
+  (define source-path
+    (simplify-path (path->complete-path mod-path)))
+  (define provider-import-aliases
+    (collect-required-type-aliases datums source-path (set source-path)))
+  ;; The raw-source importer is the standalone-check counterpart to candidate
+  ;; interfaces: collect provider aliases before importing provider signatures.
+  (define raw-provider-aliases
+    (collect-local-type-aliases datums provider-import-aliases))
+  (define provider-aliases
+    (for/hasheq ([(name expansion) (in-hash raw-provider-aliases)])
+      (define displayed-expansion
+        (register-type-alias-display!
+         (copy-type expansion)
+         (qualify-name prefix name)))
+      (values name displayed-expansion)))
+  ;; Qualified annotations in the consumer resolve through the same expansions
+  ;; used by imported signatures. Full namespace spellings get their own copy so
+  ;; diagnostics can preserve the spelling that crossed the boundary.
+  (define consumer-aliases (current-type-aliases))
+  (for ([(name expansion) (in-hash provider-aliases)])
+    (define prefixed-name (qualify-name prefix name))
+    (set! consumer-aliases
+          (hash-set consumer-aliases prefixed-name expansion))
+    (define full-name (qualify-name mod-ns name))
+    (unless (eq? prefixed-name full-name)
+      (define full-expansion
+        (register-type-alias-display! (copy-type expansion) full-name))
+      (set! consumer-aliases
+            (hash-set consumer-aliases full-name full-expansion))))
+  (current-type-aliases consumer-aliases)
+  (define import-aliases-with-dependencies
+    (for/fold ([aliases consumer-aliases])
+              ([(name expansion) (in-hash provider-import-aliases)])
+      (hash-set aliases name expansion)))
+  (define import-aliases
+    (for/fold ([aliases import-aliases-with-dependencies])
+              ([(name expansion) (in-hash provider-aliases)])
+      (hash-set aliases name expansion)))
   ;; A name is bare-referred iff this is an all-bare import (same-ns sibling)
   ;; or it is explicitly named in a :refer list. A plain `:as`/no-refer require
   ;; exposes names QUALIFIED only — registering them bare here would let an
@@ -268,14 +436,15 @@
     (when imp-dyn-vars
       (set-add! imp-dyn-vars (qualify-name prefix name))
       (when (referred? name) (set-add! imp-dyn-vars name))))
-  (for ([d (in-list datums)])
-    ;; One unparseable form must not erase the rest of the module's
-    ;; types — warn and continue per form.
-    (with-handlers ([exn:fail?
-                     (lambda (e)
-                       (eprintf "warning: type import from ~a skipped a form: ~a\n"
-                                mod-ns (exn-message e)))])
-    (match d
+  (parameterize ([current-type-aliases import-aliases])
+    (for ([d (in-list datums)])
+      ;; One unparseable form must not erase the rest of the module's
+      ;; types — warn and continue per form.
+      (with-handlers ([exn:fail?
+                       (lambda (e)
+                         (eprintf "warning: type import from ~a skipped a form: ~a\n"
+                                  mod-ns (exn-message e)))])
+      (match d
       [(list 'declare-extern (? bracketed? names-form) type-expr)
        (for ([name (in-list (bracket-body names-form))])
          (reg! name (parse-type type-expr)))]
@@ -475,7 +644,7 @@
       ;; as enum-qualified members on package targets.
       [(list* 'defenum (? symbol? name) _variants)
        (when imp-enums (hash-set! imp-enums name #t))]
-      [_ (void)]))))
+        [_ (void)])))))
 
 ;; --- multi-module: same-ns sibling auto-import (package targets) -------------
 ;;

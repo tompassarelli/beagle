@@ -73,6 +73,13 @@
 (define current-qualified-type-resolver
   (make-parameter (lambda (_type-datum) #f)))
 
+;; Imported aliases still erase semantically, but diagnostics retain the
+;; boundary name that introduced an exact expansion.
+(define TYPE-ALIAS-DISPLAYS (make-weak-hasheq))
+(define (register-type-alias-display! type name)
+  (hash-set! TYPE-ALIAS-DISPLAYS type name)
+  type)
+
 (define (qualified-type-symbol? value)
   (and
    (symbol? value)
@@ -283,10 +290,6 @@
 (define (type-compatible? actual expected)
   (cond
     [(or (not actual) (not expected)) #t]
-    ;; A closed dynamic boundary is not an `Any` escape hatch. Values enter
-    ;; only through one of its declared alternatives, and two Dyn types agree
-    ;; only when their ordered alternatives agree exactly (the order is ABI).
-    [(and (dynamic-type? expected) (any-type? actual)) #f]
     [(any-type? actual)   #t]
     [(any-type? expected) #t]
     [(type-var? actual)   #t]
@@ -452,7 +455,11 @@
 (define (default-type-delab t recur) (~v t))
 
 (define (type->string t)
-  ((hash-ref TYPE-DELAB (type-head t) default-type-delab) t type->string))
+  (cond
+    [(hash-ref TYPE-ALIAS-DISPLAYS t #f)
+     => symbol->string]
+    [else
+     ((hash-ref TYPE-DELAB (type-head t) default-type-delab) t type->string)]))
 
 (register-type-delab! '? (lambda (t recur) "?"))
 (register-type-delab! 'prim (lambda (t recur) (symbol->string (type-prim-name t))))
@@ -624,6 +631,7 @@
  current-user-parametric
  current-type-aliases
  current-qualified-type-resolver
+ register-type-alias-display!
  type?
  any-type?
  dynamic-type?
