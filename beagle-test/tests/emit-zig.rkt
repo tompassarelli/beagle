@@ -1275,7 +1275,10 @@ ZIG
   (check-regexp-match #rx"pub fn main\\(\\) void" pure)
   (check-false (regexp-match? #rx"__beagle_main|ArenaAllocator" pure))
   (define allocating
-    (compile-zig-forms '(defn main [] :- Nil (println "ok"))))
+    (compile-zig-forms
+     '(define-mode strict)
+     '(defn store-roundtrip?! [] :- Nil (println "ok"))
+     '(defn main [] :- Nil (store-roundtrip?!))))
   (check-regexp-match
    #rx"pub fn __beagle_main\\(__ctx: \\*rt\\.Ctx\\) void"
    allocating)

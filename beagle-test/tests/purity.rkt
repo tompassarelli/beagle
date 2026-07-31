@@ -202,6 +202,33 @@
      (parameterize ([current-purity-enforcement 'error])
        (type-check! entry)))))
 
+(test-case "Zig main is exempt: the native entry-point contract cannot carry `!`"
+  (define entry
+    (prog* '(ns t.app) '(define-mode strict) '(define-target zig)
+           '(defn store-roundtrip?! [] :- Bool true)
+           '(defn main [] :- Nil (do (store-roundtrip?!) nil))))
+  (parameterize ([current-purity-enforcement 'warn])
+    (define o (check-output entry))
+    (check-false (regexp-match? #rx"purity leak" o)))
+  (check-not-exn
+   (lambda ()
+     (parameterize ([current-purity-enforcement 'error])
+       (type-check! entry)))))
+
+(test-case "plain Clojure main remains a checked purity boundary"
+  (define non-entry
+    (prog* '(ns t.app) '(define-mode strict) '(define-target clj)
+           '(defn store-roundtrip?! [] :- Bool true)
+           '(defn main [] :- Nil (do (store-roundtrip?!) nil))))
+  (define e
+    (with-handlers ([beagle-diagnostic? values])
+      (parameterize ([current-purity-enforcement 'error])
+        (type-check! non-entry))
+      'no-error-raised))
+  (check-pred beagle-diagnostic? e
+              (format "expected beagle-diagnostic, got ~v" e))
+  (check-eq? (beagle-diagnostic-kind e) 'purity-leak))
+
 ;; ============================================================================
 ;; Diagnostic-kind wiring
 ;; ============================================================================

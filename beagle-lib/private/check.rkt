@@ -5323,12 +5323,14 @@
     [(warn)  (if (>= (current-check-profile) 3) 'error 'warn)]
     [else    'off]))
 
-(define (check-defn-purity name body src-table node effectful-defs)
-  ;; `-main` is exempt: the name IS the runtime entry-point contract
-  ;; (clj/bb `-m ns` resolves `ns/-main` literally), so the author cannot
-  ;; rename it — and an entry point is definitionally effectful.
+(define (check-defn-purity target name body src-table node effectful-defs)
+  ;; Runtime entry-point names are host ABI contracts, so they cannot carry
+  ;; `!`: clj/bb resolves `-main`, while Zig's native wrapper resolves `main`.
+  (define entry-point?
+    (or (eq? name '-main)
+        (and (eq? target 'zig) (eq? name 'main))))
   (define markers
-    (if (eq? name '-main)
+    (if entry-point?
         '()
         (collect-markers body (set-remove effectful-defs name))))
   (when (and (not (bang-name? name)) (pair? markers))
@@ -5357,7 +5359,8 @@
     (define defs (collect-purity-defs prog))
     (define effectful-defs (derive-effectful-defs defs))
     (for ([d (in-list defs)])
-      (check-defn-purity (vector-ref d 0)
+      (check-defn-purity (program-target prog)
+                         (vector-ref d 0)
                          (vector-ref d 1)
                          st
                          (vector-ref d 2)
