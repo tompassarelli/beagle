@@ -5,9 +5,9 @@
 ;; once the validator admits them and native semantics are proven.
 (ns conformance.sc-map-set-literal)
 
-(def sizes :- (Map String Int) {"a" 1 "b" 2})
+(def sizes: (Map String Int) {"a" 1 "b" 2})
 
-(def flags :- (Set Int) #{1 2 3})
+(def flags: (Set Int) #{1 2 3})
 
 (println (count sizes))
 (println (count flags))

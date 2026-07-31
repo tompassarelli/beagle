@@ -1,8 +1,8 @@
 ;; mod_b — its OWN `helper`, with its own caller chain. Changing mod_a/helper
 ;; MUST NOT show midB / topB in the blast radius; the bare-name graph wrongly does.
-(defn helper [x :- Int] :- Int
+(defn helper [x: Int] -> Int
   (* x 2))
-(defn midB [x :- Int] :- Int
+(defn midB [x: Int] -> Int
   (helper x))
-(defn topB [x :- Int] :- Int
+(defn topB [x: Int] -> Int
   (midB x))

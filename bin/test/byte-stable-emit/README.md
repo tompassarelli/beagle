@@ -27,8 +27,8 @@ diff), and comment preservation + rendered-text round-trip. It also fails on any
 
 Form signatures stay on the opening line; only the body breaks (indented). The
 `head-keep` table (derived from a discovery pass over `parse.rkt` + the corpus)
-keeps: `defn` name+params+`:- ret`; `let`/`if`/`when` heads; `def`/`defonce`
-bindings; `fn` params+`:- ret`; `defrecord` name+fields; threading inits;
+keeps: `defn` name+params+`-> ret`; `let`/`if`/`when` heads; `def`/`defonce`
+bindings; `fn` params+`-> ret`; `defrecord` name+fields; threading inits;
 `do`/`try`/`cond` standalone. So a body edit is a local diff.
 
 ## Known limitations (honest)

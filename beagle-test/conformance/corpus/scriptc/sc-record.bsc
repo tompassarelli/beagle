@@ -6,9 +6,9 @@
 ;; admission land.
 (ns conformance.sc-record)
 
-(defrecord Point [(x :- Int) (y :- Int)])
+(defrecord Point [(x: Int) (y: Int)])
 
-(defn manhattan [(p :- Point)] :- Int
+(defn manhattan [(p: Point)] -> Int
   (+ (point-x p) (point-y p)))
 
 (println (manhattan (->Point 3 4)))

@@ -1,5 +1,5 @@
 #lang beagle/zig
 (ns smoke.zig-revival)
 
-(defn main [] :- Nil
+(defn main [] -> Nil
   (println "zig revival alive"))

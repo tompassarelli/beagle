@@ -5,8 +5,8 @@
 ;; checker's fix-plan (category "missing-argument") names this .bzig file
 ;; directly in its structured diagnostic — beagle-repair's resolver must
 ;; locate the file back for fix-plan application.
-(defn add [a :- Int b :- Int] :- Int
+(defn add [a: Int b: Int] -> Int
   (+ a b))
 
-(defn main [] :- Int
+(defn main [] -> Int
   (add 1))

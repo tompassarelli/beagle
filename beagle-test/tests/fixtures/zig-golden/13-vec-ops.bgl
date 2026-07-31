@@ -1,7 +1,7 @@
 (ns g)
-(defn extend-and-count [ctx :- Ctx xs :- (Vec Int) x :- Int] :- Int
+(defn extend-and-count [ctx: Ctx xs: (Vec Int) x: Int] -> Int
   (let [ys (conj ctx xs x)]
     (+ (count ys) (nth ys 0))))
 
-(defn replace-first [xs :- (Vec Int) x :- Int] :- (Vec Int)
+(defn replace-first [xs: (Vec Int) x: Int] -> (Vec Int)
   (assoc xs 0 x))

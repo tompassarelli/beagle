@@ -7,7 +7,7 @@ does not enumerate. When the two disagree, the cheatsheet wins.
 
 ```clojure
 ;; types ride on bindings; interiors inferred
-(defn double [n :- Int] :- Int (* n 2))
+(defn double [n: Int] -> Int (* n 2))
 
 ;; macros + quasiquote — unquote is `~`, splice `~@` (Clojure's syntax-quote
 ;; unquote, NOT the Common Lisp comma; `,` is whitespace, exactly as in Clojure)
@@ -19,8 +19,9 @@ does not enumerate. When the two disagree, the cheatsheet wins.
 (:name {:name "ada"})
 ```
 
-- **Inline `:-` annotations** on the typed boundaries `def` / `defn` / `defonce`
-  / `defrecord`; interiors and `let`-locals are inferred.
+- **Inline postfix `NAME: TYPE` / `[params] -> RET` annotations** on the typed
+  boundaries `def` / `defn` / `defonce` / `defrecord`; interiors and
+  `let`-locals are inferred.
 - **`defmacro` + quasiquote / unquote / unquote-splicing.** Quasiquote is
   `` ` ``, unquote `~`, splice `~@`. Beagle deliberately dropped the CL-style
   `,`-as-unquote: `,` is whitespace, as in Clojure. Free references resolve at

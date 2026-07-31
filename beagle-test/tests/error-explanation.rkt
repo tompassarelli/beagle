@@ -53,7 +53,7 @@
 (test-case "examples do not use the rejected `:` annotation syntax"
   ;; The bash DB shipped `(def x : Int 5)` / `[(name : String)]` etc. — the
   ;; single-colon type annotation the parser now hard-rejects in favor of
-  ;; `:-`. ` : <Uppercase>` is the tell; `:-` and `:keyword` don't match.
+  ;; the postfix marker. ` : <Uppercase>` is the tell; `:keyword` does not match.
   (for ([code (in-list (all-explanation-codes))])
     (define e (error-explanation-ref code))
     (define blob (string-append (error-explanation-bad e) "\n"

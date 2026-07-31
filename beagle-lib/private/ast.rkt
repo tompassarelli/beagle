@@ -176,7 +176,7 @@
 ;; --- per-node inferred-type capture (the delaborator's input) ----------------
 ;; Mirrors the src-table: the checker records each expression node's INFERRED
 ;; type here, so a renderer (types-as-view / beagle-explain-type) can PROJECT
-;; "doubled :- (Vec Int)" with no type living in the source. This is the
+;; "doubled: (Vec Int)" with no type living in the source. This is the
 ;; anti-reification half of types-as-view — a pure side-channel derived from
 ;; the check pass, never stored in or drifting from the program. Same
 ;; interned-leaf exclusion as store-src! (bare symbols/literals are shared,
@@ -290,7 +290,7 @@
 (struct loop-form  (bindings body)                          #:transparent)
 (struct recur-form (args)                                   #:transparent)
 (struct for-form   (clauses body)                           #:transparent)
-(struct for-binding (name expr type)                        #:transparent)  ; G7: type = #f | a :- T annotation
+(struct for-binding (name expr type)                        #:transparent)  ; G7: type = #f | a postfix `:` annotation
 (struct for-when   (test)                                   #:transparent)
 (struct record-form (name fields)                           #:transparent)
 (struct method-call (method-name target args)               #:transparent)
@@ -483,7 +483,7 @@
 
 ;; `claim-form` removed. The (claim NAME TYPE) surface was deleted under
 ;; the Zero-users rule — the parser now rejects it with a pointed error
-;; naming `:-` as the inline-annotation replacement. There is no AST node
+;; naming postfix `:` as the annotation replacement. There is no AST node
 ;; for claim; downstream consumers must not pattern-match on one.
 
 (struct type-impl    (protocol-name methods)                 #:transparent)

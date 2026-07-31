@@ -543,7 +543,7 @@
   (if (> (count datum) 1) (subvec datum 1) []))
 
 (defn- ^Boolean symbol-trigger-char? [^String ch]
-  (or (rd/whitespace? ch) (= ch "(") (= ch ")") (= ch "[") (= ch "]") (= ch "{") (= ch "}") (= ch "\"") (= ch "|") (= ch ";") (= ch "\\") (= ch ",") (= ch "`")))
+  (or (rd/whitespace? ch) (= ch "(") (= ch ")") (= ch "[") (= ch "]") (= ch "{") (= ch "}") (= ch "\"") (= ch "|") (= ch ";") (= ch "\\") (= ch ",") (= ch ":") (= ch "`")))
 
 (defn- ^Boolean symbol-escape-char? [^String ch]
   (or (symbol-trigger-char? ch) (= ch "'")))
@@ -558,6 +558,7 @@
 (defn- ^String symbol-source [^String text]
   (cond
   (= (count text) 0) "||"
+  (and (symbol-needs-bars? text) (some? (str/index-of text ":")) (nil? (str/index-of text "|"))) (str "|" text "|")
   (symbol-needs-bars? text) (loop [i 0
    out ""]
   (if (>= i (count text)) out (let [ch (rd/char-at text i)
@@ -591,6 +592,20 @@
   (= head "#%symbolic-val") "##"
   :else nil)) nil))
 
+(def ^String ANN-UNIT-TAG "#%ann-unit")
+
+(defn- ^Boolean ann-unit? [datum]
+  (and (vector? datum) (= (count datum) 3) (= (nth datum 0) ANN-UNIT-TAG)))
+
+(defn- group-anns [items]
+  (let [n (count items)]
+  (loop [i 0
+   out []]
+  (cond
+  (>= i n) out
+  (and (string? (nth items i)) (not= (nth items i) rd/ANN-MARKER) (< (+ i 2) n) (= (nth items (+ i 1)) rd/ANN-MARKER)) (recur (+ i 3) (conj out [ANN-UNIT-TAG (nth items i) (nth items (+ i 2))]))
+  :else (recur (+ i 1) (conj out (nth items i)))))))
+
 (declare datum-source)
 
 (defn- ^String joined-source [items]
@@ -598,35 +613,38 @@
 
 (defn ^String datum-source [datum]
   (cond
+  (ann-unit? datum) (str (datum-source (nth datum 1)) ": " (datum-source (nth datum 2)))
+  (= datum rd/ANN-MARKER) ":"
   (tagged-string? datum) (edn-string (nth datum 1))
   (and (vector? datum) (= (count datum) 2) (= (nth datum 0) EXACT-NUMBER-TAG)) (nth datum 1)
   (and (vector? datum) (= (count datum) 2) (= (nth datum 0) rd/CHAR-TAG)) (str "\\" (char (nth datum 1)))
-  (ast/bracketed? datum) (str "[" (joined-source (ast/bracket-body datum)) "]")
-  (ast/map-tagged? datum) (str "{" (joined-source (ast/map-body datum)) "}")
-  (ast/set-tagged? datum) (str "#{" (joined-source (ast/set-body datum)) "}")
+  (ast/bracketed? datum) (str "[" (joined-source (group-anns (ast/bracket-body datum))) "]")
+  (ast/map-tagged? datum) (str "{" (joined-source (group-anns (ast/map-body datum))) "}")
+  (ast/set-tagged? datum) (str "#{" (joined-source (group-anns (ast/set-body datum))) "}")
   (head-is? datum rd/REGEX-TAG) (str "#\"" (if (tagged-string? (nth datum 1)) (nth (nth datum 1) 1) (nth datum 1)) "\"")
   (metadata-form? datum) (str "^" (datum-source (nth datum 1)) " " (datum-source (nth datum 2)))
   (some? (prefix-text datum)) (str (prefix-text datum) (datum-source (nth datum 1)))
   (reader-conditional? datum) (str "#?(" (joined-source (datum-tail datum)) ")")
   (reader-conditional-splice? datum) (str "#?@(" (joined-source (datum-tail datum)) ")")
   (some? (hash-prefix-text datum)) (str (hash-prefix-text datum) (datum-source (nth datum 1)))
-  (datum-list? datum) (str "(" (joined-source datum) ")")
-  (string? datum) (if (str/starts-with? datum ":") datum (symbol-source datum))
+  (datum-list? datum) (str "(" (joined-source (group-anns datum)) ")")
+  (string? datum) (if (and (> (count datum) 1) (str/starts-with? datum ":")) datum (symbol-source datum))
   (boolean? datum) (if datum "true" "false")
   :else (str datum)))
 
 (defn- sequence-parts [datum]
   (cond
-  (ast/bracketed? datum) {"open" "[" "close" "]" "items" (ast/bracket-body datum)}
-  (ast/map-tagged? datum) {"open" "{" "close" "}" "items" (ast/map-body datum)}
-  (ast/set-tagged? datum) {"open" "#{" "close" "}" "items" (ast/set-body datum)}
+  (ann-unit? datum) nil
+  (ast/bracketed? datum) {"open" "[" "close" "]" "items" (group-anns (ast/bracket-body datum))}
+  (ast/map-tagged? datum) {"open" "{" "close" "}" "items" (group-anns (ast/map-body datum))}
+  (ast/set-tagged? datum) {"open" "#{" "close" "}" "items" (group-anns (ast/set-body datum))}
   (reader-conditional? datum) {"open" "#?(" "close" ")" "items" (datum-tail datum)}
   (reader-conditional-splice? datum) {"open" "#?@(" "close" ")" "items" (datum-tail datum)}
-  (and (datum-list? datum) (not (head-is? datum rd/REGEX-TAG)) (nil? (prefix-text datum)) (nil? (hash-prefix-text datum)) (not (metadata-form? datum))) {"open" "(" "close" ")" "items" datum}
+  (and (datum-list? datum) (not (head-is? datum rd/REGEX-TAG)) (nil? (prefix-text datum)) (nil? (hash-prefix-text datum)) (not (metadata-form? datum))) {"open" "(" "close" ")" "items" (group-anns datum)}
   :else nil))
 
 (defn- ^Boolean dash-at? [items idx]
-  (and (> (count items) idx) (= (nth items idx) ":-")))
+  (and (> (count items) idx) (or (= (nth items idx) ":-") (= (nth items idx) "->"))))
 
 (defn- head-keep [^String head after]
   (let [n (count after)]

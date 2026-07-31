@@ -11,14 +11,15 @@
          racket/file
          beagle/private/cheatsheet
          beagle/private/parse
-         beagle/private/check)
+         beagle/private/check
+         (only-in beagle/lang/reader-impl beagle-readtable))
 
 (define-runtime-path cheatsheet-md "../../docs/CHEATSHEET.md")
 
-;; Read top-level forms from a string with bracket-tagging on (so `[...]`
-;; reads as (#%brackets ...) exactly as the file reader produces).
+;; Read with THE beagle readtable — a raw Racket read would mis-tokenize the
+;; postfix annotation marker (`x: Int` → the single symbol `x:`).
 (define (read-forms str)
-  (parameterize ([read-square-bracket-with-tag '#%brackets])
+  (parameterize ([current-readtable beagle-readtable])
     (define in (open-input-string str))
     (let loop ()
       (define stx (read-syntax 'cheatsheet-test in))

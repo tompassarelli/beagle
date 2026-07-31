@@ -3,10 +3,10 @@
 ;; native row: golden TS + 100% ScriptC static coverage + Node/native parity.
 (ns conformance.sc-float-boundary)
 
-(defn half [(x :- Float)] :- Float
+(defn half [(x: Float)] -> Float
   (/ x 2.0))
 
-(defn area [(r :- Float)] :- Float
+(defn area [(r: Float)] -> Float
   (* 3.14 (* r r)))
 
 (println (half 5.0))

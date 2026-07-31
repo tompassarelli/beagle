@@ -72,13 +72,13 @@
       (lambda () (delete-file f)))))
 
 (must-reject "regex literal"
-             "(ns g) (defn f [s :- String] :- Bool (re-matches #\"\\\\d+\" s))"
+             "(ns g) (defn f [s: String] -> Bool (re-matches #\"\\\\d+\" s))"
              #:pattern "regex")
 
 (must-reject "set literal"
-             "(ns g) (def S :- Any #{1 2 3})"
+             "(ns g) (def S: Any #{1 2 3})"
              #:pattern "set")
 
 (must-reject "Any-typed boundary"
-             "(ns g) (defn f [] :- Any 42)"
+             "(ns g) (defn f [] -> Any 42)"
              #:pattern "Any-typed")

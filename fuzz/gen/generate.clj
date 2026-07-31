@@ -256,7 +256,7 @@
                          v (gen ctx e t (dec d))
                          ;; annotate sometimes (type-tracked -> always correct)
                          b (if (and (not= t :any) (rchance! r 0.5))
-                             (format "%s :- %s %s" nm (ann t) v)
+                             (format "%s: %s %s" nm (ann t) v)
                              (format "%s %s" nm v))]
                      [(conj bs b) (conj e {:name nm :type t})])]
                ;; seq destructure
@@ -428,7 +428,7 @@
       (fn [[s e] t]
         (wchoose! r
           [[6 #(let [nm (fresh! ctx "p")]
-                 [(conj s (if (= t :any) nm (format "%s :- %s" nm (ann t))))
+                 [(conj s (if (= t :any) nm (format "%s: %s" nm (ann t))))
                   (conj e {:name nm :type t})])]
            [2 #(let [a (fresh! ctx "d") b (fresh! ctx "e")]
                  [(conj s (format "[%s %s]" a b))
@@ -467,7 +467,7 @@
         (swap! (:fns ctx) conj {:name nm :arities [ptypes] :ret ret})
         (format "(defn %s [%s]%s\n  %s)"
                 nm (str/join " " pstr)
-                (if (and ann? (not= ret :any)) (str " :- " (ann ret)) "")
+                (if (and ann? (not= ret :any)) (str " -> " (ann ret)) "")
                 body)))))
 
 (defn gen-def! [ctx tl-env]
@@ -480,7 +480,7 @@
     (swap! (:fns ctx) (fn [fs] fs)) ;; defs aren't callable fns; register as var
     [{:name nm :type t}
      (format "(%s %s%s%s %s)" head nm
-             (if (not= t :any) (str " :- " (ann t)) "")
+             (if (not= t :any) (str ": " (ann t)) "")
              (or doc "") v)]))
 
 (defn gen-dynvar! [ctx tl-env]
@@ -490,13 +490,13 @@
         v (gen ctx tl-env t 1)]
     (swap! (:dyns ctx) conj {:name nm :type t})
     [{:name nm :type t}
-     (format "(def ^:dynamic %s :- %s %s)" nm (ann t) v)]))
+     (format "(def ^:dynamic %s: %s %s)" nm (ann t) v)]))
 
 (defn gen-defrecord! [ctx]
   (let [r (:rng ctx)
         nm (str "Rec" (fresh! ctx "R"))
         fields (mapv #(subs % 1) (distinct-kws! r (+ 1 (rint! r 3))))
-        fstr (str/join " " (map (fn [f] (format "%s :- %s" f
+        fstr (str/join " " (map (fn [f] (format "%s: %s" f
                                           (ann (rpick! r [:int :str :any])))) fields))]
     (format "(defrecord %s [%s])" nm fstr)))
 
@@ -527,18 +527,18 @@
   [ctx]
   (let [r (:rng ctx) nm (fresh! ctx "bad")]
     (wchoose! r
-      [[3 #(format "(def %s :- String %s)" nm (int-lit! r))]           ;; def prim mismatch
-       [3 #(format "(def %s :- Int %s)" nm (str-lit! r))]
-       [3 #(format "(defn %s [] :- String %s)" nm (int-lit! r))]        ;; return mismatch
-       [3 #(format "(defn %s [] :- Int %s)" nm (str-lit! r))]
-       [3 #(format "(defn %s [] (let [z :- String %s] z))" nm (int-lit! r))] ;; let mismatch
+      [[3 #(format "(def %s: String %s)" nm (int-lit! r))]           ;; def prim mismatch
+       [3 #(format "(def %s: Int %s)" nm (str-lit! r))]
+       [3 #(format "(defn %s [] -> String %s)" nm (int-lit! r))]        ;; return mismatch
+       [3 #(format "(defn %s [] -> Int %s)" nm (str-lit! r))]
+       [3 #(format "(defn %s [] (let [z: String %s] z))" nm (int-lit! r))] ;; let mismatch
        [2 #(let [g (fresh! ctx "arg")]                                  ;; arity mismatch
-             (format "(defn %s [%s :- Int] %s)\n(defn %s [] (%s %s %s))"
+             (format "(defn %s [%s: Int] %s)\n(defn %s [] (%s %s %s))"
                      g (fresh! ctx "p") g nm g (int-lit! r) (int-lit! r)))]
        [2 #(let [g (fresh! ctx "arg") p (fresh! ctx "p")]               ;; arg-type mismatch
-             (format "(defn %s [%s :- Int] %s)\n(defn %s [] (%s %s))"
+             (format "(defn %s [%s: Int] %s)\n(defn %s [] (%s %s))"
                      g p p nm g (str-lit! r)))]
-       [2 #(format "(defonce %s :- Int %s)" nm (str-lit! r))]])))
+       [2 #(format "(defonce %s: Int %s)" nm (str-lit! r))]])))
 
 ;; ------------------------------------------------------------------ program
 (defn target->lang [target]

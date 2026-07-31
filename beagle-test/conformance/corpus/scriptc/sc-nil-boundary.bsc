@@ -3,10 +3,10 @@
 ;; native row: golden TS + 100% ScriptC static coverage + Node/native parity.
 (ns conformance.sc-nil-boundary)
 
-(defn nil-value [(x :- Nil)] :- Nil
+(defn nil-value [(x: Nil)] -> Nil
   x)
 
-(defn nil-or-zero [(x :- Nil)] :- Int
+(defn nil-or-zero [(x: Nil)] -> Int
   (if (nil? x) 0 1))
 
 (println (nil-value nil))

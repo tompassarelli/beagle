@@ -3,4 +3,4 @@
 (ns test.graph-mint-render-seed)
 (define-mode strict)
 
-(def baseline :- Int 1)
+(def baseline: Int 1)

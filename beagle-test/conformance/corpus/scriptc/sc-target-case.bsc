@@ -6,10 +6,10 @@
 ;; branch selection is pinned across top-level contexts.
 (ns conformance.sc-target-case)
 
-(defn target-name [] :- String
+(defn target-name [] -> String
   (target-case :js "js" :scriptc "scriptc"))
 
-(def banner :- String
+(def banner: String
   (target-case :js "from js" :scriptc "from scriptc"))
 
 (println (target-name))

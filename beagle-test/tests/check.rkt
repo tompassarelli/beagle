@@ -5,7 +5,8 @@
          beagle/private/parse
          beagle/private/check
          beagle/private/blame
-         beagle/private/types)
+         beagle/private/types
+         (only-in beagle/lang/reader-impl beagle-read-syntax))
 
 ;; =============================================================================
 ;; Test helpers — flat wrappers that eliminate nesting
@@ -63,40 +64,16 @@
   (let-values ([(dir _n _d?) (split-path (syntax-source #'here))])
     (build-path dir "fixtures" "check")))
 
-(define (skip-ws port)
-  (let loop ()
-    (define c (peek-char port))
-    (when (and (char? c) (char-whitespace? c))
-      (read-char port)
-      (loop))))
-
-(define (read-until-brace port)
-  (let loop ([acc '()])
-    (skip-ws port)
-    (define c (peek-char port))
-    (cond
-      [(eof-object? c) (error 'fixture-reader "unterminated {")]
-      [(char=? c #\}) (read-char port) (reverse acc)]
-      [else (loop (cons (read port) acc))])))
-
-(define fixture-readtable
-  (make-readtable #f
-    #\{ 'terminating-macro
-        (lambda (ch port src line col pos)
-          (cons MAP-TAG (read-until-brace port)))
-    #\} 'terminating-macro
-        (lambda (ch port src line col pos)
-          (error 'fixture-reader "unexpected `}`"))))
-
+;; The real reader, never a local re-implementation: a hand-rolled fixture
+;; readtable silently diverges from the language (it missed the postfix `:`
+;; annotation marker entirely and read `x: Int` as the symbol `x:`).
 (define (read-fixture-forms relpath)
   (define path (build-path fixtures-dir relpath))
   (call-with-input-file path
     (lambda (in)
-      (parameterize ([read-square-bracket-with-tag '#%brackets]
-                     [current-readtable fixture-readtable])
-        (let loop ()
-          (define stx (read-syntax (path->string path) in))
-          (if (eof-object? stx) '() (cons stx (loop))))))))
+      (let loop ()
+        (define stx (beagle-read-syntax (path->string path) in))
+        (if (eof-object? stx) '() (cons stx (loop)))))))
 
 (define (check-fixture relpath)
   (define forms (read-fixture-forms relpath))
@@ -122,7 +99,10 @@
 (define-syntax-rule (check-fixture-silent name relpath)
   (test-case name
     (let ([output (open-output-string)])
-      (parameterize ([current-error-port output])
+      ;; The legacy-marker migration notice is orthogonal to what this asserts (no
+      ;; CHECKER warning); silence it until the corpus finishes migrating.
+      (parameterize ([current-error-port output]
+                     [legacy-annotation-marker-mode 'quiet])
         (check-fixture relpath))
       (check-equal? "" (get-output-string output)))))
 
@@ -134,10 +114,10 @@
   '(def x 42))
 
 (check-ok "typed def with matching literal passes"
-  '(def x :- Int 42))
+  '(def x #%: Int 42))
 
 (check-ok "Any annotation accepts anything"
-  '(def x :- Any "hi"))
+  '(def x #%: Any "hi"))
 
 (check-ok "defn untyped passes"
   '(defn id [x] x))
@@ -145,75 +125,75 @@
 (test-case "defn with correct return type passes"
   (check-not-exn
    (lambda ()
-     (check-prog '(defn five [] :- Int 5)))))
+     (check-prog '(defn five [] -> Int 5)))))
 
 (check-ok "known builtin call type-checks"
-  '(def x :- Int (+ 1 1)))
+  '(def x #%: Int (+ 1 1)))
 
 ;; The `(claim NAME TYPE)` env-pre-pass tests have been removed entirely:
 ;; the claim form was deleted under the Zero-users rule. The check
 ;; behavior that the pre-pass exercised (env-bind from a type carrier,
 ;; def value rechecked against the carried type) is now exercised
-;; directly by the inline `:-` annotation tests below; the env-binding
+;; directly by the postfix annotation tests below; the env-binding
 ;; outcome is identical.
 
-;; --- inline `:-` annotations: env-pre-pass via def/defn type slots --------
+;; --- postfix annotations: env-pre-pass via def/defn type slots --------
 ;;
-;; The inline `:-` annotation slot on def/defonce/defn forms is the
+;; The postfix annotation slot on def/defonce/defn forms is the
 ;; canonical type carrier. build-initial-env walks every top-level def/defn
 ;; once, reads the type slot populated by Phase B parsing, and seeds env
 ;; from that slot. Same env-binding outcome that the standalone claim form
 ;; had — different source.
 ;;
-;; Param-level `:-`: each typed param binds NAME → TYPE in the local
+;; Param-level `x: T`: each typed param binds NAME → TYPE in the local
 ;; checking env for the body. Untyped params stay ANY and propagate
 ;; through subsequent operations.
 ;;
-;; Return-type `:-`: the body's inferred type is checked against the
+;; Return-type `-> T`: the body's inferred type is checked against the
 ;; declared return; mismatch surfaces a type-error diagnostic.
 
-(check-ok "(def x :- Int 42) — env-binds x:Int via inline annotation"
-  '(def x :- Int 42)
-  '(def y :- Int x))
+(check-ok "(def x: Int 42) — env-binds x:Int via inline annotation"
+  '(def x #%: Int 42)
+  '(def y #%: Int x))
 
-(check-err/rx "(def x :- Int \"hello\") — inline annotation rejects mismatch"
+(check-err/rx "(def x: Int \"hello\") — inline annotation rejects mismatch"
   #rx"(def-type|expected.*Int|got.*String)"
-  '(def x :- Int "hello"))
+  '(def x #%: Int "hello"))
 
-(check-ok "(defn add [a :- Int b :- Int] :- Int (+ a b)) — param + return annotations"
-  '(defn add [a :- Int b :- Int] :- Int (+ a b)))
+(check-ok "(defn add [a: Int b: Int] -> Int (+ a b)) — param + return annotations"
+  '(defn add [a #%: Int b #%: Int] -> Int (+ a b)))
 
 (test-case "(add 1 2) resolves to Int after typed-defn binding in env"
   (check-not-exn
    (lambda ()
-     (check-prog '(defn add [a :- Int b :- Int] :- Int (+ a b))
-                 '(def sum :- Int (add 1 2))))))
+     (check-prog '(defn add [a #%: Int b #%: Int] -> Int (+ a b))
+                 '(def sum #%: Int (add 1 2))))))
 
-(check-err/rx "(defn bad [a :- Int] :- String a) — body Int vs declared String"
+(check-err/rx "(defn bad [a: Int] -> String a) — body Int vs declared String"
   #rx"(return.*type|def-type|expected.*String|got.*Int)"
-  '(defn bad [a :- Int] :- String a))
+  '(defn bad [a #%: Int] -> String a))
 
-(check-ok "(defn mixed [a :- Int b] (* a b)) — untyped param inferred from body"
-  '(defn mixed [a :- Int b] (* a b)))
+(check-ok "(defn mixed [a: Int b] (* a b)) — untyped param inferred from body"
+  '(defn mixed [a #%: Int b] (* a b)))
 
 ;; =============================================================================
 ;; Tests — negatives
 ;; =============================================================================
 
 (check-err "def with wrong literal type errors"
-  '(def x : Int "hi"))
+  '(def x #%: Int "hi"))
 
 (check-err "defn with wrong literal return errors"
-  '(defn s [] : String 42))
+  '(defn s [] -> String 42))
 
 (check-err "let binding with wrong literal type errors"
-  '(def y (let [(x : Int) "hi"] x)))
+  '(def y (let [(x #%: Int) "hi"] x)))
 
 (check-err "call to typed builtin with wrong arg type errors"
-  '(def x : Bool (zero? "not a number")))   ; zero? expects Int, not String
+  '(def x #%: Bool (zero? "not a number")))   ; zero? expects Int, not String
 
 (check-err "call with wrong arity errors"
-  '(def x : Bool (zero? 1 2)))   ; zero? is single-arg
+  '(def x #%: Bool (zero? 1 2)))   ; zero? is single-arg
 
 ;; =============================================================================
 ;; Tests — dynamic mode
@@ -221,7 +201,7 @@
 
 (check-ok "dynamic mode lets type errors through"
   '(define-mode dynamic)
-  '(def x :- Int "wrong type but who cares"))
+  '(def x #%: Int "wrong type but who cares"))
 
 ;; =============================================================================
 ;; Tests — macros
@@ -231,24 +211,24 @@
 
 (check-err "safe macro: expansion is type-checked"
   `(defmacro id1 ,(br 'x) x)
-  '(def y : Int (id1 "string not Int")))
+  '(def y #%: Int (id1 "string not Int")))
 
 ;; =============================================================================
 ;; Tests — variadic types
 ;; =============================================================================
 
 (check-ok "variadic builtin call with valid args"
-  '(def x :- Int (+ 1 2 3 4 5)))
+  '(def x #%: Int (+ 1 2 3 4 5)))
 
 (check-ok "variadic builtin call with zero args is OK if min met"
-  '(def x :- Int (+)))
+  '(def x #%: Int (+)))
 
 (check-err "variadic call rejects wrong rest-type"
   '(declare-extern strict-sum [Int & Int -> Int])
-  '(def x : Int (strict-sum 1 "two" 3)))
+  '(def x #%: Int (strict-sum 1 "two" 3)))
 
 (check-err "variadic call rejects below minimum fixed args"
-  '(def x : Int (- )))
+  '(def x #%: Int (- )))
 
 ;; =============================================================================
 ;; Tests — declare-extern
@@ -258,30 +238,30 @@
   (check-not-exn
    (lambda ()
      (check-prog `(declare-extern my-add ,(br 'Int 'Int '-> 'Int))
-                 '(def x :- Int (my-add 1 2))))))
+                 '(def x #%: Int (my-add 1 2))))))
 
 (check-err "declare-extern: arg type error caught"
   `(declare-extern my-add ,(br 'Int 'Int '-> 'Int))
-  '(def x :- Int (my-add "a" 2)))
+  '(def x #%: Int (my-add "a" 2)))
 
 (test-case "declare-extern with variadic"
   (check-not-exn
    (lambda ()
      (check-prog `(declare-extern join ,(br 'String '& 'String '-> 'String))
-                 '(def x :- String (join "a" "b" "c"))))))
+                 '(def x #%: String (join "a" "b" "c"))))))
 
 ;; =============================================================================
 ;; Tests — union types
 ;; =============================================================================
 
 (check-ok "union annotation accepts any alternative"
-  '(def x :- (U String Nil) "hi"))
+  '(def x #%: (U String Nil) "hi"))
 
 (check-ok "union nil alternative"
-  '(def x :- (U String Nil) nil))
+  '(def x #%: (U String Nil) nil))
 
 (check-err "union annotation rejects non-member"
-  '(def x : (U String Nil) 42))
+  '(def x #%: (U String Nil) 42))
 
 ;; =============================================================================
 ;; Tests — type narrowing (fixtures)
@@ -322,7 +302,7 @@
   "poly-filterv.bclj")
 
 (check-ok "identity preserves type through annotation"
-  '(def x :- Int (identity 42)))
+  '(def x #%: Int (identity 42)))
 
 (check-err "map rejects non-function first arg"
   `(def xs ,(br 1 2 3))
@@ -376,23 +356,23 @@
 
 (check-ok/source "cross-file import: typed defn callable with prefix" fixture-source
   '(require mathlib)
-  '(def x :- Int (mathlib/add 1 2)))
+  '(def x #%: Int (mathlib/add 1 2)))
 
 (check-ok/source "cross-file import: typed def accessible with prefix" fixture-source
   '(require mathlib)
-  '(def x :- Float mathlib/pi))
+  '(def x #%: Float mathlib/pi))
 
 (check-err/source "cross-file import: type error caught across files" fixture-source
   '(require mathlib)
-  '(def x :- Int (mathlib/greet "tom")))
+  '(def x #%: Int (mathlib/greet "tom")))
 
 (check-err/source "cross-file import: arg type error caught" fixture-source
   '(require mathlib)
-  '(def x :- Int (mathlib/add "one" 2)))
+  '(def x #%: Int (mathlib/add "one" 2)))
 
 (check-ok/source "cross-file import with :as alias" fixture-source
   '(require mathlib :as m)
-  '(def x :- Int (m/add 1 2)))
+  '(def x #%: Int (m/add 1 2)))
 
 (check-err/source "cross-file import: untyped defn still has arity" fixture-source
   '(require mathlib)
@@ -417,7 +397,7 @@
 (check-ok/source "cross-file defrecord: accessor returns correct type" shapes-fixture-source
   '(require shapes)
   '(def c (shapes/->Circle 5))
-  '(def r :- Int (shapes/circle-radius c)))
+  '(def r #%: Int (shapes/circle-radius c)))
 
 (check-ok/source "cross-file defrecord: multi-field constructor" shapes-fixture-source
   '(require shapes)
@@ -426,7 +406,7 @@
 (check-ok/source "cross-file defrecord: cross-module function uses imported record" shapes-fixture-source
   '(require shapes)
   '(def c (shapes/->Circle 5))
-  '(def a :- Int (shapes/circle-area c)))
+  '(def a #%: Int (shapes/circle-area c)))
 
 (check-err/source "cross-file defrecord: constructor wrong arg type errors" shapes-fixture-source
   '(require shapes)
@@ -439,7 +419,7 @@
 (check-err/source "cross-file defrecord: accessor wrong return type errors" shapes-fixture-source
   '(require shapes)
   '(def c (shapes/->Circle 5))
-  '(def r :- String (shapes/circle-radius c)))
+  '(def r #%: String (shapes/circle-radius c)))
 
 ;; =============================================================================
 ;; Tests — defrecord (fixtures)
@@ -468,23 +448,23 @@
   (check-not-exn
    (lambda ()
      (check-prog `(declare-extern System/getProperty ,(br 'String '-> 'String))
-                 '(def x :- String (System/getProperty "user.home"))))))
+                 '(def x #%: String (System/getProperty "user.home"))))))
 
 (check-err "static method with wrong arg type errors"
   `(declare-extern System/getProperty ,(br 'String '-> 'String))
   '(def x (System/getProperty 42)))
 
 (check-ok "instance method with declared type passes"
-  '(def x :- Bool (.startsWith "hello" "he")))
+  '(def x #%: Bool (.startsWith "hello" "he")))
 
 (check-err "instance method with wrong arg type errors"
-  '(def x : Bool (.startsWith "hello" 42)))
+  '(def x #%: Bool (.startsWith "hello" 42)))
 
 (check-err "instance method wrong arity errors"
   '(def x (.trim "a" "b")))
 
 (check-ok "dynamic var with declared type infers correctly"
-  '(def x :- String (first *command-line-args*)))
+  '(def x #%: String (first *command-line-args*)))
 
 (check-ok "undeclared interop returns Any (no error)"
   '(def x (.someUnknownMethod obj)))
@@ -499,7 +479,7 @@
 (test-case "map literal typed as (Map Any Any) passes"
   (check-not-exn
    (lambda ()
-     (check-prog `(def m :- (Map Any Any) ,(mt ':a 1))))))
+     (check-prog `(def m #%: (Map Any Any) ,(mt ':a 1))))))
 
 (check-ok "empty map literal passes"
   `(def m ,(mt)))
@@ -514,7 +494,7 @@
 (test-case "set literal typed as (Set Any) passes"
   (check-not-exn
    (lambda ()
-     (check-prog `(def s :- (Set Any) ,(st 1 2 3))))))
+     (check-prog `(def s #%: (Set Any) ,(st 1 2 3))))))
 
 (check-ok "empty set literal passes"
   `(def s ,(st)))
@@ -538,7 +518,7 @@
   '(def x (try (+ 1 1) (catch Exception e "err") (finally (println "done")))))
 
 (check-ok "try with typed body passes"
-  '(def x :- Any (try (+ 1 1) (catch Exception e 0))))
+  '(def x #%: Any (try (+ 1 1) (catch Exception e 0))))
 
 ;; =============================================================================
 ;; Tests — doseq
@@ -572,56 +552,56 @@
 ;; dynamic map / unknown target it returns Any (matching get's semantics).
 ;;
 ;; The target's type only flows into kw-access lookup when the env knows
-;; it, which today requires an explicit `(def target :- Type ...)` inline
+;; it, which today requires an explicit `(def target: Type ...)` inline
 ;; annotation. Inferring record types from constructor calls is a
 ;; separate gap — exercised via the "Any fallback" tests below.
 
 (check-ok "(:keyword target) with claimed record type — resolves to field type"
-  '(defrecord Point [(x : Int) (y : Int)])
-  '(def p :- Point (->Point 1 2))
-  '(def n :- Int (:x p)))
+  '(defrecord Point [(x #%: Int) (y #%: Int)])
+  '(def p #%: Point (->Point 1 2))
+  '(def n #%: Int (:x p)))
 
 (check-err/rx "(:keyword target) — wrong field-type binding caught (Int → String)"
   #rx"(def-type|expected.*String|got.*Int)"
-  '(defrecord Point [(x : Int) (y : Int)])
-  '(def p :- Point (->Point 1 2))
-  '(def n :- String (:x p)))
+  '(defrecord Point [(x #%: Int) (y #%: Int)])
+  '(def p #%: Point (->Point 1 2))
+  '(def n #%: String (:x p)))
 
 (check-ok "(:keyword target) on dynamic map flows as Any"
   `(def m ,(mt ':a 1 ':b 2))
-  '(def v :- Int (:a m)))
+  '(def v #%: Int (:a m)))
 
 (check-ok "(:keyword target) — unknown field on record falls back to Any (gap)"
   ;; lookup-kw-field-type returns ANY for missing fields rather than a
   ;; type-error, matching the existing kw-access semantics. Surfaced
   ;; precision gap — documented, not closed by this re-adoption.
-  '(defrecord Point [(x : Int) (y : Int)])
-  '(def p :- Point (->Point 1 2))
-  '(def z :- Any (:z p)))
+  '(defrecord Point [(x #%: Int) (y #%: Int)])
+  '(def p #%: Point (->Point 1 2))
+  '(def z #%: Any (:z p)))
 
 (check-ok "(get target :keyword) on typed record — resolves to field type (was Any)"
   ;; Closed the asymmetry: literal-key (get p :x) now canonicalizes to
   ;; kw-access at parse-time, so the field type flows through. Previously
   ;; degraded to Any via stdlib's (Any Any -> Any) get.
-  '(defrecord Point [(x : Int) (y : Int)])
-  '(def p :- Point (->Point 1 2))
-  '(def a :- Int (get p :x)))
+  '(defrecord Point [(x #%: Int) (y #%: Int)])
+  '(def p #%: Point (->Point 1 2))
+  '(def a #%: Int (get p :x)))
 
 (check-err "(get target :keyword) on typed record rejects type-mismatch (was Any-degraded)"
   ;; Discriminating: under the old (get : Any Any -> Any) typing, a String
   ;; claim would have accepted the result. Now the field type (Int)
   ;; conflicts with the String claim, surfacing the bug at compile time.
-  '(defrecord Point [(x : Int) (y : Int)])
-  '(def p :- Point (->Point 1 2))
-  '(def s :- String (get p :x)))
+  '(defrecord Point [(x #%: Int) (y #%: Int)])
+  '(def p #%: Point (->Point 1 2))
+  '(def s #%: String (get p :x)))
 
 (check-ok "(get p :x default) on typed record — default never fires, field type"
   ;; 3-arity literal-key get on a typed record where the field is known:
   ;; the default expression is unreachable, so the result type is the
   ;; field type, not (U FieldType DefaultType).
-  '(defrecord Point [(x : Int) (y : Int)])
-  '(def p :- Point (->Point 1 2))
-  '(def a :- Int (get p :x 0)))
+  '(defrecord Point [(x #%: Int) (y #%: Int)])
+  '(def p #%: Point (->Point 1 2))
+  '(def a #%: Int (get p :x 0)))
 
 ;; =============================================================================
 ;; Tests — defprotocol (fixtures)
@@ -702,27 +682,27 @@
 ;; G5 — enum MEMBERSHIP is enforced (was: any keyword accepted for any enum).
 (check-ok "enum member used in record field + defn arg + comparison passes"
   '(defenum Op :one :many :show)
-  '(defrecord T [op :- Op])
-  '(def good :- T (->T :one))
-  '(defn use-op [op :- Op] :- Bool (= op :many))
-  '(def ok2 :- Bool (use-op :show)))
+  '(defrecord T [op #%: Op])
+  '(def good #%: T (->T :one))
+  '(defn use-op [op #%: Op] -> Bool (= op :many))
+  '(def ok2 #%: Bool (use-op :show)))
 
 (check-err/rx "non-member keyword in ->Ctor record field is rejected"
   #rx"not a member of enum Op"
   '(defenum Op :one :many :show)
-  '(defrecord T [op :- Op])
-  '(def bad :- T (->T :bogus)))
+  '(defrecord T [op #%: Op])
+  '(def bad #%: T (->T :bogus)))
 
 (check-err/rx "non-member keyword as a defn enum arg is rejected"
   #rx"not a member of enum Op"
   '(defenum Op :one :many :show)
-  '(defn use-op [op :- Op] :- Bool (= op :one))
-  '(def bad :- Bool (use-op :nope)))
+  '(defn use-op [op #%: Op] -> Bool (= op :one))
+  '(def bad #%: Bool (use-op :nope)))
 
 (check-err/rx "non-member keyword in (= enumvar :kw) is rejected"
   #rx"not a member of enum Op"
   '(defenum Op :one :many :show)
-  '(defn classify [op :- Op] :- Bool (= op :bogus)))
+  '(defn classify [op #%: Op] -> Bool (= op :bogus)))
 
 ;; =============================================================================
 ;; Tests — defalias (G1: type aliases / synonyms)
@@ -730,21 +710,21 @@
 
 (check-ok "defalias resolves to its expansion in a defn signature"
   '(defalias Ids (Vec String))
-  '(defn how-many [xs :- Ids] :- Int (count xs)))
+  '(defn how-many [xs #%: Ids] -> Int (count xs)))
 
 (check-ok "nested defalias (alias referencing an earlier alias) resolves"
   '(defalias Ids (Vec String))
   '(defalias Lookup (Map String Ids))
-  '(defn keys-of [m :- Lookup] :- Int (count m)))
+  '(defn keys-of [m #%: Lookup] -> Int (count m)))
 
 (check-err/rx "mismatch against an alias is still a type error (expansion shown)"
   #rx"expected.*Vec"
   '(defalias Ids (Vec String))
-  '(def bad :- Ids "not-a-vec"))
+  '(def bad #%: Ids "not-a-vec"))
 
 (check-ok "self-referential defalias terminates (does not loop)"
   '(defalias Rec (Vec Rec))
-  '(defn rid [r :- Rec] :- Int (count r)))
+  '(defn rid [r #%: Rec] -> Int (count r)))
 
 ;; =============================================================================
 ;; Tests — G4 kw-access slice: (:kw v) over a record-union discriminates by key,
@@ -752,33 +732,33 @@
 ;; =============================================================================
 
 (check-ok "kw-access over a union where ALL members declare the key is non-null"
-  '(defrecord A [code :- Int])
-  '(defrecord B [code :- Int])
+  '(defrecord A [code #%: Int])
+  '(defrecord B [code #%: Int])
   '(defunion Both A B)
-  '(defn need-int [x :- Int] :- Int x)
-  '(defn uc [v :- Both] :- Int (need-int (:code v))))
+  '(defn need-int [x #%: Int] -> Int x)
+  '(defn uc [v #%: Both] -> Int (need-int (:code v))))
 
 (check-err/rx "kw-access over a union where only SOME members declare the key is nullable"
   #rx"got Int[?]"
-  '(defrecord OkB [ok :- Int])
-  '(defrecord ErB [msg :- String])
+  '(defrecord OkB [ok #%: Int])
+  '(defrecord ErB [msg #%: String])
   '(defunion Env OkB ErB)
-  '(defn need-int [x :- Int] :- Int x)
-  '(defn uo [v :- Env] :- Int (need-int (:ok v))))
+  '(defn need-int [x #%: Int] -> Int x)
+  '(defn uo [v #%: Env] -> Int (need-int (:ok v))))
 
 ;; =============================================================================
-;; Tests — G7: for/doseq binding accepts :- T (parity with loop) + honors it
+;; Tests — G7: for/doseq binding accepts `x: T` (parity with loop) + honors it
 ;; =============================================================================
 
-(check-ok "for binding with a :- T annotation parses + checks"
-  '(defn lens [xss :- (Vec Any)] :- (Vec Int)
-     (for [xs :- (Vec String) xss] (count xs))))
+(check-ok "for binding with an `x: T` annotation parses + checks"
+  '(defn lens [xss #%: (Vec Any)] -> (Vec Int)
+     (for [xs #%: (Vec String) xss] (count xs))))
 
-(check-err/rx "for binding :- T is HONORED, not silently Any"
+(check-err/rx "for binding `x: T` is HONORED, not silently Any"
   #rx"got .Vec String"
-  '(defn need-int [x :- Int] :- Int x)
-  '(defn bad [xss :- (Vec Any)] :- (Vec Int)
-     (for [xs :- (Vec String) xss] (need-int xs))))
+  '(defn need-int [x #%: Int] -> Int x)
+  '(defn bad [xss #%: (Vec Any)] -> (Vec Int)
+     (for [xs #%: (Vec String) xss] (need-int xs))))
 
 ;; =============================================================================
 ;; Tests — G2: (Atom T) parametric, INVARIANT (a mutable cell). deref reads the
@@ -787,26 +767,26 @@
 ;; =============================================================================
 
 (check-ok "atom: typed deref + reset! type-check; bare Atom -> Any"
-  '(defn t! [] :- Int (let [a :- (Atom Int) (atom 0)] (reset! a 5) (deref a)))
-  '(defn b [x :- Atom] :- Any (deref x)))
+  '(defn t! [] -> Int (let [a #%: (Atom Int) (atom 0)] (reset! a 5) (deref a)))
+  '(defn b [x #%: Atom] -> Any (deref x)))
 
 (check-err/rx "atom: reset! a wrong-typed value errors"
   #rx"expected Int, got String"
-  '(defn bad! [a :- (Atom Int)] :- Int (let [_ (reset! a "x")] (deref a))))
+  '(defn bad! [a #%: (Atom Int)] -> Int (let [_ (reset! a "x")] (deref a))))
 
 (check-err/rx "atom: swap! fn must return the element type (soundness wall)"
   #rx"swap!"
-  '(defn bad! [a :- (Atom Int)] :- Int (swap! a (fn [x :- Int] :- String "no"))))
+  '(defn bad! [a #%: (Atom Int)] -> Int (swap! a (fn [x #%: Int] -> String "no"))))
 
 (check-err/rx "atom: INVARIANT — (Atom Int) is not (Atom Any) (the poison hole, closed)"
   #rx"expected .Atom Any"
-  '(defn anyatom [b :- (Atom Any)] :- Any (deref b))
-  '(defn demo! [] :- Int (let [a :- (Atom Int) (atom 0)] (let [_ (anyatom a)] (deref a)))))
+  '(defn anyatom [b #%: (Atom Any)] -> Any (deref b))
+  '(defn demo! [] -> Int (let [a #%: (Atom Int) (atom 0)] (let [_ (anyatom a)] (deref a)))))
 
 (check-err/rx "atom: INVARIANT both ways — (Atom Any) is not (Atom Int)"
   #rx"expected .Atom Int"
-  '(defn want! [a :- (Atom Int)] :- Int (deref a))
-  '(defn bad! [b :- (Atom Any)] :- Int (want! b)))
+  '(defn want! [a #%: (Atom Int)] -> Int (deref a))
+  '(defn bad! [b #%: (Atom Any)] -> Int (want! b)))
 
 ;; G2b — annotation-directed Atom CONSTRUCTION. A fresh cell checked against an
 ;; expected (Atom T) adopts T when the value is the constructor call `(atom init)`;
@@ -814,20 +794,20 @@
 ;; stay INVARIANT (a fresh cell has no aliases, so adoption is sound).
 
 (check-ok "atom G2b: annotated cell born empty — (atom nil) under (Atom Int?)"
-  '(def st :- (Atom Int?) (atom nil))
-  '(defn fill! [] :- Int? (reset! st 5)))
+  '(def st #%: (Atom Int?) (atom nil))
+  '(defn fill! [] -> Int? (reset! st 5)))
 
 (check-ok "atom G2b: annotation widens the constructor in a let binding"
-  '(defn t! [] :- Int? (let [a :- (Atom Int?) (atom nil)] (do (reset! a 5) (deref a)))))
+  '(defn t! [] -> Int? (let [a #%: (Atom Int?) (atom nil)] (do (reset! a 5) (deref a)))))
 
 (check-err/rx "atom G2b: constructor init must fit the annotated element"
   #rx"atom init: expected Int"
-  '(def bad :- (Atom Int) (atom "x")))
+  '(def bad #%: (Atom Int) (atom "x")))
 
 (check-err/rx "atom G2b: UNannotated (atom nil) stays (Atom Nil) — widening needs the annotation"
   #rx"expected .Atom"
-  '(defn want! [a :- (Atom Int?)] :- Any (deref a))
-  '(defn bad! [] :- Any (let [u (atom nil)] (want! u))))
+  '(defn want! [a #%: (Atom Int?)] -> Any (deref a))
+  '(defn bad! [] -> Any (let [u (atom nil)] (want! u))))
 
 ;; =============================================================================
 ;; Tests — G3: heterogeneous tuple (HVec a b c). Construct via an expected-directed
@@ -838,34 +818,34 @@
 ;; =============================================================================
 
 (check-ok "hvec: construct (def+literal) + nth positional + HVec<:Vec"
-  `(def t :- (HVec Int String) ,(br 1 "hi"))
-  '(defn u [] :- String (nth t 1))
-  '(defn v [] :- (Vec Any) t))
+  `(def t #%: (HVec Int String) ,(br 1 "hi"))
+  '(defn u [] -> String (nth t 1))
+  '(defn v [] -> (Vec Any) t))
 
 (check-err/rx "hvec: wrong element type in the literal errors"
   #rx"tuple element 1: expected String"
-  `(def e :- (HVec Int String) ,(br 1 2)))
+  `(def e #%: (HVec Int String) ,(br 1 2)))
 
 (check-err/rx "hvec: wrong arity literal errors"
   #rx"expects 2 element"
-  `(def e :- (HVec Int String) ,(br 1)))
+  `(def e #%: (HVec Int String) ,(br 1)))
 
 (check-err/rx "hvec: nth positional type is precise (misuse errors)"
   #rx"expected Int, got String"
-  `(def t :- (HVec Int String) ,(br 1 "hi"))
-  '(defn need-int [n :- Int] :- Int n)
-  '(defn bad [] :- Int (need-int (nth t 1))))
+  `(def t #%: (HVec Int String) ,(br 1 "hi"))
+  '(defn need-int [n #%: Int] -> Int n)
+  '(defn bad [] -> Int (need-int (nth t 1))))
 
 (check-err/rx "hvec: dynamic nth index degrades to the LUB, not a fabricated position"
   #rx"U Int String"
-  `(def t :- (HVec Int String) ,(br 1 "hi"))
-  '(defn need-int [n :- Int] :- Int n)
-  '(defn bad [i :- Int] :- Int (need-int (nth t i))))
+  `(def t #%: (HVec Int String) ,(br 1 "hi"))
+  '(defn need-int [n #%: Int] -> Int n)
+  '(defn bad [i #%: Int] -> Int (need-int (nth t i))))
 
 (check-err/rx "hvec: a plain Vec is NOT an HVec (one direction)"
   #rx"expected .HVec"
-  '(defn want [t :- (HVec Int String)] :- Int (nth t 0))
-  '(defn bad [v :- (Vec Int)] :- Int (want v)))
+  '(defn want [t #%: (HVec Int String)] -> Int (nth t 0))
+  '(defn bad [v #%: (Vec Int)] -> Int (want v)))
 
 ;; =============================================================================
 ;; Tests — G4-emit: a map pattern {:k x} in match binds the var (emit now emits
@@ -873,15 +853,15 @@
 ;; =============================================================================
 
 (check-ok "map-pattern in match narrows the bound var to its field type"
-  '(defrecord Box [val :- Int])
-  '(defn need-int [n :- Int] :- Int n)
-  `(defn unbox [b :- Box] :- Int (match b ,(br (mt ':val 'x) '(need-int x)) ,(br '_ 0))))
+  '(defrecord Box [val #%: Int])
+  '(defn need-int [n #%: Int] -> Int n)
+  `(defn unbox [b #%: Box] -> Int (match b ,(br (mt ':val 'x) '(need-int x)) ,(br '_ 0))))
 
 (check-err/rx "map-pattern var carries the field type (misuse errors)"
   #rx"expected String, got Int"
-  '(defrecord Box [val :- Int])
-  '(defn need-str [s :- String] :- String s)
-  `(defn bad [b :- Box] :- String (match b ,(br (mt ':val 'x) '(need-str x)) ,(br '_ ""))))
+  '(defrecord Box [val #%: Int])
+  '(defn need-str [s #%: String] -> String s)
+  `(defn bad [b #%: Box] -> String (match b ,(br (mt ':val 'x) '(need-str x)) ,(br '_ ""))))
 
 ;; =============================================================================
 ;; Tests — exhaustive match (fixtures with warnings)
@@ -903,7 +883,7 @@
 (test-case "match with or-pattern of literals type-checks"
   (check-not-exn
    (lambda ()
-     (check-prog `(defn classify [(x : Int)] :- String
+     (check-prog `(defn classify [(x #%: Int)] -> String
                     (match x
                       ,(br '(or 1 2 3) "low")
                       ,(br '(or 4 5 6) "mid")
@@ -912,7 +892,7 @@
 (test-case "or-pattern with keyword literals type-checks"
   (check-not-exn
    (lambda ()
-     (check-prog `(defn name [(k : Keyword)] :- String
+     (check-prog `(defn name [(k #%: Keyword)] -> String
                     (match k
                       ,(br '(or :a :b) "first")
                       ,(br '(or :c :d) "second")
@@ -966,21 +946,21 @@
 (check-ok/source "cross-file Result: accessor returns correct type" result-fixture-source
   '(require result)
   '(def e (result/->Err "fail"))
-  '(def msg :- String (result/err-error e)))
+  '(def msg #%: String (result/err-error e)))
 
 (test-case "cross-file Result: exhaustive match on imported union passes"
   (check-not-exn
    (lambda ()
      (check-prog/source result-fixture-source
                         '(require result)
-                        `(defn handle ,(br '(r : (Result String String))) :- String
+                        `(defn handle ,(br '(r #%: (Result String String))) -> String
                            (match r
                              ,(br '(Ok v) "ok")
                              ,(br '(Err e) 'e)))))))
 
 (check-err/source "cross-file Result: non-exhaustive match on imported union errors" result-fixture-source
   '(require result)
-  `(defn handle ,(br '(r : (Result String String))) :- String
+  `(defn handle ,(br '(r #%: (Result String String))) -> String
      (match r
        ,(br '(Ok v) "ok"))))
 
@@ -1063,17 +1043,17 @@
 (test-case "metadata is transparent to type checking"
   (check-not-exn
    (lambda ()
-     (check-prog `(def x :- (Vec Int) (#%meta (,MT :stretch 1) ,(br 1 2 3)))))))
+     (check-prog `(def x #%: (Vec Int) (#%meta (,MT :stretch 1) ,(br 1 2 3)))))))
 
 (test-case "metadata on typed vector in let"
   (check-not-exn
    (lambda ()
-     (check-prog `(defn f [] :- (Vec Int)
+     (check-prog `(defn f [] -> (Vec Int)
                     (let ,(br 'v `(#%meta (,MT :stretch 1) ,(br 10 20)))
                       v))))))
 
 (check-err "metadata does not suppress type error in inner expr"
-  `(def x : String (#%meta (,MT :stretch 1) ,(br 1 2 3))))
+  `(def x #%: String (#%meta (,MT :stretch 1) ,(br 1 2 3))))
 
 ;; when-let / if-let removed — interim let+if pattern type-checks the same way
 ;; (see let + if type-check tests above).
@@ -1081,20 +1061,20 @@
 (test-case "let + if (interim nullable-narrow pattern) type checks"
   (check-not-exn
    (lambda ()
-     (check-prog '(defn f [(x : Int?)] :- Nil (let [v x] (if v (println v) nil)))))))
+     (check-prog '(defn f [(x #%: Int?)] -> Nil (let [v x] (if v (println v) nil)))))))
 
 (test-case "with-open type checks"
   (check-not-exn
    (lambda ()
-     (check-prog '(defn f [(p : String)] :- Any (with-open [r (slurp p)] r))))))
+     (check-prog '(defn f [(p #%: String)] -> Any (with-open [r (slurp p)] r))))))
 
 (check-ok "doto type checks target"
-  '(def x :- Any (doto (atom 1) (reset! 2))))
+  '(def x #%: Any (doto (atom 1) (reset! 2))))
 
 (test-case "for with :let type checks"
   (check-not-exn
    (lambda ()
-     (check-prog `(def x :- (Vec String) (for ,(br 'i '(range 3) ':let (br 's '(str i))) s))))))
+     (check-prog `(def x #%: (Vec String) (for ,(br 'i '(range 3) ':let (br 's '(str i))) s))))))
 
 ;; when-not / if-not removed — use (when (not ...) body) / (if (not ...) t e).
 
@@ -1110,15 +1090,15 @@
 (test-case "condp type checks with default"
   (check-not-exn
    (lambda ()
-     (check-prog '(defn f [(x : Keyword)] :- String (condp = x :a "alpha" :b "beta" "other"))))))
+     (check-prog '(defn f [(x #%: Keyword)] -> String (condp = x :a "alpha" :b "beta" "other"))))))
 
 ;; --- defonce ---
 
 (check-ok "defonce type checks"
-  '(defonce db :- Any (atom nil)))
+  '(defonce db #%: Any (atom nil)))
 
 (check-err "defonce type mismatch"
-  '(defonce db : String 42))
+  '(defonce db #%: String 42))
 
 ;; =============================================================================
 ;; async/await + Promise type
@@ -1167,25 +1147,25 @@
   (check-not-exn
    (lambda ()
      (check-js-prog `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
-                    '(defn f [(url : String)] :- (Promise String) (js/await (fetch-data url)))))))
+                    '(defn f [(url #%: String)] -> (Promise String) (js/await (fetch-data url)))))))
 
 (test-case "Promise return with unwrapped body type accepted"
   (check-not-exn
    (lambda ()
      (check-js-prog `(declare-extern load ,(br '-> '(Promise Int)))
-                    '(defn f [] :- (Promise Int) (js/await (load)))))))
+                    '(defn f [] -> (Promise Int) (js/await (load)))))))
 
 (test-case "nested await in let type-checks"
   (check-not-exn
    (lambda ()
      (check-js-prog `(declare-extern fetch-name ,(br 'Int '-> '(Promise String)))
-                    '(defn f [(id : Int)] :- (Promise String)
+                    '(defn f [(id #%: Int)] -> (Promise String)
                        (let [name (js/await (fetch-name id))]
                          (str "Hello " name)))))))
 
 (check-js-err "Promise return type mismatch caught"
   `(declare-extern load ,(br '-> '(Promise Int)))
-  '(defn f [] :- (Promise String) (js/await (load))))
+  '(defn f [] -> (Promise String) (js/await (load))))
 
 ;; =============================================================================
 ;; Target-form gating — cross-target rejection
@@ -1194,32 +1174,32 @@
 (check-err/rx "await rejected in beagle/clj"
   #rx"js/await is only supported in beagle/js"
   `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
-  '(defn f [(url : String)] :- (Promise String) (js/await (fetch-data url))))
+  '(defn f [(url #%: String)] -> (Promise String) (js/await (fetch-data url))))
 
 (check-nix-err/rx "await rejected in beagle/nix"
   #rx"js/await is only supported in beagle/js"
   `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
-  '(defn f [(url : String)] :- (Promise String) (js/await (fetch-data url))))
+  '(defn f [(url #%: String)] -> (Promise String) (js/await (fetch-data url))))
 
 (check-scriptc-ok "JS-family forms are accepted in beagle/scriptc"
   `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
-  '(defn await-f [(url :- String)] :- (Promise String)
+  '(defn await-f [(url #%: String)] -> (Promise String)
      (js/await (fetch-data url)))
-  '(def template :- String (js/template "Hello, " "ScriptC" "!"))
-  '(def quoted :- JsAst (js/quote (const x 42))))
+  '(def template #%: String (js/template "Hello, " "ScriptC" "!"))
+  '(def quoted #%: JsAst (js/quote (const x 42))))
 
 ;; Nix forms rejected outside beagle/nix
 (check-err/rx "inherit rejected in beagle/clj"
   #rx"inherit is only supported in beagle/nix"
-  '(def x :- Any (inherit a b)))
+  '(def x #%: Any (inherit a b)))
 
 (check-js-err/rx "inherit rejected in beagle/js"
   #rx"inherit is only supported in beagle/nix"
-  '(def x :- Any (inherit a b)))
+  '(def x #%: Any (inherit a b)))
 
 (check-err/rx "fn-set rejected in beagle/clj"
   #rx"nix/(module|fn-set|overlay) is only supported in beagle/nix"
-  '(def x :- Any (nix/fn-set [{a 1}] a)))
+  '(def x #%: Any (nix/fn-set [{a 1}] a)))
 
 ;; pipe-to / pipe-from removed entirely (not just nix-only). The rejection is
 ;; now uniform across targets — see tests/threading.rkt for the parse-time
@@ -1227,34 +1207,34 @@
 
 (check-js-err/rx "s (interpolated string) rejected in beagle/js"
   #rx"is only supported in beagle/nix"
-  '(def x :- Any (s "hello " name)))
+  '(def x #%: Any (s "hello " name)))
 
 ;; Verify Nix forms pass on beagle/nix
 (check-nix-ok "inherit accepted in beagle/nix"
-  '(def x :- Any (inherit a b)))
+  '(def x #%: Any (inherit a b)))
 
 (check-nix-ok "s accepted in beagle/nix"
-  '(def x :- Any (s "hello " name)))
+  '(def x #%: Any (s "hello " name)))
 
 (check-nix-ok "flake-input accepted in beagle/nix"
-  '(def input :- Any (flake-input :quickshell :packages :default)))
+  '(def input #%: Any (flake-input :quickshell :packages :default)))
 
 (check-js-err/rx "flake-input rejected in beagle/js"
   #rx"flake-input is only supported in beagle/nix"
-  '(def input :- Any (flake-input :quickshell :packages :default)))
+  '(def input #%: Any (flake-input :quickshell :packages :default)))
 
 ;; =============================================================================
 ;; Tests — check/rescue
 ;; =============================================================================
 
 (check-ok "check form passes type check"
-  '(def x :- Any (check (+ 1 1))))
+  '(def x #%: Any (check (+ 1 1))))
 
 (check-ok "rescue with fallback passes type check"
-  '(def x :- Any (rescue (+ 1 1) 0)))
+  '(def x #%: Any (rescue (+ 1 1) 0)))
 
 (check-ok "rescue with error binding passes type check"
-  '(def x :- Any (rescue (+ 1 1) err (str err))))
+  '(def x #%: Any (rescue (+ 1 1) err (str err))))
 
 ;; =============================================================================
 ;; Tests — (defunion :throwable ...) / :raises
@@ -1265,8 +1245,8 @@
 
 (check-ok "defunion :throwable with fielded variants passes type check"
   `(defunion :throwable ApiError
-     (NotFound ,(br '(id : Int)))
-     (RateLimit ,(br '(retry-after : Int)))))
+     (NotFound ,(br '(id #%: Int)))
+     (RateLimit ,(br '(retry-after #%: Int)))))
 
 ;; DELETED test "defn with :raises passes type check": the inline `:raises ERR`
 ;; surface on defn was removed alongside inline `:` return-type annotations.
@@ -1280,7 +1260,7 @@
 ;; =============================================================================
 
 (check-ok "target-case passes type check"
-  '(def x :- Any (target-case :clj "clj" :js "js" :nix "nix")))
+  '(def x #%: Any (target-case :clj "clj" :js "js" :nix "nix")))
 
 ;; =============================================================================
 ;; 2026-06-12 regressions
@@ -1310,60 +1290,60 @@
 
 (check-ok "narrow: (if (nil? v) _ use) discharges Nil in else"
   '(define-target clj)
-  '(defn f [v :- Float?] :- String
+  '(defn f [v #%: Float?] -> String
      (if (nil? v) "" (str (Math/floor v)))))
 
 (check-ok "narrow: (when (some? v) use)"
   '(define-target clj)
-  '(defn f [v :- Float?] :- Any
+  '(defn f [v #%: Float?] -> Any
      (when (some? v) (Math/floor v))))
 
 (check-ok "narrow: not inversion (if-some lowering shape)"
   '(define-target clj)
-  '(defn f [v :- Float?] :- Float
+  '(defn f [v #%: Float?] -> Float
      (if (not (nil? v)) (Math/floor v) 0.0)))
 
 (check-ok "narrow: not= nil"
   '(define-target clj)
-  '(defn f [v :- Float?] :- Float
+  '(defn f [v #%: Float?] -> Float
      (if (not= v nil) (Math/floor v) 0.0)))
 
 (check-ok "narrow: and-conjunction narrows both vars in then"
   '(define-target clj)
-  '(defn f [a :- Float? b :- Float?] :- Float
+  '(defn f [a #%: Float? b #%: Float?] -> Float
      (if (and (some? a) (some? b))
        (+ (Math/floor a) (Math/floor b))
        0.0)))
 
 (check-ok "narrow: or De-Morgan narrows in else"
   '(define-target clj)
-  '(defn f [a :- Float? b :- Float?] :- Float
+  '(defn f [a #%: Float? b #%: Float?] -> Float
      (if (or (nil? a) (nil? b))
        0.0
        (+ (Math/floor a) (Math/floor b)))))
 
 (check-ok "narrow: sequential and-args see prior narrowings"
   '(define-target clj)
-  '(defn f [v :- Float?] :- Any
+  '(defn f [v #%: Float?] -> Any
      (and (some? v) (> (Math/floor v) 1.0))))
 
 (check-ok "narrow: or-args see prior else-narrowings"
   '(define-target clj)
-  '(defn f [v :- Float?] :- Any
+  '(defn f [v #%: Float?] -> Any
      (or (nil? v) (> (Math/floor v) 1.0))))
 
 (check-ok "narrow: cond accumulates negations into later clauses"
   '(define-target clj)
   ;; grouped-clause datums use bare `else`; the bracketed [:else ...]
   ;; surface is covered by the reader-level probes.
-  '(defn f [v :- Float?] :- String
+  '(defn f [v #%: Float?] -> String
      (cond
        ((nil? v) "")
        (else (str (Math/floor v))))))
 
 (check-ok "narrow: bare truthiness (if-let lowering shape)"
   '(define-target clj)
-  '(defn f [v :- Float?] :- Float
+  '(defn f [v #%: Float?] -> Float
      (let [w v]
        (if w (Math/floor w) 0.0))))
 
@@ -1373,31 +1353,31 @@
 ;; where that union is required.
 (check-ok "narrow soundness: Bool? falsy branch stays (U Bool Nil)"
   '(define-target clj)
-  '(defn g [x :- (U Bool Nil)] :- Any x)
-  '(defn f [x :- (U Bool Nil)] :- Any
+  '(defn g [x #%: (U Bool Nil)] -> Any x)
+  '(defn f [x #%: (U Bool Nil)] -> Any
      (if x 1 (g x))))
 
 (check-err "narrow negative: unguarded Float? into Math/floor still errors"
   '(define-target clj)
-  '(defn f [v :- Float?] :- Float
+  '(defn f [v #%: Float?] -> Float
      (Math/floor v)))
 
 ;; --- 2026-06-12 stdlib deepening ---------------------------------------------
 
 (check-err "stdlib: unguarded parse-long is Int? (clj)"
   '(define-target clj)
-  '(defn f [s :- String] :- Int
+  '(defn f [s #%: String] -> Int
      (parse-long s)))
 
 (check-ok "stdlib: if-let guard discharges parse-long's Nil"
   '(define-target clj)
-  '(defn f [s :- String] :- Int
+  '(defn f [s #%: String] -> Int
      (if-let [n (parse-long s)] n 0)))
 
 (check-ok "stdlib: element type flows through split + first"
   '(define-target clj)
   '(require clojure.string :as str)
-  '(defn f [s :- String] :- String
+  '(defn f [s #%: String] -> String
      (first (str/split s (#%regex ",")))))
 
 ;; index-of / last-index-of accept the optional 3-arg from-index (Int) form, as in
@@ -1405,17 +1385,17 @@
 (check-ok "stdlib: clojure.string/index-of accepts 2-arg and 3-arg from-index"
   '(define-target clj)
   '(require clojure.string :as str)
-  '(defn f2 [s :- String sep :- String] :- Int?
+  '(defn f2 [s #%: String sep #%: String] -> Int?
      (str/index-of s sep))
-  '(defn f3 [s :- String sep :- String start :- Int] :- Int?
+  '(defn f3 [s #%: String sep #%: String start #%: Int] -> Int?
      (str/index-of s sep start))
-  '(defn g3 [s :- String sep :- String start :- Int] :- Int?
+  '(defn g3 [s #%: String sep #%: String start #%: Int] -> Int?
      (str/last-index-of s sep start)))
 
 (check-ok "stdlib: comparisons accept the numeric tower"
   '(define-target clj)
-  '(def a :- Bool (> 2.5 1))
-  '(def b :- Bool (<= 1 2)))
+  '(def a #%: Bool (> 2.5 1))
+  '(def b #%: Bool (<= 1 2)))
 
 ;; --- 2026-06-12 qualified-call resolution (clj) -------------------------------
 
@@ -1427,7 +1407,7 @@
 (check-ok "qualified: required alias resolves"
   '(define-target clj)
   '(require babashka.fs :as fs)
-  '(def x :- Bool (fs/exists? "/tmp")))
+  '(def x #%: Bool (fs/exists? "/tmp")))
 
 (check-warns "qualified: catalog miss in known namespace notes did-you-mean"
   #rx"did you mean: fs/exists\\?"
@@ -1449,7 +1429,7 @@
 
 (check-ok "qualified: Java static prefixes are exempt"
   '(define-target clj)
-  '(def t :- Int (System/currentTimeMillis))
+  '(def t #%: Int (System/currentTimeMillis))
   '(def u (SomeUnknownClass/method 1)))
 
 (check-ok "qualified: nix target is untouched by the pass"
@@ -1461,65 +1441,65 @@
 ;; =============================================================================
 
 (check-ok "numeric: all-Int chain keeps Int"
-  '(def a :- Int (+ 1 (* 2 3))))
+  '(def a #%: Int (+ 1 (* 2 3))))
 
 (check-ok "numeric: mixed Int/Float produces Float"
-  '(def b :- Float (+ 1 2.5)))
+  '(def b #%: Float (+ 1 2.5)))
 
 (check-ok "numeric: Int result widens into a Float annotation"
-  '(def c :- Float (+ 1 2)))
+  '(def c #%: Float (+ 1 2)))
 
 (check-err/rx "numeric: Float result does NOT narrow into Int"
   #rx"expected Int, got Float"
-  '(def d :- Int (+ 1 2.5)))
+  '(def d #%: Int (+ 1 2.5)))
 
 (check-ok "numeric: inc accepts and preserves Float"
-  '(def e :- Float (inc 2.5)))
+  '(def e #%: Float (inc 2.5)))
 
 (check-ok "numeric: variadic max keeps Int when all-Int"
-  '(def f :- Int (max 1 2 3)))
+  '(def f #%: Int (max 1 2 3)))
 
 (check-ok "numeric: max goes Float on a mixed tower"
-  '(def g :- Float (max 1 2.5)))
+  '(def g #%: Float (max 1 2.5)))
 
 (check-err/rx "numeric: inc still rejects non-numbers pointedly"
   #rx"expected .*(Number|Int|Float).*, got String"
-  '(def h :- Int (inc "s")))
+  '(def h #%: Int (inc "s")))
 
 (check-ok "numeric: Any operand falls back to today's behavior"
-  '(defn k [x :- Any] :- Int (+ x 1)))
+  '(defn k [x #%: Any] -> Int (+ x 1)))
 
 (check-ok "numeric: Number operand degrades to Number, satisfies Float"
-  '(defn m [x :- Number] :- Float (+ x 1.0)))
+  '(defn m [x #%: Number] -> Float (+ x 1.0)))
 
 (check-ok "numeric: defn interior chains carry Int to the return"
-  '(defn n [a :- Int b :- Int] :- Int (+ (* a b) (- a b) (abs a))))
+  '(defn n [a #%: Int b #%: Int] -> Int (+ (* a b) (- a b) (abs a))))
 
 (check-err/rx "numeric: interior Float chain caught against Int return"
   #rx"got Float"
-  '(defn p [a :- Int] :- Int (* (+ a 0.5) 2)))
+  '(defn p [a #%: Int] -> Int (* (+ a 0.5) 2)))
 
 ;; --- dynamic vars: `binding` requires a ^:dynamic target ------------------
 ;; The runtime "Can't dynamically bind non-dynamic var" throw is lifted to a
 ;; compile error: only `(def ^:dynamic …)` vars may be rebound with `binding`.
 
 (check-ok "binding a ^:dynamic var is accepted"
-  '(def (#%meta :dynamic *x*) :- Int 0)
-  '(defn f [] :- Int (binding [*x* 5] *x*)))
+  '(def (#%meta :dynamic *x*) #%: Int 0)
+  '(defn f [] -> Int (binding [*x* 5] *x*)))
 
 (check-err/rx "binding a non-dynamic var is rejected, pointing at ^:dynamic"
   #rx"dynamic"
-  '(def *y* :- Int 0)
-  '(defn f [] :- Int (binding [*y* 5] *y*)))
+  '(def *y* #%: Int 0)
+  '(defn f [] -> Int (binding [*y* 5] *y*)))
 
 (check-err/rx "binding an undeclared var is rejected as non-dynamic"
   #rx"dynamic"
-  '(defn f [] :- Int (binding [*z* 5] 0)))
+  '(defn f [] -> Int (binding [*z* 5] 0)))
 
 (check-err/rx "binding a ^:dynamic Int var with a String mismatches"
   #rx"expected Int|got String"
-  '(def (#%meta :dynamic *n*) :- Int 0)
-  '(defn f [] :- Int (binding [*n* "oops"] *n*)))
+  '(def (#%meta :dynamic *n*) #%: Int 0)
+  '(defn f [] -> Int (binding [*n* "oops"] *n*)))
 
 ;; --- typed JVM-class interop (CLASS-TABLE receiver-typing) ----------------
 ;; FQCN constructors + receiver-typed methods/statics resolve against the JVM
@@ -1527,7 +1507,7 @@
 ;; arg-mismatch become compile errors instead of bailing to Any.
 
 (check-ok "fsync chain types end-to-end (FileOutputStream -> getChannel -> force)"
-  '(defn write-it [path :- String] :- Nil
+  '(defn write-it [path #%: String] -> Nil
      (let [fos (java.io.FileOutputStream. path true)]
        (do (.write fos (.getBytes "data"))
            (.flush fos)
@@ -1536,50 +1516,50 @@
 
 (check-err/rx "unknown method on a known JVM class is rejected"
   #rx"not a method"
-  '(defn f [path :- String] :- Nil
+  '(defn f [path #%: String] -> Nil
      (.totallyNotAMethod (java.io.FileOutputStream. path true))))
 
 (check-err/rx "wrong-receiver method (.force on FileOutputStream) is rejected"
   #rx"not a method"
-  '(defn f [path :- String] :- Nil
+  '(defn f [path #%: String] -> Nil
      (.force (java.io.FileOutputStream. path true) true)))
 
 (check-err/rx "JVM constructor arg-type mismatch is rejected"
   #rx"expected String|got Int"
-  '(defn f [] :- Nil (do (java.io.FileOutputStream. 42) nil)))
+  '(defn f [] -> Nil (do (java.io.FileOutputStream. 42) nil)))
 
 (check-err/rx "JVM method arg-type mismatch is rejected"
   #rx"expected Int|got String"
-  '(defn f [] :- Nil (.setSoTimeout (java.net.Socket.) "nope")))
+  '(defn f [] -> Nil (.setSoTimeout (java.net.Socket.) "nope")))
 
 (check-ok "qualified JVM instance method excludes receiver from declared arity"
   `(ns test.jvm-instance (:import ,(br 'java.net 'Socket)))
   `(declare-extern Socket/connect ,(br 'Any 'Int '-> 'Nil))
-  '(defn f [sock :- Socket addr :- Any timeout-ms :- Int] :- Nil
+  '(defn f [sock #%: Socket addr #%: Any timeout-ms #%: Int] -> Nil
      (Socket/connect sock addr timeout-ms)))
 
 (check-err/rx "qualified JVM instance method still rejects wrong Java arity"
   #rx"no overload accepts 3 argument"
   `(ns test.jvm-instance-wrong (:import ,(br 'java.net 'Socket)))
   `(declare-extern Socket/connect ,(br 'Any 'Int '-> 'Nil))
-  '(defn f [sock :- Socket addr :- Any timeout-ms :- Int] :- Nil
+  '(defn f [sock #%: Socket addr #%: Any timeout-ms #%: Int] -> Nil
      (Socket/connect sock addr timeout-ms timeout-ms)))
 
 (check-err/rx "declared unknown JVM static keeps all arguments in arity"
   #rx"expected 1 arg.*got 2"
   `(ns test.jvm-static (:import ,(br 'java.util.regex 'Pattern)))
   `(declare-extern Pattern/quote ,(br 'String '-> 'String))
-  '(def quoted :- String (Pattern/quote "x" "y")))
+  '(def quoted #%: String (Pattern/quote "x" "y")))
 
 ;; typed arrays: container sigs carry precise element types; the gap-listed
 ;; construction returns (Arr Any) which flows into them (covariant via Any).
 (check-ok "mTLS typed-array chain: getKeyManagers -> SSLContext.init"
-  '(defn setup [kmf :- javax.net.ssl.KeyManagerFactory
-                tmf :- javax.net.ssl.TrustManagerFactory
-                ctx :- javax.net.ssl.SSLContext] :- Nil
+  '(defn setup [kmf #%: javax.net.ssl.KeyManagerFactory
+                tmf #%: javax.net.ssl.TrustManagerFactory
+                ctx #%: javax.net.ssl.SSLContext] -> Nil
      (.init ctx (.getKeyManagers kmf) (.getTrustManagers tmf) nil)))
 
 (check-err/rx "wrong array element type to a typed container is rejected"
   #rx"Arr String|Arr Int"
-  '(defn f [s :- javax.net.ssl.SSLServerSocket a :- (Arr Int)] :- Nil
+  '(defn f [s #%: javax.net.ssl.SSLServerSocket a #%: (Arr Int)] -> Nil
      (.setEnabledProtocols s a)))

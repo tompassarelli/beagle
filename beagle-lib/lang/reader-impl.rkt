@@ -10,7 +10,8 @@
 ;; Contents of data literals are still read with the same reader, so
 ;; nesting works: `{:k [1 2 3]}` reads as `(#%map :k (#%brackets 1 2 3))`.
 
-(require racket/port)
+(require racket/port
+         (only-in beagle/private/tags ANN-MARKER))
 
 (define (read-regex-pattern port)
   (let loop ([acc '()])
@@ -507,10 +508,17 @@
 ;; Delimiters mirror the readtable's terminating chars + whitespace; `'` and `#`
 ;; are NON-terminating constituents (so a primed/`#`-bearing tail stays one
 ;; symbol, per the G6 primed-symbol rule) and are therefore NOT delimiters.
-(define (dot-token-delimiter? c)
+;; Token-terminating chars shared by the hand-rolled `.` and `:` token readers.
+;; `'` and `#` are NON-terminating constituents, so they are NOT delimiters.
+(define (base-token-delimiter? c)
   (or (eof-object? c)
       (char-whitespace? c)
       (memv c '(#\, #\( #\) #\[ #\] #\{ #\} #\" #\; #\~ #\^ #\` #\\))))
+
+;; `:` terminates a dot-token (`.foo:` → `.foo` + the annotation marker) but is
+;; NOT a delimiter inside a keyword token, so `::kw` / `:a/b` stay one symbol.
+(define (dot-token-delimiter? c)
+  (or (base-token-delimiter? c) (eqv? c #\:)))
 
 (define (dot-reader ch port src line col pos)
   ;; ch (the leading `.`) is already consumed by the readtable dispatch.
@@ -524,9 +532,65 @@
     (datum->syntax #f sym (vector src line col pos (string-length (symbol->string sym))))
     sym))
 
+;; `:` reader — ONE char serving two roles, split by the next character.
+;;
+;;   `:` + delimiter/whitespace/EOF → ANN-MARKER, the postfix type-annotation
+;;       marker: `x: Int` and `x : Int` both read as the FLAT datums
+;;       `x` `#%:` `Int`, mirroring the legacy `x :- Int` triple exactly, so
+;;       every index/arity computation in parse.rkt stays valid.
+;;   `:` + anything else            → today's keyword symbol, byte-identical
+;;       (`:foo`, `:foo/bar`, `::kw`, `:-`).
+;;
+;; Terminating (unlike `.`/`#`/`'`) so it also fires MID-token: `x:` splits into
+;; the symbol `x` and the marker. That is what makes the postfix form work, and
+;; what makes `~name: ~type` compose in a macro template — `~` already
+;; terminated the token before `:` fires.
+(define (colon-reader ch port src line col pos)
+  (cond
+    [(base-token-delimiter? (peek-char port))
+     (if src (datum->syntax #f ANN-MARKER (vector src line col pos 1)) ANN-MARKER)]
+    [else
+     (define text
+       (let loop ([acc '()])
+         (define c (peek-char port))
+         (if (base-token-delimiter? c)
+           (list->string (reverse acc))
+           (begin (read-char port) (loop (cons c acc))))))
+     (define sym (string->symbol (string-append ":" text)))
+     (if src
+       (datum->syntax #f sym (vector src line col pos (+ 1 (string-length text))))
+       sym)]))
+
+;; `<:` (the forall subtype-bound operator) is ONE symbol, but `:` terminates
+;; tokens, so the default reader would split it into `<` + the marker. Fires only
+;; at token start (non-terminating) and only glues a colon that ENDS the token,
+;; so `<`, `<=`, `<-` and every mid-token `<` read exactly as before.
+(define (lt-reader ch port src line col pos)
+  (define (colon-ends-token?)
+    (define la (peek-string 2 0 port))
+    (or (not (string? la)) (< (string-length la) 2)
+        (base-token-delimiter? (string-ref la 1))))
+  (define sym
+    (let loop ([acc (list #\<)])
+      (define c (peek-char port))
+      (cond
+        [(and (eqv? c #\:) (null? (cdr acc)) (colon-ends-token?))
+         (read-char port)
+         (loop (cons #\: acc))]
+        [(dot-token-delimiter? c) (string->symbol (list->string (reverse acc)))]
+        [else (read-char port) (loop (cons c acc))])))
+  (if src
+    (datum->syntax #f sym (vector src line col pos (string-length (symbol->string sym))))
+    sym))
+
 (define beagle-readtable
   (make-readtable #f
     #\^ 'terminating-macro meta-reader
+    #\< 'non-terminating-macro lt-reader
+    ;; MUST live in beagle-readtable itself, never a layer on top: bracket-,
+    ;; quasiquote-, unquote- and meta-readers re-parameterize to THIS table, so a
+    ;; layered entry silently vanishes inside every container and template.
+    #\: 'terminating-macro colon-reader
     #\[ 'terminating-macro bracket-reader
     #\] 'terminating-macro
                             (lambda (ch port src line col pos)
@@ -573,4 +637,5 @@
     (read-syntax src in)))
 
 (provide beagle-read beagle-read-syntax beagle-readtable
-         fn-shorthand->fn reading-fn-shorthand? unquote-reader)
+         fn-shorthand->fn reading-fn-shorthand? unquote-reader
+         ANN-MARKER)

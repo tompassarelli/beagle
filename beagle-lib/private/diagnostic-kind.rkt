@@ -55,7 +55,7 @@
 ;;   return-type        : function body's inferred return doesn't
 ;;                        match declared return type.
 ;;   def-type           : top-level def's value type doesn't match its
-;;                        inline `:-` annotation.
+;;                        postfix `:` annotation.
 ;;   let-binding        : let-bound value type doesn't match its
 ;;                        annotation.
 ;;   type-bound         : type parameter violates its bound.
@@ -159,12 +159,18 @@
 ;;                         received a value of the wrong shape (bad
 ;;                         parameter list, unknown mode/target,
 ;;                         non-symbol name). Type-error.
-;;   inline-type-annotation : author wrote `(def name : T value)` or the
-;;                         analogous defonce/defn shape. The canonical
-;;                         inline marker is `:-` (e.g. `(def name :- T
-;;                         value)`). Surface-divergence.
+;;   inline-type-annotation : the annotation marker is in the wrong place
+;;                         or the wrong shape — a dangling `:`, a keyword
+;;                         where `name: Type` belongs, or `:` used in
+;;                         return position (which is `-> Ret`).
+;;                         Surface-divergence.
+;;   legacy-annotation-marker : author wrote `:-`, the pre-postfix marker.
+;;                         Accepted during the dual-accept migration cut
+;;                         (warning only); the removal task flips
+;;                         legacy-annotation-marker-mode to 'error.
+;;                         Surface-divergence.
 ;;   claim-form-removed   : author wrote `(claim NAME TYPE)`. The claim
-;;                         form has been deleted entirely; inline `:-`
+;;                         form has been deleted entirely; postfix `:`
 ;;                         annotations on def/defonce/defn are the only
 ;;                         typed-binding surface. Surface-divergence.
 ;;   bare-nix-form       : author wrote a bare Nix-namespaced form
@@ -213,6 +219,7 @@
    'removed-form           'surface-divergence
    'unknown-form           'surface-divergence
    'inline-type-annotation 'surface-divergence
+   'legacy-annotation-marker 'surface-divergence
    'claim-form-removed     'surface-divergence
    'bare-nix-form          'surface-divergence
    'legacy-macro-form      'surface-divergence

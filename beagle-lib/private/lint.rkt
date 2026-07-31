@@ -82,12 +82,12 @@
 
 (define (lint-def f)
   (unless (or (def-form-type f) (hygiene-alias-def? f))
-    (warn "untyped def ~a (consider adding `: Type`)"
+    (warn "untyped def ~a (consider adding `NAME: Type`)"
           (def-form-name f))))
 
 (define (lint-defonce f)
   (unless (defonce-form-type f)
-    (warn "untyped defonce ~a (consider adding `: Type`)"
+    (warn "untyped defonce ~a (consider adding `NAME: Type`)"
           (defonce-form-name f))))
 
 (define (lint-defn f)
@@ -95,14 +95,14 @@
   (define params (defn-form-params f))
   (define ret (defn-form-return-type f))
   (unless ret
-    (warn "defn ~a has no return type annotation (consider adding `: ReturnType`)"
+    (warn "defn ~a has no return type annotation (consider adding `-> ReturnType`)"
           name))
   (define untyped-params
     (for/list ([p (in-list params)]
                #:when (and (param? p) (not (param-type p))))
       (param-name p)))
   (unless (null? untyped-params)
-    (warn "defn ~a has untyped parameter(s): ~a (consider adding `(name : Type)`)"
+    (warn "defn ~a has untyped parameter(s): ~a (consider adding `name: Type`)"
           name
           (string-join (map symbol->string untyped-params) ", "))))
 

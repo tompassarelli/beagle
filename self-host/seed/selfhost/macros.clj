@@ -10,6 +10,10 @@
 
 (def ^String SPLICE-MARKER "splice")
 
+(def ^String ANN-MARKER "#%:")
+
+(def ^String LEGACY-MARKER ":-")
+
 (def MAX-EXPANSION-DEPTH 64)
 
 (def MACRO-ERRORS (atom []))
@@ -163,17 +167,23 @@
   :else []))
 
 (defn collect-param-binders [form macro-params]
-  (let [items (unwrap-brackets form)]
-  (reduce (fn [acc item] (cond
-  (and (string? item) (not= item "&") (not (clojure.core/contains? (set macro-params) item))) (conj acc item)
-  (and (vector? item) (= (count item) 3) (string? (nth item 0)) (= (nth item 1) ":") (not (clojure.core/contains? (set macro-params) (nth item 0)))) (conj acc (nth item 0))
-  :else acc)) [] items)))
+  (let [items (unwrap-brackets form)
+   n (count items)
+   mp (set macro-params)]
+  (loop [i 0
+   acc []]
+  (cond
+  (>= i n) acc
+  (and (string? (nth items i)) (< (+ i 2) n) (or (= (nth items (+ i 1)) ANN-MARKER) (= (nth items (+ i 1)) LEGACY-MARKER))) (recur (+ i 3) (if (or (= (nth items i) "&") (clojure.core/contains? mp (nth items i))) acc (conj acc (nth items i))))
+  (and (string? (nth items i)) (not= (nth items i) "&") (not (clojure.core/contains? mp (nth items i)))) (recur (+ i 1) (conj acc (nth items i)))
+  (and (vector? (nth items i)) (= (count (nth items i)) 3) (string? (nth (nth items i) 0)) (or (= (nth (nth items i) 1) ANN-MARKER) (= (nth (nth items i) 1) LEGACY-MARKER)) (not (clojure.core/contains? mp (nth (nth items i) 0)))) (recur (+ i 1) (conj acc (nth (nth items i) 0)))
+  :else (recur (+ i 1) acc)))))
 
 (defn collect-let-binders [form macro-params]
   (let [items (unwrap-brackets form)]
   (reduce (fn [acc i] (if (and (= (mod i 2) 0) (< (+ i 1) (count items))) (let [item (nth items i)]
   (cond
-  (and (vector? item) (= (count item) 3) (string? (nth item 0)) (= (nth item 1) ":") (not (clojure.core/contains? (set macro-params) (nth item 0)))) (conj acc (nth item 0))
+  (and (vector? item) (= (count item) 3) (string? (nth item 0)) (or (= (nth item 1) ANN-MARKER) (= (nth item 1) LEGACY-MARKER)) (not (clojure.core/contains? (set macro-params) (nth item 0)))) (conj acc (nth item 0))
   (and (string? item) (not (clojure.core/contains? (set macro-params) item))) (conj acc item)
   :else acc)) acc)) [] (range (count items)))))
 

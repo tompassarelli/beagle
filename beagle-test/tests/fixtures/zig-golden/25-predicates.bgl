@@ -1,5 +1,5 @@
 (ns g)
-(defn signs [x :- Int] :- Int
+(defn signs [x: Int] -> Int
   (cond
     [(zero? x) 0]
     [(pos? x) 1]

@@ -11,4 +11,4 @@
 
 (defmacro with-v [val body] `(binding [p/*v* ~val] ~body))
 
-(defn u [] :- String (with-v "x" (p/rd)))
+(defn u [] -> String (with-v "x" (p/rd)))

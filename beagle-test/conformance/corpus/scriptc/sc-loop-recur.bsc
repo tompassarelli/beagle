@@ -3,7 +3,7 @@
 ;; native row: golden TS + 100% ScriptC static coverage + Node/native parity.
 (ns conformance.sc-loop-recur)
 
-(defn sum-to [(n :- Int)] :- Int
+(defn sum-to [(n: Int)] -> Int
   (loop [i 1
          acc 0]
     (if (< n i)

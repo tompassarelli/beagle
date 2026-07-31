@@ -4,7 +4,7 @@
 ;;
 ;; The clean view is literally your source (proving the anti-reification point
 ;; — nothing is stored). The `inferred` and `all` views take that same source
-;; and TEXT-INJECT `:- T` / `^T` annotations at precise positions recovered
+;; and TEXT-INJECT `: T` / `^T` annotations at precise positions recovered
 ;; from the src-table + the per-node inferred types captured during checking
 ;; (ast.rkt current-type-table). No type lives in the source; the view is a
 ;; pure function of the checked program. This is beagle's delaborator — the
@@ -107,11 +107,25 @@
   (define-values (start end) (form-bounds form-stx text))
   (substring text start end))
 
-;; inferred: inject `:- T` before each un-annotated, symbol-named let-binding
-;; value whose type was captured. Destructuring-pattern bindings are skipped
-;; (a single `:- Any` on a whole pattern is unhelpful). Offsets are relative
-;; to the form substring. Reports to stderr when some eligible bindings could
-;; not be annotated (no recorded position/type — e.g. literal/leaf values or
+;; The postfix marker glues to the binder NAME, whose srcloc is not recorded
+;; (src-tbl is keyed by the binding VALUE). Recover it from the text: walk back
+;; from the value offset over whitespace and require the binder's own spelling to
+;; end exactly there. Fails closed — a binder we can't locate is simply skipped
+;; (and counted in the note below) rather than injected at a guessed offset.
+(define (name-end-offset text value-abs nm)
+  (define s (symbol->string nm))
+  (define q
+    (let loop ([i value-abs])
+      (if (and (> i 0) (char-whitespace? (string-ref text (sub1 i)))) (loop (sub1 i)) i)))
+  (and (>= (- q (string-length s)) 0)
+       (string=? (substring text (- q (string-length s)) q) s)
+       q))
+
+;; inferred: inject `: T` after each un-annotated, symbol-named let binder whose
+;; type was captured. Destructuring-pattern bindings are skipped (a single
+;; `: Any` on a whole pattern is unhelpful). Offsets are relative to the form
+;; substring. Reports to stderr when some eligible bindings could not be
+;; annotated (no recorded position/type — e.g. literal/leaf values or
 ;; multi-arity bodies), so the gap is never silent.
 (define (annotate-inferred text form form-stx src-tbl ty-tbl)
   (define-values (base _end) (form-bounds form-stx text))
@@ -126,8 +140,9 @@
                 [loc (in-value (hash-ref src-tbl v #f))]
                 [ty (in-value (hash-ref ty-tbl v #f))]
                 [abs (in-value (loc-offset loc))]
-                #:when (and abs ty))
-      (cons (- abs base) (string-append ":- " (type->string ty) " "))))
+                [nend (in-value (and abs (name-end-offset text abs (let-binding-name b))))]
+                #:when (and nend ty))
+      (cons (- nend base) (string-append ": " (type->string ty)))))
   (when (< (length edits) (length candidates))
     (eprintf "note: annotated ~a of ~a let-binding(s); the rest have no recorded type/position (literal/leaf values, or a multi-arity body)\n"
              (length edits) (length candidates)))
@@ -177,7 +192,7 @@
     ;; promote: splice the rendered form back into the file in place. Only
     ;; the inferred level (which round-trips) may be written — `all` is a
     ;; non-reparseable debug view. Reversible: re-running clean (or hand-
-    ;; deleting the `:- T`) recovers the original; promoting is idempotent.
+    ;; deleting the `: T`) recovers the original; promoting is idempotent.
     [(not form) (error 'beagle-explain-type "--write needs a NAME (the definition to promote)")]
     [(not (string=? level "inferred"))
      (error 'beagle-explain-type "--write supports only --level inferred (got ~a)" level)]

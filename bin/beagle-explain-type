@@ -5,7 +5,7 @@
 #   beagle-explain-type FILE [NAME] [--level clean|inferred|all]
 #
 # clean    = the source as written (no types in the text)
-# inferred = source + `:- T` on un-annotated let-bindings (inferred on demand)
+# inferred = source + `: T` on un-annotated let-bindings (inferred on demand)
 # all      = source + `^T` on every typed interior node (pp.all)
 #
 # Types live nowhere in your source; this summons them as a view.

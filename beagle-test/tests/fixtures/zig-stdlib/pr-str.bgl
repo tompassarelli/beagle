@@ -1,13 +1,13 @@
 (ns zig-stdlib.pr-str)
 
-(defn dyn-string [value :- String] :- (Dyn String Int)
+(defn dyn-string [value: String] -> (Dyn String Int)
   value)
 
-(defn dyn-int [value :- Int] :- (Dyn String Int)
+(defn dyn-int [value: Int] -> (Dyn String Int)
   value)
 
-(defn main [] :- Nil
-  (let [record :- (Map Keyword (Dyn String Int))
+(defn main [] -> Nil
+  (let [record: (Map Keyword (Dyn String Int))
         {:name (dyn-string "fram")
          :version (dyn-int 7)}]
     (println (pr-str record))))

@@ -7,7 +7,7 @@
 
 (comment "target-neutral commentary is not a program form")
 
-(defn identity-int [(x :- Int)] :- Int
+(defn identity-int [(x: Int)] -> Int
   x)
 
 (println (identity-int 7))

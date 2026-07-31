@@ -2,32 +2,32 @@
 (ns zig-stdlib.atom-runtime)
 
 (defrecord Counter
-  [value :- Int
-   active :- Bool])
+  [value: Int
+   active: Bool])
 
 ;; A narrowed Dyn value remains owned by its enclosing union when it flows
 ;; through swap!'s preserved symbol arguments.
 (defrecord DynamicCell
-  [values :- (Map Int (Dyn String Int))])
+  [values: (Map Int (Dyn String Int))])
 
-(defn dynamic-swap! [cell :- (Atom DynamicCell) value :- (Dyn String Int)] :- DynamicCell
+(defn dynamic-swap! [cell: (Atom DynamicCell) value: (Dyn String Int)] -> DynamicCell
   (if (string? value)
     (swap! cell update :values assoc 1 value)
     (deref cell)))
 
-(defn add-delta [value :- Int delta :- Int] :- Int
+(defn add-delta [value: Int delta: Int] -> Int
   (+ value delta))
 
-(defn read-value [cell :- (Atom Counter)] :- Int
+(defn read-value [cell: (Atom Counter)] -> Int
   (:value (deref cell)))
 
-(defn exercise! [] :- Int
-  (let [cell :- (Atom Counter) (atom (->Counter 1 false))
-        alias :- (Atom Counter) cell
-        reset-value :- Counter (reset! alias (->Counter 5 false))
-        swap-value :- Counter (swap! cell update :value add-delta 2)
-        assoc-value :- Counter (swap! alias assoc :active true)
-        current :- Counter (deref cell)]
+(defn exercise! [] -> Int
+  (let [cell: (Atom Counter) (atom (->Counter 1 false))
+        alias: (Atom Counter) cell
+        reset-value: Counter (reset! alias (->Counter 5 false))
+        swap-value: Counter (swap! cell update :value add-delta 2)
+        assoc-value: Counter (swap! alias assoc :active true)
+        current: Counter (deref cell)]
     (if (:active current)
       (+ (:value reset-value)
          (:value swap-value)

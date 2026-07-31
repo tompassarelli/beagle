@@ -5,10 +5,10 @@
 The same source body, saved as `.bclj`, `.bjs`, and `.bnix`:
 
 ```clojure
-(defn even-doubles [xs :- (List Int)] :- (List Int)
+(defn even-doubles [xs: (List Int)] -> (List Int)
   (->> xs
        (filter even?)
-       (map (fn [n :- Int] :- Int (* n 2)))))
+       (map (fn [n: Int] -> Int (* n 2)))))
 ```
 
 Each target renders it idiomatically — not transliterated:
@@ -45,7 +45,7 @@ The Zig and Odin backends emit code that links. A three-line source
 
 ```clojure
 (ns g)
-(defn calc [a :- Int b :- Int c :- Int] :- Int
+(defn calc [a: Int b: Int c: Int] -> Int
   (+ (* a b) (- c a) (quot b 2) (rem c 3) (mod a 5)))
 ```
 
@@ -66,7 +66,7 @@ A record maps to a struct rather than a boxed map — `01-record.bgl`:
 
 ```clojure
 (ns g)
-(defrecord Point [x :- Int y :- Int])
+(defrecord Point [x: Int y: Int])
 ```
 
 ```zig

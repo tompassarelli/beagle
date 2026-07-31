@@ -1,12 +1,12 @@
 (ns zig-stdlib.predicates)
 
-(def DIGIT :- Regex (re-pattern "[0-9]"))
-(def VALUES :- (Vec String) ["x"])
+(def DIGIT: Regex (re-pattern "[0-9]"))
+(def VALUES: (Vec String) ["x"])
 
-(defn map-value? [record :- (Map Keyword String)] :- Bool
+(defn map-value? [record: (Map Keyword String)] -> Bool
   (map? record))
 
-(defn main [] :- Nil
+(defn main [] -> Nil
   (println
     (str
       (boolean (re-matches DIGIT "7")) ":"

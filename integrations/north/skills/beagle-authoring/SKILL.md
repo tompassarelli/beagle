@@ -139,10 +139,12 @@ if the surface looks different than you expect, `git log` it.
 
 - **Beagle is Clojure + types, nothing else.** Every divergence from Clojure
   must be load-bearing for the type system or a backend, or it gets removed.
-- **Surface lock:** typed Clojure with inline `:-` annotations only —
-  `(def x :- T v)`, `(defn f [p :- T ...] :- R body)`, `(defonce …)`,
-  `(defrecord N [field :- T …])`. Interiors are inferred. `:` (Rust-style) and
-  `(fact …)` are **hard-rejected**.
+- **Surface lock:** typed Clojure with inline postfix `NAME: TYPE` / `-> RET`
+  annotations only — `(def x: T v)`, `(defn f [p: T ...] -> R body)`,
+  `(defonce …)`, `(defrecord N [field: T …])`. Interiors are inferred. Always
+  write the canonical spelling; during the current dual-accept cut legacy `:-`
+  still parses with a warning, and only a `:`-marked RETURN is hard-rejected
+  (pointing at `-> RET`).
 - **Zero external users → hard removal.** When a form/keyword is wrong, REMOVE
   it (pointed error naming the replacement) — never deprecate or alias.
 - **Prefix where meaning diverges from Clojure:** `nix/assert`, `nix/with`,
@@ -190,7 +192,7 @@ derives from. Query it live with `beagle langs`.)
   `Tenant`, a `Request`, a node is. A typed `(defrecord …)` or a concrete
   `(Vec String)` / `(Map …)` / `[A -> B]` is the line where the checker catches a
   wrong value. `Any` is not that line.
-- **`Any` is a justified exception, never a default.** If you write `:- Any`, you
+- **`Any` is a justified exception, never a default.** If you write `: Any`, you
   must be able to say *why* this value is genuinely un-typeable here. "It was
   faster" / "the data's a bit dynamic" is not a why.
 - **The smell test:** if your `.bclj` is `Any`-heavy, you've gained nothing over

@@ -275,9 +275,9 @@
 
 (test-case "macro produces wrong-typed literal → rebucketed as macro-expansion-type-error"
   ;; (defmacro bad [] `"hello")
-  ;; (def y :- Int (bad))
+  ;; (def y: Int (bad))
   ;; bad expands to "hello" — parses fine but type-checks fail (inline
-  ;; `:-` annotation says Int, value is String). Inside macro-derived
+  ;; postfix annotation says Int, value is String). Inside macro-derived
   ;; form the rejection rebuckets to 'macro-expansion-type-error /
   ;; type-error. (Previously this test paired a `(claim y Int)` with
   ;; an untyped def; claim was removed under the Zero-users rule.)
@@ -288,7 +288,7 @@
       '(define-target clj)
       `(defmacro bad ,(br)
          (quasiquote "hello"))
-      '(def y :- Int (bad))))
+      '(def y #%: Int (bad))))
   (define e
     (with-handlers ([beagle-diagnostic? values])
       (type-check! prog)
@@ -317,7 +317,7 @@
   (define mk-call
     (datum->syntax #f '(mk) (list "t.bclj" 10 4 120 4)))
   (define def-stx
-    (datum->syntax #f (list 'def 'y (string->symbol ":-") 'Int mk-call)
+    (datum->syntax #f (list 'def 'y ANN-MARKER 'Int mk-call)
                    (list "t.bclj" 9 0 100 30)))
   (define prog
     (parse-program
@@ -424,7 +424,7 @@
   (define prog
     (parse-prog*
      '(ns t.app) '(define-mode strict) '(define-target clj)
-     (list 'def 'xs (string->symbol ":-") (list 'Vec 'Int) (br "a"))))
+     (list 'def 'xs ANN-MARKER (list 'Vec 'Int) (br "a"))))
   (define e
     (with-handlers ([beagle-diagnostic? values]) (type-check! prog) 'no-error-raised))
   (check-pred beagle-diagnostic? e)
@@ -453,7 +453,7 @@
   ;; VALUE position. The fix must report Int/String, not the unchanged key.
   (define tmp (make-temporary-file "fixplan-map-~a.bclj"))
   (call-with-output-file tmp
-    (lambda (o) (display "#lang beagle/clj\n(def m :- (Map Keyword Int) {:a \"b\"})\n" o))
+    (lambda (o) (display "#lang beagle/clj\n(def m: (Map Keyword Int) {:a \"b\"})\n" o))
     #:exists 'truncate/replace)
   (define prog (parse-program (read-beagle-syntax tmp) #:source-path tmp))
   (define e (with-handlers ([beagle-diagnostic? values]) (type-check! prog) 'no-error))

@@ -3,13 +3,13 @@
 ;; native row: golden TS + 100% ScriptC static coverage + Node/native parity.
 (ns conformance.sc-if-cond-do-let)
 
-(defn classify [(n :- Int)] :- String
+(defn classify [(n: Int)] -> String
   (cond
     (< n 0) "negative"
     (< n 1) "zero"
     :else "positive"))
 
-(defn clamped [(n :- Int)] :- Int
+(defn clamped [(n: Int)] -> Int
   (let [lo 0
         hi 10]
     (do

@@ -74,8 +74,8 @@
    :thread "@019fa49d-1276-71d6-a925-7b42ca81ff2a"
    :note "D8. The defn rejects, but the message is `unsupported boundary type
           #f` — it prints an internal absent-type value instead of naming the
-          missing `:-` return annotation. Delete when the diagnostic names
-          `:-`."}
+          missing `->` return annotation. Delete when the diagnostic names
+          `->`."}
 
   {:id "sc-untyped-def" :bucket :diag-unpointed :category :bug
    :thread "@019fa49d-1276-71d6-a925-7b42ca81ff2a"

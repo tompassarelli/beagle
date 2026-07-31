@@ -1,5 +1,5 @@
 (ns zig-rejections.non-exhaustive-union-match)
-(defrecord Circle [(radius :- Int)])
-(defrecord Square [(side :- Int)])
-(defn f [shape :- (U Circle Square)] :- Int
+(defrecord Circle [(radius: Int)])
+(defrecord Square [(side: Int)])
+(defn f [shape: (U Circle Square)] -> Int
   (match shape [(Circle r) r]))

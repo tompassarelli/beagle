@@ -141,9 +141,9 @@
 ;; Driven through the #lang loader so the reader handles the backtick/comma.
 (define HYG-EMIT-SRC
   (string-append
-   "(defn helper [x :- Int] :- Int (* x 100))\n"
+   "(defn helper [x: Int] -> Int (* x 100))\n"
    "(defmacro double [x] `(helper ,x))\n"
-   "(defn use [n :- Int] :- Int (double n))\n"))
+   "(defn use [n: Int] -> Int (double n))\n"))
 
 (define (emit-via-lang target ext)
   (define tmp (make-temporary-file (format "hyg-~a-~~a.~a" target ext)))

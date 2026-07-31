@@ -3,7 +3,7 @@
 (ns test.graph-mint-render-text-oracle)
 (define-mode strict)
 
-(def ^:dynamic *arity-check?* :- Bool true)
+(def ^:dynamic *arity-check?*: Bool true)
 
-(defn call-keyword [m :- Any] :- Any
+(defn call-keyword [m: Any] -> Any
   ((:k m)))

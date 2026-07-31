@@ -116,17 +116,17 @@
 (define (build-generated-success-fixtures!)
   (list
    (write-fixture! "gen-success.bclj"
-                    "#lang beagle/clj\n(ns gen.success)\n(defn add [x :- Int y :- Int] :- Int (+ x y))\n(def total :- Int (add 1 2))\n")
+                    "#lang beagle/clj\n(ns gen.success)\n(defn add [x: Int y: Int] -> Int (+ x y))\n(def total: Int (add 1 2))\n")
    (write-fixture! "gen-success.bjs"
-                    "#lang beagle/js\n(ns gen.success.js)\n(defn add [x :- Int y :- Int] :- Int (+ x y))\n")
+                    "#lang beagle/js\n(ns gen.success.js)\n(defn add [x: Int y: Int] -> Int (+ x y))\n")
    (write-fixture! "gen-success.bnix"
-                    "#lang beagle/nix\n(ns gen.success.nix)\n(def greeting :- String \"hi\")\n")
+                    "#lang beagle/nix\n(ns gen.success.nix)\n(def greeting: String \"hi\")\n")
    (write-fixture! "gen-success.bzig"
-                    "#lang beagle/zig\n(ns gen.success.zig)\n(defn add [x :- Int y :- Int] :- Int (+ x y))\n")
+                    "#lang beagle/zig\n(ns gen.success.zig)\n(defn add [x: Int y: Int] -> Int (+ x y))\n")
    ;; Pattern is deliberately outside the narrow JVM signature table. Its
    ;; declaration supplies the type at this explicit host boundary.
    (write-fixture! "gen-declared-jvm-static.bclj"
-                    "#lang beagle/clj\n(ns gen.declared-jvm-static)\n(declare-extern java.util.regex.Pattern/quote [String -> String])\n(def quoted :- String (java.util.regex.Pattern/quote \"x\"))\n")))
+                    "#lang beagle/clj\n(ns gen.declared-jvm-static)\n(declare-extern java.util.regex.Pattern/quote [String -> String])\n(def quoted: String (java.util.regex.Pattern/quote \"x\"))\n")))
 
 ;; Deliberately ill-typed / rejected source: a real check-time reject, not a
 ;; parse error, so the diagnostic exercises the same failure path certify
@@ -137,12 +137,12 @@
 (define (build-generated-failure-fixtures!)
   (list
    (write-fixture! "gen-fail.bclj"
-                    "#lang beagle/clj\n(ns gen.fail)\n(defn add [x :- Int y :- Int] :- Int (+ x y))\n(def bad :- Int (add \"nope\" 2))\n")
+                    "#lang beagle/clj\n(ns gen.fail)\n(defn add [x: Int y: Int] -> Int (+ x y))\n(def bad: Int (add \"nope\" 2))\n")
    ;; Pattern is deliberately outside the narrow JVM signature table.  A
    ;; declaration makes this host boundary explicit and typed; without it the
    ;; checker must reject the static instead of silently inferring Any.
    (write-fixture! "gen-undeclared-jvm-static.bclj"
-                    "#lang beagle/clj\n(ns gen.undeclared-jvm-static)\n(def quoted :- String (java.util.regex.Pattern/quote \"x\"))\n")
+                    "#lang beagle/clj\n(ns gen.undeclared-jvm-static)\n(def quoted: String (java.util.regex.Pattern/quote \"x\"))\n")
    (tmp-path "does-not-exist.bclj")))
 
 ;; ---------------------------------------------------------------------------
@@ -647,7 +647,7 @@
          "#lang beagle/clj\n"
          "(ns zig-refer.provider)\n"
          "(define-mode strict)\n"
-         "(defn twice [x :- Int] :- Int (* x 2))\n")))
+         "(defn twice [x: Int] -> Int (* x 2))\n")))
      (define consumer
        (write-fixture!
         "zig-refer-consumer.bclj"
@@ -656,7 +656,7 @@
          "(ns zig-refer.consumer\n"
          "  (:require [zig-refer.provider :refer [twice]]))\n"
          "(define-mode strict)\n"
-         "(defn answer [] :- Int (twice 21))\n")))
+         "(defn answer [] -> Int (twice 21))\n")))
      (define-values (status modules)
        (compile-source-set (list provider consumer)
                            #:root repo-root-str
@@ -687,9 +687,9 @@
          "(ns zig-alias.bridge\n"
          "  (:require [zig-alias.provider :as provider]))\n"
          "(define-mode strict)\n"
-         "(defrecord Result [accepted :- Bool version :- Int])\n"
-         "(defn inspect [value :- provider/StoreValue] :- Result\n"
-         "  (let [cell :- (Atom provider/StoreValue) (atom value)]\n"
+         "(defrecord Result [accepted: Bool version: Int])\n"
+         "(defn inspect [value: provider/StoreValue] -> Result\n"
+         "  (let [cell: (Atom provider/StoreValue) (atom value)]\n"
          "    (->Result (string? (deref cell)) 1)))\n")))
      (define consumer
        (write-fixture!
@@ -699,7 +699,7 @@
          "(ns zig-alias.consumer\n"
          "  (:require [zig-alias.bridge :as bridge]))\n"
          "(define-mode strict)\n"
-         "(defn main [] :- Nil\n"
+         "(defn main [] -> Nil\n"
          "  (let [result (bridge/inspect \"ready\")]\n"
          "    (println (if (and (bridge/result-accepted result)\n"
          "                      (= 1 (bridge/result-version result)))\n"
@@ -732,11 +732,11 @@
      (define left
        (write-fixture!
         "zig-refer-left.bclj"
-        "#lang beagle/clj\n(ns zig-refer.left)\n(define-mode strict)\n(defn choose [x :- Int] :- Int x)\n"))
+        "#lang beagle/clj\n(ns zig-refer.left)\n(define-mode strict)\n(defn choose [x: Int] -> Int x)\n"))
      (define right
        (write-fixture!
         "zig-refer-right.bclj"
-        "#lang beagle/clj\n(ns zig-refer.right)\n(define-mode strict)\n(defn choose [x :- Int] :- Int (+ x 1))\n"))
+        "#lang beagle/clj\n(ns zig-refer.right)\n(define-mode strict)\n(defn choose [x: Int] -> Int (+ x 1))\n"))
      (define consumer
        (write-fixture!
         "zig-refer-ambiguous.bclj"
@@ -746,7 +746,7 @@
          "  (:require [zig-refer.left :refer [choose]]\n"
          "            [zig-refer.right :refer [choose]]))\n"
          "(define-mode strict)\n"
-         "(defn answer [] :- Int (choose 1))\n")))
+         "(defn answer [] -> Int (choose 1))\n")))
      (define-values (status diagnostic)
        (compile-source-set (list left right consumer)
                            #:root repo-root-str
@@ -761,7 +761,7 @@
          (write-fixture!
           (format "zig-reserved-~a.bclj" namespace)
           (format
-           "#lang beagle/clj\n(ns ~a)\n(define-mode strict)\n(defn ok? [] :- Bool true)\n"
+           "#lang beagle/clj\n(ns ~a)\n(define-mode strict)\n(defn ok? [] -> Bool true)\n"
            namespace))))
      (define consumer
        (write-fixture!
@@ -774,7 +774,7 @@
          "            [Ctx :as c]\n"
          "            [const :as k]))\n"
          "(define-mode strict)\n"
-         "(defn all-ok? [] :- Bool (and (s/ok?) (r/ok?) (c/ok?) (k/ok?)))\n")))
+         "(defn all-ok? [] -> Bool (and (s/ok?) (r/ok?) (c/ok?) (k/ok?)))\n")))
      (define-values (status modules)
        (compile-source-set (append providers (list consumer))
                            #:root repo-root-str
@@ -816,10 +816,10 @@
      ;; paths; reusing a path mid-batch is out of contract by that same law.
      (define items
        (list (write-fixture! "later-item-1.bclj"
-                              "#lang beagle/clj\n(ns later.item1)\n(def x :- Int 1)\n")   ; ok
+                              "#lang beagle/clj\n(ns later.item1)\n(def x: Int 1)\n")   ; ok
              (tmp-path "does-not-exist-mid-batch.bclj")                                    ; fail (missing file)
              (write-fixture! "later-item-3.bclj"
-                              "#lang beagle/clj\n(ns later.item3)\n(def y :- Int 2)\n"))) ; ok — must still run
+                              "#lang beagle/clj\n(ns later.item3)\n(def y: Int 2)\n"))) ; ok — must still run
      (define results
        (for/list ([p (in-list items)])
          (call-with-values (lambda () (compile-source p #:root repo-root-str)) list)))

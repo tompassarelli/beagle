@@ -13,12 +13,13 @@
          json
          beagle/private/parse
          beagle/private/check
-         beagle/private/check-all)
+         beagle/private/check-all
+         (only-in beagle/lang/reader-impl beagle-readtable))
 
-;; Read top-level forms from a source string with bracket-tagging on, so
-;; `[clause]` reads as (#%brackets ...) exactly as the file reader produces.
+;; THE beagle readtable, not a bracket-tag approximation — a raw Racket read
+;; mis-tokenizes the postfix annotation marker (`x: Int` → the symbol `x:`).
 (define (read-forms str)
-  (parameterize ([read-square-bracket-with-tag '#%brackets])
+  (parameterize ([current-readtable beagle-readtable])
     (define in (open-input-string str))
     (let loop ()
       (define stx (read-syntax 'exhaustive-match-test in))
@@ -36,15 +37,15 @@
 (ns test.shapes)
 (define-mode strict)
 (define-target clj)
-(defrecord Circle [(r : Int)])
-(defrecord Square [(side : Int)])
-(defrecord Triangle [(base : Int) (height : Int)])
+(defrecord Circle [(r: Int)])
+(defrecord Square [(side: Int)])
+(defrecord Triangle [(base: Int) (height: Int)])
 (defunion Shape Circle Square Triangle)
 ")
 
 (define SRC-MISSING-ONE
   (string-append PRELUDE "
-(defn describe [(s : Shape)] :- Int
+(defn describe [(s: Shape)] -> Int
   (match s
     [(Circle r) r]
     [(Square side) side]))
@@ -52,14 +53,14 @@
 
 (define SRC-MISSING-MULTI
   (string-append PRELUDE "
-(defn describe [(s : Shape)] :- Int
+(defn describe [(s: Shape)] -> Int
   (match s
     [(Circle r) r]))
 "))
 
 (define SRC-EXHAUSTIVE
   (string-append PRELUDE "
-(defn describe [(s : Shape)] :- Int
+(defn describe [(s: Shape)] -> Int
   (match s
     [(Circle r) r]
     [(Square side) side]

@@ -48,13 +48,13 @@
   (string-append
    "#lang beagle/clj\n"
    "(def ^:dynamic *ctx* \"root\")\n"
-   "(defn area [w :- Int h :- Int] :- Int (* w h))\n"
-   "(defn label [xs :- (Vec String)] :- String\n"
+   "(defn area [w: Int h: Int] -> Int (* w h))\n"
+   "(defn label [xs: (Vec String)] -> String\n"
    "  (let [n (count xs)]\n"
    "    (str \"items:\" n)))\n"
    "(def cfg {:enable true :tags #{:a :b}})\n"
    "(def nested [[1 2] {:k [3 4]} #{:x}])\n"
-   "(defn pipe [x :- Int] :- Int (-> x (+ 1) (* 2)))\n"))
+   "(defn pipe [x: Int] -> Int (-> x (+ 1) (* 2)))\n"))
 
 (test-case "datum-IR round-trip is identity — the --build-edn soundness invariant"
   (define reader (reader-forms SRC))

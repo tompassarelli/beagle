@@ -83,7 +83,7 @@ syntax. Two amputations are deliberate, not oversights:
   what the source *looks like* — see "The Lisp/Clojure/EDN surface" below for
   why the authoring medium stays s-expressions.
 - **No claim to full Hindley-Milner.** Beagle infers interiors under explicit
-  top-level annotations (`:-`); it does not claim principal-type global
+  top-level annotations (postfix `NAME: TYPE` / `-> RET`); it does not claim principal-type global
   inference, unification-driven generalization, or any of the rest of HM's
   machinery. "ADTs and exhaustiveness" is a much smaller, honestly-scoped debt
   than "we implemented ML."
@@ -140,7 +140,8 @@ smuggling logic-programming semantics into the compiled language itself.
 
 - **Clojure as the surface.** Beagle is "Clojure plus types, nothing else." Any
   divergence from Clojure must be load-bearing for the type system or a backend,
-  or it gets removed. Inline `:-` annotations only; interiors inferred.
+  or it gets removed. Inline postfix `NAME: TYPE` / `-> RET` annotations only;
+  interiors inferred.
 - **Types that erase before emit** (closer to Typed Racket's stance than to a
   type system that drives codegen). Types check at compile time and vanish — the
   emitted Nix/JS/Clojure is idiomatic for its host, never a typed-runtime

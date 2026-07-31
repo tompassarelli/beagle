@@ -5,17 +5,17 @@
 (declare-extern los.rt/error-exit [String -> String])
 (declare-extern los.rt/epoch-seconds [-> Int])
 
-(defn parts [s :- String] :- (Vec String)
+(defn parts [s: String] -> (Vec String)
   (los.rt/split-on s ","))
 
-(defn pad [s :- String n :- Int] :- String
+(defn pad [s: String n: Int] -> String
   (los.rt/repeat-str s n))
 
-(defn now [] :- Int
+(defn now [] -> Int
   (los.rt/epoch-seconds))
 
 ;; error-exit in value position: noreturn satisfies the String branch
-(defn require-nonblank [s :- String] :- String
+(defn require-nonblank [s: String] -> String
   (if (str/blank? s)
     (los.rt/error-exit "blank input")
     s))

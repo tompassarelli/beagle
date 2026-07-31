@@ -70,6 +70,10 @@
              "license-metadata.rkt"       ; root license files and package metadata stay in sync
              "macro-hygiene.rkt"
              "parse.rkt"
+             "postfix-annotation-reader.rkt"  ; `:` marker in THE readtable; observed-table + reader-path parity
+             "postfix-annotation-parse.rkt"   ; every annotatable position + the four migration diagnostics
+             "postfix-annotation-printer.rkt" ; glue/no-break/round-trip across all four beagle-source writers
+             "postfix-annotation-macros.rkt"  ; dynamic typed-binding construction (template + `ann` constructor)
              "purity.rkt"               ; `!`-purity enforcement (Phase 6, dark by default)
              "quasi-quote-reader.rkt"
              "reader-conditionals.rkt"

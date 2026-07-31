@@ -156,9 +156,9 @@ rl_ok()   { REPAIR_LOOP+=("{\"name\":\"$1\",\"status\":\"ok\"}"); }
 rl_fail() { REPAIR_LOOP+=("{\"name\":\"$1\",\"status\":\"error\",\"message\":$(printf '%s' "$2" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')}"); STATUS="error"; REPAIR_STATUS="error"; }
 
 DOC_WORK="$(mktemp -d /tmp/beagle-doctor.XXXXXX)"
-printf '#lang beagle/clj\n(ns doctor.canary)\n(defn f [] :- Nil (str "x"\n' > "$DOC_WORK/bad.bclj"
-printf '#lang beagle/clj\n(ns doctor.canary)\n(defn f [] :- Nil nil)\n' > "$DOC_WORK/good.bclj"
-printf '#lang beagle/clj\n(ns doctor.canary)\n(defn g [n :- Int] :- Nil nil)\n(defn f [] :- Nil (g "boom"))\n' > "$DOC_WORK/type-bad.bclj"
+printf '#lang beagle/clj\n(ns doctor.canary)\n(defn f [] -> Nil (str "x"\n' > "$DOC_WORK/bad.bclj"
+printf '#lang beagle/clj\n(ns doctor.canary)\n(defn f [] -> Nil nil)\n' > "$DOC_WORK/good.bclj"
+printf '#lang beagle/clj\n(ns doctor.canary)\n(defn g [n: Int] -> Nil nil)\n(defn f [] -> Nil (g "boom"))\n' > "$DOC_WORK/type-bad.bclj"
 
 # syntax layer (canary pair)
 if "$BIN/beagle-syntax" "$DOC_WORK/bad.bclj" &>/dev/null; then

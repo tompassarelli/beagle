@@ -3,10 +3,10 @@
 ;; native row: golden TS + 100% ScriptC static coverage + Node/native parity.
 (ns conformance.sc-defn-arith)
 
-(defn add [(x :- Int) (y :- Int)] :- Int
+(defn add [(x: Int) (y: Int)] -> Int
   (+ x y))
 
-(defn scale [(x :- Int) (factor :- Int)] :- Int
+(defn scale [(x: Int) (factor: Int)] -> Int
   (* (add x 1) factor))
 
 (println (add 20 22))

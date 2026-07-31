@@ -19,7 +19,8 @@
 ;; provide. Deleting this file means re-doing the work when Cyclone lands.
 
 (require racket/list
-         racket/string)
+         racket/string
+         (only-in "tags.rkt" ANN-MARKER ann))
 
 (provide macro-eval
          macro-eval-body
@@ -74,9 +75,9 @@
                [e env])
       (cond
         [(null? rest) e]
-        ;; typed: (name : Type) value ...
+        ;; typed: (name: Type) value ...
         [(and (pair? (car rest)) (>= (length (car rest)) 3)
-              (eq? (cadr (car rest)) ':))
+              (memq (cadr (car rest)) (list ANN-MARKER ':-)))
          (define name (caar rest))
          (define val (macro-eval (cadr rest) e))
          (loop (cddr rest) (hash-set e name val))]
@@ -180,21 +181,19 @@
 
 (define (syntax-type s)
   (cond
-    [(and (pair? s) (>= (length s) 3) (eq? (cadr s) ':))
+    [(and (pair? s) (>= (length s) 3) (memq (cadr s) (list ANN-MARKER ':-)))
      (caddr s)]
-    [else (error 'syntax-type "expected (name : Type), got: ~v" s)]))
+    [else (error 'syntax-type "expected (name: Type), got: ~v" s)]))
 
-(define (make-param-form name type)
-  (list name ': type))
+(define (make-param-form name type) (ann name type))
 
-(define (make-field name type)
-  (list name ': type))
+(define (make-field name type) (ann name type))
 
 (define (make-defrecord name fields)
   (list 'defrecord name fields))
 
 (define (make-defn name params ret-type . body)
-  (append (list 'defn name params ': ret-type) body))
+  (append (list 'defn name params '-> ret-type) body))
 
 (define (make-get target field)
   (list 'get target field))

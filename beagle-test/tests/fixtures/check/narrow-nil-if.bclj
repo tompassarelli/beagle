@@ -1,4 +1,4 @@
 (declare-extern get-name [-> (U String Nil)])
-(defn safe-name [] :- String
+(defn safe-name [] -> String
   (let [x (get-name)]
     (if (nil? x) "default" (subs x 0))))

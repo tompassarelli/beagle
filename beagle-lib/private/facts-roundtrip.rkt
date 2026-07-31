@@ -383,6 +383,11 @@
       ;; the reader's `\` is a terminating char-literal macro (`v\'` → symbol `v` +
       ;; char `'`). So flag `'` only in leading position; elsewhere it needs nothing.
       (char=? (string-ref s 0) #\')
+      ;; `:` terminates a token now. `:foo`/`::x` still re-read bare (the colon
+      ;; reader consumes the whole tail), but a bare `:` or an interior colon
+      ;; (`a:b`) would split — pipe-quote those.
+      (and (regexp-match? #rx":" s)
+           (not (and (>= (string-length s) 2) (char=? (string-ref s 0) #\:))))
       (regexp-match? #rx"[][ \t\r\n(){}\"|;\\\\,`]" s)))
 (define (symbol->src d)
   (define s (symbol->string d))
@@ -391,6 +396,11 @@
     ;; carry \ or |), but OUTSIDE bars `\X` escapes any char (\\ -> \, a\ b -> "a b").
     ;; So backslash-escape each unsafe char per-char; only the empty symbol needs ||.
     [(= (string-length s) 0) "||"]
+    ;; `\:` reads as the CHAR literal, so a colon can only be quoted with bars.
+    [(and (symbol-needs-bars? s)
+          (regexp-match? #rx":" s)
+          (not (regexp-match? #rx"[|]" s)))
+     (string-append "|" s "|")]
     [(symbol-needs-bars? s)
      (apply string-append
             (for/list ([c (in-string s)])
@@ -404,6 +414,23 @@
 (define %map      (string->symbol "#%map"))
 (define %set      (string->symbol "#%set"))
 (define %regex    (string->symbol "#%regex"))
+(define %ann      (string->symbol "#%:"))
+
+;; A `NAME: TYPE` triple prints as ONE atomic token run — colon glued to the
+;; name, exactly one space after, never broken across lines. Grouping the three
+;; flat datums into a unit is what makes both properties fall out of the
+;; generic joiner/breaker below.
+(struct ann-unit (name type) #:transparent)
+
+(define (group-anns elems)
+  (let loop ([es elems] [acc '()])
+    (cond
+      [(null? es) (reverse acc)]
+      [(and (symbol? (car es)) (not (eq? (car es) %ann))
+            (pair? (cdr es)) (eq? (cadr es) %ann)
+            (pair? (cddr es)))
+       (loop (cdddr es) (cons (ann-unit (car es) (caddr es)) acc))]
+      [else (loop (cdr es) (cons (car es) acc))])))
 (define %meta     (string->symbol "#%meta"))
 ;; #-reader markers whose text is glued to a single operand (G8/G10/G11). Same
 ;; interned symbols the reader mints in reader-impl.rkt.
@@ -446,9 +473,13 @@
 (define (datum->src d)
   (cond
     [(null? d) "()"]
-    [(and (pair? d) (eq? (car d) %brackets)) (format "[~a]" (string-join (map datum->src (cdr d)) " "))]
-    [(and (pair? d) (eq? (car d) %map))      (format "{~a}" (string-join (map datum->src (cdr d)) " "))]
-    [(and (pair? d) (eq? (car d) %set))      (format "#{~a}" (string-join (map datum->src (cdr d)) " "))]
+    ;; `name: Type` — glued colon, one space, never split (see group-anns).
+    [(ann-unit? d) (format "~a: ~a" (datum->src (ann-unit-name d)) (datum->src (ann-unit-type d)))]
+    ;; A marker with no name to glue to (`[: Int]`) still round-trips as `:`.
+    [(eq? d %ann) ":"]
+    [(and (pair? d) (eq? (car d) %brackets)) (format "[~a]" (string-join (map datum->src (group-anns (cdr d))) " "))]
+    [(and (pair? d) (eq? (car d) %map))      (format "{~a}" (string-join (map datum->src (group-anns (cdr d))) " "))]
+    [(and (pair? d) (eq? (car d) %set))      (format "#{~a}" (string-join (map datum->src (group-anns (cdr d))) " "))]
     [(and (pair? d) (eq? (car d) %regex) (pair? (cdr d)) (string? (cadr d))) (format "#\"~a\"" (cadr d))]
     ;; `^m form` — `^` glued to the meta datum, one space, then the target form.
     ;; Handles type hints (^String), flags (^:dynamic), maps (^{:private true}),
@@ -466,9 +497,9 @@
     [(pair? d)
      (let-values ([(elems tail) (split-improper d)])
        (if (null? tail)
-           (format "(~a)" (string-join (map datum->src elems) " "))
-           (format "(~a . ~a)" (string-join (map datum->src elems) " ") (datum->src tail))))]
-    [(vector? d) (format "[~a]" (string-join (map datum->src (vector->list d)) " "))]
+           (format "(~a)" (string-join (map datum->src (group-anns elems)) " "))
+           (format "(~a . ~a)" (string-join (map datum->src (group-anns elems)) " ") (datum->src tail))))]
+    [(vector? d) (format "[~a]" (string-join (map datum->src (group-anns (vector->list d))) " "))]
     ;; edn-string, NOT `~s`: Racket's write escapes control chars with Racket-only
     ;; sequences (ESC → `\e`, BEL → `\a`, …) that Clojure's reader REJECTS
     ;; ("Unsupported escape character: \e"). edn-string emits the Clojure/EDN-valid
@@ -501,34 +532,39 @@
 
 (define (pp-seq-parts d)        ; -> (values open close elems) or (values #f #f #f)
   (cond
-    [(and (pair? d) (eq? (car d) %brackets)) (values "[" "]" (cdr d))]
-    [(and (pair? d) (eq? (car d) %map))      (values "{" "}" (cdr d))]
-    [(and (pair? d) (eq? (car d) %set))      (values "#{" "}" (cdr d))]
+    [(ann-unit? d)                           (values #f #f #f)]   ; atomic: never broken
+    [(and (pair? d) (eq? (car d) %brackets)) (values "[" "]" (group-anns (cdr d)))]
+    [(and (pair? d) (eq? (car d) %map))      (values "{" "}" (group-anns (cdr d)))]
+    [(and (pair? d) (eq? (car d) %set))      (values "#{" "}" (group-anns (cdr d)))]
     [(and (pair? d) (eq? (car d) %regex))    (values #f #f #f)]   ; never break a regex
     [(rcond-form? d)        (values "#?(" ")" (cdr d))]           ; #?(…): breakable, tail spliced
     [(rcond-splice-form? d) (values "#?@(" ")" (cdr d))]          ; #?@(…): breakable
     [(hash-prefix d)                         (values #f #f #f)]   ; #_ / #js / ## : glued in datum->pretty
     [(or (meta-form? d) (prefix-macro d))    (values #f #f #f)]   ; reader macros: glued in datum->pretty, never broken generically
     [(pair? d) (let-values ([(elems tail) (split-improper d)])
-                 (if (null? tail) (values "(" ")" elems) (values #f #f #f)))] ; not dotted pairs
-    [(vector? d) (values "[" "]" (vector->list d))]
+                 (if (null? tail) (values "(" ")" (group-anns elems)) (values #f #f #f)))] ; not dotted pairs
+    [(vector? d) (values "[" "]" (group-anns (vector->list d)))]
     [else (values #f #f #f)]))
 
 (define BODY-INDENT 2)
 (define DASH (string->symbol ":-"))
+(define ARROW '->)
 
 ;; How many post-head elements stay on the opening line (the "signature") before
 ;; the body breaks onto BODY-INDENT-indented lines. Keeps defn/let/if heads intact
 ;; so output is idiomatic AND a body edit stays local to the body lines.
 (define (head-keep head after)
   (define na (length after))
-  (define (dash-at? i) (and (> na i) (eq? (list-ref after i) DASH)))
+  ;; Return marker only: a binding annotation is already ONE ann-unit element,
+  ;; so the `else` arms below keep it on the signature line without extra slots.
+  (define (dash-at? i)
+    (and (> na i) (let ([e (list-ref after i)]) (or (eq? e DASH) (eq? e ARROW)))))
   (cond
-    [(memq head '(defn defn-))                  ; name + params [+ :- ret]
+    [(memq head '(defn defn-))                  ; name + params [+ -> ret]
      (cond [(< na 2) na] [(dash-at? 2) 4] [else 2])]
     [(memq head '(def defonce))                 ; name [+ :- type]; value breaks
      (cond [(< na 1) na] [(dash-at? 1) 3] [else 1])]
-    [(eq? head 'fn)                             ; [name] params [+ :- ret]
+    [(eq? head 'fn)                             ; [name] params [+ -> ret]
      (let* ([named? (and (pair? after) (symbol? (car after)))]
             [base (if named? 2 1)])
        (if (dash-at? base) (+ base 2) base))]

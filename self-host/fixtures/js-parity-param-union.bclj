@@ -2,8 +2,8 @@
 (ns selfhost.fixtures.js-parity-param-union)
 
 (defunion (Evt T E)
-  (Hit [(value : T)])
-  (Miss [(reason : E)]))
+  (Hit [(value: T)])
+  (Miss [(reason: E)]))
 
 (def hit (->Hit 7))
 (def miss (->Miss "nope"))

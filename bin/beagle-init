@@ -77,7 +77,7 @@ if [[ "$SCAFFOLD_PROJECT" == true && ! -f "src/main.$EXT" ]]; then
 #lang $BEAGLE_LANG
 (ns main)
 
-(defn greeting [] :- String "hello from beagle")
+(defn greeting [] -> String "hello from beagle")
 SRCEOF
     echo "  created src/main.$EXT"
 fi

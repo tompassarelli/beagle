@@ -1,2 +1,2 @@
 (defscalar Percentage Int :where (>= 0) (<= 100))
-(def pct :- Percentage (->Percentage 50))
+(def pct: Percentage (->Percentage 50))

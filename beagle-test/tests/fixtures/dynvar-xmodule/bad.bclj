@@ -4,5 +4,5 @@
 ;; lookup (G-A) only admits vars that are actually ^:dynamic in their module.
 (require prov :as p)
 
-(defn b [] :- Int
+(defn b [] -> Int
   (binding [p/plain 2] p/plain))

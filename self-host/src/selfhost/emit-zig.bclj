@@ -17,56 +17,56 @@
 ;; --- module state -------------------------------------------------------------
 ;; emit-expr! is reached from helpers defined before it via this indirection
 ;; (forward refs are rejected); mirrors emit-nix.bclj / emit-js.bclj.
-(def emit-expr-ref :- Any (atom nil))
+(def emit-expr-ref: Any (atom nil))
 
 ;; program scope, set once per emit-program!: record name -> field vector,
 ;; top-level def name -> annotation, top-level defn name -> form.
-(def records-ref :- Any (atom {}))
-(def defs-ref :- Any (atom {}))
-(def fns-ref :- Any (atom {}))
+(def records-ref: Any (atom {}))
+(def defs-ref: Any (atom {}))
+(def fns-ref: Any (atom {}))
 
 ;; local scope, rebound per defn: binding name -> annotation.
-(def env-ref :- Any (atom {}))
+(def env-ref: Any (atom {}))
 
 ;; --- pointed rejection ---------------------------------------------------------
 ;; String return so it can stand in expression position, like the oracle's
 ;; (unsupported ...) which never returns.
-(defn unsupported! [what :- String] :- String
+(defn unsupported! [what: String] -> String
   (throw (ex-info (str "not yet supported by zig backend (self-host slice 1): " what) {})))
 
-(defn emit-expr* [e :- Any] :- String
-  (let [f :- [Any -> String] (deref emit-expr-ref)] (f e)))
+(defn emit-expr* [e: Any] -> String
+  (let [f: [Any -> String] (deref emit-expr-ref)] (f e)))
 
 ;; ast-json encodes an absent optional slot as JSON false.
-(defn absent? [x :- Any] :- Bool (or (nil? x) (false? x)))
+(defn absent? [x: Any] -> Bool (or (nil? x) (false? x)))
 
 ;; --- identifiers (emit-zig.rkt ident / fn-ident) -------------------------------
 
-(def IDENT-BAD-CHARS :- String "?!*+<>=/")
-(def FN-IDENT-BAD-CHARS :- String "*+<>=/")
+(def IDENT-BAD-CHARS: String "?!*+<>=/")
+(def FN-IDENT-BAD-CHARS: String "*+<>=/")
 
-(defn has-any-char? [s :- String bad :- String] :- Bool
+(defn has-any-char? [s: String bad: String] -> Bool
   (loop [i 0]
     (if (>= i (count s))
       false
       (if (str/includes? bad (subs s i (+ i 1))) true (recur (+ i 1))))))
 
-(defn drop-chars [s :- String bad :- String] :- String
-  (loop [i 0 acc :- String ""]
+(defn drop-chars [s: String bad: String] -> String
+  (loop [i 0 acc: String ""]
     (if (>= i (count s))
       acc
       (let [c (subs s i (+ i 1))]
         (recur (+ i 1) (if (str/includes? bad c) acc (str acc c)))))))
 
 ;; locals / params / fields: kebab -> snake.
-(defn ident [s :- String] :- String
+(defn ident [s: String] -> String
   (if (has-any-char? s IDENT-BAD-CHARS)
     (unsupported! (str "identifier " s " (zig names can't carry ?!*+<>=/)"))
     (str/replace s "-" "_")))
 
 ;; racket string-split drops empty parts, so "a--b" and "-a" collapse the same way.
-(defn split-dash [s :- String] :- (Vec String)
-  (loop [i 0 start 0 acc :- (Vec String) []]
+(defn split-dash [s: String] -> (Vec String)
+  (loop [i 0 start 0 acc: (Vec String) []]
     (cond
       (>= i (count s))
       (let [seg (subs s start i)] (if (= 0 (count seg)) acc (conj acc seg)))
@@ -75,12 +75,12 @@
         (recur (+ i 1) (+ i 1) (if (= 0 (count seg)) acc (conj acc seg))))
       :else (recur (+ i 1) start acc))))
 
-(defn capitalize-first [p :- String] :- String
+(defn capitalize-first [p: String] -> String
   (if (= 0 (count p)) p (str (str/upper-case (subs p 0 1)) (subs p 1))))
 
 ;; function names: kebab -> camelCase, ?! dropped; `=` takes zig's escaped
 ;; identifier spelling instead.
-(defn fn-ident [s :- String] :- String
+(defn fn-ident [s: String] -> String
   (if (str/includes? s "=")
     (str "@\"" (str/replace (str/replace s "\\" "\\\\") "\"" "\\\"") "\"")
     (let [clean (drop-chars s "?!")]
@@ -93,14 +93,14 @@
 
 ;; --- literals -------------------------------------------------------------------
 
-(def HEX-DIGITS :- String "0123456789abcdef")
+(def HEX-DIGITS: String "0123456789abcdef")
 
-(defn hex2 [code :- Int] :- String
+(defn hex2 [code: Int] -> String
   (str (subs HEX-DIGITS (quot code 16) (+ (quot code 16) 1))
        (subs HEX-DIGITS (mod code 16) (+ (mod code 16) 1))))
 
-(defn zig-escape-char [c :- String] :- String
-  (let [cs :- Any c
+(defn zig-escape-char [c: String] -> String
+  (let [cs: Any c
         code (int (first cs))]
     (cond
       (= c "\"") "\\\""
@@ -111,13 +111,13 @@
       (or (< code 32) (= code 127)) (str "\\x" (hex2 code))
       :else c)))
 
-(defn zig-string-literal [s :- String] :- String
-  (loop [i 0 acc :- (Vec String) ["\""]]
+(defn zig-string-literal [s: String] -> String
+  (loop [i 0 acc: (Vec String) ["\""]]
     (if (>= i (count s))
       (str/join "" (conj acc "\""))
       (recur (+ i 1) (conj acc (zig-escape-char (subs s i (+ i 1))))))))
 
-(defn emit-float [v :- Any] :- String
+(defn emit-float [v: Any] -> String
   (let [s (str v)]
     (if (or (str/includes? s ".") (str/includes? s "E") (str/includes? s "e"))
       s
@@ -125,11 +125,11 @@
 
 ;; --- records ----------------------------------------------------------------------
 
-(defn record-fields [name :- String] :- Any (get (deref records-ref) name))
+(defn record-fields [name: String] -> Any (get (deref records-ref) name))
 
-(defn record? [name :- String] :- Bool (some? (record-fields name)))
+(defn record? [name: String] -> Bool (some? (record-fields name)))
 
-(defn field-ann [rec :- String field :- String] :- Any
+(defn field-ann [rec: String field: String] -> Any
   (let [fields (record-fields rec)]
     (loop [i 0]
       (if (>= i (count fields))
@@ -143,7 +143,7 @@
 ;; out of reach: no accepted program can need them.
 
 ;; rejection-message spelling only — never an emitted type.
-(defn type-name-of [t :- Any] :- String
+(defn type-name-of [t: Any] -> String
   (if (absent? t)
     "?"
     (let [kind (get t "kind")]
@@ -153,12 +153,12 @@
         (= kind "union") "U"
         :else (str kind)))))
 
-(defn type->zig [t :- Any] :- String
+(defn type->zig [t: Any] -> String
   (if (absent? t)
     (unsupported! "missing type annotation (the zig backend needs explicit :- types at boundaries)")
     (let [kind (get t "kind")]
       (if (= kind "prim")
-        (let [n :- String (get t "name")]
+        (let [n: String (get t "name")]
           (cond
             (= n "Int") "i64"
             (= n "Float") "f64"
@@ -178,11 +178,11 @@
 ;; access to the declared field type, a constructor to its record. Anything else
 ;; has no derivable type, so its consumers reject rather than guess.
 
-(defn static-type [e :- Any] :- Any
+(defn static-type [e: Any] -> Any
   (let [node (get e "node")]
     (cond
       (= node "ref")
-      (let [n :- String (get e "name")
+      (let [n: String (get e "name")
             local (get (deref env-ref) n)]
         (if (some? local) local (get (deref defs-ref) n)))
       (= node "kw-access")
@@ -193,7 +193,7 @@
       (= node "call")
       (let [f (get e "fn")]
         (if (= (get f "node") "ref")
-          (let [n :- String (get f "name")]
+          (let [n: String (get f "name")]
             (cond
               (and (str/starts-with? n "->") (record? (subs n 2)))
               {"kind" "prim" "name" (subs n 2)}
@@ -205,7 +205,7 @@
 
 ;; --- operators (emit-zig.rkt VARIADIC-OPS / BINARY-OPS) ---------------------------
 
-(defn variadic-op [name :- String] :- Any
+(defn variadic-op [name: String] -> Any
   (cond
     (= name "+") "+"
     (= name "*") "*"
@@ -216,7 +216,7 @@
     (= name "bit-xor") "^"
     :else nil))
 
-(defn binary-op [name :- String] :- Any
+(defn binary-op [name: String] -> Any
   (cond
     (= name "<") "<"
     (= name ">") ">"
@@ -224,12 +224,12 @@
     (= name ">=") ">="
     :else nil))
 
-(defn emit-args [args :- Any] :- (Vec String)
-  (mapv (fn [a :- Any] :- String (emit-expr* a)) args))
+(defn emit-args [args: Any] -> (Vec String)
+  (mapv (fn [a: Any] -> String (emit-expr* a)) args))
 
 ;; --- constructors ------------------------------------------------------------------
 
-(defn emit-ctor [rec :- String args :- Any] :- String
+(defn emit-ctor [rec: String args: Any] -> String
   (let [fields (record-fields rec)]
     (if (nil? fields)
       (unsupported! (str "constructor for unknown record " rec))
@@ -237,7 +237,7 @@
         (unsupported! (str "constructor arity — ->" rec " expects " (str (count fields)) " fields"))
         (str (ident rec) "{ "
              (str/join ", "
-               (loop [i 0 acc :- (Vec String) []]
+               (loop [i 0 acc: (Vec String) []]
                  (if (>= i (count fields))
                    acc
                    (recur (+ i 1)
@@ -247,12 +247,12 @@
 
 ;; --- calls -------------------------------------------------------------------------
 
-(defn emit-call [e :- Any] :- String
+(defn emit-call [e: Any] -> String
   (let [f (get e "fn")
         args (vec (get e "args"))]
     (if (not (= (get f "node") "ref"))
       (unsupported! "higher-order call (fn position must be a name in v1)")
-      (let [name :- String (get f "name")
+      (let [name: String (get f "name")
             vop (variadic-op name)
             bop (binary-op name)]
         (cond
@@ -304,7 +304,7 @@
 
 ;; --- expressions ---------------------------------------------------------------------
 
-(defn emit-kw-access [e :- Any] :- String
+(defn emit-kw-access [e: Any] -> String
   (if (not (absent? (get e "default")))
     (unsupported! "kw-access with default (use records + explicit branches)")
     (let [target (get e "target")
@@ -316,7 +316,7 @@
           (unsupported! (str "record " (str (get t "name")) " has no field " field))
           (str (emit-expr* target) "." (ident field)))))))
 
-(defn emit-expr! [e :- Any] :- String
+(defn emit-expr! [e: Any] -> String
   (let [node (get e "node")]
     (cond
       (= node "literal")
@@ -329,7 +329,7 @@
           :else (unsupported! (str "literal of kind " (str kind)))))
 
       (= node "ref")
-      (let [n :- String (get e "name")]
+      (let [n: String (get e "name")]
         (cond
           (= n "true") "true"
           (= n "false") "false"
@@ -342,7 +342,7 @@
 
 ;; --- referenced names (emit-zig.rkt refs-of, for the unused-param discards) ---------
 
-(defn refs-of [e :- Any acc :- (Vec String)] :- (Vec String)
+(defn refs-of [e: Any acc: (Vec String)] -> (Vec String)
   (let [node (get e "node")]
     (cond
       (= node "ref") (conj acc (get e "name"))
@@ -355,23 +355,23 @@
 
 ;; --- top-level forms -----------------------------------------------------------------
 
-(defn emit-record [f :- Any] :- String
+(defn emit-record [f: Any] -> String
   (let [fields (vec (get f "fields"))]
     (str "pub const " (ident (get f "name")) " = struct {\n"
          (str/join "\n"
-           (mapv (fn [p :- Any] :- String
+           (mapv (fn [p: Any] -> String
                    (str "    " (ident (get p "name")) ": " (type->zig (get p "ann")) ","))
                  fields))
          "\n};")))
 
-(defn emit-def [f :- Any] :- String
+(defn emit-def [f: Any] -> String
   (if (absent? (get f "ann"))
     (unsupported! "untyped def (zig backend needs (def name :- Type value))")
     (str "pub const " (ident (get f "name")) ": " (type->zig (get f "ann"))
          " = " (emit-expr! (get f "value")) ";")))
 
-(defn emit-defn [f :- Any] :- String
-  (let [name :- String (get f "name")
+(defn emit-defn [f: Any] -> String
+  (let [name: String (get f "name")
         params (vec (get f "params"))
         ret (get f "ret")]
     (cond
@@ -385,22 +385,22 @@
         (doseq [p params]
           (if (= (get p "type") "param") nil (unsupported! "destructuring parameter")))
         (reset! env-ref
-          (loop [i 0 acc :- Any {}]
+          (loop [i 0 acc: Any {}]
             (if (>= i (count params))
               acc
               (recur (+ i 1) (assoc acc (get (nth params i) "name") (get (nth params i) "ann"))))))
         (let [body (vec (get f "body"))
               sig (str/join ", "
-                    (mapv (fn [p :- Any] :- String
+                    (mapv (fn [p: Any] -> String
                             (str (ident (get p "name")) ": " (type->zig (get p "ann"))))
                           params))
               emitted-ret (type->zig ret)
-              used (loop [i 0 acc :- (Vec String) []]
+              used (loop [i 0 acc: (Vec String) []]
                      (if (>= i (count body)) acc (recur (+ i 1) (refs-of (nth body i) acc))))
-              discards (loop [i 0 acc :- (Vec String) []]
+              discards (loop [i 0 acc: (Vec String) []]
                          (if (>= i (count params))
                            acc
-                           (let [pn :- String (get (nth params i) "name")]
+                           (let [pn: String (get (nth params i) "name")]
                              (recur (+ i 1)
                                     (if (contains? (set used) pn)
                                       acc
@@ -413,7 +413,7 @@
                  "    return " (emit-expr! (nth body 0)) ";"
                  "\n}")))))))
 
-(defn emit-top-form [f :- Any] :- String
+(defn emit-top-form [f: Any] -> String
   (let [node (get f "node")]
     (cond
       (= node "record") (emit-record f)
@@ -423,14 +423,14 @@
 
 ;; --- program -----------------------------------------------------------------------
 
-(defn emit-program! [prog :- Any] :- String
+(defn emit-program! [prog: Any] -> String
   (reset! emit-expr-ref emit-expr!)
   (reset! env-ref {})
   (let [forms (vec (get prog "forms"))
         requires (vec (get prog "requires"))
         externs (vec (get prog "externs"))]
     (reset! records-ref
-      (loop [i 0 acc :- Any {}]
+      (loop [i 0 acc: Any {}]
         (if (>= i (count forms))
           acc
           (let [f (nth forms i)]
@@ -439,7 +439,7 @@
                      (assoc acc (get f "name") (vec (get f "fields")))
                      acc))))))
     (reset! defs-ref
-      (loop [i 0 acc :- Any {}]
+      (loop [i 0 acc: Any {}]
         (if (>= i (count forms))
           acc
           (let [f (nth forms i)]
@@ -448,7 +448,7 @@
                      (assoc acc (get f "name") (get f "ann"))
                      acc))))))
     (reset! fns-ref
-      (loop [i 0 acc :- Any {}]
+      (loop [i 0 acc: Any {}]
         (if (>= i (count forms))
           acc
           (let [f (nth forms i)]
@@ -462,8 +462,8 @@
       (> (count externs) 0)
       (unsupported! "declare-extern — the zig runtime prelude surface is not in this slice")
       :else
-      (let [decls (mapv (fn [f :- Any] :- String (emit-top-form f))
-                        (filterv (fn [f :- Any] :- Bool (map? f)) forms))]
+      (let [decls (mapv (fn [f: Any] -> String (emit-top-form f))
+                        (filterv (fn [f: Any] -> Bool (map? f)) forms))]
         (str "// generated by beagle (zig backend) — do not edit\n"
              "const std = @import(\"std\");\n"
              "const rt = @import(\"beagle_rt.zig\");\n"
@@ -473,17 +473,17 @@
 
 ;; --- module self-tests ------------------------------------------------------------
 
-(def passes :- Any (atom []))
+(def passes: Any (atom []))
 
-(def failures :- Any (atom []))
+(def failures: Any (atom []))
 
-(defn expect! [label :- String result :- Bool] :- Nil
+(defn expect! [label: String result: Bool] -> Nil
   (if result
     (do (swap! passes conj true) nil)
     (do (swap! failures conj label) nil))
   nil)
 
-(defn run-tests! [] :- Int
+(defn run-tests! [] -> Int
   (reset! emit-expr-ref emit-expr!)
   (reset! records-ref {})
   (reset! defs-ref {})

@@ -296,7 +296,7 @@
       (compile-zig-string
        (string-append
         "(ns zig.process-env)\n"
-        "(defn main [] :- Nil\n"
+        "(defn main [] -> Nil\n"
         "  (let [run-exit (zig/process-run [\"sh\" \"-c\" \"test x$BEAGLE_CHILD_ENV = xinherited\"] nil)\n"
         "        captured (zig/process-capture [\"sh\" \"-c\" \"printf %s $BEAGLE_CHILD_ENV\"] nil)]\n"
         "    (println (str run-exit \":\" (zig/process-result-stdout captured) \":\" (zig/process-result-exit captured)))))\n")))
@@ -312,7 +312,7 @@
       (compile-zig-string
        (string-append
         "(ns zig.process-exit-equality)\n"
-        "(defn main [] :- Nil\n"
+        "(defn main [] -> Nil\n"
         "  (let [result (zig/process-capture [\"sh\" \"-c\" \"exit 0\"] nil)]\n"
         "    (println (= (zig/process-result-exit result) 0))))\n")))
     (check-equal? (zig-build-exe-and-run emitted) "true\n")))
@@ -321,7 +321,7 @@
   (test-case "zig/exit propagates the exact native status"
     (define emitted
       (compile-zig-forms
-       '(defn main [] :- Nil (zig/exit 23))))
+       '(defn main [] -> Nil (zig/exit 23))))
     (check-equal?
      (zig-build-exe-and-run emitted #:exit-code 23)
      "")))
@@ -330,7 +330,7 @@
   (test-case "zig/temp-dir installs process context independently"
     (define emitted
       (compile-zig-forms
-       '(defn main [] :- Nil
+       '(defn main [] -> Nil
           (let [temporary (zig/temp-dir)]
             (zig/remove-tree temporary)))))
     (check-equal? (zig-build-exe-and-run emitted) "")))
@@ -450,7 +450,7 @@ ZIG
 (test-case "ordinary portable conj allocates through the hidden Zig context"
   (define zig-src
     (compile-zig-string
-     "(ns g)\n(defn append-value [xs :- (Vec Int) x :- Int] :- (Vec Int) (conj xs x))"))
+     "(ns g)\n(defn append-value [xs: (Vec Int) x: Int] -> (Vec Int) (conj xs x))"))
   (check-true (string-contains? zig-src "rt.conj(__ctx, xs, x)"))
   (when ZIG
     (check-true
@@ -472,7 +472,7 @@ ZIG
 (test-case "ordinary portable vector assoc is persistent and can grow at count"
   (define zig-src
     (compile-zig-string
-     "(ns g)\n(defn replace-value [xs :- (Vec Int) i :- Int x :- Int] :- (Vec Int) (assoc xs i x))"))
+     "(ns g)\n(defn replace-value [xs: (Vec Int) i: Int x: Int] -> (Vec Int) (assoc xs i x))"))
   (check-true (string-contains? zig-src "rt.assoc(__ctx, xs, i, x)"))
   (when ZIG
     (check-true
@@ -501,9 +501,9 @@ ZIG
       (compile-zig-string
        (string-append
         "(ns g)\n"
-        "(def INPUT :- (Vec Int) [1 2])\n"
-        "(defn invalid-assoc [xs :- (Vec Int)] :- (Vec Int) (assoc xs 3 9))\n"
-        "(defn main [] :- Nil (println (count (invalid-assoc INPUT))))\n")))
+        "(def INPUT: (Vec Int) [1 2])\n"
+        "(defn invalid-assoc [xs: (Vec Int)] -> (Vec Int) (assoc xs 3 9))\n"
+        "(defn main [] -> Nil (println (count (invalid-assoc INPUT))))\n")))
     (define failure (zig-build-exe-and-run zig-src #:exit-code 134))
     (check-true (string-contains? failure "vector assoc index out of bounds"))))
 
@@ -574,10 +574,10 @@ ZIG
 
 (for ([case (in-list
              (list
-              (cons "def" '((def value :- Any 1)))
-              (cons "parameter" '((defn f [value :- Any] :- Int 1)))
-              (cons "return" '((defn f [] :- Any 1)))
-              (cons "record field" '((defrecord Box [value :- Any])))
+              (cons "def" '((def value #%: Any 1)))
+              (cons "parameter" '((defn f [value #%: Any] -> Int 1)))
+              (cons "return" '((defn f [] -> Any 1)))
+              (cons "record field" '((defrecord Box [value #%: Any])))
               (cons "nested extern"
                     (list `(declare-extern app.rt/read
                              ,(br 'String '-> '(Map Keyword Any)))))))])
@@ -674,8 +674,8 @@ ZIG
      (map (lambda (datum) (datum->syntax #f datum))
           '((define-target zig)
             (ns regex-contract-shape)
-            (def optional :- Regex (re-pattern "^(a)?b$"))
-            (defn match-it [s :- String] :- (U (HVec String String?) Nil)
+            (def optional #%: Regex (re-pattern "^(a)?b$"))
+            (defn match-it [s #%: String] -> (U (HVec String String?) Nil)
               (re-matches optional s))))))
   (type-check! prog)
   (define optional-def
@@ -695,15 +695,15 @@ ZIG
      (map (lambda (datum) (datum->syntax #f datum))
           '((define-target clj)
             (ns regex-contract-any)
-            (def legacy-pattern :- Any (re-pattern "^[a-z]+$"))
-            (defn match-it [s :- String] :- Any
+            (def legacy-pattern #%: Any (re-pattern "^[a-z]+$"))
+            (defn match-it [s #%: String] -> Any
               (re-matches legacy-pattern s))))))
   (check-not-exn (lambda () (type-check! prog))))
 
 (test-case "zig regex checker admits a dynamic pattern with explicit match shape"
   (check-zig-forms
    '(ns regex-contract-dynamic)
-   '(defn make-it [s :- String] :- (Regex String) (re-pattern s))))
+   '(defn make-it [s #%: String] -> (Regex String) (re-pattern s))))
 
 (test-case "zig regex checker rejects unsupported pattern features"
   (check-exn
@@ -711,7 +711,7 @@ ZIG
    (lambda ()
      (check-zig-forms
       '(ns regex-contract-feature)
-      '(def value :- Regex (re-pattern "(?=a)a"))))))
+      '(def value #%: Regex (re-pattern "(?=a)a"))))))
 
 ;; --- semantic contract 3: closed dynamic values -----------------------------
 
@@ -786,13 +786,13 @@ ZIG
 (for ([case (in-list
              (list
               (cons "empty"
-                    '((defn bad [value :- (Dyn)] :- Int 0)))
+                    '((defn bad [value #%: (Dyn)] -> Int 0)))
               (cons "nested Any"
-                    '((defn bad [value :- (Dyn String (Vec Any))] :- Int 0)))
+                    '((defn bad [value #%: (Dyn String (Vec Any))] -> Int 0)))
               (cons "duplicate alternative"
-                    '((defn bad [value :- (Dyn String String)] :- Int 0)))
+                    '((defn bad [value #%: (Dyn String String)] -> Int 0)))
               (cons "use without narrowing"
-                    '((defn bad [value :- (Dyn String Int)] :- Int
+                    '((defn bad [value #%: (Dyn String Int)] -> Int
                         (count value))))))])
   (test-case (format "closed dynamic checker rejects ~a" (car case))
     (check-exn dynamic-contract-rejection?
@@ -803,21 +803,21 @@ ZIG
    #rx"expected return \\(Dyn String Int\\), got Bool"
    (lambda ()
      (check-zig-forms
-      '(defn bad [value :- Bool] :- (Dyn String Int) value)))))
+      '(defn bad [value #%: Bool] -> (Dyn String Int) value)))))
 
 (test-case "closed dynamic checker validates local annotations"
   (check-exn
    dynamic-contract-rejection?
    (lambda ()
      (check-zig-forms
-      '(defn bad [] :- Int
-         (let [value :- (Dyn String Any) "x"] 0))))))
+      '(defn bad [] -> Int
+         (let [value #%: (Dyn String Any) "x"] 0))))))
 
 (test-case "closed dynamic lowering discovers local-only contracts"
   (define out
     (compile-zig-forms
-     '(defn local-dynamic [value :- String] :- String
-        (let [closed :- (Dyn String Int) value]
+     '(defn local-dynamic [value #%: String] -> String
+        (let [closed #%: (Dyn String Int) value]
           (if (string? closed) closed "")))))
   (check-true (regexp-match? #rx"pub const Dyn0 = union" out))
   (check-true (regexp-match? #rx"const closed = Dyn0\\{ \\.string = value \\}" out))
@@ -830,7 +830,7 @@ ZIG
      (string-append
       "(ns dynamic-extern)\n"
       "(declare-extern app.rt/tag [(Dyn String Int) -> Int])\n"
-      "(defn call-tag [value :- String] :- Int (app.rt/tag value))")))
+      "(defn call-tag [value: String] -> Int (app.rt/tag value))")))
   (check-true (regexp-match? #rx"pub const Dyn0 = union" out))
   (check-true
    (regexp-match?
@@ -843,8 +843,8 @@ ZIG
      (map (lambda (datum) (datum->syntax #f datum))
           '((define-target zig)
             (ns dynamic-contract-shape)
-            (defn identity [value :- (Dyn String Int Bool)]
-              :- (Dyn String Int Bool)
+            (defn identity [value #%: (Dyn String Int Bool)]
+              -> (Dyn String Int Bool)
               value)))))
   (type-check! prog)
   (define identity-form
@@ -942,7 +942,7 @@ ZIG
    collection-contract-rejection?
    (lambda ()
      (check-zig-forms
-      '(defn bad [values :- (Map Keyword Int)] :- Keyword
+      '(defn bad [values #%: (Map Keyword Int)] -> Keyword
          (first (keys values)))))))
 
 (test-case "collection checker accepts order-killing consumers and pins target bytes"
@@ -1005,8 +1005,8 @@ ZIG
    collection-contract-rejection?
    (lambda ()
      (check-zig-forms
-      `(defn bad [] :- Int
-         (let ,(br 'values ':- '(Vec Int) (br 1 "wrong"))
+      `(defn bad [] -> Int
+         (let ,(br 'values ANN-MARKER '(Vec Int) (br 1 "wrong"))
            (count values)))))))
 
 (test-case "collection checker records value semantics, order, and layout"
@@ -1015,9 +1015,9 @@ ZIG
      (map (lambda (datum) (datum->syntax #f datum))
           `((define-target zig)
             (ns collection-contract-shape)
-            (defn lookup ,(br 'values ':- '(Map (Vec Int) String))
-              :- Bool
-              (let ,(br 'needle ':- '(Vec Int) (br 1))
+            (defn lookup ,(br 'values ANN-MARKER '(Map (Vec Int) String))
+              -> Bool
+              (let ,(br 'needle ANN-MARKER '(Vec Int) (br 1))
                 (contains? values needle)))))))
   (type-check! prog)
   (define lookup-form
@@ -1137,9 +1137,9 @@ ZIG
    allocation-contract-rejection?
    (lambda ()
      (check-zig-forms
-      '(defn bad [ctx :- Ctx xs :- (Vec Int)] :- (Vec Int)
+      '(defn bad [ctx #%: Ctx xs #%: (Vec Int)] -> (Vec Int)
          :raises IOError
-         (mapv (fn [x :- Int] :- Int x) xs))))))
+         (mapv (fn [x #%: Int] -> Int x) xs))))))
 
 (test-case "allocation checker records region and failure on boundaries and expressions"
   (define prog
@@ -1169,15 +1169,15 @@ ZIG
                 'caller))
 
 (test-case "zig allocator ABI propagates through local calls and leaves pure siblings alone"
-  (define xs-param (br 'xs ':- '(Vec Int)))
+  (define xs-param (br 'xs ANN-MARKER '(Vec Int)))
   (define mapper
-    `(fn ,(br 'x ':- 'Int) :- Int (inc x)))
+    `(fn ,(br 'x ANN-MARKER 'Int) -> Int (inc x)))
   (define out
     (compile-zig-forms
-     `(defn leaf ,xs-param :- (Vec Int) (mapv ,mapper xs))
-     `(defn middle ,xs-param :- (Vec Int) (leaf xs))
-     `(defn top ,xs-param :- (Vec Int) (middle xs))
-     `(defn pure ,(br 'x ':- 'Int) :- Int (inc x))))
+     `(defn leaf ,xs-param -> (Vec Int) (mapv ,mapper xs))
+     `(defn middle ,xs-param -> (Vec Int) (leaf xs))
+     `(defn top ,xs-param -> (Vec Int) (middle xs))
+     `(defn pure ,(br 'x ANN-MARKER 'Int) -> Int (inc x))))
   (for ([name (in-list '("leaf" "middle" "top"))])
     (check-regexp-match
      (regexp (format "pub fn ~a\\(__ctx: \\*rt\\.Ctx" name))
@@ -1190,8 +1190,8 @@ ZIG
 (test-case "zig runtime-valued Vec uses caller storage and propagates fixed-buffer OOM"
   (define out
     (compile-zig-forms
-     `(defn pair ,(br 'left ':- 'String 'right ':- 'String)
-        :- (Vec String)
+     `(defn pair ,(br 'left ANN-MARKER 'String 'right ANN-MARKER 'String)
+        -> (Vec String)
         :raises AllocationError
         ,(br 'left 'right))))
   (check-regexp-match
@@ -1233,8 +1233,8 @@ ZIG
 (test-case "zig static top-level Set borrows storage without an allocator"
   (define out
     (compile-zig-forms
-     `(def names :- (Set Keyword) ,(st ':alpha ':beta))
-     '(defn size [] :- Int (count names))))
+     `(def names #%: (Set Keyword) ,(st ':alpha ':beta))
+     '(defn size [] -> Int (count names))))
   (check-regexp-match
    #rx"ValueSet\\(rt\\.Keyword\\)\\.fromStatic"
    out)
@@ -1249,7 +1249,7 @@ ZIG
             (regexp-match? #rx"Map/Set literals" (exn-message e))))
      (lambda ()
        (check-zig-forms
-        `(defn bad ,(br) :- ,return-type
+        `(defn bad ,(br) -> ,return-type
            :raises AllocationError
            ,literal))))))
 
@@ -1258,10 +1258,10 @@ ZIG
     (compile-zig-string
      (string-append
       "(ns allocator.aliases (:require [clojure.string :as str] [babashka.fs :as fs]))\n"
-      "(defn lower [s :- String] :- String (str/lower-case s))\n"
-      "(defn fix [s :- String] :- String (str/replace s \"a\" \"b\"))\n"
-      "(defn lines [s :- String] :- (Vec String) (str/split-lines s))\n"
-      "(defn under [a :- String b :- String] :- String (fs/path a b))\n")))
+      "(defn lower [s: String] -> String (str/lower-case s))\n"
+      "(defn fix [s: String] -> String (str/replace s \"a\" \"b\"))\n"
+      "(defn lines [s: String] -> (Vec String) (str/split-lines s))\n"
+      "(defn under [a: String b: String] -> String (fs/path a b))\n")))
   (for ([name (in-list '("lower" "fix" "lines" "under"))])
     (check-regexp-match
      (regexp (format "pub fn ~a\\(__ctx: \\*rt\\.Ctx" name))
@@ -1276,9 +1276,9 @@ ZIG
     (compile-zig-string
      (string-append
       "(ns zig.function-names)\n"
-      "(defn store-value=? [a :- Int b :- Int] :- Bool (= a b))\n"
-      "(defn store-value= [a :- Int b :- Int] :- Bool false)\n"
-      "(defn main [] :- Nil\n"
+      "(defn store-value=? [a: Int b: Int] -> Bool (= a b))\n"
+      "(defn store-value= [a: Int b: Int] -> Bool false)\n"
+      "(defn main [] -> Nil\n"
       "  (do (println (store-value=? 1 1))\n"
       "      (println (store-value= 1 1))))\n")))
   (check-regexp-match #rx"pub fn @\"store-value=\\?\"" out)
@@ -1294,8 +1294,8 @@ ZIG
   (define stable "printable λ🙂 \"quoted\" \\ slash\n\t\r")
   (define out
     (compile-zig-forms
-     `(def controls :- String ,controls)
-     `(def stable :- String ,stable)))
+     `(def controls #%: String ,controls)
+     `(def stable #%: String ,stable)))
   (check-true
    (string-contains?
     out
@@ -1309,14 +1309,14 @@ ZIG
 
 (test-case "zig allocating main owns one local arena while pure main stays direct"
   (define pure
-    (compile-zig-forms '(defn main [] :- Nil nil)))
+    (compile-zig-forms '(defn main [] -> Nil nil)))
   (check-regexp-match #rx"pub fn main\\(\\) void" pure)
   (check-false (regexp-match? #rx"__beagle_main|ArenaAllocator" pure))
   (define allocating
     (compile-zig-forms
      '(define-mode strict)
-     '(defn store-roundtrip?! [] :- Nil (println "ok"))
-     '(defn main [] :- Nil (store-roundtrip?!))))
+     '(defn store-roundtrip?! [] -> Nil (println "ok"))
+     '(defn main [] -> Nil (store-roundtrip?!))))
   (check-regexp-match
    #rx"pub fn __beagle_main\\(__ctx: \\*rt\\.Ctx\\) void"
    allocating)
@@ -1331,17 +1331,17 @@ ZIG
   (check-false (regexp-match? #rx"cliAlloc|cli_arena_state" runtime)))
 
 (test-case "zig non-optional unions use deterministic tagged storage"
-  (define value-param (br 'value ':- '(U String Int)))
-  (define nullable-param (br 'value ':- '(U String Int Nil)))
+  (define value-param (br 'value ANN-MARKER '(U String Int)))
+  (define nullable-param (br 'value ANN-MARKER '(U String Int Nil)))
   (define out
     (compile-zig-forms
-     `(defn number-or-zero ,value-param :- Int
+     `(defn number-or-zero ,value-param -> Int
         (if (integer? value) value 0))
-     `(defn is-missing? ,nullable-param :- Bool
+     `(defn is-missing? ,nullable-param -> Bool
         (nil? value))
-     `(defn widen ,value-param :- (U String Int Bool)
+     `(defn widen ,value-param -> (U String Int Bool)
         value)
-     `(defn wrap ,value-param :- (Map Keyword (U String Int))
+     `(defn wrap ,value-param -> (Map Keyword (U String Int))
         ,(mp ':value 'value))))
   (check-regexp-match #rx"pub const Union0 = union\\(enum\\)" out)
   (check-regexp-match #rx"rt\\.widen_union\\(Union2, value\\)" out)
@@ -1389,22 +1389,22 @@ ZIG
 (define union-match-src
   (string-append
    "(ns zig.union-match)\n"
-   "(defrecord Circle [(radius :- Int)])\n"
-   "(defrecord Square [(side :- Int)])\n"
-   "(defn describe [shape :- (U Circle Square Int)] :- String\n"
+   "(defrecord Circle [(radius: Int)])\n"
+   "(defrecord Square [(side: Int)])\n"
+   "(defn describe [shape: (U Circle Square Int)] -> String\n"
    "  (match shape\n"
    "    [(Circle r) (str \"circle:\" r)]\n"
    "    [(Square s) (str \"square:\" s)]\n"
    "    [_ \"scalar\"]))\n"
-   "(defn tag-of [shape :- (U Circle Square Int)] :- String\n"
+   "(defn tag-of [shape: (U Circle Square Int)] -> String\n"
    "  (match shape\n"
    "    [(Circle ignored) \"circle\"]\n"
    "    [other (describe other)]))\n"
-   "(defn measure [shape :- (U Circle Square)] :- Int\n"
+   "(defn measure [shape: (U Circle Square)] -> Int\n"
    "  (match shape\n"
    "    [(Circle r) (* r 2)]\n"
    "    [(Square s) (* s s)]))\n"
-   "(defn main [] :- Nil\n"
+   "(defn main [] -> Nil\n"
    "  (println (str (describe (->Circle 3)) \":\"\n"
    "                (describe (->Square 4)) \":\"\n"
    "                (describe 7) \":\"\n"
@@ -1540,10 +1540,10 @@ ZIG
     (list
      '(define-target clj)
      '(ns ownership-contract-rejection)
-     `(defrecord World ,(br 'name ':- 'String))
+     `(defrecord World ,(br 'name ANN-MARKER 'String))
      `(defn world-tick
-        ,(br 'ctx ':- 'Ctx 'world ':- 'World)
-        :- World
+        ,(br 'ctx ANN-MARKER 'Ctx 'world ANN-MARKER 'World)
+        -> World
         world)))
   (check-exn
    ownership-contract-rejection?
@@ -1577,9 +1577,9 @@ ZIG
     (type-check! prog)
     (emit-program prog))
   (define params
-    (br 'missing ':- 'Bool
-        'mismatch ':- 'Bool
-        'path ':- 'String))
+    (br 'missing ANN-MARKER 'Bool
+        'mismatch ANN-MARKER 'Bool
+        'path ANN-MARKER 'String))
   (define body
     `(cond
        missing
@@ -1591,16 +1591,16 @@ ZIG
   (define baseline
     (compile-clj-forms
      '(ns semantic-contract.carrier-diff)
-     `(defn classify ,params :- String ,body)))
+     `(defn classify ,params -> String ,body)))
   (define carried
     (compile-clj-forms
      '(ns semantic-contract.carrier-diff)
      `(defunion :throwable RewriteError
         (RewriteFailure
-         ,(br 'message ':- 'String
-              'path ':- 'String
-              'refusal ':- 'Bool)))
-     `(defn classify ,params :- String :raises RewriteError ,body)))
+         ,(br 'message ANN-MARKER 'String
+              'path ANN-MARKER 'String
+              'refusal ANN-MARKER 'Bool)))
+     `(defn classify ,params -> String :raises RewriteError ,body)))
   (check-equal?
    carried
    (string-replace
@@ -1866,16 +1866,16 @@ ZIG
      '(ns semantic-contract.namespaced-error)
      '(defunion :throwable RewriteCrashError
         (RewriteCrash
-         [message :- String
-          path :- String
-          doctor-refusal :- Bool]))
-     `(defn classify-ns [path :- String] :- String
+         [message #%: String
+          path #%: String
+          doctor-refusal #%: Bool]))
+     `(defn classify-ns [path #%: String] -> String
         :raises RewriteCrashError
         (throw
          (ex-info
           "refusal"
           ,(mp ':path 'path ':fram/doctor-refusal 'true))))
-     '(defn render-ns [path :- String] :- String
+     '(defn render-ns [path #%: String] -> String
         (rescue
          (classify-ns path)
          err
@@ -1981,12 +1981,12 @@ ZIG
      (check-zig-forms
       '(defunion :throwable RewriteCrashError
          (RewriteCrash
-          [message :- String
-           path :- String
-           doctor-refusal :- Bool]))
+          [message #%: String
+           path #%: String
+           doctor-refusal #%: Bool]))
       `(defn inconsistent
-         [namespaced :- Bool path :- String]
-         :- String
+         [namespaced #%: Bool path #%: String]
+         -> String
          :raises RewriteCrashError
          (if namespaced
              (throw
@@ -2004,8 +2004,8 @@ ZIG
    (lambda ()
      (check-zig-forms
       '(defunion :throwable RewriteError
-         (RewriteFailure [message :- String path :- String refusal :- Bool]))
-      `(defn bad [path :- String] :- String
+         (RewriteFailure [message #%: String path #%: String refusal #%: Bool]))
+      `(defn bad [path #%: String] -> String
          (throw (ex-info "missing" ,(mp ':path 'path ':refusal 'true))))))))
 
 (test-case "typed error checker rejects a wrong payload type"
@@ -2014,8 +2014,8 @@ ZIG
    (lambda ()
      (check-zig-forms
       '(defunion :throwable RewriteError
-         (RewriteFailure [message :- String path :- String refusal :- Bool]))
-      `(defn bad [path :- String] :- String
+         (RewriteFailure [message #%: String path #%: String refusal #%: Bool]))
+      `(defn bad [path #%: String] -> String
          :raises RewriteError
          (throw (ex-info "missing" ,(mp ':path 'path ':refusal "yes"))))))))
 
@@ -2025,11 +2025,11 @@ ZIG
    (lambda ()
      (check-zig-forms
       '(defunion :throwable RewriteError
-         (RewriteFailure [message :- String path :- String refusal :- Bool]))
-      `(defn fail [path :- String] :- String
+         (RewriteFailure [message #%: String path #%: String refusal #%: Bool]))
+      `(defn fail [path #%: String] -> String
          :raises RewriteError
          (throw (ex-info "missing" ,(mp ':path 'path ':refusal 'true))))
-      '(defn main [path :- String] :- String
+      '(defn main [path #%: String] -> String
          (fail path))))))
 
 ;; --- determinism: same input → byte-identical output --------------------------
@@ -2118,7 +2118,7 @@ ZIG
 
 (check-unsupported "zig rejects defn without return annotation"
   #rx"return annotation"
-  '(defn f [x :- Int] x))
+  '(defn f [x #%: Int] x))
 
 (define-syntax-rule (check-unsupported/src name rx src)
   (test-case name
@@ -2130,49 +2130,49 @@ ZIG
 
 (check-unsupported/src "zig rejects map literals pointedly"
   #rx"map literal"
-  "(ns g)\n(defn f [x :- Int] :- Int (do {:a x} x))")
+  "(ns g)\n(defn f [x: Int] -> Int (do {:a x} x))")
 
 (check-unsupported/src "zig rejects multi-arity defn"
   #rx"multi-arity"
-  "(ns g)\n(defn f ([a :- Int] :- Int a) ([a :- Int b :- Int] :- Int (+ a b)))")
+  "(ns g)\n(defn f ([a: Int] -> Int a) ([a: Int b: Int] -> Int (+ a b)))")
 
 (check-unsupported "zig rejects variable shift amounts"
   #rx"shift"
-  '(defn f [x :- Int n :- Int] :- Int (bit-shift-left x n)))
+  '(defn f [x #%: Int n #%: Int] -> Int (bit-shift-left x n)))
 
 (check-unsupported "zig rejects / pointing at quot"
   #rx"quot"
-  '(defn f [a :- Int b :- Int] :- Int (/ a b)))
+  '(defn f [a #%: Int b #%: Int] -> Int (/ a b)))
 
 (check-unsupported/src "zig rejects a non-exhaustive closed-union match"
   #rx"non-exhaustive match on closed union"
   (string-append
    "(ns zig.union-match-partial)\n"
-   "(defrecord Circle [(radius :- Int)])\n"
-   "(defrecord Square [(side :- Int)])\n"
-   "(defn f [shape :- (U Circle Square)] :- Int\n"
+   "(defrecord Circle [(radius: Int)])\n"
+   "(defrecord Square [(side: Int)])\n"
+   "(defn f [shape: (U Circle Square)] -> Int\n"
    "  (match shape [(Circle r) r]))\n"))
 
 (check-unsupported/src "zig rejects a match clause outside the target union"
   #rx"is not an alternative of"
   (string-append
    "(ns zig.union-match-foreign)\n"
-   "(defrecord Circle [(radius :- Int)])\n"
-   "(defrecord Square [(side :- Int)])\n"
-   "(defrecord Blob [(size :- Int)])\n"
-   "(defn f [shape :- (U Circle Square)] :- Int\n"
+   "(defrecord Circle [(radius: Int)])\n"
+   "(defrecord Square [(side: Int)])\n"
+   "(defrecord Blob [(size: Int)])\n"
+   "(defn f [shape: (U Circle Square)] -> Int\n"
    "  (match shape [(Circle r) r] [(Square s) s] [(Blob b) b]))\n"))
 
 (check-unsupported/src "zig rejects match on a target that is not a closed union"
   #rx"match target"
   (string-append
    "(ns zig.union-match-scalar)\n"
-   "(defn f [n :- Int] :- Int\n"
+   "(defn f [n: Int] -> Int\n"
    "  (match n [1 10] [_ 0]))\n"))
 
 (check-unsupported/src "zig rejects qualified calls to non-runtime namespaces"
   #rx"qualified"
-  "(ns g)\n(require some.random.lib :as q)\n(defn f [s :- String] :- String (q/frobnicate s))")
+  "(ns g)\n(require some.random.lib :as q)\n(defn f [s: String] -> String (q/frobnicate s))")
 
 (test-case "extern: core namespaces land on rt; everything else gets its own module"
   ;; Phase 1: a declared-extern namespace lowers to a MODULE. Core
@@ -2186,7 +2186,7 @@ ZIG
                 "(ns g)\n"
                 "(declare-extern kernel.rt/draw [Int -> Int])\n"
                 "(declare-extern app.rt/tick [Int -> Int])\n"
-                "(defn f [x :- Int] :- Int (app.rt/tick (kernel.rt/draw x)))")))
+                "(defn f [x: Int] -> Int (app.rt/tick (kernel.rt/draw x)))")))
   (check-true (regexp-match? #rx"rt.draw" out))          ; kernel.rt → core rt
   (check-true (regexp-match? #rx"beagle_module_app_rt.tick" out))
   (check-true
@@ -2201,7 +2201,7 @@ ZIG
                 "(ns g)\n"
                 "(declare-extern los.rt/slugify [String -> String])\n"
                 "(declare-extern los.yaml/parse [String -> Yaml])\n"
-                "(defn f [s :- String] :- String (los.rt/slugify s))")))
+                "(defn f [s: String] -> String (los.rt/slugify s))")))
   (check-true (regexp-match? #rx"beagle_module_los_rt.slugify" out))
   (check-true
    (regexp-match?
@@ -2214,25 +2214,25 @@ ZIG
 
 (define (ho-emit body)
   (compile-zig-string
-   (string-append "(ns g)\n(defn f [ctx :- Ctx xs :- (Vec Int)] :- " body ")")))
+   (string-append "(ns g)\n(defn f [ctx: Ctx xs: (Vec Int)] -> " body ")")))
 
 (test-case "reduce: fn inlined into a flat fold, no allocation, no fn value"
-  (define out (ho-emit "Int\n  (reduce (fn [acc :- Int x :- Int] :- Int (+ acc x)) 0 xs)"))
+  (define out (ho-emit "Int\n  (reduce (fn [acc: Int x: Int] -> Int (+ acc x)) 0 xs)"))
   (check-true  (regexp-match? #rx"var acc: i64 = 0" out))   ; typed, not comptime_int
   (check-true  (regexp-match? #rx"for " out))               ; flat loop
   (check-true  (regexp-match? #rx"acc = .acc . x." out))    ; fold step, fn erased
   (check-false (regexp-match? #rx"alloc" out))              ; reduce folds, no alloc
   (check-false (regexp-match? #rx"rt.reduce" out)))         ; not a runtime HOF call
 
-(test-case "mapv: fn inlined, output allocated in the caller arena, elem type from :- U"
-  (define out (ho-emit "(Vec Int)\n  (mapv (fn [x :- Int] :- Int (* x 2)) xs)"))
+(test-case "mapv: fn inlined, output allocated in the caller arena, elem type from -> U"
+  (define out (ho-emit "(Vec Int)\n  (mapv (fn [x: Int] -> Int (* x 2)) xs)"))
   (check-true  (regexp-match? #rx"ctx\\.tick\\.alloc" out)) ; caller-owned arena
-  (check-true  (regexp-match? #rx"alloc.i64" out))         ; elem type from :- Int
+  (check-true  (regexp-match? #rx"alloc.i64" out))         ; elem type from -> Int
   (check-true  (regexp-match? #rx"= .x . 2." out))          ; body inlined
   (check-false (regexp-match? #rx"rt.mapv" out)))
 
 (test-case "filterv: fn inlined, predicate in the loop, kept-count slice"
-  (define out (ho-emit "(Vec Int)\n  (filterv (fn [x :- Int] :- Bool (> x 0)) xs)"))
+  (define out (ho-emit "(Vec Int)\n  (filterv (fn [x: Int] -> Bool (> x 0)) xs)"))
   (check-true (regexp-match? #rx"std.meta.Elem" out))       ; elem type inferred
   (check-true (regexp-match? #rx"if ..x > 0." out))         ; predicate inlined
   (check-true (regexp-match? #rx"__n" out))                 ; kept-count
@@ -2246,7 +2246,7 @@ ZIG
 (when ZIG
   (test-case "monomorphized higher-order compiles as zig"
     (check-true (zig-compiles?
-                 (ho-emit "Int\n  (reduce (fn [acc :- Int x :- Int] :- Int (+ acc x)) 0 xs)")
+                 (ho-emit "Int\n  (reduce (fn [acc: Int x: Int] -> Int (+ acc x)) 0 xs)")
                  "ho-reduce"))))
 
 ;; --- fn-name arguments, monomorphized per (callee, parameter, defn) ----------
@@ -2254,29 +2254,29 @@ ZIG
 (define reachable-from-src
   (string-append
    "(ns zig.hof-mono)\n"
-   "(def A-SUCC :- (Vec String) [\"b\"])\n"
-   "(def B-SUCC :- (Vec String) [\"c\"])\n"
-   "(def C-SUCC :- (Vec String) [\"a\"])\n"
-   "(def NO-SUCC :- (Vec String) [])\n"
-   "(defn next-nodes [node :- String] :- (Vec String)\n"
+   "(def A-SUCC: (Vec String) [\"b\"])\n"
+   "(def B-SUCC: (Vec String) [\"c\"])\n"
+   "(def C-SUCC: (Vec String) [\"a\"])\n"
+   "(def NO-SUCC: (Vec String) [])\n"
+   "(defn next-nodes [node: String] -> (Vec String)\n"
    "  (cond\n"
    "    [(= node \"a\") A-SUCC]\n"
    "    [(= node \"b\") B-SUCC]\n"
    "    [(= node \"c\") C-SUCC]\n"
    "    [:else NO-SUCC]))\n"
-   "(defn reachable-from? [succ :- [String -> (Vec String)]\n"
-   "                       frontier :- (Vec String)\n"
-   "                       fuel :- Int\n"
-   "                       target :- String] :- Bool\n"
+   "(defn reachable-from? [succ: [String -> (Vec String)]\n"
+   "                       frontier: (Vec String)\n"
+   "                       fuel: Int\n"
+   "                       target: String] -> Bool\n"
    "  (loop [front frontier n fuel]\n"
    "    (cond\n"
    "      [(empty? front) false]\n"
    "      [(<= n 0) false]\n"
    "      [(= (nth front 0) target) true]\n"
    "      [:else (recur (vec (concat (rest front) (succ (nth front 0)))) (dec n))])))\n"
-   "(defn cycle? [start :- String] :- Bool\n"
+   "(defn cycle? [start: String] -> Bool\n"
    "  (reachable-from? next-nodes (next-nodes start) 16 start))\n"
-   "(defn main [] :- Nil\n"
+   "(defn main [] -> Nil\n"
    "  (println (str (cycle? \"a\") \":\" (cycle? \"d\"))))\n"))
 
 (test-case "a top-level defn in argument position specializes the callee"
@@ -2295,10 +2295,10 @@ ZIG
     (compile-zig-string
      (string-append
       "(ns zig.hof-two)\n"
-      "(defn double [x :- Int] :- Int (* x 2))\n"
-      "(defn negate [x :- Int] :- Int (- 0 x))\n"
-      "(defn apply-twice [f :- [Int -> Int] x :- Int] :- Int (f (f x)))\n"
-      "(defn main [] :- Nil\n"
+      "(defn double [x: Int] -> Int (* x 2))\n"
+      "(defn negate [x: Int] -> Int (- 0 x))\n"
+      "(defn apply-twice [f: [Int -> Int] x: Int] -> Int (f (f x)))\n"
+      "(defn main [] -> Nil\n"
       "  (println (str (apply-twice double 5) \":\" (apply-twice negate 5))))\n")))
   (check-regexp-match #rx"pub fn applyTwice__f__double\\(x: i64\\) i64 \\{\n    return double\\(double\\(x\\)\\);" out)
   (check-regexp-match #rx"pub fn applyTwice__f__negate\\(x: i64\\) i64 \\{\n    return negate\\(negate\\(x\\)\\);" out))
@@ -2313,8 +2313,8 @@ ZIG
   #rx"higher-order argument"
   (string-append
    "(ns zig.hof-literal)\n"
-   "(defn apply-twice [f :- [Int -> Int] x :- Int] :- Int (f (f x)))\n"
-   "(defn run [] :- Int (apply-twice (fn [x :- Int] :- Int (+ x 1)) 5))\n"))
+   "(defn apply-twice [f: [Int -> Int] x: Int] -> Int (f (f x)))\n"
+   "(defn run [] -> Int (apply-twice (fn [x: Int] -> Int (+ x 1)) 5))\n"))
 
 ;; --- Phase 2: world-escape check + promote ------------------------------------
 
@@ -2328,19 +2328,19 @@ ZIG
 
 (check-escape "escape: World with a Vec field is rejected at compile time"
   #rx"tick-lifetime field log"
-  "(ns g)\n(defrecord World [score :- Int log :- (Vec Int)])\n(defn world-tick [ctx :- Ctx w :- World] :- World (->World (:score w) (:log w)))")
+  "(ns g)\n(defrecord World [score: Int log: (Vec Int)])\n(defn world-tick [ctx: Ctx w: World] -> World (->World (:score w) (:log w)))")
 
 (check-escape "escape: String fields are slices too"
   #rx"strings are slices"
-  "(ns g)\n(defrecord World [name :- String])\n(defn world-tick [ctx :- Ctx w :- World] :- World w)")
+  "(ns g)\n(defrecord World [name: String])\n(defn world-tick [ctx: Ctx w: World] -> World w)")
 
 (check-escape "escape: nested record smuggling a slice is caught"
   #rx"tick-lifetime field xs"
-  "(ns g)\n(defrecord Bag [xs :- (Vec Int)])\n(defrecord World [bag :- Bag])\n(defn tick-step [ctx :- Ctx w :- World] :- World w)")
+  "(ns g)\n(defrecord Bag [xs: (Vec Int)])\n(defrecord World [bag: Bag])\n(defn tick-step [ctx: Ctx w: World] -> World w)")
 
 (test-case "value-level promote is the world-tick artifact; systems promote via SoA"
   (define out (compile-zig-string
-               "(ns g)\n(defrecord S [v :- Int])\n(defn tick-step [ctx :- Ctx s :- S] :- S s)"))
+               "(ns g)\n(defrecord S [v: Int])\n(defn tick-step [ctx: Ctx s: S] -> S s)"))
   (check-false (regexp-match? #rx"pub fn promote\\(" out))
   (check-true (regexp-match? #rx"pub fn tickStepPromoteAll" out)))
 
@@ -2349,10 +2349,10 @@ ZIG
 (define ENGINE-SRC
   (string-append
    "(ns g)\n"
-   "(defrecord MindIn [x :- Int belief :- Int])\n"
-   "(defrecord Obs [sig :- Int])\n"
-   "(defrecord StepOut [x :- Int belief :- Int act :- Int])\n"
-   "(defn tick-step [ctx :- Ctx m :- MindIn obs :- Obs max-x :- Int] :- StepOut\n"
+   "(defrecord MindIn [x: Int belief: Int])\n"
+   "(defrecord Obs [sig: Int])\n"
+   "(defrecord StepOut [x: Int belief: Int act: Int])\n"
+   "(defn tick-step [ctx: Ctx m: MindIn obs: Obs max-x: Int] -> StepOut\n"
    "  (->StepOut (+ (:x m) (:sig obs)) (:belief m) 0))"))
 
 (test-case "engine: SoA buffers generated for entity and output records"
@@ -2381,13 +2381,13 @@ ZIG
 (define TWO-SYSTEM-SRC
   (string-append
    "(ns g)\n"
-   "(defrecord MindIn [x :- Int alarm :- Int])\n"
-   "(defrecord MindOut [x :- Int alarm :- Int act :- Int])\n"
-   "(defrecord WolfIn [x :- Int energy :- Int])\n"
-   "(defrecord WolfOut [x :- Int energy :- Int howl :- Int])\n"
-   "(defn mind-step [ctx :- Ctx m :- MindIn] :- MindOut\n"
+   "(defrecord MindIn [x: Int alarm: Int])\n"
+   "(defrecord MindOut [x: Int alarm: Int act: Int])\n"
+   "(defrecord WolfIn [x: Int energy: Int])\n"
+   "(defrecord WolfOut [x: Int energy: Int howl: Int])\n"
+   "(defn mind-step [ctx: Ctx m: MindIn] -> MindOut\n"
    "  (->MindOut (:x m) (:alarm m) 0))\n"
-   "(defn wolf-step [ctx :- Ctx w :- WolfIn] :- WolfOut\n"
+   "(defn wolf-step [ctx: Ctx w: WolfIn] -> WolfOut\n"
    "  (->WolfOut (:x w) (:energy w) 0))"))
 
 (test-case "engine: two systems — two archetypes, each with stores + loop + promote"
@@ -2413,30 +2413,30 @@ ZIG
   ;; In a binding position, (if c 1 0) is two comptime_int branches under
   ;; runtime control flow — zig rejects it unless one branch is anchored.
   (define out (compile-zig-string
-               "(ns g)\n(defn f [x :- Int] :- Int (let [v (if (> x 0) 1 0)] v))"))
+               "(ns g)\n(defn f [x: Int] -> Int (let [v (if (> x 0) 1 0)] v))"))
   (check-true (regexp-match? #rx"@as.i64, 1." out)))
 
 (when ZIG
   (test-case "literal-branch if compiles in binding position"
     (check-true (zig-compiles?
                  (compile-zig-string
-                  "(ns g)\n(defn f [x :- Int] :- Int (let [v (if (> x 0) 1 0)] v))")
+                  "(ns g)\n(defn f [x: Int] -> Int (let [v (if (> x 0) 1 0)] v))")
                  "literal-if-binding"))))
 
 (test-case "engine: a -step fn without Ctx first is an ordinary function"
   (define out (compile-zig-string
-               "(ns g)\n(defn two-step [a :- Int b :- Int] :- Int (+ a b))"))
+               "(ns g)\n(defn two-step [a: Int b: Int] -> Int (+ a b))"))
   (check-false (regexp-match? #rx"AllRange" out))
   (check-true (regexp-match? #rx"pub fn twoStep" out)))
 
 (test-case "engine: entity = output dedups to a single SoA struct"
   (define out (compile-zig-string
-               "(ns g)\n(defrecord S [v :- Int])\n(defn tick-step [ctx :- Ctx s :- S] :- S s)"))
+               "(ns g)\n(defrecord S [v: Int])\n(defn tick-step [ctx: Ctx s: S] -> S s)"))
   (check-equal? 1 (length (regexp-match* #rx"pub const SSoA = struct" out))))
 
 (test-case "engine: world-tick alone gets promote but no engine layer"
   (define out (compile-zig-string
-               "(ns g)\n(defrecord World [score :- Int])\n(defn world-tick [ctx :- Ctx w :- World] :- World w)"))
+               "(ns g)\n(defrecord World [score: Int])\n(defn world-tick [ctx: Ctx w: World] -> World w)"))
   (check-true (regexp-match? #rx"pub fn promote" out))
   (check-false (regexp-match? #rx"tickAllRange" out)))
 
@@ -2449,9 +2449,9 @@ ZIG
 (define LIFECYCLE-SRC
   (string-append
    "(ns g)\n"
-   "(defrecord E [x :- Int hp :- Int])\n"
-   "(defrecord O [x :- Int hp :- Int alive :- Bool])\n"
-   "(defn life-step [ctx :- Ctx e :- E] :- O\n"
+   "(defrecord E [x: Int hp: Int])\n"
+   "(defrecord O [x: Int hp: Int alive: Bool])\n"
+   "(defn life-step [ctx: Ctx e: E] -> O\n"
    "  (->O (:x e) (- (:hp e) 1) (> (:hp e) 1)))"))
 
 (test-case "lifecycle: alive on the output record generates compaction, not promotion"
@@ -2469,9 +2469,9 @@ ZIG
 (define SPAWN-SRC
   (string-append
    "(ns g)\n"
-   "(defrecord E [x :- Int hp :- Int])\n"
-   "(defrecord O [x :- Int hp :- Int alive :- Bool spawn :- Bool])\n"
-   "(defn life-step [ctx :- Ctx e :- E] :- O\n"
+   "(defrecord E [x: Int hp: Int])\n"
+   "(defrecord O [x: Int hp: Int alive: Bool spawn: Bool])\n"
+   "(defn life-step [ctx: Ctx e: E] -> O\n"
    "  (->O (:x e) (- (:hp e) 1) (> (:hp e) 1) (> (:hp e) 9)))"))
 
 (test-case "lifecycle: spawn verdict adds births to the generated compaction"
@@ -2490,43 +2490,43 @@ ZIG
   #rx"spawn requires alive"
   (string-append
    "(ns g)\n"
-   "(defrecord E [x :- Int])\n"
-   "(defrecord O [x :- Int spawn :- Bool])\n"
-   "(defn life-step [ctx :- Ctx e :- E] :- O (->O (:x e) false))"))
+   "(defrecord E [x: Int])\n"
+   "(defrecord O [x: Int spawn: Bool])\n"
+   "(defn life-step [ctx: Ctx e: E] -> O (->O (:x e) false))"))
 
 (check-unsupported/src "lifecycle: alive on both records is rejected pointedly"
   #rx"alive is the survival verdict"
   (string-append
    "(ns g)\n"
-   "(defrecord E [x :- Int alive :- Bool])\n"
-   "(defrecord O [x :- Int alive :- Bool])\n"
-   "(defn life-step [ctx :- Ctx e :- E] :- O (->O (:x e) true))"))
+   "(defrecord E [x: Int alive: Bool])\n"
+   "(defrecord O [x: Int alive: Bool])\n"
+   "(defn life-step [ctx: Ctx e: E] -> O (->O (:x e) true))"))
 
 (check-unsupported/src "lifecycle: a non-Bool alive is rejected pointedly"
   #rx"alive must be Bool"
   (string-append
    "(ns g)\n"
-   "(defrecord E [x :- Int])\n"
-   "(defrecord O [x :- Int alive :- Int])\n"
-   "(defn life-step [ctx :- Ctx e :- E] :- O (->O (:x e) 1))"))
+   "(defrecord E [x: Int])\n"
+   "(defrecord O [x: Int alive: Int])\n"
+   "(defn life-step [ctx: Ctx e: E] -> O (->O (:x e) 1))"))
 
 (check-unsupported/src "engine: param 1 must be the entity record"
   #rx"tick-step param 1"
-  "(ns g)\n(defrecord S [v :- Int])\n(defn tick-step [ctx :- Ctx n :- Int] :- S (->S n))")
+  "(ns g)\n(defrecord S [v: Int])\n(defn tick-step [ctx: Ctx n: Int] -> S (->S n))")
 
 (check-unsupported/src "engine: entity fields must be scalar for the commit memcpy"
   #rx"engine entity record with non-scalar field"
   (string-append
-   "(ns g)\n(defrecord Inner [v :- Int])\n"
-   "(defrecord E [inner :- Inner])\n(defrecord O [v :- Int])\n"
-   "(defn tick-step [ctx :- Ctx e :- E] :- O (->O (:v (:inner e))))"))
+   "(ns g)\n(defrecord Inner [v: Int])\n"
+   "(defrecord E [inner: Inner])\n(defrecord O [v: Int])\n"
+   "(defn tick-step [ctx: Ctx e: E] -> O (->O (:v (:inner e))))"))
 
 (check-unsupported/src "engine: param names can't collide with engine bindings"
   #rx"seed collides with a generated engine binding"
-  "(ns g)\n(defrecord S [v :- Int])\n(defn tick-step [ctx :- Ctx s :- S seed :- Int] :- S s)")
+  "(ns g)\n(defrecord S [v: Int])\n(defn tick-step [ctx: Ctx s: S seed: Int] -> S s)")
 
 (check-unsupported/src "engine: name-matched promotion fields must agree on type"
   #rx"share a name but not a type"
   (string-append
-   "(ns g)\n(defrecord E [x :- Int])\n(defrecord O [x :- Float])\n"
-   "(defn tick-step [ctx :- Ctx e :- E] :- O (->O 1.0))"))
+   "(ns g)\n(defrecord E [x: Int])\n(defrecord O [x: Float])\n"
+   "(defn tick-step [ctx: Ctx e: E] -> O (->O 1.0))"))

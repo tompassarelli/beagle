@@ -132,9 +132,12 @@
       (eval `(define BRACKET-TAG ',BRACKET-TAG) proc-macro-ns)
       (eval `(define MAP-TAG ',MAP-TAG) proc-macro-ns)
       (eval `(define SET-TAG ',SET-TAG) proc-macro-ns)
+      (eval `(define ANN-MARKER ',ANN-MARKER) proc-macro-ns)
       (eval '(define (br . xs) (cons BRACKET-TAG xs)) proc-macro-ns)
       (eval '(define (mp . xs) (cons MAP-TAG xs)) proc-macro-ns)
       (eval '(define (st . xs) (cons SET-TAG xs)) proc-macro-ns)
+      ;; canonical annotation constructor — splice it: `[~@(ann n t)]
+      (eval '(define (ann n t) (list n ANN-MARKER t)) proc-macro-ns)
       (eval '(define (sym->kw s)
                (string->symbol (string-append ":" (symbol->string s)))) proc-macro-ns)))
   proc-macro-ns)
@@ -631,21 +634,33 @@
     [else '()]))
 
 (define (collect-param-binders! form macro-params add!)
-  (for ([item (in-list (unwrap-brackets* form))])
+  ;; Walk in TRIPLES: `x: Int` is three flat datums, and gensym-renaming the
+  ;; marker or the type name (not just the binder) corrupts the template.
+  (let loop ([items (unwrap-brackets* form)])
     (cond
-      [(and (symbol? item) (not (eq? item '&)) (not (memq item macro-params)))
-       (add! item)]
-      [(and (list? item) (= (length item) 3) (symbol? (car item))
-            (eq? (cadr item) ':) (not (memq (car item) macro-params)))
-       (add! (car item))]
-      [else (void)])))
+      [(null? items) (void)]
+      [(and (symbol? (car items)) (pair? (cdr items))
+            (memq (cadr items) (list ANN-MARKER ':-)) (pair? (cddr items)))
+       (unless (or (eq? (car items) '&) (memq (car items) macro-params))
+         (add! (car items)))
+       (loop (cdddr items))]
+      [(and (symbol? (car items)) (not (eq? (car items) '&))
+            (not (memq (car items) macro-params)))
+       (add! (car items))
+       (loop (cdr items))]
+      [(and (list? (car items)) (= (length (car items)) 3) (symbol? (caar items))
+            (memq (cadr (car items)) (list ANN-MARKER ':-))
+            (not (memq (caar items) macro-params)))
+       (add! (caar items))
+       (loop (cdr items))]
+      [else (loop (cdr items))])))
 
 (define (collect-let-binders! form macro-params add!)
   (let loop ([rest (unwrap-brackets* form)])
     (cond
       [(or (null? rest) (null? (cdr rest))) (void)]
       [(and (list? (car rest)) (= (length (car rest)) 3)
-            (symbol? (caar rest)) (eq? (cadar rest) ':)
+            (symbol? (caar rest)) (memq (cadar rest) (list ANN-MARKER ':-))
             (not (memq (caar rest) macro-params)))
        (add! (caar rest))
        (loop (cddr rest))]

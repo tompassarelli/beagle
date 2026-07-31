@@ -61,8 +61,8 @@ echo "--- 4. defunion variant delete -> refuse (no false 0-form success) ---"
 cat > "$W/uni.bclj" <<'EOF'
 #lang beagle/clj
 (ns delcorp.uni)
-(defunion Shape (Circle [r :- Float]) (Sq [s :- Float]))
-(defn mk [r :- Float] :- Shape (Circle r))
+(defunion Shape (Circle [r: Float]) (Sq [s: Float]))
+(defn mk [r: Float] -> Shape (Circle r))
 EOF
 racket "$RT" --emit-edn "$W/uni.bclj" 2>/dev/null > "$W/uni.edn"
 if bb -cp "$FRAM_OUT" "$RES" delete Sq uni "$W/uni.edn" >/dev/null 2>&1; then
@@ -75,8 +75,8 @@ cat > "$W/doc.bclj" <<'EOF'
 #lang beagle/clj
 (ns delcorp.doc)
 ;; doc mentioning dead
-(defn dead [x :- Int] :- Int x)
-(defn keep-me [y :- Int] :- Int y)
+(defn dead [x: Int] -> Int x)
+(defn keep-me [y: Int] -> Int y)
 EOF
 racket "$RT" --emit-edn "$W/doc.bclj" 2>/dev/null > "$W/doc.edn"
 bb -cp "$FRAM_OUT" "$RES" delete dead doc "$W/doc.edn" 2>/dev/null
@@ -91,8 +91,8 @@ echo "--- 6. delete defunion with a live variant-ctor ref -> refuse ---"
 cat > "$W/var.bclj" <<'EOF'
 #lang beagle/clj
 (ns delcorp.var)
-(defunion Maybe (Some [v :- Int]) None)
-(def thing :- Maybe (Some 7))
+(defunion Maybe (Some [v: Int]) None)
+(def thing: Maybe (Some 7))
 EOF
 racket "$RT" --emit-edn "$W/var.bclj" 2>/dev/null > "$W/var.edn"
 if bb -cp "$FRAM_OUT" "$RES" delete Maybe var "$W/var.edn" >/dev/null 2>&1; then
@@ -104,8 +104,8 @@ echo "--- 7. delete unused parameterized union (Opt A) -> projects ---"
 cat > "$W/par.bclj" <<'EOF'
 #lang beagle/clj
 (ns delcorp.par)
-(defunion (Opt A) (Sm [v :- A]) Non)
-(defn keep-me [x :- Int] :- Int x)
+(defunion (Opt A) (Sm [v: A]) Non)
+(defn keep-me [x: Int] -> Int x)
 EOF
 racket "$RT" --emit-edn "$W/par.bclj" 2>/dev/null > "$W/par.edn"
 bb -cp "$FRAM_OUT" "$RES" delete Opt par "$W/par.edn" 2>/dev/null
@@ -118,10 +118,10 @@ echo "--- 8. multi-arity body + ->constructor references block delete ---"
 cat > "$W/ma.bclj" <<'EOF'
 #lang beagle/clj
 (ns delcorp.ma)
-(def base :- Int 5)
+(def base: Int 5)
 (defn f
-  ([x :- Int] :- Int (+ x base))
-  ([x :- Int y :- Int] :- Int (+ x y base)))
+  ([x: Int] -> Int (+ x base))
+  ([x: Int y: Int] -> Int (+ x y base)))
 EOF
 racket "$RT" --emit-edn "$W/ma.bclj" 2>/dev/null > "$W/ma.edn"
 if bb -cp "$FRAM_OUT" "$RES" delete base ma "$W/ma.edn" >/dev/null 2>&1; then
@@ -130,8 +130,8 @@ else echo "  PASS  multi-arity body reference blocks delete"; fi
 cat > "$W/ct.bclj" <<'EOF'
 #lang beagle/clj
 (ns delcorp.ct)
-(defrecord Point [(x :- Int)])
-(defn mk [] :- Point (->Point 1))
+(defrecord Point [(x: Int)])
+(defn mk [] -> Point (->Point 1))
 EOF
 racket "$RT" --emit-edn "$W/ct.bclj" 2>/dev/null > "$W/ct.edn"
 if bb -cp "$FRAM_OUT" "$RES" delete Point ct "$W/ct.edn" >/dev/null 2>&1; then
@@ -143,10 +143,10 @@ echo "--- 9. match-pattern ctor + field-accessor references block delete ---"
 cat > "$W/mt.bclj" <<'EOF'
 #lang beagle/clj
 (ns delcorp.mt)
-(defrecord Ok [(value :- Int)])
-(defrecord Err [(error :- Int)])
+(defrecord Ok [(value: Int)])
+(defrecord Err [(error: Int)])
 (defunion Result Ok Err)
-(defn f [r :- Result] :- Int (match r [(Ok v) v] [(Err e) e]))
+(defn f [r: Result] -> Int (match r [(Ok v) v] [(Err e) e]))
 EOF
 racket "$RT" --emit-edn "$W/mt.bclj" 2>/dev/null > "$W/mt.edn"
 if bb -cp "$FRAM_OUT" "$RES" delete Ok mt "$W/mt.edn" >/dev/null 2>&1; then
@@ -155,8 +155,8 @@ else echo "  PASS  match-pattern ctor reference blocks delete"; fi
 cat > "$W/fa.bclj" <<'EOF'
 #lang beagle/clj
 (ns delcorp.fa)
-(defrecord Point [(x :- Int)])
-(defn a [p :- Point] :- Int (point-x p))
+(defrecord Point [(x: Int)])
+(defn a [p: Point] -> Int (point-x p))
 EOF
 racket "$RT" --emit-edn "$W/fa.bclj" 2>/dev/null > "$W/fa.edn"
 if bb -cp "$FRAM_OUT" "$RES" delete Point fa "$W/fa.edn" >/dev/null 2>&1; then
@@ -168,13 +168,13 @@ echo "--- 10. fully-qualified consumer references block delete ---"
 cat > "$W/fqp.bclj" <<'EOF'
 #lang beagle/clj
 (ns delcorp.fqp)
-(defrecord Box [(w :- Int)])
+(defrecord Box [(w: Int)])
 EOF
 cat > "$W/fqc.bclj" <<'EOF'
 #lang beagle/clj
 (ns delcorp.fqc)
 (require delcorp.fqp)
-(defn u [b :- delcorp.fqp/Box] :- Int (delcorp.fqp/box-w b))
+(defn u [b: delcorp.fqp/Box] -> Int (delcorp.fqp/box-w b))
 EOF
 racket "$RT" --emit-edn "$W/fqp.bclj" 2>/dev/null > "$W/fqp.edn"
 racket "$RT" --emit-edn "$W/fqc.bclj" 2>/dev/null > "$W/fqc.edn"

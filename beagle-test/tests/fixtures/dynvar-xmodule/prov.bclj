@@ -5,4 +5,4 @@
 ;; but not the latter.
 (def ^:dynamic *v* "default")
 (def plain 1)
-(defn rd [] :- String *v*)
+(defn rd [] -> String *v*)

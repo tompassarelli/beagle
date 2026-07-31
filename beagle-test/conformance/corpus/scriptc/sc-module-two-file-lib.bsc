@@ -3,5 +3,5 @@
 ;; export; no self-host ScriptC route is involved.
 (ns conformance.sc-module-two-file-lib)
 
-(defn triple [(n :- Int)] :- Int
+(defn triple [(n: Int)] -> Int
   (* n 3))

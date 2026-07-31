@@ -1,5 +1,5 @@
 (ns i)
-(defn color-name [c :- Int] :- String
+(defn color-name [c: Int] -> String
   (condp = c
     :red "red"
     :green "green"

@@ -1,3 +1,3 @@
 (ns g)
-(defn pipeline [x :- Int] :- Int
+(defn pipeline [x: Int] -> Int
   (-> x (+ 1) (* 2) (- 3)))

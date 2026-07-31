@@ -104,21 +104,21 @@
    ;; --- basic arithmetic & values -------------------------------------------
 
    (check-js-output "def + defn round-trip"
-     (list '(def x :- Int 42)
-           '(defn double [(n :- Int)] :- Int (* n 2))
-           '(defn main [] :- Nil (println (double x))))
+     (list '(def x #%: Int 42)
+           '(defn double [(n #%: Int)] -> Int (* n 2))
+           '(defn main [] -> Nil (println (double x))))
      "main();"
      "84")
 
    (check-js-output "string concatenation"
-     (list '(defn greet [(name :- String)] :- String (str "Hello, " name "!"))
-           '(defn main [] :- Nil (println (greet "world"))))
+     (list '(defn greet [(name #%: String)] -> String (str "Hello, " name "!"))
+           '(defn main [] -> Nil (println (greet "world"))))
      "main();"
      "Hello, world!")
 
    (check-js-output "boolean logic"
-     (list '(defn both [(a :- Bool) (b :- Bool)] :- Bool (and a b))
-           '(defn main [] :- Nil
+     (list '(defn both [(a #%: Bool) (b #%: Bool)] -> Bool (and a b))
+           '(defn main [] -> Nil
               (do (println (both true true))
                   (println (both true false)))))
      "main();"
@@ -127,8 +127,8 @@
    ;; --- records -------------------------------------------------------------
 
    (check-js-output "record construction and field access"
-     (list '(defrecord Point [(x :- Int) (y :- Int)])
-           '(defn main [] :- Nil
+     (list '(defrecord Point [(x #%: Int) (y #%: Int)])
+           '(defn main [] -> Nil
               (let [p (->Point 3 4)]
                 (do (println (point-x p))
                     (println (point-y p))))))
@@ -136,8 +136,8 @@
      "3\n4")
 
    (check-js-output "record with -> Object.freeze is immutable"
-     (list '(defrecord Point [(x :- Int) (y :- Int)])
-           `(defn main [] :- Nil
+     (list '(defrecord Point [(x #%: Int) (y #%: Int)])
+           `(defn main [] -> Nil
               (let [p (->Point 1 2)
                     q (with p ,(br ':x 10))]
                 (do (println (point-x p))
@@ -146,7 +146,7 @@
      "1\n10")
 
    (check-js-behavior "record is frozen (mutation throws in strict mode)"
-     (list '(defrecord Point [(x :- Int) (y :- Int)]))
+     (list '(defrecord Point [(x #%: Int) (y #%: Int)]))
      "
 'use strict';
 const p = Point(1, 2);
@@ -156,9 +156,9 @@ console.assert(threw, 'frozen record should reject mutation');
 ")
 
    (check-js-output "record _tag for pattern dispatch"
-     (list '(defrecord Circle [(radius :- Int)])
-           '(defrecord Rect [(w :- Int) (h :- Int)])
-           `(defn area [(shape :- Any)] :- Int
+     (list '(defrecord Circle [(radius #%: Int)])
+           '(defrecord Rect [(w #%: Int) (h #%: Int)])
+           `(defn area [(shape #%: Any)] -> Int
               (match shape
                 ,(br '(Circle r) '(* r r))
                 ,(br '(Rect w h) '(* w h)))))
@@ -171,8 +171,8 @@ console.assert(threw, 'frozen record should reject mutation');
    ;; the call site emits `cfg_delete` (the whole `cfg-delete` symbol is not
    ;; reserved) -> ReferenceError. Property positions never get the `$` suffix.
    (check-js-output "record reserved-word field accessors round-trip"
-     (list '(defrecord Cfg [(delete :- Bool) (default :- Int)])
-           '(defn main [] :- Nil
+     (list '(defrecord Cfg [(delete #%: Bool) (default #%: Int)])
+           '(defn main [] -> Nil
               (let [c (->Cfg true 5)]
                 (do (println (cfg-delete c))
                     (println (cfg-default c))))))
@@ -180,11 +180,11 @@ console.assert(threw, 'frozen record should reject mutation');
      "true\n5")
 
    (check-js-output "record reserved-word field match-destructure"
-     (list '(defrecord Cfg [(delete :- Bool) (default :- Int)])
-           `(defn describe [(c :- Cfg)] :- Int
+     (list '(defrecord Cfg [(delete #%: Bool) (default #%: Int)])
+           `(defn describe [(c #%: Cfg)] -> Int
               (match c
                 ,(br '(Cfg d df) 'df)))
-           '(defn main [] :- Nil
+           '(defn main [] -> Nil
               (println (describe (->Cfg true 7)))))
      "main();"
      "7")
@@ -208,23 +208,23 @@ console.assert(threw, 'frozen record should reject mutation');
    ;; punctuation must be made identifier-safe without treating it as a
    ;; binding (which would apply reserved-word suffixing).
    (check-js-output "ordinary dotted predicate method char-mangles property"
-     (list '(defn invoke-ready [(gate :- Any)] :- Bool
+     (list '(defn invoke-ready [(gate #%: Any)] -> Bool
               (.ready? gate)))
      "console.log(invoke_ready({ ready_p() { return true; } }));"
      "true")
 
    (check-js-output "authored underscore properties round-trip through read call set and object"
-     (list '(defn exercise! [(obj :- Any)] :- String
+     (list '(defn exercise! [(obj #%: Any)] -> String
               (do (set! (.-total_str obj) (str (.-wall_s obj) ":" (.ctx_str obj)))
                   (.-total_str obj)))
-           `(defn snapshot [] :- Any ,(mt ':wall_s 8 ':ctx_str "ctx" ':total_str "total")))
+           `(defn snapshot [] -> Any ,(mt ':wall_s 8 ':ctx_str "ctx" ':total_str "total")))
      "console.log(exercise_bang({wall_s: 'wall', ctx_str() { return 'ctx'; }, total_str: ''}));
 console.log(JSON.stringify(snapshot()));"
      "wall:ctx\n{\"wall_s\":8,\"ctx_str\":\"ctx\",\"total_str\":\"total\"}")
 
    (check-js-output "underscored record fields keep literal properties and binding-safe accessors"
-     (list '(defrecord Snapshot [(wall_s :- Int) (ctx_str :- String) (total_str :- String)])
-           '(defn main [] :- Nil
+     (list '(defrecord Snapshot [(wall_s #%: Int) (ctx_str #%: String) (total_str #%: String)])
+           '(defn main [] -> Nil
               (let [s (->Snapshot 8 "ctx" "total")]
                 (do (println (snapshot-wall_s s))
                     (println (snapshot-ctx_str s))
@@ -235,14 +235,14 @@ console.log(JSON.stringify(snapshot()));"
    ;; --- seam 2: effect-position control flow executes correctly -------------
    ;; Semantics must be preserved through the idiomatic-statement lowering.
    (check-js-output "seam2: effect-position if-else runs then-branch"
-     (list '(defn main [] :- Nil
+     (list '(defn main [] -> Nil
               (do (if true (println "a") (println "b"))
                   (println "z"))))
      "main();"
      "a\nz")
 
    (check-js-output "seam2: effect-position cond selects else branch"
-     (list '(defn main [(n :- Int)] :- Nil
+     (list '(defn main [(n #%: Int)] -> Nil
               (do (cond (> n 10) (println "big")
                         :else (println "small"))
                   (println "done"))))
@@ -250,7 +250,7 @@ console.log(JSON.stringify(snapshot()));"
      "small\ndone")
 
    (check-js-output "seam2: nested if inside when body executes"
-     (list '(defn main [(d :- Bool)] :- Nil
+     (list '(defn main [(d #%: Bool)] -> Nil
               (when true
                 (if d (println "yes") (println "no")))))
      "main(false);"
@@ -259,52 +259,52 @@ console.log(JSON.stringify(snapshot()));"
    ;; --- nil / null ----------------------------------------------------------
 
    (check-js-output "nil maps to null"
-     (list '(def x :- Nil nil)
-           '(defn main [] :- Nil (println (nil? x))))
+     (list '(def x #%: Nil nil)
+           '(defn main [] -> Nil (println (nil? x))))
      "main();"
      "true")
 
    (check-js-output "nil? on non-nil returns false"
-     (list '(defn main [] :- Nil (println (nil? "hello"))))
+     (list '(defn main [] -> Nil (println (nil? "hello"))))
      "main();"
      "false")
 
    ;; --- truthiness (CLJS-inspired) ------------------------------------------
 
    (check-js-output "if with 0 — JS falsy"
-     (list '(defn f [(x :- Int)] :- String (if x "truthy" "falsy")))
+     (list '(defn f [(x #%: Int)] -> String (if x "truthy" "falsy")))
      "console.log(f(0));"
      "falsy")
 
    (check-js-output "if with empty string — JS falsy"
-     (list '(defn f [(x :- String)] :- String (if x "truthy" "falsy")))
+     (list '(defn f [(x #%: String)] -> String (if x "truthy" "falsy")))
      "console.log(f(\"\"));"
      "falsy")
 
    (check-js-output "if with null — falsy"
-     (list '(defn f [(x :- Any)] :- String (if x "truthy" "falsy")))
+     (list '(defn f [(x #%: Any)] -> String (if x "truthy" "falsy")))
      "console.log(f(null));"
      "falsy")
 
    (check-js-output "if with false — falsy"
-     (list '(defn f [(x :- Bool)] :- String (if x "truthy" "falsy")))
+     (list '(defn f [(x #%: Bool)] -> String (if x "truthy" "falsy")))
      "console.log(f(false));"
      "falsy")
 
    (check-js-output "if with non-zero — truthy"
-     (list '(defn f [(x :- Int)] :- String (if x "truthy" "falsy")))
+     (list '(defn f [(x #%: Int)] -> String (if x "truthy" "falsy")))
      "console.log(f(1));"
      "truthy")
 
    ;; --- let / IIFE ----------------------------------------------------------
 
    (check-js-output "let binds correctly"
-     (list '(defn f [] :- Int (let [x 10 y 20] (+ x y))))
+     (list '(defn f [] -> Int (let [x 10 y 20] (+ x y))))
      "console.log(f());"
      "30")
 
    (check-js-output "nested let scoping"
-     (list '(defn f [] :- Int
+     (list '(defn f [] -> Int
               (let [x 1]
                 (let [x 2]
                   x))))
@@ -312,7 +312,7 @@ console.log(JSON.stringify(snapshot()));"
      "2")
 
    (check-js-output "let does not leak into outer scope"
-     (list '(defn f [] :- Int
+     (list '(defn f [] -> Int
               (let [x 1]
                 (+ (let [y 10] y) x))))
      "console.log(f());"
@@ -323,7 +323,7 @@ console.log(JSON.stringify(snapshot()));"
    ;; emitted two `const x = …;` in one JS block -> SyntaxError at runtime.
    ;; See emit-js.rkt's `current-rename-env` / `emit-let-bindings`.
    (check-js-output "let with repeated binding name (return position)"
-     (list '(defn f [] :- Int
+     (list '(defn f [] -> Int
               (let [x 1
                     x (+ x 1)]
                 x)))
@@ -331,18 +331,18 @@ console.log(JSON.stringify(snapshot()));"
      "2")
 
    (check-js-output "let with repeated binding name (non-return position)"
-     (list '(defn f [] :- Int
+     (list '(defn f [] -> Int
               (let [x 1
                     x (+ x 1)]
                 x))
-           '(defn main [] :- Nil
+           '(defn main [] -> Nil
               (do (println (f))
                   (println (f)))))
      "main();"
      "2\n2")
 
    (check-js-output "let with three-times-repeated binding name"
-     (list '(defn f [] :- Int
+     (list '(defn f [] -> Int
               (let [x 1
                     x (+ x 1)
                     x (* x 10)]
@@ -351,7 +351,7 @@ console.log(JSON.stringify(snapshot()));"
      "20")
 
    (check-js-behavior "let with repeated binding name emits distinct JS identifiers"
-     (list '(defn f [] :- Int
+     (list '(defn f [] -> Int
               (let [x 1
                     x (+ x 1)]
                 x)))
@@ -359,7 +359,7 @@ console.log(JSON.stringify(snapshot()));"
 
    (test-case "let with repeated binding name never emits duplicate const/let in one block"
      (define js (js-emit (list '(ns test.app) '(define-mode strict) '(define-target js)
-                                '(defn f [] :- Int
+                                '(defn f [] -> Int
                                    (let [x 1
                                          x (+ x 1)]
                                      x)))))
@@ -370,14 +370,14 @@ console.log(JSON.stringify(snapshot()));"
    ;; --- loop/recur ----------------------------------------------------------
 
    (check-js-output "loop/recur basic countdown"
-     (list '(defn countdown [(n :- Int)] :- Int
+     (list '(defn countdown [(n #%: Int)] -> Int
               (loop [i n]
                 (if (= i 0) i (recur (- i 1))))))
      "console.log(countdown(10));"
      "0")
 
    (check-js-output "loop/recur accumulator"
-     (list '(defn sum-to [(n :- Int)] :- Int
+     (list '(defn sum-to [(n #%: Int)] -> Int
               (loop [i n acc 0]
                 (if (= i 0) acc (recur (- i 1) (+ acc i))))))
      "console.log(sum_to(5));"
@@ -386,13 +386,13 @@ console.log(JSON.stringify(snapshot()));"
    ;; --- for / map / filter --------------------------------------------------
 
    (check-js-output "for -> map"
-     (list '(defn double-all [(xs :- (Vec Int))] :- (Vec Int)
+     (list '(defn double-all [(xs #%: (Vec Int))] -> (Vec Int)
               (for [x xs] (* x 2))))
      "console.log(JSON.stringify(double_all([1,2,3])));"
      "[2,4,6]")
 
    (check-js-output "for with :when -> filter + map"
-     (list '(defn positives [(xs :- (Vec Int))] :- (Vec Int)
+     (list '(defn positives [(xs #%: (Vec Int))] -> (Vec Int)
               (for [x xs :when (> x 0)] x)))
      "console.log(JSON.stringify(positives([-1, 0, 1, 2, -3])));"
      "[1,2]")
@@ -400,13 +400,13 @@ console.log(JSON.stringify(snapshot()));"
    ;; --- cond / case ---------------------------------------------------------
 
    (check-js-output "cond evaluates correct branch"
-     (list '(defn classify [(n :- Int)] :- String
+     (list '(defn classify [(n #%: Int)] -> String
               (cond (< n 0) "neg" (= n 0) "zero" :else "pos")))
      "console.log(classify(-1)); console.log(classify(0)); console.log(classify(1));"
      "neg\nzero\npos")
 
    (check-js-output "match with or-pattern matches correct value (was: case)"
-     (list '(defn day-type [(d :- Int)] :- String
+     (list '(defn day-type [(d #%: Int)] -> String
               (match d [(or 0 6) "weekend"] [_ "weekday"])))
      "console.log(day_type(0)); console.log(day_type(3)); console.log(day_type(6));"
      "weekend\nweekday\nweekend")
@@ -414,13 +414,13 @@ console.log(JSON.stringify(snapshot()));"
    ;; --- try/catch -----------------------------------------------------------
 
    (check-js-output "try/catch returns catch value on error"
-     (list '(defn safe-div [(a :- Int) (b :- Int)] :- Int
+     (list '(defn safe-div [(a #%: Int) (b #%: Int)] -> Int
               (try (/ a b) (catch Exception e -1))))
      "console.log(safe_div(10, 2));"
      "5")
 
    (check-js-output "try/catch as expression in let"
-     (list '(defn f [] :- Int
+     (list '(defn f [] -> Int
               (let [x (try 42 (catch Exception e 0))]
                 (+ x 1))))
      "console.log(f());"
@@ -429,7 +429,7 @@ console.log(JSON.stringify(snapshot()));"
    ;; --- do ------------------------------------------------------------------
 
    (check-js-output "do executes side effects in order"
-     (list '(defn f [] :- Nil
+     (list '(defn f [] -> Nil
               (do (println "first")
                   (println "second")
                   (println "third"))))
@@ -439,25 +439,25 @@ console.log(JSON.stringify(snapshot()));"
    ;; --- when / when-let / if-let --------------------------------------------
 
    (check-js-output "when true runs body"
-     (list '(defn f [(x :- Bool)] :- Nil (when x (println "yes"))))
+     (list '(defn f [(x #%: Bool)] -> Nil (when x (println "yes"))))
      "f(true);"
      "yes")
 
    (check-js-behavior "when false produces no output"
-     (list '(defn f [(x :- Bool)] :- Nil (when x (println "yes"))))
+     (list '(defn f [(x #%: Bool)] -> Nil (when x (println "yes"))))
      "f(false);")
 
    (check-js-output "when-let non-null runs body"
-     (list '(defn f [(x :- Any)] :- Nil (when-let [v x] (println v))))
+     (list '(defn f [(x #%: Any)] -> Nil (when-let [v x] (println v))))
      "f(42);"
      "42")
 
    (check-js-behavior "when-let null skips body"
-     (list '(defn f [(x :- Any)] :- Nil (when-let [v x] (println v))))
+     (list '(defn f [(x #%: Any)] -> Nil (when-let [v x] (println v))))
      "f(null);")
 
    (check-js-output "if-let selects branch"
-     (list '(defn f [(x :- Any)] :- String (if-let [v x] "found" "missing")))
+     (list '(defn f [(x #%: Any)] -> String (if-let [v x] "found" "missing")))
      "console.log(f(1)); console.log(f(null));"
      "found\nmissing")
 
@@ -465,31 +465,31 @@ console.log(JSON.stringify(snapshot()));"
    ;; dotimes removed — use (doseq [i (range n)] body).
 
    (check-js-output "doseq iterates"
-     (list '(defn f [(xs :- (Vec Int))] :- Nil (doseq [x xs] (println x))))
+     (list '(defn f [(xs #%: (Vec Int))] -> Nil (doseq [x xs] (println x))))
      "f([10, 20, 30]);"
      "10\n20\n30")
 
    ;; --- interop -------------------------------------------------------------
 
    (check-js-output ".method call"
-     (list '(defn f [(x :- Any)] :- String (.toString x)))
+     (list '(defn f [(x #%: Any)] -> String (.toString x)))
      "console.log(f(42));"
      "42")
 
    (check-js-output "Math/abs static call"
-     (list '(defn f [(x :- Int)] :- Int (Math/abs x)))
+     (list '(defn f [(x #%: Int)] -> Int (Math/abs x)))
      "console.log(f(-7));"
      "7")
 
    (check-js-output "new constructor"
-     (list '(def d :- Any (Date. 2024)))
+     (list '(def d #%: Any (Date. 2024)))
      "console.log(typeof d);"
      "object")
 
    ;; A set!-mutated let local must execute as mutable JS (`let`, not `const`).
    ;; Static emitter coverage alone misses "Assignment to constant variable".
    (check-js-output "set!-mutated let local executes"
-     (list '(defn overwrite-local! [(n :- Int)] :- Int
+     (list '(defn overwrite-local! [(n #%: Int)] -> Int
               (let [acc 0]
                 (set! acc n)
                 acc)))
@@ -500,8 +500,8 @@ console.log(JSON.stringify(snapshot()));"
 
    (check-js-output "multi-arity dispatch"
      (list `(defn greet
-              (,(br '(name :- String)) :- String (str "Hi " name))
-              (,(br '(first :- String) '(last :- String)) :- String (str "Hi " first " " last))))
+              (,(br '(name #%: String)) -> String (str "Hi " name))
+              (,(br '(first #%: String) '(last #%: String)) -> String (str "Hi " first " " last))))
      "console.log(greet(\"Alice\")); console.log(greet(\"Bob\", \"Smith\"));"
      "Hi Alice\nHi Bob Smith")
 
@@ -509,7 +509,7 @@ console.log(JSON.stringify(snapshot()));"
 
    (check-js-output "async/await basic"
      (list `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
-           '(defn f [(x :- String)] :- (Promise String) (js/await (fetch-data x))))
+           '(defn f [(x #%: String)] -> (Promise String) (js/await (fetch-data x))))
      "
 globalThis.fetch_data = async (x) => 'got:' + x;
 f('hello').then(r => console.log(r));
@@ -518,7 +518,7 @@ f('hello').then(r => console.log(r));
 
    (check-js-output "await in nested let"
      (list `(declare-extern get-val ,(br 'Int '-> '(Promise Int)))
-           '(defn f [(n :- Int)] :- (Promise Int)
+           '(defn f [(n #%: Int)] -> (Promise Int)
               (let [a (js/await (get-val n))
                     b (js/await (get-val (+ n 1)))]
                 (+ a b))))
@@ -531,8 +531,8 @@ f(3).then(r => console.log(r));
    ;; --- munge disambiguation ------------------------------------------------
 
    (check-js-behavior "hyphen and underscore names are distinct"
-     (list '(def my-x :- Int 1)
-           '(def my_x :- Int 2))
+     (list '(def my-x #%: Int 1)
+           '(def my_x #%: Int 2))
      "
 console.assert(my_x === 1, 'my-x should be 1, got ' + my_x);
 console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
@@ -541,25 +541,25 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
    ;; --- edge cases ----------------------------------------------------------
 
    (check-js-output "inc and dec"
-     (list '(defn f [(x :- Int)] :- Int (+ x 1))
-           '(defn g [(x :- Int)] :- Int (- x 1)))
+     (list '(defn f [(x #%: Int)] -> Int (+ x 1))
+           '(defn g [(x #%: Int)] -> Int (- x 1)))
      "console.log(f(5)); console.log(g(5));"
      "6\n4")
 
    (check-js-output "count on vec"
-     (list '(defn f [(xs :- (Vec Int))] :- Int (count xs)))
+     (list '(defn f [(xs #%: (Vec Int))] -> Int (count xs)))
      "console.log(f([1,2,3]));"
      "3")
 
    (check-js-output "first on vec"
-     (list '(defn f [(xs :- (Vec Int))] :- Int (first xs)))
+     (list '(defn f [(xs #%: (Vec Int))] -> Int (first xs)))
      "console.log(f([10,20,30]));"
      "10")
 
    (check-js-output "nested record construction"
-     (list '(defrecord Inner [(val :- Int)])
-           '(defrecord Outer [(inner :- Inner)])
-           '(defn get-val [(o :- Outer)] :- Int (inner-val (outer-inner o))))
+     (list '(defrecord Inner [(val #%: Int)])
+           '(defrecord Outer [(inner #%: Inner)])
+           '(defn get-val [(o #%: Outer)] -> Int (inner-val (outer-inner o))))
      "console.log(get_val(Outer(Inner(42))));"
      "42")
 
@@ -571,14 +571,14 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
    ;; --- atom operations -------------------------------------------------------
 
    (check-js-output "atom create and deref"
-     (list '(defn f [] :- Int
+     (list '(defn f [] -> Int
               (let [a (atom 42)]
                 (deref a))))
      "console.log(f());"
      "42")
 
    (check-js-output "atom reset!"
-     (list '(defn f! [] :- Int
+     (list '(defn f! [] -> Int
               (let [a (atom 0)]
                 (do (reset! a 99)
                     (deref a)))))
@@ -586,16 +586,16 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
      "99")
 
    (check-js-output "atom swap!"
-     (list '(defn f! [] :- Int
+     (list '(defn f! [] -> Int
               (let [a (atom 10)]
-                (do (swap! a (fn [(x :- Int)] :- Int (+ x 1)))
+                (do (swap! a (fn [(x #%: Int)] -> Int (+ x 1)))
                     (deref a)))))
      "console.log(f_bang());"
      "11")
 
    (check-js-output "atom swap! with extra args"
-     (list '(defn add [(x :- Int) (y :- Int)] :- Int (+ x y))
-           '(defn f! [] :- Int
+     (list '(defn add [(x #%: Int) (y #%: Int)] -> Int (+ x y))
+           '(defn f! [] -> Int
               (let [a (atom 10)]
                 (do (swap! a add 5)
                     (deref a)))))
@@ -605,132 +605,132 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
    ;; --- additional stdlib -----------------------------------------------------
 
    (check-js-output "take-last"
-     (list '(defn f [(xs :- (Vec Int))] :- Any (take-last 2 xs)))
+     (list '(defn f [(xs #%: (Vec Int))] -> Any (take-last 2 xs)))
      "console.log(JSON.stringify(f([1,2,3,4,5])));"
      "[4,5]")
 
    (check-js-output "not= returns boolean"
-     (list '(defn f [(a :- Int) (b :- Int)] :- Bool (not (= a b))))
+     (list '(defn f [(a #%: Int) (b #%: Int)] -> Bool (not (= a b))))
      "console.log(f(1,2)); console.log(f(1,1));"
      "true\nfalse")
 
    (check-js-output "seq on empty returns null"
-     (list '(defn f [(xs :- (Vec Int))] :- Any (seq xs)))
+     (list '(defn f [(xs #%: (Vec Int))] -> Any (seq xs)))
      "console.log(f([])); console.log(f([1]) !== null);"
      "null\ntrue")
 
    (check-js-output "sequential? predicate"
-     (list '(defn f [(x :- Any)] :- Bool (sequential? x)))
+     (list '(defn f [(x #%: Any)] -> Bool (sequential? x)))
      "console.log(f([1,2])); console.log(f(42));"
      "true\nfalse")
 
    ;; --- runtime helpers (beagle/core.js) ------------------------------------
 
    (check-js-output "range generates array"
-     (list '(defn f [] :- Any (range 5)))
+     (list '(defn f [] -> Any (range 5)))
      "console.log(JSON.stringify(f()));"
      "[0,1,2,3,4]")
 
    (check-js-output "range with start and end"
-     (list '(defn f [] :- Any (range 2 7)))
+     (list '(defn f [] -> Any (range 2 7)))
      "console.log(JSON.stringify(f()));"
      "[2,3,4,5,6]")
 
    (check-js-output "range with step"
-     (list '(defn f [] :- Any (range 0 10 3)))
+     (list '(defn f [] -> Any (range 0 10 3)))
      "console.log(JSON.stringify(f()));"
      "[0,3,6,9]")
 
    (check-js-output "remove filters out matching"
-     (list '(defn z? [(x :- Int)] :- Bool (= x 0))
-           '(defn f [(xs :- (Vec Int))] :- Any (remove z? xs)))
+     (list '(defn z? [(x #%: Int)] -> Bool (= x 0))
+           '(defn f [(xs #%: (Vec Int))] -> Any (remove z? xs)))
      "console.log(JSON.stringify(f([0,1,0,2,0,3])));"
      "[1,2,3]")
 
    (check-js-output "mapcat flattens"
-     (list '(defn dup [(x :- Int)] :- (Vec Int)
+     (list '(defn dup [(x #%: Int)] -> (Vec Int)
               (let [v x] (conj (conj (conj (range 0) v) v) v)))
-            '(defn f [(xs :- (Vec Int))] :- Any (mapcat dup xs)))
+            '(defn f [(xs #%: (Vec Int))] -> Any (mapcat dup xs)))
      "console.log(JSON.stringify(f([1,2])));"
      "[1,1,1,2,2,2]")
 
    (check-js-output "every? checks all"
-     (list '(defn p? [(x :- Int)] :- Bool (> x 0))
-           '(defn f [(xs :- (Vec Int))] :- Any (every? p? xs)))
+     (list '(defn p? [(x #%: Int)] -> Bool (> x 0))
+           '(defn f [(xs #%: (Vec Int))] -> Any (every? p? xs)))
      "console.log(f([1,2,3])); console.log(f([1,0,3]));"
      "true\nfalse")
 
    (check-js-output "keep filters nulls"
-     (list '(defn maybe-inc [(x :- Int)] :- Any (if (> x 0) (+ x 1) nil))
-           '(defn f [(xs :- (Vec Int))] :- Any (keep maybe-inc xs)))
+     (list '(defn maybe-inc [(x #%: Int)] -> Any (if (> x 0) (+ x 1) nil))
+           '(defn f [(xs #%: (Vec Int))] -> Any (keep maybe-inc xs)))
      "console.log(JSON.stringify(f([0,1,0,2])));"
      "[2,3]")
 
    (check-js-output "take-while stops at first false"
-     (list '(defn p? [(x :- Int)] :- Bool (> x 0))
-           '(defn f [(xs :- (Vec Int))] :- Any (take-while p? xs)))
+     (list '(defn p? [(x #%: Int)] -> Bool (> x 0))
+           '(defn f [(xs #%: (Vec Int))] -> Any (take-while p? xs)))
      "console.log(JSON.stringify(f([3,2,1,0,-1])));"
      "[3,2,1]")
 
    (check-js-output "drop-while drops prefix"
-     (list '(defn n? [(x :- Int)] :- Bool (< x 0))
-           '(defn f [(xs :- (Vec Int))] :- Any (drop-while n? xs)))
+     (list '(defn n? [(x #%: Int)] -> Bool (< x 0))
+           '(defn f [(xs #%: (Vec Int))] -> Any (drop-while n? xs)))
      "console.log(JSON.stringify(f([-3,-2,-1,0,1,2])));"
      "[0,1,2]")
 
    (check-js-output "select-keys picks keys"
-     (list `(defn f [(m :- Any)] :- Any (select-keys m ,(br ":a" ":c"))))
+     (list `(defn f [(m #%: Any)] -> Any (select-keys m ,(br ":a" ":c"))))
      "console.log(JSON.stringify(f({':a':1, ':b':2, ':c':3})));"
      "{\":a\":1,\":c\":3}")
 
    (check-js-output "assoc-in nested set"
-     (list `(defn f [(m :- Any)] :- Any (assoc-in m ,(br ":a" ":b") 42)))
+     (list `(defn f [(m #%: Any)] -> Any (assoc-in m ,(br ":a" ":b") 42)))
      "console.log(JSON.stringify(f({':a': {':b': 0}})));"
      "{\":a\":{\":b\":42}}")
 
    (check-js-output "update-in nested update"
-     (list '(defn add1 [(x :- Int)] :- Int (+ x 1))
-           `(defn f [(m :- Any)] :- Any (update-in m ,(br ":a") add1)))
+     (list '(defn add1 [(x #%: Int)] -> Int (+ x 1))
+           `(defn f [(m #%: Any)] -> Any (update-in m ,(br ":a") add1)))
      "console.log(JSON.stringify(f({':a': 5})));"
      "{\":a\":6}")
 
    ;; --- higher-order value wrappers -------------------------------------------
 
    (check-js-output "map inc as value"
-     (list '(defn f [(xs :- (Vec Int))] :- Any (map inc xs)))
+     (list '(defn f [(xs #%: (Vec Int))] -> Any (map inc xs)))
      "console.log(JSON.stringify(f([1,2,3])));"
      "[2,3,4]")
 
    (check-js-output "map dec as value"
-     (list '(defn f [(xs :- (Vec Int))] :- Any (map dec xs)))
+     (list '(defn f [(xs #%: (Vec Int))] -> Any (map dec xs)))
      "console.log(JSON.stringify(f([10,20,30])));"
      "[9,19,29]")
 
    (check-js-output "filter pos? as value"
-     (list '(defn f [(xs :- (Vec Int))] :- Any (filter pos? xs)))
+     (list '(defn f [(xs #%: (Vec Int))] -> Any (filter pos? xs)))
      "console.log(JSON.stringify(f([-1,0,1,2,-3])));"
      "[1,2]")
 
    (check-js-output "reduce + as value"
-     (list '(defn f [(xs :- (Vec Int))] :- Any (reduce + 0 xs)))
+     (list '(defn f [(xs #%: (Vec Int))] -> Any (reduce + 0 xs)))
      "console.log(f([1,2,3,4]));"
      "10")
 
    (check-js-output "filter some? as value"
-     (list '(defn f [(xs :- (Vec Any))] :- Any (filter some? xs)))
+     (list '(defn f [(xs #%: (Vec Any))] -> Any (filter some? xs)))
      "console.log(JSON.stringify(f([1,null,2,null,3])));"
      "[1,2,3]")
 
    (check-js-output "filter nil? as value"
-     (list '(defn f [(xs :- (Vec Any))] :- Any (filter nil? xs)))
+     (list '(defn f [(xs #%: (Vec Any))] -> Any (filter nil? xs)))
      "console.log(f([1,null,2,null,3]).length);"
      "2")
 
    (check-js-output "kw-access on Any uses nil-safe polymorphic lookup"
-     (list '(defrecord Payload [(wall_s-ready?! :- Int)])
-           `(defunion Event (Hit ,(br '(delete : String))))
-           '(defn lookup [(value :- Any)] :- Any (get value :wall_s-ready?!))
-           '(defn lookup-default [(value :- Any)] :- Any (get value :delete "missing")))
+     (list '(defrecord Payload [(wall_s-ready?! #%: Int)])
+           `(defunion Event (Hit ,(br '(delete #%: String))))
+           '(defn lookup [(value #%: Any)] -> Any (get value :wall_s-ready?!))
+           '(defn lookup-default [(value #%: Any)] -> Any (get value :delete "missing")))
      (string-append
       "console.log(JSON.stringify(["
       "lookup({wall_s_ready_p_bang: 4}),"
@@ -742,13 +742,13 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
      "[4,5,\"tagged\",\"missing\",\"missing\",\"missing\"]")
 
    (check-js-output "user-defined inc shadows stdlib in map"
-     (list '(defn inc [(x :- Int)] :- Int (* x 10))
-           '(defn f [(xs :- (Vec Int))] :- Any (map inc xs)))
+     (list '(defn inc [(x #%: Int)] -> Int (* x 10))
+           '(defn f [(xs #%: (Vec Int))] -> Any (map inc xs)))
      "console.log(JSON.stringify(f([1,2,3])));"
      "[10,20,30]")
 
    (check-js-output "loop with let containing recur"
-     (list '(defn find-char [(s :- String) (target :- Int)] :- Int
+     (list '(defn find-char [(s #%: String) (target #%: Int)] -> Int
               (loop [i 0]
                 (let [c (.charCodeAt s i)]
                   (if (= c target) i (recur (+ i 1)))))))
@@ -756,7 +756,7 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
      "2")
 
    (check-js-output "loop with nested let containing recur"
-     (list '(defn sum-until [(xs :- (Vec Int)) (limit :- Int)] :- Int
+     (list '(defn sum-until [(xs #%: (Vec Int)) (limit #%: Int)] -> Int
               (loop [i 0 total 0]
                 (if (>= i (count xs)) total
                   (let [v (nth xs i)]
@@ -766,7 +766,7 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
      "6")
 
    (check-js-output "loop with cond containing recur"
-     (list '(defn classify-first [(xs :- (Vec Int))] :- String
+     (list '(defn classify-first [(xs #%: (Vec Int))] -> String
               (loop [i 0]
                 (if (>= i (count xs)) "none"
                   (let [v (nth xs i)]
@@ -780,27 +780,27 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
    ;; --- special float values (Inf/NaN) ----------------------------------------
 
    (check-js-output "+inf.0 -> Infinity at runtime"
-     (list '(def x :- Float +inf.0)
-           '(defn main [] :- Nil (println x)))
+     (list '(def x #%: Float +inf.0)
+           '(defn main [] -> Nil (println x)))
      "main();"
      "Infinity")
 
    (check-js-output "-inf.0 -> -Infinity at runtime"
-     (list '(def x :- Float -inf.0)
-           '(defn main [] :- Nil (println x)))
+     (list '(def x #%: Float -inf.0)
+           '(defn main [] -> Nil (println x)))
      "main();"
      "-Infinity")
 
    (check-js-output "+nan.0 -> NaN at runtime"
-     (list '(def x :- Float +nan.0)
-           '(defn main [] :- Nil (println x)))
+     (list '(def x #%: Float +nan.0)
+           '(defn main [] -> Nil (println x)))
      "main();"
      "NaN")
 
    (check-js-behavior "Infinity arithmetic works"
-     (list '(def x :- Float +inf.0)
-           '(def y :- Float -inf.0)
-           '(def z :- Float +nan.0))
+     (list '(def x #%: Float +inf.0)
+           '(def y #%: Float -inf.0)
+           '(def z #%: Float +nan.0))
      "if (x !== Infinity) throw new Error('expected Infinity');
       if (y !== -Infinity) throw new Error('expected -Infinity');
       if (!Number.isNaN(z)) throw new Error('expected NaN');")

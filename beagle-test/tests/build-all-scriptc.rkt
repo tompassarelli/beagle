@@ -28,7 +28,7 @@
   (write-source
    lib
    (format
-    "#lang beagle/~a\n(ns smoke.lib)\n(defn triple [(n :- Int)] :- Int (* n 3))\n"
+    "#lang beagle/~a\n(ns smoke.lib)\n(defn triple [(n: Int)] -> Int (* n 3))\n"
     lang))
   (write-source
    entry

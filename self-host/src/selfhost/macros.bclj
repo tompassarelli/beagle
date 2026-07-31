@@ -13,11 +13,13 @@
 
 ;; --- constants ---------------------------------------------------------------
 
-(def BRACKET-TAG :- String "#%brackets")
-(def MAP-TAG :- String "#%map")
-(def SET-TAG :- String "#%set")
-(def SPLICE-MARKER :- String "splice")
-(def MAX-EXPANSION-DEPTH :- Int 64)
+(def BRACKET-TAG: String "#%brackets")
+(def MAP-TAG: String "#%map")
+(def SET-TAG: String "#%set")
+(def SPLICE-MARKER: String "splice")
+(def ANN-MARKER: String "#%:")
+(def LEGACY-MARKER: String ":-")
+(def MAX-EXPANSION-DEPTH: Int 64)
 
 ;; --- macro error sink --------------------------------------------------------
 ;; Racket raises on a macro error (arity, depth-exceeded) and aborts the whole
@@ -25,16 +27,16 @@
 ;; the message so parse.bclj folds it into parse-errors (nonzero exit / no
 ;; 'ok'), and expansion returns an INERT non-macro datum so the parse loop does
 ;; not re-dispatch the still-a-macro-application form forever.
-(def MACRO-ERRORS :- Any (atom []))
+(def MACRO-ERRORS: Any (atom []))
 
-(defn macro-errors [] :- Any
+(defn macro-errors [] -> Any
   (deref MACRO-ERRORS))
 
-(defn reset-macro-errors! [] :- Nil
+(defn reset-macro-errors! [] -> Nil
   (reset! MACRO-ERRORS [])
   nil)
 
-(defn- macro-err! [msg :- String] :- Any
+(defn- macro-err! [msg: String] -> Any
   (swap! MACRO-ERRORS conj msg)
   (selfhost.rt/eprint (str "beagle: " msg "\n"))
   ;; the `nil` symbol datum parses to a nil literal and is not a datum-pair,
@@ -43,20 +45,20 @@
 
 ;; --- expansion provenance ----------------------------------------------------
 
-(defn make-root-ctx [name :- String] :- Any
+(defn make-root-ctx [name: String] -> Any
   {"macro-name" name "depth" 0 "parent" nil})
 
-(defn push-ctx [parent :- Any name :- String] :- Any
+(defn push-ctx [parent: Any name: String] -> Any
   {"macro-name" name "depth" (+ 1 (get parent "depth")) "parent" parent})
 
-(defn collect-chain-lines [ctx :- Any] :- (Vec String)
+(defn collect-chain-lines [ctx: Any] -> (Vec String)
   (if (nil? ctx)
     []
     (into
       [(str "  in macro: " (get ctx "macro-name") " (depth " (get ctx "depth") ")")]
       (collect-chain-lines (get ctx "parent")))))
 
-(defn format-expansion-chain [ctx :- Any] :- String
+(defn format-expansion-chain [ctx: Any] -> String
   (let [all-lines (collect-chain-lines ctx)
         n (count all-lines)]
     (if (<= n 10)
@@ -72,14 +74,14 @@
 ;; parse.rkt imports it. Names are <base>__<n>; minted names depend only on
 ;; module content.
 
-(def LOWERING-COUNTER :- Any (atom 0))
+(def LOWERING-COUNTER: Any (atom 0))
 
-(defn reset-lowering-counter! [] :- Nil
+(defn reset-lowering-counter! [] -> Nil
   (reset! LOWERING-COUNTER 0)
   nil)
 
-(defn fresh-lowered-sym! [base :- String] :- String
-  (let [n :- Int (deref LOWERING-COUNTER)]
+(defn fresh-lowered-sym! [base: String] -> String
+  (let [n: Int (deref LOWERING-COUNTER)]
     (swap! LOWERING-COUNTER inc)
     (str base "__" n)))
 
@@ -90,23 +92,23 @@
 ;; definition is rewritten to its memoized alias `<orig>__hyg` (bumped while
 ;; taken), and parse injects `(def alias orig)` after orig's definition.
 
-(def MODULE-DEF-NAMES :- Any (atom nil))
-(def HYGIENE-ALIASES :- Any (atom {}))
+(def MODULE-DEF-NAMES: Any (atom nil))
+(def HYGIENE-ALIASES: Any (atom {}))
 
-(defn set-hygiene-context! [def-names :- Any] :- Nil
+(defn set-hygiene-context! [def-names: Any] -> Nil
   (reset! MODULE-DEF-NAMES def-names)
   (reset! HYGIENE-ALIASES {})
   nil)
 
-(defn hygiene-aliases [] :- Any
+(defn hygiene-aliases [] -> Any
   (deref HYGIENE-ALIASES))
 
-(defn module-def-name? [s :- Any] :- Bool
+(defn module-def-name? [s: Any] -> Bool
   (and (some? (deref MODULE-DEF-NAMES))
        (string? s)
        (some? (get (deref MODULE-DEF-NAMES) s))))
 
-(defn hygiene-alias-for! [orig :- String] :- String
+(defn hygiene-alias-for! [orig: String] -> String
   (let [existing (get (deref HYGIENE-ALIASES) orig)]
     (if (some? existing)
       existing
@@ -119,26 +121,26 @@
 
 ;; --- datum helpers (arrays as cons lists) ------------------------------------
 
-(defn datum-pair? [d :- Any] :- Bool
+(defn datum-pair? [d: Any] -> Bool
   (and (vector? d) (> (count d) 0)))
 
-(defn datum-car [d :- Any] :- Any
+(defn datum-car [d: Any] -> Any
   (nth d 0))
 
-(defn datum-cdr [d :- Any] :- Any
+(defn datum-cdr [d: Any] -> Any
   (subvec d 1))
 
-(defn datum-cons [h :- Any t :- Any] :- Any
+(defn datum-cons [h: Any t: Any] -> Any
   (if (vector? t)
     (into [h] t)
     [h t]))
 
-(defn datum-append [a :- Any b :- Any] :- Any
+(defn datum-append [a: Any b: Any] -> Any
   (into a b))
 
 ;; --- strip-reader-tags -------------------------------------------------------
 
-(defn strip-reader-tags [datum :- Any] :- Any
+(defn strip-reader-tags [datum: Any] -> Any
   (cond
     (and (datum-pair? datum) (= (datum-car datum) "quote"))
       datum
@@ -154,10 +156,10 @@
 
 ;; --- macro registry ----------------------------------------------------------
 
-(defn make-macro-registry [] :- Any (atom {}))
+(defn make-macro-registry [] -> Any (atom {}))
 
-(defn register-macro! [reg :- Any name :- String kind :- String
-                        params :- (Vec String) template :- Any] :- Nil
+(defn register-macro! [reg: Any name: String kind: String
+                        params: (Vec String) template: Any] -> Nil
   (when (not (nil? (get (deref reg) name)))
     (selfhost.rt/eprint (str "beagle: duplicate macro definition: " name "\n")))
   (if (and (not= kind "safe") (not= kind "defmacro"))
@@ -165,20 +167,20 @@
           (str "beagle: macro " name
                ": kind must be 'safe or 'defmacro (escape-hatch 'unsafe kind has been removed — all template macros are now type-checked end-to-end)\n"))
         nil)
-    (let [amp-pos (or (clojure.core/first (keep-indexed (fn [i :- Int x :- String] :- Any (if (= x "&") i nil)) params)) -1)
+    (let [amp-pos (or (clojure.core/first (keep-indexed (fn [i: Int x: String] -> Any (if (= x "&") i nil)) params)) -1)
           fixed-params (if (> amp-pos -1) (subvec params 0 amp-pos) params)
           rest-param (if (> amp-pos -1) (nth params (+ amp-pos 1)) nil)]
       (swap! reg assoc name
         {"kind" kind "fixed-params" fixed-params "rest-param" rest-param "template" template})
       nil)))
 
-(defn lookup-macro [reg :- Any name :- String] :- Any
+(defn lookup-macro [reg: Any name: String] -> Any
   (get (deref reg) name))
 
 ;; --- contract checking -------------------------------------------------------
 
-(defn check-datum-contract [datum :- Any contract :- String
-                             macro-name :- String position :- String] :- Bool
+(defn check-datum-contract [datum: Any contract: String
+                             macro-name: String position: String] -> Bool
   (cond
     (= contract "Syntax") true
     (= contract "Symbol")
@@ -211,9 +213,9 @@
 
 ;; --- bindings ----------------------------------------------------------------
 
-(defn make-bindings [fixed-params :- (Vec String) fixed-args :- (Vec Any)
-                      rest-name :- Any rest-args :- (Vec Any)] :- Any
-  (let [base (reduce (fn [acc :- Any i :- Int] :- Any
+(defn make-bindings [fixed-params: (Vec String) fixed-args: (Vec Any)
+                      rest-name: Any rest-args: (Vec Any)] -> Any
+  (let [base (reduce (fn [acc: Any i: Int] -> Any
                         (assoc acc (nth fixed-params i) (nth fixed-args i)))
                       {} (range (count fixed-params)))]
     (if (not (nil? rest-name))
@@ -222,12 +224,12 @@
 
 ;; --- substitute (template expansion core) ------------------------------------
 
-(defn splice-into-list [head :- Any tail :- Any] :- Any
+(defn splice-into-list [head: Any tail: Any] -> Any
   (if (and (datum-pair? head) (= (datum-car head) "splice-marker"))
     (datum-append (datum-cdr head) tail)
     (datum-cons head tail)))
 
-(defn substitute [template :- Any bindings :- Any rest-name :- Any] :- Any
+(defn substitute [template: Any bindings: Any rest-name: Any] -> Any
   (cond
     ;; (splice name) where name is bound to a list
     (and (datum-pair? template) (= (count template) 2)
@@ -236,7 +238,7 @@
          (not (nil? (get bindings (nth template 1)))))
       (let [list-val (get bindings (nth template 1))]
         (datum-cons "splice-marker"
-          (mapv (fn [e :- Any] :- Any (substitute e bindings rest-name)) list-val)))
+          (mapv (fn [e: Any] -> Any (substitute e bindings rest-name)) list-val)))
 
     ;; Bound parameter symbol
     (and (string? template) (not (nil? (get bindings template))))
@@ -256,33 +258,51 @@
 
 ;; --- hygiene (safe macros only) ----------------------------------------------
 
-(defn unwrap-brackets [form :- Any] :- Any
+(defn unwrap-brackets [form: Any] -> Any
   (cond
     (and (datum-pair? form) (= (datum-car form) BRACKET-TAG))
       (datum-cdr form)
     (vector? form) form
     :else []))
 
-(defn collect-param-binders [form :- Any macro-params :- (Vec String)] :- (Vec String)
-  (let [items (unwrap-brackets form)]
-    (reduce (fn [acc :- (Vec String) item :- Any] :- (Vec String)
-              (cond
-                (and (string? item) (not= item "&") (not (clojure.core/contains? (set macro-params) item)))
-                  (conj acc item)
-                (and (vector? item) (= (count item) 3) (string? (nth item 0))
-                     (= (nth item 1) ":") (not (clojure.core/contains? (set macro-params) (nth item 0))))
-                  (conj acc (nth item 0))
-                :else acc))
-            [] items)))
+;; Walk in TRIPLES: `x: Int` is three flat datums, and gensym-renaming the
+;; marker or the type name (not just the binder) corrupts the template.
+(defn collect-param-binders [form: Any macro-params: (Vec String)] -> (Vec String)
+  (let [items (unwrap-brackets form) n (count items) mp (set macro-params)]
+    (loop [i 0 acc: (Vec String) []]
+      (cond
+        (>= i n) acc
+        (and (string? (nth items i))
+             (< (+ i 2) n)
+             (or (= (nth items (+ i 1)) ANN-MARKER)
+                 (= (nth items (+ i 1)) LEGACY-MARKER)))
+          (recur (+ i 3)
+                 (if (or (= (nth items i) "&")
+                         (clojure.core/contains? mp (nth items i)))
+                   acc
+                   (conj acc (nth items i))))
+        (and (string? (nth items i))
+             (not= (nth items i) "&")
+             (not (clojure.core/contains? mp (nth items i))))
+          (recur (+ i 1) (conj acc (nth items i)))
+        (and (vector? (nth items i))
+             (= (count (nth items i)) 3)
+             (string? (nth (nth items i) 0))
+             (or (= (nth (nth items i) 1) ANN-MARKER)
+                 (= (nth (nth items i) 1) LEGACY-MARKER))
+             (not (clojure.core/contains? mp (nth (nth items i) 0))))
+          (recur (+ i 1) (conj acc (nth (nth items i) 0)))
+        :else (recur (+ i 1) acc)))))
 
-(defn collect-let-binders [form :- Any macro-params :- (Vec String)] :- (Vec String)
+(defn collect-let-binders [form: Any macro-params: (Vec String)] -> (Vec String)
   (let [items (unwrap-brackets form)]
-    (reduce (fn [acc :- (Vec String) i :- Int] :- (Vec String)
+    (reduce (fn [acc: (Vec String) i: Int] -> (Vec String)
               (if (and (= (mod i 2) 0) (< (+ i 1) (count items)))
                 (let [item (nth items i)]
                   (cond
                     (and (vector? item) (= (count item) 3) (string? (nth item 0))
-                         (= (nth item 1) ":") (not (clojure.core/contains? (set macro-params) (nth item 0))))
+                         (or (= (nth item 1) ANN-MARKER) (= (nth item 1) LEGACY-MARKER))
+                         (not (clojure.core/contains? (set macro-params) (nth item 0))))
                       (conj acc (nth item 0))
                     (and (string? item) (not (clojure.core/contains? (set macro-params) item)))
                       (conj acc item)
@@ -292,7 +312,7 @@
 
 ;; (unquote X) / (unquote-splicing X) — expansion-time escapes; their payloads
 ;; are user-supplied data, never template structure.
-(defn unquote-form? [d :- Any] :- Bool
+(defn unquote-form? [d: Any] -> Bool
   (and (datum-pair? d)
        (or (= (datum-car d) "unquote")
            (= (datum-car d) "unquote-splicing"))))
@@ -302,10 +322,10 @@
 ;; Returns binders in DISCOVERY order; Racket's collect-template-binders conses
 ;; (reverse-discovery) and mints renames over that list, so mint over
 ;; (reverse binders) for counter-number parity.
-(defn collect-template-binders [template :- Any macro-params :- (Vec String)] :- (Vec String)
-  (letfn [(add-unique [acc :- (Vec String) name :- String] :- (Vec String)
+(defn collect-template-binders [template: Any macro-params: (Vec String)] -> (Vec String)
+  (letfn [(add-unique [acc: (Vec String) name: String] -> (Vec String)
             (if (clojure.core/contains? (set acc) name) acc (conj acc name)))
-          (walk [acc :- (Vec String) datum :- Any] :- (Vec String)
+          (walk [acc: (Vec String) datum: Any] -> (Vec String)
             (if (datum-pair? datum)
               (let [head (datum-car datum)]
                 (cond
@@ -346,11 +366,11 @@
 ;; collect-template-free-refs). A name that is ALSO a registered macro is not
 ;; aliased (renaming it would suppress the expansion). Discovery order; mint
 ;; over (reverse refs) like binders.
-(defn collect-template-free-refs [template :- Any macro-params :- (Vec String)
-                                  binders :- (Vec String) reg :- Any] :- (Vec String)
-  (letfn [(add-unique [acc :- (Vec String) name :- String] :- (Vec String)
+(defn collect-template-free-refs [template: Any macro-params: (Vec String)
+                                  binders: (Vec String) reg: Any] -> (Vec String)
+  (letfn [(add-unique [acc: (Vec String) name: String] -> (Vec String)
             (if (clojure.core/contains? (set acc) name) acc (conj acc name)))
-          (walk [acc :- (Vec String) datum :- Any] :- (Vec String)
+          (walk [acc: (Vec String) datum: Any] -> (Vec String)
             (cond
               (string? datum)
                 (if (and (module-def-name? datum)
@@ -367,14 +387,14 @@
               :else acc))]
     (walk [] template)))
 
-(defn rename-in-template [template :- Any renames :- Any] :- Any
+(defn rename-in-template [template: Any renames: Any] -> Any
   (cond
     (and (string? template) (not (nil? (get renames template))))
       (get renames template)
     (and (datum-pair? template) (= (datum-car template) "quote"))
       template
     (datum-pair? template)
-      (mapv (fn [item :- Any] :- Any (rename-in-template item renames)) template)
+      (mapv (fn [item: Any] -> Any (rename-in-template item renames)) template)
     :else template))
 
 ;; --- quasi-quote evaluator (defmacro bodies) — macros.rkt qq-eval -------------
@@ -382,11 +402,11 @@
 ;; semantics; only the OUTERMOST unquote at the right level fires. Outside any
 ;; quasiquote (depth 0), pass through unchanged.
 
-(defn qq-form? [d :- Any tag :- String] :- Bool
+(defn qq-form? [d: Any tag: String] -> Bool
   (and (datum-pair? d) (= (count d) 2) (= (datum-car d) tag)))
 
 ;; Bracketed vecs splice their elements (strip the tag); plain lists as-is.
-(defn qq-splice-elements [v :- Any] :- Any
+(defn qq-splice-elements [v: Any] -> Any
   (cond
     (and (datum-pair? v) (= (datum-car v) BRACKET-TAG)) (datum-cdr v)
     (vector? v) v
@@ -394,8 +414,8 @@
                 "beagle: unquote-splicing: expected list or vec\n")
               [])))
 
-(defn qq-eval [datum :- Any] :- Any
-  (letfn [(walk [d :- Any depth :- Int] :- Any
+(defn qq-eval [datum: Any] -> Any
+  (letfn [(walk [d: Any depth: Int] -> Any
             (cond
               (qq-form? d "quasiquote")
                 (if (= depth 0)
@@ -418,13 +438,13 @@
                   :else ["unquote-splicing" (walk (nth d 1) (- depth 1))])
               (datum-pair? d)
                 (if (= depth 0)
-                  (mapv (fn [item :- Any] :- Any (walk item depth)) d)
+                  (mapv (fn [item: Any] -> Any (walk item depth)) d)
                   (walk-list d depth))
               :else d))
           ;; List inside a quasiquote: handle unquote-splicing inline (a
           ;; BRACKET-TAG head is just an element, so vec semantics survive).
-          (walk-list [d :- Any depth :- Int] :- Any
-            (reduce (fn [acc :- Any item :- Any] :- Any
+          (walk-list [d: Any depth: Int] -> Any
+            (reduce (fn [acc: Any item: Any] -> Any
                       (if (and (qq-form? item "unquote-splicing") (= depth 1))
                         (into acc (qq-splice-elements (nth item 1)))
                         (conj acc (walk item depth))))
@@ -436,8 +456,8 @@
 ;; parse set the hygiene context). Racket's collectors cons (reverse-discovery
 ;; order) and mint over that list — ours return discovery order, so mint over
 ;; (reverse ...) for counter-number parity.
-(defn hygienize-template! [template :- Any fixed-params :- (Vec String)
-                           rest-param :- Any reg :- Any] :- Any
+(defn hygienize-template! [template: Any fixed-params: (Vec String)
+                           rest-param: Any reg: Any] -> Any
   (let [macro-params (if (nil? rest-param)
                        fixed-params
                        (into [rest-param] fixed-params))
@@ -445,10 +465,10 @@
         free-refs (if (some? (deref MODULE-DEF-NAMES))
                     (collect-template-free-refs template macro-params binders reg)
                     [])
-        renames0 (reduce (fn [acc :- Any b :- String] :- Any
+        renames0 (reduce (fn [acc: Any b: String] -> Any
                            (assoc acc b (fresh-lowered-sym! b)))
                          {} (reverse binders))
-        renames (reduce (fn [acc :- Any r :- String] :- Any
+        renames (reduce (fn [acc: Any r: String] -> Any
                           (assoc acc r (hygiene-alias-for! r)))
                         renames0 (reverse free-refs))]
     (if (= (count renames) 0)
@@ -457,8 +477,8 @@
 
 ;; --- expand-macro! (dispatch) ------------------------------------------------
 
-(defn expand-template-macro! [reg :- Any m :- Any name :- String
-                              args :- (Vec Any)] :- Any
+(defn expand-template-macro! [reg: Any m: Any name: String
+                              args: (Vec Any)] -> Any
   (let [fixed (get m "fixed-params")
         rest-name (get m "rest-param")
         kind (get m "kind")
@@ -489,7 +509,7 @@
             (qq-eval substituted)
             substituted)))))
 
-(defn expand-macro! [reg :- Any name :- String args :- (Vec Any) ctx :- Any] :- Any
+(defn expand-macro! [reg: Any name: String args: (Vec Any) ctx: Any] -> Any
   (let [m (lookup-macro reg name)]
     (if (nil? m)
       (do (selfhost.rt/eprint (str "beagle: no macro named " name "\n"))
@@ -498,14 +518,14 @@
 
 ;; --- macro-application? ------------------------------------------------------
 
-(defn macro-application? [reg :- Any datum :- Any] :- Bool
+(defn macro-application? [reg: Any datum: Any] -> Bool
   (and (datum-pair? datum)
        (string? (datum-car datum))
        (not (nil? (lookup-macro reg (datum-car datum))))))
 
 ;; --- expand-fully! (recursive) — macros.rkt expand-fully ----------------------
 
-(defn expand-fully! [reg :- Any datum :- Any depth :- Int ctx :- Any] :- Any
+(defn expand-fully! [reg: Any datum: Any depth: Int ctx: Any] -> Any
   (cond
     (>= depth MAX-EXPANSION-DEPTH)
       (let [chain (if (nil? ctx) "" (str "\n" (format-expansion-chain ctx)))]
@@ -521,20 +541,20 @@
             expanded (expand-macro! reg name (datum-cdr datum) next-ctx)]
         (expand-fully! reg expanded (+ depth 1) next-ctx))
     (datum-pair? datum)
-      (mapv (fn [item :- Any] :- Any (expand-fully! reg item depth ctx)) datum)
+      (mapv (fn [item: Any] -> Any (expand-fully! reg item depth ctx)) datum)
     :else datum))
 
 ;; === test runner =============================================================
 
-(def passes :- Any (atom []))
-(def failures :- Any (atom []))
+(def passes: Any (atom []))
+(def failures: Any (atom []))
 
-(defn- expect! [label :- String result :- Bool] :- Nil
+(defn- expect! [label: String result: Bool] -> Nil
   (if result
     (do (swap! passes conj true) nil)
     (do (swap! failures conj label) nil)))
 
-(defn run-tests! [] :- Int
+(defn run-tests! [] -> Int
   (reset! passes [])
   (reset! failures [])
   (reset-lowering-counter!)

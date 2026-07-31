@@ -7,7 +7,7 @@
 ;; ready-to-insert clause skeletons.
 (defunion Shape Circle Square Triangle)
 
-(defn area-hint [s :- Shape] :- String
+(defn area-hint [s: Shape] -> String
   (match s
     (Circle "round")
     (Square "boxy")))

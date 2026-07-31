@@ -1,5 +1,5 @@
 (ns g)
-(defn classify [n :- Int] :- String
+(defn classify [n: Int] -> String
   (cond
     [(< n 0) "negative"]
     [(= n 0) "zero"]

@@ -2,7 +2,7 @@
 ;; defcomponent: an ECS-style macro that generates a component record and
 ;; splices the author's fields in, auto-adding an `active` flag.
 (defmacro defcomponent [name fields]
-  `(defrecord ~name [~@fields active :- Bool]))
+  `(defrecord ~name [~@fields active: Bool]))
 
-(defcomponent Position [x :- F32 y :- F32 z :- F32])
-(defcomponent Velocity [dx :- F32 dy :- F32 dz :- F32])
+(defcomponent Position [x: F32 y: F32 z: F32])
+(defcomponent Velocity [dx: F32 dy: F32 dz: F32])

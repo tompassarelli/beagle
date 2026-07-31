@@ -41,7 +41,7 @@
 ;; --- single-string (ms "STR-WITH-\\n") → ~''…'' -----------------------------
 
 (test-case "single-string (ms \"STR-WITH-\\n\") gets normalized"
-  (define before "#lang beagle/nix\n(ns t)\n(def x : Any (ms \"alpha\\nbeta\\ngamma\\n\"))\n")
+  (define before "#lang beagle/nix\n(ns t)\n(def x: Any (ms \"alpha\\nbeta\\ngamma\\n\"))\n")
   (define after (run-normalize before))
   (check-true (regexp-match? #rx"~''" after) "result contains ~''")
   (check-false (regexp-match? #rx"\\(ms \"" after)
@@ -55,7 +55,7 @@
 (test-case "multi-operand (ms STR-\\n EXPR STR-\\n) gets normalized"
   (define before
     (string-append
-     "#lang beagle/nix\n(ns t)\n(def x : Any\n"
+     "#lang beagle/nix\n(ns t)\n(def x: Any\n"
      "  (ms \"start\\nHOSTNAME=$(\"\n"
      "      pkgs.hostname\n"
      "      \"/bin/hostname)\\nend\\n\"))\n"))
@@ -71,14 +71,14 @@
 ;; --- canonical multi-operand (no \\n) left alone ----------------------------
 
 (test-case "canonical (ms \"a\" \"b\") is NOT rewritten"
-  (define before "#lang beagle/nix\n(ns t)\n(def x : Any (ms \"a\" \"b\" \"c\"))\n")
+  (define before "#lang beagle/nix\n(ns t)\n(def x: Any (ms \"a\" \"b\" \"c\"))\n")
   (define after (run-normalize before))
   (check-equal? after before "no change for canonical multi-operand"))
 
 ;; --- literal-$ escape inserted for ${X} in body -----------------------------
 
 (test-case "literal ${X} in body becomes ''${X} after normalize"
-  (define before "#lang beagle/nix\n(ns t)\n(def x : Any (ms \"echo ${HOME}\\nbye\\n\"))\n")
+  (define before "#lang beagle/nix\n(ns t)\n(def x: Any (ms \"echo ${HOME}\\nbye\\n\"))\n")
   (define after (run-normalize before))
   (check-true (regexp-match? #rx"''\\$\\{HOME\\}" after)
               "''${HOME} appears in output"))
@@ -88,7 +88,7 @@
 (test-case "literal '' in body becomes ''' after normalize"
   ;; Racket string with embedded \\\"\\\" is two double-quote chars; we
   ;; want two SINGLE-quote chars: use the string ''
-  (define before "#lang beagle/nix\n(ns t)\n(def x : Any (ms \"first\\npair = '';\\nlast\\n\"))\n")
+  (define before "#lang beagle/nix\n(ns t)\n(def x: Any (ms \"first\\npair = '';\\nlast\\n\"))\n")
   (define after (run-normalize before))
   (check-true (regexp-match? #rx"'''" after)
               "''' (triple-quote escape) appears in output"))
@@ -96,7 +96,7 @@
 ;; --- idempotence ------------------------------------------------------------
 
 (test-case "normalize is idempotent"
-  (define before "#lang beagle/nix\n(ns t)\n(def x : Any (ms \"alpha\\nbeta\\n\"))\n")
+  (define before "#lang beagle/nix\n(ns t)\n(def x: Any (ms \"alpha\\nbeta\\n\"))\n")
   (define once (run-normalize before))
   (define twice (run-normalize once))
   (check-equal? twice once "second run is a no-op"))
@@ -104,7 +104,7 @@
 ;; --- dry-run mode -----------------------------------------------------------
 
 (test-case "--dry-run does not modify file"
-  (define before "#lang beagle/nix\n(ns t)\n(def x : Any (ms \"alpha\\nbeta\\n\"))\n")
+  (define before "#lang beagle/nix\n(ns t)\n(def x: Any (ms \"alpha\\nbeta\\n\"))\n")
   (define-values (stdout after-file) (run-dry-run before))
   (check-equal? after-file before "file unchanged after --dry-run")
   (check-true (regexp-match? #rx"would normalise" stdout)))

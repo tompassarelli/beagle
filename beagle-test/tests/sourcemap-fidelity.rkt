@@ -215,8 +215,8 @@
    ;; -------------------------------------------------------------------------
    (hash 'id 'when-body-type-error
          'category 'sugar-when-body
-         'src "(defn g [(n :- Int)] :- Nil nil)
-(defn f [(x :- Int)] :- Nil
+         'src "(defn g [(n: Int)] -> Nil nil)
+(defn f [(x: Int)] -> Nil
   (when true
     (g \"boom\")))"
          ;; Layout (1-indexed):
@@ -241,8 +241,8 @@
    ;; to a kind-mismatch that the harness records but does not double-count.
    (hash 'id 'when-condition-non-bool
          'category 'sugar-when-condition
-         'src "(defn need-string [(s :- String)] :- Nil nil)
-(defn f [] :- Nil
+         'src "(defn need-string [(s: String)] -> Nil nil)
+(defn f [] -> Nil
   (when
     (need-string 42)
     nil))"
@@ -251,7 +251,7 @@
          ;; `when` line.
          ;;   1: #lang
          ;;   2: (defn need-string …)
-         ;;   3: (defn f [] :- Nil
+         ;;   3: (defn f [] -> Nil
          ;;   4:   (when
          ;;   5:     (need-string 42)
          ;;   6:     nil))
@@ -264,8 +264,8 @@
    ;; -------------------------------------------------------------------------
    (hash 'id 'if-let-then-type-error
          'category 'sugar-if-let
-         'src "(defn g [(n :- Int)] :- Nil nil)
-(defn f [(opt :- Int?)] :- Nil
+         'src "(defn g [(n: Int)] -> Nil nil)
+(defn f [(opt: Int?)] -> Nil
   (if-let [x opt]
     (g \"boom\")
     nil))"
@@ -284,9 +284,9 @@
    ;; -------------------------------------------------------------------------
    (hash 'id 'thread-first-mid-step-mismatch
          'category 'sugar-thread-first
-         'src "(defn double [(n :- Int)] :- Int (+ n n))
-(defn need-string [(s :- String)] :- Nil nil)
-(defn f [] :- Nil
+         'src "(defn double [(n: Int)] -> Int (+ n n))
+(defn need-string [(s: String)] -> Nil nil)
+(defn f [] -> Nil
   (-> 1
       (double)
       (need-string)))"
@@ -306,9 +306,9 @@
    ;; -------------------------------------------------------------------------
    (hash 'id 'some-thread-first-mid-step-mismatch
          'category 'sugar-some-thread-first
-         'src "(defn double [(n :- Int)] :- Int (+ n n))
-(defn need-string [(s :- String)] :- Nil nil)
-(defn f [(opt :- Int?)] :- Nil
+         'src "(defn double [(n: Int)] -> Int (+ n n))
+(defn need-string [(s: String)] -> Nil nil)
+(defn f [(opt: Int?)] -> Nil
   (some-> opt
           (double)
           (need-string)))"
@@ -328,8 +328,8 @@
    ;; -------------------------------------------------------------------------
    (hash 'id 'cond-flat-pair-result-mismatch
          'category 'cond-clause-result
-         'src "(defn g [(n :- Int)] :- Nil nil)
-(defn f [] :- Nil
+         'src "(defn g [(n: Int)] -> Nil nil)
+(defn f [] -> Nil
   (cond
     true (g \"boom\")
     :else nil))"
@@ -348,15 +348,15 @@
    ;; -------------------------------------------------------------------------
    (hash 'id 'get-literal-key-non-record
          'category 'kw-access-via-get
-         'src "(defrecord Point [(x : Int) (y : Int)])
-(defn f [(p :- Point)] :- String
+         'src "(defrecord Point [(x: Int) (y: Int)])
+(defn f [(p: Point)] -> String
   (get p :x))"
          ;;   1: #lang
          ;;   2: (defrecord …)
          ;;   3: (defn f …)
          ;;   4:   (get p :x))
          ;; Expected: line 3 or line 4. The actual mismatch is the return-type
-         ;; lie at the `:- String` site (line 3) since field x : Int. We expect
+         ;; lie at the `-> String` site (line 3) since field x: Int. We expect
          ;; the diagnostic to point at line 4 (where the get is) — the body
          ;; expression that produced the wrong type.
          'expected 4
@@ -368,8 +368,8 @@
    ;; -------------------------------------------------------------------------
    (hash 'id 'kw-shorthand-non-record
          'category 'kw-access-shorthand
-         'src "(defrecord Point [(x : Int) (y : Int)])
-(defn f [(p :- Point)] :- String
+         'src "(defrecord Point [(x: Int) (y: Int)])
+(defn f [(p: Point)] -> String
   (:x p))"
          ;;   1: #lang
          ;;   2: (defrecord …)
@@ -380,17 +380,17 @@
          'kind 'return-type)
 
    ;; -------------------------------------------------------------------------
-   ;; 9. (defn f [x :- Int] :- String x) — return-type mismatch. Blame x's
-   ;;    position (or :- line). The canonical "where the lie was made".
+   ;; 9. (defn f [x: Int] -> String x) — return-type mismatch. Blame x's
+   ;;    position (or `->` line). The canonical "where the lie was made".
    ;; -------------------------------------------------------------------------
    (hash 'id 'defn-return-type-mismatch
          'category 'defn-direct
-         'src "(defn f [(x :- Int)] :- String
+         'src "(defn f [(x: Int)] -> String
   x)"
          ;;   1: #lang
-         ;;   2: (defn f [(x :- Int)] :- String
+         ;;   2: (defn f [(x: Int)] -> String
          ;;   3:   x)
-         ;; The mismatch is "body returns Int but :- says String". Body's
+         ;; The mismatch is "body returns Int but `->` says String". Body's
          ;; last expr is `x` at line 3. The check.rkt:706 diagnostic uses
          ;; `#:src (src-for (last body))` — but bare symbol `x` is rejected
          ;; by store-src! (not stored, line 76 of ast.rkt). So srcloc is
@@ -407,8 +407,8 @@
    ;; -------------------------------------------------------------------------
    (hash 'id 'kw-shorthand-multiline
          'category 'kw-access-shorthand-multiline
-         'src "(defrecord Point [(x : Int) (y : Int)])
-(defn f [(p :- Point)] :- String
+         'src "(defrecord Point [(x: Int) (y: Int)])
+(defn f [(p: Point)] -> String
   (:x
    p))"
          ;;   1: #lang
@@ -430,8 +430,8 @@
    ;; -------------------------------------------------------------------------
    (hash 'id 'control-if-direct-body-mismatch
          'category 'control-direct-if
-         'src "(defn g [(n :- Int)] :- Nil nil)
-(defn f [(x :- Int)] :- Nil
+         'src "(defn g [(n: Int)] -> Nil nil)
+(defn f [(x: Int)] -> Nil
   (if true
     (g \"boom\")
     nil))"

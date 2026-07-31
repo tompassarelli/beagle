@@ -6,7 +6,7 @@
 (declare-extern Socket/connect [Any Int -> Nil])
 
 (defn connect-with-timeout
-  [sock :- Socket
-   addr :- InetSocketAddress
-   timeout-ms :- Int] :- Nil
+  [sock: Socket
+   addr: InetSocketAddress
+   timeout-ms: Int] -> Nil
   (Socket/connect sock addr timeout-ms))

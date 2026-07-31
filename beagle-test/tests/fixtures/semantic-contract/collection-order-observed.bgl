@@ -1,4 +1,4 @@
 (ns semantic-contract.collection-order-observed)
 
-(defn first-key [record :- (Map Keyword Int)] :- Keyword
+(defn first-key [record: (Map Keyword Int)] -> Keyword
   (first (keys record)))

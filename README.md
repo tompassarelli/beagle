@@ -41,7 +41,7 @@ $ cat src/main.bzig
 #lang beagle/zig
 (ns main)
 
-(defn main [] :- Nil
+(defn main [] -> Nil
   (println "hello from beagle"))
 
 $ beagle build --target zig --exe ./hello src/main.bzig
@@ -60,7 +60,7 @@ Three lines of Beagle:
 
 ```clojure
 (ns g)
-(defn calc [a :- Int b :- Int c :- Int] :- Int
+(defn calc [a: Int b: Int c: Int] -> Int
   (+ (* a b) (- c a) (quot b 2) (rem c 3) (mod a 5)))
 ```
 

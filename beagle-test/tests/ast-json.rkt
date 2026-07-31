@@ -84,12 +84,12 @@
 
    (test-case "plain symbol binding still works"
      (define json
-       (parse+check-json "(ns t)\n(defn f [] :- String (let [x \"hello\"] x))"))
+       (parse+check-json "(ns t)\n(defn f [] -> String (let [x \"hello\"] x))"))
      (check-equal? (hash-ref (first-let-binding json) 'name) "x"))
 
    (test-case "seq-destructure let target"
      (define json
-       (parse+check-json "(ns t)\n(defn f [] :- String (let [[a b] [\"x\" \"y\"]] (str a b)))"))
+       (parse+check-json "(ns t)\n(defn f [] -> String (let [[a b] [\"x\" \"y\"]] (str a b)))"))
      (define name (hash-ref (first-let-binding json) 'name))
      (check-equal? (hash-ref name 'type)  "seq-destructure")
      (check-equal? (hash-ref name 'names) '("a" "b"))
@@ -97,7 +97,7 @@
 
    (test-case "map-destructure let target"
      (define json
-       (parse+check-json "(ns t)\n(defn f [] :- String (let [{:keys [x y]} {:x \"a\" :y \"b\"}] (str x y)))"))
+       (parse+check-json "(ns t)\n(defn f [] -> String (let [{:keys [x y]} {:x \"a\" :y \"b\"}] (str x y)))"))
      (define name (hash-ref (first-let-binding json) 'name))
      (check-equal? (hash-ref name 'type) "map-destructure")
      (check-equal? (hash-ref name 'keys) '("x" "y"))
@@ -105,14 +105,14 @@
 
    (test-case "map-destructure with :as"
      (define json
-       (parse+check-json "(ns t)\n(defn f [] :- String (let [{:keys [x] :as m} {:x \"z\"}] x))"))
+       (parse+check-json "(ns t)\n(defn f [] -> String (let [{:keys [x] :as m} {:x \"z\"}] x))"))
      (define name (hash-ref (first-let-binding json) 'name))
      (check-equal? (hash-ref name 'type) "map-destructure")
      (check-equal? (hash-ref name 'as)   "m"))
 
    (test-case "nested seq-destructure"
      (define json
-       (parse+check-json "(ns t)\n(defn f [] :- String (let [[[a b] c] [[\"p\" \"q\"] \"r\"]] (str a b c)))"))
+       (parse+check-json "(ns t)\n(defn f [] -> String (let [[[a b] c] [[\"p\" \"q\"] \"r\"]] (str a b c)))"))
      (define name (hash-ref (first-let-binding json) 'name))
      (check-equal? (hash-ref name 'type) "seq-destructure")
      (define inner (car (hash-ref name 'names)))

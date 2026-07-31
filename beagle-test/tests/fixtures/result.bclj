@@ -4,5 +4,5 @@
 (define-mode strict)
 
 (defunion (Result T E)
-  (Ok [(value : T)])
-  (Err [(error : E)]))
+  (Ok [(value: T)])
+  (Err [(error: E)]))

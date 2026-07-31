@@ -5,7 +5,7 @@
 ;; class), a changed message is diag-divergent (regen after review).
 (ns conformance.reject-type-mismatch)
 
-(defn takes-int [n :- Int] :- Nil nil)
+(defn takes-int [n: Int] -> Nil nil)
 
-(defn boom [] :- Nil
+(defn boom [] -> Nil
   (takes-int "not an int"))

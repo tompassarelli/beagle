@@ -20,7 +20,8 @@
          ;; / repair / hook path) parse with the SAME table — no second copy to
          ;; drift out of sync (#19; the #18 dynamic-var divergence was a symptom).
          (only-in "../lang/reader-impl.rkt"
-                  fn-shorthand->fn reading-fn-shorthand? beagle-readtable))
+                  fn-shorthand->fn reading-fn-shorthand? beagle-readtable)
+         (only-in "tags.rkt" ANN-MARKER ann))
 
 ;; --- structured parse errors ------------------------------------------------
 ;;
@@ -366,8 +367,8 @@
       [(list* (and head (or 'defn 'defn-)) (? symbol? name) (? string? _) rest)
        #:when (pair? rest)
        (list* head name rest)]
-      [(list (and head (or 'def 'defonce)) (? symbol? name) ':- type-expr (? string? _) value)
-       (list head name ':- type-expr value)]
+      [(list (and head (or 'def 'defonce)) (? symbol? name) (? annotation-marker? m) type-expr (? string? _) value)
+       (list head name m type-expr value)]
       [(list (and head (or 'def 'defonce)) (? symbol? name) (? string? _) value)
        (list head name value)]
       [_ d]))
@@ -425,7 +426,7 @@
     (when (and imp-symbol-ns (referred? name))
       (hash-set! imp-symbol-ns name prefix)))
   ;; defn-reg! — register an inferred function type for a defn. No
-  ;; out-of-band claim pre-pass: claim has been removed; inline `:-`
+  ;; out-of-band claim pre-pass: claim has been removed; postfix `:`
   ;; annotations on def/defonce/defn are the only typed-binding surface.
   (define (defn-reg! name type)
     (reg! name type))
@@ -450,7 +451,7 @@
          (reg! name (parse-type type-expr)))]
       [(list 'declare-extern (? symbol? name) type-expr)
        (reg! name (parse-type type-expr))]
-      [(list 'define-macro (or 'proc 'beagle) (? symbol? name) typed-params ': ret-type body)
+      [(list 'define-macro (or 'proc 'beagle) (? symbol? name) typed-params (? nested-return-marker? _) ret-type body)
        (define macro-kind (cadr d))
        (define raw-params
          (cond
@@ -461,7 +462,7 @@
          (for/lists (ns cs)
                     ([p (in-list raw-params)])
            (cond
-             [(and (list? p) (= (length p) 3) (symbol? (car p)) (eq? (cadr p) ':))
+             [(and (list? p) (= (length p) 3) (symbol? (car p)) (annotation-marker? (cadr p)))
               (values (car p) (caddr p))]
              [else (values (if (symbol? p) p (fresh-lowered-sym 'p)) 'Syntax)])))
        (define qname (qualify-name prefix name))
@@ -573,7 +574,7 @@
            (parameterize ([current-type-vars (append type-vars (current-type-vars))])
              (for/list ([item (in-list field-items)])
                (cond
-                 [(and (list? item) (= (length item) 3) (symbol? (car item)) (eq? (cadr item) ':))
+                 [(and (list? item) (= (length item) 3) (symbol? (car item)) (annotation-marker? (cadr item)))
                   (param (car item) (parse-type (caddr item)))]
                  [else (param (if (symbol? item) item (car item)) (type-prim 'Any))]))))
          (hash-set! member-fields-hash mname fields)
@@ -596,43 +597,32 @@
                     (hasheq 'params type-vars
                             'members mnames
                             'member-fields member-fields-hash)))]
-      ;; Inline `:-` annotations on def/defonce/defn: register the typed shape
+      ;; Postfix `:` annotations on def/defonce/defn: register the typed shape
       ;; so imported modules surface the annotated type to call sites in the
       ;; importing module.
-      [(list 'def (? symbol? name) ':- type-expr _)
+      [(list 'def (? symbol? name) (? def-annotation-marker? _) type-expr _)
        (reg! name (parse-type type-expr))]
-      [(list 'defonce (? symbol? name) ':- type-expr _)
+      [(list 'defonce (? symbol? name) (? def-annotation-marker? _) type-expr _)
        (reg! name (parse-type type-expr))]
       ;; ^:dynamic defs — the name is wrapped in (#%meta MV name), so the plain
       ;; (? symbol? name) arms above miss them. Import the var (typed or Any) AND
       ;; record its dynamic-ness so a requiring module's `binding` resolves it
       ;; across the module boundary, matching Clojure (G-A).
-      [(list 'def (list '#%meta mv (? symbol? name)) ':- type-expr _)
+      [(list 'def (list '#%meta mv (? symbol? name)) (? annotation-marker? _) type-expr _)
        (reg! name (parse-type type-expr))
        (when (meta-dynamic? mv) (note-dyn! name))]
       [(list 'def (list '#%meta mv (? symbol? name)) _)
        (reg! name (type-prim 'Any))
        (when (meta-dynamic? mv) (note-dyn! name))]
-      [(list 'defn (? symbol? name) params-form ':- return-type _ ...)
+      [(list 'defn (? symbol? name) params-form (? return-marker? _) return-type _ ...)
        (define-values (parsed rest-p) (parse-params params-form))
        (define ptypes (map (lambda (p) (or (param-type p) (type-prim 'Any))) parsed))
        (define rtype (and rest-p (or (param-type rest-p) (type-prim 'Any))))
        (defn-reg! name (type-fn ptypes rtype (parse-type return-type)))]
-      ;; Bare `:` is not the inline marker — same hard-rejection as on the
-      ;; authoring side, but the importer surfaces a clearer-yet-still-pointed
-      ;; pointer at `:-` so the migration target is unambiguous either way.
-      [(list 'def (? symbol? name) ': _ _)
-       (raise-parse-error 'inline-type-annotation
-                          "(def ~a : ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (def ~a :- TYPE VALUE)"
-                          name name)]
-      [(list 'defonce (? symbol? name) ': _ _)
-       (raise-parse-error 'inline-type-annotation
-                          "(defonce ~a : ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (defonce ~a :- TYPE VALUE)"
-                          name name)]
-      [(list 'defn (? symbol? name) _ ': _ _ ...)
-       (raise-parse-error 'inline-type-annotation
-                          "(defn ~a [params] : RET ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (defn ~a [params] :- RET body...)"
-                          name name)]
+      ;; The importer mirrors the authoring side's return-position rejection so
+      ;; a stale `[params] : RET` module fails here too, not silently as Any.
+      [(list 'defn (? symbol? name) _ (or (== ANN-MARKER) ':) _ _ ...)
+       (raise-return-marker-confusion (format "defn ~a" name))]
       [(list 'defn (? symbol? name) params-form body ...)
        (define-values (parsed rest-p) (parse-params params-form))
        (define ptypes (map (lambda (p) (or (param-type p) (type-prim 'Any))) parsed))
@@ -1038,6 +1028,11 @@
                         #:source-path [source-path #f]
                         #:module-resolver [module-resolver #f])
   (define raw-datums (map syntax->datum stxs*))
+
+  ;; One migration notice per source that still spells annotations `:-`.
+  (when (ormap datum-has-legacy-marker? raw-datums)
+    (note-legacy-marker! (or source-path
+                             (and (pair? stxs*) (syntax-source (car stxs*))))))
 
   ;; Determine target up-front so reader-conditionals can be resolved before
   ;; any per-form parsing. `define-target` appears as a datum produced by the
@@ -1459,7 +1454,7 @@
             (raise-parse-error 'bad-meta-value
                                "(ns ~a ...): unsupported ns clause ~v — supported: docstring, (:require libspec ...), (:import spec ...)" n clause)]))]
 
-      [(list 'define-macro (or 'proc 'beagle) (? symbol? name) typed-params ': ret-type body)
+      [(list 'define-macro (or 'proc 'beagle) (? symbol? name) typed-params (? nested-return-marker? _) ret-type body)
        (validate-identifier! name "macro")
        (define macro-kind (cadr d))
        (define raw-params
@@ -1472,7 +1467,7 @@
          (for/lists (names contracts)
                     ([p (in-list raw-params)])
            (cond
-             [(and (list? p) (= (length p) 3) (symbol? (car p)) (eq? (cadr p) ':))
+             [(and (list? p) (= (length p) 3) (symbol? (car p)) (annotation-marker? (cadr p)))
               (values (car p) (caddr p))]
              [(symbol? p)
               (values p 'Syntax)]
@@ -1816,26 +1811,90 @@
     [else (error 'beagle "unsupported expression: ~v" d)])
    loc))
 
-;; Type-annotation markers.
+;; Type-annotation markers. Two POSITIONS, each with its own marker:
 ;;
-;; Two markers are recognized:
-;;   `:-`  — canonical inline marker. Accepted in all positions:
-;;            top-level (def NAME :- TYPE VALUE),
-;;            param/let bindings inline (NAME :- TYPE VALUE),
-;;            wrapped (NAME :- TYPE),
-;;            defn return type (defn f [...] :- RET ...).
-;;   `:`   — legacy marker. Accepted ONLY inside wrapped forms
-;;            (e.g. `(x : Int)` in params, defrecord fields, fn return
-;;            arrows in arity clauses) for backward compat with existing
-;;            sources. Top-level inline `(def NAME : TYPE VALUE)` is
-;;            still rejected — that arm now points authors at `:-`.
+;;   binding  — `NAME: TYPE` (the reader's ANN-MARKER). Params, let/loop/for
+;;              bindings, def/defonce, record/union/error fields, wrapped
+;;              `(NAME: TYPE)` pairs.
+;;   return   — `-> RET`. defn/defn-/fn/letfn/arity clauses, protocol and
+;;              impl methods, jst methods.
 ;;
-;; `annotation-marker?` is the predicate used inside wrapped/arity-clause
-;; positions where both markers are acceptable. The top-level rejection
-;; arms for inline `:` use `(eq? marker ':)` directly so they can produce
-;; a marker-specific error message.
+;; DUAL-ACCEPT (this cut only): legacy `:-` is still accepted in BOTH positions
+;; so the corpus can migrate in parallel. ANN-MARKER in RETURN position is
+;; rejected pointing at `->` — the legacy bare-`:` return corpus (`[...] : Bool`)
+;; now reads as ANN-MARKER there and must migrate loudly, not silently.
+(define LEGACY-MARKER ':-)
+
 (define (annotation-marker? sym)
-  (or (eq? sym ':-) (eq? sym ':)))
+  (or (eq? sym ANN-MARKER) (eq? sym LEGACY-MARKER) (eq? sym ':)))
+
+;; def/defonce head position never accepted bare `:`; keep that narrow so a
+;; structurally-built `(def x : T v)` datum still gets its pointed rejection.
+;; (Source text can no longer produce bare `:` at all — the reader eats it.)
+(define (def-annotation-marker? sym)
+  (or (eq? sym ANN-MARKER) (eq? sym LEGACY-MARKER)))
+
+(define (return-marker? sym)
+  (or (eq? sym '->) (eq? sym LEGACY-MARKER)))
+
+;; fn / arity clauses / letfn / protocol+impl methods historically also took a
+;; bare `:` return marker. Source text can no longer produce one, so this only
+;; keeps structurally-built datums (tests, macro output) parsing as before.
+(define (nested-return-marker? sym)
+  (or (return-marker? sym) (eq? sym ':)))
+
+;; Any datum the reader can put where a marker is expected — used by the
+;; bare-multi-arity bail-out so a malformed return reaches its pointed arm.
+(define (any-marker? sym)
+  (or (eq? sym ANN-MARKER) (eq? sym LEGACY-MARKER) (eq? sym '->)))
+
+;; `#%:` never reaches printed output; render it as the source spelling.
+(define (marker->src sym) (if (eq? sym ANN-MARKER) ": " (format "~a " sym)))
+
+;; `[a :Int]` — the colon glued to the TYPE instead of the NAME, so the reader
+;; produced a keyword. Callers gate on position: in a param/field slot ANY
+;; keyword is this mistake; in a let/for slot a keyword is a legal VALUE, so
+;; only the over-long `[a :Int VALUE]` shape can be it.
+(define (raise-keyword-annotation-confusion name kw)
+  (raise-parse-error 'inline-type-annotation
+                     "unexpected keyword ~a after binding ~a; did you mean ~a: ~a?"
+                     kw name name (substring (symbol->string kw) 1)))
+
+(define (raise-dangling-marker where)
+  (raise-parse-error 'inline-type-annotation
+                     "dangling `:` in ~a — the postfix annotation marker needs a NAME before it and a TYPE after it:\n  [name: Type]"
+                     where))
+
+(define (raise-return-marker-confusion where)
+  (raise-parse-error 'inline-type-annotation
+                     "`:` is not the return-type marker in ~a — write `-> RET`:\n  (~a [params...] -> RET body...)"
+                     where where))
+
+;; Legacy `:-` migration diagnostic. One notice per source; the removal task
+;; flips the default mode to 'error and deletes LEGACY-MARKER from the
+;; predicates above.
+(define legacy-annotation-marker-mode (make-parameter 'warn))
+(define legacy-marker-reported (make-hash))
+
+(define (legacy-marker-message)
+  "`:-` is the legacy type-annotation marker — write `name: Type` for bindings and `-> Ret` for returns")
+
+(define (note-legacy-marker! src)
+  (case (legacy-annotation-marker-mode)
+    [(error) (raise-parse-error 'legacy-annotation-marker "~a" (legacy-marker-message))]
+    [(quiet) (void)]
+    [else
+     (define key (or src 'unknown-source))
+     (unless (hash-ref legacy-marker-reported key #f)
+       (hash-set! legacy-marker-reported key #t)
+       (eprintf "warning [legacy-annotation-marker] ~a: ~a\n" key (legacy-marker-message)))]))
+
+(define (datum-has-legacy-marker? d)
+  (cond
+    [(eq? d LEGACY-MARKER) #t]
+    [(pair? d) (or (datum-has-legacy-marker? (car d))
+                   (datum-has-legacy-marker? (cdr d)))]
+    [else #f]))
 
 (define (multi-arity-form? d)
   (and (pair? d) (list? d)
@@ -1872,12 +1931,12 @@
   ;; success, or #f if `args` is not bare-vector multi-arity.
   (cond
     [(or (null? args) (not (bracketed? (car args)))) #f]
-    ;; A top-level `:-` is a single-arity RETURN annotation
-    ;; (`[params] :- ret body…`), never a multi-arity boundary — so a bracket
-    ;; fn-type return `:- [A -> B]` is NOT a second arity clause (#28). Bail to
-    ;; the single-arity `:-`-return arm. (Multi-arity clause params carry their
-    ;; `:-` INSIDE the bracket, so it never appears as a top-level arg.)
-    [(memq ':- args) #f]
+    ;; A top-level marker is a single-arity RETURN annotation (`[params] -> ret
+    ;; body…`), never a multi-arity boundary — so a bracket fn-type return
+    ;; `-> [A -> B]` is NOT a second arity clause (#28). Bail to the single-arity
+    ;; return arm, or to the pointed rejection when the marker is wrong there.
+    ;; (Multi-arity clause params carry their marker INSIDE the bracket.)
+    [(ormap any-marker? args) #f]
     [else
      ;; Walk args, splitting at each top-level bracket. Each segment
      ;; is (bracket body-form ...). Reject if any segment has no body.
@@ -1917,14 +1976,15 @@
 
 (define (parse-arity-clause clause)
   (unless (and (pair? clause) (list? clause))
-    (error 'beagle "multi-arity clause must be (params body...) or (params :- Type body...)"))
+    (error 'beagle "multi-arity clause must be (params body...) or (params -> Type body...)"))
   (define params-form (car clause))
   (define rest (cdr clause))
   (define-values (parsed rest-p) (parse-params params-form))
   (cond
-    ;; Arity-clause return type: accept either `:-` (canonical) or `:`
-    ;; (legacy). See the `fn` arm in parse-list-form for the rationale.
-    [(and (>= (length rest) 2) (annotation-marker? (car rest)))
+    ;; Arity-clause return type: `->` canonical, `:-` legacy (dual-accept cut).
+    [(and (>= (length rest) 2) (eq? (car rest) ANN-MARKER))
+     (raise-return-marker-confusion "multi-arity clause")]
+    [(and (>= (length rest) 2) (nested-return-marker? (car rest)))
      (arity-clause parsed rest-p
                    (parse-type (cadr rest))
                    (map parse-expr (cddr rest)))]
@@ -1933,7 +1993,7 @@
                    #f
                    (map parse-expr rest))]))
 
-;; Parse letfn function list: [(f [params] body...) (g [params] : Ret body...)]
+;; Parse letfn function list: [(f [params] body...) (g [params] -> Ret body...)]
 (define (parse-letfn-fns form)
   (define d (->datum form))
   (define items (unwrap-items d "letfn function list"))
@@ -1946,9 +2006,10 @@
     (define rest (cddr item))
     (define-values (parsed rest-p) (parse-params params-form))
     (cond
-      ;; letfn return type: accept either `:-` (canonical) or `:` (legacy).
-      ;; See the `fn` arm in parse-list-form for the rationale.
-      [(and (>= (length rest) 2) (annotation-marker? (car rest)))
+      ;; letfn return type: `->` canonical, `:-` legacy (dual-accept cut).
+      [(and (>= (length rest) 2) (eq? (car rest) ANN-MARKER))
+       (raise-return-marker-confusion (format "letfn ~a" name))]
+      [(and (>= (length rest) 2) (nested-return-marker? (car rest)))
        (letfn-fn name parsed rest-p
                  (parse-type (cadr rest))
                  (map parse-expr (cddr rest)))]
@@ -2357,7 +2418,7 @@
     (raise-parse-error 'removed-form
                        "case removed — use (match x [v1 body] [v2 body] [_ default]) or (match x [(or v1 v2) shared-body] [_ default]); literal-only matches case-fold to target-native dispatch in emit")))
 
-;; `fn` — anonymous function; optional `:-`/`:` return-type marker.
+;; `fn` — anonymous function; optional `-> RET` return-type marker.
 (register-combiner! 'fn
   (lambda (d subs)
     (match d
@@ -2374,8 +2435,10 @@
        #:when (bare-multi-arity-clauses args)
        (raise-parse-error 'bad-form
          "multi-arity anonymous `fn` is not yet supported — give it a name with `defn` (which supports multi-arity), or use a single arity.")]
+      [(list 'fn params-form (== ANN-MARKER) _ _ ...)
+       (raise-return-marker-confusion "fn")]
       [(list 'fn params-form marker return-type body ...)
-       #:when (annotation-marker? marker)
+       #:when (nested-return-marker? marker)
        (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 1) params-form))])
          (fn-form parsed rest-p
                   (parse-type return-type)
@@ -2386,29 +2449,31 @@
                   #f (parse-body (or (stx-tail subs 2) body))))]
       [_ (parse-list-form* d subs)])))
 
-;; `defonce` — once-only top-level binding, optional `:-` type / docstring.
+;; `defonce` — once-only top-level binding, optional `: TYPE` / docstring.
 (register-combiner! 'defonce
   (lambda (d subs)
     (match d
-      [(list 'defonce (? symbol? name) ':- type-expr (? string? doc) value)
+      [(list 'defonce (? symbol? name) (? def-annotation-marker? _) type-expr (? string? doc) value)
        (defonce-form name (parse-type type-expr)
                      (parse-expr (or (stx-ref subs 5) value))
                      doc)]
-      [(list 'defonce (? symbol? name) ':- type-expr value)
+      [(list 'defonce (? symbol? name) (? def-annotation-marker? _) type-expr value)
        (defonce-form name (parse-type type-expr)
                      (parse-expr (or (stx-ref subs 4) value))
                      #f)]
       [(list 'defonce (? symbol? name) ': _ _)
        (raise-parse-error 'inline-type-annotation
-                          "(defonce ~a : ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (defonce ~a :- TYPE VALUE)"
+                          "(defonce ~a : ...) — write the postfix marker on the NAME:\n  (defonce ~a: TYPE VALUE)"
                           name name)]
+      [(list 'defonce (? symbol? _) (== ANN-MARKER) _)
+       (raise-dangling-marker "defonce")]
       [(list 'defonce (? symbol? name) (? string? doc) value)
        (defonce-form name #f (parse-expr (or (stx-ref subs 3) value)) doc)]
       [(list 'defonce (? symbol? name) value)
        (defonce-form name #f (parse-expr (or (stx-ref subs 2) value)) #f)]
       [(cons 'defonce _)
        (raise-parse-error 'bad-form
-                          "malformed defonce — expected (defonce NAME VALUE), (defonce NAME \"doc\" VALUE), or (defonce NAME :- TYPE VALUE); got: ~v" d)]
+                          "malformed defonce — expected (defonce NAME VALUE), (defonce NAME \"doc\" VALUE), or (defonce NAME: TYPE VALUE); got: ~v" d)]
       [_ (parse-list-form* d subs)])))
 
 ;; `set!` — mutable assignment.
@@ -2594,36 +2659,40 @@
          [else (loop (cddr kvs))]))]
     [else #f]))
 
-;; `def` — top-level binding; inline `:-` type, optional docstring; optional
-;; `^:dynamic` (and other) metadata on the name; bare `:` rejected; any other
-;; def shape guarded (no silent call-form bypass).
+;; `def` — top-level binding; postfix `NAME: TYPE`, optional docstring; optional
+;; `^:dynamic` (and other) metadata on the name; any other def shape guarded
+;; (no silent call-form bypass).
 (register-combiner! 'def
   (lambda (d subs)
     (match d
-      [(list 'def (? symbol? name) ':- type-expr (? string? doc) value)
+      [(list 'def (? symbol? name) (? def-annotation-marker? _) type-expr (? string? doc) value)
        (def-form name (parse-type type-expr)
                  (parse-expr (or (stx-ref subs 5) value))
                  doc #f)]
-      [(list 'def (? symbol? name) ':- type-expr value)
+      [(list 'def (? symbol? name) (? def-annotation-marker? _) type-expr value)
        (def-form name (parse-type type-expr)
                  (parse-expr (or (stx-ref subs 4) value))
                  #f #f)]
-      ;; Inline bare `:` on def is the legacy surface; reject and point at `:-`.
       [(list 'def (? symbol? name) ': _ _)
        (raise-parse-error 'inline-type-annotation
-                          "(def ~a : ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (def ~a :- TYPE VALUE)"
+                          "(def ~a : ...) — write the postfix marker on the NAME:\n  (def ~a: TYPE VALUE)"
                           name name)]
+      ;; `(def : Int 42)` / `(def x: Int)` — marker with nothing to bind.
+      [(list 'def (== ANN-MARKER) _ ...)
+       (raise-dangling-marker "def")]
+      [(list 'def (? symbol? _) (== ANN-MARKER) _)
+       (raise-dangling-marker "def")]
       [(list 'def (? symbol? name) (? string? doc) value)
        (def-form name #f (parse-expr (or (stx-ref subs 3) value)) doc #f)]
       [(list 'def (? symbol? name) value)
        (def-form name #f (parse-expr (or (stx-ref subs 2) value)) #f #f)]
       ;; `^:dynamic` (or any) metadata on the name. The metadata lives entirely
       ;; in slot 1, so later `subs` indices match the bare-name arms exactly.
-      [(list 'def (list '#%meta mv (? symbol? name)) ':- type-expr (? string? doc) value)
+      [(list 'def (list '#%meta mv (? symbol? name)) (? def-annotation-marker? _) type-expr (? string? doc) value)
        (def-form name (parse-type type-expr)
                  (parse-expr (or (stx-ref subs 5) value))
                  doc (meta-dynamic? mv))]
-      [(list 'def (list '#%meta mv (? symbol? name)) ':- type-expr value)
+      [(list 'def (list '#%meta mv (? symbol? name)) (? def-annotation-marker? _) type-expr value)
        (def-form name (parse-type type-expr)
                  (parse-expr (or (stx-ref subs 4) value))
                  #f (meta-dynamic? mv))]
@@ -2635,7 +2704,7 @@
       ;; and silently bypass the type layer — guard it (bug class 2026-06-12).
       [(cons 'def _)
        (raise-parse-error 'bad-form
-                          "malformed def — expected (def NAME VALUE), (def NAME \"doc\" VALUE), (def NAME :- TYPE VALUE), or (def NAME :- TYPE \"doc\" VALUE); got: ~v" d)]
+                          "malformed def — expected (def NAME VALUE), (def NAME \"doc\" VALUE), (def NAME: TYPE VALUE), or (def NAME: TYPE \"doc\" VALUE); got: ~v" d)]
       [_ (parse-list-form* d subs)])))
 
 ;; `defn` / `defn-` — function definition (public/private). These share several
@@ -2683,10 +2752,10 @@
 
     ;; Schema-style prefix return annotation — common prior from Plumatic
     ;; Schema. Beagle's return annotation goes after the param vector.
-    [(list* (and head (or 'defn 'defn-)) (? symbol? name) ':- _)
+    [(list* (and head (or 'defn 'defn-)) (? symbol? name) (? return-marker? m) _)
      (raise-parse-error 'inline-type-annotation
-                        "(~a ~a :- RET [params] ...) — the return annotation goes after the param vector:\n  (~a ~a [params...] :- RET body...)"
-                        head name head name)]
+                        "(~a ~a ~aRET [params] ...) — the return annotation goes after the param vector:\n  (~a ~a [params...] -> RET body...)"
+                        head name (marker->src m) head name)]
 
     [(list 'defn (? symbol? name) first-clause rest-clauses ...)
      #:when (multi-arity-form? first-clause)
@@ -2702,30 +2771,23 @@
 
     ;; Inline return-type annotations on defn.
     ;;
-    ;; Canonical form uses `:-` (the inline marker). Bare `:` is rejected with
-    ;; a message pointing the author at `:-` — diagnostic-kind reused so the
-    ;; same kind covers both spellings.
+    ;; Canonical form uses `->`. The postfix binding marker `:` is rejected here
+    ;; pointing at `->` — diagnostic-kind reused so one kind covers both.
     ;;
     ;; The `:raises` shape is matched first so the rejection message can name
     ;; both the return type and the raises clause explicitly.
-    [(list 'defn (? symbol? name) params-form ':- return-type ':raises err-type body ...)
+    [(list 'defn (? symbol? name) params-form (? return-marker? _) return-type ':raises err-type body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
                   (parse-type return-type)
                   (parse-body (or (stx-tail subs 7) body)) #f (parse-type err-type) #f))]
-    [(list 'defn (? symbol? name) params-form ':- return-type body ...)
+    [(list 'defn (? symbol? name) params-form (? return-marker? _) return-type body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
                   (parse-type return-type)
                   (parse-body (or (stx-tail subs 5) body)) #f #f #f))]
-    [(list 'defn (? symbol? name) _ ': _ ':raises _ _ ...)
-     (raise-parse-error 'inline-type-annotation
-                        "(defn ~a [params] : RET :raises ERR ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (defn ~a [params] :- RET :raises ERR body...)"
-                        name name)]
-    [(list 'defn (? symbol? name) _ ': _ _ ...)
-     (raise-parse-error 'inline-type-annotation
-                        "(defn ~a [params] : RET ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (defn ~a [params] :- RET body...)"
-                        name name)]
+    [(list 'defn (? symbol? name) _ (or (== ANN-MARKER) ':) _ _ ...)
+     (raise-return-marker-confusion (format "defn ~a" name))]
     [(list 'defn (? symbol? name) params-form body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
@@ -2743,20 +2805,18 @@
      (defn-multi name (map parse-arity-clause
                            (bare-multi-arity-clauses args)) #t #f)]
 
-    [(list 'defn (list '#%meta _ (? symbol? name)) params-form ':- return-type ':raises err-type body ...)
+    [(list 'defn (list '#%meta _ (? symbol? name)) params-form (? return-marker? _) return-type ':raises err-type body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
                   (parse-type return-type)
                   (parse-body (or (stx-tail subs 7) body)) #t (parse-type err-type) #f))]
-    [(list 'defn (list '#%meta _ (? symbol? name)) params-form ':- return-type body ...)
+    [(list 'defn (list '#%meta _ (? symbol? name)) params-form (? return-marker? _) return-type body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
                   (parse-type return-type)
                   (parse-body (or (stx-tail subs 5) body)) #t #f #f))]
-    [(list 'defn (list '#%meta _ (? symbol? name)) _ ': _ _ ...)
-     (raise-parse-error 'inline-type-annotation
-                        "(defn ^:private ~a [params] : RET ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (defn ^:private ~a [params] :- RET body...)"
-                        name name)]
+    [(list 'defn (list '#%meta _ (? symbol? name)) _ (or (== ANN-MARKER) ':) _ _ ...)
+     (raise-return-marker-confusion (format "defn ~a" name))]
     [(list 'defn (list '#%meta _ (? symbol? name)) params-form body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
@@ -2774,24 +2834,18 @@
      (defn-multi name (map parse-arity-clause
                            (bare-multi-arity-clauses args)) #t #f)]
 
-    [(list 'defn- (? symbol? name) params-form ':- return-type ':raises err-type body ...)
+    [(list 'defn- (? symbol? name) params-form (? return-marker? _) return-type ':raises err-type body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
                   (parse-type return-type)
                   (parse-body (or (stx-tail subs 7) body)) #t (parse-type err-type) #f))]
-    [(list 'defn- (? symbol? name) params-form ':- return-type body ...)
+    [(list 'defn- (? symbol? name) params-form (? return-marker? _) return-type body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
                   (parse-type return-type)
                   (parse-body (or (stx-tail subs 5) body)) #t #f #f))]
-    [(list 'defn- (? symbol? name) _ ': _ ':raises _ _ ...)
-     (raise-parse-error 'inline-type-annotation
-                        "(defn- ~a [params] : RET :raises ERR ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (defn- ~a [params] :- RET :raises ERR body...)"
-                        name name)]
-    [(list 'defn- (? symbol? name) _ ': _ _ ...)
-     (raise-parse-error 'inline-type-annotation
-                        "(defn- ~a [params] : RET ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (defn- ~a [params] :- RET body...)"
-                        name name)]
+    [(list 'defn- (? symbol? name) _ (or (== ANN-MARKER) ':) _ _ ...)
+     (raise-return-marker-confusion (format "defn- ~a" name))]
     [(list 'defn- (? symbol? name) params-form body ...)
      (let-values ([(parsed rest-p) (parse-params (or (stx-ref subs 2) params-form))])
        (defn-form name parsed rest-p
@@ -2801,7 +2855,7 @@
     ;; call-form passthrough (silent type-layer bypass — bug class 2026-06-12).
     [(cons (and head (or 'defn 'defn-)) _)
      (raise-parse-error 'bad-form
-                        "malformed ~a — expected (~a name \"doc\"? [params...] :- RET? body...) or multi-arity (~a name ([params] body...) ([params2] body...)); got: ~v"
+                        "malformed ~a — expected (~a name \"doc\"? [params...] -> RET? body...) or multi-arity (~a name ([params] body...) ([params2] body...)); got: ~v"
                         head head head d)]
     [_ (parse-list-form* d subs)]))
 (register-combiner! 'defn parse-defn-form)
@@ -3116,7 +3170,7 @@
        (check-expr (parse-expr (or (stx-ref subs 1) expr)))]
       [_ (parse-list-form* d subs)])))
 
-;; `claim` — HARD-REJECTED; claim is not a form (use inline `:-` annotations).
+;; `claim` — HARD-REJECTED; claim is not a form (use postfix `:` annotations).
 (register-combiner! 'claim
   (lambda (d subs)
     (match d
@@ -3125,8 +3179,8 @@
         (string-append
          "(claim NAME TYPE) — claim is not a form. Beagle's surface is typed "
          "Clojure + inference; use inline annotations: "
-         "`(def NAME :- TYPE VALUE)` for top-level bindings, "
-         "`[param :- TYPE]` and `:- RET-TYPE` for defn."))]
+         "`(def NAME: TYPE VALUE)` for top-level bindings, "
+         "`[param: TYPE]` and `-> RET-TYPE` for defn."))]
       [_ (parse-list-form* d subs)])))
 
 ;; `dotimes` — removed; sugar for (doseq [i (range n)] body...). Pointed rejection.
@@ -3623,11 +3677,6 @@
 
     ;; `flake-input` migrated to the compile-time combiner registry (see register-combiner!).
 
-    ;; `fn` accepts either `:-` (canonical) or `:` (legacy) as the
-    ;; return-type marker. Top-level def/defonce/defn reject bare `:` because
-    ;; their inline-annotation surface was migrated wholesale to `:-`; `fn`
-    ;; and arity-clauses retain `:` acceptance to avoid churning the existing
-    ;; corpus during the migration window.
     ;; `fn` migrated to the compile-time combiner registry (see register-combiner!).
 
     ;; `let` migrated to the compile-time combiner registry (see register-combiner!).
@@ -3953,13 +4002,15 @@
 (define (parse-protocol-method sig)
   (define d (->datum sig))
   (match d
-    [(list (? symbol? name) params-form ': return-type)
+    [(list (? symbol? name) params-form (== ANN-MARKER) _)
+     (raise-return-marker-confusion (format "defprotocol method ~a" name))]
+    [(list (? symbol? name) params-form (? nested-return-marker? _) return-type)
      (let-values ([(parsed _rp) (parse-params params-form)])
        (protocol-method name parsed (parse-type return-type)))]
     [(list (? symbol? name) params-form)
      (let-values ([(parsed _rp) (parse-params params-form)])
        (protocol-method name parsed #f))]
-    [_ (error 'beagle "defprotocol method signature must be (name [params] : RetType) or (name [params]), got: ~v" d)]))
+    [_ (error 'beagle "defprotocol method signature must be (name [params] -> RetType) or (name [params]), got: ~v" d)]))
 
 (define (parse-with-form target-stx updates)
   (define target (parse-expr target-stx))
@@ -4268,15 +4319,15 @@
 
 ;; Param lists support four intermixable shapes:
 ;;   1. bare name (untyped):              x
-;;   2. wrapped + annotation:             (x :- T)  or  (x : T) (legacy)
-;;   3. inline annotation (alternation):  x :- T    — `:-` follows the name
+;;   2. wrapped + annotation:             (x: T)
+;;   3. postfix annotation (alternation): x: T
 ;;   4. map destructure:                  {:keys [a b c]} or {:keys [a b c] :as m}
 ;;
-;; Inline `:-` walks left-to-right via `parse-typed-params` — when the item
-;; after a bare-symbol name is `:-`, the next item is consumed as that name's
-;; type; otherwise the name is untyped.
+;; `parse-typed-params` walks left-to-right — when the item after a bare-symbol
+;; name is the annotation marker, the next item is consumed as that name's type;
+;; otherwise the name is untyped.
 ;;
-;; Example: `[a :- Int b c :- String]` → a:Int, b:inferred, c:String.
+;; Example: `[a: Int b c: String]` → a:Int, b:inferred, c:String.
 (define (parse-params p)
   (define d (->datum p))
   (define items (unwrap-items d "parameter list"))
@@ -4308,29 +4359,29 @@
             (error 'beagle "bad rest parameter after &: ~v" after-amp)])))
   (values fixed rest-p))
 
-;; Walks param items left-to-right, recognizing inline `NAME :- TYPE` triples
-;; and bare `NAME` as alternation. Wrapped `(name :- T)` / `(name : T)`,
-;; bracket destructures, and map destructures are accepted as single items.
+;; Walks param items left-to-right, recognizing postfix `NAME: TYPE` triples and
+;; bare `NAME` as alternation. Wrapped `(name: T)`, bracket destructures, and map
+;; destructures are accepted as single items.
 (define (parse-typed-params items)
   (let loop ([rest items] [acc '()])
     (cond
       [(null? rest) (reverse acc)]
-      ;; Inline `name :- TYPE` — consume 3 items.
+      ;; `[: Int]` — marker with no name before it.
+      [(eq? (car rest) ANN-MARKER) (raise-dangling-marker "parameter list")]
+      ;; Postfix `name: TYPE` — consume 3 items.
       [(and (symbol? (car rest))
             (pair? (cdr rest))
-            (eq? (cadr rest) ':-)
+            (annotation-marker? (cadr rest))
             (pair? (cddr rest)))
        (validate-identifier! (car rest) "parameter")
        (loop (cdddr rest)
              (cons (param (car rest) (parse-type (caddr rest))) acc))]
-      ;; Disallow inline `name : TYPE` — guide the author at `:-`.
-      [(and (symbol? (car rest))
-            (pair? (cdr rest))
-            (eq? (cadr rest) ':)
-            (pair? (cddr rest)))
-       (raise-parse-error 'inline-type-annotation
-                          "[~a : ~v ...] — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  [~a :- TYPE ...]"
-                          (car rest) (caddr rest) (car rest))]
+      ;; `[a:]` — marker with no type after it.
+      [(and (symbol? (car rest)) (pair? (cdr rest)) (annotation-marker? (cadr rest)))
+       (raise-dangling-marker "parameter list")]
+      ;; `[a :Int]` — the colon glued to the type; params are never keywords.
+      [(and (symbol? (car rest)) (pair? (cdr rest)) (keyword-sym? (cadr rest)))
+       (raise-keyword-annotation-confusion (car rest) (cadr rest))]
       ;; Single-item parameter (bracket, map-destructure, wrapped, or bare).
       [else
        (define item (car rest))
@@ -4351,7 +4402,7 @@
             (param item #f)]
            [else
             (error 'beagle
-                   "bad parameter: ~v~nexpected name, (name :- Type), name :- Type, or {:keys [...]}"
+                   "bad parameter: ~v~nexpected name, (name: Type), name: Type, or {:keys [...]}"
                    item)]))
        (loop (cdr rest) (cons parsed acc))])))
 
@@ -4451,12 +4502,11 @@
              (and stxs (>= (length stxs) 2) (cddr stxs))
              (cons (let-binding destr #f (parse-expr (or val-stx (cadr rest))))
                    acc))]
-      ;; Inline `NAME :- TYPE VALUE` — consume 4 items.
-      ;; Locals are usually inferred; this surface exists for parity with
-      ;; param annotations so the same `:-` reads at every binding site.
+      ;; Postfix `NAME: TYPE VALUE` — consume 4 items. Locals are usually
+      ;; inferred; this surface exists so the same marker reads at every site.
       [(and (>= (length rest) 4)
             (symbol? (car rest))
-            (eq? (cadr rest) ':-))
+            (annotation-marker? (cadr rest)))
        (define val-stx (and stxs (>= (length stxs) 4) (list-ref stxs 3)))
        (loop (list-tail rest 4)
              (and stxs (>= (length stxs) 4) (list-tail stxs 4))
@@ -4464,13 +4514,14 @@
                                 (parse-type (caddr rest))
                                 (parse-expr (or val-stx (cadddr rest))))
                    acc))]
-      ;; Disallow inline `NAME : TYPE VALUE` — surface the `:-` migration.
-      [(and (>= (length rest) 4)
-            (symbol? (car rest))
-            (eq? (cadr rest) ':))
-       (raise-parse-error 'inline-type-annotation
-                          "(let [~a : ~v ...] ...) — bare `:` is not the inline type marker. Use `:-` for inline type annotation:\n  (let [~a :- TYPE VALUE ...] ...)"
-                          (car rest) (caddr rest) (car rest))]
+      [(eq? (car rest) ANN-MARKER) (raise-dangling-marker "let bindings")]
+      [(and (>= (length rest) 2) (symbol? (car rest)) (annotation-marker? (cadr rest)))
+       (raise-dangling-marker "let bindings")]
+      ;; `[a :Int VALUE]` — colon glued to the type. A keyword IS a legal
+      ;; binding value, so fire only on the odd count that is malformed anyway.
+      [(and (odd? (length rest)) (>= (length rest) 3)
+            (symbol? (car rest)) (keyword-sym? (cadr rest)))
+       (raise-keyword-annotation-confusion (car rest) (cadr rest))]
       [(and (>= (length rest) 2)
             (symbol? (car rest)))
        (define val-stx (and stxs (>= (length stxs) 2) (cadr stxs)))
@@ -4538,7 +4589,7 @@
   (target-case-form cases))
 
 ;; Record fields use the same annotation grammar as param vectors: flat
-;; `name :- Type` triples (canonical) or wrapped `(name :- Type)`. Field
+;; `name: Type` triples (canonical) or wrapped `(name: Type)`. Field
 ;; types are required — records are typed boundaries; there is no inference
 ;; across a record's surface.
 (define (parse-record-fields f)
@@ -4549,14 +4600,18 @@
   (let loop ([rest items] [acc '()])
     (cond
       [(null? rest) (reverse acc)]
-      ;; Flat inline triple: name :- Type (canonical, same as params).
+      [(eq? (car rest) ANN-MARKER) (raise-dangling-marker "record fields")]
+      ;; Flat postfix triple: name: Type (canonical, same as params).
       [(and (symbol? (car rest))
             (pair? (cdr rest))
             (annotation-marker? (cadr rest))
             (pair? (cddr rest)))
        (loop (cdddr rest)
              (cons (param (car rest) (parse-type (caddr rest))) acc))]
-      ;; Wrapped: (name :- Type) / (name : Type).
+      ;; `[a :Int]` — colon glued to the type; fields are always typed.
+      [(and (symbol? (car rest)) (pair? (cdr rest)) (keyword-sym? (cadr rest)))
+       (raise-keyword-annotation-confusion (car rest) (cadr rest))]
+      ;; Wrapped: (name: Type).
       [(and (list? (car rest))
             (= (length (car rest)) 3)
             (symbol? (caar rest))
@@ -4565,7 +4620,7 @@
              (cons (param (caar rest) (parse-type (caddr (car rest)))) acc))]
       [else
        (error 'beagle
-              "defrecord field needs a type annotation — use [name :- Type name2 :- Type2 ...], got: ~v"
+              "defrecord field needs a type annotation — use [name: Type name2: Type2 ...], got: ~v"
               (car rest))])))
 
 (define (parse-type-impls rest)
@@ -4596,7 +4651,9 @@
   (define d (->datum x))
   (define subs (stx-subs x))
   (match d
-    [(list (? symbol? name) params-form ': _ret-type body ...)
+    [(list (? symbol? name) params-form (== ANN-MARKER) _ _ ...)
+     (raise-return-marker-confusion (format "method ~a" name))]
+    [(list (? symbol? name) params-form (? nested-return-marker? _) _ret-type body ...)
      (let-values ([(parsed _rp) (parse-params (or (stx-ref subs 1) params-form))])
        (impl-method name parsed
                     (parse-body (or (stx-tail subs 4) body))))]
@@ -4666,10 +4723,10 @@
        (loop (cddr rest)
              (and stxs (>= (length stxs) 2) (cddr stxs))
              (cons (for-binding destr (parse-expr (or val-stx (cadr rest))) #f) acc))]
-      ;; G7 — typed binding clause [x :- T coll] (parity with loop): strip + carry the type.
+      ;; G7 — typed binding clause [x: T coll] (parity with loop): strip + carry the type.
       [(and (>= (length rest) 4)
             (symbol? (car rest))
-            (eq? (cadr rest) ':-))
+            (annotation-marker? (cadr rest)))
        (define ty (parse-type (->datum (caddr rest))))
        (define val-stx (and stxs (>= (length stxs) 4) (list-ref stxs 3)))
        (loop (list-tail rest 4)
@@ -4681,6 +4738,10 @@
        (loop (cddr rest)
              (and stxs (>= (length stxs) 2) (cddr stxs))
              (cons (for-binding (car rest) (parse-expr (or val-stx (cadr rest))) #f) acc))]
+      [(eq? (car rest) ANN-MARKER) (raise-dangling-marker "for/doseq clauses")]
+      [(and (odd? (length rest)) (>= (length rest) 3)
+            (symbol? (car rest)) (keyword-sym? (cadr rest)))
+       (raise-keyword-annotation-confusion (car rest) (cadr rest))]
       [else (error 'beagle "bad for clause: ~v" rest)])))
 
 
@@ -4703,4 +4764,7 @@
  beagle-parse-error?
  beagle-parse-error-kind
  beagle-parse-error-details
- raise-parse-error)
+ raise-parse-error
+ ANN-MARKER ann
+ annotation-marker? return-marker? nested-return-marker?
+ legacy-annotation-marker-mode)

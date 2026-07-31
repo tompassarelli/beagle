@@ -5,7 +5,8 @@
 
 (require racket/string
          "ast.rkt"
-         "types.rkt")
+         "types.rkt"
+         (only-in "tags.rkt" ANN-MARKER))
 
 (define JST-BINARY-OPS
   (hasheq 'js/+  '+   'js/-  '-   'js/*  '*   'js/div  '/   'js/%  '%   'js/**  '**
@@ -40,8 +41,13 @@
   (define-values (param-list rest-param) ((current-parse-params) params-form))
   (define-values (ret-type body-start)
     (cond
+      ;; `:` is the postfix BINDING marker; a js/ method return is `-> Ret`.
       [(and (>= (length body-forms) 2)
-            (eq? (->datum (car body-forms)) ':))
+            (eq? (->datum (car body-forms)) ANN-MARKER))
+       (error 'beagle
+              "`:` is not the return-type marker in a js/ method — write `-> Ret`")]
+      [(and (>= (length body-forms) 2)
+            (memq (->datum (car body-forms)) '(-> :- :)))
        (values (parse-type (cadr body-forms)) (cddr body-forms))]
       [else (values #f body-forms)]))
   (values param-list rest-param ret-type (map (current-parse-expr) body-start)))

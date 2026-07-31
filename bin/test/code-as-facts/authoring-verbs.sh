@@ -96,7 +96,7 @@ T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 
 # ---------------------------------------------------------------------------
 echo '--- NL: "add a function add-two that calls base" -> agent emits {op upsert-form, scope authmod, form <datum>} ---'
-SPEC1="$T/spec_add.edn"; printf '(defn add-two [x :- Int] :- Int (base (+ x 2)))' > "$SPEC1"
+SPEC1="$T/spec_add.edn"; printf '(defn add-two [x: Int] -> Int (base (+ x 2)))' > "$SPEC1"
 r="$(author "$T/add" "$CORPUS" upsert-form authmod "$SPEC1")"
 read -r O P <<<"$(fact_node_growth "$CORPUS" upsert-form authmod "$SPEC1")"   # orig vs projected kind-fact nodes
 if [ "$r" = COMMITTED ] \
@@ -121,8 +121,8 @@ cp "$RESOLVE_OUT/resolved-authmod.bclj.edn" "$PROJSAVE" 2>/dev/null || true
 rm -f $RESOLVE_OUT/resolved-*.edn 2>/dev/null || true
 r="$(author "$T/setb" "$CORPUS" set-body base authmod "$BODY1")"
 if [ "$r" = COMMITTED ] \
-   && grep -q '(defn base \[x :- Int\] :- Int (\* x 10))' "$T/setb/authmod.bclj" \
-   && grep -q '(defn use-base \[y :- Int\] :- Int (base y))' "$T/setb/authmod.bclj" \
+   && grep -q '(defn base \[x: Int\] -> Int (\* x 10))' "$T/setb/authmod.bclj" \
+   && grep -q '(defn use-base \[y: Int\] -> Int (base y))' "$T/setb/authmod.bclj" \
    && grep -q ';; base is the helper' "$T/setb/authmod.bclj" \
    && grep -q '"v" "\*"'  "$PROJSAVE" && grep -q '"v" "10"' "$PROJSAVE"; then
   echo "  PASS  committed; base body replaced (params/ret-type/comment intact), use-base sibling NOT corrupted,"
@@ -131,11 +131,11 @@ else echo "  FAIL  ($r)"; fail=1; fi
 
 # ---------------------------------------------------------------------------
 echo '--- NL: "replace use-base with a 2-arg version" -> agent emits {op upsert-form (existing name), ...} ---'
-SPEC2="$T/spec_repl.edn"; printf '(defn use-base [y :- Int z :- Int] :- Int (base (base y)))' > "$SPEC2"
+SPEC2="$T/spec_repl.edn"; printf '(defn use-base [y: Int z: Int] -> Int (base (base y)))' > "$SPEC2"
 r="$(author "$T/repl" "$CORPUS" upsert-form authmod "$SPEC2")"
 if [ "$r" = COMMITTED ] \
-   && grep -q '(defn use-base \[y :- Int z :- Int\] :- Int (base (base y)))' "$T/repl/authmod.bclj" \
-   && grep -q '(defn base \[x :- Int\] :- Int (+ x 1))' "$T/repl/authmod.bclj" \
+   && grep -q '(defn use-base \[y: Int z: Int\] -> Int (base (base y)))' "$T/repl/authmod.bclj" \
+   && grep -q '(defn base \[x: Int\] -> Int (+ x 1))' "$T/repl/authmod.bclj" \
    && [ "$(grep -c 'defn use-base' "$T/repl/authmod.bclj")" -eq 1 ]; then
   echo "  PASS  committed; use-base REPLACED in place (one def, slot preserved), base intact, recompiled"
 else echo "  FAIL  ($r)"; fail=1; fi
@@ -145,13 +145,13 @@ echo '--- scope-correctness: a rename of `base` must follow the AUTHORED add-two
 echo '    (proves add-two`s `base` call carries a real refers_to identity edge into the graph, not a name match)'
 # author add-two into the corpus, render, then rename base->renamed-base on the AUTHORED tree.
 "$RACKET" "$RT" --emit-edn "$CORPUS/authmod.bclj" 2>/dev/null > "$T/sc.edn"
-SPEC3="$T/spec_sc.edn"; printf '(defn add-two [x :- Int] :- Int (base (+ x 2)))' > "$SPEC3"
+SPEC3="$T/spec_sc.edn"; printf '(defn add-two [x: Int] -> Int (base (+ x 2)))' > "$SPEC3"
 bb -cp "$FRAM_OUT" "$RESOLVE" upsert-form authmod "$SPEC3" "$T/sc.edn" >/dev/null 2>&1
 "$RACKET" "$RT" --render $RESOLVE_OUT/resolved-authmod.bclj.edn 2>/dev/null > "$T/sc_authored.bclj"; rm -f $RESOLVE_OUT/resolved-*.edn
 "$RACKET" "$RT" --emit-edn "$T/sc_authored.bclj" 2>/dev/null > "$T/sc_authored.edn"
 bb -cp "$FRAM_OUT" "$RESOLVE" rename base renamed-base sc_authored "$T/sc_authored.edn" >/dev/null 2>&1 \
   && "$RACKET" "$RT" --render $RESOLVE_OUT/resolved-sc_authored.bclj.edn 2>/dev/null > "$T/sc_renamed.bclj"
-if grep -q '(defn add-two \[x :- Int\] :- Int (renamed-base (+ x 2)))' "$T/sc_renamed.bclj" 2>/dev/null \
+if grep -q '(defn add-two \[x: Int\] -> Int (renamed-base (+ x 2)))' "$T/sc_renamed.bclj" 2>/dev/null \
    && grep -q '(defn renamed-base ' "$T/sc_renamed.bclj"; then
   echo "  PASS  rename of base (O(1), one binding) propagated to the authored add-two call site"
   echo "        -> the authored reference is wired into the graph by IDENTITY (refers_to), fully scope-correct"
@@ -162,7 +162,7 @@ rm -f $RESOLVE_OUT/resolved-*.edn 2>/dev/null || true
 echo '--- graph mint/render: ^:dynamic metadata survives add-def and recompile ---'
 r="$(author "$T/dynamic" "$MINT_CORPUS" upsert-form graph-mint-render-seed "$MINT_CORPUS/graph-mint-dynamic.edn")"
 if [ "$r" = COMMITTED ] \
-   && grep -q '(def \^:dynamic \*arity-check?\* :- Bool true)' "$T/dynamic/graph-mint-render-seed.bclj"; then
+   && grep -q '(def \^:dynamic \*arity-check?\*: Bool true)' "$T/dynamic/graph-mint-render-seed.bclj"; then
   echo "  PASS  ^:dynamic metadata preserved through mint -> render -> recompile"
 else echo "  FAIL  ^:dynamic mint/render (result=$r)"; fail=1; fi
 

@@ -108,7 +108,7 @@
  ;; Reject rows carrying a pointedness contract: they DO reject today, but the
  ;; message is not user-facing, so the contract keeps the gap firing.
  ("sc-missing-return-annot" "beagle-test/conformance/corpus/scriptc/sc-missing-return-annot.bsc" reject
-  #:diag-requires ":-"
+  #:diag-requires "->"
   #:diag-forbids "type-prim|boundary type #f")
  ("sc-untyped-def"     "beagle-test/conformance/corpus/scriptc/sc-untyped-def.bsc"     reject
   #:diag-requires "\\bdef\\b"

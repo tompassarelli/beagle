@@ -14,6 +14,8 @@
 
 (def ^String CHAR-TAG "#%char")
 
+(def ^String ANN-MARKER "#%:")
+
 (defn ^String char-at [^String s i]
   (if (and (>= i 0) (< i (count s))) (subs s i (+ i 1)) ""))
 
@@ -34,6 +36,9 @@
 
 (defn ^Boolean delimiter? [^String ch]
   (or (whitespace? ch) (= ch "(") (= ch ")") (= ch "[") (= ch "]") (= ch "{") (= ch "}") (= ch "\"") (= ch ";") (= ch "~") (= ch "^")))
+
+(defn ^Boolean token-delimiter? [^String ch]
+  (or (delimiter? ch) (= ch ":")))
 
 (defn make-result [value pos]
   {"value" value "pos" pos})
@@ -159,6 +164,15 @@
   (loop [i pos]
   (if (>= i len) (make-result (subs src pos i) i) (if (delimiter? (char-at src i)) (make-result (subs src pos i) i) (recur (+ i 1)))))))
 
+(defn read-token-text [^String src pos]
+  (let [len (count src)]
+  (loop [i pos]
+  (if (>= i len) (make-result (subs src pos i) i) (if (token-delimiter? (char-at src i)) (make-result (subs src pos i) i) (recur (+ i 1)))))))
+
+(defn read-lt-token [^String src pos]
+  (let [len (count src)]
+  (if (and (= (char-at src (+ pos 1)) ":") (or (>= (+ pos 2) len) (delimiter? (char-at src (+ pos 2))))) (make-result "<:" (+ pos 2)) (read-token-text src pos))))
+
 (defn classify-atom [^String text]
   (cond
   (= text "true") true
@@ -223,9 +237,11 @@
   (selfhost.rt/eprint "beagle reader: unexpected EOF after `^` metadata (needs a target form to attach to)\n")
   nil) (make-result ["#%meta" (get meta-r "value") (get form-r "value")] (get form-r "pos"))))))
   (or (digit? ch) (and (= ch "-") (< (+ p 1) len) (digit? (char-at src (+ p 1))))) (read-number src p)
-  (and (= ch ":") (or (>= (+ p 1) len) (delimiter? (char-at src (+ p 1))))) (make-result ":" (+ p 1))
+  (and (= ch ":") (or (>= (+ p 1) len) (delimiter? (char-at src (+ p 1))))) (make-result ANN-MARKER (+ p 1))
   (= ch ":") (let [sym-result (read-symbol-text src (+ p 1))]
   (make-result (str ":" (get sym-result "value")) (get sym-result "pos")))
+  (= ch "<") (let [sym-result (read-lt-token src p)]
+  (make-result (classify-atom (get sym-result "value")) (get sym-result "pos")))
   (or (= ch ")") (= ch "]") (= ch "}")) (do
   (selfhost.rt/eprint (str "beagle reader: unexpected '" ch "'\n"))
   nil)
@@ -233,7 +249,7 @@
    sfx (get sfx-result "value")
    code (decode-char-lit sfx)]
   (make-result [CHAR-TAG code] (get sfx-result "pos")))
-  :else (let [sym-result (read-symbol-text src p)
+  :else (let [sym-result (read-token-text src p)
    text (get sym-result "value")]
   (make-result (classify-atom text) (get sym-result "pos"))))))))
 
@@ -295,8 +311,21 @@
   (expect! "symbol" (= (rd1 "foo") "foo"))
   (expect! "nil symbol" (= (rd1 "nil") "nil"))
   (expect! "keyword" (= (rd1 ":name") ":name"))
-  (expect! "standalone colon" (= (rd1 ":") ":"))
-  (expect! "type marker :-" (= (rd1 ":-") ":-"))
+  (expect! "standalone colon at EOF is the annotation marker" (= (rd1 ":") ANN-MARKER))
+  (expect! "legacy type marker :-" (= (rd1 ":-") ":-"))
+  (expect! "return marker ->" (= (rd1 "->") "->"))
+  (expect! "auto-resolved keyword ::kw stays one keyword" (= (rd1 "::kw") "::kw"))
+  (expect! "keyword unaffected by the marker split" (= (rd1 ":foo") ":foo"))
+  (expect! "x:Int reads as symbol + keyword" (= (rd "x:Int") ["x" ":Int"]))
+  (expect! "postfix marker splits mid-token" (= (rd "x: Int") ["x" ANN-MARKER "Int"]))
+  (expect! "postfix marker with no space" (= (rd "x:Int") ["x" ":Int"]))
+  (expect! "<: stays one symbol" (= (rd1 "<:") "<:"))
+  (expect! "<: inside a forall bound" (= (rd1 "(forall [T <: Num] T)") ["forall" [BRACKET-TAG "T" "<:" "Num"] "T"]))
+  (expect! "< unchanged" (= (rd1 "(< a b)") ["<" "a" "b"]))
+  (expect! "<= unchanged" (= (rd1 "(<= a b)") ["<=" "a" "b"]))
+  (expect! "<- unchanged" (= (rd1 "<-") "<-"))
+  (expect! "<:foo is < then keyword" (= (rd "<:foo") ["<" ":foo"]))
+  (expect! "char literal \\: unaffected" (= (rd1 "\\:") [CHAR-TAG 58]))
   (expect! "string literal" (= (rd1 "\"hello\"") [STRING-TAG "hello"]))
   (expect! "string with escapes" (= (rd1 "\"a\\nb\"") [STRING-TAG "a\nb"]))
   (expect! "string with tab" (= (rd1 "\"a\\tb\"") [STRING-TAG "a\tb"]))
@@ -348,6 +377,12 @@
   (and (= (get result "target") "js") (= (get result "datums") [["ns" "app"]]))))
   (expect! "no #lang" (let [result (read-all "(ns app)")]
   (and (nil? (get result "target")) (= (get result "datums") [["ns" "app"]]))))
+  (expect! "defn form postfix params" (let [result (rd1 "(defn foo [x: Int] -> String x)")]
+  (and (= (nth result 0) "defn") (= (nth result 1) "foo") (= (nth result 2) [BRACKET-TAG "x" ANN-MARKER "Int"]) (= (nth result 3) "->") (= (nth result 4) "String") (= (nth result 5) "x"))))
+  (expect! "defn form postfix params, space before colon" (= (rd1 "(defn foo [x : Int] -> String x)") (rd1 "(defn foo [x: Int] -> String x)")))
+  (expect! "defrecord postfix fields" (= (rd1 "(defrecord Point [x: Int y: Int])") ["defrecord" "Point" [BRACKET-TAG "x" ANN-MARKER "Int" "y" ANN-MARKER "Int"]]))
+  (expect! "def postfix annotation" (= (rd1 "(def greeting: String \"hi\")") ["def" "greeting" ANN-MARKER "String" [STRING-TAG "hi"]]))
+  (expect! "mixed param vector" (= (rd1 "[a: Int b c: String]") [BRACKET-TAG "a" ANN-MARKER "Int" "b" "c" ANN-MARKER "String"]))
   (expect! "defn form flat params" (let [result (rd1 "(defn foo [x :- Int] :- String x)")]
   (and (= (nth result 0) "defn") (= (nth result 1) "foo") (= (nth result 2) [BRACKET-TAG "x" ":-" "Int"]) (= (nth result 3) ":-") (= (nth result 4) "String") (= (nth result 5) "x"))))
   (expect! "defrecord flat fields" (let [result (rd1 "(defrecord Point [x :- Int y :- Int])")]

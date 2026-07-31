@@ -38,34 +38,34 @@
 ;; that resolves to no beagle source (external / .clj runtime) is skipped, and
 ;; its calls type as Any — exactly the oracle's behavior.
 
-(def BEAGLE-EXTENSIONS :- (Vec String)
+(def BEAGLE-EXTENSIONS: (Vec String)
   [".bclj" ".bjs" ".bnix" ".bodin" ".bgl" ".rkt"])
 
-(defn- split-dots [s :- String] :- Any
-  (loop [i 0 start 0 acc :- Any []]
+(defn- split-dots [s: String] -> Any
+  (loop [i 0 start 0 acc: Any []]
     (cond
       (>= i (count s)) (conj acc (subs s start i))
       (= (subs s i (+ i 1)) ".") (recur (+ i 1) (+ i 1) (conj acc (subs s start i)))
       :else (recur (+ i 1) start acc))))
 
-(defn- last-slash [s :- String] :- Int
+(defn- last-slash [s: String] -> Int
   (loop [i (- (count s) 1)]
     (cond
       (< i 0) -1
       (= (subs s i (+ i 1)) "/") i
       :else (recur (- i 1)))))
 
-(defn- dir-of [path :- String] :- String
+(defn- dir-of [path: String] -> String
   (let [i (last-slash path)]
     (if (< i 0) "" (subs path 0 i))))
 
-(defn- join-slash [segs :- Any] :- String
+(defn- join-slash [segs: Any] -> String
   (if (= (count segs) 0)
     ""
-    (reduce (fn [a :- String s :- String] :- String (str a "/" s))
+    (reduce (fn [a: String s: String] -> String (str a "/" s))
             (nth segs 0) (subvec segs 1))))
 
-(defn- try-ext [dir :- String rel :- String] :- Any
+(defn- try-ext [dir: String rel: String] -> Any
   (loop [i 0]
     (if (>= i (count BEAGLE-EXTENSIONS))
       nil
@@ -74,7 +74,7 @@
 
 ;; nested (dir-segs/base) first, then a flat (base) fallback guarded against
 ;; resolving to the source file itself — parse.rkt try-at.
-(defn- try-at-dir [dir :- String dir-segs :- Any base :- String abs-source :- String] :- Any
+(defn- try-at-dir [dir: String dir-segs: Any base: String abs-source: String] -> Any
   (let [nested-rel (if (> (count dir-segs) 0) (str (join-slash dir-segs) "/" base) base)
         nested (try-ext dir nested-rel)]
     (if (some? nested)
@@ -84,7 +84,7 @@
           (if (and (some? flat) (not (= flat abs-source))) flat nil))
         nil))))
 
-(defn- resolve-ns-path [ns :- String source-path :- String] :- Any
+(defn- resolve-ns-path [ns: String source-path: String] -> Any
   (let [segs (split-dots ns)
         base (nth segs (- (count segs) 1))
         dir-segs (subvec segs 0 (- (count segs) 1))
@@ -97,8 +97,8 @@
           (let [parent (dir-of cur)]
             (if (or (= parent "") (= parent cur)) nil (recur parent))))))))
 
-(defn- dedup-externs [xs :- Any] :- Any
-  (loop [i 0 seen :- Any {} acc :- Any []]
+(defn- dedup-externs [xs: Any] -> Any
+  (loop [i 0 seen: Any {} acc: Any []]
     (if (>= i (count xs))
       acc
       (let [e (nth xs i) nm (get e "name")]
@@ -106,11 +106,11 @@
           (recur (+ i 1) seen acc)
           (recur (+ i 1) (assoc seen nm true) (conj acc e)))))))
 
-(defn- resolve-imports! [prog :- Any source-path :- String] :- Any
+(defn- resolve-imports! [prog: Any source-path: String] -> Any
   (let [requires (get prog "requires")
         own-externs (get prog "externs")
         imported (reduce
-                   (fn [acc :- Any r :- Any] :- Any
+                   (fn [acc: Any r: Any] -> Any
                      (let [ns (get r "ns")
                            alias (get r "alias")
                            refer (get r "refer")
@@ -133,16 +133,16 @@
 ;; #lang line is consumed by the reader (target dropped from read-program), and
 ;; the CLI --target is authoritative; a source-level (define-target ...) wins if
 ;; present (duplicate would be a parse error).
-(defn- has-define-target? [datums :- Any] :- Bool
-  (> (count (filterv (fn [d :- Any] :- Bool
+(defn- has-define-target? [datums: Any] -> Bool
+  (> (count (filterv (fn [d: Any] -> Bool
                        (and (vector? d) (>= (count d) 2) (= (nth d 0) "define-target")))
                      datums)) 0))
 
-(defn- parse-file-target! [path :- String target :- String] :- Any
+(defn- parse-file-target! [path: String target: String] -> Any
   (let [datums0 (rd/read-program (selfhost.rt/slurp-file path))
         datums (if (has-define-target? datums0) datums0 (into [["define-target" target]] datums0))
         prog (resolve-imports! (p/parse-program! datums) path)
-        perrs :- Any (p/parse-errors)]
+        perrs: Any (p/parse-errors)]
     ;; Racket raises on a parse diagnostic and exits nonzero. The self-host
     ;; parser collects + eprints, so the driver must fail explicitly: any parse
     ;; diagnostic => nonzero exit, no 'ok', no emit. (err! already printed each.)
@@ -151,8 +151,8 @@
           prog)
       prog)))
 
-(defn- check-or-die! [prog :- Any] :- Any
-  (let [errors :- Any (c/check-program! prog)]
+(defn- check-or-die! [prog: Any] -> Any
+  (let [errors: Any (c/check-program! prog)]
     (if (> (count errors) 0)
       (do
         (doseq [err errors]
@@ -163,36 +163,36 @@
 
 ;; Emit dispatch by target. Default clj keeps current behavior; each backend
 ;; adds one branch here (parallel target ports union into this table).
-(defn- emit-for-target [target :- String prog :- Any] :- String
+(defn- emit-for-target [target: String prog: Any] -> String
   (cond
     (= target "js") (ejs/emit-program! prog)
     (= target "nix") (en/emit-program! prog)
     (= target "zig") (ez/emit-program! prog)
     :else (e/emit-program! prog)))
 
-(defn- cmd-ast! [path :- String target :- String] :- Nil
+(defn- cmd-ast! [path: String target: String] -> Nil
   (println (selfhost.rt/to-json (parse-file-target! path target))))
 
-(defn- cmd-check! [path :- String target :- String] :- Nil
+(defn- cmd-check! [path: String target: String] -> Nil
   (check-or-die! (parse-file-target! path target))
   (selfhost.rt/eprint "ok\n"))
 
-(defn- cmd-emit! [path :- String target :- String] :- Nil
+(defn- cmd-emit! [path: String target: String] -> Nil
   (print (emit-for-target target (check-or-die! (parse-file-target! path target)))))
 
-(defn- cmd-emit-from-ast! [target :- String] :- Nil
+(defn- cmd-emit-from-ast! [target: String] -> Nil
   (print (emit-for-target target (selfhost.rt/parse-json (selfhost.rt/read-stdin)))))
 
 ;; Extract `--target VALUE` (default clj); returns the first non-flag positional
 ;; after the command as the path.
-(defn- flag-value [args :- Any flag :- String default :- String] :- String
+(defn- flag-value [args: Any flag: String default: String] -> String
   (loop [i 0]
     (if (>= i (count args)) default
       (if (and (= (nth args i) flag) (< (+ i 1) (count args)))
         (nth args (+ i 1))
         (recur (+ i 1))))))
 
-(defn- first-positional [args :- Any] :- String
+(defn- first-positional [args: Any] -> String
   (loop [i 1]
     (if (>= i (count args)) ""
       (let [a (nth args i)]
@@ -201,7 +201,7 @@
           (str/starts-with? a "--") (recur (+ i 1))
           :else a)))))
 
-(defn -main [& args :- (Vec String)] :- Nil
+(defn -main [& args: (Vec String)] -> Nil
   (let [cmd (if (> (count args) 0) (nth args 0) "")
         target (flag-value args "--target" "clj")
         path (first-positional args)]

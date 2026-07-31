@@ -1,4 +1,4 @@
 (ns mq)
 (defmacro twice [x] `(* ~x 2))
-(defn quad [n :- Int] :- Int
+(defn quad [n: Int] -> Int
   (twice (twice n)))

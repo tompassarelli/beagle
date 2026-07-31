@@ -49,6 +49,7 @@
 (define BRACKET-TAG '#%brackets)
 (define MAP-TAG     '#%map)
 (define SET-TAG     '#%set)
+(define ANN-MARKER  (string->symbol "#%:"))
 (define skip-dirs '(".git" "node_modules" ".direnv" "result" ".beagle-cache"))
 
 ;; ---------------------------------------------------------------------------
@@ -260,8 +261,28 @@
                   (string->symbol (list->string (reverse acc))))]
          [else (read-char port) (loop (cons c acc))]))]))
 
+;; Same `:` split as the real reader (beagle-lib/lang/reader-impl.rkt): keep the
+;; two tables agreeing on token boundaries or this tool mis-slices `x: Int`.
+(define (colon-token-delimiter? c)
+  (or (eof-object? c)
+      (char-whitespace? c)
+      (memv c '(#\, #\( #\) #\[ #\] #\{ #\} #\" #\; #\~ #\^ #\` #\\))))
+
+(define (colon-reader/stx ch port src line col pos)
+  (cond
+    [(colon-token-delimiter? (peek-char port)) (mk-stx src line col pos ANN-MARKER)]
+    [else
+     (define text
+       (let loop ([acc '()])
+         (define c (peek-char port))
+         (if (colon-token-delimiter? c)
+           (list->string (reverse acc))
+           (begin (read-char port) (loop (cons c acc))))))
+     (mk-stx src line col pos (string->symbol (string-append ":" text)))]))
+
 (define migrate-readtable
   (make-readtable #f
+    #\: 'terminating-macro colon-reader/stx
     #\[ 'terminating-macro bracket-reader/stx
     #\] 'terminating-macro (close-error #\])
     #\{ 'terminating-macro curly-reader/stx

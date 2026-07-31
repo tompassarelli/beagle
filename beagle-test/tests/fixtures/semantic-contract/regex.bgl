@@ -1,32 +1,32 @@
 (ns semantic-contract.regex
   (:require [clojure.string :as str]))
 
-(def NO-CAPTURE :- Regex (re-pattern "c.t"))
+(def NO-CAPTURE: Regex (re-pattern "c.t"))
 
-(def OPTIONAL-CAPTURE :- Regex (re-pattern "^(a)?b$"))
+(def OPTIONAL-CAPTURE: Regex (re-pattern "^(a)?b$"))
 
-(def MULTIPLE-CAPTURES :- Regex (re-pattern "^([a-z]+)-([0-9]+)$"))
+(def MULTIPLE-CAPTURES: Regex (re-pattern "^([a-z]+)-([0-9]+)$"))
 
-(def ESCAPED-GROUP :- Regex (re-pattern "^\\(x\\)$"))
+(def ESCAPED-GROUP: Regex (re-pattern "^\\(x\\)$"))
 
-(def REPLACE-RUN :- Regex (re-pattern "[^a-z0-9]+"))
+(def REPLACE-RUN: Regex (re-pattern "[^a-z0-9]+"))
 
-(def SPLIT-RUN :- Regex (re-pattern "[,;]+"))
+(def SPLIT-RUN: Regex (re-pattern "[,;]+"))
 
-(defn find-no-capture [s :- String] :- String?
+(defn find-no-capture [s: String] -> String?
   (re-find NO-CAPTURE s))
 
-(defn match-optional-capture [s :- String] :- (U (HVec String String?) Nil)
+(defn match-optional-capture [s: String] -> (U (HVec String String?) Nil)
   (re-matches OPTIONAL-CAPTURE s))
 
-(defn match-multiple-captures [s :- String] :- (U (HVec String String String) Nil)
+(defn match-multiple-captures [s: String] -> (U (HVec String String String) Nil)
   (re-matches MULTIPLE-CAPTURES s))
 
-(defn match-escaped-group [s :- String] :- String?
+(defn match-escaped-group [s: String] -> String?
   (re-matches ESCAPED-GROUP s))
 
-(defn replace-runs [s :- String] :- String
+(defn replace-runs [s: String] -> String
   (str/replace s REPLACE-RUN "_"))
 
-(defn split-runs [s :- String] :- (Vec String)
+(defn split-runs [s: String] -> (Vec String)
   (str/split s SPLIT-RUN))

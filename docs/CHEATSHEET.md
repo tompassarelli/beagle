@@ -16,17 +16,17 @@ for the target list itself, `bin/beagle langs`.
 Product type with typed fields; generates a constructor and accessors.
 
 ```clojure
-(defrecord Point [x :- Int y :- Int])
+(defrecord Point [x: Int y: Int])
 ```
 
 ### defunion + match
 Sum type over records. `match` is checked EXHAUSTIVELY — a missing constructor is a compile error (and the repair loop can auto-fill the clauses).
 
 ```clojure
-(defrecord Circle [r :- Int])
-(defrecord Square [side :- Int])
+(defrecord Circle [r: Int])
+(defrecord Square [side: Int])
 (defunion Shape Circle Square)
-(defn area [s :- Shape] :- Int
+(defn area [s: Shape] -> Int
   (match s [(Circle r) r] [(Square side) side]))
 ```
 
@@ -37,11 +37,11 @@ Enumeration of named constants.
 (defenum Color Red Green Blue)
 ```
 
-### inline :- annotations
-Types attach inline with `:-` on params, returns, defs, and let bindings. (`(name : T)` pairs also parse.)
+### postfix : annotations
+Types attach postfix: `name: Type` on params, defs, fields and let bindings; `-> Ret` for returns. (`(name: T)` pairs also parse.)
 
 ```clojure
-(defn clamp [n :- Int] :- Int (if (> n 100) 100 n))
+(defn clamp [n: Int] -> Int (if (> n 100) 100 n))
 ```
 
 
@@ -52,7 +52,7 @@ Refinement contract: a base type narrowed by predicates. Literal violations are 
 
 ```clojure
 (defscalar Percentage Int :where (>= 0) (<= 100))
-(def half :- Percentage (->Percentage 50))
+(def half: Percentage (->Percentage 50))
 ```
 
 
@@ -62,7 +62,7 @@ Refinement contract: a base type narrowed by predicates. Literal violations are 
 Typed top-level binding.
 
 ```clojure
-(def answer :- Int 42)
+(def answer: Int 42)
 ```
 
 
@@ -72,7 +72,7 @@ Typed top-level binding.
 Function with typed params and return. Params are a bracket vector.
 
 ```clojure
-(defn add [x :- Int y :- Int] :- Int (+ x y))
+(defn add [x: Int y: Int] -> Int (+ x y))
 ```
 
 
@@ -82,7 +82,7 @@ Function with typed params and return. Params are a bracket vector.
 Standard control flow; bindings use bracket vectors.
 
 ```clojure
-(defn sum-to [n :- Int] :- Int
+(defn sum-to [n: Int] -> Int
   (loop [i 0 acc 0]
     (cond [(> i n) acc]
           [:else (recur (+ i 1) (+ acc i))])))

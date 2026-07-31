@@ -34,7 +34,7 @@
    (test-case "typed arithmetic and console log retain TypeScript boundaries"
      (define output
        (scriptc-emit
-        (list '(defn add [(x :- Int) (y :- Int)] :- Int (+ x y))
+        (list '(defn add [(x #%: Int) (y #%: Int)] -> Int (+ x y))
               '(println (add 20 22)))))
      (check-true (string-contains? output "function add(x: number, y: number): number {"))
      (check-true (string-contains? output "return (x + y);"))
@@ -43,7 +43,7 @@
      (check-exn #rx"experimental scriptc supports defn and calls only"
                 (lambda ()
                   (scriptc-emit
-                   (list '(def answer :- Int 42))))))
+                   (list '(def answer #%: Int 42))))))
    (test-case "F64-backed boundaries reject fixed-width types and preserve null"
      (for ([type-name (in-list '(I8 I16 I32 U8 U16 U32 U64 F32))])
        (check-exn
@@ -53,18 +53,18 @@
         (lambda ()
           (scriptc-emit
            (list
-            `(defn identity-fixed [(x :- ,type-name)]
-               :- ,type-name
+            `(defn identity-fixed [(x #%: ,type-name)]
+               -> ,type-name
                x))))))
      (define output
        (scriptc-emit
-        (list '(defn nil-value [(x :- Nil)] :- Nil nil))))
+        (list '(defn nil-value [(x #%: Nil)] -> Nil nil))))
      (check-true (string-contains? output
                                    "function nil_value(x: null): null {"))
      (check-true (string-contains? output "return null;")))
    (test-case "JS-family target-case selects the actual target"
      (define forms
-       (list '(defn target-name [] :- String
+       (list '(defn target-name [] -> String
                 (target-case :js "js" :scriptc "scriptc"))))
      (define scriptc-output (scriptc-emit forms))
      (define js-output (target-emit 'js forms))
@@ -81,7 +81,7 @@
                    (list
                     (list 'defn 'take-x
                           (cons '#%brackets (list map-param))
-                          ':- 'Any
+                          '-> 'Any
                           'x))))))
    ;; Regression: annotation used to be a whole-output regexp, so a string
    ;; literal that merely LOOKED like a declaration was rewritten instead of the
@@ -91,7 +91,7 @@
      (define output
        (scriptc-emit
         (list '(println "function add(x) {")
-              '(defn add [(x :- Int)] :- Int x))))
+              '(defn add [(x #%: Int)] -> Int x))))
      (check-true (string-contains? output "console.log(\"function add(x) {\");")
                  (format "string literal must be emitted verbatim in:\n~a" output))
      (check-true (string-contains? output "function add(x: number): number {")
@@ -105,7 +105,7 @@
    (test-case "function-like strings after the declaration are also byte-stable"
      (define output
        (scriptc-emit
-        (list '(defn add [(x :- Int)] :- Int x)
+        (list '(defn add [(x #%: Int)] -> Int x)
               '(println "function add(x) {"))))
      (check-true (string-contains? output "console.log(\"function add(x) {\");"))
      (check-true (string-contains? output "function add(x: number): number {")))
@@ -114,7 +114,7 @@
      (define output
        (target-emit 'js
                     (list '(println "function add(x) {")
-                          '(defn add [(x :- Int)] :- Int x))))
+                          '(defn add [(x #%: Int)] -> Int x))))
      (check-true (string-contains? output "console.log(\"function add(x) {\");"))
      (check-true (string-contains? output "function add(x) {\n  return x;\n}")
                  (format "JS defn must stay untyped and byte-stable in:\n~a" output))
@@ -128,17 +128,17 @@
      (define output
        (scriptc-emit
         (list
-         (list 'defn 'exercise (br) ':- 'Int
+         (list 'defn 'exercise (br) '-> 'Int
                (list
                 'let
                 (br
                  'variadic
-                 (list 'fn (br 'n ':- 'Int '& 'more ':- 'Int)
-                       ':- 'Int 'n)
+                 (list 'fn (br 'n ANN-MARKER 'Int '& 'more ANN-MARKER 'Int)
+                       '-> 'Int 'n)
                  'defaulted
-                 (list 'fn (br map-param) ':- 'Int 'x)
+                 (list 'fn (br map-param) '-> 'Int 'x)
                  'sequenced
-                 (list 'fn (br seq-param) ':- 'Any 'head))
+                 (list 'fn (br seq-param) '-> 'Any 'head))
                 (list 'try
                       (list 'variadic 1)
                       (list 'catch 'Exception 'err
@@ -161,7 +161,7 @@
      (define output
        (scriptc-emit
         (list `(declare-extern host-parse ,(br 'String '-> 'Int))
-              '(defn parse-or-zero [(s :- String)] :- Int (host-parse s))
+              '(defn parse-or-zero [(s #%: String)] -> Int (host-parse s))
               '(println (parse-or-zero "17")))))
      (check-true
       (string-prefix? output
@@ -185,7 +185,7 @@
    (test-case "defn-only ScriptC modules export their public bindings"
      (define output
        (scriptc-emit
-        (list '(defn triple [(n :- Int)] :- Int (* n 3)))))
+        (list '(defn triple [(n #%: Int)] -> Int (* n 3)))))
      (check-true
       (string-contains? output
                         "export function triple(n: number): number {")))

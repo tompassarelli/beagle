@@ -16,10 +16,10 @@
 
 (define (br . xs) (cons BRACKET-TAG xs))
 
-;; Build a list with bare `:-` symbols. Quasiquote treats `':-` as
-;; `(quote :-)`, which is wrong for parser-input datums — the parser
-;; expects the bare symbol. Use `(L 'defn 'add (br 'a ':- 'Int) ':- 'Int)`
-;; to get a flat datum with bare `:-` outside any bracket. Equivalent to
+;; Build a list with bare marker symbols. Quasiquote treats `'#%:` as
+;; `(quote #%:)`, which is wrong for parser-input datums — the parser
+;; expects the bare symbol. Use `(L 'defn 'add (br 'a ANN-MARKER 'Int) '-> 'Int)`
+;; to get a flat datum with the marker outside any bracket. Equivalent to
 ;; `list`; the alias exists to flag annotation-bearing datums.
 (define L list)
 
@@ -58,44 +58,38 @@
 
 ;; --- def -------------------------------------------------------------------
 
-;; Inline type annotations use `:-` as the marker. Surfaces:
-;;   (def NAME :- TYPE VALUE)
-;;   (defonce NAME :- TYPE VALUE)
-;;   (defn NAME [PARAMS-WITH-:-] :- RET BODY ...)
-;;   (let [NAME :- TYPE VALUE ...] ...)
-;; Bare `:` is rejected with a message naming `:-` as the replacement — see
-;; the "rejects inline …" block below. Wrapped form `(name : Type)` or
-;; `(name :- Type)` inside param/let/defrecord lists continues to work.
+;; Annotations are postfix `NAME: TYPE` (reader marker `#%:`) with `-> RET` for
+;; returns. These datums are built structurally, so they spell the marker as
+;; the reader tag; the legacy `:-` half lives in postfix-annotation-parse.rkt.
 
 (test-case "def without type annotation"
   (define f (car (parse-one '(def x 42))))
   (check-false (def-form-type f)))
 
-;; --- inline `:-` annotation (accept) + bare `:` rejection ------------------
+;; --- postfix annotation (accept) + bare `:` rejection ----------------------
 
-;; The inline type marker is `:-`. Every annotation surface — def, defonce,
-;; defn (params + return), let bindings — accepts `:-` and populates the
-;; relevant type slot. Bare `:` is HARD-REJECTED with a message naming `:-`
-;; as the replacement; same diagnostic-kind `'inline-type-annotation` as the
-;; predecessor surface.
+;; Every annotation surface — def, defonce, defn (params + return), let
+;; bindings — populates the relevant type slot from the marker. Bare `:` at a
+;; def/defonce/defn HEAD stays hard-rejected under kind
+;; 'inline-type-annotation, pointing at the postfix/arrow spellings.
 
 ;; -- def / defonce: typed forms parse with the type slot populated ----------
 
-(test-case "(def x :- Int 42) parses with type=Int"
-  (define f (car (parse-one '(def x :- Int 42))))
+(test-case "(def x: Int 42) parses with type=Int"
+  (define f (car (parse-one '(def x #%: Int 42))))
   (check-true (def-form? f))
   (check-eq? (def-form-name f) 'x)
   (check-eq? (type-prim-name (def-form-type f)) 'Int))
 
-(test-case "(defonce x :- Int 42) parses with type=Int"
-  (define f (car (parse-one '(defonce x :- Int 42))))
+(test-case "(defonce x: Int 42) parses with type=Int"
+  (define f (car (parse-one '(defonce x #%: Int 42))))
   (check-true (defonce-form? f))
   (check-eq? (type-prim-name (defonce-form-type f)) 'Int))
 
 ;; -- defn: inline-typed params and inline return type ----------------------
 
-(test-case "(defn add [a :- Int b :- Int] :- Int (+ a b)) — fully typed"
-  (define f (car (parse-one (L 'defn 'add (br 'a ':- 'Int 'b ':- 'Int) ':- 'Int '(+ a b)))))
+(test-case "(defn add [a: Int b: Int] -> Int (+ a b)) — fully typed"
+  (define f (car (parse-one (L 'defn 'add (br 'a ANN-MARKER 'Int 'b ANN-MARKER 'Int) '-> 'Int '(+ a b)))))
   (check-true (defn-form? f))
   (check-eq? (defn-form-name f) 'add)
   (check-equal? (length (defn-form-params f)) 2)
@@ -111,8 +105,8 @@
   (check-false (defn-form-return-type f))
   (check-false (param-type (car (defn-form-params f)))))
 
-(test-case "(defn mixed [a :- Int b] (foo a b)) — a:Int, b:inferred, ret:inferred"
-  (define f (car (parse-one (L 'defn 'mixed (br 'a ':- 'Int 'b) '(foo a b)))))
+(test-case "(defn mixed [a: Int b] (foo a b)) — a:Int, b:inferred, ret:inferred"
+  (define f (car (parse-one (L 'defn 'mixed (br 'a ANN-MARKER 'Int 'b) '(foo a b)))))
   (check-true (defn-form? f))
   (check-eq? (param-name (car (defn-form-params f))) 'a)
   (check-eq? (type-prim-name (param-type (car (defn-form-params f)))) 'Int)
@@ -120,33 +114,33 @@
   (check-false (param-type (cadr (defn-form-params f))))
   (check-false (defn-form-return-type f)))
 
-(test-case "(defn ret-only [x] :- Int x) — return-typed, param inferred"
-  (define f (car (parse-one (L 'defn 'ret-only (br 'x) ':- 'Int 'x))))
+(test-case "(defn ret-only [x] -> Int x) — return-typed, param inferred"
+  (define f (car (parse-one (L 'defn 'ret-only (br 'x) '-> 'Int 'x))))
   (check-true (defn-form? f))
   (check-false (param-type (car (defn-form-params f))))
   (check-eq? (type-prim-name (defn-form-return-type f)) 'Int))
 
 ;; -- defn-: private variant accepts the same shapes -------------------------
 
-(test-case "(defn- helper [x :- Int] :- Int x) — defn- with inline annotations"
-  (define f (car (parse-one (L 'defn- 'helper (br 'x ':- 'Int) ':- 'Int 'x))))
+(test-case "(defn- helper [x: Int] -> Int x) — defn- with postfix annotations"
+  (define f (car (parse-one (L 'defn- 'helper (br 'x ANN-MARKER 'Int) '-> 'Int 'x))))
   (check-true (defn-form? f))
   (check-true (defn-form-private? f))
   (check-eq? (type-prim-name (param-type (car (defn-form-params f)))) 'Int)
   (check-eq? (type-prim-name (defn-form-return-type f)) 'Int))
 
-;; -- let bindings: inline `n :- TYPE VALUE` --------------------------------
+;; -- let bindings: postfix `n: TYPE VALUE` ---------------------------------
 
-(test-case "(let [n :- Int 42] n) — inline typed let binding"
-  (define f (car (parse-one (L 'let (br 'n ':- 'Int 42) 'n))))
+(test-case "(let [n: Int 42] n) — inline typed let binding"
+  (define f (car (parse-one (L 'let (br 'n ANN-MARKER 'Int 42) 'n))))
   (check-true (let-form? f))
   (define b (car (let-form-bindings f)))
   (check-eq? (let-binding-name b) 'n)
   (check-eq? (type-prim-name (let-binding-type b)) 'Int)
   (check-equal? (let-binding-value b) 42))
 
-(test-case "(let [n :- Int 42 m \"foo\"] ...) — typed n + untyped m"
-  (define f (car (parse-one (L 'let (br 'n ':- 'Int 42 'm "foo") 'n))))
+(test-case "(let [n: Int 42 m \"foo\"] ...) — typed n + untyped m"
+  (define f (car (parse-one (L 'let (br 'n ANN-MARKER 'Int 42 'm "foo") 'n))))
   (check-equal? (length (let-form-bindings f)) 2)
   (define b0 (car (let-form-bindings f)))
   (define b1 (cadr (let-form-bindings f)))
@@ -156,39 +150,36 @@
   (check-false (let-binding-type b1))
   (check-equal? (let-binding-value b1) "foo"))
 
-;; -- bare `:` is rejected and the error points at `:-` ---------------------
+;; -- bare `:` at a def/defonce/defn head is rejected, pointing at the new
+;; -- spelling. (Source text can no longer produce a bare `:` symbol; these
+;; -- structurally-built datums keep the rejection arms alive.)
 
-(parse-err/rx "rejects inline (def x : Int 42) — diagnostic-kind preserved"
-  #rx"inline type annotation"
+;; DELIBERATE legacy fixtures: the bare `:` below is the thing under test.
+;; Migrating them to `#%:`/`->` would delete the rejection coverage outright.
+
+(parse-err/rx "rejects (def x: Int 42) — points at the postfix marker"
+  #rx"[(]def x: TYPE VALUE[)]"
   '(def x : Int 42))
 
-(parse-err/rx "rejects inline (def x : Int 42) — names `:-` as replacement"
-  #rx":-"
-  '(def x : Int 42))
-
-(parse-err/rx "rejects inline (defonce x : Int 42) — diagnostic-kind preserved"
-  #rx"inline type annotation"
+(parse-err/rx "rejects (defonce x: Int 42) — points at the postfix marker"
+  #rx"[(]defonce x: TYPE VALUE[)]"
   '(defonce x : Int 42))
 
-(parse-err/rx "rejects inline (defonce x : Int 42) — names `:-` as replacement"
-  #rx":-"
-  '(defonce x : Int 42))
-
-(parse-err/rx "rejects inline-return-type defn with bare param list"
-  #rx"inline (return-)?type annotation"
+(parse-err/rx "rejects return-position `:` on defn with bare param list"
+  #rx"return-type marker"
   '(defn add [x y] : Int (+ x y)))
 
-(parse-err/rx "rejects inline-return-type defn — names `:-` as replacement"
-  #rx":-"
+(parse-err/rx "rejects return-position `:` on defn — names `->`"
+  #rx"-> RET"
   '(defn add [x y] : Int (+ x y)))
 
-(parse-err/rx "rejects inline-return-type defn with typed param list"
-  #rx"inline (return-)?type annotation"
-  '(defn add [(x : Int) (y : Int)] : Int (+ x y)))
+(parse-err/rx "rejects return-position `:` on defn with typed param list"
+  #rx"return-type marker"
+  '(defn add [(x #%: Int) (y #%: Int)] : Int (+ x y)))
 
-(parse-err/rx "rejects inline-return-type defn-/private with typed params"
-  #rx"inline (return-)?type annotation"
-  '(defn- helper [(x : Int)] : Int x))
+(parse-err/rx "rejects return-position `:` on defn-/private with typed params"
+  #rx"return-type marker"
+  '(defn- helper [(x #%: Int)] : Int x))
 
 ;; Sanity: bare forms still parse — the rejection must not collateral-damage
 ;; the canonical untyped path.
@@ -208,20 +199,20 @@
 ;;
 ;; The (claim NAME TYPE) form was deleted under the Zero-users rule. The
 ;; parser rejects any (claim …) shape with a pointed error that names the
-;; canonical inline `:-` replacement. Regression: the rejection message
-;; contains both the literal `claim` token and the inline `:-` marker, so
+;; canonical postfix replacement. Regression: the rejection message
+;; contains both the literal `claim` token and the postfix marker, so
 ;; a confused author lands on the right replacement.
 
-(parse-err/rx "(claim x Int) is rejected with a message naming both 'claim' and ':-'"
-  #rx"claim.*:-|:-.*claim"
+(parse-err/rx "(claim x Int) is rejected naming both 'claim' and the postfix marker"
+  #rx"claim.*NAME: TYPE|NAME: TYPE.*claim"
   '(claim x Int))
 
 (parse-err/rx "(claim x) is also rejected with the same pointed message"
-  #rx"claim.*:-|:-.*claim"
+  #rx"claim.*NAME: TYPE|NAME: TYPE.*claim"
   '(claim x))
 
 (parse-err/rx "(claim x Int 99) is also rejected with the same pointed message"
-  #rx"claim.*:-|:-.*claim"
+  #rx"claim.*NAME: TYPE|NAME: TYPE.*claim"
   '(claim x Int 99))
 
 ;; --- bare Nix-namespace rejection (regression) -----------------------------
@@ -295,7 +286,7 @@
 
 (test-case "defn with typed params (no inline return type)"
   (define f (car (parse-one
-                  '(defn add [(x : Int) (y : Int)]
+                  '(defn add [(x #%: Int) (y #%: Int)]
                      (+ x y)))))
   (check-true (defn-form? f))
   (check-eq?  (defn-form-name f) 'add)
@@ -311,12 +302,12 @@
   (check-false (param-type (car (defn-form-params f)))))
 
 (test-case "defn with mixed annotated/unannotated params"
-  (define f (car (parse-one '(defn mix [(x : Int) y] (+ x y)))))
+  (define f (car (parse-one '(defn mix [(x #%: Int) y] (+ x y)))))
   (check-eq?   (type-prim-name (param-type  (car (defn-form-params f)))) 'Int)
   (check-false (param-type (cadr (defn-form-params f)))))
 
 (test-case "defn with mixed wrapped + bare params"
-  (define f (car (parse-one '(defn mix [(x : Int) y] x))))
+  (define f (car (parse-one '(defn mix [(x #%: Int) y] x))))
   (check-eq?   (type-prim-name (param-type (car (defn-form-params f)))) 'Int)
   (check-false (param-type (cadr (defn-form-params f)))))
 
@@ -354,12 +345,12 @@
 (test-case "defn multi-arity: typed params, bare-vector == list-wrapped"
   (define bare
     (car (parse-one `(defn f
-                       ,(br '(x : Int))               x
-                       ,(br '(x : Int) '(y : Int))    (+ x y)))))
+                       ,(br '(x #%: Int))               x
+                       ,(br '(x #%: Int) '(y #%: Int))    (+ x y)))))
   (define wrapped
     (car (parse-one `(defn f
-                       (,(br '(x : Int))               x)
-                       (,(br '(x : Int) '(y : Int))    (+ x y))))))
+                       (,(br '(x #%: Int))               x)
+                       (,(br '(x #%: Int) '(y #%: Int))    (+ x y))))))
   (check-true   (defn-multi? bare))
   (check-equal? bare wrapped))
 
@@ -381,7 +372,7 @@
   (check-equal? (let-binding-value (car (let-form-bindings f))) 1))
 
 (test-case "let binding with wrapped types"
-  (define f (car (parse-one '(let [(x : Int) 1 y 2] x))))
+  (define f (car (parse-one '(let [(x #%: Int) 1 y 2] x))))
   (check-eq? (type-prim-name (let-binding-type (car (let-form-bindings f)))) 'Int)
   (check-false (let-binding-type (cadr (let-form-bindings f)))))
 
@@ -635,7 +626,7 @@
 (test-case "proc macro: basic expansion"
   (define p (parse-prog
              `(define-macro proc make-const
-                ,(br '(name : Symbol) '(val : Expr)) : Form
+                ,(br '(name #%: Symbol) '(val #%: Expr)) -> Form
                 (list 'def name val))
              '(make-const x 42)))
   (define f (car (program-forms p)))
@@ -646,7 +637,7 @@
 (test-case "proc macro: quasiquote in body"
   (define p (parse-prog
              `(define-macro proc make-def
-                ,(br '(name : Symbol) '(val : Expr)) : Form
+                ,(br '(name #%: Symbol) '(val #%: Expr)) -> Form
                 (quasiquote (def (unquote name) (+ (unquote val) 1))))
              '(make-def y 10)))
   (define f (car (program-forms p)))
@@ -660,7 +651,7 @@
 (test-case "proc macro: generate multiple forms via (Vec Form) splices top-level"
   (define p (parse-prog
              `(define-macro proc gen-pair
-                ,(br '(a : Symbol) '(b : Symbol)) : (Vec Form)
+                ,(br '(a #%: Symbol) '(b #%: Symbol)) -> (Vec Form)
                 (list (list 'def a 1) (list 'def b 2)))
              '(gen-pair x y)))
   (define forms (program-forms p))
@@ -675,7 +666,7 @@
     (lambda ()
       (parse-prog
        `(define-macro proc needs-sym
-          ,(br '(name : Symbol)) : Form
+          ,(br '(name #%: Symbol)) -> Form
           (list 'def name 1))
        '(needs-sym 42)))))
 
@@ -684,7 +675,7 @@
     (lambda ()
       (parse-prog
        `(define-macro proc bad-output
-          ,(br '(name : Symbol)) : Form
+          ,(br '(name #%: Symbol)) -> Form
           42)
        '(bad-output x)))))
 
@@ -693,7 +684,7 @@
     (lambda ()
       (parse-prog
        `(define-macro proc bad-body
-          ,(br '(x : Symbol)) : Form
+          ,(br '(x #%: Symbol)) -> Form
           (error "boom"))
        '(bad-body y)))))
 
@@ -702,19 +693,19 @@
     (lambda ()
       (parse-prog
        `(define-macro proc inner
-          ,(br '(x : Symbol)) : Form
+          ,(br '(x #%: Symbol)) -> Form
           (error "inner boom"))
        `(define-macro proc outer
-          ,(br '(x : Symbol)) : Form
+          ,(br '(x #%: Symbol)) -> Form
           (list 'inner x))
        '(outer y)))))
 
 ;; The previous "proc macro: expansion goes through type checker" test
 ;; emitted `(def name : Int val)` from a macro body and asserted the
 ;; expanded form carried a parsed type. Inline `: T` on def is rejected
-;; at parse time; the canonical inline marker is `:-`. The claim form
+;; at parse time; the canonical postfix marker is `NAME: TYPE`. The claim form
 ;; that briefly carried out-of-band types has been deleted entirely. To
-;; restore this test, emit `(def z :- Int 99)` from the macro body and
+;; restore this test, emit `(def z: Int 99)` from the macro body and
 ;; assert the sig-registry binds z to Int.
 
 (test-case "trace handler captures nested macro expansion steps"
@@ -736,7 +727,7 @@
 ;; --- defrecord ---------------------------------------------------------------
 
 (test-case "defrecord parses fields"
-  (define p (parse-prog `(defrecord Employee ,(br '(name : String) '(rate : Int)))))
+  (define p (parse-prog `(defrecord Employee ,(br '(name #%: String) '(rate #%: Int)))))
   (define f (car (program-forms p)))
   (check-true (record-form? f))
   (check-eq? (record-form-name f) 'Employee)
@@ -749,12 +740,12 @@
 (parse-err "defrecord rejects bare fields without types"
   `(defrecord Foo ,(br 'x 'y)))
 
-(test-case ":- annotation marker parses (wrapped + inline-return)"
-  ;; Wrapped form `(name :- String)` and inline-return `:- String` both work.
-  ;; This pins the canonical surface — the predecessor test rejected `:-`;
+(test-case "annotation marker parses (wrapped + return)"
+  ;; Wrapped form `(name: String)` and return `-> String` both work.
+  ;; This pins the canonical surface — the predecessor test rejected this shape;
   ;; under the new surface it's the marker, so the form parses cleanly.
   (define f (car (parse-one
-                  (L 'defn 'greet (br (L 'name ':- 'String)) ':- 'String
+                  (L 'defn 'greet (br (L 'name ANN-MARKER 'String)) '-> 'String
                      '(str "hello " name)))))
   (check-true (defn-form? f))
   (check-eq? (param-name (car (defn-form-params f))) 'name)
@@ -1039,7 +1030,7 @@
 
 (test-case "defprotocol parses"
   (define f (car (parse-one `(defprotocol Greetable
-                               (greet ,(br '(self : Any)) : String)))))
+                               (greet ,(br '(self #%: Any)) -> String)))))
   (check-true (protocol-form? f))
   (check-eq? (protocol-form-name f) 'Greetable)
   (check-equal? (length (protocol-form-methods f)) 1)
@@ -1047,8 +1038,8 @@
 
 (test-case "defprotocol with multiple methods"
   (define f (car (parse-one `(defprotocol Shape
-                               (area ,(br '(self : Any)) : Float)
-                               (perimeter ,(br '(self : Any)) : Float)))))
+                               (area ,(br '(self #%: Any)) -> Float)
+                               (perimeter ,(br '(self #%: Any)) -> Float)))))
   (check-equal? (length (protocol-form-methods f)) 2))
 
 ;; defmulti / defmethod removed — multimethods had ~zero usage in the
@@ -1107,12 +1098,12 @@
 
 (parse-err/rx "deftype removed — explicit error guides to defrecord + extend-type"
               #rx"deftype removed"
-  `(deftype Point ,(br '(x : Int) '(y : Int))))
+  `(deftype Point ,(br '(x #%: Int) '(y #%: Int))))
 
 (test-case "extend-type parses"
   (define f (car (parse-one `(extend-type String
                                Showable
-                               (show ,(br '(self : String)) (str self))))))
+                               (show ,(br '(self #%: String)) (str self))))))
   (check-true (extend-type-form? f))
   (check-eq? (extend-type-form-type-name f) 'String)
   (check-equal? (length (extend-type-form-impls f)) 1))
@@ -1202,8 +1193,8 @@
 
 (test-case "defn with & rest-param parses rest-param"
   ;; Inline return type `: Int` removed from the surface — typed params
-  ;; including `& (rest : Int)` remain supported.
-  (define f (car (parse-one '(defn foo [(x : Int) & (rest : Int)] (+ x 1)))))
+  ;; including `& (rest: Int)` remain supported.
+  (define f (car (parse-one '(defn foo [(x #%: Int) & (rest #%: Int)] (+ x 1)))))
   (check-true (defn-form? f))
   (check-equal? (length (defn-form-params f)) 1)
   (check-true (param? (defn-form-rest-param f)))
@@ -1212,11 +1203,11 @@
   (check-eq? (type-prim-name (param-type (defn-form-rest-param f))) 'Int))
 
 (test-case "defn without & has #f rest-param"
-  (define f (car (parse-one '(defn bar [(x : Int)] x))))
+  (define f (car (parse-one '(defn bar [(x #%: Int)] x))))
   (check-false (defn-form-rest-param f)))
 
 (test-case "fn with & rest-param"
-  (define f (car (parse-one '(fn [(a : Int) & (b : String)] (str a b)))))
+  (define f (car (parse-one '(fn [(a #%: Int) & (b #%: String)] (str a b)))))
   (check-true (fn-form? f))
   (check-equal? (length (fn-form-params f)) 1)
   (check-true (param? (fn-form-rest-param f)))
@@ -1432,8 +1423,8 @@
 
 (test-case "defunion :throwable with fielded variants parses"
   (define f (car (parse-one `(defunion :throwable ApiError
-                               (NotFound ,(br '(id : Int)))
-                               (RateLimit ,(br '(retry-after : Int)))))))
+                               (NotFound ,(br '(id #%: Int)))
+                               (RateLimit ,(br '(retry-after #%: Int)))))))
   (check-true (deferror-form? f))
   (check-equal? (deferror-form-name f) 'ApiError)
   (check-equal? (deferror-form-members f) '(NotFound RateLimit))
@@ -1446,7 +1437,7 @@
 ;; piece is now rejected, and with it the only surface that put :raises
 ;; on the defn head. The claim carrier that briefly held types is also
 ;; gone; if :raises needs to come back, it would ride on the inline
-;; `:- RET :raises ERR` shape. The struct field stays for downstream
+;; `-> RET :raises ERR` shape. The struct field stays for downstream
 ;; consumers; tests that exercise it from source are deferred.
 
 ;; --- target-case -------------------------------------------------------------
@@ -1520,8 +1511,8 @@
   (check-equal? (def-form-doc f) "The version.")
   (check-equal? (def-form-value f) "1.0"))
 
-(test-case "def :- TYPE with docstring"
-  (define f (car (parse-one (L 'def 'port ':- 'Int "Port." 8080))))
+(test-case "def: TYPE with docstring"
+  (define f (car (parse-one (L 'def 'port ANN-MARKER 'Int "Port." 8080))))
   (check-true (def-form? f))
   (check-equal? (def-form-doc f) "Port.")
   (check-true (and (def-form-type f) #t)))
@@ -1545,7 +1536,7 @@
 
 (parse-err/rx "Schema-style prefix return annotation names canonical order"
   #rx"after the param vector"
-  (L 'defn 'f ':- 'Int (br 'x) 'x))
+  (L 'defn 'f '-> 'Int (br 'x) 'x))
 
 ;; Special-form guards — no call-form passthrough for malformed shapes.
 
@@ -1557,16 +1548,16 @@
   #rx"malformed defn"
   (L 'defn 'f))
 
-;; defrecord: flat inline `:-` fields (same grammar as params).
+;; defrecord: flat postfix fields (same grammar as params).
 
-(test-case "defrecord flat :- fields parse"
+(test-case "defrecord flat postfix fields parse"
   (define f (car (parse-one
-                  (L 'defrecord 'T (br 'id ':- 'String 'n ':- 'Int)))))
+                  (L 'defrecord 'T (br 'id ANN-MARKER 'String 'n ANN-MARKER 'Int)))))
   (check-true (record-form? f))
   (check-equal? (map param-name (record-form-fields f)) '(id n)))
 
-(parse-err/rx "defrecord untyped field rejection names flat :- form"
-  #rx":-"
+(parse-err/rx "defrecord untyped field rejection names the flat postfix form"
+  #rx"name: Type"
   (L 'defrecord 'T (br 'id)))
 
 ;; Map destructure: :or/:as supported; :strs/:syms pointedly rejected.
@@ -1613,8 +1604,8 @@
         (lambda (out)
           (display (string-append
                     "#lang beagle/clj\n"
-                    "(def ^:dynamic *x* :- Int 0)\n"
-                    "(defn f [n :- Int] :- Int (binding [*x* n] *x*))\n")
+                    "(def ^:dynamic *x*: Int 0)\n"
+                    "(defn f [n: Int] -> Int (binding [*x* n] *x*))\n")
                    out)))
       (define stxs (read-beagle-syntax tmp))
       (define datums (map syntax->datum stxs))

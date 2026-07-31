@@ -15,7 +15,8 @@
          "types.rkt"
          ;; THE single beagle readtable — no bespoke subset reader to drift
          ;; (#19/#32). Datum mode (plain read) gives container/reader tags as data.
-         (only-in "../lang/reader-impl.rkt" beagle-readtable))
+         (only-in "../lang/reader-impl.rkt" beagle-readtable)
+         (only-in "tags.rkt" ANN-MARKER))
 
 ;; --- entry ----------------------------------------------------------------
 
@@ -100,6 +101,7 @@
     [(boolean? d) (if d "true" "false")]
     [(exact-integer? d) (number->string d)]
     [(real? d) (number->string d)]
+    [(eq? d ANN-MARKER) ":"]
     [(symbol? d) (symbol->string d)]
     [(null? d) "()"]
     [(bracketed? d)
@@ -133,6 +135,13 @@
   (let loop ([rest items] [acc '()])
     (cond
       [(null? rest) (string-join (reverse acc) " ")]
+      ;; `NAME: TYPE` — the marker glues to the name, one space before the type.
+      [(and (pair? rest) (symbol? (car rest)) (not (eq? (car rest) ANN-MARKER))
+            (pair? (cdr rest)) (eq? (cadr rest) ANN-MARKER) (pair? (cddr rest)))
+       (loop (cdddr rest)
+             (cons (format "~a: ~a" (datum->beagle-src (car rest))
+                           (datum->beagle-src (caddr rest)))
+                   acc))]
       [(pair? rest)
        (loop (cdr rest) (cons (datum->beagle-src (car rest)) acc))]
       [else

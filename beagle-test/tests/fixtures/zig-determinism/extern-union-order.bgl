@@ -7,7 +7,7 @@
 (declare-extern los.rt/read-cell [Bool -> (U Int String)])
 (declare-extern los.rt/probe-flag [Int -> (U Bool Float)])
 
-(defn go [s :- String] :- Int
+(defn go [s: String] -> Int
   (do (los.rt/read-cell true)
       (los.rt/probe-flag 1)
       (los.rt/read-scalar s)

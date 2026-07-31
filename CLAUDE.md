@@ -50,21 +50,37 @@ Run a form through these and one answer falls out. **Do not surface decisions th
 
 **Default mode is apply-and-report, not present-and-ratify.** No "your call" sentences or option-A/B/C menus — that is the failure mode this rule prevents. Escalate only a genuine conflict between two clauses; the ordering pre-resolves most: **types > idiom-matching > aesthetic preference**. On a real conflict, name it "real conflict: X vs Y", propose the resolution, ask one specific question — don't reopen the board.
 
-## Surface lock — typed Clojure + inference, `:-` inline
+## Surface lock — typed Clojure + inference, postfix `:`/`->` inline
 
 Typed Clojure plus inference. No type-fact form, no `claim`, no spec
 registry, no `s/` namespace, no validation runtime. Type info rides ordinary
-bindings via inline `:-` at boundaries; interiors and `let`-locals are
-inferred. `:-` is annotation only (not Schema/Spec) — never build a spec
-registry, `s/def`, conform/explain, or validation runtime behind it.
+bindings via inline postfix annotations at boundaries; interiors and
+`let`-locals are inferred. The annotation is annotation only (not
+Schema/Spec) — never build a spec registry, `s/def`, conform/explain, or
+validation runtime behind it.
 
-`:-` is the only typed-binding marker (bare `:` is rejected with a pointed
-error). It annotates the four boundaries `def` / `defonce` / `defn` (params +
-return) / `defrecord` (fields required). Mixed param vectors are legal
-(`[a :- Int b c :- String]`).
+`NAME: TYPE` is the canonical typed-binding marker; return types use
+`[params] -> RET` after the param vector. Together these annotate the four
+boundaries `def` / `defonce` / `defn` (params + return) / `defrecord`
+(fields required). Mixed param vectors are legal (`[a: Int b c: String]`).
+
+**This is a DUAL-ACCEPT cut — write the canonical spelling, but know what the
+parser actually does** (`postfix-annotation-parse.rkt` is the contract):
+- `x: Int` / `-> Ret` — canonical, silent.
+- `x :- Int` / `:- Ret` — legacy, still PARSES with one
+  `legacy-annotation-marker` warning per source. Not yet an error.
+- `x : Int` (space before the colon) — indistinguishable from `x: Int` at the
+  reader, so it is ACCEPTED in binding position. Spacing is not enforced.
+- `: Ret` in RETURN position — REJECTED, pointing at `-> Ret`. This is the one
+  structural difference between the two positions.
+
+The removal cut flips `legacy-annotation-marker-mode` to `'error` and drops
+`LEGACY-MARKER` from the marker predicates in `parse.rkt`; it is blocked on the
+vendored `bin/test/facts-roundtrip-selfhost/fram-resolve-corpus/` (~750 legacy
+sites) and the self-host dual-accept tests.
 
 **Locked decisions — do not reopen:**
-- `(claim NAME TYPE)` is not a form; the parser hard-rejects it pointing at inline `:-`.
+- `(claim NAME TYPE)` is not a form; the parser hard-rejects it pointing at inline `NAME: TYPE`.
 - Removed forms `unless` / `fmt` / `has` are rejected pointing at `when-not` / `str`,`format` / `contains?`.
 
 For exact grammar, nil-narrowing, qualified-call resolution, and stdlib
@@ -128,8 +144,8 @@ No `unsafe-*` (nix/js/clj), no `nix-ident`, no raw verbatim-string-to-target for
 
 ### Beagle is Clojure plus types, nothing else
 
-Two sanctioned divergences from Clojure: the type layer (`:-`
-annotations + checker — see "Surface lock") and multi-backend targeting
+Two sanctioned divergences from Clojure: the type layer (postfix
+`NAME: TYPE` / `-> RET` annotations + checker — see "Surface lock") and multi-backend targeting
 (`target-case` + per-language prefixes — see below). Every other surface
 form is plain Clojure. (Why this matters → README "What it isn't" /
 "Design discipline".)
@@ -245,7 +261,7 @@ surface change breaks them you **must** migrate them, not leave them alone.
 
 ### Type-system gating policies
 
-Bare `:` type annotations are HARD-REJECTED by the parser (`(def x : Int 42)`, `(defn add [x : Int] : Int ...)`). The only typed-binding surface is inline `:-` — see "Surface lock" anchor for the grammar. A second type-producing glyph is an ambiguity surface ML/Rust-trained models will wander into.
+The canonical typed-binding surface is postfix `NAME: TYPE` / `[params] -> RET`. The one spelling HARD-REJECTED today is a `:`-marked RETURN (`(defn add [x: Int] : Int ...)`), which points at `-> Int`; legacy `:-` is still accepted with a warning during the dual-accept cut. See the "Surface lock" anchor for the full accept/reject matrix — it is the only place that describes it accurately. A second type-producing glyph is an ambiguity surface ML/Rust-trained models will wander into, which is why `:-` is on a removal path rather than a permanent alias.
 
 Deferred type-system work (refinement annotations, bidirectional Layer 2 synthesis, sourcemap fidelity, types-as-view delaborator) is tracked in contrast-doc thread `20260530180000` and `20260614120025` — not here.
 

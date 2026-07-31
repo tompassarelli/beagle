@@ -2,10 +2,10 @@
 (ns fram.rt-core)
 (define-mode strict)
 
-(defn str-lt? [a :- String b :- String] :- Bool
+(defn str-lt? [a: String b: String] -> Bool
   (neg? (compare a b)))
 
 ;; This provider-owned layout is intentionally unused by the consumer.  Its
 ;; imported signature must not be mistaken for a host extern ABI boundary.
-(defn map-size [values :- (Map Keyword Int)] :- Int
+(defn map-size [values: (Map Keyword Int)] -> Int
   (count values))

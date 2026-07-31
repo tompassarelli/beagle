@@ -2,7 +2,7 @@
 
 ;; Query-tool extraction tests (beagle-sig/-fields/-callers backbone).
 ;; These extractors rotted silently against the surface twice — bare-`:`
-;; matching made every `:-` fn report `-> Any`, and docstring-bearing
+;; matching made every annotated fn report `-> Any`, and docstring-bearing
 ;; defns vanished entirely (found dogfooding the zig kernel, 2026-06-13).
 ;; No more silent: the canonical surface shapes are pinned here.
 
@@ -25,16 +25,16 @@
 (define SRC
   (string-append
    "(ns q)\n"
-   "(def plain :- Int 42)\n"
-   "(def doced :- Int \"the answer\" 42)\n"
-   "(defrecord R [a :- Int b :- Bool])\n"
+   "(def plain: Int 42)\n"
+   "(def doced: Int \"the answer\" 42)\n"
+   "(defrecord R [a: Int b: Bool])\n"
    "(declare-extern host/get [Int -> Int])\n"
-   "(defn typed [x :- Int y :- Bool] :- Int x)\n"
-   "(defn doced-fn \"docs are surface\" [x :- Int] :- Bool (> x 0))\n"
-   "(defn- private-fn [x :- Int] :- Int (typed x true))\n"
+   "(defn typed [x: Int y: Bool] -> Int x)\n"
+   "(defn doced-fn \"docs are surface\" [x: Int] -> Bool (> x 0))\n"
+   "(defn- private-fn [x: Int] -> Int (typed x true))\n"
    "(defn untyped [x] x)\n"))
 
-(test-case "sig: :- annotated defn reports real types (not Any)"
+(test-case "sig: annotated defn reports real types (not Any)"
   (define out (query-output SRC '("sig" "typed")))
   (check-regexp-match #rx"typed : \\[Int Bool -> Int\\]" out))
 

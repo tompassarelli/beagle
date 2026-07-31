@@ -4,17 +4,17 @@
 ;; plain single chars (\z \0), and a let-binding position.
 (ns conformance.charlit)
 
-(defn named-chars [] :- Any
+(defn named-chars [] -> Any
   [\tab \space \newline \return \backspace \formfeed])
 
-(defn plain-chars [] :- Any
+(defn plain-chars [] -> Any
   [\z \0 \!])
 
-(defn char-in-let [] :- Bool
+(defn char-in-let [] -> Bool
   (let [c \a] (char? c)))
 
-(defn char-predicate [] :- Bool
+(defn char-predicate [] -> Bool
   (char? \z))
 
-(defn char-unicode-escape [] :- String
+(defn char-unicode-escape [] -> String
   (str \u00e9 \u0007))

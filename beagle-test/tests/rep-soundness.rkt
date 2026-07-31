@@ -110,53 +110,53 @@
 
    ;; ---- (a) NO FALSE PROMOTION — these stay 100% native ----
    (assert-native "scalar-key map literal"
-     `(def m :- Any ,(mt ':a 1)))
+     `(def m #%: Any ,(mt ':a 1)))
    (assert-native "nested-VALUE scalar-key map (compound values, scalar keys)"
-     `(def m :- Any ,(mt ':a (br 1 2) ':b (mt ':c 3))))
+     `(def m #%: Any ,(mt ':a (br 1 2) ':b (mt ':c 3))))
    (assert-native "vector literal (always native COW array)"
-     `(def v :- Any ,(br 1 2 3)))
+     `(def v #%: Any ,(br 1 2 3)))
    (assert-hamt "set literal with compound elems uses value equality" "hamtSet("
-     `(defn f () :- Bool (contains? ,(st (br 1 2) (br 3 4)) ,(br 1 2))))
+     `(defn f () -> Bool (contains? ,(st (br 1 2) (br 3 4)) ,(br 1 2))))
    (assert-native "scalar assoc (key arg scalar)"
-     `(defn f () :- Any (assoc ,(mt ':a 1) ':b 2)))
+     `(defn f () -> Any (assoc ,(mt ':a 1) ':b 2)))
    (assert-native "count of scalar set literal -> .size, no HAMT"
-     `(defn f () :- Int (count ,(st 1 2 3))))
+     `(defn f () -> Int (count ,(st 1 2 3))))
    (assert-native "distinct over compound values (array via $$bc, no HAMT)"
-     `(defn f () :- Int (count (distinct ,(br (mt ':a 1) (mt ':a 1))))))
+     `(defn f () -> Int (count (distinct ,(br (mt ':a 1) (mt ':a 1))))))
 
    ;; ---- (b) NO CORRECTNESS HOLE — these MUST route to HAMT ----
    (assert-hamt "compound-key map literal" "hamtMap("
-     `(def m :- Any ,(mt (mt ':a 1) ':found)))
+     `(def m #%: Any ,(mt (mt ':a 1) ':found)))
    (assert-hamt "vector-key map literal" "hamtMap("
-     `(def m :- Any ,(mt (br 1 2) ':x)))
+     `(def m #%: Any ,(mt (br 1 2) ':x)))
    (assert-hamt "assoc with compound key" "hamtMapAssoc("
-     `(defn f () :- Any (assoc ,(mt) ,(mt ':k 1) "a")))
+     `(defn f () -> Any (assoc ,(mt) ,(mt ':k 1) "a")))
    (assert-hamt "value-dedup set over compound elems" "hamtSet("
-     `(defn f () :- Int (count (set ,(br (br 1 2) (br 1 2))))))
+     `(defn f () -> Int (count (set ,(br (br 1 2) (br 1 2))))))
    (assert-hamt "count of value-set -> hamtSetCount" "hamtSetCount("
-     `(defn f () :- Int (count (set ,(br (br 1 2))))))
+     `(defn f () -> Int (count (set ,(br (br 1 2))))))
 
    ;; ---- (b') the FLIP: not-provably-scalar key/elem -> HAMT (records / Any /
    ;;      union / heterogeneous), with polymorphic $$bc reads for Any-typed colls ----
    (test-case "record-key map literal -> hamtMap (record emits as object -> collides native)"
      (define-values (js tbl prog)
-       (emit+types (list `(defrecord K ((x :- Int)))
-                         `(def m :- Any ,(mt `(->K 1) ':a)))))
+       (emit+types (list `(defrecord K ((x #%: Int)))
+                         `(def m #%: Any ,(mt `(->K 1) ':a)))))
      (check-true (string-contains? js "hamtMap(")
                  (format "record-key map must route to HAMT, got:\n~a" js)))
    (test-case "Any-typed key assoc -> hamtMapAssoc (Any not provably scalar)"
      (define-values (js tbl prog)
-       (emit+types (list `(defn f ((k :- Any) (v :- Any)) :- Any (assoc ,(mt) k v)))))
+       (emit+types (list `(defn f ((k #%: Any) (v #%: Any)) -> Any (assoc ,(mt) k v)))))
      (check-true (string-contains? js "hamtMapAssoc(")
                  (format "Any-typed key assoc must route to HAMT, got:\n~a" js)))
    (test-case "heterogeneous-key literal (scalar + compound) -> hamtMap"
      (define-values (js tbl prog)
-       (emit+types (list `(def m :- Any ,(mt ':a 1 (mt ':b 2) 5)))))
+       (emit+types (list `(def m #%: Any ,(mt ':a 1 (mt ':b 2) 5)))))
      (check-true (string-contains? js "hamtMap(")
                  (format "heterogeneous-key literal must route to HAMT, got:\n~a" js)))
    (test-case "read through an Any-typed param routes to polymorphic $$bc$get"
      (define-values (js tbl prog)
-       (emit+types (list `(defn f ((m :- Any)) :- Any (get m ,(mt ':k 1))))))
+       (emit+types (list `(defn f ((m #%: Any)) -> Any (get m ,(mt ':k 1))))))
      (check-true (string-contains? js "$$bc$get(")
                  (format "Any-typed coll read must be polymorphic $$bc$get (a native scalar map can flow into an Any read), got:\n~a" js)))
 
@@ -164,39 +164,39 @@
    ;;      compound -> hamtSet; count sees through to .size/hamtSetCount ----
    (test-case "conj onto a native set -> a Set, count -> .size (not array/.length)"
      (define-values (js tbl prog)
-       (emit+types (list `(defn f () :- Int (count (conj ,(st 1 2) 3))))))
+       (emit+types (list `(defn f () -> Int (count (conj ,(st 1 2) 3))))))
      (check-true (string-contains? js "new Set(") (format "conj-set must build a Set:\n~a" js))
      (check-true (string-contains? js ".size")    (format "count of a conj-set must be .size:\n~a" js)))
    (test-case "conj onto a value-set -> hamtSetAdd"
      (define-values (js tbl prog)
-       (emit+types (list `(defn f () :- Int (count (conj (set ,(br (br 1 2))) ,(br 1 2)))))))
+       (emit+types (list `(defn f () -> Int (count (conj (set ,(br (br 1 2))) ,(br 1 2)))))))
      (check-true (string-contains? js "hamtSetAdd(") (format "conj onto a value-set must be hamtSetAdd:\n~a" js)))
    (test-case "into a value-set -> runtime hamtSetAdd fold"
      (define-values (js tbl prog)
-       (emit+types (list `(defn f () :- Int (count (into (set ,(br (br 1 2))) ,(br (br 1 2) (br 3 4))))))))
+       (emit+types (list `(defn f () -> Int (count (into (set ,(br (br 1 2))) ,(br (br 1 2) (br 3 4))))))))
      (check-true (string-contains? js "hamtSetAdd(") (format "into a value-set must fold hamtSetAdd:\n~a" js)))
    (test-case "frequencies over compound elems -> hamtMap (value-keyed)"
      (define-values (js tbl prog)
-       (emit+types (list `(defn f () :- Int (count (frequencies ,(br (br 1 2) (br 1 2))))))))
+       (emit+types (list `(defn f () -> Int (count (frequencies ,(br (br 1 2) (br 1 2))))))))
      (check-true (string-contains? js "hamtMapAssoc(") (format "frequencies over compound must be hamtMap:\n~a" js)))
    ;; ELEMENT-driven (not target-rep): an EMPTY or native/literal set target with
    ;; compound elements must STILL value-dedup. (Residual caught by beagle-2 —
    ;; routing on the target's rep alone left these native.)
    (test-case "into an EMPTY set over compound elems -> hamtSetAdd (element-driven)"
      (define-values (js tbl prog)
-       (emit+types (list `(defn f () :- Int (count (into ,(st) ,(br (br 1 2) (br 1 2) (br 3 4))))))))
+       (emit+types (list `(defn f () -> Int (count (into ,(st) ,(br (br 1 2) (br 1 2) (br 3 4))))))))
      (check-true (string-contains? js "hamtSetAdd(") (format "into #{} over compound must value-dedup:\n~a" js)))
    (test-case "into a compound set LITERAL target -> hamtSetAdd (coerce target)"
      (define-values (js tbl prog)
-       (emit+types (list `(defn f () :- Int (count (into ,(st (br 1 2)) ,(br (br 1 2) (br 3 4))))))))
+       (emit+types (list `(defn f () -> Int (count (into ,(st (br 1 2)) ,(br (br 1 2) (br 3 4))))))))
      (check-true (string-contains? js "hamtSetAdd(") (format "into a compound set literal must value-dedup:\n~a" js)))
    (test-case "conj compound onto an empty set -> hamtSetAdd (element-driven)"
      (define-values (js tbl prog)
-       (emit+types (list `(defn f () :- Int (count (conj ,(st) ,(mt ':a 1)))))))
+       (emit+types (list `(defn f () -> Int (count (conj ,(st) ,(mt ':a 1)))))))
      (check-true (string-contains? js "hamtSetAdd(") (format "conj compound onto #{} must value-dedup:\n~a" js)))
    (test-case "into a VECTOR stays a native array (not over-promoted)"
      (define-values (js tbl prog)
-       (emit+types (list `(defn f () :- Int (count (into ,(br 1) ,(br 2 3)))))))
+       (emit+types (list `(defn f () -> Int (count (into ,(br 1) ,(br 2 3)))))))
      (check-false (string-contains? js "hamtSet") (format "into a vector must stay native:\n~a" js)))
 
    ;; (b'') a SCALAR keyword read on a HAMT-repped map must still hit the HAMT —
@@ -205,7 +205,7 @@
    ;; (scalar) key. (Regression caught by beagle-2's adversarial corpus.)
    (test-case "scalar keyword read on a HAMT-repped map -> hamtMapGet (not native dot)"
      (define-values (js tbl prog)
-       (emit+types (list `(defn f () :- Int
+       (emit+types (list `(defn f () -> Int
                             (let (m ,(mt ':a 1 (mt ':b 2) 5)) (get m :a))))))
      (check-true (string-contains? js "hamtMapGet(m,")
                  (format "scalar-key read on a HAMT map must be hamtMapGet, got:\n~a" js))
@@ -213,14 +213,14 @@
                   (format "must NOT emit native dot-access m.a on a HAMT:\n~a" js)))
    (test-case "scalar keyword read on an Any-typed param -> polymorphic $$bc$get"
      (define-values (js tbl prog)
-       (emit+types (list `(defn f ((m :- (Map Any Int))) :- Int (get m :a)))))
+       (emit+types (list `(defn f ((m #%: (Map Any Int))) -> Int (get m :a)))))
      (check-true (string-contains? js "$$bc$get(m,")
                  (format "scalar-key read on an Any-typed map must be $$bc$get, got:\n~a" js)))
 
    ;; ---- (c) read-through-var consistency (the corruption crux) ----
    (test-case "read through let-bound compound map routes to hamtMapGet (not native index)"
      (define-values (js tbl prog)
-       (emit+types (list `(defn f () :- Keyword
+       (emit+types (list `(defn f () -> Keyword
                             (let (m ,(mt (mt ':a 1) ':x)) (get m ,(mt ':a 1)))))))
      (check-true (string-contains? js "hamtMapGet(m,")
                  (format "let-bound compound map read must be hamtMapGet, got:\n~a" js))
@@ -230,7 +230,7 @@
    ;; ---- (d) independent oracle <-> emit cross-check on a mixed program ----
    (test-case "oracle HAMT-site count matches emit (mixed native + compound)"
      (define-values (js tbl prog)
-       (emit+types (list `(defn f () :- Any
+       (emit+types (list `(defn f () -> Any
                             (let (s ,(mt ':a 1)            ; native
                                   c ,(mt (mt ':k 1) ':v)   ; HAMT
                                   v ,(br 1 2 3))           ; native

@@ -13,22 +13,22 @@
 ;;   - def/defonce docstrings survive to emitted clj
 ;; Run: self-host/verify-selfhost.sh self-host/fixtures/forms-tail.bclj
 
-(def greeting :- String "the canonical greeting" "hello")
+(def greeting: String "the canonical greeting" "hello")
 
-(defonce cache :- (Map String Int) "memo table" {})
+(defonce cache: (Map String Int) "memo table" {})
 
-(defn kw-get [m :- Any] :- Any
+(defn kw-get [m: Any] -> Any
   (get m :name))
 
-(defn kw-get-default [m :- Any] :- Any
+(defn kw-get-default [m: Any] -> Any
   (get m :count 0))
 
 ;; bare-vector multi-arity (no wrapping parens around the clauses)
 (defn arity-sum
-  [a :- Int] a
-  [a :- Int b :- Int] (+ a b))
+  [a: Int] a
+  [a: Int b: Int] (+ a b))
 
-(defn sum-doubled! [xs :- (Vec Int)] :- Int
+(defn sum-doubled! [xs: (Vec Int)] -> Int
   (let [total (atom 0)]
     (doseq [x xs
             :let [dbl (* x 2)]
@@ -37,11 +37,11 @@
     (deref total)))
 
 ;; deliberately unsorted branch order — cases serialize sorted by target
-(def runtime-name :- String
+(def runtime-name: String
   (target-case :js "node" :clj "jvm"))
 
-(def ^:dynamic *level* :- Int 0)
+(def ^:dynamic *level*: Int 0)
 
-(defn with-level [n :- Int] :- Int
+(defn with-level [n: Int] -> Int
   (binding [*level* n]
     (+ *level* 1)))

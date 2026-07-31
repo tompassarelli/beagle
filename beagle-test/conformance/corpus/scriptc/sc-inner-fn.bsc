@@ -4,8 +4,8 @@
 ;; TypeScript boundary instead of emitting an implicit-any arrow parameter.
 (ns conformance.sc-inner-fn)
 
-(defn apply-twice [(x :- Int)] :- Int
-  (let [bump (fn [n :- Int] :- Int (+ n 1))]
+(defn apply-twice [(x: Int)] -> Int
+  (let [bump (fn [n: Int] -> Int (+ n 1))]
     (bump (bump x))))
 
 (println (apply-twice 40))

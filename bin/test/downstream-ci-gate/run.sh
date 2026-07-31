@@ -77,11 +77,11 @@ EOF
 
 GOOD_JS='#lang beagle/js
 (ns fixture.good)
-(defn add [a :- Int b :- Int] :- Int (+ a b))
+(defn add [a: Int b: Int] -> Int (+ a b))
 '
 BAD_JS='#lang beagle/js
 (ns fixture.bad)
-(defn f [] :- Int "not an int")
+(defn f [] -> Int "not an int")
 '
 
 RED_REPO="$BASE/red-repo"

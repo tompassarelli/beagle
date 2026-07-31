@@ -33,7 +33,7 @@
      (type-check!
       (zig-program
        '(define-mode strict)
-       '(defn lookup [entries :- (Map (Dyn String Int) Int)] :- Bool
+       '(defn lookup [entries #%: (Map (Dyn String Int) Int)] -> Bool
           (contains? entries "key"))))))
   (check-exn
    #rx"\\(Dyn String Regex\\) does not support clojure-value equality and clojure-hash"
@@ -41,7 +41,7 @@
      (type-check!
       (zig-program
        '(define-mode strict)
-       '(defn lookup [entries :- (Map (Dyn String Regex) Int)] :- Bool
+       '(defn lookup [entries #%: (Map (Dyn String Regex) Int)] -> Bool
           (contains? entries "key")))))))
 
 (test-case "closed Dyn values behave as logical keys in emitted Zig"

@@ -2,7 +2,7 @@
 (ns zig-imported-record-types.types)
 (define-mode strict)
 
-(defrecord Store [value :- Int])
+(defrecord Store [value: Int])
 
-(defn make-store [value :- Int] :- Store
+(defn make-store [value: Int] -> Store
   (->Store value))

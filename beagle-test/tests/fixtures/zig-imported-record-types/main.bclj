@@ -3,42 +3,42 @@
   (:require [zig-imported-record-types.types :as types]))
 (define-mode strict)
 
-(defn pass-store [value :- types/Store] :- types/Store value)
+(defn pass-store [value: types/Store] -> types/Store value)
 
 (defn pass-atom
-  [value :- (Atom types/Store)]
-  :- (Atom types/Store)
+  [value: (Atom types/Store)]
+  -> (Atom types/Store)
   value)
 
 (defn pass-map
-  [value :- (Map String types/Store)]
-  :- (Map String types/Store)
+  [value: (Map String types/Store)]
+  -> (Map String types/Store)
   value)
 
 (defn pass-vector
-  [value :- (Vec types/Store)]
-  :- (Vec types/Store)
+  [value: (Vec types/Store)]
+  -> (Vec types/Store)
   value)
 
 (defn pass-optional
-  [value :- (U types/Store Nil)]
-  :- (U types/Store Nil)
+  [value: (U types/Store Nil)]
+  -> (U types/Store Nil)
   value)
 
 (defn pass-nested
-  [value :- (Map String (Vec (U types/Store Nil)))]
-  :- (Map String (Vec (U types/Store Nil)))
+  [value: (Map String (Vec (U types/Store Nil)))]
+  -> (Map String (Vec (U types/Store Nil)))
   value)
 
-(defn optional-accessor-value [present :- Bool] :- Int?
-  (let [store :- types/Store? (if present (types/->Store 42) nil)]
+(defn optional-accessor-value [present: Bool] -> Int?
+  (let [store: types/Store? (if present (types/->Store 42) nil)]
     (if (some? store) (types/store-value store) nil)))
 
-(defn optional-field-value [present :- Bool] :- Int?
-  (let [store :- types/Store? (if present (types/->Store 42) nil)]
+(defn optional-field-value [present: Bool] -> Int?
+  (let [store: types/Store? (if present (types/->Store 42) nil)]
     (if (some? store) (:value store) nil)))
 
-(defn main [] :- Nil
+(defn main [] -> Nil
   (let [accessor-value (optional-accessor-value true)
         field-value (optional-field-value true)]
     (println (+ (if (some? accessor-value) accessor-value 0)

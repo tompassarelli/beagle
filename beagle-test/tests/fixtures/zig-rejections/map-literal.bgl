@@ -1,2 +1,2 @@
 (ns zig-rejections.map-literal)
-(defn f [x :- Int] :- Int (do {:a x} x))
+(defn f [x: Int] -> Int (do {:a x} x))

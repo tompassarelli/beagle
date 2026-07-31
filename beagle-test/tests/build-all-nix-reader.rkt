@@ -27,7 +27,7 @@
     (string-append
      "#lang beagle/nix\n"
      "(ns t)\n"
-     "(def x :- Any\n"
+     "(def x: Any\n"
      "  (ms \"name=$(echo | rofi -dmenu)\"\n"
      "      \"[ -n \\\"$name\\\" ] && echo \\\"got $name\\\"\"\n"
      "      \"#!/bin/sh inside body\"\n"
@@ -47,7 +47,7 @@
   ;; Sanity check the case dispatch — a non-nix file should NOT switch to
   ;; the nix readtable (otherwise unrelated targets would inherit ~-as-
   ;; interp semantics).
-  (define src "#lang beagle/clj\n(ns t)\n(def x : Int 42)\n")
+  (define src "#lang beagle/clj\n(ns t)\n(def x: Int 42)\n")
   (define p (mk-tmp-bnix src))
   (define stxs
     (with-handlers ([exn:fail? (lambda (e) e)])

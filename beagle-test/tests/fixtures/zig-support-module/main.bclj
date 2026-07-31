@@ -4,5 +4,5 @@
 
 (declare-extern test.host/answer [-> Int])
 
-(defn main [] :- Nil
+(defn main [] -> Nil
   (println (test.host/answer)))

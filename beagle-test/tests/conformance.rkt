@@ -188,7 +188,7 @@
 ;; bare Beagle expression into a compilable module, what file extension to
 ;; emit, how to run the emitted artifact, and how to print the value.
 ;;
-;; `wrap` : expr-string -> full beagle source (the body is `(defn result [] :- T expr)`)
+;; `wrap` : expr-string -> full beagle source (the body is `(defn result [] -> T expr)`)
 ;; The result type annotation matters to the checker, so each case supplies its
 ;; own return type; `wrap` takes (expr ret-type).
 ;; ---------------------------------------------------------------------------
@@ -198,7 +198,7 @@
 ;; CLJ target: header `#lang beagle`, run via bb, print via pr-str.
 (define (clj-wrap expr ret)
   (string-append "#lang beagle\n(ns conf)\n"
-                 "(defn result [] :- " ret " " expr ")\n"))
+                 "(defn result [] -> " ret " " expr ")\n"))
 
 (define (clj-run out-path)
   ;; Append a driver that prints (pr-str (result)).
@@ -219,7 +219,7 @@
 ;; the compound-key cases would silently fall back to string-coercion.
 (define (js-wrap expr ret)
   (string-append "#lang beagle/js\n(ns conf)\n(define-mode strict)\n"
-                 "(js/export (defn result [] :- " ret " " expr "))\n"))
+                 "(js/export (defn result [] -> " ret " " expr "))\n"))
 
 (define (js-run out-path)
   ;; Write the emitted module + a print driver to a `.mjs` FILE inside tmp-dir

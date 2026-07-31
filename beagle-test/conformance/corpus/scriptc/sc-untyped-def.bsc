@@ -6,6 +6,6 @@
 ;; the struct leak is a :bug ratchet, not a silent reject-match pass.
 (ns conformance.sc-untyped-def)
 
-(def answer :- Int 42)
+(def answer: Int 42)
 
 (println answer)

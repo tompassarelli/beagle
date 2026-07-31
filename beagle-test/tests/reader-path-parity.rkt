@@ -97,7 +97,7 @@
    "[a #?@(:clj [b c] :default []) d]"
    "{:a 1 #?@(:clj [:b 2] :default [])}"
    ;; realistic mixed form — typed defn with destructuring + threading + brackets
-   "(defn f [a :- Int [x y] :- Vec] :- Int (-> a (+ x) (* y)))"))
+   "(defn f [a: Int [x y] -> Vec] -> Int (-> a (+ x) (* y)))"))
 
 (for ([form (in-list BATTERY)])
   (test-case (format "reader paths agree: ~a" form)

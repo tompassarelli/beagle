@@ -1,1 +1,1 @@
-(def ^:dynamic *arity-check?* :- Bool true)
+(def ^:dynamic *arity-check?*: Bool true)

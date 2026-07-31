@@ -10,7 +10,7 @@
 
 (declare-extern host-fetch [Int -> (Promise Int)])
 
-(defn load-doubled [(id :- Int)] :- (Promise Int)
+(defn load-doubled [(id: Int)] -> (Promise Int)
   (let [n (js/await (host-fetch id))]
     (* n 2)))
 

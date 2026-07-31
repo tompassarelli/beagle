@@ -51,17 +51,17 @@ CL = ['[(Square side) (throw "TODO: handle Square")]']
 
 # 1. single-line match: insert inline, space-separated, well-formed (this was
 #    the adversarial-review bug — used to emit a broken extra line).
-src1 = '(defn f [(s : Shape)] :- Int (match s [(Circle r) r]))'
+src1 = '(defn f [(s: Shape)] -> Int (match s [(Circle r) r]))'
 check("single-line",
       insert_match_clauses(src1, 1, CL),
-      '(defn f [(s : Shape)] :- Int (match s [(Circle r) r] '
+      '(defn f [(s: Shape)] -> Int (match s [(Circle r) r] '
       '[(Square side) (throw "TODO: handle Square")]))')
 
 # 2. multi-line match: own-line clause at the existing clause indent.
-src2 = '(defn f [(s : Shape)] :- Int\n  (match s\n    [(Circle r) r]))'
+src2 = '(defn f [(s: Shape)] -> Int\n  (match s\n    [(Circle r) r]))'
 check("multi-line",
       insert_match_clauses(src2, 2, CL),
-      '(defn f [(s : Shape)] :- Int\n  (match s\n    [(Circle r) r]\n'
+      '(defn f [(s: Shape)] -> Int\n  (match s\n    [(Circle r) r]\n'
       '    [(Square side) (throw "TODO: handle Square")]))')
 
 # 3. string decoy: a `(match` inside a string before the real form must not win.
@@ -75,7 +75,7 @@ check("string-decoy-inserts-once", out3.count('[(Square side)'), 1)
 CL2 = ['[(Square side) (throw "x")]', '[(Triangle b h) (throw "y")]']
 check("two-clauses",
       insert_match_clauses(src1, 1, CL2),
-      '(defn f [(s : Shape)] :- Int (match s [(Circle r) r] '
+      '(defn f [(s: Shape)] -> Int (match s [(Circle r) r] '
       '[(Square side) (throw "x")] [(Triangle b h) (throw "y")]))')
 
 # 5. graceful failures → None (so the caller skips rather than corrupts).
