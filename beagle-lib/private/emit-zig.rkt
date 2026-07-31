@@ -699,6 +699,12 @@
 (define (optional-binding? sym)
   (memq sym (current-optionals)))
 
+;; Field access consumes the record payload even when its surrounding result is optional.
+(define (emit-field-target target)
+  (if (and (symbol? target) (optional-binding? target))
+      (format "~a.?" (ident target))
+      (emit-expr target)))
+
 ;; The return type of a call expression, if the callee's signature is
 ;; known: a declared extern (current-externs holds its type-fn) or a local
 ;; defn (current-fn-returns). #f when unknown. This lets the emitter learn
@@ -1240,7 +1246,7 @@
           (unsupported "kw-access with default" "use records + explicit branches"))
         (define field (substring (symbol->string (kw-access-kw e)) 1))
         (format "~a.~a"
-                (emit-expr (kw-access-target e))
+                (emit-field-target (kw-access-target e))
                 (ident (string->symbol field)))])]
     [(new-form? e)
      ;; class-name carries the `->` prefix: '->Mind
@@ -2224,7 +2230,7 @@
              "record accessor arity"
              (format "~a expects one record value" fn)))
           (format "(~a).~a"
-                  (emit-expr (car args))
+                  (emit-field-target (car args))
                   (ident field)))]
     [(and (eq? fn 'atom) (= (length args) 1))
      (define inferred (expr-static-type e))

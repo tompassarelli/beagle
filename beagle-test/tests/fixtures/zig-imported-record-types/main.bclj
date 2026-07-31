@@ -30,6 +30,16 @@
   :- (Map String (Vec (U types/Store Nil)))
   value)
 
+(defn optional-accessor-value [present :- Bool] :- Int?
+  (let [store :- types/Store? (if present (types/->Store 42) nil)]
+    (if (some? store) (types/store-value store) nil)))
+
+(defn optional-field-value [present :- Bool] :- Int?
+  (let [store :- types/Store? (if present (types/->Store 42) nil)]
+    (if (some? store) (:value store) nil)))
+
 (defn main [] :- Nil
-  (let [store :- types/Store (types/->Store 42)]
-    (println (types/store-value (pass-store store)))))
+  (let [accessor-value (optional-accessor-value true)
+        field-value (optional-field-value true)]
+    (println (+ (if (some? accessor-value) accessor-value 0)
+                (if (some? field-value) field-value 0)))))

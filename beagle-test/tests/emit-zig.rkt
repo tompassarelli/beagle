@@ -365,7 +365,7 @@
                          [current-directory dir])
             (system* executable)))
         (check-true ran? (get-output-string run-output))
-        (check-equal? (get-output-string run-output) "42\n"))
+        (check-equal? (get-output-string run-output) "84\n"))
       (lambda () (delete-directory/files dir)))))
 
 ;; --- Fram rt_core stdlib conformance ----------------------------------------

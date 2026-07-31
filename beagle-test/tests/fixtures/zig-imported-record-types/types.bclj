@@ -6,6 +6,3 @@
 
 (defn make-store [value :- Int] :- Store
   (->Store value))
-
-(defn store-value [store :- Store] :- Int
-  (:value store))
