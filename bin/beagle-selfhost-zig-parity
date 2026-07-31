@@ -127,10 +127,13 @@ self_emit() { # <src> <target> <out-prefix>; 0 on emitted bytes, 1 on failure
     cp "$pfx.ast.err" "$pfx.err"; return 1
   fi
   if ! sh_main emit-from-ast --target "$target" < "$pfx.ast.json" > "$pfx.out" 2> "$pfx.emit.err"; then
+    rm -f "$pfx.out"
     cp "$pfx.emit.err" "$pfx.err"; return 1
   fi
   return 0
 }
+
+SELFHOST_ZIG_UNSUPPORTED="not yet supported by zig backend (self-host slice 1)"
 
 # Driver framing differs between the two CLIs; the diagnostic BODY is what
 # parity is about.
@@ -171,6 +174,12 @@ for i in "${!emit_ids[@]}"; do
       ledger_row "$id" emit match "byte-identical to racket emitter"
       n_match=$((n_match+1)); continue
     fi
+  fi
+  if [ -f "$pfx.err" ] && grep -Fq "$SELFHOST_ZIG_UNSUPPORTED" "$pfx.err"; then
+    summary="$(grep -F -m1 'Message:' "$pfx.err" | sed -E 's/^Message:[[:space:]]*//' | cut -c1-100 | tr '\t' ' ')"
+    [ -n "$summary" ] || summary="$SELFHOST_ZIG_UNSUPPORTED"
+    ledger_row "$id" emit unported "$summary"
+    n_unported=$((n_unported+1)); continue
   fi
   # Not matching: distinguish "no zig backend" from a real divergence by asking
   # whether the self-host's zig target behaves any differently from its clj
