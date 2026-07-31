@@ -459,6 +459,15 @@
       (println (s/join \", \" [\"a\" \"b\" \"c\"]))"
      "HELLO\nhi\na, b, c")
 
+   ;; Racket's writer spells VT/BEL/ESC as \v \a \e and Clojure's reader takes
+   ;; none of the three, so emitting a string verbatim through ~v can produce a
+   ;; file that will not read at all.
+   (check-clj-output "control characters emit escapes Clojure can read"
+     (list `(def controls ,(list->string
+                            (map integer->char '(11 7 27 9 10 13 12 8)))))
+     "(println (mapv int controls))"
+     "[11 7 27 9 10 13 12 8]")
+
    ;; --- multi-arity defn ---------------------------------------------------
 
    ;; Multi-arity needs file-based compilation (bracket syntax in quasiquotes

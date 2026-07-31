@@ -433,6 +433,34 @@
                         (string-append (make-string (max 0 (- 4 (string-length h))) #\0)
                                        h))))]))
 
+;; Clojure's reader accepts a NARROWER escape set than Racket's writer emits:
+;; Racket spells VT/BEL/ESC as \v \a \e, none of which Clojure reads. Every
+;; other control byte falls through to \uNNNN, which both accept.
+(define (emit-clj-string s)
+  (string-append
+   "\""
+   (apply
+    string-append
+    (for/list ([ch (in-string s)])
+      (cond
+        [(char=? ch #\")         "\\\""]
+        [(char=? ch #\\)         "\\\\"]
+        [(char=? ch #\tab)       "\\t"]
+        [(char=? ch #\newline)   "\\n"]
+        [(char=? ch #\return)    "\\r"]
+        [(char=? ch #\page)      "\\f"]
+        [(char=? ch #\backspace) "\\b"]
+        [else
+         (define n (char->integer ch))
+         (if (or (< n #x20) (= n #x7f))
+           (string-append "\\u"
+                          (let ([h (number->string n 16)])
+                            (string-append
+                             (make-string (max 0 (- 4 (string-length h))) #\0)
+                             h)))
+           (string ch))])))
+   "\""))
+
 (define (emit-expr e)
   (with-srcloc-meta e (emit-expr-core e)))
 
@@ -451,7 +479,7 @@
 
 (define (emit-expr-core e)
   (cond
-    [(string? e)        (~v e)]
+    [(string? e)        (emit-clj-string e)]
     [(boolean? e)       (if e "true" "false")]
     [(exact-integer? e) (number->string e)]
     [(real? e)          (emit-clj-number e)]
@@ -948,7 +976,7 @@
   (define val (pat-literal-value pat))
   (cond
     [(eq? val 'nil) "nil"]
-    [(string? val) (format "~v" val)]
+    [(string? val) (emit-clj-string val)]
     [(boolean? val) (if val "true" "false")]
     [(char? val) (emit-clj-char val)]
     [(and (symbol? val) (char=? (string-ref (symbol->string val) 0) #\:))
@@ -991,7 +1019,7 @@
   (define val (pat-literal-value pat))
   (cond
     [(eq? val 'nil) (format "(nil? ~a)" target-sym)]
-    [(string? val)  (format "(= ~a ~v)" target-sym val)]
+    [(string? val)  (format "(= ~a ~a)" target-sym (emit-clj-string val))]
     [(boolean? val) (format "(~a ~a)" (if val "true?" "false?") target-sym)]
     [(char? val)    (format "(= ~a ~a)" target-sym (emit-clj-char val))]
     [(and (symbol? val) (char=? (string-ref (symbol->string val) 0) #\:))
@@ -1049,7 +1077,7 @@
            [(pat-literal? v)
             (define val (pat-literal-value v))
             (cond
-              [(string? val) (format "(= (~a ~a) ~v)" k target-sym val)]
+              [(string? val) (format "(= (~a ~a) ~a)" k target-sym (emit-clj-string val))]
               [(eq? val 'nil) (format "(nil? (~a ~a))" k target-sym)]
               [else (format "(= (~a ~a) ~a)" k target-sym val)])]
            [(pat-wildcard? v) "true"]
@@ -1193,7 +1221,7 @@
 
 (define (datum->clj d)
   (cond
-    [(string? d)        (~v d)]
+    [(string? d)        (emit-clj-string d)]
     [(boolean? d)       (if d "true" "false")]
     [(exact-integer? d) (number->string d)]
     [(real? d)          (emit-clj-number d)]
