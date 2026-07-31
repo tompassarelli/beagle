@@ -2518,6 +2518,13 @@
     [(eq? fn 'assoc)
      (define target-type (expr-static-type (car args)))
      (cond
+       [(and (type-app? target-type)
+             (eq? (type-app-ctor target-type) 'Vec))
+        (format "rt.assoc(~a, ~a, ~a, ~a)"
+                (current-allocation-ctx)
+                (emit-expr (car args))
+                (emit-expr (cadr args))
+                (emit-expr (caddr args)))]
        [(map-type? target-type)
         (format "~a.assoc(~a, ~a, ~a)"
                 (emit-expr (car args))

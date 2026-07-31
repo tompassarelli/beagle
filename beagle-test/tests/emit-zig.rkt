@@ -469,6 +469,44 @@ test "ordinary conj preserves input and appends one value" {
 ZIG
       "ordinary-conj"))))
 
+(test-case "ordinary portable vector assoc is persistent and can grow at count"
+  (define zig-src
+    (compile-zig-string
+     "(ns g)\n(defn replace-value [xs :- (Vec Int) i :- Int x :- Int] :- (Vec Int) (assoc xs i x))"))
+  (check-true (string-contains? zig-src "rt.assoc(__ctx, xs, i, x)"))
+  (when ZIG
+    (check-true
+     (zig-tests?
+      zig-src
+      #<<ZIG
+test "vector assoc preserves input, replaces, and grows at count" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var rng = rt.Splitmix64.init(1);
+    var ctx = rt.Ctx{ .tick = arena.allocator(), .rng = &rng };
+
+    const input: []const i64 = &.{ 1, 2 };
+    const replaced = replaceValue(&ctx, input, 0, 9);
+    const grown = replaceValue(&ctx, input, 2, 3);
+    try std.testing.expectEqualSlices(i64, &.{ 1, 2 }, input);
+    try std.testing.expectEqualSlices(i64, &.{ 9, 2 }, replaced);
+    try std.testing.expectEqualSlices(i64, &.{ 1, 2, 3 }, grown);
+}
+ZIG
+      "ordinary-vector-assoc"))))
+
+(when ZIG
+  (test-case "vector assoc rejects an index beyond count"
+    (define zig-src
+      (compile-zig-string
+       (string-append
+        "(ns g)\n"
+        "(def INPUT :- (Vec Int) [1 2])\n"
+        "(defn invalid-assoc [xs :- (Vec Int)] :- (Vec Int) (assoc xs 3 9))\n"
+        "(defn main [] :- Nil (println (count (invalid-assoc INPUT))))\n")))
+    (define failure (zig-build-exe-and-run zig-src #:exit-code 134))
+    (check-true (string-contains? failure "vector assoc index out of bounds"))))
+
 ;; --- semantic contract 1: concrete native boundaries -------------------------
 
 (define semantic-bless? (and (getenv "BEAGLE_SEMANTIC_BLESS") #t))

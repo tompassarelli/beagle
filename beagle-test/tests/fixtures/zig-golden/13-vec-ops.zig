@@ -7,3 +7,7 @@ pub fn extendAndCount(ctx: *rt.Ctx, xs: []const i64, x: i64) i64 {
     const ys = rt.conj(ctx, xs, x);
     return (rt.count(ys) + rt.nth(ys, 0));
 }
+
+pub fn replaceFirst(__ctx: *rt.Ctx, xs: []const i64, x: i64) []const i64 {
+    return rt.assoc(__ctx, xs, 0, x);
+}

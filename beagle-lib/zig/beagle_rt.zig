@@ -285,6 +285,19 @@ pub fn conj(ctx: *Ctx, v: anytype, x: std.meta.Elem(@TypeOf(v))) @TypeOf(v) {
     return out;
 }
 
+/// O(n) persistent positional update in the tick arena; index == len appends.
+pub fn assoc(ctx: *Ctx, v: anytype, i: i64, x: std.meta.Elem(@TypeOf(v))) @TypeOf(v) {
+    if (i < 0) @panic("vector assoc index out of bounds");
+    const index: usize = @intCast(i);
+    if (index > v.len) @panic("vector assoc index out of bounds");
+
+    const T = std.meta.Elem(@TypeOf(v));
+    const out = talloc(ctx, T, if (index == v.len) v.len + 1 else v.len);
+    @memcpy(out[0..v.len], v);
+    out[index] = x;
+    return out;
+}
+
 // === CLI runtime ============================================================
 // Every buffer returned to emitted code is owned by the caller's Ctx arena.
 // The runtime accepts that allocator explicitly, owns no allocation policy,
