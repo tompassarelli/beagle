@@ -183,6 +183,32 @@ Which target to reach for:
 `beagle-lib/private/targets.rkt`, the canonical table `extensions.rkt` itself
 derives from. Query it live with `beagle langs`.)
 
+### Native systems strategy
+
+The generated target inventory above records available materializers, not the
+strategic destination for the Fram/Beagle native program. System-layer Fram
+engine/store/coord primitives and Beagle machinery target the target-neutral
+**Beagle Native Core** profile: target-independent typed/effect/region/layout/
+control/capability/ABI semantics. Their authoritative lowered program is an
+immutable **Native World**. Fram stays entirely Beagle; greenfield work stays
+graph-upstream. Materializers are disposable projections: restricted C11 for
+bootstrap/reference/sanitizers, QBE as the first direct-native and
+anti-C-capture check, Wasm/WASI for capability sandboxing, and
+LLVM/Cranelift/direct codegen only when measurement justifies them. Coverage
+means 30/39 archived core modules lower into a validated Native World, never
+"30 modules that print Zig."
+
+The former system-layer **bzig** default is suspended; Zig is not a strategic
+native destination. This is an institutional-fit policy, not a technical-defect
+claim. Zig commits `0f5dcae`, `cf87612`, `2fcb72d`, and `9f37f7d` are frozen
+as compatibility implementation, rollback, and differential oracle at the
+closed 13-operation/12-oracle boundary; only narrowly justified
+oracle-maintenance fixes may touch them. No Rust rewrite, handwritten-C domain
+logic, or C3/Odin/Idris retarget. "Turtle" names only the turtles-all-the-way-down
+architectural thesis, never a code identifier, row/log type, or compiler-phase
+label. The amendment's provenance lives on North thread
+`019fbd6c-7e2b-7e21-aa2a-57b581004f37`.
+
 ## 4. `Any` is opting OUT of the type system — don't reach for it (POLICY)
 
 `Any` = unchecked; an `Any`-heavy `.bclj` gains nothing over `.clj`.
