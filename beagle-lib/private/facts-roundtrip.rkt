@@ -2,7 +2,7 @@
 
 ;; facts-roundtrip: the source-of-truth gate.
 ;;
-;; Turtle #2's emit-facts is a LOSSY query projection (overlays drop types/params;
+;; Phase 2's emit-facts is a LOSSY query projection (overlays drop types/params;
 ;; reconstruction needs an AST unparser that doesn't exist). Losslessness lives one
 ;; layer down — at the READER DATUM tree, where type annotations (`:- Int`) are just
 ;; tokens. This proves `datum -> facts -> datum` is the identity over a real corpus:
@@ -348,7 +348,7 @@
   (define root (edn-root props))
   (and root (build root)))
 
-;; --- Turtle #6: read comment facts back off the triples (render side) ------
+;; --- Phase 6: read comment facts back off the triples (render side) --------
 (define (comment-text props cid)          ; concatenate seg0,seg1,... `v`s -> the comment lexeme
   (define h (hash-ref props cid))
   (apply string-append
@@ -630,7 +630,7 @@
     (read (open-input-string line))))
 
 ;; ============================================================================
-;; Turtle #6 — comments as resolved references (LINE comments, top level).
+;; Phase 6 — comments as resolved references (LINE comments, top level).
 ;; The reader DROPS comments, so we recover them from the source TEXT by srcloc:
 ;; a `;` outside every form's span is a top-level comment. Each is tokenized into
 ;; text + symbol-candidate SEGMENTS and attached to the FOLLOWING form (leading)
@@ -759,7 +759,7 @@
 ;; --- modes ------------------------------------------------------------------
 ;; the slice-2 lossless projection of ONE file as EDN lines: datum facts (each
 ;; node carries line/col/pos/span — we walk the SYNTAX, not syntax->datum) THEN
-;; comment facts (Turtle #6) attached to form nodes by srcloc. The (beagle-file …)
+;; comment facts (Phase 6) attached to form nodes by srcloc. The (beagle-file …)
 ;; wrapper + its head symbol are synthetic (no srcloc); form stxs keep theirs
 ;; (datum->syntax preserves inner syntax). ONE id space — emit-edn-typed's type
 ;; overlay keys directly off these datum node-ids (comment ids are minted ABOVE
@@ -866,7 +866,7 @@
   (define forms (cdr wrapped))
   (define orig (map syntax->datum (read-beagle-syntax orig-path)))
   (define same (equal? forms orig))
-  (printf "================ TURTLE #3 — round-trip THROUGH a Fram store ================\n")
+  (printf "================ PHASE 3 — round-trip THROUGH a Fram store ==================\n")
   (printf "source: ~a\n" orig-path)
   (printf "forms reconstructed from Fram: ~a   original: ~a\n" (length forms) (length orig))
   (printf "DATUM IDENTITY through the persisted fact store: ~a\n"
@@ -905,7 +905,7 @@
           (if (equal? d d2)
               (set! ok (add1 ok))
               (when (< (length res) 3) (set! res (cons (list (path->string f) d d2) res)))))))
-  (printf "================ TURTLE #3 — source-of-truth gate ================\n")
+  (printf "================ PHASE 3 — source-of-truth gate ==================\n")
   (printf "files: ~a (~a read, ~a UNREADABLE/skipped)   top-level forms: ~a\n"
           (length files) (- (length files) (length skipped)) (length skipped) forms)
   (unless (null? skipped)
