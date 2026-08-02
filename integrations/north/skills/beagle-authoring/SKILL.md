@@ -237,4 +237,4 @@ forced back to `Any`?" is the real one.)
 The family: Beagle text edits → beagle-authoring · graph-upstream files
 (graph edit channel) → code-as-facts · relational code queries
 (blast zone / who-calls) → codegraph · building apps on the engine →
-fact-modeling. Loop vocabulary: `beagle:docs/authoring-loops.md`.
+fram-modeling. Loop vocabulary: `beagle:docs/authoring-loops.md`.
