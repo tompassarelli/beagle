@@ -1990,7 +1990,11 @@
        (cond
          [(null? type-params)
           (hash-set! env name
-                     (type-union (map (lambda (m) (type-prim m)) members)))]
+                     (type-union (map (lambda (m) (type-prim m)) members)))
+          ;; `(defunion Result Ok Err)` names pre-declared records (no inline
+          ;; fields) — those already registered as defrecords.
+          (when member-fields
+            (register-union-member-fields! members member-fields '() env))]
          [else
           (hash-set! env name (type-prim name))
           (register-parametric-union! name type-params members member-fields env)])]
@@ -2061,8 +2065,15 @@
              (hasheq 'params type-params
                      'members members
                      'member-fields member-fields))
+  (register-union-member-fields! members member-fields type-params env))
+
+;; The RECORD-FIELDS entry is load-bearing: it is what makes
+;; narrow-env-for-match bind a variant pattern's names positionally to FIELDS,
+;; matching every emitter. Skip it and the arm silently takes the
+;; single-binding instance fallback instead.
+(define (register-union-member-fields! members member-fields type-params env)
   (for ([m (in-list members)])
-    (define fields (hash-ref member-fields m))
+    (define fields (hash-ref member-fields m '()))
     (define m-type (type-prim m))
     (define m-str (symbol->string m))
     (define m-lower (string-downcase m-str))

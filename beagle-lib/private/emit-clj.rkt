@@ -850,15 +850,24 @@
   (define val-strs (map (lambda (v) (format ":~a" v)) vals))
   (format "(def ~a-values #{~a})" name (string-join val-strs " ")))
 
-;; Emit `(defrecord Name [f1 f2 ...])` from a member symbol + its field params.
+;; Emit `(defrecord Name [f1 f2 ...])` plus its `name-f1` accessors from a
+;; member symbol + its field params. The accessors are not optional: check.rkt
+;; registers `circle-radius` for every variant field, so omitting them emits
+;; calls to an undefined symbol.
 (define (emit-variant-defrecord name fields)
   (cond
     [(null? fields)
      (format "(defrecord ~a [])" name)]
     [else
-     (format "(defrecord ~a [~a])"
-             name
-             (string-join (map (lambda (p) (symbol->string (param-name p))) fields) " "))]))
+     (define name-lower (string-downcase (symbol->string name)))
+     (string-join
+      (cons (format "(defrecord ~a [~a])"
+                    name
+                    (string-join (map (lambda (p) (symbol->string (param-name p))) fields) " "))
+            (for/list ([p (in-list fields)])
+              (define fname (symbol->string (param-name p)))
+              (format "(defn ~a-~a [r] (:~a r))" name-lower fname fname)))
+      "\n\n")]))
 
 (define (emit-defunion f)
   (define name (defunion-form-name f))

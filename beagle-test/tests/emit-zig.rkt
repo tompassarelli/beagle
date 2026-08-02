@@ -1609,6 +1609,9 @@ ZIG
     (string-append
      ";; error RewriteError = RewriteFailure\n"
      "(defrecord RewriteFailure [message path refusal])\n\n"
+     "(defn rewritefailure-message [r] (:message r))\n\n"
+     "(defn rewritefailure-path [r] (:path r))\n\n"
+     "(defn rewritefailure-refusal [r] (:refusal r))\n\n"
      "(defn ^String classify"))))
 
 (test-case "typed error contract pins CLJ bytes and emits compiling Zig"

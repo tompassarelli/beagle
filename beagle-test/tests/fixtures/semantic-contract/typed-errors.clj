@@ -3,6 +3,12 @@
 ;; error RewriteError = RewriteFailure
 (defrecord RewriteFailure [message path refusal])
 
+(defn rewritefailure-message [r] (:message r))
+
+(defn rewritefailure-path [r] (:path r))
+
+(defn rewritefailure-refusal [r] (:refusal r))
+
 (defn ^String classify [^Boolean missing ^Boolean mismatch ^String path]
   (cond
   missing (throw (ex-info "missing" {:path path :refusal true}))

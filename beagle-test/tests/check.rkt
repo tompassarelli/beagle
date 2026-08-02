@@ -919,6 +919,13 @@
 (check-fixture-ok "defunion member is compatible with union type"
   "defunion-member-compat.bclj")
 
+(check-fixture-ok "defunion with inline member fields binds the FIELD in a variant pattern"
+  "defunion-inline-fields-match.bclj")
+
+(check-fixture-err/rx "defunion inline-field pattern binds the field, not the variant instance"
+  #rx"circle-radius: arg 1 expected Circle, got Int"
+  "defunion-inline-fields-instance-binding.bclj")
+
 ;; =============================================================================
 ;; Tests — Result convention (defunion Ok/Err)
 ;; =============================================================================

@@ -269,8 +269,19 @@
   (let [vals-str (str/join " " (mapv (fn [v: Any] -> String (str ":" v)) (get e "values")))]
     (str "(def " (get e "name") "-values #{" vals-str "})")))
 
+;; Accessors are mandatory: check.rkt registers `circle-radius` for every
+;; variant field, so a bare defrecord emits calls to an undefined symbol.
 (defn emit-variant-defrecord [m: String fields: Any] -> String
-  (str "(defrecord " m " [" (str/join " " (field-names-of fields)) "])"))
+  (let [fnames (field-names-of fields)
+        m-lower (str/lower-case m)
+        record-line (str "(defrecord " m " [" (str/join " " fnames) "])")]
+    (if (= 0 (count fnames))
+      record-line
+      (str/join "\n\n"
+        (into [record-line]
+          (mapv (fn [fname: String] -> String
+                  (str "(defn " m-lower "-" fname " [r] (:" fname " r))"))
+                fnames))))))
 
 (defn emit-defunion [e: Any] -> String
   (let [comment (str ";; " (get e "name") " = " (str/join " | " (get e "members")))

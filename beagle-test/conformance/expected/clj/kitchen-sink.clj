@@ -14,7 +14,11 @@
 
 ;; Shape = Circle | Square
 (defrecord Circle [radius])
+
+(defn circle-radius [r] (:radius r))
 (defrecord Square [side])
+
+(defn square-side [r] (:side r))
 
 ^{:line 16 :file "beagle-test/tests/fixtures/kitchen-sink.bclj"} (def Color-values #{:red :green :blue})
 
@@ -36,8 +40,8 @@
 ^{:line 37 :file "beagle-test/tests/fixtures/kitchen-sink.bclj"} (defn shape-size [s]
   ^{:line 38 :file "beagle-test/tests/fixtures/kitchen-sink.bclj"} (let [match__0 s]
   (cond
-    (instance? Circle match__0) (let [c (:radius match__0)] (circle-radius c))
-    (instance? Square match__0) (let [q (:side match__0)] (square-side q)))))
+    (instance? Circle match__0) (let [radius (:radius match__0)] radius)
+    (instance? Square match__0) (let [side (:side match__0)] side))))
 
 ^{:line 43 :file "beagle-test/tests/fixtures/kitchen-sink.bclj"} (defn log-point [^Point p]
   ^{:line 44 :file "beagle-test/tests/fixtures/kitchen-sink.bclj"} (if ^{:line 44 :file "beagle-test/tests/fixtures/kitchen-sink.bclj"} (> ^{:line 44 :file "beagle-test/tests/fixtures/kitchen-sink.bclj"} (point-x p) 0) ^{:line 45 :file "beagle-test/tests/fixtures/kitchen-sink.bclj"} (do

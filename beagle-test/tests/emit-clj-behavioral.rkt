@@ -133,6 +133,31 @@
         (println (instance? Circle s)))"
      "5\n3\ntrue\nfalse")
 
+   ;; The variant accessors must be DEFINED, not just type-registered:
+   ;; check.rkt gives `circle-radius` a type, so an absent defn is an
+   ;; unresolved symbol at run time.
+   (check-clj-output "defunion variant accessors are defined"
+     (list `(defunion Shape
+              (Circle ,(br '(radius #%: Int)))
+              (Square ,(br '(side #%: Int)))))
+     "(println (circle-radius (->Circle 5)))
+      (println (square-side (->Square 3)))"
+     "5\n3")
+
+   ;; A single-binding variant pattern binds the FIELD (checker and emitter
+   ;; disagreed here: the checker used to bind the instance).
+   (check-clj-output "single-binding variant pattern binds the field"
+     (list `(defunion Shape
+              (Circle ,(br '(radius #%: Int)))
+              (Square ,(br '(side #%: Int))))
+           `(defn shape-size [(s #%: Shape)] -> Int
+              (match s
+                ,(br '(Circle value) 'value)
+                ,(br '(Square value) 'value))))
+     "(println (shape-size (->Circle 5)))
+      (println (shape-size (->Square 3)))"
+     "5\n3")
+
    ;; --- defenum + case ------------------------------------------------------
 
    (check-clj-output "defenum emits keywords"

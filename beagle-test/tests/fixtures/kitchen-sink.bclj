@@ -36,8 +36,8 @@
 ;; match on union
 (defn shape-size [(s: Shape)] -> Int
   (match s
-    [(Circle c) (circle-radius c)]
-    [(Square q) (square-side q)]))
+    [(Circle radius) radius]
+    [(Square side) side]))
 
 ;; if + do (was: when + do; when removed)
 (defn log-point [(p: Point)] -> Nil

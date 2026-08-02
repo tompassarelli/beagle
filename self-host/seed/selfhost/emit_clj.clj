@@ -167,7 +167,10 @@
   (str "(def " (get e "name") "-values #{" vals-str "})")))
 
 (defn ^String emit-variant-defrecord [^String m fields]
-  (str "(defrecord " m " [" (str/join " " (field-names-of fields)) "])"))
+  (let [fnames (field-names-of fields)
+   m-lower (str/lower-case m)
+   record-line (str "(defrecord " m " [" (str/join " " fnames) "])")]
+  (if (= 0 (count fnames)) record-line (str/join "\n\n" (into [record-line] (mapv (fn [fname] (str "(defn " m-lower "-" fname " [r] (:" fname " r))")) fnames))))))
 
 (defn ^String emit-defunion [e]
   (let [comment (str ";; " (get e "name") " = " (str/join " | " (get e "members")))

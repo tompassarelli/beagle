@@ -3,6 +3,12 @@
 ;; error RewriteCrashError = RewriteCrash
 (defrecord RewriteCrash [message path refusal])
 
+(defn rewritecrash-message [r] (:message r))
+
+(defn rewritecrash-path [r] (:path r))
+
+(defn rewritecrash-refusal [r] (:refusal r))
+
 (defn classify-rewrite-crash [^String coord live-ino old-ino new-ino old-bytes old-sha new-sha1 live-line1-sha live-prefix-sha]
   (cond
   (nil? live-ino) (throw (ex-info (str "rewrite intent present but " coord " does not exist — refusing to classify") {:path coord :refusal true}))
