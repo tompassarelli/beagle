@@ -283,7 +283,9 @@
    raw-fields (field-names-of fields)
    field-params (mapv mangle-name raw-fields)
    field-props (mapv mangle-prop raw-fields)]
-  (str "function " m-str "(" (str/join ", " field-params) ") { return Object.freeze({ _tag: " (js-string-lit member-name) (if (= 0 (count field-params)) "" (str ", " (str/join ", " (map-indexed (fn [i prop] (str prop ": " (nth field-params i))) field-props)))) " }); }")))
+  (let [factory (str "function " m-str "(" (str/join ", " field-params) ") { return Object.freeze({ _tag: " (js-string-lit member-name) (if (= 0 (count field-params)) "" (str ", " (str/join ", " (map-indexed (fn [i prop] (str prop ": " (nth field-params i))) field-props)))) " }); }")
+   accessors (map-indexed (fn [i prop] (str "function " (mangle-str (str (str/lower-case member-name) "-" (nth raw-fields i))) "(r) { return r." prop "; }")) field-props)]
+  (str/join "\n\n" (into [factory] accessors)))))
 
 (defn ^String emit-defenum [f]
   (str "const " (mangle-name (get f "name")) "_values = new Set([" (str/join ", " (mapv (fn [v] (js-string-lit v)) (get f "values"))) "]);"))

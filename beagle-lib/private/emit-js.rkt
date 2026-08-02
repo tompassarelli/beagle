@@ -2270,7 +2270,9 @@
 
 ;; --- records ---------------------------------------------------------------
 
-;; Emit `function Tag(...fields) { return Object.freeze({ _tag: "Tag", ... }); }`
+;; Emit a tagged variant constructor plus its field accessors.  check.rkt
+;; registers `circle-radius` for every inline member field, so the constructor
+;; alone would leave an emitted call undefined.
 ;; Shared by defunion and deferror members (both produce tagged variant ctors).
 (define (emit-tagged-factory member-name fields)
   (define m-str (mangle-name member-name))
@@ -2278,16 +2280,26 @@
   ;; PROPERTIES (char-mangle only). Split them so `{ delete: delete$ }`.
   (define field-params (map (compose mangle-name param-name) fields))
   (define field-props (map (compose mangle-prop symbol->string param-name) fields))
-  (format "function ~a(~a) { return Object.freeze({ _tag: ~v~a }); }"
-          m-str
-          (string-join field-params ", ")
-          (symbol->string member-name)
-          (if (null? field-params) ""
-              (string-append ", "
-                             (string-join
-                              (map (lambda (prop param) (format "~a: ~a" prop param))
-                                   field-props field-params)
-                              ", ")))))
+  (define factory
+    (format "function ~a(~a) { return Object.freeze({ _tag: ~v~a }); }"
+            m-str
+            (string-join field-params ", ")
+            (symbol->string member-name)
+            (if (null? field-params) ""
+                (string-append ", "
+                               (string-join
+                                (map (lambda (prop param) (format "~a: ~a" prop param))
+                                     field-props field-params)
+                                ", ")))))
+  (define accessors
+    (for/list ([field-name (in-list (map (compose symbol->string param-name) fields))]
+               [prop (in-list field-props)])
+      (format "function ~a(r) { return r.~a; }"
+              (mangle-str (format "~a-~a"
+                                  (string-downcase (symbol->string member-name))
+                                  field-name))
+              prop)))
+  (string-join (cons factory accessors) "\n\n"))
 
 (define (emit-record f)
   (define name (record-form-name f))

@@ -165,6 +165,24 @@ console.assert(threw, 'frozen record should reject mutation');
      "console.log(area(Circle(5))); console.log(area(Rect(3, 4)));"
      "25\n12")
 
+   (check-js-output "defunion variant accessors are defined"
+     (list `(defunion Shape
+              (Circle ,(br '(radius #%: Int)))
+              (Square ,(br '(side #%: Int)))))
+     "console.log(circle_radius(Circle(5))); console.log(square_side(Square(3)));"
+     "5\n3")
+
+   (check-js-output "defunion single-binding patterns bind fields"
+     (list `(defunion Shape
+              (Circle ,(br '(radius #%: Int)))
+              (Square ,(br '(side #%: Int))))
+           `(defn shape-size [(shape #%: Shape)] -> Int
+              (match shape
+                ,(br '(Circle radius) 'radius)
+                ,(br '(Square side) 'side))))
+     "console.log(shape_size(Circle(5))); console.log(shape_size(Square(3)));"
+     "5\n3")
+
    ;; --- seam 1: reserved-word field/property positions ----------------------
    ;; A record field named for a JS reserved word must round-trip through its
    ;; generated accessor. Pre-fix the accessor is emitted as `cfg_delete$` but

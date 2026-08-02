@@ -75,6 +75,18 @@
      "function point_x(r)"
      '(defrecord Point [(x #%: Int) (y #%: Int)]))
 
+   (check-js-contains "defunion variants emit field accessors"
+     "function circle_radius(r)"
+     `(defunion Shape
+        (Circle ,(br '(radius #%: Int)))
+        (Square ,(br '(side #%: Int)))))
+
+   (check-js-contains "defunion field patterns bind fields"
+     "return radius;"
+     `(defunion Shape (Circle ,(br '(radius #%: Int))))
+     `(defn size [(shape #%: Shape)] -> Int
+        (match shape ,(br '(Circle radius) 'radius))))
+
    (check-js-contains "constructor -> factory call"
      "Point(1, 2)"
      '(defrecord Point [(x #%: Int) (y #%: Int)])
