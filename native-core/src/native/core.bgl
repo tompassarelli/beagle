@@ -1,0 +1,542 @@
+;; @upstream:graph — generated projection; author substantive forms through
+;; Fram graph edits.
+(ns native.core)
+
+(define-mode strict)
+
+(defrecord NativeId [value :- String])
+
+(defunion AtomKind
+  (BoolKind [token :- Bool])
+  (I64Kind [token :- Bool])
+  (F64Kind [token :- Bool])
+  (TextKind [token :- Bool])
+  (RefKind [target :- NativeId]))
+
+(defunion NativeAtom
+  (BoolAtom [value :- Bool])
+  (I64Atom [value :- Int])
+  (F64Atom [value :- Float])
+  (TextAtom [value :- String])
+  (RefAtom [target :- NativeId]))
+
+(defrecord TypeField [id :- NativeId name :- String type-id :- NativeId])
+
+(defrecord TypeVariant [id :- NativeId name :- String payload-type :- (U NativeId Nil)])
+
+(defunion TypeShape
+  (AtomType [kind :- AtomKind])
+  (RecordType [fields :- (Vec TypeField)])
+  (UnionType [variants :- (Vec TypeVariant)])
+  (VectorType [element-type :- NativeId])
+  (ReferenceType [target-type :- NativeId]))
+
+(defrecord TypeDef [id :- NativeId name :- String shape :- TypeShape])
+
+(defunion EffectKind
+  (PureEffect [token :- Bool])
+  (AllocateEffect [region :- NativeId])
+  (ReadEffect [region :- NativeId])
+  (WriteEffect [region :- NativeId])
+  (CapabilityEffect [capability :- NativeId]))
+
+(defrecord EffectDef [id :- NativeId kind :- EffectKind])
+
+(defunion RegionKind
+  (StackRegion [token :- Bool])
+  (ArenaRegion [token :- Bool])
+  (ExternalRegion [token :- Bool]))
+
+(defrecord RegionDef [id :- NativeId kind :- RegionKind parent :- (U NativeId Nil)])
+
+(defunion CapabilityKind
+  (ReadCapability [token :- Bool])
+  (WriteCapability [token :- Bool])
+  (AllocateCapability [token :- Bool])
+  (HostCapability [token :- Bool]))
+
+(defrecord CapabilityDef [id :- NativeId kind :- CapabilityKind region :- (U NativeId Nil) affine :- Bool])
+
+(defrecord FieldLayout [field-id :- NativeId type-id :- NativeId offset :- Int align :- Int])
+
+(defrecord LayoutDef [id :- NativeId type-id :- NativeId size :- Int align :- Int fields :- (Vec FieldLayout)])
+
+(defrecord Parameter [id :- NativeId type-id :- NativeId])
+
+(defunion StoreOp
+  (StoreBool [address :- NativeId value :- NativeId region :- NativeId capability :- NativeId])
+  (StoreI64 [address :- NativeId value :- NativeId region :- NativeId capability :- NativeId])
+  (StoreF64 [address :- NativeId value :- NativeId region :- NativeId capability :- NativeId])
+  (StoreText [address :- NativeId value :- NativeId region :- NativeId capability :- NativeId])
+  (StoreRef [address :- NativeId value :- NativeId region :- NativeId capability :- NativeId]))
+
+(defunion Instruction
+  (AtomInstruction [result-id :- NativeId atom :- NativeAtom])
+  (CopyInstruction [result-id :- NativeId source-id :- NativeId])
+  (AddI64Instruction [result-id :- NativeId left-id :- NativeId right-id :- NativeId])
+  (AddF64Instruction [result-id :- NativeId left-id :- NativeId right-id :- NativeId])
+  (StoreInstruction [result-id :- NativeId store :- StoreOp])
+  (CallInstruction [result-id :- NativeId function-id :- NativeId arguments :- (Vec NativeId)]))
+
+(defunion Terminator
+  (ReturnTerminator [value :- (U NativeId Nil)])
+  (JumpTerminator [block-id :- NativeId arguments :- (Vec NativeId)])
+  (BranchTerminator [condition :- NativeId true-block :- NativeId false-block :- NativeId]))
+
+(defrecord BasicBlock [id :- NativeId parameters :- (Vec Parameter) instructions :- (Vec Instruction) terminators :- (Vec Terminator)])
+
+(defrecord FunctionDef [id :- NativeId name :- String parameters :- (Vec Parameter) blocks :- (Vec BasicBlock) entry-block :- NativeId return-type :- (U NativeId Nil) effects :- (Vec NativeId) regions :- (Vec NativeId) capabilities :- (Vec NativeId)])
+
+(defunion ObligationCode
+  (UniqueIdsObligation [token :- Bool])
+  (AllowedSetsObligation [token :- Bool])
+  (ReferenceClosureObligation [token :- Bool])
+  (SingleTerminatorObligation [token :- Bool])
+  (SsaClosureObligation [token :- Bool]))
+
+(defrecord ObligationResult [code :- ObligationCode passed :- Bool detail :- String])
+
+(defrecord ValidationReport [passed :- Bool obligations :- (Vec ObligationResult)])
+
+(defunion ExternalObservation
+  (Fri2Observation [artifact-id :- NativeId digest :- String byte-count :- Int]))
+
+(defrecord NativeReceipt [id :- NativeId input-world :- NativeId output-world :- NativeId compiler-pass :- String parameters :- (Vec String) obligations :- (Vec ObligationResult) observations :- (Vec ExternalObservation)])
+
+(defrecord NativeWorld [id :- NativeId parent :- (U NativeId Nil) compiler-pass :- String types :- (Vec TypeDef) effects :- (Vec EffectDef) regions :- (Vec RegionDef) capabilities :- (Vec CapabilityDef) layouts :- (Vec LayoutDef) functions :- (Vec FunctionDef) allowed-effects :- (Vec NativeId) allowed-regions :- (Vec NativeId) allowed-capabilities :- (Vec NativeId) observations :- (Vec ExternalObservation)])
+
+(defn native-id= [left :- NativeId right :- NativeId] :- Bool
+  (= (nativeid-value left) (nativeid-value right)))
+
+(defn id-in? [ids :- (Vec NativeId) target :- NativeId] :- Bool
+  (loop [index :- Int 0]
+    (cond
+      (>= index (count ids))
+      false
+      (native-id= (nth ids index) target)
+      true
+      :else
+      (recur (+ index 1)))))
+
+(defn ids-in? [ids :- (Vec NativeId) allowed :- (Vec NativeId)] :- Bool
+  (loop [index :- Int 0]
+    (if (>= index (count ids))
+      true
+      (if (id-in? allowed (nth ids index)) (recur (+ index 1)) false))))
+
+(defn unique-ids? [ids :- (Vec NativeId)] :- Bool
+  (loop [index :- Int 0 seen :- (Vec NativeId) []]
+    (if (>= index (count ids))
+      true
+      (let [current :- NativeId (nth ids index)]
+        (if (id-in? seen current) false (recur (+ index 1) (conj seen current)))))))
+
+(defn canonical-parts [parts :- (Vec String)] :- String
+  (loop [index :- Int 0 encoded :- String ""]
+    (if (>= index (count parts))
+      encoded
+      (let [part :- String (nth parts index)]
+        (recur (+ index 1) (str encoded (count part) ":" part))))))
+
+(defn canonical-id [domain :- String parts :- (Vec String)] :- NativeId
+  (->NativeId (str "native-id-v0:" (count domain) ":" domain ":" (canonical-parts parts))))
+
+(defn optional-id-in? [candidate :- (U NativeId Nil) allowed :- (Vec NativeId)] :- Bool
+  (if (nil? candidate) true (id-in? allowed candidate)))
+
+(defn append-ids [left :- (Vec NativeId) right :- (Vec NativeId)] :- (Vec NativeId)
+  (vec (concat left right)))
+
+(defn parameter-ids [parameters :- (Vec Parameter)] :- (Vec NativeId)
+  (mapv (fn [parameter :- Parameter] :- NativeId (parameter-id parameter))
+    parameters))
+
+(defn instruction-result-id [instruction :- Instruction] :- NativeId
+  (match instruction
+    [(AtomInstruction result-id atom) result-id]
+    [(CopyInstruction result-id source-id) result-id]
+    [(AddI64Instruction result-id left-id right-id) result-id]
+    [(AddF64Instruction result-id left-id right-id) result-id]
+    [(StoreInstruction result-id store) result-id]
+    [(CallInstruction result-id function-id arguments) result-id]))
+
+(defn instruction-result-ids [instructions :- (Vec Instruction)] :- (Vec NativeId)
+  (mapv (fn [instruction :- Instruction] :- NativeId (instruction-result-id instruction))
+    instructions))
+
+(defn type-shape-owned-ids [shape :- TypeShape] :- (Vec NativeId)
+  (match shape
+    [(AtomType kind) []]
+    [(RecordType fields)
+     (mapv (fn [field :- TypeField] :- NativeId (typefield-id field)) fields)]
+    [(UnionType variants)
+     (mapv (fn [variant :- TypeVariant] :- NativeId (typevariant-id variant))
+       variants)]
+    [(VectorType element-type) []]
+    [(ReferenceType target-type) []]))
+
+(defn type-owned-ids [type-def :- TypeDef] :- (Vec NativeId)
+  (into [(typedef-id type-def)] (type-shape-owned-ids (typedef-shape type-def))))
+
+(defn all-type-owned-ids [types :- (Vec TypeDef)] :- (Vec NativeId)
+  (loop [index :- Int 0 ids :- (Vec NativeId) []]
+    (if (>= index (count types))
+      ids
+      (recur (+ index 1) (append-ids ids (type-owned-ids (nth types index)))))))
+
+(defn block-owned-ids [block :- BasicBlock] :- (Vec NativeId)
+  (append-ids [(basicblock-id block)]
+    (append-ids (parameter-ids (basicblock-parameters block))
+      (instruction-result-ids (basicblock-instructions block)))))
+
+(defn all-block-owned-ids [blocks :- (Vec BasicBlock)] :- (Vec NativeId)
+  (loop [index :- Int 0 ids :- (Vec NativeId) []]
+    (if (>= index (count blocks))
+      ids
+      (recur (+ index 1) (append-ids ids (block-owned-ids (nth blocks index)))))))
+
+(defn function-owned-ids [function :- FunctionDef] :- (Vec NativeId)
+  (append-ids [(functiondef-id function)]
+    (append-ids (parameter-ids (functiondef-parameters function))
+      (all-block-owned-ids (functiondef-blocks function)))))
+
+(defn all-function-owned-ids [functions :- (Vec FunctionDef)] :- (Vec NativeId)
+  (loop [index :- Int 0 ids :- (Vec NativeId) []]
+    (if (>= index (count functions))
+      ids
+      (recur (+ index 1)
+        (append-ids ids (function-owned-ids (nth functions index)))))))
+
+(defn type-ids [types :- (Vec TypeDef)] :- (Vec NativeId)
+  (mapv (fn [type-def :- TypeDef] :- NativeId (typedef-id type-def)) types))
+
+(defn effect-ids [effects :- (Vec EffectDef)] :- (Vec NativeId)
+  (mapv (fn [effect :- EffectDef] :- NativeId (effectdef-id effect)) effects))
+
+(defn region-ids [regions :- (Vec RegionDef)] :- (Vec NativeId)
+  (mapv (fn [region :- RegionDef] :- NativeId (regiondef-id region)) regions))
+
+(defn capability-ids [capabilities :- (Vec CapabilityDef)] :- (Vec NativeId)
+  (mapv (fn [capability :- CapabilityDef] :- NativeId (capabilitydef-id capability))
+    capabilities))
+
+(defn layout-ids [layouts :- (Vec LayoutDef)] :- (Vec NativeId)
+  (mapv (fn [layout :- LayoutDef] :- NativeId (layoutdef-id layout)) layouts))
+
+(defn function-ids [functions :- (Vec FunctionDef)] :- (Vec NativeId)
+  (mapv (fn [function :- FunctionDef] :- NativeId (functiondef-id function))
+    functions))
+
+(defn world-owned-ids [world :- NativeWorld] :- (Vec NativeId)
+  (let [owned0 :- (Vec NativeId) [(nativeworld-id world)] owned1 :- (Vec NativeId) (append-ids owned0 (all-type-owned-ids (nativeworld-types world))) owned2 :- (Vec NativeId) (append-ids owned1 (effect-ids (nativeworld-effects world))) owned3 :- (Vec NativeId) (append-ids owned2 (region-ids (nativeworld-regions world))) owned4 :- (Vec NativeId) (append-ids owned3 (capability-ids (nativeworld-capabilities world))) owned5 :- (Vec NativeId) (append-ids owned4 (layout-ids (nativeworld-layouts world)))]
+    (append-ids owned5 (all-function-owned-ids (nativeworld-functions world)))))
+
+(defn type-member-ids [types :- (Vec TypeDef)] :- (Vec NativeId)
+  (loop [index :- Int 0 ids :- (Vec NativeId) []]
+    (if (>= index (count types))
+      ids
+      (recur (+ index 1)
+        (append-ids ids
+          (type-shape-owned-ids (typedef-shape (nth types index))))))))
+
+(defn atom-kind-refs-closed? [kind :- AtomKind known-types :- (Vec NativeId)] :- Bool
+  (match kind
+    [(BoolKind value) true]
+    [(I64Kind value) true]
+    [(F64Kind value) true]
+    [(TextKind value) true]
+    [(RefKind value) (id-in? known-types (refkind-target value))]))
+
+(defn type-fields-refs-closed? [fields :- (Vec TypeField) known-types :- (Vec NativeId)] :- Bool
+  (every? (fn [field :- TypeField] :- Bool (id-in? known-types (typefield-type-id field)))
+    fields))
+
+(defn type-variants-refs-closed? [variants :- (Vec TypeVariant) known-types :- (Vec NativeId)] :- Bool
+  (every? (fn [variant :- TypeVariant] :- Bool (optional-id-in? (typevariant-payload-type variant) known-types))
+    variants))
+
+(defn type-shape-refs-closed? [shape :- TypeShape known-types :- (Vec NativeId)] :- Bool
+  (match shape
+    [(AtomType value)
+     (atom-kind-refs-closed? (atomtype-kind value) known-types)]
+    [(RecordType value)
+     (type-fields-refs-closed? (recordtype-fields value) known-types)]
+    [(UnionType value)
+     (type-variants-refs-closed? (uniontype-variants value) known-types)]
+    [(VectorType value) (id-in? known-types (vectortype-element-type value))]
+    [(ReferenceType value)
+     (id-in? known-types (referencetype-target-type value))]))
+
+(defn types-refs-closed? [types :- (Vec TypeDef)] :- Bool
+  (let [known-types :- (Vec NativeId) (type-ids types)]
+    (every? (fn [type-def :- TypeDef] :- Bool (type-shape-refs-closed? (typedef-shape type-def) known-types))
+      types)))
+
+(defn effect-kind-refs-closed? [kind :- EffectKind known-regions :- (Vec NativeId) known-capabilities :- (Vec NativeId)] :- Bool
+  (match kind
+    [(PureEffect value) true]
+    [(AllocateEffect value)
+     (id-in? known-regions (allocateeffect-region value))]
+    [(ReadEffect value) (id-in? known-regions (readeffect-region value))]
+    [(WriteEffect value) (id-in? known-regions (writeeffect-region value))]
+    [(CapabilityEffect value)
+     (id-in? known-capabilities (capabilityeffect-capability value))]))
+
+(defn effects-refs-closed? [effects :- (Vec EffectDef) known-regions :- (Vec NativeId) known-capabilities :- (Vec NativeId)] :- Bool
+  (every? (fn [effect :- EffectDef] :- Bool (effect-kind-refs-closed? (effectdef-kind effect) known-regions known-capabilities))
+    effects))
+
+(defn regions-refs-closed? [regions :- (Vec RegionDef)] :- Bool
+  (let [known :- (Vec NativeId) (region-ids regions)]
+    (every? (fn [region :- RegionDef] :- Bool (optional-id-in? (regiondef-parent region) known))
+      regions)))
+
+(defn capabilities-refs-closed? [capabilities :- (Vec CapabilityDef) known-regions :- (Vec NativeId)] :- Bool
+  (every? (fn [capability :- CapabilityDef] :- Bool (and (capabilitydef-affine capability) (optional-id-in? (capabilitydef-region capability) known-regions)))
+    capabilities))
+
+(defn field-layout-refs-closed? [field :- FieldLayout known-members :- (Vec NativeId) known-types :- (Vec NativeId)] :- Bool
+  (and (id-in? known-members (fieldlayout-field-id field))
+    (id-in? known-types (fieldlayout-type-id field))
+    (>= (fieldlayout-offset field) 0)
+    (> (fieldlayout-align field) 0)))
+
+(defn layout-refs-closed? [layout :- LayoutDef known-members :- (Vec NativeId) known-types :- (Vec NativeId)] :- Bool
+  (and (id-in? known-types (layoutdef-type-id layout))
+    (>= (layoutdef-size layout) 0)
+    (> (layoutdef-align layout) 0)
+    (every? (fn [field :- FieldLayout] :- Bool (field-layout-refs-closed? field known-members known-types))
+      (layoutdef-fields layout))))
+
+(defn layouts-refs-closed? [layouts :- (Vec LayoutDef) types :- (Vec TypeDef)] :- Bool
+  (let [known-types :- (Vec NativeId) (type-ids types) known-members :- (Vec NativeId) (type-member-ids types)]
+    (every? (fn [layout :- LayoutDef] :- Bool (layout-refs-closed? layout known-members known-types))
+      layouts)))
+
+(defn basic-block-ids [blocks :- (Vec BasicBlock)] :- (Vec NativeId)
+  (mapv (fn [block :- BasicBlock] :- NativeId (basicblock-id block)) blocks))
+
+(defn native-atom-refs-closed? [atom :- NativeAtom known-owned :- (Vec NativeId)] :- Bool
+  (match atom
+    [(BoolAtom value) true]
+    [(I64Atom value) true]
+    [(F64Atom value) true]
+    [(TextAtom value) true]
+    [(RefAtom value) (id-in? known-owned (refatom-target value))]))
+
+(defn store-op-resources-closed? [store :- StoreOp known-regions :- (Vec NativeId) known-capabilities :- (Vec NativeId)] :- Bool
+  (match store
+    [(StoreBool value)
+     (and (id-in? known-regions (storebool-region value))
+       (id-in? known-capabilities (storebool-capability value)))]
+    [(StoreI64 value)
+     (and (id-in? known-regions (storei64-region value))
+       (id-in? known-capabilities (storei64-capability value)))]
+    [(StoreF64 value)
+     (and (id-in? known-regions (storef64-region value))
+       (id-in? known-capabilities (storef64-capability value)))]
+    [(StoreText value)
+     (and (id-in? known-regions (storetext-region value))
+       (id-in? known-capabilities (storetext-capability value)))]
+    [(StoreRef value)
+     (and (id-in? known-regions (storeref-region value))
+       (id-in? known-capabilities (storeref-capability value)))]))
+
+(defn instruction-semantic-refs-closed? [instruction :- Instruction known-functions :- (Vec NativeId) known-regions :- (Vec NativeId) known-capabilities :- (Vec NativeId) known-owned :- (Vec NativeId)] :- Bool
+  (match instruction
+    [(AtomInstruction value)
+     (native-atom-refs-closed? (atominstruction-atom value) known-owned)]
+    [(CopyInstruction value) true]
+    [(AddI64Instruction value) true]
+    [(AddF64Instruction value) true]
+    [(StoreInstruction value)
+     (store-op-resources-closed? (storeinstruction-store value)
+       known-regions
+       known-capabilities)]
+    [(CallInstruction value)
+     (id-in? known-functions (callinstruction-function-id value))]))
+
+(defn parameter-types-closed? [parameters :- (Vec Parameter) known-types :- (Vec NativeId)] :- Bool
+  (every? (fn [parameter :- Parameter] :- Bool (id-in? known-types (parameter-type-id parameter)))
+    parameters))
+
+(defn terminator-block-refs-closed? [terminator :- Terminator known-blocks :- (Vec NativeId)] :- Bool
+  (match terminator
+    [(ReturnTerminator value) true]
+    [(JumpTerminator value)
+     (id-in? known-blocks (jumpterminator-block-id value))]
+    [(BranchTerminator value)
+     (and (id-in? known-blocks (branchterminator-true-block value))
+       (id-in? known-blocks (branchterminator-false-block value)))]))
+
+(defn block-reference-closed? [block :- BasicBlock known-types :- (Vec NativeId) known-functions :- (Vec NativeId) known-regions :- (Vec NativeId) known-capabilities :- (Vec NativeId) known-owned :- (Vec NativeId) known-blocks :- (Vec NativeId)] :- Bool
+  (and (parameter-types-closed? (basicblock-parameters block) known-types)
+    (every? (fn [instruction :- Instruction] :- Bool (instruction-semantic-refs-closed? instruction known-functions known-regions known-capabilities known-owned))
+      (basicblock-instructions block))
+    (every? (fn [terminator :- Terminator] :- Bool (terminator-block-refs-closed? terminator known-blocks))
+      (basicblock-terminators block))))
+
+(defn function-reference-closed? [function :- FunctionDef known-types :- (Vec NativeId) known-effects :- (Vec NativeId) known-regions :- (Vec NativeId) known-capabilities :- (Vec NativeId) known-functions :- (Vec NativeId) known-owned :- (Vec NativeId)] :- Bool
+  (let [blocks :- (Vec BasicBlock) (functiondef-blocks function) known-blocks :- (Vec NativeId) (basic-block-ids blocks)]
+    (and (parameter-types-closed? (functiondef-parameters function) known-types)
+      (optional-id-in? (functiondef-return-type function) known-types)
+      (id-in? known-blocks (functiondef-entry-block function))
+      (ids-in? (functiondef-effects function) known-effects)
+      (ids-in? (functiondef-regions function) known-regions)
+      (ids-in? (functiondef-capabilities function) known-capabilities)
+      (every? (fn [block :- BasicBlock] :- Bool (block-reference-closed? block known-types known-functions known-regions known-capabilities known-owned known-blocks))
+        blocks))))
+
+(defn functions-reference-closed? [functions :- (Vec FunctionDef) known-types :- (Vec NativeId) known-effects :- (Vec NativeId) known-regions :- (Vec NativeId) known-capabilities :- (Vec NativeId) known-owned :- (Vec NativeId)] :- Bool
+  (let [known-functions :- (Vec NativeId) (function-ids functions)]
+    (every? (fn [function :- FunctionDef] :- Bool (function-reference-closed? function known-types known-effects known-regions known-capabilities known-functions known-owned))
+      functions)))
+
+(defn world-reference-closed? [world :- NativeWorld] :- Bool
+  (let [types :- (Vec TypeDef) (nativeworld-types world) effects :- (Vec EffectDef) (nativeworld-effects world) regions :- (Vec RegionDef) (nativeworld-regions world) capabilities :- (Vec CapabilityDef) (nativeworld-capabilities world) known-types :- (Vec NativeId) (type-ids types) known-effects :- (Vec NativeId) (effect-ids effects) known-regions :- (Vec NativeId) (region-ids regions) known-capabilities :- (Vec NativeId) (capability-ids capabilities) known-owned :- (Vec NativeId) (world-owned-ids world)]
+    (and (types-refs-closed? types)
+      (effects-refs-closed? effects known-regions known-capabilities)
+      (regions-refs-closed? regions)
+      (capabilities-refs-closed? capabilities known-regions)
+      (layouts-refs-closed? (nativeworld-layouts world) types)
+      (functions-reference-closed? (nativeworld-functions world)
+        known-types
+        known-effects
+        known-regions
+        known-capabilities
+        known-owned))))
+
+(defn store-op-ssa-refs [store :- StoreOp] :- (Vec NativeId)
+  (match store
+    [(StoreBool value) [(storebool-address value) (storebool-value value)]]
+    [(StoreI64 value) [(storei64-address value) (storei64-value value)]]
+    [(StoreF64 value) [(storef64-address value) (storef64-value value)]]
+    [(StoreText value) [(storetext-address value) (storetext-value value)]]
+    [(StoreRef value) [(storeref-address value) (storeref-value value)]]))
+
+(defn instruction-ssa-refs [instruction :- Instruction] :- (Vec NativeId)
+  (match instruction
+    [(AtomInstruction value) []]
+    [(CopyInstruction value) [(copyinstruction-source-id value)]]
+    [(AddI64Instruction value)
+     [(addi64instruction-left-id value) (addi64instruction-right-id value)]]
+    [(AddF64Instruction value)
+     [(addf64instruction-left-id value) (addf64instruction-right-id value)]]
+    [(StoreInstruction value)
+     (store-op-ssa-refs (storeinstruction-store value))]
+    [(CallInstruction value) (callinstruction-arguments value)]))
+
+(defn terminator-ssa-refs [terminator :- Terminator] :- (Vec NativeId)
+  (match terminator
+    [(ReturnTerminator value)
+     (let [result :- (U NativeId Nil) (returnterminator-value value)]
+       (if (nil? result) [] [result]))]
+    [(JumpTerminator value) (jumpterminator-arguments value)]
+    [(BranchTerminator value) [(branchterminator-condition value)]]))
+
+(defn block-value-ids [block :- BasicBlock] :- (Vec NativeId)
+  (append-ids (parameter-ids (basicblock-parameters block))
+    (instruction-result-ids (basicblock-instructions block))))
+
+(defn all-block-value-ids [blocks :- (Vec BasicBlock)] :- (Vec NativeId)
+  (loop [index :- Int 0 ids :- (Vec NativeId) []]
+    (if (>= index (count blocks))
+      ids
+      (recur (+ index 1) (append-ids ids (block-value-ids (nth blocks index)))))))
+
+(defn function-value-ids [function :- FunctionDef] :- (Vec NativeId)
+  (append-ids (parameter-ids (functiondef-parameters function))
+    (all-block-value-ids (functiondef-blocks function))))
+
+(defn block-ssa-closed? [block :- BasicBlock known-values :- (Vec NativeId)] :- Bool
+  (and (every? (fn [instruction :- Instruction] :- Bool (ids-in? (instruction-ssa-refs instruction) known-values)) (basicblock-instructions block))
+    (every? (fn [terminator :- Terminator] :- Bool (ids-in? (terminator-ssa-refs terminator) known-values))
+      (basicblock-terminators block))))
+
+(defn function-ssa-closed? [function :- FunctionDef] :- Bool
+  (let [known-values :- (Vec NativeId) (function-value-ids function)]
+    (and (unique-ids? known-values)
+      (every? (fn [block :- BasicBlock] :- Bool (block-ssa-closed? block known-values))
+        (functiondef-blocks function)))))
+
+(defn world-ssa-closed? [world :- NativeWorld] :- Bool
+  (every? (fn [function :- FunctionDef] :- Bool (function-ssa-closed? function))
+    (nativeworld-functions world)))
+
+(defn functions-single-terminator? [functions :- (Vec FunctionDef)] :- Bool
+  (every? (fn [function :- FunctionDef] :- Bool (every? (fn [block :- BasicBlock] :- Bool (= 1 (count (basicblock-terminators block)))) (functiondef-blocks function)))
+    functions))
+
+(defn instruction-resources-allowed? [instruction :- Instruction allowed-regions :- (Vec NativeId) allowed-capabilities :- (Vec NativeId)] :- Bool
+  (match instruction
+    [(AtomInstruction value) true]
+    [(CopyInstruction value) true]
+    [(AddI64Instruction value) true]
+    [(AddF64Instruction value) true]
+    [(StoreInstruction value)
+     (store-op-resources-closed? (storeinstruction-store value)
+       allowed-regions
+       allowed-capabilities)]
+    [(CallInstruction value) true]))
+
+(defn block-resources-allowed? [block :- BasicBlock allowed-regions :- (Vec NativeId) allowed-capabilities :- (Vec NativeId)] :- Bool
+  (every? (fn [instruction :- Instruction] :- Bool (instruction-resources-allowed? instruction allowed-regions allowed-capabilities))
+    (basicblock-instructions block)))
+
+(defn function-uses-allowed? [function :- FunctionDef allowed-effects :- (Vec NativeId) allowed-regions :- (Vec NativeId) allowed-capabilities :- (Vec NativeId)] :- Bool
+  (and (ids-in? (functiondef-effects function) allowed-effects)
+    (ids-in? (functiondef-regions function) allowed-regions)
+    (ids-in? (functiondef-capabilities function) allowed-capabilities)
+    (every? (fn [block :- BasicBlock] :- Bool (block-resources-allowed? block allowed-regions allowed-capabilities))
+      (functiondef-blocks function))))
+
+(defn world-allowed-sets-valid? [world :- NativeWorld] :- Bool
+  (let [allowed-effects :- (Vec NativeId) (nativeworld-allowed-effects world) allowed-regions :- (Vec NativeId) (nativeworld-allowed-regions world) allowed-capabilities :- (Vec NativeId) (nativeworld-allowed-capabilities world)]
+    (and (unique-ids? allowed-effects)
+      (unique-ids? allowed-regions)
+      (unique-ids? allowed-capabilities)
+      (ids-in? allowed-effects (effect-ids (nativeworld-effects world)))
+      (ids-in? allowed-regions (region-ids (nativeworld-regions world)))
+      (ids-in? allowed-capabilities
+        (capability-ids (nativeworld-capabilities world)))
+      (every? (fn [function :- FunctionDef] :- Bool (function-uses-allowed? function allowed-effects allowed-regions allowed-capabilities))
+        (nativeworld-functions world)))))
+
+(defn world-unique-ids? [world :- NativeWorld] :- Bool
+  (unique-ids? (world-owned-ids world)))
+
+(defn validate-world [world :- NativeWorld] :- ValidationReport
+  (let [unique-pass :- Bool (world-unique-ids? world) allowed-pass :- Bool (world-allowed-sets-valid? world) reference-pass :- Bool (world-reference-closed? world) terminator-pass :- Bool (functions-single-terminator? (nativeworld-functions world)) ssa-pass :- Bool (world-ssa-closed? world) results :- (Vec ObligationResult) [(->ObligationResult (->UniqueIdsObligation true) unique-pass "all declared IDs are unique") (->ObligationResult (->AllowedSetsObligation true) allowed-pass "declared resource use stays inside closed allowed sets") (->ObligationResult (->ReferenceClosureObligation true) reference-pass "all type, layout, control, call, region, and capability references resolve") (->ObligationResult (->SingleTerminatorObligation true) terminator-pass "every basic block has exactly one terminator") (->ObligationResult (->SsaClosureObligation true) ssa-pass "SSA definitions are unique and every SSA reference resolves")]]
+    (->ValidationReport (and unique-pass allowed-pass reference-pass terminator-pass ssa-pass)
+      results)))
+
+(defn i64-kind [] :- AtomKind (->I64Kind true))
+
+(defn f64-kind [] :- AtomKind (->F64Kind true))
+
+(defn atom-type-shape [kind :- AtomKind] :- TypeShape (->AtomType kind))
+
+(defn arena-region-kind [] :- RegionKind (->ArenaRegion true))
+
+(defn write-capability-kind [] :- CapabilityKind (->WriteCapability true))
+
+(defn write-effect-kind [region :- NativeId] :- EffectKind
+  (->WriteEffect region))
+
+(defn store-i64-op [address :- NativeId value :- NativeId region :- NativeId capability :- NativeId] :- StoreOp
+  (->StoreI64 address value region capability))
+
+(defn store-f64-op [address :- NativeId value :- NativeId region :- NativeId capability :- NativeId] :- StoreOp
+  (->StoreF64 address value region capability))
+
+(defn store-instruction [result-id :- NativeId store :- StoreOp] :- Instruction
+  (->StoreInstruction result-id store))
+
+(defn copy-instruction [result-id :- NativeId source-id :- NativeId] :- Instruction
+  (->CopyInstruction result-id source-id))
+
+(defn return-terminator [value :- (U NativeId Nil)] :- Terminator
+  (->ReturnTerminator value))
+
+(defn fri2-observation [artifact-id :- NativeId digest :- String byte-count :- Int] :- ExternalObservation
+  (->Fri2Observation artifact-id digest byte-count))

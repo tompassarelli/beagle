@@ -1,0 +1,155 @@
+;; @upstream:graph — generated projection; author substantive forms through
+;; Fram graph edits.
+(ns native.validation-corpus (:require [native.core :as core]))
+
+(define-mode strict)
+
+(defrecord CorpusResult [valid-accepted :- Bool duplicate-rejected :- Bool allowed-rejected :- Bool reference-rejected :- Bool missing-terminator-rejected :- Bool double-terminator-rejected :- Bool ssa-rejected :- Bool canonical-deterministic :- Bool canonical-separated :- Bool i64-f64-distinct :- Bool])
+
+(defn corpus-id [name :- String] :- core/NativeId
+  (core/canonical-id "native-core-v0-corpus" [name]))
+
+(def corpus-i64-type :- core/TypeDef
+  (core/->TypeDef (corpus-id "type-i64")
+    "I64"
+    (core/atom-type-shape (core/i64-kind))))
+
+(def corpus-f64-type :- core/TypeDef
+  (core/->TypeDef (corpus-id "type-f64")
+    "F64"
+    (core/atom-type-shape (core/f64-kind))))
+
+(def corpus-region :- core/RegionDef
+  (core/->RegionDef (corpus-id "region-arena") (core/arena-region-kind) nil))
+
+(def corpus-capability :- core/CapabilityDef
+  (core/->CapabilityDef (corpus-id "capability-write")
+    (core/write-capability-kind)
+    (corpus-id "region-arena")
+    true))
+
+(def corpus-effect :- core/EffectDef
+  (core/->EffectDef (corpus-id "effect-write")
+    (core/write-effect-kind (corpus-id "region-arena"))))
+
+(def corpus-i64-layout :- core/LayoutDef
+  (core/->LayoutDef (corpus-id "layout-i64") (corpus-id "type-i64") 8 8 []))
+
+(def corpus-f64-layout :- core/LayoutDef
+  (core/->LayoutDef (corpus-id "layout-f64") (corpus-id "type-f64") 8 8 []))
+
+(def corpus-entry-block :- core/BasicBlock
+  (core/->BasicBlock (corpus-id "block-entry")
+    []
+    [(core/store-instruction (corpus-id "ssa-store-i64")
+       (core/store-i64-op (corpus-id "ssa-address")
+         (corpus-id "ssa-i64-input")
+         (corpus-id "region-arena")
+         (corpus-id "capability-write")))
+     (core/store-instruction (corpus-id "ssa-store-f64")
+       (core/store-f64-op (corpus-id "ssa-address")
+         (corpus-id "ssa-f64-input")
+         (corpus-id "region-arena")
+         (corpus-id "capability-write")))]
+    [(core/return-terminator nil)]))
+
+(def corpus-function :- core/FunctionDef
+  (core/->FunctionDef (corpus-id "function-store-pair")
+    "store-pair"
+    [(core/->Parameter (corpus-id "ssa-address") (corpus-id "type-i64"))
+     (core/->Parameter (corpus-id "ssa-i64-input") (corpus-id "type-i64"))
+     (core/->Parameter (corpus-id "ssa-f64-input") (corpus-id "type-f64"))]
+    [corpus-entry-block]
+    (corpus-id "block-entry")
+    nil
+    [(corpus-id "effect-write")]
+    [(corpus-id "region-arena")]
+    [(corpus-id "capability-write")]))
+
+(def valid-world :- core/NativeWorld
+  (core/->NativeWorld (corpus-id "world-valid")
+    nil
+    "native-core-v0"
+    [corpus-i64-type corpus-f64-type]
+    [corpus-effect]
+    [corpus-region]
+    [corpus-capability]
+    [corpus-i64-layout corpus-f64-layout]
+    [corpus-function]
+    [(corpus-id "effect-write")]
+    [(corpus-id "region-arena")]
+    [(corpus-id "capability-write")]
+    [(core/fri2-observation (corpus-id "fri2-dump")
+       "sha256:0123456789abcdef"
+       128)]))
+
+(def duplicate-id-world :- core/NativeWorld
+  (with valid-world
+    [:layouts
+     [corpus-i64-layout
+      (core/->LayoutDef (corpus-id "layout-i64") (corpus-id "type-f64") 8 8 [])]]))
+
+(def disallowed-world :- core/NativeWorld
+  (with valid-world [:allowed-capabilities []]))
+
+(def dangling-function :- core/FunctionDef
+  (with corpus-function [:return-type (corpus-id "type-missing")]))
+
+(def dangling-world :- core/NativeWorld
+  (with valid-world [:functions [dangling-function]]))
+
+(def missing-terminator-block :- core/BasicBlock
+  (with corpus-entry-block [:terminators []]))
+
+(def missing-terminator-function :- core/FunctionDef
+  (with corpus-function [:blocks [missing-terminator-block]]))
+
+(def missing-terminator-world :- core/NativeWorld
+  (with valid-world [:functions [missing-terminator-function]]))
+
+(def double-terminator-block :- core/BasicBlock
+  (with corpus-entry-block
+    [:terminators [(core/return-terminator nil) (core/return-terminator nil)]]))
+
+(def double-terminator-function :- core/FunctionDef
+  (with corpus-function [:blocks [double-terminator-block]]))
+
+(def double-terminator-world :- core/NativeWorld
+  (with valid-world [:functions [double-terminator-function]]))
+
+(def dangling-ssa-block :- core/BasicBlock
+  (with corpus-entry-block
+    [:instructions
+     [(core/copy-instruction (corpus-id "ssa-bad-result")
+        (corpus-id "ssa-missing"))]]))
+
+(def dangling-ssa-function :- core/FunctionDef
+  (with corpus-function [:blocks [dangling-ssa-block]]))
+
+(def dangling-ssa-world :- core/NativeWorld
+  (with valid-world [:functions [dangling-ssa-function]]))
+
+(def corpus-result :- CorpusResult
+  (->CorpusResult (core/validationreport-passed (core/validate-world valid-world))
+    (not (core/validationreport-passed (core/validate-world duplicate-id-world)))
+    (not (core/validationreport-passed (core/validate-world disallowed-world)))
+    (not (core/validationreport-passed (core/validate-world dangling-world)))
+    (not (core/validationreport-passed (core/validate-world missing-terminator-world)))
+    (not (core/validationreport-passed (core/validate-world double-terminator-world)))
+    (not (core/validationreport-passed (core/validate-world dangling-ssa-world)))
+    (core/native-id= (core/canonical-id "scope" ["ab" "c"])
+      (core/canonical-id "scope" ["ab" "c"]))
+    (not (core/native-id= (core/canonical-id "scope" ["ab" "c"]) (core/canonical-id "scope" ["a" "bc"])))
+    (not (core/native-id= (core/typedef-id corpus-i64-type) (core/typedef-id corpus-f64-type)))))
+
+(def corpus-passes? :- Bool
+  (and (corpusresult-valid-accepted corpus-result)
+    (corpusresult-duplicate-rejected corpus-result)
+    (corpusresult-allowed-rejected corpus-result)
+    (corpusresult-reference-rejected corpus-result)
+    (corpusresult-missing-terminator-rejected corpus-result)
+    (corpusresult-double-terminator-rejected corpus-result)
+    (corpusresult-ssa-rejected corpus-result)
+    (corpusresult-canonical-deterministic corpus-result)
+    (corpusresult-canonical-separated corpus-result)
+    (corpusresult-i64-f64-distinct corpus-result)))
