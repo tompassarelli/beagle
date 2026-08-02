@@ -65,7 +65,7 @@ loop in section 0, then run this bootstrap sequence:
    `mcp__fram__*` graph-edit verbs are present before authoring.
 4. **Hand off** — all substantive authoring past the seed goes through the
    **code-as-facts** skill
-   (`~/.agents/skills/code-as-facts/SKILL.md`) via
+   (`fram:integrations/north/skills/code-as-facts/SKILL.md`) via
    the `mcp__fram__*` graph-edit verbs. Do not scaffold the module with
    ordinary Edit/Write "temporarily" then adopt later — the seed-only step
    above is the entire text-authored surface, permanently.
@@ -93,8 +93,6 @@ three-choice moment — surface it, don't default silently.
   `beagle syntax` already counted them.
 - If feedback ever goes **silent** mid-session, the loop degraded — re-run
   `beagle doctor --revive --quiet`.
-- Optional background watchdog (this session): `/loop 10m beagle doctor --revive --quiet`
-  — silent while healthy, loud + self-revives on degradation.
 
 > Reliability note: a skill (this file) and CLAUDE.md are *model-discretion* —
 > they can be forgotten. The **hook** is the deterministic layer. The handshake
