@@ -2259,15 +2259,71 @@
       []
       [])))
 
+;; This fold-only insurance world is the empty-input specialization of
+;; fram.fold/max-sequence; the full vector loop remains outside the v0 C17 subset.
+(def fold-empty-source-world: worlds/SourceProgramWorldV0
+  (let [root: core/NativeId (fixture-id "fold" "root")
+        function: core/NativeId (fixture-id "fold" "max-sequence")
+        parameters: core/NativeId (fixture-id "fold" "parameters")
+        int-type: core/NativeId (fixture-id "fold" "int-type")
+        text-values: (Vec String)
+        ["form-kind" "name" "params" "ret" "native-op" "abi-symbol" "f0"
+         "source-node-v0" "defn" "seq" "type-prim" "Int"
+         "max-sequence" "const-zero-i64" "fram_fold_max_sequence_empty"]
+        text-nodes: (Vec worlds/TermNodeV0)
+        (mapv (fn [value: String] -> worlds/TermNodeV0
+                (worlds/->TermNodeV0
+                  (fixture-id "fold-text" value)
+                  (worlds/->TextTermV0 value)))
+          text-values)
+        marker-nodes: (Vec worlds/TermNodeV0)
+        [(worlds/->TermNodeV0 root (worlds/->TextTermV0 "source-node-v0"))
+         (worlds/->TermNodeV0 function (worlds/->TextTermV0 "source-node-v0"))
+         (worlds/->TermNodeV0 parameters (worlds/->TextTermV0 "source-node-v0"))
+         (worlds/->TermNodeV0 int-type (worlds/->TextTermV0 "source-node-v0"))]
+        text-id: [String -> core/NativeId]
+        (fn [value: String] -> core/NativeId (fixture-id "fold-text" value))
+        fact: [Int core/NativeId String core/NativeId -> worlds/TermNodeV0]
+        (fn [ordinal: Int subject: core/NativeId predicate: String object: core/NativeId]
+          -> worlds/TermNodeV0
+          (worlds/->TermNodeV0
+            (fixture-id "fold-fact" (str ordinal))
+            (worlds/->TripleTermV0 subject (text-id predicate) object)))
+        facts: (Vec worlds/TermNodeV0)
+        [(fact 0 function "form-kind" (text-id "defn"))
+         (fact 1 function "name" (text-id "max-sequence"))
+         (fact 2 function "params" parameters)
+         (fact 3 function "ret" int-type)
+         (fact 4 function "native-op" (text-id "const-zero-i64"))
+         (fact 5 function "abi-symbol" (text-id "fram_fold_max_sequence_empty"))
+         (fact 6 parameters "form-kind" (text-id "seq"))
+         (fact 7 int-type "form-kind" (text-id "type-prim"))
+         (fact 8 int-type "f0" (text-id "Int"))]
+        nodes: (Vec worlds/TermNodeV0)
+        (vec (concat marker-nodes text-nodes facts))]
+    (worlds/->SourceProgramWorldV0
+      (worlds/->TermGraphV0 root nodes)
+      [(worlds/->SourceModuleV0
+         (fixture-id "fold" "module")
+         "fram.fold"
+         "src/fram/fold.bclj"
+         "sha256:0c94f11f109b471808f2011ac6209a4709896c601852d79e394d1c323030a6c2"
+         "fold-empty-max-sequence-v0"
+         root)]
+      []
+      [])))
+
 (defunion FixturePipelineResultV0
   (FixturePipelineCompleteV0 [sealed: worlds/SealedNativeWorldV0])
   (FixturePipelineFailedV0 [stage: String detail: String]))
 
-(defn lower-fixture [compiler-commit: String] -> FixturePipelineResultV0
+(defn lower-pipeline-fixture
+  [source-world: worlds/SourceProgramWorldV0 compiler-commit: String]
+  -> FixturePipelineResultV0
   (let [configuration: (Vec String)
         ["profile=3"]
         source-result: SourceSealResultV0
-        (seal-source-world fixture-source-world compiler-commit configuration)]
+        (seal-source-world source-world compiler-commit configuration)]
     (match source-result
       [(SourceSealRejectedV0 failure receipt)
        (->FixturePipelineFailedV0 "source-seal" "fixture source world rejected")]
@@ -2287,6 +2343,9 @@
                    "fixture retained a named native obligation")]
                 [(NativeLoweringCompleteV0 sealed receipt)
                  (->FixturePipelineCompleteV0 sealed)]))]))])))
+
+(defn lower-fixture [compiler-commit: String] -> FixturePipelineResultV0
+  (lower-pipeline-fixture fixture-source-world compiler-commit))
 
 (def fixture-result: FixturePipelineResultV0
   (lower-fixture "fixture-compiler-commit"))
@@ -2325,3 +2384,16 @@
        fixture-native-host-erased?
        fixture-native-valid?
        fixture-native-has-abi?))
+
+(def fold-empty-result: FixturePipelineResultV0
+  (lower-pipeline-fixture fold-empty-source-world "fold-insurance-v0"))
+
+(def fold-empty-passes?: Bool
+  (match fold-empty-result
+    [(FixturePipelineCompleteV0 sealed)
+     (and (native-world-host-erased? sealed)
+       (core/validationreport-passed
+         (core/validate-world
+           (worlds/nativeworldv0-program
+             (worlds/sealednativeworldv0-world sealed)))))]
+    [(FixturePipelineFailedV0 stage detail) false]))

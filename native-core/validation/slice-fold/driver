@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+fold_repo="${NATIVE_SLICE_REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
+fold_artifacts="${NATIVE_SLICE_ARTIFACTS:-$fold_repo/native-core/validation/slice-fold}"
+fold_source="${FRAM_HOME:-/home/tom/code/fram/main}/src/fram/fold.bclj"
+fold_tmp="$(mktemp -d "${TMPDIR:-/tmp}/native-fold-slice.XXXXXX")"
+trap 'rm -rf "${fold_tmp:?}"' EXIT
+
+mkdir -p "$fold_artifacts" "$fold_tmp/out" "$fold_tmp/clj-config"
+
+"$fold_repo/bin/beagle" build --out "$fold_tmp/out" \
+  "$fold_repo/native-core/src/native/core.bgl" \
+  "$fold_repo/native-core/src/native/worlds.bgl" \
+  "$fold_repo/native-core/src/native/lower.bgl" \
+  "$fold_repo/native-core/src/native/obligations.bgl" \
+  "$fold_repo/native-core/src/native/c11.bgl" \
+  "$fold_repo/native-core/src/native/c11_validation_corpus.bgl"
+
+# The Clojure projection still needs imported union classes qualified at runtime.
+sed -i -E 's/\(instance\? ([A-Z][A-Za-z0-9]*)/\(instance? native.core.\1/g' \
+  "$fold_tmp/out/native/c11.clj"
+sed -i -E 's/\(instance\? (C11Success|C11Failure)/\(instance? native.c11.\1/g' \
+  "$fold_tmp/out/native/c11_validation_corpus.clj"
+
+CLJ_CONFIG="$fold_tmp/clj-config" clojure \
+  -Sdeps "{:paths [\"$fold_tmp/out\"]}" -M -e \
+  "(require 'native.c11-validation-corpus)
+   (native.c11-validation-corpus/emit-fold-fixture! \"$fold_artifacts\")
+   (when-not (and native.lower/fold-empty-passes?
+                  native.c11-validation-corpus/fold-obligations-pass?)
+     (throw (ex-info \"fold pipeline failed\" {})))"
+
+if [[ -f "$fold_source" ]]; then
+  "$fold_repo/bin/beagle-roundtrip" --emit-edn-typed "$fold_source" \
+    > "$fold_tmp/typed.edn"
+  install -m 0644 "$fold_tmp/typed.edn" "$fold_artifacts/typed.edn"
+fi

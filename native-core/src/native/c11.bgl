@@ -182,11 +182,40 @@
   (and (= 1 (count (core/functiondef-blocks function)))
     (every? block-supported? (core/functiondef-blocks function))))
 
+(defn type-id-supported?
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)
+   type-id: core/NativeId] -> Bool
+  (loop [index: Int 0]
+    (if (>= index (count types))
+      false
+      (let [definition: core/TypeDef (nth types index)]
+        (if (core/native-id= (core/typedef-id definition) type-id)
+          (type-supported? definition layouts)
+          (recur (+ index 1)))))))
+
+(defn function-types-supported?
+  [function: core/FunctionDef
+   types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)] -> Bool
+  (let [parameters-supported: Bool
+        (every?
+          (fn [parameter: core/Parameter] -> Bool
+            (type-id-supported? types layouts (core/parameter-type-id parameter)))
+          (core/functiondef-parameters function))
+        result: (U core/NativeId Nil) (core/functiondef-return-type function)]
+    (and parameters-supported
+      (or (nil? result) (type-id-supported? types layouts result)))))
+
 (defn world-supported? [world: core/NativeWorld] -> Bool
-  (let [layouts: (Vec core/LayoutDef) (core/nativeworld-layouts world)]
-    (and (every? (fn [type-def: core/TypeDef] -> Bool (type-supported? type-def layouts))
-           (core/nativeworld-types world))
-      (every? function-supported? (core/nativeworld-functions world)))))
+  (let [types: (Vec core/TypeDef) (core/nativeworld-types world)
+        layouts: (Vec core/LayoutDef) (core/nativeworld-layouts world)
+        functions: (Vec core/FunctionDef) (core/nativeworld-functions world)]
+    (and (every? function-supported? functions)
+      (every?
+        (fn [function: core/FunctionDef] -> Bool
+          (function-types-supported? function types layouts))
+        functions))))
 
 (defn module-prefix [module-index: Int] -> String
   (str "native_m" module-index))
@@ -214,11 +243,17 @@
                 (core/fieldlayoutv0-offset-bytes field) ", \"field offset\");"))))))))
 
 (defn emit-atom-type [type-name-value: String kind: core/AtomKind layout: core/LayoutDef] -> String
-  (let [backing: String
+  (let [size: Int (core/layoutdef-size-bytes layout)
+        backing: String
         (match kind
           [(BoolKind token) "bool"]
-          [(I64Kind token) "int64_t"]
-          [(F64Kind token) "double"]
+          [(I64Kind token)
+           (cond
+             (= size 1) "int8_t"
+             (= size 2) "int16_t"
+             (= size 4) "int32_t"
+             :else "int64_t")]
+          [(F64Kind token) (if (= size 4) "float" "double")]
           [(TextKind token) "native_bytes"]
           [(RefKind target) "void *"])]
     (str "typedef " backing " " type-name-value ";\n"

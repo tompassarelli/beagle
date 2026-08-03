@@ -1,0 +1,7 @@
+valid-ssa PASS
+exhaustive-matches PASS
+closed-layouts PASS
+checked-arithmetic PASS
+legal-abi PASS
+discharged-tokens PASS
+bounded-effects PASS
