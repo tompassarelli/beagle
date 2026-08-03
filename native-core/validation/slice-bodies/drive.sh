@@ -79,6 +79,10 @@ if ( cd "$build" && ulimit -c 0 && ./probe_gcc trap ) 2>/dev/null; then
   echo "drive.sh: the out-of-range instant did not trap" >&2
   exit 1
 fi
+if ( cd "$build" && ulimit -c 0 && ./probe_gcc overflow ) 2>/dev/null; then
+  echo "drive.sh: INT64_MAX + 1 did not trap — a wrapped value escaped" >&2
+  exit 1
+fi
 echo "drive.sh: gcc $(gcc -dumpversion) strict compile + run + trap ok"
 
 find_clang() {
@@ -92,6 +96,10 @@ clang_bin="$(find_clang || true)"
 if [ -n "$clang_bin" ]; then
   ( cd "$build" && "$clang_bin" -std=c17 -Werror -o probe_clang module_0.c native_shim.c main.c )
   ( cd "$build" && ./probe_clang )
+  if ( cd "$build" && ulimit -c 0 && ./probe_clang overflow ) 2>/dev/null; then
+    echo "drive.sh: clang: INT64_MAX + 1 did not trap" >&2
+    exit 1
+  fi
   echo "drive.sh: clang $("$clang_bin" -dumpversion) compile + run ok"
 else
   echo "drive.sh: clang not found — second frontend NOT exercised" >&2

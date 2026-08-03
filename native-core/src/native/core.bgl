@@ -93,6 +93,8 @@
 
 (defunion CheckedOperationV0
   (CheckedAddI64V0 [left-id: NativeId right-id: NativeId])
+  (CheckedSubI64V0 [left-id: NativeId right-id: NativeId])
+  (CheckedMulI64V0 [left-id: NativeId right-id: NativeId])
   (CheckedBoundsV0 [index-id: NativeId length-id: NativeId]))
 
 ;; Total comparisons: every operand pair is defined, so a comparison is never a
@@ -137,6 +139,10 @@
   ;; Record values are held by value, so a field read is an extract and a record
   ;; construct is a value form; neither touches a region or a capability.
   (FieldInstruction [result: SsaValueV0 source-id: NativeId field-id: NativeId])
+  ;; Read one alternative's payload out of a tagged value. Sound only where the
+  ;; tag is already proved, which is why it is reachable from a switch arm alone.
+  (VariantValueInstruction
+    [result: SsaValueV0 source-id: NativeId variant-id: NativeId])
   (RecordInstruction [result: SsaValueV0 field-ids: (Vec NativeId)]))
 
 (defrecord SwitchCaseV0
@@ -249,6 +255,23 @@
 (defn canonical-id [domain :- String parts :- (Vec String)] :- NativeId
   (->NativeId (str "native-id-v0:" (count domain) ":" domain ":" (canonical-parts parts))))
 
+;; An Outcome's tag namespace is exactly its failure union's variant set, so the
+;; success alternative has to be an alternative of that union. Lowering, layout
+;; and every materializer mint the checked-i64 ids here so they cannot disagree.
+(defn checked-id [parts :- (Vec String)] :- NativeId
+  (canonical-id "native-core-v0/checked" parts))
+
+(defn checked-i64-result-type-id [] :- NativeId
+  (checked-id ["CheckedI64Result"]))
+
+(defn checked-i64-type-id [] :- NativeId (checked-id ["CheckedI64"]))
+
+(defn checked-ok-variant-id [] :- NativeId
+  (checked-id ["CheckedI64Result" "ok"]))
+
+(defn checked-overflow-variant-id [] :- NativeId
+  (checked-id ["CheckedI64Result" "overflow"]))
+
 (defn optional-id-in? [candidate :- (U NativeId Nil) allowed :- (Vec NativeId)] :- Bool
   (if (nil? candidate) true (id-in? allowed candidate)))
 
@@ -271,6 +294,7 @@
     [(CallInstruction result function-id arguments tokens) (ssavaluev0-id result)]
     [(CompareInstruction result comparison left-id right-id) (ssavaluev0-id result)]
     [(FieldInstruction result source-id field-id) (ssavaluev0-id result)]
+    [(VariantValueInstruction result source-id variant-id) (ssavaluev0-id result)]
     [(RecordInstruction result field-ids) (ssavaluev0-id result)]))
 
 (defn instruction-result-ids [instructions :- (Vec Instruction)] :- (Vec NativeId)
@@ -480,6 +504,8 @@
      (id-in? known-functions function-id)]
     [(CompareInstruction result comparison left-id right-id) true]
     [(FieldInstruction result source-id field-id) (id-in? known-owned field-id)]
+    [(VariantValueInstruction result source-id variant-id)
+     (id-in? known-owned variant-id)]
     [(RecordInstruction result field-ids) true]))
 
 (defn parameter-types-closed? [parameters :- (Vec Parameter) known-types :- (Vec NativeId)] :- Bool
@@ -544,6 +570,8 @@
 (defn checked-operation-ssa-refs [operation :- CheckedOperationV0] :- (Vec NativeId)
   (match operation
     [(CheckedAddI64V0 left-id right-id) [left-id right-id]]
+    [(CheckedSubI64V0 left-id right-id) [left-id right-id]]
+    [(CheckedMulI64V0 left-id right-id) [left-id right-id]]
     [(CheckedBoundsV0 index-id length-id) [index-id length-id]]))
 
 (defn switch-case-ssa-refs [cases :- (Vec SwitchCaseV0)] :- (Vec NativeId)
@@ -565,6 +593,7 @@
     [(CallInstruction result function-id arguments tokens) arguments]
     [(CompareInstruction result comparison left-id right-id) [left-id right-id]]
     [(FieldInstruction result source-id field-id) [source-id]]
+    [(VariantValueInstruction result source-id variant-id) [source-id]]
     [(RecordInstruction result field-ids) field-ids]))
 
 (defn terminator-ssa-refs [terminator :- Terminator] :- (Vec NativeId)
@@ -623,6 +652,7 @@
     [(CallInstruction result function-id arguments tokens) true]
     [(CompareInstruction result comparison left-id right-id) true]
     [(FieldInstruction result source-id field-id) true]
+    [(VariantValueInstruction result source-id variant-id) true]
     [(RecordInstruction result field-ids) true]))
 
 (defn block-resources-allowed? [block :- BasicBlock allowed-regions :- (Vec NativeId) allowed-capabilities :- (Vec NativeId)] :- Bool

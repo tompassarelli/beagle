@@ -281,6 +281,10 @@
           (instance? native.core.UnionType shape)
           (and (layout-union? layout-value) dependencies-present)
 
+          ;; An Outcome materializes as the tagged union its layout already is.
+          (instance? native.core.OutcomeType shape)
+          (and (layout-union? layout-value) dependencies-present)
+
           (instance? native.core.VectorType shape) (layout-vector? layout-value)
 
           (instance? native.core.ReferenceType shape) (layout-reference? layout-value)

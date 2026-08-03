@@ -1,21 +1,23 @@
 stage source-seal ACCEPTED
 stage source-to-typed ACCEPTED
-world-types 71
-world-functions 12
-world-abis 12
-projected-types 71
+world-types 73
+world-functions 14
+world-abis 14
+projected-types 73
 lowered fn_0 instant? 4 blocks
 lowered fn_1 instant 7 blocks
-lowered fn_2 triple? 4 blocks
-lowered fn_3 rpc-page-request? 4 blocks
-lowered fn_4 rpc-page-response? 4 blocks
-lowered fn_5 rpc-error? 4 blocks
-lowered fn_6 rpc-request? 4 blocks
-lowered fn_7 rpc-response? 4 blocks
-lowered fn_8 rpc-frame-v1? 4 blocks
-lowered fn_9 commit-operation? 4 blocks
-lowered fn_10 transaction-frame? 4 blocks
-lowered fn_11 term-store-dump? 4 blocks
+lowered fn_2 instant-shift-seconds 3 blocks
+lowered fn_3 instant-seconds-between 3 blocks
+lowered fn_4 triple? 4 blocks
+lowered fn_5 rpc-page-request? 4 blocks
+lowered fn_6 rpc-page-response? 4 blocks
+lowered fn_7 rpc-error? 4 blocks
+lowered fn_8 rpc-request? 4 blocks
+lowered fn_9 rpc-response? 4 blocks
+lowered fn_10 rpc-frame-v1? 4 blocks
+lowered fn_11 commit-operation? 4 blocks
+lowered fn_12 transaction-frame? 4 blocks
+lowered fn_13 term-store-dump? 4 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts

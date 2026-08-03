@@ -36,6 +36,13 @@
     [(BodySuccessV0 artifact) artifact]
     [(BodyFailureV0 detail) (->BodyArtifactV0 "" "" "" "")]))
 
+;; Bounds checks have no i64 Outcome shape here, so only the three arithmetic
+;; operations materialize; anything else is refused rather than approximated.
+(defn checked-operation-supported? [operation: core/CheckedOperationV0] -> Bool
+  (or (instance? native.core.CheckedAddI64V0 operation)
+      (instance? native.core.CheckedSubI64V0 operation)
+      (instance? native.core.CheckedMulI64V0 operation)))
+
 (defn instruction-supported? [instruction: core/Instruction] -> Bool
   (cond
     (instance? native.core.AtomInstruction instruction)
@@ -51,6 +58,9 @@
     (instance? native.core.FieldInstruction instruction) true
     (instance? native.core.RecordInstruction instruction) true
     (instance? native.core.CallInstruction instruction) true
+    (instance? native.core.VariantValueInstruction instruction) true
+    (instance? native.core.CheckedInstruction instruction)
+    (checked-operation-supported? (core/checkedinstruction-operation instruction))
     :else false))
 
 (defn terminator-supported? [terminator: core/Terminator] -> Bool
@@ -224,6 +234,67 @@
         (str result (if (= position 0) "" ", ")
           (value-name function slots (nth arguments position)))))))
 
+(defn variant-tag
+  [layouts: (Vec core/LayoutDef) owner: core/NativeId variant: core/NativeId] -> Int
+  (let [layout: (U core/LayoutDef Nil) (c17/layout-for-type layouts owner)]
+    (if (nil? layout)
+      -1
+      (let [variants: (Vec core/UnionVariantLayoutV0)
+            (c17/union-layout-variants layout)]
+        (loop [position: Int 0]
+          (if (>= position (count variants))
+            -1
+            (if (core/native-id=
+                  (core/unionvariantlayoutv0-variant-id (nth variants position))
+                  variant)
+              (core/unionvariantlayoutv0-tag (nth variants position))
+              (recur (+ position 1)))))))))
+
+(defn checked-builtin [operation: core/CheckedOperationV0] -> String
+  (cond
+    (instance? native.core.CheckedAddI64V0 operation) "__builtin_add_overflow"
+    (instance? native.core.CheckedSubI64V0 operation) "__builtin_sub_overflow"
+    :else "__builtin_mul_overflow"))
+
+(defn checked-left [operation: core/CheckedOperationV0] -> core/NativeId
+  (cond
+    (instance? native.core.CheckedAddI64V0 operation)
+    (core/checkedaddi64v0-left-id operation)
+    (instance? native.core.CheckedSubI64V0 operation)
+    (core/checkedsubi64v0-left-id operation)
+    :else (core/checkedmuli64v0-left-id operation)))
+
+(defn checked-right [operation: core/CheckedOperationV0] -> core/NativeId
+  (cond
+    (instance? native.core.CheckedAddI64V0 operation)
+    (core/checkedaddi64v0-right-id operation)
+    (instance? native.core.CheckedSubI64V0 operation)
+    (core/checkedsubi64v0-right-id operation)
+    :else (core/checkedmuli64v0-right-id operation)))
+
+;; No wrapped value ever escapes: the builtin reports overflow as a tag, and the
+;; payload is written only where the ok tag is the one the switch will select.
+(defn emit-checked-instruction
+  [layouts: (Vec core/LayoutDef)
+   function: core/FunctionDef
+   slots: (Vec ValueSlotV0)
+   target: String
+   result: core/SsaValueV0
+   operation: core/CheckedOperationV0]
+  -> String
+  (let [outcome: core/NativeId (core/ssavaluev0-type-id result)
+        ok-tag: Int (variant-tag layouts outcome (core/checked-ok-variant-id))
+        overflow-tag: Int
+        (variant-tag layouts outcome (core/checked-overflow-variant-id))]
+    (str "  if (" (checked-builtin operation) "("
+      (value-name function slots (checked-left operation)) ", "
+      (value-name function slots (checked-right operation)) ", &"
+      target ".payload.variant_" ok-tag ")) {\n"
+      "    " target ".tag = INT64_C(" overflow-tag ");\n"
+      "  } else {\n"
+      "    " target ".tag = INT64_C(" ok-tag ");\n"
+      "  }\n")))
+
 (defn emit-instruction
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
@@ -278,6 +349,19 @@
         (str "  " target " = " (value-name function slots source)
           ".field_" position ";\n"))
 
+      (instance? native.core.CheckedInstruction instruction)
+      (emit-checked-instruction layouts function slots target result
+        (core/checkedinstruction-operation instruction))
+
+      (instance? native.core.VariantValueInstruction instruction)
+      (let [source: core/NativeId
+            (core/variantvalueinstruction-source-id instruction)]
+        (str "  " target " = " (value-name function slots source)
+          ".payload.variant_"
+          (variant-tag layouts (slot-type function slots source)
+            (core/variantvalueinstruction-variant-id instruction))
+          ";\n"))
+
       (instance? native.core.RecordInstruction instruction)
       (let [values: (Vec core/NativeId) (core/recordinstruction-field-ids instruction)]
         (str "  " target " = ("
@@ -298,22 +382,6 @@
             (core/callinstruction-function-id instruction)))
         "(" (emit-arguments function slots
               (core/callinstruction-arguments instruction)) ");\n"))))
-
-(defn variant-tag
-  [layouts: (Vec core/LayoutDef) owner: core/NativeId variant: core/NativeId] -> Int
-  (let [layout: (U core/LayoutDef Nil) (c17/layout-for-type layouts owner)]
-    (if (nil? layout)
-      -1
-      (let [variants: (Vec core/UnionVariantLayoutV0)
-            (c17/union-layout-variants layout)]
-        (loop [position: Int 0]
-          (if (>= position (count variants))
-            -1
-            (if (core/native-id=
-                  (core/unionvariantlayoutv0-variant-id (nth variants position))
-                  variant)
-              (core/unionvariantlayoutv0-tag (nth variants position))
-              (recur (+ position 1)))))))))
 
 (defn emit-jump
   [function: core/FunctionDef

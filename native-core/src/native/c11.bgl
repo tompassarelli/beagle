@@ -12,7 +12,7 @@
           ScalarShapeV0 RecordShapeV0 UnionShapeV0 VectorShapeV0 ReferenceShapeV0
           AtomType RecordType UnionType VectorType ReferenceType OutcomeType
           BoolAtom I64Atom F64Atom TextAtom RefAtom
-          CheckedAddI64V0 CheckedBoundsV0
+          CheckedAddI64V0 CheckedSubI64V0 CheckedMulI64V0 CheckedBoundsV0
           AtomInstruction CopyInstruction AddF64Instruction CheckedInstruction
           StoreInstruction AllocateInstruction CallInstruction
           ReturnTerminator JumpTerminator BranchTerminator SwitchTerminator
@@ -216,6 +216,8 @@
 (defn checked-operation-supported? [operation: core/CheckedOperationV0] -> Bool
   (match operation
     [(CheckedAddI64V0 value) true]
+    [(CheckedSubI64V0 value) false]
+    [(CheckedMulI64V0 value) false]
     [(CheckedBoundsV0 value) false]))
 
 ;; Qualified instance? rather than match: a match on an imported union emits

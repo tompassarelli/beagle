@@ -550,6 +550,21 @@
        (core/->TypeVariant (variant-id "LowerFailure" "overflow") "overflow" nil)
        (core/->TypeVariant (variant-id "LowerFailure" "malformed-source") "malformed-source" nil)])))
 
+;; An Outcome's tag namespace is its failure union, so the success alternative
+;; has to live there: `ok` carries the value, `overflow` carries nothing.
+(defn checked-i64-result-type [] -> core/TypeDef
+  (core/->TypeDef (core/checked-i64-result-type-id) "CheckedI64Result"
+    (core/->UnionType
+      [(core/->TypeVariant (core/checked-ok-variant-id) "ok" (type-id "Int"))
+       (core/->TypeVariant (core/checked-overflow-variant-id) "overflow" nil)])))
+
+(defn checked-i64-type [] -> core/TypeDef
+  (core/->TypeDef (core/checked-i64-type-id) "CheckedI64"
+    (core/->OutcomeType (type-id "Int") (core/checked-i64-result-type-id))))
+
+(defn checked-arithmetic-types [] -> (Vec core/TypeDef)
+  [(i64-type) (checked-i64-result-type) (checked-i64-type)])
+
 (defn type-def-in? [definitions: (Vec core/TypeDef) id: core/NativeId] -> Bool
   (loop [index: Int 0]
     (if (>= index (count definitions))
@@ -1248,6 +1263,67 @@
 ;; union names the codes, and the host exception argument is discarded.
 (defn trap-failure-code [] -> Int 1)
 
+;; NATIVE_TRAP_OVERFLOW in native-core/shim/native_shim.h.
+(defn overflow-failure-code [] -> Int 2)
+
+;; v0 integer arithmetic is checked, never wrapping and never bare: every
+;; operation answers an Outcome the caller has to dispatch on.
+(defn checked-arith-op? [callee: String] -> Bool
+  (or (= "+" callee) (= "-" callee) (= "*" callee)))
+
+;; Division and modulo are absent on purpose: what a zero divisor does (trap,
+;; or a third Outcome alternative) is an open design decision, so v0 refuses
+;; them by name rather than picking one silently.
+(defn refused-arith-op? [callee: String] -> Bool
+  (or (= "/" callee) (= "quot" callee) (= "rem" callee) (= "mod" callee)))
+
+(defn checked-arith-operation
+  [callee: String left: core/NativeId right: core/NativeId]
+  -> core/CheckedOperationV0
+  (cond
+    (= "+" callee) (core/->CheckedAddI64V0 left right)
+    (= "-" callee) (core/->CheckedSubI64V0 left right)
+    :else (core/->CheckedMulI64V0 left right)))
+
+;; The trap-on-overflow variant is not a second instruction: it is the ordinary
+;; dispatch, with the overflow arm closing on a trap and the ok arm reading the
+;; value out of the alternative whose tag it has just proved.
+(defn lower-checked-arith
+  [state: BodyStateV0 owner: core/NativeId callee: String
+   left: core/NativeId right: core/NativeId] -> ExprResultV0
+  (let [result-id: core/NativeId (state-id state owner "arith")
+        ok-id: core/NativeId (state-id state owner "arith-ok")
+        overflow-id: core/NativeId (state-id state owner "arith-overflow")
+        carried: core/NativeId (state-id state owner "arith-outcome")
+        value-id: core/NativeId (state-id state owner "arith-value")
+        code-id: core/NativeId (state-id state owner "arith-trap")
+        outcome-type: core/NativeId (core/checked-i64-type-id)
+        switched: BodyStateV0
+        (state-close
+          (state-emit (state-bump state)
+            (core/->CheckedInstruction
+              (core/->SsaValueV0 result-id outcome-type)
+              (checked-arith-operation callee left right)))
+          (core/->SwitchTerminator result-id
+            [(core/->SwitchCaseV0 (core/checked-ok-variant-id) ok-id [result-id])
+             (core/->SwitchCaseV0 (core/checked-overflow-variant-id)
+               overflow-id [])]))
+        trapped: BodyStateV0
+        (state-close
+          (state-emit (state-open-block switched overflow-id [])
+            (core/->AtomInstruction
+              (core/->SsaValueV0 code-id (int-type-id))
+              (core/->I64Atom (overflow-failure-code))))
+          (core/->TrapTerminator code-id))]
+    (->ExprResultV0
+      (state-emit
+        (state-open-block trapped ok-id
+          [(core/->Parameter carried outcome-type)])
+        (core/->VariantValueInstruction
+          (core/->SsaValueV0 value-id (int-type-id))
+          carried (core/checked-ok-variant-id)))
+      value-id (int-type-id) false)))
+
 ;; One accumulator's init, lowered: the name it binds, its value and the type
 ;; that init fixes for the whole loop.
 (defrecord LoopInitsV0
@@ -1915,6 +1991,29 @@
 
                 (state-blocked? current) (dead-result current)
 
+                (refused-arith-op? callee)
+                (fail-result current
+                  (str "TODO-NATIVE-DIVISION-" callee
+                    ": integer division semantics on a zero divisor is an open"
+                    " design decision, so v0 refuses it by name"))
+
+                (checked-arith-op? callee)
+                (cond
+                  (not (= 2 (count values)))
+                  (fail-result current
+                    (str "TODO-NATIVE-ARITH-ARITY: " callee
+                      " lowers only in its two-operand form"))
+
+                  (not (and (same-id? (nth value-types 0) (int-type-id))
+                            (same-id? (nth value-types 1) (int-type-id))))
+                  (fail-result current
+                    (str "TODO-NATIVE-ARITH-OPERANDS: " callee
+                      " needs native Int operands"))
+
+                  :else
+                  (lower-checked-arith current owner callee
+                    (nth values 0) (nth values 1)))
+
                 (some? comparison)
                 (if (not (= 2 (count values)))
                   (fail-result current
@@ -2180,6 +2279,26 @@
     [(NativeLoweredV0 entry-block blocks) ""]
     [(NativeTodoV0 code detail) detail]))
 
+(defn blocks-use-checked? [blocks: (Vec core/BasicBlock)] -> Bool
+  (some?
+    (some
+      (fn [block: core/BasicBlock] -> Bool
+        (some?
+          (some
+            (fn [instruction: core/Instruction] -> Bool
+              (instance? native.core.CheckedInstruction instruction))
+            (core/basicblock-instructions block))))
+      blocks)))
+
+;; Checked-arithmetic types enter the world only where a body lowered a checked
+;; operation, so a slice without arithmetic keeps its type set — and the C type
+;; indices its committed artifacts already name.
+(defn readiness-uses-checked? [readiness: NativeReadinessV0] -> Bool
+  (match readiness
+    [(NativeReadyV0 operation) false]
+    [(NativeLoweredV0 entry-block blocks) (blocks-use-checked? blocks)]
+    [(NativeTodoV0 code detail) false]))
+
 (defn attach-body
   [env: BodyEnvV0
    resolution: FunctionResolutionV0
@@ -2205,7 +2324,10 @@
         (with (with signature [:readiness readiness]) [:encoding encoding])]
     (->FunctionResolutionV0
       lowered
-      (functionresolutionv0-definitions resolution)
+      (if (readiness-uses-checked? readiness)
+        (append-type-defs (functionresolutionv0-definitions resolution)
+          (checked-arithmetic-types))
+        (functionresolutionv0-definitions resolution))
       (if (ready-function? lowered)
         (functionresolutionv0-diagnostics resolution)
         (conj (functionresolutionv0-diagnostics resolution)
@@ -2565,13 +2687,18 @@
         function-resolutions: (Vec FunctionResolutionV0)
         (attach-bodies (->BodyEnvV0 index types signatures) signature-resolutions
           (index-form-ids index "defn"))
+        ;; Bodies contribute types of their own (checked arithmetic answers an
+        ;; Outcome), so the world's type set closes only after they lower.
+        world-types: (Vec core/TypeDef)
+        (collect-function-types types function-resolutions)
         functions: (Vec TypedFunctionV0)
         (settle-readiness (collect-functions function-resolutions))
         effects: (Vec core/EffectDef) (slice-effects)
         regions: (Vec core/RegionDef) (slice-regions)
         capabilities: (Vec core/CapabilityDef) (slice-capabilities)
         root: core/NativeId (lower-id "typed-world" [source-digest])
-        nodes: (Vec worlds/TermNodeV0) (typed-term-nodes types functions effects)
+        nodes: (Vec worlds/TermNodeV0)
+        (typed-term-nodes world-types functions effects)
         terms: worlds/TermGraphV0
         (worlds/->TermGraphV0 root
           (conj nodes
@@ -2582,7 +2709,7 @@
           terms
           source-digest
           (mapv (fn [definition: core/TypeDef] -> core/NativeId
-                  (core/typedef-id definition)) types)
+                  (core/typedef-id definition)) world-types)
           (mapv (fn [function: TypedFunctionV0] -> core/NativeId
                   (typedfunctionv0-id function)) functions)
           (mapv (fn [effect: core/EffectDef] -> core/NativeId
@@ -2594,7 +2721,7 @@
         digest: String (worlds/content-digest encoding)
         resolutions-valid: Bool
         (typing-resolutions-valid? record-resolutions function-resolutions)
-        types-closed: Bool (core/types-refs-closed? types)
+        types-closed: Bool (core/types-refs-closed? world-types)
         clean: Bool (term-graph-clean? terms)
         valid: Bool (and resolutions-valid types-closed clean)
         diagnostics: (Vec core/DiagnosticV0)
@@ -2605,7 +2732,7 @@
     (if valid
       (->TypingAcceptedV0
         (worlds/->SealedTypedWorldV0 typed-world encoding digest)
-        (->TypedSliceV0 types functions effects regions capabilities
+        (->TypedSliceV0 world-types functions effects regions capabilities
           [(type-id "LowerFailure")])
         (make-receipt source-digest compiler-commit "source-to-typed"
           configuration diagnostics obligations digest))
@@ -2648,6 +2775,16 @@
         (if (same-id? target (core/typedef-id definition))
           definition
           (recur (+ index 1)))))))
+
+;; The alternatives an Outcome dispatches on: its failure union's variants.
+(defn outcome-variants
+  [types: (Vec core/TypeDef) failure-type: core/NativeId] -> (Vec core/TypeVariant)
+  (let [definition: (U core/TypeDef Nil) (find-type-def types failure-type)
+        shape: core/TypeShape
+        (if (nil? definition) (core/->UnionType []) (core/typedef-shape definition))]
+    (if (instance? native.core.UnionType shape)
+      (core/uniontype-variants shape)
+      [])))
 
 (defn measure-type
   [types: (Vec core/TypeDef) target: core/NativeId depth: Int] -> LayoutMeasureV0
@@ -2716,24 +2853,41 @@
                           (max-int payload-align (layoutmeasurev0-align-bytes measure))
                           (and closed (layoutmeasurev0-closed measure)))))))))
 
+            ;; Measured over the failure union's payloads, not its boxed size:
+            ;; layout-shape-for flattens those alternatives into the Outcome.
             :else
             (let [value-measure: LayoutMeasureV0
                   (measure-type types (core/outcometype-value-type shape) (+ depth 1))
-                  failure-measure: LayoutMeasureV0
-                  (measure-type types (core/outcometype-failure-type shape) (+ depth 1))
+                  variants: (Vec core/TypeVariant)
+                  (outcome-variants types (core/outcometype-failure-type shape))
+                  payloads: LayoutMeasureV0
+                  (loop [index: Int 0 size: Int 0 alignment: Int 1 closed: Bool true]
+                    (if (>= index (count variants))
+                      (->LayoutMeasureV0 size alignment closed "outcome payloads")
+                      (let [payload: (U core/NativeId Nil)
+                            (core/typevariant-payload-type (nth variants index))]
+                        (if (nil? payload)
+                          (recur (+ index 1) size alignment closed)
+                          (let [measure: LayoutMeasureV0
+                                (measure-type types payload (+ depth 1))]
+                            (recur (+ index 1)
+                              (max-int size (layoutmeasurev0-size-bytes measure))
+                              (max-int alignment
+                                (layoutmeasurev0-align-bytes measure))
+                              (and closed (layoutmeasurev0-closed measure))))))))
                   payload-align: Int
                   (max-int (layoutmeasurev0-align-bytes value-measure)
-                    (layoutmeasurev0-align-bytes failure-measure))
+                    (layoutmeasurev0-align-bytes payloads))
                   payload-size: Int
                   (max-int (layoutmeasurev0-size-bytes value-measure)
-                    (layoutmeasurev0-size-bytes failure-measure))
+                    (layoutmeasurev0-size-bytes payloads))
                   alignment: Int (max-int 8 payload-align)
                   payload-offset: Int (align-up 8 payload-align)]
               (->LayoutMeasureV0
                 (align-up (+ payload-offset payload-size) alignment)
                 alignment
                 (and (layoutmeasurev0-closed value-measure)
-                     (layoutmeasurev0-closed failure-measure))
+                     (layoutmeasurev0-closed payloads))
                 "outcome"))))))))
 
 (defn field-layouts
@@ -2809,20 +2963,11 @@
       (core/->ReferenceShapeV0 (core/referencetype-target-type shape))
 
       :else
-      (let [failure-def: (U core/TypeDef Nil)
-            (find-type-def types (core/outcometype-failure-type shape))
-            failure-shape: core/TypeShape
-            (if (nil? failure-def)
-              (core/->UnionType [])
-              (core/typedef-shape failure-def))
-            failure-variants: (Vec core/TypeVariant)
-            (if (instance? native.core.UnionType failure-shape)
-              (core/uniontype-variants failure-shape)
-              [])]
-        (core/->UnionShapeV0
-          (type-id "UnionTag")
-          0
-          (variant-layouts types failure-variants))))))
+      (core/->UnionShapeV0
+        (type-id "UnionTag")
+        0
+        (variant-layouts types
+          (outcome-variants types (core/outcometype-failure-type shape)))))))
 
 (defn resolve-layout
   [types: (Vec core/TypeDef) definition: core/TypeDef] -> LayoutResolutionV0
@@ -3089,16 +3234,39 @@
 
     (instance? native.core.CheckedInstruction instruction)
     (let [operation: core/CheckedOperationV0
-          (core/checkedinstruction-operation instruction)]
-      (if (instance? native.core.CheckedAddI64V0 operation)
+          (core/checkedinstruction-operation instruction)
+          result: String
+          (encode-ssa-value (core/checkedinstruction-result instruction))]
+      (cond
+        (instance? native.core.CheckedAddI64V0 operation)
         (worlds/canonical-record "checked-add-i64-instruction"
-          [(encode-ssa-value (core/checkedinstruction-result instruction))
+          [result
            (id-value (core/checkedaddi64v0-left-id operation))
            (id-value (core/checkedaddi64v0-right-id operation))])
+
+        (instance? native.core.CheckedSubI64V0 operation)
+        (worlds/canonical-record "checked-sub-i64-instruction"
+          [result
+           (id-value (core/checkedsubi64v0-left-id operation))
+           (id-value (core/checkedsubi64v0-right-id operation))])
+
+        (instance? native.core.CheckedMulI64V0 operation)
+        (worlds/canonical-record "checked-mul-i64-instruction"
+          [result
+           (id-value (core/checkedmuli64v0-left-id operation))
+           (id-value (core/checkedmuli64v0-right-id operation))])
+
+        :else
         (worlds/canonical-record "checked-bounds-instruction"
-          [(encode-ssa-value (core/checkedinstruction-result instruction))
+          [result
            (id-value (core/checkedboundsv0-index-id operation))
            (id-value (core/checkedboundsv0-length-id operation))])))
+
+    (instance? native.core.VariantValueInstruction instruction)
+    (worlds/canonical-record "variant-value-instruction"
+      [(encode-ssa-value (core/variantvalueinstruction-result instruction))
+       (id-value (core/variantvalueinstruction-source-id instruction))
+       (id-value (core/variantvalueinstruction-variant-id instruction))])
 
     (instance? native.core.StoreInstruction instruction)
     (worlds/canonical-record "store-instruction"
