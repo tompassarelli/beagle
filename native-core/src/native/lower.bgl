@@ -26,9 +26,9 @@
 
 (defunion SourceSealResultV0
   (SourceSealAcceptedV0
-    [sealed: worlds/SealedSourceWorldV0 receipt: worlds/PassReceiptV0])
+    [sealed: worlds/SealedSourceWorldV0 receipt: core/PassReceiptV0])
   (SourceSealRejectedV0
-    [failure: LowerFailureV0 receipt: worlds/PassReceiptV0]))
+    [failure: LowerFailureV0 receipt: core/PassReceiptV0]))
 
 (defn lower-id [domain: String parts: (Vec String)] -> core/NativeId
   (core/canonical-id (str "native-lower-v0/" domain) parts))
@@ -60,14 +60,14 @@
   (let [term: (U worlds/TermV0 Nil) (term-at graph target)]
     (if (nil? term)
       nil
-      (if (worlds/texttermv0? term) (worlds/texttermv0-value term) nil))))
+      (if (instance? native.worlds.TextTermV0 term) (worlds/texttermv0-value term) nil))))
 
 (defn term-references [term: worlds/TermV0] -> (Vec core/NativeId)
   (cond
-    (worlds/reftermv0? term)
+    (instance? native.worlds.RefTermV0 term)
     [(worlds/reftermv0-target term)]
 
-    (worlds/tripletermv0? term)
+    (instance? native.worlds.TripleTermV0 term)
     [(worlds/tripletermv0-subject term)
      (worlds/tripletermv0-predicate term)
      (worlds/tripletermv0-object term)]
@@ -106,7 +106,7 @@
         facts
         (let [node: worlds/TermNodeV0 (nth nodes index)
               term: worlds/TermV0 (worlds/termnodev0-term node)]
-          (if (worlds/tripletermv0? term)
+          (if (instance? native.worlds.TripleTermV0 term)
             (recur (+ index 1)
               (conj facts
                 (->SourceFactV0
@@ -146,25 +146,25 @@
 
 (defn encode-term [term: worlds/TermV0] -> String
   (cond
-    (worlds/niltermv0? term)
+    (instance? native.worlds.NilTermV0 term)
     (worlds/canonical-record "nil"
       [(worlds/encode-bool (worlds/niltermv0-token term))])
 
-    (worlds/booltermv0? term)
+    (instance? native.worlds.BoolTermV0 term)
     (worlds/canonical-record "bool"
       [(worlds/encode-bool (worlds/booltermv0-value term))])
 
-    (worlds/i64termv0? term)
+    (instance? native.worlds.I64TermV0 term)
     (worlds/canonical-record "i64" [(str (worlds/i64termv0-value term))])
 
-    (worlds/f64termv0? term)
+    (instance? native.worlds.F64TermV0 term)
     (worlds/canonical-record "f64"
       [(worlds/f64termv0-canonical-value term)])
 
-    (worlds/texttermv0? term)
+    (instance? native.worlds.TextTermV0 term)
     (worlds/canonical-record "text" [(worlds/texttermv0-value term)])
 
-    (worlds/reftermv0? term)
+    (instance? native.worlds.RefTermV0 term)
     (worlds/canonical-record "ref"
       [(id-value (worlds/reftermv0-target term))])
 
@@ -243,42 +243,37 @@
       (->InvalidSourceModuleV0 root "a module root is absent from the source Term graph"))))
 
 (defn encode-configuration
-  [configuration: (Vec worlds/ConfigurationEntryV0)] -> String
-  (worlds/canonical-set "configuration"
-    (mapv
-      (fn [entry: worlds/ConfigurationEntryV0] -> String
-        (worlds/canonical-record "entry"
-          [(worlds/configurationentryv0-key entry)
-           (worlds/configurationentryv0-value entry)]))
-      configuration)))
+  [configuration: (Vec String)] -> String
+  (worlds/canonical-set "configuration" configuration))
 
 (defn make-receipt
   [input-digest: String
    compiler-commit: String
    pass-id: String
-   configuration: (Vec worlds/ConfigurationEntryV0)
-   diagnostics: (Vec worlds/DiagnosticV0)
-   obligations: (Vec worlds/DischargedObligationV0)
+   configuration: (Vec String)
+   diagnostics: (Vec core/DiagnosticV0)
+   obligations: (Vec core/ReceiptObligationV0)
    output-digest: String]
-  -> worlds/PassReceiptV0
-  (worlds/->PassReceiptV0
+  -> core/PassReceiptV0
+  (core/->PassReceiptV0
+    (lower-id "receipt" [pass-id input-digest output-digest])
     input-digest
     compiler-commit
     pass-id
     "v0"
     configuration
-    (worlds/content-digest (encode-configuration configuration))
+    (worlds/configuration-digest configuration)
     diagnostics
     obligations
     output-digest
-    "native-core"
-    "v0"
+    "none"
+    "none"
     []))
 
 (defn source-closure-obligation
-  [digest: String passed: Bool detail: String] -> worlds/DischargedObligationV0
-  (worlds/->DischargedObligationV0
-    "source-term-closure"
+  [digest: String passed: Bool detail: String] -> core/ReceiptObligationV0
+  (core/->ReceiptObligationV0
+    (core/->ValidSsaObligation true)
     "v0"
     digest
     passed
@@ -287,7 +282,7 @@
 (defn seal-source-world
   [world: worlds/SourceProgramWorldV0
    compiler-commit: String
-   configuration: (Vec worlds/ConfigurationEntryV0)]
+   configuration: (Vec String)]
   -> SourceSealResultV0
   (let [encoding: String (encode-source-world world)
         digest: String (worlds/content-digest encoding)]
@@ -302,7 +297,7 @@
         (->SourceSealRejectedV0
           failure
           (make-receipt digest compiler-commit "source-seal" configuration
-            [(worlds/->DiagnosticV0
+            [(core/->DiagnosticV0
                "LOWER-SOURCE-NOT-CLOSED"
                "source Term graph or module roots are not closed")]
             [(source-closure-obligation digest false
@@ -312,12 +307,13 @@
 ;; The records below are a closed hot-loop projection of the authoritative
 ;; typed Term graph. They are discarded and rebuilt from the sealed world.
 (defunion NativeReadinessV0
-  (NativeReadyV0 [token: Bool])
+  (NativeReadyV0 [operation: String])
   (NativeTodoV0 [code: String detail: String]))
 
 (defrecord TypedFunctionV0
   [id: core/NativeId
    name: String
+   abi-symbol: String
    parameters: (Vec core/Parameter)
    return-type: core/NativeId
    failure-type: core/NativeId
@@ -336,16 +332,16 @@
 (defrecord TypeResolutionV0
   [type-id: core/NativeId
    definitions: (Vec core/TypeDef)
-   diagnostics: (Vec worlds/DiagnosticV0)
+   diagnostics: (Vec core/DiagnosticV0)
    valid: Bool])
 
 (defunion TypingResultV0
   (TypingAcceptedV0
     [sealed: worlds/SealedTypedWorldV0
      slice: TypedSliceV0
-     receipt: worlds/PassReceiptV0])
+     receipt: core/PassReceiptV0])
   (TypingRejectedV0
-    [failure: LowerFailureV0 receipt: worlds/PassReceiptV0]))
+    [failure: LowerFailureV0 receipt: core/PassReceiptV0]))
 
 (defn ends-with? [value: String suffix: String] -> Bool
   (let [value-count: Int (count value)
@@ -449,8 +445,8 @@
       (recur (+ index 1) (append-type-def current (nth additions index))))))
 
 (defn append-diagnostics
-  [left: (Vec worlds/DiagnosticV0) right: (Vec worlds/DiagnosticV0)]
-  -> (Vec worlds/DiagnosticV0)
+  [left: (Vec core/DiagnosticV0) right: (Vec core/DiagnosticV0)]
+  -> (Vec core/DiagnosticV0)
   (vec (concat left right)))
 
 (defn form-ids [graph: worlds/TermGraphV0 kind: String] -> (Vec core/NativeId)
@@ -508,6 +504,9 @@
     (= "String" spelling)
     (->TypeResolutionV0 (type-id "String") [(text-type)] [] true)
 
+    (= "SpaceId" spelling)
+    (->TypeResolutionV0 (type-id "String") [(text-type)] [] true)
+
     (= "Keyword" spelling)
     (->TypeResolutionV0 (type-id "Keyword") [(keyword-type)] [] true)
 
@@ -518,7 +517,7 @@
     (->TypeResolutionV0
       (type-id "SliceValue")
       [(slice-value-type)]
-      [(worlds/->DiagnosticV0
+      [(core/->DiagnosticV0
          "LOWER-CLOSED-RAW-ANY"
          "raw Any was closed to the finite SliceValue union")]
       true)
@@ -551,8 +550,8 @@
           (typeresolutionv0-definitions (nth resolutions index)))))))
 
 (defn resolution-diagnostics
-  [resolutions: (Vec TypeResolutionV0)] -> (Vec worlds/DiagnosticV0)
-  (loop [index: Int 0 diagnostics: (Vec worlds/DiagnosticV0) []]
+  [resolutions: (Vec TypeResolutionV0)] -> (Vec core/DiagnosticV0)
+  (loop [index: Int 0 diagnostics: (Vec core/DiagnosticV0) []]
     (if (>= index (count resolutions))
       diagnostics
       (recur (+ index 1)
@@ -578,7 +577,7 @@
   -> TypeResolutionV0
   (let [ids: (Vec core/NativeId) (resolution-ids resolutions)
         definitions: (Vec core/TypeDef) (resolution-definitions resolutions)
-        diagnostics: (Vec worlds/DiagnosticV0) (resolution-diagnostics resolutions)]
+        diagnostics: (Vec core/DiagnosticV0) (resolution-diagnostics resolutions)]
     (cond
       (and (= "Vec" constructor) (= 1 (count ids)))
       (let [id: core/NativeId (lower-id "vector-type" [(id-value (nth ids 0))])]
@@ -609,7 +608,7 @@
           (append-type-def (append-type-def definitions entry)
             (core/->TypeDef map-id "MapEntries" (core/->VectorType entry-id)))
           (conj diagnostics
-            (worlds/->DiagnosticV0
+            (core/->DiagnosticV0
               "TODO-NATIVE-MAP-OPERATIONS"
               "host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation"))
           true))
@@ -629,7 +628,7 @@
         (type-id "LowerFailure")
         [(lower-failure-type)]
         (conj diagnostics
-          (worlds/->DiagnosticV0
+          (core/->DiagnosticV0
             "LOWER-UNSUPPORTED-TYPE-APPLICATION"
             (str "unsupported closed type constructor: " constructor)))
         false))))
@@ -643,7 +642,7 @@
       (->TypeResolutionV0
         (type-id "LowerFailure")
         [(lower-failure-type)]
-        [(worlds/->DiagnosticV0
+        [(core/->DiagnosticV0
            "LOWER-MISSING-TYPE-KIND"
            (str "source type has no kind: " (id-value source-type)))]
         false)
@@ -653,7 +652,7 @@
         (->TypeResolutionV0
           (type-id "LowerFailure")
           [(lower-failure-type)]
-          [(worlds/->DiagnosticV0
+          [(core/->DiagnosticV0
              "LOWER-MISSING-TYPE-NAME"
              (str "primitive type has no spelling: " (id-value source-type)))]
           false)
@@ -664,7 +663,7 @@
         (->TypeResolutionV0
           (type-id "LowerFailure")
           [(lower-failure-type)]
-          [(worlds/->DiagnosticV0
+          [(core/->DiagnosticV0
              "LOWER-MISSING-TYPE-CONSTRUCTOR"
              (str "type application has no constructor: " (id-value source-type)))]
           false)
@@ -689,7 +688,7 @@
       (->TypeResolutionV0
         (type-id "LowerFailure")
         [(lower-failure-type)]
-        [(worlds/->DiagnosticV0
+        [(core/->DiagnosticV0
            "LOWER-UNSUPPORTED-TYPE-KIND"
            (str "unsupported source type kind: " kind))]
         false))))
@@ -697,19 +696,19 @@
 (defrecord RecordResolutionV0
   [definition: core/TypeDef
    supporting-definitions: (Vec core/TypeDef)
-   diagnostics: (Vec worlds/DiagnosticV0)
+   diagnostics: (Vec core/DiagnosticV0)
    valid: Bool])
 
 (defrecord ParameterResolutionV0
   [parameters: (Vec core/Parameter)
    definitions: (Vec core/TypeDef)
-   diagnostics: (Vec worlds/DiagnosticV0)
+   diagnostics: (Vec core/DiagnosticV0)
    valid: Bool])
 
 (defrecord FunctionResolutionV0
   [function: TypedFunctionV0
    definitions: (Vec core/TypeDef)
-   diagnostics: (Vec worlds/DiagnosticV0)
+   diagnostics: (Vec core/DiagnosticV0)
    valid: Bool])
 
 (defn field-name-at
@@ -738,7 +737,7 @@
         (core/->TypeDef (type-id "LowerFailure") "LowerFailure"
           (core/->ReferenceType (type-id "LowerFailure")))
         [(lower-failure-type)]
-        [(worlds/->DiagnosticV0
+        [(core/->DiagnosticV0
            "LOWER-RECORD-MISSING-NAME"
            (str "record form has no name: " (id-value source-record)))]
         false)
@@ -746,7 +745,7 @@
         (loop [index: Int 0
                fields: (Vec core/TypeField) []
                definitions: (Vec core/TypeDef) []
-               diagnostics: (Vec worlds/DiagnosticV0) []
+               diagnostics: (Vec core/DiagnosticV0) []
                valid: Bool true]
           (if (>= index (count source-fields))
             (->RecordResolutionV0
@@ -763,7 +762,7 @@
                   fields
                   definitions
                   (conj diagnostics
-                    (worlds/->DiagnosticV0
+                    (core/->DiagnosticV0
                       "LOWER-FIELD-MISSING-ANNOTATION"
                       (str "record field is missing a name or type: "
                         (id-value source-field))))
@@ -814,7 +813,7 @@
     (loop [index: Int 0
            parameters: (Vec core/Parameter) []
            definitions: (Vec core/TypeDef) []
-           diagnostics: (Vec worlds/DiagnosticV0) []
+           diagnostics: (Vec core/DiagnosticV0) []
            valid: Bool true]
       (if (>= index (count source-parameters))
         (->ParameterResolutionV0 parameters definitions diagnostics valid)
@@ -826,7 +825,7 @@
               parameters
               definitions
               (conj diagnostics
-                (worlds/->DiagnosticV0
+                (core/->DiagnosticV0
                   "LOWER-PARAMETER-MISSING-ANNOTATION"
                   (str "function parameter has no closed type: " name)))
               false)
@@ -867,6 +866,7 @@
 (defn encode-typed-function
   [id: core/NativeId
    name: String
+   abi-symbol: String
    parameters: (Vec core/Parameter)
    return-type: core/NativeId
    failure-type: core/NativeId
@@ -876,6 +876,7 @@
   (worlds/canonical-record "typed-function-v0"
     [(id-value id)
      name
+     abi-symbol
      (worlds/canonical-record "parameters"
        (mapv
          (fn [parameter: core/Parameter] -> String
@@ -891,19 +892,24 @@
   [graph: worlds/TermGraphV0 source-function: core/NativeId] -> (U String Nil)
   (first-fact-text graph source-function "native-op"))
 
+(defn recognized-native-op? [operation: String] -> Bool
+  (or (= operation "identity")
+      (= operation "checked-add-i64")
+      (= operation "const-zero-i64")))
+
 (defn resolve-function
   [graph: worlds/TermGraphV0 source-function: core/NativeId] -> FunctionResolutionV0
   (let [source-name: (U String Nil) (first-fact-text graph source-function "name")]
     (if (nil? source-name)
       (let [id: core/NativeId (function-id source-function "unnamed")]
         (->FunctionResolutionV0
-          (->TypedFunctionV0 id "unnamed" [] (type-id "LowerFailure")
+          (->TypedFunctionV0 id "unnamed" "native_unnamed" [] (type-id "LowerFailure")
             (type-id "LowerFailure") []
             (->NativeTodoV0 "TODO-NATIVE-UNNAMED-FUNCTION"
               "source function lacks a name")
             "")
           [(lower-failure-type)]
-          [(worlds/->DiagnosticV0
+          [(core/->DiagnosticV0
              "LOWER-FUNCTION-MISSING-NAME"
              (str "function form has no name: " (id-value source-function)))]
           false))
@@ -912,28 +918,42 @@
             (resolve-parameters graph source-function id)
             source-return: (U core/NativeId Nil)
             (first-fact-object graph source-function "ret")
+            source-abi-symbol: (U String Nil)
+            (first-fact-text graph source-function "abi-symbol")
+            abi-symbol: String
+            (if (nil? source-abi-symbol) source-name source-abi-symbol)
             return-resolution: TypeResolutionV0
             (if (nil? source-return)
               (->TypeResolutionV0
                 (type-id "Nil")
                 [(nil-type)]
-                [(worlds/->DiagnosticV0
+                [(core/->DiagnosticV0
                    "TODO-NATIVE-SIGNATURE-FACTS"
                    (str "checked source projection omitted the return annotation for " source-name))]
                 true)
               (resolve-source-type graph source-return))
             native-op: (U String Nil) (function-native-op graph source-function)
+            native-ready: Bool
+            (and (some? native-op) (recognized-native-op? native-op))
             readiness: NativeReadinessV0
-            (if (some? native-op)
-              (->NativeReadyV0 true)
+            (if (nil? native-op)
               (->NativeTodoV0
                 "TODO-NATIVE-FUNCTION-BODY"
-                (str "native body lowering remains for " source-name)))
+                (str "native body lowering remains for " source-name))
+              (if (recognized-native-op? native-op)
+                (->NativeReadyV0 native-op)
+                (->NativeTodoV0
+                  "TODO-NATIVE-FUNCTION-BODY"
+                  (str "native body lowering remains for " source-name))))
             readiness-code: String
-            (if (some? native-op) native-op "TODO-NATIVE-FUNCTION-BODY")
+            (if (nil? native-op)
+              "TODO-NATIVE-FUNCTION-BODY"
+              (if (recognized-native-op? native-op)
+                native-op
+                "TODO-NATIVE-FUNCTION-BODY"))
             effects: (Vec core/NativeId) (function-effects source-name)
             encoding: String
-            (encode-typed-function id source-name
+            (encode-typed-function id source-name abi-symbol
               (parameterresolutionv0-parameters parameters)
               (typeresolutionv0-type-id return-resolution)
               (type-id "LowerFailure")
@@ -943,6 +963,7 @@
           (->TypedFunctionV0
             id
             source-name
+            abi-symbol
             (parameterresolutionv0-parameters parameters)
             (typeresolutionv0-type-id return-resolution)
             (type-id "LowerFailure")
@@ -954,10 +975,10 @@
             (typeresolutionv0-definitions return-resolution))
           (append-diagnostics
             (parameterresolutionv0-diagnostics parameters)
-            (if (some? native-op)
+            (if native-ready
               (typeresolutionv0-diagnostics return-resolution)
               (conj (typeresolutionv0-diagnostics return-resolution)
-                (worlds/->DiagnosticV0
+                (core/->DiagnosticV0
                   "TODO-NATIVE-FUNCTION-BODY"
                   (str "typed function is sealed; native body lowering remains for "
                     source-name)))))
@@ -1012,15 +1033,15 @@
 
 (defn collect-typing-diagnostics
   [records: (Vec RecordResolutionV0)
-   functions: (Vec FunctionResolutionV0)] -> (Vec worlds/DiagnosticV0)
-  (let [record-diagnostics: (Vec worlds/DiagnosticV0)
-        (loop [index: Int 0 diagnostics: (Vec worlds/DiagnosticV0) []]
+   functions: (Vec FunctionResolutionV0)] -> (Vec core/DiagnosticV0)
+  (let [record-diagnostics: (Vec core/DiagnosticV0)
+        (loop [index: Int 0 diagnostics: (Vec core/DiagnosticV0) []]
           (if (>= index (count records))
             diagnostics
             (recur (+ index 1)
               (append-diagnostics diagnostics
                 (recordresolutionv0-diagnostics (nth records index))))))]
-    (loop [index: Int 0 diagnostics: (Vec worlds/DiagnosticV0) record-diagnostics]
+    (loop [index: Int 0 diagnostics: (Vec core/DiagnosticV0) record-diagnostics]
       (if (>= index (count functions))
         diagnostics
         (recur (+ index 1)
@@ -1042,10 +1063,10 @@
 
 (defn encode-atom-kind [kind: core/AtomKind] -> String
   (cond
-    (core/boolkind? kind) "bool"
-    (core/i64kind? kind) "i64"
-    (core/f64kind? kind) "f64"
-    (core/textkind? kind) "text"
+    (instance? native.core.BoolKind kind) "bool"
+    (instance? native.core.I64Kind kind) "i64"
+    (instance? native.core.F64Kind kind) "f64"
+    (instance? native.core.TextKind kind) "text"
     :else (worlds/canonical-record "reference-kind"
             [(id-value (core/refkind-target kind))])))
 
@@ -1064,27 +1085,27 @@
 
 (defn encode-type-shape [shape: core/TypeShape] -> String
   (cond
-    (core/atomtype? shape)
+    (instance? native.core.AtomType shape)
     (worlds/canonical-record "atom"
       [(encode-atom-kind (core/atomtype-kind shape))])
 
-    (core/recordtype? shape)
+    (instance? native.core.RecordType shape)
     (worlds/canonical-record "record"
       (mapv
         (fn [field: core/TypeField] -> String (encode-type-field field))
         (core/recordtype-fields shape)))
 
-    (core/uniontype? shape)
+    (instance? native.core.UnionType shape)
     (worlds/canonical-record "closed-union"
       (mapv
         (fn [variant: core/TypeVariant] -> String (encode-type-variant variant))
         (core/uniontype-variants shape)))
 
-    (core/vectortype? shape)
+    (instance? native.core.VectorType shape)
     (worlds/canonical-record "vector"
       [(id-value (core/vectortype-element-type shape))])
 
-    (core/referencetype? shape)
+    (instance? native.core.ReferenceType shape)
     (worlds/canonical-record "reference"
       [(id-value (core/referencetype-target-type shape))])
 
@@ -1103,14 +1124,14 @@
   (let [kind: core/EffectKind (core/effectdef-kind effect)
         kind-encoding: String
         (cond
-          (core/pureeffect? kind) "pure"
-          (core/allocateeffect? kind)
+          (instance? native.core.PureEffect kind) "pure"
+          (instance? native.core.AllocateEffect kind)
           (worlds/canonical-record "allocate"
             [(id-value (core/allocateeffect-region kind))])
-          (core/readeffect? kind)
+          (instance? native.core.ReadEffect kind)
           (worlds/canonical-record "read"
             [(id-value (core/readeffect-region kind))])
-          (core/writeeffect? kind)
+          (instance? native.core.WriteEffect kind)
           (worlds/canonical-record "write"
             [(id-value (core/writeeffect-region kind))])
           :else
@@ -1155,7 +1176,7 @@
             (worlds/canonical-record "capability-v0"
               [(id-value (write-capability-id))
                (id-value (arena-region-id))
-               "affine-write"]))) ]
+               "affine-write"])))]
     (vec (concat type-nodes function-nodes effect-nodes
            [region-node capability-node]))))
 
@@ -1173,7 +1194,7 @@
       (= value "zig")))
 
 (defn term-is-clean? [term: worlds/TermV0] -> Bool
-  (if (worlds/texttermv0? term)
+  (if (instance? native.worlds.TextTermV0 term)
     (not (forbidden-world-text? (worlds/texttermv0-value term)))
     true))
 
@@ -1202,33 +1223,34 @@
 
 (defn function-todo-obligations
   [functions: (Vec TypedFunctionV0) subject-digest: String]
-  -> (Vec worlds/DischargedObligationV0)
-  (loop [index: Int 0 obligations: (Vec worlds/DischargedObligationV0) []]
+  -> (Vec core/ReceiptObligationV0)
+  (loop [index: Int 0 obligations: (Vec core/ReceiptObligationV0) []]
     (if (>= index (count functions))
       obligations
       (let [function: TypedFunctionV0 (nth functions index)
             readiness: NativeReadinessV0 (typedfunctionv0-readiness function)]
         (match readiness
-          [(NativeReadyV0 token) (recur (+ index 1) obligations)]
+          [(NativeReadyV0 operation) (recur (+ index 1) obligations)]
           [(NativeTodoV0 code detail)
            (recur (+ index 1)
              (conj obligations
-               (worlds/->DischargedObligationV0
-                 code "v0" subject-digest false detail)))])))))
+               (core/->ReceiptObligationV0
+                 (core/->ValidSsaObligation true)
+                 "v0" subject-digest false (str code ": " detail))))])))))
 
 (defn type-closure-obligations
-  [digest: String closed: Bool clean: Bool] -> (Vec worlds/DischargedObligationV0)
-  [(worlds/->DischargedObligationV0
-     "reachable-type-closure" "v0" digest closed
+  [digest: String closed: Bool clean: Bool] -> (Vec core/ReceiptObligationV0)
+  [(core/->ReceiptObligationV0
+     (core/->ClosedLayoutsObligation true) "v0" digest closed
      "every reachable type is a closed Native Core TypeShape")
-   (worlds/->DischargedObligationV0
-     "typed-world-host-erasure" "v0" digest clean
+   (core/->ReceiptObligationV0
+     (core/->BoundedEffectsObligation true) "v0" digest clean
      "typed Terms contain no raw Any, host exception, host collection, or target syntax")])
 
 (defn lower-typed-world
   [sealed-source: worlds/SealedSourceWorldV0
    compiler-commit: String
-   configuration: (Vec worlds/ConfigurationEntryV0)]
+   configuration: (Vec String)]
   -> TypingResultV0
   (let [source: worlds/SourceProgramWorldV0
         (worlds/sealedsourceworldv0-world sealed-source)
@@ -1270,9 +1292,9 @@
         types-closed: Bool (core/types-refs-closed? types)
         clean: Bool (term-graph-clean? terms)
         valid: Bool (and resolutions-valid types-closed clean)
-        diagnostics: (Vec worlds/DiagnosticV0)
+        diagnostics: (Vec core/DiagnosticV0)
         (collect-typing-diagnostics record-resolutions function-resolutions)
-        obligations: (Vec worlds/DischargedObligationV0)
+        obligations: (Vec core/ReceiptObligationV0)
         (vec (concat (type-closure-obligations digest types-closed clean)
                (function-todo-obligations functions digest)))]
     (if valid
@@ -1288,3 +1310,1018 @@
           "one or more source annotations do not close over Native Core types")
         (make-receipt source-digest compiler-commit "source-to-typed"
           configuration diagnostics obligations "")))))
+
+(defrecord LayoutMeasureV0
+  [size-bytes: Int align-bytes: Int closed: Bool detail: String])
+
+(defrecord LayoutResolutionV0
+  [layout: core/LayoutDef closed: Bool detail: String])
+
+(defunion NativeLoweringResultV0
+  (NativeLoweringCompleteV0
+    [sealed: worlds/SealedNativeWorldV0 receipt: core/PassReceiptV0])
+  (NativeLoweringPendingV0
+    [sealed: worlds/SealedNativeWorldV0
+     receipt: core/PassReceiptV0
+     obligations: (Vec core/ReceiptObligationV0)]))
+
+(defn align-up [offset: Int alignment: Int] -> Int
+  (if (= 0 alignment)
+    offset
+    (let [remainder: Int (mod offset alignment)]
+      (if (= 0 remainder) offset (+ offset (- alignment remainder))))))
+
+(defn max-int [left: Int right: Int] -> Int
+  (if (> left right) left right))
+
+(defn find-type-def
+  [types: (Vec core/TypeDef) target: core/NativeId] -> (U core/TypeDef Nil)
+  (loop [index: Int 0]
+    (if (>= index (count types))
+      nil
+      (let [definition: core/TypeDef (nth types index)]
+        (if (same-id? target (core/typedef-id definition))
+          definition
+          (recur (+ index 1)))))))
+
+(defn measure-type
+  [types: (Vec core/TypeDef) target: core/NativeId depth: Int] -> LayoutMeasureV0
+  (if (> depth 32)
+    (->LayoutMeasureV0 8 8 false
+      (str "recursive value layout requires an explicit reference edge: "
+        (id-value target)))
+    (let [definition: (U core/TypeDef Nil) (find-type-def types target)]
+      (if (nil? definition)
+        (->LayoutMeasureV0 8 8 false
+          (str "layout target has no TypeDef: " (id-value target)))
+        (let [shape: core/TypeShape (core/typedef-shape definition)]
+          (cond
+            (instance? native.core.AtomType shape)
+            (let [kind: core/AtomKind (core/atomtype-kind shape)]
+              (cond
+                (same-id? target (type-id "UnionTag"))
+                (->LayoutMeasureV0 4 4 true "union tag")
+                (instance? native.core.BoolKind kind) (->LayoutMeasureV0 1 1 true "bool")
+                (instance? native.core.I64Kind kind) (->LayoutMeasureV0 8 8 true "i64")
+                (instance? native.core.F64Kind kind) (->LayoutMeasureV0 8 8 true "f64")
+                :else (->LayoutMeasureV0 8 8 true "reference-sized atom")))
+
+            (instance? native.core.ReferenceType shape)
+            (->LayoutMeasureV0 8 8 true "reference")
+
+            (instance? native.core.VectorType shape)
+            (->LayoutMeasureV0 24 8 true "vector descriptor")
+
+            (instance? native.core.RecordType shape)
+            (let [fields: (Vec core/TypeField) (core/recordtype-fields shape)]
+              (loop [index: Int 0 offset: Int 0 alignment: Int 1 closed: Bool true]
+                (if (>= index (count fields))
+                  (->LayoutMeasureV0 (align-up offset alignment) alignment closed
+                    (if closed "record" "record contains an unclosed field layout"))
+                  (let [field: core/TypeField (nth fields index)
+                        measure: LayoutMeasureV0
+                        (measure-type types (core/typefield-type-id field) (+ depth 1))
+                        field-align: Int (layoutmeasurev0-align-bytes measure)
+                        field-offset: Int (align-up offset field-align)]
+                    (recur (+ index 1)
+                      (+ field-offset (layoutmeasurev0-size-bytes measure))
+                      (max-int alignment field-align)
+                      (and closed (layoutmeasurev0-closed measure)))))))
+
+            (instance? native.core.UnionType shape)
+            (let [variants: (Vec core/TypeVariant) (core/uniontype-variants shape)]
+              (loop [index: Int 0 payload-size: Int 0 payload-align: Int 1 closed: Bool true]
+                (if (>= index (count variants))
+                  (let [alignment: Int (max-int 4 payload-align)
+                        payload-offset: Int (align-up 4 payload-align)]
+                    (->LayoutMeasureV0
+                      (align-up (+ payload-offset payload-size) alignment)
+                      alignment
+                      closed
+                      (if closed "closed union" "union contains an unclosed payload layout")))
+                  (let [variant: core/TypeVariant (nth variants index)
+                        payload: (U core/NativeId Nil)
+                        (core/typevariant-payload-type variant)]
+                    (if (nil? payload)
+                      (recur (+ index 1) payload-size payload-align closed)
+                      (let [measure: LayoutMeasureV0
+                            (measure-type types payload (+ depth 1))]
+                        (recur (+ index 1)
+                          (max-int payload-size (layoutmeasurev0-size-bytes measure))
+                          (max-int payload-align (layoutmeasurev0-align-bytes measure))
+                          (and closed (layoutmeasurev0-closed measure)))))))))
+
+            :else
+            (let [value-measure: LayoutMeasureV0
+                  (measure-type types (core/outcometype-value-type shape) (+ depth 1))
+                  failure-measure: LayoutMeasureV0
+                  (measure-type types (core/outcometype-failure-type shape) (+ depth 1))
+                  payload-align: Int
+                  (max-int (layoutmeasurev0-align-bytes value-measure)
+                    (layoutmeasurev0-align-bytes failure-measure))
+                  payload-size: Int
+                  (max-int (layoutmeasurev0-size-bytes value-measure)
+                    (layoutmeasurev0-size-bytes failure-measure))
+                  alignment: Int (max-int 4 payload-align)
+                  payload-offset: Int (align-up 4 payload-align)]
+              (->LayoutMeasureV0
+                (align-up (+ payload-offset payload-size) alignment)
+                alignment
+                (and (layoutmeasurev0-closed value-measure)
+                     (layoutmeasurev0-closed failure-measure))
+                "outcome"))))))))
+
+(defn field-layouts
+  [types: (Vec core/TypeDef) fields: (Vec core/TypeField)]
+  -> (Vec core/FieldLayoutV0)
+  (loop [index: Int 0 offset: Int 0 layouts: (Vec core/FieldLayoutV0) []]
+    (if (>= index (count fields))
+      layouts
+      (let [field: core/TypeField (nth fields index)
+            measure: LayoutMeasureV0
+            (measure-type types (core/typefield-type-id field) 0)
+            field-offset: Int (align-up offset (layoutmeasurev0-align-bytes measure))]
+        (recur (+ index 1)
+          (+ field-offset (layoutmeasurev0-size-bytes measure))
+          (conj layouts
+            (core/->FieldLayoutV0
+              (core/typefield-id field)
+              (core/typefield-type-id field)
+              field-offset
+              (layoutmeasurev0-align-bytes measure))))))))
+
+(defn variant-layouts
+  [types: (Vec core/TypeDef) variants: (Vec core/TypeVariant)]
+  -> (Vec core/UnionVariantLayoutV0)
+  (loop [index: Int 0 layouts: (Vec core/UnionVariantLayoutV0) []]
+    (if (>= index (count variants))
+      layouts
+      (let [variant: core/TypeVariant (nth variants index)
+            payload: (U core/NativeId Nil) (core/typevariant-payload-type variant)
+            payload-align: Int
+            (if (nil? payload)
+              1
+              (layoutmeasurev0-align-bytes (measure-type types payload 0)))]
+        (recur (+ index 1)
+          (conj layouts
+            (core/->UnionVariantLayoutV0
+              (core/typevariant-id variant)
+              index
+              payload
+              (align-up 4 payload-align))))))))
+
+(defn layout-shape-for
+  [types: (Vec core/TypeDef) definition: core/TypeDef] -> core/LayoutShapeV0
+  (let [shape: core/TypeShape (core/typedef-shape definition)]
+    (cond
+      (instance? native.core.AtomType shape)
+      (let [kind: core/AtomKind (core/atomtype-kind shape)]
+        (cond
+          (same-id? (core/typedef-id definition) (type-id "UnionTag"))
+          (core/->ScalarShapeV0 (core/->UnsignedIntReprV0 32))
+          (instance? native.core.BoolKind kind) (core/->ScalarShapeV0 (core/->BoolReprV0 8))
+          (instance? native.core.I64Kind kind) (core/->ScalarShapeV0 (core/->SignedIntReprV0 64))
+          (instance? native.core.F64Kind kind) (core/->ScalarShapeV0 (core/->FloatReprV0 64))
+          :else (core/->ReferenceShapeV0 (core/typedef-id definition))))
+
+      (instance? native.core.RecordType shape)
+      (core/->RecordShapeV0 (field-layouts types (core/recordtype-fields shape)))
+
+      (instance? native.core.UnionType shape)
+      (core/->UnionShapeV0
+        (type-id "UnionTag")
+        0
+        (variant-layouts types (core/uniontype-variants shape)))
+
+      (instance? native.core.VectorType shape)
+      (let [element: core/NativeId (core/vectortype-element-type shape)
+            measure: LayoutMeasureV0 (measure-type types element 0)]
+        (core/->VectorShapeV0 element (layoutmeasurev0-size-bytes measure)))
+
+      (instance? native.core.ReferenceType shape)
+      (core/->ReferenceShapeV0 (core/referencetype-target-type shape))
+
+      :else
+      (core/->UnionShapeV0
+        (type-id "UnionTag")
+        0
+        [(core/->UnionVariantLayoutV0
+           (variant-id (core/typedef-name definition) "value")
+           0
+           (core/outcometype-value-type shape)
+           8)
+         (core/->UnionVariantLayoutV0
+           (variant-id (core/typedef-name definition) "failure")
+           1
+           (core/outcometype-failure-type shape)
+           8)]))))
+
+(defn resolve-layout
+  [types: (Vec core/TypeDef) definition: core/TypeDef] -> LayoutResolutionV0
+  (let [measure: LayoutMeasureV0
+        (measure-type types (core/typedef-id definition) 0)]
+    (->LayoutResolutionV0
+      (core/->LayoutDef
+        (lower-id "layout" [(id-value (core/typedef-id definition))])
+        (core/typedef-id definition)
+        (layoutmeasurev0-size-bytes measure)
+        (layoutmeasurev0-align-bytes measure)
+        (layout-shape-for types definition))
+      (layoutmeasurev0-closed measure)
+      (layoutmeasurev0-detail measure))))
+
+(defn resolve-layouts
+  [types: (Vec core/TypeDef)] -> (Vec LayoutResolutionV0)
+  (mapv
+    (fn [definition: core/TypeDef] -> LayoutResolutionV0
+      (resolve-layout types definition))
+    types))
+
+(defn collect-layouts
+  [resolutions: (Vec LayoutResolutionV0)] -> (Vec core/LayoutDef)
+  (mapv
+    (fn [resolution: LayoutResolutionV0] -> core/LayoutDef
+      (layoutresolutionv0-layout resolution))
+    resolutions))
+
+(defn layouts-closed? [resolutions: (Vec LayoutResolutionV0)] -> Bool
+  (every?
+    (fn [resolution: LayoutResolutionV0] -> Bool
+      (layoutresolutionv0-closed resolution))
+    resolutions))
+
+(defn union-tag-type [] -> core/TypeDef
+  (core/->TypeDef (type-id "UnionTag") "UnionTag"
+    (core/->AtomType (core/->I64Kind true))))
+
+(defn ready-function? [function: TypedFunctionV0] -> Bool
+  (match (typedfunctionv0-readiness function)
+    [(NativeReadyV0 operation) true]
+    [(NativeTodoV0 code detail) false]))
+
+(defn ready-functions
+  [functions: (Vec TypedFunctionV0)] -> (Vec TypedFunctionV0)
+  (filterv
+    (fn [function: TypedFunctionV0] -> Bool (ready-function? function))
+    functions))
+
+(defn function-operation [function: TypedFunctionV0] -> String
+  (match (typedfunctionv0-readiness function)
+    [(NativeReadyV0 operation) operation]
+    [(NativeTodoV0 code detail) "pending"]))
+
+(defn function-capabilities [function: TypedFunctionV0] -> (Vec core/NativeId)
+  (if (core/id-in? (typedfunctionv0-effects function) (write-effect-id))
+    [(write-capability-id)]
+    []))
+
+(defn function-regions [function: TypedFunctionV0] -> (Vec core/NativeId)
+  (if (core/id-in? (typedfunctionv0-effects function) (write-effect-id))
+    [(arena-region-id)]
+    []))
+
+(defn lower-function-instructions
+  [function: TypedFunctionV0] -> (Vec core/Instruction)
+  (let [operation: String (function-operation function)
+        parameters: (Vec core/Parameter) (typedfunctionv0-parameters function)
+        result-id: core/NativeId
+        (lower-id "ssa-result" [(id-value (typedfunctionv0-id function))])]
+    (cond
+      (= operation "checked-add-i64")
+      [(core/->CheckedInstruction
+         (core/->SsaValueV0 result-id (typedfunctionv0-return-type function))
+         (core/->CheckedAddI64V0
+           (core/parameter-id (nth parameters 0))
+           (core/parameter-id (nth parameters 1))))]
+
+      (= operation "const-zero-i64")
+      [(core/->AtomInstruction
+         (core/->SsaValueV0 result-id (typedfunctionv0-return-type function))
+         (core/->I64Atom 0))]
+
+      :else [])))
+
+(defn lower-function-return [function: TypedFunctionV0] -> (U core/NativeId Nil)
+  (let [operation: String (function-operation function)
+        parameters: (Vec core/Parameter) (typedfunctionv0-parameters function)]
+    (cond
+      (= operation "identity")
+      (if (= 0 (count parameters)) nil (core/parameter-id (nth parameters 0)))
+
+      (or (= operation "checked-add-i64") (= operation "const-zero-i64"))
+      (lower-id "ssa-result" [(id-value (typedfunctionv0-id function))])
+
+      :else nil)))
+
+(defn lower-ready-function [function: TypedFunctionV0] -> core/FunctionDef
+  (let [entry-id: core/NativeId
+        (lower-id "block-entry" [(id-value (typedfunctionv0-id function))])
+        block: core/BasicBlock
+        (core/->BasicBlock
+          entry-id
+          []
+          (lower-function-instructions function)
+          [(core/->ReturnTerminator (lower-function-return function))])]
+    (core/->FunctionDef
+      (typedfunctionv0-id function)
+      (typedfunctionv0-name function)
+      (typedfunctionv0-parameters function)
+      [block]
+      entry-id
+      (typedfunctionv0-return-type function)
+      (typedfunctionv0-effects function)
+      (function-regions function)
+      (function-capabilities function))))
+
+(defn lower-ready-functions
+  [functions: (Vec TypedFunctionV0)] -> (Vec core/FunctionDef)
+  (mapv
+    (fn [function: TypedFunctionV0] -> core/FunctionDef
+      (lower-ready-function function))
+    (ready-functions functions)))
+
+(defn layout-digest [layouts: (Vec core/LayoutDef)] -> String
+  (worlds/content-digest
+    (worlds/canonical-set "layout-set-v0"
+      (mapv
+        (fn [layout: core/LayoutDef] -> String
+          (worlds/canonical-record "layout"
+            [(id-value (core/layoutdef-id layout))
+             (id-value (core/layoutdef-type-id layout))
+             (str (core/layoutdef-size-bytes layout))
+             (str (core/layoutdef-align-bytes layout))]))
+        layouts))))
+
+(defn abi-parameters
+  [parameters: (Vec core/Parameter)] -> (Vec core/AbiValueV0)
+  (mapv
+    (fn [parameter: core/Parameter] -> core/AbiValueV0
+      (core/->AbiValueV0
+        (id-value (core/parameter-id parameter))
+        (core/parameter-type-id parameter)
+        (core/->BorrowedV0 true)
+        nil))
+    parameters))
+
+(defn function-abi
+  [function: TypedFunctionV0 layouts-digest: String] -> core/AbiDeclV0
+  (core/->AbiDeclV0
+    (lower-id "abi" [(id-value (typedfunctionv0-id function))])
+    (typedfunctionv0-id function)
+    (typedfunctionv0-abi-symbol function)
+    (core/->AbiExportV0 true)
+    (core/->RestrictedCAbiV0 true)
+    (abi-parameters (typedfunctionv0-parameters function))
+    (core/->AbiValueV0
+      "result"
+      (typedfunctionv0-return-type function)
+      (core/->OwnedV0 true)
+      nil)
+    (typedfunctionv0-failure-type function)
+    (typedfunctionv0-effects function)
+    (function-capabilities function)
+    "v0"
+    layouts-digest))
+
+(defn function-abis
+  [functions: (Vec TypedFunctionV0) layouts: (Vec core/LayoutDef)]
+  -> (Vec core/AbiDeclV0)
+  (let [digest: String (layout-digest layouts)]
+    (mapv
+      (fn [function: TypedFunctionV0] -> core/AbiDeclV0
+        (function-abi function digest))
+      (ready-functions functions))))
+
+(defn encode-scalar-repr [representation: core/ScalarReprV0] -> String
+  (cond
+    (instance? native.core.BoolReprV0 representation)
+    (worlds/canonical-record "bool" [(str (core/boolreprv0-bit-width representation))])
+    (instance? native.core.SignedIntReprV0 representation)
+    (worlds/canonical-record "signed-int"
+      [(str (core/signedintreprv0-bit-width representation))])
+    (instance? native.core.UnsignedIntReprV0 representation)
+    (worlds/canonical-record "unsigned-int"
+      [(str (core/unsignedintreprv0-bit-width representation))])
+    :else
+    (worlds/canonical-record "float"
+      [(str (core/floatreprv0-bit-width representation))])))
+
+(defn encode-field-layout [field: core/FieldLayoutV0] -> String
+  (worlds/canonical-record "field-layout-v0"
+    [(id-value (core/fieldlayoutv0-field-id field))
+     (id-value (core/fieldlayoutv0-type-id field))
+     (str (core/fieldlayoutv0-offset-bytes field))
+     (str (core/fieldlayoutv0-align-bytes field))]))
+
+(defn encode-variant-layout [variant: core/UnionVariantLayoutV0] -> String
+  (let [payload: (U core/NativeId Nil)
+        (core/unionvariantlayoutv0-payload-type variant)]
+    (worlds/canonical-record "variant-layout-v0"
+      [(id-value (core/unionvariantlayoutv0-variant-id variant))
+       (str (core/unionvariantlayoutv0-tag variant))
+       (if (nil? payload) "unit" (id-value payload))
+       (str (core/unionvariantlayoutv0-payload-offset-bytes variant))])))
+
+(defn encode-layout-shape [shape: core/LayoutShapeV0] -> String
+  (cond
+    (instance? native.core.ScalarShapeV0 shape)
+    (worlds/canonical-record "scalar-layout"
+      [(encode-scalar-repr (core/scalarshapev0-representation shape))])
+
+    (instance? native.core.RecordShapeV0 shape)
+    (worlds/canonical-record "record-layout"
+      (mapv
+        (fn [field: core/FieldLayoutV0] -> String
+          (encode-field-layout field))
+        (core/recordshapev0-fields shape)))
+
+    (instance? native.core.UnionShapeV0 shape)
+    (worlds/canonical-record "union-layout"
+      [(id-value (core/unionshapev0-tag-type shape))
+       (str (core/unionshapev0-tag-offset-bytes shape))
+       (worlds/canonical-record "variants"
+         (mapv
+           (fn [variant: core/UnionVariantLayoutV0] -> String
+             (encode-variant-layout variant))
+           (core/unionshapev0-variants shape)))])
+
+    (instance? native.core.VectorShapeV0 shape)
+    (worlds/canonical-record "vector-layout"
+      [(id-value (core/vectorshapev0-element-type shape))
+       (str (core/vectorshapev0-stride-bytes shape))])
+
+    :else
+    (worlds/canonical-record "reference-layout"
+      [(id-value (core/referenceshapev0-target-type shape))])))
+
+(defn encode-layout-def [layout: core/LayoutDef] -> String
+  (worlds/canonical-record "exact-layout-v0"
+    [(id-value (core/layoutdef-id layout))
+     (id-value (core/layoutdef-type-id layout))
+     (str (core/layoutdef-size-bytes layout))
+     (str (core/layoutdef-align-bytes layout))
+     (encode-layout-shape (core/layoutdef-shape layout))]))
+
+(defn encode-ssa-value [value: core/SsaValueV0] -> String
+  (worlds/canonical-record "ssa-value"
+    [(id-value (core/ssavaluev0-id value))
+     (id-value (core/ssavaluev0-type-id value))]))
+
+(defn encode-instruction [instruction: core/Instruction] -> String
+  (cond
+    (instance? native.core.AtomInstruction instruction)
+    (worlds/canonical-record "atom-instruction"
+      [(encode-ssa-value (core/atominstruction-result instruction))])
+
+    (instance? native.core.CopyInstruction instruction)
+    (worlds/canonical-record "copy-instruction"
+      [(encode-ssa-value (core/copyinstruction-result instruction))
+       (id-value (core/copyinstruction-source-id instruction))])
+
+    (instance? native.core.AddF64Instruction instruction)
+    (worlds/canonical-record "add-f64-instruction"
+      [(encode-ssa-value (core/addf64instruction-result instruction))
+       (id-value (core/addf64instruction-left-id instruction))
+       (id-value (core/addf64instruction-right-id instruction))])
+
+    (instance? native.core.CheckedInstruction instruction)
+    (let [operation: core/CheckedOperationV0
+          (core/checkedinstruction-operation instruction)]
+      (if (instance? native.core.CheckedAddI64V0 operation)
+        (worlds/canonical-record "checked-add-i64-instruction"
+          [(encode-ssa-value (core/checkedinstruction-result instruction))
+           (id-value (core/checkedaddi64v0-left-id operation))
+           (id-value (core/checkedaddi64v0-right-id operation))])
+        (worlds/canonical-record "checked-bounds-instruction"
+          [(encode-ssa-value (core/checkedinstruction-result instruction))
+           (id-value (core/checkedboundsv0-index-id operation))
+           (id-value (core/checkedboundsv0-length-id operation))])))
+
+    (instance? native.core.StoreInstruction instruction)
+    (worlds/canonical-record "store-instruction"
+      [(encode-ssa-value (core/storeinstruction-result instruction))])
+
+    (instance? native.core.AllocateInstruction instruction)
+    (worlds/canonical-record "allocate-instruction"
+      [(encode-ssa-value (core/allocateinstruction-result instruction))
+       (id-value (core/allocateinstruction-region instruction))
+       (id-value (core/allocateinstruction-capability instruction))])
+
+    :else
+    (worlds/canonical-record "call-instruction"
+      [(encode-ssa-value (core/callinstruction-result instruction))
+       (id-value (core/callinstruction-function-id instruction))
+       (encode-id-roots "arguments" (core/callinstruction-arguments instruction))])))
+
+(defn encode-terminator [terminator: core/Terminator] -> String
+  (cond
+    (instance? native.core.ReturnTerminator terminator)
+    (let [value: (U core/NativeId Nil) (core/returnterminator-value terminator)]
+      (worlds/canonical-record "return"
+        [(if (nil? value) "unit" (id-value value))]))
+
+    (instance? native.core.JumpTerminator terminator)
+    (worlds/canonical-record "jump"
+      [(id-value (core/jumpterminator-block-id terminator))
+       (encode-id-roots "arguments" (core/jumpterminator-arguments terminator))])
+
+    (instance? native.core.BranchTerminator terminator)
+    (worlds/canonical-record "branch"
+      [(id-value (core/branchterminator-condition terminator))
+       (id-value (core/branchterminator-true-block terminator))
+       (id-value (core/branchterminator-false-block terminator))])
+
+    (instance? native.core.SwitchTerminator terminator)
+    (worlds/canonical-record "switch"
+      [(id-value (core/switchterminator-value-id terminator))])
+
+    :else
+    (worlds/canonical-record "trap"
+      [(id-value (core/trapterminator-failure-id terminator))])))
+
+(defn encode-basic-block [block: core/BasicBlock] -> String
+  (worlds/canonical-record "basic-block-v0"
+    [(id-value (core/basicblock-id block))
+     (worlds/canonical-record "parameters"
+       (mapv
+         (fn [parameter: core/Parameter] -> String (encode-parameter parameter))
+         (core/basicblock-parameters block)))
+     (worlds/canonical-record "instructions"
+       (mapv
+         (fn [instruction: core/Instruction] -> String
+           (encode-instruction instruction))
+         (core/basicblock-instructions block)))
+     (worlds/canonical-record "terminators"
+       (mapv
+         (fn [terminator: core/Terminator] -> String
+           (encode-terminator terminator))
+         (core/basicblock-terminators block)))]))
+
+(defn encode-native-function [function: core/FunctionDef] -> String
+  (worlds/canonical-record "native-function-v0"
+    [(id-value (core/functiondef-id function))
+     (core/functiondef-name function)
+     (worlds/canonical-record "parameters"
+       (mapv
+         (fn [parameter: core/Parameter] -> String (encode-parameter parameter))
+         (core/functiondef-parameters function)))
+     (worlds/canonical-record "blocks"
+       (mapv
+         (fn [block: core/BasicBlock] -> String (encode-basic-block block))
+         (core/functiondef-blocks function)))
+     (id-value (core/functiondef-entry-block function))
+     (let [result: (U core/NativeId Nil) (core/functiondef-return-type function)]
+       (if (nil? result) "unit" (id-value result)))
+     (encode-id-roots "effects" (core/functiondef-effects function))
+     (encode-id-roots "regions" (core/functiondef-regions function))
+     (encode-id-roots "capabilities" (core/functiondef-capabilities function))]))
+
+(defn encode-abi-value [value: core/AbiValueV0] -> String
+  (worlds/canonical-record "abi-value-v0"
+    [(core/abivaluev0-name value)
+     (id-value (core/abivaluev0-type-id value))]))
+
+(defn encode-abi [abi: core/AbiDeclV0] -> String
+  (worlds/canonical-record "abi-declaration-v0"
+    [(id-value (core/abideclv0-id abi))
+     (id-value (core/abideclv0-function-id abi))
+     (core/abideclv0-symbol abi)
+     (worlds/canonical-record "parameters"
+       (mapv
+         (fn [value: core/AbiValueV0] -> String (encode-abi-value value))
+         (core/abideclv0-parameters abi)))
+     (let [result: (U core/AbiValueV0 Nil) (core/abideclv0-result abi)]
+       (if (nil? result) "unit" (encode-abi-value result)))
+     (id-value (core/abideclv0-failure-type abi))
+     (encode-id-roots "effects" (core/abideclv0-required-effects abi))
+     (encode-id-roots "capabilities" (core/abideclv0-required-capabilities abi))
+     (core/abideclv0-version abi)
+     (core/abideclv0-layout-digest abi)]))
+
+(defn native-term-nodes
+  [types: (Vec core/TypeDef)
+   effects: (Vec core/EffectDef)
+   layouts: (Vec core/LayoutDef)
+   functions: (Vec core/FunctionDef)
+   abis: (Vec core/AbiDeclV0)
+   obligation-results: (Vec core/ObligationResult)] -> (Vec worlds/TermNodeV0)
+  (let [type-nodes: (Vec worlds/TermNodeV0)
+        (mapv
+          (fn [definition: core/TypeDef] -> worlds/TermNodeV0
+            (worlds/->TermNodeV0 (core/typedef-id definition)
+              (worlds/->TextTermV0 (encode-type-def definition))))
+          types)
+        effect-nodes: (Vec worlds/TermNodeV0)
+        (mapv
+          (fn [effect: core/EffectDef] -> worlds/TermNodeV0
+            (worlds/->TermNodeV0 (core/effectdef-id effect)
+              (worlds/->TextTermV0 (encode-effect effect))))
+          effects)
+        layout-nodes: (Vec worlds/TermNodeV0)
+        (mapv
+          (fn [layout: core/LayoutDef] -> worlds/TermNodeV0
+            (worlds/->TermNodeV0 (core/layoutdef-id layout)
+              (worlds/->TextTermV0 (encode-layout-def layout))))
+          layouts)
+        function-nodes: (Vec worlds/TermNodeV0)
+        (mapv
+          (fn [function: core/FunctionDef] -> worlds/TermNodeV0
+            (worlds/->TermNodeV0 (core/functiondef-id function)
+              (worlds/->TextTermV0 (encode-native-function function))))
+          functions)
+        abi-nodes: (Vec worlds/TermNodeV0)
+        (mapv
+          (fn [abi: core/AbiDeclV0] -> worlds/TermNodeV0
+            (worlds/->TermNodeV0 (core/abideclv0-id abi)
+              (worlds/->TextTermV0 (encode-abi abi))))
+          abis)
+        obligation-nodes: (Vec worlds/TermNodeV0)
+        (mapv
+          (fn [result: core/ObligationResult] -> worlds/TermNodeV0
+            (let [id: core/NativeId
+                  (lower-id "obligation"
+                    [(core/obligationresult-detail result)])]
+              (worlds/->TermNodeV0 id
+                (worlds/->TextTermV0
+                  (worlds/canonical-record "native-obligation-v0"
+                    [(if (core/obligationresult-passed result) "pass" "fail")
+                     (core/obligationresult-detail result)])))))
+          obligation-results)]
+    (vec (concat type-nodes effect-nodes layout-nodes function-nodes abi-nodes
+           obligation-nodes
+           [(worlds/->TermNodeV0 (arena-region-id)
+              (worlds/->TextTermV0
+                (worlds/canonical-record "region-v0"
+                  [(id-value (arena-region-id)) "arena"])))
+            (worlds/->TermNodeV0 (write-capability-id)
+              (worlds/->TextTermV0
+                (worlds/canonical-record "capability-v0"
+                  [(id-value (write-capability-id)) "affine-write"]))) ]))))
+
+(defn native-obligation-results
+  [valid-ssa: Bool
+   exhaustive: Bool
+   layouts-closed: Bool
+   checked: Bool
+   legal-abi: Bool
+   tokens-discharged: Bool
+   effects-bounded: Bool]
+  -> (Vec core/ObligationResult)
+  [(core/->ObligationResult (core/->ValidSsaObligation true) valid-ssa
+     "typed SSA definitions and uses are closed")
+   (core/->ObligationResult (core/->ExhaustiveMatchesObligation true) exhaustive
+     "every lowered closed union dispatch is exhaustive")
+   (core/->ObligationResult (core/->ClosedLayoutsObligation true) layouts-closed
+     "every reachable type has an exact target-neutral layout")
+   (core/->ObligationResult (core/->CheckedOperationsObligation true) checked
+     "integer and bounds operations use checked Native Core operations")
+   (core/->ObligationResult (core/->LegalAbiObligation true) legal-abi
+     "every lowered probe entry point has an explicit restricted ABI")
+   (core/->ObligationResult (core/->DischargedTokensObligation true) tokens-discharged
+     "affine region and capability tokens are discharged")
+   (core/->ObligationResult (core/->BoundedEffectsObligation true) effects-bounded
+     "function effects stay inside the declared world capability sets")])
+
+(defn encode-obligation-result [result: core/ObligationResult] -> String
+  (worlds/canonical-record "native-obligation-v0"
+    [(if (core/obligationresult-passed result) "pass" "fail")
+     (core/obligationresult-detail result)]))
+
+(defn encode-native-world [world: worlds/NativeWorldV0] -> String
+  (worlds/canonical-record "native-world-v0"
+    [(encode-term-graph (worlds/nativeworldv0-terms world))
+     (worlds/nativeworldv0-typed-digest world)
+     (id-value (core/nativeworld-id (worlds/nativeworldv0-program world)))
+     (encode-id-roots "obligations"
+       (worlds/nativeworldv0-obligation-roots world))]))
+
+(defn layout-pending-obligations
+  [resolutions: (Vec LayoutResolutionV0) digest: String]
+  -> (Vec core/ReceiptObligationV0)
+  (loop [index: Int 0 obligations: (Vec core/ReceiptObligationV0) []]
+    (if (>= index (count resolutions))
+      obligations
+      (let [resolution: LayoutResolutionV0 (nth resolutions index)]
+        (if (layoutresolutionv0-closed resolution)
+          (recur (+ index 1) obligations)
+          (recur (+ index 1)
+            (conj obligations
+              (core/->ReceiptObligationV0
+                (core/->ClosedLayoutsObligation true)
+                "v0"
+                digest
+                false
+                (str "TODO-NATIVE-LAYOUT-"
+                  (id-value
+                    (core/layoutdef-type-id
+                      (layoutresolutionv0-layout resolution)))
+                  ": "
+                  (layoutresolutionv0-detail resolution))))))))))
+
+(defn native-receipt-obligations
+  [digest: String
+   core-valid: Bool
+   layouts-closed: Bool
+   legal-abi: Bool
+   tokens-discharged: Bool
+   clean: Bool]
+  -> (Vec core/ReceiptObligationV0)
+  [(core/->ReceiptObligationV0
+     (core/->ValidSsaObligation true) "v0" digest core-valid
+     "Native Core validator accepts all SSA definitions and references")
+   (core/->ReceiptObligationV0
+     (core/->ExhaustiveMatchesObligation true) "v0" digest true
+     "the implemented A5 fixture operations contain no partial closed-union switch")
+   (core/->ReceiptObligationV0
+     (core/->ClosedLayoutsObligation true) "v0" digest layouts-closed
+     "all reachable type shapes have exact size, alignment, and field offsets")
+   (core/->ReceiptObligationV0
+     (core/->CheckedOperationsObligation true) "v0" digest true
+     "the implemented integer operation lowers to CheckedOperationV0")
+   (core/->ReceiptObligationV0
+     (core/->LegalAbiObligation true) "v0" digest legal-abi
+     "every implemented probe function carries an explicit ABI declaration")
+   (core/->ReceiptObligationV0
+     (core/->DischargedTokensObligation true) "v0" digest tokens-discharged
+     "implemented functions do not leak an affine capability token")
+   (core/->ReceiptObligationV0
+     (core/->BoundedEffectsObligation true) "v0" digest core-valid
+     "implemented function effects stay inside world declarations")
+   (core/->ReceiptObligationV0
+     (core/->ValidSsaObligation true) "v0" digest clean
+     "native Terms contain no raw Any, host exception, host collection, or target syntax")])
+
+(defn all-functions-ready? [functions: (Vec TypedFunctionV0)] -> Bool
+  (every?
+    (fn [function: TypedFunctionV0] -> Bool (ready-function? function))
+    functions))
+
+(defn native-diagnostics
+  [layouts-closed: Bool legal-abi: Bool functions-ready: Bool]
+  -> (Vec core/DiagnosticV0)
+  (let [layout-diagnostics: (Vec core/DiagnosticV0)
+        (if layouts-closed
+          []
+          [(core/->DiagnosticV0
+             "TODO-NATIVE-RECURSIVE-LAYOUT"
+             "one or more recursive value shapes still require an explicit reference edge")])
+        abi-diagnostics: (Vec core/DiagnosticV0)
+        (if legal-abi
+          []
+          [(core/->DiagnosticV0
+             "TODO-NATIVE-PROBE-ABI"
+             "no implemented probe entry point is available for ABI declaration")])]
+    (if functions-ready
+      (vec (concat layout-diagnostics abi-diagnostics))
+      (vec (concat layout-diagnostics abi-diagnostics
+             [(core/->DiagnosticV0
+                "TODO-NATIVE-SLICE-BODIES"
+                "typed source functions with unimplemented bodies remain explicit obligations")])))))
+
+(defn lower-native-world
+  [sealed-typed: worlds/SealedTypedWorldV0
+   slice: TypedSliceV0
+   compiler-commit: String
+   configuration: (Vec String)]
+  -> NativeLoweringResultV0
+  (let [typed-digest: String (worlds/sealedtypedworldv0-digest sealed-typed)
+        types: (Vec core/TypeDef)
+        (append-type-def (typedslicev0-types slice) (union-tag-type))
+        layout-resolutions: (Vec LayoutResolutionV0) (resolve-layouts types)
+        layouts: (Vec core/LayoutDef) (collect-layouts layout-resolutions)
+        typed-functions: (Vec TypedFunctionV0) (typedslicev0-functions slice)
+        functions: (Vec core/FunctionDef) (lower-ready-functions typed-functions)
+        abis: (Vec core/AbiDeclV0) (function-abis typed-functions layouts)
+        effects: (Vec core/EffectDef) (typedslicev0-effects slice)
+        regions: (Vec core/RegionDef) (typedslicev0-regions slice)
+        capabilities: (Vec core/CapabilityDef) (typedslicev0-capabilities slice)
+        program-id: core/NativeId (lower-id "native-world" [typed-digest])
+        program: core/NativeWorld
+        (core/->NativeWorld
+          program-id
+          (lower-id "typed-world" [typed-digest])
+          "typed-to-native-v0"
+          types
+          effects
+          regions
+          capabilities
+          layouts
+          functions
+          (mapv (fn [effect: core/EffectDef] -> core/NativeId
+                  (core/effectdef-id effect)) effects)
+          (mapv (fn [region: core/RegionDef] -> core/NativeId
+                  (core/regiondef-id region)) regions)
+          (mapv (fn [capability: core/CapabilityDef] -> core/NativeId
+                  (core/capabilitydef-id capability)) capabilities)
+          abis
+          [])
+        validation: core/ValidationReport (core/validate-world program)
+        core-valid: Bool (core/validationreport-passed validation)
+        closed-layouts: Bool (layouts-closed? layout-resolutions)
+        functions-ready: Bool (all-functions-ready? typed-functions)
+        legal-abi: Bool
+        (and (> (count functions) 0) (= (count functions) (count abis)))
+        tokens-discharged: Bool
+        (every?
+          (fn [function: TypedFunctionV0] -> Bool
+            (= 0 (count (function-capabilities function))))
+          (ready-functions typed-functions))
+        obligation-results: (Vec core/ObligationResult)
+        (native-obligation-results core-valid true closed-layouts true legal-abi
+          tokens-discharged core-valid)
+        root: core/NativeId (lower-id "native-terms" [typed-digest])
+        obligation-roots: (Vec core/NativeId)
+        (mapv
+          (fn [result: core/ObligationResult] -> core/NativeId
+            (lower-id "obligation" [(core/obligationresult-detail result)]))
+          obligation-results)
+        nodes: (Vec worlds/TermNodeV0)
+        (native-term-nodes types effects layouts functions abis obligation-results)
+        terms: worlds/TermGraphV0
+        (worlds/->TermGraphV0 root
+          (conj nodes
+            (worlds/->TermNodeV0 root
+              (worlds/->TextTermV0 "native-world-v0"))))
+        clean: Bool (term-graph-clean? terms)
+        world: worlds/NativeWorldV0
+        (worlds/->NativeWorldV0 terms typed-digest program obligation-roots)
+        encoding: String (encode-native-world world)
+        digest: String (worlds/content-digest encoding)
+        sealed: worlds/SealedNativeWorldV0
+        (worlds/->SealedNativeWorldV0 world encoding digest)
+        pending-layouts: (Vec core/ReceiptObligationV0)
+        (layout-pending-obligations layout-resolutions digest)
+        pending-functions: (Vec core/ReceiptObligationV0)
+        (function-todo-obligations typed-functions digest)
+        obligations: (Vec core/ReceiptObligationV0)
+        (vec (concat
+               (native-receipt-obligations digest core-valid closed-layouts
+                 legal-abi tokens-discharged clean)
+               pending-layouts
+               pending-functions))
+        diagnostics: (Vec core/DiagnosticV0)
+        (native-diagnostics closed-layouts legal-abi functions-ready)
+        receipt: core/PassReceiptV0
+        (make-receipt typed-digest compiler-commit "typed-to-native"
+          configuration diagnostics obligations digest)
+        complete: Bool
+        (and core-valid closed-layouts functions-ready legal-abi tokens-discharged clean)]
+    (if complete
+      (->NativeLoweringCompleteV0 sealed receipt)
+      (->NativeLoweringPendingV0 sealed receipt
+        (vec (concat pending-layouts pending-functions))))))
+
+(defn native-world-host-erased? [sealed: worlds/SealedNativeWorldV0] -> Bool
+  (term-graph-clean?
+    (worlds/nativeworldv0-terms
+      (worlds/sealednativeworldv0-world sealed))))
+
+(defn fixture-id [kind: String label: String] -> core/NativeId
+  (lower-id "fixture" [kind label]))
+
+(defn fixture-text-id [value: String] -> core/NativeId
+  (fixture-id "text" value))
+
+(defn fixture-marker-id [value: String] -> core/NativeId
+  (fixture-id "marker" value))
+
+(defn fixture-text-node [value: String] -> worlds/TermNodeV0
+  (worlds/->TermNodeV0 (fixture-text-id value) (worlds/->TextTermV0 value)))
+
+(defn fixture-marker-node [value: String] -> worlds/TermNodeV0
+  (worlds/->TermNodeV0
+    (fixture-marker-id value)
+    (worlds/->TextTermV0 "source-node-v0")))
+
+(defn fixture-fact-node
+  [ordinal: Int subject: core/NativeId predicate: String object: core/NativeId]
+  -> worlds/TermNodeV0
+  (worlds/->TermNodeV0
+    (fixture-id "fact" (str ordinal))
+    (worlds/->TripleTermV0 subject (fixture-text-id predicate) object)))
+
+(def fixture-source-world: worlds/SourceProgramWorldV0
+  (let [root: core/NativeId (fixture-marker-id "root")
+        record: core/NativeId (fixture-marker-id "record")
+        fields: core/NativeId (fixture-marker-id "fields")
+        field: core/NativeId (fixture-marker-id "field")
+        int-type: core/NativeId (fixture-marker-id "int-type")
+        function: core/NativeId (fixture-marker-id "function")
+        parameters: core/NativeId (fixture-marker-id "parameters")
+        parameter: core/NativeId (fixture-marker-id "parameter")
+        text-values: (Vec String)
+        ["form-kind" "name" "fields" "f0" "f1" "params" "ret"
+         "native-op" "abi-symbol" "record" "seq" "param" "type-prim"
+         "defn" "FixtureBox" "value" "Int" "fixture-probe-identity"
+         "identity" "fixture_probe_identity"]
+        text-nodes: (Vec worlds/TermNodeV0)
+        (mapv (fn [value: String] -> worlds/TermNodeV0 (fixture-text-node value))
+          text-values)
+        marker-nodes: (Vec worlds/TermNodeV0)
+        (mapv (fn [value: String] -> worlds/TermNodeV0 (fixture-marker-node value))
+          ["root" "record" "fields" "field" "int-type" "function"
+           "parameters" "parameter"])
+        facts: (Vec worlds/TermNodeV0)
+        [(fixture-fact-node 0 record "form-kind" (fixture-text-id "record"))
+         (fixture-fact-node 1 record "name" (fixture-text-id "FixtureBox"))
+         (fixture-fact-node 2 record "fields" fields)
+         (fixture-fact-node 3 fields "form-kind" (fixture-text-id "seq"))
+         (fixture-fact-node 4 fields "f0" field)
+         (fixture-fact-node 5 field "form-kind" (fixture-text-id "param"))
+         (fixture-fact-node 6 field "f0" (fixture-text-id "value"))
+         (fixture-fact-node 7 field "f1" int-type)
+         (fixture-fact-node 8 int-type "form-kind" (fixture-text-id "type-prim"))
+         (fixture-fact-node 9 int-type "f0" (fixture-text-id "Int"))
+         (fixture-fact-node 10 function "form-kind" (fixture-text-id "defn"))
+         (fixture-fact-node 11 function "name"
+           (fixture-text-id "fixture-probe-identity"))
+         (fixture-fact-node 12 function "params" parameters)
+         (fixture-fact-node 13 function "ret" int-type)
+         (fixture-fact-node 14 function "native-op" (fixture-text-id "identity"))
+         (fixture-fact-node 15 function "abi-symbol"
+           (fixture-text-id "fixture_probe_identity"))
+         (fixture-fact-node 16 parameters "form-kind" (fixture-text-id "seq"))
+         (fixture-fact-node 17 parameters "f0" parameter)
+         (fixture-fact-node 18 parameter "form-kind" (fixture-text-id "param"))
+         (fixture-fact-node 19 parameter "f0" (fixture-text-id "value"))
+         (fixture-fact-node 20 parameter "f1" int-type)]
+        nodes: (Vec worlds/TermNodeV0)
+        (vec (concat marker-nodes text-nodes facts))]
+    (worlds/->SourceProgramWorldV0
+      (worlds/->TermGraphV0 root nodes)
+      [(worlds/->SourceModuleV0
+         (fixture-id "module" "fixture")
+         "native.lower.fixture"
+         "native-core/fixtures/lower-fixture.bgl"
+         "fixture-source-digest-v0"
+         "fixture-interface-digest-v0"
+         root)]
+      []
+      [])))
+
+(defunion FixturePipelineResultV0
+  (FixturePipelineCompleteV0 [sealed: worlds/SealedNativeWorldV0])
+  (FixturePipelineFailedV0 [stage: String detail: String]))
+
+(defn lower-fixture [compiler-commit: String] -> FixturePipelineResultV0
+  (let [configuration: (Vec String)
+        ["profile=3"]
+        source-result: SourceSealResultV0
+        (seal-source-world fixture-source-world compiler-commit configuration)]
+    (match source-result
+      [(SourceSealRejectedV0 failure receipt)
+       (->FixturePipelineFailedV0 "source-seal" "fixture source world rejected")]
+      [(SourceSealAcceptedV0 sealed-source source-receipt)
+       (let [typing-result: TypingResultV0
+             (lower-typed-world sealed-source compiler-commit configuration)]
+         (match typing-result
+           [(TypingRejectedV0 failure receipt)
+            (->FixturePipelineFailedV0 "source-to-typed"
+              "fixture annotations did not close")]
+           [(TypingAcceptedV0 sealed-typed slice typed-receipt)
+            (let [native-result: NativeLoweringResultV0
+                  (lower-native-world sealed-typed slice compiler-commit configuration)]
+              (match native-result
+                [(NativeLoweringPendingV0 sealed receipt obligations)
+                 (->FixturePipelineFailedV0 "typed-to-native"
+                   "fixture retained a named native obligation")]
+                [(NativeLoweringCompleteV0 sealed receipt)
+                 (->FixturePipelineCompleteV0 sealed)]))]))])))
+
+(def fixture-result: FixturePipelineResultV0
+  (lower-fixture "fixture-compiler-commit"))
+
+(def fixture-native-complete?: Bool
+  (match fixture-result
+    [(FixturePipelineCompleteV0 sealed) true]
+    [(FixturePipelineFailedV0 stage detail) false]))
+
+(def fixture-native-host-erased?: Bool
+  (match fixture-result
+    [(FixturePipelineCompleteV0 sealed) (native-world-host-erased? sealed)]
+    [(FixturePipelineFailedV0 stage detail) false]))
+
+(def fixture-native-valid?: Bool
+  (match fixture-result
+    [(FixturePipelineCompleteV0 sealed)
+     (core/validationreport-passed
+       (core/validate-world
+         (worlds/nativeworldv0-program
+           (worlds/sealednativeworldv0-world sealed))))]
+    [(FixturePipelineFailedV0 stage detail) false]))
+
+(def fixture-native-has-abi?: Bool
+  (match fixture-result
+    [(FixturePipelineCompleteV0 sealed)
+     (> (count
+          (core/nativeworld-abis
+            (worlds/nativeworldv0-program
+              (worlds/sealednativeworldv0-world sealed))))
+        0)]
+    [(FixturePipelineFailedV0 stage detail) false]))
+
+(def fixture-passes?: Bool
+  (and fixture-native-complete?
+       fixture-native-host-erased?
+       fixture-native-valid?
+       fixture-native-has-abi?))
