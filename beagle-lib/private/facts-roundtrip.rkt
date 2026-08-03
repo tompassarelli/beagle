@@ -609,6 +609,33 @@
               #:when (and (>= i start) (bracket-datum? e)))
     i))
 
+(define (bare-arity-vector-indexes elems)
+  (cond
+    [(or (< (length elems) 4)
+         (not (memq (car elems) '(defn defn-))))
+     #f]
+    [else
+     (define docstring? (and (> (length elems) 2) (string? (list-ref elems 2))))
+     (define start (if docstring? 3 2))
+     (define tail (drop elems start))
+     (and (pair? tail)
+          (bracket-datum? (car tail))
+          (not (ormap (lambda (item) (or (eq? item DASH) (eq? item ARROW))) tail))
+          (let loop ([rest tail]
+                     [index start]
+                     [current? #f]
+                     [body? #f]
+                     [indexes '()])
+            (cond
+              [(null? rest)
+               (and current? body? (>= (length indexes) 2) (reverse indexes))]
+              [(bracket-datum? (car rest))
+               (if (and current? (not body?))
+                   #f
+                   (loop (cdr rest) (add1 index) #t #f (cons index indexes)))]
+              [current? (loop (cdr rest) (add1 index) #t #t indexes)]
+              [else #f])))]))
+
 ;; Context is assigned only by grammar owners. A vector in an ordinary call,
 ;; data literal, or let binding zone therefore keeps the generic formatter.
 (define (grammar-child-context d ctx i child)
@@ -625,7 +652,10 @@
     [(not elems) 'normal]
     [else
      (define head (and (pair? elems) (symbol? (car elems)) (car elems)))
+     (define bare-indexes (and head (bare-arity-vector-indexes elems)))
      (cond
+       [(and bare-indexes (member i bare-indexes) (bracket-datum? child))
+        'params]
        [(and (memq head '(defn defn- defmacro fn))
              (bracket-datum? child) (equal? i (first-bracket-index elems 1)))
         'params]

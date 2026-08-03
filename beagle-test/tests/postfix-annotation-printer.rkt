@@ -101,6 +101,8 @@
          "(defmacro pair\n  [x\n   y]\n  `[~x ~y])")
    (cons "(defn choose ([x] x) ([x y] y))"
          "(defn choose\n  ([x] x)\n  ([x\n    y]\n   y))")
+   (cons "(defn choose [x] x [x y] y)"
+         "(defn choose [x]\n  x\n  [x\n   y]\n  y)")
    (cons "(letfn [(sum [x: Int y: Int] -> Int (+ x y))] (sum 1 2))"
          "(letfn [(sum\n          [x: Int\n           y: Int] -> Int\n          (+ x y))]\n  (sum 1 2))")
    (cons "(defprotocol P (m [self x: Int] -> Int))"

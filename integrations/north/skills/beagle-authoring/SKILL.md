@@ -4,7 +4,7 @@ description: >-
   Use WHENEVER writing, editing, or debugging Beagle source in ANY project —
   files with a beagle extension (any `.b*` — the live set is `beagle langs
   --view extensions`), files starting with `#lang beagle`, or
-  anything under ~/code/beagle. Establishes the repair loop is online and
+  anything under ~/code/beagle. Establishes the authoring loop is online and
   functionally working BEFORE coding; the compiler is the loop's oracle and
   the source of truth, never a static cheat sheet. NOT for relational queries
   over a Beagle tree — that's codegraph.
@@ -14,7 +14,7 @@ description: >-
 
 Beagle is a typed authoring IR — **Clojure plus types**, compiled `parse →
 check → emit` to <!-- beagle:langs names -->Clojure, JavaScript, Nix, Odin, Zig, and TypeScript<!-- /beagle:langs -->. The reason to author in Beagle
-at all is the **repair loop**: pointed, structured errors and machine-applicable
+at all is the **authoring loop**: pointed, structured errors and machine-applicable
 repairs fed back fast. If that loop is offline or silently degraded, you are
 writing Beagle blind. So the loop comes first.
 
@@ -24,8 +24,8 @@ writing Beagle blind. So the loop comes first.
 beagle doctor --deep
 ```
 
-- **"Repair loop: ok"** → proceed.
-- **"Repair loop: DEGRADED" (exit 1)** → the feedback you'd rely on is not
+- **"Authoring loop: ok"** → proceed.
+- **"Authoring loop: DEGRADED" (exit 1)** → the feedback you'd rely on is not
   trustworthy. Do **not** start coding on silent green. Fix it:
   - daemon down → `beagle doctor --revive`  (or `beagle daemon start --watch .`)
   - no per-edit hook in this project → `beagle init --hooks` to scaffold the
@@ -37,58 +37,20 @@ known-bad **and** known-good inputs through syntax / type-check / suggestion→p
 so it catches a checker stuck "always-pass" or "always-fail" — exactly the silent
 degradation a process-exists check misses.
 
-## 0.5 Greenfield bootstrap — start graph-native before substantive code
+## 0.5 Source channel — text by default
 
-Starting a **wholly new** Beagle program/module (no existing file to edit)?
-Per `~/.agents/AGENTS.md` "New code": greenfield
-**must start graph-native at inception**. First establish the compiler repair
-loop in section 0, then run this bootstrap sequence:
+Use ordinary Edit/Write for new and existing Beagle source. Do not run
+`fram-code-on`, require a flip level, or interrupt bounded work with an upstream
+migration choice unless the human explicitly asks to adopt graph authoring.
 
-1. **Seed only** — create the minimal seed/header, nothing more: the file's
-   leading comment block carrying the `;; @upstream:graph` sentinel (or its
-   path pre-registered in `$GRAPH_UPSTREAM_REGISTRY`, whose default is
-   `~/.config/fram/graph-upstream-files`) plus whatever the
-   `(define-target …)` header requires to exist on disk. No substantive form,
-   definition, or body (`def`, `defn`, `defrecord`, and so on) gets
-   text-authored here — the seed exists only to give the graph something to
-   adopt.
-2. **Flip the full repo** — run
-   `fram:bin/fram-code-on ~/code/<repo>` to ingest the source, write the
-   project wiring for both harnesses, and warm the coordinator.
-3. **Confirm flip level 3** —
-   `fram:bin/fram-code-status ~/code/<repo>` must report `level=3`
-   (warm coordinator alive, not just L2 flipped-but-cold). L2/L1 mean the
-   graph-edit loop is not live yet: re-run
-   `fram:bin/fram-code-on ~/code/<repo>`, then start or restart a
-   **trusted-project Claude Code or Codex session** in `~/code/<repo>` so its
-   SessionStart/project config can load the MCP server. Verify that the
-   `mcp__fram__*` graph-edit verbs are present before authoring.
-4. **Hand off** — all substantive authoring past the seed goes through the
-   **code-as-facts** skill
-   (`fram:integrations/north/skills/code-as-facts/SKILL.md`) via
-   the `mcp__fram__*` graph-edit verbs. Do not scaffold the module with
-   ordinary Edit/Write "temporarily" then adopt later — the seed-only step
-   above is the entire text-authored surface, permanently.
-
-What that channel actually does: Beagle projects the program into recursive
-triples; Fram records assertion/retraction occurrences; the live view selects
-which propositions constitute the current program. A graph edit is an assertion
-event against that history, not a mutation of stored text.
-
-If `mcp__fram__*` is unavailable or flip level won't reach 3, that is a
-**loop-repair problem** (revive the coordinator, restart the session), never
-license to fall back to text Edit/Write on a greenfield graph-native module.
-
-This skill (beagle-authoring, plain-text Edit/Write + the compiler loop) is for
-**brownfield/text-upstream** Beagle files — an existing file not yet
-graph-adopted, or one where the human chose text-upstream Beagle. Before any
-brownfield migration, surface exactly these three choices: (1) keep the current
-upstream/language for this bounded task, (2) migrate to text-upstream Beagle, or
-(3) migrate directly to graph-upstream Beagle. Wait for the human's pick; never
-start a migration side project automatically. If the decision is deferred,
-record the candidate in a separate migration inventory. If you're unsure
-whether the surface is greenfield or brownfield, that uncertainty itself is the
-three-choice moment — surface it, don't default silently.
+Graph authoring remains an optional per-file channel. A file is graph-upstream
+only when its path is explicitly registered in
+`~/.config/fram/graph-upstream-files` or its leading comment block contains
+`;; @upstream:graph`. For those deliberately adopted files, use the
+**code-as-facts** skill
+(`fram:integrations/north/skills/code-as-facts/SKILL.md`) and its graph-edit
+verbs until the file is unadopted. Coordinator availability never blocks
+ordinary text authoring elsewhere.
 
 ## 1. Heartbeat — keep it alive while coding
 
@@ -122,7 +84,7 @@ the *current* surface, **query the compiler**:
 | macro expansion? | `beagle expand FILE` |
 | run tests | `beagle test` (active tier; per-suite env opts into gated suites) |
 | compile | `beagle build FILE [OUT]` |
-| is the repair loop healthy? | `beagle doctor [--deep]` |
+| is the authoring loop healthy? | `beagle doctor [--deep]` |
 | auto-repair | `beagle repair --emit-patch` (also `beagle-trace`, `beagle-blame`, `beagle-cascade`, `beagle-specfix`) |
 
 For forms/types/stdlib themselves, **read the source** — never restate it:
@@ -149,8 +111,9 @@ if the surface looks different than you expect, `git log` it.
   still parses with a warning, and only a `:`-marked RETURN is hard-rejected
   (pointing at `-> RET`).
 - **Boundary-vector layout:** zero/one logical parameter or typed field stays
-  inline with its owner; 2+ put `[` on the following line, then one aligned
-  logical entry start per line, with `]` and `-> RET` after the final entry.
+  inline with its owner; 2+ put `[` on the following line exactly two columns
+  past the owning form's opening parenthesis, then one aligned logical entry
+  start per line, with exactly one space between `]` and any `-> RET`.
   Typed bindings, destructures, and `& rest` each count as one entry. This
   covers function/method/macro vectors and typed record/union/error fields, not
   data vectors or let-style value bindings.

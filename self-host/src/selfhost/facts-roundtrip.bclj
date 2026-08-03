@@ -690,10 +690,10 @@
   (let [refs (reduce (fn
                        [out: Any
                         subject-entry: Any] -> Any (reduce (fn
-                                                                        [inner: Any
-                                                                         entry: Any] -> Any (let [predicate (nth entry 0) object (nth entry 1)] (if (and (number? object) (ref-predicate? predicate)) (assoc inner object true) inner))) out (nth subject-entry 1))) {} props) candidates (reduce (fn
-                                                                                                                                                                                                                                                                                                                 [out: Any
-                                                                                                                                                                                                                                                                                                                  entry: Any] -> Any (let [id (nth entry 0)] (if (= true (get refs id)) out (conj out id)))) [] props) wrappers (filterv (fn [id: Any] -> Bool (let [head (get (get props id {}) "f0")] (and (number? head) (= (get (get props head {}) "v") "beagle-file")))) candidates) structural (filterv (fn [id: Any] -> Bool (let [kind (get (get props id {}) "kind")] (or (= kind "list") (= kind "vector")))) candidates)]
+                                                             [inner: Any
+                                                              entry: Any] -> Any (let [predicate (nth entry 0) object (nth entry 1)] (if (and (number? object) (ref-predicate? predicate)) (assoc inner object true) inner))) out (nth subject-entry 1))) {} props) candidates (reduce (fn
+                                                                                                                                                                                                                                                                                         [out: Any
+                                                                                                                                                                                                                                                                                          entry: Any] -> Any (let [id (nth entry 0)] (if (= true (get refs id)) out (conj out id)))) [] props) wrappers (filterv (fn [id: Any] -> Bool (let [head (get (get props id {}) "f0")] (and (number? head) (= (get (get props head {}) "v") "beagle-file")))) candidates) structural (filterv (fn [id: Any] -> Bool (let [kind (get (get props id {}) "kind")] (or (= kind "list") (= kind "vector")))) candidates)]
     (if (> (count wrappers) 0)
       (nth wrappers 0)
       (if (> (count structural) 0)
@@ -1006,6 +1006,46 @@
       (bracket-datum? (nth items i)) i
       :else (recur (+ i 1)))))
 
+(defn- contains-return-marker? [items: Any] -> Bool
+  (loop [i 0]
+    (cond
+      (>= i (count items)) false
+      (or (= (nth items i) ":-") (= (nth items i) "->")) true
+      :else (recur (+ i 1)))))
+
+(defn- contains-index?
+  [items: Any
+   idx: Int] -> Bool
+  (loop [i 0]
+    (cond
+      (>= i (count items)) false
+      (= (nth items i) idx) true
+      :else (recur (+ i 1)))))
+
+(defn- bare-arity-vector-indexes [items: Any] -> Any
+  (if (or (< (count items) 4)
+        (not (some? (get #{"defn" "defn-"} (nth items 0)))))
+    []
+    (let [docstring? (and (> (count items) 2) (string? (nth items 2)))
+          start (if docstring? 3 2)
+          tail (subvec items start)]
+      (if (or (= (count tail) 0)
+            (not (bracket-datum? (nth tail 0)))
+            (contains-return-marker? tail))
+        []
+        (loop [offset 0 current? false body? false indexes []]
+          (if (>= offset (count tail))
+            (if (and current? body? (>= (count indexes) 2)) indexes [])
+            (let [item (nth tail offset)]
+              (cond
+                (bracket-datum? item)
+                (if (and current? (not body?))
+                  []
+                  (recur (+ offset 1) true false (conj indexes (+ start offset))))
+                current?
+                (recur (+ offset 1) true true indexes)
+                :else []))))))))
+
 (defn- symbol-owner-vector? [datum: Any] -> Bool
   (let [items (list-items datum)]
     (and (>= (count items) 2)
@@ -1035,8 +1075,11 @@
       "normal"
       :else
       (let [head (if (and (> (count items) 0) (string? (nth items 0))) (nth items 0) nil)
-            vector-index (first-bracket-index items 1)]
+            vector-index (first-bracket-index items 1)
+            bare-indexes (bare-arity-vector-indexes items)]
         (cond
+          (and (contains-index? bare-indexes i) (bracket-datum? child))
+          "params"
           (and (some? (get #{"defn" "defn-" "defmacro" "fn"} head))
             (bracket-datum? child) (= i vector-index))
           "params"
@@ -1278,8 +1321,8 @@
   (let [comments (node-comments props id) leading (comments-with comments "leading") trailing (comments-with comments "trailing") lead-text (reduce (fn
                                                                                                                                                       [out: String
                                                                                                                                                        c: Any] -> String (str out (nth c 1) "\n")) "" leading) trail-text (reduce (fn
-                                                                                                                                                                                                                                                  [out: String
-                                                                                                                                                                                                                                                   c: Any] -> String (str out " " (nth c 1))) "" trailing)]
+                                                                                                                                                                                                                                    [out: String
+                                                                                                                                                                                                                                     c: Any] -> String (str out " " (nth c 1))) "" trailing)]
     (str lead-text (datum-pretty (build-datum props id) 0) trail-text)))
 
 (defn render-edn! [path: String] -> Nil

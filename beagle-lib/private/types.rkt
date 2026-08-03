@@ -522,7 +522,7 @@
 
 ;; STRUCTURED serialization of a type — the repair-compiler counterpart to the
 ;; human-facing type->string. Diagnostics carry this (as `expected-type` /
-;; `actual-type` in their details) so the repair loop can reason over the
+;; `actual-type` in their details) so the authoring loop can reason over the
 ;; actual type structure (e.g. "same ctor, element type differs") instead of
 ;; pattern-matching prose. Pure jsexpr (symbol-keyed hashes, string/list
 ;; values), so it serializes straight into the JSON error stream and is also

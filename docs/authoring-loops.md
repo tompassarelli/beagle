@@ -24,7 +24,7 @@ parse → apply/graph-gate → compile → build → witness. A change is *green
 when it tops the ladder; a failure names its rung.
 *(Exapts the existing "graceful ladder" flip-level vocabulary.)*
 
-**repair loop** — the convergence protocol around ONE change:
+**authoring loop** — the convergence protocol around ONE change:
 propose → oracle verdict → if red, diagnostics feed back → repropose.
 Retries resume from the lowest failing rung. This is the term that survives
 from "repair-compiler loop" — the loop is the repairer; the compiler is its
@@ -40,7 +40,7 @@ diagnostics — consulted before proposing, not after failing.
 *(Prior art: change-impact analysis; "blast radius" from ops.)*
 
 **reasoning loop** — the agent's cycle around one task: gather context
-(blast zone, facts, docs) → form intent → drive repair loops → verify
+(blast zone, facts, docs) → form intent → drive authoring loops → verify
 intent against witnesses → record the outcome as facts. The only loop with
 judgment in it. *(Prior art: OODA; the agentic loop.)*
 
@@ -53,18 +53,18 @@ coordinated through threads and concerns. Above it sits the program.
 program
   ⊃ task loop            (threads/concerns coordinate)
     ⊃ reasoning loop     (judgment: what should change)
-      ⊃ repair loop      (convergence: make it green)
+      ⊃ authoring loop      (convergence: make it green)
         ⊃ oracle ladder  (mechanical: is it green)
 ```
 
 - the **blast zone** feeds the reasoning loop *before* an edit
-- **diagnostics** feed the repair loop *after* a check
+- **diagnostics** feed the authoring loop *after* a check
 - **witnesses** close the reasoning loop *after* green
 
 ## Deprecated
 
 - **"repair compiler" / "repair-compiler loop"** — wrong subject; the
   compiler diagnoses, the loop repairs. Say *the compiler* (component),
-  *agent-grade diagnostics* (its property), *repair loop* (the protocol).
+  *agent-grade diagnostics* (its property), *authoring loop* (the protocol).
 - **"chartroom"** for the code graph — use *codegraph* (rename thread
   019f2037-dfda).

@@ -38,7 +38,7 @@ Author:
                             Stage modules only; do not synthesize or link main
   fix [--dry-run] [PATH...] Surface high-confidence auto-fixes
   repair DIR VERIFY         Evidence-ranked repair (--emit-patch / --auto)
-  doctor [--deep]           Is the repair loop online and working?
+  doctor [--deep]           Is the authoring loop online and working?
 
 Query (the compiler is the source of truth):
   sig <fn> <path...>        Typed signature

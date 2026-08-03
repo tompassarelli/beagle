@@ -49,7 +49,7 @@
            "   y: Int])"))
 
    (cheat "defunion + match" "Types"
-          "Sum type over records. `match` is checked EXHAUSTIVELY — a missing constructor is a compile error (and the repair loop can auto-fill the clauses)."
+          "Sum type over records. `match` is checked EXHAUSTIVELY — a missing constructor is a compile error (and the authoring loop can auto-fill the clauses)."
           (string-append
            "(defrecord Circle [r: Int])\n"
            "(defrecord Square [side: Int])\n"

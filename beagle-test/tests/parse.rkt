@@ -1617,7 +1617,7 @@
 
 ;; --- read-beagle-syntax: `^:dynamic` via the parse.rkt readtable ---------
 ;; Regression: parse.rkt has its OWN beagle-readtable (drives read-beagle-syntax
-;; → check --agent / build / repair loop / hooks), SEPARATE from reader-impl's
+;; → check --agent / build / authoring loop / hooks), SEPARATE from reader-impl's
 ;; (#lang module loading). The `^` metadata macro was first added only to
 ;; reader-impl, so `^:dynamic` read as a bare symbol here → "malformed def" on
 ;; every dynamic-var file under --agent/build (fram-2 #18). Both readtables must

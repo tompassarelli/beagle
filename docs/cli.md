@@ -1,4 +1,4 @@
-# The CLI and the repair loop
+# The CLI and the authoring loop
 
 `bin/beagle help` is the source of truth for this list; it is generated from the
 live command table, and this page will lag it. Deeper dev tools stay as
@@ -19,7 +19,7 @@ beagle build --target zig --exe OUT SOURCE...   # retarget and link an executabl
 beagle build --target zig --lib OUTDIR SOURCE...# stage modules only, no main
 beagle fix [--dry-run] [PATH...]                # high-confidence auto-fixes
 beagle repair DIR VERIFY    # evidence-ranked repair (--emit-patch / --auto)
-beagle doctor [--deep]      # is the repair loop online and working?
+beagle doctor [--deep]      # is the authoring loop online and working?
 ```
 
 ## Query — the compiler is the source of truth
@@ -52,7 +52,7 @@ beagle rejection-stats DIR  # diagnostics by cause-class
 beagle lsp | beagle repl    # LSP server / typed REPL
 ```
 
-## The repair loop
+## The authoring loop
 
 A watch daemon, an on-edit syntax/type hook, and machine-applicable fixes are
 where the type signal becomes applied edits. `beagle doctor` health-checks the

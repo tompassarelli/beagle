@@ -1,4 +1,4 @@
-"""Pure-text edit helpers for the beagle-repair loop.
+"""Pure-text edit helpers for the beagle-authoring loop.
 
 Extracted from bin/beagle-repair so the apply logic is unit-testable without
 running the full diagnostic pipeline. See beagle-test/tests/repair_apply_test.py

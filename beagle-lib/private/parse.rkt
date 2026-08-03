@@ -487,7 +487,7 @@
     (define before (substring source region-start region-end))
     (raise-parse-error
      'noncanonical-binding-layout
-     "noncanonical ~a vector layout — zero/one logical entry stays inline; 2+ entries put the vector on the following line with one aligned entry start per line; keep `]` and `->` after the final entry"
+     "noncanonical ~a vector layout — zero/one logical entry stays inline; 2+ entries put the vector on the following line two columns past the owning form with one aligned entry start per line; keep `]` after the final entry and exactly one space before `->`"
      role
      #:details
      (hasheq 'error-file (let ([src (syntax-source vector-stx)])

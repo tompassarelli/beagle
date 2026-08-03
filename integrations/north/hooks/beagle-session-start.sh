@@ -3,7 +3,7 @@
 # authoring setup. Skills/AGENTS.md are model-discretion (can be forgotten);
 # this hook is harness-enforced at startup, resume, clear, and compact.
 #
-# In a Beagle project it: (1) starts a throttled, non-blocking repair-loop
+# In a Beagle project it: (1) starts a throttled, non-blocking authoring-loop
 # revive, and (2) injects source-aware authoring context. Repeated resumes in
 # one session are silent; clear/compact re-inject because they rebuild context.
 # Outside a Beagle project it is a fast no-op (a few globs, no heavy work).
@@ -194,37 +194,27 @@ is_beagle() {
 # is global, so an ordinary non-Beagle checkout must remain a pure no-op.
 is_beagle || exit 0
 
-# --- graceful-degradation ladder (L0-L3): flip-level facts + announcement ----
-# fram-code-status is filesystem + a loopback port probe (<100ms, no racket).
-# GUARDED: any failure (helper missing, timeout, bad output) leaves ladder_ctx
-# empty and the hook proceeds exactly as before — this block can never fail it.
-ladder_ctx=""
+# Graph authoring is explicit per-file opt-in. Dormant graph caches and an
+# available coordinator never change the default text-authoring channel.
+graph_ctx=""
 _fcs="/run/current-system/sw/bin/fram-code-status"
 if [ -x "$_fcs" ]; then
   _facts="$(timeout 2 "$_fcs" "$dir" 2>/dev/null)" || _facts=""
   if [ -n "$_facts" ]; then
     _fact() { printf '%s\n' "$_facts" | tr ' ' '\n' | sed -n "s/^$1=//p" | head -1; }
-    _level="$(_fact level)"
-    case "$_level" in
-      3) ladder_ctx="[flip L3] graph-native: author via mcp__fram__* graph-edit verbs (add-def/set-body/rename-def/insert-after); ask the graph first (blast-radius/query) before reading files; registered graph-upstream files REFUSE text edits ($(_fact canonical) registered here; coordinator alive on :$(_fact port), $(_fact facts) facts)." ;;
-      2) ladder_ctx="[flip L2] this repo is flipped (.fram/code.log with $(_fact facts) facts + .mcp.json) but the warm coordinator is NOT alive (port $(_fact port)). Revive: \`fram-code-on $dir\` re-warms it; then restart Claude Code here for the mcp__fram__* graph-edit verbs." ;;
-      1) ladder_ctx="[flip L1] flippable: $(_fact src) Beagle source file(s), not flipped. \`fram-code-on $dir [--src <subdir>]\` turns on graph-native authoring (ingest -> warm coordinator -> mcp__fram__* graph-edit verbs)." ;;
-      *) ladder_ctx="" ;;  # L0 or unparseable: stay silent
+    _canonical="$(_fact canonical)"
+    case "$_canonical" in
+      ""|0|*[!0-9]*) ;;
+      *) graph_ctx="[graph opt-in] $_canonical file(s) in this repo are explicitly graph-upstream and refuse text edits; all other Beagle source uses ordinary text authoring." ;;
     esac
-    # The graph-upstream guard refuses text edits at ANY level — warn early so
-    # a session in a de-flipped repo isn't surprised by a PreToolUse deny.
-    if [ -n "$ladder_ctx" ] && [ "$_level" != "3" ] && [ "$(_fact canonical)" != "0" ]; then
-      ladder_ctx="$ladder_ctx Note: $(_fact canonical) graph-upstream file(s) under this repo are registered and REFUSE text edits regardless of flip level."
-    fi
   fi
 fi
-# Emit ONLY the ladder context (early-exit paths where the full Beagle handshake
-# doesn't apply). Same SessionStart additionalContext channel as the main print.
-emit_ladder_ctx() {
-  [ -n "$ladder_ctx" ] || return 0
+
+emit_graph_ctx() {
+  [ -n "$graph_ctx" ] || return 0
   prepare_context_mode
   [ "$context_mode" != none ] || return 0
-  python3 -c 'import json,sys; print(json.dumps({"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":sys.argv[1]}}))' "$ladder_ctx" || true
+  python3 -c 'import json,sys; print(json.dumps({"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":sys.argv[1]}}))' "$graph_ctx" || true
 }
 
 # Resolve the `beagle` CLI robustly — beagle tools are NOT on the global PATH;
@@ -237,7 +227,7 @@ beagle=""
 [ -z "$beagle" ] && [ -x "$HOME/code/beagle/bin/beagle" ] && beagle="$HOME/code/beagle/bin/beagle"
 [ -z "$beagle" ] && command -v beagle >/dev/null 2>&1 && beagle="$(command -v beagle)"
 if [ -z "$beagle" ]; then
-  emit_ladder_ctx   # flip level is still worth announcing without the beagle CLI
+  emit_graph_ctx
   exit 0
 fi
 
@@ -296,10 +286,9 @@ fi
 if [ "$context_mode" = compact ]; then
   ctx="Beagle authoring context restored after compaction. Before the next Beagle edit, run \`beagle doctor --deep\`; treat compiler and PostToolUse repair feedback as authoritative.${warm_ctx}"
 else
-  ctx="Beagle authoring is active.${warm_ctx} YOU (the agent) own repair-loop health, not the user. Before the first Beagle edit, run \`beagle doctor --deep\` and self-heal if degraded. Treat the compiler as source of truth (query Beagle tools; never trust a static form/type/stdlib list), and trust the PostToolUse repair hook's per-edit feedback. If this project has no repair hook, scaffold it with \`beagle init --hooks\`."
+  ctx="Beagle authoring is active.${warm_ctx} YOU (the agent) own authoring-loop health, not the user. Before the first Beagle edit, run \`beagle doctor --deep\` and self-heal if degraded. Treat the compiler as source of truth (query Beagle tools; never trust a static form/type/stdlib list), and trust the PostToolUse repair hook's per-edit feedback. If this project has no repair hook, scaffold it with \`beagle init --hooks\`."
 fi
-# Append the flip-level announcement (graceful-degradation ladder, L1-L3).
-[ -n "$ladder_ctx" ] && ctx="$ctx $ladder_ctx"
+[ -n "$graph_ctx" ] && ctx="$ctx $graph_ctx"
 
 # Inject into session context via the SessionStart additionalContext channel.
 python3 -c 'import json,sys; print(json.dumps({"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":sys.argv[1]}}))' "$ctx"

@@ -321,7 +321,7 @@
 ;; Expected/actual detail pair carrying BOTH the human strings (kept verbatim,
 ;; matched by existing tests) AND the STRUCTURED type jsexpr (`expected-type` /
 ;; `actual-type`), so the repair compiler — the in-process fix-plan and the
-;; out-of-process JSON repair loop — can reason over the actual type structure
+;; out-of-process JSON authoring loop — can reason over the actual type structure
 ;; instead of parsing prose. Splat-safe (type->jsexpr is pure jsexpr). This is
 ;; the repair-relevant core of Lean's structured MessageData, added additively.
 (define (type-mismatch-details expected-type actual-type)
@@ -2812,7 +2812,7 @@
          ;; Details must be JSON-legal: raw symbols crash write-json (so the
          ;; agent-facing JSON for the whole exhaustive-match class was broken).
          ;; Stringify, and add structured per-case info + ready-to-insert
-         ;; clause skeletons for the repair loop.
+         ;; clause skeletons for the authoring loop.
          (hasheq 'union-name (symbol->string union-name)
                  'missing (map symbol->string missing)
                  'matched (map symbol->string matched-types)

@@ -689,6 +689,34 @@
   (bracket-datum? (nth items i)) i
   :else (recur (+ i 1)))))
 
+(defn- ^Boolean contains-return-marker? [items]
+  (loop [i 0]
+  (cond
+  (>= i (count items)) false
+  (or (= (nth items i) ":-") (= (nth items i) "->")) true
+  :else (recur (+ i 1)))))
+
+(defn- ^Boolean contains-index? [items idx]
+  (loop [i 0]
+  (cond
+  (>= i (count items)) false
+  (= (nth items i) idx) true
+  :else (recur (+ i 1)))))
+
+(defn- bare-arity-vector-indexes [items]
+  (if (or (< (count items) 4) (not (some? (get #{"defn" "defn-"} (nth items 0))))) [] (let [docstring? (and (> (count items) 2) (string? (nth items 2)))
+   start (if docstring? 3 2)
+   tail (subvec items start)]
+  (if (or (= (count tail) 0) (not (bracket-datum? (nth tail 0))) (contains-return-marker? tail)) [] (loop [offset 0
+   current? false
+   body? false
+   indexes []]
+  (if (>= offset (count tail)) (if (and current? body? (>= (count indexes) 2)) indexes []) (let [item (nth tail offset)]
+  (cond
+  (bracket-datum? item) (if (and current? (not body?)) [] (recur (+ offset 1) true false (conj indexes (+ start offset))))
+  current? (recur (+ offset 1) true true indexes)
+  :else []))))))))
+
 (defn- ^Boolean symbol-owner-vector? [datum]
   (let [items (list-items datum)]
   (and (>= (count items) 2) (string? (nth items 0)) (some? (first-bracket-index items 1)))))
@@ -702,8 +730,10 @@
   (= ctx "variant") (if (and (bracket-datum? child) (= i (first-bracket-index items 1))) "fields" "normal")
   (= (count items) 0) "normal"
   :else (let [head (if (and (> (count items) 0) (string? (nth items 0))) (nth items 0) nil)
-   vector-index (first-bracket-index items 1)]
+   vector-index (first-bracket-index items 1)
+   bare-indexes (bare-arity-vector-indexes items)]
   (cond
+  (and (contains-index? bare-indexes i) (bracket-datum? child)) "params"
   (and (some? (get #{"defn" "defn-" "defmacro" "fn"} head)) (bracket-datum? child) (= i vector-index)) "params"
   (and (= head "defrecord") (bracket-datum? child) (= i vector-index)) "fields"
   (and (some? (get #{"defn" "defn-" "fn"} head)) (arity-clause? child)) "arity-clause"

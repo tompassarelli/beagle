@@ -6,7 +6,7 @@
 ;;   • the #lang path     — beagle-read / beagle-read-syntax (module load →
 ;;     `bin/beagle check`); drives #lang beagle/* compilation.
 ;;   • the parse.rkt path — read-beagle-syntax (check --agent / build / build-all
-;;     / repair loop / PostToolUse hook).
+;;     / authoring loop / PostToolUse hook).
 ;;
 ;; Historically these were TWO hand-maintained readtables that silently drifted:
 ;; the parse.rkt copy lacked #?/#?@ reader conditionals and the #<<heredoc

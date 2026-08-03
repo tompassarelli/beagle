@@ -20,15 +20,15 @@ A patch release of JS-target hardening, driven entirely by authoring a real down
 
 - **`swallowed-binding` guard (E020)** (004d291): a `let` binding one paren short silently absorbs the following `name value` pair as body forms, emitting the swallowed name as a bare `name;` statement → runtime `ReferenceError`, while `beagle syntax` reports "ok" (parens net-balance). A non-final body statement that is a bare unbound symbol now errors with a pointed message; tail-position bare symbols (legitimate returns) are not flagged.
 - **`%` rejected as a call head — `percent-not-modulo`** (2f7a441): `(% a b)` emitted `_pct(a, b)` (`%` is the `#()` anonymous-arg shorthand) → undefined call. Now a pointed parse error naming `rem`/`mod` for modulo; `%` inside `#(…)` lambdas is unaffected.
-- **camelCase JS-export lint** (7b5b6d5): kebab names mangle to `snake_case` and camelCase emits as-is, so a camelCase export referenced cross-module in kebab resolves to a *different* identifier (undefined in the bundle). A lint warns and names the kebab fix; it runs in `lint-program!` (fires at `build` and `check`) and is counted by `count-lint-warnings`, so the `--agent` repair loop surfaces it too.
+- **camelCase JS-export lint** (7b5b6d5): kebab names mangle to `snake_case` and camelCase emits as-is, so a camelCase export referenced cross-module in kebab resolves to a *different* identifier (undefined in the bundle). A lint warns and names the kebab fix; it runs in `lint-program!` (fires at `build` and `check`) and is counted by `count-lint-warnings`, so the `--agent` authoring loop surfaces it too.
 
 ## [0.17.0] — 2026-06-15
 
-Where 0.16 locked the surface, 0.17 turns the compiler into something its own repair tooling can drive. Diagnostics now carry structured, machine-applicable data; `beagle-doctor` proves the repair loop *works* rather than merely runs; form dispatch unifies onto a single compile-time combiner registry; Odin joins as a live native target and the JS emitter returns to live. Five live targets: Clojure, ClojureScript, JavaScript, Nix, Odin.
+Where 0.16 locked the surface, 0.17 turns the compiler into something its own repair tooling can drive. Diagnostics now carry structured, machine-applicable data; `beagle-doctor` proves the authoring loop *works* rather than merely runs; form dispatch unifies onto a single compile-time combiner registry; Odin joins as a live native target and the JS emitter returns to live. Five live targets: Clojure, ClojureScript, JavaScript, Nix, Odin.
 
 ### Highlights
 
-- Repair loop is real and proven end-to-end: diagnostics carry structured types and machine-consumable conversion data (`MessageData`), `beagle-repair` applies them, and `beagle-doctor` demonstrates the loop functions, not just that the daemon is alive (d599fe17, 1cc1077f, a0e60513).
+- Authoring loop is real and proven end-to-end: diagnostics carry structured types and machine-consumable conversion data (`MessageData`), `beagle-repair` applies them, and `beagle-doctor` demonstrates the loop functions, not just that the daemon is alive (d599fe17, 1cc1077f, a0e60513).
 - Dispatch unified: one compile-time combiner registry resolves macros, builtins, and legacy forms; 21+ special forms plus the def/control/module/nix/js/sql families migrated onto it; the dead operative prototype was deleted (5d58d09 → b737821, 80c01a1).
 - Odin is a live native target, replacing the now-parked zig backend; the JS emitter is promoted back from dormant to live (34fd382, e7823757).
 - Deterministic paren-balancing is auto-enforced via the PostToolUse hook, and hooks are distributed from tracked templates (bdaae9f1, 8b13af3c).
@@ -39,9 +39,9 @@ Where 0.16 locked the surface, 0.17 turns the compiler into something its own re
 - In-compiler error-explanation registry with machine-applicable suggestions (17434043).
 - Structured types in diagnostics via `MessageData`; structural fix-plans carry machine-consumable conversion data that `beagle-repair` consumes (d599fe17, f36d18cc, 1cc1077f).
 - Exhaustive-match auto-fill: missing-case clause skeletons emitted as an applicable repair fix (cc30a6c2).
-- Auto-apply `replace-head` suggestions in the repair loop (822fa136).
+- Auto-apply `replace-head` suggestions in the authoring loop (822fa136).
 - Types-as-view: `beagle-explain-type` projects inferred types through an extensible delaborator registry; numeric unions fold to `Number`, with `--write` promotion (4145ce44, 13847b3d, f0ff58c6).
-- `beagle-doctor` proves the repair loop works, with a dynamic target inventory and a correct `raco` probe (a0e60513, 2c5a56b2).
+- `beagle-doctor` proves the authoring loop works, with a dynamic target inventory and a correct `raco` probe (a0e60513, 2c5a56b2).
 - Source positions carry origin/canonical with precise column propagation; macro expansions inherit the call-site source position (de155bae, 3a9af8f6).
 - Generated, example-verified capability cheatsheet that can't rot (10d50241).
 - Odin backend: `#lang beagle/odin`, numeric width types, `.bodin` build support, `defenum`, fixed arrays, range loops, pointer types, struct literals, keyword→enum variants, non-string map keys (`map[K]V`), `stdlib-odin` math/casts, and `defmacro` incl. the ECS `defcomponent` pattern (34fd382 + series).
@@ -75,7 +75,7 @@ Where 0.16 locked the surface, 0.17 turns the compiler into something its own re
 
 - Don't crash compiling nested macro calls (`datum->syntax` on a raw-datum srcloc) (8290e667).
 - Delaborator offset correctness across tabs/CRLF, with opt-in capture (45ab2a96).
-- Repair-loop clause insertion: single-line matches and string-decoy anchors (afff6c4d).
+- Authoring-loop clause insertion: single-line matches and string-decoy anchors (afff6c4d).
 - Structural fix-plan blames the differing type argument (e6a6562f).
 - clj regex emission and a blame-path destructure crash (0389b8bc).
 - JS `:as` whole-map binding across all three `let` paths; record-ctor partial gated to real records (973dd9b6).

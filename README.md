@@ -21,7 +21,7 @@ mistake happened, *where* in the source, after *which* canonicalization, against
   enumerate: macros, threading, reader conditionals, sourcemap fidelity.
 - [`docs/targets-by-example.md`](docs/targets-by-example.md) — one source body
   across three backends, and a NixOS module typed against the option schema.
-- [`docs/cli.md`](docs/cli.md) — the CLI and the repair loop.
+- [`docs/cli.md`](docs/cli.md) — the CLI and the authoring loop.
 - [`docs/architecture.md`](docs/architecture.md) — pipeline, layout, where to change what.
 - [`docs/self-hosting.md`](docs/self-hosting.md) — how the compiler is held correct.
 - [`docs/target-policy.md`](docs/target-policy.md) — why targets get removed, not deprecated.

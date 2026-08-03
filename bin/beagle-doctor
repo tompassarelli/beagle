@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # beagle-doctor: check host environment, target readiness, AND prove the
-# repair loop is FUNCTIONALLY working (not merely alive). The compiler is the
+# authoring loop is FUNCTIONALLY working (not merely alive). The compiler is the
 # loop's oracle; vocabulary in docs/authoring-loops.md.
 #
 # Two halves:
 #   environment  — host tools, daemon liveness, cache, target emitters.
-#   repair loop  — FUNCTIONAL canary pairs: a known-bad input that MUST be
+#   authoring loop  — FUNCTIONAL canary pairs: a known-bad input that MUST be
 #                  rejected + a known-good input that MUST pass. This is what
 #                  catches SILENT DEGRADATION (a checker stuck "always-pass"
 #                  or "always-fail"), which a version/liveness check cannot see.
@@ -47,7 +47,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 STATUS="ok"          # whole-environment rollup (tools + targets) — informational
-REPAIR_STATUS="ok"   # repair-loop health ONLY (daemon + functional canaries) — gates exit
+AUTHORING_STATUS="ok"   # authoring-loop health ONLY (daemon + functional canaries) — gates exit
 ENVIRONMENT_TRUSTED=1 # package scope must resolve this checkout before USE is safe
 CHECKS=()
 
@@ -126,12 +126,12 @@ elif [[ "$REVIVE" == "1" ]]; then
         DAEMON_REACHABLE=1
         DAEMON_REVIVED=1
     else
-        STATUS="error"; REPAIR_STATUS="error"
+        STATUS="error"; AUTHORING_STATUS="error"
     fi
 else
     # daemon powers the watcher + the hook's fast feedback path — its absence
-    # is a real repair-loop degradation, not a benign warning.
-    STATUS="error"; REPAIR_STATUS="error"
+    # is a real authoring-loop degradation, not a benign warning.
+    STATUS="error"; AUTHORING_STATUS="error"
 fi
 
 # Cache directory
@@ -146,14 +146,14 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Repair loop — FUNCTIONAL canary pairs. A liveness check says the checker is
+# Authoring loop — FUNCTIONAL canary pairs. A liveness check says the checker is
 # running; these say it is still TELLING THE TRUTH. Each layer feeds a known
 # input and asserts the known verdict, in BOTH directions (bad must fail, good
 # must pass) so a checker stuck always-pass OR always-fail is caught.
 # ---------------------------------------------------------------------------
-REPAIR_LOOP=()
-rl_ok()   { REPAIR_LOOP+=("{\"name\":\"$1\",\"status\":\"ok\"}"); }
-rl_fail() { REPAIR_LOOP+=("{\"name\":\"$1\",\"status\":\"error\",\"message\":$(printf '%s' "$2" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')}"); STATUS="error"; REPAIR_STATUS="error"; }
+AUTHORING_LOOP=()
+al_ok()   { AUTHORING_LOOP+=("{\"name\":\"$1\",\"status\":\"ok\"}"); }
+al_fail() { AUTHORING_LOOP+=("{\"name\":\"$1\",\"status\":\"error\",\"message\":$(printf '%s' "$2" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')}"); STATUS="error"; AUTHORING_STATUS="error"; }
 
 DOC_WORK="$(mktemp -d /tmp/beagle-doctor.XXXXXX)"
 printf '#lang beagle/clj\n(ns doctor.canary)\n(defn f [] -> Nil (str "x"\n' > "$DOC_WORK/bad.bclj"
@@ -162,20 +162,20 @@ printf '#lang beagle/clj\n(ns doctor.canary)\n(defn g [n: Int] -> Nil nil)\n(def
 
 # syntax layer (canary pair)
 if "$BIN/beagle-syntax" "$DOC_WORK/bad.bclj" &>/dev/null; then
-    rl_fail "syntax" "accepted a known-malformed file (stuck always-pass)"
+    al_fail "syntax" "accepted a known-malformed file (stuck always-pass)"
 elif ! "$BIN/beagle-syntax" "$DOC_WORK/good.bclj" &>/dev/null; then
-    rl_fail "syntax" "rejected a known-good file (stuck always-fail)"
+    al_fail "syntax" "rejected a known-good file (stuck always-fail)"
 else
-    rl_ok "syntax"
+    al_ok "syntax"
 fi
 
 # type-check layer (canary pair)
 if "$BIN/beagle-check-all" --agent "$DOC_WORK/type-bad.bclj" &>/dev/null; then
-    rl_fail "check" "passed a known type error (stuck always-pass)"
+    al_fail "check" "passed a known type error (stuck always-pass)"
 elif ! "$BIN/beagle-check-all" --agent "$DOC_WORK/good.bclj" &>/dev/null; then
-    rl_fail "check" "failed a known-good file (stuck always-fail)"
+    al_fail "check" "failed a known-good file (stuck always-fail)"
 else
-    rl_ok "check"
+    al_ok "check"
 fi
 
 # package-scope canary — the FALSE-GREEN backstop. Global `raco pkg` links for
@@ -190,14 +190,14 @@ _scope_probe="$("$RACKET" -e '(require setup/collection-search)(with-handlers ([
 _scope_root="$(cd "$BEAGLE_ROOT" && pwd -P)"
 if [[ -z "$_scope_probe" || "$_scope_probe" == "UNRESOLVED" ]]; then
     ENVIRONMENT_TRUSTED=0
-    rl_fail "package-scope" "beagle collection unresolvable (no pkg link and no PLTCOLLECTS scope). Repair: run bin/beagle from a real checkout, or 'source bin/_beagle-racket' which auto-scopes PLTCOLLECTS at this root ($_scope_root)."
+    al_fail "package-scope" "beagle collection unresolvable (no pkg link and no PLTCOLLECTS scope). Repair: run bin/beagle from a real checkout, or 'source bin/_beagle-racket' which auto-scopes PLTCOLLECTS at this root ($_scope_root)."
 else
     _scope_probe_real="$(cd "$(dirname "$_scope_probe")" 2>/dev/null && pwd -P || echo "$_scope_probe")"
     if [[ "$_scope_probe_real" != "$_scope_root" && "$_scope_probe_real" != "$_scope_root"/* ]]; then
         ENVIRONMENT_TRUSTED=0
-        rl_fail "package-scope" "beagle collection resolves to $_scope_probe (root $_scope_probe_real) but THIS checkout is $_scope_root — tests would load a SIBLING parse.rkt (false green). Repair: invoke via bin/* (they 'source bin/_beagle-racket', which scopes PLTCOLLECTS at this root with NO global pkg mutation); never rely on the global 'raco pkg' links inside a worktree."
+        al_fail "package-scope" "beagle collection resolves to $_scope_probe (root $_scope_probe_real) but THIS checkout is $_scope_root — tests would load a SIBLING parse.rkt (false green). Repair: invoke via bin/* (they 'source bin/_beagle-racket', which scopes PLTCOLLECTS at this root with NO global pkg mutation); never rely on the global 'raco pkg' links inside a worktree."
     else
-        rl_ok "package-scope"
+        al_ok "package-scope"
     fi
 fi
 
@@ -224,9 +224,9 @@ if [[ "$DEEP" == "1" ]]; then
     printf '#!/usr/bin/env bash\ntrue\n' > "$CN/verify.sh"; chmod +x "$CN/verify.sh"
     PATCH="$("$BIN/beagle-repair" "$CN" "$CN/verify.sh" --emit-patch 2>/dev/null || true)"
     if grep -q '^+(nix/assert' <<<"$PATCH"; then
-        rl_ok "repair-suggestion"
+        al_ok "repair-suggestion"
     else
-        rl_fail "repair-suggestion" "suggestion->patch did not emit the nix/assert rename"
+        al_fail "repair-suggestion" "suggestion->patch did not emit the nix/assert rename"
     fi
 fi
 rm -rf "$DOC_WORK"
@@ -235,7 +235,7 @@ rm -rf "$DOC_WORK"
 # canonical table (beagle-lib/private/targets.rkt, projected into
 # share/targets.sh); this script classifies only what it can OBSERVE, namely
 # whether the declared emitter module is actually present. A declared target
-# with no emitter on disk is a soft warning, never a repair-loop failure.
+# with no emitter on disk is a soft warning, never an authoring-loop failure.
 TARGETS=()
 source "$BEAGLE_ROOT/share/targets.sh"
 for target in "${BEAGLE_TARGET_IDS[@]}"; do
@@ -250,23 +250,23 @@ done
 
 # --quiet: a healthy heartbeat says nothing. It speaks only when the REPAIR
 # LOOP degrades — not for a missing unused target emitter or a stale inventory.
-if [[ "$QUIET" == "1" && "$REPAIR_STATUS" != "error" && "$JSON" == "0" ]]; then
+if [[ "$QUIET" == "1" && "$AUTHORING_STATUS" != "error" && "$JSON" == "0" ]]; then
     exit 0
 fi
 
 if [[ "$JSON" == "1" ]]; then
     CHECKS_JSON=$(IFS=,; echo "${CHECKS[*]}")
-    REPAIR_JSON=$(IFS=,; echo "${REPAIR_LOOP[*]}")
+    AUTHORING_JSON=$(IFS=,; echo "${AUTHORING_LOOP[*]}")
     TARGETS_JSON=$(IFS=,; echo "${TARGETS[*]}")
-    echo "{\"schemaVersion\":1,\"status\":\"$STATUS\",\"repair_status\":\"$REPAIR_STATUS\",\"checks\":[$CHECKS_JSON],\"repair_loop\":[$REPAIR_JSON],\"targets\":[$TARGETS_JSON]}"
+    echo "{\"schemaVersion\":1,\"status\":\"$STATUS\",\"authoring_status\":\"$AUTHORING_STATUS\",\"checks\":[$CHECKS_JSON],\"authoring_loop\":[$AUTHORING_JSON],\"targets\":[$TARGETS_JSON]}"
 else
     echo "beagle-doctor"
     echo "============="
     echo ""
-    if [[ "$REPAIR_STATUS" == "error" ]]; then
-        echo "Repair loop: DEGRADED  ← do not trust silent green while degraded"
+    if [[ "$AUTHORING_STATUS" == "error" ]]; then
+        echo "Authoring loop: DEGRADED  ← do not trust silent green while degraded"
     else
-        echo "Repair loop: ok  (daemon + functional canaries healthy)"
+        echo "Authoring loop: ok  (daemon + functional canaries healthy)"
     fi
     echo "Environment: $STATUS"
     echo ""
@@ -284,14 +284,14 @@ else
         fi
     done
     echo ""
-    echo "Repair loop (functional):"
-    for rl in "${REPAIR_LOOP[@]}"; do
-        name=$(echo "$rl" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["name"])')
-        status=$(echo "$rl" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["status"])')
+    echo "Authoring loop (functional):"
+    for entry in "${AUTHORING_LOOP[@]}"; do
+        name=$(echo "$entry" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["name"])')
+        status=$(echo "$entry" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["status"])')
         if [[ "$status" == "ok" ]]; then
             echo "  [ok]      $name canary"
         else
-            msg=$(echo "$rl" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("message",""))')
+            msg=$(echo "$entry" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("message",""))')
             echo "  [ERROR]   $name canary: $msg"
         fi
     done
@@ -311,9 +311,9 @@ else
     done
 fi
 
-# Exit gates on the REPAIR LOOP only (daemon + functional canaries), NOT on the
+# Exit gates on the AUTHORING LOOP only (daemon + functional canaries), NOT on the
 # environment rollup. A stale target inventory or a missing emitter for an
 # unused target must not trip the handshake/heartbeat — only a genuinely
-# degraded repair loop does.
-[[ "$REPAIR_STATUS" == "error" ]] && exit 1
+# degraded authoring loop does.
+[[ "$AUTHORING_STATUS" == "error" ]] && exit 1
 exit 0

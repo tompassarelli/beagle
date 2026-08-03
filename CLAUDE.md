@@ -68,8 +68,9 @@ Parameter and typed-field vectors have one canonical physical layout. Zero or
 one logical entry stays inline with the owning function, method, macro, record,
 or variant name: `(defn id [x] x)`. Two or more entries put the vector on the
 following line, with its first entry beside `[` and every later logical entry
-starting once per line at the same column; `]` and any `-> RET` remain after the
-final entry:
+starting once per line at the same column. The `[` is exactly two columns past
+the owning form's opening parenthesis; `]` remains after the final entry and is
+followed by exactly one space before any `-> RET`:
 
 ```clojure
 (defn add
@@ -86,8 +87,10 @@ A typed `name: Type`, destructuring form, or `& rest` pair is one logical
 entry. The same rule covers `defn`/`defn-`/`fn`, multi-arity clauses, `letfn`,
 protocol and implementation methods, `defmacro`, and typed record/union/error
 fields. It does not apply to data vectors or let-style value-binding vectors.
-The parser attaches an exact source-range repair to violations; source-less
-macro-produced datums have no physical-layout obligation.
+The parser attaches an exact source-range repair when moving the range cannot
+change a line comment's reach; comment-bearing violations remain hard errors
+without a lossy rewrite. Source-less macro-produced datums have no
+physical-layout obligation.
 
 **This is a DUAL-ACCEPT cut — write the canonical spelling, but know what the
 parser actually does** (`postfix-annotation-parse.rkt` is the contract):

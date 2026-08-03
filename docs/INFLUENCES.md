@@ -32,7 +32,7 @@ We stole the mechanisms, not the type theory (Beagle is not dependently typed):
   view* rendered from the type, storing nothing — zero drift by construction,
   the way Lean renders terms. (`explain-type`.)
 
-*Why it matters here:* the repair loop is only as good as the precision of what
+*Why it matters here:* the authoring loop is only as good as the precision of what
 it repairs. Lean is the proof that this precision is achievable and worth the
 engineering.
 
@@ -89,7 +89,7 @@ syntax. Two amputations are deliberate, not oversights:
   than "we implemented ML."
 
 *Why it matters here:* exhaustiveness and bounded polymorphism are exactly
-the failures the repair loop is best at — a missing match arm or a bound
+the failures the authoring loop is best at — a missing match arm or a bound
 violation is structured, located, and machine-fixable in a way an untyped
 runtime error never is.
 
@@ -101,7 +101,7 @@ breaking a reference, because references bind to identity, not to a string.
 Beagle (via FRAM) borrows that **separation**, not Unison's runtime:
 
 - **Stable binding identity.** A binding's identity in FRAM survives rename —
-  callers, the code-as-facts graph of recursive triples, and the repair loop
+  callers, the code-as-facts graph of recursive triples, and the authoring loop
   track *what a definition is*, not the string that currently labels it.
 - **Not content-addressed code.** Beagle does not adopt Unison's
   content-addressed storage, its hash-as-filename codebase model, or its
@@ -109,7 +109,7 @@ Beagle (via FRAM) borrows that **separation**, not Unison's runtime:
   key inside the ordinary compiler pipeline, not a replacement runtime or
   storage substrate.
 
-*Why it matters here:* the repair loop rewrites code (renames, clause
+*Why it matters here:* the authoring loop rewrites code (renames, clause
 skeletons, tree splices). A fix that survives a rename — because it targets
 identity, not a name string — is a fix that doesn't shatter the next time
 someone edits nearby.
@@ -131,7 +131,7 @@ relations, not as hand-written recursive traversal code.
   Datalog borrowing lives one layer up, in how the graph that *represents*
   the code answers queries about itself.
 
-*Why it matters here:* the repair loop's diagnoses ("this call site breaks
+*Why it matters here:* the authoring loop's diagnoses ("this call site breaks
 if you change that signature") are graph-shaped questions. Stratified
 recursive derivation is the right tool for exactly that shape, without
 smuggling logic-programming semantics into the compiled language itself.
@@ -150,7 +150,7 @@ smuggling logic-programming semantics into the compiled language itself.
   over free-form syntax. The s-expression surface is what makes auto-apply
   tractable.
 - **Exact Clojure syntax is not inevitable; the typed EDN/Lisp *family* is
-  what wins.** Nothing about the repair loop requires parentheses spelled
+  what wins.** Nothing about the authoring loop requires parentheses spelled
   exactly Clojure's way — a different bracket convention or reader could carry
   the same property. What is load-bearing is the *family*: a small,
   homoiconic, structurally-editable EDN/Lisp medium, because that is what
@@ -163,23 +163,23 @@ smuggling logic-programming semantics into the compiled language itself.
 The borrowings are not a remix — each is a means to the same end, and each is
 scoped to a specific concern rather than an adopted surface or runtime:
 
-| Borrowed from | Concern it supplies | Serves the repair loop by… |
+| Borrowed from | Concern it supplies | Serves the authoring loop by… |
 |---|---|---|
 | Lean | diagnostics discipline | giving the loop something *precise* to repair |
 | Kernel | combiner uniformity | making the whole surface analyzable as one thing → one IR |
 | ML family | type semantics (ADTs, exhaustiveness, explicit/bounded polymorphism, variance, heterogeneous positional types) — not ML's grammar, no full-HM claim | generating diagnoses (types) that are structured and machine-fixable, without importing a second concrete syntax |
 | Unison | names-vs-identity separation, realized as FRAM stable binding identity — not content-addressed code | letting a repair (rename, splice) target *what a binding is*, so it survives edits instead of shattering on the next rename |
-| Datalog | recursive/stratified derivation inside FRAM's graph — not Beagle's ordinary computation | answering the graph-shaped questions ("what breaks if this changes") the repair loop's diagnoses depend on |
+| Datalog | recursive/stratified derivation inside FRAM's graph — not Beagle's ordinary computation | answering the graph-shaped questions ("what breaks if this changes") the authoring loop's diagnoses depend on |
 | Lisp/Clojure/EDN | one small structural authoring surface — the family, not Clojure's exact grammar | making the medium itself machine-editable, so fixes are tree splices instead of textual guesses |
 
 On top of that foundation sits the part with no upstream analogue: the
-**auto-repair loop** — `detect → diagnose → fix → re-verify` — where the
+**auto-authoring loop** — `detect → diagnose → fix → re-verify` — where the
 compiler enumerates missing match cases, emits clause skeletons, and applies
 fixes that typecheck. That is Beagle's own frontier, not a steal.
 
 ## The thesis, carried to its conclusion
 
-The bet is that **one typed authoring IR with a repair loop can target many
+The bet is that **one typed authoring IR with an authoring loop can target many
 real ecosystems at once** — and that authoring against it beats writing each
 target by hand. The breadth is not a distraction from the pitch; it *is* the
 pitch. A single AST that lowers idiomatically to lazy Nix attrsets *and* eager
@@ -197,7 +197,7 @@ This is already demonstrated where it is hardest, not merely aspired to:
   TypeScript.
 
 Each target that lands clean is the same thesis carried one ecosystem further.
-The frontier is the *depth* of the repair loop, not the count of targets.
+The frontier is the *depth* of the authoring loop, not the count of targets.
 
 ---
 

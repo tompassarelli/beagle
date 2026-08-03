@@ -417,7 +417,7 @@
 ;; Structured types in diagnostics (MessageData for the repair compiler)
 ;; ============================================================================
 ;; Diagnostics carry the human strings (unchanged — back-compat) AND the
-;; STRUCTURED type jsexpr, so agents and the repair loop reason over the type
+;; STRUCTURED type jsexpr, so agents and the authoring loop reason over the type
 ;; structure instead of parsing prose.
 
 (test-case "diagnostics carry structured types + the repair compiler reasons over them"
@@ -432,7 +432,7 @@
   ;; human strings unchanged (the ~hundreds of regex-matching tests still pass)
   (check-equal? (hash-ref d 'expected) "(Vec Int)")
   (check-equal? (hash-ref d 'actual) "(Vec String)")
-  ;; STRUCTURED type data — what agents / the repair loop consume
+  ;; STRUCTURED type data — what agents / the authoring loop consume
   (define et (hash-ref d 'expected-type))
   (check-equal? (hash-ref et 'kind) "app")
   (check-equal? (hash-ref et 'ctor) "Vec")
