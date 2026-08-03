@@ -65,17 +65,17 @@
       result
       (recur (+ index 1) (insert-function (nth functions index) result)))))
 
-(defn insert-field-layout [item: core/FieldLayout sorted: (Vec core/FieldLayout)] -> (Vec core/FieldLayout)
-  (loop [index: Int 0 inserted: Bool false result: (Vec core/FieldLayout) []]
+(defn insert-field-layout [item: core/FieldLayoutV0 sorted: (Vec core/FieldLayoutV0)] -> (Vec core/FieldLayoutV0)
+  (loop [index: Int 0 inserted: Bool false result: (Vec core/FieldLayoutV0) []]
     (if (>= index (count sorted))
       (if inserted result (conj result item))
-      (let [current: core/FieldLayout (nth sorted index)]
-        (if (and (not inserted) (< (core/fieldlayout-offset item) (core/fieldlayout-offset current)))
+      (let [current: core/FieldLayoutV0 (nth sorted index)]
+        (if (and (not inserted) (< (core/fieldlayoutv0-offset-bytes item) (core/fieldlayoutv0-offset-bytes current)))
           (recur (+ index 1) true (conj (conj result item) current))
           (recur (+ index 1) inserted (conj result current)))))))
 
-(defn ordered-field-layouts [fields: (Vec core/FieldLayout)] -> (Vec core/FieldLayout)
-  (loop [index: Int 0 result: (Vec core/FieldLayout) []]
+(defn ordered-field-layouts [fields: (Vec core/FieldLayoutV0)] -> (Vec core/FieldLayoutV0)
+  (loop [index: Int 0 result: (Vec core/FieldLayoutV0) []]
     (if (>= index (count fields))
       result
       (recur (+ index 1) (insert-field-layout (nth fields index) result)))))
@@ -105,14 +105,43 @@
     [(TextKind token) false]
     [(RefKind target) false]))
 
-(defn type-supported? [type-def: core/TypeDef layouts: (Vec core/LayoutDef)] -> Bool
-  (let [shape: core/TypeShape (core/typedef-shape type-def)]
+(defn layout-scalar? [layout: core/LayoutDef] -> Bool
+  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
     (match shape
-      [(AtomType value) (atom-kind-supported? (core/atomtype-kind shape))]
-      [(RecordType value) (some? (layout-for-type layouts (core/typedef-id type-def)))]
+      [(ScalarShapeV0 value) true]
+      [(RecordShapeV0 value) false]
+      [(UnionShapeV0 value) false]
+      [(VectorShapeV0 value) false]
+      [(ReferenceShapeV0 value) false])))
+
+(defn layout-record? [layout: core/LayoutDef] -> Bool
+  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+    (match shape
+      [(ScalarShapeV0 value) false]
+      [(RecordShapeV0 value) true]
+      [(UnionShapeV0 value) false]
+      [(VectorShapeV0 value) false]
+      [(ReferenceShapeV0 value) false])))
+
+(defn record-layout-fields [layout: core/LayoutDef] -> (Vec core/FieldLayoutV0)
+  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+    (match shape
+      [(ScalarShapeV0 value) []]
+      [(RecordShapeV0 value) (core/recordshapev0-fields shape)]
+      [(UnionShapeV0 value) []]
+      [(VectorShapeV0 value) []]
+      [(ReferenceShapeV0 value) []])))
+
+(defn type-supported? [type-def: core/TypeDef layouts: (Vec core/LayoutDef)] -> Bool
+  (let [shape: core/TypeShape (core/typedef-shape type-def)
+        layout-value: (U core/LayoutDef Nil) (layout-for-type layouts (core/typedef-id type-def))]
+    (match shape
+      [(AtomType value) (and (some? layout-value) (layout-scalar? layout-value) (atom-kind-supported? (core/atomtype-kind shape)))]
+      [(RecordType value) (and (some? layout-value) (layout-record? layout-value))]
       [(UnionType value) false]
       [(VectorType value) false]
-      [(ReferenceType value) false])))
+      [(ReferenceType value) false]
+      [(OutcomeType value) false])))
 
 (defn atom-supported? [atom: core/NativeAtom] -> Bool
   (match atom
@@ -122,20 +151,28 @@
     [(TextAtom value) false]
     [(RefAtom target) false]))
 
+(defn checked-operation-supported? [operation: core/CheckedOperationV0] -> Bool
+  (match operation
+    [(CheckedAddI64V0 value) true]
+    [(CheckedBoundsV0 value) false]))
+
 (defn instruction-supported? [instruction: core/Instruction] -> Bool
   (match instruction
     [(AtomInstruction value) (atom-supported? (core/atominstruction-atom instruction))]
     [(CopyInstruction value) false]
-    [(AddI64Instruction value) true]
     [(AddF64Instruction value) true]
+    [(CheckedInstruction value) (checked-operation-supported? (core/checkedinstruction-operation instruction))]
     [(StoreInstruction value) false]
+    [(AllocateInstruction value) false]
     [(CallInstruction value) false]))
 
 (defn terminator-supported? [terminator: core/Terminator] -> Bool
   (match terminator
     [(ReturnTerminator value) true]
     [(JumpTerminator value) false]
-    [(BranchTerminator value) false]))
+    [(BranchTerminator value) false]
+    [(SwitchTerminator value) false]
+    [(TrapTerminator value) false]))
 
 (defn block-supported? [block: core/BasicBlock] -> Bool
   (and (every? instruction-supported? (core/basicblock-instructions block))
@@ -163,18 +200,18 @@
       "void"
       (type-name module-index index))))
 
-(defn emit-layout-assertions [type-name-value: String layout: core/LayoutDef fields: (Vec core/FieldLayout)] -> String
+(defn emit-layout-assertions [type-name-value: String layout: core/LayoutDef fields: (Vec core/FieldLayoutV0)] -> String
   (let [base: (Vec String)
-        [(str "_Static_assert(sizeof(" type-name-value ") == " (core/layoutdef-size layout) ", \"layout size\");")
-         (str "_Static_assert(_Alignof(" type-name-value ") == " (core/layoutdef-align layout) ", \"layout alignment\");")]]
+        [(str "_Static_assert(sizeof(" type-name-value ") == " (core/layoutdef-size-bytes layout) ", \"layout size\");")
+         (str "_Static_assert(_Alignof(" type-name-value ") == " (core/layoutdef-align-bytes layout) ", \"layout alignment\");")]]
     (loop [index: Int 0 lines: (Vec String) base]
       (if (>= index (count fields))
         (join-lines lines)
-        (let [field: core/FieldLayout (nth fields index)]
+        (let [field: core/FieldLayoutV0 (nth fields index)]
           (recur (+ index 1)
             (conj lines
               (str "_Static_assert(offsetof(" type-name-value ", field_" index ") == "
-                (core/fieldlayout-offset field) ", \"field offset\");"))))))))
+                (core/fieldlayoutv0-offset-bytes field) ", \"field offset\");"))))))))
 
 (defn emit-atom-type [type-name-value: String kind: core/AtomKind layout: core/LayoutDef] -> String
   (let [backing: String
@@ -187,14 +224,14 @@
     (str "typedef " backing " " type-name-value ";\n"
       (emit-layout-assertions type-name-value layout []))) )
 
-(defn emit-record-fields [types: (Vec core/TypeDef) module-index: Int fields: (Vec core/FieldLayout)] -> String
+(defn emit-record-fields [types: (Vec core/TypeDef) module-index: Int fields: (Vec core/FieldLayoutV0)] -> String
   (loop [index: Int 0 lines: (Vec String) []]
     (if (>= index (count fields))
       (join-lines lines)
-      (let [field: core/FieldLayout (nth fields index)]
+      (let [field: core/FieldLayoutV0 (nth fields index)]
         (recur (+ index 1)
           (conj lines
-            (str "  " (c-type types module-index (core/fieldlayout-type-id field)) " field_" index ";")))))))
+            (str "  " (c-type types module-index (core/fieldlayoutv0-type-id field)) " field_" index ";")))))))
 
 (defn emit-type [types: (Vec core/TypeDef) layouts: (Vec core/LayoutDef) module-index: Int type-def: core/TypeDef] -> String
   (let [index: Int (type-index types (core/typedef-id type-def))
@@ -206,14 +243,15 @@
       (match shape
         [(AtomType value) (emit-atom-type type-name-value (core/atomtype-kind shape) layout-value)]
         [(RecordType value)
-         (let [fields: (Vec core/FieldLayout) (ordered-field-layouts (core/layoutdef-fields layout-value))]
+         (let [fields: (Vec core/FieldLayoutV0) (ordered-field-layouts (record-layout-fields layout-value))]
            (str "typedef struct " type-name-value " {\n"
              (emit-record-fields types module-index fields)
              "} " type-name-value ";\n"
              (emit-layout-assertions type-name-value layout-value fields)))]
         [(UnionType value) ""]
         [(VectorType value) ""]
-        [(ReferenceType value) ""]))))
+        [(ReferenceType value) ""]
+        [(OutcomeType value) ""]))))
 
 (defn emit-types [types: (Vec core/TypeDef) layouts: (Vec core/LayoutDef) module-index: Int] -> String
   (loop [index: Int 0 result: String ""]
@@ -304,20 +342,25 @@
          (str "  " (atom-c-type types module-index atom-value) " " result-name " = " (emit-atom-expression atom-value) ";\n"
            "  (void)" result-name ";\n"))]
       [(CopyInstruction value) ""]
-      [(AddI64Instruction value)
-       (let [left: String (value-name function block (core/addi64instruction-left-id instruction))
-             right: String (value-name function block (core/addi64instruction-right-id instruction))]
-         (str "  int64_t " result-name ";\n"
-           "  if (((" right " > INT64_C(0)) && (" left " > (INT64_MAX - " right "))) ||\n"
-           "      ((" right " < INT64_C(0)) && (" left " < (INT64_MIN - " right ")))) {\n"
-           "    native_trap(NATIVE_TRAP_OVERFLOW);\n"
-           "  }\n"
-           "  " result-name " = " left " + " right ";\n"
-           "  (void)" result-name ";\n"))]
       [(AddF64Instruction value)
        (str "  double " result-name " = " (value-name function block (core/addf64instruction-left-id instruction)) " + "
          (value-name function block (core/addf64instruction-right-id instruction)) ";\n  (void)" result-name ";\n")]
+      [(CheckedInstruction value)
+       (let [operation: core/CheckedOperationV0 (core/checkedinstruction-operation instruction)]
+         (match operation
+           [(CheckedAddI64V0 operation-value)
+            (let [left: String (value-name function block (core/checkedaddi64v0-left-id operation))
+                  right: String (value-name function block (core/checkedaddi64v0-right-id operation))]
+              (str "  int64_t " result-name ";\n"
+                "  if (((" right " > INT64_C(0)) && (" left " > (INT64_MAX - " right "))) ||\n"
+                "      ((" right " < INT64_C(0)) && (" left " < (INT64_MIN - " right ")))) {\n"
+                "    native_trap(NATIVE_TRAP_OVERFLOW);\n"
+                "  }\n"
+                "  " result-name " = " left " + " right ";\n"
+                "  (void)" result-name ";\n"))]
+           [(CheckedBoundsV0 operation-value) ""]))]
       [(StoreInstruction value) ""]
+      [(AllocateInstruction value) ""]
       [(CallInstruction value) ""])))
 
 (defn emit-instructions [types: (Vec core/TypeDef) module-index: Int function: core/FunctionDef block: core/BasicBlock] -> String
@@ -334,7 +377,9 @@
      (let [return-value: (U core/NativeId Nil) (core/returnterminator-value terminator)]
        (if (nil? return-value) "  return;\n" (str "  return " (value-name function block return-value) ";\n")))]
     [(JumpTerminator value) ""]
-    [(BranchTerminator value) ""]))
+    [(BranchTerminator value) ""]
+    [(SwitchTerminator value) ""]
+    [(TrapTerminator value) ""]))
 
 (defn emit-unused-resources [function: core/FunctionDef] -> String
   (str (if (> (count (core/functiondef-regions function)) 0) "  (void)arena;\n" "")

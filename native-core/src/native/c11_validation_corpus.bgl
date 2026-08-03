@@ -38,19 +38,21 @@
     (core/->AllocateEffect (fixture-id "region-arena"))))
 
 (def fixture-i64-layout: core/LayoutDef
-  (core/->LayoutDef (fixture-id "layout-00-i64") (fixture-id "type-00-i64") 8 8 []))
+  (core/->LayoutDef (fixture-id "layout-00-i64") (fixture-id "type-00-i64") 8 8
+    (core/->ScalarShapeV0 (core/->SignedIntReprV0 64))))
 
 (def fixture-pair-layout: core/LayoutDef
   (core/->LayoutDef (fixture-id "layout-01-pair") (fixture-id "type-01-pair") 16 8
-    [(core/->FieldLayout (fixture-id "field-00-left") (fixture-id "type-00-i64") 0 8)
-     (core/->FieldLayout (fixture-id "field-01-right") (fixture-id "type-00-i64") 8 8)]))
+    (core/->RecordShapeV0
+      [(core/->FieldLayoutV0 (fixture-id "field-00-left") (fixture-id "type-00-i64") 0 8)
+       (core/->FieldLayoutV0 (fixture-id "field-01-right") (fixture-id "type-00-i64") 8 8)])))
 
 (def fixture-block: core/BasicBlock
   (core/->BasicBlock (fixture-id "block-entry")
     []
-    [(core/->AddI64Instruction (fixture-id "ssa-sum")
-       (fixture-id "ssa-left")
-       (fixture-id "ssa-right"))]
+    [(core/->CheckedInstruction
+       (core/->SsaValueV0 (fixture-id "ssa-sum") (fixture-id "type-00-i64"))
+       (core/->CheckedAddI64V0 (fixture-id "ssa-left") (fixture-id "ssa-right")))]
     [(core/return-terminator (fixture-id "ssa-sum"))]))
 
 (def fixture-function: core/FunctionDef
@@ -75,6 +77,7 @@
     [(fixture-id "effect-allocate")]
     [(fixture-id "region-arena")]
     [(fixture-id "capability-allocate")]
+    []
     []))
 
 (def fixture-world-permuted: core/NativeWorld
