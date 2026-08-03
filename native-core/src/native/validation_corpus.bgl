@@ -33,20 +33,30 @@
     (core/write-effect-kind (corpus-id "region-arena"))))
 
 (def corpus-i64-layout :- core/LayoutDef
-  (core/->LayoutDef (corpus-id "layout-i64") (corpus-id "type-i64") 8 8 []))
+  (core/->LayoutDef (corpus-id "layout-i64")
+    (corpus-id "type-i64")
+    8
+    8
+    (core/->ScalarShapeV0 (core/->SignedIntReprV0 64))))
 
 (def corpus-f64-layout :- core/LayoutDef
-  (core/->LayoutDef (corpus-id "layout-f64") (corpus-id "type-f64") 8 8 []))
+  (core/->LayoutDef (corpus-id "layout-f64")
+    (corpus-id "type-f64")
+    8
+    8
+    (core/->ScalarShapeV0 (core/->FloatReprV0 64))))
 
 (def corpus-entry-block :- core/BasicBlock
   (core/->BasicBlock (corpus-id "block-entry")
     []
     [(core/store-instruction (corpus-id "ssa-store-i64")
+       (corpus-id "type-i64")
        (core/store-i64-op (corpus-id "ssa-address")
          (corpus-id "ssa-i64-input")
          (corpus-id "region-arena")
          (corpus-id "capability-write")))
      (core/store-instruction (corpus-id "ssa-store-f64")
+       (corpus-id "type-f64")
        (core/store-f64-op (corpus-id "ssa-address")
          (corpus-id "ssa-f64-input")
          (corpus-id "region-arena")
@@ -79,6 +89,7 @@
     [(corpus-id "effect-write")]
     [(corpus-id "region-arena")]
     [(corpus-id "capability-write")]
+    []
     [(core/fri2-observation (corpus-id "fri2-dump")
        "sha256:0123456789abcdef"
        128)]))
@@ -87,7 +98,11 @@
   (with valid-world
     [:layouts
      [corpus-i64-layout
-      (core/->LayoutDef (corpus-id "layout-i64") (corpus-id "type-f64") 8 8 [])]]))
+      (core/->LayoutDef (corpus-id "layout-i64")
+        (corpus-id "type-f64")
+        8
+        8
+        (core/->ScalarShapeV0 (core/->FloatReprV0 64)))]]))
 
 (def disallowed-world :- core/NativeWorld
   (with valid-world [:allowed-capabilities []]))
@@ -121,6 +136,7 @@
   (with corpus-entry-block
     [:instructions
      [(core/copy-instruction (corpus-id "ssa-bad-result")
+        (corpus-id "type-i64")
         (corpus-id "ssa-missing"))]]))
 
 (def dangling-ssa-function :- core/FunctionDef
