@@ -1,0 +1,387 @@
+;; Fixture worlds for native.qbe. The module-0 world is byte-for-byte the
+;; world native.c11-validation-corpus materializes (same id domain, same
+;; constructors), so both backends read one sealed world.
+(ns native.qbe-validation-corpus
+  (:require [native.core :as core]
+            [native.qbe :as qbe]))
+
+(define-mode strict)
+
+(defn fixture-id [name: String] -> core/NativeId
+  (core/canonical-id "native-c11-fixture-v0" [name]))
+
+(def fixture-i64-type: core/TypeDef
+  (core/->TypeDef (fixture-id "type-00-i64") "I64"
+    (core/atom-type-shape (core/i64-kind))))
+
+(def fixture-left-field: core/TypeField
+  (core/->TypeField (fixture-id "field-00-left") "left" (fixture-id "type-00-i64")))
+
+(def fixture-right-field: core/TypeField
+  (core/->TypeField (fixture-id "field-01-right") "right" (fixture-id "type-00-i64")))
+
+(def fixture-pair-type: core/TypeDef
+  (core/->TypeDef (fixture-id "type-01-pair") "Pair"
+    (core/->RecordType [fixture-left-field fixture-right-field])))
+
+(def fixture-region: core/RegionDef
+  (core/->RegionDef (fixture-id "region-arena") (core/arena-region-kind) nil))
+
+(def fixture-capability: core/CapabilityDef
+  (core/->CapabilityDef (fixture-id "capability-allocate")
+    (core/->AllocateCapability true)
+    (fixture-id "region-arena")
+    true))
+
+(def fixture-effect: core/EffectDef
+  (core/->EffectDef (fixture-id "effect-allocate")
+    (core/->AllocateEffect (fixture-id "region-arena"))))
+
+(def fixture-i64-layout: core/LayoutDef
+  (core/->LayoutDef (fixture-id "layout-00-i64") (fixture-id "type-00-i64") 8 8
+    (core/->ScalarShapeV0 (core/->SignedIntReprV0 64))))
+
+(def fixture-pair-layout: core/LayoutDef
+  (core/->LayoutDef (fixture-id "layout-01-pair") (fixture-id "type-01-pair") 16 8
+    (core/->RecordShapeV0
+      [(core/->FieldLayoutV0 (fixture-id "field-00-left") (fixture-id "type-00-i64") 0 8)
+       (core/->FieldLayoutV0 (fixture-id "field-01-right") (fixture-id "type-00-i64") 8 8)])))
+
+(def fixture-block: core/BasicBlock
+  (core/->BasicBlock (fixture-id "block-entry")
+    []
+    [(core/->CheckedInstruction
+       (core/->SsaValueV0 (fixture-id "ssa-sum") (fixture-id "type-00-i64"))
+       (core/->CheckedAddI64V0 (fixture-id "ssa-left") (fixture-id "ssa-right")))]
+    [(core/return-terminator (fixture-id "ssa-sum"))]))
+
+(def fixture-function: core/FunctionDef
+  (core/->FunctionDef (fixture-id "function-add") "add"
+    [(core/->Parameter (fixture-id "ssa-left") (fixture-id "type-00-i64"))
+     (core/->Parameter (fixture-id "ssa-right") (fixture-id "type-00-i64"))]
+    [fixture-block]
+    (fixture-id "block-entry")
+    (fixture-id "type-00-i64")
+    [(fixture-id "effect-allocate")]
+    [(fixture-id "region-arena")]
+    [(fixture-id "capability-allocate")]))
+
+(def fixture-world: core/NativeWorld
+  (core/->NativeWorld (fixture-id "world") nil "native-c11-fixture-v0"
+    [fixture-pair-type fixture-i64-type]
+    [fixture-effect]
+    [fixture-region]
+    [fixture-capability]
+    [fixture-pair-layout fixture-i64-layout]
+    [fixture-function]
+    [(fixture-id "effect-allocate")]
+    [(fixture-id "region-arena")]
+    [(fixture-id "capability-allocate")]
+    []
+    []))
+
+(def fixture-world-permuted: core/NativeWorld
+  (with fixture-world
+    [:types [fixture-i64-type fixture-pair-type]
+     :layouts [fixture-i64-layout fixture-pair-layout]]))
+
+;; --- slice-ready world ----------------------------------------------------
+;; Widens past the module-0 fixture into the shapes a real slice needs:
+;; union aggregates, multi-block control flow, block parameters, arena
+;; allocation, stores, and an intra-module call.
+
+(defn slice-id [name: String] -> core/NativeId
+  (core/canonical-id "native-qbe-fixture-v0" [name]))
+
+(def slice-i64-type: core/TypeDef
+  (core/->TypeDef (slice-id "type-0-i64") "I64"
+    (core/atom-type-shape (core/i64-kind))))
+
+(def slice-tag-type: core/TypeDef
+  (core/->TypeDef (slice-id "type-1-tag") "UnionTag"
+    (core/atom-type-shape (core/i64-kind))))
+
+(def slice-bool-type: core/TypeDef
+  (core/->TypeDef (slice-id "type-2-bit") "Bool"
+    (core/atom-type-shape (core/->BoolKind true))))
+
+(def slice-left-field: core/TypeField
+  (core/->TypeField (slice-id "fld-0-left") "left" (slice-id "type-0-i64")))
+
+(def slice-right-field: core/TypeField
+  (core/->TypeField (slice-id "fld-1-rght") "right" (slice-id "type-0-i64")))
+
+(def slice-pair-type: core/TypeDef
+  (core/->TypeDef (slice-id "type-3-par") "Pair"
+    (core/->RecordType [slice-left-field slice-right-field])))
+
+(def slice-none-variant: core/TypeVariant
+  (core/->TypeVariant (slice-id "var-0-none") "None" nil))
+
+(def slice-pair-variant: core/TypeVariant
+  (core/->TypeVariant (slice-id "var-1-pair") "Some" (slice-id "type-3-par")))
+
+(def slice-shape-type: core/TypeDef
+  (core/->TypeDef (slice-id "type-4-shp") "Shape"
+    (core/->UnionType [slice-none-variant slice-pair-variant])))
+
+(def slice-ref-type: core/TypeDef
+  (core/->TypeDef (slice-id "type-5-ref") "RefI64"
+    (core/->ReferenceType (slice-id "type-0-i64"))))
+
+(def slice-types: (Vec core/TypeDef)
+  [slice-i64-type slice-tag-type slice-bool-type slice-pair-type
+   slice-shape-type slice-ref-type])
+
+(def slice-i64-layout: core/LayoutDef
+  (core/->LayoutDef (slice-id "lay-0-i64") (slice-id "type-0-i64") 8 8
+    (core/->ScalarShapeV0 (core/->SignedIntReprV0 64))))
+
+(def slice-tag-layout: core/LayoutDef
+  (core/->LayoutDef (slice-id "lay-1-tag") (slice-id "type-1-tag") 4 4
+    (core/->ScalarShapeV0 (core/->SignedIntReprV0 32))))
+
+(def slice-bool-layout: core/LayoutDef
+  (core/->LayoutDef (slice-id "lay-2-bit") (slice-id "type-2-bit") 4 4
+    (core/->ScalarShapeV0 (core/->BoolReprV0 32))))
+
+(def slice-pair-layout: core/LayoutDef
+  (core/->LayoutDef (slice-id "lay-3-par") (slice-id "type-3-par") 16 8
+    (core/->RecordShapeV0
+      [(core/->FieldLayoutV0 (slice-id "fld-0-left") (slice-id "type-0-i64") 0 8)
+       (core/->FieldLayoutV0 (slice-id "fld-1-rght") (slice-id "type-0-i64") 8 8)])))
+
+(def slice-shape-layout: core/LayoutDef
+  (core/->LayoutDef (slice-id "lay-4-shp") (slice-id "type-4-shp") 24 8
+    (core/->UnionShapeV0 (slice-id "type-1-tag") 0
+      [(core/->UnionVariantLayoutV0 (slice-id "var-0-none") 0 nil 0)
+       (core/->UnionVariantLayoutV0 (slice-id "var-1-pair") 1 (slice-id "type-3-par") 8)])))
+
+(def slice-ref-layout: core/LayoutDef
+  (core/->LayoutDef (slice-id "lay-5-ref") (slice-id "type-5-ref") 8 8
+    (core/->ReferenceShapeV0 (slice-id "type-0-i64"))))
+
+(def slice-layouts: (Vec core/LayoutDef)
+  [slice-i64-layout slice-tag-layout slice-bool-layout slice-pair-layout
+   slice-shape-layout slice-ref-layout])
+
+(def slice-region: core/RegionDef
+  (core/->RegionDef (slice-id "reg-0-arena") (core/arena-region-kind) nil))
+
+(def slice-alloc-capability: core/CapabilityDef
+  (core/->CapabilityDef (slice-id "cap-0-alloc") (core/->AllocateCapability true)
+    (slice-id "reg-0-arena") true))
+
+(def slice-write-capability: core/CapabilityDef
+  (core/->CapabilityDef (slice-id "cap-1-write") (core/write-capability-kind)
+    (slice-id "reg-0-arena") true))
+
+(def slice-alloc-effect: core/EffectDef
+  (core/->EffectDef (slice-id "eff-0-alloc")
+    (core/->AllocateEffect (slice-id "reg-0-arena"))))
+
+(def slice-write-effect: core/EffectDef
+  (core/->EffectDef (slice-id "eff-1-write")
+    (core/write-effect-kind (slice-id "reg-0-arena"))))
+
+(def slice-add-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "add-b0-ent")
+    []
+    [(core/->CheckedInstruction
+       (core/->SsaValueV0 (slice-id "add-s0-sum") (slice-id "type-0-i64"))
+       (core/->CheckedAddI64V0 (slice-id "add-p0-lhs") (slice-id "add-p1-rhs")))]
+    [(core/return-terminator (slice-id "add-s0-sum"))]))
+
+(def slice-add-function: core/FunctionDef
+  (core/->FunctionDef (slice-id "fn-0-add") "add"
+    [(core/->Parameter (slice-id "add-p0-lhs") (slice-id "type-0-i64"))
+     (core/->Parameter (slice-id "add-p1-rhs") (slice-id "type-0-i64"))]
+    [slice-add-block]
+    (slice-id "add-b0-ent")
+    (slice-id "type-0-i64")
+    [(slice-id "eff-0-alloc")]
+    [(slice-id "reg-0-arena")]
+    [(slice-id "cap-0-alloc")]))
+
+(def slice-entry-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "sli-b0-ent")
+    []
+    [(core/->AtomInstruction
+       (core/->SsaValueV0 (slice-id "sli-s0-siz") (slice-id "type-0-i64"))
+       (core/->I64Atom 8))
+     (core/->AllocateInstruction
+       (core/->SsaValueV0 (slice-id "sli-s1-slt") (slice-id "type-5-ref"))
+       (slice-id "reg-0-arena")
+       (slice-id "cap-0-alloc")
+       (slice-id "sli-s0-siz")
+       (core/->TokenFlowV0 [] []))
+     (core/store-instruction (slice-id "sli-s2-stw") (slice-id "type-0-i64")
+       (core/store-i64-op (slice-id "sli-s1-slt") (slice-id "sli-p1-lhs")
+         (slice-id "reg-0-arena") (slice-id "cap-1-write")))]
+    [(core/->BranchTerminator (slice-id "sli-p0-flg")
+       (slice-id "sli-b1-thn") (slice-id "sli-b2-els"))]))
+
+(def slice-then-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "sli-b1-thn")
+    []
+    [(core/->CheckedInstruction
+       (core/->SsaValueV0 (slice-id "sli-s3-sum") (slice-id "type-0-i64"))
+       (core/->CheckedAddI64V0 (slice-id "sli-p1-lhs") (slice-id "sli-p2-rhs")))]
+    [(core/->JumpTerminator (slice-id "sli-b3-joi") [(slice-id "sli-s3-sum")])]))
+
+(def slice-else-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "sli-b2-els")
+    []
+    [(core/->CallInstruction
+       (core/->SsaValueV0 (slice-id "sli-s4-cal") (slice-id "type-0-i64"))
+       (slice-id "fn-0-add")
+       [(slice-id "sli-p1-lhs") (slice-id "sli-p2-rhs")]
+       (core/->TokenFlowV0 [] []))]
+    [(core/->JumpTerminator (slice-id "sli-b3-joi") [(slice-id "sli-s4-cal")])]))
+
+(def slice-join-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "sli-b3-joi")
+    [(core/->Parameter (slice-id "sli-b3-p0r") (slice-id "type-0-i64"))]
+    []
+    [(core/return-terminator (slice-id "sli-b3-p0r"))]))
+
+(def slice-blocks: (Vec core/BasicBlock)
+  [slice-entry-block slice-then-block slice-else-block slice-join-block])
+
+(def slice-function: core/FunctionDef
+  (core/->FunctionDef (slice-id "fn-1-sli") "slice"
+    [(core/->Parameter (slice-id "sli-p0-flg") (slice-id "type-2-bit"))
+     (core/->Parameter (slice-id "sli-p1-lhs") (slice-id "type-0-i64"))
+     (core/->Parameter (slice-id "sli-p2-rhs") (slice-id "type-0-i64"))]
+    slice-blocks
+    (slice-id "sli-b0-ent")
+    (slice-id "type-0-i64")
+    [(slice-id "eff-0-alloc") (slice-id "eff-1-write")]
+    [(slice-id "reg-0-arena")]
+    [(slice-id "cap-0-alloc") (slice-id "cap-1-write")]))
+
+(def slice-switch-entry-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "swt-b0-ent")
+    []
+    []
+    [(core/->SwitchTerminator (slice-id "swt-p0-shp")
+       [(core/->SwitchCaseV0 (slice-id "var-0-none") (slice-id "swt-b1-non") [])
+        (core/->SwitchCaseV0 (slice-id "var-1-pair") (slice-id "swt-b2-som") [])])]))
+
+(def slice-switch-none-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "swt-b1-non")
+    []
+    [(core/->AtomInstruction
+       (core/->SsaValueV0 (slice-id "swt-s0-zro") (slice-id "type-0-i64"))
+       (core/->I64Atom 0))]
+    [(core/return-terminator (slice-id "swt-s0-zro"))]))
+
+(def slice-switch-some-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "swt-b2-som")
+    []
+    [(core/->AtomInstruction
+       (core/->SsaValueV0 (slice-id "swt-s1-one") (slice-id "type-0-i64"))
+       (core/->I64Atom 1))]
+    [(core/return-terminator (slice-id "swt-s1-one"))]))
+
+(def slice-switch-blocks: (Vec core/BasicBlock)
+  [slice-switch-entry-block slice-switch-none-block slice-switch-some-block])
+
+(def slice-switch-function: core/FunctionDef
+  (core/->FunctionDef (slice-id "fn-2-swt") "tag"
+    [(core/->Parameter (slice-id "swt-p0-shp") (slice-id "type-4-shp"))]
+    slice-switch-blocks
+    (slice-id "swt-b0-ent")
+    (slice-id "type-0-i64")
+    []
+    []
+    []))
+
+(def slice-world: core/NativeWorld
+  (core/->NativeWorld (slice-id "qbe-slice-world") nil "native-qbe-fixture-v0"
+    slice-types
+    [slice-alloc-effect slice-write-effect]
+    [slice-region]
+    [slice-alloc-capability slice-write-capability]
+    slice-layouts
+    [slice-add-function slice-function slice-switch-function]
+    [(slice-id "eff-0-alloc") (slice-id "eff-1-write")]
+    [(slice-id "reg-0-arena")]
+    [(slice-id "cap-0-alloc") (slice-id "cap-1-write")]
+    []
+    []))
+
+(def slice-function-permuted: core/FunctionDef
+  (with slice-function
+    [:blocks [slice-join-block slice-else-block slice-then-block slice-entry-block]]))
+
+(def slice-switch-function-permuted: core/FunctionDef
+  (with slice-switch-function
+    [:blocks [slice-switch-some-block slice-switch-none-block slice-switch-entry-block]]))
+
+(def slice-world-permuted: core/NativeWorld
+  (with slice-world
+    [:types [slice-ref-type slice-shape-type slice-pair-type slice-bool-type
+             slice-tag-type slice-i64-type]
+     :layouts [slice-ref-layout slice-shape-layout slice-pair-layout
+               slice-bool-layout slice-tag-layout slice-i64-layout]
+     :functions [slice-switch-function-permuted slice-function-permuted slice-add-function]]))
+
+;; --- materialization ------------------------------------------------------
+
+(defn require-artifact [result: qbe/QbeMaterialization] -> qbe/QbeArtifact
+  (match result
+    [(QbeSuccess value) (qbe/qbesuccess-artifact result)]
+    [(QbeFailure value) (throw (ex-info (qbe/qbefailure-detail result) {}))]))
+
+(def fixture-artifact: qbe/QbeArtifact
+  (require-artifact (qbe/materialize-world fixture-world 0)))
+
+(def fixture-permuted-artifact: qbe/QbeArtifact
+  (require-artifact (qbe/materialize-world fixture-world-permuted 0)))
+
+(def slice-artifact: qbe/QbeArtifact
+  (require-artifact (qbe/materialize-world slice-world 1)))
+
+(def slice-permuted-artifact: qbe/QbeArtifact
+  (require-artifact (qbe/materialize-world slice-world-permuted 1)))
+
+(def fixture-deterministic?: Bool
+  (and (= (qbe/qbeartifact-module-text fixture-artifact)
+         (qbe/qbeartifact-module-text fixture-permuted-artifact))
+    (= (qbe/qbeartifact-module-text slice-artifact)
+      (qbe/qbeartifact-module-text slice-permuted-artifact))))
+
+;; Declares native_m0_fn_0 directly rather than including the C backend's
+;; header: the QBE object is linked by the shim ABI alone.
+(def fixture-main-text: String
+  (str "/* Generated by native.qbe-validation-corpus; do not edit. */\n"
+    "#include \"native_shim.h\"\n\n"
+    "int64_t native_m0_fn_0(native_arena *arena, const native_capability *capability,\n"
+    "                       int64_t left, int64_t right);\n\n"
+    "int main(void) {\n"
+    "  uint8_t storage[64];\n"
+    "  native_arena arena;\n"
+    "  native_capability capability = { UINT64_C(1) };\n"
+    "  native_arena_init(&arena, storage, sizeof(storage));\n"
+    "  if (native_m0_fn_0(&arena, &capability, INT64_C(20), INT64_C(22)) != INT64_C(42)) {\n"
+    "    return 1;\n"
+    "  }\n"
+    "  int64_t *slot = native_arena_alloc(&arena, sizeof(*slot), _Alignof(int64_t));\n"
+    "  *slot = native_m0_fn_0(&arena, &capability, INT64_C(-1), INT64_C(1));\n"
+    "  if (*slot != INT64_C(0)) {\n"
+    "    return 2;\n"
+    "  }\n"
+    "  native_arena_reset(&arena);\n"
+    "  return 0;\n"
+    "}\n"))
+
+(defn emit-fixture! [directory: String] -> Nil
+  (if fixture-deterministic?
+    (do
+      (spit (str directory "/" (qbe/qbeartifact-module-name fixture-artifact))
+        (qbe/qbeartifact-module-text fixture-artifact))
+      (spit (str directory "/" (qbe/qbeartifact-module-name slice-artifact))
+        (qbe/qbeartifact-module-text slice-artifact))
+      (spit (str directory "/qbe_main.c") fixture-main-text))
+    (throw (ex-info "permuted world changed QBE materialization" {}))))
