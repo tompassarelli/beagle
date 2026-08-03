@@ -1,0 +1,30 @@
+slice          store
+source         fram:src/fram/store.bclj  (746 lines, 71 defn, 0 defrecord)
+dependency     fram:src/fram/types.bclj  (projected into the same source world)
+driver         native-core/validation/slice-store/drive.sh
+pipeline       beagle-ast -> ast-facts.clj -> native.slice -> native.lower -> native.c11
+bar            native-core/bin/native-slice --module store  =>  5/5
+
+Why the dependency is in the world
+  store.bclj declares no record; every type in its signatures is a fram.types
+  record. Projected alone, its typed world fails types-refs-closed? and the
+  source-to-typed pass rejects. The source world therefore carries both ASTs
+  and names fram.store as its module.
+
+Named gaps
+  1  Bodies are not in the source world. The fact projection carries record
+     and defn DECLARATIONS only, so no store body was ever presented to the
+     lowering. Every one of the 71 store functions is a standing
+     TODO-NATIVE-FUNCTION-BODY obligation; world-functions and world-abis are
+     both 0 and typed-to-native is PENDING, not COMPLETE.
+  2  obligation-world closed-layouts FAILs on the full world: shapes that need
+     an explicit reference edge stay unclosed. The C17 projection restores the
+     obligation by excluding them, which is why obligation-projection passes.
+  3  The restricted C17 vocabulary admits 5 of 57 world types. Every shape
+     store.bclj itself contributes -- (Vec T), closed (U T Nil), Text/Keyword
+     atoms, map-entry vectors, (Atom T) references -- is outside it, so the
+     emitted C is byte-identical to native-core/validation/slice-types-full's.
+     The store-specific evidence in this slice is the sealed world, the typed
+     signature surface, and the obligation ledger, not new C.
+  4  main.c is hand-written: the materializer emits types only, so the runtime
+     check is the layout claim under ASan/UBSan, never a store body.

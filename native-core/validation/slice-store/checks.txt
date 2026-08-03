@@ -1,0 +1,2 @@
+gcc   -std=c17 -Wall -Wextra -Werror                                  compile+link+run PASS
+clang -std=c17 -Wall -Wextra -Werror -fsanitize=address,undefined     compile+link+run PASS

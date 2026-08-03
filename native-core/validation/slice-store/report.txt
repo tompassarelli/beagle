@@ -1,0 +1,128 @@
+stage source-seal ACCEPTED
+stage source-to-typed ACCEPTED
+stage typed-to-native PENDING
+world-types 57
+world-layouts 57
+world-functions 0
+world-abis 0
+projected-types 5
+type I64
+type Instant
+type TermCodecMeasure
+type TripleRow
+type TransactionRow
+obligation-world PASS valid-ssa
+obligation-world PASS exhaustive-matches
+obligation-world FAIL closed-layouts
+obligation-world PASS checked-arithmetic
+obligation-world PASS legal-abi
+obligation-world PASS discharged-tokens
+obligation-world PASS bounded-effects
+obligation-projection PASS valid-ssa
+obligation-projection PASS exhaustive-matches
+obligation-projection PASS closed-layouts
+obligation-projection PASS checked-arithmetic
+obligation-projection PASS legal-abi
+obligation-projection PASS discharged-tokens
+obligation-projection PASS bounded-effects
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for instant?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for instant
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for triple?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for rpc-page-request?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for rpc-page-response?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for rpc-error?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for rpc-request?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for rpc-response?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for rpc-frame-v1?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for rpc-page-request-cursor-value
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for rpc-page-response-cursor-value
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for rpc-error-detail-value
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for rpc-request-payload-value
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for rpc-response-payload-value
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for commit-operation?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for transaction-frame?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for term-store-dump?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for atom?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for term?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for triple
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for transaction-coordinate
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for transaction-coordinate?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for occurrence-coordinate
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for occurrence-coordinate?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for assertion-occurrence
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for retraction-occurrence
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for withdrawal
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for recorded-at
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for occurrence-before?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for valid-space-id?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for fresh-term-slots
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for term-slot
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for term-slot-add
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for term-slots-width-for
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for build-atom-term-slots
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for build-triple-term-slots
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for build-active-slots
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for new-term-store
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for space-id
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for next-sequence
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for current-sequence
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for atom-row
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for atom-row-value
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for valid-atom-row?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for find-atom-position
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for find-triple-position
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for index-atom-term!
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for index-triple-term!
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for atom-handle
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for triple-handle
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for atom-handle?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for handle-position
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for intern-handle!
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for valid-handle?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for resolve-handle
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for resolve-triple-handle
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for known-term-handle
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for intern-term!
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for replay-terms!
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for atom-term-count
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for triple-term-count
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for term-count
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for transaction-count
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for operation-count
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for assert-operation
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for retract-operation
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for valid-commit-operation?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for valid-operations?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for transaction-frame
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for find-active-bucket-position
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for active-positions
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for set-active-positions
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for apply-operation-state
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for operation-handles!
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for append-transaction!
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for commit-transaction!
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for replay-transaction!
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for occurrence-at
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for event-at
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for first-transaction-after
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for operation-range-bounds
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for transaction-frames-between
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for operation-postings
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for lower-bound-position
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for exact-occurrence-position
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for operation-candidate-positions
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for occurrence-tuple-at
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for operation-occurrences
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for withdrawal-triples
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for semantic-history
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for live-occurrences
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for live-propositions
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for dump-term-store
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for valid-prior-handle?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for valid-triple-rows?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for valid-dump-operation?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for valid-operation-slice?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for valid-history-rows?
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for rebuild-operation-state
+pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for load-term-store!
+materialize OK module_0.h module_0.c
