@@ -102,19 +102,19 @@
 (def sealed-typed :- worlds/SealedWorldV0
   (worlds/seal typed-draft))
 
-(def receipt-configuration :- (Vec worlds/ConfigurationEntryV0)
-  [(worlds/->ConfigurationEntryV0 "profile" "3")
-   (worlds/->ConfigurationEntryV0 "target" "native-core")])
+(def receipt-configuration :- (Vec String)
+  ["profile=3" "target=native-core"])
 
-(def discharged :- worlds/DischargedObligationV0
-  (worlds/->DischargedObligationV0 "typed-world-closed"
+(def discharged :- core/ReceiptObligationV0
+  (core/->ReceiptObligationV0 (core/->ValidSsaObligation true)
     "v0"
     (worlds/sealed-world-digest sealed-typed)
     true
     "closed reachable terms"))
 
-(def valid-receipt :- worlds/PassReceiptV0
-  (worlds/->PassReceiptV0 (worlds/sealed-world-digest sealed-source-a)
+(def valid-receipt :- core/PassReceiptV0
+  (core/->PassReceiptV0 (corpus-id "receipt")
+    (worlds/sealed-world-digest sealed-source-a)
     "beagle-commit-for-corpus"
     "resolve-and-type"
     "v0"
@@ -127,7 +127,7 @@
     "none"
     []))
 
-(def mismatched-receipt :- worlds/PassReceiptV0
+(def mismatched-receipt :- core/PassReceiptV0
   (with valid-receipt [:output-digest "canonical-world-content-v0:mismatch"]))
 
 (def corpus-result :- WorldsCorpusResult
