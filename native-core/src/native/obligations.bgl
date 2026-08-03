@@ -595,6 +595,101 @@
           (->CheckedArithmeticDiagnosticV0
             (core/functiondef-id function)))))))
 
+(defn find-function [functions :- (Vec core/FunctionDef)
+                     function-id :- core/NativeId]
+  :- (U core/FunctionDef Nil)
+  (loop [index :- Int 0]
+    (cond
+      (>= index (count functions)) nil
+      (core/native-id= (core/functiondef-id (nth functions index)) function-id)
+      (nth functions index)
+      :else (recur (+ index 1)))))
+
+(defn abi-type-legal? [types :- (Vec core/TypeDef)
+                       layouts :- (Vec core/LayoutDef)
+                       type-id :- core/NativeId] :- Bool
+  (and (not (nil? (find-type types type-id)))
+    (= 1 (layout-count layouts type-id))))
+
+(defn abi-value-legal? [types :- (Vec core/TypeDef)
+                        layouts :- (Vec core/LayoutDef)
+                        function :- core/FunctionDef
+                        value :- core/AbiValueV0] :- Bool
+  (let [type-id :- core/NativeId (get value :type-id)
+        ownership :- Any (get value :ownership)
+        arena-region :- Any (get ownership :region nil)
+        lifetime :- Any (get value :lifetime-region nil)]
+    (and (> (count (get value :name "")) 0)
+      (abi-type-legal? types layouts type-id)
+      (or (nil? arena-region)
+        (core/id-in? (core/functiondef-regions function) arena-region))
+      (or (nil? lifetime)
+        (core/id-in? (core/functiondef-regions function) lifetime)))))
+
+(defn abi-parameters-match? [types :- (Vec core/TypeDef)
+                             layouts :- (Vec core/LayoutDef)
+                             function :- core/FunctionDef
+                             values :- (Vec core/AbiValueV0)] :- Bool
+  (let [parameters :- (Vec core/Parameter) (core/functiondef-parameters function)]
+    (and (= (count parameters) (count values))
+      (loop [index :- Int 0]
+        (if (>= index (count values))
+          true
+          (let [value :- core/AbiValueV0 (nth values index)]
+            (if (and (abi-value-legal? types layouts function value)
+                  (core/native-id= (core/parameter-type-id (nth parameters index))
+                    (get value :type-id)))
+              (recur (+ index 1))
+              false)))))))
+
+(defn abi-result-matches? [types :- (Vec core/TypeDef)
+                          layouts :- (Vec core/LayoutDef)
+                          function :- core/FunctionDef
+                          result :- (U core/AbiValueV0 Nil)] :- Bool
+  (let [return-type :- Any (get function :return-type nil)]
+    (cond
+      (and (nil? result) (nil? return-type)) true
+      (or (nil? result) (nil? return-type)) false
+      :else
+      (and (abi-value-legal? types layouts function result)
+        (dynamic-id= (get result :type-id) return-type)))))
+
+(defn failure-type-legal? [types :- (Vec core/TypeDef)
+                          layouts :- (Vec core/LayoutDef)
+                          failure-type :- core/NativeId] :- Bool
+  (and (abi-type-legal? types layouts failure-type)
+    (> (count (variant-ids-for-type types failure-type)) 0)))
+
+(defn abi-decl-legal? [world :- core/NativeWorld
+                      abi :- core/AbiDeclV0] :- Bool
+  (let [function :- (U core/FunctionDef Nil)
+        (find-function (core/nativeworld-functions world) (get abi :function-id))
+        types :- (Vec core/TypeDef) (core/nativeworld-types world)
+        layouts :- (Vec core/LayoutDef) (core/nativeworld-layouts world)]
+    (and (not (nil? function))
+      (> (count (get abi :symbol "")) 0)
+      (> (count (get abi :version "")) 0)
+      (> (count (get abi :layout-digest "")) 0)
+      (some? (get abi :direction nil))
+      (some? (get abi :convention nil))
+      (abi-parameters-match? types layouts function (get abi :parameters []))
+      (abi-result-matches? types layouts function (get abi :result nil))
+      (failure-type-legal? types layouts (get abi :failure-type))
+      (core/ids-in? (get abi :required-effects [])
+        (core/functiondef-effects function))
+      (core/ids-in? (get abi :required-capabilities [])
+        (core/functiondef-capabilities function)))))
+
+(defn legal-abi [world :- core/NativeWorld] :- ObligationVerdictV0
+  (loop [index :- Int 0 abis :- (Vec core/AbiDeclV0)
+         (core/nativeworld-abis world)]
+    (if (>= index (count abis))
+      (->ObligationPassV0 (core/->LegalAbiObligation true))
+      (let [abi :- core/AbiDeclV0 (nth abis index)]
+        (if (abi-decl-legal? world abi)
+          (recur (+ index 1) abis)
+          (->LegalAbiDiagnosticV0 (get abi :id)))))))
+
 (def fixture-i64-type :- core/TypeDef
   (core/->TypeDef (obligation-id "type-i64") "I64"
     (core/->AtomType (core/->I64Kind true))))
@@ -655,13 +750,26 @@
     (obligation-id "type-checked-i64")
     [] [] []))
 
+(def fixture-abi :- core/AbiDeclV0
+  (core/->AbiDeclV0 (obligation-id "abi-checked-add")
+    (obligation-id "function-copy") "native_checked_add"
+    (core/->AbiExportV0 true) (core/->RestrictedCAbiV0 true)
+    [(core/->AbiValueV0 "input" (obligation-id "type-i64")
+       (core/->BorrowedV0 true) nil)
+     (core/->AbiValueV0 "choice" (obligation-id "type-choice")
+       (core/->BorrowedV0 true) nil)]
+    (core/->AbiValueV0 "result" (obligation-id "type-checked-i64")
+      (core/->OwnedV0 true) nil)
+    (obligation-id "type-choice") [] [] "v0"
+    "sha256:fixture-layout"))
+
 (def valid-world :- core/NativeWorld
   (apply core/->NativeWorld
     [(obligation-id "world-valid") nil "obligations-v0"
      [fixture-i64-type fixture-union-type fixture-outcome-type] [] [] []
      [fixture-i64-layout fixture-union-layout fixture-outcome-layout]
      [fixture-function]
-     [] [] [] [] []]))
+     [] [] [] [fixture-abi] []]))
 
 (def invalid-ssa-function :- core/FunctionDef
   (with fixture-function
@@ -729,6 +837,17 @@
 (def unchecked-arithmetic-world :- core/NativeWorld
   (with valid-world [:functions [unchecked-result-function]]))
 
+(def invalid-abi :- core/AbiDeclV0
+  (with fixture-abi
+    [:parameters
+     [(core/->AbiValueV0 "input" (obligation-id "type-missing")
+        (core/->BorrowedV0 true) nil)
+      (core/->AbiValueV0 "choice" (obligation-id "type-choice")
+        (core/->BorrowedV0 true) nil)]]))
+
+(def illegal-abi-world :- core/NativeWorld
+  (with valid-world [:abis [invalid-abi]]))
+
 (def valid-ssa-positive :- Bool
   (obligation-passed? (valid-ssa valid-world)))
 
@@ -782,5 +901,19 @@
     [(ExhaustiveMatchesDiagnosticV0 function-id) false]
     [(ClosedLayoutsDiagnosticV0 type-id) false]
     [(LegalAbiDiagnosticV0 abi-id) false]
+    [(DischargedTokensDiagnosticV0 function-id) false]
+    [(BoundedEffectsDiagnosticV0 function-id) false]))
+
+(def legal-abi-positive :- Bool
+  (obligation-passed? (legal-abi valid-world)))
+
+(def legal-abi-negative :- Bool
+  (match (legal-abi illegal-abi-world)
+    [(LegalAbiDiagnosticV0 abi-id) true]
+    [(ObligationPassV0 code) false]
+    [(ValidSsaDiagnosticV0 function-id) false]
+    [(ExhaustiveMatchesDiagnosticV0 function-id) false]
+    [(ClosedLayoutsDiagnosticV0 type-id) false]
+    [(CheckedArithmeticDiagnosticV0 function-id) false]
     [(DischargedTokensDiagnosticV0 function-id) false]
     [(BoundedEffectsDiagnosticV0 function-id) false]))
