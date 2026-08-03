@@ -1,0 +1,49 @@
+fram.fold Native Core slice — provenance and named gaps
+
+upstream source (read-only)
+  fram:src/fram/fold.bclj
+  sha256 0c94f11f109b471808f2011ac6209a4709896c601852d79e394d1c323030a6c2
+  fram commit aeb91c7fff3e1e6bb4dfc005c925ecefba2068ea
+
+pipeline
+  native.fold-slice-corpus  source Term graph for fold.bclj + the fram.types
+                            declarations its five signatures name
+  native.lower              seal-source-world -> lower-typed-world -> lower-native-world
+  native.obligations        validate-native-world (seven structural obligations)
+  native.fold-c17           restricted C17 materialization
+
+generated here
+  module_0.h  module_0.c  main.c  slice-report.txt
+regenerate
+  native-core/validation/slice-fold/drive.sh
+  env NATIVE_SLICE_MODULE=fold NATIVE_SLICE_REPO=<repo> NATIVE_SLICE_ARTIFACTS=<dir>
+
+named gaps
+  1 no fold function reaches a native body. typed-to-native implements exactly
+    identity, checked-add-i64, and const-zero-i64; transaction-frame,
+    max-sequence, project, fold!, and refold! carry no `native-op` fact, so each
+    stays a TODO-NATIVE-FUNCTION-BODY obligation and the world lowers zero
+    functions and zero ABI declarations (legal-abi receipt obligation PENDING).
+  2 closed-layouts FAILS on the Text and Keyword atoms. layout-shape-for gives a
+    TextKind atom a ReferenceShapeV0, and layout-shape-exact? accepts only a
+    ScalarShapeV0 with a bit width for an AtomType. Both types are builtins, so
+    every real module slice hits this, not just fold.
+  3 native.c11 is unusable as the materializer: its cross-namespace `match`
+    forms emit unqualified variant symbols that fail to resolve in the clj
+    target, and the file is graph-upstream so the text arm is refused. This
+    slice ships native.fold-c17 instead; folding it back into c11 is a graph
+    edit, not a text edit.
+  4 vector element types and reference targets are erased to `const void *` /
+    `void *` in the C projection; element stride survives in the layout and in
+    the emitted comment, the element type does not round-trip through the header.
+  5 union variant payload offsets are per-variant in Native Core and single in
+    C. They agree for every shape here (each variant offset is align-up(tag,
+    variant alignment), so the widest variant sets the union offset), and the
+    generated assertion checks only that widest offset.
+  6 `T?` optionals and raw `Any` are normalized in the source projection: `T?`
+    to a two-arm closed union, `Any` to SliceValue (LOWER-CLOSED-RAW-ANY).
+  7 OutcomeType is not materialized; fold reaches no outcome-typed value.
+
+observed toolchain
+  gcc 15.2.0 and clang 21.1.8, -std=c17 -pedantic -Wall -Wextra -Werror
+  ASan+UBSan (-fno-sanitize-recover=all) on the same translation units

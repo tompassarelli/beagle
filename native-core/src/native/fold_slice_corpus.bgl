@@ -1,0 +1,576 @@
+;; Source-world projection of fram:src/fram/fold.bclj plus the fram.types
+;; declarations its signatures name, driven seal -> typed -> native -> C17.
+(ns native.fold-slice-corpus)
+
+(define-mode strict)
+
+(require native.core :as core)
+(require native.worlds :as worlds)
+(require native.lower :as lower)
+(require native.obligations :as obligations)
+(require native.fold-c17 :as c17)
+
+(def module-name: String "fram.fold")
+(def module-path: String "src/fram/fold.bclj")
+(def compiler-commit: String "fram-fold-slice-v0")
+
+(def configuration: (Vec String)
+  ["profile=3" "target=native-core" "module=fram.fold"])
+
+(defn slice-id [kind: String label: String] -> core/NativeId
+  (core/canonical-id "fram-fold-slice-v0" [kind label]))
+
+(defn text-id [value: String] -> core/NativeId (slice-id "text" value))
+
+(defn node-id [label: String] -> core/NativeId (slice-id "node" label))
+
+(defrecord FactSpecV0
+  [subject: String predicate: String object: String text-object: Bool])
+
+(defn nf [subject: String predicate: String object: String] -> FactSpecV0
+  (->FactSpecV0 subject predicate object false))
+
+(defn tf [subject: String predicate: String object: String] -> FactSpecV0
+  (->FactSpecV0 subject predicate object true))
+
+(defrecord FieldSpecV0 [name: String annotation: String])
+(defrecord PrimSpecV0 [label: String spelling: String])
+(defrecord AppSpecV0 [label: String constructor: String arguments: (Vec String)])
+(defrecord UnionSpecV0 [label: String arguments: (Vec String)])
+(defrecord RecordSpecV0 [label: String name: String fields: (Vec FieldSpecV0)])
+(defrecord FunctionSpecV0
+  [label: String name: String parameters: (Vec FieldSpecV0) result: String])
+
+(defn sequence-facts [label: String items: (Vec String)] -> (Vec FactSpecV0)
+  (loop [index: Int 0 facts: (Vec FactSpecV0) [(tf label "form-kind" "seq")]]
+    (if (>= index (count items))
+      facts
+      (recur (+ index 1) (conj facts (nf label (str "a" index) (nth items index)))))))
+
+(defn prim-facts [spec: PrimSpecV0] -> (Vec FactSpecV0)
+  [(tf (primspecv0-label spec) "form-kind" "type-prim")
+   (tf (primspecv0-label spec) "name" (primspecv0-spelling spec))])
+
+(defn app-facts [spec: AppSpecV0] -> (Vec FactSpecV0)
+  (let [label: String (appspecv0-label spec)
+        arguments-label: String (str label "-args")]
+    (vec (concat
+           [(tf label "form-kind" "type-app")
+            (tf label "name" (appspecv0-constructor spec))
+            (nf label "args" arguments-label)]
+           (sequence-facts arguments-label (appspecv0-arguments spec))))))
+
+(defn union-facts [spec: UnionSpecV0] -> (Vec FactSpecV0)
+  (let [label: String (unionspecv0-label spec)
+        arguments-label: String (str label "-args")]
+    (vec (concat
+           [(tf label "form-kind" "type-union")
+            (nf label "args" arguments-label)]
+           (sequence-facts arguments-label (unionspecv0-arguments spec))))))
+
+(defn binding-label [owner: String name: String] -> String
+  (str owner "." name))
+
+(defn binding-facts [owner: String spec: FieldSpecV0] -> (Vec FactSpecV0)
+  (let [label: String (binding-label owner (fieldspecv0-name spec))]
+    [(tf label "form-kind" "param")
+     (tf label "name" (fieldspecv0-name spec))
+     (nf label "ann" (fieldspecv0-annotation spec))]))
+
+(defn binding-labels [owner: String specs: (Vec FieldSpecV0)] -> (Vec String)
+  (mapv (fn [spec: FieldSpecV0] -> String
+          (binding-label owner (fieldspecv0-name spec)))
+    specs))
+
+(defn binding-block [owner: String specs: (Vec FieldSpecV0)] -> (Vec FactSpecV0)
+  (loop [index: Int 0 facts: (Vec FactSpecV0) []]
+    (if (>= index (count specs))
+      facts
+      (recur (+ index 1)
+        (vec (concat facts (binding-facts owner (nth specs index))))))))
+
+(defn record-facts [spec: RecordSpecV0] -> (Vec FactSpecV0)
+  (let [label: String (recordspecv0-label spec)
+        fields-label: String (str label "-fields")
+        fields: (Vec FieldSpecV0) (recordspecv0-fields spec)]
+    (vec (concat
+           [(tf label "form-kind" "record")
+            (tf label "name" (recordspecv0-name spec))
+            (nf label "fields" fields-label)]
+           (sequence-facts fields-label (binding-labels label fields))
+           (binding-block label fields)))))
+
+(defn function-facts [spec: FunctionSpecV0] -> (Vec FactSpecV0)
+  (let [label: String (functionspecv0-label spec)
+        parameters-label: String (str label "-params")
+        parameters: (Vec FieldSpecV0) (functionspecv0-parameters spec)]
+    (vec (concat
+           [(tf label "form-kind" "defn")
+            (tf label "name" (functionspecv0-name spec))
+            (nf label "params" parameters-label)
+            (nf label "ret" (functionspecv0-result spec))]
+           (sequence-facts parameters-label (binding-labels label parameters))
+           (binding-block label parameters)))))
+
+(def primitive-specs: (Vec PrimSpecV0)
+  [(->PrimSpecV0 "ty-Int" "Int")
+   (->PrimSpecV0 "ty-String" "String")
+   (->PrimSpecV0 "ty-Bool" "Bool")
+   (->PrimSpecV0 "ty-Float" "Float")
+   (->PrimSpecV0 "ty-Keyword" "Keyword")
+   (->PrimSpecV0 "ty-Nil" "Nil")
+   (->PrimSpecV0 "ty-Any" "Any")
+   (->PrimSpecV0 "ty-SpaceId" "SpaceId")
+   (->PrimSpecV0 "ty-Instant" "t/Instant")
+   (->PrimSpecV0 "ty-Triple" "t/Triple")
+   (->PrimSpecV0 "ty-AtomRow" "t/AtomRow")
+   (->PrimSpecV0 "ty-TripleRow" "t/TripleRow")
+   (->PrimSpecV0 "ty-TermBucket" "t/TermBucket")
+   (->PrimSpecV0 "ty-TransactionRow" "t/TransactionRow")
+   (->PrimSpecV0 "ty-OperationRow" "t/OperationRow")
+   (->PrimSpecV0 "ty-ActiveBucket" "t/ActiveBucket")
+   (->PrimSpecV0 "ty-CommitOperation" "t/CommitOperation")
+   (->PrimSpecV0 "ty-TransactionFrame" "t/TransactionFrame")
+   (->PrimSpecV0 "ty-TermStore" "t/TermStore")
+   (->PrimSpecV0 "ty-TermStoreDump" "t/TermStoreDump")
+   (->PrimSpecV0 "ty-Fold" "Fold")])
+
+(def application-specs: (Vec AppSpecV0)
+  [(->AppSpecV0 "ty-VecTriple" "Vec" ["ty-Triple"])
+   (->AppSpecV0 "ty-VecInt" "Vec" ["ty-Int"])
+   (->AppSpecV0 "ty-VecBool" "Vec" ["ty-Bool"])
+   (->AppSpecV0 "ty-VecAtomRow" "Vec" ["ty-AtomRow"])
+   (->AppSpecV0 "ty-VecTripleRow" "Vec" ["ty-TripleRow"])
+   (->AppSpecV0 "ty-VecTermBucket" "Vec" ["ty-TermBucket"])
+   (->AppSpecV0 "ty-VecTransactionRow" "Vec" ["ty-TransactionRow"])
+   (->AppSpecV0 "ty-VecOperationRow" "Vec" ["ty-OperationRow"])
+   (->AppSpecV0 "ty-VecActiveBucket" "Vec" ["ty-ActiveBucket"])
+   (->AppSpecV0 "ty-VecCommitOperation" "Vec" ["ty-CommitOperation"])
+   (->AppSpecV0 "ty-VecTransactionFrame" "Vec" ["ty-TransactionFrame"])
+   (->AppSpecV0 "ty-AtomTermStore" "Atom" ["ty-TermStore"])])
+
+;; `T?` in the Fram source is a two-arm optional; the source projection carries
+;; it as the closed union it desugars to.
+(def optional-specs: (Vec UnionSpecV0)
+  [(->UnionSpecV0 "ty-StringOpt" ["ty-String" "ty-Nil"])
+   (->UnionSpecV0 "ty-IntOpt" ["ty-Int" "ty-Nil"])
+   (->UnionSpecV0 "ty-FloatOpt" ["ty-Float" "ty-Nil"])
+   (->UnionSpecV0 "ty-BoolOpt" ["ty-Bool" "ty-Nil"])
+   (->UnionSpecV0 "ty-KeywordOpt" ["ty-Keyword" "ty-Nil"])
+   (->UnionSpecV0 "ty-InstantOpt" ["ty-Instant" "ty-Nil"])])
+
+(def record-specs: (Vec RecordSpecV0)
+  [(->RecordSpecV0 "rec-Fold" "Fold"
+     [(->FieldSpecV0 "space-id" "ty-String")
+      (->FieldSpecV0 "history" "ty-VecTriple")
+      (->FieldSpecV0 "live-occurrences" "ty-VecTriple")
+      (->FieldSpecV0 "live-propositions" "ty-VecTriple")
+      (->FieldSpecV0 "version" "ty-Int")
+      (->FieldSpecV0 "dump" "ty-TermStoreDump")])
+   (->RecordSpecV0 "rec-Instant" "Instant"
+     [(->FieldSpecV0 "epoch-seconds" "ty-Int")
+      (->FieldSpecV0 "nanos" "ty-Int")])
+   (->RecordSpecV0 "rec-Triple" "Triple"
+     [(->FieldSpecV0 "slot0" "ty-Any")
+      (->FieldSpecV0 "slot1" "ty-Any")
+      (->FieldSpecV0 "slot2" "ty-Any")])
+   (->RecordSpecV0 "rec-AtomRow" "AtomRow"
+     [(->FieldSpecV0 "kind" "ty-Keyword")
+      (->FieldSpecV0 "string-value" "ty-StringOpt")
+      (->FieldSpecV0 "int-value" "ty-IntOpt")
+      (->FieldSpecV0 "float-value" "ty-FloatOpt")
+      (->FieldSpecV0 "bool-value" "ty-BoolOpt")
+      (->FieldSpecV0 "keyword-value" "ty-KeywordOpt")
+      (->FieldSpecV0 "instant-value" "ty-InstantOpt")])
+   (->RecordSpecV0 "rec-TripleRow" "TripleRow"
+     [(->FieldSpecV0 "slot0" "ty-Int")
+      (->FieldSpecV0 "slot1" "ty-Int")
+      (->FieldSpecV0 "slot2" "ty-Int")])
+   (->RecordSpecV0 "rec-TermBucket" "TermBucket"
+     [(->FieldSpecV0 "key" "ty-Int")
+      (->FieldSpecV0 "positions" "ty-VecInt")])
+   (->RecordSpecV0 "rec-TransactionRow" "TransactionRow"
+     [(->FieldSpecV0 "sequence" "ty-Int")
+      (->FieldSpecV0 "first-operation" "ty-Int")
+      (->FieldSpecV0 "operation-count" "ty-Int")])
+   (->RecordSpecV0 "rec-OperationRow" "OperationRow"
+     [(->FieldSpecV0 "tx-sequence" "ty-Int")
+      (->FieldSpecV0 "ordinal" "ty-Int")
+      (->FieldSpecV0 "action" "ty-Keyword")
+      (->FieldSpecV0 "triple-handle" "ty-Int")])
+   (->RecordSpecV0 "rec-ActiveBucket" "ActiveBucket"
+     [(->FieldSpecV0 "triple-handle" "ty-Int")
+      (->FieldSpecV0 "positions" "ty-VecInt")])
+   (->RecordSpecV0 "rec-CommitOperation" "CommitOperation"
+     [(->FieldSpecV0 "action" "ty-Keyword")
+      (->FieldSpecV0 "proposition" "ty-Triple")])
+   (->RecordSpecV0 "rec-TransactionFrame" "TransactionFrame"
+     [(->FieldSpecV0 "sequence" "ty-Int")
+      (->FieldSpecV0 "operations" "ty-VecCommitOperation")])
+   (->RecordSpecV0 "rec-TermStore" "TermStore"
+     [(->FieldSpecV0 "space-id" "ty-SpaceId")
+      (->FieldSpecV0 "next-sequence" "ty-Int")
+      (->FieldSpecV0 "atoms" "ty-VecAtomRow")
+      (->FieldSpecV0 "triples" "ty-VecTripleRow")
+      (->FieldSpecV0 "transactions" "ty-VecTransactionRow")
+      (->FieldSpecV0 "operations" "ty-VecOperationRow")
+      (->FieldSpecV0 "operation-live" "ty-VecBool")
+      (->FieldSpecV0 "withdrawal-targets" "ty-VecInt")
+      (->FieldSpecV0 "active-buckets" "ty-VecActiveBucket")
+      (->FieldSpecV0 "atom-slots" "ty-VecTermBucket")
+      (->FieldSpecV0 "triple-slots" "ty-VecTermBucket")
+      (->FieldSpecV0 "active-slots" "ty-VecTermBucket")])
+   (->RecordSpecV0 "rec-TermStoreDump" "TermStoreDump"
+     [(->FieldSpecV0 "version" "ty-Int")
+      (->FieldSpecV0 "space-id" "ty-SpaceId")
+      (->FieldSpecV0 "next-sequence" "ty-Int")
+      (->FieldSpecV0 "atoms" "ty-VecAtomRow")
+      (->FieldSpecV0 "triples" "ty-VecTripleRow")
+      (->FieldSpecV0 "transactions" "ty-VecTransactionRow")
+      (->FieldSpecV0 "operations" "ty-VecOperationRow")])])
+
+;; No `native-op` fact is carried: none of the five fold bodies is one of the
+;; three operations typed-to-native lowering implements, so each stays an
+;; explicit obligation rather than a fabricated body.
+(def function-specs: (Vec FunctionSpecV0)
+  [(->FunctionSpecV0 "fn-transaction-frame" "transaction-frame"
+     [(->FieldSpecV0 "sequence" "ty-Int")
+      (->FieldSpecV0 "operations" "ty-VecCommitOperation")]
+     "ty-TransactionFrame")
+   (->FunctionSpecV0 "fn-max-sequence" "max-sequence"
+     [(->FieldSpecV0 "frames" "ty-VecTransactionFrame")]
+     "ty-Int")
+   (->FunctionSpecV0 "fn-project" "project"
+     [(->FieldSpecV0 "ctx" "ty-AtomTermStore")]
+     "ty-Fold")
+   (->FunctionSpecV0 "fn-fold" "fold!"
+     [(->FieldSpecV0 "space-id" "ty-String")
+      (->FieldSpecV0 "frames" "ty-VecTransactionFrame")]
+     "ty-Fold")
+   (->FunctionSpecV0 "fn-refold" "refold!"
+     [(->FieldSpecV0 "space-id" "ty-String")
+      (->FieldSpecV0 "dump" "ty-Any")]
+     "ty-Fold")])
+
+(defn primitive-block [specs: (Vec PrimSpecV0)] -> (Vec FactSpecV0)
+  (loop [index: Int 0 facts: (Vec FactSpecV0) []]
+    (if (>= index (count specs))
+      facts
+      (recur (+ index 1) (vec (concat facts (prim-facts (nth specs index))))))))
+
+(defn application-block [specs: (Vec AppSpecV0)] -> (Vec FactSpecV0)
+  (loop [index: Int 0 facts: (Vec FactSpecV0) []]
+    (if (>= index (count specs))
+      facts
+      (recur (+ index 1) (vec (concat facts (app-facts (nth specs index))))))))
+
+(defn optional-block [specs: (Vec UnionSpecV0)] -> (Vec FactSpecV0)
+  (loop [index: Int 0 facts: (Vec FactSpecV0) []]
+    (if (>= index (count specs))
+      facts
+      (recur (+ index 1) (vec (concat facts (union-facts (nth specs index))))))))
+
+(defn record-block [specs: (Vec RecordSpecV0)] -> (Vec FactSpecV0)
+  (loop [index: Int 0 facts: (Vec FactSpecV0) []]
+    (if (>= index (count specs))
+      facts
+      (recur (+ index 1) (vec (concat facts (record-facts (nth specs index))))))))
+
+(defn function-block [specs: (Vec FunctionSpecV0)] -> (Vec FactSpecV0)
+  (loop [index: Int 0 facts: (Vec FactSpecV0) []]
+    (if (>= index (count specs))
+      facts
+      (recur (+ index 1) (vec (concat facts (function-facts (nth specs index))))))))
+
+(def slice-facts: (Vec FactSpecV0)
+  (vec (concat
+         (primitive-block primitive-specs)
+         (application-block application-specs)
+         (optional-block optional-specs)
+         (record-block record-specs)
+         (function-block function-specs))))
+
+(defn string-in? [items: (Vec String) value: String] -> Bool
+  (loop [index: Int 0]
+    (if (>= index (count items))
+      false
+      (if (= value (nth items index)) true (recur (+ index 1))))))
+
+(defn add-once [items: (Vec String) value: String] -> (Vec String)
+  (if (string-in? items value) items (conj items value)))
+
+(def node-labels: (Vec String)
+  (loop [index: Int 0 labels: (Vec String) [module-name]]
+    (if (>= index (count slice-facts))
+      labels
+      (let [fact: FactSpecV0 (nth slice-facts index)
+            with-subject: (Vec String) (add-once labels (factspecv0-subject fact))]
+        (recur (+ index 1)
+          (if (factspecv0-text-object fact)
+            with-subject
+            (add-once with-subject (factspecv0-object fact))))))))
+
+(def text-values: (Vec String)
+  (loop [index: Int 0 values: (Vec String) []]
+    (if (>= index (count slice-facts))
+      values
+      (let [fact: FactSpecV0 (nth slice-facts index)
+            with-predicate: (Vec String) (add-once values (factspecv0-predicate fact))]
+        (recur (+ index 1)
+          (if (factspecv0-text-object fact)
+            (add-once with-predicate (factspecv0-object fact))
+            with-predicate))))))
+
+(def marker-nodes: (Vec worlds/TermNodeV0)
+  (mapv
+    (fn [label: String] -> worlds/TermNodeV0
+      (worlds/->TermNodeV0 (node-id label) (worlds/->TextTermV0 "source-node-v0")))
+    node-labels))
+
+(def text-nodes: (Vec worlds/TermNodeV0)
+  (mapv
+    (fn [value: String] -> worlds/TermNodeV0
+      (worlds/->TermNodeV0 (text-id value) (worlds/->TextTermV0 value)))
+    text-values))
+
+(def fact-nodes: (Vec worlds/TermNodeV0)
+  (loop [index: Int 0 nodes: (Vec worlds/TermNodeV0) []]
+    (if (>= index (count slice-facts))
+      nodes
+      (let [fact: FactSpecV0 (nth slice-facts index)]
+        (recur (+ index 1)
+          (conj nodes
+            (worlds/->TermNodeV0
+              (slice-id "fact" (str index))
+              (worlds/->TripleTermV0
+                (node-id (factspecv0-subject fact))
+                (text-id (factspecv0-predicate fact))
+                (if (factspecv0-text-object fact)
+                  (text-id (factspecv0-object fact))
+                  (node-id (factspecv0-object fact)))))))))))
+
+(def source-world: worlds/SourceProgramWorldV0
+  (worlds/->SourceProgramWorldV0
+    (worlds/->TermGraphV0 (node-id module-name)
+      (vec (concat marker-nodes text-nodes fact-nodes)))
+    [(worlds/->SourceModuleV0
+       (slice-id "module" module-name)
+       module-name
+       module-path
+       "fram-fold-source-v0"
+       "fram-fold-interface-v0"
+       (node-id module-name))]
+    []
+    []))
+
+;; The pipeline is a call, not a load-time def: a rejected stage has to be
+;; reportable rather than fatal to loading this module.
+(defrecord SliceStateV0
+  [source-receipt: core/PassReceiptV0
+   typed-receipt: core/PassReceiptV0
+   native-receipt: core/PassReceiptV0
+   program: core/NativeWorld
+   complete: Bool
+   host-erased: Bool])
+
+(defn seal-result [] -> lower/SourceSealResultV0
+  (lower/seal-source-world source-world compiler-commit configuration))
+
+(defn require-sealed-source
+  [result: lower/SourceSealResultV0] -> worlds/SealedSourceWorldV0
+  (if (instance? native.lower.SourceSealAcceptedV0 result)
+    (lower/sourcesealacceptedv0-sealed result)
+    (throw (ex-info "fram.fold source world was rejected at seal" {}))))
+
+(defn typing-result [] -> lower/TypingResultV0
+  (lower/lower-typed-world (require-sealed-source (seal-result))
+    compiler-commit configuration))
+
+(defn typing-accepted? [result: lower/TypingResultV0] -> Bool
+  (instance? native.lower.TypingAcceptedV0 result))
+
+(defn typing-receipt [result: lower/TypingResultV0] -> core/PassReceiptV0
+  (if (typing-accepted? result)
+    (lower/typingacceptedv0-receipt result)
+    (lower/typingrejectedv0-receipt result)))
+
+(defn require-typing-accepted
+  [result: lower/TypingResultV0] -> lower/TypingResultV0
+  (if (typing-accepted? result)
+    result
+    (throw (ex-info "fram.fold annotations did not close over Native Core types" {}))))
+
+(defn native-sealed
+  [result: lower/NativeLoweringResultV0] -> worlds/SealedNativeWorldV0
+  (if (instance? native.lower.NativeLoweringCompleteV0 result)
+    (lower/nativeloweringcompletev0-sealed result)
+    (lower/nativeloweringpendingv0-sealed result)))
+
+(defn native-receipt
+  [result: lower/NativeLoweringResultV0] -> core/PassReceiptV0
+  (if (instance? native.lower.NativeLoweringCompleteV0 result)
+    (lower/nativeloweringcompletev0-receipt result)
+    (lower/nativeloweringpendingv0-receipt result)))
+
+(defn slice-state [] -> SliceStateV0
+  (let [sealed-result: lower/SourceSealResultV0 (seal-result)
+        sealed-source: worlds/SealedSourceWorldV0 (require-sealed-source sealed-result)
+        typed: lower/TypingResultV0
+        (require-typing-accepted
+          (lower/lower-typed-world sealed-source compiler-commit configuration))
+        native: lower/NativeLoweringResultV0
+        (lower/lower-native-world
+          (lower/typingacceptedv0-sealed typed)
+          (lower/typingacceptedv0-slice typed)
+          compiler-commit
+          configuration)
+        sealed-native: worlds/SealedNativeWorldV0 (native-sealed native)]
+    (->SliceStateV0
+      (lower/sourcesealacceptedv0-receipt sealed-result)
+      (lower/typingacceptedv0-receipt typed)
+      (native-receipt native)
+      (worlds/nativeworldv0-program (worlds/sealednativeworldv0-world sealed-native))
+      (instance? native.lower.NativeLoweringCompleteV0 native)
+      (lower/native-world-host-erased? sealed-native))))
+
+(def obligation-names: (Vec String)
+  ["valid-ssa" "exhaustive-matches" "closed-layouts" "checked-arithmetic"
+   "legal-abi" "discharged-tokens" "bounded-effects"])
+
+(defn obligation-report [program: core/NativeWorld] -> String
+  (let [verdicts: (Vec obligations/ObligationVerdictV0)
+        (obligations/validate-native-world program)]
+    (loop [index: Int 0 lines: (Vec String) []]
+      (if (>= index (count verdicts))
+        (c17/join-lines lines)
+        (recur (+ index 1)
+          (conj lines
+            (str (nth obligation-names index) ": "
+              (if (obligations/obligation-passed? (nth verdicts index)) "pass" "FAIL"))))))))
+
+(defn receipt-obligation-line [obligation: core/ReceiptObligationV0] -> String
+  (str "  " (if (core/receiptobligationv0-passed obligation) "discharged" "PENDING")
+    ": " (core/receiptobligationv0-detail obligation)))
+
+(defn receipt-report [label: String receipt: core/PassReceiptV0] -> String
+  (let [obligations-list: (Vec core/ReceiptObligationV0)
+        (core/passreceiptv0-obligations receipt)]
+    (loop [index: Int 0 lines: (Vec String) [(str label ":")]]
+      (if (>= index (count obligations-list))
+        (c17/join-lines lines)
+        (recur (+ index 1)
+          (conj lines (receipt-obligation-line (nth obligations-list index))))))))
+
+(defn diagnostic-report [label: String receipt: core/PassReceiptV0] -> String
+  (let [diagnostics: (Vec core/DiagnosticV0) (core/passreceiptv0-diagnostics receipt)]
+    (loop [index: Int 0 lines: (Vec String) [(str label ":")]]
+      (if (>= index (count diagnostics))
+        (c17/join-lines lines)
+        (let [diagnostic: core/DiagnosticV0 (nth diagnostics index)]
+          (recur (+ index 1)
+            (conj lines
+              (str "  " (core/diagnosticv0-code diagnostic) ": "
+                (core/diagnosticv0-detail diagnostic)))))))))
+
+(defn require-artifact [result: c17/C17Materialization] -> c17/C17Artifact
+  (if (instance? native.fold-c17.C17Success result)
+    (c17/c17success-artifact result)
+    (throw (ex-info (c17/c17failure-detail result) {}))))
+
+(defn emitted-types [program: core/NativeWorld] -> (Vec core/TypeDef)
+  (c17/dependency-ordered-types
+    (core/nativeworld-types program)
+    (core/nativeworld-layouts program)))
+
+(defn probe-arena-bytes [program: core/NativeWorld] -> Int
+  (let [types: (Vec core/TypeDef) (emitted-types program)]
+    (loop [index: Int 0 total: Int 64]
+      (if (>= index (count types))
+        total
+        (let [layout: (U core/LayoutDef Nil)
+              (c17/layout-for-type (core/nativeworld-layouts program)
+                (core/typedef-id (nth types index)))]
+          (recur (+ index 1)
+            (if (nil? layout)
+              total
+              (+ total (+ (core/layoutdef-size-bytes layout)
+                          (core/layoutdef-align-bytes layout))))))))))
+
+(defn probe-call-lines [program: core/NativeWorld] -> String
+  (let [types: (Vec core/TypeDef) (emitted-types program)]
+    (loop [index: Int 0 lines: (Vec String) []]
+      (if (>= index (count types))
+        (c17/join-lines lines)
+        (let [name: String (c17/type-name 0 index)]
+          (recur (+ index 1)
+            (conj lines
+              (str "  if (probe_type(&arena, sizeof(" name "), _Alignof(" name ")) != 0) {\n"
+                "    return " (+ index 1) ";\n"
+                "  }"))))))))
+
+(defn probe-main-text [program: core/NativeWorld] -> String
+  (str "/* Generated by native.fold-slice-corpus; do not edit. */\n"
+    "#include \"module_0.h\"\n\n"
+    "static int probe_type(native_arena *arena, size_t size, size_t align) {\n"
+    "  uint8_t *slot = native_arena_alloc(arena, size, align);\n"
+    "  if (slot == NULL) {\n"
+    "    return 1;\n"
+    "  }\n"
+    "  if ((((uintptr_t)slot) % (uintptr_t)align) != (uintptr_t)0) {\n"
+    "    return 2;\n"
+    "  }\n"
+    "  for (size_t index = 0U; index < size; index++) {\n"
+    "    slot[index] = (uint8_t)(index & 0xFFU);\n"
+    "  }\n"
+    "  for (size_t index = 0U; index < size; index++) {\n"
+    "    if (slot[index] != (uint8_t)(index & 0xFFU)) {\n"
+    "      return 3;\n"
+    "    }\n"
+    "  }\n"
+    "  return 0;\n"
+    "}\n\n"
+    "int main(void) {\n"
+    "  static uint8_t storage[" (probe-arena-bytes program) "];\n"
+    "  native_arena arena;\n"
+    "  native_arena_init(&arena, storage, sizeof(storage));\n"
+    (probe-call-lines program)
+    "  native_arena_reset(&arena);\n"
+    "  return 0;\n"
+    "}\n"))
+
+(defn slice-report-text [state: SliceStateV0] -> String
+  (let [program: core/NativeWorld (slicestatev0-program state)]
+    (str "fram.fold Native Core slice\n"
+      "source: fram:" module-path "\n"
+      "types: " (count (core/nativeworld-types program)) "\n"
+      "layouts: " (count (core/nativeworld-layouts program)) "\n"
+      "functions: " (count (core/nativeworld-functions program)) "\n"
+      "abis: " (count (core/nativeworld-abis program)) "\n"
+      "native lowering complete: " (if (slicestatev0-complete state) "yes" "no") "\n"
+      "native terms host-erased: " (if (slicestatev0-host-erased state) "yes" "no") "\n"
+      "core validator: "
+      (if (core/validationreport-passed (core/validate-world program)) "pass" "FAIL") "\n\n"
+      "seven structural obligations (native.obligations/validate-native-world):\n"
+      (obligation-report program)
+      "\n"
+      (receipt-report "source-seal receipt obligations" (slicestatev0-source-receipt state))
+      "\n"
+      (receipt-report "source-to-typed receipt obligations" (slicestatev0-typed-receipt state))
+      "\n"
+      (diagnostic-report "source-to-typed diagnostics" (slicestatev0-typed-receipt state))
+      "\n"
+      (receipt-report "typed-to-native receipt obligations" (slicestatev0-native-receipt state))
+      "\n"
+      (diagnostic-report "typed-to-native diagnostics" (slicestatev0-native-receipt state)))))
+
+(defn emit-slice! [directory: String] -> Nil
+  (let [state: SliceStateV0 (slice-state)
+        program: core/NativeWorld (slicestatev0-program state)
+        artifact: c17/C17Artifact (require-artifact (c17/materialize-world program 0))]
+    (do
+      (spit (str directory "/" (c17/c17artifact-header-name artifact))
+        (c17/c17artifact-header-text artifact))
+      (spit (str directory "/" (c17/c17artifact-source-name artifact))
+        (c17/c17artifact-source-text artifact))
+      (spit (str directory "/main.c") (probe-main-text program))
+      (spit (str directory "/slice-report.txt") (slice-report-text state)))))
