@@ -1,0 +1,297 @@
+;; @upstream:graph — text arm authorized for Stage 4; reconcile after landing.
+(ns native.obligations
+  (:require [native.core :as core
+             :refer [ReturnTerminator JumpTerminator BranchTerminator
+                     SwitchTerminator TrapTerminator]]))
+
+(define-mode strict)
+
+(defunion ObligationVerdictV0
+  (ObligationPassV0 [code :- core/ObligationCode])
+  (ValidSsaDiagnosticV0 [function-id :- core/NativeId])
+  (ExhaustiveMatchesDiagnosticV0 [function-id :- core/NativeId])
+  (ClosedLayoutsDiagnosticV0 [type-id :- core/NativeId])
+  (CheckedArithmeticDiagnosticV0 [function-id :- core/NativeId])
+  (LegalAbiDiagnosticV0 [abi-id :- core/NativeId])
+  (DischargedTokensDiagnosticV0 [function-id :- core/NativeId])
+  (BoundedEffectsDiagnosticV0 [function-id :- core/NativeId]))
+
+(defrecord DefSiteV0
+  [found :- Bool function-parameter :- Bool block-id :- core/NativeId
+   position :- Int type-id :- core/NativeId])
+
+(defn obligation-id [name :- String] :- core/NativeId
+  (core/canonical-id "native-obligations-v0" [name]))
+
+(defn obligation-passed? [verdict :- ObligationVerdictV0] :- Bool
+  (match verdict
+    [(ObligationPassV0 code) true]
+    [(ValidSsaDiagnosticV0 function-id) false]
+    [(ExhaustiveMatchesDiagnosticV0 function-id) false]
+    [(ClosedLayoutsDiagnosticV0 type-id) false]
+    [(CheckedArithmeticDiagnosticV0 function-id) false]
+    [(LegalAbiDiagnosticV0 abi-id) false]
+    [(DischargedTokensDiagnosticV0 function-id) false]
+    [(BoundedEffectsDiagnosticV0 function-id) false]))
+
+(defn find-block [blocks :- (Vec core/BasicBlock) block-id :- core/NativeId]
+  :- (U core/BasicBlock Nil)
+  (loop [index :- Int 0]
+    (cond
+      (>= index (count blocks)) nil
+      (core/native-id= (core/basicblock-id (nth blocks index)) block-id)
+      (nth blocks index)
+      :else (recur (+ index 1)))))
+
+(defn parameter-site [parameters :- (Vec core/Parameter) value-id :- core/NativeId]
+  :- DefSiteV0
+  (loop [index :- Int 0]
+    (if (>= index (count parameters))
+      (->DefSiteV0 false false (obligation-id "missing-block") -1
+        (obligation-id "missing-type"))
+      (let [parameter :- core/Parameter (nth parameters index)]
+        (if (core/native-id= (core/parameter-id parameter) value-id)
+          (->DefSiteV0 true true (obligation-id "function-parameter") -1
+            (core/parameter-type-id parameter))
+          (recur (+ index 1)))))))
+
+(defn block-parameter-site [block :- core/BasicBlock value-id :- core/NativeId]
+  :- DefSiteV0
+  (loop [index :- Int 0 parameters :- (Vec core/Parameter) (core/basicblock-parameters block)]
+    (if (>= index (count parameters))
+      (->DefSiteV0 false false (obligation-id "missing-block") -1
+        (obligation-id "missing-type"))
+      (let [parameter :- core/Parameter (nth parameters index)]
+        (if (core/native-id= (core/parameter-id parameter) value-id)
+          (->DefSiteV0 true false (core/basicblock-id block) -1
+            (core/parameter-type-id parameter))
+          (recur (+ index 1) parameters))))))
+
+(defn block-instruction-site [block :- core/BasicBlock value-id :- core/NativeId]
+  :- DefSiteV0
+  (loop [index :- Int 0 instructions :- (Vec core/Instruction) (core/basicblock-instructions block)]
+    (if (>= index (count instructions))
+      (->DefSiteV0 false false (obligation-id "missing-block") -1
+        (obligation-id "missing-type"))
+      (let [instruction :- core/Instruction (nth instructions index)
+            result :- core/SsaValueV0 (core/instruction-result instruction)]
+        (if (core/native-id= (core/ssavaluev0-id result) value-id)
+          (->DefSiteV0 true false (core/basicblock-id block) index
+            (core/ssavaluev0-type-id result))
+          (recur (+ index 1) instructions))))))
+
+(defn block-site [block :- core/BasicBlock value-id :- core/NativeId] :- DefSiteV0
+  (let [parameter-site-result :- DefSiteV0 (block-parameter-site block value-id)]
+    (if (defsitev0-found parameter-site-result)
+      parameter-site-result
+      (block-instruction-site block value-id))))
+
+(defn find-def-site [function :- core/FunctionDef value-id :- core/NativeId]
+  :- DefSiteV0
+  (let [function-site :- DefSiteV0
+        (parameter-site (core/functiondef-parameters function) value-id)]
+    (if (defsitev0-found function-site)
+      function-site
+      (loop [index :- Int 0 blocks :- (Vec core/BasicBlock) (core/functiondef-blocks function)]
+        (if (>= index (count blocks))
+          (->DefSiteV0 false false (obligation-id "missing-block") -1
+            (obligation-id "missing-type"))
+          (let [site :- DefSiteV0 (block-site (nth blocks index) value-id)]
+            (if (defsitev0-found site) site (recur (+ index 1) blocks))))))))
+
+(defn terminator-successors [terminator :- core/Terminator]
+  :- (Vec core/NativeId)
+  (match terminator
+    [(ReturnTerminator value) []]
+    [(JumpTerminator block-id arguments) [block-id]]
+    [(BranchTerminator condition true-block false-block)
+     [true-block false-block]]
+    [(SwitchTerminator value-id cases)
+     (mapv (fn [switch-case :- core/SwitchCaseV0] :- core/NativeId
+             (core/switchcasev0-block-id switch-case))
+       cases)]
+    [(TrapTerminator failure-id) []]))
+
+(defn block-successors [block :- core/BasicBlock] :- (Vec core/NativeId)
+  (if (= 1 (count (core/basicblock-terminators block)))
+    (terminator-successors (nth (core/basicblock-terminators block) 0))
+    []))
+
+(defn path-exists-avoiding? [blocks :- (Vec core/BasicBlock)
+                             current :- core/NativeId
+                             target :- core/NativeId
+                             avoided :- core/NativeId
+                             seen :- (Vec core/NativeId)] :- Bool
+  (cond
+    (core/native-id= current avoided) false
+    (core/native-id= current target) true
+    (core/id-in? seen current) false
+    :else
+    (let [block :- (U core/BasicBlock Nil) (find-block blocks current)]
+      (if (nil? block)
+        false
+        (loop [index :- Int 0 successors :- (Vec core/NativeId) (block-successors block)]
+          (cond
+            (>= index (count successors)) false
+            (path-exists-avoiding? blocks (nth successors index) target avoided
+              (conj seen current)) true
+            :else (recur (+ index 1) successors)))))))
+
+(defn value-dominates-use? [function :- core/FunctionDef
+                            use-block :- core/NativeId
+                            use-position :- Int
+                            value-id :- core/NativeId] :- Bool
+  (let [site :- DefSiteV0 (find-def-site function value-id)]
+    (cond
+      (not (defsitev0-found site)) false
+      (defsitev0-function-parameter site) true
+      (core/native-id= (defsitev0-block-id site) use-block)
+      (< (defsitev0-position site) use-position)
+      (core/native-id= (defsitev0-block-id site)
+        (core/functiondef-entry-block function)) true
+      :else
+      (not (path-exists-avoiding? (core/functiondef-blocks function)
+        (core/functiondef-entry-block function)
+        use-block
+        (defsitev0-block-id site)
+        [])))))
+
+(defn refs-dominate? [function :- core/FunctionDef block-id :- core/NativeId
+                      position :- Int refs :- (Vec core/NativeId)] :- Bool
+  (loop [index :- Int 0]
+    (if (>= index (count refs))
+      true
+      (if (value-dominates-use? function block-id position (nth refs index))
+        (recur (+ index 1))
+        false))))
+
+(defn block-uses-dominated? [function :- core/FunctionDef block :- core/BasicBlock]
+  :- Bool
+  (let [instructions :- (Vec core/Instruction) (core/basicblock-instructions block)
+        block-id :- core/NativeId (core/basicblock-id block)]
+    (and
+      (loop [index :- Int 0]
+        (if (>= index (count instructions))
+          true
+          (if (refs-dominate? function block-id index
+                (core/instruction-ssa-refs (nth instructions index)))
+            (recur (+ index 1))
+            false)))
+      (every? (fn [terminator :- core/Terminator] :- Bool
+                (refs-dominate? function block-id (count instructions)
+                  (core/terminator-ssa-refs terminator)))
+        (core/basicblock-terminators block)))))
+
+(defn arguments-match-parameters? [function :- core/FunctionDef
+                                   target-id :- core/NativeId
+                                   arguments :- (Vec core/NativeId)] :- Bool
+  (let [target :- (U core/BasicBlock Nil)
+        (find-block (core/functiondef-blocks function) target-id)]
+    (if (nil? target)
+      false
+      (let [parameters :- (Vec core/Parameter) (core/basicblock-parameters target)]
+        (and (= (count parameters) (count arguments))
+          (loop [index :- Int 0]
+            (if (>= index (count arguments))
+              true
+              (let [site :- DefSiteV0
+                    (find-def-site function (nth arguments index))]
+                (if (and (defsitev0-found site)
+                      (core/native-id= (defsitev0-type-id site)
+                        (core/parameter-type-id (nth parameters index))))
+                  (recur (+ index 1))
+                  false)))))))))
+
+(defn terminator-arguments-valid? [function :- core/FunctionDef
+                                   terminator :- core/Terminator] :- Bool
+  (match terminator
+    [(ReturnTerminator value) true]
+    [(JumpTerminator block-id arguments)
+     (arguments-match-parameters? function block-id arguments)]
+    [(BranchTerminator condition true-block false-block)
+     (and (arguments-match-parameters? function true-block [])
+       (arguments-match-parameters? function false-block []))]
+    [(SwitchTerminator value-id cases)
+     (every? (fn [switch-case :- core/SwitchCaseV0] :- Bool
+               (arguments-match-parameters? function
+                 (core/switchcasev0-block-id switch-case)
+                 (core/switchcasev0-arguments switch-case)))
+       cases)]
+    [(TrapTerminator failure-id) true]))
+
+(defn function-valid-ssa? [function :- core/FunctionDef] :- Bool
+  (and (core/unique-ids? (core/function-value-ids function))
+    (every? (fn [block :- core/BasicBlock] :- Bool
+              (and (block-uses-dominated? function block)
+                (every? (fn [terminator :- core/Terminator] :- Bool
+                          (terminator-arguments-valid? function terminator))
+                  (core/basicblock-terminators block))))
+      (core/functiondef-blocks function))))
+
+(defn valid-ssa [world :- core/NativeWorld] :- ObligationVerdictV0
+  (loop [index :- Int 0 functions :- (Vec core/FunctionDef)
+         (core/nativeworld-functions world)]
+    (if (>= index (count functions))
+      (->ObligationPassV0 (core/->ValidSsaObligation true))
+      (let [function :- core/FunctionDef (nth functions index)]
+        (if (function-valid-ssa? function)
+          (recur (+ index 1) functions)
+          (->ValidSsaDiagnosticV0 (core/functiondef-id function)))))))
+
+(def fixture-i64-type :- core/TypeDef
+  (core/->TypeDef (obligation-id "type-i64") "I64"
+    (core/->AtomType (core/->I64Kind true))))
+
+(def fixture-i64-layout :- core/LayoutDef
+  (core/->LayoutDef (obligation-id "layout-i64") (obligation-id "type-i64")
+    8 8 (core/->ScalarShapeV0 (core/->SignedIntReprV0 64))))
+
+(def fixture-function :- core/FunctionDef
+  (core/->FunctionDef (obligation-id "function-copy") "copy"
+    [(core/->Parameter (obligation-id "ssa-input") (obligation-id "type-i64"))]
+    [(core/->BasicBlock (obligation-id "block-entry") []
+       [(core/->CopyInstruction
+          (core/->SsaValueV0 (obligation-id "ssa-result")
+            (obligation-id "type-i64"))
+          (obligation-id "ssa-input"))]
+       [(core/->ReturnTerminator (obligation-id "ssa-result"))])]
+    (obligation-id "block-entry")
+    (obligation-id "type-i64")
+    [] [] []))
+
+(def valid-world :- core/NativeWorld
+  (apply core/->NativeWorld
+    [(obligation-id "world-valid") nil "obligations-v0"
+     [fixture-i64-type] [] [] [] [fixture-i64-layout] [fixture-function]
+     [] [] [] [] []]))
+
+(def invalid-ssa-function :- core/FunctionDef
+  (with fixture-function
+    [:blocks
+     [(core/->BasicBlock (obligation-id "block-entry") []
+        [(core/->CopyInstruction
+           (core/->SsaValueV0 (obligation-id "ssa-result")
+             (obligation-id "type-i64"))
+           (obligation-id "ssa-later"))
+         (core/->AtomInstruction
+           (core/->SsaValueV0 (obligation-id "ssa-later")
+             (obligation-id "type-i64"))
+           (core/->I64Atom 1))]
+        [(core/->ReturnTerminator (obligation-id "ssa-result"))])]]))
+
+(def invalid-ssa-world :- core/NativeWorld
+  (with valid-world [:functions [invalid-ssa-function]]))
+
+(def valid-ssa-positive :- Bool
+  (obligation-passed? (valid-ssa valid-world)))
+
+(def valid-ssa-negative :- Bool
+  (match (valid-ssa invalid-ssa-world)
+    [(ValidSsaDiagnosticV0 function-id) true]
+    [(ObligationPassV0 code) false]
+    [(ExhaustiveMatchesDiagnosticV0 function-id) false]
+    [(ClosedLayoutsDiagnosticV0 type-id) false]
+    [(CheckedArithmeticDiagnosticV0 function-id) false]
+    [(LegalAbiDiagnosticV0 abi-id) false]
+    [(DischargedTokensDiagnosticV0 function-id) false]
+    [(BoundedEffectsDiagnosticV0 function-id) false]))
