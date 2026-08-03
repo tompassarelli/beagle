@@ -143,7 +143,16 @@
   ;; tag is already proved, which is why it is reachable from a switch arm alone.
   (VariantValueInstruction
     [result: SsaValueV0 source-id: NativeId variant-id: NativeId])
-  (RecordInstruction [result: SsaValueV0 field-ids: (Vec NativeId)]))
+  (RecordInstruction [result: SsaValueV0 field-ids: (Vec NativeId)])
+  ;; Widening into a closed union is a tag inject: the payload is already the
+  ;; variant's declared type, so no check can fail and none is emitted.
+  (UnionConstructInstruction
+    [result: SsaValueV0 variant-id: NativeId payload-id: (U NativeId Nil)])
+  ;; The checked companion to SwitchTerminator: a Switch asks which variant a
+  ;; value carries, an extract asserts one. A tag mismatch traps rather than
+  ;; reinterpreting the payload bytes as the expected variant.
+  (UnionExtractInstruction
+    [result: SsaValueV0 source-id: NativeId variant-id: NativeId]))
 
 (defrecord SwitchCaseV0
   [variant-id: NativeId block-id: NativeId arguments: (Vec NativeId)])
@@ -295,7 +304,11 @@
     [(CompareInstruction result comparison left-id right-id) (ssavaluev0-id result)]
     [(FieldInstruction result source-id field-id) (ssavaluev0-id result)]
     [(VariantValueInstruction result source-id variant-id) (ssavaluev0-id result)]
-    [(RecordInstruction result field-ids) (ssavaluev0-id result)]))
+    [(RecordInstruction result field-ids) (ssavaluev0-id result)]
+    [(UnionConstructInstruction result variant-id payload-id)
+     (ssavaluev0-id result)]
+    [(UnionExtractInstruction result source-id variant-id)
+     (ssavaluev0-id result)]))
 
 (defn instruction-result-ids [instructions :- (Vec Instruction)] :- (Vec NativeId)
   (mapv (fn [instruction :- Instruction] :- NativeId (instruction-result-id instruction))
@@ -506,7 +519,11 @@
     [(FieldInstruction result source-id field-id) (id-in? known-owned field-id)]
     [(VariantValueInstruction result source-id variant-id)
      (id-in? known-owned variant-id)]
-    [(RecordInstruction result field-ids) true]))
+    [(RecordInstruction result field-ids) true]
+    [(UnionConstructInstruction result variant-id payload-id)
+     (id-in? known-owned variant-id)]
+    [(UnionExtractInstruction result source-id variant-id)
+     (id-in? known-owned variant-id)]))
 
 (defn parameter-types-closed? [parameters :- (Vec Parameter) known-types :- (Vec NativeId)] :- Bool
   (every? (fn [parameter :- Parameter] :- Bool (id-in? known-types (parameter-type-id parameter)))
@@ -594,7 +611,10 @@
     [(CompareInstruction result comparison left-id right-id) [left-id right-id]]
     [(FieldInstruction result source-id field-id) [source-id]]
     [(VariantValueInstruction result source-id variant-id) [source-id]]
-    [(RecordInstruction result field-ids) field-ids]))
+    [(RecordInstruction result field-ids) field-ids]
+    [(UnionConstructInstruction result variant-id payload-id)
+     (if (nil? payload-id) [] [payload-id])]
+    [(UnionExtractInstruction result source-id variant-id) [source-id]]))
 
 (defn terminator-ssa-refs [terminator :- Terminator] :- (Vec NativeId)
   (match terminator
@@ -653,7 +673,9 @@
     [(CompareInstruction result comparison left-id right-id) true]
     [(FieldInstruction result source-id field-id) true]
     [(VariantValueInstruction result source-id variant-id) true]
-    [(RecordInstruction result field-ids) true]))
+    [(RecordInstruction result field-ids) true]
+    [(UnionConstructInstruction result variant-id payload-id) true]
+    [(UnionExtractInstruction result source-id variant-id) true]))
 
 (defn block-resources-allowed? [block :- BasicBlock allowed-regions :- (Vec NativeId) allowed-capabilities :- (Vec NativeId)] :- Bool
   (every? (fn [instruction :- Instruction] :- Bool (instruction-resources-allowed? instruction allowed-regions allowed-capabilities))

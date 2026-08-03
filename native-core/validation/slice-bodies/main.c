@@ -1,8 +1,12 @@
 /* Probe for the lowered fram.types bodies. Hand-written; the module under it is
    generated. "trap" and "overflow" take a trapping path instead, which aborts.
    fn_0 instant?  fn_1 instant  fn_2 instant-shift-seconds
-   fn_3 instant-seconds-between  fn_4 triple?  fn_11 commit-operation?
-   SliceValue tags: 1 = i64, 6 = Instant, 7 = Triple, 22 = CommitOperation. */
+   fn_3 instant-seconds-between  fn_4 triple?
+   fn_11 rpc-page-request-cursor-value  fn_16 commit-operation?
+   SliceValue tags: 0 bool, 1 i64, 2 f64, 3 text, 4 keyword, 5 nil,
+   6 Instant, 7 Triple, 22 CommitOperation.
+   Term tags: 0 text, 1 i64, 2 f64, 3 bool, 4 keyword, 5 Instant, 6 Triple.
+   Term? tags: 0 Term, 1 nil. */
 #include "module_0.h"
 
 static native_m0_type_49 slice_reference(int64_t tag, void *target) {
@@ -18,6 +22,29 @@ static native_m0_type_49 slice_i64(int64_t number) {
   value.tag = INT64_C(1);
   value.payload.variant_1 = number;
   return value;
+}
+
+/* An RpcPageRequest whose cursor is present and carries the given Term. */
+static native_m0_type_66 page_request(native_m0_type_61 cursor) {
+  native_m0_type_66 request;
+  request.field_0 = INT64_C(10);
+  request.field_1.tag = INT64_C(0);
+  request.field_1.payload.variant_0 = cursor;
+  return request;
+}
+
+static native_m0_type_61 term_i64(int64_t number) {
+  native_m0_type_61 term;
+  term.tag = INT64_C(1);
+  term.payload.variant_1 = number;
+  return term;
+}
+
+static native_m0_type_61 term_triple(void *target) {
+  native_m0_type_61 term;
+  term.tag = INT64_C(6);
+  term.payload.variant_6 = target;
+  return term;
 }
 
 int main(int argc, char **argv) {
@@ -52,10 +79,10 @@ int main(int argc, char **argv) {
   if (native_m0_fn_4(as_instant) || native_m0_fn_4(as_number)) {
     return 4;
   }
-  if (!native_m0_fn_11(as_operation)) {
+  if (!native_m0_fn_16(as_operation)) {
     return 5;
   }
-  if (native_m0_fn_11(as_instant)) {
+  if (native_m0_fn_16(as_instant)) {
     return 6;
   }
 
@@ -94,6 +121,33 @@ int main(int argc, char **argv) {
   native_m0_type_6 edge = native_m0_fn_2(near, INT64_C(1));
   if (edge.field_0 != INT64_MAX) {
     return 16;
+  }
+
+  /* Term? -> SliceValue widening: every alternative re-tags into the closure
+     of Any, payload unchanged, and the absent cursor becomes the nil variant. */
+  {
+    native_m0_type_49 widened =
+      native_m0_fn_11(page_request(term_i64(INT64_C(77))));
+    if ((widened.tag != INT64_C(1)) || (widened.payload.variant_1 != INT64_C(77))) {
+      return 17;
+    }
+  }
+  {
+    native_m0_type_49 widened =
+      native_m0_fn_11(page_request(term_triple(&moment)));
+    if ((widened.tag != INT64_C(7)) || (widened.payload.variant_7 != &moment)) {
+      return 18;
+    }
+  }
+  {
+    native_m0_type_66 absent;
+    absent.field_0 = INT64_C(10);
+    absent.field_1.tag = INT64_C(1);
+    absent.field_1.payload.variant_1.tag = INT64_C(0);
+    native_m0_type_49 widened = native_m0_fn_11(absent);
+    if (widened.tag != INT64_C(5)) {
+      return 19;
+    }
   }
   return 0;
 }

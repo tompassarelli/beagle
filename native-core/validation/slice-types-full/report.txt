@@ -1,8 +1,8 @@
 stage source-seal ACCEPTED
 stage source-to-typed ACCEPTED
 stage typed-to-native PENDING
-world-types 51
-world-layouts 51
+world-types 71
+world-layouts 71
 world-functions 0
 world-abis 0
 projected-types 5
@@ -13,7 +13,7 @@ type TripleRow
 type TransactionRow
 obligation-world PASS valid-ssa
 obligation-world PASS exhaustive-matches
-obligation-world FAIL closed-layouts
+obligation-world PASS closed-layouts
 obligation-world PASS checked-arithmetic
 obligation-world PASS legal-abi
 obligation-world PASS discharged-tokens
@@ -25,33 +25,33 @@ obligation-projection PASS checked-arithmetic
 obligation-projection PASS legal-abi
 obligation-projection PASS discharged-tokens
 obligation-projection PASS bounded-effects
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for instant?
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for instant
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for triple?
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for rpc-page-request?
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for rpc-page-response?
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for rpc-error?
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for rpc-request?
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for rpc-response?
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for rpc-frame-v1?
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for rpc-page-request-cursor-value
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for rpc-page-response-cursor-value
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for rpc-error-detail-value
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for rpc-request-payload-value
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for rpc-response-payload-value
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for commit-operation?
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for transaction-frame?
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for term-store-dump?
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for atom?
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for term?
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for triple
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for transaction-coordinate
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for transaction-coordinate?
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for occurrence-coordinate
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for occurrence-coordinate?
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for assertion-occurrence
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for retraction-occurrence
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for withdrawal
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for recorded-at
-pending TODO-NATIVE-FUNCTION-BODY: native body lowering remains for occurrence-before?
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for instant?
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for instant
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for triple?
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for rpc-page-request?
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for rpc-page-response?
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for rpc-error?
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for rpc-request?
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for rpc-response?
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for rpc-frame-v1?
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for rpc-page-request-cursor-value
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for rpc-page-response-cursor-value
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for rpc-error-detail-value
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for rpc-request-payload-value
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for rpc-response-payload-value
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for commit-operation?
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for transaction-frame?
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for term-store-dump?
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for atom?
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for term?
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for triple
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for transaction-coordinate
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for transaction-coordinate?
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for occurrence-coordinate
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for occurrence-coordinate?
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for assertion-occurrence
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for retraction-occurrence
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for withdrawal
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for recorded-at
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for occurrence-before?
 materialize OK module_0.h module_0.c

@@ -51,9 +51,6 @@
           (instance? native.core.I64Atom atom)
           (instance? native.core.F64Atom atom)))
     (instance? native.core.CopyInstruction instruction) true
-    (instance? native.core.CheckedInstruction instruction)
-    (instance? native.core.CheckedAddI64V0
-      (core/checkedinstruction-operation instruction))
     (instance? native.core.CompareInstruction instruction) true
     (instance? native.core.FieldInstruction instruction) true
     (instance? native.core.RecordInstruction instruction) true
@@ -61,6 +58,8 @@
     (instance? native.core.VariantValueInstruction instruction) true
     (instance? native.core.CheckedInstruction instruction)
     (checked-operation-supported? (core/checkedinstruction-operation instruction))
+    (instance? native.core.UnionConstructInstruction instruction) true
+    (instance? native.core.UnionExtractInstruction instruction) true
     :else false))
 
 (defn terminator-supported? [terminator: core/Terminator] -> Bool
@@ -224,16 +223,6 @@
         position
         (recur (+ position 1))))))
 
-(defn emit-arguments
-  [function: core/FunctionDef slots: (Vec ValueSlotV0) arguments: (Vec core/NativeId)]
-  -> String
-  (loop [position: Int 0 result: String ""]
-    (if (>= position (count arguments))
-      result
-      (recur (+ position 1)
-        (str result (if (= position 0) "" ", ")
-          (value-name function slots (nth arguments position)))))))
-
 (defn variant-tag
   [layouts: (Vec core/LayoutDef) owner: core/NativeId variant: core/NativeId] -> Int
   (let [layout: (U core/LayoutDef Nil) (c17/layout-for-type layouts owner)]
@@ -249,6 +238,37 @@
                   variant)
               (core/unionvariantlayoutv0-tag (nth variants position))
               (recur (+ position 1)))))))))
+
+(defn type-with-id
+  [types: (Vec core/TypeDef) target: core/NativeId] -> (U core/TypeDef Nil)
+  (loop [position: Int 0]
+    (if (>= position (count types))
+      nil
+      (if (core/native-id= (core/typedef-id (nth types position)) target)
+        (nth types position)
+        (recur (+ position 1))))))
+
+;; A record inside a closed union is a reference, so a field read through it
+;; loads via the pointer and takes its layout from the reference target.
+(defn dereferenced-type
+  [types: (Vec core/TypeDef) target: core/NativeId] -> (U core/NativeId Nil)
+  (let [definition: (U core/TypeDef Nil) (type-with-id types target)]
+    (if (nil? definition)
+      nil
+      (let [shape: core/TypeShape (core/typedef-shape definition)]
+        (if (instance? native.core.ReferenceType shape)
+          (core/referencetype-target-type shape)
+          nil)))))
+
+(defn emit-arguments
+  [function: core/FunctionDef slots: (Vec ValueSlotV0) arguments: (Vec core/NativeId)]
+  -> String
+  (loop [position: Int 0 result: String ""]
+    (if (>= position (count arguments))
+      result
+      (recur (+ position 1)
+        (str result (if (= position 0) "" ", ")
+          (value-name function slots (nth arguments position)))))))
 
 (defn checked-builtin [operation: core/CheckedOperationV0] -> String
   (cond
@@ -285,15 +305,22 @@
   (let [outcome: core/NativeId (core/ssavaluev0-type-id result)
         ok-tag: Int (variant-tag layouts outcome (core/checked-ok-variant-id))
         overflow-tag: Int
-        (variant-tag layouts outcome (core/checked-overflow-variant-id))]
-    (str "  if (" (checked-builtin operation) "("
-      (value-name function slots (checked-left operation)) ", "
-      (value-name function slots (checked-right operation)) ", &"
-      target ".payload.variant_" ok-tag ")) {\n"
-      "    " target ".tag = INT64_C(" overflow-tag ");\n"
-      "  } else {\n"
-      "    " target ".tag = INT64_C(" ok-tag ");\n"
-      "  }\n")))
+        (variant-tag layouts outcome (core/checked-overflow-variant-id))
+        left: String (value-name function slots (checked-left operation))
+        right: String (value-name function slots (checked-right operation))]
+    ;; A checked op whose result type is not the Outcome union has no ok tag to
+    ;; write into, so the overflow decision has to become a trap on the spot.
+    (if (< ok-tag 0)
+      (str "  if (" (checked-builtin operation) "(" left ", " right ", &"
+        target ")) {\n"
+        "    native_trap(NATIVE_TRAP_OVERFLOW);\n"
+        "  }\n")
+      (str "  if (" (checked-builtin operation) "(" left ", " right ", &"
+        target ".payload.variant_" ok-tag ")) {\n"
+        "    " target ".tag = INT64_C(" overflow-tag ");\n"
+        "  } else {\n"
+        "    " target ".tag = INT64_C(" ok-tag ");\n"
+        "  }\n"))))
 
 (defn emit-instruction
   [types: (Vec core/TypeDef)
@@ -316,24 +343,6 @@
         (value-name function slots (core/copyinstruction-source-id instruction))
         ";\n")
 
-      ;; fold-c17 declares its own result; here the slot is already declared at
-      ;; the top of the function, so only the guard and the store are emitted.
-      (instance? native.core.CheckedInstruction instruction)
-      (let [operation: core/CheckedOperationV0
-            (core/checkedinstruction-operation instruction)
-            left: String
-            (value-name function slots (core/checkedaddi64v0-left-id operation))
-            right: String
-            (value-name function slots (core/checkedaddi64v0-right-id operation))]
-        (str
-          "  if (((" right " > INT64_C(0)) && (" left " > (INT64_MAX - " right
-          "))) ||\n"
-          "      ((" right " < INT64_C(0)) && (" left " < (INT64_MIN - " right
-          ")))) {\n"
-          "    native_trap(NATIVE_TRAP_OVERFLOW);\n"
-          "  }\n"
-          "  " target " = " left " + " right ";\n"))
-
       (instance? native.core.CompareInstruction instruction)
       (str "  " target " = ("
         (value-name function slots (core/compareinstruction-left-id instruction))
@@ -343,11 +352,46 @@
 
       (instance? native.core.FieldInstruction instruction)
       (let [source: core/NativeId (core/fieldinstruction-source-id instruction)
+            source-type: core/NativeId (slot-type function slots source)
+            pointee: (U core/NativeId Nil) (dereferenced-type types source-type)
+            owner: core/NativeId (if (nil? pointee) source-type pointee)
             position: Int
-            (field-position layouts (slot-type function slots source)
-              (core/fieldinstruction-field-id instruction))]
-        (str "  " target " = " (value-name function slots source)
-          ".field_" position ";\n"))
+            (field-position layouts owner
+              (core/fieldinstruction-field-id instruction))
+            access: String
+            (if (nil? pointee)
+              (str (value-name function slots source) ".")
+              (str "((" (c17/c-type types module-index owner) " *)"
+                (value-name function slots source) ")->"))]
+        (str "  " target " = " access "field_" position ";\n"))
+
+      (instance? native.core.UnionConstructInstruction instruction)
+      (let [union-type: core/NativeId (core/ssavaluev0-type-id result)
+            tag: Int
+            (variant-tag layouts union-type
+              (core/unionconstructinstruction-variant-id instruction))
+            payload: (U core/NativeId Nil)
+            (core/unionconstructinstruction-payload-id instruction)]
+        (if (nil? payload)
+          (str "  " target " = (" (c17/c-type types module-index union-type)
+            "){ .tag = INT64_C(" tag ") };\n")
+          (str "  " target " = (" (c17/c-type types module-index union-type)
+            "){ .tag = INT64_C(" tag "), .payload = { .variant_" tag " = "
+            (value-name function slots payload) " } };\n")))
+
+      ;; The tag test is the whole check: a mismatch must trap, never
+      ;; reinterpret the payload bytes as the expected variant.
+      (instance? native.core.UnionExtractInstruction instruction)
+      (let [source: core/NativeId
+            (core/unionextractinstruction-source-id instruction)
+            source-name: String (value-name function slots source)
+            tag: Int
+            (variant-tag layouts (slot-type function slots source)
+              (core/unionextractinstruction-variant-id instruction))]
+        (str "  if (" source-name ".tag != INT64_C(" tag ")) {\n"
+          "    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);\n"
+          "  }\n"
+          "  " target " = " source-name ".payload.variant_" tag ";\n"))
 
       (instance? native.core.CheckedInstruction instruction)
       (emit-checked-instruction layouts function slots target result

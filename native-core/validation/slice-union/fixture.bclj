@@ -1,0 +1,21 @@
+#lang beagle/clj
+;; The coercion rule's own fixture: the smallest module in which widening into
+;; the closure of Any and narrowing back out of it are both reachable from C.
+;; fram.types has no unguarded narrowing, so its slice cannot fire the trap.
+(ns fixture.union)
+(define-mode strict)
+
+(defrecord Pair [left: Int right: Int])
+
+(defn pair? [v: Any] -> Bool (instance? Pair v))
+
+;; Widening: the declared return closes to the Any union, so the body's Int is
+;; injected under the i64 tag. Nothing can fail.
+(defn wrap-int [v: Int] -> Any v)
+
+;; Narrowing: the accessor's operand is statically the union and the expected
+;; variant is known, so this is a direct checked extract. A value carrying any
+;; other tag traps instead of reading the payload as a Pair reference.
+(defn pair-left-of [v: Any] -> Int (pair-left v))
+
+(defn pair-right-of [v: Any] -> Int (pair-right v))

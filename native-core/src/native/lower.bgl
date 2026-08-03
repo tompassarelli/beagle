@@ -541,11 +541,31 @@
       (recur (+ position 1)
         (conj definitions (record-reference-type (nth record-names position)))))))
 
+;; A record enters every closed union by reference, as it enters Any: a by-value
+;; alternative has no address to hand a tag-inject coercion.
+(defn union-member-id
+  [record-names: (Vec String) member: core/NativeId] -> core/NativeId
+  (loop [position: Int 0]
+    (if (>= position (count record-names))
+      member
+      (let [name: String (nth record-names position)]
+        (if (same-id? member (type-id name))
+          (record-reference-type-id name)
+          (recur (+ position 1)))))))
+
+(defn union-member-ids
+  [record-names: (Vec String) ids: (Vec core/NativeId)] -> (Vec core/NativeId)
+  (mapv
+    (fn [member: core/NativeId] -> core/NativeId
+      (union-member-id record-names member))
+    ids))
+
 (defn lower-failure-type [] -> core/TypeDef
   (core/->TypeDef (type-id "LowerFailure") "LowerFailure"
     (core/->UnionType
       [(core/->TypeVariant (variant-id "LowerFailure" "invalid-term") "invalid-term" nil)
        (core/->TypeVariant (variant-id "LowerFailure" "invalid-coordinate") "invalid-coordinate" nil)
+       (core/->TypeVariant (variant-id "LowerFailure" "union-variant-mismatch") "union-variant-mismatch" nil)
        (core/->TypeVariant (variant-id "LowerFailure" "bounds") "bounds" nil)
        (core/->TypeVariant (variant-id "LowerFailure" "overflow") "overflow" nil)
        (core/->TypeVariant (variant-id "LowerFailure" "malformed-source") "malformed-source" nil)])))
@@ -585,6 +605,20 @@
     (if (>= index (count additions))
       current
       (recur (+ index 1) (append-type-def current (nth additions index))))))
+
+(defn union-member-definitions
+  [record-names: (Vec String)
+   ids: (Vec core/NativeId)
+   definitions: (Vec core/TypeDef)]
+  -> (Vec core/TypeDef)
+  (loop [position: Int 0 current: (Vec core/TypeDef) definitions]
+    (if (>= position (count record-names))
+      current
+      (let [name: String (nth record-names position)]
+        (recur (+ position 1)
+          (if (core/id-in? ids (type-id name))
+            (append-type-def current (record-reference-type name))
+            current))))))
 
 (defn builtin-types [record-names: (Vec String)] -> (Vec core/TypeDef)
   (append-type-defs
@@ -692,6 +726,7 @@
 (defn application-resolution
   [source-type: core/NativeId
    constructor: String
+   record-names: (Vec String)
    resolutions: (Vec TypeResolutionV0)]
   -> TypeResolutionV0
   (let [ids: (Vec core/NativeId) (resolution-ids resolutions)
@@ -733,12 +768,14 @@
           true))
 
       (or (= "Dyn" constructor) (= "U" constructor))
-      (let [id: core/NativeId
+      (let [members: (Vec core/NativeId) (union-member-ids record-names ids)
+            id: core/NativeId
             (lower-id "closed-union-type"
-              (mapv (fn [part: core/NativeId] -> String (id-value part)) ids))]
+              (mapv (fn [part: core/NativeId] -> String (id-value part)) members))]
         (->TypeResolutionV0 id
-          (append-type-def definitions
-            (core/->TypeDef id "ClosedUnion" (core/->UnionType (union-variants (id-value id) ids))))
+          (append-type-def
+            (union-member-definitions record-names ids definitions)
+            (core/->TypeDef id "ClosedUnion" (core/->UnionType (union-variants (id-value id) members))))
           diagnostics
           true))
 
@@ -792,7 +829,8 @@
                 (fn [argument: core/NativeId] -> TypeResolutionV0
                   (resolve-source-type index argument))
                 arguments)]
-          (application-resolution source-type spelling resolutions)))
+          (application-resolution source-type spelling
+            (sourceindexv0-record-names index) resolutions)))
 
       (or (= "type-union" kind) (= "union" kind))
       (let [arguments: (Vec core/NativeId) (source-type-arguments index source-type)
@@ -801,7 +839,8 @@
               (fn [argument: core/NativeId] -> TypeResolutionV0
                 (resolve-source-type index argument))
               arguments)]
-        (application-resolution source-type "U" resolutions))
+        (application-resolution source-type "U"
+          (sourceindexv0-record-names index) resolutions))
 
       :else
       (->TypeResolutionV0
@@ -1453,6 +1492,207 @@
         true
         (recur (+ position 1))))))
 
+;; Coercion rule (ratified, North thread 019fbd6c): widen = free tag inject,
+;; narrow = checked extract trapping to LowerFailure/union-variant-mismatch.
+;; SliceValue is confined to one sealed world, never a cross-world ABI type.
+(defn variant-for-payload
+  [variants: (Vec core/TypeVariant) payload: core/NativeId]
+  -> (U core/TypeVariant Nil)
+  (loop [position: Int 0]
+    (if (>= position (count variants))
+      nil
+      (let [variant: core/TypeVariant (nth variants position)
+            declared: (U core/NativeId Nil) (core/typevariant-payload-type variant)]
+        (if (nil? declared)
+          (recur (+ position 1))
+          (if (same-id? declared payload) variant (recur (+ position 1))))))))
+
+(defn payloadless-variants
+  [variants: (Vec core/TypeVariant)] -> (Vec core/TypeVariant)
+  (loop [position: Int 0 collected: (Vec core/TypeVariant) []]
+    (if (>= position (count variants))
+      collected
+      (let [variant: core/TypeVariant (nth variants position)]
+        (recur (+ position 1)
+          (if (nil? (core/typevariant-payload-type variant))
+            (conj collected variant)
+            collected))))))
+
+;; A recursive union must be refused, not looped over.
+(defn widen-budget [] -> Int 4)
+
+;; The absent alternative carries nothing to extract, so this arm injects the
+;; target's own unit variant and never reads the source payload.
+(defn widen-unit-arm
+  [state: BodyStateV0
+   owner: core/NativeId
+   label: String
+   variant-name: String
+   to: core/NativeId
+   unit-variants: (Vec core/TypeVariant)
+   join-id: core/NativeId]
+  -> BodyStateV0
+  (if (not (= 1 (count unit-variants)))
+    (state-fail state
+      (str "TODO-NATIVE-WIDEN-UNIT: " variant-name
+        " carries no value and the target has no unit alternative"))
+    (let [unit-id: core/NativeId (state-id state owner label)]
+      (state-close
+        (state-emit (state-bump state)
+          (core/->UnionConstructInstruction
+            (core/->SsaValueV0 unit-id to)
+            (core/typevariant-id (nth unit-variants 0))
+            nil))
+        (core/->JumpTerminator join-id [unit-id])))))
+
+(defn lower-widen
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   value-id: core/NativeId
+   from: core/NativeId
+   to: core/NativeId
+   budget: Int]
+  -> ExprResultV0
+  (cond
+    (state-blocked? state) (dead-result state)
+
+    (same-id? from to) (->ExprResultV0 state value-id to false)
+
+    (< budget 0)
+    (fail-result state
+      "TODO-NATIVE-WIDEN-DEPTH: closed-union coercion nested past the v0 budget")
+
+    :else
+    (let [target-variants: (Vec core/TypeVariant) (union-variants-of types to)
+          direct: (U core/TypeVariant Nil)
+          (variant-for-payload target-variants from)
+          unit-variants: (Vec core/TypeVariant)
+          (payloadless-variants target-variants)
+          source-variants: (Vec core/TypeVariant) (union-variants-of types from)]
+      (cond
+        (= 0 (count target-variants))
+        (fail-result state
+          "TODO-NATIVE-WIDEN-TARGET: the declared type is not a closed union")
+
+        (some? direct)
+        (let [result-id: core/NativeId (state-id state owner "inject")]
+          (->ExprResultV0
+            (state-emit (state-bump state)
+              (core/->UnionConstructInstruction
+                (core/->SsaValueV0 result-id to)
+                (core/typevariant-id direct)
+                value-id))
+            result-id to false))
+
+        ;; Nil is the absence of a value, so it widens to the target's own
+        ;; payload-less alternative rather than to a variant carrying Unit.
+        (and (same-id? from (type-id "Nil")) (= 1 (count unit-variants)))
+        (let [result-id: core/NativeId (state-id state owner "inject-unit")]
+          (->ExprResultV0
+            (state-emit (state-bump state)
+              (core/->UnionConstructInstruction
+                (core/->SsaValueV0 result-id to)
+                (core/typevariant-id (nth unit-variants 0))
+                nil))
+            result-id to false))
+
+        (= 0 (count source-variants))
+        (fail-result state
+          "TODO-NATIVE-WIDEN-SOURCE: no target alternative carries this type and the source is not a closed union")
+
+        :else
+        (let [join-id: core/NativeId (state-id state owner "widen-join")
+              join-parameter: core/NativeId (state-id state owner "widen-value")
+              cases: (Vec core/SwitchCaseV0)
+              (loop [position: Int 0 collected: (Vec core/SwitchCaseV0) []]
+                (if (>= position (count source-variants))
+                  collected
+                  (recur (+ position 1)
+                    (conj collected
+                      (core/->SwitchCaseV0
+                        (core/typevariant-id (nth source-variants position))
+                        (state-id state owner (str "widen-arm-" position))
+                        [])))))
+              switched: BodyStateV0
+              (state-close (state-bump state)
+                (core/->SwitchTerminator value-id cases))
+              armed: BodyStateV0
+              (loop [position: Int 0 current: BodyStateV0 switched]
+                (if (or (>= position (count source-variants))
+                        (state-blocked? current))
+                  current
+                  (let [variant: core/TypeVariant (nth source-variants position)
+                        arm-id: core/NativeId
+                        (state-id state owner (str "widen-arm-" position))
+                        payload-type: (U core/NativeId Nil)
+                        (core/typevariant-payload-type variant)
+                        opened: BodyStateV0 (state-open-block current arm-id [])]
+                    (if (nil? payload-type)
+                      (recur (+ position 1)
+                        (widen-unit-arm opened owner
+                          (str "widen-unit-" position)
+                          (core/typevariant-name variant)
+                          to unit-variants join-id))
+                      (if (same-id? payload-type (type-id "Nil"))
+                        (recur (+ position 1)
+                          (widen-unit-arm opened owner
+                            (str "widen-unit-" position)
+                            (core/typevariant-name variant)
+                            to unit-variants join-id))
+                        (let [extract-id: core/NativeId
+                              (state-id opened owner (str "widen-extract-" position))
+                              extracted: BodyStateV0
+                              (state-emit (state-bump opened)
+                                (core/->UnionExtractInstruction
+                                  (core/->SsaValueV0 extract-id payload-type)
+                                  value-id
+                                  (core/typevariant-id variant)))
+                              widened: ExprResultV0
+                              (lower-widen types owner extracted extract-id
+                                payload-type to (- budget 1))]
+                          (if (state-blocked? (exprresultv0-state widened))
+                            (exprresultv0-state widened)
+                            (recur (+ position 1)
+                              (state-close (exprresultv0-state widened)
+                                (core/->JumpTerminator join-id
+                                  [(exprresultv0-value-id widened)]))))))))))]
+          (if (state-blocked? armed)
+            (dead-result armed)
+            (->ExprResultV0
+              (state-open-block armed join-id
+                [(core/->Parameter join-parameter to)])
+              join-parameter to false)))))))
+
+;; A narrowed reference borrows from the union value it came out of; it must not
+;; outlive that value's region. Vacuous while every payload is world-confined.
+(defrecord NarrowHitV0
+  [found: Bool variant-id: core/NativeId reference-type: core/NativeId])
+
+(defn narrow-miss [] -> NarrowHitV0
+  (->NarrowHitV0 false (type-id "LowerFailure") (type-id "LowerFailure")))
+
+(defn reference-variant-for
+  [types: (Vec core/TypeDef) union-id: core/NativeId target: core/NativeId]
+  -> NarrowHitV0
+  (let [variants: (Vec core/TypeVariant) (union-variants-of types union-id)]
+    (loop [position: Int 0]
+      (if (>= position (count variants))
+        (narrow-miss)
+        (let [variant: core/TypeVariant (nth variants position)
+              payload: (U core/NativeId Nil)
+              (core/typevariant-payload-type variant)]
+          (if (nil? payload)
+            (recur (+ position 1))
+            (let [definition: (U core/TypeDef Nil) (lookup-type types payload)]
+              (if (nil? definition)
+                (recur (+ position 1))
+                (let [shape: core/TypeShape (core/typedef-shape definition)]
+                  (if (and (instance? native.core.ReferenceType shape)
+                        (same-id? (core/referencetype-target-type shape) target))
+                    (->NarrowHitV0 true (core/typevariant-id variant) payload)
+                    (recur (+ position 1))))))))))))
+
 (defn lower-expr
   [env: BodyEnvV0 owner: core/NativeId state: BodyStateV0 expr: core/NativeId]
   -> ExprResultV0
@@ -2053,21 +2293,52 @@
                           " has no native comparison for these operand types")))))
 
                 (accessorhitv0-found accessor)
-                (if (not (and (= 1 (count values))
-                           (same-id? (nth value-types 0)
-                             (accessorhitv0-owner-type accessor))))
-                  (fail-result current
-                    (str "TODO-NATIVE-ACCESSOR-OPERAND: " callee
-                      " was not applied to its own record type"))
-                  (let [result-id: core/NativeId (state-id current owner "field")]
-                    (->ExprResultV0
-                      (state-emit (state-bump current)
-                        (core/->FieldInstruction
-                          (core/->SsaValueV0 result-id
-                            (accessorhitv0-field-type accessor))
-                          (nth values 0)
-                          (accessorhitv0-field-id accessor)))
-                      result-id (accessorhitv0-field-type accessor) false)))
+                (let [owner-type: core/NativeId (accessorhitv0-owner-type accessor)
+                      unary: Bool (= 1 (count values))
+                      direct: Bool
+                      (and unary (same-id? (nth value-types 0) owner-type))
+                      narrowing: NarrowHitV0
+                      (if (or direct (not unary))
+                        (narrow-miss)
+                        (reference-variant-for types (nth value-types 0)
+                          owner-type))]
+                  (cond
+                    direct
+                    (let [result-id: core/NativeId (state-id current owner "field")]
+                      (->ExprResultV0
+                        (state-emit (state-bump current)
+                          (core/->FieldInstruction
+                            (core/->SsaValueV0 result-id
+                              (accessorhitv0-field-type accessor))
+                            (nth values 0)
+                            (accessorhitv0-field-id accessor)))
+                        result-id (accessorhitv0-field-type accessor) false))
+
+                    ;; The operand's static type is the union, so the expected
+                    ;; variant is known: a direct checked extract, not a Switch.
+                    (narrowhitv0-found narrowing)
+                    (let [reference-id: core/NativeId
+                          (state-id current owner "narrow")
+                          result-id: core/NativeId (state-id current owner "field")]
+                      (->ExprResultV0
+                        (state-emit
+                          (state-emit (state-bump current)
+                            (core/->UnionExtractInstruction
+                              (core/->SsaValueV0 reference-id
+                                (narrowhitv0-reference-type narrowing))
+                              (nth values 0)
+                              (narrowhitv0-variant-id narrowing)))
+                          (core/->FieldInstruction
+                            (core/->SsaValueV0 result-id
+                              (accessorhitv0-field-type accessor))
+                            reference-id
+                            (accessorhitv0-field-id accessor)))
+                        result-id (accessorhitv0-field-type accessor) false))
+
+                    :else
+                    (fail-result current
+                      (str "TODO-NATIVE-ACCESSOR-OPERAND: " callee
+                        " was not applied to its own record type"))))
 
                 (some? constructor)
                 (let [shape: core/TypeShape (core/typedef-shape constructor)
@@ -2255,17 +2526,26 @@
           (exprresultv0-terminated result)
           (->NativeLoweredV0 entry-id (bodystatev0-blocks state))
 
-          (not (same-id? (exprresultv0-type-id result)
-                 (typedfunctionv0-return-type signature)))
-          (->NativeTodoV0 "TODO-NATIVE-FUNCTION-BODY"
-            (str "TODO-NATIVE-RETURN-TYPE: the lowered body of " name
-              " does not produce its declared return type"))
-
           :else
-          (->NativeLoweredV0 entry-id
-            (bodystatev0-blocks
-              (state-close state
-                (core/->ReturnTerminator (exprresultv0-value-id result))))))))))
+          ;; A body whose type differs from the declared return type is coerced,
+          ;; never reinterpreted: identity when they agree, otherwise the widen.
+          (let [coerced: ExprResultV0
+                (lower-widen (bodyenvv0-types env) id state
+                  (exprresultv0-value-id result)
+                  (exprresultv0-type-id result)
+                  (typedfunctionv0-return-type signature)
+                  (widen-budget))
+                settled: BodyStateV0 (exprresultv0-state coerced)]
+            (if (state-blocked? settled)
+              (->NativeTodoV0 "TODO-NATIVE-FUNCTION-BODY"
+                (str "TODO-NATIVE-RETURN-TYPE: the lowered body of " name
+                  " does not produce its declared return type: "
+                  (bodystatev0-failure settled)))
+              (->NativeLoweredV0 entry-id
+                (bodystatev0-blocks
+                  (state-close settled
+                    (core/->ReturnTerminator
+                      (exprresultv0-value-id coerced))))))))))))
 
 (defn readiness-code [readiness: NativeReadinessV0] -> String
   (match readiness

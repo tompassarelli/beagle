@@ -21,7 +21,7 @@ static int probe_type(native_arena *arena, size_t size, size_t align) {
 }
 
 int main(void) {
-  static uint8_t storage[2010];
+  static uint8_t storage[1994];
   native_arena arena;
   native_arena_init(&arena, storage, sizeof(storage));
   if (probe_type(&arena, sizeof(native_m0_type_0), _Alignof(native_m0_type_0)) != 0) {

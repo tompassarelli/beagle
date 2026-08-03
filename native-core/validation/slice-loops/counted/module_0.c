@@ -3,11 +3,9 @@
 
 native_m0_type_0 native_m0_fn_0(native_m0_type_0 native_v_0, native_m0_type_0 native_v_1) {
   native_m0_type_0 native_s_0;
-  if (((native_v_1 > INT64_C(0)) && (native_v_0 > (INT64_MAX - native_v_1))) ||
-      ((native_v_1 < INT64_C(0)) && (native_v_0 < (INT64_MIN - native_v_1)))) {
+  if (__builtin_add_overflow(native_v_0, native_v_1, &native_s_0)) {
     native_trap(NATIVE_TRAP_OVERFLOW);
   }
-  native_s_0 = native_v_0 + native_v_1;
   return native_s_0;
 }
 native_m0_type_0 native_m0_fn_1(native_m0_type_0 native_v_0) {
