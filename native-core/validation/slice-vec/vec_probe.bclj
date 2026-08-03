@@ -1,0 +1,35 @@
+#lang beagle/clj
+
+;; Vec-vocabulary leaves over the real fram.types record shapes; every real fram
+;; count/nth/conj site also reaches a loop or arithmetic callee, so the C probe
+;; calls these while those tiers land separately.
+(ns fram.vec-probe)
+
+(define-mode strict)
+
+(require fram.types :as t)
+
+(defn bucket-size [bucket: t/TermBucket] -> Int
+  (count (t/termbucket-positions bucket)))
+
+(defn bucket-position-at [bucket: t/TermBucket position: Int] -> Int
+  (nth (t/termbucket-positions bucket) position))
+
+(defn bucket-with-position [bucket: t/TermBucket position: Int] -> t/TermBucket
+  (t/->TermBucket (t/termbucket-key bucket)
+                  (conj (t/termbucket-positions bucket) position)))
+
+(defn append-position [positions: (Vec Int) position: Int] -> (Vec Int)
+  (conj positions position))
+
+(defn position-pair [low: Int high: Int] -> (Vec Int) [low high])
+
+(defn empty-positions [] -> (Vec Int)
+  (let [seed: (Vec Int) []] seed))
+
+(defn frame-operation-count [frame: t/TransactionFrame] -> Int
+  (count (t/transactionframe-operations frame)))
+
+(defn frame-operation-at
+  [frame: t/TransactionFrame position: Int] -> t/CommitOperation
+  (nth (t/transactionframe-operations frame) position))

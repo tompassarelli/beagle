@@ -1010,9 +1010,17 @@
 (defn write-capability-id [] -> core/NativeId
   (lower-id "capability" ["arena-write"]))
 
+(defn allocate-effect-id [] -> core/NativeId
+  (lower-id "effect" ["arena-allocate"]))
+
+(defn allocate-capability-id [] -> core/NativeId
+  (lower-id "capability" ["arena-allocate"]))
+
 (defn slice-effects [] -> (Vec core/EffectDef)
   [(core/->EffectDef (pure-effect-id) (core/->PureEffect true))
-   (core/->EffectDef (write-effect-id) (core/->WriteEffect (arena-region-id)))])
+   (core/->EffectDef (write-effect-id) (core/->WriteEffect (arena-region-id)))
+   (core/->EffectDef (allocate-effect-id)
+     (core/->AllocateEffect (arena-region-id)))])
 
 (defn function-effects [name: String] -> (Vec core/NativeId)
   (if (ends-with? name "!") [(write-effect-id)] [(pure-effect-id)]))
@@ -1232,6 +1240,7 @@
 
 ;; A Beagle record accessor is spelled <lowercased record name>-<field>; the
 ;; native world knows records only by their TypeDef, so the spelling is rebuilt.
+;; Types already enter by unqualified name, so the accessor drops its alias too.
 (defrecord AccessorHitV0
   [found: Bool owner-type: core/NativeId field-id: core/NativeId
    field-type: core/NativeId])
@@ -1241,8 +1250,9 @@
     (type-id "LowerFailure")))
 
 (defn record-accessor
-  [types: (Vec core/TypeDef) callee: String] -> AccessorHitV0
-  (loop [position: Int 0]
+  [types: (Vec core/TypeDef) qualified: String] -> AccessorHitV0
+  (let [callee: String (unqualified-name qualified)]
+   (loop [position: Int 0]
     (if (>= position (count types))
       (accessor-miss)
       (let [definition: core/TypeDef (nth types position)
@@ -1260,7 +1270,7 @@
                         (->AccessorHitV0 true (core/typedef-id definition)
                           (core/typefield-id field) (core/typefield-type-id field))
                         (recur (+ field-position 1))))))]
-            (if (accessorhitv0-found hit) hit (recur (+ position 1)))))))))
+            (if (accessorhitv0-found hit) hit (recur (+ position 1))))))))))
 
 (defn union-variants-of
   [types: (Vec core/TypeDef) target: core/NativeId] -> (Vec core/TypeVariant)
@@ -1693,6 +1703,226 @@
                     (->NarrowHitV0 true (core/typevariant-id variant) payload)
                     (recur (+ position 1))))))))))))
 
+(defn vector-type? [types: (Vec core/TypeDef) target: core/NativeId] -> Bool
+  (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
+    (and (not (nil? definition))
+      (instance? native.core.VectorType (core/typedef-shape definition)))))
+
+(defn vector-element-of
+  [types: (Vec core/TypeDef) target: core/NativeId] -> core/NativeId
+  (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
+    (if (nil? definition)
+      (type-id "LowerFailure")
+      (let [shape: core/TypeShape (core/typedef-shape definition)]
+        (if (instance? native.core.VectorType shape)
+          (core/vectortype-element-type shape)
+          (type-id "LowerFailure"))))))
+
+;; The vector TypeDef for an element type exists only when some annotation in
+;; the module named (Vec T); a literal cannot mint one, so it looks one up.
+(defn vector-type-of
+  [types: (Vec core/TypeDef) element: core/NativeId] -> (U core/NativeId Nil)
+  (loop [position: Int 0]
+    (if (>= position (count types))
+      nil
+      (let [definition: core/TypeDef (nth types position)
+            shape: core/TypeShape (core/typedef-shape definition)]
+        (if (and (instance? native.core.VectorType shape)
+              (same-id? (core/vectortype-element-type shape) element))
+          (core/typedef-id definition)
+          (recur (+ position 1)))))))
+
+(defn allocating-instruction? [instruction: core/Instruction] -> Bool
+  (or (instance? native.core.VecPushInstruction instruction)
+      (instance? native.core.VecEmptyInstruction instruction)
+      (instance? native.core.AllocateInstruction instruction)))
+
+(defn instructions-allocate? [instructions: (Vec core/Instruction)] -> Bool
+  (some?
+    (some (fn [instruction: core/Instruction] -> Bool
+            (allocating-instruction? instruction))
+      instructions)))
+
+(defn blocks-allocate? [blocks: (Vec core/BasicBlock)] -> Bool
+  (some?
+    (some (fn [block: core/BasicBlock] -> Bool
+            (instructions-allocate? (core/basicblock-instructions block)))
+      blocks)))
+
+(defn entry-block-id [owner: core/NativeId] -> core/NativeId
+  (lower-id "block-entry" [(id-value owner)]))
+
+(defn arena-token-ids [writes: Bool] -> (Vec core/NativeId)
+  (if writes
+    [(arena-region-id) (write-capability-id) (allocate-capability-id)]
+    [(arena-region-id) (allocate-capability-id)]))
+
+(defn terminator-targets [terminator: core/Terminator] -> (Vec core/NativeId)
+  (cond
+    (instance? native.core.JumpTerminator terminator)
+    [(core/jumpterminator-block-id terminator)]
+
+    (instance? native.core.BranchTerminator terminator)
+    [(core/branchterminator-true-block terminator)
+     (core/branchterminator-false-block terminator)]
+
+    (instance? native.core.SwitchTerminator terminator)
+    (mapv (fn [switch-case: core/SwitchCaseV0] -> core/NativeId
+            (core/switchcasev0-block-id switch-case))
+      (core/switchterminator-cases terminator))
+
+    :else []))
+
+(defn block-successors [block: core/BasicBlock] -> (Vec core/NativeId)
+  (loop [position: Int 0
+         terminators: (Vec core/Terminator) (core/basicblock-terminators block)
+         collected: (Vec core/NativeId) []]
+    (if (>= position (count terminators))
+      collected
+      (recur (+ position 1) terminators
+        (core/append-ids collected
+          (terminator-targets (nth terminators position)))))))
+
+(defn find-basic-block
+  [blocks: (Vec core/BasicBlock) target: core/NativeId] -> (U core/BasicBlock Nil)
+  (loop [position: Int 0]
+    (cond
+      (>= position (count blocks)) nil
+      (same-id? (core/basicblock-id (nth blocks position)) target)
+      (nth blocks position)
+      :else (recur (+ position 1)))))
+
+(defn exit-reachable-avoiding?
+  [blocks: (Vec core/BasicBlock)
+   current: core/NativeId
+   avoid: core/NativeId
+   visited: (Vec core/NativeId)]
+  -> Bool
+  (cond
+    (same-id? current avoid) false
+    (core/id-in? visited current) false
+    :else
+    (let [block: (U core/BasicBlock Nil) (find-basic-block blocks current)]
+      (if (nil? block)
+        false
+        (let [successors: (Vec core/NativeId) (block-successors block)]
+          (if (= 0 (count successors))
+            true
+            (some?
+              (some (fn [successor: core/NativeId] -> Bool
+                      (exit-reachable-avoiding? blocks successor avoid
+                        (conj visited current)))
+                successors))))))))
+
+;; Affine tokens admit exactly one consuming site per entry->exit path, so the
+;; discharge must sit in a block no path can bypass.
+(defn discharge-block-id
+  [blocks: (Vec core/BasicBlock) entry: core/NativeId] -> (U core/NativeId Nil)
+  (loop [position: Int 0]
+    (cond
+      (>= position (count blocks)) nil
+      (and (instructions-allocate?
+             (core/basicblock-instructions (nth blocks position)))
+        (not (exit-reachable-avoiding? blocks entry
+               (core/basicblock-id (nth blocks position)) [])))
+      (core/basicblock-id (nth blocks position))
+      :else (recur (+ position 1)))))
+
+(defn instruction-with-tokens
+  [instruction: core/Instruction flow: core/TokenFlowV0] -> core/Instruction
+  (cond
+    (instance? native.core.VecPushInstruction instruction)
+    (core/->VecPushInstruction
+      (core/vecpushinstruction-result instruction)
+      (core/vecpushinstruction-source-id instruction)
+      (core/vecpushinstruction-value-id instruction)
+      (core/vecpushinstruction-region instruction)
+      (core/vecpushinstruction-capability instruction)
+      flow)
+
+    (instance? native.core.VecEmptyInstruction instruction)
+    (core/->VecEmptyInstruction
+      (core/vecemptyinstruction-result instruction)
+      (core/vecemptyinstruction-capacity-id instruction)
+      (core/vecemptyinstruction-region instruction)
+      (core/vecemptyinstruction-capability instruction)
+      flow)
+
+    :else instruction))
+
+(defn discharge-instructions
+  [instructions: (Vec core/Instruction) tokens: (Vec core/NativeId)]
+  -> (Vec core/Instruction)
+  (loop [position: Int 0
+         done: Bool false
+         collected: (Vec core/Instruction) []]
+    (if (>= position (count instructions))
+      collected
+      (let [instruction: core/Instruction (nth instructions position)
+            hit: Bool (and (not done) (allocating-instruction? instruction))]
+        (recur (+ position 1) (or done hit)
+          (conj collected
+            (if hit
+              (instruction-with-tokens instruction
+                (core/->TokenFlowV0 tokens []))
+              instruction)))))))
+
+(defn discharge-arena-tokens
+  [blocks: (Vec core/BasicBlock)
+   target: core/NativeId
+   tokens: (Vec core/NativeId)]
+  -> (Vec core/BasicBlock)
+  (mapv
+    (fn [block: core/BasicBlock] -> core/BasicBlock
+      (if (not (same-id? (core/basicblock-id block) target))
+        block
+        (core/->BasicBlock
+          (core/basicblock-id block)
+          (core/basicblock-parameters block)
+          (discharge-instructions (core/basicblock-instructions block) tokens)
+          (core/basicblock-terminators block))))
+    blocks))
+
+(defn empty-vector-form? [index: SourceIndexV0 node: core/NativeId] -> Bool
+  (if (not (= "vec" (fact-text index node "form-kind")))
+    false
+    (let [items-node: (U core/NativeId Nil) (index-first-object index node "items")]
+      (if (nil? items-node)
+        true
+        (= 0 (count (index-sequence-items index items-node)))))))
+
+;; An empty literal names no element type, so the only closed source for one is
+;; the annotation on the binding it initializes.
+(defn lower-empty-vector
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   annotation: (U core/NativeId Nil)]
+  -> ExprResultV0
+  (if (nil? annotation)
+    (fail-result state
+      "TODO-NATIVE-EMPTY-VECTOR-LITERAL: an empty literal names no element type")
+    (let [index: SourceIndexV0 (bodyenvv0-index env)
+          types: (Vec core/TypeDef) (bodyenvv0-types env)
+          resolved: core/NativeId
+          (typeresolutionv0-type-id (resolve-source-type index annotation))]
+      (if (not (vector-type? types resolved))
+        (fail-result state
+          "TODO-NATIVE-EMPTY-VECTOR-LITERAL: the binding annotation is not a native vector type")
+        (let [capacity-id: core/NativeId (state-id state owner "vec-cap")
+              result-id: core/NativeId (state-id (state-bump state) owner "vec-lit")]
+          (->ExprResultV0
+            (state-emit
+              (state-emit (state-bump (state-bump state))
+                (core/->AtomInstruction
+                  (core/->SsaValueV0 capacity-id (int-type-id))
+                  (core/->I64Atom 0)))
+              (core/->VecEmptyInstruction
+                (core/->SsaValueV0 result-id resolved)
+                capacity-id (arena-region-id) (allocate-capability-id)
+                (core/->TokenFlowV0 [] [])))
+            result-id resolved false))))))
+
 (defn lower-expr
   [env: BodyEnvV0 owner: core/NativeId state: BodyStateV0 expr: core/NativeId]
   -> ExprResultV0
@@ -1766,7 +1996,10 @@
                           (str "TODO-NATIVE-BINDING-VALUE: " name " has no value form"))
                         (lower-id "body" ["let"]) (type-id "LowerFailure") false)
                       (let [value: ExprResultV0
-                            (lower-expr env owner current value-node)]
+                            (if (empty-vector-form? index value-node)
+                              (lower-empty-vector env owner current
+                                (index-first-object index item "ann"))
+                              (lower-expr env owner current value-node))]
                         (if (exprresultv0-terminated value)
                           value
                           (recur (+ position 1)
@@ -2035,6 +2268,90 @@
                         (argsresultv0-values copied)))
                     (lower-id "body" ["recur"]) (type-id "LowerFailure") true))))))
 
+        (= "vec" kind)
+        (let [items-node: (U core/NativeId Nil) (index-first-object index expr "items")
+              items: (Vec core/NativeId)
+              (if (nil? items-node) [] (index-sequence-items index items-node))
+              lowered: ArgsResultV0
+              (loop [position: Int 0
+                     current: BodyStateV0 state
+                     values: (Vec core/NativeId) []
+                     value-types: (Vec core/NativeId) []]
+                (if (or (>= position (count items)) (state-blocked? current))
+                  (->ArgsResultV0 current values value-types false)
+                  (let [item: ExprResultV0
+                        (lower-expr env owner current (nth items position))]
+                    (if (exprresultv0-terminated item)
+                      (->ArgsResultV0 (exprresultv0-state item) values value-types
+                        true)
+                      (recur (+ position 1) (exprresultv0-state item)
+                        (conj values (exprresultv0-value-id item))
+                        (conj value-types (exprresultv0-type-id item)))))))
+              current: BodyStateV0 (argsresultv0-state lowered)
+              values: (Vec core/NativeId) (argsresultv0-values lowered)
+              value-types: (Vec core/NativeId) (argsresultv0-value-types lowered)]
+          (cond
+            (argsresultv0-terminated lowered)
+            (->ExprResultV0 current (lower-id "body" ["unreachable"])
+              (type-id "LowerFailure") true)
+
+            (state-blocked? current) (dead-result current)
+
+            (= 0 (count values))
+            (fail-result current
+              "TODO-NATIVE-EMPTY-VECTOR-LITERAL: an empty literal names no element type")
+
+            :else
+            (let [element: core/NativeId (nth value-types 0)
+                  uniform: Bool
+                  (loop [position: Int 1]
+                    (cond
+                      (>= position (count value-types)) true
+                      (same-id? (nth value-types position) element)
+                      (recur (+ position 1))
+                      :else false))
+                  vector-type: (U core/NativeId Nil) (vector-type-of types element)]
+              (cond
+                (not uniform)
+                (fail-result current
+                  "TODO-NATIVE-VECTOR-LITERAL-ELEMENTS: the items do not share one native type")
+
+                (nil? vector-type)
+                (fail-result current
+                  "TODO-NATIVE-VECTOR-LITERAL-TYPE: the module declares no vector of this element type")
+
+                :else
+                (let [capacity-id: core/NativeId (state-id current owner "vec-cap")
+                      empty-id: core/NativeId
+                      (state-id (state-bump current) owner "vec-lit")
+                      seeded: BodyStateV0
+                      (state-emit
+                        (state-emit (state-bump (state-bump current))
+                          (core/->AtomInstruction
+                            (core/->SsaValueV0 capacity-id (int-type-id))
+                            (core/->I64Atom (count values))))
+                        (core/->VecEmptyInstruction
+                          (core/->SsaValueV0 empty-id vector-type)
+                          capacity-id (arena-region-id) (allocate-capability-id)
+                          (core/->TokenFlowV0 [] [])))
+                      filled: ExprResultV0
+                      (loop [position: Int 0
+                             built: BodyStateV0 seeded
+                             holder: core/NativeId empty-id]
+                        (if (>= position (count values))
+                          (->ExprResultV0 built holder vector-type false)
+                          (let [push-id: core/NativeId
+                                (state-id built owner "vec-lit-push")]
+                            (recur (+ position 1)
+                              (state-emit (state-bump built)
+                                (core/->VecPushInstruction
+                                  (core/->SsaValueV0 push-id vector-type)
+                                  holder (nth values position)
+                                  (arena-region-id) (allocate-capability-id)
+                                  (core/->TokenFlowV0 [] [])))
+                              push-id))))]
+                  filled)))))
+
         (= "call" kind)
         (let [callee: String (fact-text index expr "callee")
               args-node: (U core/NativeId Nil) (index-first-object index expr "args")
@@ -2218,9 +2535,12 @@
                   value-types: (Vec core/NativeId) (argsresultv0-value-types lowered)
                   comparison: (U core/CompareOpV0 Nil) (compare-op-for callee)
                   accessor: AccessorHitV0 (record-accessor types callee)
+                  bare-callee: String (unqualified-name callee)
                   constructor: (U core/TypeDef Nil)
-                  (if (and (> (count callee) 2) (= "->" (subs callee 0 2)))
-                    (lookup-named-type types (subs callee 2 (count callee)))
+                  (if (and (> (count bare-callee) 2)
+                           (= "->" (subs bare-callee 0 2)))
+                    (lookup-named-type types
+                      (subs bare-callee 2 (count bare-callee)))
                     nil)
                   signature: (U TypedFunctionV0 Nil)
                   (find-signature (bodyenvv0-signatures env) callee)]
@@ -2253,6 +2573,48 @@
                   :else
                   (lower-checked-arith current owner callee
                     (nth values 0) (nth values 1)))
+
+                (and (= "count" callee) (= 1 (count values))
+                  (vector-type? types (nth value-types 0)))
+                (let [result-id: core/NativeId (state-id current owner "vec-length")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->VecLengthInstruction
+                        (core/->SsaValueV0 result-id (int-type-id))
+                        (nth values 0)))
+                    result-id (int-type-id) false))
+
+                (and (= "nth" callee) (= 2 (count values))
+                  (vector-type? types (nth value-types 0)))
+                (if (not (same-id? (nth value-types 1) (int-type-id)))
+                  (fail-result current
+                    "TODO-NATIVE-NTH-INDEX: the index operand is not a native Int")
+                  (let [element: core/NativeId
+                        (vector-element-of types (nth value-types 0))
+                        result-id: core/NativeId (state-id current owner "vec-get")]
+                    (->ExprResultV0
+                      (state-emit (state-bump current)
+                        (core/->VecGetInstruction
+                          (core/->SsaValueV0 result-id element)
+                          (nth values 0) (nth values 1)))
+                      result-id element false)))
+
+                (and (= "conj" callee) (= 2 (count values))
+                  (vector-type? types (nth value-types 0)))
+                (let [vector-type: core/NativeId (nth value-types 0)
+                      element: core/NativeId (vector-element-of types vector-type)]
+                  (if (not (same-id? element (nth value-types 1)))
+                    (fail-result current
+                      "TODO-NATIVE-CONJ-ELEMENT: the pushed value is not the vector's element type")
+                    (let [result-id: core/NativeId (state-id current owner "vec-push")]
+                      (->ExprResultV0
+                        (state-emit (state-bump current)
+                          (core/->VecPushInstruction
+                            (core/->SsaValueV0 result-id vector-type)
+                            (nth values 0) (nth values 1)
+                            (arena-region-id) (allocate-capability-id)
+                            (core/->TokenFlowV0 [] [])))
+                        result-id vector-type false))))
 
                 (some? comparison)
                 (if (not (= 2 (count values)))
@@ -2488,6 +2850,25 @@
       (resolve-function index source-function))
     (index-form-ids index "defn")))
 
+(defn finish-body
+  [signature: TypedFunctionV0
+   entry-id: core/NativeId
+   blocks: (Vec core/BasicBlock)]
+  -> NativeReadinessV0
+  (if (not (blocks-allocate? blocks))
+    (->NativeLoweredV0 entry-id blocks)
+    (let [target: (U core/NativeId Nil) (discharge-block-id blocks entry-id)
+          tokens: (Vec core/NativeId)
+          (arena-token-ids
+            (core/id-in? (typedfunctionv0-effects signature) (write-effect-id)))]
+      (if (nil? target)
+        (->NativeTodoV0 "TODO-NATIVE-FUNCTION-BODY"
+          (str "TODO-NATIVE-CONDITIONAL-ALLOCATION: no block of "
+            (typedfunctionv0-name signature)
+            " lies on every path, so its arena tokens have no discharge"))
+        (->NativeLoweredV0 entry-id
+          (discharge-arena-tokens blocks target tokens))))))
+
 (defn lower-function-body
   [env: BodyEnvV0 signature: TypedFunctionV0 source-function: core/NativeId]
   -> NativeReadinessV0
@@ -2524,7 +2905,7 @@
             (str (bodystatev0-failure state) " [" name "]"))
 
           (exprresultv0-terminated result)
-          (->NativeLoweredV0 entry-id (bodystatev0-blocks state))
+          (finish-body signature entry-id (bodystatev0-blocks state))
 
           :else
           ;; A body whose type differs from the declared return type is coerced,
@@ -2541,7 +2922,7 @@
                 (str "TODO-NATIVE-RETURN-TYPE: the lowered body of " name
                   " does not produce its declared return type: "
                   (bodystatev0-failure settled)))
-              (->NativeLoweredV0 entry-id
+              (finish-body signature entry-id
                 (bodystatev0-blocks
                   (state-close settled
                     (core/->ReturnTerminator
@@ -2552,6 +2933,12 @@
     [(NativeReadyV0 operation) operation]
     [(NativeLoweredV0 entry-block blocks) "native-body-v0"]
     [(NativeTodoV0 code detail) code]))
+
+(defn readiness-blocks [readiness: NativeReadinessV0] -> (Vec core/BasicBlock)
+  (match readiness
+    [(NativeReadyV0 operation) []]
+    [(NativeLoweredV0 entry-block blocks) blocks]
+    [(NativeTodoV0 code detail) []]))
 
 (defn readiness-detail [readiness: NativeReadinessV0] -> String
   (match readiness
@@ -2590,6 +2977,14 @@
         (if (ready-function? signature)
           prior
           (lower-function-body env signature source-function))
+        ;; A vector allocation is discovered in the body, not the signature, so
+        ;; the effect that admits it is added once the blocks exist.
+        prior-effects: (Vec core/NativeId) (typedfunctionv0-effects signature)
+        effects: (Vec core/NativeId)
+        (if (and (blocks-allocate? (readiness-blocks readiness))
+              (not (core/id-in? prior-effects (allocate-effect-id))))
+          (conj prior-effects (allocate-effect-id))
+          prior-effects)
         encoding: String
         (encode-typed-function
           (typedfunctionv0-id signature)
@@ -2598,10 +2993,12 @@
           (typedfunctionv0-parameters signature)
           (typedfunctionv0-return-type signature)
           (typedfunctionv0-failure-type signature)
-          (typedfunctionv0-effects signature)
+          effects
           (readiness-code readiness))
         lowered: TypedFunctionV0
-        (with (with signature [:readiness readiness]) [:encoding encoding])]
+        (with
+          (with (with signature [:readiness readiness]) [:effects effects])
+          [:encoding encoding])]
     (->FunctionResolutionV0
       lowered
       (if (readiness-uses-checked? readiness)
@@ -2696,6 +3093,11 @@
   [(core/->CapabilityDef
      (write-capability-id)
      (core/->WriteCapability true)
+     (arena-region-id)
+     true)
+   (core/->CapabilityDef
+     (allocate-capability-id)
+     (core/->AllocateCapability true)
      (arena-region-id)
      true)])
 
@@ -3091,8 +3493,11 @@
             (instance? native.core.ReferenceType shape)
             (->LayoutMeasureV0 8 8 true "reference")
 
+            ;; A vector value is a reference to its {elements, length, capacity}
+            ;; header, so its size never depends on the element type — that is
+            ;; what closes the layout of a record with a (Vec Record) field.
             (instance? native.core.VectorType shape)
-            (->LayoutMeasureV0 24 8 true "vector descriptor")
+            (->LayoutMeasureV0 8 8 true "vector header reference")
 
             (instance? native.core.RecordType shape)
             (let [fields: (Vec core/TypeField) (core/recordtype-fields shape)]
@@ -3296,14 +3701,19 @@
 
 
 (defn function-capabilities [function: TypedFunctionV0] -> (Vec core/NativeId)
-  (if (core/id-in? (typedfunctionv0-effects function) (write-effect-id))
-    [(write-capability-id)]
-    []))
+  (let [effects: (Vec core/NativeId) (typedfunctionv0-effects function)
+        written: (Vec core/NativeId)
+        (if (core/id-in? effects (write-effect-id)) [(write-capability-id)] [])]
+    (if (core/id-in? effects (allocate-effect-id))
+      (conj written (allocate-capability-id))
+      written)))
 
 (defn function-regions [function: TypedFunctionV0] -> (Vec core/NativeId)
-  (if (core/id-in? (typedfunctionv0-effects function) (write-effect-id))
-    [(arena-region-id)]
-    []))
+  (let [effects: (Vec core/NativeId) (typedfunctionv0-effects function)]
+    (if (or (core/id-in? effects (write-effect-id))
+            (core/id-in? effects (allocate-effect-id)))
+      [(arena-region-id)]
+      [])))
 
 (defn lower-function-instructions
   [function: TypedFunctionV0] -> (Vec core/Instruction)
@@ -3557,6 +3967,32 @@
       [(encode-ssa-value (core/allocateinstruction-result instruction))
        (id-value (core/allocateinstruction-region instruction))
        (id-value (core/allocateinstruction-capability instruction))])
+
+    (instance? native.core.VecLengthInstruction instruction)
+    (worlds/canonical-record "vec-length-instruction"
+      [(encode-ssa-value (core/veclengthinstruction-result instruction))
+       (id-value (core/veclengthinstruction-source-id instruction))])
+
+    (instance? native.core.VecGetInstruction instruction)
+    (worlds/canonical-record "vec-get-instruction"
+      [(encode-ssa-value (core/vecgetinstruction-result instruction))
+       (id-value (core/vecgetinstruction-source-id instruction))
+       (id-value (core/vecgetinstruction-index-id instruction))])
+
+    (instance? native.core.VecPushInstruction instruction)
+    (worlds/canonical-record "vec-push-instruction"
+      [(encode-ssa-value (core/vecpushinstruction-result instruction))
+       (id-value (core/vecpushinstruction-source-id instruction))
+       (id-value (core/vecpushinstruction-value-id instruction))
+       (id-value (core/vecpushinstruction-region instruction))
+       (id-value (core/vecpushinstruction-capability instruction))])
+
+    (instance? native.core.VecEmptyInstruction instruction)
+    (worlds/canonical-record "vec-empty-instruction"
+      [(encode-ssa-value (core/vecemptyinstruction-result instruction))
+       (id-value (core/vecemptyinstruction-capacity-id instruction))
+       (id-value (core/vecemptyinstruction-region instruction))
+       (id-value (core/vecemptyinstruction-capability instruction))])
 
     :else
     (worlds/canonical-record "call-instruction"
@@ -3875,7 +4311,9 @@
         tokens-discharged: Bool
         (every?
           (fn [function: TypedFunctionV0] -> Bool
-            (= 0 (count (function-capabilities function))))
+            (or (= 0 (count (function-capabilities function)))
+              (some? (discharge-block-id (function-body-blocks function)
+                       (entry-block-id (typedfunctionv0-id function))))))
           (ready-functions typed-functions))
         obligation-results: (Vec core/ObligationResult)
         (native-obligation-results core-valid true closed-layouts true legal-abi

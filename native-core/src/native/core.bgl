@@ -80,6 +80,9 @@
   (UnionShapeV0
     [tag-type: NativeId tag-offset-bytes: Int
      variants: (Vec UnionVariantLayoutV0)])
+  ;; Describes the ELEMENT storage; the vector value itself is a reference-sized
+  ;; handle on the header, so a (Vec T) record field is 8 bytes for every T.
+  ;; Region-lifetime law applies: that handle may not outlive the header's region.
   (VectorShapeV0 [element-type: NativeId stride-bytes: Int])
   (ReferenceShapeV0 [target-type: NativeId]))
 
@@ -152,7 +155,20 @@
   ;; value carries, an extract asserts one. A tag mismatch traps rather than
   ;; reinterpreting the payload bytes as the expected variant.
   (UnionExtractInstruction
-    [result: SsaValueV0 source-id: NativeId variant-id: NativeId]))
+    [result: SsaValueV0 source-id: NativeId variant-id: NativeId])
+  ;; A vector value is a reference to a {elements, length, capacity} header in a
+  ;; region: length is a header read and VecGet traps outside [0, length).
+  (VecLengthInstruction [result: SsaValueV0 source-id: NativeId])
+  (VecGetInstruction
+    [result: SsaValueV0 source-id: NativeId index-id: NativeId])
+  ;; Push is LINEAR (the source header is moved) and doubles capacity, so an
+  ;; accumulate loop costs O(1) amortized instead of a persistent O(n) copy.
+  (VecPushInstruction
+    [result: SsaValueV0 source-id: NativeId value-id: NativeId
+     region: NativeId capability: NativeId tokens: TokenFlowV0])
+  (VecEmptyInstruction
+    [result: SsaValueV0 capacity-id: NativeId
+     region: NativeId capability: NativeId tokens: TokenFlowV0]))
 
 (defrecord SwitchCaseV0
   [variant-id: NativeId block-id: NativeId arguments: (Vec NativeId)])
@@ -308,6 +324,12 @@
     [(UnionConstructInstruction result variant-id payload-id)
      (ssavaluev0-id result)]
     [(UnionExtractInstruction result source-id variant-id)
+     (ssavaluev0-id result)]
+    [(VecLengthInstruction result source-id) (ssavaluev0-id result)]
+    [(VecGetInstruction result source-id index-id) (ssavaluev0-id result)]
+    [(VecPushInstruction result source-id value-id region capability tokens)
+     (ssavaluev0-id result)]
+    [(VecEmptyInstruction result capacity-id region capability tokens)
      (ssavaluev0-id result)]))
 
 (defn instruction-result-ids [instructions :- (Vec Instruction)] :- (Vec NativeId)
@@ -523,7 +545,13 @@
     [(UnionConstructInstruction result variant-id payload-id)
      (id-in? known-owned variant-id)]
     [(UnionExtractInstruction result source-id variant-id)
-     (id-in? known-owned variant-id)]))
+     (id-in? known-owned variant-id)]
+    [(VecLengthInstruction result source-id) true]
+    [(VecGetInstruction result source-id index-id) true]
+    [(VecPushInstruction result source-id value-id region capability tokens)
+     (and (id-in? known-regions region) (id-in? known-capabilities capability))]
+    [(VecEmptyInstruction result capacity-id region capability tokens)
+     (and (id-in? known-regions region) (id-in? known-capabilities capability))]))
 
 (defn parameter-types-closed? [parameters :- (Vec Parameter) known-types :- (Vec NativeId)] :- Bool
   (every? (fn [parameter :- Parameter] :- Bool (id-in? known-types (parameter-type-id parameter)))
@@ -614,7 +642,13 @@
     [(RecordInstruction result field-ids) field-ids]
     [(UnionConstructInstruction result variant-id payload-id)
      (if (nil? payload-id) [] [payload-id])]
-    [(UnionExtractInstruction result source-id variant-id) [source-id]]))
+    [(UnionExtractInstruction result source-id variant-id) [source-id]]
+    [(VecLengthInstruction result source-id) [source-id]]
+    [(VecGetInstruction result source-id index-id) [source-id index-id]]
+    [(VecPushInstruction result source-id value-id region capability tokens)
+     [source-id value-id]]
+    [(VecEmptyInstruction result capacity-id region capability tokens)
+     [capacity-id]]))
 
 (defn terminator-ssa-refs [terminator :- Terminator] :- (Vec NativeId)
   (match terminator
@@ -675,7 +709,14 @@
     [(VariantValueInstruction result source-id variant-id) true]
     [(RecordInstruction result field-ids) true]
     [(UnionConstructInstruction result variant-id payload-id) true]
-    [(UnionExtractInstruction result source-id variant-id) true]))
+    [(UnionExtractInstruction result source-id variant-id) true]
+    [(VecLengthInstruction result source-id) true]
+    [(VecGetInstruction result source-id index-id) true]
+    [(VecPushInstruction result source-id value-id region capability tokens)
+     (and (id-in? allowed-regions region) (id-in? allowed-capabilities capability))]
+    [(VecEmptyInstruction result capacity-id region capability tokens)
+     (and (id-in? allowed-regions region)
+       (id-in? allowed-capabilities capability))]))
 
 (defn block-resources-allowed? [block :- BasicBlock allowed-regions :- (Vec NativeId) allowed-capabilities :- (Vec NativeId)] :- Bool
   (every? (fn [instruction :- Instruction] :- Bool (instruction-resources-allowed? instruction allowed-regions allowed-capabilities))

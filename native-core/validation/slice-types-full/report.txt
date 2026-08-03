@@ -27,6 +27,8 @@ obligation-projection PASS discharged-tokens
 obligation-projection PASS bounded-effects
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for instant?
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for instant
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for instant-shift-seconds
+pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for instant-seconds-between
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for triple?
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for rpc-page-request?
 pending TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for rpc-page-response?

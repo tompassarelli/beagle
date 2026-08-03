@@ -369,18 +369,14 @@
   (str "typedef void *" type-name-value ";\n"
     (join-lines (size-align-assertions type-name-value layout))))
 
-;; A vector is a borrowed descriptor: the element type is carried by the layout,
-;; not by the C type, so element shape cannot round-trip through this header.
+;; A vector value is a reference to a shim-owned header, so the element type
+;; rides the layout, never the C type; the reference may not outlive its region.
 (defn emit-vector-type
   [types: (Vec core/TypeDef) module-index: Int type-name-value: String layout: core/LayoutDef] -> String
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)
         element: String (c-type types module-index (core/vectorshapev0-element-type shape))]
     (str "/* vector of " element ", stride " (core/vectorshapev0-stride-bytes shape) " */\n"
-      "typedef struct " type-name-value " {\n"
-      "  const void *elements;\n"
-      "  int64_t length;\n"
-      "  int64_t stride;\n"
-      "} " type-name-value ";\n"
+      "typedef native_vec *" type-name-value ";\n"
       (join-lines (size-align-assertions type-name-value layout)))))
 
 (defn emit-record-fields

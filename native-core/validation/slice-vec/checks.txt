@@ -1,0 +1,14 @@
+beagle-profile-3 PASS   (native-core/src/native/*.bgl, 15 files, 0 errors)
+obligations 7/7 PASS    (valid-ssa exhaustive-matches closed-layouts
+                         checked-arithmetic legal-abi discharged-tokens
+                         bounded-effects; a (Vec Int) and a (Vec CommitOperation)
+                         record field are live in the projected world)
+gcc-15.2.0-strict-c17 PASS    -std=c17 -pedantic -Wall -Wextra -Werror
+clang-21.1.8-strict-c17 PASS  -std=c17 -Werror
+determinism PASS        two materializations byte-identical
+probe run (both frontends)
+  vec: 100 pushes, 6 element-storage allocations
+  100 pushes from capacity 0 claim storage at 4,8,16,32,64,128 -> 6 claims,
+  i.e. ceil(log2(100/4)) + 1; the assertion bound is 8.
+  nth reads 0..99 back exactly; nth at index 100 traps (probe aborts, and the
+  driver fails if it returns).

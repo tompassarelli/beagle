@@ -33,7 +33,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_REPO="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-ALL_MODULES=(types store fold)
+ALL_MODULES=(types store fold vec)
 DRIVER_PROBES=(
   drive drive.sh driver driver.sh run run.sh
   materialize materialize.sh emit emit.sh check check.sh
@@ -484,7 +484,7 @@ run_module() {
 
 for m in "${MODULES[@]}"; do
   case "$m" in
-    types|store|fold) ;;
+    types|store|fold|vec) ;;
     *) printf '\n== native-slice: module %s ==\nnative-slice: unknown module %s (known: %s)\n' \
          "$m" "$m" "${ALL_MODULES[*]}" >&2
        OVERALL_RC=1

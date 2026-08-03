@@ -1,8 +1,8 @@
 source-path=/home/tom/code/fram/main/src/fram/types.bclj
 source-bytes=9895
 source-digest-bytes=29582
-typed-digest-bytes=94978
-native-digest-bytes=489084
+typed-digest-bytes=95297
+native-digest-bytes=490931
 typed-source-bound=true
 native-typed-bound=true
 typed-host-erased=true

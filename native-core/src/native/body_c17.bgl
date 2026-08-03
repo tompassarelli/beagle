@@ -60,6 +60,10 @@
     (checked-operation-supported? (core/checkedinstruction-operation instruction))
     (instance? native.core.UnionConstructInstruction instruction) true
     (instance? native.core.UnionExtractInstruction instruction) true
+    (instance? native.core.VecLengthInstruction instruction) true
+    (instance? native.core.VecGetInstruction instruction) true
+    (instance? native.core.VecPushInstruction instruction) true
+    (instance? native.core.VecEmptyInstruction instruction) true
     :else false))
 
 (defn terminator-supported? [terminator: core/Terminator] -> Bool
@@ -260,6 +264,25 @@
           (core/referencetype-target-type shape)
           nil)))))
 
+;; A callee that declares a region takes the arena (and a capability) ahead of
+;; its own parameters, and bounded-effects guarantees the caller holds both.
+(defn callee-resource-arguments
+  [functions: (Vec core/FunctionDef) target: core/NativeId] -> String
+  (let [position: Int (function-index-of functions target)]
+    (if (< position 0)
+      ""
+      (let [callee: core/FunctionDef (nth functions position)
+            arena: String
+            (if (> (count (core/functiondef-regions callee)) 0) "arena" "")
+            capability: String
+            (if (> (count (core/functiondef-capabilities callee)) 0)
+              "capability" "")]
+        (cond
+          (and (= 0 (count arena)) (= 0 (count capability))) ""
+          (= 0 (count capability)) arena
+          (= 0 (count arena)) capability
+          :else (str arena ", " capability))))))
+
 (defn emit-arguments
   [function: core/FunctionDef slots: (Vec ValueSlotV0) arguments: (Vec core/NativeId)]
   -> String
@@ -321,6 +344,43 @@
         "  } else {\n"
         "    " target ".tag = INT64_C(" ok-tag ");\n"
         "  }\n"))))
+
+(defn emit-call-arguments
+  [functions: (Vec core/FunctionDef)
+   function: core/FunctionDef
+   slots: (Vec ValueSlotV0)
+   target: core/NativeId
+   arguments: (Vec core/NativeId)]
+  -> String
+  (let [prefix: String (callee-resource-arguments functions target)
+        supplied: String (emit-arguments function slots arguments)]
+    (cond
+      (= 0 (count prefix)) supplied
+      (= 0 (count supplied)) prefix
+      :else (str prefix ", " supplied))))
+
+(defn vector-layout-of
+  [layouts: (Vec core/LayoutDef) vector-type: core/NativeId] -> core/LayoutShapeV0
+  (let [layout: (U core/LayoutDef Nil) (c17/layout-for-type layouts vector-type)]
+    (if (nil? layout)
+      (core/->VectorShapeV0 vector-type 0)
+      (core/layoutdef-shape layout))))
+
+(defn vector-stride
+  [layouts: (Vec core/LayoutDef) vector-type: core/NativeId] -> Int
+  (let [shape: core/LayoutShapeV0 (vector-layout-of layouts vector-type)]
+    (if (instance? native.core.VectorShapeV0 shape)
+      (core/vectorshapev0-stride-bytes shape)
+      0)))
+
+(defn vector-element-alignment
+  [layouts: (Vec core/LayoutDef) vector-type: core/NativeId] -> Int
+  (let [shape: core/LayoutShapeV0 (vector-layout-of layouts vector-type)]
+    (if (not (instance? native.core.VectorShapeV0 shape))
+      1
+      (let [element: (U core/LayoutDef Nil)
+            (c17/layout-for-type layouts (core/vectorshapev0-element-type shape))]
+        (if (nil? element) 1 (core/layoutdef-align-bytes element))))))
 
 (defn emit-instruction
   [types: (Vec core/TypeDef)
@@ -419,13 +479,51 @@
                   (value-name function slots (nth values position))))))
           " };\n"))
 
+      (instance? native.core.VecLengthInstruction instruction)
+      (str "  " target " = native_vec_length("
+        (value-name function slots
+          (core/veclengthinstruction-source-id instruction))
+        ");\n")
+
+      ;; native_vec_at traps outside [0, length), so the read is total here.
+      (instance? native.core.VecGetInstruction instruction)
+      (let [source: core/NativeId (core/vecgetinstruction-source-id instruction)
+            stride: Int (vector-stride layouts (slot-type function slots source))]
+        (str "  " target " = *(const "
+          (c17/c-type types module-index (core/ssavaluev0-type-id result))
+          " *)native_vec_at(" (value-name function slots source) ", "
+          (value-name function slots
+            (core/vecgetinstruction-index-id instruction))
+          ", INT64_C(" stride "));\n"))
+
+      (instance? native.core.VecPushInstruction instruction)
+      (let [vector-type: core/NativeId (core/ssavaluev0-type-id result)]
+        (str "  " target " = native_vec_push(arena, "
+          (value-name function slots
+            (core/vecpushinstruction-source-id instruction))
+          ", &"
+          (value-name function slots
+            (core/vecpushinstruction-value-id instruction))
+          ", INT64_C(" (vector-stride layouts vector-type) "), (size_t)"
+          (vector-element-alignment layouts vector-type) ");\n"))
+
+      (instance? native.core.VecEmptyInstruction instruction)
+      (let [vector-type: core/NativeId (core/ssavaluev0-type-id result)]
+        (str "  " target " = native_vec_new(arena, "
+          (value-name function slots
+            (core/vecemptyinstruction-capacity-id instruction))
+          ", INT64_C(" (vector-stride layouts vector-type) "), (size_t)"
+          (vector-element-alignment layouts vector-type) ");\n"))
+
       :else
       (str "  " target " = "
         (function-name module-index
           (function-index-of functions
             (core/callinstruction-function-id instruction)))
-        "(" (emit-arguments function slots
-              (core/callinstruction-arguments instruction)) ");\n"))))
+        "("
+        (emit-call-arguments functions function slots
+          (core/callinstruction-function-id instruction)
+          (core/callinstruction-arguments instruction)) ");\n"))))
 
 (defn emit-jump
   [function: core/FunctionDef
@@ -577,6 +675,9 @@
     (str (c17/function-return-type types module-index function) " "
       (function-name module-index function-index)
       "(" (c17/emit-parameter-list types module-index function) ") {\n"
+      ;; The capability is a static permission, so no emitted statement reads it.
+      (if (> (count (core/functiondef-capabilities function)) 0)
+        "  (void)capability;\n" "")
       (emit-declarations types module-index slots)
       (loop [position: Int 0 result: String ""]
         (if (>= position (count blocks))

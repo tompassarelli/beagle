@@ -1,0 +1,70 @@
+Vec vocabulary tier — provenance, layout rule, and named gaps
+
+upstream sources (read-only)
+  fram:src/fram/types.bclj
+  sha256 7a34d4633243073adecb86900639cb4bf4764e006078b8c34a71fbb2b5fa111c
+  fram:src/fram/store.bclj
+  sha256 1b8cc582103385bf4e6e1f285db37579a3616e8587ba0374bb9b21fee19deaaf
+  fram commit bbceba9bdf1acd21c1f0148556e5b2c3841a209d
+  native-core/validation/slice-vec/vec_probe.bclj  (this repo; C-callable leaves)
+
+layout rule — a vector value is a REFERENCE to its header
+  A (Vec T) value is one 8-byte handle on a shim-owned
+  native_vec { void *elements; int64_t length; int64_t capacity; } allocated in
+  a region beside its element storage. LayoutShapeV0/VectorShapeV0 keeps
+  describing the ELEMENT storage (element-type + stride), never the value.
+  Consequences:
+    - a (Vec T) record field is 8 bytes at 8-byte alignment for every T, so
+      closed-layouts closes for (Vec Record) without measuring the element;
+      t/TermStore, with eight vector fields, is 96 bytes and every field a
+      reference (it was a 24-byte inline descriptor per field before).
+    - the C projection is 'typedef native_vec *native_m0_type_N;'.
+    - region-lifetime law (thread 019fbd6c ratification) applies unchanged: the
+      handle may not outlive the region holding the header and its elements.
+      Vacuous under the single slice arena; load-bearing once regions nest.
+    - conj is LINEAR in v0: native_vec_push moves the argument header rather
+      than copying it, which is what makes an accumulate loop O(1) amortized
+      instead of the O(n) arena copy a persistent conj would need. A program
+      that reads the pre-conj vector after the push is outside the v0 slice.
+
+pipeline
+  ast-facts.clj             beagle-ast JSON -> source facts (signatures, bodies,
+                            vector literals) for types.bclj + store.bclj + probe
+  native.lower              seal-source-world -> lower-typed-world -> lower-native-world
+  native.obligations        validate-native-world (seven structural obligations)
+  native.body-c17           restricted C17 body materialization
+
+instructions added to native.core
+  VecLengthInstruction   O(1) header read
+  VecGetInstruction      bounds-CHECKED element read; traps NATIVE_TRAP_OUT_OF_RANGE
+  VecPushInstruction     amortized doubling push into the arena
+  VecEmptyInstruction    header + exact-capacity storage claim (vector literals)
+
+token discipline
+  A function whose lowered body allocates gains the arena-allocate effect, the
+  slice arena region, and the arena-allocate capability. Those tokens are
+  affine, so the discharge is attached, after the CFG is known, to the first
+  allocating instruction of a block no entry->exit path can bypass; a body with
+  no such block is refused as TODO-NATIVE-CONDITIONAL-ALLOCATION rather than
+  leaking a token.
+
+real-function evidence (report.txt)
+  fram.store/operation-range-bounds and fram.store/valid-handle? — both read
+  (Vec Record) fields of t/TermStore through count/nth, and
+  operation-range-bounds returns the vector literal [start end]. Both lower
+  their own bodies with ZERO vocabulary TODOs; their single remaining pending
+  line is TODO-NATIVE-CALLEE. Under the merged loop+arith+union base those two
+  callee gates are named exactly: first-transaction-after uses a loop form the
+  landed loop tier does not cover, and handle-position needs the integer
+  division v0 refuses by name (TODO-NATIVE-DIVISION). No real fram
+  count/nth/conj site is a leaf in this vocabulary, which is why the C-callable
+  entry points live in vec_probe.bclj over the same fram.types records.
+
+named gaps
+  1 an empty vector literal outside a let binding is refused
+    (TODO-NATIVE-EMPTY-VECTOR-LITERAL): [] names no element type and lower-expr
+    threads no expected type. A let binding's own annotation is honoured; the
+    loop tier will need the same hook for its seed bindings.
+  2 count on a String still refuses (TODO-NATIVE-CALL-count): Text is an
+    interned 64-bit handle, so its length is not recoverable from the value.
+  3 conj is linear, not persistent (see the layout rule above).

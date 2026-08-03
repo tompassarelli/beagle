@@ -662,5 +662,14 @@ native_m0_type_49 native_m0_fn_15(native_m0_type_72 native_v_0);
 native_m0_type_3 native_m0_fn_16(native_m0_type_49 native_v_0);
 native_m0_type_3 native_m0_fn_17(native_m0_type_49 native_v_0);
 native_m0_type_3 native_m0_fn_18(native_m0_type_49 native_v_0);
+native_m0_type_0 native_m0_fn_19(native_m0_type_0 native_v_0);
+native_m0_type_0 native_m0_fn_20(native_m0_type_16 native_v_0);
+native_m0_type_0 native_m0_fn_21(native_m0_type_16 native_v_0, native_m0_type_0 native_v_1);
+native_m0_type_16 native_m0_fn_22(native_arena *arena, const native_capability *capability, native_m0_type_16 native_v_0, native_m0_type_0 native_v_1);
+native_m0_type_15 native_m0_fn_23(native_arena *arena, const native_capability *capability, native_m0_type_15 native_v_0, native_m0_type_0 native_v_1);
+native_m0_type_15 native_m0_fn_24(native_arena *arena, const native_capability *capability, native_m0_type_0 native_v_0, native_m0_type_0 native_v_1);
+native_m0_type_15 native_m0_fn_25(native_arena *arena, const native_capability *capability);
+native_m0_type_0 native_m0_fn_26(native_m0_type_28 native_v_0);
+native_m0_type_52 native_m0_fn_27(native_m0_type_28 native_v_0, native_m0_type_0 native_v_1);
 
 #endif

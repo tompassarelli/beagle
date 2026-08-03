@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Re-materializes each native-core validation slice twice, byte-compares
 # every output, and fails loudly with the differing paths on divergence.
-# Usage: determinism_gate.sh [--module slice-types-full|slice-fold|slice-types|slice-store] [--quick]
+# Usage: determinism_gate.sh [--module slice-types-full|slice-fold|slice-types|slice-store|slice-vec] [--quick]
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,6 +30,9 @@ run_env_artifacts_slice() {
   local name="$1" driver="$2"; shift 2
   local run1="$work/$name/run1" run2="$work/$name/run2"
   mkdir -p "$run1" "$run2"
+  # A hand-written probe main.c is a driver INPUT read out of the artifacts dir,
+  # not an output it writes, so an empty run dir has to be seeded with it.
+  for r in "$run1" "$run2"; do cp "$(dirname "$driver")/main.c" "$r/" 2>/dev/null || true; done
   echo "--- $name (materialization 1/2) ---"
   NATIVE_SLICE_REPO="$repo" NATIVE_SLICE_ARTIFACTS="$run1" "$@" bash "$driver" \
     || { echo "determinism_gate.sh: $name materialization 1 failed" >&2; status=1; return; }
@@ -53,6 +56,11 @@ run_slice_fold() {
 
 run_slice_types_full() {
   run_env_artifacts_slice slice-types-full "$validation/slice-types-full/drive.sh" env
+}
+
+run_slice_vec() {
+  run_env_artifacts_slice slice-vec "$validation/slice-vec/drive.sh" \
+    env NATIVE_SLICE_NO_COMPILE=1
 }
 
 # run.sh writes into the committed dir directly (no artifacts-dir override);
@@ -110,6 +118,7 @@ if [ -n "$module" ]; then
     slice-types-full) run_slice_types_full ;;
     slice-types) run_slice_types ;;
     slice-store) run_slice_store ;;
+    slice-vec) run_slice_vec ;;
     *) echo "determinism_gate.sh: unknown --module: $module" >&2; exit 2 ;;
   esac
 elif [ "$quick" -eq 1 ]; then
@@ -119,6 +128,7 @@ else
   run_slice_types_full
   run_slice_types
   run_slice_store
+  run_slice_vec
 fi
 
 exit "$status"
