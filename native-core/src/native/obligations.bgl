@@ -1243,6 +1243,350 @@
     [(LegalAbiDiagnosticV0 abi-id) false]
     [(DischargedTokensDiagnosticV0 function-id) false]))
 
+;; Named tag per verdict variant, so a rejection-depth fixture can assert
+;; "failed with ITS diagnostic" without repeating an 8-arm match at each
+;; call site.
+(defn verdict-tag [verdict :- ObligationVerdictV0] :- String
+  (match verdict
+    [(ObligationPassV0 code) "pass"]
+    [(ValidSsaDiagnosticV0 function-id) "valid-ssa"]
+    [(ExhaustiveMatchesDiagnosticV0 function-id) "exhaustive-matches"]
+    [(ClosedLayoutsDiagnosticV0 type-id) "closed-layouts"]
+    [(CheckedArithmeticDiagnosticV0 function-id) "checked-arithmetic"]
+    [(LegalAbiDiagnosticV0 abi-id) "legal-abi"]
+    [(DischargedTokensDiagnosticV0 function-id) "discharged-tokens"]
+    [(BoundedEffectsDiagnosticV0 function-id) "bounded-effects"]))
+
+;; --- Rejection-depth corpus: two additional corrupt-world fixtures per
+;; obligation beyond the one landed above, each a distinct corruption vector.
+
+;; valid-ssa #2: a value defined only in one switch arm, used from the
+;; sibling arm — no path from entry to the use avoids the def block's
+;; sibling, so the def never dominates the use.
+(def sibling-block-use-function :- core/FunctionDef
+  (with fixture-function
+    [:blocks
+     [(core/->BasicBlock (obligation-id "block-entry") []
+        []
+        [(core/->SwitchTerminator (obligation-id "ssa-choice")
+           [(core/->SwitchCaseV0 (obligation-id "variant-left")
+              (obligation-id "block-left") [])
+            (core/->SwitchCaseV0 (obligation-id "variant-right")
+              (obligation-id "block-right") [])])])
+      (core/->BasicBlock (obligation-id "block-left") []
+        [(core/->CopyInstruction
+           (core/->SsaValueV0 (obligation-id "ssa-sibling-only")
+             (obligation-id "type-i64"))
+           (obligation-id "ssa-input"))]
+        [(core/->ReturnTerminator (obligation-id "ssa-sibling-only"))])
+      (core/->BasicBlock (obligation-id "block-right") [] []
+        [(core/->ReturnTerminator (obligation-id "ssa-sibling-only"))])]]))
+
+(def sibling-block-use-world :- core/NativeWorld
+  (with valid-world [:functions [sibling-block-use-function]]))
+
+;; valid-ssa #3: a jump terminator passes a different number of arguments
+;; than the target block declares parameters.
+(def jump-mismatch-function :- core/FunctionDef
+  (core/->FunctionDef (obligation-id "function-jump-mismatch") "jump-mismatch"
+    [(core/->Parameter (obligation-id "ssa-input") (obligation-id "type-i64"))]
+    [(core/->BasicBlock (obligation-id "block-jump-entry") []
+       []
+       [(core/->JumpTerminator (obligation-id "block-jump-target")
+          [(obligation-id "ssa-input")])])
+     (core/->BasicBlock (obligation-id "block-jump-target") [] []
+       [(core/->ReturnTerminator nil)])]
+    (obligation-id "block-jump-entry")
+    nil
+    [] [] []))
+
+(def jump-mismatch-world :- core/NativeWorld
+  (with valid-world [:functions [jump-mismatch-function]]))
+
+;; exhaustive-matches #2: a switch that cases the same variant twice
+;; instead of covering the union's two distinct variants.
+(def duplicate-case-function :- core/FunctionDef
+  (with fixture-function
+    [:blocks
+     [(core/->BasicBlock (obligation-id "block-entry") []
+        [(core/->CheckedInstruction
+           (core/->SsaValueV0 (obligation-id "ssa-result")
+             (obligation-id "type-checked-i64"))
+           (core/->CheckedAddI64V0 (obligation-id "ssa-input")
+             (obligation-id "ssa-input")))]
+        [(core/->SwitchTerminator (obligation-id "ssa-choice")
+           [(core/->SwitchCaseV0 (obligation-id "variant-left")
+              (obligation-id "block-left") [])
+            (core/->SwitchCaseV0 (obligation-id "variant-left")
+              (obligation-id "block-left") [])])])
+      (core/->BasicBlock (obligation-id "block-left") [] []
+        [(core/->ReturnTerminator (obligation-id "ssa-result"))])
+      (core/->BasicBlock (obligation-id "block-right") [] []
+        [(core/->ReturnTerminator (obligation-id "ssa-result"))])]]))
+
+(def duplicate-case-world :- core/NativeWorld
+  (with valid-world [:functions [duplicate-case-function]]))
+
+;; exhaustive-matches #3: a switch that cases an unknown variant id in
+;; place of one of the union's real variants.
+(def unknown-variant-function :- core/FunctionDef
+  (with fixture-function
+    [:blocks
+     [(core/->BasicBlock (obligation-id "block-entry") []
+        [(core/->CheckedInstruction
+           (core/->SsaValueV0 (obligation-id "ssa-result")
+             (obligation-id "type-checked-i64"))
+           (core/->CheckedAddI64V0 (obligation-id "ssa-input")
+             (obligation-id "ssa-input")))]
+        [(core/->SwitchTerminator (obligation-id "ssa-choice")
+           [(core/->SwitchCaseV0 (obligation-id "variant-left")
+              (obligation-id "block-left") [])
+            (core/->SwitchCaseV0 (obligation-id "variant-unknown")
+              (obligation-id "block-right") [])])])
+      (core/->BasicBlock (obligation-id "block-left") [] []
+        [(core/->ReturnTerminator (obligation-id "ssa-result"))])
+      (core/->BasicBlock (obligation-id "block-right") [] []
+        [(core/->ReturnTerminator (obligation-id "ssa-result"))])]]))
+
+(def unknown-variant-world :- core/NativeWorld
+  (with valid-world [:functions [unknown-variant-function]]))
+
+;; closed-layouts #2: a layout whose size is zero (missing size).
+(def zero-size-i64-layout :- core/LayoutDef
+  (with fixture-i64-layout [:size-bytes 0]))
+
+(def zero-size-layout-world :- core/NativeWorld
+  (with valid-world
+    [:layouts [zero-size-i64-layout fixture-union-layout fixture-outcome-layout]]))
+
+;; closed-layouts #3: a union layout whose tag offset is not aligned to
+;; the tag type's own alignment (misaligned offset).
+(def misaligned-union-layout :- core/LayoutDef
+  (with fixture-union-layout
+    [:shape (core/->UnionShapeV0 (obligation-id "type-i64") 3
+              [(core/->UnionVariantLayoutV0 (obligation-id "variant-left") 0 nil 8)
+               (core/->UnionVariantLayoutV0 (obligation-id "variant-right") 1 nil 8)])]))
+
+(def misaligned-offset-world :- core/NativeWorld
+  (with valid-world
+    [:layouts [fixture-i64-layout misaligned-union-layout fixture-outcome-layout]]))
+
+;; checked-arithmetic #2: a checked result consumed directly by an
+;; ordinary instruction instead of being dispatched through a switch.
+(def raw-consume-function :- core/FunctionDef
+  (with fixture-function
+    [:blocks
+     [(core/->BasicBlock (obligation-id "block-entry") []
+        [(core/->CheckedInstruction
+           (core/->SsaValueV0 (obligation-id "ssa-result")
+             (obligation-id "type-checked-i64"))
+           (core/->CheckedAddI64V0 (obligation-id "ssa-input")
+             (obligation-id "ssa-input")))
+         (core/->CopyInstruction
+           (core/->SsaValueV0 (obligation-id "ssa-raw-copy")
+             (obligation-id "type-checked-i64"))
+           (obligation-id "ssa-result"))]
+        [(core/->ReturnTerminator (obligation-id "ssa-raw-copy"))])
+      (core/->BasicBlock (obligation-id "block-left") [] []
+        [(core/->ReturnTerminator nil)])
+      (core/->BasicBlock (obligation-id "block-right") [] []
+        [(core/->ReturnTerminator nil)])]]))
+
+(def raw-consume-world :- core/NativeWorld
+  (with valid-world [:functions [raw-consume-function]]))
+
+;; checked-arithmetic #3: a checked operation whose result is typed as a
+;; plain value instead of an Outcome type.
+(def non-outcome-result-function :- core/FunctionDef
+  (with fixture-function
+    [:blocks
+     [(core/->BasicBlock (obligation-id "block-entry") []
+        [(core/->CheckedInstruction
+           (core/->SsaValueV0 (obligation-id "ssa-result")
+             (obligation-id "type-i64"))
+           (core/->CheckedAddI64V0 (obligation-id "ssa-input")
+             (obligation-id "ssa-input")))]
+        [(core/->SwitchTerminator (obligation-id "ssa-choice")
+           [(core/->SwitchCaseV0 (obligation-id "variant-left")
+              (obligation-id "block-left") [])
+            (core/->SwitchCaseV0 (obligation-id "variant-right")
+              (obligation-id "block-right") [])])])
+      (core/->BasicBlock (obligation-id "block-left") [] []
+        [(core/->ReturnTerminator (obligation-id "ssa-result"))])
+      (core/->BasicBlock (obligation-id "block-right") [] []
+        [(core/->ReturnTerminator (obligation-id "ssa-result"))])]]))
+
+(def non-outcome-result-world :- core/NativeWorld
+  (with valid-world [:functions [non-outcome-result-function]]))
+
+;; legal-abi #2: the ABI result type does not match the function's own
+;; declared return type.
+(def result-type-mismatch-abi :- core/AbiDeclV0
+  (with fixture-abi
+    [:result (core/->AbiValueV0 "result" (obligation-id "type-i64")
+               (core/->OwnedV0 true) nil)]))
+
+(def result-type-mismatch-world :- core/NativeWorld
+  (with valid-world [:abis [result-type-mismatch-abi]]))
+
+;; legal-abi #3: the ABI requires a capability the function never declares.
+(def missing-capability-abi :- core/AbiDeclV0
+  (with fixture-abi
+    [:required-capabilities [(obligation-id "capability-write")]]))
+
+(def missing-capability-abi-world :- core/NativeWorld
+  (with valid-world [:abis [missing-capability-abi]]))
+
+;; discharged-tokens #2: one branch of a two-way split never consumes the
+;; tokens live at entry, so they leak on that path.
+(def leak-token-function :- core/FunctionDef
+  (with fixture-token-function
+    [:blocks
+     [(core/->BasicBlock (obligation-id "block-token-entry") []
+        []
+        [(core/->BranchTerminator (obligation-id "ssa-address")
+           (obligation-id "block-token-consumed")
+           (obligation-id "block-token-leak"))])
+      (core/->BasicBlock (obligation-id "block-token-consumed") []
+        [(core/->StoreInstruction
+           (core/->SsaValueV0 (obligation-id "ssa-store")
+             (obligation-id "type-i64"))
+           (core/->StoreI64 (obligation-id "ssa-address")
+             (obligation-id "ssa-value")
+             (obligation-id "region-fixture")
+             (obligation-id "capability-write"))
+           (core/->TokenFlowV0
+             [(obligation-id "region-fixture")
+              (obligation-id "capability-write")]
+             []))]
+        [(core/->ReturnTerminator nil)])
+      (core/->BasicBlock (obligation-id "block-token-leak") [] []
+        [(core/->ReturnTerminator nil)])]]
+    [:entry-block (obligation-id "block-token-entry")]))
+
+(def leak-token-world :- core/NativeWorld
+  (with valid-world
+    [:functions [fixture-function leak-token-function]]))
+
+;; discharged-tokens #3: a consume names a token id that was never
+;; produced or live (a phantom consume, distinct from double-consuming a
+;; live one).
+(def phantom-consume-token-function :- core/FunctionDef
+  (with fixture-token-function
+    [:blocks
+     [(core/->BasicBlock (obligation-id "block-store") []
+        [(core/->StoreInstruction
+           (core/->SsaValueV0 (obligation-id "ssa-store")
+             (obligation-id "type-i64"))
+           (core/->StoreI64 (obligation-id "ssa-address")
+             (obligation-id "ssa-value")
+             (obligation-id "region-fixture")
+             (obligation-id "capability-write"))
+           (core/->TokenFlowV0
+             [(obligation-id "region-fixture")
+              (obligation-id "capability-write")
+              (obligation-id "capability-phantom")]
+             []))]
+        [(core/->ReturnTerminator nil)])]]))
+
+(def phantom-consume-token-world :- core/NativeWorld
+  (with valid-world
+    [:functions [fixture-function phantom-consume-token-function]]))
+
+;; bounded-effects #2: a store references a region absent from the
+;; function's own declared regions (undeclared resource use, not merely
+;; an uncovering effect).
+(def undeclared-region-function :- core/FunctionDef
+  (with fixture-token-function [:regions []]))
+
+(def undeclared-region-world :- core/NativeWorld
+  (with valid-world
+    [:functions [fixture-function undeclared-region-function]]))
+
+;; bounded-effects #3: a call to a callee whose declared effects and
+;; capabilities are not a subset of the caller's (effect widening
+;; through a call).
+(def unbounded-call-function :- core/FunctionDef
+  (core/->FunctionDef (obligation-id "function-caller") "caller"
+    [(core/->Parameter (obligation-id "ssa-address") (obligation-id "type-i64"))
+     (core/->Parameter (obligation-id "ssa-value") (obligation-id "type-i64"))]
+    [(core/->BasicBlock (obligation-id "block-caller") []
+       [(core/->CallInstruction
+          (core/->SsaValueV0 (obligation-id "ssa-call-result")
+            (obligation-id "type-i64"))
+          (obligation-id "function-store")
+          [(obligation-id "ssa-address") (obligation-id "ssa-value")]
+          (core/->TokenFlowV0 [] []))]
+       [(core/->ReturnTerminator nil)])]
+    (obligation-id "block-caller")
+    nil
+    [] [] []))
+
+(def unbounded-call-world :- core/NativeWorld
+  (with valid-world
+    [:functions [fixture-function fixture-token-function unbounded-call-function]]))
+
+(def valid-ssa-negative-sibling :- Bool
+  (= "valid-ssa" (verdict-tag (valid-ssa sibling-block-use-world))))
+
+(def valid-ssa-negative-jump-mismatch :- Bool
+  (= "valid-ssa" (verdict-tag (valid-ssa jump-mismatch-world))))
+
+(def exhaustive-matches-negative-duplicate :- Bool
+  (= "exhaustive-matches" (verdict-tag (exhaustive-matches duplicate-case-world))))
+
+(def exhaustive-matches-negative-unknown-variant :- Bool
+  (= "exhaustive-matches" (verdict-tag (exhaustive-matches unknown-variant-world))))
+
+(def closed-layouts-negative-zero-size :- Bool
+  (= "closed-layouts" (verdict-tag (closed-layouts zero-size-layout-world))))
+
+(def closed-layouts-negative-misaligned-offset :- Bool
+  (= "closed-layouts" (verdict-tag (closed-layouts misaligned-offset-world))))
+
+(def checked-arithmetic-negative-raw-consume :- Bool
+  (= "checked-arithmetic" (verdict-tag (checked-arithmetic raw-consume-world))))
+
+(def checked-arithmetic-negative-non-outcome :- Bool
+  (= "checked-arithmetic" (verdict-tag (checked-arithmetic non-outcome-result-world))))
+
+(def legal-abi-negative-result-mismatch :- Bool
+  (= "legal-abi" (verdict-tag (legal-abi result-type-mismatch-world))))
+
+(def legal-abi-negative-missing-capability :- Bool
+  (= "legal-abi" (verdict-tag (legal-abi missing-capability-abi-world))))
+
+(def discharged-tokens-negative-leak :- Bool
+  (= "discharged-tokens" (verdict-tag (discharged-tokens leak-token-world))))
+
+(def discharged-tokens-negative-phantom-consume :- Bool
+  (= "discharged-tokens" (verdict-tag (discharged-tokens phantom-consume-token-world))))
+
+(def bounded-effects-negative-undeclared-region :- Bool
+  (= "bounded-effects" (verdict-tag (bounded-effects undeclared-region-world))))
+
+(def bounded-effects-negative-unbounded-call :- Bool
+  (= "bounded-effects" (verdict-tag (bounded-effects unbounded-call-world))))
+
+(def rejection-depth-results :- (Vec Bool)
+  [valid-ssa-negative-sibling
+   valid-ssa-negative-jump-mismatch
+   exhaustive-matches-negative-duplicate
+   exhaustive-matches-negative-unknown-variant
+   closed-layouts-negative-zero-size
+   closed-layouts-negative-misaligned-offset
+   checked-arithmetic-negative-raw-consume
+   checked-arithmetic-negative-non-outcome
+   legal-abi-negative-result-mismatch
+   legal-abi-negative-missing-capability
+   discharged-tokens-negative-leak
+   discharged-tokens-negative-phantom-consume
+   bounded-effects-negative-undeclared-region
+   bounded-effects-negative-unbounded-call])
+
+(def fourteen-rejection-depth-fixtures-named? :- Bool
+  (every? (fn [passed :- Bool] :- Bool passed) rejection-depth-results))
+
 (defn validate-native-world [world :- core/NativeWorld]
   :- (Vec ObligationVerdictV0)
   [(valid-ssa world)
