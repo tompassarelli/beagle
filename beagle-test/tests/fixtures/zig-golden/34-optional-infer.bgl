@@ -8,7 +8,9 @@
 (declare-extern los.rt/lookup [String -> String?])
 
 ;; extern returning String? — `hit` is inferred-optional, unwrapped under some?
-(defn resolve-or [key: String fallback: String] -> String
+(defn resolve-or
+  [key: String
+   fallback: String] -> String
   (let [hit (los.rt/lookup key)]
     (if (some? hit) hit fallback)))
 
@@ -18,6 +20,9 @@
     (if (some? n) n 0)))
 
 ;; 2-arg get on a typed map returns V? — `v` is inferred-optional
-(defn count-or-default [m: (Map String Int) k: String fallback: Int] -> Int
+(defn count-or-default
+  [m: (Map String Int)
+   k: String
+   fallback: Int] -> Int
   (let [v (get m k)]
     (if (nil? v) fallback v)))

@@ -23,9 +23,15 @@
   (KeywordAtom [value :- String])
   (RefAtom [target :- NativeId]))
 
-(defrecord TypeField [id :- NativeId name :- String type-id :- NativeId])
+(defrecord TypeField
+  [id :- NativeId
+   name :- String
+   type-id :- NativeId])
 
-(defrecord TypeVariant [id :- NativeId name :- String payload-type :- (U NativeId Nil)])
+(defrecord TypeVariant
+  [id :- NativeId
+   name :- String
+   payload-type :- (U NativeId Nil)])
 
 (defunion TypeShape
   (AtomType [kind :- AtomKind])
@@ -33,9 +39,14 @@
   (UnionType [variants :- (Vec TypeVariant)])
   (VectorType [element-type :- NativeId])
   (ReferenceType [target-type :- NativeId])
-  (OutcomeType [value-type: NativeId failure-type: NativeId]))
+  (OutcomeType
+    [value-type: NativeId
+     failure-type: NativeId]))
 
-(defrecord TypeDef [id :- NativeId name :- String shape :- TypeShape])
+(defrecord TypeDef
+  [id :- NativeId
+   name :- String
+   shape :- TypeShape])
 
 (defunion EffectKind
   (PureEffect [token :- Bool])
@@ -46,16 +57,23 @@
   (IoEffect [capability: NativeId])
   (SocketEffect [capability: NativeId])
   (ClockEffect [capability: NativeId])
-  (AtomicEffect [region: NativeId capability: NativeId]))
+  (AtomicEffect
+    [region: NativeId
+     capability: NativeId]))
 
-(defrecord EffectDef [id :- NativeId kind :- EffectKind])
+(defrecord EffectDef
+  [id :- NativeId
+   kind :- EffectKind])
 
 (defunion RegionKind
   (StackRegion [token :- Bool])
   (ArenaRegion [token :- Bool])
   (ExternalRegion [token :- Bool]))
 
-(defrecord RegionDef [id :- NativeId kind :- RegionKind parent :- (U NativeId Nil)])
+(defrecord RegionDef
+  [id :- NativeId
+   kind :- RegionKind
+   parent :- (U NativeId Nil)])
 
 (defunion CapabilityKind
   (ReadCapability [token :- Bool])
@@ -63,7 +81,11 @@
   (AllocateCapability [token :- Bool])
   (HostCapability [token :- Bool]))
 
-(defrecord CapabilityDef [id :- NativeId kind :- CapabilityKind region :- (U NativeId Nil) affine :- Bool])
+(defrecord CapabilityDef
+  [id :- NativeId
+   kind :- CapabilityKind
+   region :- (U NativeId Nil)
+   affine :- Bool])
 
 (defunion ScalarReprV0
   (BoolReprV0 [bit-width: Int])
@@ -72,38 +94,60 @@
   (FloatReprV0 [bit-width: Int]))
 
 (defrecord FieldLayoutV0
-  [field-id: NativeId type-id: NativeId
-   offset-bytes: Int align-bytes: Int])
+  [field-id: NativeId
+   type-id: NativeId
+   offset-bytes: Int
+   align-bytes: Int])
 
 (defrecord UnionVariantLayoutV0
-  [variant-id: NativeId tag: Int payload-type: (U NativeId Nil)
+  [variant-id: NativeId
+   tag: Int
+   payload-type: (U NativeId Nil)
    payload-offset-bytes: Int])
 
 (defunion LayoutShapeV0
   (ScalarShapeV0 [representation: ScalarReprV0])
   (RecordShapeV0 [fields: (Vec FieldLayoutV0)])
   (UnionShapeV0
-    [tag-type: NativeId tag-offset-bytes: Int
+    [tag-type: NativeId
+     tag-offset-bytes: Int
      variants: (Vec UnionVariantLayoutV0)])
   ;; Describes the ELEMENT storage; the vector value itself is a reference-sized
   ;; handle on the header, so a (Vec T) record field is 8 bytes for every T.
   ;; Region-lifetime law applies: that handle may not outlive the header's region.
-  (VectorShapeV0 [element-type: NativeId stride-bytes: Int])
+  (VectorShapeV0
+    [element-type: NativeId
+     stride-bytes: Int])
   (ReferenceShapeV0 [target-type: NativeId]))
 
 (defrecord LayoutDef
-  [id: NativeId type-id: NativeId size-bytes: Int align-bytes: Int
+  [id: NativeId
+   type-id: NativeId
+   size-bytes: Int
+   align-bytes: Int
    shape: LayoutShapeV0])
 
-(defrecord Parameter [id :- NativeId type-id :- NativeId])
+(defrecord Parameter
+  [id :- NativeId
+   type-id :- NativeId])
 
-(defrecord SsaValueV0 [id: NativeId type-id: NativeId])
+(defrecord SsaValueV0
+  [id: NativeId
+   type-id: NativeId])
 
 (defunion CheckedOperationV0
-  (CheckedAddI64V0 [left-id: NativeId right-id: NativeId])
-  (CheckedSubI64V0 [left-id: NativeId right-id: NativeId])
-  (CheckedMulI64V0 [left-id: NativeId right-id: NativeId])
-  (CheckedBoundsV0 [index-id: NativeId length-id: NativeId]))
+  (CheckedAddI64V0
+    [left-id: NativeId
+     right-id: NativeId])
+  (CheckedSubI64V0
+    [left-id: NativeId
+     right-id: NativeId])
+  (CheckedMulI64V0
+    [left-id: NativeId
+     right-id: NativeId])
+  (CheckedBoundsV0
+    [index-id: NativeId
+     length-id: NativeId]))
 
 ;; Total comparisons: every operand pair is defined, so a comparison is never a
 ;; CheckedOperationV0 and never carries an Outcome result.
@@ -120,89 +164,182 @@
   (RegionTokenV0 [region: NativeId])
   (CapabilityTokenV0 [capability: NativeId]))
 
-(defrecord ResourceTokenV0 [id: NativeId kind: ResourceTokenKindV0])
+(defrecord ResourceTokenV0
+  [id: NativeId
+   kind: ResourceTokenKindV0])
 
 (defrecord TokenFlowV0
-  [consumed: (Vec NativeId) produced: (Vec ResourceTokenV0)])
+  [consumed: (Vec NativeId)
+   produced: (Vec ResourceTokenV0)])
 
 (defunion StoreOp
-  (StoreBool [address :- NativeId value :- NativeId region :- NativeId capability :- NativeId])
-  (StoreI64 [address :- NativeId value :- NativeId region :- NativeId capability :- NativeId])
-  (StoreF64 [address :- NativeId value :- NativeId region :- NativeId capability :- NativeId])
-  (StoreText [address :- NativeId value :- NativeId region :- NativeId capability :- NativeId])
-  (StoreRef [address :- NativeId value :- NativeId region :- NativeId capability :- NativeId]))
+  (StoreBool
+    [address :- NativeId
+     value :- NativeId
+     region :- NativeId
+     capability :- NativeId])
+  (StoreI64
+    [address :- NativeId
+     value :- NativeId
+     region :- NativeId
+     capability :- NativeId])
+  (StoreF64
+    [address :- NativeId
+     value :- NativeId
+     region :- NativeId
+     capability :- NativeId])
+  (StoreText
+    [address :- NativeId
+     value :- NativeId
+     region :- NativeId
+     capability :- NativeId])
+  (StoreRef
+    [address :- NativeId
+     value :- NativeId
+     region :- NativeId
+     capability :- NativeId]))
 
 (defunion Instruction
-  (AtomInstruction [result: SsaValueV0 atom: NativeAtom])
-  (CopyInstruction [result: SsaValueV0 source-id: NativeId])
-  (AddF64Instruction [result: SsaValueV0 left-id: NativeId right-id: NativeId])
-  (CheckedInstruction [result: SsaValueV0 operation: CheckedOperationV0])
-  (StoreInstruction [result: SsaValueV0 store: StoreOp tokens: TokenFlowV0])
+  (AtomInstruction
+    [result: SsaValueV0
+     atom: NativeAtom])
+  (CopyInstruction
+    [result: SsaValueV0
+     source-id: NativeId])
+  (AddF64Instruction
+    [result: SsaValueV0
+     left-id: NativeId
+     right-id: NativeId])
+  (CheckedInstruction
+    [result: SsaValueV0
+     operation: CheckedOperationV0])
+  (StoreInstruction
+    [result: SsaValueV0
+     store: StoreOp
+     tokens: TokenFlowV0])
   (AllocateInstruction
-    [result: SsaValueV0 region: NativeId capability: NativeId
-     byte-count-id: NativeId tokens: TokenFlowV0])
+    [result: SsaValueV0
+     region: NativeId
+     capability: NativeId
+     byte-count-id: NativeId
+     tokens: TokenFlowV0])
   (CallInstruction
-    [result: SsaValueV0 function-id: NativeId arguments: (Vec NativeId)
+    [result: SsaValueV0
+     function-id: NativeId
+     arguments: (Vec NativeId)
      tokens: TokenFlowV0])
   (CompareInstruction
-    [result: SsaValueV0 comparison: CompareOpV0
-     left-id: NativeId right-id: NativeId])
+    [result: SsaValueV0
+     comparison: CompareOpV0
+     left-id: NativeId
+     right-id: NativeId])
   ;; Record values are held by value, so a field read is an extract and a record
   ;; construct is a value form; neither touches a region or a capability.
-  (FieldInstruction [result: SsaValueV0 source-id: NativeId field-id: NativeId])
+  (FieldInstruction
+    [result: SsaValueV0
+     source-id: NativeId
+     field-id: NativeId])
   ;; Read one alternative's payload out of a tagged value. Sound only where the
   ;; tag is already proved, which is why it is reachable from a switch arm alone.
   (VariantValueInstruction
-    [result: SsaValueV0 source-id: NativeId variant-id: NativeId])
-  (RecordInstruction [result: SsaValueV0 field-ids: (Vec NativeId)])
+    [result: SsaValueV0
+     source-id: NativeId
+     variant-id: NativeId])
+  (RecordInstruction
+    [result: SsaValueV0
+     field-ids: (Vec NativeId)])
   ;; Widening into a closed union is a tag inject: the payload is already the
   ;; variant's declared type, so no check can fail and none is emitted.
   (UnionConstructInstruction
-    [result: SsaValueV0 variant-id: NativeId payload-id: (U NativeId Nil)])
+    [result: SsaValueV0
+     variant-id: NativeId
+     payload-id: (U NativeId Nil)])
   ;; The checked companion to SwitchTerminator: a Switch asks which variant a
   ;; value carries, an extract asserts one. A tag mismatch traps rather than
   ;; reinterpreting the payload bytes as the expected variant.
   (UnionExtractInstruction
-    [result: SsaValueV0 source-id: NativeId variant-id: NativeId])
+    [result: SsaValueV0
+     source-id: NativeId
+     variant-id: NativeId])
   ;; A vector value is a reference to a {elements, length, capacity} header in a
   ;; region: length is a header read and VecGet traps outside [0, length).
-  (VecLengthInstruction [result: SsaValueV0 source-id: NativeId])
+  (VecLengthInstruction
+    [result: SsaValueV0
+     source-id: NativeId])
   (VecGetInstruction
-    [result: SsaValueV0 source-id: NativeId index-id: NativeId])
+    [result: SsaValueV0
+     source-id: NativeId
+     index-id: NativeId])
   ;; Push is LINEAR (the source header is moved) and doubles capacity, so an
   ;; accumulate loop costs O(1) amortized instead of a persistent O(n) copy.
   (VecPushInstruction
-    [result: SsaValueV0 source-id: NativeId value-id: NativeId arena-id: NativeId])
+    [result: SsaValueV0
+     source-id: NativeId
+     value-id: NativeId
+     arena-id: NativeId])
   (VecEmptyInstruction
-    [result: SsaValueV0 capacity-id: NativeId arena-id: NativeId])
+    [result: SsaValueV0
+     capacity-id: NativeId
+     arena-id: NativeId])
   ;; Acquires the arena once in the entry block, consuming the region and
   ;; capability tokens; no other instruction can allocate without its result.
   (ArenaInstruction
-    [result: SsaValueV0 region: NativeId capability: NativeId
+    [result: SsaValueV0
+     region: NativeId
+     capability: NativeId
      tokens: TokenFlowV0])
-  (TextLengthInstruction [result: SsaValueV0 source-id: NativeId])
+  (TextLengthInstruction
+    [result: SsaValueV0
+     source-id: NativeId])
   ;; v0 subs copies into the arena: no interior borrow, so the source blob's
   ;; lifetime never constrains the slice.
   (TextSliceInstruction
-    [result: SsaValueV0 arena-id: NativeId source-id: NativeId
-     start-id: NativeId end-id: NativeId failure-code: Int])
+    [result: SsaValueV0
+     arena-id: NativeId
+     source-id: NativeId
+     start-id: NativeId
+     end-id: NativeId
+     failure-code: Int])
   (TextConcatInstruction
-    [result: SsaValueV0 arena-id: NativeId operand-ids: (Vec NativeId)]))
+    [result: SsaValueV0
+     arena-id: NativeId
+     operand-ids: (Vec NativeId)]))
 
 (defrecord SwitchCaseV0
-  [variant-id: NativeId block-id: NativeId arguments: (Vec NativeId)])
+  [variant-id: NativeId
+   block-id: NativeId
+   arguments: (Vec NativeId)])
 
 (defunion Terminator
   (ReturnTerminator [value: (U NativeId Nil)])
-  (JumpTerminator [block-id: NativeId arguments: (Vec NativeId)])
+  (JumpTerminator
+    [block-id: NativeId
+     arguments: (Vec NativeId)])
   (BranchTerminator
-    [condition: NativeId true-block: NativeId false-block: NativeId])
-  (SwitchTerminator [value-id: NativeId cases: (Vec SwitchCaseV0)])
+    [condition: NativeId
+     true-block: NativeId
+     false-block: NativeId])
+  (SwitchTerminator
+    [value-id: NativeId
+     cases: (Vec SwitchCaseV0)])
   (TrapTerminator [failure-id: NativeId]))
 
-(defrecord BasicBlock [id :- NativeId parameters :- (Vec Parameter) instructions :- (Vec Instruction) terminators :- (Vec Terminator)])
+(defrecord BasicBlock
+  [id :- NativeId
+   parameters :- (Vec Parameter)
+   instructions :- (Vec Instruction)
+   terminators :- (Vec Terminator)])
 
-(defrecord FunctionDef [id :- NativeId name :- String parameters :- (Vec Parameter) blocks :- (Vec BasicBlock) entry-block :- NativeId return-type :- (U NativeId Nil) effects :- (Vec NativeId) regions :- (Vec NativeId) capabilities :- (Vec NativeId)])
+(defrecord FunctionDef
+  [id :- NativeId
+   name :- String
+   parameters :- (Vec Parameter)
+   blocks :- (Vec BasicBlock)
+   entry-block :- NativeId
+   return-type :- (U NativeId Nil)
+   effects :- (Vec NativeId)
+   regions :- (Vec NativeId)
+   capabilities :- (Vec NativeId)])
 
 (defunion ObligationCode
   (ValidSsaObligation [token: Bool])
@@ -213,28 +350,49 @@
   (DischargedTokensObligation [token: Bool])
   (BoundedEffectsObligation [token: Bool]))
 
-(defrecord ObligationResult [code :- ObligationCode passed :- Bool detail :- String])
+(defrecord ObligationResult
+  [code :- ObligationCode
+   passed :- Bool
+   detail :- String])
 
-(defrecord ValidationReport [passed :- Bool obligations :- (Vec ObligationResult)])
+(defrecord ValidationReport
+  [passed :- Bool
+   obligations :- (Vec ObligationResult)])
 
 (defunion ExternalObservation
-  (Fri2Observation [artifact-id :- NativeId digest :- String byte-count :- Int]))
+  (Fri2Observation
+    [artifact-id :- NativeId
+     digest :- String
+     byte-count :- Int]))
 
-(defrecord DiagnosticV0 [code: String detail: String])
+(defrecord DiagnosticV0
+  [code: String
+   detail: String])
 
 (defrecord ReceiptObligationV0
-  [code: ObligationCode version: String subject-digest: String
-   passed: Bool detail: String])
+  [code: ObligationCode
+   version: String
+   subject-digest: String
+   passed: Bool
+   detail: String])
 
-(defrecord ArtifactHashV0 [name: String digest: String])
+(defrecord ArtifactHashV0
+  [name: String
+   digest: String])
 
 (defrecord PassReceiptV0
-  [id: NativeId input-digest: String compiler-commit: String
-   pass-id: String pass-version: String
-   configuration: (Vec String) configuration-digest: String
+  [id: NativeId
+   input-digest: String
+   compiler-commit: String
+   pass-id: String
+   pass-version: String
+   configuration: (Vec String)
+   configuration-digest: String
    diagnostics: (Vec DiagnosticV0)
    obligations: (Vec ReceiptObligationV0)
-   output-digest: String backend: String backend-version: String
+   output-digest: String
+   backend: String
+   backend-version: String
    artifacts: (Vec ArtifactHashV0)])
 
 (defunion AbiDirectionV0
@@ -250,23 +408,49 @@
   (ArenaOwnedV0 [region: NativeId]))
 
 (defrecord AbiValueV0
-  [name: String type-id: NativeId ownership: OwnershipRuleV0
+  [name: String
+   type-id: NativeId
+   ownership: OwnershipRuleV0
    lifetime-region: (U NativeId Nil)])
 
 (defrecord AbiDeclV0
-  [id: NativeId function-id: NativeId symbol: String
-   direction: AbiDirectionV0 convention: AbiConventionV0
-   parameters: (Vec AbiValueV0) result: (U AbiValueV0 Nil)
-   failure-type: NativeId required-effects: (Vec NativeId)
+  [id: NativeId
+   function-id: NativeId
+   symbol: String
+   direction: AbiDirectionV0
+   convention: AbiConventionV0
+   parameters: (Vec AbiValueV0)
+   result: (U AbiValueV0 Nil)
+   failure-type: NativeId
+   required-effects: (Vec NativeId)
    required-capabilities: (Vec NativeId)
-   version: String layout-digest: String])
+   version: String
+   layout-digest: String])
 
-(defrecord NativeWorld [id :- NativeId parent :- (U NativeId Nil) compiler-pass :- String types :- (Vec TypeDef) effects :- (Vec EffectDef) regions :- (Vec RegionDef) capabilities :- (Vec CapabilityDef) layouts :- (Vec LayoutDef) functions :- (Vec FunctionDef) allowed-effects :- (Vec NativeId) allowed-regions :- (Vec NativeId) allowed-capabilities :- (Vec NativeId) abis: (Vec AbiDeclV0) observations :- (Vec ExternalObservation)])
+(defrecord NativeWorld
+  [id :- NativeId
+   parent :- (U NativeId Nil)
+   compiler-pass :- String
+   types :- (Vec TypeDef)
+   effects :- (Vec EffectDef)
+   regions :- (Vec RegionDef)
+   capabilities :- (Vec CapabilityDef)
+   layouts :- (Vec LayoutDef)
+   functions :- (Vec FunctionDef)
+   allowed-effects :- (Vec NativeId)
+   allowed-regions :- (Vec NativeId)
+   allowed-capabilities :- (Vec NativeId)
+   abis: (Vec AbiDeclV0)
+   observations :- (Vec ExternalObservation)])
 
-(defn native-id= [left :- NativeId right :- NativeId] :- Bool
+(defn native-id=
+  [left :- NativeId
+   right :- NativeId] :- Bool
   (= (nativeid-value left) (nativeid-value right)))
 
-(defn id-in? [ids :- (Vec NativeId) target :- NativeId] :- Bool
+(defn id-in?
+  [ids :- (Vec NativeId)
+   target :- NativeId] :- Bool
   (loop [index :- Int 0]
     (cond
       (>= index (count ids))
@@ -276,7 +460,9 @@
       :else
       (recur (+ index 1)))))
 
-(defn ids-in? [ids :- (Vec NativeId) allowed :- (Vec NativeId)] :- Bool
+(defn ids-in?
+  [ids :- (Vec NativeId)
+   allowed :- (Vec NativeId)] :- Bool
   (loop [index :- Int 0]
     (if (>= index (count ids))
       true
@@ -296,7 +482,9 @@
       (let [part :- String (nth parts index)]
         (recur (+ index 1) (str encoded (count part) ":" part))))))
 
-(defn canonical-id [domain :- String parts :- (Vec String)] :- NativeId
+(defn canonical-id
+  [domain :- String
+   parts :- (Vec String)] :- NativeId
   (->NativeId (str "native-id-v0:" (count domain) ":" domain ":" (canonical-parts parts))))
 
 ;; An Outcome's tag namespace is exactly its failure union's variant set, so the
@@ -316,10 +504,14 @@
 (defn checked-overflow-variant-id [] :- NativeId
   (checked-id ["CheckedI64Result" "overflow"]))
 
-(defn optional-id-in? [candidate :- (U NativeId Nil) allowed :- (Vec NativeId)] :- Bool
+(defn optional-id-in?
+  [candidate :- (U NativeId Nil)
+   allowed :- (Vec NativeId)] :- Bool
   (if (nil? candidate) true (id-in? allowed candidate)))
 
-(defn append-ids [left :- (Vec NativeId) right :- (Vec NativeId)] :- (Vec NativeId)
+(defn append-ids
+  [left :- (Vec NativeId)
+   right :- (Vec NativeId)] :- (Vec NativeId)
   (vec (concat left right)))
 
 (defn parameter-ids [parameters :- (Vec Parameter)] :- (Vec NativeId)
@@ -435,7 +627,9 @@
         (append-ids ids
           (type-shape-owned-ids (typedef-shape (nth types index))))))))
 
-(defn atom-kind-refs-closed? [kind :- AtomKind known-types :- (Vec NativeId)] :- Bool
+(defn atom-kind-refs-closed?
+  [kind :- AtomKind
+   known-types :- (Vec NativeId)] :- Bool
   (match kind
     [(BoolKind value) true]
     [(I64Kind value) true]
@@ -444,15 +638,21 @@
     [(KeywordKind value) true]
     [(RefKind target) (id-in? known-types target)]))
 
-(defn type-fields-refs-closed? [fields :- (Vec TypeField) known-types :- (Vec NativeId)] :- Bool
+(defn type-fields-refs-closed?
+  [fields :- (Vec TypeField)
+   known-types :- (Vec NativeId)] :- Bool
   (every? (fn [field :- TypeField] :- Bool (id-in? known-types (typefield-type-id field)))
     fields))
 
-(defn type-variants-refs-closed? [variants :- (Vec TypeVariant) known-types :- (Vec NativeId)] :- Bool
+(defn type-variants-refs-closed?
+  [variants :- (Vec TypeVariant)
+   known-types :- (Vec NativeId)] :- Bool
   (every? (fn [variant :- TypeVariant] :- Bool (optional-id-in? (typevariant-payload-type variant) known-types))
     variants))
 
-(defn type-shape-refs-closed? [shape :- TypeShape known-types :- (Vec NativeId)] :- Bool
+(defn type-shape-refs-closed?
+  [shape :- TypeShape
+   known-types :- (Vec NativeId)] :- Bool
   (match shape
     [(AtomType kind) (atom-kind-refs-closed? kind known-types)]
     [(RecordType fields) (type-fields-refs-closed? fields known-types)]
@@ -467,7 +667,10 @@
     (every? (fn [type-def :- TypeDef] :- Bool (type-shape-refs-closed? (typedef-shape type-def) known-types))
       types)))
 
-(defn effect-kind-refs-closed? [kind :- EffectKind known-regions :- (Vec NativeId) known-capabilities :- (Vec NativeId)] :- Bool
+(defn effect-kind-refs-closed?
+  [kind :- EffectKind
+   known-regions :- (Vec NativeId)
+   known-capabilities :- (Vec NativeId)] :- Bool
   (match kind
     [(PureEffect value) true]
     [(AllocateEffect region) (id-in? known-regions region)]
@@ -481,7 +684,10 @@
      (and (id-in? known-regions region)
        (id-in? known-capabilities capability))]))
 
-(defn effects-refs-closed? [effects :- (Vec EffectDef) known-regions :- (Vec NativeId) known-capabilities :- (Vec NativeId)] :- Bool
+(defn effects-refs-closed?
+  [effects :- (Vec EffectDef)
+   known-regions :- (Vec NativeId)
+   known-capabilities :- (Vec NativeId)] :- Bool
   (every? (fn [effect :- EffectDef] :- Bool (effect-kind-refs-closed? (effectdef-kind effect) known-regions known-capabilities))
     effects))
 
@@ -490,22 +696,33 @@
     (every? (fn [region :- RegionDef] :- Bool (optional-id-in? (regiondef-parent region) known))
       regions)))
 
-(defn capabilities-refs-closed? [capabilities :- (Vec CapabilityDef) known-regions :- (Vec NativeId)] :- Bool
+(defn capabilities-refs-closed?
+  [capabilities :- (Vec CapabilityDef)
+   known-regions :- (Vec NativeId)] :- Bool
   (every? (fn [capability :- CapabilityDef] :- Bool (and (capabilitydef-affine capability) (optional-id-in? (capabilitydef-region capability) known-regions)))
     capabilities))
 
-(defn field-layout-refs-closed? [field :- FieldLayoutV0 known-members :- (Vec NativeId) known-types :- (Vec NativeId)] :- Bool
+(defn field-layout-refs-closed?
+  [field :- FieldLayoutV0
+   known-members :- (Vec NativeId)
+   known-types :- (Vec NativeId)] :- Bool
   (and (id-in? known-members (fieldlayoutv0-field-id field))
     (id-in? known-types (fieldlayoutv0-type-id field))
     (>= (fieldlayoutv0-offset-bytes field) 0)
     (> (fieldlayoutv0-align-bytes field) 0)))
 
-(defn union-variant-layout-refs-closed? [variant :- UnionVariantLayoutV0 known-members :- (Vec NativeId) known-types :- (Vec NativeId)] :- Bool
+(defn union-variant-layout-refs-closed?
+  [variant :- UnionVariantLayoutV0
+   known-members :- (Vec NativeId)
+   known-types :- (Vec NativeId)] :- Bool
   (and (id-in? known-members (unionvariantlayoutv0-variant-id variant))
     (optional-id-in? (unionvariantlayoutv0-payload-type variant) known-types)
     (>= (unionvariantlayoutv0-payload-offset-bytes variant) 0)))
 
-(defn layout-shape-refs-closed? [shape :- LayoutShapeV0 known-members :- (Vec NativeId) known-types :- (Vec NativeId)] :- Bool
+(defn layout-shape-refs-closed?
+  [shape :- LayoutShapeV0
+   known-members :- (Vec NativeId)
+   known-types :- (Vec NativeId)] :- Bool
   (match shape
     [(ScalarShapeV0 representation) true]
     [(RecordShapeV0 fields)
@@ -518,13 +735,18 @@
      (and (id-in? known-types element-type) (> stride-bytes 0))]
     [(ReferenceShapeV0 target-type) (id-in? known-types target-type)]))
 
-(defn layout-refs-closed? [layout :- LayoutDef known-members :- (Vec NativeId) known-types :- (Vec NativeId)] :- Bool
+(defn layout-refs-closed?
+  [layout :- LayoutDef
+   known-members :- (Vec NativeId)
+   known-types :- (Vec NativeId)] :- Bool
   (and (id-in? known-types (layoutdef-type-id layout))
     (>= (layoutdef-size-bytes layout) 0)
     (> (layoutdef-align-bytes layout) 0)
     (layout-shape-refs-closed? (layoutdef-shape layout) known-members known-types)))
 
-(defn layouts-refs-closed? [layouts :- (Vec LayoutDef) types :- (Vec TypeDef)] :- Bool
+(defn layouts-refs-closed?
+  [layouts :- (Vec LayoutDef)
+   types :- (Vec TypeDef)] :- Bool
   (let [known-types :- (Vec NativeId) (type-ids types) known-members :- (Vec NativeId) (type-member-ids types)]
     (every? (fn [layout :- LayoutDef] :- Bool (layout-refs-closed? layout known-members known-types))
       layouts)))
@@ -532,7 +754,9 @@
 (defn basic-block-ids [blocks :- (Vec BasicBlock)] :- (Vec NativeId)
   (mapv (fn [block :- BasicBlock] :- NativeId (basicblock-id block)) blocks))
 
-(defn native-atom-refs-closed? [atom :- NativeAtom known-owned :- (Vec NativeId)] :- Bool
+(defn native-atom-refs-closed?
+  [atom :- NativeAtom
+   known-owned :- (Vec NativeId)] :- Bool
   (match atom
     [(BoolAtom value) true]
     [(I64Atom value) true]
@@ -541,7 +765,10 @@
     [(KeywordAtom value) true]
     [(RefAtom target) (id-in? known-owned target)]))
 
-(defn store-op-resources-closed? [store :- StoreOp known-regions :- (Vec NativeId) known-capabilities :- (Vec NativeId)] :- Bool
+(defn store-op-resources-closed?
+  [store :- StoreOp
+   known-regions :- (Vec NativeId)
+   known-capabilities :- (Vec NativeId)] :- Bool
   (match store
     [(StoreBool address value region capability) (and (id-in? known-regions region) (id-in? known-capabilities capability))]
     [(StoreI64 address value region capability) (and (id-in? known-regions region) (id-in? known-capabilities capability))]
@@ -549,7 +776,12 @@
     [(StoreText address value region capability) (and (id-in? known-regions region) (id-in? known-capabilities capability))]
     [(StoreRef address value region capability) (and (id-in? known-regions region) (id-in? known-capabilities capability))]))
 
-(defn instruction-semantic-refs-closed? [instruction :- Instruction known-functions :- (Vec NativeId) known-regions :- (Vec NativeId) known-capabilities :- (Vec NativeId) known-owned :- (Vec NativeId)] :- Bool
+(defn instruction-semantic-refs-closed?
+  [instruction :- Instruction
+   known-functions :- (Vec NativeId)
+   known-regions :- (Vec NativeId)
+   known-capabilities :- (Vec NativeId)
+   known-owned :- (Vec NativeId)] :- Bool
   (match instruction
     [(AtomInstruction result atom) (native-atom-refs-closed? atom known-owned)]
     [(CopyInstruction result source-id) true]
@@ -582,11 +814,15 @@
      true]
     [(TextConcatInstruction result arena-id operand-ids) true]))
 
-(defn parameter-types-closed? [parameters :- (Vec Parameter) known-types :- (Vec NativeId)] :- Bool
+(defn parameter-types-closed?
+  [parameters :- (Vec Parameter)
+   known-types :- (Vec NativeId)] :- Bool
   (every? (fn [parameter :- Parameter] :- Bool (id-in? known-types (parameter-type-id parameter)))
     parameters))
 
-(defn terminator-block-refs-closed? [terminator :- Terminator known-blocks :- (Vec NativeId)] :- Bool
+(defn terminator-block-refs-closed?
+  [terminator :- Terminator
+   known-blocks :- (Vec NativeId)] :- Bool
   (match terminator
     [(ReturnTerminator value) true]
     [(JumpTerminator block-id arguments) (id-in? known-blocks block-id)]
@@ -596,14 +832,28 @@
      (every? (fn [switch-case :- SwitchCaseV0] :- Bool (id-in? known-blocks (switchcasev0-block-id switch-case))) cases)]
     [(TrapTerminator failure-id) true]))
 
-(defn block-reference-closed? [block :- BasicBlock known-types :- (Vec NativeId) known-functions :- (Vec NativeId) known-regions :- (Vec NativeId) known-capabilities :- (Vec NativeId) known-owned :- (Vec NativeId) known-blocks :- (Vec NativeId)] :- Bool
+(defn block-reference-closed?
+  [block :- BasicBlock
+   known-types :- (Vec NativeId)
+   known-functions :- (Vec NativeId)
+   known-regions :- (Vec NativeId)
+   known-capabilities :- (Vec NativeId)
+   known-owned :- (Vec NativeId)
+   known-blocks :- (Vec NativeId)] :- Bool
   (and (parameter-types-closed? (basicblock-parameters block) known-types)
     (every? (fn [instruction :- Instruction] :- Bool (instruction-semantic-refs-closed? instruction known-functions known-regions known-capabilities known-owned))
       (basicblock-instructions block))
     (every? (fn [terminator :- Terminator] :- Bool (terminator-block-refs-closed? terminator known-blocks))
       (basicblock-terminators block))))
 
-(defn function-reference-closed? [function :- FunctionDef known-types :- (Vec NativeId) known-effects :- (Vec NativeId) known-regions :- (Vec NativeId) known-capabilities :- (Vec NativeId) known-functions :- (Vec NativeId) known-owned :- (Vec NativeId)] :- Bool
+(defn function-reference-closed?
+  [function :- FunctionDef
+   known-types :- (Vec NativeId)
+   known-effects :- (Vec NativeId)
+   known-regions :- (Vec NativeId)
+   known-capabilities :- (Vec NativeId)
+   known-functions :- (Vec NativeId)
+   known-owned :- (Vec NativeId)] :- Bool
   (let [blocks :- (Vec BasicBlock) (functiondef-blocks function) known-blocks :- (Vec NativeId) (basic-block-ids blocks)]
     (and (parameter-types-closed? (functiondef-parameters function) known-types)
       (optional-id-in? (functiondef-return-type function) known-types)
@@ -614,7 +864,13 @@
       (every? (fn [block :- BasicBlock] :- Bool (block-reference-closed? block known-types known-functions known-regions known-capabilities known-owned known-blocks))
         blocks))))
 
-(defn functions-reference-closed? [functions :- (Vec FunctionDef) known-types :- (Vec NativeId) known-effects :- (Vec NativeId) known-regions :- (Vec NativeId) known-capabilities :- (Vec NativeId) known-owned :- (Vec NativeId)] :- Bool
+(defn functions-reference-closed?
+  [functions :- (Vec FunctionDef)
+   known-types :- (Vec NativeId)
+   known-effects :- (Vec NativeId)
+   known-regions :- (Vec NativeId)
+   known-capabilities :- (Vec NativeId)
+   known-owned :- (Vec NativeId)] :- Bool
   (let [known-functions :- (Vec NativeId) (function-ids functions)]
     (every? (fn [function :- FunctionDef] :- Bool (function-reference-closed? function known-types known-effects known-regions known-capabilities known-functions known-owned))
       functions)))
@@ -707,7 +963,9 @@
   (append-ids (parameter-ids (functiondef-parameters function))
     (all-block-value-ids (functiondef-blocks function))))
 
-(defn block-ssa-closed? [block :- BasicBlock known-values :- (Vec NativeId)] :- Bool
+(defn block-ssa-closed?
+  [block :- BasicBlock
+   known-values :- (Vec NativeId)] :- Bool
   (and (every? (fn [instruction :- Instruction] :- Bool (ids-in? (instruction-ssa-refs instruction) known-values)) (basicblock-instructions block))
     (every? (fn [terminator :- Terminator] :- Bool (ids-in? (terminator-ssa-refs terminator) known-values))
       (basicblock-terminators block))))
@@ -726,7 +984,10 @@
   (every? (fn [function :- FunctionDef] :- Bool (every? (fn [block :- BasicBlock] :- Bool (= 1 (count (basicblock-terminators block)))) (functiondef-blocks function)))
     functions))
 
-(defn instruction-resources-allowed? [instruction :- Instruction allowed-regions :- (Vec NativeId) allowed-capabilities :- (Vec NativeId)] :- Bool
+(defn instruction-resources-allowed?
+  [instruction :- Instruction
+   allowed-regions :- (Vec NativeId)
+   allowed-capabilities :- (Vec NativeId)] :- Bool
   (match instruction
     [(AtomInstruction result atom) true]
     [(CopyInstruction result source-id) true]
@@ -756,11 +1017,18 @@
      true]
     [(TextConcatInstruction result arena-id operand-ids) true]))
 
-(defn block-resources-allowed? [block :- BasicBlock allowed-regions :- (Vec NativeId) allowed-capabilities :- (Vec NativeId)] :- Bool
+(defn block-resources-allowed?
+  [block :- BasicBlock
+   allowed-regions :- (Vec NativeId)
+   allowed-capabilities :- (Vec NativeId)] :- Bool
   (every? (fn [instruction :- Instruction] :- Bool (instruction-resources-allowed? instruction allowed-regions allowed-capabilities))
     (basicblock-instructions block)))
 
-(defn function-uses-allowed? [function :- FunctionDef allowed-effects :- (Vec NativeId) allowed-regions :- (Vec NativeId) allowed-capabilities :- (Vec NativeId)] :- Bool
+(defn function-uses-allowed?
+  [function :- FunctionDef
+   allowed-effects :- (Vec NativeId)
+   allowed-regions :- (Vec NativeId)
+   allowed-capabilities :- (Vec NativeId)] :- Bool
   (and (ids-in? (functiondef-effects function) allowed-effects)
     (ids-in? (functiondef-regions function) allowed-regions)
     (ids-in? (functiondef-capabilities function) allowed-capabilities)
@@ -800,22 +1068,39 @@
 (defn write-effect-kind [region :- NativeId] :- EffectKind
   (->WriteEffect region))
 
-(defn store-i64-op [address :- NativeId value :- NativeId region :- NativeId capability :- NativeId] :- StoreOp
+(defn store-i64-op
+  [address :- NativeId
+   value :- NativeId
+   region :- NativeId
+   capability :- NativeId] :- StoreOp
   (->StoreI64 address value region capability))
 
-(defn store-f64-op [address :- NativeId value :- NativeId region :- NativeId capability :- NativeId] :- StoreOp
+(defn store-f64-op
+  [address :- NativeId
+   value :- NativeId
+   region :- NativeId
+   capability :- NativeId] :- StoreOp
   (->StoreF64 address value region capability))
 
-(defn store-instruction [result-id :- NativeId result-type-id :- NativeId store :- StoreOp] :- Instruction
+(defn store-instruction
+  [result-id :- NativeId
+   result-type-id :- NativeId
+   store :- StoreOp] :- Instruction
   (->StoreInstruction (->SsaValueV0 result-id result-type-id)
     store
     (->TokenFlowV0 [] [])))
 
-(defn copy-instruction [result-id :- NativeId result-type-id :- NativeId source-id :- NativeId] :- Instruction
+(defn copy-instruction
+  [result-id :- NativeId
+   result-type-id :- NativeId
+   source-id :- NativeId] :- Instruction
   (->CopyInstruction (->SsaValueV0 result-id result-type-id) source-id))
 
 (defn return-terminator [value :- (U NativeId Nil)] :- Terminator
   (->ReturnTerminator value))
 
-(defn fri2-observation [artifact-id :- NativeId digest :- String byte-count :- Int] :- ExternalObservation
+(defn fri2-observation
+  [artifact-id :- NativeId
+   digest :- String
+   byte-count :- Int] :- ExternalObservation
   (->Fri2Observation artifact-id digest byte-count))

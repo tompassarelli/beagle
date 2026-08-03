@@ -122,6 +122,9 @@
      (define d (beagle-parse-error-details msg-or-exn))
      (define kind (beagle-parse-error-kind msg-or-exn))
      (define msg (clean-message (exn-message msg-or-exn)))
+     (define file (or (hash-ref d 'error-file #f) (path-or-source stx)))
+     (define line (or (hash-ref d 'error-line #f) (and stx (syntax-line stx))))
+     (define col (or (hash-ref d 'error-col #f) (and stx (syntax-column stx))))
      (define base
        (hasheq 'schemaVersion 1
                'tool "beagle"
@@ -129,9 +132,9 @@
                'cause (symbol->string (parse-error-kind->cause-class kind))
                'message msg
                'hint   (or (hint-for msg) 'null)
-               'file (path-or-source stx)
-               'line (and stx (syntax-line stx))
-               'col  (and stx (syntax-column stx))))
+               'file (or file 'null)
+               'line (or line 'null)
+               'col  (or col 'null)))
      (define enriched
        (for/fold ([h base]) ([(k v) (in-hash d)])
          (hash-set h (if (symbol? k) k (string->symbol k)) v)))

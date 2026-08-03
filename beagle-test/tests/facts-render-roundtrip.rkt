@@ -165,7 +165,7 @@
 
    ;; G2 syntax-quote `` `form ``  / G3 unquote ~x / G4 splice ~@x (all in one macro)
    (gap-case "G2/G3/G4 quasiquote + unquote + unquote-splicing"
-             "(defmacro m [obj xs] `(vary-meta ~obj assoc :tags `[~@xs]))\n"
+             "(defmacro m\n  [obj\n   xs] `(vary-meta ~obj assoc :tags `[~@xs]))\n"
              #:has '("`(vary-meta " "~obj" "`[~@xs]")
              #:no '("quasiquote" "(unquote"))
 
@@ -179,7 +179,7 @@
    ;; quote), and the renderer must print it BARE (`v'`, never `v\'` — an escape
    ;; the reader would re-split at `\`). The exact ring params.clj construct:
    (gap-case "G6 primed let-binding (v')"
-             "(defn assoc-param-map [req k v] (some-> req (assoc k (if-let [v' (req k)] (reduce-kv assoc v' v) v))))\n"
+             "(defn assoc-param-map\n  [req\n   k\n   v]\n  (some-> req (assoc k (if-let [v' (req k)] (reduce-kv assoc v' v) v))))\n"
              #:has '("[v' (req k)]" "(reduce-kv assoc v' v)")
              #:no '("(quote " "v\\'"))
    (gap-case "G6 double-primed symbol (x'')"
@@ -305,9 +305,9 @@
    (cons "G1 nested" "(def y ^a ^b x)\n")
    (cons "G1 collection" "(def m ^:foo [1 2 3])\n")
    (cons "G1 ns" "(ns ^{:deprecated \"5.0.0\"} cheshire.custom)\n")
-   (cons "G2/3/4 quasiquote" "(defmacro m [obj xs] `(vary-meta ~obj assoc :tags `[~@xs]))\n")
+   (cons "G2/3/4 quasiquote" "(defmacro m\n  [obj\n   xs] `(vary-meta ~obj assoc :tags `[~@xs]))\n")
    (cons "G5 var-quote" "(def v #'foo)\n")
-   (cons "G6 primed let" "(defn assoc-param-map [req k v] (some-> req (assoc k (if-let [v' (req k)] (reduce-kv assoc v' v) v))))\n")
+   (cons "G6 primed let" "(defn assoc-param-map\n  [req\n   k\n   v]\n  (some-> req (assoc k (if-let [v' (req k)] (reduce-kv assoc v' v) v))))\n")
    (cons "G6 double-primed" "(def y x'')\n")
    (cons "G6 leading quote" "(def q 'sym)\n")
    (cons "G7 reader-cond" "(def x #?(:clj 1 :cljs 2 :nix 3))\n")

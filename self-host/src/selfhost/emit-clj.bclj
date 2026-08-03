@@ -130,7 +130,9 @@
 (defn emit-params [params: Any] -> String
   (str/join " " (mapv emit-param params)))
 
-(defn emit-params-with-rest [params: Any rest-p: Any] -> String
+(defn emit-params-with-rest
+  [params: Any
+   rest-p: Any] -> String
   (let [fixed (emit-params params)]
     (if rest-p
       (if (= fixed "")
@@ -138,7 +140,9 @@
         (str fixed " & " (emit-param rest-p)))
       fixed)))
 
-(defn emit-params-with-rest-tagged [params: Any rest-p: Any] -> String
+(defn emit-params-with-rest-tagged
+  [params: Any
+   rest-p: Any] -> String
   (let [fixed (str/join " " (mapv emit-param-tagged params))]
     (if rest-p
       (if (= fixed "")
@@ -174,7 +178,9 @@
                 :else "")))
           clauses)))
 
-(defn emit-body [exprs: Any indent: String] -> String
+(defn emit-body
+  [exprs: Any
+   indent: String] -> String
   (str/join (str "\n" indent) (mapv emit-expr* exprs)))
 
 (defn emit-args [args: Any] -> String
@@ -232,7 +238,9 @@
 (defn has-clojure-string? [rs: Any] -> Bool
   (> (count (filterv (fn [r: Any] -> Bool (= "clojure.string" (get r "ns"))) rs)) 0))
 
-(defn emit-ns-form [prog: Any body: String] -> String
+(defn emit-ns-form
+  [prog: Any
+   body: String] -> String
   (let [needs (some? (re-find #"[( \t\n]str/" body))
         rs0 (vec (get prog "requires"))
         rs (if (and needs (not (has-clojure-string? rs0)))
@@ -271,7 +279,9 @@
 
 ;; Accessors are mandatory: check.rkt registers `circle-radius` for every
 ;; variant field, so a bare defrecord emits calls to an undefined symbol.
-(defn emit-variant-defrecord [m: String fields: Any] -> String
+(defn emit-variant-defrecord
+  [m: String
+   fields: Any] -> String
   (let [fnames (field-names-of fields)
         m-lower (str/lower-case m)
         record-line (str "(defrecord " m " [" (str/join " " fnames) "])")]
@@ -349,7 +359,9 @@
       (number? val) (if (double? val) (emit-float val) (str val))
       :else (str val))))
 
-(defn emit-pat-literal-test [pat: Any target-sym: String] -> String
+(defn emit-pat-literal-test
+  [pat: Any
+   target-sym: String] -> String
   (let [val (get pat "value")]
     (cond
       (and (map? val) (= (get val "type") "symbol"))
@@ -365,7 +377,10 @@
       (number? val) (str "(= " target-sym " " (if (double? val) (emit-float val) (str val)) ")")
       :else (str "(= " target-sym " " val ")"))))
 
-(defn emit-case-folded-match [clauses: Any target-sym: String target-str: String] -> String
+(defn emit-case-folded-match
+  [clauses: Any
+   target-sym: String
+   target-str: String] -> String
   (let [cs (vec clauses)
         n (count cs)
         tail (nth cs (- n 1))
@@ -398,7 +413,9 @@
                        (emit-body (get tail "body") "      ") ")"))]
     (str "(case " target-str "\n    " (str/join "\n    " clause-strs) default-str ")")))
 
-(defn emit-match-arm [clause: Any target-sym: String] -> String
+(defn emit-match-arm
+  [clause: Any
+   target-sym: String] -> String
   (let [pat (get clause "pattern")
         body-str (emit-body (get clause "body") "      ")
         pt (get pat "type")]
@@ -824,7 +841,9 @@
 (def passes: Any (atom []))
 (def failures: Any (atom []))
 
-(defn expect! [label: String result: Bool] -> Nil
+(defn expect!
+  [label: String
+   result: Bool] -> Nil
   (if result
     (do (swap! passes conj true) nil)
     (do (swap! failures conj label) nil))

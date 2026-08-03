@@ -17,7 +17,9 @@
 (def configuration: (Vec String)
   ["profile=3" "target=native-core" "module=fram.fold"])
 
-(defn slice-id [kind: String label: String] -> core/NativeId
+(defn slice-id
+  [kind: String
+   label: String] -> core/NativeId
   (core/canonical-id "fram-fold-slice-v0" [kind label]))
 
 (defn text-id [value: String] -> core/NativeId (slice-id "text" value))
@@ -25,23 +27,49 @@
 (defn node-id [label: String] -> core/NativeId (slice-id "node" label))
 
 (defrecord FactSpecV0
-  [subject: String predicate: String object: String text-object: Bool])
+  [subject: String
+   predicate: String
+   object: String
+   text-object: Bool])
 
-(defn nf [subject: String predicate: String object: String] -> FactSpecV0
+(defn nf
+  [subject: String
+   predicate: String
+   object: String] -> FactSpecV0
   (->FactSpecV0 subject predicate object false))
 
-(defn tf [subject: String predicate: String object: String] -> FactSpecV0
+(defn tf
+  [subject: String
+   predicate: String
+   object: String] -> FactSpecV0
   (->FactSpecV0 subject predicate object true))
 
-(defrecord FieldSpecV0 [name: String annotation: String])
-(defrecord PrimSpecV0 [label: String spelling: String])
-(defrecord AppSpecV0 [label: String constructor: String arguments: (Vec String)])
-(defrecord UnionSpecV0 [label: String arguments: (Vec String)])
-(defrecord RecordSpecV0 [label: String name: String fields: (Vec FieldSpecV0)])
+(defrecord FieldSpecV0
+  [name: String
+   annotation: String])
+(defrecord PrimSpecV0
+  [label: String
+   spelling: String])
+(defrecord AppSpecV0
+  [label: String
+   constructor: String
+   arguments: (Vec String)])
+(defrecord UnionSpecV0
+  [label: String
+   arguments: (Vec String)])
+(defrecord RecordSpecV0
+  [label: String
+   name: String
+   fields: (Vec FieldSpecV0)])
 (defrecord FunctionSpecV0
-  [label: String name: String parameters: (Vec FieldSpecV0) result: String])
+  [label: String
+   name: String
+   parameters: (Vec FieldSpecV0)
+   result: String])
 
-(defn sequence-facts [label: String items: (Vec String)] -> (Vec FactSpecV0)
+(defn sequence-facts
+  [label: String
+   items: (Vec String)] -> (Vec FactSpecV0)
   (loop [index: Int 0 facts: (Vec FactSpecV0) [(tf label "form-kind" "seq")]]
     (if (>= index (count items))
       facts
@@ -68,21 +96,29 @@
             (nf label "args" arguments-label)]
            (sequence-facts arguments-label (unionspecv0-arguments spec))))))
 
-(defn binding-label [owner: String name: String] -> String
+(defn binding-label
+  [owner: String
+   name: String] -> String
   (str owner "." name))
 
-(defn binding-facts [owner: String spec: FieldSpecV0] -> (Vec FactSpecV0)
+(defn binding-facts
+  [owner: String
+   spec: FieldSpecV0] -> (Vec FactSpecV0)
   (let [label: String (binding-label owner (fieldspecv0-name spec))]
     [(tf label "form-kind" "param")
      (tf label "name" (fieldspecv0-name spec))
      (nf label "ann" (fieldspecv0-annotation spec))]))
 
-(defn binding-labels [owner: String specs: (Vec FieldSpecV0)] -> (Vec String)
+(defn binding-labels
+  [owner: String
+   specs: (Vec FieldSpecV0)] -> (Vec String)
   (mapv (fn [spec: FieldSpecV0] -> String
           (binding-label owner (fieldspecv0-name spec)))
     specs))
 
-(defn binding-block [owner: String specs: (Vec FieldSpecV0)] -> (Vec FactSpecV0)
+(defn binding-block
+  [owner: String
+   specs: (Vec FieldSpecV0)] -> (Vec FactSpecV0)
   (loop [index: Int 0 facts: (Vec FactSpecV0) []]
     (if (>= index (count specs))
       facts
@@ -290,13 +326,17 @@
          (record-block record-specs)
          (function-block function-specs))))
 
-(defn string-in? [items: (Vec String) value: String] -> Bool
+(defn string-in?
+  [items: (Vec String)
+   value: String] -> Bool
   (loop [index: Int 0]
     (if (>= index (count items))
       false
       (if (= value (nth items index)) true (recur (+ index 1))))))
 
-(defn add-once [items: (Vec String) value: String] -> (Vec String)
+(defn add-once
+  [items: (Vec String)
+   value: String] -> (Vec String)
   (if (string-in? items value) items (conj items value)))
 
 (def node-labels: (Vec String)
@@ -376,8 +416,7 @@
 (defn seal-result [] -> lower/SourceSealResultV0
   (lower/seal-source-world source-world compiler-commit configuration))
 
-(defn require-sealed-source
-  [result: lower/SourceSealResultV0] -> worlds/SealedSourceWorldV0
+(defn require-sealed-source [result: lower/SourceSealResultV0] -> worlds/SealedSourceWorldV0
   (if (instance? native.lower.SourceSealAcceptedV0 result)
     (lower/sourcesealacceptedv0-sealed result)
     (throw (ex-info "fram.fold source world was rejected at seal" {}))))
@@ -394,20 +433,17 @@
     (lower/typingacceptedv0-receipt result)
     (lower/typingrejectedv0-receipt result)))
 
-(defn require-typing-accepted
-  [result: lower/TypingResultV0] -> lower/TypingResultV0
+(defn require-typing-accepted [result: lower/TypingResultV0] -> lower/TypingResultV0
   (if (typing-accepted? result)
     result
     (throw (ex-info "fram.fold annotations did not close over Native Core types" {}))))
 
-(defn native-sealed
-  [result: lower/NativeLoweringResultV0] -> worlds/SealedNativeWorldV0
+(defn native-sealed [result: lower/NativeLoweringResultV0] -> worlds/SealedNativeWorldV0
   (if (instance? native.lower.NativeLoweringCompleteV0 result)
     (lower/nativeloweringcompletev0-sealed result)
     (lower/nativeloweringpendingv0-sealed result)))
 
-(defn native-receipt
-  [result: lower/NativeLoweringResultV0] -> core/PassReceiptV0
+(defn native-receipt [result: lower/NativeLoweringResultV0] -> core/PassReceiptV0
   (if (instance? native.lower.NativeLoweringCompleteV0 result)
     (lower/nativeloweringcompletev0-receipt result)
     (lower/nativeloweringpendingv0-receipt result)))
@@ -452,7 +488,9 @@
   (str "  " (if (core/receiptobligationv0-passed obligation) "discharged" "PENDING")
     ": " (core/receiptobligationv0-detail obligation)))
 
-(defn receipt-report [label: String receipt: core/PassReceiptV0] -> String
+(defn receipt-report
+  [label: String
+   receipt: core/PassReceiptV0] -> String
   (let [obligations-list: (Vec core/ReceiptObligationV0)
         (core/passreceiptv0-obligations receipt)]
     (loop [index: Int 0 lines: (Vec String) [(str label ":")]]
@@ -461,7 +499,9 @@
         (recur (+ index 1)
           (conj lines (receipt-obligation-line (nth obligations-list index))))))))
 
-(defn diagnostic-report [label: String receipt: core/PassReceiptV0] -> String
+(defn diagnostic-report
+  [label: String
+   receipt: core/PassReceiptV0] -> String
   (let [diagnostics: (Vec core/DiagnosticV0) (core/passreceiptv0-diagnostics receipt)]
     (loop [index: Int 0 lines: (Vec String) [(str label ":")]]
       (if (>= index (count diagnostics))

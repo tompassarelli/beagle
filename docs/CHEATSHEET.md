@@ -16,7 +16,9 @@ for the target list itself, `bin/beagle langs`.
 Product type with typed fields; generates a constructor and accessors.
 
 ```clojure
-(defrecord Point [x: Int y: Int])
+(defrecord Point
+  [x: Int
+   y: Int])
 ```
 
 ### defunion + match
@@ -72,7 +74,10 @@ Typed top-level binding.
 Function with typed params and return. Params are a bracket vector.
 
 ```clojure
-(defn add [x: Int y: Int] -> Int (+ x y))
+(defn add
+  [x: Int
+   y: Int] -> Int
+  (+ x y))
 ```
 
 
@@ -107,4 +112,3 @@ Declare a host function/value with a type so typed code can call into the target
 ```clojure
 (declare-extern host/now [-> Int])
 ```
-

@@ -45,7 +45,10 @@ The Zig and Odin backends emit code that links. A three-line source
 
 ```clojure
 (ns g)
-(defn calc [a: Int b: Int c: Int] -> Int
+(defn calc
+  [a: Int
+   b: Int
+   c: Int] -> Int
   (+ (* a b) (- c a) (quot b 2) (rem c 3) (mod a 5)))
 ```
 
@@ -66,7 +69,9 @@ A record maps to a struct rather than a boxed map — `01-record.bgl`:
 
 ```clojure
 (ns g)
-(defrecord Point [x: Int y: Int])
+(defrecord Point
+  [x: Int
+   y: Int])
 ```
 
 ```zig

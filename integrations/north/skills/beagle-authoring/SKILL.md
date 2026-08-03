@@ -143,11 +143,17 @@ if the surface looks different than you expect, `git log` it.
 - **Beagle is Clojure + types, nothing else.** Every divergence from Clojure
   must be load-bearing for the type system or a backend, or it gets removed.
 - **Surface lock:** typed Clojure with inline postfix `NAME: TYPE` / `-> RET`
-  annotations only — `(def x: T v)`, `(defn f [p: T ...] -> R body)`,
-  `(defonce …)`, `(defrecord N [field: T …])`. Interiors are inferred. Always
+  annotations only — `(def x: T v)`, `(defn f [p: T] -> R body)`,
+  `(defonce …)`, `(defrecord N [field: T])`. Interiors are inferred. Always
   write the canonical spelling; during the current dual-accept cut legacy `:-`
   still parses with a warning, and only a `:`-marked RETURN is hard-rejected
   (pointing at `-> RET`).
+- **Boundary-vector layout:** zero/one logical parameter or typed field stays
+  inline with its owner; 2+ put `[` on the following line, then one aligned
+  logical entry start per line, with `]` and `-> RET` after the final entry.
+  Typed bindings, destructures, and `& rest` each count as one entry. This
+  covers function/method/macro vectors and typed record/union/error fields, not
+  data vectors or let-style value bindings.
 - **Zero external users → hard removal.** When a form/keyword is wrong, REMOVE
   it (pointed error naming the replacement) — never deprecate or alias.
 - **Prefix where meaning diverges from Clojure:** `nix/assert`, `nix/with`,

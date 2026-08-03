@@ -17,12 +17,14 @@
 (defn env-value [name: String] -> String?
   (zig/getenv name))
 
-(defn run-process [argv: (Vec String) cwd: String?] -> Int
+(defn run-process
+  [argv: (Vec String)
+   cwd: String?] -> Int
   (zig/process-run argv cwd))
 
 (defn capture-process
-  [argv: (Vec String) cwd: String?]
-  -> zig/ProcessResult
+  [argv: (Vec String)
+   cwd: String?] -> zig/ProcessResult
   (zig/process-capture argv cwd))
 
 (defn monotonic-now [] -> Int

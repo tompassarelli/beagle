@@ -62,7 +62,32 @@ validation runtime behind it.
 `NAME: TYPE` is the canonical typed-binding marker; return types use
 `[params] -> RET` after the param vector. Together these annotate the four
 boundaries `def` / `defonce` / `defn` (params + return) / `defrecord`
-(fields required). Mixed param vectors are legal (`[a: Int b c: String]`).
+(fields required). Parameter vectors may mix typed and inferred entries.
+
+Parameter and typed-field vectors have one canonical physical layout. Zero or
+one logical entry stays inline with the owning function, method, macro, record,
+or variant name: `(defn id [x] x)`. Two or more entries put the vector on the
+following line, with its first entry beside `[` and every later logical entry
+starting once per line at the same column; `]` and any `-> RET` remain after the
+final entry:
+
+```clojure
+(defn add
+  [x: Int
+   y: Int] -> Int
+  (+ x y))
+
+(defrecord Point
+  [x: Int
+   y: Int])
+```
+
+A typed `name: Type`, destructuring form, or `& rest` pair is one logical
+entry. The same rule covers `defn`/`defn-`/`fn`, multi-arity clauses, `letfn`,
+protocol and implementation methods, `defmacro`, and typed record/union/error
+fields. It does not apply to data vectors or let-style value-binding vectors.
+The parser attaches an exact source-range repair to violations; source-less
+macro-produced datums have no physical-layout obligation.
 
 **This is a DUAL-ACCEPT cut — write the canonical spelling, but know what the
 parser actually does** (`postfix-annotation-parse.rkt` is the contract):

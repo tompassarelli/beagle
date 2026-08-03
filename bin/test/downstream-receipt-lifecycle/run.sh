@@ -67,7 +67,10 @@ EOF
 
 GOOD_JS='#lang beagle/js
 (ns fixture.good)
-(defn add [a: Int b: Int] -> Int (+ a b))
+(defn add
+  [a: Int
+   b: Int] -> Int
+  (+ a b))
 '
 BAD_JS='#lang beagle/js
 (ns fixture.bad)
@@ -86,7 +89,7 @@ mk_slow_fixture_repo() { # <dir> <n-files>
     local dir="$1" n="$2" i
     mkdir -p "$dir/js"
     for ((i=0; i<n; i++)); do
-        printf '#lang beagle/js\n(ns fixture.m%s)\n(defn f%s [a: Int b: Int] -> Int (+ a b))\n' \
+        printf '#lang beagle/js\n(ns fixture.m%s)\n(defn f%s\n  [a: Int\n   b: Int] -> Int\n  (+ a b))\n' \
             "$i" "$i" > "$dir/js/mod$i.bjs"
     done
     git -C "$dir" init -q

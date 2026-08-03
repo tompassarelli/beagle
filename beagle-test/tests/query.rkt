@@ -27,9 +27,9 @@
    "(ns q)\n"
    "(def plain: Int 42)\n"
    "(def doced: Int \"the answer\" 42)\n"
-   "(defrecord R [a: Int b: Bool])\n"
+   "(defrecord R\n  [a: Int\n   b: Bool])\n"
    "(declare-extern host/get [Int -> Int])\n"
-   "(defn typed [x: Int y: Bool] -> Int x)\n"
+   "(defn typed\n  [x: Int\n   y: Bool] -> Int\n  x)\n"
    "(defn doced-fn \"docs are surface\" [x: Int] -> Bool (> x 0))\n"
    "(defn- private-fn [x: Int] -> Int (typed x true))\n"
    "(defn untyped [x] x)\n"))

@@ -25,9 +25,18 @@
 (define-mode strict)
 
 (defrecord Store
-  [next-id :- Int next-seq :- Int supersedes-pred :- Int?
-   objects :- (Map Int Bool) values :- (Map Int Any) val-intern :- (Map Any Int)
-   facts :- (Map Int (Map Keyword Any)) tx-of :- (Map Int Int) txs :- (Map Int (Map Keyword Any))
+  [next-id :- Int
+   next-seq :- Int
+   supersedes-pred :- Int?
+   objects :- (Map Int Bool)
+   values :- (Map Int Any)
+   val-intern :- (Map Any Int)
+   facts :- (Map Int (Map Keyword Any))
+   tx-of :- (Map Int Int)
+   txs :- (Map Int (Map Keyword Any))
    superseded :- (Map Int Bool)
-   idx-by-l :- (Map Int (Vec Int)) idx-by-p :- (Map Int (Vec Int)) idx-by-r :- (Map Int (Vec Int))
-   idx-by-lp :- (Map (Vec Int) (Vec Int)) idx-by-pr :- (Map (Vec Int) (Vec Int))])
+   idx-by-l :- (Map Int (Vec Int))
+   idx-by-p :- (Map Int (Vec Int))
+   idx-by-r :- (Map Int (Vec Int))
+   idx-by-lp :- (Map (Vec Int) (Vec Int))
+   idx-by-pr :- (Map (Vec Int) (Vec Int))])

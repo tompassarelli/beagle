@@ -22,6 +22,9 @@ does not enumerate. When the two disagree, the cheatsheet wins.
 - **Inline postfix `NAME: TYPE` / `[params] -> RET` annotations** on the typed
   boundaries `def` / `defn` / `defonce` / `defrecord`; interiors and
   `let`-locals are inferred.
+- **Canonical boundary-vector layout:** zero/one logical parameter or typed
+  field stays inline; 2+ put the vector on the following line with one aligned
+  logical entry start per line, and keep `]` / `-> RET` after the final entry.
 - **`defmacro` + quasiquote / unquote / unquote-splicing.** Quasiquote is
   `` ` ``, unquote `~`, splice `~@`. Beagle deliberately dropped the CL-style
   `,`-as-unquote: `,` is whitespace, as in Clojure. Free references resolve at

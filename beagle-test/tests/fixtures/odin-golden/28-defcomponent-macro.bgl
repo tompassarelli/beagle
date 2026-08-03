@@ -1,7 +1,9 @@
 (ns ecs)
 ;; defcomponent: an ECS-style macro that generates a component record and
 ;; splices the author's fields in, auto-adding an `active` flag.
-(defmacro defcomponent [name fields]
+(defmacro defcomponent
+  [name
+   fields]
   `(defrecord ~name [~@fields active: Bool]))
 
 (defcomponent Position [x: F32 y: F32 z: F32])

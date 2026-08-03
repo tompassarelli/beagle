@@ -2,7 +2,9 @@
 
 (ns mathlib)
 
-(defn add [(x: Int) (y: Int)] -> Int
+(defn add
+  [(x: Int)
+   (y: Int)] -> Int
   (+ x y))
 
 (def pi: Float 3.14159)

@@ -1,9 +1,15 @@
 (ns semantic-contract.typed-errors)
 
 (defunion :throwable RewriteError
-  (RewriteFailure [message: String path: String refusal: Bool]))
+  (RewriteFailure
+    [message: String
+     path: String
+     refusal: Bool]))
 
-(defn classify [missing: Bool mismatch: Bool path: String] -> String
+(defn classify
+  [missing: Bool
+   mismatch: Bool
+   path: String] -> String
   :raises RewriteError
   (cond
     missing
@@ -19,11 +25,17 @@
     :else
     "roll-back"))
 
-(defn propagate [missing: Bool mismatch: Bool path: String] -> String
+(defn propagate
+  [missing: Bool
+   mismatch: Bool
+   path: String] -> String
   :raises RewriteError
   (check (classify missing mismatch path)))
 
-(defn render [missing: Bool mismatch: Bool path: String] -> String
+(defn render
+  [missing: Bool
+   mismatch: Bool
+   path: String] -> String
   (rescue
     (classify missing mismatch path)
     err

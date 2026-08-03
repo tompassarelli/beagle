@@ -76,7 +76,8 @@
                 (core/basicblock-instructions block)))))))))
 
 (defn conj-id
-  [ids: (Vec core/NativeId) candidate: core/NativeId] -> (Vec core/NativeId)
+  [ids: (Vec core/NativeId)
+   candidate: core/NativeId] -> (Vec core/NativeId)
   (if (core/id-in? ids candidate) ids (conj ids candidate)))
 
 (defn abi-type-seeds [world: core/NativeWorld] -> (Vec core/NativeId)
@@ -189,8 +190,7 @@
    module-name: String
    relative-path: String
    artifacts-dir: String
-   compiler-commit: String]
-  -> String
+   compiler-commit: String] -> String
   (let [rows: (Vec slice/SliceFactV0) (slice/parse-facts (slurp facts-path))
         configuration: (Vec String) ["profile=3"]
         source: worlds/SourceProgramWorldV0

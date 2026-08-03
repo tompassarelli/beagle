@@ -5,7 +5,9 @@
 (ns native.loops)
 (define-mode strict)
 
-(defrecord Tally [flag: Bool mark: Int])
+(defrecord Tally
+  [flag: Bool
+   mark: Int])
 
 ;; two accumulators, one back edge, exit through the if-join
 (defn settle [start: Bool] -> Bool
@@ -16,7 +18,9 @@
 
 ;; two accumulators exchanged across the back edge: sequential copies into the
 ;; header parameters would corrupt both
-(defn exchange [left: Int right: Int] -> Int
+(defn exchange
+  [left: Int
+   right: Int] -> Int
   (loop [near: Int left far: Int right done: Bool false]
     (if done
       near
@@ -24,7 +28,9 @@
 
 ;; nested loop in the outer recur argument, so the inner header shadows the
 ;; outer recur target
-(defn settle-nested [outer-start: Bool inner-start: Bool] -> Bool
+(defn settle-nested
+  [outer-start: Bool
+   inner-start: Bool] -> Bool
   (loop [outer: Bool outer-start outer-done: Bool false]
     (if outer-done
       outer
@@ -35,7 +41,10 @@
              true))))
 
 ;; six accumulators of three native types, one carried unchanged
-(defn scan-six [left: Int right: Int seed: Bool] -> Tally
+(defn scan-six
+  [left: Int
+   right: Int
+   seed: Bool] -> Tally
   (loop [first-slot: Int left
          second-slot: Int right
          flag: Bool seed

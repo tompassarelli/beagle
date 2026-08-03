@@ -77,7 +77,10 @@ EOF
 
 GOOD_JS='#lang beagle/js
 (ns fixture.good)
-(defn add [a: Int b: Int] -> Int (+ a b))
+(defn add
+  [a: Int
+   b: Int] -> Int
+  (+ a b))
 '
 BAD_JS='#lang beagle/js
 (ns fixture.bad)

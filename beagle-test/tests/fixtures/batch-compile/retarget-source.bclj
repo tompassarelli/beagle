@@ -2,7 +2,9 @@
 
 (ns batch-compile.retarget-source)
 
-(defn add [x: Int y: Int] -> Int
+(defn add
+  [x: Int
+   y: Int] -> Int
   (+ x y))
 
 (def ANSWER: Int (add 20 22))

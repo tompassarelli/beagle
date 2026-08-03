@@ -2,4 +2,6 @@
 (ns js-unary)
 (js/export (def neg: Int (- 1)))
 (js/export (defn negate [x: Int] -> Int (- x)))
-(js/export (defn sub [a: Int b: Int] -> Int (- a b)))
+(js/export (defn sub
+             [a: Int
+              b: Int] -> Int (- a b)))

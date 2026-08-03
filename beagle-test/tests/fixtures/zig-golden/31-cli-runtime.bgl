@@ -19,6 +19,10 @@
 (defn lines [s: String] -> (Vec String) (str/split-lines s))
 
 (defn dir [p: String] -> String (fs/parent p))
-(defn under [a: String b: String] -> String (fs/path a b))
+(defn under
+  [a: String
+   b: String] -> String (fs/path a b))
 (defn read-it [p: String] -> String (slurp p))
-(defn write-it [p: String s: String] -> Nil (spit p s))
+(defn write-it
+  [p: String
+   s: String] -> Nil (spit p s))

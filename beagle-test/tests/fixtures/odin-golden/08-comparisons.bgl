@@ -1,3 +1,5 @@
 (ns g)
-(defn all-cmp [a: Int b: Int] -> Bool
+(defn all-cmp
+  [a: Int
+   b: Int] -> Bool
   (and (< a b) (>= a 0) (<= b 100)))

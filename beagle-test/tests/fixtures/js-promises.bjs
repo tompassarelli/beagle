@@ -13,7 +13,9 @@
   (let [text (js/await (fetch-text url))]
     (parse-json text)))
 
-(defn fetch-both [(a: String) (b: String)] -> (Promise (Vec String))
+(defn fetch-both
+  [(a: String)
+   (b: String)] -> (Promise (Vec String))
   (let [ta (js/await (fetch-text a))
         tb (js/await (fetch-text b))]
     [ta tb]))

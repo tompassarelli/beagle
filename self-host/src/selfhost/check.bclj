@@ -21,10 +21,15 @@
 (defn make-prim [name: String] -> Any
   {"kind" "prim" "name" name})
 
-(defn make-fn [params: (Vec Any) rest-type: Any ret: Any] -> Any
+(defn make-fn
+  [params: (Vec Any)
+   rest-type: Any
+   ret: Any] -> Any
   {"kind" "fn" "params" params "rest" rest-type "ret" ret})
 
-(defn make-app [ctor: String args: (Vec Any)] -> Any
+(defn make-app
+  [ctor: String
+   args: (Vec Any)] -> Any
   {"kind" "app" "name" ctor "args" args})
 
 (defn make-union [members: (Vec Any)] -> Any
@@ -33,7 +38,10 @@
 (defn make-var [name: String] -> Any
   {"kind" "var" "name" name})
 
-(defn make-poly [vars: Any body: Any bounds: Any] -> Any
+(defn make-poly
+  [vars: Any
+   body: Any
+   bounds: Any] -> Any
   {"kind" "poly" "vars" vars "body" body "bounds" bounds})
 
 ;; Numeric tower. Oracle (types.rkt) has Int <: Number / Float <: Number and
@@ -161,7 +169,9 @@
 ;; what keeps the mutable-cell invariance hole closed. Unqualifies prim names so
 ;; a record referenced through an alias still equals itself. Mirrors the oracle
 ;; type-invariant-equal? (types.rkt).
-(defn type-invariant-equal? [a: Any b: Any] -> Bool
+(defn type-invariant-equal?
+  [a: Any
+   b: Any] -> Bool
   (cond
     (and (prim? a) (prim? b))
       (= (unqualify-name (get a "name")) (unqualify-name (get b "name")))
@@ -182,7 +192,9 @@
 
 ;; --- type-compatible? --------------------------------------------------------
 
-(defn type-compatible? [actual: Any expected: Any] -> Bool
+(defn type-compatible?
+  [actual: Any
+   expected: Any] -> Bool
   (cond
     (or (nil? actual) (nil? expected)) true
     (any-type? actual) true
@@ -278,12 +290,16 @@
 
 ;; --- type-equal? -------------------------------------------------------------
 
-(defn type-equal? [a: Any b: Any] -> Bool
+(defn type-equal?
+  [a: Any
+   b: Any] -> Bool
   (and (prim? a) (prim? b) (= (get a "name") (get b "name"))))
 
 ;; --- merge-types -------------------------------------------------------------
 
-(defn merge-types [t1: Any t2: Any] -> Any
+(defn merge-types
+  [t1: Any
+   t2: Any] -> Any
   (cond
     (and (any-type? t1) (any-type? t2)) ANY
     (any-type? t1) t2
@@ -300,7 +316,9 @@
       (let [flat1 (if (union-type? t1) (get t1 "members") [t1])
             flat2 (if (union-type? t2) (get t2 "members") [t2])
             all (into (vec flat1) flat2)
-            deduped (reduce (fn [acc: Any t: Any] -> Any
+            deduped (reduce (fn
+                              [acc: Any
+                               t: Any] -> Any
                               (if (boolean (some (fn [a: Any] -> Bool (type-compatible? t a)) acc))
                                 acc
                                 (conj acc t)))
@@ -312,12 +330,16 @@
 (defn merge-types-list [types: (Vec Any)] -> Any
   (if (= (count types) 0)
     ANY
-    (reduce (fn [acc: Any t: Any] -> Any (merge-types acc t))
+    (reduce (fn
+              [acc: Any
+               t: Any] -> Any (merge-types acc t))
             (nth types 0) types)))
 
 ;; --- remove-from-union -------------------------------------------------------
 
-(defn remove-from-union [current-type: Any remove-type: Any] -> Any
+(defn remove-from-union
+  [current-type: Any
+   remove-type: Any] -> Any
   (cond
     (any-type? current-type) current-type
     (union-type? current-type)
@@ -392,7 +414,10 @@
       "number"
     :else "other"))
 
-(defn numeric-refine [op: String arg-types: (Vec Any) declared: Any] -> Any
+(defn numeric-refine
+  [op: String
+   arg-types: (Vec Any)
+   declared: Any] -> Any
   (cond
     (not (numeric-preserving-op? op)) declared
     (not (or (any-type? declared)
@@ -411,7 +436,10 @@
 
 ;; --- polymorphic helpers (bindings is an atom holding a String->type map) -----
 
-(defn infer-type-var-bindings! [expected: Any actual: Any bindings: Any] -> Nil
+(defn infer-type-var-bindings!
+  [expected: Any
+   actual: Any
+   bindings: Any] -> Nil
   (cond
     (or (nil? expected) (nil? actual)) nil
     (any-type? actual) nil
@@ -440,7 +468,9 @@
 
     :else nil))
 
-(defn apply-type-bindings [t: Any bindings: Any] -> Any
+(defn apply-type-bindings
+  [t: Any
+   bindings: Any] -> Any
   (cond
     (nil? t) nil
     (var-type? t)
@@ -570,19 +600,28 @@
       (= t "seq-destructure") ANY
       :else ANY)))
 
-(defn extend-with-params [env: Any params: (Vec Any) rest-param: Any] -> Any
+(defn extend-with-params
+  [env: Any
+   params: (Vec Any)
+   rest-param: Any] -> Any
   (let [env1 (reduce
-               (fn [out: Any p: Any] -> Any
+               (fn
+                 [out: Any
+                  p: Any] -> Any
                  (let [t (get p "type")]
                    (cond
                      (= t "param")
                        (assoc out (get p "name") (param-type-or-any p))
                      (= t "map-destructure")
-                       (let [out1 (reduce (fn [o: Any k: Any] -> Any (assoc o k ANY))
+                       (let [out1 (reduce (fn
+                                            [o: Any
+                                             k: Any] -> Any (assoc o k ANY))
                                           out (get p "keys"))]
                          (if (not (nil? (get p "as"))) (assoc out1 (get p "as") ANY) out1))
                      (= t "seq-destructure")
-                       (let [out1 (reduce (fn [o: Any n: Any] -> Any (assoc o n ANY))
+                       (let [out1 (reduce (fn
+                                            [o: Any
+                                             n: Any] -> Any (assoc o n ANY))
                                           out (get p "names"))]
                          (if (not (nil? (get p "rest"))) (assoc out1 (get p "rest") ANY) out1))
                      :else out)))
@@ -596,9 +635,13 @@
 ;; Clojure (declare ...) so the forward ref resolves at load time.
 (declare infer-expr! check-atom-ctor!)
 
-(defn extend-with-let-bindings! [env: Any bindings: (Vec Any)] -> Any
+(defn extend-with-let-bindings!
+  [env: Any
+   bindings: (Vec Any)] -> Any
   (reduce
-    (fn [out: Any b: Any] -> Any
+    (fn
+      [out: Any
+       b: Any] -> Any
       (let [inferred (infer-expr! (get b "value") out)
             declared (get b "ann")
             bname (get b "name")]
@@ -674,7 +717,9 @@
     (any-type? t) true
     (prim? t) (= (get t "name") "Bool")
     (union-type? t)
-      (reduce (fn [acc: Bool m: Any] -> Bool (or acc (type-could-be-false? m)))
+      (reduce (fn
+                [acc: Bool
+                 m: Any] -> Bool (or acc (type-could-be-false? m)))
               false (get t "members"))
     :else false))
 
@@ -695,11 +740,17 @@
 ;; bare-ref truthiness (no else-narrow to Nil when the non-nil remainder could
 ;; itself be false) and the extract-narrowing predicates. Only env-bound
 ;; locals narrow.
-(defn test-narrowings [cond-expr: Any env: Any] -> Any
+(defn test-narrowings
+  [cond-expr: Any
+   env: Any] -> Any
   (let [fn-name (call-fn-name cond-expr)
         args (get cond-expr "args")
-        fold-branch (fn [xs: Any pick-then: Bool] -> Any
-                      (reduce (fn [acc: Any a: Any] -> Any
+        fold-branch (fn
+                      [xs: Any
+                       pick-then: Bool] -> Any
+                      (reduce (fn
+                                [acc: Any
+                                 a: Any] -> Any
                                 (let [tn (test-narrowings a (merge env acc))]
                                   (merge acc (get tn (if pick-then "then" "else")))))
                               {} xs))]
@@ -743,14 +794,19 @@
                     {"then" neg "else" pos}
                     {"then" pos "else" neg})))))))))
 
-(defn narrow-env-for-condition [env: Any cond-expr: Any] -> Any
+(defn narrow-env-for-condition
+  [env: Any
+   cond-expr: Any] -> Any
   (let [tn (test-narrowings cond-expr env)]
     {"then" (merge env (get tn "then"))
      "else" (merge env (get tn "else"))}))
 
 ;; --- match arm narrowing -----------------------------------------------------
 
-(defn narrow-env-for-match [clause: Any target-type: Any env: Any] -> Any
+(defn narrow-env-for-match
+  [clause: Any
+   target-type: Any
+   env: Any] -> Any
   (let [pat (get clause "pattern")]
     (cond
       (= (get pat "type") "record")
@@ -759,7 +815,9 @@
               field-map (get-in (deref STATE) ["record-fields" rec-name])
               field-order (get-in (deref STATE) ["record-field-order" rec-name])]
           (if (not (nil? field-map))
-            (reduce (fn [arm-env: Any i: Int] -> Any
+            (reduce (fn
+                      [arm-env: Any
+                       i: Int] -> Any
                       (let [b (nth bindings i)
                             kw (if (not (nil? field-order))
                                  (if (< i (count field-order)) (nth field-order i) nil)
@@ -783,7 +841,9 @@
 
 ;; --- match exhaustiveness ----------------------------------------------------
 
-(defn check-match-exhaustiveness! [target-type: Any clauses: (Vec Any)] -> Nil
+(defn check-match-exhaustiveness!
+  [target-type: Any
+   clauses: (Vec Any)] -> Nil
   (let [union-name (cond
                      (prim? target-type) (get target-type "name")
                      (app-type? target-type) (get target-type "name")
@@ -792,7 +852,9 @@
                         (get-in (deref STATE) ["union-members" union-name])
                         nil)]
     (when (not (nil? union-members))
-      (let [matched-types (reduce (fn [acc: Any c: Any] -> Any
+      (let [matched-types (reduce (fn
+                                    [acc: Any
+                                     c: Any] -> Any
                                     (let [pat (get c "pattern")]
                                       (if (= (get pat "type") "record")
                                         (conj acc (get pat "name"))
@@ -809,7 +871,9 @@
 
 ;; --- keyword field lookup ----------------------------------------------------
 
-(defn lookup-kw-field-type [kw: String target-type: Any] -> Any
+(defn lookup-kw-field-type
+  [kw: String
+   target-type: Any] -> Any
   (cond
     (and (prim? target-type)
          (not (nil? (get-in (deref STATE) ["record-fields" (get target-type "name")]))))
@@ -820,7 +884,10 @@
 
 ;; --- resolve polymorphic call ------------------------------------------------
 
-(defn resolve-poly-call! [poly-t: Any args: (Vec Any) env: Any] -> Any
+(defn resolve-poly-call!
+  [poly-t: Any
+   args: (Vec Any)
+   env: Any] -> Any
   (let [body (get poly-t "body")
         bindings (atom {})
         arg-types (mapv (fn [a: Any] -> Any (infer-expr! a env)) args)
@@ -855,17 +922,23 @@
 ;; Mirror check.rkt last-expr-type and make it loud. Qualified (`mod/name`) and
 ;; dotted (`config.x`) names are exempted — the oracle canonicalizes those
 ;; against the env / nixos schema, resolution selfhost doesn't model here.
-(defn bare-swallowed-ref? [e: Any env: Any] -> Bool
+(defn bare-swallowed-ref?
+  [e: Any
+   env: Any] -> Bool
   (and (= (get e "node") "ref")
        (nil? (get env (get e "name")))
        (nil? (str/index-of (get e "name") "/"))
        (nil? (str/index-of (get e "name") "."))))
 
-(defn last-expr-type! [body: (Vec Any) env: Any] -> Any
+(defn last-expr-type!
+  [body: (Vec Any)
+   env: Any] -> Any
   (let [n (count body)]
     (if (= n 0)
       ANY
-      (reduce (fn [acc: Any i: Int] -> Any
+      (reduce (fn
+                [acc: Any
+                 i: Int] -> Any
                 (let [e (nth body i)]
                   (when (and (< i (- n 1)) (bare-swallowed-ref? e env))
                     (emit-diag! (str "beagle: bare symbol `" (get e "name")
@@ -887,7 +960,11 @@
 ;; for/list stops at the shorter of params/args), so extra args aren't inferred.
 ;; The per-arg message is "arg N" for BOTH fixed and rest positions (oracle
 ;; check-one-arg does not distinguish a "rest arg").
-(defn check-args! [fn-name: String fn-t: Any args: (Vec Any) env: Any] -> (Vec Any)
+(defn check-args!
+  [fn-name: String
+   fn-t: Any
+   args: (Vec Any)
+   env: Any] -> (Vec Any)
   (let [fixed (get fn-t "params")
         rest-t (get fn-t "rest")
         n-fixed (count fixed)
@@ -915,9 +992,13 @@
 
 ;; --- infer-cond-clauses! ------------------------------------------------------
 
-(defn infer-cond-clauses! [clauses: (Vec Any) env: Any] -> Any
+(defn infer-cond-clauses!
+  [clauses: (Vec Any)
+   env: Any] -> Any
   (let [final (reduce
-                (fn [state: Any c: Any] -> Any
+                (fn
+                  [state: Any
+                   c: Any] -> Any
                   (let [test (get c "test")
                         cur-env (get state "env")]
                     (infer-expr! test cur-env)
@@ -932,15 +1013,22 @@
 
 ;; === register-record =========================================================
 
-(defn register-record! [name: String fields: (Vec Any) env: Any] -> Any
+(defn register-record!
+  [name: String
+   fields: (Vec Any)
+   env: Any] -> Any
   (let [rec-type (make-prim name)
         name-lower (str/lower-case name)
-        field-map (reduce (fn [m: Any f: Any] -> Any
+        field-map (reduce (fn
+                            [m: Any
+                             f: Any] -> Any
                             (assoc m (str ":" (get f "name"))
                                    (if (nil? (get f "ann")) ANY (get f "ann"))))
                           {} fields)
         field-order (mapv (fn [f: Any] -> String (str ":" (get f "name"))) fields)
-        env1 (reduce (fn [e: Any f: Any] -> Any
+        env1 (reduce (fn
+                       [e: Any
+                        f: Any] -> Any
                        (assoc e (str name-lower "-" (get f "name"))
                               (make-fn [rec-type] nil (if (nil? (get f "ann")) ANY (get f "ann")))))
                      env fields)
@@ -954,14 +1042,20 @@
 
 ;; === register-union ==========================================================
 
-(defn register-union! [name: String members: (Vec Any)
-                        type-params: Any member-fields: Any env: Any] -> Any
+(defn register-union!
+  [name: String
+   members: (Vec Any)
+   type-params: Any
+   member-fields: Any
+   env: Any] -> Any
   (do
     (swap! STATE assoc-in ["union-members" name] members)
     (if (or (nil? type-params) (= (count type-params) 0))
       (let [env1 (assoc env name (make-union (mapv (fn [m: Any] -> Any (make-prim m)) members)))]
         (if (not (nil? member-fields))
-          (reduce (fn [e: Any m: Any] -> Any
+          (reduce (fn
+                    [e: Any
+                     m: Any] -> Any
                     (let [fields (get member-fields m)]
                       (if (not (nil? fields)) (register-record! m fields e) e)))
                   env1 members)
@@ -970,12 +1064,16 @@
         (swap! STATE assoc-in ["parametric-unions" name]
                {"params" type-params "members" members "member-fields" member-fields})
         (if (not (nil? member-fields))
-          (reduce (fn [e: Any m: Any] -> Any
+          (reduce (fn
+                    [e: Any
+                     m: Any] -> Any
                     (let [fields (get member-fields m)]
                       (if (not (nil? fields))
                         (let [m-type (make-prim m)
                               m-lower (str/lower-case m)
-                              field-map (reduce (fn [fm: Any f: Any] -> Any
+                              field-map (reduce (fn
+                                                  [fm: Any
+                                                   f: Any] -> Any
                                                   (assoc fm (str ":" (get f "name"))
                                                          (if (nil? (get f "ann")) ANY (get f "ann"))))
                                                 {} fields)
@@ -984,7 +1082,9 @@
                                                        (if (nil? (get f "ann")) ANY (get f "ann"))) fields)
                                                nil m-type)
                               e1 (assoc e (str "->" m) (make-poly type-params ctor-fn nil))
-                              e2 (reduce (fn [ee: Any f: Any] -> Any
+                              e2 (reduce (fn
+                                           [ee: Any
+                                            f: Any] -> Any
                                            (assoc ee (str m-lower "-" (get f "name"))
                                                   (make-poly type-params
                                                              (make-fn [m-type] nil
@@ -1005,7 +1105,10 @@
 ;; is the only way to build an HVec value). Returns true when it applies (raising
 ;; per-arity / per-element diagnostics), false otherwise so the caller falls back
 ;; to type-compatible?. Mirrors the oracle check-hvec-literal (check.rkt).
-(defn check-hvec-literal! [value: Any expected: Any env: Any] -> Bool
+(defn check-hvec-literal!
+  [value: Any
+   expected: Any
+   env: Any] -> Bool
   (if (and (app-type? expected) (= (get expected "name") "HVec")
            (not (nil? value)) (= (get value "node") "vec"))
     (let [items (get value "items")
@@ -1029,7 +1132,10 @@
 ;; the constructor literal — existing references stay INVARIANT (a fresh cell has
 ;; no aliases, so adoption is sound). Returns true when it applies; false so the
 ;; caller falls back to type-compatible?.
-(defn check-atom-ctor! [value: Any expected: Any env: Any] -> Bool
+(defn check-atom-ctor!
+  [value: Any
+   expected: Any
+   env: Any] -> Bool
   (if (and (app-type? expected) (= (get expected "name") "Atom")
            (= (count (get expected "args")) 1)
            (not (nil? value)) (= (call-fn-name value) "atom")
@@ -1042,7 +1148,9 @@
       true)
     false))
 
-(defn infer-expr! [e: Any env: Any] -> Any
+(defn infer-expr!
+  [e: Any
+   env: Any] -> Any
   (cond
     (nil? e) ANY
 
@@ -1146,7 +1254,9 @@
           (last-expr-type! (get e "body") env))
 
     (= (get e "node") "letfn")
-      (let [body-env (reduce (fn [be: Any f: Any] -> Any
+      (let [body-env (reduce (fn
+                               [be: Any
+                                f: Any] -> Any
                                (let [rp (opt-field (get f "rest"))
                                      p-types (mapv param-type-or-any (get f "params"))
                                      rtype (if (not (nil? rp)) (param-type-or-any rp) nil)
@@ -1298,7 +1408,9 @@
 
     (= (get e "node") "for")
       (let [body-env (reduce
-                       (fn [be: Any c: Any] -> Any
+                       (fn
+                         [be: Any
+                          c: Any] -> Any
                          (let [ct (get c "type")]
                            (cond
                              (= ct "binding")
@@ -1314,7 +1426,9 @@
                              (= ct "when")
                                (do (infer-expr! (get c "test") be) be)
                              (= ct "let")
-                               (reduce (fn [be2: Any b: Any] -> Any
+                               (reduce (fn
+                                         [be2: Any
+                                          b: Any] -> Any
                                          (assoc be2 (get b "name") (infer-expr! (get b "value") be2)))
                                        be (get c "bindings"))
                              :else be)))
@@ -1326,7 +1440,9 @@
 
     (= (get e "node") "doseq")
       (let [body-env (reduce
-                       (fn [be: Any c: Any] -> Any
+                       (fn
+                         [be: Any
+                          c: Any] -> Any
                          (let [ct (get c "type")]
                            (cond
                              (= ct "binding")
@@ -1344,7 +1460,9 @@
                              ;; :let clauses bind sequentially (check.rkt
                              ;; doseq for-let, same as `for`)
                              (= ct "let")
-                               (reduce (fn [be2: Any b: Any] -> Any
+                               (reduce (fn
+                                         [be2: Any
+                                          b: Any] -> Any
                                          (assoc be2 (get b "name") (infer-expr! (get b "value") be2)))
                                        be (get c "bindings"))
                              :else be)))
@@ -1476,7 +1594,9 @@
     ;; (f x)) likewise — arg 2 only runs when arg 1 was falsy). Result is Any.
     (and (= (get e "node") "call")
          (or (= (call-fn-name e) "and") (= (call-fn-name e) "or")))
-      (do (reduce (fn [acc: Any a: Any] -> Any
+      (do (reduce (fn
+                    [acc: Any
+                     a: Any] -> Any
                     (let [env* (merge env acc)]
                       (infer-expr! a env*)
                       (let [tn (test-narrowings a env*)]
@@ -1628,7 +1748,9 @@
   (let [externs (get prog "externs")
         forms (get prog "forms")
         env-with-externs (if (not (nil? externs))
-                           (reduce (fn [env: Any ext: Any] -> Any
+                           (reduce (fn
+                                     [env: Any
+                                      ext: Any] -> Any
                                      (assoc env (get ext "name") (get ext "type")))
                                    STDLIB externs)
                            STDLIB)
@@ -1637,27 +1759,35 @@
         ;; Stashed under a #% sentinel key that no surface ref can collide
         ;; with. clj builtins seed below (after the form pre-pass, so a user
         ;; def of *out* keeps its declared type).
-        dyn-from-defs (reduce (fn [acc: Any f: Any] -> Any
+        dyn-from-defs (reduce (fn
+                                [acc: Any
+                                 f: Any] -> Any
                                 (if (and (= (get f "node") "def")
                                          (= (get f "dynamic") true))
                                   (assoc acc (get f "name") true)
                                   acc))
                               {} forms)
         dyn-vars (if (= (get prog "target") "clj")
-                   (reduce (fn [acc: Any nm: String] -> Any
+                   (reduce (fn
+                             [acc: Any
+                              nm: String] -> Any
                              (assoc acc nm true))
                            dyn-from-defs CLJ-BUILTIN-DYNAMIC-VARS)
                    dyn-from-defs)
         env-with-externs (assoc env-with-externs "#%dynamic-vars" dyn-vars)
         env-with-externs (if (= (get prog "target") "clj")
-                           (reduce (fn [env: Any nm: String] -> Any
+                           (reduce (fn
+                                     [env: Any
+                                      nm: String] -> Any
                                      (if (nil? (get env nm))
                                        (assoc env nm ANY)
                                        env))
                                    env-with-externs CLJ-BUILTIN-DYNAMIC-VARS)
                            env-with-externs)]
     (reduce
-      (fn [env: Any raw-form: Any] -> Any
+      (fn
+        [env: Any
+         raw-form: Any] -> Any
         (let [form (if (= (get raw-form "node") "with-meta")
                      (get raw-form "expr")
                      raw-form)
@@ -1704,7 +1834,9 @@
 
 ;; === check-form! (top-level dispatch) =========================================
 
-(defn check-form! [form: Any env: Any] -> Nil
+(defn check-form!
+  [form: Any
+   env: Any] -> Nil
   (let [node (get form "node")]
     (cond
       (= node "def") (do (infer-expr! form env) nil)
@@ -1749,7 +1881,9 @@
 ;; Collect every bound name (over-collection is safe — it only suppresses a
 ;; rejection). Any map "name" field is a potential binder; nix/with-cfg adds
 ;; `cfg`. Quoted data is code-as-data, skipped.
-(defn nix-collect-bound [x: Any acc: Any] -> Any
+(defn nix-collect-bound
+  [x: Any
+   acc: Any] -> Any
   (cond
     (map? x)
       (if (= (get x "node") "quoted")
@@ -1757,12 +1891,19 @@
         (let [nm (get x "name")
               acc1 (if (string? nm) (conj acc nm) acc)
               acc2 (if (= (get x "node") "nix-with-cfg") (conj acc1 "cfg") acc1)]
-          (reduce (fn [a: Any v: Any] -> Any (nix-collect-bound v a)) acc2 (vals x))))
+          (reduce (fn
+                    [a: Any
+                     v: Any] -> Any (nix-collect-bound v a)) acc2 (vals x))))
     (vector? x)
-      (reduce (fn [a: Any v: Any] -> Any (nix-collect-bound v a)) acc x)
+      (reduce (fn
+                [a: Any
+                 v: Any] -> Any (nix-collect-bound v a)) acc x)
     :else acc))
 
-(defn nix-free-dotted-walk! [x: Any under-with: Bool bound: Any] -> Nil
+(defn nix-free-dotted-walk!
+  [x: Any
+   under-with: Bool
+   bound: Any] -> Nil
   (cond
     (map? x)
       (let [node (get x "node")]
@@ -1797,7 +1938,9 @@
 (defn check-nix-free-dotted! [prog: Any] -> Nil
   (when (and (= (get prog "target") "nix") (= (get prog "mode") "strict"))
     (let [forms (get prog "forms")
-          bound (reduce (fn [a: Any f: Any] -> Any (nix-collect-bound f a)) #{} forms)]
+          bound (reduce (fn
+                          [a: Any
+                           f: Any] -> Any (nix-collect-bound f a)) #{} forms)]
       (doseq [form forms]
         (nix-free-dotted-walk! form false bound))))
   nil)
@@ -1817,23 +1960,33 @@
   (and (> (count s) 0)
        (some? (str/index-of LOWER-ALPHA (subs s 0 1)))))
 
-(defn collect-ref-names [x: Any acc: Any] -> Any
+(defn collect-ref-names
+  [x: Any
+   acc: Any] -> Any
   (cond
     (map? x)
       (let [acc1 (if (= (get x "node") "ref")
                    (let [nm (get x "name")] (if (string? nm) (conj acc nm) acc))
                    acc)]
-        (reduce (fn [a: Any v: Any] -> Any (collect-ref-names v a)) acc1 (vals x)))
+        (reduce (fn
+                  [a: Any
+                   v: Any] -> Any (collect-ref-names v a)) acc1 (vals x)))
     (vector? x)
-      (reduce (fn [a: Any v: Any] -> Any (collect-ref-names v a)) acc x)
+      (reduce (fn
+                [a: Any
+                 v: Any] -> Any (collect-ref-names v a)) acc x)
     :else acc))
 
-(defn check-qualified-resolution! [prog: Any env: Any] -> Nil
+(defn check-qualified-resolution!
+  [prog: Any
+   env: Any] -> Nil
   (let [target (get prog "target")]
     (when (and (= target "clj")
                (= (get prog "mode") "strict"))
       (let [required (reduce
-                       (fn [m: Any r: Any] -> Any
+                       (fn
+                         [m: Any
+                          r: Any] -> Any
                          (let [ns (get r "ns")
                                alias (get r "alias")
                                m1 (assoc m ns true)]
@@ -1841,7 +1994,9 @@
                              (assoc m1 alias true)
                              m1)))
                        {"str" true} (get prog "requires"))
-            names (reduce (fn [a: Any f: Any] -> Any (collect-ref-names f a))
+            names (reduce (fn
+                            [a: Any
+                             f: Any] -> Any (collect-ref-names f a))
                           [] (get prog "forms"))
             seen (atom {})
             bad (atom [])]
@@ -1900,35 +2055,58 @@
 
 ;; === test data helpers =======================================================
 
-(defn make-lit [kind: String value: Any] -> Any
+(defn make-lit
+  [kind: String
+   value: Any] -> Any
   {"node" "literal" "kind" kind "value" value})
 
 (defn make-ref [name: String] -> Any
   {"node" "ref" "name" name})
 
-(defn make-def-node [name: String ann: Any value: Any] -> Any
+(defn make-def-node
+  [name: String
+   ann: Any
+   value: Any] -> Any
   {"node" "def" "name" name "ann" ann "value" value})
 
-(defn make-defn-node [name: String params: (Vec Any) ret: Any body: (Vec Any)] -> Any
+(defn make-defn-node
+  [name: String
+   params: (Vec Any)
+   ret: Any
+   body: (Vec Any)] -> Any
   {"node" "defn" "name" name "params" params "rest" false
    "ret" ret "body" body "private" false})
 
-(defn make-param [name: String ann: Any] -> Any
+(defn make-param
+  [name: String
+   ann: Any] -> Any
   {"type" "param" "name" name "ann" ann})
 
-(defn make-call [fn-name: String args: (Vec Any)] -> Any
+(defn make-call
+  [fn-name: String
+   args: (Vec Any)] -> Any
   {"node" "call" "fn" {"node" "ref" "name" fn-name} "args" args})
 
-(defn make-static-call [name: String args: (Vec Any)] -> Any
+(defn make-static-call
+  [name: String
+   args: (Vec Any)] -> Any
   {"node" "static-call" "name" name "args" args})
 
-(defn make-if-node [cond-expr: Any then-expr: Any else-expr: Any] -> Any
+(defn make-if-node
+  [cond-expr: Any
+   then-expr: Any
+   else-expr: Any] -> Any
   {"node" "if" "cond" cond-expr "then" then-expr "else" else-expr})
 
-(defn make-let-node [bindings: (Vec Any) body: (Vec Any)] -> Any
+(defn make-let-node
+  [bindings: (Vec Any)
+   body: (Vec Any)] -> Any
   {"node" "let" "bindings" bindings "body" body})
 
-(defn make-let-binding [name: String ann: Any value: Any] -> Any
+(defn make-let-binding
+  [name: String
+   ann: Any
+   value: Any] -> Any
   {"name" name "ann" ann "value" value})
 
 (defn make-vec-node [items: (Vec Any)] -> Any
@@ -1937,7 +2115,9 @@
 (defn make-map-node [pairs: (Vec Any)] -> Any
   {"node" "map" "pairs" pairs})
 
-(defn make-map-pair [key: Any val: Any] -> Any
+(defn make-map-pair
+  [key: Any
+   val: Any] -> Any
   {"key" key "val" val})
 
 (defn make-prog [forms: (Vec Any)] -> Any
@@ -1949,9 +2129,13 @@
 (def passes: Any (atom []))
 (def failures: Any (atom []))
 
-(defn- json-eq [a: Any b: Any] -> Bool (= a b))
+(defn- json-eq
+  [a: Any
+   b: Any] -> Bool (= a b))
 
-(defn- expect! [label: String result: Bool] -> Nil
+(defn- expect!
+  [label: String
+   result: Bool] -> Nil
   (if result
     (do (swap! passes conj true) nil)
     (do (swap! failures conj label) nil)))

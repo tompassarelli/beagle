@@ -2,7 +2,9 @@
 (ns smoke.main)
 (define-mode strict)
 
-(defn add [(x: Int) (y: Int)] -> Int
+(defn add
+  [(x: Int)
+   (y: Int)] -> Int
   (+ x y))
 
 (println (add 20 22))

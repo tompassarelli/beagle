@@ -3,9 +3,13 @@
 (defn map-abort [xs: (Vec Int)] -> (Vec Int)
   (mapv (fn [x: Int] -> Int (inc x)) xs))
 
-(defn map-fallible [ctx: Ctx xs: (Vec Int)] -> (Vec Int)
+(defn map-fallible
+  [ctx: Ctx
+   xs: (Vec Int)] -> (Vec Int)
   :raises AllocationError
   (mapv (fn [x: Int] -> Int (inc x)) xs))
 
-(defn string-abort [left: String right: String] -> String
+(defn string-abort
+  [left: String
+   right: String] -> String
   (str left right))

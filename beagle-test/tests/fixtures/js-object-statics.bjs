@@ -11,7 +11,9 @@
 (defn obj-entries [(o: Any)] -> (Vec (Vec Any))
   (Object/entries o))
 
-(defn merge-objects [(a: Any) (b: Any)] -> Any
+(defn merge-objects
+  [(a: Any)
+   (b: Any)] -> Any
   (Object/assign a b))
 
 (defn freeze-it [(o: Any)] -> Any

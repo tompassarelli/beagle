@@ -9,11 +9,12 @@
 #
 # Evidence layers (in confidence order):
 #   1. specfix-verified: oracle confirms the fix works (0.95)
-#   2. pointed-replacement: deterministic head-rename suggestion from parser (0.95)
-#   3. type-error + fix-plan: structured repair hint (0.85)
-#   4. trace + semantic agreement: traced op matches name rule (0.80)
-#   5. semantic suspicion alone (0.65)
-#   6. blame hint alone (0.60)
+#   2. source-range replacement: compiler-authored deterministic edit (1.0)
+#   3. pointed-replacement: deterministic head-rename suggestion from parser (0.95)
+#   4. type-error + fix-plan: structured repair hint (0.85)
+#   5. trace + semantic agreement: traced op matches name rule (0.80)
+#   6. semantic suspicion alone (0.65)
+#   7. blame hint alone (0.60)
 #
 # --auto mode: apply all fixes above threshold, rebuild, reverify.
 
@@ -241,6 +242,24 @@ if os.path.exists(check_file):
                     'after': None,
                     'evidence': ['type-checker'],
                     'auto_applicable': False,
+                })
+
+            elif isinstance(d.get('suggestion'), dict) and d['suggestion'].get('type') == 'replace-range':
+                sug = d['suggestion']
+                repairs.append({
+                    'confidence': 1.0,
+                    'file': d.get('file', '?'),
+                    'line': d.get('line') or '?',
+                    'category': 'canonical-layout',
+                    'description': sug.get('label') or d.get('message', ''),
+                    'fix_hint': sug.get('label', ''),
+                    'before': sug.get('before'),
+                    'after': sug.get('replacement'),
+                    'evidence': ['compiler', 'structured-suggestion', f"kind:{d.get('kind', '?')}"],
+                    'auto_applicable': True,
+                    '_replace_range': True,
+                    '_offset': sug.get('offset'),
+                    '_length': sug.get('length'),
                 })
 
             elif isinstance(d.get('suggestion'), dict) and d['suggestion'].get('type') == 'replace-head':
@@ -566,6 +585,22 @@ def apply_fix_to_lines(lines, repair):
     """Apply a single repair to a list of lines (mutates). Returns True on success."""
     before = repair.get('before')
     after = repair.get('after')
+
+    if repair.get('_replace_range'):
+        text = ''.join(lines)
+        offset = repair.get('_offset')
+        length = repair.get('_length')
+        if not isinstance(offset, int) or not isinstance(length, int) or not isinstance(after, str):
+            return False
+        if offset < 0 or length < 0 or offset + length > len(text):
+            return False
+        if isinstance(before, str) and text[offset:offset + length] != before:
+            return False
+        new_text = text[:offset] + after + text[offset + length:]
+        if new_text == text:
+            return False
+        lines[:] = new_text.splitlines(keepends=True)
+        return True
 
     # Clause insertion (non-exhaustive-match): drop the checker-provided
     # skeletons in before the match's closing paren. Operates on whole text

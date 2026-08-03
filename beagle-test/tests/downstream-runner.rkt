@@ -38,7 +38,7 @@
 
 (define (commit-all! repo) (git! repo "add" "-A") (git! repo "commit" "-q" "-m" "x"))
 
-(define GOOD-JS "#lang beagle/js\n(ns fixture.good)\n(defn add [a: Int b: Int] -> Int (+ a b))\n")
+(define GOOD-JS "#lang beagle/js\n(ns fixture.good)\n(defn add\n  [a: Int\n   b: Int] -> Int\n  (+ a b))\n")
 (define BAD-JS  "#lang beagle/js\n(ns fixture.bad)\n(defn f [] -> Int \"not an int\")\n")
 
 ;; A glob consumer spec pointing at a fixture repo (no staging: name != north).

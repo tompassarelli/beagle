@@ -5,6 +5,8 @@
 ;; are pulled out separately and don't appear in `forms`.
 
 (require racket/match
+         racket/file
+         racket/list
          racket/string
          racket/set
          "types.rkt"
@@ -15,6 +17,7 @@
          "parse-jst.rkt"
          "parse-js-quote.rkt"
          "diagnostic-kind.rkt"
+         "syntax/tokenize.rkt"
          ;; THE single beagle readtable lives in reader-impl.rkt (the #lang
          ;; reader). read-beagle-syntax / read-beagle-datums (the --agent / build
          ;; / repair / hook path) parse with the SAME table — no second copy to
@@ -51,7 +54,21 @@
           'to (format "~a" to)
           'label (format "Replace `~a` with `~a`" from to)))
 
-(define (raise-parse-error kind fmt #:suggestion [suggestion #f] . args)
+;; Exact source-range replacement. Physical-layout diagnostics carry the
+;; compiler-produced replacement rather than asking repair tools to reproduce
+;; the grammar-aware formatting decision.
+(define (replace-range-suggestion offset before replacement label)
+  (hasheq 'type "replace-range"
+          'offset offset
+          'length (string-length before)
+          'before before
+          'replacement replacement
+          'label label))
+
+(define (raise-parse-error kind fmt
+                           #:suggestion [suggestion #f]
+                           #:details [extra-details (hasheq)]
+                           . args)
   (define msg (apply format fmt args))
   ;; When we're currently parsing the output of a macro expansion
   ;; (current-macro-expansion-ctx non-#f), rebucket the rejection as
@@ -73,8 +90,11 @@
                   'macro-name (symbol->string (expansion-ctx-macro-name ctx))
                   'macro-depth (expansion-ctx-depth ctx))]
       [else base-details]))
+  (define details1
+    (for/fold ([details details0]) ([(key value) (in-hash extra-details)])
+      (hash-set details key value)))
   (define details
-    (if suggestion (hash-set details0 'suggestion suggestion) details0))
+    (if suggestion (hash-set details1 'suggestion suggestion) details1))
   (raise (beagle-parse-error
           (format "beagle: ~a" msg)
           (current-continuation-marks)
@@ -175,7 +195,9 @@
       (define target (and has-lang? (lang-line->target first-line)))
       (unless has-lang?
         (file-position (current-input-port) 0)
-        (port-count-lines! (current-input-port)))
+        ;; Rewinding bytes does not rewind Racket's line/position counter.
+        ;; Reset it explicitly so source-less-header files retain true spans.
+        (set-port-next-location! (current-input-port) 1 0 1))
       ;; Target-specific readtable for surface forms the base reader
       ;; doesn't know about. Notably: nix's `~"…"` / `~''…''` reader
       ;; macros. Without this, beagle-build-all (and any other caller
@@ -211,6 +233,378 @@
                      "~a: #lang beagle requires a target — use #lang beagle/js, beagle/clj, beagle/nix, or add (define-target <target>)"
                      (path->string src))])]
           [else forms])))))
+
+;; --- canonical parameter / field layout -----------------------------------
+
+(define layout-trivia-types
+  '(whitespace newline line-comment block-comment))
+
+(define (layout-trivia? tok)
+  (memq (token-type tok) layout-trivia-types))
+
+(define (token-end tok)
+  (+ (token-offset tok) (string-length (token-text tok))))
+
+(define (token-at-offset tokens offset [type #f])
+  (for/first ([tok (in-list tokens)]
+              #:when (and (= (token-offset tok) offset)
+                          (or (not type) (eq? (token-type tok) type))))
+    tok))
+
+(define (matching-token tokens opener)
+  (define opener-offset (token-offset opener))
+  (let loop ([rest tokens] [stack '()] [started? #f])
+    (cond
+      [(null? rest) #f]
+      [else
+       (define tok (car rest))
+       (cond
+         [(and (not started?) (< (token-offset tok) opener-offset))
+          (loop (cdr rest) stack #f)]
+         [(not started?)
+          (and (= (token-offset tok) opener-offset)
+               (loop rest stack #t))]
+         [(opener? tok)
+          (loop (cdr rest) (cons (token-type tok) stack) #t)]
+         [(closer? tok)
+          (cond
+            [(null? stack) #f]
+            [(eq? (token-type tok) (matching-closer-type (car stack)))
+             (if (null? (cdr stack))
+                 tok
+                 (loop (cdr rest) (cdr stack) #t))]
+            [else #f])]
+         [else (loop (cdr rest) stack #t)])])))
+
+(define (syntax-start-offset stx)
+  (and (syntax? stx)
+       (syntax-position stx)
+       (sub1 (syntax-position stx))))
+
+(define (syntax-end-offset stx tokens)
+  (define start (syntax-start-offset stx))
+  (and start
+       (cond
+         [(syntax-span stx) (+ start (syntax-span stx))]
+         [else
+          (define tok (token-at-offset tokens start))
+          (cond
+            [(and tok (opener? tok))
+             (define close (matching-token tokens tok))
+             (and close (token-end close))]
+            [tok (token-end tok)]
+            [else #f])])))
+
+(define (logical-entry-stxs vector-stx)
+  (define subs (stx-subs vector-stx))
+  (define items (and subs (cdr subs)))
+  (and items
+       (let loop ([rest items] [acc '()])
+         (cond
+           [(null? rest) (reverse acc)]
+           [(eq? (->datum (car rest)) '&)
+            (and (pair? (cdr rest))
+                 (reverse (cons (car rest) acc)))]
+           [(and (>= (length rest) 3)
+                 (symbol? (->datum (car rest)))
+                 (annotation-marker? (->datum (cadr rest))))
+            (loop (cdddr rest) (cons (car rest) acc))]
+           [(or (eq? (->datum (car rest)) ANN-MARKER)
+                (eq? (->datum (car rest)) LEGACY-MARKER))
+            #f]
+           [else (loop (cdr rest) (cons (car rest) acc))]))))
+
+(define (fragment->inline tokens start end)
+  (define out (open-output-string))
+  (define pending-space? #f)
+  (define previous-type #f)
+  (define wrote? #f)
+  (define (write-token! tok text type)
+    (when (and pending-space? wrote?
+               (not (closer? tok))
+               (not (memq previous-type
+                          '(open-paren open-bracket open-brace hash-open-brace))))
+      (display " " out))
+    (display text out)
+    (set! wrote? #t)
+    (set! pending-space? #f)
+    (set! previous-type type))
+  (for ([tok (in-list tokens)]
+        #:when (and (>= (token-offset tok) start)
+                    (<= (token-end tok) end)))
+    (case (token-type tok)
+      [(whitespace newline) (set! pending-space? #t)]
+      [(line-comment)
+       (write-token! tok (token-text tok) 'line-comment)
+       (set! pending-space? #t)]
+      [else (write-token! tok (token-text tok) (token-type tok))]))
+  (string-trim (get-output-string out)))
+
+(define (line-comment-in-range? tokens start end)
+  (for/or ([tok (in-list tokens)])
+    (and (eq? (token-type tok) 'line-comment)
+         (>= (token-offset tok) start)
+         (<= (token-end tok) end))))
+
+(define (next-significant-token tokens offset)
+  (for/first ([tok (in-list tokens)]
+              #:when (and (>= (token-offset tok) offset)
+                          (not (layout-trivia? tok))))
+    tok))
+
+(define (previous-significant-token tokens offset)
+  (for/fold ([found #f]) ([tok (in-list tokens)]
+                          #:when (and (<= (token-end tok) offset)
+                                      (not (layout-trivia? tok))))
+    tok))
+
+(define (last-significant-token tokens start end)
+  (for/fold ([found #f]) ([tok (in-list tokens)]
+                          #:when (and (>= (token-offset tok) start)
+                                      (<= (token-end tok) end)
+                                      (not (layout-trivia? tok))))
+    tok))
+
+(define (canonical-vector-text tokens open close entries continuation-col)
+  (define open-end (token-end open))
+  (define close-start (token-offset close))
+  (define starts (map syntax-start-offset entries))
+  (cond
+    [(or (null? starts) (null? (cdr starts)))
+     (string-append "[" (fragment->inline tokens open-end close-start) "]")]
+    [else
+     (define boundaries (append (cdr starts) (list close-start)))
+     (define fragments
+       (for/list ([start (in-list (cons open-end (cdr starts)))]
+                  [end (in-list boundaries)])
+         (fragment->inline tokens start end)))
+     (string-append
+      "["
+      (car fragments)
+      (apply string-append
+             (for/list ([fragment (in-list (cdr fragments))])
+               (string-append "\n" (make-string continuation-col #\space) fragment)))
+      "]")]))
+
+(define (canonical-layout-valid? source tokens form-stx anchor entries open close placement)
+  (define count (length entries))
+  (define open-line (token-line open))
+  (define open-col (token-col open))
+  (define close-line (token-line close))
+  (define entry-lines (map syntax-line entries))
+  (define entry-cols (map syntax-column entries))
+  (define anchor-line (and anchor (syntax-line anchor)))
+  (define anchor-end (and anchor (syntax-end-offset anchor tokens)))
+  (define clause-open (previous-significant-token tokens (token-offset open)))
+  (define owner-inline?
+    (and (eq? placement 'owner)
+         anchor-line (= open-line anchor-line)
+         anchor-end
+         (<= anchor-end (token-offset open))
+         (string=? (substring source anchor-end (token-offset open)) " ")))
+  (define owner-continuation?
+    (and (eq? placement 'owner)
+         anchor-line
+         (= open-line (add1 anchor-line))
+         (= open-col (+ (or (syntax-column form-stx) 0) 2))))
+  (define clause-inline?
+    (and clause-open
+         (eq? (token-type clause-open) 'open-paren)
+         (= (token-end clause-open) (token-offset open))))
+  (define placement-valid?
+    (case placement
+      [(owner) (if (<= count 1) owner-inline? owner-continuation?)]
+      [(clause) clause-inline?]
+      [(bare) #t]
+      [else #f]))
+  (define entries-positioned?
+    (cond
+      [(null? entries) #t]
+      [(<= count 1)
+       (and (= (car entry-lines) open-line)
+            (= (car entry-cols) (add1 open-col)))]
+      [else
+       (and (= (car entry-lines) open-line)
+            (= (car entry-cols) (add1 open-col))
+            (= (length (remove-duplicates entry-lines)) count)
+            (andmap (lambda (col) (= col (car entry-cols))) (cdr entry-cols)))]))
+  (define final-code
+    (last-significant-token tokens (token-end open) (token-offset close)))
+  (define close-after-final?
+    (= close-line (if final-code (token-line final-code) open-line)))
+  (define after-close (next-significant-token tokens (token-end close)))
+  (define return-inline?
+    (or (not after-close)
+        (not (member (token-text after-close) '("->" ":-")))
+        (and (= (token-line after-close) close-line)
+             (string=? (substring source
+                                  (token-end close)
+                                  (token-offset after-close))
+                       " "))))
+  (and placement-valid?
+       entries-positioned?
+       close-after-final?
+       return-inline?))
+
+(define (check-layout-vector! source tokens form-stx anchor vector-stx placement role)
+  (define start (syntax-start-offset vector-stx))
+  (define entries (and start (logical-entry-stxs vector-stx)))
+  (define open (and start (token-at-offset tokens start 'open-bracket)))
+  (define close (and open (matching-token tokens open)))
+  (when (and entries open close anchor
+             (not (canonical-layout-valid? source tokens form-stx anchor entries open close placement)))
+    (define anchor-end (and (eq? placement 'owner) (syntax-end-offset anchor tokens)))
+    (define clause-open (previous-significant-token tokens (token-offset open)))
+    (define region-start
+      (case placement
+        [(owner) anchor-end]
+        [(clause) (if clause-open (token-end clause-open) (token-offset open))]
+        [else (token-offset open)]))
+    (define after-close (next-significant-token tokens (token-end close)))
+    (define return? (and after-close (member (token-text after-close) '("->" ":-"))))
+    (define region-end (if return? (token-offset after-close) (token-end close)))
+    (define gap
+      (and (eq? placement 'owner)
+           (fragment->inline tokens anchor-end (token-offset open))))
+    (define form-col (or (syntax-column form-stx) 0))
+    (define vector-col
+      (case placement
+        [(owner) (if (> (length entries) 1) (+ form-col 2) (token-col open))]
+        [(clause) (if clause-open (add1 (token-col clause-open)) (token-col open))]
+        [else (token-col open)]))
+    (define vector-text
+      (canonical-vector-text tokens open close entries (add1 vector-col)))
+    (define prefix-text
+      (cond
+        [(not (eq? placement 'owner)) ""]
+        [(<= (length entries) 1)
+         (string-append " " (if (string=? gap "") "" (string-append gap " ")))]
+        [else
+         (string-append (if (string=? gap "") "" (string-append " " gap))
+                        "\n" (make-string vector-col #\space))]))
+    (define replacement
+      (string-append prefix-text vector-text (if return? " " "")))
+    (define before (substring source region-start region-end))
+    (raise-parse-error
+     'noncanonical-binding-layout
+     "noncanonical ~a vector layout — zero/one logical entry stays inline; 2+ entries put the vector on the following line with one aligned entry start per line; keep `]` and `->` after the final entry"
+     role
+     #:details
+     (hasheq 'error-file (let ([src (syntax-source vector-stx)])
+                           (if (path? src) (path->string src) src))
+             'error-line (syntax-line vector-stx)
+             'error-col (syntax-column vector-stx)
+             'error-position (syntax-position vector-stx)
+             'error-span (syntax-span vector-stx))
+     #:suggestion
+     ;; Moving a line comment can change which code it comments out. Keep the
+     ;; diagnostic, but require a human edit instead of changing comment syntax.
+     (and (not (line-comment-in-range? tokens region-start region-end))
+          (replace-range-suggestion
+           region-start before replacement
+           (format "Canonicalize ~a vector layout" role))))))
+
+(define (vector-stx? stx)
+  (and (syntax? stx) (bracketed? (->datum stx))))
+
+(define (inspect-named-form-vector! source tokens form-stx vector-index
+                                    [anchor-index 0] [role "parameter"])
+  (define subs (stx-subs form-stx))
+  (define vector-stx (stx-ref subs vector-index))
+  (define anchor (stx-ref subs anchor-index))
+  (when (and (vector-stx? vector-stx) anchor)
+    (check-layout-vector! source tokens form-stx anchor vector-stx 'owner role)))
+
+(define (inspect-method-form! source tokens method-stx [role "method parameter"])
+  (define subs (stx-subs method-stx))
+  (when (and subs (>= (length subs) 2)
+             (symbol? (->datum (car subs)))
+             (vector-stx? (cadr subs)))
+    (check-layout-vector! source tokens method-stx (car subs) (cadr subs) 'owner role)))
+
+(define (inspect-defn-layout! source tokens form-stx)
+  (define subs (stx-subs form-stx))
+  (when (and subs (>= (length subs) 3))
+    (define raw-name-stx (cadr subs))
+    (define raw-name-subs (stx-subs raw-name-stx))
+    (define name-stx
+      (if (and raw-name-subs
+               (pair? raw-name-subs)
+               (eq? (->datum (car raw-name-subs)) '#%meta))
+          (last raw-name-subs)
+          raw-name-stx))
+    (define tail0 (cddr subs))
+    (define tail (if (and (pair? tail0) (string? (->datum (car tail0))))
+                     (cdr tail0)
+                     tail0))
+    (define anchor (if (eq? tail tail0) name-stx (car tail0)))
+    (define tail-datums (map ->datum tail))
+    (define bare-clauses (bare-multi-arity-clauses tail-datums))
+    (cond
+      [bare-clauses
+       (for ([part (in-list tail)] #:when (vector-stx? part))
+         (check-layout-vector! source tokens form-stx anchor part 'bare
+                               "multi-arity parameter"))]
+      [(and (pair? tail) (vector-stx? (car tail)))
+       (check-layout-vector! source tokens form-stx anchor (car tail) 'owner "parameter")]
+      [else
+       (for ([clause (in-list tail)])
+         (define clause-subs (stx-subs clause))
+         (when (and clause-subs (pair? clause-subs)
+                    (vector-stx? (car clause-subs)))
+           (check-layout-vector! source tokens clause clause (car clause-subs) 'clause
+                                 "multi-arity parameter")))])))
+
+(define (inspect-layout-form! source tokens form-stx)
+  (define subs (stx-subs form-stx))
+  (when (and subs (pair? subs))
+    (define head (->datum (car subs)))
+    (case head
+      [(defn defn-) (inspect-defn-layout! source tokens form-stx)]
+      [(fn) (inspect-named-form-vector! source tokens form-stx 1 0 "parameter")]
+      [(defmacro) (inspect-named-form-vector! source tokens form-stx 2 1 "macro parameter")]
+      [(defrecord) (inspect-named-form-vector! source tokens form-stx 2 1 "typed field")]
+      [(letfn)
+       (define fns (stx-ref subs 1))
+       (define fsubs (and fns (stx-subs fns)))
+       (for ([fn-stx (in-list (if fsubs (cdr fsubs) '()))])
+         (inspect-method-form! source tokens fn-stx "letfn parameter"))]
+      [(defprotocol)
+       (for ([method-stx (in-list (cddr subs))])
+         (inspect-method-form! source tokens method-stx "protocol parameter"))]
+      [(extend-type)
+       (for ([method-stx (in-list (cddr subs))]
+             #:when (pair? (->datum method-stx)))
+         (inspect-method-form! source tokens method-stx "implementation parameter"))]
+      [(defunion)
+       (for ([member-stx (in-list (cddr subs))]
+             #:when (pair? (->datum member-stx)))
+         (inspect-named-form-vector! source tokens member-stx 1 0
+                                     "typed variant field"))]
+      [else (void)])
+    ;; Quoted/macro-template/commented datums are data, not physical grammar
+    ;; sites. Macro parameter vectors above are still checked.
+    (unless (memq head '(quote quasiquote defmacro comment))
+      (for ([child (in-list subs)] #:when (pair? (->datum child)))
+        (inspect-layout-form! source tokens child)))))
+
+(define (validate-canonical-layout! stxs source-path)
+  (define physical-stx
+    (for/first ([stx (in-list stxs)]
+                #:when (and (syntax? stx)
+                            (syntax-source stx)
+                            (syntax-position stx)))
+      stx))
+  (when physical-stx
+    ;; Target wrappers prepend a synthetic `(define-target …)` whose source is
+    ;; the wrapper module. The parser's explicit source path remains the
+    ;; authority for the user's physical layout.
+    (define physical-source (or source-path (syntax-source physical-stx)))
+    (when (and (path-string? physical-source) (file-exists? physical-source))
+      (define source (file->string physical-source))
+      (define tokens (tokenize source))
+      (for ([stx (in-list stxs)] #:when (syntax-position stx))
+        (inspect-layout-form! source tokens stx)))))
 
 (define (copy-type type)
   (cond
@@ -1666,6 +2060,10 @@
   ;; body tails that store-src! refused to record.
   (when (positive? (hash-count body-locs-table))
     (register-program-body-locs-table! prog body-locs-table))
+  ;; Run this after grammar parsing so malformed forms keep their more specific
+  ;; diagnostics. Macro-expanded/synthetic datums are absent from STXS* and
+  ;; therefore intentionally carry no physical-layout obligation.
+  (validate-canonical-layout! stxs* source-path)
   prog)
 
 (define (meta-form? d)

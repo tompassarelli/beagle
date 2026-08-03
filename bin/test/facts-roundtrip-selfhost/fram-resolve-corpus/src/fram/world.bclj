@@ -44,11 +44,15 @@
     (mapv (fn [b :- Any] :- String (format "%02x" (bit-and (int b) 255)))
       (vec digest))))
 
-(defn domain-hash [tag :- String content :- Any] :- String
+(defn domain-hash
+  [tag :- String
+   content :- Any] :- String
   (let [md (. java.security.MessageDigest getInstance "SHA-256") primed (.update md (utf8 tag))]
     (hex-of (.digest md content))))
 
-(defn hash-text [tag :- String text :- String] :- String
+(defn hash-text
+  [tag :- String
+   text :- String] :- String
   (domain-hash tag (utf8 text)))
 
 (defn byte-key [text :- Any] :- String
@@ -60,7 +64,9 @@
   (let [v (vec parts)]
     (if (empty? v)
       ""
-      (reduce (fn [acc :- Any part :- Any] :- String (str acc " " part))
+      (reduce (fn
+                [acc :- Any
+                 part :- Any] :- String (str acc " " part))
         (first v)
         (vec (rest v))))))
 
@@ -180,7 +186,10 @@
     nil
     {:reject :world-illegal-mode :mode mode}))
 
-(defn put-op [slot :- String mode :- String id :- String] :- Any
+(defn put-op
+  [slot :- String
+   mode :- String
+   id :- String] :- Any
   {:op :put :slot slot :mode mode :blob-id id})
 
 (defn delete-op [slot :- String] :- Any {:op :delete :slot slot})
@@ -188,20 +197,31 @@
 (defn inherit-op [slot :- String] :- Any {:op :inherit :slot slot})
 
 (defn overlay-of [ops :- Any] :- Any
-  (let [v (vec ops) by-slot (reduce (fn [acc :- Any op :- Any] :- Any (assoc acc (get op :slot) op)) {} v) slots (vec (sort-by (fn [s :- Any] :- String (byte-key s)) (vec (keys by-slot))))]
+  (let [v (vec ops) by-slot (reduce (fn
+                                      [acc :- Any
+                                       op :- Any] :- Any (assoc acc (get op :slot) op)) {} v) slots (vec (sort-by (fn [s :- Any] :- String (byte-key s)) (vec (keys by-slot))))]
     (mapv (fn [s :- Any] :- Any (get by-slot s)) slots)))
 
-(defn version-record [base-version-id :- Any ops :- Any] :- Any
+(defn version-record
+  [base-version-id :- Any
+   ops :- Any] :- Any
   {:kind :world/version :base base-version-id :overlay (overlay-of ops)})
 
-(defn version-id [base-version-id :- Any ops :- Any] :- String
+(defn version-id
+  [base-version-id :- Any
+   ops :- Any] :- String
   (hash-text version-tag (render-record (version-record base-version-id ops))))
 
-(defn overlay-entry [record :- Any slot :- Any] :- Any
+(defn overlay-entry
+  [record :- Any
+   slot :- Any] :- Any
   (let [hits (filterv (fn [e :- Any] :- Bool (= (get e :slot) slot)) (vec (get record :overlay)))]
     (if (empty? hits) nil (first hits))))
 
-(defn resolve-slot [versions :- Any version :- Any slot :- Any] :- Any
+(defn resolve-slot
+  [versions :- Any
+   version :- Any
+   slot :- Any] :- Any
   (loop [vid version]
     (if (nil? vid)
       {:present false :origin nil}
@@ -223,7 +243,9 @@
                 :origin
                 vid}])))))))
 
-(defn chain-slots [versions :- Any version :- Any] :- Any
+(defn chain-slots
+  [versions :- Any
+   version :- Any] :- Any
   (loop [vid version acc []]
     (if (nil? vid)
       (vec (distinct acc))
@@ -233,13 +255,18 @@
           (recur (get record :base)
             (vec (concat acc (mapv (fn [e :- Any] :- Any (get e :slot)) (vec (get record :overlay)))))))))))
 
-(defn manifest [versions :- Any version :- Any] :- Any
+(defn manifest
+  [versions :- Any
+   version :- Any] :- Any
   (let [slots (vec (sort-by (fn [s :- Any] :- String (byte-key s)) (chain-slots versions version)))]
     (filterv (fn [row :- Any] :- Bool (not (nil? row)))
       (mapv (fn [s :- Any] :- Any (let [r (resolve-slot versions version s)] (if (get r :present) {:slot s :mode (get r :mode) :blob-id (get r :blob-id) :origin (get r :origin)} nil)))
         slots))))
 
-(defn compose [versions :- Any base-version-id :- Any selections :- Any] :- Any
+(defn compose
+  [versions :- Any
+   base-version-id :- Any
+   selections :- Any] :- Any
   (let [ops (filterv (fn [op :- Any] :- Bool (not (nil? op))) (mapv (fn [sel :- Any] :- Any (let [pair (vec sel) slot (get pair 0) source (get pair 1) rs (resolve-slot versions source slot) rb (resolve-slot versions base-version-id slot)] (cond [(get rs :present) (if (and (get rb :present) (= (get rb :blob-id) (get rs :blob-id)) (= (get rb :mode) (get rs :mode))) nil (put-op slot (get rs :mode) (get rs :blob-id)))] [(get rb :present) (delete-op slot)] [:else nil]))) (vec selections)))]
     (version-record base-version-id ops)))
 
@@ -248,21 +275,32 @@
     (and (= 32 (count nonce)) (.matches nonce "[0-9a-f]{32}"))
     false))
 
-(defn candidate-id [world-name :- String expected-head :- Any nonce :- String] :- String
+(defn candidate-id
+  [world-name :- String
+   expected-head :- Any
+   nonce :- String] :- String
   (if (nonce-hex? nonce)
     (hash-text candidate-tag
       (render-record {:kind :world/candidate :world world-name :expected-head expected-head :nonce nonce}))
     (throw (ex-info "fram.world: candidate nonce must be exactly 32 lowercase hex" {:reject :world-nonce-inadmissible}))))
 
-(defn fork-head [world-name :- String version :- String] :- Any
+(defn fork-head
+  [world-name :- String
+   version :- String] :- Any
   {:kind :world/head :world world-name :version version})
 
-(defn derive-head [claims :- Any world-name :- Any] :- Any
+(defn derive-head
+  [claims :- Any
+   world-name :- Any] :- Any
   (let [hits (filterv (fn [c :- Any] :- Bool (and (= (get c :kind) :world/head) (= (get c :world) world-name))) (vec claims))]
     (if (empty? hits) nil (get (last hits) :version))))
 
-(defn lock-record [version :- Any build-spec :- Any] :- Any
+(defn lock-record
+  [version :- Any
+   build-spec :- Any] :- Any
   {:kind :world/lock :version version :build-spec build-spec})
 
-(defn world-lock-id [version :- Any build-spec :- Any] :- String
+(defn world-lock-id
+  [version :- Any
+   build-spec :- Any] :- String
   (hash-text lock-tag (render-record (lock-record version build-spec))))

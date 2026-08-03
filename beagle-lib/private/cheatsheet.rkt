@@ -43,7 +43,10 @@
    ;; --- types ---------------------------------------------------------------
    (cheat "defrecord" "Types"
           "Product type with typed fields; generates a constructor and accessors."
-          "(defrecord Point [x: Int y: Int])")
+          (string-append
+           "(defrecord Point\n"
+           "  [x: Int\n"
+           "   y: Int])"))
 
    (cheat "defunion + match" "Types"
           "Sum type over records. `match` is checked EXHAUSTIVELY — a missing constructor is a compile error (and the repair loop can auto-fill the clauses)."
@@ -75,7 +78,11 @@
 
    (cheat "defn" "Functions"
           "Function with typed params and return. Params are a bracket vector."
-          "(defn add [x: Int y: Int] -> Int (+ x y))")
+          (string-append
+           "(defn add\n"
+           "  [x: Int\n"
+           "   y: Int] -> Int\n"
+           "  (+ x y))"))
 
    (cheat "let / loop / recur / cond" "Control flow"
           "Standard control flow; bindings use bracket vectors."

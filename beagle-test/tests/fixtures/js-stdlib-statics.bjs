@@ -14,7 +14,9 @@
 (defn sqrt-of [(x: Float)] -> Float
   (Math/sqrt x))
 
-(defn pow-of [(x: Float) (y: Float)] -> Float
+(defn pow-of
+  [(x: Float)
+   (y: Float)] -> Float
   (Math/pow x y))
 
 (defn random-float [] -> Float

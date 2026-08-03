@@ -450,7 +450,7 @@ ZIG
 (test-case "ordinary portable conj allocates through the hidden Zig context"
   (define zig-src
     (compile-zig-string
-     "(ns g)\n(defn append-value [xs: (Vec Int) x: Int] -> (Vec Int) (conj xs x))"))
+     "(ns g)\n(defn append-value\n  [xs: (Vec Int)\n   x: Int] -> (Vec Int)\n  (conj xs x))"))
   (check-true (string-contains? zig-src "rt.conj(__ctx, xs, x)"))
   (when ZIG
     (check-true
@@ -472,7 +472,7 @@ ZIG
 (test-case "ordinary portable vector assoc is persistent and can grow at count"
   (define zig-src
     (compile-zig-string
-     "(ns g)\n(defn replace-value [xs: (Vec Int) i: Int x: Int] -> (Vec Int) (assoc xs i x))"))
+     "(ns g)\n(defn replace-value\n  [xs: (Vec Int)\n   i: Int\n   x: Int] -> (Vec Int)\n  (assoc xs i x))"))
   (check-true (string-contains? zig-src "rt.assoc(__ctx, xs, i, x)"))
   (when ZIG
     (check-true
@@ -1261,7 +1261,7 @@ ZIG
       "(defn lower [s: String] -> String (str/lower-case s))\n"
       "(defn fix [s: String] -> String (str/replace s \"a\" \"b\"))\n"
       "(defn lines [s: String] -> (Vec String) (str/split-lines s))\n"
-      "(defn under [a: String b: String] -> String (fs/path a b))\n")))
+      "(defn under\n  [a: String\n   b: String] -> String\n  (fs/path a b))\n")))
   (for ([name (in-list '("lower" "fix" "lines" "under"))])
     (check-regexp-match
      (regexp (format "pub fn ~a\\(__ctx: \\*rt\\.Ctx" name))
@@ -1276,8 +1276,8 @@ ZIG
     (compile-zig-string
      (string-append
       "(ns zig.function-names)\n"
-      "(defn store-value=? [a: Int b: Int] -> Bool (= a b))\n"
-      "(defn store-value= [a: Int b: Int] -> Bool false)\n"
+      "(defn store-value=?\n  [a: Int\n   b: Int] -> Bool\n  (= a b))\n"
+      "(defn store-value=\n  [a: Int\n   b: Int] -> Bool\n  false)\n"
       "(defn main [] -> Nil\n"
       "  (do (println (store-value=? 1 1))\n"
       "      (println (store-value= 1 1))))\n")))
@@ -2137,7 +2137,7 @@ ZIG
 
 (check-unsupported/src "zig rejects multi-arity defn"
   #rx"multi-arity"
-  "(ns g)\n(defn f ([a: Int] -> Int a) ([a: Int b: Int] -> Int (+ a b)))")
+  "(ns g)\n(defn f\n  ([a: Int] -> Int a)\n  ([a: Int\n    b: Int] -> Int (+ a b)))")
 
 (check-unsupported "zig rejects variable shift amounts"
   #rx"shift"
@@ -2217,10 +2217,10 @@ ZIG
 
 (define (ho-emit body)
   (compile-zig-string
-   (string-append "(ns g)\n(defn f [ctx: Ctx xs: (Vec Int)] -> " body ")")))
+   (string-append "(ns g)\n(defn f\n  [ctx: Ctx\n   xs: (Vec Int)] -> " body ")")))
 
 (test-case "reduce: fn inlined into a flat fold, no allocation, no fn value"
-  (define out (ho-emit "Int\n  (reduce (fn [acc: Int x: Int] -> Int (+ acc x)) 0 xs)"))
+  (define out (ho-emit "Int\n  (reduce (fn\n            [acc: Int\n             x: Int] -> Int\n            (+ acc x)) 0 xs)"))
   (check-true  (regexp-match? #rx"var acc: i64 = 0" out))   ; typed, not comptime_int
   (check-true  (regexp-match? #rx"for " out))               ; flat loop
   (check-true  (regexp-match? #rx"acc = .acc . x." out))    ; fold step, fn erased
@@ -2244,12 +2244,12 @@ ZIG
 (test-case "higher-order needs an annotated accumulator/return (typed lowering)"
   ;; reduce without an acc type can't pick a non-comptime_int var type
   (check-exn (lambda (e) (regexp-match? #rx"reduce accumulator" (exn-message e)))
-             (lambda () (ho-emit "Int\n  (reduce (fn [acc x] (+ acc x)) 0 xs)"))))
+             (lambda () (ho-emit "Int\n  (reduce (fn\n            [acc\n             x]\n            (+ acc x)) 0 xs)"))))
 
 (when ZIG
   (test-case "monomorphized higher-order compiles as zig"
     (check-true (zig-compiles?
-                 (ho-emit "Int\n  (reduce (fn [acc: Int x: Int] -> Int (+ acc x)) 0 xs)")
+                 (ho-emit "Int\n  (reduce (fn\n            [acc: Int\n             x: Int] -> Int\n            (+ acc x)) 0 xs)")
                  "ho-reduce"))))
 
 ;; --- fn-name arguments, monomorphized per (callee, parameter, defn) ----------
@@ -2267,10 +2267,11 @@ ZIG
    "    [(= node \"b\") B-SUCC]\n"
    "    [(= node \"c\") C-SUCC]\n"
    "    [:else NO-SUCC]))\n"
-   "(defn reachable-from? [succ: [String -> (Vec String)]\n"
-   "                       frontier: (Vec String)\n"
-   "                       fuel: Int\n"
-   "                       target: String] -> Bool\n"
+   "(defn reachable-from?\n"
+   "  [succ: [String -> (Vec String)]\n"
+   "   frontier: (Vec String)\n"
+   "   fuel: Int\n"
+   "   target: String] -> Bool\n"
    "  (loop [front frontier n fuel]\n"
    "    (cond\n"
    "      [(empty? front) false]\n"
@@ -2300,7 +2301,7 @@ ZIG
       "(ns zig.hof-two)\n"
       "(defn double [x: Int] -> Int (* x 2))\n"
       "(defn negate [x: Int] -> Int (- 0 x))\n"
-      "(defn apply-twice [f: [Int -> Int] x: Int] -> Int (f (f x)))\n"
+      "(defn apply-twice\n  [f: [Int -> Int]\n   x: Int] -> Int\n  (f (f x)))\n"
       "(defn main [] -> Nil\n"
       "  (println (str (apply-twice double 5) \":\" (apply-twice negate 5))))\n")))
   (check-regexp-match #rx"pub fn applyTwice__f__double\\(x: i64\\) i64 \\{\n    return double\\(double\\(x\\)\\);" out)
@@ -2316,7 +2317,7 @@ ZIG
   #rx"higher-order argument"
   (string-append
    "(ns zig.hof-literal)\n"
-   "(defn apply-twice [f: [Int -> Int] x: Int] -> Int (f (f x)))\n"
+   "(defn apply-twice\n  [f: [Int -> Int]\n   x: Int] -> Int\n  (f (f x)))\n"
    "(defn run [] -> Int (apply-twice (fn [x: Int] -> Int (+ x 1)) 5))\n"))
 
 ;; --- Phase 2: world-escape check + promote ------------------------------------
@@ -2331,19 +2332,19 @@ ZIG
 
 (check-escape "escape: World with a Vec field is rejected at compile time"
   #rx"tick-lifetime field log"
-  "(ns g)\n(defrecord World [score: Int log: (Vec Int)])\n(defn world-tick [ctx: Ctx w: World] -> World (->World (:score w) (:log w)))")
+  "(ns g)\n(defrecord World\n  [score: Int\n   log: (Vec Int)])\n(defn world-tick\n  [ctx: Ctx\n   w: World] -> World\n  (->World (:score w) (:log w)))")
 
 (check-escape "escape: String fields are slices too"
   #rx"strings are slices"
-  "(ns g)\n(defrecord World [name: String])\n(defn world-tick [ctx: Ctx w: World] -> World w)")
+  "(ns g)\n(defrecord World [name: String])\n(defn world-tick\n  [ctx: Ctx\n   w: World] -> World\n  w)")
 
 (check-escape "escape: nested record smuggling a slice is caught"
   #rx"tick-lifetime field xs"
-  "(ns g)\n(defrecord Bag [xs: (Vec Int)])\n(defrecord World [bag: Bag])\n(defn tick-step [ctx: Ctx w: World] -> World w)")
+  "(ns g)\n(defrecord Bag [xs: (Vec Int)])\n(defrecord World [bag: Bag])\n(defn tick-step\n  [ctx: Ctx\n   w: World] -> World\n  w)")
 
 (test-case "value-level promote is the world-tick artifact; systems promote via SoA"
   (define out (compile-zig-string
-               "(ns g)\n(defrecord S [v: Int])\n(defn tick-step [ctx: Ctx s: S] -> S s)"))
+               "(ns g)\n(defrecord S [v: Int])\n(defn tick-step\n  [ctx: Ctx\n   s: S] -> S\n  s)"))
   (check-false (regexp-match? #rx"pub fn promote\\(" out))
   (check-true (regexp-match? #rx"pub fn tickStepPromoteAll" out)))
 
@@ -2352,10 +2353,10 @@ ZIG
 (define ENGINE-SRC
   (string-append
    "(ns g)\n"
-   "(defrecord MindIn [x: Int belief: Int])\n"
+   "(defrecord MindIn\n  [x: Int\n   belief: Int])\n"
    "(defrecord Obs [sig: Int])\n"
-   "(defrecord StepOut [x: Int belief: Int act: Int])\n"
-   "(defn tick-step [ctx: Ctx m: MindIn obs: Obs max-x: Int] -> StepOut\n"
+   "(defrecord StepOut\n  [x: Int\n   belief: Int\n   act: Int])\n"
+   "(defn tick-step\n  [ctx: Ctx\n   m: MindIn\n   obs: Obs\n   max-x: Int] -> StepOut\n"
    "  (->StepOut (+ (:x m) (:sig obs)) (:belief m) 0))"))
 
 (test-case "engine: SoA buffers generated for entity and output records"
@@ -2384,13 +2385,13 @@ ZIG
 (define TWO-SYSTEM-SRC
   (string-append
    "(ns g)\n"
-   "(defrecord MindIn [x: Int alarm: Int])\n"
-   "(defrecord MindOut [x: Int alarm: Int act: Int])\n"
-   "(defrecord WolfIn [x: Int energy: Int])\n"
-   "(defrecord WolfOut [x: Int energy: Int howl: Int])\n"
-   "(defn mind-step [ctx: Ctx m: MindIn] -> MindOut\n"
+   "(defrecord MindIn\n  [x: Int\n   alarm: Int])\n"
+   "(defrecord MindOut\n  [x: Int\n   alarm: Int\n   act: Int])\n"
+   "(defrecord WolfIn\n  [x: Int\n   energy: Int])\n"
+   "(defrecord WolfOut\n  [x: Int\n   energy: Int\n   howl: Int])\n"
+   "(defn mind-step\n  [ctx: Ctx\n   m: MindIn] -> MindOut\n"
    "  (->MindOut (:x m) (:alarm m) 0))\n"
-   "(defn wolf-step [ctx: Ctx w: WolfIn] -> WolfOut\n"
+   "(defn wolf-step\n  [ctx: Ctx\n   w: WolfIn] -> WolfOut\n"
    "  (->WolfOut (:x w) (:energy w) 0))"))
 
 (test-case "engine: two systems — two archetypes, each with stores + loop + promote"
@@ -2428,18 +2429,18 @@ ZIG
 
 (test-case "engine: a -step fn without Ctx first is an ordinary function"
   (define out (compile-zig-string
-               "(ns g)\n(defn two-step [a: Int b: Int] -> Int (+ a b))"))
+               "(ns g)\n(defn two-step\n  [a: Int\n   b: Int] -> Int\n  (+ a b))"))
   (check-false (regexp-match? #rx"AllRange" out))
   (check-true (regexp-match? #rx"pub fn twoStep" out)))
 
 (test-case "engine: entity = output dedups to a single SoA struct"
   (define out (compile-zig-string
-               "(ns g)\n(defrecord S [v: Int])\n(defn tick-step [ctx: Ctx s: S] -> S s)"))
+               "(ns g)\n(defrecord S [v: Int])\n(defn tick-step\n  [ctx: Ctx\n   s: S] -> S\n  s)"))
   (check-equal? 1 (length (regexp-match* #rx"pub const SSoA = struct" out))))
 
 (test-case "engine: world-tick alone gets promote but no engine layer"
   (define out (compile-zig-string
-               "(ns g)\n(defrecord World [score: Int])\n(defn world-tick [ctx: Ctx w: World] -> World w)"))
+               "(ns g)\n(defrecord World [score: Int])\n(defn world-tick\n  [ctx: Ctx\n   w: World] -> World\n  w)"))
   (check-true (regexp-match? #rx"pub fn promote" out))
   (check-false (regexp-match? #rx"tickAllRange" out)))
 
@@ -2452,9 +2453,9 @@ ZIG
 (define LIFECYCLE-SRC
   (string-append
    "(ns g)\n"
-   "(defrecord E [x: Int hp: Int])\n"
-   "(defrecord O [x: Int hp: Int alive: Bool])\n"
-   "(defn life-step [ctx: Ctx e: E] -> O\n"
+   "(defrecord E\n  [x: Int\n   hp: Int])\n"
+   "(defrecord O\n  [x: Int\n   hp: Int\n   alive: Bool])\n"
+   "(defn life-step\n  [ctx: Ctx\n   e: E] -> O\n"
    "  (->O (:x e) (- (:hp e) 1) (> (:hp e) 1)))"))
 
 (test-case "lifecycle: alive on the output record generates compaction, not promotion"
@@ -2472,9 +2473,9 @@ ZIG
 (define SPAWN-SRC
   (string-append
    "(ns g)\n"
-   "(defrecord E [x: Int hp: Int])\n"
-   "(defrecord O [x: Int hp: Int alive: Bool spawn: Bool])\n"
-   "(defn life-step [ctx: Ctx e: E] -> O\n"
+   "(defrecord E\n  [x: Int\n   hp: Int])\n"
+   "(defrecord O\n  [x: Int\n   hp: Int\n   alive: Bool\n   spawn: Bool])\n"
+   "(defn life-step\n  [ctx: Ctx\n   e: E] -> O\n"
    "  (->O (:x e) (- (:hp e) 1) (> (:hp e) 1) (> (:hp e) 9)))"))
 
 (test-case "lifecycle: spawn verdict adds births to the generated compaction"
@@ -2494,42 +2495,42 @@ ZIG
   (string-append
    "(ns g)\n"
    "(defrecord E [x: Int])\n"
-   "(defrecord O [x: Int spawn: Bool])\n"
-   "(defn life-step [ctx: Ctx e: E] -> O (->O (:x e) false))"))
+   "(defrecord O\n  [x: Int\n   spawn: Bool])\n"
+   "(defn life-step\n  [ctx: Ctx\n   e: E] -> O\n  (->O (:x e) false))"))
 
 (check-unsupported/src "lifecycle: alive on both records is rejected pointedly"
   #rx"alive is the survival verdict"
   (string-append
    "(ns g)\n"
-   "(defrecord E [x: Int alive: Bool])\n"
-   "(defrecord O [x: Int alive: Bool])\n"
-   "(defn life-step [ctx: Ctx e: E] -> O (->O (:x e) true))"))
+   "(defrecord E\n  [x: Int\n   alive: Bool])\n"
+   "(defrecord O\n  [x: Int\n   alive: Bool])\n"
+   "(defn life-step\n  [ctx: Ctx\n   e: E] -> O\n  (->O (:x e) true))"))
 
 (check-unsupported/src "lifecycle: a non-Bool alive is rejected pointedly"
   #rx"alive must be Bool"
   (string-append
    "(ns g)\n"
    "(defrecord E [x: Int])\n"
-   "(defrecord O [x: Int alive: Int])\n"
-   "(defn life-step [ctx: Ctx e: E] -> O (->O (:x e) 1))"))
+   "(defrecord O\n  [x: Int\n   alive: Int])\n"
+   "(defn life-step\n  [ctx: Ctx\n   e: E] -> O\n  (->O (:x e) 1))"))
 
 (check-unsupported/src "engine: param 1 must be the entity record"
   #rx"tick-step param 1"
-  "(ns g)\n(defrecord S [v: Int])\n(defn tick-step [ctx: Ctx n: Int] -> S (->S n))")
+  "(ns g)\n(defrecord S [v: Int])\n(defn tick-step\n  [ctx: Ctx\n   n: Int] -> S\n  (->S n))")
 
 (check-unsupported/src "engine: entity fields must be scalar for the commit memcpy"
   #rx"engine entity record with non-scalar field"
   (string-append
    "(ns g)\n(defrecord Inner [v: Int])\n"
    "(defrecord E [inner: Inner])\n(defrecord O [v: Int])\n"
-   "(defn tick-step [ctx: Ctx e: E] -> O (->O (:v (:inner e))))"))
+   "(defn tick-step\n  [ctx: Ctx\n   e: E] -> O\n  (->O (:v (:inner e))))"))
 
 (check-unsupported/src "engine: param names can't collide with engine bindings"
   #rx"seed collides with a generated engine binding"
-  "(ns g)\n(defrecord S [v: Int])\n(defn tick-step [ctx: Ctx s: S seed: Int] -> S s)")
+  "(ns g)\n(defrecord S [v: Int])\n(defn tick-step\n  [ctx: Ctx\n   s: S\n   seed: Int] -> S\n  s)")
 
 (check-unsupported/src "engine: name-matched promotion fields must agree on type"
   #rx"share a name but not a type"
   (string-append
    "(ns g)\n(defrecord E [x: Int])\n(defrecord O [x: Float])\n"
-   "(defn tick-step [ctx: Ctx e: E] -> O (->O 1.0))"))
+   "(defn tick-step\n  [ctx: Ctx\n   e: E] -> O\n  (->O 1.0))"))

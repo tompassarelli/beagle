@@ -59,16 +59,16 @@
    (list 'def-bool         "(def b: Bool true)")
    (list 'def-nil-union    "(def m: (U Int Nil) nil)")
    ;; --- functions ------------------------------------------------------------
-   (list 'defn             "(defn add [a: Int b: Int] -> Int (+ a b))")
-   (list 'defn-doc         "(defn add \"sum\" [a: Int b: Int] -> Int (+ a b))")
-   (list 'defn-mixed-params "(defn g [a: Int b c: String] (str a b c))")
-   (list 'defn-multi       "(defn m ([a: Int] -> Int a) ([a: Int b: Int] -> Int (+ a b)))")
+   (list 'defn             "(defn add\n  [a: Int\n   b: Int] -> Int\n  (+ a b))")
+   (list 'defn-doc         "(defn add \"sum\"\n  [a: Int\n   b: Int] -> Int\n  (+ a b))")
+   (list 'defn-mixed-params "(defn g\n  [a: Int\n   b\n   c: String]\n  (str a b c))")
+   (list 'defn-multi       "(defn m\n  ([a: Int] -> Int a)\n  ([a: Int\n    b: Int] -> Int (+ a b)))")
    (list 'defn-variadic    "(defn v [& xs] (count xs))")
    (list 'defn-private     "(defn- h [x: Int] -> Int x)")
    (list 'fn-literal       "(def f (fn [x] x))")
    (list 'fn-shorthand     "(def f #(+ % 1))")
    ;; --- records --------------------------------------------------------------
-   (list 'defrecord        "(defrecord P [x: Int y: Int])\n(def p (->P 1 2))\n(def px (:x p))")
+   (list 'defrecord        "(defrecord P\n  [x: Int\n   y: Int])\n(def p (->P 1 2))\n(def px (:x p))")
    ;; --- control flow ---------------------------------------------------------
    (list 'if               "(defn f [x: Int] -> Int (if (> x 0) x 0))")
    (list 'when             "(defn f [x: Int] (when (> x 0) x))")

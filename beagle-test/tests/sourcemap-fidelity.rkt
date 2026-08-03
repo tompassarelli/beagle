@@ -348,18 +348,20 @@
    ;; -------------------------------------------------------------------------
    (hash 'id 'get-literal-key-non-record
          'category 'kw-access-via-get
-         'src "(defrecord Point [(x: Int) (y: Int)])
+         'src "(defrecord Point
+  [(x: Int)
+   (y: Int)])
 (defn f [(p: Point)] -> String
   (get p :x))"
          ;;   1: #lang
-         ;;   2: (defrecord …)
-         ;;   3: (defn f …)
-         ;;   4:   (get p :x))
-         ;; Expected: line 3 or line 4. The actual mismatch is the return-type
-         ;; lie at the `-> String` site (line 3) since field x: Int. We expect
-         ;; the diagnostic to point at line 4 (where the get is) — the body
+         ;;   2-4: (defrecord …)
+         ;;   5: (defn f …)
+         ;;   6:   (get p :x))
+         ;; Expected: line 5 or line 6. The actual mismatch is the return-type
+         ;; lie at the `-> String` site (line 5) since field x: Int. We expect
+         ;; the diagnostic to point at line 6 (where the get is) — the body
          ;; expression that produced the wrong type.
-         'expected 4
+         'expected 6
          'why "return-type mismatch at body (get p :x) — line of get"
          'kind 'return-type)
 
@@ -368,14 +370,16 @@
    ;; -------------------------------------------------------------------------
    (hash 'id 'kw-shorthand-non-record
          'category 'kw-access-shorthand
-         'src "(defrecord Point [(x: Int) (y: Int)])
+         'src "(defrecord Point
+  [(x: Int)
+   (y: Int)])
 (defn f [(p: Point)] -> String
   (:x p))"
          ;;   1: #lang
-         ;;   2: (defrecord …)
-         ;;   3: (defn f …)
-         ;;   4:   (:x p))
-         'expected 4
+         ;;   2-4: (defrecord …)
+         ;;   5: (defn f …)
+         ;;   6:   (:x p))
+         'expected 6
          'why "return-type mismatch at body (:x p) — line of kw-access"
          'kind 'return-type)
 
@@ -407,18 +411,20 @@
    ;; -------------------------------------------------------------------------
    (hash 'id 'kw-shorthand-multiline
          'category 'kw-access-shorthand-multiline
-         'src "(defrecord Point [(x: Int) (y: Int)])
+         'src "(defrecord Point
+  [(x: Int)
+   (y: Int)])
 (defn f [(p: Point)] -> String
   (:x
    p))"
          ;;   1: #lang
-         ;;   2: (defrecord …)
-         ;;   3: (defn f …)
-         ;;   4:   (:x
-         ;;   5:    p))
-         ;; The kw-access form spans lines 4-5; the "where the lie was made"
-         ;; is line 4 (the start of (:x …)).
-         'expected 4
+         ;;   2-4: (defrecord …)
+         ;;   5: (defn f …)
+         ;;   6:   (:x
+         ;;   7:    p))
+         ;; The kw-access form spans lines 6-7; the "where the lie was made"
+         ;; is line 6 (the start of (:x …)).
+         'expected 6
          'why "return-type mismatch — blame line of the (:x p) form"
          'kind 'return-type)
 

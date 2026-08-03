@@ -3,6 +3,7 @@
 (require rackunit
          (for-syntax racket/base)
          racket/file
+         racket/string
          beagle/private/parse
          beagle/private/types
          beagle/private/macros)
@@ -30,6 +31,32 @@
 (define-syntax-rule (parse-err/rx name rx form ...)
   (test-case name
     (check-exn rx (lambda () (parse-prog form ...)))))
+
+(define (parse-source-text source)
+  (define tmp (make-temporary-file "beagle-layout-~a.bclj"))
+  (dynamic-wind
+    void
+    (lambda ()
+      (call-with-output-file tmp
+        (lambda (out) (display source out))
+        #:exists 'truncate)
+      (parse-program (read-beagle-syntax tmp) #:source-path tmp))
+    (lambda () (delete-file tmp))))
+
+(define (layout-error source)
+  (with-handlers ([beagle-parse-error? values])
+    (parse-source-text source)
+    #f))
+
+(define (apply-layout-suggestion source suggestion)
+  (define offset (hash-ref suggestion 'offset))
+  (define length (hash-ref suggestion 'length))
+  (define replacement (hash-ref suggestion 'replacement))
+  (check-equal? (substring source offset (+ offset length))
+                (hash-ref suggestion 'before))
+  (string-append (substring source 0 offset)
+                 replacement
+                 (substring source (+ offset length))))
 
 ;; --- meta forms ------------------------------------------------------------
 
@@ -1623,3 +1650,79 @@
       (check-true (and dyndef (def-form-dynamic? dyndef) #t)
                   "def *x* not marked dynamic via read-beagle-syntax path"))
     (lambda () (when (file-exists? tmp) (delete-file tmp)))))
+
+;; --- canonical function / typed-field vector layout -----------------------
+
+(test-case "canonical physical layouts cover every function-style grammar site"
+  (define source
+    (string-append
+     "(defn zero [] 0)\n"
+     "(defn one [x] x)\n"
+     "(defn two\n  [x\n   y] -> Int\n  (+ x y))\n"
+     "(defn multi\n  ([x] x)\n  ([x\n    y] (+ x y)))\n"
+     "(defn bare [x] x\n  [x\n   y] (+ x y))\n"
+     "(def anon (fn\n            [x\n             y] (+ x y)))\n"
+     "(def nested (letfn [(step\n                      [x\n                       y] (+ x y))] step))\n"
+     "(defprotocol P\n  (one-m [this])\n  (two-m\n    [this\n     x] -> Int))\n"
+     "(defrecord R\n  [left: Int\n   right: Int])\n"
+     "(defunion U\n  Empty\n  (Pair\n    [left: Int\n     right: Int]))\n"
+     "(defunion :throwable E\n  (Bad [message: String])\n  (Worse\n    [message: String\n     code: Int]))\n"
+     "(extend-type R\n  P\n  (one-m [this] this)\n  (two-m\n    [this\n     x] x))\n"
+     "(defmacro pair\n  [x\n   y] `(vector ~x ~y))\n"))
+  (check-not-exn (lambda () (parse-source-text source))))
+
+(test-case "noncanonical layouts carry exact machine-applicable repairs"
+  (define cases
+    (list
+     (cons "defn" "(defn add [x y] -> Int (+ x y))\n")
+     (cons "defn- one" "(defn- id\n  [x]\n  x)\n")
+     (cons "fn" "(def f (fn [x y] (+ x y)))\n")
+     (cons "owner indentation" "(defn f\n    [x\n     y] (+ x y))\n")
+     (cons "return spacing" "(defn f\n  [x\n   y]  -> Int (+ x y))\n")
+     (cons "multi-arity" "(defn f ([x] x) ([x y] (+ x y)))\n")
+     (cons "multi-arity clause placement" "(defn f\n  (\n   [x] x))\n")
+     (cons "bare multi-arity" "(defn f [x] x [x y] (+ x y))\n")
+     (cons "letfn" "(def f (letfn [(step [x y] (+ x y))] step))\n")
+     (cons "protocol" "(defprotocol P (m [this x] -> Int))\n")
+     (cons "implementation" "(extend-type String P (m [this x] x))\n")
+     (cons "macro" "(defmacro m [x y] `(vector ~x ~y))\n")
+     (cons "record" "(defrecord R [x: Int y: Int])\n")
+     (cons "union" "(defunion U (Pair [x: Int y: Int]))\n")
+     (cons "throwable union" "(defunion :throwable E (Bad [message: String code: Int]))\n")
+     (cons "destructure/rest" "(defn f [x {:keys [y]} & rest] x)\n")
+     (cons "legacy typed" "(defn f [x :- Int y :- Int] :- Int x)\n")))
+  (for ([case (in-list cases)])
+    (define source (cdr case))
+    (define e (layout-error source))
+    (check-true (beagle-parse-error? e) (car case))
+    (check-eq? (beagle-parse-error-kind e) 'noncanonical-binding-layout (car case))
+    (define details (beagle-parse-error-details e))
+    (check-pred string? (hash-ref details 'error-file #f) (car case))
+    (check-pred exact-positive-integer? (hash-ref details 'error-line #f) (car case))
+    (check-pred exact-nonnegative-integer? (hash-ref details 'error-col #f) (car case))
+    (define suggestion (hash-ref details 'suggestion #f))
+    (check-true (hash? suggestion) (car case))
+    (check-equal? (hash-ref suggestion 'type) "replace-range" (car case))
+    (define repaired (apply-layout-suggestion source suggestion))
+    (check-not-exn (lambda () (parse-source-text repaired)) (car case))))
+
+(test-case "comment-bearing layout violations get no lossy repair"
+  (define source
+    "(defn f ; owner comment\n  [x ; first parameter\n   y]\n  -> Int x)\n")
+  (define e (layout-error source))
+  (check-true (beagle-parse-error? e))
+  (check-false (hash-ref (beagle-parse-error-details e) 'suggestion #f))
+  (check-true (string-contains? source "; owner comment"))
+  (check-true (string-contains? source "; first parameter"))
+  ;; Structurally-built datums have no physical source; the long-standing
+  ;; parser API remains usable by macros and compiler tests.
+  (check-not-exn
+   (lambda () (parse-one '(defn generated [x y] (+ x y))))))
+
+(test-case "ordinary data and let binding vectors are outside the layout rule"
+  (check-not-exn
+   (lambda ()
+     (parse-source-text
+      (string-append
+       "(def values [1 2 3])\n"
+       "(defn f [] (let [x 1 y 2] [x y]))\n")))))

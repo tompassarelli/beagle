@@ -60,7 +60,10 @@ Three lines of Beagle:
 
 ```clojure
 (ns g)
-(defn calc [a: Int b: Int c: Int] -> Int
+(defn calc
+  [a: Int
+   b: Int
+   c: Int] -> Int
   (+ (* a b) (- c a) (quot b 2) (rem c 3) (mod a 5)))
 ```
 

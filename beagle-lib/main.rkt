@@ -35,7 +35,18 @@
     [(_ form ...)
      (let ()
        (define (handle-error e [loc-stx #f])
-         (define target (or loc-stx stx))
+         (define parse-location
+           (and (beagle-parse-error? e)
+                (let* ([details (beagle-parse-error-details e)]
+                       [source (hash-ref details 'error-file #f)]
+                       [line (hash-ref details 'error-line #f)]
+                       [col (hash-ref details 'error-col #f)]
+                       [position (hash-ref details 'error-position #f)]
+                       [span (hash-ref details 'error-span #f)])
+                  (and source line col position
+                       (datum->syntax #f 'layout
+                                      (list source line col position (or span 1)))))))
+         (define target (or loc-stx parse-location stx))
          (cond
            [(json-error-mode?)
             (write-json-error e target)

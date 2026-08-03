@@ -61,12 +61,16 @@
 (defn- fact-sig [c :- k/Fact] :- String (str (:l c) "|" (:p c) "|" (:r c)))
 (defn- sig-set [facts :- (Vec k/Fact)] :- (Vec String) (vec (sort (mapv fact-sig facts))))
 (defn- sig-member-map [facts :- (Vec k/Fact)] :- (Map String Bool)
-  (reduce (fn [m :- (Map String Bool) c :- k/Fact] :- (Map String Bool)
+  (reduce (fn
+            [m :- (Map String Bool)
+             c :- k/Fact] :- (Map String Bool)
             (assoc m (fact-sig c) true))
           {} facts))
 ;; count of CURRENT coordinator/agent-written facts (by frame) absent from the
 ;; files — i.e. pending writes an import would clobber.
-(defn- pending-coord-count [log :- String file-sigs :- (Map String Bool)] :- Int
+(defn- pending-coord-count
+  [log :- String
+   file-sigs :- (Map String Bool)] :- Int
   (count (filterv (fn [v :- fold/Latest] :- Bool
                     (and (or (= (:frame v) "coord") (= (:frame v) "agent") (= (:frame v) "cli"))
                          (nil? (get file-sigs (str (:l v) "|" (:p v) "|" (:r v))))))
@@ -77,7 +81,10 @@
 ;; SAFETY (concurrent agents): import rewrites the log FROM the files, so it would
 ;; drop any facts in the log that aren't in the files — i.e. pending coordinator
 ;; writes. Refuse if that would lose data; `export` first, or `--force` to overwrite.
-(defn cmd-import [threads-dir :- String log :- String force :- Bool] :- Nil
+(defn cmd-import
+  [threads-dir :- String
+   log :- String
+   force :- Bool] :- Nil
   ;; vGUARD floor law: a generation-managed corpus (any @log:gen generation
   ;; line — a vR flip's control record) must NEVER be wholesale-rewritten by
   ;; this binary; pre-flip rewrite semantics could resurrect dead values.
@@ -95,7 +102,11 @@
 
 ;; Inverse of import: fold the log -> write each thread as markdown into out-dir.
 ;; SAFETY: refuse if threads/ holds edits not yet in the log (would clobber).
-(defn cmd-export [threads-dir :- String log :- String out-dir :- String force :- Bool] :- Nil
+(defn cmd-export
+  [threads-dir :- String
+   log :- String
+   out-dir :- String
+   force :- Bool] :- Nil
   (let [log-facts (:facts (fold/fold (fram.rt/read-log log)))
         file-facts (:facts (fold/fold (imp/load-corpus threads-dir)))
         log-sigs (sig-member-map log-facts)
@@ -124,8 +135,12 @@
 (defn cmd-validate [log :- String] :- Nil
   (let [idx (k/build-index (:facts (fold/fold (fram.rt/read-log log))))
         problems (reduce
-                  (fn [acc :- (Vec String) te :- String] :- (Vec String)
-                    (reduce (fn [a :- (Vec String) v :- String] :- (Vec String)
+                  (fn
+                    [acc :- (Vec String)
+                     te :- String] :- (Vec String)
+                    (reduce (fn
+                              [a :- (Vec String)
+                               v :- String] :- (Vec String)
                               (conj a (str (short-id te) ": " v)))
                             acc (k/violations-i idx te)))
                   []
@@ -141,13 +156,18 @@
 ;; fold/fold keeps only l/p/r. Rebuild a (l|p|r) -> writer map straight from
 ;; a COLD read of the log (fold/fold-latest keeps :frame) so evidence facts
 ;; can name who wrote them without touching the write path or the k/Fact shape.
-(defn- fact-sig3 [l :- String p :- String r :- String] :- String (str l "|" p "|" r))
+(defn- fact-sig3
+  [l :- String
+   p :- String
+   r :- String] :- String (str l "|" p "|" r))
 
 ;; a fresh cold fold's Latest records carry :frame (the writer, mapped from
 ;; :by by fram.rt/read-log) — key every current fact by its (l|p|r) triple so
 ;; cmd-show can look up "who wrote this" without changing what a Fact is.
 (defn- by-map-for [log :- String] :- (Map String String)
-  (reduce (fn [m :- (Map String String) v :- fold/Latest] :- (Map String String)
+  (reduce (fn
+            [m :- (Map String String)
+             v :- fold/Latest] :- (Map String String)
             (assoc m (fact-sig3 (:l v) (:p v) (:r v)) (:frame v)))
           {}
           (fold/fold-latest (fram.rt/read-log log))))
@@ -199,9 +219,13 @@
 ;; `facts`. Missing run records (a cold read of a log that does not carry the
 ;; run subjects, or a projection written by something other than the evidence
 ;; writer) simply leave the key absent — the caller then degrades to the writer.
-(defn- reporter-map-for [facts :- (Vec k/Fact) te :- String] :- (Map String String)
+(defn- reporter-map-for
+  [facts :- (Vec k/Fact)
+   te :- String] :- (Map String String)
   (reduce
-   (fn [m :- (Map String String) c :- k/Fact] :- (Map String String)
+   (fn
+     [m :- (Map String String)
+      c :- k/Fact] :- (Map String String)
      (if (or (not (= (:p c) "run_bar_evidence")) (not (str/includes? (:r c) te)))
        m
        (let [rec (try (ajson/decode-strict (:r c)) (catch Throwable _ nil))
@@ -228,7 +252,9 @@
 ;;   run records disagree     -> "· by <writer> · reporter ambiguous (see run subjects)"
 ;;   no run record at all     -> "· by <writer>", unchanged: a true statement
 ;;                               about the append, no claim about the observer
-(defn- provenance-marker [reporter :- Any writer :- Any] :- String
+(defn- provenance-marker
+  [reporter :- Any
+   writer :- Any] :- String
   (cond
     [(nil? reporter) (if (some? writer) (by-marker writer) "")]
     [(= reporter ambiguous-reporter)
@@ -253,7 +279,10 @@
 ;; the run record (thread 019f9ab9) — the writer alone is always the
 ;; coordinator and says nothing about which lane observed the result.
 ;; `--provenance` widens that marker to every fact, not just the evidence set.
-(defn cmd-show [log :- String id :- String provenance? :- Bool] :- Nil
+(defn cmd-show
+  [log :- String
+   id :- String
+   provenance? :- Bool] :- Nil
   (let [facts (live-facts log)
         te (str "@" id)
         exact (k/q-by-l facts te)
@@ -273,7 +302,9 @@
         ;; one subject's facts, each marked with its true provenance: the
         ;; reporter named by the run record when this thread has one, else the
         ;; log writer. The reporter map is built ONCE per shown subject.
-        render (fn [subj :- String cs :- (Vec k/Fact)] :- Nil
+        render (fn
+                 [subj :- String
+                  cs :- (Vec k/Fact)] :- Nil
                  (let [rmap (reporter-map-for facts subj)]
                    (doseq [c cs]
                      (let [want? (or provenance? (evidence-pred? (:p c)))
@@ -305,7 +336,11 @@
 ;; fold's strict-> tie-break silently keeps whichever was appended last — a lost
 ;; update with nothing flagging the collision. (The coordinator/tell path is
 ;; arbitrated by base_version; this is the bare single-writer `set` path.)
-(defn cmd-set [log :- String id :- String pred :- String value :- String] :- Nil
+(defn cmd-set
+  [log :- String
+   id :- String
+   pred :- String
+   value :- String] :- Nil
   (let [as (fram.rt/read-log log)
         f (fold/fold as)
         facts (:facts f)
@@ -321,7 +356,9 @@
         (println (str "ok — " id " " pred " = " rv " (v" tx ")"))))))
 
 ;; --- entity merge (the dedup-sweep "fix" half) ---
-(defn- facts->fact-ops [facts :- (Vec k/Fact) frame :- String] :- (Vec fold/FactOp)
+(defn- facts->fact-ops
+  [facts :- (Vec k/Fact)
+   frame :- String] :- (Vec fold/FactOp)
   (loop [cs facts i 1 acc []]
     (if (empty? cs)
       acc
@@ -331,7 +368,10 @@
 
 ;; Consolidate entity `from` into `to`: rewrite every l/r occurrence, dedup via a
 ;; re-fold, leave a `(from merged_into to)` tombstone. Run `export` afterward.
-(defn cmd-merge [log :- String from :- String to :- String] :- Nil
+(defn cmd-merge
+  [log :- String
+   from :- String
+   to :- String] :- Nil
   ;; vGUARD floor law: same refusal as import — merge is a whole-log rewrite.
   (if (fram.rt/generation-managed? log)
     (println (str "REFUSING merge: corpus is generation-managed; use fram >= vR or `fram split` first"))
@@ -347,7 +387,13 @@
       (println (str "merged " from " -> " to "  (" (count facts) " facts -> " (count deduped) ")")))))
 
 ;; --- write THROUGH the coordinator (safe under concurrent agents) ------------
-(defn- tell-once [port :- Int log :- String op :- String te :- String pred :- String rv :- String] :- String
+(defn- tell-once
+  [port :- Int
+   log :- String
+   op :- String
+   te :- String
+   pred :- String
+   rv :- String] :- String
   (let [v (fram.rt/coord-version-for-log port log)]
     (cond
       [(= v -1) "nodaemon"]
@@ -358,13 +404,25 @@
       [:else
        (fram.rt/coord-retract-for-log port log te pred rv v)])))
 
-(defn- tell-retry [port :- Int log :- String op :- String te :- String pred :- String rv :- String tries :- Int] :- String
+(defn- tell-retry
+  [port :- Int
+   log :- String
+   op :- String
+   te :- String
+   pred :- String
+   rv :- String
+   tries :- Int] :- String
   (let [resp (tell-once port log op te pred rv)]
     (if (and (= resp "conflict") (> tries 0))
       (tell-retry port log op te pred rv (- tries 1))
       resp)))
 
-(defn cmd-tell [log :- String op :- String id :- String pred :- String value :- String] :- Nil
+(defn cmd-tell
+  [log :- String
+   op :- String
+   id :- String
+   pred :- String
+   value :- String] :- Nil
   (let [facts (:facts (fold/fold (fram.rt/read-log log)))
         te (str "@" id)
         rv (tl/ref-value facts pred value)
@@ -456,7 +514,9 @@
 ;; route a tool's write-intent {:op :l :p :r} through the coordinator (reuses the
 ;; same serialized, rule-checked path as `tell`). `w` is the open keyword-map write
 ;; value from call's result envelope (a record would not = the test's map literal).
-(defn- route-write [log :- String w :- (Map Keyword Any)] :- Nil
+(defn- route-write
+  [log :- String
+   w :- (Map Keyword Any)] :- Nil
   (let [resp (tell-retry (fram.rt/coord-port) log (:op w) (:l w) (:p w) (:r w) 5)]
     (cond
       [(= resp "nodaemon") (println (str "no coordinator on 127.0.0.1:" (fram.rt/coord-port) " — start it with bin/fram-up"))]
@@ -467,7 +527,10 @@
        (println (str "committed (v" (subs resp 3) "): " (:l w) " " (:p w) " = " (:r w) " [" (:op w) "]"))]
       [:else (println (str "REJECTED by coordinator: " resp))])))
 
-(defn cmd-call [log :- String tool :- String edn :- String] :- Nil
+(defn cmd-call
+  [log :- String
+   tool :- String
+   edn :- String] :- Nil
   (let [args (fram.rt/parse-edn edn)]
     (if (nil? args)
       (println (str "bad EDN args: " edn))
@@ -481,7 +544,9 @@
           [(some? (:ok res))    (print-rows (:ok res))]
           [:else                (print-rows (:rows res))])))))
 
-(defn cmd-query [log :- String edn :- String] :- Nil
+(defn cmd-query
+  [log :- String
+   edn :- String] :- Nil
   (let [qd (fram.rt/parse-edn edn)]
     (if (nil? qd)
       (println (str "bad EDN query: " edn))
@@ -493,7 +558,10 @@
 
 ;; --- dispatch (engine verbs only) -------------------------------------------
 
-(defn dispatch [args :- (Vec String) threads-dir :- String log :- String] :- Nil
+(defn dispatch
+  [args :- (Vec String)
+   threads-dir :- String
+   log :- String] :- Nil
   (let [cmd (if (empty? args) "" (first args))]
     (cond
       [(= cmd "import")

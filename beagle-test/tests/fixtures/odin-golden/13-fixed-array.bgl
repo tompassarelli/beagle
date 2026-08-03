@@ -1,2 +1,4 @@
 (ns g)
-(defrecord Vertex [pos: (Arr 3 F32) color: (Arr 3 F32)])
+(defrecord Vertex
+  [pos: (Arr 3 F32)
+   color: (Arr 3 F32)])

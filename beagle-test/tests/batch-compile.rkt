@@ -116,13 +116,13 @@
 (define (build-generated-success-fixtures!)
   (list
    (write-fixture! "gen-success.bclj"
-                    "#lang beagle/clj\n(ns gen.success)\n(defn add [x: Int y: Int] -> Int (+ x y))\n(def total: Int (add 1 2))\n")
+                    "#lang beagle/clj\n(ns gen.success)\n(defn add\n  [x: Int\n   y: Int] -> Int\n  (+ x y))\n(def total: Int (add 1 2))\n")
    (write-fixture! "gen-success.bjs"
-                    "#lang beagle/js\n(ns gen.success.js)\n(defn add [x: Int y: Int] -> Int (+ x y))\n")
+                    "#lang beagle/js\n(ns gen.success.js)\n(defn add\n  [x: Int\n   y: Int] -> Int\n  (+ x y))\n")
    (write-fixture! "gen-success.bnix"
                     "#lang beagle/nix\n(ns gen.success.nix)\n(def greeting: String \"hi\")\n")
    (write-fixture! "gen-success.bzig"
-                    "#lang beagle/zig\n(ns gen.success.zig)\n(defn add [x: Int y: Int] -> Int (+ x y))\n")
+                    "#lang beagle/zig\n(ns gen.success.zig)\n(defn add\n  [x: Int\n   y: Int] -> Int\n  (+ x y))\n")
    ;; Pattern is deliberately outside the narrow JVM signature table. Its
    ;; declaration supplies the type at this explicit host boundary.
    (write-fixture! "gen-declared-jvm-static.bclj"
@@ -137,7 +137,7 @@
 (define (build-generated-failure-fixtures!)
   (list
    (write-fixture! "gen-fail.bclj"
-                    "#lang beagle/clj\n(ns gen.fail)\n(defn add [x: Int y: Int] -> Int (+ x y))\n(def bad: Int (add \"nope\" 2))\n")
+                    "#lang beagle/clj\n(ns gen.fail)\n(defn add\n  [x: Int\n   y: Int] -> Int\n  (+ x y))\n(def bad: Int (add \"nope\" 2))\n")
    ;; Pattern is deliberately outside the narrow JVM signature table.  A
    ;; declaration makes this host boundary explicit and typed; without it the
    ;; checker must reject the static instead of silently inferring Any.
@@ -687,7 +687,7 @@
          "(ns zig-alias.bridge\n"
          "  (:require [zig-alias.provider :as provider]))\n"
          "(define-mode strict)\n"
-         "(defrecord Result [accepted: Bool version: Int])\n"
+         "(defrecord Result\n  [accepted: Bool\n   version: Int])\n"
          "(defn inspect [value: provider/StoreValue] -> Result\n"
          "  (let [cell: (Atom provider/StoreValue) (atom value)]\n"
          "    (->Result (string? (deref cell)) 1)))\n")))

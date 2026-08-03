@@ -326,6 +326,19 @@
             (for/list ([ln (reverse out)])
               (string-append ln "\n")))]
 
+    [(beagle-parse-error? e)
+     (define d (beagle-parse-error-details e))
+     (define err-file (or (hash-ref d 'error-file #f) file))
+     (define err-line (or (hash-ref d 'error-line #f) stx-line))
+     (define err-col (hash-ref d 'error-col #f))
+     (define loc
+       (cond
+         [(and err-file err-line err-col)
+          (format "~a:~a:~a" err-file err-line (add1 err-col))]
+         [(and err-file err-line) (format "~a:~a" err-file err-line)]
+         [else (or err-file path)]))
+     (format "  ~a: ~a\n" loc (exn-message e))]
+
     [else
      (define loc
        (if (and file stx-line)
@@ -389,14 +402,18 @@
      ;; can auto-apply the fix instead of re-deriving it from prose. The bare
      ;; `else` below collapses these to a generic compile-error and drops both.
      (define d (beagle-parse-error-details e))
-     (define src-line (and stx-file stx-line (read-source-line stx-file stx-line)))
+     (define error-file (or (hash-ref d 'error-file #f) stx-file))
+     (define error-line (or (hash-ref d 'error-line #f) stx-line))
+     (define error-col (or (hash-ref d 'error-col #f) col))
+     (define src-line
+       (and error-file error-line (read-source-line error-file error-line)))
      (define base
        (hasheq 'schemaVersion 1
                'tool "beagle"
                'kind (symbol->string (beagle-parse-error-kind e))
-               'file (or stx-file 'null)
-               'line (or stx-line 'null)
-               'col (or col 'null)
+               'file (or error-file 'null)
+               'line (or error-line 'null)
+               'col (or error-col 'null)
                'message (exn-message e)
                'source_line (or src-line 'null)))
      (for/fold ([h base]) ([(k v) (in-hash d)])
@@ -422,6 +439,8 @@
   (define file
     (or (and (beagle-diagnostic? e)
              (hash-ref (beagle-diagnostic-details e) 'error-file #f))
+        (and (beagle-parse-error? e)
+             (hash-ref (beagle-parse-error-details e) 'error-file #f))
         (and loc-stx
              (let ([s (syntax-source loc-stx)])
                (cond [(path? s) (path->string s)]
@@ -431,6 +450,8 @@
   (define line
     (or (and (beagle-diagnostic? e)
              (hash-ref (beagle-diagnostic-details e) 'error-line #f))
+        (and (beagle-parse-error? e)
+             (hash-ref (beagle-parse-error-details e) 'error-line #f))
         (and loc-stx (syntax-line loc-stx))))
   (define msg (exn-message e))
   ;; Strip the "beagle: " prefix for cleaner agent output

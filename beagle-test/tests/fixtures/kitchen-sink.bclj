@@ -4,8 +4,12 @@
 (define-mode strict)
 
 ;; records
-(defrecord Point [(x: Int) (y: Int)])
-(defrecord Line [(start: Point) (end: Point)])
+(defrecord Point
+  [(x: Int)
+   (y: Int)])
+(defrecord Line
+  [(start: Point)
+   (end: Point)])
 
 ;; union
 (defunion Shape
@@ -59,7 +63,9 @@
       (recur (- i 1) (* acc i)))))
 
 ;; try/catch
-(defn safe-div [(a: Int) (b: Int)] -> Int
+(defn safe-div
+  [(a: Int)
+   (b: Int)] -> Int
   (try
     (/ a b)
     (catch Exception e 0)))
@@ -78,7 +84,9 @@
   (with p [:x (+ (point-x p) 1)]))
 
 ;; higher-order
-(defn apply-twice [(f: [Int -> Int]) (x: Int)] -> Int
+(defn apply-twice
+  [(f: [Int -> Int])
+   (x: Int)] -> Int
   (f (f x)))
 
 ;; doseq

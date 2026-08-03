@@ -14,16 +14,23 @@
 
 ;; --- small string helpers (duplicated per module — PoC pattern) --------------
 
-(defn char-at [s: String i: Int] -> String
+(defn char-at
+  [s: String
+   i: Int] -> String
   (if (and (>= i 0) (< i (count s))) (subs s i (+ i 1)) ""))
 
-(defn substring2 [s: String a: Int b: Int] -> String
+(defn substring2
+  [s: String
+   a: Int
+   b: Int] -> String
   (let [n (count s)
         lo (if (< a 0) 0 (if (> a n) n a))
         hi (if (< b lo) lo (if (> b n) n b))]
     (subs s lo hi)))
 
-(defn index-of2 [xs: (Vec Any) v: Any] -> Int
+(defn index-of2
+  [xs: (Vec Any)
+   v: Any] -> Int
   (let [n (count xs)]
     (loop [i: Int 0]
       (if (>= i n) -1
@@ -31,7 +38,10 @@
 
 ;; driftlab: string-keyed object mutation — route through an Any-typed helper
 ;; (module-level atom + swap! replaces JS `aset`/mutable-object-field-set).
-(defn obj-set! [obj: Any k: Any v: Any] -> Any
+(defn obj-set!
+  [obj: Any
+   k: Any
+   v: Any] -> Any
   (swap! obj assoc k v))
 
 ;; --- constants ---------------------------------------------------------------
@@ -47,10 +57,15 @@
 (defn make-prim [name: String] -> Any
   {"kind" "prim" "name" name})
 
-(defn make-fn [params: (Vec Any) rest-type: Any ret: Any] -> Any
+(defn make-fn
+  [params: (Vec Any)
+   rest-type: Any
+   ret: Any] -> Any
   {"kind" "fn" "params" params "rest" rest-type "ret" ret})
 
-(defn make-app [ctor: String args: (Vec Any)] -> Any
+(defn make-app
+  [ctor: String
+   args: (Vec Any)] -> Any
   {"kind" "app" "name" ctor "args" args})
 
 (defn make-union [members: (Vec Any)] -> Any
@@ -59,7 +74,10 @@
 (defn make-var [name: String] -> Any
   {"kind" "var" "name" name})
 
-(defn make-poly [vars: (Vec String) body: Any bounds: Any] -> Any
+(defn make-poly
+  [vars: (Vec String)
+   body: Any
+   bounds: Any] -> Any
   {"kind" "poly" "vars" vars "body" body "bounds" bounds})
 
 ;; --- type predicates ---------------------------------------------------------
@@ -153,7 +171,9 @@
 
 ;; Structural equality for INVARIANT positions (the Atom element). Symmetric and
 ;; does NOT treat Any as a wildcard (Any ≡ Any only). Unqualifies prim names.
-(defn type-invariant-equal? [a: Any b: Any] -> Bool
+(defn type-invariant-equal?
+  [a: Any
+   b: Any] -> Bool
   (cond
     (and (prim? a) (prim? b))
       (= (unqualify-name (get a "name")) (unqualify-name (get b "name")))
@@ -174,7 +194,9 @@
 
 ;; --- type-compatible? (matches Racket type-compatible?) ----------------------
 
-(defn type-compatible? [actual: Any expected: Any] -> Bool
+(defn type-compatible?
+  [actual: Any
+   expected: Any] -> Bool
   (cond
     (or (nil? actual) (nil? expected)) true
     (any-type? actual) true
@@ -211,7 +233,9 @@
             er (get expected "rest")]
         (and (= (count ap) (count ep))
              (every? identity
-               (map-indexed (fn [i: Int p: Any] -> Bool
+               (map-indexed (fn
+                              [i: Int
+                               p: Any] -> Bool
                               (type-compatible? p (nth ep i)))
                             ap))
              (= (nil? ar) (nil? er))
@@ -239,7 +263,9 @@
       (and (= (get actual "name") (get expected "name"))
            (= (count (get actual "args")) (count (get expected "args")))
            (every? identity
-             (map-indexed (fn [i: Int a: Any] -> Bool
+             (map-indexed (fn
+                            [i: Int
+                             a: Any] -> Bool
                             (type-compatible? a (nth (get expected "args") i)))
                           (get actual "args"))))
 
@@ -253,7 +279,9 @@
 
 ;; Var-ize: convert prim types whose name is a forall var into type-vars (the
 ;; oracle consults current-type-vars while parsing; this parser var-izes after).
-(defn varize-type [t: Any vars: Any] -> Any
+(defn varize-type
+  [t: Any
+   vars: Any] -> Any
   (cond
     (nil? t) t
     (and (= (get t "kind") "prim") (>= (index-of2 vars (get t "name")) 0))
@@ -312,7 +340,9 @@
                        vars-form)
             vars (vec (filter (fn [x: Any] -> Bool (not (nil? x)))
                               (mapv forall-entry-var raw-vars)))
-            bounds (reduce (fn [acc: Any e: Any] -> Any
+            bounds (reduce (fn
+                             [acc: Any
+                              e: Any] -> Any
                              (if (and (vector? e) (= (count e) 3) (= (nth e 1) "<:")
                                       (string? (nth e 0)))
                                (assoc acc (nth e 0) (varize-type (parse-type (nth e 2)) vars))
@@ -366,7 +396,10 @@
 
 ;; --- polymorphic inference helpers -------------------------------------------
 
-(defn infer-type-var-bindings! [expected: Any actual: Any bindings: Any] -> Nil
+(defn infer-type-var-bindings!
+  [expected: Any
+   actual: Any
+   bindings: Any] -> Nil
   (cond
     (or (nil? expected) (nil? actual)) nil
     (any-type? actual) nil
@@ -397,7 +430,9 @@
 
     :else nil))
 
-(defn apply-type-bindings [t: Any bindings: Any] -> Any
+(defn apply-type-bindings
+  [t: Any
+   bindings: Any] -> Any
   (cond
     (nil? t) nil
 
@@ -430,7 +465,9 @@
 (def passes: Any (atom []))
 (def failures: Any (atom []))
 
-(defn- expect! [label: String result: Bool] -> Nil
+(defn- expect!
+  [label: String
+   result: Bool] -> Nil
   (if result
     (do (swap! passes conj true) nil)
     (do (swap! failures conj label) nil)))

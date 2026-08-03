@@ -9,6 +9,8 @@
 ;; import set — keyed by the use-site name — still resolves its dynamic-ness.
 (require prov :as p)
 
-(defmacro with-v [val body] `(binding [p/*v* ~val] ~body))
+(defmacro with-v
+  [val
+   body] `(binding [p/*v* ~val] ~body))
 
 (defn u [] -> String (with-v "x" (p/rd)))

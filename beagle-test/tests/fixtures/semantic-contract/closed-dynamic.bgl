@@ -15,8 +15,7 @@
 (defn dyn-map [value: (Map String Int)] -> (Dyn String Int Bool (Vec String) (Map String Int))
   value)
 
-(defn round-trip [value: (Dyn String Int Bool (Vec String) (Map String Int))]
-  -> (Dyn String Int Bool (Vec String) (Map String Int))
+(defn round-trip [value: (Dyn String Int Bool (Vec String) (Map String Int))] -> (Dyn String Int Bool (Vec String) (Map String Int))
   value)
 
 (defn observe [value: (Dyn String Int Bool (Vec String) (Map String Int))] -> String

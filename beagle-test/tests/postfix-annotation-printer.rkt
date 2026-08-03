@@ -175,7 +175,7 @@
      (call-with-output-file tmp
        (lambda (o) (display (string-append
                              "#lang beagle/clj\n(ns t)\n"
-                             "(defn add [x: Int y: Int] -> String \"s\")\n"
+                             "(defn add\n  [x: Int\n   y: Int] -> String\n  \"s\")\n"
                              "(def answer: Int 42)\n") o))
        #:exists 'truncate/replace)
      (define out (with-output-to-string

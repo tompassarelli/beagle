@@ -24,9 +24,9 @@
   (get m :count 0))
 
 ;; bare-vector multi-arity (no wrapping parens around the clauses)
-(defn arity-sum
-  [a: Int] a
-  [a: Int b: Int] (+ a b))
+(defn arity-sum [a: Int] a
+  [a: Int
+   b: Int] (+ a b))
 
 (defn sum-doubled! [xs: (Vec Int)] -> Int
   (let [total (atom 0)]

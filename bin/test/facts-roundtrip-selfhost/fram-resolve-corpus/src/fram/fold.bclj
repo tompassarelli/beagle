@@ -6,9 +6,17 @@
 (require fram.kernel :as k)
 (require clojure.string :as str)
 
-(defrecord FactOp [tx :- Int op :- String l :- String p :- String r :- String frame :- String])
+(defrecord FactOp
+  [tx :- Int
+   op :- String
+   l :- String
+   p :- String
+   r :- String
+   frame :- String])
 
-(defrecord Fold [facts :- (Vec k/Fact) version :- Int])
+(defrecord Fold
+  [facts :- (Vec k/Fact)
+   version :- Int])
 
 ;; :tx is DECLARED Int, but read-log passes (:tx m) straight through with no
 ;; coercion (fram.rt/read-log), so an EDN-valid line lacking :tx (hand-edited,
@@ -29,7 +37,9 @@
 ;; itself stays strict-> (deterministic latest-wins); uniqueness is enforced
 ;; at write time, which is where the collision was actually minted.
 (defn max-tx [ops :- (Vec FactOp)] :- Int
-  (reduce (fn [m :- Int a :- FactOp] :- Int (let [t (tx-of a)] (if (> t m) t m))) 0 ops))
+  (reduce (fn
+            [m :- Int
+             a :- FactOp] :- Int (let [t (tx-of a)] (if (> t m) t m))) 0 ops))
 
 ;; --- SCHEMA-AS-FACTS cardinality: PASS 1 ------------------------------------
 ;; Predicate cardinality is DATA in the log: a fact `@<pred> cardinality single|multi`
@@ -39,7 +49,10 @@
 ;; k/single-eff? (fact > env > fallback — see fram.kernel). Deriving cardinality from the
 ;; log is what lets a daemon and a CLI folding the same log classify IDENTICALLY without
 ;; both booting with the same FRAM_SINGLE_VALUED (the finding #23 divergence vector).
-(defrecord Card [tx :- Int single :- Bool live :- Bool])
+(defrecord Card
+  [tx :- Int
+   single :- Bool
+   live :- Bool])
 
 ;; The META predicates are single-valued by their own nature (mirrors fram.schema/setup!:
 ;; name/cardinality/value_kind are single). Seeded so a `@<pred> cardinality X` fact is
@@ -55,7 +68,9 @@
 ;; Returns predname -> is-single, meta-preds seeded then overlaid by live declarations.
 (defn card-map [ops :- (Vec FactOp)] :- (Map String Bool)
   (let [latest (reduce
-                (fn [m :- (Map String Card) a :- FactOp] :- (Map String Card)
+                (fn
+                  [m :- (Map String Card)
+                   a :- FactOp] :- (Map String Card)
                   (if (not (= (:p a) "cardinality"))
                     m
                     (let [pn (strip-at (:l a))
@@ -66,7 +81,9 @@
                         (assoc m pn (->Card atx (= (:r a) "single") (= (:op a) "assert")))))))
                 {}
                 ops)]
-    (reduce (fn [acc :- (Map String Bool) e :- (Vec Any)] :- (Map String Bool)
+    (reduce (fn
+              [acc :- (Map String Bool)
+               e :- (Vec Any)] :- (Map String Bool)
               (let [pn :- String (nth e 0) c :- Card (nth e 1)]
                 (if (:live c) (assoc acc pn (:single c)) acc)))
             meta-single-seed
@@ -78,16 +95,28 @@
 ;; multi-valued key on (l,p,r) — latest op (assert/retract) per triple wins.
 ;; Cardinality is the EFFECTIVE map from pass 1 (fact > env > fallback).
 ;; (l/p, and multi-valued r's, are clean refs that never contain the separator.)
-(defrecord Latest [tx :- Int op :- String l :- String p :- String r :- String frame :- String])
+(defrecord Latest
+  [tx :- Int
+   op :- String
+   l :- String
+   p :- String
+   r :- String
+   frame :- String])
 
-(defn- key-of [cmap :- (Map String Bool) a :- FactOp] :- String
+(defn- key-of
+  [cmap :- (Map String Bool)
+   a :- FactOp] :- String
   (if (k/single-eff? cmap (:p a))
     (str (:l a) "" (:p a))
     (str (:l a) "" (:p a) "" (:r a))))
 
-(defn- keyed-latest [cmap :- (Map String Bool) ops :- (Vec FactOp)] :- (Map String Latest)
+(defn- keyed-latest
+  [cmap :- (Map String Bool)
+   ops :- (Vec FactOp)] :- (Map String Latest)
   (reduce
-   (fn [m :- (Map String Latest) a :- FactOp] :- (Map String Latest)
+   (fn
+     [m :- (Map String Latest)
+      a :- FactOp] :- (Map String Latest)
      (let [k (key-of cmap a)
            prev (get m k)
            atx (tx-of a)]
@@ -108,7 +137,9 @@
         cmap (card-map valid)
         keyed (keyed-latest cmap valid)
         facts (reduce
-                (fn [acc :- (Vec k/Fact) v :- Latest] :- (Vec k/Fact)
+                (fn
+                  [acc :- (Vec k/Fact)
+                   v :- Latest] :- (Vec k/Fact)
                   (if (= (:op v) "assert")
                     (conj acc (k/->Fact (:l v) (:p v) (:r v)))
                     acc))
@@ -138,7 +169,9 @@
   (let [cmap (card-map (mapv (fn [c :- k/Fact] :- FactOp
                                (->FactOp 0 "assert" (:l c) (:p c) (:r c) "live")) facts))]
     (vec (vals (reduce
-                (fn [m :- (Map String k/Fact) c :- k/Fact] :- (Map String k/Fact)
+                (fn
+                  [m :- (Map String k/Fact)
+                   c :- k/Fact] :- (Map String k/Fact)
                   (assoc m (key-of cmap (->FactOp 0 "assert" (:l c) (:p c) (:r c) "live")) c))
                 {}
                 facts)))))

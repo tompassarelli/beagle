@@ -44,7 +44,9 @@
       (vec (str/split env #"\s+"))
       ["abandoned"])))
 
-(defn vec-contains? [xs :- (Vec String) s :- String] :- Bool
+(defn vec-contains?
+  [xs :- (Vec String)
+   s :- String] :- Bool
   (loop [r xs]
     (if (empty? r)
       false
@@ -106,7 +108,9 @@
 ;; vec-contains? linear scan over the ~23-pred vocab was a measurable slice of
 ;; the whole read path (~40ms of a 10.7k-fact refold on bb).
 (def single-valued-set :- (Map String Bool)
-  (reduce (fn [m :- (Map String Bool) p :- String] :- (Map String Bool) (assoc m p true))
+  (reduce (fn
+            [m :- (Map String Bool)
+             p :- String] :- (Map String Bool) (assoc m p true))
           {} single-valued))
 
 ;; `emoji_*` are presentation-config predicates (e.g. @ui emoji_blocked "🧱") —
@@ -126,23 +130,35 @@
 ;; precedence is fact > env > fallback — and, crucially, it is DERIVED FROM THE LOG,
 ;; so a daemon and a CLI folding the same log classify identically without both having
 ;; to have booted with the same FRAM_SINGLE_VALUED (the silent-divergence vector).
-(defn single-eff? [cmap :- (Map String Bool) p :- String] :- Bool
+(defn single-eff?
+  [cmap :- (Map String Bool)
+   p :- String] :- Bool
   (let [v :- Bool? (get cmap p)]
     (if (nil? v) (single? p) v)))
 
 ;; --- the fact -------------------------------------------------------------
 
-(defrecord Fact [l :- String p :- String r :- String])
+(defrecord Fact
+  [l :- String
+   p :- String
+   r :- String])
 
-(defn fact-eq? [a :- Fact b :- Fact] :- Bool
+(defn fact-eq?
+  [a :- Fact
+   b :- Fact] :- Bool
   (and (= (:l a) (:l b)) (= (:p a) (:p b)) (= (:r a) (:r b))))
 
 ;; --- query -----------------------------------------------------------------
 
-(defn q-lp [facts :- (Vec Fact) l :- String p :- String] :- (Vec Fact)
+(defn q-lp
+  [facts :- (Vec Fact)
+   l :- String
+   p :- String] :- (Vec Fact)
   (filterv (fn [c :- Fact] :- Bool (and (= (:l c) l) (= (:p c) p))) facts))
 
-(defn q-by-l [facts :- (Vec Fact) l :- String] :- (Vec Fact)
+(defn q-by-l
+  [facts :- (Vec Fact)
+   l :- String] :- (Vec Fact)
   (filterv (fn [c :- Fact] :- Bool (= (:l c) l)) facts))
 
 ;; Fram is view-relative (docs/VIEWS_AND_BRANCHES.md): a (l,p) group MAY hold more than one
@@ -151,11 +167,17 @@
 ;; honest single-selector (the `one`/`many` split names the selection rather than burying a
 ;; bare `(first …)`); `many` returns the whole group. Mirrors resolve/select-main-1 — the
 ;; same selection point in the resolver, named in #19 (the read-side honesty pass).
-(defn one [facts :- (Vec Fact) l :- String p :- String] :- String?
+(defn one
+  [facts :- (Vec Fact)
+   l :- String
+   p :- String] :- String?
   (let [hits (q-lp facts l p)]
     (if (empty? hits) nil (:r (first hits)))))
 
-(defn many [facts :- (Vec Fact) l :- String p :- String] :- (Vec String)
+(defn many
+  [facts :- (Vec Fact)
+   l :- String
+   p :- String] :- (Vec String)
   (mapv (fn [c :- Fact] :- String (:r c)) (q-lp facts l p)))
 
 ;; NOTE: lifecycle DERIVATION (`terminal?`/`terminal-i?` and their `any-of?`
@@ -191,10 +213,15 @@
 
 ;; --- apply / retract -------------------------------------------------------
 
-(defn- drop-lp [facts :- (Vec Fact) l :- String p :- String] :- (Vec Fact)
+(defn- drop-lp
+  [facts :- (Vec Fact)
+   l :- String
+   p :- String] :- (Vec Fact)
   (filterv (fn [x :- Fact] :- Bool (not (and (= (:l x) l) (= (:p x) p)))) facts))
 
-(defn- has-fact? [facts :- (Vec Fact) c :- Fact] :- Bool
+(defn- has-fact?
+  [facts :- (Vec Fact)
+   c :- Fact] :- Bool
   (loop [r facts]
     (if (empty? r)
       false
@@ -204,20 +231,30 @@
 ;; fallback), so the single-writer `set` path (main/cmd-set) classifies a predicate the
 ;; SAME way the fold that produced its fact set did. The bare (single?-only) arities
 ;; stay for back-compat callers that carry no cardinality map.
-(defn apply-assert-c [cmap :- (Map String Bool) facts :- (Vec Fact) c :- Fact] :- (Vec Fact)
+(defn apply-assert-c
+  [cmap :- (Map String Bool)
+   facts :- (Vec Fact)
+   c :- Fact] :- (Vec Fact)
   (if (single-eff? cmap (:p c))
     (conj (drop-lp facts (:l c) (:p c)) c)
     (if (has-fact? facts c) facts (conj facts c))))
 
-(defn apply-retract-c [cmap :- (Map String Bool) facts :- (Vec Fact) c :- Fact] :- (Vec Fact)
+(defn apply-retract-c
+  [cmap :- (Map String Bool)
+   facts :- (Vec Fact)
+   c :- Fact] :- (Vec Fact)
   (if (single-eff? cmap (:p c))
     (drop-lp facts (:l c) (:p c))
     (filterv (fn [x :- Fact] :- Bool (not (fact-eq? x c))) facts)))
 
-(defn apply-assert [facts :- (Vec Fact) c :- Fact] :- (Vec Fact)
+(defn apply-assert
+  [facts :- (Vec Fact)
+   c :- Fact] :- (Vec Fact)
   (apply-assert-c {} facts c))
 
-(defn apply-retract [facts :- (Vec Fact) c :- Fact] :- (Vec Fact)
+(defn apply-retract
+  [facts :- (Vec Fact)
+   c :- Fact] :- (Vec Fact)
   (apply-retract-c {} facts c))
 
 ;; --- cycles ----------------------------------------------------------------
@@ -228,7 +265,10 @@
 ;; un-verified reimplementation in the write path. `succ` + ids are caller-supplied
 ;; (Any: works for flat string ids or the coordinator's reified ids). seen is a set
 ;; — O(1) membership (also faster than the prior linear scan).
-(defn reachable-from? [succ :- [String -> (Vec String)] frontier :- (Vec String) target :- String] :- Bool
+(defn reachable-from?
+  [succ :- [String -> (Vec String)]
+   frontier :- (Vec String)
+   target :- String] :- Bool
   (loop [front frontier seen #{}]
     (cond
       [(empty? front) false]
@@ -241,7 +281,10 @@
 ;; acyclic-declared predicate, not just depends_on/part_of. For a single-valued pred
 ;; (e.g. part_of) the fold has already collapsed it, so `many` yields its lone target;
 ;; identical traversal to the old one-vs-many branch, now vocabulary-neutral.
-(defn cycle? [facts :- (Vec Fact) pred :- String te :- String] :- Bool
+(defn cycle?
+  [facts :- (Vec Fact)
+   pred :- String
+   te :- String] :- Bool
   (let [succ (fn [x :- String] :- (Vec String) (many facts x pred))]
     (reachable-from? succ (succ te) te)))
 
@@ -260,7 +303,10 @@
   (if (str/starts-with? s "@") (subs s 1) s))
 
 ;; declared pred names (@ stripped) whose meta-predicate `mp` facts value `mv`.
-(defn- preds-facting [facts :- (Vec Fact) mp :- String mv :- String] :- (Vec String)
+(defn- preds-facting
+  [facts :- (Vec Fact)
+   mp :- String
+   mv :- String] :- (Vec String)
   (uniq (mapv (fn [c :- Fact] :- String (strip-at (:l c)))
               (filterv (fn [c :- Fact] :- Bool (and (= (:p c) mp) (= (:r c) mv))) facts))))
 
@@ -282,11 +328,17 @@
 ;; engine and reject legitimate titleless entities. The constrained pred sets are
 ;; schema-as-facts (see ref-preds-of / acyclic-preds-of); with no schema facts they
 ;; are the original hardcoded lists.
-(defn violations [facts :- (Vec Fact) te :- String] :- (Vec String)
+(defn violations
+  [facts :- (Vec Fact)
+   te :- String] :- (Vec String)
   (let [ids (entity-ids facts)
         rv (reduce
-            (fn [acc :- (Vec String) p :- String] :- (Vec String)
-              (reduce (fn [a :- (Vec String) rt :- String] :- (Vec String)
+            (fn
+              [acc :- (Vec String)
+               p :- String] :- (Vec String)
+              (reduce (fn
+                        [a :- (Vec String)
+                         rt :- String] :- (Vec String)
                         (if (not (vec-contains? ids rt))
                           (conj a (str p " references missing entity " rt))
                           a))
@@ -294,7 +346,9 @@
             []
             (ref-preds-of facts))
         cv (reduce
-            (fn [acc :- (Vec String) p :- String] :- (Vec String)
+            (fn
+              [acc :- (Vec String)
+               p :- String] :- (Vec String)
               (if (cycle? facts p te) (conj acc (str p " cycle")) acc))
             rv
             (acyclic-preds-of facts))]
@@ -315,18 +369,26 @@
    acyclic-preds :- (Vec String)])      ; preds that must not cycle (schema-as-facts)
 
 (defn build-index [facts :- (Vec Fact)] :- Index
-  (let [single (reduce (fn [m :- (Map String String) c :- Fact] :- (Map String String)
+  (let [single (reduce (fn
+                         [m :- (Map String String)
+                          c :- Fact] :- (Map String String)
                          (assoc m (str (:l c) "" (:p c)) (:r c)))
                        {} facts)
-        bypred (reduce (fn [m :- (Map String (Vec String)) c :- Fact] :- (Map String (Vec String))
+        bypred (reduce (fn
+                         [m :- (Map String (Vec String))
+                          c :- Fact] :- (Map String (Vec String))
                          (let [kk (str (:l c) "" (:p c))]
                            (assoc m kk (conj (get m kk []) (:r c)))))
                        {} facts)
         subjects (uniq (mapv (fn [c :- Fact] :- String (:l c)) facts))
-        entity-set (reduce (fn [m :- (Map String Bool) s :- String] :- (Map String Bool)
+        entity-set (reduce (fn
+                             [m :- (Map String Bool)
+                              s :- String] :- (Map String Bool)
                              (assoc m s true))
                            {} subjects)
-        revdep (reduce (fn [m :- (Map String (Vec String)) c :- Fact] :- (Map String (Vec String))
+        revdep (reduce (fn
+                         [m :- (Map String (Vec String))
+                          c :- Fact] :- (Map String (Vec String))
                          (if (= (:p c) "depends_on")
                            (assoc m (:r c) (conj (get m (:r c) []) (:l c)))
                            m))
@@ -335,13 +397,21 @@
     ;; violations-i per thread; deriving them here keeps that O(threads + edges)).
     (->Index single bypred subjects entity-set revdep (ref-preds-of facts) (acyclic-preds-of facts))))
 
-(defn one-i [idx :- Index l :- String p :- String] :- String?
+(defn one-i
+  [idx :- Index
+   l :- String
+   p :- String] :- String?
   (get (:single idx) (str l "" p)))
 
-(defn many-i [idx :- Index l :- String p :- String] :- (Vec String)
+(defn many-i
+  [idx :- Index
+   l :- String
+   p :- String] :- (Vec String)
   (get (:bypred idx) (str l "" p) []))
 
-(defn entity-i? [idx :- Index te :- String] :- Bool
+(defn entity-i?
+  [idx :- Index
+   te :- String] :- Bool
   (some? (get (:entity-set idx) te)))
 
 (defn thread-ids-i [idx :- Index] :- (Vec String)
@@ -355,7 +425,9 @@
 ;; `terminal-i?` / `any-of-i?` (indexed lifecycle derivation) also moved to
 ;; north.projections — see the flat `terminal?` note above.
 
-(defn dependents-i [idx :- Index te :- String] :- (Vec String)
+(defn dependents-i
+  [idx :- Index
+   te :- String] :- (Vec String)
   (get (:revdep idx) te []))
 
 ;; --- indexed validation (O(edges) per thread; for whole-corpus validate) -----
@@ -363,7 +435,10 @@
 ;; O(threads * facts) raw scans into O(threads + edges). Existence of a ref is
 ;; O(1): a real entity appears in the index's subject membership map.
 
-(defn cycle-i? [idx :- Index pred :- String te :- String] :- Bool
+(defn cycle-i?
+  [idx :- Index
+   pred :- String
+   te :- String] :- Bool
   (let [succ (fn [x :- String] :- (Vec String) (many-i idx x pred))]
     (reachable-from? succ (succ te) te)))
 
@@ -373,10 +448,16 @@
 ;; Existence is subject-based (the target carries ANY live fact); the constrained
 ;; pred sets are the index's schema-as-facts ref-preds / acyclic-preds (derived once
 ;; in build-index; the hardcoded lists when the log declares no schema).
-(defn violations-i [idx :- Index te :- String] :- (Vec String)
+(defn violations-i
+  [idx :- Index
+   te :- String] :- (Vec String)
   (let [rv (reduce
-            (fn [acc :- (Vec String) p :- String] :- (Vec String)
-              (reduce (fn [a :- (Vec String) rt :- String] :- (Vec String)
+            (fn
+              [acc :- (Vec String)
+               p :- String] :- (Vec String)
+              (reduce (fn
+                        [a :- (Vec String)
+                         rt :- String] :- (Vec String)
                         (if (not (entity-i? idx rt))
                           (conj a (str p " references missing entity " rt))
                           a))
@@ -384,7 +465,9 @@
             []
             (:ref-preds idx))
         cv (reduce
-            (fn [acc :- (Vec String) p :- String] :- (Vec String)
+            (fn
+              [acc :- (Vec String)
+               p :- String] :- (Vec String)
               (if (cycle-i? idx p te) (conj acc (str p " cycle")) acc))
             rv
             (:acyclic-preds idx))]

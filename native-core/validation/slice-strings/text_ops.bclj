@@ -4,20 +4,33 @@
 (ns native.text-ops)
 (define-mode strict)
 
-(defn text-equal? [left: String right: String] -> Bool (= left right))
+(defn text-equal?
+  [left: String
+   right: String] -> Bool (= left right))
 
 (defn text-length [value: String] -> Int (count value))
 
-(defn text-slice [value: String start: Int end: Int] -> String
+(defn text-slice
+  [value: String
+   start: Int
+   end: Int] -> String
   (subs value start end))
 
-(defn text-tail [value: String start: Int] -> String (subs value start))
+(defn text-tail
+  [value: String
+   start: Int] -> String (subs value start))
 
-(defn text-join [left: String right: String] -> String (str left right))
+(defn text-join
+  [left: String
+   right: String] -> String (str left right))
 
-(defn labelled [name: String ordinal: Int] -> String (str name "=" ordinal))
+(defn labelled
+  [name: String
+   ordinal: Int] -> String (str name "=" ordinal))
 
-(defn keyword-equal? [left: Keyword right: Keyword] -> Bool (= left right))
+(defn keyword-equal?
+  [left: Keyword
+   right: Keyword] -> Bool (= left right))
 
 (defn assert-action? [action: Keyword] -> Bool (= action :assert))
 
@@ -25,7 +38,10 @@
 
 ;; The two operands reach memcmp from different handles: one is a constant-pool
 ;; blob, the other an arena copy made by subs.
-(defn prefix-is? [value: String limit: Int expected: String] -> Bool
+(defn prefix-is?
+  [value: String
+   limit: Int
+   expected: String] -> Bool
   (= (subs value 0 limit) expected))
 
 (defn tagged [value: String] -> String (str "<" value ">"))

@@ -131,10 +131,11 @@ else echo "  FAIL  ($r)"; fail=1; fi
 
 # ---------------------------------------------------------------------------
 echo '--- NL: "replace use-base with a 2-arg version" -> agent emits {op upsert-form (existing name), ...} ---'
-SPEC2="$T/spec_repl.edn"; printf '(defn use-base [y: Int z: Int] -> Int (base (base y)))' > "$SPEC2"
+SPEC2="$T/spec_repl.edn"; printf '(defn use-base\n  [y: Int\n   z: Int] -> Int\n  (base (base y)))' > "$SPEC2"
 r="$(author "$T/repl" "$CORPUS" upsert-form authmod "$SPEC2")"
 if [ "$r" = COMMITTED ] \
-   && grep -q '(defn use-base \[y: Int z: Int\] -> Int (base (base y)))' "$T/repl/authmod.bclj" \
+   && grep -q '(defn use-base' "$T/repl/authmod.bclj" \
+   && grep -q '   z: Int] -> Int' "$T/repl/authmod.bclj" \
    && grep -q '(defn base \[x: Int\] -> Int (+ x 1))' "$T/repl/authmod.bclj" \
    && [ "$(grep -c 'defn use-base' "$T/repl/authmod.bclj")" -eq 1 ]; then
   echo "  PASS  committed; use-base REPLACED in place (one def, slot preserved), base intact, recompiled"

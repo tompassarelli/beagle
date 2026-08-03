@@ -17,7 +17,9 @@
 (defn scale [n: Int] -> Int
   (* n 10))
 
-(defmacro with-scaled [v & body]
+(defmacro with-scaled
+  [v
+   & body]
   `(let [s (scale ~v)]
      (do ~@body)))
 

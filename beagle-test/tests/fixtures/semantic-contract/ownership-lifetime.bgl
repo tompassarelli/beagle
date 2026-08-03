@@ -1,12 +1,16 @@
 (ns semantic-contract.ownership-lifetime)
 
 (defrecord Cell [value: Int])
-(defrecord World [cell: Cell score: Int])
+(defrecord World
+  [cell: Cell
+   score: Int])
 
 (defn borrowed-score [world: World] -> Int
   (:score world))
 
-(defn world-tick [ctx: Ctx world: World] -> World
+(defn world-tick
+  [ctx: Ctx
+   world: World] -> World
   (->World
    (->Cell (inc (:value (:cell world))))
    (inc (borrowed-score world))))

@@ -10,15 +10,24 @@
 (require native.c11 :as c11)
 
 (defrecord FactV0
-  [subject: Int predicate: String object: Any reference: Bool])
+  [subject: Int
+   predicate: String
+   object: Any
+   reference: Bool])
 
-(defn slice-id [domain: String parts: (Vec String)] -> core/NativeId
+(defn slice-id
+  [domain: String
+   parts: (Vec String)] -> core/NativeId
   (core/canonical-id (str "native-slice-types-v0/" domain) parts))
 
-(defn same-id? [left: core/NativeId right: core/NativeId] -> Bool
+(defn same-id?
+  [left: core/NativeId
+   right: core/NativeId] -> Bool
   (core/native-id= left right))
 
-(defn int-in? [values: (Vec Int) target: Int] -> Bool
+(defn int-in?
+  [values: (Vec Int)
+   target: Int] -> Bool
   (loop [index: Int 0]
     (if (>= index (count values))
       false
@@ -52,7 +61,9 @@
     :else (worlds/->TextTermV0 (str value))))
 
 (defn find-fact
-  [facts: (Vec Any) subject: Int predicate: String] -> (U Any Nil)
+  [facts: (Vec Any)
+   subject: Int
+   predicate: String] -> (U Any Nil)
   (loop [index: Int 0]
     (if (>= index (count facts))
       nil
@@ -62,7 +73,9 @@
           (recur (+ index 1)))))))
 
 (defn child-reference?
-  [facts: (Vec Any) subject: Int object: Any] -> Bool
+  [facts: (Vec Any)
+   subject: Int
+   object: Any] -> Bool
   (and (integer? object)
     (loop [index: Int 0]
       (if (>= index (count facts))
@@ -88,7 +101,9 @@
           subject
           (recur (+ index 1)))))))
 
-(defn child-ids [facts: (Vec Any) subjects: (Vec Int)] -> (Vec Int)
+(defn child-ids
+  [facts: (Vec Any)
+   subjects: (Vec Int)] -> (Vec Int)
   (loop [index: Int 0 children: (Vec Int) []]
     (if (>= index (count facts))
       children
@@ -104,14 +119,18 @@
           (recur (+ index 1) (conj children object))
           (recur (+ index 1) children))))))
 
-(defn descendant-ids [facts: (Vec Any) root: Int] -> (Vec Int)
+(defn descendant-ids
+  [facts: (Vec Any)
+   root: Int] -> (Vec Int)
   (loop [subjects: (Vec Int) [root]]
     (let [children: (Vec Int) (child-ids facts subjects)]
       (if (= 0 (count children))
         subjects
         (recur (vec (concat subjects children)))))))
 
-(defn select-facts [facts: (Vec Any) subjects: (Vec Int)] -> (Vec FactV0)
+(defn select-facts
+  [facts: (Vec Any)
+   subjects: (Vec Int)] -> (Vec FactV0)
   (loop [index: Int 0 selected: (Vec FactV0) []]
     (if (>= index (count facts))
       selected
@@ -127,7 +146,8 @@
           (recur (+ index 1) selected))))))
 
 (defn node-in?
-  [nodes: (Vec worlds/TermNodeV0) identity: core/NativeId] -> Bool
+  [nodes: (Vec worlds/TermNodeV0)
+   identity: core/NativeId] -> Bool
   (loop [index: Int 0]
     (if (>= index (count nodes))
       false
@@ -137,8 +157,8 @@
         (recur (+ index 1))))))
 
 (defn append-node
-  [nodes: (Vec worlds/TermNodeV0) node: worlds/TermNodeV0]
-  -> (Vec worlds/TermNodeV0)
+  [nodes: (Vec worlds/TermNodeV0)
+   node: worlds/TermNodeV0] -> (Vec worlds/TermNodeV0)
   (if (node-in? nodes (worlds/termnodev0-identity node))
     nodes
     (conj nodes node)))
@@ -155,7 +175,9 @@
     (node-id (factv0-object fact))
     (literal-id (factv0-object fact))))
 
-(defn fact-node [ordinal: Int fact: FactV0] -> worlds/TermNodeV0
+(defn fact-node
+  [ordinal: Int
+   fact: FactV0] -> worlds/TermNodeV0
   (worlds/->TermNodeV0 (fact-id ordinal)
     (worlds/->TripleTermV0
       (node-id (factv0-subject fact))
@@ -179,8 +201,9 @@
         (recur (+ index 1)
           (append-node with-object (fact-node index fact)))))))
 
-(defn source-world [facts: (Vec Any) source-text: String]
-  -> worlds/SourceProgramWorldV0
+(defn source-world
+  [facts: (Vec Any)
+   source-text: String] -> worlds/SourceProgramWorldV0
   (let [root-number: Int (instant-root facts)
         subjects: (Vec Int) (descendant-ids facts root-number)
         selected: (Vec FactV0) (select-facts facts subjects)
@@ -208,7 +231,8 @@
         []))))
 
 (defn type-named?
-  [definition: core/TypeDef name: String] -> Bool
+  [definition: core/TypeDef
+   name: String] -> Bool
   (= name (core/typedef-name definition)))
 
 (defn selected-type? [definition: core/TypeDef] -> Bool
@@ -221,7 +245,8 @@
     (core/nativeworld-types program)))
 
 (defn id-selected?
-  [definitions: (Vec core/TypeDef) target: core/NativeId] -> Bool
+  [definitions: (Vec core/TypeDef)
+   target: core/NativeId] -> Bool
   (loop [index: Int 0]
     (if (>= index (count definitions))
       false
@@ -230,8 +255,8 @@
         (recur (+ index 1))))))
 
 (defn selected-layouts
-  [program: core/NativeWorld definitions: (Vec core/TypeDef)]
-  -> (Vec core/LayoutDef)
+  [program: core/NativeWorld
+   definitions: (Vec core/TypeDef)] -> (Vec core/LayoutDef)
   (filterv
     (fn [layout: core/LayoutDef] -> Bool
       (id-selected? definitions (core/layoutdef-type-id layout)))
@@ -292,14 +317,12 @@
       (subs value 0 (- size 1))
       value)))
 
-(defn require-source-seal [result: lower/SourceSealResultV0]
-  -> worlds/SealedSourceWorldV0
+(defn require-source-seal [result: lower/SourceSealResultV0] -> worlds/SealedSourceWorldV0
   (if (instance? native.lower.SourceSealAcceptedV0 result)
     (lower/sourcesealacceptedv0-sealed result)
     (throw (ex-info "source world sealing failed" {}))))
 
-(defn require-typing [result: lower/TypingResultV0]
-  -> worlds/SealedTypedWorldV0
+(defn require-typing [result: lower/TypingResultV0] -> worlds/SealedTypedWorldV0
   (if (instance? native.lower.TypingAcceptedV0 result)
     (lower/typingacceptedv0-sealed result)
     (throw (ex-info "source-to-typed lowering failed" {}))))
@@ -309,8 +332,7 @@
     (lower/typingacceptedv0-slice result)
     (throw (ex-info "source-to-typed lowering produced no slice" {}))))
 
-(defn require-native-seal [result: lower/NativeLoweringResultV0]
-  -> worlds/SealedNativeWorldV0
+(defn require-native-seal [result: lower/NativeLoweringResultV0] -> worlds/SealedNativeWorldV0
   (cond
     (instance? native.lower.NativeLoweringCompleteV0 result)
     (lower/nativeloweringcompletev0-sealed result)
@@ -347,7 +369,9 @@
         "}\n"))))
 
 (defn emit-slice!
-  [facts-path: String source-path: String output-directory: String] -> Nil
+  [facts-path: String
+   source-path: String
+   output-directory: String] -> Nil
   (let [facts: (Vec Any) (read-string (slurp facts-path))
         source-text: String (slurp source-path)
         configuration: (Vec String)

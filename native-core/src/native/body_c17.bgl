@@ -9,18 +9,24 @@
 (require native.fold-c17 :as c17)
 
 (defrecord BodyArtifactV0
-  [header-name: String header-text: String
-   source-name: String source-text: String])
+  [header-name: String
+   header-text: String
+   source-name: String
+   source-text: String])
 
 (defunion BodyMaterializationV0
   (BodySuccessV0 [artifact: BodyArtifactV0])
   (BodyFailureV0 [detail: String]))
 
-(defrecord ValueSlotV0 [id: core/NativeId type-id: core/NativeId])
+(defrecord ValueSlotV0
+  [id: core/NativeId
+   type-id: core/NativeId])
 
 ;; Text literals become one length-prefixed constant blob each; keyword literals
 ;; become table indices. Both tables are sealed by this walk over the world.
-(defrecord ConstantPoolV0 [texts: (Vec String) keywords: (Vec String)])
+(defrecord ConstantPoolV0
+  [texts: (Vec String)
+   keywords: (Vec String)])
 
 ;; v0 C17 literal alphabet. Anything else is refused rather than escaped
 ;; wrongly: without a code-point primitive the emitter cannot tell a control
@@ -30,7 +36,9 @@
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`"
     "abcdefghijklmnopqrstuvwxyz{|}~"))
 
-(defn character-in? [alphabet: String character: String] -> Bool
+(defn character-in?
+  [alphabet: String
+   character: String] -> Bool
   (loop [position: Int 0]
     (cond
       (>= position (count alphabet)) false
@@ -65,18 +73,23 @@
         (str result
           (escape-c-character (subs value position (+ position 1))))))))
 
-(defn value-position [values: (Vec String) target: String] -> Int
+(defn value-position
+  [values: (Vec String)
+   target: String] -> Int
   (loop [position: Int 0]
     (cond
       (>= position (count values)) -1
       (= target (nth values position)) position
       :else (recur (+ position 1)))))
 
-(defn conj-value [values: (Vec String) candidate: String] -> (Vec String)
+(defn conj-value
+  [values: (Vec String)
+   candidate: String] -> (Vec String)
   (if (>= (value-position values candidate) 0) values (conj values candidate)))
 
 (defn pool-with-atom
-  [pool: ConstantPoolV0 atom: core/NativeAtom] -> ConstantPoolV0
+  [pool: ConstantPoolV0
+   atom: core/NativeAtom] -> ConstantPoolV0
   (cond
     (instance? native.core.TextAtom atom)
     (with pool
@@ -89,7 +102,8 @@
     :else pool))
 
 (defn pool-with-instruction
-  [pool: ConstantPoolV0 instruction: core/Instruction] -> ConstantPoolV0
+  [pool: ConstantPoolV0
+   instruction: core/Instruction] -> ConstantPoolV0
   (if (instance? native.core.AtomInstruction instruction)
     (pool-with-atom pool (core/atominstruction-atom instruction))
     pool))
@@ -134,8 +148,7 @@
     [(BodySuccessV0 artifact) ""]
     [(BodyFailureV0 detail) detail]))
 
-(defn materialization-artifact
-  [result: BodyMaterializationV0] -> BodyArtifactV0
+(defn materialization-artifact [result: BodyMaterializationV0] -> BodyArtifactV0
   (match result
     [(BodySuccessV0 artifact) artifact]
     [(BodyFailureV0 detail) (->BodyArtifactV0 "" "" "" "")]))
@@ -201,7 +214,9 @@
       (c17/types-orderable? types layouts)
       (every? function-supported? (core/nativeworld-functions world)))))
 
-(defn block-index [blocks: (Vec core/BasicBlock) target: core/NativeId] -> Int
+(defn block-index
+  [blocks: (Vec core/BasicBlock)
+   target: core/NativeId] -> Int
   (loop [position: Int 0]
     (if (>= position (count blocks))
       -1
@@ -209,10 +224,14 @@
         position
         (recur (+ position 1))))))
 
-(defn label-name [function-index: Int block: Int] -> String
+(defn label-name
+  [function-index: Int
+   block: Int] -> String
   (str "native_l" function-index "_" block))
 
-(defn function-name [module-index: Int function-index: Int] -> String
+(defn function-name
+  [module-index: Int
+   function-index: Int] -> String
   (str (c17/module-prefix module-index) "_fn_" function-index))
 
 ;; Every block parameter and instruction result gets one C local declared at the
@@ -250,7 +269,9 @@
                       instructions))))]
           (recur (+ position 1) with-results))))))
 
-(defn slot-index [slots: (Vec ValueSlotV0) target: core/NativeId] -> Int
+(defn slot-index
+  [slots: (Vec ValueSlotV0)
+   target: core/NativeId] -> Int
   (loop [position: Int 0]
     (if (>= position (count slots))
       -1
@@ -259,7 +280,8 @@
         (recur (+ position 1))))))
 
 (defn parameter-index
-  [parameters: (Vec core/Parameter) target: core/NativeId] -> Int
+  [parameters: (Vec core/Parameter)
+   target: core/NativeId] -> Int
   (loop [position: Int 0]
     (if (>= position (count parameters))
       -1
@@ -268,8 +290,9 @@
         (recur (+ position 1))))))
 
 (defn value-name
-  [function: core/FunctionDef slots: (Vec ValueSlotV0) target: core/NativeId]
-  -> String
+  [function: core/FunctionDef
+   slots: (Vec ValueSlotV0)
+   target: core/NativeId] -> String
   (let [position: Int
         (parameter-index (core/functiondef-parameters function) target)]
     (if (>= position 0)
@@ -277,7 +300,9 @@
       (str "native_s_" (slot-index slots target)))))
 
 (defn emit-declarations
-  [types: (Vec core/TypeDef) module-index: Int slots: (Vec ValueSlotV0)] -> String
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   slots: (Vec ValueSlotV0)] -> String
   (loop [position: Int 0 result: String ""]
     (if (>= position (count slots))
       result
@@ -286,11 +311,15 @@
           (c17/c-type types module-index (valueslotv0-type-id (nth slots position)))
           " native_s_" position ";\n")))))
 
-(defn text-symbol [module-index: Int position: Int] -> String
+(defn text-symbol
+  [module-index: Int
+   position: Int] -> String
   (str (c17/module-prefix module-index) "_text_" position))
 
 (defn atom-expression
-  [module-index: Int pool: ConstantPoolV0 atom: core/NativeAtom] -> String
+  [module-index: Int
+   pool: ConstantPoolV0
+   atom: core/NativeAtom] -> String
   (cond
     (instance? native.core.BoolAtom atom)
     (if (core/boolatom-value atom) "true" "false")
@@ -317,7 +346,9 @@
     :else "=="))
 
 (defn emit-text-constant
-  [module-index: Int position: Int value: String] -> String
+  [module-index: Int
+   position: Int
+   value: String] -> String
   (let [symbol: String (text-symbol module-index position)
         literal: String (str "\"" (escape-c-text value) "\"")]
     (str "struct " symbol "_blob { uint64_t length; uint8_t bytes[sizeof "
@@ -327,7 +358,9 @@
       "_Static_assert(offsetof(struct " symbol "_blob, bytes) == 8,"
       " \"text blob is length-prefixed\");\n")))
 
-(defn emit-text-pool [module-index: Int pool: ConstantPoolV0] -> String
+(defn emit-text-pool
+  [module-index: Int
+   pool: ConstantPoolV0] -> String
   (let [texts: (Vec String) (constantpoolv0-texts pool)
         keywords: (Vec String) (constantpoolv0-keywords pool)]
     (str
@@ -350,7 +383,9 @@
       (if (and (= 0 (count texts)) (= 0 (count keywords))) "" "\n"))))
 
 (defn field-position
-  [layouts: (Vec core/LayoutDef) owner: core/NativeId field: core/NativeId] -> Int
+  [layouts: (Vec core/LayoutDef)
+   owner: core/NativeId
+   field: core/NativeId] -> Int
   (let [layout: (U core/LayoutDef Nil) (c17/layout-for-type layouts owner)]
     (if (nil? layout)
       -1
@@ -364,8 +399,9 @@
               (recur (+ position 1)))))))))
 
 (defn slot-type
-  [function: core/FunctionDef slots: (Vec ValueSlotV0) target: core/NativeId]
-  -> core/NativeId
+  [function: core/FunctionDef
+   slots: (Vec ValueSlotV0)
+   target: core/NativeId] -> core/NativeId
   (let [position: Int
         (parameter-index (core/functiondef-parameters function) target)]
     (if (>= position 0)
@@ -376,7 +412,8 @@
           (valueslotv0-type-id (nth slots slot)))))))
 
 (defn function-index-of
-  [functions: (Vec core/FunctionDef) target: core/NativeId] -> Int
+  [functions: (Vec core/FunctionDef)
+   target: core/NativeId] -> Int
   (loop [position: Int 0]
     (if (>= position (count functions))
       -1
@@ -385,7 +422,9 @@
         (recur (+ position 1))))))
 
 (defn variant-tag
-  [layouts: (Vec core/LayoutDef) owner: core/NativeId variant: core/NativeId] -> Int
+  [layouts: (Vec core/LayoutDef)
+   owner: core/NativeId
+   variant: core/NativeId] -> Int
   (let [layout: (U core/LayoutDef Nil) (c17/layout-for-type layouts owner)]
     (if (nil? layout)
       -1
@@ -401,7 +440,8 @@
               (recur (+ position 1)))))))))
 
 (defn type-with-id
-  [types: (Vec core/TypeDef) target: core/NativeId] -> (U core/TypeDef Nil)
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> (U core/TypeDef Nil)
   (loop [position: Int 0]
     (if (>= position (count types))
       nil
@@ -412,7 +452,8 @@
 ;; A record inside a closed union is a reference, so a field read through it
 ;; loads via the pointer and takes its layout from the reference target.
 (defn dereferenced-type
-  [types: (Vec core/TypeDef) target: core/NativeId] -> (U core/NativeId Nil)
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> (U core/NativeId Nil)
   (let [definition: (U core/TypeDef Nil) (type-with-id types target)]
     (if (nil? definition)
       nil
@@ -445,7 +486,8 @@
           arena-id)))))
 
 (defn caller-arena-argument
-  [function: core/FunctionDef slots: (Vec ValueSlotV0)] -> String
+  [function: core/FunctionDef
+   slots: (Vec ValueSlotV0)] -> String
   (let [arena-id: (U core/NativeId Nil) (function-arena-id function)]
     (if (nil? arena-id)
       "arena"
@@ -455,8 +497,7 @@
   [functions: (Vec core/FunctionDef)
    function: core/FunctionDef
    slots: (Vec ValueSlotV0)
-   target: core/NativeId]
-  -> String
+   target: core/NativeId] -> String
   (let [position: Int (function-index-of functions target)]
     (if (< position 0)
       ""
@@ -475,8 +516,9 @@
           :else (str arena ", " capability))))))
 
 (defn emit-arguments
-  [function: core/FunctionDef slots: (Vec ValueSlotV0) arguments: (Vec core/NativeId)]
-  -> String
+  [function: core/FunctionDef
+   slots: (Vec ValueSlotV0)
+   arguments: (Vec core/NativeId)] -> String
   (loop [position: Int 0 result: String ""]
     (if (>= position (count arguments))
       result
@@ -514,8 +556,7 @@
    slots: (Vec ValueSlotV0)
    target: String
    result: core/SsaValueV0
-   operation: core/CheckedOperationV0]
-  -> String
+   operation: core/CheckedOperationV0] -> String
   (let [outcome: core/NativeId (core/ssavaluev0-type-id result)
         ok-tag: Int (variant-tag layouts outcome (core/checked-ok-variant-id))
         overflow-tag: Int
@@ -541,8 +582,7 @@
    function: core/FunctionDef
    slots: (Vec ValueSlotV0)
    target: core/NativeId
-   arguments: (Vec core/NativeId)]
-  -> String
+   arguments: (Vec core/NativeId)] -> String
   (let [prefix: String
         (callee-resource-arguments functions function slots target)
         supplied: String (emit-arguments function slots arguments)]
@@ -552,21 +592,24 @@
       :else (str prefix ", " supplied))))
 
 (defn vector-layout-of
-  [layouts: (Vec core/LayoutDef) vector-type: core/NativeId] -> core/LayoutShapeV0
+  [layouts: (Vec core/LayoutDef)
+   vector-type: core/NativeId] -> core/LayoutShapeV0
   (let [layout: (U core/LayoutDef Nil) (c17/layout-for-type layouts vector-type)]
     (if (nil? layout)
       (core/->VectorShapeV0 vector-type 0)
       (core/layoutdef-shape layout))))
 
 (defn vector-stride
-  [layouts: (Vec core/LayoutDef) vector-type: core/NativeId] -> Int
+  [layouts: (Vec core/LayoutDef)
+   vector-type: core/NativeId] -> Int
   (let [shape: core/LayoutShapeV0 (vector-layout-of layouts vector-type)]
     (if (instance? native.core.VectorShapeV0 shape)
       (core/vectorshapev0-stride-bytes shape)
       0)))
 
 (defn vector-element-alignment
-  [layouts: (Vec core/LayoutDef) vector-type: core/NativeId] -> Int
+  [layouts: (Vec core/LayoutDef)
+   vector-type: core/NativeId] -> Int
   (let [shape: core/LayoutShapeV0 (vector-layout-of layouts vector-type)]
     (if (not (instance? native.core.VectorShapeV0 shape))
       1
@@ -574,7 +617,9 @@
             (c17/layout-for-type layouts (core/vectorshapev0-element-type shape))]
         (if (nil? element) 1 (core/layoutdef-align-bytes element))))))
 
-(defn parts-symbol [slots: (Vec ValueSlotV0) result-id: core/NativeId] -> String
+(defn parts-symbol
+  [slots: (Vec ValueSlotV0)
+   result-id: core/NativeId] -> String
   (str "native_parts_" (slot-index slots result-id)))
 
 (defn text-operand-expression
@@ -582,8 +627,7 @@
    function: core/FunctionDef
    slots: (Vec ValueSlotV0)
    arena: String
-   operand: core/NativeId]
-  -> String
+   operand: core/NativeId] -> String
   (let [operand-type: core/NativeId (slot-type function slots operand)
         definition: (U core/TypeDef Nil)
         (c17/type-def-for types operand-type)
@@ -601,8 +645,7 @@
    pool: ConstantPoolV0
    function: core/FunctionDef
    slots: (Vec ValueSlotV0)
-   instruction: core/Instruction]
-  -> String
+   instruction: core/Instruction] -> String
   (let [result: core/SsaValueV0 (get instruction :result)
         target: String (value-name function slots (core/ssavaluev0-id result))]
     (cond
@@ -805,7 +848,9 @@
           (core/callinstruction-arguments instruction)) ");\n"))))
 
 (defn variant-tag
-  [layouts: (Vec core/LayoutDef) owner: core/NativeId variant: core/NativeId] -> Int
+  [layouts: (Vec core/LayoutDef)
+   owner: core/NativeId
+   variant: core/NativeId] -> Int
   (let [layout: (U core/LayoutDef Nil) (c17/layout-for-type layouts owner)]
     (if (nil? layout)
       -1
@@ -825,8 +870,7 @@
    function-index: Int
    slots: (Vec ValueSlotV0)
    target-id: core/NativeId
-   arguments: (Vec core/NativeId)]
-  -> String
+   arguments: (Vec core/NativeId)] -> String
   (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)
         position: Int (block-index blocks target-id)
         target-block: core/BasicBlock (nth blocks position)
@@ -847,8 +891,7 @@
    function: core/FunctionDef
    function-index: Int
    slots: (Vec ValueSlotV0)
-   terminator: core/Terminator]
-  -> String
+   terminator: core/Terminator] -> String
   (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
     (cond
       (instance? native.core.ReturnTerminator terminator)
@@ -912,7 +955,8 @@
     :else []))
 
 (defn block-targeted?
-  [function: core/FunctionDef target: core/NativeId] -> Bool
+  [function: core/FunctionDef
+   target: core/NativeId] -> Bool
   (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
     (loop [position: Int 0]
       (if (>= position (count blocks))
@@ -939,8 +983,7 @@
    function: core/FunctionDef
    function-index: Int
    slots: (Vec ValueSlotV0)
-   position: Int]
-  -> String
+   position: Int] -> String
   (let [block: core/BasicBlock (nth (core/functiondef-blocks function) position)
         label: String
         (if (block-targeted? function (core/basicblock-id block))
@@ -965,8 +1008,7 @@
    module-index: Int
    pool: ConstantPoolV0
    function-index: Int
-   function: core/FunctionDef]
-  -> String
+   function: core/FunctionDef] -> String
   (let [slots: (Vec ValueSlotV0) (function-value-slots function)
         blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
     (str (c17/function-return-type types module-index function) " "
@@ -990,8 +1032,7 @@
    layouts: (Vec core/LayoutDef)
    functions: (Vec core/FunctionDef)
    module-index: Int
-   pool: ConstantPoolV0]
-  -> String
+   pool: ConstantPoolV0] -> String
   (loop [position: Int 0 result: String ""]
     (if (>= position (count functions))
       result
@@ -1006,15 +1047,15 @@
    functions: (Vec core/FunctionDef)
    module-index: Int
    pool: ConstantPoolV0
-   header-name: String]
-  -> String
+   header-name: String] -> String
   (str "/* Generated by native.body-c17; do not edit. */\n"
     "#include \"" header-name "\"\n\n"
     (emit-text-pool module-index pool)
     (emit-functions types layouts functions module-index pool)))
 
 (defn materialize-world
-  [world: core/NativeWorld module-index: Int] -> BodyMaterializationV0
+  [world: core/NativeWorld
+   module-index: Int] -> BodyMaterializationV0
   (let [validation: core/ValidationReport (core/validate-world world)]
     (cond
       (< module-index 0)

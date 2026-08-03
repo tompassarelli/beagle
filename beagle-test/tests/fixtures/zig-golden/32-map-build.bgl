@@ -10,7 +10,9 @@
 
 ;; build a map by folding assoc over a vector (the los frontmatter pattern)
 (defn tally [ks: (Vec String)] -> (Map String Int)
-  (reduce (fn [m: (Map String Int) k: String] -> (Map String Int)
+  (reduce (fn
+            [m: (Map String Int)
+             k: String] -> (Map String Int)
             (assoc m k 1))
           {}
           ks))

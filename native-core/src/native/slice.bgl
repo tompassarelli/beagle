@@ -12,15 +12,23 @@
 ;; One row of the canonical source-fact projection: subject and object name
 ;; source nodes by ordinal; kind is "t" when the object is a literal text.
 (defrecord SliceFactV0
-  [subject: String predicate: String kind: String object: String])
+  [subject: String
+   predicate: String
+   kind: String
+   object: String])
 
 (defrecord SliceWorldV0
-  [types: (Vec core/TypeDef) layouts: (Vec core/LayoutDef)])
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)])
 
-(defn char-at [text: String index: Int] -> String
+(defn char-at
+  [text: String
+   index: Int] -> String
   (subs text index (+ index 1)))
 
-(defn split-on [text: String separator: String] -> (Vec String)
+(defn split-on
+  [text: String
+   separator: String] -> (Vec String)
   (loop [index: Int 0 start: Int 0 parts: (Vec String) []]
     (if (>= index (count text))
       (conj parts (subs text start index))
@@ -42,13 +50,17 @@
         (recur (+ index 1)
           (vec (concat rows (parse-row (nth lines index)))))))))
 
-(defn string-in? [values: (Vec String) target: String] -> Bool
+(defn string-in?
+  [values: (Vec String)
+   target: String] -> Bool
   (loop [index: Int 0]
     (if (>= index (count values))
       false
       (if (= target (nth values index)) true (recur (+ index 1))))))
 
-(defn conj-unique [values: (Vec String) candidate: String] -> (Vec String)
+(defn conj-unique
+  [values: (Vec String)
+   candidate: String] -> (Vec String)
   (if (string-in? values candidate) values (conj values candidate)))
 
 (defn node-names [rows: (Vec SliceFactV0)] -> (Vec String)
@@ -74,7 +86,9 @@
             (conj-unique with-predicate (slicefactv0-object row))
             with-predicate))))))
 
-(defn slice-id [domain: String parts: (Vec String)] -> core/NativeId
+(defn slice-id
+  [domain: String
+   parts: (Vec String)] -> core/NativeId
   (core/canonical-id (str "native-slice-v0/" domain) parts))
 
 (defn node-id [name: String] -> core/NativeId (slice-id "node" [name]))
@@ -114,8 +128,9 @@
 ;; The projection reserves node name "0" for the module root so the sealed
 ;; source identity never depends on how many forms the module happens to have.
 (defn source-world
-  [rows: (Vec SliceFactV0) module-name: String relative-path: String]
-  -> worlds/SourceProgramWorldV0
+  [rows: (Vec SliceFactV0)
+   module-name: String
+   relative-path: String] -> worlds/SourceProgramWorldV0
   (let [root: core/NativeId (node-id "0")
         nodes: (Vec worlds/TermNodeV0)
         (vec (concat (marker-nodes (node-names rows))
@@ -144,7 +159,9 @@
 (defn record-type? [definition: core/TypeDef] -> Bool
   (instance? native.core.RecordType (core/typedef-shape definition)))
 
-(defn find-type [types: (Vec core/TypeDef) target: core/NativeId] -> (U core/TypeDef Nil)
+(defn find-type
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> (U core/TypeDef Nil)
   (loop [index: Int 0]
     (if (>= index (count types))
       nil
@@ -153,11 +170,14 @@
           definition
           (recur (+ index 1)))))))
 
-(defn type-id-in? [ids: (Vec core/NativeId) target: core/NativeId] -> Bool
+(defn type-id-in?
+  [ids: (Vec core/NativeId)
+   target: core/NativeId] -> Bool
   (core/id-in? ids target))
 
 (defn supported-record-ids
-  [types: (Vec core/TypeDef) layouts: (Vec core/LayoutDef)] -> (Vec core/NativeId)
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)] -> (Vec core/NativeId)
   (loop [index: Int 0 ids: (Vec core/NativeId) []]
     (if (>= index (count types))
       ids
@@ -171,8 +191,9 @@
 ;; A record survives only when every field type also survives, so the kept set
 ;; shrinks to a fixpoint before the scalars it reaches are pulled in.
 (defn closed-record-ids
-  [types: (Vec core/TypeDef) layouts: (Vec core/LayoutDef) candidates: (Vec core/NativeId)]
-  -> (Vec core/NativeId)
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)
+   candidates: (Vec core/NativeId)] -> (Vec core/NativeId)
   (let [next: (Vec core/NativeId)
         (filterv
           (fn [candidate: core/NativeId] -> Bool
@@ -194,7 +215,8 @@
       (closed-record-ids types layouts next))))
 
 (defn scalar-ids-for
-  [types: (Vec core/TypeDef) records: (Vec core/NativeId)] -> (Vec core/NativeId)
+  [types: (Vec core/TypeDef)
+   records: (Vec core/NativeId)] -> (Vec core/NativeId)
   (loop [index: Int 0 ids: (Vec core/NativeId) []]
     (if (>= index (count records))
       ids
@@ -216,7 +238,8 @@
 ;; world: it keeps the source record ABI and the scalars those records reach,
 ;; and drops every shape the restricted materializer cannot spell.
 (defn c17-projection
-  [types: (Vec core/TypeDef) layouts: (Vec core/LayoutDef)] -> SliceWorldV0
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)] -> SliceWorldV0
   (let [records: (Vec core/NativeId)
         (closed-record-ids types layouts (supported-record-ids types layouts))
         scalars: (Vec core/NativeId) (scalar-ids-for types records)
@@ -234,7 +257,8 @@
     (->SliceWorldV0 kept-types kept-layouts)))
 
 (defn projected-world
-  [world: core/NativeWorld projection: SliceWorldV0] -> core/NativeWorld
+  [world: core/NativeWorld
+   projection: SliceWorldV0] -> core/NativeWorld
   (core/->NativeWorld
     (core/nativeworld-id world)
     (core/nativeworld-parent world)
@@ -256,7 +280,8 @@
   (SliceRefusedV0 [detail: String]))
 
 (defn materialize
-  [world: core/NativeWorld module-index: Int] -> SliceMaterializationV0
+  [world: core/NativeWorld
+   module-index: Int] -> SliceMaterializationV0
   (let [validation: core/ValidationReport (core/validate-world world)]
     (cond
       (not (core/validationreport-passed validation))
@@ -285,7 +310,8 @@
    "legal-abi" "discharged-tokens" "bounded-effects"])
 
 (defn obligation-report
-  [label: String world: core/NativeWorld] -> String
+  [label: String
+   world: core/NativeWorld] -> String
   (let [verdicts: (Vec obligations/ObligationVerdictV0)
         (obligations/validate-native-world world)
         names: (Vec String) (obligation-names)]
@@ -313,14 +339,12 @@
       report
       (recur (+ index 1) (str report (pending-report (nth items index)))))))
 
-(defn native-sealed
-  [result: lower/NativeLoweringResultV0] -> worlds/SealedNativeWorldV0
+(defn native-sealed [result: lower/NativeLoweringResultV0] -> worlds/SealedNativeWorldV0
   (if (instance? native.lower.NativeLoweringCompleteV0 result)
     (lower/nativeloweringcompletev0-sealed result)
     (lower/nativeloweringpendingv0-sealed result)))
 
-(defn native-pending
-  [result: lower/NativeLoweringResultV0] -> (Vec core/ReceiptObligationV0)
+(defn native-pending [result: lower/NativeLoweringResultV0] -> (Vec core/ReceiptObligationV0)
   (if (instance? native.lower.NativeLoweringPendingV0 result)
     (lower/nativeloweringpendingv0-obligations result)
     []))
@@ -332,8 +356,7 @@
    module-name: String
    relative-path: String
    artifacts-dir: String
-   compiler-commit: String]
-  -> String
+   compiler-commit: String] -> String
   (let [rows: (Vec SliceFactV0) (parse-facts (slurp facts-path))
         configuration: (Vec String) ["profile=3"]
         world: worlds/SourceProgramWorldV0

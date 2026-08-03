@@ -1,5 +1,9 @@
-(defrecord Product [(id: Int) (name: String)])
-(defrecord Customer [(id: Int) (email: String)])
+(defrecord Product
+  [(id: Int)
+   (name: String)])
+(defrecord Customer
+  [(id: Int)
+   (email: String)])
 
 (defn process-products [(products: (Vec Product))] -> Int
   (count products))

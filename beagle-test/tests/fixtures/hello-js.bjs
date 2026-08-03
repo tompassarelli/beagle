@@ -2,17 +2,24 @@
 (ns app.main)
 (define-mode strict)
 
-(defrecord Product [(name: String) (price: Float) (in-stock: Bool)])
+(defrecord Product
+  [(name: String)
+   (price: Float)
+   (in-stock: Bool)])
 
 (def tax-rate: Float 0.08)
 
-(defn make-product [(name: String) (price: Float)] -> Product
+(defn make-product
+  [(name: String)
+   (price: Float)] -> Product
   (->Product name price true))
 
 (defn product-total [(p: Product)] -> Float
   (+ (product-price p) (* (product-price p) tax-rate)))
 
-(defn discount [(p: Product) (pct: Float)] -> Product
+(defn discount
+  [(p: Product)
+   (pct: Float)] -> Product
   (with p [:price (- (product-price p) (* (product-price p) pct))]))
 
 (defn cheap? [(p: Product)] -> Bool
@@ -37,7 +44,9 @@
     (< (product-price p) 50) "mid-range"
     :else "premium"))
 
-(defn safe-lookup [(products: (Vec Product)) (idx: Int)] -> String
+(defn safe-lookup
+  [(products: (Vec Product))
+   (idx: Int)] -> String
   (let [p (nth products idx nil)]
     (if (nil? p)
       "not found"
@@ -53,7 +62,9 @@
   (let [p (js/await (fetch-product id))]
     (classify p)))
 
-(defn load-two [(a: Int) (b: Int)] -> (Promise (Vec String))
+(defn load-two
+  [(a: Int)
+   (b: Int)] -> (Promise (Vec String))
   (let [p1 (js/await (fetch-product a))
         p2 (js/await (fetch-product b))]
     [(product-name p1) (product-name p2)]))

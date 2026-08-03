@@ -45,13 +45,17 @@
 (def IDENT-BAD-CHARS: String "?!*+<>=/")
 (def FN-IDENT-BAD-CHARS: String "*+<>=/")
 
-(defn has-any-char? [s: String bad: String] -> Bool
+(defn has-any-char?
+  [s: String
+   bad: String] -> Bool
   (loop [i 0]
     (if (>= i (count s))
       false
       (if (str/includes? bad (subs s i (+ i 1))) true (recur (+ i 1))))))
 
-(defn drop-chars [s: String bad: String] -> String
+(defn drop-chars
+  [s: String
+   bad: String] -> String
   (loop [i 0 acc: String ""]
     (if (>= i (count s))
       acc
@@ -129,7 +133,9 @@
 
 (defn record? [name: String] -> Bool (some? (record-fields name)))
 
-(defn field-ann [rec: String field: String] -> Any
+(defn field-ann
+  [rec: String
+   field: String] -> Any
   (let [fields (record-fields rec)]
     (loop [i 0]
       (if (>= i (count fields))
@@ -229,7 +235,9 @@
 
 ;; --- constructors ------------------------------------------------------------------
 
-(defn emit-ctor [rec: String args: Any] -> String
+(defn emit-ctor
+  [rec: String
+   args: Any] -> String
   (let [fields (record-fields rec)]
     (if (nil? fields)
       (unsupported! (str "constructor for unknown record " rec))
@@ -342,7 +350,9 @@
 
 ;; --- referenced names (emit-zig.rkt refs-of, for the unused-param discards) ---------
 
-(defn refs-of [e: Any acc: (Vec String)] -> (Vec String)
+(defn refs-of
+  [e: Any
+   acc: (Vec String)] -> (Vec String)
   (let [node (get e "node")]
     (cond
       (= node "ref") (conj acc (get e "name"))
@@ -477,7 +487,9 @@
 
 (def failures: Any (atom []))
 
-(defn expect! [label: String result: Bool] -> Nil
+(defn expect!
+  [label: String
+   result: Bool] -> Nil
   (if result
     (do (swap! passes conj true) nil)
     (do (swap! failures conj label) nil))

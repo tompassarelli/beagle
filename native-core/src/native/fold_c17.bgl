@@ -8,7 +8,10 @@
 (require native.core :as core)
 
 (defrecord C17Artifact
-  [header-name: String header-text: String source-name: String source-text: String])
+  [header-name: String
+   header-text: String
+   source-name: String
+   source-text: String])
 
 (defunion C17Materialization
   (C17Success [artifact: C17Artifact])
@@ -20,10 +23,14 @@
       result
       (recur (+ index 1) (str result (nth lines index) "\n")))))
 
-(defn id-before? [left: core/NativeId right: core/NativeId] -> Bool
+(defn id-before?
+  [left: core/NativeId
+   right: core/NativeId] -> Bool
   (< (compare (core/nativeid-value left) (core/nativeid-value right)) 0))
 
-(defn insert-type [item: core/TypeDef sorted: (Vec core/TypeDef)] -> (Vec core/TypeDef)
+(defn insert-type
+  [item: core/TypeDef
+   sorted: (Vec core/TypeDef)] -> (Vec core/TypeDef)
   (loop [index: Int 0 inserted: Bool false result: (Vec core/TypeDef) []]
     (if (>= index (count sorted))
       (if inserted result (conj result item))
@@ -38,7 +45,9 @@
       result
       (recur (+ index 1) (insert-type (nth types index) result)))))
 
-(defn insert-function [item: core/FunctionDef sorted: (Vec core/FunctionDef)] -> (Vec core/FunctionDef)
+(defn insert-function
+  [item: core/FunctionDef
+   sorted: (Vec core/FunctionDef)] -> (Vec core/FunctionDef)
   (loop [index: Int 0 inserted: Bool false result: (Vec core/FunctionDef) []]
     (if (>= index (count sorted))
       (if inserted result (conj result item))
@@ -54,7 +63,8 @@
       (recur (+ index 1) (insert-function (nth functions index) result)))))
 
 (defn insert-field-layout
-  [item: core/FieldLayoutV0 sorted: (Vec core/FieldLayoutV0)] -> (Vec core/FieldLayoutV0)
+  [item: core/FieldLayoutV0
+   sorted: (Vec core/FieldLayoutV0)] -> (Vec core/FieldLayoutV0)
   (loop [index: Int 0 inserted: Bool false result: (Vec core/FieldLayoutV0) []]
     (if (>= index (count sorted))
       (if inserted result (conj result item))
@@ -72,8 +82,8 @@
       (recur (+ index 1) (insert-field-layout (nth fields index) result)))))
 
 (defn insert-variant
-  [item: core/UnionVariantLayoutV0 sorted: (Vec core/UnionVariantLayoutV0)]
-  -> (Vec core/UnionVariantLayoutV0)
+  [item: core/UnionVariantLayoutV0
+   sorted: (Vec core/UnionVariantLayoutV0)] -> (Vec core/UnionVariantLayoutV0)
   (loop [index: Int 0 inserted: Bool false result: (Vec core/UnionVariantLayoutV0) []]
     (if (>= index (count sorted))
       (if inserted result (conj result item))
@@ -84,14 +94,15 @@
           (recur (+ index 1) true (conj (conj result item) current))
           (recur (+ index 1) inserted (conj result current)))))))
 
-(defn ordered-variants
-  [variants: (Vec core/UnionVariantLayoutV0)] -> (Vec core/UnionVariantLayoutV0)
+(defn ordered-variants [variants: (Vec core/UnionVariantLayoutV0)] -> (Vec core/UnionVariantLayoutV0)
   (loop [index: Int 0 result: (Vec core/UnionVariantLayoutV0) []]
     (if (>= index (count variants))
       result
       (recur (+ index 1) (insert-variant (nth variants index) result)))))
 
-(defn type-index [types: (Vec core/TypeDef) target: core/NativeId] -> Int
+(defn type-index
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> Int
   (loop [index: Int 0]
     (if (>= index (count types))
       -1
@@ -99,11 +110,14 @@
         index
         (recur (+ index 1))))))
 
-(defn type-emitted? [types: (Vec core/TypeDef) target: core/NativeId] -> Bool
+(defn type-emitted?
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> Bool
   (>= (type-index types target) 0))
 
 (defn type-def-for
-  [types: (Vec core/TypeDef) target: core/NativeId] -> (U core/TypeDef Nil)
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> (U core/TypeDef Nil)
   (let [index: Int (type-index types target)]
     (if (< index 0) nil (nth types index))))
 
@@ -113,7 +127,8 @@
       (instance? native.core.TextKind (core/atomtype-kind shape)))))
 
 (defn layout-for-type
-  [layouts: (Vec core/LayoutDef) target: core/NativeId] -> (U core/LayoutDef Nil)
+  [layouts: (Vec core/LayoutDef)
+   target: core/NativeId] -> (U core/LayoutDef Nil)
   (loop [index: Int 0]
     (if (>= index (count layouts))
       nil
@@ -144,14 +159,12 @@
     (ordered-field-layouts (core/recordshapev0-fields (core/layoutdef-shape layout)))
     []))
 
-(defn union-layout-variants
-  [layout: core/LayoutDef] -> (Vec core/UnionVariantLayoutV0)
+(defn union-layout-variants [layout: core/LayoutDef] -> (Vec core/UnionVariantLayoutV0)
   (if (layout-union? layout)
     (ordered-variants (core/unionshapev0-variants (core/layoutdef-shape layout)))
     []))
 
-(defn variant-payloads
-  [variants: (Vec core/UnionVariantLayoutV0)] -> (Vec core/NativeId)
+(defn variant-payloads [variants: (Vec core/UnionVariantLayoutV0)] -> (Vec core/NativeId)
   (loop [index: Int 0 payloads: (Vec core/NativeId) []]
     (if (>= index (count variants))
       payloads
@@ -201,7 +214,8 @@
     :else []))
 
 (defn type-dependencies
-  [layouts: (Vec core/LayoutDef) type-def: core/TypeDef] -> (Vec core/NativeId)
+  [layouts: (Vec core/LayoutDef)
+   type-def: core/TypeDef] -> (Vec core/NativeId)
   (let [layout: (U core/LayoutDef Nil)
         (layout-for-type layouts (core/typedef-id type-def))]
     (if (nil? layout) [] (layout-dependencies layout))))
@@ -210,8 +224,7 @@
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
    placed: (Vec core/NativeId)
-   type-def: core/TypeDef]
-  -> Bool
+   type-def: core/TypeDef] -> Bool
   (every?
     (fn [target: core/NativeId] -> Bool
       (or (not (type-emitted? types target)) (core/id-in? placed target)))
@@ -221,8 +234,7 @@
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
    placed: (Vec core/NativeId)
-   remaining: (Vec core/TypeDef)]
-  -> Int
+   remaining: (Vec core/TypeDef)] -> Int
   (loop [index: Int 0]
     (if (>= index (count remaining))
       -1
@@ -230,7 +242,9 @@
         index
         (recur (+ index 1))))))
 
-(defn drop-index [items: (Vec core/TypeDef) position: Int] -> (Vec core/TypeDef)
+(defn drop-index
+  [items: (Vec core/TypeDef)
+   position: Int] -> (Vec core/TypeDef)
   (loop [index: Int 0 result: (Vec core/TypeDef) []]
     (if (>= index (count items))
       result
@@ -241,7 +255,8 @@
 ;; dependencies are already placed. A cycle stops progress and is reported
 ;; rather than emitted as forward-referencing C.
 (defn dependency-ordered-types
-  [types: (Vec core/TypeDef) layouts: (Vec core/LayoutDef)] -> (Vec core/TypeDef)
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)] -> (Vec core/TypeDef)
   (let [identity-order: (Vec core/TypeDef) (id-ordered-types types)]
     (loop [remaining: (Vec core/TypeDef) identity-order
            placed: (Vec core/NativeId) []
@@ -256,7 +271,9 @@
                 (conj placed (core/typedef-id chosen))
                 (conj result chosen)))))))))
 
-(defn types-orderable? [types: (Vec core/TypeDef) layouts: (Vec core/LayoutDef)] -> Bool
+(defn types-orderable?
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)] -> Bool
   (let [identity-order: (Vec core/TypeDef) (id-ordered-types types)]
     (loop [remaining: (Vec core/TypeDef) identity-order
            placed: (Vec core/NativeId) []]
@@ -269,7 +286,9 @@
               (conj placed (core/typedef-id (nth remaining position))))))))))
 
 (defn type-supported?
-  [type-def: core/TypeDef types: (Vec core/TypeDef) layouts: (Vec core/LayoutDef)] -> Bool
+  [type-def: core/TypeDef
+   types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)] -> Bool
   (let [shape: core/TypeShape (core/typedef-shape type-def)
         layout-value: (U core/LayoutDef Nil)
         (layout-for-type layouts (core/typedef-id type-def))]
@@ -346,23 +365,30 @@
 (defn module-prefix [module-index: Int] -> String
   (str "native_m" module-index))
 
-(defn type-name [module-index: Int type-index-value: Int] -> String
+(defn type-name
+  [module-index: Int
+   type-index-value: Int] -> String
   (str (module-prefix module-index) "_type_" type-index-value))
 
 (defn c-type
-  [types: (Vec core/TypeDef) module-index: Int target: core/NativeId] -> String
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   target: core/NativeId] -> String
   (let [index: Int (type-index types target)]
     (if (< index 0) "void" (type-name module-index index))))
 
 (defn size-align-assertions
-  [type-name-value: String layout: core/LayoutDef] -> (Vec String)
+  [type-name-value: String
+   layout: core/LayoutDef] -> (Vec String)
   [(str "_Static_assert(sizeof(" type-name-value ") == "
      (core/layoutdef-size-bytes layout) ", \"layout size\");")
    (str "_Static_assert(_Alignof(" type-name-value ") == "
      (core/layoutdef-align-bytes layout) ", \"layout alignment\");")])
 
 (defn emit-layout-assertions
-  [type-name-value: String layout: core/LayoutDef fields: (Vec core/FieldLayoutV0)] -> String
+  [type-name-value: String
+   layout: core/LayoutDef
+   fields: (Vec core/FieldLayoutV0)] -> String
   (loop [index: Int 0 lines: (Vec String) (size-align-assertions type-name-value layout)]
     (if (>= index (count fields))
       (join-lines lines)
@@ -372,7 +398,9 @@
             (str "_Static_assert(offsetof(" type-name-value ", field_" index ") == "
               (core/fieldlayoutv0-offset-bytes field) ", \"field offset\");")))))))
 
-(defn emit-atom-type [type-name-value: String layout: core/LayoutDef] -> String
+(defn emit-atom-type
+  [type-name-value: String
+   layout: core/LayoutDef] -> String
   (let [backing: String
         (if (layout-scalar? layout)
           (scalar-backing (core/scalarshapev0-representation (core/layoutdef-shape layout)))
@@ -380,14 +408,19 @@
     (str "typedef " backing " " type-name-value ";\n"
       (join-lines (size-align-assertions type-name-value layout)))))
 
-(defn emit-reference-type [type-name-value: String layout: core/LayoutDef] -> String
+(defn emit-reference-type
+  [type-name-value: String
+   layout: core/LayoutDef] -> String
   (str "typedef void *" type-name-value ";\n"
     (join-lines (size-align-assertions type-name-value layout))))
 
 ;; A vector value is a reference to a shim-owned header, so the element type
 ;; rides the layout, never the C type; the reference may not outlive its region.
 (defn emit-vector-type
-  [types: (Vec core/TypeDef) module-index: Int type-name-value: String layout: core/LayoutDef] -> String
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   type-name-value: String
+   layout: core/LayoutDef] -> String
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)
         element: String (c-type types module-index (core/vectorshapev0-element-type shape))]
     (str "/* vector of " element ", stride " (core/vectorshapev0-stride-bytes shape) " */\n"
@@ -395,7 +428,9 @@
       (join-lines (size-align-assertions type-name-value layout)))))
 
 (defn emit-record-fields
-  [types: (Vec core/TypeDef) module-index: Int fields: (Vec core/FieldLayoutV0)] -> String
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   fields: (Vec core/FieldLayoutV0)] -> String
   (loop [index: Int 0 lines: (Vec String) []]
     (if (>= index (count fields))
       (join-lines lines)
@@ -406,7 +441,10 @@
               " field_" index ";")))))))
 
 (defn emit-record-type
-  [types: (Vec core/TypeDef) module-index: Int type-name-value: String layout: core/LayoutDef] -> String
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   type-name-value: String
+   layout: core/LayoutDef] -> String
   (let [fields: (Vec core/FieldLayoutV0) (record-layout-fields layout)]
     (str "typedef struct " type-name-value " {\n"
       (emit-record-fields types module-index fields)
@@ -414,7 +452,9 @@
       (emit-layout-assertions type-name-value layout fields))))
 
 (defn emit-union-members
-  [types: (Vec core/TypeDef) module-index: Int variants: (Vec core/UnionVariantLayoutV0)] -> String
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   variants: (Vec core/UnionVariantLayoutV0)] -> String
   (loop [index: Int 0 lines: (Vec String) []]
     (if (>= index (count variants))
       (join-lines lines)
@@ -439,7 +479,10 @@
 ;; per-variant offset. They agree because each variant offset is align-up(tag,
 ;; variant alignment), so the widest variant's offset is the union's offset.
 (defn emit-union-type
-  [types: (Vec core/TypeDef) module-index: Int type-name-value: String layout: core/LayoutDef] -> String
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   type-name-value: String
+   layout: core/LayoutDef] -> String
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)
         variants: (Vec core/UnionVariantLayoutV0) (union-layout-variants layout)
         members: String (emit-union-members types module-index variants)
@@ -462,7 +505,10 @@
       (join-lines payload-assertion))))
 
 (defn emit-type
-  [types: (Vec core/TypeDef) layouts: (Vec core/LayoutDef) module-index: Int type-def: core/TypeDef] -> String
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)
+   module-index: Int
+   type-def: core/TypeDef] -> String
   (let [index: Int (type-index types (core/typedef-id type-def))
         type-name-value: String (type-name module-index index)
         layout-value: (U core/LayoutDef Nil)
@@ -480,14 +526,18 @@
         :else (emit-reference-type type-name-value layout-value)))))
 
 (defn emit-types
-  [types: (Vec core/TypeDef) layouts: (Vec core/LayoutDef) module-index: Int] -> String
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)
+   module-index: Int] -> String
   (loop [index: Int 0 result: String ""]
     (if (>= index (count types))
       result
       (recur (+ index 1)
         (str result (emit-type types layouts module-index (nth types index)) "\n")))))
 
-(defn parameter-index [parameters: (Vec core/Parameter) target: core/NativeId] -> Int
+(defn parameter-index
+  [parameters: (Vec core/Parameter)
+   target: core/NativeId] -> Int
   (loop [index: Int 0]
     (if (>= index (count parameters))
       -1
@@ -495,7 +545,9 @@
         index
         (recur (+ index 1))))))
 
-(defn instruction-index [instructions: (Vec core/Instruction) target: core/NativeId] -> Int
+(defn instruction-index
+  [instructions: (Vec core/Instruction)
+   target: core/NativeId] -> Int
   (loop [index: Int 0]
     (if (>= index (count instructions))
       -1
@@ -504,7 +556,9 @@
         (recur (+ index 1))))))
 
 (defn value-name
-  [function: core/FunctionDef block: core/BasicBlock target: core/NativeId] -> String
+  [function: core/FunctionDef
+   block: core/BasicBlock
+   target: core/NativeId] -> String
   (let [parameters: (Vec core/Parameter) (core/functiondef-parameters function)
         parameter-position: Int (parameter-index parameters target)]
     (if (>= parameter-position 0)
@@ -514,12 +568,16 @@
            (instruction-index (core/basicblock-instructions block) target))))))
 
 (defn function-return-type
-  [types: (Vec core/TypeDef) module-index: Int function: core/FunctionDef] -> String
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   function: core/FunctionDef] -> String
   (let [return-type: (U core/NativeId Nil) (core/functiondef-return-type function)]
     (if (nil? return-type) "void" (c-type types module-index return-type))))
 
 (defn emit-parameter-list
-  [types: (Vec core/TypeDef) module-index: Int function: core/FunctionDef] -> String
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   function: core/FunctionDef] -> String
   (let [parameters: (Vec core/Parameter) (core/functiondef-parameters function)
         arena: Bool (> (count (core/functiondef-regions function)) 0)
         capability: Bool (> (count (core/functiondef-capabilities function)) 0)
@@ -542,13 +600,18 @@
           (recur (+ index 1) (str result (if (= index 0) "" ", ") fragment)))))))
 
 (defn emit-function-prototype
-  [types: (Vec core/TypeDef) module-index: Int function-index: Int function: core/FunctionDef] -> String
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   function-index: Int
+   function: core/FunctionDef] -> String
   (str (function-return-type types module-index function) " "
     (module-prefix module-index) "_fn_" function-index
     "(" (emit-parameter-list types module-index function) ");"))
 
 (defn emit-function-prototypes
-  [types: (Vec core/TypeDef) module-index: Int functions: (Vec core/FunctionDef)] -> String
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   functions: (Vec core/FunctionDef)] -> String
   (loop [index: Int 0 lines: (Vec String) []]
     (if (>= index (count functions))
       (join-lines lines)
@@ -574,8 +637,7 @@
   [function: core/FunctionDef
    block: core/BasicBlock
    result-name: String
-   operation: core/CheckedOperationV0]
-  -> String
+   operation: core/CheckedOperationV0] -> String
   (if (instance? native.core.CheckedAddI64V0 operation)
     (let [left: String (value-name function block (core/checkedaddi64v0-left-id operation))
           right: String (value-name function block (core/checkedaddi64v0-right-id operation))]
@@ -592,8 +654,7 @@
   [function: core/FunctionDef
    block: core/BasicBlock
    instruction-position: Int
-   instruction: core/Instruction]
-  -> String
+   instruction: core/Instruction] -> String
   (let [result-name: String
         (str "native_v_"
           (+ (count (core/functiondef-parameters function)) instruction-position))]
@@ -616,7 +677,9 @@
 
       :else "")))
 
-(defn emit-instructions [function: core/FunctionDef block: core/BasicBlock] -> String
+(defn emit-instructions
+  [function: core/FunctionDef
+   block: core/BasicBlock] -> String
   (let [instructions: (Vec core/Instruction) (core/basicblock-instructions block)]
     (loop [index: Int 0 result: String ""]
       (if (>= index (count instructions))
@@ -625,7 +688,9 @@
           (str result (emit-instruction function block index (nth instructions index))))))))
 
 (defn emit-return
-  [function: core/FunctionDef block: core/BasicBlock terminator: core/Terminator] -> String
+  [function: core/FunctionDef
+   block: core/BasicBlock
+   terminator: core/Terminator] -> String
   (if (instance? native.core.ReturnTerminator terminator)
     (let [return-value: (U core/NativeId Nil) (core/returnterminator-value terminator)]
       (if (nil? return-value)
@@ -638,7 +703,10 @@
     (if (> (count (core/functiondef-capabilities function)) 0) "  (void)capability;\n" "")))
 
 (defn emit-function
-  [types: (Vec core/TypeDef) module-index: Int function-index: Int function: core/FunctionDef] -> String
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   function-index: Int
+   function: core/FunctionDef] -> String
   (let [block: core/BasicBlock (nth (core/functiondef-blocks function) 0)
         terminator: core/Terminator (nth (core/basicblock-terminators block) 0)]
     (str (function-return-type types module-index function) " "
@@ -650,7 +718,9 @@
       "}\n")))
 
 (defn emit-functions
-  [types: (Vec core/TypeDef) module-index: Int functions: (Vec core/FunctionDef)] -> String
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   functions: (Vec core/FunctionDef)] -> String
   (loop [index: Int 0 result: String ""]
     (if (>= index (count functions))
       result
@@ -661,8 +731,7 @@
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
    functions: (Vec core/FunctionDef)
-   module-index: Int]
-  -> String
+   module-index: Int] -> String
   (let [guard: String (str "NATIVE_MODULE_" module-index "_ABI_H")]
     (str "/* Generated by native.fold-c17; do not edit. */\n"
       "#ifndef " guard "\n#define " guard "\n\n"
@@ -675,14 +744,14 @@
   [functions: (Vec core/FunctionDef)
    types: (Vec core/TypeDef)
    module-index: Int
-   header-name: String]
-  -> String
+   header-name: String] -> String
   (str "/* Generated by native.fold-c17; do not edit. */\n"
     "#include \"" header-name "\"\n\n"
     (emit-functions types module-index functions)))
 
 (defn materialize-world
-  [world: core/NativeWorld module-index: Int] -> C17Materialization
+  [world: core/NativeWorld
+   module-index: Int] -> C17Materialization
   (let [validation: core/ValidationReport (core/validate-world world)]
     (cond
       (< module-index 0)

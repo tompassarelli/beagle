@@ -47,7 +47,9 @@
 ;; intern ANY literal -> a canonical Object id (equal literals share one id).
 ;; v stays Any: this is the type-general interner — the engine is sworn to accept
 ;; arbitrary EDN, so a closed union here would be both incomplete and self-defeating.
-(defn value! [ctx :- (Atom t/Store) v :- Any] :- Int
+(defn value!
+  [ctx :- (Atom t/Store)
+   v :- Any] :- Int
   (let [vi :- (Map Any Int) (let [s :- t/Store (deref ctx)] (:val-intern s))]
     (if (contains? vi v)
       (get vi v)
@@ -57,34 +59,51 @@
         (swap! ctx update :val-intern assoc v id)
         id))))
 
-(defn value-object? [ctx :- (Atom t/Store) id :- Int] :- Bool
+(defn value-object?
+  [ctx :- (Atom t/Store)
+   id :- Int] :- Bool
   (let [s :- t/Store (deref ctx)] (contains? (:values s) id)))
 ;; literal is the inverse of value! — returns the interned EDN literal (Any).
-(defn literal [ctx :- (Atom t/Store) id :- Int] :- Any
+(defn literal
+  [ctx :- (Atom t/Store)
+   id :- Int] :- Any
   (let [s :- t/Store (deref ctx)] (get (:values s) id)))
-(defn value-id [ctx :- (Atom t/Store) v :- Any] :- Int?
+(defn value-id
+  [ctx :- (Atom t/Store)
+   v :- Any] :- Int?
   (let [s :- t/Store (deref ctx)] (get (:val-intern s) v)))
 
 ;; --- transactions: drawn from the SAME id space, but NOT registered as objects
 ;; agent stays Any: a domain-agnostic actor token (the engine names no actor type).
 ;; A tx value is a (Map Keyword Any) (NOT a record) — assemble-dump (.clj) feeds the
 ;; same shape via load-store!, so the map is the honest cross-producer wire type.
-(defn begin-tx! [ctx :- (Atom t/Store) agent :- Any] :- Int
+(defn begin-tx!
+  [ctx :- (Atom t/Store)
+   agent :- Any] :- Int
   (let [tx (fresh-id! ctx)
         seq (:next-seq (swap! ctx update :next-seq inc))]
     (swap! ctx update :txs assoc tx {:seq seq :agent agent})
     tx))
 
-(defn tx-seq [ctx :- (Atom t/Store) tx :- Int] :- Int
+(defn tx-seq
+  [ctx :- (Atom t/Store)
+   tx :- Int] :- Int
   (let [s :- t/Store (deref ctx) m :- (U (Map Keyword Any) Nil) (get (:txs s) tx)]
     (if (some? m) (:seq m) 0)))
 
 ;; --- supersession is data-driven: register the predicate that triggers it ----
-(defn set-supersedes-pred! [ctx :- (Atom t/Store) pid :- Int] :- Any
+(defn set-supersedes-pred!
+  [ctx :- (Atom t/Store)
+   pid :- Int] :- Any
   (swap! ctx assoc :supersedes-pred pid))
 
 ;; --- facts (reified: each has its own Object id) ---------------------------
-(defn- index-fact! [ctx :- (Atom t/Store) cid :- Int l :- Int p :- Int r :- Int] :- Any
+(defn- index-fact!
+  [ctx :- (Atom t/Store)
+   cid :- Int
+   l :- Int
+   p :- Int
+   r :- Int] :- Any
   (swap! ctx update :idx-by-l update l (fn [o :- (Vec Int)] :- (Vec Int) (conj (or o []) cid)))
   (swap! ctx update :idx-by-p update p (fn [o :- (Vec Int)] :- (Vec Int) (conj (or o []) cid)))
   (swap! ctx update :idx-by-r update r (fn [o :- (Vec Int)] :- (Vec Int) (conj (or o []) cid)))
@@ -96,7 +115,12 @@
 ;; A fact value is a (Map Keyword Any) {:l :p :r} (NOT a record): l/p/r are Int
 ;; ids, but the value stays an open keyword-map so it is = to the map literal that
 ;; assemble-dump (.clj) feeds via load-store! and that store_test asserts against.
-(defn fact! [ctx :- (Atom t/Store) l :- Int p :- Int r :- Int tx :- Int] :- Int
+(defn fact!
+  [ctx :- (Atom t/Store)
+   l :- Int
+   p :- Int
+   r :- Int
+   tx :- Int] :- Int
   (let [cid (fresh-id! ctx)]
     (swap! ctx update :objects assoc cid true)
     (swap! ctx update :facts assoc cid {:l l :p p :r r})
@@ -106,28 +130,48 @@
       (swap! ctx update :superseded assoc r true))
     cid))
 
-(defn fact-of [ctx :- (Atom t/Store) cid :- Int] :- (U (Map Keyword Any) Nil)
+(defn fact-of
+  [ctx :- (Atom t/Store)
+   cid :- Int] :- (U (Map Keyword Any) Nil)
   (let [s :- t/Store (deref ctx)] (get (:facts s) cid)))
 
-(defn fact-tx [ctx :- (Atom t/Store) cid :- Int] :- Int?
+(defn fact-tx
+  [ctx :- (Atom t/Store)
+   cid :- Int] :- Int?
   (let [s :- t/Store (deref ctx)] (get (:tx-of s) cid)))
 
 ;; --- queries over the LIVE view (facts − superseded) -----------------------
-(defn live? [ctx :- (Atom t/Store) cid :- Int] :- Bool
+(defn live?
+  [ctx :- (Atom t/Store)
+   cid :- Int] :- Bool
   (let [s :- t/Store (deref ctx)] (not (contains? (:superseded s) cid))))
 
-(defn- live-only [ctx :- (Atom t/Store) cids :- (Vec Int)] :- (Vec Int)
+(defn- live-only
+  [ctx :- (Atom t/Store)
+   cids :- (Vec Int)] :- (Vec Int)
   (filterv (fn [c :- Int] :- Bool (live? ctx c)) cids))
 
-(defn by-l [ctx :- (Atom t/Store) l :- Int] :- (Vec Int)
+(defn by-l
+  [ctx :- (Atom t/Store)
+   l :- Int] :- (Vec Int)
   (live-only ctx (let [s :- t/Store (deref ctx)] (get (:idx-by-l s) l []))))
-(defn by-p [ctx :- (Atom t/Store) p :- Int] :- (Vec Int)
+(defn by-p
+  [ctx :- (Atom t/Store)
+   p :- Int] :- (Vec Int)
   (live-only ctx (let [s :- t/Store (deref ctx)] (get (:idx-by-p s) p []))))
-(defn by-r [ctx :- (Atom t/Store) r :- Int] :- (Vec Int)
+(defn by-r
+  [ctx :- (Atom t/Store)
+   r :- Int] :- (Vec Int)
   (live-only ctx (let [s :- t/Store (deref ctx)] (get (:idx-by-r s) r []))))
-(defn by-lp [ctx :- (Atom t/Store) l :- Int p :- Int] :- (Vec Int)
+(defn by-lp
+  [ctx :- (Atom t/Store)
+   l :- Int
+   p :- Int] :- (Vec Int)
   (live-only ctx (let [s :- t/Store (deref ctx)] (get (:idx-by-lp s) [l p] []))))
-(defn by-pr [ctx :- (Atom t/Store) p :- Int r :- Int] :- (Vec Int)
+(defn by-pr
+  [ctx :- (Atom t/Store)
+   p :- Int
+   r :- Int] :- (Vec Int)
   (live-only ctx (let [s :- t/Store (deref ctx)] (get (:idx-by-pr s) [p r] []))))
 
 (defn current-facts [ctx :- (Atom t/Store)] :- (Vec Int)
@@ -149,7 +193,9 @@
      :txs (vec (:txs s))
      :superseded (vec (keys (:superseded s)))}))
 
-(defn load-store! [ctx :- (Atom t/Store) data :- Any] :- (Atom t/Store)
+(defn load-store!
+  [ctx :- (Atom t/Store)
+   data :- Any] :- (Atom t/Store)
   (swap! ctx (fn [old :- t/Store] :- t/Store
                (t/->Store (:next-id data) (:next-seq data) (:supersedes-pred data)
                           {} {} {} {} {} {}

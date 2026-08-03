@@ -2,7 +2,17 @@
 
 (define-mode strict)
 
-(defrecord CorpusResult [valid-accepted :- Bool duplicate-rejected :- Bool allowed-rejected :- Bool reference-rejected :- Bool missing-terminator-rejected :- Bool double-terminator-rejected :- Bool ssa-rejected :- Bool canonical-deterministic :- Bool canonical-separated :- Bool i64-f64-distinct :- Bool])
+(defrecord CorpusResult
+  [valid-accepted :- Bool
+   duplicate-rejected :- Bool
+   allowed-rejected :- Bool
+   reference-rejected :- Bool
+   missing-terminator-rejected :- Bool
+   double-terminator-rejected :- Bool
+   ssa-rejected :- Bool
+   canonical-deterministic :- Bool
+   canonical-separated :- Bool
+   i64-f64-distinct :- Bool])
 
 (defn corpus-id [name :- String] :- core/NativeId
   (core/canonical-id "native-core-v0-corpus" [name]))

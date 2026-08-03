@@ -100,7 +100,7 @@ else echo "  PASS  let-local capture refused (no-capture invariant)"; fi
 # left dangling) that recompiled. Types are first-class refactor targets.
 echo "--- 6. type resolution (constructors, defunion, cross-module types, single-colon) ---"
 # 6a. defrecord constructor (Point 1 2) must rename with the type
-printf '#lang beagle/clj\n(ns tp)\n(defrecord Point [(x: Int) (y: Int)])\n(defn mk [] -> Point (Point 1 2))\n' > "$W/tp.bclj"
+printf '#lang beagle/clj\n(ns tp)\n(defrecord Point\n  [(x: Int)\n   (y: Int)])\n(defn mk [] -> Point (Point 1 2))\n' > "$W/tp.bclj"
 racket "$RT" --emit-edn "$W/tp.bclj" 2>/dev/null > "$W/tp.edn"
 bb -cp "$FRAM_OUT" "$RES" rename Point Pt tp "$W/tp.edn" 2>/dev/null
 tp="$(racket "$RT" --render $RESOLVE_OUT/resolved-tp.bclj.edn 2>/dev/null)"
@@ -224,13 +224,13 @@ bb -cp "$FRAM_OUT" "$RES" rename Ok Yes ri "$W/ri.edn" 2>/dev/null
 ri="$(racket "$RT" --render $RESOLVE_OUT/resolved-ri.bclj.edn 2>/dev/null)"
 chk "defrecord+union+match all rename together (no type split)" "grep -qF '(defrecord Yes' <<<\"\$ri\" && grep -qF '(defunion Result Yes Err)' <<<\"\$ri\" && grep -qF '[(Yes v)' <<<\"\$ri\" && grep -qF '(defrecord Err' <<<\"\$ri\""
 # 11b. multi-arity defn: a def used in EVERY arity body renames
-printf '#lang beagle/clj\n(ns rm)\n(def base: Int 5)\n(defn f\n  ([x: Int] -> Int (+ x base))\n  ([x: Int y: Int] -> Int (+ x y base)))\n' > "$W/rm.bclj"
+printf '#lang beagle/clj\n(ns rm)\n(def base: Int 5)\n(defn f\n  ([x: Int] -> Int (+ x base))\n  ([x: Int\n    y: Int] -> Int (+ x y base)))\n' > "$W/rm.bclj"
 racket "$RT" --emit-edn "$W/rm.bclj" 2>/dev/null > "$W/rm.edn"
 bb -cp "$FRAM_OUT" "$RES" rename base unit rm "$W/rm.edn" 2>/dev/null
 rmr="$(racket "$RT" --render $RESOLVE_OUT/resolved-rm.bclj.edn 2>/dev/null)"
 chk "multi-arity defn: both arity bodies renamed" "grep -qF '(+ x unit)' <<<\"\$rmr\" && grep -qF '(+ x y unit)' <<<\"\$rmr\""
 # 11c. ->Name auto-constructor renames with the type (same-module)
-printf '#lang beagle/clj\n(ns rc)\n(defrecord Point [(x: Int) (y: Int)])\n(defn mk [] -> Point (->Point 0 0))\n' > "$W/rc.bclj"
+printf '#lang beagle/clj\n(ns rc)\n(defrecord Point\n  [(x: Int)\n   (y: Int)])\n(defn mk [] -> Point (->Point 0 0))\n' > "$W/rc.bclj"
 racket "$RT" --emit-edn "$W/rc.bclj" 2>/dev/null > "$W/rc.edn"
 bb -cp "$FRAM_OUT" "$RES" rename Point Pt rc "$W/rc.edn" 2>/dev/null
 chk "->Name constructor renamed (->Point -> ->Pt)" "grep -qF '(->Pt 0 0)' <<<\"\$(racket \"$RT\" --render $RESOLVE_OUT/resolved-rc.bclj.edn 2>/dev/null)\""
@@ -271,7 +271,9 @@ chk "typed let binding (q: Foo) cascades" "grep -qF '(let [q: Bar p]' <<<\"\$(ra
 cat > "$W/fa.bclj" <<'EOF'
 #lang beagle/clj
 (ns fa)
-(defrecord Point [(x: Int) (y: Int)])
+(defrecord Point
+  [(x: Int)
+   (y: Int)])
 (defn a [p: Point] -> Int (point-x p))
 (defn c [] -> Point (map->Point {:x 1 :y 2}))
 EOF
@@ -284,7 +286,7 @@ chk "map->Point -> map->Vertex"          "grep -qF '(map->Vertex' <<<\"\$fa\""
 # --- 13. cross-module field accessors carry a record rename (adversarial sweep #7) ----
 echo "--- 13. cross-module field accessor (qualified + :refer'd) cascades ---"
 # 13a. qualified c/point-x
-printf '#lang beagle/clj\n(ns acore)\n(defrecord Point [(x: Int) (y: Int)])\n' > "$W/acore.bclj"
+printf '#lang beagle/clj\n(ns acore)\n(defrecord Point\n  [(x: Int)\n   (y: Int)])\n' > "$W/acore.bclj"
 printf '#lang beagle/clj\n(ns ause)\n(require acore :as c)\n(defn u [p: c/Point] -> Int (c/point-x p))\n' > "$W/ause.bclj"
 racket "$RT" --emit-edn "$W/acore.bclj" 2>/dev/null > "$W/acore.edn"
 racket "$RT" --emit-edn "$W/ause.bclj" 2>/dev/null > "$W/ause.edn"

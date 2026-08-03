@@ -5,7 +5,9 @@
 (ns fixture.union)
 (define-mode strict)
 
-(defrecord Pair [left: Int right: Int])
+(defrecord Pair
+  [left: Int
+   right: Int])
 
 (defn pair? [v: Any] -> Bool (instance? Pair v))
 

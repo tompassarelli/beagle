@@ -5,29 +5,19 @@
 
 (defn pass-store [value: types/Store] -> types/Store value)
 
-(defn pass-atom
-  [value: (Atom types/Store)]
-  -> (Atom types/Store)
+(defn pass-atom [value: (Atom types/Store)] -> (Atom types/Store)
   value)
 
-(defn pass-map
-  [value: (Map String types/Store)]
-  -> (Map String types/Store)
+(defn pass-map [value: (Map String types/Store)] -> (Map String types/Store)
   value)
 
-(defn pass-vector
-  [value: (Vec types/Store)]
-  -> (Vec types/Store)
+(defn pass-vector [value: (Vec types/Store)] -> (Vec types/Store)
   value)
 
-(defn pass-optional
-  [value: (U types/Store Nil)]
-  -> (U types/Store Nil)
+(defn pass-optional [value: (U types/Store Nil)] -> (U types/Store Nil)
   value)
 
-(defn pass-nested
-  [value: (Map String (Vec (U types/Store Nil)))]
-  -> (Map String (Vec (U types/Store Nil)))
+(defn pass-nested [value: (Map String (Vec (U types/Store Nil)))] -> (Map String (Vec (U types/Store Nil)))
   value)
 
 (defn optional-accessor-value [present: Bool] -> Int?

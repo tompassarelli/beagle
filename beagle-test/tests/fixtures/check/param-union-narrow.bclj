@@ -2,8 +2,12 @@
   (Ok [(value: T)])
   (Err [(error: E)]))
 
-(defrecord Order [(id: Int) (name: String)])
-(defrecord OrderError [(code: Int) (message: String)])
+(defrecord Order
+  [(id: Int)
+   (name: String)])
+(defrecord OrderError
+  [(code: Int)
+   (message: String)])
 
 (defn handle [(r: (Result Order OrderError))] -> String
   (match r

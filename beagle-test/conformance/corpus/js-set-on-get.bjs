@@ -9,5 +9,8 @@
 ;; regen the golden) when check rejects it or emit lowers it soundly.
 (ns conformance.js-set-on-get)
 
-(defn put-key! [m: Any k: String v: Any] -> Any
+(defn put-key!
+  [m: Any
+   k: String
+   v: Any] -> Any
   (set! (get m k) v))

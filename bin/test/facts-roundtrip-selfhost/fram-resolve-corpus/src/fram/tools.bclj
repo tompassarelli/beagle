@@ -51,12 +51,24 @@
             :upsert-form :set-body :rename-def :insert-after :replace-in-body)
 
 ;; row-result records (one per read arm; each producing lambda is homogeneous)
-(defrecord PredVal [pred :- String value :- String])
-(defrecord ThreadViolation [thread :- String violation :- String])
+(defrecord PredVal
+  [pred :- String
+   value :- String])
+(defrecord ThreadViolation
+  [thread :- String
+   violation :- String])
 
 ;; tool-spec records — a catalog entry + its params
-(defrecord Param [name :- String type :- String required :- Bool])
-(defrecord ToolSpec [name :- String desc :- String params :- (Vec Param) op :- Op pred :- String])
+(defrecord Param
+  [name :- String
+   type :- String
+   required :- Bool])
+(defrecord ToolSpec
+  [name :- String
+   desc :- String
+   params :- (Vec Param)
+   op :- Op
+   pred :- String])
 
 ;; --- write-value normalization ----------------------------------------------
 ;; GAP: id is an EDN arg value (string id OR other literal) -> Any.
@@ -72,7 +84,9 @@
 ;; `ref-value` below) — no hardcoded ref-pred list, so the engine stays
 ;; domain-neutral. (A value already starting with @ is kept as-is; `at` never
 ;; double-prefixes.)
-(defn- all-ref? [facts :- (Vec k/Fact) pred :- String] :- Bool
+(defn- all-ref?
+  [facts :- (Vec k/Fact)
+   pred :- String] :- Bool
   (loop [cs facts seen false]
     (if (empty? cs)
       seen
@@ -87,7 +101,10 @@
 ;; predicate, store verbatim otherwise (`at` keeps an already-@ value as-is). Used by
 ;; tool writes AND the CLI tell/set verbs so both surfaces agree.
 ;; GAP: value is an EDN write-value -> Any (the engine interns arbitrary EDN).
-(defn ref-value [facts :- (Vec k/Fact) pred :- String value :- Any] :- Any
+(defn ref-value
+  [facts :- (Vec k/Fact)
+   pred :- String
+   value :- Any] :- Any
   (if (all-ref? facts pred) (at value) value))
 
 ;; --- catalog: the CLOSED, O(1) surface (exactly ten tools) -------------------
@@ -184,7 +201,9 @@
                  :replace-in-body "")]))
 
 ;; --- dispatch ---------------------------------------------------------------
-(defn- spec-by-name [cat :- (Vec ToolSpec) name :- String] :- ToolSpec?
+(defn- spec-by-name
+  [cat :- (Vec ToolSpec)
+   name :- String] :- ToolSpec?
   (loop [cs cat]
     (if (empty? cs)
       nil
@@ -192,7 +211,9 @@
 
 ;; required params by op — server-side enforcement (the "can't emit a broken call"
 ;; guarantee, not just an advisory schema): a missing required param is rejected.
-(defn- missing-req [op :- Op args :- (Map Keyword Any)] :- (Vec String)
+(defn- missing-req
+  [op :- Op
+   args :- (Map Keyword Any)] :- (Vec String)
   (let [need-spo (or (= op :tell) (= op :retract))
         ;; graph-edit ops: module scope is always required; the rest by op.
         need-module (or (= op :upsert-form) (or (= op :set-body) (or (= op :rename-def) (or (= op :insert-after) (= op :replace-in-body)))))
@@ -219,7 +240,12 @@
 ;; is accepted as an alias for `ask` (same :query op) so the structured escape hatch keeps
 ;; both spellings on every surface. `untell` is likewise accepted as an alias for
 ;; `retract` (same :retract op) so the retract verb keeps both spellings everywhere.
-(defn call [facts :- (Vec k/Fact) idx :- k/Index cat :- (Vec ToolSpec) tool :- String args :- (Map Keyword Any)] :- Any
+(defn call
+  [facts :- (Vec k/Fact)
+   idx :- k/Index
+   cat :- (Vec ToolSpec)
+   tool :- String
+   args :- (Map Keyword Any)] :- Any
   (let [tool (if (= tool "query") "ask" (if (= tool "untell") "retract" tool))
         spec :- ToolSpec? (spec-by-name cat tool)]
     (if (nil? spec)

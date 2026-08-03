@@ -25,13 +25,13 @@
   :source "(ns ^{:deprecated \"5.0.0\"} cheshire.custom)\n"}
  {:name "g2-g3-g4-quasiquote"
   :ext ".bclj"
-  :source "(defmacro m [obj xs] `(vary-meta ~obj assoc :tags `[~@xs]))\n"}
+  :source "(defmacro m\n  [obj\n   xs] `(vary-meta ~obj assoc :tags `[~@xs]))\n"}
  {:name "g5-var-quote"
   :ext ".bclj"
   :source "(def v #'foo)\n"}
  {:name "g6-primed-let"
   :ext ".bclj"
-  :source "(defn assoc-param-map [req k v] (some-> req (assoc k (if-let [v' (req k)] (reduce-kv assoc v' v) v))))\n"}
+  :source "(defn assoc-param-map\n  [req\n   k\n   v]\n  (some-> req (assoc k (if-let [v' (req k)] (reduce-kv assoc v' v) v))))\n"}
  {:name "g6-double-primed"
   :ext ".bclj"
   :source "(def y x'')\n"}

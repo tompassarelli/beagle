@@ -5,7 +5,12 @@
 
 (define-mode strict)
 
-(defrecord WorldsCorpusResult [scratch-path-independent :- Bool order-independent :- Bool content-sensitive :- Bool promotion-accepted :- Bool mismatched-receipt-rejected :- Bool])
+(defrecord WorldsCorpusResult
+  [scratch-path-independent :- Bool
+   order-independent :- Bool
+   content-sensitive :- Bool
+   promotion-accepted :- Bool
+   mismatched-receipt-rejected :- Bool])
 
 (defn corpus-id [name :- String] :- core/NativeId
   (core/canonical-id "native-worlds-v0-corpus" [name]))

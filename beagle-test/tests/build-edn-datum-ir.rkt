@@ -48,7 +48,7 @@
   (string-append
    "#lang beagle/clj\n"
    "(def ^:dynamic *ctx* \"root\")\n"
-   "(defn area [w: Int h: Int] -> Int (* w h))\n"
+   "(defn area\n  [w: Int\n   h: Int] -> Int\n  (* w h))\n"
    "(defn label [xs: (Vec String)] -> String\n"
    "  (let [n (count xs)]\n"
    "    (str \"items:\" n)))\n"

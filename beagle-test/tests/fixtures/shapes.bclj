@@ -3,7 +3,9 @@
 (ns shapes)
 
 (defrecord Circle [(radius: Int)])
-(defrecord Rect [(width: Int) (height: Int)])
+(defrecord Rect
+  [(width: Int)
+   (height: Int)])
 
 (defn circle-area [(c: Circle)] -> Int
   (* (circle-radius c) (circle-radius c)))

@@ -8,7 +8,9 @@
 (defn parts [s: String] -> (Vec String)
   (los.rt/split-on s ","))
 
-(defn pad [s: String n: Int] -> String
+(defn pad
+  [s: String
+   n: Int] -> String
   (los.rt/repeat-str s n))
 
 (defn now [] -> Int
