@@ -284,7 +284,7 @@
    compiler-commit: String
    configuration: (Vec String)]
   -> SourceSealResultV0
-  (let [encoding: String (encode-source-world world)
+  (let [encoding: String (worlds/encode-source-world world)
         digest: String (worlds/content-digest encoding)]
     (if (source-world-valid? world)
       (->SourceSealAcceptedV0
@@ -1285,7 +1285,7 @@
           [(arena-region-id)]
           [(write-capability-id)]
           [(type-id "LowerFailure")])
-        encoding: String (encode-typed-world typed-world)
+        encoding: String (worlds/encode-typed-world typed-world)
         digest: String (worlds/content-digest encoding)
         resolutions-valid: Bool
         (typing-resolutions-valid? record-resolutions function-resolutions)
@@ -2145,7 +2145,7 @@
         clean: Bool (term-graph-clean? terms)
         world: worlds/NativeWorldV0
         (worlds/->NativeWorldV0 terms typed-digest program obligation-roots)
-        encoding: String (encode-native-world world)
+        encoding: String (worlds/encode-native-world world)
         digest: String (worlds/content-digest encoding)
         sealed: worlds/SealedNativeWorldV0
         (worlds/->SealedNativeWorldV0 world encoding digest)
