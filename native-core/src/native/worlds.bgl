@@ -1,0 +1,105 @@
+;; @upstream:text-arm — operator-authorized for Native Stage 2; re-ingest this
+;; module into the graph after landing. Authority: North thread 019fbd6c,
+;; accepted design lane-msch3uwf section 2.
+(ns native.worlds (:require [native.core :as core]))
+
+(define-mode strict)
+
+;; Recursive terms refer to one another by stable identity so every world kind
+;; shares the same finite, canonical graph representation.
+(defunion TermV0
+  (NilTermV0 [token :- Bool])
+  (BoolTermV0 [value :- Bool])
+  (I64TermV0 [value :- Int])
+  (F64TermV0 [canonical-value :- String])
+  (TextTermV0 [value :- String])
+  (RefTermV0 [target :- core/NativeId])
+  (TripleTermV0 [subject :- core/NativeId predicate :- core/NativeId object :- core/NativeId]))
+
+(defrecord TermNodeV0 [identity :- core/NativeId term :- TermV0])
+
+(defrecord TermGraphV0 [root :- core/NativeId nodes :- (Vec TermNodeV0)])
+
+(defrecord SourceLocationV0 [module-id :- core/NativeId relative-path :- String line :- Int column :- Int])
+
+(defrecord SourceModuleV0 [id :- core/NativeId name :- String relative-path :- String source-digest :- String interface-digest :- String root-term :- core/NativeId])
+
+(defrecord SourceProgramWorldV0 [terms :- TermGraphV0 modules :- (Vec SourceModuleV0) imports :- (Vec core/NativeId) locations :- (Vec SourceLocationV0)])
+
+(defrecord TypedEffectWorldV0 [terms :- TermGraphV0 source-digest :- String type-roots :- (Vec core/NativeId) function-roots :- (Vec core/NativeId) effect-roots :- (Vec core/NativeId) region-roots :- (Vec core/NativeId) capability-token-roots :- (Vec core/NativeId) refinement-roots :- (Vec core/NativeId)])
+
+(defrecord NativeWorldV0 [terms :- TermGraphV0 typed-digest :- String program :- core/NativeWorld obligations :- (Vec core/ObligationResult)])
+
+(defrecord ArtifactBlobV0 [id :- core/NativeId name :- String media-type :- String content-digest :- String byte-count :- Int])
+
+(defrecord ArtifactWorldV0 [terms :- TermGraphV0 native-digest :- String backend-id :- String backend-version :- String configuration-digest :- String blobs :- (Vec ArtifactBlobV0) shim-abi-digest :- String diagnostics :- (Vec String)])
+
+(defunion WorldPayloadV0
+  (SourcePayloadV0 [world :- SourceProgramWorldV0])
+  (TypedPayloadV0 [world :- TypedEffectWorldV0])
+  (NativePayloadV0 [world :- NativeWorldV0])
+  (ArtifactPayloadV0 [world :- ArtifactWorldV0]))
+
+(defrecord WorldDraftV0 [parent-digest :- (U String Nil) pass-id :- String pass-version :- String payload :- WorldPayloadV0])
+
+(defrecord SealedSourceWorldV0 [world :- SourceProgramWorldV0 encoding :- String digest :- String])
+
+(defrecord SealedTypedWorldV0 [world :- TypedEffectWorldV0 encoding :- String digest :- String])
+
+(defrecord SealedNativeWorldV0 [world :- NativeWorldV0 encoding :- String digest :- String])
+
+(defrecord SealedArtifactWorldV0 [world :- ArtifactWorldV0 encoding :- String digest :- String])
+
+(defunion SealedWorldV0
+  (SealedSourceV0 [sealed :- SealedSourceWorldV0])
+  (SealedTypedV0 [sealed :- SealedTypedWorldV0])
+  (SealedNativeV0 [sealed :- SealedNativeWorldV0])
+  (SealedArtifactV0 [sealed :- SealedArtifactWorldV0]))
+
+(defrecord ConfigurationEntryV0 [key :- String value :- String])
+
+(defrecord DiagnosticV0 [code :- String severity :- String message :- String])
+
+(defrecord DischargedObligationV0 [id :- String version :- String subject-digest :- String passed :- Bool diagnostic :- String])
+
+(defrecord ArtifactHashV0 [artifact-id :- core/NativeId algorithm :- String digest :- String])
+
+;; Receipts remain external to sealed worlds, avoiding a digest cycle.
+(defrecord PassReceiptV0 [input-digest :- String compiler-commit :- String pass-id :- String pass-version :- String configuration :- (Vec ConfigurationEntryV0) configuration-digest :- String diagnostics :- (Vec DiagnosticV0) discharged-obligations :- (Vec DischargedObligationV0) output-digest :- String backend-id :- String backend-version :- String artifact-hashes :- (Vec ArtifactHashV0)])
+
+(defrecord PromotedWorldV0 [world :- SealedWorldV0 receipt :- PassReceiptV0])
+
+(defunion PromotionResultV0
+  (PromotionAcceptedV0 [promoted :- PromotedWorldV0])
+  (PromotionRejectedV0 [reason :- String]))
+
+(defn canonical-record [tag :- String fields :- (Vec String)] :- String
+  (str (count tag) ":" tag ":" (core/canonical-parts fields)))
+
+(defn canonical-set [tag :- String items :- (Vec String)] :- String
+  (canonical-record tag (sort items)))
+
+(defn encode-bool [value :- Bool] :- String
+  (if value "1" "0"))
+
+(defn encode-optional-string [value :- (U String Nil)] :- String
+  (if (nil? value) (canonical-record "none" []) (canonical-record "some" [value])))
+
+(defn encode-id [id :- core/NativeId] :- String
+  (canonical-record "id" [(core/nativeid-value id)]))
+
+(defn content-digest [encoding :- String] :- String
+  (core/nativeid-value (core/canonical-id "canonical-world-content-v0" [encoding])))
+
+(defn sealed-world-digest [world :- SealedWorldV0] :- String
+  (match world
+    [(SealedSourceV0 sealed) (sealedsourceworldv0-digest sealed)]
+    [(SealedTypedV0 sealed) (sealedtypedworldv0-digest sealed)]
+    [(SealedNativeV0 sealed) (sealednativeworldv0-digest sealed)]
+    [(SealedArtifactV0 sealed) (sealedartifactworldv0-digest sealed)]))
+
+(defn source-draft [world :- SourceProgramWorldV0] :- WorldDraftV0
+  (->WorldDraftV0 nil "source-seal" "v0" (->SourcePayloadV0 world)))
+
+(defn open-for-derivation [parent :- SealedWorldV0 pass-id :- String pass-version :- String payload :- WorldPayloadV0] :- WorldDraftV0
+  (->WorldDraftV0 (sealed-world-digest parent) pass-id pass-version payload))
