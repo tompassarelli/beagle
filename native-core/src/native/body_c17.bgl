@@ -44,6 +44,9 @@
           (instance? native.core.I64Atom atom)
           (instance? native.core.F64Atom atom)))
     (instance? native.core.CopyInstruction instruction) true
+    (instance? native.core.CheckedInstruction instruction)
+    (instance? native.core.CheckedAddI64V0
+      (core/checkedinstruction-operation instruction))
     (instance? native.core.CompareInstruction instruction) true
     (instance? native.core.FieldInstruction instruction) true
     (instance? native.core.RecordInstruction instruction) true
@@ -241,6 +244,24 @@
       (str "  " target " = "
         (value-name function slots (core/copyinstruction-source-id instruction))
         ";\n")
+
+      ;; fold-c17 declares its own result; here the slot is already declared at
+      ;; the top of the function, so only the guard and the store are emitted.
+      (instance? native.core.CheckedInstruction instruction)
+      (let [operation: core/CheckedOperationV0
+            (core/checkedinstruction-operation instruction)
+            left: String
+            (value-name function slots (core/checkedaddi64v0-left-id operation))
+            right: String
+            (value-name function slots (core/checkedaddi64v0-right-id operation))]
+        (str
+          "  if (((" right " > INT64_C(0)) && (" left " > (INT64_MAX - " right
+          "))) ||\n"
+          "      ((" right " < INT64_C(0)) && (" left " < (INT64_MIN - " right
+          ")))) {\n"
+          "    native_trap(NATIVE_TRAP_OVERFLOW);\n"
+          "  }\n"
+          "  " target " = " left " + " right ";\n"))
 
       (instance? native.core.CompareInstruction instruction)
       (str "  " target " = ("

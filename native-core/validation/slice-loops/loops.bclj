@@ -1,0 +1,47 @@
+#lang beagle/clj
+;; Loop/recur on the operands the v0 native subset carries without the
+;; arithmetic arm: every accumulator is a Bool, a record, or an Int carried
+;; across the back edge unchanged. The counted fram shapes live in counted/.
+(ns native.loops)
+(define-mode strict)
+
+(defrecord Tally [flag: Bool mark: Int])
+
+;; two accumulators, one back edge, exit through the if-join
+(defn settle [start: Bool] -> Bool
+  (loop [flag: Bool start done: Bool false]
+    (if done
+      flag
+      (recur (not flag) true))))
+
+;; two accumulators exchanged across the back edge: sequential copies into the
+;; header parameters would corrupt both
+(defn exchange [left: Int right: Int] -> Int
+  (loop [near: Int left far: Int right done: Bool false]
+    (if done
+      near
+      (recur far near true))))
+
+;; nested loop in the outer recur argument, so the inner header shadows the
+;; outer recur target
+(defn settle-nested [outer-start: Bool inner-start: Bool] -> Bool
+  (loop [outer: Bool outer-start outer-done: Bool false]
+    (if outer-done
+      outer
+      (recur (loop [inner: Bool inner-start inner-done: Bool false]
+               (if inner-done
+                 inner
+                 (recur (not inner) true)))
+             true))))
+
+;; six accumulators of three native types, one carried unchanged
+(defn scan-six [left: Int right: Int seed: Bool] -> Tally
+  (loop [first-slot: Int left
+         second-slot: Int right
+         flag: Bool seed
+         done: Bool false
+         mark: Int 0
+         carried: Tally (->Tally seed 0)]
+    (if done
+      (->Tally flag mark)
+      (recur second-slot first-slot (not flag) true first-slot carried))))

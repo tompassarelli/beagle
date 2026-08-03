@@ -1,0 +1,18 @@
+stage source-seal ACCEPTED
+stage source-to-typed ACCEPTED
+world-types 11
+world-functions 4
+world-abis 4
+projected-types 5
+lowered fn_0 settle 5 blocks
+lowered fn_1 exchange 5 blocks
+lowered fn_2 settle-nested 9 blocks
+lowered fn_3 scan-six 5 blocks
+obligation-projection PASS valid-ssa
+obligation-projection PASS exhaustive-matches
+obligation-projection PASS closed-layouts
+obligation-projection PASS checked-arithmetic
+obligation-projection PASS legal-abi
+obligation-projection PASS discharged-tokens
+obligation-projection PASS bounded-effects
+materialize OK module_0.h module_0.c

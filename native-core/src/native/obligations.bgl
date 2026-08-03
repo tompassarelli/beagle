@@ -773,25 +773,44 @@
         (instruction-token-state current (nth instructions index))
         instructions))))
 
+(defrecord TokenVisitV0 [block-id :- core/NativeId live :- (Vec core/NativeId)])
+
+(defn token-visit-live [visited :- (Vec TokenVisitV0) block-id :- core/NativeId]
+  :- (U (Vec core/NativeId) Nil)
+  (loop [index :- Int 0]
+    (cond
+      (>= index (count visited)) nil
+      (core/native-id= (tokenvisitv0-block-id (nth visited index)) block-id)
+      (tokenvisitv0-live (nth visited index))
+      :else (recur (+ index 1)))))
+
+(defn token-sets-equal? [left :- (Vec core/NativeId) right :- (Vec core/NativeId)]
+  :- Bool
+  (and (= (count left) (count right)) (core/ids-in? left right)))
+
 (defn token-paths-valid? [function :- core/FunctionDef
                           block-id :- core/NativeId
                           state :- TokenStateV0
-                          visited :- (Vec core/NativeId)] :- Bool
-  (if (core/id-in? visited block-id)
-    false
-    (let [block :- (U core/BasicBlock Nil)
-          (find-block (core/functiondef-blocks function) block-id)]
-      (if (nil? block)
-        false
-        (let [next-state :- TokenStateV0 (block-token-state state block)
-              successors :- (Vec core/NativeId) (block-successors block)]
-          (and (tokenstatev0-valid next-state)
-            (if (= 0 (count successors))
-              (= 0 (count (tokenstatev0-live next-state)))
-              (every? (fn [successor :- core/NativeId] :- Bool
-                        (token-paths-valid? function successor next-state
-                          (conj visited block-id)))
-                successors))))))))
+                          visited :- (Vec TokenVisitV0)] :- Bool
+  (let [entered :- (U (Vec core/NativeId) Nil) (token-visit-live visited block-id)]
+    ;; a back edge is token-safe exactly when the cycle consumed none of the
+    ;; tokens live when its header was first entered
+    (if (not (nil? entered))
+      (token-sets-equal? (tokenstatev0-live state) entered)
+      (let [block :- (U core/BasicBlock Nil)
+            (find-block (core/functiondef-blocks function) block-id)]
+        (if (nil? block)
+          false
+          (let [next-state :- TokenStateV0 (block-token-state state block)
+                successors :- (Vec core/NativeId) (block-successors block)
+                seen :- (Vec TokenVisitV0)
+                (conj visited (->TokenVisitV0 block-id (tokenstatev0-live state)))]
+            (and (tokenstatev0-valid next-state)
+              (if (= 0 (count successors))
+                (= 0 (count (tokenstatev0-live next-state)))
+                (every? (fn [successor :- core/NativeId] :- Bool
+                          (token-paths-valid? function successor next-state seen))
+                  successors)))))))))
 
 (defn find-capability [capabilities :- (Vec core/CapabilityDef)
                        capability-id :- core/NativeId]

@@ -1058,6 +1058,12 @@
 (defrecord LocalBindingV0
   [name: String value-id: core/NativeId type-id: core/NativeId])
 
+;; One live `loop`: the SSA header block whose block-parameters ARE the typed
+;; accumulators. `recur` is a Jump back to this header, so the innermost frame
+;; is the lexical recur target and a nested loop shadows its parent.
+(defrecord LoopFrameV0
+  [header-id: core/NativeId parameters: (Vec core/Parameter)])
+
 ;; One in-flight function body: finished blocks, the open block being filled,
 ;; the lexical environment, and the first refusal that made lowering stop.
 (defrecord BodyStateV0
@@ -1068,7 +1074,8 @@
    open: Bool
    counter: Int
    locals: (Vec LocalBindingV0)
-   failure: String])
+   failure: String
+   loop-frames: (Vec LoopFrameV0)])
 
 (defrecord ExprResultV0
   [state: BodyStateV0
@@ -1141,6 +1148,13 @@
   (with state
     [:locals (conj (bodystatev0-locals state)
                (->LocalBindingV0 name value-id type-id))]))
+
+(defn state-push-loop [state: BodyStateV0 frame: LoopFrameV0] -> BodyStateV0
+  (with state [:loop-frames (conj (bodystatev0-loop-frames state) frame)]))
+
+(defn current-loop [state: BodyStateV0] -> (U LoopFrameV0 Nil)
+  (let [frames: (Vec LoopFrameV0) (bodystatev0-loop-frames state)]
+    (if (= 0 (count frames)) nil (nth frames (- (count frames) 1)))))
 
 (defn find-local
   [locals: (Vec LocalBindingV0) name: String] -> (U LocalBindingV0 Nil)
@@ -1233,6 +1247,135 @@
 ;; v0 traps carry an i64 failure code, not a payload: the closed LowerFailure
 ;; union names the codes, and the host exception argument is discarded.
 (defn trap-failure-code [] -> Int 1)
+
+;; One accumulator's init, lowered: the name it binds, its value and the type
+;; that init fixes for the whole loop.
+(defrecord LoopInitsV0
+  [state: BodyStateV0
+   names: (Vec String)
+   values: (Vec core/NativeId)
+   value-types: (Vec core/NativeId)
+   terminated: Bool])
+
+(defn index-child-nodes
+  [index: SourceIndexV0 subject: core/NativeId] -> (Vec core/NativeId)
+  (let [subjects: (Vec core/NativeId) (sourceindexv0-subjects index)
+        objects: (Vec core/NativeId) (sourceindexv0-objects index)]
+    (loop [position: Int 0 collected: (Vec core/NativeId) []]
+      (if (>= position (count subjects))
+        collected
+        (recur (+ position 1)
+          (if (same-id? subject (nth subjects position))
+            (conj collected (nth objects position))
+            collected))))))
+
+;; A nested loop's body belongs to its own header (its init forms do not), and
+;; an unknown form kind is walked as non-tail so a `recur` reachable through
+;; another arm's form is refused rather than mislowered.
+(defn recur-tail-only?
+  [index: SourceIndexV0 node: core/NativeId tail: Bool fuel: Int] -> Bool
+  (if (<= fuel 0)
+    false
+    (let [kind: String (fact-text index node "form-kind")]
+      (cond
+        (= "recur" kind)
+        (let [args-node: (U core/NativeId Nil) (index-first-object index node "args")
+              args: (Vec core/NativeId)
+              (if (nil? args-node) [] (index-sequence-items index args-node))]
+          (and tail
+            (loop [position: Int 0]
+              (if (>= position (count args))
+                true
+                (if (recur-tail-only? index (nth args position) false (- fuel 1))
+                  (recur (+ position 1))
+                  false)))))
+
+        (= "loop" kind)
+        (let [bindings-node: (U core/NativeId Nil)
+              (index-first-object index node "bindings")
+              items: (Vec core/NativeId)
+              (if (nil? bindings-node) [] (index-sequence-items index bindings-node))]
+          (loop [position: Int 0]
+            (if (>= position (count items))
+              true
+              (let [value-node: (U core/NativeId Nil)
+                    (index-first-object index (nth items position) "value")]
+                (if (or (nil? value-node)
+                        (recur-tail-only? index value-node false (- fuel 1)))
+                  (recur (+ position 1))
+                  false)))))
+
+        (= "if" kind)
+        (let [condition-node: (U core/NativeId Nil)
+              (index-first-object index node "cond")
+              then-node: (U core/NativeId Nil) (index-first-object index node "then")
+              else-node: (U core/NativeId Nil) (index-first-object index node "else")]
+          (and
+            (or (nil? condition-node)
+                (recur-tail-only? index condition-node false (- fuel 1)))
+            (or (nil? then-node)
+                (recur-tail-only? index then-node tail (- fuel 1)))
+            (or (nil? else-node)
+                (recur-tail-only? index else-node tail (- fuel 1)))))
+
+        (= "let" kind)
+        (let [bindings-node: (U core/NativeId Nil)
+              (index-first-object index node "bindings")
+              items: (Vec core/NativeId)
+              (if (nil? bindings-node) [] (index-sequence-items index bindings-node))
+              body-node: (U core/NativeId Nil) (index-first-object index node "body")]
+          (and
+            (loop [position: Int 0]
+              (if (>= position (count items))
+                true
+                (let [value-node: (U core/NativeId Nil)
+                      (index-first-object index (nth items position) "value")]
+                  (if (or (nil? value-node)
+                          (recur-tail-only? index value-node false (- fuel 1)))
+                    (recur (+ position 1))
+                    false))))
+            (or (nil? body-node)
+                (recur-tail-only? index body-node tail (- fuel 1)))))
+
+        :else
+        (let [children: (Vec core/NativeId) (index-child-nodes index node)]
+          (loop [position: Int 0]
+            (if (>= position (count children))
+              true
+              (if (recur-tail-only? index (nth children position) false (- fuel 1))
+                (recur (+ position 1))
+                false))))))))
+
+(defn recur-type-mismatch
+  [parameters: (Vec core/Parameter) value-types: (Vec core/NativeId)] -> Int
+  (loop [position: Int 0]
+    (cond
+      (>= position (count parameters)) -1
+      (same-id? (core/parameter-type-id (nth parameters position))
+        (nth value-types position))
+      (recur (+ position 1))
+      :else position)))
+
+(defn header-parameter?
+  [parameters: (Vec core/Parameter) value: core/NativeId] -> Bool
+  (loop [position: Int 0]
+    (if (>= position (count parameters))
+      false
+      (if (same-id? (core/parameter-id (nth parameters position)) value)
+        true
+        (recur (+ position 1))))))
+
+;; A back edge whose arguments are materialized as sequential copies into the
+;; header parameters corrupts any argument that IS a header parameter, so the
+;; recur arm routes every argument through a fresh value when one aliases.
+(defn recur-aliases-header?
+  [parameters: (Vec core/Parameter) values: (Vec core/NativeId)] -> Bool
+  (loop [position: Int 0]
+    (if (>= position (count values))
+      false
+      (if (header-parameter? parameters (nth values position))
+        true
+        (recur (+ position 1))))))
 
 (defn lower-expr
   [env: BodyEnvV0 owner: core/NativeId state: BodyStateV0 expr: core/NativeId]
@@ -1396,6 +1539,185 @@
                       (state-open-block after-else join-id
                         [(core/->Parameter join-parameter result-type)])
                       join-parameter result-type false)))))))
+
+        (= "loop" kind)
+        (let [bindings-node: (U core/NativeId Nil)
+              (index-first-object index expr "bindings")
+              items: (Vec core/NativeId)
+              (if (nil? bindings-node) [] (index-sequence-items index bindings-node))
+              body-node: (U core/NativeId Nil) (index-first-object index expr "body")
+              outer-locals: (Vec LocalBindingV0) (bodystatev0-locals state)
+              outer-frames: (Vec LoopFrameV0) (bodystatev0-loop-frames state)]
+          (cond
+            (nil? body-node)
+            (fail-result state "TODO-NATIVE-LOOP-BODY: loop form has no body")
+
+            (not (recur-tail-only? index body-node true (+ 1 (index-facts index))))
+            (fail-result state
+              "TODO-NATIVE-RECUR-NON-TAIL: recur is not in tail position of its loop")
+
+            :else
+            (let [inits: LoopInitsV0
+                  (loop [position: Int 0
+                         accumulated: LoopInitsV0
+                         (->LoopInitsV0 state [] [] [] false)]
+                    (if (or (>= position (count items))
+                            (state-blocked? (loopinitsv0-state accumulated))
+                            (loopinitsv0-terminated accumulated))
+                      accumulated
+                      (let [item: core/NativeId (nth items position)
+                            name: String (fact-text index item "name")
+                            value-node: (U core/NativeId Nil)
+                            (index-first-object index item "value")]
+                        (if (nil? value-node)
+                          (->LoopInitsV0
+                            (state-fail (loopinitsv0-state accumulated)
+                              (str "TODO-NATIVE-LOOP-INIT: accumulator " name
+                                " has no init form"))
+                            (loopinitsv0-names accumulated)
+                            (loopinitsv0-values accumulated)
+                            (loopinitsv0-value-types accumulated) false)
+                          (let [value: ExprResultV0
+                                (lower-expr env owner
+                                  (loopinitsv0-state accumulated) value-node)]
+                            (if (exprresultv0-terminated value)
+                              (->LoopInitsV0 (exprresultv0-state value)
+                                (loopinitsv0-names accumulated)
+                                (loopinitsv0-values accumulated)
+                                (loopinitsv0-value-types accumulated) true)
+                              (recur (+ position 1)
+                                (->LoopInitsV0
+                                  ;; each init sees the ones before it, like `let`
+                                  (state-bind (exprresultv0-state value) name
+                                    (exprresultv0-value-id value)
+                                    (exprresultv0-type-id value))
+                                  (conj (loopinitsv0-names accumulated) name)
+                                  (conj (loopinitsv0-values accumulated)
+                                    (exprresultv0-value-id value))
+                                  (conj (loopinitsv0-value-types accumulated)
+                                    (exprresultv0-type-id value))
+                                  false))))))))
+                  base: BodyStateV0 (loopinitsv0-state inits)]
+              (cond
+                (loopinitsv0-terminated inits)
+                (->ExprResultV0 base (lower-id "body" ["unreachable"])
+                  (type-id "LowerFailure") true)
+
+                (state-blocked? base) (dead-result base)
+
+                :else
+                (let [header-id: core/NativeId (state-id base owner "loop-header")
+                      parameters: (Vec core/Parameter)
+                      (loop [position: Int 0 collected: (Vec core/Parameter) []]
+                        (if (>= position (count (loopinitsv0-names inits)))
+                          collected
+                          (recur (+ position 1)
+                            (conj collected
+                              (core/->Parameter
+                                (state-id base owner (str "loop-param-" position))
+                                (nth (loopinitsv0-value-types inits) position))))))
+                      entered: BodyStateV0
+                      (state-open-block
+                        (state-close (state-bump base)
+                          (core/->JumpTerminator header-id
+                            (loopinitsv0-values inits)))
+                        header-id parameters)
+                      bound: BodyStateV0
+                      (loop [position: Int 0 current: BodyStateV0 entered]
+                        (if (>= position (count parameters))
+                          current
+                          (recur (+ position 1)
+                            (state-bind current
+                              (nth (loopinitsv0-names inits) position)
+                              (core/parameter-id (nth parameters position))
+                              (core/parameter-type-id (nth parameters position))))))
+                      body: ExprResultV0
+                      (lower-expr env owner
+                        (state-push-loop bound (->LoopFrameV0 header-id parameters))
+                        body-node)]
+                  ;; the loop's value is the join value of the body exiting
+                  ;; without recur, in whatever block that exit left open
+                  (->ExprResultV0
+                    (with (with (exprresultv0-state body) [:locals outer-locals])
+                      [:loop-frames outer-frames])
+                    (exprresultv0-value-id body)
+                    (exprresultv0-type-id body)
+                    (exprresultv0-terminated body)))))))
+
+        (= "recur" kind)
+        (let [frame: (U LoopFrameV0 Nil) (current-loop state)]
+          (if (nil? frame)
+            (fail-result state
+              "TODO-NATIVE-RECUR-OUTSIDE-LOOP: recur has no enclosing loop header")
+            (let [args-node: (U core/NativeId Nil)
+                  (index-first-object index expr "args")
+                  args: (Vec core/NativeId)
+                  (if (nil? args-node) [] (index-sequence-items index args-node))
+                  parameters: (Vec core/Parameter) (loopframev0-parameters frame)
+                  lowered: ArgsResultV0
+                  (loop [position: Int 0
+                         current: BodyStateV0 state
+                         values: (Vec core/NativeId) []
+                         value-types: (Vec core/NativeId) []]
+                    (if (or (>= position (count args)) (state-blocked? current))
+                      (->ArgsResultV0 current values value-types false)
+                      (let [argument: ExprResultV0
+                            (lower-expr env owner current (nth args position))]
+                        (if (exprresultv0-terminated argument)
+                          (->ArgsResultV0 (exprresultv0-state argument) values
+                            value-types true)
+                          (recur (+ position 1) (exprresultv0-state argument)
+                            (conj values (exprresultv0-value-id argument))
+                            (conj value-types (exprresultv0-type-id argument)))))))
+                  current: BodyStateV0 (argsresultv0-state lowered)
+                  values: (Vec core/NativeId) (argsresultv0-values lowered)
+                  value-types: (Vec core/NativeId) (argsresultv0-value-types lowered)]
+              (cond
+                (argsresultv0-terminated lowered)
+                (->ExprResultV0 current (lower-id "body" ["unreachable"])
+                  (type-id "LowerFailure") true)
+
+                (state-blocked? current) (dead-result current)
+
+                (not (= (count parameters) (count values)))
+                (fail-result current
+                  (str "TODO-NATIVE-RECUR-ARITY: recur passes "
+                    (str (count values)) " arguments to a loop with "
+                    (str (count parameters)) " accumulators"))
+
+                (>= (recur-type-mismatch parameters value-types) 0)
+                (fail-result current
+                  (str "TODO-NATIVE-RECUR-TYPES: recur argument "
+                    (str (recur-type-mismatch parameters value-types))
+                    " is not the native type its accumulator's init fixed"))
+
+                :else
+                (let [copied: ArgsResultV0
+                      (if (not (recur-aliases-header? parameters values))
+                        (->ArgsResultV0 current values value-types false)
+                        (loop [position: Int 0
+                               accumulated: ArgsResultV0
+                               (->ArgsResultV0 (state-bump current) []
+                                 value-types false)]
+                          (if (>= position (count values))
+                            accumulated
+                            (let [copy-id: core/NativeId
+                                  (state-id current owner
+                                    (str "recur-copy-" position))]
+                              (recur (+ position 1)
+                                (->ArgsResultV0
+                                  (state-emit (argsresultv0-state accumulated)
+                                    (core/->CopyInstruction
+                                      (core/->SsaValueV0 copy-id
+                                        (nth value-types position))
+                                      (nth values position)))
+                                  (conj (argsresultv0-values accumulated) copy-id)
+                                  value-types false))))))]
+                  (->ExprResultV0
+                    (state-close (argsresultv0-state copied)
+                      (core/->JumpTerminator (loopframev0-header-id frame)
+                        (argsresultv0-values copied)))
+                    (lower-id "body" ["recur"]) (type-id "LowerFailure") true))))))
 
         (= "call" kind)
         (let [callee: String (fact-text index expr "callee")
@@ -1824,7 +2146,7 @@
         (str "the checked source projection carries no body form for " name))
       (let [result: ExprResultV0
             (lower-expr env id
-              (->BodyStateV0 [] entry-id [] [] true 0 locals "") body-node)
+              (->BodyStateV0 [] entry-id [] [] true 0 locals "" []) body-node)
             state: BodyStateV0 (exprresultv0-state result)]
         (cond
           (state-blocked? state)

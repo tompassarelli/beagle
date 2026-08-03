@@ -2,7 +2,8 @@
 ;; Columns: subject TAB predicate TAB ("t" text | "n" node) TAB object; node "0"
 ;; is the module root and ordinals come from a pre-order walk, so the projection
 ;; is byte-stable for a given source file.
-(require '[cheshire.core :as json])
+(require '[cheshire.core :as json]
+         '[clojure.string])
 
 (def counter (atom 0))
 (defn nid [] (str (swap! counter inc)))
@@ -56,8 +57,14 @@
       "literal" (do (row! n "form-kind" "t" "literal")
                     (row! n "literal-kind" "t" (str (get e "kind")))
                     (row! n "value" "t" (str (get e "value"))))
-      "ref"     (do (row! n "form-kind" "t" "ref")
-                    (row! n "name" "t" (get e "name")))
+      ;; the parser spells a boolean constant as a reference; the projection
+      ;; restores the literal so the lowering never resolves it as a binding
+      "ref"     (if (#{"true" "false"} (get e "name"))
+                  (do (row! n "form-kind" "t" "literal")
+                      (row! n "literal-kind" "t" "bool")
+                      (row! n "value" "t" (get e "name")))
+                  (do (row! n "form-kind" "t" "ref")
+                      (row! n "name" "t" (get e "name"))))
       "call"    (do (row! n "form-kind" "t" "call")
                     (row! n "callee" "t" (callee-name (get e "fn")))
                     (row! n "args" "n" (emit-seq (get e "args") emit-expr)))
@@ -72,8 +79,20 @@
                     (let [forms (get e "body")]
                       (when (= 1 (count forms))
                         (row! n "body" "n" (emit-expr (first forms))))))
+      "loop"    (do (row! n "form-kind" "t" "loop")
+                    (row! n "bindings" "n"
+                          (emit-seq (get e "bindings") emit-binding))
+                    (let [forms (get e "body")]
+                      (when (= 1 (count forms))
+                        (row! n "body" "n" (emit-expr (first forms))))))
+      "recur"   (do (row! n "form-kind" "t" "recur")
+                    (row! n "args" "n" (emit-seq (get e "args") emit-expr)))
       (row! n "form-kind" "t" (str "unsupported-" (get e "node"))))
     n))
+
+;; `<fn>=<native-op>` arguments name the functions whose Beagle body is only the
+;; reference semantics of a native primitive the lowering already carries.
+(def native-ops (atom {}))
 
 (defn emit-form [f]
   (let [n (nid)]
@@ -83,6 +102,8 @@
                    (row! n "fields" "n" (emit-seq (get f "fields") emit-param)))
       "defn"   (do (row! n "form-kind" "t" "defn")
                    (row! n "name" "t" (get f "name"))
+                   (when-let [op (get @native-ops (get f "name"))]
+                     (row! n "native-op" "t" op))
                    (row! n "params" "n" (emit-seq (get f "params") emit-param))
                    (when-let [r (get f "ret")] (row! n "ret" "n" (emit-ann r)))
                    (let [forms (get f "body")]
@@ -91,8 +112,12 @@
       nil)
     n))
 
-(let [[in out] *command-line-args*
+(let [[in out & annotations] *command-line-args*
       ast (json/parse-string (slurp in))]
+  (reset! native-ops
+          (into {} (for [a annotations
+                         :let [[name op] (clojure.string/split a #"=" 2)]]
+                     [name op])))
   (doseq [f (get ast "forms")]
     (when (#{"record" "defn"} (get f "node")) (emit-form f)))
   (row! "0" "form-kind" "t" "module-root")

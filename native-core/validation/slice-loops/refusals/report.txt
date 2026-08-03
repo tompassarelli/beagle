@@ -1,0 +1,18 @@
+stage source-seal ACCEPTED
+stage source-to-typed ACCEPTED
+world-types 9
+world-functions 0
+world-abis 0
+projected-types 0
+obligation-projection PASS valid-ssa
+obligation-projection PASS exhaustive-matches
+obligation-projection PASS closed-layouts
+obligation-projection PASS checked-arithmetic
+obligation-projection PASS legal-abi
+obligation-projection PASS discharged-tokens
+obligation-projection PASS bounded-effects
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-RECUR-NON-TAIL: recur is not in tail position of its loop [non-tail]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-RECUR-OUTSIDE-LOOP: recur has no enclosing loop header [outside-loop]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-RECUR-ARITY: recur passes 2 arguments to a loop with 1 accumulators [wrong-arity]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-RECUR-TYPES: recur argument 0 is not the native type its accumulator's init fixed [wrong-types]
+materialize OK module_0.h module_0.c

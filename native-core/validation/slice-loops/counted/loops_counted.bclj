@@ -1,0 +1,55 @@
+#lang beagle/clj
+;; The counted loop/recur shapes of fram.fri-replay and fram.fold. `+` routes
+;; through the add-i64 primitive the driver marks native-op checked-add-i64,
+;; which returns Int and so refuses checked-arithmetic until the arithmetic arm
+;; lands; loop lowering itself is what these fixtures exercise.
+(ns native.loops-counted)
+(define-mode strict)
+
+(defrecord Tally [hits: Int misses: Int])
+
+;; the driver marks this native-op checked-add-i64; the body is only its
+;; reference semantics, never the lowered code
+(defn add-i64 [left: Int right: Int] -> Int (+ left right))
+
+;; fram.fri-replay/count-triples : index and total, exit on the bound
+(defn sum-below [limit: Int] -> Int
+  (loop [index: Int 0 total: Int 0]
+    (if (>= index limit)
+      total
+      (recur (add-i64 index 1) (add-i64 total index)))))
+
+;; fram.fri-replay/index-of : one accumulator, early exit, -1 sentinel
+(defn first-at-least [limit: Int threshold: Int] -> Int
+  (loop [index: Int 0]
+    (if (>= index limit)
+      -1
+      (if (>= index threshold)
+        index
+        (recur (add-i64 index 1))))))
+
+;; native.body-slice/reachable-type-ids : nested loop in the outer recur argument
+(defn triangle [rows: Int] -> Int
+  (loop [row: Int 0 total: Int 0]
+    (if (>= row rows)
+      total
+      (recur (add-i64 row 1)
+             (loop [column: Int 0 inner: Int total]
+               (if (>= column row)
+                 inner
+                 (recur (add-i64 column 1) (add-i64 inner 1))))))))
+
+;; fram.fri-replay/replay-lines : six accumulators of three native types
+(defn scan-six [limit: Int threshold: Int] -> Tally
+  (loop [index: Int 0
+         hits: Int 0
+         misses: Int 0
+         seen: Bool false
+         first-hit: Int -1
+         carried: Tally (->Tally 0 0)]
+    (if (>= index limit)
+      (->Tally hits misses)
+      (if (>= index threshold)
+        (recur (add-i64 index 1) (add-i64 hits 1) misses true
+               (if seen first-hit index) carried)
+        (recur (add-i64 index 1) hits (add-i64 misses 1) seen first-hit carried)))))
