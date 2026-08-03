@@ -70,6 +70,11 @@ loop in section 0, then run this bootstrap sequence:
    ordinary Edit/Write "temporarily" then adopt later — the seed-only step
    above is the entire text-authored surface, permanently.
 
+What that channel actually does: Beagle projects the program into recursive
+triples; Fram records assertion/retraction occurrences; the live view selects
+which propositions constitute the current program. A graph edit is an assertion
+event against that history, not a mutation of stored text.
+
 If `mcp__fram__*` is unavailable or flip level won't reach 3, that is a
 **loop-repair problem** (revive the coordinator, restart the session), never
 license to fall back to text Edit/Write on a greenfield graph-native module.
@@ -129,9 +134,9 @@ if the surface looks different than you expect, `git log` it.
 
 > To *query* a Beagle codebase relationally (scope-correct callers, transitive
 > blast radius / leverage, the call graph) rather than write it, see the
-> **codegraph** skill — it projects the source into a Fram fact graph
-> (Chartroom) and answers with Datalog, which beats grep/bare-symbol on exactly
-> the relational questions text search can't compute.
+> **codegraph** skill — it projects the source into recursive triples in Fram's
+> store (Chartroom) and answers with Datalog over the live view, which beats
+> grep/bare-symbol on exactly the relational questions text search can't compute.
 
 ## 3. Stable operating model (this does not churn)
 

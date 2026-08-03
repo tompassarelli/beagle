@@ -23,7 +23,7 @@ unchecked as untyped Clojure. Expressing the real type (`Int?`) forced the guard
 
 ## 2. `beagle-cascade` bare-name blast radius merged across modules
 **Surfaced by:** moving cascade's call graph from regex-over-text to the Fram
-`calls` fact graph (move 1, tool 1).
+`calls` relation in the code-as-facts graph of recursive triples (move 1, tool 1).
 **The bug:** the regex call graph keyed callers by **bare function name**, so a
 `helper` defined in two modules merged into one node. Changing `mod_a/helper` was
 reported as breaking callers of `mod_b/helper` — a function never touched. Wrong

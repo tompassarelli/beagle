@@ -101,8 +101,8 @@ breaking a reference, because references bind to identity, not to a string.
 Beagle (via FRAM) borrows that **separation**, not Unison's runtime:
 
 - **Stable binding identity.** A binding's identity in FRAM survives rename —
-  callers, the fact graph, and the repair loop track *what a definition is*,
-  not the string that currently labels it.
+  callers, the code-as-facts graph of recursive triples, and the repair loop
+  track *what a definition is*, not the string that currently labels it.
 - **Not content-addressed code.** Beagle does not adopt Unison's
   content-addressed storage, its hash-as-filename codebase model, or its
   structural-diff-as-deployment story. FRAM's identity is a stable binding
@@ -117,9 +117,9 @@ someone edits nearby.
 ## Datalog — recursive, stratified derivations, scoped to FRAM's graph
 
 Datalog contributes a narrow, specific borrowing: recursive and stratified
-derivation over a fact graph — the way FRAM computes transitive closures
-(callers-of-callers, blast radius, leverage) as a fixpoint over base facts,
-not as hand-written recursive traversal code.
+derivation over FRAM's Triple store — the way FRAM computes transitive closures
+(callers-of-callers, blast radius, leverage) as a fixpoint over the live base
+relations, not as hand-written recursive traversal code.
 
 - **Scoped to FRAM's graph layer.** This is how the *coordination and
   code-graph substrate* answers relational questions (`codegraph`'s "who
