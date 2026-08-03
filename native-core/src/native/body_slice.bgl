@@ -1,0 +1,247 @@
+;; Drives one source-fact projection through seal -> typed -> native -> the
+;; seven obligations -> the restricted C17 body materializer.
+;; The projection keeps exactly the types the lowered functions reach, so the
+;; world-level obligations are about lowered code, not about unreachable shapes.
+(ns native.body-slice
+  (:require [native.core :as core]
+            [native.worlds :as worlds]
+            [native.lower :as lower]
+            [native.obligations :as obligations]
+            [native.slice :as slice]
+            [native.fold-c17 :as c17]
+            [native.body-c17 :as body]))
+
+(define-mode strict)
+
+(defn union-tag-type-id [] -> core/NativeId
+  (core/typedef-id (lower/union-tag-type)))
+
+(defn type-references [definition: core/TypeDef] -> (Vec core/NativeId)
+  (let [shape: core/TypeShape (core/typedef-shape definition)]
+    (cond
+      (instance? native.core.RecordType shape)
+      (mapv (fn [field: core/TypeField] -> core/NativeId
+              (core/typefield-type-id field))
+        (core/recordtype-fields shape))
+
+      (instance? native.core.UnionType shape)
+      (loop [position: Int 0
+             variants: (Vec core/TypeVariant) (core/uniontype-variants shape)
+             collected: (Vec core/NativeId) [(union-tag-type-id)]]
+        (if (>= position (count variants))
+          collected
+          (let [payload: (U core/NativeId Nil)
+                (core/typevariant-payload-type (nth variants position))]
+            (recur (+ position 1) variants
+              (if (nil? payload) collected (conj collected payload))))))
+
+      (instance? native.core.VectorType shape)
+      [(core/vectortype-element-type shape)]
+
+      (instance? native.core.ReferenceType shape)
+      [(core/referencetype-target-type shape)]
+
+      (instance? native.core.OutcomeType shape)
+      [(core/outcometype-value-type shape)
+       (core/outcometype-failure-type shape)
+       (union-tag-type-id)]
+
+      :else [])))
+
+(defn instruction-type [instruction: core/Instruction] -> core/NativeId
+  (core/ssavaluev0-type-id (get instruction :result)))
+
+(defn function-type-seeds [function: core/FunctionDef] -> (Vec core/NativeId)
+  (let [return-type: (U core/NativeId Nil) (core/functiondef-return-type function)
+        seeds: (Vec core/NativeId)
+        (core/append-ids
+          (mapv (fn [parameter: core/Parameter] -> core/NativeId
+                  (core/parameter-type-id parameter))
+            (core/functiondef-parameters function))
+          (if (nil? return-type) [] [return-type]))
+        blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
+    (loop [position: Int 0 collected: (Vec core/NativeId) seeds]
+      (if (>= position (count blocks))
+        collected
+        (let [block: core/BasicBlock (nth blocks position)
+              with-parameters: (Vec core/NativeId)
+              (core/append-ids collected
+                (mapv (fn [parameter: core/Parameter] -> core/NativeId
+                        (core/parameter-type-id parameter))
+                  (core/basicblock-parameters block)))]
+          (recur (+ position 1)
+            (core/append-ids with-parameters
+              (mapv (fn [instruction: core/Instruction] -> core/NativeId
+                      (instruction-type instruction))
+                (core/basicblock-instructions block)))))))))
+
+(defn conj-id
+  [ids: (Vec core/NativeId) candidate: core/NativeId] -> (Vec core/NativeId)
+  (if (core/id-in? ids candidate) ids (conj ids candidate)))
+
+(defn abi-type-seeds [world: core/NativeWorld] -> (Vec core/NativeId)
+  (loop [position: Int 0
+         abis: (Vec core/AbiDeclV0) (core/nativeworld-abis world)
+         collected: (Vec core/NativeId) []]
+    (if (>= position (count abis))
+      collected
+      (let [abi: core/AbiDeclV0 (nth abis position)
+            result: (U core/AbiValueV0 Nil) (core/abideclv0-result abi)]
+        (recur (+ position 1) abis
+          (core/append-ids
+            (core/append-ids collected [(core/abideclv0-failure-type abi)])
+            (mapv (fn [value: core/AbiValueV0] -> core/NativeId
+                    (core/abivaluev0-type-id value))
+              (if (nil? result)
+                (core/abideclv0-parameters abi)
+                (conj (core/abideclv0-parameters abi) result)))))))))
+
+(defn reachable-type-ids [world: core/NativeWorld] -> (Vec core/NativeId)
+  (let [types: (Vec core/TypeDef) (core/nativeworld-types world)
+        seeds: (Vec core/NativeId)
+        (loop [position: Int 0
+               functions: (Vec core/FunctionDef) (core/nativeworld-functions world)
+               collected: (Vec core/NativeId) (abi-type-seeds world)]
+          (if (>= position (count functions))
+            collected
+            (recur (+ position 1) functions
+              (loop [inner: Int 0
+                     candidates: (Vec core/NativeId)
+                     (function-type-seeds (nth functions position))
+                     kept: (Vec core/NativeId) collected]
+                (if (>= inner (count candidates))
+                  kept
+                  (recur (+ inner 1) candidates
+                    (conj-id kept (nth candidates inner))))))))]
+    (loop [round: Int 0 current: (Vec core/NativeId) seeds]
+      (let [grown: (Vec core/NativeId)
+            (loop [position: Int 0 collected: (Vec core/NativeId) current]
+              (if (>= position (count current))
+                collected
+                (let [definition: (U core/TypeDef Nil)
+                      (slice/find-type types (nth current position))
+                      references: (Vec core/NativeId)
+                      (if (nil? definition) [] (type-references definition))]
+                  (recur (+ position 1)
+                    (loop [inner: Int 0 kept: (Vec core/NativeId) collected]
+                      (if (>= inner (count references))
+                        kept
+                        (recur (+ inner 1) (conj-id kept (nth references inner)))))))))]
+        (if (or (= (count grown) (count current)) (> round (count types)))
+          grown
+          (recur (+ round 1) grown))))))
+
+(defn projected-world [world: core/NativeWorld] -> core/NativeWorld
+  (let [kept: (Vec core/NativeId) (reachable-type-ids world)]
+    (core/->NativeWorld
+      (core/nativeworld-id world)
+      (core/nativeworld-parent world)
+      (core/nativeworld-compiler-pass world)
+      (filterv (fn [definition: core/TypeDef] -> Bool
+                 (core/id-in? kept (core/typedef-id definition)))
+        (core/nativeworld-types world))
+      (core/nativeworld-effects world)
+      (core/nativeworld-regions world)
+      (core/nativeworld-capabilities world)
+      (filterv (fn [layout: core/LayoutDef] -> Bool
+                 (core/id-in? kept (core/layoutdef-type-id layout)))
+        (core/nativeworld-layouts world))
+      (core/nativeworld-functions world)
+      (core/nativeworld-allowed-effects world)
+      (core/nativeworld-allowed-regions world)
+      (core/nativeworld-allowed-capabilities world)
+      (core/nativeworld-abis world)
+      (core/nativeworld-observations world))))
+
+(defn id-text [candidate: Any] -> String (str (get candidate :value "")))
+
+(defn verdict-subject [verdict: Any] -> String
+  (str (id-text (get verdict :type-id nil))
+    (id-text (get verdict :function-id nil))
+    (id-text (get verdict :abi-id nil))))
+
+(defn failing-obligations [world: core/NativeWorld] -> String
+  (let [verdicts: (Vec obligations/ObligationVerdictV0)
+        (obligations/validate-native-world world)
+        names: (Vec String) (slice/obligation-names)]
+    (loop [position: Int 0 report: String ""]
+      (if (>= position (count verdicts))
+        report
+        (recur (+ position 1)
+          (if (obligations/obligation-passed? (nth verdicts position))
+            report
+            (str report "obligation-detail " (nth names position) " "
+              (verdict-subject (nth verdicts position)) "\n")))))))
+
+(defn function-report [functions: (Vec core/FunctionDef)] -> String
+  (let [ordered: (Vec core/FunctionDef) (c17/ordered-functions functions)]
+    (loop [position: Int 0 report: String ""]
+      (if (>= position (count ordered))
+        report
+        (recur (+ position 1)
+          (str report "lowered fn_" (str position) " "
+            (core/functiondef-name (nth ordered position)) " "
+            (str (count (core/functiondef-blocks (nth ordered position))))
+            " blocks\n"))))))
+
+(defn emit-slice!
+  [facts-path: String
+   module-name: String
+   relative-path: String
+   artifacts-dir: String
+   compiler-commit: String]
+  -> String
+  (let [rows: (Vec slice/SliceFactV0) (slice/parse-facts (slurp facts-path))
+        configuration: (Vec String) ["profile=3"]
+        source: worlds/SourceProgramWorldV0
+        (slice/source-world rows module-name relative-path)
+        seal-result: lower/SourceSealResultV0
+        (lower/seal-source-world source compiler-commit configuration)]
+    (if (not (instance? native.lower.SourceSealAcceptedV0 seal-result))
+      "stage source-seal REJECTED\n"
+      (let [sealed-source: worlds/SealedSourceWorldV0
+            (lower/sourcesealacceptedv0-sealed seal-result)
+            typing-result: lower/TypingResultV0
+            (lower/lower-typed-world sealed-source compiler-commit configuration)]
+        (if (not (instance? native.lower.TypingAcceptedV0 typing-result))
+          "stage source-seal ACCEPTED\nstage source-to-typed REJECTED\n"
+          (let [sealed-typed: worlds/SealedTypedWorldV0
+                (lower/typingacceptedv0-sealed typing-result)
+                typed-slice: lower/TypedSliceV0
+                (lower/typingacceptedv0-slice typing-result)
+                native-result: lower/NativeLoweringResultV0
+                (lower/lower-native-world sealed-typed typed-slice compiler-commit
+                  configuration)
+                sealed-native: worlds/SealedNativeWorldV0
+                (slice/native-sealed native-result)
+                program: core/NativeWorld
+                (worlds/nativeworldv0-program
+                  (worlds/sealednativeworldv0-world sealed-native))
+                projected: core/NativeWorld (projected-world program)
+                result: body/BodyMaterializationV0 (body/materialize-world projected 0)
+                head: String
+                (str "stage source-seal ACCEPTED\n"
+                  "stage source-to-typed ACCEPTED\n"
+                  "world-types " (str (count (core/nativeworld-types program))) "\n"
+                  "world-functions "
+                  (str (count (core/nativeworld-functions program))) "\n"
+                  "world-abis " (str (count (core/nativeworld-abis program))) "\n"
+                  "projected-types "
+                  (str (count (core/nativeworld-types projected))) "\n"
+                  (function-report (core/nativeworld-functions projected))
+                  (slice/obligation-report "obligation-projection" projected)
+                  (failing-obligations projected)
+                  (slice/pending-reports (slice/native-pending native-result)))]
+            (if (not (body/materialization-ok? result))
+              (str head "materialize REFUSED "
+                (body/materialization-detail result) "\n")
+              (let [artifact: body/BodyArtifactV0
+                    (body/materialization-artifact result)]
+                (do
+                 (spit (str artifacts-dir "/" (body/bodyartifactv0-header-name artifact))
+                   (body/bodyartifactv0-header-text artifact))
+                 (spit (str artifacts-dir "/" (body/bodyartifactv0-source-name artifact))
+                   (body/bodyartifactv0-source-text artifact))
+                  (str head "materialize OK "
+                    (body/bodyartifactv0-header-name artifact) " "
+                    (body/bodyartifactv0-source-name artifact) "\n"))))))))))

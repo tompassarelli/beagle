@@ -95,6 +95,14 @@
   (CheckedAddI64V0 [left-id: NativeId right-id: NativeId])
   (CheckedBoundsV0 [index-id: NativeId length-id: NativeId]))
 
+;; Total comparisons: every operand pair is defined, so a comparison is never a
+;; CheckedOperationV0 and never carries an Outcome result.
+(defunion CompareOpV0
+  (CompareEqI64V0 [token: Bool])
+  (CompareLtI64V0 [token: Bool])
+  (CompareLeI64V0 [token: Bool])
+  (CompareEqBoolV0 [token: Bool]))
+
 (defunion ResourceTokenKindV0
   (RegionTokenV0 [region: NativeId])
   (CapabilityTokenV0 [capability: NativeId]))
@@ -122,7 +130,14 @@
      byte-count-id: NativeId tokens: TokenFlowV0])
   (CallInstruction
     [result: SsaValueV0 function-id: NativeId arguments: (Vec NativeId)
-     tokens: TokenFlowV0]))
+     tokens: TokenFlowV0])
+  (CompareInstruction
+    [result: SsaValueV0 comparison: CompareOpV0
+     left-id: NativeId right-id: NativeId])
+  ;; Record values are held by value, so a field read is an extract and a record
+  ;; construct is a value form; neither touches a region or a capability.
+  (FieldInstruction [result: SsaValueV0 source-id: NativeId field-id: NativeId])
+  (RecordInstruction [result: SsaValueV0 field-ids: (Vec NativeId)]))
 
 (defrecord SwitchCaseV0
   [variant-id: NativeId block-id: NativeId arguments: (Vec NativeId)])
@@ -253,7 +268,10 @@
     [(StoreInstruction result store tokens) (ssavaluev0-id result)]
     [(AllocateInstruction result region capability byte-count-id tokens)
      (ssavaluev0-id result)]
-    [(CallInstruction result function-id arguments tokens) (ssavaluev0-id result)]))
+    [(CallInstruction result function-id arguments tokens) (ssavaluev0-id result)]
+    [(CompareInstruction result comparison left-id right-id) (ssavaluev0-id result)]
+    [(FieldInstruction result source-id field-id) (ssavaluev0-id result)]
+    [(RecordInstruction result field-ids) (ssavaluev0-id result)]))
 
 (defn instruction-result-ids [instructions :- (Vec Instruction)] :- (Vec NativeId)
   (mapv (fn [instruction :- Instruction] :- NativeId (instruction-result-id instruction))
@@ -459,7 +477,10 @@
      (and (id-in? known-regions region)
        (id-in? known-capabilities capability))]
     [(CallInstruction result function-id arguments tokens)
-     (id-in? known-functions function-id)]))
+     (id-in? known-functions function-id)]
+    [(CompareInstruction result comparison left-id right-id) true]
+    [(FieldInstruction result source-id field-id) (id-in? known-owned field-id)]
+    [(RecordInstruction result field-ids) true]))
 
 (defn parameter-types-closed? [parameters :- (Vec Parameter) known-types :- (Vec NativeId)] :- Bool
   (every? (fn [parameter :- Parameter] :- Bool (id-in? known-types (parameter-type-id parameter)))
@@ -541,7 +562,10 @@
     [(StoreInstruction result store tokens) (store-op-ssa-refs store)]
     [(AllocateInstruction result region capability byte-count-id tokens)
      [byte-count-id]]
-    [(CallInstruction result function-id arguments tokens) arguments]))
+    [(CallInstruction result function-id arguments tokens) arguments]
+    [(CompareInstruction result comparison left-id right-id) [left-id right-id]]
+    [(FieldInstruction result source-id field-id) [source-id]]
+    [(RecordInstruction result field-ids) field-ids]))
 
 (defn terminator-ssa-refs [terminator :- Terminator] :- (Vec NativeId)
   (match terminator
@@ -596,7 +620,10 @@
     [(AllocateInstruction result region capability byte-count-id tokens)
      (and (id-in? allowed-regions region)
        (id-in? allowed-capabilities capability))]
-    [(CallInstruction result function-id arguments tokens) true]))
+    [(CallInstruction result function-id arguments tokens) true]
+    [(CompareInstruction result comparison left-id right-id) true]
+    [(FieldInstruction result source-id field-id) true]
+    [(RecordInstruction result field-ids) true]))
 
 (defn block-resources-allowed? [block :- BasicBlock allowed-regions :- (Vec NativeId) allowed-capabilities :- (Vec NativeId)] :- Bool
   (every? (fn [instruction :- Instruction] :- Bool (instruction-resources-allowed? instruction allowed-regions allowed-capabilities))

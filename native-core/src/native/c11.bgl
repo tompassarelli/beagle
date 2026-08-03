@@ -226,7 +226,10 @@
     [(CheckedInstruction value) (checked-operation-supported? (core/checkedinstruction-operation instruction))]
     [(StoreInstruction value) false]
     [(AllocateInstruction value) false]
-    [(CallInstruction value) false]))
+    [(CallInstruction value) false]
+    [(CompareInstruction value) false]
+    [(FieldInstruction value) false]
+    [(RecordInstruction value) false]))
 
 (defn terminator-supported? [terminator: core/Terminator] -> Bool
   (match terminator
@@ -458,7 +461,10 @@
            [(CheckedBoundsV0 operation-value) ""]))]
       [(StoreInstruction value) ""]
       [(AllocateInstruction value) ""]
-      [(CallInstruction value) ""])))
+      [(CallInstruction value) ""]
+      [(CompareInstruction value) ""]
+      [(FieldInstruction value) ""]
+      [(RecordInstruction value) ""])))
 
 (defn emit-instructions [types: (Vec core/TypeDef) module-index: Int function: core/FunctionDef block: core/BasicBlock] -> String
   (let [instructions: (Vec core/Instruction) (core/basicblock-instructions block)]

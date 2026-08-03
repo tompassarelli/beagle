@@ -1,0 +1,508 @@
+;; Restricted C17 materializer for lowered function bodies: multi-block SSA with
+;; block arguments, closed-union dispatch, record extract/construct, and traps.
+;; Types, layouts and prototypes are native.fold-c17's; only bodies live here.
+(ns native.body-c17)
+
+(define-mode strict)
+
+(require native.core :as core)
+(require native.fold-c17 :as c17)
+
+(defrecord BodyArtifactV0
+  [header-name: String header-text: String
+   source-name: String source-text: String])
+
+(defunion BodyMaterializationV0
+  (BodySuccessV0 [artifact: BodyArtifactV0])
+  (BodyFailureV0 [detail: String]))
+
+(defrecord ValueSlotV0 [id: core/NativeId type-id: core/NativeId])
+
+;; Consumers live in other namespaces, where a `match` on this union does not
+;; survive emission; these three are the supported way to read the result.
+(defn materialization-ok? [result: BodyMaterializationV0] -> Bool
+  (match result
+    [(BodySuccessV0 artifact) true]
+    [(BodyFailureV0 detail) false]))
+
+(defn materialization-detail [result: BodyMaterializationV0] -> String
+  (match result
+    [(BodySuccessV0 artifact) ""]
+    [(BodyFailureV0 detail) detail]))
+
+(defn materialization-artifact
+  [result: BodyMaterializationV0] -> BodyArtifactV0
+  (match result
+    [(BodySuccessV0 artifact) artifact]
+    [(BodyFailureV0 detail) (->BodyArtifactV0 "" "" "" "")]))
+
+(defn instruction-supported? [instruction: core/Instruction] -> Bool
+  (cond
+    (instance? native.core.AtomInstruction instruction)
+    (let [atom: core/NativeAtom (core/atominstruction-atom instruction)]
+      (or (instance? native.core.BoolAtom atom)
+          (instance? native.core.I64Atom atom)
+          (instance? native.core.F64Atom atom)))
+    (instance? native.core.CopyInstruction instruction) true
+    (instance? native.core.CompareInstruction instruction) true
+    (instance? native.core.FieldInstruction instruction) true
+    (instance? native.core.RecordInstruction instruction) true
+    (instance? native.core.CallInstruction instruction) true
+    :else false))
+
+(defn terminator-supported? [terminator: core/Terminator] -> Bool
+  (or (instance? native.core.ReturnTerminator terminator)
+      (instance? native.core.JumpTerminator terminator)
+      (instance? native.core.BranchTerminator terminator)
+      (instance? native.core.SwitchTerminator terminator)
+      (instance? native.core.TrapTerminator terminator)))
+
+(defn block-supported? [block: core/BasicBlock] -> Bool
+  (and (= 1 (count (core/basicblock-terminators block)))
+    (every? instruction-supported? (core/basicblock-instructions block))
+    (every? terminator-supported? (core/basicblock-terminators block))))
+
+(defn function-supported? [function: core/FunctionDef] -> Bool
+  (and (> (count (core/functiondef-blocks function)) 0)
+    (every? block-supported? (core/functiondef-blocks function))))
+
+(defn world-supported? [world: core/NativeWorld] -> Bool
+  (let [layouts: (Vec core/LayoutDef) (core/nativeworld-layouts world)
+        types: (Vec core/TypeDef) (core/nativeworld-types world)]
+    (and (every? (fn [type-def: core/TypeDef] -> Bool
+                   (c17/type-supported? type-def types layouts))
+           types)
+      (c17/types-orderable? types layouts)
+      (every? function-supported? (core/nativeworld-functions world)))))
+
+(defn block-index [blocks: (Vec core/BasicBlock) target: core/NativeId] -> Int
+  (loop [position: Int 0]
+    (if (>= position (count blocks))
+      -1
+      (if (core/native-id= (core/basicblock-id (nth blocks position)) target)
+        position
+        (recur (+ position 1))))))
+
+(defn label-name [function-index: Int block: Int] -> String
+  (str "native_l" function-index "_" block))
+
+(defn function-name [module-index: Int function-index: Int] -> String
+  (str (c17/module-prefix module-index) "_fn_" function-index))
+
+;; Every block parameter and instruction result gets one C local declared at the
+;; top of the function: a goto target may not jump over a declaration.
+(defn function-value-slots [function: core/FunctionDef] -> (Vec ValueSlotV0)
+  (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
+    (loop [position: Int 0 slots: (Vec ValueSlotV0) []]
+      (if (>= position (count blocks))
+        slots
+        (let [block: core/BasicBlock (nth blocks position)
+              with-parameters: (Vec ValueSlotV0)
+              (loop [inner: Int 0
+                     collected: (Vec ValueSlotV0) slots
+                     parameters: (Vec core/Parameter) (core/basicblock-parameters block)]
+                (if (>= inner (count parameters))
+                  collected
+                  (recur (+ inner 1)
+                    (conj collected
+                      (->ValueSlotV0 (core/parameter-id (nth parameters inner))
+                        (core/parameter-type-id (nth parameters inner))))
+                    parameters)))
+              with-results: (Vec ValueSlotV0)
+              (loop [inner: Int 0
+                     collected: (Vec ValueSlotV0) with-parameters
+                     instructions: (Vec core/Instruction)
+                     (core/basicblock-instructions block)]
+                (if (>= inner (count instructions))
+                  collected
+                  (let [result: core/SsaValueV0
+                        (get (nth instructions inner) :result)]
+                    (recur (+ inner 1)
+                      (conj collected
+                        (->ValueSlotV0 (core/ssavaluev0-id result)
+                          (core/ssavaluev0-type-id result)))
+                      instructions))))]
+          (recur (+ position 1) with-results))))))
+
+(defn slot-index [slots: (Vec ValueSlotV0) target: core/NativeId] -> Int
+  (loop [position: Int 0]
+    (if (>= position (count slots))
+      -1
+      (if (core/native-id= (valueslotv0-id (nth slots position)) target)
+        position
+        (recur (+ position 1))))))
+
+(defn parameter-index
+  [parameters: (Vec core/Parameter) target: core/NativeId] -> Int
+  (loop [position: Int 0]
+    (if (>= position (count parameters))
+      -1
+      (if (core/native-id= (core/parameter-id (nth parameters position)) target)
+        position
+        (recur (+ position 1))))))
+
+(defn value-name
+  [function: core/FunctionDef slots: (Vec ValueSlotV0) target: core/NativeId]
+  -> String
+  (let [position: Int
+        (parameter-index (core/functiondef-parameters function) target)]
+    (if (>= position 0)
+      (str "native_v_" position)
+      (str "native_s_" (slot-index slots target)))))
+
+(defn emit-declarations
+  [types: (Vec core/TypeDef) module-index: Int slots: (Vec ValueSlotV0)] -> String
+  (loop [position: Int 0 result: String ""]
+    (if (>= position (count slots))
+      result
+      (recur (+ position 1)
+        (str result "  "
+          (c17/c-type types module-index (valueslotv0-type-id (nth slots position)))
+          " native_s_" position ";\n")))))
+
+(defn atom-expression [atom: core/NativeAtom] -> String
+  (cond
+    (instance? native.core.BoolAtom atom)
+    (if (core/boolatom-value atom) "true" "false")
+    (instance? native.core.I64Atom atom)
+    (str "INT64_C(" (core/i64atom-value atom) ")")
+    (instance? native.core.F64Atom atom) (str (core/f64atom-value atom))
+    :else ""))
+
+(defn compare-operator [comparison: core/CompareOpV0] -> String
+  (cond
+    (instance? native.core.CompareEqI64V0 comparison) "=="
+    (instance? native.core.CompareLtI64V0 comparison) "<"
+    (instance? native.core.CompareLeI64V0 comparison) "<="
+    :else "=="))
+
+(defn field-position
+  [layouts: (Vec core/LayoutDef) owner: core/NativeId field: core/NativeId] -> Int
+  (let [layout: (U core/LayoutDef Nil) (c17/layout-for-type layouts owner)]
+    (if (nil? layout)
+      -1
+      (let [fields: (Vec core/FieldLayoutV0) (c17/record-layout-fields layout)]
+        (loop [position: Int 0]
+          (if (>= position (count fields))
+            -1
+            (if (core/native-id= (core/fieldlayoutv0-field-id (nth fields position))
+                  field)
+              position
+              (recur (+ position 1)))))))))
+
+(defn slot-type
+  [function: core/FunctionDef slots: (Vec ValueSlotV0) target: core/NativeId]
+  -> core/NativeId
+  (let [position: Int
+        (parameter-index (core/functiondef-parameters function) target)]
+    (if (>= position 0)
+      (core/parameter-type-id (nth (core/functiondef-parameters function) position))
+      (let [slot: Int (slot-index slots target)]
+        (if (< slot 0)
+          (core/->NativeId "native-body-c17-missing-value")
+          (valueslotv0-type-id (nth slots slot)))))))
+
+(defn function-index-of
+  [functions: (Vec core/FunctionDef) target: core/NativeId] -> Int
+  (loop [position: Int 0]
+    (if (>= position (count functions))
+      -1
+      (if (core/native-id= (core/functiondef-id (nth functions position)) target)
+        position
+        (recur (+ position 1))))))
+
+(defn emit-arguments
+  [function: core/FunctionDef slots: (Vec ValueSlotV0) arguments: (Vec core/NativeId)]
+  -> String
+  (loop [position: Int 0 result: String ""]
+    (if (>= position (count arguments))
+      result
+      (recur (+ position 1)
+        (str result (if (= position 0) "" ", ")
+          (value-name function slots (nth arguments position)))))))
+
+(defn emit-instruction
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)
+   functions: (Vec core/FunctionDef)
+   module-index: Int
+   function: core/FunctionDef
+   slots: (Vec ValueSlotV0)
+   instruction: core/Instruction]
+  -> String
+  (let [result: core/SsaValueV0 (get instruction :result)
+        target: String (value-name function slots (core/ssavaluev0-id result))]
+    (cond
+      (instance? native.core.AtomInstruction instruction)
+      (str "  " target " = "
+        (atom-expression (core/atominstruction-atom instruction)) ";\n")
+
+      (instance? native.core.CopyInstruction instruction)
+      (str "  " target " = "
+        (value-name function slots (core/copyinstruction-source-id instruction))
+        ";\n")
+
+      (instance? native.core.CompareInstruction instruction)
+      (str "  " target " = ("
+        (value-name function slots (core/compareinstruction-left-id instruction))
+        " " (compare-operator (core/compareinstruction-comparison instruction)) " "
+        (value-name function slots (core/compareinstruction-right-id instruction))
+        ");\n")
+
+      (instance? native.core.FieldInstruction instruction)
+      (let [source: core/NativeId (core/fieldinstruction-source-id instruction)
+            position: Int
+            (field-position layouts (slot-type function slots source)
+              (core/fieldinstruction-field-id instruction))]
+        (str "  " target " = " (value-name function slots source)
+          ".field_" position ";\n"))
+
+      (instance? native.core.RecordInstruction instruction)
+      (let [values: (Vec core/NativeId) (core/recordinstruction-field-ids instruction)]
+        (str "  " target " = ("
+          (c17/c-type types module-index (core/ssavaluev0-type-id result)) "){"
+          (loop [position: Int 0 fragment: String ""]
+            (if (>= position (count values))
+              fragment
+              (recur (+ position 1)
+                (str fragment (if (= position 0) " " ", ")
+                  ".field_" position " = "
+                  (value-name function slots (nth values position))))))
+          " };\n"))
+
+      :else
+      (str "  " target " = "
+        (function-name module-index
+          (function-index-of functions
+            (core/callinstruction-function-id instruction)))
+        "(" (emit-arguments function slots
+              (core/callinstruction-arguments instruction)) ");\n"))))
+
+(defn variant-tag
+  [layouts: (Vec core/LayoutDef) owner: core/NativeId variant: core/NativeId] -> Int
+  (let [layout: (U core/LayoutDef Nil) (c17/layout-for-type layouts owner)]
+    (if (nil? layout)
+      -1
+      (let [variants: (Vec core/UnionVariantLayoutV0)
+            (c17/union-layout-variants layout)]
+        (loop [position: Int 0]
+          (if (>= position (count variants))
+            -1
+            (if (core/native-id=
+                  (core/unionvariantlayoutv0-variant-id (nth variants position))
+                  variant)
+              (core/unionvariantlayoutv0-tag (nth variants position))
+              (recur (+ position 1)))))))))
+
+(defn emit-jump
+  [function: core/FunctionDef
+   function-index: Int
+   slots: (Vec ValueSlotV0)
+   target-id: core/NativeId
+   arguments: (Vec core/NativeId)]
+  -> String
+  (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)
+        position: Int (block-index blocks target-id)
+        target-block: core/BasicBlock (nth blocks position)
+        parameters: (Vec core/Parameter) (core/basicblock-parameters target-block)]
+    (str
+      (loop [inner: Int 0 result: String ""]
+        (if (>= inner (count arguments))
+          result
+          (recur (+ inner 1)
+            (str result "  "
+              (value-name function slots
+                (core/parameter-id (nth parameters inner)))
+              " = " (value-name function slots (nth arguments inner)) ";\n"))))
+      "  goto " (label-name function-index position) ";\n")))
+
+(defn emit-terminator
+  [layouts: (Vec core/LayoutDef)
+   function: core/FunctionDef
+   function-index: Int
+   slots: (Vec ValueSlotV0)
+   terminator: core/Terminator]
+  -> String
+  (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
+    (cond
+      (instance? native.core.ReturnTerminator terminator)
+      (let [value: (U core/NativeId Nil) (core/returnterminator-value terminator)]
+        (if (nil? value)
+          "  return;\n"
+          (str "  return " (value-name function slots value) ";\n")))
+
+      (instance? native.core.JumpTerminator terminator)
+      (emit-jump function function-index slots
+        (core/jumpterminator-block-id terminator)
+        (core/jumpterminator-arguments terminator))
+
+      (instance? native.core.BranchTerminator terminator)
+      (str "  if (" (value-name function slots
+                      (core/branchterminator-condition terminator)) ") {\n  "
+        (emit-jump function function-index slots
+          (core/branchterminator-true-block terminator) [])
+        "  } else {\n  "
+        (emit-jump function function-index slots
+          (core/branchterminator-false-block terminator) [])
+        "  }\n")
+
+      (instance? native.core.SwitchTerminator terminator)
+      (let [value: core/NativeId (core/switchterminator-value-id terminator)
+            owner: core/NativeId (slot-type function slots value)
+            cases: (Vec core/SwitchCaseV0)
+            (core/switchterminator-cases terminator)]
+        (str "  switch (" (value-name function slots value) ".tag) {\n"
+          (loop [position: Int 0 result: String ""]
+            (if (>= position (count cases))
+              result
+              (let [switch-case: core/SwitchCaseV0 (nth cases position)]
+                (recur (+ position 1)
+                  (str result "  case INT64_C("
+                    (variant-tag layouts owner
+                      (core/switchcasev0-variant-id switch-case))
+                    "):\n  "
+                    (emit-jump function function-index slots
+                      (core/switchcasev0-block-id switch-case)
+                      (core/switchcasev0-arguments switch-case)))))))
+          "  default:\n    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);\n"
+          "  }\n"))
+
+      :else
+      (str "  native_trap((uint32_t)"
+        (value-name function slots (core/trapterminator-failure-id terminator))
+        ");\n"))))
+
+(defn terminator-targets [terminator: core/Terminator] -> (Vec core/NativeId)
+  (cond
+    (instance? native.core.JumpTerminator terminator)
+    [(core/jumpterminator-block-id terminator)]
+    (instance? native.core.BranchTerminator terminator)
+    [(core/branchterminator-true-block terminator)
+     (core/branchterminator-false-block terminator)]
+    (instance? native.core.SwitchTerminator terminator)
+    (mapv (fn [switch-case: core/SwitchCaseV0] -> core/NativeId
+            (core/switchcasev0-block-id switch-case))
+      (core/switchterminator-cases terminator))
+    :else []))
+
+(defn block-targeted?
+  [function: core/FunctionDef target: core/NativeId] -> Bool
+  (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
+    (loop [position: Int 0]
+      (if (>= position (count blocks))
+        false
+        (let [terminators: (Vec core/Terminator)
+              (core/basicblock-terminators (nth blocks position))
+              hit: Bool
+              (loop [inner: Int 0]
+                (if (>= inner (count terminators))
+                  false
+                  (if (core/id-in?
+                        (terminator-targets (nth terminators inner))
+                        target)
+                    true
+                    (recur (+ inner 1)))))]
+          (if hit true (recur (+ position 1))))))))
+
+(defn emit-block
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)
+   functions: (Vec core/FunctionDef)
+   module-index: Int
+   function: core/FunctionDef
+   function-index: Int
+   slots: (Vec ValueSlotV0)
+   position: Int]
+  -> String
+  (let [block: core/BasicBlock (nth (core/functiondef-blocks function) position)
+        label: String
+        (if (block-targeted? function (core/basicblock-id block))
+          (str (label-name function-index position) ": ;\n")
+          "")
+        instructions: (Vec core/Instruction) (core/basicblock-instructions block)]
+    (str label
+      (loop [inner: Int 0 result: String ""]
+        (if (>= inner (count instructions))
+          result
+          (recur (+ inner 1)
+            (str result
+              (emit-instruction types layouts functions module-index function slots
+                (nth instructions inner))))))
+      (emit-terminator layouts function function-index slots
+        (nth (core/basicblock-terminators block) 0)))))
+
+(defn emit-function
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)
+   functions: (Vec core/FunctionDef)
+   module-index: Int
+   function-index: Int
+   function: core/FunctionDef]
+  -> String
+  (let [slots: (Vec ValueSlotV0) (function-value-slots function)
+        blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
+    (str (c17/function-return-type types module-index function) " "
+      (function-name module-index function-index)
+      "(" (c17/emit-parameter-list types module-index function) ") {\n"
+      (emit-declarations types module-index slots)
+      (loop [position: Int 0 result: String ""]
+        (if (>= position (count blocks))
+          result
+          (recur (+ position 1)
+            (str result
+              (emit-block types layouts functions module-index function
+                function-index slots position)))))
+      "}\n")))
+
+(defn emit-functions
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)
+   functions: (Vec core/FunctionDef)
+   module-index: Int]
+  -> String
+  (loop [position: Int 0 result: String ""]
+    (if (>= position (count functions))
+      result
+      (recur (+ position 1)
+        (str result
+          (emit-function types layouts functions module-index position
+            (nth functions position)))))))
+
+(defn emit-source
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)
+   functions: (Vec core/FunctionDef)
+   module-index: Int
+   header-name: String]
+  -> String
+  (str "/* Generated by native.body-c17; do not edit. */\n"
+    "#include \"" header-name "\"\n\n"
+    (emit-functions types layouts functions module-index)))
+
+(defn materialize-world
+  [world: core/NativeWorld module-index: Int] -> BodyMaterializationV0
+  (let [validation: core/ValidationReport (core/validate-world world)]
+    (cond
+      (< module-index 0)
+      (->BodyFailureV0 "module index must be nonnegative")
+
+      (not (core/validationreport-passed validation))
+      (->BodyFailureV0 "native world is not sealed: validation obligations failed")
+
+      (not (world-supported? world))
+      (->BodyFailureV0
+        "native world uses a shape outside the restricted C17 body slice")
+
+      :else
+      (let [layouts: (Vec core/LayoutDef) (core/nativeworld-layouts world)
+            types: (Vec core/TypeDef)
+            (c17/dependency-ordered-types (core/nativeworld-types world) layouts)
+            functions: (Vec core/FunctionDef)
+            (c17/ordered-functions (core/nativeworld-functions world))
+            header-name: String (str "module_" module-index ".h")]
+        (->BodySuccessV0
+          (->BodyArtifactV0
+            header-name
+            (c17/emit-header types layouts functions module-index)
+            (str "module_" module-index ".c")
+            (emit-source types layouts functions module-index header-name)))))))
