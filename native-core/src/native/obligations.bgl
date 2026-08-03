@@ -20,8 +20,15 @@
   [found :- Bool function-parameter :- Bool block-id :- core/NativeId
    position :- Int type-id :- core/NativeId])
 
+(defrecord CheckedUseScanV0 [handled :- Bool legal :- Bool])
+
 (defn obligation-id [name :- String] :- core/NativeId
   (core/canonical-id "native-obligations-v0" [name]))
+
+(defn dynamic-id= [left :- Any right :- Any] :- Bool
+  (and (not (nil? left))
+    (not (nil? right))
+    (= (get left :value "left-missing") (get right :value "right-missing"))))
 
 (defn obligation-passed? [verdict :- ObligationVerdictV0] :- Bool
   (match verdict
@@ -493,6 +500,101 @@
           (recur (+ index 1) types)
           (->ClosedLayoutsDiagnosticV0 (core/typedef-id type-def)))))))
 
+(defn outcome-type? [types :- (Vec core/TypeDef) type-id :- core/NativeId]
+  :- Bool
+  (let [type-def :- (U core/TypeDef Nil) (find-type types type-id)]
+    (and (not (nil? type-def))
+      (some? (get (core/typedef-shape type-def) :value-type nil))
+      (some? (get (core/typedef-shape type-def) :failure-type nil)))))
+
+(defn checked-terminator-use [function :- core/FunctionDef
+                             result-id :- core/NativeId
+                             result-type :- core/NativeId
+                             terminator :- core/Terminator]
+  :- CheckedUseScanV0
+  (let [switch-value :- Any (get terminator :value-id nil)
+        return-value :- Any (get terminator :value nil)
+        refs :- (Vec core/NativeId) (core/terminator-ssa-refs terminator)]
+    (cond
+      (dynamic-id= switch-value result-id) (->CheckedUseScanV0 true true)
+      (dynamic-id= return-value result-id)
+      (->CheckedUseScanV0
+        (dynamic-id= (get function :return-type nil) result-type)
+        (dynamic-id= (get function :return-type nil) result-type))
+      (core/id-in? refs result-id) (->CheckedUseScanV0 false false)
+      :else (->CheckedUseScanV0 false true))))
+
+(defn checked-block-use-scan [function :- core/FunctionDef
+                              result-id :- core/NativeId
+                              result-type :- core/NativeId
+                              block :- core/BasicBlock] :- CheckedUseScanV0
+  (if
+    (some? (some (fn [instruction :- core/Instruction] :- Bool
+                   (core/id-in? (core/instruction-ssa-refs instruction)
+                     result-id))
+             (core/basicblock-instructions block)))
+    (->CheckedUseScanV0 false false)
+    (loop [term-index :- Int 0 handled :- Bool false
+           terminators :- (Vec core/Terminator)
+           (core/basicblock-terminators block)]
+      (if (>= term-index (count terminators))
+        (->CheckedUseScanV0 handled true)
+        (let [scan :- CheckedUseScanV0
+              (checked-terminator-use function result-id result-type
+                (nth terminators term-index))]
+          (if (checkedusescanv0-legal scan)
+            (recur (+ term-index 1)
+              (or handled (checkedusescanv0-handled scan))
+              terminators)
+            (->CheckedUseScanV0 false false)))))))
+
+(defn checked-result-handled? [function :- core/FunctionDef
+                               result-id :- core/NativeId
+                               result-type :- core/NativeId] :- Bool
+  (loop [block-index :- Int 0 handled :- Bool false
+         blocks :- (Vec core/BasicBlock) (core/functiondef-blocks function)]
+    (if (>= block-index (count blocks))
+      handled
+      (let [scan :- CheckedUseScanV0
+            (checked-block-use-scan function result-id result-type
+              (nth blocks block-index))]
+        (if (checkedusescanv0-legal scan)
+          (recur (+ block-index 1)
+            (or handled (checkedusescanv0-handled scan))
+            blocks)
+          false)))))
+
+(defn checked-instruction-valid? [types :- (Vec core/TypeDef)
+                                  function :- core/FunctionDef
+                                  instruction :- core/Instruction] :- Bool
+  (let [operation :- Any (get instruction :operation nil)]
+    (if (nil? operation)
+      true
+      (let [result :- core/SsaValueV0 (get instruction :result)
+            result-id :- core/NativeId (core/ssavaluev0-id result)
+            result-type :- core/NativeId (core/ssavaluev0-type-id result)]
+        (and (outcome-type? types result-type)
+          (checked-result-handled? function result-id result-type))))))
+
+(defn function-checked-arithmetic? [types :- (Vec core/TypeDef)
+                                   function :- core/FunctionDef] :- Bool
+  (every? (fn [block :- core/BasicBlock] :- Bool
+            (every? (fn [instruction :- core/Instruction] :- Bool
+                      (checked-instruction-valid? types function instruction))
+              (core/basicblock-instructions block)))
+    (core/functiondef-blocks function)))
+
+(defn checked-arithmetic [world :- core/NativeWorld] :- ObligationVerdictV0
+  (loop [index :- Int 0 functions :- (Vec core/FunctionDef)
+         (core/nativeworld-functions world)]
+    (if (>= index (count functions))
+      (->ObligationPassV0 (core/->CheckedOperationsObligation true))
+      (let [function :- core/FunctionDef (nth functions index)]
+        (if (function-checked-arithmetic? (core/nativeworld-types world) function)
+          (recur (+ index 1) functions)
+          (->CheckedArithmeticDiagnosticV0
+            (core/functiondef-id function)))))))
+
 (def fixture-i64-type :- core/TypeDef
   (core/->TypeDef (obligation-id "type-i64") "I64"
     (core/->AtomType (core/->I64Kind true))))
@@ -518,15 +620,28 @@
       [(core/->UnionVariantLayoutV0 (obligation-id "variant-left") 0 nil 8)
        (core/->UnionVariantLayoutV0 (obligation-id "variant-right") 1 nil 8)])))
 
+(def fixture-outcome-type :- core/TypeDef
+  (core/->TypeDef (obligation-id "type-checked-i64") "CheckedI64"
+    (core/->OutcomeType (obligation-id "type-i64")
+      (obligation-id "type-choice"))))
+
+(def fixture-outcome-layout :- core/LayoutDef
+  (core/->LayoutDef (obligation-id "layout-checked-i64")
+    (obligation-id "type-checked-i64") 16 8
+    (core/->UnionShapeV0 (obligation-id "type-i64") 0
+      [(core/->UnionVariantLayoutV0 (obligation-id "variant-left") 0 nil 8)
+       (core/->UnionVariantLayoutV0 (obligation-id "variant-right") 1 nil 8)])))
+
 (def fixture-function :- core/FunctionDef
   (core/->FunctionDef (obligation-id "function-copy") "copy"
     [(core/->Parameter (obligation-id "ssa-input") (obligation-id "type-i64"))
      (core/->Parameter (obligation-id "ssa-choice") (obligation-id "type-choice"))]
     [(core/->BasicBlock (obligation-id "block-entry") []
-       [(core/->CopyInstruction
+       [(core/->CheckedInstruction
           (core/->SsaValueV0 (obligation-id "ssa-result")
-            (obligation-id "type-i64"))
-          (obligation-id "ssa-input"))]
+            (obligation-id "type-checked-i64"))
+          (core/->CheckedAddI64V0 (obligation-id "ssa-input")
+            (obligation-id "ssa-input")))]
        [(core/->SwitchTerminator (obligation-id "ssa-choice")
           [(core/->SwitchCaseV0 (obligation-id "variant-left")
              (obligation-id "block-left") [])
@@ -537,14 +652,15 @@
      (core/->BasicBlock (obligation-id "block-right") [] []
        [(core/->ReturnTerminator (obligation-id "ssa-result"))])]
     (obligation-id "block-entry")
-    (obligation-id "type-i64")
+    (obligation-id "type-checked-i64")
     [] [] []))
 
 (def valid-world :- core/NativeWorld
   (apply core/->NativeWorld
     [(obligation-id "world-valid") nil "obligations-v0"
-     [fixture-i64-type fixture-union-type] [] [] []
-     [fixture-i64-layout fixture-union-layout] [fixture-function]
+     [fixture-i64-type fixture-union-type fixture-outcome-type] [] [] []
+     [fixture-i64-layout fixture-union-layout fixture-outcome-layout]
+     [fixture-function]
      [] [] [] [] []]))
 
 (def invalid-ssa-function :- core/FunctionDef
@@ -568,10 +684,11 @@
   (with fixture-function
     [:blocks
      [(core/->BasicBlock (obligation-id "block-entry") []
-        [(core/->CopyInstruction
+        [(core/->CheckedInstruction
            (core/->SsaValueV0 (obligation-id "ssa-result")
-             (obligation-id "type-i64"))
-           (obligation-id "ssa-input"))]
+             (obligation-id "type-checked-i64"))
+           (core/->CheckedAddI64V0 (obligation-id "ssa-input")
+             (obligation-id "ssa-input")))]
         [(core/->SwitchTerminator (obligation-id "ssa-choice")
            [(core/->SwitchCaseV0 (obligation-id "variant-left")
               (obligation-id "block-left") [])])])
@@ -588,7 +705,29 @@
 
 (def open-layout-world :- core/NativeWorld
   (with valid-world
-    [:layouts [undersized-i64-layout fixture-union-layout]]))
+    [:layouts [undersized-i64-layout fixture-union-layout fixture-outcome-layout]]))
+
+(def unchecked-result-function :- core/FunctionDef
+  (with fixture-function
+    [:blocks
+     [(core/->BasicBlock (obligation-id "block-entry") []
+        [(core/->CheckedInstruction
+           (core/->SsaValueV0 (obligation-id "ssa-result")
+             (obligation-id "type-checked-i64"))
+           (core/->CheckedAddI64V0 (obligation-id "ssa-input")
+             (obligation-id "ssa-input")))]
+        [(core/->SwitchTerminator (obligation-id "ssa-choice")
+           [(core/->SwitchCaseV0 (obligation-id "variant-left")
+              (obligation-id "block-left") [])
+            (core/->SwitchCaseV0 (obligation-id "variant-right")
+              (obligation-id "block-right") [])])])
+      (core/->BasicBlock (obligation-id "block-left") [] []
+        [(core/->ReturnTerminator nil)])
+      (core/->BasicBlock (obligation-id "block-right") [] []
+        [(core/->ReturnTerminator nil)])]]))
+
+(def unchecked-arithmetic-world :- core/NativeWorld
+  (with valid-world [:functions [unchecked-result-function]]))
 
 (def valid-ssa-positive :- Bool
   (obligation-passed? (valid-ssa valid-world)))
@@ -628,6 +767,20 @@
     [(ValidSsaDiagnosticV0 function-id) false]
     [(ExhaustiveMatchesDiagnosticV0 function-id) false]
     [(CheckedArithmeticDiagnosticV0 function-id) false]
+    [(LegalAbiDiagnosticV0 abi-id) false]
+    [(DischargedTokensDiagnosticV0 function-id) false]
+    [(BoundedEffectsDiagnosticV0 function-id) false]))
+
+(def checked-arithmetic-positive :- Bool
+  (obligation-passed? (checked-arithmetic valid-world)))
+
+(def checked-arithmetic-negative :- Bool
+  (match (checked-arithmetic unchecked-arithmetic-world)
+    [(CheckedArithmeticDiagnosticV0 function-id) true]
+    [(ObligationPassV0 code) false]
+    [(ValidSsaDiagnosticV0 function-id) false]
+    [(ExhaustiveMatchesDiagnosticV0 function-id) false]
+    [(ClosedLayoutsDiagnosticV0 type-id) false]
     [(LegalAbiDiagnosticV0 abi-id) false]
     [(DischargedTokensDiagnosticV0 function-id) false]
     [(BoundedEffectsDiagnosticV0 function-id) false]))
