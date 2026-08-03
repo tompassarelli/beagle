@@ -1,4 +1,3 @@
-;; @upstream:graph — text arm authorized for Stage 4; reconcile after landing.
 (ns native.obligations (:require [native.core :as core]))
 
 (define-mode strict)

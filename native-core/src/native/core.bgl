@@ -1,5 +1,3 @@
-;; @upstream:graph — generated projection; author substantive forms through
-;; Fram graph edits.
 (ns native.core)
 
 (define-mode strict)

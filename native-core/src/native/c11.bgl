@@ -1,4 +1,3 @@
-;; @upstream:graph — operator-authorized text arm; re-ingest after landing.
 (ns native.c11)
 
 (define-mode strict)
