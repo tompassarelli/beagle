@@ -1,0 +1,310 @@
+;; @upstream:text-arm — operator-authorized for Native Stage 3; re-ingest this
+;; module into the graph after landing. Authority: North thread 019fbd6c,
+;; accepted design lane-msch3uwf sections 2-3.
+(ns native.lower
+  (:require [native.core :as core]
+            [native.worlds :as worlds]))
+
+(define-mode strict)
+
+(defrecord SourceFactV0
+  [identity: core/NativeId
+   subject: core/NativeId
+   predicate: core/NativeId
+   object: core/NativeId])
+
+(defunion LowerFailureV0
+  (MissingGraphRootV0 [root: core/NativeId])
+  (DuplicateTermIdentityV0 [identity: core/NativeId])
+  (UnclosedTermReferenceV0 [owner: core/NativeId target: core/NativeId])
+  (MalformedSourceTermV0 [identity: core/NativeId detail: String])
+  (MissingSourceFactV0 [subject: core/NativeId predicate: String])
+  (UnresolvedSourceTypeV0 [source-type: core/NativeId detail: String])
+  (UnsupportedSourceTypeV0 [source-type: core/NativeId spelling: String])
+  (MissingFunctionAnnotationV0 [function-id: core/NativeId binding: String])
+  (InvalidSourceModuleV0 [module-id: core/NativeId detail: String]))
+
+(defunion SourceSealResultV0
+  (SourceSealAcceptedV0
+    [sealed: worlds/SealedSourceWorldV0 receipt: worlds/PassReceiptV0])
+  (SourceSealRejectedV0
+    [failure: LowerFailureV0 receipt: worlds/PassReceiptV0]))
+
+(defn lower-id [domain: String parts: (Vec String)] -> core/NativeId
+  (core/canonical-id (str "native-lower-v0/" domain) parts))
+
+(defn id-value [id: core/NativeId] -> String
+  (core/nativeid-value id))
+
+(defn same-id? [left: core/NativeId right: core/NativeId] -> Bool
+  (core/native-id= left right))
+
+(defn find-node
+  [graph: worlds/TermGraphV0 target: core/NativeId] -> (U worlds/TermNodeV0 Nil)
+  (let [nodes: (Vec worlds/TermNodeV0) (worlds/termgraphv0-nodes graph)]
+    (loop [index: Int 0]
+      (if (>= index (count nodes))
+        nil
+        (let [node: worlds/TermNodeV0 (nth nodes index)]
+          (if (same-id? target (worlds/termnodev0-identity node))
+            node
+            (recur (+ index 1))))))))
+
+(defn term-at
+  [graph: worlds/TermGraphV0 target: core/NativeId] -> (U worlds/TermV0 Nil)
+  (let [node: (U worlds/TermNodeV0 Nil) (find-node graph target)]
+    (if (nil? node) nil (worlds/termnodev0-term node))))
+
+(defn text-at
+  [graph: worlds/TermGraphV0 target: core/NativeId] -> (U String Nil)
+  (let [term: (U worlds/TermV0 Nil) (term-at graph target)]
+    (if (nil? term)
+      nil
+      (if (worlds/texttermv0? term) (worlds/texttermv0-value term) nil))))
+
+(defn term-references [term: worlds/TermV0] -> (Vec core/NativeId)
+  (cond
+    (worlds/reftermv0? term)
+    [(worlds/reftermv0-target term)]
+
+    (worlds/tripletermv0? term)
+    [(worlds/tripletermv0-subject term)
+     (worlds/tripletermv0-predicate term)
+     (worlds/tripletermv0-object term)]
+
+    :else []))
+
+(defn graph-identities [graph: worlds/TermGraphV0] -> (Vec core/NativeId)
+  (mapv
+    (fn [node: worlds/TermNodeV0] -> core/NativeId
+      (worlds/termnodev0-identity node))
+    (worlds/termgraphv0-nodes graph)))
+
+(defn refs-resolve?
+  [graph: worlds/TermGraphV0 refs: (Vec core/NativeId)] -> Bool
+  (loop [index: Int 0]
+    (if (>= index (count refs))
+      true
+      (if (nil? (find-node graph (nth refs index)))
+        false
+        (recur (+ index 1))))))
+
+(defn graph-reference-closed? [graph: worlds/TermGraphV0] -> Bool
+  (let [nodes: (Vec worlds/TermNodeV0) (worlds/termgraphv0-nodes graph)]
+    (loop [index: Int 0]
+      (if (>= index (count nodes))
+        true
+        (let [node: worlds/TermNodeV0 (nth nodes index)]
+          (if (refs-resolve? graph (term-references (worlds/termnodev0-term node)))
+            (recur (+ index 1))
+            false))))))
+
+(defn source-facts [graph: worlds/TermGraphV0] -> (Vec SourceFactV0)
+  (let [nodes: (Vec worlds/TermNodeV0) (worlds/termgraphv0-nodes graph)]
+    (loop [index: Int 0 facts: (Vec SourceFactV0) []]
+      (if (>= index (count nodes))
+        facts
+        (let [node: worlds/TermNodeV0 (nth nodes index)
+              term: worlds/TermV0 (worlds/termnodev0-term node)]
+          (if (worlds/tripletermv0? term)
+            (recur (+ index 1)
+              (conj facts
+                (->SourceFactV0
+                  (worlds/termnodev0-identity node)
+                  (worlds/tripletermv0-subject term)
+                  (worlds/tripletermv0-predicate term)
+                  (worlds/tripletermv0-object term))))
+            (recur (+ index 1) facts)))))))
+
+(defn facts-for
+  [graph: worlds/TermGraphV0 subject: core/NativeId predicate: String]
+  -> (Vec SourceFactV0)
+  (let [facts: (Vec SourceFactV0) (source-facts graph)]
+    (loop [index: Int 0 selected: (Vec SourceFactV0) []]
+      (if (>= index (count facts))
+        selected
+        (let [fact: SourceFactV0 (nth facts index)
+              fact-predicate: (U String Nil)
+              (text-at graph (sourcefactv0-predicate fact))]
+          (if (and (same-id? subject (sourcefactv0-subject fact))
+                   (some? fact-predicate)
+                   (= predicate fact-predicate))
+            (recur (+ index 1) (conj selected fact))
+            (recur (+ index 1) selected)))))))
+
+(defn first-fact-object
+  [graph: worlds/TermGraphV0 subject: core/NativeId predicate: String]
+  -> (U core/NativeId Nil)
+  (let [facts: (Vec SourceFactV0) (facts-for graph subject predicate)]
+    (if (= 0 (count facts)) nil (sourcefactv0-object (nth facts 0)))))
+
+(defn first-fact-text
+  [graph: worlds/TermGraphV0 subject: core/NativeId predicate: String]
+  -> (U String Nil)
+  (let [object: (U core/NativeId Nil) (first-fact-object graph subject predicate)]
+    (if (nil? object) nil (text-at graph object))))
+
+(defn encode-term [term: worlds/TermV0] -> String
+  (cond
+    (worlds/niltermv0? term)
+    (worlds/canonical-record "nil"
+      [(worlds/encode-bool (worlds/niltermv0-token term))])
+
+    (worlds/booltermv0? term)
+    (worlds/canonical-record "bool"
+      [(worlds/encode-bool (worlds/booltermv0-value term))])
+
+    (worlds/i64termv0? term)
+    (worlds/canonical-record "i64" [(str (worlds/i64termv0-value term))])
+
+    (worlds/f64termv0? term)
+    (worlds/canonical-record "f64"
+      [(worlds/f64termv0-canonical-value term)])
+
+    (worlds/texttermv0? term)
+    (worlds/canonical-record "text" [(worlds/texttermv0-value term)])
+
+    (worlds/reftermv0? term)
+    (worlds/canonical-record "ref"
+      [(id-value (worlds/reftermv0-target term))])
+
+    :else
+    (worlds/canonical-record "triple"
+      [(id-value (worlds/tripletermv0-subject term))
+       (id-value (worlds/tripletermv0-predicate term))
+       (id-value (worlds/tripletermv0-object term))])))
+
+(defn encode-node [node: worlds/TermNodeV0] -> String
+  (worlds/canonical-record "node"
+    [(id-value (worlds/termnodev0-identity node))
+     (encode-term (worlds/termnodev0-term node))]))
+
+(defn encode-term-graph [graph: worlds/TermGraphV0] -> String
+  (let [encoded-nodes: (Vec String)
+        (mapv
+          (fn [node: worlds/TermNodeV0] -> String (encode-node node))
+          (worlds/termgraphv0-nodes graph))]
+    (worlds/canonical-record "term-graph-v0"
+      [(id-value (worlds/termgraphv0-root graph))
+       (worlds/canonical-set "nodes" encoded-nodes)])))
+
+(defn encode-source-module [module: worlds/SourceModuleV0] -> String
+  (worlds/canonical-record "source-module-v0"
+    [(id-value (worlds/sourcemodulev0-id module))
+     (worlds/sourcemodulev0-name module)
+     (worlds/sourcemodulev0-relative-path module)
+     (worlds/sourcemodulev0-source-digest module)
+     (worlds/sourcemodulev0-interface-digest module)
+     (id-value (worlds/sourcemodulev0-root-term module))]))
+
+(defn encode-source-world [world: worlds/SourceProgramWorldV0] -> String
+  (let [modules: (Vec String)
+        (mapv
+          (fn [module: worlds/SourceModuleV0] -> String
+            (encode-source-module module))
+          (worlds/sourceprogramworldv0-modules world))
+        imports: (Vec String)
+        (mapv
+          (fn [id: core/NativeId] -> String (id-value id))
+          (worlds/sourceprogramworldv0-imports world))]
+    (worlds/canonical-record "source-program-world-v0"
+      [(encode-term-graph (worlds/sourceprogramworldv0-terms world))
+       (worlds/canonical-set "modules" modules)
+       (worlds/canonical-set "imports" imports)])))
+
+(defn source-world-valid? [world: worlds/SourceProgramWorldV0] -> Bool
+  (let [graph: worlds/TermGraphV0 (worlds/sourceprogramworldv0-terms world)
+        ids: (Vec core/NativeId) (graph-identities graph)
+        modules: (Vec worlds/SourceModuleV0)
+        (worlds/sourceprogramworldv0-modules world)]
+    (and (some? (find-node graph (worlds/termgraphv0-root graph)))
+         (core/unique-ids? ids)
+         (graph-reference-closed? graph)
+         (every?
+           (fn [module: worlds/SourceModuleV0] -> Bool
+             (some? (find-node graph (worlds/sourcemodulev0-root-term module))))
+           modules))))
+
+(defn source-failure [world: worlds/SourceProgramWorldV0] -> LowerFailureV0
+  (let [graph: worlds/TermGraphV0 (worlds/sourceprogramworldv0-terms world)
+        root: core/NativeId (worlds/termgraphv0-root graph)
+        ids: (Vec core/NativeId) (graph-identities graph)]
+    (cond
+      (nil? (find-node graph root))
+      (->MissingGraphRootV0 root)
+
+      (not (core/unique-ids? ids))
+      (->DuplicateTermIdentityV0 root)
+
+      (not (graph-reference-closed? graph))
+      (->UnclosedTermReferenceV0 root root)
+
+      :else
+      (->InvalidSourceModuleV0 root "a module root is absent from the source Term graph"))))
+
+(defn encode-configuration
+  [configuration: (Vec worlds/ConfigurationEntryV0)] -> String
+  (worlds/canonical-set "configuration"
+    (mapv
+      (fn [entry: worlds/ConfigurationEntryV0] -> String
+        (worlds/canonical-record "entry"
+          [(worlds/configurationentryv0-key entry)
+           (worlds/configurationentryv0-value entry)]))
+      configuration)))
+
+(defn make-receipt
+  [input-digest: String
+   compiler-commit: String
+   pass-id: String
+   configuration: (Vec worlds/ConfigurationEntryV0)
+   diagnostics: (Vec worlds/DiagnosticV0)
+   obligations: (Vec worlds/DischargedObligationV0)
+   output-digest: String]
+  -> worlds/PassReceiptV0
+  (worlds/->PassReceiptV0
+    input-digest
+    compiler-commit
+    pass-id
+    "v0"
+    configuration
+    (worlds/content-digest (encode-configuration configuration))
+    diagnostics
+    obligations
+    output-digest
+    "native-core"
+    "v0"
+    []))
+
+(defn source-closure-obligation
+  [digest: String passed: Bool detail: String] -> worlds/DischargedObligationV0
+  (worlds/->DischargedObligationV0
+    "source-term-closure"
+    "v0"
+    digest
+    passed
+    detail))
+
+(defn seal-source-world
+  [world: worlds/SourceProgramWorldV0
+   compiler-commit: String
+   configuration: (Vec worlds/ConfigurationEntryV0)]
+  -> SourceSealResultV0
+  (let [encoding: String (encode-source-world world)
+        digest: String (worlds/content-digest encoding)]
+    (if (source-world-valid? world)
+      (->SourceSealAcceptedV0
+        (worlds/->SealedSourceWorldV0 world encoding digest)
+        (make-receipt digest compiler-commit "source-seal" configuration []
+          [(source-closure-obligation digest true
+             "source Term identities and module roots are closed")]
+          digest))
+      (let [failure: LowerFailureV0 (source-failure world)]
+        (->SourceSealRejectedV0
+          failure
+          (make-receipt digest compiler-commit "source-seal" configuration
+            [(worlds/->DiagnosticV0
+               "LOWER-SOURCE-NOT-CLOSED"
+               "source Term graph or module roots are not closed")]
+            [(source-closure-obligation digest false
+               "source Term identities or module roots are not closed")]
+            ""))))))
