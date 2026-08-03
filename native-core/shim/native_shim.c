@@ -125,6 +125,128 @@ native_vec *native_vec_push(native_arena *arena, native_vec *vector, const void 
   return vector;
 }
 
+uint64_t native_text_length(uint64_t handle) {
+  uint64_t length;
+  if (handle == UINT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  memcpy(&length, (const void *)(uintptr_t)handle, sizeof length);
+  return length;
+}
+
+const uint8_t *native_text_bytes(uint64_t handle) {
+  if (handle == UINT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  return (const uint8_t *)(uintptr_t)handle + NATIVE_TEXT_HEADER_BYTES;
+}
+
+/* Handle identity is only a fast path; equality is length plus byte equality,
+   so two blobs allocated separately still compare equal. */
+bool native_text_eq(uint64_t left, uint64_t right) {
+  uint64_t length;
+  if (left == right) {
+    return true;
+  }
+  length = native_text_length(left);
+  if (length != native_text_length(right)) {
+    return false;
+  }
+  if (length == UINT64_C(0)) {
+    return true;
+  }
+  return memcmp(native_text_bytes(left), native_text_bytes(right),
+                (size_t)length) == 0;
+}
+
+uint64_t native_text_alloc(native_arena *arena, uint64_t length, uint8_t **out) {
+  uint8_t *blob;
+  if (length > (uint64_t)(SIZE_MAX - (size_t)NATIVE_TEXT_HEADER_BYTES)) {
+    native_trap(NATIVE_TRAP_ARENA_EXHAUSTED);
+  }
+  blob = (uint8_t *)native_arena_alloc(
+      arena, (size_t)(NATIVE_TEXT_HEADER_BYTES + length), sizeof(uint64_t));
+  memcpy(blob, &length, sizeof length);
+  if (out != NULL) {
+    *out = blob + NATIVE_TEXT_HEADER_BYTES;
+  }
+  return (uint64_t)(uintptr_t)blob;
+}
+
+uint64_t native_text_slice(native_arena *arena, uint64_t handle, uint64_t start,
+                           uint64_t end) {
+  uint8_t *destination = NULL;
+  uint64_t result;
+  if ((end < start) || (end > native_text_length(handle))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  result = native_text_alloc(arena, end - start, &destination);
+  if (end > start) {
+    memcpy(destination, native_text_bytes(handle) + start,
+           (size_t)(end - start));
+  }
+  return result;
+}
+
+uint64_t native_text_from_int(native_arena *arena, int64_t value) {
+  char digits[21];
+  uint64_t magnitude;
+  uint64_t written = UINT64_C(0);
+  uint64_t length;
+  uint8_t *destination = NULL;
+  uint64_t result;
+  uint64_t index;
+  magnitude = (value < INT64_C(0)) ? (~(uint64_t)value + UINT64_C(1))
+                                   : (uint64_t)value;
+  do {
+    digits[written] = (char)('0' + (int)(magnitude % UINT64_C(10)));
+    magnitude /= UINT64_C(10);
+    written += UINT64_C(1);
+  } while (magnitude != UINT64_C(0));
+  length = (value < INT64_C(0)) ? (written + UINT64_C(1)) : written;
+  result = native_text_alloc(arena, length, &destination);
+  index = UINT64_C(0);
+  if (value < INT64_C(0)) {
+    destination[index] = (uint8_t)'-';
+    index += UINT64_C(1);
+  }
+  while (written > UINT64_C(0)) {
+    written -= UINT64_C(1);
+    destination[index] = (uint8_t)digits[written];
+    index += UINT64_C(1);
+  }
+  return result;
+}
+
+uint64_t native_text_concat(native_arena *arena, const uint64_t *parts,
+                            uint64_t count) {
+  uint64_t total = UINT64_C(0);
+  uint64_t index;
+  uint64_t offset = UINT64_C(0);
+  uint8_t *destination = NULL;
+  uint64_t result;
+  if ((parts == NULL) && (count != UINT64_C(0))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  for (index = UINT64_C(0); index < count; index++) {
+    uint64_t part = native_text_length(parts[index]);
+    if (part > (UINT64_MAX - total)) {
+      native_trap(NATIVE_TRAP_OVERFLOW);
+    }
+    total += part;
+  }
+  result = native_text_alloc(arena, total, &destination);
+  for (index = UINT64_C(0); index < count; index++) {
+    uint64_t part = native_text_length(parts[index]);
+    if (part != UINT64_C(0)) {
+      memcpy(destination + offset, native_text_bytes(parts[index]),
+             (size_t)part);
+    }
+    offset += part;
+  }
+  return result;
+}
+
 bool native_byte_read(FILE *stream, uint8_t *destination, size_t length) {
   if ((stream == NULL) || ((destination == NULL) && (length != 0U))) {
     return false;

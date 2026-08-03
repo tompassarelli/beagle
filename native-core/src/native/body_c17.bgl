@@ -18,6 +18,110 @@
 
 (defrecord ValueSlotV0 [id: core/NativeId type-id: core/NativeId])
 
+;; Text literals become one length-prefixed constant blob each; keyword literals
+;; become table indices. Both tables are sealed by this walk over the world.
+(defrecord ConstantPoolV0 [texts: (Vec String) keywords: (Vec String)])
+
+;; v0 C17 literal alphabet. Anything else is refused rather than escaped
+;; wrongly: without a code-point primitive the emitter cannot tell a control
+;; byte from a multi-byte UTF-8 lead.
+(defn printable-ascii [] -> String
+  (str " !\"#$%&'()*+,-./0123456789:;<=>?@"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`"
+    "abcdefghijklmnopqrstuvwxyz{|}~"))
+
+(defn character-in? [alphabet: String character: String] -> Bool
+  (loop [position: Int 0]
+    (cond
+      (>= position (count alphabet)) false
+      (= character (subs alphabet position (+ position 1))) true
+      :else (recur (+ position 1)))))
+
+(defn text-emittable? [value: String] -> Bool
+  (loop [position: Int 0]
+    (if (>= position (count value))
+      true
+      (let [character: String (subs value position (+ position 1))]
+        (if (or (character-in? (printable-ascii) character)
+              (= character "\t") (= character "\n") (= character "\r"))
+          (recur (+ position 1))
+          false)))))
+
+(defn escape-c-character [character: String] -> String
+  (cond
+    (= character "\\") "\\\\"
+    (= character "\"") "\\\""
+    (= character "?") "\\?"
+    (= character "\t") "\\t"
+    (= character "\n") "\\n"
+    (= character "\r") "\\r"
+    :else character))
+
+(defn escape-c-text [value: String] -> String
+  (loop [position: Int 0 result: String ""]
+    (if (>= position (count value))
+      result
+      (recur (+ position 1)
+        (str result
+          (escape-c-character (subs value position (+ position 1))))))))
+
+(defn value-position [values: (Vec String) target: String] -> Int
+  (loop [position: Int 0]
+    (cond
+      (>= position (count values)) -1
+      (= target (nth values position)) position
+      :else (recur (+ position 1)))))
+
+(defn conj-value [values: (Vec String) candidate: String] -> (Vec String)
+  (if (>= (value-position values candidate) 0) values (conj values candidate)))
+
+(defn pool-with-atom
+  [pool: ConstantPoolV0 atom: core/NativeAtom] -> ConstantPoolV0
+  (cond
+    (instance? native.core.TextAtom atom)
+    (with pool
+      [:texts (conj-value (constantpoolv0-texts pool) (core/textatom-value atom))])
+    (instance? native.core.KeywordAtom atom)
+    (with pool
+      [:keywords
+       (conj-value (constantpoolv0-keywords pool)
+         (core/keywordatom-value atom))])
+    :else pool))
+
+(defn pool-with-instruction
+  [pool: ConstantPoolV0 instruction: core/Instruction] -> ConstantPoolV0
+  (if (instance? native.core.AtomInstruction instruction)
+    (pool-with-atom pool (core/atominstruction-atom instruction))
+    pool))
+
+;; Deterministic: first appearance in the already-ordered function, block and
+;; instruction sequence, so the table is a pure function of the sealed world.
+(defn collect-pool [functions: (Vec core/FunctionDef)] -> ConstantPoolV0
+  (loop [position: Int 0 pool: ConstantPoolV0 (->ConstantPoolV0 [] [])]
+    (if (>= position (count functions))
+      pool
+      (recur (+ position 1)
+        (loop [block-position: Int 0
+               blocks: (Vec core/BasicBlock)
+               (core/functiondef-blocks (nth functions position))
+               current: ConstantPoolV0 pool]
+          (if (>= block-position (count blocks))
+            current
+            (recur (+ block-position 1) blocks
+              (loop [inner: Int 0
+                     instructions: (Vec core/Instruction)
+                     (core/basicblock-instructions (nth blocks block-position))
+                     collected: ConstantPoolV0 current]
+                (if (>= inner (count instructions))
+                  collected
+                  (recur (+ inner 1) instructions
+                    (pool-with-instruction collected
+                      (nth instructions inner))))))))))))
+
+(defn pool-emittable? [pool: ConstantPoolV0] -> Bool
+  (and (every? text-emittable? (constantpoolv0-texts pool))
+    (every? text-emittable? (constantpoolv0-keywords pool))))
+
 ;; Consumers live in other namespaces, where a `match` on this union does not
 ;; survive emission; these three are the supported way to read the result.
 (defn materialization-ok? [result: BodyMaterializationV0] -> Bool
@@ -49,7 +153,9 @@
     (let [atom: core/NativeAtom (core/atominstruction-atom instruction)]
       (or (instance? native.core.BoolAtom atom)
           (instance? native.core.I64Atom atom)
-          (instance? native.core.F64Atom atom)))
+          (instance? native.core.F64Atom atom)
+          (instance? native.core.TextAtom atom)
+          (instance? native.core.KeywordAtom atom)))
     (instance? native.core.CopyInstruction instruction) true
     (instance? native.core.CompareInstruction instruction) true
     (instance? native.core.FieldInstruction instruction) true
@@ -64,6 +170,10 @@
     (instance? native.core.VecGetInstruction instruction) true
     (instance? native.core.VecPushInstruction instruction) true
     (instance? native.core.VecEmptyInstruction instruction) true
+    (instance? native.core.ArenaInstruction instruction) true
+    (instance? native.core.TextLengthInstruction instruction) true
+    (instance? native.core.TextSliceInstruction instruction) true
+    (instance? native.core.TextConcatInstruction instruction) true
     :else false))
 
 (defn terminator-supported? [terminator: core/Terminator] -> Bool
@@ -176,13 +286,27 @@
           (c17/c-type types module-index (valueslotv0-type-id (nth slots position)))
           " native_s_" position ";\n")))))
 
-(defn atom-expression [atom: core/NativeAtom] -> String
+(defn text-symbol [module-index: Int position: Int] -> String
+  (str (c17/module-prefix module-index) "_text_" position))
+
+(defn atom-expression
+  [module-index: Int pool: ConstantPoolV0 atom: core/NativeAtom] -> String
   (cond
     (instance? native.core.BoolAtom atom)
     (if (core/boolatom-value atom) "true" "false")
     (instance? native.core.I64Atom atom)
     (str "INT64_C(" (core/i64atom-value atom) ")")
     (instance? native.core.F64Atom atom) (str (core/f64atom-value atom))
+    (instance? native.core.TextAtom atom)
+    (str "(uint64_t)(uintptr_t)&"
+      (text-symbol module-index
+        (value-position (constantpoolv0-texts pool)
+          (core/textatom-value atom))))
+    (instance? native.core.KeywordAtom atom)
+    (str "UINT64_C("
+      (value-position (constantpoolv0-keywords pool)
+        (core/keywordatom-value atom))
+      ")")
     :else ""))
 
 (defn compare-operator [comparison: core/CompareOpV0] -> String
@@ -191,6 +315,39 @@
     (instance? native.core.CompareLtI64V0 comparison) "<"
     (instance? native.core.CompareLeI64V0 comparison) "<="
     :else "=="))
+
+(defn emit-text-constant
+  [module-index: Int position: Int value: String] -> String
+  (let [symbol: String (text-symbol module-index position)
+        literal: String (str "\"" (escape-c-text value) "\"")]
+    (str "struct " symbol "_blob { uint64_t length; uint8_t bytes[sizeof "
+      literal "]; };\n"
+      "static const struct " symbol "_blob " symbol " = { (uint64_t)(sizeof "
+      literal " - 1U), " literal " };\n"
+      "_Static_assert(offsetof(struct " symbol "_blob, bytes) == 8,"
+      " \"text blob is length-prefixed\");\n")))
+
+(defn emit-text-pool [module-index: Int pool: ConstantPoolV0] -> String
+  (let [texts: (Vec String) (constantpoolv0-texts pool)
+        keywords: (Vec String) (constantpoolv0-keywords pool)]
+    (str
+      (loop [position: Int 0 result: String ""]
+        (if (>= position (count texts))
+          result
+          (recur (+ position 1)
+            (str result
+              (emit-text-constant module-index position (nth texts position))))))
+      (if (= 0 (count keywords))
+        ""
+        (str "/* keyword table, sealed at lowering; a handle is its index.\n"
+          (loop [position: Int 0 result: String ""]
+            (if (>= position (count keywords))
+              result
+              (recur (+ position 1)
+                (str result "   " position " = "
+                  (escape-c-text (nth keywords position)) "\n"))))
+          "*/\n"))
+      (if (and (= 0 (count texts)) (= 0 (count keywords))) "" "\n"))))
 
 (defn field-position
   [layouts: (Vec core/LayoutDef) owner: core/NativeId field: core/NativeId] -> Int
@@ -266,14 +423,48 @@
 
 ;; A callee that declares a region takes the arena (and a capability) ahead of
 ;; its own parameters, and bounded-effects guarantees the caller holds both.
+(defn function-arena-id [function: core/FunctionDef] -> (U core/NativeId Nil)
+  (loop [block-position: Int 0]
+    (if (>= block-position (count (core/functiondef-blocks function)))
+      nil
+      (let [instructions: (Vec core/Instruction)
+            (core/basicblock-instructions
+              (nth (core/functiondef-blocks function) block-position))
+            arena-id: (U core/NativeId Nil)
+            (loop [instruction-position: Int 0]
+              (cond
+                (>= instruction-position (count instructions)) nil
+                (instance? native.core.ArenaInstruction
+                  (nth instructions instruction-position))
+                (core/ssavaluev0-id
+                  (core/arenainstruction-result
+                    (nth instructions instruction-position)))
+                :else (recur (+ instruction-position 1))))]
+        (if (nil? arena-id)
+          (recur (+ block-position 1))
+          arena-id)))))
+
+(defn caller-arena-argument
+  [function: core/FunctionDef slots: (Vec ValueSlotV0)] -> String
+  (let [arena-id: (U core/NativeId Nil) (function-arena-id function)]
+    (if (nil? arena-id)
+      "arena"
+      (str "(native_arena *)" (value-name function slots arena-id)))))
+
 (defn callee-resource-arguments
-  [functions: (Vec core/FunctionDef) target: core/NativeId] -> String
+  [functions: (Vec core/FunctionDef)
+   function: core/FunctionDef
+   slots: (Vec ValueSlotV0)
+   target: core/NativeId]
+  -> String
   (let [position: Int (function-index-of functions target)]
     (if (< position 0)
       ""
       (let [callee: core/FunctionDef (nth functions position)
             arena: String
-            (if (> (count (core/functiondef-regions callee)) 0) "arena" "")
+            (if (> (count (core/functiondef-regions callee)) 0)
+              (caller-arena-argument function slots)
+              "")
             capability: String
             (if (> (count (core/functiondef-capabilities callee)) 0)
               "capability" "")]
@@ -352,7 +543,8 @@
    target: core/NativeId
    arguments: (Vec core/NativeId)]
   -> String
-  (let [prefix: String (callee-resource-arguments functions target)
+  (let [prefix: String
+        (callee-resource-arguments functions function slots target)
         supplied: String (emit-arguments function slots arguments)]
     (cond
       (= 0 (count prefix)) supplied
@@ -382,11 +574,31 @@
             (c17/layout-for-type layouts (core/vectorshapev0-element-type shape))]
         (if (nil? element) 1 (core/layoutdef-align-bytes element))))))
 
+(defn parts-symbol [slots: (Vec ValueSlotV0) result-id: core/NativeId] -> String
+  (str "native_parts_" (slot-index slots result-id)))
+
+(defn text-operand-expression
+  [types: (Vec core/TypeDef)
+   function: core/FunctionDef
+   slots: (Vec ValueSlotV0)
+   arena: String
+   operand: core/NativeId]
+  -> String
+  (let [operand-type: core/NativeId (slot-type function slots operand)
+        definition: (U core/TypeDef Nil)
+        (c17/type-def-for types operand-type)
+        text: Bool
+        (if (nil? definition) false (c17/text-type-def? definition))]
+    (if text
+      (value-name function slots operand)
+      (str "native_text_from_int(" arena ", "
+        (value-name function slots operand) ")"))))
 (defn emit-instruction
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
    functions: (Vec core/FunctionDef)
    module-index: Int
+   pool: ConstantPoolV0
    function: core/FunctionDef
    slots: (Vec ValueSlotV0)
    instruction: core/Instruction]
@@ -396,7 +608,59 @@
     (cond
       (instance? native.core.AtomInstruction instruction)
       (str "  " target " = "
-        (atom-expression (core/atominstruction-atom instruction)) ";\n")
+        (atom-expression module-index pool
+          (core/atominstruction-atom instruction))
+        ";\n")
+
+      (instance? native.core.ArenaInstruction instruction)
+      (str "  " target " = arena;\n  (void)" target ";\n")
+
+      (instance? native.core.TextLengthInstruction instruction)
+      (str "  " target " = (int64_t)native_text_length("
+        (value-name function slots
+          (core/textlengthinstruction-source-id instruction))
+        ");\n")
+
+      (instance? native.core.TextSliceInstruction instruction)
+      (let [arena: String
+            (str "(native_arena *)"
+              (value-name function slots
+                (core/textsliceinstruction-arena-id instruction)))
+            source: String
+            (value-name function slots
+              (core/textsliceinstruction-source-id instruction))
+            start: String
+            (value-name function slots
+              (core/textsliceinstruction-start-id instruction))
+            end: String
+            (value-name function slots
+              (core/textsliceinstruction-end-id instruction))]
+        (str "  if ((" start " < INT64_C(0)) || (" end " < " start
+          ") ||\n      (" end " > (int64_t)native_text_length(" source "))) {\n"
+          "    native_trap(UINT32_C("
+          (core/textsliceinstruction-failure-code instruction) "));\n"
+          "  }\n"
+          "  " target " = native_text_slice(" arena ", " source ", (uint64_t)"
+          start ", (uint64_t)" end ");\n"))
+
+      (instance? native.core.TextConcatInstruction instruction)
+      (let [arena: String
+            (str "(native_arena *)"
+              (value-name function slots
+                (core/textconcatinstruction-arena-id instruction)))
+            operands: (Vec core/NativeId)
+            (core/textconcatinstruction-operand-ids instruction)
+            parts: String (parts-symbol slots (core/ssavaluev0-id result))]
+        (str "  {\n    const uint64_t " parts "[" (count operands) "] = {"
+          (loop [position: Int 0 fragment: String ""]
+            (if (>= position (count operands))
+              fragment
+              (recur (+ position 1)
+                (str fragment (if (= position 0) " " ", ")
+                  (text-operand-expression types function slots arena
+                    (nth operands position))))))
+          " };\n    " target " = native_text_concat(" arena ", " parts
+          ", UINT64_C(" (count operands) "));\n  }\n"))
 
       (instance? native.core.CopyInstruction instruction)
       (str "  " target " = "
@@ -404,11 +668,18 @@
         ";\n")
 
       (instance? native.core.CompareInstruction instruction)
-      (str "  " target " = ("
-        (value-name function slots (core/compareinstruction-left-id instruction))
-        " " (compare-operator (core/compareinstruction-comparison instruction)) " "
-        (value-name function slots (core/compareinstruction-right-id instruction))
-        ");\n")
+      (let [left: String
+            (value-name function slots
+              (core/compareinstruction-left-id instruction))
+            right: String
+            (value-name function slots
+              (core/compareinstruction-right-id instruction))
+            comparison: core/CompareOpV0
+            (core/compareinstruction-comparison instruction)]
+        (if (instance? native.core.CompareEqTextV0 comparison)
+          (str "  " target " = native_text_eq(" left ", " right ");\n")
+          (str "  " target " = (" left " " (compare-operator comparison) " "
+            right ");\n")))
 
       (instance? native.core.FieldInstruction instruction)
       (let [source: core/NativeId (core/fieldinstruction-source-id instruction)
@@ -497,8 +768,12 @@
           ", INT64_C(" stride "));\n"))
 
       (instance? native.core.VecPushInstruction instruction)
-      (let [vector-type: core/NativeId (core/ssavaluev0-type-id result)]
-        (str "  " target " = native_vec_push(arena, "
+      (let [vector-type: core/NativeId (core/ssavaluev0-type-id result)
+            arena: String
+            (str "(native_arena *)"
+              (value-name function slots
+                (core/vecpushinstruction-arena-id instruction)))]
+        (str "  " target " = native_vec_push(" arena ", "
           (value-name function slots
             (core/vecpushinstruction-source-id instruction))
           ", &"
@@ -508,8 +783,12 @@
           (vector-element-alignment layouts vector-type) ");\n"))
 
       (instance? native.core.VecEmptyInstruction instruction)
-      (let [vector-type: core/NativeId (core/ssavaluev0-type-id result)]
-        (str "  " target " = native_vec_new(arena, "
+      (let [vector-type: core/NativeId (core/ssavaluev0-type-id result)
+            arena: String
+            (str "(native_arena *)"
+              (value-name function slots
+                (core/vecemptyinstruction-arena-id instruction)))]
+        (str "  " target " = native_vec_new(" arena ", "
           (value-name function slots
             (core/vecemptyinstruction-capacity-id instruction))
           ", INT64_C(" (vector-stride layouts vector-type) "), (size_t)"
@@ -524,6 +803,22 @@
         (emit-call-arguments functions function slots
           (core/callinstruction-function-id instruction)
           (core/callinstruction-arguments instruction)) ");\n"))))
+
+(defn variant-tag
+  [layouts: (Vec core/LayoutDef) owner: core/NativeId variant: core/NativeId] -> Int
+  (let [layout: (U core/LayoutDef Nil) (c17/layout-for-type layouts owner)]
+    (if (nil? layout)
+      -1
+      (let [variants: (Vec core/UnionVariantLayoutV0)
+            (c17/union-layout-variants layout)]
+        (loop [position: Int 0]
+          (if (>= position (count variants))
+            -1
+            (if (core/native-id=
+                  (core/unionvariantlayoutv0-variant-id (nth variants position))
+                  variant)
+              (core/unionvariantlayoutv0-tag (nth variants position))
+              (recur (+ position 1)))))))))
 
 (defn emit-jump
   [function: core/FunctionDef
@@ -640,6 +935,7 @@
    layouts: (Vec core/LayoutDef)
    functions: (Vec core/FunctionDef)
    module-index: Int
+   pool: ConstantPoolV0
    function: core/FunctionDef
    function-index: Int
    slots: (Vec ValueSlotV0)
@@ -657,8 +953,8 @@
           result
           (recur (+ inner 1)
             (str result
-              (emit-instruction types layouts functions module-index function slots
-                (nth instructions inner))))))
+              (emit-instruction types layouts functions module-index pool function
+                slots (nth instructions inner))))))
       (emit-terminator layouts function function-index slots
         (nth (core/basicblock-terminators block) 0)))))
 
@@ -667,6 +963,7 @@
    layouts: (Vec core/LayoutDef)
    functions: (Vec core/FunctionDef)
    module-index: Int
+   pool: ConstantPoolV0
    function-index: Int
    function: core/FunctionDef]
   -> String
@@ -684,7 +981,7 @@
           result
           (recur (+ position 1)
             (str result
-              (emit-block types layouts functions module-index function
+              (emit-block types layouts functions module-index pool function
                 function-index slots position)))))
       "}\n")))
 
@@ -692,14 +989,15 @@
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
    functions: (Vec core/FunctionDef)
-   module-index: Int]
+   module-index: Int
+   pool: ConstantPoolV0]
   -> String
   (loop [position: Int 0 result: String ""]
     (if (>= position (count functions))
       result
       (recur (+ position 1)
         (str result
-          (emit-function types layouts functions module-index position
+          (emit-function types layouts functions module-index pool position
             (nth functions position)))))))
 
 (defn emit-source
@@ -707,11 +1005,13 @@
    layouts: (Vec core/LayoutDef)
    functions: (Vec core/FunctionDef)
    module-index: Int
+   pool: ConstantPoolV0
    header-name: String]
   -> String
   (str "/* Generated by native.body-c17; do not edit. */\n"
     "#include \"" header-name "\"\n\n"
-    (emit-functions types layouts functions module-index)))
+    (emit-text-pool module-index pool)
+    (emit-functions types layouts functions module-index pool)))
 
 (defn materialize-world
   [world: core/NativeWorld module-index: Int] -> BodyMaterializationV0
@@ -727,16 +1027,22 @@
       (->BodyFailureV0
         "native world uses a shape outside the restricted C17 body slice")
 
+      (not (pool-emittable? (collect-pool (core/nativeworld-functions world))))
+      (->BodyFailureV0
+        "a Text or Keyword literal falls outside the printable-ASCII subset this materializer can spell")
+
       :else
       (let [layouts: (Vec core/LayoutDef) (core/nativeworld-layouts world)
             types: (Vec core/TypeDef)
             (c17/dependency-ordered-types (core/nativeworld-types world) layouts)
             functions: (Vec core/FunctionDef)
             (c17/ordered-functions (core/nativeworld-functions world))
+            pool: ConstantPoolV0 (collect-pool functions)
             header-name: String (str "module_" module-index ".h")]
         (->BodySuccessV0
           (->BodyArtifactV0
             header-name
             (c17/emit-header types layouts functions module-index)
             (str "module_" module-index ".c")
-            (emit-source types layouts functions module-index header-name)))))))
+            (emit-source types layouts functions module-index pool
+              header-name)))))))

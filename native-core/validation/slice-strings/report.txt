@@ -1,0 +1,26 @@
+stage source-seal ACCEPTED
+stage source-to-typed ACCEPTED
+world-types 10
+world-functions 12
+world-abis 12
+projected-types 7
+lowered fn_0 text-equal? 1 blocks
+lowered fn_1 text-length 1 blocks
+lowered fn_2 text-slice 1 blocks
+lowered fn_3 text-tail 1 blocks
+lowered fn_4 text-join 1 blocks
+lowered fn_5 labelled 1 blocks
+lowered fn_6 keyword-equal? 1 blocks
+lowered fn_7 assert-action? 1 blocks
+lowered fn_8 retract-action? 1 blocks
+lowered fn_9 prefix-is? 1 blocks
+lowered fn_10 tagged 1 blocks
+lowered fn_11 strip-at 4 blocks
+obligation-projection PASS valid-ssa
+obligation-projection PASS exhaustive-matches
+obligation-projection PASS closed-layouts
+obligation-projection PASS checked-arithmetic
+obligation-projection PASS legal-abi
+obligation-projection PASS discharged-tokens
+obligation-projection PASS bounded-effects
+materialize OK module_0.h module_0.c

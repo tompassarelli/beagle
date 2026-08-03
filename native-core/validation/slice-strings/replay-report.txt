@@ -1,0 +1,17 @@
+stage source-seal ACCEPTED
+stage source-to-typed ACCEPTED
+world-types 10
+world-functions 0
+world-abis 0
+projected-types 0
+obligation-projection PASS valid-ssa
+obligation-projection PASS exhaustive-matches
+obligation-projection PASS closed-layouts
+obligation-projection PASS checked-arithmetic
+obligation-projection PASS legal-abi
+obligation-projection PASS discharged-tokens
+obligation-projection PASS bounded-effects
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-+: no native lowering for this callee [char-at]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-VARIADIC-or: only the two-operand form lowers in v0 [trim-character?]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: strip-at calls a function whose own body is not lowered
+materialize OK module_0.h module_0.c

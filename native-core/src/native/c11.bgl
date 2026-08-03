@@ -165,6 +165,7 @@
     [(I64Kind token) true]
     [(F64Kind token) true]
     [(TextKind token) false]
+    [(KeywordKind token) false]
     [(RefKind target) false]))
 
 (defn layout-scalar? [layout: core/LayoutDef] -> Bool
@@ -211,6 +212,7 @@
     [(I64Atom value) true]
     [(F64Atom value) true]
     [(TextAtom value) false]
+    [(KeywordAtom value) false]
     [(RefAtom target) false]))
 
 (defn checked-operation-supported? [operation: core/CheckedOperationV0] -> Bool
@@ -321,6 +323,7 @@
              :else "int64_t")]
           [(F64Kind token) (if (= size 4) "float" "double")]
           [(TextKind token) "native_bytes"]
+          [(KeywordKind token) "uint64_t"]
           [(RefKind target) "void *"])]
     (str "typedef " backing " " type-name-value ";\n"
       (emit-layout-assertions type-name-value layout []))) )
@@ -425,6 +428,7 @@
     [(I64Atom value) (str "INT64_C(" (core/i64atom-value atom) ")")]
     [(F64Atom value) (str (core/f64atom-value atom))]
     [(TextAtom value) ""]
+    [(KeywordAtom value) ""]
     [(RefAtom target) ""]))
 
 (defn atom-c-type [types: (Vec core/TypeDef) module-index: Int atom: core/NativeAtom] -> String
@@ -433,6 +437,7 @@
     [(I64Atom value) "int64_t"]
     [(F64Atom value) "double"]
     [(TextAtom value) "native_bytes"]
+    [(KeywordAtom value) "uint64_t"]
     [(RefAtom target) "void *"]))
 
 (defn emit-instruction [types: (Vec core/TypeDef) module-index: Int function: core/FunctionDef block: core/BasicBlock instruction-position: Int instruction: core/Instruction] -> String

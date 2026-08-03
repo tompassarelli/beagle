@@ -4,11 +4,15 @@
 
 (defrecord NativeId [value :- String])
 
+;; TextKind and KeywordKind are both 64-bit handles but never one kind: Text
+;; identity is byte equality (CompareEqText), Keyword identity is table index
+;; equality (CompareEqI64), and only the kind distinguishes them.
 (defunion AtomKind
   (BoolKind [token :- Bool])
   (I64Kind [token :- Bool])
   (F64Kind [token :- Bool])
   (TextKind [token :- Bool])
+  (KeywordKind [token :- Bool])
   (RefKind [target :- NativeId]))
 
 (defunion NativeAtom
@@ -16,6 +20,7 @@
   (I64Atom [value :- Int])
   (F64Atom [value :- Float])
   (TextAtom [value :- String])
+  (KeywordAtom [value :- String])
   (RefAtom [target :- NativeId]))
 
 (defrecord TypeField [id :- NativeId name :- String type-id :- NativeId])
@@ -102,11 +107,14 @@
 
 ;; Total comparisons: every operand pair is defined, so a comparison is never a
 ;; CheckedOperationV0 and never carries an Outcome result.
+;; CompareEqTextV0 is byte equality over two handles, never handle equality: two
+;; distinct handles onto equal bytes are equal Text.
 (defunion CompareOpV0
   (CompareEqI64V0 [token: Bool])
   (CompareLtI64V0 [token: Bool])
   (CompareLeI64V0 [token: Bool])
-  (CompareEqBoolV0 [token: Bool]))
+  (CompareEqBoolV0 [token: Bool])
+  (CompareEqTextV0 [token: Bool]))
 
 (defunion ResourceTokenKindV0
   (RegionTokenV0 [region: NativeId])
@@ -164,11 +172,22 @@
   ;; Push is LINEAR (the source header is moved) and doubles capacity, so an
   ;; accumulate loop costs O(1) amortized instead of a persistent O(n) copy.
   (VecPushInstruction
-    [result: SsaValueV0 source-id: NativeId value-id: NativeId
-     region: NativeId capability: NativeId tokens: TokenFlowV0])
+    [result: SsaValueV0 source-id: NativeId value-id: NativeId arena-id: NativeId])
   (VecEmptyInstruction
-    [result: SsaValueV0 capacity-id: NativeId
-     region: NativeId capability: NativeId tokens: TokenFlowV0]))
+    [result: SsaValueV0 capacity-id: NativeId arena-id: NativeId])
+  ;; Acquires the arena once in the entry block, consuming the region and
+  ;; capability tokens; no other instruction can allocate without its result.
+  (ArenaInstruction
+    [result: SsaValueV0 region: NativeId capability: NativeId
+     tokens: TokenFlowV0])
+  (TextLengthInstruction [result: SsaValueV0 source-id: NativeId])
+  ;; v0 subs copies into the arena: no interior borrow, so the source blob's
+  ;; lifetime never constrains the slice.
+  (TextSliceInstruction
+    [result: SsaValueV0 arena-id: NativeId source-id: NativeId
+     start-id: NativeId end-id: NativeId failure-code: Int])
+  (TextConcatInstruction
+    [result: SsaValueV0 arena-id: NativeId operand-ids: (Vec NativeId)]))
 
 (defrecord SwitchCaseV0
   [variant-id: NativeId block-id: NativeId arguments: (Vec NativeId)])
@@ -327,10 +346,14 @@
      (ssavaluev0-id result)]
     [(VecLengthInstruction result source-id) (ssavaluev0-id result)]
     [(VecGetInstruction result source-id index-id) (ssavaluev0-id result)]
-    [(VecPushInstruction result source-id value-id region capability tokens)
+    [(VecPushInstruction result source-id value-id arena-id)
      (ssavaluev0-id result)]
-    [(VecEmptyInstruction result capacity-id region capability tokens)
-     (ssavaluev0-id result)]))
+    [(VecEmptyInstruction result capacity-id arena-id) (ssavaluev0-id result)]
+    [(ArenaInstruction result region capability tokens) (ssavaluev0-id result)]
+    [(TextLengthInstruction result source-id) (ssavaluev0-id result)]
+    [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
+     (ssavaluev0-id result)]
+    [(TextConcatInstruction result arena-id operand-ids) (ssavaluev0-id result)]))
 
 (defn instruction-result-ids [instructions :- (Vec Instruction)] :- (Vec NativeId)
   (mapv (fn [instruction :- Instruction] :- NativeId (instruction-result-id instruction))
@@ -418,6 +441,7 @@
     [(I64Kind value) true]
     [(F64Kind value) true]
     [(TextKind value) true]
+    [(KeywordKind value) true]
     [(RefKind target) (id-in? known-types target)]))
 
 (defn type-fields-refs-closed? [fields :- (Vec TypeField) known-types :- (Vec NativeId)] :- Bool
@@ -514,6 +538,7 @@
     [(I64Atom value) true]
     [(F64Atom value) true]
     [(TextAtom value) true]
+    [(KeywordAtom value) true]
     [(RefAtom target) (id-in? known-owned target)]))
 
 (defn store-op-resources-closed? [store :- StoreOp known-regions :- (Vec NativeId) known-capabilities :- (Vec NativeId)] :- Bool
@@ -548,10 +573,14 @@
      (id-in? known-owned variant-id)]
     [(VecLengthInstruction result source-id) true]
     [(VecGetInstruction result source-id index-id) true]
-    [(VecPushInstruction result source-id value-id region capability tokens)
+    [(VecPushInstruction result source-id value-id arena-id) true]
+    [(VecEmptyInstruction result capacity-id arena-id) true]
+    [(ArenaInstruction result region capability tokens)
      (and (id-in? known-regions region) (id-in? known-capabilities capability))]
-    [(VecEmptyInstruction result capacity-id region capability tokens)
-     (and (id-in? known-regions region) (id-in? known-capabilities capability))]))
+    [(TextLengthInstruction result source-id) true]
+    [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
+     true]
+    [(TextConcatInstruction result arena-id operand-ids) true]))
 
 (defn parameter-types-closed? [parameters :- (Vec Parameter) known-types :- (Vec NativeId)] :- Bool
   (every? (fn [parameter :- Parameter] :- Bool (id-in? known-types (parameter-type-id parameter)))
@@ -645,10 +674,15 @@
     [(UnionExtractInstruction result source-id variant-id) [source-id]]
     [(VecLengthInstruction result source-id) [source-id]]
     [(VecGetInstruction result source-id index-id) [source-id index-id]]
-    [(VecPushInstruction result source-id value-id region capability tokens)
-     [source-id value-id]]
-    [(VecEmptyInstruction result capacity-id region capability tokens)
-     [capacity-id]]))
+    [(VecPushInstruction result source-id value-id arena-id)
+     [arena-id source-id value-id]]
+    [(VecEmptyInstruction result capacity-id arena-id) [arena-id capacity-id]]
+    [(ArenaInstruction result region capability tokens) []]
+    [(TextLengthInstruction result source-id) [source-id]]
+    [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
+     [arena-id source-id start-id end-id]]
+    [(TextConcatInstruction result arena-id operand-ids)
+     (into [arena-id] operand-ids)]))
 
 (defn terminator-ssa-refs [terminator :- Terminator] :- (Vec NativeId)
   (match terminator
@@ -712,11 +746,15 @@
     [(UnionExtractInstruction result source-id variant-id) true]
     [(VecLengthInstruction result source-id) true]
     [(VecGetInstruction result source-id index-id) true]
-    [(VecPushInstruction result source-id value-id region capability tokens)
-     (and (id-in? allowed-regions region) (id-in? allowed-capabilities capability))]
-    [(VecEmptyInstruction result capacity-id region capability tokens)
+    [(VecPushInstruction result source-id value-id arena-id) true]
+    [(VecEmptyInstruction result capacity-id arena-id) true]
+    [(ArenaInstruction result region capability tokens)
      (and (id-in? allowed-regions region)
-       (id-in? allowed-capabilities capability))]))
+       (id-in? allowed-capabilities capability))]
+    [(TextLengthInstruction result source-id) true]
+    [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
+     true]
+    [(TextConcatInstruction result arena-id operand-ids) true]))
 
 (defn block-resources-allowed? [block :- BasicBlock allowed-regions :- (Vec NativeId) allowed-capabilities :- (Vec NativeId)] :- Bool
   (every? (fn [instruction :- Instruction] :- Bool (instruction-resources-allowed? instruction allowed-regions allowed-capabilities))

@@ -147,7 +147,27 @@
     [(CheckedInstruction value) (core/checkedinstruction-result instruction)]
     [(StoreInstruction value) (core/storeinstruction-result instruction)]
     [(AllocateInstruction value) (core/allocateinstruction-result instruction)]
-    [(CallInstruction value) (core/callinstruction-result instruction)]))
+    [(CallInstruction value) (core/callinstruction-result instruction)]
+    [(CompareInstruction value) (core/compareinstruction-result instruction)]
+    [(FieldInstruction value) (core/fieldinstruction-result instruction)]
+    [(VariantValueInstruction value)
+     (core/variantvalueinstruction-result instruction)]
+    [(RecordInstruction value) (core/recordinstruction-result instruction)]
+    [(UnionConstructInstruction value)
+     (core/unionconstructinstruction-result instruction)]
+    [(UnionExtractInstruction value)
+     (core/unionextractinstruction-result instruction)]
+    [(VecLengthInstruction value) (core/veclengthinstruction-result instruction)]
+    [(VecGetInstruction value) (core/vecgetinstruction-result instruction)]
+    [(VecPushInstruction value) (core/vecpushinstruction-result instruction)]
+    [(VecEmptyInstruction value) (core/vecemptyinstruction-result instruction)]
+    [(ArenaInstruction value) (core/arenainstruction-result instruction)]
+    [(TextLengthInstruction value)
+     (core/textlengthinstruction-result instruction)]
+    [(TextSliceInstruction value)
+     (core/textsliceinstruction-result instruction)]
+    [(TextConcatInstruction value)
+     (core/textconcatinstruction-result instruction)]))
 
 (defn qbe-value-ids [function: core/FunctionDef blocks: (Vec core/BasicBlock)] -> (Vec core/NativeId)
   (loop [block-position: Int 0
@@ -235,6 +255,7 @@
     [(I64Kind token) (if (= size 8) "l" "w")]
     [(F64Kind token) (if (= size 4) "s" "d")]
     [(TextKind token) ""]
+    [(KeywordKind token) ""]
     [(RefKind target) ""]))
 
 (defn member-letter [kind: core/AtomKind size: Int] -> String
@@ -245,6 +266,7 @@
      (cond (= size 1) "b" (= size 2) "h" (= size 4) "w" (= size 8) "l" :else "")]
     [(F64Kind token) (cond (= size 4) "s" (= size 8) "d" :else "")]
     [(TextKind token) ""]
+    [(KeywordKind token) ""]
     [(RefKind target) ""]))
 
 (defn letter-size [letter: String] -> Int
@@ -564,7 +586,21 @@
     [(CheckedInstruction value) true]
     [(StoreInstruction value) false]
     [(AllocateInstruction value) false]
-    [(CallInstruction value) false]))
+    [(CallInstruction value) false]
+    [(CompareInstruction value) false]
+    [(FieldInstruction value) false]
+    [(VariantValueInstruction value) false]
+    [(RecordInstruction value) false]
+    [(UnionConstructInstruction value) false]
+    [(UnionExtractInstruction value) false]
+    [(VecLengthInstruction value) false]
+    [(VecGetInstruction value) false]
+    [(VecPushInstruction value) false]
+    [(VecEmptyInstruction value) false]
+    [(ArenaInstruction value) false]
+    [(TextLengthInstruction value) false]
+    [(TextSliceInstruction value) false]
+    [(TextConcatInstruction value) false]))
 
 ;; A checked operation becomes a trap/continue diamond, so a world block can
 ;; end in a different QBE label than it started in.
@@ -593,6 +629,7 @@
     [(I64Atom value) (str (core/i64atom-value atom))]
     [(F64Atom value) (str "d_" (core/f64atom-value atom))]
     [(TextAtom value) ""]
+    [(KeywordAtom value) ""]
     [(RefAtom value) ""]))
 
 (defn atom-letter [atom: core/NativeAtom] -> String
@@ -601,6 +638,7 @@
     [(I64Atom value) "l"]
     [(F64Atom value) "d"]
     [(TextAtom value) ""]
+    [(KeywordAtom value) ""]
     [(RefAtom value) ""]))
 
 (defn store-mnemonic [store: core/StoreOp] -> String
@@ -775,7 +813,21 @@
          (allocate-alignment context (core/ssavaluev0-type-id result)) ")\n")]
       [(CallInstruction value)
        (emit-call context result-name (core/callinstruction-function-id instruction)
-         (core/callinstruction-arguments instruction))])))
+         (core/callinstruction-arguments instruction))]
+      [(CompareInstruction value) ""]
+      [(FieldInstruction value) ""]
+      [(VariantValueInstruction value) ""]
+      [(RecordInstruction value) ""]
+      [(UnionConstructInstruction value) ""]
+      [(UnionExtractInstruction value) ""]
+      [(VecLengthInstruction value) ""]
+      [(VecGetInstruction value) ""]
+      [(VecPushInstruction value) ""]
+      [(VecEmptyInstruction value) ""]
+      [(ArenaInstruction value) ""]
+      [(TextLengthInstruction value) ""]
+      [(TextSliceInstruction value) ""]
+      [(TextConcatInstruction value) ""])))
 
 (defn emit-instructions [context: QbeFn block-index-value: Int block: core/BasicBlock] -> String
   (let [instructions: (Vec core/Instruction) (core/basicblock-instructions block)]
@@ -1039,6 +1091,7 @@
     [(I64Atom value) true]
     [(F64Atom value) true]
     [(TextAtom value) false]
+    [(KeywordAtom value) false]
     [(RefAtom target) false]))
 
 (defn store-supported? [store: core/StoreOp] -> Bool
@@ -1052,7 +1105,21 @@
     [(CheckedInstruction value) true]
     [(StoreInstruction value) (store-supported? (core/storeinstruction-store instruction))]
     [(AllocateInstruction value) true]
-    [(CallInstruction value) true]))
+    [(CallInstruction value) true]
+    [(CompareInstruction value) false]
+    [(FieldInstruction value) false]
+    [(VariantValueInstruction value) false]
+    [(RecordInstruction value) false]
+    [(UnionConstructInstruction value) false]
+    [(UnionExtractInstruction value) false]
+    [(VecLengthInstruction value) false]
+    [(VecGetInstruction value) false]
+    [(VecPushInstruction value) false]
+    [(VecEmptyInstruction value) false]
+    [(ArenaInstruction value) false]
+    [(TextLengthInstruction value) false]
+    [(TextSliceInstruction value) false]
+    [(TextConcatInstruction value) false]))
 
 (defn parameterless-target? [blocks: (Vec core/BasicBlock) target: core/NativeId] -> Bool
   (let [index: Int (block-index blocks target)]

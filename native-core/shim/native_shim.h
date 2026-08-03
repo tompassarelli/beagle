@@ -6,6 +6,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include <string.h>
+
 #define NATIVE_TRAP_INVALID_ARGUMENT UINT32_C(1)
 #define NATIVE_TRAP_OVERFLOW UINT32_C(2)
 #define NATIVE_TRAP_ARENA_EXHAUSTED UINT32_C(3)
@@ -40,6 +42,11 @@ typedef struct native_vec {
    push sequence's reallocation count is observable from a test. */
 extern uint64_t native_vec_storage_allocations;
 
+/* A Text handle is the address of a length-prefixed strict-UTF-8 blob: an
+   8-byte native-endian uint64_t length, then exactly that many bytes. Handles
+   are world-local addresses and never cross a world boundary. */
+#define NATIVE_TEXT_HEADER_BYTES ((uint64_t)sizeof(uint64_t))
+
 void native_arena_init(native_arena *arena, uint8_t *storage, size_t capacity);
 void *native_arena_alloc(native_arena *arena, size_t size, size_t alignment);
 void native_arena_reset(native_arena *arena);
@@ -56,5 +63,15 @@ native_vec *native_vec_push(native_arena *arena, native_vec *vector,
                             const void *value, int64_t stride, size_t alignment);
 bool native_byte_read(FILE *stream, uint8_t *destination, size_t length);
 bool native_byte_write(FILE *stream, const uint8_t *source, size_t length);
+
+uint64_t native_text_length(uint64_t handle);
+const uint8_t *native_text_bytes(uint64_t handle);
+bool native_text_eq(uint64_t left, uint64_t right);
+uint64_t native_text_alloc(native_arena *arena, uint64_t length, uint8_t **out);
+uint64_t native_text_slice(native_arena *arena, uint64_t handle, uint64_t start,
+                           uint64_t end);
+uint64_t native_text_from_int(native_arena *arena, int64_t value);
+uint64_t native_text_concat(native_arena *arena, const uint64_t *parts,
+                            uint64_t count);
 
 #endif

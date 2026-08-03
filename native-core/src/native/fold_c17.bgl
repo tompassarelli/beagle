@@ -102,6 +102,16 @@
 (defn type-emitted? [types: (Vec core/TypeDef) target: core/NativeId] -> Bool
   (>= (type-index types target) 0))
 
+(defn type-def-for
+  [types: (Vec core/TypeDef) target: core/NativeId] -> (U core/TypeDef Nil)
+  (let [index: Int (type-index types target)]
+    (if (< index 0) nil (nth types index))))
+
+(defn text-type-def? [definition: core/TypeDef] -> Bool
+  (let [shape: core/TypeShape (core/typedef-shape definition)]
+    (and (instance? native.core.AtomType shape)
+      (instance? native.core.TextKind (core/atomtype-kind shape)))))
+
 (defn layout-for-type
   [layouts: (Vec core/LayoutDef) target: core/NativeId] -> (U core/LayoutDef Nil)
   (loop [index: Int 0]
@@ -295,6 +305,11 @@
   (or (instance? native.core.BoolAtom atom)
       (instance? native.core.I64Atom atom)
       (instance? native.core.F64Atom atom)))
+
+(defn keyword-type-def? [definition: core/TypeDef] -> Bool
+  (let [shape: core/TypeShape (core/typedef-shape definition)]
+    (and (instance? native.core.AtomType shape)
+      (instance? native.core.KeywordKind (core/atomtype-kind shape)))))
 
 (defn checked-operation-supported? [operation: core/CheckedOperationV0] -> Bool
   (instance? native.core.CheckedAddI64V0 operation))
