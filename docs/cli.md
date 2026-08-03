@@ -33,7 +33,8 @@ beagle impact FN PATH...    # change-impact
 beagle expand FILE          # macro-expanded source
 beagle explain CODE         # diagnostic explanation (E001, …)
 beagle explain-type FILE    # inferred types as a view
-beagle facts-roundtrip MODE FILE   # lossless source/fact projection
+beagle facts-roundtrip MODE FILE   # program-lossless source↔fact projection
+                                   #  (reader-datum identity, not byte identity)
 beagle langs [--json] [--view V]   # target table (names, table, extensions,
                                    #  domains, pipeline)
 beagle doc-fill [--check]   # refill every doc span the table owns; --check

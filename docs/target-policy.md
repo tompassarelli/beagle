@@ -24,12 +24,17 @@ those points in history.
 
 ## What is not a target
 
-`facts` is a lossless CNF fact-triple projection of the same AST
-(`beagle-lib/private/emit-facts.rkt`, exercised by `bin/beagle
-facts-roundtrip`). It has no `#lang`, no source extension, and no idiom; it is a
-query surface, not a language you author against. It is carried separately in
-`targets.rkt`'s `PROJECTIONS` list precisely so views can mention it without it
-drifting back into "seven targets".
+`facts` is the compact, lossy projection of the parsed AST into CNF analysis
+facts, represented as three-slot vectors (`bin/beagle-facts`, implemented by
+`beagle-lib/private/emit-facts.rkt`). It is a query surface, not an authoring
+language. It has no `#lang`, no source extension, and no idiom, and is carried
+separately in `targets.rkt`'s `PROJECTIONS` list precisely so views can mention
+it without it drifting back into "seven targets".
+
+`beagle facts-roundtrip` is the verbose, program-lossless source↔fact projection
+used by code-as-facts; "lossless" means reader-datum identity, not byte
+identity. The two projections share the fact layer, not a fidelity contract, so
+no single sentence describes both.
 
 Beyond the target set, two source extensions name no target:
 `.bgl` (target-neutral — declare with `#lang beagle/<target>` or `(define-target

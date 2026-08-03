@@ -13,11 +13,11 @@
 ;; `bin/beagle doc-fill`; the drift test in beagle-test/tests/docfill.rkt
 ;; fails the build if a derived view was not regenerated.
 ;;
-;; `facts` is deliberately NOT in this list. It is a lossless PROJECTION of the
-;; same AST into CNF fact triples (emit-facts.rkt), not a language a program is
-;; authored against — it has no #lang, no source extension, and no idiom. It is
-;; carried separately in PROJECTIONS so views can mention it without letting it
-;; drift back into "seven targets".
+;; `facts` is deliberately NOT in this list. It is a compact, LOSSY analysis
+;; PROJECTION of the same AST into CNF fact triples (emit-facts.rkt) — no #lang,
+;; no source extension, no idiom. The program-lossless projection is a separate
+;; contract (facts-roundtrip.rkt). Carried in PROJECTIONS so views can mention
+;; `facts` without it drifting back into "seven targets".
 
 (require racket/string
          racket/list)
@@ -75,8 +75,8 @@
 
 (define PROJECTIONS
   (list
-   (projection 'facts "Fact graph" "emit-facts.rkt"
-               "lossless CNF fact-triple projection of the AST (`bin/beagle facts-roundtrip`), a query surface rather than a language you author against")))
+   (projection 'facts "Fact projection" "emit-facts.rkt"
+               "compact, lossy projection of the parsed AST into CNF analysis facts, represented as three-slot vectors (`bin/beagle-facts`): a query surface, not an authoring language. The verbose, program-lossless source↔fact projection is `beagle facts-roundtrip`, where lossless means reader-datum identity, not byte identity")))
 
 (define (target-ids) (map target-id TARGETS))
 (define (target-count) (length TARGETS))

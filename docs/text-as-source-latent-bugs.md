@@ -4,7 +4,7 @@ A running ledger. The thesis behind graph-native repair is that **text-as-source
 isn't neutral** — it doesn't just make analysis slower, it *silently corrupts and
 conceals*. Each entry below is a real correctness bug that existed for some time,
 invisible, and became visible only when a layer moved from text/`Any` to structured
-facts. "Migrating off text *found* these" is the receipt that the boat deserved to
+triples. "Migrating off text *found* these" is the receipt that the boat deserved to
 burn.
 
 The bar for an entry: a genuine wrong-answer or data-loss bug (not a style nit),

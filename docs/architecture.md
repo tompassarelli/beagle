@@ -26,7 +26,7 @@ position — not a desugared intermediate.
 <!-- beagle:langs emitters -->
 - `beagle-lib/private/emit-{clj,js,nix,odin,zig,scriptc}.rkt` — the live target emitters (one row each in
   `beagle-lib/private/targets.rkt`, the canonical target table).
-- `beagle-lib/private/emit-facts.rkt` — the lossless CNF fact-triple projection of the AST (`bin/beagle facts-roundtrip`), a query surface rather than a language you author against.
+- `beagle-lib/private/emit-facts.rkt` — the compact, lossy projection of the parsed AST into CNF analysis facts, represented as three-slot vectors (`bin/beagle-facts`): a query surface, not an authoring language. The verbose, program-lossless source↔fact projection is `beagle facts-roundtrip`, where lossless means reader-datum identity, not byte identity.
 <!-- /beagle:langs -->
 - `beagle-lib/private/nixos-schema.rkt` — the typed NixOS-option environment.
 - `beagle-lib/private/diagnostic-kind.rkt` — the `cause-class?` taxonomy.

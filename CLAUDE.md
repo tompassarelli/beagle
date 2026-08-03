@@ -247,8 +247,8 @@ Record schema (one JSON object per line):
 Analysis: JSONL → mechanically aggregable. `bin/beagle-halluc` reports counts by
 category / severity / resolution / date (the reduction-rate trend); or parse it with
 any JSON tool (`bb` + `cheshire`). Reduction rate = records-per-period falling as
-roots are fixed. (Future: each record is fact-shaped
-and migrates cleanly to Fram facts — hallucination-reduction inside the one graph.)
+roots are fixed. (Future: each record is already a set of propositions
+and migrates cleanly to Fram Triples — hallucination-reduction inside the one graph.)
 
 ### Test tiering during surface iteration
 

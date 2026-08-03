@@ -100,7 +100,7 @@ target is *for*).
 | `zig` | Zig | `.bzig` | `#lang beagle/zig` | `.zig` | live — Racket emitter with restored structural goldens |
 | `scriptc` | TypeScript | `.bsc` | `#lang beagle/scriptc` | `.ts` | live — Racket emitter over the JS lowering; experimental boundary |
 
-Six language targets. `facts` is not one of them — it is the lossless CNF fact-triple projection of the AST (`bin/beagle facts-roundtrip`), a query surface rather than a language you author against.
+Six language targets. `facts` is not one of them — it is the compact, lossy projection of the parsed AST into CNF analysis facts, represented as three-slot vectors (`bin/beagle-facts`): a query surface, not an authoring language. The verbose, program-lossless source↔fact projection is `beagle facts-roundtrip`, where lossless means reader-datum identity, not byte identity.
 <!-- /beagle:langs -->
 
 That `status` column is the maturity ordering: the three source-to-source

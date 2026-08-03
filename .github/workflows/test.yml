@@ -124,7 +124,7 @@ jobs:
         run: bin/test/build-reproducible/run.sh
 
       # Graph-native repair: beagle-cascade derives its call graph from the Fram
-      # fact graph (scope-correct), not regex over text. That runs on the Fram
+      # occurrence store (scope-correct), not regex over text. That runs on the Fram
       # engine, so we check out fram's committed classpath and gate the
       # scope-correctness proof (a change to mod_a/helper must NOT blast mod_b's
       # same-named helper). This is the load-bearing test for the thesis that

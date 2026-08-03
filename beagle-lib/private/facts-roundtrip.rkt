@@ -6,7 +6,7 @@
 ;; reconstruction needs an AST unparser that doesn't exist). Losslessness lives one
 ;; layer down — at the READER DATUM tree, where type annotations (`:- Int`) are just
 ;; tokens. This proves `datum -> facts -> datum` is the identity over a real corpus:
-;; the fact graph is a faithful, regenerable representation of the program source.
+;; the lossless occurrence projection is a faithful, regenerable representation of source.
 ;;
 ;;   racket beagle-lib/private/facts-roundtrip.rkt <file-or-dir> ...
 ;;
