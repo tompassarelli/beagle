@@ -28,7 +28,9 @@
 ;; source-location layer that facts-roundtrip needs but the compiler stages do
 ;; not: each located node carries a reader datum, its fact kind/value, optional
 ;; srcloc, and ordered children.
-(defn- surrogate-pair-at? [src: String i: Int] -> Bool
+(defn- surrogate-pair-at?
+  [src: String
+   i: Int] -> Bool
   (if (>= (+ i 1) (count src))
     false
     (let [hi (int (.charAt src i)) lo (int (.charAt src (+ i 1)))]
@@ -57,7 +59,9 @@
               (conj (conj out [line next-col]) [line next-col]))
             (recur (+ i 1) line next-col (conj out [line next-col]))))))))
 
-(defn- codepoint-offset [src: String off: Int] -> Int
+(defn- codepoint-offset
+  [src: String
+   off: Int] -> Int
   (let [offsets (deref CODEPOINT-OFFSETS)]
     (if (= (count offsets) (+ (count src) 1))
       (nth offsets off)
@@ -66,7 +70,9 @@
           result
           (recur (+ i (if (surrogate-pair-at? src i) 2 1)) (+ result 1)))))))
 
-(defn- line-col [src: String off: Int] -> Any
+(defn- line-col
+  [src: String
+   off: Int] -> Any
   (let [line-cols (deref LINE-COLS)]
     (if (= (count line-cols) (+ (count src) 1))
       (nth line-cols off)
@@ -77,7 +83,10 @@
             (recur (+ i 1) (+ line 1) 0)
             (recur (+ i (if (surrogate-pair-at? src i) 2 1)) line (+ col 1))))))))
 
-(defn- source-loc [src: String start: Int end: Any] -> Any
+(defn- source-loc
+  [src: String
+   start: Int
+   end: Any] -> Any
   (let [lc (line-col src start) base {"line" (nth lc 0) "col" (nth lc 1) "pos" (+ (codepoint-offset src start) 1) "source-start" start}]
     (if (some? end)
       (assoc base
@@ -87,17 +96,30 @@
         end)
       base)))
 
-(defn- pos-loc [start: Int end: Any] -> Any
+(defn- pos-loc
+  [start: Int
+   end: Any] -> Any
   (let [base {"pos" (+ start 1) "relative" true}]
     (if (some? end) (assoc base "span" (- end start)) base)))
 
-(defn- make-node [kind: String value: Any loc: Any children: Any] -> Any
+(defn- make-node
+  [kind: String
+   value: Any
+   loc: Any
+   children: Any] -> Any
   {"kind" kind "value" value "loc" loc "children" children})
 
-(defn- leaf-node [kind: String value: Any src: String start: Int end: Any] -> Any
+(defn- leaf-node
+  [kind: String
+   value: Any
+   src: String
+   start: Int
+   end: Any] -> Any
   (make-node kind value (source-loc src start end) nil))
 
-(defn- synthetic-leaf [value: String loc: Any] -> Any
+(defn- synthetic-leaf
+  [value: String
+   loc: Any] -> Any
   (make-node "symbol" value loc nil))
 
 (defn- child-values [children: Any] -> Any
@@ -106,15 +128,23 @@
       out
       (recur (+ i 1) (conj out (get (nth children i) "value"))))))
 
-(defn- list-node [children: Any loc: Any] -> Any
+(defn- list-node
+  [children: Any
+   loc: Any] -> Any
   (if (= (count children) 0)
     (make-node "nil" [] loc nil)
     (make-node "list" (child-values children) loc children)))
 
-(defn- tagged-node [tag: String items: Any loc: Any tag-loc: Any] -> Any
+(defn- tagged-node
+  [tag: String
+   items: Any
+   loc: Any
+   tag-loc: Any] -> Any
   (list-node (into [(synthetic-leaf tag tag-loc)] items) loc))
 
-(defn- replace-loc [node: Any loc: Any] -> Any
+(defn- replace-loc
+  [node: Any
+   loc: Any] -> Any
   (let [children (get node "children")]
     (assoc node
       "loc"
@@ -124,7 +154,9 @@
         (mapv (fn [child: Any] -> Any (replace-loc child loc)) children)
         nil))))
 
-(defn- map-context-node [node: Any loc: Any] -> Any
+(defn- map-context-node
+  [node: Any
+   loc: Any] -> Any
   (let [children (get node "children") bool? (= (get node "kind") "bool")]
     (assoc node
       "kind"
@@ -138,7 +170,9 @@
         (mapv (fn [child: Any] -> Any (map-context-node child loc)) children)
         nil))))
 
-(defn- relative-loc [node: Any base-codepoint: Int] -> Any
+(defn- relative-loc
+  [node: Any
+   base-codepoint: Int] -> Any
   (let [loc (get node "loc") pos (get loc "pos") span (get loc "span") rel (if (some? pos) (- pos (+ base-codepoint 1)) 0) next-loc (if (some? span) (pos-loc rel (+ rel span)) (pos-loc rel nil)) children (get node "children")]
     (assoc node
       "loc"
@@ -149,7 +183,10 @@
           children)
         nil))))
 
-(defn- result-leaf [src: String start: Int result: Any] -> Any
+(defn- result-leaf
+  [src: String
+   start: Int
+   result: Any] -> Any
   (let [value (get result "value") end (get result "pos")]
     (cond
       (and (vector? value) (= (count value) 2) (= (nth value 0) rd/STRING-TAG))
@@ -165,7 +202,10 @@
 
 (declare scan-datum)
 
-(defn- scan-delimited [src: String pos: Int close: String] -> Any
+(defn- scan-delimited
+  [src: String
+   pos: Int
+   close: String] -> Any
   (loop [p (rd/skip-ws src pos) out: Any []]
     (cond
       (>= p (count src))
@@ -176,39 +216,59 @@
       (let [node (scan-datum src p) next (get node "next")]
         (recur (rd/skip-ws src next) (conj out (dissoc node "next")))))))
 
-(defn- prefixed-node [src: String start: Int prefix: String inner-start: Int] -> Any
+(defn- prefixed-node
+  [src: String
+   start: Int
+   prefix: String
+   inner-start: Int] -> Any
   (let [inner (scan-datum src inner-start) child (dissoc inner "next") children [(synthetic-leaf prefix (source-loc src start nil)) child]]
     (assoc (list-node children (source-loc src start nil))
       "next"
       (get inner "next"))))
 
-(defn- metadata-node [src: String start: Int meta-start: Int] -> Any
+(defn- metadata-node
+  [src: String
+   start: Int
+   meta-start: Int] -> Any
   (let [meta-r (scan-datum src meta-start) form-r (scan-datum src (get meta-r "next")) children [(synthetic-leaf "#%meta" (source-loc src start nil)) (dissoc meta-r "next") (dissoc form-r "next")]]
     (assoc (list-node children (source-loc src start nil))
       "next"
       (get form-r "next"))))
 
-(defn- conditional-node [src: String start: Int splice?: Bool] -> Any
+(defn- conditional-node
+  [src: String
+   start: Int
+   splice?: Bool] -> Any
   (let [open (+ start (if splice? 3 2)) result (scan-delimited src (+ open 1) ")") loc (source-loc src start nil) items (mapv (fn [child: Any] -> Any (replace-loc child loc)) (get result "nodes")) tag (if splice? "reader-conditional-splice" "reader-conditional")]
     (assoc (tagged-node tag items loc loc) "next" (get result "pos"))))
 
-(defn- symbolic-value-node [src: String start: Int] -> Any
+(defn- symbolic-value-node
+  [src: String
+   start: Int] -> Any
   (let [sym-r (rd/read-symbol-text src (+ start 2)) loc (source-loc src start nil) value (get sym-r "value") children [(synthetic-leaf "#%symbolic-val" loc) (synthetic-leaf value loc)]]
     (assoc (list-node children loc) "next" (get sym-r "pos"))))
 
-(defn- syntax-quote-node [src: String start: Int] -> Any
+(defn- syntax-quote-node
+  [src: String
+   start: Int] -> Any
   (let [inner-r (scan-datum src (+ start 2)) next (get inner-r "next") child (relative-loc (dissoc inner-r "next") (codepoint-offset src start)) head (make-node "symbol" "syntax" (pos-loc 0 2) nil) wrapper (list-node [head child] (pos-loc 0 (- next start)))]
     (assoc wrapper "next" next)))
 
-(defn- regex-node [src: String start: Int] -> Any
+(defn- regex-node
+  [src: String
+   start: Int] -> Any
   (let [result (rd/read-regex-literal src (+ start 1)) next (get result "pos") loc (source-loc src start next) value (nth (get result "value") 1) children [(synthetic-leaf "#%regex" loc) (make-node "string" value loc nil)]]
     (assoc (list-node children loc) "next" next)))
 
-(defn- set-node [src: String start: Int] -> Any
+(defn- set-node
+  [src: String
+   start: Int] -> Any
   (let [result (scan-delimited src (+ start 2) "}") loc (source-loc src start nil) items (mapv (fn [child: Any] -> Any (replace-loc child loc)) (get result "nodes"))]
     (assoc (tagged-node ast/SET-TAG items loc loc) "next" (get result "pos"))))
 
-(defn- js-node [src: String start: Int] -> Any
+(defn- js-node
+  [src: String
+   start: Int] -> Any
   (let [inner-r (scan-datum src (+ start 3)) child0 (dissoc inner-r "next") child-pos (- (get (get child0 "loc") "pos") 1) child-loc (source-loc src child-pos nil) child (replace-loc child0 child-loc) loc (source-loc src start nil)]
     (assoc (list-node [(synthetic-leaf "#%js" loc) child] loc)
       "next"
@@ -229,7 +289,9 @@
 (defn- max-placeholder-index [node: Any] -> Int
   (let [own (fn-placeholder-index node) children (get node "children")]
     (if (some? children)
-      (reduce (fn [best: Int child: Any] -> Int (max best (max-placeholder-index child)))
+      (reduce (fn
+                [best: Int
+                 child: Any] -> Int (max best (max-placeholder-index child)))
         own
         children)
       own)))
@@ -239,7 +301,9 @@
     (if own
       true
       (if (some? children)
-        (reduce (fn [found: Bool child: Any] -> Bool (or found (rest-placeholder? child)))
+        (reduce (fn
+                  [found: Bool
+                   child: Any] -> Bool (or found (rest-placeholder? child)))
           false
           children)
         false))))
@@ -253,17 +317,24 @@
           children))
       rewritten)))
 
-(defn- fn-param-nodes [max-index: Int rest?: Bool loc: Any] -> Any
+(defn- fn-param-nodes
+  [max-index: Int
+   rest?: Bool
+   loc: Any] -> Any
   (let [positional (loop [i 1 out: Any []] (if (> i max-index) out (recur (+ i 1) (conj out (synthetic-leaf (str "%" i) loc)))))]
     (if rest?
       (into positional [(synthetic-leaf "&" loc) (synthetic-leaf "%&" loc)])
       positional)))
 
-(defn- anonymous-fn-node [src: String start: Int] -> Any
+(defn- anonymous-fn-node
+  [src: String
+   start: Int] -> Any
   (let [result (scan-delimited src (+ start 2) ")") raw-body (list-node (get result "nodes") nil) max-index (max-placeholder-index raw-body) rest? (rest-placeholder? raw-body) loc (source-loc src start nil) body (replace-loc (rewrite-fn-placeholders raw-body) loc) params (tagged-node ast/BRACKET-TAG (fn-param-nodes max-index rest? loc) loc loc) expanded (list-node [(synthetic-leaf "fn" loc) params body] loc)]
     (assoc expanded "next" (get result "pos"))))
 
-(defn scan-datum [src: String pos: Int] -> Any
+(defn scan-datum
+  [src: String
+   pos: Int] -> Any
   (let [p (rd/skip-ws src pos) ch (rd/char-at src p) next1 (rd/char-at src (+ p 1)) next2 (rd/char-at src (+ p 2)) atom-r (rd/read-symbol-text src p) atom-text (get atom-r "value")]
     (cond
       (= ch "(")
@@ -326,7 +397,9 @@
       (let [result (rd/read-datum src p)]
         (assoc (result-leaf src p result) "next" (get result "pos"))))))
 
-(defn- shift-node-location [node: Any shift: Int] -> Any
+(defn- shift-node-location
+  [node: Any
+   shift: Int] -> Any
   (let [loc (get node "loc") children (get node "children") next-loc (if (or (nil? loc) (= true (get loc "relative"))) loc (assoc loc "line" (+ (get loc "line") 1) "pos" (+ (get loc "pos") shift)))]
     (assoc node
       "loc"
@@ -361,7 +434,10 @@
       (let [ch (rd/char-at s i) code (int (.charAt s i)) escaped (cond (= ch "\"") "\\\"" (= ch "\\") "\\\\" (= ch "\n") "\\n" (= ch "\r") "\\r" (= ch "\t") "\\t" (or (< code 32) (= code 127)) (str "\\u" (hex4 code)) :else ch)]
         (recur (+ i 1) (str out escaped))))))
 
-(defn- fact-line [subject: Int predicate: String object: Any] -> String
+(defn- fact-line
+  [subject: Int
+   predicate: String
+   object: Any] -> String
   (str "["
     subject
     " "
@@ -370,7 +446,9 @@
     (if (number? object) (str object) (edn-string object))
     "]"))
 
-(defn- encoded-value [kind: String value: Any] -> String
+(defn- encoded-value
+  [kind: String
+   value: Any] -> String
   (cond
     (= kind "bool")
     (if value "true" "false")
@@ -379,7 +457,11 @@
     :else
     (str value)))
 
-(defn- add-fact! [out: Any subject: Int predicate: String object: Any] -> Nil
+(defn- add-fact!
+  [out: Any
+   subject: Int
+   predicate: String
+   object: Any] -> Nil
   (swap! out conj (fact-line subject predicate object))
   nil)
 
@@ -387,14 +469,20 @@
 
 (declare emit-node!)
 
-(defn- emit-loc! [out: Any id: Int loc: Any] -> Nil
+(defn- emit-loc!
+  [out: Any
+   id: Int
+   loc: Any] -> Nil
   (when (some? loc)
     (doseq [key ["line" "col" "pos" "span"]]
       (let [value (get loc key)]
         (when (some? value) (add-fact! out id key value)))))
   nil)
 
-(defn- emit-node! [node: Any counter: Any out: Any] -> Int
+(defn- emit-node!
+  [node: Any
+   counter: Any
+   out: Any] -> Int
   (let [id (fresh-id! counter) kind (get node "kind") children (get node "children")]
     (add-fact! out id "kind" kind)
     (if (some? children)
@@ -407,7 +495,9 @@
     (emit-loc! out id (get node "loc"))
     id))
 
-(defn- form-spans [forms: Any shift: Int] -> Any
+(defn- form-spans
+  [forms: Any
+   shift: Int] -> Any
   (loop [i 0 out: Any []]
     (if (>= i (count forms))
       out
@@ -421,7 +511,9 @@
             :else
             out))))))
 
-(defn- in-span? [off: Int spans: Any] -> Bool
+(defn- in-span?
+  [off: Int
+   spans: Any] -> Bool
   (loop [i 0]
     (if (>= i (count spans))
       false
@@ -440,14 +532,22 @@
       :else
       (recur (+ i 1) start out))))
 
-(defn- line-comments [src: String spans: Any] -> Any
-  (reduce (fn [out: Any line: Any] -> Any (let [start (nth line 0) text (nth line 1) hit (loop [j 0] (cond (>= j (count text)) nil (and (= (rd/char-at text j) ";") (not (in-span? (+ start j) spans))) j :else (recur (+ j 1))))] (if (some? hit) (conj out [(+ start hit) (str/trimr (subs text hit))]) out)))
+(defn- line-comments
+  [src: String
+   spans: Any] -> Any
+  (reduce (fn
+            [out: Any
+             line: Any] -> Any (let [start (nth line 0) text (nth line 1) hit (loop [j 0] (cond (>= j (count text)) nil (and (= (rd/char-at text j) ";") (not (in-span? (+ start j) spans))) j :else (recur (+ j 1))))] (if (some? hit) (conj out [(+ start hit) (str/trimr (subs text hit))]) out)))
     []
     (source-lines src)))
 
-(defn- line-number [src: String off: Int] -> Int (nth (line-col src off) 0))
+(defn- line-number
+  [src: String
+   off: Int] -> Int (nth (line-col src off) 0))
 
-(defn- nearest-preceding [off: Int spans: Any] -> Any
+(defn- nearest-preceding
+  [off: Int
+   spans: Any] -> Any
   (loop [i 0 best: Any nil]
     (if (>= i (count spans))
       best
@@ -457,7 +557,9 @@
             span
             best))))))
 
-(defn- nearest-following [off: Int spans: Any] -> Any
+(defn- nearest-following
+  [off: Int
+   spans: Any] -> Any
   (loop [i 0 best: Any nil]
     (if (>= i (count spans))
       best
@@ -467,7 +569,9 @@
             span
             best))))))
 
-(defn- classify-comments [src: String spans: Any] -> Any
+(defn- classify-comments
+  [src: String
+   spans: Any] -> Any
   (mapv (fn [comment: Any] -> Any (let [off (nth comment 0) text (nth comment 1) before (nearest-preceding off spans) after (nearest-following off spans)] (cond (and (some? before) (= (line-number src (- (nth before 2) 1)) (line-number src off))) ["trailing" (nth before 0) text] (some? after) ["leading" (nth after 0) text] :else ["trailing" "file" text])))
     (line-comments src spans)))
 
@@ -486,11 +590,18 @@
           (recur end (conj out ["text" (subs text i end)])))))))
 
 (defn- comment-segments [text: String] -> Any
-  (reduce (fn [out: Any segment: Any] -> Any (if (and (> (count out) 0) (= (nth (peek out) 0) "text") (= (nth segment 0) "text")) (conj (pop out) ["text" (str (nth (peek out) 1) (nth segment 1))]) (conj out segment)))
+  (reduce (fn
+            [out: Any
+             segment: Any] -> Any (if (and (> (count out) 0) (= (nth (peek out) 0) "text") (= (nth segment 0) "text")) (conj (pop out) ["text" (str (nth (peek out) 1) (nth segment 1))]) (conj out segment)))
     []
     (raw-comment-segments text)))
 
-(defn- emit-comments! [comments: Any form-ids: Any root: Int counter: Any out: Any] -> Nil
+(defn- emit-comments!
+  [comments: Any
+   form-ids: Any
+   root: Int
+   counter: Any
+   out: Any] -> Nil
   (let [indexes (atom {})]
     (doseq [comment comments]
       (let [placement (nth comment 0) spec (nth comment 1) text (nth comment 2) anchor (if (= spec "file") root (nth form-ids spec)) idx (get (deref indexes) anchor 0) cid (fresh-id! counter)]
@@ -538,12 +649,16 @@
     [(nth items 0) (edn-value (nth items 1)) (edn-value (nth items 2))]))
 
 (defn- read-triples [path: String] -> Any
-  (reduce (fn [out: Any line: String] -> Any (if (and (> (count line) 0) (= (rd/char-at line 0) "[")) (conj out (parse-triple line)) out))
+  (reduce (fn
+            [out: Any
+             line: String] -> Any (if (and (> (count line) 0) (= (rd/char-at line 0) "[")) (conj out (parse-triple line)) out))
     []
     (str/split-lines (selfhost.rt/slurp-file path))))
 
 (defn- triples-props [triples: Any] -> Any
-  (reduce (fn [props: Any triple: Any] -> Any (assoc-in props [(nth triple 0) (nth triple 1)] (nth triple 2)))
+  (reduce (fn
+            [props: Any
+             triple: Any] -> Any (assoc-in props [(nth triple 0) (nth triple 1)] (nth triple 2)))
     {}
     triples))
 
@@ -559,8 +674,12 @@
       :else
       nil)))
 
-(defn- ordered-children [props: Any id: Int] -> Any
-  (let [entries (reduce (fn [out: Any entry: Any] -> Any (let [key (slot-key (nth entry 0))] (if (some? key) (conj out [key (nth entry 1)]) out))) [] (get props id {}))]
+(defn- ordered-children
+  [props: Any
+   id: Int] -> Any
+  (let [entries (reduce (fn
+                          [out: Any
+                           entry: Any] -> Any (let [key (slot-key (nth entry 0))] (if (some? key) (conj out [key (nth entry 1)]) out))) [] (get props id {}))]
     (mapv (fn [entry: Any] -> Any (nth entry 1))
       (sort-by (fn [entry: Any] -> Any (nth entry 0)) entries))))
 
@@ -568,7 +687,13 @@
   (or (= predicate "child") (= predicate "tail") (some? (slot-key predicate))))
 
 (defn- root-id [props: Any] -> Any
-  (let [refs (reduce (fn [out: Any subject-entry: Any] -> Any (reduce (fn [inner: Any entry: Any] -> Any (let [predicate (nth entry 0) object (nth entry 1)] (if (and (number? object) (ref-predicate? predicate)) (assoc inner object true) inner))) out (nth subject-entry 1))) {} props) candidates (reduce (fn [out: Any entry: Any] -> Any (let [id (nth entry 0)] (if (= true (get refs id)) out (conj out id)))) [] props) wrappers (filterv (fn [id: Any] -> Bool (let [head (get (get props id {}) "f0")] (and (number? head) (= (get (get props head {}) "v") "beagle-file")))) candidates) structural (filterv (fn [id: Any] -> Bool (let [kind (get (get props id {}) "kind")] (or (= kind "list") (= kind "vector")))) candidates)]
+  (let [refs (reduce (fn
+                       [out: Any
+                        subject-entry: Any] -> Any (reduce (fn
+                                                                        [inner: Any
+                                                                         entry: Any] -> Any (let [predicate (nth entry 0) object (nth entry 1)] (if (and (number? object) (ref-predicate? predicate)) (assoc inner object true) inner))) out (nth subject-entry 1))) {} props) candidates (reduce (fn
+                                                                                                                                                                                                                                                                                                                 [out: Any
+                                                                                                                                                                                                                                                                                                                  entry: Any] -> Any (let [id (nth entry 0)] (if (= true (get refs id)) out (conj out id)))) [] props) wrappers (filterv (fn [id: Any] -> Bool (let [head (get (get props id {}) "f0")] (and (number? head) (= (get (get props head {}) "v") "beagle-file")))) candidates) structural (filterv (fn [id: Any] -> Bool (let [kind (get (get props id {}) "kind")] (or (= kind "list") (= kind "vector")))) candidates)]
     (if (> (count wrappers) 0)
       (nth wrappers 0)
       (if (> (count structural) 0)
@@ -589,7 +714,9 @@
 
 (declare build-datum)
 
-(defn- build-datum [props: Any id: Int] -> Any
+(defn- build-datum
+  [props: Any
+   id: Int] -> Any
   (let [node (get props id) kind (get node "kind")]
     (cond
       (= kind "symbol")
@@ -621,7 +748,9 @@
     (not (and (= (count datum) 2) (= (nth datum 0) rd/CHAR-TAG)))
     (not (and (= (count datum) 2) (= (nth datum 0) EXACT-NUMBER-TAG)))))
 
-(defn- head-is? [datum: Any head: String] -> Bool
+(defn- head-is?
+  [datum: Any
+   head: String] -> Bool
   (and (datum-list? datum) (> (count datum) 0) (= (nth datum 0) head)))
 
 (defn- datum-tail [datum: Any] -> Any
@@ -813,27 +942,179 @@
     :else
     nil))
 
+(defn- bracket-datum? [datum: Any] -> Bool
+  (ast/bracketed? datum))
+
+(defn- bracket-items [datum: Any] -> Any
+  (group-anns (ast/bracket-body datum)))
+
+;; `& rest` is one logical parameter even though the reader exposes two datums.
+(defn- logical-vector-items [datum: Any] -> Any
+  (let [items (bracket-items datum)]
+    (loop [i 0 out: Any []]
+      (cond
+        (>= i (count items))
+        out
+        (and (= (nth items i) "&") (< (+ i 1) (count items)))
+        (recur (+ i 2) (conj out [(nth items i) (nth items (+ i 1))]))
+        :else
+        (recur (+ i 1) (conj out [(nth items i)]))))))
+
+(defn- grammar-vector-context? [ctx: String] -> Bool
+  (or (= ctx "params") (= ctx "fields")))
+
+(defn- grammar-vector-break?
+  [datum: Any
+   ctx: String] -> Bool
+  (and (grammar-vector-context? ctx)
+    (bracket-datum? datum)
+    (>= (count (logical-vector-items datum)) 2)))
+
+(defn- logical-item-source [item: Any] -> String
+  (str/join " " (mapv (fn [part: Any] -> String (datum-source part)) item)))
+
+(defn- grammar-vector-pretty
+  [datum: Any
+   col: Int] -> String
+  (let [items (logical-vector-items datum)
+        inner-col (+ col 1)
+        pad (loop [i 0 out ""]
+              (if (>= i inner-col) out (recur (+ i 1) (str out " "))))]
+    (str "["
+      (logical-item-source (nth items 0))
+      (reduce (fn
+                [out: String
+                 item: Any] -> String
+                (str out "\n" pad (logical-item-source item)))
+        ""
+        (subvec items 1))
+      "]")))
+
+(defn- list-items [datum: Any] -> Any
+  (if (datum-list? datum) (group-anns datum) []))
+
+(defn- arity-clause? [datum: Any] -> Bool
+  (let [items (list-items datum)]
+    (and (> (count items) 0) (bracket-datum? (nth items 0)))))
+
+(defn- first-bracket-index
+  [items: Any
+   start: Int] -> Any
+  (loop [i start]
+    (cond
+      (>= i (count items)) nil
+      (bracket-datum? (nth items i)) i
+      :else (recur (+ i 1)))))
+
+(defn- symbol-owner-vector? [datum: Any] -> Bool
+  (let [items (list-items datum)]
+    (and (>= (count items) 2)
+      (string? (nth items 0))
+      (some? (first-bracket-index items 1)))))
+
+(defn- grammar-child-context
+  [datum: Any
+   ctx: String
+   i: Int
+   child: Any] -> String
+  (let [items (if (= ctx "data") [] (list-items datum))]
+    (cond
+      (= ctx "letfn-bindings")
+      (if (symbol-owner-vector? child) "method" "normal")
+      (= ctx "arity-clause")
+      (if (and (= i 0) (bracket-datum? child)) "params" "normal")
+      (= ctx "method")
+      (if (and (bracket-datum? child) (= i (first-bracket-index items 1)))
+        "params"
+        "normal")
+      (= ctx "variant")
+      (if (and (bracket-datum? child) (= i (first-bracket-index items 1)))
+        "fields"
+        "normal")
+      (= (count items) 0)
+      "normal"
+      :else
+      (let [head (if (and (> (count items) 0) (string? (nth items 0))) (nth items 0) nil)
+            vector-index (first-bracket-index items 1)]
+        (cond
+          (and (some? (get #{"defn" "defn-" "defmacro" "fn"} head))
+            (bracket-datum? child) (= i vector-index))
+          "params"
+          (and (= head "defrecord") (bracket-datum? child) (= i vector-index))
+          "fields"
+          (and (some? (get #{"defn" "defn-" "fn"} head)) (arity-clause? child))
+          "arity-clause"
+          (and (= head "letfn") (= i 1) (bracket-datum? child))
+          "letfn-bindings"
+          (and (some? (get #{"defprotocol" "extend-type"} head))
+            (symbol-owner-vector? child))
+          "method"
+          (and (= head "defunion") (symbol-owner-vector? child))
+          "variant"
+          :else
+          "normal")))))
+
+(declare canonical-layout-needed?)
+
+(defn- children-need-layout?
+  [datum: Any
+   ctx: String
+   items: Any] -> Bool
+  (loop [i 0]
+    (cond
+      (>= i (count items)) false
+      (canonical-layout-needed? (nth items i)
+        (grammar-child-context datum ctx i (nth items i))) true
+      :else (recur (+ i 1)))))
+
+(defn- canonical-layout-needed?
+  [datum: Any
+   ctx: String] -> Bool
+  (cond
+    (= ctx "data") false
+    (grammar-vector-break? datum ctx) true
+    :else
+    (let [parts (sequence-parts datum)]
+      (and (some? parts) (children-need-layout? datum ctx (get parts "items"))))))
+
 ;; Return marker only: a binding annotation is already ONE ann-unit element, so
 ;; the `else` arms below keep it on the signature line without extra slots.
-(defn- dash-at? [items: Any idx: Int] -> Bool
+(defn- dash-at?
+  [items: Any
+   idx: Int] -> Bool
   (and (> (count items) idx)
     (or (= (nth items idx) ":-") (= (nth items idx) "->"))))
 
-(defn- head-keep [head: String after: Any] -> Int
-  (let [n (count after)]
+(defn- head-keep
+  [head: String
+   after: Any] -> Int
+  (let [n (count after) vector-index (first-bracket-index after 0)]
     (cond
       (or (= head "defn") (= head "defn-"))
-      (cond (< n 2) n (dash-at? after 2) 4 :else 2)
+      (cond
+        (nil? vector-index)
+        (if (and (>= n 2) (arity-clause? (nth after 1))) 1 (min 1 n))
+        :else
+        (let [base (+ vector-index 1)]
+          (if (dash-at? after base) (+ base 2) base)))
+      (= head "defmacro")
+      (if (some? vector-index) (+ vector-index 1) (min 1 n))
       (or (= head "def") (= head "defonce"))
       (cond (< n 1) n (dash-at? after 1) 3 :else 1)
       (= head "fn")
-      (let [named? (and (> n 0) (string? (nth after 0))) base (if named? 2 1)]
-        (if (dash-at? after base) (+ base 2) base))
+      (cond
+        (and (> n 0) (arity-clause? (nth after 0))) 0
+        (and (>= n 2) (string? (nth after 0)) (arity-clause? (nth after 1))) 1
+        :else
+        (let [base (if (some? vector-index) (+ vector-index 1) (min 1 n))]
+          (if (dash-at? after base) (+ base 2) base)))
       (or (= head "defrecord") (= head "deftype"))
-      (min 2 n)
+      (if (some? vector-index) (+ vector-index 1) (min 1 n))
       (some? (get #{"let" "loop" "letfn" "binding" "for" "doseq" "with-open" "with-local-vars" "when-let" "if-let" "when-some" "if-some"} head))
       (min 1 n)
-      (some? (get #{"if" "when" "when-not" "when-first" "while" "if-not" "match" "doto" "defprotocol" "defunion" "extend-type"} head))
+      (= head "defunion")
+      (if (and (> n 0) (= (nth after 0) ":throwable")) (min 2 n) (min 1 n))
+      (some? (get #{"if" "when" "when-not" "when-first" "while" "if-not" "match" "doto" "defprotocol" "extend-type"} head))
       (min 1 n)
       (or (= head "condp") (= head "as->"))
       (min 2 n)
@@ -845,52 +1126,139 @@
 (defn- spaces [n: Int] -> String
   (loop [i 0 out ""] (if (>= i n) out (recur (+ i 1) (str out " ")))))
 
-(declare datum-pretty)
+(defn- context-head-keep
+  [ctx: String
+   head: String
+   after: Any] -> Int
+  (let [n (count after)
+        arrow? (and (> n 1) (or (= (nth after 1) ":-") (= (nth after 1) "->")))]
+    (cond
+      (= ctx "method") (if arrow? (min 3 n) (min 1 n))
+      (= ctx "variant") (min 1 n)
+      :else (head-keep head after))))
 
-(defn- pretty-many [items: Any prefix: String col: Int] -> String
-  (reduce (fn [out: String item: Any] -> String (str out "\n" prefix (datum-pretty item col)))
+(defn- current-col
+  [text: String
+   initial: Int] -> Int
+  (let [idx (str/last-index-of text "\n")]
+    (if (nil? idx) (+ initial (count text)) (- (count text) (+ idx 1)))))
+
+(declare datum-pretty-context)
+
+(defn- pretty-many
+  [items: Any
+   prefix: String
+   col: Int] -> String
+  (reduce (fn
+            [out: String
+             item: Any] -> String (str out "\n" prefix (datum-pretty-context item col "normal")))
     ""
     items))
 
-(defn datum-pretty [datum: Any col: Int] -> String
+(defn- pretty-context-items
+  [parent: Any
+   ctx: String
+   items: Any
+   start: Int
+   prefix: String
+   col: Int] -> String
+  (loop [i 0 out ""]
+    (if (>= i (count items))
+      out
+      (let [item (nth items i)
+            child-index (+ start i)
+            child-ctx (grammar-child-context parent ctx child-index item)]
+        (recur (+ i 1)
+          (str out "\n" prefix (datum-pretty-context item col child-ctx)))))))
+
+(defn- signature-pretty
+  [parent: Any
+   ctx: String
+   after: Any
+   keep: Int
+   col: Int
+   pad: String] -> String
+  (loop [i 0 out (str "(" (datum-source (nth (list-items parent) 0)))]
+    (if (>= i keep)
+      out
+      (let [item (nth after i)
+            child-index (+ i 1)
+            child-ctx (grammar-child-context parent ctx child-index item)]
+        (cond
+          (grammar-vector-break? item child-ctx)
+          (recur (+ i 1)
+            (str out "\n" pad (datum-pretty-context item (+ col 2) child-ctx)))
+          (canonical-layout-needed? item child-ctx)
+          (recur (+ i 1)
+            (str out " " (datum-pretty-context item (+ 1 (current-col out col)) child-ctx)))
+          :else
+          (recur (+ i 1) (str out " " (datum-source item))))))))
+
+(defn- datum-pretty-context
+  [datum: Any
+   col: Int
+   ctx: String] -> String
   (let [one-line (datum-source datum) parts (sequence-parts datum)]
     (cond
-      (<= (+ col (count one-line)) 80)
+      (grammar-vector-break? datum ctx)
+      (grammar-vector-pretty datum col)
+      (and (not (canonical-layout-needed? datum ctx)) (<= (+ col (count one-line)) 80))
       one-line
       (some? (prefix-text datum))
       (str (prefix-text datum)
-        (datum-pretty (nth datum 1) (+ col (count (prefix-text datum)))))
+        (datum-pretty-context (nth datum 1) (+ col (count (prefix-text datum))) "data"))
       (some? (hash-prefix-text datum))
       (str (hash-prefix-text datum)
-        (datum-pretty (nth datum 1) (+ col (count (hash-prefix-text datum)))))
+        (datum-pretty-context (nth datum 1) (+ col (count (hash-prefix-text datum))) "data"))
       (metadata-form? datum)
       (let [prefix (str "^" (datum-source (nth datum 1)) " ")]
-        (str prefix (datum-pretty (nth datum 2) (+ col (count prefix)))))
+        (str prefix (datum-pretty-context (nth datum 2) (+ col (count prefix)) ctx)))
       (nil? parts)
       one-line
       (= (count (get parts "items")) 0)
       (str (get parts "open") (get parts "close"))
       (and (= (get parts "open") "(") (string? (nth (get parts "items") 0)))
-      (let [items (get parts "items") head (nth items 0) after (subvec items 1) keep (min (head-keep head after) (count after)) signature (subvec after 0 keep) body (subvec after keep) pad (spaces (+ col 2))]
-        (str "("
-          head
-          (if (> (count signature) 0) (str " " (joined-source signature)) "")
-          (pretty-many body pad (+ col 2))
+      (let [items (get parts "items") head (nth items 0) after (subvec items 1) keep (min (context-head-keep ctx head after) (count after)) body (subvec after keep) pad (spaces (+ col 2))]
+        (str (signature-pretty datum ctx after keep col pad)
+          (pretty-context-items datum ctx body (+ keep 1) pad (+ col 2))
+          (get parts "close")))
+      (and (= ctx "arity-clause") (> (count (get parts "items")) 0)
+        (bracket-datum? (nth (get parts "items") 0)))
+      (let [items (get parts "items")
+            return? (and (>= (count items) 3)
+                      (or (= (nth items 1) ":-") (= (nth items 1) "->")))
+            keep (if return? 3 1)
+            inner-col (+ col (count (get parts "open")))
+            pad (spaces inner-col)]
+        (str (get parts "open")
+          (datum-pretty-context (nth items 0) inner-col "params")
+          (if (> keep 1) (str " " (joined-source (subvec items 1 keep))) "")
+          (pretty-context-items datum ctx (subvec items keep) keep pad inner-col)
           (get parts "close")))
       :else
       (let [items (get parts "items") inner-col (+ col (count (get parts "open"))) pad (spaces inner-col)]
         (str (get parts "open")
-          (datum-pretty (nth items 0) inner-col)
-          (pretty-many (subvec items 1) pad inner-col)
+          (datum-pretty-context (nth items 0) inner-col
+            (grammar-child-context datum ctx 0 (nth items 0)))
+          (pretty-context-items datum ctx (subvec items 1) 1 pad inner-col)
           (get parts "close"))))))
 
+(defn datum-pretty
+  [datum: Any
+   col: Int] -> String
+  (datum-pretty-context datum col "normal"))
+
 ;; --- comments and render ----------------------------------------------------
-(defn- comment-text [props: Any cid: Int] -> String
+(defn- comment-text
+  [props: Any
+   cid: Int] -> String
   (loop [i 0 out ""]
     (let [sid (get (get props cid {}) (str "seg" i))]
       (if (nil? sid) out (recur (+ i 1) (str out (get (get props sid) "v")))))))
 
-(defn- node-comments [props: Any id: Int] -> Any
+(defn- node-comments
+  [props: Any
+   id: Int] -> Any
   (loop [i 0 out: Any []]
     (let [cid (get (get props id {}) (str "comment" i))]
       (if (nil? cid)
@@ -899,11 +1267,19 @@
           (conj out
             [(get (get props cid) "placement") (comment-text props cid)]))))))
 
-(defn- comments-with [comments: Any placement: String] -> Any
+(defn- comments-with
+  [comments: Any
+   placement: String] -> Any
   (filterv (fn [comment: Any] -> Bool (= (nth comment 0) placement)) comments))
 
-(defn- rendered-block [props: Any id: Int] -> String
-  (let [comments (node-comments props id) leading (comments-with comments "leading") trailing (comments-with comments "trailing") lead-text (reduce (fn [out: String c: Any] -> String (str out (nth c 1) "\n")) "" leading) trail-text (reduce (fn [out: String c: Any] -> String (str out " " (nth c 1))) "" trailing)]
+(defn- rendered-block
+  [props: Any
+   id: Int] -> String
+  (let [comments (node-comments props id) leading (comments-with comments "leading") trailing (comments-with comments "trailing") lead-text (reduce (fn
+                                                                                                                                                      [out: String
+                                                                                                                                                       c: Any] -> String (str out (nth c 1) "\n")) "" leading) trail-text (reduce (fn
+                                                                                                                                                                                                                                                  [out: String
+                                                                                                                                                                                                                                                   c: Any] -> String (str out " " (nth c 1))) "" trailing)]
     (str lead-text (datum-pretty (build-datum props id) 0) trail-text)))
 
 (defn render-edn! [path: String] -> Nil
@@ -926,6 +1302,8 @@
         (selfhost.rt/exit 2))))
   nil)
 
-(defn- beagle-file-wrapper? [props: Any id: Any] -> Bool
+(defn- beagle-file-wrapper?
+  [props: Any
+   id: Any] -> Bool
   (let [head (get (get props id {}) "f0")]
     (and (number? head) (= (get (get props head {}) "v") "beagle-file"))))

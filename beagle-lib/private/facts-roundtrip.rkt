@@ -550,52 +550,182 @@
 (define DASH (string->symbol ":-"))
 (define ARROW '->)
 
+(define (bracket-datum? d)
+  (or (vector? d)
+      (and (pair? d) (eq? (car d) %brackets))))
+
+(define (bracket-elems d)
+  (group-anns (if (vector? d) (vector->list d) (cdr d))))
+
+;; `& rest` is one logical parameter even though the reader exposes two datums.
+(define (logical-vector-elems d)
+  (let loop ([xs (bracket-elems d)] [out '()])
+    (cond
+      [(null? xs) (reverse out)]
+      [(and (eq? (car xs) '&) (pair? (cdr xs)))
+       (loop (cddr xs) (cons (list '& (cadr xs)) out))]
+      [else (loop (cdr xs) (cons (list (car xs)) out))])))
+
+(define (grammar-vector-context? ctx)
+  (memq ctx '(params fields)))
+
+(define (grammar-vector-break? d ctx)
+  (and (grammar-vector-context? ctx)
+       (bracket-datum? d)
+       (>= (length (logical-vector-elems d)) 2)))
+
+(define (logical-elem->src item)
+  (string-join (map datum->src item) " "))
+
+(define (grammar-vector->pretty d col)
+  (define logical (logical-vector-elems d))
+  (define inner-col (add1 col))
+  (define pad (make-string inner-col #\space))
+  (string-append
+   "[" (logical-elem->src (car logical))
+   (apply string-append
+          (for/list ([item (in-list (cdr logical))])
+            (string-append "\n" pad (logical-elem->src item))))
+   "]"))
+
+(define (list-elems d)
+  (and (pair? d)
+       (let-values ([(elems tail) (split-improper d)])
+         (and (null? tail) (group-anns elems)))))
+
+(define (arity-clause? d)
+  (define elems (list-elems d))
+  (and elems (pair? elems) (bracket-datum? (car elems))))
+
+(define (symbol-owner-vector? d)
+  (define elems (list-elems d))
+  (and elems
+       (>= (length elems) 2)
+       (symbol? (car elems))
+       (for/or ([e (in-list (cdr elems))]) (bracket-datum? e))))
+
+(define (first-bracket-index elems [start 0])
+  (for/first ([e (in-list elems)] [i (in-naturals)]
+              #:when (and (>= i start) (bracket-datum? e)))
+    i))
+
+;; Context is assigned only by grammar owners. A vector in an ordinary call,
+;; data literal, or let binding zone therefore keeps the generic formatter.
+(define (grammar-child-context d ctx i child)
+  (define elems (and (not (eq? ctx 'data)) (list-elems d)))
+  (cond
+    [(eq? ctx 'letfn-bindings) (if (symbol-owner-vector? child) 'method 'normal)]
+    [(eq? ctx 'arity-clause) (if (and (= i 0) (bracket-datum? child)) 'params 'normal)]
+    [(eq? ctx 'method)
+     (if (and (bracket-datum? child) (equal? i (first-bracket-index elems 1)))
+         'params 'normal)]
+    [(eq? ctx 'variant)
+     (if (and (bracket-datum? child) (equal? i (first-bracket-index elems 1)))
+         'fields 'normal)]
+    [(not elems) 'normal]
+    [else
+     (define head (and (pair? elems) (symbol? (car elems)) (car elems)))
+     (cond
+       [(and (memq head '(defn defn- defmacro fn))
+             (bracket-datum? child) (equal? i (first-bracket-index elems 1)))
+        'params]
+       [(and (eq? head 'defrecord)
+             (bracket-datum? child) (equal? i (first-bracket-index elems 1)))
+        'fields]
+       [(and (memq head '(defn defn- fn)) (arity-clause? child)) 'arity-clause]
+       [(and (eq? head 'letfn) (= i 1) (bracket-datum? child)) 'letfn-bindings]
+       [(and (memq head '(defprotocol extend-type)) (symbol-owner-vector? child)) 'method]
+       [(and (eq? head 'defunion) (symbol-owner-vector? child)) 'variant]
+       [else 'normal])]))
+
+(define (canonical-layout-needed? d [ctx 'normal])
+  (cond
+    [(eq? ctx 'data) #f]
+    [(grammar-vector-break? d ctx) #t]
+    [else
+     (define-values (open close elems) (pp-seq-parts d))
+     (and open
+          (for/or ([e (in-list elems)] [i (in-naturals)])
+            (canonical-layout-needed? e (grammar-child-context d ctx i e))))]))
+
 ;; How many post-head elements stay on the opening line (the "signature") before
 ;; the body breaks onto BODY-INDENT-indented lines. Keeps defn/let/if heads intact
 ;; so output is idiomatic AND a body edit stays local to the body lines.
 (define (head-keep head after)
   (define na (length after))
+  (define vector-index (first-bracket-index after))
   ;; Return marker only: a binding annotation is already ONE ann-unit element,
   ;; so the `else` arms below keep it on the signature line without extra slots.
   (define (dash-at? i)
     (and (> na i) (let ([e (list-ref after i)]) (or (eq? e DASH) (eq? e ARROW)))))
   (cond
     [(memq head '(defn defn-))                  ; name + params [+ -> ret]
-     (cond [(< na 2) na] [(dash-at? 2) 4] [else 2])]
+     (cond [(not vector-index)
+            (if (and (>= na 2) (arity-clause? (list-ref after 1))) 1 (min 1 na))]
+           [else
+            (define base (add1 vector-index))
+            (if (dash-at? base) (+ base 2) base)])]
+    [(eq? head 'defmacro)                       ; name + params
+     (if vector-index (add1 vector-index) (min 1 na))]
     [(memq head '(def defonce))                 ; name [+ :- type]; value breaks
      (cond [(< na 1) na] [(dash-at? 1) 3] [else 1])]
     [(eq? head 'fn)                             ; [name] params [+ -> ret]
-     (let* ([named? (and (pair? after) (symbol? (car after)))]
-            [base (if named? 2 1)])
-       (if (dash-at? base) (+ base 2) base))]
-    [(memq head '(defrecord deftype)) (min 2 na)]              ; name + field vec
+     (cond
+       [(and (pair? after) (arity-clause? (car after))) 0]
+       [(and (>= na 2) (symbol? (car after)) (arity-clause? (cadr after))) 1]
+       [else
+        (define base (if vector-index (add1 vector-index) (min 1 na)))
+        (if (dash-at? base) (+ base 2) base)])]
+    [(memq head '(defrecord deftype))             ; name + field vec
+     (if vector-index (add1 vector-index) (min 1 na))]
     [(memq head '(let loop letfn binding for doseq with-open with-local-vars
                   when-let if-let when-some if-some)) (min 1 na)]
+    [(eq? head 'defunion)
+     (if (and (pair? after) (eq? (car after) ':throwable)) (min 2 na) (min 1 na))]
     [(memq head '(if when when-not when-first while if-not match doto
-                  defprotocol defunion extend-type)) (min 1 na)]
+                  defprotocol extend-type)) (min 1 na)]
     [(memq head '(condp as->)) (min 2 na)]                     ; pred+expr / init+binding
     [(memq head '(do try cond)) 0]
     [else (min 1 na)]))   ; generic call + threading (-> ->> some-> cond->): head + first
 
-(define (datum->pretty d [col 0])
+(define (context-head-keep ctx head after)
+  (define na (length after))
+  (define (arrow-at? i)
+    (and (> na i)
+         (let ([e (list-ref after i)]) (or (eq? e DASH) (eq? e ARROW)))))
+  (cond
+    [(eq? ctx 'method) (if (arrow-at? 1) (min 3 na) (min 1 na))]
+    [(eq? ctx 'variant) (min 1 na)]
+    [else (head-keep head after)]))
+
+(define (current-col s initial)
+  (define pieces (string-split s "\n" #:trim? #f))
+  (if (= (length pieces) 1)
+      (+ initial (string-length s))
+      (string-length (last pieces))))
+
+(define (datum->pretty/context d col ctx)
   (define oneline (datum->src d))
   (define-values (open close elems) (pp-seq-parts d))
   (cond
-    [(<= (+ col (string-length oneline)) PP-WIDTH) oneline]   ; fits on this line — inline
+    [(grammar-vector-break? d ctx) (grammar-vector->pretty d col)]
+    [(and (not (canonical-layout-needed? d ctx))
+          (<= (+ col (string-length oneline)) PP-WIDTH))
+     oneline]                                                  ; fits on this line — inline
     ;; single-operand reader macro (`` ` `` ~ ~@ #'): glue the prefix, let the one
     ;; operand break beneath it. No trailing space, so the prefix stays attached.
     [(prefix-macro d)
-     => (lambda (px) (string-append px (datum->pretty (cadr d) (+ col (string-length px)))))]
+     => (lambda (px) (string-append px (datum->pretty/context (cadr d) (+ col (string-length px)) 'data)))]
     ;; #_form / #js form / ##Name — prefix glued, single operand breaks beneath it.
     ;; (##Name always fits the width test above, so only #_ / #js reach here big.)
     [(hash-prefix d)
-     => (lambda (px) (string-append px (datum->pretty (cadr d) (+ col (string-length px)))))]
+     => (lambda (px) (string-append px (datum->pretty/context (cadr d) (+ col (string-length px)) 'data)))]
     ;; metadata `^m form`: `^` glued to the meta datum (kept one-line — metas are
     ;; small), one space, then the target form breaks at the correct column, so
     ;; the meta stays glued to its form across the break (idempotent: pure in col).
     [(meta-form? d)
      (let ([pfx (string-append "^" (datum->src (cadr d)) " ")])
-       (string-append pfx (datum->pretty (caddr d) (+ col (string-length pfx)))))]
+       (string-append pfx (datum->pretty/context (caddr d) (+ col (string-length pfx)) ctx)))]
     [(not open) oneline]                                      ; unbreakable atom over width
     [(null? elems) (string-append open close)]
     [(and (string=? open "(") (symbol? (car elems)))
@@ -603,26 +733,60 @@
      ;; onto BODY-INDENT-indented lines (idiomatic AND a body edit stays local).
      (define head (car elems))
      (define after (cdr elems))
-     (define keep (min (head-keep head after) (length after)))
+     (define keep (min (context-head-keep ctx head after) (length after)))
      (define body-pad (make-string (+ col BODY-INDENT) #\space))
+     (define signature
+       (for/fold ([out (string-append open (datum->src head))])
+                 ([e (in-list (take after keep))] [i (in-naturals 1)])
+         (define child-ctx (grammar-child-context d ctx i e))
+         (cond
+           [(grammar-vector-break? e child-ctx)
+            (string-append out "\n" body-pad
+                           (datum->pretty/context e (+ col BODY-INDENT) child-ctx))]
+           [(canonical-layout-needed? e child-ctx)
+            (define start-col (add1 (current-col out col)))
+            (string-append out " " (datum->pretty/context e start-col child-ctx))]
+           [else (string-append out " " (datum->src e))])))
      (string-append
-      open (datum->src head)
-      (apply string-append (for/list ([e (in-list (take after keep))])
-                             (string-append " " (datum->src e))))
-      (apply string-append (for/list ([e (in-list (drop after keep))])
-                             (string-append "\n" body-pad (datum->pretty e (+ col BODY-INDENT)))))
+      signature
+      (apply string-append (for/list ([e (in-list (drop after keep))]
+                                     [i (in-naturals (add1 keep))])
+                             (define child-ctx (grammar-child-context d ctx i e))
+                             (string-append "\n" body-pad
+                                            (datum->pretty/context e (+ col BODY-INDENT) child-ctx))))
+      close)]
+    [(and (eq? ctx 'arity-clause) (pair? elems) (bracket-datum? (car elems)))
+     (define vector-ctx 'params)
+     (define return? (and (>= (length elems) 3)
+                          (or (eq? (cadr elems) DASH) (eq? (cadr elems) ARROW))))
+     (define keep (if return? 3 1))
+     (define inner-col (+ col (string-length open)))
+     (define pad (make-string inner-col #\space))
+     (string-append
+      open (datum->pretty/context (car elems) inner-col vector-ctx)
+      (apply string-append
+             (for/list ([e (in-list (take (cdr elems) (sub1 keep)))])
+               (string-append " " (datum->src e))))
+      (apply string-append
+             (for/list ([e (in-list (drop elems keep))])
+               (string-append "\n" pad (datum->pretty/context e inner-col 'normal))))
       close)]
     [else
      ;; collection ([ ] { } #{}) or list with non-symbol head: break elements,
      ;; aligned one column past the opener; close attaches to the last element.
      (define inner-col (+ col (string-length open)))
      (define pad (make-string inner-col #\space))
+     (define first-ctx (grammar-child-context d ctx 0 (car elems)))
      (string-append
-      open (datum->pretty (car elems) inner-col)
+      open (datum->pretty/context (car elems) inner-col first-ctx)
       (apply string-append
-             (for/list ([e (in-list (cdr elems))])
-               (string-append "\n" pad (datum->pretty e inner-col))))
+             (for/list ([e (in-list elems)] [i (in-naturals)] #:unless (= i 0))
+               (define child-ctx (grammar-child-context d ctx i e))
+               (string-append "\n" pad (datum->pretty/context e inner-col child-ctx))))
       close)]))
+
+(define (datum->pretty d [col 0])
+  (datum->pretty/context d col 'normal))
 
 (define (read-edn-triples path)
   (for/list ([line (in-list (file->lines path))]

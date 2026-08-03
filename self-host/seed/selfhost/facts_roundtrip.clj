@@ -643,26 +643,116 @@
   (and (datum-list? datum) (not (head-is? datum rd/REGEX-TAG)) (nil? (prefix-text datum)) (nil? (hash-prefix-text datum)) (not (metadata-form? datum))) {"open" "(" "close" ")" "items" (group-anns datum)}
   :else nil))
 
+(defn- ^Boolean bracket-datum? [datum]
+  (ast/bracketed? datum))
+
+(defn- bracket-items [datum]
+  (group-anns (ast/bracket-body datum)))
+
+(defn- logical-vector-items [datum]
+  (let [items (bracket-items datum)]
+  (loop [i 0
+   out []]
+  (cond
+  (>= i (count items)) out
+  (and (= (nth items i) "&") (< (+ i 1) (count items))) (recur (+ i 2) (conj out [(nth items i) (nth items (+ i 1))]))
+  :else (recur (+ i 1) (conj out [(nth items i)]))))))
+
+(defn- ^Boolean grammar-vector-context? [^String ctx]
+  (or (= ctx "params") (= ctx "fields")))
+
+(defn- ^Boolean grammar-vector-break? [datum ^String ctx]
+  (and (grammar-vector-context? ctx) (bracket-datum? datum) (>= (count (logical-vector-items datum)) 2)))
+
+(defn- ^String logical-item-source [item]
+  (str/join " " (mapv (fn [part] (datum-source part)) item)))
+
+(defn- ^String grammar-vector-pretty [datum col]
+  (let [items (logical-vector-items datum)
+   inner-col (+ col 1)
+   pad (loop [i 0
+   out ""]
+  (if (>= i inner-col) out (recur (+ i 1) (str out " "))))]
+  (str "[" (logical-item-source (nth items 0)) (reduce (fn [out item] (str out "\n" pad (logical-item-source item))) "" (subvec items 1)) "]")))
+
+(defn- list-items [datum]
+  (if (datum-list? datum) (group-anns datum) []))
+
+(defn- ^Boolean arity-clause? [datum]
+  (let [items (list-items datum)]
+  (and (> (count items) 0) (bracket-datum? (nth items 0)))))
+
+(defn- first-bracket-index [items start]
+  (loop [i start]
+  (cond
+  (>= i (count items)) nil
+  (bracket-datum? (nth items i)) i
+  :else (recur (+ i 1)))))
+
+(defn- ^Boolean symbol-owner-vector? [datum]
+  (let [items (list-items datum)]
+  (and (>= (count items) 2) (string? (nth items 0)) (some? (first-bracket-index items 1)))))
+
+(defn- ^String grammar-child-context [datum ^String ctx i child]
+  (let [items (if (= ctx "data") [] (list-items datum))]
+  (cond
+  (= ctx "letfn-bindings") (if (symbol-owner-vector? child) "method" "normal")
+  (= ctx "arity-clause") (if (and (= i 0) (bracket-datum? child)) "params" "normal")
+  (= ctx "method") (if (and (bracket-datum? child) (= i (first-bracket-index items 1))) "params" "normal")
+  (= ctx "variant") (if (and (bracket-datum? child) (= i (first-bracket-index items 1))) "fields" "normal")
+  (= (count items) 0) "normal"
+  :else (let [head (if (and (> (count items) 0) (string? (nth items 0))) (nth items 0) nil)
+   vector-index (first-bracket-index items 1)]
+  (cond
+  (and (some? (get #{"defn" "defn-" "defmacro" "fn"} head)) (bracket-datum? child) (= i vector-index)) "params"
+  (and (= head "defrecord") (bracket-datum? child) (= i vector-index)) "fields"
+  (and (some? (get #{"defn" "defn-" "fn"} head)) (arity-clause? child)) "arity-clause"
+  (and (= head "letfn") (= i 1) (bracket-datum? child)) "letfn-bindings"
+  (and (some? (get #{"defprotocol" "extend-type"} head)) (symbol-owner-vector? child)) "method"
+  (and (= head "defunion") (symbol-owner-vector? child)) "variant"
+  :else "normal")))))
+
+(declare canonical-layout-needed?)
+
+(defn- ^Boolean children-need-layout? [datum ^String ctx items]
+  (loop [i 0]
+  (cond
+  (>= i (count items)) false
+  (canonical-layout-needed? (nth items i) (grammar-child-context datum ctx i (nth items i))) true
+  :else (recur (+ i 1)))))
+
+(defn- ^Boolean canonical-layout-needed? [datum ^String ctx]
+  (cond
+  (= ctx "data") false
+  (grammar-vector-break? datum ctx) true
+  :else (let [parts (sequence-parts datum)]
+  (and (some? parts) (children-need-layout? datum ctx (get parts "items"))))))
+
 (defn- ^Boolean dash-at? [items idx]
   (and (> (count items) idx) (or (= (nth items idx) ":-") (= (nth items idx) "->"))))
 
 (defn- head-keep [^String head after]
-  (let [n (count after)]
+  (let [n (count after)
+   vector-index (first-bracket-index after 0)]
   (cond
   (or (= head "defn") (= head "defn-")) (cond
-  (< n 2) n
-  (dash-at? after 2) 4
-  :else 2)
+  (nil? vector-index) (if (and (>= n 2) (arity-clause? (nth after 1))) 1 (min 1 n))
+  :else (let [base (+ vector-index 1)]
+  (if (dash-at? after base) (+ base 2) base)))
+  (= head "defmacro") (if (some? vector-index) (+ vector-index 1) (min 1 n))
   (or (= head "def") (= head "defonce")) (cond
   (< n 1) n
   (dash-at? after 1) 3
   :else 1)
-  (= head "fn") (let [named? (and (> n 0) (string? (nth after 0)))
-   base (if named? 2 1)]
-  (if (dash-at? after base) (+ base 2) base))
-  (or (= head "defrecord") (= head "deftype")) (min 2 n)
+  (= head "fn") (cond
+  (and (> n 0) (arity-clause? (nth after 0))) 0
+  (and (>= n 2) (string? (nth after 0)) (arity-clause? (nth after 1))) 1
+  :else (let [base (if (some? vector-index) (+ vector-index 1) (min 1 n))]
+  (if (dash-at? after base) (+ base 2) base)))
+  (or (= head "defrecord") (= head "deftype")) (if (some? vector-index) (+ vector-index 1) (min 1 n))
   (some? (get #{"let" "loop" "letfn" "binding" "for" "doseq" "with-open" "with-local-vars" "when-let" "if-let" "when-some" "if-some"} head)) (min 1 n)
-  (some? (get #{"if" "when" "when-not" "when-first" "while" "if-not" "match" "doto" "defprotocol" "defunion" "extend-type"} head)) (min 1 n)
+  (= head "defunion") (if (and (> n 0) (= (nth after 0) ":throwable")) (min 2 n) (min 1 n))
+  (some? (get #{"if" "when" "when-not" "when-first" "while" "if-not" "match" "doto" "defprotocol" "extend-type"} head)) (min 1 n)
   (or (= head "condp") (= head "as->")) (min 2 n)
   (or (= head "do") (= head "try") (= head "cond")) 0
   :else (min 1 n))))
@@ -672,34 +762,74 @@
    out ""]
   (if (>= i n) out (recur (+ i 1) (str out " ")))))
 
-(declare datum-pretty)
+(defn- context-head-keep [^String ctx ^String head after]
+  (let [n (count after)
+   arrow? (and (> n 1) (or (= (nth after 1) ":-") (= (nth after 1) "->")))]
+  (cond
+  (= ctx "method") (if arrow? (min 3 n) (min 1 n))
+  (= ctx "variant") (min 1 n)
+  :else (head-keep head after))))
+
+(defn- current-col [^String text initial]
+  (let [idx (str/last-index-of text "\n")]
+  (if (nil? idx) (+ initial (count text)) (- (count text) (+ idx 1)))))
+
+(declare datum-pretty-context)
 
 (defn- ^String pretty-many [items ^String prefix col]
-  (reduce (fn [out item] (str out "\n" prefix (datum-pretty item col))) "" items))
+  (reduce (fn [out item] (str out "\n" prefix (datum-pretty-context item col "normal"))) "" items))
 
-(defn ^String datum-pretty [datum col]
+(defn- ^String pretty-context-items [parent ^String ctx items start ^String prefix col]
+  (loop [i 0
+   out ""]
+  (if (>= i (count items)) out (let [item (nth items i)
+   child-index (+ start i)
+   child-ctx (grammar-child-context parent ctx child-index item)]
+  (recur (+ i 1) (str out "\n" prefix (datum-pretty-context item col child-ctx)))))))
+
+(defn- ^String signature-pretty [parent ^String ctx after keep col ^String pad]
+  (loop [i 0
+   out (str "(" (datum-source (nth (list-items parent) 0)))]
+  (if (>= i keep) out (let [item (nth after i)
+   child-index (+ i 1)
+   child-ctx (grammar-child-context parent ctx child-index item)]
+  (cond
+  (grammar-vector-break? item child-ctx) (recur (+ i 1) (str out "\n" pad (datum-pretty-context item (+ col 2) child-ctx)))
+  (canonical-layout-needed? item child-ctx) (recur (+ i 1) (str out " " (datum-pretty-context item (+ 1 (current-col out col)) child-ctx)))
+  :else (recur (+ i 1) (str out " " (datum-source item))))))))
+
+(defn- ^String datum-pretty-context [datum col ^String ctx]
   (let [one-line (datum-source datum)
    parts (sequence-parts datum)]
   (cond
-  (<= (+ col (count one-line)) 80) one-line
-  (some? (prefix-text datum)) (str (prefix-text datum) (datum-pretty (nth datum 1) (+ col (count (prefix-text datum)))))
-  (some? (hash-prefix-text datum)) (str (hash-prefix-text datum) (datum-pretty (nth datum 1) (+ col (count (hash-prefix-text datum)))))
+  (grammar-vector-break? datum ctx) (grammar-vector-pretty datum col)
+  (and (not (canonical-layout-needed? datum ctx)) (<= (+ col (count one-line)) 80)) one-line
+  (some? (prefix-text datum)) (str (prefix-text datum) (datum-pretty-context (nth datum 1) (+ col (count (prefix-text datum))) "data"))
+  (some? (hash-prefix-text datum)) (str (hash-prefix-text datum) (datum-pretty-context (nth datum 1) (+ col (count (hash-prefix-text datum))) "data"))
   (metadata-form? datum) (let [prefix (str "^" (datum-source (nth datum 1)) " ")]
-  (str prefix (datum-pretty (nth datum 2) (+ col (count prefix)))))
+  (str prefix (datum-pretty-context (nth datum 2) (+ col (count prefix)) ctx)))
   (nil? parts) one-line
   (= (count (get parts "items")) 0) (str (get parts "open") (get parts "close"))
   (and (= (get parts "open") "(") (string? (nth (get parts "items") 0))) (let [items (get parts "items")
    head (nth items 0)
    after (subvec items 1)
-   keep (min (head-keep head after) (count after))
-   signature (subvec after 0 keep)
+   keep (min (context-head-keep ctx head after) (count after))
    body (subvec after keep)
    pad (spaces (+ col 2))]
-  (str "(" head (if (> (count signature) 0) (str " " (joined-source signature)) "") (pretty-many body pad (+ col 2)) (get parts "close")))
+  (str (signature-pretty datum ctx after keep col pad) (pretty-context-items datum ctx body (+ keep 1) pad (+ col 2)) (get parts "close")))
+  (and (= ctx "arity-clause") (> (count (get parts "items")) 0) (bracket-datum? (nth (get parts "items") 0))) (let [items (get parts "items")
+   return? (and (>= (count items) 3) (or (= (nth items 1) ":-") (= (nth items 1) "->")))
+   keep (if return? 3 1)
+   inner-col (+ col (count (get parts "open")))
+   pad (spaces inner-col)]
+  (str (get parts "open") (datum-pretty-context (nth items 0) inner-col "params") (if (> keep 1) (str " " (joined-source (subvec items 1 keep))) "") (pretty-context-items datum ctx (subvec items keep) keep pad inner-col) (get parts "close")))
   :else (let [items (get parts "items")
    inner-col (+ col (count (get parts "open")))
    pad (spaces inner-col)]
-  (str (get parts "open") (datum-pretty (nth items 0) inner-col) (pretty-many (subvec items 1) pad inner-col) (get parts "close"))))))
+  (str (get parts "open") (datum-pretty-context (nth items 0) inner-col (grammar-child-context datum ctx 0 (nth items 0))) (pretty-context-items datum ctx (subvec items 1) 1 pad inner-col) (get parts "close"))))))
+
+(defn ^String datum-pretty [datum col]
+  (datum-pretty-context datum col "normal"))
 
 (defn- ^String comment-text [props cid]
   (loop [i 0

@@ -85,12 +85,57 @@
                   (lambda () (write-beagle-source (list (rd s)) (current-output-port)))))
     (check-equal? (rd out) (rd s) out)))
 
+;; --- canonical grammar layout ----------------------------------------------
+
+(define CANONICAL-LAYOUT
+  (list
+   (cons "(defn add [x: Int y: Int] -> Int (+ x y))"
+         "(defn add\n  [x: Int\n   y: Int] -> Int\n  (+ x y))")
+   (cons "(defn resty [x: Int & more: Int] -> Int x)"
+         "(defn resty\n  [x: Int\n   & more: Int] -> Int\n  x)")
+   (cons "(fn [x: Int y: Int] -> Int (+ x y))"
+         "(fn\n  [x: Int\n   y: Int] -> Int\n  (+ x y))")
+   (cons "(fn add [x: Int y: Int] -> Int (+ x y))"
+         "(fn add\n  [x: Int\n   y: Int] -> Int\n  (+ x y))")
+   (cons "(defmacro pair [x y] `[~x ~y])"
+         "(defmacro pair\n  [x\n   y]\n  `[~x ~y])")
+   (cons "(defn choose ([x] x) ([x y] y))"
+         "(defn choose\n  ([x] x)\n  ([x\n    y]\n   y))")
+   (cons "(letfn [(sum [x: Int y: Int] -> Int (+ x y))] (sum 1 2))"
+         "(letfn [(sum\n          [x: Int\n           y: Int] -> Int\n          (+ x y))]\n  (sum 1 2))")
+   (cons "(defprotocol P (m [self x: Int] -> Int))"
+         "(defprotocol P\n  (m\n    [self\n     x: Int] -> Int))")
+   (cons "(extend-type T P (m [self x: Int] -> Int x))"
+         "(extend-type T\n  P\n  (m\n    [self\n     x: Int] -> Int\n    x))")
+   (cons "(defrecord P [x: Int y: String])"
+         "(defrecord P\n  [x: Int\n   y: String])")
+   (cons "(defunion Shape (Rect [width: Int height: Int]))"
+         "(defunion Shape\n  (Rect\n    [width: Int\n     height: Int]))")
+   (cons "(defunion :throwable Failure (Bad [message: String path: String]))"
+         "(defunion :throwable Failure\n  (Bad\n    [message: String\n     path: String]))")))
+
+(for ([example (in-list CANONICAL-LAYOUT)])
+  (test-case (format "canonical grammar layout: ~a" (car example))
+    (define out (pp (car example)))
+    (check-equal? out (cdr example))
+    (check-equal? (rd out) (rd (car example)))))
+
+(test-case "zero/one grammar vectors stay inline with their owner"
+  (check-equal? (pp "(defn zero [] -> Int 0)") "(defn zero [] -> Int 0)")
+  (check-equal? (pp "(defn one [x: Int] -> Int x)") "(defn one [x: Int] -> Int x)")
+  (check-equal? (pp "(defrecord One [x: Int])") "(defrecord One [x: Int])"))
+
+(test-case "ordinary data and let binding vectors keep generic pretty-printing"
+  (check-equal? (pp "[a b]") "[a b]")
+  (check-equal? (pp "(f [a b])") "(f [a b])")
+  (check-equal? (pp "(let [a 1 b 2] (+ a b))") "(let [a 1 b 2] (+ a b))"))
+
 ;; --- the 80-column breaker must never split an annotation -------------------
 
 (define WIDE
   "[alpha: Int beta: String gamma: (Vec Int) delta: Bool epsilon: Keyword zeta: Float]")
 
-(test-case "a param vector wide enough to break keeps each `NAME: TYPE` intact"
+(test-case "a generic vector wide enough to break keeps each `NAME: TYPE` intact"
   (define out (pp WIDE))
   (check-true (> (length (string-split out "\n")) 1) "expected the vector to break")
   (for ([line (in-list (string-split out "\n"))])
@@ -100,11 +145,12 @@
   (check-true (string-contains? out "zeta: Float"))
   (check-equal? (rd out) (rd WIDE)))
 
-(test-case "a wide defn signature keeps `-> RET` on the head line"
+(test-case "a grammar-broken defn keeps `-> RET` after the final parameter"
   (define out (pp (string-append
                    "(defn wide [alpha: Int beta: String gamma: (Vec Int)] -> (Map Keyword Int)"
                    " (do-something alpha beta gamma) (another-thing alpha beta gamma))")))
-  (check-true (string-contains? (car (string-split out "\n")) "-> (Map Keyword Int)") out))
+  (check-true (string-contains? (list-ref (string-split out "\n") 3)
+                                "gamma: (Vec Int)] -> (Map Keyword Int)") out))
 
 (test-case "datum->pretty is idempotent at the fixed point"
   (for ([s (in-list (cons WIDE ROUNDTRIP-BATTERY))])
