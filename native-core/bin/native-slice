@@ -1,0 +1,507 @@
+#!/usr/bin/env bash
+# native-slice: run the first-native-landing bar for one native-core module.
+#
+# Usage:
+#   native-core/bin/native-slice [--module types|store|fold|all]
+#                                [--artifacts DIR] [--driver PATH]
+#                                [--repo DIR] [--quiet] [--help]
+#
+# Clauses, per module:
+#   1  profile-3 check over native-core/src/native/*.bgl   (shared, run once)
+#   2  the module's slice driver script                    (materialization)
+#   3  gcc   -std=c17 -Wall -Wextra -Werror                (compile + link/run)
+#   4  clang -std=c17 -Werror                              (second frontend)
+#   5  byte identity of a repeat materialization           (determinism)
+#
+# Every clause prints one PASS/FAIL line; a missing artifact, driver, or
+# toolchain is a named FAIL, never an abort. Exit 0 iff every clause passed.
+#
+# Artifacts, first hit: --artifacts DIR | native-core/validation/slice-<M>.
+# With no slice C output the compile clauses fall back to the fixture corpus
+# native-core/validation/c11 and FAIL — a clean baseline is evidence about
+# the toolchain and shim, never about the module.
+#
+# Driver, first hit: --driver PATH | driver= in <artifacts>/slice.conf | a
+# DRIVER_PROBES name in <artifacts> | native-core/bin/slice-<M>.
+#
+# Env: NATIVE_SLICE_GCC_FLAGS, NATIVE_SLICE_CLANG_FLAGS,
+# NATIVE_SLICE_DRIVER_TIMEOUT, NATIVE_SLICE_KEEP=1 (retain the work dir).
+
+# No `set -e`: a failing clause must be reported, not fatal.
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_REPO="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+ALL_MODULES=(types store fold)
+DRIVER_PROBES=(
+  drive drive.sh driver driver.sh run run.sh
+  materialize materialize.sh emit emit.sh check check.sh
+  Makefile
+)
+
+GCC_FLAGS="${NATIVE_SLICE_GCC_FLAGS:--std=c17 -Wall -Wextra -Werror}"
+CLANG_FLAGS="${NATIVE_SLICE_CLANG_FLAGS:--std=c17 -Werror}"
+DRIVER_TIMEOUT="${NATIVE_SLICE_DRIVER_TIMEOUT:-600}"
+CHECK_TIMEOUT=900
+CC_TIMEOUT=300
+
+REPO="$DEFAULT_REPO"
+MODULES=()
+ARTIFACTS_OVERRIDE=""
+DRIVER_OVERRIDE=""
+QUIET=0
+
+usage() { sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+
+die() { printf 'native-slice: %s\n' "$*" >&2; exit 2; }
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --module)    [[ $# -ge 2 ]] || die "--module needs a value"; MODULES+=("$2"); shift 2 ;;
+    --module=*)  MODULES+=("${1#*=}"); shift ;;
+    --artifacts) [[ $# -ge 2 ]] || die "--artifacts needs a value"; ARTIFACTS_OVERRIDE="$2"; shift 2 ;;
+    --artifacts=*) ARTIFACTS_OVERRIDE="${1#*=}"; shift ;;
+    --driver)    [[ $# -ge 2 ]] || die "--driver needs a value"; DRIVER_OVERRIDE="$2"; shift 2 ;;
+    --driver=*)  DRIVER_OVERRIDE="${1#*=}"; shift ;;
+    --repo)      [[ $# -ge 2 ]] || die "--repo needs a value"; REPO="$2"; shift 2 ;;
+    --repo=*)    REPO="${1#*=}"; shift ;;
+    --quiet|-q)  QUIET=1; shift ;;
+    --help|-h)   usage; exit 0 ;;
+    *)           die "unknown argument: $1 (try --help)" ;;
+  esac
+done
+
+if [[ ${#MODULES[@]} -eq 0 ]]; then
+  MODULES=("${ALL_MODULES[@]}")
+elif [[ ${#MODULES[@]} -eq 1 && "${MODULES[0]}" == "all" ]]; then
+  MODULES=("${ALL_MODULES[@]}")
+fi
+
+REPO="$(cd "$REPO" 2>/dev/null && pwd)" || die "--repo is not a directory"
+[[ -d "$REPO/native-core" ]] || die "$REPO has no native-core/ — wrong --repo?"
+
+# An explicit artifact or driver path names one slice, so it cannot address a
+# multi-module run without silently applying to the wrong module.
+if [[ -n "$ARTIFACTS_OVERRIDE" || -n "$DRIVER_OVERRIDE" ]] && [[ ${#MODULES[@]} -ne 1 ]]; then
+  die "--artifacts/--driver require exactly one --module"
+fi
+
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/native-slice.XXXXXX")" || die "cannot create work dir"
+cleanup() { [[ "${NATIVE_SLICE_KEEP:-0}" == 1 ]] || rm -rf "${WORK:?}"; }
+trap cleanup EXIT
+
+SHIM_DIR="$REPO/native-core/shim"
+FIXTURE_DIR="$REPO/native-core/validation/c11"
+
+# ---------------------------------------------------------------- reporting
+
+CLAUSE_N=0
+CLAUSE_TOTAL=5
+PASSED=0
+GAPS=()
+
+clause() { # clause <PASS|FAIL> <name> <detail...>
+  local status="$1" name="$2"; shift 2
+  CLAUSE_N=$((CLAUSE_N + 1))
+  [[ "$status" == PASS ]] && PASSED=$((PASSED + 1))
+  [[ "$status" == FAIL ]] && GAPS+=("$name: $*")
+  printf '[%d/%d] %-4s %-24s %s\n' "$CLAUSE_N" "$CLAUSE_TOTAL" "$status" "$name" "$*"
+}
+
+note() { printf '%-9s %s\n' "$1" "$2"; }
+
+tail_log() { # tail_log <file> — last few lines, indented, for a failed clause
+  [[ $QUIET -eq 1 || ! -s "$1" ]] && return 0
+  tail -n 12 "$1" | sed 's/^/          | /'
+}
+
+# ---------------------------------------------------------------- helpers
+
+run_bounded() { # run_bounded <seconds> <logfile> <cmd...>
+  local secs="$1" log="$2"; shift 2
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --preserve-status "$secs" "$@" >"$log" 2>&1
+  else
+    "$@" >"$log" 2>&1
+  fi
+}
+
+snapshot() { # snapshot <dir> <outfile> — content digest of every tracked-ish file
+  local dir="$1" out="$2"
+  : >"$out"
+  [[ -d "$dir" ]] || return 0
+  ( cd "$dir" && find . -type f \
+      ! -name '*.log' ! -name '*.tmp' ! -name '*.o' ! -name 'a.out' \
+      -print0 2>/dev/null | LC_ALL=C sort -z | xargs -0 -r sha256sum ) >"$out" 2>/dev/null
+}
+
+# Locate the slice driver. Prints the path, or nothing when there is none.
+find_driver() { # find_driver <module> <artifacts-dir>
+  local module="$1" art="$2" cand
+  if [[ -n "$DRIVER_OVERRIDE" ]]; then printf '%s\n' "$DRIVER_OVERRIDE"; return; fi
+  if [[ -f "$art/slice.conf" ]]; then
+    cand="$(sed -n 's/^[[:space:]]*driver[[:space:]]*=[[:space:]]*//p' "$art/slice.conf" | head -n1)"
+    if [[ -n "$cand" ]]; then
+      [[ "$cand" = /* ]] || cand="$art/$cand"
+      printf '%s\n' "$cand"; return
+    fi
+  fi
+  for cand in "${DRIVER_PROBES[@]}"; do
+    [[ -f "$art/$cand" ]] && { printf '%s\n' "$art/$cand"; return; }
+  done
+  for cand in "$REPO/native-core/bin/slice-$module" \
+              "$REPO/native-core/bin/materialize-$module" \
+              "$REPO/native-core/bin/native-slice-$module"; do
+    [[ -f "$cand" ]] && { printf '%s\n' "$cand"; return; }
+  done
+}
+
+invoke_driver() { # invoke_driver <driver> <module> <artifacts> <log>
+  local driver="$1" module="$2" art="$3" log="$4"
+  local -a cmd
+  if [[ "$(basename "$driver")" == Makefile ]]; then
+    command -v make >/dev/null 2>&1 || { printf 'make not on PATH\n' >"$log"; return 127; }
+    cmd=(make -C "$(dirname "$driver")")
+  elif [[ -x "$driver" ]]; then
+    cmd=("$driver")
+  elif head -c2 "$driver" 2>/dev/null | grep -q '#!'; then
+    cmd=(bash "$driver")   # shebang present but bit not set: still runnable
+  else
+    printf 'driver is not executable and has no shebang: %s\n' "$driver" >"$log"
+    return 126
+  fi
+  ( cd "$REPO" \
+    && NATIVE_SLICE=1 \
+       NATIVE_SLICE_MODULE="$module" \
+       NATIVE_SLICE_REPO="$REPO" \
+       NATIVE_SLICE_ARTIFACTS="$art" \
+       run_bounded "$DRIVER_TIMEOUT" "$log" "${cmd[@]}" )
+}
+
+# Compile every C translation unit in the C set with one compiler, link and
+# run when the set carries a main. Echoes a detail string; returns 0 on pass.
+compile_set() { # compile_set <label> <cc> <flags> <outdir> <cfiles...>
+  local label="$1" cc="$2" flags="$3" outdir="$4"; shift 4
+  local -a sources=("$@")
+  local log="$outdir/$label.log" script="$outdir/$label.sh"
+  local -a incs=()
+  local d f seen
+
+  for f in "${sources[@]}"; do
+    d="$(cd "$(dirname "$f")" && pwd)"
+    seen=0
+    for existing in "${incs[@]+"${incs[@]}"}"; do [[ "$existing" == "$d" ]] && seen=1; done
+    [[ $seen -eq 0 ]] && incs+=("$d")
+  done
+  # Headers may sit beside the sources or in a sibling include dir.
+  while IFS= read -r d; do
+    seen=0
+    for existing in "${incs[@]+"${incs[@]}"}"; do [[ "$existing" == "$d" ]] && seen=1; done
+    [[ $seen -eq 0 ]] && incs+=("$d")
+  done < <(for f in "${sources[@]}"; do dirname "$f"; done | sort -u \
+             | while IFS= read -r d; do find "$d" -maxdepth 2 -name '*.h' -printf '%h\n' 2>/dev/null; done \
+             | sort -u)
+
+  {
+    printf '#!/usr/bin/env bash\nset -uo pipefail\ncc="$1"; shift\nrc=0\n'
+    printf 'objs=()\n'
+    local i=0
+    for f in "${sources[@]}"; do
+      printf '"$cc" %s' "$flags"
+      for d in "${incs[@]+"${incs[@]}"}"; do printf ' -I%q' "$d"; done
+      printf ' -c %q -o %q/obj_%d.o || rc=1\n' "$f" "$outdir" "$i"
+      printf 'objs+=(%q/obj_%d.o)\n' "$outdir" "$i"
+      i=$((i + 1))
+    done
+    printf 'exit $rc\n'
+  } >"$script"
+
+  local has_main=0
+  for f in "${sources[@]}"; do
+    grep -qE '^[[:space:]]*(int|void)[[:space:]]+main[[:space:]]*\(' "$f" 2>/dev/null && has_main=1
+  done
+
+  local rc detail
+  if [[ "$cc" == clang ]] && ! command -v clang >/dev/null 2>&1; then
+    if ! command -v nix >/dev/null 2>&1; then
+      printf 'clang absent and nix absent — cannot obtain a second frontend'
+      return 1
+    fi
+    run_bounded "$CC_TIMEOUT" "$log" nix shell nixpkgs#clang --command bash "$script" clang
+    rc=$?
+  else
+    run_bounded "$CC_TIMEOUT" "$log" bash "$script" "$cc"
+    rc=$?
+  fi
+  if [[ $rc -ne 0 ]]; then
+    printf '%d TU(s) submitted, compiler exit %d' "${#sources[@]}" "$rc"
+    return 1
+  fi
+  detail="$(printf '%d TU(s) clean' "${#sources[@]}")"
+
+  if [[ $has_main -eq 1 ]]; then
+    local linklog="$outdir/$label-link.log"
+    local runner="$cc"
+    if [[ "$cc" == clang ]] && ! command -v clang >/dev/null 2>&1; then
+      run_bounded "$CC_TIMEOUT" "$linklog" nix shell nixpkgs#clang --command \
+        bash -c "clang $outdir/obj_*.o -o $outdir/$label.bin"
+    else
+      run_bounded "$CC_TIMEOUT" "$linklog" bash -c "$runner $outdir/obj_*.o -o $outdir/$label.bin"
+    fi
+    if [[ $? -ne 0 ]]; then
+      printf '%s, link failed' "$detail"
+      cat "$linklog" >>"$log" 2>/dev/null
+      return 1
+    fi
+    run_bounded 60 "$outdir/$label-run.log" "$outdir/$label.bin"
+    rc=$?
+    if [[ $rc -ne 0 ]]; then
+      printf '%s, link ok, executable exited %d' "$detail" "$rc"
+      return 1
+    fi
+    detail="$detail, link+run ok"
+  fi
+  printf '%s' "$detail"
+  return 0
+}
+
+# ---------------------------------------------------- clause 1 (shared once)
+
+PROFILE3_STATUS=""
+PROFILE3_DETAIL=""
+PROFILE3_LOG="$WORK/profile3.log"
+
+run_profile3() {
+  [[ -n "$PROFILE3_STATUS" ]] && return
+  local -a srcs=()
+  local f
+  for f in "$REPO"/native-core/src/native/*.bgl; do [[ -f "$f" ]] && srcs+=("$f"); done
+  if [[ ${#srcs[@]} -eq 0 ]]; then
+    PROFILE3_STATUS=FAIL
+    PROFILE3_DETAIL="no sources matched native-core/src/native/*.bgl"
+    return
+  fi
+  local checker="$REPO/bin/beagle-check-all"
+  if [[ ! -x "$checker" ]]; then
+    PROFILE3_STATUS=FAIL
+    PROFILE3_DETAIL="bin/beagle-check-all missing or not executable in $REPO"
+    return
+  fi
+  run_bounded "$CHECK_TIMEOUT" "$PROFILE3_LOG" "$checker" --profile 3 "${srcs[@]}"
+  local rc=$?
+  local summary
+  summary="$(grep -E '^[0-9]+ file\(s\), [0-9]+ error\(s\)' "$PROFILE3_LOG" | tail -n1)"
+  [[ -z "$summary" ]] && summary="$(printf '%d file(s) submitted' "${#srcs[@]}")"
+  if [[ $rc -eq 0 ]]; then
+    PROFILE3_STATUS=PASS
+    PROFILE3_DETAIL="$summary"
+  else
+    PROFILE3_STATUS=FAIL
+    PROFILE3_DETAIL="$summary (checker exit $rc)"
+  fi
+}
+
+# ---------------------------------------------------------------- per module
+
+OVERALL_RC=0
+SUMMARY=()
+
+run_module() {
+  local module="$1"
+  local art art_state driver
+  local moddir="$WORK/$module"
+  mkdir -p "$moddir"
+
+  CLAUSE_N=0
+  PASSED=0
+  GAPS=()
+
+  if [[ -n "$ARTIFACTS_OVERRIDE" ]]; then
+    art="$ARTIFACTS_OVERRIDE"
+  else
+    art="$REPO/native-core/validation/slice-$module"
+  fi
+
+  local n_files=0
+  if [[ -d "$art" ]]; then
+    n_files="$(find "$art" -type f 2>/dev/null | wc -l | tr -d ' ')"
+    if [[ "$n_files" -eq 0 ]]; then art_state="EMPTY"; else art_state="present"; fi
+  else
+    art_state="ABSENT"
+  fi
+
+  printf '\n== native-slice: module %s ==\n' "$module"
+  local head_desc branch dirty
+  head_desc="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  branch="$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+  if [[ -n "$(git -C "$REPO" status --porcelain 2>/dev/null)" ]]; then dirty=dirty; else dirty=clean; fi
+  note repo "$REPO"
+  note head "$head_desc ($branch, $dirty)"
+  if [[ "$art_state" == present ]]; then
+    note artifacts "${art#"$REPO"/}  [present: $n_files file(s)]"
+  else
+    note artifacts "${art#"$REPO"/}  [$art_state]"
+  fi
+
+  # ---- C set resolution ------------------------------------------------
+  local -a cset=()
+  local cset_origin f
+  if [[ "$art_state" == present ]]; then
+    while IFS= read -r f; do cset+=("$f"); done < <(find "$art" -type f -name '*.c' | LC_ALL=C sort)
+    cset_origin=slice
+  fi
+  if [[ ${#cset[@]} -eq 0 ]]; then
+    if [[ -d "$FIXTURE_DIR" ]]; then
+      while IFS= read -r f; do cset+=("$f"); done < <(find "$FIXTURE_DIR" -type f -name '*.c' | LC_ALL=C sort)
+      [[ ${#cset[@]} -gt 0 ]] && cset_origin=fixture-fallback
+    fi
+    [[ ${#cset[@]} -eq 0 ]] && cset_origin=none
+  fi
+  # The shim is the ABI floor for every slice; skip it when a slice vendors one.
+  local vendored_shim=0
+  for f in "${cset[@]+"${cset[@]}"}"; do
+    [[ "$(basename "$f")" == native_shim.c ]] && vendored_shim=1
+  done
+  if [[ $vendored_shim -eq 0 && -f "$SHIM_DIR/native_shim.c" && ${#cset[@]} -gt 0 ]]; then
+    cset=("$SHIM_DIR/native_shim.c" "${cset[@]}")
+  fi
+  case "$cset_origin" in
+    slice)            note "c-set" "${#cset[@]} TU(s) from the slice + shim" ;;
+    fixture-fallback) note "c-set" "${#cset[@]} TU(s) from ${FIXTURE_DIR#"$REPO"/} + shim (fixture corpus, NOT module output)" ;;
+    none)             note "c-set" "no C translation units found" ;;
+  esac
+
+  driver="$(find_driver "$module" "$art")"
+  if [[ -n "$driver" ]]; then note driver "${driver#"$REPO"/}"; else note driver "(none found)"; fi
+  printf '\n'
+
+  # ---- clause 1: profile-3 --------------------------------------------
+  run_profile3
+  clause "$PROFILE3_STATUS" "profile-3 check" "$PROFILE3_DETAIL"
+  [[ "$PROFILE3_STATUS" == FAIL ]] && tail_log "$PROFILE3_LOG"
+
+  # ---- clause 2: module driver ----------------------------------------
+  local driver_ok=0
+  local dlog="$moddir/driver-run1.log"
+  if [[ -z "$driver" ]]; then
+    clause FAIL "module driver" \
+      "no driver under ${art#"$REPO"/} (probed: ${DRIVER_PROBES[*]}, slice.conf driver=, native-core/bin/slice-$module)"
+  else
+    invoke_driver "$driver" "$module" "$art" "$dlog"
+    local rc=$?
+    if [[ $rc -eq 0 ]]; then
+      driver_ok=1
+      clause PASS "module driver" "${driver##*/} exit 0"
+    else
+      clause FAIL "module driver" "${driver##*/} exit $rc"
+      tail_log "$dlog"
+    fi
+  fi
+
+  # Re-resolve the C set: a driver that just materialized may have created it.
+  if [[ $driver_ok -eq 1 && "$cset_origin" != slice && -d "$art" ]]; then
+    local -a fresh=()
+    while IFS= read -r f; do fresh+=("$f"); done < <(find "$art" -type f -name '*.c' | LC_ALL=C sort)
+    if [[ ${#fresh[@]} -gt 0 ]]; then
+      cset=("$SHIM_DIR/native_shim.c" "${fresh[@]}")
+      cset_origin=slice
+      note "c-set" "re-resolved after driver: ${#cset[@]} TU(s) from the slice + shim"
+    fi
+  fi
+
+  # ---- clauses 3 and 4: the two frontends ------------------------------
+  local detail
+  for pair in "gcc|$GCC_FLAGS|gcc c17 -Werror" "clang|$CLANG_FLAGS|clang c17 -Werror"; do
+    local cc="${pair%%|*}" rest="${pair#*|}"
+    local flags="${rest%%|*}" label="${rest#*|}"
+    if [[ ${#cset[@]} -eq 0 ]]; then
+      clause FAIL "$label" "no C translation units to compile"
+      continue
+    fi
+    if [[ "$cc" != clang ]] && ! command -v "$cc" >/dev/null 2>&1; then
+      clause FAIL "$label" "$cc not on PATH"
+      continue
+    fi
+    mkdir -p "$moddir/$cc"
+    detail="$(compile_set "$cc" "$cc" "$flags" "$moddir/$cc" "${cset[@]}")"
+    local crc=$?
+    if [[ $crc -ne 0 ]]; then
+      clause FAIL "$label" "$detail"
+      tail_log "$moddir/$cc/$cc.log"
+    elif [[ "$cset_origin" == fixture-fallback ]]; then
+      clause FAIL "$label" "$detail, but on the fixture corpus — module produced no C"
+      # A clean baseline is real evidence about the toolchain, just not about
+      # this module; keep it visible instead of burying it in the gap text.
+    else
+      clause PASS "$label" "$detail"
+    fi
+  done
+
+  # ---- clause 5: byte identity of a repeat materialization -------------
+  if [[ $driver_ok -ne 1 ]]; then
+    clause FAIL "byte-identity re-run" "no successful materialization to repeat"
+  else
+    local snap_a="$moddir/snap-a.txt" snap_b="$moddir/snap-b.txt"
+    local dlog2="$moddir/driver-run2.log"
+    snapshot "$art" "$snap_a"
+    invoke_driver "$driver" "$module" "$art" "$dlog2"
+    local rc2=$?
+    if [[ $rc2 -ne 0 ]]; then
+      clause FAIL "byte-identity re-run" "second materialization exited $rc2 (driver is not re-runnable)"
+      tail_log "$dlog2"
+    else
+      snapshot "$art" "$snap_b"
+      if [[ ! -s "$snap_a" && ! -s "$snap_b" ]]; then
+        clause FAIL "byte-identity re-run" "driver re-ran but produced no files under ${art#"$REPO"/}"
+      elif diff -q "$snap_a" "$snap_b" >/dev/null 2>&1; then
+        clause PASS "byte-identity re-run" "$(wc -l <"$snap_a" | tr -d ' ') file(s) byte-identical across two materializations"
+      else
+        clause FAIL "byte-identity re-run" "materialization is not deterministic"
+        if [[ $QUIET -eq 0 ]]; then
+          diff "$snap_a" "$snap_b" 2>/dev/null | head -n 12 | sed 's/^/          | /'
+        fi
+      fi
+    fi
+  fi
+
+  # ---- verdict ---------------------------------------------------------
+  printf '\n-- verdict --\n'
+  note module "$module"
+  note clauses "$PASSED/$CLAUSE_TOTAL"
+  if [[ ${#GAPS[@]} -eq 0 ]]; then
+    note gaps "none"
+    note result "PASS — module $module clears the first-native-landing bar"
+  else
+    local g
+    note gaps "${#GAPS[@]}"
+    for g in "${GAPS[@]}"; do printf '          - %s\n' "$g"; done
+    note result "FAIL — module $module does not clear the first-native-landing bar"
+    OVERALL_RC=1
+  fi
+  SUMMARY+=("$(printf '%-6s %d/%d' "$module" "$PASSED" "$CLAUSE_TOTAL")")
+}
+
+for m in "${MODULES[@]}"; do
+  case "$m" in
+    types|store|fold) ;;
+    *) printf '\n== native-slice: module %s ==\nnative-slice: unknown module %s (known: %s)\n' \
+         "$m" "$m" "${ALL_MODULES[*]}" >&2
+       OVERALL_RC=1
+       SUMMARY+=("$(printf '%-6s unknown module' "$m")")
+       continue ;;
+  esac
+  run_module "$m"
+done
+
+if [[ ${#MODULES[@]} -gt 1 ]]; then
+  printf '\n== native-slice summary ==\n'
+  for line in "${SUMMARY[@]}"; do printf '  %s\n' "$line"; done
+  if [[ $OVERALL_RC -eq 0 ]]; then
+    printf '  overall PASS\n'
+  else
+    printf '  overall FAIL\n'
+  fi
+fi
+
+exit $OVERALL_RC
