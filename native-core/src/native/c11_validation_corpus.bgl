@@ -1,0 +1,148 @@
+#lang beagle/clj
+;; @upstream:graph — operator-authorized text arm; re-ingest after landing.
+(ns native.c11-validation-corpus)
+
+(define-mode strict)
+
+(require native.core :as core)
+(require native.c11 :as c11)
+
+(defn fixture-id [name: String] -> core/NativeId
+  (core/canonical-id "native-c11-fixture-v0" [name]))
+
+(def fixture-i64-type: core/TypeDef
+  (core/->TypeDef (fixture-id "type-00-i64") "I64"
+    (core/atom-type-shape (core/i64-kind))))
+
+(def fixture-left-field: core/TypeField
+  (core/->TypeField (fixture-id "field-00-left") "left" (fixture-id "type-00-i64")))
+
+(def fixture-right-field: core/TypeField
+  (core/->TypeField (fixture-id "field-01-right") "right" (fixture-id "type-00-i64")))
+
+(def fixture-pair-type: core/TypeDef
+  (core/->TypeDef (fixture-id "type-01-pair") "Pair"
+    (core/->RecordType [fixture-left-field fixture-right-field])))
+
+(def fixture-region: core/RegionDef
+  (core/->RegionDef (fixture-id "region-arena") (core/arena-region-kind) nil))
+
+(def fixture-capability: core/CapabilityDef
+  (core/->CapabilityDef (fixture-id "capability-allocate")
+    (core/->AllocateCapability true)
+    (fixture-id "region-arena")
+    true))
+
+(def fixture-effect: core/EffectDef
+  (core/->EffectDef (fixture-id "effect-allocate")
+    (core/->AllocateEffect (fixture-id "region-arena"))))
+
+(def fixture-i64-layout: core/LayoutDef
+  (core/->LayoutDef (fixture-id "layout-00-i64") (fixture-id "type-00-i64") 8 8 []))
+
+(def fixture-pair-layout: core/LayoutDef
+  (core/->LayoutDef (fixture-id "layout-01-pair") (fixture-id "type-01-pair") 16 8
+    [(core/->FieldLayout (fixture-id "field-00-left") (fixture-id "type-00-i64") 0 8)
+     (core/->FieldLayout (fixture-id "field-01-right") (fixture-id "type-00-i64") 8 8)]))
+
+(def fixture-block: core/BasicBlock
+  (core/->BasicBlock (fixture-id "block-entry")
+    []
+    [(core/->AddI64Instruction (fixture-id "ssa-sum")
+       (fixture-id "ssa-left")
+       (fixture-id "ssa-right"))]
+    [(core/return-terminator (fixture-id "ssa-sum"))]))
+
+(def fixture-function: core/FunctionDef
+  (core/->FunctionDef (fixture-id "function-add") "add"
+    [(core/->Parameter (fixture-id "ssa-left") (fixture-id "type-00-i64"))
+     (core/->Parameter (fixture-id "ssa-right") (fixture-id "type-00-i64"))]
+    [fixture-block]
+    (fixture-id "block-entry")
+    (fixture-id "type-00-i64")
+    [(fixture-id "effect-allocate")]
+    [(fixture-id "region-arena")]
+    [(fixture-id "capability-allocate")]))
+
+(def fixture-world: core/NativeWorld
+  (core/->NativeWorld (fixture-id "world") nil "native-c11-fixture-v0"
+    [fixture-pair-type fixture-i64-type]
+    [fixture-effect]
+    [fixture-region]
+    [fixture-capability]
+    [fixture-pair-layout fixture-i64-layout]
+    [fixture-function]
+    [(fixture-id "effect-allocate")]
+    [(fixture-id "region-arena")]
+    [(fixture-id "capability-allocate")]
+    []))
+
+(def fixture-world-permuted: core/NativeWorld
+  (with fixture-world
+    [:types [fixture-i64-type fixture-pair-type]
+     :layouts [fixture-i64-layout fixture-pair-layout]]))
+
+(defn require-artifact [result: c11/C11Materialization] -> c11/C11Artifact
+  (match result
+    [(C11Success value) (c11/c11success-artifact result)]
+    [(C11Failure value) (throw (ex-info (c11/c11failure-detail result) {}))]))
+
+(def fixture-artifact: c11/C11Artifact
+  (require-artifact (c11/materialize-world fixture-world 0)))
+
+(def fixture-permuted-artifact: c11/C11Artifact
+  (require-artifact (c11/materialize-world fixture-world-permuted 0)))
+
+(def fixture-deterministic?: Bool
+  (and (= (c11/c11artifact-header-text fixture-artifact)
+         (c11/c11artifact-header-text fixture-permuted-artifact))
+    (= (c11/c11artifact-source-text fixture-artifact)
+      (c11/c11artifact-source-text fixture-permuted-artifact))))
+
+(def fixture-main-text: String
+  (str "#include \"module_0.h\"\n\n"
+    "int main(void) {\n"
+    "  uint8_t storage[64];\n"
+    "  native_arena arena;\n"
+    "  native_capability capability = { UINT64_C(1) };\n"
+    "  native_arena_init(&arena, storage, sizeof(storage));\n"
+    "  if (native_m0_fn_0(&arena, &capability, INT64_C(20), INT64_C(22)) != INT64_C(42)) {\n"
+    "    return 1;\n"
+    "  }\n"
+    "  int64_t *slot = native_arena_alloc(&arena, sizeof(*slot), _Alignof(int64_t));\n"
+    "  *slot = INT64_C(42);\n"
+    "  if (*slot != INT64_C(42)) {\n"
+    "    return 2;\n"
+    "  }\n"
+    "  FILE *stream = tmpfile();\n"
+    "  if (stream == NULL) {\n"
+    "    return 3;\n"
+    "  }\n"
+    "  uint8_t written[3] = { UINT8_C(1), UINT8_C(2), UINT8_C(3) };\n"
+    "  uint8_t read_back[3] = { UINT8_C(0), UINT8_C(0), UINT8_C(0) };\n"
+    "  if (!native_byte_write(stream, written, sizeof(written))) {\n"
+    "    return 4;\n"
+    "  }\n"
+    "  rewind(stream);\n"
+    "  if (!native_byte_read(stream, read_back, sizeof(read_back))) {\n"
+    "    return 5;\n"
+    "  }\n"
+    "  if (fclose(stream) != 0) {\n"
+    "    return 6;\n"
+    "  }\n"
+    "  if ((read_back[0] != written[0]) || (read_back[1] != written[1]) || (read_back[2] != written[2])) {\n"
+    "    return 7;\n"
+    "  }\n"
+    "  native_arena_reset(&arena);\n"
+    "  return 0;\n"
+    "}\n"))
+
+(defn emit-fixture! [directory: String] -> Nil
+  (if fixture-deterministic?
+    (do
+      (spit (str directory "/" (c11/c11artifact-header-name fixture-artifact))
+        (c11/c11artifact-header-text fixture-artifact))
+      (spit (str directory "/" (c11/c11artifact-source-name fixture-artifact))
+        (c11/c11artifact-source-text fixture-artifact))
+      (spit (str directory "/main.c") fixture-main-text))
+    (throw (ex-info "permuted fixture world changed materialization" {}))))
