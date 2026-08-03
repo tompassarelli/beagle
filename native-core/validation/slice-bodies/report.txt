@@ -42,4 +42,4 @@ pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: occurrence-coordi
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: occurrence-coordinate? arguments do not match its native parameters [withdrawal]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: triple? arguments do not match its native parameters [recorded-at]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: occurrence-coordinate? arguments do not match its native parameters [occurrence-before?]
-materialize OK module_0.h module_0.c
+materialize REFUSED native world uses a shape outside the restricted C17 body slice
