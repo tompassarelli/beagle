@@ -1,7 +1,7 @@
 fram.fold Native Core slice
 source: fram:src/fram/fold.bclj
-types: 40
-layouts: 40
+types: 52
+layouts: 52
 functions: 0
 abis: 0
 native lowering complete: no
@@ -11,7 +11,7 @@ core validator: pass
 seven structural obligations (native.obligations/validate-native-world):
 valid-ssa: pass
 exhaustive-matches: pass
-closed-layouts: FAIL
+closed-layouts: pass
 checked-arithmetic: pass
 legal-abi: pass
 discharged-tokens: pass
@@ -23,22 +23,22 @@ source-seal receipt obligations:
 source-to-typed receipt obligations:
   discharged: every reachable type is a closed Native Core TypeShape
   discharged: typed Terms contain no raw Any, host exception, host collection, or target syntax
-  PENDING: TODO-NATIVE-FUNCTION-BODY: native body lowering remains for transaction-frame
-  PENDING: TODO-NATIVE-FUNCTION-BODY: native body lowering remains for max-sequence
-  PENDING: TODO-NATIVE-FUNCTION-BODY: native body lowering remains for project
-  PENDING: TODO-NATIVE-FUNCTION-BODY: native body lowering remains for fold!
-  PENDING: TODO-NATIVE-FUNCTION-BODY: native body lowering remains for refold!
+  PENDING: TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for transaction-frame
+  PENDING: TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for max-sequence
+  PENDING: TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for project
+  PENDING: TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for fold!
+  PENDING: TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for refold!
 
 source-to-typed diagnostics:
   LOWER-CLOSED-RAW-ANY: raw Any was closed to the finite SliceValue union
   LOWER-CLOSED-RAW-ANY: raw Any was closed to the finite SliceValue union
   LOWER-CLOSED-RAW-ANY: raw Any was closed to the finite SliceValue union
-  TODO-NATIVE-FUNCTION-BODY: typed function is sealed; native body lowering remains for transaction-frame
-  TODO-NATIVE-FUNCTION-BODY: typed function is sealed; native body lowering remains for max-sequence
-  TODO-NATIVE-FUNCTION-BODY: typed function is sealed; native body lowering remains for project
-  TODO-NATIVE-FUNCTION-BODY: typed function is sealed; native body lowering remains for fold!
+  TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for transaction-frame
+  TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for max-sequence
+  TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for project
+  TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for fold!
   LOWER-CLOSED-RAW-ANY: raw Any was closed to the finite SliceValue union
-  TODO-NATIVE-FUNCTION-BODY: typed function is sealed; native body lowering remains for refold!
+  TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for refold!
 
 typed-to-native receipt obligations:
   discharged: Native Core validator accepts all SSA definitions and references
@@ -49,11 +49,11 @@ typed-to-native receipt obligations:
   discharged: implemented functions do not leak an affine capability token
   discharged: implemented function effects stay inside world declarations
   discharged: native Terms contain no raw Any, host exception, host collection, or target syntax
-  PENDING: TODO-NATIVE-FUNCTION-BODY: native body lowering remains for transaction-frame
-  PENDING: TODO-NATIVE-FUNCTION-BODY: native body lowering remains for max-sequence
-  PENDING: TODO-NATIVE-FUNCTION-BODY: native body lowering remains for project
-  PENDING: TODO-NATIVE-FUNCTION-BODY: native body lowering remains for fold!
-  PENDING: TODO-NATIVE-FUNCTION-BODY: native body lowering remains for refold!
+  PENDING: TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for transaction-frame
+  PENDING: TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for max-sequence
+  PENDING: TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for project
+  PENDING: TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for fold!
+  PENDING: TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for refold!
 
 typed-to-native diagnostics:
   TODO-NATIVE-PROBE-ABI: no implemented probe entry point is available for ABI declaration

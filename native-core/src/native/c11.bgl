@@ -218,18 +218,17 @@
     [(CheckedAddI64V0 value) true]
     [(CheckedBoundsV0 value) false]))
 
+;; Qualified instance? rather than match: a match on an imported union emits
+;; bare variant class names, which only resolve for variants the consumer
+;; registered when it was parsed.
 (defn instruction-supported? [instruction: core/Instruction] -> Bool
-  (match instruction
-    [(AtomInstruction value) (atom-supported? (core/atominstruction-atom instruction))]
-    [(CopyInstruction value) false]
-    [(AddF64Instruction value) true]
-    [(CheckedInstruction value) (checked-operation-supported? (core/checkedinstruction-operation instruction))]
-    [(StoreInstruction value) false]
-    [(AllocateInstruction value) false]
-    [(CallInstruction value) false]
-    [(CompareInstruction value) false]
-    [(FieldInstruction value) false]
-    [(RecordInstruction value) false]))
+  (cond
+    (instance? native.core.AtomInstruction instruction)
+    (atom-supported? (core/atominstruction-atom instruction))
+    (instance? native.core.AddF64Instruction instruction) true
+    (instance? native.core.CheckedInstruction instruction)
+    (checked-operation-supported? (core/checkedinstruction-operation instruction))
+    :else false))
 
 (defn terminator-supported? [terminator: core/Terminator] -> Bool
   (match terminator
@@ -436,35 +435,31 @@
 
 (defn emit-instruction [types: (Vec core/TypeDef) module-index: Int function: core/FunctionDef block: core/BasicBlock instruction-position: Int instruction: core/Instruction] -> String
   (let [result-name: String (str "native_v_" (+ (count (core/functiondef-parameters function)) instruction-position))]
-    (match instruction
-      [(AtomInstruction value)
-       (let [atom-value: core/NativeAtom (core/atominstruction-atom instruction)]
-         (str "  " (atom-c-type types module-index atom-value) " " result-name " = " (emit-atom-expression atom-value) ";\n"
-           "  (void)" result-name ";\n"))]
-      [(CopyInstruction value) ""]
-      [(AddF64Instruction value)
-       (str "  double " result-name " = " (value-name function block (core/addf64instruction-left-id instruction)) " + "
-         (value-name function block (core/addf64instruction-right-id instruction)) ";\n  (void)" result-name ";\n")]
-      [(CheckedInstruction value)
-       (let [operation: core/CheckedOperationV0 (core/checkedinstruction-operation instruction)]
-         (match operation
-           [(CheckedAddI64V0 operation-value)
-            (let [left: String (value-name function block (core/checkedaddi64v0-left-id operation))
-                  right: String (value-name function block (core/checkedaddi64v0-right-id operation))]
-              (str "  int64_t " result-name ";\n"
-                "  if (((" right " > INT64_C(0)) && (" left " > (INT64_MAX - " right "))) ||\n"
-                "      ((" right " < INT64_C(0)) && (" left " < (INT64_MIN - " right ")))) {\n"
-                "    native_trap(NATIVE_TRAP_OVERFLOW);\n"
-                "  }\n"
-                "  " result-name " = " left " + " right ";\n"
-                "  (void)" result-name ";\n"))]
-           [(CheckedBoundsV0 operation-value) ""]))]
-      [(StoreInstruction value) ""]
-      [(AllocateInstruction value) ""]
-      [(CallInstruction value) ""]
-      [(CompareInstruction value) ""]
-      [(FieldInstruction value) ""]
-      [(RecordInstruction value) ""])))
+    (cond
+      (instance? native.core.AtomInstruction instruction)
+      (let [atom-value: core/NativeAtom (core/atominstruction-atom instruction)]
+        (str "  " (atom-c-type types module-index atom-value) " " result-name " = " (emit-atom-expression atom-value) ";\n"
+          "  (void)" result-name ";\n"))
+
+      (instance? native.core.AddF64Instruction instruction)
+      (str "  double " result-name " = " (value-name function block (core/addf64instruction-left-id instruction)) " + "
+        (value-name function block (core/addf64instruction-right-id instruction)) ";\n  (void)" result-name ";\n")
+
+      (instance? native.core.CheckedInstruction instruction)
+      (let [operation: core/CheckedOperationV0 (core/checkedinstruction-operation instruction)]
+        (if (instance? native.core.CheckedAddI64V0 operation)
+          (let [left: String (value-name function block (core/checkedaddi64v0-left-id operation))
+                right: String (value-name function block (core/checkedaddi64v0-right-id operation))]
+            (str "  int64_t " result-name ";\n"
+              "  if (((" right " > INT64_C(0)) && (" left " > (INT64_MAX - " right "))) ||\n"
+              "      ((" right " < INT64_C(0)) && (" left " < (INT64_MIN - " right ")))) {\n"
+              "    native_trap(NATIVE_TRAP_OVERFLOW);\n"
+              "  }\n"
+              "  " result-name " = " left " + " right ";\n"
+              "  (void)" result-name ";\n"))
+          ""))
+
+      :else "")))
 
 (defn emit-instructions [types: (Vec core/TypeDef) module-index: Int function: core/FunctionDef block: core/BasicBlock] -> String
   (let [instructions: (Vec core/Instruction) (core/basicblock-instructions block)]

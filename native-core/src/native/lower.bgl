@@ -174,16 +174,25 @@
           (recur (+ position 1) (conj selected (nth subjects position)))
           (recur (+ position 1) selected))))))
 
-;; A sequence node carries its items as f0, f1, ... in projection order; the
-;; ordinal suffix is the position, so items never depend on fact ordering.
-(defn index-sequence-items
-  [index: SourceIndexV0 sequence-id: core/NativeId] -> (Vec core/NativeId)
+;; A sequence node carries its items under an ordinal predicate, so item order
+;; is the ordinal, never fact order. The two live projections spell that
+;; ordinal differently: the AST projection uses f0.., the corpus uses a0...
+(defn index-sequence-under
+  [index: SourceIndexV0 sequence-id: core/NativeId prefix: String]
+  -> (Vec core/NativeId)
   (loop [position: Int 0 items: (Vec core/NativeId) []]
     (let [item: (U core/NativeId Nil)
-          (index-first-object index sequence-id (str "f" position))]
+          (index-first-object index sequence-id (str prefix position))]
       (if (nil? item)
         items
         (recur (+ position 1) (conj items item))))))
+
+(defn index-sequence-items
+  [index: SourceIndexV0 sequence-id: core/NativeId] -> (Vec core/NativeId)
+  (let [indexed: (Vec core/NativeId) (index-sequence-under index sequence-id "f")]
+    (if (> (count indexed) 0)
+      indexed
+      (index-sequence-under index sequence-id "a"))))
 
 (defn build-source-index [graph: worlds/TermGraphV0] -> SourceIndexV0
   (let [facts: (Vec SourceFactV0) (source-facts graph)
