@@ -1812,8 +1812,8 @@
                              (expr-has-await? (let-binding-value b)))
                            (contains-await? body)))
      (define let-names (apply append (map (lambda (b) (names-from-binding-target (let-binding-name b))) bindings)))
-     ;; A binding reassigned via `set!` in the body must emit `let`, not `const`.
-     (define mutated-syms (collect-set!-target-syms body))
+     ;; Earlier bindings are visible to later initializers, so scan the whole let.
+     (define mutated-syms (collect-let-set!-target-syms bindings body))
      ;; Thread the rep-env (binding-name -> 'hmap|'hset) ALONGSIDE js-bound so a
      ;; later binding's value (and the body) can classify a var-ref read of an
      ;; earlier binding consistently with how that binding's value was emitted.
@@ -2674,6 +2674,10 @@
   (for-each walk (if (list? node) node (list node)))
   syms)
 
+(define (collect-let-set!-target-syms bindings body)
+  (collect-set!-target-syms
+   (append (map let-binding-value bindings) body)))
+
 ;; mutable? — emit `let` (the binding is reassigned via set! in its scope) instead
 ;; of the default `const`. Without this, `(set! <bare-local> v)` compiled to
 ;; `const x = …; x = …;` and threw "Assignment to constant variable" at runtime.
@@ -2794,7 +2798,8 @@
        (format "if (~a) { ~a } else { return null; }" cond-str then-str))]
     [(and (let-form? e) (body-contains-recur? (let-form-body e)))
      (define let-names (apply append (map (lambda (b) (names-from-binding-target (let-binding-name b))) (let-form-bindings e))))
-     (define mutated-syms (collect-set!-target-syms (let-form-body e)))
+     (define mutated-syms
+       (collect-let-set!-target-syms (let-form-bindings e) (let-form-body e)))
      (define binding-strs
        (apply append
          (for/list ([b (in-list (let-form-bindings e))])
@@ -2858,7 +2863,7 @@
      (if shadows?
        (format "return ~a;" (emit-expr e))
        (let ()
-         (define mutated-syms (collect-set!-target-syms body))
+         (define mutated-syms (collect-let-set!-target-syms bindings body))
          (define-values (bind-strs rep-env-out type-env-out rename-env-out)
            (emit-let-bindings bindings mutated-syms))
          (with-bindings let-names
@@ -2989,7 +2994,7 @@
      (if shadows?
        (emit-expr-stmt e)
        (let ()
-         (define mutated-syms (collect-set!-target-syms body))
+         (define mutated-syms (collect-let-set!-target-syms bindings body))
          (define-values (bind-strs rep-env-out type-env-out rename-env-out)
            (emit-let-bindings bindings mutated-syms))
          (with-bindings let-names

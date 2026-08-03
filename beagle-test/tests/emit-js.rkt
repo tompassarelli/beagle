@@ -835,6 +835,13 @@
      "let acc = 0;"
      '(defn f! [(n #%: Any)] -> Any (let [acc 0] (set! acc n) acc)))
 
+   (check-js-contains "set! in a later initializer makes the earlier binding mutable"
+     "let acc = 0;"
+     '(defn f! [] -> Int
+        (let [acc 0
+              next (do (set! acc 1) acc)]
+          (+ acc next))))
+
    ;; …but a let-binding that is NOT set!-mutated still emits `const` (no over-broadening).
    (check-js-contains "an unmutated let-binding stays `const`"
      "const total = "
