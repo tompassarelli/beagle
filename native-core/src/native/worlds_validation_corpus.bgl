@@ -1,0 +1,153 @@
+;; Native Stage 2 validation corpus; authority: North thread 019fbd6c.
+(ns native.worlds-validation-corpus
+  (:require [native.core :as core]
+            [native.worlds :as worlds]))
+
+(define-mode strict)
+
+(defrecord WorldsCorpusResult [scratch-path-independent :- Bool order-independent :- Bool content-sensitive :- Bool promotion-accepted :- Bool mismatched-receipt-rejected :- Bool])
+
+(defn corpus-id [name :- String] :- core/NativeId
+  (core/canonical-id "native-worlds-v0-corpus" [name]))
+
+(def root-id :- core/NativeId (corpus-id "term-root"))
+(def subject-id :- core/NativeId (corpus-id "term-subject"))
+(def predicate-id :- core/NativeId (corpus-id "term-predicate"))
+(def object-id :- core/NativeId (corpus-id "term-object"))
+
+(def root-node :- worlds/TermNodeV0
+  (worlds/->TermNodeV0 root-id
+    (worlds/->TripleTermV0 subject-id predicate-id object-id)))
+
+(def subject-node :- worlds/TermNodeV0
+  (worlds/->TermNodeV0 subject-id (worlds/->TextTermV0 "subject")))
+
+(def predicate-node :- worlds/TermNodeV0
+  (worlds/->TermNodeV0 predicate-id (worlds/->TextTermV0 "predicate")))
+
+(def object-node :- worlds/TermNodeV0
+  (worlds/->TermNodeV0 object-id (worlds/->RefTermV0 root-id)))
+
+(def term-graph-a :- worlds/TermGraphV0
+  (worlds/->TermGraphV0 root-id
+    [root-node subject-node predicate-node object-node]))
+
+(def term-graph-b :- worlds/TermGraphV0
+  (worlds/->TermGraphV0 root-id
+    [object-node predicate-node subject-node root-node]))
+
+(def source-module :- worlds/SourceModuleV0
+  (worlds/->SourceModuleV0 (corpus-id "module")
+    "corpus.module"
+    "src/corpus/module.bgl"
+    "sha256:source"
+    "sha256:interface"
+    root-id))
+
+(def source-location :- worlds/SourceLocationV0
+  (worlds/->SourceLocationV0 (corpus-id "module")
+    "src/corpus/module.bgl"
+    1
+    1))
+
+(def source-world-a :- worlds/SourceProgramWorldV0
+  (worlds/->SourceProgramWorldV0 term-graph-a
+    [source-module]
+    []
+    [source-location]))
+
+(def source-world-b :- worlds/SourceProgramWorldV0
+  (worlds/->SourceProgramWorldV0 term-graph-b
+    [source-module]
+    []
+    [source-location]))
+
+(def source-world-changed :- worlds/SourceProgramWorldV0
+  (worlds/->SourceProgramWorldV0 term-graph-a
+    [(with source-module [:source-digest "sha256:changed"])]
+    []
+    [source-location]))
+
+(def scratch-a :- worlds/SourceInputV0
+  (worlds/->SourceInputV0 "/tmp/native-worlds-a/source" source-world-a))
+
+(def scratch-b :- worlds/SourceInputV0
+  (worlds/->SourceInputV0 "/var/tmp/native-worlds-b/source" source-world-b))
+
+(def sealed-source-a :- worlds/SealedWorldV0
+  (worlds/seal (worlds/source-input-draft scratch-a)))
+
+(def sealed-source-b :- worlds/SealedWorldV0
+  (worlds/seal (worlds/source-input-draft scratch-b)))
+
+(def sealed-source-changed :- worlds/SealedWorldV0
+  (worlds/seal (worlds/source-draft source-world-changed)))
+
+(def typed-world :- worlds/TypedEffectWorldV0
+  (worlds/->TypedEffectWorldV0 term-graph-a
+    (worlds/sealed-world-digest sealed-source-a)
+    []
+    []
+    []
+    []
+    []
+    []))
+
+(def typed-draft :- worlds/WorldDraftV0
+  (worlds/open-for-derivation sealed-source-a
+    "resolve-and-type"
+    "v0"
+    (worlds/->TypedPayloadV0 typed-world)))
+
+(def sealed-typed :- worlds/SealedWorldV0
+  (worlds/seal typed-draft))
+
+(def receipt-configuration :- (Vec worlds/ConfigurationEntryV0)
+  [(worlds/->ConfigurationEntryV0 "profile" "3")
+   (worlds/->ConfigurationEntryV0 "target" "native-core")])
+
+(def discharged :- worlds/DischargedObligationV0
+  (worlds/->DischargedObligationV0 "typed-world-closed"
+    "v0"
+    (worlds/sealed-world-digest sealed-typed)
+    true
+    "closed reachable terms"))
+
+(def valid-receipt :- worlds/PassReceiptV0
+  (worlds/->PassReceiptV0 (worlds/sealed-world-digest sealed-source-a)
+    "beagle-commit-for-corpus"
+    "resolve-and-type"
+    "v0"
+    receipt-configuration
+    (worlds/configuration-digest receipt-configuration)
+    []
+    [discharged]
+    (worlds/sealed-world-digest sealed-typed)
+    "none"
+    "none"
+    []))
+
+(def mismatched-receipt :- worlds/PassReceiptV0
+  (with valid-receipt [:output-digest "canonical-world-content-v0:mismatch"]))
+
+(def corpus-result :- WorldsCorpusResult
+  (->WorldsCorpusResult
+    (= (worlds/sealed-world-digest sealed-source-a)
+      (worlds/sealed-world-digest sealed-source-b))
+    (= (worlds/encode-source-world source-world-a)
+      (worlds/encode-source-world source-world-b))
+    (not= (worlds/sealed-world-digest sealed-source-a)
+      (worlds/sealed-world-digest sealed-source-changed))
+    (worlds/promotion-accepted? (worlds/promote typed-draft sealed-typed valid-receipt))
+    (not (worlds/promotion-accepted?
+           (worlds/promote typed-draft sealed-typed mismatched-receipt)))))
+
+(def corpus-passes? :- Bool
+  (and (worldscorpusresult-scratch-path-independent corpus-result)
+    (worldscorpusresult-order-independent corpus-result)
+    (worldscorpusresult-content-sensitive corpus-result)
+    (worldscorpusresult-promotion-accepted corpus-result)
+    (worldscorpusresult-mismatched-receipt-rejected corpus-result)))
+
+(def determinism-digest :- String
+  (worlds/sealed-world-digest sealed-source-a))

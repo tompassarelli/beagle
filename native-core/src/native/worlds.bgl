@@ -1,7 +1,22 @@
 ;; @upstream:text-arm — operator-authorized for Native Stage 2; re-ingest this
 ;; module into the graph after landing. Authority: North thread 019fbd6c,
 ;; accepted design lane-msch3uwf section 2.
-(ns native.worlds (:require [native.core :as core]))
+(ns native.worlds
+  (:require
+   [native.core :as core
+    :refer [BoolKind I64Kind F64Kind TextKind RefKind
+            BoolAtom I64Atom F64Atom TextAtom RefAtom
+            AtomType RecordType UnionType VectorType ReferenceType
+            PureEffect AllocateEffect ReadEffect WriteEffect CapabilityEffect
+            StackRegion ArenaRegion ExternalRegion
+            ReadCapability WriteCapability AllocateCapability HostCapability
+            StoreBool StoreI64 StoreF64 StoreText StoreRef
+            AtomInstruction CopyInstruction AddI64Instruction AddF64Instruction
+            StoreInstruction CallInstruction
+            ReturnTerminator JumpTerminator BranchTerminator
+            UniqueIdsObligation AllowedSetsObligation ReferenceClosureObligation
+            SingleTerminatorObligation SsaClosureObligation
+            Fri2Observation]]))
 
 (define-mode strict)
 
@@ -25,6 +40,9 @@
 (defrecord SourceModuleV0 [id :- core/NativeId name :- String relative-path :- String source-digest :- String interface-digest :- String root-term :- core/NativeId])
 
 (defrecord SourceProgramWorldV0 [terms :- TermGraphV0 modules :- (Vec SourceModuleV0) imports :- (Vec core/NativeId) locations :- (Vec SourceLocationV0)])
+
+;; Scratch roots never enter sealed source identity; locations are logical paths.
+(defrecord SourceInputV0 [scratch-root :- String program :- SourceProgramWorldV0])
 
 (defrecord TypedEffectWorldV0 [terms :- TermGraphV0 source-digest :- String type-roots :- (Vec core/NativeId) function-roots :- (Vec core/NativeId) effect-roots :- (Vec core/NativeId) region-roots :- (Vec core/NativeId) capability-token-roots :- (Vec core/NativeId) refinement-roots :- (Vec core/NativeId)])
 
@@ -101,5 +119,411 @@
 (defn source-draft [world :- SourceProgramWorldV0] :- WorldDraftV0
   (->WorldDraftV0 nil "source-seal" "v0" (->SourcePayloadV0 world)))
 
+(defn source-input-draft [input :- SourceInputV0] :- WorldDraftV0
+  (source-draft (sourceinputv0-program input)))
+
 (defn open-for-derivation [parent :- SealedWorldV0 pass-id :- String pass-version :- String payload :- WorldPayloadV0] :- WorldDraftV0
   (->WorldDraftV0 (sealed-world-digest parent) pass-id pass-version payload))
+
+(defn canonical-vector [tag :- String items :- (Vec String)] :- String
+  (canonical-record tag items))
+
+(defn encode-int [value :- Int] :- String
+  (canonical-record "int" [(str value)]))
+
+(defn encode-string [value :- String] :- String
+  (canonical-record "string" [value]))
+
+(defn encode-optional-id [value :- (U core/NativeId Nil)] :- String
+  (if (nil? value)
+    (canonical-record "none" [])
+    (canonical-record "some" [(encode-id value)])))
+
+(defn encode-ids [tag :- String ids :- (Vec core/NativeId)] :- String
+  (canonical-set tag (mapv (fn [id :- core/NativeId] :- String (encode-id id)) ids)))
+
+(defn encode-term [term :- TermV0] :- String
+  (match term
+    [(NilTermV0 token) (canonical-record "term-nil-v0" [(encode-bool token)])]
+    [(BoolTermV0 value) (canonical-record "term-bool-v0" [(encode-bool value)])]
+    [(I64TermV0 value) (canonical-record "term-i64-v0" [(encode-int value)])]
+    [(F64TermV0 canonical-value) (canonical-record "term-f64-v0" [canonical-value])]
+    [(TextTermV0 value) (canonical-record "term-text-v0" [value])]
+    [(RefTermV0 target) (canonical-record "term-ref-v0" [(encode-id target)])]
+    [(TripleTermV0 subject predicate object)
+     (canonical-record "term-triple-v0"
+       [(encode-id subject) (encode-id predicate) (encode-id object)])]))
+
+(defn encode-term-node [node :- TermNodeV0] :- String
+  (canonical-record "term-node-v0"
+    [(encode-id (termnodev0-identity node)) (encode-term (termnodev0-term node))]))
+
+(defn encode-term-graph [graph :- TermGraphV0] :- String
+  (canonical-record "term-graph-v0"
+    [(encode-id (termgraphv0-root graph))
+     (canonical-set "nodes"
+       (mapv (fn [node :- TermNodeV0] :- String (encode-term-node node))
+         (termgraphv0-nodes graph)))]))
+
+(defn encode-source-location [location :- SourceLocationV0] :- String
+  (canonical-record "source-location-v0"
+    [(encode-id (sourcelocationv0-module-id location))
+     (encode-string (sourcelocationv0-relative-path location))
+     (encode-int (sourcelocationv0-line location))
+     (encode-int (sourcelocationv0-column location))]))
+
+(defn encode-source-module [module :- SourceModuleV0] :- String
+  (canonical-record "source-module-v0"
+    [(encode-id (sourcemodulev0-id module))
+     (encode-string (sourcemodulev0-name module))
+     (encode-string (sourcemodulev0-relative-path module))
+     (encode-string (sourcemodulev0-source-digest module))
+     (encode-string (sourcemodulev0-interface-digest module))
+     (encode-id (sourcemodulev0-root-term module))]))
+
+(defn encode-source-world [world :- SourceProgramWorldV0] :- String
+  (canonical-record "source-program-world-v0"
+    [(encode-term-graph (sourceprogramworldv0-terms world))
+     (canonical-set "modules"
+       (mapv (fn [module :- SourceModuleV0] :- String (encode-source-module module))
+         (sourceprogramworldv0-modules world)))
+     (encode-ids "imports" (sourceprogramworldv0-imports world))
+     (canonical-set "locations"
+       (mapv (fn [location :- SourceLocationV0] :- String (encode-source-location location))
+         (sourceprogramworldv0-locations world)))]))
+
+(defn encode-typed-world [world :- TypedEffectWorldV0] :- String
+  (canonical-record "typed-effect-world-v0"
+    [(encode-term-graph (typedeffectworldv0-terms world))
+     (encode-string (typedeffectworldv0-source-digest world))
+     (encode-ids "type-roots" (typedeffectworldv0-type-roots world))
+     (encode-ids "function-roots" (typedeffectworldv0-function-roots world))
+     (encode-ids "effect-roots" (typedeffectworldv0-effect-roots world))
+     (encode-ids "region-roots" (typedeffectworldv0-region-roots world))
+     (encode-ids "capability-token-roots" (typedeffectworldv0-capability-token-roots world))
+     (encode-ids "refinement-roots" (typedeffectworldv0-refinement-roots world))]))
+
+(defn encode-atom-kind [kind :- core/AtomKind] :- String
+  (match kind
+    [(BoolKind value) (canonical-record "bool-kind" [(encode-bool (core/boolkind-token value))])]
+    [(I64Kind value) (canonical-record "i64-kind" [(encode-bool (core/i64kind-token value))])]
+    [(F64Kind value) (canonical-record "f64-kind" [(encode-bool (core/f64kind-token value))])]
+    [(TextKind value) (canonical-record "text-kind" [(encode-bool (core/textkind-token value))])]
+    [(RefKind value) (canonical-record "ref-kind" [(encode-id (core/refkind-target value))])]))
+
+(defn encode-native-atom [atom :- core/NativeAtom] :- String
+  (match atom
+    [(BoolAtom value) (canonical-record "bool-atom" [(encode-bool (core/boolatom-value value))])]
+    [(I64Atom value) (canonical-record "i64-atom" [(encode-int (core/i64atom-value value))])]
+    [(F64Atom value) (canonical-record "f64-atom" [(encode-string (str (core/f64atom-value value)))])]
+    [(TextAtom value) (canonical-record "text-atom" [(encode-string (core/textatom-value value))])]
+    [(RefAtom value) (canonical-record "ref-atom" [(encode-id (core/refatom-target value))])]))
+
+(defn encode-type-field [field :- core/TypeField] :- String
+  (canonical-record "type-field"
+    [(encode-id (core/typefield-id field))
+     (encode-string (core/typefield-name field))
+     (encode-id (core/typefield-type-id field))]))
+
+(defn encode-type-variant [variant :- core/TypeVariant] :- String
+  (canonical-record "type-variant"
+    [(encode-id (core/typevariant-id variant))
+     (encode-string (core/typevariant-name variant))
+     (encode-optional-id (core/typevariant-payload-type variant))]))
+
+(defn encode-type-shape [shape :- core/TypeShape] :- String
+  (match shape
+    [(AtomType value) (canonical-record "atom-type" [(encode-atom-kind (core/atomtype-kind value))])]
+    [(RecordType value)
+     (canonical-record "record-type"
+       [(canonical-vector "fields"
+          (mapv (fn [field :- core/TypeField] :- String (encode-type-field field)) (core/recordtype-fields value)))])]
+    [(UnionType value)
+     (canonical-record "union-type"
+       [(canonical-vector "variants"
+          (mapv (fn [variant :- core/TypeVariant] :- String (encode-type-variant variant)) (core/uniontype-variants value)))])]
+    [(VectorType value) (canonical-record "vector-type" [(encode-id (core/vectortype-element-type value))])]
+    [(ReferenceType value) (canonical-record "reference-type" [(encode-id (core/referencetype-target-type value))])]))
+
+(defn encode-type-def [type-def :- core/TypeDef] :- String
+  (canonical-record "type-def"
+    [(encode-id (core/typedef-id type-def))
+     (encode-string (core/typedef-name type-def))
+     (encode-type-shape (core/typedef-shape type-def))]))
+
+(defn encode-effect-kind [kind :- core/EffectKind] :- String
+  (match kind
+    [(PureEffect value) (canonical-record "pure-effect" [(encode-bool (core/pureeffect-token value))])]
+    [(AllocateEffect value) (canonical-record "allocate-effect" [(encode-id (core/allocateeffect-region value))])]
+    [(ReadEffect value) (canonical-record "read-effect" [(encode-id (core/readeffect-region value))])]
+    [(WriteEffect value) (canonical-record "write-effect" [(encode-id (core/writeeffect-region value))])]
+    [(CapabilityEffect value) (canonical-record "capability-effect" [(encode-id (core/capabilityeffect-capability value))])]))
+
+(defn encode-effect-def [effect :- core/EffectDef] :- String
+  (canonical-record "effect-def"
+    [(encode-id (core/effectdef-id effect)) (encode-effect-kind (core/effectdef-kind effect))]))
+
+(defn encode-region-kind [kind :- core/RegionKind] :- String
+  (match kind
+    [(StackRegion value) (canonical-record "stack-region" [(encode-bool (core/stackregion-token value))])]
+    [(ArenaRegion value) (canonical-record "arena-region" [(encode-bool (core/arenaregion-token value))])]
+    [(ExternalRegion value) (canonical-record "external-region" [(encode-bool (core/externalregion-token value))])]))
+
+(defn encode-region-def [region :- core/RegionDef] :- String
+  (canonical-record "region-def"
+    [(encode-id (core/regiondef-id region))
+     (encode-region-kind (core/regiondef-kind region))
+     (encode-optional-id (core/regiondef-parent region))]))
+
+(defn encode-capability-kind [kind :- core/CapabilityKind] :- String
+  (match kind
+    [(ReadCapability value) (canonical-record "read-capability" [(encode-bool (core/readcapability-token value))])]
+    [(WriteCapability value) (canonical-record "write-capability" [(encode-bool (core/writecapability-token value))])]
+    [(AllocateCapability value) (canonical-record "allocate-capability" [(encode-bool (core/allocatecapability-token value))])]
+    [(HostCapability value) (canonical-record "host-capability" [(encode-bool (core/hostcapability-token value))])]))
+
+(defn encode-capability-def [capability :- core/CapabilityDef] :- String
+  (canonical-record "capability-def"
+    [(encode-id (core/capabilitydef-id capability))
+     (encode-capability-kind (core/capabilitydef-kind capability))
+     (encode-optional-id (core/capabilitydef-region capability))
+     (encode-bool (core/capabilitydef-affine capability))]))
+
+(defn encode-field-layout [field :- core/FieldLayout] :- String
+  (canonical-record "field-layout"
+    [(encode-id (core/fieldlayout-field-id field))
+     (encode-id (core/fieldlayout-type-id field))
+     (encode-int (core/fieldlayout-offset field))
+     (encode-int (core/fieldlayout-align field))]))
+
+(defn encode-layout-def [layout :- core/LayoutDef] :- String
+  (canonical-record "layout-def"
+    [(encode-id (core/layoutdef-id layout))
+     (encode-id (core/layoutdef-type-id layout))
+     (encode-int (core/layoutdef-size layout))
+     (encode-int (core/layoutdef-align layout))
+     (canonical-vector "fields"
+       (mapv (fn [field :- core/FieldLayout] :- String (encode-field-layout field))
+         (core/layoutdef-fields layout)))]))
+
+(defn encode-parameter [parameter :- core/Parameter] :- String
+  (canonical-record "parameter"
+    [(encode-id (core/parameter-id parameter)) (encode-id (core/parameter-type-id parameter))]))
+
+(defn encode-store-op [store :- core/StoreOp] :- String
+  (match store
+    [(StoreBool address value region capability)
+     (canonical-record "store-bool" [(encode-id address) (encode-id value) (encode-id region) (encode-id capability)])]
+    [(StoreI64 address value region capability)
+     (canonical-record "store-i64" [(encode-id address) (encode-id value) (encode-id region) (encode-id capability)])]
+    [(StoreF64 address value region capability)
+     (canonical-record "store-f64" [(encode-id address) (encode-id value) (encode-id region) (encode-id capability)])]
+    [(StoreText address value region capability)
+     (canonical-record "store-text" [(encode-id address) (encode-id value) (encode-id region) (encode-id capability)])]
+    [(StoreRef address value region capability)
+     (canonical-record "store-ref" [(encode-id address) (encode-id value) (encode-id region) (encode-id capability)])]))
+
+(defn encode-instruction [instruction :- core/Instruction] :- String
+  (match instruction
+    [(AtomInstruction value)
+     (canonical-record "atom-instruction"
+       [(encode-id (core/atominstruction-result-id value))
+        (encode-native-atom (core/atominstruction-atom value))])]
+    [(CopyInstruction result-id source-id)
+     (canonical-record "copy-instruction" [(encode-id result-id) (encode-id source-id)])]
+    [(AddI64Instruction result-id left-id right-id)
+     (canonical-record "add-i64-instruction" [(encode-id result-id) (encode-id left-id) (encode-id right-id)])]
+    [(AddF64Instruction result-id left-id right-id)
+     (canonical-record "add-f64-instruction" [(encode-id result-id) (encode-id left-id) (encode-id right-id)])]
+    [(StoreInstruction result-id store)
+     (canonical-record "store-instruction" [(encode-id result-id) (encode-store-op store)])]
+    [(CallInstruction result-id function-id arguments)
+     (canonical-record "call-instruction"
+       [(encode-id result-id) (encode-id function-id) (encode-ids "arguments" arguments)])]))
+
+(defn encode-terminator [terminator :- core/Terminator] :- String
+  (match terminator
+    [(ReturnTerminator value) (canonical-record "return-terminator" [(encode-optional-id (core/returnterminator-value value))])]
+    [(JumpTerminator block-id arguments)
+     (canonical-record "jump-terminator" [(encode-id block-id) (encode-ids "arguments" arguments)])]
+    [(BranchTerminator condition true-block false-block)
+     (canonical-record "branch-terminator"
+       [(encode-id condition) (encode-id true-block) (encode-id false-block)])]))
+
+(defn encode-basic-block [block :- core/BasicBlock] :- String
+  (canonical-record "basic-block"
+    [(encode-id (core/basicblock-id block))
+     (canonical-vector "parameters"
+       (mapv (fn [parameter :- core/Parameter] :- String (encode-parameter parameter))
+         (core/basicblock-parameters block)))
+     (canonical-vector "instructions"
+       (mapv (fn [instruction :- core/Instruction] :- String (encode-instruction instruction))
+         (core/basicblock-instructions block)))
+     (canonical-vector "terminators"
+       (mapv (fn [terminator :- core/Terminator] :- String (encode-terminator terminator))
+         (core/basicblock-terminators block)))]))
+
+(defn encode-function-def [function :- core/FunctionDef] :- String
+  (canonical-record "function-def"
+    [(encode-id (core/functiondef-id function))
+     (encode-string (core/functiondef-name function))
+     (canonical-vector "parameters"
+       (mapv (fn [parameter :- core/Parameter] :- String (encode-parameter parameter))
+         (core/functiondef-parameters function)))
+     (canonical-set "blocks"
+       (mapv (fn [block :- core/BasicBlock] :- String (encode-basic-block block))
+         (core/functiondef-blocks function)))
+     (encode-id (core/functiondef-entry-block function))
+     (encode-optional-id (core/functiondef-return-type function))
+     (encode-ids "effects" (core/functiondef-effects function))
+     (encode-ids "regions" (core/functiondef-regions function))
+     (encode-ids "capabilities" (core/functiondef-capabilities function))]))
+
+(defn encode-obligation-code [code :- core/ObligationCode] :- String
+  (match code
+    [(UniqueIdsObligation value) (canonical-record "unique-ids-obligation" [(encode-bool (core/uniqueidsobligation-token value))])]
+    [(AllowedSetsObligation value) (canonical-record "allowed-sets-obligation" [(encode-bool (core/allowedsetsobligation-token value))])]
+    [(ReferenceClosureObligation value) (canonical-record "reference-closure-obligation" [(encode-bool (core/referenceclosureobligation-token value))])]
+    [(SingleTerminatorObligation value) (canonical-record "single-terminator-obligation" [(encode-bool (core/singleterminatorobligation-token value))])]
+    [(SsaClosureObligation value) (canonical-record "ssa-closure-obligation" [(encode-bool (core/ssaclosureobligation-token value))])]))
+
+(defn encode-obligation-result [result :- core/ObligationResult] :- String
+  (canonical-record "obligation-result"
+    [(encode-obligation-code (core/obligationresult-code result))
+     (encode-bool (core/obligationresult-passed result))
+     (encode-string (core/obligationresult-detail result))]))
+
+(defn encode-observation [observation :- core/ExternalObservation] :- String
+  (match observation
+    [(Fri2Observation artifact-id digest byte-count)
+     (canonical-record "fri2-observation"
+       [(encode-id artifact-id) (encode-string digest) (encode-int byte-count)])]))
+
+(defn encode-core-native-world [world :- core/NativeWorld] :- String
+  (canonical-record "native-core-world-v0"
+    [(encode-id (core/nativeworld-id world))
+     (encode-optional-id (core/nativeworld-parent world))
+     (encode-string (core/nativeworld-compiler-pass world))
+     (canonical-set "types"
+       (mapv (fn [type-def :- core/TypeDef] :- String (encode-type-def type-def))
+         (core/nativeworld-types world)))
+     (canonical-set "effects"
+       (mapv (fn [effect :- core/EffectDef] :- String (encode-effect-def effect))
+         (core/nativeworld-effects world)))
+     (canonical-set "regions"
+       (mapv (fn [region :- core/RegionDef] :- String (encode-region-def region))
+         (core/nativeworld-regions world)))
+     (canonical-set "capabilities"
+       (mapv (fn [capability :- core/CapabilityDef] :- String (encode-capability-def capability))
+         (core/nativeworld-capabilities world)))
+     (canonical-set "layouts"
+       (mapv (fn [layout :- core/LayoutDef] :- String (encode-layout-def layout))
+         (core/nativeworld-layouts world)))
+     (canonical-set "functions"
+       (mapv (fn [function :- core/FunctionDef] :- String (encode-function-def function))
+         (core/nativeworld-functions world)))
+     (encode-ids "allowed-effects" (core/nativeworld-allowed-effects world))
+     (encode-ids "allowed-regions" (core/nativeworld-allowed-regions world))
+     (encode-ids "allowed-capabilities" (core/nativeworld-allowed-capabilities world))
+     (canonical-set "observations"
+       (mapv (fn [observation :- core/ExternalObservation] :- String (encode-observation observation))
+         (core/nativeworld-observations world)))]))
+
+(defn encode-native-world [world :- NativeWorldV0] :- String
+  (canonical-record "native-world-v0"
+    [(encode-term-graph (nativeworldv0-terms world))
+     (encode-string (nativeworldv0-typed-digest world))
+     (encode-core-native-world (nativeworldv0-program world))
+     (canonical-set "obligations"
+       (mapv (fn [result :- core/ObligationResult] :- String (encode-obligation-result result))
+         (nativeworldv0-obligations world)))]))
+
+(defn encode-artifact-blob [blob :- ArtifactBlobV0] :- String
+  (canonical-record "artifact-blob-v0"
+    [(encode-id (artifactblobv0-id blob))
+     (encode-string (artifactblobv0-name blob))
+     (encode-string (artifactblobv0-media-type blob))
+     (encode-string (artifactblobv0-content-digest blob))
+     (encode-int (artifactblobv0-byte-count blob))]))
+
+(defn encode-artifact-world [world :- ArtifactWorldV0] :- String
+  (canonical-record "artifact-world-v0"
+    [(encode-term-graph (artifactworldv0-terms world))
+     (encode-string (artifactworldv0-native-digest world))
+     (encode-string (artifactworldv0-backend-id world))
+     (encode-string (artifactworldv0-backend-version world))
+     (encode-string (artifactworldv0-configuration-digest world))
+     (canonical-set "blobs"
+       (mapv (fn [blob :- ArtifactBlobV0] :- String (encode-artifact-blob blob))
+         (artifactworldv0-blobs world)))
+     (encode-string (artifactworldv0-shim-abi-digest world))
+     (canonical-set "diagnostics"
+       (mapv (fn [diagnostic :- String] :- String (encode-string diagnostic))
+         (artifactworldv0-diagnostics world)))]))
+
+(defn encode-world-payload [payload :- WorldPayloadV0] :- String
+  (match payload
+    [(SourcePayloadV0 world) (encode-source-world world)]
+    [(TypedPayloadV0 world) (encode-typed-world world)]
+    [(NativePayloadV0 world) (encode-native-world world)]
+    [(ArtifactPayloadV0 world) (encode-artifact-world world)]))
+
+(defn seal [draft :- WorldDraftV0] :- SealedWorldV0
+  (let [payload :- WorldPayloadV0 (worlddraftv0-payload draft)
+        encoding :- String (encode-world-payload payload)
+        digest :- String (content-digest encoding)]
+    (match payload
+      [(SourcePayloadV0 world)
+       (->SealedSourceV0 (->SealedSourceWorldV0 world encoding digest))]
+      [(TypedPayloadV0 world)
+       (->SealedTypedV0 (->SealedTypedWorldV0 world encoding digest))]
+      [(NativePayloadV0 world)
+       (->SealedNativeV0 (->SealedNativeWorldV0 world encoding digest))]
+      [(ArtifactPayloadV0 world)
+       (->SealedArtifactV0 (->SealedArtifactWorldV0 world encoding digest))])))
+
+(defn encode-configuration-entry [entry :- ConfigurationEntryV0] :- String
+  (canonical-record "configuration-entry-v0"
+    [(encode-string (configurationentryv0-key entry))
+     (encode-string (configurationentryv0-value entry))]))
+
+(defn configuration-digest [configuration :- (Vec ConfigurationEntryV0)] :- String
+  (content-digest
+    (canonical-set "configuration-v0"
+      (mapv (fn [entry :- ConfigurationEntryV0] :- String (encode-configuration-entry entry))
+        configuration))))
+
+(defn all-obligations-passed? [obligations :- (Vec DischargedObligationV0)] :- Bool
+  (every? (fn [obligation :- DischargedObligationV0] :- Bool
+            (dischargedobligationv0-passed obligation))
+    obligations))
+
+(defn promote [draft :- WorldDraftV0 sealed :- SealedWorldV0 receipt :- PassReceiptV0] :- PromotionResultV0
+  (let [parent :- (U String Nil) (worlddraftv0-parent-digest draft)
+        recomputed :- SealedWorldV0 (seal draft)
+        output-digest :- String (sealed-world-digest sealed)]
+    (cond
+      (nil? parent)
+      (->PromotionRejectedV0 "source worlds seal directly and have no derivation receipt")
+      (not= output-digest (sealed-world-digest recomputed))
+      (->PromotionRejectedV0 "sealed output does not match the derivation candidate")
+      (not= parent (passreceiptv0-input-digest receipt))
+      (->PromotionRejectedV0 "receipt input digest does not match the sealed parent")
+      (not= output-digest (passreceiptv0-output-digest receipt))
+      (->PromotionRejectedV0 "receipt output digest does not match the sealed candidate")
+      (not= (worlddraftv0-pass-id draft) (passreceiptv0-pass-id receipt))
+      (->PromotionRejectedV0 "receipt pass id does not match the derivation")
+      (not= (worlddraftv0-pass-version draft) (passreceiptv0-pass-version receipt))
+      (->PromotionRejectedV0 "receipt pass version does not match the derivation")
+      (not= (configuration-digest (passreceiptv0-configuration receipt))
+        (passreceiptv0-configuration-digest receipt))
+      (->PromotionRejectedV0 "receipt configuration digest is not canonical")
+      (not (all-obligations-passed? (passreceiptv0-discharged-obligations receipt)))
+      (->PromotionRejectedV0 "receipt contains an undischarged obligation")
+      :else
+      (->PromotionAcceptedV0 (->PromotedWorldV0 sealed receipt)))))
+
+(defn promotion-accepted? [result :- PromotionResultV0] :- Bool
+  (match result
+    [(PromotionAcceptedV0 promoted) true]
+    [(PromotionRejectedV0 reason) false]))
