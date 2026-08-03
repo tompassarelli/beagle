@@ -1,0 +1,13 @@
+#lang beagle/clj
+
+;; `:refer` of a fielded union's members used to CRASH the importer
+;; (symbol->string on the raw `(Circle [radius: Int])` member datum).
+(require prov :refer [Shape Circle Rect ->Circle circle-radius])
+
+(defn build [] -> Int
+  (circle-radius (->Circle 3)))
+
+(defn area [s: Shape] -> Int
+  (match s
+    [(Circle r) r]
+    [(Rect w h) w]))

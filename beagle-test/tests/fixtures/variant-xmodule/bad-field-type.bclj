@@ -1,0 +1,11 @@
+#lang beagle/clj
+
+;; A variant pattern binds the FIELD, so `h` is String and returning it as Int
+;; must fail. Before the fix the binding took the unknown-record fallback and
+;; the whole arm typed as the variant instance.
+(require prov :as p)
+
+(defn wrong [s: p/Shape] -> Int
+  (match s
+    [(Circle r) r]
+    [(Rect w h) h]))

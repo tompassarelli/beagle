@@ -885,6 +885,63 @@
     (when imp-dyn-vars
       (set-add! imp-dyn-vars (qualify-name prefix name))
       (when (referred? name) (set-add! imp-dyn-vars name))))
+  ;; Cross-module twin of check.rkt's register-union-member-fields!: a defunion
+  ;; member and a defrecord expose the same ctor/accessor/field-map/field-order
+  ;; surface, and narrow-env-for-match binds a variant pattern to the FIELD only
+  ;; when the field map is present.
+  (define (reg-fielded-type! name fields type-vars)
+    (define rec-type (type-prim name))
+    (define name-str (symbol->string name))
+    (define name-lower (string-downcase name-str))
+    (define (generalize t) (if (null? type-vars) t (type-poly type-vars t #f)))
+    (reg! (string->symbol (string-append "->" name-str))
+          (generalize (type-fn (map param-type fields) #f rec-type)))
+    (define field-map (make-hash))
+    (for ([f (in-list fields)])
+      (define fname (symbol->string (param-name f)))
+      (reg! (string->symbol (string-append name-lower "-" fname))
+            (generalize (type-fn (list rec-type) #f (param-type f))))
+      (hash-set! field-map
+                 (string->symbol (string-append ":" fname))
+                 (param-type f)))
+    (when imp-rec-fields
+      (hash-set! imp-rec-fields name field-map))
+    (when imp-rec-field-order
+      ;; Field-name STRINGS: emit-clj/emit-js/emit-zig all read this table that
+      ;; way (emit-zig rebuilds the `:name` key from the string).
+      (hash-set! imp-rec-field-order name
+                 (map (lambda (f) (symbol->string (param-name f))) fields))))
+  ;; A use site names an imported union by its QUALIFIED spelling while the
+  ;; provider declares it bare; both keys must reach UNION-MEMBERS /
+  ;; PARAMETRIC-UNIONS or exhaustiveness and match narrowing silently miss.
+  (define (reg-union-table! table name value)
+    (when table
+      (hash-set! table name value)
+      (hash-set! table (qualify-name prefix name) value)
+      (hash-set! table (qualify-name mod-ns name) value)))
+  ;; Returns member NAMES (never the raw `(Name [fields])` datum — exhaustiveness
+  ;; compares them against pattern heads) plus their parsed field map.
+  (define (reg-union-members! member-defs type-vars)
+    (define mf-hash (make-hasheq))
+    (define mnames
+      (for/list ([md (in-list member-defs)])
+        (define m (->datum md))
+        (define mname (if (pair? m) (car m) m))
+        (unless (symbol? mname)
+          (error 'beagle "defunion member must be Symbol or (Name [fields...]): ~v" m))
+        (define fields-datum (and (pair? m) (pair? (cdr m)) (cadr m)))
+        (define fields
+          (if (and (pair? fields-datum)
+                   (eq? (car fields-datum) BRACKET-TAG)
+                   (pair? (cdr fields-datum)))
+              (parameterize ([current-type-vars
+                              (append type-vars (current-type-vars))])
+                (parse-record-fields fields-datum))
+              '()))
+        (hash-set! mf-hash mname fields)
+        (reg-fielded-type! mname fields type-vars)
+        mname))
+    (values mnames mf-hash))
   (parameterize ([current-type-aliases import-aliases])
     (for ([d (in-list datums)])
       ;; One unparseable form must not erase the rest of the module's
@@ -985,17 +1042,16 @@
          (hash-set! imp-scalar-fns accessor #t)
          (hash-set! imp-scalar-fns (qualify-name prefix ctor) #t)
          (hash-set! imp-scalar-fns (qualify-name prefix accessor) #t))]
-      [(list 'defunion (? symbol? name) members ...)
-       (reg! name (type-union (map (lambda (m) (type-prim m)) members)))
-       (when imp-union-members
-         (hash-set! imp-union-members name members))]
-      [(list 'defunion ':throwable (? symbol? name) members ...)
-       ;; Throwable union: register the parent name as a type. Variants
-       ;; are registered when the form is parsed in the main pass (the
-       ;; parse-deferror code path).
+      ;; `:throwable` reads as an ordinary symbol, so this arm MUST precede the
+      ;; plain-name arm or it never fires.  Variants register on the throw/catch
+      ;; path in the consumer's own pass; only the parent name crosses here.
+      [(list 'defunion ':throwable (? symbol? name) _members ...)
        (reg! name (type-prim name))]
+      [(list 'defunion (? symbol? name) member-defs ...)
+       (define-values (mnames _mf) (reg-union-members! member-defs '()))
+       (reg! name (type-union (map (lambda (m) (type-prim m)) mnames)))
+       (reg-union-table! imp-union-members name mnames)]
       [(list 'defunion (list (? symbol? name) type-vars ...) member-defs ...)
-       (define mnames (map car member-defs))
        ;; The bootstrap candidate-world pass has provider datums but not yet a
        ;; canonical interface.  Admit the exact qualified spellings here so a
        ;; consumer annotation such as (api/Result String) can reach the
@@ -1008,43 +1064,13 @@
           (qualify-name prefix name))
          (qualify-name mod-ns name)))
        (reg! name (type-prim name))
-       (when imp-union-members
-         (hash-set! imp-union-members name mnames))
-       (define member-fields-hash (make-hasheq))
-       (for ([md (in-list member-defs)])
-         (define mname (car md))
-         (define fields-raw (cadr md))
-         (define field-items
-           (cond [(and (pair? fields-raw) (eq? (car fields-raw) BRACKET-TAG)) (cdr fields-raw)]
-                 [(list? fields-raw) fields-raw]
-                 [else '()]))
-         (define fields
-           (parameterize ([current-type-vars (append type-vars (current-type-vars))])
-             (for/list ([item (in-list field-items)])
-               (cond
-                 [(and (list? item) (= (length item) 3) (symbol? (car item)) (annotation-marker? (cadr item)))
-                  (param (car item) (parse-type (caddr item)))]
-                 [else (param (if (symbol? item) item (car item)) (type-prim 'Any))]))))
-         (hash-set! member-fields-hash mname fields)
-         (define m-lower (string-downcase (symbol->string mname)))
-         (define m-str (symbol->string mname))
-         (define m-type (type-prim mname))
-         (define ctor-fn (type-fn (map param-type fields) #f m-type))
-         (reg! (string->symbol (string-append "->" m-str))
-               (if (null? type-vars) ctor-fn (type-poly type-vars ctor-fn #f)))
-         (for ([f (in-list fields)])
-           (define acc-fn (type-fn (list m-type) #f (param-type f)))
-           (reg! (string->symbol (string-append m-lower "-" (symbol->string (param-name f))))
-                 (if (null? type-vars) acc-fn (type-poly type-vars acc-fn #f)))
-           (when imp-rec-fields
-             (define kw (string->symbol (string-append ":" (symbol->string (param-name f)))))
-             (hash-update! imp-rec-fields mname (lambda (h) (begin (hash-set! h kw (param-type f)) h)) (make-hasheq))
-             (hash-update! imp-rec-field-order mname (lambda (lst) (append lst (list kw))) '()))))
-       (when imp-param-unions
-         (hash-set! imp-param-unions name
-                    (hasheq 'params type-vars
-                            'members mnames
-                            'member-fields member-fields-hash)))]
+       (define-values (mnames member-fields-hash)
+         (reg-union-members! member-defs type-vars))
+       (reg-union-table! imp-union-members name mnames)
+       (reg-union-table! imp-param-unions name
+                         (hasheq 'params type-vars
+                                 'members mnames
+                                 'member-fields member-fields-hash))]
       ;; Postfix `:` annotations on def/defonce/defn: register the typed shape
       ;; so imported modules surface the annotated type to call sites in the
       ;; importing module.

@@ -1,0 +1,11 @@
+#lang beagle/clj
+
+;; (p/Result Int String): `v` is Int, `e` is String. Both must keep their
+;; substituted types across the boundary — the importer used to mis-parse the
+;; flat `[value: T]` field list into three Any params.
+(require prov :as p)
+
+(defn get-it [r: (p/Result Int String)] -> String
+  (match r
+    [(Ok v) v]
+    [(Err e) e]))

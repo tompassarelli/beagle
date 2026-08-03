@@ -1886,10 +1886,18 @@
         (unless (hash-has-key? env (car kv))
           (hash-set! env (car kv) (cdr kv))))))
   ;; record types imported from other modules
+  (define imported-field-order (program-imported-record-field-order prog))
   (for ([(rec-name field-map) (in-hash (program-imported-record-fields prog))])
     (hash-set! RECORD-FIELDS rec-name field-map)
     (unless (hash-has-key? RECORD-FIELD-ORDER rec-name)
-      (hash-set! RECORD-FIELD-ORDER rec-name (hash-keys field-map))))
+      ;; hash-keys is arbitrary order; a positional variant/record pattern binds
+      ;; by DECLARED order, so prefer the importer's ordered field-name strings.
+      (define declared (hash-ref imported-field-order rec-name #f))
+      (hash-set! RECORD-FIELD-ORDER rec-name
+                 (if declared
+                     (for/list ([f (in-list declared)])
+                       (string->symbol (string-append ":" f)))
+                     (hash-keys field-map)))))
   ;; union types imported from other modules (for exhaustive match checking)
   (for ([(union-name members) (in-hash (program-imported-union-members prog))])
     (hash-set! UNION-MEMBERS union-name members))
