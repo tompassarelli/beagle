@@ -34,19 +34,6 @@ fi
     exit 1
   }
 
-for types_generated in worlds lower obligations c11; do
-  sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' \
-    "$types_scratch/out/native/$types_generated.clj"
-done
-types_core_records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' \
-  "$types_scratch/out/native/core.clj" | tr '\n' ' ')"
-for types_generated in worlds obligations c11; do
-  sed -i "3i(import '[native.core $types_core_records])" \
-    "$types_scratch/out/native/$types_generated.clj"
-done
-sed -i "4i(import '[native.core $types_core_records])" \
-  "$types_scratch/out/native/lower.clj"
-
 bb -cp "$types_scratch/out" -e \
   "(require 'native.slice-types-pipeline) (native.slice-types-pipeline/emit-slice! \"$types_scratch/facts.edn\" \"$types_source\" \"$types_output\")"
 

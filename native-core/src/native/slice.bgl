@@ -251,40 +251,6 @@
     (core/nativeworld-abis world)
     (core/nativeworld-observations world)))
 
-(defn type-emitted? [emitted: (Vec core/TypeDef) target: core/NativeId] -> Bool
-  (loop [index: Int 0]
-    (if (>= index (count emitted))
-      false
-      (if (core/native-id= (core/typedef-id (nth emitted index)) target)
-        true
-        (recur (+ index 1))))))
-
-(defn ready-type? [emitted: (Vec core/TypeDef) definition: core/TypeDef] -> Bool
-  (every?
-    (fn [reference: core/NativeId] -> Bool (type-emitted? emitted reference))
-    (type-field-refs definition)))
-
-;; c11/ordered-types sorts by identity alone, so a record typedef can name a
-;; scalar typedef the header has not reached yet; this reorders that sequence
-;; without changing its membership.
-(defn dependency-ordered [types: (Vec core/TypeDef)] -> (Vec core/TypeDef)
-  (loop [pending: (Vec core/TypeDef) (c11/ordered-types types)
-         emitted: (Vec core/TypeDef) []]
-    (if (= 0 (count pending))
-      emitted
-      (let [ready: (Vec core/TypeDef)
-            (filterv
-              (fn [definition: core/TypeDef] -> Bool (ready-type? emitted definition))
-              pending)]
-        (if (= 0 (count ready))
-          (vec (concat emitted pending))
-          (recur
-            (filterv
-              (fn [definition: core/TypeDef] -> Bool
-                (not (ready-type? emitted definition)))
-              pending)
-            (vec (concat emitted ready))))))))
-
 (defunion SliceMaterializationV0
   (SliceMaterializedV0 [artifact: c11/C11Artifact])
   (SliceRefusedV0 [detail: String]))
@@ -301,7 +267,7 @@
 
       :else
       (let [types: (Vec core/TypeDef)
-            (dependency-ordered (core/nativeworld-types world))
+            (c11/ordered-types (core/nativeworld-types world))
             layouts: (Vec core/LayoutDef)
             (c11/ordered-layouts (core/nativeworld-layouts world))
             functions: (Vec core/FunctionDef)

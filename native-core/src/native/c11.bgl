@@ -4,6 +4,20 @@
 
 (require native.core :as core)
 
+;; A `match` arm names a variant bare, so a variant defined in native.core has
+;; to be a resolvable class here or the module will not load; importing them is
+;; what makes the cross-module arms below legal without a post-emit rewrite.
+(import (native.core
+          BoolKind I64Kind F64Kind TextKind RefKind
+          ScalarShapeV0 RecordShapeV0 UnionShapeV0 VectorShapeV0 ReferenceShapeV0
+          AtomType RecordType UnionType VectorType ReferenceType OutcomeType
+          BoolAtom I64Atom F64Atom TextAtom RefAtom
+          CheckedAddI64V0 CheckedBoundsV0
+          AtomInstruction CopyInstruction AddF64Instruction CheckedInstruction
+          StoreInstruction AllocateInstruction CallInstruction
+          ReturnTerminator JumpTerminator BranchTerminator SwitchTerminator
+          TrapTerminator))
+
 (defrecord C11Artifact [header-name: String header-text: String source-name: String source-text: String])
 
 (defunion C11Materialization
@@ -16,6 +30,8 @@
       result
       (recur (+ index 1) (str result (nth lines index) "\n")))))
 
+;; Canonical ids are length-prefixed, so this is a deterministic order and
+;; never a semantic one: use it only where any stable order is correct.
 (defn id-before? [left: core/NativeId right: core/NativeId] -> Bool
   (< (compare (core/nativeid-value left) (core/nativeid-value right)) 0))
 
@@ -28,11 +44,58 @@
           (recur (+ index 1) true (conj (conj result item) current))
           (recur (+ index 1) inserted (conj result current)))))))
 
-(defn ordered-types [types: (Vec core/TypeDef)] -> (Vec core/TypeDef)
+(defn id-ordered-types [types: (Vec core/TypeDef)] -> (Vec core/TypeDef)
   (loop [index: Int 0 result: (Vec core/TypeDef) []]
     (if (>= index (count types))
       result
       (recur (+ index 1) (insert-type (nth types index) result)))))
+
+(defn type-field-refs [definition: core/TypeDef] -> (Vec core/NativeId)
+  (let [shape: core/TypeShape (core/typedef-shape definition)]
+    (match shape
+      [(AtomType value) []]
+      [(RecordType value)
+       (mapv
+         (fn [field: core/TypeField] -> core/NativeId (core/typefield-type-id field))
+         (core/recordtype-fields shape))]
+      [(UnionType value) []]
+      [(VectorType value) []]
+      [(ReferenceType value) []]
+      [(OutcomeType value) []])))
+
+(defn type-emitted? [emitted: (Vec core/TypeDef) target: core/NativeId] -> Bool
+  (loop [index: Int 0]
+    (if (>= index (count emitted))
+      false
+      (if (core/native-id= (core/typedef-id (nth emitted index)) target)
+        true
+        (recur (+ index 1))))))
+
+(defn ready-type? [emitted: (Vec core/TypeDef) definition: core/TypeDef] -> Bool
+  (every?
+    (fn [reference: core/NativeId] -> Bool (type-emitted? emitted reference))
+    (type-field-refs definition)))
+
+;; A record typedef spells its field types, so every reference must already be
+;; declared; the id order only seeds a deterministic start, and a cycle or an
+;; unreachable reference falls through in seed order rather than looping.
+(defn ordered-types [types: (Vec core/TypeDef)] -> (Vec core/TypeDef)
+  (loop [pending: (Vec core/TypeDef) (id-ordered-types types)
+         emitted: (Vec core/TypeDef) []]
+    (if (= 0 (count pending))
+      emitted
+      (let [ready: (Vec core/TypeDef)
+            (filterv
+              (fn [definition: core/TypeDef] -> Bool (ready-type? emitted definition))
+              pending)]
+        (if (= 0 (count ready))
+          (vec (concat emitted pending))
+          (recur
+            (filterv
+              (fn [definition: core/TypeDef] -> Bool
+                (not (ready-type? emitted definition)))
+              pending)
+            (vec (concat emitted ready))))))))
 
 (defn insert-layout [item: core/LayoutDef sorted: (Vec core/LayoutDef)] -> (Vec core/LayoutDef)
   (loop [index: Int 0 inserted: Bool false result: (Vec core/LayoutDef) []]

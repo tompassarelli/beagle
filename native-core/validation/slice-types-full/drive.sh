@@ -46,20 +46,6 @@ fi
   "$repo/native-core/src/native/slice.bgl" \
   --out "$scratch/out" >"$scratch/build.log" 2>&1 || { sed -n '1,200p' "$scratch/build.log" >&2; exit 1; }
 
-# A cross-module `match` on an imported union emits an unqualified variant name;
-# re-exporting native.core's records into each consumer namespace is the repo's
-# standing workaround until the emitter qualifies them.
-records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' "$scratch/out/native/core.clj" | tr '\n' ' ')"
-for m in worlds lower obligations c11 slice; do
-  sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' "$scratch/out/native/$m.clj"
-done
-for m in worlds lower obligations c11 slice; do
-  awk -v imp="(import '[native.core $records])" \
-    '!seen && /^$/ { print imp; seen = 1 } { print }' \
-    "$scratch/out/native/$m.clj" >"$scratch/out/native/$m.clj.tmp"
-  mv "$scratch/out/native/$m.clj.tmp" "$scratch/out/native/$m.clj"
-done
-
 # The lowering passes rebuild the fact index on every lookup, so a 1300-fact
 # module needs a compiling runtime, not the interpreter.
 clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
