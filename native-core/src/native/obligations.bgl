@@ -22,6 +22,9 @@
 
 (defrecord CheckedUseScanV0 [handled :- Bool legal :- Bool])
 
+(defrecord TokenStateV0
+  [live :- (Vec core/NativeId) seen :- (Vec core/NativeId) valid :- Bool])
+
 (defn obligation-id [name :- String] :- core/NativeId
   (core/canonical-id "native-obligations-v0" [name]))
 
@@ -690,6 +693,124 @@
           (recur (+ index 1) abis)
           (->LegalAbiDiagnosticV0 (get abi :id)))))))
 
+(defn remove-id [ids :- (Vec core/NativeId) target :- core/NativeId]
+  :- (Vec core/NativeId)
+  (filterv (fn [candidate :- core/NativeId] :- Bool
+             (not (core/native-id= candidate target))) ids))
+
+(defn token-state-consume [state :- TokenStateV0
+                           consumed :- (Vec core/NativeId)] :- TokenStateV0
+  (if (or (not (tokenstatev0-valid state))
+        (not (core/unique-ids? consumed))
+        (not (core/ids-in? consumed (tokenstatev0-live state))))
+    (->TokenStateV0 (tokenstatev0-live state) (tokenstatev0-seen state) false)
+    (loop [index :- Int 0 live :- (Vec core/NativeId) (tokenstatev0-live state)]
+      (if (>= index (count consumed))
+        (->TokenStateV0 live (tokenstatev0-seen state) true)
+        (recur (+ index 1) (remove-id live (nth consumed index)))))))
+
+(defn produced-token-ids [produced :- (Vec core/ResourceTokenV0)]
+  :- (Vec core/NativeId)
+  (mapv (fn [token :- core/ResourceTokenV0] :- core/NativeId
+          (get token :id)) produced))
+
+(defn token-state-produce [state :- TokenStateV0
+                           produced :- (Vec core/ResourceTokenV0)] :- TokenStateV0
+  (let [produced-ids :- (Vec core/NativeId) (produced-token-ids produced)]
+    (if (or (not (tokenstatev0-valid state))
+          (not (core/unique-ids? produced-ids))
+          (some? (some (fn [token-id :- core/NativeId] :- Bool
+                         (core/id-in? (tokenstatev0-seen state) token-id))
+                   produced-ids)))
+      (->TokenStateV0 (tokenstatev0-live state) (tokenstatev0-seen state) false)
+      (->TokenStateV0
+        (core/append-ids (tokenstatev0-live state) produced-ids)
+        (core/append-ids (tokenstatev0-seen state) produced-ids)
+        true))))
+
+(defn apply-token-flow [state :- TokenStateV0 flow :- core/TokenFlowV0]
+  :- TokenStateV0
+  (token-state-produce
+    (token-state-consume state (get flow :consumed []))
+    (get flow :produced [])))
+
+(defn instruction-token-state [state :- TokenStateV0
+                               instruction :- core/Instruction] :- TokenStateV0
+  (let [flow :- Any (get instruction :tokens nil)]
+    (if (nil? flow) state (apply-token-flow state flow))))
+
+(defn block-token-state [state :- TokenStateV0 block :- core/BasicBlock]
+  :- TokenStateV0
+  (loop [index :- Int 0 current :- TokenStateV0 state
+         instructions :- (Vec core/Instruction) (core/basicblock-instructions block)]
+    (if (or (>= index (count instructions)) (not (tokenstatev0-valid current)))
+      current
+      (recur (+ index 1)
+        (instruction-token-state current (nth instructions index))
+        instructions))))
+
+(defn token-paths-valid? [function :- core/FunctionDef
+                          block-id :- core/NativeId
+                          state :- TokenStateV0
+                          visited :- (Vec core/NativeId)] :- Bool
+  (if (core/id-in? visited block-id)
+    false
+    (let [block :- (U core/BasicBlock Nil)
+          (find-block (core/functiondef-blocks function) block-id)]
+      (if (nil? block)
+        false
+        (let [next-state :- TokenStateV0 (block-token-state state block)
+              successors :- (Vec core/NativeId) (block-successors block)]
+          (and (tokenstatev0-valid next-state)
+            (if (= 0 (count successors))
+              (= 0 (count (tokenstatev0-live next-state)))
+              (every? (fn [successor :- core/NativeId] :- Bool
+                        (token-paths-valid? function successor next-state
+                          (conj visited block-id)))
+                successors))))))))
+
+(defn find-capability [capabilities :- (Vec core/CapabilityDef)
+                       capability-id :- core/NativeId]
+  :- (U core/CapabilityDef Nil)
+  (loop [index :- Int 0]
+    (cond
+      (>= index (count capabilities)) nil
+      (core/native-id= (core/capabilitydef-id (nth capabilities index))
+        capability-id)
+      (nth capabilities index)
+      :else (recur (+ index 1)))))
+
+(defn affine-function-capabilities [world :- core/NativeWorld
+                                    function :- core/FunctionDef]
+  :- (Vec core/NativeId)
+  (filterv (fn [capability-id :- core/NativeId] :- Bool
+             (let [capability :- (U core/CapabilityDef Nil)
+                   (find-capability (core/nativeworld-capabilities world)
+                     capability-id)]
+               (and (not (nil? capability))
+                 (get capability :affine false))))
+    (core/functiondef-capabilities function)))
+
+(defn function-tokens-discharged? [world :- core/NativeWorld
+                                   function :- core/FunctionDef] :- Bool
+  (let [initial :- (Vec core/NativeId)
+        (core/append-ids (core/functiondef-regions function)
+          (affine-function-capabilities world function))]
+    (and (core/unique-ids? initial)
+      (token-paths-valid? function (core/functiondef-entry-block function)
+        (->TokenStateV0 initial initial true) []))))
+
+(defn discharged-tokens [world :- core/NativeWorld] :- ObligationVerdictV0
+  (loop [index :- Int 0 functions :- (Vec core/FunctionDef)
+         (core/nativeworld-functions world)]
+    (if (>= index (count functions))
+      (->ObligationPassV0 (core/->DischargedTokensObligation true))
+      (let [function :- core/FunctionDef (nth functions index)]
+        (if (function-tokens-discharged? world function)
+          (recur (+ index 1) functions)
+          (->DischargedTokensDiagnosticV0
+            (core/functiondef-id function)))))))
+
 (def fixture-i64-type :- core/TypeDef
   (core/->TypeDef (obligation-id "type-i64") "I64"
     (core/->AtomType (core/->I64Kind true))))
@@ -763,13 +884,51 @@
     (obligation-id "type-choice") [] [] "v0"
     "sha256:fixture-layout"))
 
+(def fixture-region :- core/RegionDef
+  (core/->RegionDef (obligation-id "region-fixture")
+    (core/->ArenaRegion true) nil))
+
+(def fixture-capability :- core/CapabilityDef
+  (core/->CapabilityDef (obligation-id "capability-write")
+    (core/->WriteCapability true) (obligation-id "region-fixture") true))
+
+(def fixture-write-effect :- core/EffectDef
+  (core/->EffectDef (obligation-id "effect-write")
+    (core/->WriteEffect (obligation-id "region-fixture"))))
+
+(def fixture-token-function :- core/FunctionDef
+  (core/->FunctionDef (obligation-id "function-store") "store"
+    [(core/->Parameter (obligation-id "ssa-address") (obligation-id "type-i64"))
+     (core/->Parameter (obligation-id "ssa-value") (obligation-id "type-i64"))]
+    [(core/->BasicBlock (obligation-id "block-store") []
+       [(core/->StoreInstruction
+          (core/->SsaValueV0 (obligation-id "ssa-store")
+            (obligation-id "type-i64"))
+          (core/->StoreI64 (obligation-id "ssa-address")
+            (obligation-id "ssa-value")
+            (obligation-id "region-fixture")
+            (obligation-id "capability-write"))
+          (core/->TokenFlowV0
+            [(obligation-id "region-fixture")
+             (obligation-id "capability-write")]
+            []))]
+       [(core/->ReturnTerminator nil)])]
+    (obligation-id "block-store") nil
+    [(obligation-id "effect-write")]
+    [(obligation-id "region-fixture")]
+    [(obligation-id "capability-write")]))
+
 (def valid-world :- core/NativeWorld
   (apply core/->NativeWorld
     [(obligation-id "world-valid") nil "obligations-v0"
-     [fixture-i64-type fixture-union-type fixture-outcome-type] [] [] []
+     [fixture-i64-type fixture-union-type fixture-outcome-type]
+     [fixture-write-effect] [fixture-region] [fixture-capability]
      [fixture-i64-layout fixture-union-layout fixture-outcome-layout]
-     [fixture-function]
-     [] [] [] [fixture-abi] []]))
+     [fixture-function fixture-token-function]
+     [(obligation-id "effect-write")]
+     [(obligation-id "region-fixture")]
+     [(obligation-id "capability-write")]
+     [fixture-abi] []]))
 
 (def invalid-ssa-function :- core/FunctionDef
   (with fixture-function
@@ -848,6 +1007,28 @@
 (def illegal-abi-world :- core/NativeWorld
   (with valid-world [:abis [invalid-abi]]))
 
+(def double-consume-token-function :- core/FunctionDef
+  (with fixture-token-function
+    [:blocks
+     [(core/->BasicBlock (obligation-id "block-store") []
+        [(core/->StoreInstruction
+           (core/->SsaValueV0 (obligation-id "ssa-store")
+             (obligation-id "type-i64"))
+           (core/->StoreI64 (obligation-id "ssa-address")
+             (obligation-id "ssa-value")
+             (obligation-id "region-fixture")
+             (obligation-id "capability-write"))
+           (core/->TokenFlowV0
+             [(obligation-id "region-fixture")
+              (obligation-id "capability-write")
+              (obligation-id "capability-write")]
+             []))]
+        [(core/->ReturnTerminator nil)])]]))
+
+(def undischarged-token-world :- core/NativeWorld
+  (with valid-world
+    [:functions [fixture-function double-consume-token-function]]))
+
 (def valid-ssa-positive :- Bool
   (obligation-passed? (valid-ssa valid-world)))
 
@@ -916,4 +1097,18 @@
     [(ClosedLayoutsDiagnosticV0 type-id) false]
     [(CheckedArithmeticDiagnosticV0 function-id) false]
     [(DischargedTokensDiagnosticV0 function-id) false]
+    [(BoundedEffectsDiagnosticV0 function-id) false]))
+
+(def discharged-tokens-positive :- Bool
+  (obligation-passed? (discharged-tokens valid-world)))
+
+(def discharged-tokens-negative :- Bool
+  (match (discharged-tokens undischarged-token-world)
+    [(DischargedTokensDiagnosticV0 function-id) true]
+    [(ObligationPassV0 code) false]
+    [(ValidSsaDiagnosticV0 function-id) false]
+    [(ExhaustiveMatchesDiagnosticV0 function-id) false]
+    [(ClosedLayoutsDiagnosticV0 type-id) false]
+    [(CheckedArithmeticDiagnosticV0 function-id) false]
+    [(LegalAbiDiagnosticV0 abi-id) false]
     [(BoundedEffectsDiagnosticV0 function-id) false]))
