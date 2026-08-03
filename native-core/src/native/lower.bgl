@@ -308,3 +308,983 @@
             [(source-closure-obligation digest false
                "source Term identities or module roots are not closed")]
             ""))))))
+
+;; The records below are a closed hot-loop projection of the authoritative
+;; typed Term graph. They are discarded and rebuilt from the sealed world.
+(defunion NativeReadinessV0
+  (NativeReadyV0 [token: Bool])
+  (NativeTodoV0 [code: String detail: String]))
+
+(defrecord TypedFunctionV0
+  [id: core/NativeId
+   name: String
+   parameters: (Vec core/Parameter)
+   return-type: core/NativeId
+   failure-type: core/NativeId
+   effects: (Vec core/NativeId)
+   readiness: NativeReadinessV0
+   encoding: String])
+
+(defrecord TypedSliceV0
+  [types: (Vec core/TypeDef)
+   functions: (Vec TypedFunctionV0)
+   effects: (Vec core/EffectDef)
+   regions: (Vec core/RegionDef)
+   capabilities: (Vec core/CapabilityDef)
+   failures: (Vec core/NativeId)])
+
+(defrecord TypeResolutionV0
+  [type-id: core/NativeId
+   definitions: (Vec core/TypeDef)
+   diagnostics: (Vec worlds/DiagnosticV0)
+   valid: Bool])
+
+(defunion TypingResultV0
+  (TypingAcceptedV0
+    [sealed: worlds/SealedTypedWorldV0
+     slice: TypedSliceV0
+     receipt: worlds/PassReceiptV0])
+  (TypingRejectedV0
+    [failure: LowerFailureV0 receipt: worlds/PassReceiptV0]))
+
+(defn ends-with? [value: String suffix: String] -> Bool
+  (let [value-count: Int (count value)
+        suffix-count: Int (count suffix)]
+    (and (>= value-count suffix-count)
+         (= suffix (subs value (- value-count suffix-count) value-count)))))
+
+(defn unqualified-name [spelling: String] -> String
+  (loop [index: Int 0 start: Int 0]
+    (if (>= index (count spelling))
+      (subs spelling start (count spelling))
+      (if (= "/" (subs spelling index (+ index 1)))
+        (recur (+ index 1) (+ index 1))
+        (recur (+ index 1) start)))))
+
+(defn type-id [name: String] -> core/NativeId
+  (lower-id "type" [(unqualified-name name)]))
+
+(defn field-id [record-name: String field-name: String] -> core/NativeId
+  (lower-id "field" [(unqualified-name record-name) field-name]))
+
+(defn function-id [source-id: core/NativeId name: String] -> core/NativeId
+  (lower-id "function" [(id-value source-id) name]))
+
+(defn variant-id [owner: String name: String] -> core/NativeId
+  (lower-id "variant" [owner name]))
+
+(defn bool-type [] -> core/TypeDef
+  (core/->TypeDef (type-id "Bool") "Bool"
+    (core/->AtomType (core/->BoolKind true))))
+
+(defn i64-type [] -> core/TypeDef
+  (core/->TypeDef (type-id "Int") "I64"
+    (core/->AtomType (core/->I64Kind true))))
+
+(defn f64-type [] -> core/TypeDef
+  (core/->TypeDef (type-id "Float") "F64"
+    (core/->AtomType (core/->F64Kind true))))
+
+(defn text-type [] -> core/TypeDef
+  (core/->TypeDef (type-id "String") "Text"
+    (core/->AtomType (core/->TextKind true))))
+
+(defn keyword-type [] -> core/TypeDef
+  (core/->TypeDef (type-id "Keyword") "Keyword"
+    (core/->AtomType (core/->TextKind true))))
+
+(defn nil-type [] -> core/TypeDef
+  (core/->TypeDef (type-id "Nil") "Unit"
+    (core/->UnionType
+      [(core/->TypeVariant (variant-id "Unit" "unit") "unit" nil)])))
+
+(defn slice-value-type [] -> core/TypeDef
+  (core/->TypeDef (type-id "SliceValue") "SliceValue"
+    (core/->UnionType
+      [(core/->TypeVariant (variant-id "SliceValue" "bool") "bool" (type-id "Bool"))
+       (core/->TypeVariant (variant-id "SliceValue" "i64") "i64" (type-id "Int"))
+       (core/->TypeVariant (variant-id "SliceValue" "f64") "f64" (type-id "Float"))
+       (core/->TypeVariant (variant-id "SliceValue" "text") "text" (type-id "String"))
+       (core/->TypeVariant (variant-id "SliceValue" "keyword") "keyword" (type-id "Keyword"))
+       (core/->TypeVariant (variant-id "SliceValue" "reference") "reference" nil)])))
+
+(defn lower-failure-type [] -> core/TypeDef
+  (core/->TypeDef (type-id "LowerFailure") "LowerFailure"
+    (core/->UnionType
+      [(core/->TypeVariant (variant-id "LowerFailure" "invalid-term") "invalid-term" nil)
+       (core/->TypeVariant (variant-id "LowerFailure" "invalid-coordinate") "invalid-coordinate" nil)
+       (core/->TypeVariant (variant-id "LowerFailure" "bounds") "bounds" nil)
+       (core/->TypeVariant (variant-id "LowerFailure" "overflow") "overflow" nil)
+       (core/->TypeVariant (variant-id "LowerFailure" "malformed-source") "malformed-source" nil)])))
+
+(defn builtin-types [] -> (Vec core/TypeDef)
+  [(bool-type)
+   (i64-type)
+   (f64-type)
+   (text-type)
+   (keyword-type)
+   (nil-type)
+   (slice-value-type)
+   (lower-failure-type)])
+
+(defn type-def-in? [definitions: (Vec core/TypeDef) id: core/NativeId] -> Bool
+  (loop [index: Int 0]
+    (if (>= index (count definitions))
+      false
+      (if (same-id? id (core/typedef-id (nth definitions index)))
+        true
+        (recur (+ index 1))))))
+
+(defn append-type-def
+  [definitions: (Vec core/TypeDef) definition: core/TypeDef] -> (Vec core/TypeDef)
+  (if (type-def-in? definitions (core/typedef-id definition))
+    definitions
+    (conj definitions definition)))
+
+(defn append-type-defs
+  [definitions: (Vec core/TypeDef) additions: (Vec core/TypeDef)] -> (Vec core/TypeDef)
+  (loop [index: Int 0 current: (Vec core/TypeDef) definitions]
+    (if (>= index (count additions))
+      current
+      (recur (+ index 1) (append-type-def current (nth additions index))))))
+
+(defn append-diagnostics
+  [left: (Vec worlds/DiagnosticV0) right: (Vec worlds/DiagnosticV0)]
+  -> (Vec worlds/DiagnosticV0)
+  (vec (concat left right)))
+
+(defn form-ids [graph: worlds/TermGraphV0 kind: String] -> (Vec core/NativeId)
+  (let [facts: (Vec SourceFactV0) (source-facts graph)]
+    (loop [index: Int 0 selected: (Vec core/NativeId) []]
+      (if (>= index (count facts))
+        selected
+        (let [fact: SourceFactV0 (nth facts index)
+              predicate: (U String Nil) (text-at graph (sourcefactv0-predicate fact))
+              object: (U String Nil) (text-at graph (sourcefactv0-object fact))]
+          (if (and (some? predicate)
+                   (= "form-kind" predicate)
+                   (some? object)
+                   (= kind object))
+            (recur (+ index 1) (conj selected (sourcefactv0-subject fact)))
+            (recur (+ index 1) selected)))))))
+
+(defn sequence-items
+  [graph: worlds/TermGraphV0 sequence-id: core/NativeId] -> (Vec core/NativeId)
+  (let [facts: (Vec SourceFactV0) (source-facts graph)]
+    (loop [index: Int 0 items: (Vec core/NativeId) []]
+      (if (>= index (count facts))
+        items
+        (let [fact: SourceFactV0 (nth facts index)
+              predicate: (U String Nil) (text-at graph (sourcefactv0-predicate fact))]
+          (if (and (same-id? sequence-id (sourcefactv0-subject fact))
+                   (some? predicate)
+                   (not (= "form-kind" predicate))
+                   (not (= "child" predicate)))
+            (recur (+ index 1) (conj items (sourcefactv0-object fact)))
+            (recur (+ index 1) items)))))))
+
+(defn source-type-kind
+  [graph: worlds/TermGraphV0 source-type: core/NativeId] -> (U String Nil)
+  (let [kind: (U String Nil) (first-fact-text graph source-type "type-kind")]
+    (if (some? kind) kind (first-fact-text graph source-type "form-kind"))))
+
+(defn source-type-spelling
+  [graph: worlds/TermGraphV0 source-type: core/NativeId] -> (U String Nil)
+  (let [name: (U String Nil) (first-fact-text graph source-type "name")]
+    (if (some? name) name (first-fact-text graph source-type "f0"))))
+
+(defn primitive-resolution
+  [source-type: core/NativeId spelling: String] -> TypeResolutionV0
+  (cond
+    (= "Bool" spelling)
+    (->TypeResolutionV0 (type-id "Bool") [(bool-type)] [] true)
+
+    (= "Int" spelling)
+    (->TypeResolutionV0 (type-id "Int") [(i64-type)] [] true)
+
+    (= "Float" spelling)
+    (->TypeResolutionV0 (type-id "Float") [(f64-type)] [] true)
+
+    (= "String" spelling)
+    (->TypeResolutionV0 (type-id "String") [(text-type)] [] true)
+
+    (= "Keyword" spelling)
+    (->TypeResolutionV0 (type-id "Keyword") [(keyword-type)] [] true)
+
+    (= "Nil" spelling)
+    (->TypeResolutionV0 (type-id "Nil") [(nil-type)] [] true)
+
+    (= "Any" spelling)
+    (->TypeResolutionV0
+      (type-id "SliceValue")
+      [(slice-value-type)]
+      [(worlds/->DiagnosticV0
+         "LOWER-CLOSED-RAW-ANY"
+         "raw Any was closed to the finite SliceValue union")]
+      true)
+
+    :else
+    (let [name: String (unqualified-name spelling)
+          id: core/NativeId (type-id name)]
+      (->TypeResolutionV0 id [] [] true))))
+
+(defn source-type-arguments
+  [graph: worlds/TermGraphV0 source-type: core/NativeId] -> (Vec core/NativeId)
+  (let [direct: (U core/NativeId Nil) (first-fact-object graph source-type "args")
+        legacy: (U core/NativeId Nil) (first-fact-object graph source-type "f1")
+        arguments: (U core/NativeId Nil) (if (some? direct) direct legacy)]
+    (if (nil? arguments) [] (sequence-items graph arguments))))
+
+(defn resolution-ids [resolutions: (Vec TypeResolutionV0)] -> (Vec core/NativeId)
+  (mapv
+    (fn [resolution: TypeResolutionV0] -> core/NativeId
+      (typeresolutionv0-type-id resolution))
+    resolutions))
+
+(defn resolution-definitions
+  [resolutions: (Vec TypeResolutionV0)] -> (Vec core/TypeDef)
+  (loop [index: Int 0 definitions: (Vec core/TypeDef) []]
+    (if (>= index (count resolutions))
+      definitions
+      (recur (+ index 1)
+        (append-type-defs definitions
+          (typeresolutionv0-definitions (nth resolutions index)))))))
+
+(defn resolution-diagnostics
+  [resolutions: (Vec TypeResolutionV0)] -> (Vec worlds/DiagnosticV0)
+  (loop [index: Int 0 diagnostics: (Vec worlds/DiagnosticV0) []]
+    (if (>= index (count resolutions))
+      diagnostics
+      (recur (+ index 1)
+        (append-diagnostics diagnostics
+          (typeresolutionv0-diagnostics (nth resolutions index)))))))
+
+(defn union-variants
+  [owner: String type-ids: (Vec core/NativeId)] -> (Vec core/TypeVariant)
+  (loop [index: Int 0 variants: (Vec core/TypeVariant) []]
+    (if (>= index (count type-ids))
+      variants
+      (recur (+ index 1)
+        (conj variants
+          (core/->TypeVariant
+            (variant-id owner (str index))
+            (str "case-" index)
+            (nth type-ids index)))))))
+
+(defn application-resolution
+  [source-type: core/NativeId
+   constructor: String
+   resolutions: (Vec TypeResolutionV0)]
+  -> TypeResolutionV0
+  (let [ids: (Vec core/NativeId) (resolution-ids resolutions)
+        definitions: (Vec core/TypeDef) (resolution-definitions resolutions)
+        diagnostics: (Vec worlds/DiagnosticV0) (resolution-diagnostics resolutions)]
+    (cond
+      (and (= "Vec" constructor) (= 1 (count ids)))
+      (let [id: core/NativeId (lower-id "vector-type" [(id-value (nth ids 0))])]
+        (->TypeResolutionV0 id
+          (append-type-def definitions
+            (core/->TypeDef id "Vector" (core/->VectorType (nth ids 0))))
+          diagnostics
+          true))
+
+      (and (= "Atom" constructor) (= 1 (count ids)))
+      (let [id: core/NativeId (lower-id "reference-type" [(id-value (nth ids 0))])]
+        (->TypeResolutionV0 id
+          (append-type-def definitions
+            (core/->TypeDef id "Reference" (core/->ReferenceType (nth ids 0))))
+          diagnostics
+          true))
+
+      (and (= "Map" constructor) (= 2 (count ids)))
+      (let [entry-id: core/NativeId
+            (lower-id "map-entry-type" [(id-value (nth ids 0)) (id-value (nth ids 1))])
+            map-id: core/NativeId (lower-id "map-vector-type" [(id-value entry-id)])
+            entry: core/TypeDef
+            (core/->TypeDef entry-id "MapEntry"
+              (core/->RecordType
+                [(core/->TypeField (field-id (id-value entry-id) "key") "key" (nth ids 0))
+                 (core/->TypeField (field-id (id-value entry-id) "value") "value" (nth ids 1))]))]
+        (->TypeResolutionV0 map-id
+          (append-type-def (append-type-def definitions entry)
+            (core/->TypeDef map-id "MapEntries" (core/->VectorType entry-id)))
+          (conj diagnostics
+            (worlds/->DiagnosticV0
+              "TODO-NATIVE-MAP-OPERATIONS"
+              "host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation"))
+          true))
+
+      (or (= "Dyn" constructor) (= "U" constructor))
+      (let [id: core/NativeId
+            (lower-id "closed-union-type"
+              (mapv (fn [part: core/NativeId] -> String (id-value part)) ids))]
+        (->TypeResolutionV0 id
+          (append-type-def definitions
+            (core/->TypeDef id "ClosedUnion" (core/->UnionType (union-variants (id-value id) ids))))
+          diagnostics
+          true))
+
+      :else
+      (->TypeResolutionV0
+        (type-id "LowerFailure")
+        [(lower-failure-type)]
+        (conj diagnostics
+          (worlds/->DiagnosticV0
+            "LOWER-UNSUPPORTED-TYPE-APPLICATION"
+            (str "unsupported closed type constructor: " constructor)))
+        false))))
+
+(defn resolve-source-type
+  [graph: worlds/TermGraphV0 source-type: core/NativeId] -> TypeResolutionV0
+  (let [kind: (U String Nil) (source-type-kind graph source-type)
+        spelling: (U String Nil) (source-type-spelling graph source-type)]
+    (cond
+      (nil? kind)
+      (->TypeResolutionV0
+        (type-id "LowerFailure")
+        [(lower-failure-type)]
+        [(worlds/->DiagnosticV0
+           "LOWER-MISSING-TYPE-KIND"
+           (str "source type has no kind: " (id-value source-type)))]
+        false)
+
+      (or (= "type-prim" kind) (= "prim" kind))
+      (if (nil? spelling)
+        (->TypeResolutionV0
+          (type-id "LowerFailure")
+          [(lower-failure-type)]
+          [(worlds/->DiagnosticV0
+             "LOWER-MISSING-TYPE-NAME"
+             (str "primitive type has no spelling: " (id-value source-type)))]
+          false)
+        (primitive-resolution source-type spelling))
+
+      (or (= "type-app" kind) (= "app" kind))
+      (if (nil? spelling)
+        (->TypeResolutionV0
+          (type-id "LowerFailure")
+          [(lower-failure-type)]
+          [(worlds/->DiagnosticV0
+             "LOWER-MISSING-TYPE-CONSTRUCTOR"
+             (str "type application has no constructor: " (id-value source-type)))]
+          false)
+        (let [arguments: (Vec core/NativeId) (source-type-arguments graph source-type)
+              resolutions: (Vec TypeResolutionV0)
+              (mapv
+                (fn [argument: core/NativeId] -> TypeResolutionV0
+                  (resolve-source-type graph argument))
+                arguments)]
+          (application-resolution source-type spelling resolutions)))
+
+      (or (= "type-union" kind) (= "union" kind))
+      (let [arguments: (Vec core/NativeId) (source-type-arguments graph source-type)
+            resolutions: (Vec TypeResolutionV0)
+            (mapv
+              (fn [argument: core/NativeId] -> TypeResolutionV0
+                (resolve-source-type graph argument))
+              arguments)]
+        (application-resolution source-type "U" resolutions))
+
+      :else
+      (->TypeResolutionV0
+        (type-id "LowerFailure")
+        [(lower-failure-type)]
+        [(worlds/->DiagnosticV0
+           "LOWER-UNSUPPORTED-TYPE-KIND"
+           (str "unsupported source type kind: " kind))]
+        false))))
+
+(defrecord RecordResolutionV0
+  [definition: core/TypeDef
+   supporting-definitions: (Vec core/TypeDef)
+   diagnostics: (Vec worlds/DiagnosticV0)
+   valid: Bool])
+
+(defrecord ParameterResolutionV0
+  [parameters: (Vec core/Parameter)
+   definitions: (Vec core/TypeDef)
+   diagnostics: (Vec worlds/DiagnosticV0)
+   valid: Bool])
+
+(defrecord FunctionResolutionV0
+  [function: TypedFunctionV0
+   definitions: (Vec core/TypeDef)
+   diagnostics: (Vec worlds/DiagnosticV0)
+   valid: Bool])
+
+(defn field-name-at
+  [graph: worlds/TermGraphV0 source-field: core/NativeId] -> (U String Nil)
+  (let [name: (U String Nil) (first-fact-text graph source-field "name")]
+    (if (some? name) name (first-fact-text graph source-field "f0"))))
+
+(defn field-type-at
+  [graph: worlds/TermGraphV0 source-field: core/NativeId] -> (U core/NativeId Nil)
+  (let [annotation: (U core/NativeId Nil)
+        (first-fact-object graph source-field "ann")]
+    (if (some? annotation)
+      annotation
+      (first-fact-object graph source-field "f1"))))
+
+(defn record-field-items
+  [graph: worlds/TermGraphV0 source-record: core/NativeId] -> (Vec core/NativeId)
+  (let [fields: (U core/NativeId Nil) (first-fact-object graph source-record "fields")]
+    (if (nil? fields) [] (sequence-items graph fields))))
+
+(defn resolve-record
+  [graph: worlds/TermGraphV0 source-record: core/NativeId] -> RecordResolutionV0
+  (let [record-name: (U String Nil) (first-fact-text graph source-record "name")]
+    (if (nil? record-name)
+      (->RecordResolutionV0
+        (core/->TypeDef (type-id "LowerFailure") "LowerFailure"
+          (core/->ReferenceType (type-id "LowerFailure")))
+        [(lower-failure-type)]
+        [(worlds/->DiagnosticV0
+           "LOWER-RECORD-MISSING-NAME"
+           (str "record form has no name: " (id-value source-record)))]
+        false)
+      (let [source-fields: (Vec core/NativeId) (record-field-items graph source-record)]
+        (loop [index: Int 0
+               fields: (Vec core/TypeField) []
+               definitions: (Vec core/TypeDef) []
+               diagnostics: (Vec worlds/DiagnosticV0) []
+               valid: Bool true]
+          (if (>= index (count source-fields))
+            (->RecordResolutionV0
+              (core/->TypeDef (type-id record-name) record-name
+                (core/->RecordType fields))
+              definitions
+              diagnostics
+              valid)
+            (let [source-field: core/NativeId (nth source-fields index)
+                  name: (U String Nil) (field-name-at graph source-field)
+                  source-type: (U core/NativeId Nil) (field-type-at graph source-field)]
+              (if (or (nil? name) (nil? source-type))
+                (recur (+ index 1)
+                  fields
+                  definitions
+                  (conj diagnostics
+                    (worlds/->DiagnosticV0
+                      "LOWER-FIELD-MISSING-ANNOTATION"
+                      (str "record field is missing a name or type: "
+                        (id-value source-field))))
+                  false)
+                (let [resolution: TypeResolutionV0
+                      (resolve-source-type graph source-type)]
+                  (recur (+ index 1)
+                    (conj fields
+                      (core/->TypeField
+                        (field-id record-name name)
+                        name
+                        (typeresolutionv0-type-id resolution)))
+                    (append-type-defs definitions
+                      (typeresolutionv0-definitions resolution))
+                    (append-diagnostics diagnostics
+                      (typeresolutionv0-diagnostics resolution))
+                    (and valid (typeresolutionv0-valid resolution))))))))))))
+
+(defn resolve-records
+  [graph: worlds/TermGraphV0] -> (Vec RecordResolutionV0)
+  (mapv
+    (fn [source-record: core/NativeId] -> RecordResolutionV0
+      (resolve-record graph source-record))
+    (form-ids graph "record")))
+
+(defn parameter-name-at
+  [graph: worlds/TermGraphV0 source-parameter: core/NativeId] -> String
+  (let [name: (U String Nil) (first-fact-text graph source-parameter "name")
+        legacy: (U String Nil) (first-fact-text graph source-parameter "f0")]
+    (cond
+      (some? name) name
+      (some? legacy) legacy
+      :else (str "parameter-" (id-value source-parameter)))))
+
+(defn function-parameter-items
+  [graph: worlds/TermGraphV0 source-function: core/NativeId] -> (Vec core/NativeId)
+  (let [parameters: (U core/NativeId Nil)
+        (first-fact-object graph source-function "params")]
+    (if (nil? parameters) [] (sequence-items graph parameters))))
+
+(defn resolve-parameters
+  [graph: worlds/TermGraphV0
+   source-function: core/NativeId
+   owner-id: core/NativeId]
+  -> ParameterResolutionV0
+  (let [source-parameters: (Vec core/NativeId)
+        (function-parameter-items graph source-function)]
+    (loop [index: Int 0
+           parameters: (Vec core/Parameter) []
+           definitions: (Vec core/TypeDef) []
+           diagnostics: (Vec worlds/DiagnosticV0) []
+           valid: Bool true]
+      (if (>= index (count source-parameters))
+        (->ParameterResolutionV0 parameters definitions diagnostics valid)
+        (let [source-parameter: core/NativeId (nth source-parameters index)
+              name: String (parameter-name-at graph source-parameter)
+              source-type: (U core/NativeId Nil) (field-type-at graph source-parameter)]
+          (if (nil? source-type)
+            (recur (+ index 1)
+              parameters
+              definitions
+              (conj diagnostics
+                (worlds/->DiagnosticV0
+                  "LOWER-PARAMETER-MISSING-ANNOTATION"
+                  (str "function parameter has no closed type: " name)))
+              false)
+            (let [resolution: TypeResolutionV0
+                  (resolve-source-type graph source-type)]
+              (recur (+ index 1)
+                (conj parameters
+                  (core/->Parameter
+                    (lower-id "parameter" [(id-value owner-id) name])
+                    (typeresolutionv0-type-id resolution)))
+                (append-type-defs definitions
+                  (typeresolutionv0-definitions resolution))
+                (append-diagnostics diagnostics
+                  (typeresolutionv0-diagnostics resolution))
+                (and valid (typeresolutionv0-valid resolution))))))))))
+
+(defn pure-effect-id [] -> core/NativeId (lower-id "effect" ["pure"]))
+
+(defn arena-region-id [] -> core/NativeId (lower-id "region" ["slice-arena"]))
+
+(defn write-effect-id [] -> core/NativeId (lower-id "effect" ["arena-write"]))
+
+(defn write-capability-id [] -> core/NativeId
+  (lower-id "capability" ["arena-write"]))
+
+(defn slice-effects [] -> (Vec core/EffectDef)
+  [(core/->EffectDef (pure-effect-id) (core/->PureEffect true))
+   (core/->EffectDef (write-effect-id) (core/->WriteEffect (arena-region-id)))])
+
+(defn function-effects [name: String] -> (Vec core/NativeId)
+  (if (ends-with? name "!") [(write-effect-id)] [(pure-effect-id)]))
+
+(defn encode-parameter [parameter: core/Parameter] -> String
+  (worlds/canonical-record "parameter"
+    [(id-value (core/parameter-id parameter))
+     (id-value (core/parameter-type-id parameter))]))
+
+(defn encode-typed-function
+  [id: core/NativeId
+   name: String
+   parameters: (Vec core/Parameter)
+   return-type: core/NativeId
+   failure-type: core/NativeId
+   effects: (Vec core/NativeId)
+   readiness-code: String]
+  -> String
+  (worlds/canonical-record "typed-function-v0"
+    [(id-value id)
+     name
+     (worlds/canonical-record "parameters"
+       (mapv
+         (fn [parameter: core/Parameter] -> String
+           (encode-parameter parameter))
+         parameters))
+     (id-value return-type)
+     (id-value failure-type)
+     (worlds/canonical-record "effects"
+       (mapv (fn [effect: core/NativeId] -> String (id-value effect)) effects))
+     readiness-code]))
+
+(defn function-native-op
+  [graph: worlds/TermGraphV0 source-function: core/NativeId] -> (U String Nil)
+  (first-fact-text graph source-function "native-op"))
+
+(defn resolve-function
+  [graph: worlds/TermGraphV0 source-function: core/NativeId] -> FunctionResolutionV0
+  (let [source-name: (U String Nil) (first-fact-text graph source-function "name")]
+    (if (nil? source-name)
+      (let [id: core/NativeId (function-id source-function "unnamed")]
+        (->FunctionResolutionV0
+          (->TypedFunctionV0 id "unnamed" [] (type-id "LowerFailure")
+            (type-id "LowerFailure") []
+            (->NativeTodoV0 "TODO-NATIVE-UNNAMED-FUNCTION"
+              "source function lacks a name")
+            "")
+          [(lower-failure-type)]
+          [(worlds/->DiagnosticV0
+             "LOWER-FUNCTION-MISSING-NAME"
+             (str "function form has no name: " (id-value source-function)))]
+          false))
+      (let [id: core/NativeId (function-id source-function source-name)
+            parameters: ParameterResolutionV0
+            (resolve-parameters graph source-function id)
+            source-return: (U core/NativeId Nil)
+            (first-fact-object graph source-function "ret")
+            return-resolution: TypeResolutionV0
+            (if (nil? source-return)
+              (->TypeResolutionV0
+                (type-id "Nil")
+                [(nil-type)]
+                [(worlds/->DiagnosticV0
+                   "TODO-NATIVE-SIGNATURE-FACTS"
+                   (str "checked source projection omitted the return annotation for " source-name))]
+                true)
+              (resolve-source-type graph source-return))
+            native-op: (U String Nil) (function-native-op graph source-function)
+            readiness: NativeReadinessV0
+            (if (some? native-op)
+              (->NativeReadyV0 true)
+              (->NativeTodoV0
+                "TODO-NATIVE-FUNCTION-BODY"
+                (str "native body lowering remains for " source-name)))
+            readiness-code: String
+            (if (some? native-op) native-op "TODO-NATIVE-FUNCTION-BODY")
+            effects: (Vec core/NativeId) (function-effects source-name)
+            encoding: String
+            (encode-typed-function id source-name
+              (parameterresolutionv0-parameters parameters)
+              (typeresolutionv0-type-id return-resolution)
+              (type-id "LowerFailure")
+              effects
+              readiness-code)]
+        (->FunctionResolutionV0
+          (->TypedFunctionV0
+            id
+            source-name
+            (parameterresolutionv0-parameters parameters)
+            (typeresolutionv0-type-id return-resolution)
+            (type-id "LowerFailure")
+            effects
+            readiness
+            encoding)
+          (append-type-defs
+            (parameterresolutionv0-definitions parameters)
+            (typeresolutionv0-definitions return-resolution))
+          (append-diagnostics
+            (parameterresolutionv0-diagnostics parameters)
+            (if (some? native-op)
+              (typeresolutionv0-diagnostics return-resolution)
+              (conj (typeresolutionv0-diagnostics return-resolution)
+                (worlds/->DiagnosticV0
+                  "TODO-NATIVE-FUNCTION-BODY"
+                  (str "typed function is sealed; native body lowering remains for "
+                    source-name)))))
+          (and (parameterresolutionv0-valid parameters)
+               (typeresolutionv0-valid return-resolution)))))))
+
+(defn resolve-functions
+  [graph: worlds/TermGraphV0] -> (Vec FunctionResolutionV0)
+  (mapv
+    (fn [source-function: core/NativeId] -> FunctionResolutionV0
+      (resolve-function graph source-function))
+    (form-ids graph "defn")))
+
+(defn slice-regions [] -> (Vec core/RegionDef)
+  [(core/->RegionDef (arena-region-id) (core/->ArenaRegion true) nil)])
+
+(defn slice-capabilities [] -> (Vec core/CapabilityDef)
+  [(core/->CapabilityDef
+     (write-capability-id)
+     (core/->WriteCapability true)
+     (arena-region-id)
+     true)])
+
+(defn collect-record-types
+  [resolutions: (Vec RecordResolutionV0)] -> (Vec core/TypeDef)
+  (loop [index: Int 0 definitions: (Vec core/TypeDef) (builtin-types)]
+    (if (>= index (count resolutions))
+      definitions
+      (let [resolution: RecordResolutionV0 (nth resolutions index)]
+        (recur (+ index 1)
+          (append-type-defs
+            (append-type-def definitions
+              (recordresolutionv0-definition resolution))
+            (recordresolutionv0-supporting-definitions resolution)))))))
+
+(defn collect-function-types
+  [definitions: (Vec core/TypeDef)
+   resolutions: (Vec FunctionResolutionV0)] -> (Vec core/TypeDef)
+  (loop [index: Int 0 current: (Vec core/TypeDef) definitions]
+    (if (>= index (count resolutions))
+      current
+      (recur (+ index 1)
+        (append-type-defs current
+          (functionresolutionv0-definitions (nth resolutions index)))))))
+
+(defn collect-functions
+  [resolutions: (Vec FunctionResolutionV0)] -> (Vec TypedFunctionV0)
+  (mapv
+    (fn [resolution: FunctionResolutionV0] -> TypedFunctionV0
+      (functionresolutionv0-function resolution))
+    resolutions))
+
+(defn collect-typing-diagnostics
+  [records: (Vec RecordResolutionV0)
+   functions: (Vec FunctionResolutionV0)] -> (Vec worlds/DiagnosticV0)
+  (let [record-diagnostics: (Vec worlds/DiagnosticV0)
+        (loop [index: Int 0 diagnostics: (Vec worlds/DiagnosticV0) []]
+          (if (>= index (count records))
+            diagnostics
+            (recur (+ index 1)
+              (append-diagnostics diagnostics
+                (recordresolutionv0-diagnostics (nth records index))))))]
+    (loop [index: Int 0 diagnostics: (Vec worlds/DiagnosticV0) record-diagnostics]
+      (if (>= index (count functions))
+        diagnostics
+        (recur (+ index 1)
+          (append-diagnostics diagnostics
+            (functionresolutionv0-diagnostics (nth functions index))))))))
+
+(defn typing-resolutions-valid?
+  [records: (Vec RecordResolutionV0)
+   functions: (Vec FunctionResolutionV0)] -> Bool
+  (and
+    (every?
+      (fn [resolution: RecordResolutionV0] -> Bool
+        (recordresolutionv0-valid resolution))
+      records)
+    (every?
+      (fn [resolution: FunctionResolutionV0] -> Bool
+        (functionresolutionv0-valid resolution))
+      functions)))
+
+(defn encode-atom-kind [kind: core/AtomKind] -> String
+  (cond
+    (core/boolkind? kind) "bool"
+    (core/i64kind? kind) "i64"
+    (core/f64kind? kind) "f64"
+    (core/textkind? kind) "text"
+    :else (worlds/canonical-record "reference-kind"
+            [(id-value (core/refkind-target kind))])))
+
+(defn encode-type-field [field: core/TypeField] -> String
+  (worlds/canonical-record "field"
+    [(id-value (core/typefield-id field))
+     (core/typefield-name field)
+     (id-value (core/typefield-type-id field))]))
+
+(defn encode-type-variant [variant: core/TypeVariant] -> String
+  (let [payload: (U core/NativeId Nil) (core/typevariant-payload-type variant)]
+    (worlds/canonical-record "variant"
+      [(id-value (core/typevariant-id variant))
+       (core/typevariant-name variant)
+       (if (nil? payload) "unit" (id-value payload))])))
+
+(defn encode-type-shape [shape: core/TypeShape] -> String
+  (cond
+    (core/atomtype? shape)
+    (worlds/canonical-record "atom"
+      [(encode-atom-kind (core/atomtype-kind shape))])
+
+    (core/recordtype? shape)
+    (worlds/canonical-record "record"
+      (mapv
+        (fn [field: core/TypeField] -> String (encode-type-field field))
+        (core/recordtype-fields shape)))
+
+    (core/uniontype? shape)
+    (worlds/canonical-record "closed-union"
+      (mapv
+        (fn [variant: core/TypeVariant] -> String (encode-type-variant variant))
+        (core/uniontype-variants shape)))
+
+    (core/vectortype? shape)
+    (worlds/canonical-record "vector"
+      [(id-value (core/vectortype-element-type shape))])
+
+    (core/referencetype? shape)
+    (worlds/canonical-record "reference"
+      [(id-value (core/referencetype-target-type shape))])
+
+    :else
+    (worlds/canonical-record "outcome"
+      [(id-value (core/outcometype-value-type shape))
+       (id-value (core/outcometype-failure-type shape))])))
+
+(defn encode-type-def [definition: core/TypeDef] -> String
+  (worlds/canonical-record "closed-type-v0"
+    [(id-value (core/typedef-id definition))
+     (core/typedef-name definition)
+     (encode-type-shape (core/typedef-shape definition))]))
+
+(defn encode-effect [effect: core/EffectDef] -> String
+  (let [kind: core/EffectKind (core/effectdef-kind effect)
+        kind-encoding: String
+        (cond
+          (core/pureeffect? kind) "pure"
+          (core/allocateeffect? kind)
+          (worlds/canonical-record "allocate"
+            [(id-value (core/allocateeffect-region kind))])
+          (core/readeffect? kind)
+          (worlds/canonical-record "read"
+            [(id-value (core/readeffect-region kind))])
+          (core/writeeffect? kind)
+          (worlds/canonical-record "write"
+            [(id-value (core/writeeffect-region kind))])
+          :else
+          (worlds/canonical-record "capability"
+            [(id-value (core/capabilityeffect-capability kind))]))]
+    (worlds/canonical-record "effect-v0"
+      [(id-value (core/effectdef-id effect)) kind-encoding])))
+
+(defn typed-term-nodes
+  [types: (Vec core/TypeDef)
+   functions: (Vec TypedFunctionV0)
+   effects: (Vec core/EffectDef)] -> (Vec worlds/TermNodeV0)
+  (let [type-nodes: (Vec worlds/TermNodeV0)
+        (mapv
+          (fn [definition: core/TypeDef] -> worlds/TermNodeV0
+            (worlds/->TermNodeV0
+              (core/typedef-id definition)
+              (worlds/->TextTermV0 (encode-type-def definition))))
+          types)
+        function-nodes: (Vec worlds/TermNodeV0)
+        (mapv
+          (fn [function: TypedFunctionV0] -> worlds/TermNodeV0
+            (worlds/->TermNodeV0
+              (typedfunctionv0-id function)
+              (worlds/->TextTermV0 (typedfunctionv0-encoding function))))
+          functions)
+        effect-nodes: (Vec worlds/TermNodeV0)
+        (mapv
+          (fn [effect: core/EffectDef] -> worlds/TermNodeV0
+            (worlds/->TermNodeV0
+              (core/effectdef-id effect)
+              (worlds/->TextTermV0 (encode-effect effect))))
+          effects)
+        region-node: worlds/TermNodeV0
+        (worlds/->TermNodeV0 (arena-region-id)
+          (worlds/->TextTermV0
+            (worlds/canonical-record "region-v0"
+              [(id-value (arena-region-id)) "arena"])))
+        capability-node: worlds/TermNodeV0
+        (worlds/->TermNodeV0 (write-capability-id)
+          (worlds/->TextTermV0
+            (worlds/canonical-record "capability-v0"
+              [(id-value (write-capability-id))
+               (id-value (arena-region-id))
+               "affine-write"]))) ]
+    (vec (concat type-nodes function-nodes effect-nodes
+           [region-node capability-node]))))
+
+(defn forbidden-world-text? [value: String] -> Bool
+  (or (= value "Any")
+      (= value "Atom")
+      (= value "Map")
+      (= value "Set")
+      (= value "throw")
+      (= value "ex-info")
+      (= value "#lang")
+      (= value "clj")
+      (= value "js")
+      (= value "nix")
+      (= value "zig")))
+
+(defn term-is-clean? [term: worlds/TermV0] -> Bool
+  (if (worlds/texttermv0? term)
+    (not (forbidden-world-text? (worlds/texttermv0-value term)))
+    true))
+
+(defn term-graph-clean? [graph: worlds/TermGraphV0] -> Bool
+  (every?
+    (fn [node: worlds/TermNodeV0] -> Bool
+      (term-is-clean? (worlds/termnodev0-term node)))
+    (worlds/termgraphv0-nodes graph)))
+
+(defn encode-id-roots [tag: String roots: (Vec core/NativeId)] -> String
+  (worlds/canonical-set tag
+    (mapv (fn [id: core/NativeId] -> String (id-value id)) roots)))
+
+(defn encode-typed-world [world: worlds/TypedEffectWorldV0] -> String
+  (worlds/canonical-record "typed-effect-world-v0"
+    [(encode-term-graph (worlds/typedeffectworldv0-terms world))
+     (worlds/typedeffectworldv0-source-digest world)
+     (encode-id-roots "types" (worlds/typedeffectworldv0-type-roots world))
+     (encode-id-roots "functions" (worlds/typedeffectworldv0-function-roots world))
+     (encode-id-roots "effects" (worlds/typedeffectworldv0-effect-roots world))
+     (encode-id-roots "regions" (worlds/typedeffectworldv0-region-roots world))
+     (encode-id-roots "capabilities"
+       (worlds/typedeffectworldv0-capability-token-roots world))
+     (encode-id-roots "refinements"
+       (worlds/typedeffectworldv0-refinement-roots world))]))
+
+(defn function-todo-obligations
+  [functions: (Vec TypedFunctionV0) subject-digest: String]
+  -> (Vec worlds/DischargedObligationV0)
+  (loop [index: Int 0 obligations: (Vec worlds/DischargedObligationV0) []]
+    (if (>= index (count functions))
+      obligations
+      (let [function: TypedFunctionV0 (nth functions index)
+            readiness: NativeReadinessV0 (typedfunctionv0-readiness function)]
+        (match readiness
+          [(NativeReadyV0 token) (recur (+ index 1) obligations)]
+          [(NativeTodoV0 code detail)
+           (recur (+ index 1)
+             (conj obligations
+               (worlds/->DischargedObligationV0
+                 code "v0" subject-digest false detail)))])))))
+
+(defn type-closure-obligations
+  [digest: String closed: Bool clean: Bool] -> (Vec worlds/DischargedObligationV0)
+  [(worlds/->DischargedObligationV0
+     "reachable-type-closure" "v0" digest closed
+     "every reachable type is a closed Native Core TypeShape")
+   (worlds/->DischargedObligationV0
+     "typed-world-host-erasure" "v0" digest clean
+     "typed Terms contain no raw Any, host exception, host collection, or target syntax")])
+
+(defn lower-typed-world
+  [sealed-source: worlds/SealedSourceWorldV0
+   compiler-commit: String
+   configuration: (Vec worlds/ConfigurationEntryV0)]
+  -> TypingResultV0
+  (let [source: worlds/SourceProgramWorldV0
+        (worlds/sealedsourceworldv0-world sealed-source)
+        source-digest: String (worlds/sealedsourceworldv0-digest sealed-source)
+        graph: worlds/TermGraphV0 (worlds/sourceprogramworldv0-terms source)
+        record-resolutions: (Vec RecordResolutionV0) (resolve-records graph)
+        function-resolutions: (Vec FunctionResolutionV0) (resolve-functions graph)
+        record-types: (Vec core/TypeDef) (collect-record-types record-resolutions)
+        types: (Vec core/TypeDef)
+        (collect-function-types record-types function-resolutions)
+        functions: (Vec TypedFunctionV0) (collect-functions function-resolutions)
+        effects: (Vec core/EffectDef) (slice-effects)
+        regions: (Vec core/RegionDef) (slice-regions)
+        capabilities: (Vec core/CapabilityDef) (slice-capabilities)
+        root: core/NativeId (lower-id "typed-world" [source-digest])
+        nodes: (Vec worlds/TermNodeV0) (typed-term-nodes types functions effects)
+        terms: worlds/TermGraphV0
+        (worlds/->TermGraphV0 root
+          (conj nodes
+            (worlds/->TermNodeV0 root
+              (worlds/->TextTermV0 "typed-effect-world-v0"))))
+        typed-world: worlds/TypedEffectWorldV0
+        (worlds/->TypedEffectWorldV0
+          terms
+          source-digest
+          (mapv (fn [definition: core/TypeDef] -> core/NativeId
+                  (core/typedef-id definition)) types)
+          (mapv (fn [function: TypedFunctionV0] -> core/NativeId
+                  (typedfunctionv0-id function)) functions)
+          (mapv (fn [effect: core/EffectDef] -> core/NativeId
+                  (core/effectdef-id effect)) effects)
+          [(arena-region-id)]
+          [(write-capability-id)]
+          [(type-id "LowerFailure")])
+        encoding: String (encode-typed-world typed-world)
+        digest: String (worlds/content-digest encoding)
+        resolutions-valid: Bool
+        (typing-resolutions-valid? record-resolutions function-resolutions)
+        types-closed: Bool (core/types-refs-closed? types)
+        clean: Bool (term-graph-clean? terms)
+        valid: Bool (and resolutions-valid types-closed clean)
+        diagnostics: (Vec worlds/DiagnosticV0)
+        (collect-typing-diagnostics record-resolutions function-resolutions)
+        obligations: (Vec worlds/DischargedObligationV0)
+        (vec (concat (type-closure-obligations digest types-closed clean)
+               (function-todo-obligations functions digest)))]
+    (if valid
+      (->TypingAcceptedV0
+        (worlds/->SealedTypedWorldV0 typed-world encoding digest)
+        (->TypedSliceV0 types functions effects regions capabilities
+          [(type-id "LowerFailure")])
+        (make-receipt source-digest compiler-commit "source-to-typed"
+          configuration diagnostics obligations digest))
+      (->TypingRejectedV0
+        (->UnresolvedSourceTypeV0
+          (worlds/termgraphv0-root graph)
+          "one or more source annotations do not close over Native Core types")
+        (make-receipt source-digest compiler-commit "source-to-typed"
+          configuration diagnostics obligations "")))))
