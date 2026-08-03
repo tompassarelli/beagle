@@ -58,6 +58,7 @@
              "facts-render-roundtrip.rkt" ; #17 — renderer reconstructs #lang from leading (define-target)
              "cross-module-dynvar.rkt"  ; G-A — cross-module `binding` of an imported ^:dynamic var
              "variant-xmodule.rkt"      ; an imported defunion's ctor/accessor/field/exhaustiveness surface == same-module
+             "scrutinee-narrowing.rkt"  ; match/instance? narrow a stable scrutinee to the proven member; binders still bind fields
              "world-check.rkt"          ; coherent multi-EDN candidate overlay + cross-module interfaces
              "defmacro.rkt"
              "diagnostic-kind.rkt"

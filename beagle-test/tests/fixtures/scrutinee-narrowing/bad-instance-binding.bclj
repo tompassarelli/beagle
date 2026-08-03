@@ -1,0 +1,12 @@
+#lang beagle/clj
+
+;; (b) The negative guard 929c3ee bought: a pattern binder is the FIELD, and
+;; narrowing the scrutinee must not resurrect the instance reading. `c` is Int.
+(defunion Shape
+  (Circle [radius: Int])
+  (Rect [width: Int height: String]))
+
+(defn area [s: Shape] -> Int
+  (match s
+    [(Circle c) (circle-radius c)]
+    [(Rect w h) w]))

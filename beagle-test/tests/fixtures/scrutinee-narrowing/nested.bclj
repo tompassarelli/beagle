@@ -1,0 +1,26 @@
+#lang beagle/clj
+
+;; (d) A nested match on the same scrutinee intersects with the arm's
+;; refinement; leaving the inner match restores it.
+(defunion Shape
+  (Circle [radius: Int])
+  (Rect [width: Int height: String]))
+
+(defn area [s: Shape other: Shape] -> Int
+  (match s
+    [(Circle r)
+     (+ (match other
+          [(Circle r2) (+ (circle-radius s) (circle-radius other))]
+          [(Rect a b) (circle-radius s)])
+        ;; the inner match restored `other`, never `s`
+        (circle-radius s))]
+    [(Rect a b) a]))
+
+;; Re-matching the same scrutinee intersects to the same member.
+(defn area-renested [s: Shape] -> Int
+  (match s
+    [(Circle r)
+     (match s
+       [(Circle r2) (circle-radius s)]
+       [(Rect a b) 0])]
+    [(Rect a b) a]))

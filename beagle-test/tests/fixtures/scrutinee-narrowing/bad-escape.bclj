@@ -1,0 +1,12 @@
+#lang beagle/clj
+
+;; The refinement is arm-local: after the match, `s` is the union again.
+(defunion Shape
+  (Circle [radius: Int])
+  (Rect [width: Int height: String]))
+
+(defn area [s: Shape] -> Int
+  (let [first: Int (match s
+                     [(Circle r) (circle-radius s)]
+                     [(Rect w h) w])]
+    (+ first (circle-radius s))))

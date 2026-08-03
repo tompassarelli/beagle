@@ -176,6 +176,15 @@
 
 ;; Parametric union definitions: union-name -> (hasheq 'params 'members 'member-fields)
 (define PARAMETRIC-UNIONS (make-hash))
+;; Reverse index: member-name -> the PARAMETRIC-UNIONS union that declares it.
+;; A narrowed scrutinee carries its member as (type-app Member union-args), and
+;; recovering the union is what keeps the substitution attached to the member.
+(define PARAMETRIC-MEMBER-UNION (make-hash))
+
+;; Bindings a `set!` targets anywhere in the top-level form under check. The
+;; scrutinee-narrowing rule refuses to refine an unstable binding, so this is
+;; deliberately a whole-form over-approximation of the lexical lifetime.
+(define current-unstable-bindings (make-parameter (seteq)))
 
 ;; NixOS option schema for validating dotted map keys in beagle/nix
 (define current-nixos-schema (make-parameter #f))
@@ -749,6 +758,26 @@
           names)))
   (values bindings aliases))
 
+;; Structural descent over the transparent AST rather than a per-node case:
+;; a mutation the stability test misses would silently license an unsound
+;; refinement, so a new form must never be able to hide a `set!`.
+(define (collect-set!-targets form)
+  (define out (mutable-seteq))
+  (let walk ([v form])
+    (cond
+      [(set!-form? v)
+       (define t (set!-form-target v))
+       (when (symbol? t) (set-add! out t))
+       (walk (set!-form-target v))
+       (walk (set!-form-value v))]
+      [(pair? v) (walk (car v)) (walk (cdr v))]
+      [(vector? v) (for ([x (in-vector v)]) (walk x))]
+      [(hash? v) (for ([(k x) (in-hash v)]) (walk k) (walk x))]
+      [(struct? v)
+       (for ([x (in-list (cdr (vector->list (struct->vector v))))]) (walk x))]
+      [else (void)]))
+  out)
+
 (define (type-check! prog)
   (when (and (eq? (program-mode prog) 'strict)
              (>= (current-check-profile) 1))
@@ -757,6 +786,7 @@
     (hash-clear! UNION-MEMBERS)
     (hash-clear! ENUM-TYPES)
     (hash-clear! PARAMETRIC-UNIONS)
+    (hash-clear! PARAMETRIC-MEMBER-UNION)
     (define env (build-initial-env prog))
     (define nix-schema
       (and (eq? (program-target prog) 'nix)
@@ -765,6 +795,8 @@
     (define macro-tbl (program-macro-derived-table prog))
     (parameterize ([current-union-members UNION-MEMBERS]
                    [current-enum-types ENUM-TYPES]
+                   [current-parametric-members
+                    (list->seteq (hash-keys PARAMETRIC-MEMBER-UNION))]
                    [current-check-target (program-target prog)]
                    [current-semantic-contracts (program-semantic-contracts prog)]
                    [current-error-definitions (hasheq)]
@@ -786,7 +818,8 @@
           ;; even when it fires on the outer def-form.
           (define macro-ctx (form-macro-derived-ctx macro-tbl form))
           (parameterize ([current-macro-expansion-ctx
-                          (if (eq? macro-ctx #f) #f macro-ctx)])
+                          (if (eq? macro-ctx #f) #f macro-ctx)]
+                         [current-unstable-bindings (collect-set!-targets form)])
             (check-target-form form)
             (check-form form env)))
         (check-module-interface-resolution! prog)
@@ -1903,7 +1936,8 @@
     (hash-set! UNION-MEMBERS union-name members))
   ;; parametric unions imported from other modules (for match narrowing with type-param substitution)
   (for ([(union-name pdef) (in-hash (program-imported-parametric-unions prog))])
-    (hash-set! PARAMETRIC-UNIONS union-name pdef))
+    (hash-set! PARAMETRIC-UNIONS union-name pdef)
+    (index-parametric-members! union-name pdef))
   ;; enums imported from sibling modules — register the name so keyword
   ;; literals type-check against the enum (Keyword <: EnumType, types.rkt).
   (for ([(enum-name _) (in-hash (program-imported-enums prog))])
@@ -2068,11 +2102,16 @@
   (hash-set! env '#%jvm-imports jvm-imports)
   env)
 
+(define (index-parametric-members! union-name pdef)
+  (for ([m (in-list (hash-ref pdef 'members '()))])
+    (hash-set! PARAMETRIC-MEMBER-UNION m union-name)))
+
 (define (register-parametric-union! name type-params members member-fields env)
-  (hash-set! PARAMETRIC-UNIONS name
-             (hasheq 'params type-params
-                     'members members
-                     'member-fields member-fields))
+  (define pdef (hasheq 'params type-params
+                       'members members
+                       'member-fields member-fields))
+  (hash-set! PARAMETRIC-UNIONS name pdef)
+  (index-parametric-members! name pdef)
   (register-union-member-fields! members member-fields type-params env))
 
 ;; The RECORD-FIELDS entry is load-bearing: it is what makes
@@ -2591,6 +2630,56 @@
     [(type-union? t) (ormap type-could-be-false? (type-union-alts t))]
     [else #f]))
 
+;; --- (instance? Member x) ---------------------------------------------------
+
+(define (last-separator-index s)
+  (for/fold ([best -1]) ([c (in-string s)] [i (in-naturals)])
+    (if (or (char=? c #\.) (char=? c #\/)) i best)))
+
+;; The canonical Beagle record/variant an `instance?` first argument names, by
+;; its last qualifier segment; #f for everything else, so an arbitrary JVM class
+;; hierarchy (whose nominal alternatives may overlap) never narrows.
+(define (instance-member-name datum)
+  (and (symbol? datum)
+       (let* ([s (symbol->string datum)]
+              [i (last-separator-index s)]
+              [base (if (>= i 0) (string->symbol (substring s (add1 i))) datum)])
+         (and (or (hash-has-key? RECORD-FIELDS base)
+                  (for/or ([(_u members) (in-hash UNION-MEMBERS)])
+                    (and (memq base members) #t)))
+              base))))
+
+;; Member removed from a CLOSED union only — a nominal defunion or a structural
+;; union. Any (open) is left alone.
+(define (subtract-member cur member-name)
+  (cond
+    [(any-type? cur) cur]
+    [(and (type-prim? cur)
+          (hash-ref UNION-MEMBERS (type-prim-name cur) #f))
+     => (lambda (members)
+          (define remaining (filter (lambda (m) (not (eq? m member-name))) members))
+          (cond
+            [(= (length remaining) (length members)) cur]
+            [(null? remaining) cur]
+            [(null? (cdr remaining)) (type-prim (car remaining))]
+            [else (type-union (map type-prim remaining))]))]
+    [else (remove-from-union cur (type-prim member-name))]))
+
+(define (instance-narrowings cond-expr env)
+  (and (call-form? cond-expr)
+       (eq? (call-form-fn cond-expr) 'instance?)
+       (= 2 (length (call-form-args cond-expr)))
+       (let ([member-name (instance-member-name (car (call-form-args cond-expr)))]
+             [var (cadr (call-form-args cond-expr))])
+         (and member-name
+              (stable-scrutinee-var var env)
+              (let ([cur (hash-ref env var #f)])
+                ;; true branch is type(x) ∩ Member, which for a nominal member
+                ;; is the member (with a parametric scrutinee's substitutions).
+                (and cur
+                     (cons (list (cons var (member-view-type member-name cur)))
+                           (list (cons var (subtract-member cur member-name))))))))))
+
 (define (test-narrowings cond-expr env)
   (cond
     [(< (current-check-profile) 2) (values '() '())]
@@ -2623,6 +2712,8 @@
         (if (= 1 (length args))
             (test-narrowings (car args) env)
             (values '() (fold-branch args #f)))]
+       [(instance-narrowings cond-expr env)
+        => (lambda (p) (values (car p) (cdr p)))]
        ;; Bare-symbol truthiness.
        [(symbol? cond-expr)
         (define cur (hash-ref env cond-expr #f))
@@ -2655,11 +2746,20 @@
 
 ;; --- match arm narrowing ---------------------------------------------------
 
+;; The union whose type params index a type-app's arguments: either the union
+;; itself, or a MEMBER VIEW of it (a narrowed scrutinee), which carries the
+;; union's arguments under the member's own ctor.
+(define (parametric-def-for-app t)
+  (and (type-app? t)
+       (let ([ctor (type-app-ctor t)])
+         (or (hash-ref PARAMETRIC-UNIONS ctor #f)
+             (let ([u (hash-ref PARAMETRIC-MEMBER-UNION ctor #f)])
+               (and u (hash-ref PARAMETRIC-UNIONS u #f)))))))
+
 (define (resolve-parametric-field-type field-type target-type)
+  (define pdef (parametric-def-for-app target-type))
   (cond
-    [(and (type-app? target-type)
-          (hash-has-key? PARAMETRIC-UNIONS (type-app-ctor target-type)))
-     (define pdef (hash-ref PARAMETRIC-UNIONS (type-app-ctor target-type)))
+    [pdef
      (define params (hash-ref pdef 'params))
      (define args (type-app-args target-type))
      (define bindings (make-hasheq))
@@ -2669,13 +2769,41 @@
      (apply-type-bindings field-type bindings)]
     [else field-type]))
 
-(define (narrow-env-for-match clause target-type env)
+;; --- scrutinee narrowing ----------------------------------------------------
+
+;; A member view is the member's ctor over the UNION's arguments, in the union's
+;; declared param order — resolve-poly-call and resolve-parametric-field-type
+;; both read the substitution back out of that shape.
+(define (member-view-type member-name target-type)
+  (define pdef (parametric-def-for-app target-type))
+  (cond
+    [(and pdef (memq member-name (hash-ref pdef 'members '())))
+     (type-app member-name (type-app-args target-type))]
+    [else (type-prim member-name)]))
+
+;; The scrutinee a match may refine: a bare lexical name that is stable for its
+;; whole lifetime. `set!` anywhere in the form makes it unstable; a dynamic var
+;; can be rebound under the arm. Field/atom mutation does not participate — it
+;; cannot change the value's nominal type.
+(define (stable-scrutinee-var target env)
+  (and (symbol? target)
+       (hash-has-key? env target)
+       (not (set-member? (current-unstable-bindings) target))
+       (not (let ([dyn (hash-ref env '#%dynamic-vars #f)])
+              (and dyn (set-member? dyn target))))
+       target))
+
+(define (narrow-env-for-match clause target-type env [scrutinee #f])
   (define pat (match-clause-pattern clause))
   (cond
     [(pat-record? pat)
      (define rec-name (pat-record-type-name pat))
      (define bindings (pat-record-bindings pat))
      (define arm-env (mut-copy env))
+     ;; Scrutinee first: a pattern binder of the same name legitimately shadows
+     ;; it with the FIELD (929c3ee), and that overlay must win.
+     (when scrutinee
+       (hash-set! arm-env scrutinee (member-view-type rec-name target-type)))
      (cond
        [(hash-has-key? RECORD-FIELDS rec-name)
         (define field-map (hash-ref RECORD-FIELDS rec-name))
@@ -2901,6 +3029,14 @@
           (hash-ref UNION-MEMBERS (type-prim-name target-type) #f))
      (field-type-across-members
       kw-sym (hash-ref UNION-MEMBERS (type-prim-name target-type)) target-type)]
+    ;; Member view of a parametric union (a narrowed scrutinee) — one member, so
+    ;; its declared key is non-nullable, substitutions applied.
+    [(and (type-app? target-type)
+          (hash-has-key? PARAMETRIC-MEMBER-UNION (type-app-ctor target-type))
+          (hash-has-key? RECORD-FIELDS (type-app-ctor target-type)))
+     (define field-map (hash-ref RECORD-FIELDS (type-app-ctor target-type)))
+     (define ft (hash-ref field-map kw-sym #f))
+     (if ft (resolve-parametric-field-type ft target-type) ANY)]
     ;; Parametric record-union applied to type args (e.g. (Result String Int)).
     [(and (type-app? target-type)
           (hash-ref UNION-MEMBERS (type-app-ctor target-type) #f))
@@ -3718,9 +3854,10 @@
      ANY]
     [(match-form? e)
      (define target-type (infer-expr (match-form-target e) env))
+     (define scrutinee (stable-scrutinee-var (match-form-target e) env))
      (define arm-types
        (for/list ([c (in-list (match-form-clauses e))])
-         (define arm-env (narrow-env-for-match c target-type env))
+         (define arm-env (narrow-env-for-match c target-type env scrutinee))
          (last-expr-type (match-clause-body c) arm-env)))
      (when (>= (current-check-profile) 2)
        (check-match-exhaustiveness e env target-type))
@@ -4107,6 +4244,17 @@
   (define fixed (type-fn-params body))
   (define rest-t (type-fn-rest-type body))
   (define n-fixed (length fixed))
+  ;; A member accessor declares the BARE member prim, so the type-var walk has
+  ;; nothing to unify; a member view's args are the union's args in param order,
+  ;; which is exactly the accessor's poly-var order.
+  (for ([pt (in-list fixed)]
+        [at (in-list arg-types)])
+    (when (and (type-prim? pt) (type-app? at)
+               (eq? (type-prim-name pt) (type-app-ctor at))
+               (hash-has-key? PARAMETRIC-MEMBER-UNION (type-app-ctor at)))
+      (for ([v (in-list (type-poly-vars poly-type))]
+            [a (in-list (type-app-args at))])
+        (unless (hash-has-key? bindings v) (hash-set! bindings v a)))))
   (for ([pt (in-list fixed)]
         [at (in-list arg-types)])
     (infer-type-var-bindings pt at bindings))
@@ -4493,6 +4641,8 @@
                    [current-raising-functions (hasheq)]
                    [current-union-members UNION-MEMBERS]
                    [current-enum-types ENUM-TYPES]
+                   [current-parametric-members
+                    (list->seteq (hash-keys PARAMETRIC-MEMBER-UNION))]
                    [current-nixos-schema nix-schema])
       (define-values (regex-bindings regex-string-ops)
         (with-handlers ([exn:fail?
@@ -4514,7 +4664,8 @@
           (define macro-ctx (form-macro-derived-ctx macro-tbl form))
           (with-handlers ([exn:fail? (lambda (e) (error-handler e orig-stx))])
             (parameterize ([current-macro-expansion-ctx
-                            (if (eq? macro-ctx #f) #f macro-ctx)])
+                            (if (eq? macro-ctx #f) #f macro-ctx)]
+                           [current-unstable-bindings (collect-set!-targets form)])
               (check-form form env)
               (when nix-free-bound
                 (check-nix-free-dotted-form! form nix-free-bound (program-src-table prog))))))

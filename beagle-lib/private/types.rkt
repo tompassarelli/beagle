@@ -58,6 +58,13 @@
 (define current-union-members (make-parameter (hash)))
 ;; Set by checker: enum type names (Keyword is compatible with these)
 (define current-enum-types (make-parameter (hasheq)))
+;; Set by checker: members of PARAMETRIC unions. A narrowed scrutinee is
+;; (type-app Member union-args) — the member with its substitutions retained —
+;; and only these ctors may be read that way.
+(define current-parametric-members (make-parameter (seteq)))
+(define (member-view? t)
+  (and (type-app? t)
+       (set-member? (current-parametric-members) (type-app-ctor t))))
 ;; Set by parser: user-defined parametric type names (e.g. Result from parametric defunion)
 (define current-user-parametric (make-parameter (set)))
 ;; G1 — Set by parser: user type aliases (defalias Name <type>) -> already-parsed type.
@@ -313,6 +320,11 @@
     [(type-union? actual)
      (andmap (lambda (alt) (type-compatible? alt expected))
              (type-union-alts actual))]
+
+    ;; A member view IS its member; the retained substitutions add information,
+    ;; they never restrict where the member is accepted.
+    [(member-view? actual) (type-compatible? (type-prim (type-app-ctor actual)) expected)]
+    [(member-view? expected) (type-compatible? actual (type-prim (type-app-ctor expected)))]
 
     ;; Prim compatible with parametric union type-app: Ok compatible with (Result T E)
     [(and (type-prim? actual) (type-app? expected)
@@ -628,6 +640,8 @@
  current-type-vars
  current-union-members
  current-enum-types
+ current-parametric-members
+ member-view?
  current-user-parametric
  current-type-aliases
  current-qualified-type-resolver
