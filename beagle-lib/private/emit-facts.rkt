@@ -100,13 +100,29 @@
     [(def-form? x)    (emit-def! x)]
     [(call-form? x)   (emit-call! x)]
     [(record-form? x) (emit-record! x)]
+    [(param? x)       (emit-param! x)]
     [else             (emit-generic! x)]))
+
+;; Signature vocabulary mirrors ast-json.rkt's param->json / defn-form case
+;; (params[].name+ann, ret) so downstream Datalog consumers can query either
+;; the AST-JSON or the CNF facts projection with the same predicate names.
+(define (emit-param! x)
+  (define id (fresh-id!))
+  (emit! id "form-kind" "param")
+  (emit! id "name" (symbol->string (param-name x)))
+  (when (param-type x) (field! id "ann" (param-type x)))
+  id)
 
 (define (emit-defn! x)
   (define id (fresh-id!))
   (emit! id "form-kind" "defn")
   (emit! id "name" (symbol->string (defn-form-name x)))
   (when (defn-form-private? x) (emit! id "private" #t))
+  (field! id "params" (defn-form-params x))
+  (when (defn-form-rest-param x) (field! id "rest" (defn-form-rest-param x)))
+  (when (defn-form-return-type x) (field! id "ret" (defn-form-return-type x)))
+  (when (defn-form-raises x) (field! id "raises" (defn-form-raises x)))
+  (when (defn-form-doc x) (emit! id "doc" (defn-form-doc x)))
   (define b (seq->id (defn-form-body x)))
   (emit! id "body" b)
   (emit! id "child" b)
@@ -116,6 +132,7 @@
   (define id (fresh-id!))
   (emit! id "form-kind" "def")
   (emit! id "name" (symbol->string (def-form-name x)))
+  (when (def-form-type x) (field! id "ann" (def-form-type x)))
   (field! id "value" (def-form-value x))
   id)
 
