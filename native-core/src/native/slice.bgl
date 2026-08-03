@@ -1,0 +1,425 @@
+;; @upstream:text-arm — operator-authorized for Native Stage 3; re-ingest this
+;; module into the graph after landing. Authority: North thread 019fbd6c.
+(ns native.slice
+  (:require [native.core :as core]
+            [native.worlds :as worlds]
+            [native.lower :as lower]
+            [native.obligations :as obligations]
+            [native.c11 :as c11]))
+
+(define-mode strict)
+
+;; One row of the canonical source-fact projection: subject and object name
+;; source nodes by ordinal; kind is "t" when the object is a literal text.
+(defrecord SliceFactV0
+  [subject: String predicate: String kind: String object: String])
+
+(defrecord SliceWorldV0
+  [types: (Vec core/TypeDef) layouts: (Vec core/LayoutDef)])
+
+(defn char-at [text: String index: Int] -> String
+  (subs text index (+ index 1)))
+
+(defn split-on [text: String separator: String] -> (Vec String)
+  (loop [index: Int 0 start: Int 0 parts: (Vec String) []]
+    (if (>= index (count text))
+      (conj parts (subs text start index))
+      (if (= separator (char-at text index))
+        (recur (+ index 1) (+ index 1) (conj parts (subs text start index)))
+        (recur (+ index 1) start parts)))))
+
+(defn parse-row [line: String] -> (Vec SliceFactV0)
+  (let [cells: (Vec String) (split-on line "\t")]
+    (if (= 4 (count cells))
+      [(->SliceFactV0 (nth cells 0) (nth cells 1) (nth cells 2) (nth cells 3))]
+      [])))
+
+(defn parse-facts [text: String] -> (Vec SliceFactV0)
+  (let [lines: (Vec String) (split-on text "\n")]
+    (loop [index: Int 0 rows: (Vec SliceFactV0) []]
+      (if (>= index (count lines))
+        rows
+        (recur (+ index 1)
+          (vec (concat rows (parse-row (nth lines index)))))))))
+
+(defn string-in? [values: (Vec String) target: String] -> Bool
+  (loop [index: Int 0]
+    (if (>= index (count values))
+      false
+      (if (= target (nth values index)) true (recur (+ index 1))))))
+
+(defn conj-unique [values: (Vec String) candidate: String] -> (Vec String)
+  (if (string-in? values candidate) values (conj values candidate)))
+
+(defn node-names [rows: (Vec SliceFactV0)] -> (Vec String)
+  (loop [index: Int 0 names: (Vec String) []]
+    (if (>= index (count rows))
+      names
+      (let [row: SliceFactV0 (nth rows index)
+            with-subject: (Vec String) (conj-unique names (slicefactv0-subject row))]
+        (recur (+ index 1)
+          (if (= "t" (slicefactv0-kind row))
+            with-subject
+            (conj-unique with-subject (slicefactv0-object row))))))))
+
+(defn text-values [rows: (Vec SliceFactV0)] -> (Vec String)
+  (loop [index: Int 0 values: (Vec String) []]
+    (if (>= index (count rows))
+      values
+      (let [row: SliceFactV0 (nth rows index)
+            with-predicate: (Vec String)
+            (conj-unique values (slicefactv0-predicate row))]
+        (recur (+ index 1)
+          (if (= "t" (slicefactv0-kind row))
+            (conj-unique with-predicate (slicefactv0-object row))
+            with-predicate))))))
+
+(defn slice-id [domain: String parts: (Vec String)] -> core/NativeId
+  (core/canonical-id (str "native-slice-v0/" domain) parts))
+
+(defn node-id [name: String] -> core/NativeId (slice-id "node" [name]))
+
+(defn text-id [value: String] -> core/NativeId (slice-id "text" [value]))
+
+(defn marker-nodes [names: (Vec String)] -> (Vec worlds/TermNodeV0)
+  (mapv
+    (fn [name: String] -> worlds/TermNodeV0
+      (worlds/->TermNodeV0 (node-id name) (worlds/->TextTermV0 "source-node-v0")))
+    names))
+
+(defn text-nodes [values: (Vec String)] -> (Vec worlds/TermNodeV0)
+  (mapv
+    (fn [value: String] -> worlds/TermNodeV0
+      (worlds/->TermNodeV0 (text-id value) (worlds/->TextTermV0 value)))
+    values))
+
+(defn fact-nodes [rows: (Vec SliceFactV0)] -> (Vec worlds/TermNodeV0)
+  (loop [index: Int 0 nodes: (Vec worlds/TermNodeV0) []]
+    (if (>= index (count rows))
+      nodes
+      (let [row: SliceFactV0 (nth rows index)
+            object: core/NativeId
+            (if (= "t" (slicefactv0-kind row))
+              (text-id (slicefactv0-object row))
+              (node-id (slicefactv0-object row)))]
+        (recur (+ index 1)
+          (conj nodes
+            (worlds/->TermNodeV0
+              (slice-id "fact" [(str index)])
+              (worlds/->TripleTermV0
+                (node-id (slicefactv0-subject row))
+                (text-id (slicefactv0-predicate row))
+                object))))))))
+
+;; The projection reserves node name "0" for the module root so the sealed
+;; source identity never depends on how many forms the module happens to have.
+(defn source-world
+  [rows: (Vec SliceFactV0) module-name: String relative-path: String]
+  -> worlds/SourceProgramWorldV0
+  (let [root: core/NativeId (node-id "0")
+        nodes: (Vec worlds/TermNodeV0)
+        (vec (concat (marker-nodes (node-names rows))
+               (text-nodes (text-values rows))
+               (fact-nodes rows)))]
+    (worlds/->SourceProgramWorldV0
+      (worlds/->TermGraphV0 root nodes)
+      [(worlds/->SourceModuleV0
+         (slice-id "module" [module-name])
+         module-name
+         relative-path
+         (worlds/content-digest (str "slice-source-v0/" module-name))
+         (worlds/content-digest (str "slice-interface-v0/" module-name))
+         root)]
+      []
+      [])))
+
+(defn type-field-refs [definition: core/TypeDef] -> (Vec core/NativeId)
+  (let [shape: core/TypeShape (core/typedef-shape definition)]
+    (if (instance? native.core.RecordType shape)
+      (mapv
+        (fn [field: core/TypeField] -> core/NativeId (core/typefield-type-id field))
+        (core/recordtype-fields shape))
+      [])))
+
+(defn record-type? [definition: core/TypeDef] -> Bool
+  (instance? native.core.RecordType (core/typedef-shape definition)))
+
+(defn find-type [types: (Vec core/TypeDef) target: core/NativeId] -> (U core/TypeDef Nil)
+  (loop [index: Int 0]
+    (if (>= index (count types))
+      nil
+      (let [definition: core/TypeDef (nth types index)]
+        (if (core/native-id= (core/typedef-id definition) target)
+          definition
+          (recur (+ index 1)))))))
+
+(defn type-id-in? [ids: (Vec core/NativeId) target: core/NativeId] -> Bool
+  (core/id-in? ids target))
+
+(defn supported-record-ids
+  [types: (Vec core/TypeDef) layouts: (Vec core/LayoutDef)] -> (Vec core/NativeId)
+  (loop [index: Int 0 ids: (Vec core/NativeId) []]
+    (if (>= index (count types))
+      ids
+      (let [definition: core/TypeDef (nth types index)]
+        (recur (+ index 1)
+          (if (and (record-type? definition)
+                   (c11/type-supported? definition layouts))
+            (conj ids (core/typedef-id definition))
+            ids))))))
+
+;; A record survives only when every field type also survives, so the kept set
+;; shrinks to a fixpoint before the scalars it reaches are pulled in.
+(defn closed-record-ids
+  [types: (Vec core/TypeDef) layouts: (Vec core/LayoutDef) candidates: (Vec core/NativeId)]
+  -> (Vec core/NativeId)
+  (let [next: (Vec core/NativeId)
+        (filterv
+          (fn [candidate: core/NativeId] -> Bool
+            (let [definition: (U core/TypeDef Nil) (find-type types candidate)]
+              (if (nil? definition)
+                false
+                (every?
+                  (fn [reference: core/NativeId] -> Bool
+                    (let [referenced: (U core/TypeDef Nil) (find-type types reference)]
+                      (if (nil? referenced)
+                        false
+                        (if (record-type? referenced)
+                          (type-id-in? candidates reference)
+                          (c11/type-supported? referenced layouts)))))
+                  (type-field-refs definition)))))
+          candidates)]
+    (if (= (count next) (count candidates))
+      next
+      (closed-record-ids types layouts next))))
+
+(defn scalar-ids-for
+  [types: (Vec core/TypeDef) records: (Vec core/NativeId)] -> (Vec core/NativeId)
+  (loop [index: Int 0 ids: (Vec core/NativeId) []]
+    (if (>= index (count records))
+      ids
+      (let [definition: (U core/TypeDef Nil) (find-type types (nth records index))
+            references: (Vec core/NativeId)
+            (if (nil? definition) [] (type-field-refs definition))]
+        (recur (+ index 1)
+          (loop [inner: Int 0 collected: (Vec core/NativeId) ids]
+            (if (>= inner (count references))
+              collected
+              (let [reference: core/NativeId (nth references inner)]
+                (recur (+ inner 1)
+                  (if (or (type-id-in? records reference)
+                          (type-id-in? collected reference))
+                    collected
+                    (conj collected reference)))))))))))
+
+;; The C17 reference slice is a projection, never a claim about the whole
+;; world: it keeps the source record ABI and the scalars those records reach,
+;; and drops every shape the restricted materializer cannot spell.
+(defn c17-projection
+  [types: (Vec core/TypeDef) layouts: (Vec core/LayoutDef)] -> SliceWorldV0
+  (let [records: (Vec core/NativeId)
+        (closed-record-ids types layouts (supported-record-ids types layouts))
+        scalars: (Vec core/NativeId) (scalar-ids-for types records)
+        kept: (Vec core/NativeId) (vec (concat records scalars))
+        kept-types: (Vec core/TypeDef)
+        (filterv
+          (fn [definition: core/TypeDef] -> Bool
+            (type-id-in? kept (core/typedef-id definition)))
+          types)
+        kept-layouts: (Vec core/LayoutDef)
+        (filterv
+          (fn [layout: core/LayoutDef] -> Bool
+            (type-id-in? kept (core/layoutdef-type-id layout)))
+          layouts)]
+    (->SliceWorldV0 kept-types kept-layouts)))
+
+(defn projected-world
+  [world: core/NativeWorld projection: SliceWorldV0] -> core/NativeWorld
+  (core/->NativeWorld
+    (core/nativeworld-id world)
+    (core/nativeworld-parent world)
+    (core/nativeworld-compiler-pass world)
+    (sliceworldv0-types projection)
+    (core/nativeworld-effects world)
+    (core/nativeworld-regions world)
+    (core/nativeworld-capabilities world)
+    (sliceworldv0-layouts projection)
+    (core/nativeworld-functions world)
+    (core/nativeworld-allowed-effects world)
+    (core/nativeworld-allowed-regions world)
+    (core/nativeworld-allowed-capabilities world)
+    (core/nativeworld-abis world)
+    (core/nativeworld-observations world)))
+
+(defn type-emitted? [emitted: (Vec core/TypeDef) target: core/NativeId] -> Bool
+  (loop [index: Int 0]
+    (if (>= index (count emitted))
+      false
+      (if (core/native-id= (core/typedef-id (nth emitted index)) target)
+        true
+        (recur (+ index 1))))))
+
+(defn ready-type? [emitted: (Vec core/TypeDef) definition: core/TypeDef] -> Bool
+  (every?
+    (fn [reference: core/NativeId] -> Bool (type-emitted? emitted reference))
+    (type-field-refs definition)))
+
+;; c11/ordered-types sorts by identity alone, so a record typedef can name a
+;; scalar typedef the header has not reached yet; this reorders that sequence
+;; without changing its membership.
+(defn dependency-ordered [types: (Vec core/TypeDef)] -> (Vec core/TypeDef)
+  (loop [pending: (Vec core/TypeDef) (c11/ordered-types types)
+         emitted: (Vec core/TypeDef) []]
+    (if (= 0 (count pending))
+      emitted
+      (let [ready: (Vec core/TypeDef)
+            (filterv
+              (fn [definition: core/TypeDef] -> Bool (ready-type? emitted definition))
+              pending)]
+        (if (= 0 (count ready))
+          (vec (concat emitted pending))
+          (recur
+            (filterv
+              (fn [definition: core/TypeDef] -> Bool
+                (not (ready-type? emitted definition)))
+              pending)
+            (vec (concat emitted ready))))))))
+
+(defunion SliceMaterializationV0
+  (SliceMaterializedV0 [artifact: c11/C11Artifact])
+  (SliceRefusedV0 [detail: String]))
+
+(defn materialize
+  [world: core/NativeWorld module-index: Int] -> SliceMaterializationV0
+  (let [validation: core/ValidationReport (core/validate-world world)]
+    (cond
+      (not (core/validationreport-passed validation))
+      (->SliceRefusedV0 "projected world failed Native Core validation")
+
+      (not (c11/world-supported? world))
+      (->SliceRefusedV0 "projected world leaves the restricted C17 reference slice")
+
+      :else
+      (let [types: (Vec core/TypeDef)
+            (dependency-ordered (core/nativeworld-types world))
+            layouts: (Vec core/LayoutDef)
+            (c11/ordered-layouts (core/nativeworld-layouts world))
+            functions: (Vec core/FunctionDef)
+            (c11/ordered-functions (core/nativeworld-functions world))
+            header-name: String (str "module_" module-index ".h")]
+        (->SliceMaterializedV0
+          (c11/->C11Artifact
+            header-name
+            (c11/emit-header types layouts functions module-index)
+            (str "module_" module-index ".c")
+            (c11/emit-source functions types module-index header-name)))))))
+
+(defn obligation-names [] -> (Vec String)
+  ["valid-ssa" "exhaustive-matches" "closed-layouts" "checked-arithmetic"
+   "legal-abi" "discharged-tokens" "bounded-effects"])
+
+(defn obligation-report
+  [label: String world: core/NativeWorld] -> String
+  (let [verdicts: (Vec obligations/ObligationVerdictV0)
+        (obligations/validate-native-world world)
+        names: (Vec String) (obligation-names)]
+    (loop [index: Int 0 report: String ""]
+      (if (>= index (count verdicts))
+        report
+        (recur (+ index 1)
+          (str report label " "
+            (if (obligations/obligation-passed? (nth verdicts index)) "PASS" "FAIL")
+            " " (nth names index) "\n"))))))
+
+(defn type-names [types: (Vec core/TypeDef)] -> String
+  (loop [index: Int 0 report: String ""]
+    (if (>= index (count types))
+      report
+      (recur (+ index 1)
+        (str report "type " (core/typedef-name (nth types index)) "\n")))))
+
+(defn pending-report [obligation: core/ReceiptObligationV0] -> String
+  (str "pending " (core/receiptobligationv0-detail obligation) "\n"))
+
+(defn pending-reports [items: (Vec core/ReceiptObligationV0)] -> String
+  (loop [index: Int 0 report: String ""]
+    (if (>= index (count items))
+      report
+      (recur (+ index 1) (str report (pending-report (nth items index)))))))
+
+(defn native-sealed
+  [result: lower/NativeLoweringResultV0] -> worlds/SealedNativeWorldV0
+  (if (instance? native.lower.NativeLoweringCompleteV0 result)
+    (lower/nativeloweringcompletev0-sealed result)
+    (lower/nativeloweringpendingv0-sealed result)))
+
+(defn native-pending
+  [result: lower/NativeLoweringResultV0] -> (Vec core/ReceiptObligationV0)
+  (if (instance? native.lower.NativeLoweringPendingV0 result)
+    (lower/nativeloweringpendingv0-obligations result)
+    []))
+
+;; Writes the C set into artifacts-dir and returns the run report; every stage
+;; that refuses returns its own report rather than throwing.
+(defn emit-slice!
+  [facts-path: String
+   module-name: String
+   relative-path: String
+   artifacts-dir: String
+   compiler-commit: String]
+  -> String
+  (let [rows: (Vec SliceFactV0) (parse-facts (slurp facts-path))
+        configuration: (Vec String) ["profile=3"]
+        world: worlds/SourceProgramWorldV0
+        (source-world rows module-name relative-path)
+        seal-result: lower/SourceSealResultV0
+        (lower/seal-source-world world compiler-commit configuration)]
+    (if (not (instance? native.lower.SourceSealAcceptedV0 seal-result))
+      "stage source-seal REJECTED\n"
+      (let [sealed-source: worlds/SealedSourceWorldV0
+            (lower/sourcesealacceptedv0-sealed seal-result)
+            typing-result: lower/TypingResultV0
+            (lower/lower-typed-world sealed-source compiler-commit configuration)]
+        (if (not (instance? native.lower.TypingAcceptedV0 typing-result))
+          "stage source-seal ACCEPTED\nstage source-to-typed REJECTED\n"
+          (let [sealed-typed: worlds/SealedTypedWorldV0
+                (lower/typingacceptedv0-sealed typing-result)
+                slice: lower/TypedSliceV0 (lower/typingacceptedv0-slice typing-result)
+                native-result: lower/NativeLoweringResultV0
+                (lower/lower-native-world sealed-typed slice compiler-commit configuration)
+                sealed-native: worlds/SealedNativeWorldV0 (native-sealed native-result)
+                program: core/NativeWorld
+                (worlds/nativeworldv0-program
+                  (worlds/sealednativeworldv0-world sealed-native))
+                projection: SliceWorldV0
+                (c17-projection (core/nativeworld-types program)
+                  (core/nativeworld-layouts program))
+                projected: core/NativeWorld (projected-world program projection)
+                result: SliceMaterializationV0 (materialize projected 0)
+                head: String
+                (str "stage source-seal ACCEPTED\n"
+                  "stage source-to-typed ACCEPTED\n"
+                  "stage typed-to-native "
+                  (if (instance? native.lower.NativeLoweringCompleteV0 native-result)
+                    "COMPLETE" "PENDING")
+                  "\n"
+                  "world-types " (str (count (core/nativeworld-types program))) "\n"
+                  "world-layouts " (str (count (core/nativeworld-layouts program))) "\n"
+                  "world-functions " (str (count (core/nativeworld-functions program))) "\n"
+                  "world-abis " (str (count (core/nativeworld-abis program))) "\n"
+                  "projected-types " (str (count (sliceworldv0-types projection))) "\n"
+                  (type-names (sliceworldv0-types projection))
+                  (obligation-report "obligation-world" program)
+                  (obligation-report "obligation-projection" projected)
+                  (pending-reports (native-pending native-result)))]
+            (match result
+              [(SliceRefusedV0 detail) (str head "materialize REFUSED " detail "\n")]
+              [(SliceMaterializedV0 artifact)
+               (do
+                 (spit (str artifacts-dir "/" (c11/c11artifact-header-name artifact))
+                   (c11/c11artifact-header-text artifact))
+                 (spit (str artifacts-dir "/" (c11/c11artifact-source-name artifact))
+                   (c11/c11artifact-source-text artifact))
+                 (str head "materialize OK "
+                   (c11/c11artifact-header-name artifact) " "
+                   (c11/c11artifact-source-name artifact) "\n"))])))))))
