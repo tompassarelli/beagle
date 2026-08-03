@@ -1,0 +1,14 @@
+source-path=/home/tom/code/fram/main/src/fram/types.bclj
+source-bytes=9463
+source-digest-bytes=28598
+typed-digest-bytes=91268
+native-digest-bytes=469099
+typed-source-bound=true
+native-typed-bound=true
+typed-host-erased=true
+native-host-erased=true
+typed-to-native-status=sealed-types-only-pending-no-function-abi
+materialized-types=2
+materialized-layouts=2
+materializer=native.c11/materialize-world
+c-standard=c17
