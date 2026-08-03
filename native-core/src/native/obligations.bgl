@@ -302,6 +302,197 @@
           (->ExhaustiveMatchesDiagnosticV0
             (core/functiondef-id function)))))))
 
+(defn find-layout [layouts :- (Vec core/LayoutDef) type-id :- core/NativeId]
+  :- (U core/LayoutDef Nil)
+  (loop [index :- Int 0]
+    (cond
+      (>= index (count layouts)) nil
+      (core/native-id= (core/layoutdef-type-id (nth layouts index)) type-id)
+      (nth layouts index)
+      :else (recur (+ index 1)))))
+
+(defn layout-count [layouts :- (Vec core/LayoutDef) type-id :- core/NativeId]
+  :- Int
+  (loop [index :- Int 0 found :- Int 0]
+    (if (>= index (count layouts))
+      found
+      (recur (+ index 1)
+        (if (core/native-id= (core/layoutdef-type-id (nth layouts index)) type-id)
+          (+ found 1)
+          found)))))
+
+(defn aligned? [offset :- Int alignment :- Int] :- Bool
+  (and (> alignment 0) (= 0 (mod offset alignment))))
+
+(defn field-layout-valid? [layouts :- (Vec core/LayoutDef)
+                           parent-size :- Int
+                           field :- core/FieldLayoutV0] :- Bool
+  (let [field-type :- core/NativeId (get field :type-id)
+        child :- (U core/LayoutDef Nil) (find-layout layouts field-type)
+        offset :- Int (get field :offset-bytes)
+        alignment :- Int (get field :align-bytes)]
+    (and (not (nil? child))
+      (aligned? offset alignment)
+      (= alignment (core/layoutdef-align-bytes child))
+      (<= (+ offset (core/layoutdef-size-bytes child)) parent-size))))
+
+(defn fields-nonoverlapping? [layouts :- (Vec core/LayoutDef)
+                             fields :- (Vec core/FieldLayoutV0)] :- Bool
+  (loop [left-index :- Int 0]
+    (if (>= left-index (count fields))
+      true
+      (let [left :- core/FieldLayoutV0 (nth fields left-index)
+            left-layout :- (U core/LayoutDef Nil)
+            (find-layout layouts (get left :type-id))]
+        (if (nil? left-layout)
+          false
+          (let [left-start :- Int (get left :offset-bytes)
+                left-end :- Int (+ left-start (core/layoutdef-size-bytes left-layout))]
+            (if
+              (loop [right-index :- Int (+ left-index 1)]
+                (if (>= right-index (count fields))
+                  true
+                  (let [right :- core/FieldLayoutV0 (nth fields right-index)
+                        right-layout :- (U core/LayoutDef Nil)
+                        (find-layout layouts (get right :type-id))]
+                    (if (nil? right-layout)
+                      false
+                      (let [right-start :- Int (get right :offset-bytes)
+                            right-end :- Int
+                            (+ right-start (core/layoutdef-size-bytes right-layout))]
+                        (if (or (<= left-end right-start) (<= right-end left-start))
+                          (recur (+ right-index 1))
+                          false))))))
+              (recur (+ left-index 1))
+              false)))))))
+
+(defn unique-ints? [values :- (Vec Int)] :- Bool
+  (loop [index :- Int 0 seen :- (Vec Int) []]
+    (if (>= index (count values))
+      true
+      (let [value :- Int (nth values index)]
+        (if (some? (some (fn [prior :- Int] :- Bool (= prior value)) seen))
+          false
+          (recur (+ index 1) (conj seen value)))))))
+
+(defn record-layout-valid? [type-shape :- Any layout-shape :- Any
+                            layouts :- (Vec core/LayoutDef)
+                            parent-size :- Int] :- Bool
+  (let [type-fields :- (Vec core/TypeField) (get type-shape :fields [])
+        fields :- (Vec core/FieldLayoutV0) (get layout-shape :fields [])
+        expected-ids :- (Vec core/NativeId)
+        (mapv (fn [field :- core/TypeField] :- core/NativeId
+                (core/typefield-id field)) type-fields)
+        field-ids :- (Vec core/NativeId)
+        (mapv (fn [field :- core/FieldLayoutV0] :- core/NativeId
+                (get field :field-id)) fields)]
+    (and (= (count expected-ids) (count field-ids))
+      (core/unique-ids? field-ids)
+      (core/ids-in? expected-ids field-ids)
+      (every? (fn [field :- core/FieldLayoutV0] :- Bool
+                (field-layout-valid? layouts parent-size field)) fields)
+      (fields-nonoverlapping? layouts fields))))
+
+(defn union-payload-valid? [layouts :- (Vec core/LayoutDef)
+                            parent-size :- Int
+                            variant :- core/UnionVariantLayoutV0] :- Bool
+  (let [payload-type :- (U core/NativeId Nil) (get variant :payload-type)
+        offset :- Int (get variant :payload-offset-bytes)]
+    (if (nil? payload-type)
+      (>= offset 0)
+      (let [payload-layout :- (U core/LayoutDef Nil)
+            (find-layout layouts payload-type)]
+        (and (not (nil? payload-layout))
+          (aligned? offset (core/layoutdef-align-bytes payload-layout))
+          (<= (+ offset (core/layoutdef-size-bytes payload-layout))
+            parent-size))))))
+
+(defn union-layout-valid? [type-shape :- Any layout-shape :- Any
+                           layouts :- (Vec core/LayoutDef)
+                           parent-size :- Int] :- Bool
+  (let [type-variants :- (Vec core/TypeVariant) (get type-shape :variants [])
+        variants :- (Vec core/UnionVariantLayoutV0)
+        (get layout-shape :variants [])
+        expected-ids :- (Vec core/NativeId)
+        (mapv (fn [variant :- core/TypeVariant] :- core/NativeId
+                (core/typevariant-id variant)) type-variants)
+        variant-ids :- (Vec core/NativeId)
+        (mapv (fn [variant :- core/UnionVariantLayoutV0] :- core/NativeId
+                (get variant :variant-id)) variants)
+        tags :- (Vec Int)
+        (mapv (fn [variant :- core/UnionVariantLayoutV0] :- Int
+                (get variant :tag)) variants)
+        tag-type :- core/NativeId (get layout-shape :tag-type)
+        tag-layout :- (U core/LayoutDef Nil) (find-layout layouts tag-type)
+        tag-offset :- Int (get layout-shape :tag-offset-bytes)]
+    (and (not (nil? tag-layout))
+      (aligned? tag-offset (core/layoutdef-align-bytes tag-layout))
+      (<= (+ tag-offset (core/layoutdef-size-bytes tag-layout)) parent-size)
+      (= (count expected-ids) (count variant-ids))
+      (core/unique-ids? variant-ids)
+      (core/ids-in? expected-ids variant-ids)
+      (unique-ints? tags)
+      (every? (fn [variant :- core/UnionVariantLayoutV0] :- Bool
+                (union-payload-valid? layouts parent-size variant))
+        variants))))
+
+(defn layout-shape-exact? [type-shape :- Any layout-shape :- Any
+                           layouts :- (Vec core/LayoutDef)
+                           parent-size :- Int] :- Bool
+  (cond
+    (some? (get type-shape :kind nil))
+    (let [representation :- Any (get layout-shape :representation nil)
+          bit-width :- Int (get representation :bit-width 0)]
+      (and (not (nil? representation))
+        (> bit-width 0)
+        (= 0 (mod bit-width 8))
+        (<= (quot bit-width 8) parent-size)))
+    (some? (get type-shape :fields nil))
+    (and (some? (get layout-shape :fields nil))
+      (record-layout-valid? type-shape layout-shape layouts parent-size))
+    (some? (get type-shape :variants nil))
+    (and (some? (get layout-shape :variants nil))
+      (union-layout-valid? type-shape layout-shape layouts parent-size))
+    (some? (get type-shape :element-type nil))
+    (let [stride :- Int (get layout-shape :stride-bytes 0)
+          element-type :- core/NativeId (get type-shape :element-type)
+          element-layout :- (U core/LayoutDef Nil)
+          (find-layout layouts element-type)]
+      (and (not (nil? element-layout))
+        (> stride 0)
+        (aligned? stride (core/layoutdef-align-bytes element-layout))
+        (<= (core/layoutdef-size-bytes element-layout) stride)))
+    (some? (get type-shape :target-type nil))
+    (and (some? (get layout-shape :target-type nil))
+      (> parent-size 0))
+    (some? (get type-shape :value-type nil))
+    (and (some? (get layout-shape :variants nil)) (> parent-size 0))
+    :else false))
+
+(defn type-layout-closed? [layouts :- (Vec core/LayoutDef)
+                           type-def :- core/TypeDef] :- Bool
+  (let [type-id :- core/NativeId (core/typedef-id type-def)
+        layout :- (U core/LayoutDef Nil) (find-layout layouts type-id)]
+    (and (= 1 (layout-count layouts type-id))
+      (not (nil? layout))
+      (> (core/layoutdef-size-bytes layout) 0)
+      (> (core/layoutdef-align-bytes layout) 0)
+      (= 0 (mod (core/layoutdef-size-bytes layout)
+        (core/layoutdef-align-bytes layout)))
+      (layout-shape-exact? (core/typedef-shape type-def)
+        (core/layoutdef-shape layout)
+        layouts
+        (core/layoutdef-size-bytes layout)))))
+
+(defn closed-layouts [world :- core/NativeWorld] :- ObligationVerdictV0
+  (loop [index :- Int 0 types :- (Vec core/TypeDef) (core/nativeworld-types world)]
+    (if (>= index (count types))
+      (->ObligationPassV0 (core/->ClosedLayoutsObligation true))
+      (let [type-def :- core/TypeDef (nth types index)]
+        (if (type-layout-closed? (core/nativeworld-layouts world) type-def)
+          (recur (+ index 1) types)
+          (->ClosedLayoutsDiagnosticV0 (core/typedef-id type-def)))))))
+
 (def fixture-i64-type :- core/TypeDef
   (core/->TypeDef (obligation-id "type-i64") "I64"
     (core/->AtomType (core/->I64Kind true))))
@@ -392,6 +583,13 @@
 (def nonexhaustive-world :- core/NativeWorld
   (with valid-world [:functions [nonexhaustive-function]]))
 
+(def undersized-i64-layout :- core/LayoutDef
+  (with fixture-i64-layout [:size-bytes 4]))
+
+(def open-layout-world :- core/NativeWorld
+  (with valid-world
+    [:layouts [undersized-i64-layout fixture-union-layout]]))
+
 (def valid-ssa-positive :- Bool
   (obligation-passed? (valid-ssa valid-world)))
 
@@ -415,6 +613,20 @@
     [(ObligationPassV0 code) false]
     [(ValidSsaDiagnosticV0 function-id) false]
     [(ClosedLayoutsDiagnosticV0 type-id) false]
+    [(CheckedArithmeticDiagnosticV0 function-id) false]
+    [(LegalAbiDiagnosticV0 abi-id) false]
+    [(DischargedTokensDiagnosticV0 function-id) false]
+    [(BoundedEffectsDiagnosticV0 function-id) false]))
+
+(def closed-layouts-positive :- Bool
+  (obligation-passed? (closed-layouts valid-world)))
+
+(def closed-layouts-negative :- Bool
+  (match (closed-layouts open-layout-world)
+    [(ClosedLayoutsDiagnosticV0 type-id) true]
+    [(ObligationPassV0 code) false]
+    [(ValidSsaDiagnosticV0 function-id) false]
+    [(ExhaustiveMatchesDiagnosticV0 function-id) false]
     [(CheckedArithmeticDiagnosticV0 function-id) false]
     [(LegalAbiDiagnosticV0 abi-id) false]
     [(DischargedTokensDiagnosticV0 function-id) false]
