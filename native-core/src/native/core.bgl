@@ -245,7 +245,7 @@
     [(I64Kind value) true]
     [(F64Kind value) true]
     [(TextKind value) true]
-    [(RefKind value) (id-in? known-types (refkind-target value))]))
+    [(RefKind target) (id-in? known-types target)]))
 
 (defn type-fields-refs-closed? [fields :- (Vec TypeField) known-types :- (Vec NativeId)] :- Bool
   (every? (fn [field :- TypeField] :- Bool (id-in? known-types (typefield-type-id field)))
@@ -257,15 +257,11 @@
 
 (defn type-shape-refs-closed? [shape :- TypeShape known-types :- (Vec NativeId)] :- Bool
   (match shape
-    [(AtomType value)
-     (atom-kind-refs-closed? (atomtype-kind value) known-types)]
-    [(RecordType value)
-     (type-fields-refs-closed? (recordtype-fields value) known-types)]
-    [(UnionType value)
-     (type-variants-refs-closed? (uniontype-variants value) known-types)]
-    [(VectorType value) (id-in? known-types (vectortype-element-type value))]
-    [(ReferenceType value)
-     (id-in? known-types (referencetype-target-type value))]))
+    [(AtomType kind) (atom-kind-refs-closed? kind known-types)]
+    [(RecordType fields) (type-fields-refs-closed? fields known-types)]
+    [(UnionType variants) (type-variants-refs-closed? variants known-types)]
+    [(VectorType element-type) (id-in? known-types element-type)]
+    [(ReferenceType target-type) (id-in? known-types target-type)]))
 
 (defn types-refs-closed? [types :- (Vec TypeDef)] :- Bool
   (let [known-types :- (Vec NativeId) (type-ids types)]
@@ -275,12 +271,10 @@
 (defn effect-kind-refs-closed? [kind :- EffectKind known-regions :- (Vec NativeId) known-capabilities :- (Vec NativeId)] :- Bool
   (match kind
     [(PureEffect value) true]
-    [(AllocateEffect value)
-     (id-in? known-regions (allocateeffect-region value))]
-    [(ReadEffect value) (id-in? known-regions (readeffect-region value))]
-    [(WriteEffect value) (id-in? known-regions (writeeffect-region value))]
-    [(CapabilityEffect value)
-     (id-in? known-capabilities (capabilityeffect-capability value))]))
+    [(AllocateEffect region) (id-in? known-regions region)]
+    [(ReadEffect region) (id-in? known-regions region)]
+    [(WriteEffect region) (id-in? known-regions region)]
+    [(CapabilityEffect capability) (id-in? known-capabilities capability)]))
 
 (defn effects-refs-closed? [effects :- (Vec EffectDef) known-regions :- (Vec NativeId) known-capabilities :- (Vec NativeId)] :- Bool
   (every? (fn [effect :- EffectDef] :- Bool (effect-kind-refs-closed? (effectdef-kind effect) known-regions known-capabilities))
@@ -322,39 +316,24 @@
     [(I64Atom value) true]
     [(F64Atom value) true]
     [(TextAtom value) true]
-    [(RefAtom value) (id-in? known-owned (refatom-target value))]))
+    [(RefAtom target) (id-in? known-owned target)]))
 
 (defn store-op-resources-closed? [store :- StoreOp known-regions :- (Vec NativeId) known-capabilities :- (Vec NativeId)] :- Bool
   (match store
-    [(StoreBool value)
-     (and (id-in? known-regions (storebool-region value))
-       (id-in? known-capabilities (storebool-capability value)))]
-    [(StoreI64 value)
-     (and (id-in? known-regions (storei64-region value))
-       (id-in? known-capabilities (storei64-capability value)))]
-    [(StoreF64 value)
-     (and (id-in? known-regions (storef64-region value))
-       (id-in? known-capabilities (storef64-capability value)))]
-    [(StoreText value)
-     (and (id-in? known-regions (storetext-region value))
-       (id-in? known-capabilities (storetext-capability value)))]
-    [(StoreRef value)
-     (and (id-in? known-regions (storeref-region value))
-       (id-in? known-capabilities (storeref-capability value)))]))
+    [(StoreBool address value region capability) (and (id-in? known-regions region) (id-in? known-capabilities capability))]
+    [(StoreI64 address value region capability) (and (id-in? known-regions region) (id-in? known-capabilities capability))]
+    [(StoreF64 address value region capability) (and (id-in? known-regions region) (id-in? known-capabilities capability))]
+    [(StoreText address value region capability) (and (id-in? known-regions region) (id-in? known-capabilities capability))]
+    [(StoreRef address value region capability) (and (id-in? known-regions region) (id-in? known-capabilities capability))]))
 
 (defn instruction-semantic-refs-closed? [instruction :- Instruction known-functions :- (Vec NativeId) known-regions :- (Vec NativeId) known-capabilities :- (Vec NativeId) known-owned :- (Vec NativeId)] :- Bool
   (match instruction
-    [(AtomInstruction value)
-     (native-atom-refs-closed? (atominstruction-atom value) known-owned)]
+    [(AtomInstruction result atom) (native-atom-refs-closed? atom known-owned)]
     [(CopyInstruction value) true]
     [(AddI64Instruction value) true]
     [(AddF64Instruction value) true]
-    [(StoreInstruction value)
-     (store-op-resources-closed? (storeinstruction-store value)
-       known-regions
-       known-capabilities)]
-    [(CallInstruction value)
-     (id-in? known-functions (callinstruction-function-id value))]))
+    [(StoreInstruction result store) (store-op-resources-closed? store known-regions known-capabilities)]
+    [(CallInstruction result function-id arguments) (id-in? known-functions function-id)]))
 
 (defn parameter-types-closed? [parameters :- (Vec Parameter) known-types :- (Vec NativeId)] :- Bool
   (every? (fn [parameter :- Parameter] :- Bool (id-in? known-types (parameter-type-id parameter)))
@@ -363,11 +342,8 @@
 (defn terminator-block-refs-closed? [terminator :- Terminator known-blocks :- (Vec NativeId)] :- Bool
   (match terminator
     [(ReturnTerminator value) true]
-    [(JumpTerminator value)
-     (id-in? known-blocks (jumpterminator-block-id value))]
-    [(BranchTerminator value)
-     (and (id-in? known-blocks (branchterminator-true-block value))
-       (id-in? known-blocks (branchterminator-false-block value)))]))
+    [(JumpTerminator block-id arguments) (id-in? known-blocks block-id)]
+    [(BranchTerminator condition true-block false-block) (and (id-in? known-blocks true-block) (id-in? known-blocks false-block))]))
 
 (defn block-reference-closed? [block :- BasicBlock known-types :- (Vec NativeId) known-functions :- (Vec NativeId) known-regions :- (Vec NativeId) known-capabilities :- (Vec NativeId) known-owned :- (Vec NativeId) known-blocks :- (Vec NativeId)] :- Bool
   (and (parameter-types-closed? (basicblock-parameters block) known-types)
@@ -408,31 +384,26 @@
 
 (defn store-op-ssa-refs [store :- StoreOp] :- (Vec NativeId)
   (match store
-    [(StoreBool value) [(storebool-address value) (storebool-value value)]]
-    [(StoreI64 value) [(storei64-address value) (storei64-value value)]]
-    [(StoreF64 value) [(storef64-address value) (storef64-value value)]]
-    [(StoreText value) [(storetext-address value) (storetext-value value)]]
-    [(StoreRef value) [(storeref-address value) (storeref-value value)]]))
+    [(StoreBool address value region capability) [address value]]
+    [(StoreI64 address value region capability) [address value]]
+    [(StoreF64 address value region capability) [address value]]
+    [(StoreText address value region capability) [address value]]
+    [(StoreRef address value region capability) [address value]]))
 
 (defn instruction-ssa-refs [instruction :- Instruction] :- (Vec NativeId)
   (match instruction
     [(AtomInstruction value) []]
-    [(CopyInstruction value) [(copyinstruction-source-id value)]]
-    [(AddI64Instruction value)
-     [(addi64instruction-left-id value) (addi64instruction-right-id value)]]
-    [(AddF64Instruction value)
-     [(addf64instruction-left-id value) (addf64instruction-right-id value)]]
-    [(StoreInstruction value)
-     (store-op-ssa-refs (storeinstruction-store value))]
-    [(CallInstruction value) (callinstruction-arguments value)]))
+    [(CopyInstruction result-id source-id) [source-id]]
+    [(AddI64Instruction result-id left-id right-id) [left-id right-id]]
+    [(AddF64Instruction result-id left-id right-id) [left-id right-id]]
+    [(StoreInstruction result-id store) (store-op-ssa-refs store)]
+    [(CallInstruction result-id function-id arguments) arguments]))
 
 (defn terminator-ssa-refs [terminator :- Terminator] :- (Vec NativeId)
   (match terminator
-    [(ReturnTerminator value)
-     (let [result :- (U NativeId Nil) (returnterminator-value value)]
-       (if (nil? result) [] [result]))]
-    [(JumpTerminator value) (jumpterminator-arguments value)]
-    [(BranchTerminator value) [(branchterminator-condition value)]]))
+    [(ReturnTerminator value) (if (nil? value) [] [value])]
+    [(JumpTerminator block-id arguments) arguments]
+    [(BranchTerminator condition true-block false-block) [condition]]))
 
 (defn block-value-ids [block :- BasicBlock] :- (Vec NativeId)
   (append-ids (parameter-ids (basicblock-parameters block))
@@ -473,10 +444,7 @@
     [(CopyInstruction value) true]
     [(AddI64Instruction value) true]
     [(AddF64Instruction value) true]
-    [(StoreInstruction value)
-     (store-op-resources-closed? (storeinstruction-store value)
-       allowed-regions
-       allowed-capabilities)]
+    [(StoreInstruction result-id store) (store-op-resources-closed? store allowed-regions allowed-capabilities)]
     [(CallInstruction value) true]))
 
 (defn block-resources-allowed? [block :- BasicBlock allowed-regions :- (Vec NativeId) allowed-capabilities :- (Vec NativeId)] :- Bool
