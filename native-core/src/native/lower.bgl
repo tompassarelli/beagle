@@ -1922,9 +1922,28 @@
       nil
       (let [variant: core/TypeVariant (nth variants position)
             declared: (U core/NativeId Nil) (core/typevariant-payload-type variant)]
-        (if (nil? declared)
+          (if (nil? declared)
+            (recur (+ position 1))
+            (if (same-id? declared payload) variant (recur (+ position 1))))))))
+
+(defn variant-for-record-reference
+  [types: (Vec core/TypeDef)
+   variants: (Vec core/TypeVariant)
+   record-type: core/NativeId] -> (U core/TypeVariant Nil)
+  (loop [position: Int 0]
+    (if (>= position (count variants))
+      nil
+      (let [variant: core/TypeVariant (nth variants position)
+            payload: (U core/NativeId Nil) (core/typevariant-payload-type variant)
+            definition: (U core/TypeDef Nil)
+            (if (nil? payload) nil (lookup-type types payload))]
+        (if (nil? definition)
           (recur (+ position 1))
-          (if (same-id? declared payload) variant (recur (+ position 1))))))))
+          (let [shape: core/TypeShape (core/typedef-shape definition)]
+            (if (and (instance? native.core.ReferenceType shape)
+                  (same-id? (core/referencetype-target-type shape) record-type))
+              variant
+              (recur (+ position 1)))))))))
 
 (defn payloadless-variants [variants: (Vec core/TypeVariant)] -> (Vec core/TypeVariant)
   (loop [position: Int 0 collected: (Vec core/TypeVariant) []]
@@ -1938,6 +1957,9 @@
 
 ;; A recursive union must be refused, not looped over.
 (defn widen-budget [] -> Int 4)
+
+(defn arena-value-id [owner: core/NativeId] -> core/NativeId
+  (lower-id "arena-handle" [(id-value owner)]))
 
 ;; The absent alternative carries nothing to extract, so this arm injects the
 ;; target's own unit variant and never reads the source payload.
@@ -1983,6 +2005,8 @@
     (let [target-variants: (Vec core/TypeVariant) (union-variants-of types to)
           direct: (U core/TypeVariant Nil)
           (variant-for-payload target-variants from)
+          boxed: (U core/TypeVariant Nil)
+          (variant-for-record-reference types target-variants from)
           unit-variants: (Vec core/TypeVariant)
           (payloadless-variants target-variants)
           source-variants: (Vec core/TypeVariant) (union-variants-of types from)]
@@ -2000,6 +2024,27 @@
                 (core/typevariant-id direct)
                 value-id))
             result-id to false))
+
+        (some? boxed)
+        (let [reference-type: (U core/NativeId Nil)
+              (core/typevariant-payload-type boxed)]
+          (if (nil? reference-type)
+            (fail-result state
+              "TODO-NATIVE-BOX-RECORD: reference-backed variant has no payload")
+            (let [reference-id: core/NativeId (state-id state owner "box-record")
+                  result-id: core/NativeId
+                  (state-id (state-bump state) owner "inject-record")]
+              (->ExprResultV0
+                (state-emit
+                  (state-emit (state-bump (state-bump state))
+                    (core/->BoxRecordInstruction
+                      (core/->SsaValueV0 reference-id reference-type)
+                      value-id (arena-value-id owner)))
+                  (core/->UnionConstructInstruction
+                    (core/->SsaValueV0 result-id to)
+                    (core/typevariant-id boxed)
+                    reference-id))
+                result-id to false))))
 
         ;; Nil is the absence of a value, so it widens to the target's own
         ;; payload-less alternative rather than to a variant carrying Unit.
@@ -2112,6 +2157,77 @@
                     (->NarrowHitV0 true (core/typevariant-id variant) payload)
                     (recur (+ position 1))))))))))))
 
+(defn reference-targets?
+  [types: (Vec core/TypeDef)
+   reference: core/NativeId
+   target: core/NativeId] -> Bool
+  (let [definition: (U core/TypeDef Nil) (lookup-type types reference)]
+    (if (nil? definition)
+      false
+      (let [shape: core/TypeShape (core/typedef-shape definition)]
+        (and (instance? native.core.ReferenceType shape)
+          (same-id? (core/referencetype-target-type shape) target))))))
+
+;; Source annotations and calls are semantic boundaries: widen into their
+;; declared union, or checked-extract the one alternative the boundary names.
+(defn lower-boundary-coerce
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   value-id: core/NativeId
+   from: core/NativeId
+   to: core/NativeId] -> ExprResultV0
+  (if (same-id? from to)
+    (->ExprResultV0 state value-id to false)
+    (let [source-variants: (Vec core/TypeVariant) (union-variants-of types from)
+          scalar: (U core/TypeVariant Nil) (variant-for-payload source-variants to)
+          record: NarrowHitV0 (reference-variant-for types from to)]
+      (cond
+        (some? scalar)
+        (let [result-id: core/NativeId (state-id state owner "boundary-extract")]
+          (->ExprResultV0
+            (state-emit (state-bump state)
+              (core/->UnionExtractInstruction
+                (core/->SsaValueV0 result-id to)
+                value-id (core/typevariant-id scalar)))
+            result-id to false))
+
+        (narrowhitv0-found record)
+        (let [result-id: core/NativeId (state-id state owner "boundary-reference")]
+          (->ExprResultV0
+            (state-emit (state-bump state)
+              (core/->UnionExtractInstruction
+                (core/->SsaValueV0 result-id
+                  (narrowhitv0-reference-type record))
+                value-id (narrowhitv0-variant-id record)))
+            result-id (narrowhitv0-reference-type record) false))
+
+        :else
+        (lower-widen types owner state value-id from to (widen-budget))))))
+
+(defn coerce-arguments
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   values: (Vec core/NativeId)
+   value-types: (Vec core/NativeId)
+   parameters: (Vec core/Parameter)] -> ArgsResultV0
+  (loop [position: Int 0
+         current: BodyStateV0 state
+         coerced-values: (Vec core/NativeId) []
+         coerced-types: (Vec core/NativeId) []]
+    (if (or (>= position (count values)) (state-blocked? current))
+      (->ArgsResultV0 current coerced-values coerced-types false)
+      (let [coerced: ExprResultV0
+            (lower-boundary-coerce types owner current
+              (nth values position)
+              (nth value-types position)
+              (core/parameter-type-id (nth parameters position)))]
+        (recur (+ position 1)
+          (exprresultv0-state coerced)
+          (conj coerced-values (exprresultv0-value-id coerced))
+          (conj coerced-types (exprresultv0-type-id coerced)))))))
+
 (defn vector-type?
   [types: (Vec core/TypeDef)
    target: core/NativeId] -> Bool
@@ -2149,6 +2265,7 @@
   (or (instance? native.core.VecPushInstruction instruction)
       (instance? native.core.VecEmptyInstruction instruction)
       (instance? native.core.VecConcatInstruction instruction)
+      (instance? native.core.BoxRecordInstruction instruction)
       (instance? native.core.AllocateInstruction instruction)
       (instance? native.core.TextSliceInstruction instruction)
       (instance? native.core.TextConcatInstruction instruction)))
@@ -2174,9 +2291,6 @@
       (if (nil? items-node)
         true
         (= 0 (count (index-sequence-items index items-node)))))))
-
-(defn arena-value-id [owner: core/NativeId] -> core/NativeId
-  (lower-id "arena-handle" [(id-value owner)]))
 
 ;; An empty literal names no element type, so the only closed source for one is
 ;; the annotation on the binding it initializes.
@@ -2237,6 +2351,219 @@
         (if (or (text-operand? operand) (same-id? operand (int-type-id)))
           (recur (+ position 1))
           false)))))
+
+(defn scalar-predicate? [callee: String] -> Bool
+  (or (= "string?" callee)
+    (= "integer?" callee)
+    (= "number?" callee)
+    (= "boolean?" callee)
+    (= "keyword?" callee)))
+
+(defn scalar-predicate-types [callee: String] -> (Vec core/NativeId)
+  (cond
+    (= "string?" callee) [(text-type-id)]
+    (= "integer?" callee) [(int-type-id)]
+    (= "number?" callee) [(int-type-id) (type-id "Float")]
+    (= "boolean?" callee) [(bool-type-id)]
+    (= "keyword?" callee) [(keyword-type-id)]
+    :else []))
+
+(defn bool-constant-result
+  [state: BodyStateV0
+   owner: core/NativeId
+   label: String
+   value: Bool] -> ExprResultV0
+  (let [result-id: core/NativeId (state-id state owner label)]
+    (->ExprResultV0
+      (state-emit (state-bump state)
+        (core/->AtomInstruction
+          (core/->SsaValueV0 result-id (bool-type-id))
+          (core/->BoolAtom value)))
+      result-id (bool-type-id) false)))
+
+(defn variant-payload-in?
+  [variant: core/TypeVariant
+   accepted: (Vec core/NativeId)] -> Bool
+  (let [payload: (U core/NativeId Nil) (core/typevariant-payload-type variant)]
+    (if (nil? payload) false (core/id-in? accepted payload))))
+
+(defn lower-scalar-predicate
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   callee: String
+   value-id: core/NativeId
+   value-type: core/NativeId] -> ExprResultV0
+  (let [accepted: (Vec core/NativeId) (scalar-predicate-types callee)
+        variants: (Vec core/TypeVariant) (union-variants-of types value-type)]
+    (if (= 0 (count variants))
+      (bool-constant-result state owner "scalar-predicate"
+        (core/id-in? accepted value-type))
+      (let [true-id: core/NativeId (state-id state owner "predicate-true")
+            false-id: core/NativeId (state-id state owner "predicate-false")
+            join-id: core/NativeId (state-id state owner "predicate-join")
+            join-parameter: core/NativeId
+            (state-id state owner "predicate-value")
+            true-value: core/NativeId (state-id state owner "predicate-yes")
+            false-value: core/NativeId (state-id state owner "predicate-no")
+            cases: (Vec core/SwitchCaseV0)
+            (mapv
+              (fn [variant: core/TypeVariant] -> core/SwitchCaseV0
+                (core/->SwitchCaseV0 (core/typevariant-id variant)
+                  (if (variant-payload-in? variant accepted) true-id false-id)
+                  []))
+              variants)
+            switched: BodyStateV0
+            (state-close (state-bump state)
+              (core/->SwitchTerminator value-id cases))
+            true-block: BodyStateV0
+            (state-close
+              (state-emit (state-open-block switched true-id [])
+                (core/->AtomInstruction
+                  (core/->SsaValueV0 true-value (bool-type-id))
+                  (core/->BoolAtom true)))
+              (core/->JumpTerminator join-id [true-value]))
+            false-block: BodyStateV0
+            (state-close
+              (state-emit (state-open-block true-block false-id [])
+                (core/->AtomInstruction
+                  (core/->SsaValueV0 false-value (bool-type-id))
+                  (core/->BoolAtom false)))
+              (core/->JumpTerminator join-id [false-value]))]
+        (->ExprResultV0
+          (state-open-block false-block join-id
+            [(core/->Parameter join-parameter (bool-type-id))])
+          join-parameter (bool-type-id) false)))))
+
+(defn lower-positive
+  [state: BodyStateV0
+   owner: core/NativeId
+   value-id: core/NativeId
+   value-type: core/NativeId] -> ExprResultV0
+  (if (not (same-id? value-type (int-type-id)))
+    (fail-result state "TODO-NATIVE-POS-OPERAND: pos? needs a native Int")
+    (let [zero-id: core/NativeId (state-id state owner "positive-zero")
+          result-id: core/NativeId (state-id (state-bump state) owner "positive")]
+      (->ExprResultV0
+        (state-emit
+          (state-emit (state-bump (state-bump state))
+            (core/->AtomInstruction
+              (core/->SsaValueV0 zero-id (int-type-id))
+              (core/->I64Atom 0)))
+          (core/->CompareInstruction
+            (core/->SsaValueV0 result-id (bool-type-id))
+            (core/->CompareLtI64V0 true) zero-id value-id))
+        result-id (bool-type-id) false))))
+
+(defn equality-comparison [type-id-value: core/NativeId] -> (U core/CompareOpV0 Nil)
+  (cond
+    (same-id? type-id-value (int-type-id)) (core/->CompareEqI64V0 true)
+    (same-id? type-id-value (keyword-type-id)) (core/->CompareEqI64V0 true)
+    (same-id? type-id-value (bool-type-id)) (core/->CompareEqBoolV0 true)
+    (same-id? type-id-value (text-type-id)) (core/->CompareEqTextV0 true)
+    :else nil))
+
+;; Equality is total across a scalar and a union: another tag is false, while
+;; the matching tag is extracted and compared with its scalar semantics.
+(defn lower-scalar-union-equality
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   scalar-id: core/NativeId
+   scalar-type: core/NativeId
+   union-id: core/NativeId
+   union-type: core/NativeId] -> ExprResultV0
+  (let [variants: (Vec core/TypeVariant) (union-variants-of types union-type)
+        target: (U core/TypeVariant Nil) (variant-for-payload variants scalar-type)
+        comparison: (U core/CompareOpV0 Nil) (equality-comparison scalar-type)]
+    (cond
+      (nil? comparison)
+      (fail-result state
+        "TODO-NATIVE-EQUALITY-SCALAR: the scalar has no native equality")
+
+      (nil? target)
+      (bool-constant-result state owner "equality-miss" false)
+
+      :else
+      (let [match-id: core/NativeId (state-id state owner "equality-match")
+            miss-id: core/NativeId (state-id state owner "equality-miss")
+            join-id: core/NativeId (state-id state owner "equality-join")
+            join-parameter: core/NativeId (state-id state owner "equality-value")
+            extracted-id: core/NativeId (state-id state owner "equality-scalar")
+            compared-id: core/NativeId (state-id state owner "equality-compared")
+            false-id: core/NativeId (state-id state owner "equality-false")
+            cases: (Vec core/SwitchCaseV0)
+            (mapv
+              (fn [variant: core/TypeVariant] -> core/SwitchCaseV0
+                (core/->SwitchCaseV0 (core/typevariant-id variant)
+                  (if (same-id? (core/typevariant-id variant)
+                        (core/typevariant-id target))
+                    match-id miss-id)
+                  []))
+              variants)
+            switched: BodyStateV0
+            (state-close (state-bump state)
+              (core/->SwitchTerminator union-id cases))
+            matched: BodyStateV0
+            (state-emit
+              (state-emit (state-open-block switched match-id [])
+                (core/->UnionExtractInstruction
+                  (core/->SsaValueV0 extracted-id scalar-type)
+                  union-id (core/typevariant-id target)))
+              (core/->CompareInstruction
+                (core/->SsaValueV0 compared-id (bool-type-id))
+                comparison scalar-id extracted-id))
+            after-match: BodyStateV0
+            (state-close matched (core/->JumpTerminator join-id [compared-id]))
+            missed: BodyStateV0
+            (state-emit (state-open-block after-match miss-id [])
+              (core/->AtomInstruction
+                (core/->SsaValueV0 false-id (bool-type-id))
+                (core/->BoolAtom false)))
+            after-miss: BodyStateV0
+            (state-close missed (core/->JumpTerminator join-id [false-id]))]
+        (->ExprResultV0
+          (state-open-block after-miss join-id
+            [(core/->Parameter join-parameter (bool-type-id))])
+          join-parameter (bool-type-id) false)))))
+
+(defn lower-ordered-union-comparison
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   callee: String
+   values: (Vec core/NativeId)
+   value-types: (Vec core/NativeId)] -> ExprResultV0
+  (let [left-union: Bool
+        (> (count (union-variants-of types (nth value-types 0))) 0)
+        scalar-position: Int (if left-union 1 0)
+        union-position: Int (if left-union 0 1)
+        scalar-type: core/NativeId (nth value-types scalar-position)
+        extracted: ExprResultV0
+        (lower-boundary-coerce types owner state
+          (nth values union-position) (nth value-types union-position) scalar-type)
+        settled: BodyStateV0 (exprresultv0-state extracted)
+        ordered-values: (Vec core/NativeId)
+        (if left-union
+          [(exprresultv0-value-id extracted) (nth values 1)]
+          [(nth values 0) (exprresultv0-value-id extracted)])
+        comparison: (U core/CompareOpV0 Nil) (compare-op-for callee)
+        swap: Bool (compare-swaps? callee)
+        result-id: core/NativeId (state-id settled owner "ordered-compare")]
+    (cond
+      (state-blocked? settled) (dead-result settled)
+      (or (nil? comparison) (not (same-id? scalar-type (int-type-id))))
+      (fail-result settled
+        "TODO-NATIVE-ORDERED-UNION: ordered comparison needs an Int alternative")
+      :else
+      (->ExprResultV0
+        (state-emit (state-bump settled)
+          (core/->CompareInstruction
+            (core/->SsaValueV0 result-id (bool-type-id))
+            comparison
+            (nth ordered-values (if swap 1 0))
+            (nth ordered-values (if swap 0 1))))
+        result-id (bool-type-id) false))))
 
 (defn lower-expr
   [env: BodyEnvV0
@@ -2328,6 +2655,8 @@
                     (type-id "LowerFailure") false)
                   (let [item: core/NativeId (nth items position)
                         name: String (fact-text index item "name")
+                        annotation: (U core/NativeId Nil)
+                        (index-first-object index item "ann")
                         value-node: (U core/NativeId Nil)
                         (index-first-object index item "value")]
                     (if (nil? value-node)
@@ -2335,11 +2664,22 @@
                         (state-fail current
                           (str "TODO-NATIVE-BINDING-VALUE: " name " has no value form"))
                         (lower-id "body" ["let"]) (type-id "LowerFailure") false)
-                      (let [value: ExprResultV0
+                      (let [raw: ExprResultV0
                             (if (empty-vector-form? index value-node)
                               (lower-empty-vector env owner current
-                                (index-first-object index item "ann"))
-                              (lower-expr env owner current value-node))]
+                                annotation)
+                              (lower-expr env owner current value-node))
+                            value: ExprResultV0
+                            (if (or (nil? annotation)
+                                  (exprresultv0-terminated raw)
+                                  (state-blocked? (exprresultv0-state raw)))
+                              raw
+                              (lower-boundary-coerce types owner
+                                (exprresultv0-state raw)
+                                (exprresultv0-value-id raw)
+                                (exprresultv0-type-id raw)
+                                (typeresolutionv0-type-id
+                                  (resolve-source-type index annotation))))]
                         (if (exprresultv0-terminated value)
                           value
                           (recur (+ position 1)
@@ -2737,7 +3077,7 @@
                         short-value: core/NativeId
                         (state-id state owner "logic-const")]
                     (loop [position: Int 0
-                           current: BodyStateV0 state]
+                           current: BodyStateV0 (state-bump state)]
                       (let [operand: ExprResultV0
                             (lower-expr env owner current (nth args position))]
                         (cond
@@ -2939,6 +3279,21 @@
                   (lower-checked-arith current owner callee
                     (nth values 0) (nth values 1)))
 
+                (and (scalar-predicate? callee) (= 1 (count values)))
+                (lower-scalar-predicate types owner current callee
+                  (nth values 0) (nth value-types 0))
+
+                (scalar-predicate? callee)
+                (fail-result current
+                  (str "TODO-NATIVE-PREDICATE-ARITY: " callee
+                    " takes one operand"))
+
+                (and (= "pos?" callee) (= 1 (count values)))
+                (lower-positive current owner (nth values 0) (nth value-types 0))
+
+                (= "pos?" callee)
+                (fail-result current "TODO-NATIVE-POS-ARITY: pos? takes one operand")
+
                 (and (= "count" callee) (= 1 (count values))
                   (vector-type? types (nth value-types 0)))
                 (let [result-id: core/NativeId (state-id current owner "vec-length")]
@@ -3005,6 +3360,30 @@
                 (= "vec" callee)
                 (fail-result current
                   "TODO-NATIVE-VEC-OPERAND: vec lowers only when its value is already a native vector")
+
+                (and (not (= "=" callee)) (some? comparison)
+                  (= 2 (count values))
+                  (or
+                    (and (> (count (union-variants-of types (nth value-types 0))) 0)
+                      (= 0 (count (union-variants-of types (nth value-types 1)))))
+                    (and (= 0 (count (union-variants-of types (nth value-types 0))))
+                      (> (count (union-variants-of types (nth value-types 1))) 0))))
+                (lower-ordered-union-comparison types owner current callee
+                  values value-types)
+
+                (and (= "=" callee) (= 2 (count values))
+                  (or
+                    (and (> (count (union-variants-of types (nth value-types 0))) 0)
+                      (= 0 (count (union-variants-of types (nth value-types 1)))))
+                    (and (= 0 (count (union-variants-of types (nth value-types 0))))
+                      (> (count (union-variants-of types (nth value-types 1))) 0))))
+                (if (> (count (union-variants-of types (nth value-types 0))) 0)
+                  (lower-scalar-union-equality types owner current
+                    (nth values 1) (nth value-types 1)
+                    (nth values 0) (nth value-types 0))
+                  (lower-scalar-union-equality types owner current
+                    (nth values 0) (nth value-types 0)
+                    (nth values 1) (nth value-types 1)))
 
                 (some? comparison)
                 (if (not (= 2 (count values)))
@@ -3078,6 +3457,23 @@
                         (nth values 0)))
                     result-id (int-type-id) false))
 
+                (and (= "count" callee) (= 1 (count values))
+                  (> (count (union-variants-of types (nth value-types 0))) 0))
+                (let [text-value: ExprResultV0
+                      (lower-boundary-coerce types owner current
+                        (nth values 0) (nth value-types 0) (text-type-id))
+                      settled: BodyStateV0 (exprresultv0-state text-value)
+                      result-id: core/NativeId
+                      (state-id settled owner "text-count")]
+                  (if (state-blocked? settled)
+                    (dead-result settled)
+                    (->ExprResultV0
+                      (state-emit (state-bump settled)
+                        (core/->TextLengthInstruction
+                          (core/->SsaValueV0 result-id (int-type-id))
+                          (exprresultv0-value-id text-value)))
+                      result-id (int-type-id) false)))
+
                 (= "subs" callee)
                 (if (not (and (or (= 2 (count values)) (= 3 (count values)))
                            (text-operand? (nth value-types 0))
@@ -3127,7 +3523,10 @@
                 (let [owner-type: core/NativeId (accessorhitv0-owner-type accessor)
                       unary: Bool (= 1 (count values))
                       direct: Bool
-                      (and unary (same-id? (nth value-types 0) owner-type))
+                      (and unary
+                        (or (same-id? (nth value-types 0) owner-type)
+                          (reference-targets? types (nth value-types 0)
+                            owner-type)))
                       narrowing: NarrowHitV0
                       (if (or direct (not unary))
                         (narrow-miss)
@@ -3203,31 +3602,49 @@
                 (some? signature)
                 (let [parameters: (Vec core/Parameter)
                       (typedfunctionv0-parameters signature)
-                      arity-ok: Bool (= (count parameters) (count values))
-                      types-ok: Bool
-                      (and arity-ok
-                        (loop [position: Int 0]
-                          (if (>= position (count parameters))
-                            true
-                            (if (same-id?
-                                  (core/parameter-type-id (nth parameters position))
-                                  (nth value-types position))
-                              (recur (+ position 1))
-                              false))))
-                      result-id: core/NativeId (state-id current owner "call")]
-                  (if (not types-ok)
+                      arity-ok: Bool (= (count parameters) (count values))]
+                  (if (not arity-ok)
                     (fail-result current
                       (str "TODO-NATIVE-CALL-ARGUMENTS: " callee
                         " arguments do not match its native parameters"))
-                    (->ExprResultV0
-                      (state-emit (state-bump current)
-                        (core/->CallInstruction
-                          (core/->SsaValueV0 result-id
-                            (typedfunctionv0-return-type signature))
-                          (typedfunctionv0-id signature)
-                          values
-                          (core/->TokenFlowV0 [] [])))
-                      result-id (typedfunctionv0-return-type signature) false)))
+                    (let [coerced: ArgsResultV0
+                          (coerce-arguments types owner current values value-types
+                            parameters)
+                          settled: BodyStateV0 (argsresultv0-state coerced)
+                          coerced-values: (Vec core/NativeId)
+                          (argsresultv0-values coerced)
+                          coerced-types: (Vec core/NativeId)
+                          (argsresultv0-value-types coerced)
+                          types-ok: Bool
+                          (and (= (count parameters) (count coerced-types))
+                            (loop [position: Int 0]
+                              (if (>= position (count parameters))
+                                true
+                                (if (same-id?
+                                      (core/parameter-type-id
+                                        (nth parameters position))
+                                      (nth coerced-types position))
+                                  (recur (+ position 1))
+                                  false))))
+                          result-id: core/NativeId
+                          (state-id settled owner "call")]
+                      (cond
+                        (state-blocked? settled) (dead-result settled)
+                        (not types-ok)
+                        (fail-result settled
+                          (str "TODO-NATIVE-CALL-ARGUMENTS: " callee
+                            " arguments do not match its native parameters"))
+                        :else
+                        (->ExprResultV0
+                          (state-emit (state-bump settled)
+                            (core/->CallInstruction
+                              (core/->SsaValueV0 result-id
+                                (typedfunctionv0-return-type signature))
+                              (typedfunctionv0-id signature)
+                              coerced-values
+                              (core/->TokenFlowV0 [] [])))
+                          result-id (typedfunctionv0-return-type signature)
+                          false)))))
 
                 :else
                 (fail-result current
@@ -3262,13 +3679,12 @@
                     (exprresultv0-terminated raw)
                     (state-blocked? (exprresultv0-state raw)))
               raw
-              (lower-widen (bodyenvv0-types env) owner
+              (lower-boundary-coerce (bodyenvv0-types env) owner
                 (exprresultv0-state raw)
                 (exprresultv0-value-id raw)
                 (exprresultv0-type-id raw)
                 (typeresolutionv0-type-id
-                  (resolve-source-type (bodyenvv0-index env) annotation))
-                (widen-budget)))]
+                  (resolve-source-type (bodyenvv0-index env) annotation))))]
         (cond
           (state-blocked? (exprresultv0-state value))
           (exprresultv0-state value)
@@ -3432,11 +3848,10 @@
           ;; A body whose type differs from the declared return type is coerced,
           ;; never reinterpreted: identity when they agree, otherwise the widen.
           (let [coerced: ExprResultV0
-                (lower-widen (bodyenvv0-types env) id state
+                (lower-boundary-coerce (bodyenvv0-types env) id state
                   (exprresultv0-value-id result)
                   (exprresultv0-type-id result)
-                  (typedfunctionv0-return-type signature)
-                  (widen-budget))
+                  (typedfunctionv0-return-type signature))
                 settled: BodyStateV0 (exprresultv0-state coerced)]
             (if (state-blocked? settled)
               (->NativeTodoV0 "TODO-NATIVE-FUNCTION-BODY"
@@ -4665,6 +5080,12 @@
       [(encode-ssa-value (core/recordinstruction-result instruction))
        (encode-id-roots "fields" (core/recordinstruction-field-ids instruction))])
 
+    (instance? native.core.BoxRecordInstruction instruction)
+    (worlds/canonical-record "box-record-instruction"
+      [(encode-ssa-value (core/boxrecordinstruction-result instruction))
+       (id-value (core/boxrecordinstruction-source-id instruction))
+       (id-value (core/boxrecordinstruction-arena-id instruction))])
+
     (instance? native.core.UnionConstructInstruction instruction)
     (let [payload: (U core/NativeId Nil)
           (core/unionconstructinstruction-payload-id instruction)]
@@ -4898,7 +5319,7 @@
             (worlds/->TermNodeV0 (write-capability-id)
               (worlds/->TextTermV0
                 (worlds/canonical-record "capability-v0"
-                  [(id-value (write-capability-id)) "affine-write"]))) ]))))
+                  [(id-value (write-capability-id)) "affine-write"])))]))))
 
 (defn native-obligation-results
   [valid-ssa: Bool

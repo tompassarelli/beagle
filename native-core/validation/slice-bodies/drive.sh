@@ -17,7 +17,8 @@ trap 'rm -rf "${scratch:?}"' EXIT
 if [[ -f "$src" ]]; then
   "$repo/bin/beagle-ast" "$src" >"$scratch/types.ast.json"
   bb "$here/ast-facts.clj" \
-    "$scratch/types.ast.json=fram:src/fram/types.bclj" "$scratch/types.facts"
+    "$scratch/types.ast.json=fram:src/fram/types.bclj" "$scratch/types.facts" \
+    --include-defs
   if [[ -f "$art/types.facts" ]] && ! cmp -s "$scratch/types.facts" "$art/types.facts"; then
     echo "drive.sh: regenerated projection differs from the committed types.facts" >&2
     exit 1

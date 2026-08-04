@@ -1,12 +1,12 @@
 stage source-seal ACCEPTED
 stage source-to-typed ACCEPTED
-stage typed-to-native PENDING
+stage typed-to-native COMPLETE
 source-modules 1
 source-imports 0
-world-types 73
-world-functions 19
-world-abis 19
-projected-types 73
+world-types 74
+world-functions 31
+world-abis 31
+projected-types 74
 lowered fn_0 instant? 4 blocks
 lowered fn_1 instant 7 blocks
 lowered fn_2 instant-shift-seconds 3 blocks
@@ -26,6 +26,18 @@ lowered fn_15 rpc-response-payload-value 12 blocks
 lowered fn_16 commit-operation? 4 blocks
 lowered fn_17 transaction-frame? 4 blocks
 lowered fn_18 term-store-dump? 4 blocks
+lowered fn_19 atom? 37 blocks
+lowered fn_20 term? 10 blocks
+lowered fn_21 triple 4 blocks
+lowered fn_22 transaction-coordinate 7 blocks
+lowered fn_23 transaction-coordinate? 25 blocks
+lowered fn_24 occurrence-coordinate 7 blocks
+lowered fn_25 occurrence-coordinate? 19 blocks
+lowered fn_26 assertion-occurrence 7 blocks
+lowered fn_27 retraction-occurrence 7 blocks
+lowered fn_28 withdrawal 7 blocks
+lowered fn_29 recorded-at 7 blocks
+lowered fn_30 occurrence-before? 16 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts
@@ -33,16 +45,4 @@ obligation-projection PASS checked-arithmetic
 obligation-projection PASS legal-abi
 obligation-projection PASS discharged-tokens
 obligation-projection PASS bounded-effects
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-string?: no native lowering for this callee [atom?]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: term? calls a function whose own body is not lowered
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: term? arguments do not match its native parameters [triple]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-pos?: no native lowering for this callee [transaction-coordinate]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-string?: no native lowering for this callee [transaction-coordinate?]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: transaction-coordinate? arguments do not match its native parameters [occurrence-coordinate]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FREE-REFERENCE: op-ordinal is not a parameter or local binding [occurrence-coordinate?]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: occurrence-coordinate? arguments do not match its native parameters [assertion-occurrence]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: occurrence-coordinate? arguments do not match its native parameters [retraction-occurrence]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: occurrence-coordinate? arguments do not match its native parameters [withdrawal]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: triple? arguments do not match its native parameters [recorded-at]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: occurrence-coordinate? arguments do not match its native parameters [occurrence-before?]
 materialize OK module_0.h module_0.c

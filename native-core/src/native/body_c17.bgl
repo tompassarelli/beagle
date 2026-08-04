@@ -173,6 +173,7 @@
     (instance? native.core.CompareInstruction instruction) true
     (instance? native.core.FieldInstruction instruction) true
     (instance? native.core.RecordInstruction instruction) true
+    (instance? native.core.BoxRecordInstruction instruction) true
     (instance? native.core.CallInstruction instruction) true
     (instance? native.core.VariantValueInstruction instruction) true
     (instance? native.core.CheckedInstruction instruction)
@@ -804,6 +805,24 @@
                   ".field_" position " = "
                   (value-name function slots (nth values position))))))
           " };\n"))
+
+      (instance? native.core.BoxRecordInstruction instruction)
+      (let [reference-type: core/NativeId (core/ssavaluev0-type-id result)
+            pointee: (U core/NativeId Nil)
+            (dereferenced-type types reference-type)]
+        (if (nil? pointee)
+          ""
+          (let [record-type: String (c17/c-type types module-index pointee)
+                arena: String
+                (str "(native_arena *)"
+                  (value-name function slots
+                    (core/boxrecordinstruction-arena-id instruction)))]
+            (str "  " target " = native_arena_alloc(" arena ", sizeof("
+              record-type "), _Alignof(" record-type "));\n"
+              "  *(" record-type " *)" target " = "
+              (value-name function slots
+                (core/boxrecordinstruction-source-id instruction))
+              ";\n"))))
 
       (instance? native.core.VecLengthInstruction instruction)
       (str "  " target " = native_vec_length("

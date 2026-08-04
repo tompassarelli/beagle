@@ -248,6 +248,12 @@
   (RecordInstruction
     [result: SsaValueV0
      field-ids: (Vec NativeId)])
+  ;; Records enter recursive unions through an arena-owned reference, so the
+  ;; reference edge that closes their layout is represented in the world.
+  (BoxRecordInstruction
+    [result: SsaValueV0
+     source-id: NativeId
+     arena-id: NativeId])
   ;; Widening into a closed union is a tag inject: the payload is already the
   ;; variant's declared type, so no check can fail and none is emitted.
   (UnionConstructInstruction
@@ -539,6 +545,7 @@
     [(FieldInstruction result source-id field-id) (ssavaluev0-id result)]
     [(VariantValueInstruction result source-id variant-id) (ssavaluev0-id result)]
     [(RecordInstruction result field-ids) (ssavaluev0-id result)]
+    [(BoxRecordInstruction result source-id arena-id) (ssavaluev0-id result)]
     [(UnionConstructInstruction result variant-id payload-id)
      (ssavaluev0-id result)]
     [(UnionExtractInstruction result source-id variant-id)
@@ -808,6 +815,7 @@
     [(VariantValueInstruction result source-id variant-id)
      (id-in? known-owned variant-id)]
     [(RecordInstruction result field-ids) true]
+    [(BoxRecordInstruction result source-id arena-id) true]
     [(UnionConstructInstruction result variant-id payload-id)
      (id-in? known-owned variant-id)]
     [(UnionExtractInstruction result source-id variant-id)
@@ -935,6 +943,7 @@
     [(FieldInstruction result source-id field-id) [source-id]]
     [(VariantValueInstruction result source-id variant-id) [source-id]]
     [(RecordInstruction result field-ids) field-ids]
+    [(BoxRecordInstruction result source-id arena-id) [arena-id source-id]]
     [(UnionConstructInstruction result variant-id payload-id)
      (if (nil? payload-id) [] [payload-id])]
     [(UnionExtractInstruction result source-id variant-id) [source-id]]
@@ -1015,6 +1024,7 @@
     [(FieldInstruction result source-id field-id) true]
     [(VariantValueInstruction result source-id variant-id) true]
     [(RecordInstruction result field-ids) true]
+    [(BoxRecordInstruction result source-id arena-id) true]
     [(UnionConstructInstruction result variant-id payload-id) true]
     [(UnionExtractInstruction result source-id variant-id) true]
     [(VecLengthInstruction result source-id) true]

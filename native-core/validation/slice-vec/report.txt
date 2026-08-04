@@ -4,8 +4,8 @@ stage typed-to-native PENDING
 source-modules 3
 source-imports 2
 world-types 79
-world-functions 28
-world-abis 28
+world-functions 43
+world-abis 43
 projected-types 74
 lowered fn_0 instant? 4 blocks
 lowered fn_1 instant 7 blocks
@@ -26,15 +26,30 @@ lowered fn_15 rpc-response-payload-value 12 blocks
 lowered fn_16 commit-operation? 4 blocks
 lowered fn_17 transaction-frame? 4 blocks
 lowered fn_18 term-store-dump? 4 blocks
-lowered fn_19 atom-handle 3 blocks
-lowered fn_20 bucket-size 1 blocks
-lowered fn_21 bucket-position-at 1 blocks
-lowered fn_22 bucket-with-position 1 blocks
-lowered fn_23 append-position 1 blocks
-lowered fn_24 position-pair 1 blocks
-lowered fn_25 empty-positions 1 blocks
-lowered fn_26 frame-operation-count 1 blocks
-lowered fn_27 frame-operation-at 1 blocks
+lowered fn_19 atom? 37 blocks
+lowered fn_20 term? 10 blocks
+lowered fn_21 triple 4 blocks
+lowered fn_22 transaction-coordinate 7 blocks
+lowered fn_23 transaction-coordinate? 25 blocks
+lowered fn_24 occurrence-coordinate 7 blocks
+lowered fn_25 occurrence-coordinate? 19 blocks
+lowered fn_26 assertion-occurrence 7 blocks
+lowered fn_27 retraction-occurrence 7 blocks
+lowered fn_28 withdrawal 7 blocks
+lowered fn_29 recorded-at 7 blocks
+lowered fn_30 occurrence-before? 16 blocks
+lowered fn_31 valid-space-id? 7 blocks
+lowered fn_32 atom-handle 3 blocks
+lowered fn_33 valid-commit-operation? 10 blocks
+lowered fn_34 occurrence-at 1 blocks
+lowered fn_35 bucket-size 1 blocks
+lowered fn_36 bucket-position-at 1 blocks
+lowered fn_37 bucket-with-position 1 blocks
+lowered fn_38 append-position 1 blocks
+lowered fn_39 position-pair 1 blocks
+lowered fn_40 empty-positions 1 blocks
+lowered fn_41 frame-operation-count 1 blocks
+lowered fn_42 frame-operation-at 1 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts
@@ -42,19 +57,6 @@ obligation-projection PASS checked-arithmetic
 obligation-projection PASS legal-abi
 obligation-projection PASS discharged-tokens
 obligation-projection PASS bounded-effects
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-string?: no native lowering for this callee [atom?]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: term? calls a function whose own body is not lowered
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: term? arguments do not match its native parameters [triple]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-pos?: no native lowering for this callee [transaction-coordinate]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-string?: no native lowering for this callee [transaction-coordinate?]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: transaction-coordinate? arguments do not match its native parameters [occurrence-coordinate]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-COMPARE-OPERANDS: = has no native comparison for these operand types [occurrence-coordinate?]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: occurrence-coordinate? arguments do not match its native parameters [assertion-occurrence]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: occurrence-coordinate? arguments do not match its native parameters [retraction-occurrence]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: occurrence-coordinate? arguments do not match its native parameters [withdrawal]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: triple? arguments do not match its native parameters [recorded-at]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: occurrence-coordinate? arguments do not match its native parameters [occurrence-before?]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-string?: no native lowering for this callee [valid-space-id?]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [fresh-term-slots]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-hash: no native lowering for this callee [term-slot]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-assoc: no native lowering for this callee [term-slot-add]
@@ -62,15 +64,15 @@ pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native 
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [build-atom-term-slots]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [build-triple-term-slots]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [build-active-slots]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: valid-space-id? arguments do not match its native parameters [new-term-store]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-atom: no native lowering for this callee [new-term-store]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-deref: no native lowering for this callee [space-id]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-deref: no native lowering for this callee [next-sequence]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-dec: no native lowering for this callee [current-sequence]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-cond: no native lowering for this source form [atom-row]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-cond: no native lowering for this source form [atom-row-value]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-some?: no native lowering for this callee [valid-atom-row?]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: term-slot arguments do not match its native parameters [find-atom-position]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: term-slot arguments do not match its native parameters [find-triple-position]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [find-atom-position]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [find-triple-position]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FREE-REFERENCE: update is not a parameter or local binding [index-atom-term!]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FREE-REFERENCE: update is not a parameter or local binding [index-triple-term!]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-inc: no native lowering for this callee [triple-handle]
@@ -79,7 +81,7 @@ pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-DIVISION-quot: integer division s
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-deref: no native lowering for this callee [intern-handle!]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: valid-handle? calls a function whose own body is not lowered
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-IF-JOIN: the two arms have different native types [resolve-handle]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-RETURN-TYPE: the lowered body of resolve-triple-handle does not produce its declared return type: TODO-NATIVE-WIDEN-TARGET: the declared type is not a closed union
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: resolve-triple-handle calls a function whose own body is not lowered
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-LITERAL-nil: no native atom for this literal kind [known-term-handle]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-deref: no native lowering for this callee [intern-term!]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-do: no native lowering for this source form [replay-terms!]
@@ -90,18 +92,16 @@ pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-deref: no native lowering fo
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-deref: no native lowering for this callee [operation-count]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CONSTRUCTOR-ARGUMENTS: t/->CommitOperation arguments do not match the record field types [assert-operation]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CONSTRUCTOR-ARGUMENTS: t/->CommitOperation arguments do not match the record field types [retract-operation]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: t/triple? arguments do not match its native parameters [valid-commit-operation?]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-pos?: no native lowering for this callee [valid-operations?]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-fn: no native lowering for this source form [valid-operations?]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: transaction-frame calls a function whose own body is not lowered
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: term-slot arguments do not match its native parameters [find-active-bucket-position]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [find-active-bucket-position]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: active-positions calls a function whose own body is not lowered
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-assoc: no native lowering for this callee [set-active-positions]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-assoc: no native lowering for this callee [apply-operation-state]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-fn: no native lowering for this source form [operation-handles!]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-deref: no native lowering for this callee [append-transaction!]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-deref: no native lowering for this callee [commit-transaction!]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: t/transaction-frame? arguments do not match its native parameters [replay-transaction!]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: occurrence-at calls a function whose own body is not lowered
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: replay-transaction! calls a function whose own body is not lowered
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: event-at calls a function whose own body is not lowered
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [first-transaction-after]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: operation-range-bounds calls a function whose own body is not lowered
@@ -123,5 +123,5 @@ pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: valid-dump-operation? cal
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [valid-operation-slice?]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-loop: no native lowering for this source form [valid-history-rows?]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-assoc: no native lowering for this callee [rebuild-operation-state]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: valid-space-id? arguments do not match its native parameters [load-term-store!]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-fn: no native lowering for this source form [load-term-store!]
 materialize OK module_0.h module_0.c
