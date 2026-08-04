@@ -1,0 +1,43 @@
+stage source-seal ACCEPTED
+stage source-to-typed ACCEPTED
+stage typed-to-native PENDING
+source-modules 1
+source-imports 1
+world-types 46
+world-functions 4
+world-abis 4
+projected-types 8
+lowered fn_0 str-index-of 1 blocks
+lowered fn_1 fmt-id 1 blocks
+lowered fn_2 nonblank? 4 blocks
+lowered fn_3 coord-status-down 1 blocks
+obligation-projection PASS valid-ssa
+obligation-projection PASS exhaustive-matches
+obligation-projection PASS closed-layouts
+obligation-projection PASS checked-arithmetic
+obligation-projection PASS legal-abi
+obligation-projection PASS discharged-tokens
+obligation-projection PASS bounded-effects
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FREE-REFERENCE: str/blank? is not a parameter or local binding [split-comma]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-compare: no native lowering for this callee [str-lt?]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-str/trim: no native lowering for this callee [split-kv]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-str/lower-case: no native lowering for this callee [slugify]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-str/replace: no native lowering for this callee [filter-digits]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-re-matches: no native lowering for this callee [is-iso-datetime-19]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-re-matches: no native lowering for this callee [is-iso-datetime-16]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FREE-REFERENCE: str is not a parameter or local binding [repeat-str]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-map?: no native lowering for this callee [edit-batch-envelope-marker?]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-re-matches: no native lowering for this callee [digest?]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [generation-record?]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-set: no native lowering for this source form [valid-edit-batch-envelope?]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-COMPARE-OPERANDS: = has no native comparison for these operand types [classify-rewrite-crash]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-map: no native lowering for this source form [log-envelope]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-sequential?: no native lowering for this callee [reject-message]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [coord-write-response]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [coord-version-response]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [coord-version-for-log-response]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [coord-status-response]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-map?: no native lowering for this callee [warm-read-response]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [warm-read-for-log-response]
+materialize REFUSED a Text or Keyword literal falls outside the printable-ASCII subset this materializer can spell
+qbe-materialize REFUSED native world uses a shape outside the QBE materializer's slice
