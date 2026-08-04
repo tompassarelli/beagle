@@ -3959,6 +3959,90 @@
               (exprresultv0-value-id value) zero-id))
           result-id (bool-type-id) false)))))
 
+(defn lower-zero
+  [state: BodyStateV0
+   owner: core/NativeId
+   value-id: core/NativeId
+   value-type: core/NativeId] -> ExprResultV0
+  (if (not (same-id? value-type (int-type-id)))
+    (fail-result state "TODO-NATIVE-ZERO-OPERAND: zero? needs a native Int")
+    (let [zero-id: core/NativeId (state-id state owner "zero-value")
+          result-id: core/NativeId (state-id (state-bump state) owner "zero")]
+      (->ExprResultV0
+        (state-emit
+          (state-emit (state-bump (state-bump state))
+            (core/->AtomInstruction
+              (core/->SsaValueV0 zero-id (int-type-id))
+              (core/->I64Atom 0)))
+          (core/->CompareInstruction
+            (core/->SsaValueV0 result-id (bool-type-id))
+            (core/->CompareEqI64V0 true) value-id zero-id))
+        result-id (bool-type-id) false))))
+
+(defn int-value-types? [value-types: (Vec core/NativeId)] -> Bool
+  (every?
+    (fn [value-type: core/NativeId] -> Bool
+      (same-id? value-type (int-type-id)))
+    value-types))
+
+(defn lower-int-extreme-pair
+  [state: BodyStateV0
+   owner: core/NativeId
+   callee: String
+   left-id: core/NativeId
+   right-id: core/NativeId] -> ExprResultV0
+  (let [compare-id: core/NativeId
+        (state-id state owner (str callee "-compare"))
+        true-id: core/NativeId
+        (state-id (state-bump state) owner (str callee "-true"))
+        false-id: core/NativeId
+        (state-id (state-bump (state-bump state)) owner (str callee "-false"))
+        join-id: core/NativeId
+        (state-id (state-bump (state-bump (state-bump state)))
+          owner (str callee "-join"))
+        join-value: core/NativeId
+        (state-id
+          (state-bump (state-bump (state-bump (state-bump state))))
+          owner (str callee "-value"))
+        true-value: core/NativeId (if (= "min" callee) left-id right-id)
+        false-value: core/NativeId (if (= "min" callee) right-id left-id)
+        compared: BodyStateV0
+        (state-emit
+          (state-bump (state-bump (state-bump (state-bump (state-bump state)))))
+          (core/->CompareInstruction
+            (core/->SsaValueV0 compare-id (bool-type-id))
+            (core/->CompareLeI64V0 true) left-id right-id))
+        branched: BodyStateV0
+        (state-close compared
+          (core/->BranchTerminator compare-id true-id false-id))
+        true-block: BodyStateV0
+        (state-close (state-open-block branched true-id [])
+          (core/->JumpTerminator join-id [true-value]))
+        false-block: BodyStateV0
+        (state-close (state-open-block true-block false-id [])
+          (core/->JumpTerminator join-id [false-value]))]
+    (->ExprResultV0
+      (state-open-block false-block join-id
+        [(core/->Parameter join-value (int-type-id))])
+      join-value (int-type-id) false)))
+
+(defn lower-int-extreme
+  [state: BodyStateV0
+   owner: core/NativeId
+   callee: String
+   values: (Vec core/NativeId)] -> ExprResultV0
+  (loop [position: Int 1
+         current: BodyStateV0 state
+         selected: core/NativeId (nth values 0)]
+    (if (>= position (count values))
+      (->ExprResultV0 current selected (int-type-id) false)
+      (let [pair: ExprResultV0
+            (lower-int-extreme-pair current owner callee selected
+              (nth values position))]
+        (recur (+ position 1)
+          (exprresultv0-state pair)
+          (exprresultv0-value-id pair))))))
+
 (defn equality-comparison [type-id-value: core/NativeId] -> (U core/CompareOpV0 Nil)
   (cond
     (same-id? type-id-value (int-type-id)) (core/->CompareEqI64V0 true)
@@ -6320,43 +6404,27 @@
                         (same-id? (nth value-types 0) (int-type-id)))))
                 (->ExprResultV0 current (nth values 0) (nth value-types 0) false)
 
+                (and (= "min" callee)
+                  (or (= 2 (count values)) (= 3 (count values)))
+                  (int-value-types? value-types))
+                (lower-int-extreme current owner callee values)
+
                 (and (= "max" callee) (= 2 (count values))
-                  (same-id? (nth value-types 0) (int-type-id))
-                  (same-id? (nth value-types 1) (int-type-id)))
-                (let [compare-id: core/NativeId
-                      (state-id current owner "max-compare")
-                      left-id: core/NativeId
-                      (state-id (state-bump current) owner "max-left")
-                      right-id: core/NativeId
-                      (state-id (state-bump (state-bump current)) owner "max-right")
-                      join-id: core/NativeId
-                      (state-id (state-bump (state-bump (state-bump current)))
-                        owner "max-join")
-                      join-value: core/NativeId
-                      (state-id
-                        (state-bump (state-bump (state-bump (state-bump current))))
-                        owner "max-value")
-                      compared: BodyStateV0
-                      (state-emit
-                        (state-bump (state-bump (state-bump
-                          (state-bump (state-bump current)))))
-                        (core/->CompareInstruction
-                          (core/->SsaValueV0 compare-id (bool-type-id))
-                          (core/->CompareLeI64V0 true)
-                          (nth values 0) (nth values 1)))
-                      branched: BodyStateV0
-                      (state-close compared
-                        (core/->BranchTerminator compare-id right-id left-id))
-                      left: BodyStateV0
-                      (state-close (state-open-block branched left-id [])
-                        (core/->JumpTerminator join-id [(nth values 0)]))
-                      right: BodyStateV0
-                      (state-close (state-open-block left right-id [])
-                        (core/->JumpTerminator join-id [(nth values 1)]))]
-                  (->ExprResultV0
-                    (state-open-block right join-id
-                      [(core/->Parameter join-value (int-type-id))])
-                    join-value (int-type-id) false))
+                  (int-value-types? value-types))
+                (lower-int-extreme current owner callee values)
+
+                (or (= "min" callee) (= "max" callee))
+                (if (or (and (= "min" callee)
+                          (not (or (= 2 (count values)) (= 3 (count values)))))
+                        (and (= "max" callee) (not (= 2 (count values)))))
+                  (fail-result current
+                    (str "TODO-NATIVE-EXTREME-ARITY: " callee
+                      (if (= "min" callee)
+                        " lowers only with two or three operands"
+                        " lowers only with two operands")))
+                  (fail-result current
+                    (str "TODO-NATIVE-EXTREME-OPERANDS: " callee
+                      " needs native Int operands")))
 
                 (and (= "atom" bare-callee) (= 1 (count values)))
                 (let [cell-type: (U core/NativeId Nil)
@@ -6583,6 +6651,12 @@
 
                 (= "neg?" callee)
                 (fail-result current "TODO-NATIVE-NEG-ARITY: neg? takes one operand")
+
+                (and (= "zero?" callee) (= 1 (count values)))
+                (lower-zero current owner (nth values 0) (nth value-types 0))
+
+                (= "zero?" callee)
+                (fail-result current "TODO-NATIVE-ZERO-ARITY: zero? takes one operand")
 
                 (and (= "count" callee) (= 1 (count values))
                   (vector-type? types (nth value-types 0)))

@@ -54,3 +54,28 @@
     (if done
       (->Tally flag mark)
       (recur second-slot first-slot (not flag) true first-slot carried))))
+
+(defn positive-int? [value: Int] -> Bool
+  (pos? value))
+
+(defn negative-int? [value: Int] -> Bool
+  (neg? value))
+
+(defn zero-int? [value: Int] -> Bool
+  (zero? value))
+
+(defn bounded-min
+  [left: Int
+   right: Int] -> Int
+  (min left right))
+
+(defn bounded-min-three
+  [first: Int
+   second: Int
+   third: Int] -> Int
+  (min first second third))
+
+(defn bounded-max
+  [left: Int
+   right: Int] -> Int
+  (max left right))

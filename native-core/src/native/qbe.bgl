@@ -1274,6 +1274,14 @@
             (abi-type (qbefn-types context) (qbefn-layouts context) (qbefn-module-index context) return-type)
             " call " symbol-name "(" arguments-text ")\n"))))))
 
+(defn compare-mnemonic [comparison: core/CompareOpV0] -> String
+  (cond
+    (instance? native.core.CompareEqI64V0 comparison) "ceql"
+    (instance? native.core.CompareLtI64V0 comparison) "csltl"
+    (instance? native.core.CompareLeI64V0 comparison) "cslel"
+    (instance? native.core.CompareEqBoolV0 comparison) "ceqw"
+    :else ""))
+
 (defn emit-instruction
   [context: QbeFn
    block-index-value: Int
@@ -1330,7 +1338,12 @@
              ", l "
              (value-name context (core/compareinstruction-right-id instruction))
              ")\n")
-           ""))]
+           (let [mnemonic: String (compare-mnemonic comparison)]
+             (if (= "" mnemonic)
+               ""
+               (str "  " result-name " =w " mnemonic " "
+                 (value-name context (core/compareinstruction-left-id instruction)) ", "
+                 (value-name context (core/compareinstruction-right-id instruction)) "\n")))))]
       [(FieldInstruction value) ""]
       [(VariantValueInstruction value) ""]
       [(RecordInstruction value) ""]
@@ -1732,7 +1745,8 @@
   (not= (store-mnemonic store) ""))
 
 (defn comparison-supported? [comparison: core/CompareOpV0] -> Bool
-  (instance? native.core.CompareEqTextV0 comparison))
+  (or (instance? native.core.CompareEqTextV0 comparison)
+    (not= "" (compare-mnemonic comparison))))
 
 (defn instruction-supported? [instruction: core/Instruction] -> Bool
   (match instruction

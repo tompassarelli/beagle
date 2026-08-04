@@ -1,5 +1,5 @@
 /* Probe for the lowered native.loops bodies. Hand-written; the module under it
-   is generated. fn_0 settle  fn_1 exchange  fn_2 settle-nested  fn_3 scan-six */
+   is generated. */
 #include "module_0.h"
 
 int main(int argc, char **argv) {
@@ -49,6 +49,34 @@ int main(int argc, char **argv) {
     if ((negative.field_0 != true) || (negative.field_1 != INT64_C(-2))) {
       return 11;
     }
+  }
+
+  if (native_m0_fn_4(INT64_MIN) || native_m0_fn_4(INT64_C(-1)) ||
+      native_m0_fn_4(INT64_C(0)) || !native_m0_fn_4(INT64_MAX)) {
+    return 12;
+  }
+  if (!native_m0_fn_5(INT64_MIN) || !native_m0_fn_5(INT64_C(-1)) ||
+      native_m0_fn_5(INT64_C(0)) || native_m0_fn_5(INT64_MAX)) {
+    return 13;
+  }
+  if (native_m0_fn_6(INT64_MIN) || native_m0_fn_6(INT64_C(-1)) ||
+      !native_m0_fn_6(INT64_C(0)) || native_m0_fn_6(INT64_MAX)) {
+    return 14;
+  }
+  if ((native_m0_fn_7(INT64_MIN, INT64_MAX) != INT64_MIN) ||
+      (native_m0_fn_7(INT64_C(-7), INT64_C(-9)) != INT64_C(-9)) ||
+      (native_m0_fn_7(INT64_C(-5), INT64_C(-5)) != INT64_C(-5))) {
+    return 15;
+  }
+  if ((native_m0_fn_8(INT64_MAX, INT64_C(-1), INT64_MIN) != INT64_MIN) ||
+      (native_m0_fn_8(INT64_C(-3), INT64_C(-9), INT64_C(-5)) != INT64_C(-9)) ||
+      (native_m0_fn_8(INT64_MAX, INT64_MAX, INT64_C(0)) != INT64_C(0))) {
+    return 16;
+  }
+  if ((native_m0_fn_9(INT64_MIN, INT64_MAX) != INT64_MAX) ||
+      (native_m0_fn_9(INT64_C(-7), INT64_C(-9)) != INT64_C(-7)) ||
+      (native_m0_fn_9(INT64_MIN, INT64_MIN) != INT64_MIN)) {
+    return 17;
   }
 
   return 0;
