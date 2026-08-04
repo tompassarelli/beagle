@@ -182,6 +182,12 @@
     [(ArenaInstruction value) (core/arenainstruction-result instruction)]
     [(TextLengthInstruction value)
      (core/textlengthinstruction-result instruction)]
+    [(TextIndexOfInstruction value)
+     (core/textindexofinstruction-result instruction)]
+    [(TextBlankInstruction value)
+     (core/textblankinstruction-result instruction)]
+    [(TextParseI64Instruction value)
+     (core/textparsei64instruction-result instruction)]
     [(TextSliceInstruction value)
      (core/textsliceinstruction-result instruction)]
     [(TextConcatInstruction value)
@@ -710,6 +716,9 @@
     [(VecConcatInstruction value) false]
     [(ArenaInstruction value) false]
     [(TextLengthInstruction value) false]
+    [(TextIndexOfInstruction value) false]
+    [(TextBlankInstruction value) false]
+    [(TextParseI64Instruction value) false]
     [(TextSliceInstruction value) false]
     [(TextConcatInstruction value) false]))
 
@@ -1021,6 +1030,9 @@
       [(ArenaInstruction value)
        (str "  " result-name " =l copy %arena\n")]
       [(TextLengthInstruction value) ""]
+      [(TextIndexOfInstruction value) ""]
+      [(TextBlankInstruction value) ""]
+      [(TextParseI64Instruction value) ""]
       [(TextSliceInstruction value) ""]
       [(TextConcatInstruction value) ""])))
 
@@ -1392,6 +1404,9 @@
     [(VecConcatInstruction value) true]
     [(ArenaInstruction value) true]
     [(TextLengthInstruction value) false]
+    [(TextIndexOfInstruction value) false]
+    [(TextBlankInstruction value) false]
+    [(TextParseI64Instruction value) false]
     [(TextSliceInstruction value) false]
     [(TextConcatInstruction value) false]))
 

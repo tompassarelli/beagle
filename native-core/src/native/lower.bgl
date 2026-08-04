@@ -1299,6 +1299,23 @@
               (typeresolutionv0-definitions
                 (resolve-source-type index annotation)))))))))
 
+;; Local annotations participate in body typing just as signatures and globals
+;; do. Collect them before lowering so a body's first nullable value already
+;; names a closed world type instead of minting one after the fact.
+(defn binding-type-definitions [index: SourceIndexV0] -> (Vec core/TypeDef)
+  (let [bindings: (Vec core/NativeId) (index-form-ids index "binding")]
+    (loop [position: Int 0 definitions: (Vec core/TypeDef) []]
+      (if (>= position (count bindings))
+        definitions
+        (let [annotation: (U core/NativeId Nil)
+              (index-first-object index (nth bindings position) "ann")]
+          (recur (+ position 1)
+            (if (nil? annotation)
+              definitions
+              (append-type-defs definitions
+                (typeresolutionv0-definitions
+                  (resolve-source-type index annotation))))))))))
+
 (defn lookup-type
   [types: (Vec core/TypeDef)
    target: core/NativeId] -> (U core/TypeDef Nil)
@@ -2228,6 +2245,27 @@
           (conj coerced-values (exprresultv0-value-id coerced))
           (conj coerced-types (exprresultv0-type-id coerced)))))))
 
+(defn coerce-values-to-type
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   values: (Vec core/NativeId)
+   value-types: (Vec core/NativeId)
+   target: core/NativeId] -> ArgsResultV0
+  (loop [position: Int 0
+         current: BodyStateV0 state
+         coerced-values: (Vec core/NativeId) []
+         coerced-types: (Vec core/NativeId) []]
+    (if (or (>= position (count values)) (state-blocked? current))
+      (->ArgsResultV0 current coerced-values coerced-types false)
+      (let [coerced: ExprResultV0
+            (lower-boundary-coerce types owner current
+              (nth values position) (nth value-types position) target)]
+        (recur (+ position 1)
+          (exprresultv0-state coerced)
+          (conj coerced-values (exprresultv0-value-id coerced))
+          (conj coerced-types (exprresultv0-type-id coerced)))))))
+
 (defn vector-type?
   [types: (Vec core/TypeDef)
    target: core/NativeId] -> Bool
@@ -2434,6 +2472,134 @@
           (state-open-block false-block join-id
             [(core/->Parameter join-parameter (bool-type-id))])
           join-parameter (bool-type-id) false)))))
+
+(defn nil-variant? [variant: core/TypeVariant] -> Bool
+  (let [payload: (U core/NativeId Nil) (core/typevariant-payload-type variant)]
+    (if (nil? payload)
+      (= "nil" (core/typevariant-name variant))
+      (same-id? payload (type-id "Nil")))))
+
+(defn nil-variant-count [variants: (Vec core/TypeVariant)] -> Int
+  (loop [position: Int 0 found: Int 0]
+    (if (>= position (count variants))
+      found
+      (recur (+ position 1)
+        (+ found (if (nil-variant? (nth variants position)) 1 0))))))
+
+(defn optional-scalar-type-of
+  [types: (Vec core/TypeDef)
+   scalar: core/NativeId] -> (U core/NativeId Nil)
+  (loop [position: Int 0]
+    (if (>= position (count types))
+      nil
+      (let [definition: core/TypeDef (nth types position)
+            variants: (Vec core/TypeVariant)
+            (union-variants-of types (core/typedef-id definition))]
+        (if (and (= 2 (count variants))
+              (= 1 (nil-variant-count variants))
+              (some? (variant-for-payload variants scalar)))
+          (core/typedef-id definition)
+          (recur (+ position 1)))))))
+
+(defn lower-presence-predicate
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   value-id: core/NativeId
+   value-type: core/NativeId
+   want-present: Bool] -> ExprResultV0
+  (let [variants: (Vec core/TypeVariant) (union-variants-of types value-type)]
+    (cond
+      (same-id? value-type (type-id "Nil"))
+      (bool-constant-result state owner "presence-direct" (not want-present))
+
+      (= 0 (count variants))
+      (bool-constant-result state owner "presence-direct" want-present)
+
+      (not (= 1 (nil-variant-count variants)))
+      (fail-result state
+        "TODO-NATIVE-PRESENCE-TYPE: nil?/some? needs one closed nil alternative")
+
+      :else
+      (let [true-id: core/NativeId (state-id state owner "presence-true")
+            false-id: core/NativeId (state-id state owner "presence-false")
+            join-id: core/NativeId (state-id state owner "presence-join")
+            join-parameter: core/NativeId
+            (state-id state owner "presence-value")
+            true-value: core/NativeId (state-id state owner "presence-yes")
+            false-value: core/NativeId (state-id state owner "presence-no")
+            cases: (Vec core/SwitchCaseV0)
+            (mapv
+              (fn [variant: core/TypeVariant] -> core/SwitchCaseV0
+                (let [present: Bool (not (nil-variant? variant))]
+                  (core/->SwitchCaseV0 (core/typevariant-id variant)
+                    (if (= present want-present) true-id false-id) [])))
+              variants)
+            switched: BodyStateV0
+            (state-close (state-bump state)
+              (core/->SwitchTerminator value-id cases))
+            true-block: BodyStateV0
+            (state-close
+              (state-emit (state-open-block switched true-id [])
+                (core/->AtomInstruction
+                  (core/->SsaValueV0 true-value (bool-type-id))
+                  (core/->BoolAtom true)))
+              (core/->JumpTerminator join-id [true-value]))
+            false-block: BodyStateV0
+            (state-close
+              (state-emit (state-open-block true-block false-id [])
+                (core/->AtomInstruction
+                  (core/->SsaValueV0 false-value (bool-type-id))
+                  (core/->BoolAtom false)))
+              (core/->JumpTerminator join-id [false-value]))]
+        (->ExprResultV0
+          (state-open-block false-block join-id
+            [(core/->Parameter join-parameter (bool-type-id))])
+          join-parameter (bool-type-id) false)))))
+
+(defn lower-text-index
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   source-id: core/NativeId
+   needle-id: core/NativeId] -> ExprResultV0
+  (let [optional: (U core/NativeId Nil)
+        (optional-scalar-type-of types (int-type-id))]
+    (if (nil? optional)
+      (fail-result state
+        "TODO-NATIVE-TEXT-INDEX-TYPE: the source world declares no nullable Int")
+      (let [result-id: core/NativeId (state-id state owner "text-index")]
+        (->ExprResultV0
+          (state-emit (state-bump state)
+            (core/->TextIndexOfInstruction
+              (core/->SsaValueV0 result-id optional) source-id needle-id))
+          result-id optional false)))))
+
+(defn lower-text-search-predicate
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   callee: String
+   source-id: core/NativeId
+   needle-id: core/NativeId] -> ExprResultV0
+  (let [found: ExprResultV0
+        (lower-text-index types owner state source-id needle-id)
+        current: BodyStateV0 (exprresultv0-state found)]
+    (cond
+      (state-blocked? current) (dead-result current)
+      (= "str/includes?" callee)
+      (lower-presence-predicate types owner current
+        (exprresultv0-value-id found) (exprresultv0-type-id found) true)
+      :else
+      (let [zero-id: core/NativeId (state-id current owner "text-index-zero")
+            with-zero: BodyStateV0
+            (state-emit (state-bump current)
+              (core/->AtomInstruction
+                (core/->SsaValueV0 zero-id (int-type-id))
+                (core/->I64Atom 0)))]
+        (lower-scalar-union-equality types owner with-zero zero-id
+          (int-type-id) (exprresultv0-value-id found)
+          (exprresultv0-type-id found))))))
 
 (defn lower-positive
   [state: BodyStateV0
@@ -3269,15 +3435,87 @@
                     (str "TODO-NATIVE-ARITH-ARITY: " callee
                       " lowers only in its two-operand form"))
 
-                  (not (and (same-id? (nth value-types 0) (int-type-id))
-                            (same-id? (nth value-types 1) (int-type-id))))
-                  (fail-result current
-                    (str "TODO-NATIVE-ARITH-OPERANDS: " callee
-                      " needs native Int operands"))
-
                   :else
-                  (lower-checked-arith current owner callee
-                    (nth values 0) (nth values 1)))
+                  (let [coerced: ArgsResultV0
+                        (coerce-values-to-type types owner current values
+                          value-types (int-type-id))
+                        settled: BodyStateV0 (argsresultv0-state coerced)]
+                    (if (state-blocked? settled)
+                      (fail-result settled
+                        (str "TODO-NATIVE-ARITH-OPERANDS: " callee
+                          " needs values safely narrowable to Int"))
+                      (lower-checked-arith settled owner callee
+                        (nth (argsresultv0-values coerced) 0)
+                        (nth (argsresultv0-values coerced) 1)))))
+
+                (and (or (= "nil?" callee) (= "some?" callee))
+                  (= 1 (count values)))
+                (lower-presence-predicate types owner current
+                  (nth values 0) (nth value-types 0) (= "some?" callee))
+
+                (or (= "nil?" callee) (= "some?" callee))
+                (fail-result current
+                  (str "TODO-NATIVE-PRESENCE-ARITY: " callee
+                    " takes one operand"))
+
+                (and (or (= "str/starts-with?" callee)
+                           (= "str/includes?" callee))
+                  (= 2 (count values))
+                  (text-operand? (nth value-types 0))
+                  (text-operand? (nth value-types 1)))
+                (lower-text-search-predicate types owner current callee
+                  (nth values 0) (nth values 1))
+
+                (or (= "str/starts-with?" callee)
+                    (= "str/includes?" callee))
+                (fail-result current
+                  (str "TODO-NATIVE-TEXT-SEARCH-OPERANDS: " callee
+                    " takes two native Text operands"))
+
+                (and (= "str/index-of" callee) (= 2 (count values))
+                  (text-operand? (nth value-types 0))
+                  (text-operand? (nth value-types 1)))
+                (lower-text-index types owner current
+                  (nth values 0) (nth values 1))
+
+                (= "str/index-of" callee)
+                (fail-result current
+                  "TODO-NATIVE-TEXT-INDEX-OPERANDS: str/index-of takes two native Text operands")
+
+                (and (= "str/blank?" callee) (= 1 (count values))
+                  (text-operand? (nth value-types 0)))
+                (let [result-id: core/NativeId
+                      (state-id current owner "text-blank")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->TextBlankInstruction
+                        (core/->SsaValueV0 result-id (bool-type-id))
+                        (nth values 0)))
+                    result-id (bool-type-id) false))
+
+                (= "str/blank?" callee)
+                (fail-result current
+                  "TODO-NATIVE-TEXT-BLANK-OPERAND: str/blank? takes one native Text operand")
+
+                (and (= "parse-long" callee) (= 1 (count values))
+                  (text-operand? (nth value-types 0)))
+                (let [optional: (U core/NativeId Nil)
+                      (optional-scalar-type-of types (int-type-id))]
+                  (if (nil? optional)
+                    (fail-result current
+                      "TODO-NATIVE-PARSE-I64-TYPE: parse-long needs a nullable Int in the source world")
+                    (let [result-id: core/NativeId
+                          (state-id current owner "parse-i64")]
+                      (->ExprResultV0
+                        (state-emit (state-bump current)
+                          (core/->TextParseI64Instruction
+                            (core/->SsaValueV0 result-id optional)
+                            (nth values 0)))
+                        result-id optional false))))
+
+                (= "parse-long" callee)
+                (fail-result current
+                  "TODO-NATIVE-PARSE-I64-OPERAND: parse-long takes one native Text operand")
 
                 (and (scalar-predicate? callee) (= 1 (count values)))
                 (lower-scalar-predicate types owner current callee
@@ -3476,34 +3714,47 @@
 
                 (= "subs" callee)
                 (if (not (and (or (= 2 (count values)) (= 3 (count values)))
-                           (text-operand? (nth value-types 0))
-                           (same-id? (nth value-types 1) (int-type-id))
-                           (or (= 2 (count values))
-                             (same-id? (nth value-types 2) (int-type-id)))))
+                           (text-operand? (nth value-types 0))))
                   (fail-result current
                     "TODO-NATIVE-SUBS-OPERANDS: subs takes a native Text and one or two native Int byte bounds")
                   (let [open-ended: Bool (= 2 (count values))
-                        length-id: core/NativeId (state-id current owner "subs-end")
-                        measured: BodyStateV0
-                        (if open-ended
-                          (state-emit (state-bump current)
-                            (core/->TextLengthInstruction
-                              (core/->SsaValueV0 length-id (int-type-id))
-                              (nth values 0)))
-                          current)
-                        upper-id: core/NativeId
-                        (if open-ended length-id (nth values 2))
-                        result-id: core/NativeId (state-id measured owner "subs")]
-                    (->ExprResultV0
-                      (state-emit (state-bump measured)
-                        (core/->TextSliceInstruction
-                          (core/->SsaValueV0 result-id (text-type-id))
-                          (arena-value-id owner)
-                          (nth values 0)
-                          (nth values 1)
-                          upper-id
-                          (failure-code "bounds")))
-                      result-id (text-type-id) false)))
+                        bounds: (Vec core/NativeId)
+                        (if open-ended [(nth values 1)]
+                          [(nth values 1) (nth values 2)])
+                        bound-types: (Vec core/NativeId)
+                        (if open-ended [(nth value-types 1)]
+                          [(nth value-types 1) (nth value-types 2)])
+                        coerced: ArgsResultV0
+                        (coerce-values-to-type types owner current bounds
+                          bound-types (int-type-id))
+                        settled: BodyStateV0 (argsresultv0-state coerced)]
+                    (if (state-blocked? settled)
+                      (fail-result settled
+                        "TODO-NATIVE-SUBS-OPERANDS: subs bounds are not safely narrowable to Int")
+                      (let [length-id: core/NativeId
+                            (state-id settled owner "subs-end")
+                            measured: BodyStateV0
+                            (if open-ended
+                              (state-emit (state-bump settled)
+                                (core/->TextLengthInstruction
+                                  (core/->SsaValueV0 length-id (int-type-id))
+                                  (nth values 0)))
+                              settled)
+                            upper-id: core/NativeId
+                            (if open-ended length-id
+                              (nth (argsresultv0-values coerced) 1))
+                            result-id: core/NativeId
+                            (state-id measured owner "subs")]
+                        (->ExprResultV0
+                          (state-emit (state-bump measured)
+                            (core/->TextSliceInstruction
+                              (core/->SsaValueV0 result-id (text-type-id))
+                              (arena-value-id owner)
+                              (nth values 0)
+                              (nth (argsresultv0-values coerced) 0)
+                              upper-id
+                              (failure-code "bounds")))
+                          result-id (text-type-id) false)))))
 
                 (= "str" callee)
                 (if (not (and (> (count values) 0)
@@ -3578,26 +3829,44 @@
                         [])
                       arity-ok: Bool
                       (and (> (count fields) 0) (= (count fields) (count values)))
+                      parameters: (Vec core/Parameter)
+                      (mapv
+                        (fn [field: core/TypeField] -> core/Parameter
+                          (core/->Parameter (core/typefield-id field)
+                            (core/typefield-type-id field)))
+                        fields)
+                      coerced: ArgsResultV0
+                      (if arity-ok
+                        (coerce-arguments types owner current values value-types
+                          parameters)
+                        (->ArgsResultV0 current values value-types false))
+                      settled: BodyStateV0 (argsresultv0-state coerced)
+                      coerced-values: (Vec core/NativeId)
+                      (argsresultv0-values coerced)
+                      coerced-types: (Vec core/NativeId)
+                      (argsresultv0-value-types coerced)
                       types-ok: Bool
-                      (and arity-ok
-                        (loop [position: Int 0]
-                          (if (>= position (count fields))
-                            true
-                            (if (same-id? (core/typefield-type-id (nth fields position))
-                                  (nth value-types position))
-                              (recur (+ position 1))
-                              false))))
-                      result-id: core/NativeId (state-id current owner "record")]
-                  (if (not types-ok)
+                        (and arity-ok
+                          (loop [position: Int 0]
+                            (if (>= position (count fields))
+                              true
+                              (if (same-id? (core/typefield-type-id (nth fields position))
+                                  (nth coerced-types position))
+                                (recur (+ position 1))
+                                false))))
+                      result-id: core/NativeId (state-id settled owner "record")]
+                  (if (state-blocked? settled)
+                    (dead-result settled)
+                    (if (not types-ok)
                     (fail-result current
                       (str "TODO-NATIVE-CONSTRUCTOR-ARGUMENTS: " callee
                         " arguments do not match the record field types"))
                     (->ExprResultV0
-                      (state-emit (state-bump current)
+                      (state-emit (state-bump settled)
                         (core/->RecordInstruction
                           (core/->SsaValueV0 result-id (core/typedef-id constructor))
-                          values))
-                      result-id (core/typedef-id constructor) false)))
+                          coerced-values))
+                      result-id (core/typedef-id constructor) false))))
 
                 (some? signature)
                 (let [parameters: (Vec core/Parameter)
@@ -4378,7 +4647,9 @@
         (collect-record-types record-names record-resolutions)
         globals: (Vec GlobalBindingV0) (source-globals index)
         declared-types: (Vec core/TypeDef)
-        (append-type-defs record-types (global-type-definitions index globals))
+        (append-type-defs
+          (append-type-defs record-types (global-type-definitions index globals))
+          (binding-type-definitions index))
         source-types: (Vec core/TypeDef)
         (collect-function-types declared-types signature-resolutions)
         signatures: (Vec TypedFunctionV0) (collect-functions signature-resolutions)
@@ -5150,6 +5421,22 @@
     (worlds/canonical-record "text-length-instruction"
       [(encode-ssa-value (core/textlengthinstruction-result instruction))
        (id-value (core/textlengthinstruction-source-id instruction))])
+
+    (instance? native.core.TextIndexOfInstruction instruction)
+    (worlds/canonical-record "text-index-of-instruction"
+      [(encode-ssa-value (core/textindexofinstruction-result instruction))
+       (id-value (core/textindexofinstruction-source-id instruction))
+       (id-value (core/textindexofinstruction-needle-id instruction))])
+
+    (instance? native.core.TextBlankInstruction instruction)
+    (worlds/canonical-record "text-blank-instruction"
+      [(encode-ssa-value (core/textblankinstruction-result instruction))
+       (id-value (core/textblankinstruction-source-id instruction))])
+
+    (instance? native.core.TextParseI64Instruction instruction)
+    (worlds/canonical-record "text-parse-i64-instruction"
+      [(encode-ssa-value (core/textparsei64instruction-result instruction))
+       (id-value (core/textparsei64instruction-source-id instruction))])
 
     (instance? native.core.TextSliceInstruction instruction)
     (worlds/canonical-record "text-slice-instruction"

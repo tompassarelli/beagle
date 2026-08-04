@@ -195,6 +195,153 @@ bool native_text_eq(uint64_t left, uint64_t right) {
                 (size_t)length) == 0;
 }
 
+bool native_text_index_of(uint64_t source, uint64_t needle, int64_t *out) {
+  uint64_t source_length = native_text_length(source);
+  uint64_t needle_length = native_text_length(needle);
+  const uint8_t *source_bytes = native_text_bytes(source);
+  const uint8_t *needle_bytes = native_text_bytes(needle);
+  uint64_t index;
+  if (out == NULL) {
+    return false;
+  }
+  if (needle_length == UINT64_C(0)) {
+    *out = INT64_C(0);
+    return true;
+  }
+  if (needle_length > source_length) {
+    return false;
+  }
+  for (index = UINT64_C(0); index <= (source_length - needle_length); index++) {
+    if (memcmp(source_bytes + index, needle_bytes, (size_t)needle_length) == 0) {
+      if (index > (uint64_t)INT64_MAX) {
+        native_trap(NATIVE_TRAP_OVERFLOW);
+      }
+      *out = (int64_t)index;
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool native_unicode_whitespace(uint32_t codepoint) {
+  return ((codepoint >= UINT32_C(0x0009)) &&
+          (codepoint <= UINT32_C(0x000d))) ||
+         ((codepoint >= UINT32_C(0x001c)) &&
+          (codepoint <= UINT32_C(0x0020))) ||
+         (codepoint == UINT32_C(0x1680)) ||
+         ((codepoint >= UINT32_C(0x2000)) &&
+          (codepoint <= UINT32_C(0x2006))) ||
+         ((codepoint >= UINT32_C(0x2008)) &&
+          (codepoint <= UINT32_C(0x200a))) ||
+         ((codepoint >= UINT32_C(0x2028)) &&
+          (codepoint <= UINT32_C(0x2029))) ||
+         (codepoint == UINT32_C(0x205f)) ||
+         (codepoint == UINT32_C(0x3000));
+}
+
+static bool native_utf8_next(const uint8_t *bytes, uint64_t length,
+                             uint64_t *offset, uint32_t *out) {
+  uint8_t first;
+  uint32_t value;
+  uint64_t needed;
+  uint64_t index;
+  if ((*offset >= length) || (out == NULL)) {
+    return false;
+  }
+  first = bytes[*offset];
+  if (first < UINT8_C(0x80)) {
+    *out = (uint32_t)first;
+    *offset += UINT64_C(1);
+    return true;
+  }
+  if ((first >= UINT8_C(0xc2)) && (first <= UINT8_C(0xdf))) {
+    value = (uint32_t)(first & UINT8_C(0x1f));
+    needed = UINT64_C(1);
+  } else if ((first >= UINT8_C(0xe0)) && (first <= UINT8_C(0xef))) {
+    value = (uint32_t)(first & UINT8_C(0x0f));
+    needed = UINT64_C(2);
+  } else if ((first >= UINT8_C(0xf0)) && (first <= UINT8_C(0xf4))) {
+    value = (uint32_t)(first & UINT8_C(0x07));
+    needed = UINT64_C(3);
+  } else {
+    return false;
+  }
+  if (needed > (length - *offset - UINT64_C(1))) {
+    return false;
+  }
+  for (index = UINT64_C(1); index <= needed; index++) {
+    uint8_t continuation = bytes[*offset + index];
+    if ((continuation & UINT8_C(0xc0)) != UINT8_C(0x80)) {
+      return false;
+    }
+    value = (value << 6) | (uint32_t)(continuation & UINT8_C(0x3f));
+  }
+  if (((needed == UINT64_C(2)) && (value < UINT32_C(0x0800))) ||
+      ((needed == UINT64_C(3)) && (value < UINT32_C(0x10000))) ||
+      ((value >= UINT32_C(0xd800)) && (value <= UINT32_C(0xdfff))) ||
+      (value > UINT32_C(0x10ffff))) {
+    return false;
+  }
+  *offset += needed + UINT64_C(1);
+  *out = value;
+  return true;
+}
+
+bool native_text_is_blank(uint64_t handle) {
+  uint64_t length = native_text_length(handle);
+  const uint8_t *bytes = native_text_bytes(handle);
+  uint64_t offset = UINT64_C(0);
+  while (offset < length) {
+    uint32_t codepoint;
+    if (!native_utf8_next(bytes, length, &offset, &codepoint) ||
+        !native_unicode_whitespace(codepoint)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool native_text_parse_i64(uint64_t handle, int64_t *out) {
+  const uint8_t *bytes = native_text_bytes(handle);
+  uint64_t length = native_text_length(handle);
+  uint64_t index = UINT64_C(0);
+  uint64_t magnitude = UINT64_C(0);
+  uint64_t limit;
+  bool negative = false;
+  if ((out == NULL) || (length == UINT64_C(0))) {
+    return false;
+  }
+  if ((bytes[index] == (uint8_t)'-') || (bytes[index] == (uint8_t)'+')) {
+    negative = bytes[index] == (uint8_t)'-';
+    index += UINT64_C(1);
+    if (index == length) {
+      return false;
+    }
+  }
+  limit = negative ? (UINT64_C(1) << 63) : (uint64_t)INT64_MAX;
+  while (index < length) {
+    uint8_t byte = bytes[index];
+    uint64_t digit;
+    if ((byte < (uint8_t)'0') || (byte > (uint8_t)'9')) {
+      return false;
+    }
+    digit = (uint64_t)(byte - (uint8_t)'0');
+    if (magnitude > ((limit - digit) / UINT64_C(10))) {
+      return false;
+    }
+    magnitude = (magnitude * UINT64_C(10)) + digit;
+    index += UINT64_C(1);
+  }
+  if (negative && (magnitude == (UINT64_C(1) << 63))) {
+    *out = INT64_MIN;
+  } else if (negative) {
+    *out = -(int64_t)magnitude;
+  } else {
+    *out = (int64_t)magnitude;
+  }
+  return true;
+}
+
 uint64_t native_text_alloc(native_arena *arena, uint64_t length, uint8_t **out) {
   uint8_t *blob;
   if (length > (uint64_t)(SIZE_MAX - (size_t)NATIVE_TEXT_HEADER_BYTES)) {

@@ -51,7 +51,9 @@
       true
       (let [character: String (subs value position (+ position 1))]
         (if (or (character-in? (printable-ascii) character)
-              (= character "\t") (= character "\n") (= character "\r"))
+              (= character "\u0001") (= character "\t")
+              (= character "\n") (= character "\u000b")
+              (= character "\u000c") (= character "\r"))
           (recur (+ position 1))
           false)))))
 
@@ -60,8 +62,11 @@
     (= character "\\") "\\\\"
     (= character "\"") "\\\""
     (= character "?") "\\?"
+    (= character "\u0001") "\\001"
     (= character "\t") "\\t"
     (= character "\n") "\\n"
+    (= character "\u000b") "\\v"
+    (= character "\u000c") "\\f"
     (= character "\r") "\\r"
     :else character))
 
@@ -187,6 +192,9 @@
     (instance? native.core.VecConcatInstruction instruction) true
     (instance? native.core.ArenaInstruction instruction) true
     (instance? native.core.TextLengthInstruction instruction) true
+    (instance? native.core.TextIndexOfInstruction instruction) true
+    (instance? native.core.TextBlankInstruction instruction) true
+    (instance? native.core.TextParseI64Instruction instruction) true
     (instance? native.core.TextSliceInstruction instruction) true
     (instance? native.core.TextConcatInstruction instruction) true
     :else false))
@@ -449,7 +457,90 @@
       nil
       (if (core/native-id= (core/typedef-id (nth types position)) target)
         (nth types position)
-        (recur (+ position 1))))))
+          (recur (+ position 1))))))
+
+(defn variant-tag-for-payload
+  [layouts: (Vec core/LayoutDef)
+   owner: core/NativeId
+   payload-type: core/NativeId] -> Int
+  (let [layout: (U core/LayoutDef Nil) (c17/layout-for-type layouts owner)]
+    (if (nil? layout)
+      -1
+      (let [variants: (Vec core/UnionVariantLayoutV0)
+            (c17/union-layout-variants layout)]
+        (loop [position: Int 0]
+          (if (>= position (count variants))
+            -1
+            (let [variant: core/UnionVariantLayoutV0 (nth variants position)
+                  payload: (U core/NativeId Nil)
+                  (core/unionvariantlayoutv0-payload-type variant)]
+              (if (and (some? payload) (core/native-id= payload payload-type))
+                (core/unionvariantlayoutv0-tag variant)
+                (recur (+ position 1))))))))))
+
+(defn unit-type?
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> Bool
+  (let [definition: (U core/TypeDef Nil) (type-with-id types target)]
+    (if (nil? definition)
+      false
+      (let [shape: core/TypeShape (core/typedef-shape definition)]
+        (if (not (instance? native.core.UnionType shape))
+          false
+          (let [variants: (Vec core/TypeVariant)
+                (core/uniontype-variants shape)]
+            (and (= 1 (count variants))
+              (nil? (core/typevariant-payload-type (nth variants 0))))))))))
+
+(defn absent-variant-tag
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)
+   owner: core/NativeId] -> Int
+  (let [layout: (U core/LayoutDef Nil) (c17/layout-for-type layouts owner)]
+    (if (nil? layout)
+      -1
+      (let [variants: (Vec core/UnionVariantLayoutV0)
+            (c17/union-layout-variants layout)]
+        (loop [position: Int 0]
+          (if (>= position (count variants))
+            -1
+            (let [variant: core/UnionVariantLayoutV0 (nth variants position)
+                  payload: (U core/NativeId Nil)
+                  (core/unionvariantlayoutv0-payload-type variant)]
+              (if (or (nil? payload)
+                    (and (some? payload) (unit-type? types payload)))
+                (core/unionvariantlayoutv0-tag variant)
+                (recur (+ position 1))))))))))
+
+(defn i64-type-id [types: (Vec core/TypeDef)] -> core/NativeId
+  (loop [position: Int 0]
+    (if (>= position (count types))
+      (core/->NativeId "native-body-c17-missing-i64")
+      (let [definition: core/TypeDef (nth types position)
+            shape: core/TypeShape (core/typedef-shape definition)]
+        (if (and (instance? native.core.AtomType shape)
+              (instance? native.core.I64Kind (core/atomtype-kind shape)))
+          (core/typedef-id definition)
+          (recur (+ position 1)))))))
+
+(defn emit-optional-i64-call
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)
+   target: String
+   result: core/SsaValueV0
+   call: String] -> String
+  (let [owner: core/NativeId (core/ssavaluev0-type-id result)
+        ok-tag: Int
+        (variant-tag-for-payload layouts owner (i64-type-id types))
+        absent-tag: Int (absent-variant-tag types layouts owner)]
+    (if (or (< ok-tag 0) (< absent-tag 0))
+      ""
+      (str "  memset(&" target ", 0, sizeof " target ");\n"
+        "  if (" call "&" target ".payload.variant_" ok-tag ")) {\n"
+        "    " target ".tag = INT64_C(" ok-tag ");\n"
+        "  } else {\n"
+        "    " target ".tag = INT64_C(" absent-tag ");\n"
+        "  }\n"))))
 
 ;; A record inside a closed union is a reference, so a field read through it
 ;; loads via the pointer and takes its layout from the reference target.
@@ -676,6 +767,29 @@
         (value-name function slots
           (core/textlengthinstruction-source-id instruction))
         ");\n")
+
+      (instance? native.core.TextIndexOfInstruction instruction)
+      (emit-optional-i64-call types layouts target result
+        (str "native_text_index_of("
+          (value-name function slots
+            (core/textindexofinstruction-source-id instruction))
+          ", "
+          (value-name function slots
+            (core/textindexofinstruction-needle-id instruction))
+          ", "))
+
+      (instance? native.core.TextBlankInstruction instruction)
+      (str "  " target " = native_text_is_blank("
+        (value-name function slots
+          (core/textblankinstruction-source-id instruction))
+        ");\n")
+
+      (instance? native.core.TextParseI64Instruction instruction)
+      (emit-optional-i64-call types layouts target result
+        (str "native_text_parse_i64("
+          (value-name function slots
+            (core/textparsei64instruction-source-id instruction))
+          ", "))
 
       (instance? native.core.TextSliceInstruction instruction)
       (let [arena: String

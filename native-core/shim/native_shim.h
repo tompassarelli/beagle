@@ -70,6 +70,9 @@ bool native_byte_write(FILE *stream, const uint8_t *source, size_t length);
 uint64_t native_text_length(uint64_t handle);
 const uint8_t *native_text_bytes(uint64_t handle);
 bool native_text_eq(uint64_t left, uint64_t right);
+bool native_text_index_of(uint64_t source, uint64_t needle, int64_t *out);
+bool native_text_is_blank(uint64_t handle);
+bool native_text_parse_i64(uint64_t handle, int64_t *out);
 uint64_t native_text_alloc(native_arena *arena, uint64_t length, uint8_t **out);
 uint64_t native_text_slice(native_arena *arena, uint64_t handle, uint64_t start,
                            uint64_t end);

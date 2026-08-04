@@ -174,17 +174,44 @@
     (row! root "imports" "n" (emit-node-seq imports))
     root))
 
-(let [[input-spec out & arguments] *command-line-args*
+(defn option-values [arguments option]
+  (loop [remaining arguments collected []]
+    (if (empty? remaining)
+      collected
+      (if (= option (first remaining))
+        (recur (nnext remaining) (conj collected (second remaining)))
+        (recur (next remaining) collected)))))
+
+(defn option-value [arguments option]
+  (first (option-values arguments option)))
+
+(let [explicit? (some #{"--input"} *command-line-args*)
+      [legacy-input legacy-out & legacy-arguments] *command-line-args*
+      input-specs (if explicit?
+                    (option-values *command-line-args* "--input")
+                    [legacy-input])
+      out (if explicit?
+            (option-value *command-line-args* "--output")
+            legacy-out)
+      arguments (if explicit? *command-line-args* legacy-arguments)
       include-defs? (some #{"--include-defs"} arguments)
-      annotations (remove #{"--include-defs"} arguments)
-      [in relative-path] (parse-input-spec input-spec)
-      ast (json/parse-string (slurp in))]
+      annotations (if explicit?
+                    (option-values arguments "--native-op")
+                    (remove #{"--include-defs"} arguments))]
+  (when (or (empty? input-specs) (nil? out))
+    (throw (ex-info "expected at least one --input and one --output" {})))
   (reset! native-ops
           (into {} (for [a annotations
                          :let [[name op] (clojure.string/split a #"=" 2)]]
                      [name op])))
-  (let [module (emit-module ast relative-path include-defs?)]
+  (let [modules
+        (mapv
+          (fn [input-spec]
+            (let [[in relative-path] (parse-input-spec input-spec)
+                  ast (json/parse-string (slurp in))]
+              (emit-module ast relative-path include-defs?)))
+          input-specs)]
     (row! "0" "form-kind" "t" "program-root")
-    (row! "0" "modules" "n" (emit-node-seq [module])))
+    (row! "0" "modules" "n" (emit-node-seq modules)))
   (spit out (apply str (for [[s p k o] (persistent! @rows)]
                          (str s "\t" p "\t" k "\t" o "\n")))))

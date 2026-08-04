@@ -304,6 +304,20 @@
   (TextLengthInstruction
     [result: SsaValueV0
      source-id: NativeId])
+  ;; Search reports a byte offset, or -1 when the needle is absent. Text and
+  ;; slicing share byte coordinates, so non-ASCII prefixes remain coherent.
+  (TextIndexOfInstruction
+    [result: SsaValueV0
+     source-id: NativeId
+     needle-id: NativeId])
+  (TextBlankInstruction
+    [result: SsaValueV0
+     source-id: NativeId])
+  ;; The result is a closed Int-or-unit union: malformed or overflowing input
+  ;; is absence, not a trap and not a reserved integer sentinel.
+  (TextParseI64Instruction
+    [result: SsaValueV0
+     source-id: NativeId])
   ;; v0 subs copies into the arena: no interior borrow, so the source blob's
   ;; lifetime never constrains the slice.
   (TextSliceInstruction
@@ -559,6 +573,9 @@
      (ssavaluev0-id result)]
     [(ArenaInstruction result region capability tokens) (ssavaluev0-id result)]
     [(TextLengthInstruction result source-id) (ssavaluev0-id result)]
+    [(TextIndexOfInstruction result source-id needle-id) (ssavaluev0-id result)]
+    [(TextBlankInstruction result source-id) (ssavaluev0-id result)]
+    [(TextParseI64Instruction result source-id) (ssavaluev0-id result)]
     [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
      (ssavaluev0-id result)]
     [(TextConcatInstruction result arena-id operand-ids) (ssavaluev0-id result)]))
@@ -828,6 +845,9 @@
     [(ArenaInstruction result region capability tokens)
      (and (id-in? known-regions region) (id-in? known-capabilities capability))]
     [(TextLengthInstruction result source-id) true]
+    [(TextIndexOfInstruction result source-id needle-id) true]
+    [(TextBlankInstruction result source-id) true]
+    [(TextParseI64Instruction result source-id) true]
     [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
      true]
     [(TextConcatInstruction result arena-id operand-ids) true]))
@@ -956,6 +976,9 @@
      [arena-id left-id right-id]]
     [(ArenaInstruction result region capability tokens) []]
     [(TextLengthInstruction result source-id) [source-id]]
+    [(TextIndexOfInstruction result source-id needle-id) [source-id needle-id]]
+    [(TextBlankInstruction result source-id) [source-id]]
+    [(TextParseI64Instruction result source-id) [source-id]]
     [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
      [arena-id source-id start-id end-id]]
     [(TextConcatInstruction result arena-id operand-ids)
@@ -1036,6 +1059,9 @@
      (and (id-in? allowed-regions region)
        (id-in? allowed-capabilities capability))]
     [(TextLengthInstruction result source-id) true]
+    [(TextIndexOfInstruction result source-id needle-id) true]
+    [(TextBlankInstruction result source-id) true]
+    [(TextParseI64Instruction result source-id) true]
     [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
      true]
     [(TextConcatInstruction result arena-id operand-ids) true]))
