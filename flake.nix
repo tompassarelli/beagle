@@ -227,6 +227,7 @@
             pkgs.babashka
             pkgs.clojure
             pkgs.bun
+            pkgs.qbe
             # Rust toolchain for tools/nix-parse-json (the rnix-backed Nix
             # importer helper). The nix-import-roundtrip test bootstraps this
             # helper via `cargo build --locked` from tracked source; pinning
