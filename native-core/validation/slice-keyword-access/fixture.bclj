@@ -46,7 +46,7 @@
 
 (defn map-reject-count [response: (Map Keyword (U String Int Keyword (Vec String)))] -> Int
   (cond
-    (some? (:reject response)) (reject-message (:reject response))
+    (:reject response) (reject-message (:reject response))
     :else -1))
 
 (defn map-other-after-code-check [entries: (Map Keyword Int)] -> (U Int Nil)

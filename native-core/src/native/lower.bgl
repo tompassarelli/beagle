@@ -4002,7 +4002,7 @@
             true-value: core/NativeId (state-id armed owner "truthy-yes")
             true-block: BodyStateV0
             (state-close
-              (state-emit (state-open-block armed true-id [])
+              (state-emit (state-bump (state-open-block armed true-id []))
                 (core/->AtomInstruction
                   (core/->SsaValueV0 true-value (bool-type-id))
                   (core/->BoolAtom true)))
@@ -4010,7 +4010,7 @@
             false-value: core/NativeId (state-id true-block owner "truthy-no")
             false-block: BodyStateV0
             (state-close
-              (state-emit (state-open-block true-block false-id [])
+              (state-emit (state-bump (state-open-block true-block false-id []))
                 (core/->AtomInstruction
                   (core/->SsaValueV0 false-value (bool-type-id))
                   (core/->BoolAtom false)))
