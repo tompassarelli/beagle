@@ -4,10 +4,10 @@
 #     -> native world with lowered blocks -> 7 obligations
 #     -> native.body-c17 -> gcc/clang -std=c17 -Werror -> run the probe main.
 #
-# Two projections: text_ops.facts (this directory's corpus, compiled and run)
-# and replay_text.facts (unmodified fram.fri-replay text helpers, reported only).
-# The replay projection is hermetic; set FRAM_REPLAY to re-derive it and fail on
-# drift.
+# Two projections: text_ops.facts (this directory's corpus) and
+# replay_text.facts (unmodified fram.fri-replay parser helpers). Both generated
+# modules are compiled and run. Set FRAM_REPLAY to re-derive the replay facts
+# and fail on drift.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,7 +35,10 @@ cp "$scratch/text_ops.facts" "$art/text_ops.facts"
 
 # --- replay projection: real fram source, re-derived only on request -------
 replay_forms=(digit-table no-strings char-at split-on index-of last-index-of
-  "trim-character?" trim-line join-strings IntParse digit-value parse-int strip-at)
+  "trim-character?" trim-line join-strings IntParse digit-value parse-int strip-at
+  line-version line-assert line-retract line-batch line-invalid ParsedFact ParsedOp
+  no-facts invalid-fact invalid-op parse-fact parse-facts "facts-parsed?"
+  parse-mutation parse-batch parse-line)
 if [[ -n "${FRAM_REPLAY:-}" ]]; then
   "$repo/bin/beagle-ast" "$FRAM_REPLAY" >"$scratch/replay.json"
   bb "$here/select-forms.clj" "$scratch/replay.json" "$scratch/replay-sel.json" \
