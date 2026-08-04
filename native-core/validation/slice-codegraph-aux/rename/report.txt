@@ -1,0 +1,76 @@
+stage source-seal ACCEPTED
+stage source-to-typed REJECTED
+source-modules 1
+source-module 0 rename fram:codegraph/src/rename.bclj
+source-imports 3
+source-import 0 native-id-v0:20:native-slice-v0/node:3:743
+source-import 1 native-id-v0:20:native-slice-v0/node:3:744
+source-import 2 native-id-v0:20:native-slice-v0/node:3:745
+receipt-obligation source-seal PASS source Term identities and module roots are closed
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-FORM-kw-access: no native lowering for this source form [fact-l]
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-FORM-kw-access: no native lowering for this source form [fact-p]
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-FORM-kw-access: no native lowering for this source form [fact-r]
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed TODO-NATIVE-MAP-OPERATIONS host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed TODO-NATIVE-MAP-OPERATIONS host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-CALL-deref: no native lowering for this callee [ent!]
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed TODO-NATIVE-MAP-OPERATIONS host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-CALL-slurp: no native lowering for this callee [load-edn!]
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-FORM-fn: no native lowering for this source form [symbol-leaf?]
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-CALL-c/value-id: no native lowering for this callee [field-child]
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-FORM-fn: no native lowering for this source form [sym-val]
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-FORM-set: no native lowering for this source form [binding-name]
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed TODO-NATIVE-MAP-OPERATIONS host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed LOWER-UNSUPPORTED-TYPE-APPLICATION unsupported closed type constructor: Set
+receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-FORM-fn: no native lowering for this source form [module-bindings]
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed LOWER-UNSUPPORTED-TYPE-APPLICATION unsupported closed type constructor: Set
+receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-FORM-fn: no native lowering for this source form [rename-facts!]
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-CALL-c/literal: no native lowering for this callee [project-line]
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed TODO-NATIVE-MAP-OPERATIONS host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY the checked source projection carries no body form for project-file!
+receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-CALL-str/split: no native lowering for this callee [out-path]
+receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-FREE-REFERENCE: args is not a parameter or local binding [-main]
+receipt-obligation source-to-typed PASS every reachable type is a closed Native Core TypeShape
+receipt-obligation source-to-typed PASS typed Terms contain no raw Any, host exception, host collection, or target syntax
+receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [fact-l]
+receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [fact-p]
+receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [fact-r]
+receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-deref: no native lowering for this callee [ent!]
+receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-slurp: no native lowering for this callee [load-edn!]
+receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-fn: no native lowering for this source form [symbol-leaf?]
+receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-c/value-id: no native lowering for this callee [field-child]
+receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-fn: no native lowering for this source form [sym-val]
+receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-set: no native lowering for this source form [binding-name]
+receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-fn: no native lowering for this source form [module-bindings]
+receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-fn: no native lowering for this source form [rename-facts!]
+receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-c/literal: no native lowering for this callee [project-line]
+receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: the checked source projection carries no body form for project-file!
+receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-str/split: no native lowering for this callee [out-path]
+receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FREE-REFERENCE: args is not a parameter or local binding [-main]

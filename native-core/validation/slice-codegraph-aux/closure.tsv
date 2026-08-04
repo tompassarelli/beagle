@@ -1,0 +1,6 @@
+target	module_index	source_modules	external_imports
+callgraph	0	callgraph	clojure.edn,clojure.string,cheshire.core,resolve
+rep_jurisdiction	1	callgraph,rep-jurisdiction	clojure.edn,clojure.string,cheshire.core,resolve,fram.store,fram.datalog
+roundtrip_fram	0	roundtrip-fram	fram.store,clojure.edn,clojure.string
+supersession_check	0	supersession-check	fram.store,clojure.edn,clojure.string
+rename	0	rename	fram.store,clojure.edn,clojure.string

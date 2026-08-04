@@ -1,0 +1,62 @@
+stage source-seal ACCEPTED
+stage source-to-typed ACCEPTED
+stage typed-to-native PENDING
+source-modules 1
+source-module 0 roundtrip-fram fram:codegraph/src/roundtrip_fram.bclj
+source-imports 3
+source-import 0 native-id-v0:20:native-slice-v0/node:3:202
+source-import 1 native-id-v0:20:native-slice-v0/node:3:203
+source-import 2 native-id-v0:20:native-slice-v0/node:3:204
+world-types 12
+world-layouts 12
+world-functions 0
+world-abis 0
+projected-types 0
+obligation valid-ssa PASS
+obligation exhaustive-matches PASS
+obligation closed-layouts PASS
+obligation checked-arithmetic PASS
+obligation legal-abi PASS
+obligation discharged-tokens PASS
+obligation bounded-effects PASS
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-deref: no native lowering for this callee [ent!]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-edn/read-string: no native lowering for this callee [load-line!]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-c/fact-of: no native lowering for this callee [dump-fact!]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FREE-REFERENCE: args is not a parameter or local binding [-main]
+c17 module_0 REFUSED native world is not complete
+qbe module_0 REFUSED native world is not complete
+receipt-obligation source-seal PASS source Term identities and module roots are closed
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed TODO-NATIVE-MAP-OPERATIONS host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-CALL-deref: no native lowering for this callee [ent!]
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed TODO-NATIVE-MAP-OPERATIONS host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-CALL-edn/read-string: no native lowering for this callee [load-line!]
+receipt-diagnostic source-to-typed LOWER-CLOSED-RAW-ANY raw Any was closed to the finite SliceValue union
+receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-CALL-c/fact-of: no native lowering for this callee [dump-fact!]
+receipt-diagnostic source-to-typed TODO-NATIVE-FUNCTION-BODY TODO-NATIVE-FREE-REFERENCE: args is not a parameter or local binding [-main]
+receipt-obligation source-to-typed PASS every reachable type is a closed Native Core TypeShape
+receipt-obligation source-to-typed PASS typed Terms contain no raw Any, host exception, host collection, or target syntax
+receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-deref: no native lowering for this callee [ent!]
+receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-edn/read-string: no native lowering for this callee [load-line!]
+receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-c/fact-of: no native lowering for this callee [dump-fact!]
+receipt-obligation source-to-typed FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FREE-REFERENCE: args is not a parameter or local binding [-main]
+receipt-diagnostic typed-to-native TODO-NATIVE-PROBE-ABI no implemented probe entry point is available for ABI declaration
+receipt-diagnostic typed-to-native TODO-NATIVE-SLICE-BODIES typed source functions with unimplemented bodies remain explicit obligations
+receipt-obligation typed-to-native PASS Native Core validator accepts all SSA definitions and references
+receipt-obligation typed-to-native PASS the implemented A5 fixture operations contain no partial closed-union switch
+receipt-obligation typed-to-native PASS all reachable type shapes have exact size, alignment, and field offsets
+receipt-obligation typed-to-native PASS the implemented integer operation lowers to CheckedOperationV0
+receipt-obligation typed-to-native FAIL every implemented probe function carries an explicit ABI declaration
+receipt-obligation typed-to-native PASS implemented functions do not leak an affine capability token
+receipt-obligation typed-to-native PASS implemented function effects stay inside world declarations
+receipt-obligation typed-to-native PASS native Terms contain no raw Any, host exception, host collection, or target syntax
+receipt-obligation typed-to-native FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-deref: no native lowering for this callee [ent!]
+receipt-obligation typed-to-native FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-edn/read-string: no native lowering for this callee [load-line!]
+receipt-obligation typed-to-native FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-c/fact-of: no native lowering for this callee [dump-fact!]
+receipt-obligation typed-to-native FAIL TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FREE-REFERENCE: args is not a parameter or local binding [-main]

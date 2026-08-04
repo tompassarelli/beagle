@@ -1,0 +1,5 @@
+module worlds: 5
+source modules (deduplicated): 5
+functions: 42
+defs: 0
+records: 0
