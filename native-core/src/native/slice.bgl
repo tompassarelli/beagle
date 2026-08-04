@@ -18,6 +18,10 @@
    kind: String
    object: String])
 
+(defrecord UniqueStringsV0
+  [values: (Vec String)
+   seen: (Map String Bool)])
+
 (defrecord SliceWorldV0
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)])
@@ -77,43 +81,41 @@
     (loop [index: Int 0 rows: (Vec SliceFactV0) []]
       (if (>= index (count lines))
         rows
-        (recur (+ index 1)
-          (vec (concat rows (parse-row (nth lines index)))))))))
+        (let [parsed: (Vec SliceFactV0) (parse-row (nth lines index))]
+          (recur (+ index 1)
+            (if (= 0 (count parsed)) rows (conj rows (nth parsed 0)))))))))
 
-(defn string-in?
-  [values: (Vec String)
-   target: String] -> Bool
-  (loop [index: Int 0]
-    (if (>= index (count values))
-      false
-      (if (= target (nth values index)) true (recur (+ index 1))))))
-
-(defn conj-unique
-  [values: (Vec String)
-   candidate: String] -> (Vec String)
-  (if (string-in? values candidate) values (conj values candidate)))
+(defn add-unique-string
+  [unique: UniqueStringsV0
+   candidate: String] -> UniqueStringsV0
+  (if (= true (get (uniquestringsv0-seen unique) candidate))
+    unique
+    (->UniqueStringsV0
+      (conj (uniquestringsv0-values unique) candidate)
+      (assoc (uniquestringsv0-seen unique) candidate true))))
 
 (defn node-names [rows: (Vec SliceFactV0)] -> (Vec String)
-  (loop [index: Int 0 names: (Vec String) []]
+  (loop [index: Int 0 unique: UniqueStringsV0 (->UniqueStringsV0 [] {})]
     (if (>= index (count rows))
-      names
+      (uniquestringsv0-values unique)
       (let [row: SliceFactV0 (nth rows index)
-            with-subject: (Vec String) (conj-unique names (slicefactv0-subject row))]
+            with-subject: UniqueStringsV0
+            (add-unique-string unique (slicefactv0-subject row))]
         (recur (+ index 1)
           (if (text-row? row)
             with-subject
-            (conj-unique with-subject (slicefactv0-object row))))))))
+            (add-unique-string with-subject (slicefactv0-object row))))))))
 
 (defn text-values [rows: (Vec SliceFactV0)] -> (Vec String)
-  (loop [index: Int 0 values: (Vec String) []]
+  (loop [index: Int 0 unique: UniqueStringsV0 (->UniqueStringsV0 [] {})]
     (if (>= index (count rows))
-      values
+      (uniquestringsv0-values unique)
       (let [row: SliceFactV0 (nth rows index)
-            with-predicate: (Vec String)
-            (conj-unique values (slicefactv0-predicate row))]
+            with-predicate: UniqueStringsV0
+            (add-unique-string unique (slicefactv0-predicate row))]
         (recur (+ index 1)
           (if (text-row? row)
-            (conj-unique with-predicate (row-text row))
+            (add-unique-string with-predicate (row-text row))
             with-predicate))))))
 
 (defn slice-id

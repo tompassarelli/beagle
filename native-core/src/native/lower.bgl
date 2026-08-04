@@ -103,25 +103,40 @@
       (worlds/termnodev0-identity node))
     (worlds/termgraphv0-nodes graph)))
 
-(defn refs-resolve?
-  [graph: worlds/TermGraphV0
+(defn graph-identity-index [graph: worlds/TermGraphV0] -> (Map String Bool)
+  (let [nodes: (Vec worlds/TermNodeV0) (worlds/termgraphv0-nodes graph)]
+    (loop [index: Int 0 identities: (Map String Bool) {}]
+      (if (>= index (count nodes))
+        identities
+        (recur (+ index 1)
+          (assoc identities
+            (id-value (worlds/termnodev0-identity (nth nodes index))) true))))))
+
+(defn refs-resolve-in?
+  [identities: (Map String Bool)
    refs: (Vec core/NativeId)] -> Bool
   (loop [index: Int 0]
     (if (>= index (count refs))
       true
-      (if (nil? (find-node graph (nth refs index)))
+      (if (not (= true (get identities (id-value (nth refs index)))))
         false
         (recur (+ index 1))))))
 
-(defn graph-reference-closed? [graph: worlds/TermGraphV0] -> Bool
+(defn graph-reference-closed-in?
+  [graph: worlds/TermGraphV0
+   identities: (Map String Bool)] -> Bool
   (let [nodes: (Vec worlds/TermNodeV0) (worlds/termgraphv0-nodes graph)]
     (loop [index: Int 0]
       (if (>= index (count nodes))
         true
         (let [node: worlds/TermNodeV0 (nth nodes index)]
-          (if (refs-resolve? graph (term-references (worlds/termnodev0-term node)))
+          (if (refs-resolve-in? identities
+                (term-references (worlds/termnodev0-term node)))
             (recur (+ index 1))
             false))))))
+
+(defn graph-reference-closed? [graph: worlds/TermGraphV0] -> Bool
+  (graph-reference-closed-in? graph (graph-identity-index graph)))
 
 (defn source-facts [graph: worlds/TermGraphV0] -> (Vec SourceFactV0)
   (let [nodes: (Vec worlds/TermNodeV0) (worlds/termgraphv0-nodes graph)]
@@ -140,82 +155,74 @@
                   (worlds/tripletermv0-object term))))
             (recur (+ index 1) facts)))))))
 
-;; Every lookup below is one scan of these parallel vectors. Rebuilding the fact
-;; vector (and re-resolving predicate text) per lookup made lowering cubic in
-;; module size, so the projection is resolved exactly once per sealed world.
+;; Lookup maps preserve first-fact semantics while resolving graph text once.
 (defrecord SourceIndexV0
-  [graph: worlds/TermGraphV0
-   subjects: (Vec core/NativeId)
-   predicates: (Vec String)
-   objects: (Vec core/NativeId)
-   object-texts: (Vec String)
+  [fact-count: Int
+   first-objects: (Map String core/NativeId)
+   first-texts: (Map String String)
+   form-ids: (Map String (Vec core/NativeId))
+   callee-names: (Map String Bool)
+   child-nodes: (Map String (Vec core/NativeId))
+   definition-roots: (Map String core/NativeId)
+   module-roots: (Map String core/NativeId)
    record-names: (Vec String)])
 
-(defn text-or-empty
-  [graph: worlds/TermGraphV0
+(defn graph-text-index [graph: worlds/TermGraphV0] -> (Map String String)
+  (let [nodes: (Vec worlds/TermNodeV0) (worlds/termgraphv0-nodes graph)]
+    (loop [position: Int 0 texts: (Map String String) {}]
+      (if (>= position (count nodes))
+        texts
+        (let [node: worlds/TermNodeV0 (nth nodes position)
+              term: worlds/TermV0 (worlds/termnodev0-term node)]
+          (recur (+ position 1)
+            (if (instance? native.worlds.TextTermV0 term)
+              (assoc texts
+                (id-value (worlds/termnodev0-identity node))
+                (worlds/texttermv0-value term))
+              texts)))))))
+
+(defn graph-text-or-empty
+  [texts: (Map String String)
    target: core/NativeId] -> String
-  (let [value: (U String Nil) (text-at graph target)]
+  (let [value: (U String Nil) (get texts (id-value target))]
     (if (nil? value) "" value)))
 
+(defn source-index-key
+  [subject: core/NativeId
+   predicate: String] -> String
+  (let [identity: String (id-value subject)]
+    (str (count identity) ":" identity predicate)))
+
 (defn index-facts [index: SourceIndexV0] -> Int
-  (count (sourceindexv0-subjects index)))
+  (sourceindexv0-fact-count index))
 
 (defn index-has-callee?
   [index: SourceIndexV0
    expected: String] -> Bool
-  (let [predicates: (Vec String) (sourceindexv0-predicates index)
-        texts: (Vec String) (sourceindexv0-object-texts index)]
-    (loop [position: Int 0]
-      (cond
-        (>= position (count predicates)) false
-        (and (= "callee" (nth predicates position))
-          (= expected (nth texts position))) true
-        :else (recur (+ position 1))))))
+  (= true (get (sourceindexv0-callee-names index) expected)))
 
 (defn index-first-object
   [index: SourceIndexV0
    subject: core/NativeId
    predicate: String] -> (U core/NativeId Nil)
-  (let [subjects: (Vec core/NativeId) (sourceindexv0-subjects index)
-        predicates: (Vec String) (sourceindexv0-predicates index)
-        objects: (Vec core/NativeId) (sourceindexv0-objects index)]
-    (loop [position: Int 0]
-      (if (>= position (count subjects))
-        nil
-        (if (and (= predicate (nth predicates position))
-                 (same-id? subject (nth subjects position)))
-          (nth objects position)
-          (recur (+ position 1)))))))
+  (get (sourceindexv0-first-objects index)
+    (source-index-key subject predicate)))
 
 (defn index-first-text
   [index: SourceIndexV0
    subject: core/NativeId
    predicate: String] -> (U String Nil)
-  (let [subjects: (Vec core/NativeId) (sourceindexv0-subjects index)
-        predicates: (Vec String) (sourceindexv0-predicates index)
-        texts: (Vec String) (sourceindexv0-object-texts index)]
-    (loop [position: Int 0]
-      (if (>= position (count subjects))
-        nil
-        (if (and (= predicate (nth predicates position))
-                 (same-id? subject (nth subjects position)))
-          (let [value: String (nth texts position)]
-            (if (= 0 (count value)) nil value))
-          (recur (+ position 1)))))))
+  (let [value: (U String Nil)
+        (get (sourceindexv0-first-texts index)
+          (source-index-key subject predicate))]
+    (if (or (nil? value) (= 0 (count value))) nil value)))
 
 (defn index-form-ids
   [index: SourceIndexV0
    kind: String] -> (Vec core/NativeId)
-  (let [subjects: (Vec core/NativeId) (sourceindexv0-subjects index)
-        predicates: (Vec String) (sourceindexv0-predicates index)
-        texts: (Vec String) (sourceindexv0-object-texts index)]
-    (loop [position: Int 0 selected: (Vec core/NativeId) []]
-      (if (>= position (count subjects))
-        selected
-        (if (and (= "form-kind" (nth predicates position))
-                 (= kind (nth texts position)))
-          (recur (+ position 1) (conj selected (nth subjects position)))
-          (recur (+ position 1) selected))))))
+  (let [forms: (U (Vec core/NativeId) Nil)
+        (get (sourceindexv0-form-ids index) kind)]
+    (if (nil? forms) [] forms)))
 
 ;; A sequence node carries its items under an ordinal predicate, so item order
 ;; is the ordinal, never fact order. The two live projections spell that
@@ -250,14 +257,12 @@
 (defn source-module-root
   [index: SourceIndexV0
    definition: core/NativeId] -> (U core/NativeId Nil)
-  (let [roots: (Vec core/NativeId) (index-form-ids index "module-root")]
-    (loop [position: Int 0]
-      (if (>= position (count roots))
-        (if (= 1 (count roots)) (nth roots 0) nil)
-        (let [root: core/NativeId (nth roots position)]
-          (if (core/id-in? (module-sequence index root "definitions") definition)
-            root
-            (recur (+ position 1))))))))
+  (let [root: (U core/NativeId Nil)
+        (get (sourceindexv0-definition-roots index) (id-value definition))
+        roots: (Vec core/NativeId) (index-form-ids index "module-root")]
+    (if (nil? root)
+      (if (= 1 (count roots)) (nth roots 0) nil)
+      root)))
 
 (defn source-module-name
   [index: SourceIndexV0
@@ -271,15 +276,7 @@
 (defn module-root-named
   [index: SourceIndexV0
    module-name: String] -> (U core/NativeId Nil)
-  (let [roots: (Vec core/NativeId) (index-form-ids index "module-root")]
-    (loop [position: Int 0]
-      (if (>= position (count roots))
-        nil
-        (let [root: core/NativeId (nth roots position)
-              candidate: (U String Nil) (index-first-text index root "namespace")]
-          (if (and (some? candidate) (= module-name candidate))
-            root
-            (recur (+ position 1))))))))
+  (get (sourceindexv0-module-roots index) module-name))
 
 (defn imported-module-name
   [index: SourceIndexV0
@@ -298,34 +295,88 @@
             target
             (recur (+ position 1))))))))
 
+(defn add-module-indexes [index: SourceIndexV0] -> SourceIndexV0
+  (let [roots: (Vec core/NativeId) (index-form-ids index "module-root")]
+    (loop [position: Int 0
+           definition-roots: (Map String core/NativeId) {}
+           module-roots: (Map String core/NativeId) {}]
+      (if (>= position (count roots))
+        (with (with index [:definition-roots definition-roots])
+          [:module-roots module-roots])
+        (let [root: core/NativeId (nth roots position)
+              module-name: (U String Nil) (index-first-text index root "namespace")
+              definitions: (Vec core/NativeId)
+              (module-sequence index root "definitions")
+              next-definitions: (Map String core/NativeId)
+              (loop [inner: Int 0 current: (Map String core/NativeId) definition-roots]
+                (if (>= inner (count definitions))
+                  current
+                  (let [key: String (id-value (nth definitions inner))]
+                    (recur (+ inner 1)
+                      (if (nil? (get current key))
+                        (assoc current key root)
+                        current)))))]
+          (recur (+ position 1)
+            next-definitions
+            (if (or (nil? module-name) (some? (get module-roots module-name)))
+              module-roots
+              (assoc module-roots module-name root))))))))
+
 (defn build-source-index [graph: worlds/TermGraphV0] -> SourceIndexV0
   (let [facts: (Vec SourceFactV0) (source-facts graph)
-        subjects: (Vec core/NativeId)
-        (mapv (fn [fact: SourceFactV0] -> core/NativeId (sourcefactv0-subject fact))
-          facts)
-        predicates: (Vec String)
-        (mapv (fn [fact: SourceFactV0] -> String
-                (text-or-empty graph (sourcefactv0-predicate fact)))
-          facts)
-        objects: (Vec core/NativeId)
-        (mapv (fn [fact: SourceFactV0] -> core/NativeId (sourcefactv0-object fact))
-          facts)
-        object-texts: (Vec String)
-        (mapv (fn [fact: SourceFactV0] -> String
-                (text-or-empty graph (sourcefactv0-object fact)))
-          facts)
+        graph-texts: (Map String String) (graph-text-index graph)
         partial: SourceIndexV0
-        (->SourceIndexV0 graph subjects predicates objects object-texts [])
-        records: (Vec core/NativeId) (index-form-ids partial "record")
+        (loop [position: Int 0
+               first-objects: (Map String core/NativeId) {}
+               first-texts: (Map String String) {}
+               form-ids: (Map String (Vec core/NativeId)) {}
+               callee-names: (Map String Bool) {}
+               child-nodes: (Map String (Vec core/NativeId)) {}]
+          (if (>= position (count facts))
+            (->SourceIndexV0 (count facts) first-objects first-texts form-ids
+              callee-names child-nodes {} {} [])
+            (let [fact: SourceFactV0 (nth facts position)
+                  subject: core/NativeId (sourcefactv0-subject fact)
+                  object: core/NativeId (sourcefactv0-object fact)
+                  predicate: String
+                  (graph-text-or-empty graph-texts (sourcefactv0-predicate fact))
+                  object-text: String (graph-text-or-empty graph-texts object)
+                  key: String (source-index-key subject predicate)
+                  existing-object: (U core/NativeId Nil) (get first-objects key)
+                  existing-text: (U String Nil) (get first-texts key)
+                  prior-forms: (U (Vec core/NativeId) Nil) (get form-ids object-text)
+                  forms: (Vec core/NativeId)
+                  (if (nil? prior-forms) [] prior-forms)
+                  subject-key: String (id-value subject)
+                  prior-children: (U (Vec core/NativeId) Nil)
+                  (get child-nodes subject-key)
+                  children: (Vec core/NativeId)
+                  (if (nil? prior-children) [] prior-children)]
+              (recur (+ position 1)
+                (if (nil? existing-object)
+                  (assoc first-objects key object)
+                  first-objects)
+                (if (nil? existing-text)
+                  (assoc first-texts key object-text)
+                  first-texts)
+                (if (= "form-kind" predicate)
+                  (assoc form-ids object-text (conj forms subject))
+                  form-ids)
+                (if (= "callee" predicate)
+                  (assoc callee-names object-text true)
+                  callee-names)
+                (assoc child-nodes subject-key (conj children object))))))
+        indexed: SourceIndexV0 (add-module-indexes partial)
+        records: (Vec core/NativeId) (index-form-ids indexed "record")
         names: (Vec String)
         (loop [position: Int 0 collected: (Vec String) []]
           (if (>= position (count records))
             collected
             (let [name: (U String Nil)
-                  (index-first-text partial (nth records position) "name")]
+                  (index-first-text indexed (nth records position) "name")]
               (recur (+ position 1)
                 (if (nil? name) collected (conj collected name))))))]
-    (->SourceIndexV0 graph subjects predicates objects object-texts names)))
+    (with indexed [:record-names names])))
 
 (defn encode-term [term: worlds/TermV0] -> String
   (cond
@@ -397,29 +448,33 @@
 
 (defn source-world-valid? [world: worlds/SourceProgramWorldV0] -> Bool
   (let [graph: worlds/TermGraphV0 (worlds/sourceprogramworldv0-terms world)
-        ids: (Vec core/NativeId) (graph-identities graph)
+        nodes: (Vec worlds/TermNodeV0) (worlds/termgraphv0-nodes graph)
+        identities: (Map String Bool) (graph-identity-index graph)
         modules: (Vec worlds/SourceModuleV0)
         (worlds/sourceprogramworldv0-modules world)]
-    (and (some? (find-node graph (worlds/termgraphv0-root graph)))
-         (core/unique-ids? ids)
-         (graph-reference-closed? graph)
+    (and (= true (get identities (id-value (worlds/termgraphv0-root graph))))
+         (= (count nodes) (count identities))
+         (graph-reference-closed-in? graph identities)
          (every?
            (fn [module: worlds/SourceModuleV0] -> Bool
-             (some? (find-node graph (worlds/sourcemodulev0-root-term module))))
+             (= true
+               (get identities
+                 (id-value (worlds/sourcemodulev0-root-term module)))))
            modules))))
 
 (defn source-failure [world: worlds/SourceProgramWorldV0] -> LowerFailureV0
   (let [graph: worlds/TermGraphV0 (worlds/sourceprogramworldv0-terms world)
         root: core/NativeId (worlds/termgraphv0-root graph)
-        ids: (Vec core/NativeId) (graph-identities graph)]
+        nodes: (Vec worlds/TermNodeV0) (worlds/termgraphv0-nodes graph)
+        identities: (Map String Bool) (graph-identity-index graph)]
     (cond
-      (nil? (find-node graph root))
+      (not (= true (get identities (id-value root))))
       (->MissingGraphRootV0 root)
 
-      (not (core/unique-ids? ids))
+      (not (= (count nodes) (count identities)))
       (->DuplicateTermIdentityV0 root)
 
-      (not (graph-reference-closed? graph))
+      (not (graph-reference-closed-in? graph identities))
       (->UnclosedTermReferenceV0 root root)
 
       :else
@@ -1860,15 +1915,9 @@
 (defn index-child-nodes
   [index: SourceIndexV0
    subject: core/NativeId] -> (Vec core/NativeId)
-  (let [subjects: (Vec core/NativeId) (sourceindexv0-subjects index)
-        objects: (Vec core/NativeId) (sourceindexv0-objects index)]
-    (loop [position: Int 0 collected: (Vec core/NativeId) []]
-      (if (>= position (count subjects))
-        collected
-        (recur (+ position 1)
-          (if (same-id? subject (nth subjects position))
-            (conj collected (nth objects position))
-            collected))))))
+  (let [children: (U (Vec core/NativeId) Nil)
+        (get (sourceindexv0-child-nodes index) (id-value subject))]
+    (if (nil? children) [] children)))
 
 (defn string-member?
   [values: (Vec String)
