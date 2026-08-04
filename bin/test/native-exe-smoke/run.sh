@@ -121,13 +121,28 @@ refusal_rc=$?
     "$projection_source" \
     >"$scratch/private-entry.stdout" 2>"$scratch/private-entry.stderr"
 private_rc=$?
+"$repo/bin/beagle" native-module \
+    --out "$scratch/try-reachable" \
+    --entry native.entry-projection/try-entry \
+    "$projection_source" \
+    >"$scratch/try-reachable.stdout" 2>"$scratch/try-reachable.stderr"
+try_rc=$?
 set -e
-[[ $full_rc -ne 0 && $refusal_rc -ne 0 && $private_rc -ne 0 ]]
+[[ $full_rc -ne 0 && $refusal_rc -ne 0 && $private_rc -ne 0 && $try_rc -ne 0 ]]
 grep -Fq 'pending TODO-NATIVE-FUNCTION-BODY:' "$scratch/full-module/report.txt"
 grep -Fq '[unreachable]' "$scratch/reachable-refusal/report.txt"
 grep -Fqx 'entry-error entry is private, not exported: native.entry-projection/hidden' \
     "$scratch/private-entry/report.txt"
+grep -Fq 'TODO-NATIVE-FORM-unsupported-try' "$scratch/try-reachable/report.txt"
+for helper in try-body-helper try-catch-helper try-finally-helper; do
+    grep -Fq $'\tname\tt\t'"$helper" "$scratch/try-reachable/source.facts"
+done
+if grep -Fq $'\tname\tt\tunreachable' "$scratch/try-reachable/source.facts"; then
+    echo "native-exe smoke: try projection retained an unreachable definition" >&2
+    exit 1
+fi
 printf 'native-exe smoke: full default + reachable/private refusals fail closed\n'
+printf 'native-exe smoke: try child reachability + lowering refusal ok\n'
 
 missing="$scratch/missing-entry"
 printf 'stale executable\n' >"$missing"

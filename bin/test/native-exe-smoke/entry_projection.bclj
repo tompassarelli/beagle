@@ -25,4 +25,18 @@
 (defn bad-entry [] -> Int
   (unreachable))
 
+(defn try-body-helper [] -> Int 11)
+
+(defn try-catch-helper [] -> Int 12)
+
+(defn try-finally-helper [] -> Int 13)
+
+(defn try-entry [] -> Int
+  (try
+    (try-body-helper)
+    (catch Exception problem
+      (try-catch-helper))
+    (finally
+      (try-finally-helper))))
+
 (defn- hidden [] -> Int 0)

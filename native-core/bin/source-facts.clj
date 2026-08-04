@@ -106,6 +106,14 @@
     (row! n "value" "n" (emit-expr (get pair "val")))
     n))
 
+(defn emit-catch-clause [clause]
+  (let [n (nid)]
+    (row! n "form-kind" "t" "catch-clause")
+    (row! n "exception-type" "t" (get clause "type"))
+    (row! n "name" "t" (get clause "name"))
+    (row! n "body" "n" (emit-seq (get clause "body") emit-expr))
+    n))
+
 (defn emit-expr [e]
   (let [n (nid)]
     (case (get e "node")
@@ -162,6 +170,12 @@
       "cond"    (do (row! n "form-kind" "t" "cond")
                     (row! n "clauses" "n"
                           (emit-seq (get e "clauses") emit-cond-clause)))
+      "try"     (do (row! n "form-kind" "t" "unsupported-try")
+                    (row! n "body" "n" (emit-seq (get e "body") emit-expr))
+                    (row! n "catches" "n"
+                          (emit-seq (get e "catches") emit-catch-clause))
+                    (when-let [forms (get e "finally")]
+                      (row! n "finally" "n" (emit-seq forms emit-expr))))
       "kw-access"
       (do (row! n "form-kind" "t" "kw-access")
           (row! n "keyword" "t" (subs (get e "kw") 1))
