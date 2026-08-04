@@ -176,6 +176,7 @@
     (instance? native.core.VariantValueInstruction instruction) true
     (instance? native.core.CheckedInstruction instruction)
     (checked-operation-supported? (core/checkedinstruction-operation instruction))
+    (instance? native.core.BitwiseInstructionV0 instruction) true
     (instance? native.core.UnionConstructInstruction instruction) true
     (instance? native.core.UnionExtractInstruction instruction) true
     (instance? native.core.VecLengthInstruction instruction) true
@@ -183,6 +184,8 @@
     (instance? native.core.VecPushInstruction instruction) true
     (instance? native.core.VecEmptyInstruction instruction) true
     (instance? native.core.VecConcatInstruction instruction) true
+    (instance? native.core.VecSliceInstructionV0 instruction) true
+    (instance? native.core.VecReverseInstructionV0 instruction) true
     (instance? native.core.MapLiteralInstructionV0 instruction) true
     (instance? native.core.SetLiteralInstructionV0 instruction) true
     (instance? native.core.MapCountInstructionV0 instruction) true
@@ -1580,7 +1583,7 @@
       (str "  " target " = arena;\n  (void)" target ";\n")
 
       (instance? native.core.AtomStateInstruction instruction)
-      (str "  " target " = (void *)capability;\n")
+      (str "  " target " = (void *)capability;\n  (void)" target ";\n")
 
       (instance? native.core.AtomCreateInstruction instruction)
       (let [initial-id: core/NativeId
@@ -1857,6 +1860,33 @@
       (emit-checked-instruction layouts function slots target result
         (core/checkedinstruction-operation instruction))
 
+      (instance? native.core.BitwiseInstructionV0 instruction)
+      (let [operation: core/BitwiseOperationV0
+            (core/bitwiseinstructionv0-operation instruction)]
+        (cond
+          (instance? native.core.BitAndI64V0 operation)
+          (str "  " target " = native_bit_and_i64("
+            (value-name function slots (core/bitandi64v0-left-id operation))
+            ", "
+            (value-name function slots (core/bitandi64v0-right-id operation))
+            ");\n")
+
+          (instance? native.core.BitXorI64V0 operation)
+          (str "  " target " = native_bit_xor_i64("
+            (value-name function slots (core/bitxori64v0-left-id operation))
+            ", "
+            (value-name function slots (core/bitxori64v0-right-id operation))
+            ");\n")
+
+          :else
+          (str "  " target " = native_bit_shift_left_i64("
+            (value-name function slots
+              (core/bitshiftlefti64v0-value-id operation))
+            ", "
+            (value-name function slots
+              (core/bitshiftlefti64v0-distance-id operation))
+            ");\n")))
+
       (instance? native.core.VariantValueInstruction instruction)
       (let [source: core/NativeId
             (core/variantvalueinstruction-source-id instruction)]
@@ -1976,6 +2006,36 @@
           ", "
           (value-name function slots
             (core/vecconcatinstruction-right-id instruction))
+          ", INT64_C(" (vector-stride layouts vector-type) "), (size_t)"
+          (vector-element-alignment layouts vector-type) ");\n"))
+
+      (instance? native.core.VecSliceInstructionV0 instruction)
+      (let [vector-type: core/NativeId (core/ssavaluev0-type-id result)
+            arena: String
+            (str "(native_arena *)"
+              (value-name function slots
+                (core/vecsliceinstructionv0-arena-id instruction)))]
+        (str "  " target " = native_vec_slice(" arena ", "
+          (value-name function slots
+            (core/vecsliceinstructionv0-source-id instruction))
+          ", "
+          (value-name function slots
+            (core/vecsliceinstructionv0-start-id instruction))
+          ", "
+          (value-name function slots
+            (core/vecsliceinstructionv0-end-id instruction))
+          ", INT64_C(" (vector-stride layouts vector-type) "), (size_t)"
+          (vector-element-alignment layouts vector-type) ");\n"))
+
+      (instance? native.core.VecReverseInstructionV0 instruction)
+      (let [vector-type: core/NativeId (core/ssavaluev0-type-id result)
+            arena: String
+            (str "(native_arena *)"
+              (value-name function slots
+                (core/vecreverseinstructionv0-arena-id instruction)))]
+        (str "  " target " = native_vec_reverse(" arena ", "
+          (value-name function slots
+            (core/vecreverseinstructionv0-source-id instruction))
           ", INT64_C(" (vector-stride layouts vector-type) "), (size_t)"
           (vector-element-alignment layouts vector-type) ");\n"))
 

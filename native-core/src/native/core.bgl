@@ -195,6 +195,19 @@
     [index-id: NativeId
      length-id: NativeId]))
 
+;; I64 bit operations are total over their bit patterns. Shift distance follows
+;; the portable/Clojure contract by using its low six bits.
+(defunion BitwiseOperationV0
+  (BitAndI64V0
+    [left-id: NativeId
+     right-id: NativeId])
+  (BitXorI64V0
+    [left-id: NativeId
+     right-id: NativeId])
+  (BitShiftLeftI64V0
+    [value-id: NativeId
+     distance-id: NativeId]))
+
 ;; Total comparisons: every operand pair is defined, so a comparison is never a
 ;; CheckedOperationV0 and never carries an Outcome result.
 ;; CompareEqTextV0 is byte equality over two handles, never handle equality: two
@@ -340,6 +353,9 @@
   (CheckedInstruction
     [result: SsaValueV0
      operation: CheckedOperationV0])
+  (BitwiseInstructionV0
+    [result: SsaValueV0
+     operation: BitwiseOperationV0])
   (StoreInstruction
     [result: SsaValueV0
      store: StoreOp
@@ -437,6 +453,18 @@
     [result: SsaValueV0
      left-id: NativeId
      right-id: NativeId
+     arena-id: NativeId])
+  ;; Both transforms allocate a fresh header and storage. Source vectors stay
+  ;; immutable and may be reused after the operation.
+  (VecSliceInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     start-id: NativeId
+     end-id: NativeId
+     arena-id: NativeId])
+  (VecReverseInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
      arena-id: NativeId])
   (MapLiteralInstructionV0
     [result: SsaValueV0
@@ -815,6 +843,7 @@
     [(CopyInstruction result source-id) (ssavaluev0-id result)]
     [(AddF64Instruction result left-id right-id) (ssavaluev0-id result)]
     [(CheckedInstruction result operation) (ssavaluev0-id result)]
+    [(BitwiseInstructionV0 result operation) (ssavaluev0-id result)]
     [(StoreInstruction result store tokens) (ssavaluev0-id result)]
     [(AllocateInstruction result region capability byte-count-id tokens)
      (ssavaluev0-id result)]
@@ -838,6 +867,10 @@
      (ssavaluev0-id result)]
     [(VecEmptyInstruction result capacity-id arena-id) (ssavaluev0-id result)]
     [(VecConcatInstruction result left-id right-id arena-id)
+     (ssavaluev0-id result)]
+    [(VecSliceInstructionV0 result source-id start-id end-id arena-id)
+     (ssavaluev0-id result)]
+    [(VecReverseInstructionV0 result source-id arena-id)
      (ssavaluev0-id result)]
     [(MapLiteralInstructionV0 result key-ids value-ids arena-id key-equality)
      (ssavaluev0-id result)]
@@ -1292,6 +1325,7 @@
     [(CopyInstruction result source-id) true]
     [(AddF64Instruction result left-id right-id) true]
     [(CheckedInstruction result operation) true]
+    [(BitwiseInstructionV0 result operation) true]
     [(StoreInstruction result store tokens)
      (store-op-resources-closed? store known-regions known-capabilities)]
     [(AllocateInstruction result region capability byte-count-id tokens)
@@ -1318,6 +1352,8 @@
     [(VecPushInstruction result source-id value-id arena-id) true]
     [(VecEmptyInstruction result capacity-id arena-id) true]
     [(VecConcatInstruction result left-id right-id arena-id) true]
+    [(VecSliceInstructionV0 result source-id start-id end-id arena-id) true]
+    [(VecReverseInstructionV0 result source-id arena-id) true]
     [(MapLiteralInstructionV0 result key-ids value-ids arena-id key-equality)
      (= (count key-ids) (count value-ids))]
     [(SetLiteralInstructionV0 result value-ids arena-id element-equality) true]
@@ -1460,6 +1496,12 @@
     [(CheckedMulI64V0 left-id right-id) [left-id right-id]]
     [(CheckedBoundsV0 index-id length-id) [index-id length-id]]))
 
+(defn bitwise-operation-ssa-refs [operation: BitwiseOperationV0] -> (Vec NativeId)
+  (match operation
+    [(BitAndI64V0 left-id right-id) [left-id right-id]]
+    [(BitXorI64V0 left-id right-id) [left-id right-id]]
+    [(BitShiftLeftI64V0 value-id distance-id) [value-id distance-id]]))
+
 (defn switch-case-ssa-refs [cases :- (Vec SwitchCaseV0)] :- (Vec NativeId)
   (loop [index :- Int 0 ids :- (Vec NativeId) []]
     (if (>= index (count cases))
@@ -1500,6 +1542,8 @@
     [(CopyInstruction result source-id) [source-id]]
     [(AddF64Instruction result left-id right-id) [left-id right-id]]
     [(CheckedInstruction result operation) (checked-operation-ssa-refs operation)]
+    [(BitwiseInstructionV0 result operation)
+     (bitwise-operation-ssa-refs operation)]
     [(StoreInstruction result store tokens) (store-op-ssa-refs store)]
     [(AllocateInstruction result region capability byte-count-id tokens)
      [byte-count-id]]
@@ -1523,6 +1567,10 @@
     [(VecEmptyInstruction result capacity-id arena-id) [arena-id capacity-id]]
     [(VecConcatInstruction result left-id right-id arena-id)
      [arena-id left-id right-id]]
+    [(VecSliceInstructionV0 result source-id start-id end-id arena-id)
+     [arena-id source-id start-id end-id]]
+    [(VecReverseInstructionV0 result source-id arena-id)
+     [arena-id source-id]]
     [(MapLiteralInstructionV0 result key-ids value-ids arena-id key-equality)
      (into [arena-id] (vec (concat key-ids value-ids)))]
     [(SetLiteralInstructionV0 result value-ids arena-id element-equality)
@@ -1627,6 +1675,7 @@
     [(CopyInstruction result source-id) true]
     [(AddF64Instruction result left-id right-id) true]
     [(CheckedInstruction result operation) true]
+    [(BitwiseInstructionV0 result operation) true]
     [(StoreInstruction result store tokens)
      (store-op-resources-closed? store allowed-regions allowed-capabilities)]
     [(AllocateInstruction result region capability byte-count-id tokens)
@@ -1647,6 +1696,8 @@
     [(VecPushInstruction result source-id value-id arena-id) true]
     [(VecEmptyInstruction result capacity-id arena-id) true]
     [(VecConcatInstruction result left-id right-id arena-id) true]
+    [(VecSliceInstructionV0 result source-id start-id end-id arena-id) true]
+    [(VecReverseInstructionV0 result source-id arena-id) true]
     [(MapLiteralInstructionV0 result key-ids value-ids arena-id key-equality) true]
     [(SetLiteralInstructionV0 result value-ids arena-id element-equality) true]
     [(MapCountInstructionV0 result source-id) true]

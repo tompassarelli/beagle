@@ -244,6 +244,8 @@
     [(CopyInstruction value) (core/copyinstruction-result instruction)]
     [(AddF64Instruction value) (core/addf64instruction-result instruction)]
     [(CheckedInstruction value) (core/checkedinstruction-result instruction)]
+    [(BitwiseInstructionV0 value)
+     (core/bitwiseinstructionv0-result instruction)]
     [(StoreInstruction value) (core/storeinstruction-result instruction)]
     [(AllocateInstruction value) (core/allocateinstruction-result instruction)]
     [(CallInstruction value) (core/callinstruction-result instruction)]
@@ -266,6 +268,10 @@
     [(VecPushInstruction value) (core/vecpushinstruction-result instruction)]
     [(VecEmptyInstruction value) (core/vecemptyinstruction-result instruction)]
     [(VecConcatInstruction value) (core/vecconcatinstruction-result instruction)]
+    [(VecSliceInstructionV0 value)
+     (core/vecsliceinstructionv0-result instruction)]
+    [(VecReverseInstructionV0 value)
+     (core/vecreverseinstructionv0-result instruction)]
     [(MapLiteralInstructionV0 value)
      (core/mapliteralinstructionv0-result instruction)]
     [(SetLiteralInstructionV0 value)
@@ -989,6 +995,7 @@
     [(CopyInstruction value) false]
     [(AddF64Instruction value) false]
     [(CheckedInstruction value) true]
+    [(BitwiseInstructionV0 value) false]
     [(StoreInstruction value) false]
     [(AllocateInstruction value) false]
     [(CallInstruction value) false]
@@ -1006,6 +1013,8 @@
     [(VecPushInstruction value) false]
     [(VecEmptyInstruction value) false]
     [(VecConcatInstruction value) false]
+    [(VecSliceInstructionV0 value) false]
+    [(VecReverseInstructionV0 value) false]
     [(MapLiteralInstructionV0 value) false]
     [(SetLiteralInstructionV0 value) false]
     [(MapCountInstructionV0 value) false]
@@ -1320,6 +1329,29 @@
            [(CheckedBoundsV0 operation)
             (emit-checked-bounds context block-index-value position result-name result-letter
               (core/checkedboundsv0-index-id checked) (core/checkedboundsv0-length-id checked))]))]
+      [(BitwiseInstructionV0 value)
+       (let [operation: core/BitwiseOperationV0
+             (core/bitwiseinstructionv0-operation instruction)]
+         (match operation
+           [(BitAndI64V0 value)
+            (str "  " result-name " =l call $native_bit_and_i64(l "
+              (value-name context (core/bitandi64v0-left-id operation))
+              ", l "
+              (value-name context (core/bitandi64v0-right-id operation))
+              ")\n")]
+           [(BitXorI64V0 value)
+            (str "  " result-name " =l call $native_bit_xor_i64(l "
+              (value-name context (core/bitxori64v0-left-id operation))
+              ", l "
+              (value-name context (core/bitxori64v0-right-id operation))
+              ")\n")]
+           [(BitShiftLeftI64V0 value)
+            (str "  " result-name " =l call $native_bit_shift_left_i64(l "
+              (value-name context (core/bitshiftlefti64v0-value-id operation))
+              ", l "
+              (value-name context
+                (core/bitshiftlefti64v0-distance-id operation))
+              ")\n")]))]
       [(StoreInstruction value)
        ;; A world store carries an SSA result; QBE stores are valueless, so
        ;; the result materializes as the unit token the world already means.
@@ -1367,6 +1399,32 @@
            (value-name context (core/vecconcatinstruction-arena-id instruction))
            ", l " (value-name context (core/vecconcatinstruction-left-id instruction))
            ", l " (value-name context (core/vecconcatinstruction-right-id instruction))
+           ", l " (vector-stride context vector-type)
+           ", l " (vector-element-alignment context vector-type) ")\n"))]
+      [(VecSliceInstructionV0 value)
+       (let [vector-type: core/NativeId (core/ssavaluev0-type-id result)]
+         (str "  " result-name " =l call $native_vec_slice(l "
+           (value-name context
+             (core/vecsliceinstructionv0-arena-id instruction))
+           ", l "
+           (value-name context
+             (core/vecsliceinstructionv0-source-id instruction))
+           ", l "
+           (value-name context
+             (core/vecsliceinstructionv0-start-id instruction))
+           ", l "
+           (value-name context
+             (core/vecsliceinstructionv0-end-id instruction))
+           ", l " (vector-stride context vector-type)
+           ", l " (vector-element-alignment context vector-type) ")\n"))]
+      [(VecReverseInstructionV0 value)
+       (let [vector-type: core/NativeId (core/ssavaluev0-type-id result)]
+         (str "  " result-name " =l call $native_vec_reverse(l "
+           (value-name context
+             (core/vecreverseinstructionv0-arena-id instruction))
+           ", l "
+           (value-name context
+             (core/vecreverseinstructionv0-source-id instruction))
            ", l " (vector-stride context vector-type)
            ", l " (vector-element-alignment context vector-type) ")\n"))]
       [(MapLiteralInstructionV0 value) ""]
@@ -1766,6 +1824,7 @@
            (core/checkedinstruction-operation instruction)]
        (or (instance? native.core.CheckedAddI64V0 operation)
            (instance? native.core.CheckedBoundsV0 operation)))]
+    [(BitwiseInstructionV0 value) true]
     [(StoreInstruction value) (store-supported? (core/storeinstruction-store instruction))]
     [(AllocateInstruction value) true]
     [(CallInstruction value) true]
@@ -1784,6 +1843,8 @@
     [(VecPushInstruction value) false]
     [(VecEmptyInstruction value) false]
     [(VecConcatInstruction value) true]
+    [(VecSliceInstructionV0 value) true]
+    [(VecReverseInstructionV0 value) true]
     [(MapLiteralInstructionV0 value) false]
     [(SetLiteralInstructionV0 value) false]
     [(MapCountInstructionV0 value) false]

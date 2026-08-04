@@ -298,6 +298,33 @@
     []
     []))
 
+(def slice-bitwise-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "bit-b0-ent")
+    []
+    [(core/->BitwiseInstructionV0
+       (core/->SsaValueV0 (slice-id "bit-s0-and") (slice-id "type-0-i64"))
+       (core/->BitAndI64V0 (slice-id "bit-p0-lhs") (slice-id "bit-p1-rhs")))
+     (core/->BitwiseInstructionV0
+       (core/->SsaValueV0 (slice-id "bit-s1-shl") (slice-id "type-0-i64"))
+       (core/->BitShiftLeftI64V0
+         (slice-id "bit-p0-lhs") (slice-id "bit-p2-dis")))
+     (core/->BitwiseInstructionV0
+       (core/->SsaValueV0 (slice-id "bit-s2-xor") (slice-id "type-0-i64"))
+       (core/->BitXorI64V0 (slice-id "bit-s0-and") (slice-id "bit-s1-shl")))]
+    [(core/return-terminator (slice-id "bit-s2-xor"))]))
+
+(def slice-bitwise-function: core/FunctionDef
+  (core/->FunctionDef (slice-id "fn-3-bit") "bitwise"
+    [(core/->Parameter (slice-id "bit-p0-lhs") (slice-id "type-0-i64"))
+     (core/->Parameter (slice-id "bit-p1-rhs") (slice-id "type-0-i64"))
+     (core/->Parameter (slice-id "bit-p2-dis") (slice-id "type-0-i64"))]
+    [slice-bitwise-block]
+    (slice-id "bit-b0-ent")
+    (slice-id "type-0-i64")
+    []
+    []
+    []))
+
 (def slice-world: core/NativeWorld
   (core/->NativeWorld (slice-id "qbe-slice-world") nil "native-qbe-fixture-v0"
     slice-types
@@ -305,7 +332,8 @@
     [slice-region]
     [slice-alloc-capability slice-write-capability]
     slice-layouts
-    [slice-add-function slice-function slice-switch-function]
+    [slice-add-function slice-function slice-switch-function
+     slice-bitwise-function]
     [(slice-id "eff-0-alloc") (slice-id "eff-1-write")]
     [(slice-id "reg-0-arena")]
     [(slice-id "cap-0-alloc") (slice-id "cap-1-write")]
@@ -326,7 +354,8 @@
              slice-tag-type slice-i64-type]
      :layouts [slice-ref-layout slice-shape-layout slice-pair-layout
                slice-bool-layout slice-tag-layout slice-i64-layout]
-     :functions [slice-switch-function-permuted slice-function-permuted slice-add-function]]))
+     :functions [slice-bitwise-function slice-switch-function-permuted
+                 slice-function-permuted slice-add-function]]))
 
 ;; --- vector concat world --------------------------------------------------
 
@@ -374,6 +403,62 @@
     [(slice-id "reg-0-arena")]
     [(slice-id "cap-0-alloc")]))
 
+(def reverse-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "vec-b1-rev")
+    []
+    [(core/->ArenaInstruction
+       (core/->SsaValueV0 (slice-id "vec-r0-arn") (slice-id "vec-typ-arn"))
+       (slice-id "reg-0-arena")
+       (slice-id "cap-0-alloc")
+       (core/->TokenFlowV0
+         [(slice-id "reg-0-arena") (slice-id "cap-0-alloc")]
+         []))
+     (core/->VecReverseInstructionV0
+       (core/->SsaValueV0 (slice-id "vec-r1-out") (slice-id "vec-typ-i64"))
+       (slice-id "vec-rp-src")
+       (slice-id "vec-r0-arn"))]
+    [(core/return-terminator (slice-id "vec-r1-out"))]))
+
+(def reverse-function: core/FunctionDef
+  (core/->FunctionDef (slice-id "vec-fn-rev") "reverse"
+    [(core/->Parameter (slice-id "vec-rp-src") (slice-id "vec-typ-i64"))]
+    [reverse-block]
+    (slice-id "vec-b1-rev")
+    (slice-id "vec-typ-i64")
+    [(slice-id "eff-0-alloc")]
+    [(slice-id "reg-0-arena")]
+    [(slice-id "cap-0-alloc")]))
+
+(def slice-vector-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "vec-b2-slc")
+    []
+    [(core/->ArenaInstruction
+       (core/->SsaValueV0 (slice-id "vec-c0-arn") (slice-id "vec-typ-arn"))
+       (slice-id "reg-0-arena")
+       (slice-id "cap-0-alloc")
+       (core/->TokenFlowV0
+         [(slice-id "reg-0-arena") (slice-id "cap-0-alloc")]
+         []))
+     (core/->VecSliceInstructionV0
+       (core/->SsaValueV0 (slice-id "vec-c1-out") (slice-id "vec-typ-i64"))
+       (slice-id "vec-cp-src")
+       (slice-id "vec-cp-beg")
+       (slice-id "vec-cp-end")
+       (slice-id "vec-c0-arn"))]
+    [(core/return-terminator (slice-id "vec-c1-out"))]))
+
+(def slice-vector-function: core/FunctionDef
+  (core/->FunctionDef (slice-id "vec-fn-slc") "slice"
+    [(core/->Parameter (slice-id "vec-cp-src") (slice-id "vec-typ-i64"))
+     (core/->Parameter (slice-id "vec-cp-beg") (slice-id "type-0-i64"))
+     (core/->Parameter (slice-id "vec-cp-end") (slice-id "type-0-i64"))]
+    [slice-vector-block]
+    (slice-id "vec-b2-slc")
+    (slice-id "vec-typ-i64")
+    [(slice-id "eff-0-alloc")]
+    [(slice-id "reg-0-arena")]
+    [(slice-id "cap-0-alloc")]))
+
 (def concat-world: core/NativeWorld
   (core/->NativeWorld (slice-id "qbe-concat-world") nil "native-qbe-fixture-v0"
     [slice-i64-type concat-vector-type concat-arena-type]
@@ -381,7 +466,7 @@
     [slice-region]
     [slice-alloc-capability]
     [slice-i64-layout concat-vector-layout concat-arena-layout]
-    [concat-function]
+    [concat-function reverse-function slice-vector-function]
     [(slice-id "eff-0-alloc")]
     [(slice-id "reg-0-arena")]
     [(slice-id "cap-0-alloc")]
@@ -391,7 +476,8 @@
 (def concat-world-permuted: core/NativeWorld
   (with concat-world
     [:types [concat-arena-type concat-vector-type slice-i64-type]
-     :layouts [concat-arena-layout concat-vector-layout slice-i64-layout]]))
+     :layouts [concat-arena-layout concat-vector-layout slice-i64-layout]
+     :functions [slice-vector-function concat-function reverse-function]]))
 
 ;; --- explicit instruction refusals ---------------------------------------
 ;; Core v0 validates SSA/reference closure independently of operand semantics.
@@ -1090,8 +1176,13 @@
     "#include \"native_shim.h\"\n\n"
     "int64_t native_m0_fn_0(native_arena *arena, const native_capability *capability,\n"
     "                       int64_t left, int64_t right);\n"
+    "int64_t native_m1_fn_3(int64_t left, int64_t right, int64_t distance);\n"
     "native_vec *native_m2_fn_0(native_arena *arena, const native_capability *capability,\n"
-    "                           const native_vec *left, const native_vec *right);\n\n"
+    "                           const native_vec *left, const native_vec *right);\n"
+    "native_vec *native_m2_fn_1(native_arena *arena, const native_capability *capability,\n"
+    "                           const native_vec *source);\n"
+    "native_vec *native_m2_fn_2(native_arena *arena, const native_capability *capability,\n"
+    "                           const native_vec *source, int64_t start, int64_t end);\n\n"
     "int main(void) {\n"
     "  uint8_t storage[256];\n"
     "  native_arena arena;\n"
@@ -1104,6 +1195,9 @@
     "  *slot = native_m0_fn_0(&arena, &capability, INT64_C(-1), INT64_C(1));\n"
     "  if (*slot != INT64_C(0)) {\n"
     "    return 2;\n"
+    "  }\n"
+    "  if (native_m1_fn_3(INT64_C(240), INT64_C(90), INT64_C(1)) != INT64_C(432)) {\n"
+    "    return 6;\n"
     "  }\n"
     "  native_arena_reset(&arena);\n"
     "  int64_t left_items[] = { INT64_C(3), INT64_C(5) };\n"
@@ -1122,6 +1216,16 @@
     "  }\n"
     "  if ((left.length != INT64_C(2)) || (right.length != INT64_C(3))) {\n"
     "    return 5;\n"
+    "  }\n"
+    "  native_vec *reversed = native_m2_fn_1(&arena, &capability, joined);\n"
+    "  native_vec *middle = native_m2_fn_2(&arena, &capability, joined, INT64_C(1), INT64_C(4));\n"
+    "  const int64_t reverse_expected[] = { INT64_C(21), INT64_C(13), INT64_C(8),\n"
+    "                                       INT64_C(5), INT64_C(3) };\n"
+    "  const int64_t middle_expected[] = { INT64_C(5), INT64_C(8), INT64_C(13) };\n"
+    "  if ((reversed->length != INT64_C(5)) || (middle->length != INT64_C(3))\n"
+    "      || (memcmp(reversed->elements, reverse_expected, sizeof(reverse_expected)) != 0)\n"
+    "      || (memcmp(middle->elements, middle_expected, sizeof(middle_expected)) != 0)) {\n"
+    "    return 7;\n"
     "  }\n"
     "  native_arena_reset(&arena);\n"
     "  return 0;\n"

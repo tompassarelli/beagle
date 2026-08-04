@@ -27,7 +27,8 @@ if [[ -f "$src" && -f "$dep" ]]; then
     "$scratch/store.ast.json=fram:src/fram/store.bclj" \
     "$scratch/probe.ast.json=beagle:native-core/validation/slice-vec/vec_probe.bclj" \
     "$scratch/vec.facts"
-  if [[ -f "$art/vec.facts" ]] && ! cmp -s "$scratch/vec.facts" "$art/vec.facts"; then
+  if [[ -f "$art/vec.facts" && "${NATIVE_SLICE_UPDATE:-0}" != 1 ]] \
+      && ! cmp -s "$scratch/vec.facts" "$art/vec.facts"; then
     echo "drive.sh: regenerated projection differs from the committed vec.facts" >&2
     exit 1
   fi
@@ -81,7 +82,7 @@ fi
 
 build="$scratch/c"
 mkdir -p "$build"
-cp "$art/module_0.h" "$art/module_0.c" "$art/main.c" "$build/"
+cp "$art/module_0.h" "$art/module_0.c" "$here/main.c" "$build/"
 cp "$repo/native-core/shim/native_shim.c" "$repo/native-core/shim/native_shim.h" "$build/"
 
 strict=(-std=c17 -pedantic -Wall -Wextra -Werror)
@@ -89,6 +90,10 @@ strict=(-std=c17 -pedantic -Wall -Wextra -Werror)
 ( cd "$build" && ./probe_gcc )
 if ( cd "$build" && ulimit -c 0 && ./probe_gcc trap ) 2>/dev/null; then
   echo "drive.sh: the out-of-range nth did not trap" >&2
+  exit 1
+fi
+if ( cd "$build" && ulimit -c 0 && ./probe_gcc overflow ) 2>/dev/null; then
+  echo "drive.sh: inc INT64_MAX did not trap" >&2
   exit 1
 fi
 echo "drive.sh: gcc $(gcc -dumpversion) strict compile + run + trap ok"
@@ -106,6 +111,10 @@ if [ -n "$clang_bin" ]; then
   ( cd "$build" && ./probe_clang )
   if ( cd "$build" && ulimit -c 0 && ./probe_clang trap ) 2>/dev/null; then
     echo "drive.sh: the out-of-range nth did not trap under clang" >&2
+    exit 1
+  fi
+  if ( cd "$build" && ulimit -c 0 && ./probe_clang overflow ) 2>/dev/null; then
+    echo "drive.sh: inc INT64_MAX did not trap under clang" >&2
     exit 1
   fi
   echo "drive.sh: clang $("$clang_bin" -dumpversion) compile + run + trap ok"

@@ -3192,6 +3192,8 @@
   (or (instance? native.core.VecPushInstruction instruction)
       (instance? native.core.VecEmptyInstruction instruction)
       (instance? native.core.VecConcatInstruction instruction)
+      (instance? native.core.VecSliceInstructionV0 instruction)
+      (instance? native.core.VecReverseInstructionV0 instruction)
       (instance? native.core.MapLiteralInstructionV0 instruction)
       (instance? native.core.SetLiteralInstructionV0 instruction)
       (instance? native.core.MapAssocInstructionV0 instruction)
@@ -3454,6 +3456,9 @@
 
         (and (= position 1) (vector-type? types receiver) (= "conj" callee))
         (vector-element-of types receiver)
+
+        (and (= position 1) (vector-type? types receiver) (= "into" callee))
+        receiver
 
         :else nil))))
 
@@ -4897,6 +4902,261 @@
             arena
             (core/->TokenFlowV0 [] [])))
         result-id result-type false))))
+
+(defn lower-int-step
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   callee: String
+   value: core/NativeId
+   value-type: core/NativeId] -> ExprResultV0
+  (let [coerced: ArgsResultV0
+        (coerce-values-to-type types owner state [value] [value-type]
+          (int-type-id))
+        settled: BodyStateV0 (argsresultv0-state coerced)]
+    (if (state-blocked? settled)
+      (fail-result settled
+        (str "TODO-NATIVE-" callee "-OPERAND: " callee
+          " needs a value safely narrowable to Int"))
+      (let [one-id: core/NativeId (state-id settled owner (str callee "-one"))
+            with-one: BodyStateV0
+            (state-emit (state-bump settled)
+              (core/->AtomInstruction
+                (core/->SsaValueV0 one-id (int-type-id))
+                (core/->I64Atom 1)))]
+        (lower-checked-arith with-one owner (if (= "inc" callee) "+" "-")
+          (nth (argsresultv0-values coerced) 0) one-id)))))
+
+(defn bitwise-operation
+  [callee: String
+   left: core/NativeId
+   right: core/NativeId] -> core/BitwiseOperationV0
+  (cond
+    (= "bit-and" callee) (core/->BitAndI64V0 left right)
+    (= "bit-xor" callee) (core/->BitXorI64V0 left right)
+    :else (core/->BitShiftLeftI64V0 left right)))
+
+(defn lower-bitwise
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   callee: String
+   values: (Vec core/NativeId)
+   value-types: (Vec core/NativeId)] -> ExprResultV0
+  (let [shift: Bool (= "bit-shift-left" callee)
+        arity-ok: Bool (if shift (= 2 (count values)) (>= (count values) 2))]
+    (if (not arity-ok)
+      (fail-result state
+        (str "TODO-NATIVE-BITWISE-ARITY: " callee
+          (if shift " takes two operands" " takes two or more operands")))
+      (let [coerced: ArgsResultV0
+            (coerce-values-to-type types owner state values value-types
+              (int-type-id))
+            settled: BodyStateV0 (argsresultv0-state coerced)
+            operands: (Vec core/NativeId) (argsresultv0-values coerced)]
+        (if (state-blocked? settled)
+          (fail-result settled
+            (str "TODO-NATIVE-BITWISE-OPERANDS: " callee
+              " needs values safely narrowable to Int"))
+          (loop [position: Int 1
+                 current: BodyStateV0 settled
+                 left: core/NativeId (nth operands 0)]
+            (if (>= position (count operands))
+              (->ExprResultV0 current left (int-type-id) false)
+              (let [result-id: core/NativeId
+                    (state-id current owner (str callee "-" position))]
+                (recur (+ position 1)
+                  (state-emit (state-bump current)
+                    (core/->BitwiseInstructionV0
+                      (core/->SsaValueV0 result-id (int-type-id))
+                      (bitwise-operation callee left (nth operands position))))
+                  result-id)))))))))
+
+(defn lower-native-equality
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   left-id: core/NativeId
+   left-type: core/NativeId
+   right-id: core/NativeId
+   right-type: core/NativeId] -> ExprResultV0
+  (let [same-type: Bool (same-id? left-type right-type)
+        left-union: Bool (> (count (union-variants-of types left-type)) 0)
+        right-union: Bool (> (count (union-variants-of types right-type)) 0)
+        comparison: (U core/CompareOpV0 Nil)
+        (if same-type (equality-comparison left-type) nil)]
+    (cond
+      (and same-type (set-type? types left-type))
+      (lower-set-equality types owner state left-id right-id left-type)
+
+      (and same-type (value-semantics-type? types left-type))
+      (let [result-id: core/NativeId (state-id state owner "value-equal")]
+        (->ExprResultV0
+          (state-emit (state-bump state)
+            (core/->ValueSemanticsInstruction
+              (core/->SsaValueV0 result-id (bool-type-id))
+              (core/->ValueEqualV0 left-type left-id right-id)))
+          result-id (bool-type-id) false))
+
+      (and left-union (not right-union))
+      (lower-scalar-union-equality types owner state
+        right-id right-type left-id left-type)
+
+      (and (not left-union) right-union)
+      (lower-scalar-union-equality types owner state
+        left-id left-type right-id right-type)
+
+      (some? comparison)
+      (let [result-id: core/NativeId (state-id state owner "equal")]
+        (->ExprResultV0
+          (state-emit (state-bump state)
+            (core/->CompareInstruction
+              (core/->SsaValueV0 result-id (bool-type-id))
+              comparison left-id right-id))
+          result-id (bool-type-id) false))
+
+      :else
+      (fail-result state
+        "TODO-NATIVE-NOT-EQUAL-OPERANDS: not= has no native equality for these operand types"))))
+
+(defn lower-not-equal
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   values: (Vec core/NativeId)
+   value-types: (Vec core/NativeId)] -> ExprResultV0
+  (if (not (= 2 (count values)))
+    (fail-result state "TODO-NATIVE-NOT-EQUAL-ARITY: not= lowers two operands")
+    (let [equal: ExprResultV0
+          (lower-native-equality types owner state
+            (nth values 0) (nth value-types 0)
+            (nth values 1) (nth value-types 1))
+          current: BodyStateV0 (exprresultv0-state equal)]
+      (if (state-blocked? current)
+        (dead-result current)
+        (let [false-id: core/NativeId (state-id current owner "not-equal-false")
+              result-id: core/NativeId
+              (state-id (state-bump current) owner "not-equal")]
+          (->ExprResultV0
+            (state-emit
+              (state-emit (state-bump (state-bump current))
+                (core/->AtomInstruction
+                  (core/->SsaValueV0 false-id (bool-type-id))
+                  (core/->BoolAtom false)))
+              (core/->CompareInstruction
+                (core/->SsaValueV0 result-id (bool-type-id))
+                (core/->CompareEqBoolV0 true)
+                (exprresultv0-value-id equal) false-id))
+            result-id (bool-type-id) false))))))
+
+(defn lower-native-count
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   value-id: core/NativeId
+   value-type: core/NativeId] -> ExprResultV0
+  (let [result-id: core/NativeId (state-id state owner "collection-count")]
+    (cond
+      (vector-type? types value-type)
+      (->ExprResultV0
+        (state-emit (state-bump state)
+          (core/->VecLengthInstruction
+            (core/->SsaValueV0 result-id (int-type-id)) value-id))
+        result-id (int-type-id) false)
+
+      (map-type? types value-type)
+      (->ExprResultV0
+        (state-emit (state-bump state)
+          (core/->MapCountInstructionV0
+            (core/->SsaValueV0 result-id (int-type-id)) value-id))
+        result-id (int-type-id) false)
+
+      (set-type? types value-type)
+      (->ExprResultV0
+        (state-emit (state-bump state)
+          (core/->SetCountInstructionV0
+            (core/->SsaValueV0 result-id (int-type-id)) value-id))
+        result-id (int-type-id) false)
+
+      (text-operand? value-type)
+      (->ExprResultV0
+        (state-emit (state-bump state)
+          (core/->TextLengthInstruction
+            (core/->SsaValueV0 result-id (int-type-id)) value-id))
+        result-id (int-type-id) false)
+
+      :else
+      (fail-result state
+        "TODO-NATIVE-EMPTY-OPERAND: empty? needs a native vector, map, set, or Text"))))
+
+(defn lower-empty-predicate
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   value-id: core/NativeId
+   value-type: core/NativeId] -> ExprResultV0
+  (let [measured: ExprResultV0
+        (lower-native-count types owner state value-id value-type)
+        current: BodyStateV0 (exprresultv0-state measured)]
+    (if (state-blocked? current)
+      (dead-result current)
+      (let [zero-id: core/NativeId (state-id current owner "empty-zero")
+            result-id: core/NativeId (state-id (state-bump current) owner "empty")]
+        (->ExprResultV0
+          (state-emit
+            (state-emit (state-bump (state-bump current))
+              (core/->AtomInstruction
+                (core/->SsaValueV0 zero-id (int-type-id))
+                (core/->I64Atom 0)))
+            (core/->CompareInstruction
+              (core/->SsaValueV0 result-id (bool-type-id))
+              (core/->CompareEqI64V0 true)
+              (exprresultv0-value-id measured) zero-id))
+          result-id (bool-type-id) false)))))
+
+(defn lower-vector-slice
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   values: (Vec core/NativeId)
+   value-types: (Vec core/NativeId)] -> ExprResultV0
+  (if (not (and (or (= 2 (count values)) (= 3 (count values)))
+             (vector-type? types (nth value-types 0))))
+    (fail-result state
+      "TODO-NATIVE-SUBVEC-OPERANDS: subvec takes a native vector and one or two Int bounds")
+    (let [open-ended: Bool (= 2 (count values))
+          bounds: (Vec core/NativeId)
+          (if open-ended [(nth values 1)] [(nth values 1) (nth values 2)])
+          bound-types: (Vec core/NativeId)
+          (if open-ended [(nth value-types 1)]
+            [(nth value-types 1) (nth value-types 2)])
+          coerced: ArgsResultV0
+          (coerce-values-to-type types owner state bounds bound-types
+            (int-type-id))
+          settled: BodyStateV0 (argsresultv0-state coerced)]
+      (if (state-blocked? settled)
+        (fail-result settled
+          "TODO-NATIVE-SUBVEC-OPERANDS: subvec bounds are not safely narrowable to Int")
+        (let [length-id: core/NativeId (state-id settled owner "subvec-end")
+              measured: BodyStateV0
+              (if open-ended
+                (state-emit (state-bump settled)
+                  (core/->VecLengthInstruction
+                    (core/->SsaValueV0 length-id (int-type-id))
+                    (nth values 0)))
+                settled)
+              end-id: core/NativeId
+              (if open-ended length-id (nth (argsresultv0-values coerced) 1))
+              result-id: core/NativeId (state-id measured owner "subvec")]
+          (->ExprResultV0
+            (state-emit (state-bump measured)
+              (core/->VecSliceInstructionV0
+                (core/->SsaValueV0 result-id (nth value-types 0))
+                (nth values 0)
+                (nth (argsresultv0-values coerced) 0)
+                end-id
+                (arena-value-id owner)))
+            result-id (nth value-types 0) false))))))
 
 ;; Only a literal keyword access of an already-bound Map SSA can seed flow;
 ;; calls, persistent updates, and dynamic get keys cannot manufacture a match.
@@ -7013,6 +7273,21 @@
                     (str "TODO-NATIVE-EXTREME-OPERANDS: " callee
                       " needs native Int operands")))
 
+                (and (or (= "inc" callee) (= "dec" callee))
+                  (= 1 (count values)))
+                (lower-int-step types owner current callee
+                  (nth values 0) (nth value-types 0))
+
+                (or (= "inc" callee) (= "dec" callee))
+                (fail-result current
+                  (str "TODO-NATIVE-" callee "-ARITY: " callee
+                    " takes one operand"))
+
+                (or (= "bit-and" callee)
+                    (= "bit-xor" callee)
+                    (= "bit-shift-left" callee))
+                (lower-bitwise types owner current callee values value-types)
+
                 (and (= "atom" bare-callee) (= 1 (count values)))
                 (let [cell-type: (U core/NativeId Nil)
                       (atom-cell-type-of types (nth value-types 0))]
@@ -7244,6 +7519,14 @@
 
                 (= "zero?" callee)
                 (fail-result current "TODO-NATIVE-ZERO-ARITY: zero? takes one operand")
+
+                (and (= "empty?" callee) (= 1 (count values)))
+                (lower-empty-predicate types owner current
+                  (nth values 0) (nth value-types 0))
+
+                (= "empty?" callee)
+                (fail-result current
+                  "TODO-NATIVE-EMPTY-ARITY: empty? takes one operand")
 
                 (and (= "count" callee) (= 1 (count values))
                   (vector-type? types (nth value-types 0)))
@@ -7603,6 +7886,39 @@
                 (fail-result current
                   "TODO-NATIVE-CONCAT-OPERANDS: concat lowers two native vectors of the same type")
 
+                (= "subvec" callee)
+                (lower-vector-slice types owner current values value-types)
+
+                (and (= "reverse" callee) (= 1 (count values))
+                  (vector-type? types (nth value-types 0)))
+                (let [result-id: core/NativeId
+                      (state-id current owner "vec-reverse")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->VecReverseInstructionV0
+                        (core/->SsaValueV0 result-id (nth value-types 0))
+                        (nth values 0) (arena-value-id owner)))
+                    result-id (nth value-types 0) false))
+
+                (= "reverse" callee)
+                (fail-result current
+                  "TODO-NATIVE-REVERSE-OPERAND: reverse takes one native vector")
+
+                (and (= "into" callee) (= 2 (count values))
+                  (same-id? (nth value-types 0) (nth value-types 1))
+                  (vector-type? types (nth value-types 0)))
+                (let [result-id: core/NativeId (state-id current owner "vec-into")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->VecConcatInstruction
+                        (core/->SsaValueV0 result-id (nth value-types 0))
+                        (nth values 0) (nth values 1) (arena-value-id owner)))
+                    result-id (nth value-types 0) false))
+
+                (= "into" callee)
+                (fail-result current
+                  "TODO-NATIVE-INTO-OPERANDS: into lowers two native vectors of the same type")
+
                 (and (= "set" callee) (= 1 (count values))
                   (vector-type? types (nth value-types 0)))
                 (lower-vector-to-set types owner current
@@ -7670,6 +7986,9 @@
                 (= "compare" callee)
                 (fail-result current
                   "TODO-NATIVE-VALUE-COMPARE-OPERANDS: compare takes two closed composite values of the same type")
+
+                (= "not=" callee)
+                (lower-not-equal types owner current values value-types)
 
                 (and (= "=" callee) (= 2 (count values))
                   (same-id? (nth value-types 0) (nth value-types 1))
@@ -10028,6 +10347,18 @@
     [(FloatFromBitsV0 source-id)
      (worlds/canonical-record "float-from-bits-v0" [(id-value source-id)])]))
 
+(defn encode-bitwise-operation [operation: core/BitwiseOperationV0] -> String
+  (match operation
+    [(BitAndI64V0 left-id right-id)
+     (worlds/canonical-record "bit-and-i64-v0"
+       [(id-value left-id) (id-value right-id)])]
+    [(BitXorI64V0 left-id right-id)
+     (worlds/canonical-record "bit-xor-i64-v0"
+       [(id-value left-id) (id-value right-id)])]
+    [(BitShiftLeftI64V0 value-id distance-id)
+     (worlds/canonical-record "bit-shift-left-i64-v0"
+       [(id-value value-id) (id-value distance-id)])]))
+
 (defn encode-instruction [instruction: core/Instruction] -> String
   (cond
     (instance? native.core.AtomInstruction instruction)
@@ -10074,6 +10405,12 @@
           [result
            (id-value (core/checkedboundsv0-index-id operation))
            (id-value (core/checkedboundsv0-length-id operation))])))
+
+    (instance? native.core.BitwiseInstructionV0 instruction)
+    (worlds/canonical-record "bitwise-instruction-v0"
+      [(encode-ssa-value (core/bitwiseinstructionv0-result instruction))
+       (encode-bitwise-operation
+         (core/bitwiseinstructionv0-operation instruction))])
 
     (instance? native.core.CompareInstruction instruction)
     (let [comparison: core/CompareOpV0
@@ -10175,6 +10512,20 @@
        (id-value (core/vecconcatinstruction-left-id instruction))
        (id-value (core/vecconcatinstruction-right-id instruction))
        (id-value (core/vecconcatinstruction-arena-id instruction))])
+
+    (instance? native.core.VecSliceInstructionV0 instruction)
+    (worlds/canonical-record "vec-slice-instruction-v0"
+      [(encode-ssa-value (core/vecsliceinstructionv0-result instruction))
+       (id-value (core/vecsliceinstructionv0-source-id instruction))
+       (id-value (core/vecsliceinstructionv0-start-id instruction))
+       (id-value (core/vecsliceinstructionv0-end-id instruction))
+       (id-value (core/vecsliceinstructionv0-arena-id instruction))])
+
+    (instance? native.core.VecReverseInstructionV0 instruction)
+    (worlds/canonical-record "vec-reverse-instruction-v0"
+      [(encode-ssa-value (core/vecreverseinstructionv0-result instruction))
+       (id-value (core/vecreverseinstructionv0-source-id instruction))
+       (id-value (core/vecreverseinstructionv0-arena-id instruction))])
 
     (instance? native.core.MapLiteralInstructionV0 instruction)
     (worlds/canonical-record "map-literal-instruction-v0"

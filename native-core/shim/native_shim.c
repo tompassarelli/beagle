@@ -239,6 +239,71 @@ native_vec *native_vec_concat(native_arena *arena, const native_vec *left,
   return result;
 }
 
+native_vec *native_vec_slice(native_arena *arena, const native_vec *source,
+                             int64_t start, int64_t end, int64_t stride,
+                             size_t alignment) {
+  native_vec *result;
+  int64_t length;
+  size_t source_offset;
+  size_t byte_count;
+  if ((source == NULL) || (stride <= INT64_C(0)) ||
+      (source->length < INT64_C(0)) || (source->length > source->capacity)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  if ((start < INT64_C(0)) || (end < start) || (end > source->length)) {
+    native_trap(NATIVE_TRAP_OUT_OF_RANGE);
+  }
+  length = end - start;
+  source_offset = native_vec_bytes(start, stride);
+  byte_count = native_vec_bytes(length, stride);
+  result = native_vec_new(arena, length, stride, alignment);
+  if (byte_count != 0U) {
+    memcpy(result->elements,
+           (const uint8_t *)source->elements + source_offset, byte_count);
+  }
+  result->length = length;
+  return result;
+}
+
+native_vec *native_vec_reverse(native_arena *arena, const native_vec *source,
+                               int64_t stride, size_t alignment) {
+  native_vec *result;
+  int64_t position;
+  if ((source == NULL) || (stride <= INT64_C(0)) ||
+      (source->length < INT64_C(0)) || (source->length > source->capacity)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  result = native_vec_new(arena, source->length, stride, alignment);
+  for (position = INT64_C(0); position < source->length; ++position) {
+    int64_t source_position = source->length - position - INT64_C(1);
+    memcpy((uint8_t *)result->elements + native_vec_bytes(position, stride),
+           (const uint8_t *)source->elements +
+               native_vec_bytes(source_position, stride),
+           (size_t)stride);
+  }
+  result->length = source->length;
+  return result;
+}
+
+static int64_t native_i64_from_bits(uint64_t bits) {
+  int64_t value;
+  memcpy(&value, &bits, sizeof(value));
+  return value;
+}
+
+int64_t native_bit_and_i64(int64_t left, int64_t right) {
+  return native_i64_from_bits((uint64_t)left & (uint64_t)right);
+}
+
+int64_t native_bit_xor_i64(int64_t left, int64_t right) {
+  return native_i64_from_bits((uint64_t)left ^ (uint64_t)right);
+}
+
+int64_t native_bit_shift_left_i64(int64_t value, int64_t distance) {
+  uint32_t shift = (uint32_t)((uint64_t)distance & UINT64_C(63));
+  return native_i64_from_bits((uint64_t)value << shift);
+}
+
 static size_t native_collection_bytes(int64_t count, int64_t stride) {
   if ((count < INT64_C(0)) || (stride <= INT64_C(0))) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
