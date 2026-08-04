@@ -22,8 +22,11 @@ if [[ -f "$src" && -f "$dep" ]]; then
   "$repo/bin/beagle-ast" "$src" >"$scratch/types.ast.json"
   "$repo/bin/beagle-ast" "$dep" >"$scratch/store.ast.json"
   "$repo/bin/beagle-ast" "$here/vec_probe.bclj" >"$scratch/probe.ast.json"
-  bb "$here/ast-facts.clj" "$scratch/types.ast.json" "$scratch/store.ast.json" \
-    "$scratch/probe.ast.json" "$scratch/vec.facts"
+  bb "$here/ast-facts.clj" \
+    "$scratch/types.ast.json=fram:src/fram/types.bclj" \
+    "$scratch/store.ast.json=fram:src/fram/store.bclj" \
+    "$scratch/probe.ast.json=beagle:native-core/validation/slice-vec/vec_probe.bclj" \
+    "$scratch/vec.facts"
   if [[ -f "$art/vec.facts" ]] && ! cmp -s "$scratch/vec.facts" "$art/vec.facts"; then
     echo "drive.sh: regenerated projection differs from the committed vec.facts" >&2
     exit 1

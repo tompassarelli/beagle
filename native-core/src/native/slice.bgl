@@ -155,8 +155,74 @@
                 (text-id (slicefactv0-predicate row))
                 object))))))))
 
-;; The projection reserves node name "0" for the module root so the sealed
-;; source identity never depends on how many forms the module happens to have.
+(defn row-first-text
+  [rows: (Vec SliceFactV0)
+   subject: String
+   predicate: String] -> (U String Nil)
+  (loop [position: Int 0]
+    (if (>= position (count rows))
+      nil
+      (let [row: SliceFactV0 (nth rows position)]
+        (if (and (= subject (slicefactv0-subject row))
+                 (= predicate (slicefactv0-predicate row))
+                 (text-row? row))
+          (row-text row)
+          (recur (+ position 1)))))))
+
+(defn form-node-names
+  [rows: (Vec SliceFactV0)
+   kind: String] -> (Vec String)
+  (loop [position: Int 0 selected: (Vec String) []]
+    (if (>= position (count rows))
+      selected
+      (let [row: SliceFactV0 (nth rows position)]
+        (recur (+ position 1)
+          (if (and (= "form-kind" (slicefactv0-predicate row))
+                   (text-row? row)
+                   (= kind (row-text row)))
+            (conj selected (slicefactv0-subject row))
+            selected))))))
+
+(defn source-module
+  [rows: (Vec SliceFactV0)
+   root-name: String
+   fallback-name: String
+   fallback-path: String] -> worlds/SourceModuleV0
+  (let [declared-name: (U String Nil) (row-first-text rows root-name "namespace")
+        declared-path: (U String Nil) (row-first-text rows root-name "relative-path")
+        module-name: String
+        (if (or (nil? declared-name) (= "" declared-name)) fallback-name declared-name)
+        relative-path: String
+        (if (or (nil? declared-path) (= "" declared-path)) fallback-path declared-path)]
+    (worlds/->SourceModuleV0
+      (slice-id "module" [module-name relative-path])
+      module-name
+      relative-path
+      (worlds/content-digest
+        (str "slice-source-v0/" module-name "/" relative-path "/" root-name))
+      (worlds/content-digest
+        (str "slice-interface-v0/" module-name "/" root-name))
+      (node-id root-name))))
+
+(defn source-modules
+  [rows: (Vec SliceFactV0)
+   fallback-name: String
+   fallback-path: String] -> (Vec worlds/SourceModuleV0)
+  (let [roots: (Vec String) (form-node-names rows "module-root")]
+    (if (= 0 (count roots))
+      [(source-module rows "0" fallback-name fallback-path)]
+      (mapv
+        (fn [root-name: String] -> worlds/SourceModuleV0
+          (source-module rows root-name fallback-name fallback-path))
+        roots))))
+
+(defn source-imports [rows: (Vec SliceFactV0)] -> (Vec core/NativeId)
+  (mapv
+    (fn [node-name: String] -> core/NativeId (node-id node-name))
+    (form-node-names rows "import")))
+
+;; Node "0" is the program root. New projections carry one module root per AST;
+;; old facts without module metadata remain a single-module source world.
 (defn source-world
   [rows: (Vec SliceFactV0)
    module-name: String
@@ -168,14 +234,8 @@
                (fact-nodes rows)))]
     (worlds/->SourceProgramWorldV0
       (worlds/->TermGraphV0 root nodes)
-      [(worlds/->SourceModuleV0
-         (slice-id "module" [module-name])
-         module-name
-         relative-path
-         (worlds/content-digest (str "slice-source-v0/" module-name))
-         (worlds/content-digest (str "slice-interface-v0/" module-name))
-         root)]
-      []
+      (source-modules rows module-name relative-path)
+      (source-imports rows)
       [])))
 
 (defn type-field-refs [definition: core/TypeDef] -> (Vec core/NativeId)

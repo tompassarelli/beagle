@@ -1,5 +1,8 @@
 stage source-seal ACCEPTED
 stage source-to-typed ACCEPTED
+stage typed-to-native PENDING
+source-modules 1
+source-imports 0
 world-types 73
 world-functions 19
 world-abis 19

@@ -222,6 +222,14 @@
                 head: String
                 (str "stage source-seal ACCEPTED\n"
                   "stage source-to-typed ACCEPTED\n"
+                  "stage typed-to-native "
+                  (if (instance? native.lower.NativeLoweringCompleteV0 native-result)
+                    "COMPLETE" "PENDING")
+                  "\n"
+                  "source-modules "
+                  (str (count (worlds/sourceprogramworldv0-modules source))) "\n"
+                  "source-imports "
+                  (str (count (worlds/sourceprogramworldv0-imports source))) "\n"
                   "world-types " (str (count (core/nativeworld-types program))) "\n"
                   "world-functions "
                   (str (count (core/nativeworld-functions program))) "\n"

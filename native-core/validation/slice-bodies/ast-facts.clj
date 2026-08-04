@@ -1,7 +1,7 @@
 ;; bin/beagle-ast JSON -> the source-fact projection, extended with bodies.
 ;; Columns: subject TAB predicate TAB ("t" text | "e" escaped text | "n" node)
-;; TAB object; node "0" is the module root and ordinals come from a pre-order
-;; walk, so the projection is byte-stable for a given source file.
+;; TAB object; node "0" is the program root, each AST gets its own module root,
+;; and ordinals come from a pre-order walk, so the projection is byte-stable.
 (require '[cheshire.core :as json]
          '[clojure.string])
 
@@ -43,6 +43,9 @@
     (doseq [[i it] (map-indexed vector items)]
       (row! n (str "f" i) "n" (emit-one it)))
     n))
+
+(defn emit-node-seq [items]
+  (emit-seq items identity))
 
 (defn emit-ann [a]
   (let [n (nid)]
@@ -143,18 +146,45 @@
       nil)
     n))
 
-(let [[in out & arguments] *command-line-args*
+(defn parse-input-spec [spec]
+  (let [[path relative-path] (clojure.string/split spec #"=" 2)]
+    [path (or relative-path "")]))
+
+(defn emit-import [required]
+  (let [n (nid)]
+    (row! n "form-kind" "t" "import")
+    (row! n "namespace" "t" (get required "ns"))
+    (row! n "alias" "t" (or (get required "alias") ""))
+    (row! n "refer" "t" (str (boolean (get required "refer"))))
+    n))
+
+(defn selected-form? [include-defs? form]
+  (or (#{"record" "defn"} (get form "node"))
+      (and include-defs? (= "def" (get form "node")))))
+
+(defn emit-module [ast relative-path include-defs?]
+  (let [definitions (mapv emit-form
+                      (filter #(selected-form? include-defs? %) (get ast "forms")))
+        imports (mapv emit-import (get ast "requires"))
+        root (nid)]
+    (row! root "form-kind" "t" "module-root")
+    (row! root "namespace" "t" (get ast "namespace"))
+    (row! root "relative-path" "t" relative-path)
+    (row! root "definitions" "n" (emit-node-seq definitions))
+    (row! root "imports" "n" (emit-node-seq imports))
+    root))
+
+(let [[input-spec out & arguments] *command-line-args*
       include-defs? (some #{"--include-defs"} arguments)
       annotations (remove #{"--include-defs"} arguments)
+      [in relative-path] (parse-input-spec input-spec)
       ast (json/parse-string (slurp in))]
   (reset! native-ops
           (into {} (for [a annotations
                          :let [[name op] (clojure.string/split a #"=" 2)]]
                      [name op])))
-  (doseq [f (get ast "forms")]
-    (when (or (#{"record" "defn"} (get f "node"))
-              (and include-defs? (= "def" (get f "node"))))
-      (emit-form f)))
-  (row! "0" "form-kind" "t" "module-root")
+  (let [module (emit-module ast relative-path include-defs?)]
+    (row! "0" "form-kind" "t" "program-root")
+    (row! "0" "modules" "n" (emit-node-seq [module])))
   (spit out (apply str (for [[s p k o] (persistent! @rows)]
                          (str s "\t" p "\t" k "\t" o "\n")))))

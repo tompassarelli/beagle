@@ -227,6 +227,65 @@
       indexed
       (index-sequence-under index sequence-id "a"))))
 
+(defn module-sequence
+  [index: SourceIndexV0
+   module-root: core/NativeId
+   predicate: String] -> (Vec core/NativeId)
+  (let [sequence: (U core/NativeId Nil)
+        (index-first-object index module-root predicate)]
+    (if (nil? sequence) [] (index-sequence-items index sequence))))
+
+(defn source-module-root
+  [index: SourceIndexV0
+   definition: core/NativeId] -> (U core/NativeId Nil)
+  (let [roots: (Vec core/NativeId) (index-form-ids index "module-root")]
+    (loop [position: Int 0]
+      (if (>= position (count roots))
+        (if (= 1 (count roots)) (nth roots 0) nil)
+        (let [root: core/NativeId (nth roots position)]
+          (if (core/id-in? (module-sequence index root "definitions") definition)
+            root
+            (recur (+ position 1))))))))
+
+(defn source-module-name
+  [index: SourceIndexV0
+   definition: core/NativeId] -> String
+  (let [root: (U core/NativeId Nil) (source-module-root index definition)]
+    (if (nil? root)
+      ""
+      (let [name: (U String Nil) (index-first-text index root "namespace")]
+        (if (nil? name) "" name)))))
+
+(defn module-root-named
+  [index: SourceIndexV0
+   module-name: String] -> (U core/NativeId Nil)
+  (let [roots: (Vec core/NativeId) (index-form-ids index "module-root")]
+    (loop [position: Int 0]
+      (if (>= position (count roots))
+        nil
+        (let [root: core/NativeId (nth roots position)
+              candidate: (U String Nil) (index-first-text index root "namespace")]
+          (if (and (some? candidate) (= module-name candidate))
+            root
+            (recur (+ position 1))))))))
+
+(defn imported-module-name
+  [index: SourceIndexV0
+   module-name: String
+   alias: String] -> (U String Nil)
+  (let [root: (U core/NativeId Nil) (module-root-named index module-name)
+        imports: (Vec core/NativeId)
+        (if (nil? root) [] (module-sequence index root "imports"))]
+    (loop [position: Int 0]
+      (if (>= position (count imports))
+        nil
+        (let [import-node: core/NativeId (nth imports position)
+              candidate: (U String Nil) (index-first-text index import-node "alias")
+              target: (U String Nil) (index-first-text index import-node "namespace")]
+          (if (and (some? candidate) (= alias candidate) (some? target))
+            target
+            (recur (+ position 1))))))))
+
 (defn build-source-index [graph: worlds/TermGraphV0] -> SourceIndexV0
   (let [facts: (Vec SourceFactV0) (source-facts graph)
         subjects: (Vec core/NativeId)
@@ -499,6 +558,42 @@
       (if (= "/" (subs spelling index (+ index 1)))
         (recur (+ index 1) (+ index 1))
         (recur (+ index 1) start)))))
+
+(defrecord ResolvedSourceNameV0
+  [module-name: String
+   local-name: String
+   visible: Bool])
+
+(defn first-slash [spelling: String] -> Int
+  (loop [position: Int 0]
+    (if (>= position (count spelling))
+      -1
+      (if (= "/" (subs spelling position (+ position 1)))
+        position
+        (recur (+ position 1))))))
+
+(defn resolve-source-name
+  [index: SourceIndexV0
+   module-name: String
+   spelling: String] -> ResolvedSourceNameV0
+  (let [slash: Int (first-slash spelling)]
+    (if (< slash 0)
+      (->ResolvedSourceNameV0 module-name spelling (> (count spelling) 0))
+      (let [alias: String (subs spelling 0 slash)
+            local-name: String (subs spelling (+ slash 1) (count spelling))
+            imported: (U String Nil)
+            (if (= alias module-name)
+              module-name
+              (imported-module-name index module-name alias))]
+        (if (or (nil? imported) (= "" local-name))
+          (->ResolvedSourceNameV0 "" local-name false)
+          (->ResolvedSourceNameV0 imported local-name true))))))
+
+(defn resolved-source-key [resolved: ResolvedSourceNameV0] -> String
+  (if (resolvedsourcenamev0-visible resolved)
+    (str (resolvedsourcenamev0-module-name resolved) "/"
+      (resolvedsourcenamev0-local-name resolved))
+    ""))
 
 (defn type-id [name: String] -> core/NativeId
   (lower-id "type" [(unqualified-name name)]))
@@ -1166,7 +1261,8 @@
     (if (nil? value) "" value)))
 
 (defrecord GlobalBindingV0
-  [name: String
+  [module-name: String
+   name: String
    value: core/NativeId
    annotation: (U core/NativeId Nil)])
 
@@ -1182,8 +1278,11 @@
             (if (or (= "" name) (nil? value))
               globals
               (conj globals
-                (->GlobalBindingV0 name value
+                (->GlobalBindingV0 (source-module-name index form) name value
                   (index-first-object index form "ann"))))))))))
+
+(defn global-key [global: GlobalBindingV0] -> String
+  (str (globalbindingv0-module-name global) "/" (globalbindingv0-name global)))
 
 (defn global-type-definitions
   [index: SourceIndexV0
@@ -1263,6 +1362,7 @@
   [index: SourceIndexV0
    types: (Vec core/TypeDef)
    signatures: (Vec TypedFunctionV0)
+   signature-sources: (Vec core/NativeId)
    globals: (Vec GlobalBindingV0)])
 
 (defn state-blocked? [state: BodyStateV0] -> Bool
@@ -1353,16 +1453,47 @@
           binding
           (recur (- position 1)))))))
 
-(defn find-signature
-  [signatures: (Vec TypedFunctionV0)
-   name: String] -> (U TypedFunctionV0 Nil)
-  (loop [position: Int 0]
-    (if (>= position (count signatures))
-      nil
-      (let [signature: TypedFunctionV0 (nth signatures position)]
-        (if (= name (typedfunctionv0-name signature))
-          signature
+(defn owner-source
+  [env: BodyEnvV0
+   owner: core/NativeId] -> (U core/NativeId Nil)
+  (let [signatures: (Vec TypedFunctionV0) (bodyenvv0-signatures env)
+        sources: (Vec core/NativeId) (bodyenvv0-signature-sources env)]
+    (loop [position: Int 0]
+      (if (or (>= position (count signatures)) (>= position (count sources)))
+        nil
+        (if (same-id? owner (typedfunctionv0-id (nth signatures position)))
+          (nth sources position)
           (recur (+ position 1)))))))
+
+(defn body-owner-module
+  [env: BodyEnvV0
+   owner: core/NativeId] -> String
+  (let [source: (U core/NativeId Nil) (owner-source env owner)]
+    (if (nil? source) "" (source-module-name (bodyenvv0-index env) source))))
+
+(defn find-signature
+  [env: BodyEnvV0
+   owner: core/NativeId
+   spelling: String] -> (U TypedFunctionV0 Nil)
+  (let [index: SourceIndexV0 (bodyenvv0-index env)
+        signatures: (Vec TypedFunctionV0) (bodyenvv0-signatures env)
+        sources: (Vec core/NativeId) (bodyenvv0-signature-sources env)
+        resolved: ResolvedSourceNameV0
+        (resolve-source-name index (body-owner-module env owner) spelling)]
+    (if (not (resolvedsourcenamev0-visible resolved))
+      nil
+      (loop [position: Int 0]
+        (if (or (>= position (count signatures)) (>= position (count sources)))
+          nil
+          (let [signature: TypedFunctionV0 (nth signatures position)
+                source: core/NativeId (nth sources position)]
+            (if (and
+                  (= (resolvedsourcenamev0-local-name resolved)
+                    (typedfunctionv0-name signature))
+                  (= (resolvedsourcenamev0-module-name resolved)
+                    (source-module-name index source)))
+              signature
+              (recur (+ position 1)))))))))
 
 ;; A Beagle record accessor is spelled <lowercased record name>-<field>; the
 ;; native world knows records only by their TypeDef, so the spelling is rebuilt.
@@ -1607,49 +1738,62 @@
                   (source-free-ref-names index (nth children position) bound
                     (- fuel 1)))))))))))
 
-(defn source-ref-names
+(defn source-ref-keys
   [index: SourceIndexV0
+   module-name: String
    node: core/NativeId
+   bound: (Vec String)
    fuel: Int] -> (Vec String)
-  (source-free-ref-names index node [] fuel))
+  (let [names: (Vec String) (source-free-ref-names index node bound fuel)]
+    (loop [position: Int 0 keys: (Vec String) []]
+      (if (>= position (count names))
+        keys
+        (let [key: String
+              (resolved-source-key
+                (resolve-source-name index module-name (nth names position)))]
+          (recur (+ position 1)
+            (if (or (= "" key) (string-member? keys key)) keys (conj keys key))))))))
 
-(defn close-global-names
+(defn close-global-keys
   [index: SourceIndexV0
    globals: (Vec GlobalBindingV0)
    seeds: (Vec String)] -> (Vec String)
-  (loop [round: Int 0 names: (Vec String) seeds]
+  (loop [round: Int 0 keys: (Vec String) seeds]
     (if (>= round (count globals))
-      names
+      keys
       (let [expanded: (Vec String)
-            (loop [position: Int 0 current: (Vec String) names]
+            (loop [position: Int 0 current: (Vec String) keys]
               (if (>= position (count globals))
                 current
                 (let [global: GlobalBindingV0 (nth globals position)]
                   (recur (+ position 1)
-                    (if (string-member? current (globalbindingv0-name global))
+                    (if (string-member? current (global-key global))
                       (append-unique-strings current
-                        (source-ref-names index (globalbindingv0-value global)
+                        (source-ref-keys index (globalbindingv0-module-name global)
+                          (globalbindingv0-value global) []
                           (+ 1 (index-facts index))))
                       current)))))]
-        (if (= (count expanded) (count names))
-          names
+        (if (= (count expanded) (count keys))
+          keys
           (recur (+ round 1) expanded))))))
 
 (defn needed-globals
   [env: BodyEnvV0
+   owner: core/NativeId
    body: core/NativeId
    bound: (Vec String)] -> (Vec GlobalBindingV0)
   (let [index: SourceIndexV0 (bodyenvv0-index env)
         globals: (Vec GlobalBindingV0) (bodyenvv0-globals env)
-        names: (Vec String)
-        (close-global-names index globals
-          (source-free-ref-names index body bound (+ 1 (index-facts index))))]
+        keys: (Vec String)
+        (close-global-keys index globals
+          (source-ref-keys index (body-owner-module env owner) body bound
+            (+ 1 (index-facts index))))]
     (loop [position: Int 0 selected: (Vec GlobalBindingV0) []]
       (if (>= position (count globals))
         selected
         (let [global: GlobalBindingV0 (nth globals position)]
           (recur (+ position 1)
-            (if (string-member? names (globalbindingv0-name global))
+            (if (string-member? keys (global-key global))
               (conj selected global)
               selected)))))))
 
@@ -2155,8 +2299,15 @@
 
         (= "ref" kind)
         (let [name: String (fact-text index expr "name")
+              direct: (U LocalBindingV0 Nil)
+              (find-local (bodystatev0-locals state) name)
+              canonical: String
+              (resolved-source-key
+                (resolve-source-name index (body-owner-module env owner) name))
               binding: (U LocalBindingV0 Nil)
-              (find-local (bodystatev0-locals state) name)]
+              (if (some? direct)
+                direct
+                (find-local (bodystatev0-locals state) canonical))]
           (if (nil? binding)
             (fail-result state
               (str "TODO-NATIVE-FREE-REFERENCE: " name
@@ -2742,16 +2893,22 @@
                   values: (Vec core/NativeId) (argsresultv0-values lowered)
                   value-types: (Vec core/NativeId) (argsresultv0-value-types lowered)
                   comparison: (U core/CompareOpV0 Nil) (compare-op-for callee)
-                  accessor: AccessorHitV0 (record-accessor types callee)
+                  callee-visible: Bool
+                  (resolvedsourcenamev0-visible
+                    (resolve-source-name index (body-owner-module env owner) callee))
+                  accessor: AccessorHitV0
+                  (if callee-visible
+                    (record-accessor types callee)
+                    (accessor-miss))
                   bare-callee: String (unqualified-name callee)
                   constructor: (U core/TypeDef Nil)
-                  (if (and (> (count bare-callee) 2)
+                  (if (and callee-visible (> (count bare-callee) 2)
                            (= "->" (subs bare-callee 0 2)))
                     (lookup-named-type types
                       (subs bare-callee 2 (count bare-callee)))
                     nil)
                   signature: (U TypedFunctionV0 Nil)
-                  (find-signature (bodyenvv0-signatures env) callee)]
+                  (find-signature env owner callee)]
               (cond
                 (argsresultv0-terminated lowered)
                 (->ExprResultV0 current (lower-id "body" ["unreachable"])
@@ -3124,7 +3281,7 @@
           :else
           (recur (+ position 1)
             (state-bind (exprresultv0-state value)
-              (globalbindingv0-name global)
+              (global-key global)
               (exprresultv0-value-id value)
               (exprresultv0-type-id value))))))))
 
@@ -3246,7 +3403,7 @@
       (let [globalized: BodyStateV0
             (lower-global-bindings env id
               (->BodyStateV0 [] entry-id [] [] true 0 [] "" [])
-              (needed-globals env body-node
+              (needed-globals env id body-node
                 (mapv
                   (fn [binding: LocalBindingV0] -> String
                     (localbindingv0-name binding))
@@ -3801,6 +3958,7 @@
         index: SourceIndexV0 (build-source-index graph)
         record-names: (Vec String) (sourceindexv0-record-names index)
         record-resolutions: (Vec RecordResolutionV0) (resolve-records index)
+        function-sources: (Vec core/NativeId) (index-form-ids index "defn")
         signature-resolutions: (Vec FunctionResolutionV0) (resolve-functions index)
         record-types: (Vec core/TypeDef)
         (collect-record-types record-names record-resolutions)
@@ -3811,8 +3969,9 @@
         (collect-function-types declared-types signature-resolutions)
         signatures: (Vec TypedFunctionV0) (collect-functions signature-resolutions)
         function-resolutions: (Vec FunctionResolutionV0)
-        (attach-bodies (->BodyEnvV0 index source-types signatures globals)
-          signature-resolutions (index-form-ids index "defn"))
+        (attach-bodies
+          (->BodyEnvV0 index source-types signatures function-sources globals)
+          signature-resolutions function-sources)
         functions: (Vec TypedFunctionV0)
         (settle-effects (settle-readiness (collect-functions function-resolutions)))
         ;; Bodies contribute types of their own (checked arithmetic answers an

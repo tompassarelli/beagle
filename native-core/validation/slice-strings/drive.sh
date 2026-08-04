@@ -18,14 +18,16 @@ replay_art="${NATIVE_REPLAY_ARTIFACTS:-$scratch/replay}"
 trap 'rm -rf "${scratch:?}"' EXIT
 mkdir -p "$replay_art"
 
-facts_of() { # facts_of <source> <out.facts>
+facts_of() { # facts_of <source> <relative-path> <out.facts>
   "$repo/bin/beagle-ast" "$1" >"$scratch/ast.json"
   bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-    "$scratch/ast.json" "$2" --include-defs
+    "$scratch/ast.json=$2" "$3" --include-defs
 }
 
 # --- corpus projection: the source is in this repo, so always regenerate ----
-facts_of "$here/text_ops.bclj" "$scratch/text_ops.facts"
+facts_of "$here/text_ops.bclj" \
+  "beagle:native-core/validation/slice-strings/text_ops.bclj" \
+  "$scratch/text_ops.facts"
 if [[ -f "$art/text_ops.facts" ]] \
    && ! cmp -s "$scratch/text_ops.facts" "$art/text_ops.facts"; then
   echo "drive.sh: regenerated projection differs from the committed text_ops.facts" >&2
@@ -51,7 +53,8 @@ if [[ -n "${FRAM_REPLAY:-}" ]]; then
   bb "$here/select-forms.clj" "$scratch/replay.json" "$scratch/replay-sel.json" \
     "${replay_forms[@]}"
   bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-    "$scratch/replay-sel.json" "$scratch/replay_text.facts" --include-defs
+    "$scratch/replay-sel.json=fram:src/fram/fri_replay.bclj" \
+    "$scratch/replay_text.facts" --include-defs
   if [[ -f "$art/replay_text.facts" ]] \
      && ! cmp -s "$scratch/replay_text.facts" "$art/replay_text.facts"; then
     echo "drive.sh: fram.fri-replay slice drifted from the committed projection" >&2
