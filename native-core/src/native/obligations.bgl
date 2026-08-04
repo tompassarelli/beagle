@@ -569,12 +569,16 @@
    parent-size :- Int] :- Bool
   (cond
     (some? (get type-shape :kind nil))
-    (let [representation :- Any (get layout-shape :representation nil)
-          bit-width :- Int (get representation :bit-width 0)]
-      (and (not (nil? representation))
-        (> bit-width 0)
-        (= 0 (mod bit-width 8))
-        (<= (quot bit-width 8) parent-size)))
+    (let [kind :- Any (get type-shape :kind nil)]
+      (if (instance? native.core.BytesKind kind)
+        (and (instance? native.core.BytesShapeV0 layout-shape)
+          (= parent-size 16))
+        (let [representation :- Any (get layout-shape :representation nil)
+              bit-width :- Int (get representation :bit-width 0)]
+          (and (not (nil? representation))
+            (> bit-width 0)
+            (= 0 (mod bit-width 8))
+            (<= (quot bit-width 8) parent-size)))))
     (some? (get type-shape :fields nil))
     (and (some? (get layout-shape :fields nil))
       (record-layout-valid? type-shape layout-shape layouts parent-size))
@@ -839,6 +843,67 @@
       (or (nil? lifetime)
         (core/id-in? (core/nativeworld-allowed-regions world) lifetime)))))
 
+(defn named-variant
+  [variants :- (Vec core/TypeVariant)
+   name :- String] :- (U core/TypeVariant Nil)
+  (loop [index :- Int 0]
+    (cond
+      (>= index (count variants)) nil
+      (= name (core/typevariant-name (nth variants index)))
+      (nth variants index)
+      :else (recur (+ index 1)))))
+
+(defn i64-type?
+  [types :- (Vec core/TypeDef)
+   type-id :- core/NativeId] :- Bool
+  (let [definition :- (U core/TypeDef Nil) (find-type types type-id)]
+    (if (nil? definition)
+      false
+      (let [shape :- core/TypeShape (core/typedef-shape definition)]
+        (and (instance? native.core.AtomType shape)
+          (instance? native.core.I64Kind (core/atomtype-kind shape)))))))
+
+(defn optional-i64-type?
+  [types :- (Vec core/TypeDef)
+   type-id :- (U core/NativeId Nil)] :- Bool
+  (if (nil? type-id) false (i64-type? types type-id)))
+
+(defn socket-outcome-result-legal?
+  [types :- (Vec core/TypeDef)
+   result :- core/AbiValueV0] :- Bool
+  (let [outcome :- (U core/TypeDef Nil)
+        (find-type types (core/abivaluev0-type-id result))]
+    (if (nil? outcome)
+      false
+      (let [shape :- core/TypeShape (core/typedef-shape outcome)]
+        (if (not (instance? native.core.OutcomeType shape))
+          false
+          (let [value-type :- core/NativeId (core/outcometype-value-type shape)
+                failure :- (U core/TypeDef Nil)
+                (find-type types (core/outcometype-failure-type shape))]
+            (if (nil? failure)
+              false
+              (let [failure-shape :- core/TypeShape (core/typedef-shape failure)]
+                (if (not (instance? native.core.UnionType failure-shape))
+                  false
+                  (let [variants :- (Vec core/TypeVariant)
+                        (core/uniontype-variants failure-shape)
+                        ok :- (U core/TypeVariant Nil)
+                        (named-variant variants "ok")
+                        peer :- (U core/TypeVariant Nil)
+                        (named-variant variants "peer-closed")
+                        error :- (U core/TypeVariant Nil)
+                        (named-variant variants "error")]
+                    (and (= 3 (count variants))
+                      (not (nil? ok)) (not (nil? peer)) (not (nil? error))
+                      (or (and (unit-type? types value-type)
+                            (nil? (core/typevariant-payload-type ok)))
+                        (dynamic-id= value-type
+                          (core/typevariant-payload-type ok)))
+                      (nil? (core/typevariant-payload-type peer))
+                      (optional-i64-type? types
+                        (core/typevariant-payload-type error)))))))))))))
+
 (defn abi-decl-legal?
   [world :- core/NativeWorld
    abi :- core/AbiDeclV0] :- Bool
@@ -858,16 +923,27 @@
           (or (instance? native.core.RestrictedCAbiV0
                 (core/abideclv0-convention abi))
             (instance? native.core.RestrictedCOptionalOutAbiV0
+              (core/abideclv0-convention abi))
+            (instance? native.core.RestrictedCOutcomeOutAbiV0
               (core/abideclv0-convention abi)))
           (every? (fn [value :- core/AbiValueV0] :- Bool
                     (import-abi-value-legal? world types layouts value))
             (core/abideclv0-parameters abi))
-          (if (instance? native.core.RestrictedCOptionalOutAbiV0
-                (core/abideclv0-convention abi))
+          (cond
+            (instance? native.core.RestrictedCOptionalOutAbiV0
+              (core/abideclv0-convention abi))
             (and (not (nil? result))
               (instance? native.core.ArenaOwnedV0
                 (core/abivaluev0-ownership result))
               (import-abi-value-legal? world types layouts result))
+
+            (instance? native.core.RestrictedCOutcomeOutAbiV0
+              (core/abideclv0-convention abi))
+            (and (not (nil? result))
+              (import-abi-value-legal? world types layouts result)
+              (socket-outcome-result-legal? types result))
+
+            :else
             (or (nil? result)
               (import-abi-value-legal? world types layouts result)))
           (core/ids-in? (core/abideclv0-required-effects abi)

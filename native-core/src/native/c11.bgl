@@ -8,8 +8,8 @@
 ;; to be a resolvable class here or the module will not load; importing them is
 ;; what makes the cross-module arms below legal without a post-emit rewrite.
 (import (native.core
-          BoolKind I64Kind F64Kind TextKind KeywordKind RefKind
-          ScalarShapeV0 RecordShapeV0 UnionShapeV0 VectorShapeV0 ReferenceShapeV0
+          BoolKind I64Kind F64Kind TextKind BytesKind KeywordKind RefKind
+          ScalarShapeV0 BytesShapeV0 RecordShapeV0 UnionShapeV0 VectorShapeV0 ReferenceShapeV0
           MapShapeV0 SetShapeV0 AtomCellShapeV0
           AtomType RecordType UnionType VectorType MapTypeV0 SetTypeV0
           ReferenceType AtomCellTypeV0 FunctionType OutcomeType
@@ -193,6 +193,7 @@
     [(I64Kind token) true]
     [(F64Kind token) true]
     [(TextKind token) false]
+    [(BytesKind token) false]
     [(KeywordKind token) false]
     [(RefKind target) false]))
 
@@ -200,6 +201,7 @@
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
     (match shape
       [(ScalarShapeV0 value) true]
+      [(BytesShapeV0 value) false]
       [(RecordShapeV0 value) false]
       [(UnionShapeV0 value) false]
       [(VectorShapeV0 value) false]
@@ -212,6 +214,7 @@
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
     (match shape
       [(ScalarShapeV0 value) false]
+      [(BytesShapeV0 value) false]
       [(RecordShapeV0 value) true]
       [(UnionShapeV0 value) false]
       [(VectorShapeV0 value) false]
@@ -224,6 +227,7 @@
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
     (match shape
       [(ScalarShapeV0 value) []]
+      [(BytesShapeV0 value) []]
       [(RecordShapeV0 value) (core/recordshapev0-fields shape)]
       [(UnionShapeV0 value) []]
       [(VectorShapeV0 value) []]
@@ -377,6 +381,7 @@
              :else "int64_t")]
           [(F64Kind token) (if (= size 4) "float" "double")]
           [(TextKind token) "native_bytes"]
+          [(BytesKind token) "native_bytes"]
           [(KeywordKind token) "uint64_t"]
           [(RefKind target) "void *"])]
     (str "typedef " backing " " type-name-value ";\n"

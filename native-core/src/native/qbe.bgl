@@ -449,6 +449,7 @@
     [(I64Kind token) (if (= size 8) "l" "w")]
     [(F64Kind token) (if (= size 4) "s" "d")]
     [(TextKind token) (if (= size 8) "l" "")]
+    [(BytesKind token) ""]
     [(KeywordKind token) ""]
     [(RefKind target) ""]))
 
@@ -462,6 +463,7 @@
      (cond (= size 1) "b" (= size 2) "h" (= size 4) "w" (= size 8) "l" :else "")]
     [(F64Kind token) (cond (= size 4) "s" (= size 8) "d" :else "")]
     [(TextKind token) (if (= size 8) "l" "")]
+    [(BytesKind token) ""]
     [(KeywordKind token) ""]
     [(RefKind target) ""]))
 
@@ -614,6 +616,7 @@
 (defn shape-union-variants [shape: core/LayoutShapeV0] -> (Vec core/UnionVariantLayoutV0)
   (match shape
     [(ScalarShapeV0 value) []]
+    [(BytesShapeV0 value) []]
     [(RecordShapeV0 value) []]
     [(UnionShapeV0 value) (core/unionshapev0-variants shape)]
     [(VectorShapeV0 value) []]
@@ -626,6 +629,7 @@
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
     (match shape
       [(ScalarShapeV0 value) false]
+      [(BytesShapeV0 value) false]
       [(RecordShapeV0 value) true]
       [(UnionShapeV0 value) false]
       [(VectorShapeV0 value) false]
@@ -638,6 +642,7 @@
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
     (match shape
       [(ScalarShapeV0 value) false]
+      [(BytesShapeV0 value) false]
       [(RecordShapeV0 value) false]
       [(UnionShapeV0 value) true]
       [(VectorShapeV0 value) false]
@@ -650,6 +655,7 @@
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
     (match shape
       [(ScalarShapeV0 value) []]
+      [(BytesShapeV0 value) []]
       [(RecordShapeV0 value) (ordered-field-layouts (core/recordshapev0-fields shape))]
       [(UnionShapeV0 value) []]
       [(VectorShapeV0 value) []]
@@ -662,6 +668,7 @@
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
     (match shape
       [(ScalarShapeV0 value) nil]
+      [(BytesShapeV0 value) nil]
       [(RecordShapeV0 value) nil]
       [(UnionShapeV0 value) (core/unionshapev0-tag-type shape)]
       [(VectorShapeV0 value) nil]
@@ -674,6 +681,7 @@
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
     (match shape
       [(ScalarShapeV0 value) -1]
+      [(BytesShapeV0 value) -1]
       [(RecordShapeV0 value) -1]
       [(UnionShapeV0 value) (core/unionshapev0-tag-offset-bytes shape)]
       [(VectorShapeV0 value) -1]
@@ -1664,6 +1672,7 @@
     [(I64Kind token) true]
     [(F64Kind token) true]
     [(TextKind token) true]
+    [(BytesKind token) false]
     [(KeywordKind token) false]
     [(RefKind target) false]))
 
@@ -1906,6 +1915,23 @@
                 (core/abideclv0-symbol abi))))
       (core/nativeworld-abis world))))
 
+(defn socket-extern-symbol? [symbol: String] -> Bool
+  (or (= symbol "native_host_socket_inherited_listener_v0")
+      (= symbol "native_host_socket_accept_v0")
+      (= symbol "native_host_socket_read_bounded_v0")
+      (= symbol "native_host_socket_write_bounded_v0")
+      (= symbol "native_host_socket_close_v0")))
+
+(defn world-has-socket-extern? [world: core/NativeWorld] -> Bool
+  (some?
+    (some (fn [abi: core/AbiDeclV0] -> Bool
+            (and (instance? native.core.AbiImportV0
+                   (core/abideclv0-direction abi))
+              (instance? native.core.RestrictedCOutcomeOutAbiV0
+                (core/abideclv0-convention abi))
+              (socket-extern-symbol? (core/abideclv0-symbol abi))))
+      (core/nativeworld-abis world))))
+
 ;; --- entry point ----------------------------------------------------------
 
 (defn emit-module
@@ -1937,6 +1963,9 @@
       (->QbeFailure "module index must be nonnegative")
       (not (core/validationreport-passed validation))
       (->QbeFailure "native world is not sealed: validation obligations failed")
+      (world-has-socket-extern? world)
+      (->QbeFailure
+        "QBE socket extern ABI is unsupported: native_bytes and peer lifecycle have no QBE call representation")
       (world-has-stdout-extern? world)
       (->QbeFailure
         "QBE stdout extern ABI is unsupported: Text handles have no QBE call representation")

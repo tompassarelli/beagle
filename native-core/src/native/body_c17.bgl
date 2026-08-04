@@ -228,6 +228,13 @@
   (and (> (count (core/functiondef-blocks function)) 0)
     (every? block-supported? (core/functiondef-blocks function))))
 
+(defn host-socket-symbol? [symbol: String] -> Bool
+  (or (= symbol "native_host_socket_inherited_listener_v0")
+      (= symbol "native_host_socket_accept_v0")
+      (= symbol "native_host_socket_read_bounded_v0")
+      (= symbol "native_host_socket_write_bounded_v0")
+      (= symbol "native_host_socket_close_v0")))
+
 (defn world-supported? [world: core/NativeWorld] -> Bool
   (let [layouts: (Vec core/LayoutDef) (core/nativeworld-layouts world)
         types: (Vec core/TypeDef) (core/nativeworld-types world)]
@@ -246,7 +253,10 @@
             (and (instance? native.core.RestrictedCAbiV0
                    (core/abideclv0-convention abi))
               (= "native_host_stdout_write_line_v0"
-                (core/abideclv0-symbol abi)))))
+                (core/abideclv0-symbol abi)))
+            (and (instance? native.core.RestrictedCOutcomeOutAbiV0
+                   (core/abideclv0-convention abi))
+              (host-socket-symbol? (core/abideclv0-symbol abi)))))
         (core/nativeworld-abis world))
       (every? function-supported? (core/nativeworld-functions world)))))
 
@@ -459,6 +469,7 @@
           (instance? native.core.I64Kind kind) "NATIVE_VALUE_SIGNED"
           (instance? native.core.F64Kind kind) "NATIVE_VALUE_FLOAT"
           (instance? native.core.TextKind kind) "NATIVE_VALUE_TEXT"
+          (instance? native.core.BytesKind kind) "NATIVE_VALUE_BYTES"
           (instance? native.core.KeywordKind kind) "NATIVE_VALUE_KEYWORD"
           :else "NATIVE_VALUE_REFERENCE"))
       (instance? native.core.RecordType shape) "NATIVE_VALUE_RECORD"
@@ -823,6 +834,53 @@
                 (if (or (nil? payload) (unit-type? types payload))
                   (recur (+ position 1) variants)
                   payload)))))))))
+
+(defn outcome-variants
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId] -> (Vec core/TypeVariant)
+  (let [outcome: (U core/TypeDef Nil) (type-with-id types owner)]
+    (if (nil? outcome)
+      []
+      (let [shape: core/TypeShape (core/typedef-shape outcome)]
+        (if (not (instance? native.core.OutcomeType shape))
+          []
+          (let [result: (U core/TypeDef Nil)
+                (type-with-id types (core/outcometype-failure-type shape))]
+            (if (nil? result)
+              []
+              (let [result-shape: core/TypeShape (core/typedef-shape result)]
+                (if (instance? native.core.UnionType result-shape)
+                  (core/uniontype-variants result-shape)
+                  [])))))))))
+
+(defn outcome-variant
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   name: String] -> (U core/TypeVariant Nil)
+  (let [variants: (Vec core/TypeVariant) (outcome-variants types owner)]
+    (loop [position: Int 0]
+      (cond
+        (>= position (count variants)) nil
+        (= name (core/typevariant-name (nth variants position)))
+        (nth variants position)
+        :else (recur (+ position 1))))))
+
+(defn outcome-variant-tag
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)
+   owner: core/NativeId
+   name: String] -> Int
+  (let [variant: (U core/TypeVariant Nil) (outcome-variant types owner name)]
+    (if (nil? variant)
+      -1
+      (variant-tag layouts owner (core/typevariant-id variant)))))
+
+(defn outcome-variant-payload
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   name: String] -> (U core/NativeId Nil)
+  (let [variant: (U core/TypeVariant Nil) (outcome-variant types owner name)]
+    (if (nil? variant) nil (core/typevariant-payload-type variant))))
 
 (defn find-abi
   [abis: (Vec core/AbiDeclV0)
@@ -1385,6 +1443,85 @@
             (join-c-arguments arguments) ");\n"
             "  memset(&" target ", 0, sizeof " target ");\n"))))))
 
+(defn emit-outcome-out-extern-call
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)
+   abis: (Vec core/AbiDeclV0)
+   function: core/FunctionDef
+   slots: (Vec ValueSlotV0)
+   target: String
+   instruction: core/ExternCallInstruction] -> String
+  (let [abi: (U core/AbiDeclV0 Nil)
+        (find-abi abis (core/externcallinstruction-abi-id instruction))]
+    (if (nil? abi)
+      ""
+      (let [result: core/SsaValueV0
+            (core/externcallinstruction-result instruction)
+            owner: core/NativeId (core/ssavaluev0-type-id result)
+            ok-variant: (U core/TypeVariant Nil)
+            (outcome-variant types owner "ok")
+            peer-variant: (U core/TypeVariant Nil)
+            (outcome-variant types owner "peer-closed")
+            error-variant: (U core/TypeVariant Nil)
+            (outcome-variant types owner "error")
+            ok-payload: (U core/NativeId Nil)
+            (outcome-variant-payload types owner "ok")
+            error-payload: (U core/NativeId Nil)
+            (outcome-variant-payload types owner "error")
+            ok-tag: Int (outcome-variant-tag types layouts owner "ok")
+            peer-tag: Int
+            (outcome-variant-tag types layouts owner "peer-closed")
+            error-tag: Int (outcome-variant-tag types layouts owner "error")
+            result-value: (U core/AbiValueV0 Nil)
+            (core/abideclv0-result abi)
+            arena-id: (U core/NativeId Nil)
+            (core/externcallinstruction-arena-id instruction)]
+        (if (or (nil? ok-variant) (nil? peer-variant) (nil? error-variant)
+              (nil? error-payload) (nil? result-value)
+              (< ok-tag 0) (< peer-tag 0) (< error-tag 0))
+          ""
+          (let [hidden: (Vec String)
+                (if (nil? arena-id)
+                  []
+                  [(str "(native_arena *)"
+                     (value-name function slots arena-id))])
+                with-capability: (Vec String)
+                (if (> (count (core/abideclv0-required-capabilities abi)) 0)
+                  (conj hidden "capability")
+                  hidden)
+                arguments: (Vec String)
+                (loop [position: Int 0
+                       collected: (Vec String) with-capability
+                       values: (Vec core/NativeId)
+                       (core/externcallinstruction-arguments instruction)]
+                  (if (>= position (count values))
+                    collected
+                    (recur (+ position 1)
+                      (conj collected
+                        (value-name function slots (nth values position)))
+                      values)))
+                call-arguments: (Vec String)
+                (if (nil? ok-payload)
+                  arguments
+                  (conj arguments
+                    (str "&" target ".payload.variant_" ok-tag)))
+                status: String (str target "_status")]
+            (str "  memset(&" target ", 0, sizeof " target ");\n"
+              "  {\n"
+              "    int32_t " status " = " (core/abideclv0-symbol abi) "("
+              (join-c-arguments call-arguments) ");\n"
+              "    if (" status " == INT32_C(0)) {\n"
+              "      " target ".tag = INT64_C(" ok-tag ");\n"
+              "    } else if (" status
+              " == NATIVE_HOST_SOCKET_PEER_CLOSED) {\n"
+              "      " target ".tag = INT64_C(" peer-tag ");\n"
+              "    } else {\n"
+              "      " target ".tag = INT64_C(" error-tag ");\n"
+              "      " target ".payload.variant_" error-tag
+              " = (int64_t)" status ";\n"
+              "    }\n"
+              "  }\n")))))))
+
 (defn emit-extern-call
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
@@ -1401,6 +1538,11 @@
         (instance? native.core.RestrictedCOptionalOutAbiV0
           (core/abideclv0-convention abi))
         (emit-optional-out-extern-call types layouts abis function slots target
+          instruction)
+
+        (instance? native.core.RestrictedCOutcomeOutAbiV0
+          (core/abideclv0-convention abi))
+        (emit-outcome-out-extern-call types layouts abis function slots target
           instruction)
 
         (instance? native.core.RestrictedCAbiV0

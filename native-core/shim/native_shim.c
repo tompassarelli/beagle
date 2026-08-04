@@ -1,9 +1,16 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include "native_shim.h"
 
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
 #include <math.h>
 #include <stdatomic.h>
 #include <string.h>
 #include <stdlib.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 struct native_atom {
   _Atomic bool locked;
@@ -735,6 +742,23 @@ static bool native_value_equal_inner(const native_value_descriptor *descriptor,
       return native_text_eq(left_handle, right_handle);
     }
 
+    case NATIVE_VALUE_BYTES: {
+      native_bytes left_bytes;
+      native_bytes right_bytes;
+      memcpy(&left_bytes, left, sizeof left_bytes);
+      memcpy(&right_bytes, right, sizeof right_bytes);
+      if (left_bytes.length != right_bytes.length) {
+        return false;
+      }
+      if (left_bytes.length == (size_t)0U) {
+        return true;
+      }
+      if ((left_bytes.data == NULL) || (right_bytes.data == NULL)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      return memcmp(left_bytes.data, right_bytes.data, left_bytes.length) == 0;
+    }
+
     case NATIVE_VALUE_RECORD:
       if ((descriptor->fields == NULL) && (descriptor->field_count != 0U)) {
         native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -963,6 +987,7 @@ static void native_value_text_descriptor_inner(
     case NATIVE_VALUE_UNSIGNED:
     case NATIVE_VALUE_RECORD:
     case NATIVE_VALUE_REFERENCE:
+    case NATIVE_VALUE_BYTES:
       native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
   native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -1420,6 +1445,7 @@ static void native_value_text_inner(const native_value_descriptor *descriptor,
     case NATIVE_VALUE_UNSIGNED:
     case NATIVE_VALUE_RECORD:
     case NATIVE_VALUE_REFERENCE:
+    case NATIVE_VALUE_BYTES:
       native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
   native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
@@ -2446,6 +2472,189 @@ void native_host_stdout_write_line_v0(
       (fputc('\n', stdout) == EOF)) {
     native_trap(NATIVE_TRAP_IO);
   }
+}
+
+static int32_t native_host_socket_check(
+    const native_capability *capability, int64_t value, int *out) {
+  if ((capability == NULL) || (capability->token == UINT64_C(0)) ||
+      (out == NULL) || (value < INT64_C(0)) ||
+      (value > (int64_t)INT_MAX)) {
+    return EINVAL;
+  }
+  *out = (int)value;
+  return NATIVE_HOST_SOCKET_OK;
+}
+
+static int32_t native_host_socket_errno(void) {
+  return (errno == 0) ? EIO : (int32_t)errno;
+}
+
+static bool native_host_socket_peer_error(int error) {
+  return (error == EPIPE) || (error == ECONNRESET) || (error == ENOTCONN);
+}
+
+int32_t native_host_socket_inherited_listener_v0(
+    const native_capability *capability, int64_t fd, int64_t *out) {
+  int descriptor;
+  int accepting = 0;
+  socklen_t accepting_size = (socklen_t)sizeof accepting;
+  int32_t status = native_host_socket_check(capability, fd, &descriptor);
+  if (out == NULL) {
+    return EINVAL;
+  }
+  *out = INT64_C(-1);
+  if (status != NATIVE_HOST_SOCKET_OK) {
+    return status;
+  }
+  if (fd != NATIVE_HOST_SOCKET_INHERITED_FD) {
+    return EINVAL;
+  }
+  if (fcntl(descriptor, F_GETFD) == -1) {
+    return native_host_socket_errno();
+  }
+  if (getsockopt(descriptor, SOL_SOCKET, SO_ACCEPTCONN, &accepting,
+                 &accepting_size) == -1) {
+    return native_host_socket_errno();
+  }
+  if (accepting == 0) {
+    return EINVAL;
+  }
+  *out = fd;
+  return NATIVE_HOST_SOCKET_OK;
+}
+
+int32_t native_host_socket_accept_v0(
+    const native_capability *capability, int64_t listener_fd, int64_t *out) {
+  int listener;
+  int peer;
+  int flags;
+  int32_t status = native_host_socket_check(capability, listener_fd, &listener);
+  if (out == NULL) {
+    return EINVAL;
+  }
+  *out = INT64_C(-1);
+  if (status != NATIVE_HOST_SOCKET_OK) {
+    return status;
+  }
+  do {
+    peer = accept(listener, NULL, NULL);
+  } while ((peer == -1) && (errno == EINTR));
+  if (peer == -1) {
+    return native_host_socket_errno();
+  }
+  flags = fcntl(peer, F_GETFD);
+  if ((flags == -1) || (fcntl(peer, F_SETFD, flags | FD_CLOEXEC) == -1)) {
+    int32_t error = native_host_socket_errno();
+    (void)close(peer);
+    return error;
+  }
+  *out = (int64_t)peer;
+  return NATIVE_HOST_SOCKET_OK;
+}
+
+int32_t native_host_socket_read_bounded_v0(
+    native_arena *arena, const native_capability *capability, int64_t peer_fd,
+    int64_t max_bytes, native_bytes *out) {
+  int peer;
+  ssize_t received;
+  uint8_t *destination;
+  int32_t status = native_host_socket_check(capability, peer_fd, &peer);
+  if (out == NULL) {
+    return EINVAL;
+  }
+  out->data = NULL;
+  out->length = (size_t)0U;
+  if (status != NATIVE_HOST_SOCKET_OK) {
+    return status;
+  }
+  if ((arena == NULL) || (max_bytes < INT64_C(0)) ||
+      (max_bytes > NATIVE_HOST_SOCKET_MAX_IO) ||
+      (arena->offset > arena->capacity)) {
+    return EINVAL;
+  }
+  if ((size_t)max_bytes > (arena->capacity - arena->offset)) {
+    return ENOBUFS;
+  }
+  if (max_bytes == INT64_C(0)) {
+    return NATIVE_HOST_SOCKET_OK;
+  }
+  if (arena->bytes == NULL) {
+    return EINVAL;
+  }
+  destination = arena->bytes + arena->offset;
+  do {
+    received = recv(peer, destination, (size_t)max_bytes, 0);
+  } while ((received == (ssize_t)-1) && (errno == EINTR));
+  if (received == (ssize_t)0) {
+    return NATIVE_HOST_SOCKET_PEER_CLOSED;
+  }
+  if (received == (ssize_t)-1) {
+    int error = errno;
+    return native_host_socket_peer_error(error)
+               ? NATIVE_HOST_SOCKET_PEER_CLOSED
+               : ((error == 0) ? EIO : (int32_t)error);
+  }
+  arena->offset += (size_t)received;
+  out->data = destination;
+  out->length = (size_t)received;
+  return NATIVE_HOST_SOCKET_OK;
+}
+
+int32_t native_host_socket_write_bounded_v0(
+    const native_capability *capability, int64_t peer_fd, native_bytes bytes,
+    int64_t max_bytes, int64_t *out) {
+  int peer;
+  size_t offset = (size_t)0U;
+  int flags = 0;
+  int32_t status = native_host_socket_check(capability, peer_fd, &peer);
+  if (out == NULL) {
+    return EINVAL;
+  }
+  *out = INT64_C(0);
+  if (status != NATIVE_HOST_SOCKET_OK) {
+    return status;
+  }
+  if ((max_bytes < INT64_C(0)) ||
+      (max_bytes > NATIVE_HOST_SOCKET_MAX_IO) ||
+      ((bytes.data == NULL) && (bytes.length != (size_t)0U))) {
+    return EINVAL;
+  }
+  if (bytes.length > (size_t)max_bytes) {
+    return EMSGSIZE;
+  }
+#ifdef MSG_NOSIGNAL
+  flags = MSG_NOSIGNAL;
+#endif
+  while (offset < bytes.length) {
+    ssize_t sent = send(peer, bytes.data + offset, bytes.length - offset, flags);
+    if (sent > (ssize_t)0) {
+      offset += (size_t)sent;
+    } else if (sent == (ssize_t)0) {
+      return NATIVE_HOST_SOCKET_PEER_CLOSED;
+    } else if (errno == EINTR) {
+      continue;
+    } else {
+      int error = errno;
+      return native_host_socket_peer_error(error)
+                 ? NATIVE_HOST_SOCKET_PEER_CLOSED
+                 : ((error == 0) ? EIO : (int32_t)error);
+    }
+  }
+  *out = (int64_t)offset;
+  return NATIVE_HOST_SOCKET_OK;
+}
+
+int32_t native_host_socket_close_v0(
+    const native_capability *capability, int64_t fd) {
+  int descriptor;
+  int32_t status = native_host_socket_check(capability, fd, &descriptor);
+  if (status != NATIVE_HOST_SOCKET_OK) {
+    return status;
+  }
+  if (close(descriptor) == -1) {
+    return native_host_socket_errno();
+  }
+  return NATIVE_HOST_SOCKET_OK;
 }
 
 bool native_byte_read(FILE *stream, uint8_t *destination, size_t length) {

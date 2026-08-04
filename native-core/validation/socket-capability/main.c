@@ -1,0 +1,132 @@
+#include "native_shim.h"
+
+#include <arpa/inet.h>
+#include <errno.h>
+#include <netinet/in.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+static void fail(const char *detail) {
+  fprintf(stderr, "socket-capability fixture: %s\n", detail);
+  exit(1);
+}
+
+static void require_status(int32_t actual, int32_t expected,
+                           const char *detail) {
+  if (actual != expected) {
+    fprintf(stderr, "socket-capability fixture: %s: got %d expected %d\n",
+            detail, actual, expected);
+    exit(1);
+  }
+}
+
+int main(void) {
+  native_capability capability = {UINT64_C(1)};
+  uint8_t arena_storage[64];
+  native_arena arena;
+  struct sockaddr_in address;
+  socklen_t address_size = (socklen_t)sizeof address;
+  int listener = socket(AF_INET, SOCK_STREAM, 0);
+  int64_t inherited = INT64_C(-1);
+  int64_t peer = INT64_C(-1);
+  int64_t written = INT64_C(0);
+  native_bytes received = {NULL, (size_t)0U};
+  native_bytes reply = {(uint8_t *)"pong", (size_t)4U};
+  pid_t child;
+
+  if (listener == -1) {
+    fail("socket");
+  }
+  memset(&address, 0, sizeof address);
+  address.sin_family = AF_INET;
+  address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  address.sin_port = htons(0);
+  if ((bind(listener, (const struct sockaddr *)&address, sizeof address) == -1) ||
+      (listen(listener, 1) == -1)) {
+    fail("bind/listen");
+  }
+  if ((listener != 3) && (dup2(listener, 3) == -1)) {
+    fail("dup2 inherited listener");
+  }
+  if (listener != 3) {
+    (void)close(listener);
+  }
+  require_status(native_host_socket_inherited_listener_v0(
+                     &capability, NATIVE_HOST_SOCKET_INHERITED_FD, &inherited),
+                 NATIVE_HOST_SOCKET_OK, "adopt fd 3");
+  if (inherited != NATIVE_HOST_SOCKET_INHERITED_FD) {
+    fail("adopted descriptor changed");
+  }
+  if (getsockname(3, (struct sockaddr *)&address, &address_size) == -1) {
+    fail("getsockname");
+  }
+
+  child = fork();
+  if (child == -1) {
+    fail("fork");
+  }
+  if (child == 0) {
+    char response[4];
+    size_t offset = (size_t)0U;
+    int client = socket(AF_INET, SOCK_STREAM, 0);
+    if ((client == -1) ||
+        (connect(client, (const struct sockaddr *)&address, address_size) == -1) ||
+        (send(client, "ping", 4, 0) != 4)) {
+      _exit(2);
+    }
+    while (offset < sizeof response) {
+      ssize_t count = recv(client, response + offset, sizeof response - offset, 0);
+      if (count <= 0) {
+        _exit(3);
+      }
+      offset += (size_t)count;
+    }
+    if (memcmp(response, "pong", sizeof response) != 0) {
+      _exit(4);
+    }
+    (void)close(client);
+    _exit(0);
+  }
+
+  require_status(native_host_socket_accept_v0(&capability, inherited, &peer),
+                 NATIVE_HOST_SOCKET_OK, "accept");
+  native_arena_init(&arena, arena_storage, sizeof arena_storage);
+  require_status(native_host_socket_read_bounded_v0(
+                     &arena, &capability, peer, INT64_C(16), &received),
+                 NATIVE_HOST_SOCKET_OK, "read");
+  if ((received.length != (size_t)4U) ||
+      (memcmp(received.data, "ping", (size_t)4U) != 0)) {
+    fail("read payload");
+  }
+  require_status(native_host_socket_write_bounded_v0(
+                     &capability, peer, reply, INT64_C(4), &written),
+                 NATIVE_HOST_SOCKET_OK, "write");
+  if (written != INT64_C(4)) {
+    fail("write count");
+  }
+  require_status(native_host_socket_write_bounded_v0(
+                     &capability, peer, reply, INT64_C(3), &written),
+                 EMSGSIZE, "write bound");
+  {
+    int child_status = 0;
+    if ((waitpid(child, &child_status, 0) != child) ||
+        (!WIFEXITED(child_status)) || (WEXITSTATUS(child_status) != 0)) {
+      fail("client lifecycle");
+    }
+  }
+  require_status(native_host_socket_read_bounded_v0(
+                     &arena, &capability, peer, INT64_C(16), &received),
+                 NATIVE_HOST_SOCKET_PEER_CLOSED, "peer closed");
+  require_status(native_host_socket_close_v0(&capability, peer),
+                 NATIVE_HOST_SOCKET_OK, "close peer");
+  require_status(native_host_socket_close_v0(&capability, inherited),
+                 NATIVE_HOST_SOCKET_OK, "close listener");
+  puts("socket capability fixture: ok");
+  return 0;
+}

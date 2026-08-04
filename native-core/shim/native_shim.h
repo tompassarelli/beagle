@@ -14,6 +14,11 @@
 #define NATIVE_TRAP_OUT_OF_RANGE UINT32_C(4)
 #define NATIVE_TRAP_IO UINT32_C(5)
 
+#define NATIVE_HOST_SOCKET_OK INT32_C(0)
+#define NATIVE_HOST_SOCKET_PEER_CLOSED INT32_C(-1)
+#define NATIVE_HOST_SOCKET_INHERITED_FD INT64_C(3)
+#define NATIVE_HOST_SOCKET_MAX_IO INT64_C(1048576)
+
 typedef struct native_arena {
   uint8_t *bytes;
   size_t capacity;
@@ -83,7 +88,8 @@ typedef enum native_value_kind {
   NATIVE_VALUE_UNION = 8,
   NATIVE_VALUE_VECTOR = 9,
   NATIVE_VALUE_REFERENCE = 10,
-  NATIVE_VALUE_MAP = 11
+  NATIVE_VALUE_MAP = 11,
+  NATIVE_VALUE_BYTES = 12
 } native_value_kind;
 
 typedef enum native_value_text_mode {
@@ -256,5 +262,18 @@ bool native_host_environment_lookup_v0(
     uint64_t name, uint64_t *out);
 void native_host_stdout_write_line_v0(
     const native_capability *capability, uint64_t text);
+/* Listener ownership is inherited at FD 3; this ABI never creates a socket. */
+int32_t native_host_socket_inherited_listener_v0(
+    const native_capability *capability, int64_t fd, int64_t *out);
+int32_t native_host_socket_accept_v0(
+    const native_capability *capability, int64_t listener_fd, int64_t *out);
+int32_t native_host_socket_read_bounded_v0(
+    native_arena *arena, const native_capability *capability, int64_t peer_fd,
+    int64_t max_bytes, native_bytes *out);
+int32_t native_host_socket_write_bounded_v0(
+    const native_capability *capability, int64_t peer_fd, native_bytes bytes,
+    int64_t max_bytes, int64_t *out);
+int32_t native_host_socket_close_v0(
+    const native_capability *capability, int64_t fd);
 
 #endif

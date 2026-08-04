@@ -4,14 +4,14 @@
 
 (defrecord NativeId [value :- String])
 
-;; TextKind and KeywordKind are both 64-bit handles but never one kind: Text
-;; identity is byte equality (CompareEqText), Keyword identity is table index
-;; equality (CompareEqI64), and only the kind distinguishes them.
+;; TextKind and KeywordKind are 64-bit handles. BytesKind is an owned byte span;
+;; it remains distinct because bounded socket reads need not end on UTF-8 edges.
 (defunion AtomKind
   (BoolKind [token :- Bool])
   (I64Kind [token :- Bool])
   (F64Kind [token :- Bool])
   (TextKind [token :- Bool])
+  (BytesKind [token: Bool])
   (KeywordKind [token :- Bool])
   (RefKind [target :- NativeId]))
 
@@ -136,6 +136,7 @@
 
 (defunion LayoutShapeV0
   (ScalarShapeV0 [representation: ScalarReprV0])
+  (BytesShapeV0 [token: Bool])
   (RecordShapeV0 [fields: (Vec FieldLayoutV0)])
   (UnionShapeV0
     [tag-type: NativeId
@@ -650,7 +651,10 @@
   (RestrictedCAbiV0 [token: Bool])
   ;; A restricted C import returns presence and writes the one non-unit union
   ;; payload through a trailing pointer; the world result stays a closed union.
-  (RestrictedCOptionalOutAbiV0 [token: Bool]))
+  (RestrictedCOptionalOutAbiV0 [token: Bool])
+  ;; Zero means success, -1 means peer-closed, and a positive return is copied
+  ;; into `error` as errno; a non-unit `ok` payload is a trailing out pointer.
+  (RestrictedCOutcomeOutAbiV0 [token: Bool]))
 
 (defunion OwnershipRuleV0
   (BorrowedV0 [token: Bool])
@@ -936,6 +940,7 @@
     [(I64Kind value) true]
     [(F64Kind value) true]
     [(TextKind value) true]
+    [(BytesKind value) true]
     [(KeywordKind value) true]
     [(RefKind target) (id-in? known-types target)]))
 
@@ -1034,6 +1039,7 @@
    known-types :- (Vec NativeId)] :- Bool
   (match shape
     [(ScalarShapeV0 representation) true]
+    [(BytesShapeV0 token) true]
     [(RecordShapeV0 fields)
      (every? (fn [field :- FieldLayoutV0] :- Bool (field-layout-refs-closed? field known-members known-types)) fields)]
     [(UnionShapeV0 tag-type tag-offset-bytes variants)
