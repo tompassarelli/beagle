@@ -201,6 +201,10 @@
     [(SetVectorInstructionV0 value)
      (core/setvectorinstructionv0-result instruction)]
     [(ArenaInstruction value) (core/arenainstruction-result instruction)]
+    [(AtomStateInstruction value) (core/atomstateinstruction-result instruction)]
+    [(AtomCreateInstruction value) (core/atomcreateinstruction-result instruction)]
+    [(AtomDerefInstruction value) (core/atomderefinstruction-result instruction)]
+    [(AtomSwapInstruction value) (core/atomswapinstruction-result instruction)]
     [(TextLengthInstruction value)
      (core/textlengthinstruction-result instruction)]
     [(TextIndexOfInstruction value)
@@ -357,6 +361,7 @@
     [(MapTypeV0 value) false]
     [(SetTypeV0 value) false]
     [(ReferenceType value) false]
+    [(AtomCellTypeV0 value) false]
     [(FunctionType value) false]
     [(OutcomeType value) false]))
 
@@ -369,6 +374,7 @@
     [(MapTypeV0 value) nil]
     [(SetTypeV0 value) nil]
     [(ReferenceType value) nil]
+    [(AtomCellTypeV0 value) nil]
     [(FunctionType value) nil]
     [(OutcomeType value) nil]))
 
@@ -381,6 +387,7 @@
     [(MapTypeV0 value) nil]
     [(SetTypeV0 value) nil]
     [(ReferenceType value) (core/referencetype-target-type shape)]
+    [(AtomCellTypeV0 value) nil]
     [(FunctionType value) nil]
     [(OutcomeType value) nil]))
 
@@ -489,7 +496,8 @@
     [(VectorShapeV0 value) []]
     [(MapShapeV0 value) []]
     [(SetShapeV0 value) []]
-    [(ReferenceShapeV0 value) []]))
+    [(ReferenceShapeV0 value) []]
+    [(AtomCellShapeV0 value) []]))
 
 (defn layout-record? [layout: core/LayoutDef] -> Bool
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
@@ -500,7 +508,8 @@
       [(VectorShapeV0 value) false]
       [(MapShapeV0 value) false]
       [(SetShapeV0 value) false]
-      [(ReferenceShapeV0 value) false])))
+      [(ReferenceShapeV0 value) false]
+      [(AtomCellShapeV0 value) false])))
 
 (defn layout-union? [layout: core/LayoutDef] -> Bool
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
@@ -511,7 +520,8 @@
       [(VectorShapeV0 value) false]
       [(MapShapeV0 value) false]
       [(SetShapeV0 value) false]
-      [(ReferenceShapeV0 value) false])))
+      [(ReferenceShapeV0 value) false]
+      [(AtomCellShapeV0 value) false])))
 
 (defn record-fields [layout: core/LayoutDef] -> (Vec core/FieldLayoutV0)
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
@@ -522,7 +532,8 @@
       [(VectorShapeV0 value) []]
       [(MapShapeV0 value) []]
       [(SetShapeV0 value) []]
-      [(ReferenceShapeV0 value) []])))
+      [(ReferenceShapeV0 value) []]
+      [(AtomCellShapeV0 value) []])))
 
 (defn union-tag-type [layout: core/LayoutDef] -> (U core/NativeId Nil)
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
@@ -533,7 +544,8 @@
       [(VectorShapeV0 value) nil]
       [(MapShapeV0 value) nil]
       [(SetShapeV0 value) nil]
-      [(ReferenceShapeV0 value) nil])))
+      [(ReferenceShapeV0 value) nil]
+      [(AtomCellShapeV0 value) nil])))
 
 (defn union-tag-offset [layout: core/LayoutDef] -> Int
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
@@ -544,7 +556,8 @@
       [(VectorShapeV0 value) -1]
       [(MapShapeV0 value) -1]
       [(SetShapeV0 value) -1]
-      [(ReferenceShapeV0 value) -1])))
+      [(ReferenceShapeV0 value) -1]
+      [(AtomCellShapeV0 value) -1])))
 
 (defn union-variants [layout: core/LayoutDef] -> (Vec core/UnionVariantLayoutV0)
   (shape-union-variants (core/layoutdef-shape layout)))
@@ -869,6 +882,10 @@
     [(SetDisjInstructionV0 value) false]
     [(SetVectorInstructionV0 value) false]
     [(ArenaInstruction value) false]
+    [(AtomStateInstruction value) false]
+    [(AtomCreateInstruction value) false]
+    [(AtomDerefInstruction value) false]
+    [(AtomSwapInstruction value) false]
     [(TextLengthInstruction value) false]
     [(TextIndexOfInstruction value) false]
     [(TextBlankInstruction value) false]
@@ -1199,6 +1216,10 @@
       [(SetVectorInstructionV0 value) ""]
       [(ArenaInstruction value)
        (str "  " result-name " =l copy %arena\n")]
+      [(AtomStateInstruction value) ""]
+      [(AtomCreateInstruction value) ""]
+      [(AtomDerefInstruction value) ""]
+      [(AtomSwapInstruction value) ""]
       [(TextLengthInstruction value) ""]
       [(TextIndexOfInstruction value) ""]
       [(TextBlankInstruction value) ""]
@@ -1537,6 +1558,9 @@
           [(MapTypeV0 value) false]
           [(SetTypeV0 value) false]
           [(ReferenceType value) false]
+          ;; QBE has no lock/runtime calling convention for Atom state in this
+          ;; slice; reject the sealed world instead of treating a cell as Ref.
+          [(AtomCellTypeV0 value) false]
           [(FunctionType value) false]
           [(OutcomeType value) false])))))
 
@@ -1592,6 +1616,10 @@
     [(SetDisjInstructionV0 value) false]
     [(SetVectorInstructionV0 value) false]
     [(ArenaInstruction value) true]
+    [(AtomStateInstruction value) false]
+    [(AtomCreateInstruction value) false]
+    [(AtomDerefInstruction value) false]
+    [(AtomSwapInstruction value) false]
     [(TextLengthInstruction value) false]
     [(TextIndexOfInstruction value) false]
     [(TextBlankInstruction value) false]

@@ -717,6 +717,13 @@
   (core/->TypeDef (arena-handle-type-id) "ArenaHandle"
     (core/->ReferenceType (arena-handle-type-id))))
 
+(defn atom-state-handle-type-id [] -> core/NativeId
+  (type-id "AtomStateHandle"))
+
+(defn atom-state-handle-type [] -> core/TypeDef
+  (core/->TypeDef (atom-state-handle-type-id) "AtomStateHandle"
+    (core/->ReferenceType (atom-state-handle-type-id))))
+
 (defn nil-type [] -> core/TypeDef
   (core/->TypeDef (type-id "Nil") "Unit"
     (core/->UnionType
@@ -987,10 +994,12 @@
           true))
 
       (and (= "Atom" constructor) (= 1 (count ids)))
-      (let [id: core/NativeId (lower-id "reference-type" [(id-value (nth ids 0))])]
+      (let [id: core/NativeId
+            (lower-id "atom-cell-type" [(id-value (nth ids 0))])]
         (->TypeResolutionV0 id
           (append-type-def definitions
-            (core/->TypeDef id "Reference" (core/->ReferenceType (nth ids 0))))
+            (core/->TypeDef id "AtomCell"
+              (core/->AtomCellTypeV0 (nth ids 0))))
           diagnostics
           true))
 
@@ -1345,11 +1354,23 @@
 (defn allocate-capability-id [] -> core/NativeId
   (lower-id "capability" ["arena-allocate"]))
 
+(defn atom-state-region-id [] -> core/NativeId
+  (lower-id "region" ["atom-state"]))
+
+(defn atom-state-effect-id [] -> core/NativeId
+  (lower-id "effect" ["atom-state"]))
+
+(defn atom-state-capability-id [] -> core/NativeId
+  (lower-id "capability" ["atom-state"]))
+
 (defn slice-effects [] -> (Vec core/EffectDef)
   [(core/->EffectDef (pure-effect-id) (core/->PureEffect true))
    (core/->EffectDef (write-effect-id) (core/->WriteEffect (arena-region-id)))
    (core/->EffectDef (allocate-effect-id)
-     (core/->AllocateEffect (arena-region-id)))])
+     (core/->AllocateEffect (arena-region-id)))
+   (core/->EffectDef (atom-state-effect-id)
+     (core/->AtomicEffect (atom-state-region-id)
+       (atom-state-capability-id)))])
 
 ;; RULING (v0): a pure-named function MAY allocate. v0 source carries no effect
 ;; annotation, so the Allocate effect is inferred from the lowered body and from
@@ -1771,6 +1792,27 @@
                     (source-module-name index source)))
               signature
               (recur (+ position 1)))))))))
+
+(defn tail-parameters [parameters: (Vec core/Parameter)] -> (Vec core/Parameter)
+  (loop [position: Int 1 collected: (Vec core/Parameter) []]
+    (if (>= position (count parameters))
+      collected
+      (recur (+ position 1) (conj collected (nth parameters position))))))
+
+(defn pure-updater-signature?
+  [signature: TypedFunctionV0
+   content-type: core/NativeId
+   extra-count: Int] -> Bool
+  (let [parameters: (Vec core/Parameter)
+        (typedfunctionv0-parameters signature)
+        effects: (Vec core/NativeId) (typedfunctionv0-effects signature)]
+    (and (= (+ extra-count 1) (count parameters))
+      (> (count parameters) 0)
+      (same-id? content-type
+        (core/parameter-type-id (nth parameters 0)))
+      (same-id? content-type (typedfunctionv0-return-type signature))
+      (= 1 (count effects))
+      (same-id? (pure-effect-id) (nth effects 0)))))
 
 ;; A Beagle record accessor is spelled <lowercased record name>-<field>; the
 ;; native world knows records only by their TypeDef, so the spelling is rebuilt.
@@ -2232,6 +2274,9 @@
 (defn arena-value-id [owner: core/NativeId] -> core/NativeId
   (lower-id "arena-handle" [(id-value owner)]))
 
+(defn atom-state-value-id [owner: core/NativeId] -> core/NativeId
+  (lower-id "atom-state-handle" [(id-value owner)]))
+
 ;; The absent alternative carries nothing to extract, so this arm injects the
 ;; target's own unit variant and never reads the source payload.
 (defn widen-unit-arm
@@ -2673,6 +2718,30 @@
     (same-id? target (type-id "Keyword")) (core/->KeywordEqualityV0 true)
     :else nil))
 
+(defn atom-cell-content-of
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> (U core/NativeId Nil)
+  (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
+    (if (nil? definition)
+      nil
+      (let [shape: core/TypeShape (core/typedef-shape definition)]
+        (if (instance? native.core.AtomCellTypeV0 shape)
+          (core/atomcelltypev0-content-type shape)
+          nil)))))
+
+(defn atom-cell-type-of
+  [types: (Vec core/TypeDef)
+   content: core/NativeId] -> (U core/NativeId Nil)
+  (loop [position: Int 0]
+    (if (>= position (count types))
+      nil
+      (let [definition: core/TypeDef (nth types position)
+            shape: core/TypeShape (core/typedef-shape definition)]
+        (if (and (instance? native.core.AtomCellTypeV0 shape)
+              (same-id? (core/atomcelltypev0-content-type shape) content))
+          (core/typedef-id definition)
+          (recur (+ position 1)))))))
+
 (defn allocating-instruction? [instruction: core/Instruction] -> Bool
   (or (instance? native.core.VecPushInstruction instruction)
       (instance? native.core.VecEmptyInstruction instruction)
@@ -2688,11 +2757,25 @@
       (instance? native.core.SetVectorInstructionV0 instruction)
       (instance? native.core.BoxRecordInstruction instruction)
       (instance? native.core.AllocateInstruction instruction)
+      (instance? native.core.AtomCreateInstruction instruction)
       (instance? native.core.TextSliceInstruction instruction)
       (instance? native.core.TextConcatInstruction instruction)
       (and (instance? native.core.TextBuiltinInstruction instruction)
         (text-builtin-allocates?
           (core/textbuiltininstruction-builtin instruction)))))
+
+(defn atom-state-instruction? [instruction: core/Instruction] -> Bool
+  (or (instance? native.core.AtomCreateInstruction instruction)
+      (instance? native.core.AtomDerefInstruction instruction)
+      (instance? native.core.AtomSwapInstruction instruction)))
+
+(defn blocks-use-atom-state? [blocks: (Vec core/BasicBlock)] -> Bool
+  (some?
+    (some
+      (fn [block: core/BasicBlock] -> Bool
+        (some? (some atom-state-instruction?
+                 (core/basicblock-instructions block))))
+      blocks)))
 
 (defn instructions-allocate? [instructions: (Vec core/Instruction)] -> Bool
   (some?
@@ -4710,6 +4793,92 @@
                             [(core/->Parameter join-parameter (bool-type-id))])
                           join-parameter (bool-type-id) false)))))))
 
+            (= "swap!" (unqualified-name callee))
+            (if (< (count args) 2)
+              (fail-result state
+                "TODO-NATIVE-ATOM-SWAP-ARITY: swap! takes an Atom, a named updater, and optional updater arguments")
+              (let [cell: ExprResultV0
+                    (lower-expr env owner state (nth args 0))
+                    cell-state: BodyStateV0 (exprresultv0-state cell)]
+                (cond
+                  (exprresultv0-terminated cell) cell
+                  (state-blocked? cell-state) (dead-result cell-state)
+                  (not (= "ref" (fact-text index (nth args 1) "form-kind")))
+                  (fail-result cell-state
+                    "TODO-NATIVE-ATOM-SWAP-UPDATER: swap! requires a statically named pure native updater")
+                  :else
+                  (let [updater-name: String
+                        (fact-text index (nth args 1) "name")
+                        signature: (U TypedFunctionV0 Nil)
+                        (find-signature env owner updater-name)
+                        content: (U core/NativeId Nil)
+                        (atom-cell-content-of types (exprresultv0-type-id cell))]
+                    (cond
+                      (nil? content)
+                      (fail-result cell-state
+                        "TODO-NATIVE-ATOM-SWAP-CELL: swap! first operand is not an Atom")
+                      (nil? signature)
+                      (fail-result cell-state
+                        (str "TODO-NATIVE-ATOM-SWAP-UPDATER: " updater-name
+                          " is not a statically sealed native function"))
+                      (not (pure-updater-signature? signature content
+                             (- (count args) 2)))
+                      (fail-result cell-state
+                        (str "TODO-NATIVE-ATOM-SWAP-UPDATER: " updater-name
+                          " must be pure, take the Atom value first, and return that same type"))
+                      :else
+                      (let [lowered: ArgsResultV0
+                            (loop [position: Int 2
+                                   current: BodyStateV0 cell-state
+                                   values: (Vec core/NativeId) []
+                                   value-types: (Vec core/NativeId) []]
+                              (if (or (>= position (count args))
+                                    (state-blocked? current))
+                                (->ArgsResultV0 current values value-types false)
+                                (let [argument: ExprResultV0
+                                      (lower-expr env owner current
+                                        (nth args position))]
+                                  (if (exprresultv0-terminated argument)
+                                    (->ArgsResultV0
+                                      (exprresultv0-state argument)
+                                      values value-types true)
+                                    (recur (+ position 1)
+                                      (exprresultv0-state argument)
+                                      (conj values
+                                        (exprresultv0-value-id argument))
+                                      (conj value-types
+                                        (exprresultv0-type-id argument)))))))
+                            current: BodyStateV0 (argsresultv0-state lowered)]
+                        (cond
+                          (argsresultv0-terminated lowered)
+                          (->ExprResultV0 current
+                            (lower-id "body" ["unreachable"])
+                            (type-id "LowerFailure") true)
+                          (state-blocked? current) (dead-result current)
+                          :else
+                          (let [coerced: ArgsResultV0
+                                (coerce-arguments types owner current
+                                  (argsresultv0-values lowered)
+                                  (argsresultv0-value-types lowered)
+                                  (tail-parameters
+                                    (typedfunctionv0-parameters signature)))
+                                settled: BodyStateV0
+                                (argsresultv0-state coerced)
+                                result-id: core/NativeId
+                                (state-id settled owner "atom-swap")]
+                            (if (state-blocked? settled)
+                              (fail-result settled
+                                "TODO-NATIVE-ATOM-SWAP-ARGUMENTS: updater arguments do not match its native parameters")
+                              (->ExprResultV0
+                                (state-emit (state-bump settled)
+                                  (core/->AtomSwapInstruction
+                                    (core/->SsaValueV0 result-id content)
+                                    (exprresultv0-value-id cell)
+                                    (atom-state-value-id owner)
+                                    (typedfunctionv0-id signature)
+                                    (argsresultv0-values coerced)))
+                                result-id content false))))))))))
+
             :else
             (let [lowered: ArgsResultV0
                   (loop [position: Int 0
@@ -4959,6 +5128,51 @@
                 (bool-constant-result current owner "sequential-predicate"
                   (and (vector-type? types (nth value-types 0))
                     (not (map-value? types (nth value-types 0)))))
+
+                (and (= "atom" bare-callee) (= 1 (count values)))
+                (let [cell-type: (U core/NativeId Nil)
+                      (atom-cell-type-of types (nth value-types 0))]
+                  (if (nil? cell-type)
+                    (fail-result current
+                      "TODO-NATIVE-ATOM-TYPE: atom needs a closed (Atom T) annotation for its initial value type")
+                    (let [result-id: core/NativeId
+                          (state-id current owner "atom-create")]
+                      (->ExprResultV0
+                        (state-emit (state-bump current)
+                          (core/->AtomCreateInstruction
+                            (core/->SsaValueV0 result-id cell-type)
+                            (nth values 0)
+                            (arena-value-id owner)
+                            (atom-state-value-id owner)))
+                        result-id cell-type false))))
+
+                (= "atom" bare-callee)
+                (fail-result current
+                  "TODO-NATIVE-ATOM-ARITY: atom takes exactly one initial value")
+
+                (and (= "deref" bare-callee) (= 1 (count values)))
+                (let [content: (U core/NativeId Nil)
+                      (atom-cell-content-of types (nth value-types 0))]
+                  (if (nil? content)
+                    (fail-result current
+                      "TODO-NATIVE-ATOM-DEREF-CELL: deref operand is not an Atom")
+                    (let [result-id: core/NativeId
+                          (state-id current owner "atom-deref")]
+                      (->ExprResultV0
+                        (state-emit (state-bump current)
+                          (core/->AtomDerefInstruction
+                            (core/->SsaValueV0 result-id content)
+                            (nth values 0)
+                            (atom-state-value-id owner)))
+                        result-id content false))))
+
+                (= "deref" bare-callee)
+                (fail-result current
+                  "TODO-NATIVE-ATOM-DEREF-ARITY: deref takes exactly one Atom")
+
+                (= "reset!" bare-callee)
+                (fail-result current
+                  "TODO-NATIVE-ATOM-RESET-REFUSED: reset! is outside the measured Atom seam; use a statically named swap! updater")
 
                 (refused-arith-op? callee)
                 (fail-result current
@@ -6083,8 +6297,21 @@
 (defn function-allocates? [function: TypedFunctionV0] -> Bool
   (core/id-in? (typedfunctionv0-effects function) (allocate-effect-id)))
 
+(defn function-uses-atom-state? [function: TypedFunctionV0] -> Bool
+  (core/id-in? (typedfunctionv0-effects function) (atom-state-effect-id)))
+
 (defn any-function-allocates? [functions: (Vec TypedFunctionV0)] -> Bool
   (some? (some function-allocates? functions)))
+
+(defn any-function-uses-atom-state? [functions: (Vec TypedFunctionV0)] -> Bool
+  (some? (some function-uses-atom-state? functions)))
+
+(defn any-function-uses-arena? [functions: (Vec TypedFunctionV0)] -> Bool
+  (some?
+    (some
+      (fn [function: TypedFunctionV0] -> Bool
+        (or (function-writes? function) (function-allocates? function)))
+      functions)))
 (defn attach-body
   [env: BodyEnvV0
    resolution: FunctionResolutionV0
@@ -6104,10 +6331,14 @@
         ;; A vector allocation is discovered in the body, not the signature, so
         ;; the effect that admits it is added once the blocks exist.
         prior-effects: (Vec core/NativeId) (typedfunctionv0-effects signature)
-        effects: (Vec core/NativeId)
+        allocated-effects: (Vec core/NativeId)
         (if (blocks-allocate? (readiness-blocks readiness))
           (with-effect prior-effects (allocate-effect-id))
           prior-effects)
+        effects: (Vec core/NativeId)
+        (if (blocks-use-atom-state? (readiness-blocks readiness))
+          (with-effect allocated-effects (atom-state-effect-id))
+          allocated-effects)
         encoding: String
         (encode-typed-function
           (typedfunctionv0-id signature)
@@ -6150,9 +6381,12 @@
               (nth sources position))))))))
 
 (defn instruction-callee [instruction: core/Instruction] -> (U core/NativeId Nil)
-  (if (instance? native.core.CallInstruction instruction)
+  (cond
+    (instance? native.core.CallInstruction instruction)
     (core/callinstruction-function-id instruction)
-    nil))
+    (instance? native.core.AtomSwapInstruction instruction)
+    (core/atomswapinstruction-updater-id instruction)
+    :else nil))
 
 (defn body-call-targets [function: TypedFunctionV0] -> (Vec core/NativeId)
   (let [blocks: (Vec core/BasicBlock) (function-body-blocks function)]
@@ -6207,8 +6441,7 @@
                   false)))]
         (if settled current (recur (+ round 1) next))))))
 
-;; A caller of an allocating function allocates too, so the declared effect set
-;; must close over calls before the ABI and the obligations read it.
+;; Resource effects close over calls before the ABI and obligations read them.
 (defn settle-effects [functions: (Vec TypedFunctionV0)] -> (Vec TypedFunctionV0)
   (loop [round: Int 0 current: (Vec TypedFunctionV0) functions]
     (if (> round (count functions))
@@ -6223,31 +6456,54 @@
                           (allocate-effect-id))
                       (conj ids (typedfunctionv0-id function))
                       ids)))))
+            atom-stateful: (Vec core/NativeId)
+            (loop [position: Int 0 ids: (Vec core/NativeId) []]
+              (if (>= position (count current))
+                ids
+                (let [function: TypedFunctionV0 (nth current position)]
+                  (recur (+ position 1)
+                    (if (core/id-in? (typedfunctionv0-effects function)
+                          (atom-state-effect-id))
+                      (conj ids (typedfunctionv0-id function))
+                      ids)))))
             next: (Vec TypedFunctionV0)
             (mapv
               (fn [function: TypedFunctionV0] -> TypedFunctionV0
-                (if (or (core/id-in? (typedfunctionv0-effects function)
-                          (allocate-effect-id))
-                      (not (some? (some
-                                    (fn [target: core/NativeId] -> Bool
-                                      (core/id-in? allocating target))
-                                    (body-call-targets function)))))
+                (let [targets: (Vec core/NativeId) (body-call-targets function)
+                      prior-effects: (Vec core/NativeId)
+                      (typedfunctionv0-effects function)
+                      needs-allocate: Bool
+                      (some? (some
+                               (fn [target: core/NativeId] -> Bool
+                                 (core/id-in? allocating target))
+                               targets))
+                      needs-atom-state: Bool
+                      (some? (some
+                               (fn [target: core/NativeId] -> Bool
+                                 (core/id-in? atom-stateful target))
+                               targets))
+                      allocated-effects: (Vec core/NativeId)
+                      (if needs-allocate
+                        (with-effect prior-effects (allocate-effect-id))
+                        prior-effects)
+                      effects: (Vec core/NativeId)
+                      (if needs-atom-state
+                        (with-effect allocated-effects (atom-state-effect-id))
+                        allocated-effects)]
+                (if (= (count prior-effects) (count effects))
                   function
-                  (let [effects: (Vec core/NativeId)
-                        (with-effect (typedfunctionv0-effects function)
-                          (allocate-effect-id))]
-                    (with
-                      (with function [:effects effects])
-                      [:encoding
-                       (encode-typed-function
-                         (typedfunctionv0-id function)
-                         (typedfunctionv0-name function)
-                         (typedfunctionv0-abi-symbol function)
-                         (typedfunctionv0-parameters function)
-                         (typedfunctionv0-return-type function)
-                         (typedfunctionv0-failure-type function)
-                         effects
-                         (readiness-code (typedfunctionv0-readiness function)))]))))
+                  (with
+                    (with function [:effects effects])
+                    [:encoding
+                     (encode-typed-function
+                       (typedfunctionv0-id function)
+                       (typedfunctionv0-name function)
+                       (typedfunctionv0-abi-symbol function)
+                       (typedfunctionv0-parameters function)
+                       (typedfunctionv0-return-type function)
+                       (typedfunctionv0-failure-type function)
+                       effects
+                       (readiness-code (typedfunctionv0-readiness function)))]))))
               current)
             settled: Bool
             (loop [position: Int 0]
@@ -6260,7 +6516,8 @@
         (if settled current (recur (+ round 1) next))))))
 
 (defn slice-regions [] -> (Vec core/RegionDef)
-  [(core/->RegionDef (arena-region-id) (core/->ArenaRegion true) nil)])
+  [(core/->RegionDef (arena-region-id) (core/->ArenaRegion true) nil)
+   (core/->RegionDef (atom-state-region-id) (core/->ExternalRegion true) nil)])
 
 (defn slice-capabilities [] -> (Vec core/CapabilityDef)
   [(core/->CapabilityDef
@@ -6272,6 +6529,11 @@
      (allocate-capability-id)
      (core/->AllocateCapability true)
      (arena-region-id)
+     true)
+   (core/->CapabilityDef
+     (atom-state-capability-id)
+     (core/->WriteCapability true)
+     (atom-state-region-id)
      true)])
 
 (defn collect-record-types
@@ -6403,6 +6665,10 @@
              (core/functiontype-rest-type shape)]
          (if (nil? rest-type) "fixed" (id-value rest-type)))
        (id-value (core/functiontype-return-type shape))])
+
+    (instance? native.core.AtomCellTypeV0 shape)
+    (worlds/canonical-record "atom-cell"
+      [(id-value (core/atomcelltypev0-content-type shape))])
 
     (instance? native.core.OutcomeType shape)
     (worlds/canonical-record "outcome"
@@ -6598,12 +6864,14 @@
         ;; Outcome), so the world's type set closes only after they lower.
         body-types: (Vec core/TypeDef)
         (collect-function-types source-types function-resolutions)
-        ;; Only a world that allocates names an arena handle, so a pure module's
-        ;; type set and its C type numbering are unchanged by this tier.
-        types: (Vec core/TypeDef)
-        (if (any-function-allocates? functions)
+        arena-types: (Vec core/TypeDef)
+        (if (any-function-uses-arena? functions)
           (append-type-def body-types (arena-handle-type))
           body-types)
+        types: (Vec core/TypeDef)
+        (if (any-function-uses-atom-state? functions)
+          (append-type-def arena-types (atom-state-handle-type))
+          arena-types)
         effects: (Vec core/EffectDef) (slice-effects)
         regions: (Vec core/RegionDef) (slice-regions)
         capabilities: (Vec core/CapabilityDef) (slice-capabilities)
@@ -6624,8 +6892,9 @@
                   (typedfunctionv0-id function)) functions)
           (mapv (fn [effect: core/EffectDef] -> core/NativeId
                   (core/effectdef-id effect)) effects)
-          [(arena-region-id)]
-          [(write-capability-id) (allocate-capability-id)]
+          [(arena-region-id) (atom-state-region-id)]
+          [(write-capability-id) (allocate-capability-id)
+           (atom-state-capability-id)]
           [(type-id "LowerFailure")])
         encoding: String (worlds/encode-typed-world typed-world)
         digest: String (worlds/content-digest encoding)
@@ -6736,6 +7005,9 @@
 
             (instance? native.core.ReferenceType shape)
             (->LayoutMeasureV0 8 8 true "reference")
+
+            (instance? native.core.AtomCellTypeV0 shape)
+            (->LayoutMeasureV0 8 8 true "atom cell handle")
 
             ;; A vector value is a reference to its {elements, length, capacity}
             ;; header, so its size never depends on the element type — that is
@@ -6934,6 +7206,9 @@
       (instance? native.core.FunctionType shape)
       (core/->ReferenceShapeV0 (core/typedef-id definition))
 
+      (instance? native.core.AtomCellTypeV0 shape)
+      (core/->AtomCellShapeV0 (core/atomcelltypev0-content-type shape))
+
       (instance? native.core.OutcomeType shape)
       (core/->UnionShapeV0
         (type-id "UnionTag")
@@ -6990,15 +7265,32 @@
 
 (defn function-capabilities [function: TypedFunctionV0] -> (Vec core/NativeId)
   (let [written: (Vec core/NativeId)
-        (if (function-writes? function) [(write-capability-id)] [])]
-    (if (function-allocates? function)
-      (conj written (allocate-capability-id))
-      written)))
+        (if (function-writes? function) [(write-capability-id)] [])
+        allocated: (Vec core/NativeId)
+        (if (function-allocates? function)
+          (conj written (allocate-capability-id))
+          written)]
+    (if (function-uses-atom-state? function)
+      (conj allocated (atom-state-capability-id))
+      allocated)))
 
 (defn function-regions [function: TypedFunctionV0] -> (Vec core/NativeId)
-  (if (or (function-writes? function) (function-allocates? function))
-    [(arena-region-id)]
-    []))
+  (let [arena: (Vec core/NativeId)
+        (if (or (function-writes? function) (function-allocates? function))
+          [(arena-region-id)]
+          [])]
+    (if (function-uses-atom-state? function)
+      (conj arena (atom-state-region-id))
+      arena)))
+
+(defn arena-function-tokens [function: TypedFunctionV0] -> (Vec core/NativeId)
+  (let [written: (Vec core/NativeId)
+        (if (function-writes? function) [(write-capability-id)] [])
+        capabilities: (Vec core/NativeId)
+        (if (function-allocates? function)
+          (conj written (allocate-capability-id))
+          written)]
+    (into [(arena-region-id)] capabilities)))
 
 ;; The acquisition consumes exactly the function's affine set, so every path out
 ;; of the entry block leaves it empty.
@@ -7007,11 +7299,19 @@
     (core/->SsaValueV0 (arena-value-id (typedfunctionv0-id function))
       (arena-handle-type-id))
     (arena-region-id)
-    (allocate-capability-id)
+    (if (function-allocates? function)
+      (allocate-capability-id)
+      (write-capability-id))
+    (core/->TokenFlowV0 (arena-function-tokens function) [])))
+
+(defn atom-state-acquire-instruction [function: TypedFunctionV0] -> core/Instruction
+  (core/->AtomStateInstruction
+    (core/->SsaValueV0 (atom-state-value-id (typedfunctionv0-id function))
+      (atom-state-handle-type-id))
+    (atom-state-region-id)
+    (atom-state-capability-id)
     (core/->TokenFlowV0
-      (core/append-ids (function-regions function)
-        (function-capabilities function))
-      [])))
+      [(atom-state-region-id) (atom-state-capability-id)] [])))
 
 (defn with-arena-acquire
   [entry-id: core/NativeId
@@ -7070,11 +7370,16 @@
              []
              (lower-function-instructions function)
              [(core/->ReturnTerminator (lower-function-return function))])])
-        blocks: (Vec core/BasicBlock)
-        (if (function-allocates? function)
+        arena-blocks: (Vec core/BasicBlock)
+        (if (or (function-writes? function) (function-allocates? function))
           (with-arena-acquire entry-id (arena-acquire-instruction function)
             body-blocks)
-          body-blocks)]
+          body-blocks)
+        blocks: (Vec core/BasicBlock)
+        (if (function-uses-atom-state? function)
+          (with-arena-acquire entry-id
+            (atom-state-acquire-instruction function) arena-blocks)
+          arena-blocks)]
     (core/->FunctionDef
       (typedfunctionv0-id function)
       (typedfunctionv0-name function)
@@ -7248,6 +7553,10 @@
        (str (core/setshapev0-stride-bytes shape))
        (str (core/setshapev0-align-bytes shape))
        "insertion-order-v0"])
+
+    (instance? native.core.AtomCellShapeV0 shape)
+    (worlds/canonical-record "atom-cell-layout"
+      [(id-value (core/atomcellshapev0-content-type shape))])
 
     :else
     (worlds/canonical-record "reference-layout"
@@ -7590,6 +7899,34 @@
       [(encode-ssa-value (core/arenainstruction-result instruction))
        (id-value (core/arenainstruction-region instruction))
        (id-value (core/arenainstruction-capability instruction))])
+
+    (instance? native.core.AtomStateInstruction instruction)
+    (worlds/canonical-record "atom-state-instruction"
+      [(encode-ssa-value (core/atomstateinstruction-result instruction))
+       (id-value (core/atomstateinstruction-region instruction))
+       (id-value (core/atomstateinstruction-capability instruction))])
+
+    (instance? native.core.AtomCreateInstruction instruction)
+    (worlds/canonical-record "atom-create-instruction"
+      [(encode-ssa-value (core/atomcreateinstruction-result instruction))
+       (id-value (core/atomcreateinstruction-initial-id instruction))
+       (id-value (core/atomcreateinstruction-arena-id instruction))
+       (id-value (core/atomcreateinstruction-state-id instruction))])
+
+    (instance? native.core.AtomDerefInstruction instruction)
+    (worlds/canonical-record "atom-deref-instruction"
+      [(encode-ssa-value (core/atomderefinstruction-result instruction))
+       (id-value (core/atomderefinstruction-cell-id instruction))
+       (id-value (core/atomderefinstruction-state-id instruction))])
+
+    (instance? native.core.AtomSwapInstruction instruction)
+    (worlds/canonical-record "atom-swap-instruction"
+      [(encode-ssa-value (core/atomswapinstruction-result instruction))
+       (id-value (core/atomswapinstruction-cell-id instruction))
+       (id-value (core/atomswapinstruction-state-id instruction))
+       (id-value (core/atomswapinstruction-updater-id instruction))
+       (encode-id-roots "arguments"
+         (core/atomswapinstruction-arguments instruction))])
 
     (instance? native.core.TextLengthInstruction instruction)
     (worlds/canonical-record "text-length-instruction"

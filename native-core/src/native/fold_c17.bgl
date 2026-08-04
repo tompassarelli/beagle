@@ -160,6 +160,9 @@
 (defn layout-reference? [layout: core/LayoutDef] -> Bool
   (instance? native.core.ReferenceShapeV0 (core/layoutdef-shape layout)))
 
+(defn layout-atom-cell? [layout: core/LayoutDef] -> Bool
+  (instance? native.core.AtomCellShapeV0 (core/layoutdef-shape layout)))
+
 (defn record-layout-fields [layout: core/LayoutDef] -> (Vec core/FieldLayoutV0)
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
     (if (instance? native.core.RecordShapeV0 shape)
@@ -332,6 +335,9 @@
 
           (instance? native.core.ReferenceType shape) (layout-reference? layout-value)
 
+          (instance? native.core.AtomCellTypeV0 shape)
+          (layout-atom-cell? layout-value)
+
           :else false)))))
 
 (defn atom-supported? [atom: core/NativeAtom] -> Bool
@@ -427,6 +433,12 @@
   [type-name-value: String
    layout: core/LayoutDef] -> String
   (str "typedef void *" type-name-value ";\n"
+    (join-lines (size-align-assertions type-name-value layout))))
+
+(defn emit-atom-cell-type
+  [type-name-value: String
+   layout: core/LayoutDef] -> String
+  (str "typedef native_atom *" type-name-value ";\n"
     (join-lines (size-align-assertions type-name-value layout))))
 
 ;; A vector value is a reference to a shim-owned header, so the element type
@@ -578,6 +590,8 @@
         (emit-map-type types module-index type-name-value layout-value)
         (layout-set? layout-value)
         (emit-set-type types module-index type-name-value layout-value)
+        (layout-atom-cell? layout-value)
+        (emit-atom-cell-type type-name-value layout-value)
         :else (emit-reference-type type-name-value layout-value)))))
 
 (defn emit-types

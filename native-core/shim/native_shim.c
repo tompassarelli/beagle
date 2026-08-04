@@ -1,7 +1,14 @@
 #include "native_shim.h"
 
+#include <stdatomic.h>
 #include <string.h>
 #include <stdlib.h>
+
+struct native_atom {
+  _Atomic bool locked;
+  size_t size;
+  void *value;
+};
 
 uint64_t native_vec_storage_allocations = UINT64_C(0);
 
@@ -56,6 +63,69 @@ void native_arena_reset(native_arena *arena) {
 _Noreturn void native_trap(uint32_t code) {
   (void)code;
   abort();
+}
+
+static void native_atom_require(const native_atom *atom,
+                                const native_capability *capability,
+                                const void *value, size_t size) {
+  if ((atom == NULL) || (capability == NULL) ||
+      (capability->token == UINT64_C(0)) || (value == NULL) ||
+      (size == 0U) || (size != atom->size)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+}
+
+static void native_atom_acquire(native_atom *atom) {
+  while (atomic_exchange_explicit(&atom->locked, true,
+                                  memory_order_acquire)) {
+  }
+}
+
+static void native_atom_release(native_atom *atom) {
+  atomic_store_explicit(&atom->locked, false, memory_order_release);
+}
+
+native_atom *native_atom_new(native_arena *arena,
+                             const native_capability *capability,
+                             const void *initial, size_t size,
+                             size_t alignment) {
+  native_atom *atom;
+  if ((capability == NULL) || (capability->token == UINT64_C(0)) ||
+      (initial == NULL) || (size == 0U)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  atom = (native_atom *)native_arena_alloc(arena, sizeof(*atom),
+                                           _Alignof(native_atom));
+  atom->value = native_arena_alloc(arena, size, alignment);
+  atomic_init(&atom->locked, false);
+  atom->size = size;
+  memcpy(atom->value, initial, size);
+  return atom;
+}
+
+void native_atom_deref(native_atom *atom,
+                       const native_capability *capability, void *out,
+                       size_t size) {
+  native_atom_require(atom, capability, out, size);
+  native_atom_acquire(atom);
+  memcpy(out, atom->value, size);
+  native_atom_release(atom);
+}
+
+void native_atom_lock(native_atom *atom,
+                      const native_capability *capability, void *out,
+                      size_t size) {
+  native_atom_require(atom, capability, out, size);
+  native_atom_acquire(atom);
+  memcpy(out, atom->value, size);
+}
+
+void native_atom_store_unlock(native_atom *atom,
+                              const native_capability *capability,
+                              const void *value, size_t size) {
+  native_atom_require(atom, capability, value, size);
+  memcpy(atom->value, value, size);
+  native_atom_release(atom);
 }
 
 static size_t native_vec_bytes(int64_t capacity, int64_t stride) {

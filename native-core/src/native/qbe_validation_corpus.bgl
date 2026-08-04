@@ -664,6 +664,201 @@
     []
     []))
 
+;; --- Atom state world ----------------------------------------------------
+;; This fixture is materialized by validation/atom through C17. QBE must reject
+;; the same sealed world until it has a lock-aware state calling convention.
+
+(defn atom-fixture-id [name: String] -> core/NativeId
+  (core/canonical-id "native-atom-fixture-v0" [name]))
+
+(def atom-i64-type: core/TypeDef
+  (core/->TypeDef (atom-fixture-id "type-i64") "I64"
+    (core/->AtomType (core/->I64Kind true))))
+
+(def atom-cell-type: core/TypeDef
+  (core/->TypeDef (atom-fixture-id "type-cell") "AtomCell"
+    (core/->AtomCellTypeV0 (atom-fixture-id "type-i64"))))
+
+(def atom-state-type: core/TypeDef
+  (core/->TypeDef (atom-fixture-id "type-state") "AtomStateHandle"
+    (core/->ReferenceType (atom-fixture-id "type-state"))))
+
+(def atom-arena-type: core/TypeDef
+  (core/->TypeDef (atom-fixture-id "type-arena") "ArenaHandle"
+    (core/->ReferenceType (atom-fixture-id "type-arena"))))
+
+(def atom-i64-layout: core/LayoutDef
+  (core/->LayoutDef (atom-fixture-id "layout-i64")
+    (atom-fixture-id "type-i64") 8 8
+    (core/->ScalarShapeV0 (core/->SignedIntReprV0 64))))
+
+(def atom-cell-layout: core/LayoutDef
+  (core/->LayoutDef (atom-fixture-id "layout-cell")
+    (atom-fixture-id "type-cell") 8 8
+    (core/->AtomCellShapeV0 (atom-fixture-id "type-i64"))))
+
+(def atom-state-layout: core/LayoutDef
+  (core/->LayoutDef (atom-fixture-id "layout-state")
+    (atom-fixture-id "type-state") 8 8
+    (core/->ReferenceShapeV0 (atom-fixture-id "type-state"))))
+
+(def atom-arena-layout: core/LayoutDef
+  (core/->LayoutDef (atom-fixture-id "layout-arena")
+    (atom-fixture-id "type-arena") 8 8
+    (core/->ReferenceShapeV0 (atom-fixture-id "type-arena"))))
+
+(def atom-arena-region: core/RegionDef
+  (core/->RegionDef (atom-fixture-id "region-arena")
+    (core/->ArenaRegion true) nil))
+
+(def atom-state-region: core/RegionDef
+  (core/->RegionDef (atom-fixture-id "region-state")
+    (core/->ExternalRegion true) nil))
+
+(def atom-allocate-capability: core/CapabilityDef
+  (core/->CapabilityDef (atom-fixture-id "cap-allocate")
+    (core/->AllocateCapability true) (atom-fixture-id "region-arena") true))
+
+(def atom-state-capability: core/CapabilityDef
+  (core/->CapabilityDef (atom-fixture-id "cap-state")
+    (core/->WriteCapability true) (atom-fixture-id "region-state") true))
+
+(def atom-pure-effect: core/EffectDef
+  (core/->EffectDef (atom-fixture-id "effect-pure")
+    (core/->PureEffect true)))
+
+(def atom-allocate-effect: core/EffectDef
+  (core/->EffectDef (atom-fixture-id "effect-allocate")
+    (core/->AllocateEffect (atom-fixture-id "region-arena"))))
+
+(def atom-state-effect: core/EffectDef
+  (core/->EffectDef (atom-fixture-id "effect-state")
+    (core/->AtomicEffect (atom-fixture-id "region-state")
+      (atom-fixture-id "cap-state"))))
+
+(def atom-updater-function: core/FunctionDef
+  (core/->FunctionDef (atom-fixture-id "fn-0-upd") "replace-value"
+    [(core/->Parameter (atom-fixture-id "upd-current")
+       (atom-fixture-id "type-i64"))
+     (core/->Parameter (atom-fixture-id "upd-next")
+       (atom-fixture-id "type-i64"))]
+    [(core/->BasicBlock (atom-fixture-id "block-upd") []
+       [(core/->CopyInstruction
+          (core/->SsaValueV0 (atom-fixture-id "upd-result")
+            (atom-fixture-id "type-i64"))
+          (atom-fixture-id "upd-next"))]
+       [(core/->ReturnTerminator (atom-fixture-id "upd-result"))])]
+    (atom-fixture-id "block-upd")
+    (atom-fixture-id "type-i64")
+    [(atom-fixture-id "effect-pure")]
+    []
+    []))
+
+(def atom-create-function: core/FunctionDef
+  (core/->FunctionDef (atom-fixture-id "fn-1-new") "new-atom"
+    [(core/->Parameter (atom-fixture-id "new-initial")
+       (atom-fixture-id "type-i64"))]
+    [(core/->BasicBlock (atom-fixture-id "block-new") []
+       [(core/->AtomStateInstruction
+          (core/->SsaValueV0 (atom-fixture-id "new-state")
+            (atom-fixture-id "type-state"))
+          (atom-fixture-id "region-state")
+          (atom-fixture-id "cap-state")
+          (core/->TokenFlowV0
+            [(atom-fixture-id "region-state") (atom-fixture-id "cap-state")]
+            []))
+        (core/->ArenaInstruction
+          (core/->SsaValueV0 (atom-fixture-id "new-arena")
+            (atom-fixture-id "type-arena"))
+          (atom-fixture-id "region-arena")
+          (atom-fixture-id "cap-allocate")
+          (core/->TokenFlowV0
+            [(atom-fixture-id "region-arena")
+             (atom-fixture-id "cap-allocate")]
+            []))
+        (core/->AtomCreateInstruction
+          (core/->SsaValueV0 (atom-fixture-id "new-result")
+            (atom-fixture-id "type-cell"))
+          (atom-fixture-id "new-initial")
+          (atom-fixture-id "new-arena")
+          (atom-fixture-id "new-state"))]
+       [(core/->ReturnTerminator (atom-fixture-id "new-result"))])]
+    (atom-fixture-id "block-new")
+    (atom-fixture-id "type-cell")
+    [(atom-fixture-id "effect-allocate") (atom-fixture-id "effect-state")]
+    [(atom-fixture-id "region-arena") (atom-fixture-id "region-state")]
+    [(atom-fixture-id "cap-allocate") (atom-fixture-id "cap-state")]))
+
+(def atom-deref-function: core/FunctionDef
+  (core/->FunctionDef (atom-fixture-id "fn-2-get") "deref-atom"
+    [(core/->Parameter (atom-fixture-id "get-cell")
+       (atom-fixture-id "type-cell"))]
+    [(core/->BasicBlock (atom-fixture-id "block-get") []
+       [(core/->AtomStateInstruction
+          (core/->SsaValueV0 (atom-fixture-id "get-state")
+            (atom-fixture-id "type-state"))
+          (atom-fixture-id "region-state")
+          (atom-fixture-id "cap-state")
+          (core/->TokenFlowV0
+            [(atom-fixture-id "region-state") (atom-fixture-id "cap-state")]
+            []))
+        (core/->AtomDerefInstruction
+          (core/->SsaValueV0 (atom-fixture-id "get-result")
+            (atom-fixture-id "type-i64"))
+          (atom-fixture-id "get-cell")
+          (atom-fixture-id "get-state"))]
+       [(core/->ReturnTerminator (atom-fixture-id "get-result"))])]
+    (atom-fixture-id "block-get")
+    (atom-fixture-id "type-i64")
+    [(atom-fixture-id "effect-state")]
+    [(atom-fixture-id "region-state")]
+    [(atom-fixture-id "cap-state")]))
+
+(def atom-swap-function: core/FunctionDef
+  (core/->FunctionDef (atom-fixture-id "fn-3-swp") "swap-atom"
+    [(core/->Parameter (atom-fixture-id "swp-cell")
+       (atom-fixture-id "type-cell"))
+     (core/->Parameter (atom-fixture-id "swp-next")
+       (atom-fixture-id "type-i64"))]
+    [(core/->BasicBlock (atom-fixture-id "block-swp") []
+       [(core/->AtomStateInstruction
+          (core/->SsaValueV0 (atom-fixture-id "swp-state")
+            (atom-fixture-id "type-state"))
+          (atom-fixture-id "region-state")
+          (atom-fixture-id "cap-state")
+          (core/->TokenFlowV0
+            [(atom-fixture-id "region-state") (atom-fixture-id "cap-state")]
+            []))
+        (core/->AtomSwapInstruction
+          (core/->SsaValueV0 (atom-fixture-id "swp-result")
+            (atom-fixture-id "type-i64"))
+          (atom-fixture-id "swp-cell")
+          (atom-fixture-id "swp-state")
+          (atom-fixture-id "fn-0-upd")
+          [(atom-fixture-id "swp-next")])]
+       [(core/->ReturnTerminator (atom-fixture-id "swp-result"))])]
+    (atom-fixture-id "block-swp")
+    (atom-fixture-id "type-i64")
+    [(atom-fixture-id "effect-state")]
+    [(atom-fixture-id "region-state")]
+    [(atom-fixture-id "cap-state")]))
+
+(def atom-world: core/NativeWorld
+  (core/->NativeWorld (atom-fixture-id "world") nil "native-atom-fixture-v0"
+    [atom-i64-type atom-cell-type atom-state-type atom-arena-type]
+    [atom-pure-effect atom-allocate-effect atom-state-effect]
+    [atom-arena-region atom-state-region]
+    [atom-allocate-capability atom-state-capability]
+    [atom-i64-layout atom-cell-layout atom-state-layout atom-arena-layout]
+    [atom-updater-function atom-create-function atom-deref-function
+     atom-swap-function]
+    [(atom-fixture-id "effect-pure") (atom-fixture-id "effect-allocate")
+     (atom-fixture-id "effect-state")]
+    [(atom-fixture-id "region-arena") (atom-fixture-id "region-state")]
+    [(atom-fixture-id "cap-allocate") (atom-fixture-id "cap-state")]
+    []
+    []))
+
 ;; --- materialization ------------------------------------------------------
 
 (defn require-artifact [result: qbe/QbeMaterialization] -> qbe/QbeArtifact
@@ -705,6 +900,9 @@
       [(QbeFailure value)
        (= "unsupported native value-semantics op: equal" value)])))
 
+(def atom-refusal-proven?: Bool
+  (explicitly-refused? atom-world))
+
 (def fixture-artifact: qbe/QbeArtifact
   (require-artifact (qbe/materialize-world fixture-world 0)))
 
@@ -731,6 +929,7 @@
     refusal-map-proven?
     refusal-set-proven?
     refusal-value-equal-proven?
+    atom-refusal-proven?
     (= (qbe/qbeartifact-module-text fixture-artifact)
          (qbe/qbeartifact-module-text fixture-permuted-artifact))
     (= (qbe/qbeartifact-module-text slice-artifact)

@@ -534,6 +534,12 @@
       (and (dynamic-id= target-type layout-target)
         (not (nil? (find-layout layouts target-type)))
         (> parent-size 0)))
+    (some? (get type-shape :content-type nil))
+    (let [content-type :- core/NativeId (get type-shape :content-type)
+          layout-content :- Any (get layout-shape :content-type nil)]
+      (and (dynamic-id= content-type layout-content)
+        (not (nil? (find-layout layouts content-type)))
+        (> parent-size 0)))
     (some? (get type-shape :value-type nil))
     (let [failure-type :- core/NativeId (get type-shape :failure-type)
           failure-def :- (U core/TypeDef Nil) (find-type types failure-type)]
@@ -988,6 +994,12 @@
    region :- core/NativeId] :- Bool
   (= kind (core/->AllocateEffect region)))
 
+(defn effect-covers-atom-state?
+  [kind :- Any
+   region :- core/NativeId
+   capability :- core/NativeId] :- Bool
+  (= kind (core/->AtomicEffect region capability)))
+
 (defn declared-effect-covers?
   [world :- core/NativeWorld
    function :- core/FunctionDef
@@ -1016,6 +1028,37 @@
         allocation-capability :- Any (get instruction :capability nil)
         callee-id :- Any (get instruction :function-id nil)]
     (cond
+      (instance? native.core.AtomStateInstruction instruction)
+      (let [region :- core/NativeId
+            (core/atomstateinstruction-region instruction)
+            capability :- core/NativeId
+            (core/atomstateinstruction-capability instruction)]
+        (and (core/id-in? (core/functiondef-regions function) region)
+          (core/id-in? (core/functiondef-capabilities function) capability)
+          (some?
+            (some
+              (fn [effect-id :- core/NativeId] :- Bool
+                (let [effect :- (U core/EffectDef Nil)
+                      (find-effect (core/nativeworld-effects world) effect-id)]
+                  (and (not (nil? effect))
+                    (effect-covers-atom-state? (core/effectdef-kind effect)
+                      region capability))))
+              (core/functiondef-effects function)))))
+      (instance? native.core.AtomSwapInstruction instruction)
+      (let [updater :- (U core/FunctionDef Nil)
+            (find-function (core/nativeworld-functions world)
+              (core/atomswapinstruction-updater-id instruction))]
+        (and (not (nil? updater))
+          (= 0 (count (core/functiondef-regions updater)))
+          (= 0 (count (core/functiondef-capabilities updater)))
+          (every?
+            (fn [effect-id :- core/NativeId] :- Bool
+              (let [effect :- (U core/EffectDef Nil)
+                    (find-effect (core/nativeworld-effects world) effect-id)]
+                (and (not (nil? effect))
+                  (instance? native.core.PureEffect
+                    (core/effectdef-kind effect)))))
+            (core/functiondef-effects updater))))
       (not (nil? store))
       (let [resources :- (Vec core/NativeId) (store-resources store)
             region :- core/NativeId (nth resources 0)

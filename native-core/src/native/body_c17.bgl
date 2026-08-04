@@ -196,6 +196,10 @@
     (instance? native.core.SetDisjInstructionV0 instruction) true
     (instance? native.core.SetVectorInstructionV0 instruction) true
     (instance? native.core.ArenaInstruction instruction) true
+    (instance? native.core.AtomStateInstruction instruction) true
+    (instance? native.core.AtomCreateInstruction instruction) true
+    (instance? native.core.AtomDerefInstruction instruction) true
+    (instance? native.core.AtomSwapInstruction instruction) true
     (instance? native.core.TextLengthInstruction instruction) true
     (instance? native.core.TextIndexOfInstruction instruction) true
     (instance? native.core.TextBlankInstruction instruction) true
@@ -1194,6 +1198,64 @@
       (instance? native.core.ArenaInstruction instruction)
       (str "  " target " = arena;\n  (void)" target ";\n")
 
+      (instance? native.core.AtomStateInstruction instruction)
+      (str "  " target " = (void *)capability;\n")
+
+      (instance? native.core.AtomCreateInstruction instruction)
+      (let [initial-id: core/NativeId
+            (core/atomcreateinstruction-initial-id instruction)
+            initial: String (value-name function slots initial-id)
+            initial-type: core/NativeId (slot-type function slots initial-id)
+            arena: String
+            (str "(native_arena *)"
+              (value-name function slots
+                (core/atomcreateinstruction-arena-id instruction)))
+            state: String
+            (str "(const native_capability *)"
+              (value-name function slots
+                (core/atomcreateinstruction-state-id instruction)))
+            content: String (c17/c-type types module-index initial-type)]
+        (str "  " target " = native_atom_new(" arena ", " state ", &"
+          initial ", sizeof(" content "), _Alignof(" content "));\n"))
+
+      (instance? native.core.AtomDerefInstruction instruction)
+      (let [cell: String
+            (value-name function slots
+              (core/atomderefinstruction-cell-id instruction))
+            state: String
+            (str "(const native_capability *)"
+              (value-name function slots
+                (core/atomderefinstruction-state-id instruction)))]
+        (str "  native_atom_deref(" cell ", " state ", &" target
+          ", sizeof(" target "));\n"))
+
+      (instance? native.core.AtomSwapInstruction instruction)
+      (let [cell: String
+            (value-name function slots
+              (core/atomswapinstruction-cell-id instruction))
+            state: String
+            (str "(const native_capability *)"
+              (value-name function slots
+                (core/atomswapinstruction-state-id instruction)))
+            updater: String
+            (function-name module-index
+              (function-index-of functions
+                (core/atomswapinstruction-updater-id instruction)))
+            arguments: (Vec core/NativeId)
+            (core/atomswapinstruction-arguments instruction)]
+        (str "  native_atom_lock(" cell ", " state ", &" target
+          ", sizeof(" target "));\n"
+          "  " target " = " updater "(" target
+          (loop [position: Int 0 fragment: String ""]
+            (if (>= position (count arguments))
+              fragment
+              (recur (+ position 1)
+                (str fragment ", "
+                  (value-name function slots (nth arguments position))))))
+          ");\n"
+          "  native_atom_store_unlock(" cell ", " state ", &" target
+          ", sizeof(" target "));\n"))
+
       (instance? native.core.TextLengthInstruction instruction)
       (str "  " target " = (int64_t)native_text_length("
         (value-name function slots
@@ -1835,9 +1897,18 @@
     (str (c17/function-return-type types module-index function) " "
       (function-name module-index function-index)
       "(" (c17/emit-parameter-list types module-index function) ") {\n"
-      ;; The capability is a static permission, so no emitted statement reads it.
+      (if (> (count (core/functiondef-regions function)) 0)
+        "  (void)arena;\n" "")
       (if (> (count (core/functiondef-capabilities function)) 0)
         "  (void)capability;\n" "")
+      (loop [position: Int 0 fragment: String ""
+             parameters: (Vec core/Parameter)
+             (core/functiondef-parameters function)]
+        (if (>= position (count parameters))
+          fragment
+          (recur (+ position 1)
+            (str fragment "  (void)native_v_" position ";\n")
+            parameters)))
       (emit-declarations types module-index slots)
       (loop [position: Int 0 result: String ""]
         (if (>= position (count blocks))

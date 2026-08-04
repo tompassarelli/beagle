@@ -23,6 +23,10 @@ typedef struct native_capability {
   uint64_t token;
 } native_capability;
 
+/* Atom storage is opaque: generated programs can only access a cell while
+   presenting the dedicated state capability. */
+typedef struct native_atom native_atom;
+
 typedef struct native_bytes {
   uint8_t *data;
   size_t length;
@@ -123,6 +127,20 @@ void native_arena_init(native_arena *arena, uint8_t *storage, size_t capacity);
 void *native_arena_alloc(native_arena *arena, size_t size, size_t alignment);
 void native_arena_reset(native_arena *arena);
 _Noreturn void native_trap(uint32_t code);
+
+native_atom *native_atom_new(native_arena *arena,
+                             const native_capability *capability,
+                             const void *initial, size_t size,
+                             size_t alignment);
+void native_atom_deref(native_atom *atom,
+                       const native_capability *capability, void *out,
+                       size_t size);
+void native_atom_lock(native_atom *atom,
+                      const native_capability *capability, void *out,
+                      size_t size);
+void native_atom_store_unlock(native_atom *atom,
+                              const native_capability *capability,
+                              const void *value, size_t size);
 
 native_vec *native_vec_new(native_arena *arena, int64_t capacity, int64_t stride,
                            size_t alignment);

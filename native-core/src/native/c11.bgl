@@ -10,9 +10,9 @@
 (import (native.core
           BoolKind I64Kind F64Kind TextKind KeywordKind RefKind
           ScalarShapeV0 RecordShapeV0 UnionShapeV0 VectorShapeV0 ReferenceShapeV0
-          MapShapeV0 SetShapeV0
+          MapShapeV0 SetShapeV0 AtomCellShapeV0
           AtomType RecordType UnionType VectorType MapTypeV0 SetTypeV0
-          ReferenceType OutcomeType
+          ReferenceType AtomCellTypeV0 FunctionType OutcomeType
           BoolAtom I64Atom F64Atom TextAtom KeywordAtom RefAtom
           CheckedAddI64V0 CheckedSubI64V0 CheckedMulI64V0 CheckedBoundsV0
           AtomInstruction CopyInstruction AddF64Instruction CheckedInstruction
@@ -73,6 +73,7 @@
       [(MapTypeV0 value) []]
       [(SetTypeV0 value) []]
       [(ReferenceType value) []]
+      [(AtomCellTypeV0 value) []]
       [(FunctionType value) []]
       [(OutcomeType value) []])))
 
@@ -204,7 +205,8 @@
       [(VectorShapeV0 value) false]
       [(MapShapeV0 value) false]
       [(SetShapeV0 value) false]
-      [(ReferenceShapeV0 value) false])))
+      [(ReferenceShapeV0 value) false]
+      [(AtomCellShapeV0 value) false])))
 
 (defn layout-record? [layout: core/LayoutDef] -> Bool
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
@@ -215,7 +217,8 @@
       [(VectorShapeV0 value) false]
       [(MapShapeV0 value) false]
       [(SetShapeV0 value) false]
-      [(ReferenceShapeV0 value) false])))
+      [(ReferenceShapeV0 value) false]
+      [(AtomCellShapeV0 value) false])))
 
 (defn record-layout-fields [layout: core/LayoutDef] -> (Vec core/FieldLayoutV0)
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
@@ -226,7 +229,8 @@
       [(VectorShapeV0 value) []]
       [(MapShapeV0 value) []]
       [(SetShapeV0 value) []]
-      [(ReferenceShapeV0 value) []])))
+      [(ReferenceShapeV0 value) []]
+      [(AtomCellShapeV0 value) []])))
 
 (defn type-supported?
   [type-def: core/TypeDef
@@ -241,6 +245,7 @@
       [(MapTypeV0 value) false]
       [(SetTypeV0 value) false]
       [(ReferenceType value) false]
+      [(AtomCellTypeV0 value) false]
       [(FunctionType value) false]
       [(OutcomeType value) false])))
 
@@ -413,6 +418,7 @@
         [(MapTypeV0 value) ""]
         [(SetTypeV0 value) ""]
         [(ReferenceType value) ""]
+        [(AtomCellTypeV0 value) ""]
         [(FunctionType value) ""]
         [(OutcomeType value) ""]))))
 
