@@ -4,13 +4,14 @@ stage typed-to-native COMPLETE
 source-modules 1
 source-imports 0
 world-types 11
-world-functions 4
-world-abis 4
+world-functions 5
+world-abis 5
 projected-types 7
 lowered fn_0 encode-utf8 1 blocks
 lowered fn_1 decode-utf8 1 blocks
 lowered fn_2 encode-float 1 blocks
 lowered fn_3 decode-float 1 blocks
+lowered fn_4 digest-bytes 1 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts

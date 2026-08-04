@@ -271,6 +271,9 @@
   (Utf8DecodeV0
     [arena-id: NativeId
      source-id: NativeId])
+  (Sha256BytesV0
+    [arena-id: NativeId
+     source-id: NativeId])
   (FloatToBitsV0 [source-id: NativeId])
   (FloatFromBitsV0 [source-id: NativeId]))
 
@@ -1322,6 +1325,7 @@
   (match operation
     [(Utf8EncodeV0 arena-id source-id) [arena-id source-id]]
     [(Utf8DecodeV0 arena-id source-id) [arena-id source-id]]
+    [(Sha256BytesV0 arena-id source-id) [arena-id source-id]]
     [(FloatToBitsV0 source-id) [source-id]]
     [(FloatFromBitsV0 source-id) [source-id]]))
 

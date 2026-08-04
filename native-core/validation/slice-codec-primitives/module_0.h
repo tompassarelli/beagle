@@ -40,5 +40,6 @@ native_m0_type_6 native_m0_fn_0(native_arena *arena, const native_capability *ca
 native_m0_type_3 native_m0_fn_1(native_arena *arena, const native_capability *capability, native_m0_type_6 native_v_0);
 native_m0_type_1 native_m0_fn_2(native_m0_type_2 native_v_0);
 native_m0_type_2 native_m0_fn_3(native_m0_type_1 native_v_0);
+native_m0_type_3 native_m0_fn_4(native_arena *arena, const native_capability *capability, native_m0_type_6 native_v_0);
 
 #endif

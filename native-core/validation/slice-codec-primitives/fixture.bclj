@@ -13,3 +13,6 @@
 
 (defn decode-float [value: Int] -> Float
   (float-from-bits value))
+
+(defn digest-bytes [value: (Vec Int)] -> String
+  (sha256-bytes value))

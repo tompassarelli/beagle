@@ -2486,14 +2486,22 @@ native_vec *native_utf8_encode(native_arena *arena, uint64_t source) {
   return result;
 }
 
-static uint8_t native_utf8_vector_byte(const native_vec *source,
-                                       int64_t index) {
-  int64_t value;
+static void native_byte_vector_check(const native_vec *source) {
   if ((source == NULL) || (source->length < INT64_C(0)) ||
       (source->capacity < source->length) ||
       ((source->capacity == INT64_C(0)) && (source->elements != NULL)) ||
-      ((source->capacity > INT64_C(0)) && (source->elements == NULL)) ||
-      (index < INT64_C(0)) || (index >= source->length)) {
+      ((source->capacity > INT64_C(0)) && (source->elements == NULL))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  if ((uint64_t)source->length > ((uint64_t)SIZE_MAX / sizeof(int64_t))) {
+    native_trap(NATIVE_TRAP_OVERFLOW);
+  }
+}
+
+static uint8_t native_vector_byte(const native_vec *source, int64_t index) {
+  int64_t value;
+  native_byte_vector_check(source);
+  if ((index < INT64_C(0)) || (index >= source->length)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
   memcpy(&value, (const uint8_t *)source->elements + (size_t)(index * INT64_C(8)),
@@ -2513,10 +2521,157 @@ uint64_t native_utf8_decode(native_arena *arena, const native_vec *source) {
   }
   result = native_text_alloc(arena, (uint64_t)source->length, &destination);
   for (index = INT64_C(0); index < source->length; index++) {
-    destination[index] = native_utf8_vector_byte(source, index);
+    destination[index] = native_vector_byte(source, index);
   }
   if (!native_utf8_valid(destination, (uint64_t)source->length)) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  return result;
+}
+
+static uint32_t native_sha256_rotate_right(uint32_t value, uint32_t count) {
+  return (value >> count) | (value << (UINT32_C(32) - count));
+}
+
+static uint32_t native_sha256_load_be32(const uint8_t *source) {
+  return ((uint32_t)source[0] << UINT32_C(24)) |
+         ((uint32_t)source[1] << UINT32_C(16)) |
+         ((uint32_t)source[2] << UINT32_C(8)) | (uint32_t)source[3];
+}
+
+static void native_sha256_transform(uint32_t state[8],
+                                    const uint8_t block[64]) {
+  static const uint32_t constants[64] = {
+      UINT32_C(0x428a2f98), UINT32_C(0x71374491), UINT32_C(0xb5c0fbcf),
+      UINT32_C(0xe9b5dba5), UINT32_C(0x3956c25b), UINT32_C(0x59f111f1),
+      UINT32_C(0x923f82a4), UINT32_C(0xab1c5ed5), UINT32_C(0xd807aa98),
+      UINT32_C(0x12835b01), UINT32_C(0x243185be), UINT32_C(0x550c7dc3),
+      UINT32_C(0x72be5d74), UINT32_C(0x80deb1fe), UINT32_C(0x9bdc06a7),
+      UINT32_C(0xc19bf174), UINT32_C(0xe49b69c1), UINT32_C(0xefbe4786),
+      UINT32_C(0x0fc19dc6), UINT32_C(0x240ca1cc), UINT32_C(0x2de92c6f),
+      UINT32_C(0x4a7484aa), UINT32_C(0x5cb0a9dc), UINT32_C(0x76f988da),
+      UINT32_C(0x983e5152), UINT32_C(0xa831c66d), UINT32_C(0xb00327c8),
+      UINT32_C(0xbf597fc7), UINT32_C(0xc6e00bf3), UINT32_C(0xd5a79147),
+      UINT32_C(0x06ca6351), UINT32_C(0x14292967), UINT32_C(0x27b70a85),
+      UINT32_C(0x2e1b2138), UINT32_C(0x4d2c6dfc), UINT32_C(0x53380d13),
+      UINT32_C(0x650a7354), UINT32_C(0x766a0abb), UINT32_C(0x81c2c92e),
+      UINT32_C(0x92722c85), UINT32_C(0xa2bfe8a1), UINT32_C(0xa81a664b),
+      UINT32_C(0xc24b8b70), UINT32_C(0xc76c51a3), UINT32_C(0xd192e819),
+      UINT32_C(0xd6990624), UINT32_C(0xf40e3585), UINT32_C(0x106aa070),
+      UINT32_C(0x19a4c116), UINT32_C(0x1e376c08), UINT32_C(0x2748774c),
+      UINT32_C(0x34b0bcb5), UINT32_C(0x391c0cb3), UINT32_C(0x4ed8aa4a),
+      UINT32_C(0x5b9cca4f), UINT32_C(0x682e6ff3), UINT32_C(0x748f82ee),
+      UINT32_C(0x78a5636f), UINT32_C(0x84c87814), UINT32_C(0x8cc70208),
+      UINT32_C(0x90befffa), UINT32_C(0xa4506ceb), UINT32_C(0xbef9a3f7),
+      UINT32_C(0xc67178f2)};
+  uint32_t words[64];
+  uint32_t a = state[0];
+  uint32_t b = state[1];
+  uint32_t c = state[2];
+  uint32_t d = state[3];
+  uint32_t e = state[4];
+  uint32_t f = state[5];
+  uint32_t g = state[6];
+  uint32_t h = state[7];
+  uint32_t index;
+
+  for (index = UINT32_C(0); index < UINT32_C(16); index++) {
+    words[index] = native_sha256_load_be32(
+        block + ((size_t)index * (size_t)4U));
+  }
+  for (index = UINT32_C(16); index < UINT32_C(64); index++) {
+    uint32_t left = words[index - UINT32_C(15)];
+    uint32_t right = words[index - UINT32_C(2)];
+    uint32_t sigma0 = native_sha256_rotate_right(left, UINT32_C(7)) ^
+                      native_sha256_rotate_right(left, UINT32_C(18)) ^
+                      (left >> UINT32_C(3));
+    uint32_t sigma1 = native_sha256_rotate_right(right, UINT32_C(17)) ^
+                      native_sha256_rotate_right(right, UINT32_C(19)) ^
+                      (right >> UINT32_C(10));
+    words[index] = words[index - UINT32_C(16)] + sigma0 +
+                   words[index - UINT32_C(7)] + sigma1;
+  }
+
+  for (index = UINT32_C(0); index < UINT32_C(64); index++) {
+    uint32_t sum1 = native_sha256_rotate_right(e, UINT32_C(6)) ^
+                    native_sha256_rotate_right(e, UINT32_C(11)) ^
+                    native_sha256_rotate_right(e, UINT32_C(25));
+    uint32_t choice = (e & f) ^ ((~e) & g);
+    uint32_t temp1 = h + sum1 + choice + constants[index] + words[index];
+    uint32_t sum0 = native_sha256_rotate_right(a, UINT32_C(2)) ^
+                    native_sha256_rotate_right(a, UINT32_C(13)) ^
+                    native_sha256_rotate_right(a, UINT32_C(22));
+    uint32_t majority = (a & b) ^ (a & c) ^ (b & c);
+    uint32_t temp2 = sum0 + majority;
+    h = g;
+    g = f;
+    f = e;
+    e = d + temp1;
+    d = c;
+    c = b;
+    b = a;
+    a = temp1 + temp2;
+  }
+
+  state[0] += a;
+  state[1] += b;
+  state[2] += c;
+  state[3] += d;
+  state[4] += e;
+  state[5] += f;
+  state[6] += g;
+  state[7] += h;
+}
+
+uint64_t native_sha256_bytes(native_arena *arena, const native_vec *source) {
+  static const uint8_t hex[] = "0123456789abcdef";
+  uint32_t state[8] = {UINT32_C(0x6a09e667), UINT32_C(0xbb67ae85),
+                       UINT32_C(0x3c6ef372), UINT32_C(0xa54ff53a),
+                       UINT32_C(0x510e527f), UINT32_C(0x9b05688c),
+                       UINT32_C(0x1f83d9ab), UINT32_C(0x5be0cd19)};
+  uint8_t block[64];
+  uint8_t *destination;
+  uint64_t result;
+  uint64_t bit_length;
+  int64_t offset = INT64_C(0);
+  int64_t remaining;
+  int64_t index;
+
+  native_byte_vector_check(source);
+  while ((source->length - offset) >= INT64_C(64)) {
+    for (index = INT64_C(0); index < INT64_C(64); index++) {
+      block[index] = native_vector_byte(source, offset + index);
+    }
+    native_sha256_transform(state, block);
+    offset += INT64_C(64);
+  }
+
+  remaining = source->length - offset;
+  memset(block, 0, sizeof block);
+  for (index = INT64_C(0); index < remaining; index++) {
+    block[index] = native_vector_byte(source, offset + index);
+  }
+  block[remaining] = UINT8_C(0x80);
+  if (remaining >= INT64_C(56)) {
+    native_sha256_transform(state, block);
+    memset(block, 0, sizeof block);
+  }
+  bit_length = (uint64_t)source->length * UINT64_C(8);
+  for (index = INT64_C(0); index < INT64_C(8); index++) {
+    block[INT64_C(63) - index] =
+        (uint8_t)(bit_length >> ((uint32_t)index * UINT32_C(8)));
+  }
+  native_sha256_transform(state, block);
+
+  result = native_text_alloc(arena, UINT64_C(64), &destination);
+  for (index = INT64_C(0); index < INT64_C(8); index++) {
+    uint32_t word = state[index];
+    int64_t digit;
+    for (digit = INT64_C(0); digit < INT64_C(8); digit++) {
+      uint32_t shift = UINT32_C(28) - ((uint32_t)digit * UINT32_C(4));
+      destination[(index * INT64_C(8)) + digit] =
+          hex[(word >> shift) & UINT32_C(0x0f)];
+    }
   }
   return result;
 }

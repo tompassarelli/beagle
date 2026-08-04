@@ -3174,7 +3174,8 @@
         (let [operation: core/CodecPrimitiveOpV0
               (core/codecprimitiveinstructionv0-operation instruction)]
           (or (instance? native.core.Utf8EncodeV0 operation)
-            (instance? native.core.Utf8DecodeV0 operation))))
+            (instance? native.core.Utf8DecodeV0 operation)
+            (instance? native.core.Sha256BytesV0 operation))))
       (and (instance? native.core.ExternCallInstruction instruction)
         (some? (core/externcallinstruction-arena-id instruction)))
       (and (instance? native.core.TextBuiltinInstruction instruction)
@@ -6686,6 +6687,22 @@
                 (fail-result current
                   "TODO-NATIVE-UTF8-DECODE-OPERAND: utf8-decode takes one native Vec Int value")
 
+                (and (= "sha256-bytes" callee) (= 1 (count values))
+                  (int-vector-value? types (nth value-types 0)))
+                (let [result-id: core/NativeId
+                      (state-id current owner "sha256-bytes")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->CodecPrimitiveInstructionV0
+                        (core/->SsaValueV0 result-id (text-type-id))
+                        (core/->Sha256BytesV0 (arena-value-id owner)
+                          (nth values 0))))
+                    result-id (text-type-id) false))
+
+                (= "sha256-bytes" callee)
+                (fail-result current
+                  "TODO-NATIVE-SHA256-BYTES-OPERAND: sha256-bytes takes one native Vec Int value")
+
                 (and (= "float-to-bits" callee) (= 1 (count values))
                   (same-id? (nth value-types 0) (type-id "Float")))
                 (let [result-id: core/NativeId
@@ -9854,6 +9871,9 @@
        [(id-value arena-id) (id-value source-id)])]
     [(Utf8DecodeV0 arena-id source-id)
      (worlds/canonical-record "utf8-decode-v0"
+       [(id-value arena-id) (id-value source-id)])]
+    [(Sha256BytesV0 arena-id source-id)
+     (worlds/canonical-record "sha256-bytes-v0"
        [(id-value arena-id) (id-value source-id)])]
     [(FloatToBitsV0 source-id)
      (worlds/canonical-record "float-to-bits-v0" [(id-value source-id)])]

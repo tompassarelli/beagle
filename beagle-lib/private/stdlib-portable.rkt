@@ -76,6 +76,8 @@
    (type-fn (list (p 'String)) #f (type-app 'Vec (list (p 'Int))))
    'utf8-decode
    (type-fn (list (type-app 'Vec (list (p 'Int)))) #f (p 'String))
+   'sha256-bytes
+   (type-fn (list (type-app 'Vec (list (p 'Int)))) #f (p 'String))
    'float-to-bits (fn-of '(Float) 'Int)
    'float-from-bits (fn-of '(Int) 'Float)
    ;; --- math (variadic on Int; Clojure's are polymorphic, v0 narrows) -----

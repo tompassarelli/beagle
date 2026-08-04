@@ -1776,6 +1776,12 @@
             ", "
             (value-name function slots (core/utf8decodev0-source-id operation))
             ");\n")
+          (instance? native.core.Sha256BytesV0 operation)
+          (str "  " target " = native_sha256_bytes((native_arena *)"
+            (value-name function slots (core/sha256bytesv0-arena-id operation))
+            ", "
+            (value-name function slots (core/sha256bytesv0-source-id operation))
+            ");\n")
           (instance? native.core.FloatToBitsV0 operation)
           (str "  " target " = native_float_to_bits("
             (value-name function slots (core/floattobitsv0-source-id operation))

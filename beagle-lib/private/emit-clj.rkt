@@ -89,6 +89,30 @@
 (define current-emit-scalar-fns (make-parameter (set)))
 ;; Unqualified imported symbol → module prefix (for qualifying in output)
 (define current-emit-symbol-ns (make-parameter (hasheq)))
+(define current-emit-local-names (make-parameter (set)))
+
+(define clj-sha256-runtime
+  #<<CLJ
+(defn- beagle$sha256_bytes_v0 [values]
+  (when-not (vector? values)
+    (throw (ex-info "sha256-bytes requires a Vec Int"
+                    {:value values})))
+  (let [raw (byte-array
+             (map-indexed
+              (fn [index value]
+                (if (and (integer? value) (<= 0 value 255))
+                  (unchecked-byte value)
+                  (throw
+                   (ex-info "sha256-bytes requires byte values from 0 through 255"
+                            {:index index :value value}))))
+              values))
+        digest (.digest (java.security.MessageDigest/getInstance "SHA-256") raw)]
+    (apply str
+           (map (fn [value]
+                  (format "%02x" (bit-and (int value) 255)))
+                digest))))
+CLJ
+  )
 
 (define (emit-srcloc loc)
   (define src (src-loc-source loc))
@@ -173,6 +197,16 @@
   (for/fold ([s local]) ([sym (in-list (program-imported-scalar-fns prog))])
     (set-add s sym)))
 
+(define (build-local-names prog)
+  (for/fold ([names (set)]) ([form (in-list (program-forms prog))])
+    (cond
+      [(def-form? form) (set-add names (def-form-name form))]
+      [(defonce-form? form) (set-add names (defonce-form-name form))]
+      [(defn-form? form) (set-add names (defn-form-name form))]
+      [(defn-multi? form) (set-add names (defn-multi-name form))]
+      [(defmulti-form? form) (set-add names (defmulti-form-name form))]
+      [else names])))
+
 ;; --- inline `:- T` lowering ------------------------------------------
 ;;
 ;; v0.16 carries type information directly on def-form / defonce-form /
@@ -235,6 +269,7 @@
                   (program-semantic-contracts prog)]
                  [current-emit-scalar-fns (build-scalar-fns prog)]
                  [current-emit-symbol-ns (program-imported-symbol-ns prog)]
+                 [current-emit-local-names (build-local-names prog)]
                  [match-counter (box 0)])   ; fresh per program -> deterministic match temps
     ;; Emit body first so we can detect str/ usage for auto-requires.
     (define body
@@ -244,9 +279,14 @@
        "\n\n"))
     (define needs-clj-string?
       (regexp-match? #rx"[( \t\n]str/" body))
+    (define needs-sha256-runtime?
+      (string-contains? body "beagle$sha256_bytes_v0"))
     (string-append
      (emit-ns prog #:needs-clj-string? needs-clj-string?)
      "\n\n"
+     (if needs-sha256-runtime?
+         (string-append clj-sha256-runtime "\n")
+         "")
      body
      "\n")))
 
@@ -761,6 +801,11 @@
        [(and (set-member? (current-emit-scalar-fns) fn-sym)
              (= 1 (length (call-form-args e))))
         (emit-expr (car (call-form-args e)))]
+       [(and (eq? fn-sym 'sha256-bytes)
+             (= 1 (length (call-form-args e)))
+             (not (set-member? (current-emit-local-names) fn-sym)))
+        (format "(beagle$sha256_bytes_v0 ~a)"
+                (emit-expr (car (call-form-args e))))]
        [else
         (define qualified-str
           (if (symbol? fn-sym)

@@ -3,6 +3,12 @@
 #include <math.h>
 #include <string.h>
 
+static int text_equals(uint64_t value, const char *expected) {
+  size_t length = strlen(expected);
+  return (native_text_length(value) == (uint64_t)length) &&
+         (memcmp(native_text_bytes(value), expected, length) == 0);
+}
+
 int main(int argc, char **argv) {
   uint8_t storage[4096];
   native_arena arena;
@@ -45,12 +51,34 @@ int main(int argc, char **argv) {
   if (!signbit(native_m0_fn_3(INT64_MIN))) {
     return 6;
   }
+  {
+    native_vec empty = {NULL, INT64_C(0), INT64_C(0)};
+    int64_t abc_values[] = {INT64_C(97), INT64_C(98), INT64_C(99)};
+    native_vec abc = {abc_values, INT64_C(3), INT64_C(3)};
+    if (!text_equals(
+            native_m0_fn_4(&arena, &capability, &empty),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")) {
+      return 7;
+    }
+    if (!text_equals(
+            native_m0_fn_4(&arena, &capability, &abc),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")) {
+      return 8;
+    }
+  }
 
   if (argc > 1) {
-    int64_t invalid_bytes[] = {INT64_C(0xc0), INT64_C(0x80)};
-    native_vec invalid = {invalid_bytes, INT64_C(2), INT64_C(2)};
-    (void)native_m0_fn_1(&arena, &capability, &invalid);
-    return 7;
+    if (strcmp(argv[1], "invalid-sha") == 0) {
+      int64_t invalid_sha_bytes[] = {INT64_C(256)};
+      native_vec invalid_sha = {invalid_sha_bytes, INT64_C(1), INT64_C(1)};
+      (void)native_m0_fn_4(&arena, &capability, &invalid_sha);
+      return 9;
+    } else {
+      int64_t invalid_utf8_bytes[] = {INT64_C(0xc0), INT64_C(0x80)};
+      native_vec invalid_utf8 = {invalid_utf8_bytes, INT64_C(2), INT64_C(2)};
+      (void)native_m0_fn_1(&arena, &capability, &invalid_utf8);
+      return 10;
+    }
   }
   return 0;
 }
