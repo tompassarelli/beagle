@@ -1,12 +1,12 @@
 stage source-seal ACCEPTED
 stage source-to-typed ACCEPTED
-stage typed-to-native PENDING
+stage typed-to-native COMPLETE
 source-modules 1
 source-imports 1
-world-types 39
-world-functions 13
-world-abis 13
-projected-types 10
+world-types 50
+world-functions 25
+world-abis 25
+projected-types 44
 lowered fn_0 str-index-of 1 blocks
 lowered fn_1 split-comma 1 blocks
 lowered fn_2 str-lt? 1 blocks
@@ -17,9 +17,21 @@ lowered fn_6 filter-digits 1 blocks
 lowered fn_7 is-iso-datetime-19 4 blocks
 lowered fn_8 is-iso-datetime-16 4 blocks
 lowered fn_9 repeat-str 4 blocks
-lowered fn_10 digest? 4 blocks
-lowered fn_11 nonblank? 4 blocks
-lowered fn_12 coord-status-down 1 blocks
+lowered fn_10 edit-batch-envelope-marker? 4 blocks
+lowered fn_11 digest? 4 blocks
+lowered fn_12 nonblank? 4 blocks
+lowered fn_13 generation-record? 16 blocks
+lowered fn_14 valid-edit-batch-envelope? 117 blocks
+lowered fn_15 classify-rewrite-crash 43 blocks
+lowered fn_16 log-envelope 13 blocks
+lowered fn_17 reject-message 1 blocks
+lowered fn_18 coord-write-response 44 blocks
+lowered fn_19 coord-version-response 23 blocks
+lowered fn_20 coord-version-for-log-response 23 blocks
+lowered fn_21 coord-status-response 21 blocks
+lowered fn_22 coord-status-down 1 blocks
+lowered fn_23 warm-read-response 12 blocks
+lowered fn_24 warm-read-for-log-response 12 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts
@@ -27,17 +39,5 @@ obligation-projection PASS checked-arithmetic
 obligation-projection PASS legal-abi
 obligation-projection PASS discharged-tokens
 obligation-projection PASS bounded-effects
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-contains?: no native lowering for this callee [edit-batch-envelope-marker?]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [generation-record?]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [valid-edit-batch-envelope?]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-COMPARE-OPERANDS: = has no native comparison for these operand types [classify-rewrite-crash]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-MAP-LITERAL-ITEMS: keys and values must each share one native type [log-envelope]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-STR-OPERANDS: str concatenates one or more native Text or Int operands [reject-message]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [coord-write-response]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [coord-version-response]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [coord-version-for-log-response]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [coord-status-response]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [warm-read-response]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [warm-read-for-log-response]
 materialize OK module_0.h module_0.c
-qbe-materialize REFUSED native world uses a shape outside the QBE materializer's slice
+qbe-materialize REFUSED unsupported native value-semantics op: equal

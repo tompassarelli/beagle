@@ -40,15 +40,1075 @@ _Static_assert(offsetof(struct native_m0_text_11_blob, bytes) == 8, "text blob i
 struct native_m0_text_12_blob { uint64_t length; uint8_t bytes[sizeof "[0-9a-f]{64}"]; };
 static const struct native_m0_text_12_blob native_m0_text_12 = { (uint64_t)(sizeof "[0-9a-f]{64}" - 1U), "[0-9a-f]{64}" };
 _Static_assert(offsetof(struct native_m0_text_12_blob, bytes) == 8, "text blob is length-prefixed");
-struct native_m0_text_13_blob { uint64_t length; uint8_t bytes[sizeof "coordinator DOWN on 127.0.0.1:"]; };
-static const struct native_m0_text_13_blob native_m0_text_13 = { (uint64_t)(sizeof "coordinator DOWN on 127.0.0.1:" - 1U), "coordinator DOWN on 127.0.0.1:" };
+struct native_m0_text_13_blob { uint64_t length; uint8_t bytes[sizeof "@log:gen"]; };
+static const struct native_m0_text_13_blob native_m0_text_13 = { (uint64_t)(sizeof "@log:gen" - 1U), "@log:gen" };
 _Static_assert(offsetof(struct native_m0_text_13_blob, bytes) == 8, "text blob is length-prefixed");
-struct native_m0_text_14_blob { uint64_t length; uint8_t bytes[sizeof " — start it with bin/fram-up"]; };
-static const struct native_m0_text_14_blob native_m0_text_14 = { (uint64_t)(sizeof " — start it with bin/fram-up" - 1U), " — start it with bin/fram-up" };
+struct native_m0_text_14_blob { uint64_t length; uint8_t bytes[sizeof "generation"]; };
+static const struct native_m0_text_14_blob native_m0_text_14 = { (uint64_t)(sizeof "generation" - 1U), "generation" };
 _Static_assert(offsetof(struct native_m0_text_14_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_15_blob { uint64_t length; uint8_t bytes[sizeof "; "]; };
+static const struct native_m0_text_15_blob native_m0_text_15 = { (uint64_t)(sizeof "; " - 1U), "; " };
+_Static_assert(offsetof(struct native_m0_text_15_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_16_blob { uint64_t length; uint8_t bytes[sizeof "ok:"]; };
+static const struct native_m0_text_16_blob native_m0_text_16 = { (uint64_t)(sizeof "ok:" - 1U), "ok:" };
+_Static_assert(offsetof(struct native_m0_text_16_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_17_blob { uint64_t length; uint8_t bytes[sizeof "conflict"]; };
+static const struct native_m0_text_17_blob native_m0_text_17 = { (uint64_t)(sizeof "conflict" - 1U), "conflict" };
+_Static_assert(offsetof(struct native_m0_text_17_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_18_blob { uint64_t length; uint8_t bytes[sizeof "log-mismatch: expected "]; };
+static const struct native_m0_text_18_blob native_m0_text_18 = { (uint64_t)(sizeof "log-mismatch: expected " - 1U), "log-mismatch: expected " };
+_Static_assert(offsetof(struct native_m0_text_18_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_19_blob { uint64_t length; uint8_t bytes[sizeof "; daemon serves "]; };
+static const struct native_m0_text_19_blob native_m0_text_19 = { (uint64_t)(sizeof "; daemon serves " - 1U), "; daemon serves " };
+_Static_assert(offsetof(struct native_m0_text_19_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_20_blob { uint64_t length; uint8_t bytes[sizeof "unknown op"]; };
+static const struct native_m0_text_20_blob native_m0_text_20 = { (uint64_t)(sizeof "unknown op" - 1U), "unknown op" };
+_Static_assert(offsetof(struct native_m0_text_20_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_21_blob { uint64_t length; uint8_t bytes[sizeof "protocol-incompatible"]; };
+static const struct native_m0_text_21_blob native_m0_text_21 = { (uint64_t)(sizeof "protocol-incompatible" - 1U), "protocol-incompatible" };
+_Static_assert(offsetof(struct native_m0_text_21_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_22_blob { uint64_t length; uint8_t bytes[sizeof "reject:"]; };
+static const struct native_m0_text_22_blob native_m0_text_22 = { (uint64_t)(sizeof "reject:" - 1U), "reject:" };
+_Static_assert(offsetof(struct native_m0_text_22_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_23_blob { uint64_t length; uint8_t bytes[sizeof "error:"]; };
+static const struct native_m0_text_23_blob native_m0_text_23 = { (uint64_t)(sizeof "error:" - 1U), "error:" };
+_Static_assert(offsetof(struct native_m0_text_23_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_24_blob { uint64_t length; uint8_t bytes[sizeof "coordinator UP on 127.0.0.1:"]; };
+static const struct native_m0_text_24_blob native_m0_text_24 = { (uint64_t)(sizeof "coordinator UP on 127.0.0.1:" - 1U), "coordinator UP on 127.0.0.1:" };
+_Static_assert(offsetof(struct native_m0_text_24_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_25_blob { uint64_t length; uint8_t bytes[sizeof " (v"]; };
+static const struct native_m0_text_25_blob native_m0_text_25 = { (uint64_t)(sizeof " (v" - 1U), " (v" };
+_Static_assert(offsetof(struct native_m0_text_25_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_26_blob { uint64_t length; uint8_t bytes[sizeof ")"]; };
+static const struct native_m0_text_26_blob native_m0_text_26 = { (uint64_t)(sizeof ")" - 1U), ")" };
+_Static_assert(offsetof(struct native_m0_text_26_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_27_blob { uint64_t length; uint8_t bytes[sizeof "coordinator WRONG LOG on 127.0.0.1:"]; };
+static const struct native_m0_text_27_blob native_m0_text_27 = { (uint64_t)(sizeof "coordinator WRONG LOG on 127.0.0.1:" - 1U), "coordinator WRONG LOG on 127.0.0.1:" };
+_Static_assert(offsetof(struct native_m0_text_27_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_28_blob { uint64_t length; uint8_t bytes[sizeof " — expected "]; };
+static const struct native_m0_text_28_blob native_m0_text_28 = { (uint64_t)(sizeof " — expected " - 1U), " — expected " };
+_Static_assert(offsetof(struct native_m0_text_28_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_29_blob { uint64_t length; uint8_t bytes[sizeof "; refusing fenced reads and writes"]; };
+static const struct native_m0_text_29_blob native_m0_text_29 = { (uint64_t)(sizeof "; refusing fenced reads and writes" - 1U), "; refusing fenced reads and writes" };
+_Static_assert(offsetof(struct native_m0_text_29_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_30_blob { uint64_t length; uint8_t bytes[sizeof "coordinator INCOMPATIBLE on 127.0.0.1:"]; };
+static const struct native_m0_text_30_blob native_m0_text_30 = { (uint64_t)(sizeof "coordinator INCOMPATIBLE on 127.0.0.1:" - 1U), "coordinator INCOMPATIBLE on 127.0.0.1:" };
+_Static_assert(offsetof(struct native_m0_text_30_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_31_blob { uint64_t length; uint8_t bytes[sizeof " — daemon lacks required log-fence protocol; restart it with current Fram"]; };
+static const struct native_m0_text_31_blob native_m0_text_31 = { (uint64_t)(sizeof " — daemon lacks required log-fence protocol; restart it with current Fram" - 1U), " — daemon lacks required log-fence protocol; restart it with current Fram" };
+_Static_assert(offsetof(struct native_m0_text_31_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_32_blob { uint64_t length; uint8_t bytes[sizeof "coordinator UNUSABLE on 127.0.0.1:"]; };
+static const struct native_m0_text_32_blob native_m0_text_32 = { (uint64_t)(sizeof "coordinator UNUSABLE on 127.0.0.1:" - 1U), "coordinator UNUSABLE on 127.0.0.1:" };
+_Static_assert(offsetof(struct native_m0_text_32_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_33_blob { uint64_t length; uint8_t bytes[sizeof " — "]; };
+static const struct native_m0_text_33_blob native_m0_text_33 = { (uint64_t)(sizeof " — " - 1U), " — " };
+_Static_assert(offsetof(struct native_m0_text_33_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_34_blob { uint64_t length; uint8_t bytes[sizeof "coordinator DOWN on 127.0.0.1:"]; };
+static const struct native_m0_text_34_blob native_m0_text_34 = { (uint64_t)(sizeof "coordinator DOWN on 127.0.0.1:" - 1U), "coordinator DOWN on 127.0.0.1:" };
+_Static_assert(offsetof(struct native_m0_text_34_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_35_blob { uint64_t length; uint8_t bytes[sizeof " — start it with bin/fram-up"]; };
+static const struct native_m0_text_35_blob native_m0_text_35 = { (uint64_t)(sizeof " — start it with bin/fram-up" - 1U), " — start it with bin/fram-up" };
+_Static_assert(offsetof(struct native_m0_text_35_blob, bytes) == 8, "text blob is length-prefixed");
+static const uint8_t native_m0_keyword_0[] = "fram-edit-envelope";
+static const uint8_t native_m0_keyword_1[] = "l";
+static const uint8_t native_m0_keyword_2[] = "p";
+static const uint8_t native_m0_keyword_3[] = "fram-edit-seal-sha";
+static const uint8_t native_m0_keyword_4[] = "fram-edit-candidate";
+static const uint8_t native_m0_keyword_5[] = "fram-edit-line-count";
+static const uint8_t native_m0_keyword_6[] = "fram-edit-path";
+static const uint8_t native_m0_keyword_7[] = "fram-edit-ops";
+static const uint8_t native_m0_keyword_8[] = "fram-edit-ops-digest";
+static const uint8_t native_m0_keyword_9[] = "fram-edit-edn-digest";
+static const uint8_t native_m0_keyword_10[] = "fram-edit-base-version";
+static const uint8_t native_m0_keyword_11[] = "fram-edit-installed";
+static const uint8_t native_m0_keyword_12[] = "fram-edit-log";
+static const uint8_t native_m0_keyword_13[] = "fram-edit-final-version";
+static const uint8_t native_m0_keyword_14[] = "fram-edit-module";
+static const uint8_t native_m0_keyword_15[] = "fram-edit-batch-sha";
+static const uint8_t native_m0_keyword_16[] = "fram-edit-batch";
+static const uint8_t native_m0_keyword_17[] = "roll-back";
+static const uint8_t native_m0_keyword_18[] = "roll-forward";
+static const uint8_t native_m0_keyword_19[] = "op";
+static const uint8_t native_m0_keyword_20[] = "for-log";
+static const uint8_t native_m0_keyword_21[] = "expected-log";
+static const uint8_t native_m0_keyword_22[] = "request";
+static const uint8_t native_m0_keyword_23[] = "fmt";
+static const uint8_t native_m0_keyword_24[] = "ok";
+static const uint8_t native_m0_keyword_25[] = "reject";
+static const uint8_t native_m0_keyword_26[] = "conflict";
+static const uint8_t native_m0_keyword_27[] = "code";
+static const uint8_t native_m0_keyword_28[] = "log-mismatch";
+static const uint8_t native_m0_keyword_29[] = "served-log";
+static const uint8_t native_m0_keyword_30[] = "error";
+static const uint8_t native_m0_keyword_31[] = "version";
+static const native_value_keyword_descriptor native_m0_value_keywords[] = {
+  { .bytes = native_m0_keyword_0, .length = sizeof native_m0_keyword_0 - 1U },
+  { .bytes = native_m0_keyword_1, .length = sizeof native_m0_keyword_1 - 1U },
+  { .bytes = native_m0_keyword_2, .length = sizeof native_m0_keyword_2 - 1U },
+  { .bytes = native_m0_keyword_3, .length = sizeof native_m0_keyword_3 - 1U },
+  { .bytes = native_m0_keyword_4, .length = sizeof native_m0_keyword_4 - 1U },
+  { .bytes = native_m0_keyword_5, .length = sizeof native_m0_keyword_5 - 1U },
+  { .bytes = native_m0_keyword_6, .length = sizeof native_m0_keyword_6 - 1U },
+  { .bytes = native_m0_keyword_7, .length = sizeof native_m0_keyword_7 - 1U },
+  { .bytes = native_m0_keyword_8, .length = sizeof native_m0_keyword_8 - 1U },
+  { .bytes = native_m0_keyword_9, .length = sizeof native_m0_keyword_9 - 1U },
+  { .bytes = native_m0_keyword_10, .length = sizeof native_m0_keyword_10 - 1U },
+  { .bytes = native_m0_keyword_11, .length = sizeof native_m0_keyword_11 - 1U },
+  { .bytes = native_m0_keyword_12, .length = sizeof native_m0_keyword_12 - 1U },
+  { .bytes = native_m0_keyword_13, .length = sizeof native_m0_keyword_13 - 1U },
+  { .bytes = native_m0_keyword_14, .length = sizeof native_m0_keyword_14 - 1U },
+  { .bytes = native_m0_keyword_15, .length = sizeof native_m0_keyword_15 - 1U },
+  { .bytes = native_m0_keyword_16, .length = sizeof native_m0_keyword_16 - 1U },
+  { .bytes = native_m0_keyword_17, .length = sizeof native_m0_keyword_17 - 1U },
+  { .bytes = native_m0_keyword_18, .length = sizeof native_m0_keyword_18 - 1U },
+  { .bytes = native_m0_keyword_19, .length = sizeof native_m0_keyword_19 - 1U },
+  { .bytes = native_m0_keyword_20, .length = sizeof native_m0_keyword_20 - 1U },
+  { .bytes = native_m0_keyword_21, .length = sizeof native_m0_keyword_21 - 1U },
+  { .bytes = native_m0_keyword_22, .length = sizeof native_m0_keyword_22 - 1U },
+  { .bytes = native_m0_keyword_23, .length = sizeof native_m0_keyword_23 - 1U },
+  { .bytes = native_m0_keyword_24, .length = sizeof native_m0_keyword_24 - 1U },
+  { .bytes = native_m0_keyword_25, .length = sizeof native_m0_keyword_25 - 1U },
+  { .bytes = native_m0_keyword_26, .length = sizeof native_m0_keyword_26 - 1U },
+  { .bytes = native_m0_keyword_27, .length = sizeof native_m0_keyword_27 - 1U },
+  { .bytes = native_m0_keyword_28, .length = sizeof native_m0_keyword_28 - 1U },
+  { .bytes = native_m0_keyword_29, .length = sizeof native_m0_keyword_29 - 1U },
+  { .bytes = native_m0_keyword_30, .length = sizeof native_m0_keyword_30 - 1U },
+  { .bytes = native_m0_keyword_31, .length = sizeof native_m0_keyword_31 - 1U },
+};
 
-native_m0_type_9 native_m0_fn_0(native_m0_type_3 native_v_0, native_m0_type_3 native_v_1) {
-  native_m0_type_9 native_s_0;
+extern const native_value_descriptor native_m0_value_0;
+extern const native_value_descriptor native_m0_value_1;
+extern const native_value_descriptor native_m0_value_2;
+extern const native_value_descriptor native_m0_value_3;
+extern const native_value_descriptor native_m0_value_4;
+extern const native_value_descriptor native_m0_value_5;
+extern const native_value_descriptor native_m0_value_6;
+extern const native_value_descriptor native_m0_value_7;
+extern const native_value_descriptor native_m0_value_8;
+extern const native_value_descriptor native_m0_value_9;
+extern const native_value_descriptor native_m0_value_10;
+extern const native_value_descriptor native_m0_value_11;
+extern const native_value_descriptor native_m0_value_12;
+extern const native_value_descriptor native_m0_value_13;
+extern const native_value_descriptor native_m0_value_14;
+extern const native_value_descriptor native_m0_value_15;
+extern const native_value_descriptor native_m0_value_16;
+extern const native_value_descriptor native_m0_value_17;
+extern const native_value_descriptor native_m0_value_18;
+extern const native_value_descriptor native_m0_value_19;
+extern const native_value_descriptor native_m0_value_20;
+extern const native_value_descriptor native_m0_value_21;
+extern const native_value_descriptor native_m0_value_22;
+extern const native_value_descriptor native_m0_value_23;
+extern const native_value_descriptor native_m0_value_24;
+extern const native_value_descriptor native_m0_value_25;
+extern const native_value_descriptor native_m0_value_26;
+extern const native_value_descriptor native_m0_value_27;
+extern const native_value_descriptor native_m0_value_28;
+extern const native_value_descriptor native_m0_value_29;
+extern const native_value_descriptor native_m0_value_30;
+extern const native_value_descriptor native_m0_value_31;
+extern const native_value_descriptor native_m0_value_32;
+extern const native_value_descriptor native_m0_value_33;
+extern const native_value_descriptor native_m0_value_34;
+extern const native_value_descriptor native_m0_value_35;
+extern const native_value_descriptor native_m0_value_36;
+extern const native_value_descriptor native_m0_value_37;
+extern const native_value_descriptor native_m0_value_38;
+extern const native_value_descriptor native_m0_value_39;
+extern const native_value_descriptor native_m0_value_40;
+extern const native_value_descriptor native_m0_value_41;
+extern const native_value_descriptor native_m0_value_42;
+extern const native_value_descriptor native_m0_value_43;
+
+static const native_value_variant_descriptor native_m0_value_7_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_2 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
+  { .tag = INT64_C(2), .payload_offset = (size_t)8, .payload = &native_m0_value_3 },
+  { .tag = INT64_C(3), .payload_offset = (size_t)8, .payload = &native_m0_value_4 },
+  { .tag = INT64_C(4), .payload_offset = (size_t)8, .payload = &native_m0_value_5 },
+  { .tag = INT64_C(5), .payload_offset = (size_t)8, .payload = NULL },
+};
+static const native_value_variant_descriptor native_m0_value_8_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = NULL },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = NULL },
+  { .tag = INT64_C(2), .payload_offset = (size_t)8, .payload = NULL },
+  { .tag = INT64_C(3), .payload_offset = (size_t)8, .payload = NULL },
+  { .tag = INT64_C(4), .payload_offset = (size_t)8, .payload = NULL },
+  { .tag = INT64_C(5), .payload_offset = (size_t)8, .payload = NULL },
+};
+static const native_value_variant_descriptor native_m0_value_9_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = NULL },
+};
+static const native_value_variant_descriptor native_m0_value_10_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = NULL },
+};
+static const native_value_variant_descriptor native_m0_value_11_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = NULL },
+};
+static const native_value_variant_descriptor native_m0_value_28_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_9 },
+};
+static const native_value_variant_descriptor native_m0_value_29_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_4 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
+};
+static const native_value_variant_descriptor native_m0_value_30_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_29 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_9 },
+};
+static const native_value_variant_descriptor native_m0_value_31_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_4 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
+  { .tag = INT64_C(2), .payload_offset = (size_t)8, .payload = &native_m0_value_2 },
+  { .tag = INT64_C(3), .payload_offset = (size_t)8, .payload = &native_m0_value_5 },
+  { .tag = INT64_C(4), .payload_offset = (size_t)8, .payload = &native_m0_value_9 },
+  { .tag = INT64_C(5), .payload_offset = (size_t)8, .payload = &native_m0_value_24 },
+  { .tag = INT64_C(6), .payload_offset = (size_t)8, .payload = &native_m0_value_26 },
+};
+static const native_value_variant_descriptor native_m0_value_32_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_4 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
+  { .tag = INT64_C(2), .payload_offset = (size_t)8, .payload = &native_m0_value_2 },
+  { .tag = INT64_C(3), .payload_offset = (size_t)8, .payload = &native_m0_value_5 },
+  { .tag = INT64_C(4), .payload_offset = (size_t)8, .payload = &native_m0_value_9 },
+  { .tag = INT64_C(5), .payload_offset = (size_t)8, .payload = &native_m0_value_24 },
+  { .tag = INT64_C(6), .payload_offset = (size_t)8, .payload = &native_m0_value_26 },
+  { .tag = INT64_C(7), .payload_offset = (size_t)8, .payload = &native_m0_value_18 },
+};
+static const native_value_variant_descriptor native_m0_value_33_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_4 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
+  { .tag = INT64_C(2), .payload_offset = (size_t)8, .payload = &native_m0_value_2 },
+  { .tag = INT64_C(3), .payload_offset = (size_t)8, .payload = &native_m0_value_5 },
+  { .tag = INT64_C(4), .payload_offset = (size_t)8, .payload = &native_m0_value_9 },
+  { .tag = INT64_C(5), .payload_offset = (size_t)8, .payload = &native_m0_value_24 },
+  { .tag = INT64_C(6), .payload_offset = (size_t)8, .payload = &native_m0_value_26 },
+  { .tag = INT64_C(7), .payload_offset = (size_t)8, .payload = &native_m0_value_18 },
+  { .tag = INT64_C(8), .payload_offset = (size_t)8, .payload = &native_m0_value_12 },
+};
+static const native_value_variant_descriptor native_m0_value_34_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_4 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
+  { .tag = INT64_C(2), .payload_offset = (size_t)8, .payload = &native_m0_value_3 },
+  { .tag = INT64_C(3), .payload_offset = (size_t)8, .payload = &native_m0_value_2 },
+  { .tag = INT64_C(4), .payload_offset = (size_t)8, .payload = &native_m0_value_5 },
+  { .tag = INT64_C(5), .payload_offset = (size_t)8, .payload = &native_m0_value_9 },
+};
+static const native_value_variant_descriptor native_m0_value_35_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_4 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
+  { .tag = INT64_C(2), .payload_offset = (size_t)8, .payload = &native_m0_value_3 },
+  { .tag = INT64_C(3), .payload_offset = (size_t)8, .payload = &native_m0_value_2 },
+  { .tag = INT64_C(4), .payload_offset = (size_t)8, .payload = &native_m0_value_5 },
+  { .tag = INT64_C(5), .payload_offset = (size_t)8, .payload = &native_m0_value_9 },
+  { .tag = INT64_C(6), .payload_offset = (size_t)8, .payload = &native_m0_value_24 },
+  { .tag = INT64_C(7), .payload_offset = (size_t)8, .payload = &native_m0_value_26 },
+};
+static const native_value_variant_descriptor native_m0_value_36_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_4 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
+  { .tag = INT64_C(2), .payload_offset = (size_t)8, .payload = &native_m0_value_3 },
+  { .tag = INT64_C(3), .payload_offset = (size_t)8, .payload = &native_m0_value_2 },
+  { .tag = INT64_C(4), .payload_offset = (size_t)8, .payload = &native_m0_value_5 },
+  { .tag = INT64_C(5), .payload_offset = (size_t)8, .payload = &native_m0_value_9 },
+  { .tag = INT64_C(6), .payload_offset = (size_t)8, .payload = &native_m0_value_24 },
+  { .tag = INT64_C(7), .payload_offset = (size_t)8, .payload = &native_m0_value_26 },
+  { .tag = INT64_C(8), .payload_offset = (size_t)8, .payload = &native_m0_value_19 },
+};
+static const native_value_variant_descriptor native_m0_value_37_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_4 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
+  { .tag = INT64_C(2), .payload_offset = (size_t)8, .payload = &native_m0_value_3 },
+  { .tag = INT64_C(3), .payload_offset = (size_t)8, .payload = &native_m0_value_2 },
+  { .tag = INT64_C(4), .payload_offset = (size_t)8, .payload = &native_m0_value_5 },
+  { .tag = INT64_C(5), .payload_offset = (size_t)8, .payload = &native_m0_value_9 },
+  { .tag = INT64_C(6), .payload_offset = (size_t)8, .payload = &native_m0_value_24 },
+  { .tag = INT64_C(7), .payload_offset = (size_t)8, .payload = &native_m0_value_23 },
+};
+static const native_value_variant_descriptor native_m0_value_38_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_4 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
+  { .tag = INT64_C(2), .payload_offset = (size_t)8, .payload = &native_m0_value_5 },
+};
+static const native_value_variant_descriptor native_m0_value_39_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_38 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_9 },
+};
+static const native_value_variant_descriptor native_m0_value_40_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_4 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_1 },
+  { .tag = INT64_C(2), .payload_offset = (size_t)8, .payload = &native_m0_value_5 },
+  { .tag = INT64_C(3), .payload_offset = (size_t)8, .payload = &native_m0_value_24 },
+};
+static const native_value_variant_descriptor native_m0_value_41_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_40 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_9 },
+};
+static const native_value_variant_descriptor native_m0_value_42_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_4 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_9 },
+};
+static const native_value_variant_descriptor native_m0_value_43_variants[] = {
+  { .tag = INT64_C(0), .payload_offset = (size_t)8, .payload = &native_m0_value_20 },
+  { .tag = INT64_C(1), .payload_offset = (size_t)8, .payload = &native_m0_value_9 },
+};
+const native_value_descriptor native_m0_value_0 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_0,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_1 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_SIGNED,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_2 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_BOOL,
+  .size = (size_t)1,
+  .alignment = (size_t)1,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_3 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_FLOAT,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_4 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_TEXT,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_5 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_KEYWORD,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = native_m0_value_keywords,
+  .keyword_count = (size_t)32
+};
+const native_value_descriptor native_m0_value_6 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_SIGNED,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_7 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_7_variants,
+  .variant_count = (size_t)6,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_8 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_8_variants,
+  .variant_count = (size_t)6,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_9 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_9_variants,
+  .variant_count = (size_t)1,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_10 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_10_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_11 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_11_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_12 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_MAP,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = &native_m0_value_5,
+  .map_value = &native_m0_value_32,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_13 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_MAP,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = &native_m0_value_5,
+  .map_value = &native_m0_value_36,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_14 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_MAP,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = &native_m0_value_5,
+  .map_value = &native_m0_value_29,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_15 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_MAP,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = &native_m0_value_5,
+  .map_value = &native_m0_value_38,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_16 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_MAP,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = &native_m0_value_5,
+  .map_value = &native_m0_value_33,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_17 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_MAP,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = &native_m0_value_5,
+  .map_value = &native_m0_value_40,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_18 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_MAP,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = &native_m0_value_5,
+  .map_value = &native_m0_value_31,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_19 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_MAP,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = &native_m0_value_5,
+  .map_value = &native_m0_value_35,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_20 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_MAP,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = &native_m0_value_5,
+  .map_value = &native_m0_value_37,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_21 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_REFERENCE,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_22 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_VECTOR,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_34,
+  .stride = (size_t)16,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_23 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_VECTOR,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_22,
+  .stride = (size_t)8,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_24 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_VECTOR,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_4,
+  .stride = (size_t)8,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_25 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_VECTOR,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_5,
+  .stride = (size_t)8,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_26 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_VECTOR,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_24,
+  .stride = (size_t)8,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_27 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_VECTOR,
+  .size = (size_t)8,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = NULL,
+  .variant_count = (size_t)0,
+  .element = &native_m0_value_4,
+  .stride = (size_t)8,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_28 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_28_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_29 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_29_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_30 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)24,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_30_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_31 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_31_variants,
+  .variant_count = (size_t)7,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_32 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_32_variants,
+  .variant_count = (size_t)8,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_33 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_33_variants,
+  .variant_count = (size_t)9,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_34 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_34_variants,
+  .variant_count = (size_t)6,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_35 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_35_variants,
+  .variant_count = (size_t)8,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_36 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_36_variants,
+  .variant_count = (size_t)9,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_37 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_37_variants,
+  .variant_count = (size_t)8,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_38 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_38_variants,
+  .variant_count = (size_t)3,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_39 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)24,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_39_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_40 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_40_variants,
+  .variant_count = (size_t)4,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_41 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)24,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_41_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_42 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_42_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+const native_value_descriptor native_m0_value_43 = {
+  .abi_version = NATIVE_VALUE_ABI_VERSION,
+  .kind = NATIVE_VALUE_UNION,
+  .size = (size_t)16,
+  .alignment = (size_t)8,
+  .tag_offset = (size_t)0,
+  .fields = NULL,
+  .field_count = (size_t)0,
+  .variants = native_m0_value_43_variants,
+  .variant_count = (size_t)2,
+  .element = NULL,
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
+};
+
+native_m0_type_28 native_m0_fn_0(native_m0_type_4 native_v_0, native_m0_type_4 native_v_1) {
+  (void)native_v_0;
+  (void)native_v_1;
+  native_m0_type_28 native_s_0;
   memset(&native_s_0, 0, sizeof native_s_0);
   if (native_text_index_of(native_v_0, native_v_1, &native_s_0.payload.variant_0)) {
     native_s_0.tag = INT64_C(0);
@@ -57,60 +1117,70 @@ native_m0_type_9 native_m0_fn_0(native_m0_type_3 native_v_0, native_m0_type_3 na
   }
   return native_s_0;
 }
-native_m0_type_7 native_m0_fn_1(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0) {
+native_m0_type_24 native_m0_fn_1(native_arena *arena, const native_capability *capability, native_m0_type_4 native_v_0) {
+  (void)arena;
   (void)capability;
+  (void)native_v_0;
   native_m0_type_0 native_s_0;
-  native_m0_type_3 native_s_1;
-  native_m0_type_7 native_s_2;
-  native_m0_type_7 native_s_3;
-  native_m0_type_7 native_s_4;
+  native_m0_type_4 native_s_1;
+  native_m0_type_24 native_s_2;
+  native_m0_type_24 native_s_3;
+  native_m0_type_24 native_s_4;
   native_s_0 = arena;
   (void)native_s_0;
   native_s_1 = (uint64_t)(uintptr_t)&native_m0_text_0;
+  (void)native_s_1;
   native_s_2 = native_text_regex_split((native_arena *)native_s_0, native_v_0, native_s_1);
   native_s_3 = native_text_vector_trim((native_arena *)native_s_0, native_s_2);
   native_s_4 = native_text_vector_remove_blank((native_arena *)native_s_0, native_s_3);
   return native_s_4;
 }
-native_m0_type_2 native_m0_fn_2(native_m0_type_3 native_v_0, native_m0_type_3 native_v_1) {
+native_m0_type_2 native_m0_fn_2(native_m0_type_4 native_v_0, native_m0_type_4 native_v_1) {
+  (void)native_v_0;
+  (void)native_v_1;
   native_m0_type_1 native_s_0;
   native_m0_type_1 native_s_1;
   native_m0_type_2 native_s_2;
   native_s_0 = native_text_compare(native_v_0, native_v_1);
   native_s_1 = INT64_C(0);
+  (void)native_s_1;
   native_s_2 = (native_s_0 < native_s_1);
   return native_s_2;
 }
-native_m0_type_7 native_m0_fn_3(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0) {
+native_m0_type_24 native_m0_fn_3(native_arena *arena, const native_capability *capability, native_m0_type_4 native_v_0) {
+  (void)arena;
   (void)capability;
+  (void)native_v_0;
   native_m0_type_0 native_s_0;
-  native_m0_type_3 native_s_1;
-  native_m0_type_3 native_s_2;
-  native_m0_type_8 native_s_3;
+  native_m0_type_4 native_s_1;
+  native_m0_type_4 native_s_2;
+  native_m0_type_27 native_s_3;
   native_m0_type_1 native_s_4;
   native_m0_type_1 native_s_5;
   native_m0_type_2 native_s_6;
   native_m0_type_1 native_s_7;
-  native_m0_type_3 native_s_8;
+  native_m0_type_4 native_s_8;
   native_m0_type_1 native_s_9;
-  native_m0_type_3 native_s_10;
+  native_m0_type_4 native_s_10;
   native_m0_type_1 native_s_11;
-  native_m0_type_7 native_s_12;
-  native_m0_type_7 native_s_13;
-  native_m0_type_7 native_s_14;
-  native_m0_type_3 native_s_15;
+  native_m0_type_24 native_s_12;
+  native_m0_type_24 native_s_13;
+  native_m0_type_24 native_s_14;
+  native_m0_type_4 native_s_15;
   native_m0_type_1 native_s_16;
-  native_m0_type_7 native_s_17;
-  native_m0_type_7 native_s_18;
-  native_m0_type_7 native_s_19;
-  native_m0_type_7 native_s_20;
+  native_m0_type_24 native_s_17;
+  native_m0_type_24 native_s_18;
+  native_m0_type_24 native_s_19;
+  native_m0_type_24 native_s_20;
   native_s_0 = arena;
   (void)native_s_0;
   native_s_1 = (uint64_t)(uintptr_t)&native_m0_text_1;
+  (void)native_s_1;
   native_s_2 = native_text_trim((native_arena *)native_s_0, native_v_0);
   native_s_3 = native_text_regex_find((native_arena *)native_s_0, native_s_2, native_s_1);
   native_s_4 = native_vec_length(native_s_3);
   native_s_5 = INT64_C(0);
+  (void)native_s_5;
   native_s_6 = (native_s_5 < native_s_4);
   if (native_s_6) {
     goto native_l3_1;
@@ -119,10 +1189,13 @@ native_m0_type_7 native_m0_fn_3(native_arena *arena, const native_capability *ca
   }
 native_l3_1: ;
   native_s_7 = INT64_C(1);
-  native_s_8 = *(const native_m0_type_3 *)native_vec_at(native_s_3, native_s_7, INT64_C(8));
+  (void)native_s_7;
+  native_s_8 = *(const native_m0_type_4 *)native_vec_at(native_s_3, native_s_7, INT64_C(8));
   native_s_9 = INT64_C(2);
-  native_s_10 = *(const native_m0_type_3 *)native_vec_at(native_s_3, native_s_9, INT64_C(8));
+  (void)native_s_9;
+  native_s_10 = *(const native_m0_type_4 *)native_vec_at(native_s_3, native_s_9, INT64_C(8));
   native_s_11 = INT64_C(2);
+  (void)native_s_11;
   native_s_12 = native_vec_new((native_arena *)native_s_0, native_s_11, INT64_C(8), (size_t)8);
   native_s_13 = native_vec_push((native_arena *)native_s_0, native_s_12, &native_s_8, INT64_C(8), (size_t)8);
   native_s_14 = native_vec_push((native_arena *)native_s_0, native_s_13, &native_s_10, INT64_C(8), (size_t)8);
@@ -130,7 +1203,9 @@ native_l3_1: ;
   goto native_l3_3;
 native_l3_2: ;
   native_s_15 = (uint64_t)(uintptr_t)&native_m0_text_2;
+  (void)native_s_15;
   native_s_16 = INT64_C(2);
+  (void)native_s_16;
   native_s_17 = native_vec_new((native_arena *)native_s_0, native_s_16, INT64_C(8), (size_t)8);
   native_s_18 = native_vec_push((native_arena *)native_s_0, native_s_17, &native_s_2, INT64_C(8), (size_t)8);
   native_s_19 = native_vec_push((native_arena *)native_s_0, native_s_18, &native_s_15, INT64_C(8), (size_t)8);
@@ -139,26 +1214,28 @@ native_l3_2: ;
 native_l3_3: ;
   return native_s_20;
 }
-native_m0_type_3 native_m0_fn_4(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0) {
+native_m0_type_4 native_m0_fn_4(native_arena *arena, const native_capability *capability, native_m0_type_4 native_v_0) {
+  (void)arena;
   (void)capability;
+  (void)native_v_0;
   native_m0_type_0 native_s_0;
-  native_m0_type_3 native_s_1;
+  native_m0_type_4 native_s_1;
   native_m0_type_1 native_s_2;
   native_m0_type_1 native_s_3;
-  native_m0_type_3 native_s_4;
-  native_m0_type_3 native_s_5;
+  native_m0_type_4 native_s_4;
+  native_m0_type_4 native_s_5;
   native_m0_type_1 native_s_6;
   native_m0_type_1 native_s_7;
-  native_m0_type_3 native_s_8;
-  native_m0_type_3 native_s_9;
+  native_m0_type_4 native_s_8;
+  native_m0_type_4 native_s_9;
   native_m0_type_1 native_s_10;
   native_m0_type_1 native_s_11;
-  native_m0_type_3 native_s_12;
-  native_m0_type_3 native_s_13;
+  native_m0_type_4 native_s_12;
+  native_m0_type_4 native_s_13;
   native_m0_type_1 native_s_14;
   native_m0_type_1 native_s_15;
-  native_m0_type_3 native_s_16;
-  native_m0_type_3 native_s_17;
+  native_m0_type_4 native_s_16;
+  native_m0_type_4 native_s_17;
   native_s_0 = arena;
   (void)native_s_0;
   {
@@ -166,31 +1243,42 @@ native_m0_type_3 native_m0_fn_4(native_arena *arena, const native_capability *ca
     native_s_1 = native_text_concat((native_arena *)native_s_0, native_parts_1, UINT64_C(1));
   }
   native_s_2 = INT64_C(0);
+  (void)native_s_2;
   native_s_3 = INT64_C(4);
+  (void)native_s_3;
   if ((native_s_2 < INT64_C(0)) || (native_s_3 < native_s_2) ||
       (native_s_3 > (int64_t)native_text_length(native_s_1))) {
     native_trap(UINT32_C(3));
   }
   native_s_4 = native_text_slice((native_arena *)native_s_0, native_s_1, (uint64_t)native_s_2, (uint64_t)native_s_3);
   native_s_5 = (uint64_t)(uintptr_t)&native_m0_text_3;
+  (void)native_s_5;
   native_s_6 = INT64_C(4);
+  (void)native_s_6;
   native_s_7 = INT64_C(6);
+  (void)native_s_7;
   if ((native_s_6 < INT64_C(0)) || (native_s_7 < native_s_6) ||
       (native_s_7 > (int64_t)native_text_length(native_s_1))) {
     native_trap(UINT32_C(3));
   }
   native_s_8 = native_text_slice((native_arena *)native_s_0, native_s_1, (uint64_t)native_s_6, (uint64_t)native_s_7);
   native_s_9 = (uint64_t)(uintptr_t)&native_m0_text_3;
+  (void)native_s_9;
   native_s_10 = INT64_C(6);
+  (void)native_s_10;
   native_s_11 = INT64_C(8);
+  (void)native_s_11;
   if ((native_s_10 < INT64_C(0)) || (native_s_11 < native_s_10) ||
       (native_s_11 > (int64_t)native_text_length(native_s_1))) {
     native_trap(UINT32_C(3));
   }
   native_s_12 = native_text_slice((native_arena *)native_s_0, native_s_1, (uint64_t)native_s_10, (uint64_t)native_s_11);
   native_s_13 = (uint64_t)(uintptr_t)&native_m0_text_3;
+  (void)native_s_13;
   native_s_14 = INT64_C(8);
+  (void)native_s_14;
   native_s_15 = INT64_C(14);
+  (void)native_s_15;
   if ((native_s_14 < INT64_C(0)) || (native_s_15 < native_s_14) ||
       (native_s_15 > (int64_t)native_text_length(native_s_1))) {
     native_trap(UINT32_C(3));
@@ -202,50 +1290,59 @@ native_m0_type_3 native_m0_fn_4(native_arena *arena, const native_capability *ca
   }
   return native_s_17;
 }
-native_m0_type_3 native_m0_fn_5(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0) {
+native_m0_type_4 native_m0_fn_5(native_arena *arena, const native_capability *capability, native_m0_type_4 native_v_0) {
+  (void)arena;
   (void)capability;
+  (void)native_v_0;
   native_m0_type_0 native_s_0;
-  native_m0_type_3 native_s_1;
-  native_m0_type_3 native_s_2;
-  native_m0_type_3 native_s_3;
-  native_m0_type_3 native_s_4;
-  native_m0_type_3 native_s_5;
-  native_m0_type_3 native_s_6;
-  native_m0_type_3 native_s_7;
-  native_m0_type_3 native_s_8;
-  native_m0_type_3 native_s_9;
-  native_m0_type_3 native_s_10;
-  native_m0_type_3 native_s_11;
+  native_m0_type_4 native_s_1;
+  native_m0_type_4 native_s_2;
+  native_m0_type_4 native_s_3;
+  native_m0_type_4 native_s_4;
+  native_m0_type_4 native_s_5;
+  native_m0_type_4 native_s_6;
+  native_m0_type_4 native_s_7;
+  native_m0_type_4 native_s_8;
+  native_m0_type_4 native_s_9;
+  native_m0_type_4 native_s_10;
+  native_m0_type_4 native_s_11;
   native_m0_type_1 native_s_12;
   native_m0_type_1 native_s_13;
   native_m0_type_2 native_s_14;
   native_m0_type_1 native_s_15;
   native_m0_type_1 native_s_16;
-  native_m0_type_3 native_s_17;
-  native_m0_type_3 native_s_18;
-  native_m0_type_3 native_s_19;
-  native_m0_type_3 native_s_20;
+  native_m0_type_4 native_s_17;
+  native_m0_type_4 native_s_18;
+  native_m0_type_4 native_s_19;
+  native_m0_type_4 native_s_20;
   native_m0_type_2 native_s_21;
-  native_m0_type_3 native_s_22;
-  native_m0_type_3 native_s_23;
+  native_m0_type_4 native_s_22;
+  native_m0_type_4 native_s_23;
   native_s_0 = arena;
   (void)native_s_0;
   native_s_1 = (uint64_t)(uintptr_t)&native_m0_text_4;
+  (void)native_s_1;
   native_s_2 = (uint64_t)(uintptr_t)&native_m0_text_5;
+  (void)native_s_2;
   native_s_3 = (uint64_t)(uintptr_t)&native_m0_text_6;
+  (void)native_s_3;
   {
     const uint64_t native_parts_4[1] = { native_v_0 };
     native_s_4 = native_text_concat((native_arena *)native_s_0, native_parts_4, UINT64_C(1));
   }
   native_s_5 = native_text_lower_ascii((native_arena *)native_s_0, native_s_4);
   native_s_6 = (uint64_t)(uintptr_t)&native_m0_text_7;
+  (void)native_s_6;
   native_s_7 = native_text_regex_replace((native_arena *)native_s_0, native_s_5, native_s_1, native_s_6);
   native_s_8 = (uint64_t)(uintptr_t)&native_m0_text_2;
+  (void)native_s_8;
   native_s_9 = native_text_regex_replace((native_arena *)native_s_0, native_s_7, native_s_2, native_s_8);
   native_s_10 = (uint64_t)(uintptr_t)&native_m0_text_2;
+  (void)native_s_10;
   native_s_11 = native_text_regex_replace((native_arena *)native_s_0, native_s_9, native_s_3, native_s_10);
   native_s_12 = (int64_t)native_text_length(native_s_11);
   native_s_13 = INT64_C(60);
+  (void)native_s_13;
   native_s_14 = (native_s_13 < native_s_12);
   if (native_s_14) {
     goto native_l5_1;
@@ -254,7 +1351,9 @@ native_m0_type_3 native_m0_fn_5(native_arena *arena, const native_capability *ca
   }
 native_l5_1: ;
   native_s_15 = INT64_C(0);
+  (void)native_s_15;
   native_s_16 = INT64_C(60);
+  (void)native_s_16;
   if ((native_s_15 < INT64_C(0)) || (native_s_16 < native_s_15) ||
       (native_s_16 > (int64_t)native_text_length(native_s_11))) {
     native_trap(UINT32_C(3));
@@ -267,6 +1366,7 @@ native_l5_2: ;
   goto native_l5_3;
 native_l5_3: ;
   native_s_19 = (uint64_t)(uintptr_t)&native_m0_text_2;
+  (void)native_s_19;
   native_s_20 = native_text_regex_replace((native_arena *)native_s_0, native_s_18, native_s_3, native_s_19);
   native_s_21 = native_text_is_blank(native_s_20);
   if (native_s_21) {
@@ -276,6 +1376,7 @@ native_l5_3: ;
   }
 native_l5_4: ;
   native_s_22 = (uint64_t)(uintptr_t)&native_m0_text_8;
+  (void)native_s_22;
   native_s_23 = native_s_22;
   goto native_l5_6;
 native_l5_5: ;
@@ -284,21 +1385,26 @@ native_l5_5: ;
 native_l5_6: ;
   return native_s_23;
 }
-native_m0_type_3 native_m0_fn_6(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0) {
+native_m0_type_4 native_m0_fn_6(native_arena *arena, const native_capability *capability, native_m0_type_4 native_v_0) {
+  (void)arena;
   (void)capability;
+  (void)native_v_0;
   native_m0_type_0 native_s_0;
-  native_m0_type_3 native_s_1;
-  native_m0_type_3 native_s_2;
-  native_m0_type_3 native_s_3;
+  native_m0_type_4 native_s_1;
+  native_m0_type_4 native_s_2;
+  native_m0_type_4 native_s_3;
   native_s_0 = arena;
   (void)native_s_0;
   native_s_1 = (uint64_t)(uintptr_t)&native_m0_text_9;
+  (void)native_s_1;
   native_s_2 = (uint64_t)(uintptr_t)&native_m0_text_2;
+  (void)native_s_2;
   native_s_3 = native_text_regex_replace((native_arena *)native_s_0, native_v_0, native_s_1, native_s_2);
   return native_s_3;
 }
-native_m0_type_2 native_m0_fn_7(native_m0_type_3 native_v_0) {
-  native_m0_type_3 native_s_0;
+native_m0_type_2 native_m0_fn_7(native_m0_type_4 native_v_0) {
+  (void)native_v_0;
+  native_m0_type_4 native_s_0;
   native_m0_type_1 native_s_1;
   native_m0_type_1 native_s_2;
   native_m0_type_2 native_s_3;
@@ -306,7 +1412,9 @@ native_m0_type_2 native_m0_fn_7(native_m0_type_3 native_v_0) {
   native_m0_type_2 native_s_5;
   native_m0_type_2 native_s_6;
   native_s_0 = (uint64_t)(uintptr_t)&native_m0_text_10;
+  (void)native_s_0;
   native_s_1 = INT64_C(19);
+  (void)native_s_1;
   native_s_2 = (int64_t)native_text_length(native_v_0);
   native_s_3 = (native_s_1 == native_s_2);
   if (native_s_3) {
@@ -320,13 +1428,15 @@ native_l7_1: ;
   goto native_l7_3;
 native_l7_2: ;
   native_s_5 = false;
+  (void)native_s_5;
   native_s_6 = native_s_5;
   goto native_l7_3;
 native_l7_3: ;
   return native_s_6;
 }
-native_m0_type_2 native_m0_fn_8(native_m0_type_3 native_v_0) {
-  native_m0_type_3 native_s_0;
+native_m0_type_2 native_m0_fn_8(native_m0_type_4 native_v_0) {
+  (void)native_v_0;
+  native_m0_type_4 native_s_0;
   native_m0_type_1 native_s_1;
   native_m0_type_1 native_s_2;
   native_m0_type_2 native_s_3;
@@ -334,7 +1444,9 @@ native_m0_type_2 native_m0_fn_8(native_m0_type_3 native_v_0) {
   native_m0_type_2 native_s_5;
   native_m0_type_2 native_s_6;
   native_s_0 = (uint64_t)(uintptr_t)&native_m0_text_11;
+  (void)native_s_0;
   native_s_1 = INT64_C(16);
+  (void)native_s_1;
   native_s_2 = (int64_t)native_text_length(native_v_0);
   native_s_3 = (native_s_1 == native_s_2);
   if (native_s_3) {
@@ -348,62 +1460,100 @@ native_l8_1: ;
   goto native_l8_3;
 native_l8_2: ;
   native_s_5 = false;
+  (void)native_s_5;
   native_s_6 = native_s_5;
   goto native_l8_3;
 native_l8_3: ;
   return native_s_6;
 }
-native_m0_type_3 native_m0_fn_9(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0, native_m0_type_1 native_v_1) {
+native_m0_type_4 native_m0_fn_9(native_arena *arena, const native_capability *capability, native_m0_type_4 native_v_0, native_m0_type_1 native_v_1) {
+  (void)arena;
   (void)capability;
+  (void)native_v_0;
+  (void)native_v_1;
   native_m0_type_0 native_s_0;
   native_m0_type_1 native_s_1;
   native_m0_type_2 native_s_2;
   native_m0_type_1 native_s_3;
-  native_m0_type_3 native_s_4;
+  native_m0_type_4 native_s_4;
   native_s_0 = arena;
   (void)native_s_0;
   native_s_1 = INT64_C(0);
+  (void)native_s_1;
   native_s_2 = (native_s_1 <= native_v_1);
   if (native_s_2) {
-    goto native_l9_2;
-  } else {
     goto native_l9_1;
+  } else {
+    goto native_l9_2;
   }
 native_l9_1: ;
-  native_s_3 = native_s_1;
+  native_s_3 = native_v_1;
   goto native_l9_3;
 native_l9_2: ;
-  native_s_3 = native_v_1;
+  native_s_3 = native_s_1;
   goto native_l9_3;
 native_l9_3: ;
   native_s_4 = native_text_repeat((native_arena *)native_s_0, native_v_0, native_s_3);
   return native_s_4;
 }
-native_m0_type_2 native_m0_fn_10(native_m0_type_3 native_v_0) {
-  native_m0_type_3 native_s_0;
-  native_m0_type_2 native_s_1;
+native_m0_type_2 native_m0_fn_10(native_m0_type_14 native_v_0) {
+  (void)native_v_0;
+  native_m0_type_2 native_s_0;
+  native_m0_type_5 native_s_1;
   native_m0_type_2 native_s_2;
   native_m0_type_2 native_s_3;
   native_m0_type_2 native_s_4;
-  native_s_0 = (uint64_t)(uintptr_t)&native_m0_text_12;
-  native_s_1 = true;
-  if (native_s_1) {
+  native_s_0 = true;
+  (void)native_s_0;
+  if (native_s_0) {
     goto native_l10_1;
   } else {
     goto native_l10_2;
   }
 native_l10_1: ;
-  native_s_2 = native_text_regex_matches(native_v_0, native_s_0);
+  native_s_1 = UINT64_C(0);
+  (void)native_s_1;
+  native_s_2 = native_map_contains(native_v_0, &native_s_1, NATIVE_COLLECTION_EQ_KEYWORD);
   native_s_4 = native_s_2;
   goto native_l10_3;
 native_l10_2: ;
   native_s_3 = false;
+  (void)native_s_3;
   native_s_4 = native_s_3;
   goto native_l10_3;
 native_l10_3: ;
   return native_s_4;
 }
-native_m0_type_2 native_m0_fn_11(native_m0_type_3 native_v_0) {
+native_m0_type_2 native_m0_fn_11(native_m0_type_4 native_v_0) {
+  (void)native_v_0;
+  native_m0_type_4 native_s_0;
+  native_m0_type_2 native_s_1;
+  native_m0_type_2 native_s_2;
+  native_m0_type_2 native_s_3;
+  native_m0_type_2 native_s_4;
+  native_s_0 = (uint64_t)(uintptr_t)&native_m0_text_12;
+  (void)native_s_0;
+  native_s_1 = true;
+  (void)native_s_1;
+  if (native_s_1) {
+    goto native_l11_1;
+  } else {
+    goto native_l11_2;
+  }
+native_l11_1: ;
+  native_s_2 = native_text_regex_matches(native_v_0, native_s_0);
+  native_s_4 = native_s_2;
+  goto native_l11_3;
+native_l11_2: ;
+  native_s_3 = false;
+  (void)native_s_3;
+  native_s_4 = native_s_3;
+  goto native_l11_3;
+native_l11_3: ;
+  return native_s_4;
+}
+native_m0_type_2 native_m0_fn_12(native_m0_type_4 native_v_0) {
+  (void)native_v_0;
   native_m0_type_2 native_s_0;
   native_m0_type_2 native_s_1;
   native_m0_type_2 native_s_2;
@@ -411,37 +1561,3534 @@ native_m0_type_2 native_m0_fn_11(native_m0_type_3 native_v_0) {
   native_m0_type_2 native_s_4;
   native_m0_type_2 native_s_5;
   native_s_0 = true;
+  (void)native_s_0;
   if (native_s_0) {
-    goto native_l11_1;
+    goto native_l12_1;
   } else {
-    goto native_l11_2;
+    goto native_l12_2;
   }
-native_l11_1: ;
+native_l12_1: ;
   native_s_1 = native_text_is_blank(native_v_0);
   native_s_2 = false;
+  (void)native_s_2;
   native_s_3 = (native_s_1 == native_s_2);
   native_s_5 = native_s_3;
-  goto native_l11_3;
-native_l11_2: ;
+  goto native_l12_3;
+native_l12_2: ;
   native_s_4 = false;
+  (void)native_s_4;
   native_s_5 = native_s_4;
-  goto native_l11_3;
-native_l11_3: ;
+  goto native_l12_3;
+native_l12_3: ;
   return native_s_5;
 }
-native_m0_type_3 native_m0_fn_12(native_arena *arena, const native_capability *capability, native_m0_type_1 native_v_0) {
+native_m0_type_2 native_m0_fn_13(native_m0_type_14 native_v_0) {
+  (void)native_v_0;
+  native_m0_type_4 native_s_0;
+  native_m0_type_5 native_s_1;
+  native_m0_type_30 native_s_2;
+  native_m0_type_29 native_s_3;
+  native_m0_type_4 native_s_4;
+  native_m0_type_2 native_s_5;
+  native_m0_type_2 native_s_6;
+  native_m0_type_2 native_s_7;
+  native_m0_type_2 native_s_8;
+  native_m0_type_2 native_s_9;
+  native_m0_type_4 native_s_10;
+  native_m0_type_5 native_s_11;
+  native_m0_type_30 native_s_12;
+  native_m0_type_29 native_s_13;
+  native_m0_type_4 native_s_14;
+  native_m0_type_2 native_s_15;
+  native_m0_type_2 native_s_16;
+  native_m0_type_2 native_s_17;
+  native_m0_type_2 native_s_18;
+  native_m0_type_2 native_s_19;
+  native_m0_type_2 native_s_20;
+  native_m0_type_2 native_s_21;
+  native_s_0 = (uint64_t)(uintptr_t)&native_m0_text_13;
+  (void)native_s_0;
+  native_s_1 = UINT64_C(1);
+  (void)native_s_1;
+  {
+    const void *native_map_hit_2 = native_map_get(native_v_0, &native_s_1, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_2, 0, sizeof native_s_2);
+    if (native_map_hit_2 != NULL) {
+      native_s_2.tag = INT64_C(0);
+      native_s_2.payload.variant_0 = *(const native_m0_type_29 *)native_map_hit_2;
+    } else {
+      native_s_2.tag = INT64_C(1);
+    }
+  }
+  switch (native_s_2.tag) {
+  case INT64_C(0):
+    goto native_l13_1;
+  case INT64_C(1):
+    goto native_l13_5;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l13_1: ;
+  if (native_s_2.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_3 = native_s_2.payload.variant_0;
+  switch (native_s_3.tag) {
+  case INT64_C(0):
+    goto native_l13_2;
+  case INT64_C(1):
+    goto native_l13_3;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l13_2: ;
+  if (native_s_3.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_4 = native_s_3.payload.variant_0;
+  native_s_5 = native_text_eq(native_s_0, native_s_4);
+  native_s_7 = native_s_5;
+  goto native_l13_4;
+native_l13_3: ;
+  native_s_6 = false;
+  (void)native_s_6;
+  native_s_7 = native_s_6;
+  goto native_l13_4;
+native_l13_4: ;
+  native_s_9 = native_s_7;
+  goto native_l13_6;
+native_l13_5: ;
+  native_s_8 = false;
+  (void)native_s_8;
+  native_s_9 = native_s_8;
+  goto native_l13_6;
+native_l13_6: ;
+  if (native_s_9) {
+    goto native_l13_7;
+  } else {
+    goto native_l13_14;
+  }
+native_l13_7: ;
+  native_s_10 = (uint64_t)(uintptr_t)&native_m0_text_14;
+  (void)native_s_10;
+  native_s_11 = UINT64_C(2);
+  (void)native_s_11;
+  {
+    const void *native_map_hit_12 = native_map_get(native_v_0, &native_s_11, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_12, 0, sizeof native_s_12);
+    if (native_map_hit_12 != NULL) {
+      native_s_12.tag = INT64_C(0);
+      native_s_12.payload.variant_0 = *(const native_m0_type_29 *)native_map_hit_12;
+    } else {
+      native_s_12.tag = INT64_C(1);
+    }
+  }
+  switch (native_s_12.tag) {
+  case INT64_C(0):
+    goto native_l13_8;
+  case INT64_C(1):
+    goto native_l13_12;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l13_8: ;
+  if (native_s_12.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_13 = native_s_12.payload.variant_0;
+  switch (native_s_13.tag) {
+  case INT64_C(0):
+    goto native_l13_9;
+  case INT64_C(1):
+    goto native_l13_10;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l13_9: ;
+  if (native_s_13.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_14 = native_s_13.payload.variant_0;
+  native_s_15 = native_text_eq(native_s_10, native_s_14);
+  native_s_17 = native_s_15;
+  goto native_l13_11;
+native_l13_10: ;
+  native_s_16 = false;
+  (void)native_s_16;
+  native_s_17 = native_s_16;
+  goto native_l13_11;
+native_l13_11: ;
+  native_s_19 = native_s_17;
+  goto native_l13_13;
+native_l13_12: ;
+  native_s_18 = false;
+  (void)native_s_18;
+  native_s_19 = native_s_18;
+  goto native_l13_13;
+native_l13_13: ;
+  native_s_21 = native_s_19;
+  goto native_l13_15;
+native_l13_14: ;
+  native_s_20 = false;
+  (void)native_s_20;
+  native_s_21 = native_s_20;
+  goto native_l13_15;
+native_l13_15: ;
+  return native_s_21;
+}
+native_m0_type_2 native_m0_fn_14(native_arena *arena, const native_capability *capability, native_m0_type_14 native_v_0, native_m0_type_4 native_v_1) {
+  (void)arena;
   (void)capability;
+  (void)native_v_0;
+  (void)native_v_1;
   native_m0_type_0 native_s_0;
-  native_m0_type_3 native_s_1;
-  native_m0_type_3 native_s_2;
-  native_m0_type_3 native_s_3;
+  native_m0_type_1 native_s_1;
+  native_m0_type_5 native_s_2;
+  native_m0_type_5 native_s_3;
+  native_m0_type_5 native_s_4;
+  native_m0_type_5 native_s_5;
+  native_m0_type_5 native_s_6;
+  native_m0_type_5 native_s_7;
+  native_m0_type_5 native_s_8;
+  native_m0_type_5 native_s_9;
+  native_m0_type_5 native_s_10;
+  native_m0_type_5 native_s_11;
+  native_m0_type_5 native_s_12;
+  native_m0_type_5 native_s_13;
+  native_m0_type_5 native_s_14;
+  native_m0_type_5 native_s_15;
+  native_m0_type_5 native_s_16;
+  native_m0_type_21 native_s_17;
+  native_m0_type_5 native_s_18;
+  native_m0_type_30 native_s_19;
+  native_m0_type_5 native_s_20;
+  native_m0_type_30 native_s_21;
+  native_m0_type_5 native_s_22;
+  native_m0_type_30 native_s_23;
+  native_m0_type_5 native_s_24;
+  native_m0_type_30 native_s_25;
+  native_m0_type_5 native_s_26;
+  native_m0_type_30 native_s_27;
+  native_m0_type_2 native_s_28;
+  native_m0_type_25 native_s_29;
+  native_m0_type_1 native_s_30;
+  native_m0_type_1 native_s_31;
+  native_m0_type_21 native_s_32;
+  native_m0_type_1 native_s_33;
+  native_m0_type_21 native_s_34;
+  native_m0_type_2 native_s_35;
+  native_m0_type_5 native_s_36;
+  native_m0_type_21 native_s_37;
+  native_m0_type_1 native_s_38;
+  native_m0_type_10 native_s_39;
+  native_m0_type_1 native_s_40;
+  native_m0_type_10 native_s_41;
+  native_m0_type_1 native_s_42;
+  native_m0_type_1 native_s_43;
+  native_m0_type_1 native_s_44;
+  native_m0_type_2 native_s_45;
+  native_m0_type_25 native_s_46;
+  native_m0_type_1 native_s_47;
+  native_m0_type_1 native_s_48;
+  native_m0_type_2 native_s_49;
+  native_m0_type_5 native_s_50;
+  native_m0_type_2 native_s_51;
+  native_m0_type_1 native_s_52;
+  native_m0_type_10 native_s_53;
+  native_m0_type_1 native_s_54;
+  native_m0_type_10 native_s_55;
+  native_m0_type_1 native_s_56;
+  native_m0_type_2 native_s_57;
+  native_m0_type_2 native_s_58;
+  native_m0_type_2 native_s_59;
+  native_m0_type_5 native_s_60;
+  native_m0_type_30 native_s_61;
+  native_m0_type_29 native_s_62;
+  native_m0_type_1 native_s_63;
+  native_m0_type_2 native_s_64;
+  native_m0_type_2 native_s_65;
+  native_m0_type_2 native_s_66;
+  native_m0_type_2 native_s_67;
+  native_m0_type_2 native_s_68;
+  native_m0_type_5 native_s_69;
+  native_m0_type_30 native_s_70;
+  native_m0_type_29 native_s_71;
+  native_m0_type_4 native_s_72;
+  native_m0_type_2 native_s_73;
+  native_m0_type_5 native_s_74;
+  native_m0_type_30 native_s_75;
+  native_m0_type_29 native_s_76;
+  native_m0_type_4 native_s_77;
+  native_m0_type_2 native_s_78;
+  native_m0_type_5 native_s_79;
+  native_m0_type_30 native_s_80;
+  native_m0_type_5 native_s_81;
+  native_m0_type_30 native_s_82;
+  native_m0_type_2 native_s_83;
+  native_m0_type_5 native_s_84;
+  native_m0_type_30 native_s_85;
+  native_m0_type_29 native_s_86;
+  native_m0_type_4 native_s_87;
+  native_m0_type_2 native_s_88;
+  native_m0_type_5 native_s_89;
+  native_m0_type_30 native_s_90;
+  native_m0_type_29 native_s_91;
+  native_m0_type_4 native_s_92;
+  native_m0_type_2 native_s_93;
+  native_m0_type_29 native_s_94;
+  native_m0_type_2 native_s_95;
+  native_m0_type_2 native_s_96;
+  native_m0_type_2 native_s_97;
+  native_m0_type_9 native_s_98;
+  native_m0_type_2 native_s_99;
+  native_m0_type_2 native_s_100;
+  native_m0_type_2 native_s_101;
+  native_m0_type_2 native_s_102;
+  native_m0_type_2 native_s_103;
+  native_m0_type_2 native_s_104;
+  native_m0_type_29 native_s_105;
+  native_m0_type_1 native_s_106;
+  native_m0_type_1 native_s_107;
+  native_m0_type_2 native_s_108;
+  native_m0_type_2 native_s_109;
+  native_m0_type_2 native_s_110;
+  native_m0_type_29 native_s_111;
+  native_m0_type_2 native_s_112;
+  native_m0_type_2 native_s_113;
+  native_m0_type_2 native_s_114;
+  native_m0_type_9 native_s_115;
+  native_m0_type_2 native_s_116;
+  native_m0_type_2 native_s_117;
+  native_m0_type_2 native_s_118;
+  native_m0_type_2 native_s_119;
+  native_m0_type_2 native_s_120;
+  native_m0_type_2 native_s_121;
+  native_m0_type_29 native_s_122;
+  native_m0_type_1 native_s_123;
+  native_m0_type_1 native_s_124;
+  native_m0_type_2 native_s_125;
+  native_m0_type_2 native_s_126;
+  native_m0_type_2 native_s_127;
+  native_m0_type_29 native_s_128;
+  native_m0_type_2 native_s_129;
+  native_m0_type_2 native_s_130;
+  native_m0_type_2 native_s_131;
+  native_m0_type_9 native_s_132;
+  native_m0_type_2 native_s_133;
+  native_m0_type_2 native_s_134;
+  native_m0_type_2 native_s_135;
+  native_m0_type_2 native_s_136;
+  native_m0_type_2 native_s_137;
+  native_m0_type_2 native_s_138;
+  native_m0_type_29 native_s_139;
+  native_m0_type_1 native_s_140;
+  native_m0_type_1 native_s_141;
+  native_m0_type_2 native_s_142;
+  native_m0_type_2 native_s_143;
+  native_m0_type_2 native_s_144;
+  native_m0_type_29 native_s_145;
+  native_m0_type_2 native_s_146;
+  native_m0_type_2 native_s_147;
+  native_m0_type_2 native_s_148;
+  native_m0_type_9 native_s_149;
+  native_m0_type_2 native_s_150;
+  native_m0_type_2 native_s_151;
+  native_m0_type_2 native_s_152;
+  native_m0_type_2 native_s_153;
+  native_m0_type_2 native_s_154;
+  native_m0_type_2 native_s_155;
+  native_m0_type_29 native_s_156;
+  native_m0_type_1 native_s_157;
+  native_m0_type_1 native_s_158;
+  native_m0_type_2 native_s_159;
+  native_m0_type_2 native_s_160;
+  native_m0_type_2 native_s_161;
+  native_m0_type_29 native_s_162;
+  native_m0_type_2 native_s_163;
+  native_m0_type_2 native_s_164;
+  native_m0_type_2 native_s_165;
+  native_m0_type_9 native_s_166;
+  native_m0_type_2 native_s_167;
+  native_m0_type_2 native_s_168;
+  native_m0_type_2 native_s_169;
+  native_m0_type_2 native_s_170;
+  native_m0_type_2 native_s_171;
+  native_m0_type_2 native_s_172;
+  native_m0_type_29 native_s_173;
+  native_m0_type_1 native_s_174;
+  native_m0_type_1 native_s_175;
+  native_m0_type_2 native_s_176;
+  native_m0_type_2 native_s_177;
+  native_m0_type_2 native_s_178;
+  native_m0_type_2 native_s_179;
+  native_m0_type_2 native_s_180;
+  native_m0_type_29 native_s_181;
+  native_m0_type_1 native_s_182;
+  native_m0_type_29 native_s_183;
+  native_m0_type_1 native_s_184;
+  native_m0_type_10 native_s_185;
+  native_m0_type_1 native_s_186;
+  native_m0_type_10 native_s_187;
+  native_m0_type_1 native_s_188;
+  native_m0_type_29 native_s_189;
+  native_m0_type_1 native_s_190;
+  native_m0_type_2 native_s_191;
+  native_m0_type_2 native_s_192;
+  native_m0_type_2 native_s_193;
+  native_m0_type_2 native_s_194;
+  native_m0_type_2 native_s_195;
+  native_m0_type_5 native_s_196;
+  native_m0_type_30 native_s_197;
+  native_m0_type_29 native_s_198;
+  native_m0_type_4 native_s_199;
+  native_m0_type_2 native_s_200;
+  native_m0_type_5 native_s_201;
+  native_m0_type_30 native_s_202;
+  native_m0_type_29 native_s_203;
+  native_m0_type_4 native_s_204;
+  native_m0_type_2 native_s_205;
+  native_m0_type_5 native_s_206;
+  native_m0_type_30 native_s_207;
+  native_m0_type_29 native_s_208;
+  native_m0_type_4 native_s_209;
+  native_m0_type_2 native_s_210;
+  native_m0_type_5 native_s_211;
+  native_m0_type_30 native_s_212;
+  native_m0_type_29 native_s_213;
+  native_m0_type_4 native_s_214;
+  native_m0_type_2 native_s_215;
+  native_m0_type_5 native_s_216;
+  native_m0_type_30 native_s_217;
+  native_m0_type_29 native_s_218;
+  native_m0_type_4 native_s_219;
+  native_m0_type_2 native_s_220;
+  native_m0_type_2 native_s_221;
+  native_m0_type_2 native_s_222;
+  native_m0_type_2 native_s_223;
+  native_m0_type_2 native_s_224;
+  native_m0_type_2 native_s_225;
+  native_m0_type_2 native_s_226;
   native_s_0 = arena;
   (void)native_s_0;
-  native_s_1 = (uint64_t)(uintptr_t)&native_m0_text_13;
-  native_s_2 = (uint64_t)(uintptr_t)&native_m0_text_14;
+  native_s_1 = INT64_C(1);
+  (void)native_s_1;
+  native_s_2 = UINT64_C(3);
+  (void)native_s_2;
+  native_s_3 = UINT64_C(4);
+  (void)native_s_3;
+  native_s_4 = UINT64_C(5);
+  (void)native_s_4;
+  native_s_5 = UINT64_C(6);
+  (void)native_s_5;
+  native_s_6 = UINT64_C(7);
+  (void)native_s_6;
+  native_s_7 = UINT64_C(8);
+  (void)native_s_7;
+  native_s_8 = UINT64_C(9);
+  (void)native_s_8;
+  native_s_9 = UINT64_C(0);
+  (void)native_s_9;
+  native_s_10 = UINT64_C(10);
+  (void)native_s_10;
+  native_s_11 = UINT64_C(11);
+  (void)native_s_11;
+  native_s_12 = UINT64_C(12);
+  (void)native_s_12;
+  native_s_13 = UINT64_C(13);
+  (void)native_s_13;
+  native_s_14 = UINT64_C(14);
+  (void)native_s_14;
+  native_s_15 = UINT64_C(15);
+  (void)native_s_15;
+  native_s_16 = UINT64_C(16);
+  (void)native_s_16;
+  {
+    const native_m0_type_5 native_set_values_17[15] = { native_s_2, native_s_3, native_s_4, native_s_5, native_s_6, native_s_7, native_s_8, native_s_9, native_s_10, native_s_11, native_s_12, native_s_13, native_s_14, native_s_15, native_s_16 };
+    native_s_17 = native_set_from_array((native_arena *)native_s_0, native_set_values_17, INT64_C(15), INT64_C(8), (size_t)8, NATIVE_COLLECTION_EQ_KEYWORD);
+  }
+  native_s_18 = UINT64_C(10);
+  (void)native_s_18;
+  {
+    const void *native_map_hit_19 = native_map_get(native_v_0, &native_s_18, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_19, 0, sizeof native_s_19);
+    if (native_map_hit_19 != NULL) {
+      native_s_19.tag = INT64_C(0);
+      native_s_19.payload.variant_0 = *(const native_m0_type_29 *)native_map_hit_19;
+    } else {
+      native_s_19.tag = INT64_C(1);
+    }
+  }
+  native_s_20 = UINT64_C(13);
+  (void)native_s_20;
+  {
+    const void *native_map_hit_21 = native_map_get(native_v_0, &native_s_20, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_21, 0, sizeof native_s_21);
+    if (native_map_hit_21 != NULL) {
+      native_s_21.tag = INT64_C(0);
+      native_s_21.payload.variant_0 = *(const native_m0_type_29 *)native_map_hit_21;
+    } else {
+      native_s_21.tag = INT64_C(1);
+    }
+  }
+  native_s_22 = UINT64_C(7);
+  (void)native_s_22;
+  {
+    const void *native_map_hit_23 = native_map_get(native_v_0, &native_s_22, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_23, 0, sizeof native_s_23);
+    if (native_map_hit_23 != NULL) {
+      native_s_23.tag = INT64_C(0);
+      native_s_23.payload.variant_0 = *(const native_m0_type_29 *)native_map_hit_23;
+    } else {
+      native_s_23.tag = INT64_C(1);
+    }
+  }
+  native_s_24 = UINT64_C(11);
+  (void)native_s_24;
+  {
+    const void *native_map_hit_25 = native_map_get(native_v_0, &native_s_24, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_25, 0, sizeof native_s_25);
+    if (native_map_hit_25 != NULL) {
+      native_s_25.tag = INT64_C(0);
+      native_s_25.payload.variant_0 = *(const native_m0_type_29 *)native_map_hit_25;
+    } else {
+      native_s_25.tag = INT64_C(1);
+    }
+  }
+  native_s_26 = UINT64_C(5);
+  (void)native_s_26;
+  {
+    const void *native_map_hit_27 = native_map_get(native_v_0, &native_s_26, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_27, 0, sizeof native_s_27);
+    if (native_map_hit_27 != NULL) {
+      native_s_27.tag = INT64_C(0);
+      native_s_27.payload.variant_0 = *(const native_m0_type_29 *)native_map_hit_27;
+    } else {
+      native_s_27.tag = INT64_C(1);
+    }
+  }
+  native_s_28 = true;
+  (void)native_s_28;
+  if (native_s_28) {
+    goto native_l14_1;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_1: ;
+  native_s_29 = native_map_keys((native_arena *)native_s_0, native_v_0, (size_t)8);
+  native_s_30 = native_vec_length(native_s_29);
+  native_s_31 = INT64_C(0);
+  (void)native_s_31;
+  native_s_32 = native_set_from_array((native_arena *)native_s_0, NULL, INT64_C(0), INT64_C(8), (size_t)8, NATIVE_COLLECTION_EQ_KEYWORD);
+  native_s_33 = native_s_31;
+  native_s_34 = native_s_32;
+  goto native_l14_2;
+native_l14_2: ;
+  native_s_35 = (native_s_33 < native_s_30);
+  if (native_s_35) {
+    goto native_l14_3;
+  } else {
+    goto native_l14_6;
+  }
+native_l14_3: ;
+  native_s_36 = *(const native_m0_type_5 *)native_vec_at(native_s_29, native_s_33, INT64_C(8));
+  native_s_37 = native_set_conj((native_arena *)native_s_0, native_s_34, &native_s_36, INT64_C(8), (size_t)8, NATIVE_COLLECTION_EQ_KEYWORD);
+  native_s_38 = INT64_C(1);
+  (void)native_s_38;
+  if (__builtin_add_overflow(native_s_33, native_s_38, &native_s_39.payload.variant_0)) {
+    native_s_39.tag = INT64_C(1);
+  } else {
+    native_s_39.tag = INT64_C(0);
+  }
+  switch (native_s_39.tag) {
+  case INT64_C(0):
+    native_s_41 = native_s_39;
+  goto native_l14_5;
+  case INT64_C(1):
+    goto native_l14_4;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l14_4: ;
+  native_s_40 = INT64_C(2);
+  (void)native_s_40;
+  native_trap((uint32_t)native_s_40);
+native_l14_5: ;
+  native_s_42 = native_s_41.payload.variant_0;
+  native_s_33 = native_s_42;
+  native_s_34 = native_s_37;
+  goto native_l14_2;
+native_l14_6: ;
+  native_s_43 = native_set_count(native_s_17);
+  native_s_44 = native_set_count(native_s_34);
+  native_s_45 = (native_s_43 == native_s_44);
+  native_s_46 = native_set_vector((native_arena *)native_s_0, native_s_17, (size_t)8);
+  native_s_47 = INT64_C(0);
+  (void)native_s_47;
+  native_s_48 = native_s_47;
+  goto native_l14_7;
+native_l14_7: ;
+  native_s_49 = (native_s_48 < native_s_43);
+  if (native_s_45) {
+    goto native_l14_8;
+  } else {
+    goto native_l14_13;
+  }
+native_l14_8: ;
+  if (native_s_49) {
+    goto native_l14_9;
+  } else {
+    goto native_l14_14;
+  }
+native_l14_9: ;
+  native_s_50 = *(const native_m0_type_5 *)native_vec_at(native_s_46, native_s_48, INT64_C(8));
+  native_s_51 = native_set_contains(native_s_34, &native_s_50, NATIVE_COLLECTION_EQ_KEYWORD);
+  if (native_s_51) {
+    goto native_l14_10;
+  } else {
+    goto native_l14_13;
+  }
+native_l14_10: ;
+  native_s_52 = INT64_C(1);
+  (void)native_s_52;
+  if (__builtin_add_overflow(native_s_48, native_s_52, &native_s_53.payload.variant_0)) {
+    native_s_53.tag = INT64_C(1);
+  } else {
+    native_s_53.tag = INT64_C(0);
+  }
+  switch (native_s_53.tag) {
+  case INT64_C(0):
+    native_s_55 = native_s_53;
+  goto native_l14_12;
+  case INT64_C(1):
+    goto native_l14_11;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l14_11: ;
+  native_s_54 = INT64_C(2);
+  (void)native_s_54;
+  native_trap((uint32_t)native_s_54);
+native_l14_12: ;
+  native_s_56 = native_s_55.payload.variant_0;
+  native_s_48 = native_s_56;
+  goto native_l14_7;
+native_l14_13: ;
+  native_s_57 = false;
+  (void)native_s_57;
+  native_s_59 = native_s_57;
+  goto native_l14_15;
+native_l14_14: ;
+  native_s_58 = true;
+  (void)native_s_58;
+  native_s_59 = native_s_58;
+  goto native_l14_15;
+native_l14_15: ;
+  if (native_s_59) {
+    goto native_l14_16;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_16: ;
+  native_s_60 = UINT64_C(0);
+  (void)native_s_60;
+  {
+    const void *native_map_hit_61 = native_map_get(native_v_0, &native_s_60, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_61, 0, sizeof native_s_61);
+    if (native_map_hit_61 != NULL) {
+      native_s_61.tag = INT64_C(0);
+      native_s_61.payload.variant_0 = *(const native_m0_type_29 *)native_map_hit_61;
+    } else {
+      native_s_61.tag = INT64_C(1);
+    }
+  }
+  switch (native_s_61.tag) {
+  case INT64_C(0):
+    goto native_l14_17;
+  case INT64_C(1):
+    goto native_l14_21;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l14_17: ;
+  if (native_s_61.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_62 = native_s_61.payload.variant_0;
+  switch (native_s_62.tag) {
+  case INT64_C(0):
+    goto native_l14_19;
+  case INT64_C(1):
+    goto native_l14_18;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l14_18: ;
+  if (native_s_62.tag != INT64_C(1)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_63 = native_s_62.payload.variant_1;
+  native_s_64 = (native_s_1 == native_s_63);
+  native_s_66 = native_s_64;
+  goto native_l14_20;
+native_l14_19: ;
+  native_s_65 = false;
+  (void)native_s_65;
+  native_s_66 = native_s_65;
+  goto native_l14_20;
+native_l14_20: ;
+  native_s_68 = native_s_66;
+  goto native_l14_22;
+native_l14_21: ;
+  native_s_67 = false;
+  (void)native_s_67;
+  native_s_68 = native_s_67;
+  goto native_l14_22;
+native_l14_22: ;
+  if (native_s_68) {
+    goto native_l14_23;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_23: ;
+  native_s_69 = UINT64_C(12);
+  (void)native_s_69;
+  {
+    const void *native_map_hit_70 = native_map_get(native_v_0, &native_s_69, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_70, 0, sizeof native_s_70);
+    if (native_map_hit_70 != NULL) {
+      native_s_70.tag = INT64_C(0);
+      native_s_70.payload.variant_0 = *(const native_m0_type_29 *)native_map_hit_70;
+    } else {
+      native_s_70.tag = INT64_C(1);
+    }
+  }
+  if (native_s_70.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_71 = native_s_70.payload.variant_0;
+  if (native_s_71.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_72 = native_s_71.payload.variant_0;
+  native_s_73 = native_m0_fn_12(native_s_72);
+  if (native_s_73) {
+    goto native_l14_24;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_24: ;
+  native_s_74 = UINT64_C(4);
+  (void)native_s_74;
+  {
+    const void *native_map_hit_75 = native_map_get(native_v_0, &native_s_74, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_75, 0, sizeof native_s_75);
+    if (native_map_hit_75 != NULL) {
+      native_s_75.tag = INT64_C(0);
+      native_s_75.payload.variant_0 = *(const native_m0_type_29 *)native_map_hit_75;
+    } else {
+      native_s_75.tag = INT64_C(1);
+    }
+  }
+  if (native_s_75.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_76 = native_s_75.payload.variant_0;
+  if (native_s_76.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_77 = native_s_76.payload.variant_0;
+  native_s_78 = native_m0_fn_12(native_s_77);
+  if (native_s_78) {
+    goto native_l14_25;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_25: ;
+  native_s_79 = UINT64_C(4);
+  (void)native_s_79;
+  {
+    const void *native_map_hit_80 = native_map_get(native_v_0, &native_s_79, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_80, 0, sizeof native_s_80);
+    if (native_map_hit_80 != NULL) {
+      native_s_80.tag = INT64_C(0);
+      native_s_80.payload.variant_0 = *(const native_m0_type_29 *)native_map_hit_80;
+    } else {
+      native_s_80.tag = INT64_C(1);
+    }
+  }
+  native_s_81 = UINT64_C(16);
+  (void)native_s_81;
+  {
+    const void *native_map_hit_82 = native_map_get(native_v_0, &native_s_81, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_82, 0, sizeof native_s_82);
+    if (native_map_hit_82 != NULL) {
+      native_s_82.tag = INT64_C(0);
+      native_s_82.payload.variant_0 = *(const native_m0_type_29 *)native_map_hit_82;
+    } else {
+      native_s_82.tag = INT64_C(1);
+    }
+  }
+  native_s_83 = native_value_equal(&native_m0_value_30, &native_s_80, &native_s_82);
+  if (native_s_83) {
+    goto native_l14_26;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_26: ;
+  native_s_84 = UINT64_C(14);
+  (void)native_s_84;
+  {
+    const void *native_map_hit_85 = native_map_get(native_v_0, &native_s_84, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_85, 0, sizeof native_s_85);
+    if (native_map_hit_85 != NULL) {
+      native_s_85.tag = INT64_C(0);
+      native_s_85.payload.variant_0 = *(const native_m0_type_29 *)native_map_hit_85;
+    } else {
+      native_s_85.tag = INT64_C(1);
+    }
+  }
+  if (native_s_85.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_86 = native_s_85.payload.variant_0;
+  if (native_s_86.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_87 = native_s_86.payload.variant_0;
+  native_s_88 = native_m0_fn_12(native_s_87);
+  if (native_s_88) {
+    goto native_l14_27;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_27: ;
+  native_s_89 = UINT64_C(6);
+  (void)native_s_89;
+  {
+    const void *native_map_hit_90 = native_map_get(native_v_0, &native_s_89, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_90, 0, sizeof native_s_90);
+    if (native_map_hit_90 != NULL) {
+      native_s_90.tag = INT64_C(0);
+      native_s_90.payload.variant_0 = *(const native_m0_type_29 *)native_map_hit_90;
+    } else {
+      native_s_90.tag = INT64_C(1);
+    }
+  }
+  if (native_s_90.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_91 = native_s_90.payload.variant_0;
+  if (native_s_91.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_92 = native_s_91.payload.variant_0;
+  native_s_93 = native_m0_fn_12(native_s_92);
+  if (native_s_93) {
+    goto native_l14_28;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_28: ;
+  switch (native_s_19.tag) {
+  case INT64_C(0):
+    goto native_l14_29;
+  case INT64_C(1):
+    goto native_l14_33;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l14_29: ;
+  if (native_s_19.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_94 = native_s_19.payload.variant_0;
+  switch (native_s_94.tag) {
+  case INT64_C(0):
+    goto native_l14_31;
+  case INT64_C(1):
+    goto native_l14_30;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l14_30: ;
+  native_s_95 = true;
+  (void)native_s_95;
+  native_s_97 = native_s_95;
+  goto native_l14_32;
+native_l14_31: ;
+  native_s_96 = false;
+  (void)native_s_96;
+  native_s_97 = native_s_96;
+  goto native_l14_32;
+native_l14_32: ;
+  native_s_104 = native_s_97;
+  goto native_l14_39;
+native_l14_33: ;
+  if (native_s_19.tag != INT64_C(1)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_98 = native_s_19.payload.variant_1;
+  (void)native_s_98;
+  switch (native_s_98.tag) {
+  case INT64_C(0):
+    goto native_l14_35;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_99 = true;
+  (void)native_s_99;
+  native_s_101 = native_s_99;
+  goto native_l14_36;
+native_l14_35: ;
+  native_s_100 = false;
+  (void)native_s_100;
+  native_s_101 = native_s_100;
+  goto native_l14_36;
+native_l14_36: ;
+  native_s_104 = native_s_101;
+  goto native_l14_39;
+  native_s_102 = true;
+  (void)native_s_102;
+  native_s_104 = native_s_102;
+  goto native_l14_39;
+  native_s_103 = false;
+  (void)native_s_103;
+  native_s_104 = native_s_103;
+  goto native_l14_39;
+native_l14_39: ;
+  if (native_s_104) {
+    goto native_l14_40;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_40: ;
+  if (native_s_19.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_105 = native_s_19.payload.variant_0;
+  if (native_s_105.tag != INT64_C(1)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_106 = native_s_105.payload.variant_1;
+  native_s_107 = INT64_C(0);
+  (void)native_s_107;
+  native_s_108 = (native_s_106 < native_s_107);
+  native_s_109 = false;
+  (void)native_s_109;
+  native_s_110 = (native_s_108 == native_s_109);
+  if (native_s_110) {
+    goto native_l14_41;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_41: ;
+  switch (native_s_21.tag) {
+  case INT64_C(0):
+    goto native_l14_42;
+  case INT64_C(1):
+    goto native_l14_46;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l14_42: ;
+  if (native_s_21.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_111 = native_s_21.payload.variant_0;
+  switch (native_s_111.tag) {
+  case INT64_C(0):
+    goto native_l14_44;
+  case INT64_C(1):
+    goto native_l14_43;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l14_43: ;
+  native_s_112 = true;
+  (void)native_s_112;
+  native_s_114 = native_s_112;
+  goto native_l14_45;
+native_l14_44: ;
+  native_s_113 = false;
+  (void)native_s_113;
+  native_s_114 = native_s_113;
+  goto native_l14_45;
+native_l14_45: ;
+  native_s_121 = native_s_114;
+  goto native_l14_52;
+native_l14_46: ;
+  if (native_s_21.tag != INT64_C(1)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_115 = native_s_21.payload.variant_1;
+  (void)native_s_115;
+  switch (native_s_115.tag) {
+  case INT64_C(0):
+    goto native_l14_48;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_116 = true;
+  (void)native_s_116;
+  native_s_118 = native_s_116;
+  goto native_l14_49;
+native_l14_48: ;
+  native_s_117 = false;
+  (void)native_s_117;
+  native_s_118 = native_s_117;
+  goto native_l14_49;
+native_l14_49: ;
+  native_s_121 = native_s_118;
+  goto native_l14_52;
+  native_s_119 = true;
+  (void)native_s_119;
+  native_s_121 = native_s_119;
+  goto native_l14_52;
+  native_s_120 = false;
+  (void)native_s_120;
+  native_s_121 = native_s_120;
+  goto native_l14_52;
+native_l14_52: ;
+  if (native_s_121) {
+    goto native_l14_53;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_53: ;
+  if (native_s_21.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_122 = native_s_21.payload.variant_0;
+  if (native_s_122.tag != INT64_C(1)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_123 = native_s_122.payload.variant_1;
+  native_s_124 = INT64_C(0);
+  (void)native_s_124;
+  native_s_125 = (native_s_123 < native_s_124);
+  native_s_126 = false;
+  (void)native_s_126;
+  native_s_127 = (native_s_125 == native_s_126);
+  if (native_s_127) {
+    goto native_l14_54;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_54: ;
+  switch (native_s_23.tag) {
+  case INT64_C(0):
+    goto native_l14_55;
+  case INT64_C(1):
+    goto native_l14_59;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l14_55: ;
+  if (native_s_23.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_128 = native_s_23.payload.variant_0;
+  switch (native_s_128.tag) {
+  case INT64_C(0):
+    goto native_l14_57;
+  case INT64_C(1):
+    goto native_l14_56;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l14_56: ;
+  native_s_129 = true;
+  (void)native_s_129;
+  native_s_131 = native_s_129;
+  goto native_l14_58;
+native_l14_57: ;
+  native_s_130 = false;
+  (void)native_s_130;
+  native_s_131 = native_s_130;
+  goto native_l14_58;
+native_l14_58: ;
+  native_s_138 = native_s_131;
+  goto native_l14_65;
+native_l14_59: ;
+  if (native_s_23.tag != INT64_C(1)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_132 = native_s_23.payload.variant_1;
+  (void)native_s_132;
+  switch (native_s_132.tag) {
+  case INT64_C(0):
+    goto native_l14_61;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_133 = true;
+  (void)native_s_133;
+  native_s_135 = native_s_133;
+  goto native_l14_62;
+native_l14_61: ;
+  native_s_134 = false;
+  (void)native_s_134;
+  native_s_135 = native_s_134;
+  goto native_l14_62;
+native_l14_62: ;
+  native_s_138 = native_s_135;
+  goto native_l14_65;
+  native_s_136 = true;
+  (void)native_s_136;
+  native_s_138 = native_s_136;
+  goto native_l14_65;
+  native_s_137 = false;
+  (void)native_s_137;
+  native_s_138 = native_s_137;
+  goto native_l14_65;
+native_l14_65: ;
+  if (native_s_138) {
+    goto native_l14_66;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_66: ;
+  if (native_s_23.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_139 = native_s_23.payload.variant_0;
+  if (native_s_139.tag != INT64_C(1)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_140 = native_s_139.payload.variant_1;
+  native_s_141 = INT64_C(0);
+  (void)native_s_141;
+  native_s_142 = (native_s_140 < native_s_141);
+  native_s_143 = false;
+  (void)native_s_143;
+  native_s_144 = (native_s_142 == native_s_143);
+  if (native_s_144) {
+    goto native_l14_67;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_67: ;
+  switch (native_s_25.tag) {
+  case INT64_C(0):
+    goto native_l14_68;
+  case INT64_C(1):
+    goto native_l14_72;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l14_68: ;
+  if (native_s_25.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_145 = native_s_25.payload.variant_0;
+  switch (native_s_145.tag) {
+  case INT64_C(0):
+    goto native_l14_70;
+  case INT64_C(1):
+    goto native_l14_69;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l14_69: ;
+  native_s_146 = true;
+  (void)native_s_146;
+  native_s_148 = native_s_146;
+  goto native_l14_71;
+native_l14_70: ;
+  native_s_147 = false;
+  (void)native_s_147;
+  native_s_148 = native_s_147;
+  goto native_l14_71;
+native_l14_71: ;
+  native_s_155 = native_s_148;
+  goto native_l14_78;
+native_l14_72: ;
+  if (native_s_25.tag != INT64_C(1)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_149 = native_s_25.payload.variant_1;
+  (void)native_s_149;
+  switch (native_s_149.tag) {
+  case INT64_C(0):
+    goto native_l14_74;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_150 = true;
+  (void)native_s_150;
+  native_s_152 = native_s_150;
+  goto native_l14_75;
+native_l14_74: ;
+  native_s_151 = false;
+  (void)native_s_151;
+  native_s_152 = native_s_151;
+  goto native_l14_75;
+native_l14_75: ;
+  native_s_155 = native_s_152;
+  goto native_l14_78;
+  native_s_153 = true;
+  (void)native_s_153;
+  native_s_155 = native_s_153;
+  goto native_l14_78;
+  native_s_154 = false;
+  (void)native_s_154;
+  native_s_155 = native_s_154;
+  goto native_l14_78;
+native_l14_78: ;
+  if (native_s_155) {
+    goto native_l14_79;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_79: ;
+  if (native_s_25.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_156 = native_s_25.payload.variant_0;
+  if (native_s_156.tag != INT64_C(1)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_157 = native_s_156.payload.variant_1;
+  native_s_158 = INT64_C(0);
+  (void)native_s_158;
+  native_s_159 = (native_s_157 < native_s_158);
+  native_s_160 = false;
+  (void)native_s_160;
+  native_s_161 = (native_s_159 == native_s_160);
+  if (native_s_161) {
+    goto native_l14_80;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_80: ;
+  switch (native_s_27.tag) {
+  case INT64_C(0):
+    goto native_l14_81;
+  case INT64_C(1):
+    goto native_l14_85;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l14_81: ;
+  if (native_s_27.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_162 = native_s_27.payload.variant_0;
+  switch (native_s_162.tag) {
+  case INT64_C(0):
+    goto native_l14_83;
+  case INT64_C(1):
+    goto native_l14_82;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l14_82: ;
+  native_s_163 = true;
+  (void)native_s_163;
+  native_s_165 = native_s_163;
+  goto native_l14_84;
+native_l14_83: ;
+  native_s_164 = false;
+  (void)native_s_164;
+  native_s_165 = native_s_164;
+  goto native_l14_84;
+native_l14_84: ;
+  native_s_172 = native_s_165;
+  goto native_l14_91;
+native_l14_85: ;
+  if (native_s_27.tag != INT64_C(1)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_166 = native_s_27.payload.variant_1;
+  (void)native_s_166;
+  switch (native_s_166.tag) {
+  case INT64_C(0):
+    goto native_l14_87;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_167 = true;
+  (void)native_s_167;
+  native_s_169 = native_s_167;
+  goto native_l14_88;
+native_l14_87: ;
+  native_s_168 = false;
+  (void)native_s_168;
+  native_s_169 = native_s_168;
+  goto native_l14_88;
+native_l14_88: ;
+  native_s_172 = native_s_169;
+  goto native_l14_91;
+  native_s_170 = true;
+  (void)native_s_170;
+  native_s_172 = native_s_170;
+  goto native_l14_91;
+  native_s_171 = false;
+  (void)native_s_171;
+  native_s_172 = native_s_171;
+  goto native_l14_91;
+native_l14_91: ;
+  if (native_s_172) {
+    goto native_l14_92;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_92: ;
+  if (native_s_27.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_173 = native_s_27.payload.variant_0;
+  if (native_s_173.tag != INT64_C(1)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_174 = native_s_173.payload.variant_1;
+  native_s_175 = INT64_C(0);
+  (void)native_s_175;
+  native_s_176 = (native_s_174 < native_s_175);
+  native_s_177 = false;
+  (void)native_s_177;
+  native_s_178 = (native_s_176 == native_s_177);
+  if (native_s_178) {
+    goto native_l14_93;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_93: ;
+  native_s_179 = native_value_equal(&native_m0_value_30, &native_s_23, &native_s_25);
+  if (native_s_179) {
+    goto native_l14_94;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_94: ;
+  native_s_180 = native_value_equal(&native_m0_value_30, &native_s_25, &native_s_27);
+  if (native_s_180) {
+    goto native_l14_95;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_95: ;
+  if (native_s_19.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_181 = native_s_19.payload.variant_0;
+  if (native_s_181.tag != INT64_C(1)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_182 = native_s_181.payload.variant_1;
+  if (native_s_25.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_183 = native_s_25.payload.variant_0;
+  if (native_s_183.tag != INT64_C(1)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_184 = native_s_183.payload.variant_1;
+  if (__builtin_add_overflow(native_s_182, native_s_184, &native_s_185.payload.variant_0)) {
+    native_s_185.tag = INT64_C(1);
+  } else {
+    native_s_185.tag = INT64_C(0);
+  }
+  switch (native_s_185.tag) {
+  case INT64_C(0):
+    native_s_187 = native_s_185;
+  goto native_l14_97;
+  case INT64_C(1):
+    goto native_l14_96;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l14_96: ;
+  native_s_186 = INT64_C(2);
+  (void)native_s_186;
+  native_trap((uint32_t)native_s_186);
+native_l14_97: ;
+  native_s_188 = native_s_187.payload.variant_0;
+  switch (native_s_21.tag) {
+  case INT64_C(0):
+    goto native_l14_98;
+  case INT64_C(1):
+    goto native_l14_102;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l14_98: ;
+  if (native_s_21.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_189 = native_s_21.payload.variant_0;
+  switch (native_s_189.tag) {
+  case INT64_C(0):
+    goto native_l14_100;
+  case INT64_C(1):
+    goto native_l14_99;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l14_99: ;
+  if (native_s_189.tag != INT64_C(1)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_190 = native_s_189.payload.variant_1;
+  native_s_191 = (native_s_188 == native_s_190);
+  native_s_193 = native_s_191;
+  goto native_l14_101;
+native_l14_100: ;
+  native_s_192 = false;
+  (void)native_s_192;
+  native_s_193 = native_s_192;
+  goto native_l14_101;
+native_l14_101: ;
+  native_s_195 = native_s_193;
+  goto native_l14_103;
+native_l14_102: ;
+  native_s_194 = false;
+  (void)native_s_194;
+  native_s_195 = native_s_194;
+  goto native_l14_103;
+native_l14_103: ;
+  if (native_s_195) {
+    goto native_l14_104;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_104: ;
+  native_s_196 = UINT64_C(8);
+  (void)native_s_196;
+  {
+    const void *native_map_hit_197 = native_map_get(native_v_0, &native_s_196, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_197, 0, sizeof native_s_197);
+    if (native_map_hit_197 != NULL) {
+      native_s_197.tag = INT64_C(0);
+      native_s_197.payload.variant_0 = *(const native_m0_type_29 *)native_map_hit_197;
+    } else {
+      native_s_197.tag = INT64_C(1);
+    }
+  }
+  if (native_s_197.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_198 = native_s_197.payload.variant_0;
+  if (native_s_198.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_199 = native_s_198.payload.variant_0;
+  native_s_200 = native_m0_fn_11(native_s_199);
+  if (native_s_200) {
+    goto native_l14_105;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_105: ;
+  native_s_201 = UINT64_C(9);
+  (void)native_s_201;
+  {
+    const void *native_map_hit_202 = native_map_get(native_v_0, &native_s_201, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_202, 0, sizeof native_s_202);
+    if (native_map_hit_202 != NULL) {
+      native_s_202.tag = INT64_C(0);
+      native_s_202.payload.variant_0 = *(const native_m0_type_29 *)native_map_hit_202;
+    } else {
+      native_s_202.tag = INT64_C(1);
+    }
+  }
+  if (native_s_202.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_203 = native_s_202.payload.variant_0;
+  if (native_s_203.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_204 = native_s_203.payload.variant_0;
+  native_s_205 = native_m0_fn_11(native_s_204);
+  if (native_s_205) {
+    goto native_l14_106;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_106: ;
+  native_s_206 = UINT64_C(15);
+  (void)native_s_206;
+  {
+    const void *native_map_hit_207 = native_map_get(native_v_0, &native_s_206, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_207, 0, sizeof native_s_207);
+    if (native_map_hit_207 != NULL) {
+      native_s_207.tag = INT64_C(0);
+      native_s_207.payload.variant_0 = *(const native_m0_type_29 *)native_map_hit_207;
+    } else {
+      native_s_207.tag = INT64_C(1);
+    }
+  }
+  if (native_s_207.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_208 = native_s_207.payload.variant_0;
+  if (native_s_208.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_209 = native_s_208.payload.variant_0;
+  native_s_210 = native_m0_fn_11(native_s_209);
+  if (native_s_210) {
+    goto native_l14_107;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_107: ;
+  native_s_211 = UINT64_C(3);
+  (void)native_s_211;
+  {
+    const void *native_map_hit_212 = native_map_get(native_v_0, &native_s_211, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_212, 0, sizeof native_s_212);
+    if (native_map_hit_212 != NULL) {
+      native_s_212.tag = INT64_C(0);
+      native_s_212.payload.variant_0 = *(const native_m0_type_29 *)native_map_hit_212;
+    } else {
+      native_s_212.tag = INT64_C(1);
+    }
+  }
+  if (native_s_212.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_213 = native_s_212.payload.variant_0;
+  if (native_s_213.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_214 = native_s_213.payload.variant_0;
+  native_s_215 = native_m0_fn_11(native_s_214);
+  if (native_s_215) {
+    goto native_l14_108;
+  } else {
+    goto native_l14_115;
+  }
+native_l14_108: ;
+  native_s_216 = UINT64_C(3);
+  (void)native_s_216;
+  {
+    const void *native_map_hit_217 = native_map_get(native_v_0, &native_s_216, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_217, 0, sizeof native_s_217);
+    if (native_map_hit_217 != NULL) {
+      native_s_217.tag = INT64_C(0);
+      native_s_217.payload.variant_0 = *(const native_m0_type_29 *)native_map_hit_217;
+    } else {
+      native_s_217.tag = INT64_C(1);
+    }
+  }
+  switch (native_s_217.tag) {
+  case INT64_C(0):
+    goto native_l14_109;
+  case INT64_C(1):
+    goto native_l14_113;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l14_109: ;
+  if (native_s_217.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_218 = native_s_217.payload.variant_0;
+  switch (native_s_218.tag) {
+  case INT64_C(0):
+    goto native_l14_110;
+  case INT64_C(1):
+    goto native_l14_111;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l14_110: ;
+  if (native_s_218.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_219 = native_s_218.payload.variant_0;
+  native_s_220 = native_text_eq(native_v_1, native_s_219);
+  native_s_222 = native_s_220;
+  goto native_l14_112;
+native_l14_111: ;
+  native_s_221 = false;
+  (void)native_s_221;
+  native_s_222 = native_s_221;
+  goto native_l14_112;
+native_l14_112: ;
+  native_s_224 = native_s_222;
+  goto native_l14_114;
+native_l14_113: ;
+  native_s_223 = false;
+  (void)native_s_223;
+  native_s_224 = native_s_223;
+  goto native_l14_114;
+native_l14_114: ;
+  native_s_226 = native_s_224;
+  goto native_l14_116;
+native_l14_115: ;
+  native_s_225 = false;
+  (void)native_s_225;
+  native_s_226 = native_s_225;
+  goto native_l14_116;
+native_l14_116: ;
+  return native_s_226;
+}
+native_m0_type_5 native_m0_fn_15(native_m0_type_4 native_v_0, native_m0_type_28 native_v_1, native_m0_type_28 native_v_2, native_m0_type_28 native_v_3, native_m0_type_28 native_v_4, native_m0_type_42 native_v_5, native_m0_type_42 native_v_6, native_m0_type_42 native_v_7, native_m0_type_42 native_v_8) {
+  (void)native_v_0;
+  (void)native_v_1;
+  (void)native_v_2;
+  (void)native_v_3;
+  (void)native_v_4;
+  (void)native_v_5;
+  (void)native_v_6;
+  (void)native_v_7;
+  (void)native_v_8;
+  native_m0_type_2 native_s_0;
+  native_m0_type_2 native_s_1;
+  native_m0_type_2 native_s_2;
+  native_m0_type_1 native_s_3;
+  native_m0_type_2 native_s_4;
+  native_m0_type_2 native_s_5;
+  native_m0_type_2 native_s_6;
+  native_m0_type_2 native_s_7;
+  native_m0_type_2 native_s_8;
+  native_m0_type_2 native_s_9;
+  native_m0_type_5 native_s_10;
+  native_m0_type_2 native_s_11;
+  native_m0_type_2 native_s_12;
+  native_m0_type_2 native_s_13;
+  native_m0_type_2 native_s_14;
+  native_m0_type_2 native_s_15;
+  native_m0_type_2 native_s_16;
+  native_m0_type_5 native_s_17;
+  native_m0_type_2 native_s_18;
+  native_m0_type_2 native_s_19;
+  native_m0_type_2 native_s_20;
+  native_m0_type_2 native_s_21;
+  native_m0_type_2 native_s_22;
+  native_m0_type_2 native_s_23;
+  native_m0_type_5 native_s_24;
+  native_m0_type_2 native_s_25;
+  native_m0_type_2 native_s_26;
+  native_m0_type_2 native_s_27;
+  native_m0_type_2 native_s_28;
+  native_m0_type_2 native_s_29;
+  native_m0_type_2 native_s_30;
+  native_m0_type_2 native_s_31;
+  native_m0_type_2 native_s_32;
+  native_m0_type_2 native_s_33;
+  native_m0_type_5 native_s_34;
+  native_m0_type_1 native_s_35;
+  native_m0_type_5 native_s_36;
+  switch (native_v_1.tag) {
+  case INT64_C(0):
+    goto native_l15_2;
+  case INT64_C(1):
+    goto native_l15_1;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l15_1: ;
+  native_s_0 = true;
+  (void)native_s_0;
+  native_s_2 = native_s_0;
+  goto native_l15_3;
+native_l15_2: ;
+  native_s_1 = false;
+  (void)native_s_1;
+  native_s_2 = native_s_1;
+  goto native_l15_3;
+native_l15_3: ;
+  if (native_s_2) {
+    goto native_l15_4;
+  } else {
+    goto native_l15_5;
+  }
+native_l15_4: ;
+  native_s_3 = INT64_C(1);
+  (void)native_s_3;
+  native_trap((uint32_t)native_s_3);
+native_l15_5: ;
+  switch (native_v_2.tag) {
+  case INT64_C(0):
+    goto native_l15_6;
+  case INT64_C(1):
+    goto native_l15_7;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l15_6: ;
+  native_s_4 = true;
+  (void)native_s_4;
+  native_s_6 = native_s_4;
+  goto native_l15_8;
+native_l15_7: ;
+  native_s_5 = false;
+  (void)native_s_5;
+  native_s_6 = native_s_5;
+  goto native_l15_8;
+native_l15_8: ;
+  if (native_s_6) {
+    goto native_l15_9;
+  } else {
+    goto native_l15_10;
+  }
+native_l15_9: ;
+  native_s_7 = native_value_equal(&native_m0_value_28, &native_v_1, &native_v_2);
+  native_s_9 = native_s_7;
+  goto native_l15_11;
+native_l15_10: ;
+  native_s_8 = false;
+  (void)native_s_8;
+  native_s_9 = native_s_8;
+  goto native_l15_11;
+native_l15_11: ;
+  if (native_s_9) {
+    goto native_l15_12;
+  } else {
+    goto native_l15_13;
+  }
+native_l15_12: ;
+  native_s_10 = UINT64_C(17);
+  (void)native_s_10;
+  native_s_36 = native_s_10;
+  goto native_l15_42;
+native_l15_13: ;
+  switch (native_v_3.tag) {
+  case INT64_C(0):
+    goto native_l15_14;
+  case INT64_C(1):
+    goto native_l15_15;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l15_14: ;
+  native_s_11 = true;
+  (void)native_s_11;
+  native_s_13 = native_s_11;
+  goto native_l15_16;
+native_l15_15: ;
+  native_s_12 = false;
+  (void)native_s_12;
+  native_s_13 = native_s_12;
+  goto native_l15_16;
+native_l15_16: ;
+  if (native_s_13) {
+    goto native_l15_17;
+  } else {
+    goto native_l15_18;
+  }
+native_l15_17: ;
+  native_s_14 = native_value_equal(&native_m0_value_28, &native_v_1, &native_v_3);
+  native_s_16 = native_s_14;
+  goto native_l15_19;
+native_l15_18: ;
+  native_s_15 = false;
+  (void)native_s_15;
+  native_s_16 = native_s_15;
+  goto native_l15_19;
+native_l15_19: ;
+  if (native_s_16) {
+    goto native_l15_20;
+  } else {
+    goto native_l15_21;
+  }
+native_l15_20: ;
+  native_s_17 = UINT64_C(18);
+  (void)native_s_17;
+  native_s_36 = native_s_17;
+  goto native_l15_42;
+native_l15_21: ;
+  switch (native_v_6.tag) {
+  case INT64_C(0):
+    goto native_l15_22;
+  case INT64_C(1):
+    goto native_l15_23;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l15_22: ;
+  native_s_18 = true;
+  (void)native_s_18;
+  native_s_20 = native_s_18;
+  goto native_l15_24;
+native_l15_23: ;
+  native_s_19 = false;
+  (void)native_s_19;
+  native_s_20 = native_s_19;
+  goto native_l15_24;
+native_l15_24: ;
+  if (native_s_20) {
+    goto native_l15_25;
+  } else {
+    goto native_l15_26;
+  }
+native_l15_25: ;
+  native_s_21 = native_value_equal(&native_m0_value_42, &native_v_6, &native_v_7);
+  native_s_23 = native_s_21;
+  goto native_l15_27;
+native_l15_26: ;
+  native_s_22 = false;
+  (void)native_s_22;
+  native_s_23 = native_s_22;
+  goto native_l15_27;
+native_l15_27: ;
+  if (native_s_23) {
+    goto native_l15_28;
+  } else {
+    goto native_l15_29;
+  }
+native_l15_28: ;
+  native_s_24 = UINT64_C(18);
+  (void)native_s_24;
+  native_s_36 = native_s_24;
+  goto native_l15_42;
+native_l15_29: ;
+  switch (native_v_4.tag) {
+  case INT64_C(0):
+    goto native_l15_30;
+  case INT64_C(1):
+    goto native_l15_31;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l15_30: ;
+  native_s_25 = true;
+  (void)native_s_25;
+  native_s_27 = native_s_25;
+  goto native_l15_32;
+native_l15_31: ;
+  native_s_26 = false;
+  (void)native_s_26;
+  native_s_27 = native_s_26;
+  goto native_l15_32;
+native_l15_32: ;
+  if (native_s_27) {
+    goto native_l15_33;
+  } else {
+    goto native_l15_38;
+  }
+native_l15_33: ;
+  switch (native_v_5.tag) {
+  case INT64_C(0):
+    goto native_l15_34;
+  case INT64_C(1):
+    goto native_l15_35;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l15_34: ;
+  native_s_28 = true;
+  (void)native_s_28;
+  native_s_30 = native_s_28;
+  goto native_l15_36;
+native_l15_35: ;
+  native_s_29 = false;
+  (void)native_s_29;
+  native_s_30 = native_s_29;
+  goto native_l15_36;
+native_l15_36: ;
+  if (native_s_30) {
+    goto native_l15_37;
+  } else {
+    goto native_l15_38;
+  }
+native_l15_37: ;
+  native_s_31 = native_value_equal(&native_m0_value_42, &native_v_5, &native_v_8);
+  native_s_33 = native_s_31;
+  goto native_l15_39;
+native_l15_38: ;
+  native_s_32 = false;
+  (void)native_s_32;
+  native_s_33 = native_s_32;
+  goto native_l15_39;
+native_l15_39: ;
+  if (native_s_33) {
+    goto native_l15_40;
+  } else {
+    goto native_l15_41;
+  }
+native_l15_40: ;
+  native_s_34 = UINT64_C(17);
+  (void)native_s_34;
+  native_s_36 = native_s_34;
+  goto native_l15_42;
+native_l15_41: ;
+  native_s_35 = INT64_C(1);
+  (void)native_s_35;
+  native_trap((uint32_t)native_s_35);
+native_l15_42: ;
+  return native_s_36;
+}
+native_m0_type_16 native_m0_fn_16(native_arena *arena, const native_capability *capability, native_m0_type_4 native_v_0, native_m0_type_12 native_v_1) {
+  (void)arena;
+  (void)capability;
+  (void)native_v_0;
+  (void)native_v_1;
+  native_m0_type_0 native_s_0;
+  native_m0_type_5 native_s_1;
+  native_m0_type_5 native_s_2;
+  native_m0_type_5 native_s_3;
+  native_m0_type_5 native_s_4;
+  native_m0_type_33 native_s_5;
+  native_m0_type_33 native_s_6;
+  native_m0_type_33 native_s_7;
+  native_m0_type_16 native_s_8;
+  native_m0_type_5 native_s_9;
+  native_m0_type_2 native_s_10;
+  native_m0_type_5 native_s_11;
+  native_m0_type_5 native_s_12;
+  native_m0_type_32 native_s_13;
+  native_m0_type_4 native_s_14;
+  native_m0_type_33 native_s_15;
+  native_m0_type_1 native_s_16;
+  native_m0_type_33 native_s_17;
+  native_m0_type_2 native_s_18;
+  native_m0_type_33 native_s_19;
+  native_m0_type_5 native_s_20;
+  native_m0_type_33 native_s_21;
+  native_m0_type_9 native_s_22;
+  native_m0_type_33 native_s_23;
+  native_m0_type_24 native_s_24;
+  native_m0_type_33 native_s_25;
+  native_m0_type_26 native_s_26;
+  native_m0_type_33 native_s_27;
+  native_m0_type_18 native_s_28;
+  native_m0_type_33 native_s_29;
+  native_m0_type_33 native_s_30;
+  native_m0_type_16 native_s_31;
+  native_m0_type_16 native_s_32;
+  native_s_0 = arena;
+  (void)native_s_0;
+  native_s_1 = UINT64_C(19);
+  (void)native_s_1;
+  native_s_2 = UINT64_C(20);
+  (void)native_s_2;
+  native_s_3 = UINT64_C(21);
+  (void)native_s_3;
+  native_s_4 = UINT64_C(22);
+  (void)native_s_4;
+  native_s_5 = (native_m0_type_33){ .tag = INT64_C(3), .payload = { .variant_3 = native_s_2 } };
+  native_s_6 = (native_m0_type_33){ .tag = INT64_C(0), .payload = { .variant_0 = native_v_0 } };
+  native_s_7 = (native_m0_type_33){ .tag = INT64_C(8), .payload = { .variant_8 = native_v_1 } };
+  {
+    const native_m0_type_5 native_map_keys_8[3] = { native_s_1, native_s_3, native_s_4 };
+    const native_m0_type_33 native_map_values_8[3] = { native_s_5, native_s_6, native_s_7 };
+    native_s_8 = native_map_from_arrays((native_arena *)native_s_0, native_map_keys_8, native_map_values_8, INT64_C(3), INT64_C(8), (size_t)8, INT64_C(16), (size_t)8, NATIVE_COLLECTION_EQ_KEYWORD);
+  }
+  native_s_9 = UINT64_C(23);
+  (void)native_s_9;
+  native_s_10 = native_map_contains(native_v_1, &native_s_9, NATIVE_COLLECTION_EQ_KEYWORD);
+  if (native_s_10) {
+    goto native_l16_1;
+  } else {
+    goto native_l16_11;
+  }
+native_l16_1: ;
+  native_s_11 = UINT64_C(23);
+  (void)native_s_11;
+  native_s_12 = UINT64_C(23);
+  (void)native_s_12;
+  {
+    const void *native_map_hit_13 = native_map_get(native_v_1, &native_s_12, NATIVE_COLLECTION_EQ_KEYWORD);
+    if (native_map_hit_13 != NULL) {
+      native_s_13 = *(const native_m0_type_32 *)native_map_hit_13;
+    } else {
+      memset(&native_s_13, 0, sizeof native_s_13);
+      native_s_13.tag = INT64_C(4);
+    }
+  }
+  switch (native_s_13.tag) {
+  case INT64_C(0):
+    goto native_l16_2;
+  case INT64_C(1):
+    goto native_l16_3;
+  case INT64_C(2):
+    goto native_l16_4;
+  case INT64_C(3):
+    goto native_l16_5;
+  case INT64_C(4):
+    goto native_l16_6;
+  case INT64_C(5):
+    goto native_l16_7;
+  case INT64_C(6):
+    goto native_l16_8;
+  case INT64_C(7):
+    goto native_l16_9;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l16_2: ;
+  if (native_s_13.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_14 = native_s_13.payload.variant_0;
+  native_s_15 = (native_m0_type_33){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_14 } };
+  native_s_30 = native_s_15;
+  goto native_l16_10;
+native_l16_3: ;
+  if (native_s_13.tag != INT64_C(1)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_16 = native_s_13.payload.variant_1;
+  native_s_17 = (native_m0_type_33){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_16 } };
+  native_s_30 = native_s_17;
+  goto native_l16_10;
+native_l16_4: ;
+  if (native_s_13.tag != INT64_C(2)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_18 = native_s_13.payload.variant_2;
+  native_s_19 = (native_m0_type_33){ .tag = INT64_C(2), .payload = { .variant_2 = native_s_18 } };
+  native_s_30 = native_s_19;
+  goto native_l16_10;
+native_l16_5: ;
+  if (native_s_13.tag != INT64_C(3)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_20 = native_s_13.payload.variant_3;
+  native_s_21 = (native_m0_type_33){ .tag = INT64_C(3), .payload = { .variant_3 = native_s_20 } };
+  native_s_30 = native_s_21;
+  goto native_l16_10;
+native_l16_6: ;
+  if (native_s_13.tag != INT64_C(4)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_22 = native_s_13.payload.variant_4;
+  (void)native_s_22;
+  native_s_23 = (native_m0_type_33){ .tag = INT64_C(4), .payload = { .variant_4 = native_s_22 } };
+  native_s_30 = native_s_23;
+  goto native_l16_10;
+native_l16_7: ;
+  if (native_s_13.tag != INT64_C(5)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_24 = native_s_13.payload.variant_5;
+  native_s_25 = (native_m0_type_33){ .tag = INT64_C(5), .payload = { .variant_5 = native_s_24 } };
+  native_s_30 = native_s_25;
+  goto native_l16_10;
+native_l16_8: ;
+  if (native_s_13.tag != INT64_C(6)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_26 = native_s_13.payload.variant_6;
+  native_s_27 = (native_m0_type_33){ .tag = INT64_C(6), .payload = { .variant_6 = native_s_26 } };
+  native_s_30 = native_s_27;
+  goto native_l16_10;
+native_l16_9: ;
+  if (native_s_13.tag != INT64_C(7)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_28 = native_s_13.payload.variant_7;
+  native_s_29 = (native_m0_type_33){ .tag = INT64_C(7), .payload = { .variant_7 = native_s_28 } };
+  native_s_30 = native_s_29;
+  goto native_l16_10;
+native_l16_10: ;
+  native_s_31 = native_map_assoc((native_arena *)native_s_0, native_s_8, &native_s_11, &native_s_30, INT64_C(8), (size_t)8, INT64_C(16), (size_t)8, NATIVE_COLLECTION_EQ_KEYWORD);
+  native_s_32 = native_s_31;
+  goto native_l16_12;
+native_l16_11: ;
+  native_s_32 = native_s_8;
+  goto native_l16_12;
+native_l16_12: ;
+  return native_s_32;
+}
+native_m0_type_4 native_m0_fn_17(native_arena *arena, const native_capability *capability, native_m0_type_24 native_v_0) {
+  (void)arena;
+  (void)capability;
+  (void)native_v_0;
+  native_m0_type_0 native_s_0;
+  native_m0_type_4 native_s_1;
+  native_m0_type_4 native_s_2;
+  native_s_0 = arena;
+  (void)native_s_0;
+  native_s_1 = (uint64_t)(uintptr_t)&native_m0_text_15;
+  (void)native_s_1;
+  native_s_2 = native_text_join((native_arena *)native_s_0, native_s_1, native_v_0);
+  return native_s_2;
+}
+native_m0_type_4 native_m0_fn_18(native_arena *arena, const native_capability *capability, native_m0_type_17 native_v_0) {
+  (void)arena;
+  (void)capability;
+  (void)native_v_0;
+  native_m0_type_0 native_s_0;
+  native_m0_type_5 native_s_1;
+  native_m0_type_41 native_s_2;
+  native_m0_type_40 native_s_3;
+  native_m0_type_2 native_s_4;
+  native_m0_type_2 native_s_5;
+  native_m0_type_2 native_s_6;
+  native_m0_type_2 native_s_7;
+  native_m0_type_2 native_s_8;
+  native_m0_type_2 native_s_9;
+  native_m0_type_4 native_s_10;
+  native_m0_type_5 native_s_11;
+  native_m0_type_41 native_s_12;
+  native_m0_type_4 native_s_13;
+  native_m0_type_4 native_s_14;
+  native_m0_type_5 native_s_15;
+  native_m0_type_41 native_s_16;
+  native_m0_type_5 native_s_17;
+  native_m0_type_40 native_s_18;
+  native_m0_type_5 native_s_19;
+  native_m0_type_2 native_s_20;
+  native_m0_type_2 native_s_21;
+  native_m0_type_2 native_s_22;
+  native_m0_type_2 native_s_23;
+  native_m0_type_2 native_s_24;
+  native_m0_type_4 native_s_25;
+  native_m0_type_5 native_s_26;
+  native_m0_type_41 native_s_27;
+  native_m0_type_5 native_s_28;
+  native_m0_type_40 native_s_29;
+  native_m0_type_5 native_s_30;
+  native_m0_type_2 native_s_31;
+  native_m0_type_2 native_s_32;
+  native_m0_type_2 native_s_33;
+  native_m0_type_2 native_s_34;
+  native_m0_type_2 native_s_35;
+  native_m0_type_4 native_s_36;
+  native_m0_type_5 native_s_37;
+  native_m0_type_41 native_s_38;
+  native_m0_type_4 native_s_39;
+  native_m0_type_5 native_s_40;
+  native_m0_type_41 native_s_41;
+  native_m0_type_4 native_s_42;
+  native_m0_type_4 native_s_43;
+  native_m0_type_4 native_s_44;
+  native_m0_type_4 native_s_45;
+  native_m0_type_5 native_s_46;
+  native_m0_type_41 native_s_47;
+  native_m0_type_40 native_s_48;
+  native_m0_type_4 native_s_49;
+  native_m0_type_2 native_s_50;
+  native_m0_type_2 native_s_51;
+  native_m0_type_2 native_s_52;
+  native_m0_type_2 native_s_53;
+  native_m0_type_2 native_s_54;
+  native_m0_type_4 native_s_55;
+  native_m0_type_5 native_s_56;
+  native_m0_type_41 native_s_57;
+  native_m0_type_40 native_s_58;
+  native_m0_type_2 native_s_59;
+  native_m0_type_2 native_s_60;
+  native_m0_type_2 native_s_61;
+  native_m0_type_2 native_s_62;
+  native_m0_type_2 native_s_63;
+  native_m0_type_2 native_s_64;
+  native_m0_type_4 native_s_65;
+  native_m0_type_5 native_s_66;
+  native_m0_type_41 native_s_67;
+  native_m0_type_40 native_s_68;
+  native_m0_type_24 native_s_69;
+  native_m0_type_4 native_s_70;
+  native_m0_type_4 native_s_71;
+  native_m0_type_4 native_s_72;
+  native_m0_type_4 native_s_73;
+  native_m0_type_4 native_s_74;
+  native_m0_type_4 native_s_75;
+  native_s_0 = arena;
+  (void)native_s_0;
+  native_s_1 = UINT64_C(24);
+  (void)native_s_1;
+  {
+    const void *native_map_hit_2 = native_map_get(native_v_0, &native_s_1, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_2, 0, sizeof native_s_2);
+    if (native_map_hit_2 != NULL) {
+      native_s_2.tag = INT64_C(0);
+      native_s_2.payload.variant_0 = *(const native_m0_type_40 *)native_map_hit_2;
+    } else {
+      native_s_2.tag = INT64_C(1);
+    }
+  }
+  switch (native_s_2.tag) {
+  case INT64_C(0):
+    goto native_l18_1;
+  case INT64_C(1):
+    goto native_l18_6;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l18_1: ;
+  if (native_s_2.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_3 = native_s_2.payload.variant_0;
+  switch (native_s_3.tag) {
+  case INT64_C(0):
+    goto native_l18_2;
+  case INT64_C(1):
+    goto native_l18_2;
+  case INT64_C(2):
+    goto native_l18_2;
+  case INT64_C(3):
+    goto native_l18_2;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l18_2: ;
+  native_s_4 = true;
+  (void)native_s_4;
+  native_s_6 = native_s_4;
+  goto native_l18_4;
+  native_s_5 = false;
+  (void)native_s_5;
+  native_s_6 = native_s_5;
+  goto native_l18_4;
+native_l18_4: ;
+  native_s_9 = native_s_6;
+  goto native_l18_7;
+  native_s_7 = true;
+  (void)native_s_7;
+  native_s_9 = native_s_7;
+  goto native_l18_7;
+native_l18_6: ;
+  native_s_8 = false;
+  (void)native_s_8;
+  native_s_9 = native_s_8;
+  goto native_l18_7;
+native_l18_7: ;
+  if (native_s_9) {
+    goto native_l18_8;
+  } else {
+    goto native_l18_9;
+  }
+native_l18_8: ;
+  native_s_10 = (uint64_t)(uintptr_t)&native_m0_text_16;
+  (void)native_s_10;
+  native_s_11 = UINT64_C(24);
+  (void)native_s_11;
+  {
+    const void *native_map_hit_12 = native_map_get(native_v_0, &native_s_11, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_12, 0, sizeof native_s_12);
+    if (native_map_hit_12 != NULL) {
+      native_s_12.tag = INT64_C(0);
+      native_s_12.payload.variant_0 = *(const native_m0_type_40 *)native_map_hit_12;
+    } else {
+      native_s_12.tag = INT64_C(1);
+    }
+  }
+  native_s_13 = native_value_to_text((native_arena *)native_s_0, &native_m0_value_41, &native_s_12, NATIVE_VALUE_STR);
+  {
+    const uint64_t native_parts_14[2] = { native_s_10, native_s_13 };
+    native_s_14 = native_text_concat((native_arena *)native_s_0, native_parts_14, UINT64_C(2));
+  }
+  native_s_75 = native_s_14;
+  goto native_l18_43;
+native_l18_9: ;
+  native_s_15 = UINT64_C(25);
+  (void)native_s_15;
+  {
+    const void *native_map_hit_16 = native_map_get(native_v_0, &native_s_15, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_16, 0, sizeof native_s_16);
+    if (native_map_hit_16 != NULL) {
+      native_s_16.tag = INT64_C(0);
+      native_s_16.payload.variant_0 = *(const native_m0_type_40 *)native_map_hit_16;
+    } else {
+      native_s_16.tag = INT64_C(1);
+    }
+  }
+  native_s_17 = UINT64_C(26);
+  (void)native_s_17;
+  switch (native_s_16.tag) {
+  case INT64_C(0):
+    goto native_l18_10;
+  case INT64_C(1):
+    goto native_l18_14;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l18_10: ;
+  if (native_s_16.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_18 = native_s_16.payload.variant_0;
+  switch (native_s_18.tag) {
+  case INT64_C(0):
+    goto native_l18_12;
+  case INT64_C(1):
+    goto native_l18_12;
+  case INT64_C(2):
+    goto native_l18_11;
+  case INT64_C(3):
+    goto native_l18_12;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l18_11: ;
+  if (native_s_18.tag != INT64_C(2)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_19 = native_s_18.payload.variant_2;
+  native_s_20 = (native_s_17 == native_s_19);
+  native_s_22 = native_s_20;
+  goto native_l18_13;
+native_l18_12: ;
+  native_s_21 = false;
+  (void)native_s_21;
+  native_s_22 = native_s_21;
+  goto native_l18_13;
+native_l18_13: ;
+  native_s_24 = native_s_22;
+  goto native_l18_15;
+native_l18_14: ;
+  native_s_23 = false;
+  (void)native_s_23;
+  native_s_24 = native_s_23;
+  goto native_l18_15;
+native_l18_15: ;
+  if (native_s_24) {
+    goto native_l18_16;
+  } else {
+    goto native_l18_17;
+  }
+native_l18_16: ;
+  native_s_25 = (uint64_t)(uintptr_t)&native_m0_text_17;
+  (void)native_s_25;
+  native_s_75 = native_s_25;
+  goto native_l18_43;
+native_l18_17: ;
+  native_s_26 = UINT64_C(27);
+  (void)native_s_26;
+  {
+    const void *native_map_hit_27 = native_map_get(native_v_0, &native_s_26, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_27, 0, sizeof native_s_27);
+    if (native_map_hit_27 != NULL) {
+      native_s_27.tag = INT64_C(0);
+      native_s_27.payload.variant_0 = *(const native_m0_type_40 *)native_map_hit_27;
+    } else {
+      native_s_27.tag = INT64_C(1);
+    }
+  }
+  native_s_28 = UINT64_C(28);
+  (void)native_s_28;
+  switch (native_s_27.tag) {
+  case INT64_C(0):
+    goto native_l18_18;
+  case INT64_C(1):
+    goto native_l18_22;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l18_18: ;
+  if (native_s_27.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_29 = native_s_27.payload.variant_0;
+  switch (native_s_29.tag) {
+  case INT64_C(0):
+    goto native_l18_20;
+  case INT64_C(1):
+    goto native_l18_20;
+  case INT64_C(2):
+    goto native_l18_19;
+  case INT64_C(3):
+    goto native_l18_20;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l18_19: ;
+  if (native_s_29.tag != INT64_C(2)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_30 = native_s_29.payload.variant_2;
+  native_s_31 = (native_s_28 == native_s_30);
+  native_s_33 = native_s_31;
+  goto native_l18_21;
+native_l18_20: ;
+  native_s_32 = false;
+  (void)native_s_32;
+  native_s_33 = native_s_32;
+  goto native_l18_21;
+native_l18_21: ;
+  native_s_35 = native_s_33;
+  goto native_l18_23;
+native_l18_22: ;
+  native_s_34 = false;
+  (void)native_s_34;
+  native_s_35 = native_s_34;
+  goto native_l18_23;
+native_l18_23: ;
+  if (native_s_35) {
+    goto native_l18_24;
+  } else {
+    goto native_l18_25;
+  }
+native_l18_24: ;
+  native_s_36 = (uint64_t)(uintptr_t)&native_m0_text_18;
+  (void)native_s_36;
+  native_s_37 = UINT64_C(21);
+  (void)native_s_37;
+  {
+    const void *native_map_hit_38 = native_map_get(native_v_0, &native_s_37, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_38, 0, sizeof native_s_38);
+    if (native_map_hit_38 != NULL) {
+      native_s_38.tag = INT64_C(0);
+      native_s_38.payload.variant_0 = *(const native_m0_type_40 *)native_map_hit_38;
+    } else {
+      native_s_38.tag = INT64_C(1);
+    }
+  }
+  native_s_39 = (uint64_t)(uintptr_t)&native_m0_text_19;
+  (void)native_s_39;
+  native_s_40 = UINT64_C(29);
+  (void)native_s_40;
+  {
+    const void *native_map_hit_41 = native_map_get(native_v_0, &native_s_40, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_41, 0, sizeof native_s_41);
+    if (native_map_hit_41 != NULL) {
+      native_s_41.tag = INT64_C(0);
+      native_s_41.payload.variant_0 = *(const native_m0_type_40 *)native_map_hit_41;
+    } else {
+      native_s_41.tag = INT64_C(1);
+    }
+  }
+  native_s_42 = native_value_to_text((native_arena *)native_s_0, &native_m0_value_41, &native_s_38, NATIVE_VALUE_STR);
+  native_s_43 = native_value_to_text((native_arena *)native_s_0, &native_m0_value_41, &native_s_41, NATIVE_VALUE_STR);
+  {
+    const uint64_t native_parts_44[4] = { native_s_36, native_s_42, native_s_39, native_s_43 };
+    native_s_44 = native_text_concat((native_arena *)native_s_0, native_parts_44, UINT64_C(4));
+  }
+  native_s_75 = native_s_44;
+  goto native_l18_43;
+native_l18_25: ;
+  native_s_45 = (uint64_t)(uintptr_t)&native_m0_text_20;
+  (void)native_s_45;
+  native_s_46 = UINT64_C(30);
+  (void)native_s_46;
+  {
+    const void *native_map_hit_47 = native_map_get(native_v_0, &native_s_46, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_47, 0, sizeof native_s_47);
+    if (native_map_hit_47 != NULL) {
+      native_s_47.tag = INT64_C(0);
+      native_s_47.payload.variant_0 = *(const native_m0_type_40 *)native_map_hit_47;
+    } else {
+      native_s_47.tag = INT64_C(1);
+    }
+  }
+  switch (native_s_47.tag) {
+  case INT64_C(0):
+    goto native_l18_26;
+  case INT64_C(1):
+    goto native_l18_30;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l18_26: ;
+  if (native_s_47.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_48 = native_s_47.payload.variant_0;
+  switch (native_s_48.tag) {
+  case INT64_C(0):
+    goto native_l18_27;
+  case INT64_C(1):
+    goto native_l18_28;
+  case INT64_C(2):
+    goto native_l18_28;
+  case INT64_C(3):
+    goto native_l18_28;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l18_27: ;
+  if (native_s_48.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_49 = native_s_48.payload.variant_0;
+  native_s_50 = native_text_eq(native_s_45, native_s_49);
+  native_s_52 = native_s_50;
+  goto native_l18_29;
+native_l18_28: ;
+  native_s_51 = false;
+  (void)native_s_51;
+  native_s_52 = native_s_51;
+  goto native_l18_29;
+native_l18_29: ;
+  native_s_54 = native_s_52;
+  goto native_l18_31;
+native_l18_30: ;
+  native_s_53 = false;
+  (void)native_s_53;
+  native_s_54 = native_s_53;
+  goto native_l18_31;
+native_l18_31: ;
+  if (native_s_54) {
+    goto native_l18_32;
+  } else {
+    goto native_l18_33;
+  }
+native_l18_32: ;
+  native_s_55 = (uint64_t)(uintptr_t)&native_m0_text_21;
+  (void)native_s_55;
+  native_s_75 = native_s_55;
+  goto native_l18_43;
+native_l18_33: ;
+  native_s_56 = UINT64_C(25);
+  (void)native_s_56;
+  {
+    const void *native_map_hit_57 = native_map_get(native_v_0, &native_s_56, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_57, 0, sizeof native_s_57);
+    if (native_map_hit_57 != NULL) {
+      native_s_57.tag = INT64_C(0);
+      native_s_57.payload.variant_0 = *(const native_m0_type_40 *)native_map_hit_57;
+    } else {
+      native_s_57.tag = INT64_C(1);
+    }
+  }
+  switch (native_s_57.tag) {
+  case INT64_C(0):
+    goto native_l18_34;
+  case INT64_C(1):
+    goto native_l18_39;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l18_34: ;
+  if (native_s_57.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_58 = native_s_57.payload.variant_0;
+  switch (native_s_58.tag) {
+  case INT64_C(0):
+    goto native_l18_35;
+  case INT64_C(1):
+    goto native_l18_35;
+  case INT64_C(2):
+    goto native_l18_35;
+  case INT64_C(3):
+    goto native_l18_35;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l18_35: ;
+  native_s_59 = true;
+  (void)native_s_59;
+  native_s_61 = native_s_59;
+  goto native_l18_37;
+  native_s_60 = false;
+  (void)native_s_60;
+  native_s_61 = native_s_60;
+  goto native_l18_37;
+native_l18_37: ;
+  native_s_64 = native_s_61;
+  goto native_l18_40;
+  native_s_62 = true;
+  (void)native_s_62;
+  native_s_64 = native_s_62;
+  goto native_l18_40;
+native_l18_39: ;
+  native_s_63 = false;
+  (void)native_s_63;
+  native_s_64 = native_s_63;
+  goto native_l18_40;
+native_l18_40: ;
+  if (native_s_64) {
+    goto native_l18_41;
+  } else {
+    goto native_l18_42;
+  }
+native_l18_41: ;
+  native_s_65 = (uint64_t)(uintptr_t)&native_m0_text_22;
+  (void)native_s_65;
+  native_s_66 = UINT64_C(25);
+  (void)native_s_66;
+  {
+    const void *native_map_hit_67 = native_map_get(native_v_0, &native_s_66, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_67, 0, sizeof native_s_67);
+    if (native_map_hit_67 != NULL) {
+      native_s_67.tag = INT64_C(0);
+      native_s_67.payload.variant_0 = *(const native_m0_type_40 *)native_map_hit_67;
+    } else {
+      native_s_67.tag = INT64_C(1);
+    }
+  }
+  if (native_s_67.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_68 = native_s_67.payload.variant_0;
+  if (native_s_68.tag != INT64_C(3)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_69 = native_s_68.payload.variant_3;
+  native_s_70 = native_m0_fn_17((native_arena *)native_s_0, capability, native_s_69);
+  {
+    const uint64_t native_parts_71[2] = { native_s_65, native_s_70 };
+    native_s_71 = native_text_concat((native_arena *)native_s_0, native_parts_71, UINT64_C(2));
+  }
+  native_s_75 = native_s_71;
+  goto native_l18_43;
+native_l18_42: ;
+  native_s_72 = (uint64_t)(uintptr_t)&native_m0_text_23;
+  (void)native_s_72;
+  native_s_73 = native_value_to_text((native_arena *)native_s_0, &native_m0_value_17, &native_v_0, NATIVE_VALUE_PR_STR);
+  {
+    const uint64_t native_parts_74[2] = { native_s_72, native_s_73 };
+    native_s_74 = native_text_concat((native_arena *)native_s_0, native_parts_74, UINT64_C(2));
+  }
+  native_s_75 = native_s_74;
+  goto native_l18_43;
+native_l18_43: ;
+  return native_s_75;
+}
+native_m0_type_1 native_m0_fn_19(native_m0_type_14 native_v_0) {
+  (void)native_v_0;
+  native_m0_type_5 native_s_0;
+  native_m0_type_30 native_s_1;
+  native_m0_type_29 native_s_2;
+  native_m0_type_2 native_s_3;
+  native_m0_type_2 native_s_4;
+  native_m0_type_2 native_s_5;
+  native_m0_type_9 native_s_6;
+  native_m0_type_2 native_s_7;
+  native_m0_type_2 native_s_8;
+  native_m0_type_2 native_s_9;
+  native_m0_type_2 native_s_10;
+  native_m0_type_2 native_s_11;
+  native_m0_type_2 native_s_12;
+  native_m0_type_1 native_s_13;
+  native_m0_type_30 native_s_14;
+  native_m0_type_29 native_s_15;
+  native_m0_type_4 native_s_16;
+  native_m0_type_7 native_s_17;
+  native_m0_type_1 native_s_18;
+  native_m0_type_7 native_s_19;
+  native_m0_type_7 native_s_20;
+  native_m0_type_9 native_s_21;
+  native_m0_type_7 native_s_22;
+  native_m0_type_7 native_s_23;
+  native_m0_type_1 native_s_24;
+  native_m0_type_7 native_s_25;
+  native_m0_type_7 native_s_26;
+  native_m0_type_1 native_s_27;
+  native_s_0 = UINT64_C(31);
+  (void)native_s_0;
+  {
+    const void *native_map_hit_1 = native_map_get(native_v_0, &native_s_0, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_1, 0, sizeof native_s_1);
+    if (native_map_hit_1 != NULL) {
+      native_s_1.tag = INT64_C(0);
+      native_s_1.payload.variant_0 = *(const native_m0_type_29 *)native_map_hit_1;
+    } else {
+      native_s_1.tag = INT64_C(1);
+    }
+  }
+  switch (native_s_1.tag) {
+  case INT64_C(0):
+    goto native_l19_1;
+  case INT64_C(1):
+    goto native_l19_5;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l19_1: ;
+  if (native_s_1.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_2 = native_s_1.payload.variant_0;
+  switch (native_s_2.tag) {
+  case INT64_C(0):
+    goto native_l19_3;
+  case INT64_C(1):
+    goto native_l19_2;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l19_2: ;
+  native_s_3 = true;
+  (void)native_s_3;
+  native_s_5 = native_s_3;
+  goto native_l19_4;
+native_l19_3: ;
+  native_s_4 = false;
+  (void)native_s_4;
+  native_s_5 = native_s_4;
+  goto native_l19_4;
+native_l19_4: ;
+  native_s_12 = native_s_5;
+  goto native_l19_11;
+native_l19_5: ;
+  if (native_s_1.tag != INT64_C(1)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_6 = native_s_1.payload.variant_1;
+  (void)native_s_6;
+  switch (native_s_6.tag) {
+  case INT64_C(0):
+    goto native_l19_7;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_7 = true;
+  (void)native_s_7;
+  native_s_9 = native_s_7;
+  goto native_l19_8;
+native_l19_7: ;
+  native_s_8 = false;
+  (void)native_s_8;
+  native_s_9 = native_s_8;
+  goto native_l19_8;
+native_l19_8: ;
+  native_s_12 = native_s_9;
+  goto native_l19_11;
+  native_s_10 = true;
+  (void)native_s_10;
+  native_s_12 = native_s_10;
+  goto native_l19_11;
+  native_s_11 = false;
+  (void)native_s_11;
+  native_s_12 = native_s_11;
+  goto native_l19_11;
+native_l19_11: ;
+  if (native_s_12) {
+    goto native_l19_12;
+  } else {
+    goto native_l19_13;
+  }
+native_l19_12: ;
+  native_s_14 = native_s_1;
+  goto native_l19_14;
+native_l19_13: ;
+  native_s_13 = INT64_C(-1);
+  (void)native_s_13;
+  native_s_24 = native_s_13;
+  goto native_l19_21;
+native_l19_14: ;
+  switch (native_s_14.tag) {
+  case INT64_C(0):
+    goto native_l19_15;
+  case INT64_C(1):
+    goto native_l19_19;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l19_15: ;
+  if (native_s_14.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_15 = native_s_14.payload.variant_0;
+  switch (native_s_15.tag) {
+  case INT64_C(0):
+    goto native_l19_16;
+  case INT64_C(1):
+    goto native_l19_17;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l19_16: ;
+  if (native_s_15.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_16 = native_s_15.payload.variant_0;
+  native_s_17 = (native_m0_type_7){ .tag = INT64_C(3), .payload = { .variant_3 = native_s_16 } };
+  native_s_20 = native_s_17;
+  goto native_l19_18;
+native_l19_17: ;
+  if (native_s_15.tag != INT64_C(1)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_18 = native_s_15.payload.variant_1;
+  native_s_19 = (native_m0_type_7){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_18 } };
+  native_s_20 = native_s_19;
+  goto native_l19_18;
+native_l19_18: ;
+  native_s_23 = native_s_20;
+  goto native_l19_20;
+native_l19_19: ;
+  if (native_s_14.tag != INT64_C(1)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_21 = native_s_14.payload.variant_1;
+  (void)native_s_21;
+  native_s_22 = (native_m0_type_7){ .tag = INT64_C(5) };
+  native_s_23 = native_s_22;
+  goto native_l19_20;
+native_l19_20: ;
+  native_s_26 = native_s_23;
+  goto native_l19_22;
+native_l19_21: ;
+  native_s_25 = (native_m0_type_7){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_24 } };
+  native_s_26 = native_s_25;
+  goto native_l19_22;
+native_l19_22: ;
+  if (native_s_26.tag != INT64_C(1)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_27 = native_s_26.payload.variant_1;
+  return native_s_27;
+}
+native_m0_type_1 native_m0_fn_20(native_m0_type_15 native_v_0) {
+  (void)native_v_0;
+  native_m0_type_5 native_s_0;
+  native_m0_type_39 native_s_1;
+  native_m0_type_38 native_s_2;
+  native_m0_type_2 native_s_3;
+  native_m0_type_2 native_s_4;
+  native_m0_type_2 native_s_5;
+  native_m0_type_9 native_s_6;
+  native_m0_type_2 native_s_7;
+  native_m0_type_2 native_s_8;
+  native_m0_type_2 native_s_9;
+  native_m0_type_2 native_s_10;
+  native_m0_type_2 native_s_11;
+  native_m0_type_2 native_s_12;
+  native_m0_type_5 native_s_13;
+  native_m0_type_39 native_s_14;
+  native_m0_type_38 native_s_15;
+  native_m0_type_1 native_s_16;
+  native_m0_type_5 native_s_17;
+  native_m0_type_5 native_s_18;
+  native_m0_type_39 native_s_19;
+  native_m0_type_38 native_s_20;
+  native_m0_type_5 native_s_21;
+  native_m0_type_2 native_s_22;
+  native_m0_type_2 native_s_23;
+  native_m0_type_2 native_s_24;
+  native_m0_type_2 native_s_25;
+  native_m0_type_2 native_s_26;
+  native_m0_type_1 native_s_27;
+  native_m0_type_1 native_s_28;
+  native_m0_type_1 native_s_29;
+  native_s_0 = UINT64_C(31);
+  (void)native_s_0;
+  {
+    const void *native_map_hit_1 = native_map_get(native_v_0, &native_s_0, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_1, 0, sizeof native_s_1);
+    if (native_map_hit_1 != NULL) {
+      native_s_1.tag = INT64_C(0);
+      native_s_1.payload.variant_0 = *(const native_m0_type_38 *)native_map_hit_1;
+    } else {
+      native_s_1.tag = INT64_C(1);
+    }
+  }
+  switch (native_s_1.tag) {
+  case INT64_C(0):
+    goto native_l20_1;
+  case INT64_C(1):
+    goto native_l20_5;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l20_1: ;
+  if (native_s_1.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_2 = native_s_1.payload.variant_0;
+  switch (native_s_2.tag) {
+  case INT64_C(0):
+    goto native_l20_3;
+  case INT64_C(1):
+    goto native_l20_2;
+  case INT64_C(2):
+    goto native_l20_3;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l20_2: ;
+  native_s_3 = true;
+  (void)native_s_3;
+  native_s_5 = native_s_3;
+  goto native_l20_4;
+native_l20_3: ;
+  native_s_4 = false;
+  (void)native_s_4;
+  native_s_5 = native_s_4;
+  goto native_l20_4;
+native_l20_4: ;
+  native_s_12 = native_s_5;
+  goto native_l20_11;
+native_l20_5: ;
+  if (native_s_1.tag != INT64_C(1)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_6 = native_s_1.payload.variant_1;
+  (void)native_s_6;
+  switch (native_s_6.tag) {
+  case INT64_C(0):
+    goto native_l20_7;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_7 = true;
+  (void)native_s_7;
+  native_s_9 = native_s_7;
+  goto native_l20_8;
+native_l20_7: ;
+  native_s_8 = false;
+  (void)native_s_8;
+  native_s_9 = native_s_8;
+  goto native_l20_8;
+native_l20_8: ;
+  native_s_12 = native_s_9;
+  goto native_l20_11;
+  native_s_10 = true;
+  (void)native_s_10;
+  native_s_12 = native_s_10;
+  goto native_l20_11;
+  native_s_11 = false;
+  (void)native_s_11;
+  native_s_12 = native_s_11;
+  goto native_l20_11;
+native_l20_11: ;
+  if (native_s_12) {
+    goto native_l20_12;
+  } else {
+    goto native_l20_13;
+  }
+native_l20_12: ;
+  native_s_13 = UINT64_C(31);
+  (void)native_s_13;
+  {
+    const void *native_map_hit_14 = native_map_get(native_v_0, &native_s_13, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_14, 0, sizeof native_s_14);
+    if (native_map_hit_14 != NULL) {
+      native_s_14.tag = INT64_C(0);
+      native_s_14.payload.variant_0 = *(const native_m0_type_38 *)native_map_hit_14;
+    } else {
+      native_s_14.tag = INT64_C(1);
+    }
+  }
+  if (native_s_14.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_15 = native_s_14.payload.variant_0;
+  if (native_s_15.tag != INT64_C(1)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_16 = native_s_15.payload.variant_1;
+  native_s_29 = native_s_16;
+  goto native_l20_22;
+native_l20_13: ;
+  native_s_17 = UINT64_C(28);
+  (void)native_s_17;
+  native_s_18 = UINT64_C(27);
+  (void)native_s_18;
+  {
+    const void *native_map_hit_19 = native_map_get(native_v_0, &native_s_18, NATIVE_COLLECTION_EQ_KEYWORD);
+    memset(&native_s_19, 0, sizeof native_s_19);
+    if (native_map_hit_19 != NULL) {
+      native_s_19.tag = INT64_C(0);
+      native_s_19.payload.variant_0 = *(const native_m0_type_38 *)native_map_hit_19;
+    } else {
+      native_s_19.tag = INT64_C(1);
+    }
+  }
+  switch (native_s_19.tag) {
+  case INT64_C(0):
+    goto native_l20_14;
+  case INT64_C(1):
+    goto native_l20_18;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l20_14: ;
+  if (native_s_19.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_20 = native_s_19.payload.variant_0;
+  switch (native_s_20.tag) {
+  case INT64_C(0):
+    goto native_l20_16;
+  case INT64_C(1):
+    goto native_l20_16;
+  case INT64_C(2):
+    goto native_l20_15;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l20_15: ;
+  if (native_s_20.tag != INT64_C(2)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_21 = native_s_20.payload.variant_2;
+  native_s_22 = (native_s_17 == native_s_21);
+  native_s_24 = native_s_22;
+  goto native_l20_17;
+native_l20_16: ;
+  native_s_23 = false;
+  (void)native_s_23;
+  native_s_24 = native_s_23;
+  goto native_l20_17;
+native_l20_17: ;
+  native_s_26 = native_s_24;
+  goto native_l20_19;
+native_l20_18: ;
+  native_s_25 = false;
+  (void)native_s_25;
+  native_s_26 = native_s_25;
+  goto native_l20_19;
+native_l20_19: ;
+  if (native_s_26) {
+    goto native_l20_20;
+  } else {
+    goto native_l20_21;
+  }
+native_l20_20: ;
+  native_s_27 = INT64_C(-2);
+  (void)native_s_27;
+  native_s_29 = native_s_27;
+  goto native_l20_22;
+native_l20_21: ;
+  native_s_28 = INT64_C(-3);
+  (void)native_s_28;
+  native_s_29 = native_s_28;
+  goto native_l20_22;
+native_l20_22: ;
+  return native_s_29;
+}
+native_m0_type_4 native_m0_fn_21(native_arena *arena, const native_capability *capability, native_m0_type_1 native_v_0, native_m0_type_13 native_v_1) {
+  (void)arena;
+  (void)capability;
+  (void)native_v_0;
+  (void)native_v_1;
+  native_m0_type_0 native_s_0;
+  native_m0_type_5 native_s_1;
+  native_m0_type_36 native_s_2;
+  native_m0_type_9 native_s_3;
+  native_m0_type_2 native_s_4;
+  native_m0_type_2 native_s_5;
+  native_m0_type_2 native_s_6;
+  native_m0_type_2 native_s_7;
+  native_m0_type_2 native_s_8;
+  native_m0_type_2 native_s_9;
+  native_m0_type_4 native_s_10;
+  native_m0_type_4 native_s_11;
+  native_m0_type_5 native_s_12;
+  native_m0_type_36 native_s_13;
+  native_m0_type_1 native_s_14;
+  native_m0_type_4 native_s_15;
+  native_m0_type_4 native_s_16;
+  native_m0_type_5 native_s_17;
+  native_m0_type_5 native_s_18;
+  native_m0_type_36 native_s_19;
+  native_m0_type_5 native_s_20;
+  native_m0_type_2 native_s_21;
+  native_m0_type_2 native_s_22;
+  native_m0_type_2 native_s_23;
+  native_m0_type_4 native_s_24;
+  native_m0_type_4 native_s_25;
+  native_m0_type_5 native_s_26;
+  native_m0_type_36 native_s_27;
+  native_m0_type_4 native_s_28;
+  native_m0_type_5 native_s_29;
+  native_m0_type_36 native_s_30;
+  native_m0_type_4 native_s_31;
+  native_m0_type_4 native_s_32;
+  native_m0_type_4 native_s_33;
+  native_m0_type_4 native_s_34;
+  native_m0_type_4 native_s_35;
+  native_m0_type_5 native_s_36;
+  native_m0_type_36 native_s_37;
+  native_m0_type_4 native_s_38;
+  native_m0_type_2 native_s_39;
+  native_m0_type_2 native_s_40;
+  native_m0_type_2 native_s_41;
+  native_m0_type_4 native_s_42;
+  native_m0_type_4 native_s_43;
+  native_m0_type_4 native_s_44;
+  native_m0_type_4 native_s_45;
+  native_m0_type_4 native_s_46;
+  native_m0_type_4 native_s_47;
+  native_m0_type_4 native_s_48;
+  native_m0_type_4 native_s_49;
+  native_s_0 = arena;
+  (void)native_s_0;
+  native_s_1 = UINT64_C(31);
+  (void)native_s_1;
+  {
+    const void *native_map_hit_2 = native_map_get(native_v_1, &native_s_1, NATIVE_COLLECTION_EQ_KEYWORD);
+    if (native_map_hit_2 != NULL) {
+      native_s_2 = *(const native_m0_type_36 *)native_map_hit_2;
+    } else {
+      memset(&native_s_2, 0, sizeof native_s_2);
+      native_s_2.tag = INT64_C(5);
+    }
+  }
+  switch (native_s_2.tag) {
+  case INT64_C(0):
+    goto native_l21_6;
+  case INT64_C(1):
+    goto native_l21_5;
+  case INT64_C(2):
+    goto native_l21_6;
+  case INT64_C(3):
+    goto native_l21_6;
+  case INT64_C(4):
+    goto native_l21_6;
+  case INT64_C(5):
+    goto native_l21_1;
+  case INT64_C(6):
+    goto native_l21_6;
+  case INT64_C(7):
+    goto native_l21_6;
+  case INT64_C(8):
+    goto native_l21_6;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l21_1: ;
+  if (native_s_2.tag != INT64_C(5)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_3 = native_s_2.payload.variant_5;
+  (void)native_s_3;
+  switch (native_s_3.tag) {
+  case INT64_C(0):
+    goto native_l21_3;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_4 = true;
+  (void)native_s_4;
+  native_s_6 = native_s_4;
+  goto native_l21_4;
+native_l21_3: ;
+  native_s_5 = false;
+  (void)native_s_5;
+  native_s_6 = native_s_5;
+  goto native_l21_4;
+native_l21_4: ;
+  native_s_9 = native_s_6;
+  goto native_l21_7;
+native_l21_5: ;
+  native_s_7 = true;
+  (void)native_s_7;
+  native_s_9 = native_s_7;
+  goto native_l21_7;
+native_l21_6: ;
+  native_s_8 = false;
+  (void)native_s_8;
+  native_s_9 = native_s_8;
+  goto native_l21_7;
+native_l21_7: ;
+  if (native_s_9) {
+    goto native_l21_8;
+  } else {
+    goto native_l21_9;
+  }
+native_l21_8: ;
+  native_s_10 = (uint64_t)(uintptr_t)&native_m0_text_24;
+  (void)native_s_10;
+  native_s_11 = (uint64_t)(uintptr_t)&native_m0_text_25;
+  (void)native_s_11;
+  native_s_12 = UINT64_C(31);
+  (void)native_s_12;
+  {
+    const void *native_map_hit_13 = native_map_get(native_v_1, &native_s_12, NATIVE_COLLECTION_EQ_KEYWORD);
+    if (native_map_hit_13 != NULL) {
+      native_s_13 = *(const native_m0_type_36 *)native_map_hit_13;
+    } else {
+      memset(&native_s_13, 0, sizeof native_s_13);
+      native_s_13.tag = INT64_C(5);
+    }
+  }
+  if (native_s_13.tag != INT64_C(1)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_14 = native_s_13.payload.variant_1;
+  native_s_15 = (uint64_t)(uintptr_t)&native_m0_text_26;
+  (void)native_s_15;
+  {
+    const uint64_t native_parts_16[5] = { native_s_10, native_text_from_int((native_arena *)native_s_0, native_v_0), native_s_11, native_text_from_int((native_arena *)native_s_0, native_s_14), native_s_15 };
+    native_s_16 = native_text_concat((native_arena *)native_s_0, native_parts_16, UINT64_C(5));
+  }
+  native_s_49 = native_s_16;
+  goto native_l21_20;
+native_l21_9: ;
+  native_s_17 = UINT64_C(28);
+  (void)native_s_17;
+  native_s_18 = UINT64_C(27);
+  (void)native_s_18;
+  {
+    const void *native_map_hit_19 = native_map_get(native_v_1, &native_s_18, NATIVE_COLLECTION_EQ_KEYWORD);
+    if (native_map_hit_19 != NULL) {
+      native_s_19 = *(const native_m0_type_36 *)native_map_hit_19;
+    } else {
+      memset(&native_s_19, 0, sizeof native_s_19);
+      native_s_19.tag = INT64_C(5);
+    }
+  }
+  switch (native_s_19.tag) {
+  case INT64_C(0):
+    goto native_l21_11;
+  case INT64_C(1):
+    goto native_l21_11;
+  case INT64_C(2):
+    goto native_l21_11;
+  case INT64_C(3):
+    goto native_l21_11;
+  case INT64_C(4):
+    goto native_l21_10;
+  case INT64_C(5):
+    goto native_l21_11;
+  case INT64_C(6):
+    goto native_l21_11;
+  case INT64_C(7):
+    goto native_l21_11;
+  case INT64_C(8):
+    goto native_l21_11;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l21_10: ;
+  if (native_s_19.tag != INT64_C(4)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_20 = native_s_19.payload.variant_4;
+  native_s_21 = (native_s_17 == native_s_20);
+  native_s_23 = native_s_21;
+  goto native_l21_12;
+native_l21_11: ;
+  native_s_22 = false;
+  (void)native_s_22;
+  native_s_23 = native_s_22;
+  goto native_l21_12;
+native_l21_12: ;
+  if (native_s_23) {
+    goto native_l21_13;
+  } else {
+    goto native_l21_14;
+  }
+native_l21_13: ;
+  native_s_24 = (uint64_t)(uintptr_t)&native_m0_text_27;
+  (void)native_s_24;
+  native_s_25 = (uint64_t)(uintptr_t)&native_m0_text_28;
+  (void)native_s_25;
+  native_s_26 = UINT64_C(21);
+  (void)native_s_26;
+  {
+    const void *native_map_hit_27 = native_map_get(native_v_1, &native_s_26, NATIVE_COLLECTION_EQ_KEYWORD);
+    if (native_map_hit_27 != NULL) {
+      native_s_27 = *(const native_m0_type_36 *)native_map_hit_27;
+    } else {
+      memset(&native_s_27, 0, sizeof native_s_27);
+      native_s_27.tag = INT64_C(5);
+    }
+  }
+  native_s_28 = (uint64_t)(uintptr_t)&native_m0_text_19;
+  (void)native_s_28;
+  native_s_29 = UINT64_C(29);
+  (void)native_s_29;
+  {
+    const void *native_map_hit_30 = native_map_get(native_v_1, &native_s_29, NATIVE_COLLECTION_EQ_KEYWORD);
+    if (native_map_hit_30 != NULL) {
+      native_s_30 = *(const native_m0_type_36 *)native_map_hit_30;
+    } else {
+      memset(&native_s_30, 0, sizeof native_s_30);
+      native_s_30.tag = INT64_C(5);
+    }
+  }
+  native_s_31 = (uint64_t)(uintptr_t)&native_m0_text_29;
+  (void)native_s_31;
+  native_s_32 = native_value_to_text((native_arena *)native_s_0, &native_m0_value_36, &native_s_27, NATIVE_VALUE_STR);
+  native_s_33 = native_value_to_text((native_arena *)native_s_0, &native_m0_value_36, &native_s_30, NATIVE_VALUE_STR);
+  {
+    const uint64_t native_parts_34[7] = { native_s_24, native_text_from_int((native_arena *)native_s_0, native_v_0), native_s_25, native_s_32, native_s_28, native_s_33, native_s_31 };
+    native_s_34 = native_text_concat((native_arena *)native_s_0, native_parts_34, UINT64_C(7));
+  }
+  native_s_49 = native_s_34;
+  goto native_l21_20;
+native_l21_14: ;
+  native_s_35 = (uint64_t)(uintptr_t)&native_m0_text_20;
+  (void)native_s_35;
+  native_s_36 = UINT64_C(30);
+  (void)native_s_36;
+  {
+    const void *native_map_hit_37 = native_map_get(native_v_1, &native_s_36, NATIVE_COLLECTION_EQ_KEYWORD);
+    if (native_map_hit_37 != NULL) {
+      native_s_37 = *(const native_m0_type_36 *)native_map_hit_37;
+    } else {
+      memset(&native_s_37, 0, sizeof native_s_37);
+      native_s_37.tag = INT64_C(5);
+    }
+  }
+  switch (native_s_37.tag) {
+  case INT64_C(0):
+    goto native_l21_15;
+  case INT64_C(1):
+    goto native_l21_16;
+  case INT64_C(2):
+    goto native_l21_16;
+  case INT64_C(3):
+    goto native_l21_16;
+  case INT64_C(4):
+    goto native_l21_16;
+  case INT64_C(5):
+    goto native_l21_16;
+  case INT64_C(6):
+    goto native_l21_16;
+  case INT64_C(7):
+    goto native_l21_16;
+  case INT64_C(8):
+    goto native_l21_16;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l21_15: ;
+  if (native_s_37.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_38 = native_s_37.payload.variant_0;
+  native_s_39 = native_text_eq(native_s_35, native_s_38);
+  native_s_41 = native_s_39;
+  goto native_l21_17;
+native_l21_16: ;
+  native_s_40 = false;
+  (void)native_s_40;
+  native_s_41 = native_s_40;
+  goto native_l21_17;
+native_l21_17: ;
+  if (native_s_41) {
+    goto native_l21_18;
+  } else {
+    goto native_l21_19;
+  }
+native_l21_18: ;
+  native_s_42 = (uint64_t)(uintptr_t)&native_m0_text_30;
+  (void)native_s_42;
+  native_s_43 = (uint64_t)(uintptr_t)&native_m0_text_31;
+  (void)native_s_43;
+  {
+    const uint64_t native_parts_44[3] = { native_s_42, native_text_from_int((native_arena *)native_s_0, native_v_0), native_s_43 };
+    native_s_44 = native_text_concat((native_arena *)native_s_0, native_parts_44, UINT64_C(3));
+  }
+  native_s_49 = native_s_44;
+  goto native_l21_20;
+native_l21_19: ;
+  native_s_45 = (uint64_t)(uintptr_t)&native_m0_text_32;
+  (void)native_s_45;
+  native_s_46 = (uint64_t)(uintptr_t)&native_m0_text_33;
+  (void)native_s_46;
+  native_s_47 = native_value_to_text((native_arena *)native_s_0, &native_m0_value_13, &native_v_1, NATIVE_VALUE_PR_STR);
+  {
+    const uint64_t native_parts_48[4] = { native_s_45, native_text_from_int((native_arena *)native_s_0, native_v_0), native_s_46, native_s_47 };
+    native_s_48 = native_text_concat((native_arena *)native_s_0, native_parts_48, UINT64_C(4));
+  }
+  native_s_49 = native_s_48;
+  goto native_l21_20;
+native_l21_20: ;
+  return native_s_49;
+}
+native_m0_type_4 native_m0_fn_22(native_arena *arena, const native_capability *capability, native_m0_type_1 native_v_0) {
+  (void)arena;
+  (void)capability;
+  (void)native_v_0;
+  native_m0_type_0 native_s_0;
+  native_m0_type_4 native_s_1;
+  native_m0_type_4 native_s_2;
+  native_m0_type_4 native_s_3;
+  native_s_0 = arena;
+  (void)native_s_0;
+  native_s_1 = (uint64_t)(uintptr_t)&native_m0_text_34;
+  (void)native_s_1;
+  native_s_2 = (uint64_t)(uintptr_t)&native_m0_text_35;
+  (void)native_s_2;
   {
     const uint64_t native_parts_3[3] = { native_s_1, native_text_from_int((native_arena *)native_s_0, native_v_0), native_s_2 };
     native_s_3 = native_text_concat((native_arena *)native_s_0, native_parts_3, UINT64_C(3));
   }
   return native_s_3;
+}
+native_m0_type_43 native_m0_fn_23(native_m0_type_20 native_v_0) {
+  (void)native_v_0;
+  native_m0_type_2 native_s_0;
+  native_m0_type_4 native_s_1;
+  native_m0_type_5 native_s_2;
+  native_m0_type_37 native_s_3;
+  native_m0_type_4 native_s_4;
+  native_m0_type_2 native_s_5;
+  native_m0_type_2 native_s_6;
+  native_m0_type_2 native_s_7;
+  native_m0_type_2 native_s_8;
+  native_m0_type_2 native_s_9;
+  native_m0_type_9 native_s_10;
+  native_m0_type_9 native_s_11;
+  native_m0_type_43 native_s_12;
+  native_m0_type_20 native_s_13;
+  native_m0_type_43 native_s_14;
+  native_m0_type_43 native_s_15;
+  native_s_0 = true;
+  (void)native_s_0;
+  if (native_s_0) {
+    goto native_l23_1;
+  } else {
+    goto native_l23_5;
+  }
+native_l23_1: ;
+  native_s_1 = (uint64_t)(uintptr_t)&native_m0_text_20;
+  (void)native_s_1;
+  native_s_2 = UINT64_C(30);
+  (void)native_s_2;
+  {
+    const void *native_map_hit_3 = native_map_get(native_v_0, &native_s_2, NATIVE_COLLECTION_EQ_KEYWORD);
+    if (native_map_hit_3 != NULL) {
+      native_s_3 = *(const native_m0_type_37 *)native_map_hit_3;
+    } else {
+      memset(&native_s_3, 0, sizeof native_s_3);
+      native_s_3.tag = INT64_C(5);
+    }
+  }
+  switch (native_s_3.tag) {
+  case INT64_C(0):
+    goto native_l23_2;
+  case INT64_C(1):
+    goto native_l23_3;
+  case INT64_C(2):
+    goto native_l23_3;
+  case INT64_C(3):
+    goto native_l23_3;
+  case INT64_C(4):
+    goto native_l23_3;
+  case INT64_C(5):
+    goto native_l23_3;
+  case INT64_C(6):
+    goto native_l23_3;
+  case INT64_C(7):
+    goto native_l23_3;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l23_2: ;
+  if (native_s_3.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_4 = native_s_3.payload.variant_0;
+  native_s_5 = native_text_eq(native_s_1, native_s_4);
+  native_s_7 = native_s_5;
+  goto native_l23_4;
+native_l23_3: ;
+  native_s_6 = false;
+  (void)native_s_6;
+  native_s_7 = native_s_6;
+  goto native_l23_4;
+native_l23_4: ;
+  native_s_9 = native_s_7;
+  goto native_l23_6;
+native_l23_5: ;
+  native_s_8 = false;
+  (void)native_s_8;
+  native_s_9 = native_s_8;
+  goto native_l23_6;
+native_l23_6: ;
+  if (native_s_9) {
+    goto native_l23_7;
+  } else {
+    goto native_l23_8;
+  }
+native_l23_7: ;
+  native_s_10 = (native_m0_type_9){ .tag = INT64_C(0) };
+  native_s_11 = native_s_10;
+  goto native_l23_9;
+native_l23_8: ;
+  native_s_13 = native_v_0;
+  goto native_l23_10;
+native_l23_9: ;
+  native_s_12 = (native_m0_type_43){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_11 } };
+  native_s_15 = native_s_12;
+  goto native_l23_11;
+native_l23_10: ;
+  native_s_14 = (native_m0_type_43){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_13 } };
+  native_s_15 = native_s_14;
+  goto native_l23_11;
+native_l23_11: ;
+  return native_s_15;
+}
+native_m0_type_43 native_m0_fn_24(native_m0_type_20 native_v_0) {
+  (void)native_v_0;
+  native_m0_type_4 native_s_0;
+  native_m0_type_5 native_s_1;
+  native_m0_type_37 native_s_2;
+  native_m0_type_4 native_s_3;
+  native_m0_type_2 native_s_4;
+  native_m0_type_2 native_s_5;
+  native_m0_type_2 native_s_6;
+  native_m0_type_5 native_s_7;
+  native_m0_type_2 native_s_8;
+  native_m0_type_2 native_s_9;
+  native_m0_type_2 native_s_10;
+  native_m0_type_9 native_s_11;
+  native_m0_type_9 native_s_12;
+  native_m0_type_43 native_s_13;
+  native_m0_type_20 native_s_14;
+  native_m0_type_43 native_s_15;
+  native_m0_type_43 native_s_16;
+  native_s_0 = (uint64_t)(uintptr_t)&native_m0_text_20;
+  (void)native_s_0;
+  native_s_1 = UINT64_C(30);
+  (void)native_s_1;
+  {
+    const void *native_map_hit_2 = native_map_get(native_v_0, &native_s_1, NATIVE_COLLECTION_EQ_KEYWORD);
+    if (native_map_hit_2 != NULL) {
+      native_s_2 = *(const native_m0_type_37 *)native_map_hit_2;
+    } else {
+      memset(&native_s_2, 0, sizeof native_s_2);
+      native_s_2.tag = INT64_C(5);
+    }
+  }
+  switch (native_s_2.tag) {
+  case INT64_C(0):
+    goto native_l24_1;
+  case INT64_C(1):
+    goto native_l24_2;
+  case INT64_C(2):
+    goto native_l24_2;
+  case INT64_C(3):
+    goto native_l24_2;
+  case INT64_C(4):
+    goto native_l24_2;
+  case INT64_C(5):
+    goto native_l24_2;
+  case INT64_C(6):
+    goto native_l24_2;
+  case INT64_C(7):
+    goto native_l24_2;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+native_l24_1: ;
+  if (native_s_2.tag != INT64_C(0)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_s_3 = native_s_2.payload.variant_0;
+  native_s_4 = native_text_eq(native_s_0, native_s_3);
+  native_s_6 = native_s_4;
+  goto native_l24_3;
+native_l24_2: ;
+  native_s_5 = false;
+  (void)native_s_5;
+  native_s_6 = native_s_5;
+  goto native_l24_3;
+native_l24_3: ;
+  if (native_s_6) {
+    goto native_l24_5;
+  } else {
+    goto native_l24_4;
+  }
+native_l24_4: ;
+  native_s_7 = UINT64_C(25);
+  (void)native_s_7;
+  native_s_8 = native_map_contains(native_v_0, &native_s_7, NATIVE_COLLECTION_EQ_KEYWORD);
+  native_s_10 = native_s_8;
+  goto native_l24_6;
+native_l24_5: ;
+  native_s_9 = true;
+  (void)native_s_9;
+  native_s_10 = native_s_9;
+  goto native_l24_6;
+native_l24_6: ;
+  if (native_s_10) {
+    goto native_l24_7;
+  } else {
+    goto native_l24_8;
+  }
+native_l24_7: ;
+  native_s_11 = (native_m0_type_9){ .tag = INT64_C(0) };
+  native_s_12 = native_s_11;
+  goto native_l24_9;
+native_l24_8: ;
+  native_s_14 = native_v_0;
+  goto native_l24_10;
+native_l24_9: ;
+  native_s_13 = (native_m0_type_43){ .tag = INT64_C(1), .payload = { .variant_1 = native_s_12 } };
+  native_s_16 = native_s_13;
+  goto native_l24_11;
+native_l24_10: ;
+  native_s_15 = (native_m0_type_43){ .tag = INT64_C(0), .payload = { .variant_0 = native_s_14 } };
+  native_s_16 = native_s_15;
+  goto native_l24_11;
+native_l24_11: ;
+  return native_s_16;
 }

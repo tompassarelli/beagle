@@ -16,7 +16,7 @@ rt-core	is-iso-datetime-16	long	PASS
 rt-core	repeat-str	positive	PASS
 rt-core	repeat-str	negative	PASS
 rt-core	edit-batch-envelope-marker?	present	PASS
-rt-core	edit-batch-envelope-marker?	non-map	PASS
+rt-core	edit-batch-envelope-marker?	absent	PASS
 rt-core	digest?	valid	PASS
 rt-core	digest?	uppercase	PASS
 rt-core	nonblank?	text	PASS
@@ -31,7 +31,7 @@ rt-core	classify-rewrite-crash	missing-live	PASS
 rt-core	log-envelope	plain	PASS
 rt-core	log-envelope	format	PASS
 rt-core	reject-message	sequence	PASS
-rt-core	reject-message	scalar	PASS
+rt-core	reject-message	single	PASS
 rt-core	coord-write-response	ok	PASS
 rt-core	coord-write-response	conflict	PASS
 rt-core	coord-write-response	log-mismatch	PASS

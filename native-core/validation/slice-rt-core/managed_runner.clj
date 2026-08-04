@@ -66,8 +66,8 @@
 (pass! "rt-core" "repeat-str" "negative" (rt/repeat-str "ab" -2) "")
 (pass! "rt-core" "edit-batch-envelope-marker?" "present"
   (rt/edit-batch-envelope-marker? {:fram-edit-envelope 1}) true)
-(pass! "rt-core" "edit-batch-envelope-marker?" "non-map"
-  (rt/edit-batch-envelope-marker? "record") false)
+(pass! "rt-core" "edit-batch-envelope-marker?" "absent"
+  (rt/edit-batch-envelope-marker? {}) false)
 (pass! "rt-core" "digest?" "valid" (rt/digest? digest-a) true)
 (pass! "rt-core" "digest?" "uppercase" (rt/digest? (str/upper-case digest-a)) false)
 (pass! "rt-core" "nonblank?" "text" (rt/nonblank? "x") true)
@@ -90,15 +90,16 @@
   #(rt/classify-rewrite-crash "coord.log" nil nil nil nil nil nil nil nil)
   "does not exist")
 (pass! "rt-core" "log-envelope" "plain"
-  (rt/log-envelope "coord.log" {:op :read})
-  {:op :for-log :expected-log "coord.log" :request {:op :read}})
+  (rt/log-envelope "coord.log" {:op :for-log})
+  {:op :for-log :expected-log "coord.log" :request {:op :for-log}})
 (pass! "rt-core" "log-envelope" "format"
-  (rt/log-envelope "coord.log" {:op :read :fmt :edn})
-  {:op :for-log :expected-log "coord.log" :request {:op :read :fmt :edn}
-   :fmt :edn})
+  (rt/log-envelope "coord.log" {:op :for-log :fmt :log-mismatch})
+  {:op :for-log :expected-log "coord.log"
+   :request {:op :for-log :fmt :log-mismatch} :fmt :log-mismatch})
 (pass! "rt-core" "reject-message" "sequence"
   (rt/reject-message ["left" "right"]) "left; right")
-(pass! "rt-core" "reject-message" "scalar" (rt/reject-message :conflict) ":conflict")
+(pass! "rt-core" "reject-message" "single"
+  (rt/reject-message ["conflict"]) "conflict")
 (pass! "rt-core" "coord-write-response" "ok"
   (rt/coord-write-response {:ok 7}) "ok:7")
 (pass! "rt-core" "coord-write-response" "conflict"
@@ -144,13 +145,15 @@
 (pass! "rt-core" "warm-read-response" "unknown"
   (rt/warm-read-response {:error "unknown op"}) nil)
 (pass! "rt-core" "warm-read-response" "value"
-  (rt/warm-read-response {:rows [["s" "p" "o"]]}) {:rows [["s" "p" "o"]]})
+  (rt/warm-read-response {:request [["s" "p" "o"]]})
+  {:request [["s" "p" "o"]]})
 (pass! "rt-core" "warm-read-for-log-response" "unknown"
   (rt/warm-read-for-log-response {:error "unknown op"}) nil)
 (pass! "rt-core" "warm-read-for-log-response" "rejected"
   (rt/warm-read-for-log-response {:reject :log-mismatch}) nil)
 (pass! "rt-core" "warm-read-for-log-response" "value"
-  (rt/warm-read-for-log-response {:rows [[1 true nil]]}) {:rows [[1 true nil]]})
+  (rt/warm-read-for-log-response {:request [[1 true nil]]})
+  {:request [[1 true nil]]})
 
 (doseq [[name pattern]
         [["COMMA-RE" rt/COMMA-RE]

@@ -1,6 +1,6 @@
 source-functions 25
-lowered-functions 13
-pending-functions 12
+lowered-functions 25
+pending-functions 0
 function str-index-of LOWERED fn_0 1 blocks
 function split-comma LOWERED fn_1 1 blocks
 function str-lt? LOWERED fn_2 1 blocks
@@ -11,21 +11,21 @@ function filter-digits LOWERED fn_6 1 blocks
 function is-iso-datetime-19 LOWERED fn_7 4 blocks
 function is-iso-datetime-16 LOWERED fn_8 4 blocks
 function repeat-str LOWERED fn_9 4 blocks
-function edit-batch-envelope-marker? PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-contains?: no native lowering for this callee
-function digest? LOWERED fn_10 4 blocks
-function nonblank? LOWERED fn_11 4 blocks
-function generation-record? PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form
-function valid-edit-batch-envelope? PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form
-function classify-rewrite-crash PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-COMPARE-OPERANDS: = has no native comparison for these operand types
-function log-envelope PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-MAP-LITERAL-ITEMS: keys and values must each share one native type
-function reject-message PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-STR-OPERANDS: str concatenates one or more native Text or Int operands
-function coord-write-response PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form
-function coord-version-response PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form
-function coord-version-for-log-response PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form
-function coord-status-response PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form
-function coord-status-down LOWERED fn_12 1 blocks
-function warm-read-response PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form
-function warm-read-for-log-response PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form
+function edit-batch-envelope-marker? LOWERED fn_10 4 blocks
+function digest? LOWERED fn_11 4 blocks
+function nonblank? LOWERED fn_12 4 blocks
+function generation-record? LOWERED fn_13 16 blocks
+function valid-edit-batch-envelope? LOWERED fn_14 117 blocks
+function classify-rewrite-crash LOWERED fn_15 43 blocks
+function log-envelope LOWERED fn_16 13 blocks
+function reject-message LOWERED fn_17 1 blocks
+function coord-write-response LOWERED fn_18 44 blocks
+function coord-version-response LOWERED fn_19 23 blocks
+function coord-version-for-log-response LOWERED fn_20 23 blocks
+function coord-status-response LOWERED fn_21 21 blocks
+function coord-status-down LOWERED fn_22 1 blocks
+function warm-read-response LOWERED fn_23 12 blocks
+function warm-read-for-log-response LOWERED fn_24 12 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts
@@ -34,5 +34,5 @@ obligation-projection PASS legal-abi
 obligation-projection PASS discharged-tokens
 obligation-projection PASS bounded-effects
 materialize OK module_0.h module_0.c
-qbe-materialize REFUSED native world uses a shape outside the QBE materializer's slice
+qbe-materialize REFUSED unsupported native value-semantics op: equal
 frontier-accounting PASS accounted=25

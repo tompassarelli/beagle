@@ -13,8 +13,20 @@
 #define RT_IS_ISO_DATETIME_19 native_m0_fn_7
 #define RT_IS_ISO_DATETIME_16 native_m0_fn_8
 #define RT_REPEAT_STR native_m0_fn_9
-#define RT_DIGEST_P native_m0_fn_10
-#define RT_NONBLANK_P native_m0_fn_11
-#define RT_COORD_STATUS_DOWN native_m0_fn_12
+#define RT_EDIT_BATCH_ENVELOPE_MARKER_P native_m0_fn_10
+#define RT_DIGEST_P native_m0_fn_11
+#define RT_NONBLANK_P native_m0_fn_12
+#define RT_GENERATION_RECORD_P native_m0_fn_13
+#define RT_VALID_EDIT_BATCH_ENVELOPE_P native_m0_fn_14
+#define RT_CLASSIFY_REWRITE_CRASH native_m0_fn_15
+#define RT_LOG_ENVELOPE native_m0_fn_16
+#define RT_REJECT_MESSAGE native_m0_fn_17
+#define RT_COORD_WRITE_RESPONSE native_m0_fn_18
+#define RT_COORD_VERSION_RESPONSE native_m0_fn_19
+#define RT_COORD_VERSION_FOR_LOG_RESPONSE native_m0_fn_20
+#define RT_COORD_STATUS_RESPONSE native_m0_fn_21
+#define RT_COORD_STATUS_DOWN native_m0_fn_22
+#define RT_WARM_READ_RESPONSE native_m0_fn_23
+#define RT_WARM_READ_FOR_LOG_RESPONSE native_m0_fn_24
 
 #endif
