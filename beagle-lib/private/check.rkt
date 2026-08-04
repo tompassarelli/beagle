@@ -5137,11 +5137,22 @@
 ;; Least fixed point of module-local defs whose bodies reach a direct marker or
 ;; another effectful local def. Repeating from the previous complete set makes
 ;; the result independent of source order.
+;; A body that opens its own transient mutates nothing observable; one that only
+;; mutates a received transient still leaks. `transient` carries no bang.
+(define transient-marker-set
+  (set 'persistent! 'assoc! 'conj! 'dissoc! 'disj! 'pop!))
+
+(define (effective-markers body known)
+  (define collected (collect-markers body known))
+  (if (memq 'transient (collect-markers body (set 'transient)))
+      (filter (lambda (m) (not (set-member? transient-marker-set m))) collected)
+      collected))
+
 (define (derive-effectful-defs defs)
   (let loop ([known (set)])
     (define next
       (for/fold ([acc known]) ([d (in-list defs)])
-        (if (pair? (collect-markers (vector-ref d 1) known))
+        (if (pair? (effective-markers (vector-ref d 1) known))
             (set-add acc (vector-ref d 0))
             acc)))
     (if (set=? known next) known (loop next))))
@@ -5158,26 +5169,13 @@
     [(warn)  (if (>= (current-check-profile) 3) 'error 'warn)]
     [else    'off]))
 
-;; The transient family mutates a collection no other code can observe, so a body
-;; that both OPENS one (`transient`) and mutates it is locally mutable and
-;; externally pure. A body that only mutates a transient it received still leaks.
-(define transient-marker-set
-  (set 'persistent! 'assoc! 'conj! 'dissoc! 'disj! 'pop!))
-
 (define (check-defn-purity _target name body src-table node effectful-defs)
   ;; Runtime entry-point names are host ABI contracts, so they cannot carry `!`.
   (define entry-point? (eq? name '-main))
-  (define collected
+  (define markers
     (if entry-point?
         '()
-        (collect-markers body (set-remove effectful-defs name))))
-  ;; `transient` carries no bang, so it is probed for explicitly.
-  (define opens-transient?
-    (and (memq 'transient (collect-markers body (set 'transient))) #t))
-  (define markers
-    (if opens-transient?
-        (filter (lambda (m) (not (set-member? transient-marker-set m))) collected)
-        collected))
+        (effective-markers body (set-remove effectful-defs name))))
   (when (and (not (bang-name? name)) (pair? markers))
     (define src (and src-table (hash-ref src-table node #f)))
     (define msg
