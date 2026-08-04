@@ -2,7 +2,7 @@
 # native-slice: run the first-native-landing bar for one native-core module.
 #
 # Usage:
-#   native-core/bin/native-slice [--module types|store|fold|all]
+#   native-core/bin/native-slice [--module types|store|fold|vec|kernel-classify|all]
 #                                [--artifacts DIR] [--driver PATH]
 #                                [--repo DIR] [--quiet] [--help]
 #
@@ -33,7 +33,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_REPO="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-ALL_MODULES=(types store fold vec)
+ALL_MODULES=(types store fold vec kernel-classify)
 DRIVER_PROBES=(
   drive drive.sh driver driver.sh run run.sh
   materialize materialize.sh emit emit.sh check check.sh
@@ -484,7 +484,7 @@ run_module() {
 
 for m in "${MODULES[@]}"; do
   case "$m" in
-    types|store|fold|vec) ;;
+    types|store|fold|vec|kernel-classify) ;;
     *) printf '\n== native-slice: module %s ==\nnative-slice: unknown module %s (known: %s)\n' \
          "$m" "$m" "${ALL_MODULES[*]}" >&2
        OVERALL_RC=1

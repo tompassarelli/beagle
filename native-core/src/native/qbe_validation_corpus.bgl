@@ -392,12 +392,132 @@
     [:types [concat-arena-type concat-vector-type slice-i64-type]
      :layouts [concat-arena-layout concat-vector-layout slice-i64-layout]]))
 
+;; --- explicit text-instruction refusals ----------------------------------
+;; Core v0 validates SSA/reference closure independently of operand semantics.
+;; Supported scalar carriers isolate these instruction gates from QBE's separate
+;; rejection of text-shaped types, so each world has exactly one refusal cause.
+
+(def refusal-index-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "ref-idx-blk")
+    []
+    [(core/->TextIndexOfInstruction
+       (core/->SsaValueV0 (slice-id "ref-idx-out") (slice-id "type-0-i64"))
+       (slice-id "ref-idx-src")
+       (slice-id "ref-idx-ndl"))]
+    [(core/return-terminator (slice-id "ref-idx-out"))]))
+
+(def refusal-index-function: core/FunctionDef
+  (core/->FunctionDef (slice-id "ref-idx-fn") "refuse-index"
+    [(core/->Parameter (slice-id "ref-idx-src") (slice-id "type-0-i64"))
+     (core/->Parameter (slice-id "ref-idx-ndl") (slice-id "type-0-i64"))]
+    [refusal-index-block]
+    (slice-id "ref-idx-blk")
+    (slice-id "type-0-i64")
+    []
+    []
+    []))
+
+(def refusal-index-world: core/NativeWorld
+  (core/->NativeWorld (slice-id "ref-idx-wld") nil "native-qbe-fixture-v0"
+    [slice-i64-type]
+    []
+    []
+    []
+    [slice-i64-layout]
+    [refusal-index-function]
+    []
+    []
+    []
+    []
+    []))
+
+(def refusal-blank-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "ref-bln-blk")
+    []
+    [(core/->TextBlankInstruction
+       (core/->SsaValueV0 (slice-id "ref-bln-out") (slice-id "type-2-bit"))
+       (slice-id "ref-bln-src"))]
+    [(core/return-terminator (slice-id "ref-bln-out"))]))
+
+(def refusal-blank-function: core/FunctionDef
+  (core/->FunctionDef (slice-id "ref-bln-fn") "refuse-blank"
+    [(core/->Parameter (slice-id "ref-bln-src") (slice-id "type-0-i64"))]
+    [refusal-blank-block]
+    (slice-id "ref-bln-blk")
+    (slice-id "type-2-bit")
+    []
+    []
+    []))
+
+(def refusal-blank-world: core/NativeWorld
+  (core/->NativeWorld (slice-id "ref-bln-wld") nil "native-qbe-fixture-v0"
+    [slice-i64-type slice-bool-type]
+    []
+    []
+    []
+    [slice-i64-layout slice-bool-layout]
+    [refusal-blank-function]
+    []
+    []
+    []
+    []
+    []))
+
+(def refusal-parse-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "ref-prs-blk")
+    []
+    [(core/->TextParseI64Instruction
+       (core/->SsaValueV0 (slice-id "ref-prs-out") (slice-id "type-0-i64"))
+       (slice-id "ref-prs-src"))]
+    [(core/return-terminator (slice-id "ref-prs-out"))]))
+
+(def refusal-parse-function: core/FunctionDef
+  (core/->FunctionDef (slice-id "ref-prs-fn") "refuse-parse"
+    [(core/->Parameter (slice-id "ref-prs-src") (slice-id "type-0-i64"))]
+    [refusal-parse-block]
+    (slice-id "ref-prs-blk")
+    (slice-id "type-0-i64")
+    []
+    []
+    []))
+
+(def refusal-parse-world: core/NativeWorld
+  (core/->NativeWorld (slice-id "ref-prs-wld") nil "native-qbe-fixture-v0"
+    [slice-i64-type]
+    []
+    []
+    []
+    [slice-i64-layout]
+    [refusal-parse-function]
+    []
+    []
+    []
+    []
+    []))
+
 ;; --- materialization ------------------------------------------------------
 
 (defn require-artifact [result: qbe/QbeMaterialization] -> qbe/QbeArtifact
   (match result
     [(QbeSuccess value) (qbe/qbesuccess-artifact result)]
     [(QbeFailure value) (throw (ex-info (qbe/qbefailure-detail result) {}))]))
+
+(defn explicitly-refused? [world: core/NativeWorld] -> Bool
+  (and (core/validationreport-passed (core/validate-world world))
+    (match (qbe/materialize-world world 3)
+      [(QbeSuccess value) false]
+      [(QbeFailure value)
+       (= "native world uses a shape outside the QBE materializer's slice"
+         value)])))
+
+(def refusal-index-proven?: Bool
+  (explicitly-refused? refusal-index-world))
+
+(def refusal-blank-proven?: Bool
+  (explicitly-refused? refusal-blank-world))
+
+(def refusal-parse-proven?: Bool
+  (explicitly-refused? refusal-parse-world))
 
 (def fixture-artifact: qbe/QbeArtifact
   (require-artifact (qbe/materialize-world fixture-world 0)))
@@ -418,7 +538,10 @@
   (require-artifact (qbe/materialize-world concat-world-permuted 2)))
 
 (def fixture-deterministic?: Bool
-  (and (= (qbe/qbeartifact-module-text fixture-artifact)
+  (and refusal-index-proven?
+    refusal-blank-proven?
+    refusal-parse-proven?
+    (= (qbe/qbeartifact-module-text fixture-artifact)
          (qbe/qbeartifact-module-text fixture-permuted-artifact))
     (= (qbe/qbeartifact-module-text slice-artifact)
       (qbe/qbeartifact-module-text slice-permuted-artifact))

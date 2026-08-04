@@ -2575,32 +2575,6 @@
               (core/->SsaValueV0 result-id optional) source-id needle-id))
           result-id optional false)))))
 
-(defn lower-text-search-predicate
-  [types: (Vec core/TypeDef)
-   owner: core/NativeId
-   state: BodyStateV0
-   callee: String
-   source-id: core/NativeId
-   needle-id: core/NativeId] -> ExprResultV0
-  (let [found: ExprResultV0
-        (lower-text-index types owner state source-id needle-id)
-        current: BodyStateV0 (exprresultv0-state found)]
-    (cond
-      (state-blocked? current) (dead-result current)
-      (= "str/includes?" callee)
-      (lower-presence-predicate types owner current
-        (exprresultv0-value-id found) (exprresultv0-type-id found) true)
-      :else
-      (let [zero-id: core/NativeId (state-id current owner "text-index-zero")
-            with-zero: BodyStateV0
-            (state-emit (state-bump current)
-              (core/->AtomInstruction
-                (core/->SsaValueV0 zero-id (int-type-id))
-                (core/->I64Atom 0)))]
-        (lower-scalar-union-equality types owner with-zero zero-id
-          (int-type-id) (exprresultv0-value-id found)
-          (exprresultv0-type-id found))))))
-
 (defn lower-positive
   [state: BodyStateV0
    owner: core/NativeId
@@ -2692,6 +2666,32 @@
           (state-open-block after-miss join-id
             [(core/->Parameter join-parameter (bool-type-id))])
           join-parameter (bool-type-id) false)))))
+
+(defn lower-text-search-predicate
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   callee: String
+   source-id: core/NativeId
+   needle-id: core/NativeId] -> ExprResultV0
+  (let [found: ExprResultV0
+        (lower-text-index types owner state source-id needle-id)
+        current: BodyStateV0 (exprresultv0-state found)]
+    (cond
+      (state-blocked? current) (dead-result current)
+      (= "str/includes?" callee)
+      (lower-presence-predicate types owner current
+        (exprresultv0-value-id found) (exprresultv0-type-id found) true)
+      :else
+      (let [zero-id: core/NativeId (state-id current owner "text-index-zero")
+            with-zero: BodyStateV0
+            (state-emit (state-bump current)
+              (core/->AtomInstruction
+                (core/->SsaValueV0 zero-id (int-type-id))
+                (core/->I64Atom 0)))]
+        (lower-scalar-union-equality types owner with-zero zero-id
+          (int-type-id) (exprresultv0-value-id found)
+          (exprresultv0-type-id found))))))
 
 (defn lower-ordered-union-comparison
   [types: (Vec core/TypeDef)

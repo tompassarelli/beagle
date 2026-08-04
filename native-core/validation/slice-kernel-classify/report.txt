@@ -1,0 +1,36 @@
+stage source-seal ACCEPTED
+stage source-to-typed ACCEPTED
+stage typed-to-native COMPLETE
+source-modules 2
+source-imports 2
+world-types 16
+world-functions 19
+world-abis 19
+projected-types 12
+lowered fn_0 strip-at 7 blocks
+lowered fn_1 has-whitespace? 26 blocks
+lowered fn_2 ref-shape? 8 blocks
+lowered fn_3 vec-member? 10 blocks
+lowered fn_4 emoji-single? 4 blocks
+lowered fn_5 configured-single? 1 blocks
+lowered fn_6 meta-single-seed? 7 blocks
+lowered fn_7 single-eff? 8 blocks
+lowered fn_8 key-of-group 1 blocks
+lowered fn_9 key-of-triple 1 blocks
+lowered fn_10 normalize-ref-value 12 blocks
+lowered fn_11 lease-invalid 1 blocks
+lowered fn_12 lease-subject 1 blocks
+lowered fn_13 lease-encode 1 blocks
+lowered fn_14 lease-decode 35 blocks
+lowered fn_15 delivery-trigger? 4 blocks
+lowered fn_16 observed-fallback-single 1 blocks
+lowered fn_17 observed-key-sep 1 blocks
+lowered fn_18 observed-lease-schema-lines 1 blocks
+obligation-projection PASS valid-ssa
+obligation-projection PASS exhaustive-matches
+obligation-projection PASS closed-layouts
+obligation-projection PASS checked-arithmetic
+obligation-projection PASS legal-abi
+obligation-projection PASS discharged-tokens
+obligation-projection PASS bounded-effects
+materialize OK module_0.h module_0.c

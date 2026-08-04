@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Re-materializes each native-core validation slice twice, byte-compares
 # every output, and fails loudly with the differing paths on divergence.
-# Usage: determinism_gate.sh [--module slice-types-full|slice-fold|slice-types|slice-store|slice-vec] [--quick]
+# Usage: determinism_gate.sh [--module slice-types-full|slice-fold|slice-types|slice-store|slice-vec|slice-kernel-classify] [--quick]
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -63,6 +63,12 @@ run_slice_vec() {
     env NATIVE_SLICE_NO_COMPILE=1
 }
 
+run_slice_kernel_classify() {
+  run_env_artifacts_slice slice-kernel-classify \
+    "$validation/slice-kernel-classify/drive.sh" \
+    env NATIVE_SLICE_NO_COMPILE=1
+}
+
 # run.sh writes into the committed dir directly (no artifacts-dir override);
 # snapshot + restore so the gate never leaves the tree dirty.
 run_slice_types() {
@@ -119,6 +125,7 @@ if [ -n "$module" ]; then
     slice-types) run_slice_types ;;
     slice-store) run_slice_store ;;
     slice-vec) run_slice_vec ;;
+    slice-kernel-classify) run_slice_kernel_classify ;;
     *) echo "determinism_gate.sh: unknown --module: $module" >&2; exit 2 ;;
   esac
 elif [ "$quick" -eq 1 ]; then
@@ -129,6 +136,7 @@ else
   run_slice_types
   run_slice_store
   run_slice_vec
+  run_slice_kernel_classify
 fi
 
 exit "$status"
