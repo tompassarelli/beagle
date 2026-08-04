@@ -8,16 +8,24 @@
    fn_14 any-none?   fn_15 all-none?   fn_16 any-one?    fn_17 all-one?
    fn_18 any-short-circuits?            fn_19 all-short-circuits?
    fn_20 trim-byte?  fn_21 global-size  fn_22 parameter-shadow-size
-   fn_23 local-shadow-size
-   type_1 Int  type_2 Bool  type_3 Text  type_4 Keyword */
+   fn_23 local-shadow-size  fn_24 render-float  fn_25 print-float
+   fn_26 render-bool  fn_27 print-text  fn_28 print-int
+   fn_29 render-keyword  fn_30 render-nil  fn_31 print-nil
+   fn_32 render-text-vector  fn_33 print-text-vector
+   fn_34 render-text-map  fn_35 print-text-map
+   fn_36 render-printable  fn_37 print-printable
+   type_1 Int  type_2 Bool  type_3 Float  type_4 Text  type_5 Keyword
+   type_8 Nil  type_9 Map  type_10 Vec  type_11 Printable */
 #include "module_0.h"
+
+#include <math.h>
 
 static uint8_t storage[1u << 16];
 static native_arena arena;
 static const native_capability capability = { UINT64_C(0) };
 
 /* A fresh arena blob per call, so equal bytes never share a handle. */
-static native_m0_type_3 text_of(const char *bytes) {
+static native_m0_type_4 text_of(const char *bytes) {
   uint8_t *destination = NULL;
   size_t length = strlen(bytes);
   uint64_t handle = native_text_alloc(&arena, (uint64_t)length, &destination);
@@ -27,7 +35,7 @@ static native_m0_type_3 text_of(const char *bytes) {
   return handle;
 }
 
-static bool text_is(native_m0_type_3 handle, const char *bytes) {
+static bool text_is(native_m0_type_4 handle, const char *bytes) {
   size_t length = strlen(bytes);
   if (native_text_length(handle) != (uint64_t)length) {
     return false;
@@ -38,11 +46,77 @@ static bool text_is(native_m0_type_3 handle, const char *bytes) {
   return memcmp(native_text_bytes(handle), bytes, length) == 0;
 }
 
+static native_m0_type_11 printable_text(native_m0_type_4 value) {
+  native_m0_type_11 result = { 0 };
+  result.tag = INT64_C(0);
+  result.payload.variant_0 = value;
+  return result;
+}
+
+static native_m0_type_11 printable_int(native_m0_type_1 value) {
+  native_m0_type_11 result = { 0 };
+  result.tag = INT64_C(1);
+  result.payload.variant_1 = value;
+  return result;
+}
+
+static native_m0_type_11 printable_float(native_m0_type_3 value) {
+  native_m0_type_11 result = { 0 };
+  result.tag = INT64_C(2);
+  result.payload.variant_2 = value;
+  return result;
+}
+
+static native_m0_type_11 printable_bool(native_m0_type_2 value) {
+  native_m0_type_11 result = { 0 };
+  result.tag = INT64_C(3);
+  result.payload.variant_3 = value;
+  return result;
+}
+
+static native_m0_type_11 printable_keyword(native_m0_type_5 value) {
+  native_m0_type_11 result = { 0 };
+  result.tag = INT64_C(4);
+  result.payload.variant_4 = value;
+  return result;
+}
+
+static native_m0_type_11 printable_nil(void) {
+  native_m0_type_11 result = { 0 };
+  result.tag = INT64_C(5);
+  result.payload.variant_5.tag = INT64_C(0);
+  return result;
+}
+
+static void stringify_cycle(void) {
+  native_value_descriptor cycle = {
+    .abi_version = NATIVE_VALUE_ABI_VERSION,
+    .kind = NATIVE_VALUE_VECTOR,
+    .size = sizeof(native_vec *),
+    .alignment = _Alignof(native_vec *),
+    .stride = sizeof(native_vec *)
+  };
+  native_vec *value = NULL;
+  cycle.element = &cycle;
+  (void)native_value_to_text(&arena, &cycle, &value, NATIVE_VALUE_PR_STR);
+}
+
+static void stringify_reference(void) {
+  native_value_descriptor reference = {
+    .abi_version = NATIVE_VALUE_ABI_VERSION,
+    .kind = NATIVE_VALUE_REFERENCE,
+    .size = sizeof(void *),
+    .alignment = _Alignof(void *)
+  };
+  void *value = NULL;
+  (void)native_value_to_text(&arena, &reference, &value, NATIVE_VALUE_PR_STR);
+}
+
 int main(int argc, char **argv) {
-  native_m0_type_3 hello_a;
-  native_m0_type_3 hello_b;
-  native_m0_type_3 hell;
-  native_m0_type_3 empty;
+  native_m0_type_4 hello_a;
+  native_m0_type_4 hello_b;
+  native_m0_type_4 hell;
+  native_m0_type_4 empty;
 
   (void)argv;
   native_arena_init(&arena, storage, sizeof storage);
@@ -52,6 +126,14 @@ int main(int argc, char **argv) {
   empty = text_of("");
 
   if (argc > 1) {
+    if (strcmp(argv[1], "cycle") == 0) {
+      stringify_cycle();
+      return 97;
+    }
+    if (strcmp(argv[1], "reference") == 0) {
+      stringify_reference();
+      return 98;
+    }
     /* end beyond the blob must trap, never return */
     (void)native_m0_fn_2(&arena, &capability, hello_a, INT64_C(0), INT64_C(9));
     return 99;
@@ -89,7 +171,7 @@ int main(int argc, char **argv) {
 
   /* subs copies into the arena: a new handle carrying the right bytes */
   {
-    native_m0_type_3 ell =
+    native_m0_type_4 ell =
         native_m0_fn_2(&arena, &capability, hello_a, INT64_C(1), INT64_C(4));
     if (!text_is(ell, "ell")) {
       return 9;
@@ -206,6 +288,75 @@ int main(int argc, char **argv) {
   }
   if (native_m0_fn_23() != INT64_C(3)) {
     return 39;
+  }
+
+  if (!text_is(native_m0_fn_24(&arena, &capability, 1.0), "1.0") ||
+      !text_is(native_m0_fn_24(&arena, &capability, 10000000.0), "1.0E7") ||
+      !text_is(native_m0_fn_24(&arena, &capability, 0.001), "0.001") ||
+      !text_is(native_m0_fn_24(&arena, &capability, 0.0001), "1.0E-4") ||
+      !text_is(native_m0_fn_24(&arena, &capability, -0.0), "-0.0") ||
+      !text_is(native_m0_fn_24(&arena, &capability, NAN), "NaN") ||
+      !text_is(native_m0_fn_24(&arena, &capability, INFINITY), "Infinity") ||
+      !text_is(native_m0_fn_24(&arena, &capability, -INFINITY), "-Infinity") ||
+      !text_is(native_m0_fn_25(&arena, &capability, 1.25), "1.25")) {
+    return 40;
+  }
+  if (!text_is(native_m0_fn_26(&arena, &capability, true), "true") ||
+      !text_is(native_m0_fn_26(&arena, &capability, false), "false")) {
+    return 41;
+  }
+  if (!text_is(native_m0_fn_27(&arena, &capability, text_of("line\n\"")),
+               "\"line\\n\\\"\"") ||
+      !text_is(native_m0_fn_28(&arena, &capability, INT64_MIN),
+               "-9223372036854775808") ||
+      !text_is(native_m0_fn_29(&arena, &capability, UINT64_C(0)), ":assert") ||
+      !text_is(native_m0_fn_30(&arena, &capability), "") ||
+      !text_is(native_m0_fn_31(&arena, &capability), "nil")) {
+    return 42;
+  }
+  {
+    native_m0_type_4 items[] = { text_of("alpha"), text_of("line\n\"") };
+    native_m0_type_10 vector = native_vec_new(
+        &arena, INT64_C(2), (int64_t)sizeof(items[0]), _Alignof(native_m0_type_4));
+    vector = native_vec_push(&arena, vector, &items[0],
+                             (int64_t)sizeof(items[0]), _Alignof(native_m0_type_4));
+    vector = native_vec_push(&arena, vector, &items[1],
+                             (int64_t)sizeof(items[1]), _Alignof(native_m0_type_4));
+    if (!text_is(native_m0_fn_32(&arena, &capability, vector),
+                 "[\"alpha\" \"line\\n\\\"\"]") ||
+        !text_is(native_m0_fn_33(&arena, &capability, vector),
+                 "[\"alpha\" \"line\\n\\\"\"]")) {
+      return 43;
+    }
+  }
+  {
+    native_m0_type_5 keys[] = { UINT64_C(1), UINT64_C(0) };
+    native_m0_type_4 values[] = { text_of("two"), text_of("line\n\"") };
+    native_m0_type_9 map = native_map_from_arrays(
+        &arena, keys, values, INT64_C(2), (int64_t)sizeof(keys[0]),
+        _Alignof(native_m0_type_5), (int64_t)sizeof(values[0]),
+        _Alignof(native_m0_type_4), NATIVE_COLLECTION_EQ_KEYWORD);
+    const char *expected = "{:retract \"two\", :assert \"line\\n\\\"\"}";
+    if (!text_is(native_m0_fn_34(&arena, &capability, map), expected) ||
+        !text_is(native_m0_fn_35(&arena, &capability, map), expected)) {
+      return 44;
+    }
+  }
+  if (!text_is(native_m0_fn_36(&arena, &capability,
+                               printable_text(text_of("raw"))), "raw") ||
+      !text_is(native_m0_fn_37(&arena, &capability,
+                               printable_text(text_of("raw"))), "\"raw\"") ||
+      !text_is(native_m0_fn_36(&arena, &capability,
+                               printable_int(INT64_C(-9))), "-9") ||
+      !text_is(native_m0_fn_37(&arena, &capability,
+                               printable_float(1.5)), "1.5") ||
+      !text_is(native_m0_fn_36(&arena, &capability,
+                               printable_bool(false)), "false") ||
+      !text_is(native_m0_fn_37(&arena, &capability,
+                               printable_keyword(UINT64_C(1))), ":retract") ||
+      !text_is(native_m0_fn_36(&arena, &capability, printable_nil()), "") ||
+      !text_is(native_m0_fn_37(&arena, &capability, printable_nil()), "nil")) {
+    return 45;
   }
   return 0;
 }

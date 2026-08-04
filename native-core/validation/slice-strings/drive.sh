@@ -122,7 +122,15 @@ if ( cd "$build" && ulimit -c 0 && ./probe_gcc trap ) 2>/dev/null; then
   echo "drive.sh: the out-of-range subs did not trap" >&2
   exit 1
 fi
-echo "drive.sh: gcc $(gcc -dumpversion) strict compile + run + trap ok"
+if ( cd "$build" && ulimit -c 0 && ./probe_gcc cycle ) 2>/dev/null; then
+  echo "drive.sh: cyclic value descriptor was not refused" >&2
+  exit 1
+fi
+if ( cd "$build" && ulimit -c 0 && ./probe_gcc reference ) 2>/dev/null; then
+  echo "drive.sh: reference value descriptor was not refused" >&2
+  exit 1
+fi
+echo "drive.sh: gcc $(gcc -dumpversion) strict compile + run + refusal traps ok"
 
 find_clang() {
   if command -v clang >/dev/null 2>&1; then command -v clang; return 0; fi
@@ -135,7 +143,13 @@ clang_bin="$(find_clang || true)"
 if [ -n "$clang_bin" ]; then
   ( cd "$build" && "$clang_bin" -std=c17 -Werror -o probe_clang module_0.c native_shim.c main.c )
   ( cd "$build" && ./probe_clang )
-  echo "drive.sh: clang $("$clang_bin" -dumpversion) compile + run ok"
+  for refusal in trap cycle reference; do
+    if ( cd "$build" && ulimit -c 0 && ./probe_clang "$refusal" ) 2>/dev/null; then
+      echo "drive.sh: clang build did not trap for $refusal" >&2
+      exit 1
+    fi
+  done
+  echo "drive.sh: clang $("$clang_bin" -dumpversion) compile + run + refusal traps ok"
 else
   echo "drive.sh: clang not found — second frontend NOT exercised" >&2
 fi

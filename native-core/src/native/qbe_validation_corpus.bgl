@@ -664,6 +664,58 @@
     []
     []))
 
+(def refusal-value-text-type: core/TypeDef
+  (core/->TypeDef (slice-id "ref-val-txt-typ") "Text"
+    (core/->AtomType (core/->TextKind true))))
+
+(def refusal-value-text-layout: core/LayoutDef
+  (core/->LayoutDef (slice-id "ref-val-txt-lay")
+    (slice-id "ref-val-txt-typ") 8 8
+    (core/->ScalarShapeV0 (core/->UnsignedIntReprV0 64))))
+
+(def refusal-value-to-text-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "ref-val-txt-blk")
+    []
+    [(core/->ArenaInstruction
+       (core/->SsaValueV0 (slice-id "ref-val-txt-arn") (slice-id "vec-typ-arn"))
+       (slice-id "reg-0-arena")
+       (slice-id "cap-0-alloc")
+       (core/->TokenFlowV0
+         [(slice-id "reg-0-arena") (slice-id "cap-0-alloc")]
+         []))
+     (core/->ValueToTextInstructionV0
+       (core/->SsaValueV0 (slice-id "ref-val-txt-out")
+         (slice-id "ref-val-txt-typ"))
+       (core/->ValuePrStrV0 true)
+       (slice-id "type-0-i64")
+       (slice-id "ref-val-txt-val")
+       (slice-id "ref-val-txt-arn"))]
+    [(core/return-terminator (slice-id "ref-val-txt-out"))]))
+
+(def refusal-value-to-text-function: core/FunctionDef
+  (core/->FunctionDef (slice-id "ref-val-txt-fn") "refuse-value-to-text"
+    [(core/->Parameter (slice-id "ref-val-txt-val") (slice-id "type-0-i64"))]
+    [refusal-value-to-text-block]
+    (slice-id "ref-val-txt-blk")
+    (slice-id "ref-val-txt-typ")
+    [(slice-id "eff-0-alloc")]
+    [(slice-id "reg-0-arena")]
+    [(slice-id "cap-0-alloc")]))
+
+(def refusal-value-to-text-world: core/NativeWorld
+  (core/->NativeWorld (slice-id "ref-val-txt-wld") nil "native-qbe-fixture-v0"
+    [slice-i64-type refusal-value-text-type concat-arena-type]
+    [slice-alloc-effect]
+    [slice-region]
+    [slice-alloc-capability]
+    [slice-i64-layout refusal-value-text-layout concat-arena-layout]
+    [refusal-value-to-text-function]
+    [(slice-id "eff-0-alloc")]
+    [(slice-id "reg-0-arena")]
+    [(slice-id "cap-0-alloc")]
+    []
+    []))
+
 ;; --- Atom state world ----------------------------------------------------
 ;; This fixture is materialized by validation/atom through C17. QBE must reject
 ;; the same sealed world until it has a lock-aware state calling convention.
@@ -900,6 +952,14 @@
       [(QbeFailure value)
        (= "unsupported native value-semantics op: equal" value)])))
 
+(def refusal-value-to-text-proven?: Bool
+  (and (core/validationreport-passed
+         (core/validate-world refusal-value-to-text-world))
+    (match (qbe/materialize-world refusal-value-to-text-world 3)
+      [(QbeSuccess value) false]
+      [(QbeFailure value)
+       (= "unsupported native value-semantics op: to-text" value)])))
+
 (def atom-refusal-proven?: Bool
   (explicitly-refused? atom-world))
 
@@ -929,6 +989,7 @@
     refusal-map-proven?
     refusal-set-proven?
     refusal-value-equal-proven?
+    refusal-value-to-text-proven?
     atom-refusal-proven?
     (= (qbe/qbeartifact-module-text fixture-artifact)
          (qbe/qbeartifact-module-text fixture-permuted-artifact))

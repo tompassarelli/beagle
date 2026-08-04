@@ -257,6 +257,10 @@
      left-id: NativeId
      right-id: NativeId]))
 
+(defunion ValueTextModeV0
+  (ValueStrV0 [token: Bool])
+  (ValuePrStrV0 [token: Bool]))
+
 (defunion ResourceTokenKindV0
   (RegionTokenV0 [region: NativeId])
   (CapabilityTokenV0 [capability: NativeId]))
@@ -539,7 +543,14 @@
      builtin: TextBuiltinOpV0])
   (ValueSemanticsInstruction
     [result: SsaValueV0
-     operation: ValueSemanticsOpV0]))
+     operation: ValueSemanticsOpV0])
+  ;; Stringification stays separate from TextConcat's statically tagged operands.
+  (ValueToTextInstructionV0
+    [result: SsaValueV0
+     mode: ValueTextModeV0
+     domain-type: NativeId
+     value-id: NativeId
+     arena-id: NativeId]))
 
 (defrecord SwitchCaseV0
   [variant-id: NativeId
@@ -824,7 +835,9 @@
      (ssavaluev0-id result)]
     [(TextConcatInstruction result arena-id operand-ids) (ssavaluev0-id result)]
     [(TextBuiltinInstruction result operation) (ssavaluev0-id result)]
-    [(ValueSemanticsInstruction result operation) (ssavaluev0-id result)]))
+    [(ValueSemanticsInstruction result operation) (ssavaluev0-id result)]
+    [(ValueToTextInstructionV0 result mode domain-type value-id arena-id)
+     (ssavaluev0-id result)]))
 
 (defn instruction-result-ids [instructions :- (Vec Instruction)] :- (Vec NativeId)
   (mapv (fn [instruction :- Instruction] :- NativeId (instruction-result-id instruction))
@@ -1157,7 +1170,9 @@
     [(ValueSemanticsInstruction result operation)
      (match operation
        [(ValueEqualV0 domain-type left-id right-id)
-        (id-in? known-types domain-type)])]))
+        (id-in? known-types domain-type)])]
+    [(ValueToTextInstructionV0 result mode domain-type value-id arena-id)
+     (id-in? known-types domain-type)]))
 
 (defn parameter-types-closed?
   [parameters :- (Vec Parameter)
@@ -1349,7 +1364,9 @@
      (text-builtin-ssa-refs operation)]
     [(ValueSemanticsInstruction result operation)
      (match operation
-       [(ValueEqualV0 domain-type left-id right-id) [left-id right-id]])]))
+       [(ValueEqualV0 domain-type left-id right-id) [left-id right-id]])]
+    [(ValueToTextInstructionV0 result mode domain-type value-id arena-id)
+     [arena-id value-id]]))
 
 (defn terminator-ssa-refs [terminator :- Terminator] :- (Vec NativeId)
   (match terminator
@@ -1455,7 +1472,8 @@
      true]
     [(TextConcatInstruction result arena-id operand-ids) true]
     [(TextBuiltinInstruction result operation) true]
-    [(ValueSemanticsInstruction result operation) true]))
+    [(ValueSemanticsInstruction result operation) true]
+    [(ValueToTextInstructionV0 result mode domain-type value-id arena-id) true]))
 
 (defn block-resources-allowed?
   [block :- BasicBlock

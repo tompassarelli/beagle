@@ -2749,6 +2749,67 @@
             (or (instance? native.core.UnionType shape)
                 (instance? native.core.VectorType shape)))))))
 
+(defn nil-value-variant?
+  [definition: core/TypeDef
+   variant: core/TypeVariant] -> Bool
+  (and (nil? (core/typevariant-payload-type variant))
+    (or (= "nil" (core/typevariant-name variant))
+      (and (= "Unit" (core/typedef-name definition))
+        (= "unit" (core/typevariant-name variant))))))
+
+(defn value-to-text-type-inner?
+  [types: (Vec core/TypeDef)
+   target: core/NativeId
+   visiting: (Vec core/NativeId)] -> Bool
+  (if (core/id-in? visiting target)
+    false
+    (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
+      (if (nil? definition)
+        false
+        (let [shape: core/TypeShape (core/typedef-shape definition)
+              next: (Vec core/NativeId) (conj visiting target)]
+          (cond
+            (instance? native.core.AtomType shape)
+            (let [kind: core/AtomKind (core/atomtype-kind shape)]
+              (or (instance? native.core.BoolKind kind)
+                (instance? native.core.I64Kind kind)
+                (instance? native.core.F64Kind kind)
+                (instance? native.core.TextKind kind)
+                (instance? native.core.KeywordKind kind)))
+
+            (instance? native.core.VectorType shape)
+            (value-to-text-type-inner? types
+              (core/vectortype-element-type shape) next)
+
+            (instance? native.core.MapTypeV0 shape)
+            (and
+              (instance? native.core.InsertionOrderV0
+                (core/maptypev0-iteration-order shape))
+              (value-to-text-type-inner? types
+                (core/maptypev0-key-type shape) next)
+              (value-to-text-type-inner? types
+                (core/maptypev0-value-type shape) next))
+
+            (instance? native.core.UnionType shape)
+            (let [variants: (Vec core/TypeVariant)
+                  (core/uniontype-variants shape)]
+              (and (> (count variants) 0)
+                (every?
+                  (fn [variant: core/TypeVariant] -> Bool
+                    (let [payload: (U core/NativeId Nil)
+                          (core/typevariant-payload-type variant)]
+                      (if (nil? payload)
+                        (nil-value-variant? definition variant)
+                        (value-to-text-type-inner? types payload next))))
+                  variants)))
+
+            :else false))))))
+
+(defn value-to-text-type?
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> Bool
+  (value-to-text-type-inner? types target []))
+
 ;; The vector TypeDef for an element type exists only when some annotation in
 ;; the module named (Vec T); a literal cannot mint one, so it looks one up.
 (defn vector-type-of
@@ -2868,6 +2929,7 @@
       (instance? native.core.AtomCreateInstruction instruction)
       (instance? native.core.TextSliceInstruction instruction)
       (instance? native.core.TextConcatInstruction instruction)
+      (instance? native.core.ValueToTextInstructionV0 instruction)
       (and (instance? native.core.ExternCallInstruction instruction)
         (some? (core/externcallinstruction-arena-id instruction)))
       (and (instance? native.core.TextBuiltinInstruction instruction)
@@ -4001,6 +4063,21 @@
                   (core/->SsaValueV0 result-id (keyword-type-id))
                   (core/->KeywordAtom text)))
               result-id (keyword-type-id) false)
+
+            (= "nil" literal-kind)
+            (let [variants: (Vec core/TypeVariant)
+                  (union-variants-of types (type-id "Nil"))]
+              (if (and (= 1 (count variants))
+                    (nil? (core/typevariant-payload-type (nth variants 0))))
+                (->ExprResultV0
+                  (state-emit bumped
+                    (core/->UnionConstructInstruction
+                      (core/->SsaValueV0 result-id (type-id "Nil"))
+                      (core/typevariant-id (nth variants 0))
+                      nil))
+                  result-id (type-id "Nil") false)
+                (fail-result state
+                  "TODO-NATIVE-LITERAL-NIL-TYPE: Nil has no closed unit variant")))
 
             :else
             (fail-result state
@@ -6453,6 +6530,31 @@
                               (failure-code "bounds")))
                           result-id (text-type-id) false)))))
 
+                (and (= 1 (count values))
+                  (or (= "pr-str" callee)
+                    (and (= "str" callee)
+                      (not (concat-operands-native? value-types))))
+                  (value-to-text-type? types (nth value-types 0)))
+                (let [result-id: core/NativeId
+                      (state-id current owner "value-to-text")
+                      mode: core/ValueTextModeV0
+                      (if (= "pr-str" callee)
+                        (core/->ValuePrStrV0 true)
+                        (core/->ValueStrV0 true))]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->ValueToTextInstructionV0
+                        (core/->SsaValueV0 result-id (text-type-id))
+                        mode
+                        (nth value-types 0)
+                        (nth values 0)
+                        (arena-value-id owner)))
+                    result-id (text-type-id) false))
+
+                (= "pr-str" callee)
+                (fail-result current
+                  "TODO-NATIVE-PR-STR-OPERANDS: pr-str takes one acyclic closed native value")
+
                 (= "str" callee)
                 (if (not (and (> (count values) 0)
                            (concat-operands-native? value-types)))
@@ -8760,6 +8862,18 @@
          (core/valuesemanticsinstruction-result instruction))
        (encode-value-semantics-operation
          (core/valuesemanticsinstruction-operation instruction))])
+
+    (instance? native.core.ValueToTextInstructionV0 instruction)
+    (worlds/canonical-record "value-to-text-instruction-v0"
+      [(encode-ssa-value
+         (core/valuetotextinstructionv0-result instruction))
+       (if (instance? native.core.ValuePrStrV0
+             (core/valuetotextinstructionv0-mode instruction))
+         "pr-str"
+         "str")
+       (id-value (core/valuetotextinstructionv0-domain-type instruction))
+       (id-value (core/valuetotextinstructionv0-value-id instruction))
+       (id-value (core/valuetotextinstructionv0-arena-id instruction))])
 
     (instance? native.core.CallInstruction instruction)
     (worlds/canonical-record "call-instruction"

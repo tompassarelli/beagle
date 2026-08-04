@@ -209,6 +209,7 @@
     (instance? native.core.TextConcatInstruction instruction) true
     (instance? native.core.TextBuiltinInstruction instruction) true
     (instance? native.core.ValueSemanticsInstruction instruction) true
+    (instance? native.core.ValueToTextInstructionV0 instruction) true
     :else false))
 
 (defn terminator-supported? [terminator: core/Terminator] -> Bool
@@ -351,6 +352,14 @@
    position: Int] -> String
   (str (c17/module-prefix module-index) "_text_" position))
 
+(defn keyword-symbol
+  [module-index: Int
+   position: Int] -> String
+  (str (c17/module-prefix module-index) "_keyword_" position))
+
+(defn keyword-table-symbol [module-index: Int] -> String
+  (str (c17/module-prefix module-index) "_value_keywords"))
+
 (defn atom-expression
   [module-index: Int
    pool: ConstantPoolV0
@@ -393,6 +402,31 @@
       "_Static_assert(offsetof(struct " symbol "_blob, bytes) == 8,"
       " \"text blob is length-prefixed\");\n")))
 
+(defn emit-keyword-pool
+  [module-index: Int
+   keywords: (Vec String)] -> String
+  (if (= 0 (count keywords))
+    ""
+    (str
+      (loop [position: Int 0 result: String ""]
+        (if (>= position (count keywords))
+          result
+          (let [symbol: String (keyword-symbol module-index position)
+                literal: String
+                (str "\"" (escape-c-text (nth keywords position)) "\"")]
+            (recur (+ position 1)
+              (str result "static const uint8_t " symbol "[] = " literal ";\n")))))
+      "static const native_value_keyword_descriptor "
+      (keyword-table-symbol module-index) "[] = {\n"
+      (loop [position: Int 0 result: String ""]
+        (if (>= position (count keywords))
+          result
+          (let [symbol: String (keyword-symbol module-index position)]
+            (recur (+ position 1)
+              (str result "  { .bytes = " symbol ", .length = sizeof "
+                symbol " - 1U },\n")))))
+      "};\n")))
+
 (defn emit-text-pool
   [module-index: Int
    pool: ConstantPoolV0] -> String
@@ -405,16 +439,7 @@
           (recur (+ position 1)
             (str result
               (emit-text-constant module-index position (nth texts position))))))
-      (if (= 0 (count keywords))
-        ""
-        (str "/* keyword table, sealed at lowering; a handle is its index.\n"
-          (loop [position: Int 0 result: String ""]
-            (if (>= position (count keywords))
-              result
-              (recur (+ position 1)
-                (str result "   " position " = "
-                  (escape-c-text (nth keywords position)) "\n"))))
-          "*/\n"))
+      (emit-keyword-pool module-index keywords)
       (if (and (= 0 (count texts)) (= 0 (count keywords))) "" "\n"))))
 
 (defn descriptor-symbol
@@ -440,6 +465,7 @@
       (or (instance? native.core.UnionType shape)
           (instance? native.core.OutcomeType shape)) "NATIVE_VALUE_UNION"
       (instance? native.core.VectorType shape) "NATIVE_VALUE_VECTOR"
+      (instance? native.core.MapTypeV0 shape) "NATIVE_VALUE_MAP"
       :else "NATIVE_VALUE_REFERENCE")))
 
 (defn field-descriptor-symbol
@@ -529,6 +555,31 @@
       (core/vectorshapev0-stride-bytes shape)
       0)))
 
+(defn descriptor-map-key
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   layout: core/LayoutDef] -> String
+  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+    (if (instance? native.core.MapShapeV0 shape)
+      (str "&" (descriptor-symbol types module-index
+        (core/mapshapev0-key-type shape)))
+      "NULL")))
+
+(defn descriptor-map-value
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   layout: core/LayoutDef] -> String
+  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+    (if (instance? native.core.MapShapeV0 shape)
+      (str "&" (descriptor-symbol types module-index
+        (core/mapshapev0-value-type shape)))
+      "NULL")))
+
+(defn keyword-definition? [definition: core/TypeDef] -> Bool
+  (let [shape: core/TypeShape (core/typedef-shape definition)]
+    (and (instance? native.core.AtomType shape)
+      (instance? native.core.KeywordKind (core/atomtype-kind shape)))))
+
 (defn descriptor-tag-offset [layout: core/LayoutDef] -> Int
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
     (if (instance? native.core.UnionShapeV0 shape)
@@ -539,6 +590,7 @@
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
    module-index: Int
+   pool: ConstantPoolV0
    definition: core/TypeDef] -> String
   (let [target: core/NativeId (core/typedef-id definition)
         layout: (U core/LayoutDef Nil) (c17/layout-for-type layouts target)]
@@ -546,7 +598,9 @@
       ""
       (let [fields: (Vec core/FieldLayoutV0) (c17/record-layout-fields layout)
             variants: (Vec core/UnionVariantLayoutV0)
-            (c17/union-layout-variants layout)]
+            (c17/union-layout-variants layout)
+            keywords: (Vec String) (constantpoolv0-keywords pool)
+            keyword-type: Bool (keyword-definition? definition)]
         (str "const native_value_descriptor "
           (descriptor-symbol types module-index target) " = {\n"
           "  .abi_version = NATIVE_VALUE_ABI_VERSION,\n"
@@ -563,10 +617,18 @@
             (variant-descriptor-symbol types module-index target)) ",\n"
           "  .variant_count = (size_t)" (count variants) ",\n"
           "  .element = " (descriptor-element types module-index layout) ",\n"
-          "  .stride = (size_t)" (descriptor-stride layout) "\n"
+          "  .stride = (size_t)" (descriptor-stride layout) ",\n"
+          "  .map_key = " (descriptor-map-key types module-index layout) ",\n"
+          "  .map_value = " (descriptor-map-value types module-index layout) ",\n"
+          "  .keywords = "
+          (if (and keyword-type (> (count keywords) 0))
+            (keyword-table-symbol module-index)
+            "NULL") ",\n"
+          "  .keyword_count = (size_t)"
+          (if keyword-type (count keywords) 0) "\n"
           "};\n")))))
 
-(defn value-semantics-used? [functions: (Vec core/FunctionDef)] -> Bool
+(defn value-descriptors-used? [functions: (Vec core/FunctionDef)] -> Bool
   (some?
     (some
       (fn [function: core/FunctionDef] -> Bool
@@ -576,7 +638,9 @@
               (some?
                 (some
                   (fn [instruction: core/Instruction] -> Bool
-                    (instance? native.core.ValueSemanticsInstruction instruction))
+                    (or
+                      (instance? native.core.ValueSemanticsInstruction instruction)
+                      (instance? native.core.ValueToTextInstructionV0 instruction)))
                   (core/basicblock-instructions block))))
             (core/functiondef-blocks function))))
       functions)))
@@ -585,8 +649,9 @@
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
    functions: (Vec core/FunctionDef)
-   module-index: Int] -> String
-  (if (not (value-semantics-used? functions))
+   module-index: Int
+   pool: ConstantPoolV0] -> String
+  (if (not (value-descriptors-used? functions))
     ""
     (str
       (loop [position: Int 0 result: String ""]
@@ -616,7 +681,7 @@
           (recur (+ position 1)
             (str result
               (emit-value-descriptor types layouts module-index
-                (nth types position))))))
+                pool (nth types position))))))
       "\n")))
 
 (defn field-position
@@ -1531,6 +1596,23 @@
             ");\n")
           ""))
 
+      (instance? native.core.ValueToTextInstructionV0 instruction)
+      (str "  " target " = native_value_to_text((native_arena *)"
+        (value-name function slots
+          (core/valuetotextinstructionv0-arena-id instruction))
+        ", &"
+        (descriptor-symbol types module-index
+          (core/valuetotextinstructionv0-domain-type instruction))
+        ", &"
+        (value-name function slots
+          (core/valuetotextinstructionv0-value-id instruction))
+        ", "
+        (if (instance? native.core.ValuePrStrV0
+              (core/valuetotextinstructionv0-mode instruction))
+          "NATIVE_VALUE_PR_STR"
+          "NATIVE_VALUE_STR")
+        ");\n")
+
       (instance? native.core.FieldInstruction instruction)
       (let [source: core/NativeId (core/fieldinstruction-source-id instruction)
             source-type: core/NativeId (slot-type function slots source)
@@ -2118,7 +2200,7 @@
   (str "/* Generated by native.body-c17; do not edit. */\n"
     "#include \"" header-name "\"\n\n"
     (emit-text-pool module-index pool)
-    (emit-value-descriptors types layouts functions module-index)
+    (emit-value-descriptors types layouts functions module-index pool)
     (emit-functions types layouts functions abis module-index pool)))
 
 (defn materialize-world

@@ -1,5 +1,6 @@
 #include "native_shim.h"
 
+#include <math.h>
 #include <stdatomic.h>
 #include <string.h>
 #include <stdlib.h>
@@ -677,7 +678,8 @@ static bool native_value_descriptor_valid(
     const native_value_descriptor *descriptor) {
   return (descriptor != NULL) &&
          (descriptor->abi_version == NATIVE_VALUE_ABI_VERSION) &&
-         (descriptor->size > 0U) && (descriptor->alignment > 0U);
+         (descriptor->size > 0U) && (descriptor->alignment > 0U) &&
+         ((descriptor->alignment & (descriptor->alignment - 1U)) == 0U);
 }
 
 static const native_value_variant_descriptor *native_value_variant(
@@ -822,6 +824,9 @@ static bool native_value_equal_inner(const native_value_descriptor *descriptor,
       return native_value_equal_inner(descriptor->element, left_reference,
                                       right_reference);
     }
+
+    case NATIVE_VALUE_MAP:
+      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
   native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
 }
@@ -829,6 +834,627 @@ static bool native_value_equal_inner(const native_value_descriptor *descriptor,
 bool native_value_equal(const native_value_descriptor *descriptor,
                         const void *left, const void *right) {
   return native_value_equal_inner(descriptor, left, right);
+}
+
+#define NATIVE_VALUE_TEXT_MAX_DEPTH 128U
+#define NATIVE_VALUE_FLOAT_BUFFER 64U
+
+typedef struct native_value_text_writer {
+  uint8_t *bytes;
+  size_t capacity;
+  size_t length;
+} native_value_text_writer;
+
+static bool native_value_signed_size(size_t size) {
+  return (size == sizeof(int8_t)) || (size == sizeof(int16_t)) ||
+         (size == sizeof(int32_t)) || (size == sizeof(int64_t));
+}
+
+static void native_value_text_descriptor_inner(
+    const native_value_descriptor *descriptor,
+    const native_value_descriptor **stack, size_t depth) {
+  size_t index;
+  if (!native_value_descriptor_valid(descriptor) ||
+      (depth >= NATIVE_VALUE_TEXT_MAX_DEPTH)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  for (index = 0U; index < depth; index++) {
+    if (stack[index] == descriptor) {
+      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+    }
+  }
+  stack[depth] = descriptor;
+  switch (descriptor->kind) {
+    case NATIVE_VALUE_BOOL:
+      if (descriptor->size != sizeof(bool)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      return;
+
+    case NATIVE_VALUE_SIGNED:
+      if (!native_value_signed_size(descriptor->size)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      return;
+
+    case NATIVE_VALUE_FLOAT:
+      if ((descriptor->size != sizeof(float)) &&
+          (descriptor->size != sizeof(double))) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      return;
+
+    case NATIVE_VALUE_TEXT:
+      if (descriptor->size != sizeof(uint64_t)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      return;
+
+    case NATIVE_VALUE_KEYWORD:
+      if ((descriptor->size != sizeof(uint64_t)) ||
+          (descriptor->keywords == NULL) ||
+          (descriptor->keyword_count == 0U)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      for (index = 0U; index < descriptor->keyword_count; index++) {
+        if ((descriptor->keywords[index].bytes == NULL) &&
+            (descriptor->keywords[index].length != 0U)) {
+          native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+        }
+      }
+      return;
+
+    case NATIVE_VALUE_UNION:
+      if ((descriptor->variants == NULL) ||
+          (descriptor->variant_count == 0U) ||
+          (descriptor->tag_offset > descriptor->size) ||
+          ((descriptor->size - descriptor->tag_offset) < sizeof(int64_t))) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      for (index = 0U; index < descriptor->variant_count; index++) {
+        const native_value_variant_descriptor *variant =
+            &descriptor->variants[index];
+        size_t prior;
+        for (prior = 0U; prior < index; prior++) {
+          if (descriptor->variants[prior].tag == variant->tag) {
+            native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+          }
+        }
+        if (variant->payload != NULL) {
+          if (!native_value_descriptor_valid(variant->payload) ||
+              (variant->payload_offset > descriptor->size) ||
+              (variant->payload->size >
+               (descriptor->size - variant->payload_offset)) ||
+              ((variant->payload_offset % variant->payload->alignment) != 0U)) {
+            native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+          }
+          native_value_text_descriptor_inner(variant->payload, stack,
+                                             depth + 1U);
+        }
+      }
+      return;
+
+    case NATIVE_VALUE_VECTOR:
+      if ((descriptor->size != sizeof(native_vec *)) ||
+          !native_value_descriptor_valid(descriptor->element) ||
+          (descriptor->stride > (size_t)INT64_MAX) ||
+          (descriptor->stride < descriptor->element->size) ||
+          ((descriptor->stride % descriptor->element->alignment) != 0U)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      native_value_text_descriptor_inner(descriptor->element, stack,
+                                         depth + 1U);
+      return;
+
+    case NATIVE_VALUE_MAP:
+      if ((descriptor->size != sizeof(native_map *)) ||
+          !native_value_descriptor_valid(descriptor->map_key) ||
+          !native_value_descriptor_valid(descriptor->map_value) ||
+          (descriptor->map_key->size > (size_t)INT64_MAX) ||
+          (descriptor->map_value->size > (size_t)INT64_MAX)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      native_value_text_descriptor_inner(descriptor->map_key, stack,
+                                         depth + 1U);
+      native_value_text_descriptor_inner(descriptor->map_value, stack,
+                                         depth + 1U);
+      return;
+
+    case NATIVE_VALUE_UNSIGNED:
+    case NATIVE_VALUE_RECORD:
+    case NATIVE_VALUE_REFERENCE:
+      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+}
+
+static void native_value_text_append(native_value_text_writer *writer,
+                                     const void *bytes, size_t length) {
+  if ((writer == NULL) || (writer->length > (SIZE_MAX - length)) ||
+      ((bytes == NULL) && (length != 0U))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  if (writer->bytes != NULL) {
+    if ((writer->length > writer->capacity) ||
+        (length > (writer->capacity - writer->length))) {
+      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+    }
+    if (length != 0U) {
+      memcpy(writer->bytes + writer->length, bytes, length);
+    }
+  }
+  writer->length += length;
+}
+
+static void native_value_text_character(native_value_text_writer *writer,
+                                        uint8_t byte) {
+  native_value_text_append(writer, &byte, 1U);
+}
+
+static int64_t native_value_read_signed(const native_value_descriptor *descriptor,
+                                        const void *value) {
+  switch (descriptor->size) {
+    case sizeof(int8_t): {
+      int8_t result;
+      memcpy(&result, value, sizeof result);
+      return (int64_t)result;
+    }
+    case sizeof(int16_t): {
+      int16_t result;
+      memcpy(&result, value, sizeof result);
+      return (int64_t)result;
+    }
+    case sizeof(int32_t): {
+      int32_t result;
+      memcpy(&result, value, sizeof result);
+      return (int64_t)result;
+    }
+    case sizeof(int64_t): {
+      int64_t result;
+      memcpy(&result, value, sizeof result);
+      return result;
+    }
+    default:
+      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+}
+
+static size_t native_value_i64_text(int64_t value, char output[21]) {
+  char reversed[20];
+  uint64_t magnitude;
+  size_t count = 0U;
+  size_t position = 0U;
+  if (value < INT64_C(0)) {
+    magnitude = (uint64_t)(-(value + INT64_C(1))) + UINT64_C(1);
+    output[position++] = '-';
+  } else {
+    magnitude = (uint64_t)value;
+  }
+  do {
+    reversed[count++] = (char)('0' + (magnitude % UINT64_C(10)));
+    magnitude /= UINT64_C(10);
+  } while (magnitude != UINT64_C(0));
+  while (count > 0U) {
+    output[position++] = reversed[--count];
+  }
+  return position;
+}
+
+static bool native_value_float_roundtrips(const char *text, double value,
+                                          bool single) {
+  char *end = NULL;
+  double parsed = strtod(text, &end);
+  if ((end == NULL) || (*end != '\0')) {
+    return false;
+  }
+  if (single) {
+    float expected = (float)value;
+    float actual = (float)parsed;
+    uint32_t expected_bits;
+    uint32_t actual_bits;
+    memcpy(&expected_bits, &expected, sizeof expected_bits);
+    memcpy(&actual_bits, &actual, sizeof actual_bits);
+    return expected_bits == actual_bits;
+  }
+  {
+    uint64_t expected_bits;
+    uint64_t actual_bits;
+    memcpy(&expected_bits, &value, sizeof expected_bits);
+    memcpy(&actual_bits, &parsed, sizeof actual_bits);
+    return expected_bits == actual_bits;
+  }
+}
+
+static size_t native_value_exponent_text(int64_t exponent, char *output) {
+  char reversed[8];
+  uint64_t magnitude;
+  size_t count = 0U;
+  size_t position = 0U;
+  if (exponent < INT64_C(0)) {
+    output[position++] = '-';
+    magnitude = (uint64_t)(-exponent);
+  } else {
+    magnitude = (uint64_t)exponent;
+  }
+  do {
+    reversed[count++] = (char)('0' + (magnitude % UINT64_C(10)));
+    magnitude /= UINT64_C(10);
+  } while (magnitude != UINT64_C(0));
+  while (count > 0U) {
+    output[position++] = reversed[--count];
+  }
+  return position;
+}
+
+/* Precision search supplies the shortest round-tripping significand; the
+   second step fixes spelling independently of libc's %g exponent policy. */
+static size_t native_value_float_text(double value, bool single,
+                                      char output[NATIVE_VALUE_FLOAT_BUFFER]) {
+  char raw[NATIVE_VALUE_FLOAT_BUFFER];
+  char digits[NATIVE_VALUE_FLOAT_BUFFER];
+  int maximum = single ? 9 : 17;
+  int precision;
+  size_t raw_length;
+  size_t index;
+  size_t digit_count = 0U;
+  size_t digits_before_decimal = 0U;
+  size_t leading = 0U;
+  size_t trailing;
+  size_t position = 0U;
+  int64_t exponent = INT64_C(0);
+  int64_t decimal_position;
+  bool decimal_seen = false;
+  bool negative = signbit(value) != 0;
+
+  if (isnan(value)) {
+    memcpy(output, "NaN", 3U);
+    return 3U;
+  }
+  if (isinf(value)) {
+    if (negative) {
+      memcpy(output, "-Infinity", 9U);
+      return 9U;
+    }
+    memcpy(output, "Infinity", 8U);
+    return 8U;
+  }
+
+  raw[0] = '\0';
+  for (precision = 1; precision <= maximum; precision++) {
+    int written = snprintf(raw, sizeof raw, "%.*g", precision, value);
+    if ((written < 0) || ((size_t)written >= sizeof raw)) {
+      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+    }
+    if (native_value_float_roundtrips(raw, value, single)) {
+      break;
+    }
+  }
+  if (precision > maximum) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+
+  raw_length = strlen(raw);
+  index = negative ? 1U : 0U;
+  while ((index < raw_length) && (raw[index] != 'e') &&
+         (raw[index] != 'E')) {
+    uint8_t byte = (uint8_t)raw[index];
+    if ((byte >= (uint8_t)'0') && (byte <= (uint8_t)'9')) {
+      digits[digit_count++] = (char)byte;
+      if (!decimal_seen) {
+        digits_before_decimal += 1U;
+      }
+    } else {
+      decimal_seen = true;
+    }
+    index += 1U;
+  }
+  if (index < raw_length) {
+    bool exponent_negative = false;
+    index += 1U;
+    if ((index < raw_length) &&
+        ((raw[index] == '+') || (raw[index] == '-'))) {
+      exponent_negative = raw[index] == '-';
+      index += 1U;
+    }
+    while (index < raw_length) {
+      uint8_t byte = (uint8_t)raw[index++];
+      if ((byte < (uint8_t)'0') || (byte > (uint8_t)'9') ||
+          (exponent > INT64_C(10000))) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      exponent = (exponent * INT64_C(10)) +
+                 (int64_t)(byte - (uint8_t)'0');
+    }
+    if (exponent_negative) {
+      exponent = -exponent;
+    }
+  }
+  if (digit_count == 0U) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  while ((leading + 1U < digit_count) && (digits[leading] == '0')) {
+    leading += 1U;
+  }
+  trailing = digit_count;
+  while ((trailing > leading + 1U) && (digits[trailing - 1U] == '0')) {
+    trailing -= 1U;
+  }
+  decimal_position = (int64_t)digits_before_decimal + exponent -
+                     (int64_t)leading;
+
+  if (negative) {
+    output[position++] = '-';
+  }
+  if ((decimal_position > INT64_C(-3)) &&
+      (decimal_position <= INT64_C(7))) {
+    if (decimal_position <= INT64_C(0)) {
+      int64_t zeros;
+      output[position++] = '0';
+      output[position++] = '.';
+      for (zeros = decimal_position; zeros < INT64_C(0); zeros++) {
+        output[position++] = '0';
+      }
+      for (index = leading; index < trailing; index++) {
+        output[position++] = digits[index];
+      }
+    } else {
+      size_t significant = trailing - leading;
+      size_t whole = (size_t)decimal_position;
+      for (index = 0U; index < whole; index++) {
+        output[position++] = (index < significant)
+                                 ? digits[leading + index]
+                                 : '0';
+      }
+      output[position++] = '.';
+      if (whole >= significant) {
+        output[position++] = '0';
+      } else {
+        for (index = whole; index < significant; index++) {
+          output[position++] = digits[leading + index];
+        }
+      }
+    }
+  } else {
+    output[position++] = digits[leading];
+    output[position++] = '.';
+    if ((leading + 1U) >= trailing) {
+      output[position++] = '0';
+    } else {
+      for (index = leading + 1U; index < trailing; index++) {
+        output[position++] = digits[index];
+      }
+    }
+    output[position++] = 'E';
+    position += native_value_exponent_text(decimal_position - INT64_C(1),
+                                           output + position);
+  }
+  if (position >= NATIVE_VALUE_FLOAT_BUFFER) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  return position;
+}
+
+static void native_value_text_escaped(native_value_text_writer *writer,
+                                      const uint8_t *bytes, size_t length) {
+  size_t index;
+  native_value_text_character(writer, (uint8_t)'"');
+  for (index = 0U; index < length; index++) {
+    const char *escape = NULL;
+    switch (bytes[index]) {
+      case (uint8_t)'"': escape = "\\\""; break;
+      case (uint8_t)'\\': escape = "\\\\"; break;
+      case (uint8_t)'\b': escape = "\\b"; break;
+      case (uint8_t)'\f': escape = "\\f"; break;
+      case (uint8_t)'\n': escape = "\\n"; break;
+      case (uint8_t)'\r': escape = "\\r"; break;
+      case (uint8_t)'\t': escape = "\\t"; break;
+      default: break;
+    }
+    if (escape == NULL) {
+      native_value_text_character(writer, bytes[index]);
+    } else {
+      native_value_text_append(writer, escape, 2U);
+    }
+  }
+  native_value_text_character(writer, (uint8_t)'"');
+}
+
+static void native_value_text_inner(const native_value_descriptor *descriptor,
+                                    const void *value, bool readable,
+                                    size_t depth,
+                                    native_value_text_writer *writer) {
+  if ((value == NULL) || (depth >= NATIVE_VALUE_TEXT_MAX_DEPTH)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  switch (descriptor->kind) {
+    case NATIVE_VALUE_BOOL: {
+      bool boolean;
+      memcpy(&boolean, value, sizeof boolean);
+      if (boolean) {
+        native_value_text_append(writer, "true", 4U);
+      } else {
+        native_value_text_append(writer, "false", 5U);
+      }
+      return;
+    }
+
+    case NATIVE_VALUE_SIGNED: {
+      char text[21];
+      size_t length =
+          native_value_i64_text(native_value_read_signed(descriptor, value), text);
+      native_value_text_append(writer, text, length);
+      return;
+    }
+
+    case NATIVE_VALUE_FLOAT: {
+      double number;
+      char text[NATIVE_VALUE_FLOAT_BUFFER];
+      size_t length;
+      bool single = descriptor->size == sizeof(float);
+      if (single) {
+        float narrow;
+        memcpy(&narrow, value, sizeof narrow);
+        number = (double)narrow;
+      } else {
+        memcpy(&number, value, sizeof number);
+      }
+      length = native_value_float_text(number, single, text);
+      native_value_text_append(writer, text, length);
+      return;
+    }
+
+    case NATIVE_VALUE_TEXT: {
+      uint64_t handle;
+      uint64_t length;
+      size_t narrowed_length;
+      const uint8_t *bytes;
+      memcpy(&handle, value, sizeof handle);
+      length = native_text_length(handle);
+      narrowed_length = (size_t)length;
+      if ((uint64_t)narrowed_length != length) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      bytes = native_text_bytes(handle);
+      if (readable) {
+        native_value_text_escaped(writer, bytes, narrowed_length);
+      } else {
+        native_value_text_append(writer, bytes, narrowed_length);
+      }
+      return;
+    }
+
+    case NATIVE_VALUE_KEYWORD: {
+      uint64_t handle;
+      const native_value_keyword_descriptor *keyword;
+      memcpy(&handle, value, sizeof handle);
+      if (handle >= (uint64_t)descriptor->keyword_count) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      keyword = &descriptor->keywords[(size_t)handle];
+      native_value_text_character(writer, (uint8_t)':');
+      native_value_text_append(writer, keyword->bytes, keyword->length);
+      return;
+    }
+
+    case NATIVE_VALUE_UNION: {
+      int64_t tag;
+      const native_value_variant_descriptor *variant;
+      memcpy(&tag, (const uint8_t *)value + descriptor->tag_offset,
+             sizeof tag);
+      variant = native_value_variant(descriptor, tag);
+      if (variant->payload == NULL) {
+        if (readable) {
+          native_value_text_append(writer, "nil", 3U);
+        }
+        return;
+      }
+      native_value_text_inner(
+          variant->payload,
+          (const uint8_t *)value + variant->payload_offset,
+          readable, depth + 1U, writer);
+      return;
+    }
+
+    case NATIVE_VALUE_VECTOR: {
+      const native_vec *vector;
+      int64_t count;
+      int64_t index;
+      memcpy(&vector, value, sizeof vector);
+      count = native_vec_length(vector);
+      if ((count < INT64_C(0)) || (count > vector->capacity) ||
+          ((count > INT64_C(0)) && (vector->elements == NULL)) ||
+          ((vector->elements != NULL) &&
+           (((uintptr_t)vector->elements % descriptor->element->alignment) !=
+            0U))) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      native_value_text_character(writer, (uint8_t)'[');
+      for (index = INT64_C(0); index < count; index++) {
+        if (index != INT64_C(0)) {
+          native_value_text_character(writer, (uint8_t)' ');
+        }
+        native_value_text_inner(
+            descriptor->element,
+            native_vec_at(vector, index, (int64_t)descriptor->stride),
+            true, depth + 1U, writer);
+      }
+      native_value_text_character(writer, (uint8_t)']');
+      return;
+    }
+
+    case NATIVE_VALUE_MAP: {
+      const native_map *map;
+      int64_t count;
+      int64_t index;
+      memcpy(&map, value, sizeof map);
+      count = native_map_count(map);
+      if ((map->key_stride < (int64_t)descriptor->map_key->size) ||
+          (map->value_stride < (int64_t)descriptor->map_value->size) ||
+          (((size_t)map->key_stride % descriptor->map_key->alignment) != 0U) ||
+          (((size_t)map->value_stride % descriptor->map_value->alignment) !=
+           0U) ||
+          ((map->keys != NULL) &&
+           (((uintptr_t)map->keys % descriptor->map_key->alignment) != 0U)) ||
+          ((map->values != NULL) &&
+           (((uintptr_t)map->values % descriptor->map_value->alignment) !=
+            0U))) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      native_value_text_character(writer, (uint8_t)'{');
+      for (index = INT64_C(0); index < count; index++) {
+        if (index != INT64_C(0)) {
+          native_value_text_append(writer, ", ", 2U);
+        }
+        native_value_text_inner(descriptor->map_key,
+                                native_map_key_at(map, index), true,
+                                depth + 1U, writer);
+        native_value_text_character(writer, (uint8_t)' ');
+        native_value_text_inner(descriptor->map_value,
+                                native_map_value_at(map, index), true,
+                                depth + 1U, writer);
+      }
+      native_value_text_character(writer, (uint8_t)'}');
+      return;
+    }
+
+    case NATIVE_VALUE_UNSIGNED:
+    case NATIVE_VALUE_RECORD:
+    case NATIVE_VALUE_REFERENCE:
+      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+}
+
+uint64_t native_value_to_text(native_arena *arena,
+                              const native_value_descriptor *descriptor,
+                              const void *value,
+                              native_value_text_mode mode) {
+  const native_value_descriptor *stack[NATIVE_VALUE_TEXT_MAX_DEPTH];
+  native_value_text_writer measured = { NULL, 0U, 0U };
+  native_value_text_writer rendered;
+  uint8_t *bytes = NULL;
+  uint64_t handle;
+  uint64_t output_length;
+  bool readable;
+  if ((mode != NATIVE_VALUE_STR) && (mode != NATIVE_VALUE_PR_STR)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_value_text_descriptor_inner(descriptor, stack, 0U);
+  readable = mode == NATIVE_VALUE_PR_STR;
+  native_value_text_inner(descriptor, value, readable, 0U, &measured);
+  output_length = (uint64_t)measured.length;
+  if ((size_t)output_length != measured.length) {
+    native_trap(NATIVE_TRAP_OVERFLOW);
+  }
+  handle = native_text_alloc(arena, output_length, &bytes);
+  rendered.bytes = bytes;
+  rendered.capacity = measured.length;
+  rendered.length = 0U;
+  native_value_text_inner(descriptor, value, readable, 0U, &rendered);
+  if (rendered.length != measured.length) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  return handle;
 }
 
 uint64_t native_text_length(uint64_t handle) {

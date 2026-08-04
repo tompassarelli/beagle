@@ -86,3 +86,33 @@
 
 (defn local-shadow-size [] -> Int
   (let [sample-values: String "abc"] (count sample-values)))
+
+(defn render-float [value: Float] -> String (str value))
+
+(defn print-float [value: Float] -> String (pr-str value))
+
+(defn render-bool [value: Bool] -> String (str value))
+
+(defn print-text [value: String] -> String (pr-str value))
+
+(defn print-int [value: Int] -> String (pr-str value))
+
+(defn render-keyword [value: Keyword] -> String (str value))
+
+(defn render-nil [] -> String (str nil))
+
+(defn print-nil [] -> String (pr-str nil))
+
+(defn render-text-vector [values: (Vec String)] -> String (str values))
+
+(defn print-text-vector [values: (Vec String)] -> String (pr-str values))
+
+(defn render-text-map [values: (Map Keyword String)] -> String (str values))
+
+(defn print-text-map [values: (Map Keyword String)] -> String (pr-str values))
+
+(defn render-printable [value: (U String Int Float Bool Keyword Nil)] -> String
+  (str value))
+
+(defn print-printable [value: (U String Int Float Bool Keyword Nil)] -> String
+  (pr-str value))

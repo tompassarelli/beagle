@@ -305,7 +305,9 @@
     [(TextBuiltinInstruction value)
      (core/textbuiltininstruction-result instruction)]
     [(ValueSemanticsInstruction value)
-     (core/valuesemanticsinstruction-result instruction)]))
+     (core/valuesemanticsinstruction-result instruction)]
+    [(ValueToTextInstructionV0 value)
+     (core/valuetotextinstructionv0-result instruction)]))
 
 (defn qbe-value-ids
   [function: core/FunctionDef
@@ -797,6 +799,7 @@
     [(ReferenceType value) []]
     [(AtomCellTypeV0 value) []]
     [(FunctionType value) []]
+    [(AtomCellTypeV0 value) []]
     [(OutcomeType value) []]))
 
 (defn type-definition-in?
@@ -1016,7 +1019,8 @@
     [(TextSliceInstruction value) false]
     [(TextConcatInstruction value) false]
     [(TextBuiltinInstruction value) false]
-    [(ValueSemanticsInstruction value) false]))
+    [(ValueSemanticsInstruction value) false]
+    [(ValueToTextInstructionV0 value) false]))
 
 ;; A checked operation becomes a trap/continue diamond, so a world block can
 ;; end in a different QBE label than it started in.
@@ -1364,7 +1368,8 @@
       [(TextSliceInstruction value) ""]
       [(TextConcatInstruction value) ""]
       [(TextBuiltinInstruction value) ""]
-      [(ValueSemanticsInstruction value) ""])))
+      [(ValueSemanticsInstruction value) ""]
+      [(ValueToTextInstructionV0 value) ""])))
 
 (defn emit-instructions
   [context: QbeFn
@@ -1773,7 +1778,8 @@
     [(TextSliceInstruction value) false]
     [(TextConcatInstruction value) false]
     [(TextBuiltinInstruction value) false]
-    [(ValueSemanticsInstruction value) false]))
+    [(ValueSemanticsInstruction value) false]
+    [(ValueToTextInstructionV0 value) false]))
 
 (defn value-semantics-operation-name [operation: core/ValueSemanticsOpV0] -> String
   (match operation
@@ -1786,10 +1792,13 @@
       (if (>= position (count instructions))
         nil
         (let [instruction: core/Instruction (nth instructions position)]
-          (if (instance? native.core.ValueSemanticsInstruction instruction)
+          (cond
+            (instance? native.core.ValueSemanticsInstruction instruction)
             (value-semantics-operation-name
               (core/valuesemanticsinstruction-operation instruction))
-            (recur (+ position 1))))))))
+            (instance? native.core.ValueToTextInstructionV0 instruction)
+            "to-text"
+            :else (recur (+ position 1))))))))
 
 (defn unsupported-function-value-semantics [function: core/FunctionDef] -> (U String Nil)
   (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]

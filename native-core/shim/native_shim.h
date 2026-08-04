@@ -70,7 +70,7 @@ typedef struct native_set {
   int64_t stride;
 } native_set;
 
-#define NATIVE_VALUE_ABI_VERSION UINT32_C(1)
+#define NATIVE_VALUE_ABI_VERSION UINT32_C(2)
 
 typedef enum native_value_kind {
   NATIVE_VALUE_BOOL = 1,
@@ -82,10 +82,21 @@ typedef enum native_value_kind {
   NATIVE_VALUE_RECORD = 7,
   NATIVE_VALUE_UNION = 8,
   NATIVE_VALUE_VECTOR = 9,
-  NATIVE_VALUE_REFERENCE = 10
+  NATIVE_VALUE_REFERENCE = 10,
+  NATIVE_VALUE_MAP = 11
 } native_value_kind;
 
+typedef enum native_value_text_mode {
+  NATIVE_VALUE_STR = 1,
+  NATIVE_VALUE_PR_STR = 2
+} native_value_text_mode;
+
 typedef struct native_value_descriptor native_value_descriptor;
+
+typedef struct native_value_keyword_descriptor {
+  const uint8_t *bytes;
+  size_t length;
+} native_value_keyword_descriptor;
 
 typedef struct native_value_field_descriptor {
   size_t offset;
@@ -113,6 +124,10 @@ struct native_value_descriptor {
   size_t variant_count;
   const native_value_descriptor *element;
   size_t stride;
+  const native_value_descriptor *map_key;
+  const native_value_descriptor *map_value;
+  const native_value_keyword_descriptor *keywords;
+  size_t keyword_count;
 };
 
 /* Counts ELEMENT-STORAGE allocations only (header allocations excluded), so a
@@ -198,6 +213,10 @@ native_vec *native_set_vector(native_arena *arena, const native_set *set,
 
 bool native_value_equal(const native_value_descriptor *descriptor,
                         const void *left, const void *right);
+uint64_t native_value_to_text(native_arena *arena,
+                              const native_value_descriptor *descriptor,
+                              const void *value,
+                              native_value_text_mode mode);
 bool native_byte_read(FILE *stream, uint8_t *destination, size_t length);
 bool native_byte_write(FILE *stream, const uint8_t *source, size_t length);
 
