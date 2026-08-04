@@ -7,6 +7,7 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 source_file="$repo/native-core/validation/slice-strings/text_ops.bclj"
+projection_source="$repo/bin/test/native-exe-smoke/entry_projection.bclj"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/beagle-native-exe-smoke.XXXXXX")"
 cleanup() { rm -rf "${scratch:?}"; }
 trap cleanup EXIT
@@ -71,8 +72,62 @@ run_frontend() {
     printf 'native-exe smoke: %s compile + link + no-JVM run ok\n' "$label"
 }
 
-run_frontend gcc "$gcc_bin" global-size native_m0_fn_21 arena+capability 2
-run_frontend clang "$clang_bin" local-shadow-size native_m0_fn_23 pure 3
+run_frontend gcc "$gcc_bin" global-size native_m0_fn_0 arena+capability 2
+run_frontend clang "$clang_bin" local-shadow-size native_m0_fn_0 pure 3
+
+projection="$scratch/projection"
+"$repo/bin/beagle" native-module \
+    --out "$projection" \
+    --entry native.entry-projection/entry \
+    --entry native.entry-projection/second \
+    "$projection_source" >"$scratch/projection.log"
+
+for expected in \
+    "source-entry native.entry-projection/entry" \
+    "source-entry native.entry-projection/second" \
+    "source-definitions 6" \
+    "world-functions 4" \
+    "lowered fn_0 box-value 1 blocks" \
+    "lowered fn_1 helper 1 blocks" \
+    "lowered fn_2 entry 1 blocks" \
+    "lowered fn_3 second 3 blocks" \
+    "stage typed-to-native COMPLETE" \
+    "materialize-c17 OK module_0.h module_0.c" \
+    "materialize-qbe OK module_0.ssa" \
+    "result PASS"; do
+    grep -Fqx "$expected" "$projection/report.txt"
+done
+[[ "$(grep -c '^obligation-projection PASS ' "$projection/report.txt")" == "7" ]]
+if grep -Eq 'unreachable|bad-entry|hidden|^pending ' "$projection/report.txt"; then
+    echo "native-exe smoke: entry projection retained unreachable definitions" >&2
+    exit 1
+fi
+printf 'native-exe smoke: repeatable entry closure + exact function map ok\n'
+
+set +e
+"$repo/bin/beagle" native-module \
+    --out "$scratch/full-module" \
+    "$projection_source" >"$scratch/full-module.stdout" 2>"$scratch/full-module.stderr"
+full_rc=$?
+"$repo/bin/beagle" native-module \
+    --out "$scratch/reachable-refusal" \
+    --entry native.entry-projection/bad-entry \
+    "$projection_source" \
+    >"$scratch/reachable-refusal.stdout" 2>"$scratch/reachable-refusal.stderr"
+refusal_rc=$?
+"$repo/bin/beagle" native-module \
+    --out "$scratch/private-entry" \
+    --entry native.entry-projection/hidden \
+    "$projection_source" \
+    >"$scratch/private-entry.stdout" 2>"$scratch/private-entry.stderr"
+private_rc=$?
+set -e
+[[ $full_rc -ne 0 && $refusal_rc -ne 0 && $private_rc -ne 0 ]]
+grep -Fq 'pending TODO-NATIVE-FUNCTION-BODY:' "$scratch/full-module/report.txt"
+grep -Fq '[unreachable]' "$scratch/reachable-refusal/report.txt"
+grep -Fqx 'entry-error entry is private, not exported: native.entry-projection/hidden' \
+    "$scratch/private-entry/report.txt"
+printf 'native-exe smoke: full default + reachable/private refusals fail closed\n'
 
 missing="$scratch/missing-entry"
 printf 'stale executable\n' >"$missing"

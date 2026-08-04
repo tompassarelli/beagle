@@ -248,7 +248,8 @@ set -e
 module_dir="$work/module"
 mkdir -p "$module_dir"
 set +e
-"$NATIVE_MODULE" --out "$module_dir" -- "${sources[@]}" >"$work/native-module.log" 2>&1
+"$NATIVE_MODULE" --out "$module_dir" --entry "$entry" -- \
+    "${sources[@]}" >"$work/native-module.log" 2>&1
 module_rc=$?
 set -e
 if [[ $module_rc -ne 0 ]]; then

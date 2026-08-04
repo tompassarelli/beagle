@@ -181,6 +181,7 @@
                    (row! n "value" "n" (emit-expr (get f "value"))))
       "defn"   (do (row! n "form-kind" "t" "defn")
                    (row! n "name" "t" (get f "name"))
+                   (row! n "private" "t" (str (= true (get f "private"))))
                    (when-let [op (get @native-ops (get f "name"))]
                      (row! n "native-op" "t" op))
                    (row! n "params" "n" (emit-seq (get f "params") emit-param))

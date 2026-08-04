@@ -2,8 +2,8 @@
 # Compile dependency-first Beagle modules through the sealed Native World.
 #
 # Usage:
-#   beagle native-module --out DIR SOURCE...
-#   beagle native-module --out DIR --facts SOURCE_FACTS
+#   beagle native-module --out DIR [--entry NS/NAME]... SOURCE...
+#   beagle native-module --out DIR [--entry NS/NAME]... --facts SOURCE_FACTS
 #
 # A successful run writes source.facts, report.txt, module_0.h, module_0.c,
 # module_0.ssa, and the shared native shim into DIR. The command refuses a
@@ -26,6 +26,7 @@ die() {
 
 out=""
 facts_input=""
+entries=()
 sources=()
 
 while [[ $# -gt 0 ]]; do
@@ -52,6 +53,15 @@ while [[ $# -gt 0 ]]; do
             facts_input="${1#*=}"
             shift
             ;;
+        --entry)
+            [[ $# -ge 2 ]] || die "--entry needs a qualified NS/NAME"
+            entries+=("$2")
+            shift 2
+            ;;
+        --entry=*)
+            entries+=("${1#*=}")
+            shift
+            ;;
         --help|-h)
             usage
             exit 0
@@ -72,6 +82,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$out" ]] || die "--out DIR is required"
+for entry in "${entries[@]}"; do
+    [[ "$entry" == */* ]] || die "--entry must be qualified as NS/NAME: $entry"
+    entry_namespace="${entry%/*}"
+    entry_name="${entry##*/}"
+    [[ -n "$entry_namespace" && -n "$entry_name" && "$entry_namespace" != */* ]] ||
+        die "--entry must contain exactly one namespace separator: $entry"
+done
 if [[ -n "$facts_input" ]]; then
     [[ ${#sources[@]} -eq 0 ]] || die "--facts and source paths are mutually exclusive"
     [[ -f "$facts_input" ]] || die "facts file not found: $facts_input"
@@ -142,6 +159,9 @@ compiler_commit="$(git -C "$BEAGLE_DIR" rev-parse HEAD 2>/dev/null || echo unkno
 export NATIVE_MODULE_FACTS="$facts"
 export NATIVE_MODULE_ARTIFACTS="$work/artifacts"
 export NATIVE_MODULE_COMMIT="$compiler_commit"
+printf '%s\n' "${entries[@]}" >"$work/entries"
+export NATIVE_MODULE_ENTRIES="$work/entries"
+export NATIVE_MODULE_PROJECTED_FACTS="$work/artifacts/source.facts"
 
 set +e
 clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
@@ -152,7 +172,220 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
          (quote [native.slice :as slice])
          (quote [native.body-c17 :as body])
          (quote [native.body-slice :as body-slice])
-         (quote [native.qbe :as qbe]))
+         (quote [native.qbe :as qbe])
+         (quote [clojure.string :as str]))
+
+(defn id-value [id]
+  (core/nativeid-value id))
+
+(defn definition-key [index definition]
+  (str (lower/source-module-name index definition) "/"
+       (lower/fact-text index definition "name")))
+
+(defn definition-nodes [index]
+  (vec
+   (mapcat #(lower/index-form-ids index %)
+           ["record" "def" "defn"])))
+
+(defn definitions-by-key [index]
+  (reduce
+   (fn [definitions definition]
+     (update definitions (definition-key index definition) (fnil conj []) definition))
+   {}
+   (definition-nodes index)))
+
+(defn definition-kind [index definition]
+  (lower/fact-text index definition "form-kind"))
+
+(defn unique-nodes [nodes]
+  (vals
+   (reduce (fn [found node] (assoc found (id-value node) node)) {} nodes)))
+
+(defn resolved-definition-nodes [definitions index module-name spelling]
+  (let [exact (get definitions spelling [])
+        resolved (lower/resolved-source-key
+                  (lower/resolve-source-name index module-name spelling))]
+    (unique-nodes (concat exact (get definitions resolved [])))))
+
+(defn record-definition-nodes [definitions index module-name spelling]
+  (let [unqualified (lower/unqualified-name spelling)
+        local (cond
+                (str/starts-with? unqualified "map->") (subs unqualified 5)
+                (str/starts-with? unqualified "->") (subs unqualified 2)
+                :else unqualified)
+        resolved (resolved-definition-nodes definitions index module-name local)
+        named (mapcat second
+                      (filter (fn [[key nodes]]
+                                (and (str/ends-with? key (str "/" local))
+                                     (= "record"
+                                        (definition-kind index (first nodes)))))
+                              definitions))]
+    (filter #(= "record" (definition-kind index %))
+            (unique-nodes (concat resolved named)))))
+
+(defn nested-texts [index node kind predicate fuel]
+  (if (<= fuel 0)
+    []
+    (let [own (if (= kind (lower/fact-text index node "form-kind"))
+                (let [value (lower/fact-text index node predicate)]
+                  (if (= "" value) [] [value]))
+                [])]
+      (vec
+       (distinct
+        (concat own
+                (mapcat #(nested-texts index % kind predicate (dec fuel))
+                        (lower/index-child-nodes index node))))))))
+
+(defn type-spellings [index node fuel]
+  (if (<= fuel 0)
+    []
+    (let [kind (lower/fact-text index node "form-kind")
+          own (if (#{"type-prim" "type-app"} kind)
+                [(lower/fact-text index node "name")]
+                [])]
+      (vec
+       (distinct
+        (concat (remove str/blank? own)
+                (mapcat #(type-spellings index % (dec fuel))
+                        (lower/index-child-nodes index node))))))))
+
+(defn definition-bound-names [index definition]
+  (if (= "defn" (definition-kind index definition))
+    (mapv #(lower/parameter-name-at index %)
+          (lower/function-parameter-items index definition))
+    []))
+
+(defn dependency-nodes [definitions index definition]
+  (let [module-name (lower/source-module-name index definition)
+        fuel (inc (lower/index-facts index))
+        references (lower/source-free-ref-names
+                    index definition (definition-bound-names index definition) fuel)
+        calls (vec
+               (distinct
+                (concat (nested-texts index definition "call" "callee" fuel)
+                        (nested-texts index definition "static-call" "callee" fuel))))
+        types (type-spellings index definition fuel)]
+    (unique-nodes
+     (concat
+      (mapcat #(resolved-definition-nodes definitions index module-name %) references)
+      (mapcat #(resolved-definition-nodes definitions index module-name %) calls)
+      (mapcat #(record-definition-nodes definitions index module-name %) calls)
+      (mapcat #(record-definition-nodes definitions index module-name %) types)))))
+
+(defn reachable-definition-ids [definitions index seeds]
+  (loop [queue (vec seeds) selected #{}]
+    (if (empty? queue)
+      selected
+      (let [definition (first queue)
+            identity (id-value definition)]
+        (if (contains? selected identity)
+          (recur (vec (rest queue)) selected)
+          (recur (vec (concat (rest queue)
+                              (dependency-nodes definitions index definition)))
+                 (conj selected identity)))))))
+
+(defn definition-sequence-names [rows]
+  (set
+   (for [row rows
+         :when (and (= "definitions" (slice/slicefactv0-predicate row))
+                    (= "n" (slice/slicefactv0-kind row)))]
+     (slice/slicefactv0-object row))))
+
+(defn sequence-row? [definition-sequences row]
+  (and (contains? definition-sequences (slice/slicefactv0-subject row))
+       (some? (re-matches #"[fa][0-9]+" (slice/slicefactv0-predicate row)))))
+
+(defn replacement-sequence-rows [rows definition-sequences selected]
+  (vec
+   (mapcat
+    (fn [sequence-name]
+      (map-indexed
+       (fn [position definition-name]
+         (slice/->SliceFactV0 sequence-name (str "f" position) "n" definition-name))
+       (for [row rows
+             :when (and (= sequence-name (slice/slicefactv0-subject row))
+                        (some? (re-matches #"[fa][0-9]+"
+                                           (slice/slicefactv0-predicate row)))
+                        (= "n" (slice/slicefactv0-kind row))
+                        (contains? selected
+                                   (id-value
+                                    (slice/node-id (slice/slicefactv0-object row)))))]
+         (slice/slicefactv0-object row))))
+    (sort definition-sequences))))
+
+(defn reachable-node-names [rows]
+  (let [children
+        (reduce
+         (fn [edges row]
+           (if (= "n" (slice/slicefactv0-kind row))
+             (update edges (slice/slicefactv0-subject row) (fnil conj [])
+                     (slice/slicefactv0-object row))
+             edges))
+         {}
+         rows)]
+    (loop [queue ["0"] reached #{}]
+      (if (empty? queue)
+        reached
+        (let [node (first queue)]
+          (if (contains? reached node)
+            (recur (vec (rest queue)) reached)
+            (recur (vec (concat (rest queue) (get children node [])))
+                   (conj reached node))))))))
+
+(defn projected-rows [rows selected]
+  (let [sequences (definition-sequence-names rows)
+        without-definitions (remove #(sequence-row? sequences %) rows)
+        candidate (vec (concat without-definitions
+                               (replacement-sequence-rows rows sequences selected)))
+        reached (reachable-node-names candidate)]
+    (filterv #(contains? reached (slice/slicefactv0-subject %)) candidate)))
+
+(defn rows-text [rows]
+  (apply str
+         (for [row rows]
+           (str (slice/slicefactv0-subject row) "\t"
+                (slice/slicefactv0-predicate row) "\t"
+                (slice/slicefactv0-kind row) "\t"
+                (slice/slicefactv0-object row) "\n"))))
+
+(defn entry-seeds [definitions index entries]
+  (loop [remaining entries seeds []]
+    (if (empty? remaining)
+      {:ok? true :seeds seeds}
+      (let [entry (first remaining)
+            matches (get definitions entry [])]
+        (cond
+          (empty? matches)
+          {:ok? false :detail (str "entry not found: " entry)}
+
+          (not= 1 (count matches))
+          {:ok? false :detail (str "entry is ambiguous: " entry)}
+
+          (not= "defn" (definition-kind index (first matches)))
+          {:ok? false :detail (str "entry is not a source function: " entry)}
+
+          (= "true" (lower/fact-text index (first matches) "private"))
+          {:ok? false :detail (str "entry is private, not exported: " entry)}
+
+          (not= "false" (lower/fact-text index (first matches) "private"))
+          {:ok? false :detail (str "entry export visibility is unavailable: " entry)}
+
+          :else
+          (recur (rest remaining) (conj seeds (first matches))))))))
+
+(defn project-entry-rows [rows entries]
+  (if (empty? entries)
+    {:ok? true :rows rows}
+    (let [source (slice/source-world rows "native.module" "source.facts")
+          index (lower/build-source-index (worlds/sourceprogramworldv0-terms source))
+          definitions (definitions-by-key index)
+          seeds (entry-seeds definitions index entries)]
+      (if-not (:ok? seeds)
+        seeds
+        {:ok? true
+         :rows (projected-rows rows
+                               (reachable-definition-ids definitions index
+                                                         (:seeds seeds)))}))))
 
 (defn source-definition-count [rows]
   (reduce + (map #(count (slice/form-node-names rows %))
@@ -218,8 +451,9 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
                          "PASS " "REFUSED ")
                        (core/functiondef-name function) "\n"))))))
 
-(defn native-report-head [rows source program projected]
-  (str "stage source-seal ACCEPTED\n"
+(defn native-report-head [rows entries source program projected]
+  (str (apply str (map #(str "source-entry " % "\n") entries))
+       "stage source-seal ACCEPTED\n"
        "stage source-to-typed ACCEPTED\n"
        "stage typed-to-native COMPLETE\n"
        "native-lowering-result NativeLoweringCompleteV0\n"
@@ -234,85 +468,99 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
        (slice/obligation-report "obligation-projection" projected)
        (body-slice/failing-obligations projected)))
 
-(defn compile-native-module! [facts-path artifacts-dir compiler-commit]
-  (let [rows (slice/parse-facts (slurp facts-path))
-        configuration ["profile=3"]
-        source (slice/source-world rows "native.module" "source.facts")
-        seal-result (lower/seal-source-world source compiler-commit configuration)]
-    (if-not (instance? native.lower.SourceSealAcceptedV0 seal-result)
+(defn compile-native-module!
+  [facts-path projected-facts-path artifacts-dir compiler-commit entries]
+  (let [raw-rows (slice/parse-facts (slurp facts-path))
+        projection (project-entry-rows raw-rows entries)]
+    (if-not (:ok? projection)
       {:ok? false
-       :report "stage source-seal REJECTED\nresult FAIL source seal\n"}
-      (let [sealed-source (lower/sourcesealacceptedv0-sealed seal-result)
-            typing-result (lower/lower-typed-world sealed-source compiler-commit configuration)]
-        (if-not (instance? native.lower.TypingAcceptedV0 typing-result)
+       :report (str "stage source-projection REJECTED\n"
+                    "entry-error " (:detail projection) "\n"
+                    "result FAIL entry projection\n")}
+      (let [rows (:rows projection)
+            _ (spit projected-facts-path (rows-text rows))
+            configuration ["profile=3"]
+            source (slice/source-world rows "native.module" "source.facts")
+            seal-result (lower/seal-source-world source compiler-commit configuration)]
+        (if-not (instance? native.lower.SourceSealAcceptedV0 seal-result)
           {:ok? false
-           :report (str "stage source-seal ACCEPTED\n"
-                        "stage source-to-typed REJECTED\n"
-                        "result FAIL source typing\n")}
-          (let [sealed-typed (lower/typingacceptedv0-sealed typing-result)
-                typed-slice (lower/typingacceptedv0-slice typing-result)
-                native-result (lower/lower-native-world sealed-typed typed-slice
-                                compiler-commit configuration)]
-            (if-not (instance? native.lower.NativeLoweringCompleteV0 native-result)
+           :report "stage source-seal REJECTED\nresult FAIL source seal\n"}
+          (let [sealed-source (lower/sourcesealacceptedv0-sealed seal-result)
+                typing-result (lower/lower-typed-world sealed-source compiler-commit configuration)]
+            (if-not (instance? native.lower.TypingAcceptedV0 typing-result)
               {:ok? false
                :report (str "stage source-seal ACCEPTED\n"
-                            "stage source-to-typed ACCEPTED\n"
-                            "stage typed-to-native PENDING\n"
-                            (slice/pending-reports (slice/native-pending native-result))
-                            "result FAIL NativeLoweringCompleteV0 required\n")}
-              (let [sealed-native (lower/nativeloweringcompletev0-sealed native-result)
-                    program (worlds/nativeworldv0-program
-                             (worlds/sealednativeworldv0-world sealed-native))
-                    projected (body-slice/projected-world program)
-                    verdicts (obligations/validate-native-world projected)
-                    head (native-report-head rows source program projected)]
-                (if-not (obligation-pass? verdicts)
+                            "stage source-to-typed REJECTED\n"
+                            "result FAIL source typing\n")}
+              (let [sealed-typed (lower/typingacceptedv0-sealed typing-result)
+                    typed-slice (lower/typingacceptedv0-slice typing-result)
+                    native-result (lower/lower-native-world sealed-typed typed-slice
+                                    compiler-commit configuration)]
+                (if-not (instance? native.lower.NativeLoweringCompleteV0 native-result)
                   {:ok? false
-                   :report (str head "result FAIL seven native obligations required\n")}
-                  (let [qbe-functions (qbe-supported-functions projected)
-                        qbe-world (qbe-projected-world projected qbe-functions)
-                        qbe-report (qbe-support-report projected qbe-functions)
-                        c-result (body/materialize-world projected 0)
-                        qbe-result (qbe/materialize-world qbe-world 0)
-                        c-ok? (body/materialization-ok? c-result)
-                        qbe-ok? (instance? native.qbe.QbeSuccess qbe-result)
-                        materialization-report
-                        (str "materialize-c17 "
-                             (if c-ok?
-                               (let [artifact (body/materialization-artifact c-result)]
-                                 (str "OK "
-                                      (body/bodyartifactv0-header-name artifact) " "
-                                      (body/bodyartifactv0-source-name artifact)))
-                               (str "REFUSED " (body/materialization-detail c-result)))
-                             "\nmaterialize-qbe "
-                             (if qbe-ok?
-                               (let [artifact (qbe/qbesuccess-artifact qbe-result)]
-                                 (str "OK " (qbe/qbeartifact-module-name artifact)))
-                               (str "REFUSED " (qbe/qbefailure-detail qbe-result)))
-                             "\n")]
-                    (if-not (and c-ok? qbe-ok?)
+                   :report (str "stage source-seal ACCEPTED\n"
+                                "stage source-to-typed ACCEPTED\n"
+                                "stage typed-to-native PENDING\n"
+                                (slice/pending-reports (slice/native-pending native-result))
+                                "result FAIL NativeLoweringCompleteV0 required\n")}
+                  (let [sealed-native (lower/nativeloweringcompletev0-sealed native-result)
+                        program (worlds/nativeworldv0-program
+                                 (worlds/sealednativeworldv0-world sealed-native))
+                        projected (body-slice/projected-world program)
+                        verdicts (obligations/validate-native-world projected)
+                        head (native-report-head rows entries source program projected)]
+                    (if-not (obligation-pass? verdicts)
                       {:ok? false
-                       :report (str head qbe-report materialization-report
-                                    "result FAIL materialization\n")}
-                      (let [c-artifact (body/materialization-artifact c-result)
-                            qbe-artifact (qbe/qbesuccess-artifact qbe-result)]
-                        (spit (str artifacts-dir "/"
-                                   (body/bodyartifactv0-header-name c-artifact))
-                              (body/bodyartifactv0-header-text c-artifact))
-                        (spit (str artifacts-dir "/"
-                                   (body/bodyartifactv0-source-name c-artifact))
-                              (body/bodyartifactv0-source-text c-artifact))
-                        (spit (str artifacts-dir "/"
-                                   (qbe/qbeartifact-module-name qbe-artifact))
-                              (qbe/qbeartifact-module-text qbe-artifact))
-                        {:ok? true
-                         :report (str head qbe-report materialization-report
-                                      "result PASS\n")}))))))))))))
+                       :report (str head "result FAIL seven native obligations required\n")}
+                      (let [qbe-functions (qbe-supported-functions projected)
+                            qbe-world (qbe-projected-world projected qbe-functions)
+                            qbe-report (qbe-support-report projected qbe-functions)
+                            c-result (body/materialize-world projected 0)
+                            qbe-result (qbe/materialize-world qbe-world 0)
+                            c-ok? (body/materialization-ok? c-result)
+                            qbe-ok? (instance? native.qbe.QbeSuccess qbe-result)
+                            materialization-report
+                            (str "materialize-c17 "
+                                 (if c-ok?
+                                   (let [artifact (body/materialization-artifact c-result)]
+                                     (str "OK "
+                                          (body/bodyartifactv0-header-name artifact) " "
+                                          (body/bodyartifactv0-source-name artifact)))
+                                   (str "REFUSED " (body/materialization-detail c-result)))
+                                 "\nmaterialize-qbe "
+                                 (if qbe-ok?
+                                   (let [artifact (qbe/qbesuccess-artifact qbe-result)]
+                                     (str "OK " (qbe/qbeartifact-module-name artifact)))
+                                   (str "REFUSED " (qbe/qbefailure-detail qbe-result)))
+                                 "\n")]
+                        (if-not (and c-ok? qbe-ok?)
+                          {:ok? false
+                           :report (str head qbe-report materialization-report
+                                        "result FAIL materialization\n")}
+                          (let [c-artifact (body/materialization-artifact c-result)
+                                qbe-artifact (qbe/qbesuccess-artifact qbe-result)]
+                            (spit (str artifacts-dir "/"
+                                       (body/bodyartifactv0-header-name c-artifact))
+                                  (body/bodyartifactv0-header-text c-artifact))
+                            (spit (str artifacts-dir "/"
+                                       (body/bodyartifactv0-source-name c-artifact))
+                                  (body/bodyartifactv0-source-text c-artifact))
+                            (spit (str artifacts-dir "/"
+                                       (qbe/qbeartifact-module-name qbe-artifact))
+                                  (qbe/qbeartifact-module-text qbe-artifact))
+                            {:ok? true
+                             :report (str head qbe-report materialization-report
+                                          "result PASS\n")}))))))))))))))
 
 (let [facts-path (System/getenv "NATIVE_MODULE_FACTS")
+      projected-facts-path (System/getenv "NATIVE_MODULE_PROJECTED_FACTS")
       artifacts-dir (System/getenv "NATIVE_MODULE_ARTIFACTS")
       compiler-commit (System/getenv "NATIVE_MODULE_COMMIT")
-      result (compile-native-module! facts-path artifacts-dir compiler-commit)]
+      entries (vec (remove str/blank?
+                           (str/split-lines
+                            (slurp (System/getenv "NATIVE_MODULE_ENTRIES")))))
+      result (compile-native-module! facts-path projected-facts-path artifacts-dir
+                                     compiler-commit entries)]
   (spit (str artifacts-dir "/report.txt") (:report result))
   (print (:report result))
   (flush)
@@ -321,7 +569,11 @@ clojure -Sdeps "{:paths [\"$work/compiled\"]}" -M -e '
 runner_rc=$?
 set -e
 
-cp "$facts" "$out/source.facts"
+if [[ -f "$work/artifacts/source.facts" ]]; then
+    cp "$work/artifacts/source.facts" "$out/source.facts"
+else
+    cp "$facts" "$out/source.facts"
+fi
 if [[ -f "$work/artifacts/report.txt" ]]; then
     cp "$work/artifacts/report.txt" "$out/report.txt"
 fi
