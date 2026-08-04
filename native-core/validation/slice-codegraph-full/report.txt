@@ -1,0 +1,126 @@
+stage source-seal ACCEPTED
+stage source-to-typed REJECTED
+source-modules 1
+source-imports 4
+source-records 1
+source-functions 18
+source-defs 0
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-UNSUPPORTED-TYPE-APPLICATION | unsupported closed type constructor: Set
+diagnostic TODO-NATIVE-MAP-OPERATIONS | host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+diagnostic TODO-NATIVE-FUNCTION-BODY | TODO-NATIVE-FORM-fn: no native lowering for this source form [rev-adj]
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-UNSUPPORTED-TYPE-APPLICATION | unsupported closed type constructor: Set
+diagnostic TODO-NATIVE-MAP-OPERATIONS | host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+diagnostic TODO-NATIVE-FUNCTION-BODY | TODO-NATIVE-FORM-fn: no native lowering for this source form [fwd-adj]
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-UNSUPPORTED-TYPE-APPLICATION | unsupported closed type constructor: Set
+diagnostic TODO-NATIVE-MAP-OPERATIONS | host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-UNSUPPORTED-TYPE-APPLICATION | unsupported closed type constructor: Set
+diagnostic TODO-NATIVE-FUNCTION-BODY | TODO-NATIVE-FORM-set: no native lowering for this source form [transitive]
+diagnostic TODO-NATIVE-FUNCTION-BODY | TODO-NATIVE-FORM-fn: no native lowering for this source form [avg-ranks]
+diagnostic TODO-NATIVE-FUNCTION-BODY | TODO-NATIVE-FREE-REFERENCE: + is not a parameter or local binding [pearson]
+diagnostic TODO-NATIVE-FUNCTION-BODY | TODO-NATIVE-CALL-double: no native lowering for this callee [fmt3]
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic TODO-NATIVE-FUNCTION-BODY | TODO-NATIVE-STR-OPERANDS: str concatenates one or more native Text or Int operands [short-file]
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic TODO-NATIVE-MAP-OPERATIONS | host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic TODO-NATIVE-FUNCTION-BODY | TODO-NATIVE-FORM-fn: no native lowering for this source form [defn-keys-of]
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-UNSUPPORTED-TYPE-APPLICATION | unsupported closed type constructor: Set
+diagnostic TODO-NATIVE-MAP-OPERATIONS | host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic TODO-NATIVE-MAP-OPERATIONS | host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+diagnostic TODO-NATIVE-FUNCTION-BODY | TODO-NATIVE-FORM-fn: no native lowering for this source form [count-adj]
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-UNSUPPORTED-TYPE-APPLICATION | unsupported closed type constructor: Set
+diagnostic TODO-NATIVE-MAP-OPERATIONS | host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic TODO-NATIVE-MAP-OPERATIONS | host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+diagnostic TODO-NATIVE-FUNCTION-BODY | TODO-NATIVE-FORM-fn: no native lowering for this source form [count-transitive]
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic TODO-NATIVE-MAP-OPERATIONS | host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic TODO-NATIVE-FUNCTION-BODY | TODO-NATIVE-FORM-fn: no native lowering for this source form [name-of]
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic TODO-NATIVE-MAP-OPERATIONS | host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+diagnostic TODO-NATIVE-MAP-OPERATIONS | host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+diagnostic TODO-NATIVE-FUNCTION-BODY | TODO-NATIVE-FORM-fn: no native lowering for this source form [collision-names]
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic TODO-NATIVE-MAP-OPERATIONS | host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+diagnostic TODO-NATIVE-MAP-OPERATIONS | host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-UNSUPPORTED-TYPE-APPLICATION | unsupported closed type constructor: Set
+diagnostic TODO-NATIVE-MAP-OPERATIONS | host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+diagnostic TODO-NATIVE-FUNCTION-BODY | TODO-NATIVE-FORM-fn: no native lowering for this source form [scored-rows]
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-UNSUPPORTED-TYPE-APPLICATION | unsupported closed type constructor: Set
+diagnostic TODO-NATIVE-MAP-OPERATIONS | host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+diagnostic TODO-NATIVE-FUNCTION-BODY | TODO-NATIVE-CALL-c/new-store: no native lowering for this callee [closure-line!]
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic TODO-NATIVE-MAP-OPERATIONS | host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+diagnostic TODO-NATIVE-MAP-OPERATIONS | host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-UNSUPPORTED-TYPE-APPLICATION | unsupported closed type constructor: Set
+diagnostic TODO-NATIVE-MAP-OPERATIONS | host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+diagnostic TODO-NATIVE-FUNCTION-BODY | TODO-NATIVE-FORM-do: no native lowering for this source form [bench-a!]
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic TODO-NATIVE-MAP-OPERATIONS | host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic TODO-NATIVE-MAP-OPERATIONS | host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+diagnostic LOWER-CLOSED-RAW-ANY | raw Any was closed to the finite SliceValue union
+diagnostic TODO-NATIVE-MAP-OPERATIONS | host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation
+diagnostic TODO-NATIVE-FUNCTION-BODY | TODO-NATIVE-FORM-do: no native lowering for this source form [bench-b!]
+diagnostic TODO-NATIVE-FUNCTION-BODY | TODO-NATIVE-FREE-REFERENCE: args is not a parameter or local binding [-main]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-fn: no native lowering for this source form [rev-adj]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-fn: no native lowering for this source form [fwd-adj]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-set: no native lowering for this source form [transitive]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-fn: no native lowering for this source form [avg-ranks]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FREE-REFERENCE: + is not a parameter or local binding [pearson]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: spearman calls a function whose own body is not lowered
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-double: no native lowering for this callee [fmt3]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-STR-OPERANDS: str concatenates one or more native Text or Int operands [short-file]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-fn: no native lowering for this source form [defn-keys-of]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-fn: no native lowering for this source form [count-adj]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-fn: no native lowering for this source form [count-transitive]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-fn: no native lowering for this source form [name-of]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-fn: no native lowering for this source form [collision-names]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-fn: no native lowering for this source form [scored-rows]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-c/new-store: no native lowering for this callee [closure-line!]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-do: no native lowering for this source form [bench-a!]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-do: no native lowering for this source form [bench-b!]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FREE-REFERENCE: args is not a parameter or local binding [-main]
+obligation-world UNAVAILABLE valid-ssa | source-to-typed rejected
+obligation-world UNAVAILABLE exhaustive-matches | source-to-typed rejected
+obligation-world UNAVAILABLE closed-layouts | source-to-typed rejected
+obligation-world UNAVAILABLE checked-arithmetic | source-to-typed rejected
+obligation-world UNAVAILABLE legal-abi | source-to-typed rejected
+obligation-world UNAVAILABLE discharged-tokens | source-to-typed rejected
+obligation-world UNAVAILABLE bounded-effects | source-to-typed rejected
+obligation-projection UNAVAILABLE valid-ssa | source-to-typed rejected
+obligation-projection UNAVAILABLE exhaustive-matches | source-to-typed rejected
+obligation-projection UNAVAILABLE closed-layouts | source-to-typed rejected
+obligation-projection UNAVAILABLE checked-arithmetic | source-to-typed rejected
+obligation-projection UNAVAILABLE legal-abi | source-to-typed rejected
+obligation-projection UNAVAILABLE discharged-tokens | source-to-typed rejected
+obligation-projection UNAVAILABLE bounded-effects | source-to-typed rejected
+c17 REFUSED source-to-typed rejected
+qbe REFUSED source-to-typed rejected
