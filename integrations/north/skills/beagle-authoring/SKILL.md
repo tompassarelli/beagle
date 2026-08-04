@@ -52,6 +52,20 @@ only when its path is explicitly registered in
 verbs until the file is unadopted. Coordinator availability never blocks
 ordinary text authoring elsewhere.
 
+## 0.75 Compiler defects — repair upstream first
+
+When dogfooding exposes a confirmed Beagle parser, checker, lowering, emitter,
+runtime, or authoring-tool defect, stop the consuming application change and
+repair the defect in `~/code/beagle` before continuing. Use a Beagle worktree,
+exercise the nearest existing relevant check, land the repair, then regenerate
+the consumer from canonical Beagle source.
+
+Do not reshape semantically valid application code to evade the defect, edit
+generated output, add target-side glue, or silently normalize a workaround. A
+pointed diagnostic rejecting invalid source is an application repair, not a
+compiler defect. If an upstream repair is genuinely blocked, checkpoint the
+blocker and stop; the application workaround is not an alternate delivery path.
+
 ## 1. Heartbeat — keep it alive while coding
 
 - The **PostToolUse hook** (installed by `beagle init --hooks`) is the only
