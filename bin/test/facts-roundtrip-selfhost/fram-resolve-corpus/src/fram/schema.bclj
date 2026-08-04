@@ -1,12 +1,5 @@
 #lang beagle/clj
 
-;; @upstream:graph — the code lives in the Fram fact graph; this text is
-;; GENERATED. Author via the fram MCP graph-edit verbs (add-def / set-body /
-;; rename-def / insert-after / replace-in-body), never Edit/Write — a text edit
-;; would desync the graph. De-adopt (drop sentinel + registry entry) to edit as
-;; text; that is a deliberate workflow change. RE-ADOPTED 2026-07-09 after the
-;; store-rename re-ingest (render(log) verified structurally identical).
-;; ============================================================================
 ;; fram.schema — the store schema/identity layer over the kernel.
 ;; ============================================================================
 ;; Still DOMAIN-AGNOSTIC: this is the META-model (name/identity, predicate

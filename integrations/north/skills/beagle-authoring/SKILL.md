@@ -29,16 +29,11 @@ liveness alone is not evidence that checking works. During authoring, trust the
 PostToolUse hook, fix syntax before types, and let `beagle syntax` count
 delimiters. If hook feedback goes silent, run `beagle doctor --revive --quiet`.
 
-## Preserve source authority
+## Keep source text authoritative
 
-Never migrate a file incidentally. Edit text-upstream Beagle as text. A path
-registered in `~/.config/fram/graph-upstream-files`, or whose leading comments
-contain `;; @upstream:graph`, is graph-upstream: read and follow
-`fram:integrations/north/skills/code-as-facts/SKILL.md` and use its graph-edit
-verbs. For a new file, obey an explicit repository/profile greenfield policy;
-otherwise default to text. Never activate graph authoring or require a flip
-level without that policy or explicit human adoption. A coordinator failure
-never changes the selected source channel.
+Beagle source is text-authoritative. Graph reasoning is optional read-only
+research, never an edit gate. When a file carries a legacy graph-authority
+marker, remove the marker and edit the source normally.
 
 ## Choose the compilation path explicitly
 

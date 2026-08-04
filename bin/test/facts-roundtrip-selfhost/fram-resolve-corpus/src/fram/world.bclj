@@ -1,14 +1,5 @@
 #lang beagle/clj
 
-;; @upstream:graph — the code lives in the Fram fact graph; this text is
-;; GENERATED. Author via the fram MCP graph-edit verbs (add-def / set-body /
-;; rename-def / insert-after / replace-in-body), never Edit/Write — a text edit
-;; would desync the graph. De-adopt (drop sentinel + registry entry) to edit as
-;; text; that is a deliberate workflow change. SEEDED 2026-07-22 (greenfield
-;; world-kernel bootstrap, worktree world-kernel-v0) — seed only, no
-;; substantive forms yet; authoring continues via mcp__fram__* graph-edit
-;; verbs per the code-as-facts skill.
-;; ============================================================================
 ;; fram.world — world-kernel: versioned views over the claim graph (worlds).
 ;; ============================================================================
 (ns fram.world)

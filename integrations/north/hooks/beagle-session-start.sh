@@ -194,29 +194,6 @@ is_beagle() {
 # is global, so an ordinary non-Beagle checkout must remain a pure no-op.
 is_beagle || exit 0
 
-# Graph authoring is explicit per-file opt-in. Dormant graph caches and an
-# available coordinator never change the default text-authoring channel.
-graph_ctx=""
-_fcs="/run/current-system/sw/bin/fram-code-status"
-if [ -x "$_fcs" ]; then
-  _facts="$(timeout 2 "$_fcs" "$dir" 2>/dev/null)" || _facts=""
-  if [ -n "$_facts" ]; then
-    _fact() { printf '%s\n' "$_facts" | tr ' ' '\n' | sed -n "s/^$1=//p" | head -1; }
-    _canonical="$(_fact canonical)"
-    case "$_canonical" in
-      ""|0|*[!0-9]*) ;;
-      *) graph_ctx="[graph opt-in] $_canonical file(s) in this repo are explicitly graph-upstream and refuse text edits; all other Beagle source uses ordinary text authoring." ;;
-    esac
-  fi
-fi
-
-emit_graph_ctx() {
-  [ -n "$graph_ctx" ] || return 0
-  prepare_context_mode
-  [ "$context_mode" != none ] || return 0
-  python3 -c 'import json,sys; print(json.dumps({"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":sys.argv[1]}}))' "$graph_ctx" || true
-}
-
 # Resolve the `beagle` CLI robustly — beagle tools are NOT on the global PATH;
 # they live in the checkout (direnv-activated) or are reached via $BEAGLE_PATH.
 # Try, in order: $BEAGLE_PATH/bin, the canonical ~/code/beagle checkout, PATH.
@@ -227,7 +204,6 @@ beagle=""
 [ -z "$beagle" ] && [ -x "$HOME/code/beagle/bin/beagle" ] && beagle="$HOME/code/beagle/bin/beagle"
 [ -z "$beagle" ] && command -v beagle >/dev/null 2>&1 && beagle="$(command -v beagle)"
 if [ -z "$beagle" ]; then
-  emit_graph_ctx
   exit 0
 fi
 
@@ -288,8 +264,6 @@ if [ "$context_mode" = compact ]; then
 else
   ctx="Beagle authoring is active.${warm_ctx} YOU (the agent) own authoring-loop health, not the user. Before the first Beagle edit, run \`beagle doctor --deep\` and self-heal if degraded. Treat the compiler as source of truth (query Beagle tools; never trust a static form/type/stdlib list), and trust the PostToolUse repair hook's per-edit feedback. If this project has no repair hook, scaffold it with \`beagle init --hooks\`."
 fi
-[ -n "$graph_ctx" ] && ctx="$ctx $graph_ctx"
-
 # Inject into session context via the SessionStart additionalContext channel.
 python3 -c 'import json,sys; print(json.dumps({"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":sys.argv[1]}}))' "$ctx"
 exit 0

@@ -53,7 +53,7 @@ backslash, or the empty symbol (constructible via `|...|` or `\`), did NOT
 round-trip (`|foo bar|` → two symbols; `\\` → unreadable; `||` → vanished value).
 Fixed: `symbol->src` backslash-escapes unsafe chars per the reader's actual
 convention (`|...|` is a literal run with no internal escaping; `\X` escapes
-outside bars), empty → `||`. Logged in `docs/text-as-source-latent-bugs.md`.
+outside bars), empty → `||`.
 
 ## Flagged (separate, not move 2)
 

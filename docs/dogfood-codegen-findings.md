@@ -1,6 +1,6 @@
 # Codegen / check findings from dogfooding (gjoa authoring, 2026-06-20)
 
-A running ledger, companion to `text-as-source-latent-bugs.md`. These surfaced not
+A running ledger. These surfaced not
 from a text→graph migration but from **using beagle to author a real project**
 (gjoa: an externs sweep, a cross-module `:require` refactor, and a from-scratch JS
 projector subsystem). The meta-signal: every failure here is "beagle emitted bad JS"

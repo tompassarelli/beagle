@@ -1,14 +1,5 @@
 #lang beagle/clj
 
-;; @upstream:graph — the code lives in the Fram fact graph; this text is
-;; GENERATED. Author via the fram MCP graph-edit verbs (add-def / set-body /
-;; rename-def / insert-after / replace-in-body), never Edit/Write — a text edit
-;; would desync the graph. De-adopt (drop sentinel + registry entry) to edit as
-;; text; that is a deliberate workflow change. SEEDED 2026-07-26 (greenfield
-;; claims-module bootstrap) — seed only: the ns/require/extern header, no
-;; substantive forms; authoring continues via mcp__fram__* graph-edit verbs per
-;; the code-as-facts skill.
-;; ============================================================================
 ;; fram.claims — assertion under verification. A claim is an ORDINARY FACT that
 ;; participates in a verification discipline expressed as MORE FACTS: a
 ;; predicate vocabulary, a few Datalog rules, and the views mechanics the engine

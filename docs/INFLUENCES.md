@@ -101,7 +101,7 @@ breaking a reference, because references bind to identity, not to a string.
 Beagle (via FRAM) borrows that **separation**, not Unison's runtime:
 
 - **Stable binding identity.** A binding's identity in FRAM survives rename —
-  callers, the code-as-facts graph of recursive triples, and the authoring loop
+  callers, the projected code graph of recursive triples, and the authoring loop
   track *what a definition is*, not the string that currently labels it.
 - **Not content-addressed code.** Beagle does not adopt Unison's
   content-addressed storage, its hash-as-filename codebase model, or its

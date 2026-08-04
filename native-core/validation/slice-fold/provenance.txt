@@ -35,9 +35,7 @@ named gaps
     every real module slice hits this, not just fold.
   3 native.c11 is unusable as the materializer: its cross-namespace `match`
     forms emit unqualified variant symbols that fail to resolve in the clj
-    target, and the file is graph-upstream so the text arm is refused. This
-    slice ships native.fold-c17 instead; folding it back into c11 is a graph
-    edit, not a text edit.
+    target. This slice ships native.fold-c17 instead.
   4 vector element types and reference targets are erased to `const void *` /
     `void *` in the C projection; element stride survives in the layout and in
     the emitted comment, the element type does not round-trip through the header.

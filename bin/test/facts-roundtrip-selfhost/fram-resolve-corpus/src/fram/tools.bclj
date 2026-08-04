@@ -40,7 +40,7 @@
 ;; The op of a tool — constrains dispatch (cond/:else) and missing-req. `:tell`/`:retract`
 ;; are the single-triple KB writes (assert/retract of ANY predicate); `:query` backs
 ;; `ask`; `:show`/`:validate` are the reads. The trailing five are GRAPH-AST EDIT ops:
-;; they author a graph-upstream Beagle module by minting/superseding kind/v/fN facts via
+;; they modify a projected Beagle module by minting/superseding kind/v/fN facts via
 ;; the engine's resolve.clj verbs (NOT a single coordinator triple), so they return a
 ;; distinct {:edit ...} envelope the host runs out-of-band, recompile-gated and fail-closed.
 ;; :insert-after is the CRDT insert-anywhere (commute) op — insert a NEW top-level def
@@ -139,8 +139,8 @@
      (->ToolSpec "validate"
                  "Structural integrity violations (cycles, dangling refs) across all threads."
                  [] :validate "")
-     ;; --- GRAPH-AST EDIT verbs (graph-upstream authoring) -----------------
-     ;; These author a Beagle source MODULE as a FACT operation on its lossless
+     ;; --- GRAPH-AST EDIT verbs --------------------------------------------
+     ;; These modify a Beagle source MODULE as a FACT operation on its lossless
      ;; AST projection, not a text splice: the agent emits the new form/body as an
      ;; EDN datum STRING (read by resolve.clj), it is minted into the module's
      ;; fact graph (kind/v/fN facts), scope-resolved via refers_to, regenerated
@@ -149,26 +149,26 @@
      ;; carried out OUT-OF-BAND by the host (route-edit), NOT through the single-
      ;; triple coordinator, so it returns the {:edit ...} envelope.
      (->ToolSpec "add-def"
-                 (str "Author a graph-upstream Beagle module: add a NEW top-level def, or "
+                 (str "Apply a structured graph edit to a Beagle module: add a NEW top-level def, or "
                       "REPLACE an existing one by name (upsert by the def name). `form` is the "
                       "whole top-level form as an EDN datum string, e.g. "
                       "\"(defn add-two [x :- Int] :- Int (base (+ x 2)))\". Recompile-gated + fail-closed.")
                  [(->Param "module" "string" true) (->Param "form" "string" true)]
                  :upsert-form "")
      (->ToolSpec "set-body"
-                 (str "Author a graph-upstream Beagle module: replace the BODY of an existing "
+                 (str "Apply a structured graph edit to a Beagle module: replace the BODY of an existing "
                       "defn named <name>. `body` is the new body as an EDN datum string, e.g. "
                       "\"(* x 10)\" (params + return type are preserved). Recompile-gated + fail-closed.")
                  [(->Param "module" "string" true) (->Param "name" "string" true) (->Param "body" "string" true)]
                  :set-body "")
      (->ToolSpec "rename-def"
-                 (str "Author a graph-upstream Beagle module: rename a top-level def from <name> "
+                 (str "Apply a structured graph edit to a Beagle module: rename a top-level def from <name> "
                       "to <new-name> (O(1), scope-correct via refers_to, shadow-safe; references "
                       "follow by identity). Recompile-gated + fail-closed.")
                  [(->Param "module" "string" true) (->Param "name" "string" true) (->Param "new-name" "string" true)]
                  :rename-def "")
      (->ToolSpec "insert-after"
-                 (str "Author a graph-upstream Beagle module: insert a NEW top-level def AFTER an "
+                 (str "Apply a structured graph edit to a Beagle module: insert a NEW top-level def AFTER an "
                       "anchor def named <after>, at a CRDT (path,tie) order-key strictly between the "
                       "anchor and its next sibling. `form` is the whole top-level form as an EDN datum "
                       "string, e.g. \"(defn add-two [x :- Int] :- Int (base (+ x 2)))\". Two concurrent "
@@ -183,7 +183,7 @@
      ;; case in a 1,768-line def costs ONE fN-edge swap, not a whole-def re-mint; and
      ;; every sibling form + comment is preserved (no set-body comment-fidelity loss).
      (->ToolSpec "replace-in-body"
-                 (str "Author a graph-upstream Beagle module: replace ONE interior form inside def "
+                 (str "Apply a structured graph edit to a Beagle module: replace ONE interior form inside def "
                       "<name>, WITHOUT re-emitting the whole def (the sub-def surgical edit). `old` is "
                       "the existing interior form as an EDN datum string (the anchor — matched "
                       "STRUCTURALLY, like an Edit old_string on the AST; must match exactly one interior "

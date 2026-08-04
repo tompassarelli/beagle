@@ -1,6 +1,5 @@
 #lang beagle/clj
 
-;; @upstream:graph — this text is a generated view of the Fram fact graph.
 (ns fram.authority)
 
 (define-mode strict)
