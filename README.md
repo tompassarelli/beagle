@@ -2,14 +2,18 @@
 
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-blue.svg)](LICENSE)
 
-**Typed Clojure with canonical source and structured diagnostics, compiling to
-idiomatic <!-- beagle:langs names -->Clojure, JavaScript, Nix, Odin, Zig, and TypeScript<!-- /beagle:langs -->.**
+**Typed Clojure with one canonical source shape, structured diagnostics, and a
+compiler-backed authoring loop.**
 
 Beagle is a typed Lisp designed for ordinary text editing and a short authoring
-loop. It compiles one high-level language to six targets — including Zig and
-Odin, which link to native executables. Each backend renders code that the
-target language's own programmers would recognize, not a
-lowest-common-denominator transliteration.
+loop. The product is not a high target count: it is one source language whose
+parser, checker, canonicalizer, and repair tools give people and agents the same
+answer. A backend stays only when a real consumer makes its semantics testable.
+
+There are two deliberate compilation paths. Hosted targets emit source for a
+runtime or evaluator that remains part of the system; Native Core lowers
+system-layer code into an immutable, target-neutral Native World and then
+materializes that world as native code. Fram stays Beagle source in both cases.
 
 Types exist here for a specific job: making authoring, diagnostics, and
 automated repair reliable. They check at compile time and erase before emit. The
@@ -37,26 +41,33 @@ help`, `beagle langs`, `beagle sig`, `beagle fields`.
 
 ## Quickstart
 
-The flake pins the whole toolchain, including the Zig the native backend links
-with. Inside the devshell (`direnv allow`), the binary is `bin/beagle` — written
-`beagle` below. Using the compiler requires no database or coordinator:
+The flake pins the compiler and its toolchain. Inside the devshell (`direnv
+allow`), the binary is `bin/beagle` — written `beagle` below. Using the compiler
+requires no database or coordinator:
 
 ```console
-$ cat src/main.bzig
-#lang beagle/zig
+$ cat src/main.bclj
+#lang beagle
 (ns main)
 
-(defn main [] -> Nil
-  (println "hello from beagle"))
+(defn greet [name: String] -> String
+  (str "hello " name))
 
-$ beagle build --target zig --exe ./hello src/main.bzig
-src/main.bzig -> ./hello
+(println (greet "from Beagle"))
 
-$ ./hello
-hello from beagle
+$ beagle doctor --deep
+Authoring loop: ok
+
+$ beagle check --agent src/main.bclj
+0 errors
+
+$ beagle build src/main.bclj build/main.clj
+src/main.bclj -> build/main.clj
+$ bb build/main.clj
+hello from Beagle
 ```
 
-`beagle init --target TARGET DIR` scaffolds a project for any of the six;
+`beagle init --target TARGET DIR` scaffolds a project for any live target;
 `beagle build FILE OUT` writes the target's source instead of linking a binary.
 Run `beagle doctor --deep` before authoring to verify the complete diagnostic
 path. `beagle check --agent FILE` is the fast compiler oracle; `beagle init
@@ -86,40 +97,48 @@ The parser hard-rejects other physical layouts and carries an exact
 source-range repair when changing the range cannot alter a comment. This gives
 people, formatters, and agents the same answer instead of a style choice.
 
-## Think high-level, get native
+## Two compilation paths
 
-A typed Beagle function:
+Hosted emission is for domains where the host source and runtime are part of the
+product:
 
-```clojure
-(ns g)
-(defn calc
-  [a: Int
-   b: Int
-   c: Int] -> Int
-  (+ (* a b) (- c a) (quot b 2) (rem c 3) (mod a 5)))
+```text
+.bclj / .bjs / .bnix  →  parse  →  check  →  emit  →  .clj / .js / .nix
 ```
 
-becomes Zig that reaches for the language's own operators rather than a runtime
-shim (module preamble elided):
+The Nix path is exactly this kind of hosted path. A `.bnix` file becomes a Nix
+expression and is evaluated by Nix. It does not enter the native pipeline. This
+is useful because Beagle can type a NixOS option against the real option schema:
+assigning a `String` to `services.openssh.enable` fails before
+`nixos-rebuild`.
 
-```zig
-pub fn calc(a: i64, b: i64, c: i64) i64 {
-    return ((a * b) + (c - a) + @divTrunc(b, 2) + @rem(c, 3) + @mod(a, 5));
-}
+Native Core is a lowering path, not another idiomatic source emitter:
+
+```text
+Beagle source  →  source world  →  typed world  →  Native World
+                                                    ├─→ restricted C reference
+                                                    └─→ QBE IL → native object
 ```
 
-Both halves are committed goldens in
-[`beagle-test/tests/fixtures/zig-golden`](beagle-test/tests/fixtures/zig-golden)
-and the suite fails when the emitter drifts from them.
+The Native World owns typed operations, effects, regions, layouts, control
+flow, capabilities, and ABI facts. Materializers are deliberately replaceable
+projections of that same sealed program. They are judged by correct binaries and
+independent agreement, not by whether a human would maintain the generated C or
+QBE.
 
-The leverage runs upward too: types can come from the target itself. A NixOS
-option carries one in the schema, so `services.openssh.enable` is known to be
-`Bool` at compile time — assigning a `String` fails with `file:line:col`
-precision *before* `nixos-rebuild` is ever invoked.
+Fram's files remain Beagle; they are not rewritten as C, Zig, or another systems
+language. The current native path is exercised by the `native-core/validation`
+drivers while the general CLI profile is being finished. The generated
+[`fram.fri-replay` report](native-core/validation/slice-strings/replay-report.txt)
+is a concrete vertical slice: real Fram parser, mutation, outcome, and replay
+bodies lower into one validated Native World and execute through the reference
+materializer.
 
 ## Targets
 
-One AST, idiomatic output per backend — <!-- beagle:langs idioms -->Clojure eager persistent maps, JavaScript plain objects and ES modules, Nix lazy attrsets, Odin structs and explicit context, Zig explicit allocators and error unions, TypeScript typed function boundaries over JS<!-- /beagle:langs -->.
+The table below is the compiler's live direct-emitter inventory, not a strategic
+promise that every current row will remain. Each admitted target must have a real
+consumer and an executable semantic oracle.
 
 The table is generated from `beagle-lib/private/targets.rkt` by `beagle
 doc-fill`; query it live with `beagle langs` (`--view domains` for what each
@@ -138,10 +157,10 @@ target is *for*).
 Six language targets. `facts` is not one of them — it is the compact, lossy projection of the parsed AST into CNF analysis facts, represented as three-slot vectors (`bin/beagle-facts`): a query surface, not an authoring language. The verbose, program-lossless source↔fact projection is `beagle facts-roundtrip`, where lossless means reader-datum identity, not byte identity.
 <!-- /beagle:langs -->
 
-That `status` column is the maturity ordering: the three source-to-source
-backends are oracle-certified and fuzz-guarded, the two native backends are held
-by structural goldens. Targets are removed rather than deprecated when they stop
-earning their place — [`docs/target-policy.md`](docs/target-policy.md).
+Native Core is not a seventh row in this table: it is a target-neutral lowering
+profile below the shared parser and checker. Targets are removed rather than
+deprecated when they stop earning their place —
+[`docs/target-policy.md`](docs/target-policy.md).
 
 ## Real codebases author against Beagle
 
@@ -152,9 +171,11 @@ earning their place — [`docs/target-policy.md`](docs/target-policy.md).
 - **[wake](https://github.com/tompassarelli/wake)** — an application compiler
   (entities, views, routes → direct-DOM JS), itself authored in `.bjs`.
 - **[fram](https://github.com/Autonymy/fram)** — a slot-addressable,
-  typed-triple substrate with stratified Datalog, authored in `.bclj`.
+  typed-triple substrate with stratified Datalog, authored in `.bclj`; its replay
+  path is the current Native Core vertical slice.
 - **[north](https://github.com/tompassarelli/north)** — a work tracker and
-  agent orchestrator over one triple graph, authored in `.bclj`.
+  agent orchestrator over one triple graph, authored in `.bclj` and built on
+  Fram.
 
 ## How it is held correct
 
@@ -169,6 +190,9 @@ on an empty exemption list — [`docs/self-hosting.md`](docs/self-hosting.md).
   time, then erase.
 - **Not a new Lisp in spirit** — a strict typed subset of Clojure; divergence
   from Clojure must serve the type system or a backend, or it dies.
+- **Not a universal idiomatic-native transpiler** — hosted emitters exist where
+  generated source is a real interface; native code comes from one Native World
+  and replaceable materializers.
 - **Not stable.** Pre-1.0, the surface still moves, and removals are hard breaks:
   there is no deprecation path.
 - **Not benchmarked.** The repository gates correctness, not speed, and publishes
