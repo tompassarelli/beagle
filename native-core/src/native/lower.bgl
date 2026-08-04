@@ -3361,7 +3361,8 @@
     (= "map?" callee)
     (= "set?" callee)
     (= "string?" callee)
-    (= "integer?" callee)))
+    (= "integer?" callee)
+    (= "int?" callee)))
 
 (defn static-collection-predicate? [callee: String] -> Bool
   (or (= "sequential?" callee) (= "map?" callee) (= "set?" callee)))
@@ -3381,7 +3382,8 @@
       (or (map-type? types value-type) (map-value? types value-type))
       (= "set?" callee) (set-type? types value-type)
       (= "string?" callee) (same-id? value-type (text-type-id))
-      (= "integer?" callee) (same-id? value-type (int-type-id))
+      (or (= "integer?" callee) (= "int?" callee))
+      (same-id? value-type (int-type-id))
       :else nil)))
 
 ;; The trap code IS the LowerFailure variant ordinal, read off the union rather
@@ -3459,6 +3461,7 @@
 (defn scalar-predicate? [callee: String] -> Bool
   (or (= "string?" callee)
     (= "integer?" callee)
+    (= "int?" callee)
     (= "number?" callee)
     (= "boolean?" callee)
     (= "keyword?" callee)))
@@ -3466,7 +3469,7 @@
 (defn scalar-predicate-types [callee: String] -> (Vec core/NativeId)
   (cond
     (= "string?" callee) [(text-type-id)]
-    (= "integer?" callee) [(int-type-id)]
+    (or (= "integer?" callee) (= "int?" callee)) [(int-type-id)]
     (= "number?" callee) [(int-type-id) (type-id "Float")]
     (= "boolean?" callee) [(bool-type-id)]
     (= "keyword?" callee) [(keyword-type-id)]
