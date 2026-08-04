@@ -1,9 +1,9 @@
 stage source-seal ACCEPTED
 stage source-to-typed ACCEPTED
-world-types 20
-world-functions 17
-world-abis 17
-projected-types 13
+world-types 35
+world-functions 28
+world-abis 28
+projected-types 21
 lowered fn_0 char-at 3 blocks
 lowered fn_1 split-on 13 blocks
 lowered fn_2 index-of 10 blocks
@@ -21,6 +21,17 @@ lowered fn_13 parse-mutation 22 blocks
 lowered fn_14 parse-batch 19 blocks
 lowered fn_15 parse-line 20 blocks
 lowered fn_16 strip-at 7 blocks
+lowered fn_17 find-exact 14 blocks
+lowered fn_18 find-group 13 blocks
+lowered fn_19 remove-at 10 blocks
+lowered fn_20 single-predicate? 14 blocks
+lowered fn_21 subject-predicate-count 15 blocks
+lowered fn_22 collapses? 13 blocks
+lowered fn_23 declaration-collapse? 6 blocks
+lowered fn_24 remove-group 5 blocks
+lowered fn_25 apply-assert 7 blocks
+lowered fn_26 apply-retract 7 blocks
+lowered fn_27 apply-action 7 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts

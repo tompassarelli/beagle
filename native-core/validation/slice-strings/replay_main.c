@@ -26,16 +26,16 @@ static bool text_is(native_m0_type_3 handle, const char *bytes) {
          (length == 0u || memcmp(native_text_bytes(handle), bytes, length) == 0);
 }
 
-static native_m0_type_3 vector_text(native_m0_type_10 values, int64_t index) {
+static native_m0_type_3 vector_text(native_m0_type_13 values, int64_t index) {
   return *(const native_m0_type_3 *)native_vec_at(values, index, INT64_C(8));
 }
 
-static native_m0_type_4 vector_fact(native_m0_type_11 facts, int64_t index) {
+static native_m0_type_4 vector_fact(native_m0_type_14 facts, int64_t index) {
   return *(const native_m0_type_4 *)native_vec_at(facts, index, INT64_C(40));
 }
 
-static native_m0_type_10 strings_of(const char *const *values, int64_t count) {
-  native_m0_type_10 result =
+static native_m0_type_13 strings_of(const char *const *values, int64_t count) {
+  native_m0_type_13 result =
       native_vec_new(&arena, count, INT64_C(8), (size_t)8);
   for (int64_t index = INT64_C(0); index < count; ++index) {
     native_m0_type_3 value = text_of(values[index]);
@@ -51,7 +51,7 @@ static bool fact_is(native_m0_type_4 fact, bool valid, const char *predicate,
          fact.field_4 == has_base;
 }
 
-static bool op_is(native_m0_type_12 operation, int64_t kind,
+static bool op_is(native_m0_type_15 operation, int64_t kind,
                   const char *subject, const char *predicate,
                   const char *value, int64_t base, bool has_base,
                   int64_t fact_count, const char *error) {
@@ -63,6 +63,63 @@ static bool op_is(native_m0_type_12 operation, int64_t kind,
          text_is(operation.field_7, error);
 }
 
+static native_m0_type_5 triple_of(const char *slot0, const char *slot1,
+                                  const char *slot2) {
+  native_m0_type_5 triple;
+  triple.field_0 = text_of(slot0);
+  triple.field_1 = text_of(slot1);
+  triple.field_2 = text_of(slot2);
+  return triple;
+}
+
+static native_m0_type_16 triple_vector(int64_t capacity) {
+  return native_vec_new(&arena, capacity, INT64_C(24), (size_t)8);
+}
+
+static native_m0_type_16 push_triple(native_m0_type_16 triples,
+                                     native_m0_type_5 triple) {
+  return native_vec_push(&arena, triples, &triple, INT64_C(24), (size_t)8);
+}
+
+static native_m0_type_5 vector_triple(native_m0_type_16 triples,
+                                      int64_t index) {
+  return *(const native_m0_type_5 *)native_vec_at(triples, index,
+                                                  INT64_C(24));
+}
+
+static native_m0_type_6 vector_commit(native_m0_type_18 commits,
+                                      int64_t index) {
+  return *(const native_m0_type_6 *)native_vec_at(commits, index,
+                                                  INT64_C(32));
+}
+
+static bool triple_is(native_m0_type_5 triple, const char *slot0,
+                      const char *slot1, const char *slot2) {
+  return text_is(triple.field_0, slot0) && text_is(triple.field_1, slot1) &&
+         text_is(triple.field_2, slot2);
+}
+
+static native_m0_type_7 action_of(int64_t operation, const char *slot0,
+                                  const char *slot1, const char *slot2,
+                                  bool local_base) {
+  native_m0_type_7 action;
+  action.field_0 = operation;
+  action.field_1 = text_of(slot0);
+  action.field_2 = text_of(slot1);
+  action.field_3 = text_of(slot2);
+  action.field_4 = local_base;
+  return action;
+}
+
+static bool apply_is(native_m0_type_19 result, int64_t version,
+                     int64_t triple_count, bool changed, bool collapse,
+                     int64_t commit_count) {
+  return result.field_0.field_1 == version &&
+         native_vec_length(result.field_0.field_0) == triple_count &&
+         result.field_1 == changed && result.field_2 == collapse &&
+         native_vec_length(result.field_3) == commit_count;
+}
+
 int main(void) {
   static const char *const assertion_fields[] = {
       "assert", "subject", "predicate", "value"};
@@ -72,11 +129,18 @@ int main(void) {
   native_m0_type_3 separator;
   native_m0_type_3 result;
   native_m0_type_4 fact;
-  native_m0_type_5 parsed;
-  native_m0_type_10 fields;
-  native_m0_type_10 parts;
-  native_m0_type_11 facts;
-  native_m0_type_12 operation;
+  native_m0_type_5 triple;
+  native_m0_type_7 action;
+  native_m0_type_8 parsed;
+  native_m0_type_13 fields;
+  native_m0_type_13 parts;
+  native_m0_type_14 facts;
+  native_m0_type_15 operation;
+  native_m0_type_16 reduced;
+  native_m0_type_16 triples;
+  native_m0_type_17 model;
+  native_m0_type_19 applied;
+  native_m0_type_20 removal;
 
   reset_arena();
   text = text_of("abc");
@@ -255,6 +319,105 @@ int main(void) {
   if (!text_is(native_m0_fn_16(&arena, &capability, text_of("root")),
                "root")) {
     return 30;
+  }
+
+  reset_arena();
+  triples = triple_vector(INT64_C(4));
+  triple = triple_of("@color", "cardinality", "single");
+  triples = push_triple(triples, triple);
+  triple = triple_of("subject", "color", "red");
+  triples = push_triple(triples, triple);
+  triple = triple_of("subject", "color", "blue");
+  triples = push_triple(triples, triple);
+  triple = triple_of("other", "color", "green");
+  triples = push_triple(triples, triple);
+
+  text = text_of("subject");
+  separator = text_of("color");
+  result = text_of("red");
+  if (native_m0_fn_17(triples, text, separator, result) != INT64_C(1) ||
+      native_m0_fn_18(triples, text, separator) != INT64_C(1)) {
+    return 31;
+  }
+
+  reduced = native_m0_fn_19(&arena, &capability, triples, INT64_C(2));
+  if (native_vec_length(reduced) != INT64_C(3) ||
+      !triple_is(vector_triple(reduced, INT64_C(1)), "subject", "color",
+                 "red") ||
+      !triple_is(vector_triple(reduced, INT64_C(2)), "other", "color",
+                 "green")) {
+    return 32;
+  }
+
+  if (!native_m0_fn_20(&arena, &capability, triples, separator) ||
+      native_m0_fn_21(triples, text, separator) != INT64_C(2) ||
+      !native_m0_fn_22(triples, separator)) {
+    return 33;
+  }
+
+  model.field_0 = triples;
+  model.field_1 = INT64_C(5);
+  action = action_of(INT64_C(1), "@color", "cardinality", "single", false);
+  if (!native_m0_fn_23(&arena, &capability, model, action)) {
+    return 34;
+  }
+
+  removal = native_m0_fn_24(&arena, &capability, triples, text, separator);
+  if (native_vec_length(removal.field_0) != INT64_C(2) ||
+      native_vec_length(removal.field_1) != INT64_C(2) ||
+      !triple_is(vector_triple(removal.field_0, INT64_C(1)), "other", "color",
+                 "green") ||
+      vector_commit(removal.field_1, INT64_C(0)).field_0 != INT64_C(2) ||
+      !triple_is(vector_commit(removal.field_1, INT64_C(1)).field_1,
+                 "subject", "color", "blue")) {
+    return 35;
+  }
+
+  reset_arena();
+  triples = triple_vector(INT64_C(2));
+  triple = triple_of("@color", "cardinality", "single");
+  triples = push_triple(triples, triple);
+  triple = triple_of("subject", "color", "red");
+  triples = push_triple(triples, triple);
+  model.field_0 = triples;
+  model.field_1 = INT64_C(5);
+  action = action_of(INT64_C(1), "subject", "color", "blue", false);
+  applied = native_m0_fn_25(&arena, &capability, model, action);
+  if (!apply_is(applied, INT64_C(5), INT64_C(2), true, false,
+                INT64_C(2)) ||
+      !triple_is(vector_triple(applied.field_0.field_0, INT64_C(1)),
+                 "subject", "color", "blue")) {
+    return 36;
+  }
+  if (vector_commit(applied.field_3, INT64_C(0)).field_0 != INT64_C(2) ||
+      vector_commit(applied.field_3, INT64_C(1)).field_0 != INT64_C(1)) {
+    return 37;
+  }
+
+  action = action_of(INT64_C(2), "subject", "color", "ignored", false);
+  applied = native_m0_fn_26(&arena, &capability, applied.field_0, action);
+  if (!apply_is(applied, INT64_C(5), INT64_C(1), true, false,
+                INT64_C(1)) ||
+      !triple_is(vector_triple(applied.field_0.field_0, INT64_C(0)),
+                 "@color", "cardinality", "single")) {
+    return 38;
+  }
+
+  reset_arena();
+  triples = triple_vector(INT64_C(3));
+  triple = triple_of("@color", "cardinality", "single");
+  triples = push_triple(triples, triple);
+  triple = triple_of("subject", "color", "red");
+  triples = push_triple(triples, triple);
+  triple = triple_of("subject", "color", "blue");
+  triples = push_triple(triples, triple);
+  model.field_0 = triples;
+  model.field_1 = INT64_C(9);
+  action = action_of(INT64_C(1), "@color", "cardinality", "single", false);
+  applied = native_m0_fn_27(&arena, &capability, model, action);
+  if (!apply_is(applied, INT64_C(9), INT64_C(3), false, true,
+                INT64_C(0))) {
+    return 39;
   }
   return 0;
 }

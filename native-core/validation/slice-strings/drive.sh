@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Drive the Text/Keyword/Boolean vocabulary through the native pipeline:
+# Drive the text corpus and a real FRI replay slice through the native pipeline:
 #   beagle-ast -> source facts -> sealed source world -> typed world
 #     -> native world with lowered blocks -> 7 obligations
 #     -> native.body-c17 -> gcc/clang -std=c17 -Werror -> run the probe main.
 #
 # Two projections: text_ops.facts (this directory's corpus) and
-# replay_text.facts (unmodified fram.fri-replay parser helpers). Both generated
-# modules are compiled and run. Set FRAM_REPLAY to re-derive the replay facts
-# and fail on drift.
+# replay_text.facts (an unmodified fram.fri-replay helper slice). Both generated
+# modules are compiled and run. Set FRAM_REPLAY to re-derive the replay facts and
+# fail on drift.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,7 +38,11 @@ replay_forms=(digit-table no-strings char-at split-on index-of last-index-of
   "trim-character?" trim-line join-strings IntParse digit-value parse-int strip-at
   line-version line-assert line-retract line-batch line-invalid ParsedFact ParsedOp
   no-facts invalid-fact invalid-op parse-fact parse-facts "facts-parsed?"
-  parse-mutation parse-batch parse-line)
+  parse-mutation parse-batch parse-line act-assert act-retract ModelTriple Model
+  Action ReplayCommit no-triples no-actions no-commits initial-model find-exact
+  find-group remove-at "single-predicate?" subject-predicate-count "collapses?"
+  "declaration-collapse?" GroupRemoval remove-group ApplyResult apply-assert
+  apply-retract apply-action)
 if [[ -n "${FRAM_REPLAY:-}" ]]; then
   "$repo/bin/beagle-ast" "$FRAM_REPLAY" >"$scratch/replay.json"
   bb "$here/select-forms.clj" "$scratch/replay.json" "$scratch/replay-sel.json" \
@@ -47,7 +51,7 @@ if [[ -n "${FRAM_REPLAY:-}" ]]; then
     "$scratch/replay-sel.json" "$scratch/replay_text.facts" --include-defs
   if [[ -f "$art/replay_text.facts" ]] \
      && ! cmp -s "$scratch/replay_text.facts" "$art/replay_text.facts"; then
-    echo "drive.sh: fram.fri-replay text helpers drifted from the committed projection" >&2
+    echo "drive.sh: fram.fri-replay slice drifted from the committed projection" >&2
     exit 1
   fi
   cp "$scratch/replay_text.facts" "$art/replay_text.facts"
@@ -92,7 +96,7 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
     \"native-slice-strings-v0\"))"
 
 cat "$art/report.txt"
-echo "-- fram.fri-replay text helpers --"
+echo "-- fram.fri-replay native slice --"
 cat "$art/replay-report.txt"
 
 if [ -n "${NATIVE_SLICE_NO_COMPILE:-}" ]; then
