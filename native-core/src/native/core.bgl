@@ -245,6 +245,14 @@
      source-id: NativeId
      count-id: NativeId]))
 
+;; Value semantics are closed over one sealed TypeDef/LayoutDef graph. The
+;; domain is explicit so materializers never infer dynamic behavior from bytes.
+(defunion ValueSemanticsOpV0
+  (ValueEqualV0
+    [domain-type: NativeId
+     left-id: NativeId
+     right-id: NativeId]))
+
 (defunion ResourceTokenKindV0
   (RegionTokenV0 [region: NativeId])
   (CapabilityTokenV0 [capability: NativeId]))
@@ -492,7 +500,10 @@
      operand-ids: (Vec NativeId)])
   (TextBuiltinInstruction
     [result: SsaValueV0
-     builtin: TextBuiltinOpV0]))
+     builtin: TextBuiltinOpV0])
+  (ValueSemanticsInstruction
+    [result: SsaValueV0
+     operation: ValueSemanticsOpV0]))
 
 (defrecord SwitchCaseV0
   [variant-id: NativeId
@@ -764,7 +775,8 @@
     [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
      (ssavaluev0-id result)]
     [(TextConcatInstruction result arena-id operand-ids) (ssavaluev0-id result)]
-    [(TextBuiltinInstruction result operation) (ssavaluev0-id result)]))
+    [(TextBuiltinInstruction result operation) (ssavaluev0-id result)]
+    [(ValueSemanticsInstruction result operation) (ssavaluev0-id result)]))
 
 (defn instruction-result-ids [instructions :- (Vec Instruction)] :- (Vec NativeId)
   (mapv (fn [instruction :- Instruction] :- NativeId (instruction-result-id instruction))
@@ -1022,6 +1034,7 @@
    known-functions :- (Vec NativeId)
    known-regions :- (Vec NativeId)
    known-capabilities :- (Vec NativeId)
+   known-types :- (Vec NativeId)
    known-owned :- (Vec NativeId)] :- Bool
   (match instruction
     [(AtomInstruction result atom) (native-atom-refs-closed? atom known-owned)]
@@ -1075,7 +1088,11 @@
     [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
      true]
     [(TextConcatInstruction result arena-id operand-ids) true]
-    [(TextBuiltinInstruction result operation) true]))
+    [(TextBuiltinInstruction result operation) true]
+    [(ValueSemanticsInstruction result operation)
+     (match operation
+       [(ValueEqualV0 domain-type left-id right-id)
+        (id-in? known-types domain-type)])]))
 
 (defn parameter-types-closed?
   [parameters :- (Vec Parameter)
@@ -1104,7 +1121,7 @@
    known-owned :- (Vec NativeId)
    known-blocks :- (Vec NativeId)] :- Bool
   (and (parameter-types-closed? (basicblock-parameters block) known-types)
-    (every? (fn [instruction :- Instruction] :- Bool (instruction-semantic-refs-closed? instruction known-functions known-regions known-capabilities known-owned))
+    (every? (fn [instruction :- Instruction] :- Bool (instruction-semantic-refs-closed? instruction known-functions known-regions known-capabilities known-types known-owned))
       (basicblock-instructions block))
     (every? (fn [terminator :- Terminator] :- Bool (terminator-block-refs-closed? terminator known-blocks))
       (basicblock-terminators block))))
@@ -1252,7 +1269,10 @@
     [(TextConcatInstruction result arena-id operand-ids)
      (into [arena-id] operand-ids)]
     [(TextBuiltinInstruction result operation)
-     (text-builtin-ssa-refs operation)]))
+     (text-builtin-ssa-refs operation)]
+    [(ValueSemanticsInstruction result operation)
+     (match operation
+       [(ValueEqualV0 domain-type left-id right-id) [left-id right-id]])]))
 
 (defn terminator-ssa-refs [terminator :- Terminator] :- (Vec NativeId)
   (match terminator
@@ -1350,7 +1370,8 @@
     [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
      true]
     [(TextConcatInstruction result arena-id operand-ids) true]
-    [(TextBuiltinInstruction result operation) true]))
+    [(TextBuiltinInstruction result operation) true]
+    [(ValueSemanticsInstruction result operation) true]))
 
 (defn block-resources-allowed?
   [block :- BasicBlock

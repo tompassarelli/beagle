@@ -2,6 +2,7 @@
    With the argument "mismatch" it hands a checked extract a value carrying the
    wrong tag, which must trap instead of reading the payload as a reference.
    fn_0 pair?  fn_1 wrap-int  fn_2 pair-left-of  fn_3 pair-right-of
+   fn_4 any-equal?
    Any (type_9) tags: 0 bool, 1 i64, 2 f64, 3 text, 4 keyword, 5 nil, 6 Pair. */
 #include "module_0.h"
 
@@ -22,7 +23,11 @@ static native_m0_type_9 slice_i64(int64_t number) {
 int main(int argc, char **argv) {
   (void)argv;
   native_m0_type_2 pair = { INT64_C(3), INT64_C(4) };
+  native_m0_type_2 equal_pair = { INT64_C(3), INT64_C(4) };
+  native_m0_type_2 different_pair = { INT64_C(3), INT64_C(5) };
   native_m0_type_9 as_pair = slice_pair(&pair);
+  native_m0_type_9 as_equal_pair = slice_pair(&equal_pair);
+  native_m0_type_9 as_different_pair = slice_pair(&different_pair);
   native_m0_type_9 as_number = slice_i64(INT64_C(42));
 
   if (argc > 1) {
@@ -51,6 +56,12 @@ int main(int argc, char **argv) {
   }
   if (native_m0_fn_0(as_number) || native_m0_fn_0(wrapped)) {
     return 5;
+  }
+  if (!native_m0_fn_4(as_pair, as_equal_pair)
+      || native_m0_fn_4(as_pair, as_different_pair)
+      || native_m0_fn_4(as_pair, as_number)
+      || !native_m0_fn_4(as_number, wrapped)) {
+    return 6;
   }
   return 0;
 }

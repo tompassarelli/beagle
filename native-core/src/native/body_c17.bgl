@@ -203,6 +203,7 @@
     (instance? native.core.TextSliceInstruction instruction) true
     (instance? native.core.TextConcatInstruction instruction) true
     (instance? native.core.TextBuiltinInstruction instruction) true
+    (instance? native.core.ValueSemanticsInstruction instruction) true
     :else false))
 
 (defn terminator-supported? [terminator: core/Terminator] -> Bool
@@ -397,6 +398,208 @@
                   (escape-c-text (nth keywords position)) "\n"))))
           "*/\n"))
       (if (and (= 0 (count texts)) (= 0 (count keywords))) "" "\n"))))
+
+(defn descriptor-symbol
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   target: core/NativeId] -> String
+  (str (c17/module-prefix module-index) "_value_"
+    (c17/type-index types target)))
+
+(defn descriptor-kind [definition: core/TypeDef] -> String
+  (let [shape: core/TypeShape (core/typedef-shape definition)]
+    (cond
+      (instance? native.core.AtomType shape)
+      (let [kind: core/AtomKind (core/atomtype-kind shape)]
+        (cond
+          (instance? native.core.BoolKind kind) "NATIVE_VALUE_BOOL"
+          (instance? native.core.I64Kind kind) "NATIVE_VALUE_SIGNED"
+          (instance? native.core.F64Kind kind) "NATIVE_VALUE_FLOAT"
+          (instance? native.core.TextKind kind) "NATIVE_VALUE_TEXT"
+          (instance? native.core.KeywordKind kind) "NATIVE_VALUE_KEYWORD"
+          :else "NATIVE_VALUE_REFERENCE"))
+      (instance? native.core.RecordType shape) "NATIVE_VALUE_RECORD"
+      (or (instance? native.core.UnionType shape)
+          (instance? native.core.OutcomeType shape)) "NATIVE_VALUE_UNION"
+      (instance? native.core.VectorType shape) "NATIVE_VALUE_VECTOR"
+      :else "NATIVE_VALUE_REFERENCE")))
+
+(defn field-descriptor-symbol
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   target: core/NativeId] -> String
+  (str (descriptor-symbol types module-index target) "_fields"))
+
+(defn variant-descriptor-symbol
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   target: core/NativeId] -> String
+  (str (descriptor-symbol types module-index target) "_variants"))
+
+(defn emit-field-descriptors
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)
+   module-index: Int
+   layout: core/LayoutDef] -> String
+  (let [fields: (Vec core/FieldLayoutV0) (c17/record-layout-fields layout)]
+    (if (= 0 (count fields))
+      ""
+      (str "static const native_value_field_descriptor "
+        (field-descriptor-symbol types module-index (core/layoutdef-type-id layout))
+        "[] = {\n"
+        (loop [position: Int 0 result: String ""]
+          (if (>= position (count fields))
+            result
+            (let [field: core/FieldLayoutV0 (nth fields position)]
+              (recur (+ position 1)
+                (str result "  { .offset = (size_t)"
+                  (core/fieldlayoutv0-offset-bytes field)
+                  ", .value = &"
+                  (descriptor-symbol types module-index
+                    (core/fieldlayoutv0-type-id field))
+                  " },\n")))))
+        "};\n"))))
+
+(defn emit-variant-descriptors
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)
+   module-index: Int
+   layout: core/LayoutDef] -> String
+  (let [variants: (Vec core/UnionVariantLayoutV0)
+        (c17/union-layout-variants layout)]
+    (if (= 0 (count variants))
+      ""
+      (str "static const native_value_variant_descriptor "
+        (variant-descriptor-symbol types module-index
+          (core/layoutdef-type-id layout))
+        "[] = {\n"
+        (loop [position: Int 0 result: String ""]
+          (if (>= position (count variants))
+            result
+            (let [variant: core/UnionVariantLayoutV0 (nth variants position)
+                  payload: (U core/NativeId Nil)
+                  (core/unionvariantlayoutv0-payload-type variant)]
+              (recur (+ position 1)
+                (str result "  { .tag = INT64_C("
+                  (core/unionvariantlayoutv0-tag variant)
+                  "), .payload_offset = (size_t)"
+                  (core/unionvariantlayoutv0-payload-offset-bytes variant)
+                  ", .payload = "
+                  (if (nil? payload)
+                    "NULL"
+                    (str "&" (descriptor-symbol types module-index payload)))
+                  " },\n")))))
+        "};\n"))))
+
+(defn descriptor-element
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   layout: core/LayoutDef] -> String
+  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+    (cond
+      (instance? native.core.VectorShapeV0 shape)
+      (str "&" (descriptor-symbol types module-index
+        (core/vectorshapev0-element-type shape)))
+      (instance? native.core.ReferenceShapeV0 shape)
+      (str "&" (descriptor-symbol types module-index
+        (core/referenceshapev0-target-type shape)))
+      :else "NULL")))
+
+(defn descriptor-stride [layout: core/LayoutDef] -> Int
+  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+    (if (instance? native.core.VectorShapeV0 shape)
+      (core/vectorshapev0-stride-bytes shape)
+      0)))
+
+(defn descriptor-tag-offset [layout: core/LayoutDef] -> Int
+  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+    (if (instance? native.core.UnionShapeV0 shape)
+      (core/unionshapev0-tag-offset-bytes shape)
+      0)))
+
+(defn emit-value-descriptor
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)
+   module-index: Int
+   definition: core/TypeDef] -> String
+  (let [target: core/NativeId (core/typedef-id definition)
+        layout: (U core/LayoutDef Nil) (c17/layout-for-type layouts target)]
+    (if (nil? layout)
+      ""
+      (let [fields: (Vec core/FieldLayoutV0) (c17/record-layout-fields layout)
+            variants: (Vec core/UnionVariantLayoutV0)
+            (c17/union-layout-variants layout)]
+        (str "const native_value_descriptor "
+          (descriptor-symbol types module-index target) " = {\n"
+          "  .abi_version = NATIVE_VALUE_ABI_VERSION,\n"
+          "  .kind = " (descriptor-kind definition) ",\n"
+          "  .size = (size_t)" (core/layoutdef-size-bytes layout) ",\n"
+          "  .alignment = (size_t)" (core/layoutdef-align-bytes layout) ",\n"
+          "  .tag_offset = (size_t)" (descriptor-tag-offset layout) ",\n"
+          "  .fields = "
+          (if (= 0 (count fields)) "NULL"
+            (field-descriptor-symbol types module-index target)) ",\n"
+          "  .field_count = (size_t)" (count fields) ",\n"
+          "  .variants = "
+          (if (= 0 (count variants)) "NULL"
+            (variant-descriptor-symbol types module-index target)) ",\n"
+          "  .variant_count = (size_t)" (count variants) ",\n"
+          "  .element = " (descriptor-element types module-index layout) ",\n"
+          "  .stride = (size_t)" (descriptor-stride layout) "\n"
+          "};\n")))))
+
+(defn value-semantics-used? [functions: (Vec core/FunctionDef)] -> Bool
+  (some?
+    (some
+      (fn [function: core/FunctionDef] -> Bool
+        (some?
+          (some
+            (fn [block: core/BasicBlock] -> Bool
+              (some?
+                (some
+                  (fn [instruction: core/Instruction] -> Bool
+                    (instance? native.core.ValueSemanticsInstruction instruction))
+                  (core/basicblock-instructions block))))
+            (core/functiondef-blocks function))))
+      functions)))
+
+(defn emit-value-descriptors
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)
+   functions: (Vec core/FunctionDef)
+   module-index: Int] -> String
+  (if (not (value-semantics-used? functions))
+    ""
+    (str
+      (loop [position: Int 0 result: String ""]
+        (if (>= position (count types))
+          result
+          (recur (+ position 1)
+            (str result "extern const native_value_descriptor "
+              (descriptor-symbol types module-index
+                (core/typedef-id (nth types position)))
+              ";\n"))))
+      "\n"
+      (loop [position: Int 0 result: String ""]
+        (if (>= position (count types))
+          result
+          (let [definition: core/TypeDef (nth types position)
+                layout: (U core/LayoutDef Nil)
+                (c17/layout-for-type layouts (core/typedef-id definition))]
+            (recur (+ position 1)
+              (if (nil? layout)
+                result
+                (str result
+                  (emit-field-descriptors types layouts module-index layout)
+                  (emit-variant-descriptors types layouts module-index layout)))))))
+      (loop [position: Int 0 result: String ""]
+        (if (>= position (count types))
+          result
+          (recur (+ position 1)
+            (str result
+              (emit-value-descriptor types layouts module-index
+                (nth types position))))))
+      "\n")))
 
 (defn field-position
   [layouts: (Vec core/LayoutDef)
@@ -1084,6 +1287,20 @@
           (str "  " target " = (" left " " (compare-operator comparison) " "
             right ");\n")))
 
+      (instance? native.core.ValueSemanticsInstruction instruction)
+      (let [operation: core/ValueSemanticsOpV0
+            (core/valuesemanticsinstruction-operation instruction)]
+        (if (instance? native.core.ValueEqualV0 operation)
+          (str "  " target " = native_value_equal(&"
+            (descriptor-symbol types module-index
+              (core/valueequalv0-domain-type operation))
+            ", &"
+            (value-name function slots (core/valueequalv0-left-id operation))
+            ", &"
+            (value-name function slots (core/valueequalv0-right-id operation))
+            ");\n")
+          ""))
+
       (instance? native.core.FieldInstruction instruction)
       (let [source: core/NativeId (core/fieldinstruction-source-id instruction)
             source-type: core/NativeId (slot-type function slots source)
@@ -1655,6 +1872,7 @@
   (str "/* Generated by native.body-c17; do not edit. */\n"
     "#include \"" header-name "\"\n\n"
     (emit-text-pool module-index pool)
+    (emit-value-descriptors types layouts functions module-index)
     (emit-functions types layouts functions module-index pool)))
 
 (defn materialize-world

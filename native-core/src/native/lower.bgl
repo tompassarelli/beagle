@@ -2585,6 +2585,17 @@
           (core/settypev0-element-type shape)
           (type-id "LowerFailure"))))))
 
+(defn value-semantics-type?
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> Bool
+  (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
+    (if (nil? definition)
+      false
+      (let [shape: core/TypeShape (core/typedef-shape definition)]
+        (or (instance? native.core.RecordType shape)
+            (or (instance? native.core.UnionType shape)
+                (instance? native.core.VectorType shape)))))))
+
 ;; The vector TypeDef for an element type exists only when some annotation in
 ;; the module named (Vec T); a literal cannot mint one, so it looks one up.
 (defn vector-type-of
@@ -5451,6 +5462,19 @@
                 (fail-result current
                   "TODO-NATIVE-VEC-OPERAND: vec lowers a native vector or a closed insertion-order set")
 
+                (and (= "=" callee) (= 2 (count values))
+                  (same-id? (nth value-types 0) (nth value-types 1))
+                  (value-semantics-type? types (nth value-types 0)))
+                (let [result-id: core/NativeId
+                      (state-id current owner "value-equal")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->ValueSemanticsInstruction
+                        (core/->SsaValueV0 result-id (bool-type-id))
+                        (core/->ValueEqualV0 (nth value-types 0)
+                          (nth values 0) (nth values 1))))
+                    result-id (bool-type-id) false))
+
                 (and (not (= "=" callee)) (some? comparison)
                   (= 2 (count values))
                   (or
@@ -7303,6 +7327,12 @@
     (instance? native.core.TextEqualityV0 equality) "text-equality-v0"
     :else "keyword-equality-v0"))
 
+(defn encode-value-semantics-operation [operation: core/ValueSemanticsOpV0] -> String
+  (match operation
+    [(ValueEqualV0 domain-type left-id right-id)
+     (worlds/canonical-record "value-equal-v0"
+       [(id-value domain-type) (id-value left-id) (id-value right-id)])]))
+
 (defn encode-instruction [instruction: core/Instruction] -> String
   (cond
     (instance? native.core.AtomInstruction instruction)
@@ -7603,6 +7633,13 @@
       [(encode-ssa-value (core/textbuiltininstruction-result instruction))
        (encode-text-builtin-operation
          (core/textbuiltininstruction-builtin instruction))])
+
+    (instance? native.core.ValueSemanticsInstruction instruction)
+    (worlds/canonical-record "value-semantics-instruction"
+      [(encode-ssa-value
+         (core/valuesemanticsinstruction-result instruction))
+       (encode-value-semantics-operation
+         (core/valuesemanticsinstruction-operation instruction))])
 
     (instance? native.core.CallInstruction instruction)
     (worlds/canonical-record "call-instruction"

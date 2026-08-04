@@ -629,6 +629,40 @@
     []
     []))
 
+(def refusal-value-equal-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "ref-val-eq-blk")
+    []
+    [(core/->ValueSemanticsInstruction
+       (core/->SsaValueV0 (slice-id "ref-val-eq-out") (slice-id "type-2-bit"))
+       (core/->ValueEqualV0 (slice-id "type-3-par")
+         (slice-id "ref-val-eq-left") (slice-id "ref-val-eq-right")))]
+    [(core/return-terminator (slice-id "ref-val-eq-out"))]))
+
+(def refusal-value-equal-function: core/FunctionDef
+  (core/->FunctionDef (slice-id "ref-val-eq-fn") "refuse-value-equal"
+    [(core/->Parameter (slice-id "ref-val-eq-left") (slice-id "type-3-par"))
+     (core/->Parameter (slice-id "ref-val-eq-right") (slice-id "type-3-par"))]
+    [refusal-value-equal-block]
+    (slice-id "ref-val-eq-blk")
+    (slice-id "type-2-bit")
+    []
+    []
+    []))
+
+(def refusal-value-equal-world: core/NativeWorld
+  (core/->NativeWorld (slice-id "ref-val-eq-wld") nil "native-qbe-fixture-v0"
+    [slice-i64-type slice-bool-type slice-pair-type]
+    []
+    []
+    []
+    [slice-i64-layout slice-bool-layout slice-pair-layout]
+    [refusal-value-equal-function]
+    []
+    []
+    []
+    []
+    []))
+
 ;; --- materialization ------------------------------------------------------
 
 (defn require-artifact [result: qbe/QbeMaterialization] -> qbe/QbeArtifact
@@ -662,6 +696,14 @@
 (def refusal-set-proven?: Bool
   (explicitly-refused? refusal-set-world))
 
+(def refusal-value-equal-proven?: Bool
+  (and (core/validationreport-passed
+         (core/validate-world refusal-value-equal-world))
+    (match (qbe/materialize-world refusal-value-equal-world 3)
+      [(QbeSuccess value) false]
+      [(QbeFailure value)
+       (= "unsupported native value-semantics op: equal" value)])))
+
 (def fixture-artifact: qbe/QbeArtifact
   (require-artifact (qbe/materialize-world fixture-world 0)))
 
@@ -687,6 +729,7 @@
     refusal-text-builtin-proven?
     refusal-map-proven?
     refusal-set-proven?
+    refusal-value-equal-proven?
     (= (qbe/qbeartifact-module-text fixture-artifact)
          (qbe/qbeartifact-module-text fixture-permuted-artifact))
     (= (qbe/qbeartifact-module-text slice-artifact)

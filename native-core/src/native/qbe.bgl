@@ -214,7 +214,9 @@
     [(TextConcatInstruction value)
      (core/textconcatinstruction-result instruction)]
     [(TextBuiltinInstruction value)
-     (core/textbuiltininstruction-result instruction)]))
+     (core/textbuiltininstruction-result instruction)]
+    [(ValueSemanticsInstruction value)
+     (core/valuesemanticsinstruction-result instruction)]))
 
 (defn qbe-value-ids
   [function: core/FunctionDef
@@ -779,7 +781,8 @@
     [(TextParseI64Instruction value) false]
     [(TextSliceInstruction value) false]
     [(TextConcatInstruction value) false]
-    [(TextBuiltinInstruction value) false]))
+    [(TextBuiltinInstruction value) false]
+    [(ValueSemanticsInstruction value) false]))
 
 ;; A checked operation becomes a trap/continue diamond, so a world block can
 ;; end in a different QBE label than it started in.
@@ -1108,7 +1111,8 @@
       [(TextParseI64Instruction value) ""]
       [(TextSliceInstruction value) ""]
       [(TextConcatInstruction value) ""]
-      [(TextBuiltinInstruction value) ""])))
+      [(TextBuiltinInstruction value) ""]
+      [(ValueSemanticsInstruction value) ""])))
 
 (defn emit-instructions
   [context: QbeFn
@@ -1500,7 +1504,46 @@
     [(TextParseI64Instruction value) false]
     [(TextSliceInstruction value) false]
     [(TextConcatInstruction value) false]
-    [(TextBuiltinInstruction value) false]))
+    [(TextBuiltinInstruction value) false]
+    [(ValueSemanticsInstruction value) false]))
+
+(defn value-semantics-operation-name [operation: core/ValueSemanticsOpV0] -> String
+  (match operation
+    [(ValueEqualV0 domain-type left-id right-id) "equal"]))
+
+(defn unsupported-block-value-semantics [block: core/BasicBlock] -> (U String Nil)
+  (let [instructions: (Vec core/Instruction)
+        (core/basicblock-instructions block)]
+    (loop [position: Int 0]
+      (if (>= position (count instructions))
+        nil
+        (let [instruction: core/Instruction (nth instructions position)]
+          (if (instance? native.core.ValueSemanticsInstruction instruction)
+            (value-semantics-operation-name
+              (core/valuesemanticsinstruction-operation instruction))
+            (recur (+ position 1))))))))
+
+(defn unsupported-function-value-semantics [function: core/FunctionDef] -> (U String Nil)
+  (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
+    (loop [position: Int 0]
+      (if (>= position (count blocks))
+        nil
+        (let [operation: (U String Nil)
+              (unsupported-block-value-semantics (nth blocks position))]
+          (if (nil? operation)
+            (recur (+ position 1))
+            operation))))))
+
+(defn unsupported-value-semantics [world: core/NativeWorld] -> (U String Nil)
+  (let [functions: (Vec core/FunctionDef) (core/nativeworld-functions world)]
+    (loop [position: Int 0]
+      (if (>= position (count functions))
+        nil
+        (let [operation: (U String Nil)
+              (unsupported-function-value-semantics (nth functions position))]
+          (if (nil? operation)
+            (recur (+ position 1))
+            operation))))))
 
 (defn parameterless-target?
   [blocks: (Vec core/BasicBlock)
@@ -1583,12 +1626,16 @@
 (defn materialize-world
   [world: core/NativeWorld
    module-index: Int] -> QbeMaterialization
-  (let [validation: core/ValidationReport (core/validate-world world)]
+  (let [validation: core/ValidationReport (core/validate-world world)
+        unsupported: (U String Nil) (unsupported-value-semantics world)]
     (cond
       (< module-index 0)
       (->QbeFailure "module index must be nonnegative")
       (not (core/validationreport-passed validation))
       (->QbeFailure "native world is not sealed: validation obligations failed")
+      (some? unsupported)
+      (->QbeFailure
+        (str "unsupported native value-semantics op: " unsupported))
       (not (world-supported? world))
       (->QbeFailure "native world uses a shape outside the QBE materializer's slice")
       :else

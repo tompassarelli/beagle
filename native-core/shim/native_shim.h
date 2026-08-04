@@ -65,6 +65,51 @@ typedef struct native_set {
   int64_t stride;
 } native_set;
 
+#define NATIVE_VALUE_ABI_VERSION UINT32_C(1)
+
+typedef enum native_value_kind {
+  NATIVE_VALUE_BOOL = 1,
+  NATIVE_VALUE_SIGNED = 2,
+  NATIVE_VALUE_UNSIGNED = 3,
+  NATIVE_VALUE_FLOAT = 4,
+  NATIVE_VALUE_TEXT = 5,
+  NATIVE_VALUE_KEYWORD = 6,
+  NATIVE_VALUE_RECORD = 7,
+  NATIVE_VALUE_UNION = 8,
+  NATIVE_VALUE_VECTOR = 9,
+  NATIVE_VALUE_REFERENCE = 10
+} native_value_kind;
+
+typedef struct native_value_descriptor native_value_descriptor;
+
+typedef struct native_value_field_descriptor {
+  size_t offset;
+  const native_value_descriptor *value;
+} native_value_field_descriptor;
+
+typedef struct native_value_variant_descriptor {
+  int64_t tag;
+  size_t payload_offset;
+  const native_value_descriptor *payload;
+} native_value_variant_descriptor;
+
+/* A sealed Native World emits one immutable descriptor graph. Descriptors are
+   world-local ABI metadata: values never carry host function pointers or tags
+   not already present in their TypeDef/LayoutDef. */
+struct native_value_descriptor {
+  uint32_t abi_version;
+  native_value_kind kind;
+  size_t size;
+  size_t alignment;
+  size_t tag_offset;
+  const native_value_field_descriptor *fields;
+  size_t field_count;
+  const native_value_variant_descriptor *variants;
+  size_t variant_count;
+  const native_value_descriptor *element;
+  size_t stride;
+};
+
 /* Counts ELEMENT-STORAGE allocations only (header allocations excluded), so a
    push sequence's reallocation count is observable from a test. */
 extern uint64_t native_vec_storage_allocations;
@@ -91,7 +136,6 @@ native_vec *native_vec_push(native_arena *arena, native_vec *vector,
 native_vec *native_vec_concat(native_arena *arena, const native_vec *left,
                               const native_vec *right, int64_t stride,
                               size_t alignment);
-
 native_map *native_map_from_arrays(
     native_arena *arena, const void *keys, const void *values, int64_t count,
     int64_t key_stride, size_t key_alignment, int64_t value_stride,
@@ -133,6 +177,8 @@ native_set *native_set_disj(native_arena *arena, native_set *set,
 native_vec *native_set_vector(native_arena *arena, const native_set *set,
                               size_t alignment);
 
+bool native_value_equal(const native_value_descriptor *descriptor,
+                        const void *left, const void *right);
 bool native_byte_read(FILE *stream, uint8_t *destination, size_t length);
 bool native_byte_write(FILE *stream, const uint8_t *source, size_t length);
 

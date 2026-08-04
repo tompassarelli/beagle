@@ -640,14 +640,13 @@
   [types :- (Vec core/TypeDef)
    function :- core/FunctionDef
    instruction :- core/Instruction] :- Bool
-  (let [operation :- Any (get instruction :operation nil)]
-    (if (nil? operation)
-      true
-      (let [result :- core/SsaValueV0 (get instruction :result)
-            result-id :- core/NativeId (core/ssavaluev0-id result)
-            result-type :- core/NativeId (core/ssavaluev0-type-id result)]
-        (and (outcome-type? types result-type)
-          (checked-result-handled? function result-id result-type))))))
+  (if (not (instance? native.core.CheckedInstruction instruction))
+    true
+    (let [result :- core/SsaValueV0 (core/checkedinstruction-result instruction)
+          result-id :- core/NativeId (core/ssavaluev0-id result)
+          result-type :- core/NativeId (core/ssavaluev0-type-id result)]
+      (and (outcome-type? types result-type)
+        (checked-result-handled? function result-id result-type)))))
 
 (defn function-checked-arithmetic?
   [types :- (Vec core/TypeDef)

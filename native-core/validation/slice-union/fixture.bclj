@@ -21,3 +21,10 @@
 (defn pair-left-of [v: Any] -> Int (pair-left v))
 
 (defn pair-right-of [v: Any] -> Int (pair-right v))
+
+;; Same-domain Any equality follows the sealed union closure: tags first, then
+;; the selected scalar payload or the boxed record's fields.
+(defn any-equal?
+  [left: Any
+   right: Any] -> Bool
+  (= left right))
