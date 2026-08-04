@@ -4,6 +4,7 @@
 ;; Verifies each form lands on the right AST node with the right structure.
 
 (require rackunit
+         racket/file
          racket/string
          racket/port
          beagle/private/parse
@@ -23,6 +24,26 @@
 
 (define (first-form str)
   (car (parse-nix str)))
+
+(define (parse-nix/physical str)
+  (define path (make-temporary-file "beagle-nix-layout-~a.bnix"))
+  (dynamic-wind
+    void
+    (lambda ()
+      (call-with-output-file path
+        (lambda (out) (display str out))
+        #:exists 'truncate)
+      (define stxs
+        (call-with-input-file path
+          (lambda (in)
+            (let loop ([acc '()])
+              (define d
+                (beagle-nix-read-syntax (path->string path) in))
+              (if (eof-object? d)
+                  (reverse acc)
+                  (loop (cons d acc)))))))
+      (program-forms (parse-program stxs #:source-path path)))
+    (lambda () (delete-file path))))
 
 ;; --- inherit / inherit-from -------------------------------------------------
 
@@ -65,6 +86,18 @@
   (check-true (nix-fn-set? f))
   (check-true (nix-fn-set-rest? f))
   (check-equal? (length (nix-fn-set-formals f)) 3))
+
+(test-case "physical Nix reader functions remain layout-checkable"
+  (check-not-exn
+   (lambda ()
+     (parse-nix/physical
+      (string-append
+       "(define-target nix)\n"
+       "(nix/module\n"
+       "  [config\n"
+       "   ...]\n"
+       "  (let [f (fn [line] line)]\n"
+       "    (f config)))\n")))))
 
 (test-case "nix/fn-set parses to nix-fn-set with rest? false"
   (define f (first-form "(nix/fn-set [a b] a)"))

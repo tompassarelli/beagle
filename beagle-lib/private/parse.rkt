@@ -281,6 +281,20 @@
        (syntax-position stx)
        (sub1 (syntax-position stx))))
 
+(define (syntax-start-token stx tokens)
+  (define start (syntax-start-offset stx))
+  (and start (token-at-offset tokens start)))
+
+(define (physical-syntax-line stx tokens)
+  (or (syntax-line stx)
+      (let ([tok (syntax-start-token stx tokens)])
+        (and tok (token-line tok)))))
+
+(define (physical-syntax-column stx tokens)
+  (or (syntax-column stx)
+      (let ([tok (syntax-start-token stx tokens)])
+        (and tok (token-col tok)))))
+
 (define (syntax-end-offset stx tokens)
   (define start (syntax-start-offset stx))
   (and start
@@ -437,9 +451,15 @@
   (define open-line (token-line open))
   (define open-col (token-col open))
   (define close-line (token-line close))
-  (define entry-lines (map syntax-line entries))
-  (define entry-cols (map syntax-column entries))
-  (define anchor-line (and anchor (syntax-line anchor)))
+  (define entry-lines
+    (map (lambda (entry) (physical-syntax-line entry tokens)) entries))
+  (define entry-cols
+    (map (lambda (entry) (physical-syntax-column entry tokens)) entries))
+  (define entry-positions-known?
+    (and (andmap exact-positive-integer? entry-lines)
+         (andmap exact-nonnegative-integer? entry-cols)))
+  (define anchor-line
+    (and anchor (physical-syntax-line anchor tokens)))
   (define anchor-end (and anchor (syntax-end-offset anchor tokens)))
   (define clause-open (previous-significant-token tokens (token-offset open)))
   (define owner-inline?
@@ -452,7 +472,7 @@
     (and (eq? placement 'owner)
          anchor-line
          (= open-line (add1 anchor-line))
-         (= open-col (+ (or (syntax-column form-stx) 0) 2))))
+         (= open-col (+ (or (physical-syntax-column form-stx tokens) 0) 2))))
   (define clause-inline?
     (and clause-open
          (eq? (token-type clause-open) 'open-paren)
@@ -466,6 +486,7 @@
   (define entries-positioned?
     (cond
       [(null? entries) #t]
+      [(not entry-positions-known?) #t]
       [(<= count 1)
        (and (= (car entry-lines) open-line)
             (= (car entry-cols) (add1 open-col)))]
@@ -501,7 +522,7 @@
   (define marker-pairs (and start (typed-binding-marker-pairs vector-stx)))
   (define open (and start (token-at-offset tokens start 'open-bracket)))
   (define close (and open (matching-token tokens open)))
-  (when (and entries open close anchor
+  (when (and entries open close anchor (syntax-start-offset anchor)
              (not (canonical-layout-valid? source tokens form-stx anchor entries
                                            open close placement marker-pairs)))
     (define anchor-end (and (eq? placement 'owner) (syntax-end-offset anchor tokens)))
@@ -517,7 +538,7 @@
     (define gap
       (and (eq? placement 'owner)
            (fragment->inline tokens anchor-end (token-offset open))))
-    (define form-col (or (syntax-column form-stx) 0))
+    (define form-col (or (physical-syntax-column form-stx tokens) 0))
     (define vector-col
       (case placement
         [(owner) (if (> (length entries) 1) (+ form-col 2) (token-col open))]
@@ -546,8 +567,8 @@
      #:details
      (hasheq 'error-file (let ([src (syntax-source vector-stx)])
                            (if (path? src) (path->string src) src))
-             'error-line (syntax-line vector-stx)
-             'error-col (syntax-column vector-stx)
+             'error-line (physical-syntax-line vector-stx tokens)
+             'error-col (physical-syntax-column vector-stx tokens)
              'error-position (syntax-position vector-stx)
              'error-span (syntax-span vector-stx))
      #:suggestion
