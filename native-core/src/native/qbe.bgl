@@ -641,6 +641,97 @@
 
 ;; --- type emission --------------------------------------------------------
 
+(defn type-shape-references [shape: core/TypeShape] -> (Vec core/NativeId)
+  (match shape
+    [(AtomType value) []]
+    [(RecordType value)
+     (mapv
+       (fn [field: core/TypeField] -> core/NativeId (core/typefield-type-id field))
+       (core/recordtype-fields shape))]
+    [(UnionType value)
+     (loop [index: Int 0 references: (Vec core/NativeId) []]
+       (let [variants: (Vec core/TypeVariant) (core/uniontype-variants shape)]
+         (if (>= index (count variants))
+           references
+           (let [payload: (U core/NativeId Nil)
+                 (core/typevariant-payload-type (nth variants index))]
+             (recur (+ index 1)
+               (if (nil? payload) references (conj references payload)))))))]
+    [(VectorType value) []]
+    [(MapTypeV0 value) []]
+    [(SetTypeV0 value) []]
+    [(ReferenceType value) []]
+    [(FunctionType value) []]
+    [(OutcomeType value) []]))
+
+(defn type-definition-in?
+  [definitions: (Vec core/TypeDef)
+   target: core/NativeId] -> Bool
+  (loop [index: Int 0]
+    (if (>= index (count definitions))
+      false
+      (if (core/native-id= (core/typedef-id (nth definitions index)) target)
+        true
+        (recur (+ index 1))))))
+
+(defn aggregate-dependencies
+  [types: (Vec core/TypeDef)
+   definition: core/TypeDef] -> (Vec core/TypeDef)
+  (let [references: (Vec core/NativeId)
+        (type-shape-references (core/typedef-shape definition))]
+    (filterv
+      (fn [candidate: core/TypeDef] -> Bool
+        (and (shape-aggregate? (core/typedef-shape candidate))
+          (core/id-in? references (core/typedef-id candidate))))
+      types)))
+
+;; QBE resolves aggregate names as it parses. Keep canonical indices for names,
+;; but place each reachable aggregate after the aggregates its members name.
+(defn append-aggregate-closure
+  [types: (Vec core/TypeDef)
+   visiting: (Vec core/NativeId)
+   emitted: (Vec core/TypeDef)
+   target: core/NativeId] -> (Vec core/TypeDef)
+  (if (or (core/id-in? visiting target) (type-definition-in? emitted target))
+    emitted
+    (let [definition: (U core/TypeDef Nil) (typedef-for-id types target)]
+      (if (or (nil? definition)
+              (not (shape-aggregate? (core/typedef-shape definition))))
+        emitted
+        (let [dependencies: (Vec core/TypeDef) (aggregate-dependencies types definition)
+              with-dependencies: (Vec core/TypeDef)
+              (loop [index: Int 0 result: (Vec core/TypeDef) emitted]
+                (if (>= index (count dependencies))
+                  result
+                  (recur (+ index 1)
+                    (append-aggregate-closure types (conj visiting target) result
+                      (core/typedef-id (nth dependencies index))))))]
+          (conj with-dependencies definition))))))
+
+(defn function-type-ids [function: core/FunctionDef] -> (Vec core/NativeId)
+  (let [return-type: (U core/NativeId Nil) (core/functiondef-return-type function)
+        values: (Vec core/NativeId) (qbe-value-types function (ordered-blocks function))]
+    (if (nil? return-type) values (conj values return-type))))
+
+(defn reachable-aggregate-types
+  [types: (Vec core/TypeDef)
+   functions: (Vec core/FunctionDef)] -> (Vec core/TypeDef)
+  (let [roots: (Vec core/NativeId)
+        (loop [index: Int 0 result: (Vec core/NativeId) []]
+          (if (>= index (count functions))
+            result
+            (recur (+ index 1)
+              (core/append-ids result (function-type-ids (nth functions index))))))]
+    (loop [index: Int 0 result: (Vec core/TypeDef) []]
+      (if (>= index (count types))
+        result
+        (let [definition: core/TypeDef (nth types index)
+              type-id: core/NativeId (core/typedef-id definition)]
+          (recur (+ index 1)
+            (if (core/id-in? roots type-id)
+              (append-aggregate-closure types [] result type-id)
+              result)))))))
+
 (defn emit-record-members
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
@@ -701,16 +792,19 @@
 (defn emit-types
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
+   functions: (Vec core/FunctionDef)
    module-index: Int] -> String
-  (loop [index: Int 0 result: String ""]
-    (if (>= index (count types))
-      result
-      (let [definition: core/TypeDef (nth types index)
-            layout: (U core/LayoutDef Nil) (layout-for-type layouts (core/typedef-id definition))]
-        (if (or (nil? layout) (not (shape-aggregate? (core/typedef-shape definition))))
-          (recur (+ index 1) result)
-          (recur (+ index 1)
-            (str result (emit-aggregate-type types layouts module-index definition layout))))))))
+  (let [emitted: (Vec core/TypeDef) (reachable-aggregate-types types functions)]
+    (loop [index: Int 0 result: String ""]
+      (if (>= index (count emitted))
+        result
+        (let [definition: core/TypeDef (nth emitted index)
+              layout: (U core/LayoutDef Nil)
+              (layout-for-type layouts (core/typedef-id definition))]
+          (if (or (nil? layout) (not (shape-aggregate? (core/typedef-shape definition))))
+            (recur (+ index 1) result)
+            (recur (+ index 1)
+              (str result (emit-aggregate-type types layouts module-index definition layout)))))))))
 
 ;; --- value helpers --------------------------------------------------------
 
@@ -1616,7 +1710,7 @@
    layouts: (Vec core/LayoutDef)
    functions: (Vec core/FunctionDef)
    module-index: Int] -> String
-  (let [type-text: String (emit-types types layouts module-index)]
+  (let [type-text: String (emit-types types layouts functions module-index)]
     (str "# Generated by native.qbe; do not edit.\n"
       "# module " module-index "; shim ABI native_arena_alloc/native_vec_concat/native_trap\n\n"
       type-text

@@ -121,8 +121,9 @@
 (def slice-pair-variant: core/TypeVariant
   (core/->TypeVariant (slice-id "var-1-pair") "Some" (slice-id "type-3-par")))
 
+;; Shape sorts before Pair by identity, but its QBE definition must follow Pair's.
 (def slice-shape-type: core/TypeDef
-  (core/->TypeDef (slice-id "type-4-shp") "Shape"
+  (core/->TypeDef (slice-id "type-2-shp") "Shape"
     (core/->UnionType [slice-none-variant slice-pair-variant])))
 
 (def slice-ref-type: core/TypeDef
@@ -152,7 +153,7 @@
        (core/->FieldLayoutV0 (slice-id "fld-1-rght") (slice-id "type-0-i64") 8 8)])))
 
 (def slice-shape-layout: core/LayoutDef
-  (core/->LayoutDef (slice-id "lay-4-shp") (slice-id "type-4-shp") 24 8
+  (core/->LayoutDef (slice-id "lay-4-shp") (slice-id "type-2-shp") 24 8
     (core/->UnionShapeV0 (slice-id "type-1-tag") 0
       [(core/->UnionVariantLayoutV0 (slice-id "var-0-none") 0 nil 0)
        (core/->UnionVariantLayoutV0 (slice-id "var-1-pair") 1 (slice-id "type-3-par") 8)])))
@@ -289,7 +290,7 @@
 
 (def slice-switch-function: core/FunctionDef
   (core/->FunctionDef (slice-id "fn-2-swt") "tag"
-    [(core/->Parameter (slice-id "swt-p0-shp") (slice-id "type-4-shp"))]
+    [(core/->Parameter (slice-id "swt-p0-shp") (slice-id "type-2-shp"))]
     slice-switch-blocks
     (slice-id "swt-b0-ent")
     (slice-id "type-0-i64")
