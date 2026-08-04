@@ -10,7 +10,8 @@
 (define-mode strict)
 
 ;; One row of the canonical source-fact projection: subject and object name
-;; source nodes by ordinal; kind is "t" when the object is a literal text.
+;; source nodes by ordinal; kind "t" carries literal text and "e" its escaped
+;; delimiter-safe spelling.
 (defrecord SliceFactV0
   [subject: String
    predicate: String
@@ -35,6 +36,35 @@
       (if (= separator (char-at text index))
         (recur (+ index 1) (+ index 1) (conj parts (subs text start index)))
         (recur (+ index 1) start parts)))))
+
+(defn escaped-text [value: String] -> String
+  (loop [index: Int 0 decoded: String ""]
+    (if (>= index (count value))
+      decoded
+      (let [character: String (char-at value index)]
+        (if (= character "\\")
+          (if (>= (+ index 1) (count value))
+            (str decoded "\\")
+            (let [escape: String (char-at value (+ index 1))]
+              (recur (+ index 2)
+                (str decoded
+                  (cond
+                    (= escape "s") " "
+                    (= escape "t") "\t"
+                    (= escape "n") "\n"
+                    (= escape "r") "\r"
+                    (= escape "z") ""
+                    (= escape "\\") "\\"
+                    :else (str "\\" escape))))))
+          (recur (+ index 1) (str decoded character)))))))
+
+(defn text-row? [row: SliceFactV0] -> Bool
+  (or (= "t" (slicefactv0-kind row)) (= "e" (slicefactv0-kind row))))
+
+(defn row-text [row: SliceFactV0] -> String
+  (if (= "e" (slicefactv0-kind row))
+    (escaped-text (slicefactv0-object row))
+    (slicefactv0-object row)))
 
 (defn parse-row [line: String] -> (Vec SliceFactV0)
   (let [cells: (Vec String) (split-on line "\t")]
@@ -70,7 +100,7 @@
       (let [row: SliceFactV0 (nth rows index)
             with-subject: (Vec String) (conj-unique names (slicefactv0-subject row))]
         (recur (+ index 1)
-          (if (= "t" (slicefactv0-kind row))
+          (if (text-row? row)
             with-subject
             (conj-unique with-subject (slicefactv0-object row))))))))
 
@@ -82,8 +112,8 @@
             with-predicate: (Vec String)
             (conj-unique values (slicefactv0-predicate row))]
         (recur (+ index 1)
-          (if (= "t" (slicefactv0-kind row))
-            (conj-unique with-predicate (slicefactv0-object row))
+          (if (text-row? row)
+            (conj-unique with-predicate (row-text row))
             with-predicate))))))
 
 (defn slice-id
@@ -113,8 +143,8 @@
       nodes
       (let [row: SliceFactV0 (nth rows index)
             object: core/NativeId
-            (if (= "t" (slicefactv0-kind row))
-              (text-id (slicefactv0-object row))
+            (if (text-row? row)
+              (text-id (row-text row))
               (node-id (slicefactv0-object row)))]
         (recur (+ index 1)
           (conj nodes

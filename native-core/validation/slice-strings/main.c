@@ -7,6 +7,8 @@
    fn_10 tagged      fn_11 strip-at    fn_12 any-three?  fn_13 all-three?
    fn_14 any-none?   fn_15 all-none?   fn_16 any-one?    fn_17 all-one?
    fn_18 any-short-circuits?            fn_19 all-short-circuits?
+   fn_20 trim-byte?  fn_21 global-size  fn_22 parameter-shadow-size
+   fn_23 local-shadow-size
    type_1 Int  type_2 Bool  type_3 Text  type_4 Keyword */
 #include "module_0.h"
 
@@ -189,6 +191,21 @@ int main(int argc, char **argv) {
   }
   if (native_m0_fn_19(&arena, &capability, hello_a)) {
     return 35;
+  }
+  if (!native_m0_fn_20(text_of(" ")) ||
+      !native_m0_fn_20(text_of("\t")) ||
+      !native_m0_fn_20(text_of("\r")) ||
+      native_m0_fn_20(text_of("x"))) {
+    return 36;
+  }
+  if (native_m0_fn_21(&arena, &capability) != INT64_C(2)) {
+    return 37;
+  }
+  if (native_m0_fn_22(text_of("abc")) != INT64_C(3)) {
+    return 38;
+  }
+  if (native_m0_fn_23() != INT64_C(3)) {
+    return 39;
   }
   return 0;
 }

@@ -1,14 +1,39 @@
 ;; bin/beagle-ast JSON -> the source-fact projection, extended with bodies.
-;; Columns: subject TAB predicate TAB ("t" text | "n" node) TAB object; node "0"
-;; is the module root and ordinals come from a pre-order walk, so the projection
-;; is byte-stable for a given source file.
+;; Columns: subject TAB predicate TAB ("t" text | "e" escaped text | "n" node)
+;; TAB object; node "0" is the module root and ordinals come from a pre-order
+;; walk, so the projection is byte-stable for a given source file.
 (require '[cheshire.core :as json]
          '[clojure.string])
 
 (def counter (atom 0))
 (defn nid [] (str (swap! counter inc)))
 (def rows (atom (transient [])))
-(defn row! [s p k o] (swap! rows conj! [s p k o]))
+(defn escape-text [value]
+  (let [last-position (dec (count value))
+        unsafe? (or (empty? value)
+                    (some #{\tab \newline \return} value)
+                    (= \space (first value))
+                    (= \space (last value)))]
+    (if (not unsafe?)
+      value
+      (if (empty? value)
+        "\\z"
+        (apply str
+               (map-indexed
+                (fn [position character]
+                  (cond
+                    (= character \\) "\\\\"
+                    (= character \tab) "\\t"
+                    (= character \newline) "\\n"
+                    (= character \return) "\\r"
+                    (and (= character \space)
+                         (or (= position 0) (= position last-position))) "\\s"
+                    :else character))
+                value))))))
+(defn row! [s p k o]
+  (let [escaped (if (= "t" k) (escape-text o) o)]
+    (swap! rows conj! [s p (if (and (= "t" k) (not= escaped o)) "e" k)
+                       escaped])))
 
 (declare emit-ann emit-expr)
 
@@ -87,6 +112,8 @@
                         (row! n "body" "n" (emit-expr (first forms))))))
       "recur"   (do (row! n "form-kind" "t" "recur")
                     (row! n "args" "n" (emit-seq (get e "args") emit-expr)))
+      "vec"     (do (row! n "form-kind" "t" "vec")
+                    (row! n "items" "n" (emit-seq (get e "items") emit-expr)))
       (row! n "form-kind" "t" (str "unsupported-" (get e "node"))))
     n))
 
@@ -100,6 +127,10 @@
       "record" (do (row! n "form-kind" "t" "record")
                    (row! n "name" "t" (get f "name"))
                    (row! n "fields" "n" (emit-seq (get f "fields") emit-param)))
+      "def"    (do (row! n "form-kind" "t" "def")
+                   (row! n "name" "t" (get f "name"))
+                   (when-let [a (get f "ann")] (row! n "ann" "n" (emit-ann a)))
+                   (row! n "value" "n" (emit-expr (get f "value"))))
       "defn"   (do (row! n "form-kind" "t" "defn")
                    (row! n "name" "t" (get f "name"))
                    (when-let [op (get @native-ops (get f "name"))]
@@ -112,14 +143,18 @@
       nil)
     n))
 
-(let [[in out & annotations] *command-line-args*
+(let [[in out & arguments] *command-line-args*
+      include-defs? (some #{"--include-defs"} arguments)
+      annotations (remove #{"--include-defs"} arguments)
       ast (json/parse-string (slurp in))]
   (reset! native-ops
           (into {} (for [a annotations
                          :let [[name op] (clojure.string/split a #"=" 2)]]
                      [name op])))
   (doseq [f (get ast "forms")]
-    (when (#{"record" "defn"} (get f "node")) (emit-form f)))
+    (when (or (#{"record" "defn"} (get f "node"))
+              (and include-defs? (= "def" (get f "node"))))
+      (emit-form f)))
   (row! "0" "form-kind" "t" "module-root")
   (spit out (apply str (for [[s p k o] (persistent! @rows)]
                          (str s "\t" p "\t" k "\t" o "\n")))))

@@ -1,12 +1,19 @@
 stage source-seal ACCEPTED
 stage source-to-typed ACCEPTED
-world-types 12
-world-functions 3
-world-abis 3
-projected-types 8
+world-types 15
+world-functions 10
+world-abis 10
+projected-types 10
 lowered fn_0 char-at 3 blocks
-lowered fn_1 trim-character? 5 blocks
-lowered fn_2 strip-at 7 blocks
+lowered fn_1 split-on 13 blocks
+lowered fn_2 index-of 10 blocks
+lowered fn_3 last-index-of 12 blocks
+lowered fn_4 trim-character? 5 blocks
+lowered fn_5 trim-line 21 blocks
+lowered fn_6 join-strings 10 blocks
+lowered fn_7 digit-value 10 blocks
+lowered fn_8 parse-int 28 blocks
+lowered fn_9 strip-at 7 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts

@@ -35,6 +35,11 @@ _Static_assert(sizeof(native_m0_type_6) == 8, "layout size");
 _Static_assert(_Alignof(native_m0_type_6) == 8, "layout alignment");
 _Static_assert(offsetof(native_m0_type_6, tag) == 0, "union tag offset");
 
+/* vector of native_m0_type_3, stride 8 */
+typedef native_vec *native_m0_type_7;
+_Static_assert(sizeof(native_m0_type_7) == 8, "layout size");
+_Static_assert(_Alignof(native_m0_type_7) == 8, "layout alignment");
+
 native_m0_type_2 native_m0_fn_0(native_m0_type_3 native_v_0, native_m0_type_3 native_v_1);
 native_m0_type_1 native_m0_fn_1(native_m0_type_3 native_v_0);
 native_m0_type_3 native_m0_fn_2(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0, native_m0_type_1 native_v_1, native_m0_type_1 native_v_2);
@@ -55,5 +60,9 @@ native_m0_type_2 native_m0_fn_16(native_m0_type_2 native_v_0);
 native_m0_type_2 native_m0_fn_17(native_m0_type_2 native_v_0);
 native_m0_type_2 native_m0_fn_18(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0);
 native_m0_type_2 native_m0_fn_19(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0);
+native_m0_type_2 native_m0_fn_20(native_m0_type_3 native_v_0);
+native_m0_type_1 native_m0_fn_21(native_arena *arena, const native_capability *capability);
+native_m0_type_1 native_m0_fn_22(native_m0_type_3 native_v_0);
+native_m0_type_1 native_m0_fn_23(void);
 
 #endif

@@ -33,7 +33,7 @@ obligation-projection PASS bounded-effects
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-string?: no native lowering for this callee [atom?]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALLEE: term? calls a function whose own body is not lowered
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: term? arguments do not match its native parameters [triple]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-count: no native lowering for this callee [transaction-coordinate]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-pos?: no native lowering for this callee [transaction-coordinate]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-string?: no native lowering for this callee [transaction-coordinate?]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-ARGUMENTS: transaction-coordinate? arguments do not match its native parameters [occurrence-coordinate]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FREE-REFERENCE: op-ordinal is not a parameter or local binding [occurrence-coordinate?]

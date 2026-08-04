@@ -14,12 +14,14 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-strings.XXXXXX")"
+replay_art="${NATIVE_REPLAY_ARTIFACTS:-$scratch/replay}"
 trap 'rm -rf "${scratch:?}"' EXIT
+mkdir -p "$replay_art"
 
 facts_of() { # facts_of <source> <out.facts>
   "$repo/bin/beagle-ast" "$1" >"$scratch/ast.json"
   bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-    "$scratch/ast.json" "$2"
+    "$scratch/ast.json" "$2" --include-defs
 }
 
 # --- corpus projection: the source is in this repo, so always regenerate ----
@@ -32,13 +34,14 @@ fi
 cp "$scratch/text_ops.facts" "$art/text_ops.facts"
 
 # --- replay projection: real fram source, re-derived only on request -------
-replay_forms=(char-at "trim-character?" strip-at)
+replay_forms=(digit-table no-strings char-at split-on index-of last-index-of
+  "trim-character?" trim-line join-strings IntParse digit-value parse-int strip-at)
 if [[ -n "${FRAM_REPLAY:-}" ]]; then
   "$repo/bin/beagle-ast" "$FRAM_REPLAY" >"$scratch/replay.json"
   bb "$here/select-forms.clj" "$scratch/replay.json" "$scratch/replay-sel.json" \
     "${replay_forms[@]}"
   bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
-    "$scratch/replay-sel.json" "$scratch/replay_text.facts"
+    "$scratch/replay-sel.json" "$scratch/replay_text.facts" --include-defs
   if [[ -f "$art/replay_text.facts" ]] \
      && ! cmp -s "$scratch/replay_text.facts" "$art/replay_text.facts"; then
     echo "drive.sh: fram.fri-replay text helpers drifted from the committed projection" >&2
@@ -82,7 +85,7 @@ clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
     \"native-slice-strings-v0\"))
 (spit \"$art/replay-report.txt\"
   (native.body-slice/emit-slice! \"$art/replay_text.facts\" \"fram.fri-replay\"
-    \"fram:src/fram/fri_replay.bclj\" \"$scratch\"
+    \"fram:src/fram/fri_replay.bclj\" \"$replay_art\"
     \"native-slice-strings-v0\"))"
 
 cat "$art/report.txt"
@@ -121,4 +124,22 @@ if [ -n "$clang_bin" ]; then
   echo "drive.sh: clang $("$clang_bin" -dumpversion) compile + run ok"
 else
   echo "drive.sh: clang not found — second frontend NOT exercised" >&2
+fi
+
+replay_build="$scratch/replay-c"
+mkdir -p "$replay_build"
+cp "$replay_art/module_0.h" "$replay_art/module_0.c" "$here/replay_main.c" \
+  "$replay_build/"
+cp "$repo/native-core/shim/native_shim.c" "$repo/native-core/shim/native_shim.h" \
+  "$replay_build/"
+( cd "$replay_build" && gcc "${strict[@]}" -o replay_gcc \
+    module_0.c native_shim.c replay_main.c )
+( cd "$replay_build" && ./replay_gcc )
+echo "drive.sh: replay helpers gcc strict compile + run ok"
+
+if [ -n "$clang_bin" ]; then
+  ( cd "$replay_build" && "$clang_bin" -std=c17 -Werror -o replay_clang \
+      module_0.c native_shim.c replay_main.c )
+  ( cd "$replay_build" && ./replay_clang )
+  echo "drive.sh: replay helpers clang compile + run ok"
 fi

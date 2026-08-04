@@ -1,8 +1,9 @@
 #lang beagle/clj
-;; Text/Keyword corpus plus the Boolean control flow used by FRI text helpers.
-;; No loop, arithmetic or vector form appears: those belong to other tiers.
+;; Text/Keyword corpus plus FRI Boolean control flow and immutable globals.
 (ns native.text-ops)
 (define-mode strict)
+
+(def sample-values: (Vec String) ["left" "right"])
 
 (defn text-equal?
   [left: String
@@ -74,3 +75,14 @@
 
 (defn all-short-circuits? [value: String] -> Bool
   (and true false (= (subs value 0 999) value)))
+
+(defn trim-byte? [character: String] -> Bool
+  (or (= character " ") (= character "\t") (= character "\r")))
+
+(defn global-size [] -> Int (count sample-values))
+
+(defn parameter-shadow-size [sample-values: String] -> Int
+  (count sample-values))
+
+(defn local-shadow-size [] -> Int
+  (let [sample-values: String "abc"] (count sample-values)))

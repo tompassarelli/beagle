@@ -13,6 +13,24 @@ _Static_assert(offsetof(struct native_m0_text_2_blob, bytes) == 8, "text blob is
 struct native_m0_text_3_blob { uint64_t length; uint8_t bytes[sizeof "@"]; };
 static const struct native_m0_text_3_blob native_m0_text_3 = { (uint64_t)(sizeof "@" - 1U), "@" };
 _Static_assert(offsetof(struct native_m0_text_3_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_4_blob { uint64_t length; uint8_t bytes[sizeof " "]; };
+static const struct native_m0_text_4_blob native_m0_text_4 = { (uint64_t)(sizeof " " - 1U), " " };
+_Static_assert(offsetof(struct native_m0_text_4_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_5_blob { uint64_t length; uint8_t bytes[sizeof "\t"]; };
+static const struct native_m0_text_5_blob native_m0_text_5 = { (uint64_t)(sizeof "\t" - 1U), "\t" };
+_Static_assert(offsetof(struct native_m0_text_5_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_6_blob { uint64_t length; uint8_t bytes[sizeof "\r"]; };
+static const struct native_m0_text_6_blob native_m0_text_6 = { (uint64_t)(sizeof "\r" - 1U), "\r" };
+_Static_assert(offsetof(struct native_m0_text_6_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_7_blob { uint64_t length; uint8_t bytes[sizeof "left"]; };
+static const struct native_m0_text_7_blob native_m0_text_7 = { (uint64_t)(sizeof "left" - 1U), "left" };
+_Static_assert(offsetof(struct native_m0_text_7_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_8_blob { uint64_t length; uint8_t bytes[sizeof "right"]; };
+static const struct native_m0_text_8_blob native_m0_text_8 = { (uint64_t)(sizeof "right" - 1U), "right" };
+_Static_assert(offsetof(struct native_m0_text_8_blob, bytes) == 8, "text blob is length-prefixed");
+struct native_m0_text_9_blob { uint64_t length; uint8_t bytes[sizeof "abc"]; };
+static const struct native_m0_text_9_blob native_m0_text_9 = { (uint64_t)(sizeof "abc" - 1U), "abc" };
+_Static_assert(offsetof(struct native_m0_text_9_blob, bytes) == 8, "text blob is length-prefixed");
 /* keyword table, sealed at lowering; a handle is its index.
    0 = assert
    1 = retract
@@ -329,4 +347,73 @@ native_l19_3: ;
   goto native_l19_4;
 native_l19_4: ;
   return native_s_8;
+}
+native_m0_type_2 native_m0_fn_20(native_m0_type_3 native_v_0) {
+  native_m0_type_3 native_s_0;
+  native_m0_type_2 native_s_1;
+  native_m0_type_3 native_s_2;
+  native_m0_type_2 native_s_3;
+  native_m0_type_3 native_s_4;
+  native_m0_type_2 native_s_5;
+  native_m0_type_2 native_s_6;
+  native_m0_type_2 native_s_7;
+  native_s_0 = (uint64_t)(uintptr_t)&native_m0_text_4;
+  native_s_1 = native_text_eq(native_v_0, native_s_0);
+  if (native_s_1) {
+    goto native_l20_3;
+  } else {
+    goto native_l20_1;
+  }
+native_l20_1: ;
+  native_s_2 = (uint64_t)(uintptr_t)&native_m0_text_5;
+  native_s_3 = native_text_eq(native_v_0, native_s_2);
+  if (native_s_3) {
+    goto native_l20_3;
+  } else {
+    goto native_l20_2;
+  }
+native_l20_2: ;
+  native_s_4 = (uint64_t)(uintptr_t)&native_m0_text_6;
+  native_s_5 = native_text_eq(native_v_0, native_s_4);
+  native_s_7 = native_s_5;
+  goto native_l20_4;
+native_l20_3: ;
+  native_s_6 = true;
+  native_s_7 = native_s_6;
+  goto native_l20_4;
+native_l20_4: ;
+  return native_s_7;
+}
+native_m0_type_1 native_m0_fn_21(native_arena *arena, const native_capability *capability) {
+  (void)capability;
+  native_m0_type_0 native_s_0;
+  native_m0_type_3 native_s_1;
+  native_m0_type_3 native_s_2;
+  native_m0_type_1 native_s_3;
+  native_m0_type_7 native_s_4;
+  native_m0_type_7 native_s_5;
+  native_m0_type_7 native_s_6;
+  native_m0_type_1 native_s_7;
+  native_s_0 = arena;
+  (void)native_s_0;
+  native_s_1 = (uint64_t)(uintptr_t)&native_m0_text_7;
+  native_s_2 = (uint64_t)(uintptr_t)&native_m0_text_8;
+  native_s_3 = INT64_C(2);
+  native_s_4 = native_vec_new((native_arena *)native_s_0, native_s_3, INT64_C(8), (size_t)8);
+  native_s_5 = native_vec_push((native_arena *)native_s_0, native_s_4, &native_s_1, INT64_C(8), (size_t)8);
+  native_s_6 = native_vec_push((native_arena *)native_s_0, native_s_5, &native_s_2, INT64_C(8), (size_t)8);
+  native_s_7 = native_vec_length(native_s_6);
+  return native_s_7;
+}
+native_m0_type_1 native_m0_fn_22(native_m0_type_3 native_v_0) {
+  native_m0_type_1 native_s_0;
+  native_s_0 = (int64_t)native_text_length(native_v_0);
+  return native_s_0;
+}
+native_m0_type_1 native_m0_fn_23(void) {
+  native_m0_type_3 native_s_0;
+  native_m0_type_1 native_s_1;
+  native_s_0 = (uint64_t)(uintptr_t)&native_m0_text_9;
+  native_s_1 = (int64_t)native_text_length(native_s_0);
+  return native_s_1;
 }
