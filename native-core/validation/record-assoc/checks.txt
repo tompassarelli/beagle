@@ -1,0 +1,2 @@
+gcc 15.2.0 -std=c17 -pedantic -Wall -Wextra -Werror compile+run PASS
+clang 21.1.8 -std=c17 -pedantic -Wall -Wextra -Werror compile+run PASS

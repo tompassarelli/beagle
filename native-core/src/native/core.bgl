@@ -373,6 +373,15 @@
   (RecordInstruction
     [result: SsaValueV0
      field-ids: (Vec NativeId)])
+  ;; Immutable record update copies the source into fresh arena storage before
+  ;; replacing one statically identified field; the result keeps the by-value
+  ;; record ABI while the allocation remains explicit in the world.
+  (RecordAssocInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     field-id: NativeId
+     value-id: NativeId
+     arena-id: NativeId])
   ;; Records enter recursive unions through an arena-owned reference, so the
   ;; reference edge that closes their layout is represented in the world.
   (BoxRecordInstruction
@@ -806,6 +815,8 @@
     [(FieldInstruction result source-id field-id) (ssavaluev0-id result)]
     [(VariantValueInstruction result source-id variant-id) (ssavaluev0-id result)]
     [(RecordInstruction result field-ids) (ssavaluev0-id result)]
+    [(RecordAssocInstructionV0 result source-id field-id value-id arena-id)
+     (ssavaluev0-id result)]
     [(BoxRecordInstruction result source-id arena-id) (ssavaluev0-id result)]
     [(UnionConstructInstruction result variant-id payload-id)
      (ssavaluev0-id result)]
@@ -866,6 +877,140 @@
 (defn instruction-result-ids [instructions :- (Vec Instruction)] :- (Vec NativeId)
   (mapv (fn [instruction :- Instruction] :- NativeId (instruction-result-id instruction))
     instructions))
+
+(defn type-definition-with-id
+  [types: (Vec TypeDef)
+   target: NativeId] -> (U TypeDef Nil)
+  (loop [position: Int 0]
+    (if (>= position (count types))
+      nil
+      (let [definition: TypeDef (nth types position)]
+        (if (native-id= target (typedef-id definition))
+          definition
+          (recur (+ position 1)))))))
+
+(defn record-field-with-id
+  [types: (Vec TypeDef)
+   owner: NativeId
+   target: NativeId] -> (U TypeField Nil)
+  (let [definition: (U TypeDef Nil) (type-definition-with-id types owner)]
+    (if (nil? definition)
+      nil
+      (let [shape: TypeShape (typedef-shape definition)]
+        (if (not (instance? native.core.RecordType shape))
+          nil
+          (loop [position: Int 0 fields: (Vec TypeField) (recordtype-fields shape)]
+            (if (>= position (count fields))
+              nil
+              (let [field: TypeField (nth fields position)]
+                (if (native-id= target (typefield-id field))
+                  field
+                  (recur (+ position 1) fields))))))))))
+
+(defn parameters-value-type
+  [parameters: (Vec Parameter)
+   target: NativeId] -> (U NativeId Nil)
+  (loop [position: Int 0]
+    (if (>= position (count parameters))
+      nil
+      (let [parameter: Parameter (nth parameters position)]
+        (if (native-id= target (parameter-id parameter))
+          (parameter-type-id parameter)
+          (recur (+ position 1)))))))
+
+(defn instructions-value-type
+  [instructions: (Vec Instruction)
+   target: NativeId] -> (U NativeId Nil)
+  (loop [position: Int 0]
+    (if (>= position (count instructions))
+      nil
+      (let [result: SsaValueV0 (get (nth instructions position) :result)]
+        (if (native-id= target (ssavaluev0-id result))
+          (ssavaluev0-type-id result)
+          (recur (+ position 1)))))))
+
+(defn block-value-type
+  [block: BasicBlock
+   target: NativeId] -> (U NativeId Nil)
+  (let [parameter-type: (U NativeId Nil)
+        (parameters-value-type (basicblock-parameters block) target)]
+    (if (nil? parameter-type)
+      (instructions-value-type (basicblock-instructions block) target)
+      parameter-type)))
+
+(defn function-value-type
+  [function: FunctionDef
+   target: NativeId] -> (U NativeId Nil)
+  (let [parameter-type: (U NativeId Nil)
+        (parameters-value-type (functiondef-parameters function) target)]
+    (if (some? parameter-type)
+      parameter-type
+      (loop [position: Int 0 blocks: (Vec BasicBlock) (functiondef-blocks function)]
+        (if (>= position (count blocks))
+          nil
+          (let [value-type: (U NativeId Nil)
+                (block-value-type (nth blocks position) target)]
+            (if (nil? value-type)
+              (recur (+ position 1) blocks)
+              value-type)))))))
+
+(defn block-produces-arena?
+  [block: BasicBlock
+   target: NativeId] -> Bool
+  (loop [position: Int 0 instructions: (Vec Instruction)
+         (basicblock-instructions block)]
+    (if (>= position (count instructions))
+      false
+      (let [instruction: Instruction (nth instructions position)]
+        (if (and (instance? native.core.ArenaInstruction instruction)
+              (native-id= target (instruction-result-id instruction)))
+          true
+          (recur (+ position 1) instructions))))))
+
+(defn function-produces-arena?
+  [function: FunctionDef
+   target: NativeId] -> Bool
+  (loop [position: Int 0 blocks: (Vec BasicBlock) (functiondef-blocks function)]
+    (if (>= position (count blocks))
+      false
+      (if (block-produces-arena? (nth blocks position) target)
+        true
+        (recur (+ position 1) blocks)))))
+
+(defn record-assoc-instruction-valid?
+  [types: (Vec TypeDef)
+   function: FunctionDef
+   instruction: Instruction] -> Bool
+  (if (not (instance? native.core.RecordAssocInstructionV0 instruction))
+    true
+    (let [result: SsaValueV0 (recordassocinstructionv0-result instruction)
+          owner: NativeId (ssavaluev0-type-id result)
+          source-type: (U NativeId Nil)
+          (function-value-type function
+            (recordassocinstructionv0-source-id instruction))
+          value-type: (U NativeId Nil)
+          (function-value-type function
+            (recordassocinstructionv0-value-id instruction))
+          field: (U TypeField Nil)
+          (record-field-with-id types owner
+            (recordassocinstructionv0-field-id instruction))]
+      (if (or (nil? source-type) (nil? value-type) (nil? field))
+        false
+        (and (native-id= owner source-type)
+          (native-id= value-type (typefield-type-id field))
+          (function-produces-arena? function
+            (recordassocinstructionv0-arena-id instruction)))))))
+
+(defn function-record-assocs-valid?
+  [types: (Vec TypeDef)
+   function: FunctionDef] -> Bool
+  (every?
+    (fn [block: BasicBlock] -> Bool
+      (every?
+        (fn [instruction: Instruction] -> Bool
+          (record-assoc-instruction-valid? types function instruction))
+        (basicblock-instructions block)))
+    (functiondef-blocks function)))
 
 (defn type-shape-owned-ids [shape :- TypeShape] :- (Vec NativeId)
   (match shape
@@ -1151,6 +1296,8 @@
     [(VariantValueInstruction result source-id variant-id)
      (id-in? known-owned variant-id)]
     [(RecordInstruction result field-ids) true]
+    [(RecordAssocInstructionV0 result source-id field-id value-id arena-id)
+     (id-in? known-owned field-id)]
     [(BoxRecordInstruction result source-id arena-id) true]
     [(UnionConstructInstruction result variant-id payload-id)
      (id-in? known-owned variant-id)]
@@ -1236,6 +1383,7 @@
 
 (defn function-reference-closed?
   [function :- FunctionDef
+   types :- (Vec TypeDef)
    known-types :- (Vec NativeId)
    known-effects :- (Vec NativeId)
    known-regions :- (Vec NativeId)
@@ -1250,11 +1398,13 @@
       (ids-in? (functiondef-effects function) known-effects)
       (ids-in? (functiondef-regions function) known-regions)
       (ids-in? (functiondef-capabilities function) known-capabilities)
+      (function-record-assocs-valid? types function)
       (every? (fn [block :- BasicBlock] :- Bool (block-reference-closed? block known-types known-functions known-abis known-regions known-capabilities known-owned known-blocks))
         blocks))))
 
 (defn functions-reference-closed?
   [functions :- (Vec FunctionDef)
+   types :- (Vec TypeDef)
    known-types :- (Vec NativeId)
    known-effects :- (Vec NativeId)
    known-regions :- (Vec NativeId)
@@ -1262,7 +1412,7 @@
    known-abis :- (Vec NativeId)
    known-owned :- (Vec NativeId)] :- Bool
   (let [known-functions :- (Vec NativeId) (function-ids functions)]
-    (every? (fn [function :- FunctionDef] :- Bool (function-reference-closed? function known-types known-effects known-regions known-capabilities known-functions known-abis known-owned))
+    (every? (fn [function :- FunctionDef] :- Bool (function-reference-closed? function types known-types known-effects known-regions known-capabilities known-functions known-abis known-owned))
       functions)))
 
 (defn world-reference-closed? [world :- NativeWorld] :- Bool
@@ -1273,6 +1423,7 @@
       (capabilities-refs-closed? capabilities known-regions)
       (layouts-refs-closed? (nativeworld-layouts world) types)
       (functions-reference-closed? (nativeworld-functions world)
+        types
         known-types
         known-effects
         known-regions
@@ -1345,6 +1496,8 @@
     [(FieldInstruction result source-id field-id) [source-id]]
     [(VariantValueInstruction result source-id variant-id) [source-id]]
     [(RecordInstruction result field-ids) field-ids]
+    [(RecordAssocInstructionV0 result source-id field-id value-id arena-id)
+     [arena-id source-id value-id]]
     [(BoxRecordInstruction result source-id arena-id) [arena-id source-id]]
     [(UnionConstructInstruction result variant-id payload-id)
      (if (nil? payload-id) [] [payload-id])]
@@ -1469,6 +1622,7 @@
     [(FieldInstruction result source-id field-id) true]
     [(VariantValueInstruction result source-id variant-id) true]
     [(RecordInstruction result field-ids) true]
+    [(RecordAssocInstructionV0 result source-id field-id value-id arena-id) true]
     [(BoxRecordInstruction result source-id arena-id) true]
     [(UnionConstructInstruction result variant-id payload-id) true]
     [(UnionExtractInstruction result source-id variant-id) true]

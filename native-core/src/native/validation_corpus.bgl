@@ -153,6 +153,184 @@
 (def dangling-ssa-world :- core/NativeWorld
   (with valid-world [:functions [dangling-ssa-function]]))
 
+;; Closed record-assoc corpus: the valid case fixes source/result ownership,
+;; field membership, replacement type, and a real ArenaInstruction producer.
+;; Each negative changes exactly one of those facts while keeping references
+;; and SSA IDs otherwise closed.
+(def assoc-arena-type :- core/TypeDef
+  (core/->TypeDef (corpus-id "assoc-type-arena") "ArenaHandle"
+    (core/->ReferenceType (corpus-id "assoc-type-arena"))))
+
+(def assoc-left-field :- core/TypeField
+  (core/->TypeField (corpus-id "assoc-field-left") "left"
+    (corpus-id "type-i64")))
+
+(def assoc-right-field :- core/TypeField
+  (core/->TypeField (corpus-id "assoc-field-right") "right"
+    (corpus-id "type-i64")))
+
+(def assoc-pair-type :- core/TypeDef
+  (core/->TypeDef (corpus-id "assoc-type-pair") "Pair"
+    (core/->RecordType [assoc-left-field assoc-right-field])))
+
+(def assoc-foreign-field :- core/TypeField
+  (core/->TypeField (corpus-id "assoc-field-foreign") "foreign"
+    (corpus-id "type-i64")))
+
+(def assoc-foreign-type :- core/TypeDef
+  (core/->TypeDef (corpus-id "assoc-type-foreign") "Foreign"
+    (core/->RecordType [assoc-foreign-field])))
+
+(def assoc-arena-layout :- core/LayoutDef
+  (core/->LayoutDef (corpus-id "assoc-layout-arena")
+    (corpus-id "assoc-type-arena") 8 8
+    (core/->ReferenceShapeV0 (corpus-id "assoc-type-arena"))))
+
+(def assoc-pair-layout :- core/LayoutDef
+  (core/->LayoutDef (corpus-id "assoc-layout-pair")
+    (corpus-id "assoc-type-pair") 16 8
+    (core/->RecordShapeV0
+      [(core/->FieldLayoutV0 (corpus-id "assoc-field-left")
+         (corpus-id "type-i64") 0 8)
+       (core/->FieldLayoutV0 (corpus-id "assoc-field-right")
+         (corpus-id "type-i64") 8 8)])))
+
+(def assoc-foreign-layout :- core/LayoutDef
+  (core/->LayoutDef (corpus-id "assoc-layout-foreign")
+    (corpus-id "assoc-type-foreign") 8 8
+    (core/->RecordShapeV0
+      [(core/->FieldLayoutV0 (corpus-id "assoc-field-foreign")
+         (corpus-id "type-i64") 0 8)])))
+
+(def assoc-region :- core/RegionDef
+  (core/->RegionDef (corpus-id "assoc-region") (core/arena-region-kind) nil))
+
+(def assoc-capability :- core/CapabilityDef
+  (core/->CapabilityDef (corpus-id "assoc-capability")
+    (core/->AllocateCapability true) (corpus-id "assoc-region") true))
+
+(def assoc-effect :- core/EffectDef
+  (core/->EffectDef (corpus-id "assoc-effect")
+    (core/->AllocateEffect (corpus-id "assoc-region"))))
+
+(def assoc-arena-instruction :- core/Instruction
+  (core/->ArenaInstruction
+    (core/->SsaValueV0 (corpus-id "assoc-ssa-arena")
+      (corpus-id "assoc-type-arena"))
+    (corpus-id "assoc-region")
+    (corpus-id "assoc-capability")
+    (core/->TokenFlowV0
+      [(corpus-id "assoc-region") (corpus-id "assoc-capability")]
+      [])))
+
+(def assoc-instruction :- core/Instruction
+  (core/->RecordAssocInstructionV0
+    (core/->SsaValueV0 (corpus-id "assoc-ssa-result")
+      (corpus-id "assoc-type-pair"))
+    (corpus-id "assoc-ssa-source")
+    (corpus-id "assoc-field-right")
+    (corpus-id "assoc-ssa-value")
+    (corpus-id "assoc-ssa-arena")))
+
+(def assoc-block :- core/BasicBlock
+  (core/->BasicBlock (corpus-id "assoc-block") []
+    [assoc-arena-instruction assoc-instruction]
+    [(core/return-terminator (corpus-id "assoc-ssa-result"))]))
+
+(def assoc-function :- core/FunctionDef
+  (core/->FunctionDef (corpus-id "assoc-function") "assoc-right"
+    [(core/->Parameter (corpus-id "assoc-ssa-source")
+       (corpus-id "assoc-type-pair"))
+     (core/->Parameter (corpus-id "assoc-ssa-value")
+       (corpus-id "type-i64"))]
+    [assoc-block]
+    (corpus-id "assoc-block")
+    (corpus-id "assoc-type-pair")
+    [(corpus-id "assoc-effect")]
+    [(corpus-id "assoc-region")]
+    [(corpus-id "assoc-capability")]))
+
+(def record-assoc-world :- core/NativeWorld
+  (core/->NativeWorld (corpus-id "assoc-world") nil "native-core-v0-record-assoc"
+    [assoc-pair-type assoc-foreign-type assoc-arena-type
+     corpus-i64-type corpus-f64-type]
+    [assoc-effect]
+    [assoc-region]
+    [assoc-capability]
+    [assoc-pair-layout assoc-foreign-layout assoc-arena-layout
+     corpus-i64-layout corpus-f64-layout]
+    [assoc-function]
+    [(corpus-id "assoc-effect")]
+    [(corpus-id "assoc-region")]
+    [(corpus-id "assoc-capability")]
+    []
+    []))
+
+(def assoc-bad-field-instruction :- core/Instruction
+  (with assoc-instruction [:field-id (corpus-id "assoc-field-foreign")]))
+
+(def assoc-bad-field-block :- core/BasicBlock
+  (with assoc-block
+    [:instructions [assoc-arena-instruction assoc-bad-field-instruction]]))
+
+(def assoc-bad-field-function :- core/FunctionDef
+  (with assoc-function [:blocks [assoc-bad-field-block]]))
+
+(def record-assoc-bad-field-world :- core/NativeWorld
+  (with record-assoc-world [:functions [assoc-bad-field-function]]))
+
+(def assoc-bad-value-parameter :- core/Parameter
+  (core/->Parameter (corpus-id "assoc-ssa-value") (corpus-id "type-f64")))
+
+(def assoc-bad-type-function :- core/FunctionDef
+  (with assoc-function
+    [:parameters
+     [(core/->Parameter (corpus-id "assoc-ssa-source")
+        (corpus-id "assoc-type-pair"))
+      assoc-bad-value-parameter]]))
+
+(def record-assoc-bad-type-world :- core/NativeWorld
+  (with record-assoc-world [:functions [assoc-bad-type-function]]))
+
+(def assoc-bad-arena-instruction :- core/Instruction
+  (with assoc-instruction [:arena-id (corpus-id "assoc-ssa-source")]))
+
+(def assoc-bad-arena-block :- core/BasicBlock
+  (with assoc-block
+    [:instructions [assoc-arena-instruction assoc-bad-arena-instruction]]))
+
+(def assoc-bad-arena-function :- core/FunctionDef
+  (with assoc-function [:blocks [assoc-bad-arena-block]]))
+
+(def record-assoc-bad-arena-world :- core/NativeWorld
+  (with record-assoc-world [:functions [assoc-bad-arena-function]]))
+
+(def assoc-bad-source-parameter :- core/Parameter
+  (core/->Parameter (corpus-id "assoc-ssa-source")
+    (corpus-id "assoc-type-foreign")))
+
+(def assoc-bad-source-function :- core/FunctionDef
+  (with assoc-function
+    [:parameters
+     [assoc-bad-source-parameter
+      (core/->Parameter (corpus-id "assoc-ssa-value")
+        (corpus-id "type-i64"))]]))
+
+(def record-assoc-bad-source-world :- core/NativeWorld
+  (with record-assoc-world [:functions [assoc-bad-source-function]]))
+
+(def record-assoc-corpus-passes? :- Bool
+  (and
+    (core/validationreport-passed (core/validate-world record-assoc-world))
+    (not (core/validationreport-passed
+      (core/validate-world record-assoc-bad-field-world)))
+    (not (core/validationreport-passed
+      (core/validate-world record-assoc-bad-type-world)))
+    (not (core/validationreport-passed
+      (core/validate-world record-assoc-bad-arena-world)))
+    (not (core/validationreport-passed
+      (core/validate-world record-assoc-bad-source-world)))))
+
 (def corpus-result :- CorpusResult
   (->CorpusResult (core/validationreport-passed (core/validate-world valid-world))
     (not (core/validationreport-passed (core/validate-world duplicate-id-world)))
@@ -176,4 +354,5 @@
     (corpusresult-ssa-rejected corpus-result)
     (corpusresult-canonical-deterministic corpus-result)
     (corpusresult-canonical-separated corpus-result)
-    (corpusresult-i64-f64-distinct corpus-result)))
+    (corpusresult-i64-f64-distinct corpus-result)
+    record-assoc-corpus-passes?))

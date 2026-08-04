@@ -2920,6 +2920,43 @@
     (and (not (nil? definition))
       (instance? native.core.VectorType (core/typedef-shape definition)))))
 
+(defn record-type?
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> Bool
+  (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
+    (and (not (nil? definition))
+      (instance? native.core.RecordType (core/typedef-shape definition)))))
+
+(defn source-ref-type
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   expr: core/NativeId] -> (U core/NativeId Nil)
+  (let [index: SourceIndexV0 (bodyenvv0-index env)]
+    (if (not (= "ref" (fact-text index expr "form-kind")))
+      nil
+      (let [name: String (fact-text index expr "name")
+            direct: (U LocalBindingV0 Nil)
+            (find-local (bodystatev0-locals state) name)
+            canonical: String
+            (resolved-source-key
+              (resolve-source-name index (body-owner-module env owner) name))
+            binding: (U LocalBindingV0 Nil)
+            (if (some? direct)
+              direct
+              (find-local (bodystatev0-locals state) canonical))]
+        (if (nil? binding) nil (localbindingv0-type-id binding))))))
+
+(defn source-ref-record?
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   expr: core/NativeId] -> Bool
+  (let [source-type: (U core/NativeId Nil)
+        (source-ref-type env owner state expr)]
+    (and (not (nil? source-type))
+      (record-type? (bodyenvv0-types env) source-type))))
+
 (defn vector-element-of
   [types: (Vec core/TypeDef)
    target: core/NativeId] -> core/NativeId
@@ -3164,6 +3201,7 @@
       (instance? native.core.SetConjInstructionV0 instruction)
       (instance? native.core.SetDisjInstructionV0 instruction)
       (instance? native.core.SetVectorInstructionV0 instruction)
+      (instance? native.core.RecordAssocInstructionV0 instruction)
       (instance? native.core.BoxRecordInstruction instruction)
       (instance? native.core.AllocateInstruction instruction)
       (instance? native.core.AtomCreateInstruction instruction)
@@ -5970,6 +6008,81 @@
                 (source-call-named? index (nth args 1) "repeat"))))
             (fail-result state
               "TODO-NATIVE-APPLY: no frozen Fram function requires dynamic argument spreading")
+
+            (and (= "assoc" callee) (> (count args) 0)
+              (source-ref-record? env owner state (nth args 0)))
+            (if (or (< (count args) 3) (= 0 (mod (count args) 2)))
+              (fail-result state
+                "TODO-NATIVE-RECORD-ASSOC-ARITY: assoc takes a record and one or more key/value pairs")
+              (let [source: ExprResultV0
+                    (lower-expr env owner state (nth args 0))]
+                (cond
+                  (exprresultv0-terminated source) source
+                  (state-blocked? (exprresultv0-state source))
+                  (dead-result (exprresultv0-state source))
+                  (not (record-type? types (exprresultv0-type-id source)))
+                  (fail-result (exprresultv0-state source)
+                    "TODO-NATIVE-RECORD-ASSOC-SOURCE: assoc lowers only for a closed record source")
+                  :else
+                  (loop [position: Int 1
+                         current: BodyStateV0 (exprresultv0-state source)
+                         current-id: core/NativeId (exprresultv0-value-id source)
+                         record-type: core/NativeId (exprresultv0-type-id source)]
+                    (if (or (>= position (count args)) (state-blocked? current))
+                      (if (state-blocked? current)
+                        (dead-result current)
+                        (->ExprResultV0 current current-id record-type false))
+                      (let [key: core/NativeId (nth args position)
+                            literal-key: Bool
+                            (and (= "literal" (fact-text index key "form-kind"))
+                              (= "keyword" (fact-text index key "literal-kind")))]
+                        (if (not literal-key)
+                          (fail-result current
+                            "TODO-NATIVE-RECORD-ASSOC-KEY: record assoc requires a literal keyword")
+                          (let [keyword: String (fact-text index key "value")
+                                field: AccessorHitV0
+                                (record-keyword-field types record-type keyword)]
+                            (if (or (not (accessorhitv0-found field))
+                                  (not (same-id? record-type
+                                    (accessorhitv0-owner-type field))))
+                              (fail-result current
+                                (str "TODO-NATIVE-RECORD-ASSOC-FIELD: " keyword
+                                  " is not a field of the source record"))
+                              (let [replacement: ExprResultV0
+                                    (lower-expr env owner current
+                                      (nth args (+ position 1)))]
+                                (cond
+                                  (exprresultv0-terminated replacement) replacement
+                                  (state-blocked? (exprresultv0-state replacement))
+                                  (dead-result (exprresultv0-state replacement))
+                                  :else
+                                  (let [coerced: ExprResultV0
+                                        (lower-boundary-coerce types owner
+                                          (exprresultv0-state replacement)
+                                          (exprresultv0-value-id replacement)
+                                          (exprresultv0-type-id replacement)
+                                          (accessorhitv0-field-type field))
+                                        settled: BodyStateV0
+                                        (exprresultv0-state coerced)]
+                                    (if (or (state-blocked? settled)
+                                          (not (same-id?
+                                            (exprresultv0-type-id coerced)
+                                            (accessorhitv0-field-type field))))
+                                      (fail-result settled
+                                        (str "TODO-NATIVE-RECORD-ASSOC-TYPE: " keyword
+                                          " replacement does not match its declared field type"))
+                                      (let [result-id: core/NativeId
+                                            (state-id settled owner "record-assoc")
+                                            next-state: BodyStateV0
+                                            (state-emit (state-bump settled)
+                                              (core/->RecordAssocInstructionV0
+                                                (core/->SsaValueV0 result-id record-type)
+                                                current-id
+                                                (accessorhitv0-field-id field)
+                                                (exprresultv0-value-id coerced)
+                                                (arena-value-id owner)))]
+                                        (recur (+ position 2) next-state result-id
+                                          record-type)))))))))))))))
 
             (= "reduce" callee)
             (if (not (= 3 (count args)))
@@ -9958,6 +10071,14 @@
     (worlds/canonical-record "record-instruction"
       [(encode-ssa-value (core/recordinstruction-result instruction))
        (encode-id-roots "fields" (core/recordinstruction-field-ids instruction))])
+
+    (instance? native.core.RecordAssocInstructionV0 instruction)
+    (worlds/canonical-record "record-assoc-instruction-v0"
+      [(encode-ssa-value (core/recordassocinstructionv0-result instruction))
+       (id-value (core/recordassocinstructionv0-source-id instruction))
+       (id-value (core/recordassocinstructionv0-field-id instruction))
+       (id-value (core/recordassocinstructionv0-value-id instruction))
+       (id-value (core/recordassocinstructionv0-arena-id instruction))])
 
     (instance? native.core.BoxRecordInstruction instruction)
     (worlds/canonical-record "box-record-instruction"

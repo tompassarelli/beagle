@@ -169,6 +169,7 @@
     (instance? native.core.CompareInstruction instruction) true
     (instance? native.core.FieldInstruction instruction) true
     (instance? native.core.RecordInstruction instruction) true
+    (instance? native.core.RecordAssocInstructionV0 instruction) true
     (instance? native.core.BoxRecordInstruction instruction) true
     (instance? native.core.CallInstruction instruction) true
     (instance? native.core.ExternCallInstruction instruction) true
@@ -1862,6 +1863,29 @@
                   ".field_" position " = "
                   (value-name function slots (nth values position))))))
           " };\n"))
+
+      (instance? native.core.RecordAssocInstructionV0 instruction)
+      (let [record-type-id: core/NativeId (core/ssavaluev0-type-id result)
+            record-type: String (c17/c-type types module-index record-type-id)
+            copy: String (str target "_copy")
+            arena: String
+            (str "(native_arena *)"
+              (value-name function slots
+                (core/recordassocinstructionv0-arena-id instruction)))
+            position: Int
+            (field-position layouts record-type-id
+              (core/recordassocinstructionv0-field-id instruction))]
+        (str "  {\n    " record-type " *" copy " = native_arena_alloc("
+          arena ", sizeof(" record-type "), _Alignof(" record-type "));\n"
+          "    *" copy " = "
+          (value-name function slots
+            (core/recordassocinstructionv0-source-id instruction))
+          ";\n"
+          "    " copy "->field_" position " = "
+          (value-name function slots
+            (core/recordassocinstructionv0-value-id instruction))
+          ";\n"
+          "    " target " = *" copy ";\n  }\n"))
 
       (instance? native.core.BoxRecordInstruction instruction)
       (let [reference-type: core/NativeId (core/ssavaluev0-type-id result)

@@ -1,0 +1,6 @@
+valid-record-assoc ACCEPTED
+foreign-field REJECTED
+wrong-field-type REJECTED
+non-arena-handle REJECTED
+wrong-source-record REJECTED
+qbe-record-assoc EXPLICIT-REFUSAL

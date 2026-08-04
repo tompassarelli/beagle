@@ -254,6 +254,8 @@
     [(VariantValueInstruction value)
      (core/variantvalueinstruction-result instruction)]
     [(RecordInstruction value) (core/recordinstruction-result instruction)]
+    [(RecordAssocInstructionV0 value)
+     (core/recordassocinstructionv0-result instruction)]
     [(BoxRecordInstruction value) (core/boxrecordinstruction-result instruction)]
     [(UnionConstructInstruction value)
      (core/unionconstructinstruction-result instruction)]
@@ -995,6 +997,7 @@
     [(FieldInstruction value) false]
     [(VariantValueInstruction value) false]
     [(RecordInstruction value) false]
+    [(RecordAssocInstructionV0 value) false]
     [(BoxRecordInstruction value) false]
     [(UnionConstructInstruction value) false]
     [(UnionExtractInstruction value) false]
@@ -1350,6 +1353,7 @@
       [(FieldInstruction value) ""]
       [(VariantValueInstruction value) ""]
       [(RecordInstruction value) ""]
+      [(RecordAssocInstructionV0 value) ""]
       [(BoxRecordInstruction value) ""]
       [(UnionConstructInstruction value) ""]
       [(UnionExtractInstruction value) ""]
@@ -1771,6 +1775,7 @@
     [(FieldInstruction value) false]
     [(VariantValueInstruction value) false]
     [(RecordInstruction value) false]
+    [(RecordAssocInstructionV0 value) false]
     [(BoxRecordInstruction value) false]
     [(UnionConstructInstruction value) false]
     [(UnionExtractInstruction value) false]
