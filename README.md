@@ -1,24 +1,27 @@
 # Beagle
 
-**Typed Clojure that compiles to idiomatic <!-- beagle:langs names -->Clojure, JavaScript, Nix, Odin, Zig, and TypeScript<!-- /beagle:langs -->.**
+**Typed Clojure with canonical source and structured diagnostics, compiling to
+idiomatic <!-- beagle:langs names -->Clojure, JavaScript, Nix, Odin, Zig, and TypeScript<!-- /beagle:langs -->.**
 
-Beagle is a typed Lisp that compiles to six languages — including Zig and Odin,
-which link to native executables. You write one high-level source; each backend
-renders it as code that language's own programmers would recognize, not a
+Beagle is a typed Lisp designed for ordinary text editing and a short authoring
+loop. It compiles one high-level language to six targets — including Zig and
+Odin, which link to native executables. Each backend renders code that the
+target language's own programmers would recognize, not a
 lowest-common-denominator transliteration.
 
 Types exist here for a specific job: making authoring, diagnostics, and
 automated repair reliable. They check at compile time and erase before emit. The
-point isn't to reject bad code — it's to tell a repair tool *what* kind of
-mistake happened, *where* in the source, after *which* canonicalization, against
-*which* target.
+point isn't rejection for its own sake — it's to give an authoring loop exact
+facts: *what* kind of mistake happened, *where* in the source, after *which*
+canonicalization, against *which* target.
 
 ## Documentation
 
 - [`docs/CHEATSHEET.md`](docs/CHEATSHEET.md) — the language surface, generated
   from the compiler; every example is parse- and type-checked by the suite.
 - [`docs/surface.md`](docs/surface.md) — what the cheatsheet does not
-  enumerate: macros, threading, reader conditionals, sourcemap fidelity.
+  enumerate: canonical layout, macros, threading, reader conditionals,
+  sourcemap fidelity.
 - [`docs/targets-by-example.md`](docs/targets-by-example.md) — one source body
   across three backends, and a NixOS module typed against the option schema.
 - [`docs/cli.md`](docs/cli.md) — the CLI and the authoring loop.
@@ -34,7 +37,7 @@ help`, `beagle langs`, `beagle sig`, `beagle fields`.
 
 The flake pins the whole toolchain, including the Zig the native backend links
 with. Inside the devshell (`direnv allow`), the binary is `bin/beagle` — written
-`beagle` below:
+`beagle` below. Using the compiler requires no database or coordinator:
 
 ```console
 $ cat src/main.bzig
@@ -53,10 +56,37 @@ hello from beagle
 
 `beagle init --target TARGET DIR` scaffolds a project for any of the six;
 `beagle build FILE OUT` writes the target's source instead of linking a binary.
+Run `beagle doctor --deep` before authoring to verify the complete diagnostic
+path. `beagle check --agent FILE` is the fast compiler oracle; `beagle init
+--hooks` makes a project invoke it on each edit.
+
+## One canonical source shape
+
+Zero- and one-entry parameter or typed-field vectors stay inline:
+
+```clojure
+(defn zero [] -> Int 0)
+(defn increment [x: Int] -> Int (+ x 1))
+```
+
+Two or more entries put the vector on the following line. Binding names start
+in the same column; `:` attaches to the name and has exactly one following
+space. Names and types are never padded into columns:
+
+```clojure
+(defn add
+  [long-name: Int
+   x: Int] -> Int
+  (+ long-name x))
+```
+
+The parser hard-rejects other physical layouts and carries an exact
+source-range repair when changing the range cannot alter a comment. This gives
+people, formatters, and agents the same answer instead of a style choice.
 
 ## Think high-level, get native
 
-Three lines of Beagle:
+A typed Beagle function:
 
 ```clojure
 (ns g)
@@ -67,7 +97,7 @@ Three lines of Beagle:
   (+ (* a b) (- c a) (quot b 2) (rem c 3) (mod a 5)))
 ```
 
-become Zig that reaches for the language's own operators rather than a runtime
+becomes Zig that reaches for the language's own operators rather than a runtime
 shim (module preamble elided):
 
 ```zig
