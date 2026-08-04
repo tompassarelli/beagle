@@ -5087,6 +5087,7 @@
        (for ([c (in-list (case-form-clauses e))]) (walk (case-clause-body c)))
        (when (case-form-default e) (walk (case-form-default e)))]
       [(loop-form? e)
+       (for ([b (in-list (loop-form-bindings e))]) (walk (let-binding-value b)))
        (for-each walk (loop-form-body e))]
       [(match-form? e)
        (walk (match-form-target e))
