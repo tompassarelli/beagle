@@ -3077,6 +3077,41 @@
 
 (defn keyword-type-id [] -> core/NativeId (type-id "Keyword"))
 
+(defn exact-closed-type?
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> Bool
+  (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
+    (and (some? definition)
+      (not (instance? native.core.UnionType (core/typedef-shape definition))))))
+
+(defn static-type-predicate? [callee: String] -> Bool
+  (or (= "sequential?" callee)
+    (= "map?" callee)
+    (= "set?" callee)
+    (= "string?" callee)
+    (= "integer?" callee)))
+
+(defn static-collection-predicate? [callee: String] -> Bool
+  (or (= "sequential?" callee) (= "map?" callee) (= "set?" callee)))
+
+(defn static-type-predicate-value
+  [types: (Vec core/TypeDef)
+   callee: String
+   value-type: core/NativeId] -> (U Bool Nil)
+  (if (not (and (static-type-predicate? callee)
+             (exact-closed-type? types value-type)))
+    nil
+    (cond
+      (= "sequential?" callee)
+      (and (vector-type? types value-type)
+        (not (map-value? types value-type)))
+      (= "map?" callee)
+      (or (map-type? types value-type) (map-value? types value-type))
+      (= "set?" callee) (set-type? types value-type)
+      (= "string?" callee) (same-id? value-type (text-type-id))
+      (= "integer?" callee) (same-id? value-type (int-type-id))
+      :else nil)))
+
 ;; The trap code IS the LowerFailure variant ordinal, read off the union rather
 ;; than spelled twice.
 (defn failure-code [name: String] -> Int
@@ -3131,6 +3166,43 @@
           (core/->SsaValueV0 result-id (bool-type-id))
           (core/->BoolAtom value)))
       result-id (bool-type-id) false)))
+
+(defn static-predicate-condition-value
+  [index: SourceIndexV0
+   owner: core/NativeId
+   condition-node: core/NativeId
+   condition: ExprResultV0] -> (U Bool Nil)
+  (let [state: BodyStateV0 (exprresultv0-state condition)
+        instructions: (Vec core/Instruction) (bodystatev0-instructions state)
+        callee: String (fact-text index condition-node "callee")]
+    (if (not (and (= "call" (fact-text index condition-node "form-kind"))
+               (static-type-predicate? callee)
+               (= 1 (count (source-call-arguments index condition-node)))
+               (> (bodystatev0-counter state) 0)
+               (> (count instructions) 0)))
+      nil
+      (let [instruction: core/Instruction
+            (nth instructions (- (count instructions) 1))
+            prior: BodyStateV0
+            (with state [:counter (- (bodystatev0-counter state) 1)])]
+        (if (not (instance? native.core.AtomInstruction instruction))
+          nil
+          (let [atom: core/NativeAtom (core/atominstruction-atom instruction)]
+            (cond
+              (not (same-id? (exprresultv0-value-id condition)
+                     (state-id prior owner "static-predicate"))) nil
+              (not (same-id? (exprresultv0-value-id condition)
+                     (core/ssavaluev0-id
+                       (core/atominstruction-result instruction)))) nil
+              (instance? native.core.BoolAtom atom) (core/boolatom-value atom)
+              :else nil)))))))
+
+(defn drop-static-predicate-result [state: BodyStateV0] -> BodyStateV0
+  (let [instructions: (Vec core/Instruction) (bodystatev0-instructions state)]
+    (loop [position: Int 0 kept: (Vec core/Instruction) []]
+      (if (>= (+ position 1) (count instructions))
+        (with state [:instructions kept])
+        (recur (+ position 1) (conj kept (nth instructions position)))))))
 
 (defn variant-payload-in?
   [variant: core/TypeVariant
@@ -3748,7 +3820,16 @@
                 (fail-result (exprresultv0-state condition)
                   "TODO-NATIVE-IF-CONDITION: condition is not a native Bool")
                 :else
-                (let [base: BodyStateV0 (exprresultv0-state condition)
+                (let [static-condition: (U Bool Nil)
+                      (static-predicate-condition-value index owner
+                        condition-node condition)]
+                  (if (some? static-condition)
+                    ;; Operand instructions are already in state; discard only the predicate atom.
+                    (lower-expr env owner
+                      (drop-static-predicate-result
+                        (exprresultv0-state condition))
+                      (if static-condition then-node else-node))
+                    (let [base: BodyStateV0 (exprresultv0-state condition)
                       then-id: core/NativeId (state-id base owner "then")
                       else-id: core/NativeId (state-id base owner "else")
                       join-id: core/NativeId (state-id base owner "join")
@@ -3795,7 +3876,7 @@
                     (->ExprResultV0
                       (state-open-block after-else join-id
                         [(core/->Parameter join-parameter result-type)])
-                      join-parameter result-type false)))))))
+                      join-parameter result-type false)))))))))
 
         (= "cond" kind)
         (let [clauses-node: (U core/NativeId Nil)
@@ -4984,13 +5065,33 @@
                       (subs bare-callee 2 (count bare-callee)))
                     nil)
                   signature: (U TypedFunctionV0 Nil)
-                  (find-signature env owner callee)]
+                  (find-signature env owner callee)
+                  static-predicate: (U Bool Nil)
+                  (if (= 1 (count values))
+                    (static-type-predicate-value types callee
+                      (nth value-types 0))
+                    nil)]
               (cond
                 (argsresultv0-terminated lowered)
                 (->ExprResultV0 current (lower-id "body" ["unreachable"])
                   (type-id "LowerFailure") true)
 
                 (state-blocked? current) (dead-result current)
+
+                (some? static-predicate)
+                (bool-constant-result current owner "static-predicate"
+                  static-predicate)
+
+                (and (static-collection-predicate? callee)
+                  (= 1 (count values)))
+                (fail-result current
+                  (str "TODO-NATIVE-PREDICATE-TYPE: " callee
+                    " needs a known exact native type"))
+
+                (static-collection-predicate? callee)
+                (fail-result current
+                  (str "TODO-NATIVE-PREDICATE-ARITY: " callee
+                    " takes one operand"))
 
                 (and (= "compare" callee) (= 2 (count values))
                   (text-operand? (nth value-types 0))
@@ -5178,15 +5279,6 @@
                     (state-open-block right join-id
                       [(core/->Parameter join-value (int-type-id))])
                     join-value (int-type-id) false))
-
-                (and (= "map?" callee) (= 1 (count values)))
-                (bool-constant-result current owner "map-predicate"
-                  (map-value? types (nth value-types 0)))
-
-                (and (= "sequential?" callee) (= 1 (count values)))
-                (bool-constant-result current owner "sequential-predicate"
-                  (and (vector-type? types (nth value-types 0))
-                    (not (map-value? types (nth value-types 0)))))
 
                 (and (= "atom" bare-callee) (= 1 (count values)))
                 (let [cell-type: (U core/NativeId Nil)
