@@ -47,5 +47,13 @@ native_m0_type_2 native_m0_fn_8(native_m0_type_4 native_v_0);
 native_m0_type_2 native_m0_fn_9(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0, native_m0_type_1 native_v_1, native_m0_type_3 native_v_2);
 native_m0_type_3 native_m0_fn_10(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0);
 native_m0_type_3 native_m0_fn_11(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0);
+native_m0_type_2 native_m0_fn_12(native_m0_type_2 native_v_0, native_m0_type_2 native_v_1, native_m0_type_2 native_v_2);
+native_m0_type_2 native_m0_fn_13(native_m0_type_2 native_v_0, native_m0_type_2 native_v_1, native_m0_type_2 native_v_2);
+native_m0_type_2 native_m0_fn_14(void);
+native_m0_type_2 native_m0_fn_15(void);
+native_m0_type_2 native_m0_fn_16(native_m0_type_2 native_v_0);
+native_m0_type_2 native_m0_fn_17(native_m0_type_2 native_v_0);
+native_m0_type_2 native_m0_fn_18(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0);
+native_m0_type_2 native_m0_fn_19(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0);
 
 #endif

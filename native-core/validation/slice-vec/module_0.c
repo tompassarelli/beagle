@@ -75,8 +75,8 @@ native_l0_3: ;
 native_m0_type_7 native_m0_fn_1(native_m0_type_1 native_v_0, native_m0_type_1 native_v_1) {
   native_m0_type_1 native_s_0;
   native_m0_type_4 native_s_1;
-  native_m0_type_4 native_s_2;
-  native_m0_type_1 native_s_3;
+  native_m0_type_1 native_s_2;
+  native_m0_type_4 native_s_3;
   native_m0_type_4 native_s_4;
   native_m0_type_4 native_s_5;
   native_m0_type_7 native_s_6;
@@ -85,17 +85,17 @@ native_m0_type_7 native_m0_fn_1(native_m0_type_1 native_v_0, native_m0_type_1 na
   native_s_0 = INT64_C(0);
   native_s_1 = (native_s_0 <= native_v_1);
   if (native_s_1) {
-    goto native_l1_2;
-  } else {
     goto native_l1_1;
+  } else {
+    goto native_l1_2;
   }
 native_l1_1: ;
-  native_s_2 = false;
-  native_s_5 = native_s_2;
+  native_s_2 = INT64_C(1000000000);
+  native_s_3 = (native_v_1 < native_s_2);
+  native_s_5 = native_s_3;
   goto native_l1_3;
 native_l1_2: ;
-  native_s_3 = INT64_C(1000000000);
-  native_s_4 = (native_v_1 < native_s_3);
+  native_s_4 = false;
   native_s_5 = native_s_4;
   goto native_l1_3;
 native_l1_3: ;

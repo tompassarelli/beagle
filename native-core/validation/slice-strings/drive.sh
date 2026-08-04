@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Drive the Text/Keyword vocabulary through the native pipeline:
+# Drive the Text/Keyword/Boolean vocabulary through the native pipeline:
 #   beagle-ast -> source facts -> sealed source world -> typed world
 #     -> native world with lowered blocks -> 7 obligations
 #     -> native.body-c17 -> gcc/clang -std=c17 -Werror -> run the probe main.
 #
 # Two projections: text_ops.facts (this directory's corpus, compiled and run)
-# and replay_text.facts (unmodified fram.fri-replay text helpers, reported only
-# — it records which residual TODO belongs to another tier). The replay
-# projection is hermetic; set FRAM_REPLAY to re-derive it and fail on drift.
+# and replay_text.facts (unmodified fram.fri-replay text helpers, reported only).
+# The replay projection is hermetic; set FRAM_REPLAY to re-derive it and fail on
+# drift.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

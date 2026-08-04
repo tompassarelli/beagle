@@ -1,11 +1,12 @@
 stage source-seal ACCEPTED
 stage source-to-typed ACCEPTED
 world-types 12
-world-functions 2
-world-abis 2
+world-functions 3
+world-abis 3
 projected-types 8
 lowered fn_0 char-at 3 blocks
-lowered fn_1 strip-at 7 blocks
+lowered fn_1 trim-character? 5 blocks
+lowered fn_2 strip-at 7 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts
@@ -13,5 +14,4 @@ obligation-projection PASS checked-arithmetic
 obligation-projection PASS legal-abi
 obligation-projection PASS discharged-tokens
 obligation-projection PASS bounded-effects
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-VARIADIC-or: only the two-operand form lowers in v0 [trim-character?]
 materialize OK module_0.h module_0.c

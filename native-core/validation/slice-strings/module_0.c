@@ -178,3 +178,155 @@ native_l11_2: ;
 native_l11_3: ;
   return native_s_9;
 }
+native_m0_type_2 native_m0_fn_12(native_m0_type_2 native_v_0, native_m0_type_2 native_v_1, native_m0_type_2 native_v_2) {
+  native_m0_type_2 native_s_0;
+  native_m0_type_2 native_s_1;
+  if (native_v_0) {
+    goto native_l12_3;
+  } else {
+    goto native_l12_1;
+  }
+native_l12_1: ;
+  if (native_v_1) {
+    goto native_l12_3;
+  } else {
+    goto native_l12_2;
+  }
+native_l12_2: ;
+  native_s_1 = native_v_2;
+  goto native_l12_4;
+native_l12_3: ;
+  native_s_0 = true;
+  native_s_1 = native_s_0;
+  goto native_l12_4;
+native_l12_4: ;
+  return native_s_1;
+}
+native_m0_type_2 native_m0_fn_13(native_m0_type_2 native_v_0, native_m0_type_2 native_v_1, native_m0_type_2 native_v_2) {
+  native_m0_type_2 native_s_0;
+  native_m0_type_2 native_s_1;
+  if (native_v_0) {
+    goto native_l13_1;
+  } else {
+    goto native_l13_3;
+  }
+native_l13_1: ;
+  if (native_v_1) {
+    goto native_l13_2;
+  } else {
+    goto native_l13_3;
+  }
+native_l13_2: ;
+  native_s_1 = native_v_2;
+  goto native_l13_4;
+native_l13_3: ;
+  native_s_0 = false;
+  native_s_1 = native_s_0;
+  goto native_l13_4;
+native_l13_4: ;
+  return native_s_1;
+}
+native_m0_type_2 native_m0_fn_14(void) {
+  native_m0_type_2 native_s_0;
+  native_s_0 = false;
+  return native_s_0;
+}
+native_m0_type_2 native_m0_fn_15(void) {
+  native_m0_type_2 native_s_0;
+  native_s_0 = true;
+  return native_s_0;
+}
+native_m0_type_2 native_m0_fn_16(native_m0_type_2 native_v_0) {
+  return native_v_0;
+}
+native_m0_type_2 native_m0_fn_17(native_m0_type_2 native_v_0) {
+  return native_v_0;
+}
+native_m0_type_2 native_m0_fn_18(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0) {
+  (void)capability;
+  native_m0_type_0 native_s_0;
+  native_m0_type_2 native_s_1;
+  native_m0_type_2 native_s_2;
+  native_m0_type_1 native_s_3;
+  native_m0_type_1 native_s_4;
+  native_m0_type_3 native_s_5;
+  native_m0_type_2 native_s_6;
+  native_m0_type_2 native_s_7;
+  native_m0_type_2 native_s_8;
+  native_s_0 = arena;
+  (void)native_s_0;
+  native_s_1 = false;
+  if (native_s_1) {
+    goto native_l18_3;
+  } else {
+    goto native_l18_1;
+  }
+native_l18_1: ;
+  native_s_2 = true;
+  if (native_s_2) {
+    goto native_l18_3;
+  } else {
+    goto native_l18_2;
+  }
+native_l18_2: ;
+  native_s_3 = INT64_C(0);
+  native_s_4 = INT64_C(999);
+  if ((native_s_3 < INT64_C(0)) || (native_s_4 < native_s_3) ||
+      (native_s_4 > (int64_t)native_text_length(native_v_0))) {
+    native_trap(UINT32_C(3));
+  }
+  native_s_5 = native_text_slice((native_arena *)native_s_0, native_v_0, (uint64_t)native_s_3, (uint64_t)native_s_4);
+  native_s_6 = native_text_eq(native_s_5, native_v_0);
+  native_s_8 = native_s_6;
+  goto native_l18_4;
+native_l18_3: ;
+  native_s_7 = true;
+  native_s_8 = native_s_7;
+  goto native_l18_4;
+native_l18_4: ;
+  return native_s_8;
+}
+native_m0_type_2 native_m0_fn_19(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0) {
+  (void)capability;
+  native_m0_type_0 native_s_0;
+  native_m0_type_2 native_s_1;
+  native_m0_type_2 native_s_2;
+  native_m0_type_1 native_s_3;
+  native_m0_type_1 native_s_4;
+  native_m0_type_3 native_s_5;
+  native_m0_type_2 native_s_6;
+  native_m0_type_2 native_s_7;
+  native_m0_type_2 native_s_8;
+  native_s_0 = arena;
+  (void)native_s_0;
+  native_s_1 = true;
+  if (native_s_1) {
+    goto native_l19_1;
+  } else {
+    goto native_l19_3;
+  }
+native_l19_1: ;
+  native_s_2 = false;
+  if (native_s_2) {
+    goto native_l19_2;
+  } else {
+    goto native_l19_3;
+  }
+native_l19_2: ;
+  native_s_3 = INT64_C(0);
+  native_s_4 = INT64_C(999);
+  if ((native_s_3 < INT64_C(0)) || (native_s_4 < native_s_3) ||
+      (native_s_4 > (int64_t)native_text_length(native_v_0))) {
+    native_trap(UINT32_C(3));
+  }
+  native_s_5 = native_text_slice((native_arena *)native_s_0, native_v_0, (uint64_t)native_s_3, (uint64_t)native_s_4);
+  native_s_6 = native_text_eq(native_s_5, native_v_0);
+  native_s_8 = native_s_6;
+  goto native_l19_4;
+native_l19_3: ;
+  native_s_7 = false;
+  native_s_8 = native_s_7;
+  goto native_l19_4;
+native_l19_4: ;
+  return native_s_8;
+}

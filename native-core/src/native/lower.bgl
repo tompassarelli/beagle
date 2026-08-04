@@ -2397,64 +2397,85 @@
                 code-id (type-id "LowerFailure") true))
 
             (or (= "and" callee) (= "or" callee))
-            (if (not (= 2 (count args)))
-              (fail-result state
-                (str "TODO-NATIVE-VARIADIC-" callee
-                  ": only the two-operand form lowers in v0"))
-              (let [left: ExprResultV0 (lower-expr env owner state (nth args 0))]
-                (cond
-                  (exprresultv0-terminated left) left
-                  (state-blocked? (exprresultv0-state left))
-                  (dead-result (exprresultv0-state left))
-                  (not (same-id? (exprresultv0-type-id left) (bool-type-id)))
-                  (fail-result (exprresultv0-state left)
-                    (str "TODO-NATIVE-BOOL-OPERAND: " callee
-                      " needs native Bool operands"))
-                  :else
-                  (let [base: BodyStateV0 (exprresultv0-state left)
-                        other-id: core/NativeId (state-id base owner "shortcut")
-                        rest-id: core/NativeId (state-id base owner "rest")
-                        join-id: core/NativeId (state-id base owner "logic-join")
-                        join-parameter: core/NativeId
-                        (state-id base owner "logic-value")
-                        short-value: core/NativeId (state-id base owner "logic-const")
-                        branched: BodyStateV0
-                        (state-close (state-bump base)
-                          (if (= "and" callee)
-                            (core/->BranchTerminator (exprresultv0-value-id left)
-                              rest-id other-id)
-                            (core/->BranchTerminator (exprresultv0-value-id left)
-                              other-id rest-id)))
-                        shortcut: BodyStateV0
-                        (state-close
-                          (state-emit (state-open-block branched other-id [])
-                            (core/->AtomInstruction
-                              (core/->SsaValueV0 short-value (bool-type-id))
-                              (core/->BoolAtom (= "or" callee))))
-                          (core/->JumpTerminator join-id [short-value]))
-                        right: ExprResultV0
-                        (lower-expr env owner
-                          (state-open-block shortcut rest-id []) (nth args 1))]
+            (let [arity: Int (count args)]
+              (if (= 0 arity)
+                (let [result-id: core/NativeId (state-id state owner "logic-empty")]
+                  (->ExprResultV0
+                    (state-emit (state-bump state)
+                      (core/->AtomInstruction
+                        (core/->SsaValueV0 result-id (bool-type-id))
+                        (core/->BoolAtom (= "and" callee))))
+                    result-id (bool-type-id) false))
+                (if (= 1 arity)
+                  (let [only: ExprResultV0
+                        (lower-expr env owner state (nth args 0))]
                     (cond
-                      (state-blocked? (exprresultv0-state right))
-                      (dead-result (exprresultv0-state right))
-                      (exprresultv0-terminated right)
-                      (fail-result (exprresultv0-state right)
-                        (str "TODO-NATIVE-DIVERGENT-OPERAND: the second " callee
-                          " operand does not produce a value"))
-                      (not (same-id? (exprresultv0-type-id right) (bool-type-id)))
-                      (fail-result (exprresultv0-state right)
+                      (exprresultv0-terminated only) only
+                      (state-blocked? (exprresultv0-state only))
+                      (dead-result (exprresultv0-state only))
+                      (not (same-id? (exprresultv0-type-id only) (bool-type-id)))
+                      (fail-result (exprresultv0-state only)
                         (str "TODO-NATIVE-BOOL-OPERAND: " callee
                           " needs native Bool operands"))
-                      :else
-                      (->ExprResultV0
-                        (state-open-block
-                          (state-close (exprresultv0-state right)
-                            (core/->JumpTerminator join-id
-                              [(exprresultv0-value-id right)]))
-                          join-id
-                          [(core/->Parameter join-parameter (bool-type-id))])
-                        join-parameter (bool-type-id) false))))))
+                      :else only))
+                  (let [shortcut-id: core/NativeId
+                        (state-id state owner "logic-shortcut")
+                        join-id: core/NativeId (state-id state owner "logic-join")
+                        join-parameter: core/NativeId
+                        (state-id state owner "logic-value")
+                        short-value: core/NativeId
+                        (state-id state owner "logic-const")]
+                    (loop [position: Int 0
+                           current: BodyStateV0 state]
+                      (let [operand: ExprResultV0
+                            (lower-expr env owner current (nth args position))]
+                        (cond
+                          (state-blocked? (exprresultv0-state operand))
+                          (dead-result (exprresultv0-state operand))
+                          (exprresultv0-terminated operand)
+                          (if (= 0 position)
+                            operand
+                            (fail-result (exprresultv0-state operand)
+                              (str "TODO-NATIVE-DIVERGENT-OPERAND: " callee
+                                " operand " (+ position 1)
+                                " does not produce a value")))
+                          (not (same-id? (exprresultv0-type-id operand) (bool-type-id)))
+                          (fail-result (exprresultv0-state operand)
+                            (str "TODO-NATIVE-BOOL-OPERAND: " callee
+                              " needs native Bool operands"))
+                          (= (+ position 1) arity)
+                          (let [after-value: BodyStateV0
+                                (state-close (state-bump (exprresultv0-state operand))
+                                  (core/->JumpTerminator join-id
+                                    [(exprresultv0-value-id operand)]))
+                                shortcut: BodyStateV0
+                                (state-emit
+                                  (state-open-block after-value shortcut-id [])
+                                  (core/->AtomInstruction
+                                    (core/->SsaValueV0 short-value (bool-type-id))
+                                    (core/->BoolAtom (= "or" callee))))
+                                after-shortcut: BodyStateV0
+                                (state-close (state-bump shortcut)
+                                  (core/->JumpTerminator join-id [short-value]))]
+                            (->ExprResultV0
+                              (state-open-block after-shortcut join-id
+                                [(core/->Parameter join-parameter (bool-type-id))])
+                              join-parameter (bool-type-id) false))
+                          :else
+                          (let [next-id: core/NativeId
+                                (state-id (exprresultv0-state operand) owner
+                                  (str "logic-rest-" position))
+                                branched: BodyStateV0
+                                (state-close (state-bump (exprresultv0-state operand))
+                                  (if (= "and" callee)
+                                    (core/->BranchTerminator
+                                      (exprresultv0-value-id operand)
+                                      next-id shortcut-id)
+                                    (core/->BranchTerminator
+                                      (exprresultv0-value-id operand)
+                                      shortcut-id next-id)))]
+                            (recur (+ position 1)
+                              (state-open-block branched next-id []))))))))))
 
             (= "not" callee)
             (if (not (= 1 (count args)))

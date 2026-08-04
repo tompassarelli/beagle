@@ -1,6 +1,6 @@
 #lang beagle/clj
-;; Text/Keyword corpus. No loop, arithmetic or vector form appears: those belong
-;; to other tiers, and their absence keeps a failure here about strings.
+;; Text/Keyword corpus plus the Boolean control flow used by FRI text helpers.
+;; No loop, arithmetic or vector form appears: those belong to other tiers.
 (ns native.text-ops)
 (define-mode strict)
 
@@ -48,3 +48,29 @@
 
 (defn strip-at [value: String] -> String
   (if (= "@" (subs value 0 1)) (subs value 1) value))
+
+(defn any-three?
+  [first: Bool
+   second: Bool
+   third: Bool] -> Bool
+  (or first second third))
+
+(defn all-three?
+  [first: Bool
+   second: Bool
+   third: Bool] -> Bool
+  (and first second third))
+
+(defn any-none? [] -> Bool (or))
+
+(defn all-none? [] -> Bool (and))
+
+(defn any-one? [value: Bool] -> Bool (or value))
+
+(defn all-one? [value: Bool] -> Bool (and value))
+
+(defn any-short-circuits? [value: String] -> Bool
+  (or false true (= (subs value 0 999) value)))
+
+(defn all-short-circuits? [value: String] -> Bool
+  (and true false (= (subs value 0 999) value)))

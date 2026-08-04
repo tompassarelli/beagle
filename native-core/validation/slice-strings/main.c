@@ -4,7 +4,9 @@
    fn_0 text-equal?  fn_1 text-length  fn_2 text-slice  fn_3 text-tail
    fn_4 text-join    fn_5 labelled     fn_6 keyword-equal?
    fn_7 assert-action?  fn_8 retract-action?  fn_9 prefix-is?
-   fn_10 tagged      fn_11 strip-at
+   fn_10 tagged      fn_11 strip-at    fn_12 any-three?  fn_13 all-three?
+   fn_14 any-none?   fn_15 all-none?   fn_16 any-one?    fn_17 all-one?
+   fn_18 any-short-circuits?            fn_19 all-short-circuits?
    type_1 Int  type_2 Bool  type_3 Text  type_4 Keyword */
 #include "module_0.h"
 
@@ -161,6 +163,32 @@ int main(int argc, char **argv) {
   }
   if (!text_is(native_m0_fn_11(&arena, &capability, hello_a), "hello")) {
     return 27;
+  }
+  if (!native_m0_fn_12(false, false, true) ||
+      native_m0_fn_12(false, false, false)) {
+    return 28;
+  }
+  if (!native_m0_fn_13(true, true, true) ||
+      native_m0_fn_13(true, false, true)) {
+    return 29;
+  }
+  if (native_m0_fn_14()) {
+    return 30;
+  }
+  if (!native_m0_fn_15()) {
+    return 31;
+  }
+  if (!native_m0_fn_16(true) || native_m0_fn_16(false)) {
+    return 32;
+  }
+  if (!native_m0_fn_17(true) || native_m0_fn_17(false)) {
+    return 33;
+  }
+  if (!native_m0_fn_18(&arena, &capability, hello_a)) {
+    return 34;
+  }
+  if (native_m0_fn_19(&arena, &capability, hello_a)) {
+    return 35;
   }
   return 0;
 }

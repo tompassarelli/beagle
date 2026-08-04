@@ -1,8 +1,8 @@
 stage source-seal ACCEPTED
 stage source-to-typed ACCEPTED
 world-types 10
-world-functions 12
-world-abis 12
+world-functions 20
+world-abis 20
 projected-types 7
 lowered fn_0 text-equal? 1 blocks
 lowered fn_1 text-length 1 blocks
@@ -16,6 +16,14 @@ lowered fn_8 retract-action? 1 blocks
 lowered fn_9 prefix-is? 1 blocks
 lowered fn_10 tagged 1 blocks
 lowered fn_11 strip-at 4 blocks
+lowered fn_12 any-three? 5 blocks
+lowered fn_13 all-three? 5 blocks
+lowered fn_14 any-none? 1 blocks
+lowered fn_15 all-none? 1 blocks
+lowered fn_16 any-one? 1 blocks
+lowered fn_17 all-one? 1 blocks
+lowered fn_18 any-short-circuits? 5 blocks
+lowered fn_19 all-short-circuits? 5 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts
