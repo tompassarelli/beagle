@@ -3658,44 +3658,54 @@
           result-id optional false)))))
 
 (defn lower-positive
-  [state: BodyStateV0
+  [types: (Vec core/TypeDef)
+   state: BodyStateV0
    owner: core/NativeId
    value-id: core/NativeId
    value-type: core/NativeId] -> ExprResultV0
-  (if (not (same-id? value-type (int-type-id)))
-    (fail-result state "TODO-NATIVE-POS-OPERAND: pos? needs a native Int")
-    (let [zero-id: core/NativeId (state-id state owner "positive-zero")
-          result-id: core/NativeId (state-id (state-bump state) owner "positive")]
-      (->ExprResultV0
-        (state-emit
-          (state-emit (state-bump (state-bump state))
-            (core/->AtomInstruction
-              (core/->SsaValueV0 zero-id (int-type-id))
-              (core/->I64Atom 0)))
-          (core/->CompareInstruction
-            (core/->SsaValueV0 result-id (bool-type-id))
-            (core/->CompareLtI64V0 true) zero-id value-id))
-        result-id (bool-type-id) false))))
+  (let [value: ExprResultV0
+        (lower-boundary-coerce types owner state value-id value-type (int-type-id))]
+    (if (state-blocked? (exprresultv0-state value))
+      (dead-result (exprresultv0-state value))
+      (let [base: BodyStateV0 (exprresultv0-state value)
+            zero-id: core/NativeId (state-id base owner "positive-zero")
+            result-id: core/NativeId (state-id (state-bump base) owner "positive")]
+        (->ExprResultV0
+          (state-emit
+            (state-emit (state-bump (state-bump base))
+              (core/->AtomInstruction
+                (core/->SsaValueV0 zero-id (int-type-id))
+                (core/->I64Atom 0)))
+            (core/->CompareInstruction
+              (core/->SsaValueV0 result-id (bool-type-id))
+              (core/->CompareLtI64V0 true)
+              zero-id (exprresultv0-value-id value)))
+          result-id (bool-type-id) false)))))
 
 (defn lower-negative
-  [state: BodyStateV0
+  [types: (Vec core/TypeDef)
+   state: BodyStateV0
    owner: core/NativeId
    value-id: core/NativeId
    value-type: core/NativeId] -> ExprResultV0
-  (if (not (same-id? value-type (int-type-id)))
-    (fail-result state "TODO-NATIVE-NEG-OPERAND: neg? needs a native Int")
-    (let [zero-id: core/NativeId (state-id state owner "negative-zero")
-          result-id: core/NativeId (state-id (state-bump state) owner "negative")]
-      (->ExprResultV0
-        (state-emit
-          (state-emit (state-bump (state-bump state))
-            (core/->AtomInstruction
-              (core/->SsaValueV0 zero-id (int-type-id))
-              (core/->I64Atom 0)))
-          (core/->CompareInstruction
-            (core/->SsaValueV0 result-id (bool-type-id))
-            (core/->CompareLtI64V0 true) value-id zero-id))
-        result-id (bool-type-id) false))))
+  (let [value: ExprResultV0
+        (lower-boundary-coerce types owner state value-id value-type (int-type-id))]
+    (if (state-blocked? (exprresultv0-state value))
+      (dead-result (exprresultv0-state value))
+      (let [base: BodyStateV0 (exprresultv0-state value)
+            zero-id: core/NativeId (state-id base owner "negative-zero")
+            result-id: core/NativeId (state-id (state-bump base) owner "negative")]
+        (->ExprResultV0
+          (state-emit
+            (state-emit (state-bump (state-bump base))
+              (core/->AtomInstruction
+                (core/->SsaValueV0 zero-id (int-type-id))
+                (core/->I64Atom 0)))
+            (core/->CompareInstruction
+              (core/->SsaValueV0 result-id (bool-type-id))
+              (core/->CompareLtI64V0 true)
+              (exprresultv0-value-id value) zero-id))
+          result-id (bool-type-id) false)))))
 
 (defn equality-comparison [type-id-value: core/NativeId] -> (U core/CompareOpV0 Nil)
   (cond
@@ -5891,13 +5901,15 @@
                     " takes one operand"))
 
                 (and (= "pos?" callee) (= 1 (count values)))
-                (lower-positive current owner (nth values 0) (nth value-types 0))
+                (lower-positive types current owner
+                  (nth values 0) (nth value-types 0))
 
                 (= "pos?" callee)
                 (fail-result current "TODO-NATIVE-POS-ARITY: pos? takes one operand")
 
                 (and (= "neg?" callee) (= 1 (count values)))
-                (lower-negative current owner (nth values 0) (nth value-types 0))
+                (lower-negative types current owner
+                  (nth values 0) (nth value-types 0))
 
                 (= "neg?" callee)
                 (fail-result current "TODO-NATIVE-NEG-ARITY: neg? takes one operand")
