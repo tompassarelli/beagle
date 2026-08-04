@@ -26,6 +26,8 @@ does not enumerate. When the two disagree, the cheatsheet wins.
   field stays inline; 2+ put the vector on the following line exactly two
   columns past the owning form's opening parenthesis, with one aligned logical
   entry start per line and exactly one space between `]` and any `-> RET`.
+  Binding names are left-aligned; `:` attaches to its name and has exactly one
+  following space. Names, colons, and types are never padded into columns.
 - **`defmacro` + quasiquote / unquote / unquote-splicing.** Quasiquote is
   `` ` ``, unquote `~`, splice `~@`. Beagle deliberately dropped the CL-style
   `,`-as-unquote: `,` is whitespace, as in Clojure. Free references resolve at

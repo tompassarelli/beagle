@@ -114,6 +114,8 @@ if the surface looks different than you expect, `git log` it.
   inline with its owner; 2+ put `[` on the following line exactly two columns
   past the owning form's opening parenthesis, then one aligned logical entry
   start per line, with exactly one space between `]` and any `-> RET`.
+  Binding names are left-aligned; `:` immediately follows its name and has
+  exactly one following space. Never pad names, colons, or types into columns.
   Typed bindings, destructures, and `& rest` each count as one entry. This
   covers function/method/macro vectors and typed record/union/error fields, not
   data vectors or let-style value bindings.
@@ -162,8 +164,9 @@ strategic destination for the Fram/Beagle native program. System-layer Fram
 engine/store/coord primitives and Beagle machinery target the target-neutral
 **Beagle Native Core** profile: target-independent typed/effect/region/layout/
 control/capability/ABI semantics. Their authoritative lowered program is an
-immutable **Native World**. Fram stays entirely Beagle; greenfield work stays
-graph-upstream. Materializers are disposable projections: restricted C11 for
+immutable **Native World**. Fram stays entirely Beagle; greenfield source uses
+ordinary text unless a file explicitly opts into graph authoring. Materializers
+are disposable projections: restricted C11 for
 bootstrap/reference/sanitizers, QBE as the first direct-native and
 anti-C-capture check, Wasm/WASI for capability sandboxing, and
 LLVM/Cranelift/direct codegen only when measurement justifies them. Coverage

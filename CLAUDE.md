@@ -70,17 +70,44 @@ or variant name: `(defn id [x] x)`. Two or more entries put the vector on the
 following line, with its first entry beside `[` and every later logical entry
 starting once per line at the same column. The `[` is exactly two columns past
 the owning form's opening parenthesis; `]` remains after the final entry and is
-followed by exactly one space before any `-> RET`:
+followed by exactly one space before any `-> RET`. Binding names are
+left-aligned at that shared entry-start column. In a typed entry, `:`
+immediately follows the name and exactly one space follows `:`; never pad names,
+colons, or types into columns:
 
 ```clojure
 (defn add
-  [x: Int
-   y: Int] -> Int
-  (+ x y))
+  [left: Int
+   r: Int] -> Int
+  (+ left r))
 
 (defrecord Point
   [x: Int
    y: Int])
+```
+
+Thus `[abc: Int b: String bc: (Vec Int)]` lays out as:
+
+```clojure
+[abc: Int
+ b: String
+ bc: (Vec Int)]
+```
+
+Do not pad the type column:
+
+```clojure
+[abc: Int
+ b:   String
+ bc:  (Vec Int)]
+```
+
+Do not indent shorter names to align the colons:
+
+```clojure
+[abc: Int
+   b: String
+  bc: (Vec Int)]
 ```
 
 A typed `name: Type`, destructuring form, or `& rest` pair is one logical
