@@ -69,6 +69,7 @@ static const native_value_variant_descriptor native_m0_value_11_variants[] = {
   { .tag = INT64_C(3), .payload_offset = (size_t)8, .payload = &native_m0_value_2 },
   { .tag = INT64_C(4), .payload_offset = (size_t)8, .payload = &native_m0_value_5 },
   { .tag = INT64_C(5), .payload_offset = (size_t)8, .payload = &native_m0_value_8 },
+  { .tag = INT64_C(6), .payload_offset = (size_t)8, .payload = &native_m0_value_10 },
 };
 const native_value_descriptor native_m0_value_0 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
@@ -266,7 +267,7 @@ const native_value_descriptor native_m0_value_11 = {
   .fields = NULL,
   .field_count = (size_t)0,
   .variants = native_m0_value_11_variants,
-  .variant_count = (size_t)6,
+  .variant_count = (size_t)7,
   .element = NULL,
   .stride = (size_t)0,
   .map_key = NULL,
@@ -886,4 +887,22 @@ native_m0_type_4 native_m0_fn_37(native_arena *arena, const native_capability *c
   (void)native_s_0;
   native_s_1 = native_value_to_text((native_arena *)native_s_0, &native_m0_value_11, &native_v_0, NATIVE_VALUE_PR_STR);
   return native_s_1;
+}
+native_m0_type_4 native_m0_fn_38(native_arena *arena, const native_capability *capability, native_m0_type_4 native_v_0, native_m0_type_11 native_v_1, native_m0_type_1 native_v_2) {
+  (void)arena;
+  (void)capability;
+  (void)native_v_0;
+  (void)native_v_1;
+  (void)native_v_2;
+  native_m0_type_0 native_s_0;
+  native_m0_type_4 native_s_1;
+  native_m0_type_4 native_s_2;
+  native_s_0 = arena;
+  (void)native_s_0;
+  native_s_1 = native_value_to_text((native_arena *)native_s_0, &native_m0_value_11, &native_v_1, NATIVE_VALUE_STR);
+  {
+    const uint64_t native_parts_2[3] = { native_v_0, native_s_1, native_text_from_int((native_arena *)native_s_0, native_v_2) };
+    native_s_2 = native_text_concat((native_arena *)native_s_0, native_parts_2, UINT64_C(3));
+  }
+  return native_s_2;
 }

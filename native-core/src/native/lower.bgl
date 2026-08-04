@@ -3357,6 +3357,52 @@
           (recur (+ position 1))
           false)))))
 
+(defn str-operands-compatible?
+  [types: (Vec core/TypeDef)
+   value-types: (Vec core/NativeId)] -> Bool
+  (loop [position: Int 0]
+    (if (>= position (count value-types))
+      true
+      (let [operand: core/NativeId (nth value-types position)]
+        (if (or (text-operand? operand)
+              (same-id? operand (int-type-id))
+              (value-to-text-type? types operand))
+          (recur (+ position 1))
+          false)))))
+
+(defn render-str-operands
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   values: (Vec core/NativeId)
+   value-types: (Vec core/NativeId)] -> ArgsResultV0
+  (loop [position: Int 0
+         current: BodyStateV0 state
+         rendered-values: (Vec core/NativeId) []
+         rendered-types: (Vec core/NativeId) []]
+    (if (or (>= position (count values)) (state-blocked? current))
+      (->ArgsResultV0 current rendered-values rendered-types false)
+      (let [value-id: core/NativeId (nth values position)
+            value-type: core/NativeId (nth value-types position)]
+        (if (or (text-operand? value-type)
+              (same-id? value-type (int-type-id)))
+          (recur (+ position 1) current
+            (conj rendered-values value-id)
+            (conj rendered-types value-type))
+          (let [result-id: core/NativeId
+                (state-id current owner (str "str-value-" position))
+                rendered: BodyStateV0
+                (state-emit (state-bump current)
+                  (core/->ValueToTextInstructionV0
+                    (core/->SsaValueV0 result-id (text-type-id))
+                    (core/->ValueStrV0 true)
+                    value-type
+                    value-id
+                    (arena-value-id owner)))]
+            (recur (+ position 1) rendered
+              (conj rendered-values result-id)
+              (conj rendered-types (text-type-id)))))))))
+
 (defn scalar-predicate? [callee: String] -> Bool
   (or (= "string?" callee)
     (= "integer?" callee)
@@ -6725,10 +6771,12 @@
                   "TODO-NATIVE-PR-STR-OPERANDS: pr-str takes one acyclic closed native value")
 
                 (= "str" callee)
-                (if (not (and (> (count values) 0)
-                           (concat-operands-native? value-types)))
+                (cond
+                  (= 0 (count values))
                   (fail-result current
-                    "TODO-NATIVE-STR-OPERANDS: str concatenates one or more native Text or Int operands")
+                    "TODO-NATIVE-STR-OPERANDS: str takes one or more native operands")
+
+                  (concat-operands-native? value-types)
                   (let [result-id: core/NativeId (state-id current owner "str")]
                     (->ExprResultV0
                       (state-emit (state-bump current)
@@ -6736,7 +6784,24 @@
                           (core/->SsaValueV0 result-id (text-type-id))
                           (arena-value-id owner)
                           values))
-                      result-id (text-type-id) false)))
+                      result-id (text-type-id) false))
+
+                  (str-operands-compatible? types value-types)
+                  (let [rendered: ArgsResultV0
+                        (render-str-operands types owner current values value-types)
+                        settled: BodyStateV0 (argsresultv0-state rendered)
+                        result-id: core/NativeId (state-id settled owner "str")]
+                    (->ExprResultV0
+                      (state-emit (state-bump settled)
+                        (core/->TextConcatInstruction
+                          (core/->SsaValueV0 result-id (text-type-id))
+                          (arena-value-id owner)
+                          (argsresultv0-values rendered)))
+                      result-id (text-type-id) false))
+
+                  :else
+                  (fail-result current
+                    "TODO-NATIVE-STR-OPERANDS: str operands must be Text, Int, or acyclic closed native values"))
 
                 (accessorhitv0-found accessor)
                 (let [owner-type: core/NativeId (accessorhitv0-owner-type accessor)

@@ -111,8 +111,14 @@
 
 (defn print-text-map [values: (Map Keyword String)] -> String (pr-str values))
 
-(defn render-printable [value: (U String Int Float Bool Keyword Nil)] -> String
+(defn render-printable [value: (U String Int Float Bool Keyword Nil (Vec String))] -> String
   (str value))
 
-(defn print-printable [value: (U String Int Float Bool Keyword Nil)] -> String
+(defn print-printable [value: (U String Int Float Bool Keyword Nil (Vec String))] -> String
   (pr-str value))
+
+(defn render-framed-printable
+  [prefix: String
+   value: (U String Int Float Bool Keyword Nil (Vec String))
+   suffix: Int] -> String
+  (str prefix value suffix))

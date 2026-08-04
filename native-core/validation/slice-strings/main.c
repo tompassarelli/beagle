@@ -14,6 +14,7 @@
    fn_32 render-text-vector  fn_33 print-text-vector
    fn_34 render-text-map  fn_35 print-text-map
    fn_36 render-printable  fn_37 print-printable
+   fn_38 render-framed-printable
    type_1 Int  type_2 Bool  type_3 Float  type_4 Text  type_5 Keyword
    type_8 Nil  type_9 Map  type_10 Vec  type_11 Printable */
 #include "module_0.h"
@@ -85,6 +86,13 @@ static native_m0_type_11 printable_nil(void) {
   native_m0_type_11 result = { 0 };
   result.tag = INT64_C(5);
   result.payload.variant_5.tag = INT64_C(0);
+  return result;
+}
+
+static native_m0_type_11 printable_vector(native_m0_type_10 value) {
+  native_m0_type_11 result = { 0 };
+  result.tag = INT64_C(6);
+  result.payload.variant_6 = value;
   return result;
 }
 
@@ -325,7 +333,10 @@ int main(int argc, char **argv) {
     if (!text_is(native_m0_fn_32(&arena, &capability, vector),
                  "[\"alpha\" \"line\\n\\\"\"]") ||
         !text_is(native_m0_fn_33(&arena, &capability, vector),
-                 "[\"alpha\" \"line\\n\\\"\"]")) {
+                 "[\"alpha\" \"line\\n\\\"\"]") ||
+        !text_is(native_m0_fn_38(&arena, &capability, text_of("items="),
+                                 printable_vector(vector), INT64_C(2)),
+                 "items=[\"alpha\" \"line\\n\\\"\"]2")) {
       return 43;
     }
   }

@@ -4,8 +4,8 @@ stage typed-to-native COMPLETE
 source-modules 1
 source-imports 0
 world-types 14
-world-functions 38
-world-abis 38
+world-functions 39
+world-abis 39
 projected-types 12
 lowered fn_0 text-equal? 1 blocks
 lowered fn_1 text-length 1 blocks
@@ -45,6 +45,7 @@ lowered fn_34 render-text-map 1 blocks
 lowered fn_35 print-text-map 1 blocks
 lowered fn_36 render-printable 1 blocks
 lowered fn_37 print-printable 1 blocks
+lowered fn_38 render-framed-printable 1 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts
