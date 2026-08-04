@@ -1,6 +1,11 @@
-module	functions	defs	records	imports
-callgraph	9	0	0	4
-rep-jurisdiction	7	0	0	5
-roundtrip-fram	4	0	0	3
-supersession-check	7	0	0	3
-rename	15	0	0	3
+role	module	functions	defs	records	imports
+dependency	fram.types	31	8	20	0
+dependency	fram.kernel	30	9	0	2
+dependency	fram.text-index	15	1	1	1
+dependency	fram.datalog	81	8	6	3
+dependency	fram.store	71	11	0	1
+target	callgraph	9	0	0	4
+target	rep-jurisdiction	7	0	0	5
+target	roundtrip-fram	4	0	0	3
+target	supersession-check	7	0	0	3
+target	rename	15	0	0	3

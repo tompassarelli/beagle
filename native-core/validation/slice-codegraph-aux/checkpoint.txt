@@ -1,0 +1,11 @@
+state INTERRUPTED
+inputs EXACT-CLOSURE
+fram-source-commit 950bf1927f99f1756f57e66d606cb6a04d36db24
+source-fact-rows 81151
+completed-world callgraph
+interrupted-world rep_jurisdiction
+not-run-world roundtrip_fram
+not-run-world supersession_check
+not-run-world rename
+reports callgraph-current others-pre-expansion
+resume NATIVE_CODEGRAPH_REFRESH=1 NATIVE_CODEGRAPH_ALLOW_FRONTIER=1 native-core/validation/slice-codegraph-aux/drive.sh

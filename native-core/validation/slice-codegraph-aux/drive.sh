@@ -7,28 +7,61 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
 art="${NATIVE_SLICE_ARTIFACTS:-$here}"
-fram="${FRAM_ROOT:-$HOME/code/fram/main}"
+fram_repo="${FRAM_ROOT:-$HOME/code/fram/main}"
+fram_commit="950bf1927f99f1756f57e66d606cb6a04d36db24"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-codegraph-aux.XXXXXX")"
 trap 'rm -rf "${scratch:?}"' EXIT
 
-mkdir -p "$scratch/ast" "$scratch/out" "$scratch/build" \
+mkdir -p "$scratch/ast" "$scratch/out" "$scratch/build" "$scratch/sources" \
   "$art/callgraph" "$art/rep_jurisdiction" "$art/roundtrip_fram" \
   "$art/supersession_check" "$art/rename"
 
-sources=(callgraph rep_jurisdiction roundtrip_fram supersession_check rename)
-for source_name in "${sources[@]}"; do
-  source_path="$fram/codegraph/src/$source_name.bclj"
-  if [[ ! -f "$source_path" ]]; then
-    echo "drive.sh: missing frozen source $source_path" >&2
+targets=(callgraph rep_jurisdiction roundtrip_fram supersession_check rename)
+dependencies=(types kernel text_index datalog store)
+all_sources=("${dependencies[@]}" "${targets[@]}")
+
+source_repo_path_for() {
+  case "$1" in
+    types|kernel|text_index|datalog|store) printf 'src/fram/%s.bclj\n' "$1" ;;
+    *) printf 'codegraph/src/%s.bclj\n' "$1" ;;
+  esac
+}
+
+source_path_for() {
+  printf '%s/sources/%s\n' "$scratch" "$(source_repo_path_for "$1")"
+}
+
+logical_path_for() {
+  case "$1" in
+    types|kernel|text_index|datalog|store) printf 'fram:src/fram/%s.bclj\n' "$1" ;;
+    *) printf 'fram:codegraph/src/%s.bclj\n' "$1" ;;
+  esac
+}
+
+git -C "$fram_repo" cat-file -e "$fram_commit^{commit}" 2>/dev/null || {
+  echo "drive.sh: frozen Fram commit $fram_commit is unavailable in $fram_repo" >&2
+  exit 1
+}
+
+for source_name in "${all_sources[@]}"; do
+  source_repo_path="$(source_repo_path_for "$source_name")"
+  source_path="$(source_path_for "$source_name")"
+  mkdir -p "$(dirname "$source_path")"
+  git -C "$fram_repo" show "$fram_commit:$source_repo_path" >"$source_path" || {
+    echo "drive.sh: missing frozen source $source_repo_path at $fram_commit" >&2
     exit 1
-  fi
+  }
   "$repo/bin/beagle-ast" "$source_path" >"$scratch/ast/$source_name.json"
 done
 
 {
-  printf 'module\tfunctions\tdefs\trecords\timports\n'
-  for source_name in "${sources[@]}"; do
-    jq -r '[.namespace,
+  printf 'role\tmodule\tfunctions\tdefs\trecords\timports\n'
+  for source_name in "${all_sources[@]}"; do
+    role=dependency
+    for target in "${targets[@]}"; do
+      [[ "$source_name" == "$target" ]] && role=target
+    done
+    jq -r --arg role "$role" '[$role, .namespace,
             ([.forms[] | select(.node == "defn")] | length),
             ([.forms[] | select(.node == "def")] | length),
             ([.forms[] | select(.node == "record")] | length),
@@ -37,9 +70,11 @@ done
 } >"$scratch/coverage.tsv"
 
 {
-  for source_name in "${sources[@]}"; do
-    digest="$(sha256sum "$fram/codegraph/src/$source_name.bclj" | cut -d' ' -f1)"
-    printf '%s\tfram:codegraph/src/%s.bclj\n' "$digest" "$source_name"
+  for source_name in "${all_sources[@]}"; do
+    source_path="$(source_path_for "$source_name")"
+    logical_path="$(logical_path_for "$source_name")"
+    digest="$(sha256sum "$source_path" | cut -d' ' -f1)"
+    printf '%s\t%s\n' "$digest" "$logical_path"
   done
 } >"$scratch/sources.sha256"
 
@@ -47,8 +82,12 @@ record_or_check() {
   local generated="$1" committed="$2" label="$3"
   if [[ -f "$committed" ]]; then
     cmp -s "$generated" "$committed" || {
-      echo "drive.sh: $label drifted from $committed" >&2
-      exit 1
+      if [[ "${NATIVE_CODEGRAPH_REFRESH:-0}" == 1 ]]; then
+        cp "$generated" "$committed"
+      else
+        echo "drive.sh: $label drifted from $committed" >&2
+        exit 1
+      fi
     }
   else
     cp "$generated" "$committed"
@@ -63,20 +102,31 @@ bb "$facts" \
   --input "$scratch/ast/callgraph.json=fram:codegraph/src/callgraph.bclj" \
   --output "$scratch/callgraph.facts" --include-defs
 bb "$facts" \
+  --input "$scratch/ast/types.json=fram:src/fram/types.bclj" \
+  --input "$scratch/ast/kernel.json=fram:src/fram/kernel.bclj" \
+  --input "$scratch/ast/text_index.json=fram:src/fram/text_index.bclj" \
+  --input "$scratch/ast/datalog.json=fram:src/fram/datalog.bclj" \
+  --input "$scratch/ast/store.json=fram:src/fram/store.bclj" \
   --input "$scratch/ast/callgraph.json=fram:codegraph/src/callgraph.bclj" \
   --input "$scratch/ast/rep_jurisdiction.json=fram:codegraph/src/rep_jurisdiction.bclj" \
   --output "$scratch/rep_jurisdiction.facts" --include-defs
 bb "$facts" \
+  --input "$scratch/ast/types.json=fram:src/fram/types.bclj" \
+  --input "$scratch/ast/store.json=fram:src/fram/store.bclj" \
   --input "$scratch/ast/roundtrip_fram.json=fram:codegraph/src/roundtrip_fram.bclj" \
   --output "$scratch/roundtrip_fram.facts" --include-defs
 bb "$facts" \
+  --input "$scratch/ast/types.json=fram:src/fram/types.bclj" \
+  --input "$scratch/ast/store.json=fram:src/fram/store.bclj" \
   --input "$scratch/ast/supersession_check.json=fram:codegraph/src/supersession_check.bclj" \
   --output "$scratch/supersession_check.facts" --include-defs
 bb "$facts" \
+  --input "$scratch/ast/types.json=fram:src/fram/types.bclj" \
+  --input "$scratch/ast/store.json=fram:src/fram/store.bclj" \
   --input "$scratch/ast/rename.json=fram:codegraph/src/rename.bclj" \
   --output "$scratch/rename.facts" --include-defs
 
-for target in "${sources[@]}"; do
+for target in "${targets[@]}"; do
   record_or_check "$scratch/$target.facts" "$art/$target/source.facts" \
     "$target source-fact projection"
 done
@@ -140,7 +190,8 @@ qbe_bin="$(find_tool qbe '*/bin/qbe')"
 failures=0
 
 check_projection() {
-  local target="$1" target_art="$art/$target" build="$scratch/build/$target"
+  local target="$1"
+  local target_art="$art/$target" build="$scratch/build/$target"
   local native_status checks
   native_status="$(tr -d '\n' <"$target_art/native-status.txt")"
   mkdir -p "$build"
@@ -196,12 +247,19 @@ check_projection() {
   fi
 }
 
-for target in "${sources[@]}"; do
+for target in "${targets[@]}"; do
   check_projection "$target"
 done
 
-printf 'module worlds: 5\nsource modules (deduplicated): 5\nfunctions: 42\ndefs: 0\nrecords: 0\n' \
-  >"$art/counts.txt"
+target_functions="$(awk -F '\t' '$1 == "target" {total += $3} END {print total + 0}' "$art/coverage.tsv")"
+target_defs="$(awk -F '\t' '$1 == "target" {total += $4} END {print total + 0}' "$art/coverage.tsv")"
+target_records="$(awk -F '\t' '$1 == "target" {total += $5} END {print total + 0}' "$art/coverage.tsv")"
+closure_functions="$(awk -F '\t' 'NR > 1 {total += $3} END {print total + 0}' "$art/coverage.tsv")"
+closure_defs="$(awk -F '\t' 'NR > 1 {total += $4} END {print total + 0}' "$art/coverage.tsv")"
+closure_records="$(awk -F '\t' 'NR > 1 {total += $5} END {print total + 0}' "$art/coverage.tsv")"
+printf 'module worlds: 5\nsource module instances: 17\nunique source modules: 10\ntarget functions: %s\ntarget defs: %s\ntarget records: %s\nclosure functions: %s\nclosure defs: %s\nclosure records: %s\n' \
+  "$target_functions" "$target_defs" "$target_records" \
+  "$closure_functions" "$closure_defs" "$closure_records" >"$art/counts.txt"
 
 if [[ $failures -ne 0 ]]; then
   echo "drive.sh: $failures projection(s) remain at an exact native frontier" >&2

@@ -1,5 +1,9 @@
 module worlds: 5
-source modules (deduplicated): 5
-functions: 42
-defs: 0
-records: 0
+source module instances: 17
+unique source modules: 10
+target functions: 42
+target defs: 0
+target records: 0
+closure functions: 270
+closure defs: 37
+closure records: 27
