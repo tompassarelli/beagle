@@ -88,8 +88,11 @@
       (str/split-lines
        (slice/obligation-report "obligation-projection" projected))
       (str/split-lines (slice/pending-reports (slice/native-pending native-result)))
-      [(write-c17! projected artifacts-dir)
-       (write-qbe! projected artifacts-dir)])))
+      (if complete?
+        [(write-c17! projected artifacts-dir)
+         (write-qbe! projected artifacts-dir)]
+        ["c17 SKIPPED native-world-incomplete"
+         "qbe SKIPPED native-world-incomplete"]))))
 
 (let [[facts-path artifacts-dir report-path] *command-line-args*
       facts (slurp facts-path)
