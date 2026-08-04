@@ -104,29 +104,75 @@
 
 ;; --- beagle-fields: print record fields + accessors --------------------------
 
+(define (expand-fields-file-args args)
+  (define files
+    (apply append
+      (for/list ([a (in-list args)])
+        (cond
+          [(directory-exists? a)
+           (with-handlers ([exn:fail?
+                            (lambda (e)
+                              (raise-user-error
+                               'beagle-fields
+                               "failed to read input path ~a: ~a"
+                               a
+                               (exn-message e)))])
+             (find-rkt-files a))]
+          [(file-exists? a) (list a)]
+          [else
+           (raise-user-error 'beagle-fields
+                             "input path does not exist: ~a"
+                             a)]))))
+  (when (null? files)
+    (raise-user-error
+     'beagle-fields
+     "no Beagle source files found in provided paths: ~a"
+     (string-join* args ", ")))
+  files)
+
+(define (query-field-matches rec-name files
+                             #:read-datums [read-datums read-expanded-datums])
+  (when (null? files)
+    (raise-user-error 'beagle-fields "no Beagle source files were provided"))
+  (define target (if (string? rec-name) (string->symbol rec-name) rec-name))
+  (define matches
+    (for*/list ([f (in-list files)]
+                [d (in-list
+                    (with-handlers ([exn:fail?
+                                     (lambda (e)
+                                       (raise-user-error
+                                        'beagle-fields
+                                        "failed to read ~a: ~a"
+                                        f
+                                        (exn-message e)))])
+                      (read-datums f)))]
+                #:do [(define entry (extract-record-entry d))]
+                #:when (and entry (eq? (car entry) target)))
+      (cons f entry)))
+  (when (null? matches)
+    (raise-user-error 'beagle-fields
+                      "record ~a not found in provided files"
+                      target))
+  matches)
+
 (define (query-fields rec-name files)
   (define target (if (string? rec-name) (string->symbol rec-name) rec-name))
-  (for ([f (in-list files)])
-    (with-handlers ([exn:fail? (lambda (e) (void))])
-      (define datums (read-expanded-datums f))
-      (for ([d (in-list datums)])
-        (define entry (extract-record-entry d))
-        (when (and entry (eq? (car entry) target))
-          (define fields (cadr entry))
-          (define name-str (symbol->string target))
-          (define name-lower (str-downcase name-str))
-          (printf "~a\n" target)
-          (for ([fld (in-list fields)])
-            (printf "  ~a : ~a    accessor: ~a-~a\n"
-                    (param-name fld)
-                    (type->string (param-type fld))
-                    name-lower
-                    (param-name fld)))
-          (define ctor-types (map (lambda (fld) (type->string (param-type fld))) fields))
-          (printf "  constructor: ->~a : [~a -> ~a]\n"
-                  name-str
-                  (string-join* ctor-types " ")
-                  name-str))))))
+  (for ([match (in-list (query-field-matches target files))])
+    (define fields (caddr match))
+    (define name-str (symbol->string target))
+    (define name-lower (str-downcase name-str))
+    (printf "~a\n" target)
+    (for ([fld (in-list fields)])
+      (printf "  ~a : ~a    accessor: ~a-~a\n"
+              (param-name fld)
+              (type->string (param-type fld))
+              name-lower
+              (param-name fld)))
+    (define ctor-types (map (lambda (fld) (type->string (param-type fld))) fields))
+    (printf "  constructor: ->~a : [~a -> ~a]\n"
+            name-str
+            (string-join* ctor-types " ")
+            name-str)))
 
 ;; --- beagle-callers: find call sites -----------------------------------------
 
@@ -310,7 +356,7 @@
        (fprintf (current-error-port) "usage: beagle-fields <RecordName> <file-or-dir> ...\n")
        (exit 2))
      (define name (car rest))
-     (define files (expand-file-args (cdr rest)))
+     (define files (expand-fields-file-args (cdr rest)))
      (query-fields name files)]
     [("callers")
      (when (< (length rest) 2)
@@ -345,6 +391,6 @@
         (list a)))))
 
 (provide query-sig query-fields query-callers query-provides query-impact
-         run-query find-rkt-files
+         run-query find-rkt-files expand-fields-file-args query-field-matches
          extract-defn-entry extract-def-entry extract-record-entry
          extract-extern-entry extract-ns find-calls-in format-call)

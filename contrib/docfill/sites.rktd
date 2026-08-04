@@ -28,9 +28,6 @@
  (site (path "docs/architecture.md")
        (note "target spans externalized from the README restructure; registered so they cannot drift unowned"))
 
- (site (path "integrations/north/skills/beagle-authoring/SKILL.md")
-       (note "headline target sentence, extension table, per-target domain fit; live-symlinked into ~/.agents/skills, so a fill is agent-visible immediately"))
-
  (site (path "share/targets.sh")
        (kind generated)
        (view shell)

@@ -56,7 +56,7 @@
            (and rest-param (param-interface-type rest-param))
            (or return-type ANY)))
 
-(define (record-bindings name fields kind)
+(define (record-bindings name fields kind map-constructor?)
   (define record-type (type-prim name))
   (define name-string (symbol->string name))
   (define lower-name (string-downcase name-string))
@@ -66,15 +66,15 @@
      (string->symbol (string-append "->" name-string))
      kind
      (type-fn (map param-interface-type fields) #f record-type)
-     #f)
-    ;; Clojure's defrecord also exposes map->Name.  It is not yet typed by the
-    ;; legacy importer, but it is a real export and therefore must not be
-    ;; rejected as missing.
-    (interface-binding
-     (string->symbol (string-append "map->" name-string))
-     kind
-     (type-fn (list ANY) #f record-type)
      #f))
+   (if map-constructor?
+       (list
+        (interface-binding
+         (string->symbol (string-append "map->" name-string))
+         'map-constructor
+         (type-fn (list ANY) #f record-type)
+         #f))
+       '())
    (for/list ([field (in-list fields)])
      (interface-binding
       (string->symbol
@@ -91,12 +91,13 @@
      (unwrap-public-form (jst-export-default-form form))]
     [else form]))
 
-(define (ast-interface-bindings forms)
+(define (ast-interface-bindings forms target)
   (define out (make-hasheq))
   (define (add! binding)
     (hash-set! out (interface-binding-name binding) binding))
   (define (add-record! name fields kind)
-    (for ([binding (in-list (record-bindings name fields kind))])
+    (for ([binding
+           (in-list (record-bindings name fields kind (eq? target 'clj)))])
       (add! binding)))
   (for ([raw-form (in-list forms)])
     (define form (unwrap-public-form raw-form))
@@ -517,7 +518,8 @@
 (define (program->module-interface prog
                                    #:source-id [source-id #f]
                                    #:datums [datums '()])
-  (define ast-bindings (ast-interface-bindings (program-forms prog)))
+  (define ast-bindings
+    (ast-interface-bindings (program-forms prog) (program-target prog)))
   (define bindings (hash-copy ast-bindings))
   (for ([(name binding)
          (in-hash

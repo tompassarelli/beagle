@@ -3117,13 +3117,7 @@
   (format "(~a ~a)" (scalar-predicate-op p) (scalar-predicate-value p)))
 
 (define (ctor->scalar-name fn)
-  (define s (symbol->string fn))
-  (define bare
-    (let ([slash (regexp-match-positions #rx"/" s)])
-      (if slash (substring s (cdar slash)) s)))
-  (and (string-prefix? bare "->")
-       (> (string-length bare) 2)
-       (string->symbol (substring bare 2))))
+  (scalar-constructor-name fn))
 
 (define (check-scalar-predicate-literal fn args e)
   (define scalar-name (ctor->scalar-name fn))
@@ -4710,28 +4704,40 @@
     (hash-set! SCALAR-PREDS name preds))
   ;; also register imported scalars
   (for ([sym (in-list (program-imported-scalar-fns prog))])
-    (define s (symbol->string sym))
-    (define bare
-      (let ([slash (regexp-match-positions #rx"/" s)])
-        (if slash (substring s (cdar slash)) s)))
     (cond
-      [(string-prefix? bare "->")
-       (define scalar-name (string->symbol (substring bare 2)))
-       (hash-set! SCALAR-CTORS sym scalar-name)]
-      [(string-suffix? bare "-value")
-       (define prefix (substring bare 0 (- (string-length bare) 6)))
-       (define ctor-sym (string->symbol (string-append "->" (string-titlecase-first prefix))))
-       (define canonical
-         (or (hash-ref SCALAR-CTORS ctor-sym #f)
-             (for/first ([(k v) (in-hash SCALAR-CTORS)]
-                         #:when (string-ci=? (symbol->string v) prefix))
-               v)))
-       (hash-set! SCALAR-ACCESSORS sym (or canonical (string->symbol prefix)))])))
+      [(scalar-constructor-name sym)
+       => (lambda (scalar-name)
+            (hash-set! SCALAR-CTORS sym scalar-name))]
+      [(scalar-accessor-name sym)
+       => (lambda (scalar-name)
+            (hash-set! SCALAR-ACCESSORS sym scalar-name))])))
 
 (define (string-titlecase-first s)
   (if (string=? s "") s
       (string-append (string (char-upcase (string-ref s 0)))
                      (substring s 1))))
+
+(define (qualified-name-parts name)
+  (define authored (symbol->string name))
+  (define slash
+    (for/fold ([last #f]) ([index (in-range (string-length authored))]
+                           #:when (char=? (string-ref authored index) #\/))
+      index))
+  (values (if slash (substring authored 0 (add1 slash)) "")
+          (if slash (substring authored (add1 slash)) authored)))
+
+(define (scalar-constructor-name name)
+  (define-values (prefix leaf) (qualified-name-parts name))
+  (and (string-prefix? leaf "->")
+       (> (string-length leaf) 2)
+       (string->symbol (string-append prefix (substring leaf 2)))))
+
+(define (scalar-accessor-name name)
+  (define-values (prefix leaf) (qualified-name-parts name))
+  (and (string-suffix? leaf "-value")
+       (let ([base (substring leaf 0 (- (string-length leaf) 6))])
+         (string->symbol
+          (string-append prefix (string-titlecase-first base))))))
 
 (define (scalar-name-eq? a b)
   (string-ci=? (symbol->string a) (symbol->string b)))
@@ -4884,7 +4890,7 @@
     (when (eq? (program-mode prog) 'strict)
       (define src-table (program-src-table prog))
       (for ([form (in-list (program-forms prog))])
-        (walk-for-provenance form src-table)))))
+        (walk-for-provenance form src-table (program-target prog))))))
 
 ;; --- free dotted-name rejection (nix target) -------------------------------
 ;; A dotted name `root.a.b` on the nix target descends into an attrset, so its
@@ -5051,7 +5057,7 @@
        (vector-copy! prev 0 curr))
      (vector-ref prev lb)]))
 
-(define (walk-for-provenance form src-table)
+(define (walk-for-provenance form src-table target)
   (define (walk e)
     (cond
       [(call-form? e)
@@ -5066,7 +5072,9 @@
                   (not (memq fn '(recur throw)))
                   (not (string-contains? (symbol->string fn) "/")))
          (define src (and src-table (hash-ref src-table e #f)))
-         (define suggestion (nix-form-did-you-mean fn))
+         (define suggestion
+           (and (eq? target 'nix)
+                (nix-form-did-you-mean fn)))
          (fprintf (current-error-port)
                   "note: call to undefined function '~a'~a~a\n"
                   fn

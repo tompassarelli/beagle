@@ -650,6 +650,7 @@
 (define current-js-inline-scope (make-parameter (set)))
 (define current-js-record-fields (make-parameter (hasheq)))
 (define current-js-record-ns (make-parameter (hasheq)))
+(define current-js-record-constructors (make-parameter (set)))
 (define current-js-scalar-fns (make-parameter (set)))
 (define current-js-symbol-ns (make-parameter (hasheq)))
 
@@ -1064,6 +1065,115 @@
   (for/fold ([h local]) ([(rec-name field-names) (in-hash (program-imported-record-field-order prog))])
     (hash-set h rec-name field-names)))
 
+(define RECORD-CONSTRUCTOR-KINDS
+  '(record-constructor union-constructor error-constructor))
+
+(define (qualified-binding prefix name)
+  (string->symbol
+   (string-append (symbol->string prefix) "/" (symbol->string name))))
+
+(define (record-constructor-kind? kind)
+  (and (memq kind RECORD-CONSTRUCTOR-KINDS) #t))
+
+(define (require-prefix entry)
+  (or (require-entry-alias entry)
+      (string->symbol
+       (last (string-split (symbol->string (require-entry-ns entry)) ".")))))
+
+(define (require-module-import prog entry)
+  (for/first ([import (in-list (program-imported-module-interfaces prog))]
+              #:when (eq? (module-interface-namespace
+                            (module-import-interface import))
+                           (require-entry-ns entry)))
+    import))
+
+(define (require-interface-binding prog entry name)
+  (define import (require-module-import prog entry))
+  (and import
+       (module-interface-binding-ref
+        (module-import-interface import) name #f)))
+
+(define (interface-scalar-predicated? interface scalar-name)
+  (define declaration
+    (hash-ref (module-interface-type-declarations interface) scalar-name #f))
+  (and declaration
+       (match (interface-type-declaration-details declaration)
+         [`(backing ,_ predicates ,predicates) (pair? predicates)]
+         [_ #f])))
+
+(define (legacy-record-constructor-import? prog entry name)
+  (define authored (symbol->string name))
+  (and (string-prefix? authored "->")
+       (let* ([record-name (string->symbol (substring authored 2))]
+              [owned-name (qualified-binding (require-entry-ns entry) record-name)])
+         (equal? (hash-ref (program-imported-record-ns prog) owned-name #f)
+                 (require-entry-ns entry)))))
+
+(define (record-constructor-import? prog entry name)
+  (define binding (require-interface-binding prog entry name))
+  (or (and (string-prefix? (symbol->string name) "->")
+           binding
+           (record-constructor-kind? (interface-binding-kind binding)))
+      (and (not binding) (legacy-record-constructor-import? prog entry name))))
+
+(define (build-record-constructor-set prog)
+  (define local
+    (for/fold ([constructors (set)]) ([form (in-list (program-forms prog))])
+      (define names
+        (cond
+          [(record-form? form) (list (record-form-name form))]
+          [(and (defunion-form? form) (defunion-form-member-fields form))
+           (defunion-form-members form)]
+          [(deferror-form? form) (deferror-form-members form)]
+          [else '()]))
+      (for/fold ([next constructors]) ([name (in-list names)])
+        (set-add next
+                 (string->symbol (string-append "->" (symbol->string name)))))))
+  (for/fold ([constructors local]) ([entry (in-list (program-requires prog))])
+    (define prefix (require-prefix entry))
+    (define namespace (require-entry-ns entry))
+    (define import (require-module-import prog entry))
+    (define names
+      (if import
+          (for/list ([(name binding)
+                      (in-hash
+                       (module-interface-bindings
+                        (module-import-interface import)))]
+                     #:when (record-constructor-kind?
+                             (interface-binding-kind binding)))
+            name)
+          (for/list ([(owned-name owner)
+                      (in-hash (program-imported-record-ns prog))]
+                     #:when (and (eq? owner namespace)
+                                 (string-prefix?
+                                  (symbol->string owned-name)
+                                  (string-append (symbol->string namespace) "/"))))
+            (define record-name
+              (substring (symbol->string owned-name)
+                         (add1 (string-length (symbol->string namespace)))))
+            (string->symbol (string-append "->" record-name)))))
+    (define qualified
+      (for/fold ([next constructors]) ([name (in-list names)])
+        (set-add (set-add next (qualified-binding prefix name))
+                 (qualified-binding namespace name))))
+    (for/fold ([next qualified])
+              ([name (in-list (or (require-entry-refer entry) '()))]
+               #:when (record-constructor-import? prog entry name))
+      (set-add next name))))
+
+(define (scalar-constructor-type-name constructor)
+  (define authored (symbol->string constructor))
+  (define slash
+    (for/fold ([last #f]) ([index (in-range (string-length authored))]
+                           #:when (char=? (string-ref authored index) #\/))
+      index))
+  (define leaf (if slash (substring authored (add1 slash)) authored))
+  (and (string-prefix? leaf "->")
+       (string->symbol
+        (string-append
+         (if slash (substring authored 0 (add1 slash)) "")
+         (substring leaf 2)))))
+
 (define (build-scalar-fns prog)
   (define predicated
     (for/fold ([h (hash)]) ([f (in-list (program-forms prog))])
@@ -1082,7 +1192,13 @@
                 (set-add s accessor)
                 (set-add (set-add s ctor) accessor)))
           s)))
-  (for/fold ([s local]) ([sym (in-list (program-imported-scalar-fns prog))])
+  (for/fold ([s local]) ([sym (in-list (program-imported-scalar-fns prog))]
+                         #:unless
+                         (let ([scalar-name (scalar-constructor-type-name sym)])
+                           (and scalar-name
+                                (hash-has-key?
+                                 (program-imported-scalar-preds prog)
+                                 scalar-name))))
     (set-add s sym)))
 
 (define (validate-js-target! prog)
@@ -1111,7 +1227,7 @@
       (if refer (set-union s (list->set refer)) s)))
   (set-union from-forms from-externs from-refers))
 
-(define (exported-defn? name private?)
+(define (exported-binding? name [private? #f])
   (define names (current-js-export-names))
   (and (not private?)
        names
@@ -1138,6 +1254,8 @@
                  [match-counter (box 0)]
                  [current-js-record-fields (build-record-field-table prog)]
                  [current-js-record-ns (program-imported-record-ns prog)]
+                 [current-js-record-constructors
+                  (build-record-constructor-set prog)]
                  [current-js-scalar-fns (build-scalar-fns prog)]
                  [current-js-symbol-ns (program-imported-symbol-ns prog)]
                  [current-js-semantic-contracts (program-semantic-contracts prog)]
@@ -1222,6 +1340,52 @@
 (define (emit-module-header prog)
   (define importer-ns (symbol->string (program-namespace prog)))
   (define rs (program-requires prog))
+  (define imported-scalar-fns
+    (list->set (program-imported-scalar-fns prog)))
+  (define (runtime-import-name entry name)
+    (define import (require-module-import prog entry))
+    (define interface (and import (module-import-interface import)))
+    (define binding
+      (and interface (module-interface-binding-ref interface name #f)))
+    (define kind (and binding (interface-binding-kind binding)))
+    (cond
+      [(and interface
+            (module-interface-type-export? interface name)
+            (not binding))
+       #f]
+      [(record-constructor-import? prog entry name)
+       (string->symbol (substring (symbol->string name) 2))]
+      [(or (eq? kind 'scalar-accessor)
+           (and (not interface)
+                (set-member?
+                 imported-scalar-fns
+                 (qualified-binding (require-prefix entry) name))
+                (string-suffix? (symbol->string name) "-value")))
+       #f]
+      [(or (eq? kind 'scalar-constructor)
+           (and (not interface)
+                (set-member?
+                 imported-scalar-fns
+                 (qualified-binding (require-prefix entry) name))
+                (string-prefix? (symbol->string name) "->")))
+       (define scalar-name
+         (qualified-binding
+          (require-prefix entry)
+          (string->symbol (substring (symbol->string name) 2))))
+       (and (if interface
+                (interface-scalar-predicated?
+                 interface
+                 (string->symbol (substring (symbol->string name) 2)))
+                (hash-has-key?
+                 (program-imported-scalar-preds prog)
+                 scalar-name))
+            name)]
+      [(eq? kind 'extern) #f]
+      [(set-member?
+        (program-imported-type-names prog)
+        (qualified-binding (require-prefix entry) name))
+       #f]
+      [else name]))
   ;; A `:refer`'d name that resolved to a macro is compile-time only — it's
   ;; expanded away and never referenced at runtime, and the target module emits
   ;; no runtime export for it. Emitting it in `import { … }` produces an ESM that
@@ -1242,7 +1406,12 @@
            [else (relative-js-module-path importer-ns ns-str)]))
        (if refer
          (let ([runtime-refer
-                (filter (lambda (n) (not (hash-ref macros n #f))) refer)])
+                (remove-duplicates
+                 (filter-map
+                  (lambda (name)
+                    (and (not (hash-ref macros name #f))
+                         (runtime-import-name r name)))
+                  refer))])
            (if (null? runtime-refer)
              ""
              (format "import { ~a } from '~a';"
@@ -1263,12 +1432,14 @@
 (define (emit-form f)
   (cond
     [(def-form? f)
-     (format "const ~a = ~a;"
+     (format "~aconst ~a = ~a;"
+             (if (exported-binding? (def-form-name f)) "export " "")
              (mangle-name (def-form-name f))
              (emit-expr (def-form-value f)))]
 
     [(defonce-form? f)
-     (format "const ~a = ~a;"
+     (format "~aconst ~a = ~a;"
+             (if (exported-binding? (defonce-form-name f)) "export " "")
              (mangle-name (defonce-form-name f))
              (emit-expr (defonce-form-value f)))]
 
@@ -1277,7 +1448,7 @@
      (define async? (contains-await? (defn-form-body f)))
      (define bound (binding-names-from-params (defn-form-params f) (defn-form-rest-param f)))
      (format "~a~a {\n  ~a\n}"
-             (if (exported-defn? (defn-form-name f) (defn-form-private? f))
+             (if (exported-binding? (defn-form-name f) (defn-form-private? f))
                  "export "
                  "")
              (js-defn-signature f
@@ -1316,7 +1487,7 @@
            (format "  if (arguments.length >= ~a) {\n    ~a\n  }" n inner)
            (format "  if (arguments.length === ~a) {\n    ~a\n  }" n inner))))
      (format "~a~afunction ~a(..._args) {\n~a\n  throw new Error('No matching arity: ' + _args.length);\n}"
-             (if (exported-defn? (defn-multi-name f) (defn-multi-private? f))
+             (if (exported-binding? (defn-multi-name f) (defn-multi-private? f))
                  "export "
                  "")
              (if async? "async " "")
@@ -1326,10 +1497,15 @@
      (emit-record f)]
 
     [(defenum-form? f)
-     (define name (mangle-name (defenum-form-name f)))
+     (define values-name
+       (string->symbol
+        (string-append (symbol->string (defenum-form-name f)) "-values")))
      (define vals (defenum-form-values f))
      (define val-strs (map (lambda (v) (format "~v" (symbol->string v))) vals))
-     (format "const ~a_values = new Set([~a]);" name (string-join val-strs ", "))]
+     (format "~aconst ~a = new Set([~a]);"
+             (if (exported-binding? values-name) "export " "")
+             (mangle-name values-name)
+             (string-join val-strs ", "))]
 
     [(defunion-form? f)
      (define comment
@@ -1998,9 +2174,12 @@
         (define fn-str (symbol->string fn-sym))
         (define mangled
           (cond
-            [(string-prefix? fn-str "->")
+            [(and (string-prefix? fn-str "->")
+                  (set-member? (current-js-record-constructors) fn-sym))
              (mangle-str (substring fn-str 2))]
-            [(string-contains? fn-str "/->")
+            [(and (string-contains? fn-str "/->")
+                  (or (set-member? (current-js-record-constructors) fn-sym)
+                      (not (js-bound? fn-sym))))
              (let ([parts (string-split fn-str "/->")])
                (string-append (mangle-name (string->symbol (car parts)))
                               "." (mangle-str (cadr parts))))]
@@ -2028,12 +2207,18 @@
 ;; Shared by defunion and deferror members (both produce tagged variant ctors).
 (define (emit-tagged-factory member-name fields)
   (define m-str (mangle-name member-name))
+  (define constructor-name
+    (string->symbol
+     (string-append "->" (symbol->string member-name))))
   ;; params are BINDINGS (reserved-word-suffixed); the object KEYS are
   ;; PROPERTIES (char-mangle only). Split them so `{ delete: delete$ }`.
   (define field-params (map (compose mangle-name param-name) fields))
   (define field-props (map (compose mangle-prop symbol->string param-name) fields))
   (define factory
-    (format "function ~a(~a) { return Object.freeze({ _tag: ~v~a }); }"
+    (format "~afunction ~a(~a) { return Object.freeze({ _tag: ~v~a }); }"
+            (if (exported-binding? constructor-name)
+                "export "
+                "")
             m-str
             (string-join field-params ", ")
             (symbol->string member-name)
@@ -2046,10 +2231,14 @@
   (define accessors
     (for/list ([field-name (in-list (map (compose symbol->string param-name) fields))]
                [prop (in-list field-props)])
-      (format "function ~a(r) { return r.~a; }"
-              (mangle-str (format "~a-~a"
-                                  (string-downcase (symbol->string member-name))
-                                  field-name))
+      (define accessor-name
+        (string->symbol
+         (format "~a-~a"
+                 (string-downcase (symbol->string member-name))
+                 field-name)))
+      (format "~afunction ~a(r) { return r.~a; }"
+              (if (exported-binding? accessor-name) "export " "")
+              (mangle-name accessor-name)
               prop)))
   (string-join (cons factory accessors) "\n\n"))
 
@@ -2071,8 +2260,13 @@
     (map (lambda (prop param)
            (if (string=? prop param) param (format "~a: ~a" prop param)))
          field-props field-params))
+  (define constructor-name
+    (string->symbol (string-append "->" name-str)))
   (define factory
-    (format "function ~a(~a) {\n  return Object.freeze({_tag: ~v, ~a});\n}"
+    (format "~afunction ~a(~a) {\n  return Object.freeze({_tag: ~v, ~a});\n}"
+            (if (exported-binding? constructor-name)
+                "export "
+                "")
             name-mangled
             (string-join field-params ", ")
             name-str
@@ -2080,8 +2274,11 @@
   (define accessors
     (for/list ([field-name (in-list field-source-names)]
                [prop (in-list field-props)])
-      (format "function ~a(r) { return r.~a; }"
-              (mangle-str (format "~a-~a" (string-downcase name-str) field-name))
+      (define accessor-name
+        (string->symbol (format "~a-~a" (string-downcase name-str) field-name)))
+      (format "~afunction ~a(r) { return r.~a; }"
+              (if (exported-binding? accessor-name) "export " "")
+              (mangle-name accessor-name)
               prop)))
   (string-join (cons factory accessors) "\n\n"))
 
@@ -2301,14 +2498,17 @@
   (define preds (defscalar-form-predicates f))
   (if (null? preds)
     (format "// ~a : scalar" (mangle-name name))
-    (let ([ctor (mangle-str (string-append "->" (symbol->string name)))]
-          [checks (string-join
+    (let* ([constructor-name
+            (string->symbol (string-append "->" (symbol->string name)))]
+           [ctor (mangle-name constructor-name)]
+           [checks (string-join
                     (for/list ([p (in-list preds)])
                       (format "v ~a ~a"
                               (scalar-predicate-op p)
                               (scalar-predicate-value p)))
                     " && ")])
-      (format "function ~a(v) {\n  if (!(~a)) throw new Error('scalar constraint violated');\n  return v;\n}"
+      (format "~afunction ~a(v) {\n  if (!(~a)) throw new Error('scalar constraint violated');\n  return v;\n}"
+              (if (exported-binding? constructor-name) "export " "")
               ctor checks))))
 
 ;; --- quoted values ---------------------------------------------------------

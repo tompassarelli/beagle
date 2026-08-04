@@ -9,6 +9,7 @@
 ;; imports the emitted module + calls functions + prints expected output.
 
 (require rackunit
+         racket/list
          racket/string
          racket/port
          racket/system
@@ -17,8 +18,76 @@
 
 (define-runtime-path fixtures-dir "fixtures")
 (define-runtime-path beagle-build "../../bin/beagle-build")
+(define-runtime-path beagle "../../bin/beagle")
 
 (define tmp-dir (make-temporary-file "beagle-js-oracle-~a" 'directory))
+
+(define (write-source path source)
+  (make-parent-directory* path)
+  (call-with-output-file path #:exists 'truncate
+    (lambda (out) (display source out))))
+
+(define (module-output-path out-dir namespace)
+  (define parts (string-split namespace "."))
+  (apply build-path
+         out-dir
+         (append (drop-right parts 1)
+                 (list (string-append (last parts) ".js")))))
+
+(define (emit-batch-and-run modules entry-namespace)
+  (define scratch
+    (make-temporary-file "beagle-js-batch-oracle-~a" 'directory))
+  (define src-dir (build-path scratch "src"))
+  (define out-dir (build-path scratch "out"))
+  (dynamic-wind
+   void
+   (lambda ()
+     (define sources
+       (for/list ([module (in-list modules)])
+         (define path
+           (build-path src-dir (string-append (car module) ".bjs")))
+         (write-source path (cdr module))
+         path))
+     (define build-out (open-output-string))
+     (define build-err (open-output-string))
+     (define build-code
+       (parameterize ([current-output-port build-out]
+                      [current-error-port build-err])
+         (apply system*/exit-code
+                beagle
+                "build"
+                (append (map path->string sources)
+                        (list "--out" (path->string out-dir))))))
+     (define emitted
+       (if (zero? build-code)
+           (for/hash ([module (in-list modules)])
+             (define namespace
+               (second (regexp-match #px"\\(ns\\s+([^\\s\\)]+)"
+                                     (cdr module))))
+             (values namespace
+                     (file->string
+                      (module-output-path out-dir namespace))))
+           (hash)))
+     (write-source (build-path out-dir "package.json")
+                   "{\"type\":\"module\"}\n")
+     (define run-out (open-output-string))
+     (define run-err (open-output-string))
+     (define node (find-executable-path "node"))
+     (define run-code
+       (if (and node (zero? build-code))
+           (parameterize ([current-directory out-dir]
+                          [current-output-port run-out]
+                          [current-error-port run-err])
+             (system*/exit-code
+              node
+              (module-output-path out-dir entry-namespace)))
+           1))
+     (values build-code run-code emitted
+             (get-output-string run-out)
+             (string-append (get-output-string build-out)
+                            (get-output-string build-err)
+                            (get-output-string run-err))))
+   (lambda () (delete-directory/files scratch #:must-exist? #f))))
 
 (define (emit-and-run name driver-code)
   (define src (build-path fixtures-dir (string-append name ".bjs")))
@@ -189,3 +258,74 @@ JS
     ))
   (check-true ok? err)
   (check-equal? out "[{\"k\":\"a\",\"v\":1},{\"k\":\"b\",\"v\":2}]\n[{},{}]\n"))
+
+(test-case "JS batch imports typed runtime bindings without owner collisions"
+  (define-values (build-code run-code emitted out err)
+    (emit-batch-and-run
+     (list
+      (cons
+       "types"
+       #<<BJS
+#lang beagle/js
+(ns oracle.types)
+(defrecord Person [name: String])
+(defunion Choice (Chosen [value: Int]))
+(defunion :throwable Failure (Bad [message: String]))
+(defscalar Checked Int :where (>= 0))
+(def total: Int 7)
+(defonce once: Int 8)
+(defenum Color :red :blue)
+BJS
+       )
+      (cons
+       "scalar"
+       #<<BJS
+#lang beagle/js
+(ns oracle.scalar)
+(defscalar Amount Int)
+BJS
+       )
+      (cons
+       "functions"
+       #<<BJS
+#lang beagle/js
+(ns oracle.functions)
+(defn ->Amount [value: Int] -> Int (+ value 100))
+(defn amount-value [value: Int] -> Int (+ value 200))
+BJS
+       )
+      (cons
+       "entry"
+       #<<BJS
+#lang beagle/js
+(ns oracle.entry
+  (:require [oracle.types :refer [->Person person-name ->Chosen chosen-value
+                                  ->Bad bad-message ->Checked checked-value
+                                  total once Color-values
+                                  Person Choice Failure Bad Checked]]
+            [oracle.scalar :as scalar]
+            [oracle.functions :refer [->Amount amount-value]]))
+(println (person-name (->Person "Ada")))
+(println (chosen-value (->Chosen 9)))
+(println (bad-message (->Bad "oops")))
+(println (checked-value (->Checked 3)))
+(println total)
+(println once)
+(println (.-size Color-values))
+(println (->Amount 1))
+(println (amount-value 1))
+(println (scalar/amount-value (scalar/->Amount 5)))
+BJS
+       ))
+     "oracle.entry"))
+  (check-equal? build-code 0 err)
+  (check-equal? run-code 0 err)
+  (check-equal? out "Ada\n9\noops\n3\n7\n8\n2\n101\n201\n5\n")
+  (define types-js (hash-ref emitted "oracle.types" ""))
+  (check-true (string-contains? types-js "export function Person("))
+  (check-true (string-contains? types-js "export function Chosen("))
+  (check-true (string-contains? types-js "export function Bad("))
+  (check-true (string-contains? types-js "export function __gtChecked("))
+  (check-true (string-contains? types-js "export const total = 7;"))
+  (check-true (string-contains? types-js "export const once = 8;"))
+  (check-true (string-contains? types-js "export const Color_values")))

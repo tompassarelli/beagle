@@ -383,26 +383,21 @@
   (when (< (length args) 2)
     (error "fields requires: <record-name> <file-or-dir>..."))
   (define rec-name (car args))
-  (define files (find-rkt-in (cdr args)))
-  (define target (string->symbol rec-name))
-  (define results '())
-  (for ([f (in-list files)])
-    (with-handlers ([exn:fail? void])
-      (define datums (get-datums f))
-      (for ([d (in-list datums)])
-        (define entry (extract-record-entry d))
-        (when (and entry (eq? (car entry) target))
-          (define fields (cadr entry))
-          (define name-lower (string-downcase rec-name))
-          (set! results
-                (cons (hasheq 'record rec-name
-                              'file f
-                              'fields (for/list ([fld (in-list fields)])
-                                        (hasheq 'name (symbol->string (param-name fld))
-                                                'type (type->string (param-type fld))
-                                                'accessor (format "~a-~a" name-lower (param-name fld)))))
-                      results))))))
-  (hasheq 'ok #t 'results (reverse results)))
+  (define files (expand-fields-file-args (cdr args)))
+  (define matches
+    (query-field-matches rec-name files #:read-datums get-datums))
+  (define name-lower (string-downcase rec-name))
+  (hasheq
+   'ok #t
+   'results
+   (for/list ([match (in-list matches)])
+     (define fields (caddr match))
+     (hasheq 'record rec-name
+             'file (car match)
+             'fields (for/list ([fld (in-list fields)])
+                       (hasheq 'name (symbol->string (param-name fld))
+                               'type (type->string (param-type fld))
+                               'accessor (format "~a-~a" name-lower (param-name fld))))))))
 
 (define (handle-provides args)
   (when (null? args)

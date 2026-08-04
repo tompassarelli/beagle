@@ -9,8 +9,10 @@ a stale copy. (`bin/beagle` with no args prints the full command list.)
 ## Test
 
 ```
-bin/beagle test                       # run the test tiers
-raco test beagle-test/tests/parse.rkt # one file
+bin/beagle test                        # run the active test tier
+source bin/_beagle-racket              # select Beagle's pinned Racket
+"$RACO" make beagle-lib/private/parse.rkt
+"$RACO" test beagle-test/tests/parse.rkt
 ```
 
 ## Check / build

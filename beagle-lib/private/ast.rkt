@@ -513,6 +513,7 @@
                  src-table
                  semantic-contracts
                  declared-type-aliases
+                 imported-type-names
                  imported-record-fields
                  imported-record-field-order
                  imported-record-ns

@@ -12,6 +12,8 @@
     (lint-program! prog))
   (get-output-string out))
 
+(define (br . xs) (cons '#%brackets xs))
+
 (test-case "untyped def warns in strict mode"
   (define out (lint-prog '(def x 42)))
   (check-true (regexp-match? #rx"untyped def x" out)))
@@ -69,13 +71,29 @@
 
 ;; --- unused externs --------------------------------------------------------
 
-;; "unused declare-extern warns" / "used declare-extern does not warn" /
-;; "extern used in nested call does not warn" all relied on `(def x: T …)`
-;; or `(defn f [..] -> T …)` to wire the type so the lint pass had something
-;; to call. With bare `: T` rejected, these need rewriting on the inline
-;; postfix surface (`(def x: T …)`). The brief `(claim NAME TYPE)` carrier
-;; that briefly sat between them is gone. Deferred until the fixtures are
-;; on the postfix marker; the lint rule itself is unchanged.
+(test-case "unused declare-extern warns"
+  (define out (lint-prog '(declare-extern Unused Any)))
+  (check-true (regexp-match? #rx"unused declare-extern: Unused" out)))
+
+(test-case "constructor use counts as an extern use"
+  (define out (lint-prog '(declare-extern Widget Any)
+                         '(def widget (Widget.))))
+  (check-false (regexp-match? #rx"unused declare-extern: Widget" out)))
+
+(test-case "catch type counts as an extern use"
+  (define out (lint-prog '(declare-extern Error Any)
+                         '(defn guarded []
+                            (try 1 (catch Error error 0)))))
+  (check-false (regexp-match? #rx"unused declare-extern: Error" out)))
+
+(test-case "scoped package imports are not reported as unused externs"
+  (define out
+    (lint-prog
+     '(define-target js)
+     (list 'ns 'test.ui
+           (list ':require
+                 (br '|@opentui/core| ':refer (br 'BoxRenderable))))))
+  (check-false (regexp-match? #rx"unused declare-extern" out) out))
 
 ;; --- with and defenum lint traversal -----------------------------------------
 

@@ -1407,6 +1407,13 @@
   '(require babashka.fs :as fs)
   '(def x #%: Bool (fs/exists? "/tmp")))
 
+(check-silent "foreign :refer call is a known imported binding"
+  '(define-target js)
+  (list 'ns 'test.foreign
+        (list ':require
+              (br '|@opentui/core| ':refer (br 'paint))))
+  '(defn render [] (paint)))
+
 (check-warns "qualified: catalog miss in known namespace notes did-you-mean"
   #rx"did you mean: fs/exists\\?"
   '(define-target clj)

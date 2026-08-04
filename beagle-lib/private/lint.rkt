@@ -9,6 +9,7 @@
 
 (require racket/match
          racket/format
+         racket/string
          "parse.rkt")
 
 (define (lint-program! prog)
@@ -440,6 +441,17 @@
   (define imported (program-imported-symbol-ns prog))
   (define imported-prefixes (make-hasheq))
   (define referred-imports (make-hasheq))
+  ;; Raw-source imports still expose their require prefixes before an interface
+  ;; is materialized, so lint must recognize those prefixes too.
+  (for ([entry (in-list (program-requires prog))])
+    (define namespace (require-entry-ns entry))
+    (define alias (require-entry-alias entry))
+    (define match
+      (regexp-match #rx"([^.]+)$" (symbol->string namespace)))
+    (hash-set! imported-prefixes namespace #t)
+    (when alias (hash-set! imported-prefixes alias #t))
+    (when match
+      (hash-set! imported-prefixes (string->symbol (cadr match)) #t)))
   (for ([module-import (in-list (program-imported-module-interfaces prog))])
     (define interface (module-import-interface module-import))
     (hash-set! imported-prefixes (module-import-prefix module-import) #t)
@@ -451,21 +463,12 @@
       (hash-set! referred-imports name #t)))
   (define (imported-name? name)
     (define s (symbol->string name))
-    (define idx (for/first ([i (in-naturals)]
-                            [c (in-string s)]
-                            #:when (char=? c #\/))
-                  i))
-    (cond
-      [idx
-       (define p (substring s 0 idx))
-       (define base (string->symbol (substring s (+ idx 1))))
-       (define reg-prefix (hash-ref imported base #f))
-       (or
-        (hash-has-key? imported-prefixes (string->symbol p))
-        (and reg-prefix (equal? (symbol->string reg-prefix) p)))]
-      [else
-       (or (hash-has-key? referred-imports name)
-           (hash-has-key? imported name))]))
+    (or (for/or ([prefix (in-hash-keys imported-prefixes)])
+          (string-prefix?
+           s
+           (string-append (symbol->string prefix) "/")))
+        (hash-has-key? referred-imports name)
+        (hash-has-key? imported name)))
   (for ([(name _) (in-hash (program-externs prog))])
     (unless (or (hash-has-key? used name)
                 (imported-name? name))
@@ -569,6 +572,9 @@
     [(try-form body catches finally-body)
      (for ([e (in-list body)]) (collect-symbols e used))
      (for ([c (in-list catches)])
+       (define exception-type (catch-clause-exception-type c))
+       (when (symbol? exception-type)
+         (hash-set! used exception-type #t))
        (for ([e (in-list (catch-clause-body c))]) (collect-symbols e used)))
      (when finally-body
        (for ([e (in-list finally-body)]) (collect-symbols e used)))]
@@ -589,7 +595,14 @@
      (for ([c (in-list clauses)])
        (for ([e (in-list (match-clause-body c))])
          (collect-symbols e used)))]
-    [(new-form _ args)
+    [(new-form class-name args)
+     (when (symbol? class-name)
+       (define authored (symbol->string class-name))
+       (define binding-name
+         (if (regexp-match? #rx"\\.$" authored)
+             (string->symbol (substring authored 0 (sub1 (string-length authored))))
+             class-name))
+       (hash-set! used binding-name #t))
      (for ([a (in-list args)]) (collect-symbols a used))]
     [(kw-access _ target default)
      (collect-symbols target used)

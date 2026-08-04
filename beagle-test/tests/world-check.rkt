@@ -183,6 +183,50 @@
               (map checked-world-module-emitted
                    (world-check-result-modules result)))))))
 
+(test-case "candidate worlds accept type-only refers without runtime imports"
+  (with-world-files
+   (lambda (root provider-source consumer-source)
+     (define provider-edn
+       (candidate!
+        root "typed-provider" provider-source
+        (string-append
+         "#lang beagle/js\n"
+         "(ns world.provider)\n"
+         "(defrecord Person [name: String])\n"
+         "(defunion Choice (Chosen [value: Int]))\n"
+         "(defscalar Checked Int :where (>= 0))\n")))
+     (define consumer-edn
+       (candidate!
+        root "typed-consumer" consumer-source
+        (string-append
+         "#lang beagle/js\n"
+         "(ns world.consumer\n"
+         "  (:require [world.provider :refer [Person Choice Checked]]))\n"
+         "(defn keep-person [value: Person] -> Person value)\n"
+         "(defn keep-choice [value: Choice] -> Choice value)\n"
+         "(defn keep-checked [value: Checked] -> Checked value)\n")))
+     (define result (check-edn-world (list consumer-edn provider-edn)))
+     (check-true (world-check-result-ok? result)
+                 (diagnostic-text result))
+     (define consumer
+       (for/first ([module (in-list (world-check-result-modules result))]
+                   #:when (eq? (checked-world-module-namespace module)
+                               'world.consumer))
+         module))
+     (define provider
+       (for/first ([module (in-list (world-check-result-modules result))]
+                   #:when (eq? (checked-world-module-namespace module)
+                               'world.provider))
+         module))
+     (check-not-false consumer)
+     (check-not-false provider)
+     (check-false
+      (regexp-match? #rx"import.*(Person|Choice|Checked)"
+                     (checked-world-module-emitted consumer)))
+     (check-false
+      (regexp-match? #rx"export function (Person|Chosen)"
+                     (checked-world-module-emitted provider))))))
+
 (test-case "full overlay can provide context while only an explicit set is checked"
   (with-world-files
    (lambda (root provider-source consumer-source)

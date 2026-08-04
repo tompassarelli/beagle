@@ -813,6 +813,7 @@
 
 
 (define (import-module-types! mod-path prefix externs registry imp-rec-fields imp-rec-field-order imp-rec-ns mod-ns
+                              #:type-names [imp-type-names #f]
                               #:scalar-fns [imp-scalar-fns #f]
                               #:scalar-preds [imp-scalar-preds #f]
                               #:symbol-ns [imp-symbol-ns #f]
@@ -888,6 +889,30 @@
   ;; consumer's own local def of the same name at its call sites.
   (define (referred? name)
     (or bare-all? (and refer-set (set-member? refer-set name))))
+  (define (note-type! name)
+    (when imp-type-names
+      (set-add! imp-type-names (qualify-name prefix name))
+      (when (referred? name)
+        (set-add! imp-type-names name))))
+  (for ([name (in-hash-keys raw-provider-aliases)])
+    (note-type! name))
+  (define (register-scalar-runtime! name predicates)
+    (define name-str (symbol->string name))
+    (define ctor (string->symbol (string-append "->" name-str)))
+    (define accessor
+      (string->symbol
+       (string-append (string-downcase name-str) "-value")))
+    (when imp-scalar-fns
+      (hash-set! imp-scalar-fns (qualify-name prefix ctor) #t)
+      (hash-set! imp-scalar-fns (qualify-name prefix accessor) #t)
+      (when (referred? ctor)
+        (hash-set! imp-scalar-fns ctor #t))
+      (when (referred? accessor)
+        (hash-set! imp-scalar-fns accessor #t)))
+    (when (and imp-scalar-preds (pair? predicates))
+      (hash-set! imp-scalar-preds (qualify-name prefix name) predicates)
+      (when (referred? ctor)
+        (hash-set! imp-scalar-preds name predicates))))
   (define (reg! name type)
     (hash-set! externs (qualify-name prefix name) type)
     (when (and (referred? name) (not (hash-has-key? externs name)))
@@ -931,7 +956,10 @@
       ;; Field-name STRINGS: emit-clj/emit-js/emit-zig all read this table that
       ;; way (emit-zig rebuilds the `:name` key from the string).
       (hash-set! imp-rec-field-order name
-                 (map (lambda (f) (symbol->string (param-name f))) fields))))
+                 (map (lambda (f) (symbol->string (param-name f))) fields)))
+    (when imp-rec-ns
+      (hash-set! imp-rec-ns name mod-ns)
+      (hash-set! imp-rec-ns (qualify-name mod-ns name) mod-ns)))
   ;; A use site names an imported union by its QUALIFIED spelling while the
   ;; provider declares it bare; both keys must reach UNION-MEMBERS /
   ;; PARAMETRIC-UNIONS or exhaustiveness and match narrowing silently miss.
@@ -1011,6 +1039,7 @@
        (when (and (referred? name) (not (hash-has-key? registry name)))
          (register-macro! registry name 'defmacro ps template))]
       [(list 'defrecord (? symbol? name) fields-form)
+       (note-type! name)
        (define fields (parse-record-fields fields-form))
        (define rec-type (type-prim name))
        (define name-str (symbol->string name))
@@ -1028,8 +1057,10 @@
        (hash-set! imp-rec-fields name field-map)
        (hash-set! imp-rec-field-order name
                   (map (lambda (f) (symbol->string (param-name f))) fields))
-       (hash-set! imp-rec-ns name mod-ns)]
+       (hash-set! imp-rec-ns name mod-ns)
+       (hash-set! imp-rec-ns (qualify-name mod-ns name) mod-ns)]
       [(list 'defscalar (? symbol? name) (? symbol? backing) ':where preds ...)
+       (note-type! name)
        (define scalar-type (type-prim name))
        (define backing-type (parse-type backing))
        (define name-str (symbol->string name))
@@ -1038,18 +1069,13 @@
        (define accessor (string->symbol (string-append name-lower "-value")))
        (reg! ctor (type-fn (list backing-type) #f scalar-type))
        (reg! accessor (type-fn (list scalar-type) #f backing-type))
-       (when imp-scalar-fns
-         (hash-set! imp-scalar-fns ctor #t)
-         (hash-set! imp-scalar-fns accessor #t)
-         (hash-set! imp-scalar-fns (qualify-name prefix ctor) #t)
-         (hash-set! imp-scalar-fns (qualify-name prefix accessor) #t))
-       (when imp-scalar-preds
-         (define parsed-preds
-           (for/list ([p (in-list preds)])
-             (define pd (if (syntax? p) (syntax->datum p) p))
-             (scalar-predicate (car pd) (cadr pd))))
-         (hash-set! imp-scalar-preds name parsed-preds))]
+       (define parsed-preds
+         (for/list ([p (in-list preds)])
+           (define pd (if (syntax? p) (syntax->datum p) p))
+           (scalar-predicate (car pd) (cadr pd))))
+       (register-scalar-runtime! name parsed-preds)]
       [(list 'defscalar (? symbol? name) (? symbol? backing))
+       (note-type! name)
        (define scalar-type (type-prim name))
        (define backing-type (parse-type backing))
        (define name-str (symbol->string name))
@@ -1058,18 +1084,21 @@
        (define accessor (string->symbol (string-append name-lower "-value")))
        (reg! ctor (type-fn (list backing-type) #f scalar-type))
        (reg! accessor (type-fn (list scalar-type) #f backing-type))
-       (when imp-scalar-fns
-         (hash-set! imp-scalar-fns ctor #t)
-         (hash-set! imp-scalar-fns accessor #t)
-         (hash-set! imp-scalar-fns (qualify-name prefix ctor) #t)
-         (hash-set! imp-scalar-fns (qualify-name prefix accessor) #t))]
+       (register-scalar-runtime! name '())]
       ;; `:throwable` reads as an ordinary symbol, so this arm MUST precede the
       ;; plain-name arm or it never fires.  Variants register on the throw/catch
       ;; path in the consumer's own pass; only the parent name crosses here.
       [(list 'defunion ':throwable (? symbol? name) _members ...)
-       (reg! name (type-prim name))]
+       (define-values (mnames _member-fields)
+         (reg-union-members! _members '()))
+       (note-type! name)
+       (for ([member (in-list mnames)]) (note-type! member))
+       (reg! name (type-union (map (lambda (member) (type-prim member)) mnames)))
+       (reg-union-table! imp-union-members name mnames)]
       [(list 'defunion (? symbol? name) member-defs ...)
        (define-values (mnames _mf) (reg-union-members! member-defs '()))
+       (note-type! name)
+       (for ([member (in-list mnames)]) (note-type! member))
        (reg! name (type-union (map (lambda (m) (type-prim m)) mnames)))
        (reg-union-table! imp-union-members name mnames)]
       [(list 'defunion (list (? symbol? name) type-vars ...) member-defs ...)
@@ -1087,6 +1116,8 @@
        (reg! name (type-prim name))
        (define-values (mnames member-fields-hash)
          (reg-union-members! member-defs type-vars))
+       (note-type! name)
+       (for ([member (in-list mnames)]) (note-type! member))
        (reg-union-table! imp-union-members name mnames)
        (reg-union-table! imp-param-unions name
                          (hasheq 'params type-vars
@@ -1128,6 +1159,7 @@
       ;; the importing module (Keyword <: EnumType, types.rkt). Variants emit
       ;; as enum-qualified members on package targets.
       [(list* 'defenum (? symbol? name) _variants)
+       (note-type! name)
        (when imp-enums (hash-set! imp-enums name #t))]
         [_ (void)])))))
 
@@ -1187,6 +1219,7 @@
                                   (program-imported-record-field-order prog)
                                   (program-imported-record-ns prog)
                                   ns
+                                  #:type-names (program-imported-type-names prog)
                                   #:scalar-preds (program-imported-scalar-preds prog)
                                   #:symbol-ns (program-imported-symbol-ns prog)
                                   #:union-members (program-imported-union-members prog)
@@ -1604,6 +1637,7 @@
   (define imp-rec-fields (make-hash))
   (define imp-rec-field-order (make-hash))
   (define imp-rec-ns (make-hash))
+  (define imp-type-names (mutable-seteq))
   (define requires  '())
   (define imports   '())
   (define imp-scalar-fns (make-hash))
@@ -1726,6 +1760,7 @@
        (import-module-types!
         (module-source-source-id candidate)
         prefix externs registry imp-rec-fields imp-rec-field-order imp-rec-ns rn
+        #:type-names imp-type-names
         #:scalar-fns imp-scalar-fns
         #:scalar-preds imp-scalar-preds
         #:symbol-ns imp-symbol-ns
@@ -1738,7 +1773,8 @@
        (when interface
          (register-interface-types! interface prefix)
          (for ([name (in-list (or refer-syms '()))])
-           (unless (module-interface-export? interface name)
+           (unless (or (module-interface-export? interface name)
+                       (module-interface-type-export? interface name))
              (error 'beagle
                     "required module ~a does not export referred name ~a"
                     rn name)))
@@ -1758,6 +1794,10 @@
            (when (and refer-syms (memq name refer-syms))
              (hash-set! externs name binding-type)
              (hash-set! imp-symbol-ns name prefix)))
+         (for ([name (in-hash-keys (module-interface-type-exports interface))])
+           (set-add! imp-type-names (qualify-name prefix name))
+           (when (and refer-syms (memq name refer-syms))
+             (set-add! imp-type-names name)))
          (set! imp-module-interfaces
                (cons (module-import interface prefix refer-syms)
                      imp-module-interfaces)))]
@@ -1767,17 +1807,31 @@
                           (eprintf "warning: type import from ~a failed: ~a\n"
                                    rn (exn-message e)))])
          (define mod-path (resolve-module-path rn source-path))
-         (when mod-path
-           (import-module-types!
-            mod-path prefix externs registry
-            imp-rec-fields imp-rec-field-order imp-rec-ns rn
-            #:scalar-fns imp-scalar-fns
-            #:scalar-preds imp-scalar-preds
-            #:symbol-ns imp-symbol-ns
-            #:union-members imp-union-members
-            #:parametric-unions imp-param-unions
-            #:dynamic-vars imp-dyn-vars
-            #:refer-syms refer-syms)))])
+         (cond
+           [mod-path
+            (import-module-types!
+              mod-path prefix externs registry
+              imp-rec-fields imp-rec-field-order imp-rec-ns rn
+              #:type-names imp-type-names
+              #:scalar-fns imp-scalar-fns
+              #:scalar-preds imp-scalar-preds
+              #:symbol-ns imp-symbol-ns
+              #:union-members imp-union-members
+              #:parametric-unions imp-param-unions
+              #:dynamic-vars imp-dyn-vars
+              #:refer-syms refer-syms)]
+           [(and (eq? target 'js)
+                 (let ([module-name (symbol->string rn)])
+                   (not (string-contains? module-name "."))))
+            ;; Foreign package refers are runtime bindings with unknown types.
+            (for ([name (in-list (or refer-syms '()))])
+              (hash-set! externs name (type-prim 'Any))
+              (hash-set! externs (qualify-name prefix name) (type-prim 'Any))
+              (hash-set! imp-symbol-ns name prefix))]
+           [(and (eq? target 'js)
+                 (string-contains? (symbol->string rn) "."))
+            (error 'beagle "required module ~a could not be resolved" rn)]
+           [else (void)]))])
     (set! requires (cons (require-entry rn alias refer-syms) requires)))
 
   (define current-require-registration
@@ -2149,6 +2203,7 @@
     (program mode ns parsed registry externs (reverse requires) (reverse imports)
              form-stxs src-table (make-hasheq)
              (hash-copy declared-type-aliases)
+             imp-type-names
              imp-rec-fields imp-rec-field-order imp-rec-ns
              (hash-keys imp-scalar-fns) imp-scalar-preds imp-symbol-ns
              imp-union-members imp-param-unions imp-enums imp-dyn-vars

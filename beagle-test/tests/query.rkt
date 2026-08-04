@@ -11,16 +11,22 @@
          racket/port
          beagle/private/query)
 
-(define (query-output . args)
+(define (with-query-file source proc)
   (define f (make-temporary-file "query~a.bgl"))
   (dynamic-wind
     void
     (lambda ()
       (call-with-output-file f #:exists 'replace
-        (lambda (p) (display (car args) p)))
-      (with-output-to-string
-        (lambda () (run-query (append (cadr args) (list (path->string f)))))))
+        (lambda (p) (display source p)))
+      (proc (path->string f)))
     (lambda () (delete-file f))))
+
+(define (query-output source args)
+  (with-query-file
+   source
+   (lambda (f)
+     (with-output-to-string
+       (lambda () (run-query (append args (list f))))))))
 
 (define SRC
   (string-append
@@ -58,6 +64,31 @@
   (define out (query-output SRC '("fields" "R")))
   (check-regexp-match #rx"a : Int" out)
   (check-regexp-match #rx"b : Bool" out))
+
+(test-case "fields: empty source fails with the missing record"
+  (check-exn
+   #rx"beagle-fields: record Missing not found in provided files"
+   (lambda ()
+     (with-query-file
+      ""
+      (lambda (f) (run-query (list "fields" "Missing" f)))))))
+
+(test-case "fields: reader failure reports its path"
+  (check-exn
+   #rx"beagle-fields: failed to read /unreadable[.]bgl: reader: denied"
+   (lambda ()
+     (query-field-matches
+      "Missing"
+      '("/unreadable.bgl")
+      #:read-datums (lambda (_f) (error 'reader "denied"))))))
+
+(test-case "fields: missing input path fails pointedly"
+  (define missing (make-temporary-file "query-missing~a.bgl"))
+  (delete-file missing)
+  (check-exn
+   #rx"beagle-fields: input path does not exist:"
+   (lambda ()
+     (run-query (list "fields" "Missing" (path->string missing))))))
 
 (test-case "callers: finds call sites inside defn bodies"
   (define out (query-output SRC '("callers" "typed")))

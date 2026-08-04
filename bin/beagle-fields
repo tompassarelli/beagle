@@ -22,11 +22,15 @@ import json, sys
 data = json.load(sys.stdin)
 if not data.get('ok'):
     print(data.get('error', 'unknown error'), file=sys.stderr); sys.exit(1)
-for r in data.get('results', []):
+results = data.get('results', [])
+if not results:
+    print(f'beagle-fields: record {sys.argv[1]} not found in provided files', file=sys.stderr)
+    sys.exit(1)
+for r in results:
     print(r['record'])
     for f in r.get('fields', []):
         print(f'  {f[\"name\"]} : {f[\"type\"]}    accessor: {f[\"accessor\"]}')
-"
+" "$1"
         exit 0
     fi
 fi
