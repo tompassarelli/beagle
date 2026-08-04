@@ -5158,13 +5158,26 @@
     [(warn)  (if (>= (current-check-profile) 3) 'error 'warn)]
     [else    'off]))
 
+;; The transient family mutates a collection no other code can observe, so a body
+;; that both OPENS one (`transient`) and mutates it is locally mutable and
+;; externally pure. A body that only mutates a transient it received still leaks.
+(define transient-marker-set
+  (set 'persistent! 'assoc! 'conj! 'dissoc! 'disj! 'pop!))
+
 (define (check-defn-purity _target name body src-table node effectful-defs)
   ;; Runtime entry-point names are host ABI contracts, so they cannot carry `!`.
   (define entry-point? (eq? name '-main))
-  (define markers
+  (define collected
     (if entry-point?
         '()
         (collect-markers body (set-remove effectful-defs name))))
+  ;; `transient` carries no bang, so it is probed for explicitly.
+  (define opens-transient?
+    (and (memq 'transient (collect-markers body (set 'transient))) #t))
+  (define markers
+    (if opens-transient?
+        (filter (lambda (m) (not (set-member? transient-marker-set m))) collected)
+        collected))
   (when (and (not (bang-name? name)) (pair? markers))
     (define src (and src-table (hash-ref src-table node #f)))
     (define msg
