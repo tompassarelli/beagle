@@ -1764,6 +1764,40 @@
       [:instructions []])
     [:open true]))
 
+(defn retarget-jump
+  [block: core/BasicBlock
+   from: core/NativeId
+   to: core/NativeId] -> core/BasicBlock
+  (let [terminators: (Vec core/Terminator) (core/basicblock-terminators block)]
+    (if (not (= 1 (count terminators)))
+      block
+      (let [terminator: core/Terminator (nth terminators 0)]
+        (if (and (instance? native.core.JumpTerminator terminator)
+              (same-id? (core/jumpterminator-block-id terminator) from))
+          (core/->BasicBlock
+            (core/basicblock-id block)
+            (core/basicblock-parameters block)
+            (core/basicblock-instructions block)
+            [(core/->JumpTerminator to
+               (core/jumpterminator-arguments terminator))])
+          block)))))
+
+(defn retarget-jumps-between
+  [state: BodyStateV0
+   start: Int
+   end: Int
+   from: core/NativeId
+   to: core/NativeId] -> BodyStateV0
+  (let [blocks: (Vec core/BasicBlock) (bodystatev0-blocks state)]
+    (loop [position: Int 0 collected: (Vec core/BasicBlock) []]
+      (if (>= position (count blocks))
+        (with state [:blocks collected])
+        (recur (+ position 1)
+          (conj collected
+            (if (and (>= position start) (< position end))
+              (retarget-jump (nth blocks position) from to)
+              (nth blocks position))))))))
+
 (defn state-bind
   [state: BodyStateV0
    name: String
@@ -3491,6 +3525,120 @@
             [(core/->Parameter join-parameter (bool-type-id))])
           join-parameter (bool-type-id) false)))))
 
+(defn lower-truthy-with-budget
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   value-id: core/NativeId
+   value-type: core/NativeId
+   budget: Int] -> ExprResultV0
+  (let [variants: (Vec core/TypeVariant) (union-variants-of types value-type)]
+    (cond
+      (same-id? value-type (bool-type-id))
+      (->ExprResultV0 state value-id (bool-type-id) false)
+
+      (same-id? value-type (type-id "Nil"))
+      (bool-constant-result state owner "truthy-nil" false)
+
+      (= 0 (count variants))
+      (bool-constant-result state owner "truthy-value" true)
+
+      (< budget 0)
+      (fail-result state
+        "TODO-NATIVE-TRUTHY-DEPTH: closed-union truthiness nested past the v0 budget")
+
+      :else
+      (let [true-id: core/NativeId (state-id state owner "truthy-true")
+            false-id: core/NativeId (state-id state owner "truthy-false")
+            join-id: core/NativeId (state-id state owner "truthy-join")
+            join-parameter: core/NativeId
+            (state-id state owner "truthy-result")
+            cases: (Vec core/SwitchCaseV0)
+            (loop [position: Int 0 collected: (Vec core/SwitchCaseV0) []]
+              (if (>= position (count variants))
+                collected
+                (let [variant: core/TypeVariant (nth variants position)
+                      payload: (U core/NativeId Nil)
+                      (core/typevariant-payload-type variant)
+                      target: core/NativeId
+                      (if (nil-variant? variant)
+                        false-id
+                        (if (nil? payload)
+                          true-id
+                          (if (or (same-id? payload (bool-type-id))
+                                (> (count (union-variants-of types payload)) 0))
+                            (state-id state owner
+                              (str "truthy-arm-" position))
+                            true-id)))]
+                  (recur (+ position 1)
+                    (conj collected
+                      (core/->SwitchCaseV0
+                        (core/typevariant-id variant) target []))))))
+            switched: BodyStateV0
+            (state-close (state-bump state)
+              (core/->SwitchTerminator value-id cases))
+            armed: BodyStateV0
+            (loop [position: Int 0 current: BodyStateV0 switched]
+              (if (or (>= position (count variants)) (state-blocked? current))
+                current
+                (let [variant: core/TypeVariant (nth variants position)
+                      payload: (U core/NativeId Nil)
+                      (core/typevariant-payload-type variant)]
+                  (if (or (nil? payload)
+                        (nil-variant? variant)
+                        (and (not (same-id? payload (bool-type-id)))
+                          (= 0 (count (union-variants-of types payload)))))
+                    (recur (+ position 1) current)
+                    (let [arm-id: core/NativeId
+                          (state-id state owner (str "truthy-arm-" position))
+                          opened: BodyStateV0 (state-open-block current arm-id [])
+                          extracted-id: core/NativeId
+                          (state-id opened owner (str "truthy-payload-" position))
+                          extracted: BodyStateV0
+                          (state-emit (state-bump opened)
+                            (core/->UnionExtractInstruction
+                              (core/->SsaValueV0 extracted-id payload)
+                              value-id (core/typevariant-id variant)))
+                          truthy: ExprResultV0
+                          (lower-truthy-with-budget types owner extracted
+                            extracted-id payload (- budget 1))]
+                      (if (state-blocked? (exprresultv0-state truthy))
+                        (exprresultv0-state truthy)
+                        (recur (+ position 1)
+                          (state-close (exprresultv0-state truthy)
+                            (core/->JumpTerminator join-id
+                              [(exprresultv0-value-id truthy)])))))))))
+            true-value: core/NativeId (state-id armed owner "truthy-yes")
+            true-block: BodyStateV0
+            (state-close
+              (state-emit (state-open-block armed true-id [])
+                (core/->AtomInstruction
+                  (core/->SsaValueV0 true-value (bool-type-id))
+                  (core/->BoolAtom true)))
+              (core/->JumpTerminator join-id [true-value]))
+            false-value: core/NativeId (state-id true-block owner "truthy-no")
+            false-block: BodyStateV0
+            (state-close
+              (state-emit (state-open-block true-block false-id [])
+                (core/->AtomInstruction
+                  (core/->SsaValueV0 false-value (bool-type-id))
+                  (core/->BoolAtom false)))
+              (core/->JumpTerminator join-id [false-value]))]
+        (if (state-blocked? false-block)
+          (dead-result false-block)
+          (->ExprResultV0
+            (state-open-block false-block join-id
+              [(core/->Parameter join-parameter (bool-type-id))])
+            join-parameter (bool-type-id) false))))))
+
+(defn lower-truthy
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   value-id: core/NativeId
+   value-type: core/NativeId] -> ExprResultV0
+  (lower-truthy-with-budget types owner state value-id value-type (widen-budget)))
+
 (defn lower-text-index
   [types: (Vec core/TypeDef)
    owner: core/NativeId
@@ -3685,6 +3833,111 @@
             (nth ordered-values (if swap 0 1))))
         result-id (bool-type-id) false))))
 
+(defn type-widens-to?
+  [types: (Vec core/TypeDef)
+   from: core/NativeId
+   to: core/NativeId
+   budget: Int] -> Bool
+  (cond
+    (same-id? from to) true
+    (< budget 0) false
+    :else
+    (let [targets: (Vec core/TypeVariant) (union-variants-of types to)
+          sources: (Vec core/TypeVariant) (union-variants-of types from)]
+      (cond
+        (= 0 (count targets)) false
+        (some? (variant-for-payload targets from)) true
+        (some? (variant-for-record-reference types targets from)) true
+        (same-id? from (type-id "Nil"))
+        (some? (some nil-variant? targets))
+        (= 0 (count sources)) false
+        :else
+        (every?
+          (fn [variant: core/TypeVariant] -> Bool
+            (let [payload: (U core/NativeId Nil)
+                  (core/typevariant-payload-type variant)]
+              (if (or (nil? payload) (same-id? payload (type-id "Nil")))
+                (some? (some nil-variant? targets))
+                (type-widens-to? types payload to (- budget 1)))))
+          sources)))))
+
+(defn join-type-for
+  [types: (Vec core/TypeDef)
+   left: core/NativeId
+   right: core/NativeId] -> (U core/NativeId Nil)
+  (cond
+    (same-id? left right) left
+    (type-widens-to? types right left (widen-budget)) left
+    (type-widens-to? types left right (widen-budget)) right
+    :else
+    (loop [position: Int 0
+           chosen: (U core/NativeId Nil) nil
+           chosen-width: Int 2147483647]
+      (if (>= position (count types))
+        chosen
+        (let [candidate: core/NativeId (core/typedef-id (nth types position))
+              variants: (Vec core/TypeVariant) (union-variants-of types candidate)
+              width: Int (count variants)]
+          (if (and (> width 0)
+                (< width chosen-width)
+                (type-widens-to? types left candidate (widen-budget))
+                (type-widens-to? types right candidate (widen-budget)))
+            (recur (+ position 1) candidate width)
+            (recur (+ position 1) chosen chosen-width)))))))
+
+(defn bridge-join-arms
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   left-start: Int
+   left-end: Int
+   right-start: Int
+   right-end: Int
+   join-id: core/NativeId
+   join-parameter: core/NativeId
+   left-type: core/NativeId
+   right-type: core/NativeId] -> ExprResultV0
+  (let [target: (U core/NativeId Nil) (join-type-for types left-type right-type)]
+    (if (nil? target)
+      (fail-result state
+        "TODO-NATIVE-JOIN-TYPE: live arms have no declared native union")
+      (let [left-id: core/NativeId (state-id state owner "join-left-coerce")
+            right-id: core/NativeId (state-id state owner "join-right-coerce")
+            left-value: core/NativeId (state-id state owner "join-left-value")
+            right-value: core/NativeId (state-id state owner "join-right-value")
+            rewired-left: BodyStateV0
+            (retarget-jumps-between state left-start left-end join-id left-id)
+            rewired: BodyStateV0
+            (retarget-jumps-between rewired-left
+              right-start right-end join-id right-id)
+            left-open: BodyStateV0
+            (state-open-block rewired left-id
+              [(core/->Parameter left-value left-type)])
+            left: ExprResultV0
+            (lower-boundary-coerce types owner left-open
+              left-value left-type target)]
+        (if (state-blocked? (exprresultv0-state left))
+          (dead-result (exprresultv0-state left))
+          (let [left-closed: BodyStateV0
+                (state-close (exprresultv0-state left)
+                  (core/->JumpTerminator join-id
+                    [(exprresultv0-value-id left)]))
+                right-open: BodyStateV0
+                (state-open-block left-closed right-id
+                  [(core/->Parameter right-value right-type)])
+                right: ExprResultV0
+                (lower-boundary-coerce types owner right-open
+                  right-value right-type target)]
+            (if (state-blocked? (exprresultv0-state right))
+              (dead-result (exprresultv0-state right))
+              (->ExprResultV0
+                (state-open-block
+                  (state-close (exprresultv0-state right)
+                    (core/->JumpTerminator join-id
+                      [(exprresultv0-value-id right)]))
+                  join-id [(core/->Parameter join-parameter target)])
+                join-parameter target false))))))))
+
 (defn lower-expr
   [env: BodyEnvV0
    owner: core/NativeId
@@ -3843,7 +4096,16 @@
           (if (or (nil? condition-node) (nil? then-node) (nil? else-node))
             (fail-result state
               "TODO-NATIVE-IF-ARMS: if form needs a condition and both arms")
-            (let [condition: ExprResultV0 (lower-expr env owner state condition-node)]
+            (let [raw-condition: ExprResultV0
+                  (lower-expr env owner state condition-node)
+                  condition: ExprResultV0
+                  (if (or (exprresultv0-terminated raw-condition)
+                          (state-blocked? (exprresultv0-state raw-condition)))
+                    raw-condition
+                    (lower-truthy types owner
+                      (exprresultv0-state raw-condition)
+                      (exprresultv0-value-id raw-condition)
+                      (exprresultv0-type-id raw-condition)))]
               (cond
                 (exprresultv0-terminated condition) condition
                 (state-blocked? (exprresultv0-state condition))
@@ -3872,6 +4134,7 @@
                           (core/->BranchTerminator
                             (exprresultv0-value-id condition) then-id else-id))
                         then-id [])
+                      then-start: Int (count (bodystatev0-blocks branched))
                       then-result: ExprResultV0 (lower-expr env owner branched then-node)
                       after-then: BodyStateV0
                       (if (exprresultv0-terminated then-result)
@@ -3879,7 +4142,9 @@
                         (state-close (exprresultv0-state then-result)
                           (core/->JumpTerminator join-id
                             [(exprresultv0-value-id then-result)])))
+                      then-end: Int (count (bodystatev0-blocks after-then))
                       else-start: BodyStateV0 (state-open-block after-then else-id [])
+                      else-block-start: Int (count (bodystatev0-blocks else-start))
                       else-result: ExprResultV0
                       (lower-expr env owner else-start else-node)
                       after-else: BodyStateV0
@@ -3888,6 +4153,7 @@
                         (state-close (exprresultv0-state else-result)
                           (core/->JumpTerminator join-id
                             [(exprresultv0-value-id else-result)])))
+                      else-end: Int (count (bodystatev0-blocks after-else))
                       then-live: Bool (not (exprresultv0-terminated then-result))
                       else-live: Bool (not (exprresultv0-terminated else-result))
                       result-type: core/NativeId
@@ -3902,8 +4168,11 @@
                     (and then-live else-live
                       (not (same-id? (exprresultv0-type-id then-result)
                              (exprresultv0-type-id else-result))))
-                    (fail-result after-else
-                      "TODO-NATIVE-IF-JOIN: the two arms have different native types")
+                    (bridge-join-arms types owner after-else
+                      then-start then-end else-block-start else-end
+                      join-id join-parameter
+                      (exprresultv0-type-id then-result)
+                      (exprresultv0-type-id else-result))
                     :else
                     (->ExprResultV0
                       (state-open-block after-else join-id
@@ -3956,23 +4225,36 @@
                       (state-blocked? body-state) (dead-result body-state)
                       (exprresultv0-terminated body)
                       (recur (count clauses) body-state result-type live-arms)
-                      (and (some? result-type)
-                        (not (same-id? result-type
-                               (exprresultv0-type-id body))))
-                      (fail-result body-state
-                        "TODO-NATIVE-COND-JOIN: live cond arms have different native types")
-                      :else
+                      (nil? result-type)
                       (recur (count clauses)
                         (state-close body-state
                           (core/->JumpTerminator join-id
                             [(exprresultv0-value-id body)]))
-                        (if (nil? result-type)
-                          (exprresultv0-type-id body) result-type)
-                        (+ live-arms 1))))
+                        (exprresultv0-type-id body) (+ live-arms 1))
+                      :else
+                      (let [settled: ExprResultV0
+                            (lower-boundary-coerce types owner body-state
+                              (exprresultv0-value-id body)
+                              (exprresultv0-type-id body) result-type)]
+                        (if (state-blocked? (exprresultv0-state settled))
+                          (dead-result (exprresultv0-state settled))
+                          (recur (count clauses)
+                            (state-close (exprresultv0-state settled)
+                              (core/->JumpTerminator join-id
+                                [(exprresultv0-value-id settled)]))
+                            result-type (+ live-arms 1))))))
 
                   :else
-                  (let [condition: ExprResultV0
+                  (let [raw-condition: ExprResultV0
                         (lower-expr env owner current test-node)
+                        condition: ExprResultV0
+                        (if (or (exprresultv0-terminated raw-condition)
+                                (state-blocked? (exprresultv0-state raw-condition)))
+                          raw-condition
+                          (lower-truthy types owner
+                            (exprresultv0-state raw-condition)
+                            (exprresultv0-value-id raw-condition)
+                            (exprresultv0-type-id raw-condition)))
                         condition-state: BodyStateV0
                         (exprresultv0-state condition)]
                     (cond
@@ -3999,28 +4281,35 @@
                             (lower-expr env owner branched body-node)
                             body-state: BodyStateV0 (exprresultv0-state body)
                             body-live: Bool
-                            (not (exprresultv0-terminated body))
-                            mismatch: Bool
-                            (and body-live (some? result-type)
-                              (not (same-id? result-type
-                                     (exprresultv0-type-id body))))]
+                            (not (exprresultv0-terminated body))]
                         (cond
                           (state-blocked? body-state) (dead-result body-state)
-                          mismatch
-                          (fail-result body-state
-                            "TODO-NATIVE-COND-JOIN: live cond arms have different native types")
-                          :else
+                          (not body-live)
+                          (recur (+ position 1)
+                            (state-open-block body-state next-id [])
+                            result-type live-arms)
+                          (nil? result-type)
                           (recur (+ position 1)
                             (state-open-block
-                              (if body-live
-                                (state-close body-state
-                                  (core/->JumpTerminator join-id
-                                    [(exprresultv0-value-id body)]))
-                                body-state)
+                              (state-close body-state
+                                (core/->JumpTerminator join-id
+                                  [(exprresultv0-value-id body)]))
                               next-id [])
-                            (if (and body-live (nil? result-type))
-                              (exprresultv0-type-id body) result-type)
-                            (if body-live (+ live-arms 1) live-arms)))))))))))
+                            (exprresultv0-type-id body) (+ live-arms 1))
+                          :else
+                          (let [settled: ExprResultV0
+                                (lower-boundary-coerce types owner body-state
+                                  (exprresultv0-value-id body)
+                                  (exprresultv0-type-id body) result-type)]
+                            (if (state-blocked? (exprresultv0-state settled))
+                              (dead-result (exprresultv0-state settled))
+                              (recur (+ position 1)
+                                (state-open-block
+                                  (state-close (exprresultv0-state settled)
+                                    (core/->JumpTerminator join-id
+                                      [(exprresultv0-value-id settled)]))
+                                  next-id [])
+                                result-type (+ live-arms 1)))))))))))))
 
         (= "loop" kind)
         (let [bindings-node: (U core/NativeId Nil)
@@ -4954,7 +5243,16 @@
             (= "not" callee)
             (if (not (= 1 (count args)))
               (fail-result state "TODO-NATIVE-NOT-ARITY: not takes one operand")
-              (let [operand: ExprResultV0 (lower-expr env owner state (nth args 0))]
+              (let [raw-operand: ExprResultV0
+                    (lower-expr env owner state (nth args 0))
+                    operand: ExprResultV0
+                    (if (or (exprresultv0-terminated raw-operand)
+                            (state-blocked? (exprresultv0-state raw-operand)))
+                      raw-operand
+                      (lower-truthy types owner
+                        (exprresultv0-state raw-operand)
+                        (exprresultv0-value-id raw-operand)
+                        (exprresultv0-type-id raw-operand)))]
                 (cond
                   (exprresultv0-terminated operand) operand
                   (state-blocked? (exprresultv0-state operand))
