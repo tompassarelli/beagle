@@ -262,6 +262,18 @@
   (ValueStrV0 [token: Bool])
   (ValuePrStrV0 [token: Bool]))
 
+;; Pure target-neutral codec semantics. UTF-8 operations allocate only their
+;; returned value in the caller's arena; binary64 conversions are bit-level.
+(defunion CodecPrimitiveOpV0
+  (Utf8EncodeV0
+    [arena-id: NativeId
+     source-id: NativeId])
+  (Utf8DecodeV0
+    [arena-id: NativeId
+     source-id: NativeId])
+  (FloatToBitsV0 [source-id: NativeId])
+  (FloatFromBitsV0 [source-id: NativeId]))
+
 (defunion ResourceTokenKindV0
   (RegionTokenV0 [region: NativeId])
   (CapabilityTokenV0 [capability: NativeId]))
@@ -551,7 +563,10 @@
      mode: ValueTextModeV0
      domain-type: NativeId
      value-id: NativeId
-     arena-id: NativeId]))
+     arena-id: NativeId])
+  (CodecPrimitiveInstructionV0
+    [result: SsaValueV0
+     operation: CodecPrimitiveOpV0]))
 
 (defrecord SwitchCaseV0
   [variant-id: NativeId
@@ -841,6 +856,8 @@
     [(TextBuiltinInstruction result operation) (ssavaluev0-id result)]
     [(ValueSemanticsInstruction result operation) (ssavaluev0-id result)]
     [(ValueToTextInstructionV0 result mode domain-type value-id arena-id)
+     (ssavaluev0-id result)]
+    [(CodecPrimitiveInstructionV0 result operation)
      (ssavaluev0-id result)]))
 
 (defn instruction-result-ids [instructions :- (Vec Instruction)] :- (Vec NativeId)
@@ -1178,7 +1195,8 @@
        [(ValueEqualV0 domain-type left-id right-id)
         (id-in? known-types domain-type)])]
     [(ValueToTextInstructionV0 result mode domain-type value-id arena-id)
-     (id-in? known-types domain-type)]))
+     (id-in? known-types domain-type)]
+    [(CodecPrimitiveInstructionV0 result operation) true]))
 
 (defn parameter-types-closed?
   [parameters :- (Vec Parameter)
@@ -1300,6 +1318,13 @@
     [(TextRepeatV0 arena-id source-id count-id)
      [arena-id source-id count-id]]))
 
+(defn codec-primitive-ssa-refs [operation: CodecPrimitiveOpV0] -> (Vec NativeId)
+  (match operation
+    [(Utf8EncodeV0 arena-id source-id) [arena-id source-id]]
+    [(Utf8DecodeV0 arena-id source-id) [arena-id source-id]]
+    [(FloatToBitsV0 source-id) [source-id]]
+    [(FloatFromBitsV0 source-id) [source-id]]))
+
 (defn instruction-ssa-refs [instruction :- Instruction] :- (Vec NativeId)
   (match instruction
     [(AtomInstruction result atom) []]
@@ -1372,7 +1397,9 @@
      (match operation
        [(ValueEqualV0 domain-type left-id right-id) [left-id right-id]])]
     [(ValueToTextInstructionV0 result mode domain-type value-id arena-id)
-     [arena-id value-id]]))
+     [arena-id value-id]]
+    [(CodecPrimitiveInstructionV0 result operation)
+     (codec-primitive-ssa-refs operation)]))
 
 (defn terminator-ssa-refs [terminator :- Terminator] :- (Vec NativeId)
   (match terminator
@@ -1479,7 +1506,8 @@
     [(TextConcatInstruction result arena-id operand-ids) true]
     [(TextBuiltinInstruction result operation) true]
     [(ValueSemanticsInstruction result operation) true]
-    [(ValueToTextInstructionV0 result mode domain-type value-id arena-id) true]))
+    [(ValueToTextInstructionV0 result mode domain-type value-id arena-id) true]
+    [(CodecPrimitiveInstructionV0 result operation) true]))
 
 (defn block-resources-allowed?
   [block :- BasicBlock

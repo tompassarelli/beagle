@@ -256,6 +256,10 @@ uint64_t native_text_join(native_arena *arena, uint64_t separator,
                           const native_vec *source);
 uint64_t native_text_repeat(native_arena *arena, uint64_t source,
                             int64_t count);
+native_vec *native_utf8_encode(native_arena *arena, uint64_t source);
+uint64_t native_utf8_decode(native_arena *arena, const native_vec *source);
+int64_t native_float_to_bits(double source);
+double native_float_from_bits(int64_t source);
 
 bool native_host_environment_lookup_v0(
     native_arena *arena, const native_capability *capability,

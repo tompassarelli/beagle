@@ -3170,6 +3170,11 @@
       (instance? native.core.TextSliceInstruction instruction)
       (instance? native.core.TextConcatInstruction instruction)
       (instance? native.core.ValueToTextInstructionV0 instruction)
+      (and (instance? native.core.CodecPrimitiveInstructionV0 instruction)
+        (let [operation: core/CodecPrimitiveOpV0
+              (core/codecprimitiveinstructionv0-operation instruction)]
+          (or (instance? native.core.Utf8EncodeV0 operation)
+            (instance? native.core.Utf8DecodeV0 operation))))
       (and (instance? native.core.ExternCallInstruction instruction)
         (some? (core/externcallinstruction-arena-id instruction)))
       (and (instance? native.core.TextBuiltinInstruction instruction)
@@ -3249,6 +3254,12 @@
    target: core/NativeId] -> Bool
   (and (vector-type? types target)
     (same-id? (vector-element-of types target) (type-id "String"))))
+
+(defn int-vector-value?
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> Bool
+  (and (vector-type? types target)
+    (same-id? (vector-element-of types target) (int-type-id))))
 
 (defn empty-map-form?
   [index: SourceIndexV0
@@ -6638,6 +6649,73 @@
                   (str "TODO-NATIVE-PREDICATE-ARITY: " callee
                     " takes one operand"))
 
+                (and (= "utf8-encode" callee) (= 1 (count values))
+                  (text-operand? (nth value-types 0)))
+                (let [result-type: (U core/NativeId Nil)
+                      (vector-type-of types (int-type-id))]
+                  (if (nil? result-type)
+                    (fail-result current
+                      "TODO-NATIVE-UTF8-ENCODE-TYPE: utf8-encode needs a closed (Vec Int) result type")
+                    (let [result-id: core/NativeId
+                          (state-id current owner "utf8-encode")]
+                      (->ExprResultV0
+                        (state-emit (state-bump current)
+                          (core/->CodecPrimitiveInstructionV0
+                            (core/->SsaValueV0 result-id result-type)
+                            (core/->Utf8EncodeV0 (arena-value-id owner)
+                              (nth values 0))))
+                        result-id result-type false))))
+
+                (= "utf8-encode" callee)
+                (fail-result current
+                  "TODO-NATIVE-UTF8-ENCODE-OPERAND: utf8-encode takes one native Text value")
+
+                (and (= "utf8-decode" callee) (= 1 (count values))
+                  (int-vector-value? types (nth value-types 0)))
+                (let [result-id: core/NativeId
+                      (state-id current owner "utf8-decode")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->CodecPrimitiveInstructionV0
+                        (core/->SsaValueV0 result-id (text-type-id))
+                        (core/->Utf8DecodeV0 (arena-value-id owner)
+                          (nth values 0))))
+                    result-id (text-type-id) false))
+
+                (= "utf8-decode" callee)
+                (fail-result current
+                  "TODO-NATIVE-UTF8-DECODE-OPERAND: utf8-decode takes one native Vec Int value")
+
+                (and (= "float-to-bits" callee) (= 1 (count values))
+                  (same-id? (nth value-types 0) (type-id "Float")))
+                (let [result-id: core/NativeId
+                      (state-id current owner "float-to-bits")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->CodecPrimitiveInstructionV0
+                        (core/->SsaValueV0 result-id (int-type-id))
+                        (core/->FloatToBitsV0 (nth values 0))))
+                    result-id (int-type-id) false))
+
+                (= "float-to-bits" callee)
+                (fail-result current
+                  "TODO-NATIVE-FLOAT-TO-BITS-OPERAND: float-to-bits takes one native Float value")
+
+                (and (= "float-from-bits" callee) (= 1 (count values))
+                  (same-id? (nth value-types 0) (int-type-id)))
+                (let [result-id: core/NativeId
+                      (state-id current owner "float-from-bits")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->CodecPrimitiveInstructionV0
+                        (core/->SsaValueV0 result-id (type-id "Float"))
+                        (core/->FloatFromBitsV0 (nth values 0))))
+                    result-id (type-id "Float") false))
+
+                (= "float-from-bits" callee)
+                (fail-result current
+                  "TODO-NATIVE-FLOAT-FROM-BITS-OPERAND: float-from-bits takes one native Int value")
+
                 (and (= "compare" callee) (= 2 (count values))
                   (text-operand? (nth value-types 0))
                   (text-operand? (nth value-types 1)))
@@ -9769,6 +9847,19 @@
      (worlds/canonical-record "value-equal-v0"
        [(id-value domain-type) (id-value left-id) (id-value right-id)])]))
 
+(defn encode-codec-primitive-operation [operation: core/CodecPrimitiveOpV0] -> String
+  (match operation
+    [(Utf8EncodeV0 arena-id source-id)
+     (worlds/canonical-record "utf8-encode-v0"
+       [(id-value arena-id) (id-value source-id)])]
+    [(Utf8DecodeV0 arena-id source-id)
+     (worlds/canonical-record "utf8-decode-v0"
+       [(id-value arena-id) (id-value source-id)])]
+    [(FloatToBitsV0 source-id)
+     (worlds/canonical-record "float-to-bits-v0" [(id-value source-id)])]
+    [(FloatFromBitsV0 source-id)
+     (worlds/canonical-record "float-from-bits-v0" [(id-value source-id)])]))
+
 (defn encode-instruction [instruction: core/Instruction] -> String
   (cond
     (instance? native.core.AtomInstruction instruction)
@@ -10116,6 +10207,13 @@
        (id-value (core/valuetotextinstructionv0-domain-type instruction))
        (id-value (core/valuetotextinstructionv0-value-id instruction))
        (id-value (core/valuetotextinstructionv0-arena-id instruction))])
+
+    (instance? native.core.CodecPrimitiveInstructionV0 instruction)
+    (worlds/canonical-record "codec-primitive-instruction-v0"
+      [(encode-ssa-value
+         (core/codecprimitiveinstructionv0-result instruction))
+       (encode-codec-primitive-operation
+         (core/codecprimitiveinstructionv0-operation instruction))])
 
     (instance? native.core.CallInstruction instruction)
     (worlds/canonical-record "call-instruction"

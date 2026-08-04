@@ -70,6 +70,14 @@
    'name       (fn-of '(Any) 'String)
    'keyword    (fn-of '(String) 'Keyword)
    'symbol     (fn-of '(String) 'Symbol)
+   ;; Target-neutral byte and binary64 codecs. UTF-8 decoding is strict, and
+   ;; Float-to-bits follows the canonical IEEE-754 quiet-NaN representation.
+   'utf8-encode
+   (type-fn (list (p 'String)) #f (type-app 'Vec (list (p 'Int))))
+   'utf8-decode
+   (type-fn (list (type-app 'Vec (list (p 'Int)))) #f (p 'String))
+   'float-to-bits (fn-of '(Float) 'Int)
+   'float-from-bits (fn-of '(Int) 'Float)
    ;; --- math (variadic on Int; Clojure's are polymorphic, v0 narrows) -----
    ;; Math operators are polymorphic in real Clojure (Long/Double/Ratio).
    ;; v0 types them as variadic Any to avoid spurious type errors on FP work.

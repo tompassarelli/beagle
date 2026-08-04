@@ -210,6 +210,7 @@
     (instance? native.core.TextBuiltinInstruction instruction) true
     (instance? native.core.ValueSemanticsInstruction instruction) true
     (instance? native.core.ValueToTextInstructionV0 instruction) true
+    (instance? native.core.CodecPrimitiveInstructionV0 instruction) true
     :else false))
 
 (defn terminator-supported? [terminator: core/Terminator] -> Bool
@@ -1758,6 +1759,31 @@
           "NATIVE_VALUE_PR_STR"
           "NATIVE_VALUE_STR")
         ");\n")
+
+      (instance? native.core.CodecPrimitiveInstructionV0 instruction)
+      (let [operation: core/CodecPrimitiveOpV0
+            (core/codecprimitiveinstructionv0-operation instruction)]
+        (cond
+          (instance? native.core.Utf8EncodeV0 operation)
+          (str "  " target " = native_utf8_encode((native_arena *)"
+            (value-name function slots (core/utf8encodev0-arena-id operation))
+            ", "
+            (value-name function slots (core/utf8encodev0-source-id operation))
+            ");\n")
+          (instance? native.core.Utf8DecodeV0 operation)
+          (str "  " target " = native_utf8_decode((native_arena *)"
+            (value-name function slots (core/utf8decodev0-arena-id operation))
+            ", "
+            (value-name function slots (core/utf8decodev0-source-id operation))
+            ");\n")
+          (instance? native.core.FloatToBitsV0 operation)
+          (str "  " target " = native_float_to_bits("
+            (value-name function slots (core/floattobitsv0-source-id operation))
+            ");\n")
+          :else
+          (str "  " target " = native_float_from_bits("
+            (value-name function slots (core/floatfrombitsv0-source-id operation))
+            ");\n")))
 
       (instance? native.core.FieldInstruction instruction)
       (let [source: core/NativeId (core/fieldinstruction-source-id instruction)

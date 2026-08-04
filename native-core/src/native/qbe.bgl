@@ -307,7 +307,9 @@
     [(ValueSemanticsInstruction value)
      (core/valuesemanticsinstruction-result instruction)]
     [(ValueToTextInstructionV0 value)
-     (core/valuetotextinstructionv0-result instruction)]))
+     (core/valuetotextinstructionv0-result instruction)]
+    [(CodecPrimitiveInstructionV0 value)
+     (core/codecprimitiveinstructionv0-result instruction)]))
 
 (defn qbe-value-ids
   [function: core/FunctionDef
@@ -1028,7 +1030,8 @@
     [(TextConcatInstruction value) false]
     [(TextBuiltinInstruction value) false]
     [(ValueSemanticsInstruction value) false]
-    [(ValueToTextInstructionV0 value) false]))
+    [(ValueToTextInstructionV0 value) false]
+    [(CodecPrimitiveInstructionV0 value) false]))
 
 ;; A checked operation becomes a trap/continue diamond, so a world block can
 ;; end in a different QBE label than it started in.
@@ -1390,7 +1393,8 @@
       [(TextConcatInstruction value) ""]
       [(TextBuiltinInstruction value) ""]
       [(ValueSemanticsInstruction value) ""]
-      [(ValueToTextInstructionV0 value) ""])))
+      [(ValueToTextInstructionV0 value) ""]
+      [(CodecPrimitiveInstructionV0 value) ""])))
 
 (defn emit-instructions
   [context: QbeFn
@@ -1802,7 +1806,49 @@
     [(TextConcatInstruction value) false]
     [(TextBuiltinInstruction value) false]
     [(ValueSemanticsInstruction value) false]
-    [(ValueToTextInstructionV0 value) false]))
+    [(ValueToTextInstructionV0 value) false]
+    [(CodecPrimitiveInstructionV0 value) false]))
+
+(defn codec-primitive-operation-name [operation: core/CodecPrimitiveOpV0] -> String
+  (cond
+    (instance? native.core.Utf8EncodeV0 operation) "utf8-encode"
+    (instance? native.core.Utf8DecodeV0 operation) "utf8-decode"
+    (instance? native.core.FloatToBitsV0 operation) "float-to-bits"
+    :else "float-from-bits"))
+
+(defn unsupported-block-codec-primitive [block: core/BasicBlock] -> (U String Nil)
+  (let [instructions: (Vec core/Instruction)
+        (core/basicblock-instructions block)]
+    (loop [position: Int 0]
+      (if (>= position (count instructions))
+        nil
+        (let [instruction: core/Instruction (nth instructions position)]
+          (if (instance? native.core.CodecPrimitiveInstructionV0 instruction)
+            (codec-primitive-operation-name
+              (core/codecprimitiveinstructionv0-operation instruction))
+            (recur (+ position 1))))))))
+
+(defn unsupported-function-codec-primitive [function: core/FunctionDef] -> (U String Nil)
+  (let [blocks: (Vec core/BasicBlock) (core/functiondef-blocks function)]
+    (loop [position: Int 0]
+      (if (>= position (count blocks))
+        nil
+        (let [operation: (U String Nil)
+              (unsupported-block-codec-primitive (nth blocks position))]
+          (if (nil? operation)
+            (recur (+ position 1))
+            operation))))))
+
+(defn unsupported-codec-primitive [world: core/NativeWorld] -> (U String Nil)
+  (let [functions: (Vec core/FunctionDef) (core/nativeworld-functions world)]
+    (loop [position: Int 0]
+      (if (>= position (count functions))
+        nil
+        (let [operation: (U String Nil)
+              (unsupported-function-codec-primitive (nth functions position))]
+          (if (nil? operation)
+            (recur (+ position 1))
+            operation))))))
 
 (defn value-semantics-operation-name [operation: core/ValueSemanticsOpV0] -> String
   (match operation
@@ -1969,6 +2015,7 @@
    module-index: Int] -> QbeMaterialization
   (let [validation: core/ValidationReport (core/validate-world world)
         unsupported: (U String Nil) (unsupported-value-semantics world)
+        unsupported-codec: (U String Nil) (unsupported-codec-primitive world)
         functions: (Vec core/FunctionDef)
         (ordered-functions (core/nativeworld-functions world))
         texts: (Vec String) (collect-texts functions)]
@@ -1989,6 +2036,9 @@
       (some? unsupported)
       (->QbeFailure
         (str "unsupported native value-semantics op: " unsupported))
+      (some? unsupported-codec)
+      (->QbeFailure
+        (str "QBE codec primitive is unsupported: " unsupported-codec))
       (not (every? text-emittable? texts))
       (->QbeFailure "native world contains a Text literal outside the QBE literal slice")
       (not (world-supported? world))

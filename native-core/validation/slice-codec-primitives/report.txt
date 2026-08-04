@@ -1,0 +1,21 @@
+stage source-seal ACCEPTED
+stage source-to-typed ACCEPTED
+stage typed-to-native COMPLETE
+source-modules 1
+source-imports 0
+world-types 11
+world-functions 4
+world-abis 4
+projected-types 7
+lowered fn_0 encode-utf8 1 blocks
+lowered fn_1 decode-utf8 1 blocks
+lowered fn_2 encode-float 1 blocks
+lowered fn_3 decode-float 1 blocks
+obligation-projection PASS valid-ssa
+obligation-projection PASS exhaustive-matches
+obligation-projection PASS closed-layouts
+obligation-projection PASS checked-arithmetic
+obligation-projection PASS legal-abi
+obligation-projection PASS discharged-tokens
+obligation-projection PASS bounded-effects
+materialize OK module_0.h module_0.c

@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo="${NATIVE_SLICE_REPO:-$(cd "$here/../../.." && pwd)}"
+art="${NATIVE_SLICE_ARTIFACTS:-$here}"
+src="$here/fixture.bclj"
+scratch="$(mktemp -d "${TMPDIR:-/tmp}/native-slice-codec-primitives.XXXXXX")"
+trap 'rm -rf "${scratch:?}"' EXIT
+
+"$repo/bin/beagle-ast" "$src" >"$scratch/fixture.ast.json"
+bb "$repo/native-core/validation/slice-bodies/ast-facts.clj" \
+  "$scratch/fixture.ast.json=beagle:native-core/validation/slice-codec-primitives/fixture.bclj" \
+  "$scratch/fixture.facts"
+if [[ -f "$art/fixture.facts" ]] && ! cmp -s "$scratch/fixture.facts" "$art/fixture.facts"; then
+  echo "drive.sh: regenerated projection differs from fixture.facts" >&2
+  exit 1
+fi
+cp "$scratch/fixture.facts" "$art/fixture.facts"
+sha256sum "$src" | cut -d' ' -f1 >"$art/source.sha256"
+
+"$repo/bin/beagle-build-all" \
+  "$repo/native-core/src/native/core.bgl" \
+  "$repo/native-core/src/native/worlds.bgl" \
+  "$repo/native-core/src/native/lower.bgl" \
+  "$repo/native-core/src/native/obligations.bgl" \
+  "$repo/native-core/src/native/c11.bgl" \
+  "$repo/native-core/src/native/slice.bgl" \
+  "$repo/native-core/src/native/fold_c17.bgl" \
+  "$repo/native-core/src/native/body_c17.bgl" \
+  "$repo/native-core/src/native/body_slice.bgl" \
+  "$repo/native-core/src/native/qbe.bgl" \
+  --out "$scratch/out" >"$scratch/build.log" 2>&1 \
+  || { sed -n '1,240p' "$scratch/build.log" >&2; exit 1; }
+
+records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' "$scratch/out/native/core.clj" | tr '\n' ' ')"
+for module in worlds lower obligations c11 slice fold_c17 body_c17 body_slice qbe; do
+  [[ -f "$scratch/out/native/$module.clj" ]] || continue
+  sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' \
+    "$scratch/out/native/$module.clj"
+  awk -v imp="(import '[native.core $records])" \
+    '!seen && /^$/ { print imp; seen = 1 } { print }' \
+    "$scratch/out/native/$module.clj" >"$scratch/out/native/$module.clj.tmp"
+  mv "$scratch/out/native/$module.clj.tmp" "$scratch/out/native/$module.clj"
+done
+
+clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M -e "
+(require 'native.body-slice)
+(spit \"$art/report.txt\"
+  (native.body-slice/emit-slice! \"$art/fixture.facts\"
+    \"native.codec-primitives\"
+    \"beagle:native-core/validation/slice-codec-primitives/fixture.bclj\"
+    \"$art\" \"native-slice-codec-primitives-v0\"))"
+cat "$art/report.txt"
+grep -q '^materialize OK ' "$art/report.txt"
+if grep -q '^obligation-projection FAIL' "$art/report.txt"; then
+  echo "drive.sh: codec projection failed a Native obligation" >&2
+  exit 1
+fi
+
+clojure -Sdeps "{:paths [\"$scratch/out\"]}" -M \
+  "$here/qbe-refusal.clj" "$art/fixture.facts" \
+  "native.codec-primitives" \
+  "beagle:native-core/validation/slice-codec-primitives/fixture.bclj" \
+  "native-slice-codec-primitives-v0"
+
+build="$scratch/c"
+mkdir -p "$build"
+cp "$art/module_0.h" "$art/module_0.c" "$art/main.c" "$build/"
+cp "$repo/native-core/shim/native_shim.c" "$repo/native-core/shim/native_shim.h" "$build/"
+strict=(-std=c17 -pedantic -Wall -Wextra -Werror)
+(cd "$build" && gcc "${strict[@]}" -o probe module_0.c native_shim.c main.c -lm)
+(cd "$build" && ./probe)
+if (cd "$build" && ulimit -c 0 && ./probe invalid) 2>/dev/null; then
+  echo "drive.sh: invalid UTF-8 did not trap" >&2
+  exit 1
+fi
+echo "drive.sh: strict C17 codec compile, round-trip, bitcast, and refusal checks ok"

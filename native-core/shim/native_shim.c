@@ -2414,6 +2414,135 @@ uint64_t native_text_repeat(native_arena *arena, uint64_t source,
   }
 }
 
+static bool native_utf8_continuation(uint8_t byte) {
+  return (byte >= UINT8_C(0x80)) && (byte <= UINT8_C(0xbf));
+}
+
+static bool native_utf8_valid(const uint8_t *bytes, uint64_t length) {
+  uint64_t index = UINT64_C(0);
+  if ((bytes == NULL) && (length != UINT64_C(0))) {
+    return false;
+  }
+  while (index < length) {
+    uint8_t first = bytes[index];
+    if (first <= UINT8_C(0x7f)) {
+      index += UINT64_C(1);
+    } else if ((first >= UINT8_C(0xc2)) && (first <= UINT8_C(0xdf))) {
+      if ((length - index < UINT64_C(2)) ||
+          !native_utf8_continuation(bytes[index + UINT64_C(1)])) {
+        return false;
+      }
+      index += UINT64_C(2);
+    } else if ((first >= UINT8_C(0xe0)) && (first <= UINT8_C(0xef))) {
+      uint8_t second;
+      if (length - index < UINT64_C(3)) {
+        return false;
+      }
+      second = bytes[index + UINT64_C(1)];
+      if (!native_utf8_continuation(bytes[index + UINT64_C(2)]) ||
+          ((first == UINT8_C(0xe0)) && (second < UINT8_C(0xa0))) ||
+          ((first == UINT8_C(0xed)) && (second > UINT8_C(0x9f))) ||
+          !native_utf8_continuation(second)) {
+        return false;
+      }
+      index += UINT64_C(3);
+    } else if ((first >= UINT8_C(0xf0)) && (first <= UINT8_C(0xf4))) {
+      uint8_t second;
+      if (length - index < UINT64_C(4)) {
+        return false;
+      }
+      second = bytes[index + UINT64_C(1)];
+      if (!native_utf8_continuation(second) ||
+          !native_utf8_continuation(bytes[index + UINT64_C(2)]) ||
+          !native_utf8_continuation(bytes[index + UINT64_C(3)]) ||
+          ((first == UINT8_C(0xf0)) && (second < UINT8_C(0x90))) ||
+          ((first == UINT8_C(0xf4)) && (second > UINT8_C(0x8f)))) {
+        return false;
+      }
+      index += UINT64_C(4);
+    } else {
+      return false;
+    }
+  }
+  return true;
+}
+
+native_vec *native_utf8_encode(native_arena *arena, uint64_t source) {
+  uint64_t length = native_text_length(source);
+  const uint8_t *bytes = native_text_bytes(source);
+  native_vec *result;
+  uint64_t index;
+  if ((length > (uint64_t)INT64_MAX) || !native_utf8_valid(bytes, length)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  result = native_vec_new(arena, (int64_t)length, INT64_C(8),
+                          _Alignof(int64_t));
+  for (index = UINT64_C(0); index < length; index++) {
+    int64_t value = (int64_t)bytes[index];
+    memcpy((uint8_t *)result->elements + (size_t)(index * UINT64_C(8)),
+           &value, sizeof value);
+  }
+  result->length = (int64_t)length;
+  return result;
+}
+
+static uint8_t native_utf8_vector_byte(const native_vec *source,
+                                       int64_t index) {
+  int64_t value;
+  if ((source == NULL) || (source->length < INT64_C(0)) ||
+      (source->capacity < source->length) ||
+      ((source->capacity == INT64_C(0)) && (source->elements != NULL)) ||
+      ((source->capacity > INT64_C(0)) && (source->elements == NULL)) ||
+      (index < INT64_C(0)) || (index >= source->length)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  memcpy(&value, (const uint8_t *)source->elements + (size_t)(index * INT64_C(8)),
+         sizeof value);
+  if ((value < INT64_C(0)) || (value > INT64_C(255))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  return (uint8_t)value;
+}
+
+uint64_t native_utf8_decode(native_arena *arena, const native_vec *source) {
+  uint8_t *destination;
+  uint64_t result;
+  int64_t index;
+  if ((source == NULL) || (source->length < INT64_C(0))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  result = native_text_alloc(arena, (uint64_t)source->length, &destination);
+  for (index = INT64_C(0); index < source->length; index++) {
+    destination[index] = native_utf8_vector_byte(source, index);
+  }
+  if (!native_utf8_valid(destination, (uint64_t)source->length)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  return result;
+}
+
+int64_t native_float_to_bits(double source) {
+  uint64_t bits;
+  int64_t result;
+  _Static_assert(sizeof(double) == sizeof(uint64_t),
+                 "native binary64 requires an eight-byte double");
+  if (isnan(source)) {
+    bits = UINT64_C(0x7ff8000000000000);
+  } else {
+    memcpy(&bits, &source, sizeof bits);
+  }
+  memcpy(&result, &bits, sizeof result);
+  return result;
+}
+
+double native_float_from_bits(int64_t source) {
+  double result;
+  _Static_assert(sizeof(double) == sizeof(int64_t),
+                 "native binary64 requires an eight-byte double");
+  memcpy(&result, &source, sizeof result);
+  return result;
+}
+
 bool native_host_environment_lookup_v0(
     native_arena *arena, const native_capability *capability,
     uint64_t name, uint64_t *out) {
