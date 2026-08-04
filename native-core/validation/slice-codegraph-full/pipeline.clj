@@ -1,4 +1,4 @@
-(ns codegraph-native-pipeline
+(ns pipeline
   (:require [clojure.string :as str]
             [native.body-c17 :as body]
             [native.body-slice :as body-slice]
@@ -64,7 +64,7 @@
         (str "qbe OK " (qbe/qbeartifact-module-name artifact)))
       (str "qbe REFUSED " (qbe/qbefailure-detail result)))))
 
-(defn accepted-lines [source typing-result artifacts-dir]
+(defn accepted-lines [typing-result artifacts-dir]
   (let [sealed-typed (lower/typingacceptedv0-sealed typing-result)
         typed-slice (lower/typingacceptedv0-slice typing-result)
         native-result (lower/lower-native-world
@@ -131,5 +131,5 @@
               ["stage source-seal ACCEPTED"
                "stage source-to-typed ACCEPTED"]
               source-lines
-              (accepted-lines source typing-result artifacts-dir)))))]
+              (accepted-lines typing-result artifacts-dir)))))]
   (spit report-path (str (str/join "\n" lines) "\n")))
