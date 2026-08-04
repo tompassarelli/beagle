@@ -42,7 +42,10 @@ replay_forms=(digit-table no-strings char-at split-on index-of last-index-of
   Action ReplayCommit no-triples no-actions no-commits initial-model find-exact
   find-group remove-at "single-predicate?" subject-predicate-count "collapses?"
   "declaration-collapse?" GroupRemoval remove-group ApplyResult apply-assert
-  apply-retract apply-action)
+  apply-retract apply-action kind-version kind-ok kind-reject
+  reason-invalid-request reason-conflict reason-cardinality-collapse Outcome
+  MutationResult no-outcomes reject op-actions "any-local-base?" apply-actions
+  mutate ReplayFrame ReplayResult no-frames replay)
 if [[ -n "${FRAM_REPLAY:-}" ]]; then
   "$repo/bin/beagle-ast" "$FRAM_REPLAY" >"$scratch/replay.json"
   bb "$here/select-forms.clj" "$scratch/replay.json" "$scratch/replay-sel.json" \

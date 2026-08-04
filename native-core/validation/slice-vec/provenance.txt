@@ -22,10 +22,12 @@ layout rule — a vector value is a REFERENCE to its header
     - region-lifetime law (thread 019fbd6c ratification) applies unchanged: the
       handle may not outlive the region holding the header and its elements.
       Vacuous under the single slice arena; load-bearing once regions nest.
-    - conj is LINEAR in v0: native_vec_push moves the argument header rather
-      than copying it, which is what makes an accumulate loop O(1) amortized
-      instead of the O(n) arena copy a persistent conj would need. A program
-      that reads the pre-conj vector after the push is outside the v0 slice.
+    - conj is LINEAR in v0 once element storage exists: native_vec_push moves
+      the argument header rather than copying it, which makes an accumulate
+      loop O(1) amortized instead of the O(n) arena copy a persistent conj would
+      need. A zero-capacity value is the exception: it is reusable and its first
+      push returns a fresh header, so shared immutable [] seeds stay independent.
+      Reading a nonempty pre-conj vector after the push is outside the v0 slice.
 
 pipeline
   ast-facts.clj             beagle-ast JSON -> source facts (signatures, bodies,

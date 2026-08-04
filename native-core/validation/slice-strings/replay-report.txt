@@ -1,9 +1,9 @@
 stage source-seal ACCEPTED
 stage source-to-typed ACCEPTED
-world-types 35
-world-functions 28
-world-abis 28
-projected-types 21
+world-types 45
+world-functions 34
+world-abis 34
+projected-types 28
 lowered fn_0 char-at 3 blocks
 lowered fn_1 split-on 13 blocks
 lowered fn_2 index-of 10 blocks
@@ -32,6 +32,12 @@ lowered fn_24 remove-group 5 blocks
 lowered fn_25 apply-assert 7 blocks
 lowered fn_26 apply-retract 7 blocks
 lowered fn_27 apply-action 7 blocks
+lowered fn_28 reject 1 blocks
+lowered fn_29 op-actions 13 blocks
+lowered fn_30 any-local-base? 10 blocks
+lowered fn_31 apply-actions 26 blocks
+lowered fn_32 mutate 20 blocks
+lowered fn_33 replay 25 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts

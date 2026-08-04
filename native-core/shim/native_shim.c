@@ -104,6 +104,16 @@ native_vec *native_vec_push(native_arena *arena, native_vec *vector, const void 
   if ((vector == NULL) || (value == NULL) || (stride <= INT64_C(0))) {
     native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
   }
+  if (vector->capacity == INT64_C(0)) {
+    native_vec *fresh;
+    if (vector->length != INT64_C(0)) {
+      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+    }
+    fresh = native_vec_new(arena, NATIVE_VEC_MIN_CAPACITY, stride, alignment);
+    memcpy(fresh->elements, value, (size_t)stride);
+    fresh->length = INT64_C(1);
+    return fresh;
+  }
   if (vector->length == vector->capacity) {
     int64_t grown = (vector->capacity <= INT64_C(0))
                         ? NATIVE_VEC_MIN_CAPACITY
@@ -123,6 +133,32 @@ native_vec *native_vec_push(native_arena *arena, native_vec *vector, const void 
          (size_t)stride);
   vector->length += INT64_C(1);
   return vector;
+}
+
+native_vec *native_vec_concat(native_arena *arena, const native_vec *left,
+                              const native_vec *right, int64_t stride,
+                              size_t alignment) {
+  native_vec *result;
+  int64_t length;
+  if ((left == NULL) || (right == NULL) || (stride <= INT64_C(0)) ||
+      (left->length < INT64_C(0)) || (right->length < INT64_C(0)) ||
+      (left->length > left->capacity) || (right->length > right->capacity)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  if (left->length > (INT64_MAX - right->length)) {
+    native_trap(NATIVE_TRAP_OVERFLOW);
+  }
+  length = left->length + right->length;
+  result = native_vec_new(arena, length, stride, alignment);
+  if (left->length > INT64_C(0)) {
+    memcpy(result->elements, left->elements, (size_t)(left->length * stride));
+  }
+  if (right->length > INT64_C(0)) {
+    memcpy((uint8_t *)result->elements + (size_t)(left->length * stride),
+           right->elements, (size_t)(right->length * stride));
+  }
+  result->length = length;
+  return result;
 }
 
 uint64_t native_text_length(uint64_t handle) {

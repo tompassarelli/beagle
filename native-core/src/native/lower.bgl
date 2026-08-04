@@ -2004,6 +2004,7 @@
 (defn allocating-instruction? [instruction: core/Instruction] -> Bool
   (or (instance? native.core.VecPushInstruction instruction)
       (instance? native.core.VecEmptyInstruction instruction)
+      (instance? native.core.VecConcatInstruction instruction)
       (instance? native.core.AllocateInstruction instruction)
       (instance? native.core.TextSliceInstruction instruction)
       (instance? native.core.TextConcatInstruction instruction)))
@@ -2821,6 +2822,32 @@
                             (nth values 0) (nth values 1)
                             (arena-value-id owner)))
                         result-id vector-type false))))
+
+                (and (= "concat" callee) (= 2 (count values))
+                  (vector-type? types (nth value-types 0))
+                  (same-id? (nth value-types 0) (nth value-types 1)))
+                (let [vector-type: core/NativeId (nth value-types 0)
+                      result-id: core/NativeId
+                      (state-id current owner "vec-concat")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->VecConcatInstruction
+                        (core/->SsaValueV0 result-id vector-type)
+                        (nth values 0) (nth values 1)
+                        (arena-value-id owner)))
+                    result-id vector-type false))
+
+                (= "concat" callee)
+                (fail-result current
+                  "TODO-NATIVE-CONCAT-OPERANDS: concat lowers two native vectors of the same type")
+
+                (and (= "vec" callee) (= 1 (count values))
+                  (vector-type? types (nth value-types 0)))
+                (->ExprResultV0 current (nth values 0) (nth value-types 0) false)
+
+                (= "vec" callee)
+                (fail-result current
+                  "TODO-NATIVE-VEC-OPERAND: vec lowers only when its value is already a native vector")
 
                 (some? comparison)
                 (if (not (= 2 (count values)))
@@ -4526,6 +4553,13 @@
       [(encode-ssa-value (core/vecemptyinstruction-result instruction))
        (id-value (core/vecemptyinstruction-capacity-id instruction))
        (id-value (core/vecemptyinstruction-arena-id instruction))])
+
+    (instance? native.core.VecConcatInstruction instruction)
+    (worlds/canonical-record "vec-concat-instruction"
+      [(encode-ssa-value (core/vecconcatinstruction-result instruction))
+       (id-value (core/vecconcatinstruction-left-id instruction))
+       (id-value (core/vecconcatinstruction-right-id instruction))
+       (id-value (core/vecconcatinstruction-arena-id instruction))])
 
     (instance? native.core.ArenaInstruction instruction)
     (worlds/canonical-record "arena-instruction"

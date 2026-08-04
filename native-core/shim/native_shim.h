@@ -57,10 +57,13 @@ native_vec *native_vec_new(native_arena *arena, int64_t capacity, int64_t stride
 int64_t native_vec_length(const native_vec *vector);
 /* Traps NATIVE_TRAP_OUT_OF_RANGE unless 0 <= index < length. */
 const void *native_vec_at(const native_vec *vector, int64_t index, int64_t stride);
-/* Linear push: the argument header is moved, not copied. Capacity doubles, so
-   a run of n pushes performs O(log n) element-storage allocations. */
+/* Push is linear once storage exists. A reusable zero-capacity value produces
+   a fresh header; subsequent growth moves that owned header and doubles. */
 native_vec *native_vec_push(native_arena *arena, native_vec *vector,
                             const void *value, int64_t stride, size_t alignment);
+native_vec *native_vec_concat(native_arena *arena, const native_vec *left,
+                              const native_vec *right, int64_t stride,
+                              size_t alignment);
 bool native_byte_read(FILE *stream, uint8_t *destination, size_t length);
 bool native_byte_write(FILE *stream, const uint8_t *source, size_t length);
 

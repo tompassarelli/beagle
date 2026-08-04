@@ -270,8 +270,8 @@
     [result: SsaValueV0
      source-id: NativeId
      index-id: NativeId])
-  ;; Push is LINEAR (the source header is moved) and doubles capacity, so an
-  ;; accumulate loop costs O(1) amortized instead of a persistent O(n) copy.
+  ;; Push is LINEAR once storage exists and doubles capacity; a reusable empty
+  ;; value yields a fresh header so independent [] seeds never alias.
   (VecPushInstruction
     [result: SsaValueV0
      source-id: NativeId
@@ -280,6 +280,13 @@
   (VecEmptyInstruction
     [result: SsaValueV0
      capacity-id: NativeId
+     arena-id: NativeId])
+  ;; Concat borrows both inputs and copies their elements into a fresh header;
+  ;; neither source is moved because source-level concat preserves both values.
+  (VecConcatInstruction
+    [result: SsaValueV0
+     left-id: NativeId
+     right-id: NativeId
      arena-id: NativeId])
   ;; Acquires the arena once in the entry block, consuming the region and
   ;; capability tokens; no other instruction can allocate without its result.
@@ -541,6 +548,8 @@
     [(VecPushInstruction result source-id value-id arena-id)
      (ssavaluev0-id result)]
     [(VecEmptyInstruction result capacity-id arena-id) (ssavaluev0-id result)]
+    [(VecConcatInstruction result left-id right-id arena-id)
+     (ssavaluev0-id result)]
     [(ArenaInstruction result region capability tokens) (ssavaluev0-id result)]
     [(TextLengthInstruction result source-id) (ssavaluev0-id result)]
     [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
@@ -807,6 +816,7 @@
     [(VecGetInstruction result source-id index-id) true]
     [(VecPushInstruction result source-id value-id arena-id) true]
     [(VecEmptyInstruction result capacity-id arena-id) true]
+    [(VecConcatInstruction result left-id right-id arena-id) true]
     [(ArenaInstruction result region capability tokens)
      (and (id-in? known-regions region) (id-in? known-capabilities capability))]
     [(TextLengthInstruction result source-id) true]
@@ -933,6 +943,8 @@
     [(VecPushInstruction result source-id value-id arena-id)
      [arena-id source-id value-id]]
     [(VecEmptyInstruction result capacity-id arena-id) [arena-id capacity-id]]
+    [(VecConcatInstruction result left-id right-id arena-id)
+     [arena-id left-id right-id]]
     [(ArenaInstruction result region capability tokens) []]
     [(TextLengthInstruction result source-id) [source-id]]
     [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
@@ -1009,6 +1021,7 @@
     [(VecGetInstruction result source-id index-id) true]
     [(VecPushInstruction result source-id value-id arena-id) true]
     [(VecEmptyInstruction result capacity-id arena-id) true]
+    [(VecConcatInstruction result left-id right-id arena-id) true]
     [(ArenaInstruction result region capability tokens)
      (and (id-in? allowed-regions region)
        (id-in? allowed-capabilities capability))]
