@@ -3035,6 +3035,82 @@
             [(core/->Parameter join-parameter (bool-type-id))])
           join-parameter (bool-type-id) false)))))
 
+(defn collection-predicate? [callee: String] -> Bool
+  (or (= "map?" callee)
+    (= "set?" callee)
+    (= "sequential?" callee)))
+
+(defn collection-predicate-type?
+  [types: (Vec core/TypeDef)
+   callee: String
+   target: core/NativeId] -> Bool
+  (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
+    (if (nil? definition)
+      false
+      (let [shape: core/TypeShape (core/typedef-shape definition)]
+        (cond
+          (= "map?" callee) (instance? native.core.MapTypeV0 shape)
+          (= "set?" callee) (instance? native.core.SetTypeV0 shape)
+          (= "sequential?" callee) (instance? native.core.VectorType shape)
+          :else false)))))
+
+(defn collection-variant-matches?
+  [types: (Vec core/TypeDef)
+   callee: String
+   variant: core/TypeVariant] -> Bool
+  (let [payload: (U core/NativeId Nil) (core/typevariant-payload-type variant)]
+    (if (nil? payload)
+      false
+      (collection-predicate-type? types callee payload))))
+
+(defn lower-collection-predicate
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   callee: String
+   value-id: core/NativeId
+   value-type: core/NativeId] -> ExprResultV0
+  (let [variants: (Vec core/TypeVariant) (union-variants-of types value-type)]
+    (if (= 0 (count variants))
+      (bool-constant-result state owner "collection-predicate"
+        (collection-predicate-type? types callee value-type))
+      (let [true-id: core/NativeId (state-id state owner "collection-true")
+            false-id: core/NativeId (state-id state owner "collection-false")
+            join-id: core/NativeId (state-id state owner "collection-join")
+            join-parameter: core/NativeId
+            (state-id state owner "collection-value")
+            true-value: core/NativeId (state-id state owner "collection-yes")
+            false-value: core/NativeId (state-id state owner "collection-no")
+            cases: (Vec core/SwitchCaseV0)
+            (mapv
+              (fn [variant: core/TypeVariant] -> core/SwitchCaseV0
+                (core/->SwitchCaseV0 (core/typevariant-id variant)
+                  (if (collection-variant-matches? types callee variant)
+                    true-id false-id)
+                  []))
+              variants)
+            switched: BodyStateV0
+            (state-close (state-bump state)
+              (core/->SwitchTerminator value-id cases))
+            true-block: BodyStateV0
+            (state-close
+              (state-emit (state-open-block switched true-id [])
+                (core/->AtomInstruction
+                  (core/->SsaValueV0 true-value (bool-type-id))
+                  (core/->BoolAtom true)))
+              (core/->JumpTerminator join-id [true-value]))
+            false-block: BodyStateV0
+            (state-close
+              (state-emit (state-open-block true-block false-id [])
+                (core/->AtomInstruction
+                  (core/->SsaValueV0 false-value (bool-type-id))
+                  (core/->BoolAtom false)))
+              (core/->JumpTerminator join-id [false-value]))]
+        (->ExprResultV0
+          (state-open-block false-block join-id
+            [(core/->Parameter join-parameter (bool-type-id))])
+          join-parameter (bool-type-id) false)))))
+
 (defn nil-variant? [variant: core/TypeVariant] -> Bool
   (let [payload: (U core/NativeId Nil) (core/typevariant-payload-type variant)]
     (if (nil? payload)
@@ -4985,6 +5061,15 @@
                   (str "TODO-NATIVE-PREDICATE-ARITY: " callee
                     " takes one operand"))
 
+                (and (collection-predicate? callee) (= 1 (count values)))
+                (lower-collection-predicate types owner current callee
+                  (nth values 0) (nth value-types 0))
+
+                (collection-predicate? callee)
+                (fail-result current
+                  (str "TODO-NATIVE-COLLECTION-PREDICATE-ARITY: " callee
+                    " takes one operand"))
+
                 (and (= "pos?" callee) (= 1 (count values)))
                 (lower-positive current owner (nth values 0) (nth value-types 0))
 
@@ -5003,6 +5088,26 @@
                   (->ExprResultV0
                     (state-emit (state-bump current)
                       (core/->VecLengthInstruction
+                        (core/->SsaValueV0 result-id (int-type-id))
+                        (nth values 0)))
+                    result-id (int-type-id) false))
+
+                (and (= "count" callee) (= 1 (count values))
+                  (map-type? types (nth value-types 0)))
+                (let [result-id: core/NativeId (state-id current owner "map-count")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->MapCountInstructionV0
+                        (core/->SsaValueV0 result-id (int-type-id))
+                        (nth values 0)))
+                    result-id (int-type-id) false))
+
+                (and (= "count" callee) (= 1 (count values))
+                  (set-type? types (nth value-types 0)))
+                (let [result-id: core/NativeId (state-id current owner "set-count")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->SetCountInstructionV0
                         (core/->SsaValueV0 result-id (int-type-id))
                         (nth values 0)))
                     result-id (int-type-id) false))
@@ -5111,6 +5216,110 @@
                 (fail-result current
                   "TODO-NATIVE-CONTAINS-OPERANDS: contains? lowers a closed map key or set element")
 
+                (and (= "assoc" callee) (= 3 (count values))
+                  (map-type? types (nth value-types 0)))
+                (let [map-type: core/NativeId (nth value-types 0)
+                      key-type: core/NativeId (map-key-of types map-type)
+                      value-type: core/NativeId (map-value-of types map-type)
+                      equality: (U core/ConcreteEqualityV0 Nil)
+                      (concrete-equality-for key-type)]
+                  (cond
+                    (not (same-id? key-type (nth value-types 1)))
+                    (fail-result current
+                      "TODO-NATIVE-ASSOC-KEY: the key does not match the map key type")
+                    (not (same-id? value-type (nth value-types 2)))
+                    (fail-result current
+                      "TODO-NATIVE-ASSOC-VALUE: the value does not match the map value type")
+                    (nil? equality)
+                    (fail-result current
+                      "TODO-NATIVE-MAP-KEY-EQUALITY: assoc needs closed concrete key equality")
+                    :else
+                    (let [result-id: core/NativeId
+                          (state-id current owner "map-assoc")]
+                      (->ExprResultV0
+                        (state-emit (state-bump current)
+                          (core/->MapAssocInstructionV0
+                            (core/->SsaValueV0 result-id map-type)
+                            (nth values 0) (nth values 1) (nth values 2)
+                            (arena-value-id owner) equality))
+                        result-id map-type false))))
+
+                (= "assoc" callee)
+                (fail-result current
+                  "TODO-NATIVE-ASSOC-OPERANDS: assoc lowers one key/value pair on a closed map")
+
+                (and (= "dissoc" callee) (= 2 (count values))
+                  (map-type? types (nth value-types 0)))
+                (let [map-type: core/NativeId (nth value-types 0)
+                      key-type: core/NativeId (map-key-of types map-type)
+                      equality: (U core/ConcreteEqualityV0 Nil)
+                      (concrete-equality-for key-type)]
+                  (cond
+                    (not (same-id? key-type (nth value-types 1)))
+                    (fail-result current
+                      "TODO-NATIVE-DISSOC-KEY: the key does not match the map key type")
+                    (nil? equality)
+                    (fail-result current
+                      "TODO-NATIVE-MAP-KEY-EQUALITY: dissoc needs closed concrete key equality")
+                    :else
+                    (let [result-id: core/NativeId
+                          (state-id current owner "map-dissoc")]
+                      (->ExprResultV0
+                        (state-emit (state-bump current)
+                          (core/->MapDissocInstructionV0
+                            (core/->SsaValueV0 result-id map-type)
+                            (nth values 0) (nth values 1)
+                            (arena-value-id owner) equality))
+                        result-id map-type false))))
+
+                (= "dissoc" callee)
+                (fail-result current
+                  "TODO-NATIVE-DISSOC-OPERANDS: dissoc lowers one key on a closed map")
+
+                (and (= "keys" callee) (= 1 (count values))
+                  (map-type? types (nth value-types 0)))
+                (let [element: core/NativeId
+                      (map-key-of types (nth value-types 0))
+                      vector-type: (U core/NativeId Nil)
+                      (vector-type-of types element)]
+                  (if (nil? vector-type)
+                    (fail-result current
+                      "TODO-NATIVE-MAP-KEYS-TYPE: the world declares no vector of the map key type")
+                    (let [result-id: core/NativeId
+                          (state-id current owner "map-keys")]
+                      (->ExprResultV0
+                        (state-emit (state-bump current)
+                          (core/->MapKeysInstructionV0
+                            (core/->SsaValueV0 result-id vector-type)
+                            (nth values 0) (arena-value-id owner)))
+                        result-id vector-type false))))
+
+                (= "keys" callee)
+                (fail-result current
+                  "TODO-NATIVE-MAP-KEYS-OPERAND: keys lowers one closed map")
+
+                (and (= "vals" callee) (= 1 (count values))
+                  (map-type? types (nth value-types 0)))
+                (let [element: core/NativeId
+                      (map-value-of types (nth value-types 0))
+                      vector-type: (U core/NativeId Nil)
+                      (vector-type-of types element)]
+                  (if (nil? vector-type)
+                    (fail-result current
+                      "TODO-NATIVE-MAP-VALUES-TYPE: the world declares no vector of the map value type")
+                    (let [result-id: core/NativeId
+                          (state-id current owner "map-values")]
+                      (->ExprResultV0
+                        (state-emit (state-bump current)
+                          (core/->MapValuesInstructionV0
+                            (core/->SsaValueV0 result-id vector-type)
+                            (nth values 0) (arena-value-id owner)))
+                        result-id vector-type false))))
+
+                (= "vals" callee)
+                (fail-result current
+                  "TODO-NATIVE-MAP-VALUES-OPERAND: vals lowers one closed map")
+
                 (and (= "nth" callee) (= 2 (count values))
                   (vector-type? types (nth value-types 0)))
                 (if (not (same-id? (nth value-types 1) (int-type-id)))
@@ -5142,6 +5351,62 @@
                             (arena-value-id owner)))
                         result-id vector-type false))))
 
+                (and (= "conj" callee) (= 2 (count values))
+                  (set-type? types (nth value-types 0)))
+                (let [set-type: core/NativeId (nth value-types 0)
+                      element-type: core/NativeId (set-element-of types set-type)
+                      equality: (U core/ConcreteEqualityV0 Nil)
+                      (concrete-equality-for element-type)]
+                  (cond
+                    (not (same-id? element-type (nth value-types 1)))
+                    (fail-result current
+                      "TODO-NATIVE-CONJ-ELEMENT: the value is not the set's element type")
+                    (nil? equality)
+                    (fail-result current
+                      "TODO-NATIVE-SET-ELEMENT-EQUALITY: conj needs closed concrete element equality")
+                    :else
+                    (let [result-id: core/NativeId
+                          (state-id current owner "set-conj")]
+                      (->ExprResultV0
+                        (state-emit (state-bump current)
+                          (core/->SetConjInstructionV0
+                            (core/->SsaValueV0 result-id set-type)
+                            (nth values 0) (nth values 1)
+                            (arena-value-id owner) equality))
+                        result-id set-type false))))
+
+                (= "conj" callee)
+                (fail-result current
+                  "TODO-NATIVE-CONJ-OPERANDS: conj lowers a native vector push or closed set insertion")
+
+                (and (= "disj" callee) (= 2 (count values))
+                  (set-type? types (nth value-types 0)))
+                (let [set-type: core/NativeId (nth value-types 0)
+                      element-type: core/NativeId (set-element-of types set-type)
+                      equality: (U core/ConcreteEqualityV0 Nil)
+                      (concrete-equality-for element-type)]
+                  (cond
+                    (not (same-id? element-type (nth value-types 1)))
+                    (fail-result current
+                      "TODO-NATIVE-DISJ-ELEMENT: the value is not the set's element type")
+                    (nil? equality)
+                    (fail-result current
+                      "TODO-NATIVE-SET-ELEMENT-EQUALITY: disj needs closed concrete element equality")
+                    :else
+                    (let [result-id: core/NativeId
+                          (state-id current owner "set-disj")]
+                      (->ExprResultV0
+                        (state-emit (state-bump current)
+                          (core/->SetDisjInstructionV0
+                            (core/->SsaValueV0 result-id set-type)
+                            (nth values 0) (nth values 1)
+                            (arena-value-id owner) equality))
+                        result-id set-type false))))
+
+                (= "disj" callee)
+                (fail-result current
+                  "TODO-NATIVE-DISJ-OPERANDS: disj lowers one value from a closed set")
+
                 (and (= "concat" callee) (= 2 (count values))
                   (vector-type? types (nth value-types 0))
                   (same-id? (nth value-types 0) (nth value-types 1)))
@@ -5164,9 +5429,27 @@
                   (vector-type? types (nth value-types 0)))
                 (->ExprResultV0 current (nth values 0) (nth value-types 0) false)
 
+                (and (= "vec" callee) (= 1 (count values))
+                  (set-type? types (nth value-types 0)))
+                (let [element: core/NativeId
+                      (set-element-of types (nth value-types 0))
+                      vector-type: (U core/NativeId Nil)
+                      (vector-type-of types element)]
+                  (if (nil? vector-type)
+                    (fail-result current
+                      "TODO-NATIVE-SET-VECTOR-TYPE: the world declares no vector of the set element type")
+                    (let [result-id: core/NativeId
+                          (state-id current owner "set-vector")]
+                      (->ExprResultV0
+                        (state-emit (state-bump current)
+                          (core/->SetVectorInstructionV0
+                            (core/->SsaValueV0 result-id vector-type)
+                            (nth values 0) (arena-value-id owner)))
+                        result-id vector-type false))))
+
                 (= "vec" callee)
                 (fail-result current
-                  "TODO-NATIVE-VEC-OPERAND: vec lowers only when its value is already a native vector")
+                  "TODO-NATIVE-VEC-OPERAND: vec lowers a native vector or a closed insertion-order set")
 
                 (and (not (= "=" callee)) (some? comparison)
                   (= 2 (count values))

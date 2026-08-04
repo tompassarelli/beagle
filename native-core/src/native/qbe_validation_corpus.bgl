@@ -392,10 +392,10 @@
     [:types [concat-arena-type concat-vector-type slice-i64-type]
      :layouts [concat-arena-layout concat-vector-layout slice-i64-layout]]))
 
-;; --- explicit text-instruction refusals ----------------------------------
+;; --- explicit instruction refusals ---------------------------------------
 ;; Core v0 validates SSA/reference closure independently of operand semantics.
-;; Supported scalar carriers isolate these instruction gates from QBE's separate
-;; rejection of text-shaped types, so each world has exactly one refusal cause.
+;; Scalar function carriers isolate these gates from QBE's separate rejection
+;; of unsupported parameter and return shapes, so each world has one cause.
 
 (def refusal-index-block: core/BasicBlock
   (core/->BasicBlock (slice-id "ref-idx-blk")
@@ -529,6 +529,106 @@
     []
     []))
 
+(def refusal-map-type: core/TypeDef
+  (core/->TypeDef (slice-id "ref-map-typ") "RefusalMap"
+    (core/->MapTypeV0 (slice-id "type-0-i64") (slice-id "type-0-i64")
+      (core/->InsertionOrderV0 true))))
+
+(def refusal-map-layout: core/LayoutDef
+  (core/->LayoutDef (slice-id "ref-map-lay") (slice-id "ref-map-typ") 8 8
+    (core/->MapShapeV0
+      (slice-id "type-0-i64") 8 8
+      (slice-id "type-0-i64") 8 8
+      (core/->InsertionOrderV0 true))))
+
+(def refusal-map-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "ref-map-blk")
+    []
+    [(core/->MapLiteralInstructionV0
+       (core/->SsaValueV0 (slice-id "ref-map-out") (slice-id "ref-map-typ"))
+       [(slice-id "ref-map-key")]
+       [(slice-id "ref-map-val")]
+       (slice-id "ref-map-arn")
+       (core/->I64EqualityV0 true))
+     (core/->AtomInstruction
+       (core/->SsaValueV0 (slice-id "ref-map-zro") (slice-id "type-0-i64"))
+       (core/->I64Atom 0))]
+    [(core/return-terminator (slice-id "ref-map-zro"))]))
+
+(def refusal-map-function: core/FunctionDef
+  (core/->FunctionDef (slice-id "ref-map-fn") "refuse-map"
+    [(core/->Parameter (slice-id "ref-map-key") (slice-id "type-0-i64"))
+     (core/->Parameter (slice-id "ref-map-val") (slice-id "type-0-i64"))
+     (core/->Parameter (slice-id "ref-map-arn") (slice-id "type-0-i64"))]
+    [refusal-map-block]
+    (slice-id "ref-map-blk")
+    (slice-id "type-0-i64")
+    []
+    []
+    []))
+
+(def refusal-map-world: core/NativeWorld
+  (core/->NativeWorld (slice-id "ref-map-wld") nil "native-qbe-fixture-v0"
+    [slice-i64-type refusal-map-type]
+    []
+    []
+    []
+    [slice-i64-layout refusal-map-layout]
+    [refusal-map-function]
+    []
+    []
+    []
+    []
+    []))
+
+(def refusal-set-type: core/TypeDef
+  (core/->TypeDef (slice-id "ref-set-typ") "RefusalSet"
+    (core/->SetTypeV0 (slice-id "type-0-i64")
+      (core/->InsertionOrderV0 true))))
+
+(def refusal-set-layout: core/LayoutDef
+  (core/->LayoutDef (slice-id "ref-set-lay") (slice-id "ref-set-typ") 8 8
+    (core/->SetShapeV0 (slice-id "type-0-i64") 8 8
+      (core/->InsertionOrderV0 true))))
+
+(def refusal-set-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "ref-set-blk")
+    []
+    [(core/->SetLiteralInstructionV0
+       (core/->SsaValueV0 (slice-id "ref-set-out") (slice-id "ref-set-typ"))
+       [(slice-id "ref-set-val")]
+       (slice-id "ref-set-arn")
+       (core/->I64EqualityV0 true))
+     (core/->AtomInstruction
+       (core/->SsaValueV0 (slice-id "ref-set-zro") (slice-id "type-0-i64"))
+       (core/->I64Atom 0))]
+    [(core/return-terminator (slice-id "ref-set-zro"))]))
+
+(def refusal-set-function: core/FunctionDef
+  (core/->FunctionDef (slice-id "ref-set-fn") "refuse-set"
+    [(core/->Parameter (slice-id "ref-set-val") (slice-id "type-0-i64"))
+     (core/->Parameter (slice-id "ref-set-arn") (slice-id "type-0-i64"))]
+    [refusal-set-block]
+    (slice-id "ref-set-blk")
+    (slice-id "type-0-i64")
+    []
+    []
+    []))
+
+(def refusal-set-world: core/NativeWorld
+  (core/->NativeWorld (slice-id "ref-set-wld") nil "native-qbe-fixture-v0"
+    [slice-i64-type refusal-set-type]
+    []
+    []
+    []
+    [slice-i64-layout refusal-set-layout]
+    [refusal-set-function]
+    []
+    []
+    []
+    []
+    []))
+
 ;; --- materialization ------------------------------------------------------
 
 (defn require-artifact [result: qbe/QbeMaterialization] -> qbe/QbeArtifact
@@ -556,6 +656,12 @@
 (def refusal-text-builtin-proven?: Bool
   (explicitly-refused? refusal-text-builtin-world))
 
+(def refusal-map-proven?: Bool
+  (explicitly-refused? refusal-map-world))
+
+(def refusal-set-proven?: Bool
+  (explicitly-refused? refusal-set-world))
+
 (def fixture-artifact: qbe/QbeArtifact
   (require-artifact (qbe/materialize-world fixture-world 0)))
 
@@ -579,6 +685,8 @@
     refusal-blank-proven?
     refusal-parse-proven?
     refusal-text-builtin-proven?
+    refusal-map-proven?
+    refusal-set-proven?
     (= (qbe/qbeartifact-module-text fixture-artifact)
          (qbe/qbeartifact-module-text fixture-permuted-artifact))
     (= (qbe/qbeartifact-module-text slice-artifact)
