@@ -3136,23 +3136,53 @@
         true
         (= 0 (count (index-sequence-items index items-node)))))))
 
-;; An empty literal names no element type, so the only closed source for one is
-;; the annotation on the binding it initializes.
+(defn annotation-native-type
+  [index: SourceIndexV0
+   annotation: (U core/NativeId Nil)] -> (U core/NativeId Nil)
+  (if (nil? annotation)
+    nil
+    (typeresolutionv0-type-id (resolve-source-type index annotation))))
+
+(defn contextual-argument-type
+  [constructor: (U core/TypeDef Nil)
+   signature: (U TypedFunctionV0 Nil)
+   arity: Int
+   position: Int] -> (U core/NativeId Nil)
+  (if (some? constructor)
+    (let [shape: core/TypeShape (core/typedef-shape constructor)
+          fields: (Vec core/TypeField)
+          (if (instance? native.core.RecordType shape)
+            (core/recordtype-fields shape)
+            [])]
+      (if (and (= arity (count fields))
+               (>= position 0)
+               (< position (count fields)))
+        (core/typefield-type-id (nth fields position))
+        nil))
+    (if (some? signature)
+      (let [parameters: (Vec core/Parameter)
+            (typedfunctionv0-parameters signature)]
+        (if (and (= arity (count parameters))
+                 (>= position 0)
+                 (< position (count parameters)))
+          (core/parameter-type-id (nth parameters position))
+          nil))
+      nil)))
+
+;; Empty literals carry no member evidence. Only an exact closed type supplied
+;; by a surrounding boundary may choose their Native World shape.
 (defn lower-empty-vector
   [env: BodyEnvV0
    owner: core/NativeId
    state: BodyStateV0
-   annotation: (U core/NativeId Nil)] -> ExprResultV0
-  (if (nil? annotation)
+   expected: (U core/NativeId Nil)] -> ExprResultV0
+  (if (nil? expected)
     (fail-result state
       "TODO-NATIVE-EMPTY-VECTOR-LITERAL: an empty literal names no element type")
-    (let [index: SourceIndexV0 (bodyenvv0-index env)
-          types: (Vec core/TypeDef) (bodyenvv0-types env)
-          resolved: core/NativeId
-          (typeresolutionv0-type-id (resolve-source-type index annotation))]
-      (if (not (vector-type? types resolved))
+    (let [types: (Vec core/TypeDef) (bodyenvv0-types env)]
+      (if (not (vector-type? types expected))
         (fail-result state
-          "TODO-NATIVE-EMPTY-VECTOR-LITERAL: the binding annotation is not a native vector type")
+          "TODO-NATIVE-EMPTY-VECTOR-LITERAL: the contextual type is not an exact native vector type")
         (let [capacity-id: core/NativeId (state-id state owner "vec-cap")
               result-id: core/NativeId (state-id (state-bump state) owner "vec-lit")]
           (->ExprResultV0
@@ -3162,27 +3192,24 @@
                   (core/->SsaValueV0 capacity-id (int-type-id))
                   (core/->I64Atom 0)))
               (core/->VecEmptyInstruction
-                (core/->SsaValueV0 result-id resolved)
+                (core/->SsaValueV0 result-id expected)
                 capacity-id (arena-value-id owner)))
-            result-id resolved false))))))
+            result-id expected false))))))
 
 (defn lower-empty-map
   [env: BodyEnvV0
    owner: core/NativeId
    state: BodyStateV0
-   annotation: (U core/NativeId Nil)] -> ExprResultV0
-  (if (nil? annotation)
+   expected: (U core/NativeId Nil)] -> ExprResultV0
+  (if (nil? expected)
     (fail-result state
       "TODO-NATIVE-EMPTY-MAP-LITERAL: an empty literal names no key or value type")
-    (let [index: SourceIndexV0 (bodyenvv0-index env)
-          types: (Vec core/TypeDef) (bodyenvv0-types env)
-          resolved: core/NativeId
-          (typeresolutionv0-type-id (resolve-source-type index annotation))]
-      (if (not (map-type? types resolved))
+    (let [types: (Vec core/TypeDef) (bodyenvv0-types env)]
+      (if (not (map-type? types expected))
         (fail-result state
-          "TODO-NATIVE-EMPTY-MAP-LITERAL: the binding annotation is not a native map type")
+          "TODO-NATIVE-EMPTY-MAP-LITERAL: the contextual type is not an exact native map type")
         (let [equality: (U core/ConcreteEqualityV0 Nil)
-              (concrete-equality-for (map-key-of types resolved))]
+              (concrete-equality-for (map-key-of types expected))]
           (if (nil? equality)
             (fail-result state
               "TODO-NATIVE-MAP-KEY-EQUALITY: the key type has no closed concrete equality")
@@ -3190,27 +3217,24 @@
               (->ExprResultV0
                 (state-emit (state-bump state)
                   (core/->MapLiteralInstructionV0
-                    (core/->SsaValueV0 result-id resolved)
+                    (core/->SsaValueV0 result-id expected)
                     [] [] (arena-value-id owner) equality))
-                result-id resolved false))))))))
+                result-id expected false))))))))
 
 (defn lower-empty-set
   [env: BodyEnvV0
    owner: core/NativeId
    state: BodyStateV0
-   annotation: (U core/NativeId Nil)] -> ExprResultV0
-  (if (nil? annotation)
+   expected: (U core/NativeId Nil)] -> ExprResultV0
+  (if (nil? expected)
     (fail-result state
       "TODO-NATIVE-EMPTY-SET-LITERAL: an empty literal names no element type")
-    (let [index: SourceIndexV0 (bodyenvv0-index env)
-          types: (Vec core/TypeDef) (bodyenvv0-types env)
-          resolved: core/NativeId
-          (typeresolutionv0-type-id (resolve-source-type index annotation))]
-      (if (not (set-type? types resolved))
+    (let [types: (Vec core/TypeDef) (bodyenvv0-types env)]
+      (if (not (set-type? types expected))
         (fail-result state
-          "TODO-NATIVE-EMPTY-SET-LITERAL: the binding annotation is not a native set type")
+          "TODO-NATIVE-EMPTY-SET-LITERAL: the contextual type is not an exact native set type")
         (let [equality: (U core/ConcreteEqualityV0 Nil)
-              (concrete-equality-for (set-element-of types resolved))]
+              (concrete-equality-for (set-element-of types expected))]
           (if (nil? equality)
             (fail-result state
               "TODO-NATIVE-SET-ELEMENT-EQUALITY: the element type has no closed concrete equality")
@@ -3218,67 +3242,9 @@
               (->ExprResultV0
                 (state-emit (state-bump state)
                   (core/->SetLiteralInstructionV0
-                    (core/->SsaValueV0 result-id resolved)
+                    (core/->SsaValueV0 result-id expected)
                     [] (arena-value-id owner) equality))
-                result-id resolved false))))))))
-
-;; Some collection calls close an empty literal from the receiver type (for
-;; example `(get m k [])`). This is still type-directed lowering: the call's
-;; concrete Map/Set/Vec signature supplies the otherwise absent literal type.
-(defn lower-contextual-empty-aggregate
-  [env: BodyEnvV0
-   owner: core/NativeId
-   state: BodyStateV0
-   node: core/NativeId
-   expected: core/NativeId] -> ExprResultV0
-  (let [index: SourceIndexV0 (bodyenvv0-index env)
-        types: (Vec core/TypeDef) (bodyenvv0-types env)]
-    (cond
-      (and (empty-vector-form? index node) (vector-type? types expected))
-      (let [capacity-id: core/NativeId (state-id state owner "vec-cap")
-            result-id: core/NativeId (state-id (state-bump state) owner "vec-lit")]
-        (->ExprResultV0
-          (state-emit
-            (state-emit (state-bump (state-bump state))
-              (core/->AtomInstruction
-                (core/->SsaValueV0 capacity-id (int-type-id))
-                (core/->I64Atom 0)))
-            (core/->VecEmptyInstruction
-              (core/->SsaValueV0 result-id expected)
-              capacity-id (arena-value-id owner)))
-          result-id expected false))
-
-      (and (empty-map-form? index node) (map-type? types expected))
-      (let [equality: (U core/ConcreteEqualityV0 Nil)
-            (concrete-equality-for (map-key-of types expected))]
-        (if (nil? equality)
-          (fail-result state
-            "TODO-NATIVE-MAP-KEY-EQUALITY: the contextual key type has no closed concrete equality")
-          (let [result-id: core/NativeId (state-id state owner "map-lit")]
-            (->ExprResultV0
-              (state-emit (state-bump state)
-                (core/->MapLiteralInstructionV0
-                  (core/->SsaValueV0 result-id expected)
-                  [] [] (arena-value-id owner) equality))
-              result-id expected false))))
-
-      (and (empty-set-form? index node) (set-type? types expected))
-      (let [equality: (U core/ConcreteEqualityV0 Nil)
-            (concrete-equality-for (set-element-of types expected))]
-        (if (nil? equality)
-          (fail-result state
-            "TODO-NATIVE-SET-ELEMENT-EQUALITY: the contextual element type has no closed concrete equality")
-          (let [result-id: core/NativeId (state-id state owner "set-lit")]
-            (->ExprResultV0
-              (state-emit (state-bump state)
-                (core/->SetLiteralInstructionV0
-                  (core/->SsaValueV0 result-id expected)
-                  [] (arena-value-id owner) equality))
-              result-id expected false))))
-
-      :else
-      (fail-result state
-        "TODO-NATIVE-CONTEXTUAL-EMPTY-LITERAL: the receiver type does not close this literal"))))
+                result-id expected false))))))))
 
 (defn expected-collection-argument-type
   [types: (Vec core/TypeDef)
@@ -3306,6 +3272,25 @@
         (vector-element-of types receiver)
 
         :else nil))))
+
+(defn lower-contextual-empty
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   expression: core/NativeId
+   expected: (U core/NativeId Nil)] -> (U ExprResultV0 Nil)
+  (let [index: SourceIndexV0 (bodyenvv0-index env)]
+    (cond
+      (empty-vector-form? index expression)
+      (lower-empty-vector env owner state expected)
+
+      (empty-map-form? index expression)
+      (lower-empty-map env owner state expected)
+
+      (empty-set-form? index expression)
+      (lower-empty-set env owner state expected)
+
+      :else nil)))
 
 (defn text-type-id [] -> core/NativeId (type-id "String"))
 
@@ -4290,19 +4275,14 @@
                         (state-fail current
                           (str "TODO-NATIVE-BINDING-VALUE: " name " has no value form"))
                         (lower-id "body" ["let"]) (type-id "LowerFailure") false)
-                      (let [raw: ExprResultV0
-                            (cond
-                              (empty-vector-form? index value-node)
-                              (lower-empty-vector env owner current annotation)
-
-                              (empty-map-form? index value-node)
-                              (lower-empty-map env owner current annotation)
-
-                              (empty-set-form? index value-node)
-                              (lower-empty-set env owner current annotation)
-
-                              :else
-                              (lower-expr env owner current value-node))
+                      (let [expected: (U core/NativeId Nil)
+                            (annotation-native-type index annotation)
+                            contextual: (U ExprResultV0 Nil)
+                            (lower-contextual-empty env owner current value-node expected)
+                            raw: ExprResultV0
+                            (if (nil? contextual)
+                              (lower-expr env owner current value-node)
+                              contextual)
                             value: ExprResultV0
                             (if (or (nil? annotation)
                                   (exprresultv0-terminated raw)
@@ -4587,6 +4567,8 @@
                       accumulated
                       (let [item: core/NativeId (nth items position)
                             name: String (fact-text index item "name")
+                            annotation: (U core/NativeId Nil)
+                            (index-first-object index item "ann")
                             value-node: (U core/NativeId Nil)
                             (index-first-object index item "value")]
                         (if (nil? value-node)
@@ -4597,9 +4579,26 @@
                             (loopinitsv0-names accumulated)
                             (loopinitsv0-values accumulated)
                             (loopinitsv0-value-types accumulated) false)
-                          (let [value: ExprResultV0
-                                (lower-expr env owner
-                                  (loopinitsv0-state accumulated) value-node)]
+                          (let [current: BodyStateV0
+                                (loopinitsv0-state accumulated)
+                                expected: (U core/NativeId Nil)
+                                (annotation-native-type index annotation)
+                                contextual: (U ExprResultV0 Nil)
+                                (lower-contextual-empty env owner current value-node expected)
+                                raw: ExprResultV0
+                                (if (nil? contextual)
+                                  (lower-expr env owner current value-node)
+                                  contextual)
+                                value: ExprResultV0
+                                (if (or (nil? expected)
+                                      (exprresultv0-terminated raw)
+                                      (state-blocked? (exprresultv0-state raw)))
+                                  raw
+                                  (lower-boundary-coerce types owner
+                                    (exprresultv0-state raw)
+                                    (exprresultv0-value-id raw)
+                                    (exprresultv0-type-id raw)
+                                    expected))]
                             (if (exprresultv0-terminated value)
                               (->LoopInitsV0 (exprresultv0-state value)
                                 (loopinitsv0-names accumulated)
@@ -5671,37 +5670,7 @@
                                 result-id content false))))))))))
 
             :else
-            (let [lowered: ArgsResultV0
-                  (loop [position: Int 0
-                         current: BodyStateV0 state
-                         values: (Vec core/NativeId) []
-                         value-types: (Vec core/NativeId) []]
-                    (if (or (>= position (count args)) (state-blocked? current))
-                      (->ArgsResultV0 current values value-types false)
-                      (let [node: core/NativeId (nth args position)
-                            expected: (U core/NativeId Nil)
-                            (expected-collection-argument-type
-                              types callee position value-types)
-                            empty-aggregate: Bool
-                            (or (empty-vector-form? index node)
-                              (empty-map-form? index node)
-                              (empty-set-form? index node))
-                            argument: ExprResultV0
-                            (if (and (some? expected) empty-aggregate)
-                              (lower-contextual-empty-aggregate
-                                env owner current node expected)
-                              (lower-expr env owner current node))]
-                        (if (exprresultv0-terminated argument)
-                          (->ArgsResultV0 (exprresultv0-state argument) values
-                            value-types true)
-                          (recur (+ position 1) (exprresultv0-state argument)
-                            (conj values (exprresultv0-value-id argument))
-                            (conj value-types (exprresultv0-type-id argument)))))))
-                  current: BodyStateV0 (argsresultv0-state lowered)
-                  values: (Vec core/NativeId) (argsresultv0-values lowered)
-                  value-types: (Vec core/NativeId) (argsresultv0-value-types lowered)
-                  comparison: (U core/CompareOpV0 Nil) (compare-op-for callee)
-                  callee-visible: Bool
+            (let [callee-visible: Bool
                   (resolvedsourcenamev0-visible
                     (resolve-source-name index (body-owner-module env owner) callee))
                   accessor: AccessorHitV0
@@ -5717,6 +5686,40 @@
                     nil)
                   signature: (U TypedFunctionV0 Nil)
                   (find-signature env owner callee)
+                  lowered: ArgsResultV0
+                  (loop [position: Int 0
+                         current: BodyStateV0 state
+                         values: (Vec core/NativeId) []
+                         value-types: (Vec core/NativeId) []]
+                    (if (or (>= position (count args)) (state-blocked? current))
+                      (->ArgsResultV0 current values value-types false)
+                      (let [argument-node: core/NativeId (nth args position)
+                            declared-expected: (U core/NativeId Nil)
+                            (contextual-argument-type constructor signature
+                              (count args) position)
+                            receiver-expected: (U core/NativeId Nil)
+                            (expected-collection-argument-type
+                              types callee position value-types)
+                            expected: (U core/NativeId Nil)
+                            (if (some? declared-expected)
+                              declared-expected receiver-expected)
+                            contextual: (U ExprResultV0 Nil)
+                            (lower-contextual-empty env owner current
+                              argument-node expected)
+                            argument: ExprResultV0
+                            (if (nil? contextual)
+                              (lower-expr env owner current argument-node)
+                              contextual)]
+                        (if (exprresultv0-terminated argument)
+                          (->ArgsResultV0 (exprresultv0-state argument) values
+                            value-types true)
+                          (recur (+ position 1) (exprresultv0-state argument)
+                            (conj values (exprresultv0-value-id argument))
+                            (conj value-types (exprresultv0-type-id argument)))))))
+                  current: BodyStateV0 (argsresultv0-state lowered)
+                  values: (Vec core/NativeId) (argsresultv0-values lowered)
+                  value-types: (Vec core/NativeId) (argsresultv0-value-types lowered)
+                  comparison: (U core/CompareOpV0 Nil) (compare-op-for callee)
                   static-predicate: (U Bool Nil)
                   (if (= 1 (count values))
                     (static-type-predicate-value types callee
@@ -6903,22 +6906,15 @@
       (let [global: GlobalBindingV0 (nth globals position)
             annotation: (U core/NativeId Nil)
             (globalbindingv0-annotation global)
+            expected: (U core/NativeId Nil)
+            (annotation-native-type (bodyenvv0-index env) annotation)
+            contextual: (U ExprResultV0 Nil)
+            (lower-contextual-empty env owner current
+              (globalbindingv0-value global) expected)
             raw: ExprResultV0
-            (cond
-              (empty-vector-form? (bodyenvv0-index env)
-                (globalbindingv0-value global))
-              (lower-empty-vector env owner current annotation)
-
-              (empty-map-form? (bodyenvv0-index env)
-                (globalbindingv0-value global))
-              (lower-empty-map env owner current annotation)
-
-              (empty-set-form? (bodyenvv0-index env)
-                (globalbindingv0-value global))
-              (lower-empty-set env owner current annotation)
-
-              :else
-              (lower-expr env owner current (globalbindingv0-value global)))
+            (if (nil? contextual)
+              (lower-expr env owner current (globalbindingv0-value global))
+              contextual)
             value: ExprResultV0
             (if (or (nil? annotation)
                     (exprresultv0-terminated raw)
@@ -7081,19 +7077,14 @@
                       (localbindingv0-name binding)
                       (localbindingv0-value-id binding)
                       (localbindingv0-type-id binding))))))
+            expected: (U core/NativeId Nil)
+            (annotation-native-type index return-annotation)
+            contextual: (U ExprResultV0 Nil)
+            (lower-contextual-empty env id initialized body-node expected)
             result: ExprResultV0
-            (cond
-              (empty-vector-form? index body-node)
-              (lower-empty-vector env id initialized return-annotation)
-
-              (empty-map-form? index body-node)
-              (lower-empty-map env id initialized return-annotation)
-
-              (empty-set-form? index body-node)
-              (lower-empty-set env id initialized return-annotation)
-
-              :else
-              (lower-expr env id initialized body-node))
+            (if (nil? contextual)
+              (lower-expr env id initialized body-node)
+              contextual)
             state: BodyStateV0 (exprresultv0-state result)]
         (cond
           (state-blocked? state)
@@ -9685,6 +9676,222 @@
     (fixture-id "fact" (str ordinal))
     (worlds/->TripleTermV0 subject (fixture-text-id predicate) object)))
 
+(defn empty-context-id [label: String] -> core/NativeId
+  (lower-id "empty-context-corpus" [label]))
+
+(def empty-context-vector-id: core/NativeId
+  (lower-id "vector-type" [(id-value (type-id "Int"))]))
+
+(def empty-context-map-id: core/NativeId
+  (lower-id "map-type-v0"
+    [(id-value (type-id "Keyword")) (id-value (type-id "Int"))]))
+
+(def empty-context-set-id: core/NativeId
+  (lower-id "set-type-v0" [(id-value (type-id "String"))]))
+
+(def empty-context-vector-type: core/TypeDef
+  (core/->TypeDef empty-context-vector-id "Vector"
+    (core/->VectorType (type-id "Int"))))
+
+(def empty-context-map-type: core/TypeDef
+  (core/->TypeDef empty-context-map-id "Map"
+    (core/->MapTypeV0 (type-id "Keyword") (type-id "Int")
+      (core/->InsertionOrderV0 true))))
+
+(def empty-context-set-type: core/TypeDef
+  (core/->TypeDef empty-context-set-id "Set"
+    (core/->SetTypeV0 (type-id "String") (core/->InsertionOrderV0 true))))
+
+(def empty-context-record-type: core/TypeDef
+  (core/->TypeDef (empty-context-id "record-type") "EmptyContextRecord"
+    (core/->RecordType
+      [(core/->TypeField (empty-context-id "record-vector-field")
+         "vector" empty-context-vector-id)
+       (core/->TypeField (empty-context-id "record-map-field")
+         "map" empty-context-map-id)
+       (core/->TypeField (empty-context-id "record-set-field")
+         "set" empty-context-set-id)])))
+
+(def empty-context-union-id: core/NativeId
+  (empty-context-id "collection-union"))
+
+(def empty-context-union-type: core/TypeDef
+  (core/->TypeDef empty-context-union-id "CollectionUnion"
+    (core/->UnionType
+      [(core/->TypeVariant (empty-context-id "union-vector")
+         "vector" empty-context-vector-id)
+       (core/->TypeVariant (empty-context-id "union-map")
+         "map" empty-context-map-id)
+       (core/->TypeVariant (empty-context-id "union-set")
+         "set" empty-context-set-id)])))
+
+(def empty-context-signature: TypedFunctionV0
+  (->TypedFunctionV0
+    (empty-context-id "signature")
+    "accept-contexts"
+    "accept_contexts"
+    [(core/->Parameter (empty-context-id "call-vector") empty-context-vector-id)
+     (core/->Parameter (empty-context-id "call-map") empty-context-map-id)
+     (core/->Parameter (empty-context-id "call-set") empty-context-set-id)]
+    (type-id "Int")
+    (type-id "LowerFailure")
+    []
+    (->NativeTodoV0 "CORPUS-ONLY" "signature supplies contextual parameter types")
+    ""))
+
+(def empty-context-vector-node: core/NativeId
+  (empty-context-id "empty-vector"))
+
+(def empty-context-map-node: core/NativeId
+  (empty-context-id "empty-map"))
+
+(def empty-context-set-node: core/NativeId
+  (empty-context-id "empty-set"))
+
+(def empty-context-vector-annotation: core/NativeId
+  (empty-context-id "vector-annotation"))
+
+(def empty-context-index: SourceIndexV0
+  (let [annotation-arguments: core/NativeId
+        (empty-context-id "vector-annotation-arguments")
+        int-annotation: core/NativeId (empty-context-id "int-annotation")]
+    (->SourceIndexV0
+      9
+      {(source-index-key empty-context-vector-annotation "args") annotation-arguments
+       (source-index-key annotation-arguments "f0") int-annotation}
+      {(source-index-key empty-context-vector-node "form-kind") "vec"
+       (source-index-key empty-context-map-node "form-kind") "map"
+       (source-index-key empty-context-set-node "form-kind") "set"
+       (source-index-key empty-context-vector-annotation "form-kind") "type-app"
+       (source-index-key empty-context-vector-annotation "name") "Vec"
+       (source-index-key int-annotation "form-kind") "type-prim"
+       (source-index-key int-annotation "name") "Int"}
+      {} {} {} {} {} [])))
+
+(def empty-context-types: (Vec core/TypeDef)
+  [(i64-type) (text-type) (keyword-type) (lower-failure-type)
+   empty-context-vector-type empty-context-map-type empty-context-set-type
+   empty-context-record-type empty-context-union-type])
+
+(def empty-context-env: BodyEnvV0
+  (->BodyEnvV0 empty-context-index empty-context-types
+    [empty-context-signature] [] []))
+
+(def empty-context-owner: core/NativeId
+  (empty-context-id "owner"))
+
+(defn empty-context-state [] -> BodyStateV0
+  (->BodyStateV0 [] (empty-context-id "entry") [] [] true 0 [] "" []))
+
+(defn contextual-result-matches?
+  [result: (U ExprResultV0 Nil)
+   expected: (U core/NativeId Nil)] -> Bool
+  (if (or (nil? result) (nil? expected))
+    false
+    (and (not (state-blocked? (exprresultv0-state result)))
+      (same-id? (exprresultv0-type-id result) expected))))
+
+(defn contextual-result-failed-with?
+  [result: (U ExprResultV0 Nil)
+   detail: String] -> Bool
+  (if (nil? result)
+    false
+    (and (state-blocked? (exprresultv0-state result))
+      (= detail (bodystatev0-failure (exprresultv0-state result))))))
+
+(defn contextual-arguments-match?
+  [constructor: (U core/TypeDef Nil)
+   signature: (U TypedFunctionV0 Nil)] -> Bool
+  (let [expected: (Vec core/NativeId)
+        [empty-context-vector-id empty-context-map-id empty-context-set-id]]
+    (loop [position: Int 0]
+      (if (>= position (count expected))
+        true
+        (let [actual: (U core/NativeId Nil)
+              (contextual-argument-type constructor signature
+                (count expected) position)]
+          (if (and (some? actual) (same-id? actual (nth expected position)))
+            (recur (+ position 1))
+            false))))))
+
+(defrecord EmptyCollectionContextCorpusV0
+  [annotation-vector-accepted: Bool
+   call-map-accepted: Bool
+   record-set-accepted: Bool
+   call-types-exact: Bool
+   record-types-exact: Bool
+   ambiguous-vector-rejected: Bool
+   ambiguous-map-rejected: Bool
+   ambiguous-set-rejected: Bool
+   nonexact-context-rejected: Bool
+   wrong-arity-uncontextual: Bool])
+
+(def empty-collection-context-corpus: EmptyCollectionContextCorpusV0
+  (let [annotation-expected: (U core/NativeId Nil)
+        (annotation-native-type empty-context-index
+          empty-context-vector-annotation)
+        call-expected: (U core/NativeId Nil)
+        (contextual-argument-type nil empty-context-signature 3 1)
+        record-expected: (U core/NativeId Nil)
+        (contextual-argument-type empty-context-record-type nil 3 2)]
+    (->EmptyCollectionContextCorpusV0
+      (contextual-result-matches?
+        (lower-contextual-empty empty-context-env empty-context-owner
+          (empty-context-state) empty-context-vector-node annotation-expected)
+        annotation-expected)
+      (contextual-result-matches?
+        (lower-contextual-empty empty-context-env empty-context-owner
+          (empty-context-state) empty-context-map-node call-expected)
+        call-expected)
+      (contextual-result-matches?
+        (lower-contextual-empty empty-context-env empty-context-owner
+          (empty-context-state) empty-context-set-node record-expected)
+        record-expected)
+      (contextual-arguments-match? nil empty-context-signature)
+      (contextual-arguments-match? empty-context-record-type nil)
+      (contextual-result-failed-with?
+        (lower-contextual-empty empty-context-env empty-context-owner
+          (empty-context-state) empty-context-vector-node nil)
+        "TODO-NATIVE-EMPTY-VECTOR-LITERAL: an empty literal names no element type")
+      (contextual-result-failed-with?
+        (lower-contextual-empty empty-context-env empty-context-owner
+          (empty-context-state) empty-context-map-node nil)
+        "TODO-NATIVE-EMPTY-MAP-LITERAL: an empty literal names no key or value type")
+      (contextual-result-failed-with?
+        (lower-contextual-empty empty-context-env empty-context-owner
+          (empty-context-state) empty-context-set-node nil)
+        "TODO-NATIVE-EMPTY-SET-LITERAL: an empty literal names no element type")
+      (contextual-result-failed-with?
+        (lower-contextual-empty empty-context-env empty-context-owner
+          (empty-context-state) empty-context-vector-node empty-context-union-id)
+        "TODO-NATIVE-EMPTY-VECTOR-LITERAL: the contextual type is not an exact native vector type")
+      (and
+        (nil? (contextual-argument-type nil empty-context-signature 2 0))
+        (nil? (contextual-argument-type empty-context-record-type nil 4 0))))))
+
+(def empty-collection-context-corpus-passes?: Bool
+  (and
+    (emptycollectioncontextcorpusv0-annotation-vector-accepted
+      empty-collection-context-corpus)
+    (emptycollectioncontextcorpusv0-call-map-accepted
+      empty-collection-context-corpus)
+    (emptycollectioncontextcorpusv0-record-set-accepted
+      empty-collection-context-corpus)
+    (emptycollectioncontextcorpusv0-call-types-exact
+      empty-collection-context-corpus)
+    (emptycollectioncontextcorpusv0-record-types-exact
+      empty-collection-context-corpus)
+    (emptycollectioncontextcorpusv0-ambiguous-vector-rejected
+      empty-collection-context-corpus)
+    (emptycollectioncontextcorpusv0-ambiguous-map-rejected
+      empty-collection-context-corpus)
+    (emptycollectioncontextcorpusv0-ambiguous-set-rejected
+      empty-collection-context-corpus)
+    (emptycollectioncontextcorpusv0-nonexact-context-rejected
+      empty-collection-context-corpus)
+    (emptycollectioncontextcorpusv0-wrong-arity-uncontextual
+      empty-collection-context-corpus)))
+
 (def fixture-source-world: worlds/SourceProgramWorldV0
   (let [root: core/NativeId (fixture-marker-id "root")
         record: core/NativeId (fixture-marker-id "record")
@@ -9870,7 +10077,8 @@
     [(FixturePipelineFailedV0 stage detail) false]))
 
 (def fixture-passes?: Bool
-  (and fixture-native-complete?
+  (and empty-collection-context-corpus-passes?
+       fixture-native-complete?
        fixture-native-host-erased?
        fixture-native-valid?
        fixture-native-has-abi?
