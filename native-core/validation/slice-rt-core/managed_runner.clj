@@ -1,4 +1,5 @@
-(require '[fram.rt-core :as rt])
+(require '[clojure.string :as str]
+         '[fram.rt-core :as rt])
 
 (defn pass! [kind subject case-name actual expected]
   (when-not (= expected actual)
@@ -14,7 +15,7 @@
       {:subject subject :case case-name}))
     (catch clojure.lang.ExceptionInfo error
       (when-not (and (= true (:fram/doctor-refusal (ex-data error)))
-                  (clojure.string/includes? (.getMessage error) message-fragment))
+                  (str/includes? (.getMessage error) message-fragment))
         (throw error))
       (println (str "rt-core\t" subject "\t" case-name "\tPASS")))))
 
@@ -68,7 +69,7 @@
 (pass! "rt-core" "edit-batch-envelope-marker?" "non-map"
   (rt/edit-batch-envelope-marker? "record") false)
 (pass! "rt-core" "digest?" "valid" (rt/digest? digest-a) true)
-(pass! "rt-core" "digest?" "uppercase" (rt/digest? (clojure.string/upper-case digest-a)) false)
+(pass! "rt-core" "digest?" "uppercase" (rt/digest? (str/upper-case digest-a)) false)
 (pass! "rt-core" "nonblank?" "text" (rt/nonblank? "x") true)
 (pass! "rt-core" "nonblank?" "blank" (rt/nonblank? " \t") false)
 (pass! "rt-core" "generation-record?" "generation"
