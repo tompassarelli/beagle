@@ -10,7 +10,9 @@
 (import (native.core
           BoolKind I64Kind F64Kind TextKind KeywordKind RefKind
           ScalarShapeV0 RecordShapeV0 UnionShapeV0 VectorShapeV0 ReferenceShapeV0
-          AtomType RecordType UnionType VectorType ReferenceType OutcomeType
+          MapShapeV0 SetShapeV0
+          AtomType RecordType UnionType VectorType MapTypeV0 SetTypeV0
+          ReferenceType OutcomeType
           BoolAtom I64Atom F64Atom TextAtom KeywordAtom RefAtom
           CheckedAddI64V0 CheckedSubI64V0 CheckedMulI64V0 CheckedBoundsV0
           AtomInstruction CopyInstruction AddF64Instruction CheckedInstruction
@@ -68,6 +70,8 @@
          (core/recordtype-fields shape))]
       [(UnionType value) []]
       [(VectorType value) []]
+      [(MapTypeV0 value) []]
+      [(SetTypeV0 value) []]
       [(ReferenceType value) []]
       [(FunctionType value) []]
       [(OutcomeType value) []])))
@@ -198,6 +202,8 @@
       [(RecordShapeV0 value) false]
       [(UnionShapeV0 value) false]
       [(VectorShapeV0 value) false]
+      [(MapShapeV0 value) false]
+      [(SetShapeV0 value) false]
       [(ReferenceShapeV0 value) false])))
 
 (defn layout-record? [layout: core/LayoutDef] -> Bool
@@ -207,6 +213,8 @@
       [(RecordShapeV0 value) true]
       [(UnionShapeV0 value) false]
       [(VectorShapeV0 value) false]
+      [(MapShapeV0 value) false]
+      [(SetShapeV0 value) false]
       [(ReferenceShapeV0 value) false])))
 
 (defn record-layout-fields [layout: core/LayoutDef] -> (Vec core/FieldLayoutV0)
@@ -216,6 +224,8 @@
       [(RecordShapeV0 value) (core/recordshapev0-fields shape)]
       [(UnionShapeV0 value) []]
       [(VectorShapeV0 value) []]
+      [(MapShapeV0 value) []]
+      [(SetShapeV0 value) []]
       [(ReferenceShapeV0 value) []])))
 
 (defn type-supported?
@@ -228,6 +238,8 @@
       [(RecordType value) (and (some? layout-value) (layout-record? layout-value))]
       [(UnionType value) false]
       [(VectorType value) false]
+      [(MapTypeV0 value) false]
+      [(SetTypeV0 value) false]
       [(ReferenceType value) false]
       [(FunctionType value) false]
       [(OutcomeType value) false])))
@@ -398,6 +410,8 @@
              (emit-layout-assertions type-name-value layout-value fields)))]
         [(UnionType value) ""]
         [(VectorType value) ""]
+        [(MapTypeV0 value) ""]
+        [(SetTypeV0 value) ""]
         [(ReferenceType value) ""]
         [(FunctionType value) ""]
         [(OutcomeType value) ""]))))

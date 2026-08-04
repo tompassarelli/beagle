@@ -179,6 +179,10 @@
     [(VecPushInstruction value) (core/vecpushinstruction-result instruction)]
     [(VecEmptyInstruction value) (core/vecemptyinstruction-result instruction)]
     [(VecConcatInstruction value) (core/vecconcatinstruction-result instruction)]
+    [(MapLiteralInstructionV0 value)
+     (core/mapliteralinstructionv0-result instruction)]
+    [(SetLiteralInstructionV0 value)
+     (core/setliteralinstructionv0-result instruction)]
     [(ArenaInstruction value) (core/arenainstruction-result instruction)]
     [(TextLengthInstruction value)
      (core/textlengthinstruction-result instruction)]
@@ -331,6 +335,8 @@
     [(RecordType value) true]
     [(UnionType value) true]
     [(VectorType value) false]
+    [(MapTypeV0 value) false]
+    [(SetTypeV0 value) false]
     [(ReferenceType value) false]
     [(FunctionType value) false]
     [(OutcomeType value) false]))
@@ -341,6 +347,8 @@
     [(RecordType value) nil]
     [(UnionType value) nil]
     [(VectorType value) nil]
+    [(MapTypeV0 value) nil]
+    [(SetTypeV0 value) nil]
     [(ReferenceType value) nil]
     [(FunctionType value) nil]
     [(OutcomeType value) nil]))
@@ -351,6 +359,8 @@
     [(RecordType value) nil]
     [(UnionType value) nil]
     [(VectorType value) nil]
+    [(MapTypeV0 value) nil]
+    [(SetTypeV0 value) nil]
     [(ReferenceType value) (core/referencetype-target-type shape)]
     [(FunctionType value) nil]
     [(OutcomeType value) nil]))
@@ -458,6 +468,8 @@
     [(RecordShapeV0 value) []]
     [(UnionShapeV0 value) (core/unionshapev0-variants shape)]
     [(VectorShapeV0 value) []]
+    [(MapShapeV0 value) []]
+    [(SetShapeV0 value) []]
     [(ReferenceShapeV0 value) []]))
 
 (defn layout-record? [layout: core/LayoutDef] -> Bool
@@ -467,6 +479,8 @@
       [(RecordShapeV0 value) true]
       [(UnionShapeV0 value) false]
       [(VectorShapeV0 value) false]
+      [(MapShapeV0 value) false]
+      [(SetShapeV0 value) false]
       [(ReferenceShapeV0 value) false])))
 
 (defn layout-union? [layout: core/LayoutDef] -> Bool
@@ -476,6 +490,8 @@
       [(RecordShapeV0 value) false]
       [(UnionShapeV0 value) true]
       [(VectorShapeV0 value) false]
+      [(MapShapeV0 value) false]
+      [(SetShapeV0 value) false]
       [(ReferenceShapeV0 value) false])))
 
 (defn record-fields [layout: core/LayoutDef] -> (Vec core/FieldLayoutV0)
@@ -485,6 +501,8 @@
       [(RecordShapeV0 value) (ordered-field-layouts (core/recordshapev0-fields shape))]
       [(UnionShapeV0 value) []]
       [(VectorShapeV0 value) []]
+      [(MapShapeV0 value) []]
+      [(SetShapeV0 value) []]
       [(ReferenceShapeV0 value) []])))
 
 (defn union-tag-type [layout: core/LayoutDef] -> (U core/NativeId Nil)
@@ -494,6 +512,8 @@
       [(RecordShapeV0 value) nil]
       [(UnionShapeV0 value) (core/unionshapev0-tag-type shape)]
       [(VectorShapeV0 value) nil]
+      [(MapShapeV0 value) nil]
+      [(SetShapeV0 value) nil]
       [(ReferenceShapeV0 value) nil])))
 
 (defn union-tag-offset [layout: core/LayoutDef] -> Int
@@ -503,6 +523,8 @@
       [(RecordShapeV0 value) -1]
       [(UnionShapeV0 value) (core/unionshapev0-tag-offset-bytes shape)]
       [(VectorShapeV0 value) -1]
+      [(MapShapeV0 value) -1]
+      [(SetShapeV0 value) -1]
       [(ReferenceShapeV0 value) -1])))
 
 (defn union-variants [layout: core/LayoutDef] -> (Vec core/UnionVariantLayoutV0)
@@ -719,6 +741,8 @@
     [(VecPushInstruction value) false]
     [(VecEmptyInstruction value) false]
     [(VecConcatInstruction value) false]
+    [(MapLiteralInstructionV0 value) false]
+    [(SetLiteralInstructionV0 value) false]
     [(ArenaInstruction value) false]
     [(TextLengthInstruction value) false]
     [(TextIndexOfInstruction value) false]
@@ -1033,6 +1057,8 @@
            ", l " (value-name context (core/vecconcatinstruction-right-id instruction))
            ", l " (vector-stride context vector-type)
            ", l " (vector-element-alignment context vector-type) ")\n"))]
+      [(MapLiteralInstructionV0 value) ""]
+      [(SetLiteralInstructionV0 value) ""]
       [(ArenaInstruction value)
        (str "  " result-name " =l copy %arena\n")]
       [(TextLengthInstruction value) ""]
@@ -1369,6 +1395,8 @@
                    (> (if (nil? element-layout) 0
                         (core/layoutdef-align-bytes element-layout))
                      0)))))]
+          [(MapTypeV0 value) false]
+          [(SetTypeV0 value) false]
           [(ReferenceType value) false]
           [(FunctionType value) false]
           [(OutcomeType value) false])))))
@@ -1410,6 +1438,8 @@
     [(VecPushInstruction value) false]
     [(VecEmptyInstruction value) false]
     [(VecConcatInstruction value) true]
+    [(MapLiteralInstructionV0 value) false]
+    [(SetLiteralInstructionV0 value) false]
     [(ArenaInstruction value) true]
     [(TextLengthInstruction value) false]
     [(TextIndexOfInstruction value) false]

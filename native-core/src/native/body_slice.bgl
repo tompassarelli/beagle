@@ -38,6 +38,12 @@
       (instance? native.core.VectorType shape)
       [(core/vectortype-element-type shape)]
 
+      (instance? native.core.MapTypeV0 shape)
+      [(core/maptypev0-key-type shape) (core/maptypev0-value-type shape)]
+
+      (instance? native.core.SetTypeV0 shape)
+      [(core/settypev0-element-type shape)]
+
       (instance? native.core.ReferenceType shape)
       [(core/referencetype-target-type shape)]
 

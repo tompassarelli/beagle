@@ -929,21 +929,25 @@
           true))
 
       (and (= "Map" constructor) (= 2 (count ids)))
-      (let [entry-id: core/NativeId
-            (lower-id "map-entry-type" [(id-value (nth ids 0)) (id-value (nth ids 1))])
-            map-id: core/NativeId (lower-id "map-vector-type" [(id-value entry-id)])
-            entry: core/TypeDef
-            (core/->TypeDef entry-id "MapEntry"
-              (core/->RecordType
-                [(core/->TypeField (field-id (id-value entry-id) "key") "key" (nth ids 0))
-                 (core/->TypeField (field-id (id-value entry-id) "value") "value" (nth ids 1))]))]
-        (->TypeResolutionV0 map-id
-          (append-type-def (append-type-def definitions entry)
-            (core/->TypeDef map-id "MapEntries" (core/->VectorType entry-id)))
-          (conj diagnostics
-            (core/->DiagnosticV0
-              "TODO-NATIVE-MAP-OPERATIONS"
-              "host map annotation normalized to vector-of-entry layout; map operations remain a named native obligation"))
+      (let [id: core/NativeId
+            (lower-id "map-type-v0"
+              [(id-value (nth ids 0)) (id-value (nth ids 1))])]
+        (->TypeResolutionV0 id
+          (append-type-def definitions
+            (core/->TypeDef id "Map"
+              (core/->MapTypeV0 (nth ids 0) (nth ids 1)
+                (core/->InsertionOrderV0 true))))
+          diagnostics
+          true))
+
+      (and (= "Set" constructor) (= 1 (count ids)))
+      (let [id: core/NativeId
+            (lower-id "set-type-v0" [(id-value (nth ids 0))])]
+        (->TypeResolutionV0 id
+          (append-type-def definitions
+            (core/->TypeDef id "Set"
+              (core/->SetTypeV0 (nth ids 0) (core/->InsertionOrderV0 true))))
+          diagnostics
           true))
 
       (or (= "Dyn" constructor) (= "U" constructor))
@@ -1481,6 +1485,14 @@
 (defrecord ArgsResultV0
   [state: BodyStateV0
    values: (Vec core/NativeId)
+   value-types: (Vec core/NativeId)
+   terminated: Bool])
+
+(defrecord MapItemsResultV0
+  [state: BodyStateV0
+   key-ids: (Vec core/NativeId)
+   key-types: (Vec core/NativeId)
+   value-ids: (Vec core/NativeId)
    value-types: (Vec core/NativeId)
    terminated: Bool])
 
@@ -2393,6 +2405,53 @@
           (core/vectortype-element-type shape)
           (type-id "LowerFailure"))))))
 
+(defn map-type?
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> Bool
+  (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
+    (and (not (nil? definition))
+      (instance? native.core.MapTypeV0 (core/typedef-shape definition)))))
+
+(defn map-key-of
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> core/NativeId
+  (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
+    (if (nil? definition)
+      (type-id "LowerFailure")
+      (let [shape: core/TypeShape (core/typedef-shape definition)]
+        (if (instance? native.core.MapTypeV0 shape)
+          (core/maptypev0-key-type shape)
+          (type-id "LowerFailure"))))))
+
+(defn map-value-of
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> core/NativeId
+  (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
+    (if (nil? definition)
+      (type-id "LowerFailure")
+      (let [shape: core/TypeShape (core/typedef-shape definition)]
+        (if (instance? native.core.MapTypeV0 shape)
+          (core/maptypev0-value-type shape)
+          (type-id "LowerFailure"))))))
+
+(defn set-type?
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> Bool
+  (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
+    (and (not (nil? definition))
+      (instance? native.core.SetTypeV0 (core/typedef-shape definition)))))
+
+(defn set-element-of
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> core/NativeId
+  (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
+    (if (nil? definition)
+      (type-id "LowerFailure")
+      (let [shape: core/TypeShape (core/typedef-shape definition)]
+        (if (instance? native.core.SetTypeV0 shape)
+          (core/settypev0-element-type shape)
+          (type-id "LowerFailure"))))))
+
 ;; The vector TypeDef for an element type exists only when some annotation in
 ;; the module named (Vec T); a literal cannot mint one, so it looks one up.
 (defn vector-type-of
@@ -2433,10 +2492,40 @@
   (not (or (instance? native.core.TextCompareV0 operation)
            (instance? native.core.TextRegexMatchesV0 operation))))
 
+(defn map-type-of
+  [types: (Vec core/TypeDef)
+   key-type: core/NativeId
+   value-type: core/NativeId] -> (U core/NativeId Nil)
+  (loop [position: Int 0]
+    (if (>= position (count types))
+      nil
+      (let [definition: core/TypeDef (nth types position)
+            shape: core/TypeShape (core/typedef-shape definition)]
+        (if (and (instance? native.core.MapTypeV0 shape)
+              (same-id? (core/maptypev0-key-type shape) key-type)
+              (same-id? (core/maptypev0-value-type shape) value-type))
+          (core/typedef-id definition)
+          (recur (+ position 1)))))))
+
+(defn set-type-of
+  [types: (Vec core/TypeDef)
+   element-type: core/NativeId] -> (U core/NativeId Nil)
+  (loop [position: Int 0]
+    (if (>= position (count types))
+      nil
+      (let [definition: core/TypeDef (nth types position)
+            shape: core/TypeShape (core/typedef-shape definition)]
+        (if (and (instance? native.core.SetTypeV0 shape)
+              (same-id? (core/settypev0-element-type shape) element-type))
+          (core/typedef-id definition)
+          (recur (+ position 1)))))))
+
 (defn allocating-instruction? [instruction: core/Instruction] -> Bool
   (or (instance? native.core.VecPushInstruction instruction)
       (instance? native.core.VecEmptyInstruction instruction)
       (instance? native.core.VecConcatInstruction instruction)
+      (instance? native.core.MapLiteralInstructionV0 instruction)
+      (instance? native.core.SetLiteralInstructionV0 instruction)
       (instance? native.core.BoxRecordInstruction instruction)
       (instance? native.core.AllocateInstruction instruction)
       (instance? native.core.TextSliceInstruction instruction)
@@ -2493,6 +2582,26 @@
   (and (vector-type? types target)
     (same-id? (vector-element-of types target) (type-id "String"))))
 
+(defn empty-map-form?
+  [index: SourceIndexV0
+   node: core/NativeId] -> Bool
+  (if (not (= "map" (fact-text index node "form-kind")))
+    false
+    (let [pairs-node: (U core/NativeId Nil) (index-first-object index node "pairs")]
+      (if (nil? pairs-node)
+        true
+        (= 0 (count (index-sequence-items index pairs-node)))))))
+
+(defn empty-set-form?
+  [index: SourceIndexV0
+   node: core/NativeId] -> Bool
+  (if (not (= "set" (fact-text index node "form-kind")))
+    false
+    (let [items-node: (U core/NativeId Nil) (index-first-object index node "items")]
+      (if (nil? items-node)
+        true
+        (= 0 (count (index-sequence-items index items-node)))))))
+
 ;; An empty literal names no element type, so the only closed source for one is
 ;; the annotation on the binding it initializes.
 (defn lower-empty-vector
@@ -2521,6 +2630,52 @@
               (core/->VecEmptyInstruction
                 (core/->SsaValueV0 result-id resolved)
                 capacity-id (arena-value-id owner)))
+            result-id resolved false))))))
+
+(defn lower-empty-map
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   annotation: (U core/NativeId Nil)] -> ExprResultV0
+  (if (nil? annotation)
+    (fail-result state
+      "TODO-NATIVE-EMPTY-MAP-LITERAL: an empty literal names no key or value type")
+    (let [index: SourceIndexV0 (bodyenvv0-index env)
+          types: (Vec core/TypeDef) (bodyenvv0-types env)
+          resolved: core/NativeId
+          (typeresolutionv0-type-id (resolve-source-type index annotation))]
+      (if (not (map-type? types resolved))
+        (fail-result state
+          "TODO-NATIVE-EMPTY-MAP-LITERAL: the binding annotation is not a native map type")
+        (let [result-id: core/NativeId (state-id state owner "map-lit")]
+          (->ExprResultV0
+            (state-emit (state-bump state)
+              (core/->MapLiteralInstructionV0
+                (core/->SsaValueV0 result-id resolved)
+                [] [] (arena-value-id owner)))
+            result-id resolved false))))))
+
+(defn lower-empty-set
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   annotation: (U core/NativeId Nil)] -> ExprResultV0
+  (if (nil? annotation)
+    (fail-result state
+      "TODO-NATIVE-EMPTY-SET-LITERAL: an empty literal names no element type")
+    (let [index: SourceIndexV0 (bodyenvv0-index env)
+          types: (Vec core/TypeDef) (bodyenvv0-types env)
+          resolved: core/NativeId
+          (typeresolutionv0-type-id (resolve-source-type index annotation))]
+      (if (not (set-type? types resolved))
+        (fail-result state
+          "TODO-NATIVE-EMPTY-SET-LITERAL: the binding annotation is not a native set type")
+        (let [result-id: core/NativeId (state-id state owner "set-lit")]
+          (->ExprResultV0
+            (state-emit (state-bump state)
+              (core/->SetLiteralInstructionV0
+                (core/->SsaValueV0 result-id resolved)
+                [] (arena-value-id owner)))
             result-id resolved false))))))
 
 (defn text-type-id [] -> core/NativeId (type-id "String"))
@@ -3049,9 +3204,17 @@
                           (str "TODO-NATIVE-BINDING-VALUE: " name " has no value form"))
                         (lower-id "body" ["let"]) (type-id "LowerFailure") false)
                       (let [raw: ExprResultV0
-                            (if (empty-vector-form? index value-node)
-                              (lower-empty-vector env owner current
-                                annotation)
+                            (cond
+                              (empty-vector-form? index value-node)
+                              (lower-empty-vector env owner current annotation)
+
+                              (empty-map-form? index value-node)
+                              (lower-empty-map env owner current annotation)
+
+                              (empty-set-form? index value-node)
+                              (lower-empty-set env owner current annotation)
+
+                              :else
                               (lower-expr env owner current value-node))
                             value: ExprResultV0
                             (if (or (nil? annotation)
@@ -3526,6 +3689,155 @@
                               push-id))))]
                   filled)))))
 
+        (= "set" kind)
+        (let [items-node: (U core/NativeId Nil) (index-first-object index expr "items")
+              items: (Vec core/NativeId)
+              (if (nil? items-node) [] (index-sequence-items index items-node))
+              lowered: ArgsResultV0
+              (loop [position: Int 0
+                     current: BodyStateV0 state
+                     values: (Vec core/NativeId) []
+                     value-types: (Vec core/NativeId) []]
+                (if (or (>= position (count items)) (state-blocked? current))
+                  (->ArgsResultV0 current values value-types false)
+                  (let [item: ExprResultV0
+                        (lower-expr env owner current (nth items position))]
+                    (if (exprresultv0-terminated item)
+                      (->ArgsResultV0 (exprresultv0-state item) values value-types true)
+                      (recur (+ position 1) (exprresultv0-state item)
+                        (conj values (exprresultv0-value-id item))
+                        (conj value-types (exprresultv0-type-id item)))))))
+              current: BodyStateV0 (argsresultv0-state lowered)
+              values: (Vec core/NativeId) (argsresultv0-values lowered)
+              value-types: (Vec core/NativeId) (argsresultv0-value-types lowered)]
+          (cond
+            (argsresultv0-terminated lowered)
+            (->ExprResultV0 current (lower-id "body" ["unreachable"])
+              (type-id "LowerFailure") true)
+
+            (state-blocked? current) (dead-result current)
+
+            (= 0 (count values))
+            (fail-result current
+              "TODO-NATIVE-EMPTY-SET-LITERAL: an empty literal names no element type")
+
+            :else
+            (let [element-type: core/NativeId (nth value-types 0)
+                  uniform: Bool
+                  (loop [position: Int 1]
+                    (cond
+                      (>= position (count value-types)) true
+                      (same-id? (nth value-types position) element-type)
+                      (recur (+ position 1))
+                      :else false))
+                  set-type: (U core/NativeId Nil) (set-type-of types element-type)]
+              (cond
+                (not uniform)
+                (fail-result current
+                  "TODO-NATIVE-SET-LITERAL-ELEMENTS: the items do not share one native type")
+
+                (nil? set-type)
+                (fail-result current
+                  "TODO-NATIVE-SET-LITERAL-TYPE: the module declares no set of this element type")
+
+                :else
+                (let [result-id: core/NativeId (state-id current owner "set-lit")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->SetLiteralInstructionV0
+                        (core/->SsaValueV0 result-id set-type)
+                        values (arena-value-id owner)))
+                    result-id set-type false))))))
+
+        (= "map" kind)
+        (let [pairs-node: (U core/NativeId Nil) (index-first-object index expr "pairs")
+              pairs: (Vec core/NativeId)
+              (if (nil? pairs-node) [] (index-sequence-items index pairs-node))
+              lowered: MapItemsResultV0
+              (loop [position: Int 0
+                     current: BodyStateV0 state
+                     key-ids: (Vec core/NativeId) []
+                     key-types: (Vec core/NativeId) []
+                     value-ids: (Vec core/NativeId) []
+                     value-types: (Vec core/NativeId) []]
+                (if (or (>= position (count pairs)) (state-blocked? current))
+                  (->MapItemsResultV0 current key-ids key-types value-ids value-types false)
+                  (let [pair: core/NativeId (nth pairs position)
+                        key-node: (U core/NativeId Nil) (index-first-object index pair "key")
+                        value-node: (U core/NativeId Nil) (index-first-object index pair "value")]
+                    (if (or (nil? key-node) (nil? value-node))
+                      (->MapItemsResultV0
+                        (state-fail current
+                          "TODO-NATIVE-MAP-LITERAL-PAIR: every pair needs a key and value")
+                        key-ids key-types value-ids value-types false)
+                      (let [entry-left: ExprResultV0
+                            (lower-expr env owner current key-node)]
+                        (if (exprresultv0-terminated entry-left)
+                          (->MapItemsResultV0 (exprresultv0-state entry-left)
+                            key-ids key-types value-ids value-types true)
+                          (let [lowered-value: ExprResultV0
+                                (lower-expr env owner
+                                  (exprresultv0-state entry-left) value-node)]
+                            (if (exprresultv0-terminated lowered-value)
+                              (->MapItemsResultV0 (exprresultv0-state lowered-value)
+                                key-ids key-types value-ids value-types true)
+                              (recur (+ position 1)
+                                (exprresultv0-state lowered-value)
+                                (conj key-ids (exprresultv0-value-id entry-left))
+                                (conj key-types (exprresultv0-type-id entry-left))
+                                (conj value-ids (exprresultv0-value-id lowered-value))
+                                (conj value-types (exprresultv0-type-id lowered-value)))))))))))
+              current: BodyStateV0 (mapitemsresultv0-state lowered)
+              key-ids: (Vec core/NativeId) (mapitemsresultv0-key-ids lowered)
+              key-types: (Vec core/NativeId) (mapitemsresultv0-key-types lowered)
+              value-ids: (Vec core/NativeId) (mapitemsresultv0-value-ids lowered)
+              value-types: (Vec core/NativeId) (mapitemsresultv0-value-types lowered)]
+          (cond
+            (mapitemsresultv0-terminated lowered)
+            (->ExprResultV0 current (lower-id "body" ["unreachable"])
+              (type-id "LowerFailure") true)
+
+            (state-blocked? current) (dead-result current)
+
+            (= 0 (count key-ids))
+            (fail-result current
+              "TODO-NATIVE-EMPTY-MAP-LITERAL: an empty literal names no key or value type")
+
+            :else
+            (let [key-type: core/NativeId (nth key-types 0)
+                  value-type: core/NativeId (nth value-types 0)
+                  uniform-keys: Bool
+                  (loop [position: Int 1]
+                    (cond
+                      (>= position (count key-types)) true
+                      (same-id? (nth key-types position) key-type) (recur (+ position 1))
+                      :else false))
+                  uniform-values: Bool
+                  (loop [position: Int 1]
+                    (cond
+                      (>= position (count value-types)) true
+                      (same-id? (nth value-types position) value-type) (recur (+ position 1))
+                      :else false))
+                  map-type: (U core/NativeId Nil)
+                  (map-type-of types key-type value-type)]
+              (cond
+                (or (not uniform-keys) (not uniform-values))
+                (fail-result current
+                  "TODO-NATIVE-MAP-LITERAL-ITEMS: keys and values must each share one native type")
+
+                (nil? map-type)
+                (fail-result current
+                  "TODO-NATIVE-MAP-LITERAL-TYPE: the module declares no map of these key/value types")
+
+                :else
+                (let [result-id: core/NativeId (state-id current owner "map-lit")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->MapLiteralInstructionV0
+                        (core/->SsaValueV0 result-id map-type)
+                        key-ids value-ids (arena-value-id owner)))
+                    result-id map-type false))))))
+
         (= "call" kind)
         (let [callee: String (fact-text index expr "callee")
               callee-form: (U core/NativeId Nil)
@@ -3538,7 +3850,10 @@
             (fail-result state
               "TODO-NATIVE-INDIRECT-CALL: v0 has no closure or function-pointer ABI")
 
-            (= "apply" callee)
+            (and (= "apply" callee)
+              (not (and (= 2 (count args))
+                (source-ref-named? index (nth args 0) "str")
+                (source-call-named? index (nth args 1) "repeat"))))
             (fail-result state
               "TODO-NATIVE-APPLY: no frozen Fram function requires dynamic argument spreading")
 
@@ -4812,9 +5127,20 @@
             annotation: (U core/NativeId Nil)
             (globalbindingv0-annotation global)
             raw: ExprResultV0
-            (if (empty-vector-form? (bodyenvv0-index env)
-                  (globalbindingv0-value global))
+            (cond
+              (empty-vector-form? (bodyenvv0-index env)
+                (globalbindingv0-value global))
               (lower-empty-vector env owner current annotation)
+
+              (empty-map-form? (bodyenvv0-index env)
+                (globalbindingv0-value global))
+              (lower-empty-map env owner current annotation)
+
+              (empty-set-form? (bodyenvv0-index env)
+                (globalbindingv0-value global))
+              (lower-empty-set env owner current annotation)
+
+              :else
               (lower-expr env owner current (globalbindingv0-value global)))
             value: ExprResultV0
             (if (or (nil? annotation)
@@ -4940,6 +5266,8 @@
         name: String (typedfunctionv0-name signature)
         body-node: (U core/NativeId Nil)
         (index-first-object index source-function "body")
+        return-annotation: (U core/NativeId Nil)
+        (index-first-object index source-function "ret")
         parameters: (Vec core/Parameter) (typedfunctionv0-parameters signature)
         source-parameters: (Vec core/NativeId)
         (function-parameter-items index source-function)
@@ -4976,7 +5304,19 @@
                       (localbindingv0-name binding)
                       (localbindingv0-value-id binding)
                       (localbindingv0-type-id binding))))))
-            result: ExprResultV0 (lower-expr env id initialized body-node)
+            result: ExprResultV0
+            (cond
+              (empty-vector-form? index body-node)
+              (lower-empty-vector env id initialized return-annotation)
+
+              (empty-map-form? index body-node)
+              (lower-empty-map env id initialized return-annotation)
+
+              (empty-set-form? index body-node)
+              (lower-empty-set env id initialized return-annotation)
+
+              :else
+              (lower-expr env id initialized body-node))
             state: BodyStateV0 (exprresultv0-state result)]
         (cond
           (state-blocked? state)
@@ -5344,6 +5684,17 @@
     (worlds/canonical-record "vector"
       [(id-value (core/vectortype-element-type shape))])
 
+    (instance? native.core.MapTypeV0 shape)
+    (worlds/canonical-record "map-v0"
+      [(id-value (core/maptypev0-key-type shape))
+       (id-value (core/maptypev0-value-type shape))
+       "insertion-order-v0"])
+
+    (instance? native.core.SetTypeV0 shape)
+    (worlds/canonical-record "set-v0"
+      [(id-value (core/settypev0-element-type shape))
+       "insertion-order-v0"])
+
     (instance? native.core.ReferenceType shape)
     (worlds/canonical-record "reference"
       [(id-value (core/referencetype-target-type shape))])
@@ -5702,6 +6053,12 @@
             (->LayoutMeasureV0 8 8 false
               "TODO-NATIVE-FUNCTION-LAYOUT: callable signatures have no closure layout or indirect-call ABI")
 
+            (instance? native.core.MapTypeV0 shape)
+            (->LayoutMeasureV0 8 8 true "map header reference")
+
+            (instance? native.core.SetTypeV0 shape)
+            (->LayoutMeasureV0 8 8 true "set header reference")
+
             (instance? native.core.RecordType shape)
             (let [fields: (Vec core/TypeField) (core/recordtype-fields shape)]
               (loop [index: Int 0 offset: Int 0 alignment: Int 1 closed: Bool true]
@@ -5852,6 +6209,28 @@
       (let [element: core/NativeId (core/vectortype-element-type shape)
             measure: LayoutMeasureV0 (measure-type types element 0)]
         (core/->VectorShapeV0 element (layoutmeasurev0-size-bytes measure)))
+
+      (instance? native.core.MapTypeV0 shape)
+      (let [key-type: core/NativeId (core/maptypev0-key-type shape)
+            value-type: core/NativeId (core/maptypev0-value-type shape)
+            key-measure: LayoutMeasureV0 (measure-type types key-type 0)
+            value-measure: LayoutMeasureV0 (measure-type types value-type 0)]
+        (core/->MapShapeV0
+          key-type
+          (layoutmeasurev0-size-bytes key-measure)
+          (layoutmeasurev0-align-bytes key-measure)
+          value-type
+          (layoutmeasurev0-size-bytes value-measure)
+          (layoutmeasurev0-align-bytes value-measure)
+          (core/maptypev0-iteration-order shape)))
+
+      (instance? native.core.SetTypeV0 shape)
+      (let [element: core/NativeId (core/settypev0-element-type shape)
+            measure: LayoutMeasureV0 (measure-type types element 0)]
+        (core/->SetShapeV0 element
+          (layoutmeasurev0-size-bytes measure)
+          (layoutmeasurev0-align-bytes measure)
+          (core/settypev0-iteration-order shape)))
 
       (instance? native.core.ReferenceType shape)
       (core/->ReferenceShapeV0 (core/referencetype-target-type shape))
@@ -6159,6 +6538,23 @@
       [(id-value (core/vectorshapev0-element-type shape))
        (str (core/vectorshapev0-stride-bytes shape))])
 
+    (instance? native.core.MapShapeV0 shape)
+    (worlds/canonical-record "map-layout-v0"
+      [(id-value (core/mapshapev0-key-type shape))
+       (str (core/mapshapev0-key-stride-bytes shape))
+       (str (core/mapshapev0-key-align-bytes shape))
+       (id-value (core/mapshapev0-value-type shape))
+       (str (core/mapshapev0-value-stride-bytes shape))
+       (str (core/mapshapev0-value-align-bytes shape))
+       "insertion-order-v0"])
+
+    (instance? native.core.SetShapeV0 shape)
+    (worlds/canonical-record "set-layout-v0"
+      [(id-value (core/setshapev0-element-type shape))
+       (str (core/setshapev0-stride-bytes shape))
+       (str (core/setshapev0-align-bytes shape))
+       "insertion-order-v0"])
+
     :else
     (worlds/canonical-record "reference-layout"
       [(id-value (core/referenceshapev0-target-type shape))])))
@@ -6368,6 +6764,22 @@
        (id-value (core/vecconcatinstruction-left-id instruction))
        (id-value (core/vecconcatinstruction-right-id instruction))
        (id-value (core/vecconcatinstruction-arena-id instruction))])
+
+    (instance? native.core.MapLiteralInstructionV0 instruction)
+    (worlds/canonical-record "map-literal-instruction-v0"
+      [(encode-ssa-value (core/mapliteralinstructionv0-result instruction))
+       (encode-id-roots "keys"
+         (core/mapliteralinstructionv0-key-ids instruction))
+       (encode-id-roots "values"
+         (core/mapliteralinstructionv0-value-ids instruction))
+       (id-value (core/mapliteralinstructionv0-arena-id instruction))])
+
+    (instance? native.core.SetLiteralInstructionV0 instruction)
+    (worlds/canonical-record "set-literal-instruction-v0"
+      [(encode-ssa-value (core/setliteralinstructionv0-result instruction))
+       (encode-id-roots "values"
+         (core/setliteralinstructionv0-value-ids instruction))
+       (id-value (core/setliteralinstructionv0-arena-id instruction))])
 
     (instance? native.core.ArenaInstruction instruction)
     (worlds/canonical-record "arena-instruction"

@@ -33,11 +33,21 @@
    name :- String
    payload-type :- (U NativeId Nil)])
 
+(defunion CollectionOrderV0
+  (InsertionOrderV0 [token: Bool]))
+
 (defunion TypeShape
   (AtomType [kind :- AtomKind])
   (RecordType [fields :- (Vec TypeField)])
   (UnionType [variants :- (Vec TypeVariant)])
   (VectorType [element-type :- NativeId])
+  (MapTypeV0
+    [key-type: NativeId
+     value-type: NativeId
+     iteration-order: CollectionOrderV0])
+  (SetTypeV0
+    [element-type: NativeId
+     iteration-order: CollectionOrderV0])
   (ReferenceType [target-type :- NativeId])
   ;; A closed callable signature is semantic type information only. Physical
   ;; closure layout and indirect-call ABI remain separate, explicit obligations.
@@ -124,6 +134,21 @@
   (VectorShapeV0
     [element-type: NativeId
      stride-bytes: Int])
+  ;; Map and Set values are arena-owned header handles. Their exact element
+  ;; storage ABI and deterministic iteration policy stay in the Native World.
+  (MapShapeV0
+    [key-type: NativeId
+     key-stride-bytes: Int
+     key-align-bytes: Int
+     value-type: NativeId
+     value-stride-bytes: Int
+     value-align-bytes: Int
+     iteration-order: CollectionOrderV0])
+  (SetShapeV0
+    [element-type: NativeId
+     stride-bytes: Int
+     align-bytes: Int
+     iteration-order: CollectionOrderV0])
   (ReferenceShapeV0 [target-type: NativeId]))
 
 (defrecord LayoutDef
@@ -343,6 +368,15 @@
     [result: SsaValueV0
      left-id: NativeId
      right-id: NativeId
+     arena-id: NativeId])
+  (MapLiteralInstructionV0
+    [result: SsaValueV0
+     key-ids: (Vec NativeId)
+     value-ids: (Vec NativeId)
+     arena-id: NativeId])
+  (SetLiteralInstructionV0
+    [result: SsaValueV0
+     value-ids: (Vec NativeId)
      arena-id: NativeId])
   ;; Acquires the arena once in the entry block, consuming the region and
   ;; capability tokens; no other instruction can allocate without its result.
@@ -624,6 +658,10 @@
     [(VecEmptyInstruction result capacity-id arena-id) (ssavaluev0-id result)]
     [(VecConcatInstruction result left-id right-id arena-id)
      (ssavaluev0-id result)]
+    [(MapLiteralInstructionV0 result key-ids value-ids arena-id)
+     (ssavaluev0-id result)]
+    [(SetLiteralInstructionV0 result value-ids arena-id)
+     (ssavaluev0-id result)]
     [(ArenaInstruction result region capability tokens) (ssavaluev0-id result)]
     [(TextLengthInstruction result source-id) (ssavaluev0-id result)]
     [(TextIndexOfInstruction result source-id needle-id) (ssavaluev0-id result)]
@@ -647,6 +685,8 @@
      (mapv (fn [variant :- TypeVariant] :- NativeId (typevariant-id variant))
        variants)]
     [(VectorType element-type) []]
+    [(MapTypeV0 key-type value-type iteration-order) []]
+    [(SetTypeV0 element-type iteration-order) []]
     [(ReferenceType target-type) []]
     [(FunctionType parameter-types rest-type return-type) []]
     [(OutcomeType value-type failure-type) []]))
@@ -746,6 +786,9 @@
     [(RecordType fields) (type-fields-refs-closed? fields known-types)]
     [(UnionType variants) (type-variants-refs-closed? variants known-types)]
     [(VectorType element-type) (id-in? known-types element-type)]
+    [(MapTypeV0 key-type value-type iteration-order)
+     (and (id-in? known-types key-type) (id-in? known-types value-type))]
+    [(SetTypeV0 element-type iteration-order) (id-in? known-types element-type)]
     [(ReferenceType target-type) (id-in? known-types target-type)]
     [(FunctionType parameter-types rest-type return-type)
      (and (ids-in? parameter-types known-types)
@@ -825,6 +868,18 @@
        (every? (fn [variant :- UnionVariantLayoutV0] :- Bool (union-variant-layout-refs-closed? variant known-members known-types)) variants))]
     [(VectorShapeV0 element-type stride-bytes)
      (and (id-in? known-types element-type) (> stride-bytes 0))]
+    [(MapShapeV0 key-type key-stride-bytes key-align-bytes
+       value-type value-stride-bytes value-align-bytes iteration-order)
+     (and (id-in? known-types key-type)
+       (> key-stride-bytes 0)
+       (> key-align-bytes 0)
+       (id-in? known-types value-type)
+       (> value-stride-bytes 0)
+       (> value-align-bytes 0))]
+    [(SetShapeV0 element-type stride-bytes align-bytes iteration-order)
+     (and (id-in? known-types element-type)
+       (> stride-bytes 0)
+       (> align-bytes 0))]
     [(ReferenceShapeV0 target-type) (id-in? known-types target-type)]))
 
 (defn layout-refs-closed?
@@ -901,6 +956,9 @@
     [(VecPushInstruction result source-id value-id arena-id) true]
     [(VecEmptyInstruction result capacity-id arena-id) true]
     [(VecConcatInstruction result left-id right-id arena-id) true]
+    [(MapLiteralInstructionV0 result key-ids value-ids arena-id)
+     (= (count key-ids) (count value-ids))]
+    [(SetLiteralInstructionV0 result value-ids arena-id) true]
     [(ArenaInstruction result region capability tokens)
      (and (id-in? known-regions region) (id-in? known-capabilities capability))]
     [(TextLengthInstruction result source-id) true]
@@ -1053,6 +1111,10 @@
     [(VecEmptyInstruction result capacity-id arena-id) [arena-id capacity-id]]
     [(VecConcatInstruction result left-id right-id arena-id)
      [arena-id left-id right-id]]
+    [(MapLiteralInstructionV0 result key-ids value-ids arena-id)
+     (into [arena-id] (vec (concat key-ids value-ids)))]
+    [(SetLiteralInstructionV0 result value-ids arena-id)
+     (into [arena-id] value-ids)]
     [(ArenaInstruction result region capability tokens) []]
     [(TextLengthInstruction result source-id) [source-id]]
     [(TextIndexOfInstruction result source-id needle-id) [source-id needle-id]]
@@ -1136,6 +1198,8 @@
     [(VecPushInstruction result source-id value-id arena-id) true]
     [(VecEmptyInstruction result capacity-id arena-id) true]
     [(VecConcatInstruction result left-id right-id arena-id) true]
+    [(MapLiteralInstructionV0 result key-ids value-ids arena-id) true]
+    [(SetLiteralInstructionV0 result value-ids arena-id) true]
     [(ArenaInstruction result region capability tokens)
      (and (id-in? allowed-regions region)
        (id-in? allowed-capabilities capability))]
