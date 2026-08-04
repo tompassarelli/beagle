@@ -55,6 +55,12 @@ cat "$art/report.txt"
 grep -q '^materialize OK ' "$art/report.txt"
 grep -q 'TODO-NATIVE-KEYWORD-MAP-KEY' "$art/report.txt"
 grep -q 'TODO-NATIVE-KEYWORD-ACCESS-TARGET' "$art/report.txt"
+for function in map-code-value map-code-value-cond map-code-value-equal \
+    map-version-value optional-map-branch map-reject-count \
+    map-other-after-code-check map-code-from-other-source \
+    map-code-false-arm; do
+  grep -Eq "^lowered [^ ]+ ${function} " "$art/report.txt"
+done
 if grep -q '^obligation-projection FAIL' "$art/report.txt"; then
   echo "drive.sh: keyword-access projection failed a Native obligation" >&2
   exit 1

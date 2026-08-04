@@ -1764,6 +1764,25 @@
    value-id: core/NativeId
    type-id: core/NativeId])
 
+;; A branch fact is keyed by one immutable map SSA and one sealed keyword
+;; identity; another map of the same type is never interchangeable.
+(defrecord KeywordFlowRefinementV0
+  [source-id: core/NativeId
+   source-type: core/NativeId
+   keyword: String
+   lookup-type: core/NativeId
+   result-type: core/NativeId])
+
+(defrecord KeywordLookupSiteV0
+  [source-id: core/NativeId
+   source-type: core/NativeId
+   keyword: String
+   lookup-type: core/NativeId])
+
+(defrecord VariantPathV0
+  [matches: Int
+   variants: (Vec core/TypeVariant)])
+
 ;; One live `loop`: the SSA header block whose block-parameters ARE the typed
 ;; accumulators. `recur` is a Jump back to this header, so the innermost frame
 ;; is the lexical recur target and a nested loop shadows its parent.
@@ -1782,7 +1801,8 @@
    counter: Int
    locals: (Vec LocalBindingV0)
    failure: String
-   loop-frames: (Vec LoopFrameV0)])
+   loop-frames: (Vec LoopFrameV0)
+   keyword-refinements: (Vec KeywordFlowRefinementV0)])
 
 (defrecord ExprResultV0
   [state: BodyStateV0
@@ -1913,6 +1933,17 @@
     [:locals (conj (bodystatev0-locals state)
                (->LocalBindingV0 name value-id type-id))]))
 
+(defn state-with-keyword-refinements
+  [state: BodyStateV0
+   refinements: (Vec KeywordFlowRefinementV0)] -> BodyStateV0
+  (with state [:keyword-refinements refinements]))
+
+(defn state-add-keyword-refinement
+  [state: BodyStateV0
+   refinement: KeywordFlowRefinementV0] -> BodyStateV0
+  (state-with-keyword-refinements state
+    (conj (bodystatev0-keyword-refinements state) refinement)))
+
 (defn state-push-loop
   [state: BodyStateV0
    frame: LoopFrameV0] -> BodyStateV0
@@ -1933,6 +1964,30 @@
           binding
           (recur (- position 1)))))))
 
+(defn find-keyword-refinement
+  [state: BodyStateV0
+   source-id: core/NativeId
+   source-type: core/NativeId
+   keyword: String
+   lookup-type: core/NativeId] -> (U KeywordFlowRefinementV0 Nil)
+  (let [refinements: (Vec KeywordFlowRefinementV0)
+        (bodystatev0-keyword-refinements state)]
+    (loop [position: Int (- (count refinements) 1)]
+      (if (< position 0)
+        nil
+        (let [refinement: KeywordFlowRefinementV0
+              (nth refinements position)]
+          (if (and
+                (same-id? source-id
+                  (keywordflowrefinementv0-source-id refinement))
+                (same-id? source-type
+                  (keywordflowrefinementv0-source-type refinement))
+                (= keyword (keywordflowrefinementv0-keyword refinement))
+                (same-id? lookup-type
+                  (keywordflowrefinementv0-lookup-type refinement)))
+            refinement
+            (recur (- position 1))))))))
+
 (defn owner-source
   [env: BodyEnvV0
    owner: core/NativeId] -> (U core/NativeId Nil)
@@ -1950,6 +2005,24 @@
    owner: core/NativeId] -> String
   (let [source: (U core/NativeId Nil) (owner-source env owner)]
     (if (nil? source) "" (source-module-name (bodyenvv0-index env) source))))
+
+(defn source-ref-binding
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   source: core/NativeId] -> (U LocalBindingV0 Nil)
+  (let [index: SourceIndexV0 (bodyenvv0-index env)]
+    (if (not (= "ref" (fact-text index source "form-kind")))
+      nil
+      (let [name: String (fact-text index source "name")
+            direct: (U LocalBindingV0 Nil)
+            (find-local (bodystatev0-locals state) name)
+            canonical: String
+            (resolved-source-key
+              (resolve-source-name index (body-owner-module env owner) name))]
+        (if (some? direct)
+          direct
+          (find-local (bodystatev0-locals state) canonical))))))
 
 (defn find-signature
   [env: BodyEnvV0
@@ -2485,6 +2558,69 @@
 ;; A recursive union must be refused, not looped over.
 (defn widen-budget [] -> Int 4)
 
+(defn variant-path-to-payload-with-budget
+  [types: (Vec core/TypeDef)
+   current: core/NativeId
+   target: core/NativeId
+   budget: Int] -> VariantPathV0
+  (cond
+    (same-id? current target) (->VariantPathV0 1 [])
+    (< budget 0) (->VariantPathV0 0 [])
+    :else
+    (let [variants: (Vec core/TypeVariant) (union-variants-of types current)]
+      (loop [position: Int 0
+             matches: Int 0
+             chosen: (Vec core/TypeVariant) []]
+        (if (>= position (count variants))
+          (->VariantPathV0 matches chosen)
+          (let [variant: core/TypeVariant (nth variants position)
+                payload: (U core/NativeId Nil)
+                (core/typevariant-payload-type variant)
+                nested: VariantPathV0
+                (if (nil? payload)
+                  (->VariantPathV0 0 [])
+                  (variant-path-to-payload-with-budget types payload target
+                    (- budget 1)))
+                nested-matches: Int (variantpathv0-matches nested)]
+            (recur (+ position 1) (+ matches nested-matches)
+              (if (and (= 0 matches) (> nested-matches 0))
+                (into [variant] (variantpathv0-variants nested))
+                chosen))))))))
+
+(defn variant-path-to-payload
+  [types: (Vec core/TypeDef)
+   current: core/NativeId
+   target: core/NativeId] -> VariantPathV0
+  (variant-path-to-payload-with-budget types current target (widen-budget)))
+
+(defn extract-variant-path
+  [owner: core/NativeId
+   state: BodyStateV0
+   value-id: core/NativeId
+   value-type: core/NativeId
+   label: String
+   path: (Vec core/TypeVariant)] -> ExprResultV0
+  (loop [position: Int 0
+         current: BodyStateV0 state
+         current-id: core/NativeId value-id
+         current-type: core/NativeId value-type]
+    (if (>= position (count path))
+      (->ExprResultV0 current current-id current-type false)
+      (let [variant: core/TypeVariant (nth path position)
+            payload: (U core/NativeId Nil)
+            (core/typevariant-payload-type variant)]
+        (if (nil? payload)
+          (fail-result current
+            "TODO-NATIVE-VARIANT-PATH: checked path reached a unit variant")
+          (let [result-id: core/NativeId
+                (state-id current owner (str label "-" position))]
+            (recur (+ position 1)
+              (state-emit (state-bump current)
+                (core/->UnionExtractInstruction
+                  (core/->SsaValueV0 result-id payload)
+                  current-id (core/typevariant-id variant)))
+              result-id payload)))))))
+
 (defn arena-value-id [owner: core/NativeId] -> core/NativeId
   (lower-id "arena-handle" [(id-value owner)]))
 
@@ -2692,46 +2828,6 @@
         (and (instance? native.core.ReferenceType shape)
           (same-id? (core/referencetype-target-type shape) target))))))
 
-(defrecord NestedScalarHitV0
-  [found: Bool
-   outer-variant-id: core/NativeId
-   inner-type: core/NativeId
-   inner-variant-id: core/NativeId])
-
-(defn nested-scalar-miss [] -> NestedScalarHitV0
-  (->NestedScalarHitV0 false
-    (type-id "LowerFailure") (type-id "LowerFailure")
-    (type-id "LowerFailure")))
-
-;; A nullable map value may wrap an already-closed dynamic union. Scalars can
-;; be checked through that one wrapper; record alternatives remain references
-;; and deliberately do not enter this by-value path.
-(defn nested-scalar-hit
-  [types: (Vec core/TypeDef)
-   variants: (Vec core/TypeVariant)
-   target: core/NativeId] -> NestedScalarHitV0
-  (let [target-definition: (U core/TypeDef Nil) (lookup-type types target)]
-    (if (or (nil? target-definition)
-            (not (instance? native.core.AtomType
-              (core/typedef-shape target-definition))))
-      (nested-scalar-miss)
-      (loop [position: Int 0]
-        (if (>= position (count variants))
-          (nested-scalar-miss)
-          (let [outer: core/TypeVariant (nth variants position)
-                inner-type: (U core/NativeId Nil)
-                (core/typevariant-payload-type outer)]
-            (if (nil? inner-type)
-              (recur (+ position 1))
-              (let [inner: (U core/TypeVariant Nil)
-                    (variant-for-payload
-                      (union-variants-of types inner-type) target)]
-                (if (nil? inner)
-                  (recur (+ position 1))
-                  (->NestedScalarHitV0 true
-                    (core/typevariant-id outer) inner-type
-                    (core/typevariant-id inner)))))))))))
-
 ;; Source annotations and calls are semantic boundaries: widen into their
 ;; declared union, or checked-extract the one alternative the boundary names.
 (defn lower-boundary-coerce
@@ -2746,8 +2842,7 @@
     (let [source-variants: (Vec core/TypeVariant) (union-variants-of types from)
           scalar: (U core/TypeVariant Nil) (variant-for-payload source-variants to)
           record: NarrowHitV0 (reference-variant-for types from to)
-          nested: NestedScalarHitV0
-          (nested-scalar-hit types source-variants to)]
+          nested: VariantPathV0 (variant-path-to-payload types from to)]
       (cond
         (some? scalar)
         (let [result-id: core/NativeId (state-id state owner "boundary-extract")]
@@ -2768,23 +2863,9 @@
                 value-id (narrowhitv0-variant-id record)))
             result-id (narrowhitv0-reference-type record) false))
 
-        (nestedscalarhitv0-found nested)
-        (let [inner-id: core/NativeId
-              (state-id state owner "boundary-inner-union")
-              result-id: core/NativeId
-              (state-id (state-bump state) owner "boundary-inner-extract")]
-          (->ExprResultV0
-            (state-emit
-              (state-emit (state-bump (state-bump state))
-                (core/->UnionExtractInstruction
-                  (core/->SsaValueV0 inner-id
-                    (nestedscalarhitv0-inner-type nested))
-                  value-id (nestedscalarhitv0-outer-variant-id nested)))
-              (core/->UnionExtractInstruction
-                (core/->SsaValueV0 result-id to)
-                inner-id (nestedscalarhitv0-inner-variant-id nested)))
-            result-id to false))
-
+        (= 1 (variantpathv0-matches nested))
+        (extract-variant-path owner state value-id from "boundary-nested"
+          (variantpathv0-variants nested))
         :else
         (lower-widen types owner state value-id from to (widen-budget))))))
 
@@ -3525,24 +3606,26 @@
         (with state [:instructions kept])
         (recur (+ position 1) (conj kept (nth instructions position)))))))
 
-(defn variant-payload-in?
-  [variant: core/TypeVariant
-   accepted: (Vec core/NativeId)] -> Bool
-  (let [payload: (U core/NativeId Nil) (core/typevariant-payload-type variant)]
-    (if (nil? payload) false (core/id-in? accepted payload))))
-
-(defn lower-scalar-predicate
+(defn lower-scalar-predicate-with-budget
   [types: (Vec core/TypeDef)
    owner: core/NativeId
    state: BodyStateV0
    callee: String
    value-id: core/NativeId
-   value-type: core/NativeId] -> ExprResultV0
+   value-type: core/NativeId
+   budget: Int] -> ExprResultV0
   (let [accepted: (Vec core/NativeId) (scalar-predicate-types callee)
         variants: (Vec core/TypeVariant) (union-variants-of types value-type)]
-    (if (= 0 (count variants))
+    (cond
+      (= 0 (count variants))
       (bool-constant-result state owner "scalar-predicate"
         (core/id-in? accepted value-type))
+
+      (< budget 0)
+      (fail-result state
+        "TODO-NATIVE-PREDICATE-DEPTH: scalar predicate nested past the v0 budget")
+
+      :else
       (let [true-id: core/NativeId (state-id state owner "predicate-true")
             false-id: core/NativeId (state-id state owner "predicate-false")
             join-id: core/NativeId (state-id state owner "predicate-join")
@@ -3551,18 +3634,60 @@
             true-value: core/NativeId (state-id state owner "predicate-yes")
             false-value: core/NativeId (state-id state owner "predicate-no")
             cases: (Vec core/SwitchCaseV0)
-            (mapv
-              (fn [variant: core/TypeVariant] -> core/SwitchCaseV0
-                (core/->SwitchCaseV0 (core/typevariant-id variant)
-                  (if (variant-payload-in? variant accepted) true-id false-id)
-                  []))
-              variants)
+            (loop [position: Int 0 collected: (Vec core/SwitchCaseV0) []]
+              (if (>= position (count variants))
+                collected
+                (let [variant: core/TypeVariant (nth variants position)
+                      payload: (U core/NativeId Nil)
+                      (core/typevariant-payload-type variant)
+                      target: core/NativeId
+                      (cond
+                        (nil? payload) false-id
+                        (core/id-in? accepted payload) true-id
+                        (> (count (union-variants-of types payload)) 0)
+                        (state-id state owner (str "predicate-arm-" position))
+                        :else false-id)]
+                  (recur (+ position 1)
+                    (conj collected
+                      (core/->SwitchCaseV0
+                        (core/typevariant-id variant) target []))))))
             switched: BodyStateV0
             (state-close (state-bump state)
               (core/->SwitchTerminator value-id cases))
+            armed: BodyStateV0
+            (loop [position: Int 0 current: BodyStateV0 switched]
+              (if (or (>= position (count variants)) (state-blocked? current))
+                current
+                (let [variant: core/TypeVariant (nth variants position)
+                      payload: (U core/NativeId Nil)
+                      (core/typevariant-payload-type variant)]
+                  (if (or (nil? payload)
+                        (core/id-in? accepted payload)
+                        (= 0 (count (union-variants-of types payload))))
+                    (recur (+ position 1) current)
+                    (let [arm-id: core/NativeId
+                          (state-id state owner (str "predicate-arm-" position))
+                          opened: BodyStateV0 (state-open-block current arm-id [])
+                          extracted-id: core/NativeId
+                          (state-id opened owner
+                            (str "predicate-payload-" position))
+                          extracted: BodyStateV0
+                          (state-emit (state-bump opened)
+                            (core/->UnionExtractInstruction
+                              (core/->SsaValueV0 extracted-id payload)
+                              value-id (core/typevariant-id variant)))
+                          nested: ExprResultV0
+                          (lower-scalar-predicate-with-budget types owner extracted
+                            callee extracted-id payload (- budget 1))]
+                      (if (state-blocked? (exprresultv0-state nested))
+                        (exprresultv0-state nested)
+                        (recur (+ position 1)
+                          (state-close (exprresultv0-state nested)
+                            (core/->JumpTerminator join-id
+                              [(exprresultv0-value-id nested)])))))))))
             true-block: BodyStateV0
             (state-close
-              (state-emit (state-open-block switched true-id [])
+              (state-emit (state-open-block armed true-id [])
                 (core/->AtomInstruction
                   (core/->SsaValueV0 true-value (bool-type-id))
                   (core/->BoolAtom true)))
@@ -4056,6 +4181,119 @@
 
 ;; Equality is total across a scalar and a union: another tag is false, while
 ;; the matching tag is extracted and compared with its scalar semantics.
+(defn lower-scalar-union-equality-with-budget
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   scalar-id: core/NativeId
+   scalar-type: core/NativeId
+   union-id: core/NativeId
+   union-type: core/NativeId
+   budget: Int] -> ExprResultV0
+  (let [variants: (Vec core/TypeVariant) (union-variants-of types union-type)
+        path: VariantPathV0
+        (variant-path-to-payload-with-budget types union-type scalar-type budget)
+        comparison: (U core/CompareOpV0 Nil) (equality-comparison scalar-type)]
+    (cond
+      (nil? comparison)
+      (fail-result state
+        "TODO-NATIVE-EQUALITY-SCALAR: the scalar has no native equality")
+
+      (= 0 (variantpathv0-matches path))
+      (bool-constant-result state owner "equality-miss" false)
+
+      (< budget 0)
+      (fail-result state
+        "TODO-NATIVE-EQUALITY-DEPTH: scalar equality nested past the v0 budget")
+
+      :else
+      (let [miss-id: core/NativeId (state-id state owner "equality-miss")
+            join-id: core/NativeId (state-id state owner "equality-join")
+            join-parameter: core/NativeId (state-id state owner "equality-value")
+            false-id: core/NativeId (state-id state owner "equality-false")
+            cases: (Vec core/SwitchCaseV0)
+            (loop [position: Int 0 collected: (Vec core/SwitchCaseV0) []]
+              (if (>= position (count variants))
+                collected
+                (let [variant: core/TypeVariant (nth variants position)
+                      payload: (U core/NativeId Nil)
+                      (core/typevariant-payload-type variant)
+                      nested: VariantPathV0
+                      (if (nil? payload)
+                        (->VariantPathV0 0 [])
+                        (variant-path-to-payload-with-budget types payload
+                          scalar-type (- budget 1)))
+                      target: core/NativeId
+                      (if (> (variantpathv0-matches nested) 0)
+                        (state-id state owner (str "equality-arm-" position))
+                        miss-id)]
+                  (recur (+ position 1)
+                    (conj collected
+                      (core/->SwitchCaseV0
+                        (core/typevariant-id variant) target []))))))
+            switched: BodyStateV0
+            (state-close (state-bump state)
+              (core/->SwitchTerminator union-id cases))
+            armed: BodyStateV0
+            (loop [position: Int 0 current: BodyStateV0 switched]
+              (if (or (>= position (count variants)) (state-blocked? current))
+                current
+                (let [variant: core/TypeVariant (nth variants position)
+                      payload: (U core/NativeId Nil)
+                      (core/typevariant-payload-type variant)]
+                  (if (nil? payload)
+                    (recur (+ position 1) current)
+                    (let [nested: VariantPathV0
+                          (variant-path-to-payload-with-budget types payload
+                            scalar-type (- budget 1))]
+                      (if (= 0 (variantpathv0-matches nested))
+                        (recur (+ position 1) current)
+                        (let [arm-id: core/NativeId
+                              (state-id state owner (str "equality-arm-" position))
+                              opened: BodyStateV0 (state-open-block current arm-id [])
+                              extracted-id: core/NativeId
+                              (state-id opened owner
+                                (str "equality-payload-" position))
+                              extracted: BodyStateV0
+                              (state-emit (state-bump opened)
+                                (core/->UnionExtractInstruction
+                                  (core/->SsaValueV0 extracted-id payload)
+                                  union-id (core/typevariant-id variant)))
+                              result: ExprResultV0
+                              (if (same-id? payload scalar-type)
+                                (let [compared-id: core/NativeId
+                                      (state-id extracted owner
+                                        (str "equality-compared-" position))]
+                                  (->ExprResultV0
+                                    (state-emit (state-bump extracted)
+                                      (core/->CompareInstruction
+                                        (core/->SsaValueV0 compared-id
+                                          (bool-type-id))
+                                        comparison scalar-id extracted-id))
+                                    compared-id (bool-type-id) false))
+                                (lower-scalar-union-equality-with-budget types owner
+                                  extracted scalar-id scalar-type extracted-id payload
+                                  (- budget 1)))]
+                          (if (state-blocked? (exprresultv0-state result))
+                            (exprresultv0-state result)
+                            (recur (+ position 1)
+                              (state-close (exprresultv0-state result)
+                                (core/->JumpTerminator join-id
+                                  [(exprresultv0-value-id result)])))))))))))]
+        (if (state-blocked? armed)
+          (dead-result armed)
+          (let [missed: BodyStateV0
+                (state-emit (state-open-block armed miss-id [])
+                  (core/->AtomInstruction
+                    (core/->SsaValueV0 false-id (bool-type-id))
+                    (core/->BoolAtom false)))
+                after-miss: BodyStateV0
+                (state-close missed (core/->JumpTerminator join-id [false-id]))]
+            (->ExprResultV0
+              (state-open-block after-miss join-id
+                [(core/->Parameter join-parameter (bool-type-id))])
+              join-parameter (bool-type-id) false)))))))
+
 (defn lower-scalar-union-equality
   [types: (Vec core/TypeDef)
    owner: core/NativeId
@@ -4064,59 +4302,18 @@
    scalar-type: core/NativeId
    union-id: core/NativeId
    union-type: core/NativeId] -> ExprResultV0
-  (let [variants: (Vec core/TypeVariant) (union-variants-of types union-type)
-        target: (U core/TypeVariant Nil) (variant-for-payload variants scalar-type)
-        comparison: (U core/CompareOpV0 Nil) (equality-comparison scalar-type)]
-    (cond
-      (nil? comparison)
-      (fail-result state
-        "TODO-NATIVE-EQUALITY-SCALAR: the scalar has no native equality")
+  (lower-scalar-union-equality-with-budget types owner state scalar-id
+    scalar-type union-id union-type (widen-budget)))
 
-      (nil? target)
-      (bool-constant-result state owner "equality-miss" false)
-
-      :else
-      (let [match-id: core/NativeId (state-id state owner "equality-match")
-            miss-id: core/NativeId (state-id state owner "equality-miss")
-            join-id: core/NativeId (state-id state owner "equality-join")
-            join-parameter: core/NativeId (state-id state owner "equality-value")
-            extracted-id: core/NativeId (state-id state owner "equality-scalar")
-            compared-id: core/NativeId (state-id state owner "equality-compared")
-            false-id: core/NativeId (state-id state owner "equality-false")
-            cases: (Vec core/SwitchCaseV0)
-            (mapv
-              (fn [variant: core/TypeVariant] -> core/SwitchCaseV0
-                (core/->SwitchCaseV0 (core/typevariant-id variant)
-                  (if (same-id? (core/typevariant-id variant)
-                        (core/typevariant-id target))
-                    match-id miss-id)
-                  []))
-              variants)
-            switched: BodyStateV0
-            (state-close (state-bump state)
-              (core/->SwitchTerminator union-id cases))
-            matched: BodyStateV0
-            (state-emit
-              (state-emit (state-open-block switched match-id [])
-                (core/->UnionExtractInstruction
-                  (core/->SsaValueV0 extracted-id scalar-type)
-                  union-id (core/typevariant-id target)))
-              (core/->CompareInstruction
-                (core/->SsaValueV0 compared-id (bool-type-id))
-                comparison scalar-id extracted-id))
-            after-match: BodyStateV0
-            (state-close matched (core/->JumpTerminator join-id [compared-id]))
-            missed: BodyStateV0
-            (state-emit (state-open-block after-match miss-id [])
-              (core/->AtomInstruction
-                (core/->SsaValueV0 false-id (bool-type-id))
-                (core/->BoolAtom false)))
-            after-miss: BodyStateV0
-            (state-close missed (core/->JumpTerminator join-id [false-id]))]
-        (->ExprResultV0
-          (state-open-block after-miss join-id
-            [(core/->Parameter join-parameter (bool-type-id))])
-          join-parameter (bool-type-id) false)))))
+(defn lower-scalar-predicate
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   callee: String
+   value-id: core/NativeId
+   value-type: core/NativeId] -> ExprResultV0
+  (lower-scalar-predicate-with-budget types owner state callee value-id
+    value-type (widen-budget)))
 
 (defn lower-text-search-predicate
   [types: (Vec core/TypeDef)
@@ -4651,6 +4848,154 @@
             (core/->TokenFlowV0 [] [])))
         result-id result-type false))))
 
+;; Only a literal keyword access of an already-bound Map SSA can seed flow;
+;; calls, persistent updates, and dynamic get keys cannot manufacture a match.
+(defn keyword-lookup-site
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   source: core/NativeId] -> (U KeywordLookupSiteV0 Nil)
+  (let [index: SourceIndexV0 (bodyenvv0-index env)
+        types: (Vec core/TypeDef) (bodyenvv0-types env)
+        keyword: String (fact-text index source "keyword")
+        target: (U core/NativeId Nil) (index-first-object index source "target")]
+    (if (or (not (= "kw-access" (fact-text index source "form-kind")))
+            (= "" keyword)
+            (nil? target))
+      nil
+      (let [binding: (U LocalBindingV0 Nil)
+            (source-ref-binding env owner state target)]
+        (if (nil? binding)
+          nil
+          (let [source-type: core/NativeId (localbindingv0-type-id binding)]
+            (if (or (not (map-type? types source-type))
+                    (not (same-id? (map-key-of types source-type)
+                           (keyword-type-id))))
+              nil
+              (let [lookup-type: (U core/NativeId Nil)
+                    (nullable-value-type-of types
+                      (map-value-of types source-type))]
+                (if (nil? lookup-type)
+                  nil
+                  (->KeywordLookupSiteV0
+                    (localbindingv0-value-id binding)
+                    source-type keyword lookup-type))))))))))
+
+(defn exact-scalar-predicate-type [callee: String] -> (U core/NativeId Nil)
+  (cond
+    (= "integer?" callee) (int-type-id)
+    (= "string?" callee) (text-type-id)
+    (= "boolean?" callee) (bool-type-id)
+    (= "keyword?" callee) (keyword-type-id)
+    :else nil))
+
+(defn exact-scalar-source-type
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   source: core/NativeId] -> (U core/NativeId Nil)
+  (let [index: SourceIndexV0 (bodyenvv0-index env)
+        kind: String (fact-text index source "form-kind")]
+    (cond
+      (= "literal" kind)
+      (let [literal-kind: String (fact-text index source "literal-kind")]
+        (cond
+          (or (= "int" literal-kind) (= "number" literal-kind)) (int-type-id)
+          (= "bool" literal-kind) (bool-type-id)
+          (= "string" literal-kind) (text-type-id)
+          (= "keyword" literal-kind) (keyword-type-id)
+          :else nil))
+
+      (= "ref" kind)
+      (let [binding: (U LocalBindingV0 Nil)
+            (source-ref-binding env owner state source)]
+        (if (nil? binding)
+          nil
+          (let [type-id-value: core/NativeId (localbindingv0-type-id binding)]
+            (if (nil? (equality-comparison type-id-value))
+              nil
+              type-id-value))))
+
+      :else nil)))
+
+(defn keyword-refinement-for-source
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   source: core/NativeId
+   result-type: core/NativeId] -> (U KeywordFlowRefinementV0 Nil)
+  (let [site: (U KeywordLookupSiteV0 Nil)
+        (keyword-lookup-site env owner state source)]
+    (if (nil? site)
+      nil
+      (let [path: VariantPathV0
+            (variant-path-to-payload (bodyenvv0-types env)
+              (keywordlookupsitev0-lookup-type site) result-type)]
+        (if (not (= 1 (variantpathv0-matches path)))
+          nil
+          (->KeywordFlowRefinementV0
+            (keywordlookupsitev0-source-id site)
+            (keywordlookupsitev0-source-type site)
+            (keywordlookupsitev0-keyword site)
+            (keywordlookupsitev0-lookup-type site)
+            result-type))))))
+
+(defn equality-keyword-refinement
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   lookup-source: core/NativeId
+   scalar-source: core/NativeId] -> (U KeywordFlowRefinementV0 Nil)
+  (let [scalar-type: (U core/NativeId Nil)
+        (exact-scalar-source-type env owner state scalar-source)]
+    (if (nil? scalar-type)
+      nil
+      (keyword-refinement-for-source env owner state lookup-source scalar-type))))
+
+(defn condition-keyword-refinement
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   condition: core/NativeId] -> (U KeywordFlowRefinementV0 Nil)
+  (let [index: SourceIndexV0 (bodyenvv0-index env)]
+    (if (not (= "call" (fact-text index condition "form-kind")))
+      nil
+      (let [callee: String (fact-text index condition "callee")
+            args-node: (U core/NativeId Nil)
+            (index-first-object index condition "args")
+            args: (Vec core/NativeId)
+            (if (nil? args-node) [] (index-sequence-items index args-node))]
+        (cond
+          (= 1 (count args))
+          (let [result-type: (U core/NativeId Nil)
+                (exact-scalar-predicate-type callee)]
+            (if (nil? result-type)
+              nil
+              (keyword-refinement-for-source env owner state
+                (nth args 0) result-type)))
+
+          (and (= "=" callee) (= 2 (count args)))
+          (let [left: (U KeywordFlowRefinementV0 Nil)
+                (equality-keyword-refinement env owner state
+                  (nth args 0) (nth args 1))]
+            (if (some? left)
+              left
+              (equality-keyword-refinement env owner state
+                (nth args 1) (nth args 0))))
+
+          :else nil)))))
+
+(defn state-refine-for-condition
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   condition: core/NativeId] -> BodyStateV0
+  (let [refinement: (U KeywordFlowRefinementV0 Nil)
+        (condition-keyword-refinement env owner state condition)]
+    (if (nil? refinement)
+      state
+      (state-add-keyword-refinement state refinement))))
+
 (defn lower-expr
   [env: BodyEnvV0
    owner: core/NativeId
@@ -4727,15 +5072,8 @@
 
         (= "ref" kind)
         (let [name: String (fact-text index expr "name")
-              direct: (U LocalBindingV0 Nil)
-              (find-local (bodystatev0-locals state) name)
-              canonical: String
-              (resolved-source-key
-                (resolve-source-name index (body-owner-module env owner) name))
               binding: (U LocalBindingV0 Nil)
-              (if (some? direct)
-                direct
-                (find-local (bodystatev0-locals state) canonical))]
+              (source-ref-binding env owner state expr)]
           (if (nil? binding)
             (fail-result state
               (str "TODO-NATIVE-FREE-REFERENCE: " name
@@ -4847,16 +5185,20 @@
                         (exprresultv0-state condition))
                       (if static-condition then-node else-node))
                     (let [base: BodyStateV0 (exprresultv0-state condition)
+                      outer-refinements: (Vec KeywordFlowRefinementV0)
+                      (bodystatev0-keyword-refinements base)
                       then-id: core/NativeId (state-id base owner "then")
                       else-id: core/NativeId (state-id base owner "else")
                       join-id: core/NativeId (state-id base owner "join")
                       join-parameter: core/NativeId (state-id base owner "join-value")
                       branched: BodyStateV0
-                      (state-open-block
-                        (state-close (state-bump base)
-                          (core/->BranchTerminator
-                            (exprresultv0-value-id condition) then-id else-id))
-                        then-id [])
+                      (state-refine-for-condition env owner
+                        (state-open-block
+                          (state-close (state-bump base)
+                            (core/->BranchTerminator
+                              (exprresultv0-value-id condition) then-id else-id))
+                          then-id [])
+                        condition-node)
                       then-start: Int (count (bodystatev0-blocks branched))
                       then-result: ExprResultV0 (lower-expr env owner branched then-node)
                       after-then: BodyStateV0
@@ -4866,7 +5208,10 @@
                           (core/->JumpTerminator join-id
                             [(exprresultv0-value-id then-result)])))
                       then-end: Int (count (bodystatev0-blocks after-then))
-                      else-start: BodyStateV0 (state-open-block after-then else-id [])
+                      else-start: BodyStateV0
+                      (state-with-keyword-refinements
+                        (state-open-block after-then else-id [])
+                        outer-refinements)
                       else-block-start: Int (count (bodystatev0-blocks else-start))
                       else-result: ExprResultV0
                       (lower-expr env owner else-start else-node)
@@ -4877,6 +5222,8 @@
                           (core/->JumpTerminator join-id
                             [(exprresultv0-value-id else-result)])))
                       else-end: Int (count (bodystatev0-blocks after-else))
+                      settled: BodyStateV0
+                      (state-with-keyword-refinements after-else outer-refinements)
                       then-live: Bool (not (exprresultv0-terminated then-result))
                       else-live: Bool (not (exprresultv0-terminated else-result))
                       result-type: core/NativeId
@@ -4884,21 +5231,21 @@
                         (exprresultv0-type-id then-result)
                         (exprresultv0-type-id else-result))]
                   (cond
-                    (state-blocked? after-else) (dead-result after-else)
+                    (state-blocked? settled) (dead-result settled)
                     (and (not then-live) (not else-live))
-                    (->ExprResultV0 after-else (lower-id "body" ["unreachable"])
+                    (->ExprResultV0 settled (lower-id "body" ["unreachable"])
                       result-type true)
                     (and then-live else-live
                       (not (same-id? (exprresultv0-type-id then-result)
                              (exprresultv0-type-id else-result))))
-                    (bridge-join-arms types owner after-else
+                    (bridge-join-arms types owner settled
                       then-start then-end else-block-start else-end
                       join-id join-parameter
                       (exprresultv0-type-id then-result)
                       (exprresultv0-type-id else-result))
                     :else
                     (->ExprResultV0
-                      (state-open-block after-else join-id
+                      (state-open-block settled join-id
                         [(core/->Parameter join-parameter result-type)])
                       join-parameter result-type false)))))))))
 
@@ -4993,13 +5340,17 @@
                             (state-id condition-state owner "cond-body")
                             next-id: core/NativeId
                             (state-id (state-bump condition-state) owner "cond-next")
+                            outer-refinements: (Vec KeywordFlowRefinementV0)
+                            (bodystatev0-keyword-refinements condition-state)
                             branched: BodyStateV0
-                            (state-open-block
-                              (state-close (state-bump (state-bump condition-state))
-                                (core/->BranchTerminator
-                                  (exprresultv0-value-id condition)
-                                  body-id next-id))
-                              body-id [])
+                            (state-refine-for-condition env owner
+                              (state-open-block
+                                (state-close (state-bump (state-bump condition-state))
+                                  (core/->BranchTerminator
+                                    (exprresultv0-value-id condition)
+                                    body-id next-id))
+                                body-id [])
+                              test-node)
                             body: ExprResultV0
                             (lower-expr env owner branched body-node)
                             body-state: BodyStateV0 (exprresultv0-state body)
@@ -5009,15 +5360,19 @@
                           (state-blocked? body-state) (dead-result body-state)
                           (not body-live)
                           (recur (+ position 1)
-                            (state-open-block body-state next-id [])
+                            (state-with-keyword-refinements
+                              (state-open-block body-state next-id [])
+                              outer-refinements)
                             result-type live-arms)
                           (nil? result-type)
                           (recur (+ position 1)
-                            (state-open-block
-                              (state-close body-state
-                                (core/->JumpTerminator join-id
-                                  [(exprresultv0-value-id body)]))
-                              next-id [])
+                            (state-with-keyword-refinements
+                              (state-open-block
+                                (state-close body-state
+                                  (core/->JumpTerminator join-id
+                                    [(exprresultv0-value-id body)]))
+                                next-id [])
+                              outer-refinements)
                             (exprresultv0-type-id body) (+ live-arms 1))
                           :else
                           (let [settled: ExprResultV0
@@ -5027,11 +5382,13 @@
                             (if (state-blocked? (exprresultv0-state settled))
                               (dead-result (exprresultv0-state settled))
                               (recur (+ position 1)
-                                (state-open-block
-                                  (state-close (exprresultv0-state settled)
-                                    (core/->JumpTerminator join-id
-                                      [(exprresultv0-value-id settled)]))
-                                  next-id [])
+                                (state-with-keyword-refinements
+                                  (state-open-block
+                                    (state-close (exprresultv0-state settled)
+                                      (core/->JumpTerminator join-id
+                                        [(exprresultv0-value-id settled)]))
+                                    next-id [])
+                                  outer-refinements)
                                 result-type (+ live-arms 1)))))))))))))
 
         (= "loop" kind)
@@ -5543,7 +5900,11 @@
                       "TODO-NATIVE-KEYWORD-MAP-EQUALITY: keyword access needs closed Keyword equality")
 
                     :else
-                    (let [key-id: core/NativeId
+                    (let [refinement: (U KeywordFlowRefinementV0 Nil)
+                          (find-keyword-refinement current
+                            (exprresultv0-value-id target) target-type keyword
+                            result-type)
+                          key-id: core/NativeId
                           (state-id current owner "keyword-key")
                           keyed: BodyStateV0
                           (state-emit (state-bump current)
@@ -5551,13 +5912,26 @@
                               (core/->SsaValueV0 key-id (keyword-type-id))
                               (core/->KeywordAtom keyword)))
                           result-id: core/NativeId
-                          (state-id keyed owner "keyword-get")]
-                      (->ExprResultV0
-                        (state-emit (state-bump keyed)
-                          (core/->MapGetInstructionV0
-                            (core/->SsaValueV0 result-id result-type)
-                            (exprresultv0-value-id target) key-id nil equality))
-                        result-id result-type false))))
+                          (state-id keyed owner "keyword-get")
+                          looked-up: BodyStateV0
+                          (state-emit (state-bump keyed)
+                            (core/->MapGetInstructionV0
+                              (core/->SsaValueV0 result-id result-type)
+                              (exprresultv0-value-id target) key-id nil equality))]
+                      ;; The proof authorizes only a checked extraction; the
+                      ;; repeated lookup still produces and checks its union tag.
+                      (if (nil? refinement)
+                        (->ExprResultV0 looked-up result-id result-type false)
+                        (let [refined-type: core/NativeId
+                              (keywordflowrefinementv0-result-type refinement)
+                              path: VariantPathV0
+                              (variant-path-to-payload types result-type
+                                refined-type)]
+                          (if (not (= 1 (variantpathv0-matches path)))
+                            (->ExprResultV0 looked-up result-id result-type false)
+                            (extract-variant-path owner looked-up result-id
+                              result-type "keyword-refined"
+                              (variantpathv0-variants path))))))))
 
                 :else
                 (fail-result current
@@ -5694,6 +6068,8 @@
                                       (bodystatev0-locals collection-state)
                                       outer-frames: (Vec LoopFrameV0)
                                       (bodystatev0-loop-frames collection-state)
+                                      outer-refinements: (Vec KeywordFlowRefinementV0)
+                                      (bodystatev0-keyword-refinements collection-state)
                                       length-id: core/NativeId
                                       (state-id collection-state owner "reduce-length")
                                       zero-id: core/NativeId
@@ -5751,14 +6127,16 @@
                                       isolated: BodyStateV0
                                       (with
                                         (with
-                                          (state-emit (state-bump branched)
-                                            (core/->VecGetInstruction
-                                              (core/->SsaValueV0 item-id
-                                                element-type)
-                                              (exprresultv0-value-id collection)
-                                              header-index))
-                                          [:locals []])
-                                        [:loop-frames []])
+                                          (with
+                                            (state-emit (state-bump branched)
+                                              (core/->VecGetInstruction
+                                                (core/->SsaValueV0 item-id
+                                                  element-type)
+                                                (exprresultv0-value-id collection)
+                                                header-index))
+                                            [:locals []])
+                                          [:loop-frames []])
+                                        [:keyword-refinements []])
                                       callback-state: BodyStateV0
                                       (state-bind
                                         (state-bind isolated
@@ -5770,9 +6148,11 @@
                                         callback-body)
                                       restored: BodyStateV0
                                       (with
-                                        (with (exprresultv0-state callback-result)
-                                          [:locals outer-locals])
-                                        [:loop-frames outer-frames])]
+                                        (with
+                                          (with (exprresultv0-state callback-result)
+                                            [:locals outer-locals])
+                                          [:loop-frames outer-frames])
+                                        [:keyword-refinements outer-refinements])]
                                   (cond
                                     (state-blocked? restored) (dead-result restored)
                                     (exprresultv0-terminated callback-result)
@@ -7611,7 +7991,7 @@
         (str "the checked source projection carries no body form for " name))
       (let [globalized: BodyStateV0
             (lower-global-bindings env id
-              (->BodyStateV0 [] entry-id [] [] true 0 [] "" [])
+              (->BodyStateV0 [] entry-id [] [] true 0 [] "" [] [])
               (needed-globals env id body-node
                 (mapv
                   (fn [binding: LocalBindingV0] -> String
@@ -10331,7 +10711,7 @@
   (empty-context-id "owner"))
 
 (defn empty-context-state [] -> BodyStateV0
-  (->BodyStateV0 [] (empty-context-id "entry") [] [] true 0 [] "" []))
+  (->BodyStateV0 [] (empty-context-id "entry") [] [] true 0 [] "" [] []))
 
 (defn contextual-result-matches?
   [result: (U ExprResultV0 Nil)

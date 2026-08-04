@@ -20,6 +20,46 @@
    expected: Int] -> Bool
   (= expected (:code entries)))
 
+(defn map-code-value [entries: (Map Keyword Int)] -> Int
+  (if (integer? (:code entries)) (:code entries) -1))
+
+(defn map-code-value-cond [entries: (Map Keyword Int)] -> Int
+  (cond
+    (integer? (:code entries)) (:code entries)
+    :else -1))
+
+(defn map-code-value-equal
+  [entries: (Map Keyword Int)
+   expected: Int] -> Int
+  (if (= expected (:code entries)) (:code entries) -1))
+
+(defn map-version-value [response: (Map Keyword (U String Int Keyword))] -> Int
+  (cond
+    (integer? (:version response)) (:version response)
+    :else -3))
+
+(defn optional-map-branch [response: (Map Keyword (U String Int))] -> (U (Map Keyword (U String Int)) Nil)
+  (if (= "unknown op" (:error response)) nil response))
+
+(defn reject-message [rejection: (Vec String)] -> Int
+  (count rejection))
+
+(defn map-reject-count [response: (Map Keyword (U String Int Keyword (Vec String)))] -> Int
+  (cond
+    (some? (:reject response)) (reject-message (:reject response))
+    :else -1))
+
+(defn map-other-after-code-check [entries: (Map Keyword Int)] -> (U Int Nil)
+  (if (integer? (:code entries)) (:other entries) (:other entries)))
+
+(defn map-code-from-other-source
+  [checked: (Map Keyword Int)
+   other: (Map Keyword Int)] -> (U Int Nil)
+  (if (integer? (:code checked)) (:code other) (:code other)))
+
+(defn map-code-false-arm [entries: (Map Keyword Int)] -> (U Int Nil)
+  (if (integer? (:code entries)) -1 (:code entries)))
+
 (defn wrong-key-type [entries: (Map String Int)] -> Bool
   (some? (:code entries)))
 
