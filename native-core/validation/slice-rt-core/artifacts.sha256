@@ -1,6 +1,10 @@
 f96e571b165e082f9cb6381f7aacb34895215d1c7a6f20762a02f3cfd6645371  beagle:native-core/validation/slice-rt-core/rt_core.facts
 19bd6c72c3684d3faf01f6126a4ff097f60c5f38332454f92d16d3e67ba08c00  beagle:native-core/validation/slice-rt-core/inventory.txt
 da715e4cba17fa09ffccad11590cedc1088c195000b8a84e4756c5162f4b3ced  beagle:native-core/validation/slice-rt-core/managed.out
-c1d3bdf876bdc7bb5fbbb61e42ad87f8c01d54a94b9529dd9cc69de2a9cf4ae0  beagle:native-core/validation/slice-rt-core/report.txt
-d38ecc6bf8e4af741b9ef0615e93c53b7f9e7d9c24b9f7902ab8971a799fe297  beagle:native-core/validation/slice-rt-core/frontier.txt
-0bb04bfa7219f845f98be2a1d56a30041487450b1b9095b27a13be5c58fdb075  beagle:native-core/validation/slice-rt-core/source.sha256
+b1d99d1c911fa581c2628e82738819a624b176f1c3a1281adb764d2f1f74db10  beagle:native-core/validation/slice-rt-core/lowered-managed.out
+4fc55e9ba065ebb460db67dc16f6f8ccd75f3c6c91d95a342d0ea63ee4c400b3  beagle:native-core/validation/slice-rt-core/report.txt
+02938671408204757d647782671820ceffd5062d7fb5ff207cf25918f30392e5  beagle:native-core/validation/slice-rt-core/frontier.txt
+ad0606198069558271f61ceaed24f77a4cb628f1e440fa8345a72da536c657cc  beagle:native-core/validation/slice-rt-core/function_map.h
+9f9b0fd222992a18a73960257f0d563ee3f6f679dbce54cc6a69ec6210924d6b  beagle:native-core/validation/slice-rt-core/source.sha256
+15d5bf9abd7b90035e0db9be8356168429eb1471c3ccd909e2a889f06b1b940c  beagle:native-core/validation/slice-rt-core/module_0.h
+c0b169f72b68f84e1d626d93cd23bb7cd01b51b17e5ab01c0d44ece11d2c2a6d  beagle:native-core/validation/slice-rt-core/module_0.c

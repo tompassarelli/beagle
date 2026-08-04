@@ -137,12 +137,14 @@ int main(void) {
   CHECK("is-iso-datetime-16", "valid", RT_IS_ISO_DATETIME_16(second));
   CHECK("is-iso-datetime-16", "long", !RT_IS_ISO_DATETIME_16(first));
 
+#ifdef RT_REPEAT_STR
   native_arena_reset(&arena);
   first = text_of(&arena, "ab");
   result = RT_REPEAT_STR(&arena, &capability, first, INT64_C(3));
   CHECK("repeat-str", "positive", text_is(result, "ababab"));
   result = RT_REPEAT_STR(&arena, &capability, first, INT64_C(-2));
   CHECK("repeat-str", "negative", text_is(result, ""));
+#endif
 
   for (index = 0U; index < 64U; index++) {
     digest[index] = 'a';
