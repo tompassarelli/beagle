@@ -4,7 +4,9 @@
 ;; arm test is the runtime proof, so `s` is that member there.
 (defunion Shape
   (Circle [radius: Int])
-  (Rect [width: Int height: String]))
+  (Rect
+    [width: Int
+     height: String]))
 
 (defn area [s: Shape] -> Int
   (match s

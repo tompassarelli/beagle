@@ -4,7 +4,9 @@
 ;; ordered cond inherits each prior clause's false-branch exclusion.
 (defunion Shape
   (Circle [radius: Int])
-  (Rect [width: Int height: String]))
+  (Rect
+    [width: Int
+     height: String]))
 
 (defn area [s: Shape] -> Int
   (if (instance? Circle s)

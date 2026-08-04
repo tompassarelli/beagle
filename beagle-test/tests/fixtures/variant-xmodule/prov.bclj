@@ -6,7 +6,9 @@
 ;; Inline fields, non-parametric — the shape the importer used to drop entirely.
 (defunion Shape
   (Circle [radius: Int])
-  (Rect [width: Int height: String]))
+  (Rect
+    [width: Int
+     height: String]))
 
 ;; Members without fields (pre-declared / bare) still import.
 (defunion Flag On Off)

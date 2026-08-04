@@ -3,7 +3,9 @@
 ;; The refinement is arm-local: after the match, `s` is the union again.
 (defunion Shape
   (Circle [radius: Int])
-  (Rect [width: Int height: String]))
+  (Rect
+    [width: Int
+     height: String]))
 
 (defn area [s: Shape] -> Int
   (let [first: Int (match s

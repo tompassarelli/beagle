@@ -4,7 +4,9 @@
 ;; value is proven, and there is no name for it.
 (defunion Shape
   (Circle [radius: Int])
-  (Rect [width: Int height: String]))
+  (Rect
+    [width: Int
+     height: String]))
 
 (defn identity-shape [s: Shape] -> Shape s)
 
