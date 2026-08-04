@@ -1341,16 +1341,26 @@
 
 (defn parse-int-text [value: String] -> (U Int Nil)
   (let [negative: Bool (and (> (count value) 0) (= "-" (subs value 0 1)))
-        start: Int (if negative 1 0)]
+        start: Int (if negative 1 0)
+        maximum: Int 9223372036854775807
+        minimum: Int (- (- 0 maximum) 1)
+        limit: Int (if negative minimum (- 0 maximum))
+        multiply-limit: Int (quot limit 10)]
     (if (>= start (count value))
       nil
-      (loop [position: Int start magnitude: Int 0]
+      ;; Keep the accumulator negative so Int's asymmetric range needs no +2^63.
+      (loop [position: Int start result: Int 0]
         (if (>= position (count value))
-          (if negative (- 0 magnitude) magnitude)
+          (if negative result (- 0 result))
           (let [digit: Int (digit-value (subs value position (+ position 1)))]
-            (if (< digit 0)
-              nil
-              (recur (+ position 1) (+ (* magnitude 10) digit)))))))))
+            (cond
+              (< digit 0) nil
+              (< result multiply-limit) nil
+              :else
+              (let [shifted: Int (* result 10)]
+                (if (< shifted (+ limit digit))
+                  nil
+                  (recur (+ position 1) (- shifted digit)))))))))))
 
 (defn fact-text
   [index: SourceIndexV0
@@ -6993,7 +7003,12 @@
   (and fixture-native-complete?
        fixture-native-host-erased?
        fixture-native-valid?
-       fixture-native-has-abi?))
+       fixture-native-has-abi?
+       (= (parse-int-text "-9223372036854775808")
+          (- (- 0 9223372036854775807) 1))
+       (= (parse-int-text "9223372036854775807") 9223372036854775807)
+       (nil? (parse-int-text "-9223372036854775809"))
+       (nil? (parse-int-text "9223372036854775808"))))
 
 (def fold-empty-result: FixturePipelineResultV0
   (lower-pipeline-fixture fold-empty-source-world "fold-insurance-v0"))
