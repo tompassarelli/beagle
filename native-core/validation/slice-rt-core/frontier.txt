@@ -1,6 +1,6 @@
 source-functions 25
-lowered-functions 12
-pending-functions 13
+lowered-functions 13
+pending-functions 12
 function str-index-of LOWERED fn_0 1 blocks
 function split-comma LOWERED fn_1 1 blocks
 function str-lt? LOWERED fn_2 1 blocks
@@ -10,20 +10,20 @@ function slugify LOWERED fn_5 7 blocks
 function filter-digits LOWERED fn_6 1 blocks
 function is-iso-datetime-19 LOWERED fn_7 4 blocks
 function is-iso-datetime-16 LOWERED fn_8 4 blocks
-function repeat-str PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-APPLY: no frozen Fram function requires dynamic argument spreading
+function repeat-str LOWERED fn_9 4 blocks
 function edit-batch-envelope-marker? PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-contains?: no native lowering for this callee
-function digest? LOWERED fn_9 4 blocks
-function nonblank? LOWERED fn_10 4 blocks
+function digest? LOWERED fn_10 4 blocks
+function nonblank? LOWERED fn_11 4 blocks
 function generation-record? PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form
-function valid-edit-batch-envelope? PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-set: no native lowering for this source form
+function valid-edit-batch-envelope? PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form
 function classify-rewrite-crash PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-COMPARE-OPERANDS: = has no native comparison for these operand types
-function log-envelope PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-map: no native lowering for this source form
+function log-envelope PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-MAP-LITERAL-ITEMS: keys and values must each share one native type
 function reject-message PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-STR-OPERANDS: str concatenates one or more native Text or Int operands
 function coord-write-response PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form
 function coord-version-response PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form
 function coord-version-for-log-response PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form
 function coord-status-response PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form
-function coord-status-down LOWERED fn_11 1 blocks
+function coord-status-down LOWERED fn_12 1 blocks
 function warm-read-response PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form
 function warm-read-for-log-response PENDING - TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form
 obligation-projection PASS valid-ssa

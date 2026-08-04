@@ -13,6 +13,8 @@ rt-core	is-iso-datetime-19	valid	PASS
 rt-core	is-iso-datetime-19	short	PASS
 rt-core	is-iso-datetime-16	valid	PASS
 rt-core	is-iso-datetime-16	long	PASS
+rt-core	repeat-str	positive	PASS
+rt-core	repeat-str	negative	PASS
 rt-core	digest?	valid	PASS
 rt-core	digest?	uppercase	PASS
 rt-core	nonblank?	text	PASS

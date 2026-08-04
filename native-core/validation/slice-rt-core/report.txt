@@ -3,9 +3,9 @@ stage source-to-typed ACCEPTED
 stage typed-to-native PENDING
 source-modules 1
 source-imports 1
-world-types 47
-world-functions 12
-world-abis 12
+world-types 39
+world-functions 13
+world-abis 13
 projected-types 10
 lowered fn_0 str-index-of 1 blocks
 lowered fn_1 split-comma 1 blocks
@@ -16,9 +16,10 @@ lowered fn_5 slugify 7 blocks
 lowered fn_6 filter-digits 1 blocks
 lowered fn_7 is-iso-datetime-19 4 blocks
 lowered fn_8 is-iso-datetime-16 4 blocks
-lowered fn_9 digest? 4 blocks
-lowered fn_10 nonblank? 4 blocks
-lowered fn_11 coord-status-down 1 blocks
+lowered fn_9 repeat-str 4 blocks
+lowered fn_10 digest? 4 blocks
+lowered fn_11 nonblank? 4 blocks
+lowered fn_12 coord-status-down 1 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts
@@ -26,12 +27,11 @@ obligation-projection PASS checked-arithmetic
 obligation-projection PASS legal-abi
 obligation-projection PASS discharged-tokens
 obligation-projection PASS bounded-effects
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-APPLY: no frozen Fram function requires dynamic argument spreading [repeat-str]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-CALL-contains?: no native lowering for this callee [edit-batch-envelope-marker?]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [generation-record?]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-set: no native lowering for this source form [valid-edit-batch-envelope?]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [valid-edit-batch-envelope?]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-COMPARE-OPERANDS: = has no native comparison for these operand types [classify-rewrite-crash]
-pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-map: no native lowering for this source form [log-envelope]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-MAP-LITERAL-ITEMS: keys and values must each share one native type [log-envelope]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-STR-OPERANDS: str concatenates one or more native Text or Int operands [reject-message]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [coord-write-response]
 pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-kw-access: no native lowering for this source form [coord-version-response]

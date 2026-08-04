@@ -12,8 +12,9 @@
 #define RT_FILTER_DIGITS native_m0_fn_6
 #define RT_IS_ISO_DATETIME_19 native_m0_fn_7
 #define RT_IS_ISO_DATETIME_16 native_m0_fn_8
-#define RT_DIGEST_P native_m0_fn_9
-#define RT_NONBLANK_P native_m0_fn_10
-#define RT_COORD_STATUS_DOWN native_m0_fn_11
+#define RT_REPEAT_STR native_m0_fn_9
+#define RT_DIGEST_P native_m0_fn_10
+#define RT_NONBLANK_P native_m0_fn_11
+#define RT_COORD_STATUS_DOWN native_m0_fn_12
 
 #endif
