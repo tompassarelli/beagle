@@ -3,9 +3,11 @@
 
 int64_t native_m0_fn_0(native_arena *arena, const native_capability *capability,
                        int64_t left, int64_t right);
+native_vec *native_m2_fn_0(native_arena *arena, const native_capability *capability,
+                           const native_vec *left, const native_vec *right);
 
 int main(void) {
-  uint8_t storage[64];
+  uint8_t storage[256];
   native_arena arena;
   native_capability capability = { UINT64_C(1) };
   native_arena_init(&arena, storage, sizeof(storage));
@@ -16,6 +18,24 @@ int main(void) {
   *slot = native_m0_fn_0(&arena, &capability, INT64_C(-1), INT64_C(1));
   if (*slot != INT64_C(0)) {
     return 2;
+  }
+  native_arena_reset(&arena);
+  int64_t left_items[] = { INT64_C(3), INT64_C(5) };
+  int64_t right_items[] = { INT64_C(8), INT64_C(13), INT64_C(21) };
+  const int64_t expected[] = { INT64_C(3), INT64_C(5), INT64_C(8),
+                               INT64_C(13), INT64_C(21) };
+  native_vec left = { left_items, INT64_C(2), INT64_C(2) };
+  native_vec right = { right_items, INT64_C(3), INT64_C(3) };
+  native_vec *joined = native_m2_fn_0(&arena, &capability, &left, &right);
+  if ((joined == &left) || (joined == &right) ||
+      (joined->length != INT64_C(5)) || (joined->capacity != INT64_C(5))) {
+    return 3;
+  }
+  if (memcmp(joined->elements, expected, sizeof(expected)) != 0) {
+    return 4;
+  }
+  if ((left.length != INT64_C(2)) || (right.length != INT64_C(3))) {
+    return 5;
   }
   native_arena_reset(&arena);
   return 0;

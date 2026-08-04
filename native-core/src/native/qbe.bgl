@@ -354,8 +354,11 @@
     (if (nil? definition)
       ""
       (let [shape: core/TypeShape (core/typedef-shape definition)]
-        (if (shape-aggregate? shape)
+        (cond
+          (shape-aggregate? shape)
           (str ":" (type-name module-index (type-index types type-id)))
+          (instance? native.core.VectorType shape) "l"
+          :else
           (let [kind: (U core/AtomKind Nil) (shape-atom-kind shape)]
             (if (or (nil? kind) (nil? layout))
               ""
@@ -375,6 +378,7 @@
       (let [shape: core/TypeShape (core/typedef-shape definition)]
         (cond
           (shape-aggregate? shape) "l"
+          (instance? native.core.VectorType shape) "l"
           (some? (shape-reference-target shape)) "l"
           :else
           (let [kind: (U core/AtomKind Nil) (shape-atom-kind shape)]
@@ -867,6 +871,35 @@
             alignment: Int (layout-align layouts resolved)]
         (if (<= alignment 0) 8 alignment)))))
 
+;; The shim copies opaque element bytes; the world layout supplies their
+;; stride and alignment without exposing the vector header to QBE.
+(defn vector-stride
+  [context: QbeFn
+   vector-type: core/NativeId] -> Int
+  (let [layout: (U core/LayoutDef Nil)
+        (layout-for-type (qbefn-layouts context) vector-type)]
+    (if (nil? layout)
+      0
+      (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+        (if (instance? native.core.VectorShapeV0 shape)
+          (core/vectorshapev0-stride-bytes shape)
+          0)))))
+
+(defn vector-element-alignment
+  [context: QbeFn
+   vector-type: core/NativeId] -> Int
+  (let [layout: (U core/LayoutDef Nil)
+        (layout-for-type (qbefn-layouts context) vector-type)]
+    (if (nil? layout)
+      0
+      (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+        (if (not (instance? native.core.VectorShapeV0 shape))
+          0
+          (let [element: (U core/LayoutDef Nil)
+                (layout-for-type (qbefn-layouts context)
+                  (core/vectorshapev0-element-type shape))]
+            (if (nil? element) 0 (core/layoutdef-align-bytes element))))))))
+
 (defn function-index
   [functions: (Vec core/FunctionDef)
    target: core/NativeId] -> Int
@@ -974,8 +1007,16 @@
       [(VecGetInstruction value) ""]
       [(VecPushInstruction value) ""]
       [(VecEmptyInstruction value) ""]
-      [(VecConcatInstruction value) ""]
-      [(ArenaInstruction value) ""]
+      [(VecConcatInstruction value)
+       (let [vector-type: core/NativeId (core/ssavaluev0-type-id result)]
+         (str "  " result-name " =l call $native_vec_concat(l "
+           (value-name context (core/vecconcatinstruction-arena-id instruction))
+           ", l " (value-name context (core/vecconcatinstruction-left-id instruction))
+           ", l " (value-name context (core/vecconcatinstruction-right-id instruction))
+           ", l " (vector-stride context vector-type)
+           ", l " (vector-element-alignment context vector-type) ")\n"))]
+      [(ArenaInstruction value)
+       (str "  " result-name " =l copy %arena\n")]
       [(TextLengthInstruction value) ""]
       [(TextSliceInstruction value) ""]
       [(TextConcatInstruction value) ""])))
@@ -1288,7 +1329,24 @@
                (not= (scalar-letter kind (core/layoutdef-size-bytes layout)) "")))]
           [(RecordType value) (> (core/layoutdef-size-bytes layout) 0)]
           [(UnionType value) (> (core/layoutdef-size-bytes layout) 0)]
-          [(VectorType value) false]
+          [(VectorType value)
+           (let [layout-shape: core/LayoutShapeV0 (core/layoutdef-shape layout)
+                 element-type: core/NativeId (core/vectortype-element-type shape)]
+             (if (not (instance? native.core.VectorShapeV0 layout-shape))
+               false
+               (let [element-layout: (U core/LayoutDef Nil)
+                     (layout-for-type layouts element-type)]
+                 (and (= (core/layoutdef-size-bytes layout) 8)
+                   (= (core/layoutdef-align-bytes layout) 8)
+                   (core/native-id= element-type
+                     (core/vectorshapev0-element-type layout-shape))
+                   (some? element-layout)
+                   (= (core/vectorshapev0-stride-bytes layout-shape)
+                     (if (nil? element-layout) 0
+                       (core/layoutdef-size-bytes element-layout)))
+                   (> (if (nil? element-layout) 0
+                        (core/layoutdef-align-bytes element-layout))
+                     0)))))]
           [(ReferenceType value) false]
           [(OutcomeType value) false])))))
 
@@ -1327,8 +1385,8 @@
     [(VecGetInstruction value) false]
     [(VecPushInstruction value) false]
     [(VecEmptyInstruction value) false]
-    [(VecConcatInstruction value) false]
-    [(ArenaInstruction value) false]
+    [(VecConcatInstruction value) true]
+    [(ArenaInstruction value) true]
     [(TextLengthInstruction value) false]
     [(TextSliceInstruction value) false]
     [(TextConcatInstruction value) false]))
@@ -1406,7 +1464,7 @@
    module-index: Int] -> String
   (let [type-text: String (emit-types types layouts module-index)]
     (str "# Generated by native.qbe; do not edit.\n"
-      "# module " module-index "; shim ABI native_arena_alloc/native_trap\n\n"
+      "# module " module-index "; shim ABI native_arena_alloc/native_vec_concat/native_trap\n\n"
       type-text
       (if (= (count type-text) 0) "" "\n")
       (emit-functions types layouts functions module-index))))

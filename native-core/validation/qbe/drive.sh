@@ -49,21 +49,22 @@ emit() {
 emit "$work/run-a"
 emit "$work/run-b"
 
-for name in module_0.ssa module_1.ssa qbe_main.c; do
+for name in module_0.ssa module_1.ssa module_2.ssa qbe_main.c; do
   cmp -s "$work/run-a/$name" "$work/run-b/$name" \
     || { echo "drive.sh: re-emission is not byte-identical for $name" >&2; exit 1; }
   cp "$work/run-a/$name" "$artifacts/$name"
 done
 
-( cd "$artifacts" && sha256sum module_0.ssa module_1.ssa > determinism.txt )
+( cd "$artifacts" && sha256sum module_0.ssa module_1.ssa module_2.ssa > determinism.txt )
 cat > "$artifacts/provenance.txt" <<'PROV'
 module_0.ssa  native.qbe over the native.c11-validation-corpus fixture world (module 0)
 module_1.ssa  native.qbe over the native.qbe-validation-corpus slice world (module 1)
-qbe_main.c    C driver for module_0; links by the native_shim ABI only
+module_2.ssa  native.qbe over the native.qbe-validation-corpus vector concat world (module 2)
+qbe_main.c    C driver for modules 0 and 2; links by the native_shim ABI only
 determinism   two independent emitter runs compared byte-for-byte, plus a
               permuted-world equality assertion inside the corpus
 PROV
-echo "drive.sh: emitted $artifacts/module_0.ssa $artifacts/module_1.ssa (two runs, byte-identical)"
+echo "drive.sh: emitted $artifacts/module_0.ssa $artifacts/module_1.ssa $artifacts/module_2.ssa (two runs, byte-identical)"
 cat "$artifacts/determinism.txt"
 
 qbe_bin=""
@@ -92,11 +93,12 @@ build="$work/c"
 mkdir -p "$build"
 run_qbe "$artifacts/module_0.ssa" > "$build/module_0.s"
 run_qbe "$artifacts/module_1.ssa" > "$build/module_1.s"
+run_qbe "$artifacts/module_2.ssa" > "$build/module_2.s"
 cp "$artifacts/qbe_main.c" "$build/"
 cp "$repo/native-core/shim/native_shim.c" "$repo/native-core/shim/native_shim.h" "$build/"
 
 ( cd "$build" && cc -std=c17 -Wall -Wextra -Werror -c native_shim.c -o native_shim.o )
 ( cd "$build" && cc -std=c17 -Wall -Wextra -Werror -c qbe_main.c -o qbe_main.o )
-( cd "$build" && cc module_0.s module_1.s qbe_main.o native_shim.o -o probe_qbe )
+( cd "$build" && cc module_0.s module_1.s module_2.s qbe_main.o native_shim.o -o probe_qbe )
 ( cd "$build" && ./probe_qbe )
 echo "drive.sh: qbe assemble + link + run ok"
