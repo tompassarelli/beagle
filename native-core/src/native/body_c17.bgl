@@ -1733,16 +1733,31 @@
       (instance? native.core.ValueSemanticsInstruction instruction)
       (let [operation: core/ValueSemanticsOpV0
             (core/valuesemanticsinstruction-operation instruction)]
-        (if (instance? native.core.ValueEqualV0 operation)
+        (match operation
+          [(ValueEqualV0 domain-type left-id right-id)
           (str "  " target " = native_value_equal(&"
-            (descriptor-symbol types module-index
-              (core/valueequalv0-domain-type operation))
+            (descriptor-symbol types module-index domain-type)
             ", &"
-            (value-name function slots (core/valueequalv0-left-id operation))
+            (value-name function slots left-id)
             ", &"
-            (value-name function slots (core/valueequalv0-right-id operation))
-            ");\n")
-          ""))
+            (value-name function slots right-id)
+            ");\n")]
+
+          [(ValueHashV0 domain-type value-id)
+           (str "  " target " = native_value_hash(&"
+             (descriptor-symbol types module-index domain-type)
+             ", &"
+             (value-name function slots value-id)
+             ");\n")]
+
+          [(ValueCompareV0 domain-type left-id right-id)
+           (str "  " target " = native_value_compare(&"
+             (descriptor-symbol types module-index domain-type)
+             ", &"
+             (value-name function slots left-id)
+             ", &"
+             (value-name function slots right-id)
+             ");\n")]))
 
       (instance? native.core.ValueToTextInstructionV0 instruction)
       (str "  " target " = native_value_to_text((native_arena *)"

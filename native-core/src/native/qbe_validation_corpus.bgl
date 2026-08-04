@@ -664,6 +664,73 @@
     []
     []))
 
+(def refusal-value-hash-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "ref-val-hsh-blk")
+    []
+    [(core/->ValueSemanticsInstruction
+       (core/->SsaValueV0 (slice-id "ref-val-hsh-out") (slice-id "type-0-i64"))
+       (core/->ValueHashV0 (slice-id "type-3-par")
+         (slice-id "ref-val-hsh-val")))]
+    [(core/return-terminator (slice-id "ref-val-hsh-out"))]))
+
+(def refusal-value-hash-function: core/FunctionDef
+  (core/->FunctionDef (slice-id "ref-val-hsh-fn") "refuse-value-hash"
+    [(core/->Parameter (slice-id "ref-val-hsh-val") (slice-id "type-3-par"))]
+    [refusal-value-hash-block]
+    (slice-id "ref-val-hsh-blk")
+    (slice-id "type-0-i64")
+    []
+    []
+    []))
+
+(def refusal-value-hash-world: core/NativeWorld
+  (core/->NativeWorld (slice-id "ref-val-hsh-wld") nil "native-qbe-fixture-v0"
+    [slice-i64-type slice-pair-type]
+    []
+    []
+    []
+    [slice-i64-layout slice-pair-layout]
+    [refusal-value-hash-function]
+    []
+    []
+    []
+    []
+    []))
+
+(def refusal-value-compare-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "ref-val-cmp-blk")
+    []
+    [(core/->ValueSemanticsInstruction
+       (core/->SsaValueV0 (slice-id "ref-val-cmp-out") (slice-id "type-0-i64"))
+       (core/->ValueCompareV0 (slice-id "type-3-par")
+         (slice-id "ref-val-cmp-left") (slice-id "ref-val-cmp-right")))]
+    [(core/return-terminator (slice-id "ref-val-cmp-out"))]))
+
+(def refusal-value-compare-function: core/FunctionDef
+  (core/->FunctionDef (slice-id "ref-val-cmp-fn") "refuse-value-compare"
+    [(core/->Parameter (slice-id "ref-val-cmp-left") (slice-id "type-3-par"))
+     (core/->Parameter (slice-id "ref-val-cmp-right") (slice-id "type-3-par"))]
+    [refusal-value-compare-block]
+    (slice-id "ref-val-cmp-blk")
+    (slice-id "type-0-i64")
+    []
+    []
+    []))
+
+(def refusal-value-compare-world: core/NativeWorld
+  (core/->NativeWorld (slice-id "ref-val-cmp-wld") nil "native-qbe-fixture-v0"
+    [slice-i64-type slice-pair-type]
+    []
+    []
+    []
+    [slice-i64-layout slice-pair-layout]
+    [refusal-value-compare-function]
+    []
+    []
+    []
+    []
+    []))
+
 (def refusal-value-text-type: core/TypeDef
   (core/->TypeDef (slice-id "ref-val-txt-typ") "Text"
     (core/->AtomType (core/->TextKind true))))
@@ -952,6 +1019,22 @@
       [(QbeFailure value)
        (= "unsupported native value-semantics op: equal" value)])))
 
+(def refusal-value-hash-proven?: Bool
+  (and (core/validationreport-passed
+         (core/validate-world refusal-value-hash-world))
+    (match (qbe/materialize-world refusal-value-hash-world 3)
+      [(QbeSuccess value) false]
+      [(QbeFailure value)
+       (= "unsupported native value-semantics op: hash" value)])))
+
+(def refusal-value-compare-proven?: Bool
+  (and (core/validationreport-passed
+         (core/validate-world refusal-value-compare-world))
+    (match (qbe/materialize-world refusal-value-compare-world 3)
+      [(QbeSuccess value) false]
+      [(QbeFailure value)
+       (= "unsupported native value-semantics op: compare" value)])))
+
 (def refusal-value-to-text-proven?: Bool
   (and (core/validationreport-passed
          (core/validate-world refusal-value-to-text-world))
@@ -989,6 +1072,8 @@
     refusal-map-proven?
     refusal-set-proven?
     refusal-value-equal-proven?
+    refusal-value-hash-proven?
+    refusal-value-compare-proven?
     refusal-value-to-text-proven?
     atom-refusal-proven?
     (= (qbe/qbeartifact-module-text fixture-artifact)

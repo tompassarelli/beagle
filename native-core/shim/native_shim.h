@@ -217,8 +217,18 @@ native_set *native_set_disj(native_arena *arena, native_set *set,
 native_vec *native_set_vector(native_arena *arena, const native_set *set,
                               size_t alignment);
 
+/* Value semantics recurse through the sealed descriptor graph. Hash is a
+   nonnegative 63-bit FNV-1a digest over a kind-separated, low-byte-first
+   structural stream. Compare returns only -1, 0, or 1: records and vectors are
+   lexicographic, unions compare tag then payload, and Text compares UTF-8
+   bytes. Float zeros coalesce; NaNs hash canonically and sort after numbers,
+   ordered among themselves by representation. */
 bool native_value_equal(const native_value_descriptor *descriptor,
                         const void *left, const void *right);
+int64_t native_value_hash(const native_value_descriptor *descriptor,
+                          const void *value);
+int64_t native_value_compare(const native_value_descriptor *descriptor,
+                             const void *left, const void *right);
 uint64_t native_value_to_text(native_arena *arena,
                               const native_value_descriptor *descriptor,
                               const void *value,

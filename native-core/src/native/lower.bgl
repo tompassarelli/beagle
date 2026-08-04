@@ -6859,10 +6859,6 @@
                           (nth values 0) (nth values 1))))
                     result-id (int-type-id) false))
 
-                (= "compare" callee)
-                (fail-result current
-                  "TODO-NATIVE-TEXT-COMPARE-OPERANDS: compare takes two native Text operands")
-
                 (and (= "str/trim" callee) (= 1 (count values))
                   (text-operand? (nth value-types 0)))
                 (let [result-id: core/NativeId
@@ -7641,6 +7637,39 @@
                 (= "vec" callee)
                 (fail-result current
                   "TODO-NATIVE-VEC-OPERAND: vec lowers a native vector or a closed insertion-order set")
+
+                (and (= "hash" callee) (= 1 (count values))
+                  (value-semantics-type? types (nth value-types 0)))
+                (let [result-id: core/NativeId
+                      (state-id current owner "value-hash")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->ValueSemanticsInstruction
+                        (core/->SsaValueV0 result-id (int-type-id))
+                        (core/->ValueHashV0 (nth value-types 0)
+                          (nth values 0))))
+                    result-id (int-type-id) false))
+
+                (= "hash" callee)
+                (fail-result current
+                  "TODO-NATIVE-HASH-OPERAND: hash takes one closed composite value")
+
+                (and (= "compare" callee) (= 2 (count values))
+                  (same-id? (nth value-types 0) (nth value-types 1))
+                  (value-semantics-type? types (nth value-types 0)))
+                (let [result-id: core/NativeId
+                      (state-id current owner "value-compare")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->ValueSemanticsInstruction
+                        (core/->SsaValueV0 result-id (int-type-id))
+                        (core/->ValueCompareV0 (nth value-types 0)
+                          (nth values 0) (nth values 1))))
+                    result-id (int-type-id) false))
+
+                (= "compare" callee)
+                (fail-result current
+                  "TODO-NATIVE-VALUE-COMPARE-OPERANDS: compare takes two closed composite values of the same type")
 
                 (and (= "=" callee) (= 2 (count values))
                   (same-id? (nth value-types 0) (nth value-types 1))
@@ -9975,6 +10004,12 @@
   (match operation
     [(ValueEqualV0 domain-type left-id right-id)
      (worlds/canonical-record "value-equal-v0"
+       [(id-value domain-type) (id-value left-id) (id-value right-id)])]
+    [(ValueHashV0 domain-type value-id)
+     (worlds/canonical-record "value-hash-v0"
+       [(id-value domain-type) (id-value value-id)])]
+    [(ValueCompareV0 domain-type left-id right-id)
+     (worlds/canonical-record "value-compare-v0"
        [(id-value domain-type) (id-value left-id) (id-value right-id)])]))
 
 (defn encode-codec-primitive-operation [operation: core/CodecPrimitiveOpV0] -> String

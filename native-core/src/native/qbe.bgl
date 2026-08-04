@@ -1858,7 +1858,9 @@
 
 (defn value-semantics-operation-name [operation: core/ValueSemanticsOpV0] -> String
   (match operation
-    [(ValueEqualV0 domain-type left-id right-id) "equal"]))
+    [(ValueEqualV0 domain-type left-id right-id) "equal"]
+    [(ValueHashV0 domain-type value-id) "hash"]
+    [(ValueCompareV0 domain-type left-id right-id) "compare"]))
 
 (defn unsupported-block-value-semantics [block: core/BasicBlock] -> (U String Nil)
   (let [instructions: (Vec core/Instruction)

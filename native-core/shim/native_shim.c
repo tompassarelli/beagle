@@ -689,6 +689,19 @@ static bool native_value_descriptor_valid(
          ((descriptor->alignment & (descriptor->alignment - 1U)) == 0U);
 }
 
+static void native_value_vector_validate(
+    const native_value_descriptor *descriptor, const native_vec *vector) {
+  if ((vector == NULL) ||
+      !native_value_descriptor_valid(descriptor->element) ||
+      (descriptor->stride < descriptor->element->size) ||
+      ((descriptor->stride % descriptor->element->alignment) != 0U) ||
+      (vector->length < INT64_C(0)) || (vector->length > vector->capacity) ||
+      ((uint64_t)vector->length > (uint64_t)(SIZE_MAX / descriptor->stride)) ||
+      ((vector->length > INT64_C(0)) && (vector->elements == NULL))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+}
+
 static const native_value_variant_descriptor *native_value_variant(
     const native_value_descriptor *descriptor, int64_t tag) {
   size_t index;
@@ -858,6 +871,500 @@ static bool native_value_equal_inner(const native_value_descriptor *descriptor,
 bool native_value_equal(const native_value_descriptor *descriptor,
                         const void *left, const void *right) {
   return native_value_equal_inner(descriptor, left, right);
+}
+
+#define NATIVE_VALUE_HASH_OFFSET UINT64_C(14695981039346656037)
+#define NATIVE_VALUE_HASH_PRIME UINT64_C(1099511628211)
+
+static uint64_t native_value_semantic_unsigned(const void *value, size_t size) {
+  if (size == sizeof(uint8_t)) {
+    uint8_t result;
+    memcpy(&result, value, sizeof result);
+    return (uint64_t)result;
+  }
+  if (size == sizeof(uint16_t)) {
+    uint16_t result;
+    memcpy(&result, value, sizeof result);
+    return (uint64_t)result;
+  }
+  if (size == sizeof(uint32_t)) {
+    uint32_t result;
+    memcpy(&result, value, sizeof result);
+    return (uint64_t)result;
+  }
+  if (size == sizeof(uint64_t)) {
+    uint64_t result;
+    memcpy(&result, value, sizeof result);
+    return result;
+  }
+  native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+}
+
+static int64_t native_value_semantic_signed(const void *value, size_t size) {
+  if (size == sizeof(int8_t)) {
+    int8_t result;
+    memcpy(&result, value, sizeof result);
+    return (int64_t)result;
+  }
+  if (size == sizeof(int16_t)) {
+    int16_t result;
+    memcpy(&result, value, sizeof result);
+    return (int64_t)result;
+  }
+  if (size == sizeof(int32_t)) {
+    int32_t result;
+    memcpy(&result, value, sizeof result);
+    return (int64_t)result;
+  }
+  if (size == sizeof(int64_t)) {
+    int64_t result;
+    memcpy(&result, value, sizeof result);
+    return result;
+  }
+  native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+}
+
+static void native_value_hash_byte(uint64_t *state, uint8_t value) {
+  *state ^= (uint64_t)value;
+  *state *= NATIVE_VALUE_HASH_PRIME;
+}
+
+/* Canonical low-byte-first encoding makes the hash independent of host byte
+   order while retaining the full fixed-width semantic value. */
+static void native_value_hash_u64(uint64_t *state, uint64_t value) {
+  uint32_t shift;
+  for (shift = UINT32_C(0); shift < UINT32_C(64); shift += UINT32_C(8)) {
+    native_value_hash_byte(state, (uint8_t)(value >> shift));
+  }
+}
+
+static void native_value_hash_float(
+    const native_value_descriptor *descriptor, const void *value,
+    uint64_t *state) {
+  if (descriptor->size == sizeof(float)) {
+    float number;
+    uint32_t bits;
+    memcpy(&number, value, sizeof number);
+    memcpy(&bits, value, sizeof bits);
+    if (number == 0.0F) {
+      bits = UINT32_C(0);
+    } else if (number != number) {
+      bits = UINT32_C(0x7fc00000);
+    }
+    native_value_hash_u64(state, (uint64_t)bits);
+    return;
+  }
+  if (descriptor->size == sizeof(double)) {
+    double number;
+    uint64_t bits;
+    memcpy(&number, value, sizeof number);
+    memcpy(&bits, value, sizeof bits);
+    if (number == 0.0) {
+      bits = UINT64_C(0);
+    } else if (number != number) {
+      bits = UINT64_C(0x7ff8000000000000);
+    }
+    native_value_hash_u64(state, bits);
+    return;
+  }
+  native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+}
+
+static void native_value_hash_inner(const native_value_descriptor *descriptor,
+                                    const void *value, uint64_t *state) {
+  size_t index;
+  if (!native_value_descriptor_valid(descriptor) || (value == NULL) ||
+      (state == NULL)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_value_hash_u64(state, (uint64_t)descriptor->kind);
+  switch (descriptor->kind) {
+    case NATIVE_VALUE_BOOL: {
+      bool boolean;
+      if (descriptor->size != sizeof boolean) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      memcpy(&boolean, value, sizeof boolean);
+      native_value_hash_u64(state, boolean ? UINT64_C(1) : UINT64_C(0));
+      return;
+    }
+
+    case NATIVE_VALUE_SIGNED:
+      native_value_hash_u64(
+          state, (uint64_t)native_value_semantic_signed(value, descriptor->size));
+      return;
+
+    case NATIVE_VALUE_UNSIGNED:
+    case NATIVE_VALUE_KEYWORD:
+      native_value_hash_u64(
+          state, native_value_semantic_unsigned(value, descriptor->size));
+      return;
+
+    case NATIVE_VALUE_FLOAT:
+      native_value_hash_float(descriptor, value, state);
+      return;
+
+    case NATIVE_VALUE_TEXT: {
+      uint64_t handle;
+      uint64_t length;
+      const uint8_t *bytes;
+      uint64_t offset;
+      if (descriptor->size != sizeof handle) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      memcpy(&handle, value, sizeof handle);
+      length = native_text_length(handle);
+      bytes = native_text_bytes(handle);
+      native_value_hash_u64(state, length);
+      for (offset = UINT64_C(0); offset < length; offset++) {
+        native_value_hash_byte(state, bytes[offset]);
+      }
+      return;
+    }
+
+    case NATIVE_VALUE_BYTES: {
+      native_bytes bytes;
+      size_t offset;
+      if (descriptor->size != sizeof bytes) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      memcpy(&bytes, value, sizeof bytes);
+      if ((bytes.data == NULL) && (bytes.length != 0U)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      native_value_hash_u64(state, (uint64_t)bytes.length);
+      for (offset = 0U; offset < bytes.length; offset++) {
+        native_value_hash_byte(state, bytes.data[offset]);
+      }
+      return;
+    }
+
+    case NATIVE_VALUE_RECORD:
+      if ((descriptor->fields == NULL) && (descriptor->field_count != 0U)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      native_value_hash_u64(state, (uint64_t)descriptor->field_count);
+      for (index = 0U; index < descriptor->field_count; index++) {
+        const native_value_field_descriptor *field = &descriptor->fields[index];
+        native_value_hash_inner(field->value,
+                                (const uint8_t *)value + field->offset, state);
+      }
+      return;
+
+    case NATIVE_VALUE_UNION: {
+      int64_t tag;
+      const native_value_variant_descriptor *variant;
+      memcpy(&tag, (const uint8_t *)value + descriptor->tag_offset, sizeof tag);
+      variant = native_value_variant(descriptor, tag);
+      native_value_hash_u64(state, (uint64_t)tag);
+      if (variant->payload != NULL) {
+        native_value_hash_inner(
+            variant->payload,
+            (const uint8_t *)value + variant->payload_offset, state);
+      }
+      return;
+    }
+
+    case NATIVE_VALUE_VECTOR: {
+      const native_vec *vector;
+      memcpy(&vector, value, sizeof vector);
+      native_value_vector_validate(descriptor, vector);
+      native_value_hash_u64(state, (uint64_t)vector->length);
+      for (index = 0U; index < (size_t)vector->length; index++) {
+        native_value_hash_inner(
+            descriptor->element,
+            (const uint8_t *)vector->elements + (index * descriptor->stride),
+            state);
+      }
+      return;
+    }
+
+    case NATIVE_VALUE_REFERENCE: {
+      const void *reference;
+      if ((descriptor->size != sizeof reference) ||
+          !native_value_descriptor_valid(descriptor->element)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      memcpy(&reference, value, sizeof reference);
+      if (reference == NULL) {
+        native_value_hash_u64(state, UINT64_C(0));
+      } else {
+        native_value_hash_u64(state, UINT64_C(1));
+        native_value_hash_inner(descriptor->element, reference, state);
+      }
+      return;
+    }
+
+    case NATIVE_VALUE_MAP:
+      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+}
+
+int64_t native_value_hash(const native_value_descriptor *descriptor,
+                          const void *value) {
+  uint64_t state = NATIVE_VALUE_HASH_OFFSET;
+  native_value_hash_inner(descriptor, value, &state);
+  return (int64_t)(state & UINT64_C(0x7fffffffffffffff));
+}
+
+static int64_t native_value_order_i64(int64_t left, int64_t right) {
+  return (left < right) ? INT64_C(-1) : ((left > right) ? INT64_C(1) : INT64_C(0));
+}
+
+static int64_t native_value_order_u64(uint64_t left, uint64_t right) {
+  return (left < right) ? INT64_C(-1) : ((left > right) ? INT64_C(1) : INT64_C(0));
+}
+
+static int64_t native_value_compare_float(
+    const native_value_descriptor *descriptor, const void *left,
+    const void *right) {
+  if (descriptor->size == sizeof(float)) {
+    float left_number;
+    float right_number;
+    uint32_t left_bits;
+    uint32_t right_bits;
+    bool left_nan;
+    bool right_nan;
+    memcpy(&left_number, left, sizeof left_number);
+    memcpy(&right_number, right, sizeof right_number);
+    memcpy(&left_bits, left, sizeof left_bits);
+    memcpy(&right_bits, right, sizeof right_bits);
+    left_nan = left_number != left_number;
+    right_nan = right_number != right_number;
+    if (left_nan || right_nan) {
+      if (left_nan && right_nan) {
+        return native_value_order_u64((uint64_t)left_bits,
+                                      (uint64_t)right_bits);
+      }
+      return left_nan ? INT64_C(1) : INT64_C(-1);
+    }
+    if (left_number == right_number) {
+      return INT64_C(0);
+    }
+    return (left_number < right_number) ? INT64_C(-1) : INT64_C(1);
+  }
+  if (descriptor->size == sizeof(double)) {
+    double left_number;
+    double right_number;
+    uint64_t left_bits;
+    uint64_t right_bits;
+    bool left_nan;
+    bool right_nan;
+    memcpy(&left_number, left, sizeof left_number);
+    memcpy(&right_number, right, sizeof right_number);
+    memcpy(&left_bits, left, sizeof left_bits);
+    memcpy(&right_bits, right, sizeof right_bits);
+    left_nan = left_number != left_number;
+    right_nan = right_number != right_number;
+    if (left_nan || right_nan) {
+      if (left_nan && right_nan) {
+        return native_value_order_u64(left_bits, right_bits);
+      }
+      return left_nan ? INT64_C(1) : INT64_C(-1);
+    }
+    if (left_number == right_number) {
+      return INT64_C(0);
+    }
+    return (left_number < right_number) ? INT64_C(-1) : INT64_C(1);
+  }
+  native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+}
+
+static int64_t native_value_compare_text(const void *left, const void *right) {
+  uint64_t left_handle;
+  uint64_t right_handle;
+  uint64_t left_length;
+  uint64_t right_length;
+  uint64_t common;
+  int compared;
+  memcpy(&left_handle, left, sizeof left_handle);
+  memcpy(&right_handle, right, sizeof right_handle);
+  left_length = native_text_length(left_handle);
+  right_length = native_text_length(right_handle);
+  common = (left_length < right_length) ? left_length : right_length;
+  if (common > (uint64_t)SIZE_MAX) {
+    native_trap(NATIVE_TRAP_OVERFLOW);
+  }
+  compared = memcmp(native_text_bytes(left_handle), native_text_bytes(right_handle),
+                    (size_t)common);
+  if (compared < 0) {
+    return INT64_C(-1);
+  }
+  if (compared > 0) {
+    return INT64_C(1);
+  }
+  return native_value_order_u64(left_length, right_length);
+}
+
+static int64_t native_value_compare_bytes(const void *left, const void *right) {
+  native_bytes left_bytes;
+  native_bytes right_bytes;
+  size_t common;
+  int compared;
+  memcpy(&left_bytes, left, sizeof left_bytes);
+  memcpy(&right_bytes, right, sizeof right_bytes);
+  if (((left_bytes.data == NULL) && (left_bytes.length != 0U)) ||
+      ((right_bytes.data == NULL) && (right_bytes.length != 0U))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  common = (left_bytes.length < right_bytes.length) ? left_bytes.length
+                                                    : right_bytes.length;
+  compared = (common == 0U) ? 0 : memcmp(left_bytes.data, right_bytes.data, common);
+  if (compared < 0) {
+    return INT64_C(-1);
+  }
+  if (compared > 0) {
+    return INT64_C(1);
+  }
+  return (left_bytes.length < right_bytes.length)
+             ? INT64_C(-1)
+             : ((left_bytes.length > right_bytes.length) ? INT64_C(1)
+                                                         : INT64_C(0));
+}
+
+static int64_t native_value_compare_inner(
+    const native_value_descriptor *descriptor, const void *left,
+    const void *right) {
+  size_t index;
+  if (!native_value_descriptor_valid(descriptor) || (left == NULL) ||
+      (right == NULL)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  switch (descriptor->kind) {
+    case NATIVE_VALUE_BOOL: {
+      bool left_boolean;
+      bool right_boolean;
+      if (descriptor->size != sizeof left_boolean) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      memcpy(&left_boolean, left, sizeof left_boolean);
+      memcpy(&right_boolean, right, sizeof right_boolean);
+      return native_value_order_u64(left_boolean ? UINT64_C(1) : UINT64_C(0),
+                                    right_boolean ? UINT64_C(1) : UINT64_C(0));
+    }
+
+    case NATIVE_VALUE_SIGNED:
+      return native_value_order_i64(
+          native_value_semantic_signed(left, descriptor->size),
+          native_value_semantic_signed(right, descriptor->size));
+
+    case NATIVE_VALUE_UNSIGNED:
+    case NATIVE_VALUE_KEYWORD:
+      return native_value_order_u64(
+          native_value_semantic_unsigned(left, descriptor->size),
+          native_value_semantic_unsigned(right, descriptor->size));
+
+    case NATIVE_VALUE_FLOAT:
+      return native_value_compare_float(descriptor, left, right);
+
+    case NATIVE_VALUE_TEXT:
+      if (descriptor->size != sizeof(uint64_t)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      return native_value_compare_text(left, right);
+
+    case NATIVE_VALUE_BYTES:
+      if (descriptor->size != sizeof(native_bytes)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      return native_value_compare_bytes(left, right);
+
+    case NATIVE_VALUE_RECORD:
+      if ((descriptor->fields == NULL) && (descriptor->field_count != 0U)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      for (index = 0U; index < descriptor->field_count; index++) {
+        const native_value_field_descriptor *field = &descriptor->fields[index];
+        int64_t compared = native_value_compare_inner(
+            field->value, (const uint8_t *)left + field->offset,
+            (const uint8_t *)right + field->offset);
+        if (compared != INT64_C(0)) {
+          return compared;
+        }
+      }
+      return INT64_C(0);
+
+    case NATIVE_VALUE_UNION: {
+      int64_t left_tag;
+      int64_t right_tag;
+      const native_value_variant_descriptor *variant;
+      memcpy(&left_tag, (const uint8_t *)left + descriptor->tag_offset,
+             sizeof left_tag);
+      memcpy(&right_tag, (const uint8_t *)right + descriptor->tag_offset,
+             sizeof right_tag);
+      if (left_tag != right_tag) {
+        return native_value_order_i64(left_tag, right_tag);
+      }
+      variant = native_value_variant(descriptor, left_tag);
+      if (variant->payload == NULL) {
+        return INT64_C(0);
+      }
+      return native_value_compare_inner(
+          variant->payload, (const uint8_t *)left + variant->payload_offset,
+          (const uint8_t *)right + variant->payload_offset);
+    }
+
+    case NATIVE_VALUE_VECTOR: {
+      const native_vec *left_vector;
+      const native_vec *right_vector;
+      size_t common;
+      memcpy(&left_vector, left, sizeof left_vector);
+      memcpy(&right_vector, right, sizeof right_vector);
+      native_value_vector_validate(descriptor, left_vector);
+      if (left_vector == right_vector) {
+        return INT64_C(0);
+      }
+      native_value_vector_validate(descriptor, right_vector);
+      common = (size_t)((left_vector->length < right_vector->length)
+                            ? left_vector->length
+                            : right_vector->length);
+      for (index = 0U; index < common; index++) {
+        int64_t compared = native_value_compare_inner(
+            descriptor->element,
+            (const uint8_t *)left_vector->elements +
+                (index * descriptor->stride),
+            (const uint8_t *)right_vector->elements +
+                (index * descriptor->stride));
+        if (compared != INT64_C(0)) {
+          return compared;
+        }
+      }
+      return native_value_order_i64(left_vector->length,
+                                    right_vector->length);
+    }
+
+    case NATIVE_VALUE_REFERENCE: {
+      const void *left_reference;
+      const void *right_reference;
+      if ((descriptor->size != sizeof left_reference) ||
+          !native_value_descriptor_valid(descriptor->element)) {
+        native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+      }
+      memcpy(&left_reference, left, sizeof left_reference);
+      memcpy(&right_reference, right, sizeof right_reference);
+      if (left_reference == right_reference) {
+        return INT64_C(0);
+      }
+      if (left_reference == NULL) {
+        return INT64_C(-1);
+      }
+      if (right_reference == NULL) {
+        return INT64_C(1);
+      }
+      return native_value_compare_inner(descriptor->element, left_reference,
+                                        right_reference);
+    }
+
+    case NATIVE_VALUE_MAP:
+      native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+}
+
+int64_t native_value_compare(const native_value_descriptor *descriptor,
+                             const void *left, const void *right) {
+  return native_value_compare_inner(descriptor, left, right);
 }
 
 #define NATIVE_VALUE_TEXT_MAX_DEPTH 128U

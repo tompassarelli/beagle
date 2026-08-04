@@ -28,3 +28,11 @@
   [left: Any
    right: Any] -> Bool
   (= left right))
+
+(defn any-hash [value: Any] -> Int
+  (hash value))
+
+(defn any-compare
+  [left: Any
+   right: Any] -> Int
+  (compare left right))

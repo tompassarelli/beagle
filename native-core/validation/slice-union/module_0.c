@@ -44,7 +44,11 @@ const native_value_descriptor native_m0_value_0 = {
   .variants = NULL,
   .variant_count = (size_t)0,
   .element = NULL,
-  .stride = (size_t)0
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
 };
 const native_value_descriptor native_m0_value_1 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
@@ -57,7 +61,11 @@ const native_value_descriptor native_m0_value_1 = {
   .variants = NULL,
   .variant_count = (size_t)0,
   .element = NULL,
-  .stride = (size_t)0
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
 };
 const native_value_descriptor native_m0_value_2 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
@@ -70,7 +78,11 @@ const native_value_descriptor native_m0_value_2 = {
   .variants = NULL,
   .variant_count = (size_t)0,
   .element = NULL,
-  .stride = (size_t)0
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
 };
 const native_value_descriptor native_m0_value_3 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
@@ -83,7 +95,11 @@ const native_value_descriptor native_m0_value_3 = {
   .variants = NULL,
   .variant_count = (size_t)0,
   .element = NULL,
-  .stride = (size_t)0
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
 };
 const native_value_descriptor native_m0_value_4 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
@@ -96,7 +112,11 @@ const native_value_descriptor native_m0_value_4 = {
   .variants = NULL,
   .variant_count = (size_t)0,
   .element = NULL,
-  .stride = (size_t)0
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
 };
 const native_value_descriptor native_m0_value_5 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
@@ -109,7 +129,11 @@ const native_value_descriptor native_m0_value_5 = {
   .variants = NULL,
   .variant_count = (size_t)0,
   .element = NULL,
-  .stride = (size_t)0
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
 };
 const native_value_descriptor native_m0_value_6 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
@@ -122,7 +146,11 @@ const native_value_descriptor native_m0_value_6 = {
   .variants = NULL,
   .variant_count = (size_t)0,
   .element = NULL,
-  .stride = (size_t)0
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
 };
 const native_value_descriptor native_m0_value_7 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
@@ -135,7 +163,11 @@ const native_value_descriptor native_m0_value_7 = {
   .variants = native_m0_value_7_variants,
   .variant_count = (size_t)6,
   .element = NULL,
-  .stride = (size_t)0
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
 };
 const native_value_descriptor native_m0_value_8 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
@@ -148,7 +180,11 @@ const native_value_descriptor native_m0_value_8 = {
   .variants = NULL,
   .variant_count = (size_t)0,
   .element = &native_m0_value_2,
-  .stride = (size_t)0
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
 };
 const native_value_descriptor native_m0_value_9 = {
   .abi_version = NATIVE_VALUE_ABI_VERSION,
@@ -161,10 +197,15 @@ const native_value_descriptor native_m0_value_9 = {
   .variants = native_m0_value_9_variants,
   .variant_count = (size_t)7,
   .element = NULL,
-  .stride = (size_t)0
+  .stride = (size_t)0,
+  .map_key = NULL,
+  .map_value = NULL,
+  .keywords = NULL,
+  .keyword_count = (size_t)0
 };
 
 native_m0_type_1 native_m0_fn_0(native_m0_type_9 native_v_0) {
+  (void)native_v_0;
   native_m0_type_1 native_s_0;
   native_m0_type_1 native_s_1;
   native_m0_type_1 native_s_2;
@@ -188,21 +229,25 @@ native_m0_type_1 native_m0_fn_0(native_m0_type_9 native_v_0) {
   }
 native_l0_1: ;
   native_s_0 = true;
+  (void)native_s_0;
   native_s_2 = native_s_0;
   goto native_l0_3;
 native_l0_2: ;
   native_s_1 = false;
+  (void)native_s_1;
   native_s_2 = native_s_1;
   goto native_l0_3;
 native_l0_3: ;
   return native_s_2;
 }
 native_m0_type_9 native_m0_fn_1(native_m0_type_0 native_v_0) {
+  (void)native_v_0;
   native_m0_type_9 native_s_0;
   native_s_0 = (native_m0_type_9){ .tag = INT64_C(1), .payload = { .variant_1 = native_v_0 } };
   return native_s_0;
 }
 native_m0_type_0 native_m0_fn_2(native_m0_type_9 native_v_0) {
+  (void)native_v_0;
   native_m0_type_8 native_s_0;
   native_m0_type_0 native_s_1;
   if (native_v_0.tag != INT64_C(6)) {
@@ -213,6 +258,7 @@ native_m0_type_0 native_m0_fn_2(native_m0_type_9 native_v_0) {
   return native_s_1;
 }
 native_m0_type_0 native_m0_fn_3(native_m0_type_9 native_v_0) {
+  (void)native_v_0;
   native_m0_type_8 native_s_0;
   native_m0_type_0 native_s_1;
   if (native_v_0.tag != INT64_C(6)) {
@@ -223,7 +269,22 @@ native_m0_type_0 native_m0_fn_3(native_m0_type_9 native_v_0) {
   return native_s_1;
 }
 native_m0_type_1 native_m0_fn_4(native_m0_type_9 native_v_0, native_m0_type_9 native_v_1) {
+  (void)native_v_0;
+  (void)native_v_1;
   native_m0_type_1 native_s_0;
   native_s_0 = native_value_equal(&native_m0_value_9, &native_v_0, &native_v_1);
+  return native_s_0;
+}
+native_m0_type_0 native_m0_fn_5(native_m0_type_9 native_v_0) {
+  (void)native_v_0;
+  native_m0_type_0 native_s_0;
+  native_s_0 = native_value_hash(&native_m0_value_9, &native_v_0);
+  return native_s_0;
+}
+native_m0_type_0 native_m0_fn_6(native_m0_type_9 native_v_0, native_m0_type_9 native_v_1) {
+  (void)native_v_0;
+  (void)native_v_1;
+  native_m0_type_0 native_s_0;
+  native_s_0 = native_value_compare(&native_m0_value_9, &native_v_0, &native_v_1);
   return native_s_0;
 }
