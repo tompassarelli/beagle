@@ -19,6 +19,21 @@
   (QbeSuccess [artifact: QbeArtifact])
   (QbeFailure [detail: String]))
 
+(defn materialization-ok? [result: QbeMaterialization] -> Bool
+  (match result
+    [(QbeSuccess artifact) true]
+    [(QbeFailure detail) false]))
+
+(defn materialization-detail [result: QbeMaterialization] -> String
+  (match result
+    [(QbeSuccess artifact) ""]
+    [(QbeFailure detail) (qbefailure-detail result)]))
+
+(defn materialization-artifact [result: QbeMaterialization] -> QbeArtifact
+  (match result
+    [(QbeSuccess artifact) (qbesuccess-artifact result)]
+    [(QbeFailure detail) (->QbeArtifact "" "")]))
+
 ;; Per-function emission context; every emitter reads canonical orders from
 ;; here so a permuted world produces byte-identical text.
 (defrecord QbeFn
@@ -28,7 +43,8 @@
    module-index: Int
    blocks: (Vec core/BasicBlock)
    value-ids: (Vec core/NativeId)
-   value-types: (Vec core/NativeId)])
+   value-types: (Vec core/NativeId)
+   texts: (Vec String)])
 
 (defn join-lines [lines: (Vec String)] -> String
   (loop [index: Int 0 result: String ""]
@@ -142,6 +158,73 @@
                 block
                 (recur (+ index 1) found)))))]
     (if (nil? entry) tail (vec (concat [entry] tail)))))
+
+(defn printable-ascii [] -> String
+  (str " !\"#$%&'()*+,-./0123456789:;<=>?@"
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`"
+    "abcdefghijklmnopqrstuvwxyz{|}~"))
+
+(defn character-position
+  [alphabet: String
+   character: String] -> Int
+  (loop [position: Int 0]
+    (cond
+      (>= position (count alphabet)) -1
+      (= character (subs alphabet position (+ position 1))) position
+      :else (recur (+ position 1)))))
+
+(defn text-emittable? [value: String] -> Bool
+  (loop [position: Int 0]
+    (if (>= position (count value))
+      true
+      (let [character: String (subs value position (+ position 1))]
+        (if (or (>= (character-position (printable-ascii) character) 0)
+              (= character "\u0001") (= character "\t")
+              (= character "\n") (= character "\u000b")
+              (= character "\u000c") (= character "\r"))
+          (recur (+ position 1))
+          false)))))
+
+(defn text-position
+  [texts: (Vec String)
+   target: String] -> Int
+  (loop [position: Int 0]
+    (cond
+      (>= position (count texts)) -1
+      (= target (nth texts position)) position
+      :else (recur (+ position 1)))))
+
+(defn conj-text
+  [texts: (Vec String)
+   candidate: String] -> (Vec String)
+  (if (>= (text-position texts candidate) 0) texts (conj texts candidate)))
+
+(defn collect-texts [functions: (Vec core/FunctionDef)] -> (Vec String)
+  (loop [function-position: Int 0 collected: (Vec String) []]
+    (if (>= function-position (count functions))
+      collected
+      (let [blocks: (Vec core/BasicBlock)
+            (ordered-blocks (nth functions function-position))]
+        (recur (+ function-position 1)
+          (loop [block-position: Int 0 current: (Vec String) collected]
+            (if (>= block-position (count blocks))
+              current
+              (let [instructions: (Vec core/Instruction)
+                    (core/basicblock-instructions (nth blocks block-position))]
+                (recur (+ block-position 1)
+                  (loop [instruction-position: Int 0 kept: (Vec String) current]
+                    (if (>= instruction-position (count instructions))
+                      kept
+                      (let [instruction: core/Instruction
+                            (nth instructions instruction-position)]
+                        (recur (+ instruction-position 1)
+                          (if (instance? native.core.AtomInstruction instruction)
+                            (let [atom: core/NativeAtom
+                                  (core/atominstruction-atom instruction)]
+                              (if (instance? native.core.TextAtom atom)
+                                (conj-text kept (core/textatom-value atom))
+                                kept))
+                            kept))))))))))))))
 
 (defn block-index
   [blocks: (Vec core/BasicBlock)
@@ -314,6 +397,42 @@
    type-index-value: Int] -> String
   (str (module-prefix module-index) "_type_" type-index-value))
 
+(defn text-symbol
+  [module-index: Int
+   position: Int] -> String
+  (str (module-prefix module-index) "_text_" position))
+
+(defn text-byte [character: String] -> Int
+  (cond
+    (= character "\u0001") 1
+    (= character "\t") 9
+    (= character "\n") 10
+    (= character "\u000b") 11
+    (= character "\u000c") 12
+    (= character "\r") 13
+    :else (+ 32 (character-position (printable-ascii) character))))
+
+(defn emit-text-bytes [value: String] -> String
+  (loop [position: Int 0 result: String ""]
+    (if (>= position (count value))
+      result
+      (recur (+ position 1)
+        (str result (if (= position 0) "" " ")
+          (text-byte (subs value position (+ position 1))))))))
+
+(defn emit-text-data
+  [texts: (Vec String)
+   module-index: Int] -> String
+  (loop [position: Int 0 result: String ""]
+    (if (>= position (count texts))
+      result
+      (let [value: String (nth texts position)]
+        (recur (+ position 1)
+          (str result "data $" (text-symbol module-index position)
+            " = align 8 { l " (count value)
+            (if (= (count value) 0) "" (str ", b " (emit-text-bytes value)))
+            " }\n"))))))
+
 ;; --- type mapping ---------------------------------------------------------
 ;; QBE base types are the register classes; extended types (b, h) exist only
 ;; inside aggregates and loads/stores.
@@ -325,7 +444,7 @@
     [(BoolKind token) "w"]
     [(I64Kind token) (if (= size 8) "l" "w")]
     [(F64Kind token) (if (= size 4) "s" "d")]
-    [(TextKind token) ""]
+    [(TextKind token) (if (= size 8) "l" "")]
     [(KeywordKind token) ""]
     [(RefKind target) ""]))
 
@@ -338,7 +457,7 @@
     [(I64Kind token)
      (cond (= size 1) "b" (= size 2) "h" (= size 4) "w" (= size 8) "l" :else "")]
     [(F64Kind token) (cond (= size 4) "s" (= size 8) "d" :else "")]
-    [(TextKind token) ""]
+    [(TextKind token) (if (= size 8) "l" "")]
     [(KeywordKind token) ""]
     [(RefKind target) ""]))
 
@@ -923,12 +1042,16 @@
 
 ;; --- instruction emission -------------------------------------------------
 
-(defn atom-literal [atom: core/NativeAtom] -> String
+(defn atom-literal
+  [context: QbeFn
+   atom: core/NativeAtom] -> String
   (match atom
     [(BoolAtom value) (if (core/boolatom-value atom) "1" "0")]
     [(I64Atom value) (str (core/i64atom-value atom))]
     [(F64Atom value) (str "d_" (core/f64atom-value atom))]
-    [(TextAtom value) ""]
+    [(TextAtom value)
+     (str "$" (text-symbol (qbefn-module-index context)
+       (text-position (qbefn-texts context) (core/textatom-value atom))))]
     [(KeywordAtom value) ""]
     [(RefAtom value) ""]))
 
@@ -937,7 +1060,7 @@
     [(BoolAtom value) "w"]
     [(I64Atom value) "l"]
     [(F64Atom value) "d"]
-    [(TextAtom value) ""]
+    [(TextAtom value) "l"]
     [(KeywordAtom value) ""]
     [(RefAtom value) ""]))
 
@@ -1148,7 +1271,7 @@
       [(AtomInstruction value)
        (let [atom: core/NativeAtom (core/atominstruction-atom instruction)]
          (str "  " result-name " =" (value-letter-or context result-id (atom-letter atom))
-           " copy " (atom-literal atom) "\n"))]
+           " copy " (atom-literal context atom) "\n"))]
       [(CopyInstruction value)
        (str "  " result-name " =" result-letter " copy "
          (value-name context (core/copyinstruction-source-id instruction)) "\n")]
@@ -1181,7 +1304,16 @@
       [(CallInstruction value)
        (emit-call context result-name (core/callinstruction-function-id instruction)
          (core/callinstruction-arguments instruction))]
-      [(CompareInstruction value) ""]
+      [(CompareInstruction value)
+       (let [comparison: core/CompareOpV0
+             (core/compareinstruction-comparison instruction)]
+         (if (instance? native.core.CompareEqTextV0 comparison)
+           (str "  " result-name " =w call $native_text_eq(l "
+             (value-name context (core/compareinstruction-left-id instruction))
+             ", l "
+             (value-name context (core/compareinstruction-right-id instruction))
+             ")\n")
+           ""))]
       [(FieldInstruction value) ""]
       [(VariantValueInstruction value) ""]
       [(RecordInstruction value) ""]
@@ -1482,6 +1614,7 @@
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
    functions: (Vec core/FunctionDef)
+   texts: (Vec String)
    module-index: Int
    function-position: Int
    function: core/FunctionDef] -> String
@@ -1489,7 +1622,8 @@
         context: QbeFn
         (->QbeFn types layouts functions module-index blocks
           (qbe-value-ids function blocks)
-          (qbe-value-types function blocks))
+          (qbe-value-types function blocks)
+          texts)
         return-type: (U core/NativeId Nil) (core/functiondef-return-type function)
         return-text: String
         (if (nil? return-type) "" (str (abi-type types layouts module-index return-type) " "))]
@@ -1502,13 +1636,15 @@
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
    functions: (Vec core/FunctionDef)
+   texts: (Vec String)
    module-index: Int] -> String
   (loop [index: Int 0 result: String ""]
     (if (>= index (count functions))
       result
       (recur (+ index 1)
         (str result (if (= index 0) "" "\n")
-          (emit-function types layouts functions module-index index (nth functions index)))))))
+          (emit-function types layouts functions texts module-index index
+            (nth functions index)))))))
 
 ;; --- support gate ---------------------------------------------------------
 
@@ -1517,7 +1653,7 @@
     [(BoolKind token) true]
     [(I64Kind token) true]
     [(F64Kind token) true]
-    [(TextKind token) false]
+    [(TextKind token) true]
     [(KeywordKind token) false]
     [(RefKind target) false]))
 
@@ -1569,12 +1705,15 @@
     [(BoolAtom value) true]
     [(I64Atom value) true]
     [(F64Atom value) true]
-    [(TextAtom value) false]
+    [(TextAtom value) true]
     [(KeywordAtom value) false]
     [(RefAtom target) false]))
 
 (defn store-supported? [store: core/StoreOp] -> Bool
   (not= (store-mnemonic store) ""))
+
+(defn comparison-supported? [comparison: core/CompareOpV0] -> Bool
+  (instance? native.core.CompareEqTextV0 comparison))
 
 (defn instruction-supported? [instruction: core/Instruction] -> Bool
   (match instruction
@@ -1589,7 +1728,8 @@
     [(StoreInstruction value) (store-supported? (core/storeinstruction-store instruction))]
     [(AllocateInstruction value) true]
     [(CallInstruction value) true]
-    [(CompareInstruction value) false]
+    [(CompareInstruction value)
+     (comparison-supported? (core/compareinstruction-comparison instruction))]
     [(FieldInstruction value) false]
     [(VariantValueInstruction value) false]
     [(RecordInstruction value) false]
@@ -1737,19 +1877,26 @@
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
    functions: (Vec core/FunctionDef)
+   texts: (Vec String)
    module-index: Int] -> String
-  (let [type-text: String (emit-types types layouts functions module-index)]
+  (let [data-text: String (emit-text-data texts module-index)
+        type-text: String (emit-types types layouts functions module-index)]
     (str "# Generated by native.qbe; do not edit.\n"
       "# module " module-index "; shim ABI native_arena_alloc/native_vec_concat/native_trap\n\n"
+      data-text
+      (if (= (count data-text) 0) "" "\n")
       type-text
       (if (= (count type-text) 0) "" "\n")
-      (emit-functions types layouts functions module-index))))
+      (emit-functions types layouts functions texts module-index))))
 
 (defn materialize-world
   [world: core/NativeWorld
    module-index: Int] -> QbeMaterialization
   (let [validation: core/ValidationReport (core/validate-world world)
-        unsupported: (U String Nil) (unsupported-value-semantics world)]
+        unsupported: (U String Nil) (unsupported-value-semantics world)
+        functions: (Vec core/FunctionDef)
+        (ordered-functions (core/nativeworld-functions world))
+        texts: (Vec String) (collect-texts functions)]
     (cond
       (< module-index 0)
       (->QbeFailure "module index must be nonnegative")
@@ -1758,12 +1905,13 @@
       (some? unsupported)
       (->QbeFailure
         (str "unsupported native value-semantics op: " unsupported))
+      (not (every? text-emittable? texts))
+      (->QbeFailure "native world contains a Text literal outside the QBE literal slice")
       (not (world-supported? world))
       (->QbeFailure "native world uses a shape outside the QBE materializer's slice")
       :else
       (let [types: (Vec core/TypeDef) (ordered-types (core/nativeworld-types world))
             layouts: (Vec core/LayoutDef) (ordered-layouts (core/nativeworld-layouts world))
-            functions: (Vec core/FunctionDef) (ordered-functions (core/nativeworld-functions world))
             module-name: String (str "module_" module-index ".ssa")
-            module-text: String (emit-module types layouts functions module-index)]
+            module-text: String (emit-module types layouts functions texts module-index)]
         (->QbeSuccess (->QbeArtifact module-name module-text))))))
