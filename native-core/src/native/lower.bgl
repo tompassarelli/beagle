@@ -2625,29 +2625,23 @@
                           (str "widen-unit-" position)
                           (core/typevariant-name variant)
                           to unit-variants join-id))
-                      (if (same-id? payload-type (type-id "Nil"))
-                        (recur (+ position 1)
-                          (widen-unit-arm opened owner
-                            (str "widen-unit-" position)
-                            (core/typevariant-name variant)
-                            to unit-variants join-id))
-                        (let [extract-id: core/NativeId
-                              (state-id opened owner (str "widen-extract-" position))
-                              extracted: BodyStateV0
-                              (state-emit (state-bump opened)
-                                (core/->UnionExtractInstruction
-                                  (core/->SsaValueV0 extract-id payload-type)
-                                  value-id
-                                  (core/typevariant-id variant)))
-                              widened: ExprResultV0
-                              (lower-widen types owner extracted extract-id
-                                payload-type to (- budget 1))]
-                          (if (state-blocked? (exprresultv0-state widened))
-                            (exprresultv0-state widened)
-                            (recur (+ position 1)
-                              (state-close (exprresultv0-state widened)
-                                (core/->JumpTerminator join-id
-                                  [(exprresultv0-value-id widened)]))))))))))]
+                      (let [extract-id: core/NativeId
+                            (state-id opened owner (str "widen-extract-" position))
+                            extracted: BodyStateV0
+                            (state-emit (state-bump opened)
+                              (core/->UnionExtractInstruction
+                                (core/->SsaValueV0 extract-id payload-type)
+                                value-id
+                                (core/typevariant-id variant)))
+                            widened: ExprResultV0
+                            (lower-widen types owner extracted extract-id
+                              payload-type to (- budget 1))]
+                        (if (state-blocked? (exprresultv0-state widened))
+                          (exprresultv0-state widened)
+                          (recur (+ position 1)
+                            (state-close (exprresultv0-state widened)
+                              (core/->JumpTerminator join-id
+                                [(exprresultv0-value-id widened)])))))))))]
           (if (state-blocked? armed)
             (dead-result armed)
             (->ExprResultV0
@@ -2698,6 +2692,46 @@
         (and (instance? native.core.ReferenceType shape)
           (same-id? (core/referencetype-target-type shape) target))))))
 
+(defrecord NestedScalarHitV0
+  [found: Bool
+   outer-variant-id: core/NativeId
+   inner-type: core/NativeId
+   inner-variant-id: core/NativeId])
+
+(defn nested-scalar-miss [] -> NestedScalarHitV0
+  (->NestedScalarHitV0 false
+    (type-id "LowerFailure") (type-id "LowerFailure")
+    (type-id "LowerFailure")))
+
+;; A nullable map value may wrap an already-closed dynamic union. Scalars can
+;; be checked through that one wrapper; record alternatives remain references
+;; and deliberately do not enter this by-value path.
+(defn nested-scalar-hit
+  [types: (Vec core/TypeDef)
+   variants: (Vec core/TypeVariant)
+   target: core/NativeId] -> NestedScalarHitV0
+  (let [target-definition: (U core/TypeDef Nil) (lookup-type types target)]
+    (if (or (nil? target-definition)
+            (not (instance? native.core.AtomType
+              (core/typedef-shape target-definition))))
+      (nested-scalar-miss)
+      (loop [position: Int 0]
+        (if (>= position (count variants))
+          (nested-scalar-miss)
+          (let [outer: core/TypeVariant (nth variants position)
+                inner-type: (U core/NativeId Nil)
+                (core/typevariant-payload-type outer)]
+            (if (nil? inner-type)
+              (recur (+ position 1))
+              (let [inner: (U core/TypeVariant Nil)
+                    (variant-for-payload
+                      (union-variants-of types inner-type) target)]
+                (if (nil? inner)
+                  (recur (+ position 1))
+                  (->NestedScalarHitV0 true
+                    (core/typevariant-id outer) inner-type
+                    (core/typevariant-id inner)))))))))))
+
 ;; Source annotations and calls are semantic boundaries: widen into their
 ;; declared union, or checked-extract the one alternative the boundary names.
 (defn lower-boundary-coerce
@@ -2711,7 +2745,9 @@
     (->ExprResultV0 state value-id to false)
     (let [source-variants: (Vec core/TypeVariant) (union-variants-of types from)
           scalar: (U core/TypeVariant Nil) (variant-for-payload source-variants to)
-          record: NarrowHitV0 (reference-variant-for types from to)]
+          record: NarrowHitV0 (reference-variant-for types from to)
+          nested: NestedScalarHitV0
+          (nested-scalar-hit types source-variants to)]
       (cond
         (some? scalar)
         (let [result-id: core/NativeId (state-id state owner "boundary-extract")]
@@ -2731,6 +2767,23 @@
                   (narrowhitv0-reference-type record))
                 value-id (narrowhitv0-variant-id record)))
             result-id (narrowhitv0-reference-type record) false))
+
+        (nestedscalarhitv0-found nested)
+        (let [inner-id: core/NativeId
+              (state-id state owner "boundary-inner-union")
+              result-id: core/NativeId
+              (state-id (state-bump state) owner "boundary-inner-extract")]
+          (->ExprResultV0
+            (state-emit
+              (state-emit (state-bump (state-bump state))
+                (core/->UnionExtractInstruction
+                  (core/->SsaValueV0 inner-id
+                    (nestedscalarhitv0-inner-type nested))
+                  value-id (nestedscalarhitv0-outer-variant-id nested)))
+              (core/->UnionExtractInstruction
+                (core/->SsaValueV0 result-id to)
+                inner-id (nestedscalarhitv0-inner-variant-id nested)))
+            result-id to false))
 
         :else
         (lower-widen types owner state value-id from to (widen-budget))))))
@@ -4070,6 +4123,314 @@
                 (type-widens-to? types payload to (- budget 1)))))
           sources)))))
 
+(defn values-widen-to?
+  [types: (Vec core/TypeDef)
+   value-types: (Vec core/NativeId)
+   target: core/NativeId] -> Bool
+  (loop [position: Int 0]
+    (if (>= position (count value-types))
+      true
+      (if (type-widens-to? types (nth value-types position) target
+            (widen-budget))
+        (recur (+ position 1))
+        false))))
+
+;; A heterogeneous map literal has no intrinsic value type. Close it only when
+;; one declared map union is the unique narrowest carrier of every value.
+(defn map-type-for-widened-values
+  [types: (Vec core/TypeDef)
+   key-type: core/NativeId
+   value-types: (Vec core/NativeId)] -> (U core/NativeId Nil)
+  (loop [position: Int 0
+         chosen: (U core/NativeId Nil) nil
+         chosen-width: Int 2147483647
+         ambiguous: Bool false]
+    (if (>= position (count types))
+      (if ambiguous nil chosen)
+      (let [definition: core/TypeDef (nth types position)
+            shape: core/TypeShape (core/typedef-shape definition)]
+        (if (not (instance? native.core.MapTypeV0 shape))
+          (recur (+ position 1) chosen chosen-width ambiguous)
+          (let [candidate: core/NativeId (core/typedef-id definition)
+                candidate-key: core/NativeId (core/maptypev0-key-type shape)
+                candidate-value: core/NativeId (core/maptypev0-value-type shape)
+                width: Int (count (union-variants-of types candidate-value))
+                carries: Bool
+                (and (same-id? candidate-key key-type)
+                  (> width 0)
+                  (values-widen-to? types value-types candidate-value))]
+            (cond
+              (not carries)
+              (recur (+ position 1) chosen chosen-width ambiguous)
+
+              (< width chosen-width)
+              (recur (+ position 1) candidate width false)
+
+              (and (= width chosen-width) (some? chosen)
+                (not (same-id? candidate chosen)))
+              (recur (+ position 1) chosen chosen-width true)
+
+              :else
+              (recur (+ position 1) chosen chosen-width ambiguous))))))))
+
+(defn lower-vector-to-set
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   source-id: core/NativeId
+   vector-type: core/NativeId] -> ExprResultV0
+  (let [element-type: core/NativeId (vector-element-of types vector-type)
+        set-type: (U core/NativeId Nil) (set-type-of types element-type)
+        equality: (U core/ConcreteEqualityV0 Nil)
+        (concrete-equality-for element-type)]
+    (cond
+      (nil? set-type)
+      (fail-result state
+        "TODO-NATIVE-SET-VECTOR-TYPE: the world declares no set of the vector element type")
+
+      (nil? equality)
+      (fail-result state
+        "TODO-NATIVE-SET-ELEMENT-EQUALITY: set needs closed concrete element equality")
+
+      :else
+      (let [length-id: core/NativeId
+            (state-id state owner "set-from-vector-length")
+            with-length: BodyStateV0
+            (state-emit (state-bump state)
+              (core/->VecLengthInstruction
+                (core/->SsaValueV0 length-id (int-type-id)) source-id))
+            zero-id: core/NativeId
+            (state-id with-length owner "set-from-vector-zero")
+            with-zero: BodyStateV0
+            (state-emit (state-bump with-length)
+              (core/->AtomInstruction
+                (core/->SsaValueV0 zero-id (int-type-id))
+                (core/->I64Atom 0)))
+            empty-id: core/NativeId
+            (state-id with-zero owner "set-from-vector-empty")
+            prepared: BodyStateV0
+            (state-emit (state-bump with-zero)
+              (core/->SetLiteralInstructionV0
+                (core/->SsaValueV0 empty-id set-type)
+                [] (arena-value-id owner) equality))
+            header-id: core/NativeId
+            (state-id prepared owner "set-from-vector-header")
+            body-id: core/NativeId
+            (state-id prepared owner "set-from-vector-body")
+            exit-id: core/NativeId
+            (state-id prepared owner "set-from-vector-exit")
+            header-index: core/NativeId
+            (state-id prepared owner "set-from-vector-index")
+            header-set: core/NativeId
+            (state-id prepared owner "set-from-vector-set")
+            entered: BodyStateV0
+            (state-open-block
+              (state-close (state-bump prepared)
+                (core/->JumpTerminator header-id [zero-id empty-id]))
+              header-id
+              [(core/->Parameter header-index (int-type-id))
+               (core/->Parameter header-set set-type)])
+            has-item: core/NativeId
+            (state-id entered owner "set-from-vector-has-item")
+            compared: BodyStateV0
+            (state-emit (state-bump entered)
+              (core/->CompareInstruction
+                (core/->SsaValueV0 has-item (bool-type-id))
+                (core/->CompareLtI64V0 true) header-index length-id))
+            body-state: BodyStateV0
+            (state-open-block
+              (state-close compared
+                (core/->BranchTerminator has-item body-id exit-id))
+              body-id [])
+            item-id: core/NativeId
+            (state-id body-state owner "set-from-vector-item")
+            with-item: BodyStateV0
+            (state-emit (state-bump body-state)
+              (core/->VecGetInstruction
+                (core/->SsaValueV0 item-id element-type)
+                source-id header-index))
+            next-set: core/NativeId
+            (state-id with-item owner "set-from-vector-conj")
+            with-set: BodyStateV0
+            (state-emit (state-bump with-item)
+              (core/->SetConjInstructionV0
+                (core/->SsaValueV0 next-set set-type)
+                header-set item-id (arena-value-id owner) equality))
+            one-id: core/NativeId
+            (state-id with-set owner "set-from-vector-one")
+            with-one: BodyStateV0
+            (state-emit (state-bump with-set)
+              (core/->AtomInstruction
+                (core/->SsaValueV0 one-id (int-type-id))
+                (core/->I64Atom 1)))
+            next-index: ExprResultV0
+            (lower-checked-arith with-one owner "+" header-index one-id)
+            settled: BodyStateV0 (exprresultv0-state next-index)]
+        (if (state-blocked? settled)
+          (dead-result settled)
+          (->ExprResultV0
+            (state-open-block
+              (state-close settled
+                (core/->JumpTerminator header-id
+                  [(exprresultv0-value-id next-index) next-set]))
+              exit-id [])
+            header-set set-type false))))))
+
+(defn lower-set-equality
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId
+   state: BodyStateV0
+   left-id: core/NativeId
+   right-id: core/NativeId
+   set-type: core/NativeId] -> ExprResultV0
+  (let [element-type: core/NativeId (set-element-of types set-type)
+        vector-type: (U core/NativeId Nil)
+        (vector-type-of types element-type)
+        equality: (U core/ConcreteEqualityV0 Nil)
+        (concrete-equality-for element-type)]
+    (cond
+      (nil? vector-type)
+      (fail-result state
+        "TODO-NATIVE-SET-EQUALITY-TYPE: the world declares no vector of the set element type")
+
+      (nil? equality)
+      (fail-result state
+        "TODO-NATIVE-SET-EQUALITY: set equality needs closed concrete element equality")
+
+      :else
+      (let [left-count: core/NativeId
+            (state-id state owner "set-equal-left-count")
+            with-left-count: BodyStateV0
+            (state-emit (state-bump state)
+              (core/->SetCountInstructionV0
+                (core/->SsaValueV0 left-count (int-type-id)) left-id))
+            right-count: core/NativeId
+            (state-id with-left-count owner "set-equal-right-count")
+            with-counts: BodyStateV0
+            (state-emit (state-bump with-left-count)
+              (core/->SetCountInstructionV0
+                (core/->SsaValueV0 right-count (int-type-id)) right-id))
+            same-count: core/NativeId
+            (state-id with-counts owner "set-equal-same-count")
+            with-comparison: BodyStateV0
+            (state-emit (state-bump with-counts)
+              (core/->CompareInstruction
+                (core/->SsaValueV0 same-count (bool-type-id))
+                (core/->CompareEqI64V0 true) left-count right-count))
+            left-vector: core/NativeId
+            (state-id with-comparison owner "set-equal-vector")
+            with-vector: BodyStateV0
+            (state-emit (state-bump with-comparison)
+              (core/->SetVectorInstructionV0
+                (core/->SsaValueV0 left-vector vector-type)
+                left-id (arena-value-id owner)))
+            zero-id: core/NativeId
+            (state-id with-vector owner "set-equal-zero")
+            prepared: BodyStateV0
+            (state-emit (state-bump with-vector)
+              (core/->AtomInstruction
+                (core/->SsaValueV0 zero-id (int-type-id))
+                (core/->I64Atom 0)))
+            header-id: core/NativeId
+            (state-id prepared owner "set-equal-header")
+            check-id: core/NativeId
+            (state-id prepared owner "set-equal-check")
+            body-id: core/NativeId
+            (state-id prepared owner "set-equal-body")
+            advance-id: core/NativeId
+            (state-id prepared owner "set-equal-advance")
+            false-id: core/NativeId
+            (state-id prepared owner "set-equal-false")
+            true-id: core/NativeId
+            (state-id prepared owner "set-equal-true")
+            join-id: core/NativeId
+            (state-id prepared owner "set-equal-join")
+            join-value: core/NativeId
+            (state-id prepared owner "set-equal-value")
+            header-index: core/NativeId
+            (state-id prepared owner "set-equal-index")
+            entered: BodyStateV0
+            (state-open-block
+              (state-close (state-bump prepared)
+                (core/->JumpTerminator header-id [zero-id]))
+              header-id
+              [(core/->Parameter header-index (int-type-id))])
+            has-item: core/NativeId
+            (state-id entered owner "set-equal-has-item")
+            compared: BodyStateV0
+            (state-emit (state-bump entered)
+              (core/->CompareInstruction
+                (core/->SsaValueV0 has-item (bool-type-id))
+                (core/->CompareLtI64V0 true) header-index left-count))
+            checked: BodyStateV0
+            (state-open-block
+              (state-close compared
+                (core/->BranchTerminator same-count check-id false-id))
+              check-id [])
+            body-state: BodyStateV0
+            (state-open-block
+              (state-close checked
+                (core/->BranchTerminator has-item body-id true-id))
+              body-id [])
+            item-id: core/NativeId
+            (state-id body-state owner "set-equal-item")
+            with-item: BodyStateV0
+            (state-emit (state-bump body-state)
+              (core/->VecGetInstruction
+                (core/->SsaValueV0 item-id element-type)
+                left-vector header-index))
+            present-id: core/NativeId
+            (state-id with-item owner "set-equal-present")
+            with-present: BodyStateV0
+            (state-emit (state-bump with-item)
+              (core/->SetContainsInstructionV0
+                (core/->SsaValueV0 present-id (bool-type-id))
+                right-id item-id equality))
+            advance: BodyStateV0
+            (state-open-block
+              (state-close with-present
+                (core/->BranchTerminator present-id advance-id false-id))
+              advance-id [])
+            one-id: core/NativeId
+            (state-id advance owner "set-equal-one")
+            with-one: BodyStateV0
+            (state-emit (state-bump advance)
+              (core/->AtomInstruction
+                (core/->SsaValueV0 one-id (int-type-id))
+                (core/->I64Atom 1)))
+            next-index: ExprResultV0
+            (lower-checked-arith with-one owner "+" header-index one-id)
+            looped: BodyStateV0 (exprresultv0-state next-index)]
+        (if (state-blocked? looped)
+          (dead-result looped)
+          (let [false-value: core/NativeId
+                (state-id looped owner "set-equal-no")
+                false-block: BodyStateV0
+                (state-close
+                  (state-emit
+                    (state-open-block
+                      (state-close looped
+                        (core/->JumpTerminator header-id
+                          [(exprresultv0-value-id next-index)]))
+                      false-id [])
+                    (core/->AtomInstruction
+                      (core/->SsaValueV0 false-value (bool-type-id))
+                      (core/->BoolAtom false)))
+                  (core/->JumpTerminator join-id [false-value]))
+                true-value: core/NativeId
+                (state-id false-block owner "set-equal-yes")
+                true-block: BodyStateV0
+                (state-close
+                  (state-emit (state-open-block false-block true-id [])
+                    (core/->AtomInstruction
+                      (core/->SsaValueV0 true-value (bool-type-id))
+                      (core/->BoolAtom true)))
+                  (core/->JumpTerminator join-id [true-value]))]
+            (->ExprResultV0
+              (state-open-block true-block join-id
+                [(core/->Parameter join-value (bool-type-id))])
+              join-value (bool-type-id) false)))))))
+
 (defn join-type-for
   [types: (Vec core/TypeDef)
    left: core/NativeId
@@ -5001,31 +5362,48 @@
                       (>= position (count value-types)) true
                       (same-id? (nth value-types position) value-type) (recur (+ position 1))
                       :else false))
+                  exact-map-type: (U core/NativeId Nil)
+                  (if uniform-values
+                    (map-type-of types key-type value-type)
+                    nil)
                   map-type: (U core/NativeId Nil)
-                  (map-type-of types key-type value-type)
+                  (if (some? exact-map-type)
+                    exact-map-type
+                    (map-type-for-widened-values types key-type value-types))
                   equality: (U core/ConcreteEqualityV0 Nil)
                   (concrete-equality-for key-type)]
               (cond
-                (or (not uniform-keys) (not uniform-values))
+                (not uniform-keys)
                 (fail-result current
-                  "TODO-NATIVE-MAP-LITERAL-ITEMS: keys and values must each share one native type")
+                  "TODO-NATIVE-MAP-LITERAL-ITEMS: keys must share one native type")
 
                 (nil? map-type)
                 (fail-result current
-                  "TODO-NATIVE-MAP-LITERAL-TYPE: the module declares no map of these key/value types")
+                  "TODO-NATIVE-MAP-LITERAL-ITEMS: values have no unique declared closed union")
 
                 (nil? equality)
                 (fail-result current
                   "TODO-NATIVE-MAP-KEY-EQUALITY: the key type has no closed concrete equality")
 
                 :else
-                (let [result-id: core/NativeId (state-id current owner "map-lit")]
-                  (->ExprResultV0
-                    (state-emit (state-bump current)
-                      (core/->MapLiteralInstructionV0
-                        (core/->SsaValueV0 result-id map-type)
-                        key-ids value-ids (arena-value-id owner) equality))
-                    result-id map-type false))))))
+                (let [target-value: core/NativeId
+                      (map-value-of types map-type)
+                      coerced: ArgsResultV0
+                      (coerce-values-to-type types owner current value-ids
+                        value-types target-value)
+                      settled: BodyStateV0 (argsresultv0-state coerced)]
+                  (if (state-blocked? settled)
+                    (fail-result settled
+                      "TODO-NATIVE-MAP-LITERAL-ITEMS: a value cannot widen to the declared map union")
+                    (let [result-id: core/NativeId
+                          (state-id settled owner "map-lit")]
+                      (->ExprResultV0
+                        (state-emit (state-bump settled)
+                          (core/->MapLiteralInstructionV0
+                            (core/->SsaValueV0 result-id map-type)
+                            key-ids (argsresultv0-values coerced)
+                            (arena-value-id owner) equality))
+                        result-id map-type false))))))))
 
         (= "kw-access" kind)
         (let [keyword: String (fact-text index expr "keyword")
@@ -6351,22 +6729,37 @@
                     (not (same-id? key-type (nth value-types 1)))
                     (fail-result current
                       "TODO-NATIVE-ASSOC-KEY: the key does not match the map key type")
-                    (not (same-id? value-type (nth value-types 2)))
-                    (fail-result current
-                      "TODO-NATIVE-ASSOC-VALUE: the value does not match the map value type")
                     (nil? equality)
                     (fail-result current
                       "TODO-NATIVE-MAP-KEY-EQUALITY: assoc needs closed concrete key equality")
                     :else
-                    (let [result-id: core/NativeId
-                          (state-id current owner "map-assoc")]
-                      (->ExprResultV0
-                        (state-emit (state-bump current)
-                          (core/->MapAssocInstructionV0
-                            (core/->SsaValueV0 result-id map-type)
-                            (nth values 0) (nth values 1) (nth values 2)
-                            (arena-value-id owner) equality))
-                        result-id map-type false))))
+                    (let [coerced: ExprResultV0
+                          (lower-boundary-coerce types owner current
+                            (nth values 2) (nth value-types 2) value-type)
+                          settled: BodyStateV0 (exprresultv0-state coerced)]
+                      (cond
+                        (state-blocked? settled)
+                        (fail-result settled
+                          "TODO-NATIVE-ASSOC-VALUE: the value does not widen to the map value type")
+
+                        ;; A record extracted from a union is a borrowed
+                        ;; reference, never a direct record value for storage.
+                        (not (same-id? value-type
+                               (exprresultv0-type-id coerced)))
+                        (fail-result settled
+                          "TODO-NATIVE-ASSOC-VALUE: a borrowed record reference cannot populate a direct-record map")
+
+                        :else
+                        (let [result-id: core/NativeId
+                              (state-id settled owner "map-assoc")]
+                          (->ExprResultV0
+                            (state-emit (state-bump settled)
+                              (core/->MapAssocInstructionV0
+                                (core/->SsaValueV0 result-id map-type)
+                                (nth values 0) (nth values 1)
+                                (exprresultv0-value-id coerced)
+                                (arena-value-id owner) equality))
+                            result-id map-type false))))))
 
                 (= "assoc" callee)
                 (fail-result current
@@ -6549,6 +6942,15 @@
                 (fail-result current
                   "TODO-NATIVE-CONCAT-OPERANDS: concat lowers two native vectors of the same type")
 
+                (and (= "set" callee) (= 1 (count values))
+                  (vector-type? types (nth value-types 0)))
+                (lower-vector-to-set types owner current
+                  (nth values 0) (nth value-types 0))
+
+                (= "set" callee)
+                (fail-result current
+                  "TODO-NATIVE-SET-OPERAND: set lowers one finite native vector")
+
                 (and (= "vec" callee) (= 1 (count values))
                   (vector-type? types (nth value-types 0)))
                 (->ExprResultV0 current (nth values 0) (nth value-types 0) false)
@@ -6574,6 +6976,12 @@
                 (= "vec" callee)
                 (fail-result current
                   "TODO-NATIVE-VEC-OPERAND: vec lowers a native vector or a closed insertion-order set")
+
+                (and (= "=" callee) (= 2 (count values))
+                  (same-id? (nth value-types 0) (nth value-types 1))
+                  (set-type? types (nth value-types 0)))
+                (lower-set-equality types owner current
+                  (nth values 0) (nth values 1) (nth value-types 0))
 
                 (and (= "=" callee) (= 2 (count values))
                   (same-id? (nth value-types 0) (nth value-types 1))
