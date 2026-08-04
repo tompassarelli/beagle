@@ -1361,7 +1361,7 @@
       (str "  " target " = "
         (atom-expression module-index pool
           (core/atominstruction-atom instruction))
-        ";\n")
+        ";\n  (void)" target ";\n")
 
       (instance? native.core.ArenaInstruction instruction)
       (str "  " target " = arena;\n  (void)" target ";\n")
