@@ -191,7 +191,9 @@
     [(TextSliceInstruction value)
      (core/textsliceinstruction-result instruction)]
     [(TextConcatInstruction value)
-     (core/textconcatinstruction-result instruction)]))
+     (core/textconcatinstruction-result instruction)]
+    [(TextBuiltinInstruction value)
+     (core/textbuiltininstruction-result instruction)]))
 
 (defn qbe-value-ids
   [function: core/FunctionDef
@@ -720,7 +722,8 @@
     [(TextBlankInstruction value) false]
     [(TextParseI64Instruction value) false]
     [(TextSliceInstruction value) false]
-    [(TextConcatInstruction value) false]))
+    [(TextConcatInstruction value) false]
+    [(TextBuiltinInstruction value) false]))
 
 ;; A checked operation becomes a trap/continue diamond, so a world block can
 ;; end in a different QBE label than it started in.
@@ -1034,7 +1037,8 @@
       [(TextBlankInstruction value) ""]
       [(TextParseI64Instruction value) ""]
       [(TextSliceInstruction value) ""]
-      [(TextConcatInstruction value) ""])))
+      [(TextConcatInstruction value) ""]
+      [(TextBuiltinInstruction value) ""])))
 
 (defn emit-instructions
   [context: QbeFn
@@ -1408,7 +1412,8 @@
     [(TextBlankInstruction value) false]
     [(TextParseI64Instruction value) false]
     [(TextSliceInstruction value) false]
-    [(TextConcatInstruction value) false]))
+    [(TextConcatInstruction value) false]
+    [(TextBuiltinInstruction value) false]))
 
 (defn parameterless-target?
   [blocks: (Vec core/BasicBlock)

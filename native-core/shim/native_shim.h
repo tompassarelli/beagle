@@ -79,5 +79,23 @@ uint64_t native_text_slice(native_arena *arena, uint64_t handle, uint64_t start,
 uint64_t native_text_from_int(native_arena *arena, int64_t value);
 uint64_t native_text_concat(native_arena *arena, const uint64_t *parts,
                             uint64_t count);
+int64_t native_text_compare(uint64_t left, uint64_t right);
+uint64_t native_text_trim(native_arena *arena, uint64_t source);
+uint64_t native_text_lower_ascii(native_arena *arena, uint64_t source);
+bool native_text_regex_matches(uint64_t source, uint64_t pattern);
+uint64_t native_text_regex_replace(native_arena *arena, uint64_t source,
+                                   uint64_t pattern, uint64_t replacement);
+native_vec *native_text_regex_find(native_arena *arena, uint64_t source,
+                                   uint64_t pattern);
+native_vec *native_text_regex_split(native_arena *arena, uint64_t source,
+                                    uint64_t pattern);
+native_vec *native_text_vector_trim(native_arena *arena,
+                                    const native_vec *source);
+native_vec *native_text_vector_remove_blank(native_arena *arena,
+                                            const native_vec *source);
+uint64_t native_text_join(native_arena *arena, uint64_t separator,
+                          const native_vec *source);
+uint64_t native_text_repeat(native_arena *arena, uint64_t source,
+                            int64_t count);
 
 #endif

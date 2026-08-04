@@ -160,6 +160,18 @@
 (defn index-facts [index: SourceIndexV0] -> Int
   (count (sourceindexv0-subjects index)))
 
+(defn index-has-callee?
+  [index: SourceIndexV0
+   expected: String] -> Bool
+  (let [predicates: (Vec String) (sourceindexv0-predicates index)
+        texts: (Vec String) (sourceindexv0-object-texts index)]
+    (loop [position: Int 0]
+      (cond
+        (>= position (count predicates)) false
+        (and (= "callee" (nth predicates position))
+          (= expected (nth texts position))) true
+        :else (recur (+ position 1))))))
+
 (defn index-first-object
   [index: SourceIndexV0
    subject: core/NativeId
@@ -628,6 +640,15 @@
 (defn text-type [] -> core/TypeDef
   (core/->TypeDef (type-id "String") "Text"
     (core/->AtomType (core/->TextKind true))))
+
+(defn regex-match-type-id [] -> core/NativeId
+  (lower-id "regex-match-type" [(id-value (type-id "String"))]))
+
+;; A successful regular-expression search always has element zero (the whole
+;; match), so an empty vector is an unambiguous absence representation.
+(defn regex-match-type [] -> core/TypeDef
+  (core/->TypeDef (regex-match-type-id) "RegexMatch"
+    (core/->VectorType (type-id "String"))))
 
 (defn keyword-type [] -> core/TypeDef
   (core/->TypeDef (type-id "Keyword") "Keyword"
@@ -2300,9 +2321,34 @@
       (let [definition: core/TypeDef (nth types position)
             shape: core/TypeShape (core/typedef-shape definition)]
         (if (and (instance? native.core.VectorType shape)
+              (= "Vector" (core/typedef-name definition))
               (same-id? (core/vectortype-element-type shape) element))
           (core/typedef-id definition)
           (recur (+ position 1)))))))
+
+(defn text-vector-type-of [types: (Vec core/TypeDef)] -> (U core/NativeId Nil)
+  (loop [position: Int 0]
+    (if (>= position (count types))
+      nil
+      (let [definition: core/TypeDef (nth types position)
+            shape: core/TypeShape (core/typedef-shape definition)]
+        (if (and (instance? native.core.VectorType shape)
+              (= "Vector" (core/typedef-name definition))
+              (same-id? (core/vectortype-element-type shape)
+                (type-id "String")))
+          (core/typedef-id definition)
+          (recur (+ position 1)))))))
+
+(defn map-value?
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> Bool
+  (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
+    (and (some? definition)
+      (= "MapEntries" (core/typedef-name definition)))))
+
+(defn text-builtin-allocates? [operation: core/TextBuiltinOpV0] -> Bool
+  (not (or (instance? native.core.TextCompareV0 operation)
+           (instance? native.core.TextRegexMatchesV0 operation))))
 
 (defn allocating-instruction? [instruction: core/Instruction] -> Bool
   (or (instance? native.core.VecPushInstruction instruction)
@@ -2311,7 +2357,10 @@
       (instance? native.core.BoxRecordInstruction instruction)
       (instance? native.core.AllocateInstruction instruction)
       (instance? native.core.TextSliceInstruction instruction)
-      (instance? native.core.TextConcatInstruction instruction)))
+      (instance? native.core.TextConcatInstruction instruction)
+      (and (instance? native.core.TextBuiltinInstruction instruction)
+        (text-builtin-allocates?
+          (core/textbuiltininstruction-builtin instruction)))))
 
 (defn instructions-allocate? [instructions: (Vec core/Instruction)] -> Bool
   (some?
@@ -2334,6 +2383,32 @@
       (if (nil? items-node)
         true
         (= 0 (count (index-sequence-items index items-node)))))))
+
+(defn source-ref-named?
+  [index: SourceIndexV0
+   node: core/NativeId
+   expected: String] -> Bool
+  (and (= "ref" (fact-text index node "form-kind"))
+    (= expected (fact-text index node "name"))))
+
+(defn source-call-named?
+  [index: SourceIndexV0
+   node: core/NativeId
+   expected: String] -> Bool
+  (and (= "call" (fact-text index node "form-kind"))
+    (= expected (fact-text index node "callee"))))
+
+(defn source-call-arguments
+  [index: SourceIndexV0
+   node: core/NativeId] -> (Vec core/NativeId)
+  (let [args: (U core/NativeId Nil) (index-first-object index node "args")]
+    (if (nil? args) [] (index-sequence-items index args))))
+
+(defn text-vector-value?
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> Bool
+  (and (vector-type? types target)
+    (same-id? (vector-element-of types target) (type-id "String"))))
 
 ;; An empty literal names no element type, so the only closed source for one is
 ;; the annotation on the binding it initializes.
@@ -2506,6 +2581,13 @@
           (core/typedef-id definition)
           (recur (+ position 1)))))))
 
+(defn regex-match-value?
+  [types: (Vec core/TypeDef)
+   target: core/NativeId] -> Bool
+  (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
+    (and (some? definition)
+      (= "RegexMatch" (core/typedef-name definition)))))
+
 (defn lower-presence-predicate
   [types: (Vec core/TypeDef)
    owner: core/NativeId
@@ -2515,6 +2597,30 @@
    want-present: Bool] -> ExprResultV0
   (let [variants: (Vec core/TypeVariant) (union-variants-of types value-type)]
     (cond
+      (regex-match-value? types value-type)
+      (let [length-id: core/NativeId (state-id state owner "match-length")
+            zero-id: core/NativeId
+            (state-id (state-bump state) owner "match-zero")
+            result-id: core/NativeId
+            (state-id (state-bump (state-bump state)) owner "match-present")]
+        (->ExprResultV0
+          (state-emit
+            (state-emit
+              (state-emit
+                (state-bump (state-bump (state-bump state)))
+                (core/->VecLengthInstruction
+                  (core/->SsaValueV0 length-id (int-type-id)) value-id))
+              (core/->AtomInstruction
+                (core/->SsaValueV0 zero-id (int-type-id))
+                (core/->I64Atom 0)))
+            (core/->CompareInstruction
+              (core/->SsaValueV0 result-id (bool-type-id))
+              (if want-present
+                (core/->CompareLtI64V0 true)
+                (core/->CompareEqI64V0 true))
+              zero-id length-id))
+          result-id (bool-type-id) false))
+
       (same-id? value-type (type-id "Nil"))
       (bool-constant-result state owner "presence-direct" (not want-present))
 
@@ -2598,6 +2704,26 @@
           (core/->CompareInstruction
             (core/->SsaValueV0 result-id (bool-type-id))
             (core/->CompareLtI64V0 true) zero-id value-id))
+        result-id (bool-type-id) false))))
+
+(defn lower-negative
+  [state: BodyStateV0
+   owner: core/NativeId
+   value-id: core/NativeId
+   value-type: core/NativeId] -> ExprResultV0
+  (if (not (same-id? value-type (int-type-id)))
+    (fail-result state "TODO-NATIVE-NEG-OPERAND: neg? needs a native Int")
+    (let [zero-id: core/NativeId (state-id state owner "negative-zero")
+          result-id: core/NativeId (state-id (state-bump state) owner "negative")]
+      (->ExprResultV0
+        (state-emit
+          (state-emit (state-bump (state-bump state))
+            (core/->AtomInstruction
+              (core/->SsaValueV0 zero-id (int-type-id))
+              (core/->I64Atom 0)))
+          (core/->CompareInstruction
+            (core/->SsaValueV0 result-id (bool-type-id))
+            (core/->CompareLtI64V0 true) value-id zero-id))
         result-id (bool-type-id) false))))
 
 (defn equality-comparison [type-id-value: core/NativeId] -> (U core/CompareOpV0 Nil)
@@ -3557,6 +3683,105 @@
                                           header-accumulator accumulator-type
                                           false)))))))))))))))
 
+            (and (= "map" callee) (= 2 (count args))
+              (source-ref-named? index (nth args 0) "str"))
+            (let [source: ExprResultV0
+                  (lower-expr env owner state (nth args 1))]
+              (if (or (exprresultv0-terminated source)
+                      (state-blocked? (exprresultv0-state source)))
+                source
+                (if (text-vector-value? types (exprresultv0-type-id source))
+                  source
+                  (fail-result (exprresultv0-state source)
+                    "TODO-NATIVE-TEXT-MAP-OPERAND: map str needs a vector of Text"))))
+
+            (and (= "map" callee) (= 2 (count args))
+              (source-ref-named? index (nth args 0) "str/trim"))
+            (let [source: ExprResultV0
+                  (lower-expr env owner state (nth args 1))]
+              (cond
+                (exprresultv0-terminated source) source
+                (state-blocked? (exprresultv0-state source))
+                (dead-result (exprresultv0-state source))
+                (not (text-vector-value? types (exprresultv0-type-id source)))
+                (fail-result (exprresultv0-state source)
+                  "TODO-NATIVE-TEXT-MAP-OPERAND: map str/trim needs a vector of Text")
+                :else
+                (let [base: BodyStateV0 (exprresultv0-state source)
+                      result-id: core/NativeId
+                      (state-id base owner "text-vector-trim")]
+                  (->ExprResultV0
+                    (state-emit (state-bump base)
+                      (core/->TextBuiltinInstruction
+                        (core/->SsaValueV0 result-id
+                          (exprresultv0-type-id source))
+                        (core/->TextVectorTrimV0 (arena-value-id owner)
+                          (exprresultv0-value-id source))))
+                    result-id (exprresultv0-type-id source) false))))
+
+            (and (= "remove" callee) (= 2 (count args))
+              (source-ref-named? index (nth args 0) "str/blank?"))
+            (let [source: ExprResultV0
+                  (lower-expr env owner state (nth args 1))]
+              (cond
+                (exprresultv0-terminated source) source
+                (state-blocked? (exprresultv0-state source))
+                (dead-result (exprresultv0-state source))
+                (not (text-vector-value? types (exprresultv0-type-id source)))
+                (fail-result (exprresultv0-state source)
+                  "TODO-NATIVE-TEXT-REMOVE-OPERAND: remove str/blank? needs a vector of Text")
+                :else
+                (let [base: BodyStateV0 (exprresultv0-state source)
+                      result-id: core/NativeId
+                      (state-id base owner "text-vector-nonblank")]
+                  (->ExprResultV0
+                    (state-emit (state-bump base)
+                      (core/->TextBuiltinInstruction
+                        (core/->SsaValueV0 result-id
+                          (exprresultv0-type-id source))
+                        (core/->TextVectorRemoveBlankV0 (arena-value-id owner)
+                          (exprresultv0-value-id source))))
+                    result-id (exprresultv0-type-id source) false))))
+
+            (and (= "apply" callee) (= 2 (count args))
+              (source-ref-named? index (nth args 0) "str")
+              (source-call-named? index (nth args 1) "repeat"))
+            (let [repeat-args: (Vec core/NativeId)
+                  (source-call-arguments index (nth args 1))]
+              (if (not (= 2 (count repeat-args)))
+                (fail-result state
+                  "TODO-NATIVE-TEXT-REPEAT-ARITY: repeat needs a count and Text")
+                (let [count-value: ExprResultV0
+                      (lower-expr env owner state (nth repeat-args 0))
+                      source: ExprResultV0
+                      (if (or (exprresultv0-terminated count-value)
+                              (state-blocked? (exprresultv0-state count-value)))
+                        count-value
+                        (lower-expr env owner
+                          (exprresultv0-state count-value)
+                          (nth repeat-args 1)))]
+                  (cond
+                    (exprresultv0-terminated source) source
+                    (state-blocked? (exprresultv0-state source))
+                    (dead-result (exprresultv0-state source))
+                    (not (and (same-id? (exprresultv0-type-id count-value)
+                                (int-type-id))
+                           (text-operand? (exprresultv0-type-id source))))
+                    (fail-result (exprresultv0-state source)
+                      "TODO-NATIVE-TEXT-REPEAT-OPERANDS: repeat needs Int and Text")
+                    :else
+                    (let [base: BodyStateV0 (exprresultv0-state source)
+                          result-id: core/NativeId
+                          (state-id base owner "text-repeat")]
+                      (->ExprResultV0
+                        (state-emit (state-bump base)
+                          (core/->TextBuiltinInstruction
+                            (core/->SsaValueV0 result-id (text-type-id))
+                            (core/->TextRepeatV0 (arena-value-id owner)
+                              (exprresultv0-value-id source)
+                              (exprresultv0-value-id count-value))))
+                        result-id (text-type-id) false))))))
+
             (= "throw" callee)
             (let [code-id: core/NativeId (state-id state owner "trap")
                   emitted: BodyStateV0
@@ -3777,6 +4002,202 @@
 
                 (state-blocked? current) (dead-result current)
 
+                (and (= "compare" callee) (= 2 (count values))
+                  (text-operand? (nth value-types 0))
+                  (text-operand? (nth value-types 1)))
+                (let [result-id: core/NativeId
+                      (state-id current owner "text-compare")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->TextBuiltinInstruction
+                        (core/->SsaValueV0 result-id (int-type-id))
+                        (core/->TextCompareV0
+                          (nth values 0) (nth values 1))))
+                    result-id (int-type-id) false))
+
+                (= "compare" callee)
+                (fail-result current
+                  "TODO-NATIVE-TEXT-COMPARE-OPERANDS: compare takes two native Text operands")
+
+                (and (= "str/trim" callee) (= 1 (count values))
+                  (text-operand? (nth value-types 0)))
+                (let [result-id: core/NativeId
+                      (state-id current owner "text-trim")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->TextBuiltinInstruction
+                        (core/->SsaValueV0 result-id (text-type-id))
+                        (core/->TextTrimV0 (arena-value-id owner)
+                          (nth values 0))))
+                    result-id (text-type-id) false))
+
+                (= "str/trim" callee)
+                (fail-result current
+                  "TODO-NATIVE-TEXT-TRIM-OPERAND: str/trim takes one native Text operand")
+
+                (and (= "str/lower-case" callee) (= 1 (count values))
+                  (text-operand? (nth value-types 0)))
+                (let [result-id: core/NativeId
+                      (state-id current owner "text-lower")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->TextBuiltinInstruction
+                        (core/->SsaValueV0 result-id (text-type-id))
+                        (core/->TextLowerV0 (arena-value-id owner)
+                          (nth values 0))))
+                    result-id (text-type-id) false))
+
+                (= "str/lower-case" callee)
+                (fail-result current
+                  "TODO-NATIVE-TEXT-LOWER-OPERAND: str/lower-case takes one native Text operand")
+
+                (and (= "str/replace" callee) (= 3 (count values))
+                  (text-operand? (nth value-types 0))
+                  (text-operand? (nth value-types 1))
+                  (text-operand? (nth value-types 2)))
+                (let [result-id: core/NativeId
+                      (state-id current owner "text-regex-replace")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->TextBuiltinInstruction
+                        (core/->SsaValueV0 result-id (text-type-id))
+                        (core/->TextRegexReplaceV0 (arena-value-id owner)
+                          (nth values 0) (nth values 1) (nth values 2))))
+                    result-id (text-type-id) false))
+
+                (= "str/replace" callee)
+                (fail-result current
+                  "TODO-NATIVE-REGEX-REPLACE-OPERANDS: str/replace takes Text, Regex, Text")
+
+                (and (= "re-matches" callee) (= 2 (count values))
+                  (text-operand? (nth value-types 0))
+                  (text-operand? (nth value-types 1)))
+                (let [result-id: core/NativeId
+                      (state-id current owner "text-regex-matches")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->TextBuiltinInstruction
+                        (core/->SsaValueV0 result-id (bool-type-id))
+                        ;; re-matches spells pattern before source.
+                        (core/->TextRegexMatchesV0
+                          (nth values 1) (nth values 0))))
+                    result-id (bool-type-id) false))
+
+                (= "re-matches" callee)
+                (fail-result current
+                  "TODO-NATIVE-REGEX-MATCHES-OPERANDS: re-matches takes Regex and Text")
+
+                (and (= "re-find" callee) (= 2 (count values))
+                  (text-operand? (nth value-types 0))
+                  (text-operand? (nth value-types 1)))
+                (let [result-id: core/NativeId
+                      (state-id current owner "text-regex-find")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->TextBuiltinInstruction
+                        (core/->SsaValueV0 result-id (regex-match-type-id))
+                        (core/->TextRegexFindV0 (arena-value-id owner)
+                          (nth values 1) (nth values 0))))
+                    result-id (regex-match-type-id) false))
+
+                (= "re-find" callee)
+                (fail-result current
+                  "TODO-NATIVE-REGEX-FIND-OPERANDS: re-find takes Regex and Text")
+
+                (and (= "str/split" callee) (= 2 (count values))
+                  (text-operand? (nth value-types 0))
+                  (text-operand? (nth value-types 1)))
+                (let [vector-type: (U core/NativeId Nil)
+                      (text-vector-type-of types)]
+                  (if (nil? vector-type)
+                    (fail-result current
+                      "TODO-NATIVE-TEXT-SPLIT-TYPE: str/split needs a declared Vec Text")
+                    (let [result-id: core/NativeId
+                          (state-id current owner "text-split")]
+                      (->ExprResultV0
+                        (state-emit (state-bump current)
+                          (core/->TextBuiltinInstruction
+                            (core/->SsaValueV0 result-id vector-type)
+                            (core/->TextSplitV0 (arena-value-id owner)
+                              (nth values 0) (nth values 1))))
+                        result-id vector-type false))))
+
+                (= "str/split" callee)
+                (fail-result current
+                  "TODO-NATIVE-TEXT-SPLIT-OPERANDS: str/split takes Text and Regex")
+
+                (and (= "str/join" callee) (= 2 (count values))
+                  (text-operand? (nth value-types 0))
+                  (text-vector-value? types (nth value-types 1)))
+                (let [result-id: core/NativeId
+                      (state-id current owner "text-join")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->TextBuiltinInstruction
+                        (core/->SsaValueV0 result-id (text-type-id))
+                        (core/->TextJoinV0 (arena-value-id owner)
+                          (nth values 0) (nth values 1))))
+                    result-id (text-type-id) false))
+
+                (= "str/join" callee)
+                (fail-result current
+                  "TODO-NATIVE-TEXT-JOIN-OPERANDS: str/join takes Text and Vec Text")
+
+                (and (or (= "boolean" callee) (= "long" callee))
+                  (= 1 (count values))
+                  (or (and (= "boolean" callee)
+                        (same-id? (nth value-types 0) (bool-type-id)))
+                      (and (= "long" callee)
+                        (same-id? (nth value-types 0) (int-type-id)))))
+                (->ExprResultV0 current (nth values 0) (nth value-types 0) false)
+
+                (and (= "max" callee) (= 2 (count values))
+                  (same-id? (nth value-types 0) (int-type-id))
+                  (same-id? (nth value-types 1) (int-type-id)))
+                (let [compare-id: core/NativeId
+                      (state-id current owner "max-compare")
+                      left-id: core/NativeId
+                      (state-id (state-bump current) owner "max-left")
+                      right-id: core/NativeId
+                      (state-id (state-bump (state-bump current)) owner "max-right")
+                      join-id: core/NativeId
+                      (state-id (state-bump (state-bump (state-bump current)))
+                        owner "max-join")
+                      join-value: core/NativeId
+                      (state-id
+                        (state-bump (state-bump (state-bump (state-bump current))))
+                        owner "max-value")
+                      compared: BodyStateV0
+                      (state-emit
+                        (state-bump (state-bump (state-bump
+                          (state-bump (state-bump current)))))
+                        (core/->CompareInstruction
+                          (core/->SsaValueV0 compare-id (bool-type-id))
+                          (core/->CompareLeI64V0 true)
+                          (nth values 0) (nth values 1)))
+                      branched: BodyStateV0
+                      (state-close compared
+                        (core/->BranchTerminator compare-id right-id left-id))
+                      left: BodyStateV0
+                      (state-close (state-open-block branched left-id [])
+                        (core/->JumpTerminator join-id [(nth values 0)]))
+                      right: BodyStateV0
+                      (state-close (state-open-block left right-id [])
+                        (core/->JumpTerminator join-id [(nth values 1)]))]
+                  (->ExprResultV0
+                    (state-open-block right join-id
+                      [(core/->Parameter join-value (int-type-id))])
+                    join-value (int-type-id) false))
+
+                (and (= "map?" callee) (= 1 (count values)))
+                (bool-constant-result current owner "map-predicate"
+                  (map-value? types (nth value-types 0)))
+
+                (and (= "sequential?" callee) (= 1 (count values)))
+                (bool-constant-result current owner "sequential-predicate"
+                  (and (vector-type? types (nth value-types 0))
+                    (not (map-value? types (nth value-types 0)))))
+
                 (refused-arith-op? callee)
                 (fail-result current
                   (str "TODO-NATIVE-DIVISION-" callee
@@ -3894,6 +4315,12 @@
 
                 (= "pos?" callee)
                 (fail-result current "TODO-NATIVE-POS-ARITY: pos? takes one operand")
+
+                (and (= "neg?" callee) (= 1 (count values)))
+                (lower-negative current owner (nth values 0) (nth value-types 0))
+
+                (= "neg?" callee)
+                (fail-result current "TODO-NATIVE-NEG-ARITY: neg? takes one operand")
 
                 (and (= "count" callee) (= 1 (count values))
                   (vector-type? types (nth value-types 0)))
@@ -5006,8 +5433,12 @@
         record-resolutions: (Vec RecordResolutionV0) (resolve-records index)
         function-sources: (Vec core/NativeId) (index-form-ids index "defn")
         signature-resolutions: (Vec FunctionResolutionV0) (resolve-functions index)
-        record-types: (Vec core/TypeDef)
+        base-record-types: (Vec core/TypeDef)
         (collect-record-types record-names record-resolutions)
+        record-types: (Vec core/TypeDef)
+        (if (index-has-callee? index "re-find")
+          (append-type-def base-record-types (regex-match-type))
+          base-record-types)
         globals: (Vec GlobalBindingV0) (source-globals index)
         declared-types: (Vec core/TypeDef)
         (append-type-defs
@@ -5634,6 +6065,59 @@
     [(id-value (core/ssavaluev0-id value))
      (id-value (core/ssavaluev0-type-id value))]))
 
+(defn encode-text-builtin-operation [operation: core/TextBuiltinOpV0] -> String
+  (cond
+    (instance? native.core.TextCompareV0 operation)
+    (worlds/canonical-record "text-compare"
+      [(id-value (core/textcomparev0-left-id operation))
+       (id-value (core/textcomparev0-right-id operation))])
+    (instance? native.core.TextTrimV0 operation)
+    (worlds/canonical-record "text-trim"
+      [(id-value (core/texttrimv0-arena-id operation))
+       (id-value (core/texttrimv0-source-id operation))])
+    (instance? native.core.TextLowerV0 operation)
+    (worlds/canonical-record "text-lower"
+      [(id-value (core/textlowerv0-arena-id operation))
+       (id-value (core/textlowerv0-source-id operation))])
+    (instance? native.core.TextRegexReplaceV0 operation)
+    (worlds/canonical-record "text-regex-replace"
+      [(id-value (core/textregexreplacev0-arena-id operation))
+       (id-value (core/textregexreplacev0-source-id operation))
+       (id-value (core/textregexreplacev0-pattern-id operation))
+       (id-value (core/textregexreplacev0-replacement-id operation))])
+    (instance? native.core.TextRegexMatchesV0 operation)
+    (worlds/canonical-record "text-regex-matches"
+      [(id-value (core/textregexmatchesv0-source-id operation))
+       (id-value (core/textregexmatchesv0-pattern-id operation))])
+    (instance? native.core.TextRegexFindV0 operation)
+    (worlds/canonical-record "text-regex-find"
+      [(id-value (core/textregexfindv0-arena-id operation))
+       (id-value (core/textregexfindv0-source-id operation))
+       (id-value (core/textregexfindv0-pattern-id operation))])
+    (instance? native.core.TextSplitV0 operation)
+    (worlds/canonical-record "text-split"
+      [(id-value (core/textsplitv0-arena-id operation))
+       (id-value (core/textsplitv0-source-id operation))
+       (id-value (core/textsplitv0-pattern-id operation))])
+    (instance? native.core.TextVectorTrimV0 operation)
+    (worlds/canonical-record "text-vector-trim"
+      [(id-value (core/textvectortrimv0-arena-id operation))
+       (id-value (core/textvectortrimv0-source-id operation))])
+    (instance? native.core.TextVectorRemoveBlankV0 operation)
+    (worlds/canonical-record "text-vector-remove-blank"
+      [(id-value (core/textvectorremoveblankv0-arena-id operation))
+       (id-value (core/textvectorremoveblankv0-source-id operation))])
+    (instance? native.core.TextJoinV0 operation)
+    (worlds/canonical-record "text-join"
+      [(id-value (core/textjoinv0-arena-id operation))
+       (id-value (core/textjoinv0-separator-id operation))
+       (id-value (core/textjoinv0-source-id operation))])
+    :else
+    (worlds/canonical-record "text-repeat"
+      [(id-value (core/textrepeatv0-arena-id operation))
+       (id-value (core/textrepeatv0-source-id operation))
+       (id-value (core/textrepeatv0-count-id operation))])))
+
 (defn encode-instruction [instruction: core/Instruction] -> String
   (cond
     (instance? native.core.AtomInstruction instruction)
@@ -5816,6 +6300,12 @@
        (id-value (core/textconcatinstruction-arena-id instruction))
        (encode-id-roots "operands"
          (core/textconcatinstruction-operand-ids instruction))])
+
+    (instance? native.core.TextBuiltinInstruction instruction)
+    (worlds/canonical-record "text-builtin-instruction"
+      [(encode-ssa-value (core/textbuiltininstruction-result instruction))
+       (encode-text-builtin-operation
+         (core/textbuiltininstruction-builtin instruction))])
 
     (instance? native.core.CallInstruction instruction)
     (worlds/canonical-record "call-instruction"

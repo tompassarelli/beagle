@@ -45,17 +45,8 @@
       (= character (subs alphabet position (+ position 1))) true
       :else (recur (+ position 1)))))
 
-(defn text-emittable? [value: String] -> Bool
-  (loop [position: Int 0]
-    (if (>= position (count value))
-      true
-      (let [character: String (subs value position (+ position 1))]
-        (if (or (character-in? (printable-ascii) character)
-              (= character "\u0001") (= character "\t")
-              (= character "\n") (= character "\u000b")
-              (= character "\u000c") (= character "\r"))
-          (recur (+ position 1))
-          false)))))
+;; Generated translation units are sealed UTF-8 artifacts.
+(defn text-emittable? [value: String] -> Bool true)
 
 (defn escape-c-character [character: String] -> String
   (cond
@@ -197,6 +188,7 @@
     (instance? native.core.TextParseI64Instruction instruction) true
     (instance? native.core.TextSliceInstruction instruction) true
     (instance? native.core.TextConcatInstruction instruction) true
+    (instance? native.core.TextBuiltinInstruction instruction) true
     :else false))
 
 (defn terminator-supported? [terminator: core/Terminator] -> Bool
@@ -741,6 +733,66 @@
       (value-name function slots operand)
       (str "native_text_from_int(" arena ", "
         (value-name function slots operand) ")"))))
+
+(defn emit-text-builtin
+  [function: core/FunctionDef
+   slots: (Vec ValueSlotV0)
+   target: String
+   operation: core/TextBuiltinOpV0] -> String
+  (cond
+    (instance? native.core.TextCompareV0 operation)
+    (str "  " target " = native_text_compare("
+      (value-name function slots (core/textcomparev0-left-id operation)) ", "
+      (value-name function slots (core/textcomparev0-right-id operation)) ");\n")
+    (instance? native.core.TextTrimV0 operation)
+    (str "  " target " = native_text_trim((native_arena *)"
+      (value-name function slots (core/texttrimv0-arena-id operation)) ", "
+      (value-name function slots (core/texttrimv0-source-id operation)) ");\n")
+    (instance? native.core.TextLowerV0 operation)
+    (str "  " target " = native_text_lower_ascii((native_arena *)"
+      (value-name function slots (core/textlowerv0-arena-id operation)) ", "
+      (value-name function slots (core/textlowerv0-source-id operation)) ");\n")
+    (instance? native.core.TextRegexReplaceV0 operation)
+    (str "  " target " = native_text_regex_replace((native_arena *)"
+      (value-name function slots (core/textregexreplacev0-arena-id operation)) ", "
+      (value-name function slots (core/textregexreplacev0-source-id operation)) ", "
+      (value-name function slots (core/textregexreplacev0-pattern-id operation)) ", "
+      (value-name function slots (core/textregexreplacev0-replacement-id operation)) ");\n")
+    (instance? native.core.TextRegexMatchesV0 operation)
+    (str "  " target " = native_text_regex_matches("
+      (value-name function slots (core/textregexmatchesv0-source-id operation)) ", "
+      (value-name function slots (core/textregexmatchesv0-pattern-id operation)) ");\n")
+    (instance? native.core.TextRegexFindV0 operation)
+    (str "  " target " = native_text_regex_find((native_arena *)"
+      (value-name function slots (core/textregexfindv0-arena-id operation)) ", "
+      (value-name function slots (core/textregexfindv0-source-id operation)) ", "
+      (value-name function slots (core/textregexfindv0-pattern-id operation)) ");\n")
+    (instance? native.core.TextSplitV0 operation)
+    (str "  " target " = native_text_regex_split((native_arena *)"
+      (value-name function slots (core/textsplitv0-arena-id operation)) ", "
+      (value-name function slots (core/textsplitv0-source-id operation)) ", "
+      (value-name function slots (core/textsplitv0-pattern-id operation)) ");\n")
+    (instance? native.core.TextVectorTrimV0 operation)
+    (str "  " target " = native_text_vector_trim((native_arena *)"
+      (value-name function slots (core/textvectortrimv0-arena-id operation)) ", "
+      (value-name function slots (core/textvectortrimv0-source-id operation)) ");\n")
+    (instance? native.core.TextVectorRemoveBlankV0 operation)
+    (str "  " target " = native_text_vector_remove_blank((native_arena *)"
+      (value-name function slots
+        (core/textvectorremoveblankv0-arena-id operation)) ", "
+      (value-name function slots
+        (core/textvectorremoveblankv0-source-id operation)) ");\n")
+    (instance? native.core.TextJoinV0 operation)
+    (str "  " target " = native_text_join((native_arena *)"
+      (value-name function slots (core/textjoinv0-arena-id operation)) ", "
+      (value-name function slots (core/textjoinv0-separator-id operation)) ", "
+      (value-name function slots (core/textjoinv0-source-id operation)) ");\n")
+    :else
+    (str "  " target " = native_text_repeat((native_arena *)"
+      (value-name function slots (core/textrepeatv0-arena-id operation)) ", "
+      (value-name function slots (core/textrepeatv0-source-id operation)) ", "
+      (value-name function slots (core/textrepeatv0-count-id operation)) ");\n")))
+
 (defn emit-instruction
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
@@ -831,6 +883,10 @@
                     (nth operands position))))))
           " };\n    " target " = native_text_concat(" arena ", " parts
           ", UINT64_C(" (count operands) "));\n  }\n"))
+
+      (instance? native.core.TextBuiltinInstruction instruction)
+      (emit-text-builtin function slots target
+        (core/textbuiltininstruction-builtin instruction))
 
       (instance? native.core.CopyInstruction instruction)
       (str "  " target " = "

@@ -495,6 +495,40 @@
     []
     []))
 
+(def refusal-text-builtin-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "ref-txt-blk")
+    []
+    [(core/->TextBuiltinInstruction
+       (core/->SsaValueV0 (slice-id "ref-txt-out") (slice-id "type-0-i64"))
+       (core/->TextCompareV0
+         (slice-id "ref-txt-lft") (slice-id "ref-txt-rgt")))]
+    [(core/return-terminator (slice-id "ref-txt-out"))]))
+
+(def refusal-text-builtin-function: core/FunctionDef
+  (core/->FunctionDef (slice-id "ref-txt-fn") "refuse-text-builtin"
+    [(core/->Parameter (slice-id "ref-txt-lft") (slice-id "type-0-i64"))
+     (core/->Parameter (slice-id "ref-txt-rgt") (slice-id "type-0-i64"))]
+    [refusal-text-builtin-block]
+    (slice-id "ref-txt-blk")
+    (slice-id "type-0-i64")
+    []
+    []
+    []))
+
+(def refusal-text-builtin-world: core/NativeWorld
+  (core/->NativeWorld (slice-id "ref-txt-wld") nil "native-qbe-fixture-v0"
+    [slice-i64-type]
+    []
+    []
+    []
+    [slice-i64-layout]
+    [refusal-text-builtin-function]
+    []
+    []
+    []
+    []
+    []))
+
 ;; --- materialization ------------------------------------------------------
 
 (defn require-artifact [result: qbe/QbeMaterialization] -> qbe/QbeArtifact
@@ -519,6 +553,9 @@
 (def refusal-parse-proven?: Bool
   (explicitly-refused? refusal-parse-world))
 
+(def refusal-text-builtin-proven?: Bool
+  (explicitly-refused? refusal-text-builtin-world))
+
 (def fixture-artifact: qbe/QbeArtifact
   (require-artifact (qbe/materialize-world fixture-world 0)))
 
@@ -541,6 +578,7 @@
   (and refusal-index-proven?
     refusal-blank-proven?
     refusal-parse-proven?
+    refusal-text-builtin-proven?
     (= (qbe/qbeartifact-module-text fixture-artifact)
          (qbe/qbeartifact-module-text fixture-permuted-artifact))
     (= (qbe/qbeartifact-module-text slice-artifact)

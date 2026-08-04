@@ -160,6 +160,50 @@
   (CompareEqBoolV0 [token: Bool])
   (CompareEqTextV0 [token: Bool]))
 
+;; Text library operations share one closed instruction family. Allocation is
+;; explicit in each operation through its arena SSA value; pure comparisons do
+;; not acquire one.
+(defunion TextBuiltinOpV0
+  (TextCompareV0
+    [left-id: NativeId
+     right-id: NativeId])
+  (TextTrimV0
+    [arena-id: NativeId
+     source-id: NativeId])
+  (TextLowerV0
+    [arena-id: NativeId
+     source-id: NativeId])
+  (TextRegexReplaceV0
+    [arena-id: NativeId
+     source-id: NativeId
+     pattern-id: NativeId
+     replacement-id: NativeId])
+  (TextRegexMatchesV0
+    [source-id: NativeId
+     pattern-id: NativeId])
+  (TextRegexFindV0
+    [arena-id: NativeId
+     source-id: NativeId
+     pattern-id: NativeId])
+  (TextSplitV0
+    [arena-id: NativeId
+     source-id: NativeId
+     pattern-id: NativeId])
+  (TextVectorTrimV0
+    [arena-id: NativeId
+     source-id: NativeId])
+  (TextVectorRemoveBlankV0
+    [arena-id: NativeId
+     source-id: NativeId])
+  (TextJoinV0
+    [arena-id: NativeId
+     separator-id: NativeId
+     source-id: NativeId])
+  (TextRepeatV0
+    [arena-id: NativeId
+     source-id: NativeId
+     count-id: NativeId]))
+
 (defunion ResourceTokenKindV0
   (RegionTokenV0 [region: NativeId])
   (CapabilityTokenV0 [capability: NativeId]))
@@ -330,7 +374,10 @@
   (TextConcatInstruction
     [result: SsaValueV0
      arena-id: NativeId
-     operand-ids: (Vec NativeId)]))
+     operand-ids: (Vec NativeId)])
+  (TextBuiltinInstruction
+    [result: SsaValueV0
+     builtin: TextBuiltinOpV0]))
 
 (defrecord SwitchCaseV0
   [variant-id: NativeId
@@ -578,7 +625,8 @@
     [(TextParseI64Instruction result source-id) (ssavaluev0-id result)]
     [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
      (ssavaluev0-id result)]
-    [(TextConcatInstruction result arena-id operand-ids) (ssavaluev0-id result)]))
+    [(TextConcatInstruction result arena-id operand-ids) (ssavaluev0-id result)]
+    [(TextBuiltinInstruction result operation) (ssavaluev0-id result)]))
 
 (defn instruction-result-ids [instructions :- (Vec Instruction)] :- (Vec NativeId)
   (mapv (fn [instruction :- Instruction] :- NativeId (instruction-result-id instruction))
@@ -850,7 +898,8 @@
     [(TextParseI64Instruction result source-id) true]
     [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
      true]
-    [(TextConcatInstruction result arena-id operand-ids) true]))
+    [(TextConcatInstruction result arena-id operand-ids) true]
+    [(TextBuiltinInstruction result operation) true]))
 
 (defn parameter-types-closed?
   [parameters :- (Vec Parameter)
@@ -949,6 +998,25 @@
       (recur (+ index 1)
         (append-ids ids (switchcasev0-arguments (nth cases index)))))))
 
+(defn text-builtin-ssa-refs [operation: TextBuiltinOpV0] -> (Vec NativeId)
+  (match operation
+    [(TextCompareV0 left-id right-id) [left-id right-id]]
+    [(TextTrimV0 arena-id source-id) [arena-id source-id]]
+    [(TextLowerV0 arena-id source-id) [arena-id source-id]]
+    [(TextRegexReplaceV0 arena-id source-id pattern-id replacement-id)
+     [arena-id source-id pattern-id replacement-id]]
+    [(TextRegexMatchesV0 source-id pattern-id) [source-id pattern-id]]
+    [(TextRegexFindV0 arena-id source-id pattern-id)
+     [arena-id source-id pattern-id]]
+    [(TextSplitV0 arena-id source-id pattern-id)
+     [arena-id source-id pattern-id]]
+    [(TextVectorTrimV0 arena-id source-id) [arena-id source-id]]
+    [(TextVectorRemoveBlankV0 arena-id source-id) [arena-id source-id]]
+    [(TextJoinV0 arena-id separator-id source-id)
+     [arena-id separator-id source-id]]
+    [(TextRepeatV0 arena-id source-id count-id)
+     [arena-id source-id count-id]]))
+
 (defn instruction-ssa-refs [instruction :- Instruction] :- (Vec NativeId)
   (match instruction
     [(AtomInstruction result atom) []]
@@ -982,7 +1050,9 @@
     [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
      [arena-id source-id start-id end-id]]
     [(TextConcatInstruction result arena-id operand-ids)
-     (into [arena-id] operand-ids)]))
+     (into [arena-id] operand-ids)]
+    [(TextBuiltinInstruction result operation)
+     (text-builtin-ssa-refs operation)]))
 
 (defn terminator-ssa-refs [terminator :- Terminator] :- (Vec NativeId)
   (match terminator
@@ -1064,7 +1134,8 @@
     [(TextParseI64Instruction result source-id) true]
     [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
      true]
-    [(TextConcatInstruction result arena-id operand-ids) true]))
+    [(TextConcatInstruction result arena-id operand-ids) true]
+    [(TextBuiltinInstruction result operation) true]))
 
 (defn block-resources-allowed?
   [block :- BasicBlock
