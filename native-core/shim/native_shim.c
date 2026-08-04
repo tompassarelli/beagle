@@ -1806,6 +1806,22 @@ bool native_host_environment_lookup_v0(
   return true;
 }
 
+void native_host_stdout_write_line_v0(
+    const native_capability *capability, uint64_t text) {
+  uint64_t length;
+  if ((capability == NULL) || (capability->token == UINT64_C(0))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  length = native_text_length(text);
+  if (length > (uint64_t)SIZE_MAX) {
+    native_trap(NATIVE_TRAP_OVERFLOW);
+  }
+  if (!native_byte_write(stdout, native_text_bytes(text), (size_t)length) ||
+      (fputc('\n', stdout) == EOF)) {
+    native_trap(NATIVE_TRAP_IO);
+  }
+}
+
 bool native_byte_read(FILE *stream, uint8_t *destination, size_t length) {
   if ((stream == NULL) || ((destination == NULL) && (length != 0U))) {
     return false;

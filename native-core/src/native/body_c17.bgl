@@ -241,6 +241,10 @@
             (and (instance? native.core.RestrictedCOptionalOutAbiV0
                    (core/abideclv0-convention abi))
               (= "native_host_environment_lookup_v0"
+                (core/abideclv0-symbol abi)))
+            (and (instance? native.core.RestrictedCAbiV0
+                   (core/abideclv0-convention abi))
+              (= "native_host_stdout_write_line_v0"
                 (core/abideclv0-symbol abi)))))
         (core/nativeworld-abis world))
       (every? function-supported? (core/nativeworld-functions world)))))
@@ -1113,7 +1117,7 @@
       (str "native_text_from_int(" arena ", "
         (value-name function slots operand) ")"))))
 
-(defn emit-extern-call
+(defn emit-optional-out-extern-call
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
    abis: (Vec core/AbiDeclV0)
@@ -1280,6 +1284,65 @@
                 "    } else {\n"
                 "      " target ".tag = INT64_C(" absent-tag ");\n"
                 "    }\n  }\n"))))))))
+
+(defn emit-void-extern-call
+  [abis: (Vec core/AbiDeclV0)
+   function: core/FunctionDef
+   slots: (Vec ValueSlotV0)
+   target: String
+   instruction: core/ExternCallInstruction] -> String
+  (let [abi: (U core/AbiDeclV0 Nil)
+        (find-abi abis (core/externcallinstruction-abi-id instruction))]
+    (if (nil? abi)
+      ""
+      (let [result-value: (U core/AbiValueV0 Nil)
+            (core/abideclv0-result abi)
+            arena-id: (U core/NativeId Nil)
+            (core/externcallinstruction-arena-id instruction)
+            hidden: (Vec String)
+            (if (> (count (core/abideclv0-required-capabilities abi)) 0)
+              ["capability"]
+              [])
+            arguments: (Vec String)
+            (loop [position: Int 0
+                   collected: (Vec String) hidden
+                   values: (Vec core/NativeId)
+                   (core/externcallinstruction-arguments instruction)]
+              (if (>= position (count values))
+                collected
+                (recur (+ position 1)
+                  (conj collected
+                    (value-name function slots (nth values position)))
+                  values)))]
+        (if (or (not (nil? result-value)) (not (nil? arena-id)))
+          ""
+          (str "  " (core/abideclv0-symbol abi) "("
+            (join-c-arguments arguments) ");\n"
+            "  memset(&" target ", 0, sizeof " target ");\n"))))))
+
+(defn emit-extern-call
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)
+   abis: (Vec core/AbiDeclV0)
+   function: core/FunctionDef
+   slots: (Vec ValueSlotV0)
+   target: String
+   instruction: core/ExternCallInstruction] -> String
+  (let [abi: (U core/AbiDeclV0 Nil)
+        (find-abi abis (core/externcallinstruction-abi-id instruction))]
+    (if (nil? abi)
+      ""
+      (cond
+        (instance? native.core.RestrictedCOptionalOutAbiV0
+          (core/abideclv0-convention abi))
+        (emit-optional-out-extern-call types layouts abis function slots target
+          instruction)
+
+        (instance? native.core.RestrictedCAbiV0
+          (core/abideclv0-convention abi))
+        (emit-void-extern-call abis function slots target instruction)
+
+        :else ""))))
 
 (defn emit-instruction
   [types: (Vec core/TypeDef)

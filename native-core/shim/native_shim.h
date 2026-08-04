@@ -12,6 +12,7 @@
 #define NATIVE_TRAP_OVERFLOW UINT32_C(2)
 #define NATIVE_TRAP_ARENA_EXHAUSTED UINT32_C(3)
 #define NATIVE_TRAP_OUT_OF_RANGE UINT32_C(4)
+#define NATIVE_TRAP_IO UINT32_C(5)
 
 typedef struct native_arena {
   uint8_t *bytes;
@@ -234,5 +235,7 @@ uint64_t native_text_repeat(native_arena *arena, uint64_t source,
 bool native_host_environment_lookup_v0(
     native_arena *arena, const native_capability *capability,
     uint64_t name, uint64_t *out);
+void native_host_stdout_write_line_v0(
+    const native_capability *capability, uint64_t text);
 
 #endif

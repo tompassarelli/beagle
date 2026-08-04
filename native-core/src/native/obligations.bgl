@@ -285,6 +285,20 @@
       (nth types index)
       :else (recur (+ index 1)))))
 
+(defn unit-type?
+  [types :- (Vec core/TypeDef)
+   type-id :- core/NativeId] :- Bool
+  (let [type-def :- (U core/TypeDef Nil) (find-type types type-id)]
+    (if (nil? type-def)
+      false
+      (let [shape :- core/TypeShape (core/typedef-shape type-def)]
+        (if (not (instance? native.core.UnionType shape))
+          false
+          (let [variants :- (Vec core/TypeVariant)
+                (core/uniontype-variants shape)]
+            (and (= 1 (count variants))
+              (nil? (core/typevariant-payload-type (nth variants 0))))))))))
+
 (defn variant-ids-for-type
   [types :- (Vec core/TypeDef)
    type-id :- core/NativeId] :- (Vec core/NativeId)
@@ -884,6 +898,7 @@
               (core/externcallinstruction-arguments instruction)
               parameters :- (Vec core/AbiValueV0)
               (core/abideclv0-parameters abi)
+              types :- (Vec core/TypeDef) (core/nativeworld-types world)
               result :- (U core/AbiValueV0 Nil) (core/abideclv0-result abi)
               arena :- (U core/NativeId Nil)
               (core/externcallinstruction-arena-id instruction)]
@@ -901,20 +916,25 @@
                           (core/abivaluev0-type-id (nth parameters index))))
                     (recur (+ index 1))
                     false))))
-            (not (nil? result))
-            (core/native-id=
-              (core/ssavaluev0-type-id
-                (core/externcallinstruction-result instruction))
-              (core/abivaluev0-type-id result))
-            (if (instance? native.core.ArenaOwnedV0
-                  (core/abivaluev0-ownership result))
-              (let [region :- (U core/NativeId Nil)
-                    (get (core/abivaluev0-ownership result) :region nil)]
-                (and (not (nil? region))
-                  (core/id-in? (core/functiondef-regions function) region)
-                  (not (nil? arena))
-                  (defsitev0-found (find-def-site function arena))))
-              true)
+            (if (nil? result)
+              (unit-type? types
+                (core/ssavaluev0-type-id
+                  (core/externcallinstruction-result instruction)))
+              (core/native-id=
+                (core/ssavaluev0-type-id
+                  (core/externcallinstruction-result instruction))
+                (core/abivaluev0-type-id result)))
+            (if (nil? result)
+              (nil? arena)
+              (if (instance? native.core.ArenaOwnedV0
+                    (core/abivaluev0-ownership result))
+                (let [region :- (U core/NativeId Nil)
+                      (get (core/abivaluev0-ownership result) :region nil)]
+                  (and (not (nil? region))
+                    (core/id-in? (core/functiondef-regions function) region)
+                    (not (nil? arena))
+                    (defsitev0-found (find-def-site function arena))))
+                (nil? arena)))
             (core/ids-in? (core/abideclv0-required-effects abi)
               (core/functiondef-effects function))
             (core/ids-in? (core/abideclv0-required-capabilities abi)
