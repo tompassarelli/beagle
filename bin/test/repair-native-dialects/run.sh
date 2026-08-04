@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Regression test: beagle_repair_apply.resolve_source_file locates native-dialect
-# (.bzig/.bodin/.bsc) source files for fix-plan application.
+# Regression test: beagle_repair_apply.resolve_source_file locates a .bzig
+# source file for fix-plan application.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"

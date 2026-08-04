@@ -63,6 +63,19 @@
   (check-equal? (hash-ref (beagle-parse-error-details e) 'cause)
                 "surface-divergence"))
 
+(test-case "surface-divergence: removed ScriptC target is tagged"
+  (define e
+    (with-handlers ([beagle-parse-error? values])
+      (parse-program
+       (list (datum->syntax #f '(define-target scriptc))))
+      'no-error-raised))
+  (check-pred beagle-parse-error? e)
+  (check-eq? (beagle-parse-error-kind e) 'removed-form)
+  (check-regexp-match #rx"target 'scriptc' was removed"
+                      (exn-message e))
+  (check-equal? (hash-ref (beagle-parse-error-details e) 'cause)
+                "surface-divergence"))
+
 ;; (:keyword target) was re-adopted as the typed keyword-as-fn projection
 ;; — it no longer raises. The arity-error cases (:keyword) and
 ;; (:keyword a b c) raise as 'bad-form, classified as type-error (arity

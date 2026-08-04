@@ -13,7 +13,7 @@ description: >-
 # Beagle authoring
 
 Beagle is a typed authoring IR — **Clojure plus types**, compiled `parse →
-check → emit` to <!-- beagle:langs names -->Clojure, JavaScript, Nix, Odin, Zig, and TypeScript<!-- /beagle:langs -->. The reason to author in Beagle
+check → emit` to <!-- beagle:langs names -->Clojure, JavaScript, Nix, Odin, and Zig<!-- /beagle:langs -->. The reason to author in Beagle
 at all is the **authoring loop**: pointed, structured errors and machine-applicable
 repairs fed back fast. If that loop is offline or silently degraded, you are
 writing Beagle blind. So the loop comes first.
@@ -151,7 +151,6 @@ if the surface looks different than you expect, `git log` it.
 | `.bnix` | `nix` (`#lang beagle/nix`) |
 | `.bodin` | `odin` (`#lang beagle/odin`) |
 | `.bzig` | `zig` (`#lang beagle/zig`) |
-| `.bsc` | `scriptc` (`#lang beagle/scriptc`) |
 | `.bgl` | target-neutral — declare with `#lang beagle/<target>` or `(define-target …)` |
 | `.rkt` | legacy — no extension/header validation |
 <!-- /beagle:langs -->
@@ -164,7 +163,6 @@ Which target to reach for:
 - **Nix** (`nix`, `.bnix`) — Nix expressions type-checked against the NixOS option schema: system and package configuration.
 - **Odin** (`odin`, `.bodin`) — Native Odin for graphics and systems work against wgpu and SDL3.
 - **Zig** (`zig`, `.bzig`) — Native Zig for standalone linked executables and low-level systems code.
-- **TypeScript** (`scriptc`, `.bsc`) — A narrow TypeScript boundary over the JS lowering: typed exports for TypeScript consumers (experimental; primitive-typed defn only).
 <!-- /beagle:langs -->
 
 (Both tables are filled by `bin/beagle doc-fill` from

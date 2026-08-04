@@ -1,24 +1,12 @@
 ;; Beagle conformance corpus — the executable-spec manifest (see README.md).
 ;;
-;; Row: (id path kind option ...)
+;; Row: (id path kind)
 ;;   id    — stable case id; the ratchet (known-divergences-<target>.edn) keys on it.
 ;;   path  — repo-relative source file; target derived from extension
-;;           (.bjs -> js, .bclj -> clj, .bnix -> nix, .bsc -> scriptc).
+;;           (.bjs -> js, .bclj -> clj, .bnix -> nix).
 ;;   kind  — emit   : golden = emitted output (expected/<target>/<id>.<ext>)
 ;;           reject : source must FAIL check; golden = diagnostic text
 ;;                    (expected/<target>/<id>.diag)
-;;           static : emit + the emitted output compiles 100% statically on the
-;;                    target (scriptc), over MORE THAN ZERO statements
-;;           native : static + the native executable's stdout/stderr/exit equal
-;;                    the oracle runtime's (node) on the same emitted source
-;;           module : a multi-file row — #:modules names the siblings; goldens
-;;                    live in expected/<target>/<id>/, and the entry then runs
-;;                    the static + native dimensions
-;;   option — #:modules (path ...)  additional sources of a module row
-;;            #:diag-requires REGEX / #:diag-forbids REGEX  (reject rows) the
-;;              POINTEDNESS contract: what a user-facing diagnostic must and
-;;              must not say. Without it a reject row with a bad message is a
-;;              silent pass — the rejection is "correct" and nothing ratchets.
 ;;
 ;; The initial emit corpus is the standalone beagle-test fixtures; rows added
 ;; for conformance only live under beagle-test/conformance/corpus/.
@@ -73,44 +61,4 @@
  ("nix-simple-pkg"     "beagle-test/tests/fixtures/nix-simple-pkg.bnix"    emit)
  ("nix-tilde-ms"       "beagle-test/tests/fixtures/nix-tilde-ms.bnix"      emit)
  ("nix-with-cfg"       "beagle-test/tests/fixtures/nix-with-cfg.bnix"      emit)
-
- ;; --- scriptc --------------------------------------------------------
- ;; ScriptC compiles ordinary TypeScript to a native binary with no JS engine,
- ;; so a scriptc row certifies three things a golden diff cannot: the emitted
- ;; .ts type-checks under ScriptC's real tsc, it compiles 100% STATICALLY over
- ;; a non-zero statement count, and the native executable behaves exactly like
- ;; Node. Tooling: $BEAGLE_SCRIPTC (or `scriptc` on PATH) + clang + node; when
- ;; absent those dimensions report UNENFORCED, never pass.
- ;;
- ;; Green rows — the JS-family core that already survives all three dimensions.
- ("sc-defn-arith"      "beagle-test/conformance/corpus/scriptc/sc-defn-arith.bsc"      native)
- ("sc-if-cond-do-let"  "beagle-test/conformance/corpus/scriptc/sc-if-cond-do-let.bsc"  native)
- ("sc-loop-recur"      "beagle-test/conformance/corpus/scriptc/sc-loop-recur.bsc"      native)
- ("sc-nil-boundary"    "beagle-test/conformance/corpus/scriptc/sc-nil-boundary.bsc"    native)
- ("sc-float-boundary"  "beagle-test/conformance/corpus/scriptc/sc-float-boundary.bsc"  native)
- ("sc-count-vec"       "beagle-test/conformance/corpus/scriptc/sc-count-vec.bsc"       native)
- ;;
- ;; Ratcheted rows — every one is a CURRENT PRODUCT GAP, declared at the
- ;; behavior beagle owes rather than at today's behavior, and classified in
- ;; known-divergences-scriptc.edn. Each entry goes STALE (and must be deleted,
- ;; with the golden regenerated) the moment the gap closes.
- ("sc-str-concat"      "beagle-test/conformance/corpus/scriptc/sc-str-concat.bsc"      static)
- ("sc-inner-fn"        "beagle-test/conformance/corpus/scriptc/sc-inner-fn.bsc"        static)
- ("sc-extern"          "beagle-test/conformance/corpus/scriptc/sc-extern.bsc"          static)
- ("sc-fixed-width-reject" "beagle-test/conformance/corpus/scriptc/sc-fixed-width-reject.bsc" static)
- ("sc-await-reject"    "beagle-test/conformance/corpus/scriptc/sc-await-reject.bsc"    native)
- ("sc-record"          "beagle-test/conformance/corpus/scriptc/sc-record.bsc"          native)
- ("sc-map-set-literal" "beagle-test/conformance/corpus/scriptc/sc-map-set-literal.bsc" native)
- ("sc-comment-neutral" "beagle-test/conformance/corpus/scriptc/sc-comment-neutral.bsc" emit)
- ("sc-target-case"     "beagle-test/conformance/corpus/scriptc/sc-target-case.bsc"     emit)
- ("sc-module-two-file" "beagle-test/conformance/corpus/scriptc/sc-module-two-file.bsc" module
-  #:modules ("beagle-test/conformance/corpus/scriptc/sc-module-two-file-lib.bsc"))
- ;; Reject rows carrying a pointedness contract: they DO reject today, but the
- ;; message is not user-facing, so the contract keeps the gap firing.
- ("sc-missing-return-annot" "beagle-test/conformance/corpus/scriptc/sc-missing-return-annot.bsc" reject
-  #:diag-requires "->"
-  #:diag-forbids "type-prim|boundary type #f")
- ("sc-untyped-def"     "beagle-test/conformance/corpus/scriptc/sc-untyped-def.bsc"     reject
-  #:diag-requires "\\bdef\\b"
-  #:diag-forbids "def-form|record-form|type-prim|type-app")
 )

@@ -34,6 +34,10 @@ if [[ "${1:-}" == "--target" ]]; then
     }
     target="$2"
     shift 2
+    if [[ "$target" == "scriptc" ]]; then
+        echo "target 'scriptc' was removed — use .bjs/#lang beagle/js for hosted JavaScript; native Beagle code goes through Beagle Native Core" >&2
+        exit 2
+    fi
     if ! beagle_known_target "$target"; then
         echo "beagle-build: unsupported --target '$target' (expected $BEAGLE_TARGET_IDS_LIST)" >&2
         exit 2

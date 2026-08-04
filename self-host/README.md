@@ -130,8 +130,6 @@ absolute checkout paths and remain byte-stable across machines.
   srcloc-free by construction, so this cannot affect seed bytes.
 - **Non-clj targets** — this gap is target-specific: the chain emits the `clj`
   target only (no nix reader macros / `nix-*` forms, no js/odin emitters).
-  The Racket oracle's experimental `scriptc` target is therefore oracle-only;
-  the self-host has no `scriptc` parser, checker, or emitter route.
 
 ## Native distribution binary (stage0)
 

@@ -152,9 +152,8 @@ target is *for*).
 | `nix` | Nix | `.bnix` | `#lang beagle/nix` | `.nix` | live — self-hosted, oracle-certified, fuzz-guarded |
 | `odin` | Odin | `.bodin` | `#lang beagle/odin` | `.odin` | live — Racket emitter; self-host port pending conformance goldens |
 | `zig` | Zig | `.bzig` | `#lang beagle/zig` | `.zig` | live — Racket emitter with restored structural goldens |
-| `scriptc` | TypeScript | `.bsc` | `#lang beagle/scriptc` | `.ts` | live — Racket emitter over the JS lowering; experimental boundary |
 
-Six language targets. `facts` is not one of them — it is the compact, lossy projection of the parsed AST into CNF analysis facts, represented as three-slot vectors (`bin/beagle-facts`): a query surface, not an authoring language. The verbose, program-lossless source↔fact projection is `beagle facts-roundtrip`, where lossless means reader-datum identity, not byte identity.
+Five language targets. `facts` is not one of them — it is the compact, lossy projection of the parsed AST into CNF analysis facts, represented as three-slot vectors (`bin/beagle-facts`): a query surface, not an authoring language. The verbose, program-lossless source↔fact projection is `beagle facts-roundtrip`, where lossless means reader-datum identity, not byte identity.
 <!-- /beagle:langs -->
 
 Native Core is not a seventh row in this table: it is a target-neutral lowering

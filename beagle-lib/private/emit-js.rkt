@@ -15,7 +15,6 @@
          "emit-jst.rkt"
          "emit-js-quote.rkt")
 
-(define current-js-emit-target (make-parameter 'js))
 (define current-js-semantic-contracts (make-parameter #f))
 
 (define (error-payload-keyword field)
@@ -34,15 +33,8 @@
 
 (define current-js-export-names (make-parameter #f))
 
-;; How a top-level `defn`'s signature text is rendered, up to but excluding the
-;; opening brace. Targets layered over JS lowering (scriptc) override this to
-;; type the declaration AT its AST node. Annotating emitted TEXT instead is
-;; unsound: a string literal reading `"function add(x) {"` is indistinguishable
-;; from the declaration it names. The default reproduces ordinary JS byte for byte.
 (define (js-defn-signature form #:async? async? #:name name #:params params)
   (format "~afunction ~a(~a)" (if async? "async " "") name params))
-
-(define current-js-defn-signature (make-parameter js-defn-signature))
 
 ;; match temp counter — a PARAMETER holding a box, reset fresh per program (see
 ;; js-emit-program) so the same source emits byte-identical .js every build, exactly
@@ -109,14 +101,8 @@
 (define (emit-core-call fn-sym args)
   (define n (length args))
   (case fn-sym
-    [(str)
-     (if (eq? (current-js-emit-target) 'scriptc)
-         (if (zero? n)
-             "\"\""
-             (format "(~a)"
-                     (string-join (cons "\"\"" (map emit-expr args)) " + ")))
-         (format "(\"\".concat(~a))"
-                 (string-join (map emit-expr args) ", ")))]
+    [(str) (format "(\"\".concat(~a))"
+                   (string-join (map emit-expr args) ", "))]
     [(println) (format "console.log(~a)"
                        (string-join (map emit-expr args) ", "))]
     [(print) (format "process.stdout.write(~a)"
@@ -290,12 +276,9 @@
               [else #f])]
     [(re-find)
      (if (= n 2)
-         (if (eq? (current-js-emit-target) 'scriptc)
-             (format "(~a.match(~a) || [])[0] || null"
-                     (emit-expr (cadr args)) (emit-expr (car args)))
-             (format
-              "(() => { const _r = ~a, _f = _r.flags.replace(/[gy]/g, \"\") + (_r.flags.includes(\"u\") ? \"\" : \"u\"), _m = ~a.match(new RegExp(_r.source, _f)); return _m == null ? null : (_m.length === 1 ? _m[0] : Array.from(_m, _x => _x ?? null)); })()"
-              (emit-expr (car args)) (emit-expr (cadr args))))
+         (format
+          "(() => { const _r = ~a, _f = _r.flags.replace(/[gy]/g, \"\") + (_r.flags.includes(\"u\") ? \"\" : \"u\"), _m = ~a.match(new RegExp(_r.source, _f)); return _m == null ? null : (_m.length === 1 ? _m[0] : Array.from(_m, _x => _x ?? null)); })()"
+          (emit-expr (car args)) (emit-expr (cadr args)))
          #f)]
     [(atom) (if (= n 1) (format "({value: ~a, watches: {}})" (emit-expr (car args))) #f)]
     [(deref) (if (= n 1) (format "~a.value" (emit-expr (car args))) #f)]
@@ -496,11 +479,9 @@
     [(re-pattern) (if (= n 1) (format "new RegExp(~a)" (emit-expr (car args))) #f)]
     [(re-matches)
      (if (= n 2)
-         (if (eq? (current-js-emit-target) 'scriptc)
-             (format "~a.match(~a)" (emit-expr (cadr args)) (emit-expr (car args)))
-             (format
-              "(() => { const _r = ~a, _f = _r.flags.replace(/[gy]/g, \"\") + (_r.flags.includes(\"u\") ? \"\" : \"u\"), _m = ~a.match(new RegExp(\"^(?:\" + _r.source + \")$\", _f)); return _m == null ? null : (_m.length === 1 ? _m[0] : Array.from(_m, _x => _x ?? null)); })()"
-              (emit-expr (car args)) (emit-expr (cadr args))))
+         (format
+          "(() => { const _r = ~a, _f = _r.flags.replace(/[gy]/g, \"\") + (_r.flags.includes(\"u\") ? \"\" : \"u\"), _m = ~a.match(new RegExp(\"^(?:\" + _r.source + \")$\", _f)); return _m == null ? null : (_m.length === 1 ? _m[0] : Array.from(_m, _x => _x ?? null)); })()"
+          (emit-expr (car args)) (emit-expr (cadr args)))
          #f)]
     [(re-seq) (if (= n 2) (format "[...~a.matchAll(~a)].map(m => m[0])"
                                   (emit-expr (cadr args)) (emit-expr (car args))) #f)]
@@ -739,172 +720,6 @@
   (define tbl (current-type-table))
   (and tbl (hash-ref tbl node #f)))
 
-;; TypeScript rendering for JS-family boundaries emitted below top-level defn.
-;; ScriptC's top-level validator owns which types are admitted; this renderer
-;; keeps every admitted nested/rest/destructured/catch boundary explicit.
-(define (scriptc-type->ts ty)
-  (cond
-    [(not ty) "unknown"]
-    [(type-prim? ty)
-     (case (unqualify-type-name (type-prim-name ty))
-       [(Int Float I8 I16 I32 U8 U16 U32 U64 F32) "number"]
-       [(Bool) "boolean"]
-       [(String Keyword) "string"]
-       [(Nil) "null"]
-       [(Any) "unknown"]
-       [(Exception Error) "Error"]
-       [else (mangle-name (type-prim-name ty))])]
-    [(type-app? ty)
-     (define args (type-app-args ty))
-     (case (type-app-ctor ty)
-       [(Vec Vector List Arr)
-        (format "(~a)[]" (scriptc-type->ts (and (pair? args) (car args))))]
-       [(Set)
-        (format "Set<~a>" (scriptc-type->ts (and (pair? args) (car args))))]
-       [(Map)
-        (format "Map<~a, ~a>"
-                (scriptc-type->ts (and (pair? args) (car args)))
-                (scriptc-type->ts (and (pair? args) (pair? (cdr args)) (cadr args))))]
-       [(Promise)
-        (format "Promise<~a>" (scriptc-type->ts (and (pair? args) (car args))))]
-       [(HVec)
-        (format "[~a]" (string-join (map scriptc-type->ts args) ", "))]
-       [else
-        (format "~a<~a>"
-                (mangle-name (type-app-ctor ty))
-                (string-join (map scriptc-type->ts args) ", "))])]
-    [(type-union? ty)
-     (string-join (map scriptc-type->ts (type-union-alts ty)) " | ")]
-    [(type-var? ty) (mangle-name (type-var-name ty))]
-    [(type-poly? ty) (scriptc-type->ts (type-poly-body ty))]
-    [(type-fn? ty)
-     (define fixed
-       (for/list ([p (in-list (type-fn-params ty))]
-                  [i (in-naturals)])
-         (format "_arg~a: ~a" i (scriptc-type->ts p))))
-     (define rest
-       (if (type-fn-rest-type ty)
-           (list (format "..._rest: (~a)[]"
-                         (scriptc-type->ts (type-fn-rest-type ty))))
-           '()))
-     (format "(~a) => ~a"
-             (string-join (append fixed rest) ", ")
-             (scriptc-type->ts (type-fn-ret ty)))]
-    [else "unknown"]))
-
-(define (scriptc-default-type e)
-  (cond
-    [(string? e) "string"]
-    [(boolean? e) "boolean"]
-    [(number? e) "number"]
-    [(eq? e 'nil) "null"]
-    [else "unknown"]))
-
-(define (scriptc-pattern-type p inferred)
-  (cond
-    [(and inferred (not (any-type? inferred)))
-     (scriptc-type->ts inferred)]
-    [(map-destructure? p)
-     (define defaults (map-destructure-or-defaults p))
-     (format "{ ~a }"
-             (string-join
-              (for/list ([k (in-list (map-destructure-keys p))])
-                (define default-pair (assq k defaults))
-                (format "~a~a: ~a"
-                        (mangle-prop (symbol->string k))
-                        (if default-pair "?" "")
-                        (if default-pair
-                            (scriptc-default-type (cdr default-pair))
-                            "unknown")))
-              "; "))]
-    [(seq-destructure? p) "unknown[]"]
-    [else (scriptc-type->ts inferred)]))
-
-(define (scriptc-boundary-param p inferred #:rest? [rest? #f])
-  (cond
-    [rest?
-     (format "...~a: (~a)[]"
-             (mangle-name (param-name p))
-             (scriptc-type->ts (or (param-type p) inferred)))]
-    [(param? p)
-     (format "~a: ~a"
-             (mangle-name (param-name p))
-             (scriptc-type->ts (or (param-type p) inferred)))]
-    [else
-     (format "~a: ~a"
-             (emit-destructure p)
-             (scriptc-pattern-type p inferred))]))
-
-(define (scriptc-boundary-params node params rest-p)
-  (define inferred (node-type node))
-  (define inferred-fixed
-    (if (type-fn? inferred) (type-fn-params inferred) '()))
-  (define fixed
-    (for/list ([p (in-list params)]
-               [i (in-naturals)])
-      (scriptc-boundary-param
-       p (and (< i (length inferred-fixed)) (list-ref inferred-fixed i)))))
-  (define rest
-    (if rest-p
-        (list (scriptc-boundary-param
-               rest-p
-               (and (type-fn? inferred) (type-fn-rest-type inferred))
-               #:rest? #t))
-        '()))
-  (string-join (append fixed rest) ", "))
-
-(define (scriptc-boundary-return node declared)
-  (define inferred (node-type node))
-  (scriptc-type->ts
-   (or declared
-       (and (type-fn? inferred) (type-fn-ret inferred)))))
-
-(define (imported-extern-name? prog name)
-  (define imported (program-imported-symbol-ns prog))
-  (define s (symbol->string name))
-  (define slash
-    (for/first ([i (in-naturals)]
-                [c (in-string s)]
-                #:when (char=? c #\/))
-      i))
-  (cond
-    [slash
-     (define prefix (substring s 0 slash))
-     (define base (string->symbol (substring s (add1 slash))))
-     (define registered-prefix (hash-ref imported base #f))
-     (and registered-prefix
-          (string=? (symbol->string registered-prefix) prefix))]
-    [else (hash-has-key? imported name)]))
-
-(define (render-scriptc-ambient-declarations prog)
-  (string-join
-   (for/list ([name (in-list
-                     (sort (hash-keys (program-externs prog))
-                           symbol<?
-                           #:key values))]
-              #:unless (imported-extern-name? prog name))
-     (define ty (hash-ref (program-externs prog) name))
-     (cond
-       [(type-fn? ty)
-        (define fixed
-          (for/list ([p (in-list (type-fn-params ty))]
-                     [i (in-naturals)])
-            (format "_arg~a: ~a" i (scriptc-type->ts p))))
-        (define rest
-          (if (type-fn-rest-type ty)
-              (list (format "..._rest: (~a)[]"
-                            (scriptc-type->ts (type-fn-rest-type ty))))
-              '()))
-        (format "declare function ~a(~a): ~a;"
-                (mangle-name name)
-                (string-join (append fixed rest) ", ")
-                (scriptc-type->ts (type-fn-ret ty)))]
-       [else
-        (format "declare const ~a: ~a;"
-                (mangle-name name)
-                (scriptc-type->ts ty))]))
-   "\n"))
-
 (define (map-type? ty) (and (type-app? ty) (eq? (type-app-ctor ty) 'Map)))
 (define (set-type? ty) (and (type-app? ty) (eq? (type-app-ctor ty) 'Set)))
 
@@ -1032,15 +847,13 @@
         ;; A freshly parsed nested literal may not yet have a type-table entry.
         ;; Its element syntax is still decisive: collection elements require
         ;; value-dedup and therefore the HAMT path.
-        (and (not (eq? (current-js-emit-target) 'scriptc))
-             (vec-form? (car args))
+        (and (vec-form? (car args))
              (for/or ([item (in-list (vec-form-items (car args)))])
                (or (vec-form? item) (map-form? item) (set-form? item)))))))
 
 (define (keyword-string-mixed? left right)
-  (and (not (eq? (current-js-emit-target) 'scriptc))
-       (or (and (keyword-symbol? left) (string? right))
-           (and (string? left) (keyword-symbol? right)))))
+  (or (and (keyword-symbol? left) (string? right))
+      (and (string? left) (keyword-symbol? right))))
 
 ;; assoc key args sit at odd indices (coll k0 v0 k1 v1 ...): any NOT provably-scalar?
 ;; arg-type resolves a var key through the type-env (params/let).
@@ -1298,11 +1111,6 @@
       (if refer (set-union s (list->set refer)) s)))
   (set-union from-forms from-externs from-refers))
 
-(define (scriptc-library-module? prog)
-  (and (pair? (program-forms prog))
-       (for/and ([f (in-list (program-forms prog))])
-         (or (defn-form? f) (defn-multi? f)))))
-
 (define (exported-defn? name private?)
   (define names (current-js-export-names))
   (and (not private?)
@@ -1324,12 +1132,7 @@
 
 (define (js-emit-program prog)
   (validate-js-target! prog)
-  (define requested-exports
-    (or (current-js-export-names)
-        (if (and (eq? (current-js-emit-target) 'scriptc)
-                 (scriptc-library-module? prog))
-            (set '*)
-            (set))))
+  (define requested-exports (or (current-js-export-names) (set)))
   (parameterize ([current-js-export-names requested-exports]
                  [current-js-context 'stmt]
                  [match-counter (box 0)]
@@ -1393,32 +1196,14 @@
           (format "import { ~a } from '~a';\n"
                   (string-join ops ", ")
                   (string-append js-runtime-prefix "hamt.js")))))
-    (define ambient
-      (if (eq? (current-js-emit-target) 'scriptc)
-          (render-scriptc-ambient-declarations prog)
-          ""))
-    ;; `declare` at script scope is global. An empty export makes an extern-only
-    ;; ScriptC unit a real module without creating a runtime binding.
-    (define module-marker
-      (if (and (eq? (current-js-emit-target) 'scriptc)
-               (not (string=? ambient ""))
-               (string=? header "")
-               (not (regexp-match? #rx"(^|\n)export " body)))
-          "export {};\n"
-          ""))
-    (define declaration-block
-      (if (string=? ambient "")
-          ""
-          (string-append module-marker ambient "\n")))
-    (string-append rep-comment header runtime-import hamt-import
-                   declaration-block "\n" body "\n")))
+    (string-append rep-comment header runtime-import hamt-import "\n" body "\n")))
 
 ;; --- module header ---------------------------------------------------------
 
 ;; Relative ES-module specifier from the importing module to an imported one,
 ;; both given as dotted namespaces (e.g. gjoa.tools.prep.cli importing
-;; gjoa.tools.prep.log → "./log.js" for JS or "./log.ts" for ScriptC;
-;; importing gjoa.tools.security.check → "../security/check.<ext>". A
+;; gjoa.tools.prep.log → "./log.js"; importing gjoa.tools.security.check →
+;; "../security/check.js". A
 ;; `./`-prefixed full-ns path only resolves when the importer sits at the module
 ;; root, which is false for any nested module run un-bundled — so emit a path
 ;; relative to the importer's own directory.
@@ -1431,9 +1216,7 @@
       (loop (cdr d) (cdr t))
       (let* ([ups (map (lambda (_) "..") d)]
              [parts (append ups t)]
-             [extension
-              (if (eq? (current-js-emit-target) 'scriptc) ".ts" ".js")]
-             [path (string-append (string-join parts "/") extension)])
+             [path (string-append (string-join parts "/") ".js")])
         (if (string-prefix? path "..") path (string-append "./" path))))))
 
 (define (emit-module-header prog)
@@ -1497,10 +1280,10 @@
              (if (exported-defn? (defn-form-name f) (defn-form-private? f))
                  "export "
                  "")
-             ((current-js-defn-signature) f
-                                          #:async? async?
-                                          #:name (mangle-name (defn-form-name f))
-                                          #:params params)
+             (js-defn-signature f
+                                #:async? async?
+                                #:name (mangle-name (defn-form-name f))
+                                #:params params)
              (with-param-envs (defn-form-params f)
                (lambda ()
                  (with-bindings bound (lambda () (emit-body-return (defn-form-body f) "  "))))))]
@@ -1864,18 +1647,10 @@
      (emit-for e)]
 
     [(fn-form? e)
-     (define params
-       (if (eq? (current-js-emit-target) 'scriptc)
-           (scriptc-boundary-params e (fn-form-params e) (fn-form-rest-param e))
-           (emit-js-params (fn-form-params e) (fn-form-rest-param e))))
+     (define params (emit-js-params (fn-form-params e) (fn-form-rest-param e)))
      (define body (fn-form-body e))
      (define async? (contains-await? body))
      (define prefix (if async? "async " ""))
-     (define return-suffix
-       (if (eq? (current-js-emit-target) 'scriptc)
-           (format ": ~a"
-                   (scriptc-boundary-return e (fn-form-return-type e)))
-           ""))
      (define bound (binding-names-from-params (fn-form-params e) (fn-form-rest-param e)))
      (with-param-envs (fn-form-params e)
       (lambda ()
@@ -1888,10 +1663,10 @@
              ;; whereas `=> ({…})` returns the object. Any expression that emits
              ;; starting with `{` is an object literal in this position, so wrap it.
              (if (regexp-match? #rx"^[ \t\r\n]*[{]" body-str)
-               (format "~a(~a)~a => (~a)" prefix params return-suffix body-str)
-               (format "~a(~a)~a => ~a" prefix params return-suffix body-str)))
-           (format "~a(~a)~a => { ~a }"
-                   prefix params return-suffix (emit-body-return body ""))))))) ]
+               (format "~a(~a) => (~a)" prefix params body-str)
+               (format "~a(~a) => ~a" prefix params body-str)))
+           (format "~a(~a) => { ~a }"
+                   prefix params (emit-body-return body ""))))))) ]
 
     [(letfn-form? e)
      (define fns (letfn-form-fns e))
@@ -1906,25 +1681,16 @@
            (for/list ([f (in-list fns)])
              (define name (mangle-name (letfn-fn-name f)))
              (define params
-               (if (eq? (current-js-emit-target) 'scriptc)
-                   (scriptc-boundary-params
-                    f (letfn-fn-params f) (letfn-fn-rest-param f))
-                   (emit-js-params
-                    (letfn-fn-params f) (letfn-fn-rest-param f))))
+               (emit-js-params
+                (letfn-fn-params f) (letfn-fn-rest-param f)))
              (define fn-body (letfn-fn-body f))
              (define fn-async? (contains-await? fn-body))
              (define prefix (if fn-async? "async " ""))
-             (define return-suffix
-               (if (eq? (current-js-emit-target) 'scriptc)
-                   (format ": ~a"
-                           (scriptc-boundary-return
-                            f (letfn-fn-return-type f)))
-                   ""))
              (define fn-bound (binding-names-from-params (letfn-fn-params f) (letfn-fn-rest-param f)))
              (with-bindings fn-bound
                (lambda ()
-                 (format "~afunction ~a(~a)~a { ~a }"
-                         prefix name params return-suffix
+                 (format "~afunction ~a(~a) { ~a }"
+                         prefix name params
                          (emit-body-return fn-body ""))))))
          (iife (format "~a ~a" (string-join fn-strs " ") (emit-body-return body ""))
                 #:async? has-await)))]
@@ -1965,8 +1731,7 @@
     [(check-expr? e)
      (define inner (emit-expr (check-expr-expr e)))
      (define contract
-       (and (eq? (current-js-emit-target) 'js)
-            (current-js-semantic-contracts)
+       (and (current-js-semantic-contracts)
             (hash-ref (current-js-semantic-contracts) e #f)))
      (if (error-contract? contract)
          inner
@@ -1979,8 +1744,7 @@
                           (mangle-name (rescue-form-err-name e))
                           "_err"))
      (define contract
-       (and (eq? (current-js-emit-target) 'js)
-            (current-js-semantic-contracts)
+       (and (current-js-semantic-contracts)
             (hash-ref (current-js-semantic-contracts) e #f)))
      (if (error-contract? contract)
          (let* ([variant (car (error-contract-payload-layout contract))]
@@ -2012,7 +1776,7 @@
            (iife (format "const r = ~a;\nif (r && r.__tag === \"Ok\") return r.value;\nconst ~a = r;\nreturn ~a;"
                          inner err-name fallback))))]
     [(target-case-form? e)
-     (define target (current-js-emit-target))
+     (define target 'js)
      (define cases (target-case-form-cases e))
      (define branch (hash-ref cases target #f))
      (unless branch
@@ -2025,19 +1789,9 @@
          (with-bindings (list (catch-clause-name c))
            (lambda ()
              (define name (mangle-name (catch-clause-name c)))
-             (if (eq? (current-js-emit-target) 'scriptc)
-                 (format "catch (_caught) {\n    const ~a: ~a = _caught as ~a;\n    ~a\n  }"
-                         name
-                         (scriptc-type->ts
-                          (let ([t (catch-clause-exception-type c)])
-                            (if (type? t) t (type-prim t))))
-                         (scriptc-type->ts
-                          (let ([t (catch-clause-exception-type c)])
-                            (if (type? t) t (type-prim t))))
-                         (emit-body-return (catch-clause-body c) "    "))
-                 (format "catch (~a) {\n    ~a\n  }"
-                         name
-                         (emit-body-return (catch-clause-body c) "    ")))))))
+             (format "catch (~a) {\n    ~a\n  }"
+                     name
+                     (emit-body-return (catch-clause-body c) "    "))))))
      (define finally-str
        (if (try-form-finally-body e)
          (format " finally {\n    ~a\n  }"
@@ -2214,8 +1968,7 @@
         (format "(~a)" (string-join (map emit-expr args) (format " ~a " op)))]
        [(and (js-unary? fn-sym) (= 1 (length args)))
         (format "(~a~a)" (hash-ref JS-UNARY-OPS fn-sym) (emit-expr (car args)))]
-       [(and (not (eq? (current-js-emit-target) 'scriptc))
-             (current-js-semantic-contracts)
+       [(and (current-js-semantic-contracts)
              (hash-ref (current-js-semantic-contracts) e #f)
              (= (length args) 3)
              (regexp-match? #rx"/replace$" (symbol->string fn-sym)))
@@ -2224,8 +1977,7 @@
          (emit-expr (cadr args))
          (emit-expr (car args))
          (emit-expr (caddr args)))]
-       [(and (not (eq? (current-js-emit-target) 'scriptc))
-             (current-js-semantic-contracts)
+       [(and (current-js-semantic-contracts)
              (hash-ref (current-js-semantic-contracts) e #f)
              (= (length args) 2)
              (regexp-match? #rx"/split$" (symbol->string fn-sym)))
@@ -3103,6 +2855,4 @@
 (register-backend! 'js js-backend)
 
 (provide js-backend
-         current-js-emit-target
-         current-js-defn-signature
          current-js-export-names)

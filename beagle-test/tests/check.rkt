@@ -1128,16 +1128,6 @@
 (define-syntax-rule (check-js-err/rx name rx form ...)
   (test-case name (check-exn rx (lambda () (check-js-prog form ...)))))
 
-;; Helpers for ScriptC-target tests. ScriptC is a checked JS-family target.
-(define (check-scriptc-prog . forms)
-  (define prog (parse-program
-                (map (lambda (f) (datum->syntax #f f))
-                     (cons '(define-target scriptc) forms))))
-  (type-check! prog))
-
-(define-syntax-rule (check-scriptc-ok name form ...)
-  (test-case name (check-not-exn (lambda () (check-scriptc-prog form ...)))))
-
 ;; Helpers for Nix-target tests
 (define (check-nix-prog . forms)
   (define prog (parse-program
@@ -1189,12 +1179,12 @@
   `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
   '(defn f [(url #%: String)] -> (Promise String) (js/await (fetch-data url))))
 
-(check-scriptc-ok "JS-family forms are accepted in beagle/scriptc"
-  `(declare-extern fetch-data ,(br 'String '-> '(Promise String)))
-  '(defn await-f [(url #%: String)] -> (Promise String)
-     (js/await (fetch-data url)))
-  '(def template #%: String (js/template "Hello, " "ScriptC" "!"))
-  '(def quoted #%: JsAst (js/quote (const x 42))))
+(test-case "removed ScriptC target is rejected with a migration path"
+  (check-exn
+   #rx"target 'scriptc' was removed.*beagle/js.*Native Core"
+   (lambda ()
+     (parse-program
+      (list (datum->syntax #f '(define-target scriptc)))))))
 
 ;; Nix forms rejected outside beagle/nix
 (check-err/rx "inherit rejected in beagle/clj"

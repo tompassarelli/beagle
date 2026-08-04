@@ -17,27 +17,22 @@
   (call-with-output-file path #:exists 'truncate
     (lambda (out) (display text out))))
 
-(define (build-module-pair target source-ext output-ext)
+(define (build-module-pair)
   (define scratch
-    (make-temporary-file "beagle-build-all-scriptc-~a" 'directory))
+    (make-temporary-file "beagle-build-all-js-~a" 'directory))
   (define src-dir (build-path scratch "smoke"))
   (define out-dir (build-path scratch "out"))
-  (define lang (if (eq? target 'scriptc) "scriptc" "js"))
-  (define lib (build-path src-dir (string-append "lib." source-ext)))
-  (define entry (build-path src-dir (string-append "entry." source-ext)))
+  (define lib (build-path src-dir "lib.bjs"))
+  (define entry (build-path src-dir "entry.bjs"))
   (write-source
    lib
-   (format
-    "#lang beagle/~a\n(ns smoke.lib)\n(defn triple [(n: Int)] -> Int (* n 3))\n"
-    lang))
+   "#lang beagle/js\n(ns smoke.lib)\n(defn triple [n: Int] -> Int (* n 3))\n")
   (write-source
    entry
-   (format
-    (string-append
-     "#lang beagle/~a\n"
-     "(ns smoke.entry (:require [smoke.lib :refer [triple]]))\n"
-     "(println (triple 14))\n")
-    lang))
+   (string-append
+    "#lang beagle/js\n"
+    "(ns smoke.entry (:require [smoke.lib :refer [triple]]))\n"
+    "(println (triple 14))\n"))
   (define stdout (open-output-string))
   (define stderr (open-output-string))
   (define exit-code
@@ -48,21 +43,21 @@
                          (path->string entry)
                          (path->string lib)
                          "--out" (path->string out-dir))))
-  (define lib-out
-    (build-path out-dir "smoke" (string-append "lib." output-ext)))
-  (define entry-out
-    (build-path out-dir "smoke" (string-append "entry." output-ext)))
-  (values scratch exit-code lib-out entry-out
-          (get-output-string stdout) (get-output-string stderr)))
+  (values scratch
+          exit-code
+          (build-path out-dir "smoke" "lib.js")
+          (build-path out-dir "smoke" "entry.js")
+          (get-output-string stdout)
+          (get-output-string stderr)))
 
 (define failures
   (run-tests
    (test-suite
-    "build-all JS-family ESM plan"
+    "build-all JavaScript ESM plan"
 
-    (test-case "JavaScript batch exports only the required public defn"
+    (test-case "batch exports only the required public defn"
       (define-values (scratch exit-code lib entry stdout stderr)
-        (build-module-pair 'js "bjs" "js"))
+        (build-module-pair))
       (dynamic-wind
        void
        (lambda ()
@@ -87,30 +82,6 @@
                (system*/exit-code node (path->string entry))))
            (check-equal? node-code 0 (get-output-string node-err))
            (check-equal? (get-output-string node-out) "42\n")))
-       (lambda () (delete-directory/files scratch #:must-exist? #f))))
-
-    (test-case "ScriptC batch emits typed export and named import"
-      (define-values (scratch exit-code lib entry stdout stderr)
-        (build-module-pair 'scriptc "bsc" "ts"))
-      (dynamic-wind
-       void
-       (lambda ()
-         (check-equal? exit-code 0 (string-append stdout stderr))
-         (define lib-text (file->string lib))
-         (define entry-text (file->string entry))
-         (check-true
-          (string-contains?
-           lib-text
-           "export function triple(n: number): number"))
-         (check-true
-          (string-contains? entry-text
-                            "import { triple } from './lib.ts';"))
-         (check-true (string-contains? entry-text "console.log(triple(14));"))
-         (check-false (string-contains? entry-text "smoke_lib.triple"))
-         (check-false (string-contains? entry-text "declare function triple"))
-         (check-false
-          (file-exists? (path-replace-extension lib #".d.ts"))
-          "D0 keeps declarations inline and emits no .d.ts sidecar"))
        (lambda () (delete-directory/files scratch #:must-exist? #f)))))))
 
 (exit (if (zero? failures) 0 1))

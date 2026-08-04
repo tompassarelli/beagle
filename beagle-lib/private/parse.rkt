@@ -1908,11 +1908,16 @@
        (set! mode m)
        (set! mode-set? #t)]
 
+      [(list 'define-target 'scriptc)
+       (raise-parse-error
+        'removed-form
+        "target 'scriptc' was removed — use .bjs/#lang beagle/js for hosted JavaScript; native Beagle code goes through Beagle Native Core")]
+
       [(list 'define-target (? symbol? t))
        (when target-set? (raise-parse-error 'duplicate-meta "duplicate define-target"))
-      (unless (memq t '(clj js scriptc nix py rkt zig odin))
+      (unless (memq t '(clj js nix py rkt zig odin))
         (raise-parse-error 'bad-meta-value
-                            "unknown target: ~a (expected clj, js, scriptc, nix, py, rkt, zig, or odin)" t))
+                            "unknown target: ~a (expected clj, js, nix, py, rkt, zig, or odin)" t))
        (set! target t)
        (set! target-set? #t)]
 
@@ -2044,7 +2049,7 @@
                           "malformed defmacro — expected (defmacro NAME [params] template) with exactly one template form; wrap multiple forms in `(do ...)`, got: ~v" d)]
       [(cons 'define-target _)
        (raise-parse-error 'bad-meta-value
-                          "malformed define-target — expected (define-target clj|js|scriptc|nix|py|rkt|zig|odin), got: ~v" d)]
+                          "malformed define-target — expected (define-target clj|js|nix|py|rkt|zig|odin), got: ~v" d)]
       [(cons 'define-mode _)
        (raise-parse-error 'bad-meta-value
                           "malformed define-mode — expected (define-mode strict|dynamic), got: ~v" d)]

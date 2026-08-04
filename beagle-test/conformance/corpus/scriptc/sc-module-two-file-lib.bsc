@@ -1,7 +1,0 @@
-#lang beagle/scriptc
-;; Library module for the sc-module-two-file row. Its public defn is a real ESM
-;; export; no self-host ScriptC route is involved.
-(ns conformance.sc-module-two-file-lib)
-
-(defn triple [(n: Int)] -> Int
-  (* n 3))

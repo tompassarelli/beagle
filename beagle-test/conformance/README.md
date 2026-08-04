@@ -1,29 +1,14 @@
 # Conformance: certifying every backend against the oracle
 
 The corpus (`corpus.rktd`) is beagle's per-backend executable spec — one row
-per case: `(id path kind option ...)`, where `path` is a beagle source file
-(target derived from its extension: `.bjs`→js, `.bclj`→clj, `.bnix`→nix,
-`.bsc`→scriptc) and `kind` is one of:
-
-| kind | contract |
-|---|---|
-| `emit` | golden = emitted target source |
-| `reject` | source must fail check; golden = the diagnostic text |
-| `static` | emit **+** the output compiles 100% statically on the target (scriptc), over **more than zero** statements |
-| `native` | static **+** the native executable's stdout/stderr/exit equal the oracle runtime's (node) |
-| `module` | multi-file row (`#:modules`); goldens live in `expected/<target>/<id>/`, then runs the static + native dimensions |
-
-Options: `#:modules (path ...)` names a module row's siblings;
-`#:diag-requires REGEX` / `#:diag-forbids REGEX` give a `reject` row a
-**pointedness contract** — what a user-facing diagnostic must and must not
-say. Without one, a reject row with an internal-detail message is a silent
-pass: the rejection is "correct" and nothing ratchets.
-
+per case: `(id path kind)`, where `path` is a beagle source file (target
+derived from its extension) and `kind` is `emit` (golden = emitted target
+source) or `reject` (source must fail check; golden = the diagnostic text).
 The **oracle is the Racket beagle compiler at HEAD**: `--regen` sources every
 golden from it; a gate run diffs the live compiler against that blessed
 snapshot. Mechanics ported from jolt's `test/conformance/certify.clj`.
 
-The gate kills semantic drift across targets in these independent dimensions:
+The gate kills semantic drift across targets in three independent dimensions:
 
 1. **Golden diff** — emitted output byte-compared against the committed
    golden (`expected/<target>/<id>.<ext>`); diagnostics for `reject` rows
@@ -38,35 +23,15 @@ The gate kills semantic drift across targets in these independent dimensions:
    ledger entries falsely stale.
 3. **Accept/reject boundary** — a `reject` row that starts compiling is a
    `reject-mismatch` (the checker got looser); a changed diagnostic is
-   `diag-divergent` (regen after review); a diagnostic that breaks its
-   pointedness contract is `diag-unpointed`.
-4. **Static coverage (scriptc)** — `scriptc coverage` must analyze **more than
-   zero** statements (`static-vacuous` otherwise — 0/0 is not 100%) and
-   compile all of them statically (`static-incomplete` otherwise). Accepted
-   rows print their statement counts, so the green is auditable, not asserted.
-5. **Native differential (scriptc)** — the native binary's stdout, stderr and
-   exit status must equal Node's on the same emitted `.ts`
-   (`native-divergent` otherwise).
-
-Dimensions 4–5 need the ScriptC CLI (`$BEAGLE_SCRIPTC`, or `scriptc` on PATH)
-plus clang and node. ScriptC is **not** a beagle dependency and is used only
-as a black-box executable oracle. When any of those tools is missing the
-dependent dimensions report **`unenforced`** — a distinct state that is never
-a pass, and whose ledger entries are reported unenforced rather than stale.
+   `diag-divergent` (regen after review).
 
 ## What's here
 
 - **`certify.rkt`** — classifies every row into buckets: `match` /
   `reject-match` (good), `divergent`, `invalid-output`, `compile-fail`,
-  `reject-mismatch`, `diag-divergent`, `diag-unpointed`, `static-vacuous`,
-  `static-incomplete`, `native-divergent`, `no-golden` (flagged), plus
-  `unenforced` (not a pass). Run it only via
+  `reject-mismatch`, `diag-divergent`, `no-golden` (flagged). Run it only via
   `bin/beagle-certify`, which pins racket and routes the `beagle` collection
   at *this* checkout — a worktree certifies its own compiler.
-- **`scriptc-oracle.rkt`** — the executable ScriptC oracle: tool discovery,
-  static-coverage and native-vs-Node probes. Shared by `certify.rkt` and the
-  focused suite `beagle-test/tests/emit-scriptc-behavioral.rkt` (run it with
-  `raco test`; it is not in `beagle-test/tiers.rktd`).
 - **`known-divergences-<target>.edn`** — THE RATCHET: accepted divergence
   debt, classified + justified, keyed `[:id :bucket]`. The gate fails on a
   **NEW** (unclassified) flagged row and on a **STALE** entry (listed but no
@@ -87,10 +52,6 @@ a pass, and whose ledger entries are reported unenforced rather than stale.
 bin/beagle-certify                    # the gate (CI: exit 0/1)
 bin/beagle-certify --target js,clj    # subset of targets
 bin/beagle-certify --regen            # re-source goldens from the oracle
-
-# arm the scriptc static + native dimensions
-BEAGLE_SCRIPTC="node /path/to/scriptc/packages/cli/dist/main.js" \
-  bin/beagle-certify --target scriptc
 ```
 
 CI runs the gate after the tiered suite (`.github/workflows/test.yml`), with

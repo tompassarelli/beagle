@@ -82,7 +82,7 @@
 ;; Target-specific AST forms must only appear in their target.
 ;; Maps predicate → required target symbol.
 (define (js-family-target? target)
-  (memq target '(js scriptc)))
+  (eq? target 'js))
 
 (define TARGET-ONLY-FORMS
   (hash
@@ -1258,7 +1258,7 @@
 
 (define (allocation-region target form failure)
   (case target
-    [(clj js scriptc nix) 'gc]
+    [(clj js nix) 'gc]
     [(zig)
      ;; Zig always receives allocation policy from its caller. A source-visible
      ;; Ctx is the tick arena; the hidden native ABI is classified explicitly
@@ -1485,7 +1485,7 @@
 
 (define (error-mode target)
   (case target
-    [(clj js scriptc) 'exception]
+    [(clj js) 'exception]
     [(zig) 'native-error-union]
     [else 'result]))
 

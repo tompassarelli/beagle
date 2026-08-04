@@ -524,6 +524,9 @@
       (for/list ([a (in-list args)])
         (cond
           [(directory-exists? a) (find-rkt-files a)]
+          [(string-suffix? a ".bsc")
+           (eprintf "target 'scriptc' was removed — use .bjs/#lang beagle/js for hosted JavaScript; native Beagle code goes through Beagle Native Core\n")
+           (exit 2)]
           [(regexp-match? BEAGLE-FILE-RX a) (list a)]
           [else
            (eprintf "beagle-check-all: skipping non-beagle file: ~a\n" a)

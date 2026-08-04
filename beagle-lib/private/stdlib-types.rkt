@@ -42,7 +42,7 @@
 (define (stdlib-for-target target)
   (case target
     [(clj)  stdlib-clj-combined]
-    [(js scriptc) stdlib-js-combined]
+    [(js)   stdlib-js-combined]
     [(nix)  stdlib-nix-combined]
     [(zig)  stdlib-zig-combined]
     [(odin) (merge-hashes STDLIB-PORTABLE STDLIB-ODIN)]
@@ -50,7 +50,7 @@
 
 (define (target-excludes-for target)
   (case target
-    [(js scriptc) JS-NO-EMIT]
+    [(js) JS-NO-EMIT]
     [else #f]))
 
 ;; Backward compatibility: STDLIB-TYPES = full CLJ combined set

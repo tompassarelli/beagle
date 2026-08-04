@@ -49,6 +49,11 @@ mkdir -p "$DIR"
 cd "$DIR"
 
 # --- Target → lang/extension (derived; never hand-listed) ---
+if [[ "$TARGET" == "scriptc" ]]; then
+    echo "target 'scriptc' was removed — use .bjs/#lang beagle/js for hosted JavaScript; native Beagle code goes through Beagle Native Core" >&2
+    exit 2
+fi
+
 if ! beagle_known_target "$TARGET"; then
     echo "unknown target: $TARGET (expected $BEAGLE_TARGET_IDS_LIST)" >&2
     exit 1

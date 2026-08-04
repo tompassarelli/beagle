@@ -4,10 +4,10 @@
 
 <!-- beagle:langs pipeline -->
 ```
-.bclj / .bjs / .bnix / .bodin / .bzig / .bsc  ──▶  parse ──▶ check ──▶ emit  ──▶  .clj / .js / .nix / .odin / .zig / .ts
-                                                               ▲
-                                                 macros, schema, stdlib, type narrowing
-                                                 all share one AST + diagnostic path
+.bclj / .bjs / .bnix / .bodin / .bzig  ──▶  parse ──▶ check ──▶ emit  ──▶  .clj / .js / .nix / .odin / .zig
+                                                        ▲
+                                          macros, schema, stdlib, type narrowing
+                                          all share one AST + diagnostic path
 ```
 <!-- /beagle:langs -->
 
@@ -24,7 +24,7 @@ position — not a desugared intermediate.
 - `beagle-lib/private/targets.rkt` — the canonical language-target table; every
   target list in this repo is a rendered view of it (`bin/beagle langs`).
 <!-- beagle:langs emitters -->
-- `beagle-lib/private/emit-{clj,js,nix,odin,zig,scriptc}.rkt` — the live target emitters (one row each in
+- `beagle-lib/private/emit-{clj,js,nix,odin,zig}.rkt` — the live target emitters (one row each in
   `beagle-lib/private/targets.rkt`, the canonical target table).
 - `beagle-lib/private/emit-facts.rkt` — the compact, lossy projection of the parsed AST into CNF analysis facts, represented as three-slot vectors (`bin/beagle-facts`): a query surface, not an authoring language. The verbose, program-lossless source↔fact projection is `beagle facts-roundtrip`, where lossless means reader-datum identity, not byte identity.
 <!-- /beagle:langs -->

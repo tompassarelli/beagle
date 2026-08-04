@@ -21,7 +21,7 @@
 (require racket/string
          "targets.rkt")
 
-;; "clj | js | nix | odin | zig | scriptc", from the canonical table.
+;; "clj | js | nix | odin | zig", from the canonical table.
 (define (target-alternatives)
   (string-join (for/list ([t (in-list TARGETS)])
                  (symbol->string (target-id t)))

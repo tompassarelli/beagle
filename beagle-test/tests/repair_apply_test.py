@@ -35,9 +35,6 @@ check("zig output ext maps back to .bzig",
 check("odin output ext maps back to .bodin",
       _with_file('mod.bodin', lambda d: resolve_source_file('mod.odin', d) == os.path.join(d, 'mod.bodin')),
       True)
-check("scriptc output ext maps back to .bsc",
-      _with_file('mod.bsc', lambda d: resolve_source_file('mod.ts', d) == os.path.join(d, 'mod.bsc')),
-      True)
 check("bare basename fallback",
       _with_file('mod.bzig', lambda d: resolve_source_file('mod.bzig', d) == os.path.join(d, 'mod.bzig')),
       True)

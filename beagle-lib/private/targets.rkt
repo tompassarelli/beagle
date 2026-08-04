@@ -58,11 +58,7 @@
    (target 'zig "Zig" ".bzig" "beagle/zig" ".zig" 'live "emit-zig.rkt"
            "Racket emitter with restored structural goldens"
            "explicit allocators and error unions"
-           "Native Zig for standalone linked executables and low-level systems code.")
-   (target 'scriptc "TypeScript" ".bsc" "beagle/scriptc" ".ts" 'live "emit-scriptc.rkt"
-           "Racket emitter over the JS lowering; experimental boundary"
-           "typed function boundaries over JS"
-           "A narrow TypeScript boundary over the JS lowering: typed exports for TypeScript consumers (experimental; primitive-typed defn only).")))
+           "Native Zig for standalone linked executables and low-level systems code.")))
 
 ;; Extensions that are real beagle sources but name no target.
 (define NEUTRAL-EXTENSIONS

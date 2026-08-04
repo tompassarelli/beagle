@@ -19,7 +19,6 @@
 (define (extension-for-target target)
   (case target
     [(js)   ".js"]
-    [(scriptc) ".ts"]
     [(py)   ".py"]
     [(nix)  ".nix"]
     [(zig)  ".zig"]
@@ -89,7 +88,7 @@
     (define source
       (parameterize
         ([current-js-export-names
-          (and (memq target '(js scriptc))
+          (and (eq? target 'js)
                (hash-ref export-plan ns (set)))])
         (emit-program prog)))
     (define out-path

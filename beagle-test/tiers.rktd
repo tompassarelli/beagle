@@ -34,8 +34,8 @@
 ;; --- per-target tier summary: DELETED 2026-07-30 ---
 ;;
 ;; This file used to carry a second, human-readable per-target summary datum.
-;; The runner never read it, so it rotted unchecked (it still listed the SQL
-;; target months after removal and never learned about scriptc). Nothing
+;; The runner never read it, so it rotted unchecked and drifted from the
+;; compiler's live target inventory. Nothing
 ;; replaces it: which targets exist and how each is held correct is
 ;; `bin/beagle langs` (rendered from beagle-lib/private/targets.rkt), and which
 ;; SUITES run in which tier is the authoritative list below — the only thing
@@ -111,7 +111,6 @@
              "emit-odin.rkt"
              ;; Zig backend — restored strategic native target (2026-07-28).
              "emit-zig.rkt"
-             "emit-scriptc.rkt"        ; experimental structural TypeScript slice
              ;; Form × live-backend matrix: every cell emits or rejects
              ;; pointedly (cracks thread 20260613013145 #2).
              "emit-matrix.rkt"

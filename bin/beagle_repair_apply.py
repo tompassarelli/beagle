@@ -10,8 +10,8 @@ import re
 
 # Hand-kept mirror of targets.rkt's TARGETS source/output extensions (`bin/beagle
 # langs --view extensions` renders the canonical list).
-SOURCE_EXTS = ('.bclj', '.bjs', '.bnix', '.bodin', '.bzig', '.bsc', '.bsql', '.bpy', '.bgl', '.rkt')
-OUTPUT_EXTS = ('.clj', '.js', '.nix', '.odin', '.zig', '.ts')
+SOURCE_EXTS = ('.bclj', '.bjs', '.bnix', '.bodin', '.bzig', '.bsql', '.bpy', '.bgl', '.rkt')
+OUTPUT_EXTS = ('.clj', '.js', '.nix', '.odin', '.zig')
 
 
 def resolve_source_file(file_field, source_dir):

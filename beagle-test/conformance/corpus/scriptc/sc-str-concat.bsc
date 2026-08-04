@@ -1,8 +1,0 @@
-#lang beagle/scriptc
-;; RATCHET FIXTURE — D1-str-lowering.
-;; `str` must use a ScriptC-static construction rather than
-;; String.prototype.concat while ordinary JavaScript retains its established
-;; byte output.
-(ns conformance.sc-str-concat)
-
-(println (str "beagle" "-" "scriptc"))

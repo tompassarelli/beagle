@@ -9,8 +9,7 @@
          "emit-clj.rkt"
          "emit-odin.rkt"
          "emit-zig.rkt"
-         "emit-js.rkt"
-         "emit-scriptc.rkt")
+         "emit-js.rkt")
 
 (define (emit-program prog)
   (define backend (resolve-backend (program-target prog)))
