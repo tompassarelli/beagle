@@ -1383,14 +1383,35 @@
 (defn atom-state-capability-id [] -> core/NativeId
   (lower-id "capability" ["atom-state"]))
 
-(defn slice-effects [] -> (Vec core/EffectDef)
-  [(core/->EffectDef (pure-effect-id) (core/->PureEffect true))
-   (core/->EffectDef (write-effect-id) (core/->WriteEffect (arena-region-id)))
-   (core/->EffectDef (allocate-effect-id)
-     (core/->AllocateEffect (arena-region-id)))
-   (core/->EffectDef (atom-state-effect-id)
-     (core/->AtomicEffect (atom-state-region-id)
-       (atom-state-capability-id)))])
+(defn host-environment-effect-id [] -> core/NativeId
+  (lower-id "effect" ["host-environment-read"]))
+
+(defn host-environment-capability-id [] -> core/NativeId
+  (lower-id "capability" ["host-environment"]))
+
+(defn host-environment-abi-id [] -> core/NativeId
+  (lower-id "abi" ["host-environment-lookup-v0"]))
+
+(defn host-environment-function-id [] -> core/NativeId
+  (lower-id "extern" ["host-environment-lookup-v0"]))
+
+(defn host-environment-callee? [name: String] -> Bool
+  (or (= name "System/getenv") (= name "java.lang.System/getenv")))
+
+(defn slice-effects [include-host: Bool] -> (Vec core/EffectDef)
+  (let [base: (Vec core/EffectDef)
+        [(core/->EffectDef (pure-effect-id) (core/->PureEffect true))
+         (core/->EffectDef (write-effect-id) (core/->WriteEffect (arena-region-id)))
+         (core/->EffectDef (allocate-effect-id)
+           (core/->AllocateEffect (arena-region-id)))
+         (core/->EffectDef (atom-state-effect-id)
+           (core/->AtomicEffect (atom-state-region-id)
+             (atom-state-capability-id)))]]
+    (if include-host
+      (conj base
+        (core/->EffectDef (host-environment-effect-id)
+          (core/->CapabilityEffect (host-environment-capability-id))))
+      base)))
 
 ;; RULING (v0): a pure-named function MAY allocate. v0 source carries no effect
 ;; annotation, so the Allocate effect is inferred from the lowered body and from
@@ -2780,6 +2801,8 @@
       (instance? native.core.AtomCreateInstruction instruction)
       (instance? native.core.TextSliceInstruction instruction)
       (instance? native.core.TextConcatInstruction instruction)
+      (and (instance? native.core.ExternCallInstruction instruction)
+        (some? (core/externcallinstruction-arena-id instruction)))
       (and (instance? native.core.TextBuiltinInstruction instruction)
         (text-builtin-allocates?
           (core/textbuiltininstruction-builtin instruction)))))
@@ -2795,6 +2818,19 @@
       (fn [block: core/BasicBlock] -> Bool
         (some? (some atom-state-instruction?
                  (core/basicblock-instructions block))))
+      blocks)))
+
+(defn blocks-use-host-environment? [blocks: (Vec core/BasicBlock)] -> Bool
+  (some?
+    (some
+      (fn [block: core/BasicBlock] -> Bool
+        (some?
+          (some
+            (fn [instruction: core/Instruction] -> Bool
+              (and (instance? native.core.ExternCallInstruction instruction)
+                (same-id? (core/externcallinstruction-abi-id instruction)
+                  (host-environment-abi-id))))
+            (core/basicblock-instructions block))))
       blocks)))
 
 (defn instructions-allocate? [instructions: (Vec core/Instruction)] -> Bool
@@ -4294,7 +4330,9 @@
                         key-ids value-ids (arena-value-id owner) equality))
                     result-id map-type false))))))
 
-        (= "call" kind)
+        (or (= "call" kind)
+          (and (= "static-call" kind)
+            (host-environment-callee? (fact-text index expr "callee"))))
         (let [callee: String (fact-text index expr "callee")
               callee-form: (U core/NativeId Nil)
               (index-first-object index expr "callee-form")
@@ -5219,6 +5257,30 @@
                       (lower-checked-arith settled owner callee
                         (nth (argsresultv0-values coerced) 0)
                         (nth (argsresultv0-values coerced) 1)))))
+
+                (and (host-environment-callee? callee)
+                  (= 1 (count values))
+                  (text-operand? (nth value-types 0)))
+                (let [optional: (U core/NativeId Nil)
+                      (optional-scalar-type-of types (text-type-id))]
+                  (if (nil? optional)
+                    (fail-result current
+                      "TODO-NATIVE-HOST-ENVIRONMENT-TYPE: environment lookup needs a nullable Text result")
+                    (let [result-id: core/NativeId
+                          (state-id current owner "host-environment")]
+                      (->ExprResultV0
+                        (state-emit (state-bump current)
+                          (core/->ExternCallInstruction
+                            (core/->SsaValueV0 result-id optional)
+                            (host-environment-abi-id)
+                            values
+                            (arena-value-id owner)
+                            (core/->TokenFlowV0 [] [])))
+                        result-id optional false))))
+
+                (host-environment-callee? callee)
+                (fail-result current
+                  "TODO-NATIVE-HOST-ENVIRONMENT-OPERAND: environment lookup takes one native Text name")
 
                 (and (or (= "nil?" callee) (= "some?" callee))
                   (= 1 (count values)))
@@ -6320,11 +6382,18 @@
 (defn function-uses-atom-state? [function: TypedFunctionV0] -> Bool
   (core/id-in? (typedfunctionv0-effects function) (atom-state-effect-id)))
 
+(defn function-hosts? [function: TypedFunctionV0] -> Bool
+  (core/id-in? (typedfunctionv0-effects function)
+    (host-environment-effect-id)))
+
 (defn any-function-allocates? [functions: (Vec TypedFunctionV0)] -> Bool
   (some? (some function-allocates? functions)))
 
 (defn any-function-uses-atom-state? [functions: (Vec TypedFunctionV0)] -> Bool
   (some? (some function-uses-atom-state? functions)))
+
+(defn any-function-hosts? [functions: (Vec TypedFunctionV0)] -> Bool
+  (some? (some function-hosts? functions)))
 
 (defn any-function-uses-arena? [functions: (Vec TypedFunctionV0)] -> Bool
   (some?
@@ -6355,10 +6424,14 @@
         (if (blocks-allocate? (readiness-blocks readiness))
           (with-effect prior-effects (allocate-effect-id))
           prior-effects)
-        effects: (Vec core/NativeId)
+        atom-effects: (Vec core/NativeId)
         (if (blocks-use-atom-state? (readiness-blocks readiness))
           (with-effect allocated-effects (atom-state-effect-id))
           allocated-effects)
+        effects: (Vec core/NativeId)
+        (if (blocks-use-host-environment? (readiness-blocks readiness))
+          (with-effect atom-effects (host-environment-effect-id))
+          atom-effects)
         encoding: String
         (encode-typed-function
           (typedfunctionv0-id signature)
@@ -6461,29 +6534,21 @@
                   false)))]
         (if settled current (recur (+ round 1) next))))))
 
-;; Resource effects close over calls before the ABI and obligations read them.
-(defn settle-effects [functions: (Vec TypedFunctionV0)] -> (Vec TypedFunctionV0)
+;; Effects admitted by a callee are admitted by every caller before ABI sealing.
+(defn settle-effect
+  [functions: (Vec TypedFunctionV0)
+   effect-id: core/NativeId] -> (Vec TypedFunctionV0)
   (loop [round: Int 0 current: (Vec TypedFunctionV0) functions]
     (if (> round (count functions))
       current
-      (let [allocating: (Vec core/NativeId)
+      (let [effectful: (Vec core/NativeId)
             (loop [position: Int 0 ids: (Vec core/NativeId) []]
               (if (>= position (count current))
                 ids
                 (let [function: TypedFunctionV0 (nth current position)]
                   (recur (+ position 1)
                     (if (core/id-in? (typedfunctionv0-effects function)
-                          (allocate-effect-id))
-                      (conj ids (typedfunctionv0-id function))
-                      ids)))))
-            atom-stateful: (Vec core/NativeId)
-            (loop [position: Int 0 ids: (Vec core/NativeId) []]
-              (if (>= position (count current))
-                ids
-                (let [function: TypedFunctionV0 (nth current position)]
-                  (recur (+ position 1)
-                    (if (core/id-in? (typedfunctionv0-effects function)
-                          (atom-state-effect-id))
+                          effect-id)
                       (conj ids (typedfunctionv0-id function))
                       ids)))))
             next: (Vec TypedFunctionV0)
@@ -6492,24 +6557,15 @@
                 (let [targets: (Vec core/NativeId) (body-call-targets function)
                       prior-effects: (Vec core/NativeId)
                       (typedfunctionv0-effects function)
-                      needs-allocate: Bool
+                      needs-effect: Bool
                       (some? (some
                                (fn [target: core/NativeId] -> Bool
-                                 (core/id-in? allocating target))
+                                 (core/id-in? effectful target))
                                targets))
-                      needs-atom-state: Bool
-                      (some? (some
-                               (fn [target: core/NativeId] -> Bool
-                                 (core/id-in? atom-stateful target))
-                               targets))
-                      allocated-effects: (Vec core/NativeId)
-                      (if needs-allocate
-                        (with-effect prior-effects (allocate-effect-id))
-                        prior-effects)
                       effects: (Vec core/NativeId)
-                      (if needs-atom-state
-                        (with-effect allocated-effects (atom-state-effect-id))
-                        allocated-effects)]
+                      (if needs-effect
+                        (with-effect prior-effects effect-id)
+                        prior-effects)]
                 (if (= (count prior-effects) (count effects))
                   function
                   (with
@@ -6535,26 +6591,42 @@
                   false)))]
         (if settled current (recur (+ round 1) next))))))
 
+(defn settle-effects [functions: (Vec TypedFunctionV0)] -> (Vec TypedFunctionV0)
+  (settle-effect
+    (settle-effect
+      (settle-effect functions (allocate-effect-id))
+      (atom-state-effect-id))
+    (host-environment-effect-id)))
+
 (defn slice-regions [] -> (Vec core/RegionDef)
   [(core/->RegionDef (arena-region-id) (core/->ArenaRegion true) nil)
    (core/->RegionDef (atom-state-region-id) (core/->ExternalRegion true) nil)])
 
-(defn slice-capabilities [] -> (Vec core/CapabilityDef)
-  [(core/->CapabilityDef
-     (write-capability-id)
-     (core/->WriteCapability true)
-     (arena-region-id)
-     true)
-   (core/->CapabilityDef
-     (allocate-capability-id)
-     (core/->AllocateCapability true)
-     (arena-region-id)
-     true)
-   (core/->CapabilityDef
-     (atom-state-capability-id)
-     (core/->WriteCapability true)
-     (atom-state-region-id)
-     true)])
+(defn slice-capabilities [include-host: Bool] -> (Vec core/CapabilityDef)
+  (let [base: (Vec core/CapabilityDef)
+        [(core/->CapabilityDef
+           (write-capability-id)
+           (core/->WriteCapability true)
+           (arena-region-id)
+           true)
+         (core/->CapabilityDef
+           (allocate-capability-id)
+           (core/->AllocateCapability true)
+           (arena-region-id)
+           true)
+         (core/->CapabilityDef
+           (atom-state-capability-id)
+           (core/->WriteCapability true)
+           (atom-state-region-id)
+           true)]]
+    (if include-host
+      (conj base
+        (core/->CapabilityDef
+          (host-environment-capability-id)
+          (core/->HostCapability true)
+          nil
+          false))
+      base)))
 
 (defn collect-record-types
   [record-names: (Vec String)
@@ -6739,7 +6811,8 @@
 (defn typed-term-nodes
   [types: (Vec core/TypeDef)
    functions: (Vec TypedFunctionV0)
-   effects: (Vec core/EffectDef)] -> (Vec worlds/TermNodeV0)
+   effects: (Vec core/EffectDef)
+   include-host: Bool] -> (Vec worlds/TermNodeV0)
   (let [type-nodes: (Vec worlds/TermNodeV0)
         (mapv
           (fn [definition: core/TypeDef] -> worlds/TermNodeV0
@@ -6772,9 +6845,18 @@
             (worlds/canonical-record "capability-v0"
               [(id-value (write-capability-id))
                (id-value (arena-region-id))
-               "affine-write"])))]
+               "affine-write"])))
+        host-capability-nodes: (Vec worlds/TermNodeV0)
+        (if include-host
+          [(worlds/->TermNodeV0 (host-environment-capability-id)
+             (worlds/->TextTermV0
+               (worlds/canonical-record "capability-v0"
+                 [(id-value (host-environment-capability-id))
+                  "host-environment"
+                  "non-affine"])))]
+          [])]
     (vec (concat type-nodes function-nodes effect-nodes
-           [region-node capability-node]))))
+           [region-node capability-node] host-capability-nodes))))
 
 (defn forbidden-world-text? [value: String] -> Bool
   (or (= value "Any")
@@ -6880,6 +6962,7 @@
           signature-resolutions function-sources)
         functions: (Vec TypedFunctionV0)
         (settle-effects (settle-readiness (collect-functions function-resolutions)))
+        hosts: Bool (any-function-hosts? functions)
         ;; Bodies contribute types of their own (checked arithmetic answers an
         ;; Outcome), so the world's type set closes only after they lower.
         body-types: (Vec core/TypeDef)
@@ -6892,11 +6975,12 @@
         (if (any-function-uses-atom-state? functions)
           (append-type-def arena-types (atom-state-handle-type))
           arena-types)
-        effects: (Vec core/EffectDef) (slice-effects)
+        effects: (Vec core/EffectDef) (slice-effects hosts)
         regions: (Vec core/RegionDef) (slice-regions)
-        capabilities: (Vec core/CapabilityDef) (slice-capabilities)
+        capabilities: (Vec core/CapabilityDef) (slice-capabilities hosts)
         root: core/NativeId (lower-id "typed-world" [source-digest])
-        nodes: (Vec worlds/TermNodeV0) (typed-term-nodes types functions effects)
+        nodes: (Vec worlds/TermNodeV0)
+        (typed-term-nodes types functions effects hosts)
         terms: worlds/TermGraphV0
         (worlds/->TermGraphV0 root
           (conj nodes
@@ -6913,8 +6997,11 @@
           (mapv (fn [effect: core/EffectDef] -> core/NativeId
                   (core/effectdef-id effect)) effects)
           [(arena-region-id) (atom-state-region-id)]
-          [(write-capability-id) (allocate-capability-id)
-           (atom-state-capability-id)]
+          (if hosts
+            [(write-capability-id) (allocate-capability-id)
+             (atom-state-capability-id) (host-environment-capability-id)]
+            [(write-capability-id) (allocate-capability-id)
+             (atom-state-capability-id)])
           [(type-id "LowerFailure")])
         encoding: String (worlds/encode-typed-world typed-world)
         digest: String (worlds/content-digest encoding)
@@ -7289,10 +7376,20 @@
         allocated: (Vec core/NativeId)
         (if (function-allocates? function)
           (conj written (allocate-capability-id))
-          written)]
-    (if (function-uses-atom-state? function)
-      (conj allocated (atom-state-capability-id))
-      allocated)))
+          written)
+        with-atom: (Vec core/NativeId)
+        (if (function-uses-atom-state? function)
+          (conj allocated (atom-state-capability-id))
+          allocated)]
+    (if (function-hosts? function)
+      (conj with-atom (host-environment-capability-id))
+      with-atom)))
+
+(defn function-affine-capabilities [function: TypedFunctionV0] -> (Vec core/NativeId)
+  (filterv
+    (fn [capability: core/NativeId] -> Bool
+      (not (same-id? capability (host-environment-capability-id))))
+    (function-capabilities function)))
 
 (defn function-regions [function: TypedFunctionV0] -> (Vec core/NativeId)
   (let [arena: (Vec core/NativeId)
@@ -7439,9 +7536,14 @@
                 (instruction-consumed-tokens (nth instructions inner))))))))))
 
 (defn function-tokens-discharged? [function: core/FunctionDef] -> Bool
-  (let [required: (Vec core/NativeId)
-        (core/append-ids (core/functiondef-regions function)
+  (let [affine-capabilities: (Vec core/NativeId)
+        (filterv
+          (fn [capability: core/NativeId] -> Bool
+            (not (same-id? capability (host-environment-capability-id))))
           (core/functiondef-capabilities function))
+        required: (Vec core/NativeId)
+        (core/append-ids (core/functiondef-regions function)
+          affine-capabilities)
         consumed: (Vec core/NativeId) (function-consumed-tokens function)]
     (and (core/unique-ids? consumed)
       (core/ids-in? required consumed)
@@ -7498,6 +7600,39 @@
       (fn [function: TypedFunctionV0] -> core/AbiDeclV0
         (function-abi function digest))
       (ready-functions functions))))
+
+(defn host-environment-abi
+  [result-type: core/NativeId
+   layouts-digest: String] -> core/AbiDeclV0
+  (core/->AbiDeclV0
+    (host-environment-abi-id)
+    (host-environment-function-id)
+    "native_host_environment_lookup_v0"
+    (core/->AbiImportV0 true)
+    (core/->RestrictedCOptionalOutAbiV0 true)
+    [(core/->AbiValueV0 "name" (text-type-id)
+       (core/->BorrowedV0 true) nil)]
+    (core/->AbiValueV0 "result" result-type
+      (core/->ArenaOwnedV0 (arena-region-id))
+      (arena-region-id))
+    (type-id "LowerFailure")
+    [(allocate-effect-id) (host-environment-effect-id)]
+    [(allocate-capability-id) (host-environment-capability-id)]
+    "v0"
+    layouts-digest))
+
+(defn slice-abis
+  [functions: (Vec TypedFunctionV0)
+   types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)] -> (Vec core/AbiDeclV0)
+  (let [exports: (Vec core/AbiDeclV0) (function-abis functions layouts)]
+    (if (not (any-function-hosts? functions))
+      exports
+      (let [optional: (U core/NativeId Nil)
+            (optional-scalar-type-of types (text-type-id))]
+        (if (nil? optional)
+          exports
+          (conj exports (host-environment-abi optional (layout-digest layouts))))))))
 
 (defn encode-scalar-repr [representation: core/ScalarReprV0] -> String
   (cond
@@ -8004,6 +8139,16 @@
        (id-value (core/callinstruction-function-id instruction))
        (encode-id-roots "arguments" (core/callinstruction-arguments instruction))])
 
+    (instance? native.core.ExternCallInstruction instruction)
+    (let [arena: (U core/NativeId Nil)
+          (core/externcallinstruction-arena-id instruction)]
+      (worlds/canonical-record "extern-call-instruction"
+        [(encode-ssa-value (core/externcallinstruction-result instruction))
+         (id-value (core/externcallinstruction-abi-id instruction))
+         (encode-id-roots "arguments"
+           (core/externcallinstruction-arguments instruction))
+         (if (nil? arena) "no-arena" (id-value arena))]))
+
     :else ""))
 
 (defn encode-terminator [terminator: core/Terminator] -> String
@@ -8074,26 +8219,66 @@
     [(core/abivaluev0-name value)
      (id-value (core/abivaluev0-type-id value))]))
 
+(defn encode-ownership [ownership: core/OwnershipRuleV0] -> String
+  (cond
+    (instance? native.core.BorrowedV0 ownership) "borrowed"
+    (instance? native.core.OwnedV0 ownership) "owned"
+    :else
+    (worlds/canonical-record "arena-owned"
+      [(id-value (core/arenaownedv0-region ownership))])))
+
+(defn encode-import-abi-value [value: core/AbiValueV0] -> String
+  (let [lifetime: (U core/NativeId Nil)
+        (core/abivaluev0-lifetime-region value)]
+    (worlds/canonical-record "import-abi-value-v0"
+      [(core/abivaluev0-name value)
+       (id-value (core/abivaluev0-type-id value))
+       (encode-ownership (core/abivaluev0-ownership value))
+       (if (nil? lifetime) "no-lifetime" (id-value lifetime))])))
+
 (defn encode-abi [abi: core/AbiDeclV0] -> String
-  (worlds/canonical-record "abi-declaration-v0"
-    [(id-value (core/abideclv0-id abi))
-     (id-value (core/abideclv0-function-id abi))
-     (core/abideclv0-symbol abi)
-     (worlds/canonical-record "parameters"
-       (mapv
-         (fn [value: core/AbiValueV0] -> String (encode-abi-value value))
-         (core/abideclv0-parameters abi)))
-     (let [result: (U core/AbiValueV0 Nil) (core/abideclv0-result abi)]
-       (if (nil? result) "unit" (encode-abi-value result)))
-     (id-value (core/abideclv0-failure-type abi))
-     (encode-id-roots "effects" (core/abideclv0-required-effects abi))
-     (encode-id-roots "capabilities" (core/abideclv0-required-capabilities abi))
-     (core/abideclv0-version abi)
-     (core/abideclv0-layout-digest abi)]))
+  (let [result: (U core/AbiValueV0 Nil) (core/abideclv0-result abi)]
+    (if (instance? native.core.AbiImportV0 (core/abideclv0-direction abi))
+      (worlds/canonical-record "abi-import-declaration-v0"
+        [(id-value (core/abideclv0-id abi))
+         (id-value (core/abideclv0-function-id abi))
+         (core/abideclv0-symbol abi)
+         (if (instance? native.core.RestrictedCOptionalOutAbiV0
+               (core/abideclv0-convention abi))
+           "restricted-c-optional-out-v0"
+           "restricted-c-v0")
+         (worlds/canonical-record "parameters"
+           (mapv
+             (fn [value: core/AbiValueV0] -> String
+               (encode-import-abi-value value))
+             (core/abideclv0-parameters abi)))
+         (if (nil? result) "unit" (encode-import-abi-value result))
+         (id-value (core/abideclv0-failure-type abi))
+         (encode-id-roots "effects" (core/abideclv0-required-effects abi))
+         (encode-id-roots "capabilities"
+           (core/abideclv0-required-capabilities abi))
+         (core/abideclv0-version abi)
+         (core/abideclv0-layout-digest abi)])
+      (worlds/canonical-record "abi-declaration-v0"
+        [(id-value (core/abideclv0-id abi))
+         (id-value (core/abideclv0-function-id abi))
+         (core/abideclv0-symbol abi)
+         (worlds/canonical-record "parameters"
+           (mapv
+             (fn [value: core/AbiValueV0] -> String (encode-abi-value value))
+             (core/abideclv0-parameters abi)))
+         (if (nil? result) "unit" (encode-abi-value result))
+         (id-value (core/abideclv0-failure-type abi))
+         (encode-id-roots "effects" (core/abideclv0-required-effects abi))
+         (encode-id-roots "capabilities"
+           (core/abideclv0-required-capabilities abi))
+         (core/abideclv0-version abi)
+         (core/abideclv0-layout-digest abi)]))))
 
 (defn native-term-nodes
   [types: (Vec core/TypeDef)
    effects: (Vec core/EffectDef)
+   capabilities: (Vec core/CapabilityDef)
    layouts: (Vec core/LayoutDef)
    functions: (Vec core/FunctionDef)
    abis: (Vec core/AbiDeclV0)
@@ -8139,9 +8324,19 @@
                   (worlds/canonical-record "native-obligation-v0"
                     [(if (core/obligationresult-passed result) "pass" "fail")
                      (core/obligationresult-detail result)])))))
-          obligation-results)]
+          obligation-results)
+        host-capability-nodes: (Vec worlds/TermNodeV0)
+        (if (core/id-in? (core/capability-ids capabilities)
+              (host-environment-capability-id))
+          [(worlds/->TermNodeV0 (host-environment-capability-id)
+             (worlds/->TextTermV0
+               (worlds/canonical-record "capability-v0"
+                 [(id-value (host-environment-capability-id))
+                  "host-environment"
+                  "non-affine"])))]
+          [])]
     (vec (concat type-nodes effect-nodes layout-nodes function-nodes abi-nodes
-           obligation-nodes
+           obligation-nodes host-capability-nodes
            [(worlds/->TermNodeV0 (arena-region-id)
               (worlds/->TextTermV0
                 (worlds/canonical-record "region-v0"
@@ -8282,7 +8477,8 @@
         layouts: (Vec core/LayoutDef) (collect-layouts layout-resolutions)
         typed-functions: (Vec TypedFunctionV0) (typedslicev0-functions slice)
         functions: (Vec core/FunctionDef) (lower-ready-functions typed-functions)
-        abis: (Vec core/AbiDeclV0) (function-abis typed-functions layouts)
+        abis: (Vec core/AbiDeclV0)
+        (slice-abis typed-functions types layouts)
         effects: (Vec core/EffectDef) (typedslicev0-effects slice)
         regions: (Vec core/RegionDef) (typedslicev0-regions slice)
         capabilities: (Vec core/CapabilityDef) (typedslicev0-capabilities slice)
@@ -8311,7 +8507,10 @@
         closed-layouts: Bool (layouts-closed? layout-resolutions)
         functions-ready: Bool (all-functions-ready? typed-functions)
         legal-abi: Bool
-        (and (> (count functions) 0) (= (count functions) (count abis)))
+        (and (> (count functions) 0)
+          (= (+ (count functions)
+               (if (any-function-hosts? typed-functions) 1 0))
+            (count abis)))
         tokens-discharged: Bool
         (every?
           (fn [function: core/FunctionDef] -> Bool
@@ -8327,7 +8526,8 @@
             (lower-id "obligation" [(core/obligationresult-detail result)]))
           obligation-results)
         nodes: (Vec worlds/TermNodeV0)
-        (native-term-nodes types effects layouts functions abis obligation-results)
+        (native-term-nodes types effects capabilities layouts functions abis
+          obligation-results)
         terms: worlds/TermGraphV0
         (worlds/->TermGraphV0 root
           (conj nodes

@@ -231,4 +231,8 @@ uint64_t native_text_join(native_arena *arena, uint64_t separator,
 uint64_t native_text_repeat(native_arena *arena, uint64_t source,
                             int64_t count);
 
+bool native_host_environment_lookup_v0(
+    native_arena *arena, const native_capability *capability,
+    uint64_t name, uint64_t *out);
+
 #endif

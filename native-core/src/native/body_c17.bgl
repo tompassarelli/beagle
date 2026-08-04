@@ -171,6 +171,7 @@
     (instance? native.core.RecordInstruction instruction) true
     (instance? native.core.BoxRecordInstruction instruction) true
     (instance? native.core.CallInstruction instruction) true
+    (instance? native.core.ExternCallInstruction instruction) true
     (instance? native.core.VariantValueInstruction instruction) true
     (instance? native.core.CheckedInstruction instruction)
     (checked-operation-supported? (core/checkedinstruction-operation instruction))
@@ -233,6 +234,15 @@
                    (c17/type-supported? type-def types layouts))
            types)
       (c17/types-orderable? types layouts)
+      (every?
+        (fn [abi: core/AbiDeclV0] -> Bool
+          (or (instance? native.core.AbiExportV0
+                (core/abideclv0-direction abi))
+            (and (instance? native.core.RestrictedCOptionalOutAbiV0
+                   (core/abideclv0-convention abi))
+              (= "native_host_environment_lookup_v0"
+                (core/abideclv0-symbol abi)))))
+        (core/nativeworld-abis world))
       (every? function-supported? (core/nativeworld-functions world)))))
 
 (defn block-index
@@ -725,6 +735,44 @@
                 (core/unionvariantlayoutv0-tag variant)
                 (recur (+ position 1))))))))))
 
+(defn optional-payload-type
+  [types: (Vec core/TypeDef)
+   owner: core/NativeId] -> (U core/NativeId Nil)
+  (let [definition: (U core/TypeDef Nil) (type-with-id types owner)]
+    (if (nil? definition)
+      nil
+      (let [shape: core/TypeShape (core/typedef-shape definition)]
+        (if (not (instance? native.core.UnionType shape))
+          nil
+          (loop [position: Int 0
+                 variants: (Vec core/TypeVariant)
+                 (core/uniontype-variants shape)]
+            (if (>= position (count variants))
+              nil
+              (let [payload: (U core/NativeId Nil)
+                    (core/typevariant-payload-type (nth variants position))]
+                (if (or (nil? payload) (unit-type? types payload))
+                  (recur (+ position 1) variants)
+                  payload)))))))))
+
+(defn find-abi
+  [abis: (Vec core/AbiDeclV0)
+   target: core/NativeId] -> (U core/AbiDeclV0 Nil)
+  (loop [position: Int 0]
+    (if (>= position (count abis))
+      nil
+      (if (core/native-id= (core/abideclv0-id (nth abis position)) target)
+        (nth abis position)
+        (recur (+ position 1))))))
+
+(defn join-c-arguments [arguments: (Vec String)] -> String
+  (loop [position: Int 0 result: String ""]
+    (if (>= position (count arguments))
+      result
+      (recur (+ position 1)
+        (str result (if (= position 0) "" ", ")
+          (nth arguments position))))))
+
 (defn i64-type-id [types: (Vec core/TypeDef)] -> core/NativeId
   (loop [position: Int 0]
     (if (>= position (count types))
@@ -1064,6 +1112,62 @@
       (value-name function slots operand)
       (str "native_text_from_int(" arena ", "
         (value-name function slots operand) ")"))))
+
+(defn emit-extern-call
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)
+   abis: (Vec core/AbiDeclV0)
+   function: core/FunctionDef
+   slots: (Vec ValueSlotV0)
+   target: String
+   instruction: core/ExternCallInstruction] -> String
+  (let [abi: (U core/AbiDeclV0 Nil)
+        (find-abi abis (core/externcallinstruction-abi-id instruction))]
+    (if (nil? abi)
+      ""
+      (let [result: core/SsaValueV0
+            (core/externcallinstruction-result instruction)
+            owner: core/NativeId (core/ssavaluev0-type-id result)
+            payload: (U core/NativeId Nil) (optional-payload-type types owner)
+            result-value: (U core/AbiValueV0 Nil) (core/abideclv0-result abi)
+            arena-id: (U core/NativeId Nil)
+            (core/externcallinstruction-arena-id instruction)
+            ok-tag: Int
+            (if (nil? payload) -1
+              (variant-tag-for-payload layouts owner payload))
+            absent-tag: Int (absent-variant-tag types layouts owner)]
+        (if (or (nil? payload) (nil? result-value) (nil? arena-id)
+              (< ok-tag 0) (< absent-tag 0))
+          ""
+          (let [hidden: (Vec String)
+                [(str "(native_arena *)"
+                   (value-name function slots arena-id))]
+                with-capability: (Vec String)
+                (if (> (count (core/abideclv0-required-capabilities abi)) 0)
+                  (conj hidden "capability")
+                  hidden)
+                arguments: (Vec String)
+                (loop [position: Int 0
+                       collected: (Vec String) with-capability
+                       values: (Vec core/NativeId)
+                       (core/externcallinstruction-arguments instruction)]
+                  (if (>= position (count values))
+                    collected
+                    (recur (+ position 1)
+                      (conj collected
+                        (value-name function slots (nth values position)))
+                      values)))
+                call-arguments: (Vec String)
+                (conj arguments
+                  (str "&" target ".payload.variant_" ok-tag))]
+            (str "  memset(&" target ", 0, sizeof " target ");\n"
+              "  if (" (core/abideclv0-symbol abi) "("
+              (join-c-arguments call-arguments) ")) {\n"
+              "    " target ".tag = INT64_C(" ok-tag ");\n"
+              "  } else {\n"
+              "    " target ".tag = INT64_C(" absent-tag ");\n"
+              "  }\n")))))))
+
 (defn emit-text-builtin
   [function: core/FunctionDef
    slots: (Vec ValueSlotV0)
@@ -1181,6 +1285,7 @@
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
    functions: (Vec core/FunctionDef)
+   abis: (Vec core/AbiDeclV0)
    module-index: Int
    pool: ConstantPoolV0
    function: core/FunctionDef
@@ -1728,6 +1833,9 @@
           (core/callinstruction-function-id instruction)
           (core/callinstruction-arguments instruction)) ");\n")
 
+      (instance? native.core.ExternCallInstruction instruction)
+      (emit-extern-call types layouts abis function slots target instruction)
+
       :else "")))
 
 (defn variant-tag
@@ -1861,6 +1969,7 @@
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
    functions: (Vec core/FunctionDef)
+   abis: (Vec core/AbiDeclV0)
    module-index: Int
    pool: ConstantPoolV0
    function: core/FunctionDef
@@ -1879,8 +1988,8 @@
           result
           (recur (+ inner 1)
             (str result
-              (emit-instruction types layouts functions module-index pool function
-                slots (nth instructions inner))))))
+              (emit-instruction types layouts functions abis module-index pool
+                function slots (nth instructions inner))))))
       (emit-terminator layouts function function-index slots
         (nth (core/basicblock-terminators block) 0)))))
 
@@ -1888,6 +1997,7 @@
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
    functions: (Vec core/FunctionDef)
+   abis: (Vec core/AbiDeclV0)
    module-index: Int
    pool: ConstantPoolV0
    function-index: Int
@@ -1915,7 +2025,7 @@
           result
           (recur (+ position 1)
             (str result
-              (emit-block types layouts functions module-index pool function
+              (emit-block types layouts functions abis module-index pool function
                 function-index slots position)))))
       "}\n")))
 
@@ -1923,6 +2033,7 @@
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
    functions: (Vec core/FunctionDef)
+   abis: (Vec core/AbiDeclV0)
    module-index: Int
    pool: ConstantPoolV0] -> String
   (loop [position: Int 0 result: String ""]
@@ -1930,13 +2041,14 @@
       result
       (recur (+ position 1)
         (str result
-          (emit-function types layouts functions module-index pool position
+          (emit-function types layouts functions abis module-index pool position
             (nth functions position)))))))
 
 (defn emit-source
   [types: (Vec core/TypeDef)
    layouts: (Vec core/LayoutDef)
    functions: (Vec core/FunctionDef)
+   abis: (Vec core/AbiDeclV0)
    module-index: Int
    pool: ConstantPoolV0
    header-name: String] -> String
@@ -1944,7 +2056,7 @@
     "#include \"" header-name "\"\n\n"
     (emit-text-pool module-index pool)
     (emit-value-descriptors types layouts functions module-index)
-    (emit-functions types layouts functions module-index pool)))
+    (emit-functions types layouts functions abis module-index pool)))
 
 (defn materialize-world
   [world: core/NativeWorld
@@ -1971,6 +2083,7 @@
             (c17/dependency-ordered-types (core/nativeworld-types world) layouts)
             functions: (Vec core/FunctionDef)
             (c17/ordered-functions (core/nativeworld-functions world))
+            abis: (Vec core/AbiDeclV0) (core/nativeworld-abis world)
             pool: ConstantPoolV0 (collect-pool functions)
             header-name: String (str "module_" module-index ".h")]
         (->BodySuccessV0
@@ -1978,5 +2091,5 @@
             header-name
             (c17/emit-header types layouts functions module-index)
             (str "module_" module-index ".c")
-            (emit-source types layouts functions module-index pool
+            (emit-source types layouts functions abis module-index pool
               header-name)))))))

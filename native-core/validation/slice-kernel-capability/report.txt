@@ -1,0 +1,37 @@
+stage source-seal ACCEPTED
+stage source-to-typed ACCEPTED
+stage typed-to-native PENDING
+source-modules 3
+source-imports 2
+full-world-functions 48
+full-world-abis 49
+host-world-functions 3
+host-world-abis 4
+lowered fn_0 getenv 1 blocks
+lowered fn_1 getenv-present? 4 blocks
+lowered fn_2 getenv-length 7 blocks
+obligation-host PASS valid-ssa
+obligation-host PASS exhaustive-matches
+obligation-host PASS closed-layouts
+obligation-host PASS checked-arithmetic
+obligation-host PASS legal-abi
+obligation-host PASS discharged-tokens
+obligation-host PASS bounded-effects
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FN-ESCAPES: anonymous functions lower only as an inline reduce callback [profile-has-rule?]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FN-ESCAPES: anonymous functions lower only as an inline reduce callback [declared-relational-profile?]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FN-ESCAPES: anonymous functions lower only as an inline reduce callback [space-profile-ids]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FN-ESCAPES: anonymous functions lower only as an inline reduce callback [declared-vocabulary-rule?]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-STR-OPERANDS: str concatenates one or more native Text or Int operands [namespaced-vocabulary?]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FN-ESCAPES: anonymous functions lower only as an inline reduce callback [grouped-vocabulary?]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-EMPTY-VECTOR-LITERAL: an empty literal names no element type [vocabulary-lint-errors]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-threading: no native lowering for this source form [relational-admission-errors]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FORM-unsupported-threading: no native lowering for this source form [relational-lint-errors]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-EMPTY-VECTOR-LITERAL: an empty literal names no element type [lint-declared-profile]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FN-ESCAPES: anonymous functions lower only as an inline reduce callback [by-slot0]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FN-ESCAPES: anonymous functions lower only as an inline reduce callback [by-slot1]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FN-ESCAPES: anonymous functions lower only as an inline reduce callback [by-slot2]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FN-ESCAPES: anonymous functions lower only as an inline reduce callback [by-slot01]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FN-ESCAPES: anonymous functions lower only as an inline reduce callback [by-slot12]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-FN-ESCAPES: anonymous functions lower only as an inline reduce callback [by-slot02]
+materialize OK module_0.h module_0.c
+qbe REFUSED QBE host extern ABI is unsupported: optional Text handles have no QBE representation

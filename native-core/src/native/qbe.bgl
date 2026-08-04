@@ -247,6 +247,8 @@
     [(StoreInstruction value) (core/storeinstruction-result instruction)]
     [(AllocateInstruction value) (core/allocateinstruction-result instruction)]
     [(CallInstruction value) (core/callinstruction-result instruction)]
+    [(ExternCallInstruction value)
+     (core/externcallinstruction-result instruction)]
     [(CompareInstruction value) (core/compareinstruction-result instruction)]
     [(FieldInstruction value) (core/fieldinstruction-result instruction)]
     [(VariantValueInstruction value)
@@ -793,6 +795,7 @@
     [(MapTypeV0 value) []]
     [(SetTypeV0 value) []]
     [(ReferenceType value) []]
+    [(AtomCellTypeV0 value) []]
     [(FunctionType value) []]
     [(OutcomeType value) []]))
 
@@ -974,6 +977,7 @@
     [(StoreInstruction value) false]
     [(AllocateInstruction value) false]
     [(CallInstruction value) false]
+    [(ExternCallInstruction value) false]
     [(CompareInstruction value) false]
     [(FieldInstruction value) false]
     [(VariantValueInstruction value) false]
@@ -1304,6 +1308,7 @@
       [(CallInstruction value)
        (emit-call context result-name (core/callinstruction-function-id instruction)
          (core/callinstruction-arguments instruction))]
+      [(ExternCallInstruction value) ""]
       [(CompareInstruction value)
        (let [comparison: core/CompareOpV0
              (core/compareinstruction-comparison instruction)]
@@ -1728,6 +1733,7 @@
     [(StoreInstruction value) (store-supported? (core/storeinstruction-store instruction))]
     [(AllocateInstruction value) true]
     [(CallInstruction value) true]
+    [(ExternCallInstruction value) false]
     [(CompareInstruction value)
      (comparison-supported? (core/compareinstruction-comparison instruction))]
     [(FieldInstruction value) false]
@@ -1871,6 +1877,15 @@
     (every? (fn [function: core/FunctionDef] -> Bool (function-supported? types layouts function))
       (core/nativeworld-functions world))))
 
+(defn world-has-host-extern? [world: core/NativeWorld] -> Bool
+  (some?
+    (some (fn [abi: core/AbiDeclV0] -> Bool
+            (and (instance? native.core.AbiImportV0
+                   (core/abideclv0-direction abi))
+              (instance? native.core.RestrictedCOptionalOutAbiV0
+                (core/abideclv0-convention abi))))
+      (core/nativeworld-abis world))))
+
 ;; --- entry point ----------------------------------------------------------
 
 (defn emit-module
@@ -1902,6 +1917,9 @@
       (->QbeFailure "module index must be nonnegative")
       (not (core/validationreport-passed validation))
       (->QbeFailure "native world is not sealed: validation obligations failed")
+      (world-has-host-extern? world)
+      (->QbeFailure
+        "QBE host extern ABI is unsupported: optional Text handles have no QBE representation")
       (some? unsupported)
       (->QbeFailure
         (str "unsupported native value-semantics op: " unsupported))

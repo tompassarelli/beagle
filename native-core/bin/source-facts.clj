@@ -119,6 +119,10 @@
                     (when (not= "ref" (get-in e ["fn" "node"]))
                       (row! n "callee-form" "n" (emit-expr (get e "fn"))))
                     (row! n "args" "n" (emit-seq (get e "args") emit-expr)))
+      "static-call"
+      (do (row! n "form-kind" "t" "static-call")
+          (row! n "callee" "t" (get e "name"))
+          (row! n "args" "n" (emit-seq (get e "args") emit-expr)))
       "fn"      (do (row! n "form-kind" "t" "fn")
                     (row! n "params" "n" (emit-seq (get e "params") emit-param))
                     (row! n "rest" "t" (str (boolean (get e "rest"))))

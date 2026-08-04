@@ -739,6 +739,16 @@
       (nth functions index)
       :else (recur (+ index 1)))))
 
+(defn find-abi
+  [abis :- (Vec core/AbiDeclV0)
+   abi-id :- core/NativeId] :- (U core/AbiDeclV0 Nil)
+  (loop [index :- Int 0]
+    (cond
+      (>= index (count abis)) nil
+      (core/native-id= (core/abideclv0-id (nth abis index)) abi-id)
+      (nth abis index)
+      :else (recur (+ index 1)))))
+
 (defn abi-type-legal?
   [types :- (Vec core/TypeDef)
    layouts :- (Vec core/LayoutDef)
@@ -799,6 +809,22 @@
   (and (abi-type-legal? types layouts failure-type)
     (> (count (variant-ids-for-type types failure-type)) 0)))
 
+(defn import-abi-value-legal?
+  [world :- core/NativeWorld
+   types :- (Vec core/TypeDef)
+   layouts :- (Vec core/LayoutDef)
+   value :- core/AbiValueV0] :- Bool
+  (let [ownership :- core/OwnershipRuleV0 (core/abivaluev0-ownership value)
+        arena-region :- Any (get ownership :region nil)
+        lifetime :- (U core/NativeId Nil)
+        (core/abivaluev0-lifetime-region value)]
+    (and (> (count (core/abivaluev0-name value)) 0)
+      (abi-type-legal? types layouts (core/abivaluev0-type-id value))
+      (or (nil? arena-region)
+        (core/id-in? (core/nativeworld-allowed-regions world) arena-region))
+      (or (nil? lifetime)
+        (core/id-in? (core/nativeworld-allowed-regions world) lifetime)))))
+
 (defn abi-decl-legal?
   [world :- core/NativeWorld
    abi :- core/AbiDeclV0] :- Bool
@@ -806,25 +832,110 @@
         (find-function (core/nativeworld-functions world) (get abi :function-id))
         types :- (Vec core/TypeDef) (core/nativeworld-types world)
         layouts :- (Vec core/LayoutDef) (core/nativeworld-layouts world)]
-    (and (not (nil? function))
-      (> (count (get abi :symbol "")) 0)
+    (and (> (count (get abi :symbol "")) 0)
       (> (count (get abi :version "")) 0)
       (> (count (get abi :layout-digest "")) 0)
       (some? (get abi :direction nil))
       (some? (get abi :convention nil))
-      (abi-parameters-match? types layouts function (get abi :parameters []))
-      (abi-result-matches? types layouts function (get abi :result nil))
       (failure-type-legal? types layouts (get abi :failure-type))
-      (core/ids-in? (get abi :required-effects [])
-        (core/functiondef-effects function))
-      (core/ids-in? (get abi :required-capabilities [])
-        (core/functiondef-capabilities function)))))
+      (if (instance? native.core.AbiImportV0 (core/abideclv0-direction abi))
+        (let [result :- (U core/AbiValueV0 Nil) (core/abideclv0-result abi)]
+          (and
+          (or (instance? native.core.RestrictedCAbiV0
+                (core/abideclv0-convention abi))
+            (instance? native.core.RestrictedCOptionalOutAbiV0
+              (core/abideclv0-convention abi)))
+          (every? (fn [value :- core/AbiValueV0] :- Bool
+                    (import-abi-value-legal? world types layouts value))
+            (core/abideclv0-parameters abi))
+          (if (instance? native.core.RestrictedCOptionalOutAbiV0
+                (core/abideclv0-convention abi))
+            (and (not (nil? result))
+              (instance? native.core.ArenaOwnedV0
+                (core/abivaluev0-ownership result))
+              (import-abi-value-legal? world types layouts result))
+            (or (nil? result)
+              (import-abi-value-legal? world types layouts result)))
+          (core/ids-in? (core/abideclv0-required-effects abi)
+            (core/nativeworld-allowed-effects world))
+          (core/ids-in? (core/abideclv0-required-capabilities abi)
+            (core/nativeworld-allowed-capabilities world))))
+        (and (not (nil? function))
+          (abi-parameters-match? types layouts function
+            (get abi :parameters []))
+          (abi-result-matches? types layouts function (get abi :result nil))
+          (core/ids-in? (get abi :required-effects [])
+            (core/functiondef-effects function))
+          (core/ids-in? (get abi :required-capabilities [])
+            (core/functiondef-capabilities function)))))))
+
+(defn extern-call-legal?
+  [world :- core/NativeWorld
+   function :- core/FunctionDef
+   instruction :- core/Instruction] :- Bool
+  (if (not (instance? native.core.ExternCallInstruction instruction))
+    true
+    (let [abi :- (U core/AbiDeclV0 Nil)
+          (find-abi (core/nativeworld-abis world)
+            (core/externcallinstruction-abi-id instruction))]
+      (if (nil? abi)
+        false
+        (let [arguments :- (Vec core/NativeId)
+              (core/externcallinstruction-arguments instruction)
+              parameters :- (Vec core/AbiValueV0)
+              (core/abideclv0-parameters abi)
+              result :- (U core/AbiValueV0 Nil) (core/abideclv0-result abi)
+              arena :- (U core/NativeId Nil)
+              (core/externcallinstruction-arena-id instruction)]
+          (and
+            (instance? native.core.AbiImportV0
+              (core/abideclv0-direction abi))
+            (= (count arguments) (count parameters))
+            (loop [index :- Int 0]
+              (if (>= index (count arguments))
+                true
+                (let [site :- DefSiteV0
+                      (find-def-site function (nth arguments index))]
+                  (if (and (defsitev0-found site)
+                        (core/native-id= (defsitev0-type-id site)
+                          (core/abivaluev0-type-id (nth parameters index))))
+                    (recur (+ index 1))
+                    false))))
+            (not (nil? result))
+            (core/native-id=
+              (core/ssavaluev0-type-id
+                (core/externcallinstruction-result instruction))
+              (core/abivaluev0-type-id result))
+            (if (instance? native.core.ArenaOwnedV0
+                  (core/abivaluev0-ownership result))
+              (let [region :- (U core/NativeId Nil)
+                    (get (core/abivaluev0-ownership result) :region nil)]
+                (and (not (nil? region))
+                  (core/id-in? (core/functiondef-regions function) region)
+                  (not (nil? arena))
+                  (defsitev0-found (find-def-site function arena))))
+              true)
+            (core/ids-in? (core/abideclv0-required-effects abi)
+              (core/functiondef-effects function))
+            (core/ids-in? (core/abideclv0-required-capabilities abi)
+              (core/functiondef-capabilities function))))))))
+
+(defn extern-calls-legal? [world :- core/NativeWorld] :- Bool
+  (every? (fn [function :- core/FunctionDef] :- Bool
+            (every? (fn [block :- core/BasicBlock] :- Bool
+                      (every? (fn [instruction :- core/Instruction] :- Bool
+                                (extern-call-legal? world function instruction))
+                        (core/basicblock-instructions block)))
+              (core/functiondef-blocks function)))
+    (core/nativeworld-functions world)))
 
 (defn legal-abi [world :- core/NativeWorld] :- ObligationVerdictV0
   (loop [index :- Int 0 abis :- (Vec core/AbiDeclV0)
          (core/nativeworld-abis world)]
     (if (>= index (count abis))
-      (->ObligationPassV0 (core/->LegalAbiObligation true))
+      (if (extern-calls-legal? world)
+        (->ObligationPassV0 (core/->LegalAbiObligation true))
+        (->LegalAbiDiagnosticV0 (obligation-id "extern-call")))
       (let [abi :- core/AbiDeclV0 (nth abis index)]
         (if (abi-decl-legal? world abi)
           (recur (+ index 1) abis)
@@ -1081,6 +1192,7 @@
   (let [store :- Any (get instruction :store nil)
         allocation-region :- Any (get instruction :region nil)
         allocation-capability :- Any (get instruction :capability nil)
+        abi-id :- Any (get instruction :abi-id nil)
         callee-id :- Any (get instruction :function-id nil)]
     (cond
       (instance? native.core.AtomStateInstruction instruction)
@@ -1127,6 +1239,16 @@
           allocation-capability)
         (declared-effect-covers? world function allocation-region
           allocation-capability true))
+      (not (nil? abi-id))
+      (let [abi :- (U core/AbiDeclV0 Nil)
+            (find-abi (core/nativeworld-abis world) abi-id)]
+        (and (not (nil? abi))
+          (instance? native.core.AbiImportV0
+            (core/abideclv0-direction abi))
+          (core/ids-in? (core/abideclv0-required-effects abi)
+            (core/functiondef-effects function))
+          (core/ids-in? (core/abideclv0-required-capabilities abi)
+            (core/functiondef-capabilities function))))
       (not (nil? callee-id))
       (let [callee :- (U core/FunctionDef Nil)
             (find-function (core/nativeworld-functions world) callee-id)]

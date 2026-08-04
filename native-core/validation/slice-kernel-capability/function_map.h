@@ -1,0 +1,8 @@
+#ifndef NATIVE_HOST_CAPABILITY_FUNCTION_MAP_H
+#define NATIVE_HOST_CAPABILITY_FUNCTION_MAP_H
+
+#define HOST_GETENV native_m0_fn_0
+#define HOST_GETENV_PRESENT native_m0_fn_1
+#define HOST_GETENV_LENGTH native_m0_fn_2
+
+#endif

@@ -325,6 +325,14 @@
      function-id: NativeId
      arguments: (Vec NativeId)
      tokens: TokenFlowV0])
+  ;; The ABI declaration, rather than a source-language callee name, owns the
+  ;; physical symbol, effects, capabilities, ownership, and failure contract.
+  (ExternCallInstruction
+    [result: SsaValueV0
+     abi-id: NativeId
+     arguments: (Vec NativeId)
+     arena-id: (U NativeId Nil)
+     tokens: TokenFlowV0])
   (CompareInstruction
     [result: SsaValueV0
      comparison: CompareOpV0
@@ -628,7 +636,10 @@
   (AbiExportV0 [token: Bool]))
 
 (defunion AbiConventionV0
-  (RestrictedCAbiV0 [token: Bool]))
+  (RestrictedCAbiV0 [token: Bool])
+  ;; A restricted C import returns presence and writes the one non-unit union
+  ;; payload through a trailing pointer; the world result stays a closed union.
+  (RestrictedCOptionalOutAbiV0 [token: Bool]))
 
 (defunion OwnershipRuleV0
   (BorrowedV0 [token: Bool])
@@ -756,6 +767,8 @@
     [(AllocateInstruction result region capability byte-count-id tokens)
      (ssavaluev0-id result)]
     [(CallInstruction result function-id arguments tokens) (ssavaluev0-id result)]
+    [(ExternCallInstruction result abi-id arguments arena-id tokens)
+     (ssavaluev0-id result)]
     [(CompareInstruction result comparison left-id right-id) (ssavaluev0-id result)]
     [(FieldInstruction result source-id field-id) (ssavaluev0-id result)]
     [(VariantValueInstruction result source-id variant-id) (ssavaluev0-id result)]
@@ -885,9 +898,14 @@
   (mapv (fn [function :- FunctionDef] :- NativeId (functiondef-id function))
     functions))
 
+(defn abi-ids [abis :- (Vec AbiDeclV0)] :- (Vec NativeId)
+  (mapv (fn [abi :- AbiDeclV0] :- NativeId (abideclv0-id abi)) abis))
+
 (defn world-owned-ids [world :- NativeWorld] :- (Vec NativeId)
   (let [owned0 :- (Vec NativeId) [(nativeworld-id world)] owned1 :- (Vec NativeId) (append-ids owned0 (all-type-owned-ids (nativeworld-types world))) owned2 :- (Vec NativeId) (append-ids owned1 (effect-ids (nativeworld-effects world))) owned3 :- (Vec NativeId) (append-ids owned2 (region-ids (nativeworld-regions world))) owned4 :- (Vec NativeId) (append-ids owned3 (capability-ids (nativeworld-capabilities world))) owned5 :- (Vec NativeId) (append-ids owned4 (layout-ids (nativeworld-layouts world)))]
-    (append-ids owned5 (all-function-owned-ids (nativeworld-functions world)))))
+    (append-ids
+      (append-ids owned5 (all-function-owned-ids (nativeworld-functions world)))
+      (abi-ids (nativeworld-abis world)))))
 
 (defn type-member-ids [types :- (Vec TypeDef)] :- (Vec NativeId)
   (loop [index :- Int 0 ids :- (Vec NativeId) []]
@@ -977,7 +995,7 @@
 (defn capabilities-refs-closed?
   [capabilities :- (Vec CapabilityDef)
    known-regions :- (Vec NativeId)] :- Bool
-  (every? (fn [capability :- CapabilityDef] :- Bool (and (capabilitydef-affine capability) (optional-id-in? (capabilitydef-region capability) known-regions)))
+  (every? (fn [capability :- CapabilityDef] :- Bool (optional-id-in? (capabilitydef-region capability) known-regions))
     capabilities))
 
 (defn field-layout-refs-closed?
@@ -1070,6 +1088,7 @@
 (defn instruction-semantic-refs-closed?
   [instruction :- Instruction
    known-functions :- (Vec NativeId)
+   known-abis :- (Vec NativeId)
    known-regions :- (Vec NativeId)
    known-capabilities :- (Vec NativeId)
    known-types :- (Vec NativeId)
@@ -1086,6 +1105,8 @@
        (id-in? known-capabilities capability))]
     [(CallInstruction result function-id arguments tokens)
      (id-in? known-functions function-id)]
+    [(ExternCallInstruction result abi-id arguments arena-id tokens)
+     (id-in? known-abis abi-id)]
     [(CompareInstruction result comparison left-id right-id) true]
     [(FieldInstruction result source-id field-id) (id-in? known-owned field-id)]
     [(VariantValueInstruction result source-id variant-id)
@@ -1160,12 +1181,13 @@
   [block :- BasicBlock
    known-types :- (Vec NativeId)
    known-functions :- (Vec NativeId)
+   known-abis :- (Vec NativeId)
    known-regions :- (Vec NativeId)
    known-capabilities :- (Vec NativeId)
    known-owned :- (Vec NativeId)
    known-blocks :- (Vec NativeId)] :- Bool
   (and (parameter-types-closed? (basicblock-parameters block) known-types)
-    (every? (fn [instruction :- Instruction] :- Bool (instruction-semantic-refs-closed? instruction known-functions known-regions known-capabilities known-types known-owned))
+    (every? (fn [instruction :- Instruction] :- Bool (instruction-semantic-refs-closed? instruction known-functions known-abis known-regions known-capabilities known-types known-owned))
       (basicblock-instructions block))
     (every? (fn [terminator :- Terminator] :- Bool (terminator-block-refs-closed? terminator known-blocks))
       (basicblock-terminators block))))
@@ -1177,6 +1199,7 @@
    known-regions :- (Vec NativeId)
    known-capabilities :- (Vec NativeId)
    known-functions :- (Vec NativeId)
+   known-abis :- (Vec NativeId)
    known-owned :- (Vec NativeId)] :- Bool
   (let [blocks :- (Vec BasicBlock) (functiondef-blocks function) known-blocks :- (Vec NativeId) (basic-block-ids blocks)]
     (and (parameter-types-closed? (functiondef-parameters function) known-types)
@@ -1185,7 +1208,7 @@
       (ids-in? (functiondef-effects function) known-effects)
       (ids-in? (functiondef-regions function) known-regions)
       (ids-in? (functiondef-capabilities function) known-capabilities)
-      (every? (fn [block :- BasicBlock] :- Bool (block-reference-closed? block known-types known-functions known-regions known-capabilities known-owned known-blocks))
+      (every? (fn [block :- BasicBlock] :- Bool (block-reference-closed? block known-types known-functions known-abis known-regions known-capabilities known-owned known-blocks))
         blocks))))
 
 (defn functions-reference-closed?
@@ -1194,13 +1217,14 @@
    known-effects :- (Vec NativeId)
    known-regions :- (Vec NativeId)
    known-capabilities :- (Vec NativeId)
+   known-abis :- (Vec NativeId)
    known-owned :- (Vec NativeId)] :- Bool
   (let [known-functions :- (Vec NativeId) (function-ids functions)]
-    (every? (fn [function :- FunctionDef] :- Bool (function-reference-closed? function known-types known-effects known-regions known-capabilities known-functions known-owned))
+    (every? (fn [function :- FunctionDef] :- Bool (function-reference-closed? function known-types known-effects known-regions known-capabilities known-functions known-abis known-owned))
       functions)))
 
 (defn world-reference-closed? [world :- NativeWorld] :- Bool
-  (let [types :- (Vec TypeDef) (nativeworld-types world) effects :- (Vec EffectDef) (nativeworld-effects world) regions :- (Vec RegionDef) (nativeworld-regions world) capabilities :- (Vec CapabilityDef) (nativeworld-capabilities world) known-types :- (Vec NativeId) (type-ids types) known-effects :- (Vec NativeId) (effect-ids effects) known-regions :- (Vec NativeId) (region-ids regions) known-capabilities :- (Vec NativeId) (capability-ids capabilities) known-owned :- (Vec NativeId) (world-owned-ids world)]
+  (let [types :- (Vec TypeDef) (nativeworld-types world) effects :- (Vec EffectDef) (nativeworld-effects world) regions :- (Vec RegionDef) (nativeworld-regions world) capabilities :- (Vec CapabilityDef) (nativeworld-capabilities world) known-types :- (Vec NativeId) (type-ids types) known-effects :- (Vec NativeId) (effect-ids effects) known-regions :- (Vec NativeId) (region-ids regions) known-capabilities :- (Vec NativeId) (capability-ids capabilities) known-abis :- (Vec NativeId) (abi-ids (nativeworld-abis world)) known-owned :- (Vec NativeId) (world-owned-ids world)]
     (and (types-refs-closed? types)
       (effects-refs-closed? effects known-regions known-capabilities)
       (regions-refs-closed? regions)
@@ -1211,6 +1235,7 @@
         known-effects
         known-regions
         known-capabilities
+        known-abis
         known-owned))))
 
 (defn store-op-ssa-refs [store :- StoreOp] :- (Vec NativeId)
@@ -1264,6 +1289,8 @@
     [(AllocateInstruction result region capability byte-count-id tokens)
      [byte-count-id]]
     [(CallInstruction result function-id arguments tokens) arguments]
+    [(ExternCallInstruction result abi-id arguments arena-id tokens)
+     (if (nil? arena-id) arguments (into arguments [arena-id]))]
     [(CompareInstruction result comparison left-id right-id) [left-id right-id]]
     [(FieldInstruction result source-id field-id) [source-id]]
     [(VariantValueInstruction result source-id variant-id) [source-id]]
@@ -1383,6 +1410,7 @@
      (and (id-in? allowed-regions region)
        (id-in? allowed-capabilities capability))]
     [(CallInstruction result function-id arguments tokens) true]
+    [(ExternCallInstruction result abi-id arguments arena-id tokens) true]
     [(CompareInstruction result comparison left-id right-id) true]
     [(FieldInstruction result source-id field-id) true]
     [(VariantValueInstruction result source-id variant-id) true]

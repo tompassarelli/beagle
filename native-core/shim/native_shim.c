@@ -1762,6 +1762,50 @@ uint64_t native_text_repeat(native_arena *arena, uint64_t source,
   }
 }
 
+bool native_host_environment_lookup_v0(
+    native_arena *arena, const native_capability *capability,
+    uint64_t name, uint64_t *out) {
+  uint64_t name_length;
+  const uint8_t *name_bytes;
+  char *key;
+  const char *value;
+  size_t value_length;
+  uint8_t *destination;
+  uint64_t handle;
+
+  if ((arena == NULL) || (capability == NULL) ||
+      (capability->token == UINT64_C(0)) || (out == NULL)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  *out = UINT64_C(0);
+  name_length = native_text_length(name);
+  name_bytes = native_text_bytes(name);
+  if (name_length > (uint64_t)(SIZE_MAX - (size_t)1U)) {
+    native_trap(NATIVE_TRAP_OVERFLOW);
+  }
+  if (memchr(name_bytes, '\0', (size_t)name_length) != NULL) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  key = (char *)malloc((size_t)name_length + (size_t)1U);
+  if (key == NULL) {
+    native_trap(NATIVE_TRAP_ARENA_EXHAUSTED);
+  }
+  memcpy(key, name_bytes, (size_t)name_length);
+  key[name_length] = '\0';
+  value = getenv(key);
+  free(key);
+  if (value == NULL) {
+    return false;
+  }
+  value_length = strlen(value);
+  handle = native_text_alloc(arena, (uint64_t)value_length, &destination);
+  if (value_length != (size_t)0U) {
+    memcpy(destination, value, value_length);
+  }
+  *out = handle;
+  return true;
+}
+
 bool native_byte_read(FILE *stream, uint8_t *destination, size_t length) {
   if ((stream == NULL) || ((destination == NULL) && (length != 0U))) {
     return false;
