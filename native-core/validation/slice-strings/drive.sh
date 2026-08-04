@@ -73,6 +73,7 @@ fi
   "$repo/native-core/src/native/slice.bgl" \
   "$repo/native-core/src/native/fold_c17.bgl" \
   "$repo/native-core/src/native/body_c17.bgl" \
+  "$repo/native-core/src/native/qbe.bgl" \
   "$repo/native-core/src/native/body_slice.bgl" \
   --out "$scratch/out" >"$scratch/build.log" 2>&1 \
   || { sed -n '1,200p' "$scratch/build.log" >&2; exit 1; }
@@ -81,7 +82,7 @@ fi
 # re-exporting native.core's records into each consumer namespace is the repo's
 # standing workaround until the emitter qualifies them.
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' "$scratch/out/native/core.clj" | tr '\n' ' ')"
-for m in worlds lower obligations c11 slice fold_c17 body_c17 body_slice; do
+for m in worlds lower obligations c11 slice fold_c17 body_c17 qbe body_slice; do
   [ -f "$scratch/out/native/$m.clj" ] || continue
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' "$scratch/out/native/$m.clj"
   awk -v imp="(import '[native.core $records])" \
@@ -121,7 +122,15 @@ if ( cd "$build" && ulimit -c 0 && ./probe_gcc trap ) 2>/dev/null; then
   echo "drive.sh: the out-of-range subs did not trap" >&2
   exit 1
 fi
-echo "drive.sh: gcc $(gcc -dumpversion) strict compile + run + trap ok"
+if ( cd "$build" && ulimit -c 0 && ./probe_gcc cycle ) 2>/dev/null; then
+  echo "drive.sh: cyclic value descriptor was not refused" >&2
+  exit 1
+fi
+if ( cd "$build" && ulimit -c 0 && ./probe_gcc reference ) 2>/dev/null; then
+  echo "drive.sh: reference value descriptor was not refused" >&2
+  exit 1
+fi
+echo "drive.sh: gcc $(gcc -dumpversion) strict compile + run + refusal traps ok"
 
 find_clang() {
   if command -v clang >/dev/null 2>&1; then command -v clang; return 0; fi
@@ -134,7 +143,13 @@ clang_bin="$(find_clang || true)"
 if [ -n "$clang_bin" ]; then
   ( cd "$build" && "$clang_bin" -std=c17 -Werror -o probe_clang module_0.c native_shim.c main.c )
   ( cd "$build" && ./probe_clang )
-  echo "drive.sh: clang $("$clang_bin" -dumpversion) compile + run ok"
+  for refusal in trap cycle reference; do
+    if ( cd "$build" && ulimit -c 0 && ./probe_clang "$refusal" ) 2>/dev/null; then
+      echo "drive.sh: clang build did not trap for $refusal" >&2
+      exit 1
+    fi
+  done
+  echo "drive.sh: clang $("$clang_bin" -dumpversion) compile + run + refusal traps ok"
 else
   echo "drive.sh: clang not found — second frontend NOT exercised" >&2
 fi

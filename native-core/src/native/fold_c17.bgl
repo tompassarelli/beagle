@@ -142,6 +142,9 @@
 (defn layout-scalar? [layout: core/LayoutDef] -> Bool
   (instance? native.core.ScalarShapeV0 (core/layoutdef-shape layout)))
 
+(defn layout-bytes? [layout: core/LayoutDef] -> Bool
+  (instance? native.core.BytesShapeV0 (core/layoutdef-shape layout)))
+
 (defn layout-record? [layout: core/LayoutDef] -> Bool
   (instance? native.core.RecordShapeV0 (core/layoutdef-shape layout)))
 
@@ -151,8 +154,17 @@
 (defn layout-vector? [layout: core/LayoutDef] -> Bool
   (instance? native.core.VectorShapeV0 (core/layoutdef-shape layout)))
 
+(defn layout-map? [layout: core/LayoutDef] -> Bool
+  (instance? native.core.MapShapeV0 (core/layoutdef-shape layout)))
+
+(defn layout-set? [layout: core/LayoutDef] -> Bool
+  (instance? native.core.SetShapeV0 (core/layoutdef-shape layout)))
+
 (defn layout-reference? [layout: core/LayoutDef] -> Bool
   (instance? native.core.ReferenceShapeV0 (core/layoutdef-shape layout)))
+
+(defn layout-atom-cell? [layout: core/LayoutDef] -> Bool
+  (instance? native.core.AtomCellShapeV0 (core/layoutdef-shape layout)))
 
 (defn record-layout-fields [layout: core/LayoutDef] -> (Vec core/FieldLayoutV0)
   (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
@@ -303,10 +315,13 @@
               (layout-dependencies layout-value))]
         (cond
           (instance? native.core.AtomType shape)
-          (if (instance? native.core.ScalarShapeV0 layout-shape)
-            (scalar-backing-supported?
-              (core/scalarshapev0-representation layout-shape))
-            (instance? native.core.ReferenceShapeV0 layout-shape))
+          (let [kind: core/AtomKind (core/atomtype-kind shape)]
+            (if (instance? native.core.BytesKind kind)
+              (instance? native.core.BytesShapeV0 layout-shape)
+              (if (instance? native.core.ScalarShapeV0 layout-shape)
+                (scalar-backing-supported?
+                  (core/scalarshapev0-representation layout-shape))
+                (instance? native.core.ReferenceShapeV0 layout-shape))))
 
           (instance? native.core.RecordType shape)
           (and (layout-record? layout-value) dependencies-present)
@@ -320,7 +335,14 @@
 
           (instance? native.core.VectorType shape) (layout-vector? layout-value)
 
+          (instance? native.core.MapTypeV0 shape) (layout-map? layout-value)
+
+          (instance? native.core.SetTypeV0 shape) (layout-set? layout-value)
+
           (instance? native.core.ReferenceType shape) (layout-reference? layout-value)
+
+          (instance? native.core.AtomCellTypeV0 shape)
+          (layout-atom-cell? layout-value)
 
           :else false)))))
 
@@ -413,10 +435,22 @@
     (str "typedef " backing " " type-name-value ";\n"
       (join-lines (size-align-assertions type-name-value layout)))))
 
+(defn emit-bytes-type
+  [type-name-value: String
+   layout: core/LayoutDef] -> String
+  (str "typedef native_bytes " type-name-value ";\n"
+    (join-lines (size-align-assertions type-name-value layout))))
+
 (defn emit-reference-type
   [type-name-value: String
    layout: core/LayoutDef] -> String
   (str "typedef void *" type-name-value ";\n"
+    (join-lines (size-align-assertions type-name-value layout))))
+
+(defn emit-atom-cell-type
+  [type-name-value: String
+   layout: core/LayoutDef] -> String
+  (str "typedef native_atom *" type-name-value ";\n"
     (join-lines (size-align-assertions type-name-value layout))))
 
 ;; A vector value is a reference to a shim-owned header, so the element type
@@ -434,6 +468,36 @@
           (core/vectorshapev0-stride-bytes shape) " */\n"
           "typedef native_vec *" type-name-value ";\n"
           (join-lines (size-align-assertions type-name-value layout))))
+      "")))
+
+(defn emit-map-type
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   type-name-value: String
+   layout: core/LayoutDef] -> String
+  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+    (if (instance? native.core.MapShapeV0 shape)
+      (str "/* insertion-order map of "
+        (c-type types module-index (core/mapshapev0-key-type shape))
+        " to "
+        (c-type types module-index (core/mapshapev0-value-type shape))
+        " */\n"
+        "typedef native_map *" type-name-value ";\n"
+        (join-lines (size-align-assertions type-name-value layout)))
+      "")))
+
+(defn emit-set-type
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   type-name-value: String
+   layout: core/LayoutDef] -> String
+  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+    (if (instance? native.core.SetShapeV0 shape)
+      (str "/* insertion-order set of "
+        (c-type types module-index (core/setshapev0-element-type shape))
+        " */\n"
+        "typedef native_set *" type-name-value ";\n"
+        (join-lines (size-align-assertions type-name-value layout)))
       "")))
 
 (defn emit-record-fields
@@ -527,6 +591,7 @@
     (if (nil? layout-value)
       ""
       (cond
+        (layout-bytes? layout-value) (emit-bytes-type type-name-value layout-value)
         (layout-scalar? layout-value) (emit-atom-type type-name-value layout-value)
         (layout-record? layout-value)
         (emit-record-type types module-index type-name-value layout-value)
@@ -534,6 +599,12 @@
         (emit-union-type types module-index type-name-value layout-value)
         (layout-vector? layout-value)
         (emit-vector-type types module-index type-name-value layout-value)
+        (layout-map? layout-value)
+        (emit-map-type types module-index type-name-value layout-value)
+        (layout-set? layout-value)
+        (emit-set-type types module-index type-name-value layout-value)
+        (layout-atom-cell? layout-value)
+        (emit-atom-cell-type type-name-value layout-value)
         :else (emit-reference-type type-name-value layout-value)))))
 
 (defn emit-types

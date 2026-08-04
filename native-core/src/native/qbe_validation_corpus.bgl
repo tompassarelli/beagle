@@ -121,8 +121,9 @@
 (def slice-pair-variant: core/TypeVariant
   (core/->TypeVariant (slice-id "var-1-pair") "Some" (slice-id "type-3-par")))
 
+;; Shape sorts before Pair by identity, but its QBE definition must follow Pair's.
 (def slice-shape-type: core/TypeDef
-  (core/->TypeDef (slice-id "type-4-shp") "Shape"
+  (core/->TypeDef (slice-id "type-2-shp") "Shape"
     (core/->UnionType [slice-none-variant slice-pair-variant])))
 
 (def slice-ref-type: core/TypeDef
@@ -152,7 +153,7 @@
        (core/->FieldLayoutV0 (slice-id "fld-1-rght") (slice-id "type-0-i64") 8 8)])))
 
 (def slice-shape-layout: core/LayoutDef
-  (core/->LayoutDef (slice-id "lay-4-shp") (slice-id "type-4-shp") 24 8
+  (core/->LayoutDef (slice-id "lay-4-shp") (slice-id "type-2-shp") 24 8
     (core/->UnionShapeV0 (slice-id "type-1-tag") 0
       [(core/->UnionVariantLayoutV0 (slice-id "var-0-none") 0 nil 0)
        (core/->UnionVariantLayoutV0 (slice-id "var-1-pair") 1 (slice-id "type-3-par") 8)])))
@@ -289,7 +290,7 @@
 
 (def slice-switch-function: core/FunctionDef
   (core/->FunctionDef (slice-id "fn-2-swt") "tag"
-    [(core/->Parameter (slice-id "swt-p0-shp") (slice-id "type-4-shp"))]
+    [(core/->Parameter (slice-id "swt-p0-shp") (slice-id "type-2-shp"))]
     slice-switch-blocks
     (slice-id "swt-b0-ent")
     (slice-id "type-0-i64")
@@ -392,10 +393,10 @@
     [:types [concat-arena-type concat-vector-type slice-i64-type]
      :layouts [concat-arena-layout concat-vector-layout slice-i64-layout]]))
 
-;; --- explicit text-instruction refusals ----------------------------------
+;; --- explicit instruction refusals ---------------------------------------
 ;; Core v0 validates SSA/reference closure independently of operand semantics.
-;; Supported scalar carriers isolate these instruction gates from QBE's separate
-;; rejection of text-shaped types, so each world has exactly one refusal cause.
+;; Scalar function carriers isolate these gates from QBE's separate rejection
+;; of unsupported parameter and return shapes, so each world has one cause.
 
 (def refusal-index-block: core/BasicBlock
   (core/->BasicBlock (slice-id "ref-idx-blk")
@@ -529,6 +530,387 @@
     []
     []))
 
+(def refusal-map-type: core/TypeDef
+  (core/->TypeDef (slice-id "ref-map-typ") "RefusalMap"
+    (core/->MapTypeV0 (slice-id "type-0-i64") (slice-id "type-0-i64")
+      (core/->InsertionOrderV0 true))))
+
+(def refusal-map-layout: core/LayoutDef
+  (core/->LayoutDef (slice-id "ref-map-lay") (slice-id "ref-map-typ") 8 8
+    (core/->MapShapeV0
+      (slice-id "type-0-i64") 8 8
+      (slice-id "type-0-i64") 8 8
+      (core/->InsertionOrderV0 true))))
+
+(def refusal-map-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "ref-map-blk")
+    []
+    [(core/->MapLiteralInstructionV0
+       (core/->SsaValueV0 (slice-id "ref-map-out") (slice-id "ref-map-typ"))
+       [(slice-id "ref-map-key")]
+       [(slice-id "ref-map-val")]
+       (slice-id "ref-map-arn")
+       (core/->I64EqualityV0 true))
+     (core/->AtomInstruction
+       (core/->SsaValueV0 (slice-id "ref-map-zro") (slice-id "type-0-i64"))
+       (core/->I64Atom 0))]
+    [(core/return-terminator (slice-id "ref-map-zro"))]))
+
+(def refusal-map-function: core/FunctionDef
+  (core/->FunctionDef (slice-id "ref-map-fn") "refuse-map"
+    [(core/->Parameter (slice-id "ref-map-key") (slice-id "type-0-i64"))
+     (core/->Parameter (slice-id "ref-map-val") (slice-id "type-0-i64"))
+     (core/->Parameter (slice-id "ref-map-arn") (slice-id "type-0-i64"))]
+    [refusal-map-block]
+    (slice-id "ref-map-blk")
+    (slice-id "type-0-i64")
+    []
+    []
+    []))
+
+(def refusal-map-world: core/NativeWorld
+  (core/->NativeWorld (slice-id "ref-map-wld") nil "native-qbe-fixture-v0"
+    [slice-i64-type refusal-map-type]
+    []
+    []
+    []
+    [slice-i64-layout refusal-map-layout]
+    [refusal-map-function]
+    []
+    []
+    []
+    []
+    []))
+
+(def refusal-set-type: core/TypeDef
+  (core/->TypeDef (slice-id "ref-set-typ") "RefusalSet"
+    (core/->SetTypeV0 (slice-id "type-0-i64")
+      (core/->InsertionOrderV0 true))))
+
+(def refusal-set-layout: core/LayoutDef
+  (core/->LayoutDef (slice-id "ref-set-lay") (slice-id "ref-set-typ") 8 8
+    (core/->SetShapeV0 (slice-id "type-0-i64") 8 8
+      (core/->InsertionOrderV0 true))))
+
+(def refusal-set-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "ref-set-blk")
+    []
+    [(core/->SetLiteralInstructionV0
+       (core/->SsaValueV0 (slice-id "ref-set-out") (slice-id "ref-set-typ"))
+       [(slice-id "ref-set-val")]
+       (slice-id "ref-set-arn")
+       (core/->I64EqualityV0 true))
+     (core/->AtomInstruction
+       (core/->SsaValueV0 (slice-id "ref-set-zro") (slice-id "type-0-i64"))
+       (core/->I64Atom 0))]
+    [(core/return-terminator (slice-id "ref-set-zro"))]))
+
+(def refusal-set-function: core/FunctionDef
+  (core/->FunctionDef (slice-id "ref-set-fn") "refuse-set"
+    [(core/->Parameter (slice-id "ref-set-val") (slice-id "type-0-i64"))
+     (core/->Parameter (slice-id "ref-set-arn") (slice-id "type-0-i64"))]
+    [refusal-set-block]
+    (slice-id "ref-set-blk")
+    (slice-id "type-0-i64")
+    []
+    []
+    []))
+
+(def refusal-set-world: core/NativeWorld
+  (core/->NativeWorld (slice-id "ref-set-wld") nil "native-qbe-fixture-v0"
+    [slice-i64-type refusal-set-type]
+    []
+    []
+    []
+    [slice-i64-layout refusal-set-layout]
+    [refusal-set-function]
+    []
+    []
+    []
+    []
+    []))
+
+(def refusal-value-equal-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "ref-val-eq-blk")
+    []
+    [(core/->ValueSemanticsInstruction
+       (core/->SsaValueV0 (slice-id "ref-val-eq-out") (slice-id "type-2-bit"))
+       (core/->ValueEqualV0 (slice-id "type-3-par")
+         (slice-id "ref-val-eq-left") (slice-id "ref-val-eq-right")))]
+    [(core/return-terminator (slice-id "ref-val-eq-out"))]))
+
+(def refusal-value-equal-function: core/FunctionDef
+  (core/->FunctionDef (slice-id "ref-val-eq-fn") "refuse-value-equal"
+    [(core/->Parameter (slice-id "ref-val-eq-left") (slice-id "type-3-par"))
+     (core/->Parameter (slice-id "ref-val-eq-right") (slice-id "type-3-par"))]
+    [refusal-value-equal-block]
+    (slice-id "ref-val-eq-blk")
+    (slice-id "type-2-bit")
+    []
+    []
+    []))
+
+(def refusal-value-equal-world: core/NativeWorld
+  (core/->NativeWorld (slice-id "ref-val-eq-wld") nil "native-qbe-fixture-v0"
+    [slice-i64-type slice-bool-type slice-pair-type]
+    []
+    []
+    []
+    [slice-i64-layout slice-bool-layout slice-pair-layout]
+    [refusal-value-equal-function]
+    []
+    []
+    []
+    []
+    []))
+
+(def refusal-value-text-type: core/TypeDef
+  (core/->TypeDef (slice-id "ref-val-txt-typ") "Text"
+    (core/->AtomType (core/->TextKind true))))
+
+(def refusal-value-text-layout: core/LayoutDef
+  (core/->LayoutDef (slice-id "ref-val-txt-lay")
+    (slice-id "ref-val-txt-typ") 8 8
+    (core/->ScalarShapeV0 (core/->UnsignedIntReprV0 64))))
+
+(def refusal-value-to-text-block: core/BasicBlock
+  (core/->BasicBlock (slice-id "ref-val-txt-blk")
+    []
+    [(core/->ArenaInstruction
+       (core/->SsaValueV0 (slice-id "ref-val-txt-arn") (slice-id "vec-typ-arn"))
+       (slice-id "reg-0-arena")
+       (slice-id "cap-0-alloc")
+       (core/->TokenFlowV0
+         [(slice-id "reg-0-arena") (slice-id "cap-0-alloc")]
+         []))
+     (core/->ValueToTextInstructionV0
+       (core/->SsaValueV0 (slice-id "ref-val-txt-out")
+         (slice-id "ref-val-txt-typ"))
+       (core/->ValuePrStrV0 true)
+       (slice-id "type-0-i64")
+       (slice-id "ref-val-txt-val")
+       (slice-id "ref-val-txt-arn"))]
+    [(core/return-terminator (slice-id "ref-val-txt-out"))]))
+
+(def refusal-value-to-text-function: core/FunctionDef
+  (core/->FunctionDef (slice-id "ref-val-txt-fn") "refuse-value-to-text"
+    [(core/->Parameter (slice-id "ref-val-txt-val") (slice-id "type-0-i64"))]
+    [refusal-value-to-text-block]
+    (slice-id "ref-val-txt-blk")
+    (slice-id "ref-val-txt-typ")
+    [(slice-id "eff-0-alloc")]
+    [(slice-id "reg-0-arena")]
+    [(slice-id "cap-0-alloc")]))
+
+(def refusal-value-to-text-world: core/NativeWorld
+  (core/->NativeWorld (slice-id "ref-val-txt-wld") nil "native-qbe-fixture-v0"
+    [slice-i64-type refusal-value-text-type concat-arena-type]
+    [slice-alloc-effect]
+    [slice-region]
+    [slice-alloc-capability]
+    [slice-i64-layout refusal-value-text-layout concat-arena-layout]
+    [refusal-value-to-text-function]
+    [(slice-id "eff-0-alloc")]
+    [(slice-id "reg-0-arena")]
+    [(slice-id "cap-0-alloc")]
+    []
+    []))
+
+;; --- Atom state world ----------------------------------------------------
+;; This fixture is materialized by validation/atom through C17. QBE must reject
+;; the same sealed world until it has a lock-aware state calling convention.
+
+(defn atom-fixture-id [name: String] -> core/NativeId
+  (core/canonical-id "native-atom-fixture-v0" [name]))
+
+(def atom-i64-type: core/TypeDef
+  (core/->TypeDef (atom-fixture-id "type-i64") "I64"
+    (core/->AtomType (core/->I64Kind true))))
+
+(def atom-cell-type: core/TypeDef
+  (core/->TypeDef (atom-fixture-id "type-cell") "AtomCell"
+    (core/->AtomCellTypeV0 (atom-fixture-id "type-i64"))))
+
+(def atom-state-type: core/TypeDef
+  (core/->TypeDef (atom-fixture-id "type-state") "AtomStateHandle"
+    (core/->ReferenceType (atom-fixture-id "type-state"))))
+
+(def atom-arena-type: core/TypeDef
+  (core/->TypeDef (atom-fixture-id "type-arena") "ArenaHandle"
+    (core/->ReferenceType (atom-fixture-id "type-arena"))))
+
+(def atom-i64-layout: core/LayoutDef
+  (core/->LayoutDef (atom-fixture-id "layout-i64")
+    (atom-fixture-id "type-i64") 8 8
+    (core/->ScalarShapeV0 (core/->SignedIntReprV0 64))))
+
+(def atom-cell-layout: core/LayoutDef
+  (core/->LayoutDef (atom-fixture-id "layout-cell")
+    (atom-fixture-id "type-cell") 8 8
+    (core/->AtomCellShapeV0 (atom-fixture-id "type-i64"))))
+
+(def atom-state-layout: core/LayoutDef
+  (core/->LayoutDef (atom-fixture-id "layout-state")
+    (atom-fixture-id "type-state") 8 8
+    (core/->ReferenceShapeV0 (atom-fixture-id "type-state"))))
+
+(def atom-arena-layout: core/LayoutDef
+  (core/->LayoutDef (atom-fixture-id "layout-arena")
+    (atom-fixture-id "type-arena") 8 8
+    (core/->ReferenceShapeV0 (atom-fixture-id "type-arena"))))
+
+(def atom-arena-region: core/RegionDef
+  (core/->RegionDef (atom-fixture-id "region-arena")
+    (core/->ArenaRegion true) nil))
+
+(def atom-state-region: core/RegionDef
+  (core/->RegionDef (atom-fixture-id "region-state")
+    (core/->ExternalRegion true) nil))
+
+(def atom-allocate-capability: core/CapabilityDef
+  (core/->CapabilityDef (atom-fixture-id "cap-allocate")
+    (core/->AllocateCapability true) (atom-fixture-id "region-arena") true))
+
+(def atom-state-capability: core/CapabilityDef
+  (core/->CapabilityDef (atom-fixture-id "cap-state")
+    (core/->WriteCapability true) (atom-fixture-id "region-state") true))
+
+(def atom-pure-effect: core/EffectDef
+  (core/->EffectDef (atom-fixture-id "effect-pure")
+    (core/->PureEffect true)))
+
+(def atom-allocate-effect: core/EffectDef
+  (core/->EffectDef (atom-fixture-id "effect-allocate")
+    (core/->AllocateEffect (atom-fixture-id "region-arena"))))
+
+(def atom-state-effect: core/EffectDef
+  (core/->EffectDef (atom-fixture-id "effect-state")
+    (core/->AtomicEffect (atom-fixture-id "region-state")
+      (atom-fixture-id "cap-state"))))
+
+(def atom-updater-function: core/FunctionDef
+  (core/->FunctionDef (atom-fixture-id "fn-0-upd") "replace-value"
+    [(core/->Parameter (atom-fixture-id "upd-current")
+       (atom-fixture-id "type-i64"))
+     (core/->Parameter (atom-fixture-id "upd-next")
+       (atom-fixture-id "type-i64"))]
+    [(core/->BasicBlock (atom-fixture-id "block-upd") []
+       [(core/->CopyInstruction
+          (core/->SsaValueV0 (atom-fixture-id "upd-result")
+            (atom-fixture-id "type-i64"))
+          (atom-fixture-id "upd-next"))]
+       [(core/->ReturnTerminator (atom-fixture-id "upd-result"))])]
+    (atom-fixture-id "block-upd")
+    (atom-fixture-id "type-i64")
+    [(atom-fixture-id "effect-pure")]
+    []
+    []))
+
+(def atom-create-function: core/FunctionDef
+  (core/->FunctionDef (atom-fixture-id "fn-1-new") "new-atom"
+    [(core/->Parameter (atom-fixture-id "new-initial")
+       (atom-fixture-id "type-i64"))]
+    [(core/->BasicBlock (atom-fixture-id "block-new") []
+       [(core/->AtomStateInstruction
+          (core/->SsaValueV0 (atom-fixture-id "new-state")
+            (atom-fixture-id "type-state"))
+          (atom-fixture-id "region-state")
+          (atom-fixture-id "cap-state")
+          (core/->TokenFlowV0
+            [(atom-fixture-id "region-state") (atom-fixture-id "cap-state")]
+            []))
+        (core/->ArenaInstruction
+          (core/->SsaValueV0 (atom-fixture-id "new-arena")
+            (atom-fixture-id "type-arena"))
+          (atom-fixture-id "region-arena")
+          (atom-fixture-id "cap-allocate")
+          (core/->TokenFlowV0
+            [(atom-fixture-id "region-arena")
+             (atom-fixture-id "cap-allocate")]
+            []))
+        (core/->AtomCreateInstruction
+          (core/->SsaValueV0 (atom-fixture-id "new-result")
+            (atom-fixture-id "type-cell"))
+          (atom-fixture-id "new-initial")
+          (atom-fixture-id "new-arena")
+          (atom-fixture-id "new-state"))]
+       [(core/->ReturnTerminator (atom-fixture-id "new-result"))])]
+    (atom-fixture-id "block-new")
+    (atom-fixture-id "type-cell")
+    [(atom-fixture-id "effect-allocate") (atom-fixture-id "effect-state")]
+    [(atom-fixture-id "region-arena") (atom-fixture-id "region-state")]
+    [(atom-fixture-id "cap-allocate") (atom-fixture-id "cap-state")]))
+
+(def atom-deref-function: core/FunctionDef
+  (core/->FunctionDef (atom-fixture-id "fn-2-get") "deref-atom"
+    [(core/->Parameter (atom-fixture-id "get-cell")
+       (atom-fixture-id "type-cell"))]
+    [(core/->BasicBlock (atom-fixture-id "block-get") []
+       [(core/->AtomStateInstruction
+          (core/->SsaValueV0 (atom-fixture-id "get-state")
+            (atom-fixture-id "type-state"))
+          (atom-fixture-id "region-state")
+          (atom-fixture-id "cap-state")
+          (core/->TokenFlowV0
+            [(atom-fixture-id "region-state") (atom-fixture-id "cap-state")]
+            []))
+        (core/->AtomDerefInstruction
+          (core/->SsaValueV0 (atom-fixture-id "get-result")
+            (atom-fixture-id "type-i64"))
+          (atom-fixture-id "get-cell")
+          (atom-fixture-id "get-state"))]
+       [(core/->ReturnTerminator (atom-fixture-id "get-result"))])]
+    (atom-fixture-id "block-get")
+    (atom-fixture-id "type-i64")
+    [(atom-fixture-id "effect-state")]
+    [(atom-fixture-id "region-state")]
+    [(atom-fixture-id "cap-state")]))
+
+(def atom-swap-function: core/FunctionDef
+  (core/->FunctionDef (atom-fixture-id "fn-3-swp") "swap-atom"
+    [(core/->Parameter (atom-fixture-id "swp-cell")
+       (atom-fixture-id "type-cell"))
+     (core/->Parameter (atom-fixture-id "swp-next")
+       (atom-fixture-id "type-i64"))]
+    [(core/->BasicBlock (atom-fixture-id "block-swp") []
+       [(core/->AtomStateInstruction
+          (core/->SsaValueV0 (atom-fixture-id "swp-state")
+            (atom-fixture-id "type-state"))
+          (atom-fixture-id "region-state")
+          (atom-fixture-id "cap-state")
+          (core/->TokenFlowV0
+            [(atom-fixture-id "region-state") (atom-fixture-id "cap-state")]
+            []))
+        (core/->AtomSwapInstruction
+          (core/->SsaValueV0 (atom-fixture-id "swp-result")
+            (atom-fixture-id "type-i64"))
+          (atom-fixture-id "swp-cell")
+          (atom-fixture-id "swp-state")
+          (atom-fixture-id "fn-0-upd")
+          [(atom-fixture-id "swp-next")])]
+       [(core/->ReturnTerminator (atom-fixture-id "swp-result"))])]
+    (atom-fixture-id "block-swp")
+    (atom-fixture-id "type-i64")
+    [(atom-fixture-id "effect-state")]
+    [(atom-fixture-id "region-state")]
+    [(atom-fixture-id "cap-state")]))
+
+(def atom-world: core/NativeWorld
+  (core/->NativeWorld (atom-fixture-id "world") nil "native-atom-fixture-v0"
+    [atom-i64-type atom-cell-type atom-state-type atom-arena-type]
+    [atom-pure-effect atom-allocate-effect atom-state-effect]
+    [atom-arena-region atom-state-region]
+    [atom-allocate-capability atom-state-capability]
+    [atom-i64-layout atom-cell-layout atom-state-layout atom-arena-layout]
+    [atom-updater-function atom-create-function atom-deref-function
+     atom-swap-function]
+    [(atom-fixture-id "effect-pure") (atom-fixture-id "effect-allocate")
+     (atom-fixture-id "effect-state")]
+    [(atom-fixture-id "region-arena") (atom-fixture-id "region-state")]
+    [(atom-fixture-id "cap-allocate") (atom-fixture-id "cap-state")]
+    []
+    []))
+
 ;; --- materialization ------------------------------------------------------
 
 (defn require-artifact [result: qbe/QbeMaterialization] -> qbe/QbeArtifact
@@ -556,6 +938,31 @@
 (def refusal-text-builtin-proven?: Bool
   (explicitly-refused? refusal-text-builtin-world))
 
+(def refusal-map-proven?: Bool
+  (explicitly-refused? refusal-map-world))
+
+(def refusal-set-proven?: Bool
+  (explicitly-refused? refusal-set-world))
+
+(def refusal-value-equal-proven?: Bool
+  (and (core/validationreport-passed
+         (core/validate-world refusal-value-equal-world))
+    (match (qbe/materialize-world refusal-value-equal-world 3)
+      [(QbeSuccess value) false]
+      [(QbeFailure value)
+       (= "unsupported native value-semantics op: equal" value)])))
+
+(def refusal-value-to-text-proven?: Bool
+  (and (core/validationreport-passed
+         (core/validate-world refusal-value-to-text-world))
+    (match (qbe/materialize-world refusal-value-to-text-world 3)
+      [(QbeSuccess value) false]
+      [(QbeFailure value)
+       (= "unsupported native value-semantics op: to-text" value)])))
+
+(def atom-refusal-proven?: Bool
+  (explicitly-refused? atom-world))
+
 (def fixture-artifact: qbe/QbeArtifact
   (require-artifact (qbe/materialize-world fixture-world 0)))
 
@@ -579,6 +986,11 @@
     refusal-blank-proven?
     refusal-parse-proven?
     refusal-text-builtin-proven?
+    refusal-map-proven?
+    refusal-set-proven?
+    refusal-value-equal-proven?
+    refusal-value-to-text-proven?
+    atom-refusal-proven?
     (= (qbe/qbeartifact-module-text fixture-artifact)
          (qbe/qbeartifact-module-text fixture-permuted-artifact))
     (= (qbe/qbeartifact-module-text slice-artifact)

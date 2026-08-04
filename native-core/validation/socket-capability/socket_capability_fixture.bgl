@@ -1,0 +1,162 @@
+(ns native.socket-capability-fixture)
+
+(define-mode strict)
+
+(require native.core :as core)
+(require native.lower :as lower)
+(require native.obligations :as obligations)
+(require native.body-c17 :as body)
+(require native.qbe :as qbe)
+
+(defn fixture-id [name: String] -> core/NativeId
+  (core/canonical-id "native-socket-capability-fixture-v0" [name]))
+
+(defn fixture-types [] -> (Vec core/TypeDef)
+  (lower/append-type-defs
+    [(lower/lower-failure-type)
+     (lower/arena-handle-type)
+     (lower/union-tag-type)]
+    (lower/socket-outcome-types)))
+
+(defn fixture-effects [] -> (Vec core/EffectDef)
+  [(core/->EffectDef (lower/allocate-effect-id)
+     (core/->AllocateEffect (lower/arena-region-id)))
+   (core/->EffectDef (lower/host-socket-effect-id)
+     (core/->SocketEffect (lower/host-socket-capability-id)))])
+
+(defn fixture-regions [] -> (Vec core/RegionDef)
+  [(core/->RegionDef (lower/arena-region-id) (core/->ArenaRegion true) nil)])
+
+(defn fixture-capabilities [] -> (Vec core/CapabilityDef)
+  [(core/->CapabilityDef
+     (lower/allocate-capability-id)
+     (core/->AllocateCapability true)
+     (lower/arena-region-id)
+     true)
+   (core/->CapabilityDef
+     (lower/host-socket-capability-id)
+     (core/->HostCapability true)
+     nil
+     false)])
+
+(defn fixture-function [] -> core/FunctionDef
+  (let [function-id: core/NativeId (fixture-id "function")
+        block-id: core/NativeId (fixture-id "entry")
+        fd: core/NativeId (fixture-id "fd")
+        bound: core/NativeId (fixture-id "bound")
+        bytes: core/NativeId (fixture-id "bytes")
+        arena: core/NativeId (fixture-id "arena")
+        inherited: core/NativeId (fixture-id "inherited")
+        accepted: core/NativeId (fixture-id "accepted")
+        read: core/NativeId (fixture-id "read")
+        written: core/NativeId (fixture-id "written")
+        closed: core/NativeId (fixture-id "closed")]
+    (core/->FunctionDef
+      function-id
+      "socket-capability-fixture"
+      [(core/->Parameter fd (lower/type-id "Int"))
+       (core/->Parameter bound (lower/type-id "Int"))
+       (core/->Parameter bytes (lower/bytes-type-id))]
+      [(core/->BasicBlock
+         block-id
+         []
+         [(core/->ArenaInstruction
+            (core/->SsaValueV0 arena (lower/arena-handle-type-id))
+            (lower/arena-region-id)
+            (lower/allocate-capability-id)
+            (core/->TokenFlowV0
+              [(lower/arena-region-id) (lower/allocate-capability-id)] []))
+          (core/->ExternCallInstruction
+            (core/->SsaValueV0 inherited
+              (lower/socket-int-outcome-type-id))
+            (lower/host-socket-abi-id "inherited-listener")
+            [fd] nil (core/->TokenFlowV0 [] []))
+          (core/->ExternCallInstruction
+            (core/->SsaValueV0 accepted
+              (lower/socket-int-outcome-type-id))
+            (lower/host-socket-abi-id "accept")
+            [fd] nil (core/->TokenFlowV0 [] []))
+          (core/->ExternCallInstruction
+            (core/->SsaValueV0 read
+              (lower/socket-bytes-outcome-type-id))
+            (lower/host-socket-abi-id "read-bounded")
+            [fd bound] arena (core/->TokenFlowV0 [] []))
+          (core/->ExternCallInstruction
+            (core/->SsaValueV0 written
+              (lower/socket-int-outcome-type-id))
+            (lower/host-socket-abi-id "write-bounded")
+            [fd bytes bound] nil (core/->TokenFlowV0 [] []))
+          (core/->ExternCallInstruction
+            (core/->SsaValueV0 closed
+              (lower/socket-close-outcome-type-id))
+            (lower/host-socket-abi-id "close")
+            [fd] nil (core/->TokenFlowV0 [] []))]
+         [(core/->ReturnTerminator closed)])]
+      block-id
+      (lower/socket-close-outcome-type-id)
+      [(lower/allocate-effect-id) (lower/host-socket-effect-id)]
+      [(lower/arena-region-id)]
+      [(lower/allocate-capability-id) (lower/host-socket-capability-id)])))
+
+(defn fixture-world [] -> core/NativeWorld
+  (let [types: (Vec core/TypeDef) (fixture-types)
+        layouts: (Vec core/LayoutDef)
+        (lower/collect-layouts (lower/resolve-layouts types))
+        effects: (Vec core/EffectDef) (fixture-effects)
+        regions: (Vec core/RegionDef) (fixture-regions)
+        capabilities: (Vec core/CapabilityDef) (fixture-capabilities)]
+    (core/->NativeWorld
+      (fixture-id "world") nil "socket-capability-fixture-v0"
+      types effects regions capabilities layouts
+      [(fixture-function)]
+      [(lower/allocate-effect-id) (lower/host-socket-effect-id)]
+      [(lower/arena-region-id)]
+      [(lower/allocate-capability-id) (lower/host-socket-capability-id)]
+      (lower/host-socket-abis (lower/layout-digest layouts))
+      [])))
+
+(defn obligations-pass? [world: core/NativeWorld] -> Bool
+  (every? obligations/obligation-passed?
+    (obligations/validate-native-world world)))
+
+(defn qbe-detail [result: qbe/QbeMaterialization] -> String
+  (if (instance? native.qbe.QbeFailure result)
+    (qbe/qbefailure-detail result)
+    "unexpected success"))
+
+(defn emit-fixture! [artifacts-dir: String] -> String
+  (let [world: core/NativeWorld (fixture-world)
+        c-result: body/BodyMaterializationV0 (body/materialize-world world 0)
+        qbe-result: qbe/QbeMaterialization (qbe/materialize-world world 0)]
+    (if (or (not (obligations-pass? world))
+            (not (body/materialization-ok? c-result)))
+      (str "fixture REFUSED " (body/materialization-detail c-result) "\n"
+        "valid-ssa "
+        (str (obligations/obligation-passed? (obligations/valid-ssa world))) "\n"
+        "exhaustive "
+        (str (obligations/obligation-passed?
+          (obligations/exhaustive-matches world))) "\n"
+        "layouts "
+        (str (obligations/obligation-passed?
+          (obligations/closed-layouts world))) "\n"
+        "checked "
+        (str (obligations/obligation-passed?
+          (obligations/checked-arithmetic world))) "\n"
+        "abi "
+        (str (obligations/obligation-passed? (obligations/legal-abi world))) "\n"
+        "tokens "
+        (str (obligations/obligation-passed?
+          (obligations/discharged-tokens world))) "\n"
+        "effects "
+        (str (obligations/obligation-passed?
+          (obligations/bounded-effects world))) "\n")
+      (let [artifact: body/BodyArtifactV0
+            (body/materialization-artifact c-result)]
+        (do
+          (spit (str artifacts-dir "/" (body/bodyartifactv0-header-name artifact))
+            (body/bodyartifactv0-header-text artifact))
+          (spit (str artifacts-dir "/" (body/bodyartifactv0-source-name artifact))
+            (body/bodyartifactv0-source-text artifact))
+          (str "fixture PASS\n"
+            "abis " (str (count (core/nativeworld-abis world))) "\n"
+            "qbe REFUSED " (qbe-detail qbe-result) "\n"))))))

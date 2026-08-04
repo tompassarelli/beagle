@@ -4,14 +4,14 @@
 
 (defrecord NativeId [value :- String])
 
-;; TextKind and KeywordKind are both 64-bit handles but never one kind: Text
-;; identity is byte equality (CompareEqText), Keyword identity is table index
-;; equality (CompareEqI64), and only the kind distinguishes them.
+;; TextKind and KeywordKind are 64-bit handles. BytesKind is an owned byte span;
+;; it remains distinct because bounded socket reads need not end on UTF-8 edges.
 (defunion AtomKind
   (BoolKind [token :- Bool])
   (I64Kind [token :- Bool])
   (F64Kind [token :- Bool])
   (TextKind [token :- Bool])
+  (BytesKind [token: Bool])
   (KeywordKind [token :- Bool])
   (RefKind [target :- NativeId]))
 
@@ -36,6 +36,16 @@
 (defunion CollectionOrderV0
   (InsertionOrderV0 [token: Bool]))
 
+;; Collection lookup equality is closed over concrete native scalars. Dyn/Any
+;; descriptors extend this vocabulary elsewhere; ordinary Map/Set ops never
+;; smuggle a host hash or equality callback through the runtime ABI.
+(defunion ConcreteEqualityV0
+  (BoolEqualityV0 [token: Bool])
+  (I64EqualityV0 [token: Bool])
+  (F64EqualityV0 [token: Bool])
+  (TextEqualityV0 [token: Bool])
+  (KeywordEqualityV0 [token: Bool]))
+
 (defunion TypeShape
   (AtomType [kind :- AtomKind])
   (RecordType [fields :- (Vec TypeField)])
@@ -49,6 +59,9 @@
     [element-type: NativeId
      iteration-order: CollectionOrderV0])
   (ReferenceType [target-type :- NativeId])
+  ;; An Atom is an opaque identity-bearing cell, never a general reference.
+  ;; Its content type fixes the byte layout copied under the state token.
+  (AtomCellTypeV0 [content-type :- NativeId])
   ;; A closed callable signature is semantic type information only. Physical
   ;; closure layout and indirect-call ABI remain separate, explicit obligations.
   (FunctionType
@@ -123,6 +136,7 @@
 
 (defunion LayoutShapeV0
   (ScalarShapeV0 [representation: ScalarReprV0])
+  (BytesShapeV0 [token: Bool])
   (RecordShapeV0 [fields: (Vec FieldLayoutV0)])
   (UnionShapeV0
     [tag-type: NativeId
@@ -149,7 +163,8 @@
      stride-bytes: Int
      align-bytes: Int
      iteration-order: CollectionOrderV0])
-  (ReferenceShapeV0 [target-type: NativeId]))
+  (ReferenceShapeV0 [target-type: NativeId])
+  (AtomCellShapeV0 [content-type: NativeId]))
 
 (defrecord LayoutDef
   [id: NativeId
@@ -235,6 +250,18 @@
      source-id: NativeId
      count-id: NativeId]))
 
+;; Value semantics are closed over one sealed TypeDef/LayoutDef graph. The
+;; domain is explicit so materializers never infer dynamic behavior from bytes.
+(defunion ValueSemanticsOpV0
+  (ValueEqualV0
+    [domain-type: NativeId
+     left-id: NativeId
+     right-id: NativeId]))
+
+(defunion ValueTextModeV0
+  (ValueStrV0 [token: Bool])
+  (ValuePrStrV0 [token: Bool]))
+
 (defunion ResourceTokenKindV0
   (RegionTokenV0 [region: NativeId])
   (CapabilityTokenV0 [capability: NativeId]))
@@ -302,6 +329,14 @@
     [result: SsaValueV0
      function-id: NativeId
      arguments: (Vec NativeId)
+     tokens: TokenFlowV0])
+  ;; The ABI declaration, rather than a source-language callee name, owns the
+  ;; physical symbol, effects, capabilities, ownership, and failure contract.
+  (ExternCallInstruction
+    [result: SsaValueV0
+     abi-id: NativeId
+     arguments: (Vec NativeId)
+     arena-id: (U NativeId Nil)
      tokens: TokenFlowV0])
   (CompareInstruction
     [result: SsaValueV0
@@ -373,10 +408,75 @@
     [result: SsaValueV0
      key-ids: (Vec NativeId)
      value-ids: (Vec NativeId)
-     arena-id: NativeId])
+     arena-id: NativeId
+     key-equality: ConcreteEqualityV0])
   (SetLiteralInstructionV0
     [result: SsaValueV0
      value-ids: (Vec NativeId)
+     arena-id: NativeId
+     element-equality: ConcreteEqualityV0])
+  (MapCountInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId])
+  ;; With a default, result is the map value type. Without one it is either an
+  ;; existing nullable value union or a closed value-or-nil union.
+  (MapGetInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     key-id: NativeId
+     default-id: (U NativeId Nil)
+     key-equality: ConcreteEqualityV0])
+  (MapContainsInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     key-id: NativeId
+     key-equality: ConcreteEqualityV0])
+  ;; Assoc/dissoc are persistent linear updates. Replacement keeps its original
+  ;; iteration position; deletion compacts without reordering survivors.
+  (MapAssocInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     key-id: NativeId
+     value-id: NativeId
+     arena-id: NativeId
+     key-equality: ConcreteEqualityV0])
+  (MapDissocInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     key-id: NativeId
+     arena-id: NativeId
+     key-equality: ConcreteEqualityV0])
+  (MapKeysInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     arena-id: NativeId])
+  (MapValuesInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     arena-id: NativeId])
+  (SetCountInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId])
+  (SetContainsInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     value-id: NativeId
+     element-equality: ConcreteEqualityV0])
+  (SetConjInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     value-id: NativeId
+     arena-id: NativeId
+     element-equality: ConcreteEqualityV0])
+  (SetDisjInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     value-id: NativeId
+     arena-id: NativeId
+     element-equality: ConcreteEqualityV0])
+  (SetVectorInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
      arena-id: NativeId])
   ;; Acquires the arena once in the entry block, consuming the region and
   ;; capability tokens; no other instruction can allocate without its result.
@@ -385,6 +485,30 @@
      region: NativeId
      capability: NativeId
      tokens: TokenFlowV0])
+  ;; Acquires the dedicated Atom-state token once at function entry. Atom
+  ;; operations must carry this SSA handle, so state cannot be implicit.
+  (AtomStateInstruction
+    [result: SsaValueV0
+     region: NativeId
+     capability: NativeId
+     tokens: TokenFlowV0])
+  (AtomCreateInstruction
+    [result: SsaValueV0
+     initial-id: NativeId
+     arena-id: NativeId
+     state-id: NativeId])
+  (AtomDerefInstruction
+    [result: SsaValueV0
+     cell-id: NativeId
+     state-id: NativeId])
+  ;; swap! is deliberately not a general higher-order call: updater-id names a
+  ;; statically sealed pure function and arguments excludes the current value.
+  (AtomSwapInstruction
+    [result: SsaValueV0
+     cell-id: NativeId
+     state-id: NativeId
+     updater-id: NativeId
+     arguments: (Vec NativeId)])
   (TextLengthInstruction
     [result: SsaValueV0
      source-id: NativeId])
@@ -417,7 +541,17 @@
      operand-ids: (Vec NativeId)])
   (TextBuiltinInstruction
     [result: SsaValueV0
-     builtin: TextBuiltinOpV0]))
+     builtin: TextBuiltinOpV0])
+  (ValueSemanticsInstruction
+    [result: SsaValueV0
+     operation: ValueSemanticsOpV0])
+  ;; Stringification stays separate from TextConcat's statically tagged operands.
+  (ValueToTextInstructionV0
+    [result: SsaValueV0
+     mode: ValueTextModeV0
+     domain-type: NativeId
+     value-id: NativeId
+     arena-id: NativeId]))
 
 (defrecord SwitchCaseV0
   [variant-id: NativeId
@@ -514,7 +648,13 @@
   (AbiExportV0 [token: Bool]))
 
 (defunion AbiConventionV0
-  (RestrictedCAbiV0 [token: Bool]))
+  (RestrictedCAbiV0 [token: Bool])
+  ;; A restricted C import returns presence and writes the one non-unit union
+  ;; payload through a trailing pointer; the world result stays a closed union.
+  (RestrictedCOptionalOutAbiV0 [token: Bool])
+  ;; Zero means success, -1 means peer-closed, and a positive return is copied
+  ;; into `error` as errno; a non-unit `ok` payload is a trailing out pointer.
+  (RestrictedCOutcomeOutAbiV0 [token: Bool]))
 
 (defunion OwnershipRuleV0
   (BorrowedV0 [token: Bool])
@@ -642,6 +782,8 @@
     [(AllocateInstruction result region capability byte-count-id tokens)
      (ssavaluev0-id result)]
     [(CallInstruction result function-id arguments tokens) (ssavaluev0-id result)]
+    [(ExternCallInstruction result abi-id arguments arena-id tokens)
+     (ssavaluev0-id result)]
     [(CompareInstruction result comparison left-id right-id) (ssavaluev0-id result)]
     [(FieldInstruction result source-id field-id) (ssavaluev0-id result)]
     [(VariantValueInstruction result source-id variant-id) (ssavaluev0-id result)]
@@ -658,11 +800,37 @@
     [(VecEmptyInstruction result capacity-id arena-id) (ssavaluev0-id result)]
     [(VecConcatInstruction result left-id right-id arena-id)
      (ssavaluev0-id result)]
-    [(MapLiteralInstructionV0 result key-ids value-ids arena-id)
+    [(MapLiteralInstructionV0 result key-ids value-ids arena-id key-equality)
      (ssavaluev0-id result)]
-    [(SetLiteralInstructionV0 result value-ids arena-id)
+    [(SetLiteralInstructionV0 result value-ids arena-id element-equality)
      (ssavaluev0-id result)]
+    [(MapCountInstructionV0 result source-id) (ssavaluev0-id result)]
+    [(MapGetInstructionV0 result source-id key-id default-id key-equality)
+     (ssavaluev0-id result)]
+    [(MapContainsInstructionV0 result source-id key-id key-equality)
+     (ssavaluev0-id result)]
+    [(MapAssocInstructionV0 result source-id key-id value-id arena-id key-equality)
+     (ssavaluev0-id result)]
+    [(MapDissocInstructionV0 result source-id key-id arena-id key-equality)
+     (ssavaluev0-id result)]
+    [(MapKeysInstructionV0 result source-id arena-id) (ssavaluev0-id result)]
+    [(MapValuesInstructionV0 result source-id arena-id) (ssavaluev0-id result)]
+    [(SetCountInstructionV0 result source-id) (ssavaluev0-id result)]
+    [(SetContainsInstructionV0 result source-id value-id element-equality)
+     (ssavaluev0-id result)]
+    [(SetConjInstructionV0 result source-id value-id arena-id element-equality)
+     (ssavaluev0-id result)]
+    [(SetDisjInstructionV0 result source-id value-id arena-id element-equality)
+     (ssavaluev0-id result)]
+    [(SetVectorInstructionV0 result source-id arena-id) (ssavaluev0-id result)]
     [(ArenaInstruction result region capability tokens) (ssavaluev0-id result)]
+    [(AtomStateInstruction result region capability tokens)
+     (ssavaluev0-id result)]
+    [(AtomCreateInstruction result initial-id arena-id state-id)
+     (ssavaluev0-id result)]
+    [(AtomDerefInstruction result cell-id state-id) (ssavaluev0-id result)]
+    [(AtomSwapInstruction result cell-id state-id updater-id arguments)
+     (ssavaluev0-id result)]
     [(TextLengthInstruction result source-id) (ssavaluev0-id result)]
     [(TextIndexOfInstruction result source-id needle-id) (ssavaluev0-id result)]
     [(TextBlankInstruction result source-id) (ssavaluev0-id result)]
@@ -670,7 +838,10 @@
     [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
      (ssavaluev0-id result)]
     [(TextConcatInstruction result arena-id operand-ids) (ssavaluev0-id result)]
-    [(TextBuiltinInstruction result operation) (ssavaluev0-id result)]))
+    [(TextBuiltinInstruction result operation) (ssavaluev0-id result)]
+    [(ValueSemanticsInstruction result operation) (ssavaluev0-id result)]
+    [(ValueToTextInstructionV0 result mode domain-type value-id arena-id)
+     (ssavaluev0-id result)]))
 
 (defn instruction-result-ids [instructions :- (Vec Instruction)] :- (Vec NativeId)
   (mapv (fn [instruction :- Instruction] :- NativeId (instruction-result-id instruction))
@@ -688,6 +859,7 @@
     [(MapTypeV0 key-type value-type iteration-order) []]
     [(SetTypeV0 element-type iteration-order) []]
     [(ReferenceType target-type) []]
+    [(AtomCellTypeV0 content-type) []]
     [(FunctionType parameter-types rest-type return-type) []]
     [(OutcomeType value-type failure-type) []]))
 
@@ -743,9 +915,14 @@
   (mapv (fn [function :- FunctionDef] :- NativeId (functiondef-id function))
     functions))
 
+(defn abi-ids [abis :- (Vec AbiDeclV0)] :- (Vec NativeId)
+  (mapv (fn [abi :- AbiDeclV0] :- NativeId (abideclv0-id abi)) abis))
+
 (defn world-owned-ids [world :- NativeWorld] :- (Vec NativeId)
   (let [owned0 :- (Vec NativeId) [(nativeworld-id world)] owned1 :- (Vec NativeId) (append-ids owned0 (all-type-owned-ids (nativeworld-types world))) owned2 :- (Vec NativeId) (append-ids owned1 (effect-ids (nativeworld-effects world))) owned3 :- (Vec NativeId) (append-ids owned2 (region-ids (nativeworld-regions world))) owned4 :- (Vec NativeId) (append-ids owned3 (capability-ids (nativeworld-capabilities world))) owned5 :- (Vec NativeId) (append-ids owned4 (layout-ids (nativeworld-layouts world)))]
-    (append-ids owned5 (all-function-owned-ids (nativeworld-functions world)))))
+    (append-ids
+      (append-ids owned5 (all-function-owned-ids (nativeworld-functions world)))
+      (abi-ids (nativeworld-abis world)))))
 
 (defn type-member-ids [types :- (Vec TypeDef)] :- (Vec NativeId)
   (loop [index :- Int 0 ids :- (Vec NativeId) []]
@@ -763,6 +940,7 @@
     [(I64Kind value) true]
     [(F64Kind value) true]
     [(TextKind value) true]
+    [(BytesKind value) true]
     [(KeywordKind value) true]
     [(RefKind target) (id-in? known-types target)]))
 
@@ -790,6 +968,7 @@
      (and (id-in? known-types key-type) (id-in? known-types value-type))]
     [(SetTypeV0 element-type iteration-order) (id-in? known-types element-type)]
     [(ReferenceType target-type) (id-in? known-types target-type)]
+    [(AtomCellTypeV0 content-type) (id-in? known-types content-type)]
     [(FunctionType parameter-types rest-type return-type)
      (and (ids-in? parameter-types known-types)
        (optional-id-in? rest-type known-types)
@@ -834,7 +1013,7 @@
 (defn capabilities-refs-closed?
   [capabilities :- (Vec CapabilityDef)
    known-regions :- (Vec NativeId)] :- Bool
-  (every? (fn [capability :- CapabilityDef] :- Bool (and (capabilitydef-affine capability) (optional-id-in? (capabilitydef-region capability) known-regions)))
+  (every? (fn [capability :- CapabilityDef] :- Bool (optional-id-in? (capabilitydef-region capability) known-regions))
     capabilities))
 
 (defn field-layout-refs-closed?
@@ -860,6 +1039,7 @@
    known-types :- (Vec NativeId)] :- Bool
   (match shape
     [(ScalarShapeV0 representation) true]
+    [(BytesShapeV0 token) true]
     [(RecordShapeV0 fields)
      (every? (fn [field :- FieldLayoutV0] :- Bool (field-layout-refs-closed? field known-members known-types)) fields)]
     [(UnionShapeV0 tag-type tag-offset-bytes variants)
@@ -880,7 +1060,8 @@
      (and (id-in? known-types element-type)
        (> stride-bytes 0)
        (> align-bytes 0))]
-    [(ReferenceShapeV0 target-type) (id-in? known-types target-type)]))
+    [(ReferenceShapeV0 target-type) (id-in? known-types target-type)]
+    [(AtomCellShapeV0 content-type) (id-in? known-types content-type)]))
 
 (defn layout-refs-closed?
   [layout :- LayoutDef
@@ -926,8 +1107,10 @@
 (defn instruction-semantic-refs-closed?
   [instruction :- Instruction
    known-functions :- (Vec NativeId)
+   known-abis :- (Vec NativeId)
    known-regions :- (Vec NativeId)
    known-capabilities :- (Vec NativeId)
+   known-types :- (Vec NativeId)
    known-owned :- (Vec NativeId)] :- Bool
   (match instruction
     [(AtomInstruction result atom) (native-atom-refs-closed? atom known-owned)]
@@ -941,6 +1124,8 @@
        (id-in? known-capabilities capability))]
     [(CallInstruction result function-id arguments tokens)
      (id-in? known-functions function-id)]
+    [(ExternCallInstruction result abi-id arguments arena-id tokens)
+     (id-in? known-abis abi-id)]
     [(CompareInstruction result comparison left-id right-id) true]
     [(FieldInstruction result source-id field-id) (id-in? known-owned field-id)]
     [(VariantValueInstruction result source-id variant-id)
@@ -956,11 +1141,30 @@
     [(VecPushInstruction result source-id value-id arena-id) true]
     [(VecEmptyInstruction result capacity-id arena-id) true]
     [(VecConcatInstruction result left-id right-id arena-id) true]
-    [(MapLiteralInstructionV0 result key-ids value-ids arena-id)
+    [(MapLiteralInstructionV0 result key-ids value-ids arena-id key-equality)
      (= (count key-ids) (count value-ids))]
-    [(SetLiteralInstructionV0 result value-ids arena-id) true]
+    [(SetLiteralInstructionV0 result value-ids arena-id element-equality) true]
+    [(MapCountInstructionV0 result source-id) true]
+    [(MapGetInstructionV0 result source-id key-id default-id key-equality) true]
+    [(MapContainsInstructionV0 result source-id key-id key-equality) true]
+    [(MapAssocInstructionV0 result source-id key-id value-id arena-id key-equality)
+     true]
+    [(MapDissocInstructionV0 result source-id key-id arena-id key-equality) true]
+    [(MapKeysInstructionV0 result source-id arena-id) true]
+    [(MapValuesInstructionV0 result source-id arena-id) true]
+    [(SetCountInstructionV0 result source-id) true]
+    [(SetContainsInstructionV0 result source-id value-id element-equality) true]
+    [(SetConjInstructionV0 result source-id value-id arena-id element-equality) true]
+    [(SetDisjInstructionV0 result source-id value-id arena-id element-equality) true]
+    [(SetVectorInstructionV0 result source-id arena-id) true]
     [(ArenaInstruction result region capability tokens)
      (and (id-in? known-regions region) (id-in? known-capabilities capability))]
+    [(AtomStateInstruction result region capability tokens)
+     (and (id-in? known-regions region) (id-in? known-capabilities capability))]
+    [(AtomCreateInstruction result initial-id arena-id state-id) true]
+    [(AtomDerefInstruction result cell-id state-id) true]
+    [(AtomSwapInstruction result cell-id state-id updater-id arguments)
+     (id-in? known-functions updater-id)]
     [(TextLengthInstruction result source-id) true]
     [(TextIndexOfInstruction result source-id needle-id) true]
     [(TextBlankInstruction result source-id) true]
@@ -968,7 +1172,13 @@
     [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
      true]
     [(TextConcatInstruction result arena-id operand-ids) true]
-    [(TextBuiltinInstruction result operation) true]))
+    [(TextBuiltinInstruction result operation) true]
+    [(ValueSemanticsInstruction result operation)
+     (match operation
+       [(ValueEqualV0 domain-type left-id right-id)
+        (id-in? known-types domain-type)])]
+    [(ValueToTextInstructionV0 result mode domain-type value-id arena-id)
+     (id-in? known-types domain-type)]))
 
 (defn parameter-types-closed?
   [parameters :- (Vec Parameter)
@@ -992,12 +1202,13 @@
   [block :- BasicBlock
    known-types :- (Vec NativeId)
    known-functions :- (Vec NativeId)
+   known-abis :- (Vec NativeId)
    known-regions :- (Vec NativeId)
    known-capabilities :- (Vec NativeId)
    known-owned :- (Vec NativeId)
    known-blocks :- (Vec NativeId)] :- Bool
   (and (parameter-types-closed? (basicblock-parameters block) known-types)
-    (every? (fn [instruction :- Instruction] :- Bool (instruction-semantic-refs-closed? instruction known-functions known-regions known-capabilities known-owned))
+    (every? (fn [instruction :- Instruction] :- Bool (instruction-semantic-refs-closed? instruction known-functions known-abis known-regions known-capabilities known-types known-owned))
       (basicblock-instructions block))
     (every? (fn [terminator :- Terminator] :- Bool (terminator-block-refs-closed? terminator known-blocks))
       (basicblock-terminators block))))
@@ -1009,6 +1220,7 @@
    known-regions :- (Vec NativeId)
    known-capabilities :- (Vec NativeId)
    known-functions :- (Vec NativeId)
+   known-abis :- (Vec NativeId)
    known-owned :- (Vec NativeId)] :- Bool
   (let [blocks :- (Vec BasicBlock) (functiondef-blocks function) known-blocks :- (Vec NativeId) (basic-block-ids blocks)]
     (and (parameter-types-closed? (functiondef-parameters function) known-types)
@@ -1017,7 +1229,7 @@
       (ids-in? (functiondef-effects function) known-effects)
       (ids-in? (functiondef-regions function) known-regions)
       (ids-in? (functiondef-capabilities function) known-capabilities)
-      (every? (fn [block :- BasicBlock] :- Bool (block-reference-closed? block known-types known-functions known-regions known-capabilities known-owned known-blocks))
+      (every? (fn [block :- BasicBlock] :- Bool (block-reference-closed? block known-types known-functions known-abis known-regions known-capabilities known-owned known-blocks))
         blocks))))
 
 (defn functions-reference-closed?
@@ -1026,13 +1238,14 @@
    known-effects :- (Vec NativeId)
    known-regions :- (Vec NativeId)
    known-capabilities :- (Vec NativeId)
+   known-abis :- (Vec NativeId)
    known-owned :- (Vec NativeId)] :- Bool
   (let [known-functions :- (Vec NativeId) (function-ids functions)]
-    (every? (fn [function :- FunctionDef] :- Bool (function-reference-closed? function known-types known-effects known-regions known-capabilities known-functions known-owned))
+    (every? (fn [function :- FunctionDef] :- Bool (function-reference-closed? function known-types known-effects known-regions known-capabilities known-functions known-abis known-owned))
       functions)))
 
 (defn world-reference-closed? [world :- NativeWorld] :- Bool
-  (let [types :- (Vec TypeDef) (nativeworld-types world) effects :- (Vec EffectDef) (nativeworld-effects world) regions :- (Vec RegionDef) (nativeworld-regions world) capabilities :- (Vec CapabilityDef) (nativeworld-capabilities world) known-types :- (Vec NativeId) (type-ids types) known-effects :- (Vec NativeId) (effect-ids effects) known-regions :- (Vec NativeId) (region-ids regions) known-capabilities :- (Vec NativeId) (capability-ids capabilities) known-owned :- (Vec NativeId) (world-owned-ids world)]
+  (let [types :- (Vec TypeDef) (nativeworld-types world) effects :- (Vec EffectDef) (nativeworld-effects world) regions :- (Vec RegionDef) (nativeworld-regions world) capabilities :- (Vec CapabilityDef) (nativeworld-capabilities world) known-types :- (Vec NativeId) (type-ids types) known-effects :- (Vec NativeId) (effect-ids effects) known-regions :- (Vec NativeId) (region-ids regions) known-capabilities :- (Vec NativeId) (capability-ids capabilities) known-abis :- (Vec NativeId) (abi-ids (nativeworld-abis world)) known-owned :- (Vec NativeId) (world-owned-ids world)]
     (and (types-refs-closed? types)
       (effects-refs-closed? effects known-regions known-capabilities)
       (regions-refs-closed? regions)
@@ -1043,6 +1256,7 @@
         known-effects
         known-regions
         known-capabilities
+        known-abis
         known-owned))))
 
 (defn store-op-ssa-refs [store :- StoreOp] :- (Vec NativeId)
@@ -1096,6 +1310,8 @@
     [(AllocateInstruction result region capability byte-count-id tokens)
      [byte-count-id]]
     [(CallInstruction result function-id arguments tokens) arguments]
+    [(ExternCallInstruction result abi-id arguments arena-id tokens)
+     (if (nil? arena-id) arguments (into arguments [arena-id]))]
     [(CompareInstruction result comparison left-id right-id) [left-id right-id]]
     [(FieldInstruction result source-id field-id) [source-id]]
     [(VariantValueInstruction result source-id variant-id) [source-id]]
@@ -1111,11 +1327,37 @@
     [(VecEmptyInstruction result capacity-id arena-id) [arena-id capacity-id]]
     [(VecConcatInstruction result left-id right-id arena-id)
      [arena-id left-id right-id]]
-    [(MapLiteralInstructionV0 result key-ids value-ids arena-id)
+    [(MapLiteralInstructionV0 result key-ids value-ids arena-id key-equality)
      (into [arena-id] (vec (concat key-ids value-ids)))]
-    [(SetLiteralInstructionV0 result value-ids arena-id)
+    [(SetLiteralInstructionV0 result value-ids arena-id element-equality)
      (into [arena-id] value-ids)]
+    [(MapCountInstructionV0 result source-id) [source-id]]
+    [(MapGetInstructionV0 result source-id key-id default-id key-equality)
+     (if (nil? default-id) [source-id key-id]
+       [source-id key-id default-id])]
+    [(MapContainsInstructionV0 result source-id key-id key-equality)
+     [source-id key-id]]
+    [(MapAssocInstructionV0 result source-id key-id value-id arena-id key-equality)
+     [arena-id source-id key-id value-id]]
+    [(MapDissocInstructionV0 result source-id key-id arena-id key-equality)
+     [arena-id source-id key-id]]
+    [(MapKeysInstructionV0 result source-id arena-id) [arena-id source-id]]
+    [(MapValuesInstructionV0 result source-id arena-id) [arena-id source-id]]
+    [(SetCountInstructionV0 result source-id) [source-id]]
+    [(SetContainsInstructionV0 result source-id value-id element-equality)
+     [source-id value-id]]
+    [(SetConjInstructionV0 result source-id value-id arena-id element-equality)
+     [arena-id source-id value-id]]
+    [(SetDisjInstructionV0 result source-id value-id arena-id element-equality)
+     [arena-id source-id value-id]]
+    [(SetVectorInstructionV0 result source-id arena-id) [arena-id source-id]]
     [(ArenaInstruction result region capability tokens) []]
+    [(AtomStateInstruction result region capability tokens) []]
+    [(AtomCreateInstruction result initial-id arena-id state-id)
+     [initial-id arena-id state-id]]
+    [(AtomDerefInstruction result cell-id state-id) [cell-id state-id]]
+    [(AtomSwapInstruction result cell-id state-id updater-id arguments)
+     (into [cell-id state-id] arguments)]
     [(TextLengthInstruction result source-id) [source-id]]
     [(TextIndexOfInstruction result source-id needle-id) [source-id needle-id]]
     [(TextBlankInstruction result source-id) [source-id]]
@@ -1125,7 +1367,12 @@
     [(TextConcatInstruction result arena-id operand-ids)
      (into [arena-id] operand-ids)]
     [(TextBuiltinInstruction result operation)
-     (text-builtin-ssa-refs operation)]))
+     (text-builtin-ssa-refs operation)]
+    [(ValueSemanticsInstruction result operation)
+     (match operation
+       [(ValueEqualV0 domain-type left-id right-id) [left-id right-id]])]
+    [(ValueToTextInstructionV0 result mode domain-type value-id arena-id)
+     [arena-id value-id]]))
 
 (defn terminator-ssa-refs [terminator :- Terminator] :- (Vec NativeId)
   (match terminator
@@ -1186,6 +1433,7 @@
      (and (id-in? allowed-regions region)
        (id-in? allowed-capabilities capability))]
     [(CallInstruction result function-id arguments tokens) true]
+    [(ExternCallInstruction result abi-id arguments arena-id tokens) true]
     [(CompareInstruction result comparison left-id right-id) true]
     [(FieldInstruction result source-id field-id) true]
     [(VariantValueInstruction result source-id variant-id) true]
@@ -1198,11 +1446,30 @@
     [(VecPushInstruction result source-id value-id arena-id) true]
     [(VecEmptyInstruction result capacity-id arena-id) true]
     [(VecConcatInstruction result left-id right-id arena-id) true]
-    [(MapLiteralInstructionV0 result key-ids value-ids arena-id) true]
-    [(SetLiteralInstructionV0 result value-ids arena-id) true]
+    [(MapLiteralInstructionV0 result key-ids value-ids arena-id key-equality) true]
+    [(SetLiteralInstructionV0 result value-ids arena-id element-equality) true]
+    [(MapCountInstructionV0 result source-id) true]
+    [(MapGetInstructionV0 result source-id key-id default-id key-equality) true]
+    [(MapContainsInstructionV0 result source-id key-id key-equality) true]
+    [(MapAssocInstructionV0 result source-id key-id value-id arena-id key-equality)
+     true]
+    [(MapDissocInstructionV0 result source-id key-id arena-id key-equality) true]
+    [(MapKeysInstructionV0 result source-id arena-id) true]
+    [(MapValuesInstructionV0 result source-id arena-id) true]
+    [(SetCountInstructionV0 result source-id) true]
+    [(SetContainsInstructionV0 result source-id value-id element-equality) true]
+    [(SetConjInstructionV0 result source-id value-id arena-id element-equality) true]
+    [(SetDisjInstructionV0 result source-id value-id arena-id element-equality) true]
+    [(SetVectorInstructionV0 result source-id arena-id) true]
     [(ArenaInstruction result region capability tokens)
      (and (id-in? allowed-regions region)
        (id-in? allowed-capabilities capability))]
+    [(AtomStateInstruction result region capability tokens)
+     (and (id-in? allowed-regions region)
+       (id-in? allowed-capabilities capability))]
+    [(AtomCreateInstruction result initial-id arena-id state-id) true]
+    [(AtomDerefInstruction result cell-id state-id) true]
+    [(AtomSwapInstruction result cell-id state-id updater-id arguments) true]
     [(TextLengthInstruction result source-id) true]
     [(TextIndexOfInstruction result source-id needle-id) true]
     [(TextBlankInstruction result source-id) true]
@@ -1210,7 +1477,9 @@
     [(TextSliceInstruction result arena-id source-id start-id end-id failure-code)
      true]
     [(TextConcatInstruction result arena-id operand-ids) true]
-    [(TextBuiltinInstruction result operation) true]))
+    [(TextBuiltinInstruction result operation) true]
+    [(ValueSemanticsInstruction result operation) true]
+    [(ValueToTextInstructionV0 result mode domain-type value-id arena-id) true]))
 
 (defn block-resources-allowed?
   [block :- BasicBlock

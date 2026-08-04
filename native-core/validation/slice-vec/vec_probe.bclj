@@ -42,3 +42,8 @@
   [frame: t/TransactionFrame
    position: Int] -> t/CommitOperation
   (nth (t/transactionframe-operations frame) position))
+
+(defn any-values-equal?
+  [left: (Vec Any)
+   right: (Vec Any)] -> Bool
+  (= left right))

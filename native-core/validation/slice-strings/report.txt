@@ -3,10 +3,10 @@ stage source-to-typed ACCEPTED
 stage typed-to-native COMPLETE
 source-modules 1
 source-imports 0
-world-types 11
-world-functions 24
-world-abis 24
-projected-types 8
+world-types 14
+world-functions 39
+world-abis 39
+projected-types 12
 lowered fn_0 text-equal? 1 blocks
 lowered fn_1 text-length 1 blocks
 lowered fn_2 text-slice 1 blocks
@@ -31,6 +31,21 @@ lowered fn_20 trim-byte? 5 blocks
 lowered fn_21 global-size 1 blocks
 lowered fn_22 parameter-shadow-size 1 blocks
 lowered fn_23 local-shadow-size 1 blocks
+lowered fn_24 render-float 1 blocks
+lowered fn_25 print-float 1 blocks
+lowered fn_26 render-bool 1 blocks
+lowered fn_27 print-text 1 blocks
+lowered fn_28 print-int 1 blocks
+lowered fn_29 render-keyword 1 blocks
+lowered fn_30 render-nil 1 blocks
+lowered fn_31 print-nil 1 blocks
+lowered fn_32 render-text-vector 1 blocks
+lowered fn_33 print-text-vector 1 blocks
+lowered fn_34 render-text-map 1 blocks
+lowered fn_35 print-text-map 1 blocks
+lowered fn_36 render-printable 1 blocks
+lowered fn_37 print-printable 1 blocks
+lowered fn_38 render-framed-printable 1 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts

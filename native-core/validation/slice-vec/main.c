@@ -3,7 +3,8 @@
    fn_35 bucket-size          fn_36 bucket-position-at
    fn_37 bucket-with-position fn_38 append-position
    fn_39 position-pair        fn_40 empty-positions
-   fn_41 frame-operation-count fn_42 frame-operation-at */
+   fn_41 frame-operation-count fn_42 frame-operation-at
+   fn_43 any-values-equal? */
 #include "module_0.h"
 
 #define ARENA_BYTES ((size_t)65536)
@@ -72,18 +73,39 @@ int main(int argc, char **argv) {
   }
 
   /* (Vec Record): a CommitOperation vector, stride 56, read back by value */
-  native_m0_type_28 operations = native_vec_new(&arena, INT64_C(2), INT64_C(56), (size_t)8);
-  native_m0_type_53 assert_operation = { UINT64_C(101), { { INT64_C(0) }, { INT64_C(0) }, { INT64_C(0) } } };
-  native_m0_type_53 retract_operation = { UINT64_C(202), { { INT64_C(0) }, { INT64_C(0) }, { INT64_C(0) } } };
+  native_m0_type_29 operations = native_vec_new(&arena, INT64_C(2), INT64_C(56), (size_t)8);
+  native_m0_type_54 assert_operation = { UINT64_C(101), { { INT64_C(0) }, { INT64_C(0) }, { INT64_C(0) } } };
+  native_m0_type_54 retract_operation = { UINT64_C(202), { { INT64_C(0) }, { INT64_C(0) }, { INT64_C(0) } } };
   operations = native_vec_push(&arena, operations, &assert_operation, INT64_C(56), (size_t)8);
   operations = native_vec_push(&arena, operations, &retract_operation, INT64_C(56), (size_t)8);
-  native_m0_type_29 frame = { INT64_C(3), operations };
+  native_m0_type_30 frame = { INT64_C(3), operations };
   if (native_m0_fn_41(frame) != INT64_C(2)) {
     return 8;
   }
   if ((native_m0_fn_42(frame, INT64_C(0)).field_0 != UINT64_C(101))
       || (native_m0_fn_42(frame, INT64_C(1)).field_0 != UINT64_C(202))) {
     return 10;
+  }
+
+  /* (Vec Any): distinct vectors compare elementwise through the Any tags. */
+  native_m0_type_51 any_int = { .tag = INT64_C(1),
+                                .payload.variant_1 = INT64_C(17) };
+  native_m0_type_51 any_bool = { .tag = INT64_C(0),
+                                 .payload.variant_0 = true };
+  native_m0_type_51 any_other = { .tag = INT64_C(1),
+                                  .payload.variant_1 = INT64_C(18) };
+  native_m0_type_22 values = native_vec_new(&arena, INT64_C(2), INT64_C(16), (size_t)8);
+  native_m0_type_22 equal_values = native_vec_new(&arena, INT64_C(2), INT64_C(16), (size_t)8);
+  native_m0_type_22 different_values = native_vec_new(&arena, INT64_C(2), INT64_C(16), (size_t)8);
+  values = native_vec_push(&arena, values, &any_int, INT64_C(16), (size_t)8);
+  values = native_vec_push(&arena, values, &any_bool, INT64_C(16), (size_t)8);
+  equal_values = native_vec_push(&arena, equal_values, &any_int, INT64_C(16), (size_t)8);
+  equal_values = native_vec_push(&arena, equal_values, &any_bool, INT64_C(16), (size_t)8);
+  different_values = native_vec_push(&arena, different_values, &any_int, INT64_C(16), (size_t)8);
+  different_values = native_vec_push(&arena, different_values, &any_other, INT64_C(16), (size_t)8);
+  if (!native_m0_fn_43(values, equal_values)
+      || native_m0_fn_43(values, different_values)) {
+    return 11;
   }
 
   printf("vec: %lld pushes, %llu element-storage allocations\n",

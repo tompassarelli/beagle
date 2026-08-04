@@ -1,0 +1,445 @@
+#!/usr/bin/env bash
+# Link one public zero-argument Beagle function as a native executable.
+#
+# Usage:
+#   beagle native-exe --out FILE --entry NS/NAME [--cc CC]
+#                     [--artifacts DIR] SOURCE...
+#
+# The native-module report and projection artifacts are copied to DIR (default:
+# FILE.artifacts). FILE is published only after the complete C17 projection,
+# entry ABI validation, strict compilation, and link all pass.
+
+set -euo pipefail
+
+BEAGLE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+BIN="$BEAGLE_DIR/bin"
+NATIVE_MODULE="$BIN/beagle-native-module"
+
+usage() {
+    sed -n '2,11p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+}
+
+die() {
+    echo "beagle native-exe: $*" >&2
+    exit 2
+}
+
+out=""
+entry=""
+artifacts=""
+cc="${CC:-cc}"
+sources=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --out)
+            [[ $# -ge 2 ]] || die "--out needs an executable path"
+            [[ -z "$out" ]] || die "--out may be specified only once"
+            out="$2"
+            shift 2
+            ;;
+        --out=*)
+            [[ -z "$out" ]] || die "--out may be specified only once"
+            out="${1#*=}"
+            shift
+            ;;
+        --entry)
+            [[ $# -ge 2 ]] || die "--entry needs a qualified NS/NAME"
+            [[ -z "$entry" ]] || die "--entry may be specified only once"
+            entry="$2"
+            shift 2
+            ;;
+        --entry=*)
+            [[ -z "$entry" ]] || die "--entry may be specified only once"
+            entry="${1#*=}"
+            shift
+            ;;
+        --artifacts)
+            [[ $# -ge 2 ]] || die "--artifacts needs a directory"
+            [[ -z "$artifacts" ]] || die "--artifacts may be specified only once"
+            artifacts="$2"
+            shift 2
+            ;;
+        --artifacts=*)
+            [[ -z "$artifacts" ]] || die "--artifacts may be specified only once"
+            artifacts="${1#*=}"
+            shift
+            ;;
+        --cc)
+            [[ $# -ge 2 ]] || die "--cc needs one compiler executable"
+            cc="$2"
+            shift 2
+            ;;
+        --cc=*)
+            cc="${1#*=}"
+            shift
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        --)
+            shift
+            sources+=("$@")
+            break
+            ;;
+        -*)
+            die "unknown option: $1 (try --help)"
+            ;;
+        *)
+            sources+=("$1")
+            shift
+            ;;
+    esac
+done
+
+[[ -n "$out" ]] || die "--out FILE is required"
+[[ -n "$entry" ]] || die "--entry NS/NAME is required"
+[[ ${#sources[@]} -gt 0 ]] || die "provide at least one source path"
+[[ "$entry" == */* ]] || die "--entry must be qualified as NS/NAME: $entry"
+entry_namespace="${entry%/*}"
+entry_name="${entry##*/}"
+[[ -n "$entry_namespace" && -n "$entry_name" && "$entry_namespace" != */* ]] ||
+    die "--entry must contain exactly one namespace separator: $entry"
+
+out_parent="$(dirname -- "$out")"
+out_name="$(basename -- "$out")"
+[[ -n "$out_name" && "$out_name" != "." && "$out_name" != ".." ]] ||
+    die "--out must name an executable file: $out"
+mkdir -p "$out_parent"
+out_parent="$(cd "$out_parent" && pwd)"
+out="$out_parent/$out_name"
+[[ ! -d "$out" ]] || die "--out names a directory: $out"
+
+if [[ -z "$artifacts" ]]; then
+    artifacts="$out.artifacts"
+fi
+mkdir -p "$artifacts"
+artifacts="$(cd "$artifacts" && pwd)"
+
+published_names=(
+    source.facts
+    report.txt
+    module_0.h
+    module_0.c
+    module_0.ssa
+    native_shim.h
+    native_shim.c
+    entry.c
+    native-exe.log
+    native-exe.report.txt
+)
+for name in "${published_names[@]}"; do
+    [[ "$out" != "$artifacts/$name" ]] ||
+        die "--out conflicts with the $name artifact: $out"
+done
+
+work="$(mktemp -d "$out_parent/.beagle-native-exe.XXXXXX")"
+started=0
+success=0
+cleanup() {
+    local rc=$?
+    rm -rf "${work:?}"
+    if [[ "$started" == "1" && "$success" != "1" ]]; then
+        rm -f -- "$out"
+        for name in "${published_names[@]}"; do
+            rm -f -- "$artifacts/$name"
+        done
+    fi
+    return "$rc"
+}
+trap cleanup EXIT
+
+started=1
+rm -f -- "$out"
+for name in "${published_names[@]}"; do
+    rm -f -- "$artifacts/$name"
+done
+
+[[ -x "$NATIVE_MODULE" ]] ||
+    die "native-module command is unavailable: $NATIVE_MODULE"
+[[ -x "$BIN/beagle-ast" ]] || die "AST command is unavailable: $BIN/beagle-ast"
+command -v python3 >/dev/null 2>&1 || die "required command is unavailable: python3"
+cc_path="$(command -v -- "$cc" 2>/dev/null || true)"
+[[ -n "$cc_path" && -x "$cc_path" ]] || die "C17 compiler is unavailable: $cc"
+
+for source in "${sources[@]}"; do
+    [[ -f "$source" ]] || die "source file not found: $source"
+done
+
+ast_args=()
+source_index=0
+for source in "${sources[@]}"; do
+    ast="$work/source_${source_index}.ast.json"
+    ast_log="$work/source_${source_index}.ast.log"
+    set +e
+    "$BIN/beagle-ast" "$source" >"$ast" 2>"$ast_log"
+    ast_rc=$?
+    set -e
+    if [[ $ast_rc -ne 0 ]]; then
+        sed -n '1,200p' "$ast_log" >&2
+        die "could not inspect exports in source: $source"
+    fi
+    ast_args+=("$source" "$ast")
+    source_index=$((source_index + 1))
+done
+
+set +e
+entry_return="$(python3 - "$entry" "${ast_args[@]}" <<'PY'
+import json
+import sys
+
+
+def fail(message):
+    print(f"beagle native-exe: {message}", file=sys.stderr)
+    raise SystemExit(2)
+
+
+target = sys.argv[1]
+namespace, name = target.split("/", 1)
+arguments = sys.argv[2:]
+if len(arguments) % 2:
+    fail("internal AST argument mismatch")
+
+matches = []
+for source, ast_path in zip(arguments[0::2], arguments[1::2]):
+    try:
+        with open(ast_path, encoding="utf-8") as stream:
+            ast = json.load(stream)
+    except (OSError, ValueError) as error:
+        fail(f"could not read AST for {source}: {error}")
+    if ast.get("namespace") != namespace:
+        continue
+    for form in ast.get("forms", []):
+        if form.get("node") == "defn" and form.get("name") == name:
+            matches.append((source, form))
+
+if not matches:
+    fail(f"exported entry not found: {target}")
+if len(matches) != 1:
+    files = ", ".join(source for source, _ in matches)
+    fail(f"entry is ambiguous across source files: {target} ({files})")
+
+source, form = matches[0]
+if form.get("private") is True:
+    fail(f"entry is private, not exported: {target} ({source})")
+if form.get("private") is not False:
+    fail(f"entry export visibility is unavailable: {target} ({source})")
+parameters = form.get("params")
+if not isinstance(parameters, list) or parameters:
+    count = len(parameters) if isinstance(parameters, list) else "unknown"
+    fail(f"entry must have zero source parameters: {target} has {count}")
+if form.get("rest") is not False:
+    fail(f"entry must not have a rest parameter: {target}")
+return_type = form.get("ret")
+if not isinstance(return_type, dict):
+    fail(f"entry needs an explicit -> Int or -> Nil return: {target}")
+if return_type.get("kind") != "prim" or return_type.get("name") not in {"Int", "Nil"}:
+    rendered = return_type.get("name", return_type.get("kind", "unknown"))
+    fail(f"entry return must be Int or Nil: {target} returns {rendered}")
+
+print(return_type["name"])
+PY
+)"
+metadata_rc=$?
+set -e
+[[ $metadata_rc -eq 0 ]] || exit "$metadata_rc"
+
+module_dir="$work/module"
+mkdir -p "$module_dir"
+set +e
+"$NATIVE_MODULE" --out "$module_dir" -- "${sources[@]}" >"$work/native-module.log" 2>&1
+module_rc=$?
+set -e
+if [[ $module_rc -ne 0 ]]; then
+    sed -n '1,240p' "$work/native-module.log" >&2
+    exit "$module_rc"
+fi
+
+for name in source.facts report.txt module_0.h module_0.c module_0.ssa native_shim.h native_shim.c; do
+    [[ -f "$module_dir/$name" ]] || die "native-module omitted required artifact: $name"
+done
+
+report="$module_dir/report.txt"
+for required in \
+    "stage typed-to-native COMPLETE" \
+    "native-lowering-result NativeLoweringCompleteV0" \
+    "materialize-c17 OK module_0.h module_0.c" \
+    "result PASS"; do
+    grep -Fqx "$required" "$report" ||
+        die "native-module report omitted required verdict: $required"
+done
+
+obligation_count="$(grep -c '^obligation-projection PASS ' "$report" || true)"
+[[ "$obligation_count" == "7" ]] ||
+    die "native-module report has $obligation_count/7 passing obligations"
+
+mapfile -t world_counts < <(awk '$1 == "world-functions" && NF == 2 { print $2 }' "$report")
+[[ ${#world_counts[@]} -eq 1 && "${world_counts[0]}" =~ ^[0-9]+$ ]] ||
+    die "native-module report has no unique world-functions count"
+lowered_count="$(grep -c '^lowered fn_[0-9][0-9]* ' "$report" || true)"
+[[ "$lowered_count" == "${world_counts[0]}" ]] ||
+    die "C17 projection is incomplete: lowered $lowered_count/${world_counts[0]} functions"
+
+mapfile -t entry_rows < <(
+    awk -v name="$entry_name" \
+        '$1 == "lowered" && $2 ~ /^fn_[0-9]+$/ && $3 == name { print $2 }' "$report"
+)
+if [[ ${#entry_rows[@]} -eq 0 ]]; then
+    die "exported entry was not lowered: $entry"
+fi
+if [[ ${#entry_rows[@]} -ne 1 ]]; then
+    die "lowered entry name is ambiguous across modules: $entry"
+fi
+function_index="${entry_rows[0]#fn_}"
+symbol="native_m0_fn_$function_index"
+
+mapfile -t prototypes < <(grep -E "^[A-Za-z_][A-Za-z0-9_]* ${symbol}\\(.*\\);$" \
+    "$module_dir/module_0.h" || true)
+[[ ${#prototypes[@]} -eq 1 ]] ||
+    die "generated C17 header has no unique prototype for $entry ($symbol)"
+prototype="${prototypes[0]}"
+if [[ "$prototype" =~ ^([A-Za-z_][A-Za-z0-9_]*)[[:space:]]+${symbol}\((.*)\)\;$ ]]; then
+    c_return="${BASH_REMATCH[1]}"
+    c_parameters="${BASH_REMATCH[2]}"
+else
+    die "generated C17 entry prototype is malformed: $prototype"
+fi
+
+needs_arena=0
+needs_capability=0
+case "$c_parameters" in
+    void)
+        abi="pure"
+        call_arguments=""
+        ;;
+    "native_arena *arena")
+        abi="arena"
+        needs_arena=1
+        call_arguments="&arena"
+        ;;
+    "const native_capability *capability")
+        abi="capability"
+        needs_capability=1
+        call_arguments="&capability"
+        ;;
+    "native_arena *arena, const native_capability *capability")
+        abi="arena+capability"
+        needs_arena=1
+        needs_capability=1
+        call_arguments="&arena, &capability"
+        ;;
+    *)
+        die "entry has unsupported generated ABI parameters: $entry ($c_parameters)"
+        ;;
+esac
+
+[[ "$c_return" =~ ^native_m0_type_[0-9]+$ ]] ||
+    die "entry has unsupported generated ABI return: $entry ($c_return)"
+if [[ "$entry_return" == "Int" ]]; then
+    grep -Fqx "typedef int64_t $c_return;" "$module_dir/module_0.h" ||
+        die "entry Int return is not represented as int64_t: $entry ($c_return)"
+fi
+
+entry_source="$work/entry.c"
+{
+    cat <<EOF
+/* Generated by beagle native-exe; do not edit. */
+#include "module_0.h"
+
+#include <limits.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+EOF
+    if [[ "$needs_arena" == "1" ]]; then
+        cat <<'EOF'
+
+#define BEAGLE_NATIVE_ARENA_BYTES ((size_t)(64U * 1024U * 1024U))
+EOF
+    fi
+    cat <<'EOF'
+
+int main(void) {
+EOF
+    if [[ "$needs_arena" == "1" ]]; then
+        cat <<'EOF'
+  uint8_t *arena_storage = (uint8_t *)malloc(BEAGLE_NATIVE_ARENA_BYTES);
+  native_arena arena;
+  if (arena_storage == NULL) {
+    fputs("beagle native entry: arena allocation failed\n", stderr);
+    return EXIT_FAILURE;
+  }
+  native_arena_init(&arena, arena_storage, BEAGLE_NATIVE_ARENA_BYTES);
+EOF
+    fi
+    if [[ "$needs_capability" == "1" ]]; then
+        cat <<'EOF'
+  const native_capability capability = { UINT64_C(0) };
+EOF
+    fi
+    if [[ "$entry_return" == "Int" ]]; then
+        cat <<EOF
+  int64_t status = (int64_t)$symbol($call_arguments);
+EOF
+        if [[ "$needs_arena" == "1" ]]; then
+            cat <<'EOF'
+  free(arena_storage);
+EOF
+        fi
+        cat <<'EOF'
+  if ((status < (int64_t)INT_MIN) || (status > (int64_t)INT_MAX)) {
+    fputs("beagle native entry: Int result is outside the C process-status range\n",
+          stderr);
+    return EXIT_FAILURE;
+  }
+  return (int)status;
+EOF
+    else
+        cat <<EOF
+  (void)$symbol($call_arguments);
+EOF
+        if [[ "$needs_arena" == "1" ]]; then
+            cat <<'EOF'
+  free(arena_storage);
+EOF
+        fi
+        cat <<'EOF'
+  return EXIT_SUCCESS;
+EOF
+    fi
+    cat <<'EOF'
+}
+EOF
+} >"$entry_source"
+
+linked="$work/native-executable"
+set +e
+"$cc_path" -std=c17 -pedantic -Wall -Wextra -Werror \
+    -I "$module_dir" \
+    "$module_dir/module_0.c" \
+    "$module_dir/native_shim.c" \
+    "$entry_source" \
+    -o "$linked" >"$work/native-exe.log" 2>&1
+link_rc=$?
+set -e
+if [[ $link_rc -ne 0 ]]; then
+    sed -n '1,240p' "$work/native-exe.log" >&2
+    die "C17 compile/link failed with $cc_path"
+fi
+[[ -x "$linked" ]] || die "C17 compiler reported success without an executable"
+
+for name in source.facts report.txt module_0.h module_0.c module_0.ssa native_shim.h native_shim.c; do
+    cp -- "$module_dir/$name" "$artifacts/$name"
+done
+cp -- "$entry_source" "$artifacts/entry.c"
+cp -- "$work/native-exe.log" "$artifacts/native-exe.log"
+
+entry_line="native-exe-entry PASS name=$entry symbol=$symbol return=$entry_return abi=$abi"
+c17_line="native-exe-c17 PASS compiler=$cc_path output=$out"
+printf '%s\n%s\n' "$entry_line" "$c17_line" >"$artifacts/native-exe.report.txt"
+mv -f -- "$linked" "$out"
+success=1
+
+cat "$report"
+printf '%s\n%s\n' "$entry_line" "$c17_line"

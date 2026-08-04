@@ -34,3 +34,16 @@ obligation-projection PASS legal-abi
 obligation-projection PASS discharged-tokens
 obligation-projection PASS bounded-effects
 materialize OK module_0.h module_0.c
+qbe-stage typed-to-native COMPLETE
+qbe-selected-function delivery-trigger?
+qbe-world-functions 1
+qbe-world-abis 1
+qbe-projected-types 4
+qbe-obligation PASS valid-ssa
+qbe-obligation PASS exhaustive-matches
+qbe-obligation PASS closed-layouts
+qbe-obligation PASS checked-arithmetic
+qbe-obligation PASS legal-abi
+qbe-obligation PASS discharged-tokens
+qbe-obligation PASS bounded-effects
+qbe-materialize OK module_1.ssa

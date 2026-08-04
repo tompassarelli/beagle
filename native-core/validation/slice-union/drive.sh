@@ -32,6 +32,7 @@ sha256sum "$src" | cut -d' ' -f1 >"$art/source.sha256"
   "$repo/native-core/src/native/slice.bgl" \
   "$repo/native-core/src/native/fold_c17.bgl" \
   "$repo/native-core/src/native/body_c17.bgl" \
+  "$repo/native-core/src/native/qbe.bgl" \
   "$repo/native-core/src/native/body_slice.bgl" \
   --out "$scratch/out" >"$scratch/build.log" 2>&1 || { sed -n '1,200p' "$scratch/build.log" >&2; exit 1; }
 
@@ -39,7 +40,7 @@ sha256sum "$src" | cut -d' ' -f1 >"$art/source.sha256"
 # re-exporting native.core's records into each consumer namespace is the repo's
 # standing workaround until the emitter qualifies them.
 records="$(sed -nE 's/.*\(defrecord ([^ ]+).*/\1/p' "$scratch/out/native/core.clj" | tr '\n' ' ')"
-for m in worlds lower obligations c11 slice fold_c17 body_c17 body_slice; do
+for m in worlds lower obligations c11 slice fold_c17 body_c17 qbe body_slice; do
   [ -f "$scratch/out/native/$m.clj" ] || continue
   sed -i 's/\[native\.core :as core\]/[native.core :as core :refer :all]/' "$scratch/out/native/$m.clj"
   awk -v imp="(import '[native.core $records])" \

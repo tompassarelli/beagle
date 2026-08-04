@@ -32,6 +32,7 @@ Author:
   check [--profile N] [PATH...]  Type-check without emitting
   validate [FILE...]        Parse + check + schema validation
   build [--target T] PATH   Compile, optionally retargeting portable source
+  native-module --out DIR PATH...  Lower complete modules to C17 + QBE
   fix [--dry-run] [PATH...] Surface high-confidence auto-fixes
   repair DIR VERIFY         Evidence-ranked repair (--emit-patch / --auto)
   doctor [--deep]           Is the authoring loop online and working?
@@ -55,6 +56,8 @@ Project / loop:
   init [--hooks] [--target T]  Bootstrap a project (+ portable repair hooks)
   daemon start|status|stop  Watch + cache type results
   promote [REV]             Promote clean checkout HEAD + restart its daemon
+  native-exe --out FILE --entry NS/NAME PATH...
+                            Link a complete native C17 executable
   test [--active-only]      Run the test tiers
   rejection-stats DIR       Diagnostics by cause-class
   lsp | repl                LSP server / typed REPL
@@ -102,6 +105,9 @@ case "$cmd" in
             exec "$BIN/beagle-build-all" "$@"
         fi
         ;;
+    native-module)
+        exec "$BIN/beagle-native-module" "$@"
+        ;;
     fix)
         exec "$BIN/beagle-fix" "$@"
         ;;
@@ -138,6 +144,7 @@ case "$cmd" in
         ;;
     daemon)          exec "$BIN/beagle-daemon" "$@" ;;
     promote)         exec "$BIN/beagle-promote" "$@" ;;
+    native-exe)      exec "$BIN/beagle-native-exe" "$@" ;;
     test)            exec "$BIN/beagle-test" "$@" ;;
     rejection-stats) exec "$BIN/beagle-rejection-stats" "$@" ;;
     help|--help|-h)

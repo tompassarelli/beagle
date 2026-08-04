@@ -1,0 +1,17 @@
+stage source-seal ACCEPTED
+stage source-to-typed ACCEPTED
+stage typed-to-native COMPLETE
+source-modules 1
+source-imports 0
+world-functions 1
+world-abis 2
+lowered fn_0 -main 1 blocks
+obligation-main PASS valid-ssa
+obligation-main PASS exhaustive-matches
+obligation-main PASS closed-layouts
+obligation-main PASS checked-arithmetic
+obligation-main PASS legal-abi
+obligation-main PASS discharged-tokens
+obligation-main PASS bounded-effects
+materialize OK module_0.h module_0.c
+qbe REFUSED QBE stdout extern ABI is unsupported: Text handles have no QBE call representation

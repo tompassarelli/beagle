@@ -1,0 +1,27 @@
+#lang beagle/clj
+(ns native.keyword-access)
+(define-mode strict)
+
+(defrecord Pair
+  [left: Int
+   right: String])
+
+(defn record-left [pair: Pair] -> Int
+  (:left pair))
+
+(defn code-key [] -> Keyword
+  :code)
+
+(defn map-has-code [entries: (Map Keyword Int)] -> Bool
+  (some? (:code entries)))
+
+(defn map-code-is
+  [entries: (Map Keyword Int)
+   expected: Int] -> Bool
+  (= expected (:code entries)))
+
+(defn wrong-key-type [entries: (Map String Int)] -> Bool
+  (some? (:code entries)))
+
+(defn missing-record-field [pair: Pair] -> Int
+  (:missing pair))

@@ -1,13 +1,22 @@
 stage source-seal ACCEPTED
 stage source-to-typed ACCEPTED
+stage typed-to-native COMPLETE
+source-modules 1
+source-imports 0
 world-types 11
-world-functions 4
-world-abis 4
+world-functions 10
+world-abis 10
 projected-types 5
 lowered fn_0 settle 5 blocks
 lowered fn_1 exchange 5 blocks
 lowered fn_2 settle-nested 9 blocks
 lowered fn_3 scan-six 5 blocks
+lowered fn_4 positive-int? 1 blocks
+lowered fn_5 negative-int? 1 blocks
+lowered fn_6 zero-int? 1 blocks
+lowered fn_7 bounded-min 4 blocks
+lowered fn_8 bounded-min-three 7 blocks
+lowered fn_9 bounded-max 4 blocks
 obligation-projection PASS valid-ssa
 obligation-projection PASS exhaustive-matches
 obligation-projection PASS closed-layouts

@@ -186,3 +186,93 @@ native_l3_3: ;
 native_l3_4: ;
   return native_s_20;
 }
+native_m0_type_1 native_m0_fn_4(native_m0_type_0 native_v_0) {
+  native_m0_type_0 native_s_0;
+  native_m0_type_1 native_s_1;
+  native_s_0 = INT64_C(0);
+  native_s_1 = (native_s_0 < native_v_0);
+  return native_s_1;
+}
+native_m0_type_1 native_m0_fn_5(native_m0_type_0 native_v_0) {
+  native_m0_type_0 native_s_0;
+  native_m0_type_1 native_s_1;
+  native_s_0 = INT64_C(0);
+  native_s_1 = (native_v_0 < native_s_0);
+  return native_s_1;
+}
+native_m0_type_1 native_m0_fn_6(native_m0_type_0 native_v_0) {
+  native_m0_type_0 native_s_0;
+  native_m0_type_1 native_s_1;
+  native_s_0 = INT64_C(0);
+  native_s_1 = (native_v_0 == native_s_0);
+  return native_s_1;
+}
+native_m0_type_0 native_m0_fn_7(native_m0_type_0 native_v_0, native_m0_type_0 native_v_1) {
+  native_m0_type_1 native_s_0;
+  native_m0_type_0 native_s_1;
+  native_s_0 = (native_v_0 <= native_v_1);
+  if (native_s_0) {
+    goto native_l7_1;
+  } else {
+    goto native_l7_2;
+  }
+native_l7_1: ;
+  native_s_1 = native_v_0;
+  goto native_l7_3;
+native_l7_2: ;
+  native_s_1 = native_v_1;
+  goto native_l7_3;
+native_l7_3: ;
+  return native_s_1;
+}
+native_m0_type_0 native_m0_fn_8(native_m0_type_0 native_v_0, native_m0_type_0 native_v_1, native_m0_type_0 native_v_2) {
+  native_m0_type_1 native_s_0;
+  native_m0_type_0 native_s_1;
+  native_m0_type_1 native_s_2;
+  native_m0_type_0 native_s_3;
+  native_s_0 = (native_v_0 <= native_v_1);
+  if (native_s_0) {
+    goto native_l8_1;
+  } else {
+    goto native_l8_2;
+  }
+native_l8_1: ;
+  native_s_1 = native_v_0;
+  goto native_l8_3;
+native_l8_2: ;
+  native_s_1 = native_v_1;
+  goto native_l8_3;
+native_l8_3: ;
+  native_s_2 = (native_s_1 <= native_v_2);
+  if (native_s_2) {
+    goto native_l8_4;
+  } else {
+    goto native_l8_5;
+  }
+native_l8_4: ;
+  native_s_3 = native_s_1;
+  goto native_l8_6;
+native_l8_5: ;
+  native_s_3 = native_v_2;
+  goto native_l8_6;
+native_l8_6: ;
+  return native_s_3;
+}
+native_m0_type_0 native_m0_fn_9(native_m0_type_0 native_v_0, native_m0_type_0 native_v_1) {
+  native_m0_type_1 native_s_0;
+  native_m0_type_0 native_s_1;
+  native_s_0 = (native_v_0 <= native_v_1);
+  if (native_s_0) {
+    goto native_l9_1;
+  } else {
+    goto native_l9_2;
+  }
+native_l9_1: ;
+  native_s_1 = native_v_1;
+  goto native_l9_3;
+native_l9_2: ;
+  native_s_1 = native_v_0;
+  goto native_l9_3;
+native_l9_3: ;
+  return native_s_1;
+}
