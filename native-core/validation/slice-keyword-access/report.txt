@@ -1,0 +1,23 @@
+stage source-seal ACCEPTED
+stage source-to-typed ACCEPTED
+stage typed-to-native PENDING
+source-modules 1
+source-imports 0
+world-types 14
+world-functions 4
+world-abis 4
+projected-types 10
+lowered fn_0 record-left 1 blocks
+lowered fn_1 code-key 1 blocks
+lowered fn_2 map-has-code 4 blocks
+lowered fn_3 map-code-is 4 blocks
+obligation-projection PASS valid-ssa
+obligation-projection PASS exhaustive-matches
+obligation-projection PASS closed-layouts
+obligation-projection PASS checked-arithmetic
+obligation-projection PASS legal-abi
+obligation-projection PASS discharged-tokens
+obligation-projection PASS bounded-effects
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-KEYWORD-MAP-KEY: keyword access needs a Keyword-keyed map [wrong-key-type]
+pending TODO-NATIVE-FUNCTION-BODY: TODO-NATIVE-KEYWORD-ACCESS-TARGET: keyword access needs a closed map or known record field [missing-record-field]
+materialize OK module_0.h module_0.c

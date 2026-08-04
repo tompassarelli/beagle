@@ -1893,6 +1893,38 @@
                         (recur (+ field-position 1))))))]
             (if (accessorhitv0-found hit) hit (recur (+ position 1))))))))))
 
+(defn record-keyword-field
+  [types: (Vec core/TypeDef)
+   target: core/NativeId
+   keyword: String] -> AccessorHitV0
+  (let [target-definition: (U core/TypeDef Nil) (lookup-type types target)
+        owner: (U core/NativeId Nil)
+        (if (nil? target-definition)
+          nil
+          (let [shape: core/TypeShape (core/typedef-shape target-definition)]
+            (cond
+              (instance? native.core.RecordType shape) target
+              (instance? native.core.ReferenceType shape)
+              (core/referencetype-target-type shape)
+              :else nil)))]
+    (if (nil? owner)
+      (accessor-miss)
+      (let [definition: (U core/TypeDef Nil) (lookup-type types owner)]
+        (if (nil? definition)
+          (accessor-miss)
+          (let [shape: core/TypeShape (core/typedef-shape definition)]
+            (if (not (instance? native.core.RecordType shape))
+              (accessor-miss)
+              (loop [position: Int 0
+                     fields: (Vec core/TypeField) (core/recordtype-fields shape)]
+                (if (>= position (count fields))
+                  (accessor-miss)
+                  (let [field: core/TypeField (nth fields position)]
+                    (if (= keyword (core/typefield-name field))
+                      (->AccessorHitV0 true owner (core/typefield-id field)
+                        (core/typefield-type-id field))
+                      (recur (+ position 1) fields))))))))))))
+
 (defn union-variants-of
   [types: (Vec core/TypeDef)
    target: core/NativeId] -> (Vec core/TypeVariant)
@@ -4411,6 +4443,77 @@
                         (core/->SsaValueV0 result-id map-type)
                         key-ids value-ids (arena-value-id owner) equality))
                     result-id map-type false))))))
+
+        (= "kw-access" kind)
+        (let [keyword: String (fact-text index expr "keyword")
+              target-node: (U core/NativeId Nil)
+              (index-first-object index expr "target")]
+          (if (or (= "" keyword) (nil? target-node))
+            (fail-result state
+              "TODO-NATIVE-KEYWORD-ACCESS-SOURCE: keyword access needs a literal key and target")
+            (let [target: ExprResultV0
+                  (lower-expr env owner state target-node)
+                  current: BodyStateV0 (exprresultv0-state target)
+                  target-type: core/NativeId (exprresultv0-type-id target)
+                  field: AccessorHitV0
+                  (record-keyword-field types target-type keyword)]
+              (cond
+                (exprresultv0-terminated target) target
+
+                (state-blocked? current) (dead-result current)
+
+                (accessorhitv0-found field)
+                (let [result-id: core/NativeId
+                      (state-id current owner "keyword-field")]
+                  (->ExprResultV0
+                    (state-emit (state-bump current)
+                      (core/->FieldInstruction
+                        (core/->SsaValueV0 result-id
+                          (accessorhitv0-field-type field))
+                        (exprresultv0-value-id target)
+                        (accessorhitv0-field-id field)))
+                    result-id (accessorhitv0-field-type field) false))
+
+                (map-type? types target-type)
+                (let [key-type: core/NativeId (map-key-of types target-type)
+                      value-type: core/NativeId (map-value-of types target-type)
+                      result-type: (U core/NativeId Nil)
+                      (nullable-value-type-of types value-type)
+                      equality: (U core/ConcreteEqualityV0 Nil)
+                      (concrete-equality-for key-type)]
+                  (cond
+                    (not (same-id? key-type (keyword-type-id)))
+                    (fail-result current
+                      "TODO-NATIVE-KEYWORD-MAP-KEY: keyword access needs a Keyword-keyed map")
+
+                    (nil? result-type)
+                    (fail-result current
+                      "TODO-NATIVE-KEYWORD-MAP-RESULT: keyword access needs the map's closed nullable value type")
+
+                    (nil? equality)
+                    (fail-result current
+                      "TODO-NATIVE-KEYWORD-MAP-EQUALITY: keyword access needs closed Keyword equality")
+
+                    :else
+                    (let [key-id: core/NativeId
+                          (state-id current owner "keyword-key")
+                          keyed: BodyStateV0
+                          (state-emit (state-bump current)
+                            (core/->AtomInstruction
+                              (core/->SsaValueV0 key-id (keyword-type-id))
+                              (core/->KeywordAtom keyword)))
+                          result-id: core/NativeId
+                          (state-id keyed owner "keyword-get")]
+                      (->ExprResultV0
+                        (state-emit (state-bump keyed)
+                          (core/->MapGetInstructionV0
+                            (core/->SsaValueV0 result-id result-type)
+                            (exprresultv0-value-id target) key-id nil equality))
+                        result-id result-type false))))
+
+                :else
+                (fail-result current
+                  "TODO-NATIVE-KEYWORD-ACCESS-TARGET: keyword access needs a closed map or known record field")))))
 
         (or (= "call" kind)
           (and (= "static-call" kind)
