@@ -41,6 +41,14 @@
       (instance? native.core.ReferenceType shape)
       [(core/referencetype-target-type shape)]
 
+      (instance? native.core.FunctionType shape)
+      (let [rest-type: (U core/NativeId Nil)
+            (core/functiontype-rest-type shape)]
+        (vec (concat
+               (core/functiontype-parameter-types shape)
+               (if (nil? rest-type) [] [rest-type])
+               [(core/functiontype-return-type shape)])))
+
       (instance? native.core.OutcomeType shape)
       [(core/outcometype-value-type shape)
        (core/outcometype-failure-type shape)

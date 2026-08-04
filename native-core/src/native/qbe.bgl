@@ -332,6 +332,7 @@
     [(UnionType value) true]
     [(VectorType value) false]
     [(ReferenceType value) false]
+    [(FunctionType value) false]
     [(OutcomeType value) false]))
 
 (defn shape-atom-kind [shape: core/TypeShape] -> (U core/AtomKind Nil)
@@ -341,6 +342,7 @@
     [(UnionType value) nil]
     [(VectorType value) nil]
     [(ReferenceType value) nil]
+    [(FunctionType value) nil]
     [(OutcomeType value) nil]))
 
 (defn shape-reference-target [shape: core/TypeShape] -> (U core/NativeId Nil)
@@ -350,6 +352,7 @@
     [(UnionType value) nil]
     [(VectorType value) nil]
     [(ReferenceType value) (core/referencetype-target-type shape)]
+    [(FunctionType value) nil]
     [(OutcomeType value) nil]))
 
 ;; Signature position: aggregates name their QBE type, scalars their class.
@@ -1367,6 +1370,7 @@
                         (core/layoutdef-align-bytes element-layout))
                      0)))))]
           [(ReferenceType value) false]
+          [(FunctionType value) false]
           [(OutcomeType value) false])))))
 
 (defn atom-supported? [atom: core/NativeAtom] -> Bool

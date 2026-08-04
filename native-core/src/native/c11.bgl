@@ -69,6 +69,7 @@
       [(UnionType value) []]
       [(VectorType value) []]
       [(ReferenceType value) []]
+      [(FunctionType value) []]
       [(OutcomeType value) []])))
 
 (defn type-emitted?
@@ -228,6 +229,7 @@
       [(UnionType value) false]
       [(VectorType value) false]
       [(ReferenceType value) false]
+      [(FunctionType value) false]
       [(OutcomeType value) false])))
 
 (defn atom-supported? [atom: core/NativeAtom] -> Bool
@@ -397,6 +399,7 @@
         [(UnionType value) ""]
         [(VectorType value) ""]
         [(ReferenceType value) ""]
+        [(FunctionType value) ""]
         [(OutcomeType value) ""]))))
 
 (defn emit-types

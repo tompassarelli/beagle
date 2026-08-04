@@ -1022,6 +1022,79 @@
         (application-resolution source-type "U"
           (sourceindexv0-record-names index) resolutions))
 
+      (= "type-fn" kind)
+      (let [parameters-node: (U core/NativeId Nil)
+            (index-first-object index source-type "params")
+            parameter-sources: (Vec core/NativeId)
+            (if (nil? parameters-node)
+              []
+              (index-sequence-items index parameters-node))
+            rest-source: (U core/NativeId Nil)
+            (index-first-object index source-type "rest")
+            return-source: (U core/NativeId Nil)
+            (index-first-object index source-type "ret")
+            component-sources: (Vec core/NativeId)
+            (vec (concat parameter-sources
+                   (if (nil? rest-source) [] [rest-source])
+                   (if (nil? return-source) [] [return-source])))
+            resolutions: (Vec TypeResolutionV0)
+            (mapv
+              (fn [component: core/NativeId] -> TypeResolutionV0
+                (resolve-source-type index component))
+              component-sources)
+            parameter-count: Int (count parameter-sources)
+            parameter-types: (Vec core/NativeId)
+            (loop [position: Int 0 collected: (Vec core/NativeId) []]
+              (if (>= position parameter-count)
+                collected
+                (recur (+ position 1)
+                  (conj collected
+                    (typeresolutionv0-type-id (nth resolutions position))))))
+            rest-position: Int parameter-count
+            return-position: Int
+            (+ parameter-count (if (nil? rest-source) 0 1))
+            rest-type: (U core/NativeId Nil)
+            (if (nil? rest-source)
+              nil
+              (typeresolutionv0-type-id (nth resolutions rest-position)))
+            return-type: core/NativeId
+            (if (nil? return-source)
+              (type-id "LowerFailure")
+              (typeresolutionv0-type-id (nth resolutions return-position)))
+            parts: (Vec String)
+            (vec (concat
+                   (mapv
+                     (fn [parameter: core/NativeId] -> String
+                       (id-value parameter))
+                     parameter-types)
+                   [(if (nil? rest-type)
+                      "fixed"
+                      (str "rest:" (id-value rest-type)))
+                    "returns"
+                    (id-value return-type)]))
+            id: core/NativeId (lower-id "function-type" parts)
+            definitions: (Vec core/TypeDef)
+            (append-type-def
+              (resolution-definitions resolutions)
+              (core/->TypeDef id "Function"
+                (core/->FunctionType parameter-types rest-type return-type)))
+            diagnostics: (Vec core/DiagnosticV0)
+            (resolution-diagnostics resolutions)
+            valid: Bool
+            (and (some? return-source)
+              (every?
+                (fn [resolution: TypeResolutionV0] -> Bool
+                  (typeresolutionv0-valid resolution))
+                resolutions))]
+        (->TypeResolutionV0 id definitions
+          (if (some? return-source)
+            diagnostics
+            (conj diagnostics
+              (core/->DiagnosticV0
+                "LOWER-FUNCTION-TYPE-RETURN"
+                "function type has no return annotation")))
+          valid))
+
       :else
       (->TypeResolutionV0
         (type-id "LowerFailure")
@@ -5265,10 +5338,23 @@
     (worlds/canonical-record "reference"
       [(id-value (core/referencetype-target-type shape))])
 
-    :else
+    (instance? native.core.FunctionType shape)
+    (worlds/canonical-record "function"
+      [(worlds/canonical-record "parameters"
+         (mapv
+           (fn [parameter: core/NativeId] -> String (id-value parameter))
+           (core/functiontype-parameter-types shape)))
+       (let [rest-type: (U core/NativeId Nil)
+             (core/functiontype-rest-type shape)]
+         (if (nil? rest-type) "fixed" (id-value rest-type)))
+       (id-value (core/functiontype-return-type shape))])
+
+    (instance? native.core.OutcomeType shape)
     (worlds/canonical-record "outcome"
       [(id-value (core/outcometype-value-type shape))
-       (id-value (core/outcometype-failure-type shape))])))
+       (id-value (core/outcometype-failure-type shape))])
+
+    :else "invalid-type-shape"))
 
 (defn encode-type-def [definition: core/TypeDef] -> String
   (worlds/canonical-record "closed-type-v0"
@@ -5602,6 +5688,10 @@
             (instance? native.core.VectorType shape)
             (->LayoutMeasureV0 8 8 true "vector header reference")
 
+            (instance? native.core.FunctionType shape)
+            (->LayoutMeasureV0 8 8 false
+              "TODO-NATIVE-FUNCTION-LAYOUT: callable signatures have no closure layout or indirect-call ABI")
+
             (instance? native.core.RecordType shape)
             (let [fields: (Vec core/TypeField) (core/recordtype-fields shape)]
               (loop [index: Int 0 offset: Int 0 alignment: Int 1 closed: Bool true]
@@ -5643,7 +5733,7 @@
 
             ;; Measured over the failure union's payloads, not its boxed size:
             ;; layout-shape-for flattens those alternatives into the Outcome.
-            :else
+            (instance? native.core.OutcomeType shape)
             (let [value-measure: LayoutMeasureV0
                   (measure-type types (core/outcometype-value-type shape) (+ depth 1))
                   variants: (Vec core/TypeVariant)
@@ -5676,7 +5766,10 @@
                 alignment
                 (and (layoutmeasurev0-closed value-measure)
                      (layoutmeasurev0-closed payloads))
-                "outcome"))))))))
+                "outcome"))
+
+            :else
+            (->LayoutMeasureV0 8 8 false "unknown native type shape")))))))
 
 (defn field-layouts
   [types: (Vec core/TypeDef)
@@ -5753,12 +5846,20 @@
       (instance? native.core.ReferenceType shape)
       (core/->ReferenceShapeV0 (core/referencetype-target-type shape))
 
-      :else
+      ;; Placeholder only: resolve-layout marks FunctionType unclosed, so this
+      ;; reference-sized shape can never authorize a closure ABI.
+      (instance? native.core.FunctionType shape)
+      (core/->ReferenceShapeV0 (core/typedef-id definition))
+
+      (instance? native.core.OutcomeType shape)
       (core/->UnionShapeV0
         (type-id "UnionTag")
         0
         (variant-layouts types
-          (outcome-variants types (core/outcometype-failure-type shape)))))))
+          (outcome-variants types (core/outcometype-failure-type shape))))
+
+      :else
+      (core/->ReferenceShapeV0 (core/typedef-id definition)))))
 
 (defn resolve-layout
   [types: (Vec core/TypeDef)

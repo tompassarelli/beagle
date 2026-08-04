@@ -39,6 +39,12 @@
   (UnionType [variants :- (Vec TypeVariant)])
   (VectorType [element-type :- NativeId])
   (ReferenceType [target-type :- NativeId])
+  ;; A closed callable signature is semantic type information only. Physical
+  ;; closure layout and indirect-call ABI remain separate, explicit obligations.
+  (FunctionType
+    [parameter-types: (Vec NativeId)
+     rest-type: (U NativeId Nil)
+     return-type: NativeId])
   (OutcomeType
     [value-type: NativeId
      failure-type: NativeId]))
@@ -642,6 +648,7 @@
        variants)]
     [(VectorType element-type) []]
     [(ReferenceType target-type) []]
+    [(FunctionType parameter-types rest-type return-type) []]
     [(OutcomeType value-type failure-type) []]))
 
 (defn type-owned-ids [type-def :- TypeDef] :- (Vec NativeId)
@@ -740,6 +747,10 @@
     [(UnionType variants) (type-variants-refs-closed? variants known-types)]
     [(VectorType element-type) (id-in? known-types element-type)]
     [(ReferenceType target-type) (id-in? known-types target-type)]
+    [(FunctionType parameter-types rest-type return-type)
+     (and (ids-in? parameter-types known-types)
+       (optional-id-in? rest-type known-types)
+       (id-in? known-types return-type))]
     [(OutcomeType value-type failure-type)
      (and (id-in? known-types value-type) (id-in? known-types failure-type))]))
 
