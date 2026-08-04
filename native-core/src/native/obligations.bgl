@@ -497,6 +497,56 @@
                 (union-payload-valid? layouts parent-size variant))
         variants))))
 
+(defn collection-order-exact?
+  [type-order :- Any
+   layout-order :- Any] :- Bool
+  (and (not (nil? type-order))
+    (not (nil? layout-order))
+    (= (get type-order :token false) (get layout-order :token false))))
+
+(defn map-layout-valid?
+  [type-shape :- Any
+   layout-shape :- Any
+   layouts :- (Vec core/LayoutDef)
+   parent-size :- Int] :- Bool
+  (let [key-type :- core/NativeId (get type-shape :key-type)
+        value-type :- core/NativeId (get type-shape :value-type)
+        key-layout :- (U core/LayoutDef Nil) (find-layout layouts key-type)
+        value-layout :- (U core/LayoutDef Nil) (find-layout layouts value-type)]
+    (and (not (nil? key-layout))
+      (not (nil? value-layout))
+      (dynamic-id= key-type (get layout-shape :key-type nil))
+      (dynamic-id= value-type (get layout-shape :value-type nil))
+      (= (get layout-shape :key-stride-bytes 0)
+        (core/layoutdef-size-bytes key-layout))
+      (= (get layout-shape :key-align-bytes 0)
+        (core/layoutdef-align-bytes key-layout))
+      (= (get layout-shape :value-stride-bytes 0)
+        (core/layoutdef-size-bytes value-layout))
+      (= (get layout-shape :value-align-bytes 0)
+        (core/layoutdef-align-bytes value-layout))
+      (collection-order-exact? (get type-shape :iteration-order nil)
+        (get layout-shape :iteration-order nil))
+      (> parent-size 0))))
+
+(defn set-layout-valid?
+  [type-shape :- Any
+   layout-shape :- Any
+   layouts :- (Vec core/LayoutDef)
+   parent-size :- Int] :- Bool
+  (let [element-type :- core/NativeId (get type-shape :element-type)
+        element-layout :- (U core/LayoutDef Nil)
+        (find-layout layouts element-type)]
+    (and (not (nil? element-layout))
+      (dynamic-id= element-type (get layout-shape :element-type nil))
+      (= (get layout-shape :stride-bytes 0)
+        (core/layoutdef-size-bytes element-layout))
+      (= (get layout-shape :align-bytes 0)
+        (core/layoutdef-align-bytes element-layout))
+      (collection-order-exact? (get type-shape :iteration-order nil)
+        (get layout-shape :iteration-order nil))
+      (> parent-size 0))))
+
 (defn layout-shape-exact?
   [types :- (Vec core/TypeDef)
    type-shape :- Any
@@ -517,6 +567,11 @@
     (some? (get type-shape :variants nil))
     (and (some? (get layout-shape :variants nil))
       (union-layout-valid? type-shape layout-shape layouts parent-size))
+    (some? (get type-shape :key-type nil))
+    (map-layout-valid? type-shape layout-shape layouts parent-size)
+    (and (some? (get type-shape :element-type nil))
+      (some? (get type-shape :iteration-order nil)))
+    (set-layout-valid? type-shape layout-shape layouts parent-size)
     (some? (get type-shape :element-type nil))
     (let [stride :- Int (get layout-shape :stride-bytes 0)
           element-type :- core/NativeId (get type-shape :element-type)
