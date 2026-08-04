@@ -181,6 +181,20 @@
     (instance? native.core.VecPushInstruction instruction) true
     (instance? native.core.VecEmptyInstruction instruction) true
     (instance? native.core.VecConcatInstruction instruction) true
+    (instance? native.core.MapLiteralInstructionV0 instruction) true
+    (instance? native.core.SetLiteralInstructionV0 instruction) true
+    (instance? native.core.MapCountInstructionV0 instruction) true
+    (instance? native.core.MapGetInstructionV0 instruction) true
+    (instance? native.core.MapContainsInstructionV0 instruction) true
+    (instance? native.core.MapAssocInstructionV0 instruction) true
+    (instance? native.core.MapDissocInstructionV0 instruction) true
+    (instance? native.core.MapKeysInstructionV0 instruction) true
+    (instance? native.core.MapValuesInstructionV0 instruction) true
+    (instance? native.core.SetCountInstructionV0 instruction) true
+    (instance? native.core.SetContainsInstructionV0 instruction) true
+    (instance? native.core.SetConjInstructionV0 instruction) true
+    (instance? native.core.SetDisjInstructionV0 instruction) true
+    (instance? native.core.SetVectorInstructionV0 instruction) true
     (instance? native.core.ArenaInstruction instruction) true
     (instance? native.core.TextLengthInstruction instruction) true
     (instance? native.core.TextIndexOfInstruction instruction) true
@@ -713,6 +727,116 @@
             (c17/layout-for-type layouts (core/vectorshapev0-element-type shape))]
         (if (nil? element) 1 (core/layoutdef-align-bytes element))))))
 
+(defn collection-layout-of
+  [layouts: (Vec core/LayoutDef)
+   collection-type: core/NativeId] -> core/LayoutShapeV0
+  (let [layout: (U core/LayoutDef Nil)
+        (c17/layout-for-type layouts collection-type)]
+    (if (nil? layout)
+      (core/->ReferenceShapeV0 collection-type)
+      (core/layoutdef-shape layout))))
+
+(defn map-key-type
+  [layouts: (Vec core/LayoutDef)
+   map-type: core/NativeId] -> core/NativeId
+  (let [shape: core/LayoutShapeV0 (collection-layout-of layouts map-type)]
+    (if (instance? native.core.MapShapeV0 shape)
+      (core/mapshapev0-key-type shape)
+      map-type)))
+
+(defn map-value-type
+  [layouts: (Vec core/LayoutDef)
+   map-type: core/NativeId] -> core/NativeId
+  (let [shape: core/LayoutShapeV0 (collection-layout-of layouts map-type)]
+    (if (instance? native.core.MapShapeV0 shape)
+      (core/mapshapev0-value-type shape)
+      map-type)))
+
+(defn map-key-stride
+  [layouts: (Vec core/LayoutDef)
+   map-type: core/NativeId] -> Int
+  (let [shape: core/LayoutShapeV0 (collection-layout-of layouts map-type)]
+    (if (instance? native.core.MapShapeV0 shape)
+      (core/mapshapev0-key-stride-bytes shape)
+      0)))
+
+(defn map-key-alignment
+  [layouts: (Vec core/LayoutDef)
+   map-type: core/NativeId] -> Int
+  (let [shape: core/LayoutShapeV0 (collection-layout-of layouts map-type)]
+    (if (instance? native.core.MapShapeV0 shape)
+      (core/mapshapev0-key-align-bytes shape)
+      1)))
+
+(defn map-value-stride
+  [layouts: (Vec core/LayoutDef)
+   map-type: core/NativeId] -> Int
+  (let [shape: core/LayoutShapeV0 (collection-layout-of layouts map-type)]
+    (if (instance? native.core.MapShapeV0 shape)
+      (core/mapshapev0-value-stride-bytes shape)
+      0)))
+
+(defn map-value-alignment
+  [layouts: (Vec core/LayoutDef)
+   map-type: core/NativeId] -> Int
+  (let [shape: core/LayoutShapeV0 (collection-layout-of layouts map-type)]
+    (if (instance? native.core.MapShapeV0 shape)
+      (core/mapshapev0-value-align-bytes shape)
+      1)))
+
+(defn set-element-type
+  [layouts: (Vec core/LayoutDef)
+   set-type: core/NativeId] -> core/NativeId
+  (let [shape: core/LayoutShapeV0 (collection-layout-of layouts set-type)]
+    (if (instance? native.core.SetShapeV0 shape)
+      (core/setshapev0-element-type shape)
+      set-type)))
+
+(defn set-stride
+  [layouts: (Vec core/LayoutDef)
+   set-type: core/NativeId] -> Int
+  (let [shape: core/LayoutShapeV0 (collection-layout-of layouts set-type)]
+    (if (instance? native.core.SetShapeV0 shape)
+      (core/setshapev0-stride-bytes shape)
+      0)))
+
+(defn set-alignment
+  [layouts: (Vec core/LayoutDef)
+   set-type: core/NativeId] -> Int
+  (let [shape: core/LayoutShapeV0 (collection-layout-of layouts set-type)]
+    (if (instance? native.core.SetShapeV0 shape)
+      (core/setshapev0-align-bytes shape)
+      1)))
+
+(defn concrete-equality-name [equality: core/ConcreteEqualityV0] -> String
+  (cond
+    (instance? native.core.BoolEqualityV0 equality)
+    "NATIVE_COLLECTION_EQ_BOOL"
+    (instance? native.core.I64EqualityV0 equality)
+    "NATIVE_COLLECTION_EQ_I64"
+    (instance? native.core.F64EqualityV0 equality)
+    "NATIVE_COLLECTION_EQ_F64"
+    (instance? native.core.TextEqualityV0 equality)
+    "NATIVE_COLLECTION_EQ_TEXT"
+    :else "NATIVE_COLLECTION_EQ_KEYWORD"))
+
+(defn emit-value-list
+  [function: core/FunctionDef
+   slots: (Vec ValueSlotV0)
+   values: (Vec core/NativeId)] -> String
+  (loop [position: Int 0 result: String ""]
+    (if (>= position (count values))
+      result
+      (recur (+ position 1)
+        (str result (if (= position 0) " " ", ")
+          (value-name function slots (nth values position)))))))
+
+(defn collection-symbol
+  [prefix: String
+   slots: (Vec ValueSlotV0)
+   result-id: core/NativeId] -> String
+  (str "native_" prefix "_" (slot-index slots result-id)))
+
 (defn parts-symbol
   [slots: (Vec ValueSlotV0)
    result-id: core/NativeId] -> String
@@ -733,7 +857,6 @@
       (value-name function slots operand)
       (str "native_text_from_int(" arena ", "
         (value-name function slots operand) ")"))))
-
 (defn emit-text-builtin
   [function: core/FunctionDef
    slots: (Vec ValueSlotV0)
@@ -792,6 +915,60 @@
       (value-name function slots (core/textrepeatv0-arena-id operation)) ", "
       (value-name function slots (core/textrepeatv0-source-id operation)) ", "
       (value-name function slots (core/textrepeatv0-count-id operation)) ");\n")))
+
+(defn emit-map-get
+  [types: (Vec core/TypeDef)
+   layouts: (Vec core/LayoutDef)
+   module-index: Int
+   function: core/FunctionDef
+   slots: (Vec ValueSlotV0)
+   instruction: core/MapGetInstructionV0] -> String
+  (let [result: core/SsaValueV0 (core/mapgetinstructionv0-result instruction)
+        result-id: core/NativeId (core/ssavaluev0-id result)
+        target: String (value-name function slots result-id)
+        source: core/NativeId (core/mapgetinstructionv0-source-id instruction)
+        source-type: core/NativeId (slot-type function slots source)
+        value-type: core/NativeId (map-value-type layouts source-type)
+        default: (U core/NativeId Nil)
+        (core/mapgetinstructionv0-default-id instruction)
+        hit: String (collection-symbol "map_hit" slots result-id)
+        call: String
+        (str "native_map_get(" (value-name function slots source) ", &"
+          (value-name function slots (core/mapgetinstructionv0-key-id instruction))
+          ", "
+          (concrete-equality-name
+            (core/mapgetinstructionv0-key-equality instruction))
+          ")")]
+    (if (some? default)
+      (str "  {\n    const void *" hit " = " call ";\n"
+        "    " target " = (" hit " == NULL) ? "
+        (value-name function slots default) " : *(const "
+        (c17/c-type types module-index value-type) " *)" hit ";\n  }\n")
+      (let [result-type: core/NativeId (core/ssavaluev0-type-id result)
+            absent-tag: Int (absent-variant-tag types layouts result-type)]
+        (if (core/native-id= result-type value-type)
+          (if (< absent-tag 0)
+            ""
+            (str "  {\n    const void *" hit " = " call ";\n"
+              "    if (" hit " != NULL) {\n"
+              "      " target " = *(const "
+              (c17/c-type types module-index value-type) " *)" hit ";\n"
+              "    } else {\n      memset(&" target ", 0, sizeof " target ");\n"
+              "      " target ".tag = INT64_C(" absent-tag ");\n"
+              "    }\n  }\n"))
+          (let [value-tag: Int
+                (variant-tag-for-payload layouts result-type value-type)]
+            (if (or (< value-tag 0) (< absent-tag 0))
+              ""
+              (str "  {\n    const void *" hit " = " call ";\n"
+                "    memset(&" target ", 0, sizeof " target ");\n"
+                "    if (" hit " != NULL) {\n"
+                "      " target ".tag = INT64_C(" value-tag ");\n"
+                "      " target ".payload.variant_" value-tag " = *(const "
+                (c17/c-type types module-index value-type) " *)" hit ";\n"
+                "    } else {\n"
+                "      " target ".tag = INT64_C(" absent-tag ");\n"
+                "    }\n  }\n"))))))))
 
 (defn emit-instruction
   [types: (Vec core/TypeDef)
@@ -1052,6 +1229,215 @@
             (core/vecconcatinstruction-right-id instruction))
           ", INT64_C(" (vector-stride layouts vector-type) "), (size_t)"
           (vector-element-alignment layouts vector-type) ");\n"))
+
+      (instance? native.core.MapLiteralInstructionV0 instruction)
+      (let [map-type: core/NativeId (core/ssavaluev0-type-id result)
+            keys: (Vec core/NativeId)
+            (core/mapliteralinstructionv0-key-ids instruction)
+            values: (Vec core/NativeId)
+            (core/mapliteralinstructionv0-value-ids instruction)
+            arena: String
+            (str "(native_arena *)"
+              (value-name function slots
+                (core/mapliteralinstructionv0-arena-id instruction)))
+            equality: String
+            (concrete-equality-name
+              (core/mapliteralinstructionv0-key-equality instruction))]
+        (if (= 0 (count keys))
+          (str "  " target " = native_map_from_arrays(" arena
+            ", NULL, NULL, INT64_C(0), INT64_C("
+            (map-key-stride layouts map-type) "), (size_t)"
+            (map-key-alignment layouts map-type) ", INT64_C("
+            (map-value-stride layouts map-type) "), (size_t)"
+            (map-value-alignment layouts map-type) ", " equality ");\n")
+          (let [key-array: String
+                (collection-symbol "map_keys" slots (core/ssavaluev0-id result))
+                value-array: String
+                (collection-symbol "map_values" slots (core/ssavaluev0-id result))]
+            (str "  {\n    const "
+              (c17/c-type types module-index (map-key-type layouts map-type))
+              " " key-array "[" (count keys) "] = {"
+              (emit-value-list function slots keys) " };\n    const "
+              (c17/c-type types module-index (map-value-type layouts map-type))
+              " " value-array "[" (count values) "] = {"
+              (emit-value-list function slots values) " };\n    "
+              target " = native_map_from_arrays(" arena ", " key-array ", "
+              value-array ", INT64_C(" (count keys) "), INT64_C("
+              (map-key-stride layouts map-type) "), (size_t)"
+              (map-key-alignment layouts map-type) ", INT64_C("
+              (map-value-stride layouts map-type) "), (size_t)"
+              (map-value-alignment layouts map-type) ", " equality ");\n  }\n"))))
+
+      (instance? native.core.SetLiteralInstructionV0 instruction)
+      (let [set-type: core/NativeId (core/ssavaluev0-type-id result)
+            values: (Vec core/NativeId)
+            (core/setliteralinstructionv0-value-ids instruction)
+            arena: String
+            (str "(native_arena *)"
+              (value-name function slots
+                (core/setliteralinstructionv0-arena-id instruction)))
+            equality: String
+            (concrete-equality-name
+              (core/setliteralinstructionv0-element-equality instruction))]
+        (if (= 0 (count values))
+          (str "  " target " = native_set_from_array(" arena
+            ", NULL, INT64_C(0), INT64_C(" (set-stride layouts set-type)
+            "), (size_t)" (set-alignment layouts set-type) ", " equality ");\n")
+          (let [array: String
+                (collection-symbol "set_values" slots (core/ssavaluev0-id result))]
+            (str "  {\n    const "
+              (c17/c-type types module-index (set-element-type layouts set-type))
+              " " array "[" (count values) "] = {"
+              (emit-value-list function slots values) " };\n    "
+              target " = native_set_from_array(" arena ", " array
+              ", INT64_C(" (count values) "), INT64_C("
+              (set-stride layouts set-type) "), (size_t)"
+              (set-alignment layouts set-type) ", " equality ");\n  }\n"))))
+
+      (instance? native.core.MapCountInstructionV0 instruction)
+      (str "  " target " = native_map_count("
+        (value-name function slots
+          (core/mapcountinstructionv0-source-id instruction))
+        ");\n")
+
+      (instance? native.core.MapGetInstructionV0 instruction)
+      (emit-map-get types layouts module-index function slots instruction)
+
+      (instance? native.core.MapContainsInstructionV0 instruction)
+      (str "  " target " = native_map_contains("
+        (value-name function slots
+          (core/mapcontainsinstructionv0-source-id instruction))
+        ", &"
+        (value-name function slots
+          (core/mapcontainsinstructionv0-key-id instruction))
+        ", "
+        (concrete-equality-name
+          (core/mapcontainsinstructionv0-key-equality instruction))
+        ");\n")
+
+      (instance? native.core.MapAssocInstructionV0 instruction)
+      (let [map-type: core/NativeId (core/ssavaluev0-type-id result)
+            arena: String
+            (str "(native_arena *)"
+              (value-name function slots
+                (core/mapassocinstructionv0-arena-id instruction)))]
+        (str "  " target " = native_map_assoc(" arena ", "
+          (value-name function slots
+            (core/mapassocinstructionv0-source-id instruction))
+          ", &"
+          (value-name function slots
+            (core/mapassocinstructionv0-key-id instruction))
+          ", &"
+          (value-name function slots
+            (core/mapassocinstructionv0-value-id instruction))
+          ", INT64_C(" (map-key-stride layouts map-type) "), (size_t)"
+          (map-key-alignment layouts map-type) ", INT64_C("
+          (map-value-stride layouts map-type) "), (size_t)"
+          (map-value-alignment layouts map-type) ", "
+          (concrete-equality-name
+            (core/mapassocinstructionv0-key-equality instruction))
+          ");\n"))
+
+      (instance? native.core.MapDissocInstructionV0 instruction)
+      (let [map-type: core/NativeId (core/ssavaluev0-type-id result)
+            arena: String
+            (str "(native_arena *)"
+              (value-name function slots
+                (core/mapdissocinstructionv0-arena-id instruction)))]
+        (str "  " target " = native_map_dissoc(" arena ", "
+          (value-name function slots
+            (core/mapdissocinstructionv0-source-id instruction))
+          ", &"
+          (value-name function slots
+            (core/mapdissocinstructionv0-key-id instruction))
+          ", INT64_C(" (map-key-stride layouts map-type) "), (size_t)"
+          (map-key-alignment layouts map-type) ", INT64_C("
+          (map-value-stride layouts map-type) "), (size_t)"
+          (map-value-alignment layouts map-type) ", "
+          (concrete-equality-name
+            (core/mapdissocinstructionv0-key-equality instruction))
+          ");\n"))
+
+      (instance? native.core.MapKeysInstructionV0 instruction)
+      (let [source: core/NativeId (core/mapkeysinstructionv0-source-id instruction)
+            map-type: core/NativeId (slot-type function slots source)]
+        (str "  " target " = native_map_keys((native_arena *)"
+          (value-name function slots
+            (core/mapkeysinstructionv0-arena-id instruction))
+          ", " (value-name function slots source) ", (size_t)"
+          (map-key-alignment layouts map-type) ");\n"))
+
+      (instance? native.core.MapValuesInstructionV0 instruction)
+      (let [source: core/NativeId
+            (core/mapvaluesinstructionv0-source-id instruction)
+            map-type: core/NativeId (slot-type function slots source)]
+        (str "  " target " = native_map_values((native_arena *)"
+          (value-name function slots
+            (core/mapvaluesinstructionv0-arena-id instruction))
+          ", " (value-name function slots source) ", (size_t)"
+          (map-value-alignment layouts map-type) ");\n"))
+
+      (instance? native.core.SetCountInstructionV0 instruction)
+      (str "  " target " = native_set_count("
+        (value-name function slots
+          (core/setcountinstructionv0-source-id instruction))
+        ");\n")
+
+      (instance? native.core.SetContainsInstructionV0 instruction)
+      (str "  " target " = native_set_contains("
+        (value-name function slots
+          (core/setcontainsinstructionv0-source-id instruction))
+        ", &"
+        (value-name function slots
+          (core/setcontainsinstructionv0-value-id instruction))
+        ", "
+        (concrete-equality-name
+          (core/setcontainsinstructionv0-element-equality instruction))
+        ");\n")
+
+      (instance? native.core.SetConjInstructionV0 instruction)
+      (let [set-type: core/NativeId (core/ssavaluev0-type-id result)]
+        (str "  " target " = native_set_conj((native_arena *)"
+          (value-name function slots
+            (core/setconjinstructionv0-arena-id instruction))
+          ", "
+          (value-name function slots
+            (core/setconjinstructionv0-source-id instruction))
+          ", &"
+          (value-name function slots
+            (core/setconjinstructionv0-value-id instruction))
+          ", INT64_C(" (set-stride layouts set-type) "), (size_t)"
+          (set-alignment layouts set-type) ", "
+          (concrete-equality-name
+            (core/setconjinstructionv0-element-equality instruction))
+          ");\n"))
+
+      (instance? native.core.SetDisjInstructionV0 instruction)
+      (let [set-type: core/NativeId (core/ssavaluev0-type-id result)]
+        (str "  " target " = native_set_disj((native_arena *)"
+          (value-name function slots
+            (core/setdisjinstructionv0-arena-id instruction))
+          ", "
+          (value-name function slots
+            (core/setdisjinstructionv0-source-id instruction))
+          ", &"
+          (value-name function slots
+            (core/setdisjinstructionv0-value-id instruction))
+          ", INT64_C(" (set-stride layouts set-type) "), (size_t)"
+          (set-alignment layouts set-type) ", "
+          (concrete-equality-name
+            (core/setdisjinstructionv0-element-equality instruction))
+          ");\n"))
+
+      (instance? native.core.SetVectorInstructionV0 instruction)
+      (let [source: core/NativeId
+            (core/setvectorinstructionv0-source-id instruction)
+            set-type: core/NativeId (slot-type function slots source)]
+        (str "  " target " = native_set_vector((native_arena *)"
+          (value-name function slots
+            (core/setvectorinstructionv0-arena-id instruction))
+          ", " (value-name function slots source) ", (size_t)"
+          (set-alignment layouts set-type) ");\n"))
 
       (instance? native.core.CallInstruction instruction)
       (str "  " target " = "

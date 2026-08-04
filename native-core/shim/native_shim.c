@@ -161,6 +161,448 @@ native_vec *native_vec_concat(native_arena *arena, const native_vec *left,
   return result;
 }
 
+static size_t native_collection_bytes(int64_t count, int64_t stride) {
+  if ((count < INT64_C(0)) || (stride <= INT64_C(0))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  if ((uint64_t)count > ((uint64_t)SIZE_MAX / (uint64_t)stride)) {
+    native_trap(NATIVE_TRAP_OVERFLOW);
+  }
+  return (size_t)((uint64_t)count * (uint64_t)stride);
+}
+
+static void native_collection_check_equality(
+    native_collection_equality equality) {
+  switch (equality) {
+  case NATIVE_COLLECTION_EQ_BOOL:
+  case NATIVE_COLLECTION_EQ_I64:
+  case NATIVE_COLLECTION_EQ_F64:
+  case NATIVE_COLLECTION_EQ_TEXT:
+  case NATIVE_COLLECTION_EQ_KEYWORD:
+    return;
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+}
+
+static bool native_collection_equal(const void *left, const void *right,
+                                    native_collection_equality equality) {
+  if ((left == NULL) || (right == NULL)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_collection_check_equality(equality);
+  switch (equality) {
+  case NATIVE_COLLECTION_EQ_BOOL: {
+    bool left_value;
+    bool right_value;
+    memcpy(&left_value, left, sizeof left_value);
+    memcpy(&right_value, right, sizeof right_value);
+    return left_value == right_value;
+  }
+  case NATIVE_COLLECTION_EQ_I64: {
+    int64_t left_value;
+    int64_t right_value;
+    memcpy(&left_value, left, sizeof left_value);
+    memcpy(&right_value, right, sizeof right_value);
+    return left_value == right_value;
+  }
+  case NATIVE_COLLECTION_EQ_F64: {
+    double left_value;
+    double right_value;
+    memcpy(&left_value, left, sizeof left_value);
+    memcpy(&right_value, right, sizeof right_value);
+    return left_value == right_value;
+  }
+  case NATIVE_COLLECTION_EQ_TEXT: {
+    uint64_t left_value;
+    uint64_t right_value;
+    memcpy(&left_value, left, sizeof left_value);
+    memcpy(&right_value, right, sizeof right_value);
+    return native_text_eq(left_value, right_value);
+  }
+  case NATIVE_COLLECTION_EQ_KEYWORD: {
+    uint64_t left_value;
+    uint64_t right_value;
+    memcpy(&left_value, left, sizeof left_value);
+    memcpy(&right_value, right, sizeof right_value);
+    return left_value == right_value;
+  }
+  default:
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+}
+
+static native_map *native_map_new(native_arena *arena, int64_t capacity,
+                                  int64_t key_stride, size_t key_alignment,
+                                  int64_t value_stride,
+                                  size_t value_alignment) {
+  native_map *map;
+  size_t key_bytes = native_collection_bytes(capacity, key_stride);
+  size_t value_bytes = native_collection_bytes(capacity, value_stride);
+  map = (native_map *)native_arena_alloc(arena, sizeof(native_map),
+                                         _Alignof(native_map));
+  map->keys = (key_bytes == 0U)
+                  ? NULL
+                  : native_arena_alloc(arena, key_bytes, key_alignment);
+  map->values = (value_bytes == 0U)
+                    ? NULL
+                    : native_arena_alloc(arena, value_bytes, value_alignment);
+  map->length = INT64_C(0);
+  map->capacity = capacity;
+  map->key_stride = key_stride;
+  map->value_stride = value_stride;
+  return map;
+}
+
+static void native_map_check(const native_map *map) {
+  if ((map == NULL) || (map->length < INT64_C(0)) ||
+      (map->capacity < map->length) || (map->key_stride <= INT64_C(0)) ||
+      (map->value_stride <= INT64_C(0)) ||
+      ((map->capacity == INT64_C(0)) &&
+       ((map->keys != NULL) || (map->values != NULL))) ||
+      ((map->capacity > INT64_C(0)) &&
+       ((map->keys == NULL) || (map->values == NULL)))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+}
+
+static void native_map_check_shape(const native_map *map, int64_t key_stride,
+                                   int64_t value_stride) {
+  native_map_check(map);
+  if ((map->key_stride != key_stride) ||
+      (map->value_stride != value_stride)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+}
+
+int64_t native_map_count(const native_map *map) {
+  native_map_check(map);
+  return map->length;
+}
+
+const void *native_map_key_at(const native_map *map, int64_t index) {
+  native_map_check(map);
+  if ((index < INT64_C(0)) || (index >= map->length)) {
+    native_trap(NATIVE_TRAP_OUT_OF_RANGE);
+  }
+  return (const uint8_t *)map->keys +
+         native_collection_bytes(index, map->key_stride);
+}
+
+const void *native_map_value_at(const native_map *map, int64_t index) {
+  native_map_check(map);
+  if ((index < INT64_C(0)) || (index >= map->length)) {
+    native_trap(NATIVE_TRAP_OUT_OF_RANGE);
+  }
+  return (const uint8_t *)map->values +
+         native_collection_bytes(index, map->value_stride);
+}
+
+static int64_t native_map_find(const native_map *map, const void *key,
+                               native_collection_equality equality) {
+  int64_t index;
+  native_map_check(map);
+  if (key == NULL) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_collection_check_equality(equality);
+  for (index = INT64_C(0); index < map->length; index++) {
+    if (native_collection_equal(native_map_key_at(map, index), key, equality)) {
+      return index;
+    }
+  }
+  return INT64_C(-1);
+}
+
+const void *native_map_get(const native_map *map, const void *key,
+                           native_collection_equality equality) {
+  int64_t index = native_map_find(map, key, equality);
+  return (index < INT64_C(0)) ? NULL : native_map_value_at(map, index);
+}
+
+bool native_map_contains(const native_map *map, const void *key,
+                         native_collection_equality equality) {
+  return native_map_find(map, key, equality) >= INT64_C(0);
+}
+
+native_map *native_map_from_arrays(
+    native_arena *arena, const void *keys, const void *values, int64_t count,
+    int64_t key_stride, size_t key_alignment, int64_t value_stride,
+    size_t value_alignment, native_collection_equality equality) {
+  native_map *map;
+  int64_t index;
+  native_collection_check_equality(equality);
+  if (((keys == NULL) || (values == NULL)) && (count != INT64_C(0))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  map = native_map_new(arena, count, key_stride, key_alignment, value_stride,
+                       value_alignment);
+  for (index = INT64_C(0); index < count; index++) {
+    const void *key = (const uint8_t *)keys +
+                      native_collection_bytes(index, key_stride);
+    const void *value = (const uint8_t *)values +
+                        native_collection_bytes(index, value_stride);
+    int64_t prior = native_map_find(map, key, equality);
+    if (prior >= INT64_C(0)) {
+      memcpy((uint8_t *)map->values +
+                 native_collection_bytes(prior, value_stride),
+             value, (size_t)value_stride);
+    } else {
+      memcpy((uint8_t *)map->keys +
+                 native_collection_bytes(map->length, key_stride),
+             key, (size_t)key_stride);
+      memcpy((uint8_t *)map->values +
+                 native_collection_bytes(map->length, value_stride),
+             value, (size_t)value_stride);
+      map->length += INT64_C(1);
+    }
+  }
+  return map;
+}
+
+native_map *native_map_assoc(
+    native_arena *arena, native_map *map, const void *key, const void *value,
+    int64_t key_stride, size_t key_alignment, int64_t value_stride,
+    size_t value_alignment, native_collection_equality equality) {
+  int64_t prior;
+  int64_t length;
+  native_map *result;
+  native_map_check_shape(map, key_stride, value_stride);
+  if ((key == NULL) || (value == NULL)) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  prior = native_map_find(map, key, equality);
+  if ((prior < INT64_C(0)) && (map->length == INT64_MAX)) {
+    native_trap(NATIVE_TRAP_OVERFLOW);
+  }
+  length = map->length + ((prior < INT64_C(0)) ? INT64_C(1) : INT64_C(0));
+  result = native_map_new(arena, length, key_stride, key_alignment, value_stride,
+                          value_alignment);
+  if (map->length > INT64_C(0)) {
+    memcpy(result->keys, map->keys,
+           native_collection_bytes(map->length, key_stride));
+    memcpy(result->values, map->values,
+           native_collection_bytes(map->length, value_stride));
+  }
+  result->length = length;
+  if (prior >= INT64_C(0)) {
+    memcpy((uint8_t *)result->values +
+               native_collection_bytes(prior, value_stride),
+           value, (size_t)value_stride);
+  } else {
+    memcpy((uint8_t *)result->keys +
+               native_collection_bytes(map->length, key_stride),
+           key, (size_t)key_stride);
+    memcpy((uint8_t *)result->values +
+               native_collection_bytes(map->length, value_stride),
+           value, (size_t)value_stride);
+  }
+  return result;
+}
+
+native_map *native_map_dissoc(
+    native_arena *arena, native_map *map, const void *key, int64_t key_stride,
+    size_t key_alignment, int64_t value_stride, size_t value_alignment,
+    native_collection_equality equality) {
+  int64_t removed;
+  int64_t source_index;
+  native_map *result;
+  native_map_check_shape(map, key_stride, value_stride);
+  removed = native_map_find(map, key, equality);
+  if (removed < INT64_C(0)) {
+    return map;
+  }
+  result = native_map_new(arena, map->length - INT64_C(1), key_stride,
+                          key_alignment, value_stride, value_alignment);
+  for (source_index = INT64_C(0); source_index < map->length; source_index++) {
+    if (source_index != removed) {
+      memcpy((uint8_t *)result->keys +
+                 native_collection_bytes(result->length, key_stride),
+             native_map_key_at(map, source_index), (size_t)key_stride);
+      memcpy((uint8_t *)result->values +
+                 native_collection_bytes(result->length, value_stride),
+             native_map_value_at(map, source_index), (size_t)value_stride);
+      result->length += INT64_C(1);
+    }
+  }
+  return result;
+}
+
+native_vec *native_map_keys(native_arena *arena, const native_map *map,
+                            size_t key_alignment) {
+  native_vec *result;
+  native_map_check(map);
+  result = native_vec_new(arena, map->length, map->key_stride, key_alignment);
+  if (map->length > INT64_C(0)) {
+    memcpy(result->elements, map->keys,
+           native_collection_bytes(map->length, map->key_stride));
+  }
+  result->length = map->length;
+  return result;
+}
+
+native_vec *native_map_values(native_arena *arena, const native_map *map,
+                              size_t value_alignment) {
+  native_vec *result;
+  native_map_check(map);
+  result = native_vec_new(arena, map->length, map->value_stride,
+                          value_alignment);
+  if (map->length > INT64_C(0)) {
+    memcpy(result->elements, map->values,
+           native_collection_bytes(map->length, map->value_stride));
+  }
+  result->length = map->length;
+  return result;
+}
+
+static native_set *native_set_new(native_arena *arena, int64_t capacity,
+                                  int64_t stride, size_t alignment) {
+  native_set *set;
+  size_t bytes = native_collection_bytes(capacity, stride);
+  set = (native_set *)native_arena_alloc(arena, sizeof(native_set),
+                                         _Alignof(native_set));
+  set->elements =
+      (bytes == 0U) ? NULL : native_arena_alloc(arena, bytes, alignment);
+  set->length = INT64_C(0);
+  set->capacity = capacity;
+  set->stride = stride;
+  return set;
+}
+
+static void native_set_check(const native_set *set) {
+  if ((set == NULL) || (set->length < INT64_C(0)) ||
+      (set->capacity < set->length) || (set->stride <= INT64_C(0)) ||
+      ((set->capacity == INT64_C(0)) && (set->elements != NULL)) ||
+      ((set->capacity > INT64_C(0)) && (set->elements == NULL))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+}
+
+static void native_set_check_shape(const native_set *set, int64_t stride) {
+  native_set_check(set);
+  if (set->stride != stride) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+}
+
+int64_t native_set_count(const native_set *set) {
+  native_set_check(set);
+  return set->length;
+}
+
+const void *native_set_item_at(const native_set *set, int64_t index) {
+  native_set_check(set);
+  if ((index < INT64_C(0)) || (index >= set->length)) {
+    native_trap(NATIVE_TRAP_OUT_OF_RANGE);
+  }
+  return (const uint8_t *)set->elements +
+         native_collection_bytes(index, set->stride);
+}
+
+static int64_t native_set_find(const native_set *set, const void *value,
+                               native_collection_equality equality) {
+  int64_t index;
+  native_set_check(set);
+  if (value == NULL) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  native_collection_check_equality(equality);
+  for (index = INT64_C(0); index < set->length; index++) {
+    if (native_collection_equal(native_set_item_at(set, index), value,
+                                equality)) {
+      return index;
+    }
+  }
+  return INT64_C(-1);
+}
+
+bool native_set_contains(const native_set *set, const void *value,
+                         native_collection_equality equality) {
+  return native_set_find(set, value, equality) >= INT64_C(0);
+}
+
+native_set *native_set_from_array(
+    native_arena *arena, const void *values, int64_t count, int64_t stride,
+    size_t alignment, native_collection_equality equality) {
+  native_set *set;
+  int64_t index;
+  native_collection_check_equality(equality);
+  if ((values == NULL) && (count != INT64_C(0))) {
+    native_trap(NATIVE_TRAP_INVALID_ARGUMENT);
+  }
+  set = native_set_new(arena, count, stride, alignment);
+  for (index = INT64_C(0); index < count; index++) {
+    const void *value = (const uint8_t *)values +
+                        native_collection_bytes(index, stride);
+    if (native_set_find(set, value, equality) < INT64_C(0)) {
+      memcpy((uint8_t *)set->elements +
+                 native_collection_bytes(set->length, stride),
+             value, (size_t)stride);
+      set->length += INT64_C(1);
+    }
+  }
+  return set;
+}
+
+native_set *native_set_conj(native_arena *arena, native_set *set,
+                            const void *value, int64_t stride, size_t alignment,
+                            native_collection_equality equality) {
+  native_set *result;
+  native_set_check_shape(set, stride);
+  if (native_set_find(set, value, equality) >= INT64_C(0)) {
+    return set;
+  }
+  if (set->length == INT64_MAX) {
+    native_trap(NATIVE_TRAP_OVERFLOW);
+  }
+  result = native_set_new(arena, set->length + INT64_C(1), stride, alignment);
+  if (set->length > INT64_C(0)) {
+    memcpy(result->elements, set->elements,
+           native_collection_bytes(set->length, stride));
+  }
+  memcpy((uint8_t *)result->elements +
+             native_collection_bytes(set->length, stride),
+         value, (size_t)stride);
+  result->length = set->length + INT64_C(1);
+  return result;
+}
+
+native_set *native_set_disj(native_arena *arena, native_set *set,
+                            const void *value, int64_t stride, size_t alignment,
+                            native_collection_equality equality) {
+  int64_t removed;
+  int64_t source_index;
+  native_set *result;
+  native_set_check_shape(set, stride);
+  removed = native_set_find(set, value, equality);
+  if (removed < INT64_C(0)) {
+    return set;
+  }
+  result = native_set_new(arena, set->length - INT64_C(1), stride, alignment);
+  for (source_index = INT64_C(0); source_index < set->length; source_index++) {
+    if (source_index != removed) {
+      memcpy((uint8_t *)result->elements +
+                 native_collection_bytes(result->length, stride),
+             native_set_item_at(set, source_index), (size_t)stride);
+      result->length += INT64_C(1);
+    }
+  }
+  return result;
+}
+
+native_vec *native_set_vector(native_arena *arena, const native_set *set,
+                              size_t alignment) {
+  native_vec *result;
+  native_set_check(set);
+  result = native_vec_new(arena, set->length, set->stride, alignment);
+  if (set->length > INT64_C(0)) {
+    memcpy(result->elements, set->elements,
+           native_collection_bytes(set->length, set->stride));
+  }
+  result->length = set->length;
+  return result;
+}
+
 uint64_t native_text_length(uint64_t handle) {
   uint64_t length;
   if (handle == UINT64_C(0)) {

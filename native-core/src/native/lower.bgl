@@ -958,6 +958,17 @@
             (str "case-" index)
             (nth type-ids index)))))))
 
+(defn nullable-map-value-type-id [value-type: core/NativeId] -> core/NativeId
+  (lower-id "nullable-map-value-type-v0" [(id-value value-type)]))
+
+(defn nullable-map-value-type [value-type: core/NativeId] -> core/TypeDef
+  (let [id: core/NativeId (nullable-map-value-type-id value-type)
+        owner: String (id-value id)]
+    (core/->TypeDef id "NullableMapValue"
+      (core/->UnionType
+        [(core/->TypeVariant (variant-id owner "value") "value" value-type)
+         (core/->TypeVariant (variant-id owner "nil") "nil" nil)]))))
+
 (defn application-resolution
   [source-type: core/NativeId
    constructor: String
@@ -988,7 +999,9 @@
             (lower-id "map-type-v0"
               [(id-value (nth ids 0)) (id-value (nth ids 1))])]
         (->TypeResolutionV0 id
-          (append-type-def definitions
+          (append-type-def
+            (append-type-def definitions
+              (nullable-map-value-type (nth ids 1)))
             (core/->TypeDef id "Map"
               (core/->MapTypeV0 (nth ids 0) (nth ids 1)
                 (core/->InsertionOrderV0 true))))
@@ -2640,12 +2653,28 @@
           (core/typedef-id definition)
           (recur (+ position 1)))))))
 
+(defn concrete-equality-for [target: core/NativeId] -> (U core/ConcreteEqualityV0 Nil)
+  (cond
+    (same-id? target (type-id "Bool")) (core/->BoolEqualityV0 true)
+    (same-id? target (type-id "Int")) (core/->I64EqualityV0 true)
+    (same-id? target (type-id "Float")) (core/->F64EqualityV0 true)
+    (same-id? target (type-id "String")) (core/->TextEqualityV0 true)
+    (same-id? target (type-id "Keyword")) (core/->KeywordEqualityV0 true)
+    :else nil))
+
 (defn allocating-instruction? [instruction: core/Instruction] -> Bool
   (or (instance? native.core.VecPushInstruction instruction)
       (instance? native.core.VecEmptyInstruction instruction)
       (instance? native.core.VecConcatInstruction instruction)
       (instance? native.core.MapLiteralInstructionV0 instruction)
       (instance? native.core.SetLiteralInstructionV0 instruction)
+      (instance? native.core.MapAssocInstructionV0 instruction)
+      (instance? native.core.MapDissocInstructionV0 instruction)
+      (instance? native.core.MapKeysInstructionV0 instruction)
+      (instance? native.core.MapValuesInstructionV0 instruction)
+      (instance? native.core.SetConjInstructionV0 instruction)
+      (instance? native.core.SetDisjInstructionV0 instruction)
+      (instance? native.core.SetVectorInstructionV0 instruction)
       (instance? native.core.BoxRecordInstruction instruction)
       (instance? native.core.AllocateInstruction instruction)
       (instance? native.core.TextSliceInstruction instruction)
@@ -2767,13 +2796,18 @@
       (if (not (map-type? types resolved))
         (fail-result state
           "TODO-NATIVE-EMPTY-MAP-LITERAL: the binding annotation is not a native map type")
-        (let [result-id: core/NativeId (state-id state owner "map-lit")]
-          (->ExprResultV0
-            (state-emit (state-bump state)
-              (core/->MapLiteralInstructionV0
-                (core/->SsaValueV0 result-id resolved)
-                [] [] (arena-value-id owner)))
-            result-id resolved false))))))
+        (let [equality: (U core/ConcreteEqualityV0 Nil)
+              (concrete-equality-for (map-key-of types resolved))]
+          (if (nil? equality)
+            (fail-result state
+              "TODO-NATIVE-MAP-KEY-EQUALITY: the key type has no closed concrete equality")
+            (let [result-id: core/NativeId (state-id state owner "map-lit")]
+              (->ExprResultV0
+                (state-emit (state-bump state)
+                  (core/->MapLiteralInstructionV0
+                    (core/->SsaValueV0 result-id resolved)
+                    [] [] (arena-value-id owner) equality))
+                result-id resolved false))))))))
 
 (defn lower-empty-set
   [env: BodyEnvV0
@@ -2790,13 +2824,103 @@
       (if (not (set-type? types resolved))
         (fail-result state
           "TODO-NATIVE-EMPTY-SET-LITERAL: the binding annotation is not a native set type")
-        (let [result-id: core/NativeId (state-id state owner "set-lit")]
-          (->ExprResultV0
-            (state-emit (state-bump state)
-              (core/->SetLiteralInstructionV0
-                (core/->SsaValueV0 result-id resolved)
-                [] (arena-value-id owner)))
-            result-id resolved false))))))
+        (let [equality: (U core/ConcreteEqualityV0 Nil)
+              (concrete-equality-for (set-element-of types resolved))]
+          (if (nil? equality)
+            (fail-result state
+              "TODO-NATIVE-SET-ELEMENT-EQUALITY: the element type has no closed concrete equality")
+            (let [result-id: core/NativeId (state-id state owner "set-lit")]
+              (->ExprResultV0
+                (state-emit (state-bump state)
+                  (core/->SetLiteralInstructionV0
+                    (core/->SsaValueV0 result-id resolved)
+                    [] (arena-value-id owner) equality))
+                result-id resolved false))))))))
+
+;; Some collection calls close an empty literal from the receiver type (for
+;; example `(get m k [])`). This is still type-directed lowering: the call's
+;; concrete Map/Set/Vec signature supplies the otherwise absent literal type.
+(defn lower-contextual-empty-aggregate
+  [env: BodyEnvV0
+   owner: core/NativeId
+   state: BodyStateV0
+   node: core/NativeId
+   expected: core/NativeId] -> ExprResultV0
+  (let [index: SourceIndexV0 (bodyenvv0-index env)
+        types: (Vec core/TypeDef) (bodyenvv0-types env)]
+    (cond
+      (and (empty-vector-form? index node) (vector-type? types expected))
+      (let [capacity-id: core/NativeId (state-id state owner "vec-cap")
+            result-id: core/NativeId (state-id (state-bump state) owner "vec-lit")]
+        (->ExprResultV0
+          (state-emit
+            (state-emit (state-bump (state-bump state))
+              (core/->AtomInstruction
+                (core/->SsaValueV0 capacity-id (int-type-id))
+                (core/->I64Atom 0)))
+            (core/->VecEmptyInstruction
+              (core/->SsaValueV0 result-id expected)
+              capacity-id (arena-value-id owner)))
+          result-id expected false))
+
+      (and (empty-map-form? index node) (map-type? types expected))
+      (let [equality: (U core/ConcreteEqualityV0 Nil)
+            (concrete-equality-for (map-key-of types expected))]
+        (if (nil? equality)
+          (fail-result state
+            "TODO-NATIVE-MAP-KEY-EQUALITY: the contextual key type has no closed concrete equality")
+          (let [result-id: core/NativeId (state-id state owner "map-lit")]
+            (->ExprResultV0
+              (state-emit (state-bump state)
+                (core/->MapLiteralInstructionV0
+                  (core/->SsaValueV0 result-id expected)
+                  [] [] (arena-value-id owner) equality))
+              result-id expected false))))
+
+      (and (empty-set-form? index node) (set-type? types expected))
+      (let [equality: (U core/ConcreteEqualityV0 Nil)
+            (concrete-equality-for (set-element-of types expected))]
+        (if (nil? equality)
+          (fail-result state
+            "TODO-NATIVE-SET-ELEMENT-EQUALITY: the contextual element type has no closed concrete equality")
+          (let [result-id: core/NativeId (state-id state owner "set-lit")]
+            (->ExprResultV0
+              (state-emit (state-bump state)
+                (core/->SetLiteralInstructionV0
+                  (core/->SsaValueV0 result-id expected)
+                  [] (arena-value-id owner) equality))
+              result-id expected false))))
+
+      :else
+      (fail-result state
+        "TODO-NATIVE-CONTEXTUAL-EMPTY-LITERAL: the receiver type does not close this literal"))))
+
+(defn expected-collection-argument-type
+  [types: (Vec core/TypeDef)
+   callee: String
+   position: Int
+   prior-types: (Vec core/NativeId)] -> (U core/NativeId Nil)
+  (if (= 0 (count prior-types))
+    nil
+    (let [receiver: core/NativeId (nth prior-types 0)]
+      (cond
+        (and (= position 1) (map-type? types receiver)
+          (or (= "get" callee) (= "assoc" callee) (= "dissoc" callee)
+            (= "contains?" callee)))
+        (map-key-of types receiver)
+
+        (and (= position 2) (map-type? types receiver)
+          (or (= "get" callee) (= "assoc" callee)))
+        (map-value-of types receiver)
+
+        (and (= position 1) (set-type? types receiver)
+          (or (= "contains?" callee) (= "conj" callee) (= "disj" callee)))
+        (set-element-of types receiver)
+
+        (and (= position 1) (vector-type? types receiver) (= "conj" callee))
+        (vector-element-of types receiver)
+
+        :else nil))))
 
 (defn text-type-id [] -> core/NativeId (type-id "String"))
 
@@ -2945,6 +3069,16 @@
   (let [definition: (U core/TypeDef Nil) (lookup-type types target)]
     (and (some? definition)
       (= "RegexMatch" (core/typedef-name definition)))))
+
+(defn nullable-value-type-of
+  [types: (Vec core/TypeDef)
+   value-type: core/NativeId] -> (U core/NativeId Nil)
+  (let [direct: (Vec core/TypeVariant) (union-variants-of types value-type)
+        wrapper: core/NativeId (nullable-map-value-type-id value-type)]
+    (cond
+      (> (nil-variant-count direct) 0) value-type
+      (some? (lookup-type types wrapper)) wrapper
+      :else (optional-scalar-type-of types value-type))))
 
 (defn lower-presence-predicate
   [types: (Vec core/TypeDef)
@@ -3669,8 +3803,19 @@
                          value-types: (Vec core/NativeId) []]
                     (if (or (>= position (count args)) (state-blocked? current))
                       (->ArgsResultV0 current values value-types false)
-                      (let [argument: ExprResultV0
-                            (lower-expr env owner current (nth args position))]
+                      (let [node: core/NativeId (nth args position)
+                            expected: (U core/NativeId Nil)
+                            (expected-collection-argument-type
+                              types callee position value-types)
+                            empty-aggregate: Bool
+                            (or (empty-vector-form? index node)
+                              (empty-map-form? index node)
+                              (empty-set-form? index node))
+                            argument: ExprResultV0
+                            (if (and (some? expected) empty-aggregate)
+                              (lower-contextual-empty-aggregate
+                                env owner current node expected)
+                              (lower-expr env owner current node))]
                         (if (exprresultv0-terminated argument)
                           (->ArgsResultV0 (exprresultv0-state argument) values
                             value-types true)
@@ -3850,7 +3995,9 @@
                       (same-id? (nth value-types position) element-type)
                       (recur (+ position 1))
                       :else false))
-                  set-type: (U core/NativeId Nil) (set-type-of types element-type)]
+                  set-type: (U core/NativeId Nil) (set-type-of types element-type)
+                  equality: (U core/ConcreteEqualityV0 Nil)
+                  (concrete-equality-for element-type)]
               (cond
                 (not uniform)
                 (fail-result current
@@ -3860,13 +4007,17 @@
                 (fail-result current
                   "TODO-NATIVE-SET-LITERAL-TYPE: the module declares no set of this element type")
 
+                (nil? equality)
+                (fail-result current
+                  "TODO-NATIVE-SET-ELEMENT-EQUALITY: the element type has no closed concrete equality")
+
                 :else
                 (let [result-id: core/NativeId (state-id current owner "set-lit")]
                   (->ExprResultV0
                     (state-emit (state-bump current)
                       (core/->SetLiteralInstructionV0
                         (core/->SsaValueV0 result-id set-type)
-                        values (arena-value-id owner)))
+                        values (arena-value-id owner) equality))
                     result-id set-type false))))))
 
         (= "map" kind)
@@ -3939,7 +4090,9 @@
                       (same-id? (nth value-types position) value-type) (recur (+ position 1))
                       :else false))
                   map-type: (U core/NativeId Nil)
-                  (map-type-of types key-type value-type)]
+                  (map-type-of types key-type value-type)
+                  equality: (U core/ConcreteEqualityV0 Nil)
+                  (concrete-equality-for key-type)]
               (cond
                 (or (not uniform-keys) (not uniform-values))
                 (fail-result current
@@ -3949,13 +4102,17 @@
                 (fail-result current
                   "TODO-NATIVE-MAP-LITERAL-TYPE: the module declares no map of these key/value types")
 
+                (nil? equality)
+                (fail-result current
+                  "TODO-NATIVE-MAP-KEY-EQUALITY: the key type has no closed concrete equality")
+
                 :else
                 (let [result-id: core/NativeId (state-id current owner "map-lit")]
                   (->ExprResultV0
                     (state-emit (state-bump current)
                       (core/->MapLiteralInstructionV0
                         (core/->SsaValueV0 result-id map-type)
-                        key-ids value-ids (arena-value-id owner)))
+                        key-ids value-ids (arena-value-id owner) equality))
                     result-id map-type false))))))
 
         (= "call" kind)
@@ -4849,6 +5006,110 @@
                         (core/->SsaValueV0 result-id (int-type-id))
                         (nth values 0)))
                     result-id (int-type-id) false))
+
+                (and (= "get" callee)
+                  (or (= 2 (count values)) (= 3 (count values)))
+                  (map-type? types (nth value-types 0)))
+                (let [map-type: core/NativeId (nth value-types 0)
+                      key-type: core/NativeId (map-key-of types map-type)
+                      value-type: core/NativeId (map-value-of types map-type)
+                      equality: (U core/ConcreteEqualityV0 Nil)
+                      (concrete-equality-for key-type)]
+                  (cond
+                    (not (same-id? key-type (nth value-types 1)))
+                    (fail-result current
+                      "TODO-NATIVE-GET-KEY: the lookup key does not match the map key type")
+
+                    (nil? equality)
+                    (fail-result current
+                      "TODO-NATIVE-MAP-KEY-EQUALITY: get needs closed concrete key equality")
+
+                    (= 3 (count values))
+                    (let [coerced: ExprResultV0
+                          (lower-boundary-coerce types owner current
+                            (nth values 2) (nth value-types 2) value-type)
+                          settled: BodyStateV0 (exprresultv0-state coerced)]
+                      (if (state-blocked? settled)
+                        (fail-result settled
+                          "TODO-NATIVE-GET-DEFAULT: the default does not match the map value type")
+                        (let [result-id: core/NativeId
+                              (state-id settled owner "map-get")]
+                          (->ExprResultV0
+                            (state-emit (state-bump settled)
+                              (core/->MapGetInstructionV0
+                                (core/->SsaValueV0 result-id value-type)
+                                (nth values 0) (nth values 1)
+                                (exprresultv0-value-id coerced) equality))
+                            result-id value-type false))))
+
+                    :else
+                    (let [optional: (U core/NativeId Nil)
+                          (nullable-value-type-of types value-type)]
+                      (if (nil? optional)
+                        (fail-result current
+                          "TODO-NATIVE-GET-RESULT: two-argument get needs a closed nullable value type")
+                        (let [result-id: core/NativeId
+                              (state-id current owner "map-get")]
+                          (->ExprResultV0
+                            (state-emit (state-bump current)
+                              (core/->MapGetInstructionV0
+                                (core/->SsaValueV0 result-id optional)
+                                (nth values 0) (nth values 1) nil equality))
+                            result-id optional false))))))
+
+                (= "get" callee)
+                (fail-result current
+                  "TODO-NATIVE-GET-OPERANDS: get lowers a closed map, key, and optional typed default")
+
+                (and (= "contains?" callee) (= 2 (count values))
+                  (map-type? types (nth value-types 0)))
+                (let [map-type: core/NativeId (nth value-types 0)
+                      key-type: core/NativeId (map-key-of types map-type)
+                      equality: (U core/ConcreteEqualityV0 Nil)
+                      (concrete-equality-for key-type)]
+                  (cond
+                    (not (same-id? key-type (nth value-types 1)))
+                    (fail-result current
+                      "TODO-NATIVE-CONTAINS-KEY: the key does not match the map key type")
+                    (nil? equality)
+                    (fail-result current
+                      "TODO-NATIVE-MAP-KEY-EQUALITY: contains? needs closed concrete key equality")
+                    :else
+                    (let [result-id: core/NativeId
+                          (state-id current owner "map-contains")]
+                      (->ExprResultV0
+                        (state-emit (state-bump current)
+                          (core/->MapContainsInstructionV0
+                            (core/->SsaValueV0 result-id (bool-type-id))
+                            (nth values 0) (nth values 1) equality))
+                        result-id (bool-type-id) false))))
+
+                (and (= "contains?" callee) (= 2 (count values))
+                  (set-type? types (nth value-types 0)))
+                (let [set-type: core/NativeId (nth value-types 0)
+                      element-type: core/NativeId (set-element-of types set-type)
+                      equality: (U core/ConcreteEqualityV0 Nil)
+                      (concrete-equality-for element-type)]
+                  (cond
+                    (not (same-id? element-type (nth value-types 1)))
+                    (fail-result current
+                      "TODO-NATIVE-CONTAINS-ELEMENT: the value does not match the set element type")
+                    (nil? equality)
+                    (fail-result current
+                      "TODO-NATIVE-SET-ELEMENT-EQUALITY: contains? needs closed concrete element equality")
+                    :else
+                    (let [result-id: core/NativeId
+                          (state-id current owner "set-contains")]
+                      (->ExprResultV0
+                        (state-emit (state-bump current)
+                          (core/->SetContainsInstructionV0
+                            (core/->SsaValueV0 result-id (bool-type-id))
+                            (nth values 0) (nth values 1) equality))
+                        result-id (bool-type-id) false))))
+
+                (= "contains?" callee)
+                (fail-result current
+                  "TODO-NATIVE-CONTAINS-OPERANDS: contains? lowers a closed map key or set element")
 
                 (and (= "nth" callee) (= 2 (count values))
                   (vector-type? types (nth value-types 0)))
@@ -6751,6 +7012,14 @@
        (id-value (core/textrepeatv0-source-id operation))
        (id-value (core/textrepeatv0-count-id operation))])))
 
+(defn encode-concrete-equality [equality: core/ConcreteEqualityV0] -> String
+  (cond
+    (instance? native.core.BoolEqualityV0 equality) "bool-equality-v0"
+    (instance? native.core.I64EqualityV0 equality) "i64-equality-v0"
+    (instance? native.core.F64EqualityV0 equality) "f64-equality-v0"
+    (instance? native.core.TextEqualityV0 equality) "text-equality-v0"
+    :else "keyword-equality-v0"))
+
 (defn encode-instruction [instruction: core/Instruction] -> String
   (cond
     (instance? native.core.AtomInstruction instruction)
@@ -6898,14 +7167,110 @@
          (core/mapliteralinstructionv0-key-ids instruction))
        (encode-id-roots "values"
          (core/mapliteralinstructionv0-value-ids instruction))
-       (id-value (core/mapliteralinstructionv0-arena-id instruction))])
+       (id-value (core/mapliteralinstructionv0-arena-id instruction))
+       (encode-concrete-equality
+         (core/mapliteralinstructionv0-key-equality instruction))])
 
     (instance? native.core.SetLiteralInstructionV0 instruction)
     (worlds/canonical-record "set-literal-instruction-v0"
       [(encode-ssa-value (core/setliteralinstructionv0-result instruction))
        (encode-id-roots "values"
          (core/setliteralinstructionv0-value-ids instruction))
-       (id-value (core/setliteralinstructionv0-arena-id instruction))])
+       (id-value (core/setliteralinstructionv0-arena-id instruction))
+       (encode-concrete-equality
+         (core/setliteralinstructionv0-element-equality instruction))])
+
+    (instance? native.core.MapCountInstructionV0 instruction)
+    (worlds/canonical-record "map-count-instruction-v0"
+      [(encode-ssa-value (core/mapcountinstructionv0-result instruction))
+       (id-value (core/mapcountinstructionv0-source-id instruction))])
+
+    (instance? native.core.MapGetInstructionV0 instruction)
+    (let [default: (U core/NativeId Nil)
+          (core/mapgetinstructionv0-default-id instruction)]
+      (worlds/canonical-record "map-get-instruction-v0"
+        [(encode-ssa-value (core/mapgetinstructionv0-result instruction))
+         (id-value (core/mapgetinstructionv0-source-id instruction))
+         (id-value (core/mapgetinstructionv0-key-id instruction))
+         (if (nil? default) "absent-v0" (id-value default))
+         (encode-concrete-equality
+           (core/mapgetinstructionv0-key-equality instruction))]))
+
+    (instance? native.core.MapContainsInstructionV0 instruction)
+    (worlds/canonical-record "map-contains-instruction-v0"
+      [(encode-ssa-value (core/mapcontainsinstructionv0-result instruction))
+       (id-value (core/mapcontainsinstructionv0-source-id instruction))
+       (id-value (core/mapcontainsinstructionv0-key-id instruction))
+       (encode-concrete-equality
+         (core/mapcontainsinstructionv0-key-equality instruction))])
+
+    (instance? native.core.MapAssocInstructionV0 instruction)
+    (worlds/canonical-record "map-assoc-instruction-v0"
+      [(encode-ssa-value (core/mapassocinstructionv0-result instruction))
+       (id-value (core/mapassocinstructionv0-source-id instruction))
+       (id-value (core/mapassocinstructionv0-key-id instruction))
+       (id-value (core/mapassocinstructionv0-value-id instruction))
+       (id-value (core/mapassocinstructionv0-arena-id instruction))
+       (encode-concrete-equality
+         (core/mapassocinstructionv0-key-equality instruction))])
+
+    (instance? native.core.MapDissocInstructionV0 instruction)
+    (worlds/canonical-record "map-dissoc-instruction-v0"
+      [(encode-ssa-value (core/mapdissocinstructionv0-result instruction))
+       (id-value (core/mapdissocinstructionv0-source-id instruction))
+       (id-value (core/mapdissocinstructionv0-key-id instruction))
+       (id-value (core/mapdissocinstructionv0-arena-id instruction))
+       (encode-concrete-equality
+         (core/mapdissocinstructionv0-key-equality instruction))])
+
+    (instance? native.core.MapKeysInstructionV0 instruction)
+    (worlds/canonical-record "map-keys-instruction-v0"
+      [(encode-ssa-value (core/mapkeysinstructionv0-result instruction))
+       (id-value (core/mapkeysinstructionv0-source-id instruction))
+       (id-value (core/mapkeysinstructionv0-arena-id instruction))])
+
+    (instance? native.core.MapValuesInstructionV0 instruction)
+    (worlds/canonical-record "map-values-instruction-v0"
+      [(encode-ssa-value (core/mapvaluesinstructionv0-result instruction))
+       (id-value (core/mapvaluesinstructionv0-source-id instruction))
+       (id-value (core/mapvaluesinstructionv0-arena-id instruction))])
+
+    (instance? native.core.SetCountInstructionV0 instruction)
+    (worlds/canonical-record "set-count-instruction-v0"
+      [(encode-ssa-value (core/setcountinstructionv0-result instruction))
+       (id-value (core/setcountinstructionv0-source-id instruction))])
+
+    (instance? native.core.SetContainsInstructionV0 instruction)
+    (worlds/canonical-record "set-contains-instruction-v0"
+      [(encode-ssa-value (core/setcontainsinstructionv0-result instruction))
+       (id-value (core/setcontainsinstructionv0-source-id instruction))
+       (id-value (core/setcontainsinstructionv0-value-id instruction))
+       (encode-concrete-equality
+         (core/setcontainsinstructionv0-element-equality instruction))])
+
+    (instance? native.core.SetConjInstructionV0 instruction)
+    (worlds/canonical-record "set-conj-instruction-v0"
+      [(encode-ssa-value (core/setconjinstructionv0-result instruction))
+       (id-value (core/setconjinstructionv0-source-id instruction))
+       (id-value (core/setconjinstructionv0-value-id instruction))
+       (id-value (core/setconjinstructionv0-arena-id instruction))
+       (encode-concrete-equality
+         (core/setconjinstructionv0-element-equality instruction))])
+
+    (instance? native.core.SetDisjInstructionV0 instruction)
+    (worlds/canonical-record "set-disj-instruction-v0"
+      [(encode-ssa-value (core/setdisjinstructionv0-result instruction))
+       (id-value (core/setdisjinstructionv0-source-id instruction))
+       (id-value (core/setdisjinstructionv0-value-id instruction))
+       (id-value (core/setdisjinstructionv0-arena-id instruction))
+       (encode-concrete-equality
+         (core/setdisjinstructionv0-element-equality instruction))])
+
+    (instance? native.core.SetVectorInstructionV0 instruction)
+    (worlds/canonical-record "set-vector-instruction-v0"
+      [(encode-ssa-value (core/setvectorinstructionv0-result instruction))
+       (id-value (core/setvectorinstructionv0-source-id instruction))
+       (id-value (core/setvectorinstructionv0-arena-id instruction))])
 
     (instance? native.core.ArenaInstruction instruction)
     (worlds/canonical-record "arena-instruction"

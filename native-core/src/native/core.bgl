@@ -36,6 +36,16 @@
 (defunion CollectionOrderV0
   (InsertionOrderV0 [token: Bool]))
 
+;; Collection lookup equality is closed over concrete native scalars. Dyn/Any
+;; descriptors extend this vocabulary elsewhere; ordinary Map/Set ops never
+;; smuggle a host hash or equality callback through the runtime ABI.
+(defunion ConcreteEqualityV0
+  (BoolEqualityV0 [token: Bool])
+  (I64EqualityV0 [token: Bool])
+  (F64EqualityV0 [token: Bool])
+  (TextEqualityV0 [token: Bool])
+  (KeywordEqualityV0 [token: Bool]))
+
 (defunion TypeShape
   (AtomType [kind :- AtomKind])
   (RecordType [fields :- (Vec TypeField)])
@@ -373,10 +383,75 @@
     [result: SsaValueV0
      key-ids: (Vec NativeId)
      value-ids: (Vec NativeId)
-     arena-id: NativeId])
+     arena-id: NativeId
+     key-equality: ConcreteEqualityV0])
   (SetLiteralInstructionV0
     [result: SsaValueV0
      value-ids: (Vec NativeId)
+     arena-id: NativeId
+     element-equality: ConcreteEqualityV0])
+  (MapCountInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId])
+  ;; With a default, result is the map value type. Without one it is either an
+  ;; existing nullable value union or a closed value-or-nil union.
+  (MapGetInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     key-id: NativeId
+     default-id: (U NativeId Nil)
+     key-equality: ConcreteEqualityV0])
+  (MapContainsInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     key-id: NativeId
+     key-equality: ConcreteEqualityV0])
+  ;; Assoc/dissoc are persistent linear updates. Replacement keeps its original
+  ;; iteration position; deletion compacts without reordering survivors.
+  (MapAssocInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     key-id: NativeId
+     value-id: NativeId
+     arena-id: NativeId
+     key-equality: ConcreteEqualityV0])
+  (MapDissocInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     key-id: NativeId
+     arena-id: NativeId
+     key-equality: ConcreteEqualityV0])
+  (MapKeysInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     arena-id: NativeId])
+  (MapValuesInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     arena-id: NativeId])
+  (SetCountInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId])
+  (SetContainsInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     value-id: NativeId
+     element-equality: ConcreteEqualityV0])
+  (SetConjInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     value-id: NativeId
+     arena-id: NativeId
+     element-equality: ConcreteEqualityV0])
+  (SetDisjInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
+     value-id: NativeId
+     arena-id: NativeId
+     element-equality: ConcreteEqualityV0])
+  (SetVectorInstructionV0
+    [result: SsaValueV0
+     source-id: NativeId
      arena-id: NativeId])
   ;; Acquires the arena once in the entry block, consuming the region and
   ;; capability tokens; no other instruction can allocate without its result.
@@ -658,10 +733,29 @@
     [(VecEmptyInstruction result capacity-id arena-id) (ssavaluev0-id result)]
     [(VecConcatInstruction result left-id right-id arena-id)
      (ssavaluev0-id result)]
-    [(MapLiteralInstructionV0 result key-ids value-ids arena-id)
+    [(MapLiteralInstructionV0 result key-ids value-ids arena-id key-equality)
      (ssavaluev0-id result)]
-    [(SetLiteralInstructionV0 result value-ids arena-id)
+    [(SetLiteralInstructionV0 result value-ids arena-id element-equality)
      (ssavaluev0-id result)]
+    [(MapCountInstructionV0 result source-id) (ssavaluev0-id result)]
+    [(MapGetInstructionV0 result source-id key-id default-id key-equality)
+     (ssavaluev0-id result)]
+    [(MapContainsInstructionV0 result source-id key-id key-equality)
+     (ssavaluev0-id result)]
+    [(MapAssocInstructionV0 result source-id key-id value-id arena-id key-equality)
+     (ssavaluev0-id result)]
+    [(MapDissocInstructionV0 result source-id key-id arena-id key-equality)
+     (ssavaluev0-id result)]
+    [(MapKeysInstructionV0 result source-id arena-id) (ssavaluev0-id result)]
+    [(MapValuesInstructionV0 result source-id arena-id) (ssavaluev0-id result)]
+    [(SetCountInstructionV0 result source-id) (ssavaluev0-id result)]
+    [(SetContainsInstructionV0 result source-id value-id element-equality)
+     (ssavaluev0-id result)]
+    [(SetConjInstructionV0 result source-id value-id arena-id element-equality)
+     (ssavaluev0-id result)]
+    [(SetDisjInstructionV0 result source-id value-id arena-id element-equality)
+     (ssavaluev0-id result)]
+    [(SetVectorInstructionV0 result source-id arena-id) (ssavaluev0-id result)]
     [(ArenaInstruction result region capability tokens) (ssavaluev0-id result)]
     [(TextLengthInstruction result source-id) (ssavaluev0-id result)]
     [(TextIndexOfInstruction result source-id needle-id) (ssavaluev0-id result)]
@@ -956,9 +1050,22 @@
     [(VecPushInstruction result source-id value-id arena-id) true]
     [(VecEmptyInstruction result capacity-id arena-id) true]
     [(VecConcatInstruction result left-id right-id arena-id) true]
-    [(MapLiteralInstructionV0 result key-ids value-ids arena-id)
+    [(MapLiteralInstructionV0 result key-ids value-ids arena-id key-equality)
      (= (count key-ids) (count value-ids))]
-    [(SetLiteralInstructionV0 result value-ids arena-id) true]
+    [(SetLiteralInstructionV0 result value-ids arena-id element-equality) true]
+    [(MapCountInstructionV0 result source-id) true]
+    [(MapGetInstructionV0 result source-id key-id default-id key-equality) true]
+    [(MapContainsInstructionV0 result source-id key-id key-equality) true]
+    [(MapAssocInstructionV0 result source-id key-id value-id arena-id key-equality)
+     true]
+    [(MapDissocInstructionV0 result source-id key-id arena-id key-equality) true]
+    [(MapKeysInstructionV0 result source-id arena-id) true]
+    [(MapValuesInstructionV0 result source-id arena-id) true]
+    [(SetCountInstructionV0 result source-id) true]
+    [(SetContainsInstructionV0 result source-id value-id element-equality) true]
+    [(SetConjInstructionV0 result source-id value-id arena-id element-equality) true]
+    [(SetDisjInstructionV0 result source-id value-id arena-id element-equality) true]
+    [(SetVectorInstructionV0 result source-id arena-id) true]
     [(ArenaInstruction result region capability tokens)
      (and (id-in? known-regions region) (id-in? known-capabilities capability))]
     [(TextLengthInstruction result source-id) true]
@@ -1111,10 +1218,30 @@
     [(VecEmptyInstruction result capacity-id arena-id) [arena-id capacity-id]]
     [(VecConcatInstruction result left-id right-id arena-id)
      [arena-id left-id right-id]]
-    [(MapLiteralInstructionV0 result key-ids value-ids arena-id)
+    [(MapLiteralInstructionV0 result key-ids value-ids arena-id key-equality)
      (into [arena-id] (vec (concat key-ids value-ids)))]
-    [(SetLiteralInstructionV0 result value-ids arena-id)
+    [(SetLiteralInstructionV0 result value-ids arena-id element-equality)
      (into [arena-id] value-ids)]
+    [(MapCountInstructionV0 result source-id) [source-id]]
+    [(MapGetInstructionV0 result source-id key-id default-id key-equality)
+     (if (nil? default-id) [source-id key-id]
+       [source-id key-id default-id])]
+    [(MapContainsInstructionV0 result source-id key-id key-equality)
+     [source-id key-id]]
+    [(MapAssocInstructionV0 result source-id key-id value-id arena-id key-equality)
+     [arena-id source-id key-id value-id]]
+    [(MapDissocInstructionV0 result source-id key-id arena-id key-equality)
+     [arena-id source-id key-id]]
+    [(MapKeysInstructionV0 result source-id arena-id) [arena-id source-id]]
+    [(MapValuesInstructionV0 result source-id arena-id) [arena-id source-id]]
+    [(SetCountInstructionV0 result source-id) [source-id]]
+    [(SetContainsInstructionV0 result source-id value-id element-equality)
+     [source-id value-id]]
+    [(SetConjInstructionV0 result source-id value-id arena-id element-equality)
+     [arena-id source-id value-id]]
+    [(SetDisjInstructionV0 result source-id value-id arena-id element-equality)
+     [arena-id source-id value-id]]
+    [(SetVectorInstructionV0 result source-id arena-id) [arena-id source-id]]
     [(ArenaInstruction result region capability tokens) []]
     [(TextLengthInstruction result source-id) [source-id]]
     [(TextIndexOfInstruction result source-id needle-id) [source-id needle-id]]
@@ -1198,8 +1325,21 @@
     [(VecPushInstruction result source-id value-id arena-id) true]
     [(VecEmptyInstruction result capacity-id arena-id) true]
     [(VecConcatInstruction result left-id right-id arena-id) true]
-    [(MapLiteralInstructionV0 result key-ids value-ids arena-id) true]
-    [(SetLiteralInstructionV0 result value-ids arena-id) true]
+    [(MapLiteralInstructionV0 result key-ids value-ids arena-id key-equality) true]
+    [(SetLiteralInstructionV0 result value-ids arena-id element-equality) true]
+    [(MapCountInstructionV0 result source-id) true]
+    [(MapGetInstructionV0 result source-id key-id default-id key-equality) true]
+    [(MapContainsInstructionV0 result source-id key-id key-equality) true]
+    [(MapAssocInstructionV0 result source-id key-id value-id arena-id key-equality)
+     true]
+    [(MapDissocInstructionV0 result source-id key-id arena-id key-equality) true]
+    [(MapKeysInstructionV0 result source-id arena-id) true]
+    [(MapValuesInstructionV0 result source-id arena-id) true]
+    [(SetCountInstructionV0 result source-id) true]
+    [(SetContainsInstructionV0 result source-id value-id element-equality) true]
+    [(SetConjInstructionV0 result source-id value-id arena-id element-equality) true]
+    [(SetDisjInstructionV0 result source-id value-id arena-id element-equality) true]
+    [(SetVectorInstructionV0 result source-id arena-id) true]
     [(ArenaInstruction result region capability tokens)
      (and (id-in? allowed-regions region)
        (id-in? allowed-capabilities capability))]

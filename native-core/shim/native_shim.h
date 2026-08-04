@@ -38,6 +38,33 @@ typedef struct native_vec {
   int64_t capacity;
 } native_vec;
 
+typedef enum native_collection_equality {
+  NATIVE_COLLECTION_EQ_BOOL = 1,
+  NATIVE_COLLECTION_EQ_I64 = 2,
+  NATIVE_COLLECTION_EQ_F64 = 3,
+  NATIVE_COLLECTION_EQ_TEXT = 4,
+  NATIVE_COLLECTION_EQ_KEYWORD = 5
+} native_collection_equality;
+
+/* Map/Set headers own parallel insertion-order storage in the arena. The
+   headers are opaque to generated modules; descriptor code reads through the
+   checked address accessors below. */
+typedef struct native_map {
+  void *keys;
+  void *values;
+  int64_t length;
+  int64_t capacity;
+  int64_t key_stride;
+  int64_t value_stride;
+} native_map;
+
+typedef struct native_set {
+  void *elements;
+  int64_t length;
+  int64_t capacity;
+  int64_t stride;
+} native_set;
+
 /* Counts ELEMENT-STORAGE allocations only (header allocations excluded), so a
    push sequence's reallocation count is observable from a test. */
 extern uint64_t native_vec_storage_allocations;
@@ -64,6 +91,48 @@ native_vec *native_vec_push(native_arena *arena, native_vec *vector,
 native_vec *native_vec_concat(native_arena *arena, const native_vec *left,
                               const native_vec *right, int64_t stride,
                               size_t alignment);
+
+native_map *native_map_from_arrays(
+    native_arena *arena, const void *keys, const void *values, int64_t count,
+    int64_t key_stride, size_t key_alignment, int64_t value_stride,
+    size_t value_alignment, native_collection_equality equality);
+int64_t native_map_count(const native_map *map);
+const void *native_map_key_at(const native_map *map, int64_t index);
+const void *native_map_value_at(const native_map *map, int64_t index);
+const void *native_map_get(const native_map *map, const void *key,
+                           native_collection_equality equality);
+bool native_map_contains(const native_map *map, const void *key,
+                         native_collection_equality equality);
+native_map *native_map_assoc(
+    native_arena *arena, native_map *map, const void *key,
+    const void *value, int64_t key_stride, size_t key_alignment,
+    int64_t value_stride, size_t value_alignment,
+    native_collection_equality equality);
+native_map *native_map_dissoc(
+    native_arena *arena, native_map *map, const void *key,
+    int64_t key_stride, size_t key_alignment, int64_t value_stride,
+    size_t value_alignment, native_collection_equality equality);
+native_vec *native_map_keys(native_arena *arena, const native_map *map,
+                            size_t key_alignment);
+native_vec *native_map_values(native_arena *arena, const native_map *map,
+                              size_t value_alignment);
+
+native_set *native_set_from_array(
+    native_arena *arena, const void *values, int64_t count, int64_t stride,
+    size_t alignment, native_collection_equality equality);
+int64_t native_set_count(const native_set *set);
+const void *native_set_item_at(const native_set *set, int64_t index);
+bool native_set_contains(const native_set *set, const void *value,
+                         native_collection_equality equality);
+native_set *native_set_conj(native_arena *arena, native_set *set,
+                            const void *value, int64_t stride, size_t alignment,
+                            native_collection_equality equality);
+native_set *native_set_disj(native_arena *arena, native_set *set,
+                            const void *value, int64_t stride, size_t alignment,
+                            native_collection_equality equality);
+native_vec *native_set_vector(native_arena *arena, const native_set *set,
+                              size_t alignment);
+
 bool native_byte_read(FILE *stream, uint8_t *destination, size_t length);
 bool native_byte_write(FILE *stream, const uint8_t *source, size_t length);
 

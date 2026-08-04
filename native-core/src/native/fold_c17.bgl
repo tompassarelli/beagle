@@ -151,6 +151,12 @@
 (defn layout-vector? [layout: core/LayoutDef] -> Bool
   (instance? native.core.VectorShapeV0 (core/layoutdef-shape layout)))
 
+(defn layout-map? [layout: core/LayoutDef] -> Bool
+  (instance? native.core.MapShapeV0 (core/layoutdef-shape layout)))
+
+(defn layout-set? [layout: core/LayoutDef] -> Bool
+  (instance? native.core.SetShapeV0 (core/layoutdef-shape layout)))
+
 (defn layout-reference? [layout: core/LayoutDef] -> Bool
   (instance? native.core.ReferenceShapeV0 (core/layoutdef-shape layout)))
 
@@ -320,6 +326,10 @@
 
           (instance? native.core.VectorType shape) (layout-vector? layout-value)
 
+          (instance? native.core.MapTypeV0 shape) (layout-map? layout-value)
+
+          (instance? native.core.SetTypeV0 shape) (layout-set? layout-value)
+
           (instance? native.core.ReferenceType shape) (layout-reference? layout-value)
 
           :else false)))))
@@ -436,6 +446,36 @@
           (join-lines (size-align-assertions type-name-value layout))))
       "")))
 
+(defn emit-map-type
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   type-name-value: String
+   layout: core/LayoutDef] -> String
+  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+    (if (instance? native.core.MapShapeV0 shape)
+      (str "/* insertion-order map of "
+        (c-type types module-index (core/mapshapev0-key-type shape))
+        " to "
+        (c-type types module-index (core/mapshapev0-value-type shape))
+        " */\n"
+        "typedef native_map *" type-name-value ";\n"
+        (join-lines (size-align-assertions type-name-value layout)))
+      "")))
+
+(defn emit-set-type
+  [types: (Vec core/TypeDef)
+   module-index: Int
+   type-name-value: String
+   layout: core/LayoutDef] -> String
+  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+    (if (instance? native.core.SetShapeV0 shape)
+      (str "/* insertion-order set of "
+        (c-type types module-index (core/setshapev0-element-type shape))
+        " */\n"
+        "typedef native_set *" type-name-value ";\n"
+        (join-lines (size-align-assertions type-name-value layout)))
+      "")))
+
 (defn emit-record-fields
   [types: (Vec core/TypeDef)
    module-index: Int
@@ -534,6 +574,10 @@
         (emit-union-type types module-index type-name-value layout-value)
         (layout-vector? layout-value)
         (emit-vector-type types module-index type-name-value layout-value)
+        (layout-map? layout-value)
+        (emit-map-type types module-index type-name-value layout-value)
+        (layout-set? layout-value)
+        (emit-set-type types module-index type-name-value layout-value)
         :else (emit-reference-type type-name-value layout-value)))))
 
 (defn emit-types
