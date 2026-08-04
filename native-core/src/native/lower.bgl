@@ -3890,19 +3890,8 @@
                          value-types: (Vec core/NativeId) []]
                     (if (or (>= position (count args)) (state-blocked? current))
                       (->ArgsResultV0 current values value-types false)
-                      (let [node: core/NativeId (nth args position)
-                            expected: (U core/NativeId Nil)
-                            (expected-collection-argument-type
-                              types callee position value-types)
-                            empty-aggregate: Bool
-                            (or (empty-vector-form? index node)
-                              (empty-map-form? index node)
-                              (empty-set-form? index node))
-                            argument: ExprResultV0
-                            (if (and (some? expected) empty-aggregate)
-                              (lower-contextual-empty-aggregate
-                                env owner current node expected)
-                              (lower-expr env owner current node))]
+                      (let [argument: ExprResultV0
+                            (lower-expr env owner current (nth args position))]
                         (if (exprresultv0-terminated argument)
                           (->ArgsResultV0 (exprresultv0-state argument) values
                             value-types true)
@@ -4729,8 +4718,19 @@
                          value-types: (Vec core/NativeId) []]
                     (if (or (>= position (count args)) (state-blocked? current))
                       (->ArgsResultV0 current values value-types false)
-                      (let [argument: ExprResultV0
-                            (lower-expr env owner current (nth args position))]
+                      (let [node: core/NativeId (nth args position)
+                            expected: (U core/NativeId Nil)
+                            (expected-collection-argument-type
+                              types callee position value-types)
+                            empty-aggregate: Bool
+                            (or (empty-vector-form? index node)
+                              (empty-map-form? index node)
+                              (empty-set-form? index node))
+                            argument: ExprResultV0
+                            (if (and (some? expected) empty-aggregate)
+                              (lower-contextual-empty-aggregate
+                                env owner current node expected)
+                              (lower-expr env owner current node))]
                         (if (exprresultv0-terminated argument)
                           (->ArgsResultV0 (exprresultv0-state argument) values
                             value-types true)
