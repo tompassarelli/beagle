@@ -71,6 +71,7 @@
   (define path (build-path fixtures-dir relpath))
   (call-with-input-file path
     (lambda (in)
+      (port-count-lines! in)
       (let loop ()
         (define stx (beagle-read-syntax (path->string path) in))
         (if (eof-object? stx) '() (cons stx (loop)))))))
