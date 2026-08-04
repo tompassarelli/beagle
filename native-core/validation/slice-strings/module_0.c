@@ -29,37 +29,37 @@ native_m0_type_1 native_m0_fn_1(native_m0_type_3 native_v_0) {
   return native_s_0;
 }
 native_m0_type_3 native_m0_fn_2(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0, native_m0_type_1 native_v_1, native_m0_type_1 native_v_2) {
+  (void)capability;
   native_m0_type_0 native_s_0;
   native_m0_type_3 native_s_1;
-  (void)capability;
   native_s_0 = arena;
   (void)native_s_0;
   if ((native_v_1 < INT64_C(0)) || (native_v_2 < native_v_1) ||
       (native_v_2 > (int64_t)native_text_length(native_v_0))) {
-    native_trap(UINT32_C(2));
+    native_trap(UINT32_C(3));
   }
   native_s_1 = native_text_slice((native_arena *)native_s_0, native_v_0, (uint64_t)native_v_1, (uint64_t)native_v_2);
   return native_s_1;
 }
 native_m0_type_3 native_m0_fn_3(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0, native_m0_type_1 native_v_1) {
+  (void)capability;
   native_m0_type_0 native_s_0;
   native_m0_type_1 native_s_1;
   native_m0_type_3 native_s_2;
-  (void)capability;
   native_s_0 = arena;
   (void)native_s_0;
   native_s_1 = (int64_t)native_text_length(native_v_0);
   if ((native_v_1 < INT64_C(0)) || (native_s_1 < native_v_1) ||
       (native_s_1 > (int64_t)native_text_length(native_v_0))) {
-    native_trap(UINT32_C(2));
+    native_trap(UINT32_C(3));
   }
   native_s_2 = native_text_slice((native_arena *)native_s_0, native_v_0, (uint64_t)native_v_1, (uint64_t)native_s_1);
   return native_s_2;
 }
 native_m0_type_3 native_m0_fn_4(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0, native_m0_type_3 native_v_1) {
+  (void)capability;
   native_m0_type_0 native_s_0;
   native_m0_type_3 native_s_1;
-  (void)capability;
   native_s_0 = arena;
   (void)native_s_0;
   {
@@ -69,10 +69,10 @@ native_m0_type_3 native_m0_fn_4(native_arena *arena, const native_capability *ca
   return native_s_1;
 }
 native_m0_type_3 native_m0_fn_5(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0, native_m0_type_1 native_v_1) {
+  (void)capability;
   native_m0_type_0 native_s_0;
   native_m0_type_3 native_s_1;
   native_m0_type_3 native_s_2;
-  (void)capability;
   native_s_0 = arena;
   (void)native_s_0;
   native_s_1 = (uint64_t)(uintptr_t)&native_m0_text_0;
@@ -102,28 +102,28 @@ native_m0_type_2 native_m0_fn_8(native_m0_type_4 native_v_0) {
   return native_s_1;
 }
 native_m0_type_2 native_m0_fn_9(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0, native_m0_type_1 native_v_1, native_m0_type_3 native_v_2) {
+  (void)capability;
   native_m0_type_0 native_s_0;
   native_m0_type_1 native_s_1;
   native_m0_type_3 native_s_2;
   native_m0_type_2 native_s_3;
-  (void)capability;
   native_s_0 = arena;
   (void)native_s_0;
   native_s_1 = INT64_C(0);
   if ((native_s_1 < INT64_C(0)) || (native_v_1 < native_s_1) ||
       (native_v_1 > (int64_t)native_text_length(native_v_0))) {
-    native_trap(UINT32_C(2));
+    native_trap(UINT32_C(3));
   }
   native_s_2 = native_text_slice((native_arena *)native_s_0, native_v_0, (uint64_t)native_s_1, (uint64_t)native_v_1);
   native_s_3 = native_text_eq(native_s_2, native_v_2);
   return native_s_3;
 }
 native_m0_type_3 native_m0_fn_10(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0) {
+  (void)capability;
   native_m0_type_0 native_s_0;
   native_m0_type_3 native_s_1;
   native_m0_type_3 native_s_2;
   native_m0_type_3 native_s_3;
-  (void)capability;
   native_s_0 = arena;
   (void)native_s_0;
   native_s_1 = (uint64_t)(uintptr_t)&native_m0_text_1;
@@ -135,6 +135,7 @@ native_m0_type_3 native_m0_fn_10(native_arena *arena, const native_capability *c
   return native_s_3;
 }
 native_m0_type_3 native_m0_fn_11(native_arena *arena, const native_capability *capability, native_m0_type_3 native_v_0) {
+  (void)capability;
   native_m0_type_0 native_s_0;
   native_m0_type_3 native_s_1;
   native_m0_type_1 native_s_2;
@@ -145,7 +146,6 @@ native_m0_type_3 native_m0_fn_11(native_arena *arena, const native_capability *c
   native_m0_type_1 native_s_7;
   native_m0_type_3 native_s_8;
   native_m0_type_3 native_s_9;
-  (void)capability;
   native_s_0 = arena;
   (void)native_s_0;
   native_s_1 = (uint64_t)(uintptr_t)&native_m0_text_3;
@@ -153,7 +153,7 @@ native_m0_type_3 native_m0_fn_11(native_arena *arena, const native_capability *c
   native_s_3 = INT64_C(1);
   if ((native_s_2 < INT64_C(0)) || (native_s_3 < native_s_2) ||
       (native_s_3 > (int64_t)native_text_length(native_v_0))) {
-    native_trap(UINT32_C(2));
+    native_trap(UINT32_C(3));
   }
   native_s_4 = native_text_slice((native_arena *)native_s_0, native_v_0, (uint64_t)native_s_2, (uint64_t)native_s_3);
   native_s_5 = native_text_eq(native_s_1, native_s_4);
@@ -167,7 +167,7 @@ native_l11_1: ;
   native_s_7 = (int64_t)native_text_length(native_v_0);
   if ((native_s_6 < INT64_C(0)) || (native_s_7 < native_s_6) ||
       (native_s_7 > (int64_t)native_text_length(native_v_0))) {
-    native_trap(UINT32_C(2));
+    native_trap(UINT32_C(3));
   }
   native_s_8 = native_text_slice((native_arena *)native_s_0, native_v_0, (uint64_t)native_s_6, (uint64_t)native_s_7);
   native_s_9 = native_s_8;

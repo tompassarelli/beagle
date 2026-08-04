@@ -234,26 +234,27 @@
                   false)))))))))
 
 (defn terminator-arguments-valid?
-  [function :- core/FunctionDef
-   terminator :- core/Terminator] :- Bool
-  (let [jump-block :- Any (get terminator :block-id nil)
-        arguments :- (Vec core/NativeId) (get terminator :arguments [])
-        true-block :- Any (get terminator :true-block nil)
-        false-block :- Any (get terminator :false-block nil)
-        cases :- Any (get terminator :cases nil)]
-    (cond
-      (not (nil? jump-block))
-      (arguments-match-parameters? function jump-block arguments)
-      (and (not (nil? true-block)) (not (nil? false-block)))
-      (and (arguments-match-parameters? function true-block [])
-        (arguments-match-parameters? function false-block []))
-      (not (nil? cases))
-      (every? (fn [switch-case :- core/SwitchCaseV0] :- Bool
-                (arguments-match-parameters? function
-                  (core/switchcasev0-block-id switch-case)
-                  (core/switchcasev0-arguments switch-case)))
-        cases)
-      :else true)))
+  [function: core/FunctionDef
+   terminator: core/Terminator] -> Bool
+  (cond
+    (instance? native.core.ReturnTerminator terminator) true
+    (instance? native.core.JumpTerminator terminator)
+    (arguments-match-parameters? function
+      (core/jumpterminator-block-id terminator)
+      (core/jumpterminator-arguments terminator))
+    (instance? native.core.BranchTerminator terminator)
+    (and
+      (arguments-match-parameters? function
+        (core/branchterminator-true-block terminator) [])
+      (arguments-match-parameters? function
+        (core/branchterminator-false-block terminator) []))
+    (instance? native.core.SwitchTerminator terminator)
+    (every? (fn [switch-case: core/SwitchCaseV0] -> Bool
+              (arguments-match-parameters? function
+                (core/switchcasev0-block-id switch-case)
+                (core/switchcasev0-arguments switch-case)))
+      (core/switchterminator-cases terminator))
+    :else true))
 
 (defn function-valid-ssa? [function :- core/FunctionDef] :- Bool
   (and (core/unique-ids? (core/function-value-ids function))
@@ -322,13 +323,14 @@
           (core/ids-in? variant-ids case-ids))))))
 
 (defn terminator-exhaustive?
-  [types :- (Vec core/TypeDef)
-   function :- core/FunctionDef
-   terminator :- core/Terminator] :- Bool
-  (let [cases :- Any (get terminator :cases nil)]
-    (if (nil? cases)
-      true
-      (switch-exhaustive? types function (get terminator :value-id) cases))))
+  [types: (Vec core/TypeDef)
+   function: core/FunctionDef
+   terminator: core/Terminator] -> Bool
+  (if (instance? native.core.SwitchTerminator terminator)
+    (switch-exhaustive? types function
+      (core/switchterminator-value-id terminator)
+      (core/switchterminator-cases terminator))
+    true))
 
 (defn function-exhaustive?
   [types :- (Vec core/TypeDef)

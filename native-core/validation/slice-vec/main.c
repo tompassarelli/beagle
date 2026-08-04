@@ -20,8 +20,8 @@ int main(int argc, char **argv) {
   native_arena arena;
   native_arena_init(&arena, arena_storage, ARENA_BYTES);
 
-  native_m0_type_15 positions = native_vec_new(&arena, INT64_C(0), INT64_C(8), (size_t)8);
-  native_m0_type_16 bucket = { INT64_C(7), positions };
+  native_m0_type_16 positions = native_vec_new(&arena, INT64_C(0), INT64_C(8), (size_t)8);
+  native_m0_type_17 bucket = { INT64_C(7), positions };
 
   native_vec_storage_allocations = UINT64_C(0);
   for (int64_t i = INT64_C(0); i < PUSH_COUNT; ++i) {
@@ -48,7 +48,7 @@ int main(int argc, char **argv) {
     return 9;
   }
 
-  native_m0_type_16 grown = native_m0_fn_22(&arena, &capability, bucket, INT64_C(4242));
+  native_m0_type_17 grown = native_m0_fn_22(&arena, &capability, bucket, INT64_C(4242));
   if ((grown.field_0 != INT64_C(7))
       || (native_m0_fn_20(grown) != (PUSH_COUNT + INT64_C(1)))
       || (native_m0_fn_21(grown, PUSH_COUNT) != INT64_C(4242))) {
@@ -56,12 +56,12 @@ int main(int argc, char **argv) {
   }
 
   native_vec_storage_allocations = UINT64_C(0);
-  native_m0_type_15 pair = native_m0_fn_24(&arena, &capability, INT64_C(11), INT64_C(22));
+  native_m0_type_16 pair = native_m0_fn_24(&arena, &capability, INT64_C(11), INT64_C(22));
   if ((native_vec_length(pair) != INT64_C(2))
       || (native_vec_storage_allocations != UINT64_C(1))) {
     return 5;
   }
-  native_m0_type_16 pair_bucket = { INT64_C(0), pair };
+  native_m0_type_17 pair_bucket = { INT64_C(0), pair };
   if ((native_m0_fn_21(pair_bucket, INT64_C(0)) != INT64_C(11))
       || (native_m0_fn_21(pair_bucket, INT64_C(1)) != INT64_C(22))) {
     return 6;
@@ -72,12 +72,12 @@ int main(int argc, char **argv) {
   }
 
   /* (Vec Record): a CommitOperation vector, stride 56, read back by value */
-  native_m0_type_27 operations = native_vec_new(&arena, INT64_C(2), INT64_C(56), (size_t)8);
-  native_m0_type_52 assert_operation = { UINT64_C(101), { { INT64_C(0) }, { INT64_C(0) }, { INT64_C(0) } } };
-  native_m0_type_52 retract_operation = { UINT64_C(202), { { INT64_C(0) }, { INT64_C(0) }, { INT64_C(0) } } };
+  native_m0_type_28 operations = native_vec_new(&arena, INT64_C(2), INT64_C(56), (size_t)8);
+  native_m0_type_53 assert_operation = { UINT64_C(101), { { INT64_C(0) }, { INT64_C(0) }, { INT64_C(0) } } };
+  native_m0_type_53 retract_operation = { UINT64_C(202), { { INT64_C(0) }, { INT64_C(0) }, { INT64_C(0) } } };
   operations = native_vec_push(&arena, operations, &assert_operation, INT64_C(56), (size_t)8);
   operations = native_vec_push(&arena, operations, &retract_operation, INT64_C(56), (size_t)8);
-  native_m0_type_28 frame = { INT64_C(3), operations };
+  native_m0_type_29 frame = { INT64_C(3), operations };
   if (native_m0_fn_26(frame) != INT64_C(2)) {
     return 8;
   }

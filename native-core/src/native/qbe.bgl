@@ -943,6 +943,8 @@
            [(CheckedAddI64V0 operation)
             (emit-checked-add context block-index-value position result-name result-letter
               (core/checkedaddi64v0-left-id checked) (core/checkedaddi64v0-right-id checked))]
+           [(CheckedSubI64V0 operation) ""]
+           [(CheckedMulI64V0 operation) ""]
            [(CheckedBoundsV0 operation)
             (emit-checked-bounds context block-index-value position result-name result-letter
               (core/checkedboundsv0-index-id checked) (core/checkedboundsv0-length-id checked))]))]
@@ -1264,6 +1266,7 @@
     [(I64Kind token) true]
     [(F64Kind token) true]
     [(TextKind token) false]
+    [(KeywordKind token) false]
     [(RefKind target) false]))
 
 (defn type-supported?
@@ -1303,7 +1306,11 @@
     [(AtomInstruction value) (atom-supported? (core/atominstruction-atom instruction))]
     [(CopyInstruction value) true]
     [(AddF64Instruction value) true]
-    [(CheckedInstruction value) true]
+    [(CheckedInstruction value)
+     (let [operation: core/CheckedOperationV0
+           (core/checkedinstruction-operation instruction)]
+       (or (instance? native.core.CheckedAddI64V0 operation)
+           (instance? native.core.CheckedBoundsV0 operation)))]
     [(StoreInstruction value) (store-supported? (core/storeinstruction-store instruction))]
     [(AllocateInstruction value) true]
     [(CallInstruction value) true]

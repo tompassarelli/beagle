@@ -416,25 +416,26 @@
 (defn seal-result [] -> lower/SourceSealResultV0
   (lower/seal-source-world source-world compiler-commit configuration))
 
-(defn require-sealed-source [result: lower/SourceSealResultV0] -> worlds/SealedSourceWorldV0
+(defn require-seal-accepted [result: lower/SourceSealResultV0] -> lower/SourceSealAcceptedV0
   (if (instance? native.lower.SourceSealAcceptedV0 result)
-    (lower/sourcesealacceptedv0-sealed result)
+    result
     (throw (ex-info "fram.fold source world was rejected at seal" {}))))
 
 (defn typing-result [] -> lower/TypingResultV0
-  (lower/lower-typed-world (require-sealed-source (seal-result))
+  (lower/lower-typed-world
+    (lower/sourcesealacceptedv0-sealed (require-seal-accepted (seal-result)))
     compiler-commit configuration))
 
 (defn typing-accepted? [result: lower/TypingResultV0] -> Bool
   (instance? native.lower.TypingAcceptedV0 result))
 
 (defn typing-receipt [result: lower/TypingResultV0] -> core/PassReceiptV0
-  (if (typing-accepted? result)
+  (if (instance? native.lower.TypingAcceptedV0 result)
     (lower/typingacceptedv0-receipt result)
     (lower/typingrejectedv0-receipt result)))
 
-(defn require-typing-accepted [result: lower/TypingResultV0] -> lower/TypingResultV0
-  (if (typing-accepted? result)
+(defn require-typing-accepted [result: lower/TypingResultV0] -> lower/TypingAcceptedV0
+  (if (instance? native.lower.TypingAcceptedV0 result)
     result
     (throw (ex-info "fram.fold annotations did not close over Native Core types" {}))))
 
@@ -450,8 +451,10 @@
 
 (defn slice-state [] -> SliceStateV0
   (let [sealed-result: lower/SourceSealResultV0 (seal-result)
-        sealed-source: worlds/SealedSourceWorldV0 (require-sealed-source sealed-result)
-        typed: lower/TypingResultV0
+        sealed-accepted: lower/SourceSealAcceptedV0 (require-seal-accepted sealed-result)
+        sealed-source: worlds/SealedSourceWorldV0
+        (lower/sourcesealacceptedv0-sealed sealed-accepted)
+        typed: lower/TypingAcceptedV0
         (require-typing-accepted
           (lower/lower-typed-world sealed-source compiler-commit configuration))
         native: lower/NativeLoweringResultV0
@@ -462,7 +465,7 @@
           configuration)
         sealed-native: worlds/SealedNativeWorldV0 (native-sealed native)]
     (->SliceStateV0
-      (lower/sourcesealacceptedv0-receipt sealed-result)
+      (lower/sourcesealacceptedv0-receipt sealed-accepted)
       (lower/typingacceptedv0-receipt typed)
       (native-receipt native)
       (worlds/nativeworldv0-program (worlds/sealednativeworldv0-world sealed-native))

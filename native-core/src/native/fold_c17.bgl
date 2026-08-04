@@ -155,14 +155,16 @@
   (instance? native.core.ReferenceShapeV0 (core/layoutdef-shape layout)))
 
 (defn record-layout-fields [layout: core/LayoutDef] -> (Vec core/FieldLayoutV0)
-  (if (layout-record? layout)
-    (ordered-field-layouts (core/recordshapev0-fields (core/layoutdef-shape layout)))
-    []))
+  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+    (if (instance? native.core.RecordShapeV0 shape)
+      (ordered-field-layouts (core/recordshapev0-fields shape))
+      [])))
 
 (defn union-layout-variants [layout: core/LayoutDef] -> (Vec core/UnionVariantLayoutV0)
-  (if (layout-union? layout)
-    (ordered-variants (core/unionshapev0-variants (core/layoutdef-shape layout)))
-    []))
+  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+    (if (instance? native.core.UnionShapeV0 shape)
+      (ordered-variants (core/unionshapev0-variants shape))
+      [])))
 
 (defn variant-payloads [variants: (Vec core/UnionVariantLayoutV0)] -> (Vec core/NativeId)
   (loop [index: Int 0 payloads: (Vec core/NativeId) []]
@@ -201,17 +203,18 @@
 ;; stores by value. Vector elements and reference targets are pointers, so they
 ;; impose no declaration order.
 (defn layout-dependencies [layout: core/LayoutDef] -> (Vec core/NativeId)
-  (cond
-    (layout-record? layout)
-    (mapv (fn [field: core/FieldLayoutV0] -> core/NativeId
-            (core/fieldlayoutv0-type-id field))
-      (record-layout-fields layout))
+  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+    (cond
+      (instance? native.core.RecordShapeV0 shape)
+      (mapv (fn [field: core/FieldLayoutV0] -> core/NativeId
+              (core/fieldlayoutv0-type-id field))
+        (record-layout-fields layout))
 
-    (layout-union? layout)
-    (conj (variant-payloads (union-layout-variants layout))
-      (core/unionshapev0-tag-type (core/layoutdef-shape layout)))
+      (instance? native.core.UnionShapeV0 shape)
+      (conj (variant-payloads (union-layout-variants layout))
+        (core/unionshapev0-tag-type shape))
 
-    :else []))
+      :else [])))
 
 (defn type-dependencies
   [layouts: (Vec core/LayoutDef)
@@ -294,15 +297,16 @@
         (layout-for-type layouts (core/typedef-id type-def))]
     (if (nil? layout-value)
       false
-      (let [dependencies-present: Bool
+      (let [layout-shape: core/LayoutShapeV0 (core/layoutdef-shape layout-value)
+            dependencies-present: Bool
             (every? (fn [target: core/NativeId] -> Bool (type-emitted? types target))
               (layout-dependencies layout-value))]
         (cond
           (instance? native.core.AtomType shape)
-          (if (layout-scalar? layout-value)
+          (if (instance? native.core.ScalarShapeV0 layout-shape)
             (scalar-backing-supported?
-              (core/scalarshapev0-representation (core/layoutdef-shape layout-value)))
-            (layout-reference? layout-value))
+              (core/scalarshapev0-representation layout-shape))
+            (instance? native.core.ReferenceShapeV0 layout-shape))
 
           (instance? native.core.RecordType shape)
           (and (layout-record? layout-value) dependencies-present)
@@ -401,9 +405,10 @@
 (defn emit-atom-type
   [type-name-value: String
    layout: core/LayoutDef] -> String
-  (let [backing: String
-        (if (layout-scalar? layout)
-          (scalar-backing (core/scalarshapev0-representation (core/layoutdef-shape layout)))
+  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)
+        backing: String
+        (if (instance? native.core.ScalarShapeV0 shape)
+          (scalar-backing (core/scalarshapev0-representation shape))
           "const void *")]
     (str "typedef " backing " " type-name-value ";\n"
       (join-lines (size-align-assertions type-name-value layout)))))
@@ -421,11 +426,15 @@
    module-index: Int
    type-name-value: String
    layout: core/LayoutDef] -> String
-  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)
-        element: String (c-type types module-index (core/vectorshapev0-element-type shape))]
-    (str "/* vector of " element ", stride " (core/vectorshapev0-stride-bytes shape) " */\n"
-      "typedef native_vec *" type-name-value ";\n"
-      (join-lines (size-align-assertions type-name-value layout)))))
+  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+    (if (instance? native.core.VectorShapeV0 shape)
+      (let [element: String
+            (c-type types module-index (core/vectorshapev0-element-type shape))]
+        (str "/* vector of " element ", stride "
+          (core/vectorshapev0-stride-bytes shape) " */\n"
+          "typedef native_vec *" type-name-value ";\n"
+          (join-lines (size-align-assertions type-name-value layout))))
+      "")))
 
 (defn emit-record-fields
   [types: (Vec core/TypeDef)
@@ -483,26 +492,28 @@
    module-index: Int
    type-name-value: String
    layout: core/LayoutDef] -> String
-  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)
-        variants: (Vec core/UnionVariantLayoutV0) (union-layout-variants layout)
-        members: String (emit-union-members types module-index variants)
-        tag-line: String
-        (str "  " (c-type types module-index (core/unionshapev0-tag-type shape)) " tag;\n")
-        payload-block: String
-        (if (= 0 (count members)) "" (str "  union {\n" members "  } payload;\n"))
-        assertions: (Vec String)
-        (conj (size-align-assertions type-name-value layout)
-          (str "_Static_assert(offsetof(" type-name-value ", tag) == "
-            (core/unionshapev0-tag-offset-bytes shape) ", \"union tag offset\");"))
-        payload-assertion: (Vec String)
-        (if (= 0 (count members))
-          assertions
-          (conj assertions
-            (str "_Static_assert(offsetof(" type-name-value ", payload) == "
-              (max-payload-offset variants) ", \"union payload offset\");")))]
-    (str "typedef struct " type-name-value " {\n" tag-line payload-block
-      "} " type-name-value ";\n"
-      (join-lines payload-assertion))))
+  (let [shape: core/LayoutShapeV0 (core/layoutdef-shape layout)]
+    (if (instance? native.core.UnionShapeV0 shape)
+      (let [variants: (Vec core/UnionVariantLayoutV0) (union-layout-variants layout)
+            members: String (emit-union-members types module-index variants)
+            tag-line: String
+            (str "  " (c-type types module-index (core/unionshapev0-tag-type shape)) " tag;\n")
+            payload-block: String
+            (if (= 0 (count members)) "" (str "  union {\n" members "  } payload;\n"))
+            assertions: (Vec String)
+            (conj (size-align-assertions type-name-value layout)
+              (str "_Static_assert(offsetof(" type-name-value ", tag) == "
+                (core/unionshapev0-tag-offset-bytes shape) ", \"union tag offset\");"))
+            payload-assertion: (Vec String)
+            (if (= 0 (count members))
+              assertions
+              (conj assertions
+                (str "_Static_assert(offsetof(" type-name-value ", payload) == "
+                  (max-payload-offset variants) ", \"union payload offset\");")))]
+        (str "typedef struct " type-name-value " {\n" tag-line payload-block
+          "} " type-name-value ";\n"
+          (join-lines payload-assertion)))
+      "")))
 
 (defn emit-type
   [types: (Vec core/TypeDef)

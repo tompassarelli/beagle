@@ -1871,6 +1871,9 @@
         true
         (= 0 (count (index-sequence-items index items-node)))))))
 
+(defn arena-value-id [owner: core/NativeId] -> core/NativeId
+  (lower-id "arena-handle" [(id-value owner)]))
+
 ;; An empty literal names no element type, so the only closed source for one is
 ;; the annotation on the binding it initializes.
 (defn lower-empty-vector
@@ -1918,9 +1921,6 @@
         (>= position (count variants)) (trap-failure-code)
         (= name (core/typevariant-name (nth variants position))) position
         :else (recur (+ position 1))))))
-
-(defn arena-value-id [owner: core/NativeId] -> core/NativeId
-  (lower-id "arena-handle" [(id-value owner)]))
 
 (defn text-operand? [type-id-value: core/NativeId] -> Bool
   (same-id? type-id-value (text-type-id)))
@@ -3389,9 +3389,22 @@
           (instance? native.core.WriteEffect kind)
           (worlds/canonical-record "write"
             [(id-value (core/writeeffect-region kind))])
-          :else
+          (instance? native.core.CapabilityEffect kind)
           (worlds/canonical-record "capability"
-            [(id-value (core/capabilityeffect-capability kind))]))]
+            [(id-value (core/capabilityeffect-capability kind))])
+          (instance? native.core.IoEffect kind)
+          (worlds/canonical-record "io"
+            [(id-value (core/ioeffect-capability kind))])
+          (instance? native.core.SocketEffect kind)
+          (worlds/canonical-record "socket"
+            [(id-value (core/socketeffect-capability kind))])
+          (instance? native.core.ClockEffect kind)
+          (worlds/canonical-record "clock"
+            [(id-value (core/clockeffect-capability kind))])
+          :else
+          (worlds/canonical-record "atomic"
+            [(id-value (core/atomiceffect-region kind))
+             (id-value (core/atomiceffect-capability kind))]))]
     (worlds/canonical-record "effect-v0"
       [(id-value (core/effectdef-id effect)) kind-encoding])))
 
@@ -4188,11 +4201,51 @@
            (id-value (core/checkedboundsv0-index-id operation))
            (id-value (core/checkedboundsv0-length-id operation))])))
 
+    (instance? native.core.CompareInstruction instruction)
+    (let [comparison: core/CompareOpV0
+          (core/compareinstruction-comparison instruction)
+          label: String
+          (cond
+            (instance? native.core.CompareEqI64V0 comparison) "compare-eq-i64-instruction"
+            (instance? native.core.CompareLtI64V0 comparison) "compare-lt-i64-instruction"
+            (instance? native.core.CompareLeI64V0 comparison) "compare-le-i64-instruction"
+            (instance? native.core.CompareEqBoolV0 comparison) "compare-eq-bool-instruction"
+            :else "compare-eq-text-instruction")]
+      (worlds/canonical-record label
+        [(encode-ssa-value (core/compareinstruction-result instruction))
+         (id-value (core/compareinstruction-left-id instruction))
+         (id-value (core/compareinstruction-right-id instruction))]))
+
+    (instance? native.core.FieldInstruction instruction)
+    (worlds/canonical-record "field-instruction"
+      [(encode-ssa-value (core/fieldinstruction-result instruction))
+       (id-value (core/fieldinstruction-source-id instruction))
+       (id-value (core/fieldinstruction-field-id instruction))])
+
     (instance? native.core.VariantValueInstruction instruction)
     (worlds/canonical-record "variant-value-instruction"
       [(encode-ssa-value (core/variantvalueinstruction-result instruction))
        (id-value (core/variantvalueinstruction-source-id instruction))
        (id-value (core/variantvalueinstruction-variant-id instruction))])
+
+    (instance? native.core.RecordInstruction instruction)
+    (worlds/canonical-record "record-instruction"
+      [(encode-ssa-value (core/recordinstruction-result instruction))
+       (encode-id-roots "fields" (core/recordinstruction-field-ids instruction))])
+
+    (instance? native.core.UnionConstructInstruction instruction)
+    (let [payload: (U core/NativeId Nil)
+          (core/unionconstructinstruction-payload-id instruction)]
+      (worlds/canonical-record "union-construct-instruction"
+        [(encode-ssa-value (core/unionconstructinstruction-result instruction))
+         (id-value (core/unionconstructinstruction-variant-id instruction))
+         (if (nil? payload) "unit" (id-value payload))]))
+
+    (instance? native.core.UnionExtractInstruction instruction)
+    (worlds/canonical-record "union-extract-instruction"
+      [(encode-ssa-value (core/unionextractinstruction-result instruction))
+       (id-value (core/unionextractinstruction-source-id instruction))
+       (id-value (core/unionextractinstruction-variant-id instruction))])
 
     (instance? native.core.StoreInstruction instruction)
     (worlds/canonical-record "store-instruction"
@@ -4255,11 +4308,13 @@
        (encode-id-roots "operands"
          (core/textconcatinstruction-operand-ids instruction))])
 
-    :else
+    (instance? native.core.CallInstruction instruction)
     (worlds/canonical-record "call-instruction"
       [(encode-ssa-value (core/callinstruction-result instruction))
        (id-value (core/callinstruction-function-id instruction))
-       (encode-id-roots "arguments" (core/callinstruction-arguments instruction))])))
+       (encode-id-roots "arguments" (core/callinstruction-arguments instruction))])
+
+    :else ""))
 
 (defn encode-terminator [terminator: core/Terminator] -> String
   (cond

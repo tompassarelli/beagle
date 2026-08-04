@@ -473,14 +473,14 @@
               (nth (core/functiondef-blocks function) block-position))
             arena-id: (U core/NativeId Nil)
             (loop [instruction-position: Int 0]
-              (cond
-                (>= instruction-position (count instructions)) nil
-                (instance? native.core.ArenaInstruction
-                  (nth instructions instruction-position))
-                (core/ssavaluev0-id
-                  (core/arenainstruction-result
-                    (nth instructions instruction-position)))
-                :else (recur (+ instruction-position 1))))]
+              (if (>= instruction-position (count instructions))
+                nil
+                (let [instruction: core/Instruction
+                      (nth instructions instruction-position)]
+                  (if (instance? native.core.ArenaInstruction instruction)
+                    (core/ssavaluev0-id
+                      (core/arenainstruction-result instruction))
+                    (recur (+ instruction-position 1))))))]
         (if (nil? arena-id)
           (recur (+ block-position 1))
           arena-id)))))
@@ -530,7 +530,8 @@
   (cond
     (instance? native.core.CheckedAddI64V0 operation) "__builtin_add_overflow"
     (instance? native.core.CheckedSubI64V0 operation) "__builtin_sub_overflow"
-    :else "__builtin_mul_overflow"))
+    (instance? native.core.CheckedMulI64V0 operation) "__builtin_mul_overflow"
+    :else ""))
 
 (defn checked-left [operation: core/CheckedOperationV0] -> core/NativeId
   (cond
@@ -538,7 +539,11 @@
     (core/checkedaddi64v0-left-id operation)
     (instance? native.core.CheckedSubI64V0 operation)
     (core/checkedsubi64v0-left-id operation)
-    :else (core/checkedmuli64v0-left-id operation)))
+    (instance? native.core.CheckedMulI64V0 operation)
+    (core/checkedmuli64v0-left-id operation)
+    (instance? native.core.CheckedBoundsV0 operation)
+    (core/checkedboundsv0-index-id operation)
+    :else (core/->NativeId "")))
 
 (defn checked-right [operation: core/CheckedOperationV0] -> core/NativeId
   (cond
@@ -546,7 +551,11 @@
     (core/checkedaddi64v0-right-id operation)
     (instance? native.core.CheckedSubI64V0 operation)
     (core/checkedsubi64v0-right-id operation)
-    :else (core/checkedmuli64v0-right-id operation)))
+    (instance? native.core.CheckedMulI64V0 operation)
+    (core/checkedmuli64v0-right-id operation)
+    (instance? native.core.CheckedBoundsV0 operation)
+    (core/checkedboundsv0-length-id operation)
+    :else (core/->NativeId "")))
 
 ;; No wrapped value ever escapes: the builtin reports overflow as a tag, and the
 ;; payload is written only where the ok tag is the one the switch will select.
@@ -557,25 +566,27 @@
    target: String
    result: core/SsaValueV0
    operation: core/CheckedOperationV0] -> String
-  (let [outcome: core/NativeId (core/ssavaluev0-type-id result)
-        ok-tag: Int (variant-tag layouts outcome (core/checked-ok-variant-id))
-        overflow-tag: Int
-        (variant-tag layouts outcome (core/checked-overflow-variant-id))
-        left: String (value-name function slots (checked-left operation))
-        right: String (value-name function slots (checked-right operation))]
-    ;; A checked op whose result type is not the Outcome union has no ok tag to
-    ;; write into, so the overflow decision has to become a trap on the spot.
-    (if (< ok-tag 0)
-      (str "  if (" (checked-builtin operation) "(" left ", " right ", &"
-        target ")) {\n"
-        "    native_trap(NATIVE_TRAP_OVERFLOW);\n"
-        "  }\n")
-      (str "  if (" (checked-builtin operation) "(" left ", " right ", &"
-        target ".payload.variant_" ok-tag ")) {\n"
-        "    " target ".tag = INT64_C(" overflow-tag ");\n"
-        "  } else {\n"
-        "    " target ".tag = INT64_C(" ok-tag ");\n"
-        "  }\n"))))
+  (if (instance? native.core.CheckedBoundsV0 operation)
+    ""
+    (let [outcome: core/NativeId (core/ssavaluev0-type-id result)
+          ok-tag: Int (variant-tag layouts outcome (core/checked-ok-variant-id))
+          overflow-tag: Int
+          (variant-tag layouts outcome (core/checked-overflow-variant-id))
+          left: String (value-name function slots (checked-left operation))
+          right: String (value-name function slots (checked-right operation))]
+      ;; A checked op whose result type is not the Outcome union has no ok tag to
+      ;; write into, so the overflow decision has to become a trap on the spot.
+      (if (< ok-tag 0)
+        (str "  if (" (checked-builtin operation) "(" left ", " right ", &"
+          target ")) {\n"
+          "    native_trap(NATIVE_TRAP_OVERFLOW);\n"
+          "  }\n")
+        (str "  if (" (checked-builtin operation) "(" left ", " right ", &"
+          target ".payload.variant_" ok-tag ")) {\n"
+          "    " target ".tag = INT64_C(" overflow-tag ");\n"
+          "  } else {\n"
+          "    " target ".tag = INT64_C(" ok-tag ");\n"
+          "  }\n")))))
 
 (defn emit-call-arguments
   [functions: (Vec core/FunctionDef)
@@ -837,7 +848,7 @@
           ", INT64_C(" (vector-stride layouts vector-type) "), (size_t)"
           (vector-element-alignment layouts vector-type) ");\n"))
 
-      :else
+      (instance? native.core.CallInstruction instruction)
       (str "  " target " = "
         (function-name module-index
           (function-index-of functions
@@ -845,7 +856,9 @@
         "("
         (emit-call-arguments functions function slots
           (core/callinstruction-function-id instruction)
-          (core/callinstruction-arguments instruction)) ");\n"))))
+          (core/callinstruction-arguments instruction)) ");\n")
+
+      :else "")))
 
 (defn variant-tag
   [layouts: (Vec core/LayoutDef)
